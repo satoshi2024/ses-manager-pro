@@ -20,7 +20,9 @@ import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.approval.ApprovalRequestCommand;
 import com.ses.service.approval.ApprovalSlaService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.scheduler.ApprovalSlaScheduler;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -65,6 +67,7 @@ class ApprovalNotificationSlaTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         applicantId = insertUser("b1-applicant");
         approverId = insertUser("b1-approver");
         outsiderId = insertUser("b1-outsider");
@@ -76,17 +79,22 @@ class ApprovalNotificationSlaTest {
         organizationId = organization.getId();
     }
 
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
+
     private Long insertUser(String prefix) {
         SysUser user = SysUser.builder()
                 .username(prefix + "-" + System.nanoTime())
-                .password("x").realName(prefix).role("管理者").status(1).build();
+                .password("x").realName(prefix).role("管理者").tenantId("default").status(1).build();
         userMapper.insert(user);
         return user.getId();
     }
 
     private void insertRoute(String requestType, Integer slaHours, Long approver) {
         ApprovalRoute route = ApprovalRoute.builder()
-                .tenantId(1L).requestType(requestType).organizationId(null)
+                .tenantId("default").requestType(requestType).organizationId(null)
                 .minAmount(null).maxAmount(null).versionNo(1)
                 .validFrom(LocalDate.now().minusDays(1)).activeFlag(1).build();
         routeMapper.insert(route);
@@ -161,6 +169,7 @@ class ApprovalNotificationSlaTest {
         String type = "b1.sla." + System.nanoTime();
         insertRoute(type, 2, approverId);
         organizationMapper.insert(UserOrganization.builder()
+                .tenantId("default")
                 .userId(approverId).organizationId(organizationId).managerUserId(managerId)
                 .primaryFlag(1).validFrom(LocalDate.now().minusDays(1)).build());
         ApprovalRequest request = request(type);
@@ -190,6 +199,7 @@ class ApprovalNotificationSlaTest {
         String type = "b1.round-dedupe." + System.nanoTime();
         insertRoute(type, 1, approverId);
         organizationMapper.insert(UserOrganization.builder()
+                .tenantId("default")
                 .userId(approverId).organizationId(organizationId).managerUserId(managerId)
                 .primaryFlag(1).validFrom(LocalDate.now().minusDays(1)).build());
 
@@ -234,6 +244,7 @@ class ApprovalNotificationSlaTest {
         String type = "b1.no-sla." + System.nanoTime();
         insertRoute(type, null, approverId);
         organizationMapper.insert(UserOrganization.builder()
+                .tenantId("default")
                 .userId(approverId).organizationId(organizationId).managerUserId(managerId)
                 .primaryFlag(1).validFrom(LocalDate.now().minusDays(1)).build());
         ApprovalRequest request = request(type);

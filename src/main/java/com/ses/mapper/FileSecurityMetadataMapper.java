@@ -27,4 +27,8 @@ public interface FileSecurityMetadataMapper extends BaseMapper<FileSecurityMetad
                          @Param("scannedAt") LocalDateTime scannedAt,
                          @Param("scannerVersion") String scannerVersion,
                          @Param("rejectionReason") String rejectionReason);
+
+    @Update("UPDATE t_file_security_metadata SET deleted_flag = 1, updated_at = CURRENT_TIMESTAMP "
+            + "WHERE id = #{id} AND tenant_id = #{tenantId} AND deleted_flag = 0")
+    int markDeletedForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
 }

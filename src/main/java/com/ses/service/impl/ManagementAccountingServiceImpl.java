@@ -84,6 +84,7 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
     public ManagementAccountingSummaryDto summary(String month, Long legalEntityId, Long organizationId,
                                                   Long costCenterId, Long customerId, Long projectId,
                                                   Long salesUserId) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         YearMonth yearMonth = com.ses.common.util.DateUtils.parseYearMonth(month);
         return summaryInternal(month, legalEntityId, organizationId, costCenterId, customerId, projectId,
                 salesUserId, yearMonth.atDay(1));
@@ -100,6 +101,7 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
                                                            Long costCenterId, Long customerId, Long projectId,
                                                            Long salesUserId, LocalDate scopeAsOf,
                                                            EffectiveScopeSnapshot scopeSnapshot) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         YearMonth yearMonth = com.ses.common.util.DateUtils.parseYearMonth(month);
         LocalDate monthStart = yearMonth.atDay(1);
         LocalDate monthEnd = yearMonth.atEndOfMonth();
@@ -129,7 +131,8 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
         List<ManagementAccountingContractRow> forecastRows = filtered
                 ? organizationContractRows(monthStart, monthEnd, fullAccess, queryAllowed, queryDirectUsers, allowedContractIds, legalEntityId,
                 organizationId, costCenterId, customerId, projectId, salesUserId)
-                : contractMapper.selectAccountingContracts(monthStart, monthEnd, fullAccess, queryAllowed, queryDirectUsers);
+                : contractMapper.selectAccountingContracts(monthStart, monthEnd, fullAccess, queryAllowed, queryDirectUsers,
+                tenantId);
 
         Map<Long, MonthlyAccountingDimension> snapshots = visibleSnapshots(monthStart, scopeAsOf, legalEntityId,
                 organizationId, costCenterId, scopeSnapshot);
@@ -154,7 +157,7 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
             List<Long> actualContractIds = confirmed.values().stream().map(WorkRecord::getContractId)
                     .filter(java.util.Objects::nonNull).distinct().toList();
             if (!actualContractIds.isEmpty()) {
-                List<Contract> actualContracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+                List<Contract> actualContracts = contractMapper.selectListForTenant(new LambdaQueryWrapper<Contract>()
                         .in(Contract::getId, actualContractIds)
                         .eq(legalEntityId != null, Contract::getLegalEntityId, legalEntityId)
                         .apply(legalEntityId != null,
@@ -170,7 +173,8 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
                         .eq(projectId != null, Contract::getProjectId, projectId)
                         .eq(salesUserId != null, Contract::getSalesUserId, salesUserId)
                         .in(allowedContractIds != null, Contract::getId,
-                                allowedContractIds == null ? List.of(-1L) : allowedContractIds));
+                                 allowedContractIds == null ? List.of(-1L) : allowedContractIds),
+                        tenantId);
                 if (actualContracts != null) {
                     for (Contract actual : actualContracts) {
                         MonthlyAccountingDimension snapshot = snapshots.values().stream()
@@ -313,8 +317,9 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
                                                                             Long legalEntityId, Long organizationId,
                                                                             Long costCenterId, Long customerId,
                                                                             Long projectId, Long salesUserId) {
-        return contractMapper.selectAccountingContractsFiltered(start, end, full, ids, directUserIds, allowedContractIds, legalEntityId, organizationId,
-                costCenterId, customerId, projectId, salesUserId);
+        return contractMapper.selectAccountingContractsFiltered(start, end, full, ids, directUserIds, allowedContractIds, legalEntityId,
+                organizationId, costCenterId, customerId, projectId, salesUserId,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
     }
 
     private ManagementAccountingSummaryDto emptySummary(String month) {
@@ -410,16 +415,24 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
     private Map<Long, WorkRecord> confirmedRecords(String month, java.util.Collection<Long> sourceIds,
                                                    java.util.Collection<Long> contractIds) {
         Map<Long, WorkRecord> result = new HashMap<>();
-        QueryWrapper<WorkRecord> query = new QueryWrapper<WorkRecord>().eq("work_month", month).eq("status", "確定");
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        if (sourceIds != null && sourceIds.isEmpty()) return result;
+        if (contractIds != null && contractIds.isEmpty()) return result;
+
+        List<WorkRecord> records;
         if (sourceIds != null) {
-            if (sourceIds.isEmpty()) return result;
-            query.in("id", sourceIds);
+            records = workRecordMapper.selectConfirmedByWorkMonthAndIdsForTenant(month,
+                    new ArrayList<>(sourceIds), tenantId);
+        } else if (contractIds != null) {
+            records = workRecordMapper.selectConfirmedByWorkMonthsAndContractIdsForTenant(
+                    List.of(month), new ArrayList<>(contractIds), tenantId);
+        } else {
+            records = workRecordMapper.selectConfirmedByWorkMonthsForTenant(List.of(month), tenantId);
         }
-        if (contractIds != null) {
-            if (contractIds.isEmpty()) return result;
-            query.in("contract_id", contractIds);
+        if (contractIds != null && sourceIds != null) {
+            records = records.stream().filter(r -> contractIds.contains(r.getContractId())).toList();
         }
-        workRecordMapper.selectList(query).forEach(record -> result.put(record.getId(), record));
+        records.forEach(record -> result.put(record.getId(), record));
         return result;
     }
 

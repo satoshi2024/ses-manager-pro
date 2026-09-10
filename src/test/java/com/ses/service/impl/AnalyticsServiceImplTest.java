@@ -12,6 +12,8 @@ import com.ses.mapper.EngineerSkillMapper;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.dto.engineersales.EngineerPrimarySalesDto;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -33,6 +35,24 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class AnalyticsServiceImplTest {
+
+    @BeforeEach
+    void bindTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("tenant-a");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
+
+    @BeforeEach
+    void bridgeTenantAwareContractMocks() {
+        lenient().when(contractMapper.selectActiveDateRanges("tenant-a"))
+                .thenAnswer(invocation -> contractMapper.selectActiveDateRanges());
+        lenient().when(contractMapper.selectListForTenant(any(), org.mockito.ArgumentMatchers.eq("tenant-a")))
+                .thenAnswer(invocation -> contractMapper.selectList(null));
+    }
 
     @Mock
     private EngineerMapper engineerMapper;

@@ -23,6 +23,8 @@ import com.ses.service.pwa.PwaMutationTransactionService;
 import com.ses.service.pwa.PwaUserContextService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -38,6 +40,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 
 @ExtendWith(MockitoExtension.class)
 class PwaMutationApiControllerTest {
@@ -62,6 +65,16 @@ class PwaMutationApiControllerTest {
     @InjectMocks
     private PwaMutationApiController controller;
 
+    @BeforeEach
+    void bindTenant() {
+        AccountingTenantContextHolder.setTenantId("tenant-a");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+    }
+
     @Test
     void staleBaseVersionは業務serviceを呼ばずclientとserverの差分を返す() {
         ObjectNode payload = new ObjectMapper().createObjectNode()
@@ -75,7 +88,7 @@ class PwaMutationApiControllerTest {
                 .thenReturn(new PwaClientMutationLedgerService.Claim(1L, context, false, null));
         Contract contract = new Contract();
         contract.setEngineerId(9L);
-        when(contractMapper.selectByIdForUpdate(100L)).thenReturn(contract);
+        when(contractMapper.selectByIdForUpdateForTenant(100L, "tenant-a")).thenReturn(contract);
         WorkRecord record = new WorkRecord();
         record.setId(200L);
         record.setContractId(100L);
@@ -149,7 +162,7 @@ class PwaMutationApiControllerTest {
                 .thenReturn(new PwaClientMutationLedgerService.Claim(3L, context, false, null));
         Contract contract = new Contract();
         contract.setEngineerId(9L);
-        when(contractMapper.selectByIdForUpdate(100L)).thenReturn(contract);
+        when(contractMapper.selectByIdForUpdateForTenant(100L, "tenant-a")).thenReturn(contract);
         WorkRecord record = new WorkRecord();
         record.setId(200L);
         record.setContractId(100L);

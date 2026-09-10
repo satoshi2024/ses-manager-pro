@@ -11,6 +11,7 @@ import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.approval.ApprovalNotificationKeys;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -40,9 +41,11 @@ public class ApprovalSlaService {
      */
     @Transactional(rollbackFor = Exception.class)
     public int escalateOverdue(LocalDateTime asOf) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         LocalDateTime now = asOf == null ? LocalDateTime.now() : asOf;
         List<ApprovalRequest> requests = approvalRequestMapper.selectList(
                 new LambdaQueryWrapper<ApprovalRequest>()
+                        .eq(ApprovalRequest::getTenantId, tenantId)
                         .eq(ApprovalRequest::getStatus, "in_review")
                         .isNotNull(ApprovalRequest::getCurrentStepStartedAt));
         int notified = 0;
@@ -58,7 +61,7 @@ public class ApprovalSlaService {
             int round = request.getRoundNo() == null ? 1 : request.getRoundNo();
             String dedupeKey = ApprovalNotificationKeys.slaOverdue(request.getId(), round,
                     request.getCurrentStep());
-            for (Long managerId : resolveManagers(step.approverUserIds(), now.toLocalDate())) {
+            for (Long managerId : resolveManagers(step.approverUserIds(), now.toLocalDate(), tenantId)) {
                 notificationService.publishToUser(managerId, "APPROVAL_SLA_ESCALATED",
                         "承認stepのSLA超過",
                         message(request, deadline), NotificationLinks.APPROVAL_INBOX, dedupeKey, "approval");
@@ -79,12 +82,13 @@ public class ApprovalSlaService {
         }
     }
 
-    private Set<Long> resolveManagers(List<Long> approverIds, LocalDate asOf) {
+    private Set<Long> resolveManagers(List<Long> approverIds, LocalDate asOf, String tenantId) {
         if (approverIds == null || approverIds.isEmpty()) {
             return Set.of();
         }
         List<UserOrganization> assignments = userOrganizationMapper.selectList(
                 new LambdaQueryWrapper<UserOrganization>()
+                        .eq(UserOrganization::getTenantId, tenantId)
                         .in(UserOrganization::getUserId, approverIds)
                         .eq(UserOrganization::getPrimaryFlag, 1)
                         .le(UserOrganization::getValidFrom, asOf)
@@ -101,7 +105,8 @@ public class ApprovalSlaService {
     }
 
     private boolean isActive(Long userId) {
-        SysUser user = sysUserMapper.selectById(userId);
+        SysUser user = sysUserMapper.selectByIdAndTenant(userId,
+                AccountingTenantContextHolder.requireTenantContext());
         return user != null && Objects.equals(user.getStatus(), 1);
     }
 

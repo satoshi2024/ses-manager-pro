@@ -36,8 +36,9 @@ public class LoginUser implements UserDetails, CredentialsContainer {
         return sysUser;
     }
 
+    /** 認証済みユーザーへ固定されたtenantを返す。認証主体以外からtenantを解決しない。 */
     public String getTenantId() {
-        return tenantId;
+        return tenantId != null ? tenantId : (sysUser == null ? null : sysUser.getTenantId());
     }
 
     @Override

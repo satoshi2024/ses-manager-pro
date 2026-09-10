@@ -43,6 +43,7 @@ public class ResumeIngestionServiceImplTest {
 
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
         org.springframework.test.util.ReflectionTestUtils.setField(resumeIngestionService, "baseMapper", baseMapper);
         org.springframework.test.util.ReflectionTestUtils.setField(
                 resumeIngestionService, "legalEntityContextService", legalEntityContextService);
@@ -53,6 +54,11 @@ public class ResumeIngestionServiceImplTest {
         );
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
+
     @Test
     void reject_success() {
         Long jobId = 1L;
@@ -61,12 +67,12 @@ public class ResumeIngestionServiceImplTest {
         job.setLegalEntityId(1L);
         job.setStatus("要確認");
 
-        when(baseMapper.selectById(jobId)).thenReturn(job);
-        when(baseMapper.update(isNull(), any())).thenReturn(1);
+        when(baseMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
+        when(baseMapper.rejectForTenant(jobId, "default", "NG", 0)).thenReturn(1);
 
         resumeIngestionService.reject(jobId, "NG");
 
-        verify(baseMapper).update(isNull(), any());
+        verify(baseMapper).rejectForTenant(jobId, "default", "NG", 0);
     }
 
     @Mock
@@ -86,8 +92,8 @@ public class ResumeIngestionServiceImplTest {
         job.setLegalEntityId(1L);
         job.setStatus("確定済");
 
-        when(baseMapper.selectById(jobId)).thenReturn(job);
-        when(baseMapper.update(isNull(), any())).thenReturn(0); // conflict
+        when(baseMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
+        when(baseMapper.rejectForTenant(jobId, "default", "NG", 0)).thenReturn(0); // conflict
 
         BusinessException ex = assertThrows(BusinessException.class, () -> {
             resumeIngestionService.reject(jobId, "NG");
@@ -103,8 +109,8 @@ public class ResumeIngestionServiceImplTest {
         job.setLegalEntityId(1L);
         job.setStatus("要確認");
 
-        when(baseMapper.selectById(jobId)).thenReturn(job);
-        when(baseMapper.update(isNull(), any())).thenReturn(1);
+        when(baseMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
+        when(baseMapper.confirmForTenant(jobId, "default", 99L, null, 0)).thenReturn(1);
 
         com.ses.dto.resume.ReviewedResumeDto dto = new com.ses.dto.resume.ReviewedResumeDto();
         com.ses.dto.resume.ReviewedResumeDto.EngineerPart ep = new com.ses.dto.resume.ReviewedResumeDto.EngineerPart();
@@ -137,9 +143,9 @@ public class ResumeIngestionServiceImplTest {
         assertEquals(99L, engId);
 
         verify(engineerService).save(any(Engineer.class));
-        verify(engineerSkillService).replaceSkills(eq(99L), any());
+        verify(engineerSkillService).replaceSkills(eq(99L), any(com.ses.dto.skill.SkillReplaceRequest.class));
         verify(engineerCareerService).save(any(com.ses.entity.EngineerCareer.class));
-        verify(baseMapper).update(isNull(), any());
+        verify(baseMapper).confirmForTenant(jobId, "default", 99L, null, 0);
     }
 
     @Test
@@ -151,7 +157,7 @@ public class ResumeIngestionServiceImplTest {
         job.setStatus("確定済");
         job.setConvertedEngineerId(99L);
 
-        when(baseMapper.selectById(jobId)).thenReturn(job);
+        when(baseMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
 
         com.ses.dto.resume.ReviewedResumeDto dto = new com.ses.dto.resume.ReviewedResumeDto();
 
@@ -170,7 +176,7 @@ public class ResumeIngestionServiceImplTest {
         job.setLegalEntityId(1L);
         job.setStatus("要確認");
 
-        when(baseMapper.selectById(jobId)).thenReturn(job);
+        when(baseMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
 
         com.ses.dto.resume.ReviewedResumeDto dto = new com.ses.dto.resume.ReviewedResumeDto();
         com.ses.dto.resume.ReviewedResumeDto.EngineerPart ep = new com.ses.dto.resume.ReviewedResumeDto.EngineerPart();

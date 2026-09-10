@@ -3,6 +3,7 @@ package com.ses.entity;
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.ses.common.base.BaseEntity;
 import jakarta.validation.constraints.AssertTrue;
@@ -104,6 +105,10 @@ public class Project extends BaseEntity {
      * 商機からの変換元ID
      */
     private Long sourceOpportunityId;
+
+    /** 案件skill projectionのCAS用version。 */
+    @Version
+    private Integer version;
 
     /**
      * 登録者ID

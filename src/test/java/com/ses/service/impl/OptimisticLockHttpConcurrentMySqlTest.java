@@ -3,10 +3,12 @@ package com.ses.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
+import com.ses.config.LoginUser;
 import com.ses.entity.Contract;
 import com.ses.entity.Customer;
 import com.ses.entity.Engineer;
 import com.ses.entity.Project;
+import com.ses.entity.SysUser;
 import com.ses.entity.WorkRecord;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.CustomerMapper;
@@ -23,7 +25,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.test.context.TestSecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -55,12 +61,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Engineer / Customer / WorkRecord の楽観ロックを、コントローラが呼ぶ実サービス経由で並行検証する。
  * 任意 Exception を成功扱いしない（REV-RP-P2-003）。
  */
-@SpringBootTest
+@SpringBootTest(properties = "app.security.oidc.tenant-id=")
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class OptimisticLockHttpConcurrentMySqlTest {
+
+    private static final String TEST_TENANT = "mysql-cas-tenant";
 
     @Container
     @SuppressWarnings("resource")
@@ -100,9 +108,34 @@ class OptimisticLockHttpConcurrentMySqlTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @org.junit.jupiter.api.BeforeEach
+    void bindTenantPrincipal() {
+        SysUser user = new SysUser();
+        user.setId(1L);
+        user.setUsername("admin");
+        user.setRole("管理者");
+        user.setTenantId(TEST_TENANT);
+        user.setStatus(1);
+        LoginUser principal = new LoginUser(user,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        UsernamePasswordAuthenticationToken authentication =
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        TestSecurityContextHolder.setContext(SecurityContextHolder.getContext());
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId(TEST_TENANT);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantPrincipal() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+        TestSecurityContextHolder.clearContext();
+        SecurityContextHolder.clearContext();
+    }
+
     @Test
     void engineer_並行更新は一方のみ成功し409を返す() throws Exception {
-        Engineer inserted = Engineer.builder().fullName("並行要員").employmentType("正社員").status("Bench").build();
+        Engineer inserted = Engineer.builder().fullName("並行要員").employmentType("正社員").status("Bench")
+                .tenantId(TEST_TENANT).build();
         engineerMapper.insert(inserted);
         Engineer base = engineerMapper.selectById(inserted.getId());
         Integer sharedVersion = base.getVersion();
@@ -115,12 +148,12 @@ class OptimisticLockHttpConcurrentMySqlTest {
             Engineer patch = Engineer.builder().fullName("勝者A").employmentType("正社員").status("Bench").build();
             patch.setId(base.getId());
             patch.setVersion(sharedVersion);
-            engineerService.updateWithStatusGuard(patch);
+            runWithTenant(() -> engineerService.updateWithStatusGuard(patch));
         }, () -> {
             Engineer patch = Engineer.builder().fullName("勝者B").employmentType("正社員").status("Bench").build();
             patch.setId(base.getId());
             patch.setVersion(sharedVersion);
-            engineerService.updateWithStatusGuard(patch);
+            runWithTenant(() -> engineerService.updateWithStatusGuard(patch));
         }, success, conflict409, unexpected);
 
         assertEquals(null, unexpected.get(), () -> "予期しない例外: " + unexpected.get());
@@ -134,7 +167,7 @@ class OptimisticLockHttpConcurrentMySqlTest {
 
     @Test
     void customer_並行更新は一方のみ成功し409を返す() throws Exception {
-        Customer inserted = Customer.builder().companyName("並行顧客").build();
+        Customer inserted = Customer.builder().companyName("並行顧客").tenantId(TEST_TENANT).build();
         customerMapper.insert(inserted);
         Customer base = customerMapper.selectById(inserted.getId());
         Integer sharedVersion = base.getVersion();
@@ -144,15 +177,15 @@ class OptimisticLockHttpConcurrentMySqlTest {
         AtomicReference<Throwable> unexpected = new AtomicReference<>();
 
         runTwoThreads(() -> {
-            Customer patch = Customer.builder().companyName("顧客A").build();
+            Customer patch = Customer.builder().companyName("顧客A").deliveryPreference("PDF").build();
             patch.setId(base.getId());
             patch.setVersion(sharedVersion);
-            customerService.updateWithOptimisticLock(patch);
+            runWithTenant(() -> customerService.updateWithOptimisticLock(patch));
         }, () -> {
-            Customer patch = Customer.builder().companyName("顧客B").build();
+            Customer patch = Customer.builder().companyName("顧客B").deliveryPreference("PDF").build();
             patch.setId(base.getId());
             patch.setVersion(sharedVersion);
-            customerService.updateWithOptimisticLock(patch);
+            runWithTenant(() -> customerService.updateWithOptimisticLock(patch));
         }, success, conflict409, unexpected);
 
         assertEquals(null, unexpected.get(), () -> "予期しない例外: " + unexpected.get());
@@ -180,10 +213,10 @@ class OptimisticLockHttpConcurrentMySqlTest {
         AtomicInteger conflict409 = new AtomicInteger(0);
         AtomicReference<Throwable> unexpected = new AtomicReference<>();
 
-        runTwoThreads(() -> workRecordService.saveHours(
-                        contractId, "2026-08", new BigDecimal("161.0"), "A", sharedVersion),
-                () -> workRecordService.saveHours(
-                        contractId, "2026-08", new BigDecimal("162.0"), "B", sharedVersion),
+        runTwoThreads(() -> runWithTenant(() -> workRecordService.saveHours(
+                        contractId, "2026-08", new BigDecimal("161.0"), "A", sharedVersion)),
+                () -> runWithTenant(() -> workRecordService.saveHours(
+                        contractId, "2026-08", new BigDecimal("162.0"), "B", sharedVersion)),
                 success, conflict409, unexpected);
 
         assertEquals(null, unexpected.get(), () -> "予期しない例外: " + unexpected.get());
@@ -203,7 +236,8 @@ class OptimisticLockHttpConcurrentMySqlTest {
     @Test
     @WithMockUser(username = "admin", roles = "管理者")
     void engineerHttp_version欠落は409() throws Exception {
-        Engineer inserted = Engineer.builder().fullName("HTTP欠落").employmentType("正社員").status("Bench").build();
+        Engineer inserted = Engineer.builder().fullName("HTTP欠落").employmentType("正社員").status("Bench")
+                .tenantId(TEST_TENANT).build();
         engineerMapper.insert(inserted);
 
         String body = """
@@ -220,7 +254,8 @@ class OptimisticLockHttpConcurrentMySqlTest {
     @Test
     @WithMockUser(username = "admin", roles = "管理者")
     void engineerHttp_staleVersionは409() throws Exception {
-        Engineer inserted = Engineer.builder().fullName("HTTP競合").employmentType("正社員").status("Bench").build();
+        Engineer inserted = Engineer.builder().fullName("HTTP競合").employmentType("正社員").status("Bench")
+                .tenantId(TEST_TENANT).build();
         engineerMapper.insert(inserted);
         Engineer current = engineerMapper.selectById(inserted.getId());
         Integer staleVersion = current.getVersion();
@@ -254,6 +289,7 @@ class OptimisticLockHttpConcurrentMySqlTest {
     private Long seedContractForWorkRecord() {
         Customer customer = new Customer();
         customer.setCompanyName("OL顧客");
+        customer.setTenantId(TEST_TENANT);
         customerMapper.insert(customer);
 
         Project project = new Project();
@@ -261,7 +297,8 @@ class OptimisticLockHttpConcurrentMySqlTest {
         project.setCustomerId(customer.getId());
         projectMapper.insert(project);
 
-        Engineer engineer = Engineer.builder().fullName("OL要員").employmentType("正社員").status("Bench").build();
+        Engineer engineer = Engineer.builder().fullName("OL要員").employmentType("正社員").status("Bench")
+                .tenantId(TEST_TENANT).build();
         engineerMapper.insert(engineer);
 
         Contract contract = new Contract();
@@ -272,8 +309,33 @@ class OptimisticLockHttpConcurrentMySqlTest {
         contract.setStatus("稼動中");
         contract.setSellingPrice(new BigDecimal("500000"));
         contract.setCostPrice(new BigDecimal("300000"));
+        contract.setTenantId(TEST_TENANT);
         contractMapper.insert(contract);
         return contract.getId();
+    }
+
+    private void runWithTenant(ThrowingRunnable task) throws Exception {
+        try {
+            com.ses.service.accounting.AccountingTenantContextHolder.runWithTenant(TEST_TENANT, () -> {
+                try {
+                    task.run();
+                } catch (RuntimeException ex) {
+                    throw ex;
+                } catch (Exception ex) {
+                    throw new CheckedTaskException(ex);
+                }
+            });
+        } catch (CheckedTaskException ex) {
+            throw ex.checked;
+        }
+    }
+
+    private static final class CheckedTaskException extends RuntimeException {
+        private final Exception checked;
+
+        private CheckedTaskException(Exception checked) {
+            this.checked = checked;
+        }
     }
 
     private void runTwoThreads(ThrowingRunnable a, ThrowingRunnable b,

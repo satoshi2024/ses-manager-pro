@@ -8,6 +8,9 @@ import com.ses.mapper.CertificationContinuityGroupMapper;
 import com.ses.mapper.CertificationMapper;
 import com.ses.mapper.EngineerCertificationMapper;
 import com.ses.mapper.EngineerMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -41,8 +44,19 @@ class EngineerCertificationServiceTest {
     @Autowired
     private CertificationContinuityGroupMapper continuityGroupMapper;
 
+    @BeforeEach
+    void bindDefaultTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
+
     private Engineer createEngineer(String name) {
         Engineer engineer = new Engineer();
+        engineer.setTenantId("default");
         engineer.setFullName(name);
         engineer.setEmploymentType("正社員");
         engineer.setStatus("Bench");

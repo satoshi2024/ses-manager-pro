@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 public class DocumentArchiveFileCleanupScheduler {
 
     private final DocumentStorage documentStorage;
+    private final com.ses.service.FileCleanupService fileCleanupService;
 
     /**
      * 毎日深夜2時に孤児ファイルの補償クリーンアップログを出力/実行する。
@@ -23,6 +24,7 @@ public class DocumentArchiveFileCleanupScheduler {
     @Scheduled(cron = "0 0 2 * * ?")
     @SchedulerLock(name = "DocumentArchiveFileCleanupScheduler_cleanupOrphanStorageFiles", lockAtLeastFor = "1m", lockAtMostFor = "15m")
     public void cleanupOrphanStorageFiles() {
-        log.info("[DocumentArchiveFileCleanupScheduler] 孤児クリーンアップスケジューラー実行");
+        int deleted = fileCleanupService.cleanupOrphanFiles();
+        log.info("[DocumentArchiveFileCleanupScheduler] 孤児クリーンアップスケジューラー実行: deleted={}", deleted);
     }
 }

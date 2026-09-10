@@ -23,6 +23,7 @@ import java.time.LocalDate;
 @TableName("t_approval_delegation")
 public class ApprovalDelegation extends BaseEntity {
 
+    private String tenantId;
     private Long fromUserId;
     private Long toUserId;
     private LocalDate validFrom;

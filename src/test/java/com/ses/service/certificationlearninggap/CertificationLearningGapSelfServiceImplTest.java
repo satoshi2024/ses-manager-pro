@@ -3,6 +3,7 @@ package com.ses.service.certificationlearninggap;
 import com.ses.dto.certification.EngineerCertificationViewDto;
 import com.ses.entity.Certification;
 import com.ses.entity.Document;
+import com.ses.entity.DocumentLink;
 import com.ses.entity.DocumentVersion;
 import com.ses.entity.EngineerCertification;
 import com.ses.entity.LearningPlan;
@@ -17,6 +18,7 @@ import com.ses.service.DocumentService;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.certification.EngineerCertificationService;
 import com.ses.service.training.TrainingPlanService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -58,11 +60,17 @@ class CertificationLearningGapSelfServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         service = new CertificationLearningGapSelfServiceImpl(accountLinkService, certificationService,
                 certificationMapper, certificationMasterMapper, planMapper, enrollmentMapper, courseMapper,
                 documentService, documentLinkMapper, documentVersionMapper, trainingPlanService,
                 Clock.fixed(Instant.parse("2026-08-28T03:00:00Z"), ZoneId.of("Asia/Tokyo")));
         when(accountLinkService.findEngineerIdByUserId(100L)).thenReturn(42L);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -82,8 +90,6 @@ class CertificationLearningGapSelfServiceImplTest {
         EngineerCertification record = new EngineerCertification();
         record.setId(11L);
         record.setEngineerId(43L);
-        when(certificationMapper.selectById(11L)).thenReturn(record);
-
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> service.certification(100L, 11L));
     }
@@ -93,9 +99,11 @@ class CertificationLearningGapSelfServiceImplTest {
         EngineerCertification record = new EngineerCertification();
         record.setId(11L);
         record.setEngineerId(42L);
-        when(certificationMapper.selectById(11L)).thenReturn(record);
+        record.setTenantId("default");
+        when(certificationMapper.selectOne(any())).thenReturn(record);
         Document document = new Document();
         document.setId(77L);
+        document.setTenantId("default");
         when(documentService.registerReceived(any(), any())).thenReturn(document);
         DocumentVersion version = new DocumentVersion();
         version.setId(88L);
@@ -104,7 +112,15 @@ class CertificationLearningGapSelfServiceImplTest {
         version.setOriginalName("evidence.pdf");
         version.setSha256("abc");
         version.setScanStatus("CLEAN");
-        when(documentVersionMapper.findLatestByDocumentId(77L)).thenReturn(version);
+        version.setTenantId("default");
+        when(documentVersionMapper.findByIdempotencyKey(eq("default"), eq("RECEIVED"), any(), eq("v1")))
+                .thenReturn(version);
+        DocumentLink typedLink = new DocumentLink();
+        typedLink.setTenantId("default");
+        typedLink.setDocumentId(77L);
+        typedLink.setTargetType("CERTIFICATION_RECORD");
+        typedLink.setTargetId(11L);
+        when(documentLinkMapper.selectOne(any())).thenReturn(typedLink);
 
         var result = service.uploadEvidence(100L, 11L,
                 new MockMultipartFile("file", "evidence.pdf", "application/pdf", "pdf".getBytes()));

@@ -64,6 +64,7 @@ CREATE INDEX idx_expense_approval ON t_expense_request(approval_request_id);
 
 CREATE TABLE t_expense_accounting_job (
   id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id          VARCHAR(100) NOT NULL DEFAULT 'default',
   expense_request_id BIGINT NOT NULL,
   status             VARCHAR(20) NOT NULL DEFAULT 'PENDING',
   correlation_id     VARCHAR(64),
@@ -76,8 +77,9 @@ CREATE TABLE t_expense_accounting_job (
   updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT chk_expense_job_status CHECK (status IN ('PENDING', 'PROCESSING', 'SUCCEEDED', 'FAILED'))
 );
-CREATE UNIQUE INDEX uk_expense_job_request ON t_expense_accounting_job(expense_request_id);
+CREATE UNIQUE INDEX uk_expense_job_tenant_request ON t_expense_accounting_job(tenant_id, expense_request_id);
 CREATE INDEX idx_expense_job_status ON t_expense_accounting_job(status, next_attempt_at);
+CREATE INDEX idx_expense_job_tenant_status ON t_expense_accounting_job(tenant_id, status, next_attempt_at);
 
 CREATE TABLE t_one_on_one_request (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,

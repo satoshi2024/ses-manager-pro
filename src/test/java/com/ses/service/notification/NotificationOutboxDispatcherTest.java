@@ -5,7 +5,10 @@ import com.ses.entity.NotificationOutbox;
 import com.ses.entity.ReportDelivery;
 import com.ses.mapper.ReportDeliveryMapper;
 import com.ses.mapper.NotificationOutboxMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -27,6 +30,16 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class NotificationOutboxDispatcherTest {
 
+    @BeforeEach
+    void bindTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+    }
+
     @Mock
     private NotificationOutboxMapper outboxMapper;
 
@@ -40,7 +53,10 @@ class NotificationOutboxDispatcherTest {
     void dispatchOne_送信成功時はSENTへ更新する() {
         NotificationOutbox before = row(0);
         NotificationOutbox claimed = row(1);
-        when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(before, claimed);
+        when(outboxMapper.selectByIdForDispatch("default", 7L)).thenReturn(before, claimed, rowWithStatus("SENT"));
+        when(outboxMapper.claim("default", 7L)).thenReturn(1);
+        when(outboxMapper.markSent("default", 7L)).thenReturn(1);
+        when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(before, claimed, rowWithStatus("SENT"));
         when(outboxMapper.claim(7L)).thenReturn(1);
         when(outboxMapper.markSent(7L)).thenReturn(1);
         when(outboxMapper.selectById(7L)).thenReturn(rowWithStatus("SENT"));
@@ -53,9 +69,9 @@ class NotificationOutboxDispatcherTest {
 
         assertTrue(dispatcher.dispatchOne(7L));
 
-        verify(outboxMapper).claim(7L);
-        verify(outboxMapper).markSent(7L);
-        verify(reportDeliveryMapper).syncOutboxStatus(7L, "SENT", null, null);
+        verify(outboxMapper).claim("default", 7L);
+        verify(outboxMapper).markSent("default", 7L);
+        verify(reportDeliveryMapper).syncOutboxStatus("default", 7L, "SENT", null, null);
         verify(outboxMapper, never()).markResult(any(), any(), any(), any());
         ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
         verify(webhookNotifier).notifyNow(notification.capture());
@@ -64,7 +80,10 @@ class NotificationOutboxDispatcherTest {
 
     @Test
     void dispatchOne_送信失敗時はRETRYと指数backoffを記録する() {
-        when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(row(1), row(2));
+        when(outboxMapper.selectByIdForDispatch("default", 7L)).thenReturn(row(1), row(2), rowWithStatus("RETRY"));
+        when(outboxMapper.claim("default", 7L)).thenReturn(1);
+        when(outboxMapper.markResult(eq("default"), eq(7L), eq("RETRY"), any(LocalDateTime.class), any())).thenReturn(1);
+        when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(row(1), row(2), rowWithStatus("RETRY"));
         when(outboxMapper.claim(7L)).thenReturn(1);
         when(outboxMapper.markResult(eq(7L), eq("RETRY"), any(LocalDateTime.class), any())).thenReturn(1);
         when(outboxMapper.selectById(7L)).thenReturn(rowWithStatus("RETRY"));
@@ -77,13 +96,16 @@ class NotificationOutboxDispatcherTest {
 
         assertFalse(dispatcher.dispatchOne(7L));
 
-        verify(outboxMapper).markResult(eq(7L), eq("RETRY"), any(LocalDateTime.class), contains("attempt=2"));
-        verify(reportDeliveryMapper).syncOutboxStatus(eq(7L), eq("RETRY"), eq("DELIVERY_FAILED"), contains("attempt=2"));
+        verify(outboxMapper).markResult(eq("default"), eq(7L), eq("RETRY"), any(LocalDateTime.class), contains("attempt=2"));
+        verify(reportDeliveryMapper).syncOutboxStatus(eq("default"), eq(7L), eq("RETRY"), eq("DELIVERY_FAILED"), contains("attempt=2"));
     }
 
     @Test
     void dispatchOne_最大試行回数ではFAILEDへ遷移する() {
-        when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(row(4), row(5));
+        when(outboxMapper.selectByIdForDispatch("default", 7L)).thenReturn(row(4), row(5), rowWithStatus("FAILED"));
+        when(outboxMapper.claim("default", 7L)).thenReturn(1);
+        when(outboxMapper.markResult(eq("default"), eq(7L), eq("FAILED"), any(LocalDateTime.class), any())).thenReturn(1);
+        when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(row(4), row(5), rowWithStatus("FAILED"));
         when(outboxMapper.claim(7L)).thenReturn(1);
         when(outboxMapper.markResult(eq(7L), eq("FAILED"), any(LocalDateTime.class), any())).thenReturn(1);
         when(outboxMapper.selectById(7L)).thenReturn(rowWithStatus("FAILED"));
@@ -96,14 +118,14 @@ class NotificationOutboxDispatcherTest {
 
         assertFalse(dispatcher.dispatchOne(7L));
 
-        verify(outboxMapper).markResult(eq(7L), eq("FAILED"), any(LocalDateTime.class), contains("attempt=5"));
-        verify(reportDeliveryMapper).syncOutboxStatus(eq(7L), eq("FAILED"), eq("DELIVERY_DLQ"), contains("attempt=5"));
+        verify(outboxMapper).markResult(eq("default"), eq(7L), eq("FAILED"), any(LocalDateTime.class), contains("attempt=5"));
+        verify(reportDeliveryMapper).syncOutboxStatus(eq("default"), eq(7L), eq("FAILED"), eq("DELIVERY_DLQ"), contains("attempt=5"));
     }
 
     @Test
     void dispatchOne_claim競合時は送信しない() {
-        when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(row(0));
-        when(outboxMapper.claim(7L)).thenReturn(0);
+        when(outboxMapper.selectByIdForDispatch("default", 7L)).thenReturn(row(0));
+        when(outboxMapper.claim("default", 7L)).thenReturn(0);
 
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
 
@@ -127,6 +149,7 @@ class NotificationOutboxDispatcherTest {
     private NotificationOutbox row(int attempts) {
         return NotificationOutbox.builder()
                 .id(7L)
+                .tenantId("default")
                 .notificationId(9L)
                 .type("APPROVAL_REQUESTED")
                 .title("承認申請")

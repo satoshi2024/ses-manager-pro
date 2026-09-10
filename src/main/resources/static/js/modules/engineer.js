@@ -544,11 +544,18 @@ function saveEngineer() {
 
                 // 候補者からの変換導線: 新規登録が完了したら、候補者側にconvertedEngineerIdを紐付ける
                 if (!id && prefillCandidateId && res.data && res.data.id) {
-                    $.ajax({
-                        url: '/api/candidates/' + prefillCandidateId + '/converted-engineer',
-                        method: 'PUT',
-                        contentType: 'application/json',
-                        data: JSON.stringify({ engineerId: res.data.id })
+                    // 候補者の最新versionを再取得してからtenant-aware CASで紐付ける。
+                    $.get('/api/candidates/' + prefillCandidateId, function(candidateResponse) {
+                        if (candidateResponse.code !== 200 || !candidateResponse.data) {
+                            Toast.error(candidateResponse.message || SES.i18n.t('error.saveFailed'));
+                            return;
+                        }
+                        $.ajax({
+                            url: '/api/candidates/' + prefillCandidateId + '/converted-engineer',
+                            method: 'PUT',
+                            contentType: 'application/json',
+                            data: JSON.stringify({ engineerId: res.data.id, expectedVersion: candidateResponse.data.version })
+                        });
                     });
                     prefillCandidateId = null;
                 }
@@ -674,4 +681,3 @@ function deleteEngineer(id) {
         }
     });
 }
-

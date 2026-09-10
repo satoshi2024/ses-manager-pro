@@ -28,4 +28,8 @@ public interface OvertimeComplianceService {
 
     /** 段階通知の非同期実行。呼び出し側は必ずObjectProvider経由で呼ぶこと。 */
     void notifyFindingsAsync(Long engineerId, YearMonth targetMonth, List<OvertimeComplianceFinding> findings);
+
+    /** 親スレッドのThreadLocalに依存しない、明示tenant付き非同期通知。 */
+    void notifyFindingsAsync(String tenantId, Long engineerId, YearMonth targetMonth,
+                             List<OvertimeComplianceFinding> findings);
 }

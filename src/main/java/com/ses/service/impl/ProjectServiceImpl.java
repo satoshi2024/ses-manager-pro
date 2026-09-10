@@ -12,6 +12,7 @@ import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.service.ProjectService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,7 +63,9 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         Project current = getById(projectId);
         if (current == null) return false;
         bindLegalEntity(current, current.getCustomerId(), current);
-        long contracts = contractMapper.selectCount(new LambdaQueryWrapper<Contract>().eq(Contract::getProjectId, projectId));
+        long contracts = contractMapper.selectCountForTenant(
+                new LambdaQueryWrapper<Contract>().eq(Contract::getProjectId, projectId),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (contracts > 0) {
             throw BusinessException.of("error.project.delete.hasContract");
         }
@@ -84,7 +87,7 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         this.save(project);
         dto.setId(project.getId());
         if (dto.getSkills() != null) {
-            projectSkillServiceProvider.ifAvailable(service -> service.replaceSkills(dto.getId(), dto.getSkills()));
+            replaceProjectSkills(dto.getId(), dto.getSkills(), "案件作成");
         }
     }
 
@@ -93,7 +96,9 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
     public boolean updateProjectWithSkills(com.ses.dto.project.ProjectSaveDto dto) {
         Project old = this.getById(dto.getId());
         if (old != null && old.getCustomerId() != null && !old.getCustomerId().equals(dto.getCustomerId())) {
-            long contracts = contractMapper.selectCount(new LambdaQueryWrapper<Contract>().eq(Contract::getProjectId, dto.getId()));
+            long contracts = contractMapper.selectCountForTenant(
+                    new LambdaQueryWrapper<Contract>().eq(Contract::getProjectId, dto.getId()),
+                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
             if (contracts > 0) {
                 throw BusinessException.of(409, "error.project.update.hasContract");
             }
@@ -109,7 +114,7 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         bindLegalEntity(project, dto.getCustomerId(), old);
         boolean updated = this.updateById(project);
         if (dto.getSkills() != null) {
-            projectSkillServiceProvider.ifAvailable(service -> service.replaceSkills(dto.getId(), dto.getSkills()));
+            replaceProjectSkills(dto.getId(), dto.getSkills(), "案件更新");
         }
         return updated;
     }
@@ -127,5 +132,25 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
             legalEntityContextService.assertSame(old.getLegalEntityId(), customer.getLegalEntityId());
         }
         project.setLegalEntityId(customer.getLegalEntityId());
+    }
+
+    private void replaceProjectSkills(Long projectId, List<com.ses.entity.ProjectSkill> skills, String reason) {
+        com.ses.entity.Project current = baseMapper.selectByIdForTenant(
+                projectId, AccountingTenantContextHolder.requireTenantContext());
+        if (current == null || current.getVersion() == null) {
+            throw BusinessException.of(404, "error.project.notFound");
+        }
+        com.ses.dto.skill.SkillReplaceRequest request = new com.ses.dto.skill.SkillReplaceRequest();
+        request.setExpectedVersion(current.getVersion());
+        request.setReason(reason);
+        request.setSkills(skills.stream().map(skill -> {
+            com.ses.dto.skill.SkillReplaceRequest.SkillItem item =
+                    new com.ses.dto.skill.SkillReplaceRequest.SkillItem();
+            item.setSkillId(skill.getSkillId());
+            item.setRequiredLevel(skill.getRequiredLevel());
+            item.setIsMust(skill.getIsMust());
+            return item;
+        }).toList());
+        projectSkillServiceProvider.ifAvailable(service -> service.replaceSkills(projectId, request));
     }
 }

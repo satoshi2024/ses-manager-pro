@@ -10,6 +10,7 @@ import com.ses.entity.ReportSchedule;
 import com.ses.entity.ReportTemplateVersion;
 import com.ses.mapper.ReportScheduleMapper;
 import com.ses.mapper.ReportTemplateVersionMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.OrganizationScopeService;
 import com.ses.service.report.ReportScheduleService;
 import lombok.RequiredArgsConstructor;
@@ -32,7 +33,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ReportScheduleServiceImpl implements ReportScheduleService {
 
-    private static final String TENANT_ID = "default";
     private static final String TIMEZONE = "Asia/Tokyo";
     private final ReportScheduleMapper scheduleMapper;
     private final ReportTemplateVersionMapper templateVersionMapper;
@@ -42,7 +42,7 @@ public class ReportScheduleServiceImpl implements ReportScheduleService {
     @Override
     public List<ReportSchedule> list() {
         QueryWrapper<ReportSchedule> query = new QueryWrapper<ReportSchedule>()
-                .eq("tenant_id", TENANT_ID);
+                .eq("tenant_id", tenantId());
         if ("マネージャー".equals(SecurityUtils.currentRole())) {
             Long userId = SecurityUtils.currentUserId();
             if (userId == null) throw BusinessException.of(403, "error.managementReport.roleDenied");
@@ -70,7 +70,8 @@ public class ReportScheduleServiceImpl implements ReportScheduleService {
         if (!"管理者".equals(role) && !"マネージャー".equals(role)) {
             throw BusinessException.of(403, "error.managementReport.roleDenied");
         }
-        ReportTemplateVersion version = templateVersionMapper.selectById(request.getTemplateVersionId());
+        ReportTemplateVersion version = templateVersionMapper.selectOne(new QueryWrapper<ReportTemplateVersion>()
+                .eq("tenant_id", tenantId()).eq("id", request.getTemplateVersionId()));
         if (version == null || !"PUBLISHED".equals(version.getStatus())) {
             throw BusinessException.of(400, "error.managementReport.templateVersionNotPublished");
         }
@@ -85,7 +86,7 @@ public class ReportScheduleServiceImpl implements ReportScheduleService {
             next = nextOccurrence.toLocalDateTime();
         }
         ReportSchedule schedule = new ReportSchedule();
-        schedule.setTenantId(TENANT_ID);
+        schedule.setTenantId(tenantId());
         schedule.setTemplateVersionId(request.getTemplateVersionId());
         schedule.setCronExpression(cron);
         schedule.setTimezoneId(TIMEZONE);
@@ -171,11 +172,16 @@ public class ReportScheduleServiceImpl implements ReportScheduleService {
         if (!"管理者".equals(SecurityUtils.currentRole())) {
             throw BusinessException.of(403, "error.managementReport.adminRequired");
         }
-        ReportSchedule schedule = scheduleMapper.selectById(scheduleId);
+        ReportSchedule schedule = scheduleMapper.selectOne(new QueryWrapper<ReportSchedule>()
+                .eq("tenant_id", tenantId()).eq("id", scheduleId));
         if (schedule == null) throw BusinessException.of(404, "error.managementReport.scheduleNotFound");
         schedule.setEnabled(enabled ? 1 : 0);
         schedule.setUpdatedBy(SecurityUtils.currentUserId());
         scheduleMapper.updateById(schedule);
         return schedule;
+    }
+
+    private String tenantId() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 }

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.closing.MonthlyClosingSummaryDto;
+import com.ses.dto.closing.MonthlyClosingWorkRecordDto;
 import com.ses.dto.invoice.InvoiceBalanceDto;
 import com.ses.dto.invoice.UnbilledWorkRecordDto;
 import com.ses.entity.SysUser;
@@ -18,6 +19,7 @@ import com.ses.mapper.SystemConfigMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.MonthlyClosingService;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -143,23 +145,23 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
     @Override
     public MonthlyClosingSummaryDto summary(String month) {
         validateMonth(month);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         String monthEnd = YearMonth.parse(month).atEndOfMonth().toString();
 
         MonthlyClosingSummaryDto dto = new MonthlyClosingSummaryDto();
         dto.setMonth(month);
 
         // (a) 工数未入力: 勤怠グリッドと完全同一条件（workRecordId==null）
-        dto.setUnenteredWork(workRecordMapper.selectMonthlyGrid(month, monthEnd).stream()
+        dto.setUnenteredWork(workRecordMapper.selectMonthlyGrid(month, monthEnd, tenantId).stream()
                 .filter(g -> g.getWorkRecordId() == null)
                 .toList());
 
         // (b) 未確定実績
-        dto.setUnconfirmedRecords(workRecordMapper.selectList(new QueryWrapper<WorkRecord>()
-                .eq("work_month", month)
-                .ne("status", "確定")));
+        dto.setUnconfirmedRecords(workRecordMapper.selectUnconfirmedByWorkMonthForTenant(month, tenantId)
+                .stream().map(this::toPublicWorkRecord).toList());
 
         // (c) 確定済み未請求（全顧客）
-        List<UnbilledWorkRecordDto> items = invoiceMapper.selectUnbilledWorkRecordsAll(month);
+        List<UnbilledWorkRecordDto> items = invoiceMapper.selectUnbilledWorkRecordsAll(month, tenantId);
         Map<Long, MonthlyClosingSummaryDto.CustomerUnbilledDto> map = new LinkedHashMap<>();
         for (UnbilledWorkRecordDto item : items) {
             Long cid = item.getCustomerId();
@@ -182,18 +184,18 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         if (acceptanceMapper != null) {
             // 未検収件数は対象月時点の契約母集団で数える（R09-P1-04: 異動前後の過去月でも一致）
             List<Long> closingContractIds = scopedContractIdsForClosing(month);
-            dto.setUnacceptedCount((int) acceptanceMapper.countUnacceptedForClosing(month, closingContractIds));
+            dto.setUnacceptedCount((int) acceptanceMapper.countUnacceptedForClosing(month, closingContractIds, tenantId));
         } else {
             dto.setUnacceptedCount(0);
         }
 
         // (d) 未払BP
-        dto.setUnpaidBp(bpPaymentMapper.selectListWithDetails(month, "未払"));
+        dto.setUnpaidBp(bpPaymentMapper.selectListWithDetailsForTenant(month, "未払", tenantId));
 
         // (e) 期限超過請求（残高付き）: 未回収残高一覧のうち due_date<today
         LocalDate today = LocalDate.now();
         List<InvoiceBalanceDto> overdue = new ArrayList<>();
-        for (InvoiceBalanceDto b : invoiceMapper.selectOutstandingBalances()) {
+        for (InvoiceBalanceDto b : invoiceMapper.selectOutstandingBalancesForTenant(tenantId)) {
             if (com.ses.service.InvoiceService.isOverdue(b.getStatus(), b.getDueDate(), today)) {
                 overdue.add(b);
             }
@@ -248,6 +250,20 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
             }
         }
         return dto;
+    }
+
+    /** 未確定勤怠は画面で必要な項目だけを公開し、永続化entityの監査項目を隠す。 */
+    private MonthlyClosingWorkRecordDto toPublicWorkRecord(WorkRecord source) {
+        MonthlyClosingWorkRecordDto target = new MonthlyClosingWorkRecordDto();
+        target.setWorkRecordId(source.getId());
+        target.setContractId(source.getContractId());
+        target.setWorkMonth(source.getWorkMonth());
+        target.setActualHours(source.getActualHours());
+        target.setStatus(source.getStatus());
+        target.setRemarks(source.getRemarks());
+        target.setRejectComment(source.getRejectComment());
+        target.setVersion(source.getVersion());
+        return target;
     }
 
     @Transactional(rollbackFor = Exception.class)

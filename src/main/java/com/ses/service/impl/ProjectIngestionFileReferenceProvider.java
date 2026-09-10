@@ -1,9 +1,8 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.ses.entity.ProjectIngestion;
 import com.ses.mapper.ProjectIngestionMapper;
 import com.ses.service.FileReferenceProvider;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -22,14 +21,9 @@ public class ProjectIngestionFileReferenceProvider implements FileReferenceProvi
 
     @Override
     public Set<String> referencedFileNames() {
-        // EML形式でアップロードされ、storedFileName が設定されているものを全件取得
-        LambdaQueryWrapper<ProjectIngestion> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ProjectIngestion::getSourceType, "EML")
-               .isNotNull(ProjectIngestion::getStoredFileName);
-
-        List<ProjectIngestion> ingestions = projectIngestionMapper.selectList(wrapper);
-        return ingestions.stream()
-                .map(ProjectIngestion::getStoredFileName)
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        List<String> storedNames = projectIngestionMapper.selectAllStoredFileNamesForTenant(tenantId);
+        return storedNames.stream()
                 .collect(Collectors.toSet());
     }
 }

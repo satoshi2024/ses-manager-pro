@@ -195,7 +195,8 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         if (approvalRequestId == null) {
             throw BusinessException.of(400, "error.lifecycle.waiveRequiresApproval", "免除には承認済みの例外申請が必要です");
         }
-        com.ses.entity.ApprovalRequest approvalReq = approvalRequestMapper.selectById(approvalRequestId);
+        com.ses.entity.ApprovalRequest approvalReq = approvalRequestMapper.selectByIdAndTenant(approvalRequestId,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (approvalReq == null || !"LIFECYCLE_EXCEPTION".equals(approvalReq.getRequestType())
                 || !taskId.equals(approvalReq.getTargetId())
                 || !"APPROVED".equalsIgnoreCase(approvalReq.getStatus())) {

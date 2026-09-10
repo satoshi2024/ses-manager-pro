@@ -1,6 +1,5 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.constant.StatusConstants;
@@ -12,6 +11,7 @@ import com.ses.mapper.ContractMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.ContractService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.EngineerStatusService;
 import com.ses.service.security.ScopeChangeInvalidator;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +36,16 @@ import com.ses.entity.WorkRecord;
 @Service
 @RequiredArgsConstructor
 public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> implements ContractService {
+
+    /** 契約ID取得も必ず認証済みtenantのownership SQLを通す。 */
+    @Override
+    public Contract getById(java.io.Serializable id) {
+        if (id == null) {
+            return null;
+        }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        return baseMapper.selectByIdForTenant(Long.valueOf(id.toString()), tenantId);
+    }
 
     // 状態遷移の唯一の権威。フロントの STATUS_TRANSITIONS(contract.js)はこの複製であり、変更時は両方追随すること。
     private static final Map<String, Set<String>> ALLOWED_STATUS_TRANSITIONS = Map.of(
@@ -98,19 +108,24 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean removeById(Serializable id) {
-        Contract target = this.getById(id);
+        String tenantId = requireTenant();
+        Long contractId = Long.valueOf(id.toString());
+        Contract target = this.baseMapper.selectByIdForUpdateForTenant(contractId, tenantId);
         if (target == null) return false;
         // 論理削除も法人境界を越えて実行できないよう、削除前に関連graphを再認可する。
         validateLegalEntityRelations(target, target);
         if ("稼動中".equals(target.getStatus())) {
             throw BusinessException.of("error.contract.activeDelete");
         }
-        Long contractId = Long.valueOf(id.toString());
-        long workRecords = workRecordMapper.selectCount(new LambdaQueryWrapper<WorkRecord>().eq(WorkRecord::getContractId, contractId));
+        long workRecords = workRecordMapper.countByContractIdForTenant(contractId, tenantId);
         if (workRecords > 0) {
             throw BusinessException.of("error.contract.hasWorkRecord");
         }
-        boolean removed = super.removeById(id);
+        int deleted = this.baseMapper.deleteByIdForTenant(contractId, tenantId, versionOf(target));
+        if (deleted != 1) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
+        boolean removed = true;
         // 契約削除後、要員が稼働中契約を持たなくなった場合は Bench に戻す
         // （releaseIfIdle は承認済み・稼働中以外の契約も参照するため安全に呼べる。実際の判定はメソッド内）。
         if (removed && target.getEngineerId() != null) {
@@ -123,8 +138,9 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
 
     @Override
     public String generateContractNo(LocalDate baseDate) {
+        String tenantId = requireTenant();
         String prefix = "C-" + baseDate.format(DateTimeFormatter.ofPattern("yyyyMM")) + "-";
-        String maxNo = this.baseMapper.selectMaxContractNoIncludingDeleted(prefix);
+        String maxNo = this.baseMapper.selectMaxContractNoIncludingDeleted(prefix, tenantId);
         if (maxNo == null) {
             return prefix + "0001";
         }
@@ -134,7 +150,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     }
 
     private void validate(Contract c) {
-        validate(c, null);
+        validate(c, null, requireTenant());
     }
 
     /**
@@ -143,6 +159,10 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
      * `engineer-sales-commission` R3-2 と整合)。
      */
     private void validate(Contract c, Contract old) {
+        validate(c, old, requireTenant());
+    }
+
+    private void validate(Contract c, Contract old, String tenantId) {
         // 検収不要理由（R3.3: false時は理由必須、trueへ戻す場合は理由をクリア。R09-P1-01対応）
         if (Boolean.FALSE.equals(c.getAcceptanceRequired())) {
             if (!org.springframework.util.StringUtils.hasText(c.getAcceptanceExemptionReason())) {
@@ -165,21 +185,13 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             throw BusinessException.of(400, "error.contract.commissionRateInvalid");
         }
 
-        if (c.getProjectId() != null) {
-            Project project = projectMapper.selectById(c.getProjectId());
-            if (project == null) {
-                throw BusinessException.of("error.contract.projectNotFound");
-            }
-            if (!Objects.equals(project.getCustomerId(), c.getCustomerId())) {
-                throw BusinessException.of("error.contract.projectCustomerMismatch");
-            }
-        }
+        // 顧客・案件・要員のownershipは、保存直前に同一tenantの専用SQLで検証する。
 
         validateLegalEntityRelations(c, old);
 
         // staffing-capacity-planning: ポジション紐付けは案件配下の実在ポジションに限定する
         if (c.getPositionId() != null) {
-            com.ses.entity.ProjectPosition position = positionMapper.selectById(c.getPositionId());
+            com.ses.entity.ProjectPosition position = positionMapper.selectByIdForTenant(c.getPositionId(), tenantId);
             if (position == null) {
                 throw BusinessException.of(404, "error.staffing.positionNotFound");
             }
@@ -233,7 +245,10 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public List<com.ses.dto.compliance.ComplianceFinding> saveWithBusinessRules(Contract contract) {
+        String tenantId = requireTenant();
+        bindTenantOwnership(contract, tenantId);
         validate(contract);
+        validateReferencesForTenant(contract, tenantId);
         if (!StringUtils.hasText(contract.getContractType())) {
             contract.setContractType("準委任");
         }
@@ -254,9 +269,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                     // 注文明細の一意制約競合は採番競合として再試行しない。
                     // 先行txのcommit後に勝者を可視化し、呼出元で同一契約を返す。
                     if (contract.getOrderLineId() != null) {
-                        Contract winner = this.baseMapper.selectOne(new LambdaQueryWrapper<Contract>()
-                                .eq(Contract::getOrderLineId, contract.getOrderLineId())
-                                .last("LIMIT 1 FOR UPDATE"));
+                        Contract winner = this.baseMapper.selectByOrderLineForTenant(contract.getOrderLineId(), tenantId);
                         if (winner != null) {
                             throw e;
                         }
@@ -302,8 +315,15 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Transactional(rollbackFor = Exception.class)
     public List<com.ses.dto.compliance.ComplianceFinding> updateWithBusinessRules(
             Contract contract, Set<String> presentAlwaysFields) {
+        String tenantId = requireTenant();
+        if (contract == null || contract.getId() == null) {
+            throw BusinessException.of(400, "error.contract.notFound");
+        }
+        if (contract.getVersion() == null) {
+            throw BusinessException.of(400, "error.common.optimisticLock");
+        }
         // 行ロックで単価同期/改定と直列化する（R3R-29）。
-        Contract old = this.baseMapper.selectByIdForUpdate(contract.getId());
+        Contract old = this.baseMapper.selectByIdForUpdateForTenant(contract.getId(), tenantId);
         if (old == null) {
             throw BusinessException.of("error.contract.notFound");
         }
@@ -314,23 +334,26 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
 
+        mergeAbsentRegularFields(contract, old);
         restoreAbsentAlwaysFields(contract, old, presentAlwaysFields);
+        contract.setTenantId(tenantId);
 
-        java.util.List<com.ses.entity.ContractPriceHistory> histories = priceHistoryMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.ContractPriceHistory>()
-                        .eq("contract_id", contract.getId()));
+        java.util.List<com.ses.entity.ContractPriceHistory> histories = priceHistoryMapper.selectByContractIdForTenant(
+                contract.getId(), tenantId);
         // 改定履歴がある契約は単価を「単価改定」経由に一本化する。通常更新SQLからは単価列を除外し
         // （null化＝update-strategy:not_null によりUPDATE対象外）、同期後の新単価を旧値へ戻さない。
         if (!histories.isEmpty()) {
-            contract.setSellingPrice(null);
-            contract.setCostPrice(null);
+            contract.setSellingPrice(old.getSellingPrice());
+            contract.setCostPrice(old.getCostPrice());
         }
 
+        validateReferencesForTenant(contract, tenantId);
         validate(contract, old);
-        int updated = this.baseMapper.updateById(contract);
-        if (contract.getVersion() != null && updated != 1) {
+        int updated = this.baseMapper.updateByIdForTenant(contract, tenantId, old.getVersion());
+        if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
+        contract.setVersion(versionOf(old) + 1);
 
         Long oldEngineerId = old.getEngineerId();
         Long newEngineerId = contract.getEngineerId() != null ? contract.getEngineerId() : oldEngineerId;
@@ -394,6 +417,33 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
      * payload に未出現の ALWAYS フィールドを行ロック後の旧値で回填する（CON-01）。
      * {@code presentAlwaysFields} に含まれる列は明示指定（null クリア含む）として触らない。
      */
+    private void mergeAbsentRegularFields(Contract incoming, Contract old) {
+        if (incoming.getContractNo() == null) incoming.setContractNo(old.getContractNo());
+        if (incoming.getProposalId() == null) incoming.setProposalId(old.getProposalId());
+        if (incoming.getEngineerId() == null) incoming.setEngineerId(old.getEngineerId());
+        if (incoming.getProjectId() == null) incoming.setProjectId(old.getProjectId());
+        if (incoming.getCustomerId() == null) incoming.setCustomerId(old.getCustomerId());
+        if (incoming.getContractType() == null) incoming.setContractType(old.getContractType());
+        if (incoming.getStartDate() == null) incoming.setStartDate(old.getStartDate());
+        if (incoming.getContractDate() == null) incoming.setContractDate(old.getContractDate());
+        if (incoming.getJobDescription() == null) incoming.setJobDescription(old.getJobDescription());
+        if (incoming.getWorkLocation() == null) incoming.setWorkLocation(old.getWorkLocation());
+        if (incoming.getInspectionDueDate() == null) incoming.setInspectionDueDate(old.getInspectionDueDate());
+        if (incoming.getPaymentDueDate() == null) incoming.setPaymentDueDate(old.getPaymentDueDate());
+        if (incoming.getPaymentMethod() == null) incoming.setPaymentMethod(old.getPaymentMethod());
+        if (incoming.getSellingPrice() == null) incoming.setSellingPrice(old.getSellingPrice());
+        if (incoming.getCostPrice() == null) incoming.setCostPrice(old.getCostPrice());
+        if (incoming.getCostCenterId() == null) incoming.setCostCenterId(old.getCostCenterId());
+        if (incoming.getAutoRenew() == null) incoming.setAutoRenew(old.getAutoRenew());
+        if (incoming.getRemarks() == null) incoming.setRemarks(old.getRemarks());
+        if (incoming.getDirectCommandFlag() == null) incoming.setDirectCommandFlag(old.getDirectCommandFlag());
+        if (incoming.getRenewedFromContractId() == null) incoming.setRenewedFromContractId(old.getRenewedFromContractId());
+        if (incoming.getQuotationId() == null) incoming.setQuotationId(old.getQuotationId());
+        if (incoming.getOrderLineId() == null) incoming.setOrderLineId(old.getOrderLineId());
+        if (incoming.getAcceptanceRequired() == null) incoming.setAcceptanceRequired(old.getAcceptanceRequired());
+        incoming.setStatus(old.getStatus());
+    }
+
     private void restoreAbsentAlwaysFields(Contract incoming, Contract old, Set<String> presentAlwaysFields) {
         Set<String> present = presentAlwaysFields != null ? presentAlwaysFields : Set.of();
         if (!present.contains("positionId")) {
@@ -449,10 +499,40 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         return findings;
     }
 
+    /** 契約のownershipは呼出元の認証tenantだけで固定する。 */
+    private void bindTenantOwnership(Contract contract, String currentTenant) {
+        if (contract == null) {
+            throw BusinessException.of(400, "error.contract.notFound");
+        }
+        if (org.springframework.util.StringUtils.hasText(contract.getTenantId())
+                && !currentTenant.equals(contract.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        contract.setTenantId(currentTenant);
+    }
+
+    /** 契約を作成・更新する前に、顧客・案件・要員の三者を同一tenantで検証する。 */
+    private void validateReferencesForTenant(Contract contract, String tenantId) {
+        if (contract.getCustomerId() == null || contract.getProjectId() == null || contract.getEngineerId() == null
+                || baseMapper.countOwnedReferencesForTenant(contract.getCustomerId(), contract.getProjectId(),
+                contract.getEngineerId(), tenantId) != 1) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+    }
+
+    private String requireTenant() {
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+    }
+
+    private int versionOf(Contract contract) {
+        return contract == null || contract.getVersion() == null ? 0 : contract.getVersion();
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void changeStatus(Long contractId, String newStatus, LocalDate cancelDate) {
-        Contract contract = this.baseMapper.selectByIdForUpdate(contractId);
+        String tenantId = requireTenant();
+        Contract contract = this.baseMapper.selectByIdForUpdateForTenant(contractId, tenantId);
         if (contract == null) {
             throw BusinessException.of(404, "error.contract.notFound");
         }
@@ -486,7 +566,12 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             }
         }
         contract.setStatus(newStatus);
-        this.baseMapper.updateById(contract);
+        int updated = this.baseMapper.updateStatusForTenant(contractId, tenantId, versionOf(contract),
+                newStatus, contract.getEndDate());
+        if (updated != 1) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
+        contract.setVersion(versionOf(contract) + 1);
         if (contract.getEngineerId() != null) {
             if ("稼動中".equals(newStatus)) {
                 engineerStatusService.onContractActive(contract.getEngineerId());
@@ -504,25 +589,23 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
 
     @Override
     public boolean hasActiveContract(Long engineerId) {
-        return this.baseMapper.selectCount(new LambdaQueryWrapper<Contract>()
-                .eq(Contract::getEngineerId, engineerId)
-                .eq(Contract::getStatus, "稼動中")) > 0;
+        String tenantId = requireTenant();
+        return this.baseMapper.countActiveByEngineerForTenant(engineerId, tenantId) > 0;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Contract createDraftFromProposal(Proposal proposal) {
+        String tenantId = requireTenant();
         // 冪等性: 同一提案から生成済みの契約があればそれを返す
-        Contract existing = this.baseMapper.selectOne(new LambdaQueryWrapper<Contract>()
-                .eq(Contract::getProposalId, proposal.getId())
-                .last("LIMIT 1"));
+        Contract existing = this.baseMapper.selectByProposalForTenant(proposal.getId(), tenantId);
         if (existing != null) {
             // 冪等返却でも、現在の法人境界と関連行を再確認する。
             validateLegalEntityRelations(existing, null);
             return existing;
         }
 
-        Project project = projectMapper.selectById(proposal.getProjectId());
+        Project project = projectMapper.selectByIdForTenant(proposal.getProjectId(), tenantId);
         if (project == null) {
             throw BusinessException.of("error.contract.proposalProjectNotFound");
         }
@@ -547,10 +630,9 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Contract createDraftFromQuotation(com.ses.entity.Quotation quotation) {
+        String tenantId = requireTenant();
         // 冪等性: 同一見積から生成済みの契約があればそれを返す
-        Contract existing = this.baseMapper.selectOne(new LambdaQueryWrapper<Contract>()
-                .eq(Contract::getQuotationId, quotation.getId())
-                .last("LIMIT 1"));
+        Contract existing = this.baseMapper.selectByQuotationForTenant(quotation.getId(), tenantId);
         if (existing != null) {
             validateLegalEntityRelations(existing, existing);
             return existing;
@@ -562,7 +644,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         Long projectId = quotation.getProjectId();
         Long customerId = quotation.getCustomerId();
         if (projectId != null) {
-            Project project = projectMapper.selectById(projectId);
+            Project project = projectMapper.selectByIdForTenant(projectId, tenantId);
             if (project != null) {
                 customerId = project.getCustomerId();
             }
@@ -587,10 +669,9 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Transactional(rollbackFor = Exception.class)
     public Contract createDraftFromSalesOrderLine(com.ses.entity.SalesOrderLine line,
                                                   com.ses.entity.SalesOrder order) {
+        String tenantId = requireTenant();
         // 冪等: 同一注文明細から生成済みの契約があればそれを返す（order_line_id UNIQUEでも防御）。
-        Contract existing = this.baseMapper.selectOne(new LambdaQueryWrapper<Contract>()
-                .eq(Contract::getOrderLineId, line.getId())
-                .last("LIMIT 1"));
+        Contract existing = this.baseMapper.selectByOrderLineForTenant(line.getId(), tenantId);
         if (existing != null) {
             validateLegalEntityRelations(existing, existing);
             return existing;
@@ -601,7 +682,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         Long projectId = line.getProjectId();
         Long customerId = order.getCustomerId();
         if (projectId != null) {
-            Project project = projectMapper.selectById(projectId);
+            Project project = projectMapper.selectByIdForTenant(projectId, tenantId);
             if (project != null) {
                 customerId = project.getCustomerId();
             }
@@ -660,8 +741,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             saveWithBusinessRules(contract);
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
             if (src.orderLineId() != null) {
-                Contract existing = baseMapper.selectOne(new LambdaQueryWrapper<Contract>()
-                        .eq(Contract::getOrderLineId, src.orderLineId()).last("LIMIT 1 FOR UPDATE"));
+                Contract existing = baseMapper.selectByOrderLineForTenant(src.orderLineId(), requireTenant());
                 if (existing != null) {
                     return existing;
                 }
@@ -685,8 +765,9 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Transactional(rollbackFor = Exception.class)
     public boolean revisePrice(Long contractId, String applyFromMonth, BigDecimal selling,
                                BigDecimal cost, String reason) {
+        String tenantId = requireTenant();
         // 行ロックで同月改定同士・通常更新・同期と直列化する（R3R-29）。
-        Contract contract = this.baseMapper.selectByIdForUpdate(contractId);
+        Contract contract = this.baseMapper.selectByIdForUpdateForTenant(contractId, tenantId);
         if (contract == null) {
             throw BusinessException.of("error.contract.notFound");
         }
@@ -705,9 +786,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             throw BusinessException.of("error.contract.priceRevision.beforeStart");
         }
 
-        List<com.ses.entity.ContractPriceHistory> histories = priceHistoryMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.ContractPriceHistory>()
-                        .eq("contract_id", contractId));
+        List<com.ses.entity.ContractPriceHistory> histories = priceHistoryMapper.selectByContractIdForTenant(
+                contractId, tenantId);
 
         // 初回改定なら契約開始月・現行単価の初期履歴を自動補完（R1-3）。
         if (histories.isEmpty() && contract.getStartDate() != null) {
@@ -732,7 +812,9 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             existing.setSellingPrice(selling);
             existing.setCostPrice(cost);
             existing.setReason(reason);
-            priceHistoryMapper.updateById(existing);
+            if (priceHistoryMapper.updateByIdForContractTenant(existing, contractId, tenantId) != 1) {
+                throw BusinessException.of(409, "error.common.optimisticLock");
+            }
         } else {
             com.ses.entity.ContractPriceHistory rev = new com.ses.entity.ContractPriceHistory();
             rev.setContractId(contractId);
@@ -745,21 +827,20 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         }
 
         // t_contract の現在単価を「当月時点で有効な履歴」で再計算（新履歴そのものではなくリゾルバで解決）。
-        List<com.ses.entity.ContractPriceHistory> fresh = priceHistoryMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.ContractPriceHistory>()
-                        .eq("contract_id", contractId));
+        List<com.ses.entity.ContractPriceHistory> fresh = priceHistoryMapper.selectByContractIdForTenant(
+                contractId, tenantId);
         com.ses.service.billing.ContractPriceResolver.ResolvedPrice current =
                 com.ses.service.billing.ContractPriceResolver.resolveFrom(
                         contract, java.time.YearMonth.from(requireBusinessDate()), fresh);
         // 単価列だけを部分UPDATEし、他項目を巻き戻さない（R3R-29）。
-        this.baseMapper.updatePriceOnly(contractId, current.getSellingPrice(), current.getCostPrice());
+        if (this.baseMapper.updatePriceOnlyForTenant(contractId, tenantId, versionOf(contract),
+                current.getSellingPrice(), current.getCostPrice()) != 1) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
 
         // 未確定の既存勤怠（applyFromMonth以降）の金額を再計算
-        List<WorkRecord> unconfirmedRecords = workRecordMapper.selectList(
-                new QueryWrapper<WorkRecord>()
-                        .eq("contract_id", contractId)
-                        .ge("work_month", applyFromMonth)
-                        .ne("status", "確定"));
+        List<WorkRecord> unconfirmedRecords = workRecordMapper.selectUnconfirmedByContractIdForTenant(
+                contractId, applyFromMonth, tenantId);
         for (WorkRecord wr : unconfirmedRecords) {
             if (wr.getActualHours() != null) {
                 java.time.YearMonth ym = java.time.YearMonth.parse(wr.getWorkMonth());
@@ -776,7 +857,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                         contract.getSettlementHoursMax(),
                         wr.getActualHours()) : null;
                 int updated = workRecordMapper.updateBillingAndPayment(
-                        wr.getId(), wr.getActualHours(), bAmt, pAmt, wr.getVersion());
+                        wr.getId(), wr.getActualHours(), bAmt, pAmt, wr.getVersion(), tenantId);
                 if (updated != 1) {
                     throw BusinessException.of(409, "error.common.optimisticLock");
                 }
@@ -786,10 +867,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         // 過去遡及かつ確定済み実績があれば警告。
         boolean retroactive = applyFrom.isBefore(java.time.YearMonth.now());
         if (retroactive) {
-            long confirmed = workRecordMapper.selectCount(new QueryWrapper<WorkRecord>()
-                    .eq("contract_id", contractId)
-                    .eq("status", "確定")
-                    .ge("work_month", applyFromMonth));
+            long confirmed = workRecordMapper.countConfirmedByContractIdForTenant(contractId, applyFromMonth, tenantId);
             return confirmed > 0;
         }
         return false;
@@ -797,18 +875,16 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
 
     @Override
     public List<com.ses.entity.ContractPriceHistory> priceHistory(Long contractId) {
-        return priceHistoryMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.ContractPriceHistory>()
-                        .eq("contract_id", contractId)
-                        .orderByAsc("apply_from_month"));
+        return priceHistoryMapper.selectByContractIdForTenant(contractId, requireTenant());
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteFuturePriceRevision(Long contractId, String applyFromMonth) {
-        Contract contract = this.baseMapper.selectByIdForUpdate(contractId);
+        String tenantId = requireTenant();
+        Contract contract = this.baseMapper.selectByIdForUpdateForTenant(contractId, tenantId);
         if (contract == null) {
-            throw BusinessException.of("error.contract.notFound");
+            throw BusinessException.of(404, "error.scope.notFound");
         }
         validateLegalEntityRelations(contract, contract);
         java.time.YearMonth applyFrom;
@@ -821,36 +897,33 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         if (!applyFrom.isAfter(java.time.YearMonth.from(requireBusinessDate()))) {
             throw BusinessException.of("error.contract.priceRevision.pastLocked");
         }
-        priceHistoryMapper.delete(
-                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.ContractPriceHistory>()
-                        .eq("contract_id", contractId)
-                        .eq("apply_from_month", applyFromMonth));
+        priceHistoryMapper.deleteByContractAndMonthForTenant(contractId, applyFromMonth, tenantId);
     }
 
     @Override
     public void updateRenewalDecision(Long contractId, String decision) {
+        String tenantId = requireTenant();
         if (decision != null
                 && !com.ses.common.constant.RenewalState.DECISION_CONTINUE.equals(decision)
                 && !com.ses.common.constant.RenewalState.DECISION_END.equals(decision)) {
             throw BusinessException.of(400, "error.contract.invalidRenewalDecision");
         }
-        Contract current = this.getById(contractId);
-        if (current == null) {
+        Contract contract = this.baseMapper.selectByIdForUpdateForTenant(contractId, tenantId);
+        if (contract == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
-        validateLegalEntityRelations(current, current);
+        validateLegalEntityRelations(contract, contract);
         // updateById(エンティティ) は使えない。Contract には renewalDecision の他にも
         // salesUserId / commissionBaseType / commissionRate が @TableField(updateStrategy = ALWAYS)
         // で定義されており、空の patch エンティティを渡すとそれらも SET 句に含まれて NULL 上書き
         // されてしまう（担当営業とインセンティブ個別設定が消える）。ALWAYS は「全項目を送る単一経路」
         // 前提の指定のため、部分更新はカラムを明示する UpdateWrapper で行う。
-        this.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Contract>()
-                .eq("id", contractId)
-                .set("renewal_decision", decision)
-                .setSql("version = version + 1"));
+        if (this.baseMapper.updateRenewalDecisionForTenant(contractId, tenantId, versionOf(contract), decision) != 1) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
         if (com.ses.common.constant.RenewalState.DECISION_CONTINUE.equals(decision)) {
-            Contract updated = this.getById(contractId);
-            recordAiOutcome(svc -> svc.onContractRenewalContinued(updated));
+            Contract updated = this.baseMapper.selectByIdForTenant(contractId, tenantId);
+            recordAiOutcome(svc -> svc.onContractRenewalContinued(updated != null ? updated : contract));
         }
     }
 

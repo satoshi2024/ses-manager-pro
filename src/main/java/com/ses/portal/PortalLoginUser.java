@@ -39,6 +39,9 @@ public class PortalLoginUser implements UserDetails {
     /** 組織に紐づくBP会社ID（BP時。null可） */
     private Long bpCompanyId;
 
+    /** m_portal_organizationから解決したtenant。portalリクエストの唯一のtenant根拠。 */
+    private String tenantId;
+
     private String email;
 
     private String displayName;

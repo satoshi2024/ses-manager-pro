@@ -18,8 +18,11 @@ import com.ses.mapper.ServiceSlaClockMapper;
 import com.ses.mapper.ServiceSlaEscalationMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.servicedesk.ServiceSlaMonitoringService;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -47,11 +50,24 @@ import static org.mockito.Mockito.verify;
 @Transactional
 class ServiceSlaSchedulerTest {
 
+    @BeforeEach
+    void bindTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+    }
+
     @Autowired
     private ServiceSlaScheduler serviceSlaScheduler;
 
     @Autowired
     private ServiceSlaMonitoringService monitoringService;
+
+    @Autowired
+    private com.ses.service.servicedesk.impl.ServiceSlaMonitoringServiceImpl monitoringServiceImpl;
 
     @Autowired
     private ServiceRequestMapper requestMapper;
@@ -88,6 +104,7 @@ class ServiceSlaSchedulerTest {
     void testBreachDetectionAndNotificationDeduplication_ownerRecipient() {
         // 1. 顧客とOwnerユーザー作成
         Customer customer = Customer.builder().companyName("テスト顧客-" + UUID.randomUUID()).build();
+        customer.setTenantId("default");
         customerMapper.insert(customer);
 
         SysUser owner = new SysUser();
@@ -146,6 +163,7 @@ class ServiceSlaSchedulerTest {
     @DisplayName("Ownerが空の場合、②契約担当営業に通知がフォールバックされること")
     void testEscalation_fallbackToContractSales() {
         Customer customer = Customer.builder().companyName("テスト顧客-" + UUID.randomUUID()).build();
+        customer.setTenantId("default");
         customerMapper.insert(customer);
 
         Project project = new Project();
@@ -154,11 +172,13 @@ class ServiceSlaSchedulerTest {
         projectMapper.insert(project);
 
         Engineer engineer = new Engineer();
+        engineer.setTenantId("default");
         engineer.setFullName("Test Engineer " + UUID.randomUUID());
         engineer.setEmploymentType("正社員");
         engineerMapper.insert(engineer);
 
         SysUser salesUser = new SysUser();
+        salesUser.setTenantId("default");
         salesUser.setUsername("sales_" + UUID.randomUUID());
         salesUser.setPassword("pass123");
         salesUser.setRealName("Sales Rep");
@@ -177,6 +197,7 @@ class ServiceSlaSchedulerTest {
         contract.setStartDate(LocalDate.now());
         contract.setEndDate(LocalDate.now().plusMonths(3));
         contract.setStatus("稼動中");
+        contract.setTenantId("default");
         contractMapper.insert(contract);
 
         ServiceRequest req = ServiceRequest.builder()
@@ -215,6 +236,7 @@ class ServiceSlaSchedulerTest {
     @DisplayName("Owner・契約営業・顧客主営業が全て空の場合、④アクティブな管理者全員にエスカレーション通知されること（ID 1への硬直フォールバックなし）")
     void testEscalation_fallbackToActiveAdmins() {
         Customer customer = Customer.builder().companyName("テスト顧客-" + UUID.randomUUID()).build();
+        customer.setTenantId("default");
         customerMapper.insert(customer);
 
         // 管理者ユーザーを作成 (ID = 888L, 889L)
@@ -271,6 +293,7 @@ class ServiceSlaSchedulerTest {
     @DisplayName("期限30分前warningと初回breach・継続breachが別段階で記録されること")
     void testWarningFirstAndContinuingBreach() {
         Customer customer = Customer.builder().companyName("warning顧客-" + UUID.randomUUID()).build();
+        customer.setTenantId("default");
         customerMapper.insert(customer);
         SysUser owner = activeUser("warning_owner");
 
@@ -315,6 +338,7 @@ class ServiceSlaSchedulerTest {
         });
 
         Customer customer = Customer.builder().companyName("recipientなし顧客-" + UUID.randomUUID()).build();
+        customer.setTenantId("default");
         customerMapper.insert(customer);
         ServiceRequest req = ServiceRequest.builder()
                 .requestNo("REQ-" + UUID.randomUUID().toString().substring(0, 8))
@@ -353,6 +377,37 @@ class ServiceSlaSchedulerTest {
                 .eq(com.ses.entity.ServiceSlaEscalation::getStatus, "SENT")));
     }
 
+    @Test
+    @DisplayName("SLA通知の契約候補は同一顧客でもcurrent tenantの契約だけを使う")
+    void contractRecipientDoesNotCrossTenant() {
+        Customer customer = Customer.builder().companyName("契約tenant分離顧客-" + UUID.randomUUID())
+                .tenantId("default").build();
+        customerMapper.insert(customer);
+
+        Project project = new Project();
+        project.setProjectName("契約tenant分離案件-" + UUID.randomUUID());
+        project.setCustomerId(customer.getId());
+        projectMapper.insert(project);
+        Engineer engineer = new Engineer();
+        engineer.setFullName("契約tenant分離要員-" + UUID.randomUUID());
+        engineer.setEmploymentType("正社員");
+        engineerMapper.insert(engineer);
+
+        SysUser salesA = activeSales("sla-a", "default");
+        SysUser salesB = activeSales("sla-b", "tenant-b");
+        Contract contractA = contract(customer.getId(), project.getId(), engineer.getId(), salesA.getId(), "default");
+        Contract contractB = contract(customer.getId(), project.getId(), engineer.getId(), salesB.getId(), "tenant-b");
+        contractMapper.insert(contractA);
+        contractMapper.insert(contractB);
+
+        ServiceRequest request = ServiceRequest.builder().requestNo("REQ-" + UUID.randomUUID())
+                .tenantId("default").customerId(customer.getId()).contractId(contractB.getId())
+                .status("RECEIVED").build();
+        assertTrue(monitoringServiceImpl.resolveNotificationRecipients(request).isEmpty());
+        request.setTenantId(null);
+        assertTrue(monitoringServiceImpl.resolveNotificationRecipients(request).isEmpty());
+    }
+
     private SysUser activeUser(String prefix) {
         SysUser user = new SysUser();
         user.setUsername(prefix + "_" + UUID.randomUUID());
@@ -362,5 +417,28 @@ class ServiceSlaSchedulerTest {
         user.setStatus(1);
         userMapper.insert(user);
         return user;
+    }
+
+    private SysUser activeSales(String prefix, String tenantId) {
+        SysUser user = activeUser(prefix);
+        user.setTenantId(tenantId);
+        userMapper.updateById(user);
+        return userMapper.selectById(user.getId());
+    }
+
+    private Contract contract(Long customerId, Long projectId, Long engineerId, Long salesUserId, String tenantId) {
+        Contract contract = new Contract();
+        contract.setContractNo("CT-" + UUID.randomUUID());
+        contract.setCustomerId(customerId);
+        contract.setProjectId(projectId);
+        contract.setEngineerId(engineerId);
+        contract.setSalesUserId(salesUserId);
+        contract.setSellingPrice(new BigDecimal("800000"));
+        contract.setCostPrice(new BigDecimal("600000"));
+        contract.setStartDate(LocalDate.now());
+        contract.setEndDate(LocalDate.now().plusMonths(3));
+        contract.setStatus("稼動中");
+        contract.setTenantId(tenantId);
+        return contract;
     }
 }

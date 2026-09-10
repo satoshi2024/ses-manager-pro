@@ -24,7 +24,7 @@ import java.time.LocalDate;
 @TableName("m_approval_route")
 public class ApprovalRoute extends BaseEntity {
 
-    private Long tenantId;
+    private String tenantId;
     private String requestType;
     /** NULLは全role対象。値があるrouteは同一条件の汎用routeより優先される。 */
     private String applicantRoleCondition;
@@ -38,4 +38,17 @@ public class ApprovalRoute extends BaseEntity {
 
     @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
+
+    /** 旧テスト/seedの数値tenant指定を、永続化する文字列tenantへ明示変換する互換builder。 */
+    public static class ApprovalRouteBuilder {
+        public ApprovalRouteBuilder tenantId(String tenantId) {
+            this.tenantId = tenantId;
+            return this;
+        }
+
+        public ApprovalRouteBuilder tenantId(Long tenantId) {
+            this.tenantId = tenantId == null ? null : String.valueOf(tenantId);
+            return this;
+        }
+    }
 }

@@ -5,6 +5,7 @@ import com.ses.common.security.OutboundUrlException;
 import com.ses.common.security.OutboundUrlGuard;
 import com.ses.entity.Notification;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpEntity;
@@ -58,8 +59,14 @@ public class WebhookNotifier {
      */
     @Async
     public void notify(Notification notification) {
-        ExecutionActorContext.runAsSystem("notification-webhook-callback", "BACKGROUND_CALLBACK",
-                () -> notifyNowInternal(notification));
+        if (notification == null || !StringUtils.hasText(notification.getTenantId())) {
+            log.warn("tenantがないWebhook通知を破棄しました");
+            return;
+        }
+        String tenantId = notification.getTenantId().trim();
+        AccountingTenantContextHolder.runWithTenant(tenantId, () ->
+                ExecutionActorContext.runAsSystem("notification-webhook-callback", "BACKGROUND_CALLBACK",
+                        () -> notifyNowInternal(notification)));
     }
 
     /** outbox workerから同期実行し、成功/再送要否を返す。 */

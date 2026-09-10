@@ -21,6 +21,9 @@ import java.time.LocalDateTime;
 @TableName("t_service_request")
 public class ServiceRequest {
 
+    /** テナント境界。REQ採番・関連文書と同じ実行コンテキストを保持する。 */
+    private String tenantId;
+
     @TableId(type = IdType.AUTO)
     private Long id;
 

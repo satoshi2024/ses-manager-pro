@@ -1,6 +1,5 @@
 package com.ses.controller.api;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.PageUtils;
@@ -33,10 +32,7 @@ public class BpAvailabilityIngestionApiController {
             @RequestParam(defaultValue = "10") long size,
             @RequestParam(required = false) String status) {
         Page<BpAvailabilityIngestion> page = PageUtils.safePage(current, size);
-        LambdaQueryWrapper<BpAvailabilityIngestion> wrapper = new LambdaQueryWrapper<BpAvailabilityIngestion>()
-                .eq(status != null && !status.isBlank(), BpAvailabilityIngestion::getStatus, status)
-                .orderByDesc(BpAvailabilityIngestion::getCreatedAt);
-        return ApiResult.success(bpAvailabilityIngestionService.page(page, wrapper));
+        return ApiResult.success(bpAvailabilityIngestionService.pageForCurrentTenant(page, status));
     }
 
     /**
@@ -61,7 +57,7 @@ public class BpAvailabilityIngestionApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<BpAvailabilityIngestion> getById(@PathVariable Long id) {
-        return ApiResult.success(bpAvailabilityIngestionService.getById(id));
+        return ApiResult.success(bpAvailabilityIngestionService.getForCurrentTenant(id));
     }
 
     /**

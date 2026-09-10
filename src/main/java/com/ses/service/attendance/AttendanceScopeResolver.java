@@ -11,6 +11,7 @@ import com.ses.mapper.EngineerAccountingHistoryMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.OrganizationUnitMapper;
 import com.ses.mapper.UserOrganizationMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -39,8 +40,9 @@ public class AttendanceScopeResolver {
     }
 
     public AttendanceScopeSnapshot resolveSnapshot(Long engineerId, Long fallbackUserId, LocalDate asOf) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (engineerId == null || asOf == null) return null;
-        Engineer engineer = engineerMapper.selectById(engineerId);
+        Engineer engineer = engineerMapper.selectByIdForTenant(engineerId, tenantId);
         if (engineer == null) return null;
         EngineerAccountingHistory history = accountingHistoryMapper.selectAt(engineerId, asOf);
         if (history != null && "UNKNOWN".equals(history.getOrganizationHistoryStatus())) {
@@ -57,7 +59,7 @@ public class AttendanceScopeResolver {
         if (history == null && organizationId == null) {
             Long linkedUserId = linkedUserId(engineerId, fallbackUserId);
             organizationId = linkedUserId == null ? null
-                    : userOrganizationMapper.selectPrimaryOrganizationId(linkedUserId, asOf);
+                    : userOrganizationMapper.selectPrimaryOrganizationIdByTenant(tenantId, linkedUserId, asOf);
         }
         if (organizationId == null) return null;
         OrganizationUnit organization = organizationUnitMapper.selectAt(organizationId, asOf);
@@ -87,7 +89,8 @@ public class AttendanceScopeResolver {
     }
 
     private Long linkedUserId(Long engineerId, Long fallbackUserId) {
-        EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(engineerId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerIdAndTenant(engineerId, tenantId);
         return link != null && link.getSysUserId() != null ? link.getSysUserId() : fallbackUserId;
     }
 }

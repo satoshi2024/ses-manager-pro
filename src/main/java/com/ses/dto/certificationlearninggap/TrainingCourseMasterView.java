@@ -6,7 +6,6 @@ import java.util.List;
 /** HR/adminが管理するcourse catalogの安全な表示projection。 */
 public record TrainingCourseMasterView(
         Long id,
-        String tenantId,
         String provider,
         String name,
         String description,

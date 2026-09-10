@@ -3,6 +3,7 @@ package com.ses.entity;
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 import com.ses.common.base.BaseEntity;
 import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
@@ -31,6 +32,9 @@ import java.time.LocalDate;
 @TableName("t_candidate")
 public class Candidate extends BaseEntity {
 
+    /** 候補者のtenant ownership。legacy NULLはresolverから除外する。 */
+    private String tenantId;
+
     @NotBlank(message = "氏名は必須です")
     private String name;
 
@@ -55,6 +59,9 @@ public class Candidate extends BaseEntity {
 
     /** 入社後に変換したt_engineer.idへの紐付け(未変換はnull) */
     private Long convertedEngineerId;
+
+    @Version
+    private Integer version;
 
     private String remarks;
 

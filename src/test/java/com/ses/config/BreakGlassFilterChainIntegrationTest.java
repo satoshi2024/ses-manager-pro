@@ -57,7 +57,7 @@ class BreakGlassFilterChainIntegrationTest {
 
     @Test
     void mfaPageからdashboardまで静的resourceを許可し通知pollingを生成しない() throws Exception {
-        when(incidentMapper.selectById(10L)).thenReturn(activeIncident());
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(activeIncident());
         when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
         when(mfaService.isRequired(any())).thenReturn(true);
         when(mfaService.isConfigured(1L)).thenReturn(true);
@@ -89,7 +89,7 @@ class BreakGlassFilterChainIntegrationTest {
      */
     @Test
     void dashboardScopeで通知Apiを直接要求すると失効せず403と必備監査を返す() throws Exception {
-        when(incidentMapper.selectById(10L)).thenReturn(activeIncident());
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(activeIncident());
         when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
 
         mockMvc.perform(get("/api/notifications")
@@ -105,7 +105,7 @@ class BreakGlassFilterChainIntegrationTest {
     void engineerListScopeで業務画面到達と受動APIの403保護とsession維持を確認する() throws Exception {
         BreakGlassIncident incident = activeIncident();
         incident.setAllowedActions("engineer.view");
-        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(incident);
         when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
 
         MockHttpSession session = boundSession();
@@ -136,7 +136,7 @@ class BreakGlassFilterChainIntegrationTest {
     void contractListScopeで業務画面到達と受動APIの403保護とsession維持を確認する() throws Exception {
         BreakGlassIncident incident = activeIncident();
         incident.setAllowedActions("contract.view");
-        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(incident);
         when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
 
         MockHttpSession session = boundSession();
@@ -156,7 +156,7 @@ class BreakGlassFilterChainIntegrationTest {
     void projectListScopeで業務画面到達と受動APIの403保護とsession維持を確認する() throws Exception {
         BreakGlassIncident incident = activeIncident();
         incident.setAllowedActions("project.view");
-        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(incident);
         when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
 
         MockHttpSession session = boundSession();
@@ -174,7 +174,7 @@ class BreakGlassFilterChainIntegrationTest {
 
     @Test
     void 未知Apiと未知pageはfullChainでもfailClosedにする() throws Exception {
-        when(incidentMapper.selectById(10L)).thenReturn(activeIncident());
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(activeIncident());
         when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
 
         mockMvc.perform(get("/api/future-sensitive")
@@ -184,6 +184,23 @@ class BreakGlassFilterChainIntegrationTest {
         mockMvc.perform(get("/future-sensitive")
                         .session(boundSession()).with(breakGlassAuthentication()))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void tenant欠落breakGlass主体はtenantFilter到達前に403になる() throws Exception {
+        when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
+        SysUser user = new SysUser();
+        user.setId(1L);
+        user.setUsername("BG-01");
+        user.setRole("管理者");
+        user.setStatus(1);
+        var authorities = List.of(new SimpleGrantedAuthority("ROLE_管理者"));
+        LoginUser principal = new LoginUser(user, authorities);
+
+        mockMvc.perform(get("/dashboard").session(boundSession())
+                        .with(authentication(new UsernamePasswordAuthenticationToken(principal, null, authorities))))
+                .andExpect(status().isForbidden());
+        verify(incidentMapper, never()).selectByIdAndTenant(any(), any());
     }
 
     private MockHttpSession boundSession() {
@@ -198,6 +215,7 @@ class BreakGlassFilterChainIntegrationTest {
         user.setUsername("BG-01");
         user.setRole("管理者");
         user.setStatus(1);
+        user.setTenantId("default");
         List<SimpleGrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_管理者"));
         LoginUser principal = new LoginUser(user, authorities);
         return authentication(new UsernamePasswordAuthenticationToken(principal, null, authorities));

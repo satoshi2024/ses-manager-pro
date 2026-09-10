@@ -8,6 +8,7 @@ import com.ses.common.util.TemplateRenderer;
 import com.ses.entity.*;
 import com.ses.mapper.*;
 import com.ses.service.ContractDocumentService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -20,6 +21,16 @@ import java.util.*;
 @Service
 @RequiredArgsConstructor
 public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMapper, ContractDocument> implements ContractDocumentService {
+
+    /** 書類IDの取得も、親契約・顧客のtenant ownershipを満たす専用SQLへ限定する。 */
+    @Override
+    public ContractDocument getById(java.io.Serializable id) {
+        if (id == null) {
+            return null;
+        }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        return baseMapper.selectByIdForTenant(Long.valueOf(id.toString()), tenantId);
+    }
     
     private final ContractTemplateMapper templates;
     private final com.ses.mapper.ContractMapper contracts;
@@ -35,6 +46,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
     @Override
     @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ContractDocument create(Long contractId, Long templateId, String name, String email) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (name == null || email == null || !email.contains("@")) {
             throw BusinessException.of("error.contract.document.recipientInvalid");
         }
@@ -44,7 +56,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
             throw BusinessException.of("error.contract.document.templateNotFound");
         }
         
-        Contract c = contracts.selectById(contractId);
+        Contract c = contracts.selectByIdForTenant(contractId, tenantId);
         if (c == null) {
             throw BusinessException.of("error.contract.notFound");
         }
@@ -92,8 +104,8 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
         
         save(d);
         if (d.getPdfPath() != null) {
-            recordSelfGeneratedMetadata(Paths.get(d.getPdfPath()), d.getId());
-            registerToDocumentLedger(d, c);
+            recordSelfGeneratedMetadata(Paths.get(d.getPdfPath()), d.getId(), tenantId);
+            registerToDocumentLedger(d, c, tenantId);
         }
         return d;
     }
@@ -127,6 +139,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
     @Override
     @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ContractDocument queueSend(Long id, com.ses.dto.cloudsign.ConfirmedSendRequest request) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         // kill switch: enabled=falseの間は新規queue受付も停止する（HFP-02-AC-12-03）
         if (!cloudSignProperties.isEnabled()) {
             throw BusinessException.of("error.contract.document.cloudsignNotConfigured");
@@ -140,7 +153,10 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
             throw BusinessException.of("error.contract.document.invalidState");
         }
         // 確認済みpayloadが現在の書類/契約と一致することを検証（HFP-02-AC-03-04/05）
-        Contract c = contracts.selectById(d.getContractId());
+        Contract c = contracts.selectByIdForTenant(d.getContractId(), tenantId);
+        if (c == null) {
+            throw BusinessException.of("error.contract.document.notFound");
+        }
         if (c == null || !Objects.equals(c.getContractNo(), request.contractNo())) {
             throw BusinessException.of("error.contract.document.payloadChanged");
         }
@@ -242,11 +258,15 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
 
     @Override
     public byte[] download(Long id) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         ContractDocument d = getById(id);
         if (d == null) {
             throw BusinessException.of("error.contract.document.notFound");
         }
         
+        if (d.getContractId() == null || contracts.selectByIdForTenant(d.getContractId(), tenantId) == null) {
+            throw BusinessException.of("error.contract.document.notFound");
+        }
         // 送信原本（ローカル生成物）のみ。signed/certificateはCloudSignArtifactServiceが別経路で返す。
         String p = d.getPdfPath();
         if (p == null) {
@@ -262,7 +282,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
             com.ses.mapper.FileSecurityMetadataMapper mapper = metadataMapperProvider.getIfAvailable();
             if (mapper != null) {
                 String relativeName = relativeStoredName(target);
-                FileSecurityMetadata metadata = mapper.selectByStoredName("default", relativeName);
+                FileSecurityMetadata metadata = mapper.selectByStoredName(tenantId, relativeName);
                 if (metadata == null || !"PUBLISHED".equals(metadata.getStorageState())
                         || !"CLEAN".equals(metadata.getScanStatus())) {
                     throw BusinessException.of("error.contract.document.fileNotFound");
@@ -294,16 +314,16 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
         return filePath.getFileName().toString();
     }
 
-    private void recordSelfGeneratedMetadata(Path pdfPath, Long documentId) {
+    private void recordSelfGeneratedMetadata(Path pdfPath, Long documentId, String tenantId) {
         com.ses.mapper.FileSecurityMetadataMapper mapper = metadataMapperProvider.getIfAvailable();
         if (mapper == null) {
             return;
         }
         String storedName = relativeStoredName(pdfPath);
-        FileSecurityMetadata metadata = mapper.selectByStoredName("default", storedName);
+        FileSecurityMetadata metadata = mapper.selectByStoredName(tenantId, storedName);
         if (metadata == null) {
             metadata = new FileSecurityMetadata();
-            metadata.setTenantId("default");
+            metadata.setTenantId(tenantId);
             metadata.setStoredName(storedName);
             metadata.setFileKind("CONTRACT_DOCUMENT");
             metadata.setStorageState("PUBLISHED");
@@ -319,7 +339,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
         }
     }
 
-    private void registerToDocumentLedger(ContractDocument doc, Contract contract) {
+    private void registerToDocumentLedger(ContractDocument doc, Contract contract, String tenantId) {
         com.ses.service.DocumentService docService = documentServiceProvider.getIfAvailable();
         if (docService == null || doc.getPdfPath() == null) {
             return;
@@ -330,6 +350,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
                 return;
             }
             com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
+                    .tenantId(tenantId)
                     .documentType("CONTRACT")
                     .title("契約書 PDF: " + Objects.toString(contract.getContractNo(), "ID:" + contract.getId()))
                     .documentNo(contract.getContractNo())

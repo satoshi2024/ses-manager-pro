@@ -23,6 +23,9 @@ import java.time.LocalDate;
 @TableName("t_contract")
 public class Contract extends BaseEntity {
 
+    /** SLA通知等の契約母集団を顧客tenantと一致させるownership。NULLのlegacy行は不可視とする。 */
+    private String tenantId;
+
     /** 法人境界。要員・案件・顧客とのjoinでも同一値を要求する。 */
     private Long legalEntityId;
 

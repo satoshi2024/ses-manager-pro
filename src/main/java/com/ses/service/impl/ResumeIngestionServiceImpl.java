@@ -1,31 +1,36 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ses.common.exception.BusinessException;
-import com.ses.config.AiConfig;
 import com.ses.common.enums.FileKind;
+import com.ses.common.exception.BusinessException;
+import com.ses.common.util.SecurityUtils;
+import com.ses.config.AiConfig;
+import com.ses.dto.document.DocumentRegisterRequest;
 import com.ses.dto.file.StoredFile;
 import com.ses.dto.resume.ParsedResumeDto;
 import com.ses.dto.resume.ReviewedResumeDto;
+import com.ses.dto.skill.SkillReplaceRequest;
+import com.ses.entity.Candidate;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerCareer;
 import com.ses.entity.EngineerSkill;
 import com.ses.entity.ResumeIngestion;
 import com.ses.mapper.ResumeIngestionMapper;
 import com.ses.service.CandidateService;
+import com.ses.service.DocumentService;
+import com.ses.service.DocumentTextExtractor;
 import com.ses.service.EngineerCareerService;
 import com.ses.service.EngineerService;
 import com.ses.service.EngineerSkillService;
 import com.ses.service.FileStorageService;
 import com.ses.service.ResumeIngestionService;
-import com.ses.service.DocumentTextExtractor;
 import com.ses.service.SkillTagResolver;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.ai.ResumeParseService;
+import com.ses.service.security.CandidateOwnershipResolver;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.ObjectProvider;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,23 +39,19 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * スキルシート取込サービス実装。
- * アップロード -> ジョブ作成 -> 非同期解析 -> レビュー -> 確定のフローを管理する。
- */
+/** スキルシート取込。tenant境界と状態CASを全て専用mapperへ集約する。 */
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class ResumeIngestionServiceImpl
-        extends ServiceImpl<ResumeIngestionMapper, ResumeIngestion>
+public class ResumeIngestionServiceImpl extends com.baomidou.mybatisplus.extension.service.impl.ServiceImpl<ResumeIngestionMapper, ResumeIngestion>
         implements ResumeIngestionService {
 
-    private static final String STATUS_PENDING  = "\u53d6\u8fbc\u5f85\u3061";
-    private static final String STATUS_PARSING  = "\u62bd\u51fa\u4e2d";
-    private static final String STATUS_REVIEW   = "\u8981\u78ba\u8a8d";
-    private static final String STATUS_DONE     = "\u78ba\u5b9a\u6e08";
-    private static final String STATUS_REJECTED = "\u5374\u4e0b";
-    private static final String STATUS_FAILED   = "\u5931\u6557";
+    private static final String STATUS_PENDING = "取込待ち";
+    private static final String STATUS_PARSING = "抽出中";
+    private static final String STATUS_REVIEW = "要確認";
+    private static final String STATUS_DONE = "確定済";
+    private static final String STATUS_REJECTED = "却下";
+    private static final String STATUS_FAILED = "失敗";
 
     private final FileStorageService fileStorageService;
     private final DocumentTextExtractor documentTextExtractor;
@@ -63,6 +64,19 @@ public class ResumeIngestionServiceImpl
     private final AiConfig aiConfig;
     private final ObjectMapper objectMapper;
     private final ObjectProvider<ResumeIngestionService> selfProvider;
+    private final ObjectProvider<DocumentService> documentServiceProvider;
+    private final CandidateOwnershipResolver candidateOwnershipResolver;
+
+    @Override
+    public com.baomidou.mybatisplus.extension.plugins.pagination.Page<ResumeIngestion> pageForCurrentTenant(
+            com.baomidou.mybatisplus.extension.plugins.pagination.Page<ResumeIngestion> page, String status) {
+        return baseMapper.selectPageForTenant(page, requireTenant(), status);
+    }
+
+    @Override
+    public ResumeIngestion getForCurrentTenant(Long id) {
+        return baseMapper.selectByIdForTenant(id, requireTenant());
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.service.security.LegalEntityContextService legalEntityContextService;
@@ -100,86 +114,122 @@ public class ResumeIngestionServiceImpl
     @Override
     public ResumeIngestion createJob(MultipartFile file, Long candidateId) {
         requireLegalEntityContext();
-        // ファイル保存
+        String tenantId = requireTenant();
+        if (candidateId != null && (candidateOwnershipResolver == null
+                || candidateOwnershipResolver.select(tenantId, candidateId) == null)) {
+            throw BusinessException.of(404, "error.candidate.notFound");
+        }
         StoredFile stored = fileStorageService.store(file, FileKind.SKILL_SHEET);
-
-        // ジョブ作成
         ResumeIngestion job = new ResumeIngestion();
+        job.setTenantId(tenantId);
         job.setOriginalFileName(stored.getOriginalName());
         job.setStoredFileName(stored.getStoredName());
-        String ext = stored.getStoredName().contains(".")
-                ? stored.getStoredName().substring(stored.getStoredName().lastIndexOf('.') + 1)
-                : "";
-        job.setFileExt(ext);
+        job.setFileExt(extensionOf(stored.getStoredName()));
         job.setStatus(STATUS_PENDING);
         job.setCandidateId(candidateId);
         job.setLegalEntityId(legalEntityContextService.requireCurrentLegalEntityId());
-        this.save(job);
+        job.setVersion(0);
+        if (!this.save(job)) {
+            deleteStoredFileQuietly(stored);
+            throw BusinessException.of("error.resume.saveFailed");
+        }
+
+        DocumentService documentService = documentServiceProvider == null
+                ? null : documentServiceProvider.getIfAvailable();
+        if (documentService == null) {
+            baseMapper.deleteNewJobForTenant(job.getId(), tenantId, versionOf(job));
+            deleteStoredFileQuietly(stored);
+            throw BusinessException.of(503, "error.document.unavailable");
+        }
+        try (java.io.InputStream original = fileStorageService.load(stored.getStoredName()).getInputStream()) {
+            documentService.registerReceived(DocumentRegisterRequest.builder()
+                    .tenantId(tenantId)
+                    .documentType("RESUME_INGESTION")
+                    .title(stored.getOriginalName())
+                    .sourceType("RECEIVED")
+                    .businessKey("RESUME_INGESTION:" + job.getId())
+                    .versionDiscriminator("original")
+                    .originalName(stored.getOriginalName())
+                    .contentType(file.getContentType())
+                    .targetType("RESUME_INGESTION")
+                    .targetId(job.getId())
+                    .createdBy(SecurityUtils.currentUserId())
+                    .build(), original);
+        } catch (Exception e) {
+            baseMapper.deleteNewJobForTenant(job.getId(), tenantId, versionOf(job));
+            deleteStoredFileQuietly(stored);
+            throw e instanceof RuntimeException runtime ? runtime
+                    : new IllegalStateException("原本の文書台帳登録に失敗しました", e);
+        }
 
         log.info("スキルシート取込ジョブを作成しました: jobId={}, fileName={}", job.getId(), stored.getOriginalName());
-
-        // 非同期解析を起動
-        selfProvider.getIfAvailable().parseAsync(job.getId());
+        ResumeIngestionService self = selfProvider == null ? null : selfProvider.getIfAvailable();
+        if (self != null) {
+            self.parseAsync(job.getId(), tenantId);
+        }
         return job;
     }
 
     @Override
     @Async("taskExecutor")
     public void parseAsync(Long id) {
-        // 状態を "抽出中" に CAS 更新
-        boolean casOk = casStatus(id, STATUS_PENDING, STATUS_PARSING);
-        // 再解析時は "要確認"/"失敗" -> "抽出中" も許容
-        if (!casOk) {
-            casOk = casStatus(id, STATUS_REVIEW, STATUS_PARSING);
-            if (!casOk) {
-                casOk = casStatus(id, STATUS_FAILED, STATUS_PARSING);
-            }
-        }
-        if (!casOk) {
-            log.warn("状態遷移ができませんでした: id={}", id);
-            return;
-        }
+        parseAsyncInTenant(id, requireTenant());
+    }
 
-        ResumeIngestion job = this.getById(id);
+    @Override
+    @Async("taskExecutor")
+    public void parseAsync(Long id, String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        AccountingTenantContextHolder.runWithTenant(tenantId, () -> parseAsyncInTenant(id, tenantId));
+    }
+
+    private void parseAsyncInTenant(Long id, String tenantId) {
+        ResumeIngestion job = baseMapper.selectByIdForTenant(id, tenantId);
         if (job == null) {
             log.error("ジョブが見つかりません: id={}", id);
             return;
         }
-        // 非同期workerでも、CAS後に法人が解決不能/変更済みなら処理を続行しない。
+        Integer expected = versionOf(job);
+        boolean casOk = casStatus(id, tenantId, STATUS_PENDING, STATUS_PARSING, expected);
+        if (!casOk) {
+            job = baseMapper.selectByIdForTenant(id, tenantId);
+            casOk = job != null && casStatus(id, tenantId, STATUS_REVIEW, STATUS_PARSING, versionOf(job));
+        }
+        if (!casOk) {
+            job = baseMapper.selectByIdForTenant(id, tenantId);
+            casOk = job != null && casStatus(id, tenantId, STATUS_FAILED, STATUS_PARSING, versionOf(job));
+        }
+        if (!casOk) {
+            log.warn("状態を抽出中へ遷移できませんでした: id={}", id);
+            return;
+        }
+        job = baseMapper.selectByIdForTenant(id, tenantId);
+        if (job == null) return;
         assertJobLegalEntity(job);
 
         try {
-            // 1. テキスト抽出
             String text = documentTextExtractor.extract(job.getStoredFileName(), job.getFileExt());
             if (text == null || text.isBlank()) {
-                log.warn("テキストの抽出結果が空でした: jobId={}", id);
-                updateFailed(id, "テキスト抽出に失敗しました。画像 PDF または空ファイルの可能性があります。");
+                updateFailed(id, tenantId, "テキスト抽出に失敗しました。画像 PDF または空ファイルの可能性があります。");
                 return;
             }
-            job.setExtractedText(text);
-
-            // 2. AI解析
             ParsedResumeDto parsed = resumeParseService.parse(text);
             String parsedJson = objectMapper.writeValueAsString(parsed);
-
-            // 3. 状態を "要確認" に更新
-            LambdaUpdateWrapper<ResumeIngestion> wrapper = new LambdaUpdateWrapper<>();
-            wrapper.eq(ResumeIngestion::getId, id)
-                   .eq(ResumeIngestion::getStatus, STATUS_PARSING)
-                   .set(ResumeIngestion::getStatus, STATUS_REVIEW)
-                   .set(ResumeIngestion::getExtractedText, text)
-                   .set(ResumeIngestion::getParsedJson, parsedJson)
-                   .set(ResumeIngestion::getAiProvider, aiConfig.getProvider())
-                   .set(ResumeIngestion::getAiModel, aiConfig.getModel());
-            this.update(wrapper);
+            ResumeIngestion parsingJob = baseMapper.selectByIdForTenant(id, tenantId);
+            int updated = parsingJob == null ? 0 : baseMapper.saveParsedForTenant(id, tenantId, STATUS_REVIEW,
+                    text, parsedJson, aiConfig.getProvider(), aiConfig.getModel(), versionOf(parsingJob));
+            if (updated != 1) {
+                throw BusinessException.of(409, "error.common.optimisticLock");
+            }
             log.info("スキルシート解析完了: jobId={}", id);
-
         } catch (BusinessException e) {
             log.error("スキルシート解析失敗: jobId={}, msg={}", id, e.getMessage());
-            updateFailed(id, e.getMessage());
+            updateFailed(id, tenantId, e.getMessage());
         } catch (Exception e) {
             log.error("スキルシート解析失敗（予期しないエラー）: jobId={}", id, e);
-            updateFailed(id, "内部エラーが発生しました。");
+            updateFailed(id, tenantId, "内部エラーが発生しました。");
         }
     }
 
@@ -187,11 +237,13 @@ public class ResumeIngestionServiceImpl
     public void reparse(Long id) {
         ResumeIngestion job = getJobOrThrow(id);
         assertJobLegalEntity(job);
-        String status = job.getStatus();
-        if (!STATUS_REVIEW.equals(status) && !STATUS_FAILED.equals(status)) {
+        if (!STATUS_REVIEW.equals(job.getStatus()) && !STATUS_FAILED.equals(job.getStatus())) {
             throw BusinessException.of("error.resume.invalidStatus");
         }
-        selfProvider.getIfAvailable().parseAsync(id);
+        ResumeIngestionService self = selfProvider == null ? null : selfProvider.getIfAvailable();
+        if (self != null) {
+            self.parseAsync(id, requireTenant());
+        }
     }
 
     @Override
@@ -203,11 +255,11 @@ public class ResumeIngestionServiceImpl
         }
         try {
             String parsedJson = objectMapper.writeValueAsString(dto);
-            LambdaUpdateWrapper<ResumeIngestion> wrapper = new LambdaUpdateWrapper<>();
-            wrapper.eq(ResumeIngestion::getId, id)
-                   .set(ResumeIngestion::getParsedJson, parsedJson)
-                   .set(ResumeIngestion::getReviewNote, dto.getReviewNote());
-            this.update(wrapper);
+            if (baseMapper.saveReviewForTenant(id, requireTenant(), parsedJson, dto.getReviewNote(), versionOf(job)) != 1) {
+                throw BusinessException.of(409, "error.common.optimisticLock");
+            }
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("レビュー保存に失敗しました: jobId={}", id, e);
             throw BusinessException.of("error.systemError");
@@ -217,7 +269,7 @@ public class ResumeIngestionServiceImpl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long confirm(Long id, ReviewedResumeDto dto) {
-        // 1. ジョブ確認 + 二重確定ガード
+        String tenantId = requireTenant();
         ResumeIngestion job = getJobOrThrow(id);
         assertJobLegalEntity(job);
         if (job.getConvertedEngineerId() != null) {
@@ -226,14 +278,18 @@ public class ResumeIngestionServiceImpl
         if (!STATUS_REVIEW.equals(job.getStatus())) {
             throw BusinessException.of("error.resume.invalidStatus");
         }
+        if (job.getCandidateId() != null && (candidateOwnershipResolver == null
+                || candidateOwnershipResolver.select(tenantId, job.getCandidateId()) == null)) {
+            throw BusinessException.of(404, "error.candidate.notFound");
+        }
 
         ReviewedResumeDto.EngineerPart ep = dto.getEngineer();
         if (ep == null || ep.getFullName() == null || ep.getFullName().isBlank()) {
             throw BusinessException.of("error.engineer.nameRequired");
         }
-
-        // 2. 要員生成
         Engineer engineer = new Engineer();
+        engineer.setTenantId(tenantId);
+        engineer.setVersion(0);
         engineer.setFullName(ep.getFullName());
         engineer.setFullNameKana(ep.getFullNameKana());
         engineer.setInitialName(ep.getInitialName());
@@ -254,36 +310,33 @@ public class ResumeIngestionServiceImpl
         com.ses.common.util.EntityProtectUtil.protectForCreate(engineer);
         engineerService.save(engineer);
         Long engineerId = engineer.getId();
-        log.info("スキルシート取込から要員を作成しました: engineerId={}, jobId={}", engineerId, id);
 
-        // 3. スキル登録（スキル名 -> skill_id 解決）
         if (dto.getSkills() != null && !dto.getSkills().isEmpty()) {
-            List<EngineerSkill> skillEntities = new ArrayList<>();
+            List<SkillReplaceRequest.SkillItem> items = new ArrayList<>();
             for (ReviewedResumeDto.SkillPart sp : dto.getSkills()) {
-                if (sp.getName() == null || sp.getName().isBlank()) continue;
-                try {
-                    Long skillId = skillTagResolver.resolveOrCreate(sp.getName());
-                    EngineerSkill es = new EngineerSkill();
-                    es.setEngineerId(engineerId);
-                    es.setSkillId(skillId);
-                    es.setProficiency(sp.getProficiency());
-                    es.setExperienceYears(sp.getExperienceYears());
-                    skillEntities.add(es);
-                } catch (Exception e) {
-                    log.warn("スキル登録をスキップしました: skillName={}, reason={}", sp.getName(), e.getMessage());
+                if (sp.getName() == null || sp.getName().isBlank()) {
+                    continue;
                 }
+                Long skillId = skillTagResolver.resolveOrCreate(sp.getName());
+                SkillReplaceRequest.SkillItem item = new SkillReplaceRequest.SkillItem();
+                item.setSkillId(skillId);
+                item.setProficiency(sp.getProficiency());
+                item.setExperienceYears(sp.getExperienceYears());
+                items.add(item);
             }
-            if (!skillEntities.isEmpty()) {
-                engineerSkillService.replaceSkills(engineerId, skillEntities);
+            if (!items.isEmpty()) {
+                SkillReplaceRequest skillRequest = new SkillReplaceRequest();
+                skillRequest.setExpectedVersion(0);
+                skillRequest.setReason("スキルシート取込確定");
+                skillRequest.setSkills(items);
+                engineerSkillService.replaceSkills(engineerId, skillRequest);
             }
         }
 
-        // 4. 経歴登録
         if (dto.getCareers() != null) {
             for (ReviewedResumeDto.CareerPart cp : dto.getCareers()) {
                 if (cp.getPeriodTo() != null && cp.getPeriodFrom() != null
                         && cp.getPeriodTo().isBefore(cp.getPeriodFrom())) {
-                    log.warn("経歴の期間が不正なためスキップします: from={}, to={}", cp.getPeriodFrom(), cp.getPeriodTo());
                     continue;
                 }
                 EngineerCareer career = new EngineerCareer();
@@ -300,28 +353,17 @@ public class ResumeIngestionServiceImpl
             }
         }
 
-        // 5. ジョブ状態を "確定済" に CAS 更新
-        int updated = baseMapper.update(null, new LambdaUpdateWrapper<ResumeIngestion>()
-                .eq(ResumeIngestion::getId, id)
-                .eq(ResumeIngestion::getStatus, STATUS_REVIEW)
-                .isNull(ResumeIngestion::getConvertedEngineerId)
-                .set(ResumeIngestion::getStatus, STATUS_DONE)
-                .set(ResumeIngestion::getConvertedEngineerId, engineerId)
-                .set(ResumeIngestion::getReviewNote, dto.getReviewNote()));
-        if (updated == 0) {
+        if (baseMapper.confirmForTenant(id, tenantId, engineerId, dto.getReviewNote(), versionOf(job)) != 1) {
             throw BusinessException.of(409, "error.resume.alreadyConfirmed");
         }
-
-        // 6. 候補者連携（candidate_id がある場合）
         if (job.getCandidateId() != null) {
-            try {
-                candidateService.linkConvertedEngineer(job.getCandidateId(), engineerId);
-            } catch (Exception e) {
-                log.warn("候補者連携に失敗しました（要員作成は成功した）: candidateId={}, reason={}",
-                         job.getCandidateId(), e.getMessage());
+            // candidate link failure is part of the same transaction; never report a partial confirmation.
+            Candidate candidate = candidateService.getForCurrentTenant(job.getCandidateId());
+            if (candidate == null || candidate.getVersion() == null) {
+                throw BusinessException.of(404, "error.candidate.notFound");
             }
+            candidateService.linkConvertedEngineer(job.getCandidateId(), engineerId, candidate.getVersion());
         }
-
         return engineerId;
     }
 
@@ -329,21 +371,14 @@ public class ResumeIngestionServiceImpl
     public void reject(Long id, String reason) {
         ResumeIngestion job = getJobOrThrow(id);
         assertJobLegalEntity(job);
-        int updated = baseMapper.update(null, new LambdaUpdateWrapper<ResumeIngestion>()
-                .eq(ResumeIngestion::getId, id)
-                .in(ResumeIngestion::getStatus, STATUS_PENDING, STATUS_PARSING, STATUS_REVIEW, STATUS_FAILED)
-                .set(ResumeIngestion::getStatus, STATUS_REJECTED)
-                .set(ResumeIngestion::getErrorMessage, reason));
-        if (updated == 0) {
+        if (baseMapper.rejectForTenant(id, requireTenant(), reason, versionOf(job)) != 1) {
             throw BusinessException.of(409, "error.resume.invalidStatus");
         }
         log.info("スキルシート取込を却下しました: id={}", id);
     }
 
-    // --- プライベートメソッド ---
-
     private ResumeIngestion getJobOrThrow(Long id) {
-        ResumeIngestion job = this.getById(id);
+        ResumeIngestion job = baseMapper.selectByIdForTenant(id, requireTenant());
         if (job == null) {
             throw BusinessException.of(404, "error.resume.notFound");
         }
@@ -364,23 +399,42 @@ public class ResumeIngestionServiceImpl
         legalEntityContextService.assertCurrent(job.getLegalEntityId());
     }
 
-    /**
-     * CAS（比較和更新）で状態を変更する。
-     * 0件更新の場合は false を返す。
-     */
-    private boolean casStatus(Long id, String fromStatus, String toStatus) {
-        int count = baseMapper.update(null, new LambdaUpdateWrapper<ResumeIngestion>()
-                .eq(ResumeIngestion::getId, id)
-                .eq(ResumeIngestion::getStatus, fromStatus)
-                .set(ResumeIngestion::getStatus, toStatus));
-        return count > 0;
+    private boolean casStatus(Long id, String tenantId, String fromStatus, String toStatus, Integer expectedVersion) {
+        return baseMapper.casStatusForTenant(id, tenantId, fromStatus, toStatus, expectedVersion) == 1;
     }
 
-    private void updateFailed(Long id, String message) {
-        baseMapper.update(null, new LambdaUpdateWrapper<ResumeIngestion>()
-                .eq(ResumeIngestion::getId, id)
-                .set(ResumeIngestion::getStatus, STATUS_FAILED)
-                .set(ResumeIngestion::getErrorMessage, message != null && message.length() > 500
-                        ? message.substring(0, 500) : message));
+    private void updateFailed(Long id, String tenantId, String message) {
+        ResumeIngestion job = baseMapper.selectByIdForTenant(id, tenantId);
+        if (job != null) {
+            baseMapper.updateFailedForTenant(id, tenantId,
+                    message != null && message.length() > 500 ? message.substring(0, 500) : message,
+                    versionOf(job));
+        }
+    }
+
+    private String requireTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
+    }
+
+    private int versionOf(ResumeIngestion job) {
+        return job.getVersion() == null ? 0 : job.getVersion();
+    }
+
+    private String extensionOf(String storedName) {
+        int dot = storedName == null ? -1 : storedName.lastIndexOf('.');
+        return dot < 0 ? "" : storedName.substring(dot + 1);
+    }
+
+    /** 文書台帳登録に失敗した場合も保存実体を孤児化させない。元の例外を優先して返す。 */
+    private void deleteStoredFileQuietly(StoredFile stored) {
+        if (stored == null || stored.getStoredName() == null) {
+            return;
+        }
+        try {
+            fileStorageService.delete(stored.getStoredName());
+        } catch (RuntimeException cleanupFailure) {
+            log.error("スキルシート保存実体の補償削除に失敗しました: fileName={}",
+                    stored.getStoredName(), cleanupFailure);
+        }
     }
 }

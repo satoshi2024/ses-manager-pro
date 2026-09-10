@@ -16,6 +16,7 @@ import com.ses.mapper.TrainingEnrollmentExpenseMapper;
 import com.ses.mapper.TrainingEnrollmentMapper;
 import com.ses.service.MonthlyClosingService;
 import com.ses.service.approval.ApprovalEngineService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.expense.ExpenseRequestService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,6 +61,7 @@ class TrainingPlanServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         service = new TrainingPlanServiceImpl(planMapper, courseMapper, enrollmentMapper,
                 enrollmentExpenseMapper, eventMapper, expenseRequestService, approvalEngineService,
                 monthlyClosingService, clock);
@@ -67,10 +69,15 @@ class TrainingPlanServiceTest {
         ReflectionTestUtils.setField(service, "approvalActionMapper", approvalActionMapper);
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
+
     @Test
     void test0円はexpenseを作らず人の理由付き確認だけでapprovedになる() {
         LearningPlan plan = draft(1L, BigDecimal.ZERO);
-        when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
+        when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
         when(planMapper.update(any(), any())).thenReturn(1);
 
         LearningPlan result = service.submit(1L, 0, 7L, "社内講座のため無償");
@@ -83,7 +90,7 @@ class TrainingPlanServiceTest {
     @Test
     void 正の金額はExpenseRequestへ同じ税込JPYのsnapshotを渡しapprovalへ進む() {
         LearningPlan plan = draft(1L, new BigDecimal("100000"));
-        when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
+        when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
         when(planMapper.update(any(), any())).thenReturn(1);
         when(expenseRequestService.createDraft(org.mockito.ArgumentMatchers.eq(20L), any()))
                 .thenReturn(expenseDto(50L, null, "下書き", new BigDecimal("100000")));
@@ -107,7 +114,7 @@ class TrainingPlanServiceTest {
         assertThrows(BusinessException.class, () -> service.createDraft(nullAmount, 7L));
 
         LearningPlan zero = draft(1L, BigDecimal.ZERO);
-        when(planMapper.selectByIdForUpdate(1L)).thenReturn(zero);
+        when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(zero);
         assertThrows(BusinessException.class, () -> service.submit(1L, 0, 7L, null));
     }
 
@@ -129,7 +136,7 @@ class TrainingPlanServiceTest {
         plan.setApprovalRequestId(70L);
         plan.setCreatedByUserId(7L);
         plan.setVersion(1);
-        when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
+        when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
         assertThrows(BusinessException.class, () -> service.approve(1L, 1, 7L, "自己承認"));
         verify(approvalEngineService, never()).approve(anyLong(), anyLong(), anyString());
 
@@ -143,7 +150,7 @@ class TrainingPlanServiceTest {
     @Test
     void CAS失敗は状態を進めない() {
         LearningPlan plan = draft(1L, BigDecimal.ZERO);
-        when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
+        when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
         when(planMapper.update(any(), any())).thenReturn(0);
         assertThrows(BusinessException.class, () -> service.submit(1L, 0, 7L, "無償確認"));
     }
@@ -160,8 +167,8 @@ class TrainingPlanServiceTest {
         enrollment.setEngineerId(20L);
         enrollment.setStatus(TrainingPlanService.ENROLLMENT_STARTED);
         enrollment.setVersion(0);
-        when(enrollmentMapper.selectByIdForUpdate(90L)).thenReturn(enrollment);
-        when(planMapper.selectById(1L)).thenReturn(plan);
+        when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(enrollment);
+        when(planMapper.selectOne(any())).thenReturn(plan);
         when(expenseRequestService.getEntity(50L)).thenReturn(expense("申請中", new BigDecimal("100")));
         assertThrows(BusinessException.class, () -> service.completeEnrollment(90L, 0,
                 LocalDate.of(2026, 9, 1), null, 7L));
@@ -177,7 +184,9 @@ class TrainingPlanServiceTest {
         enrollment.setEngineerId(20L);
         enrollment.setVersion(0);
         when(enrollmentMapper.selectByIdForUpdate(90L)).thenReturn(enrollment);
+        when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(enrollment);
         when(planMapper.selectById(1L)).thenReturn(plan);
+        when(planMapper.selectOne(any())).thenReturn(plan);
         when(expenseRequestService.getEntity(50L)).thenReturn(expense("申請中", new BigDecimal("150")));
 
         assertThrows(BusinessException.class, () -> service.linkExpense(90L, 0, 50L, 7L, "実費差額"));
@@ -192,7 +201,9 @@ class TrainingPlanServiceTest {
             plan.setExpenseRequestId(50L);
             TrainingEnrollment enrollment = startedEnrollment(90L);
             when(enrollmentMapper.selectByIdForUpdate(90L)).thenReturn(enrollment);
+            when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(enrollment);
             when(planMapper.selectById(1L)).thenReturn(plan);
+            when(planMapper.selectOne(any())).thenReturn(plan);
             when(expenseRequestService.getEntity(50L)).thenReturn(expense(status, new BigDecimal("150")));
 
             assertThrows(BusinessException.class,
@@ -212,7 +223,9 @@ class TrainingPlanServiceTest {
         relation.setEnrollmentId(90L);
         relation.setExpenseRequestId(50L);
         when(enrollmentMapper.selectByIdForUpdate(90L)).thenReturn(enrollment);
+        when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(enrollment);
         when(planMapper.selectById(1L)).thenReturn(plan);
+        when(planMapper.selectOne(any())).thenReturn(plan);
         when(enrollmentExpenseMapper.selectList(any())).thenReturn(java.util.List.of(relation));
         when(expenseRequestService.getEntity(50L)).thenReturn(expense("承認済", new BigDecimal("150")));
 
@@ -231,9 +244,13 @@ class TrainingPlanServiceTest {
         ExpenseRequest expense = expense("承認済", new BigDecimal("150"));
         expense.setApprovalRequestId(71L);
         when(enrollmentMapper.selectByIdForUpdate(90L)).thenReturn(enrollment);
+        when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(enrollment);
         when(planMapper.selectById(1L)).thenReturn(plan);
+        when(planMapper.selectOne(any())).thenReturn(plan);
         when(expenseRequestService.getEntity(50L)).thenReturn(expense);
         when(approvalRequestMapper.selectById(71L)).thenReturn(approvedRequest(71L, "EXPENSE_REQUEST", 50L,
+                new BigDecimal("150"), 7L));
+        when(approvalRequestMapper.selectByIdAndTenant(71L, "default")).thenReturn(approvedRequest(71L, "EXPENSE_REQUEST", 50L,
                 new BigDecimal("150"), 7L));
         when(approvalActionMapper.selectList(any())).thenReturn(java.util.List.of(approvalAction(71L, 8L)));
         when(enrollmentExpenseMapper.selectCount(any())).thenReturn(0L);
@@ -247,8 +264,11 @@ class TrainingPlanServiceTest {
         LearningPlan plan = draft(1L, new BigDecimal("100"));
         plan.setStatus(TrainingPlanService.PLAN_APPROVED);
         when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
+        when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
         when(planMapper.update(any(), any())).thenReturn(1);
         when(approvalRequestMapper.selectById(72L)).thenReturn(approvedRequest(72L,
+                "LEARNING_PLAN_BUDGET_AMENDMENT", 1L, new BigDecimal("150"), 7L));
+        when(approvalRequestMapper.selectByIdAndTenant(72L, "default")).thenReturn(approvedRequest(72L,
                 "LEARNING_PLAN_BUDGET_AMENDMENT", 1L, new BigDecimal("150"), 7L));
         when(approvalActionMapper.selectList(any())).thenReturn(java.util.List.of(approvalAction(72L, 8L)));
 
@@ -263,7 +283,7 @@ class TrainingPlanServiceTest {
         for (BigDecimal amount : new BigDecimal[]{new BigDecimal("9999"), new BigDecimal("10000"),
                 new BigDecimal("10001")}) {
             LearningPlan plan = draft(1L, amount);
-            when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
+            when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
             when(planMapper.update(any(), any())).thenReturn(1);
             when(expenseRequestService.createDraft(org.mockito.ArgumentMatchers.eq(20L), any()))
                     .thenReturn(expenseDto(50L, null, "下書き", amount));

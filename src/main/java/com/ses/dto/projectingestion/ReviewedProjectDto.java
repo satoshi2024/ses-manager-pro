@@ -24,7 +24,7 @@ public class ReviewedProjectDto {
 
     @Data
     public static class ProjectPart {
-        /** 法人を推測しないため、レビュー担当が既存顧客を明示選択する。 */
+        /** 確定先顧客。認証tenant内で再解決し、存在確認する。法人は推測せずレビュー担当が明示選択する。 */
         private Long customerId;
         private String name;
         private BigDecimal minUnitPrice;

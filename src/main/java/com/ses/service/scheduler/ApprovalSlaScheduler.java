@@ -16,15 +16,17 @@ public class ApprovalSlaScheduler {
 
     private final ApprovalSlaService approvalSlaService;
     private final Clock clock;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(cron = "0 */5 * * * *")
     @SchedulerLock(name = "approvalSlaEscalation", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void runOverdueCheck() {
-        processOverdue(LocalDateTime.now(clock));
+        processOverdue(null);
     }
 
     /** schedulerと同じtransaction経路をテスト/Demoから明示時刻で起動する。 */
     public int processOverdue(LocalDateTime asOf) {
-        return approvalSlaService.escalateOverdue(asOf);
+        return tenantAwareBatchRunner.runAndSum(tenant -> approvalSlaService.escalateOverdue(
+                asOf == null ? LocalDateTime.now(clock) : asOf));
     }
 }

@@ -57,7 +57,8 @@ class PortalCustomerApiTest extends PortalTestSupport {
     }
 
     private long insertEngineer() {
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')",
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, tenant_id) "
+                        + "VALUES (?, '正社員', 'Bench', 'default')",
                 "portal-test-engineer-" + unique());
         return jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_engineer", Long.class);
     }
@@ -72,8 +73,8 @@ class PortalCustomerApiTest extends PortalTestSupport {
         long engineerId = insertEngineer();
         long projectId = insertProject(org);
         jdbcTemplate.update("INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, status,"
-                        + " start_date, end_date, selling_price, cost_price, acceptance_required)"
-                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, 1)",
+                        + " start_date, end_date, selling_price, cost_price, acceptance_required, tenant_id)"
+                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, 1, 'default')",
                 "PORTAL-CONTRACT-" + unique(), engineerId, projectId, org.getCustomerId());
         long contractId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_contract", Long.class);
         jdbcTemplate.update("INSERT INTO t_work_record (contract_id, work_month, actual_hours, billing_amount, payment_amount, status)"
@@ -195,7 +196,8 @@ class PortalCustomerApiTest extends PortalTestSupport {
 
         // 2) 別acceptanceで内部が先に検収 → portalは409
         CustomerData data2 = seedCustomerData(orgA, "2026-03");
-        acceptanceService.accept(data2.acceptanceId(), null);
+        com.ses.service.accounting.AccountingTenantContextHolder.runWithTenant("default",
+                () -> acceptanceService.accept(data2.acceptanceId(), null));
         mockMvc.perform(portalPost("/api/portal/customer/acceptances/" + data2.acceptanceId() + "/accept",
                         csrf, session).contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isConflict());
@@ -223,7 +225,8 @@ class PortalCustomerApiTest extends PortalTestSupport {
                 .andExpect(jsonPath("$.data.rejectComment").value("工数が誤っています"));
 
         // 内部が再提出（差戻し→提出済）
-        acceptanceService.resubmit(data.acceptanceId());
+        com.ses.service.accounting.AccountingTenantContextHolder.runWithTenant("default",
+                () -> acceptanceService.resubmit(data.acceptanceId()));
 
         // 顧客が再検収
         mockMvc.perform(portalPost("/api/portal/customer/acceptances/" + data.acceptanceId() + "/accept",

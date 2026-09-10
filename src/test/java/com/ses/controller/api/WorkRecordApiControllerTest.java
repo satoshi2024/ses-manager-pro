@@ -1,9 +1,11 @@
 package com.ses.controller.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.config.LoginUser;
 import com.ses.dto.workrecord.PendingApprovalItemDto;
 import com.ses.dto.workrecord.PendingApprovalSummaryDto;
 import com.ses.dto.workrecord.WorkRecordSaveRequest;
+import com.ses.entity.SysUser;
 import com.ses.service.WorkRecordService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,6 +13,10 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -48,6 +54,24 @@ public class WorkRecordApiControllerTest {
 
     @MockBean
     private com.ses.service.security.DataScopeService dataScopeService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void bindTenantToMockPrincipal() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getPrincipal() instanceof LoginUser) {
+            return;
+        }
+        SysUser user = new SysUser();
+        user.setUsername(authentication.getName());
+        user.setPassword("test");
+        user.setRole("管理者");
+        user.setStatus(1);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+    }
 
     @Test
     @WithMockUser(roles = "管理者")

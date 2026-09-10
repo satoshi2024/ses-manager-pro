@@ -15,8 +15,9 @@ import com.ses.service.CustomerService;
 import com.ses.service.ProjectService;
 import com.ses.service.ProposalService;
 import com.ses.service.SalesActivityService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.security.TenantOwnershipResolver;
 import lombok.RequiredArgsConstructor;
-import org.springframework.util.StringUtils;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
@@ -40,6 +41,9 @@ public class CustomerApiController {
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
     private final com.ses.service.security.AuthorizationService authorizationService;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
+    private final com.ses.mapper.ProjectMapper projectMapper;
+    private final com.ses.mapper.ContractMapper contractMapper;
 
     /** 法人はpayloadではなくsecurity/org contextからのみ注入する。境界依存が無い場合もfail-closedする。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -59,25 +63,10 @@ public class CustomerApiController {
         // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ
         Page<Customer> page = PageUtils.safePage(current, size);
         // データスコープ: 営業ロール制限時は担当顧客のみ。
-        java.util.Set<Long> allowed = effectiveCustomerIds();
-        if (allowed != null && allowed.isEmpty()) return ApiResult.success(new Page<>(current, size, 0));
-        LambdaQueryWrapper<Customer> queryWrapper = new LambdaQueryWrapper<>();
-        if (allowed != null) {
-            queryWrapper.in(Customer::getId, allowed);
-        }
-
-        if (StringUtils.hasText(companyName)) {
-            queryWrapper.like(Customer::getCompanyName, companyName);
-        }
-        if (StringUtils.hasText(commercialFlow)) {
-            queryWrapper.eq(Customer::getCommercialFlow, commercialFlow);
-        }
-        if (StringUtils.hasText(trustLevel)) {
-            queryWrapper.eq(Customer::getTrustLevel, trustLevel);
-        }
-
-        queryWrapper.orderByDesc(Customer::getId);
-        Page<Customer> result = customerService.page(page, queryWrapper);
+        String tenantId = currentTenant();
+        java.util.Set<Long> allowed = effectiveCustomerIds(tenantId);
+        Page<Customer> result = customerService.pageForTenant(page, tenantId, allowed,
+                companyName, commercialFlow, trustLevel);
         result.getRecords().forEach(this::maskLegacyContact);
         return ApiResult.success(result);
     }
@@ -87,15 +76,10 @@ public class CustomerApiController {
      */
     @GetMapping("/options")
     public ApiResult<List<com.ses.dto.common.OptionDto>> getOptions() {
-        LambdaQueryWrapper<Customer> queryWrapper = new LambdaQueryWrapper<>();
-        java.util.Set<Long> allowed = effectiveCustomerIds();
-        if (allowed != null) {
-            if (allowed.isEmpty()) return ApiResult.success(java.util.Collections.emptyList());
-            queryWrapper.in(Customer::getId, allowed);
-        }
-        queryWrapper.select(Customer::getId, Customer::getCompanyName)
-                    .orderByDesc(Customer::getId);
-        List<com.ses.dto.common.OptionDto> options = customerService.list(queryWrapper).stream()
+        String tenantId = currentTenant();
+        java.util.Set<Long> allowed = effectiveCustomerIds(tenantId);
+        List<com.ses.dto.common.OptionDto> options = tenantOwnershipResolver
+                .selectCustomers(tenantId, allowed, null).stream()
                 .map(c -> new com.ses.dto.common.OptionDto(c.getId(), c.getCompanyName()))
                 .collect(Collectors.toList());
         return ApiResult.success(options);
@@ -106,11 +90,12 @@ public class CustomerApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<Customer> getById(@PathVariable Long id) {
-        java.util.Set<Long> allowed = effectiveCustomerIds();
-        if (allowed != null && !allowed.contains(id)) {
+        String tenantId = currentTenant();
+        java.util.Set<Long> allowed = effectiveCustomerIds(tenantId);
+        if (!allowed.contains(id)) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
-        var entity = customerService.getById(id);
+        var entity = tenantOwnershipResolver.selectCustomer(tenantId, id);
         if (entity == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         maskLegacyContact(entity);
         return ApiResult.success(entity);
@@ -138,7 +123,8 @@ public class CustomerApiController {
         org.springframework.beans.BeanUtils.copyProperties(customerDto, customer);
         clearLegacyContactWrite(customer);
         customer.setId(id);
-        java.util.Set<Long> allowed = effectiveCustomerIds();
+        String tenantId = currentTenant();
+        java.util.Set<Long> allowed = effectiveCustomerIds(tenantId);
         if (allowed != null && !allowed.contains(id)) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
@@ -164,13 +150,14 @@ public class CustomerApiController {
      * 顧客削除
      */
     @DeleteMapping("/{id}")
-    public ApiResult<Boolean> delete(@PathVariable Long id) {
-        java.util.Set<Long> allowed = effectiveCustomerIds();
-        if (allowed != null && !allowed.contains(id)) {
+    public ApiResult<Boolean> delete(@PathVariable Long id, @RequestParam Integer version) {
+        String tenantId = currentTenant();
+        java.util.Set<Long> allowed = effectiveCustomerIds(tenantId);
+        if (!allowed.contains(id)) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
         dataScopeService.assertAllowedCustomer(id);
-        boolean success = customerService.removeById(id);
+        boolean success = customerService.removeById(id, version);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         return ApiResult.success(true);
     }
@@ -180,8 +167,9 @@ public class CustomerApiController {
      */
     @GetMapping("/{id}/summary")
     public ApiResult<CustomerSummaryDto> getSummary(@PathVariable Long id) {
-        java.util.Set<Long> allowed = effectiveCustomerIds();
-        if (allowed != null && !allowed.contains(id)) {
+        String tenantId = currentTenant();
+        java.util.Set<Long> allowed = effectiveCustomerIds(tenantId);
+        if (!allowed.contains(id)) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
         dataScopeService.assertAllowedCustomer(id);
@@ -189,14 +177,13 @@ public class CustomerApiController {
         CustomerSummaryDto dto = new CustomerSummaryDto();
 
         // 案件数
-        long projectCount = projectService.count(new LambdaQueryWrapper<Project>()
-                .eq(Project::getCustomerId, id));
+        // The validated customer is resolved again by the ownership SQL before aggregation.
+        List<Long> projectIds = projectMapper.selectIdsByCustomerAndTenant(id, tenantId);
+        long projectCount = projectIds.size();
         dto.setProjectCount(projectCount);
 
         // 稼動中契約数
-        long activeContractCount = contractService.count(new LambdaQueryWrapper<Contract>()
-                .eq(Contract::getCustomerId, id)
-                .eq(Contract::getStatus, "稼動中"));
+        long activeContractCount = contractMapper.countByCustomerAndTenant(id, tenantId, "稼動中");
         dto.setActiveContractCount(activeContractCount);
 
         // 要フォロー活動数
@@ -207,17 +194,11 @@ public class CustomerApiController {
         dto.setPendingFollowUpCount(pendingFollowUpCount);
 
         // 提案関連
-        List<Project> projects = projectService.list(new LambdaQueryWrapper<Project>()
-                .eq(Project::getCustomerId, id)
-                .select(Project::getId));
-
-        if (projects.isEmpty()) {
+        if (projectIds.isEmpty()) {
             dto.setProposalCount(0L);
             dto.setWonCount(0L);
             dto.setWinRate(null);
         } else {
-            List<Long> projectIds = projects.stream().map(Project::getId).collect(Collectors.toList());
-
             long proposalCount = proposalService.count(new LambdaQueryWrapper<Proposal>()
                     .in(Proposal::getProjectId, projectIds));
             dto.setProposalCount(proposalCount);
@@ -241,14 +222,24 @@ public class CustomerApiController {
         return ApiResult.success(dto);
     }
 
-    private java.util.Set<Long> effectiveCustomerIds() {
+    private java.util.Set<Long> effectiveCustomerIds(String tenantId) {
+        java.util.Set<Long> ownedIds = tenantOwnershipResolver.resolveCustomerIds(tenantId);
         java.util.Set<Long> dataIds = dataScopeService.isScoped()
                 ? dataScopeService.allowedCustomerIds() : null;
+        java.util.Set<Long> result = new java.util.HashSet<>(ownedIds);
         if (organizationScopeService.hasFullAccess()) {
-            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+            if (dataIds != null) result.retainAll(dataIds);
+            return result;
         }
-        return organizationScopeService.intersectWithDataScope(
+        java.util.Set<Long> scoped = organizationScopeService.intersectWithDataScope(
                 organizationScopeService.allowedCustomerIds(java.time.LocalDate.now()), dataIds);
+        if (scoped == null) return result;
+        result.retainAll(scoped);
+        return result;
+    }
+
+    private String currentTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 
     /** 旧contact_*列は移行後の互換表示専用。新規書込み経路へ流さない。 */

@@ -7,6 +7,7 @@ import com.ses.entity.ReportTemplateVersion;
 import com.ses.mapper.ReportScheduleMapper;
 import com.ses.mapper.ReportTemplateVersionMapper;
 import com.ses.service.report.impl.ReportScheduleServiceImpl;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.OrganizationScopeService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -31,17 +32,19 @@ class ReportScheduleServiceImplTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
     void managerScheduleStoresCreationScopeAndStartsDisabled() {
+        AccountingTenantContextHolder.setTenantId("default");
         ReportScheduleMapper scheduleMapper = mock(ReportScheduleMapper.class);
         ReportTemplateVersionMapper versionMapper = mock(ReportTemplateVersionMapper.class);
         OrganizationScopeService scopeService = mock(OrganizationScopeService.class);
         ReportScheduleServiceImpl service = new ReportScheduleServiceImpl(scheduleMapper, versionMapper,
                 scopeService, new ObjectMapper());
         authenticate(7L, "マネージャー");
-        when(versionMapper.selectById(3L)).thenReturn(publishedVersion());
+        when(versionMapper.selectOne(any())).thenReturn(publishedVersion());
         when(scopeService.allowedOrganizationIds(any())).thenReturn(Set.of(10L));
         when(scopeService.allowedDirectUserIds(any())).thenReturn(Set.of(20L));
         when(scopeService.allowedEngineerIds(any())).thenReturn(Set.of(30L));
@@ -70,6 +73,7 @@ class ReportScheduleServiceImplTest {
 
     @Test
     void invalidCronIsRejectedBeforePersistingSchedule() {
+        AccountingTenantContextHolder.setTenantId("default");
         ReportScheduleMapper scheduleMapper = mock(ReportScheduleMapper.class);
         ReportTemplateVersionMapper versionMapper = mock(ReportTemplateVersionMapper.class);
         OrganizationScopeService scopeService = mock(OrganizationScopeService.class);
@@ -86,13 +90,14 @@ class ReportScheduleServiceImplTest {
 
     @Test
     void missingNextRunUsesNextCronOccurrenceInTokyo() {
+        AccountingTenantContextHolder.setTenantId("default");
         ReportScheduleMapper scheduleMapper = mock(ReportScheduleMapper.class);
         ReportTemplateVersionMapper versionMapper = mock(ReportTemplateVersionMapper.class);
         OrganizationScopeService scopeService = mock(OrganizationScopeService.class);
         ReportScheduleServiceImpl service = new ReportScheduleServiceImpl(scheduleMapper, versionMapper,
                 scopeService, new ObjectMapper());
         authenticate(1L, "管理者");
-        when(versionMapper.selectById(3L)).thenReturn(publishedVersion());
+        when(versionMapper.selectOne(any())).thenReturn(publishedVersion());
         doAnswer(invocation -> 1).when(scheduleMapper).insert(any(ReportSchedule.class));
 
         ReportScheduleCreateRequest request = new ReportScheduleCreateRequest();

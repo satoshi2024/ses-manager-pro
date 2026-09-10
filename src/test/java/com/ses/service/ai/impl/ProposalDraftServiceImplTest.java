@@ -14,6 +14,7 @@ import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.TenantOwnershipResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -60,6 +62,16 @@ class ProposalDraftServiceImplTest {
     private ObjectMapper objectMapper = new ObjectMapper();
     @InjectMocks
     private ProposalDraftServiceImpl proposalDraftService;
+
+    @BeforeEach
+    void setTenantContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
 
     private Engineer mockEngineer;
     private Project mockProject;

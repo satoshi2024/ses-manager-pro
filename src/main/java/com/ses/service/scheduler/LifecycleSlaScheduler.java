@@ -18,6 +18,7 @@ import java.time.LocalDate;
 public class LifecycleSlaScheduler {
 
     private final LifecycleSlaService slaService;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(cron = "0 0 8 * * *") // 毎朝8時実行
     @SchedulerLock(name = "lifecycleSlaCheck", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
@@ -29,6 +30,6 @@ public class LifecycleSlaScheduler {
      * テストおよび手動実行用エントリーポイント
      */
     public int processSlaCheck(LocalDate asOf) {
-        return slaService.processSlaCheck(asOf);
+        return tenantAwareBatchRunner.runAndSum(tenant -> slaService.processSlaCheck(asOf));
     }
 }

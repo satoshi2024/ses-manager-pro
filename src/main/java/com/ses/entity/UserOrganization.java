@@ -20,6 +20,8 @@ import java.time.LocalDate;
 @TableName("t_user_organization")
 public class UserOrganization extends BaseEntity {
 
+    private String tenantId;
+
     private Long userId;
     private Long organizationId;
     private String positionName;

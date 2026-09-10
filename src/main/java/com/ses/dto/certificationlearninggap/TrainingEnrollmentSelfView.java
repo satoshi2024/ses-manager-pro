@@ -13,6 +13,5 @@ public record TrainingEnrollmentSelfView(
         LocalDate startedOn,
         LocalDate completedOn,
         BigDecimal score,
-        BigDecimal plannedCostSnapshot,
         Integer version) {
 }

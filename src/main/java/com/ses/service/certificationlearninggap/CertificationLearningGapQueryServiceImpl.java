@@ -33,6 +33,7 @@ import com.ses.service.certification.CertificationLifecycleStateResolver;
 import com.ses.service.security.AuthorizationService;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
+import com.ses.service.security.TenantOwnershipResolver;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -57,12 +58,16 @@ import java.util.stream.Collectors;
 @Service
 public class CertificationLearningGapQueryServiceImpl implements CertificationLearningGapQueryService {
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CertificationEvidenceRestrictedResolver restrictedEvidenceResolver;
+
     private static final String PII_ACTION = "certification.pii.view";
     private static final String DEFAULT_LIFECYCLE = "ACTIVE";
     private static final String RESIGNED = "RESIGNED";
     private static final String ON_LEAVE = "ON_LEAVE";
 
     private final EngineerService engineerService;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
     private final DataScopeService dataScopeService;
     private final OrganizationScopeService organizationScopeService;
     private final AuthorizationService authorizationService;
@@ -79,8 +84,9 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
     private final CertificationLifecycleStateResolver lifecycleStateResolver;
     private final java.time.Clock clock;
 
-    /** 既存の直接生成互換。新しいSpring経路ではClockを注入する。 */
-    public CertificationLearningGapQueryServiceImpl(EngineerService engineerService, DataScopeService dataScopeService,
+    public CertificationLearningGapQueryServiceImpl(EngineerService engineerService,
+                                                    TenantOwnershipResolver tenantOwnershipResolver,
+                                                    DataScopeService dataScopeService,
                                                     OrganizationScopeService organizationScopeService,
                                                     AuthorizationService authorizationService,
                                                     EngineerCertificationMapper certificationRecordMapper,
@@ -89,14 +95,16 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
                                                     LifecycleCaseMapper lifecycleCaseMapper, SkillGapService skillGapService,
                                                     CertificationNumberCryptoService numberCryptoService,
                                                     DocumentLinkMapper documentLinkMapper, DocumentVersionMapper documentVersionMapper) {
-        this(engineerService, dataScopeService, organizationScopeService, authorizationService, certificationRecordMapper,
+        this(engineerService, tenantOwnershipResolver, dataScopeService, organizationScopeService, authorizationService, certificationRecordMapper,
                 certificationMapper, learningPlanMapper, enrollmentMapper, courseMapper, lifecycleCaseMapper, skillGapService,
                 numberCryptoService, documentLinkMapper, documentVersionMapper, new CertificationLifecycleStateResolver(),
                 java.time.Clock.system(java.time.ZoneId.of("Asia/Tokyo")));
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public CertificationLearningGapQueryServiceImpl(EngineerService engineerService, DataScopeService dataScopeService,
+    public CertificationLearningGapQueryServiceImpl(EngineerService engineerService,
+                                                    TenantOwnershipResolver tenantOwnershipResolver,
+                                                    DataScopeService dataScopeService,
                                                     OrganizationScopeService organizationScopeService,
                                                     AuthorizationService authorizationService,
                                                     EngineerCertificationMapper certificationRecordMapper,
@@ -108,6 +116,7 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
                                                     CertificationLifecycleStateResolver lifecycleStateResolver,
                                                     java.time.Clock clock) {
         this.engineerService = engineerService;
+        this.tenantOwnershipResolver = tenantOwnershipResolver;
         this.dataScopeService = dataScopeService;
         this.organizationScopeService = organizationScopeService;
         this.authorizationService = authorizationService;
@@ -169,42 +178,39 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
 
     @Override
     public Set<Long> visibleEngineerIds(LocalDate asOf) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         LocalDate date = asOf == null ? LocalDate.now(clock) : asOf;
         Set<Long> dataIds = dataScopeService.isScoped() ? safeSet(dataScopeService.allowedEngineerIds()) : null;
+        Set<Long> tenantIds = new java.util.HashSet<>(tenantOwnershipResolver.resolveEngineerIds(tenantId));
         if (organizationScopeService.hasFullAccess()) {
-            return dataIds == null ? null : Set.copyOf(dataIds);
+            if (dataIds != null) {
+                tenantIds.retainAll(dataIds);
+            }
+            return Set.copyOf(tenantIds);
         }
-        return organizationScopeService.intersectWithDataScope(
+        Set<Long> scoped = organizationScopeService.intersectWithDataScope(
                 organizationScopeService.allowedEngineerIds(date), dataIds);
+        if (scoped == null) {
+            return Set.copyOf(tenantIds);
+        }
+        tenantIds.retainAll(scoped);
+        return Set.copyOf(tenantIds);
     }
 
     private List<CertificationLearningGapRow> rows(CertificationLearningGapFilter rawFilter,
                                                    Authentication authentication, boolean includeFullNumber) {
         CertificationLearningGapFilter filter = normalize(rawFilter);
         Set<Long> allowedIds = visibleEngineerIds(filter.asOf());
-        if (allowedIds != null && allowedIds.isEmpty()) {
+        if (allowedIds.isEmpty()) {
             return List.of();
         }
         // DB wrapperだけに依存せず、detailのID直指定も同じpopulationでfail closedにする。
-        if (allowedIds != null && filter.engineerId() != null && !allowedIds.contains(filter.engineerId())) {
+        if (filter.engineerId() != null && !allowedIds.contains(filter.engineerId())) {
             return List.of();
         }
-
-        LambdaQueryWrapper<Engineer> engineerQuery = new LambdaQueryWrapper<>();
-        if (allowedIds != null) {
-            engineerQuery.in(Engineer::getId, allowedIds);
-        }
-        if (filter.engineerId() != null) {
-            engineerQuery.eq(Engineer::getId, filter.engineerId());
-        }
-        if (StringUtils.hasText(filter.engineerName())) {
-            engineerQuery.like(Engineer::getFullName, filter.engineerName());
-        }
-        if (StringUtils.hasText(filter.engineerStatus())) {
-            engineerQuery.eq(Engineer::getStatus, filter.engineerStatus());
-        }
-        engineerQuery.orderByDesc(Engineer::getId);
-        List<Engineer> engineers = engineerService.list(engineerQuery);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        List<Engineer> engineers = tenantOwnershipResolver.selectEngineers(
+                tenantId, allowedIds, filter.engineerId(), filter.engineerName(), filter.engineerStatus());
         if (engineers.isEmpty()) {
             return List.of();
         }
@@ -225,7 +231,9 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
         Map<Long, List<TrainingEnrollment>> enrollments = groupEnrollments(ids);
         Set<Long> courseIds = enrollments.values().stream().flatMap(List::stream)
                 .map(TrainingEnrollment::getCourseId).filter(Objects::nonNull).collect(Collectors.toSet());
-        Map<Long, TrainingCourse> courses = courseIds.isEmpty() ? Map.of() : courseMapper.selectBatchIds(courseIds).stream()
+        Map<Long, TrainingCourse> courses = courseIds.isEmpty() ? Map.of() : courseMapper.selectList(new LambdaQueryWrapper<TrainingCourse>()
+                        .eq(TrainingCourse::getTenantId, currentTenant())
+                        .in(TrainingCourse::getId, courseIds)).stream()
                 .collect(Collectors.toMap(TrainingCourse::getId, Function.identity(), (a, b) -> a));
         boolean canViewFullNumber = includeFullNumber && authorizationService.isAllowed(authentication, PII_ACTION);
 
@@ -278,6 +286,7 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
 
     private Map<Long, List<EngineerCertification>> groupCertifications(List<Long> ids) {
         return certificationRecordMapper.selectList(new LambdaQueryWrapper<EngineerCertification>()
+                        .eq(EngineerCertification::getTenantId, currentTenant())
                         .in(EngineerCertification::getEngineerId, ids)
                         .orderByDesc(EngineerCertification::getAcquiredOn)
                         .orderByDesc(EngineerCertification::getId))
@@ -286,12 +295,15 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
 
     private Map<Long, Certification> certificationMasters(Set<Long> ids) {
         if (ids.isEmpty()) return Map.of();
-        return certificationMapper.selectBatchIds(ids).stream()
+        return certificationMapper.selectList(new LambdaQueryWrapper<Certification>()
+                        .eq(Certification::getTenantId, currentTenant())
+                        .in(Certification::getId, ids)).stream()
                 .collect(Collectors.toMap(Certification::getId, Function.identity(), (a, b) -> a));
     }
 
     private Map<Long, List<LearningPlan>> groupPlans(List<Long> ids) {
         return learningPlanMapper.selectList(new LambdaQueryWrapper<LearningPlan>()
+                        .eq(LearningPlan::getTenantId, currentTenant())
                         .in(LearningPlan::getEngineerId, ids)
                         .orderByDesc(LearningPlan::getPlannedStartOn)
                         .orderByDesc(LearningPlan::getId))
@@ -300,6 +312,7 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
 
     private Map<Long, List<TrainingEnrollment>> groupEnrollments(List<Long> ids) {
         return enrollmentMapper.selectList(new LambdaQueryWrapper<TrainingEnrollment>()
+                        .eq(TrainingEnrollment::getTenantId, currentTenant())
                         .in(TrainingEnrollment::getEngineerId, ids)
                         .orderByDesc(TrainingEnrollment::getId))
                 .stream().collect(Collectors.groupingBy(TrainingEnrollment::getEngineerId, LinkedHashMap::new, Collectors.toList()));
@@ -346,26 +359,28 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
         return new CertificationLearningGapCertificationDto(record.getId(), record.getCertificationId(),
                 master == null ? null : master.getDisplayName(), record.getAcquiredOn(), record.getExpiresOn(),
                 record.getRecordState(), effectiveState, record.getCurrentFlag(), record.getCertificateNumberMasked(), raw,
-                canViewFullNumber, record.getVersion(), evidenceViews(record.getId()));
+                canViewFullNumber, record.getVersion(), evidenceViews(record));
     }
 
-    private List<CertificationEvidenceView> evidenceViews(Long recordId) {
-        if (recordId == null) {
+    private List<CertificationEvidenceView> evidenceViews(EngineerCertification record) {
+        if (record == null || record.getId() == null) {
             return List.of();
         }
-        return documentLinkMapper.selectList(new LambdaQueryWrapper<com.ses.entity.DocumentLink>()
-                        .eq(com.ses.entity.DocumentLink::getTargetType, "CERTIFICATION_RECORD")
-                        .eq(com.ses.entity.DocumentLink::getTargetId, recordId))
-                .stream().map(com.ses.entity.DocumentLink::getDocumentId).filter(Objects::nonNull).distinct()
-                .map(documentVersionMapper::findLatestByDocumentId).filter(Objects::nonNull)
-                .map(version -> new CertificationEvidenceView(version.getDocumentId(), version.getId(), version.getVersionNo(),
-                        version.getOriginalName(), version.getSha256(), version.getScanStatus()))
-                .toList();
+        if (restrictedEvidenceResolver != null) {
+            return restrictedEvidenceResolver.listForDisplay(record.getId()).stream()
+                    .map(resolved -> new CertificationEvidenceView(resolved.version().getDocumentId(),
+                            resolved.version().getId(), resolved.version().getVersionNo(),
+                            resolved.version().getOriginalName(), resolved.version().getSha256(),
+                            resolved.version().getScanStatus())).toList();
+        }
+        // restricted resolverが配線されない経路はfail-closedとし、latest版を直接公開しない。
+        return List.of();
     }
 
     private Map<Long, String> lifecycleStates(Set<Long> engineerIds, LocalDate asOf) {
         if (engineerIds.isEmpty()) return Map.of();
         List<LifecycleCase> cases = lifecycleCaseMapper.selectList(new LambdaQueryWrapper<LifecycleCase>()
+                .eq(LifecycleCase::getTenantId, currentTenant())
                 .in(LifecycleCase::getEngineerId, engineerIds)
                 .in(LifecycleCase::getLifecycleType, "LEAVE", "REINSTATEMENT", "RESIGNATION")
                 .ne(LifecycleCase::getStatus, "CANCELLED")
@@ -390,5 +405,9 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
 
     private Set<Long> safeSet(Set<Long> ids) {
         return ids == null ? Set.of() : new HashSet<>(ids);
+    }
+
+    private String currentTenant() {
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 }

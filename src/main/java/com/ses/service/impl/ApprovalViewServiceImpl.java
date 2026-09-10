@@ -20,6 +20,7 @@ import com.ses.common.util.PageUtils;
 import com.ses.service.approval.ApprovalViewService;
 import com.ses.service.approval.RouteSnapshot;
 import com.ses.service.approval.RouteStepGroup;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.AuthorizationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
@@ -71,7 +72,7 @@ public class ApprovalViewServiceImpl implements ApprovalViewService {
                                             Long userId, String role, Authentication authentication) {
         com.baomidou.mybatisplus.extension.plugins.pagination.Page<ApprovalRequest> page =
                 PageUtils.safePage(current, size);
-        requestMapper.selectVisiblePage(page, userId, "管理者".equals(role), LocalDate.now(), view, status);
+        requestMapper.selectVisiblePage(page, userId, "管理者".equals(role), tenant(), LocalDate.now(), view, status);
         List<ApprovalRequestListItem> records = page.getRecords().stream()
                 .map(this::toListItem).toList();
         return new ApprovalRequestListResponse(records, page.getTotal(), page.getCurrent(), page.getPages());
@@ -80,12 +81,13 @@ public class ApprovalViewServiceImpl implements ApprovalViewService {
     @Override
     public ApprovalRequestView detail(Long requestId, Long userId, String role,
                                       Authentication authentication) {
-        ApprovalRequest request = requestMapper.selectById(requestId);
+        ApprovalRequest request = requestMapper.selectByIdAndTenant(requestId, tenant());
         if (request == null || !isVisible(request, userId, role)) {
             throw BusinessException.of(404, "error.approval.notFound");
         }
         RouteSnapshot snapshot = read(request.getRouteSnapshotJson(), RouteSnapshot.class);
         List<ApprovalActionView> actions = actionMapper.selectList(new LambdaQueryWrapper<ApprovalAction>()
+                        .eq(ApprovalAction::getTenantId, tenant())
                         .eq(ApprovalAction::getRequestId, requestId)
                         .orderByAsc(ApprovalAction::getActedAt)
                         .orderByAsc(ApprovalAction::getId))
@@ -128,6 +130,7 @@ public class ApprovalViewServiceImpl implements ApprovalViewService {
         if (approvers.isEmpty()) return false;
         LocalDate today = LocalDate.now();
         return delegationMapper.selectList(new LambdaQueryWrapper<ApprovalDelegation>()
+                        .eq(ApprovalDelegation::getTenantId, tenant())
                         .in(ApprovalDelegation::getFromUserId, approvers)
                         .eq(ApprovalDelegation::getToUserId, userId)
                         .le(ApprovalDelegation::getValidFrom, today)
@@ -142,6 +145,7 @@ public class ApprovalViewServiceImpl implements ApprovalViewService {
         if (step.approverUserIds().contains(userId)) return true;
         LocalDate today = LocalDate.now();
         return step.approverUserIds().stream().anyMatch(owner -> delegationMapper.selectList(new LambdaQueryWrapper<ApprovalDelegation>()
+                .eq(ApprovalDelegation::getTenantId, tenant())
                 .eq(ApprovalDelegation::getFromUserId, owner).eq(ApprovalDelegation::getToUserId, userId)
                 .le(ApprovalDelegation::getValidFrom, today)
                 .and(w -> w.isNull(ApprovalDelegation::getValidTo).or().ge(ApprovalDelegation::getValidTo, today)))
@@ -153,7 +157,7 @@ public class ApprovalViewServiceImpl implements ApprovalViewService {
         if (delegationTypeMapper == null || d.getId() == null) {
             return true;
         }
-        List<String> types = delegationTypeMapper.selectRequestTypes(d.getId());
+        List<String> types = delegationTypeMapper.selectRequestTypes(d.getId(), tenant());
         return types == null || types.isEmpty() || types.contains(requestType);
     }
 
@@ -258,5 +262,9 @@ public class ApprovalViewServiceImpl implements ApprovalViewService {
     private Map<String, Object> readMap(String json) {
         try { return objectMapper.readValue(json, new TypeReference<>() {}); }
         catch (Exception e) { return Map.of(); }
+    }
+
+    private String tenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 }

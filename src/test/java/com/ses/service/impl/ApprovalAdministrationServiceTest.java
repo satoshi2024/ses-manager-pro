@@ -21,6 +21,8 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.approval.ApprovalAdministrationService;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.approval.ApprovalRequestCommand;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -59,10 +61,16 @@ class ApprovalAdministrationServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         applicantId = insertUser("a2-applicant");
         approver1Id = insertUser("a2-approver1");
         approver2Id = insertUser("a2-approver2");
         delegateId = insertUser("a2-delegate");
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     private Long insertUser(String prefix) {

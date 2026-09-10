@@ -21,6 +21,7 @@ public class CustomerHealthScheduler {
 
     private final CustomerHealthService customerHealthService;
     private final Clock clock;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(cron = "${customerhealth.snapshot.cron:0 0 2 * * *}")
     @SchedulerLock(name = "customerHealthSnapshotDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
@@ -33,8 +34,12 @@ public class CustomerHealthScheduler {
      */
     public void processDailySnapshot(String targetMonth) {
         log.info("顧客ヘルス日次スナップショットバッチ実行開始: targetMonth={}", targetMonth);
-        customerHealthService.generateMonthlySnapshot(targetMonth, "日次定期バッチによるスナップショット更新",
-                SnapshotExecutionContext.systemScheduler());
+        tenantAwareBatchRunner.run(tenantId -> {
+            log.debug("顧客ヘルス日次スナップショットtenant処理開始: tenantId={}, targetMonth={}",
+                    tenantId, targetMonth);
+            customerHealthService.generateMonthlySnapshot(targetMonth, "日次定期バッチによるスナップショット更新",
+                    SnapshotExecutionContext.systemScheduler());
+        });
         log.info("顧客ヘルス日次スナップショットバッチ実行完了: targetMonth={}", targetMonth);
     }
 }

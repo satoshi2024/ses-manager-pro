@@ -65,8 +65,8 @@ class SkillGapServiceImplTest {
         service = new SkillGapServiceImpl(engineerSkillEventMapper, projectSkillEventMapper,
                 projectPositionEventMapper, snapshotMapper, taxonomyResolver, objectMapper,
                 Clock.fixed(Instant.parse("2026-09-01T01:00:00Z"), ZoneId.of("Asia/Tokyo")), FEATURE_START);
-        lenient().when(projectSkillEventMapper.selectByProjectId(20L)).thenReturn(List.of());
-        lenient().when(projectPositionEventMapper.selectByProjectId(20L)).thenReturn(List.of());
+        lenient().when(projectSkillEventMapper.selectByTenantAndProjectId("default", 20L)).thenReturn(List.of());
+        lenient().when(projectPositionEventMapper.selectByTenantAndProjectId("default", 20L)).thenReturn(List.of());
         lenient().doAnswer(invocation -> {
             SkillGapSnapshot snapshot = invocation.getArgument(0);
             snapshot.setId(900L);
@@ -78,8 +78,8 @@ class SkillGapServiceImplTest {
     void effectiveProjectAndSupplyEventsAreComparedWithoutCurrentFallback() {
         EngineerSkillEvent supply = supply(101L, 1L, "初級", LocalDate.of(2026, 8, 28), null);
         ProjectSkillEvent demand = project(201L, 1L, "中級", LocalDate.of(2026, 8, 28), null);
-        when(engineerSkillEventMapper.selectByEngineerId(10L)).thenReturn(List.of(supply));
-        when(projectSkillEventMapper.selectByProjectId(20L)).thenReturn(List.of(demand));
+        when(engineerSkillEventMapper.selectByTenantAndEngineerId("default", 10L)).thenReturn(List.of(supply));
+        when(projectSkillEventMapper.selectByTenantAndProjectId("default", 20L)).thenReturn(List.of(demand));
         when(taxonomyResolver.resolveCanonicalId(1L)).thenReturn(canonical(1L, "Java"));
         when(taxonomyResolver.fingerprint(AS_OF)).thenReturn("taxonomy-v1");
 
@@ -110,9 +110,9 @@ class SkillGapServiceImplTest {
         ProjectSkillEvent projectJava = project(201L, 1L, "上級", FEATURE_START, null);
         ProjectPositionEvent position = position(301L, 20L, "募集中", FEATURE_START,
                 null, "[{\"skillId\":1,\"skillName\":\"Java\",\"requiredLevel\":\"初級\"},{\"skillName\":\"AWS\",\"requiredLevel\":\"中級\"}]");
-        when(engineerSkillEventMapper.selectByEngineerId(10L)).thenReturn(List.of(supply));
-        when(projectSkillEventMapper.selectByProjectId(20L)).thenReturn(List.of(projectJava));
-        when(projectPositionEventMapper.selectByProjectId(20L)).thenReturn(List.of(position));
+        when(engineerSkillEventMapper.selectByTenantAndEngineerId("default", 10L)).thenReturn(List.of(supply));
+        when(projectSkillEventMapper.selectByTenantAndProjectId("default", 20L)).thenReturn(List.of(projectJava));
+        when(projectPositionEventMapper.selectByTenantAndProjectId("default", 20L)).thenReturn(List.of(position));
         when(taxonomyResolver.resolveCanonicalId(1L)).thenReturn(canonical(1L, "Java"));
         when(taxonomyResolver.resolveName("AWS", FEATURE_START)).thenReturn(canonical(2L, "AWS"));
         when(taxonomyResolver.fingerprint(AS_OF)).thenReturn("taxonomy-v1");
@@ -129,9 +129,9 @@ class SkillGapServiceImplTest {
 
     @Test
     void unknownDemandIsReportedAndDoesNotBecomeMaster() {
-        when(engineerSkillEventMapper.selectByEngineerId(10L)).thenReturn(List.of(
+        when(engineerSkillEventMapper.selectByTenantAndEngineerId("default", 10L)).thenReturn(List.of(
                 supply(101L, 1L, "中級", FEATURE_START, null)));
-        when(projectSkillEventMapper.selectByProjectId(20L)).thenReturn(List.of(
+        when(projectSkillEventMapper.selectByTenantAndProjectId("default", 20L)).thenReturn(List.of(
                 project(201L, 99L, "中級", FEATURE_START, null)));
         when(taxonomyResolver.resolveCanonicalId(99L)).thenReturn(
                 new SkillGapTaxonomyResolver.Resolution("skill#99", "SKILL#99", null, null, null, "UNKNOWN"));
@@ -147,7 +147,7 @@ class SkillGapServiceImplTest {
 
     @Test
     void deleteDayAndAfterDoNotUseDeletedCurrentPositionAsDemand() {
-        when(engineerSkillEventMapper.selectByEngineerId(10L)).thenReturn(List.of(
+        when(engineerSkillEventMapper.selectByTenantAndEngineerId("default", 10L)).thenReturn(List.of(
                 supply(101L, 1L, "中級", FEATURE_START, null)));
         ProjectPositionEvent beforeDelete = position(301L, 20L, "募集中", FEATURE_START,
                 LocalDate.of(2026, 8, 31), "[{\"skillName\":\"Java\"}]");
@@ -155,7 +155,7 @@ class SkillGapServiceImplTest {
                 LocalDate.of(2026, 9, 1), "[{\"skillName\":\"Java\"}]");
         deleteDay.setPositionId(30L);
         deleteDay.setEventType(ProjectPositionEvent.TYPE_DELETE);
-        when(projectPositionEventMapper.selectByProjectId(20L)).thenReturn(List.of(beforeDelete, deleteDay));
+        when(projectPositionEventMapper.selectByTenantAndProjectId("default", 20L)).thenReturn(List.of(beforeDelete, deleteDay));
         when(taxonomyResolver.fingerprint(any())).thenReturn("taxonomy-v1");
 
         SkillGapResult onDeleteDay = service.calculate(new SkillGapRequest(10L, 20L,
@@ -172,8 +172,8 @@ class SkillGapServiceImplTest {
     void replayVerifiesAndRestoresImmutableSnapshotWithoutReadingCurrentSources() throws Exception {
         EngineerSkillEvent supply = supply(101L, 1L, "初級", FEATURE_START, null);
         ProjectSkillEvent demand = project(201L, 1L, "中級", FEATURE_START, null);
-        when(engineerSkillEventMapper.selectByEngineerId(10L)).thenReturn(List.of(supply));
-        when(projectSkillEventMapper.selectByProjectId(20L)).thenReturn(List.of(demand));
+        when(engineerSkillEventMapper.selectByTenantAndEngineerId("default", 10L)).thenReturn(List.of(supply));
+        when(projectSkillEventMapper.selectByTenantAndProjectId("default", 20L)).thenReturn(List.of(demand));
         when(taxonomyResolver.resolveCanonicalId(1L)).thenReturn(canonical(1L, "Java"));
         when(taxonomyResolver.fingerprint(AS_OF)).thenReturn("taxonomy-v1");
         ArgumentCaptor<SkillGapSnapshot> captor = ArgumentCaptor.forClass(SkillGapSnapshot.class);
@@ -185,7 +185,7 @@ class SkillGapServiceImplTest {
 
         service.calculate(new SkillGapRequest(10L, 20L, AS_OF, SkillGapService.DemandSource.PROJECT));
         SkillGapSnapshot stored = captor.getValue();
-        when(snapshotMapper.selectById(901L)).thenReturn(stored);
+        when(snapshotMapper.selectOne(any())).thenReturn(stored);
 
         SkillGapResult replayed = service.replay(901L);
 

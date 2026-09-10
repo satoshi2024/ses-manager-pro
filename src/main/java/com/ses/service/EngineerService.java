@@ -3,6 +3,8 @@ package com.ses.service;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.ses.entity.Engineer;
 
+import java.io.Serializable;
+
 /**
  * エンジニアサービスインターフェース
  */
@@ -15,4 +17,7 @@ public interface EngineerService extends IService<Engineer> {
      * @return 更新成功なら true
      */
     boolean updateWithStatusGuard(Engineer engineer);
+
+    /** tenant・ID・期待versionを含む論理削除。HTTP更新と同じCAS境界を使う。 */
+    boolean removeById(Serializable id, Integer expectedVersion);
 }

@@ -1,7 +1,6 @@
 package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.entity.Contract;
 import com.ses.entity.CostCenter;
 import com.ses.entity.Engineer;
@@ -23,6 +22,7 @@ import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.service.MonthlyAccountingSnapshotService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -60,10 +60,10 @@ public class MonthlyAccountingSnapshotServiceImpl implements MonthlyAccountingSn
     @Override
     @Transactional(rollbackFor = Exception.class)
     public int snapshotMonth(String workMonth) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         YearMonth month = com.ses.common.util.DateUtils.parseYearMonth(workMonth);
         LocalDate asOf = month.atDay(1);
-        List<WorkRecord> records = workRecordMapper.selectList(new QueryWrapper<WorkRecord>()
-                .eq("work_month", workMonth).eq("status", "確定").orderByAsc("id"));
+        List<WorkRecord> records = workRecordMapper.selectConfirmedByWorkMonthForTenant(workMonth, tenantId);
         if (records.isEmpty()) {
             return snapshotBenchCosts(asOf);
         }
@@ -85,21 +85,23 @@ public class MonthlyAccountingSnapshotServiceImpl implements MonthlyAccountingSn
             }
         }
         List<Long> contractIds = records.stream().map(WorkRecord::getContractId).filter(java.util.Objects::nonNull).distinct().toList();
-        List<Contract> contracts = contractIds.isEmpty() ? List.of() : contractMapper.selectBatchIds(contractIds);
-        if (contracts == null) {
-            contracts = contractIds.stream().map(contractMapper::selectById).filter(java.util.Objects::nonNull).toList();
-        }
+        List<Contract> contracts = contractIds.isEmpty() ? List.of()
+                : contractMapper.selectByIdsForTenant(contractIds, tenantId);
+        if (contracts == null) contracts = List.of();
         java.util.Map<Long, Contract> contractById = contracts == null ? java.util.Map.of()
                 : contracts.stream().collect(java.util.stream.Collectors.toMap(Contract::getId, c -> c, (a, b) -> a));
         List<Long> engineerIds = contracts == null ? List.of() : contracts.stream().map(Contract::getEngineerId)
                 .filter(java.util.Objects::nonNull).distinct().toList();
-        List<Engineer> engineers = engineerIds.isEmpty() ? List.of() : engineerMapper.selectBatchIds(engineerIds);
+        List<Engineer> engineers = engineerIds.isEmpty() ? List.of()
+                : engineerMapper.selectByIdsForTenant(engineerIds, tenantId);
+        if (engineers == null) engineers = List.of();
         java.util.Map<Long, Engineer> engineerById = engineers == null ? java.util.Map.of()
                 : engineers.stream().collect(java.util.stream.Collectors.toMap(Engineer::getId, e -> e, (a, b) -> a));
         List<EngineerAccountLink> links = engineerIds.isEmpty() ? List.of()
-                : engineerAccountLinkMapper.selectByEngineerIds(engineerIds);
+                : engineerAccountLinkMapper.selectByEngineerIdsAndTenant(engineerIds, tenantId);
         if (links == null) {
-            links = engineerIds.stream().map(engineerAccountLinkMapper::selectByEngineerId)
+            links = engineerIds.stream()
+                    .map(id -> engineerAccountLinkMapper.selectByEngineerIdAndTenant(id, tenantId))
                     .filter(java.util.Objects::nonNull).toList();
         }
         java.util.Map<Long, EngineerAccountLink> linkByEngineer = links.stream().collect(
@@ -108,6 +110,7 @@ public class MonthlyAccountingSnapshotServiceImpl implements MonthlyAccountingSn
                 .filter(java.util.Objects::nonNull).distinct().toList();
         List<UserOrganization> assignments = userIds.isEmpty() ? List.of() : userOrganizationMapper.selectList(
                 new LambdaQueryWrapper<UserOrganization>().in(UserOrganization::getUserId, userIds)
+                        .eq(UserOrganization::getTenantId, tenantId)
                         .eq(UserOrganization::getPrimaryFlag, 1).le(UserOrganization::getValidFrom, asOf)
                         .and(w -> w.isNull(UserOrganization::getValidTo).or().ge(UserOrganization::getValidTo, asOf))
                         .orderByDesc(UserOrganization::getValidFrom));
@@ -117,7 +120,8 @@ public class MonthlyAccountingSnapshotServiceImpl implements MonthlyAccountingSn
         } else {
             for (Long userId : userIds) {
                 UserOrganization assignment = userOrganizationMapper.selectOne(new LambdaQueryWrapper<UserOrganization>()
-                        .eq(UserOrganization::getUserId, userId).eq(UserOrganization::getPrimaryFlag, 1)
+                        .eq(UserOrganization::getUserId, userId).eq(UserOrganization::getTenantId, tenantId)
+                        .eq(UserOrganization::getPrimaryFlag, 1)
                         .le(UserOrganization::getValidFrom, asOf)
                         .and(w -> w.isNull(UserOrganization::getValidTo).or().ge(UserOrganization::getValidTo, asOf))
                         .orderByDesc(UserOrganization::getValidFrom).last("LIMIT 1"));
@@ -223,7 +227,9 @@ public class MonthlyAccountingSnapshotServiceImpl implements MonthlyAccountingSn
      */
     private int snapshotBenchCosts(LocalDate asOf) {
         List<com.ses.dto.accounting.AccountingWaitCostSnapshotRow> rows =
-                engineerMapper.selectAccountingWaitCostByEngineer(asOf, asOf.withDayOfMonth(asOf.lengthOfMonth()));
+                engineerMapper.selectAccountingWaitCostByEngineerForTenant(
+                        asOf, asOf.withDayOfMonth(asOf.lengthOfMonth()),
+                        AccountingTenantContextHolder.requireTenantContext());
         if (rows == null || rows.isEmpty()) {
             return 0;
         }

@@ -2,7 +2,7 @@ package com.ses.controller.api;
 
 import com.ses.common.result.ApiResult;
 import com.ses.dto.project.ProjectSkillDetailDto;
-import com.ses.entity.ProjectSkill;
+import com.ses.dto.skill.SkillReplaceRequest;
 import com.ses.service.ProjectSkillService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -26,10 +26,10 @@ public class ProjectSkillApiController {
     }
 
     @PutMapping
-    public ApiResult<Void> replaceSkills(@PathVariable Long projectId, @RequestBody List<@Valid ProjectSkill> skills) {
+    public ApiResult<Void> replaceSkills(@PathVariable Long projectId, @Valid @RequestBody SkillReplaceRequest request) {
         // 親案件のスコープを検証（担当外案件のスキル書込IDOR防止 / R3R-32）。
         dataScopeService.assertAllowedProject(projectId);
-        projectSkillService.replaceSkills(projectId, skills);
+        projectSkillService.replaceSkills(projectId, request);
         return ApiResult.success(null);
     }
 }

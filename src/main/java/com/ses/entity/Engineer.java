@@ -24,6 +24,9 @@ import java.time.LocalDate;
 @TableName("t_engineer")
 public class Engineer extends BaseEntity {
 
+    /** 要員のtenant所有権。NULLのlegacy行は修復完了まで業務母集団へ入れない。 */
+    private String tenantId;
+
     /** 法人境界。未設定行は公開APIのSQL境界から除外される。 */
     private Long legalEntityId;
 

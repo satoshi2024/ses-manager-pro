@@ -15,6 +15,7 @@ import com.ses.mapper.ServiceRequestMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.portal.PortalRateLimiter;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.CustomerScopeResolver;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -24,9 +25,18 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
 
-/** サービスリクエスト添付の認可・文書台帳・業務リンクを一つのtransactionで管理する。 */
+/** サービスリクエスト添付の認可・Storage処理・短い業務リンク確定を分離して管理する。 */
 @Service
 public class ServiceRequestAttachmentService {
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ServiceRequestAttachmentCommitService attachmentCommitService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ServiceRequestAttachmentCompensationService compensationService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CustomerScopeResolver customerScopeResolver;
 
     private final ServiceRequestMapper requestMapper;
     private final ServiceCommentMapper commentMapper;
@@ -59,18 +69,14 @@ public class ServiceRequestAttachmentService {
         this.clock = clock;
     }
 
-    @Transactional(rollbackFor = Exception.class)
     public ServiceAttachmentLink uploadInternal(Long requestId, Long commentId, MultipartFile file,
                                                 String visibility, Long actorUserId) {
         enforceInternalUploadRateLimit(actorUserId);
         ServiceRequest request = validateRequest(requestId, false, null);
-        if (dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(request.getCustomerId());
-        }
+        assertAllowed(request.getCustomerId());
         return upload(request, commentId, file, normalizeVisibility(visibility), actorUserId, "INTERNAL_USER");
     }
 
-    @Transactional(rollbackFor = Exception.class)
     public ServiceAttachmentLink uploadPortal(Long requestId, Long commentId, MultipartFile file,
                                               Long customerId, Long actorUserId) {
         ServiceRequest request = validateRequest(requestId, true, customerId);
@@ -78,8 +84,10 @@ public class ServiceRequestAttachmentService {
     }
 
     private ServiceRequest validateRequest(Long requestId, boolean portal, Long customerId) {
-        ServiceRequest request = requestId == null ? null : requestMapper.selectById(requestId);
-        if (request == null || (portal && !java.util.Objects.equals(request.getCustomerId(), customerId))) {
+        String tenantId = currentTenant();
+        ServiceRequest request = requestId == null ? null : requestMapper.selectByIdAndTenant(requestId, tenantId);
+        if (request == null || !tenantId.equals(request.getTenantId())
+                || (portal && !java.util.Objects.equals(request.getCustomerId(), customerId))) {
             throw BusinessException.of(404, "error.notFound");
         }
         return request;
@@ -95,8 +103,10 @@ public class ServiceRequestAttachmentService {
             String hash = sha256(content);
             String originalName = safeName(file.getOriginalFilename());
             String businessKey = "SERVICE_REQUEST:" + request.getId() + ":"
-                    + (commentId == null ? "REQUEST" : "COMMENT-" + commentId) + ":" + hash;
+                    + (commentId == null ? "REQUEST" : "COMMENT-" + commentId) + ":"
+                    + visibility + ":" + hash;
             DocumentRegisterRequest registerRequest = DocumentRegisterRequest.builder()
+                    .tenantId(currentTenant())
                     .documentType("SERVICE_REQUEST_ATTACHMENT")
                     .title(originalName)
                     .counterpartyType("CUSTOMER")
@@ -119,12 +129,29 @@ public class ServiceRequestAttachmentService {
             if (document == null || document.getId() == null) {
                 throw BusinessException.of(400, "error.file.scanRejected");
             }
-            documentService.link(document.getId(), "SERVICE_REQUEST", request.getId());
-            DocumentVersion version = documentVersionMapper.findLatestByDocumentId(document.getId());
-            if (version == null || !"CLEAN".equals(version.getScanStatus())) {
-                throw BusinessException.of(403, "error.file.scanNotReady");
-            }
+            try {
+                documentService.link(document.getId(), "SERVICE_REQUEST", request.getId());
+                DocumentVersion version = documentVersionMapper.findByIdempotencyKey(
+                        currentTenant(), "RECEIVED", businessKey, "v1");
+                if (version == null) {
+                    version = documentVersionMapper.findLatestByDocumentId(document.getId());
+                }
+                if (version == null || !"CLEAN".equals(version.getScanStatus())) {
+                    throw BusinessException.of(403, "error.file.scanNotReady");
+                }
 
+                if (attachmentCommitService != null) {
+                    return attachmentCommitService.commit(currentTenant(), request.getId(), commentId,
+                            document.getId(), visibility, originalName, file.getSize(), businessKey);
+                }
+            } catch (RuntimeException failure) {
+                if (compensationService != null) {
+                    compensationService.record(currentTenant(), request.getId(), commentId, document.getId(),
+                            visibility, originalName, file.getSize(), businessKey, failure);
+                }
+                throw failure;
+            }
+            // Spring外の旧unit adapterだけに残す互換経路。実運用では短transaction serviceが必ず配線される。
             LambdaQueryWrapper<ServiceAttachmentLink> duplicateQuery = new LambdaQueryWrapper<ServiceAttachmentLink>()
                     .eq(ServiceAttachmentLink::getServiceRequestId, request.getId())
                     .eq(ServiceAttachmentLink::getDocumentId, document.getId())
@@ -144,6 +171,7 @@ public class ServiceRequestAttachmentService {
                     .commentId(commentId)
                     .documentId(document.getId())
                     .visibility(visibility)
+                    .businessKey(businessKey)
                     .fileName(originalName)
                     .fileSize(file.getSize())
                     .createdAt(java.time.LocalDateTime.now(clock))
@@ -218,6 +246,18 @@ public class ServiceRequestAttachmentService {
             return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(content));
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256算出に失敗しました", e);
+        }
+    }
+
+    private String currentTenant() {
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+    }
+
+    private void assertAllowed(Long customerId) {
+        if (customerScopeResolver != null) {
+            customerScopeResolver.assertAllowed(customerId);
+        } else if (dataScopeService.isScoped()) {
+            dataScopeService.assertAllowedCustomer(customerId);
         }
     }
 }

@@ -24,6 +24,7 @@ DROP TABLE IF EXISTS m_customer CASCADE;
 CREATE TABLE m_customer (
   id                BIGINT AUTO_INCREMENT PRIMARY KEY,
   legal_entity_id   BIGINT,
+  tenant_id         VARCHAR(100),
   company_name      VARCHAR(200) NOT NULL,
   company_name_kana VARCHAR(200),
   contact_person    VARCHAR(100),
@@ -45,6 +46,7 @@ DROP TABLE IF EXISTS t_engineer CASCADE;
 CREATE TABLE t_engineer (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
   legal_entity_id     BIGINT,
+  tenant_id           VARCHAR(100),
   full_name           VARCHAR(100),
   full_name_kana      VARCHAR(100),
   initial_name        VARCHAR(10),
@@ -147,6 +149,7 @@ CREATE TABLE t_project_skill (
 DROP TABLE IF EXISTS t_notification CASCADE;
 CREATE TABLE t_notification (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
   type        VARCHAR(30)  NOT NULL,
   title       VARCHAR(200) NOT NULL,
   message     VARCHAR(500),
@@ -154,9 +157,10 @@ CREATE TABLE t_notification (
   menu_key    VARCHAR(50),
   organization_id BIGINT,
   recipient_user_id BIGINT,
-  dedupe_key  VARCHAR(200) NOT NULL UNIQUE,
+  dedupe_key  VARCHAR(200) NOT NULL,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX uk_notification_tenant_dedupe ON t_notification(tenant_id, dedupe_key);
 
 DROP TABLE IF EXISTS t_notification_read CASCADE;
 CREATE TABLE t_notification_read (
@@ -186,6 +190,7 @@ CREATE TABLE t_project (
   end_date          DATE,
   remarks           TEXT,
   source_opportunity_id BIGINT,
+  version                INT NOT NULL DEFAULT 0,
   created_by        BIGINT,
   created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -197,6 +202,7 @@ DROP TABLE IF EXISTS t_contract CASCADE;
 CREATE TABLE t_contract (
   id                      BIGINT AUTO_INCREMENT PRIMARY KEY,
   legal_entity_id         BIGINT,
+  tenant_id               VARCHAR(100),
   contract_no             VARCHAR(50),
   proposal_id             BIGINT,
   engineer_id             BIGINT,
@@ -574,6 +580,7 @@ DROP TABLE IF EXISTS t_candidate_activity CASCADE;
 DROP TABLE IF EXISTS t_candidate CASCADE;
 CREATE TABLE t_candidate (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id             VARCHAR(100),
   name                  VARCHAR(100) NOT NULL,
   contact_email         VARCHAR(200),
   contact_phone         VARCHAR(20),
@@ -583,6 +590,7 @@ CREATE TABLE t_candidate (
   current_stage         VARCHAR(20) NOT NULL DEFAULT '応募受付',
   next_action_date      DATE,
   converted_engineer_id BIGINT,
+  version               INT NOT NULL DEFAULT 0,
   remarks               VARCHAR(1000),
   deleted_flag          TINYINT NOT NULL DEFAULT 0,
   created_by            BIGINT,
@@ -646,6 +654,7 @@ WHERE m.menu_key = 'myLifecycle'
 DROP TABLE IF EXISTS sys_user CASCADE;
 CREATE TABLE sys_user (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id     VARCHAR(100) NOT NULL DEFAULT 'default',
   username      VARCHAR(50) NOT NULL UNIQUE,
   password      VARCHAR(255) NOT NULL,
   real_name     VARCHAR(50),
@@ -769,6 +778,7 @@ CREATE TABLE t_freee_employee_link (
 DROP TABLE IF EXISTS t_engineer_account_link CASCADE;
 CREATE TABLE t_engineer_account_link (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
   engineer_id BIGINT NOT NULL UNIQUE,
   sys_user_id BIGINT NOT NULL UNIQUE,
   linked_by   BIGINT,
@@ -808,9 +818,10 @@ DROP TABLE IF EXISTS t_resume_ingestion;
 CREATE TABLE t_resume_ingestion (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
   legal_entity_id       BIGINT,
-  original_file_name    VARCHAR(255) NOT NULL,
-  stored_file_name      VARCHAR(120) NOT NULL,
-  file_ext              VARCHAR(10)  NOT NULL,
+  tenant_id             VARCHAR(100),
+  original_file_name    VARCHAR(255),
+  stored_file_name      VARCHAR(120),
+  file_ext              VARCHAR(10),
   status                VARCHAR(20)  NOT NULL DEFAULT '取込待ち',
   extracted_text        LONGTEXT,
   parsed_json           LONGTEXT,
@@ -819,17 +830,21 @@ CREATE TABLE t_resume_ingestion (
   error_message         VARCHAR(500),
   converted_engineer_id BIGINT,
   candidate_id          BIGINT,
+  version               INT NOT NULL DEFAULT 0,
   review_note           VARCHAR(500),
   created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag          TINYINT NOT NULL DEFAULT 0,
   created_by            BIGINT
 );
+CREATE INDEX IF NOT EXISTS idx_resume_ingestion_tenant_status_file
+    ON t_resume_ingestion (tenant_id, status, stored_file_name, deleted_flag);
 
 DROP TABLE IF EXISTS t_project_ingestion;
 CREATE TABLE t_project_ingestion (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
   legal_entity_id     BIGINT,
+  tenant_id           VARCHAR(100),
   source_type         VARCHAR(10) NOT NULL,
   original_file_name  VARCHAR(255),
   stored_file_name    VARCHAR(120),
@@ -844,13 +859,17 @@ CREATE TABLE t_project_ingestion (
   created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag        TINYINT NOT NULL DEFAULT 0,
-  created_by          BIGINT
+  created_by          BIGINT,
+  version             INT NOT NULL DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS idx_project_ingestion_tenant_status
+    ON t_project_ingestion (tenant_id, status, deleted_flag, id);
 
 DROP TABLE IF EXISTS t_bp_availability;
 CREATE TABLE t_bp_availability (
   id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
   legal_entity_id    BIGINT,
+  tenant_id          VARCHAR(100),
   initial_name       VARCHAR(50),
   bp_company         VARCHAR(120),
   bp_company_id      BIGINT,
@@ -1109,6 +1128,7 @@ CREATE TABLE m_organization_unit (
 
 CREATE TABLE t_user_organization (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
   user_id BIGINT NOT NULL,
   organization_id BIGINT NOT NULL,
   position_name VARCHAR(100),

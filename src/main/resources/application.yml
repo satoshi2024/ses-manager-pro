@@ -207,6 +207,10 @@ logging:
 
 # ===== アプリ固有設定 =====
 app:
+  accounting:
+    tenants:
+      # 本番系profileでは空欄を許可しない。ACCOUNTING_TENANT_IDSをカンマ区切りで指定すること。
+      ids: ${ACCOUNTING_TENANT_IDS:}
   # ===== Prometheus スクレイパー・マシン認証（REV-RP-P1-004 / ACC-OPS-P1-002） =====
   # 秘密情報は環境変数のみ。リポジトリ・設定ファイルへ平文パスワードを書かないこと。
   # username/password が両方非空のときだけ ROLE_METRICS_SCRAPER のインメモリユーザーを登録する。
@@ -242,7 +246,8 @@ app:
       enabled: ${OIDC_ENABLED:false}
       local-login-enabled: ${LOCAL_LOGIN_ENABLED:true}
       break-glass-login-enabled: ${BREAK_GLASS_LOGIN_ENABLED:true}
-      tenant-id: ${OIDC_TENANT_ID:default}
+      # 設定された場合だけ認証ユーザーtenantと一致検証する。未設定時にdefaultへ寄せない。
+      tenant-id: ${OIDC_TENANT_ID:}
       provider-registration-id: ${OIDC_PROVIDER_REGISTRATION_ID:enterprise}
       issuer-uri: ${OIDC_ISSUER_URI:}
       client-id: ${OIDC_CLIENT_ID:}

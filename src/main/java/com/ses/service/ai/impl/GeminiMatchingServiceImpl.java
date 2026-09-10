@@ -94,14 +94,14 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
 
         List<MatchResultDto> results = new ArrayList<>();
         for (Project p : activeProjects) {
-            List<ProjectSkill> pSkills = psMap.getOrDefault(p.getId(), Collections.emptyList());
-            Set<Long> mustIds = pSkills.stream().filter(s -> Integer.valueOf(1).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
-            Set<Long> niceIds = pSkills.stream().filter(s -> Integer.valueOf(0).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
+            List<ProjectSkill> skills = psMap.getOrDefault(p.getId(), Collections.emptyList());
+            Set<Long> mustIds = skills.stream().filter(s -> Integer.valueOf(1).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
+            Set<Long> niceIds = skills.stream().filter(s -> Integer.valueOf(0).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
 
             BigDecimal pMin = p.getUnitPriceMin() != null ? p.getUnitPriceMin() : null;
             BigDecimal pMax = p.getUnitPriceMax() != null ? p.getUnitPriceMax() : null;
+
             BigDecimal ePrice = engineer.getExpectedUnitPrice() != null ? engineer.getExpectedUnitPrice() : null;
-            
             MatchScore score = MatchScoreCalculator.calculate(
                     mustIds, niceIds, engSkillIds, pMin, pMax,
                     ePrice, p.getStartDate(), engineer.getAvailableDate()
@@ -112,10 +112,15 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
             MatchResultDto dto = new MatchResultDto();
             dto.setProjectId(p.getId());
             dto.setProjectName(p.getProjectName());
+            dto.setProposedPrice(engineer.getExpectedUnitPrice() != null ? engineer.getExpectedUnitPrice().intValue() : null);
             dto.setScore(score.getTotalScore());
             fillMatchExplanation(dto, AiAllowlistFields.merge(
-                    AiAllowlistFields.engineer(engineer, engSkills),
+                    AiAllowlistFields.engineer(engineer, null),
                     AiAllowlistFields.project(p),
+                    Map.of("engineerSkill.skillName", engSkills.stream()
+                            .map(EngineerSkillDetailDto::getSkillName)
+                            .filter(n -> n != null && !n.isBlank())
+                            .collect(Collectors.joining(","))),
                     AiAllowlistFields.ruleScore(score)), score.getTotalScore(), context);
             results.add(dto);
         }
@@ -308,7 +313,7 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
         } catch (Exception e) {
             log.warn("AI response parse failed: category=PARSE_ERROR responseBytes={} safety=REDACTED",
                     responseByteLength(aiResponse));
-            dto.setReason("AIによる理由生成結果の解析に失敗しました。");
+            dto.setReason("AIによる理由生成結果の解析に失敗しました");
             dto.setSellingPoints("解析失敗");
         }
     }

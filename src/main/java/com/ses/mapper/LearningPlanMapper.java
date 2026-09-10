@@ -11,4 +11,7 @@ public interface LearningPlanMapper extends BaseMapper<LearningPlan> {
 
     @Select("SELECT * FROM t_learning_plan WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     LearningPlan selectByIdForUpdate(@Param("id") Long id);
+
+    @Select("SELECT * FROM t_learning_plan WHERE id = #{id} AND tenant_id = #{tenantId} AND deleted_flag = 0 FOR UPDATE")
+    LearningPlan selectByIdForUpdateWithTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
 }

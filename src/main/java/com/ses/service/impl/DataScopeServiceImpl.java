@@ -197,7 +197,8 @@ public class DataScopeServiceImpl implements DataScopeService {
         if (!isScoped()) return Collections.emptySet();
         Set<Long> contracts = allowedContractIds();
         if (contracts.isEmpty()) return Collections.emptySet();
-        List<Long> ids = contractMapper.selectOrganizationIdsByContractIds(new java.util.ArrayList<>(contracts));
+        List<Long> ids = contractMapper.selectOrganizationIdsByContractIds(new java.util.ArrayList<>(contracts),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         return ids == null ? Collections.emptySet() : new HashSet<>(ids);
     }
 
@@ -269,9 +270,10 @@ public class DataScopeServiceImpl implements DataScopeService {
         }
         Caches caches = cache();
         if (caches.contractIds != null) return caches.contractIds;
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         // sales_user_id=自分 ∪ 未帰属(NULL) を可視とする。
-        caches.contractIds = contractMapper.selectList(new QueryWrapper<Contract>()
-                        .and(w -> w.eq("sales_user_id", userId).or().isNull("sales_user_id")))
+        caches.contractIds = contractMapper.selectListForTenant(new QueryWrapper<Contract>()
+                        .and(w -> w.eq("sales_user_id", userId).or().isNull("sales_user_id")), tenantId)
                 .stream().map(Contract::getId).filter(java.util.Objects::nonNull)
                 .collect(Collectors.toSet());
         return caches.contractIds;
@@ -320,10 +322,11 @@ public class DataScopeServiceImpl implements DataScopeService {
         Caches caches = cache();
         if (caches.customerIds != null) return caches.customerIds;
         Set<Long> customerIds = new HashSet<>();
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         // 担当契約の顧客。customer権限は「自分が担当」の契約由来のみとする（未帰属契約1件で顧客全体へ
         // 権限拡大するのを防ぐ / R3R-34）。未帰属契約は contract 一覧では見えるが顧客アクセス根拠にはしない。
-        contractMapper.selectList(new QueryWrapper<Contract>()
-                        .eq("sales_user_id", userId))
+        contractMapper.selectListForTenant(new QueryWrapper<Contract>()
+                        .eq("sales_user_id", userId), tenantId)
                 .forEach(c -> { if (c.getCustomerId() != null) customerIds.add(c.getCustomerId()); });
         // 担当要員/自分の提案の案件→顧客
         Set<Long> proposalIds = computeProposalIds(userId);

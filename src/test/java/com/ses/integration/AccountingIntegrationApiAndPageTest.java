@@ -1,6 +1,7 @@
 package com.ses.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.config.LoginUser;
 import com.ses.dto.accounting.IntegrationTokensDto;
 import com.ses.entity.*;
 import com.ses.service.CustomerService;
@@ -17,6 +18,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
@@ -77,6 +81,8 @@ class AccountingIntegrationApiAndPageTest {
 
     @BeforeEach
     void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+        normalizeMockPrincipal();
         connection = connectionService.getOrCreateConnection("default", 1L, "freee", "accounting");
         IntegrationTokensDto tokens = IntegrationTokensDto.builder()
                 .accessToken("test-secret-access-token-999")
@@ -85,6 +91,33 @@ class AccountingIntegrationApiAndPageTest {
                 .expiresIn(3600L)
                 .build();
         connectionService.saveTokens(connection.getId(), tokens, 10001L, "テスト株式会社", 1L);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+        SecurityContextHolder.clearContext();
+    }
+
+    /** 内部HTTP契約に合わせ、@WithMockUserを明示的なtenant付きLoginUserへ変換する。 */
+    private void normalizeMockPrincipal() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getPrincipal() instanceof LoginUser) {
+            return;
+        }
+        String role = authentication.getAuthorities().stream()
+                .map(a -> a.getAuthority().startsWith("ROLE_")
+                        ? a.getAuthority().substring("ROLE_".length()) : a.getAuthority())
+                .findFirst().orElse("管理者");
+        SysUser user = new SysUser();
+        user.setUsername(authentication.getName());
+        user.setPassword("test");
+        user.setRole(role);
+        user.setStatus(1);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user, authentication.getAuthorities());
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
     }
 
     @Test
@@ -360,10 +393,7 @@ class AccountingIntegrationApiAndPageTest {
                 "SCOPE-JOB-C", "hash-c", "{\"c\":1}", "other-tenant", null, orgXId);
 
         // マネージャー (username = ローカルID) として認証
-        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
-                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
-                        String.valueOf(managerUserId), null,
-                        java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_マネージャー"))));
+        SecurityContextHolder.getContext().setAuthentication(loginAuthentication(managerUserId, "マネージャー"));
 
         // --- ジョブ一覧: 自組織 (orgX, tenant=default) のみ ---
         mockMvc.perform(get("/api/accounting/jobs"))
@@ -460,11 +490,8 @@ class AccountingIntegrationApiAndPageTest {
         reconMock.verify();
 
         // --- 管理者の retry/cancel: 他テナントジョブは SQL 境界で 404 ---
-        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
-                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
-                        "admin_user", null,
-                        java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_管理者"))));
-        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        SecurityContextHolder.getContext().setAuthentication(loginAuthentication("admin_user", "管理者"));
+        SecurityContextHolder.clearContext();
     }
 
     @Test
@@ -472,10 +499,7 @@ class AccountingIntegrationApiAndPageTest {
     void connection_crossTenant_hidden_forManager() throws Exception {
         Long orgXId = insertOrg("SCOPE-CONN-ORG", "スコープ接続組織", 1L);
         Long managerUserId = insertManagerUser(orgXId);
-        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
-                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
-                        String.valueOf(managerUserId), null,
-                        java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_マネージャー"))));
+        SecurityContextHolder.getContext().setAuthentication(loginAuthentication(managerUserId, "マネージャー"));
 
         IntegrationConnection otherTenantNull = connectionService.getOrCreateConnection("other-tenant", null, "freee", "accounting");
         IntegrationConnection otherTenantSameLegal = connectionService.getOrCreateConnection("other-tenant", 1L, "freee", "accounting");
@@ -566,10 +590,32 @@ class AccountingIntegrationApiAndPageTest {
         user.setRealName("スコープマネージャー");
         user.setRole("マネージャー");
         user.setStatus(1);
+        user.setTenantId("default");
         sysUserMapper.insert(user);
         userOrganizationMapper.insert(com.ses.entity.UserOrganization.builder()
                 .userId(user.getId()).organizationId(orgId).primaryFlag(1)
                 .validFrom(java.time.LocalDate.of(2026, 1, 1)).build());
         return user.getId();
+    }
+
+    private Authentication loginAuthentication(Long userId, String role) {
+        SysUser user = sysUserMapper.selectById(userId);
+        user.setRole(role);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user,
+                java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_" + role)));
+        return new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
+    }
+
+    private Authentication loginAuthentication(String username, String role) {
+        SysUser user = new SysUser();
+        user.setUsername(username);
+        user.setPassword("test");
+        user.setRole(role);
+        user.setStatus(1);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user,
+                java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_" + role)));
+        return new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
     }
 }

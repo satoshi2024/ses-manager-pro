@@ -1,6 +1,7 @@
 ConcurrentContractizationTest
 ConcurrentLoginSessionSmokeTest
 ConcurrentSubmitReopenTest
+WorkRecordTenantIsolationMySqlTest
 CustomerContactPrimaryConcurrencyTest
 FlywayRepairRunbookTest
 FlywayStaffingSchemaSmokeTest

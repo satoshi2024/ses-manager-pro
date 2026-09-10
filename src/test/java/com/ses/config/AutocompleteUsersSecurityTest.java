@@ -5,6 +5,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.test.context.support.WithMockUser;
+import com.ses.config.LoginUser;
+import com.ses.entity.SysUser;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,16 +40,28 @@ class AutocompleteUsersSecurityTest {
     }
 
     @Test
-    @WithMockUser(roles = "管理者")
     void users_管理者ロールは200() throws Exception {
-        mockMvc.perform(get("/api/autocomplete/users"))
+        mockMvc.perform(get("/api/autocomplete/users").with(authentication("管理者")))
                 .andExpect(status().isOk());
     }
 
     @Test
-    @WithMockUser(roles = "営業")
     void engineers_営業ロールは200() throws Exception {
-        mockMvc.perform(get("/api/autocomplete/engineers"))
+        mockMvc.perform(get("/api/autocomplete/engineers").with(authentication("営業")))
                 .andExpect(status().isOk());
+    }
+
+    private RequestPostProcessor authentication(String role) {
+        SysUser user = new SysUser();
+        user.setId(1L);
+        user.setUsername("autocomplete-security-user");
+        user.setPassword("password");
+        user.setRole(role);
+        user.setStatus(1);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_" + role)));
+        return SecurityMockMvcRequestPostProcessors.authentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
     }
 }

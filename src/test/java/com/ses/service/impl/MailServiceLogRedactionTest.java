@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.ses.service.EmailTemplateService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,16 @@ import static org.mockito.Mockito.when;
  * 例外経路でも例外メッセージ（本文・トークンを含み得る）を出力しないことを確認する。
  */
 class MailServiceLogRedactionTest {
+
+    @BeforeEach
+    void setUpTenantContext() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
 
     private static final String RECIPIENT = "invite.token.user@partner.example.jp";
     private static final String RECIPIENT_LOCALPART = "invite.token.user";

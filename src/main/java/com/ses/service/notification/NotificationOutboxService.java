@@ -3,6 +3,7 @@ package com.ses.service.notification;
 import com.ses.entity.Notification;
 import com.ses.entity.NotificationOutbox;
 import com.ses.mapper.NotificationOutboxMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -28,7 +29,12 @@ public class NotificationOutboxService {
             return null;
         }
         LocalDateTime now = LocalDateTime.now();
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        if (notification.getTenantId() != null && !tenantId.equals(notification.getTenantId())) {
+            throw new IllegalStateException("通知とoutboxのtenantが一致しません");
+        }
         NotificationOutbox row = NotificationOutbox.builder()
+                .tenantId(tenantId)
                 .notificationId(notification.getId())
                 .type(notification.getType())
                 .title(notification.getTitle())
@@ -60,6 +66,7 @@ public class NotificationOutboxService {
 
     /** schedulerからdue行をまとめて処理する。各行のclaim・送信・更新は独立transactionで行う。 */
     public int dispatchDue(int requestedLimit) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         int limit = Math.max(1, Math.min(requestedLimit, 100));
         try {
             dispatcher.recoverStaleRows();
@@ -73,7 +80,7 @@ public class NotificationOutboxService {
             // reconciliationの障害で同一batchの新規due行を止めない。
             log.error("通知outboxのreconciliationに失敗しました: exceptionClass={}", e.getClass().getName());
         }
-        List<NotificationOutbox> due = outboxMapper.selectDue(limit);
+        List<NotificationOutbox> due = outboxMapper.selectDue(tenantId, limit);
         int processed = 0;
         for (NotificationOutbox row : due) {
             try {

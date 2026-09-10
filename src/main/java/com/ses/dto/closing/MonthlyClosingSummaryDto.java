@@ -4,7 +4,6 @@ import com.ses.dto.WorkRecordGridDto;
 import com.ses.dto.invoice.BpPaymentListDto;
 import com.ses.dto.invoice.InvoiceBalanceDto;
 import com.ses.dto.invoice.UnbilledWorkRecordDto;
-import com.ses.entity.WorkRecord;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -21,7 +20,7 @@ public class MonthlyClosingSummaryDto {
     /** (a) 工数未入力の稼動契約。 */
     private List<WorkRecordGridDto> unenteredWork;
     /** (b) 入力中のまま残っている実績（未確定）。 */
-    private List<WorkRecord> unconfirmedRecords;
+    private List<MonthlyClosingWorkRecordDto> unconfirmedRecords;
     
     @Data
     public static class CustomerUnbilledDto {

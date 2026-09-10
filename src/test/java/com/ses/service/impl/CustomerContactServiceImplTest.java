@@ -17,6 +17,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -29,23 +30,25 @@ class CustomerContactServiceImplTest {
     @Mock private CustomerMapper customerMapper;
     @Mock private DataScopeService dataScopeService;
     @Mock private AuthorizationService authorizationService;
+    @Mock private com.ses.service.security.TenantOwnershipResolver tenantOwnershipResolver;
 
     @AfterEach
     void clearSecurityContext() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
     void rolesJsonは5値配列へ正規化して保存する() {
-        CustomerContactServiceImpl service = service();
+    CustomerContactServiceImpl service = service();
         CustomerContact saved = contact("[\"決裁者\",\"請求\"]");
-        when(mapper.selectList(any())).thenReturn(List.of());
+        when(mapper.selectListForTenant(any(), any(), any(), any(), any())).thenReturn(List.of());
         when(mapper.insert(any(CustomerContact.class))).thenAnswer(invocation -> {
             CustomerContact value = invocation.getArgument(0);
             value.setId(1L);
             return 1;
         });
-        when(mapper.selectById(1L)).thenReturn(saved);
+        when(mapper.selectByIdForTenant(1L, 10L, "default")).thenReturn(saved);
 
         com.ses.dto.customer.CustomerContactSaveRequest request = request("[\"請求\",\"決裁者\"]");
         service.create(10L, request);
@@ -58,7 +61,7 @@ class CustomerContactServiceImplTest {
     @Test
     void 不正なrolesJsonは400で拒否する() {
         CustomerContactServiceImpl service = service();
-        when(mapper.selectList(any())).thenReturn(List.of());
+        when(mapper.selectListForTenant(any(), any(), any(), any(), any())).thenReturn(List.of());
         com.ses.dto.customer.CustomerContactSaveRequest request = request("決裁者,調達");
 
         var exception = assertThrows(com.ses.common.exception.BusinessException.class,
@@ -70,7 +73,7 @@ class CustomerContactServiceImplTest {
     @Test
     void PIIはaction許可時だけ平文で画面DTOへ返す() {
         CustomerContactServiceImpl service = service();
-        when(mapper.selectList(any())).thenReturn(List.of(contact("[]")));
+        when(mapper.selectListForTenant(any(), any(), any(), any(), any())).thenReturn(List.of(contact("[]")));
         when(authorizationService.isAllowed(any(), eq("customer.pii.view"))).thenReturn(false);
 
         var masked = service.list(10L, LocalDate.of(2026, 1, 1)).get(0);
@@ -88,7 +91,7 @@ class CustomerContactServiceImplTest {
         CustomerContactServiceImpl service = service();
         CustomerContact existing = contact("[]");
         existing.setEmail("test@example.com");
-        when(mapper.selectList(any())).thenReturn(List.of(existing));
+        when(mapper.selectListForTenant(any(), any(), any(), any(), any())).thenReturn(List.of(existing));
         when(authorizationService.isAllowed(any(), eq("customer.pii.view"))).thenReturn(true);
 
         var candidates = service.duplicateCandidates(10L, "ｔｅｓｔ＠example.com", null, null);
@@ -103,7 +106,7 @@ class CustomerContactServiceImplTest {
         CustomerContactServiceImpl service = service();
         CustomerContact existing = contact("[]");
         existing.setPhone("03-1234-5678");
-        when(mapper.selectList(any())).thenReturn(List.of(existing));
+        when(mapper.selectListForTenant(any(), any(), any(), any(), any())).thenReturn(List.of(existing));
         when(authorizationService.isAllowed(any(), eq("customer.pii.view"))).thenReturn(true);
 
         var candidates = service.duplicateCandidates(10L, null, "０３－１２３４－５６７８", null);
@@ -113,10 +116,19 @@ class CustomerContactServiceImplTest {
     }
 
     private CustomerContactServiceImpl service() {
+        AccountingTenantContextHolder.setTenantId("default");
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("sales", "n/a"));
-        lenient().when(customerMapper.selectByIdForUpdate(10L)).thenReturn(new com.ses.entity.Customer());
-        return new CustomerContactServiceImpl(mapper, customerMapper, dataScopeService, authorizationService, Clock.systemUTC());
+        lenient().when(customerMapper.selectByIdForTenant(10L, "default"))
+                .thenReturn(new com.ses.entity.Customer());
+        lenient().when(customerMapper.selectByIdForUpdateForTenant(10L, "default"))
+                .thenReturn(new com.ses.entity.Customer());
+        lenient().when(tenantOwnershipResolver.selectCustomer("default", 10L))
+                .thenReturn(new com.ses.entity.Customer());
+        lenient().when(mapper.selectListForTenant(org.mockito.ArgumentMatchers.eq(10L),
+                org.mockito.ArgumentMatchers.eq("default"), any(), any(), any())).thenReturn(List.of());
+        return new CustomerContactServiceImpl(mapper, customerMapper, dataScopeService, authorizationService,
+                Clock.systemUTC(), tenantOwnershipResolver);
     }
 
     private com.ses.dto.customer.CustomerContactSaveRequest request(String rolesJson) {

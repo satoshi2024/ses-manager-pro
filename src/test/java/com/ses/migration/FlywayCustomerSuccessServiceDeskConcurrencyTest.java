@@ -272,6 +272,68 @@ class FlywayCustomerSuccessServiceDeskConcurrencyTest {
         }
     }
 
+    @Test
+    void MySQLのtenant月採番は9999境界で並行更新を一件だけ成功させる() throws Exception {
+        migrate();
+        String tenantId = "nf02-sequence-concurrency";
+        String requestMonth = "209912";
+        try (Connection connection = MYSQL.createConnection("")) {
+            try (PreparedStatement delete = connection.prepareStatement(
+                    "DELETE FROM t_service_request_sequence WHERE tenant_id = ? AND request_month = ?")) {
+                delete.setString(1, tenantId);
+                delete.setString(2, requestMonth);
+                delete.executeUpdate();
+            }
+            try (PreparedStatement insert = connection.prepareStatement(
+                    "INSERT INTO t_service_request_sequence (tenant_id, request_month, last_number) VALUES (?, ?, 9998)")) {
+                insert.setString(1, tenantId);
+                insert.setString(2, requestMonth);
+                insert.executeUpdate();
+            }
+        }
+
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Integer> affectedRows = new java.util.concurrent.CopyOnWriteArrayList<>();
+        ConcurrentLinkedQueue<Throwable> failures = new ConcurrentLinkedQueue<>();
+        List<Thread> workers = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            Thread worker = new Thread(() -> {
+                try (Connection connection = MYSQL.createConnection("")) {
+                    connection.setAutoCommit(false);
+                    ready.countDown();
+                    assertTrue(start.await(10, TimeUnit.SECONDS));
+                    try (PreparedStatement update = connection.prepareStatement(
+                            "UPDATE t_service_request_sequence SET last_number = last_number + 1 "
+                                    + "WHERE tenant_id = ? AND request_month = ? AND last_number < 9999")) {
+                        update.setString(1, tenantId);
+                        update.setString(2, requestMonth);
+                        affectedRows.add(update.executeUpdate());
+                    }
+                    connection.commit();
+                } catch (Throwable failure) {
+                    failures.add(failure);
+                }
+            }, "nf02-sequence-worker-" + i);
+            workers.add(worker);
+            worker.start();
+        }
+
+        assertTrue(ready.await(10, TimeUnit.SECONDS));
+        start.countDown();
+        for (Thread worker : workers) {
+            worker.join(15_000L);
+            assertTrue(!worker.isAlive(), "採番workerが終了していません");
+        }
+        assertTrue(failures.isEmpty(), failures.toString());
+        assertEquals(List.of(0, 1), affectedRows.stream().sorted().toList());
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            assertEquals(9999, queryInt(statement,
+                    "SELECT last_number FROM t_service_request_sequence WHERE tenant_id = '" + tenantId
+                            + "' AND request_month = '" + requestMonth + "'"));
+        }
+    }
+
     private static void migrate() {
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())

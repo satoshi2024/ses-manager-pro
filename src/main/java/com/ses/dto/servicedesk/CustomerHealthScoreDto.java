@@ -34,6 +34,9 @@ public class CustomerHealthScoreDto {
     /** 直近30日SLA違反件数 */
     private Integer slaBreachCount30d;
 
+    /** 時刻不明の旧SLA breach件数。直近30日違反とは混同しない。 */
+    private Integer slaBreachHistoricalUnknownCount;
+
     /** 直近90日平均CSATスコア */
     private BigDecimal avgCsatScore;
 

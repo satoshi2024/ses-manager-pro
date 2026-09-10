@@ -62,6 +62,7 @@ class AiRecommendationRecorderExecutionContextTest {
     @Mock EngineerMapper engineerMapper;
     @Mock ProjectMapper projectMapper;
     @Mock EngineerSkillMapper engineerSkillMapper;
+    @Mock com.ses.service.security.TenantOwnershipResolver tenantOwnershipResolver;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -191,7 +192,10 @@ class AiRecommendationRecorderExecutionContextTest {
         active.setRuleVersion("rule-2026.09");
         when(engineerMapper.selectById(10L)).thenReturn(source);
         when(projectMapper.selectById(20L)).thenReturn(sourceProject);
-        when(engineerSkillMapper.selectDetailByEngineerId(10L)).thenReturn(List.of());
+        org.mockito.Mockito.lenient().when(engineerSkillMapper.selectDetailByEngineerId(10L)).thenReturn(List.of());
+        org.mockito.Mockito.lenient().when(engineerSkillMapper.selectDetailByEngineerIdAndTenant(org.mockito.ArgumentMatchers.eq(10L), org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
+        when(tenantOwnershipResolver.selectEngineer(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(10L))).thenReturn(source);
+        when(projectMapper.selectByIdForTenant(org.mockito.ArgumentMatchers.eq(20L), org.mockito.ArgumentMatchers.any())).thenReturn(sourceProject);
         when(versionMapper.selectOne(any())).thenReturn(active);
         doAnswer(invocation -> {
             AiRecommendationRun run = invocation.getArgument(0);
@@ -226,7 +230,8 @@ class AiRecommendationRecorderExecutionContextTest {
 
     private AiRecommendationRecorder recorder() {
         return new AiRecommendationRecorderImpl(versionMapper, runMapper, itemMapper,
-                bpAvailabilityMapper, engineerMapper, projectMapper, engineerSkillMapper, objectMapper);
+                bpAvailabilityMapper, engineerMapper, projectMapper, engineerSkillMapper, objectMapper,
+                tenantOwnershipResolver);
     }
 
     private CopilotExecutionContext fullContext() {

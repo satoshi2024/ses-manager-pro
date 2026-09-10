@@ -12,7 +12,9 @@ import com.ses.mapper.ServiceAttachmentLinkMapper;
 import com.ses.mapper.ServiceCommentMapper;
 import com.ses.mapper.ServiceRequestMapper;
 import com.ses.service.DocumentService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.DataScopeService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,6 +30,7 @@ import java.time.ZoneId;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -50,24 +53,36 @@ class ServiceRequestAttachmentServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         service = new ServiceRequestAttachmentService(requestMapper, commentMapper, attachmentLinkMapper,
                 documentVersionMapper, documentService, dataScopeService, new UploadProperties(),
                 Clock.fixed(Instant.parse("2026-08-28T03:00:00Z"), ZoneId.of("Asia/Tokyo")));
         request = new ServiceRequest();
         request.setId(10L);
         request.setCustomerId(20L);
-        when(requestMapper.selectById(10L)).thenReturn(request);
+        request.setTenantId("default");
+        lenient().when(requestMapper.selectById(10L)).thenReturn(request);
+        lenient().when(requestMapper.selectByIdAndTenant(10L, "default")).thenReturn(request);
         lenient().when(dataScopeService.isScoped()).thenReturn(false);
 
         document = new Document();
         document.setId(30L);
+        document.setTenantId("default");
         lenient().when(documentService.registerReceived(any(), any())).thenReturn(document);
         version = new DocumentVersion();
         version.setId(31L);
+        version.setTenantId("default");
         version.setDocumentId(30L);
         version.setVersionNo(1);
         version.setScanStatus("CLEAN");
         lenient().when(documentVersionMapper.findLatestByDocumentId(30L)).thenReturn(version);
+        lenient().when(documentVersionMapper.findByIdempotencyKey(
+                any(), anyString(), anyString(), anyString())).thenReturn(version);
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test

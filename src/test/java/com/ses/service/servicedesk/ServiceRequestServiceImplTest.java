@@ -24,6 +24,8 @@ import com.ses.mapper.ServiceSlaClockMapper;
 import com.ses.mapper.ServiceSlaPolicyMapper;
 import com.ses.mapper.ServiceStateEventMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -80,9 +82,16 @@ class ServiceRequestServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         testCustomer = new Customer();
+        testCustomer.setTenantId("default");
         testCustomer.setCompanyName("株式会社テスト顧客CS");
         customerMapper.insert(testCustomer);
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -129,7 +138,7 @@ class ServiceRequestServiceImplTest {
 
         // 1. RECEIVED -> IN_PROGRESS (初回応答)
         serviceRequestService.changeStatus(reqId,
-                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").reason("担当エンジニア調査開始").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").reason("担当エンジニア調査開始").version(0).build(),
                 100L, "INTERNAL_USER", "管理者");
 
         ServiceRequestDto d1 = serviceRequestService.getInternalDetail(reqId);
@@ -139,7 +148,7 @@ class ServiceRequestServiceImplTest {
 
         // 2. IN_PROGRESS -> WAITING_CUSTOMER (一時停止)
         serviceRequestService.changeStatus(reqId,
-                ServiceRequestStatusChangeRequest.builder().toStatus("WAITING_CUSTOMER").reason("再現ログの提供待ち").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("WAITING_CUSTOMER").reason("再現ログの提供待ち").version(1).build(),
                 100L, "INTERNAL_USER", "管理者");
 
         ServiceRequestDto d2 = serviceRequestService.getInternalDetail(reqId);
@@ -149,7 +158,7 @@ class ServiceRequestServiceImplTest {
 
         // 3. WAITING_CUSTOMER -> IN_PROGRESS (再開・SLA期限延長)
         serviceRequestService.changeStatus(reqId,
-                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").reason("顧客からログ受領").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").reason("顧客からログ受領").version(2).build(),
                 100L, "INTERNAL_USER", "管理者");
 
         ServiceRequestDto d3 = serviceRequestService.getInternalDetail(reqId);
@@ -158,7 +167,7 @@ class ServiceRequestServiceImplTest {
 
         // 4. IN_PROGRESS -> RESOLVED (解決・SLA解決時計停止)
         serviceRequestService.changeStatus(reqId,
-                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("インデックス追加により負荷解消").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("インデックス追加により負荷解消").version(3).build(),
                 100L, "INTERNAL_USER", "管理者");
 
         ServiceRequestDto d4 = serviceRequestService.getInternalDetail(reqId);
@@ -169,7 +178,7 @@ class ServiceRequestServiceImplTest {
 
         // 5. RESOLVED -> CLOSED (終了)
         serviceRequestService.changeStatus(reqId,
-                ServiceRequestStatusChangeRequest.builder().toStatus("CLOSED").reason("顧客確認完了").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("CLOSED").reason("顧客確認完了").version(4).build(),
                 100L, "INTERNAL_USER", "管理者");
 
         ServiceRequestDto d5 = serviceRequestService.getInternalDetail(reqId);
@@ -178,7 +187,7 @@ class ServiceRequestServiceImplTest {
 
         // 6. CLOSED -> REOPENED (再オープン・新SLAラウンド作成)
         serviceRequestService.changeStatus(reqId,
-                ServiceRequestStatusChangeRequest.builder().toStatus("REOPENED").reason("同一事象の再発").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("REOPENED").reason("同一事象の再発").version(5).build(),
                 100L, "INTERNAL_USER", "管理者");
 
         ServiceRequestDto d6 = serviceRequestService.getInternalDetail(reqId);
@@ -236,6 +245,30 @@ class ServiceRequestServiceImplTest {
     }
 
     @Test
+    @DisplayName("status変更のexpectedVersion省略はDB読込で補完せず400となり、副作用を残さないこと")
+    void missingExpectedVersionIsRejectedBeforeStateChange() {
+        ServiceRequest created = serviceRequestService.createRequest(ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId())
+                .category("SYSTEM")
+                .priority("P2")
+                .subject("version必須テスト")
+                .description("省略されたversionを補完しない")
+                .build(), 100L, false, null);
+        long initialEvents = stateEventMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ServiceStateEvent>()
+                .eq(com.ses.entity.ServiceStateEvent::getServiceRequestId, created.getId()));
+
+        BusinessException missing = assertThrows(BusinessException.class, () ->
+                serviceRequestService.changeStatus(created.getId(),
+                        ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").build(),
+                        100L, "INTERNAL_USER", "管理者"));
+
+        assertEquals(400, missing.getCode());
+        assertEquals("RECEIVED", serviceRequestService.getInternalDetail(created.getId()).getStatus());
+        assertEquals(initialEvents, stateEventMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ServiceStateEvent>()
+                .eq(com.ses.entity.ServiceStateEvent::getServiceRequestId, created.getId())));
+    }
+
+    @Test
     @DisplayName("WAITING_CUSTOMERから直接解決しても停止区間を営業分で精算すること")
     void testWaitingCustomerDirectResolveClosesPauseInterval() {
         ServiceRequest created = serviceRequestService.createRequest(ServiceRequestCreateRequest.builder()
@@ -247,10 +280,10 @@ class ServiceRequestServiceImplTest {
                 .build(), 100L, false, null);
 
         serviceRequestService.changeStatus(created.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").version(0).build(),
                 100L, "INTERNAL_USER", "管理者");
         serviceRequestService.changeStatus(created.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("WAITING_CUSTOMER").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("WAITING_CUSTOMER").version(1).build(),
                 100L, "INTERNAL_USER", "管理者");
         ServiceSlaClock paused = slaClockMapper.selectOne(new LambdaQueryWrapper<ServiceSlaClock>()
                 .eq(ServiceSlaClock::getServiceRequestId, created.getId())
@@ -259,7 +292,7 @@ class ServiceRequestServiceImplTest {
         assertNotNull(paused.getLastPausedAt());
 
         serviceRequestService.changeStatus(created.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").version(2).build(),
                 100L, "INTERNAL_USER", "管理者");
 
         ServiceSlaClock completed = slaClockMapper.selectById(paused.getId());
@@ -316,10 +349,10 @@ class ServiceRequestServiceImplTest {
 
         // WAITING_CUSTOMER に変更
         serviceRequestService.changeStatus(reqId,
-                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").version(0).build(),
                 100L, "INTERNAL_USER", "営業担当");
         serviceRequestService.changeStatus(reqId,
-                ServiceRequestStatusChangeRequest.builder().toStatus("WAITING_CUSTOMER").reason("送付先確認中").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("WAITING_CUSTOMER").reason("送付先確認中").version(1).build(),
                 100L, "INTERNAL_USER", "営業担当");
 
         assertEquals("WAITING_CUSTOMER", serviceRequestService.getInternalDetail(reqId).getStatus());
@@ -358,10 +391,10 @@ class ServiceRequestServiceImplTest {
 
         // 解決状態へ遷移
         serviceRequestService.changeStatus(reqId,
-                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").version(0).build(),
                 100L, "INTERNAL_USER", "営業担当");
         serviceRequestService.changeStatus(reqId,
-                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").version(1).build(),
                 100L, "INTERNAL_USER", "営業担当");
 
         // 1回目のCSAT回答は成功

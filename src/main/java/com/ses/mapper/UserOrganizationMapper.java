@@ -15,14 +15,39 @@ public interface UserOrganizationMapper extends BaseMapper<UserOrganization> {
     @Select("SELECT * FROM t_user_organization WHERE user_id = #{userId} AND deleted_flag = 0 ORDER BY id FOR UPDATE")
     List<UserOrganization> selectByUserForUpdate(@Param("userId") Long userId);
 
+    @Select("SELECT * FROM t_user_organization WHERE tenant_id = #{tenantId} "
+            + "AND user_id = #{userId} AND deleted_flag = 0 ORDER BY id")
+    List<UserOrganization> selectByUserAndTenant(@Param("userId") Long userId,
+                                                  @Param("tenantId") String tenantId);
+
+    @Select("SELECT * FROM t_user_organization WHERE tenant_id = #{tenantId} AND user_id = #{userId} "
+            + "AND manager_user_id = #{managerUserId} AND primary_flag = 1 AND valid_from <= #{asOf} "
+            + "AND (valid_to IS NULL OR valid_to >= #{asOf}) AND deleted_flag = 0")
+    List<UserOrganization> selectManagerAssignmentByTenant(@Param("tenantId") String tenantId,
+                                                            @Param("userId") Long userId,
+                                                            @Param("managerUserId") Long managerUserId,
+                                                            @Param("asOf") java.time.LocalDate asOf);
+
     @Select("SELECT * FROM t_user_organization WHERE manager_user_id = #{userId} AND valid_from <= #{asOf} AND (valid_to IS NULL OR valid_to >= #{asOf}) AND deleted_flag = 0")
     List<UserOrganization> selectActiveByManagerUserId(@Param("userId") Long userId, @Param("asOf") java.time.LocalDate asOf);
 
     @Select("SELECT organization_id FROM t_user_organization WHERE user_id = #{userId} AND primary_flag = 1 AND valid_from <= #{asOf} AND (valid_to IS NULL OR valid_to >= #{asOf}) AND deleted_flag = 0 ORDER BY id DESC LIMIT 1")
     Long selectPrimaryOrganizationId(@Param("userId") Long userId, @Param("asOf") java.time.LocalDate asOf);
 
+    @Select("SELECT organization_id FROM t_user_organization WHERE tenant_id = #{tenantId} "
+            + "AND user_id = #{userId} AND primary_flag = 1 AND valid_from <= #{asOf} "
+            + "AND (valid_to IS NULL OR valid_to >= #{asOf}) AND deleted_flag = 0 ORDER BY id DESC LIMIT 1")
+    Long selectPrimaryOrganizationIdByTenant(@Param("tenantId") String tenantId,
+                                             @Param("userId") Long userId,
+                                             @Param("asOf") java.time.LocalDate asOf);
+
     default Long selectPrimaryOrganizationAt(Long userId, java.time.LocalDate asOf) {
         return selectPrimaryOrganizationId(userId, asOf);
+    }
+
+    /** 承認経路の所属解決。tenant境界を省略した旧クエリは使用しない。 */
+    default Long selectPrimaryOrganizationAtForTenant(String tenantId, Long userId, java.time.LocalDate asOf) {
+        return selectPrimaryOrganizationIdByTenant(tenantId, userId, asOf);
     }
 
     /**

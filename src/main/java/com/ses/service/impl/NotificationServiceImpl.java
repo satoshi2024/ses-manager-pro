@@ -8,6 +8,7 @@ import com.ses.mapper.NotificationMapper;
 import com.ses.mapper.NotificationReadMapper;
 import com.ses.service.NotificationService;
 import com.ses.mapper.UserOrganizationMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.security.OrganizationScopeService;
 import com.ses.service.notification.WebhookNotifier;
 import com.ses.service.notification.NotificationOutboxService;
@@ -38,14 +39,17 @@ public class NotificationServiceImpl implements NotificationService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private NotificationOutboxService notificationOutboxService;
     private final UserOrganizationMapper userOrganizationMapper;
+    private final SysUserMapper sysUserMapper;
     private final java.time.Clock clock;
 
     @Override
     public List<NotificationDto> getRecentNotifications(Long userId) {
-        List<NotificationDto> list = scopedIds() == null
-                ? notificationMapper.selectPageForUser(userId, null, null, 10, 0)
-                : notificationMapper.selectPageForUserScoped(userId, null, null, 10, 0,
-                organizationScopeService.hasFullAccess(), scopedIds());
+        String tenantId = explicitTenantId();
+        List<Long> organizations = scopedIds();
+        List<NotificationDto> list = organizations == null
+                ? notificationMapper.selectPageForUserByTenant(tenantId, userId, null, null, 10, 0)
+                : notificationMapper.selectPageForUserScopedByTenant(tenantId, userId, null, null, 10, 0,
+                organizationScopeService.hasFullAccess(), organizations);
         list.forEach(this::translateDto);
         return list;
     }
@@ -61,13 +65,15 @@ public class NotificationServiceImpl implements NotificationService {
         Page<NotificationDto> page = new Page<>(current, size);
         int offset = (int) ((current - 1) * size);
         List<Long> ids = scopedIds();
+        String tenantId = explicitTenantId();
         List<NotificationDto> records = ids == null
-                ? notificationMapper.selectPageForUser(userId, type, unreadOnly, (int) size, offset)
-                : notificationMapper.selectPageForUserScoped(userId, type, unreadOnly, (int) size, offset,
+                ? notificationMapper.selectPageForUserByTenant(tenantId, userId, type, unreadOnly, (int) size, offset)
+                : notificationMapper.selectPageForUserScopedByTenant(tenantId, userId, type, unreadOnly, (int) size, offset,
                 organizationScopeService.hasFullAccess(), ids);
         records.forEach(this::translateDto);
-        long total = ids == null ? notificationMapper.countPageForUser(userId, type, unreadOnly)
-                : notificationMapper.countPageForUserScoped(userId, type, unreadOnly,
+        long total = ids == null
+                ? notificationMapper.countPageForUserByTenant(tenantId, userId, type, unreadOnly)
+                : notificationMapper.countPageForUserScopedByTenant(tenantId, userId, type, unreadOnly,
                 organizationScopeService.hasFullAccess(), ids);
         page.setRecords(records);
         page.setTotal(total);
@@ -93,15 +99,21 @@ public class NotificationServiceImpl implements NotificationService {
     @Override
     public long unreadCount(Long userId) {
         List<Long> ids = scopedIds();
-        return ids == null ? notificationMapper.countUnread(userId)
-                : notificationMapper.countUnreadScoped(userId, organizationScopeService.hasFullAccess(), ids);
+        String tenantId = explicitTenantId();
+        return ids == null
+                ? notificationMapper.countUnreadByTenant(tenantId, userId)
+                : notificationMapper.countUnreadScopedByTenant(tenantId, userId,
+                organizationScopeService.hasFullAccess(), ids);
     }
 
     @Override
     public void markRead(Long notificationId, Long userId) {
         List<Long> ids = scopedIds();
-        long visible = ids == null ? notificationMapper.countVisible(notificationId, userId)
-                : notificationMapper.countVisibleScoped(notificationId, userId, organizationScopeService.hasFullAccess(), ids);
+        String tenantId = explicitTenantId();
+        long visible = ids == null
+                ? notificationMapper.countVisibleByTenant(tenantId, notificationId, userId)
+                : notificationMapper.countVisibleScopedByTenant(tenantId, notificationId, userId,
+                organizationScopeService.hasFullAccess(), ids);
         if (visible == 0) return;
         try {
             NotificationRead read = new NotificationRead();
@@ -117,8 +129,13 @@ public class NotificationServiceImpl implements NotificationService {
     @Override
     public void markAllRead(Long userId) {
         List<Long> ids = scopedIds();
-        if (ids == null) notificationMapper.markAllReadForUser(userId);
-        else notificationMapper.markAllReadForUserScoped(userId, organizationScopeService.hasFullAccess(), ids);
+        String tenantId = explicitTenantId();
+        if (ids == null) {
+            notificationMapper.markAllReadForUserByTenant(tenantId, userId);
+        } else {
+            notificationMapper.markAllReadForUserScopedByTenant(tenantId, userId,
+                    organizationScopeService.hasFullAccess(), ids);
+        }
     }
 
     @Override
@@ -218,6 +235,12 @@ public class NotificationServiceImpl implements NotificationService {
         }
         try {
             Notification notification = new Notification();
+            String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+            if (userId != null && sysUserMapper.selectByIdAndTenant(userId, tenantId) == null) {
+                // recipient IDだけを別tenantから持ち込む経路を許可しない。
+                return null;
+            }
+            notification.setTenantId(tenantId);
             notification.setRecipientUserId(userId);
             notification.setType(type);
             notification.setTitle(title);
@@ -284,10 +307,15 @@ public class NotificationServiceImpl implements NotificationService {
                 : new java.util.ArrayList<>(organizationScopeService.allowedOrganizationIds());
     }
 
+    private String explicitTenantId() {
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+    }
+
     private Long resolveRecipientOrganizationId(Long userId) {
         if (userId == null || userOrganizationMapper == null) {
             return null;
         }
-        return userOrganizationMapper.selectPrimaryOrganizationId(userId, LocalDate.now(clock));
+        return userOrganizationMapper.selectPrimaryOrganizationIdByTenant(
+                explicitTenantId(), userId, LocalDate.now(clock));
     }
 }

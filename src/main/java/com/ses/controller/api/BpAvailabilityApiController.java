@@ -1,6 +1,5 @@
 package com.ses.controller.api;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.PageUtils;
@@ -31,14 +30,7 @@ public class BpAvailabilityApiController {
             @RequestParam(defaultValue = "10") long size,
             @RequestParam(required = false) String status) {
         Page<BpAvailability> page = PageUtils.safePage(current, size);
-        LambdaQueryWrapper<BpAvailability> wrapper = new LambdaQueryWrapper<BpAvailability>()
-                .eq(status != null && !status.isBlank(), BpAvailability::getStatus, status)
-                .notIn((status == null || status.isBlank()),
-                        BpAvailability::getStatus,
-                        com.ses.service.portal.impl.PortalBpServiceImpl.AVAILABILITY_PENDING,
-                        com.ses.service.portal.impl.PortalBpServiceImpl.AVAILABILITY_REJECTED)
-                .orderByDesc(BpAvailability::getCreatedAt);
-        return ApiResult.success(bpAvailabilityService.page(page, wrapper));
+        return ApiResult.success(bpAvailabilityService.pageForCurrentTenant(page, status));
     }
 
     /**
@@ -49,7 +41,7 @@ public class BpAvailabilityApiController {
     @PostMapping("/{id}/review")
     public ApiResult<BpAvailability> review(@PathVariable Long id, @RequestBody ReviewRequest request) {
         bpAvailabilityService.review(id, Boolean.TRUE.equals(request.isApproved()), request.getComment());
-        BpAvailability availability = bpAvailabilityService.getById(id);
+        BpAvailability availability = bpAvailabilityService.getForCurrentTenant(id);
         if (availability == null) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
@@ -83,7 +75,7 @@ public class BpAvailabilityApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<BpAvailability> getById(@PathVariable Long id) {
-        return ApiResult.success(bpAvailabilityService.getById(id));
+        return ApiResult.success(bpAvailabilityService.getForCurrentTenant(id));
     }
 
     /**
@@ -97,7 +89,7 @@ public class BpAvailabilityApiController {
             throw com.ses.common.exception.BusinessException.of(400, "error.bpAvailability.bpCompanyRequired");
         }
         com.ses.common.util.EntityProtectUtil.protectForUpdate(bpAvailability);
-        return ApiResult.success(bpAvailabilityService.updateById(bpAvailability));
+        return ApiResult.success(bpAvailabilityService.updateForCurrentTenant(id, bpAvailability));
     }
 
     /**
@@ -105,7 +97,7 @@ public class BpAvailabilityApiController {
      */
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
-        return ApiResult.success(bpAvailabilityService.removeById(id));
+        return ApiResult.success(bpAvailabilityService.removeForCurrentTenant(id));
     }
 
     /**

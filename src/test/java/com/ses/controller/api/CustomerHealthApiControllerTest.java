@@ -1,7 +1,9 @@
 package com.ses.controller.api;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.config.LoginUser;
 import com.ses.dto.servicedesk.CustomerHealthScoreDto;
+import com.ses.entity.SysUser;
 import com.ses.service.servicedesk.CustomerHealthService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -10,6 +12,9 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,6 +54,7 @@ class CustomerHealthApiControllerTest {
 
         mockMvc.perform(post("/api/customer-success/health/snapshots")
                         .with(csrf())
+                        .with(tenantAuthentication("default", "管理者"))
                         .param("targetMonth", "2026-08")
                         .param("reason", "手動実行"))
                 .andExpect(status().isOk())
@@ -64,7 +70,7 @@ class CustomerHealthApiControllerTest {
         doNothing().when(customerHealthService).generateMonthlySnapshot(any(), any());
 
         mockMvc.perform(post("/api/customer-success/health/snapshots")
-                        .with(csrf()))
+                        .with(csrf()).with(tenantAuthentication("default", "管理者")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
     }
@@ -77,7 +83,7 @@ class CustomerHealthApiControllerTest {
                 .when(customerHealthService).generateMonthlySnapshot(eq("2026-13"), any());
 
         mockMvc.perform(post("/api/customer-success/health/snapshots")
-                        .with(csrf())
+                        .with(csrf()).with(tenantAuthentication("default", "管理者"))
                         .param("targetMonth", "2026-13"))
                 .andExpect(jsonPath("$.code").value(400));
     }
@@ -134,10 +140,25 @@ class CustomerHealthApiControllerTest {
                 .build();
         when(customerHealthService.listCustomerHealthSummaries(any(), any())).thenReturn(List.of(dto));
 
-        mockMvc.perform(get("/api/customer-success/health"))
+        mockMvc.perform(get("/api/customer-success/health")
+                        .with(tenantAuthentication("default", "営業")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data[0].customerName").value("テスト顧客"))
                 .andExpect(jsonPath("$.data[0].healthScore").value(85));
+    }
+
+    private RequestPostProcessor tenantAuthentication(String tenantId, String role) {
+        SysUser user = new SysUser();
+        user.setId(1L);
+        user.setUsername("test-" + role);
+        user.setPassword("password");
+        user.setRole(role);
+        user.setStatus(1);
+        user.setTenantId(tenantId);
+        LoginUser principal = new LoginUser(user,
+                List.of(new SimpleGrantedAuthority("ROLE_" + role)));
+        return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                .authentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
     }
 }

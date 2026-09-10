@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 @TableName("t_ai_feedback")
 public class AiFeedback extends BaseEntity {
 
+    private String tenantId;
     private Long itemId;
     private String decision;
     private String reasonCode;

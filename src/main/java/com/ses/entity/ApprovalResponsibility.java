@@ -21,7 +21,7 @@ import java.time.LocalDate;
 @TableName("t_approval_responsibility")
 public class ApprovalResponsibility extends BaseEntity {
 
-    private Long tenantId;
+    private String tenantId;
     private String responsibilityType;
     private Long organizationId;
     private Long userId;
@@ -31,4 +31,17 @@ public class ApprovalResponsibility extends BaseEntity {
 
     @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
+
+    /** 旧テスト/seedの数値tenant指定を、永続化する文字列tenantへ明示変換する互換builder。 */
+    public static class ApprovalResponsibilityBuilder {
+        public ApprovalResponsibilityBuilder tenantId(String tenantId) {
+            this.tenantId = tenantId;
+            return this;
+        }
+
+        public ApprovalResponsibilityBuilder tenantId(Long tenantId) {
+            this.tenantId = tenantId == null ? null : String.valueOf(tenantId);
+            return this;
+        }
+    }
 }

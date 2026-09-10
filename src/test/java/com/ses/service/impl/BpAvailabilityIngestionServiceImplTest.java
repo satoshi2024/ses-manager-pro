@@ -7,6 +7,7 @@ import com.ses.entity.BpAvailabilityIngestion;
 import com.ses.mapper.BpAvailabilityIngestionMapper;
 import com.ses.service.BpAvailabilityService;
 import com.ses.service.security.LegalEntityContextService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,6 +49,12 @@ public class BpAvailabilityIngestionServiceImplTest {
                 new org.apache.ibatis.builder.MapperBuilderAssistant(
                         new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""),
                 BpAvailabilityIngestion.class);
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -58,8 +65,8 @@ public class BpAvailabilityIngestionServiceImplTest {
         job.setLegalEntityId(1L);
         job.setStatus("要確認");
 
-        when(ingestionMapper.selectById(jobId)).thenReturn(job);
-        when(ingestionMapper.update(eq(null), any())).thenReturn(1);
+        when(ingestionMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
+        when(ingestionMapper.confirmForTenant(eq(jobId), eq("default"), eq(999L), any())).thenReturn(1);
         doAnswer(inv -> {
             BpAvailability arg = inv.getArgument(0);
             arg.setId(999L);
@@ -73,7 +80,7 @@ public class BpAvailabilityIngestionServiceImplTest {
 
         assertEquals(999L, resultId);
         verify(bpAvailabilityService, times(1)).save(any(BpAvailability.class));
-        verify(ingestionMapper, times(1)).update(eq(null), any());
+        verify(ingestionMapper, times(1)).confirmForTenant(eq(jobId), eq("default"), eq(999L), any());
     }
 
     @Test
@@ -85,7 +92,7 @@ public class BpAvailabilityIngestionServiceImplTest {
         job.setStatus("要確認");
         job.setConvertedAvailabilityId(999L); // Already confirmed
 
-        when(ingestionMapper.selectById(jobId)).thenReturn(job);
+        when(ingestionMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
 
         ReviewedBpAvailabilityDto dto = new ReviewedBpAvailabilityDto();
         dto.setInitialName("M.M");
@@ -103,12 +110,12 @@ public class BpAvailabilityIngestionServiceImplTest {
         job.setLegalEntityId(1L);
         job.setStatus("取込待ち");
 
-        when(ingestionMapper.selectById(jobId)).thenReturn(job);
-        when(ingestionMapper.update(eq(null), any())).thenReturn(1);
+        when(ingestionMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
+        when(ingestionMapper.rejectForTenant(eq(jobId), eq("default"), eq("NG"))).thenReturn(1);
 
         ingestionService.reject(jobId, "NG");
 
-        verify(ingestionMapper, times(1)).update(eq(null), any());
+        verify(ingestionMapper, times(1)).rejectForTenant(eq(jobId), eq("default"), eq("NG"));
     }
 
     @Test
@@ -119,8 +126,8 @@ public class BpAvailabilityIngestionServiceImplTest {
         job.setLegalEntityId(1L);
         job.setStatus("確定済"); // Cannot reject completed job
 
-        when(ingestionMapper.selectById(jobId)).thenReturn(job);
-        when(ingestionMapper.update(eq(null), any())).thenReturn(0);
+        when(ingestionMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
+        when(ingestionMapper.rejectForTenant(eq(jobId), eq("default"), eq("NG"))).thenReturn(0);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> ingestionService.reject(jobId, "NG"));
         assertEquals(409, ex.getCode());

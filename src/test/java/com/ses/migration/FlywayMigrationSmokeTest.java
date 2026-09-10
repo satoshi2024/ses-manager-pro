@@ -634,8 +634,9 @@ class FlywayMigrationSmokeTest {
                 while (rs.next()) {
                     columns.add(rs.getString(1));
                 }
-                assertEquals(java.util.List.of("request_id", "round_no", "step_no", "approver_slot_user_id"),
-                        columns, "V78のaction UNIQUEはroundとslot userを含む必要がある");
+                assertEquals(java.util.List.of("tenant_id", "request_id", "round_no", "step_no",
+                                "approver_slot_user_id"),
+                        columns, "V159のaction UNIQUEはtenant、round、slot userを含む必要がある");
             }
 
             // V80: 注文・注文請・月次検収 (order-acceptance-workflow / S09)

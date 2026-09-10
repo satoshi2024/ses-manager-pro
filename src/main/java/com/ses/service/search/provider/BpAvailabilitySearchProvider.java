@@ -6,6 +6,7 @@ import com.ses.dto.search.GlobalSearchResultDTO;
 import com.ses.entity.BpAvailability;
 import com.ses.mapper.BpAvailabilityMapper;
 import com.ses.service.search.GlobalSearchProvider;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.DataScopeService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -34,11 +35,13 @@ public class BpAvailabilitySearchProvider implements GlobalSearchProvider {
 
     @Override
     public List<GlobalSearchResultDTO> search(String query, int maxResults) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (dataScopeService.isScoped() && dataScopeService.allowedCustomerIds() != null && dataScopeService.allowedCustomerIds().isEmpty()) {
             return List.of();
         }
 
         LambdaQueryWrapper<BpAvailability> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(BpAvailability::getTenantId, tenantId);
         wrapper.and(w -> w.like(BpAvailability::getBpCompany, query)
                 .or().like(BpAvailability::getInitialName, query));
 

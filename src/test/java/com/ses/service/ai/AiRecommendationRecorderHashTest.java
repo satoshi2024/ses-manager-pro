@@ -16,6 +16,8 @@ import com.ses.service.ai.LegacyAiExecutionContextBinder;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -43,6 +45,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 @Transactional
 class AiRecommendationRecorderHashTest {
+
+    @BeforeEach
+    void bindTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
 
     @Autowired
     private AiRecommendationRecorder recorder;
@@ -72,6 +84,7 @@ class AiRecommendationRecorderHashTest {
                 .setDetails(Map.of("tenant_id", "tenant-recorder"));
 
         Engineer engineer = new Engineer();
+        engineer.setTenantId("default");
         engineer.setFullName("AI-hash-e-" + stamp);
         engineer.setLegalEntityId(77L);
         engineer.setEmploymentType("正社員");
@@ -83,8 +96,8 @@ class AiRecommendationRecorderHashTest {
         Long customerId = jdbcTemplate.queryForObject(
                 "SELECT COALESCE(MAX(id), 0) + 1 FROM m_customer", Long.class);
         jdbcTemplate.update(
-                "INSERT INTO m_customer (id, company_name, legal_entity_id, deleted_flag) VALUES (?, ?, ?, 0)",
-                customerId, "AI-hash-cust-" + stamp, 77L);
+                "INSERT INTO m_customer (id, company_name, tenant_id, legal_entity_id, deleted_flag) VALUES (?, ?, 'default', 77L, 0)",
+                customerId, "AI-hash-cust-" + stamp);
 
         Project project = new Project();
         project.setProjectName("AI-hash-seed-" + stamp);

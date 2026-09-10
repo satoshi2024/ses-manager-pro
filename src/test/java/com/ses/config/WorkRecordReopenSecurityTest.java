@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.entity.SysUser;
 import com.ses.service.WorkRecordService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -7,6 +8,10 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +36,28 @@ class WorkRecordReopenSecurityTest {
 
     @MockBean
     private WorkRecordService workRecordService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void bindTenantToMockPrincipal() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getPrincipal() instanceof LoginUser) {
+            return;
+        }
+        String role = authentication.getAuthorities().stream()
+                .map(a -> a.getAuthority().startsWith("ROLE_")
+                        ? a.getAuthority().substring("ROLE_".length()) : a.getAuthority())
+                .findFirst().orElse("管理者");
+        SysUser user = new SysUser();
+        user.setUsername(authentication.getName());
+        user.setPassword("test");
+        user.setRole(role);
+        user.setStatus(1);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_" + role)));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+    }
 
     @Test
     @WithMockUser(roles = "営業")

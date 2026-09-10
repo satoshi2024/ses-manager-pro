@@ -1,7 +1,7 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.config.AiConfig;
@@ -17,6 +17,7 @@ import com.ses.service.FileStorageService;
 import com.ses.service.BpAvailabilityIngestionService;
 import com.ses.service.BpAvailabilityService;
 import com.ses.service.skillsheet.BpAvailabilityParseService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -83,8 +84,19 @@ public class BpAvailabilityIngestionServiceImpl
     }
 
     @Override
+    public Page<BpAvailabilityIngestion> pageForCurrentTenant(Page<BpAvailabilityIngestion> page, String status) {
+        return baseMapper.selectPageForTenant(page, requireTenant(), status);
+    }
+
+    @Override
+    public BpAvailabilityIngestion getForCurrentTenant(Long id) {
+        return baseMapper.selectByIdForTenant(id, requireTenant());
+    }
+
+    @Override
     public BpAvailabilityIngestion createJob(MultipartFile file) {
         requireLegalEntityContext();
+        String tenantId = requireTenant();
         StoredFile stored = fileStorageService.store(file, FileKind.BP_EMAIL);
 
         BpAvailabilityIngestion job = new BpAvailabilityIngestion();
@@ -97,13 +109,14 @@ public class BpAvailabilityIngestionServiceImpl
         this.save(job);
 
         log.info("要員空き状況メール取込ジョブを作成しました (FILE): jobId={}", job.getId());
-        selfProvider.getIfAvailable().parseAsync(job.getId());
+        selfProvider.getIfAvailable().parseAsync(job.getId(), tenantId);
         return job;
     }
 
     @Override
     public BpAvailabilityIngestion createJobFromPaste(String text) {
         requireLegalEntityContext();
+        String tenantId = requireTenant();
         BpAvailabilityIngestion job = new BpAvailabilityIngestion();
         job.setFileExt("PASTE");
         job.setExtractedText(text);
@@ -112,18 +125,34 @@ public class BpAvailabilityIngestionServiceImpl
         this.save(job);
 
         log.info("要員空き状況メール取込ジョブを作成しました (PASTE): jobId={}", job.getId());
-        selfProvider.getIfAvailable().parseAsync(job.getId());
+        selfProvider.getIfAvailable().parseAsync(job.getId(), tenantId);
         return job;
     }
 
     @Override
     @Async("taskExecutor")
     public void parseAsync(Long id) {
-        boolean casOk = casStatus(id, STATUS_PENDING, STATUS_PARSING);
+        parseAsyncInTenant(id, requireTenant());
+    }
+
+    @Override
+    @Async("taskExecutor")
+    public void parseAsync(Long id, String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        AccountingTenantContextHolder.runWithTenant(tenantId, () -> parseAsyncInTenant(id, tenantId));
+    }
+
+    private void parseAsyncInTenant(Long id, String tenantId) {
+        BpAvailabilityIngestion job = baseMapper.selectByIdForTenant(id, tenantId);
+        if (job == null) return;
+
+        boolean casOk = casStatus(id, tenantId, STATUS_PENDING, STATUS_PARSING);
         if (!casOk) {
-            casOk = casStatus(id, STATUS_REVIEW, STATUS_PARSING);
+            casOk = casStatus(id, tenantId, STATUS_REVIEW, STATUS_PARSING);
             if (!casOk) {
-                casOk = casStatus(id, STATUS_FAILED, STATUS_PARSING);
+                casOk = casStatus(id, tenantId, STATUS_FAILED, STATUS_PARSING);
             }
         }
         if (!casOk) {
@@ -131,10 +160,7 @@ public class BpAvailabilityIngestionServiceImpl
             return;
         }
 
-        BpAvailabilityIngestion job = this.getById(id);
-        if (job == null) return;
         assertJobLegalEntity(job);
-
         try {
             String text = job.getExtractedText();
             if (!"PASTE".equals(job.getFileExt())) {
@@ -150,15 +176,8 @@ public class BpAvailabilityIngestionServiceImpl
             ParsedBpAvailabilityDto parsed = parseService.parse(text);
             String parsedJson = objectMapper.writeValueAsString(parsed);
 
-            LambdaUpdateWrapper<BpAvailabilityIngestion> wrapper = new LambdaUpdateWrapper<>();
-            wrapper.eq(BpAvailabilityIngestion::getId, id)
-                   .eq(BpAvailabilityIngestion::getStatus, STATUS_PARSING)
-                   .set(BpAvailabilityIngestion::getStatus, STATUS_REVIEW)
-                   .set(BpAvailabilityIngestion::getExtractedText, text)
-                   .set(BpAvailabilityIngestion::getParsedJson, parsedJson)
-                   .set(BpAvailabilityIngestion::getAiProvider, aiConfig.getProvider())
-                   .set(BpAvailabilityIngestion::getAiModel, aiConfig.getModel());
-            this.update(wrapper);
+            baseMapper.updateParsedForTenant(id, tenantId, STATUS_REVIEW, text, parsedJson,
+                    aiConfig.getProvider(), aiConfig.getModel());
 
         } catch (BusinessException e) {
             updateFailed(id, e.getMessage());
@@ -176,7 +195,7 @@ public class BpAvailabilityIngestionServiceImpl
         if (!STATUS_REVIEW.equals(status) && !STATUS_FAILED.equals(status)) {
             throw BusinessException.of("error.projectIngestion.invalidStatus");
         }
-        selfProvider.getIfAvailable().parseAsync(id);
+        selfProvider.getIfAvailable().parseAsync(id, requireTenant());
     }
 
     @Override
@@ -188,11 +207,7 @@ public class BpAvailabilityIngestionServiceImpl
         }
         try {
             String parsedJson = objectMapper.writeValueAsString(dto);
-            LambdaUpdateWrapper<BpAvailabilityIngestion> wrapper = new LambdaUpdateWrapper<>();
-            wrapper.eq(BpAvailabilityIngestion::getId, id)
-                   .set(BpAvailabilityIngestion::getParsedJson, parsedJson)
-                   .set(BpAvailabilityIngestion::getReviewNote, dto.getReviewNote());
-            this.update(wrapper);
+            baseMapper.updateReviewForTenant(id, requireTenant(), parsedJson, dto.getReviewNote());
         } catch (Exception e) {
             log.error("レビュー保存に失敗しました: jobId={}", id, e);
             throw BusinessException.of("error.systemError");
@@ -246,13 +261,7 @@ public class BpAvailabilityIngestionServiceImpl
         bpAvailabilityService.save(availability);
         Long availabilityId = availability.getId();
 
-        int updated = baseMapper.update(null, new LambdaUpdateWrapper<BpAvailabilityIngestion>()
-                .eq(BpAvailabilityIngestion::getId, id)
-                .eq(BpAvailabilityIngestion::getStatus, STATUS_REVIEW)
-                .isNull(BpAvailabilityIngestion::getConvertedAvailabilityId)
-                .set(BpAvailabilityIngestion::getStatus, STATUS_DONE)
-                .set(BpAvailabilityIngestion::getConvertedAvailabilityId, availabilityId)
-                .set(BpAvailabilityIngestion::getReviewNote, dto.getReviewNote()));
+        int updated = baseMapper.confirmForTenant(id, requireTenant(), availabilityId, dto.getReviewNote());
         if (updated == 0) {
             throw BusinessException.of(409, "error.projectIngestion.alreadyConfirmed");
         }
@@ -264,18 +273,14 @@ public class BpAvailabilityIngestionServiceImpl
     public void reject(Long id, String reason) {
         BpAvailabilityIngestion job = getJobOrThrow(id);
         assertJobLegalEntity(job);
-        int updated = baseMapper.update(null, new LambdaUpdateWrapper<BpAvailabilityIngestion>()
-                .eq(BpAvailabilityIngestion::getId, id)
-                .in(BpAvailabilityIngestion::getStatus, STATUS_PENDING, STATUS_PARSING, STATUS_REVIEW, STATUS_FAILED)
-                .set(BpAvailabilityIngestion::getStatus, STATUS_REJECTED)
-                .set(BpAvailabilityIngestion::getErrorMessage, reason));
+        int updated = baseMapper.rejectForTenant(id, requireTenant(), reason);
         if (updated == 0) {
             throw BusinessException.of(409, "error.projectIngestion.invalidStatus");
         }
     }
 
     private BpAvailabilityIngestion getJobOrThrow(Long id) {
-        BpAvailabilityIngestion job = this.getById(id);
+        BpAvailabilityIngestion job = baseMapper.selectByIdForTenant(id, requireTenant());
         if (job == null) {
             throw BusinessException.of(404, "error.projectIngestion.notFound");
         }
@@ -296,19 +301,19 @@ public class BpAvailabilityIngestionServiceImpl
         legalEntityContextService.assertCurrent(job.getLegalEntityId());
     }
 
-    private boolean casStatus(Long id, String fromStatus, String toStatus) {
-        int count = baseMapper.update(null, new LambdaUpdateWrapper<BpAvailabilityIngestion>()
-                .eq(BpAvailabilityIngestion::getId, id)
-                .eq(BpAvailabilityIngestion::getStatus, fromStatus)
-                .set(BpAvailabilityIngestion::getStatus, toStatus));
+    private String requireTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
+    }
+
+    private boolean casStatus(Long id, String tenantId, String fromStatus, String toStatus) {
+        int count = baseMapper.updateStatusForTenant(id, tenantId, fromStatus, toStatus);
         return count > 0;
     }
 
+
     private void updateFailed(Long id, String message) {
-        baseMapper.update(null, new LambdaUpdateWrapper<BpAvailabilityIngestion>()
-                .eq(BpAvailabilityIngestion::getId, id)
-                .set(BpAvailabilityIngestion::getStatus, STATUS_FAILED)
-                .set(BpAvailabilityIngestion::getErrorMessage, message != null && message.length() > 500
-                        ? message.substring(0, 500) : message));
+        String tenantId = requireTenant();
+        baseMapper.updateFailedForTenant(id, tenantId, message != null && message.length() > 500
+                ? message.substring(0, 500) : message);
     }
 }

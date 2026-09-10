@@ -157,7 +157,8 @@ public class UtilizationForecastServiceImpl implements UtilizationForecastServic
                         .in("engineer_id", engineerIds)
                         .eq(legalEntityId != null, "legal_entity_id", legalEntityId);
         applyIdFilter(contractQuery, "id", scopeSnapshot == null ? null : scopeSnapshot.contractIds());
-        List<Contract> contracts = contractMapper.selectList(contractQuery);
+        List<Contract> contracts = contractMapper.selectListForTenant(contractQuery,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
 
         Map<Long, List<Contract>> contractsByEngineer = contracts.stream()
                 .filter(c -> c.getEngineerId() != null)

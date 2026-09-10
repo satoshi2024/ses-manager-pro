@@ -1,7 +1,5 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
@@ -12,6 +10,7 @@ import com.ses.entity.CustomerContact;
 import com.ses.mapper.CustomerContactMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.service.CustomerContactService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.CrmScopeService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +35,7 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     private final CustomerMapper customerMapper;
     private final DataScopeService dataScopeService;
     private final com.ses.service.security.AuthorizationService authorizationService;
+    private final com.ses.service.security.TenantOwnershipResolver tenantOwnershipResolver;
     @Autowired(required = false)
     private Clock clock = Clock.systemDefaultZone();
     @Autowired(required = false)
@@ -44,25 +44,21 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     public CustomerContactServiceImpl(CustomerContactMapper mapper, CustomerMapper customerMapper,
                                       DataScopeService dataScopeService,
                                       com.ses.service.security.AuthorizationService authorizationService,
-                                      Clock clock) {
+                                      Clock clock,
+                                      com.ses.service.security.TenantOwnershipResolver tenantOwnershipResolver) {
         this.mapper = mapper;
         this.customerMapper = customerMapper;
         this.dataScopeService = dataScopeService;
         this.authorizationService = authorizationService;
         this.clock = clock == null ? Clock.systemDefaultZone() : clock;
+        this.tenantOwnershipResolver = tenantOwnershipResolver;
     }
 
     @Override
     public List<CustomerContactDto> list(Long customerId, LocalDate asOf) {
         assertCustomerScope(customerId);
         LocalDate target = asOf != null ? asOf : LocalDate.now(clock);
-        return mapper.selectList(new LambdaQueryWrapper<CustomerContact>()
-                        .eq(CustomerContact::getCustomerId, customerId)
-                        .le(CustomerContact::getValidFrom, target)
-                        .and(w -> w.isNull(CustomerContact::getValidTo)
-                                .or().ge(CustomerContact::getValidTo, target))
-                        .orderByDesc(CustomerContact::getValidFrom)
-                        .orderByDesc(CustomerContact::getId))
+        return mapper.selectListForTenant(customerId, currentTenant(), null, target, null)
                 .stream().map(this::toDto).collect(Collectors.toList());
     }
 
@@ -70,10 +66,7 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     public List<CustomerContactDto> duplicateCandidates(Long customerId, String email, String phone, Long excludeId) {
         assertCustomerScope(customerId);
         if (!hasText(email) && !hasText(phone)) return List.of();
-        return mapper.selectList(new LambdaQueryWrapper<CustomerContact>()
-                        .eq(CustomerContact::getCustomerId, customerId)
-                        .eq(CustomerContact::getStatus, "有効")
-                        .last("LIMIT 100"))
+        return mapper.selectListForTenant(customerId, currentTenant(), "有効", null, null)
                 .stream()
                 .filter(c -> !Objects.equals(c.getId(), excludeId)
                         && (sameEmail(email, c.getEmail()) || samePhone(phone, c.getPhone())))
@@ -86,23 +79,12 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     public List<CustomerContactDto> recipientCandidates(Long customerId, LocalDate asOf, String role) {
         assertCustomerScope(customerId);
         LocalDate target = asOf != null ? asOf : LocalDate.now(clock);
-        LambdaQueryWrapper<CustomerContact> query = new LambdaQueryWrapper<CustomerContact>()
-                        .eq(CustomerContact::getCustomerId, customerId)
-                        .eq(CustomerContact::getStatus, "有効")
-                        .le(CustomerContact::getValidFrom, target)
-                        .and(w -> w.isNull(CustomerContact::getValidTo)
-                                .or().ge(CustomerContact::getValidTo, target))
-                        .isNotNull(CustomerContact::getEmail)
-                        .ne(CustomerContact::getEmail, "")
-                        .orderByDesc(CustomerContact::getPrimaryFlag)
-                        .orderByAsc(CustomerContact::getId);
         if (role != null && !role.isBlank()) {
             if (!ALLOWED_ROLES.contains(role)) {
                 throw BusinessException.of(400, "error.crm.contactRoleInvalid");
             }
-            query.like(CustomerContact::getRolesJson, "\"" + role + "\"");
         }
-        return mapper.selectList(query)
+        return mapper.selectListForTenant(customerId, currentTenant(), "有効", target, role)
                 .stream().map(this::toDto).collect(Collectors.toList());
     }
 
@@ -121,7 +103,7 @@ public class CustomerContactServiceImpl implements CustomerContactService {
         apply(contact, request);
         if (contact.getPrimaryFlag() == null) contact.setPrimaryFlag(0);
         mapper.insert(contact);
-        return toDto(mapper.selectById(contact.getId()));
+        return toDto(mapper.selectByIdForTenant(contact.getId(), customerId, currentTenant()));
     }
 
     @Override
@@ -138,26 +120,16 @@ public class CustomerContactServiceImpl implements CustomerContactService {
         validatePrimaryPeriod(customerId, contactId, request.getPrimaryFlag(), request.getStatus(),
                 request.getValidFrom(), request.getValidTo());
 
-        UpdateWrapper<CustomerContact> update = new UpdateWrapper<CustomerContact>()
-                .eq("id", contactId)
-                .eq("customer_id", customerId)
-                .eq("version", current.getVersion());
-        update.set("name", request.getName())
-                .set("name_kana", request.getNameKana())
-                .set("department", request.getDepartment())
-                .set("position", request.getPosition())
-                .set("roles_json", normalizeRolesJson(request.getRolesJson()))
-                .set("email",preserveMasked(current.getEmail(), request.getEmail(), true))
-                .set("phone",preserveMasked(current.getPhone(), request.getPhone(), false))
-                .set("primary_flag", request.getPrimaryFlag() == null ? 0 : request.getPrimaryFlag())
-                .set("valid_from", request.getValidFrom())
-                .set("valid_to", request.getValidTo())
-                .set("status", request.getStatus())
-                .set("version", current.getVersion() + 1);
-        if (mapper.update(null, update) != 1) {
+        String tenantId = currentTenant();
+        String rolesJson = normalizeRolesJson(request.getRolesJson());
+        String email = preserveMasked(current.getEmail(), request.getEmail(), true);
+        String phone = preserveMasked(current.getPhone(), request.getPhone(), false);
+        Integer primaryFlag = request.getPrimaryFlag() == null ? 0 : request.getPrimaryFlag();
+        if (mapper.updateByIdForTenant(contactId, customerId, tenantId, current.getVersion(), request,
+                rolesJson, email, phone, primaryFlag) != 1) {
             throw BusinessException.of("error.common.optimisticLock");
         }
-        CustomerContact updated = mapper.selectById(contactId);
+        CustomerContact updated = mapper.selectByIdForTenant(contactId, customerId, currentTenant());
         return toDto(updated);
     }
 
@@ -173,28 +145,19 @@ public class CustomerContactServiceImpl implements CustomerContactService {
         if (version == null || !Objects.equals(version, current.getVersion())) {
             throw BusinessException.of("error.common.optimisticLock");
         }
-        UpdateWrapper<CustomerContact> update = new UpdateWrapper<CustomerContact>()
-                .eq("id", contactId).eq("customer_id", customerId).eq("version", current.getVersion())
-                .set("status", "退職").set("valid_to", end).set("primary_flag", 0)
-                .set("version", current.getVersion() + 1);
-        if (mapper.update(null, update) != 1) {
+        if (mapper.retireForTenant(contactId, customerId, currentTenant(), current.getVersion(), end) != 1) {
             throw BusinessException.of("error.common.optimisticLock");
         }
-        return toDto(mapper.selectById(contactId));
+        return toDto(mapper.selectByIdForTenant(contactId, customerId, currentTenant()));
     }
 
     @Override
     public String resolveRecipientEmail(Long customerId, Long contactId, LocalDate asOf) {
         assertCustomerScope(customerId);
         LocalDate target = asOf != null ? asOf : LocalDate.now(clock);
-        CustomerContact contact = mapper.selectOne(new LambdaQueryWrapper<CustomerContact>()
-                .eq(CustomerContact::getId, contactId)
-                .eq(CustomerContact::getCustomerId, customerId)
-                .eq(CustomerContact::getStatus, "有効")
-                .le(CustomerContact::getValidFrom, target)
-                .and(w -> w.isNull(CustomerContact::getValidTo).or().ge(CustomerContact::getValidTo, target))
-                .isNotNull(CustomerContact::getEmail)
-                .ne(CustomerContact::getEmail, ""));
+        CustomerContact contact = mapper.selectListForTenant(customerId, currentTenant(), "有効", target, null)
+                .stream().filter(c -> Objects.equals(c.getId(), contactId)
+                        && c.getEmail() != null && !c.getEmail().isBlank()).findFirst().orElse(null);
         if (contact == null) {
             throw BusinessException.of("error.invoice.recipientContactUnavailable");
         }
@@ -204,39 +167,32 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     @Override
     public CustomerContact getOwnedOrThrow(Long customerId, Long contactId) {
         assertCustomerScope(customerId);
-        CustomerContact contact = mapper.selectOne(new LambdaQueryWrapper<CustomerContact>()
-                .eq(CustomerContact::getId, contactId)
-                .eq(CustomerContact::getCustomerId, customerId));
+        CustomerContact contact = mapper.selectByIdForTenant(contactId, customerId, currentTenant());
         if (contact == null) throw BusinessException.of(404, "error.crm.contactNotFound");
         return contact;
     }
 
     private CustomerContact lockOwned(Long customerId, Long contactId) {
-        CustomerContact contact = mapper.selectOne(new LambdaQueryWrapper<CustomerContact>()
-                .eq(CustomerContact::getId, contactId)
-                .eq(CustomerContact::getCustomerId, customerId)
-                .last("FOR UPDATE"));
+        CustomerContact contact = mapper.selectForUpdateForTenant(contactId, customerId, currentTenant());
         if (contact == null) throw BusinessException.of(404, "error.crm.contactNotFound");
         return contact;
     }
 
     private void lockCustomerContacts(Long customerId) {
-        if (customerMapper.selectByIdForUpdate(customerId) == null) {
+        if (customerMapper.selectByIdForUpdateForTenant(customerId, currentTenant()) == null) {
             throw BusinessException.of(404, "error.crm.customerNotFound");
         }
-        mapper.selectList(new LambdaQueryWrapper<CustomerContact>()
-                .eq(CustomerContact::getCustomerId, customerId).orderByAsc(CustomerContact::getId).last("FOR UPDATE"));
+        mapper.selectListForTenant(customerId, currentTenant(), null, null, null);
     }
 
     private void validatePrimaryPeriod(Long customerId, Long excludedId, Integer primaryFlag, String status,
                                        LocalDate from, LocalDate to) {
         if (!Integer.valueOf(1).equals(primaryFlag) || !"有効".equals(status)) return;
-        List<CustomerContact> contacts = mapper.selectList(new LambdaQueryWrapper<CustomerContact>()
-                .eq(CustomerContact::getCustomerId, customerId)
-                .eq(CustomerContact::getPrimaryFlag, 1)
-                .eq(CustomerContact::getStatus, "有効")
-                .and(w -> w.isNull(CustomerContact::getValidTo).or().ge(CustomerContact::getValidTo, from))
-                .le(CustomerContact::getValidFrom, to == null ? LocalDate.of(9999, 12, 31) : to));
+        List<CustomerContact> contacts = mapper.selectListForTenant(customerId, currentTenant(), "有効", null, null)
+                .stream().filter(c -> Integer.valueOf(1).equals(c.getPrimaryFlag())
+                        && !c.getValidFrom().isAfter(to == null ? LocalDate.of(9999, 12, 31) : to)
+                        && (c.getValidTo() == null || !c.getValidTo().isBefore(from)))
+                .collect(Collectors.toList());
         boolean overlap = contacts.stream().anyMatch(c -> !Objects.equals(c.getId(), excludedId)
                 && overlaps(c.getValidFrom(), c.getValidTo(), from, to));
         if (overlap) throw BusinessException.of("error.crm.primaryContactOverlap");
@@ -271,11 +227,19 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     }
 
     private void assertCustomerScope(Long customerId) {
+        String tenantId = currentTenant();
+        if (tenantOwnershipResolver.selectCustomer(tenantId, customerId) == null) {
+            throw BusinessException.of(404, "error.crm.customerNotFound");
+        }
         if (crmScopeService != null) {
             crmScopeService.assertAllowedCustomer(customerId, LocalDate.now(clock));
         } else {
             dataScopeService.assertAllowedCustomer(customerId);
         }
+    }
+
+    private String currentTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 
     private boolean hasText(String value) {

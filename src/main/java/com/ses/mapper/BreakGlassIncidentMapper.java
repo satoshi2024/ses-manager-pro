@@ -19,6 +19,10 @@ public interface BreakGlassIncidentMapper extends BaseMapper<BreakGlassIncident>
     BreakGlassIncident selectActive(@Param("tenantId") String tenantId, @Param("now") LocalDateTime now);
 
     @Select("SELECT * FROM t_break_glass_incident WHERE id = #{id} AND tenant_id = #{tenantId} "
+            + "AND deleted_flag = 0")
+    BreakGlassIncident selectByIdAndTenant(@Param("tenantId") String tenantId, @Param("id") Long id);
+
+    @Select("SELECT * FROM t_break_glass_incident WHERE id = #{id} AND tenant_id = #{tenantId} "
             + "AND deleted_flag = 0 FOR UPDATE")
     BreakGlassIncident selectByIdForUpdate(@Param("tenantId") String tenantId, @Param("id") Long id);
 }

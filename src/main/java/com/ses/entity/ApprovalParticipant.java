@@ -23,6 +23,7 @@ public class ApprovalParticipant implements Serializable {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    private String tenantId;
     private Long requestId;
     private Long userId;
     /** applicant / approver */

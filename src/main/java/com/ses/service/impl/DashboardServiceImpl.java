@@ -43,6 +43,7 @@ import com.ses.mapper.ProposalMapper;
 import com.ses.dto.engineer.EngineerSkillDetailDto;
 
 import com.ses.service.security.DataScopeService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.UtilizationCalcService;
 import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
@@ -99,6 +100,7 @@ public class DashboardServiceImpl implements DashboardService {
 
     private DashboardSummaryDto getSummaryAt(Integer year, LocalDate asOf, Long legalEntityId,
                                               EffectiveScopeSnapshot scopeSnapshot) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         // 1. Calculate Charts (Dynamic) and prepare for KPIs
         List<YearMonth> targetMonths = (year != null)
                 ? buildFiscalYearMonths(year)
@@ -112,7 +114,6 @@ public class DashboardServiceImpl implements DashboardService {
         if (!queryMonths.contains(previousMonth)) queryMonths.add(previousMonth);
 
         List<String> monthStrs = queryMonths.stream().map(YearMonth::toString).collect(Collectors.toList());
-        // 確定実績を月別に一括ロードし、月ごとに contract_id -> record へ変換する(共通口径サービスへ渡す形)。
         // チャート対象月の末日までを上限にする(旧: 当月末+1ヶ月だと下々月開始契約がFY図から欠落する)。
         // 月別の対象判定は MonthlyRevenueCalcService.isTargetInMonth に委ねる。
         LocalDate limitDate = targetMonths.get(targetMonths.size() - 1).atEndOfMonth();
@@ -123,16 +124,12 @@ public class DashboardServiceImpl implements DashboardService {
                 .in("status", Arrays.asList("稼動中", "終了", "解約"))
                 .le("start_date", limitDate);
         List<Contract> allContracts = scopedContracts(contractQuery, asOf, legalEntityId, scopeSnapshot);
-
-        // WorkRecord自身に法人列を持たせず、法人境界は親契約のSQL predicateで解決する。
-        QueryWrapper<WorkRecord> workRecordQuery = new QueryWrapper<WorkRecord>()
-                .in("work_month", monthStrs).eq("status", "確定");
-        if (legalEntityId != null) {
-            workRecordQuery.apply("contract_id IN (SELECT id FROM t_contract WHERE legal_entity_id = {0} AND deleted_flag = 0)",
-                    legalEntityId);
-        }
-        applyIdFilter(workRecordQuery, "contract_id", scopeSnapshot == null ? null : scopeSnapshot.contractIds());
-        Map<String, Map<Long, WorkRecord>> confirmedByMonth = workRecordMapper.selectList(workRecordQuery)
+        // 確定実績は、既に解決した契約母集団とtenantの両方をSQLで限定する。
+        List<Long> contractIds = allContracts.stream().map(Contract::getId).toList();
+        Map<String, Map<Long, WorkRecord>> confirmedByMonth = (contractIds.isEmpty() || monthStrs.isEmpty())
+                ? Collections.emptyMap()
+                : workRecordMapper
+                .selectConfirmedByWorkMonthsAndContractIdsForTenant(monthStrs, contractIds, tenantId)
                 .stream().collect(Collectors.groupingBy(WorkRecord::getWorkMonth,
                         Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1)));
 
@@ -276,10 +273,10 @@ public class DashboardServiceImpl implements DashboardService {
         // 必ず一致させるため、Engineer.status ベースの集計(下のステータス構成チャート)とは口径を分ける。
         Map<Long, List<Contract>> utilizationContractsByEngineer = existingEngineerIds.isEmpty()
                 ? Collections.emptyMap()
-                : contractMapper.selectList(new QueryWrapper<Contract>()
+                : contractMapper.selectListForTenant(new QueryWrapper<Contract>()
                         .in("status", UtilizationCalcService.targetContractStatuses())
                         .in("engineer_id", existingEngineerIds)
-                        .eq(legalEntityId != null, "legal_entity_id", legalEntityId))
+                        .eq(legalEntityId != null, "legal_entity_id", legalEntityId), tenantId)
                         .stream()
                         .filter(c -> scopeSnapshot == null || scopeSnapshot.contractIds() == null
                                 || scopeSnapshot.contractIds().contains(c.getId()))
@@ -541,7 +538,8 @@ public class DashboardServiceImpl implements DashboardService {
             applyIdFilter(query, "project_id", scopeSnapshot.projectIds());
             applyIdFilter(query, "customer_id", scopeSnapshot.customerIds());
         }
-        return contractMapper.selectList(query);
+        return contractMapper.selectListForTenant(query,
+                AccountingTenantContextHolder.requireTenantContext());
     }
 
     /**
@@ -606,6 +604,7 @@ public class DashboardServiceImpl implements DashboardService {
 
     private List<ContractProfitDto> getProfitAnalysisAt(LocalDate asOf, Long legalEntityId,
                                                         EffectiveScopeSnapshot scopeSnapshot) {
+        AccountingTenantContextHolder.requireTenantContext();
         List<Contract> contracts = scopedContracts(new QueryWrapper<Contract>()
                 .in("status", "稼動中", "終了"), asOf, legalEntityId, scopeSnapshot);
         List<ContractProfitDto> result = new ArrayList<>();

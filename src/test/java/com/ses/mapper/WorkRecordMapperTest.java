@@ -2,6 +2,9 @@ package com.ses.mapper;
 
 import com.ses.BaseIntegrationTest;
 import com.ses.dto.WorkRecordGridDto;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -16,6 +19,16 @@ class WorkRecordMapperTest extends BaseIntegrationTest {
 
     @Autowired
     private WorkRecordMapper workRecordMapper;
+
+    @BeforeEach
+    void bindTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Test
     void testSelectMonthlyGrid() {
@@ -33,7 +46,7 @@ class WorkRecordMapperTest extends BaseIntegrationTest {
     void testSelectMonthlyGridScoped_emptyScopeReturnsNoRowsAtQueryBoundary() {
         List<WorkRecordGridDto> result = workRecordMapper.selectMonthlyGridScoped(
                 "2026-07", "2026-07-31", LocalDate.of(2026, 7, 1), false,
-                List.of(), List.of(), null);
+                List.of(), List.of(), null, "default");
 
         assertNotNull(result);
         assertFalse(result.stream().anyMatch(row -> row.getContractId() != null));

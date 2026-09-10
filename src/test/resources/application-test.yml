@@ -20,6 +20,7 @@ spring:
         - classpath:db/migration/V7__create_analytics_report.sql
         - classpath:db/migration/V8__user_security_columns.sql
         - classpath:db/migration/V9__system_config_and_menu.sql
+        - classpath:sql/schema-candidate-h2.sql
         - classpath:sql/schema-external-api-resource-isolation-h2.sql
         - classpath:sql/schema-organization-accounting-h2.sql
         - classpath:sql/schema-engineer-sales-h2.sql
@@ -67,6 +68,7 @@ spring:
         - classpath:sql/schema-integration-hub-a1-h2.sql
         - classpath:sql/schema-integration-hub-b2-h2.sql
         - classpath:sql/schema-service-desk-h2.sql
+        - classpath:sql/schema-nf02-nf03-tenant-ownership-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 
@@ -145,6 +147,9 @@ app:
       local-login-enabled: true
       tenant-id: default
       break-glass-usernames: []
+  accounting:
+    tenants:
+      ids: default
   mail:
     from: test@example.com
 

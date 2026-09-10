@@ -6,6 +6,7 @@ import com.ses.entity.AiArtifactVersion;
 import com.ses.entity.AiRecommendationRun;
 import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -104,6 +105,7 @@ public class CopilotRunService {
         }
 
         AiRecommendationRun run = new AiRecommendationRun();
+        run.setTenantId(AccountingTenantContextHolder.requireTenantContext());
         run.setTraceId(traceId);
         run.setUseCase(AiGatewayRequest.USE_COPILOT);
         run.setArtifactVersionId(active.getId());

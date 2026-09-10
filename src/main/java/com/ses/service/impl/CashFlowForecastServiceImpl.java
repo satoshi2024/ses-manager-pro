@@ -16,6 +16,7 @@ import com.ses.service.FreeeIntegrationService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.billing.CashFlowForecastService;
 import com.ses.service.billing.MonthlyRevenueCalcService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.dto.payroll.PayrollStatementDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,7 @@ import java.time.YearMonth;
 import java.time.Clock;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -221,19 +223,12 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
                                                                        com.ses.service.ai.copilot.CopilotExecutionContext context) {
         String monthStr = month.toString();
 
-        // 当月の確定実績（contract_id -> record）。DashboardServiceImpl と同一の絞り込み。
-        LambdaQueryWrapper<WorkRecord> workRecordQuery = new LambdaQueryWrapper<WorkRecord>()
-                .eq(WorkRecord::getWorkMonth, monthStr)
-                .eq(WorkRecord::getStatus, "確定");
-        if (scope != null && !scope.companyWide()) {
-            workRecordQuery.in(WorkRecord::getContractId,
-                    scope.contractIds().isEmpty() ? List.of(-1L) : scope.contractIds());
-        }
-        if (context != null) {
-            workRecordQuery.apply("contract_id IN (SELECT id FROM t_contract WHERE legal_entity_id = {0} AND deleted_flag = 0)",
-                    context.legalEntityId());
-        }
-        Map<Long, WorkRecord> confirmedByContractId = workRecordMapper.selectList(workRecordQuery)
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        List<WorkRecord> confirmedRecords = scope != null && !scope.companyWide()
+                ? (scope.contractIds().isEmpty() ? Collections.emptyList() : workRecordMapper.selectConfirmedByWorkMonthsAndContractIdsForTenant(
+                        List.of(monthStr), scope.contractIds(), tenantId))
+                : workRecordMapper.selectConfirmedByWorkMonthsForTenant(List.of(monthStr), tenantId);
+        Map<Long, WorkRecord> confirmedByContractId = confirmedRecords
                 .stream()
                 .filter(w -> w.getContractId() != null)
                 .collect(Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1));
@@ -248,7 +243,7 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
         if (context != null) {
             contractQuery.eq(Contract::getLegalEntityId, context.legalEntityId());
         }
-        List<Contract> contracts = contractMapper.selectList(contractQuery);
+        List<Contract> contracts = contractMapper.selectListForTenant(contractQuery, tenantId);
 
         MonthlyRevenueCalcService.MonthlyAmount amount =
                 monthlyRevenueCalcService.calc(month, contracts, confirmedByContractId);

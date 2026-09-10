@@ -18,6 +18,7 @@ public class ApprovalDelegationType implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    private String tenantId;
     private Long delegationId;
     private String requestType;
 }

@@ -10,6 +10,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.ComplianceDeadlineService;
 import com.ses.service.NotificationService;
 import com.ses.service.compliance.ComplianceFindingStore;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -51,6 +52,7 @@ public class ComplianceDeadlineServiceImpl implements ComplianceDeadlineService 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public int process(LocalDateTime asOf) {
+        AccountingTenantContextHolder.requireTenantContext();
         int notified = 0;
         notified += expireExceptions(asOf);
         notified += notifyDeadlines(asOf);
@@ -61,6 +63,7 @@ public class ComplianceDeadlineServiceImpl implements ComplianceDeadlineService 
     private int expireExceptions(LocalDateTime asOf) {
         List<ComplianceFinding> expired = findingMapper.selectList(
                 new LambdaQueryWrapper<ComplianceFinding>()
+                        .eq(ComplianceFinding::getTenantId, AccountingTenantContextHolder.requireTenantContext())
                         .eq(ComplianceFinding::getStatus, ComplianceFindingStore.STATUS_EXCEPTION_APPROVED)
                         .isNotNull(ComplianceFinding::getExceptionExpiresAt)
                         .lt(ComplianceFinding::getExceptionExpiresAt, asOf));
@@ -81,6 +84,7 @@ public class ComplianceDeadlineServiceImpl implements ComplianceDeadlineService 
         LocalDate today = asOf.toLocalDate();
         List<ComplianceFinding> targets = findingMapper.selectList(
                 new LambdaQueryWrapper<ComplianceFinding>()
+                        .eq(ComplianceFinding::getTenantId, AccountingTenantContextHolder.requireTenantContext())
                         .in(ComplianceFinding::getStatus, ComplianceFindingStore.STATUS_OPEN,
                                 ComplianceFindingStore.STATUS_ACKNOWLEDGED, ComplianceFindingStore.STATUS_IN_PROGRESS)
                         .isNotNull(ComplianceFinding::getDueDate));
@@ -90,11 +94,17 @@ public class ComplianceDeadlineServiceImpl implements ComplianceDeadlineService 
         Set<Long> contractIds = new LinkedHashSet<>();
         targets.forEach(f -> contractIds.add(f.getContractId()));
         List<Contract> contracts = contractIds.isEmpty() ? List.of()
-                : contractMapper.selectBatchIds(new java.util.ArrayList<>(contractIds));
+                : contractMapper.selectByIdsForTenant(new java.util.ArrayList<>(contractIds),
+                AccountingTenantContextHolder.requireTenantContext());
         java.util.Map<Long, Contract> byContract = new java.util.HashMap<>();
-        contracts.forEach(c -> byContract.put(c.getId(), c));
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        contracts.stream()
+                .filter(c -> c.getSalesUserId() != null
+                        && sysUserMapper.selectByIdAndTenant(c.getSalesUserId(), tenantId) != null)
+                .forEach(c -> byContract.put(c.getId(), c));
 
         List<SysUser> hrUsers = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getTenantId, tenantId)
                 .eq(SysUser::getRole, "HR")
                 .eq(SysUser::getStatus, 1));
 
@@ -148,6 +158,7 @@ public class ComplianceDeadlineServiceImpl implements ComplianceDeadlineService 
         // DBのUNIQUE(dedupe_key)が最終的な冪等保証であり、このチェックは戻り値（発行件数）の正確化のため。
         String finalKey = dedupeKey + "#u" + userId;
         Long existing = notificationMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.Notification>()
+                .eq(com.ses.entity.Notification::getTenantId, AccountingTenantContextHolder.requireTenantContext())
                 .eq(com.ses.entity.Notification::getDedupeKey, finalKey));
         if (existing != null && existing > 0) {
             return false;

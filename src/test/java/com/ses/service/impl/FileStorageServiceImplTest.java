@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.io.Resource;
 import org.springframework.mock.web.MockMultipartFile;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -190,6 +191,7 @@ class FileStorageServiceImplTest {
         java.nio.file.Files.writeString(tempDir.resolve("quarantine").resolve(storedName), "safe text");
         com.ses.entity.FileSecurityMetadata metadata = new com.ses.entity.FileSecurityMetadata();
         metadata.setId(10L);
+        metadata.setTenantId("default");
         metadata.setStoredName(storedName);
         metadata.setFileKind(FileKind.PROJECT_EMAIL.name());
         metadata.setStorageState("QUARANTINED");
@@ -206,7 +208,8 @@ class FileStorageServiceImplTest {
         props.setBasePath(tempDir.toString());
         FileStorageServiceImpl rescannable = new FileStorageServiceImpl(props, scanner, mapper);
 
-        assertTrue(rescannable.rescan(storedName));
+        assertTrue(AccountingTenantContextHolder.runWithTenant("default",
+                () -> rescannable.rescan(storedName)));
         assertTrue(java.nio.file.Files.exists(tempDir.resolve("published").resolve(storedName)));
         assertFalse(java.nio.file.Files.exists(tempDir.resolve("quarantine").resolve(storedName)));
     }

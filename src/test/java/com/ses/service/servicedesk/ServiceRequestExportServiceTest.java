@@ -3,6 +3,8 @@ package com.ses.service.servicedesk;
 import com.ses.dto.servicedesk.ServiceRequestCreateRequest;
 import com.ses.entity.Customer;
 import com.ses.mapper.CustomerMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,6 +40,7 @@ class ServiceRequestExportServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         testCustomer = Customer.builder()
                 .companyName("CSVテスト顧客-" + UUID.randomUUID().toString().substring(0, 6))
                 .build();
@@ -51,6 +54,11 @@ class ServiceRequestExportServiceTest {
                 .description("請求書送付先変更の依頼")
                 .build();
         serviceRequestService.createRequest(req, 100L, false, null);
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test

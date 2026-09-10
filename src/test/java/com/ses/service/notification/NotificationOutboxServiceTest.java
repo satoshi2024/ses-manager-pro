@@ -3,6 +3,7 @@ package com.ses.service.notification;
 import com.ses.entity.Notification;
 import com.ses.entity.NotificationOutbox;
 import com.ses.mapper.NotificationOutboxMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -36,7 +37,13 @@ class NotificationOutboxServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         service = new NotificationOutboxService(outboxMapper, dispatcher);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -87,14 +94,14 @@ class NotificationOutboxServiceTest {
     void dispatchDueは上限を正規化し各行をworkerへ渡す() {
         NotificationOutbox first = NotificationOutbox.builder().id(31L).build();
         NotificationOutbox second = NotificationOutbox.builder().id(32L).build();
-        when(outboxMapper.selectDue(100)).thenReturn(List.of(first, second));
+        when(outboxMapper.selectDue("default", 100)).thenReturn(List.of(first, second));
         when(dispatcher.dispatchOne(31L)).thenReturn(true);
         when(dispatcher.dispatchOne(32L)).thenReturn(false);
 
         assertEquals(1, service.dispatchDue(999));
 
         verify(dispatcher).recoverStaleRows();
-        verify(outboxMapper).selectDue(100);
+        verify(outboxMapper).selectDue("default", 100);
         verify(dispatcher).dispatchOne(31L);
         verify(dispatcher).dispatchOne(32L);
     }

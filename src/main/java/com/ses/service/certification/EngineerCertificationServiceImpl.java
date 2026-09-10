@@ -34,6 +34,7 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
     private final java.time.Clock clock;
     private final CertificationContinuityGroupMapper continuityGroupMapper;
 
+
     /** F1互換の直接生成用。Springは下記の@Autowired constructorを使用する。 */
     public EngineerCertificationServiceImpl(EngineerCertificationMapper engineerCertificationMapper,
                                             CertificationMapper certificationMapper,
@@ -78,11 +79,12 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
     public EngineerCertificationViewDto submitApplication(Long engineerId, Long certificationId, LocalDate acquiredOn,
                                                           LocalDate expiresOn, String certificateNumberPlaintext,
                                                           Long actorUserId, boolean canViewFullNumber) {
-        Engineer engineer = engineerMapper.selectById(engineerId);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        Engineer engineer = engineerMapper.selectByIdForTenant(engineerId, tenantId);
         if (engineer == null) {
             throw BusinessException.of(404, "error.engineer.notFound");
         }
-        Certification certification = certificationMapper.selectById(certificationId);
+        Certification certification = certificationMapper.selectByIdForTenant(certificationId, tenantId);
         if (certification == null || certification.getActiveFlag() == null || certification.getActiveFlag() != 1) {
             throw BusinessException.of(404, "certification.master.notFound");
         }
@@ -93,8 +95,6 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
         if (expiresOn != null && expiresOn.isBefore(acquiredOn)) {
             throw BusinessException.of(400, "certification.record.expiryBeforeAcquired");
         }
-
-        String tenantId = StringUtils.hasText(certification.getTenantId()) ? certification.getTenantId() : "default";
 
         if (engineerCertificationMapper.countNonTerminalAcquisition(tenantId, engineerId, certificationId,
                 acquiredOn, null) > 0) {
@@ -135,7 +135,13 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
             record.setCertificateNumberKeyVersion(encrypted.keyVersion());
             record.setCertificateNumberCipherFormat(encrypted.cipherFormat());
             record.setCertificateNumberMasked(encrypted.masked());
-            engineerCertificationMapper.updateById(record);
+            Integer expectedVersion = record.getVersion() == null ? 0 : record.getVersion();
+            if (engineerCertificationMapper.updateCertificateNumberForTenant(record.getId(), tenantId,
+                    expectedVersion, encrypted.encrypted(), encrypted.keyVersion(), encrypted.cipherFormat(),
+                    encrypted.masked()) != 1) {
+                throw BusinessException.of(409, "certification.record.optimisticLock");
+            }
+            record.setVersion(expectedVersion + 1);
         }
 
         appendEvent(record, "SUBMIT", actorUserId, null, null, null, null);
@@ -162,7 +168,8 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
 
     @Override
     public EngineerCertification getEntity(Long id) {
-        return engineerCertificationMapper.selectById(id);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        return id == null ? null : engineerCertificationMapper.selectByIdForTenant(id, tenantId);
     }
 
     @Override
@@ -289,8 +296,12 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
         if (recordId == null) {
             throw BusinessException.of(404, "certification.record.notFound");
         }
-        EngineerCertification record = engineerCertificationMapper.selectByIdForUpdate(recordId);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        EngineerCertification record = engineerCertificationMapper.selectByTenantIdForUpdate(tenantId, recordId);
         if (record == null) {
+            throw BusinessException.of(404, "certification.record.notFound");
+        }
+        if (!tenantId.equals(record.getTenantId())) {
             throw BusinessException.of(404, "certification.record.notFound");
         }
         if (expectedVersion == null) {
@@ -306,8 +317,10 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
                         LocalDate acquiredOn, LocalDate expiresOn, Integer expiryRuleVersion,
                         Integer revision, Long actorUserId) {
         Integer version = record.getVersion() == null ? 0 : record.getVersion();
-        if (engineerCertificationMapper.updateLifecycleCas(record.getId(), version, state, currentFlag, holder,
-                acquiredOn, expiresOn, expiryRuleVersion, revision, actorUserId) == 0) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        if (!tenantId.equals(record.getTenantId())
+                || engineerCertificationMapper.updateLifecycleCas(record.getId(), tenantId, version, state,
+                currentFlag, holder, acquiredOn, expiresOn, expiryRuleVersion, revision, actorUserId) == 0) {
             throw BusinessException.of(409, "certification.record.optimisticLock");
         }
         record.setRecordState(state);

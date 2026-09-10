@@ -65,8 +65,9 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     private final ObjectMapper objectMapper;
 
     private LocalDate resolveBpIssueDate(BpPayment bpPayment) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (bpPayment.getWorkRecordId() != null) {
-            WorkRecord wr = workRecordMapper.selectById(bpPayment.getWorkRecordId());
+            WorkRecord wr = workRecordMapper.selectByIdForTenant(bpPayment.getWorkRecordId(), tenantId);
             if (wr != null && wr.getWorkMonth() != null && !wr.getWorkMonth().isBlank()) {
                 return java.time.YearMonth.parse(wr.getWorkMonth().trim()).atEndOfMonth();
             }
@@ -107,7 +108,8 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
 
         // 月次締めチェック (締め済み月への更新拒否)
         if (bpPayment.getWorkRecordId() != null) {
-            WorkRecord wr = workRecordMapper.selectById(bpPayment.getWorkRecordId());
+            WorkRecord wr = workRecordMapper.selectByIdForTenant(bpPayment.getWorkRecordId(),
+                    AccountingTenantContextHolder.requireTenantContext());
             if (wr != null && wr.getWorkMonth() != null && !wr.getWorkMonth().isBlank()) {
                 monthlyClosingService.assertOpenForUpdate(wr.getWorkMonth().trim());
             }
@@ -186,7 +188,8 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     @Override
     @Transactional(rollbackFor = Exception.class)
     public IntegrationJob triggerExpenseSync(Long expenseRequestId, Long triggeredByUserId) {
-        ExpenseRequest expense = expenseRequestMapper.selectById(expenseRequestId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        ExpenseRequest expense = expenseRequestMapper.selectByIdForTenant(expenseRequestId, tenantId);
         if (expense == null) {
             throw new BusinessException(404, "経費申請レコードが見つかりません (id=" + expenseRequestId + ")");
         }
@@ -204,7 +207,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
             throw new BusinessException(400, "承認済の経費申請のみ会計連携可能です (現在: " + expense.getStatus() + ")");
         }
 
-        IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
+        IntegrationConnection conn = resolveConnection(tenantId, null, "freee", "accounting");
         String engineerCode = "ENG-" + expense.getEngineerId();
 
         mappingService.assertMappingVerified(conn.getId(), "ACCOUNT_EXPENSE", "EXPENSE_DEFAULT");
@@ -415,6 +418,11 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         AccountingTenantContextHolder.runWithTenant(job.getTenantId(), timezoneResolver.resolve(job.getTenantId()), () -> {
             try {
                 CanonicalExpenseDeal canonical = objectMapper.readValue(job.getPayloadSnapshot(), CanonicalExpenseDeal.class);
+                String tenantId = AccountingTenantContextHolder.requireTenantContext();
+                if (expenseRequestMapper.selectByIdForTenant(job.getTargetId(), tenantId) == null) {
+                    jobService.markFailed(jobId, "TENANT_SCOPE_VIOLATION", "経費申請のtenant所有権を確認できません");
+                    return;
+                }
 
                 AccountingProvider provider = providerFactory.getProvider(conn);
                 CanonicalDealResult result = provider.upsertExpenseDeal(conn, canonical);
@@ -425,10 +433,8 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                                 java.time.YearMonth.from(canonical.getExpenseDate()).toString());
                     }
                     // 経費ステータス更新 (CAS: 承認済 -> 会計連携済) (P1-08)
-                    int updated = expenseRequestMapper.update(null, new LambdaUpdateWrapper<ExpenseRequest>()
-                            .set(ExpenseRequest::getStatus, "会計連携済")
-                            .eq(ExpenseRequest::getId, job.getTargetId())
-                            .eq(ExpenseRequest::getStatus, "承認済"));
+                    int updated = expenseRequestMapper.updateStatusForTenant(
+                            job.getTargetId(), tenantId, "承認済", "会計連携済");
 
                     if (updated != 1) {
                         jobService.markFailed(jobId, "CAS_CONFLICT",

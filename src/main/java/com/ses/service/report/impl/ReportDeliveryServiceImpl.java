@@ -22,13 +22,13 @@ import com.ses.mapper.NotificationOutboxMapper;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.DocumentService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.report.ReportDeliveryService;
 import com.ses.service.report.ReportDocumentService;
 import com.ses.service.report.ReportDeliveryDocumentRegistrar;
 import com.ses.service.report.ReportDeliveryIssueService;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.report.ReportSnapshotService;
-import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.accounting.AccountingTimezoneResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -39,7 +39,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -52,7 +51,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ReportDeliveryServiceImpl implements ReportDeliveryService {
 
-    private static final String TENANT_ID = "default";
     private static final int MAX_ATTEMPTS = 5;
     private static final int REAUTH_MINUTES = 10;
     private static final int LINK_DAYS = 7;
@@ -77,20 +75,24 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     @Override
     public ReportDeliveryResult deliverUser(Long runId, String requiredPreviewHash) {
         requirePreviewHash(requiredPreviewHash);
-        return AccountingTenantContextHolder.runWithTenant(TENANT_ID, tenantZone(), () -> {
-            ReportRun run = runMapper.selectById(runId);
-            requireReady(run);
-            snapshotService.assertAccessible(run);
-            ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
-            assertPreviewHashMatches(requiredPreviewHash, preview.getPreviewHash());
-            if (run.getRecipientPreviewHash() != null && !run.getRecipientPreviewHash().equals(preview.getPreviewHash())) {
-                throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
-            }
-            if (run.getRecipientSnapshotJson() != null && !run.getRecipientSnapshotJson().equals(recipientSnapshotJson(preview))) {
-                throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
-            }
-            return deliverRecipients(run, preview);
-        });
+        String tenantId = requireTenant();
+        ReportRun run = findRun(runId, tenantId);
+        requireReady(run);
+        snapshotService.assertAccessible(run);
+        ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
+        assertPreviewHashMatches(requiredPreviewHash, preview.getPreviewHash());
+        if (run.getRecipientPreviewHash() != null && !run.getRecipientPreviewHash().equals(preview.getPreviewHash())) {
+            throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
+        }
+        if (run.getRecipientSnapshotJson() != null && !run.getRecipientSnapshotJson().equals(recipientSnapshotJson(preview))) {
+            throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
+        }
+        return deliverRecipients(run, preview);
+    }
+
+    @Override
+    public ReportDeliveryResult deliver(Long runId, String previewHash) {
+        return deliverUser(runId, previewHash);
     }
 
     @Override
@@ -98,24 +100,24 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         if (systemContext == null) {
             throw BusinessException.of(400, "error.managementReport.systemContextRequired");
         }
-        return AccountingTenantContextHolder.runWithTenant(TENANT_ID, tenantZone(), () -> {
-            ReportRun run = runMapper.selectById(runId);
-            requireReady(run);
-            assertScheduledContext(run, systemContext);
-            snapshotService.assertAccessible(run);
-            ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
-            return deliverRecipients(run, preview);
-        });
+        String tenantId = requireTenant();
+        ReportRun run = findRun(runId, tenantId);
+        requireReady(run);
+        assertScheduledContext(run, systemContext);
+        snapshotService.assertAccessible(run);
+        ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
+        return deliverRecipients(run, preview);
     }
 
     private ReportDeliveryResult deliverRecipients(ReportRun run, ReportRecipientPreviewResult preview) {
+        String tenantId = requireTenant();
         ReportDocumentArtifact artifact = null;
         List<ReportDelivery> deliveries = new ArrayList<>();
         for (ReportRecipientPreview recipient : preview.getRecipients()) {
             if (!"ALLOW".equals(recipient.getScopeDecision())) {
                 continue;
             }
-            ReportDelivery delivery = find(run.getId(), recipient.getRecipientUserId());
+            ReportDelivery delivery = find(run.getId(), recipient.getRecipientUserId(), tenantId);
             if (delivery != null && !"CANCELLED".equals(delivery.getDeliveryStatus())) {
                 deliveries.add(delivery);
                 continue;
@@ -131,12 +133,13 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void reauthenticate(Long deliveryId, String password) {
-        ReportDelivery delivery = findRequired(deliveryId);
+        String tenantId = requireTenant();
+        ReportDelivery delivery = findRequired(deliveryId, tenantId);
         Long userId = currentUserId();
         if (!userId.equals(delivery.getRecipientUserId()) || password == null || password.isBlank()) {
             throw BusinessException.of(403, "error.managementReport.reauthenticationRequired");
         }
-        SysUser user = sysUserMapper.selectById(userId);
+        SysUser user = sysUserMapper.selectByIdAndTenant(userId, tenantId);
         if (user == null || !passwordEncoder.matches(password, user.getPassword())) {
             throw BusinessException.of(403, "error.managementReport.reauthenticationFailed");
         }
@@ -164,7 +167,8 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             rollbackFor = Exception.class)
     public void retry(Long deliveryId) {
         requireAdmin();
-        ReportDelivery delivery = findRequiredForReplay(deliveryId);
+        String tenantId = requireTenant();
+        ReportDelivery delivery = findRequiredForReplay(deliveryId, tenantId);
         if (!"RETRY".equals(delivery.getDeliveryStatus())) {
             return;
         }
@@ -175,7 +179,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             updateDeliveryChecked(delivery);
             return;
         }
-        ReportRun run = runMapper.selectById(delivery.getRunId());
+        ReportRun run = findRun(delivery.getRunId(), tenantId);
         ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
         assertPreviewFresh(run, preview);
         ReportRecipientPreview recipient = preview.getRecipients().stream()
@@ -188,7 +192,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             return;
         }
         if (delivery.getNotificationOutboxId() != null) {
-            if (notificationOutboxMapper.requeueReport(delivery.getNotificationOutboxId()) == 0) {
+            if (notificationOutboxMapper.requeueReport(tenantId, delivery.getNotificationOutboxId()) == 0) {
                 reconcileReplayConflict(delivery, "DELIVERY_OUTBOX_REQUEUE_CONFLICT");
                 return;
             }
@@ -208,15 +212,16 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             rollbackFor = Exception.class)
     public void manualReplay(Long deliveryId) {
         requireAdmin();
-        ReportDelivery delivery = findRequiredForReplay(deliveryId);
+        String tenantId = requireTenant();
+        ReportDelivery delivery = findRequiredForReplay(deliveryId, tenantId);
         if (!"FAILED".equals(delivery.getDeliveryStatus())) {
             return;
         }
         if (delivery.getNotificationOutboxId() != null) {
-            ReportRun run = runMapper.selectById(delivery.getRunId());
+            ReportRun run = findRun(delivery.getRunId(), tenantId);
             ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
             assertPreviewFresh(run, preview);
-            if (notificationOutboxMapper.replayReport(delivery.getNotificationOutboxId()) == 0) {
+            if (notificationOutboxMapper.replayReport(tenantId, delivery.getNotificationOutboxId()) == 0) {
                 reconcileReplayConflict(delivery, "DELIVERY_OUTBOX_REPLAY_CONFLICT");
                 return;
             }
@@ -232,7 +237,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         delivery.setLastErrorCode(null);
         delivery.setLastErrorMessage(null);
         updateDeliveryChecked(delivery);
-        ReportRun run = runMapper.selectById(delivery.getRunId());
+        ReportRun run = findRun(delivery.getRunId(), tenantId);
         ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
         assertPreviewFresh(run, preview);
         ReportRecipientPreview recipient = preview.getRecipients().stream()
@@ -248,7 +253,8 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     @Transactional(rollbackFor = Exception.class)
     public void cancel(Long deliveryId) {
         requireAdmin();
-        ReportDelivery delivery = findRequired(deliveryId);
+        String tenantId = requireTenant();
+        ReportDelivery delivery = findRequired(deliveryId, tenantId);
         if ("CANCELLED".equals(delivery.getDeliveryStatus())) {
             return;
         }
@@ -262,16 +268,18 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
 
     @Override
     public List<ReportDelivery> listByRun(Long runId) {
-        ReportRun run = runMapper.selectById(runId);
+        String tenantId = requireTenant();
+        ReportRun run = findRun(runId, tenantId);
         if (run == null) {
             throw BusinessException.of(404, "error.managementReport.runNotFound");
         }
         snapshotService.assertAccessible(run);
         return deliveryMapper.selectList(new QueryWrapper<ReportDelivery>()
-                .eq("run_id", runId).orderByAsc("id"));
+                .eq("tenant_id", tenantId).eq("run_id", runId).orderByAsc("id"));
     }
 
     private ResolvedDownload resolveDownload(Long deliveryId, String token, String format) {
+        String tenantId = requireTenant();
         ReportDelivery delivery;
         if (token == null || token.isBlank()) {
             delivery = deliveryMapper.selectById(deliveryId);
@@ -284,6 +292,9 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             }
         }
         if (delivery == null || !deliveryId.equals(delivery.getId())) {
+            throw BusinessException.of(403, "error.managementReport.linkInvalid");
+        }
+        if (delivery.getTenantId() != null && !tenantId.equals(delivery.getTenantId())) {
             throw BusinessException.of(403, "error.managementReport.linkInvalid");
         }
         Long userId = currentUserId();
@@ -301,7 +312,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
                 || delivery.getReauthenticatedAt().isBefore(now().minusMinutes(REAUTH_MINUTES)))) {
             throw BusinessException.of(403, "error.managementReport.reauthenticationRequired");
         }
-        ReportRun run = runMapper.selectById(delivery.getRunId());
+        ReportRun run = findRun(delivery.getRunId(), tenantId);
         snapshotService.scopeSnapshotOf(run);
         ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
         if (run.getRecipientPreviewHash() != null
@@ -369,25 +380,35 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         }
     }
 
-    private ReportDelivery find(Long runId, Long userId) {
+    private ReportDelivery find(Long runId, Long userId, String tenantId) {
         return deliveryMapper.selectOne(new QueryWrapper<ReportDelivery>()
-                .eq("run_id", runId).eq("recipient_user_id", userId));
+                .eq("tenant_id", tenantId).eq("run_id", runId).eq("recipient_user_id", userId));
     }
 
-    private ReportDelivery findRequired(Long deliveryId) {
-        ReportDelivery delivery = deliveryMapper.selectById(deliveryId);
+    private ReportDelivery findRequired(Long deliveryId, String tenantId) {
+        ReportDelivery delivery = deliveryMapper.selectOne(new QueryWrapper<ReportDelivery>()
+                .eq("tenant_id", tenantId).eq("id", deliveryId));
         if (delivery == null) {
             throw BusinessException.of(404, "error.managementReport.deliveryNotFound");
         }
         return delivery;
     }
 
-    private ReportDelivery findRequiredForReplay(Long deliveryId) {
+    private ReportDelivery findRequiredForReplay(Long deliveryId, String tenantId) {
         ReportDelivery delivery = deliveryMapper.selectByIdForReplay(deliveryId);
-        if (delivery == null) {
+        if (delivery == null || (delivery.getTenantId() != null && !tenantId.equals(delivery.getTenantId()))) {
             throw BusinessException.of(404, "error.managementReport.deliveryNotFound");
         }
         return delivery;
+    }
+
+    private ReportRun findRun(Long runId, String tenantId) {
+        ReportRun run = runMapper.selectOne(new QueryWrapper<ReportRun>()
+                .eq("tenant_id", tenantId).eq("id", runId));
+        if (run == null) {
+            throw BusinessException.of(404, "error.managementReport.runNotFound");
+        }
+        return run;
     }
 
     private ReportDocumentArtifact resolveArtifact(ReportRun run, ReportDelivery delivery) {
@@ -461,11 +482,11 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     }
 
     private LocalDateTime now() {
-        return timezoneResolver.now(TENANT_ID);
+        return timezoneResolver.now(requireTenant());
     }
 
-    private ZoneId tenantZone() {
-        return timezoneResolver.resolve(TENANT_ID);
+    private String requireTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 
     private String recipientSnapshotJson(ReportRecipientPreviewResult preview) {

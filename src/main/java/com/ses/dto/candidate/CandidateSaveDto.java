@@ -21,4 +21,7 @@ public class CandidateSaveDto {
     private LocalDate nextActionDate;
     private Long convertedEngineerId;
     private String remarks;
+
+    /** 更新時の楽観ロック値。新規登録時は不要。 */
+    private Integer expectedVersion;
 }

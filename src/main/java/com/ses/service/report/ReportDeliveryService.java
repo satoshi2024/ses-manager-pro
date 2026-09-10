@@ -12,6 +12,10 @@ public interface ReportDeliveryService {
 
     ReportDeliveryResult deliverUser(Long runId, String requiredPreviewHash);
 
+    default ReportDeliveryResult deliver(Long runId, String previewHash) {
+        return deliverUser(runId, previewHash);
+    }
+
     ReportDeliveryResult deliverScheduled(Long runId, ReportScheduledDeliveryContext systemContext);
 
     void reauthenticate(Long deliveryId, String password);

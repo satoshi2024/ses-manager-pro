@@ -24,6 +24,7 @@ import com.ses.service.report.ReportDeliveryIssueService;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.report.ReportSnapshotService;
 import com.ses.service.accounting.AccountingTimezoneResolver;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.report.impl.ReportDeliveryServiceImpl;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,6 +66,7 @@ class ReportDeliveryServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         runMapper = mock(ReportRunMapper.class);
         deliveryMapper = mock(ReportDeliveryMapper.class);
         when(deliveryMapper.updateById(any(ReportDelivery.class))).thenReturn(1);
@@ -95,12 +97,13 @@ class ReportDeliveryServiceImplTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
     void deliveryUsesPreviewAndPublishesOneInAppLink() {
         ReportRun run = readyRun();
-        when(runMapper.selectById(10L)).thenReturn(run);
+        when(runMapper.selectOne(any())).thenReturn(run);
         ReportRecipientPreview recipient = new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope");
         when(previewService.previewForRun(run)).thenReturn(preview(recipient));
         Document document = new Document();
@@ -144,7 +147,7 @@ class ReportDeliveryServiceImplTest {
     @Test
     void deliverはENQUEUED中の既存deliveryを再配布しない() {
         ReportRun run = readyRun();
-        when(runMapper.selectById(10L)).thenReturn(run);
+        when(runMapper.selectOne(any())).thenReturn(run);
         ReportRecipientPreview recipient = new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope");
         when(previewService.previewForRun(run)).thenReturn(preview(recipient));
         ReportDelivery existing = new ReportDelivery();
@@ -164,7 +167,7 @@ class ReportDeliveryServiceImplTest {
     @Test
     void deliverはCANCELLEDの既存deliveryを再issueする() {
         ReportRun run = readyRun();
-        when(runMapper.selectById(10L)).thenReturn(run);
+        when(runMapper.selectOne(any())).thenReturn(run);
         ReportRecipientPreview recipient = new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope");
         when(previewService.previewForRun(run)).thenReturn(preview(recipient));
         ReportDelivery existing = new ReportDelivery();
@@ -202,7 +205,9 @@ class ReportDeliveryServiceImplTest {
         delivery.setLinkTokenHash(sha256("token"));
         delivery.setLinkExpiresAt(LocalDateTime.now().minusMinutes(1));
         delivery.setReauthRequired(1);
+        delivery.setTenantId("default");
         when(deliveryMapper.selectByLinkTokenHash(sha256("token"))).thenReturn(delivery);
+        when(deliveryMapper.selectOne(any())).thenReturn(delivery);
 
         assertThatThrownBy(() -> service.download(7L, "token", "PDF"))
                 .hasMessageContaining("error.managementReport.linkExpired");
@@ -233,11 +238,12 @@ class ReportDeliveryServiceImplTest {
         ReportDelivery delivery = new ReportDelivery();
         delivery.setId(7L);
         delivery.setRecipientUserId(1L);
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        delivery.setTenantId("default");
+        when(deliveryMapper.selectOne(any())).thenReturn(delivery);
         SysUser user = new SysUser();
         user.setId(1L);
         user.setPassword("encoded");
-        when(userMapper.selectById(1L)).thenReturn(user);
+        when(userMapper.selectByIdAndTenant(1L, "default")).thenReturn(user);
         when(passwordEncoder.matches("pass", "encoded")).thenReturn(true);
 
         service.reauthenticate(7L, "pass");
@@ -256,8 +262,10 @@ class ReportDeliveryServiceImplTest {
         delivery.setLinkExpiresAt(LocalDateTime.now().plusDays(1));
         delivery.setReauthRequired(1);
         delivery.setReauthenticatedAt(LocalDateTime.now());
+        delivery.setTenantId("default");
         when(deliveryMapper.selectByLinkTokenHash(anyString())).thenReturn(delivery);
-        when(runMapper.selectById(10L)).thenReturn(readyRun());
+        when(deliveryMapper.selectOne(any())).thenReturn(delivery);
+        when(runMapper.selectOne(any())).thenReturn(readyRun());
         ReportRecipientPreview recipient = new ReportRecipientPreview(
                 1L, "マネージャー", "DENY", "RECIPIENT_SCOPE_MISMATCH", "changed");
         when(previewService.previewForRun(any())).thenReturn(preview(recipient));
@@ -280,14 +288,19 @@ class ReportDeliveryServiceImplTest {
         delivery.setLinkExpiresAt(LocalDateTime.now().plusDays(1));
         delivery.setReauthRequired(1);
         delivery.setReauthenticatedAt(LocalDateTime.now());
+        delivery.setTenantId("default");
         when(deliveryMapper.selectByLinkTokenHash(anyString())).thenReturn(delivery);
+        when(deliveryMapper.selectOne(any())).thenReturn(delivery);
         ReportRun run = readyRun();
+        run.setTenantId("default");
         run.setScopeOwnerType("ORGANIZATION");
         run.setScopeOwnerId(1L);
-        when(runMapper.selectById(10L)).thenReturn(run);
+        run.setOrganizationScopeJson("{\"companyWide\":false,\"organizationIds\":[10],\"directUserIds\":[]}");
+        when(runMapper.selectOne(any())).thenReturn(run);
         ReportRecipientPreview recipient = new ReportRecipientPreview(
                 1L, "マネージャー", "ALLOW", "SCOPE_MATCH", "recipient-scope");
         when(previewService.previewForRun(any())).thenReturn(preview(recipient));
+        when(archiveService.getVersionStorageKey(20L, 1)).thenReturn("published/report.pdf");
         when(archiveService.download(20L, 1)).thenReturn(new ByteArrayInputStream("data".getBytes(StandardCharsets.UTF_8)));
 
         ReportDownload download = service.download(7L, "token", "PDF");
@@ -305,7 +318,9 @@ class ReportDeliveryServiceImplTest {
         delivery.setId(7L);
         delivery.setAttemptCount(5);
         delivery.setDeliveryStatus("RETRY");
+        delivery.setTenantId("default");
         when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectOne(any())).thenReturn(delivery);
 
         service.retry(7L);
 
@@ -322,7 +337,9 @@ class ReportDeliveryServiceImplTest {
         delivery.setId(7L);
         delivery.setAttemptCount(1);
         delivery.setDeliveryStatus(status);
+        delivery.setTenantId("default");
         when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectOne(any())).thenReturn(delivery);
 
         service.retry(7L);
 
@@ -340,16 +357,18 @@ class ReportDeliveryServiceImplTest {
         delivery.setAttemptCount(2);
         delivery.setDeliveryStatus("RETRY");
         delivery.setNotificationOutboxId(88L);
+        delivery.setTenantId("default");
         when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
-        when(runMapper.selectById(10L)).thenReturn(readyRun());
+        when(deliveryMapper.selectOne(any())).thenReturn(delivery);
+        when(runMapper.selectOne(any())).thenReturn(readyRun());
         when(previewService.previewForRun(any())).thenReturn(
                 preview(new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope")));
-        when(notificationOutboxMapper.requeueReport(88L)).thenReturn(1);
+        when(notificationOutboxMapper.requeueReport("default", 88L)).thenReturn(1);
 
         service.retry(7L);
 
         assertThat(delivery.getDeliveryStatus()).isEqualTo("ENQUEUED");
-        verify(notificationOutboxMapper).requeueReport(88L);
+        verify(notificationOutboxMapper).requeueReport("default", 88L);
         verifyNoInteractions(documentRegistrar, deliveryIssueService);
     }
 
@@ -363,8 +382,10 @@ class ReportDeliveryServiceImplTest {
         delivery.setDeliveryStatus("FAILED");
         delivery.setDocumentId(20L);
         delivery.setDocumentVersionNo(1);
+        delivery.setTenantId("default");
         when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
-        when(runMapper.selectById(10L)).thenReturn(readyRun());
+        when(deliveryMapper.selectOne(any())).thenReturn(delivery);
+        when(runMapper.selectOne(any())).thenReturn(readyRun());
         when(previewService.previewForRun(any())).thenReturn(
                 preview(new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope")));
         Document document = new Document();
@@ -395,17 +416,19 @@ class ReportDeliveryServiceImplTest {
         delivery.setAttemptCount(5);
         delivery.setDeliveryStatus("FAILED");
         delivery.setNotificationOutboxId(88L);
+        delivery.setTenantId("default");
         when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
-        when(runMapper.selectById(10L)).thenReturn(readyRun());
+        when(deliveryMapper.selectOne(any())).thenReturn(delivery);
+        when(runMapper.selectOne(any())).thenReturn(readyRun());
         when(previewService.previewForRun(any())).thenReturn(
                 preview(new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope")));
-        when(notificationOutboxMapper.replayReport(88L)).thenReturn(1);
+        when(notificationOutboxMapper.replayReport("default", 88L)).thenReturn(1);
 
         service.manualReplay(7L);
 
         assertThat(delivery.getDeliveryStatus()).isEqualTo("ENQUEUED");
         assertThat(delivery.getAttemptCount()).isEqualTo(5);
-        verify(notificationOutboxMapper).replayReport(88L);
+        verify(notificationOutboxMapper).replayReport("default", 88L);
         verify(deliveryMapper).updateById(delivery);
         verifyNoInteractions(deliveryIssueService);
     }
@@ -419,6 +442,8 @@ class ReportDeliveryServiceImplTest {
         delivery.setLinkTokenHash(sha256("token"));
         delivery.setLinkExpiresAt(LocalDateTime.now().plusDays(1));
         delivery.setDeliveryStatus("ENQUEUED");
+        delivery.setTenantId("default");
+        when(deliveryMapper.selectOne(any())).thenReturn(delivery);
         when(deliveryMapper.selectById(7L)).thenReturn(delivery);
         when(deliveryMapper.selectByLinkTokenHash(anyString())).thenReturn(delivery);
 
@@ -436,7 +461,10 @@ class ReportDeliveryServiceImplTest {
     private ReportRun readyRun() {
         ReportRun run = new ReportRun();
         run.setId(10L);
+        run.setTenantId("default");
         run.setStatus("SUCCEEDED");
+        run.setPeriodFrom(LocalDate.of(2026, 8, 1));
+        run.setPeriodTo(LocalDate.of(2026, 8, 31));
         run.setScopeOwnerType("COMPANY");
         run.setScopeOwnerId(1L);
         run.setTemplateVersionId(3L);
@@ -456,7 +484,6 @@ class ReportDeliveryServiceImplTest {
         return new ReportRecipientPreviewResult("preview-hash", "APPROVED_SCOPE_CHECKED",
                 LocalDateTime.now(), List.of(recipient));
     }
-
     private String sha256(String value) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));

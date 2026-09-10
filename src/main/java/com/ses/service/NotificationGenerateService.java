@@ -25,6 +25,7 @@ import com.ses.mapper.EngineerFollowupMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.mapper.EngineerAccountLinkMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.dto.WorkRecordGridDto;
 import com.ses.entity.EngineerSales;
 import com.ses.entity.EngineerFollowup;
@@ -67,6 +68,8 @@ public class NotificationGenerateService {
     private final com.ses.service.attendance.AttendanceDiscrepancyService attendanceDiscrepancyService;
 
     public void generateAll() {
+        // 通知生成はHTTP主体の暗黙tenantにも、無指定のdefaultにも依存しない。
+        tenant();
         contractEnding();
         proposalStale();
         benchLong();
@@ -91,6 +94,7 @@ public class NotificationGenerateService {
      * {@code ATT_DISCREPANCY:{engineerId}:{workMonth}} で冪等（確認されるまで再通知しない）。</p>
      */
     public void attendanceDiscrepancyWarning() {
+        String tenantId = tenant();
         try {
             YearMonth target = YearMonth.now().minusMonths(1);
             var pending = attendanceDiscrepancyService.pendingWarnings(target.toString());
@@ -99,6 +103,7 @@ public class NotificationGenerateService {
             }
             List<SysUser> recipients = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
                     .in(SysUser::getRole, "管理者", "HR")
+                    .eq(SysUser::getTenantId, tenantId)
                     .eq(SysUser::getStatus, 1));
             for (var item : pending.getItems()) {
                 String dedupeKey = "ATT_DISCREPANCY:" + item.getEngineerId() + ":" + target;
@@ -132,6 +137,7 @@ public class NotificationGenerateService {
      * （対象月が変わらない限り一度だけ発行し、提出されればグリッドから外れて再発行されない）。
      */
     public void attendanceUnsubmitted() {
+        String tenantId = tenant();
         int closingDay = systemConfigService.getInt("attendance.submission-closing-day", 5);
         LocalDate today = LocalDate.now();
         if (today.getDayOfMonth() > closingDay) {
@@ -141,16 +147,17 @@ public class NotificationGenerateService {
         YearMonth targetMonth = YearMonth.from(today).minusMonths(1);
         String workMonth = targetMonth.toString();
         String monthEnd = targetMonth.atEndOfMonth().toString();
-        List<WorkRecordGridDto> rows = workRecordMapper.selectMonthlyGrid(workMonth, monthEnd);
+        List<WorkRecordGridDto> rows = workRecordMapper.selectMonthlyGrid(workMonth, monthEnd, tenantId);
         for (WorkRecordGridDto row : rows) {
             if (isSubmitted(row.getStatus())) {
                 continue;
             }
-            Contract contract = contractMapper.selectById(row.getContractId());
+            Contract contract = contractMapper.selectByIdForTenant(row.getContractId(), tenantId);
             if (contract == null || contract.getEngineerId() == null) {
                 continue;
             }
-            EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
+            EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerIdAndTenant(
+                    contract.getEngineerId(), tenantId);
             if (link == null || link.getSysUserId() == null) {
                 log.warn("勤怠未提出リマインドの宛先要員アカウントが解決できません: contractId={}, engineerId={}",
                         row.getContractId(), contract.getEngineerId());
@@ -179,6 +186,7 @@ public class NotificationGenerateService {
      * 冪等性: dedupe_key = CASHFLOW_ALERT:{yyyy-MM}
      */
     public void cashflowAlert() {
+        String tenantId = tenant();
         int months = systemConfigService.getInt("cashflow.alert-months", 6);
         java.math.BigDecimal threshold = systemConfigService.getDecimal("cashflow.alert-threshold", java.math.BigDecimal.ZERO);
 
@@ -196,6 +204,7 @@ public class NotificationGenerateService {
             if (recipients == null) {
                 recipients = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
                         .in(SysUser::getRole, StatusConstants.ROLE_ADMIN, StatusConstants.ROLE_MANAGER)
+                        .eq(SysUser::getTenantId, tenantId)
                         .eq(SysUser::getStatus, 1));
             }
             String dedupeKey = "CASHFLOW_ALERT:" + m.getMonth();
@@ -236,19 +245,12 @@ public class NotificationGenerateService {
     void contractEnding() {
         int days = systemConfigService.getInt("notice.contract-end-days", 30);
         LocalDate today = LocalDate.now();
-        QueryWrapper<Contract> qw = new QueryWrapper<>();
-        qw.eq("status", "稼動中")
-          .le("end_date", today.plusDays(days))
-          .ge("end_date", today);
-        List<Contract> contracts = contractMapper.selectList(qw);
+        String tenantId = tenant();
+        List<Contract> contracts = contractMapper.selectEndingForTenant(today, today.plusDays(days), tenantId);
 
         // 自動更新ドラフト生成済み(renewed_from_contract_id = 当該契約ID)の契約は更新手続きが
         // 進行中のため通知しない。判定基準は ContractRenewalServiceImpl.hasExistingDraft と同一。
-        Set<Long> renewedFromIds = contractMapper.selectList(new QueryWrapper<Contract>()
-                        .isNotNull("renewed_from_contract_id")
-                        .select("renewed_from_contract_id")).stream()
-                .map(Contract::getRenewedFromContractId)
-                .collect(Collectors.toSet());
+        Set<Long> renewedFromIds = new java.util.HashSet<>(contractMapper.selectRenewedOriginalIdsForTenant(tenantId));
         contracts = contracts.stream()
                 .filter(c -> !renewedFromIds.contains(c.getId()))
                 .collect(Collectors.toList());
@@ -284,7 +286,7 @@ public class NotificationGenerateService {
             // Find latest contract end_date or created_at
             QueryWrapper<Contract> cQw = new QueryWrapper<>();
             cQw.eq("engineer_id", e.getId()).orderByDesc("end_date").last("LIMIT 1");
-            Contract lastContract = contractMapper.selectOne(cQw);
+            Contract lastContract = contractMapper.selectLatestByEngineerForTenant(e.getId(), tenant());
             LocalDate dateToCheck = (lastContract != null && lastContract.getEndDate() != null) ? lastContract.getEndDate() : (e.getCreatedAt() != null ? e.getCreatedAt().toLocalDate() : null);
             if (dateToCheck != null && dateToCheck.plusDays(days).isBefore(LocalDate.now())) {
                 String name = getEngineerName(e.getId());
@@ -305,7 +307,8 @@ public class NotificationGenerateService {
         for (Project p : projects) {
             String dedupeKey = "PROJECT_URGENT:" + p.getId() + ":" + todayString();
             String message = "[\"notification.msg.PROJECT_URGENT\", \"" + p.getProjectName() + "\"]";
-            for (Long organizationId : contractMapper.selectOrganizationIdsByProjectId(p.getId(), LocalDate.now())) {
+            for (Long organizationId : contractMapper.selectOrganizationIdsByProjectId(p.getId(), LocalDate.now(),
+                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext())) {
                 notificationService.publishToOrganization(organizationId, "PROJECT_URGENT", "急募案件",
                         message, NotificationLinks.PROJECT_LIST, dedupeKey + "#o" + organizationId);
             }
@@ -446,7 +449,7 @@ public class NotificationGenerateService {
         String workMonth = YearMonth.from(LocalDate.now()).minusMonths(offset).toString();
         List<Long> contractIds = unacceptedContractIds(workMonth);
         for (Long contractId : contractIds) {
-            Contract contract = contractMapper.selectById(contractId);
+            Contract contract = contractMapper.selectByIdForTenant(contractId, tenant());
             if (contract == null) {
                 continue;
             }
@@ -473,7 +476,7 @@ public class NotificationGenerateService {
                         .isNotNull("submitted_at")
                         .le("submitted_at", today.minusDays(days).atStartOfDay()));
         for (com.ses.entity.Acceptance acceptance : pending) {
-            Contract contract = contractMapper.selectById(acceptance.getContractId());
+            Contract contract = contractMapper.selectByIdForTenant(acceptance.getContractId(), tenant());
             if (contract == null) {
                 continue;
             }
@@ -495,7 +498,7 @@ public class NotificationGenerateService {
         List<com.ses.entity.Acceptance> rejected = acceptanceMapper.selectList(
                 new QueryWrapper<com.ses.entity.Acceptance>().eq("status", "差戻し"));
         for (com.ses.entity.Acceptance acceptance : rejected) {
-            Contract contract = contractMapper.selectById(acceptance.getContractId());
+            Contract contract = contractMapper.selectByIdForTenant(acceptance.getContractId(), tenant());
             if (contract == null) {
                 continue;
             }
@@ -511,13 +514,11 @@ public class NotificationGenerateService {
 
     /** 未提出/未検収の契約ID（確定済み・検収要・検収済acceptanceが無い実績の契約）。 */
     private List<Long> unacceptedContractIds(String workMonth) {
-        List<com.ses.entity.WorkRecord> records = workRecordMapper.selectList(
-                new QueryWrapper<com.ses.entity.WorkRecord>()
-                        .eq("work_month", workMonth)
-                        .eq("status", "確定"));
+        List<com.ses.entity.WorkRecord> records = workRecordMapper.selectByWorkMonthAndStatusesForTenant(
+                workMonth, List.of("確定"), tenant());
         Set<Long> result = new java.util.LinkedHashSet<>();
         for (com.ses.entity.WorkRecord record : records) {
-            Contract contract = contractMapper.selectById(record.getContractId());
+            Contract contract = contractMapper.selectByIdForTenant(record.getContractId(), tenant());
             if (contract == null || Boolean.FALSE.equals(contract.getAcceptanceRequired())) {
                 continue;
             }
@@ -532,12 +533,7 @@ public class NotificationGenerateService {
 
     /** 顧客の担当営業（その顧客の契約sales_user_idの有効営業）＋管理者。 */
     private List<Long> resolveCustomerSalesUserIds(Long customerId) {
-        List<Long> salesIds = contractMapper.selectList(
-                        new QueryWrapper<Contract>()
-                                .eq("customer_id", customerId)
-                                .isNotNull("sales_user_id")
-                                .select("sales_user_id"))
-                .stream().map(Contract::getSalesUserId).distinct().collect(Collectors.toList());
+        List<Long> salesIds = contractMapper.selectSalesUserIdsByCustomerForTenant(customerId, tenant());
         return resolveSalesRecipients(salesIds);
     }
 
@@ -580,14 +576,17 @@ public class NotificationGenerateService {
         if (history != null) {
             return history.getOrganizationId();
         }
-        com.ses.entity.Engineer engineer = engineerMapper.selectById(contract.getEngineerId());
+        com.ses.entity.Engineer engineer = engineerMapper.selectByIdForTenant(contract.getEngineerId(), tenant());
         if (engineer != null && engineer.getOrganizationId() != null) {
             return engineer.getOrganizationId();
         }
-        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
+        String tenantId = tenant();
+        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerIdAndTenant(
+                contract.getEngineerId(), tenantId);
         if (link != null && link.getSysUserId() != null) {
             com.ses.entity.UserOrganization primary = userOrganizationMapper.selectOne(
-                    new QueryWrapper<com.ses.entity.UserOrganization>()
+                            new QueryWrapper<com.ses.entity.UserOrganization>()
+                            .eq("tenant_id", tenantId)
                             .eq("user_id", link.getSysUserId())
                             .eq("primary_flag", 1)
                             .le("valid_from", date)
@@ -608,8 +607,10 @@ public class NotificationGenerateService {
             return java.util.List.of();
         }
         LocalDate date = asOf == null ? LocalDate.now() : asOf;
+        String tenantId = tenant();
         List<Long> userIds = userOrganizationMapper.selectList(
                         new QueryWrapper<com.ses.entity.UserOrganization>()
+                                .eq("tenant_id", tenantId)
                                 .eq("organization_id", orgId)
                                 .eq("primary_flag", 1)
                                 .le("valid_from", date)
@@ -621,6 +622,7 @@ public class NotificationGenerateService {
         }
         return sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
                         .in(SysUser::getId, userIds)
+                        .eq(SysUser::getTenantId, tenantId)
                         .eq(SysUser::getRole, "マネージャー")
                         .eq(SysUser::getStatus, 1))
                 .stream().map(SysUser::getId).collect(Collectors.toList());
@@ -634,18 +636,24 @@ public class NotificationGenerateService {
     }
 
     private List<Long> resolveSalesRecipients(List<Long> salesIds) {
+        String tenantId = tenant();
         List<Long> recipients = new java.util.ArrayList<>();
         for (Long salesId : salesIds) {
-            SysUser user = salesId == null ? null : sysUserMapper.selectById(salesId);
+            SysUser user = salesId == null ? null : sysUserMapper.selectByIdAndTenant(salesId, tenantId);
             if (user != null && "営業".equals(user.getRole()) && Integer.valueOf(1).equals(user.getStatus())) {
                 recipients.add(salesId);
             }
         }
         // 管理者へも常時通知（design §5.2 scheduler: 宛先は担当営業/管理者）
         recipients.addAll(sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                        .eq(SysUser::getTenantId, tenantId)
                         .eq(SysUser::getRole, "管理者")
                         .eq(SysUser::getStatus, 1))
                 .stream().map(SysUser::getId).collect(Collectors.toList()));
         return recipients.stream().distinct().collect(Collectors.toList());
+    }
+
+    private String tenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 }

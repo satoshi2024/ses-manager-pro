@@ -1,6 +1,5 @@
 package com.ses.service.skillgap;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.EngineerAccountLink;
@@ -11,10 +10,13 @@ import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.EngineerSkillAssessmentMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.LearningDecisionEventMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.EngineerSkillService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.security.TenantOwnershipResolver;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,7 +35,6 @@ import java.util.List;
 @Service
 public class SkillAssessmentServiceImpl implements SkillAssessmentService {
 
-    private static final String TENANT = "default";
     private static final List<String> LEVELS = List.of("初級", "中級", "上級");
 
     private final EngineerSkillAssessmentMapper assessmentMapper;
@@ -44,6 +45,8 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
     private final EngineerSkillService engineerSkillService;
     private final Clock clock;
     private final ObjectMapper objectMapper;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
+    private final EngineerMapper engineerMapper;
 
     public SkillAssessmentServiceImpl(EngineerSkillAssessmentMapper assessmentMapper,
                                       LearningDecisionEventMapper decisionEventMapper,
@@ -52,7 +55,9 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
                                       SysUserMapper sysUserMapper,
                                       EngineerSkillService engineerSkillService,
                                       Clock clock,
-                                      ObjectMapper objectMapper) {
+                                      ObjectMapper objectMapper,
+                                      TenantOwnershipResolver tenantOwnershipResolver,
+                                      EngineerMapper engineerMapper) {
         this.assessmentMapper = assessmentMapper;
         this.decisionEventMapper = decisionEventMapper;
         this.accountLinkMapper = accountLinkMapper;
@@ -61,15 +66,19 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
         this.engineerSkillService = engineerSkillService;
         this.clock = clock;
         this.objectMapper = objectMapper;
+        this.tenantOwnershipResolver = tenantOwnershipResolver;
+        this.engineerMapper = engineerMapper;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public EngineerSkillAssessment submitSelf(Long engineerId, Long skillId, String proposedLevel,
-                                              LocalDate effectiveFrom, Long actorUserId, String reason) {
+                                               LocalDate effectiveFrom, Long actorUserId, String reason) {
+        String tenantId = currentTenant();
         requireActor(actorUserId, reason);
-        EngineerAccountLink link = accountLinkMapper.selectByEngineerId(engineerId);
-        if (link == null || !actorUserId.equals(link.getSysUserId()) || !activeUser(actorUserId)) {
+        requireEngineer(tenantId, engineerId);
+        EngineerAccountLink link = accountLinkMapper.selectByEngineerIdAndTenant(engineerId, tenantId);
+        if (link == null || !actorUserId.equals(link.getSysUserId()) || !activeUser(actorUserId, tenantId)) {
             throw BusinessException.of(403, "skill.assessment.selfOnly");
         }
         return save(EngineerSkillAssessment.TYPE_SELF, engineerId, skillId, proposedLevel,
@@ -80,13 +89,15 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
     @Transactional(rollbackFor = Exception.class)
     public EngineerSkillAssessment submitManager(Long engineerId, Long skillId, String proposedLevel,
                                                  LocalDate effectiveFrom, Long actorUserId, String reason) {
+        String tenantId = currentTenant();
         requireActor(actorUserId, reason);
-        SysUser actor = activeUserEntity(actorUserId);
+        requireEngineer(tenantId, engineerId);
+        SysUser actor = activeUserEntity(actorUserId, tenantId);
         if (actor == null || !"マネージャー".equals(actor.getRole())) {
             throw BusinessException.of(403, "skill.assessment.managerOnly");
         }
-        EngineerAccountLink link = accountLinkMapper.selectByEngineerId(engineerId);
-        if (link == null || !isCurrentManager(link.getSysUserId(), actorUserId, effectiveDate(effectiveFrom))) {
+        EngineerAccountLink link = accountLinkMapper.selectByEngineerIdAndTenant(engineerId, tenantId);
+        if (link == null || !isCurrentManager(tenantId, link.getSysUserId(), actorUserId, effectiveDate(effectiveFrom))) {
             throw BusinessException.of(403, "skill.assessment.managerOutOfScope");
         }
         return save(EngineerSkillAssessment.TYPE_MANAGER, engineerId, skillId, proposedLevel,
@@ -97,16 +108,17 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
     @Transactional(rollbackFor = Exception.class)
     public EngineerSkillAssessment finalizeByHr(Long engineerId, Long skillId, String proposedLevel,
                                                 LocalDate effectiveFrom, Long actorUserId, String reason) {
+        String tenantId = currentTenant();
         requireActor(actorUserId, reason);
-        SysUser actor = activeUserEntity(actorUserId);
+        requireEngineer(tenantId, engineerId);
+        SysUser actor = activeUserEntity(actorUserId, tenantId);
         if (actor == null || !("HR".equals(actor.getRole()) || "管理者".equals(actor.getRole()))) {
             throw BusinessException.of(403, "skill.assessment.hrOnly");
         }
         EngineerSkillAssessment assessment = save(EngineerSkillAssessment.TYPE_HR_FINAL, engineerId, skillId,
                 proposedLevel, effectiveFrom, actorUserId, reason);
 
-        List<EngineerSkill> current = new ArrayList<>(engineerSkillService.list(
-                new LambdaQueryWrapper<EngineerSkill>().eq(EngineerSkill::getEngineerId, engineerId)));
+        List<EngineerSkill> current = new ArrayList<>(engineerSkillService.listForTenant(engineerId));
         boolean found = false;
         for (EngineerSkill skill : current) {
             if (skillId.equals(skill.getSkillId())) {
@@ -123,7 +135,22 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
             current.add(skill);
         }
         // 共通serviceがcurrent projectionとeffective eventを同一transactionで更新する。
-        engineerSkillService.replaceSkills(engineerId, current);
+        com.ses.entity.Engineer parent = engineerMapper.selectByIdForTenant(engineerId, tenantId);
+        if (parent == null || parent.getVersion() == null) {
+            throw BusinessException.of(404, "error.engineer.notFound");
+        }
+        com.ses.dto.skill.SkillReplaceRequest request = new com.ses.dto.skill.SkillReplaceRequest();
+        request.setExpectedVersion(parent.getVersion());
+        request.setReason("HR資格評価確定");
+        request.setSkills(current.stream().map(skill -> {
+            com.ses.dto.skill.SkillReplaceRequest.SkillItem item =
+                    new com.ses.dto.skill.SkillReplaceRequest.SkillItem();
+            item.setSkillId(skill.getSkillId());
+            item.setProficiency(skill.getProficiency());
+            item.setExperienceYears(skill.getExperienceYears());
+            return item;
+        }).toList());
+        engineerSkillService.replaceSkills(engineerId, request);
         appendDecision("SKILL_LEVEL", assessment.getId(), actorUserId, reason,
                 snapshotHash(assessment), 0);
         return assessment;
@@ -136,7 +163,7 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
         }
         LocalDate from = effectiveFrom == null ? LocalDate.now(clock) : effectiveFrom;
         EngineerSkillAssessment assessment = new EngineerSkillAssessment();
-        assessment.setTenantId(TENANT);
+        assessment.setTenantId(currentTenant());
         assessment.setEngineerId(engineerId);
         assessment.setSkillId(skillId);
         assessment.setAssessmentType(type);
@@ -154,25 +181,17 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
         return assessment;
     }
 
-    private boolean isCurrentManager(Long userId, Long managerId, LocalDate asOf) {
-        return userOrganizationMapper.selectList(new LambdaQueryWrapper<UserOrganization>()
-                        .eq(UserOrganization::getUserId, userId)
-                        .eq(UserOrganization::getManagerUserId, managerId)
-                        .eq(UserOrganization::getPrimaryFlag, 1)
-                        .eq(UserOrganization::getDeletedFlag, 0)
-                        .le(UserOrganization::getValidFrom, asOf)
-                        .and(wrapper -> wrapper.isNull(UserOrganization::getValidTo)
-                                .or().ge(UserOrganization::getValidTo, asOf)))
-                .stream().findAny().isPresent();
+    private boolean isCurrentManager(String tenantId, Long userId, Long managerId, LocalDate asOf) {
+        return !userOrganizationMapper.selectManagerAssignmentByTenant(tenantId, userId, managerId, asOf).isEmpty();
     }
 
-    private SysUser activeUserEntity(Long userId) {
-        SysUser user = sysUserMapper.selectById(userId);
+    private SysUser activeUserEntity(Long userId, String tenantId) {
+        SysUser user = sysUserMapper.selectByIdAndTenant(userId, tenantId);
         return user != null && Integer.valueOf(1).equals(user.getStatus()) ? user : null;
     }
 
-    private boolean activeUser(Long userId) {
-        return activeUserEntity(userId) != null;
+    private boolean activeUser(Long userId, String tenantId) {
+        return activeUserEntity(userId, tenantId) != null;
     }
 
     private LocalDate effectiveDate(LocalDate date) {
@@ -188,7 +207,7 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
     private void appendDecision(String domain, Long sourceId, Long actorUserId, String reason,
                                 String hash, int adverseUseFlag) {
         LearningDecisionEvent event = new LearningDecisionEvent();
-        event.setTenantId(TENANT);
+        event.setTenantId(currentTenant());
         event.setDecisionDomain(domain);
         event.setSourceType("ENGINEER_SKILL_ASSESSMENT");
         event.setSourceId(sourceId);
@@ -199,6 +218,16 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
         event.setOccurredAt(LocalDateTime.now(clock));
         event.setCreatedAt(event.getOccurredAt());
         decisionEventMapper.insertEvent(event);
+    }
+
+    private String currentTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
+    }
+
+    private void requireEngineer(String tenantId, Long engineerId) {
+        if (engineerId == null || tenantOwnershipResolver.selectEngineer(tenantId, engineerId) == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
     }
 
     private String snapshotHash(EngineerSkillAssessment assessment) {

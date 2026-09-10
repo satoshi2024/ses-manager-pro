@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.PageUtils;
 import com.ses.entity.Contract;
+import com.ses.dto.contract.ContractDetailDto;
 import com.ses.service.ContractRenewalService;
 import com.ses.service.ContractService;
 import lombok.RequiredArgsConstructor;
@@ -62,6 +63,7 @@ public class ContractApiController {
         // 契約一覧は画面密度に合わせて最大100件に制限する。共通上限1000件は他APIとの互換のため変更しない。
         long boundedSize = Math.min(size, MAX_CONTRACT_PAGE_SIZE);
         Page<ContractListDto> page = PageUtils.safePage(current, boundedSize, DEFAULT_CONTRACT_PAGE_SIZE);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         // データスコープ: 営業ロール制限時は担当契約(自分∪未帰属)のみ。件数・ページングもスコープ後の値にするため
         // クエリレベルで IN を注入する（空集合なら空ページを即返し、IN空リストのSQLエラーを回避）。
         java.util.Set<Long> effectiveIds = effectiveContractIds();
@@ -70,7 +72,8 @@ public class ContractApiController {
             return ApiResult.success(page);
         }
         java.util.List<Long> allowedIds = effectiveIds == null ? null : new java.util.ArrayList<>(effectiveIds);
-        Page<ContractListDto> result = contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId, contractNo, endDateFrom, endDateTo, salesUserId, salesUnassigned, periodFrom, periodTo, allowedIds);
+        Page<ContractListDto> result = contractMapper.selectPageWithNames(page, status, customerId, engineerId, projectId,
+                contractNo, endDateFrom, endDateTo, salesUserId, salesUnassigned, periodFrom, periodTo, allowedIds, tenantId);
         if (!authorizationService.isAllowed(authentication, "contract.cost.view")) {
             result.getRecords().forEach(row -> row.setCostPrice(null));
         }
@@ -82,18 +85,10 @@ public class ContractApiController {
      */
     @GetMapping("/options")
     public ApiResult<java.util.List<com.ses.dto.common.OptionDto>> getOptions() {
-        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Contract> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         java.util.Set<Long> allowed = effectiveContractIds();
-        if (allowed != null) {
-            if (allowed.isEmpty()) return ApiResult.success(java.util.Collections.emptyList());
-            queryWrapper.in(Contract::getId, allowed);
-        }
-        queryWrapper.select(Contract::getId, Contract::getContractNo, Contract::getStatus)
-                    .orderByDesc(Contract::getId);
-        java.util.List<com.ses.dto.common.OptionDto> options = contractService.list(queryWrapper).stream()
-                .map(c -> new com.ses.dto.common.OptionDto(c.getId(), 
-                        (c.getContractNo() != null ? c.getContractNo() : "No Number") + " - " + c.getStatus()))
-                .collect(java.util.stream.Collectors.toList());
+        if (allowed != null && allowed.isEmpty()) return ApiResult.success(java.util.Collections.emptyList());
+        java.util.List<com.ses.dto.common.OptionDto> options = contractMapper.selectOptionsForTenant(tenantId, allowed);
         return ApiResult.success(options);
     }
 
@@ -114,6 +109,10 @@ public class ContractApiController {
      * @return 契約情報
      */
     private void assertContractVisible(Long id) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        if (contractMapper.selectByIdForTenant(id, tenantId) == null) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
         java.util.Set<Long> allowed = effectiveContractIds();
         if (allowed != null && !allowed.contains(id)) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
@@ -121,15 +120,21 @@ public class ContractApiController {
     }
 
     @GetMapping("/{id}")
-    public ApiResult<Contract> getById(@PathVariable Long id,
+    public ApiResult<ContractDetailDto> getById(@PathVariable Long id,
                                        org.springframework.security.core.Authentication authentication) {
         assertContractVisible(id);
-        var entity = contractService.getById(id);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        var entity = contractMapper.selectByIdForTenant(id, tenantId);
         if (entity == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
-        if (!authorizationService.isAllowed(authentication, "contract.cost.view")) {
-            entity.setCostPrice(null);
-        }
-        return ApiResult.success(entity);
+        return ApiResult.success(toDetailDto(entity,
+                authorizationService.isAllowed(authentication, "contract.cost.view")));
+    }
+
+    private ContractDetailDto toDetailDto(Contract c, boolean canViewCost) {
+        ContractDetailDto dto = new ContractDetailDto();
+        org.springframework.beans.BeanUtils.copyProperties(c, dto);
+        if (!canViewCost) dto.setCostPrice(null);
+        return dto;
     }
 
     /**

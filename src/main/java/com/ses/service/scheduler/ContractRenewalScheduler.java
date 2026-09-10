@@ -15,10 +15,11 @@ import org.springframework.stereotype.Component;
 public class ContractRenewalScheduler {
 
     private final ContractRenewalService contractRenewalService;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(cron = "0 30 7 * * *")
     @SchedulerLock(name = "contractRenewalDraftDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void generateDaily() {
-        contractRenewalService.generateRenewalDrafts();
+        tenantAwareBatchRunner.run(tenant -> contractRenewalService.generateRenewalDrafts());
     }
 }

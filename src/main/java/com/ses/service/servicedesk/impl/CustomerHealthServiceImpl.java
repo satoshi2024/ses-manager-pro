@@ -15,12 +15,13 @@ import com.ses.entity.ServiceRequest;
 import com.ses.entity.ServiceSlaClock;
 import com.ses.mapper.CustomerCsatMapper;
 import com.ses.mapper.CustomerHealthSnapshotMapper;
-import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.CustomerQbrMapper;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.ServiceRequestMapper;
 import com.ses.mapper.ServiceSlaClockMapper;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.CustomerScopeResolver;
+import com.ses.service.security.TenantOwnershipResolver;
 import com.ses.service.servicedesk.CustomerHealthService;
 import com.ses.service.servicedesk.SnapshotExecutionContext;
 import lombok.RequiredArgsConstructor;
@@ -57,9 +58,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class CustomerHealthServiceImpl implements CustomerHealthService {
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CustomerScopeResolver customerScopeResolver;
+
     private static final Pattern MONTH_PATTERN = Pattern.compile("^\\d{4}-(0[1-9]|1[0-2])$");
 
-    private final CustomerMapper customerMapper;
     private final CustomerHealthSnapshotMapper snapshotMapper;
     private final ServiceRequestMapper serviceRequestMapper;
     private final ServiceSlaClockMapper slaClockMapper;
@@ -67,29 +70,21 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
     private final CustomerQbrMapper qbrMapper;
     private final InvoiceMapper invoiceMapper;
     private final DataScopeService dataScopeService;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
     @Override
     @Transactional(readOnly = true)
     public List<CustomerHealthScoreDto> listCustomerHealthSummaries(String healthStatus, String keyword) {
-        LambdaQueryWrapper<Customer> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Customer::getDeletedFlag, 0);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
 
-        if (dataScopeService.isScoped()) {
-            Set<Long> allowedCustomerIds = dataScopeService.allowedCustomerIds();
-            if (allowedCustomerIds == null || allowedCustomerIds.isEmpty()) {
-                wrapper.eq(Customer::getId, -1L);
-            } else {
-                wrapper.in(Customer::getId, allowedCustomerIds);
-            }
-        }
+        Set<Long> ownedCustomerIds = tenantOwnershipResolver.resolveCustomerIds(tenantId);
+        Set<Long> allowedCustomerIds = intersectOwnedCustomerIds(ownedCustomerIds, resolvedCustomerIds());
 
-        if (StringUtils.hasText(keyword)) {
-            wrapper.like(Customer::getCompanyName, keyword);
-        }
-
-        List<Customer> customers = customerMapper.selectList(wrapper);
+        List<Customer> customers = allowedCustomerIds == null || allowedCustomerIds.isEmpty()
+                ? Collections.emptyList()
+                : tenantOwnershipResolver.selectCustomers(tenantId, allowedCustomerIds, keyword);
         if (customers.isEmpty()) {
             return Collections.emptyList();
         }
@@ -116,11 +111,10 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         if (customerId == null) {
             throw BusinessException.of(400, "顧客IDは必須です");
         }
-        if (dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(customerId);
-        }
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        assertAllowedCustomer(customerId);
 
-        Customer customer = customerMapper.selectById(customerId);
+        Customer customer = tenantOwnershipResolver.selectCustomer(tenantId, customerId);
         if (customer == null || Integer.valueOf(1).equals(customer.getDeletedFlag())) {
             throw BusinessException.of(404, "指定された顧客が見つかりません");
         }
@@ -136,11 +130,19 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
     @Override
     @Transactional(readOnly = true)
     public Map<Long, CustomerHealthScoreDto> getHealthMapForCustomers(Set<Long> customerIds) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         if (customerIds == null || customerIds.isEmpty()) {
             return Collections.emptyMap();
         }
 
-        List<Customer> customers = customerMapper.selectBatchIds(customerIds);
+        Set<Long> ownedCustomerIds = tenantOwnershipResolver.resolveCustomerIds(tenantId);
+        Set<Long> scopedCustomerIds = intersectOwnedCustomerIds(ownedCustomerIds, customerIds);
+        scopedCustomerIds = intersectOwnedCustomerIds(scopedCustomerIds, resolvedCustomerIds());
+        if (scopedCustomerIds == null || scopedCustomerIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<Customer> customers = tenantOwnershipResolver.selectCustomers(tenantId, scopedCustomerIds, null);
         Map<Long, String> customerNameMap = customers.stream()
                 .collect(Collectors.toMap(Customer::getId, Customer::getCompanyName, (a, b) -> a));
 
@@ -152,7 +154,9 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         // 1. 問い合わせデータ一括取得
         List<ServiceRequest> allRequests = serviceRequestMapper.selectList(
                 new LambdaQueryWrapper<ServiceRequest>()
-                        .in(ServiceRequest::getCustomerId, customerIds)
+                        .eq(ServiceRequest::getTenantId,
+                                tenantId)
+                        .in(ServiceRequest::getCustomerId, scopedCustomerIds)
         );
         Map<Long, List<ServiceRequest>> requestsByCustomer = allRequests.stream()
                 .collect(Collectors.groupingBy(ServiceRequest::getCustomerId));
@@ -160,43 +164,35 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         // 2. SLAクロック一括取得。created_atはround開始時刻であり、breach時刻の代替にしない。
         List<Long> allRequestIds = allRequests.stream().map(ServiceRequest::getId).toList();
         List<ServiceSlaClock> allClocks = allRequestIds.isEmpty() ? Collections.emptyList() :
-                slaClockMapper.selectList(
-                        new LambdaQueryWrapper<ServiceSlaClock>()
-                                .in(ServiceSlaClock::getServiceRequestId, allRequestIds)
-                );
+                slaClockMapper.selectByRequestIdsForTenant(allRequestIds, tenantId);
 
         Set<Long> breachedRequestIds = new HashSet<>();
+        Set<Long> historicalUnknownRequestIds = new HashSet<>();
         for (ServiceSlaClock clk : allClocks) {
             boolean responseInWindow = inWindow(clk.getResponseBreachedAt(), thirtyDaysAgo, now);
             boolean resolveInWindow = inWindow(clk.getResolveBreachedAt(), thirtyDaysAgo, now);
             if (responseInWindow || resolveInWindow) {
                 breachedRequestIds.add(clk.getServiceRequestId());
             }
+            if (Boolean.TRUE.equals(clk.getResponseBreachTimeUnknown())
+                    || Boolean.TRUE.equals(clk.getResolveBreachTimeUnknown())) {
+                historicalUnknownRequestIds.add(clk.getServiceRequestId());
+            }
         }
 
         // 3. CSAT回答一括取得 (直近90日)
-        List<CustomerCsat> allCsats = csatMapper.selectList(
-                new LambdaQueryWrapper<CustomerCsat>()
-                        .in(CustomerCsat::getCustomerId, customerIds)
-                        .ge(CustomerCsat::getAnsweredAt, ninetyDaysAgo)
-        );
+        List<CustomerCsat> allCsats = allRequestIds.isEmpty() ? Collections.emptyList()
+                : csatMapper.selectByCustomersForTenant(scopedCustomerIds, allRequestIds, ninetyDaysAgo, tenantId);
         Map<Long, List<CustomerCsat>> csatByCustomer = allCsats.stream()
                 .collect(Collectors.groupingBy(CustomerCsat::getCustomerId));
 
         // 4. 定例会(QBR)記録一括取得
-        List<CustomerQbr> allQbrs = qbrMapper.selectList(
-                new LambdaQueryWrapper<CustomerQbr>()
-                        .in(CustomerQbr::getCustomerId, customerIds)
-        );
+        List<CustomerQbr> allQbrs = qbrMapper.selectByCustomerIdsForTenant(scopedCustomerIds, tenantId);
         Map<Long, List<CustomerQbr>> allQbrByCustomer = allQbrs.stream()
                 .collect(Collectors.groupingBy(CustomerQbr::getCustomerId));
 
         // 5. 売掛金延滞(Invoice)一括取得
-        List<Invoice> allInvoices = invoiceMapper.selectList(
-                new LambdaQueryWrapper<Invoice>()
-                        .in(Invoice::getCustomerId, customerIds)
-                        .eq(Invoice::getDeletedFlag, 0)
-        );
+        List<Invoice> allInvoices = invoiceMapper.selectByCustomerIdsForTenant(scopedCustomerIds, tenantId);
         Map<Long, List<Invoice>> allInvoicesByCustomer = allInvoices.stream()
                 .collect(Collectors.groupingBy(Invoice::getCustomerId));
 
@@ -212,7 +208,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
 
         Map<Long, CustomerHealthScoreDto> resultMap = new HashMap<>();
 
-        for (Long custId : customerIds) {
+        for (Long custId : scopedCustomerIds) {
             String companyName = customerNameMap.getOrDefault(custId, "顧客#" + custId);
 
             List<ServiceRequest> custReqs = requestsByCustomer.getOrDefault(custId, Collections.emptyList());
@@ -227,10 +223,14 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             int openCritical = openP0 + openP1;
 
             int slaBreaches30d = 0;
+            int historicalUnknown = 0;
             List<Long> custReqIds = custReqs.stream().map(ServiceRequest::getId).toList();
             for (Long rId : custReqIds) {
                 if (breachedRequestIds.contains(rId)) {
                     slaBreaches30d++;
+                }
+                if (historicalUnknownRequestIds.contains(rId)) {
+                    historicalUnknown++;
                 }
             }
 
@@ -265,8 +265,12 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             if (custReqIds.isEmpty()) {
                 missingInputs.add("SLA");
             }
+            if (historicalUnknown > 0) {
+                missingInputs.add("SLA_BREACH_TIMESTAMP_HISTORICAL_UNKNOWN");
+            }
             deductions += slaDeduction;
             breakdown.put("slaBreachDeduction", slaDeduction);
+            breakdown.put("slaBreachHistoricalUnknownCount", historicalUnknown);
 
             // 3. CSAT平均 (<3.0は-15, 3.0-3.9は-5, >=4.0は0, 回答0はmissing)
             int csatDeduction = 0;
@@ -311,6 +315,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             List<String> explanations = new ArrayList<>();
             if (openCritical > 0) explanations.add("未解決重大障害: " + openCritical + "件 (-" + (p0Deduction + p1Deduction) + "点)");
             if (slaBreaches30d > 0) explanations.add("直近30日SLA違反: " + slaBreaches30d + "件 (-" + slaDeduction + "点)");
+            if (historicalUnknown > 0) explanations.add("過去SLA違反の検知時刻不明: " + historicalUnknown + "件（履歴不明）");
             if (csatDeduction > 0) explanations.add("CSAT評価低迷: " + avgCsat + " (-" + csatDeduction + "点)");
             if (arDeduction > 0) explanations.add("売掛金延滞発生中 (-25点)");
             if (qbrDeduction > 0) explanations.add("直近60日定例会(QBR)未開催 (-10点)");
@@ -323,6 +328,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
                     .healthStatus(healthStatus)
                     .openCriticalIssuesCount(openCritical)
                     .slaBreachCount30d(slaBreaches30d)
+                    .slaBreachHistoricalUnknownCount(historicalUnknown)
                     .avgCsatScore(avgCsat)
                     .arOverdueFlag(arOverdue)
                     .missingInputs(missingInputs)
@@ -363,6 +369,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
     public void generateMonthlySnapshot(String targetMonth, String reason,
                                         SnapshotExecutionContext executionContext) {
         validateExecutionContext(executionContext);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
 
         // targetMonth 解決 & フォーマット検証
         String effectiveMonth = targetMonth;
@@ -394,9 +401,9 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         Long actorId = executionContext.actorId();
         String actorName = executionContext.actorName();
 
-        List<Customer> allCustomers = customerMapper.selectList(
-                new LambdaQueryWrapper<Customer>().eq(Customer::getDeletedFlag, 0)
-        );
+        Set<Long> ownedCustomerIds = tenantOwnershipResolver.resolveCustomerIds(tenantId);
+        List<Customer> allCustomers = ownedCustomerIds == null || ownedCustomerIds.isEmpty()
+                ? Collections.emptyList() : tenantOwnershipResolver.selectCustomers(tenantId, ownedCustomerIds, null);
         if (allCustomers.isEmpty()) {
             return;
         }
@@ -459,7 +466,9 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
                                          String actorType, Long actorId, String actorName,
                                          LocalDateTime now, String effectiveMonth) {
         for (int attempt = 0; attempt < 3; attempt++) {
-            CustomerHealthSnapshot latest = snapshotMapper.selectLatestForUpdate(dto.getCustomerId(), snapshotDate);
+            String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+            CustomerHealthSnapshot latest = snapshotMapper.selectLatestForUpdate(
+                    dto.getCustomerId(), snapshotDate, tenantId);
             if (latest != null && computedHash.equals(latest.getSnapshotHash())) {
                 log.debug("顧客ヘルススナップショット同一内容スキップ: customerId={}, month={}",
                         dto.getCustomerId(), effectiveMonth);
@@ -478,6 +487,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
                     .healthStatus(dto.getHealthStatus())
                     .openCriticalIssuesCount(dto.getOpenCriticalIssuesCount())
                     .slaBreachCount30d(dto.getSlaBreachCount30d())
+                    .slaBreachHistoricalUnknownCount(dto.getSlaBreachHistoricalUnknownCount())
                     .avgCsatScore(dto.getAvgCsatScore())
                     .arOverdueFlag(dto.getArOverdueFlag())
                     .missingInputsJson(missingJson)
@@ -525,6 +535,37 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             return hexString.toString();
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 algorithm not available", e);
+        }
+    }
+
+    private Set<Long> resolvedCustomerIds() {
+        if (SecurityUtils.currentRole() == null) {
+            return null;
+        }
+        if (customerScopeResolver != null) {
+            return customerScopeResolver.resolve(LocalDate.now(clock));
+        }
+        return dataScopeService.isScoped() ? dataScopeService.allowedCustomerIds() : null;
+    }
+
+    /** tenant所有権とDataScope/組織scopeの共通積集合。nullはfull-accessを意味する。 */
+    private Set<Long> intersectOwnedCustomerIds(Set<Long> ownedCustomerIds, Set<Long> allowedCustomerIds) {
+        Set<Long> owned = ownedCustomerIds == null ? Set.of() : new HashSet<>(ownedCustomerIds);
+        if (allowedCustomerIds == null) {
+            return owned;
+        }
+        owned.retainAll(allowedCustomerIds);
+        return owned;
+    }
+
+    private void assertAllowedCustomer(Long customerId) {
+        if (SecurityUtils.currentRole() == null) {
+            return;
+        }
+        if (customerScopeResolver != null) {
+            customerScopeResolver.assertAllowed(customerId);
+        } else if (dataScopeService.isScoped()) {
+            dataScopeService.assertAllowedCustomer(customerId);
         }
     }
 }

@@ -130,6 +130,9 @@ public final class ActionPermissionResolver {
         if (matchesPrefix(uri, "/api/security/break-glass/incidents")) {
             return "break-glass.manage";
         }
+        if (matchesPrefix(uri, "/api/admin/nf02-nf03/ownership-repair")) {
+            return "ownership-repair.manage";
+        }
         if ("POST".equals(method) && uri.matches("/api/security/mfa/\\d+/reset")) {
             return "mfa.reset";
         }
@@ -138,7 +141,9 @@ public final class ActionPermissionResolver {
             return null;
         }
         if (!uri.startsWith("/api/")) {
-            return null;
+            // break-glass検証はMenuPermissionFilterより前に行うため、pageも同じactionへ正規化する。
+            // 画面の直下resourceだけを静的allow-list化し、未知pageはnull（fail-closed）のままにする。
+            return resolvePageAction(method, uri);
         }
         String remainder = uri.substring("/api/".length());
         int slash = remainder.indexOf('/');
@@ -277,7 +282,8 @@ public final class ActionPermissionResolver {
                 || actionKey.equals("file.upload") || actionKey.equals("file.scan.retry")
                 || actionKey.equals("permission.manage") || actionKey.equals("audit.security.view")
                 || actionKey.equals("mfa.reset") || actionKey.equals("sales-order.edit")
-                || actionKey.equals("integration.webhook.replay")) {
+                || actionKey.equals("integration.webhook.replay")
+                || actionKey.equals("ownership-repair.manage")) {
             return true;
         }
         int separator = actionKey.indexOf('.');
@@ -337,5 +343,50 @@ public final class ActionPermissionResolver {
             case "DELETE" -> resource + ".delete";
             default -> null;
         };
+    }
+
+    private static String resolvePageAction(String method, String uri) {
+        if (!("GET".equals(method) || "HEAD".equals(method))) {
+            return null;
+        }
+        String resource = switch (uri) {
+            case "/dashboard" -> "dashboard";
+            default -> pageResource(uri);
+        };
+        return resource == null ? null : resource + ".view";
+    }
+
+    private static String pageResource(String uri) {
+        Map<String, String> pages = Map.ofEntries(
+                Map.entry("/engineer", "engineer"),
+                Map.entry("/customer", "customer"),
+                Map.entry("/project", "project"),
+                Map.entry("/proposal", "proposal"),
+                Map.entry("/contract", "contract"),
+                Map.entry("/invoice", "invoice"),
+                Map.entry("/work-record", "work-record"),
+                Map.entry("/approval", "approval"),
+                Map.entry("/service-desk", "service-desk"),
+                Map.entry("/customer-success", "customer-health"),
+                Map.entry("/certification-learning-skill-gap", "certification-learning-gap"),
+                Map.entry("/accounting", "accounting"),
+                Map.entry("/integration-hub", "integration-hub"),
+                Map.entry("/expenses", "expense-request"),
+                Map.entry("/todo", "task"),
+                Map.entry("/compliance", "compliance"),
+                Map.entry("/management-reports", "management-report"),
+                Map.entry("/system-config", "system-config"),
+                Map.entry("/user", "user"),
+                Map.entry("/organization", "organization"),
+                Map.entry("/bp-company", "bp-company"),
+                Map.entry("/quotation", "quotation"),
+                Map.entry("/analytics", "analytics"),
+                Map.entry("/ai", "ai"),
+                Map.entry("/lifecycle", "lifecycle"));
+        return pages.entrySet().stream()
+                .filter(entry -> uri.equals(entry.getKey()) || uri.startsWith(entry.getKey() + "/"))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElse(null);
     }
 }

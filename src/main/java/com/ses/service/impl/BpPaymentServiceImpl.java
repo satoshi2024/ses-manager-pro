@@ -13,6 +13,7 @@ import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.BpPaymentService;
 import com.ses.service.MonthlyClosingService;
 import com.ses.service.WorkRecordService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.dao.DuplicateKeyException;
@@ -41,6 +42,10 @@ public class BpPaymentServiceImpl implements BpPaymentService {
         if (workRecordService != null) {
             workRecordService.assertAllowed(workRecordId);
         }
+    }
+
+    private String tenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 
     @Override
@@ -124,7 +129,7 @@ public class BpPaymentServiceImpl implements BpPaymentService {
         }
         if (bpPayment.getWorkRecordId() != null) {
             assertWorkRecordAllowed(bpPayment.getWorkRecordId());
-            WorkRecord wr = workRecordMapper.selectById(bpPayment.getWorkRecordId());
+            WorkRecord wr = workRecordMapper.selectByIdForTenant(bpPayment.getWorkRecordId(), tenant());
             if (wr != null) {
                 monthlyClosingService.assertOpenForUpdate(wr.getWorkMonth());
             }
@@ -167,7 +172,7 @@ public class BpPaymentServiceImpl implements BpPaymentService {
         }
         assertWorkRecordAllowed(existing.getWorkRecordId());
         if (existing.getWorkRecordId() != null) {
-            WorkRecord wr = workRecordMapper.selectById(existing.getWorkRecordId());
+            WorkRecord wr = workRecordMapper.selectByIdForTenant(existing.getWorkRecordId(), tenant());
             if (wr != null) {
                 monthlyClosingService.assertOpenForUpdate(wr.getWorkMonth());
             }
@@ -209,7 +214,7 @@ public class BpPaymentServiceImpl implements BpPaymentService {
         }
         assertWorkRecordAllowed(existing.getWorkRecordId());
         if (existing.getWorkRecordId() != null) {
-            WorkRecord wr = workRecordMapper.selectById(existing.getWorkRecordId());
+            WorkRecord wr = workRecordMapper.selectByIdForTenant(existing.getWorkRecordId(), tenant());
             if (wr != null) {
                 monthlyClosingService.assertOpenForUpdate(wr.getWorkMonth());
             }

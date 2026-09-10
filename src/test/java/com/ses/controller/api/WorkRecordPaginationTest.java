@@ -1,7 +1,9 @@
 package com.ses.controller.api;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ses.config.LoginUser;
 import com.ses.dto.WorkRecordGridDto;
+import com.ses.entity.SysUser;
 import com.ses.service.TimesheetPdfService;
 import com.ses.service.WorkRecordService;
 import org.junit.jupiter.api.DisplayName;
@@ -10,6 +12,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
@@ -36,6 +42,24 @@ class WorkRecordPaginationTest {
 
     @MockBean
     private TimesheetPdfService timesheetPdfService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void bindTenantToMockPrincipal() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getPrincipal() instanceof LoginUser) {
+            return;
+        }
+        SysUser user = new SysUser();
+        user.setUsername(authentication.getName());
+        user.setPassword("test");
+        user.setRole("管理者");
+        user.setStatus(1);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+    }
 
     @Test
     @WithMockUser(roles = "管理者")

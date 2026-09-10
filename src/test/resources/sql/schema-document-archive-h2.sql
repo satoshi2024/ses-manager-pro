@@ -93,6 +93,7 @@ CREATE TABLE t_document_version (
 
 CREATE TABLE t_document_link (
   id                             BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  tenant_id                      VARCHAR(100) NOT NULL DEFAULT 'default',
   document_id                    BIGINT       NOT NULL,
   target_type                    VARCHAR(50)  NOT NULL,
   target_id                      BIGINT       NOT NULL,

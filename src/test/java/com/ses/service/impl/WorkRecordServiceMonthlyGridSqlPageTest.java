@@ -16,6 +16,7 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.WorkRecordService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,6 +53,16 @@ import static org.mockito.Mockito.verify;
 @DisplayName("勤怠月次Grid SQLページング (SC-02)")
 class WorkRecordServiceMonthlyGridSqlPageTest {
 
+    @org.junit.jupiter.api.BeforeEach
+    void bindTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+    }
+
     @Autowired
     private WorkRecordService workRecordService;
 
@@ -80,9 +91,9 @@ class WorkRecordServiceMonthlyGridSqlPageTest {
 
         assertEquals(12L, page.getTotal());
         assertEquals(5, page.getRecords().size());
-        verify(workRecordMapper, never()).selectMonthlyGrid(anyString(), anyString());
+        verify(workRecordMapper, never()).selectMonthlyGrid(anyString(), anyString(), anyString());
         verify(workRecordMapper, atLeastOnce()).selectMonthlyGridPage(
-                any(), eq(workMonth), anyString(), isNull(), isNull());
+                any(), eq(workMonth), anyString(), isNull(), isNull(), eq("default"));
     }
 
     @Test
@@ -122,9 +133,9 @@ class WorkRecordServiceMonthlyGridSqlPageTest {
         assertEquals(2, summary.getItems().size());
         assertEquals(7, summary.getMaxPendingDays());
         assertEquals(7, summary.getItems().get(0).getDaysPending());
-        verify(workRecordMapper, never()).selectMonthlyGrid(anyString(), anyString());
-        verify(workRecordMapper, never()).selectMonthlyGridScoped(anyString(), anyString(), any(), any(Boolean.class), any(), any(), any());
-        verify(workRecordMapper, atLeastOnce()).selectPendingApprovalPage(any(), eq(workMonth), anyString());
+        verify(workRecordMapper, never()).selectMonthlyGrid(anyString(), anyString(), anyString());
+        verify(workRecordMapper, never()).selectMonthlyGridScoped(anyString(), anyString(), any(), any(Boolean.class), any(), any(), any(), eq("default"));
+        verify(workRecordMapper, atLeastOnce()).selectPendingApprovalPage(any(), eq(workMonth), anyString(), eq("default"));
     }
 
     @Test
@@ -142,8 +153,8 @@ class WorkRecordServiceMonthlyGridSqlPageTest {
                 org.mockito.ArgumentMatchers.argThat(page ->
                         page != null && page.getSize() == PageUtils.MAX_PAGE_SIZE && page.getCurrent() == 1L),
                 eq(workMonth),
-                anyString());
-        verify(workRecordMapper, never()).selectMonthlyGrid(anyString(), anyString());
+                anyString(), eq("default"));
+        verify(workRecordMapper, never()).selectMonthlyGrid(anyString(), anyString(), anyString());
     }
 
     private List<Long> seedContracts(int count, String workMonth, String recordStatus) {
@@ -154,6 +165,7 @@ class WorkRecordServiceMonthlyGridSqlPageTest {
                                                    LocalDateTime... updatedAts) {
         Customer customer = new Customer();
         customer.setCompanyName("勤怠Grid顧客");
+        customer.setTenantId("default");
         customerMapper.insert(customer);
 
         Project project = new Project();
@@ -168,6 +180,7 @@ class WorkRecordServiceMonthlyGridSqlPageTest {
             engineer.setFullName("勤怠要員" + i);
             engineer.setEmploymentType("正社員");
             engineer.setStatus("稼動中");
+            engineer.setTenantId("default");
             engineerMapper.insert(engineer);
 
             Contract contract = new Contract();
@@ -181,6 +194,7 @@ class WorkRecordServiceMonthlyGridSqlPageTest {
             contract.setCostPrice(new BigDecimal("400000"));
             contract.setStatus("稼動中");
             contract.setAcceptanceRequired(Boolean.TRUE);
+            contract.setTenantId("default");
             contractMapper.insert(contract);
             ids.add(contract.getId());
 

@@ -19,6 +19,7 @@ import com.ses.dto.report.ReportScopeSnapshot;
 import com.ses.dto.report.ReportGenerationCommand;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -37,7 +38,6 @@ import java.util.UUID;
 @Component
 public class ManagementReportScheduler {
 
-    private static final String TENANT_ID = "default";
     private static final int PROCESSING_LEASE_MINUTES = 30;
 
     private final ReportScheduleMapper scheduleMapper;
@@ -45,15 +45,17 @@ public class ManagementReportScheduler {
     private final ReportDeliveryService deliveryService;
     private final MonthlyClosingService monthlyClosingService;
     private final AccountingTimezoneResolver timezoneResolver;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
     private final ReportRecipientPreviewService recipientPreviewService;
     private final ObjectMapper objectMapper;
 
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     public ManagementReportScheduler(ReportScheduleMapper scheduleMapper,
                                      ReportSnapshotService snapshotService,
                                      ReportDeliveryService deliveryService,
                                      MonthlyClosingService monthlyClosingService,
                                      AccountingTimezoneResolver timezoneResolver,
+                                     TenantAwareBatchRunner tenantAwareBatchRunner,
                                      ReportRecipientPreviewService recipientPreviewService,
                                      ObjectMapper objectMapper) {
         this.scheduleMapper = scheduleMapper;
@@ -61,47 +63,87 @@ public class ManagementReportScheduler {
         this.deliveryService = deliveryService;
         this.monthlyClosingService = monthlyClosingService;
         this.timezoneResolver = timezoneResolver;
+        this.tenantAwareBatchRunner = tenantAwareBatchRunner;
         this.recipientPreviewService = recipientPreviewService;
         this.objectMapper = objectMapper;
+    }
+
+    public ManagementReportScheduler(ReportScheduleMapper scheduleMapper,
+                                     ReportSnapshotService snapshotService,
+                                     ReportDeliveryService deliveryService,
+                                     MonthlyClosingService monthlyClosingService,
+                                     AccountingTimezoneResolver timezoneResolver,
+                                     ReportRecipientPreviewService recipientPreviewService,
+                                     ObjectMapper objectMapper) {
+        this(scheduleMapper, snapshotService, deliveryService, monthlyClosingService, timezoneResolver,
+                null, recipientPreviewService, objectMapper);
+    }
+
+    public ManagementReportScheduler(ReportScheduleMapper scheduleMapper,
+                                     ReportSnapshotService snapshotService,
+                                     ReportDeliveryService deliveryService,
+                                     MonthlyClosingService monthlyClosingService,
+                                     AccountingTimezoneResolver timezoneResolver,
+                                     TenantAwareBatchRunner tenantAwareBatchRunner) {
+        this(scheduleMapper, snapshotService, deliveryService, monthlyClosingService, timezoneResolver,
+                tenantAwareBatchRunner, null, new ObjectMapper());
     }
 
     @Scheduled(cron = "${management-report.schedule-cron:0 * * * * *}", zone = "Asia/Tokyo")
     @SchedulerLock(name = "managementReportScheduleDispatch", lockAtLeastFor = "PT10S", lockAtMostFor = "PT10M")
     public void dispatchDue() {
         ExecutionActorContext.runAsSystem("management-report-scheduler", "SCHEDULER_POLL", () -> {
-            ZoneId zone = timezoneResolver.resolve(TENANT_ID);
-            AccountingTenantContextHolder.runWithTenant(TENANT_ID, zone, () -> {
+            if (tenantAwareBatchRunner != null) {
+                tenantAwareBatchRunner.run(this::dispatchDueForTenant);
+            } else {
+                String tenant = AccountingTenantContextHolder.getTenantContext();
+                dispatchDueForTenant(tenant != null && !tenant.isBlank() ? tenant : "default");
+            }
+            return null;
+        });
+    }
+
+    private void dispatchDueForTenant(String tenantId) {
+        ZoneId zone = timezoneResolver.resolve(tenantId);
+        AccountingTenantContextHolder.runWithTenant(tenantId, zone, () -> {
             LocalDateTime now = LocalDateTime.now(zone);
             LocalDateTime staleBefore = now.minusMinutes(PROCESSING_LEASE_MINUTES);
-            List<ReportSchedule> due = scheduleMapper.selectDue(now, staleBefore, 50);
+            List<ReportSchedule> due = scheduleMapper.selectDue(tenantId, now, staleBefore, 50);
             for (ReportSchedule schedule : due) {
                 LocalDateTime expected = schedule.getNextRunAt();
                 LocalDateTime logicalRunAt = resolveLogicalRunAt(schedule, now);
                 if (logicalRunAt == null) continue;
-                if (scheduleMapper.claimDue(schedule.getId(), expected, logicalRunAt, now, staleBefore) != 1) {
+                if (scheduleMapper.claimDue(tenantId, schedule.getId(), expected, logicalRunAt, now, staleBefore) != 1) {
                     continue;
                 }
                 try {
                     runOneInternal(schedule, logicalRunAt);
-                    scheduleMapper.markSuccess(schedule.getId(), nextRun(schedule, logicalRunAt), logicalRunAt);
+                    scheduleMapper.markSuccess(tenantId, schedule.getId(), nextRun(schedule, logicalRunAt, tenantId), logicalRunAt);
                 } catch (Exception ex) {
                     LocalDateTime retryAt = now.plusMinutes(retryDelayMinutes(schedule));
-                    scheduleMapper.markFailure(schedule.getId(), retryAt, logicalRunAt,
+                    scheduleMapper.markFailure(tenantId, schedule.getId(), retryAt, logicalRunAt,
                             "SCHEDULE_GENERATION_FAILED", safeMessage(ex));
                     log.error("[定期管理レポート] schedule実行失敗: scheduleId={} retryAt={} exceptionType={} diagnosticId={} detail={}",
                             schedule.getId(), retryAt, LogRedaction.exceptionType(ex),
                             UUID.randomUUID(), LogRedaction.safeThrowableSummary(ex));
                 }
             }
-            });
-            return null;
         });
     }
 
     public void runOne(ReportSchedule schedule, LocalDateTime scheduledAt) {
         ExecutionActorContext.runAsSystem("management-report-scheduler", "SCHEDULER_POLL", () -> {
-            ZoneId zone = timezoneResolver.resolve(TENANT_ID);
-            AccountingTenantContextHolder.runWithTenant(TENANT_ID, zone, () -> {
+            String tenantId = schedule == null ? null : schedule.getTenantId();
+            if (tenantId == null || tenantId.isBlank()) {
+                tenantId = AccountingTenantContextHolder.requireTenantContext();
+            }
+            String currentTenant = AccountingTenantContextHolder.getExplicitTenantId();
+            if (currentTenant != null && !currentTenant.equals(tenantId)) {
+                throw BusinessException.of(403, "error.tenant.contextMismatch");
+            }
+            String resolvedTenantId = tenantId;
+            ZoneId zone = timezoneResolver.resolve(resolvedTenantId);
+            AccountingTenantContextHolder.runWithTenant(resolvedTenantId, zone, () -> {
                 try {
                     runOneInternal(schedule, scheduledAt);
                 } catch (Exception ex) {
@@ -198,8 +240,8 @@ public class ManagementReportScheduler {
         }
     }
 
-    private LocalDateTime nextRun(ReportSchedule schedule, LocalDateTime logicalRunAt) {
-        ZoneId zone = timezoneResolver.resolve(TENANT_ID);
+    private LocalDateTime nextRun(ReportSchedule schedule, LocalDateTime logicalRunAt, String tenantId) {
+        ZoneId zone = timezoneResolver.resolve(tenantId);
         if (schedule.getCronExpression() == null || schedule.getCronExpression().isBlank()) {
             return logicalRunAt.plusMonths(1);
         }

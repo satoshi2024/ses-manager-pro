@@ -89,9 +89,9 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
 
         List<MatchResultDto> results = new ArrayList<>();
         for (Project p : activeProjects) {
-            List<ProjectSkill> pSkills = psMap.getOrDefault(p.getId(), Collections.emptyList());
-            Set<Long> mustIds = pSkills.stream().filter(s -> Integer.valueOf(1).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
-            Set<Long> niceIds = pSkills.stream().filter(s -> Integer.valueOf(0).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
+            List<ProjectSkill> skills = psMap.getOrDefault(p.getId(), Collections.emptyList());
+            Set<Long> mustIds = skills.stream().filter(s -> Integer.valueOf(1).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
+            Set<Long> niceIds = skills.stream().filter(s -> Integer.valueOf(0).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
 
             BigDecimal pMin = p.getUnitPriceMin() != null ? p.getUnitPriceMin() : null;
             BigDecimal pMax = p.getUnitPriceMax() != null ? p.getUnitPriceMax() : null;
@@ -107,6 +107,7 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
             MatchResultDto dto = new MatchResultDto();
             dto.setProjectId(p.getId());
             dto.setProjectName(p.getProjectName());
+            dto.setProposedPrice(engineer.getExpectedUnitPrice() != null ? engineer.getExpectedUnitPrice().intValue() : null);
             dto.setScore(score.getTotalScore());
             dto.setReason(buildProjectReason(score, mustIds, tagNameMap));
             dto.setSellingPoints(buildEngineerSellingPoints(engSkills));

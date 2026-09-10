@@ -76,12 +76,13 @@ public class ComplianceRuleEngine {
     /** 全active契約に対してruleを実行し、findingをupsertする。 */
     @Transactional(rollbackFor = Exception.class)
     public RunResult runActiveContracts() {
-        List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+        List<Contract> contracts = contractMapper.selectListForTenant(new LambdaQueryWrapper<Contract>()
                 .in(Contract::getStatus, ACTIVE_CONTRACT_STATUSES)
                 .select(Contract::getId, Contract::getEngineerId, Contract::getContractType,
                         Contract::getStartDate, Contract::getEndDate, Contract::getCustomerId,
-                        Contract::getDirectCommandFlag, Contract::getSettlementHoursMin,
-                        Contract::getSettlementHoursMax));
+                         Contract::getDirectCommandFlag, Contract::getSettlementHoursMin,
+                         Contract::getSettlementHoursMax),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         int opened = 0;
         int resolved = 0;
         int kept = 0;
@@ -97,7 +98,8 @@ public class ComplianceRuleEngine {
     /** 指定契約に対してruleを実行し、findingをupsertする。 */
     @Transactional(rollbackFor = Exception.class)
     public ComplianceFindingStore.SyncResult runForContract(Long contractId) {
-        Contract contract = contractMapper.selectById(contractId);
+        Contract contract = contractMapper.selectByIdForTenant(contractId,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (contract == null) {
             return new ComplianceFindingStore.SyncResult(0, 0, 0);
         }
@@ -124,6 +126,7 @@ public class ComplianceRuleEngine {
     }
 
     private ComplianceRuleContext buildContext(Contract contract) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         Integer maxLayer = bpPaymentMapper.selectMaxLayerOrderByContractId(contract.getId());
         ContractComplianceProfile profile = profileMapper.selectOne(
                 new LambdaQueryWrapper<ContractComplianceProfile>()
@@ -138,9 +141,7 @@ public class ComplianceRuleEngine {
                         .eq(DocumentDelivery::getContractId, contract.getId()));
         List<WorkRecordDaily> dailies = new ArrayList<>();
         if (contract.getEngineerId() != null) {
-            List<WorkRecord> records = workRecordMapper.selectList(
-                    new LambdaQueryWrapper<WorkRecord>()
-                            .eq(WorkRecord::getContractId, contract.getId()));
+            List<WorkRecord> records = workRecordMapper.selectByContractIdForTenant(contract.getId(), tenantId);
             if (!records.isEmpty()) {
                 List<Long> recordIds = records.stream().map(WorkRecord::getId).toList();
                 dailies = workRecordDailyMapper.selectList(
@@ -150,11 +151,12 @@ public class ComplianceRuleEngine {
         }
         List<LimitationDateCalculator.ChainContract> chain = List.of();
         if (contract.getEngineerId() != null) {
-            List<Contract> engineerContracts = contractMapper.selectList(
+            List<Contract> engineerContracts = contractMapper.selectListForTenant(
                     new LambdaQueryWrapper<Contract>()
                             .eq(Contract::getEngineerId, contract.getEngineerId())
                             .select(Contract::getId, Contract::getStartDate, Contract::getEndDate,
-                                    Contract::getCustomerId));
+                                    Contract::getCustomerId),
+                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
             Map<Long, ContractComplianceProfile> profilesByContract = engineerContracts.isEmpty() ? Map.of()
                     : profileMapper.selectList(new LambdaQueryWrapper<ContractComplianceProfile>()
                             .in(ContractComplianceProfile::getContractId,

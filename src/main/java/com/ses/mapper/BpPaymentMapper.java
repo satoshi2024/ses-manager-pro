@@ -107,6 +107,42 @@ public interface BpPaymentMapper extends BaseMapper<BpPayment> {
     """)
     List<BpPaymentListDto> selectListWithDetails(@Param("month") String month, @Param("status") String status);
 
+    /** 月次締め用。BP支払はwork record→契約→顧客ownershipで現在tenantへ限定する。 */
+    @Select("""
+        <script>
+        SELECT
+            b.id AS id,
+            b.work_record_id AS workRecordId,
+            w.work_month AS workMonth,
+            e.full_name AS engineerName,
+            p.project_name AS projectName,
+            b.amount AS amount,
+            b.status AS status,
+            b.paid_date AS paidDate,
+            b.layer_order AS layerOrder,
+            b.payee_company_name AS payeeCompanyName,
+            b.parent_payment_id AS parentPaymentId
+        FROM t_bp_payment b
+        INNER JOIN t_work_record w ON b.work_record_id = w.id
+        INNER JOIN t_contract c ON w.contract_id = c.id
+          AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0
+        INNER JOIN m_customer mc ON mc.id = c.customer_id
+          AND mc.tenant_id IS NOT NULL AND mc.tenant_id = c.tenant_id
+          AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
+        INNER JOIN t_engineer e ON c.engineer_id = e.id
+        INNER JOIN t_project p ON c.project_id = p.id
+        <where>
+            <if test='month != null and month != ""'>AND w.work_month = #{month}</if>
+            <if test='status != null and status != ""'>AND b.status = #{status}</if>
+            AND b.deleted_flag = 0
+        </where>
+        ORDER BY w.id DESC, b.layer_order ASC
+        </script>
+        """)
+    List<BpPaymentListDto> selectListWithDetailsForTenant(@Param("month") String month,
+                                                           @Param("status") String status,
+                                                           @Param("tenantId") String tenantId);
+
     @Select("""
         <script>
         SELECT b.id AS id, b.work_record_id AS workRecordId, w.work_month AS workMonth,

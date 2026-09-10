@@ -1,5 +1,7 @@
 package com.ses.controller.api;
 
+import com.ses.config.LoginUser;
+import com.ses.entity.Engineer;
 import com.ses.entity.SysUser;
 import com.ses.service.EngineerAccountLinkService;
 import org.junit.jupiter.api.BeforeEach;
@@ -7,8 +9,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.util.List;
 
@@ -39,12 +43,15 @@ class EngineerAccountLinkApiControllerTest {
     private com.ses.service.security.PersistentSessionService persistentSessionService;
     @MockBean
     private com.ses.service.security.AuthorizationService authorizationService;
+    @MockBean
+    private com.ses.service.security.TenantOwnershipResolver tenantOwnershipResolver;
 
     @BeforeEach
     void allowMockMvcSessions() {
         when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
         when(authorizationService.isAllowed(any(), anyString())).thenReturn(true);
         when(linkService.findLinkedUserIds(any())).thenReturn(java.util.Set.of());
+        when(tenantOwnershipResolver.selectEngineer(anyString(), any())).thenReturn(new Engineer());
     }
 
     private static SysUser user(Long id, String name, int status) {
@@ -53,49 +60,60 @@ class EngineerAccountLinkApiControllerTest {
         u.setUsername(name);
         u.setRole("要員");
         u.setStatus(status);
+        u.setTenantId("default");
         return u;
     }
 
-    @Test
-    @WithMockUser(roles = "管理者")
-    void candidates_要員ロールのユーザーが1件も無ければ理由を返す() throws Exception {
-        when(sysUserMapper.selectList(any())).thenReturn(List.of());
+    private RequestPostProcessor administrator() {
+        SysUser user = new SysUser();
+        user.setId(1L);
+        user.setUsername("admin");
+        user.setPassword("password");
+        user.setRole("管理者");
+        user.setStatus(1);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user,
+                List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                .authentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+    }
 
-        mockMvc.perform(get("/api/engineers/1/account-link/candidates"))
+    @Test
+    void candidates_要員ロールのユーザーが1件も無ければ理由を返す() throws Exception {
+        when(sysUserMapper.selectByRoleAndTenant(anyString(), anyString())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/engineers/1/account-link/candidates").with(administrator()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.candidates").isEmpty())
                 .andExpect(jsonPath("$.data.emptyReason").value("NO_ENGINEER_ROLE_USER"));
     }
 
     @Test
-    @WithMockUser(roles = "管理者")
     void candidates_要員ロールが全員無効なら理由を分けて返す() throws Exception {
-        when(sysUserMapper.selectList(any())).thenReturn(List.of(user(10L, "eng1", 0)));
+        when(sysUserMapper.selectByRoleAndTenant(anyString(), anyString())).thenReturn(List.of(user(10L, "eng1", 0)));
 
-        mockMvc.perform(get("/api/engineers/1/account-link/candidates"))
+        mockMvc.perform(get("/api/engineers/1/account-link/candidates").with(administrator()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.candidates").isEmpty())
                 .andExpect(jsonPath("$.data.emptyReason").value("ALL_INACTIVE"));
     }
 
     @Test
-    @WithMockUser(roles = "管理者")
     void candidates_有効な要員が全員紐付け済みなら理由を分けて返す() throws Exception {
-        when(sysUserMapper.selectList(any())).thenReturn(List.of(user(10L, "eng1", 1)));
+        when(sysUserMapper.selectByRoleAndTenant(anyString(), anyString())).thenReturn(List.of(user(10L, "eng1", 1)));
         when(linkService.findLinkedUserIds(any())).thenReturn(java.util.Set.of(10L));
 
-        mockMvc.perform(get("/api/engineers/1/account-link/candidates"))
+        mockMvc.perform(get("/api/engineers/1/account-link/candidates").with(administrator()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.candidates").isEmpty())
                 .andExpect(jsonPath("$.data.emptyReason").value("ALL_LINKED"));
     }
 
     @Test
-    @WithMockUser(roles = "管理者")
     void candidates_未紐付けの有効な要員は候補になりemptyReasonはnull() throws Exception {
-        when(sysUserMapper.selectList(any())).thenReturn(List.of(user(10L, "eng1", 1), user(11L, "eng2", 0)));
+        when(sysUserMapper.selectByRoleAndTenant(anyString(), anyString())).thenReturn(List.of(user(10L, "eng1", 1), user(11L, "eng2", 0)));
 
-        mockMvc.perform(get("/api/engineers/1/account-link/candidates"))
+        mockMvc.perform(get("/api/engineers/1/account-link/candidates").with(administrator()))
                 .andExpect(status().isOk())
                 // 無効ユーザー(eng2)は候補に含めない。
                 .andExpect(jsonPath("$.data.candidates.length()").value(1))

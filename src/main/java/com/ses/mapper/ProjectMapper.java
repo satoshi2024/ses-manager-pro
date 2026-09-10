@@ -17,6 +17,75 @@ import java.util.Collection;
 @Mapper
 public interface ProjectMapper extends BaseMapper<Project> {
 
+    @Select("SELECT p.* FROM t_project p INNER JOIN m_customer c ON c.id = p.customer_id "
+            + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
+            + "WHERE p.id = #{id} AND p.customer_id = #{customerId} AND p.deleted_flag = 0")
+    Project selectByIdForCustomerAndTenant(@Param("id") Long id,
+                                           @Param("customerId") Long customerId,
+                                           @Param("tenantId") String tenantId);
+
+    @Select("SELECT p.* FROM t_project p INNER JOIN m_customer c ON c.id = p.customer_id "
+            + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
+            + "WHERE p.id = #{id} AND p.deleted_flag = 0")
+    Project selectByIdForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    @Select("SELECT p.* FROM t_project p JOIN m_customer c ON c.id = p.customer_id "
+            + "WHERE p.id = #{id} AND c.tenant_id = #{tenantId} "
+            + "AND p.deleted_flag = 0 AND c.deleted_flag = 0 FOR UPDATE")
+    Project selectByIdForUpdateForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    @org.apache.ibatis.annotations.Update("UPDATE t_project SET version = version + 1 "
+            + "WHERE id = #{id} AND version = #{expectedVersion} AND deleted_flag = 0 "
+            + "AND customer_id IN (SELECT c.id FROM m_customer c WHERE c.tenant_id = #{tenantId} AND c.deleted_flag = 0)")
+    int bumpVersionForTenant(@Param("id") Long id, @Param("tenantId") String tenantId,
+                             @Param("expectedVersion") Integer expectedVersion);
+
+    @Select("SELECT p.* FROM t_project p JOIN m_customer c ON c.id = p.customer_id "
+            + "WHERE p.id = #{id} AND c.tenant_id = #{tenantId} "
+            + "AND p.deleted_flag = 0 AND c.deleted_flag = 0 LIMIT 1")
+    Project selectByIdAndTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    @Select("SELECT p.* FROM t_project p JOIN m_customer c ON c.id = p.customer_id "
+            + "WHERE c.tenant_id = #{tenantId} AND p.status = #{status} "
+            + "AND p.deleted_flag = 0 AND c.deleted_flag = 0 ORDER BY p.id")
+    java.util.List<Project> selectListForTenant(@Param("tenantId") String tenantId,
+                                                @Param("status") String status);
+
+    @Select("""
+        <script>
+        SELECT p.* FROM t_project p JOIN m_customer c ON c.id = p.customer_id
+        WHERE c.tenant_id = #{tenantId} AND p.status = #{status}
+          AND p.deleted_flag = 0 AND c.deleted_flag = 0 AND p.id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY p.id
+        </script>
+        """)
+    java.util.List<Project> selectListForTenantAndIds(@Param("tenantId") String tenantId,
+                                                      @Param("status") String status,
+                                                      @Param("ids") Collection<Long> ids);
+
+    @Select("""
+        <script>
+        SELECT p.* FROM t_project p JOIN m_customer c ON c.id = p.customer_id
+        WHERE c.tenant_id = #{tenantId} AND p.deleted_flag = 0 AND c.deleted_flag = 0
+          AND p.id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY p.id
+        </script>
+        """)
+    java.util.List<Project> selectByIdsForTenant(@Param("tenantId") String tenantId,
+                                                 @Param("ids") Collection<Long> ids);
+
+    @Select("SELECT p.id FROM t_project p JOIN m_customer c ON c.id = p.customer_id "
+            + "WHERE c.tenant_id = #{tenantId} AND p.deleted_flag = 0 AND c.deleted_flag = 0")
+    java.util.Set<Long> selectOwnedProjectIds(@Param("tenantId") String tenantId);
+
+    @Select("SELECT p.id FROM t_project p JOIN m_customer c ON c.id = p.customer_id "
+            + "WHERE p.customer_id = #{customerId} AND c.tenant_id = #{tenantId} "
+            + "AND p.deleted_flag = 0 AND c.deleted_flag = 0 ORDER BY p.id")
+    java.util.List<Long> selectIdsByCustomerAndTenant(@Param("customerId") Long customerId,
+                                                      @Param("tenantId") String tenantId);
+
     /** 商機変換の冪等判定用。論理削除済みも含めてsourceを一意に解決する。 */
     @Select("SELECT * FROM t_project WHERE source_opportunity_id = #{opportunityId} LIMIT 1")
     Project selectBySourceOpportunityIdIncludingDeleted(@Param("opportunityId") Long opportunityId);

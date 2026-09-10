@@ -78,6 +78,7 @@ CREATE TABLE m_email_template (
 DROP TABLE IF EXISTS t_notification CASCADE;
 CREATE TABLE t_notification (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
   type        VARCHAR(30)  NOT NULL,
   title       VARCHAR(200) NOT NULL,
   message     VARCHAR(500),
@@ -85,9 +86,10 @@ CREATE TABLE t_notification (
   menu_key    VARCHAR(50),
   recipient_user_id BIGINT,
   organization_id BIGINT,
-  dedupe_key  VARCHAR(200) NOT NULL UNIQUE,
+  dedupe_key  VARCHAR(200) NOT NULL,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX uk_notification_tenant_dedupe ON t_notification(tenant_id, dedupe_key);
 
 DROP TABLE IF EXISTS t_notification_read CASCADE;
 CREATE TABLE t_notification_read (

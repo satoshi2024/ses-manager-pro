@@ -39,6 +39,11 @@ public class ReportDeliveryIssueServiceImpl implements ReportDeliveryIssueServic
     private final ObjectMapper objectMapper;
     private final AccountingTimezoneResolver timezoneResolver;
 
+    private String resolveTenantId() {
+        String tenant = com.ses.service.accounting.AccountingTenantContextHolder.getTenantContext();
+        return (tenant != null && !tenant.isBlank()) ? tenant : TENANT_ID;
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ReportDelivery issue(ReportRun run, ReportDelivery existing, ReportRecipientPreview recipient,
@@ -47,7 +52,7 @@ public class ReportDeliveryIssueServiceImpl implements ReportDeliveryIssueServic
         int attempt = delivery.getAttemptCount() == null ? 1 : delivery.getAttemptCount() + 1;
         String token = UUID.randomUUID() + "-" + UUID.randomUUID();
         LocalDateTime expiresAt = now().plusDays(LINK_DAYS);
-        delivery.setTenantId(TENANT_ID);
+        delivery.setTenantId(resolveTenantId());
         delivery.setRunId(run.getId());
         if (artifact != null && artifact.getDocument() != null) {
             delivery.setDocumentId(artifact.getDocument().getId());
@@ -115,7 +120,7 @@ public class ReportDeliveryIssueServiceImpl implements ReportDeliveryIssueServic
     }
 
     private LocalDateTime now() {
-        return timezoneResolver.now(TENANT_ID);
+        return timezoneResolver.now(resolveTenantId());
     }
 
     private String toJson(Object value) {

@@ -7,17 +7,21 @@ import com.ses.dto.accounting.AccountingReconciliationSummaryDto.ReconciliationI
 import com.ses.dto.accounting.IntegrationTokensDto;
 import com.ses.entity.*;
 import com.ses.mapper.CustomerMapper;
+import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.service.accounting.AccountingReconciliationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.transaction.annotation.Transactional;
@@ -72,7 +76,13 @@ public class AccountingReconciliationTest {
     private com.ses.mapper.EngineerMapper engineerMapper;
 
     @Autowired
+    private EngineerAccountLinkMapper engineerAccountLinkMapper;
+
+    @Autowired
     private RestTemplate restTemplate;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private MockRestServiceServer mockServer;
     private IntegrationConnection connection;
@@ -80,6 +90,10 @@ public class AccountingReconciliationTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
+        jdbcTemplate.update("UPDATE m_customer SET tenant_id = 'default', deleted_flag = 0 WHERE id = 1");
+        jdbcTemplate.update("UPDATE m_customer SET tenant_id = 'default', deleted_flag = 0 WHERE id = 3");
+        jdbcTemplate.update("UPDATE t_contract SET tenant_id = 'default', deleted_flag = 0 WHERE id = 1");
         mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
 
         connection = connectionService.getOrCreateConnection("default", null, "freee", "accounting");
@@ -93,7 +107,13 @@ public class AccountingReconciliationTest {
 
         customer = new Customer();
         customer.setCompanyName("照合テスト株式会社-" + UUID.randomUUID().toString().substring(0, 6));
+        customer.setTenantId("default");
         customerMapper.insert(customer);
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -260,9 +280,17 @@ public class AccountingReconciliationTest {
 
         // 3. 要員立替経費 (Population 3)
         Engineer eng = new Engineer();
+        eng.setTenantId("default");
         eng.setFullName("立替太郎");
         eng.setEmploymentType("正社員");
         engineerMapper.insert(eng);
+        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getEngineerId, eng.getId()));
+        EngineerAccountLink ownerLink = new EngineerAccountLink();
+        ownerLink.setEngineerId(eng.getId());
+        ownerLink.setSysUserId(1L);
+        ownerLink.setTenantId("default");
+        engineerAccountLinkMapper.insert(ownerLink);
 
         ExpenseRequest exp = new ExpenseRequest();
         exp.setEngineerId(eng.getId());

@@ -62,6 +62,9 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         if (request == null || request.getUseCase() == null) {
             throw new BusinessException("AI use case が指定されていません");
         }
+        // provider呼出し自体もtenant-bound requestだけに限定し、persist=false経路から
+        // tenant未束縛の外部送信が発生しないようにする。
+        com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         Map<String, Object> masked = AiPiiMasker.mask(request.getAllowlistedFields());
         if (AiPiiMasker.containsCanary(masked)) {
             throw new BusinessException(400, "PII canary を外部送信できません");
@@ -96,6 +99,8 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         Long runId = null;
         if (request.isPersistRun()) {
             AiRecommendationRun run = runMapper.selectOne(new LambdaQueryWrapper<AiRecommendationRun>()
+                    .eq(AiRecommendationRun::getTenantId,
+                            com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext())
                     .eq(AiRecommendationRun::getTraceId, request.getTraceId())
                     .last("LIMIT 1"));
             if (run != null) {
@@ -233,6 +238,7 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
             request.setTraceId(traceId);
             String json = objectMapper.writeValueAsString(masked);
             AiRecommendationRun run = new AiRecommendationRun();
+            run.setTenantId(com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
             run.setTraceId(traceId);
             run.setUseCase(useCase);
             run.setArtifactVersionId(active.getId());

@@ -657,7 +657,9 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
             throw BusinessException.of("error.invoice.bpPaymentNotFound");
         }
         
-        com.ses.entity.WorkRecord workRecord = workRecordMapper.selectById(bpPayment.getWorkRecordId());
+        com.ses.entity.WorkRecord workRecord = workRecordMapper.selectByIdForTenant(
+                bpPayment.getWorkRecordId(),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (workRecord != null) {
             monthlyClosingService.assertOpenForUpdate(workRecord.getWorkMonth());
         }

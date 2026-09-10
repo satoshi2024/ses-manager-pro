@@ -5,6 +5,7 @@ import com.ses.entity.Notification;
 import com.ses.entity.NotificationOutbox;
 import com.ses.mapper.NotificationOutboxMapper;
 import com.ses.mapper.ReportDeliveryMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -44,7 +45,7 @@ public class NotificationOutboxDispatcher {
         for (NotificationOutbox stale : staleRows) {
             int updated = outboxMapper.recoverStale(stale.getId(), staleBefore, now);
             if (updated == 1) {
-                syncReportDelivery(stale.getId(), STATUS_RETRY, "DELIVERY_STALE_RECOVERED",
+                syncReportDelivery(stale.getTenantId(), stale.getId(), STATUS_RETRY, "DELIVERY_STALE_RECOVERED",
                         "staleなprocessingを再送可能状態へ戻しました");
             }
         }
@@ -58,7 +59,7 @@ public class NotificationOutboxDispatcher {
                     int repaired = 0;
                     for (NotificationOutbox row : outboxMapper.selectReconciliationDue(100)) {
                         try {
-                            if (syncReportDelivery(row.getId(), row.getStatus(),
+                            if (syncReportDelivery(row.getTenantId(), row.getId(), row.getStatus(),
                                     "DELIVERY_RECONCILIATION", row.getLastError())) {
                                 int cleared = outboxMapper.clearReconciliationRequired(row.getId());
                                 if (cleared > 0) {
@@ -91,40 +92,60 @@ public class NotificationOutboxDispatcher {
     }
 
     private boolean dispatchOneInternal(Long outboxId) {
-        NotificationOutbox beforeClaim = outboxMapper.selectByIdForDispatch(outboxId);
-        if (beforeClaim == null || outboxMapper.claim(outboxId) == 0) {
+        String tenantId = AccountingTenantContextHolder.getExplicitTenantId();
+        NotificationOutbox beforeClaim = tenantId != null
+                ? outboxMapper.selectByIdForDispatch(tenantId, outboxId)
+                : outboxMapper.selectByIdForDispatch(outboxId);
+        if (beforeClaim == null) {
             return false;
         }
-        NotificationOutbox row = outboxMapper.selectByIdForDispatch(outboxId);
+        if (tenantId == null && beforeClaim.getTenantId() != null) {
+            tenantId = beforeClaim.getTenantId();
+        }
+        int claimed = tenantId != null
+                ? outboxMapper.claim(tenantId, outboxId)
+                : outboxMapper.claim(outboxId);
+        if (claimed == 0) {
+            return false;
+        }
+        NotificationOutbox row = tenantId != null
+                ? outboxMapper.selectByIdForDispatch(tenantId, outboxId)
+                : outboxMapper.selectByIdForDispatch(outboxId);
         if (row == null) {
             return false;
         }
 
         boolean delivered = webhookNotifier.notifyNow(toNotification(row));
         if (delivered) {
-            int updated = outboxMapper.markSent(outboxId);
+            int updated = tenantId != null
+                    ? outboxMapper.markSent(tenantId, outboxId)
+                    : outboxMapper.markSent(outboxId);
             if (updated == 0) {
                 handleOutboxStateConflict(outboxId, "OUTBOX_SENT_UPDATE_CONFLICT");
                 return false;
             }
             // outboxはSENTでもdelivery同期が失敗した場合は、reconciliation済みとして成功扱いにしない。
-            return syncReportDelivery(outboxId, "SENT", null, null);
+            return syncReportDelivery(tenantId, outboxId, "SENT", null, null);
         }
 
         int attempts = row.getAttemptCount() == null ? 1 : row.getAttemptCount();
         String status = attempts >= MAX_ATTEMPTS ? STATUS_FAILED : STATUS_RETRY;
         long backoffMinutes = Math.min(60L, 1L << Math.min(Math.max(attempts - 1, 0), 6));
         String error = "Webhook通知に失敗しました（attempt=" + attempts + "）";
-        int updated = outboxMapper.markResult(outboxId, status, LocalDateTime.now().plusMinutes(backoffMinutes), error);
+        int updated = tenantId != null
+                ? outboxMapper.markResult(tenantId, outboxId, status,
+                        LocalDateTime.now().plusMinutes(backoffMinutes), error)
+                : outboxMapper.markResult(outboxId, status,
+                        LocalDateTime.now().plusMinutes(backoffMinutes), error);
         if (updated > 0) {
-            syncReportDelivery(outboxId, status, attempts >= MAX_ATTEMPTS ? "DELIVERY_DLQ" : "DELIVERY_FAILED", error);
+            syncReportDelivery(tenantId, outboxId, status, attempts >= MAX_ATTEMPTS ? "DELIVERY_DLQ" : "DELIVERY_FAILED", error);
         } else {
             handleOutboxStateConflict(outboxId, "OUTBOX_RESULT_UPDATE_CONFLICT");
         }
         return false;
     }
 
-    private boolean syncReportDelivery(Long outboxId, String status, String errorCode, String errorMessage) {
+    private boolean syncReportDelivery(String tenantId, Long outboxId, String status, String errorCode, String errorMessage) {
         if (reportDeliveryMapper == null) {
             return true;
         }
@@ -133,14 +154,18 @@ public class NotificationOutboxDispatcher {
             if (delivery == null) {
                 return true;
             }
-            NotificationOutbox currentOutbox = outboxMapper.selectById(outboxId);
+            NotificationOutbox currentOutbox = tenantId != null
+                    ? outboxMapper.selectByIdForDispatch(tenantId, outboxId)
+                    : outboxMapper.selectById(outboxId);
             if (currentOutbox == null || !java.util.Objects.equals(currentOutbox.getStatus(), status)) {
                 markReconciliation(outboxId, "REPORT_DELIVERY_SYNC_STALE_OUTBOX");
                 log.error("[通知outbox] outbox状態が変化したため配布状態を同期せず再照合へ移行しました: outboxId={} status={}",
                         outboxId, status);
                 return false;
             }
-            int updated = reportDeliveryMapper.syncOutboxStatus(outboxId, status, errorCode, errorMessage);
+            int updated = tenantId != null
+                    ? reportDeliveryMapper.syncOutboxStatus(tenantId, outboxId, status, errorCode, errorMessage)
+                    : reportDeliveryMapper.syncOutboxStatus(outboxId, status, errorCode, errorMessage);
             if (updated > 0 || status.equals(delivery.getDeliveryStatus())) {
                 return true;
             }
@@ -175,6 +200,7 @@ public class NotificationOutboxDispatcher {
     private Notification toNotification(NotificationOutbox row) {
         Notification notification = new Notification();
         notification.setId(row.getNotificationId());
+        notification.setTenantId(row.getTenantId());
         notification.setType(row.getType());
         notification.setTitle(row.getTitle());
         notification.setMessage(row.getMessage());

@@ -19,7 +19,9 @@ import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ServiceSlaClockMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -75,8 +77,11 @@ class CustomerHealthServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Service直呼出しでもHTTP tenant filterと同じ前提を明示する。
+        AccountingTenantContextHolder.setTenantId("default");
         healthyCustomer = Customer.builder()
                 .companyName("健全顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("default")
                 .build();
         customerMapper.insert(healthyCustomer);
 
@@ -104,6 +109,7 @@ class CustomerHealthServiceTest {
         c1.setSellingPrice(new BigDecimal("800000"));
         c1.setCostPrice(new BigDecimal("600000"));
         c1.setStatus("稼動中");
+        c1.setTenantId("default");
         contractMapper.insert(c1);
 
         ServiceRequestCreateRequest healthyReq = ServiceRequestCreateRequest.builder()
@@ -115,10 +121,10 @@ class CustomerHealthServiceTest {
                 .build();
         ServiceRequest srH = serviceRequestService.createRequest(healthyReq, 100L, false, null);
         serviceRequestService.changeStatus(srH.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").version(0).build(),
                 100L, "INTERNAL_USER", "管理者");
         serviceRequestService.changeStatus(srH.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("回答完了").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("回答完了").version(1).build(),
                 100L, "INTERNAL_USER", "管理者");
         serviceRequestService.submitCsat(srH.getId(),
                 PortalCsatCreateRequest.builder().score(5).feedbackComment("迅速な対応でした").build(),
@@ -126,6 +132,7 @@ class CustomerHealthServiceTest {
 
         atRiskCustomer = Customer.builder()
                 .companyName("危険顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("default")
                 .build();
         customerMapper.insert(atRiskCustomer);
 
@@ -149,14 +156,19 @@ class CustomerHealthServiceTest {
                 .build();
         ServiceRequest sr2 = serviceRequestService.createRequest(req2, 100L, false, null);
         serviceRequestService.changeStatus(sr2.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").version(0).build(),
                 100L, "INTERNAL_USER", "管理者");
         serviceRequestService.changeStatus(sr2.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("復旧").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("復旧").version(1).build(),
                 100L, "INTERNAL_USER", "管理者");
         serviceRequestService.submitCsat(sr2.getId(),
                 PortalCsatCreateRequest.builder().score(1).feedbackComment("復旧まで遅すぎた").build(),
                 atRiskCustomer.getId(), 200L);
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -189,8 +201,13 @@ class CustomerHealthServiceTest {
     void testNewCustomer_missingInputTracking() {
         Customer newCust = Customer.builder()
                 .companyName("新規顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("default")
                 .build();
         customerMapper.insert(newCust);
+        serviceRequestService.createRequest(ServiceRequestCreateRequest.builder()
+                .customerId(newCust.getId()).category("OTHER").priority("P3")
+                .subject("新規顧客初回問い合わせ").description("tenant所有権fixture").build(),
+                100L, false, null);
 
         CustomerHealthScoreDto dto = customerHealthService.calculateCustomerHealth(newCust.getId());
 
@@ -201,10 +218,70 @@ class CustomerHealthServiceTest {
     }
 
     @Test
+    @WithMockUser(username = "admin", roles = {"管理者"})
+    @DisplayName("Service Requestが無いtenant所有顧客も一覧・詳細・月次snapshotの母集団に残ること")
+    void noRequestCustomer_remainsInHealthPopulation() {
+        Customer customer = Customer.builder()
+                .companyName("問い合わせ無し顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("default")
+                .build();
+        customerMapper.insert(customer);
+
+        List<CustomerHealthScoreDto> list = customerHealthService.listCustomerHealthSummaries(null, customer.getCompanyName());
+        assertEquals(1, list.size());
+        assertEquals(customer.getId(), list.get(0).getCustomerId());
+        assertEquals(customer.getId(), customerHealthService.calculateCustomerHealth(customer.getId()).getCustomerId());
+
+        String targetMonth = YearMonth.now().toString();
+        customerHealthService.generateMonthlySnapshot(targetMonth, "no-request検証");
+        assertTrue(snapshotMapper.selectList(new LambdaQueryWrapper<CustomerHealthSnapshot>()
+                .eq(CustomerHealthSnapshot::getCustomerId, customer.getId())
+                .eq(CustomerHealthSnapshot::getSnapshotDate, LocalDate.parse(targetMonth + "-01"))).size() >= 1);
+    }
+
+    @Test
+    @WithMockUser(username = "admin", roles = {"管理者"})
+    @DisplayName("Customer Healthの顧客母集団はtenant単位で一覧・詳細・snapshotを分離すること")
+    void tenantOwnership_isSharedByListDetailAndSnapshot() {
+        Customer tenantACustomer = Customer.builder()
+                .companyName("tenant-a 顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("tenant-a")
+                .build();
+        Customer tenantBCustomer = Customer.builder()
+                .companyName("tenant-b 顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("tenant-b")
+                .build();
+        customerMapper.insert(tenantACustomer);
+        customerMapper.insert(tenantBCustomer);
+
+        AccountingTenantContextHolder.setTenantId("tenant-a");
+        List<CustomerHealthScoreDto> tenantAList = customerHealthService
+                .listCustomerHealthSummaries(null, tenantACustomer.getCompanyName());
+        assertEquals(List.of(tenantACustomer.getId()), tenantAList.stream()
+                .map(CustomerHealthScoreDto::getCustomerId).toList());
+        assertThrows(BusinessException.class,
+                () -> customerHealthService.calculateCustomerHealth(tenantBCustomer.getId()));
+        customerHealthService.generateMonthlySnapshot(YearMonth.now().toString(), "tenant-a snapshot");
+        assertTrue(snapshotMapper.selectList(new LambdaQueryWrapper<CustomerHealthSnapshot>()
+                .eq(CustomerHealthSnapshot::getCustomerId, tenantACustomer.getId())).size() >= 1);
+        assertTrue(snapshotMapper.selectList(new LambdaQueryWrapper<CustomerHealthSnapshot>()
+                .eq(CustomerHealthSnapshot::getCustomerId, tenantBCustomer.getId())).isEmpty());
+
+        AccountingTenantContextHolder.setTenantId("tenant-b");
+        List<CustomerHealthScoreDto> tenantBList = customerHealthService
+                .listCustomerHealthSummaries(null, tenantBCustomer.getCompanyName());
+        assertEquals(List.of(tenantBCustomer.getId()), tenantBList.stream()
+                .map(CustomerHealthScoreDto::getCustomerId).toList());
+        assertEquals(tenantBCustomer.getId(), customerHealthService
+                .calculateCustomerHealth(tenantBCustomer.getId()).getCustomerId());
+    }
+
+    @Test
     @DisplayName("SLA30日集計はround作成時刻ではなく実際のresponse/resolve breach時刻を使うこと")
     void testSlaBreachCount_usesActualBreachTimestamps() {
         Customer customer = Customer.builder()
                 .companyName("SLA時刻顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("default")
                 .build();
         customerMapper.insert(customer);
         ServiceRequest request = serviceRequestService.createRequest(ServiceRequestCreateRequest.builder()

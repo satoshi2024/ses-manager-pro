@@ -1,6 +1,7 @@
 package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Contract;
@@ -12,11 +13,14 @@ import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.service.CustomerService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.security.TenantOwnershipResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.Serializable;
+import java.util.Set;
 
 /**
  * 顧客サービス実装クラス
@@ -28,6 +32,7 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
     private final ProjectMapper projectMapper;
     private final ContractMapper contractMapper;
     private final InvoiceMapper invoiceMapper;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.service.security.LegalEntityContextService legalEntityContextService;
@@ -39,6 +44,8 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         if (entity == null || legalEntityContextService == null) {
             throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        entity.setTenantId(tenantId);
         entity.setLegalEntityId(legalEntityContextService.requireCurrentLegalEntityId());
         return super.save(entity);
     }
@@ -67,7 +74,8 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         if (customer == null || customer.getId() == null || customer.getVersion() == null) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
-        Customer current = getById(customer.getId());
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Customer current = tenantOwnershipResolver.selectCustomer(tenantId, customer.getId());
         if (current == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -78,8 +86,7 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         // 法人変更は常に拒否し、保存済みの値をcanonicalとする。
         legalEntityContextService.assertSame(current.getLegalEntityId(), customer.getLegalEntityId());
         customer.setLegalEntityId(current.getLegalEntityId());
-        // OptimisticLockerInnerInterceptor が version を検査し、成功時に +1 する。
-        if (baseMapper.updateById(customer) != 1) {
+        if (baseMapper.updateByIdForTenant(customer, tenantId, customer.getVersion()) != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
         return true;
@@ -88,18 +95,41 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean removeById(Serializable id) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         Long customerId = Long.valueOf(id.toString());
-        Customer current = getById(customerId);
-        if (current == null) return false;
+        Customer current = tenantOwnershipResolver.selectCustomer(tenantId, customerId);
+        if (current == null) {
+            return false;
+        }
         if (legalEntityContextService == null || current.getLegalEntityId() == null) {
             throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
         legalEntityContextService.assertCurrent(current.getLegalEntityId());
+        return removeById(id, current.getVersion());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean removeById(Serializable id, Integer expectedVersion) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Long customerId = Long.valueOf(id.toString());
+        Customer current = tenantOwnershipResolver.selectCustomer(tenantId, customerId);
+        if (current == null) {
+            return false;
+        }
+        if (legalEntityContextService == null || current.getLegalEntityId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        legalEntityContextService.assertCurrent(current.getLegalEntityId());
+        if (expectedVersion == null) {
+            throw BusinessException.of(400, "error.common.optimisticLock");
+        }
         long projects = projectMapper.selectCount(new LambdaQueryWrapper<Project>().eq(Project::getCustomerId, customerId));
         if (projects > 0) {
             throw BusinessException.of("error.customer.delete.hasProjects", projects);
         }
-        long contracts = contractMapper.selectCount(new LambdaQueryWrapper<Contract>().eq(Contract::getCustomerId, customerId));
+        long contracts = contractMapper.selectCountForTenant(
+                new LambdaQueryWrapper<Contract>().eq(Contract::getCustomerId, customerId), tenantId);
         if (contracts > 0) {
             throw BusinessException.of("error.customer.delete.hasContracts", contracts);
         }
@@ -107,7 +137,32 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         if (invoices > 0) {
             throw BusinessException.of("error.customer.delete.hasInvoices", invoices);
         }
-        return super.removeById(id);
+        int deleted = baseMapper.deleteByIdForTenant(customerId, tenantId, expectedVersion);
+        if (deleted == 0) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
+        return true;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<Customer> pageForTenant(Page<Customer> page, String tenantId, Set<Long> customerIds,
+                                        String companyName, String commercialFlow, String trustLevel) {
+        String currentTenant = AccountingTenantContextHolder.requireTenantContext();
+        if (tenantId == null || !currentTenant.equals(tenantId.trim())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        return baseMapper.selectPageForTenant(page, tenantId, customerIds, companyName, commercialFlow, trustLevel);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Customer getByIdForTenant(Long customerId, String tenantId) {
+        String currentTenant = AccountingTenantContextHolder.requireTenantContext();
+        if (tenantId == null || !currentTenant.equals(tenantId.trim())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        return tenantOwnershipResolver.selectCustomer(tenantId, customerId);
     }
 }
 

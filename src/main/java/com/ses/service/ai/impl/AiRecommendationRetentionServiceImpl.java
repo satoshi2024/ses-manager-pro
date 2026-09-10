@@ -2,6 +2,7 @@ package com.ses.service.ai.impl;
 
 import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.ai.AiRecommendationRetentionService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,7 +40,8 @@ public class AiRecommendationRetentionServiceImpl implements AiRecommendationRet
             throw new IllegalArgumentException("invalid AI retention purge request");
         }
         LocalDateTime cutoff = now.minusDays(redactedDays);
-        return runMapper.purgeExpiredSummaries(cutoff, now, Math.min(maxRows, 1000));
+        String tenantId = AccountingTenantContextHolder.getTenantContext();
+        return runMapper.purgeExpiredSummaries(tenantId, cutoff, now, Math.min(maxRows, 1000));
     }
 
     /** scheduler用。時刻の正本は注入Clockに限定する。 */

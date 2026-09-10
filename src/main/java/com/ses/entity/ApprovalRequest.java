@@ -25,6 +25,8 @@ import java.time.LocalDateTime;
 @TableName("t_approval_request")
 public class ApprovalRequest extends BaseEntity {
 
+    /** 認証済みtenant。request bodyから設定しない。 */
+    private String tenantId;
     private String requestNo;
     private String requestType;
     /** QUOTATION / CONTRACT / INVOICE / BP_PAYMENT / MONTHLY_CLOSING */
