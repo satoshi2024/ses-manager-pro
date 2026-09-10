@@ -53,13 +53,13 @@ class SalesOrderQuotationContractIntegrationTest {
     @BeforeEach
     void setUp() {
         String suffix = "-" + System.nanoTime();
-        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, deleted_flag) VALUES (?, 'B', 0)", "F2顧客" + suffix);
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, legal_entity_id, company_name, trust_level, deleted_flag) VALUES ('default', ?, ?, 'B', 0)", legalEntityId, "F2顧客" + suffix);
         customerId = jdbcTemplate.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, "F2顧客" + suffix);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')", "F2要員A" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, legal_entity_id, full_name, employment_type, status) VALUES ('default', ?, ?, '正社員', 'Bench')", legalEntityId, "F2要員A" + suffix);
         engineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "F2要員A" + suffix);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')", "F2要員B" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, legal_entity_id, full_name, employment_type, status) VALUES ('default', ?, ?, '正社員', 'Bench')", legalEntityId, "F2要員B" + suffix);
         engineerId2 = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "F2要員B" + suffix);
-        jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) VALUES (?, ?, '募集中')", "F2案件" + suffix, customerId);
+        jdbcTemplate.update("INSERT INTO t_project (legal_entity_id, project_name, customer_id, status) VALUES (?, ?, ?, '募集中')", legalEntityId, "F2案件" + suffix, customerId);
         projectId = jdbcTemplate.queryForObject("SELECT id FROM t_project WHERE project_name = ?", Long.class, "F2案件" + suffix);
         jdbcTemplate.update("INSERT INTO m_organization_unit "
                         + "(legal_entity_id, code, name, type, valid_from, status, deleted_flag) "

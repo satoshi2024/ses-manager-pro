@@ -65,7 +65,7 @@ class AttendanceWorkflowServiceTest {
         jdbcTemplate.update("INSERT INTO m_organization_unit (tenant_id, legal_entity_id, code, name, type, valid_from, status) "
                 + "VALUES (1, 70001, ?, ?, '部門', '2026-01-01', '有効')", code, name);
         organizationId = jdbcTemplate.queryForObject("SELECT id FROM m_organization_unit WHERE code = ?", Long.class, code);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', 'Bench', ?)",
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status, organization_id) VALUES ('default', ?, '正社員', 'Bench', ?)",
                 name, organizationId);
         engineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, name);
         jdbcTemplate.update("INSERT INTO m_work_calendar (legal_entity_id, organization_id, engineer_id, name, valid_from, status) "
@@ -79,6 +79,7 @@ class AttendanceWorkflowServiceTest {
                 .or()
                 .eq(EngineerAccountLink::getEngineerId, engineerId));
         EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId("default");
         link.setEngineerId(engineerId);
         link.setSysUserId(USER_ID);
         engineerAccountLinkMapper.insert(link);

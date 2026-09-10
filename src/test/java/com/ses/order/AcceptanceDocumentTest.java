@@ -47,16 +47,16 @@ class AcceptanceDocumentTest {
                 new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
                         principal, null, principal.getAuthorities()));
         String suffix = "-" + System.nanoTime();
-        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, deleted_flag) VALUES (?, 'B', 0)", "AD顧客" + suffix);
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, company_name, trust_level, deleted_flag) VALUES ('default', ?, 'B', 0)", "AD顧客" + suffix);
         long customerId = jdbcTemplate.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, "AD顧客" + suffix);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')", "AD要員" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status) VALUES ('default', ?, '正社員', 'Bench')", "AD要員" + suffix);
         long engineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "AD要員" + suffix);
         jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) VALUES (?, ?, '募集中')", "AD案件" + suffix, customerId);
         long projectId = jdbcTemplate.queryForObject("SELECT id FROM t_project WHERE project_name = ?", Long.class, "AD案件" + suffix);
         jdbcTemplate.update(
-                "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, start_date,"
+                "INSERT INTO t_contract (tenant_id, contract_no, engineer_id, project_id, customer_id, start_date,"
                         + " selling_price, cost_price, status, acceptance_required)"
-                        + " VALUES (?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', 1)",
+                        + " VALUES ('default', ?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', 1)",
                 "AD-C-" + suffix, engineerId, projectId, customerId);
         contractId = jdbcTemplate.queryForObject("SELECT id FROM t_contract WHERE contract_no = ?", Long.class, "AD-C-" + suffix);
         jdbcTemplate.update(

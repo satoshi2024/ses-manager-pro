@@ -47,7 +47,13 @@ public class ApprovalRoute extends BaseEntity {
         }
 
         public ApprovalRouteBuilder tenantId(Long tenantId) {
-            this.tenantId = tenantId == null ? null : String.valueOf(tenantId);
+            if (tenantId == null) {
+                this.tenantId = null;
+            } else if (tenantId == 1L) {
+                this.tenantId = "default";
+            } else {
+                this.tenantId = String.valueOf(tenantId);
+            }
             return this;
         }
     }

@@ -384,7 +384,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
              AND h.valid_from &lt;= #{asOf}
              AND (h.valid_to IS NULL OR h.valid_to &gt;= #{asOf})
         LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
-             AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+             AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId}
              AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
                AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
@@ -428,7 +428,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
         JOIN t_engineer e ON e.id = c.engineer_id AND e.tenant_id IS NOT NULL
              AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
         LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
-             AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+             AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId}
              AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
                AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id

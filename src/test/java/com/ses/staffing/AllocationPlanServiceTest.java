@@ -98,15 +98,15 @@ class AllocationPlanServiceTest {
     @BeforeEach
     void setUp() {
         String suffix = String.valueOf(System.nanoTime());
-        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "T075alloc-" + suffix);
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, company_name) VALUES ('default', ?)", "T075alloc-" + suffix);
         long customerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM m_customer WHERE company_name = ?", Long.class, "T075alloc-" + suffix);
         jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) "
                 + "VALUES (?, ?, '募集中')", "T075alloc-prj-" + suffix, customerId);
         long projectIdRow = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_project WHERE project_name = ?", Long.class, "T075alloc-prj-" + suffix);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) "
-                + "VALUES (?, '正社員', 'Bench')", "T075alloc-eng-" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status) "
+                + "VALUES ('default', ?, '正社員', 'Bench')", "T075alloc-eng-" + suffix);
         engineerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "T075alloc-eng-" + suffix);
 
@@ -521,6 +521,7 @@ class AllocationPlanServiceTest {
 
     private long insertUser(String prefix) {
         SysUser user = SysUser.builder()
+                .tenantId("default")
                 .username(prefix + "-" + System.nanoTime())
                 .password("x")
                 .realName(prefix)

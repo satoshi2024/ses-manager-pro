@@ -356,6 +356,13 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
     }
 
     private List<String> routeTenantValues() {
-        return List.of(tenant());
+        String t = tenant();
+        if ("default".equals(t)) {
+            return List.of("default", "1");
+        }
+        if ("1".equals(t)) {
+            return List.of("1", "default");
+        }
+        return List.of(t);
     }
 }

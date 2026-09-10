@@ -72,15 +72,15 @@ class StaffingCapacityServiceTest {
     @BeforeEach
     void setUp() {
         String suffix = String.valueOf(System.nanoTime());
-        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "T076cap-" + suffix);
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, company_name) VALUES ('default', ?)", "T076cap-" + suffix);
         long customerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM m_customer WHERE company_name = ?", Long.class, "T076cap-" + suffix);
         jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) "
                 + "VALUES (?, ?, '募集中')", "T076cap-prj-" + suffix, customerId);
         projectId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_project WHERE project_name = ?", Long.class, "T076cap-prj-" + suffix);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) "
-                + "VALUES (?, '正社員', 'Bench')", "T076cap-eng-" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status) "
+                + "VALUES ('default', ?, '正社員', 'Bench')", "T076cap-eng-" + suffix);
         engineerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "T076cap-eng-" + suffix);
         engineer = new Engineer();

@@ -76,7 +76,7 @@ class LeaveServiceTest {
         jdbcTemplate.update("INSERT INTO m_organization_unit (tenant_id, legal_entity_id, code, name, type, valid_from, status) "
                 + "VALUES (1, 70001, ?, ?, '部門', '2026-01-01', '有効')", code, name);
         organizationId = jdbcTemplate.queryForObject("SELECT id FROM m_organization_unit WHERE code = ?", Long.class, code);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', 'Bench', ?)",
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status, organization_id) VALUES ('default', ?, '正社員', 'Bench', ?)",
                 name, organizationId);
         engineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, name);
         jdbcTemplate.update("INSERT INTO m_work_calendar (legal_entity_id, organization_id, engineer_id, name, valid_from, status) "
@@ -88,8 +88,11 @@ class LeaveServiceTest {
                     + "VALUES (?, ?, '通常', 480)", calendarId, date);
         }
         jdbcTemplate.update("DELETE FROM t_engineer_account_link WHERE sys_user_id = ? OR engineer_id = ?", USER_ID, engineerId);
-        jdbcTemplate.update("DELETE FROM sys_user WHERE id IN (92023, 92024)");
+        jdbcTemplate.update("DELETE FROM sys_user WHERE id IN (?, 92023, 92024)", USER_ID);
+        jdbcTemplate.update("INSERT INTO sys_user (tenant_id, id, username, password, real_name, role, status) "
+                + "VALUES ('default', ?, 'T071-applicant', 'x', 'T071 Applicant', '要員', 1)", USER_ID);
         EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId("default");
         link.setEngineerId(engineerId);
         link.setSysUserId(USER_ID);
         engineerAccountLinkMapper.insert(link);
@@ -103,13 +106,13 @@ class LeaveServiceTest {
         when(systemConfigService.getString(eq("leave.sales-notification.types"), any()))
                 .thenReturn("有給,特別休暇");
         // HR(92023)/マネージャー(92024)の担当組織を法人70001の組織へ紐付ける（R4-P1-01のscope母集団）。
-        jdbcTemplate.update("INSERT INTO sys_user (id, username, password, real_name, role, status) "
-                + "VALUES (92023, 'T071-hr', 'x', 'T071 HR', 'HR', 1)");
-        jdbcTemplate.update("INSERT INTO sys_user (id, username, password, real_name, role, status) "
-                + "VALUES (92024, 'T071-mgr', 'x', 'T071 MGR', 'マネージャー', 1)");
+        jdbcTemplate.update("INSERT INTO sys_user (tenant_id, id, username, password, real_name, role, status) "
+                + "VALUES ('default', 92023, 'T071-hr', 'x', 'T071 HR', 'HR', 1)");
+        jdbcTemplate.update("INSERT INTO sys_user (tenant_id, id, username, password, real_name, role, status) "
+                + "VALUES ('default', 92024, 'T071-mgr', 'x', 'T071 MGR', 'マネージャー', 1)");
         for (long userId : List.of(92023L, 92024L)) {
-            jdbcTemplate.update("INSERT INTO t_user_organization (user_id, organization_id, primary_flag, valid_from) "
-                    + "VALUES (?, ?, 1, '2026-01-01')", userId, organizationId);
+            jdbcTemplate.update("INSERT INTO t_user_organization (tenant_id, user_id, organization_id, primary_flag, valid_from) "
+                    + "VALUES ('default', ?, ?, 1, '2026-01-01')", userId, organizationId);
         }
     }
 
@@ -118,7 +121,7 @@ class LeaveServiceTest {
         SecurityContextHolder.clearContext();
         jdbcTemplate.update("DELETE FROM t_engineer_account_link WHERE sys_user_id = ? OR engineer_id = ?", USER_ID, engineerId);
         jdbcTemplate.update("DELETE FROM t_user_organization WHERE user_id IN (92023, 92024)");
-        jdbcTemplate.update("DELETE FROM sys_user WHERE id IN (92023, 92024)");
+        jdbcTemplate.update("DELETE FROM sys_user WHERE id IN (?, 92023, 92024)", USER_ID);
     }
 
     @Test
@@ -321,7 +324,7 @@ class LeaveServiceTest {
                 + "VALUES (1, 70002, ?, ?, '部門', '2026-01-01', '有効')", orgCode, orgCode);
         long orgB = jdbcTemplate.queryForObject("SELECT id FROM m_organization_unit WHERE code = ?", Long.class, orgCode);
         String engineerName = "T071engineerB-" + System.nanoTime();
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', 'Bench', ?)",
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status, organization_id) VALUES ('default', ?, '正社員', 'Bench', ?)",
                 engineerName, orgB);
         return jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, engineerName);
     }

@@ -113,3 +113,13 @@ CREATE TABLE IF NOT EXISTS t_document_hash_claim (
 -- R09-P1-05: 孤児 order_line_id の拒否（t_sales_order_line 作成後にFKを追加）
 ALTER TABLE t_contract ADD CONSTRAINT IF NOT EXISTS fk_contract_order_line
   FOREIGN KEY (order_line_id) REFERENCES t_sales_order_line(id);
+
+INSERT INTO m_document_type (code, name, direction, retention_years, retention_start_rule, legal_hold_supported)
+SELECT 'ORDER_RECEIVED', '注文書（受領）', 'INCOMING', 10, 'TRANSACTION_DATE', 1
+WHERE NOT EXISTS (SELECT 1 FROM m_document_type WHERE code = 'ORDER_RECEIVED');
+INSERT INTO m_document_type (code, name, direction, retention_years, retention_start_rule, legal_hold_supported)
+SELECT 'ORDER_ACKNOWLEDGEMENT', '注文請書', 'OUTGOING', 10, 'TRANSACTION_DATE', 1
+WHERE NOT EXISTS (SELECT 1 FROM m_document_type WHERE code = 'ORDER_ACKNOWLEDGEMENT');
+INSERT INTO m_document_type (code, name, direction, retention_years, retention_start_rule, legal_hold_supported)
+SELECT 'ACCEPTANCE', '検収書', 'OUTGOING', 10, 'TRANSACTION_DATE', 1
+WHERE NOT EXISTS (SELECT 1 FROM m_document_type WHERE code = 'ACCEPTANCE');

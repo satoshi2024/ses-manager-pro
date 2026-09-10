@@ -23,8 +23,8 @@ CREATE TABLE t_mail_delivery (
 DROP TABLE IF EXISTS m_customer CASCADE;
 CREATE TABLE m_customer (
   id                BIGINT AUTO_INCREMENT PRIMARY KEY,
-  legal_entity_id   BIGINT,
-  tenant_id         VARCHAR(100),
+  legal_entity_id   BIGINT DEFAULT 1,
+  tenant_id         VARCHAR(100) DEFAULT 'default',
   company_name      VARCHAR(200) NOT NULL,
   company_name_kana VARCHAR(200),
   contact_person    VARCHAR(100),
@@ -45,8 +45,8 @@ DROP TABLE IF EXISTS t_engineer CASCADE;
 
 CREATE TABLE t_engineer (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
-  legal_entity_id     BIGINT,
-  tenant_id           VARCHAR(100),
+  legal_entity_id     BIGINT DEFAULT 1,
+  tenant_id           VARCHAR(100) DEFAULT 'default',
   full_name           VARCHAR(100),
   full_name_kana      VARCHAR(100),
   initial_name        VARCHAR(10),
@@ -174,7 +174,7 @@ CREATE TABLE t_notification_read (
 DROP TABLE IF EXISTS t_project CASCADE;
 CREATE TABLE t_project (
   id                BIGINT AUTO_INCREMENT PRIMARY KEY,
-  legal_entity_id   BIGINT,
+  legal_entity_id   BIGINT DEFAULT 1,
   project_name      VARCHAR(200) NOT NULL,
   customer_id       BIGINT,
   commercial_flow   VARCHAR(50),
@@ -201,8 +201,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_project_source_opportunity ON t_project(sou
 DROP TABLE IF EXISTS t_contract CASCADE;
 CREATE TABLE t_contract (
   id                      BIGINT AUTO_INCREMENT PRIMARY KEY,
-  legal_entity_id         BIGINT,
-  tenant_id               VARCHAR(100),
+  legal_entity_id         BIGINT DEFAULT 1,
+  tenant_id               VARCHAR(100) DEFAULT 'default',
   contract_no             VARCHAR(50),
   proposal_id             BIGINT,
   engineer_id             BIGINT,
@@ -404,7 +404,7 @@ CREATE TABLE t_work_record (
 DROP TABLE IF EXISTS t_invoice CASCADE;
 CREATE TABLE t_invoice (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
-  legal_entity_id BIGINT,
+  legal_entity_id BIGINT DEFAULT 1,
   invoice_no    VARCHAR(30) NOT NULL UNIQUE,
   customer_id   BIGINT NOT NULL,
   billing_month CHAR(7) NOT NULL,
@@ -580,7 +580,7 @@ DROP TABLE IF EXISTS t_candidate_activity CASCADE;
 DROP TABLE IF EXISTS t_candidate CASCADE;
 CREATE TABLE t_candidate (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
-  tenant_id             VARCHAR(100),
+  tenant_id             VARCHAR(100) DEFAULT 'default',
   name                  VARCHAR(100) NOT NULL,
   contact_email         VARCHAR(200),
   contact_phone         VARCHAR(20),
@@ -817,8 +817,8 @@ CREATE TABLE t_contract_price_history (
 DROP TABLE IF EXISTS t_resume_ingestion;
 CREATE TABLE t_resume_ingestion (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
-  legal_entity_id       BIGINT,
-  tenant_id             VARCHAR(100),
+  legal_entity_id       BIGINT DEFAULT 1,
+  tenant_id             VARCHAR(100) DEFAULT 'default',
   original_file_name    VARCHAR(255),
   stored_file_name      VARCHAR(120),
   file_ext              VARCHAR(10),
@@ -843,8 +843,8 @@ CREATE INDEX IF NOT EXISTS idx_resume_ingestion_tenant_status_file
 DROP TABLE IF EXISTS t_project_ingestion;
 CREATE TABLE t_project_ingestion (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
-  legal_entity_id     BIGINT,
-  tenant_id           VARCHAR(100),
+  legal_entity_id     BIGINT DEFAULT 1,
+  tenant_id           VARCHAR(100) DEFAULT 'default',
   source_type         VARCHAR(10) NOT NULL,
   original_file_name  VARCHAR(255),
   stored_file_name    VARCHAR(120),
@@ -868,8 +868,8 @@ CREATE INDEX IF NOT EXISTS idx_project_ingestion_tenant_status
 DROP TABLE IF EXISTS t_bp_availability;
 CREATE TABLE t_bp_availability (
   id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
-  legal_entity_id    BIGINT,
-  tenant_id          VARCHAR(100),
+  legal_entity_id    BIGINT DEFAULT 1,
+  tenant_id          VARCHAR(100) DEFAULT 'default',
   initial_name       VARCHAR(50),
   bp_company         VARCHAR(120),
   bp_company_id      BIGINT,

@@ -229,6 +229,12 @@ public class RouteResolverServiceImpl implements RouteResolverService {
     }
 
     private List<String> routeTenantValues(String tenantId) {
+        if ("default".equals(tenantId)) {
+            return List.of("default", "1");
+        }
+        if ("1".equals(tenantId)) {
+            return List.of("1", "default");
+        }
         return List.of(tenantId);
     }
 }

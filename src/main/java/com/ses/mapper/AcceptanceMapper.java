@@ -114,7 +114,19 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
             @Param("customerId") Long customerId,
             @Param("engineerId") Long engineerId,
             @Param("acceptanceId") Long acceptanceId,
-            @Param("contractIds") List<Long> contractIds);
+            @Param("contractIds") List<Long> contractIds,
+            @Param("tenantId") String tenantId);
+
+    default Page<AcceptanceGridDto> selectGridPage(Page<AcceptanceGridDto> page,
+            String workMonth,
+            String status,
+            Long customerId,
+            Long engineerId,
+            Long acceptanceId,
+            List<Long> contractIds) {
+        return selectGridPage(page, workMonth, status, customerId, engineerId, acceptanceId, contractIds,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
+    }
 
     @Select("SELECT * FROM t_acceptance WHERE contract_id = #{contractId} AND work_month = #{workMonth} AND deleted_flag = 0 FOR UPDATE")
     Acceptance selectByContractAndMonthForUpdate(@Param("contractId") Long contractId, @Param("workMonth") String workMonth);

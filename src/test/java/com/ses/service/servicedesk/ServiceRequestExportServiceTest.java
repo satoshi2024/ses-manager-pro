@@ -42,6 +42,8 @@ class ServiceRequestExportServiceTest {
     void setUp() {
         AccountingTenantContextHolder.setTenantId("default");
         testCustomer = Customer.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
                 .companyName("CSVテスト顧客-" + UUID.randomUUID().toString().substring(0, 6))
                 .build();
         customerMapper.insert(testCustomer);
@@ -83,7 +85,11 @@ class ServiceRequestExportServiceTest {
     @Test
     @DisplayName("CSVのユーザー入力フィールドは数式として解釈されないこと")
     void testExportCsv_neutralizesFormulaFields() {
-        Customer formulaCustomer = Customer.builder().companyName("=1+1").build();
+        Customer formulaCustomer = Customer.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
+                .companyName("=1+1")
+                .build();
         customerMapper.insert(formulaCustomer);
         ServiceRequestCreateRequest req = ServiceRequestCreateRequest.builder()
                 .customerId(formulaCustomer.getId()).category("BILLING").priority("P2")

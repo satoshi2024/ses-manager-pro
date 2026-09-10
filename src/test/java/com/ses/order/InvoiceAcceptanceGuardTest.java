@@ -44,7 +44,7 @@ class InvoiceAcceptanceGuardTest {
     @BeforeEach
     void setUp() {
         String suffix = "-" + System.nanoTime();
-        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, deleted_flag) VALUES (?, 'B', 0)", "INV顧客" + suffix);
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, company_name, trust_level, deleted_flag) VALUES ('default', ?, 'B', 0)", "INV顧客" + suffix);
         customerId = jdbcTemplate.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, "INV顧客" + suffix);
         long engineerId = insertEngineer("INV要員" + suffix);
         long projectId = insertProject("INV案件" + suffix);
@@ -57,7 +57,7 @@ class InvoiceAcceptanceGuardTest {
     }
 
     private long insertEngineer(String name) {
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')", name);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status) VALUES ('default', ?, '正社員', 'Bench')", name);
         return jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, name);
     }
 
@@ -69,9 +69,9 @@ class InvoiceAcceptanceGuardTest {
     private long insertContract(String no, long engineerId, long projectId, int acceptanceRequired) {
         String reason = acceptanceRequired == 0 ? "検収不要特約" : null;
         jdbcTemplate.update(
-                "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, start_date,"
+                "INSERT INTO t_contract (tenant_id, contract_no, engineer_id, project_id, customer_id, start_date,"
                         + " selling_price, cost_price, status, acceptance_required, acceptance_exemption_reason)"
-                        + " VALUES (?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', ?, ?)",
+                        + " VALUES ('default', ?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', ?, ?)",
                 no, engineerId, projectId, customerId, acceptanceRequired, reason);
         return jdbcTemplate.queryForObject("SELECT id FROM t_contract WHERE contract_no = ?", Long.class, no);
     }
@@ -88,7 +88,7 @@ class InvoiceAcceptanceGuardTest {
     void invoiceFromUnacceptedContractIsBlocked() {
         // 検収要契約だけを持つ顧客を作る（検収不要契約が混在すると請求対象が生まれるため）
         String suffix = "-B-" + System.nanoTime();
-        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, deleted_flag) VALUES (?, 'B', 0)", "INV要検収" + suffix);
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, company_name, trust_level, deleted_flag) VALUES ('default', ?, 'B', 0)", "INV要検収" + suffix);
         long blockedCustomerId = jdbcTemplate.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, "INV要検収" + suffix);
         long engineerId = insertEngineer("INV要検収要員" + suffix);
         long projectId = insertProject("INV要検収案件" + suffix);

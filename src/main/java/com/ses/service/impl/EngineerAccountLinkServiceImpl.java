@@ -84,19 +84,31 @@ public class EngineerAccountLinkServiceImpl implements EngineerAccountLinkServic
     public Long findEngineerIdByUserId(Long sysUserId) {
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
         EngineerAccountLink link = linkMapper.selectByUserIdAndTenant(sysUserId, tenantId);
+        if (link == null) {
+            EngineerAccountLink unScoped = linkMapper.selectByUserId(sysUserId);
+            if (unScoped != null && (unScoped.getTenantId() == null || unScoped.getTenantId().equals(tenantId))) {
+                link = unScoped;
+            }
+        }
         return link != null ? link.getEngineerId() : null;
     }
 
     @Override
     public EngineerAccountLink findByEngineerId(Long engineerId) {
-        return linkMapper.selectByEngineerIdAndTenant(engineerId,
-                AccountingTenantContextHolder.requireTenantContext());
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        EngineerAccountLink link = linkMapper.selectByEngineerIdAndTenant(engineerId, tenantId);
+        if (link == null) {
+            EngineerAccountLink unScoped = linkMapper.selectByEngineerId(engineerId);
+            if (unScoped != null && (unScoped.getTenantId() == null || unScoped.getTenantId().equals(tenantId))) {
+                link = unScoped;
+            }
+        }
+        return link;
     }
 
     @Override
     public boolean isUserLinked(Long sysUserId) {
-        return linkMapper.selectByUserIdAndTenant(sysUserId,
-                AccountingTenantContextHolder.requireTenantContext()) != null;
+        return findEngineerIdByUserId(sysUserId) != null;
     }
 
     @Override

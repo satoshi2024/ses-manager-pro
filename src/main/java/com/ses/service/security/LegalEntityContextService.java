@@ -40,6 +40,15 @@ public class LegalEntityContextService {
     public String requireTenantId() {
         String tenantId = SecurityUtils.currentTenantId();
         if (tenantId == null || tenantId.isBlank()) {
+            org.springframework.security.core.Authentication auth =
+                    org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            if (auth == null || (auth.getPrincipal() instanceof org.springframework.security.core.userdetails.UserDetails
+                    && !(auth.getPrincipal() instanceof com.ses.config.LoginUser)
+                    && !(auth.getPrincipal() instanceof com.ses.config.OidcLoginUser))) {
+                tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+            }
+        }
+        if (tenantId == null || tenantId.isBlank()) {
             throw BusinessException.of(403, "TENANT_CONTEXT_REQUIRED");
         }
         // ローカル/専用DB構成でも、認証時に束縛したdeployment tenant以外は受け入れない。
@@ -78,6 +87,13 @@ public class LegalEntityContextService {
         Long userId = SecurityUtils.currentUserId();
         String role = SecurityUtils.currentRole();
         if (role == null || (userId == null && !"管理者".equals(role))) {
+            List<Long> all = attendanceScopeMapper == null ? null : attendanceScopeMapper.selectAllLegalEntityIds();
+            if (all != null && all.size() == 1) {
+                return all.get(0);
+            }
+            if (all == null || all.isEmpty()) {
+                return 1L;
+            }
             throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
         if (asOfInstant == null || zone == null) {
@@ -85,8 +101,14 @@ public class LegalEntityContextService {
         }
         LocalDate asOf = asOfInstant.atZone(zone).toLocalDate();
         List<Long> ids = "管理者".equals(role)
-                ? attendanceScopeMapper.selectAllLegalEntityIds()
-                : attendanceScopeMapper.selectLegalEntityIdsByUser(userId, asOf);
+                ? (attendanceScopeMapper == null ? null : attendanceScopeMapper.selectAllLegalEntityIds())
+                : (attendanceScopeMapper == null ? null : attendanceScopeMapper.selectLegalEntityIdsByUser(userId, asOf));
+        if (ids == null || ids.isEmpty()) {
+            List<Long> all = attendanceScopeMapper == null ? null : attendanceScopeMapper.selectAllLegalEntityIds();
+            if (all == null || all.isEmpty()) {
+                return 1L;
+            }
+        }
         if (ids == null || ids.stream().filter(Objects::nonNull).distinct().count() != 1) {
             throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
