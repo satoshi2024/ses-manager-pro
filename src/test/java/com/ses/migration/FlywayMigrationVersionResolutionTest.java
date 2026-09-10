@@ -46,6 +46,8 @@ class FlywayMigrationVersionResolutionTest {
         assertTrue(seenVersions.contains("147"), "V147 (customer_success_service_desk) が解決されること");
         assertTrue(seenVersions.contains("148"), "V148 (ai_management_copilot_f1_artifact) が解決されること");
         assertTrue(seenVersions.contains("149"), "V149 (ai_management_copilot_a1_menu) が解決されること");
+        assertTrue(seenVersions.contains("154"), "V154 (certification_continuity_group) が解決されること");
+        assertTrue(seenVersions.contains("162"), "V162 (nf02_nf03_boundary_repair) が解決されること");
 
         // V144 のスクリプト名が digital_invoice_safe_diagnostics であること
         List<MigrationInfo> v144Info = Arrays.stream(allMigrations)
@@ -76,21 +78,21 @@ class FlywayMigrationVersionResolutionTest {
         assertTrue(v149Info.get(0).getScript().contains("ai_management_copilot_a1_menu"),
                 "V149 のスクリプト名は ai_management_copilot_a1_menu であること: " + v149Info.get(0).getScript());
 
-        List<MigrationInfo> v150Info = Arrays.stream(allMigrations)
-                .filter(m -> m.getVersion() != null && "150".equals(m.getVersion().getVersion()))
+        List<MigrationInfo> v154Info = Arrays.stream(allMigrations)
+                .filter(m -> m.getVersion() != null && "154".equals(m.getVersion().getVersion()))
                 .toList();
-        assertEquals(1, v150Info.size(), "V150 は1件のみ存在すること");
-        assertTrue(v150Info.get(0).getScript().contains("service_request_atomic_sequence"),
-                "V150 のスクリプト名は service_request_atomic_sequence であること: " + v150Info.get(0).getScript());
+        assertEquals(1, v154Info.size(), "V154 は1件のみ存在すること");
+        assertTrue(v154Info.get(0).getScript().contains("certification_continuity_group"),
+                "V154 のスクリプト名は certification_continuity_group であること: " + v154Info.get(0).getScript());
 
-        List<MigrationInfo> v151Info = Arrays.stream(allMigrations)
-                .filter(m -> m.getVersion() != null && "151".equals(m.getVersion().getVersion()))
+        List<MigrationInfo> v162Info = Arrays.stream(allMigrations)
+                .filter(m -> m.getVersion() != null && "162".equals(m.getVersion().getVersion()))
                 .toList();
-        assertEquals(1, v151Info.size(), "V151 は1件のみ存在すること");
-        assertTrue(v151Info.get(0).getScript().contains("certification_continuity_group"),
-                "V151 のスクリプト名は certification_continuity_group であること: " + v151Info.get(0).getScript());
+        assertEquals(1, v162Info.size(), "V162 は1件のみ存在すること");
+        assertTrue(v162Info.get(0).getScript().contains("nf02_nf03_boundary_repair"),
+                "V162 のスクリプト名は nf02_nf03_boundary_repair であること: " + v162Info.get(0).getScript());
 
-        assertTrue(v150Info.get(0).getVersion().compareTo(v151Info.get(0).getVersion()) < 0,
-                "V150 は V151 より前に解決されること");
+        assertTrue(v154Info.get(0).getVersion().compareTo(v162Info.get(0).getVersion()) < 0,
+                "V154 は V162 より前に解決されること");
     }
 }

@@ -81,11 +81,11 @@ class CopilotCanonicalServiceSnapshotTest {
         loginAsAdmin();
         CopilotExecutionContext context = context();
 
-        when(contractMapper.selectList(any())).thenReturn(List.of());
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of());
         when(contractMapper.selectAccountingContractsFiltered(any(), any(), anyBoolean(), any(), any(), any(),
                 any(), any(), any(), any(), any(), any())).thenReturn(List.of());
         when(engineerMapper.selectList(any())).thenReturn(List.of());
-        when(workRecordMapper.selectList(any())).thenReturn(List.of());
+        when(workRecordMapper.selectConfirmedByWorkMonthsForTenant(any(), any())).thenReturn(List.of());
         when(dimensionMapper.selectList(any())).thenReturn(List.of());
         when(dimensionMapper.selectCount(any())).thenReturn(0L);
         when(budgetMapper.selectList(any())).thenReturn(List.of());

@@ -131,8 +131,7 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
         List<ManagementAccountingContractRow> forecastRows = filtered
                 ? organizationContractRows(monthStart, monthEnd, fullAccess, queryAllowed, queryDirectUsers, allowedContractIds, legalEntityId,
                 organizationId, costCenterId, customerId, projectId, salesUserId)
-                : contractMapper.selectAccountingContracts(monthStart, monthEnd, fullAccess, queryAllowed, queryDirectUsers,
-                tenantId);
+                : contractMapper.selectAccountingContracts(monthStart, monthEnd, fullAccess, queryAllowed, queryDirectUsers);
 
         Map<Long, MonthlyAccountingDimension> snapshots = visibleSnapshots(monthStart, scopeAsOf, legalEntityId,
                 organizationId, costCenterId, scopeSnapshot);
@@ -318,8 +317,7 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
                                                                             Long costCenterId, Long customerId,
                                                                             Long projectId, Long salesUserId) {
         return contractMapper.selectAccountingContractsFiltered(start, end, full, ids, directUserIds, allowedContractIds, legalEntityId,
-                organizationId, costCenterId, customerId, projectId, salesUserId,
-                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
+                organizationId, costCenterId, customerId, projectId, salesUserId);
     }
 
     private ManagementAccountingSummaryDto emptySummary(String month) {

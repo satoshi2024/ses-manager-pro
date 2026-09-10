@@ -13,6 +13,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 
 /**
@@ -60,6 +62,7 @@ class AccountingNullGuardTest {
         nullAmount.setCategory("交通費");
         nullAmount.setStatus("承認済");
         doReturn(nullAmount).when(expenseRequestMapper).selectById(2L);
+        doReturn(nullAmount).when(expenseRequestMapper).selectByIdForTenant(eq(2L), any());
 
         assertThatThrownBy(() -> purchaseIntegrationService.triggerExpenseSync(2L, 1L))
                 .isInstanceOf(BusinessException.class)
@@ -73,6 +76,7 @@ class AccountingNullGuardTest {
         nullDate.setAmount(new java.math.BigDecimal("1000"));
         nullDate.setStatus("承認済");
         doReturn(nullDate).when(expenseRequestMapper).selectById(3L);
+        doReturn(nullDate).when(expenseRequestMapper).selectByIdForTenant(eq(3L), any());
 
         assertThatThrownBy(() -> purchaseIntegrationService.triggerExpenseSync(3L, 1L))
                 .isInstanceOf(BusinessException.class)
