@@ -92,13 +92,13 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     // ----------------------------------------------------------------
 
     @Override
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public Document registerGenerated(DocumentRegisterRequest request, InputStream content) {
         return doRegister(request, content);
     }
 
     @Override
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public Document registerReceived(DocumentRegisterRequest request, InputStream content) {
         return doRegister(request, content);
     }
@@ -208,7 +208,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     // ----------------------------------------------------------------
 
     @Override
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public DocumentVersion addVersion(Long documentId, DocumentRegisterRequest request, InputStream content) {
         if (request == null || content == null) {
             throw BusinessException.of(400, "error.document.invalidRequest");
