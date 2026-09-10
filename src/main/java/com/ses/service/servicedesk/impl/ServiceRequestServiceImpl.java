@@ -372,19 +372,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void changeStatus(Long id, ServiceRequestStatusChangeRequest req, Long actorId, String actorType, String actorName) {
-        // 既存のservice直呼び出し互換。HTTP/明示context経路はversionを必須にする。
-        if (req.getVersion() == null) {
-            ServiceRequest current = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
-            if (current == null) {
-                throw BusinessException.of(404, "指定されたリクエストが見つかりません");
-            }
-            req = ServiceRequestStatusChangeRequest.builder()
-                    .toStatus(req.getToStatus())
-                    .reason(req.getReason())
-                    .version(current.getVersion() == null ? 0 : current.getVersion())
-                    .organizationId(req.getOrganizationId())
-                    .legalEntityId(req.getLegalEntityId())
-                    .build();
+        // 既存のservice直呼び出し互換でも、クライアントのexpectedVersionを省略した更新は許可しない。
+        if (req == null || req.getVersion() == null) {
+            throw BusinessException.of(400, "サービスリクエストversionは必須です");
         }
         changeStatus(id, req, legacyContext(actorId, "PORTAL_USER".equals(actorType), actorId,
                 actorType, actorName, null, null));
@@ -394,10 +384,10 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Transactional(rollbackFor = Exception.class)
     public void changeStatus(Long id, ServiceRequestStatusChangeRequest req,
                              ServiceDeskExecutionContext executionContext) {
-        requireExecutionContext(executionContext);
         if (req == null || req.getVersion() == null) {
             throw BusinessException.of(400, "サービスリクエストversionは必須です");
         }
+        requireExecutionContext(executionContext);
         ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
         if (existing == null || !currentTenant().equals(existing.getTenantId())) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
@@ -420,8 +410,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         }
         String toStatus = "REOPENED".equals(requestedStatus) ? "IN_PROGRESS" : requestedStatus;
 
-        int expectedVersion = req.getVersion() != null ? req.getVersion()
-                : (existing.getVersion() != null ? existing.getVersion() : 0);
+        int expectedVersion = req.getVersion();
         int currentVersion = existing.getVersion() != null ? existing.getVersion() : 0;
         if (expectedVersion != currentVersion) {
             throw BusinessException.of(409, "サービスリクエストが更新済みです。再読込してください");

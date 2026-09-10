@@ -6,7 +6,6 @@ import com.ses.dto.certification.CertificationMasterView;
 import com.ses.dto.certificationlearninggap.TrainingCourseMasterView;
 import com.ses.entity.Certification;
 import com.ses.entity.EngineerCertification;
-import com.ses.entity.TrainingCourse;
 import com.ses.service.certification.CertificationMasterService;
 import com.ses.service.certification.EngineerCertificationService;
 import com.ses.service.certificationlearninggap.CertificationEvidenceAccessService;
@@ -38,21 +37,22 @@ class CertificationLearningGapWriteApiControllerTest {
     @Test
     void masterとcourseのwriteは既存serviceへ委譲する() {
         Certification master = new Certification(); master.setId(1L); master.setDisplayName("FE");
-        TrainingCourse course = new TrainingCourse(); course.setId(2L); course.setName("AWS");
+        TrainingCourseMasterView course = new TrainingCourseMasterView(2L, "provider", "AWS", null,
+                java.math.BigDecimal.TEN, 3, 10, 1, 0, List.of());
         when(masterService.createMaster(any(Certification.class), any())).thenReturn(master);
         when(courseService.create(any(TrainingCourseMasterService.TrainingCourseCommand.class), any())).thenReturn(course);
 
         ApiResult<CertificationMasterView> masterResult = controller.createCertificationMaster(
                 new CertificationLearningGapApiController.CertificationMasterRequest(
                         "default", "FE", "IPA", "FE", "NONE", null, 1, 1));
-        ApiResult<TrainingCourse> courseResult = controller.createTrainingCourse(
+        ApiResult<TrainingCourseMasterView> courseResult = controller.createTrainingCourse(
                 new CertificationLearningGapApiController.TrainingCourseMasterRequest(
                         "default", "provider", "AWS", "desc", java.math.BigDecimal.TEN, 3, 10, 1, null, List.of(5L)));
 
         assertEquals(200, masterResult.getCode());
         assertEquals(1L, masterResult.getData().id());
         assertEquals(200, courseResult.getCode());
-        assertEquals(2L, courseResult.getData().getId());
+        assertEquals(2L, courseResult.getData().id());
         verify(masterService).createMaster(any(Certification.class), any());
         verify(courseService).create(any(TrainingCourseMasterService.TrainingCourseCommand.class), any());
     }
@@ -75,7 +75,7 @@ class CertificationLearningGapWriteApiControllerTest {
 
     @Test
     void course一覧の管理endpointはviewを返す() {
-        when(courseService.list(true)).thenReturn(List.of(new TrainingCourseMasterView(2L, "default", "p", "n",
+        when(courseService.list(true)).thenReturn(List.of(new TrainingCourseMasterView(2L, "p", "n",
                 null, java.math.BigDecimal.ONE, 1, 1, 1, 0, List.of())));
         assertEquals(1, controller.trainingCourses(true).getData().size());
     }

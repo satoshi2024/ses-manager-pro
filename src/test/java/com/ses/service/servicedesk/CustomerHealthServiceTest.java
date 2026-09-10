@@ -109,6 +109,7 @@ class CustomerHealthServiceTest {
         c1.setSellingPrice(new BigDecimal("800000"));
         c1.setCostPrice(new BigDecimal("600000"));
         c1.setStatus("稼動中");
+        c1.setTenantId("default");
         contractMapper.insert(c1);
 
         ServiceRequestCreateRequest healthyReq = ServiceRequestCreateRequest.builder()
@@ -120,10 +121,10 @@ class CustomerHealthServiceTest {
                 .build();
         ServiceRequest srH = serviceRequestService.createRequest(healthyReq, 100L, false, null);
         serviceRequestService.changeStatus(srH.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").version(0).build(),
                 100L, "INTERNAL_USER", "管理者");
         serviceRequestService.changeStatus(srH.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("回答完了").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("回答完了").version(1).build(),
                 100L, "INTERNAL_USER", "管理者");
         serviceRequestService.submitCsat(srH.getId(),
                 PortalCsatCreateRequest.builder().score(5).feedbackComment("迅速な対応でした").build(),
@@ -155,10 +156,10 @@ class CustomerHealthServiceTest {
                 .build();
         ServiceRequest sr2 = serviceRequestService.createRequest(req2, 100L, false, null);
         serviceRequestService.changeStatus(sr2.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").version(0).build(),
                 100L, "INTERNAL_USER", "管理者");
         serviceRequestService.changeStatus(sr2.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("復旧").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("復旧").version(1).build(),
                 100L, "INTERNAL_USER", "管理者");
         serviceRequestService.submitCsat(sr2.getId(),
                 PortalCsatCreateRequest.builder().score(1).feedbackComment("復旧まで遅すぎた").build(),

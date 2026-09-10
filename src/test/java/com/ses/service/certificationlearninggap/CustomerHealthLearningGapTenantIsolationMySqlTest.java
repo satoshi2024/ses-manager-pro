@@ -5,16 +5,22 @@ import com.ses.config.LoginUser;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapFilter;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapRow;
 import com.ses.dto.servicedesk.CustomerHealthScoreDto;
+import com.ses.entity.Contract;
 import com.ses.entity.Customer;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
+import com.ses.entity.Project;
+import com.ses.entity.ServiceRequest;
 import com.ses.entity.SysUser;
+import com.ses.mapper.ContractMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.servicedesk.CustomerHealthService;
+import com.ses.service.servicedesk.impl.ServiceSlaMonitoringServiceImpl;
 import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
@@ -81,6 +87,15 @@ class CustomerHealthLearningGapTenantIsolationMySqlTest {
     @Autowired
     private SysUserMapper sysUserMapper;
 
+    @Autowired
+    private ContractMapper contractMapper;
+
+    @Autowired
+    private ProjectMapper projectMapper;
+
+    @Autowired
+    private ServiceSlaMonitoringServiceImpl slaMonitoringService;
+
     @AfterEach
     void clearContext() {
         SecurityContextHolder.clearContext();
@@ -123,6 +138,33 @@ class CustomerHealthLearningGapTenantIsolationMySqlTest {
         assertThat(linkService.findEngineerIdByUserId(userA.getId())).isEqualTo(engineerA.getId());
     }
 
+    @Test
+    void MySQLのSLA通知契約候補は顧客と契約の両方がcurrentTenantの行だけを使う() {
+        String suffix = UUID.randomUUID().toString().replace("-", "");
+        String tenantA = "sla-a-" + suffix;
+        String tenantB = "sla-b-" + suffix;
+        Customer customerA = insertCustomer(tenantA, "SLA顧客A-" + suffix);
+        Engineer engineerA = insertEngineer(tenantA, "SLA要員A-" + suffix);
+        Project projectA = new Project();
+        projectA.setCustomerId(customerA.getId());
+        projectA.setProjectName("SLA案件A-" + suffix);
+        projectMapper.insert(projectA);
+        SysUser salesA = insertSalesUser(tenantA, "sla-sales-a-" + suffix);
+        SysUser salesB = insertSalesUser(tenantB, "sla-sales-b-" + suffix);
+        Contract contractA = insertContract(customerA, projectA, engineerA, salesA, tenantA);
+        Contract contractB = insertContract(customerA, projectA, engineerA, salesB, tenantB);
+
+        authenticateAsAdmin(tenantA);
+        AccountingTenantContextHolder.setTenantId(tenantA);
+        ServiceRequest request = ServiceRequest.builder().tenantId(tenantA).customerId(customerA.getId())
+                .contractId(contractB.getId()).status("RECEIVED").build();
+
+        assertThat(slaMonitoringService.resolveNotificationRecipients(request))
+                .isEmpty();
+        assertThat(contractMapper.selectByIdForTenant(contractB.getId(), tenantA)).isNull();
+        assertThat(contractMapper.selectByIdForTenant(contractA.getId(), tenantA)).isNotNull();
+    }
+
     private Customer insertCustomer(String tenantId, String name) {
         Customer customer = Customer.builder().tenantId(tenantId).companyName(name).build();
         customerMapper.insert(customer);
@@ -142,6 +184,32 @@ class CustomerHealthLearningGapTenantIsolationMySqlTest {
                 .password("test").realName(name).role("要員").status(1).build();
         sysUserMapper.insert(user);
         return user;
+    }
+
+    private SysUser insertSalesUser(String tenantId, String username) {
+        SysUser user = SysUser.builder().tenantId(tenantId).username(username)
+                .password("test").realName(username).role("営業").status(1).build();
+        sysUserMapper.insert(user);
+        return user;
+    }
+
+    private Contract insertContract(Customer customer, Project project, Engineer engineer,
+                                    SysUser salesUser, String tenantId) {
+        Contract contract = new Contract();
+        contract.setTenantId(tenantId);
+        contract.setContractNo("CT-SLA-" + UUID.randomUUID());
+        contract.setCustomerId(customer.getId());
+        contract.setProjectId(project.getId());
+        contract.setEngineerId(engineer.getId());
+        contract.setSalesUserId(salesUser.getId());
+        contract.setContractType("準委任");
+        contract.setStartDate(LocalDate.now().minusDays(1));
+        contract.setEndDate(LocalDate.now().plusMonths(1));
+        contract.setSellingPrice(java.math.BigDecimal.valueOf(800000));
+        contract.setCostPrice(java.math.BigDecimal.valueOf(600000));
+        contract.setStatus("稼動中");
+        contractMapper.insert(contract);
+        return contract;
     }
 
     private void authenticateAsAdmin(String tenantId) {

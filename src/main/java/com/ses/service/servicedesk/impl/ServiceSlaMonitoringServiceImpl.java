@@ -1,6 +1,5 @@
 package com.ses.service.servicedesk.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.constant.NotificationLinks;
 import com.ses.entity.Contract;
 import com.ses.entity.Customer;
@@ -28,6 +27,7 @@ import java.time.LocalDateTime;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * SLA監視・アラート通知サービス実装
@@ -342,8 +342,12 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
 
         // ② 関連契約の担当営業
         if (req.getContractId() != null) {
-            Contract contract = contractMapper.selectById(req.getContractId());
-            if (contract != null && contract.getSalesUserId() != null) {
+            Contract contract = contractMapper.selectByIdForTenant(req.getContractId(), tenantId);
+            if (contract == null || !Objects.equals(req.getCustomerId(), contract.getCustomerId())) {
+                // 明示された契約のtenant/customerが解決できない場合、別契約への推測fallbackは禁止する。
+                return Collections.emptyList();
+            }
+            if (contract.getSalesUserId() != null) {
                 SysUser salesUser = sysUserMapper.selectByIdAndTenant(contract.getSalesUserId(), tenantId);
                 if (salesUser != null && Integer.valueOf(1).equals(salesUser.getStatus()) && Integer.valueOf(0).equals(salesUser.getDeletedFlag())) {
                     return List.of(salesUser.getId());
@@ -353,13 +357,10 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
 
         // ③ 顧客の有効契約担当営業
         if (req.getCustomerId() != null) {
-            List<Contract> contracts = contractMapper.selectList(
-                    new LambdaQueryWrapper<Contract>()
-                            .eq(Contract::getCustomerId, req.getCustomerId())
-                            .eq(Contract::getStatus, "稼動中")
-                            .isNotNull(Contract::getSalesUserId)
-                            .orderByDesc(Contract::getId)
-            );
+            List<Contract> contracts = contractMapper.selectActiveByCustomerAndTenant(req.getCustomerId(), tenantId);
+            if (contracts == null) {
+                contracts = List.of();
+            }
             for (Contract c : contracts) {
                 SysUser salesUser = sysUserMapper.selectByIdAndTenant(c.getSalesUserId(), tenantId);
                 if (salesUser != null && Integer.valueOf(1).equals(salesUser.getStatus()) && Integer.valueOf(0).equals(salesUser.getDeletedFlag())) {

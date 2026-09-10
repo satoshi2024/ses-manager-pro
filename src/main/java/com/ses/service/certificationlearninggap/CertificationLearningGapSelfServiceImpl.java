@@ -5,11 +5,13 @@ import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.certification.EngineerCertificationViewDto;
 import com.ses.dto.certification.CertificationLifecycleActionView;
+import com.ses.dto.certification.CertificationMasterView;
 import com.ses.dto.certificationlearninggap.CertificationEvidenceView;
 import com.ses.dto.certificationlearninggap.CertificationSelfDashboard;
 import com.ses.dto.certificationlearninggap.CertificationSelfView;
 import com.ses.dto.certificationlearninggap.LearningPlanSelfView;
 import com.ses.dto.certificationlearninggap.TrainingEnrollmentSelfView;
+import com.ses.dto.certificationlearninggap.TrainingCourseCatalogView;
 import com.ses.dto.document.DocumentRegisterRequest;
 import com.ses.entity.Certification;
 import com.ses.entity.DocumentLink;
@@ -98,19 +100,23 @@ public class CertificationLearningGapSelfServiceImpl implements CertificationLea
     }
 
     @Override
-    public List<Certification> availableCertificationMasters() {
+    public List<CertificationMasterView> availableCertificationMasters() {
         return certificationMasterMapper.selectList(new LambdaQueryWrapper<Certification>()
                 .eq(Certification::getTenantId, currentTenant())
                 .eq(Certification::getActiveFlag, 1)
-                .orderByAsc(Certification::getDisplayName).orderByAsc(Certification::getId));
+                .orderByAsc(Certification::getDisplayName).orderByAsc(Certification::getId))
+                .stream().map(CertificationMasterView::from).toList();
     }
 
     @Override
-    public List<TrainingCourse> availableTrainingCourses() {
+    public List<TrainingCourseCatalogView> availableTrainingCourses() {
         return courseMapper.selectList(new LambdaQueryWrapper<TrainingCourse>()
                 .eq(TrainingCourse::getTenantId, currentTenant())
                 .eq(TrainingCourse::getActiveFlag, 1)
-                .orderByAsc(TrainingCourse::getName).orderByAsc(TrainingCourse::getId));
+                .orderByAsc(TrainingCourse::getName).orderByAsc(TrainingCourse::getId))
+                .stream().map(course -> new TrainingCourseCatalogView(course.getId(), course.getProvider(),
+                        course.getName(), course.getDescription(), course.getCostJpy(), course.getPeriodDays(),
+                        course.getCapacity(), course.getActiveFlag(), course.getVersion())).toList();
     }
 
     @Override

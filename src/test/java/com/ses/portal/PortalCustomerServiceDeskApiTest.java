@@ -314,11 +314,14 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
         CsrfPair csrf = fetchPortalCsrf(mockMvc);
 
         // 管理者がリクエストを解決済みにする
+        Integer currentVersion = jdbcTemplate.queryForObject(
+                "SELECT version FROM t_service_request WHERE id = ?", Integer.class, customerARequest.getId());
         serviceRequestService.changeStatus(customerARequest.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").version(currentVersion).build(),
                 100L, "INTERNAL_USER", "管理者");
         serviceRequestService.changeStatus(customerARequest.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("対応完了").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("対応完了")
+                        .version(currentVersion + 1).build(),
                 100L, "INTERNAL_USER", "管理者");
 
         PortalCsatCreateRequest csatReq = PortalCsatCreateRequest.builder()

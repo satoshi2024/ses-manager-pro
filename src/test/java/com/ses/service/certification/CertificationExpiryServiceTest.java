@@ -3,6 +3,8 @@ package com.ses.service.certification;
 import com.ses.entity.EngineerCertification;
 import com.ses.mapper.EngineerCertificationMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -21,6 +23,16 @@ class CertificationExpiryServiceTest {
 
     @Mock
     private EngineerCertificationMapper mapper;
+
+    @BeforeEach
+    void bindTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
 
     @Test
     void test90_60_30当日だけ候補になり前後日はならない() {
@@ -83,10 +95,21 @@ class CertificationExpiryServiceTest {
         assertEquals(1, service.findCandidates(today, 99L).size());
     }
 
+    @Test
+    void tenantContextが無い場合は候補を作らない() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+        CertificationExpiryService service = new CertificationExpiryServiceImpl(mapper);
+        EngineerCertification record = active(10L, LocalDate.of(2026, 11, 26));
+        assertNull(service.evaluate(record, LocalDate.of(2026, 8, 28), 99L));
+        org.junit.jupiter.api.Assertions.assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> service.findCandidates(LocalDate.of(2026, 8, 28), 99L));
+    }
+
     private EngineerCertification active(Long id, LocalDate expiry) {
         EngineerCertification record = new EngineerCertification();
         record.setId(id);
         record.setEngineerId(20L);
+        record.setTenantId("default");
         record.setExpiresOn(expiry);
         record.setRecordState(CertificationRecordStates.ACTIVE);
         record.setCurrentFlag(1);

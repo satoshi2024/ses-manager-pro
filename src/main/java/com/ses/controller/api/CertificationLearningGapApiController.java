@@ -1,16 +1,17 @@
 package com.ses.controller.api;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapFilter;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapRow;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapAiView;
+import com.ses.dto.certificationlearninggap.TrainingPlanManagementView;
 import com.ses.dto.certification.CertificationLifecycleActionView;
 import com.ses.dto.certification.CertificationMasterView;
 import com.ses.dto.certificationlearninggap.TrainingCourseMasterView;
 import com.ses.entity.Certification;
 import com.ses.entity.EngineerCertification;
-import com.ses.entity.LearningPlan;
 import com.ses.service.SkillGapService;
 import com.ses.service.certification.CertificationMasterService;
 import com.ses.service.certification.EngineerCertificationService;
@@ -115,7 +116,7 @@ public class CertificationLearningGapApiController {
 
     @PostMapping("/masters/courses")
     @PreAuthorize("hasAnyRole('管理者','HR')")
-    public ApiResult<com.ses.entity.TrainingCourse> createTrainingCourse(
+    public ApiResult<TrainingCourseMasterView> createTrainingCourse(
             @RequestBody TrainingCourseMasterRequest request) {
         return ApiResult.success(trainingCourseMasterService.create(toTrainingCourseCommand(request),
                 com.ses.common.util.SecurityUtils.currentUserId()));
@@ -123,7 +124,7 @@ public class CertificationLearningGapApiController {
 
     @PutMapping("/masters/courses/{id}")
     @PreAuthorize("hasAnyRole('管理者','HR')")
-    public ApiResult<com.ses.entity.TrainingCourse> updateTrainingCourse(
+    public ApiResult<TrainingCourseMasterView> updateTrainingCourse(
             @PathVariable Long id, @RequestBody TrainingCourseMasterRequest request) {
         return ApiResult.success(trainingCourseMasterService.update(id, toTrainingCourseCommand(request),
                 com.ses.common.util.SecurityUtils.currentUserId()));
@@ -131,8 +132,13 @@ public class CertificationLearningGapApiController {
 
     @DeleteMapping("/masters/courses/{id}")
     @PreAuthorize("hasAnyRole('管理者','HR')")
-    public ApiResult<com.ses.entity.TrainingCourse> deactivateTrainingCourse(@PathVariable Long id) {
-        return ApiResult.success(trainingCourseMasterService.deactivate(id,
+    public ApiResult<TrainingCourseMasterView> deactivateTrainingCourse(
+            @PathVariable Long id,
+            @RequestParam(required = false) Integer expectedVersion,
+            @RequestBody(required = false) TrainingCourseVersionRequest request) {
+        Integer version = expectedVersion != null ? expectedVersion
+                : request == null ? null : request.expectedVersion();
+        return ApiResult.success(trainingCourseMasterService.deactivate(id, version,
                 com.ses.common.util.SecurityUtils.currentUserId()));
     }
 
@@ -207,31 +213,31 @@ public class CertificationLearningGapApiController {
     }
 
     @PostMapping("/training-plans/{planId}/approve")
-    public ApiResult<LearningPlan> approveTrainingPlan(@PathVariable Long planId,
-                                                       @RequestBody(required = false) ApprovalCommand command,
-                                                       Authentication authentication) {
-        return ApiResult.success(trainingApprovalService.approve(planId, version(command),
-                com.ses.common.util.SecurityUtils.currentUserId(), comment(command), authentication));
+    public ApiResult<TrainingPlanManagementView> approveTrainingPlan(@PathVariable Long planId,
+                                                                     @RequestBody(required = false) ApprovalCommand command,
+                                                                     Authentication authentication) {
+        return ApiResult.success(TrainingPlanManagementView.from(trainingApprovalService.approve(planId,
+                version(command), com.ses.common.util.SecurityUtils.currentUserId(), comment(command), authentication)));
     }
 
     @PostMapping("/training-plans/{planId}/reject")
-    public ApiResult<LearningPlan> rejectTrainingPlan(@PathVariable Long planId,
-                                                      @RequestBody ApprovalCommand command,
-                                                      Authentication authentication) {
-        return ApiResult.success(trainingApprovalService.reject(planId, version(command),
-                com.ses.common.util.SecurityUtils.currentUserId(), comment(command), authentication));
+    public ApiResult<TrainingPlanManagementView> rejectTrainingPlan(@PathVariable Long planId,
+                                                                    @RequestBody ApprovalCommand command,
+                                                                    Authentication authentication) {
+        return ApiResult.success(TrainingPlanManagementView.from(trainingApprovalService.reject(planId,
+                version(command), com.ses.common.util.SecurityUtils.currentUserId(), comment(command), authentication)));
     }
 
     @PostMapping("/training-plans/{planId}/amend-budget")
-    public ApiResult<LearningPlan> amendTrainingBudget(@PathVariable Long planId,
-                                                       @RequestBody BudgetAmendmentCommand command,
-                                                       Authentication authentication) {
+    public ApiResult<TrainingPlanManagementView> amendTrainingBudget(@PathVariable Long planId,
+                                                                      @RequestBody BudgetAmendmentCommand command,
+                                                                      Authentication authentication) {
         if (command == null) {
             throw com.ses.common.exception.BusinessException.of(400, "training.plan.expectedVersionRequired");
         }
-        return ApiResult.success(trainingApprovalService.amendBudget(planId, command.expectedVersion(),
-                command.amendedCostJpy(), command.approvalRequestId(),
-                com.ses.common.util.SecurityUtils.currentUserId(), command.reason(), authentication));
+        return ApiResult.success(TrainingPlanManagementView.from(trainingApprovalService.amendBudget(planId,
+                command.expectedVersion(), command.amendedCostJpy(), command.approvalRequestId(),
+                com.ses.common.util.SecurityUtils.currentUserId(), command.reason(), authentication)));
     }
 
     @GetMapping("/{engineerId}/certifications/{recordId}/evidence/{documentId}/versions/{versionNo}/download")
@@ -355,7 +361,7 @@ public class CertificationLearningGapApiController {
         }
         return new TrainingCourseMasterService.TrainingCourseCommand(request.tenantId(), request.provider(),
                 request.name(), request.description(), request.costJpy(), request.periodDays(), request.capacity(),
-                request.activeFlag(), request.version(), request.requiredSkillIds());
+                request.activeFlag(), request.expectedVersion(), request.requiredSkillIds());
     }
 
     private Integer version(ApprovalCommand command) { return command == null ? null : command.expectedVersion(); }
@@ -388,5 +394,9 @@ public class CertificationLearningGapApiController {
 
     public record TrainingCourseMasterRequest(String tenantId, String provider, String name, String description,
                                               java.math.BigDecimal costJpy, Integer periodDays, Integer capacity,
-                                              Integer activeFlag, Integer version, List<Long> requiredSkillIds) { }
+                                              Integer activeFlag,
+                                              @JsonAlias({"version", "expectedVersion"}) Integer expectedVersion,
+                                              List<Long> requiredSkillIds) { }
+
+    public record TrainingCourseVersionRequest(Integer expectedVersion) { }
 }

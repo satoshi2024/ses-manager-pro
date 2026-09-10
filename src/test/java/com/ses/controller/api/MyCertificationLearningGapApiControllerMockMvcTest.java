@@ -1,6 +1,8 @@
 package com.ses.controller.api;
 
 import com.ses.dto.certification.CertificationLifecycleActionView;
+import com.ses.dto.certification.CertificationMasterView;
+import com.ses.dto.certificationlearninggap.TrainingCourseCatalogView;
 import com.ses.service.certificationlearninggap.CertificationEvidenceAccessService;
 import com.ses.service.certificationlearninggap.CertificationLearningGapSelfService;
 import org.junit.jupiter.api.AfterEach;
@@ -15,10 +17,13 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.LocalDate;
+import java.math.BigDecimal;
+import java.util.List;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -99,5 +104,33 @@ class MyCertificationLearningGapApiControllerMockMvcTest {
                 .andExpect(jsonPath("$.data.tenantId").doesNotExist())
                 .andExpect(jsonPath("$.data.createdBy").doesNotExist())
                 .andExpect(jsonPath("$.data.updatedBy").doesNotExist());
+    }
+
+    @Test
+    void 本人catalogは安全projectionだけを返す() throws Exception {
+        when(selfService.availableCertificationMasters()).thenReturn(List.of(
+                new CertificationMasterView(21L, "AWS SAA", "Amazon", "aws-saa",
+                        "NONE", null, 1, 1, 0)));
+        when(selfService.availableTrainingCourses()).thenReturn(List.of(
+                new TrainingCourseCatalogView(31L, "社内講座", "AWS基礎", "説明",
+                        BigDecimal.TEN, 2, 20, 1, 0)));
+
+        mockMvc.perform(get("/api/my/certification-learning-gap/catalog/certifications"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id").value(21))
+                .andExpect(jsonPath("$.data[0].displayName").value("AWS SAA"))
+                .andExpect(jsonPath("$.data[0].tenantId").doesNotExist())
+                .andExpect(jsonPath("$.data[0].identityKey").doesNotExist())
+                .andExpect(jsonPath("$.data[0].createdBy").doesNotExist())
+                .andExpect(jsonPath("$.data[0].deletedFlag").doesNotExist());
+
+        mockMvc.perform(get("/api/my/certification-learning-gap/catalog/courses"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id").value(31))
+                .andExpect(jsonPath("$.data[0].name").value("AWS基礎"))
+                .andExpect(jsonPath("$.data[0].tenantId").doesNotExist())
+                .andExpect(jsonPath("$.data[0].identityKey").doesNotExist())
+                .andExpect(jsonPath("$.data[0].createdBy").doesNotExist())
+                .andExpect(jsonPath("$.data[0].deletedFlag").doesNotExist());
     }
 }

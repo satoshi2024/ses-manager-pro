@@ -170,6 +170,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public List<com.ses.dto.compliance.ComplianceFinding> saveWithBusinessRules(Contract contract) {
+        bindTenantOwnership(contract);
         validate(contract);
         if (!StringUtils.hasText(contract.getContractType())) {
             contract.setContractType("準委任");
@@ -239,6 +240,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Transactional(rollbackFor = Exception.class)
     public List<com.ses.dto.compliance.ComplianceFinding> updateWithBusinessRules(
             Contract contract, Set<String> presentAlwaysFields) {
+        bindTenantOwnership(contract);
         // 行ロックで単価同期/改定と直列化する（R3R-29）。
         Contract old = this.baseMapper.selectByIdForUpdate(contract.getId());
         if (old == null) {
@@ -384,6 +386,23 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                     "/api/contracts/" + contract.getId(), 200, applicationCode, false);
         }
         return findings;
+    }
+
+    /** HTTP/workerの明示tenantを契約へ固定する。contextなしのlegacy呼出しはNULLのまま保存し、
+     * SLA通知側で不可視にして修復対象とする（defaultへ推測しない）。 */
+    private void bindTenantOwnership(Contract contract) {
+        if (contract == null) {
+            return;
+        }
+        String currentTenant = com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId();
+        if (currentTenant == null) {
+            return;
+        }
+        if (org.springframework.util.StringUtils.hasText(contract.getTenantId())
+                && !currentTenant.equals(contract.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        contract.setTenantId(currentTenant);
     }
 
     @Override

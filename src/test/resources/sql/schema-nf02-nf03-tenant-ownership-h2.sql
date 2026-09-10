@@ -49,3 +49,8 @@ CREATE INDEX IF NOT EXISTS idx_candidate_tenant_stage
 ALTER TABLE t_project ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_project_customer_version
     ON t_project (customer_id, version, deleted_flag, id);
+
+-- V171相当。契約tenant不明行はNULLのままSLA通知母集団から除外する。
+ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100);
+CREATE INDEX IF NOT EXISTS idx_contract_tenant_customer_status_sales
+    ON t_contract (tenant_id, customer_id, status, sales_user_id, deleted_flag, id);

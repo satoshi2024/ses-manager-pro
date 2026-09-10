@@ -25,7 +25,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
     /** 月次snapshotの契約母集団を顧客ownershipへ限定する。 */
     @Select("<script>SELECT c.* FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
-            + "WHERE c.deleted_flag = 0 AND c.id IN "
+            + "WHERE c.tenant_id = #{tenantId} AND c.deleted_flag = 0 AND c.id IN "
             + "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach>"
             + "</script>")
     List<Contract> selectByIdsForTenant(@org.apache.ibatis.annotations.Param("ids") Collection<Long> ids,
@@ -33,33 +33,44 @@ public interface ContractMapper extends BaseMapper<Contract> {
 
     @Select("SELECT ct.* FROM t_contract ct INNER JOIN m_customer c ON c.id = ct.customer_id "
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
-            + "WHERE ct.id = #{id} AND ct.customer_id = #{customerId} AND ct.deleted_flag = 0")
+            + "WHERE ct.id = #{id} AND ct.customer_id = #{customerId} "
+            + "AND ct.tenant_id = #{tenantId} AND ct.deleted_flag = 0")
     Contract selectByIdForCustomerAndTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                                              @org.apache.ibatis.annotations.Param("customerId") Long customerId,
                                              @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT ct.* FROM t_contract ct INNER JOIN m_customer c ON c.id = ct.customer_id "
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
-            + "WHERE ct.id = #{id} AND ct.deleted_flag = 0")
+            + "WHERE ct.id = #{id} AND ct.tenant_id = #{tenantId} AND ct.deleted_flag = 0")
     Contract selectByIdForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                                  @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
+
+    /** SLA通知の顧客担当営業候補を、契約・顧客の両方の帰属で限定する。 */
+    @Select("SELECT ct.* FROM t_contract ct INNER JOIN m_customer c ON c.id = ct.customer_id "
+            + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
+            + "WHERE ct.customer_id = #{customerId} AND ct.tenant_id = #{tenantId} "
+            + "AND ct.status = '稼動中' AND ct.sales_user_id IS NOT NULL "
+            + "AND ct.deleted_flag = 0 ORDER BY ct.id DESC")
+    List<Contract> selectActiveByCustomerAndTenant(
+            @org.apache.ibatis.annotations.Param("customerId") Long customerId,
+            @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT COUNT(*) FROM t_contract ct INNER JOIN m_customer c ON c.id = ct.customer_id "
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
             + "WHERE ct.customer_id = #{customerId} AND ct.engineer_id = #{engineerId} "
-            + "AND ct.deleted_flag = 0")
+            + "AND ct.tenant_id = #{tenantId} AND ct.deleted_flag = 0")
     long countByCustomerAndEngineerForTenant(@org.apache.ibatis.annotations.Param("customerId") Long customerId,
                                              @org.apache.ibatis.annotations.Param("engineerId") Long engineerId,
                                              @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT c.* FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
-            + "WHERE c.customer_id = #{customerId} AND mc.tenant_id = #{tenantId} "
+            + "WHERE c.customer_id = #{customerId} AND c.tenant_id = #{tenantId} AND mc.tenant_id = #{tenantId} "
             + "AND c.deleted_flag = 0 AND c.cost_center_id IS NOT NULL ORDER BY c.id DESC LIMIT 10")
     List<Contract> selectByCustomerAndTenant(@org.apache.ibatis.annotations.Param("customerId") Long customerId,
                                               @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT COUNT(*) FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
-            + "WHERE c.customer_id = #{customerId} AND mc.tenant_id = #{tenantId} "
+            + "WHERE c.customer_id = #{customerId} AND c.tenant_id = #{tenantId} AND mc.tenant_id = #{tenantId} "
             + "AND c.status = #{status} AND c.deleted_flag = 0 AND mc.deleted_flag = 0")
     long countByCustomerAndTenant(@org.apache.ibatis.annotations.Param("customerId") Long customerId,
                                   @org.apache.ibatis.annotations.Param("tenantId") String tenantId,

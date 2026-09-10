@@ -198,6 +198,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_project_source_opportunity ON t_project(sou
 DROP TABLE IF EXISTS t_contract CASCADE;
 CREATE TABLE t_contract (
   id                      BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id               VARCHAR(100),
   contract_no             VARCHAR(50),
   proposal_id             BIGINT,
   engineer_id             BIGINT,

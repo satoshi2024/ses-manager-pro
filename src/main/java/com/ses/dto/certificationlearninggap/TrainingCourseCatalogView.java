@@ -1,10 +1,9 @@
 package com.ses.dto.certificationlearninggap;
 
 import java.math.BigDecimal;
-import java.util.List;
 
-/** HR/adminが管理するcourse catalogの安全な表示projection。 */
-public record TrainingCourseMasterView(
+/** 要員本人が選択する研修catalogの公開projection。tenant・監査・内部関連は含めない。 */
+public record TrainingCourseCatalogView(
         Long id,
         String provider,
         String name,
@@ -13,6 +12,5 @@ public record TrainingCourseMasterView(
         Integer periodDays,
         Integer capacity,
         Integer activeFlag,
-        Integer version,
-        List<TrainingCourseSkillView> skills) {
+        Integer version) {
 }

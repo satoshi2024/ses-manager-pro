@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * NF-03 F1-1〜A2のMySQL smoke。V116〜V158のDDL shape・seed・FKを実MySQLで検証する。
+ * NF-03 F1-1〜A2のMySQL smoke。V116〜V171のDDL shape・seed・FKを実MySQLで検証する。
  */
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
@@ -46,7 +46,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertTrue(Integer.parseInt(latestVersion) >= 170,
+            assertTrue(Integer.parseInt(latestVersion) >= 171,
                     "NF-02/NF-03の最新tenant/CAS migration以降まで適用されていること");
 
             for (String table : new String[]{
@@ -72,6 +72,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             assertColumnExists(statement, "t_candidate", "version");
             assertColumnExists(statement, "t_resume_ingestion", "tenant_id");
             assertColumnExists(statement, "t_resume_ingestion", "version");
+            assertColumnExists(statement, "t_contract", "tenant_id");
             assertIndexExists(statement, "t_project_ingestion", "idx_project_ingestion_tenant_status");
             assertTableExists(statement, "nf02_nf03_ownership_repair_queue");
             for (String column : new String[]{"status", "assignee_user_id", "repair_tenant_id",
@@ -86,6 +87,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             assertColumnExists(statement, "t_bp_availability", "tenant_id");
             assertIndexExists(statement, "t_bp_availability", "idx_bp_availability_tenant_population");
             assertIndexExists(statement, "t_engineer_account_link", "idx_engineer_account_link_tenant_owner");
+            assertIndexExists(statement, "t_contract", "idx_contract_tenant_customer_status_sales");
             for (String table : new String[]{"t_ai_recommendation_run", "t_ai_recommendation_item",
                     "t_ai_feedback", "t_ai_outcome"}) {
                 assertColumnExists(statement, table, "tenant_id");

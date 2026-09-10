@@ -7,10 +7,10 @@ import com.ses.dto.certificationlearninggap.CertificationEvidenceView;
 import com.ses.dto.certificationlearninggap.CertificationSelfDashboard;
 import com.ses.dto.certificationlearninggap.CertificationSelfView;
 import com.ses.dto.certificationlearninggap.LearningPlanSelfView;
+import com.ses.dto.certification.CertificationMasterView;
+import com.ses.dto.certificationlearninggap.TrainingCourseCatalogView;
 import com.ses.dto.certification.CertificationLifecycleActionView;
 import com.ses.entity.LearningPlan;
-import com.ses.entity.Certification;
-import com.ses.entity.TrainingCourse;
 import com.ses.service.certificationlearninggap.CertificationLearningGapSelfService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -53,12 +53,12 @@ public class MyCertificationLearningGapApiController {
     }
 
     @GetMapping("/catalog/certifications")
-    public ApiResult<List<Certification>> certificationCatalog() {
+    public ApiResult<List<CertificationMasterView>> certificationCatalog() {
         return ApiResult.success(selfService.availableCertificationMasters());
     }
 
     @GetMapping("/catalog/courses")
-    public ApiResult<List<TrainingCourse>> courseCatalog() {
+    public ApiResult<List<TrainingCourseCatalogView>> courseCatalog() {
         return ApiResult.success(selfService.availableTrainingCourses());
     }
 
