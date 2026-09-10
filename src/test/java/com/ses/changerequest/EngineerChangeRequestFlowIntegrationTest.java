@@ -62,6 +62,12 @@ class EngineerChangeRequestFlowIntegrationTest {
         AccountingTenantContextHolder.setTenantId("default");
     }
 
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+        SecurityContextHolder.clearContext();
+    }
+
     @Autowired
     private EngineerChangeRequestService changeRequestService;
     @Autowired
@@ -154,12 +160,12 @@ class EngineerChangeRequestFlowIntegrationTest {
         // 要員Bが文書を作成
         authenticate(applicantB, "要員");
         com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
-                .documentType("OTHER")
+                .documentType("CHANGE_REQUEST_ATTACHMENT")
                 .title("docB.pdf")
                 .originalName("docB.pdf")
                 .contentType("application/pdf")
                 .sourceType("UPLOADED")
-                .direction("INBOUND")
+                .direction("INCOMING")
                 .counterpartyType("INTERNAL")
                 .transactionDate(LocalDate.now())
                 .businessKey("doc-b-" + System.nanoTime())
@@ -445,6 +451,7 @@ class EngineerChangeRequestFlowIntegrationTest {
 
     long createEngineer() {
         Engineer engineer = Engineer.builder()
+                .tenantId("default")
                 .fullName("変更申請要員-" + System.nanoTime())
                 .fullNameKana("ヘンコウ")
                 .employmentType("正社員")
@@ -498,8 +505,10 @@ class EngineerChangeRequestFlowIntegrationTest {
     }
 
     void authenticate(long userId, String role) {
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(String.valueOf(userId), "n/a",
-                        List.of(new SimpleGrantedAuthority("ROLE_" + role))));
+        UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                String.valueOf(userId), "n/a",
+                List.of(new SimpleGrantedAuthority("ROLE_" + role)));
+        auth.setDetails(Map.of("tenant_id", "default"));
+        SecurityContextHolder.getContext().setAuthentication(auth);
     }
 }
