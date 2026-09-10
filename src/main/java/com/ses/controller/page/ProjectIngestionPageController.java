@@ -28,7 +28,7 @@ public class ProjectIngestionPageController {
 
     @GetMapping("/review/{id}")
     public String review(@PathVariable Long id, Model model) {
-        ProjectIngestion job = projectIngestionService.getById(id);
+        ProjectIngestion job = projectIngestionService.getForCurrentTenant(id);
         if (job == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "error.scope.notFound");
         }

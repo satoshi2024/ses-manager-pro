@@ -72,11 +72,16 @@ class CandidateApiControllerTest {
     }
 
     private org.springframework.test.web.servlet.request.RequestPostProcessor authentication(String role) {
+        return authentication(role, "default");
+    }
+
+    private org.springframework.test.web.servlet.request.RequestPostProcessor authentication(String role,
+                                                                                              String tenantId) {
         SysUser user = new SysUser();
         user.setId(1L);
         user.setUsername("test");
         user.setRole(role);
-        user.setTenantId("default");
+        user.setTenantId(tenantId);
         LoginUser principal = new LoginUser(user,
                 java.util.List.of(new SimpleGrantedAuthority("ROLE_" + role)));
         return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
@@ -125,6 +130,40 @@ class CandidateApiControllerTest {
 
     @Test
     @WithMockUser(username = "test", roles = {"管理者"})
+    void tenantBoundary_listDetailAndResponseDto() throws Exception {
+        Candidate tenantA = seedCandidate("応募受付");
+        Candidate tenantB = AccountingTenantContextHolder.runWithTenant("tenant-b", () -> {
+            Candidate candidate = new Candidate();
+            candidate.setName("tenant-b候補者");
+            candidate.setCurrentStage("応募受付");
+            candidateService.save(candidate);
+            return candidate;
+        });
+
+        mockMvc.perform(get("/api/candidates").with(authentication("管理者", "default")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records", hasSize(1)))
+                .andExpect(jsonPath("$.data.records[0].name", is("APIテスト候補者")))
+                .andExpect(jsonPath("$.data.records[0].tenantId").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].createdBy").doesNotExist());
+
+        mockMvc.perform(get("/api/candidates/" + tenantB.getId())
+                        .with(authentication("管理者", "default")))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(put("/api/candidates/" + tenantB.getId())
+                        .with(authentication("管理者", "default"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"不正更新\",\"expectedVersion\":0}"))
+                .andExpect(status().isNotFound());
+        assertEquals("tenant-b候補者", AccountingTenantContextHolder.runWithTenant("tenant-b",
+                () -> candidateService.getForCurrentTenant(tenantB.getId())).getName());
+        assertNotNull(tenantA);
+    }
+
+    @Test
+    @WithMockUser(username = "test", roles = {"管理者"})
     void testChangeStage_success() throws Exception {
         Candidate candidate = seedCandidate("応募受付");
 
@@ -132,7 +171,7 @@ class CandidateApiControllerTest {
                         .with(authentication("管理者"))
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"stage\":\"書類選考\",\"remarks\":\"通過\"}"))
+                        .content("{\"stage\":\"書類選考\",\"remarks\":\"通過\",\"expectedVersion\":0}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data", is(true)));
@@ -195,7 +234,7 @@ class CandidateApiControllerTest {
                         .with(authentication("管理者"))
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"engineerId\":123}"))
+                        .content("{\"engineerId\":123,\"expectedVersion\":0}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data", is(true)));
@@ -211,7 +250,7 @@ class CandidateApiControllerTest {
 
         mockMvc.perform(delete("/api/candidates/" + candidate.getId())
                         .with(authentication("管理者"))
-                        .with(csrf()))
+                        .with(csrf()).param("expectedVersion", "0"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data", is(true)));

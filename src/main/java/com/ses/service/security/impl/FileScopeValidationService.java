@@ -259,11 +259,15 @@ public class FileScopeValidationService {
         }
 
         // 4. t_project_ingestion の原本
-        ProjectIngestion projectIngestion = projectIngestionMapper.selectOne(
-                new QueryWrapper<ProjectIngestion>().eq("stored_file_name", storedName).last("LIMIT 1"));
+        ProjectIngestion projectIngestion = projectIngestionMapper.selectByStoredFileNameForTenant(
+                currentTenant(), storedName);
         if (projectIngestion != null) {
             assertMenuAllowed("project-ingestion");
             return;
+        }
+        // 別tenantの案件取込原本が同名でも、汎用参照へフォールスルーさせない。
+        if (projectIngestionMapper.countByStoredFileName(storedName) > 0) {
+            throw BusinessException.of(403, "error.forbidden");
         }
 
         // 5. t_bp_availability_ingestion の原本

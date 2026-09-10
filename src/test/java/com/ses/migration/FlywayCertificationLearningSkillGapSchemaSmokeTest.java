@@ -46,8 +46,8 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertTrue(Integer.parseInt(latestVersion) >= 167,
-                    "NF-02/NF-03 AI recommendation tenant records migration以降まで適用されていること");
+            assertTrue(Integer.parseInt(latestVersion) >= 170,
+                    "NF-02/NF-03の最新tenant/CAS migration以降まで適用されていること");
 
             for (String table : new String[]{
                     "m_certification", "m_certification_alias", "t_engineer_certification",
@@ -66,12 +66,21 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             assertColumnExists(statement, "m_certification", "version");
             assertColumnExists(statement, "m_customer", "tenant_id");
             assertColumnExists(statement, "t_engineer", "tenant_id");
+            assertColumnExists(statement, "t_project_ingestion", "tenant_id");
+            assertColumnExists(statement, "t_project_ingestion", "version");
+            assertColumnExists(statement, "t_candidate", "tenant_id");
+            assertColumnExists(statement, "t_candidate", "version");
+            assertColumnExists(statement, "t_resume_ingestion", "tenant_id");
+            assertColumnExists(statement, "t_resume_ingestion", "version");
+            assertIndexExists(statement, "t_project_ingestion", "idx_project_ingestion_tenant_status");
             assertTableExists(statement, "nf02_nf03_ownership_repair_queue");
             for (String column : new String[]{"status", "assignee_user_id", "repair_tenant_id",
                     "resolution_reason", "evidence", "resolved_at", "resolved_by", "last_checked_at"}) {
                 assertColumnExists(statement, "nf02_nf03_ownership_repair_queue", column);
             }
+            assertColumnExists(statement, "nf02_nf03_ownership_repair_queue", "conflicting_tenant_id");
             assertIndexExists(statement, "nf02_nf03_ownership_repair_queue", "idx_nf02_nf03_repair_status_age");
+            assertIndexExists(statement, "nf02_nf03_ownership_repair_queue", "idx_nf02_nf03_repair_conflict");
             assertIndexExists(statement, "m_customer", "idx_customer_tenant_population");
             assertIndexExists(statement, "t_engineer", "idx_engineer_tenant_population");
             assertColumnExists(statement, "t_bp_availability", "tenant_id");

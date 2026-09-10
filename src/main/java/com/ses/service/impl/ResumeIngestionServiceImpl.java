@@ -10,6 +10,7 @@ import com.ses.dto.file.StoredFile;
 import com.ses.dto.resume.ParsedResumeDto;
 import com.ses.dto.resume.ReviewedResumeDto;
 import com.ses.dto.skill.SkillReplaceRequest;
+import com.ses.entity.Candidate;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerCareer;
 import com.ses.entity.EngineerSkill;
@@ -315,7 +316,11 @@ public class ResumeIngestionServiceImpl extends com.baomidou.mybatisplus.extensi
         }
         if (job.getCandidateId() != null) {
             // candidate link failure is part of the same transaction; never report a partial confirmation.
-            candidateService.linkConvertedEngineer(job.getCandidateId(), engineerId);
+            Candidate candidate = candidateService.getForCurrentTenant(job.getCandidateId());
+            if (candidate == null || candidate.getVersion() == null) {
+                throw BusinessException.of(404, "error.candidate.notFound");
+            }
+            candidateService.linkConvertedEngineer(job.getCandidateId(), engineerId, candidate.getVersion());
         }
         return engineerId;
     }

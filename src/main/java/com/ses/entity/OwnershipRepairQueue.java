@@ -20,6 +20,8 @@ public class OwnershipRepairQueue {
     private String status;
     private Long assigneeUserId;
     private String repairTenantId;
+    /** created_by/converted owner等の証拠から判明した対立tenant。修復先とは別管理する。 */
+    private String conflictingTenantId;
     private String resolutionReason;
     private String evidence;
     private LocalDateTime resolvedAt;

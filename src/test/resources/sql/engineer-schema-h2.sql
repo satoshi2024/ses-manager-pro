@@ -834,6 +834,7 @@ CREATE INDEX IF NOT EXISTS idx_resume_ingestion_tenant_status_file
 DROP TABLE IF EXISTS t_project_ingestion;
 CREATE TABLE t_project_ingestion (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id           VARCHAR(100),
   source_type         VARCHAR(10) NOT NULL,
   original_file_name  VARCHAR(255),
   stored_file_name    VARCHAR(120),
@@ -848,8 +849,11 @@ CREATE TABLE t_project_ingestion (
   created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag        TINYINT NOT NULL DEFAULT 0,
-  created_by          BIGINT
+  created_by          BIGINT,
+  version             INT NOT NULL DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS idx_project_ingestion_tenant_status
+    ON t_project_ingestion (tenant_id, status, deleted_flag, id);
 
 DROP TABLE IF EXISTS t_bp_availability;
 CREATE TABLE t_bp_availability (

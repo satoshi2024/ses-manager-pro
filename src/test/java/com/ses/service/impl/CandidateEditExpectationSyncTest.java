@@ -5,6 +5,7 @@ import com.ses.entity.Engineer;
 import com.ses.mapper.CandidateActivityMapper;
 import com.ses.mapper.CandidateMapper;
 import com.ses.mapper.EngineerMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,7 +39,13 @@ class CandidateEditExpectationSyncTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         ReflectionTestUtils.setField(candidateService, "baseMapper", candidateMapper);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -50,26 +57,35 @@ class CandidateEditExpectationSyncTest {
                 .convertedEngineerId(50L)
                 .build();
         existing.setId(10L);
+        existing.setTenantId("default");
+        existing.setVersion(0);
 
         Candidate update = Candidate.builder()
                 .name("山田 太郎")
                 .desiredRate(new BigDecimal("750000"))
                 .build();
         update.setId(10L);
+        update.setTenantId("default");
+        update.setVersion(0);
 
         Engineer eng = new Engineer();
         eng.setId(50L);
         eng.setFullName("山田 太郎");
         eng.setExpectedUnitPrice(new BigDecimal("700000"));
+        eng.setTenantId("default");
+        eng.setVersion(0);
 
-        when(candidateMapper.selectById(10L)).thenReturn(existing);
-        doReturn(1).when(candidateMapper).updateById((Candidate) any());
-        when(engineerMapper.selectById(50L)).thenReturn(eng);
+        when(candidateMapper.selectByIdForUpdateForTenant(10L, "default")).thenReturn(existing);
+        doReturn(1).when(candidateMapper).updateByIdForTenant(any(), org.mockito.ArgumentMatchers.eq("default"),
+                org.mockito.ArgumentMatchers.eq(0));
+        when(engineerMapper.selectByIdForTenant(50L, "default")).thenReturn(eng);
+        doReturn(1).when(engineerMapper).updateByIdForTenant(any(), org.mockito.ArgumentMatchers.eq("default"),
+                org.mockito.ArgumentMatchers.eq(0));
 
         candidateService.updateById(update);
 
-        verify(engineerMapper).updateById((Engineer) argThat(e ->
+        verify(engineerMapper).updateByIdForTenant((Engineer) argThat(e ->
                 ((Engineer) e).getId().equals(50L) && new BigDecimal("750000").equals(((Engineer) e).getExpectedUnitPrice())
-        ));
+        ), org.mockito.ArgumentMatchers.eq("default"), org.mockito.ArgumentMatchers.eq(0));
     }
 }

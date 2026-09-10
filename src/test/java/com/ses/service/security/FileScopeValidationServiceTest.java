@@ -128,7 +128,9 @@ class FileScopeValidationServiceTest {
     @Test
     void 案件メール取込の原本はproject_ingestionメニューを持たないロールに403() {
         noMatchOnEarlierTables();
-        when(projectIngestionMapper.selectOne(any())).thenReturn(new ProjectIngestion());
+        ProjectIngestion ingestion = new ProjectIngestion();
+        ingestion.setTenantId("default");
+        when(projectIngestionMapper.selectByStoredFileNameForTenant("default", "abc.eml")).thenReturn(ingestion);
         loginAs("HR");
         when(menuCacheServiceProvider.getIfAvailable()).thenReturn(menuCacheService);
         when(menuCacheService.getMenuKeysByRole("HR")).thenReturn(List.of("engineer"));
@@ -141,7 +143,9 @@ class FileScopeValidationServiceTest {
     @Test
     void 案件メール取込の原本はメニューを持つロールなら許可() {
         noMatchOnEarlierTables();
-        when(projectIngestionMapper.selectOne(any())).thenReturn(new ProjectIngestion());
+        ProjectIngestion ingestion = new ProjectIngestion();
+        ingestion.setTenantId("default");
+        when(projectIngestionMapper.selectByStoredFileNameForTenant("default", "abc.eml")).thenReturn(ingestion);
         loginAs("営業");
         when(menuCacheServiceProvider.getIfAvailable()).thenReturn(menuCacheService);
         when(menuCacheService.getMenuKeysByRole("営業")).thenReturn(List.of("project-ingestion"));
@@ -152,7 +156,7 @@ class FileScopeValidationServiceTest {
     @Test
     void 要員空き状況取込の原本はbp_availability_ingestionメニューで判定する() {
         noMatchOnEarlierTables();
-        when(projectIngestionMapper.selectOne(any())).thenReturn(null);
+        when(projectIngestionMapper.selectByStoredFileNameForTenant("default", "abc.pdf")).thenReturn(null);
         when(bpAvailabilityIngestionMapper.selectOne(any())).thenReturn(new BpAvailabilityIngestion());
         loginAs("HR");
         when(menuCacheServiceProvider.getIfAvailable()).thenReturn(menuCacheService);
@@ -166,7 +170,9 @@ class FileScopeValidationServiceTest {
     @Test
     void 管理者はメニュー設定によらず取込原本を参照できる() {
         noMatchOnEarlierTables();
-        when(projectIngestionMapper.selectOne(any())).thenReturn(new ProjectIngestion());
+        ProjectIngestion ingestion = new ProjectIngestion();
+        ingestion.setTenantId("default");
+        when(projectIngestionMapper.selectByStoredFileNameForTenant("default", "abc.eml")).thenReturn(ingestion);
         loginAs("管理者");
 
         assertDoesNotThrow(() -> service.assertDownloadAllowed("abc.eml"));

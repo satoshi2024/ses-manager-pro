@@ -1,16 +1,34 @@
 package com.ses.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.dto.candidate.CandidateEngineerInitialDto;
 import com.ses.entity.Candidate;
 import com.ses.entity.CandidateActivity;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
  * 候補者サービスインターフェース
  */
 public interface CandidateService extends IService<Candidate> {
+
+    Page<Candidate> pageForCurrentTenant(Page<Candidate> page, String name, String stage, String skillKeyword);
+
+    List<Candidate> overdueForCurrentTenant(LocalDate today);
+
+    Candidate getForCurrentTenant(Long candidateId);
+
+    boolean createForCurrentTenant(Candidate candidate);
+
+    boolean updateForCurrentTenant(Long candidateId, Candidate candidate, Integer expectedVersion);
+
+    boolean deleteForCurrentTenant(Long candidateId, Integer expectedVersion);
+
+    List<CandidateActivity> getActivitiesForCurrentTenant(Long candidateId);
+
+    CandidateEngineerInitialDto getEngineerInitialDtoForCurrentTenant(Long candidateId);
 
     /**
      * 候補者のステージを変更し、変更履歴({@code t_candidate_activity})を記録する。
@@ -23,6 +41,8 @@ public interface CandidateService extends IService<Candidate> {
      * @param remarks     備考
      */
     void changeStage(Long candidateId, String newStage, String reason, String remarks);
+
+    void changeStage(Long candidateId, String newStage, String reason, String remarks, Integer expectedVersion);
 
     /**
      * 候補者のステージ変更履歴を変更日時降順で取得する。
@@ -48,4 +68,6 @@ public interface CandidateService extends IService<Candidate> {
      * @param engineerId  変換後のt_engineer.id
      */
     void linkConvertedEngineer(Long candidateId, Long engineerId);
+
+    void linkConvertedEngineer(Long candidateId, Long engineerId, Integer expectedVersion);
 }

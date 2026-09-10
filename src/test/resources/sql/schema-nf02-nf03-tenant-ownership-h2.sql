@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS nf02_nf03_ownership_repair_queue (
     status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
     assignee_user_id BIGINT,
     repair_tenant_id VARCHAR(100),
+    conflicting_tenant_id VARCHAR(100),
     resolution_reason VARCHAR(500),
     evidence CLOB,
     resolved_at DATETIME,
@@ -38,6 +39,8 @@ CREATE INDEX IF NOT EXISTS idx_nf02_nf03_repair_status_age
     ON nf02_nf03_ownership_repair_queue (status, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_nf02_nf03_repair_claim
     ON nf02_nf03_ownership_repair_queue (status, version, claim_token, id);
+CREATE INDEX IF NOT EXISTS idx_nf02_nf03_repair_conflict
+    ON nf02_nf03_ownership_repair_queue (entity_type, conflicting_tenant_id, status, id);
 
 ALTER TABLE t_candidate ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100);
 ALTER TABLE t_candidate ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 0;

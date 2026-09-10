@@ -1,17 +1,20 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ses.common.exception.BusinessException;
-import com.ses.config.AiConfig;
 import com.ses.common.enums.FileKind;
+import com.ses.common.exception.BusinessException;
+import com.ses.common.util.EntityProtectUtil;
+import com.ses.config.AiConfig;
 import com.ses.dto.file.StoredFile;
 import com.ses.dto.projectingestion.ParsedProjectDto;
 import com.ses.dto.projectingestion.ReviewedProjectDto;
+import com.ses.entity.Customer;
 import com.ses.entity.Project;
 import com.ses.entity.ProjectIngestion;
 import com.ses.entity.ProjectSkill;
+import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.ProjectIngestionMapper;
 import com.ses.service.DocumentTextExtractor;
 import com.ses.service.FileStorageService;
@@ -19,6 +22,7 @@ import com.ses.service.ProjectIngestionService;
 import com.ses.service.ProjectService;
 import com.ses.service.ProjectSkillService;
 import com.ses.service.SkillTagResolver;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.ai.ProjectParseService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +37,9 @@ import java.util.List;
 
 /**
  * 案件メール取込サービス実装。
+ *
+ * <p>ジョブの全状態遷移は tenant と version を含む専用SQLだけを使用する。
+ * 非同期解析にもtenantを明示的に渡し、worker threadへ認証threadの状態を継承させない。</p>
  */
 @Slf4j
 @Service
@@ -41,12 +48,12 @@ public class ProjectIngestionServiceImpl
         extends ServiceImpl<ProjectIngestionMapper, ProjectIngestion>
         implements ProjectIngestionService {
 
-    private static final String STATUS_PENDING  = "取込待ち";
-    private static final String STATUS_PARSING  = "抽出中";
-    private static final String STATUS_REVIEW   = "要確認";
-    private static final String STATUS_DONE     = "確定済";
+    private static final String STATUS_PENDING = "取込待ち";
+    private static final String STATUS_PARSING = "抽出中";
+    private static final String STATUS_REVIEW = "要確認";
+    private static final String STATUS_DONE = "確定済";
     private static final String STATUS_REJECTED = "却下";
-    private static final String STATUS_FAILED   = "失敗";
+    private static final String STATUS_FAILED = "失敗";
 
     private final FileStorageService fileStorageService;
     private final DocumentTextExtractor documentTextExtractor;
@@ -57,113 +64,125 @@ public class ProjectIngestionServiceImpl
     private final AiConfig aiConfig;
     private final ObjectMapper objectMapper;
     private final ObjectProvider<ProjectIngestionService> selfProvider;
+    private final CustomerMapper customerMapper;
 
     @Override
     public ProjectIngestion createJob(MultipartFile file) {
+        String tenantId = requireTenant();
         StoredFile stored = fileStorageService.store(file, FileKind.PROJECT_EMAIL);
-
         ProjectIngestion job = new ProjectIngestion();
+        job.setTenantId(tenantId);
         job.setSourceType("EML");
         job.setOriginalFileName(stored.getOriginalName());
         job.setStoredFileName(stored.getStoredName());
         job.setStatus(STATUS_PENDING);
-        this.save(job);
-
+        job.setVersion(0);
+        if (baseMapper.insert(job) != 1) throw BusinessException.of("error.systemError");
         log.info("案件メール取込ジョブを作成しました (FILE): jobId={}", job.getId());
-        selfProvider.getIfAvailable().parseAsync(job.getId());
+        ProjectIngestionService self = selfProvider.getIfAvailable();
+        if (self != null) self.parseAsync(job.getId(), tenantId);
         return job;
     }
 
     @Override
     public ProjectIngestion createJobFromPaste(String text) {
+        String tenantId = requireTenant();
         ProjectIngestion job = new ProjectIngestion();
+        job.setTenantId(tenantId);
         job.setSourceType("PASTE");
         job.setRawText(text);
         job.setStatus(STATUS_PENDING);
-        this.save(job);
-
+        job.setVersion(0);
+        if (baseMapper.insert(job) != 1) throw BusinessException.of("error.systemError");
         log.info("案件メール取込ジョブを作成しました (PASTE): jobId={}", job.getId());
-        selfProvider.getIfAvailable().parseAsync(job.getId());
+        ProjectIngestionService self = selfProvider.getIfAvailable();
+        if (self != null) self.parseAsync(job.getId(), tenantId);
         return job;
     }
 
     @Override
+    public Page<ProjectIngestion> pageForCurrentTenant(Page<ProjectIngestion> page, String status) {
+        return baseMapper.selectPageForTenant(page, requireTenant(), status);
+    }
+
+    @Override
+    public ProjectIngestion getForCurrentTenant(Long id) {
+        return baseMapper.selectByIdForTenant(id, requireTenant());
+    }
+
+    @Override
     @Async("taskExecutor")
-    public void parseAsync(Long id) {
-        boolean casOk = casStatus(id, STATUS_PENDING, STATUS_PARSING);
-        if (!casOk) {
-            casOk = casStatus(id, STATUS_REVIEW, STATUS_PARSING);
-            if (!casOk) {
-                casOk = casStatus(id, STATUS_FAILED, STATUS_PARSING);
-            }
+    public void parseAsync(Long id, String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
         }
-        if (!casOk) {
-            log.warn("状態遷移ができませんでした: id={}", id);
+        AccountingTenantContextHolder.runWithTenant(tenantId, () -> parseInTenant(id, tenantId));
+    }
+
+    private void parseInTenant(Long id, String tenantId) {
+        ProjectIngestion job = baseMapper.selectByIdForTenant(id, tenantId);
+        if (job == null) return;
+        Integer expectedVersion = versionOf(job);
+        if (baseMapper.casStatusForTenant(id, tenantId, job.getStatus(), STATUS_PARSING,
+                expectedVersion) != 1) {
+            log.warn("案件メール取込の状態遷移が競合しました: id={}, tenantId={}", id, tenantId);
             return;
         }
-
-        ProjectIngestion job = this.getById(id);
-        if (job == null) return;
-
+        ProjectIngestion parsingJob = baseMapper.selectByIdForTenant(id, tenantId);
+        if (parsingJob == null) return;
+        Integer parsingVersion = versionOf(parsingJob);
         try {
-            String text = job.getRawText();
-            if ("EML".equals(job.getSourceType())) {
-                String ext = job.getStoredFileName().contains(".")
-                        ? job.getStoredFileName().substring(job.getStoredFileName().lastIndexOf('.') + 1)
-                        : "";
-                text = documentTextExtractor.extract(job.getStoredFileName(), ext);
-                job.setRawText(text);
+            String text = parsingJob.getRawText();
+            if ("EML".equals(parsingJob.getSourceType())) {
+                String storedName = parsingJob.getStoredFileName();
+                String ext = storedName != null && storedName.contains(".")
+                        ? storedName.substring(storedName.lastIndexOf('.') + 1) : "";
+                text = documentTextExtractor.extract(storedName, ext);
             }
-
             if (text == null || text.isBlank()) {
-                updateFailed(id, "テキスト抽出に失敗しました。");
+                updateFailed(id, tenantId, parsingVersion, "テキスト抽出に失敗しました。");
                 return;
             }
-
             ParsedProjectDto parsed = projectParseService.parse(text);
             String parsedJson = objectMapper.writeValueAsString(parsed);
-
-            LambdaUpdateWrapper<ProjectIngestion> wrapper = new LambdaUpdateWrapper<>();
-            wrapper.eq(ProjectIngestion::getId, id)
-                   .eq(ProjectIngestion::getStatus, STATUS_PARSING)
-                   .set(ProjectIngestion::getStatus, STATUS_REVIEW)
-                   .set(ProjectIngestion::getRawText, text)
-                   .set(ProjectIngestion::getParsedJson, parsedJson)
-                   .set(ProjectIngestion::getAiProvider, aiConfig.getProvider())
-                   .set(ProjectIngestion::getAiModel, aiConfig.getModel());
-            this.update(wrapper);
-
+            if (baseMapper.saveParsedForTenant(id, tenantId, text, parsedJson,
+                    aiConfig.getProvider(), aiConfig.getModel(), parsingVersion) != 1) {
+                log.warn("案件メール解析結果の保存が競合しました: id={}, tenantId={}", id, tenantId);
+            }
         } catch (BusinessException e) {
-            updateFailed(id, e.getMessage());
+            updateFailed(id, tenantId, parsingVersion, e.getMessage());
         } catch (Exception e) {
             log.error("案件メール解析失敗（予期しないエラー）: jobId={}", id, e);
-            updateFailed(id, "内部エラーが発生しました。");
+            updateFailed(id, tenantId, parsingVersion, "内部エラーが発生しました。");
         }
     }
 
     @Override
     public void reparse(Long id) {
-        ProjectIngestion job = getJobOrThrow(id);
-        String status = job.getStatus();
-        if (!STATUS_REVIEW.equals(status) && !STATUS_FAILED.equals(status)) {
+        String tenantId = requireTenant();
+        ProjectIngestion job = getJobOrThrow(id, tenantId);
+        if (!STATUS_REVIEW.equals(job.getStatus()) && !STATUS_FAILED.equals(job.getStatus())) {
             throw BusinessException.of("error.projectIngestion.invalidStatus");
         }
-        selfProvider.getIfAvailable().parseAsync(id);
+        ProjectIngestionService self = selfProvider.getIfAvailable();
+        if (self != null) self.parseAsync(id, tenantId);
     }
 
     @Override
     public void saveReview(Long id, ReviewedProjectDto dto) {
-        ProjectIngestion job = getJobOrThrow(id);
+        String tenantId = requireTenant();
+        ProjectIngestion job = getJobOrThrow(id, tenantId);
         if (!STATUS_REVIEW.equals(job.getStatus())) {
             throw BusinessException.of("error.projectIngestion.invalidStatus");
         }
         try {
             String parsedJson = objectMapper.writeValueAsString(dto);
-            LambdaUpdateWrapper<ProjectIngestion> wrapper = new LambdaUpdateWrapper<>();
-            wrapper.eq(ProjectIngestion::getId, id)
-                   .set(ProjectIngestion::getParsedJson, parsedJson)
-                   .set(ProjectIngestion::getReviewNote, dto.getReviewNote());
-            this.update(wrapper);
+            if (baseMapper.saveReviewForTenant(id, tenantId, parsedJson, dto.getReviewNote(),
+                    versionOf(job)) != 1) {
+                throw BusinessException.of(409, "error.common.optimisticLock");
+            }
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("レビュー保存に失敗しました: jobId={}", id, e);
             throw BusinessException.of("error.systemError");
@@ -173,22 +192,27 @@ public class ProjectIngestionServiceImpl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long confirm(Long id, ReviewedProjectDto dto) {
-        ProjectIngestion job = getJobOrThrow(id);
+        String tenantId = requireTenant();
+        ProjectIngestion job = getJobOrThrowForUpdate(id, tenantId);
         if (job.getConvertedProjectId() != null) {
             throw BusinessException.of(409, "error.projectIngestion.alreadyConfirmed");
         }
         if (!STATUS_REVIEW.equals(job.getStatus())) {
             throw BusinessException.of("error.projectIngestion.invalidStatus");
         }
-
         ReviewedProjectDto.ProjectPart pp = dto.getProject();
         if (pp == null || pp.getName() == null || pp.getName().isBlank()) {
             throw BusinessException.of("error.project.nameRequired");
         }
+        if (pp.getCustomerId() == null) {
+            throw BusinessException.of(400, "error.project.customerRequired");
+        }
+        Customer customer = customerMapper.selectByIdForTenant(pp.getCustomerId(), tenantId);
+        if (customer == null) throw BusinessException.of(404, "error.scope.notFound");
 
-        // Projectエンティティ生成
         Project project = new Project();
         project.setProjectName(pp.getName());
+        project.setCustomerId(customer.getId());
         project.setUnitPriceMin(pp.getMinUnitPrice());
         project.setUnitPriceMax(pp.getMaxUnitPrice());
         project.setWorkLocation(pp.getLocation());
@@ -198,27 +222,25 @@ public class ProjectIngestionServiceImpl
         project.setCommercialFlow(pp.getCommercialFlow());
         project.setRequiredCount(pp.getHeadCount() != null ? pp.getHeadCount() : 1);
         project.setDescription(pp.getDescription());
-        // エンド顧客名は一旦備考へ退避するか、Projectの顧客ID管理などに応じる（ここではRemarksへ）
         if (pp.getEndClientName() != null && !pp.getEndClientName().isBlank()) {
             project.setRemarks("エンド顧客名: " + pp.getEndClientName());
         }
-        project.setStatus("募集中"); // StatusConstantsに合わせる（既存要件）
+        project.setStatus("募集中");
+        EntityProtectUtil.protectForCreate(project);
+        if (!projectService.save(project) || project.getId() == null) {
+            throw BusinessException.of("error.systemError");
+        }
 
-        com.ses.common.util.EntityProtectUtil.protectForCreate(project);
-        projectService.save(project);
-        Long projectId = project.getId();
-
-        // 案件スキル登録
         if (dto.getSkills() != null && !dto.getSkills().isEmpty()) {
             List<ProjectSkill> skillEntities = new ArrayList<>();
             for (ReviewedProjectDto.SkillPart sp : dto.getSkills()) {
                 if (sp.getName() == null || sp.getName().isBlank()) continue;
                 try {
                     Long skillId = skillTagResolver.resolveOrCreate(sp.getName());
-                    ProjectSkill ps = new ProjectSkill();
-                    ps.setProjectId(projectId);
-                    ps.setSkillId(skillId);
-                    skillEntities.add(ps);
+                    ProjectSkill skill = new ProjectSkill();
+                    skill.setProjectId(project.getId());
+                    skill.setSkillId(skillId);
+                    skillEntities.add(skill);
                 } catch (Exception e) {
                     log.warn("案件スキル登録をスキップしました: skillName={}", sp.getName());
                 }
@@ -235,58 +257,48 @@ public class ProjectIngestionServiceImpl
                     item.setIsMust(skill.getIsMust());
                     return item;
                 }).toList());
-                projectSkillService.replaceSkills(projectId, request);
+                projectSkillService.replaceSkills(project.getId(), request);
             }
         }
 
-        int updated = baseMapper.update(null, new LambdaUpdateWrapper<ProjectIngestion>()
-                .eq(ProjectIngestion::getId, id)
-                .eq(ProjectIngestion::getStatus, STATUS_REVIEW)
-                .isNull(ProjectIngestion::getConvertedProjectId)
-                .set(ProjectIngestion::getStatus, STATUS_DONE)
-                .set(ProjectIngestion::getConvertedProjectId, projectId)
-                .set(ProjectIngestion::getReviewNote, dto.getReviewNote()));
-        if (updated == 0) {
+        if (baseMapper.confirmForTenant(id, tenantId, project.getId(), dto.getReviewNote(),
+                versionOf(job)) != 1) {
             throw BusinessException.of(409, "error.projectIngestion.alreadyConfirmed");
         }
-
-        return projectId;
+        return project.getId();
     }
 
     @Override
     public void reject(Long id, String reason) {
-        getJobOrThrow(id);
-        int updated = baseMapper.update(null, new LambdaUpdateWrapper<ProjectIngestion>()
-                .eq(ProjectIngestion::getId, id)
-                .in(ProjectIngestion::getStatus, STATUS_PENDING, STATUS_PARSING, STATUS_REVIEW, STATUS_FAILED)
-                .set(ProjectIngestion::getStatus, STATUS_REJECTED)
-                .set(ProjectIngestion::getErrorMessage, reason));
-        if (updated == 0) {
+        String tenantId = requireTenant();
+        ProjectIngestion job = getJobOrThrowForUpdate(id, tenantId);
+        if (baseMapper.rejectForTenant(id, tenantId, reason, versionOf(job)) != 1) {
             throw BusinessException.of(409, "error.projectIngestion.invalidStatus");
         }
     }
 
-    private ProjectIngestion getJobOrThrow(Long id) {
-        ProjectIngestion job = this.getById(id);
-        if (job == null) {
-            throw BusinessException.of(404, "error.projectIngestion.notFound");
-        }
+    private ProjectIngestion getJobOrThrow(Long id, String tenantId) {
+        ProjectIngestion job = baseMapper.selectByIdForTenant(id, tenantId);
+        if (job == null) throw BusinessException.of(404, "error.projectIngestion.notFound");
         return job;
     }
 
-    private boolean casStatus(Long id, String fromStatus, String toStatus) {
-        int count = baseMapper.update(null, new LambdaUpdateWrapper<ProjectIngestion>()
-                .eq(ProjectIngestion::getId, id)
-                .eq(ProjectIngestion::getStatus, fromStatus)
-                .set(ProjectIngestion::getStatus, toStatus));
-        return count > 0;
+    private ProjectIngestion getJobOrThrowForUpdate(Long id, String tenantId) {
+        ProjectIngestion job = baseMapper.selectByIdForUpdateForTenant(id, tenantId);
+        if (job == null) throw BusinessException.of(404, "error.projectIngestion.notFound");
+        return job;
     }
 
-    private void updateFailed(Long id, String message) {
-        baseMapper.update(null, new LambdaUpdateWrapper<ProjectIngestion>()
-                .eq(ProjectIngestion::getId, id)
-                .set(ProjectIngestion::getStatus, STATUS_FAILED)
-                .set(ProjectIngestion::getErrorMessage, message != null && message.length() > 500
-                        ? message.substring(0, 500) : message));
+    private void updateFailed(Long id, String tenantId, Integer expectedVersion, String message) {
+        String safeMessage = message != null && message.length() > 500 ? message.substring(0, 500) : message;
+        baseMapper.updateFailedForTenant(id, tenantId, safeMessage, expectedVersion);
+    }
+
+    private Integer versionOf(ProjectIngestion job) {
+        return job.getVersion() == null ? 0 : job.getVersion();
+    }
+
+    private String requireTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 }
