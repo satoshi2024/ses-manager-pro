@@ -79,12 +79,13 @@ class AiRecommendationRecorderHashTest {
     @WithMockUser(username = "1", roles = "管理者")
     void matchingのrunはallowlistのhashとgrain済み勤務地スキルを残す() {
         long stamp = System.nanoTime();
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("tenant-recorder");
         ((org.springframework.security.authentication.AbstractAuthenticationToken)
                 SecurityContextHolder.getContext().getAuthentication())
                 .setDetails(Map.of("tenant_id", "tenant-recorder"));
 
         Engineer engineer = new Engineer();
-        engineer.setTenantId("default");
+        engineer.setTenantId("tenant-recorder");
         engineer.setFullName("AI-hash-e-" + stamp);
         engineer.setLegalEntityId(77L);
         engineer.setEmploymentType("正社員");
@@ -96,7 +97,7 @@ class AiRecommendationRecorderHashTest {
         Long customerId = jdbcTemplate.queryForObject(
                 "SELECT COALESCE(MAX(id), 0) + 1 FROM m_customer", Long.class);
         jdbcTemplate.update(
-                "INSERT INTO m_customer (id, company_name, tenant_id, legal_entity_id, deleted_flag) VALUES (?, ?, 'default', 77L, 0)",
+                "INSERT INTO m_customer (id, company_name, tenant_id, legal_entity_id, deleted_flag) VALUES (?, ?, 'tenant-recorder', 77L, 0)",
                 customerId, "AI-hash-cust-" + stamp);
 
         Project project = new Project();
