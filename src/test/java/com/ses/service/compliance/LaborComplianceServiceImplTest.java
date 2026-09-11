@@ -11,6 +11,8 @@ import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -55,12 +57,18 @@ class LaborComplianceServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         LocaleContextHolder.setLocale(Locale.JAPANESE);
         // ルールは既定で全て有効・段数上限は3
         lenient().when(systemConfigService.getString(anyString(), eq("true"))).thenReturn("true");
         lenient().when(systemConfigService.getInt(eq("compliance.max-tier"), eq(3))).thenReturn(3);
         lenient().when(messageSource.getMessage(any(), any(), anyString(), any(Locale.class)))
                 .thenAnswer(inv -> inv.getArgument(2));
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
     }
 
     private Contract contract(Long id, String type) {
@@ -172,7 +180,7 @@ class LaborComplianceServiceImplTest {
         Contract c2 = contract(2L, "準委任");
         c2.setContractNo("C-002");
 
-        when(contractMapper.selectList(any())).thenReturn(List.of(c1, c2));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1, c2));
         ContractTierDto tier1 = new ContractTierDto();
         tier1.setContractId(1L);
         tier1.setMaxLayer(2);
@@ -224,7 +232,7 @@ class LaborComplianceServiceImplTest {
         untyped.setEngineerId(11L);
         untyped.setProjectId(21L);
         untyped.setDirectCommandFlag(true);
-        when(contractMapper.selectList(any())).thenReturn(List.of(untyped, typed));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(untyped, typed));
         ContractTierDto tier = new ContractTierDto();
         tier.setContractId(1L);
         tier.setMaxLayer(2);

@@ -15,6 +15,8 @@ import com.ses.mapper.WorkRecordMapper;
 import com.ses.mapper.WorkplaceMapper;
 import com.ses.entity.Workplace;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -71,6 +73,7 @@ class ComplianceRuleEngineTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         LocaleContextHolder.setLocale(Locale.JAPANESE);
         lenient().when(systemConfigService.getString(anyString(), eq("true"))).thenReturn("true");
         lenient().when(systemConfigService.getInt(anyString(), eq(30))).thenReturn(30);
@@ -79,14 +82,21 @@ class ComplianceRuleEngineTest {
         lenient().when(messageSource.getMessage(anyString(), any(), anyString(), any())).thenReturn("msg");
         lenient().when(bpPaymentMapper.selectMaxLayerOrderByContractId(1L)).thenReturn(0);
         lenient().when(workRecordMapper.selectList(any())).thenReturn(List.of());
+        lenient().when(workRecordMapper.selectByContractIdForTenant(any(), any())).thenReturn(List.of());
         lenient().when(workRecordDailyMapper.selectList(any())).thenReturn(List.of());
         lenient().when(contractMapper.selectList(any())).thenReturn(List.of());
+        lenient().when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of());
         Workplace workplace = new Workplace();
         workplace.setId(10L);
         workplace.setOrganizationUnit("開発部");
         lenient().when(workplaceMapper.selectById(10L)).thenReturn(workplace);
         lenient().when(limitationDateCalculator.compute(any(), any(), any(), any()))
                 .thenReturn(new LimitationDateCalculator.LimitationDates(null, null));
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
     }
 
     private Contract contract(String type, LocalDate start, LocalDate end) {
@@ -203,7 +213,7 @@ class ComplianceRuleEngineTest {
         outside.setId(52L);
         outside.setWorkRecordId(5L);
         outside.setWorkDate(LocalDate.parse("2025-12-15"));
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(record));
+        when(workRecordMapper.selectByContractIdForTenant(eq(1L), any())).thenReturn(List.of(record));
         when(workRecordDailyMapper.selectList(any())).thenReturn(List.of(inside, outside));
 
         List<ComplianceFinding> findings = engine.evaluate(contract).stream()
