@@ -95,7 +95,7 @@ class PwaMutationApiControllerTest {
         record.setWorkMonth("2026-08");
         record.setVersion(4);
         record.setStatus("入力中");
-        when(workRecordMapper.selectOne(any())).thenReturn(record);
+        when(workRecordMapper.selectByContractIdAndMonthForUpdateForTenant(eq(100L), eq("2026-08"), any())).thenReturn(record);
 
         assertThatThrownBy(() -> controller.saveTimesheet(body, "req-1", "a".repeat(64), 3,
                 System.currentTimeMillis(), "scope-A"))
@@ -169,7 +169,7 @@ class PwaMutationApiControllerTest {
         record.setWorkMonth("2026-08");
         record.setVersion(4);
         record.setStatus("入力中");
-        when(workRecordMapper.selectOne(any())).thenReturn(record);
+        when(workRecordMapper.selectByContractIdAndMonthForUpdateForTenant(eq(100L), eq("2026-08"), any())).thenReturn(record);
         WorkRecordDaily daily = new WorkRecordDaily();
         daily.setId(201L);
         daily.setWorkRecordId(200L);

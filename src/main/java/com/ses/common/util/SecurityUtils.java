@@ -89,6 +89,9 @@ public final class SecurityUtils {
         if (principal instanceof LoginUser loginUser && hasText(loginUser.getTenantId())) {
             return loginUser.getTenantId().trim();
         }
+        if (principal instanceof com.ses.portal.PortalLoginUser portalUser && hasText(portalUser.getTenantId())) {
+            return portalUser.getTenantId().trim();
+        }
         if (authentication.getDetails() instanceof Map<?, ?> details) {
             Object tenant = details.get("tenant_id");
             if (tenant == null) tenant = details.get("tenantId");

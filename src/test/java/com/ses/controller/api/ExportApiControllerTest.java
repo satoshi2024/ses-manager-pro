@@ -125,7 +125,7 @@ class ExportApiControllerTest {
     @Test
     @WithMockUser
     void exportContracts_returnsXlsxWithAttachmentHeader() throws Exception {
-        when(contractMapper.selectList(any())).thenReturn(List.of(new Contract()));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(new Contract()));
         when(excelExportService.exportContracts(any())).thenReturn(new byte[]{1, 2, 3});
 
         mockMvc.perform(get("/api/contracts/export"))
@@ -145,26 +145,26 @@ class ExportApiControllerTest {
         when(organizationScopeService.intersectWithDataScope(any(), any()))
                 .thenReturn(java.util.Set.of(22L));
         ArgumentCaptor<Wrapper<Contract>> captor = ArgumentCaptor.captor();
-        when(contractMapper.selectCount(any())).thenReturn(0L);
+        when(contractMapper.selectCountForTenant(any(), any())).thenReturn(0L);
 
         mockMvc.perform(get("/api/contracts/export"))
                 .andExpect(status().isOk());
 
-        verify(contractMapper).selectCount(captor.capture());
+        verify(contractMapper).selectCountForTenant(captor.capture(), any());
         org.junit.jupiter.api.Assertions.assertTrue(captor.getValue().getSqlSegment().contains("id"));
     }
 
     @Test
     @WithMockUser
     void exportContracts_appliesListSearchParameters() throws Exception {
-        when(contractMapper.selectCount(any())).thenReturn(1201L);
+        when(contractMapper.selectCountForTenant(any(), any())).thenReturn(1201L);
         when(engineerService.listByIds(any())).thenReturn(List.of());
         when(projectMapper.selectBatchIds(any())).thenReturn(List.of());
         when(customerMapper.selectBatchIds(any())).thenReturn(List.of());
 
         AtomicInteger fetchCount = new AtomicInteger();
         List<Wrapper<Contract>> batchWrappers = new ArrayList<>();
-        when(contractMapper.selectList(any())).thenAnswer(invocation -> {
+        when(contractMapper.selectListForTenant(any(), any())).thenAnswer(invocation -> {
             batchWrappers.add(invocation.getArgument(0));
             int batch = fetchCount.incrementAndGet();
             if (batch > 3) return List.of();
@@ -197,7 +197,7 @@ class ExportApiControllerTest {
                 .andExpect(status().isOk());
 
         ArgumentCaptor<Wrapper<Contract>> captor = ArgumentCaptor.captor();
-        verify(contractMapper, times(3)).selectList(captor.capture());
+        verify(contractMapper, times(3)).selectListForTenant(captor.capture(), any());
         assertEquals(1201, exported.size());
         assertEquals("C-1201", exported.get(0).getContractNo());
         assertEquals("C-1", exported.get(1200).getContractNo());
@@ -221,7 +221,7 @@ class ExportApiControllerTest {
             org.junit.jupiter.api.Assertions.assertTrue(batchSql.contains("end_date <="));
         }
         ArgumentCaptor<Wrapper<Contract>> countCaptor = ArgumentCaptor.captor();
-        verify(contractMapper).selectCount(countCaptor.capture());
+        verify(contractMapper).selectCountForTenant(countCaptor.capture(), any());
         String countSql = countCaptor.getValue().getSqlSegment();
         org.junit.jupiter.api.Assertions.assertTrue(countSql.contains("status"));
         org.junit.jupiter.api.Assertions.assertTrue(countSql.contains("customer_id"));
@@ -234,8 +234,8 @@ class ExportApiControllerTest {
         Contract contract = new Contract();
         contract.setId(1L);
         contract.setCostPrice(new java.math.BigDecimal("600000"));
-        when(contractMapper.selectCount(any())).thenReturn(1L);
-        when(contractMapper.selectList(any())).thenReturn(List.of(contract)).thenReturn(List.of());
+        when(contractMapper.selectCountForTenant(any(), any())).thenReturn(1L);
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(contract)).thenReturn(List.of());
         when(authorizationService.isAllowed(any(), org.mockito.ArgumentMatchers.eq("contract.cost.view")))
                 .thenReturn(false);
         List<ContractExportDto> exported = new ArrayList<>();

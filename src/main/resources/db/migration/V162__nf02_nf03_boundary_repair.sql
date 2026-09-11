@@ -47,8 +47,10 @@ ALTER TABLE t_engineer_certification
     REFERENCES t_certification_continuity_group (tenant_id, engineer_id, certification_id, continuity_group_id);
 
 -- AI run・候補・人判断は同一tenantで結び、AIの結果を正式projectionへ書き込まない。
+-- tenant_id は V161 (NF08) で先行追加済み（VARCHAR(64) NULL・推測backfillなし）。
+-- ここでは幅を NF02 ownership の VARCHAR(100) に揃え、NULL許容と非backfill方針は維持する。
 ALTER TABLE t_ai_recommendation_run
-    ADD COLUMN tenant_id VARCHAR(100) NOT NULL DEFAULT 'default' AFTER id;
+    MODIFY COLUMN tenant_id VARCHAR(100) NULL COMMENT 'security-bound tenant / NF02 ownership';
 CREATE INDEX idx_ai_run_tenant_created ON t_ai_recommendation_run (tenant_id, created_at);
 
 CREATE TABLE t_learning_candidate (

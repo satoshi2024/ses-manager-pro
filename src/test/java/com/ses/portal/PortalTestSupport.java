@@ -59,6 +59,7 @@ public abstract class PortalTestSupport {
         PortalOrganization org = new PortalOrganization();
         org.setType("CUSTOMER");
         org.setCustomerId(customerId);
+        org.setTenantId("default");
         org.setStatus("ACTIVE");
         organizationMapper.insert(org);
         return org;
@@ -69,6 +70,7 @@ public abstract class PortalTestSupport {
         PortalOrganization org = new PortalOrganization();
         org.setType("BP");
         org.setBpCompanyId(bpCompanyId);
+        org.setTenantId("default");
         org.setStatus("ACTIVE");
         organizationMapper.insert(org);
         return org;
@@ -164,7 +166,7 @@ public abstract class PortalTestSupport {
 
     private long insertBpCompany(String legalName) {
         org.springframework.jdbc.core.JdbcTemplate jdbc = jdbcTemplate();
-        jdbc.update("INSERT INTO m_bp_company (legal_name, entity_type, status) VALUES (?, 'CORPORATE', 'ACTIVE')",
+        jdbc.update("INSERT INTO m_bp_company (legal_name, entity_type, status, tenant_id) VALUES (?, 'CORPORATE', 'ACTIVE', 1)",
                 legalName);
         return jdbc.queryForObject("SELECT id FROM m_bp_company WHERE legal_name = ?", Long.class, legalName);
     }

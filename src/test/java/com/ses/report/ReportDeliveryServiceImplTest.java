@@ -135,7 +135,7 @@ class ReportDeliveryServiceImplTest {
     @Test
     void deliverUserはstalePreviewHashを拒否する() {
         ReportRun run = readyRun();
-        when(runMapper.selectById(10L)).thenReturn(run);
+        when(runMapper.selectOne(any())).thenReturn(run);
         when(previewService.previewForRun(run)).thenReturn(preview(
                 new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope")));
 

@@ -764,11 +764,13 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .fullName("資産Scope要員A-" + suffix)
                 .employmentType("正社員")
                 .status("稼動中")
+                .tenantId("default")
                 .build();
         Engineer engineerB = Engineer.builder()
                 .fullName("資産Scope要員B-" + suffix)
                 .employmentType("正社員")
                 .status("稼動中")
+                .tenantId("default")
                 .build();
         engineerMapper.insert(engineerA);
         engineerMapper.insert(engineerB);
@@ -855,9 +857,11 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         organizationUnitMapper.insert(orgB);
 
         Engineer engineerA = Engineer.builder().fullName("資産Scope要員A-" + suffix)
-                .employmentType("正社員").status("稼動中").organizationId(orgA.getId()).build();
+                .employmentType("正社員").status("稼動中").organizationId(orgA.getId())
+                .tenantId("default").build();
         Engineer engineerB = Engineer.builder().fullName("資産Scope要員B-" + suffix)
-                .employmentType("正社員").status("稼動中").organizationId(orgB.getId()).build();
+                .employmentType("正社員").status("稼動中").organizationId(orgB.getId())
+                .tenantId("default").build();
         engineerMapper.insert(engineerA);
         engineerMapper.insert(engineerB);
 
@@ -867,9 +871,9 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .tenantId("default").build();
         sysUserMapper.insert(sales);
         sysUserMapper.insert(manager);
-        userOrganizationMapper.insert(UserOrganization.builder().userId(sales.getId()).organizationId(orgA.getId())
+        userOrganizationMapper.insert(UserOrganization.builder().tenantId("default").userId(sales.getId()).organizationId(orgA.getId())
                 .primaryFlag(1).validFrom(LocalDate.of(2026, 1, 1)).build());
-        userOrganizationMapper.insert(UserOrganization.builder().userId(manager.getId()).organizationId(orgA.getId())
+        userOrganizationMapper.insert(UserOrganization.builder().tenantId("default").userId(manager.getId()).organizationId(orgA.getId())
                 .primaryFlag(1).validFrom(LocalDate.of(2026, 1, 1)).build());
         engineerSalesMapper.insert(EngineerSales.builder().engineerId(engineerA.getId()).salesUserId(sales.getId())
                 .primaryFlag(1).assignedAt(LocalDate.of(2026, 1, 1)).build());
@@ -962,11 +966,13 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .fullName("資産DocLink要員A-" + suffix)
                 .employmentType("正社員")
                 .status("稼動中")
+                .tenantId("default")
                 .build();
         Engineer engineerB = Engineer.builder()
                 .fullName("資産DocLink要員B-" + suffix)
                 .employmentType("正社員")
                 .status("稼動中")
+                .tenantId("default")
                 .build();
         engineerMapper.insert(engineerA);
         engineerMapper.insert(engineerB);
@@ -1090,6 +1096,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .fullName("SoftDelete要員-" + System.nanoTime())
                 .employmentType("正社員")
                 .status("稼動中")
+                .tenantId("default")
                 .build();
         engineerMapper.insert(engineer);
 
@@ -1184,6 +1191,11 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     }
 
     private void linkEngineerAccountIsolated(long engineerId, long sysUserId, long linkedBy) {
+        Engineer eng = engineerMapper.selectById(engineerId);
+        if (eng != null && (eng.getTenantId() == null || eng.getTenantId().isBlank())) {
+            eng.setTenantId("default");
+            engineerMapper.updateById(eng);
+        }
         engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
                 .eq(EngineerAccountLink::getEngineerId, engineerId));
         engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()

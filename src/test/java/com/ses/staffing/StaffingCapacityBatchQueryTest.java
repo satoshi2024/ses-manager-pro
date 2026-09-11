@@ -52,7 +52,7 @@ class StaffingCapacityBatchQueryTest {
         when(workCalendarMapper.selectList(any(Wrapper.class))).thenReturn(List.<WorkCalendar>of());
         when(leaveRequestMapper.selectList(any(Wrapper.class))).thenReturn(List.<LeaveRequest>of());
         when(allocationMapper.selectList(any(Wrapper.class))).thenReturn(List.<AllocationPlan>of());
-        when(contractMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of());
 
         List<Engineer> engineers = LongStream.rangeClosed(1, 200)
                 .mapToObj(id -> {
@@ -70,7 +70,7 @@ class StaffingCapacityBatchQueryTest {
         verify(workCalendarMapper, times(1)).selectList(any(Wrapper.class));
         verify(leaveRequestMapper, times(1)).selectList(any(Wrapper.class));
         verify(allocationMapper, times(1)).selectList(any(Wrapper.class));
-        verify(contractMapper, times(1)).selectList(any(Wrapper.class));
+        verify(contractMapper, times(1)).selectListForTenant(any(), any());
         verify(workCalendarDayMapper, never()).selectList(any(Wrapper.class));
     }
 }

@@ -75,6 +75,7 @@ class OneOnOneSurveyFlowIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
         // 匿名閾値を1にして平均値を確認可能にする（threshold検証はテスト末尾で3へ変更する）
         systemConfigService.put("survey.min-answers", "1", "テスト用閾値");
     }
@@ -82,6 +83,7 @@ class OneOnOneSurveyFlowIntegrationTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -413,6 +415,7 @@ class OneOnOneSurveyFlowIntegrationTest {
                 .realName("B2テスト")
                 .role("要員".equals(role) ? "管理者" : role)
                 .status(1)
+                .tenantId("default")
                 .build();
         sysUserMapper.insert(user);
         return user.getId();
@@ -424,6 +427,7 @@ class OneOnOneSurveyFlowIntegrationTest {
                 .employmentType("正社員")
                 .status("Bench")
                 .organizationId(organizationId)
+                .tenantId("default")
                 .build();
         engineerMapper.insert(engineer);
         jdbcTemplate.update("DELETE FROM t_engineer_accounting_history WHERE engineer_id = ?", engineer.getId());
@@ -444,6 +448,7 @@ class OneOnOneSurveyFlowIntegrationTest {
     void assignManager(Long managerUserId, Long organizationId) {
         jdbcTemplate.update("DELETE FROM t_user_organization WHERE user_id = ?", managerUserId);
         com.ses.entity.UserOrganization row = new com.ses.entity.UserOrganization();
+        row.setTenantId("default");
         row.setUserId(managerUserId);
         row.setOrganizationId(organizationId);
         row.setPrimaryFlag(1);
@@ -458,6 +463,7 @@ class OneOnOneSurveyFlowIntegrationTest {
         accountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
                 .eq(EngineerAccountLink::getSysUserId, sysUserId));
         EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId("default");
         link.setEngineerId(engineerId);
         link.setSysUserId(sysUserId);
         accountLinkMapper.insert(link);

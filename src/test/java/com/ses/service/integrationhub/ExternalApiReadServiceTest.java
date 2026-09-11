@@ -69,7 +69,7 @@ class ExternalApiReadServiceTest {
         assertTrue(response.hasMore());
         assertTrue(response.nextCursor().startsWith("v1."));
         ExternalApiProject first = response.items().get(0);
-        assertEquals("ACTIVE", first.status());
+        assertEquals("OPEN", first.status());
         verify(mapper).selectProjects(List.of(1L, 2L, 3L), List.of(10L), null, 513, 9L);
         verify(snapshotMapper, never()).selectExpiredSnapshotIds(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt());
         verify(snapshotMapper, never()).deleteSnapshotsById(org.mockito.ArgumentMatchers.anyList());

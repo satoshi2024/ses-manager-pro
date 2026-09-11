@@ -35,6 +35,16 @@ class LeadServiceIntegrationTest {
     @Autowired private CustomerContactMapper contactMapper;
     @Autowired private OpportunityMapper opportunityMapper;
 
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
+
     @Test
     void duplicateCandidatesAreWarningsOnlyAndDoNotMerge() {
         LeadSaveRequest first = request("重複候補社", "contact@example.com");

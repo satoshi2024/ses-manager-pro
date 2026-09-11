@@ -120,8 +120,12 @@ public class LegacyAiEndpointBoundary {
     }
 
     public CopilotExecutionContext createContext() {
-        if (contextBinder == null) throw denied();
-        return contextBinder.bind(contextFactory.create());
+        if (contextBinder == null || contextFactory == null) throw denied();
+        try {
+            return contextBinder.bind(contextFactory.create());
+        } catch (BusinessException e) {
+            throw denied();
+        }
     }
 
     private BusinessException denied() {

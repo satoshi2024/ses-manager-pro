@@ -69,6 +69,10 @@ class Nf02Nf03V162MigrationContractTest {
         assertTrue(migration.contains("fk_learning_candidate_run"));
         assertTrue(migration.contains("fk_learning_candidate_snapshot"));
         assertTrue(migration.contains("uk_learning_decision_tenant_idempotency"));
+        // V161 (NF08) が tenant_id を先行追加済みのため、V162は再ADDせず幅だけ揃える
+        assertTrue(migration.contains("MODIFY COLUMN tenant_id VARCHAR(100) NULL"));
+        assertTrue(migration.contains("idx_ai_run_tenant_created"));
+        assertFalse(migration.contains("ADD COLUMN tenant_id VARCHAR(100) NOT NULL DEFAULT 'default' AFTER id;\nCREATE INDEX idx_ai_run_tenant_created"));
         assertFalse(migration.contains("V150"));
     }
 

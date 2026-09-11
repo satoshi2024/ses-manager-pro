@@ -121,6 +121,10 @@ public class DocumentMetadataCommitService {
         Long userId = com.ses.common.util.SecurityUtils.currentUserId();
         log.setUserId(userId != null ? userId : -1L);
         log.setOccurredAt(LocalDateTime.now());
-        documentAccessLogMapper.insert(log);
+        try {
+            documentAccessLogMapper.insert(log);
+        } catch (Exception e) {
+            throw BusinessException.of("文書アクセス監査ログの記録に失敗しました。");
+        }
     }
 }

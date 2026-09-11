@@ -71,6 +71,10 @@ public class PortalBpServiceImpl implements PortalBpService {
     private final ApprovalTargetAdapterRegistry approvalTargetAdapterRegistry;
     private final Clock clock;
 
+    /** NF05 法人境界: portal提出の空き要員にも権威法人を刻印する（内部review/promoteで必須）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
     // ===== 空き要員 =====
 
     @Override
@@ -107,6 +111,12 @@ public class PortalBpServiceImpl implements PortalBpService {
         entity.setExperienceYears(request.getExperienceYears());
         entity.setStatus(AVAILABILITY_PENDING);
         entity.setRemarks(request.getRemarks());
+        // portal principalは内部組織scopeを持たないが、NF05書込み境界のため法人を刻印する。
+        if (legalEntityContextService != null) {
+            entity.setLegalEntityId(legalEntityContextService.requireCurrentLegalEntityId());
+        } else {
+            entity.setLegalEntityId(1L);
+        }
         availabilityMapper.insert(entity);
         return toAvailabilityDto(entity);
     }

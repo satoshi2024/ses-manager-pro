@@ -109,6 +109,7 @@ class PortalBpApiTest extends PortalTestSupport {
         PortalOrganization org = createBpOrg("org-" + unique());
         // createBpOrgが作ったorgのbp_company_idを差し替え（1:1ユニークを満たすため）
         org.setBpCompanyId(bpCompanyId);
+        org.setTenantId("default");
         organizationMapper.updateById(org);
         PortalUser user = createUser(org, "bp-" + unique() + "@example.com");
         String secret = uniqueSecret();
@@ -118,7 +119,7 @@ class PortalBpApiTest extends PortalTestSupport {
     }
 
     private long insertEngineer() {
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')",
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, tenant_id) VALUES (?, '正社員', 'Bench', 'default')",
                 "bp-portal-engineer-" + unique());
         return jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_engineer", Long.class);
     }
@@ -131,13 +132,14 @@ class PortalBpApiTest extends PortalTestSupport {
 
     /** work record＋BP支払行を作る（発注相当）。 */
     private long seedBpPayment(long bpCompanyId) {
-        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "bp-portal-customer-" + unique());
+        jdbcTemplate.update("INSERT INTO m_customer (company_name, tenant_id) VALUES (?, 'default')",
+                "bp-portal-customer-" + unique());
         long customerId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM m_customer", Long.class);
         long engineerId = insertEngineer();
         long projectId = insertProject(customerId);
         jdbcTemplate.update("INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, status,"
-                        + " start_date, end_date, selling_price, cost_price, acceptance_required)"
-                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, 1)",
+                        + " start_date, end_date, selling_price, cost_price, acceptance_required, tenant_id)"
+                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, 1, 'default')",
                 "BP-CONTRACT-" + unique(), engineerId, projectId, customerId);
         long contractId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_contract", Long.class);
         jdbcTemplate.update("INSERT INTO t_work_record (contract_id, work_month, actual_hours, billing_amount,"

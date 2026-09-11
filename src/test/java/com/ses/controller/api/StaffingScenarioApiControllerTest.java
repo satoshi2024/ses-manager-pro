@@ -117,9 +117,11 @@ class StaffingScenarioApiControllerTest {
     }
 
     private void authenticate(long userId, String role) {
+        org.springframework.security.core.userdetails.User principal =
+                new org.springframework.security.core.userdetails.User(
+                        String.valueOf(userId), "n/a", List.of(new SimpleGrantedAuthority("ROLE_" + role)));
         SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(String.valueOf(userId), "n/a",
-                        List.of(new SimpleGrantedAuthority("ROLE_" + role))));
+                new UsernamePasswordAuthenticationToken(principal, "n/a", principal.getAuthorities()));
     }
 
     private long extractId(String json) {

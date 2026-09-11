@@ -64,10 +64,10 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             assertColumnExists(statement, "t_certification_continuity_group", "tenant_id");
             assertColumnExists(statement, "t_certification_continuity_group", "engineer_id");
             assertColumnExists(statement, "t_certification_continuity_group", "certification_id");
-            assertColumnExists(statement, "t_certification_continuity_group", "updated_at");
-            assertIndexExists(statement, "t_certification_continuity_group", "uk_cert_continuity_group_ident");
-            assertForeignKeyExists(statement, "t_certification_continuity_group", "fk_cert_continuity_group_eng");
-            assertForeignKeyExists(statement, "t_certification_continuity_group", "fk_cert_continuity_group_cert");
+            assertColumnExists(statement, "t_certification_continuity_group", "continuity_group_id");
+            assertIndexExists(statement, "t_certification_continuity_group", "uk_cert_continuity_group_id");
+            assertForeignKeyExists(statement, "t_certification_continuity_group", "fk_cert_continuity_engineer");
+            assertForeignKeyExists(statement, "t_certification_continuity_group", "fk_cert_continuity_master");
             assertForeignKeyExists(statement, "t_engineer_certification", "fk_eng_cert_continuity_group");
             assertCheckConstraintExists(statement, "chk_eng_cert_current_holder");
 
@@ -186,8 +186,8 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
                     try (Connection conn = MYSQL.createConnection("")) {
                         try (Statement st = conn.createStatement()) {
                             st.executeUpdate("INSERT INTO t_certification_continuity_group "
-                                    + "(tenant_id, engineer_id, certification_id, created_at, updated_at, created_by, deleted_flag) "
-                                    + "VALUES ('tenant-smoke', " + engineerId + ", " + certificationId + ", NOW(), NOW(), 1, 0)",
+                                    + "(tenant_id, engineer_id, certification_id) "
+                                    + "VALUES ('tenant-smoke', " + engineerId + ", " + certificationId + ")",
                                     Statement.RETURN_GENERATED_KEYS);
                             try (ResultSet rs = st.getGeneratedKeys()) {
                                 if (rs.next()) {
