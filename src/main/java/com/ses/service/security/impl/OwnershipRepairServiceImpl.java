@@ -55,6 +55,8 @@ public class OwnershipRepairServiceImpl implements OwnershipRepairService {
         Map<String, Object> result = new LinkedHashMap<>();
         LocalDateTime oldest = queueMapper.selectOldestPendingAt(authority.tenantId());
         result.put("pendingCount", queueMapper.countPending(authority.tenantId()));
+        result.put("unresolvedWithoutConflictTenantCount",
+                queueMapper.countUnresolvedWithoutConflictTenant());
         result.put("oldestPendingAt", oldest);
         result.put("oldestPendingAgeSeconds", oldest == null ? 0L
                 : Math.max(0L, Duration.between(oldest, LocalDateTime.now()).getSeconds()));

@@ -7,6 +7,7 @@ import com.ses.config.OidcLoginUser;
 import com.ses.config.OidcSecurityProperties;
 import com.ses.config.integrationhub.ExternalApiPrincipal;
 import com.ses.mapper.AttendanceScopeMapper;
+import com.ses.portal.PortalLoginUser;
 import com.ses.service.accounting.AccountingTimezoneResolver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
@@ -43,7 +44,7 @@ public class LegalEntityContextService {
 
     /**
      * 現在のsecurity-bound tenantを返す。
-     * 受け入れるprincipalは LoginUser / OidcLoginUser / ExternalApiPrincipal のみ。
+     * 受け入れるprincipalは LoginUser / OidcLoginUser / ExternalApiPrincipal / PortalLoginUser。
      * AccountingTenantContextHolder や default 推測には依存しない。
      */
     public String requireTenantId() {
@@ -54,14 +55,14 @@ public class LegalEntityContextService {
         Object principal = auth.getPrincipal();
         if (!(principal instanceof LoginUser)
                 && !(principal instanceof OidcLoginUser)
-                && !(principal instanceof ExternalApiPrincipal)) {
+                && !(principal instanceof ExternalApiPrincipal)
+                && !(principal instanceof PortalLoginUser)) {
             throw BusinessException.of(403, "TENANT_CONTEXT_REQUIRED");
         }
         String tenantId = SecurityUtils.currentTenantId();
         if (tenantId == null || tenantId.isBlank()) {
             throw BusinessException.of(403, "TENANT_CONTEXT_REQUIRED");
         }
-        // ローカル/専用DB構成でも、認証時に束縛したdeployment tenant以外は受け入れない。
         String configuredTenant = oidcSecurityProperties == null ? null : oidcSecurityProperties.getTenantId();
         if (configuredTenant != null && !configuredTenant.isBlank()
                 && !configuredTenant.trim().equals(tenantId.trim())) {
@@ -97,6 +98,18 @@ public class LegalEntityContextService {
         if (attendanceScopeMapper == null) {
             throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
+        if (asOfInstant == null || zone == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        requireTenantId();
+
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        Object principal = auth == null ? null : auth.getPrincipal();
+        // portal は内部組織scopeを持たない。一意の法人だけを権威として刻印し、曖昧なら拒否する。
+        if (principal instanceof PortalLoginUser) {
+            return requireUniqueLegalEntity(attendanceScopeMapper.selectAllLegalEntityIds());
+        }
+
         Long userId = SecurityUtils.currentUserId();
         String role = SecurityUtils.currentRole();
         if (role == null || role.isBlank()) {
@@ -105,16 +118,15 @@ public class LegalEntityContextService {
         if (userId == null && !"管理者".equals(role)) {
             throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
-        if (asOfInstant == null || zone == null) {
-            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
-        }
-        // tenant は security-bound のみ。Holder 補完は禁止。
-        requireTenantId();
 
         LocalDate asOf = asOfInstant.atZone(zone).toLocalDate();
         List<Long> ids = "管理者".equals(role)
                 ? attendanceScopeMapper.selectAllLegalEntityIds()
                 : attendanceScopeMapper.selectLegalEntityIdsByUser(userId, asOf);
+        return requireUniqueLegalEntity(ids);
+    }
+
+    private Long requireUniqueLegalEntity(List<Long> ids) {
         if (ids == null || ids.isEmpty()) {
             throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }

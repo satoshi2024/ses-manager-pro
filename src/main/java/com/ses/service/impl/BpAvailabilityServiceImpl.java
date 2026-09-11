@@ -45,9 +45,10 @@ public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper,
             throw BusinessException.of(403, "error.tenant.mismatch");
         }
         entity.setTenantId(tenantId);
-        if (legalEntityContextService != null) {
-            entity.setLegalEntityId(legalEntityContextService.requireCurrentLegalEntityId());
+        if (legalEntityContextService == null) {
+            throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
+        entity.setLegalEntityId(legalEntityContextService.requireCurrentLegalEntityId());
         return super.save(entity);
     }
 

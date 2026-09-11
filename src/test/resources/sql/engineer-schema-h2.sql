@@ -1193,11 +1193,11 @@ CREATE TABLE t_monthly_accounting_dimension (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- V181相当。月次締め（tenant×月）。confirmed_at NULL = 未締め。
+-- V181/V182相当。月次締め（tenant×月）。confirmed_at NULL = 未締め。tenant_id 必須。
 DROP TABLE IF EXISTS t_monthly_closing CASCADE;
 CREATE TABLE t_monthly_closing (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  tenant_id VARCHAR(100),
+  tenant_id VARCHAR(100) NOT NULL,
   work_month VARCHAR(7) NOT NULL,
   confirmed_by BIGINT,
   confirmed_at DATETIME,

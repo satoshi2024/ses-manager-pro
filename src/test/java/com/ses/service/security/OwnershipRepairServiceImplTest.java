@@ -124,6 +124,20 @@ class OwnershipRepairServiceImplTest {
     }
 
     @Test
+    void summaryは証拠tenant不明件数を監査用に返すがclaim対象には含めない() {
+        when(queueMapper.countPending("tenant-a")).thenReturn(2L);
+        when(queueMapper.countUnresolvedWithoutConflictTenant()).thenReturn(3L);
+        when(queueMapper.selectOldestPendingAt("tenant-a")).thenReturn(null);
+
+        var summary = service.summary();
+
+        assertEquals(2L, summary.get("pendingCount"));
+        assertEquals(3L, summary.get("unresolvedWithoutConflictTenantCount"));
+        verify(queueMapper).countUnresolvedWithoutConflictTenant();
+        verify(queueMapper).countPending("tenant-a");
+    }
+
+    @Test
     void 他tenantの修復行はclaimもresolveもできない() {
         when(sysUserMapper.selectByIdAndTenant(99L, "tenant-a")).thenReturn(new com.ses.entity.SysUser());
         when(queueMapper.selectForUpdate(9L, "tenant-a")).thenReturn(null);

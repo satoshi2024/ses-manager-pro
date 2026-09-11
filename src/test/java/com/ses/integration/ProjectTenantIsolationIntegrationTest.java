@@ -128,6 +128,24 @@ class ProjectTenantIsolationIntegrationTest extends BaseIntegrationTest {
                 .containsExactly(tenantA.projectId());
     }
 
+    @Test
+    void 管理者検索でも他tenant案件はヒットしない() {
+        AccountingTenantContextHolder.setTenantId("tenant-a");
+        SysUser user = tenantA.user();
+        LoginUser principal = new LoginUser(user,
+                List.of(new SimpleGrantedAuthority("ROLE_管理者")), "tenant-a");
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+
+        var hits = projectSearchProvider.search("案件", 20);
+        assertThat(hits).extracting(com.ses.dto.search.GlobalSearchResultDTO::getId)
+                .contains(tenantA.projectId())
+                .doesNotContain(tenantB.projectId());
+    }
+
+    @Autowired
+    private com.ses.service.search.provider.ProjectSearchProvider projectSearchProvider;
+
     private Fixture fixture(String tenantId, String label) {
         SysUser user = new SysUser();
         user.setUsername("proj-" + tenantId);

@@ -26,6 +26,11 @@ public interface OwnershipRepairQueueMapper extends BaseMapper<OwnershipRepairQu
             + "AND conflicting_tenant_id = #{tenantId}")
     long countPending(@Param("tenantId") String tenantId);
 
+    /** 証拠tenant不明のPENDING件数。監査専用（claim対象外）。 */
+    @Select("SELECT COUNT(*) FROM nf02_nf03_ownership_repair_queue WHERE status IN ('PENDING','CLAIMED') "
+            + "AND (conflicting_tenant_id IS NULL OR conflicting_tenant_id = '')")
+    long countUnresolvedWithoutConflictTenant();
+
     @Select("SELECT MIN(created_at) FROM nf02_nf03_ownership_repair_queue WHERE status = 'PENDING' "
             + "AND conflicting_tenant_id = #{tenantId}")
     LocalDateTime selectOldestPendingAt(@Param("tenantId") String tenantId);

@@ -247,6 +247,11 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "t_bp_availability", "bp_company_id");
             assertColumnExists(st, "t_bp_availability", "tenant_id");
             assertIndexExists(st, "t_bp_availability", "idx_bp_availability_tenant_population");
+            assertTableExists(st, "t_monthly_closing");
+            assertRowExists(st, "SELECT 1 FROM information_schema.columns WHERE table_schema=DATABASE()"
+                    + " AND table_name='t_monthly_closing' AND column_name='tenant_id' AND is_nullable='NO'");
+            assertRowExists(st, "SELECT 1 FROM information_schema.views WHERE table_schema=DATABASE()"
+                    + " AND table_name='v_nf02_nf03_ownership_repair_unresolved_audit'");
             assertColumnExists(st, "t_bp_payment", "bp_company_id");
             assertColumnExists(st, "t_bp_payment", "bp_company_name_snapshot");
             assertColumnExists(st, "t_bp_payment", "terms_snapshot_json");

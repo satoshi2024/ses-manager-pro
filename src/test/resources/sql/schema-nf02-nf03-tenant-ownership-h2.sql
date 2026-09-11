@@ -67,10 +67,10 @@ CREATE INDEX IF NOT EXISTS idx_contract_tenant_reference
 CREATE INDEX IF NOT EXISTS idx_user_org_tenant_owner
     ON t_user_organization (tenant_id, user_id, organization_id, deleted_flag, id);
 
--- V181相当。月次締めはtenant×月の正本行。旧グローバルJSONはdefaultのみ写経対象。
+-- V181/V182相当。月次締めはtenant×月の正本行。tenant_id は必須。
 CREATE TABLE IF NOT EXISTS t_monthly_closing (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    tenant_id VARCHAR(100),
+    tenant_id VARCHAR(100) NOT NULL,
     work_month VARCHAR(7) NOT NULL,
     confirmed_by BIGINT,
     confirmed_at DATETIME,
@@ -81,3 +81,31 @@ CREATE TABLE IF NOT EXISTS t_monthly_closing (
 );
 CREATE INDEX IF NOT EXISTS idx_monthly_closing_tenant_confirmed
     ON t_monthly_closing (tenant_id, confirmed_at, work_month);
+
+-- V182: 証拠tenant不明の修復行を監査専用に可視化（claim不可のまま）
+CREATE OR REPLACE VIEW v_nf02_nf03_ownership_repair_unresolved_audit AS
+SELECT
+    q.id,
+    q.entity_type,
+    q.entity_id,
+    q.reason,
+    q.status,
+    q.conflicting_tenant_id,
+    q.repair_tenant_id,
+    q.actor_tenant_id,
+    q.evidence,
+    q.evidence_hash,
+    q.created_at,
+    q.last_checked_at,
+    q.claimed_at,
+    q.claimed_by,
+    CASE
+        WHEN q.conflicting_tenant_id IS NULL OR q.conflicting_tenant_id = '' THEN 1
+        ELSE 0
+    END AS conflict_tenant_unresolved,
+    CASE
+        WHEN q.conflicting_tenant_id IS NULL OR q.conflicting_tenant_id = '' THEN 'AUDIT_ONLY_NO_CLAIM'
+        ELSE 'CLAIMABLE_WHEN_MATCHED'
+    END AS ops_path
+FROM nf02_nf03_ownership_repair_queue q
+WHERE q.status IN ('PENDING', 'CLAIMED');

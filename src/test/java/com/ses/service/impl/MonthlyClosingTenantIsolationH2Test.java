@@ -88,18 +88,12 @@ class MonthlyClosingTenantIsolationH2Test {
             assertThat(saved.getActualHours()).isEqualByComparingTo("170.00");
         });
 
-        // NULL tenant 行はどの明示tenantからも読めず、ensure/CASでも触れない。
-        jdbcTemplate.update(
+        // NULL tenant 行はスキーマ上書けない（V182 NOT NULL）。明示tenant欠落は fail-closed。
+        assertThatThrownBy(() -> jdbcTemplate.update(
                 "INSERT INTO t_monthly_closing (tenant_id, work_month, confirmed_by, confirmed_at, version) "
                         + "VALUES (NULL, ?, 9, ?, 0)",
-                MONTH, LocalDateTime.of(2026, 8, 1, 0, 0));
-        AccountingTenantContextHolder.runWithTenant("tenant-a", () -> {
-            assertThat(monthlyClosingMapper.selectByTenantAndMonth("tenant-a", MONTH).getConfirmedBy())
-                    .isEqualTo(1L);
-            assertThat(monthlyClosingService.isClosed(MONTH)).isTrue();
-        });
-        AccountingTenantContextHolder.runWithTenant("tenant-b", () ->
-                assertThat(monthlyClosingService.isClosed(MONTH)).isFalse());
+                MONTH, LocalDateTime.of(2026, 8, 1, 0, 0)))
+                .isInstanceOf(Exception.class);
 
         AccountingTenantContextHolder.clear();
         assertThatThrownBy(() -> monthlyClosingService.isClosed(MONTH))

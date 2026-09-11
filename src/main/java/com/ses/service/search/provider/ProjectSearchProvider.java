@@ -5,11 +5,14 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.dto.search.GlobalSearchResultDTO;
 import com.ses.entity.Project;
 import com.ses.mapper.ProjectMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.search.GlobalSearchProvider;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.TenantOwnershipResolver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -23,6 +26,9 @@ public class ProjectSearchProvider implements GlobalSearchProvider {
     @Autowired
     private DataScopeService dataScopeService;
 
+    @Autowired
+    private TenantOwnershipResolver tenantOwnershipResolver;
+
     @Override
     public String getType() {
         return "PROJECT";
@@ -35,20 +41,26 @@ public class ProjectSearchProvider implements GlobalSearchProvider {
 
     @Override
     public List<GlobalSearchResultDTO> search(String query, int maxResults) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        // fullAccessでもtenant ownership母集合を超えない（null=全表検索は禁止）。
+        Set<Long> ownedIds = new HashSet<>(tenantOwnershipResolver.resolveProjectIds(tenantId));
+        if (ownedIds.isEmpty()) {
+            return List.of();
+        }
         if (dataScopeService.isScoped()) {
             Set<Long> allowedIds = dataScopeService.allowedProjectIds();
             if (allowedIds == null || allowedIds.isEmpty()) {
                 return List.of();
             }
+            ownedIds.retainAll(allowedIds);
+            if (ownedIds.isEmpty()) {
+                return List.of();
+            }
         }
 
         LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<>();
+        wrapper.in(Project::getId, ownedIds);
         wrapper.and(w -> w.like(Project::getProjectName, query));
-
-        if (dataScopeService.isScoped()) {
-            wrapper.in(Project::getId, dataScopeService.allowedProjectIds());
-        }
-
         wrapper.orderByDesc(Project::getUpdatedAt);
 
         Page<Project> page = projectMapper.selectPage(new Page<>(1, maxResults), wrapper);

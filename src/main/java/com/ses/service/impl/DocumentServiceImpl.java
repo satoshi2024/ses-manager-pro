@@ -86,7 +86,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             "ORDER_RECEIVED", "ORDER_ACKNOWLEDGEMENT", "ACCEPTANCE");
     /** FileScopeValidationService と同一の専用ACL文書種別（decision table §6.2）。 */
     private static final Set<String> FILE_SCOPE_SPECIAL_DOCUMENT_TYPES = Set.of(
-            "PRIVATE_NOTE", "RECEIPT", "CHANGE_REQUEST_ATTACHMENT");
+            "PRIVATE_NOTE", "RECEIPT", "CHANGE_REQUEST_ATTACHMENT", "CERTIFICATION_EVIDENCE");
     // ----------------------------------------------------------------
     // 登録
     // ----------------------------------------------------------------
@@ -1375,6 +1375,10 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                     return;
                 }
             }
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        if ("CERTIFICATION_EVIDENCE".equals(documentType)) {
+            // 資格証憑は list/detail でも専用 evidence API のみ。汎用 document 経路は常に拒否。
             throw BusinessException.of(403, "error.forbidden");
         }
         throw BusinessException.of(403, "error.forbidden");
