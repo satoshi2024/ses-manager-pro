@@ -34,3 +34,4 @@ SELECT '要員', m.id FROM m_menu m WHERE m.menu_key = 'my-timesheet'
 -- V36/V37 相当: 通知宛先とAND勤怠差戻しコメント（MySQL migrationと同一構造へ同期）
 ALTER TABLE t_notification ADD COLUMN IF NOT EXISTS recipient_user_id BIGINT;
 ALTER TABLE t_work_record ADD COLUMN IF NOT EXISTS reject_comment VARCHAR(500);
+ALTER TABLE t_work_record ALTER COLUMN status VARCHAR(20) DEFAULT '入力中';

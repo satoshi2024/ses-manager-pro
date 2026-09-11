@@ -56,6 +56,27 @@ class BpPaymentWritePathTest {
     @Autowired
     private WorkRecordService workRecordService;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUpContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+        jdbcTemplate.update("UPDATE sys_user SET tenant_id = 'default', deleted_flag = 0, status = 1 WHERE id = 1");
+        jdbcTemplate.update("UPDATE m_customer SET tenant_id = 'default', deleted_flag = 0 WHERE id = 1");
+        Integer projectCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_project WHERE id = 1", Integer.class);
+        if (projectCount == null || projectCount == 0) {
+            jdbcTemplate.update("INSERT INTO t_project (id, project_name, customer_id, commercial_flow, status, created_by, deleted_flag) VALUES (1, 'テスト案件', 1, '元請け', '募集中', 1, 0)");
+        } else {
+            jdbcTemplate.update("UPDATE t_project SET customer_id = 1, created_by = 1, deleted_flag = 0 WHERE id = 1");
+        }
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDownContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
+
     /**
      * 勤怠のスコープ判定は契約→要員をINNER JOINするため、勤怠には実在する契約が必要。
      * 以前は contractId=1 という「他テストが作った既存データ」に暗黙依存しており、
@@ -67,9 +88,11 @@ class BpPaymentWritePathTest {
         engineer.setFullName("BP支払テスト要員");
         engineer.setEmploymentType("BP");
         engineer.setStatus("稼動中");
+        engineer.setTenantId("default");
         engineerMapper.insert(engineer);
 
         Contract contract = new Contract();
+        contract.setTenantId("default");
         contract.setEngineerId(engineer.getId());
         contract.setProjectId(1L);
         contract.setCustomerId(1L);
@@ -133,11 +156,13 @@ class BpPaymentWritePathTest {
         engineer.setFullName("自動生成テスト要員");
         engineer.setEmploymentType("BP");
         engineer.setStatus("稼動中");
+        engineer.setTenantId("default");
         engineerMapper.insert(engineer);
         engineerBpAffiliationService.assignBpAffiliation(
                 engineer.getId(), company.getId(), LocalDate.of(2026, 1, 1), null);
 
         Contract contract = new Contract();
+        contract.setTenantId("default");
         contract.setEngineerId(engineer.getId());
         contract.setProjectId(1L);
         contract.setCustomerId(1L);

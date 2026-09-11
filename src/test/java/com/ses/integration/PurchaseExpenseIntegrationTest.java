@@ -226,6 +226,8 @@ class PurchaseExpenseIntegrationTest {
                             + "(id, username, password, real_name, role, tenant_id, status, deleted_flag) "
                             + "VALUES (1, ?, 'x', '会計連携テスト所有者', '管理者', 'default', 1, 0)",
                     username);
+        } else {
+            jdbcTemplate.update("UPDATE sys_user SET tenant_id = 'default', deleted_flag = 0, status = 1 WHERE id = 1");
         }
         Integer engineerCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_engineer WHERE id = 1", Integer.class);
@@ -233,6 +235,17 @@ class PurchaseExpenseIntegrationTest {
             jdbcTemplate.update("INSERT INTO t_engineer "
                             + "(id, full_name, employment_type, status, tenant_id, created_by, deleted_flag) "
                             + "VALUES (1, '会計連携テスト要員', '正社員', 'Bench', 'default', 1, 0)");
+        } else {
+            jdbcTemplate.update("UPDATE t_engineer SET tenant_id = 'default', deleted_flag = 0 WHERE id = 1");
+        }
+        Integer projectCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_project WHERE id = 1", Integer.class);
+        if (projectCount == null || projectCount == 0) {
+            jdbcTemplate.update("INSERT INTO t_project "
+                            + "(id, project_name, customer_id, commercial_flow, status, created_by, deleted_flag) "
+                            + "VALUES (1, '金融系基盤システム移行', 1, '元請け', '募集中', 1, 0)");
+        } else {
+            jdbcTemplate.update("UPDATE t_project SET customer_id = 1, created_by = 1, deleted_flag = 0 WHERE id = 1");
         }
     }
 

@@ -314,7 +314,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
                     (w.accounting_dimension_frozen IS NULL OR w.accounting_dimension_frozen &lt;&gt; 1)
                     AND e.organization_id IS NULL
                     AND EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId}
                         AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
                           AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                         AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
@@ -326,7 +326,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               <if test="allowedDirectUserIds != null and allowedDirectUserIds.size() > 0">
                 <if test="allowedOrganizationIds != null and allowedOrganizationIds.size() > 0">OR</if>
                 EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId}
                      AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
                        AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                     AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
@@ -401,7 +401,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
                     (w.accounting_dimension_frozen IS NULL OR w.accounting_dimension_frozen &lt;&gt; 1)
                     AND e.organization_id IS NULL
                     AND EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId}
                         AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
                           AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                         AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
@@ -413,7 +413,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               <if test="allowedDirectUserIds != null and allowedDirectUserIds.size() > 0">
                 <if test="allowedOrganizationIds != null and allowedOrganizationIds.size() > 0">OR</if>
                 EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId}
                      AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
                        AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                     AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
@@ -495,7 +495,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
                     (w.accounting_dimension_frozen IS NULL OR w.accounting_dimension_frozen &lt;&gt; 1)
                     AND e.organization_id IS NULL
                     AND EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId}
                         AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
                           AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                         AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
@@ -507,7 +507,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               <if test="allowedDirectUserIds != null and allowedDirectUserIds.size() > 0">
                 <if test="allowedOrganizationIds != null and allowedOrganizationIds.size() > 0">OR</if>
                 EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId}
                      AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
                        AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                     AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
@@ -697,7 +697,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
                     (w.accounting_dimension_frozen IS NULL OR w.accounting_dimension_frozen &lt;&gt; 1)
                     AND e.organization_id IS NULL
                     AND EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId}
                         AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
                           AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                         AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
@@ -709,7 +709,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               <if test="allowedDirectUserIds != null and allowedDirectUserIds.size() > 0">
                 <if test="allowedOrganizationIds != null and allowedOrganizationIds.size() > 0">OR</if>
                 EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId}
                      AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
                        AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                     AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
@@ -811,7 +811,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
                     (w.accounting_dimension_frozen IS NULL OR w.accounting_dimension_frozen &lt;&gt; 1)
                     AND e.organization_id IS NULL
                     AND EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId}
                         AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
                           AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                         AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
@@ -823,7 +823,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               <if test="allowedDirectUserIds != null and allowedDirectUserIds.size() > 0">
                 <if test="allowedOrganizationIds != null and allowedOrganizationIds.size() > 0">OR</if>
                 EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId}
                      AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
                        AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                     AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0

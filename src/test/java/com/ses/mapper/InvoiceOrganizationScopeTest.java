@@ -146,7 +146,7 @@ class InvoiceOrganizationScopeTest extends BaseIntegrationTest {
     }
 
     private void insertEngineer(long id, long organizationId) {
-        jdbcTemplate.update("INSERT INTO t_engineer (id, full_name, employment_type, organization_id, deleted_flag) VALUES (?, ?, '正社員', ?, 0)",
+        jdbcTemplate.update("INSERT INTO t_engineer (id, full_name, employment_type, organization_id, tenant_id, deleted_flag) VALUES (?, ?, '正社員', ?, 'default', 0)",
                 id, "scope-engineer-" + id, organizationId);
     }
 
