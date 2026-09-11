@@ -107,7 +107,17 @@ public class LegalEntityContextService {
             return 1L;
         }
         if (ids == null || ids.isEmpty()) {
-            if (!"管理者".equals(role)) {
+            String tenantId = requireTenantId();
+            if ("default".equals(tenantId)
+                    && (oidcSecurityProperties == null || oidcSecurityProperties.getTenantId() == null || "default".equals(oidcSecurityProperties.getTenantId()))) {
+                List<Long> all = attendanceScopeMapper.selectAllLegalEntityIds();
+                if (all == null || all.isEmpty()) {
+                    return 1L;
+                }
+                if (all.size() == 1) {
+                    return all.get(0);
+                }
+            } else if (!"管理者".equals(role)) {
                 List<Long> all = attendanceScopeMapper.selectAllLegalEntityIds();
                 if (all != null && all.size() == 1) {
                     return all.get(0);

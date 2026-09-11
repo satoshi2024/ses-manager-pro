@@ -78,11 +78,12 @@ class OpportunityServiceIntegrationTest {
         opportunity.setUnitPrice(new BigDecimal("700000"));
         opportunity.setProbability(60);
         opportunity.setVersion(1);
+        opportunity.setLegalEntityId(1L);
         return opportunity;
     }
 
     private long newCustomer(String name) {
-        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, deleted_flag) VALUES (?, 'B', 0)", name);
+        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, legal_entity_id, deleted_flag) VALUES (?, 'B', 1, 0)", name);
         return jdbcTemplate.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, name);
     }
 

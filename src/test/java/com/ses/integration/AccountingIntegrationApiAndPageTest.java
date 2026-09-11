@@ -437,6 +437,7 @@ class AccountingIntegrationApiAndPageTest {
         Long ccXId = insertCostCenter("SCOPE-CC-X", "スコープCCX", orgXId);
         Long ccYId = insertCostCenter("SCOPE-CC-Y", "スコープCCY", orgYId);
 
+        SecurityContextHolder.getContext().setAuthentication(loginAuthentication(managerUserId, "マネージャー"));
         Customer cust = new Customer();
         cust.setCompanyName("スコープ顧客");
         customerService.save(cust);

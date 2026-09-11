@@ -82,6 +82,8 @@ class SalesInvoiceIntegrationTest {
             jdbcTemplate.update("DELETE FROM t_invoice_item WHERE invoice_id = ?", invoice.getId());
         }
         if (customer != null && customer.getId() != null) {
+            jdbcTemplate.update("DELETE FROM t_invoice_item WHERE invoice_id IN (SELECT id FROM t_invoice WHERE customer_id = ?)", customer.getId());
+            jdbcTemplate.update("DELETE FROM t_invoice WHERE customer_id = ?", customer.getId());
             customerService.removeById(customer.getId());
         }
         if (connection != null && connection.getId() != null) {
