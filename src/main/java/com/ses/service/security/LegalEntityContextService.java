@@ -103,13 +103,19 @@ public class LegalEntityContextService {
         List<Long> ids = "管理者".equals(role)
                 ? (attendanceScopeMapper == null ? null : attendanceScopeMapper.selectAllLegalEntityIds())
                 : (attendanceScopeMapper == null ? null : attendanceScopeMapper.selectLegalEntityIdsByUser(userId, asOf));
-        if (ids == null || ids.isEmpty()) {
-            List<Long> all = attendanceScopeMapper == null ? null : attendanceScopeMapper.selectAllLegalEntityIds();
-            if (all == null || all.isEmpty()) {
-                return 1L;
-            }
+        if (attendanceScopeMapper == null) {
+            return 1L;
         }
-        if (ids == null || ids.stream().filter(Objects::nonNull).distinct().count() != 1) {
+        if (ids == null || ids.isEmpty()) {
+            if (!"管理者".equals(role)) {
+                List<Long> all = attendanceScopeMapper.selectAllLegalEntityIds();
+                if (all != null && all.size() == 1) {
+                    return all.get(0);
+                }
+            }
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        if (ids.stream().filter(Objects::nonNull).distinct().count() != 1) {
             throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
         return ids.stream().filter(Objects::nonNull).findFirst().orElseThrow(
