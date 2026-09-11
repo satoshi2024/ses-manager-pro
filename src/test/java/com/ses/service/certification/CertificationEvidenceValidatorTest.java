@@ -7,6 +7,8 @@ import com.ses.entity.DocumentVersion;
 import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -26,6 +28,16 @@ class CertificationEvidenceValidatorTest {
     @Mock private DocumentVersionMapper documentVersionMapper;
     @Mock private DocumentLinkMapper documentLinkMapper;
 
+    @BeforeEach
+    void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void tearDown() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
+
     @Test
     void 証憑三組がすべてnullの場合は拒否する() {
         CertificationEvidenceValidator validator = new CertificationEvidenceValidator(documentMapper,
@@ -38,11 +50,12 @@ class CertificationEvidenceValidatorTest {
         Document document = document("CERTIFICATION_EVIDENCE");
         DocumentVersion version = version(100L, 10L, "abc123", "CLEAN");
         DocumentLink link = new DocumentLink();
+        link.setTenantId("default");
         link.setDocumentId(10L);
         link.setTargetType("CERTIFICATION_RECORD");
         link.setTargetId(20L);
-        when(documentMapper.selectById(10L)).thenReturn(document);
-        when(documentVersionMapper.selectById(100L)).thenReturn(version);
+        when(documentMapper.selectOne(any())).thenReturn(document);
+        when(documentVersionMapper.selectOne(any())).thenReturn(version);
         when(documentLinkMapper.selectList(any())).thenReturn(List.of(link));
 
         CertificationEvidenceValidator validator = new CertificationEvidenceValidator(documentMapper,
@@ -54,14 +67,15 @@ class CertificationEvidenceValidatorTest {
     void versionHashscan未一致とgenericLinkだけは拒否する() {
         Document document = document("CERTIFICATION_EVIDENCE");
         DocumentVersion version = version(100L, 10L, "abc123", "PENDING");
-        when(documentMapper.selectById(10L)).thenReturn(document);
-        when(documentVersionMapper.selectById(100L)).thenReturn(version);
+        when(documentMapper.selectOne(any())).thenReturn(document);
+        when(documentVersionMapper.selectOne(any())).thenReturn(version);
         CertificationEvidenceValidator validator = new CertificationEvidenceValidator(documentMapper,
                 documentVersionMapper, documentLinkMapper);
         assertThrows(BusinessException.class, () -> validator.validate(20L, 10L, 100L, "abc123"));
 
         version.setScanStatus("CLEAN");
         DocumentLink generic = new DocumentLink();
+        generic.setTenantId("default");
         generic.setTargetType("ENGINEER");
         generic.setTargetId(20L);
         when(documentLinkMapper.selectList(any())).thenReturn(List.of(generic));
@@ -71,6 +85,7 @@ class CertificationEvidenceValidatorTest {
     private Document document(String type) {
         Document document = new Document();
         document.setId(10L);
+        document.setTenantId("default");
         document.setDocumentType(type);
         return document;
     }
@@ -78,6 +93,7 @@ class CertificationEvidenceValidatorTest {
     private DocumentVersion version(Long id, Long documentId, String hash, String scan) {
         DocumentVersion version = new DocumentVersion();
         version.setId(id);
+        version.setTenantId("default");
         version.setDocumentId(documentId);
         version.setSha256(hash);
         version.setScanStatus(scan);

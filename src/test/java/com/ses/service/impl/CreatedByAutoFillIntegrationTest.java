@@ -43,7 +43,8 @@ class CreatedByAutoFillIntegrationTest {
         user.setId(userId);
         user.setUsername("tester");
         user.setStatus(1);
-        LoginUser principal = new LoginUser(user, AuthorityUtils.NO_AUTHORITIES);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user, AuthorityUtils.NO_AUTHORITIES, "default");
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(principal, null, AuthorityUtils.NO_AUTHORITIES));
     }
