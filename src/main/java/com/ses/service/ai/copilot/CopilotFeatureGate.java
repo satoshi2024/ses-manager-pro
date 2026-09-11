@@ -31,6 +31,17 @@ public class CopilotFeatureGate {
     public void assertEvaluationAllowed() { assertInferenceAllowed(); }
     public void assertExportAllowed() { assertInferenceAllowed(); }
 
+    /**
+     * legacy match/proposal-draft/chat入口の共通feature gate。
+     * management-copilot専用flagは要求せず、ai.enabledとproduction provider境界だけを見る。
+     */
+    public void assertLegacyEndpointAllowed() {
+        if (!aiConfig.isEnabled()) {
+            throw new BusinessException(503, "AI機能は現在無効化されています。");
+        }
+        productionApprovalGate.assertProviderAllowed(aiConfig.getProvider());
+    }
+
     /** retention purgeは推論/外部送信ではなく安全なmaintenanceであり、flag OFFでも実行可能。 */
     public void assertRetentionMaintenanceAllowed() {
         if (aiConfig.isExternalSendEnabled()) {

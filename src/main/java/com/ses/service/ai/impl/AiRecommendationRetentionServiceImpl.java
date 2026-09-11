@@ -6,6 +6,7 @@ import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.Clock;
@@ -39,8 +40,12 @@ public class AiRecommendationRetentionServiceImpl implements AiRecommendationRet
         if (now == null || maxRows <= 0) {
             throw new IllegalArgumentException("invalid AI retention purge request");
         }
+        // 明示tenantのみ。Holder defaultやSecurityUtils補完では全tenant掃除を許さない。
+        String tenantId = AccountingTenantContextHolder.getExplicitTenantId();
+        if (!StringUtils.hasText(tenantId)) {
+            throw new IllegalStateException("TENANT_CONTEXT_REQUIRED");
+        }
         LocalDateTime cutoff = now.minusDays(redactedDays);
-        String tenantId = AccountingTenantContextHolder.getTenantContext();
         return runMapper.purgeExpiredSummaries(tenantId, cutoff, now, Math.min(maxRows, 1000));
     }
 

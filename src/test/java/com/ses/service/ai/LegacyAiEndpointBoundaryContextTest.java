@@ -1,11 +1,13 @@
 package com.ses.service.ai;
 
+import com.ses.config.AiConfig;
 import com.ses.entity.Engineer;
 import com.ses.entity.Project;
 import com.ses.service.EngineerService;
 import com.ses.service.ProjectService;
 import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.CopilotExecutionContextFactory;
+import com.ses.service.ai.copilot.CopilotFeatureGate;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+
+import com.ses.common.exception.BusinessException;
 
 /** NF08: legacy入口的認可日付が固定ClockのLocalDateではなくcontext.asOf/zoneに束縛される。 */
 @ExtendWith(MockitoExtension.class)
@@ -104,9 +108,27 @@ class LegacyAiEndpointBoundaryContextTest {
         assertTrue(source.contains("CopilotExecutionContextFactory"));
     }
 
+    @Test
+    void createContextはaiEnabledFalseで503になりscope判定へ進まない() {
+        AiConfig config = new AiConfig();
+        config.setEnabled(false);
+        config.setProvider("mock");
+        LegacyAiEndpointBoundary boundary = new LegacyAiEndpointBoundary(
+                engineerService, projectService, dataScopeService, organizationScopeService,
+                contextFactory, contextBinder, new CopilotFeatureGate(config));
+
+        BusinessException ex = assertThrows(BusinessException.class, boundary::createContext);
+        assertEquals(503, ex.getCode());
+    }
+
     private LegacyAiEndpointBoundary boundary() {
+        AiConfig config = new AiConfig();
+        config.setEnabled(true);
+        config.setProvider("mock");
+        config.setExternalSendEnabled(false);
         return new LegacyAiEndpointBoundary(engineerService, projectService, dataScopeService,
-                organizationScopeService, contextFactory, contextBinder);
+                organizationScopeService, contextFactory, contextBinder,
+                new CopilotFeatureGate(config));
     }
 
     private static CopilotExecutionContext context(String instant, String zone) {

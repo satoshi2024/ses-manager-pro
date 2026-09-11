@@ -107,18 +107,23 @@ class AiExecutionGatewayLegacyBoundaryTest {
 
     @Test
     void mockとruleのresourceなしlegacyはlocalProviderとして継続する() {
-        AiConfig config = config("mock", false);
-        AiExecutionGateway gateway = gateway(config);
-        org.mockito.Mockito.when(aiTextService.generate(org.mockito.ArgumentMatchers.anyString()))
-                .thenReturn("local");
-        assertEquals("local", gateway.execute(AiGatewayRequest.builder()
-                .useCase(AiGatewayRequest.USE_CHAT).build()).getText());
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+        try {
+            AiConfig config = config("mock", false);
+            AiExecutionGateway gateway = gateway(config);
+            org.mockito.Mockito.when(aiTextService.generate(org.mockito.ArgumentMatchers.anyString()))
+                    .thenReturn("local");
+            assertEquals("local", gateway.execute(AiGatewayRequest.builder()
+                    .useCase(AiGatewayRequest.USE_CHAT).build()).getText());
 
-        config.setProvider("rule");
-        assertEquals("local", gateway.execute(AiGatewayRequest.builder()
-                .useCase(AiGatewayRequest.USE_CHAT).build()).getText());
-        verify(aiTextService, org.mockito.Mockito.times(2))
-                .generate(org.mockito.ArgumentMatchers.anyString());
+            config.setProvider("rule");
+            assertEquals("local", gateway.execute(AiGatewayRequest.builder()
+                    .useCase(AiGatewayRequest.USE_CHAT).build()).getText());
+            verify(aiTextService, org.mockito.Mockito.times(2))
+                    .generate(org.mockito.ArgumentMatchers.anyString());
+        } finally {
+            com.ses.service.accounting.AccountingTenantContextHolder.clear();
+        }
     }
 
     @Test

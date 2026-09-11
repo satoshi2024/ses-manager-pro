@@ -156,6 +156,91 @@ class InternalTenantContextFilterTest {
         verify(chain).doFilter(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
+    @Test
+    void authenticatedPrincipalにtenantが無くHolderだけあっても403() throws Exception {
+        AccountingTenantContextHolder.setTenantId("holder-tenant");
+        org.springframework.security.core.userdetails.User bare =
+                new org.springframework.security.core.userdetails.User(
+                        "bare", "pw", List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(bare, null, bare.getAuthorities()));
+        // OIDC設定tenantがあってもprincipal束縛が無ければ補完しない
+        oidcProperties.setTenantId("oidc-configured");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request("/api/service-desk/requests"), response, chain);
+
+        assertEquals(403, response.getStatus());
+        assertTrue(response.getContentAsString().contains(InternalTenantContextFilter.TENANT_CONTEXT_REQUIRED));
+        verify(chain, never()).doFilter(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        assertEquals("holder-tenant", AccountingTenantContextHolder.getExplicitTenantId());
+    }
+
+    @Test
+    void authenticatedPrincipal無tenantでOIDC設定tenantがあっても自動補完しない() throws Exception {
+        oidcProperties.setTenantId("oidc-only");
+        org.springframework.security.core.userdetails.User bare =
+                new org.springframework.security.core.userdetails.User(
+                        "bare", "pw", List.of(new SimpleGrantedAuthority("ROLE_営業")));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(bare, null, bare.getAuthorities()));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request("/api/engineers"), response, chain);
+
+        assertEquals(403, response.getStatus());
+        assertTrue(response.getContentAsString().contains(InternalTenantContextFilter.TENANT_CONTEXT_REQUIRED));
+        verify(chain, never()).doFilter(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void anonymousリクエストはtenantをbindせず通過する() throws Exception {
+        SecurityContextHolder.clearContext();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request("/login"), response, chain);
+
+        verify(chain).doFilter(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        assertNull(AccountingTenantContextHolder.getExplicitTenantId());
+    }
+
+    @Test
+    void 合法LoginUserとOIDCtenant一致は成功する() throws Exception {
+        oidcProperties.setTenantId("tenant-a");
+        SecurityContextHolder.getContext().setAuthentication(authentication(user("tenant-a")));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request("/api/engineers"), response, (req, res) ->
+                assertEquals("tenant-a", AccountingTenantContextHolder.requireTenantContext()));
+
+        assertEquals(200, response.getStatus());
+        assertNull(AccountingTenantContextHolder.getExplicitTenantId());
+    }
+
+    @Test
+    void PortalLoginUserのtenantもprincipal束縛として成功する() throws Exception {
+        oidcProperties.setTenantId(null);
+        com.ses.portal.PortalLoginUser portal = com.ses.portal.PortalLoginUser.builder()
+                .portalUserId(9L)
+                .email("portal@example.com")
+                .tenantId("tenant-portal")
+                .userStatus("ACTIVE")
+                .orgStatus("ACTIVE")
+                .build();
+        when(timezoneResolver.resolve("tenant-portal")).thenReturn(ZoneId.of("Asia/Tokyo"));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(portal, null, portal.getAuthorities()));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request("/api/portal/me"), response, (req, res) ->
+                assertEquals("tenant-portal", AccountingTenantContextHolder.requireTenantContext()));
+
+        assertNull(AccountingTenantContextHolder.getExplicitTenantId());
+    }
+
     private FilterChain throwingChain() {
         return (request, response) -> {
             assertEquals("tenant-a", AccountingTenantContextHolder.requireTenantContext());

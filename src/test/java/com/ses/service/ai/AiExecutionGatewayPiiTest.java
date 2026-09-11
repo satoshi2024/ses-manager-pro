@@ -7,6 +7,8 @@ import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
 import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshotFactory;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -36,6 +38,16 @@ class AiExecutionGatewayPiiTest {
     private AiConfig aiConfig;
     @Autowired
     private org.springframework.context.ApplicationContext context;
+
+    @BeforeEach
+    void bindTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
 
     @Test
     void AiTextServiceは一意() {
@@ -101,18 +113,33 @@ class AiExecutionGatewayPiiTest {
     }
 
     private CopilotExecutionContext matchingContext() {
+        String tenantId = "default";
+        long legalEntityId = 1L;
+        java.time.LocalDate asOf = java.time.LocalDate.of(2026, 9, 1);
         CopilotExecutionContext context = new CopilotExecutionContext(
-                "tenant-test", 1L, java.time.Instant.parse("2026-09-01T00:00:00Z"),
+                tenantId, legalEntityId, java.time.Instant.parse("2026-09-01T00:00:00Z"),
                 java.time.ZoneId.of("Asia/Tokyo"));
         EffectiveScopeSnapshot snapshot = new EffectiveScopeSnapshot(
-                "tenant-test", 1L, java.time.LocalDate.of(2026, 9, 1), "COMPANY_WIDE",
+                tenantId, legalEntityId, asOf, "COMPANY_WIDE",
                 true, false, false, null, null, null, null, null, null, null, null, null,
                 EffectiveScopeSnapshotFactory.POLICY_VERSION, false, "ALL",
-                "91b01054585507ec79a06893bbb7fd6180fbb86b18681f10cb7b792733ad12c6");
+                scopeHash(tenantId, legalEntityId, asOf));
         context.bindSnapshot(snapshot);
         context.bind(AiGatewayRequest.USE_MATCHING,
                 CopilotQueryParameters.ofQuery(AiGatewayRequest.USE_MATCHING), snapshot.scope());
         return context;
+    }
+
+    private static String scopeHash(String tenantId, long legalEntityId, java.time.LocalDate asOf) {
+        String canonical = "tenant=" + tenantId + "|legalEntity=" + legalEntityId
+                + "|asOf=" + asOf + "|scopeType=COMPANY_WIDE|policy="
+                + EffectiveScopeSnapshotFactory.POLICY_VERSION + "|members=ALL";
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
     }
 
     @Test

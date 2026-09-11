@@ -42,46 +42,56 @@ class AiUseCasePolicyBoundaryTest {
 
     @Test
     void ingestionとlearningはmock_ruleだけを明示的に許可する() {
-        AiConfig config = config("mock");
-        AiExecutionGateway gateway = gateway(config);
-        when(aiTextService.generate(anyString())).thenReturn("local");
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+        try {
+            AiConfig config = config("mock");
+            AiExecutionGateway gateway = gateway(config);
+            when(aiTextService.generate(anyString())).thenReturn("local");
 
-        for (String provider : List.of("mock", "rule")) {
-            config.setProvider(provider);
-            for (String useCase : OFFLINE_USE_CASES) {
-                AiGatewayResult result = gateway.execute(AiGatewayRequest.builder()
-                        .useCase(useCase)
-                        .persistRun(false)
-                        .build());
-                assertEquals("local", result.getText(), provider + ":" + useCase);
+            for (String provider : List.of("mock", "rule")) {
+                config.setProvider(provider);
+                for (String useCase : OFFLINE_USE_CASES) {
+                    AiGatewayResult result = gateway.execute(AiGatewayRequest.builder()
+                            .useCase(useCase)
+                            .persistRun(false)
+                            .build());
+                    assertEquals("local", result.getText(), provider + ":" + useCase);
+                }
             }
-        }
 
-        verify(aiTextService, org.mockito.Mockito.times(OFFLINE_USE_CASES.size() * 2))
-                .generate(anyString());
+            verify(aiTextService, org.mockito.Mockito.times(OFFLINE_USE_CASES.size() * 2))
+                    .generate(anyString());
+        } finally {
+            com.ses.service.accounting.AccountingTenantContextHolder.clear();
+        }
     }
 
     @Test
     void ingestionとlearningはexternalDisabledおよびunknownProviderをfailClosedする() {
-        AiConfig config = config("gemini");
-        AiExecutionGateway gateway = gateway(config);
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+        try {
+            AiConfig config = config("gemini");
+            AiExecutionGateway gateway = gateway(config);
 
-        for (String useCase : OFFLINE_USE_CASES) {
-            BusinessException externalDisabled = assertThrows(BusinessException.class,
-                    () -> gateway.execute(AiGatewayRequest.builder()
-                            .useCase(useCase).persistRun(false).build()));
-            assertEquals(503, externalDisabled.getCode(), useCase);
+            for (String useCase : OFFLINE_USE_CASES) {
+                BusinessException externalDisabled = assertThrows(BusinessException.class,
+                        () -> gateway.execute(AiGatewayRequest.builder()
+                                .useCase(useCase).persistRun(false).build()));
+                assertEquals(503, externalDisabled.getCode(), useCase);
+            }
+
+            config.setProvider("unknown-provider");
+            for (String useCase : OFFLINE_USE_CASES) {
+                BusinessException unknown = assertThrows(BusinessException.class,
+                        () -> gateway.execute(AiGatewayRequest.builder()
+                                .useCase(useCase).persistRun(false).build()));
+                assertEquals(503, unknown.getCode(), useCase);
+            }
+
+            verify(aiTextService, never()).generate(anyString());
+        } finally {
+            com.ses.service.accounting.AccountingTenantContextHolder.clear();
         }
-
-        config.setProvider("unknown-provider");
-        for (String useCase : OFFLINE_USE_CASES) {
-            BusinessException unknown = assertThrows(BusinessException.class,
-                    () -> gateway.execute(AiGatewayRequest.builder()
-                            .useCase(useCase).persistRun(false).build()));
-            assertEquals(503, unknown.getCode(), useCase);
-        }
-
-        verify(aiTextService, never()).generate(anyString());
     }
 
     @Test

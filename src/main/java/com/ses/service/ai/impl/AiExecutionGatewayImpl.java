@@ -225,20 +225,38 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
 
     private void persistRun(AiGatewayRequest request, Map<String, Object> masked,
                             String status, String error, int latencyMs) {
-        try {
-            String useCase = request.getUseCase();
-            AiArtifactVersion active = versionMapper.selectOne(new LambdaQueryWrapper<AiArtifactVersion>()
-                    .eq(AiArtifactVersion::getUseCase, useCase)
-                    .eq(AiArtifactVersion::getStatus, "ACTIVE")
-                    .last("LIMIT 1"));
-            if (active == null) {
-                return;
+        String useCase = request.getUseCase();
+        AiArtifactVersion active = versionMapper.selectOne(new LambdaQueryWrapper<AiArtifactVersion>()
+                .eq(AiArtifactVersion::getUseCase, useCase)
+                .eq(AiArtifactVersion::getStatus, "ACTIVE")
+                .last("LIMIT 1"));
+        if (active == null) {
+            return;
+        }
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        CopilotExecutionContext context = request.getExecutionContext();
+        if (context != null) {
+            // ExecutionContextがある場合はRecorderと同水準のmetadataを必須化し、推測補完しない。
+            if (context.tenantId() == null || context.tenantId().isBlank()
+                    || context.legalEntityId() == null
+                    || context.scopeHash() == null || context.scopeHash().isBlank()
+                    || context.asOf() == null || context.zoneId() == null
+                    || context.scope() == null
+                    || !tenantId.equals(context.tenantId())
+                    || !context.scopeHash().equals(context.scope().scopeHash())
+                    || !tenantId.equals(context.scope().tenantId())
+                    || !context.legalEntityId().equals(context.scope().legalEntityId())) {
+                throw new BusinessException(403, "EXECUTION_CONTEXT_REQUIRED");
             }
+        } else if (requiresLegacyContext(request) || request.isResourceBearing()) {
+            throw new BusinessException(403, "EXECUTION_CONTEXT_REQUIRED");
+        }
+        try {
             String traceId = request.getTraceId() != null ? request.getTraceId() : UUID.randomUUID().toString();
             request.setTraceId(traceId);
             String json = objectMapper.writeValueAsString(masked);
             AiRecommendationRun run = new AiRecommendationRun();
-            run.setTenantId(com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
+            run.setTenantId(tenantId);
             run.setTraceId(traceId);
             run.setUseCase(useCase);
             run.setArtifactVersionId(active.getId());
@@ -251,13 +269,23 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
             run.setStatus(status);
             run.setStatusVersion(0);
             run.setErrorCode(error);
-            run.setCreatedAt(request.getExecutionContext() == null
-                    ? LocalDateTime.now(clock)
-                    : LocalDateTime.ofInstant(request.getExecutionContext().asOf(),
-                    request.getExecutionContext().zoneId()));
+            if (context != null) {
+                run.setScopeHash(context.scopeHash());
+                run.setLegalEntityId(context.legalEntityId());
+                run.setAsOfAt(LocalDateTime.ofInstant(context.asOf(), java.time.ZoneOffset.UTC));
+                run.setTimezoneId(context.zoneId().getId());
+                run.setCatalogVersion("legacy-gateway-v1");
+                run.setDataVersion("resource-scope-v1");
+                run.setCreatedAt(LocalDateTime.ofInstant(context.asOf(), context.zoneId()));
+            } else {
+                run.setCreatedAt(LocalDateTime.now(clock));
+            }
             runMapper.insert(run);
-        } catch (Exception ignored) {
-            // 実行自体は落とさない。記録失敗は後続評価の欠損として扱う。
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            // 不完全な成功監査を残さない。persist失敗は呼出元へ伝播する。
+            throw new BusinessException(500, "AI_RUN_PERSIST_FAILED");
         }
     }
 

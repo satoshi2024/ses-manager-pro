@@ -9,6 +9,7 @@ import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
 import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.CopilotExecutionContextFactory;
+import com.ses.service.ai.copilot.CopilotFeatureGate;
 import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
 import org.springframework.stereotype.Component;
 
@@ -27,18 +28,21 @@ public class LegacyAiEndpointBoundary {
     private final OrganizationScopeService organizationScopeService;
     private final CopilotExecutionContextFactory contextFactory;
     private final LegacyAiExecutionContextBinder contextBinder;
+    private final CopilotFeatureGate featureGate;
 
     public LegacyAiEndpointBoundary(EngineerService engineerService, ProjectService projectService,
                                     DataScopeService dataScopeService,
                                     OrganizationScopeService organizationScopeService,
                                     CopilotExecutionContextFactory contextFactory,
-                                    LegacyAiExecutionContextBinder contextBinder) {
+                                    LegacyAiExecutionContextBinder contextBinder,
+                                    CopilotFeatureGate featureGate) {
         this.engineerService = engineerService;
         this.projectService = projectService;
         this.dataScopeService = dataScopeService;
         this.organizationScopeService = organizationScopeService;
         this.contextFactory = contextFactory;
         this.contextBinder = contextBinder;
+        this.featureGate = featureGate;
     }
 
     public Long requireLegalEntityId() {
@@ -120,6 +124,11 @@ public class LegacyAiEndpointBoundary {
     }
 
     public CopilotExecutionContext createContext() {
+        // feature gate → tenant/legal entity/scope の順。controllerへgate複製を置かない。
+        if (featureGate == null) {
+            throw new BusinessException(503, "AI機能は現在無効化されています。");
+        }
+        featureGate.assertLegacyEndpointAllowed();
         if (contextBinder == null || contextFactory == null) throw denied();
         try {
             return contextBinder.bind(contextFactory.create());

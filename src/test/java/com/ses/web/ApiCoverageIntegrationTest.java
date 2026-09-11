@@ -56,18 +56,17 @@ class ApiCoverageIntegrationTest extends BaseIntegrationTest {
     @Test
     @WithMockUser(username = "admin", roles = "管理者")
     void testAiApi() throws Exception {
-        // AI Matching endpoints
+        // AI Matching endpoints — ai.enabled=false のtest既定では統一feature gateが503。
         String matchEngBody = "{\"engineerId\": 1}";
         mockMvc.perform(post("/api/ai/match/engineer-to-projects")
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(matchEngBody))
-                // legal_entity_idが未解決のfixtureはlegacy AI境界でもfail-closedする。
-                .andExpect(status().isNotFound());
+                .andExpect(status().isServiceUnavailable());
 
         mockMvc.perform(get("/api/ai/matching/project/1")
                         .with(csrf()))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isServiceUnavailable());
     }
 
     @Test

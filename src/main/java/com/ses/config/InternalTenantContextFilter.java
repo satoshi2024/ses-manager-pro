@@ -72,21 +72,13 @@ public class InternalTenantContextFilter extends OncePerRequestFilter {
             return;
         }
 
+        // tenantは認証済みprincipal/security contextに明示束縛された値だけを使う。
+        // AccountingTenantContextHolder・OIDC設定・getTenantId()のdefault・request入力は補完根拠にしない。
         String tenantId;
         if (principal instanceof LoginUser loginUser) {
             tenantId = loginUser.getTenantId();
         } else if (principal instanceof org.springframework.security.core.userdetails.UserDetails) {
             tenantId = com.ses.common.util.SecurityUtils.currentTenantId();
-            if (!StringUtils.hasText(tenantId)) {
-                tenantId = AccountingTenantContextHolder.getExplicitTenantId();
-            }
-            if (!StringUtils.hasText(tenantId) && oidcSecurityProperties != null
-                    && StringUtils.hasText(oidcSecurityProperties.getTenantId())) {
-                tenantId = oidcSecurityProperties.getTenantId().trim();
-            }
-            if (!StringUtils.hasText(tenantId)) {
-                tenantId = AccountingTenantContextHolder.getTenantId();
-            }
         } else {
             deny(response, TENANT_CONTEXT_REQUIRED);
             return;

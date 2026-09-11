@@ -2,6 +2,7 @@ package com.ses.service.ai;
 
 import com.ses.config.AiConfig;
 import com.ses.service.ai.copilot.CopilotFeatureGate;
+import com.ses.service.scheduler.TenantAwareBatchRunner;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
@@ -23,6 +24,7 @@ public class AiRecommendationRetentionScheduler {
     private final AiConfig aiConfig;
     private final Clock clock;
     private final CopilotFeatureGate featureGate;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(fixedDelayString = "${ai.retention.purge-fixed-delay-ms:86400000}")
     @SchedulerLock(name = "aiRecommendationRetentionPurge", lockAtLeastFor = "PT5S", lockAtMostFor = "PT30M")
@@ -30,8 +32,10 @@ public class AiRecommendationRetentionScheduler {
         try {
             featureGate.assertRetentionMaintenanceAllowed();
             LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
-            int purged = retentionService.purgeExpiredRedactedSummaries(
-                    now, aiConfig.getRetention().getPurgeBatchSize());
+            int batchSize = aiConfig.getRetention().getPurgeBatchSize();
+            // inventory tenantごとにrunWithTenantで囲み、ThreadLocalを必ず清掃する。
+            int purged = tenantAwareBatchRunner.runAndSum(tenantId ->
+                    retentionService.purgeExpiredRedactedSummaries(now, batchSize));
             if (purged > 0) {
                 log.debug("[AI retention] redacted summary purge完了: count={}", purged);
             }
