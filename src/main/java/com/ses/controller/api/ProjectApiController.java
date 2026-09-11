@@ -8,10 +8,11 @@ import com.ses.dto.project.ProjectListDto;
 import com.ses.dto.project.ProjectSaveDto;
 import com.ses.service.ProjectService;
 import com.ses.mapper.ProjectMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.security.TenantOwnershipResolver;
 import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
-import java.util.Collection;
 
 /**
  * 案件APIコントローラー
@@ -25,6 +26,7 @@ public class ProjectApiController {
     private final ProjectMapper projectMapper;
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
 
     /**
      * 案件一覧（ページネーション）
@@ -39,13 +41,14 @@ public class ProjectApiController {
             @RequestParam(required = false) String customerName) {
         // A7-11: PageUtils.safePage で size<=0 の全件取得と上限超過を防ぐ（旧 defaultSize 1000 はそのまま引き継ぐ）
         Page<ProjectListDto> page = PageUtils.safePage(current, size, 1000L);
-        
-        Collection<Long> allowedIds = effectiveCustomerIds();
-        if (allowedIds != null && allowedIds.isEmpty()) {
+        String tenantId = currentTenant();
+        java.util.Set<Long> allowedIds = effectiveCustomerIds(tenantId);
+        if (allowedIds.isEmpty()) {
             return ApiResult.success(new Page<>(current, size, 0));
         }
 
-        return ApiResult.success(projectMapper.selectPageWithNames(page, projectName, status, customerId, customerName, allowedIds));
+        return ApiResult.success(projectMapper.selectPageWithNames(
+                page, projectName, status, customerId, customerName, allowedIds, tenantId));
     }
 
     /**
@@ -53,18 +56,17 @@ public class ProjectApiController {
      */
     @GetMapping("/options")
     public ApiResult<java.util.List<com.ses.dto.common.OptionDto>> getOptions(@RequestParam(required = false) Long customerId) {
-        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Project> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-        if (customerId != null) {
-            queryWrapper.eq(Project::getCustomerId, customerId);
+        String tenantId = currentTenant();
+        java.util.Set<Long> allowedProjects = effectiveProjectIds(tenantId);
+        if (allowedProjects.isEmpty()) {
+            return ApiResult.success(java.util.Collections.emptyList());
         }
-        java.util.Set<Long> allowed = effectiveCustomerIds();
-        if (allowed != null) {
-            if (allowed.isEmpty()) return ApiResult.success(java.util.Collections.emptyList());
-            queryWrapper.in(Project::getCustomerId, allowed);
+        if (customerId != null && !effectiveCustomerIds(tenantId).contains(customerId)) {
+            return ApiResult.success(java.util.Collections.emptyList());
         }
-        queryWrapper.select(Project::getId, Project::getProjectName)
-                    .orderByDesc(Project::getId);
-        java.util.List<com.ses.dto.common.OptionDto> options = projectService.list(queryWrapper).stream()
+        java.util.List<com.ses.dto.common.OptionDto> options = projectMapper
+                .selectByIdsForTenant(tenantId, allowedProjects).stream()
+                .filter(p -> customerId == null || customerId.equals(p.getCustomerId()))
                 .map(p -> new com.ses.dto.common.OptionDto(p.getId(), p.getProjectName()))
                 .collect(java.util.stream.Collectors.toList());
         return ApiResult.success(options);
@@ -75,13 +77,10 @@ public class ProjectApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<Project> getById(@PathVariable Long id) {
-        java.util.Set<Long> allowedProjects = effectiveProjectIds();
-        if (allowedProjects != null && !allowedProjects.contains(id)) {
+        assertProjectVisible(id);
+        Project p = tenantOwnershipResolver.selectProject(currentTenant(), id);
+        if (p == null) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
-        }
-        Project p = projectService.getById(id);
-        if (p != null) {
-            dataScopeService.assertAllowedCustomer(p.getCustomerId());
         }
         return ApiResult.success(p);
     }
@@ -91,6 +90,7 @@ public class ProjectApiController {
      */
     @PostMapping
     public ApiResult<ProjectSaveDto> save(@Valid @RequestBody ProjectSaveDto project) {
+        assertCustomerInTenant(project.getCustomerId());
         if (project.getCustomerId() != null) {
             dataScopeService.assertAllowedCustomer(project.getCustomerId());
         }
@@ -104,18 +104,12 @@ public class ProjectApiController {
     @PutMapping
     public ApiResult<Boolean> update(@Valid @RequestBody ProjectSaveDto project) {
         // 先にDB上の既存案件を認可する（担当外案件を自分の顧客へ付け替えるIDOR防止 / R3R-32）。
-        if (project.getId() != null) {
-            java.util.Set<Long> allowedProjects = effectiveProjectIds();
-            if (allowedProjects != null && !allowedProjects.contains(project.getId())) {
-                throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
-            }
-            Project existing = projectService.getById(project.getId());
-            if (existing == null) {
-                throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
-            }
-            dataScopeService.assertAllowedCustomer(existing.getCustomerId());
+        if (project.getId() == null) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
-        // 変更後の顧客も担当スコープ内であることを検証する。
+        assertProjectVisible(project.getId());
+        // 変更後の顧客も現在tenant・担当スコープ内であることを検証する。
+        assertCustomerInTenant(project.getCustomerId());
         if (project.getCustomerId() != null) {
             dataScopeService.assertAllowedCustomer(project.getCustomerId());
         }
@@ -127,36 +121,59 @@ public class ProjectApiController {
      */
     @DeleteMapping("/{id}")
     public ApiResult<Boolean> delete(@PathVariable Long id) {
-        java.util.Set<Long> allowedProjects = effectiveProjectIds();
-        if (allowedProjects != null && !allowedProjects.contains(id)) {
-            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
-        }
-        Project p = projectService.getById(id);
-        if (p != null) {
-            dataScopeService.assertAllowedCustomer(p.getCustomerId());
-        }
+        assertProjectVisible(id);
         boolean success = projectService.removeById(id);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         return ApiResult.success(true);
     }
 
-    private java.util.Set<Long> effectiveCustomerIds() {
+    /**
+     * fullAccessは組織scopeのみを bypass し、tenant ownershipは常に交差する。
+     * null（=全tenant無制限）は返さない。
+     */
+    private java.util.Set<Long> effectiveCustomerIds(String tenantId) {
+        java.util.Set<Long> ownedIds = new java.util.HashSet<>(tenantOwnershipResolver.resolveCustomerIds(tenantId));
         java.util.Set<Long> dataIds = dataScopeService.isScoped()
                 ? dataScopeService.allowedCustomerIds() : null;
-        if (organizationScopeService.hasFullAccess()) {
-            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        if (dataIds != null) ownedIds.retainAll(dataIds);
+        if (!organizationScopeService.hasFullAccess()) {
+            ownedIds.retainAll(organizationScopeService.allowedCustomerIds(java.time.LocalDate.now()));
         }
-        return organizationScopeService.intersectWithDataScope(
-                organizationScopeService.allowedCustomerIds(java.time.LocalDate.now()), dataIds);
+        return ownedIds;
     }
 
-    private java.util.Set<Long> effectiveProjectIds() {
+    /**
+     * fullAccessは組織scopeのみを bypass し、顧客経由のtenant ownershipは常に交差する。
+     */
+    private java.util.Set<Long> effectiveProjectIds(String tenantId) {
+        java.util.Set<Long> ownedIds = new java.util.HashSet<>(tenantOwnershipResolver.resolveProjectIds(tenantId));
         java.util.Set<Long> dataIds = dataScopeService.isScoped()
                 ? dataScopeService.allowedProjectIds() : null;
-        if (organizationScopeService.hasFullAccess()) {
-            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        if (dataIds != null) ownedIds.retainAll(dataIds);
+        if (!organizationScopeService.hasFullAccess()) {
+            ownedIds.retainAll(organizationScopeService.allowedProjectIds(java.time.LocalDate.now()));
         }
-        return organizationScopeService.intersectWithDataScope(
-                organizationScopeService.allowedProjectIds(java.time.LocalDate.now()), dataIds);
+        return ownedIds;
+    }
+
+    private void assertProjectVisible(Long id) {
+        String tenantId = currentTenant();
+        if (tenantOwnershipResolver.selectProject(tenantId, id) == null) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+        if (!effectiveProjectIds(tenantId).contains(id)) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+    }
+
+    private void assertCustomerInTenant(Long customerId) {
+        if (customerId == null) return;
+        if (tenantOwnershipResolver.selectCustomer(currentTenant(), customerId) == null) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
+    }
+
+    private String currentTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 }

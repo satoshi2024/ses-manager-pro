@@ -7,6 +7,7 @@ import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProposalMapper;
+import com.ses.mapper.SalesActivityMapper;
 import com.ses.service.SystemConfigService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.AfterEach;
@@ -18,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.List;
 import java.util.Set;
@@ -36,6 +38,10 @@ class DataScopeServiceImplTest {
     @Mock private ContractMapper contractMapper;
     @Mock private ProposalMapper proposalMapper;
     @Mock private ProjectMapper projectMapper;
+
+    @Mock private SalesActivityMapper salesActivityMapper;
+    @Mock private ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
+    @Mock private ObjectProvider<com.ses.service.EngineerAccountLinkService> engineerAccountLinkServiceProvider;
 
     @InjectMocks
     private DataScopeServiceImpl service;

@@ -35,16 +35,20 @@ public final class AccountingTenantContextHolder {
         return getTenantId();
     }
 
-    /** 認証済みリクエスト等で、暗黙のdefaultへフォールバックせずtenantを必須化する。 */
+    /**
+     * 明示tenantまたはsecurity-bound tenantを必須化する。
+     * どちらも無い場合は暗黙の {@code "default"} へ落とさず失敗する。
+     * 互換用途の {@link #getTenantId()} は安全な書込み経路のfallbackに使わないこと。
+     */
     public static String requireTenantContext() {
         String tenant = getExplicitTenantId();
         if (tenant == null) {
             tenant = com.ses.common.util.SecurityUtils.currentTenantId();
         }
-        if (tenant == null) {
-            return getTenantId();
+        if (tenant == null || tenant.isBlank()) {
+            throw BusinessException.of(403, "TENANT_CONTEXT_REQUIRED");
         }
-        return tenant;
+        return tenant.trim();
     }
 
     /** 明示的に設定されたtenantだけを返す。定期処理のinventory検証で使用する。 */

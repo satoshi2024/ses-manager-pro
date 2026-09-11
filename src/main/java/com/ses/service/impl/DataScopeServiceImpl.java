@@ -49,6 +49,8 @@ public class DataScopeServiceImpl implements DataScopeService {
     private final ProjectMapper projectMapper;
     private final SalesActivityMapper salesActivityMapper;
     private final ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
+    /** 要員本人のaccount link解決。循環依存回避のため任意注入。 */
+    private final ObjectProvider<com.ses.service.EngineerAccountLinkService> engineerAccountLinkServiceProvider;
 
     /**
      * リクエスト単位のキャッシュ。リクエスト外では毎回新しい入れ物を返してキャッシュしない。
@@ -83,6 +85,10 @@ public class DataScopeServiceImpl implements DataScopeService {
 
     @Override
     public boolean isScoped() {
+        if ("要員".equals(SecurityUtils.currentRole())) {
+            // 要員は常に本人紐付け要員だけへ絞る（資格証憑等のIDOR防止）。
+            return true;
+        }
         if (isOrganizationScoped()) {
             return true;
         }
@@ -107,6 +113,9 @@ public class DataScopeServiceImpl implements DataScopeService {
 
     @Override
     public Set<Long> allowedEngineerIds() {
+        if ("要員".equals(SecurityUtils.currentRole())) {
+            return ownBoundEngineerIds();
+        }
         if (isOrganizationScoped()) {
             return organizationScope().allowedEngineerIds(java.time.LocalDate.now());
         }
@@ -116,8 +125,24 @@ public class DataScopeServiceImpl implements DataScopeService {
     @Override
     public Set<Long> allowedEngineerIds(java.time.LocalDate asOf) {
         if (asOf == null) throw com.ses.common.exception.BusinessException.of(403, "TIME_CONTEXT_REQUIRED");
+        if ("要員".equals(SecurityUtils.currentRole())) {
+            return ownBoundEngineerIds();
+        }
         if (isOrganizationScoped()) return organizationScope().allowedEngineerIds(asOf);
         return computeEngineerIds(SecurityUtils.currentUserId());
+    }
+
+    /** 要員ロールはaccount linkで束縛された本人要員だけを返す。未紐付けは空集合（fail-closed）。 */
+    private Set<Long> ownBoundEngineerIds() {
+        Caches caches = cache();
+        if (caches.engineerIds != null) {
+            return caches.engineerIds;
+        }
+        com.ses.service.EngineerAccountLinkService linkService = engineerAccountLinkServiceProvider == null
+                ? null : engineerAccountLinkServiceProvider.getIfAvailable();
+        Long ownId = linkService == null ? null : linkService.findEngineerIdByUserId(SecurityUtils.currentUserId());
+        caches.engineerIds = ownId == null ? Collections.emptySet() : Set.of(ownId);
+        return caches.engineerIds;
     }
 
     @Override
@@ -222,6 +247,9 @@ public class DataScopeServiceImpl implements DataScopeService {
 
     @Override
     public void assertAllowedEngineer(Long engineerId) {
+        if (engineerId == null) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        }
         if (isScoped() && !allowedEngineerIds().contains(engineerId)) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }

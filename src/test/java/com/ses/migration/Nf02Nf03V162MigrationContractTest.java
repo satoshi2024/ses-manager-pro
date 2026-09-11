@@ -18,7 +18,7 @@ class Nf02Nf03V162MigrationContractTest {
     private static final Path MIGRATION_ROOT = Path.of("src/main/resources/db/migration");
 
     @Test
-    void NF02_NF03の追加migrationがV162からV178まで順序通りに存在する() throws Exception {
+    void NF02_NF03の追加migrationがV162からV180まで順序通りに存在する() throws Exception {
         List<String> expected = List.of(
                 "V162__nf02_nf03_boundary_repair.sql",
                 "V163__nf02_nf03_tenant_attachment_notification_boundary.sql",
@@ -36,7 +36,9 @@ class Nf02Nf03V162MigrationContractTest {
                 "V175__nf02_nf03_resume_candidate_skill_cas.sql",
                 "V176__nf02_nf03_project_candidate_tenant_evidence.sql",
                 "V177__contract_tenant_sla_notification_boundary.sql",
-                "V178__nf02_nf03_contract_reference_ownership_repair.sql");
+                "V178__nf02_nf03_contract_reference_ownership_repair.sql",
+                "V179__nf09_bp_portal_submission_document_type.sql",
+                "V180__nf03_bp_availability_tenant_one_to_default.sql");
         for (String name : expected) {
             assertTrue(Files.exists(MIGRATION_ROOT.resolve(name)), name);
         }
@@ -46,10 +48,10 @@ class Nf02Nf03V162MigrationContractTest {
                     .map(Pattern.compile("^V(\\d+)(__|_).*")::matcher)
                     .filter(java.util.regex.Matcher::matches)
                     .map(m -> Integer.valueOf(m.group(1)))
-                    .filter(v -> v >= 162 && v <= 178)
+                    .filter(v -> v >= 162 && v <= 180)
                     .sorted()
                     .toList();
-            assertEquals(List.of(162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178), versions);
+            assertEquals(List.of(162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180), versions);
         }
     }
 
@@ -93,6 +95,7 @@ class Nf02Nf03V162MigrationContractTest {
         String v176 = read("V176__nf02_nf03_project_candidate_tenant_evidence.sql");
         String v177 = read("V177__contract_tenant_sla_notification_boundary.sql");
         String v178 = read("V178__nf02_nf03_contract_reference_ownership_repair.sql");
+        String v180 = read("V180__nf03_bp_availability_tenant_one_to_default.sql");
 
         assertTrue(v164.contains("ALTER TABLE m_certification"));
         assertTrue(v164.contains("version INT NOT NULL DEFAULT 0"));
@@ -182,6 +185,13 @@ class Nf02Nf03V162MigrationContractTest {
         assertTrue(v178.contains("SHA2"));
         assertTrue(v178.contains("TENANT_REFERENCE_MISMATCH"));
         assertFalse(v178.contains("'default'"));
+        assertTrue(v180.contains("UPDATE t_bp_availability"));
+        assertTrue(v180.contains("tenant_id = 'default'"));
+        assertTrue(v180.contains("WHERE tenant_id IN ('1', '1.0')"));
+        assertTrue(v180.contains("BP_AVAILABILITY"));
+        assertTrue(v180.contains("TENANT_UNRESOLVED"));
+        assertTrue(v180.contains("__ses_check_v180_bp_availability_tenant"));
+        assertFalse(v180.contains("ADD COLUMN tenant_id"));
     }
 
     private String read(String name) throws Exception {

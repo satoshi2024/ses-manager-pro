@@ -21,9 +21,9 @@ public interface MonthlyClosingService {
 
     /**
      * 対象月が更新可能（未締め）であることを保証する共通ガード。
-     * 締め設定行を FOR UPDATE でロックしたうえで判定するため、confirm と保護対象更新
+     * t_monthly_closing の対象行を FOR UPDATE でロックしたうえで判定するため、confirm と保護対象更新
      * （工数保存・請求取消等）を直列化する。呼び出し側の @Transactional 内で使用すること。
-     * 締め済みなら例外を送出し、締めJSON破損時は fail-closed（更新拒否）とする。
+     * 締め済みなら例外を送出する。tenant 欠落は fail-closed。
      */
     void assertOpenForUpdate(String month);
 }

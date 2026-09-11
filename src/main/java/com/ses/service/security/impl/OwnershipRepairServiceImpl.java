@@ -44,17 +44,17 @@ public class OwnershipRepairServiceImpl implements OwnershipRepairService {
     @Override
     @Transactional(readOnly = true)
     public List<OwnershipRepairQueue> listPending() {
-        authorityResolver.requireAuthority();
-        return queueMapper.selectPending();
+        RepairAuthorityResolver.RepairAuthority authority = authorityResolver.requireAuthority();
+        return queueMapper.selectPending(authority.tenantId());
     }
 
     @Override
     @Transactional(readOnly = true)
     public Map<String, Object> summary() {
-        authorityResolver.requireAuthority();
+        RepairAuthorityResolver.RepairAuthority authority = authorityResolver.requireAuthority();
         Map<String, Object> result = new LinkedHashMap<>();
-        LocalDateTime oldest = queueMapper.selectOldestPendingAt();
-        result.put("pendingCount", queueMapper.countPending());
+        LocalDateTime oldest = queueMapper.selectOldestPendingAt(authority.tenantId());
+        result.put("pendingCount", queueMapper.countPending(authority.tenantId()));
         result.put("oldestPendingAt", oldest);
         result.put("oldestPendingAgeSeconds", oldest == null ? 0L
                 : Math.max(0L, Duration.between(oldest, LocalDateTime.now()).getSeconds()));
@@ -71,9 +71,12 @@ public class OwnershipRepairServiceImpl implements OwnershipRepairService {
                 || request.getReason().isBlank() || request.getReason().trim().length() > 500) {
             throw BusinessException.of(400, "error.tenant.repairEvidenceRequired");
         }
-        OwnershipRepairQueue row = queueMapper.selectForUpdate(queueId);
+        OwnershipRepairQueue row = queueMapper.selectForUpdate(queueId, authority.tenantId());
         if (row == null) {
             throw BusinessException.of(404, "error.notFound");
+        }
+        if (!authority.tenantId().equals(row.getConflictingTenantId())) {
+            throw BusinessException.of(403, "error.forbidden");
         }
         if (!"CLAIMED".equals(row.getStatus())
                 || !request.getClaimToken().equals(row.getClaimToken())
@@ -112,9 +115,12 @@ public class OwnershipRepairServiceImpl implements OwnershipRepairService {
                 || sysUserMapper.selectByIdAndTenant(assigneeUserId, authority.tenantId()) == null) {
             throw BusinessException.of(403, "error.tenant.repairAssignee");
         }
-        OwnershipRepairQueue row = queueMapper.selectForUpdate(queueId);
+        OwnershipRepairQueue row = queueMapper.selectForUpdate(queueId, authority.tenantId());
         if (row == null) {
             throw BusinessException.of(404, "error.notFound");
+        }
+        if (!authority.tenantId().equals(row.getConflictingTenantId())) {
+            throw BusinessException.of(403, "error.forbidden");
         }
         if (!"PENDING".equals(row.getStatus()) || !expectedVersion.equals(row.getVersion())) {
             throw BusinessException.of(409, "error.tenant.repairConflict");

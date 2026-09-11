@@ -62,7 +62,7 @@ class SalesInvoiceIntegrationTest {
     private MonthlyClosingService monthlyClosingService;
 
     @Autowired
-    private com.ses.mapper.SystemConfigMapper systemConfigMapper;
+    private com.ses.mapper.MonthlyClosingMapper monthlyClosingMapper;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -77,6 +77,7 @@ class SalesInvoiceIntegrationTest {
 
     @AfterEach
     void cleanupFixtures() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
         if (invoice != null && invoice.getId() != null) {
             invoiceService.removeById(invoice.getId());
             jdbcTemplate.update("DELETE FROM t_invoice_item WHERE invoice_id = ?", invoice.getId());
@@ -96,6 +97,7 @@ class SalesInvoiceIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
         mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
 
         connection = connectionService.getOrCreateConnection("default", null, "freee", "accounting");
@@ -273,16 +275,12 @@ class SalesInvoiceIntegrationTest {
         closedInvoice.setTaxRate(new BigDecimal("0.100"));
         invoiceService.save(closedInvoice);
 
-        // 2025-01 を締め済みに設定
-        SystemConfig config = systemConfigMapper.selectById("closing.confirmed-months");
-        if (config == null) {
-            config = new SystemConfig();
-            config.setConfigKey("closing.confirmed-months");
-            config.setConfigValue("[{\"month\":\"2025-01\",\"by\":1,\"at\":\"2025-02-01T00:00:00\"}]");
-            systemConfigMapper.insert(config);
-        } else {
-            config.setConfigValue("[{\"month\":\"2025-01\",\"by\":1,\"at\":\"2025-02-01T00:00:00\"}]");
-            systemConfigMapper.updateById(config);
+        // 2025-01 を default tenant の締め済みに設定
+        monthlyClosingMapper.ensureRow("default", "2025-01");
+        var row = monthlyClosingMapper.selectByTenantAndMonth("default", "2025-01");
+        if (row.getConfirmedAt() == null) {
+            monthlyClosingMapper.confirmCas("default", "2025-01", 1L,
+                    java.time.LocalDateTime.of(2025, 2, 1, 0, 0), row.getVersion());
         }
 
         assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(closedInvoice.getId(), 1L))

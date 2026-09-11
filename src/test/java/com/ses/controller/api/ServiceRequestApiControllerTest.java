@@ -157,6 +157,7 @@ public class ServiceRequestApiControllerTest {
                 .description("更新された本文")
                 .priority("P2")
                 .category("BILLING")
+                .version(testRequest.getVersion())
                 .build();
 
         mockMvc.perform(put("/api/service-desk/requests/" + testRequest.getId())
@@ -170,6 +171,23 @@ public class ServiceRequestApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.subject").value("更新された件名"))
                 .andExpect(jsonPath("$.data.priority").value("P2"));
+    }
+
+    @Test
+    @DisplayName("属性更新はversionなしを拒否すること")
+    void testUpdateRequest_requiresVersion() throws Exception {
+        ServiceRequestUpdateRequest updateReq = ServiceRequestUpdateRequest.builder()
+                .subject("version無し更新")
+                .description("拒否されるべき")
+                .priority("P2")
+                .category("BILLING")
+                .build();
+
+        mockMvc.perform(put("/api/service-desk/requests/" + testRequest.getId())
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updateReq)))
+                .andExpect(jsonPath("$.code").value(400));
     }
 
     @Test

@@ -49,7 +49,8 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         if (entity == null || entity.getId() == null) {
             throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
-        Project old = getById(entity.getId());
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Project old = baseMapper.selectByIdForTenant(entity.getId(), tenantId);
         if (old == null) throw BusinessException.of(404, "error.scope.notFound");
         Long customerId = entity.getCustomerId() == null ? old.getCustomerId() : entity.getCustomerId();
         bindLegalEntity(entity, customerId, old);
@@ -60,7 +61,8 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
     @Transactional(rollbackFor = Exception.class)
     public boolean removeById(Serializable id) {
         Long projectId = Long.valueOf(id.toString());
-        Project current = getById(projectId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Project current = baseMapper.selectByIdForTenant(projectId, tenantId);
         if (current == null) return false;
         bindLegalEntity(current, current.getCustomerId(), current);
         long contracts = contractMapper.selectCountForTenant(
@@ -94,8 +96,12 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean updateProjectWithSkills(com.ses.dto.project.ProjectSaveDto dto) {
-        Project old = this.getById(dto.getId());
-        if (old != null && old.getCustomerId() != null && !old.getCustomerId().equals(dto.getCustomerId())) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Project old = baseMapper.selectByIdForTenant(dto.getId(), tenantId);
+        if (old == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        if (old.getCustomerId() != null && !old.getCustomerId().equals(dto.getCustomerId())) {
             long contracts = contractMapper.selectCountForTenant(
                     new LambdaQueryWrapper<Contract>().eq(Contract::getProjectId, dto.getId()),
                     com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
@@ -123,8 +129,14 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         if (legalEntityContextService == null) {
             throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
-        Customer customer = customerMapper.selectById(customerId);
-        if (customer == null || customer.getLegalEntityId() == null) {
+        // 顧客tenant不一致・NULL ownershipは fail-closed（法人境界の前に母集団外扱い）。
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Customer customer = customerId == null ? null
+                : customerMapper.selectByIdForTenant(customerId, tenantId);
+        if (customer == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        if (customer.getLegalEntityId() == null) {
             throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
         legalEntityContextService.assertCurrent(customer.getLegalEntityId());

@@ -55,9 +55,29 @@ ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100);
 CREATE INDEX IF NOT EXISTS idx_contract_tenant_customer_status_sales
     ON t_contract (tenant_id, customer_id, status, sales_user_id, deleted_flag, id);
 
+-- V180相当。BIGINT 1由来の '1'/'1.0' は実行時に残さない（契約テストでDDL本文を固定）。
+-- H2では実行時変換は行わず、初期値をdefaultにしておく。
+UPDATE t_bp_availability SET tenant_id = 'default'
+ WHERE tenant_id IN ('1', '1.0');
+
 -- V172相当。契約の要員・案件・顧客・営業ownership監査を高速化する。
 -- 不明・衝突行はtenantを推測せず、resolverから不可視のまま修復キューで扱う。
 CREATE INDEX IF NOT EXISTS idx_contract_tenant_reference
     ON t_contract (tenant_id, customer_id, engineer_id, project_id, sales_user_id, deleted_flag, id);
 CREATE INDEX IF NOT EXISTS idx_user_org_tenant_owner
     ON t_user_organization (tenant_id, user_id, organization_id, deleted_flag, id);
+
+-- V181相当。月次締めはtenant×月の正本行。旧グローバルJSONはdefaultのみ写経対象。
+CREATE TABLE IF NOT EXISTS t_monthly_closing (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(100),
+    work_month VARCHAR(7) NOT NULL,
+    confirmed_by BIGINT,
+    confirmed_at DATETIME,
+    version INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, work_month)
+);
+CREATE INDEX IF NOT EXISTS idx_monthly_closing_tenant_confirmed
+    ON t_monthly_closing (tenant_id, confirmed_at, work_month);

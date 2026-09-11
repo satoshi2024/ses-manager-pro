@@ -2,10 +2,15 @@ package com.ses.service.security;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
+import com.ses.config.LoginUser;
+import com.ses.config.OidcLoginUser;
 import com.ses.config.OidcSecurityProperties;
+import com.ses.config.integrationhub.ExternalApiPrincipal;
 import com.ses.mapper.AttendanceScopeMapper;
 import com.ses.service.accounting.AccountingTimezoneResolver;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -36,18 +41,23 @@ public class LegalEntityContextService {
         this.oidcSecurityProperties = oidcSecurityProperties;
     }
 
-    /** 現在のsecurity-bound tenantを返す。AccountingTenantContextHolderの既定値には依存しない。 */
+    /**
+     * 現在のsecurity-bound tenantを返す。
+     * 受け入れるprincipalは LoginUser / OidcLoginUser / ExternalApiPrincipal のみ。
+     * AccountingTenantContextHolder や default 推測には依存しない。
+     */
     public String requireTenantId() {
-        String tenantId = SecurityUtils.currentTenantId();
-        if (tenantId == null || tenantId.isBlank()) {
-            org.springframework.security.core.Authentication auth =
-                    org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
-            if (auth == null || (auth.getPrincipal() instanceof org.springframework.security.core.userdetails.UserDetails
-                    && !(auth.getPrincipal() instanceof com.ses.config.LoginUser)
-                    && !(auth.getPrincipal() instanceof com.ses.config.OidcLoginUser))) {
-                tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
-            }
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || auth.getPrincipal() == null) {
+            throw BusinessException.of(403, "TENANT_CONTEXT_REQUIRED");
         }
+        Object principal = auth.getPrincipal();
+        if (!(principal instanceof LoginUser)
+                && !(principal instanceof OidcLoginUser)
+                && !(principal instanceof ExternalApiPrincipal)) {
+            throw BusinessException.of(403, "TENANT_CONTEXT_REQUIRED");
+        }
+        String tenantId = SecurityUtils.currentTenantId();
         if (tenantId == null || tenantId.isBlank()) {
             throw BusinessException.of(403, "TENANT_CONTEXT_REQUIRED");
         }
@@ -84,45 +94,28 @@ public class LegalEntityContextService {
 
     /** Factoryと通常writeが同じasOf/zone規則を使うための明示的なoverload。 */
     public Long requireCurrentLegalEntityId(java.time.Instant asOfInstant, ZoneId zone) {
+        if (attendanceScopeMapper == null) {
+            throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
         Long userId = SecurityUtils.currentUserId();
         String role = SecurityUtils.currentRole();
-        if (role == null || (userId == null && !"管理者".equals(role))) {
-            List<Long> all = attendanceScopeMapper == null ? null : attendanceScopeMapper.selectAllLegalEntityIds();
-            if (all != null && all.size() == 1) {
-                return all.get(0);
-            }
-            if (all == null || all.isEmpty()) {
-                return 1L;
-            }
+        if (role == null || role.isBlank()) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        if (userId == null && !"管理者".equals(role)) {
             throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
         if (asOfInstant == null || zone == null) {
             throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
+        // tenant は security-bound のみ。Holder 補完は禁止。
+        requireTenantId();
+
         LocalDate asOf = asOfInstant.atZone(zone).toLocalDate();
         List<Long> ids = "管理者".equals(role)
-                ? (attendanceScopeMapper == null ? null : attendanceScopeMapper.selectAllLegalEntityIds())
-                : (attendanceScopeMapper == null ? null : attendanceScopeMapper.selectLegalEntityIdsByUser(userId, asOf));
-        if (attendanceScopeMapper == null) {
-            return 1L;
-        }
+                ? attendanceScopeMapper.selectAllLegalEntityIds()
+                : attendanceScopeMapper.selectLegalEntityIdsByUser(userId, asOf);
         if (ids == null || ids.isEmpty()) {
-            String tenantId = requireTenantId();
-            if ("default".equals(tenantId)
-                    && (oidcSecurityProperties == null || oidcSecurityProperties.getTenantId() == null || "default".equals(oidcSecurityProperties.getTenantId()))) {
-                List<Long> all = attendanceScopeMapper.selectAllLegalEntityIds();
-                if (all == null || all.isEmpty()) {
-                    return 1L;
-                }
-                if (all.size() == 1) {
-                    return all.get(0);
-                }
-            } else if (!"管理者".equals(role)) {
-                List<Long> all = attendanceScopeMapper.selectAllLegalEntityIds();
-                if (all != null && all.size() == 1) {
-                    return all.get(0);
-                }
-            }
             throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
         if (ids.stream().filter(Objects::nonNull).distinct().count() != 1) {

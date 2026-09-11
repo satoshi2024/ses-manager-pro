@@ -55,7 +55,8 @@ class OwnershipRepairServiceImplTest {
         row.setStatus("CLAIMED");
         row.setVersion(2);
         row.setClaimToken("claim");
-        when(queueMapper.selectForUpdate(1L)).thenReturn(row);
+        row.setConflictingTenantId("tenant-a");
+        when(queueMapper.selectForUpdate(1L, "tenant-a")).thenReturn(row);
         OwnershipRepairRequest request = new OwnershipRepairRequest();
         request.setExpectedVersion(2);
         request.setClaimToken("claim");
@@ -91,7 +92,8 @@ class OwnershipRepairServiceImplTest {
         OwnershipRepairQueue row = new OwnershipRepairQueue();
         row.setStatus("PENDING");
         row.setVersion(0);
-        when(queueMapper.selectForUpdate(1L)).thenReturn(row);
+        row.setConflictingTenantId("tenant-a");
+        when(queueMapper.selectForUpdate(1L, "tenant-a")).thenReturn(row);
         when(queueMapper.claim(eq(1L), eq(99L), anyString(), any(), eq(0), eq(77L), eq("tenant-a")))
                 .thenReturn(1);
         service.assign(1L, 99L, 0);
@@ -104,7 +106,8 @@ class OwnershipRepairServiceImplTest {
         row.setStatus("CLAIMED");
         row.setVersion(1);
         row.setClaimToken("claim");
-        when(queueMapper.selectForUpdate(1L)).thenReturn(row);
+        row.setConflictingTenantId("tenant-a");
+        when(queueMapper.selectForUpdate(1L, "tenant-a")).thenReturn(row);
 
         OwnershipRepairRequest request = new OwnershipRepairRequest();
         request.setExpectedVersion(1);
@@ -118,5 +121,17 @@ class OwnershipRepairServiceImplTest {
         verifyNoInteractions(customerMapper, engineerMapper, bpAvailabilityMapper, engineerAccountLinkMapper);
         verify(queueMapper, never()).markResolvedCas(anyLong(), anyString(), anyString(), anyString(),
                 any(), any(), any(), anyString(), anyString(), any(), anyString(), anyInt());
+    }
+
+    @Test
+    void 他tenantの修復行はclaimもresolveもできない() {
+        when(sysUserMapper.selectByIdAndTenant(99L, "tenant-a")).thenReturn(new com.ses.entity.SysUser());
+        when(queueMapper.selectForUpdate(9L, "tenant-a")).thenReturn(null);
+
+        com.ses.common.exception.BusinessException ex = assertThrows(
+                com.ses.common.exception.BusinessException.class,
+                () -> service.assign(9L, 99L, 0));
+        assertEquals(404, ex.getCode());
+        verify(queueMapper, never()).claim(anyLong(), anyLong(), anyString(), any(), anyInt(), anyLong(), anyString());
     }
 }

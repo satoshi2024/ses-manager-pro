@@ -104,14 +104,11 @@ public class AutocompleteApiController {
 
     private java.util.Set<Long> effectiveProjectIds() {
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
-        java.util.Set<Long> ownedCustomerIds = new java.util.HashSet<>(tenantOwnershipResolver.resolveCustomerIds(tenantId));
         java.util.Set<Long> dataIds = dataScopeService.isScoped()
                 ? dataScopeService.allowedProjectIds() : null;
         java.util.Set<Long> scoped = organizationScopeService.hasFullAccess() ? null
                 : organizationScopeService.allowedProjectIds(java.time.LocalDate.now());
-        java.util.Set<Long> ids = new java.util.HashSet<>();
-        // Resolve project IDs from tenant-owned customers in SQL; optional DataScope/org IDs are a second layer.
-        ids.addAll(projectMapper.selectOwnedProjectIds(tenantId));
+        java.util.Set<Long> ids = new java.util.HashSet<>(tenantOwnershipResolver.resolveProjectIds(tenantId));
         if (dataIds != null) ids.retainAll(dataIds);
         if (scoped != null) ids.retainAll(scoped);
         return ids;

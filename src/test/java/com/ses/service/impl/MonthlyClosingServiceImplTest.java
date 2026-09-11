@@ -5,24 +5,25 @@ import com.ses.dto.WorkRecordGridDto;
 import com.ses.dto.closing.MonthlyClosingSummaryDto;
 import com.ses.dto.invoice.InvoiceBalanceDto;
 import com.ses.dto.invoice.UnbilledWorkRecordDto;
+import com.ses.entity.MonthlyClosing;
 import com.ses.entity.WorkRecord;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.InvoiceMapper;
-import com.ses.mapper.WorkRecordMapper;
-import com.ses.mapper.SystemConfigMapper;
+import com.ses.mapper.MonthlyClosingMapper;
 import com.ses.mapper.SysUserMapper;
-import com.ses.service.SystemConfigService;
+import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 
@@ -38,8 +39,7 @@ class MonthlyClosingServiceImplTest {
     @Mock private WorkRecordMapper workRecordMapper;
     @Mock private InvoiceMapper invoiceMapper;
     @Mock private BpPaymentMapper bpPaymentMapper;
-    @Mock private SystemConfigService systemConfigService;
-    @Mock private SystemConfigMapper systemConfigMapper;
+    @Mock private MonthlyClosingMapper monthlyClosingMapper;
     @Mock private SysUserMapper sysUserMapper;
     @Mock private com.ses.service.compliance.LaborComplianceService laborComplianceService;
     @Mock private com.ses.service.MenuCacheService menuCacheService;
@@ -56,9 +56,25 @@ class MonthlyClosingServiceImplTest {
                 service, "monthlyAccountingSnapshotService", monthlyAccountingSnapshotService);
     }
 
-    @org.junit.jupiter.api.AfterEach
+    @AfterEach
     void clearTenantContext() {
         AccountingTenantContextHolder.clear();
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
+
+    private MonthlyClosing openRow(String month) {
+        MonthlyClosing row = new MonthlyClosing();
+        row.setTenantId("default");
+        row.setWorkMonth(month);
+        row.setVersion(0);
+        return row;
+    }
+
+    private MonthlyClosing closedRow(String month, Long by) {
+        MonthlyClosing row = openRow(month);
+        row.setConfirmedBy(by);
+        row.setConfirmedAt(LocalDateTime.of(2026, 7, 1, 10, 0));
+        return row;
     }
 
     private void stubEmptyAll() {
@@ -72,8 +88,14 @@ class MonthlyClosingServiceImplTest {
                 .thenReturn(Collections.emptyList());
         lenient().when(invoiceMapper.selectOutstandingBalancesForTenant(eq("default")))
                 .thenReturn(Collections.emptyList());
-        lenient().when(systemConfigMapper.selectByIdForUpdate(anyString())).thenReturn(new com.ses.entity.SystemConfig());
-        lenient().when(systemConfigMapper.selectById(anyString())).thenReturn(new com.ses.entity.SystemConfig());
+        lenient().when(monthlyClosingMapper.ensureRow(eq("default"), anyString())).thenReturn(1);
+        lenient().when(monthlyClosingMapper.selectForUpdate(eq("default"), anyString()))
+                .thenAnswer(inv -> openRow(inv.getArgument(1)));
+        lenient().when(monthlyClosingMapper.selectByTenantAndMonth(eq("default"), anyString()))
+                .thenReturn(null);
+        lenient().when(monthlyClosingMapper.confirmCas(eq("default"), anyString(), any(), any(), any()))
+                .thenReturn(1);
+        lenient().when(monthlyClosingMapper.reopenCas(eq("default"), anyString(), any())).thenReturn(1);
     }
 
     @Test
@@ -85,11 +107,11 @@ class MonthlyClosingServiceImplTest {
         lenient().when(workRecordMapper.selectMonthlyGrid(anyString(), anyString(), eq("default")))
                 .thenReturn(List.of(entered, unentered));
         WorkRecord wr = new WorkRecord();
-        wr.setBillingAmount(new BigDecimal("1000")); // fix NPE
+        wr.setBillingAmount(new BigDecimal("1000"));
         lenient().when(workRecordMapper.selectUnconfirmedByWorkMonthForTenant(anyString(), eq("default")))
                 .thenReturn(List.of(wr));
         UnbilledWorkRecordDto unbilled = new UnbilledWorkRecordDto();
-        unbilled.setBillingAmount(new BigDecimal("2000")); // fix NPE
+        unbilled.setBillingAmount(new BigDecimal("2000"));
         lenient().when(invoiceMapper.selectUnbilledWorkRecordsAll(anyString(), eq("default")))
                 .thenReturn(List.of(unbilled));
         lenient().when(bpPaymentMapper.selectListWithDetailsForTenant(anyString(), eq("未払"), eq("default")))
@@ -103,7 +125,8 @@ class MonthlyClosingServiceImplTest {
         notDue.setStatus("送付済");
         lenient().when(invoiceMapper.selectOutstandingBalancesForTenant(eq("default")))
                 .thenReturn(List.of(overdue, notDue));
-        lenient().when(systemConfigMapper.selectById(anyString())).thenReturn(new com.ses.entity.SystemConfig());
+        lenient().when(monthlyClosingMapper.selectByTenantAndMonth(eq("default"), anyString()))
+                .thenReturn(null);
 
         MonthlyClosingSummaryDto s = service.summary("2026-06");
 
@@ -137,11 +160,10 @@ class MonthlyClosingServiceImplTest {
 
         service.confirmClosing("2026-06", 7L, "管理者");
 
-        ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
-        verify(systemConfigService).put(eq("closing.confirmed-months"), json.capture(), anyString());
+        verify(monthlyClosingMapper).ensureRow("default", "2026-06");
+        verify(monthlyClosingMapper).selectForUpdate("default", "2026-06");
         verify(monthlyAccountingSnapshotService).snapshotMonth("2026-06");
-        assertTrue(json.getValue().contains("2026-06"));
-        assertTrue(json.getValue().contains("7"));
+        verify(monthlyClosingMapper).confirmCas(eq("default"), eq("2026-06"), eq(7L), any(), eq(0));
     }
 
     @Test
@@ -150,12 +172,12 @@ class MonthlyClosingServiceImplTest {
         WorkRecord wr = new WorkRecord();
         wr.setBillingAmount(new BigDecimal("100"));
         lenient().when(workRecordMapper.selectUnconfirmedByWorkMonthForTenant(anyString(), eq("default")))
-                .thenReturn(List.of(wr)); // (b) 残あり
+                .thenReturn(List.of(wr));
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.confirmClosing("2026-06", 7L, "管理者"));
         assertTrue(ex.getMessage().contains("error.closing.notReady"));
-        verify(systemConfigService, never()).put(any(), any(), any());
+        verify(monthlyClosingMapper, never()).confirmCas(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -174,38 +196,43 @@ class MonthlyClosingServiceImplTest {
 
     @Test
     void isClosed_reflectsRecord() {
-        com.ses.entity.SystemConfig config = new com.ses.entity.SystemConfig();
-        config.setConfigValue("[{\"month\":\"2026-06\",\"userId\":7,\"confirmedAt\":\"2026-07-01T10:00:00\"}]");
-        lenient().when(systemConfigMapper.selectById(anyString())).thenReturn(config);
-        
+        when(monthlyClosingMapper.selectByTenantAndMonth("default", "2026-06"))
+                .thenReturn(closedRow("2026-06", 7L));
+        when(monthlyClosingMapper.selectByTenantAndMonth("default", "2026-05"))
+                .thenReturn(openRow("2026-05"));
+
         assertTrue(service.isClosed("2026-06"));
         assertFalse(service.isClosed("2026-05"));
     }
 
     @Test
     void reopen_removesRecord() {
-        com.ses.entity.SystemConfig config = new com.ses.entity.SystemConfig();
-        config.setConfigValue("[{\"month\":\"2026-06\",\"userId\":7,\"confirmedAt\":\"2026-07-01T10:00:00\"}]");
-        lenient().when(systemConfigMapper.selectByIdForUpdate(anyString())).thenReturn(config);
-        
+        when(monthlyClosingMapper.ensureRow("default", "2026-06")).thenReturn(1);
+        when(monthlyClosingMapper.selectForUpdate("default", "2026-06"))
+                .thenReturn(closedRow("2026-06", 7L));
+        when(monthlyClosingMapper.reopenCas("default", "2026-06", 0)).thenReturn(1);
+
         service.reopenClosing("2026-06", 7L, "マネージャー");
-        
-        ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
-        verify(systemConfigService).put(eq("closing.confirmed-months"), json.capture(), anyString());
-        assertFalse(json.getValue().contains("2026-06"));
+
+        verify(monthlyClosingMapper).reopenCas("default", "2026-06", 0);
     }
 
     @Test
     void reopen_notClosedThrows() {
-        lenient().when(systemConfigMapper.selectByIdForUpdate(anyString())).thenReturn(new com.ses.entity.SystemConfig());
+        when(monthlyClosingMapper.ensureRow("default", "2026-06")).thenReturn(1);
+        when(monthlyClosingMapper.selectForUpdate("default", "2026-06"))
+                .thenReturn(openRow("2026-06"));
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.reopenClosing("2026-06", 7L, "管理者"));
         assertTrue(ex.getMessage().contains("error.closing.notClosed"));
     }
 
-    @org.junit.jupiter.api.AfterEach
-    void clearAuth() {
-        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    @Test
+    void missingTenant_failClosed() {
+        AccountingTenantContextHolder.clear();
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.isClosed("2026-06"));
+        assertTrue(ex.getMessage().contains("TENANT_CONTEXT_REQUIRED"));
     }
 
     /** 指定ロールでログイン中の状態にする。 */

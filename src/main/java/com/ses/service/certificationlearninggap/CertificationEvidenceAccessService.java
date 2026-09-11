@@ -76,6 +76,11 @@ public class CertificationEvidenceAccessService {
 
     public EvidenceDownload downloadForManagement(Long engineerId, Long recordId, Long documentId, Integer versionNo,
                                                   Authentication authentication) {
+        String role = com.ses.common.util.SecurityUtils.currentRole();
+        // 営業は資格証憑の管理downloadを既定拒否（SecurityConfigと二重化）。明示組織scopeはquery側で評価する。
+        if ("営業".equals(role) || "要員".equals(role)) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
         EngineerCertification record = record(recordId);
         if (!Objects.equals(engineerId, record.getEngineerId())) {
             throw BusinessException.of(404, "error.scope.notFound");
@@ -88,8 +93,8 @@ public class CertificationEvidenceAccessService {
     public EvidenceDownload downloadForSelf(Long actorUserId, Long recordId, Long documentId, Integer versionNo) {
         EngineerCertification record = record(recordId);
         Long ownEngineerId = actorUserId == null ? null : accountLinkService.findEngineerIdByUserId(actorUserId);
-        if (!Objects.equals(ownEngineerId, record.getEngineerId())) {
-            throw BusinessException.of(404, "error.scope.notFound");
+        if (ownEngineerId == null || !Objects.equals(ownEngineerId, record.getEngineerId())) {
+            throw BusinessException.of(403, "error.forbidden");
         }
         return download(record, documentId, versionNo);
     }

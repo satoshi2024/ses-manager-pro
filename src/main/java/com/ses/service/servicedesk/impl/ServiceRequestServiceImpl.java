@@ -373,6 +373,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateRequest(Long id, ServiceRequestUpdateRequest req) {
+        if (req == null || req.getVersion() == null) {
+            throw BusinessException.of(400, "サービスリクエストversionは必須です");
+        }
         ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
         if (existing == null || !currentTenant().equals(existing.getTenantId())) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
@@ -390,8 +393,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 req.getProjectId(), req.getEngineerId());
         validateOwnerUser(req.getOwnerUserId());
 
-        int expectedVersion = req.getVersion() != null ? req.getVersion()
-                : (existing.getVersion() != null ? existing.getVersion() : 0);
+        int expectedVersion = req.getVersion();
         int updated = serviceRequestMapper.update(null, new LambdaUpdateWrapper<ServiceRequest>()
                 .eq(ServiceRequest::getId, id)
                 .eq(ServiceRequest::getTenantId, currentTenant())

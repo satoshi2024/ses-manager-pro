@@ -252,6 +252,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/notifications", "/api/notifications/**").authenticated()
                 // 資産貸与証跡のdetail/downloadはDocumentServiceのDocumentLink認可を通す。
                 // 一覧/exportは要員へ開放せず、本人証跡の対象IDだけをserviceで再検証する。
+                // CERTIFICATION_EVIDENCE は本経路では認可しない（FileScopeが403）。
+                // 資格証憑は /api/certification-learning-gap/** または /api/my/** の専用境界のみ。
                 .requestMatchers(HttpMethod.GET, "/api/documents/*",
                         "/api/documents/*/versions/*/download")
                 .hasAnyRole("管理者", "営業", "HR", "マネージャー", "要員")

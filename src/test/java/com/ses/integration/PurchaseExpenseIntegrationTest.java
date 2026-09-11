@@ -81,6 +81,9 @@ class PurchaseExpenseIntegrationTest {
     private SystemConfigMapper systemConfigMapper;
 
     @Autowired
+    private com.ses.mapper.MonthlyClosingMapper monthlyClosingMapper;
+
+    @Autowired
     private AccountingTimezoneResolver timezoneResolver;
 
     @Autowired
@@ -483,16 +486,12 @@ class PurchaseExpenseIntegrationTest {
         closedPayment.setStatus("未払");
         bpPaymentMapper.insert(closedPayment);
 
-        // 2025-01 を締め済みに設定
-        SystemConfig config = systemConfigMapper.selectById("closing.confirmed-months");
-        if (config == null) {
-            config = new SystemConfig();
-            config.setConfigKey("closing.confirmed-months");
-            config.setConfigValue("[{\"month\":\"2025-01\",\"by\":1,\"at\":\"2025-02-01T00:00:00\"}]");
-            systemConfigMapper.insert(config);
-        } else {
-            config.setConfigValue("[{\"month\":\"2025-01\",\"by\":1,\"at\":\"2025-02-01T00:00:00\"}]");
-            systemConfigMapper.updateById(config);
+        // 2025-01 を default tenant の締め済みに設定
+        monthlyClosingMapper.ensureRow("default", "2025-01");
+        var row = monthlyClosingMapper.selectByTenantAndMonth("default", "2025-01");
+        if (row.getConfirmedAt() == null) {
+            monthlyClosingMapper.confirmCas("default", "2025-01", 1L,
+                    java.time.LocalDateTime.of(2025, 2, 1, 0, 0), row.getVersion());
         }
 
         assertThatThrownBy(() -> purchaseIntegrationService.triggerBpPurchaseSync(closedPayment.getId(), 1L))

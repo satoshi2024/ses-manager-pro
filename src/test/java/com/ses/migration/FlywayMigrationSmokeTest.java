@@ -245,6 +245,8 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "t_bp_terms", "fee_bearer_exception_reason");
             assertColumnExists(st, "t_bp_terms", "fee_bearer_approved_by");
             assertColumnExists(st, "t_bp_availability", "bp_company_id");
+            assertColumnExists(st, "t_bp_availability", "tenant_id");
+            assertIndexExists(st, "t_bp_availability", "idx_bp_availability_tenant_population");
             assertColumnExists(st, "t_bp_payment", "bp_company_id");
             assertColumnExists(st, "t_bp_payment", "bp_company_name_snapshot");
             assertColumnExists(st, "t_bp_payment", "terms_snapshot_json");

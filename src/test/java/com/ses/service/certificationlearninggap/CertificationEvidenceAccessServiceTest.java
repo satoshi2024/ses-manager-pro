@@ -95,6 +95,7 @@ class CertificationEvidenceAccessServiceTest {
         when(documentVersionMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(version);
         when(documentService.getVersionStorageKey(77L, 2)).thenReturn("certification/evidence-key");
         when(documentService.download(77L, 2)).thenReturn(new ByteArrayInputStream("pdf".getBytes()));
+        when(accountLinkService.findEngineerIdByUserId(100L)).thenReturn(42L);
         when(queryService.detail(eq(42L), any(), any())).thenReturn(new CertificationLearningGapRow(
                 42L, "対象", "稼動中", "ACTIVE", List.of(), List.of(), null, null, null, List.of()));
     }
@@ -102,10 +103,13 @@ class CertificationEvidenceAccessServiceTest {
     @AfterEach
     void clearTenant() {
         AccountingTenantContextHolder.clear();
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
     }
 
     @Test
     void managementDownloadはscopeとtypedLinkと版hashを毎回検証する() {
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new TestingAuthenticationToken("8", "n", "ROLE_HR"));
         var result = service.downloadForManagement(42L, 11L, 77L, 2,
                 new TestingAuthenticationToken("8", "n", "ROLE_HR"));
 
@@ -113,6 +117,15 @@ class CertificationEvidenceAccessServiceTest {
         verify(fileScopeValidationService).assertCertificationEvidenceDownloadAllowed(
                 "certification/evidence-key", 11L, 77L, 88L, "abc123");
         verify(documentService).download(77L, 2);
+    }
+
+    @Test
+    void managementDownloadは営業ロールを拒否する() {
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new TestingAuthenticationToken("8", "n", "ROLE_営業"));
+        assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> service.downloadForManagement(42L, 11L, 77L, 2,
+                        new TestingAuthenticationToken("8", "n", "ROLE_営業")));
     }
 
     @Test
@@ -173,7 +186,8 @@ class CertificationEvidenceAccessServiceTest {
         generic.setDocumentId(77L);
         generic.setTargetType("ENGINEER");
         generic.setTargetId(42L);
-        when(documentLinkMapper.selectList(any())).thenReturn(List.of(generic));
+        // CERTIFICATION_RECORD 条件の照会結果が空＝typed link無しとして拒否されることを固定する。
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of());
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> service.downloadForSelf(100L, 11L, 77L, 2));
     }

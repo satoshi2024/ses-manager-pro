@@ -3,8 +3,10 @@ package com.ses.service.security;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Customer;
 import com.ses.entity.Engineer;
+import com.ses.entity.Project;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.ProjectMapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -16,11 +18,12 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 顧客・要員の業務母集団をtenant境界で解決する共通resolver。
+ * 顧客・要員・案件の業務母集団をtenant境界で解決する共通resolver。
  *
  * <p>tenantは呼出元から明示的に渡すが、空値は許可しない。DBに保存された明示的な
  * ownershipだけを採用し、legacy行（tenant_id NULL）は修復されるまで不可視とする。
  * これにより、service requestやaccount linkの有無をtenant所有権の代用にしない。
+ * 案件は顧客のtenant ownership経由で解決する（t_project自体にtenant列はない）。
  */
 @Service
 @RequiredArgsConstructor
@@ -28,6 +31,7 @@ public class TenantOwnershipResolver {
 
     private final CustomerMapper customerMapper;
     private final EngineerMapper engineerMapper;
+    private final ProjectMapper projectMapper;
 
     public Set<Long> resolveCustomerIds(String tenantId) {
         requireBoundTenant(tenantId);
@@ -72,6 +76,21 @@ public class TenantOwnershipResolver {
             return null;
         }
         return engineerMapper.selectByIdForTenant(engineerId, tenantId);
+    }
+
+    /** 顧客tenant ownership経由の案件ID母集団。fullAccessでもこの集合を超えない。 */
+    public Set<Long> resolveProjectIds(String tenantId) {
+        requireBoundTenant(tenantId);
+        Set<Long> ids = projectMapper.selectOwnedProjectIds(tenantId);
+        return ids == null ? Set.of() : Set.copyOf(ids);
+    }
+
+    public Project selectProject(String tenantId, Long projectId) {
+        requireBoundTenant(tenantId);
+        if (projectId == null) {
+            return null;
+        }
+        return projectMapper.selectByIdForTenant(projectId, tenantId);
     }
 
     private void requireTenant(String tenantId) {

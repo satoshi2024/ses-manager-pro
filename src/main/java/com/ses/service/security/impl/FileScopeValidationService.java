@@ -350,18 +350,9 @@ public class FileScopeValidationService {
                 throw BusinessException.of(403, "error.forbidden");
             }
             if ("CERTIFICATION_EVIDENCE".equals(documentType)) {
-                // 資格証憑は保持中のdownload/exportを許可しない契約。汎用文書台帳の
-                // legal hold（通常は廃棄だけを止める）より厳しい専用境界を先に適用する。
-                com.ses.mapper.DocumentMapper documentMapper = documentMapperProvider.getIfAvailable();
-                com.ses.entity.Document document = findDocumentForCurrentTenant(documentMapper,
-                        documentVersion.getDocumentId());
-                if (document == null || Integer.valueOf(1).equals(document.getLegalHoldFlag())
-                        || (document.getRetentionUntil() != null
-                        && document.getRetentionUntil().isBefore(java.time.LocalDate.now(clock)))) {
-                    throw BusinessException.of(403, "error.file.legalHoldActive");
-                }
-                assertCertificationEvidenceAllowed(documentVersion, expectedDocumentVersionId, expectedHash, null);
-                return;
+                // 資格証憑は専用API（CertificationEvidenceAccessService）のみ。
+                // 汎用 /api/documents/.../download からの迂回を許可しない（NF03 IDOR）。
+                throw BusinessException.of(403, "error.forbidden");
             }
 
             // P1-03: メニュー権限判定
@@ -504,7 +495,8 @@ public class FileScopeValidationService {
     /**
      * 資格証憑（CERTIFICATION_EVIDENCE）の専用scope。
      * typed {@code CERTIFICATION_RECORD} linkのみを認可根拠とし、管理者bypass・empty-link・
-     * ENGINEER-only mixed linkを拒否する（design §3.6）。
+     * ENGINEER-only mixed link・tenant NULL・engineer不一致を拒否する（design §3.6 / NF03）。
+     * 汎用download経路からは呼ばず、専用API経由の {@link #assertCertificationEvidenceDownloadAllowed} のみ。
      */
     private void assertCertificationEvidenceAllowed(DocumentVersion documentVersion,
                                                     Long expectedDocumentVersionId,
@@ -516,6 +508,10 @@ public class FileScopeValidationService {
         if (expectedHash != null && !expectedHash.equalsIgnoreCase(documentVersion.getSha256())) {
             throw BusinessException.of(403, "error.file.hashMismatch");
         }
+        if (documentVersion.getTenantId() == null || documentVersion.getTenantId().isBlank()
+                || !Objects.equals(documentVersion.getTenantId(), currentTenant())) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
 
         DocumentLinkMapper linkMapper = documentLinkMapperProvider.getIfAvailable();
         EngineerCertificationMapper certificationMapper = engineerCertificationMapperProvider.getIfAvailable();
@@ -524,11 +520,11 @@ public class FileScopeValidationService {
         }
 
         List<DocumentLink> links = linkMapper.selectList(
-                new QueryWrapper<DocumentLink>().eq("tenant_id",
-                                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext())
+                new QueryWrapper<DocumentLink>().eq("tenant_id", currentTenant())
                         .eq("document_id", documentVersion.getDocumentId()));
         List<DocumentLink> certificationLinks = links.stream()
                 .filter(link -> "CERTIFICATION_RECORD".equals(link.getTargetType())
+                        && link.getTargetId() != null
                         && (expectedRecordId == null || Objects.equals(expectedRecordId, link.getTargetId())))
                 .toList();
         if (certificationLinks.isEmpty()) {
@@ -542,27 +538,58 @@ public class FileScopeValidationService {
                         new QueryWrapper<EngineerCertification>()
                                 .eq("id", link.getTargetId())
                                 .eq("tenant_id", currentTenant()));
-                if (record == null) {
+                if (record == null || record.getTenantId() == null || record.getTenantId().isBlank()
+                        || record.getEngineerId() == null) {
                     continue;
                 }
-                if (expectedRecordId != null
-                        && (!Objects.equals(record.getTenantId(), documentVersion.getTenantId())
-                        || !Objects.equals(record.getTenantId(), currentTenant()))) {
+                if (!Objects.equals(record.getTenantId(), documentVersion.getTenantId())
+                        || !Objects.equals(record.getTenantId(), currentTenant())) {
                     continue;
                 }
-                if (!Objects.equals(record.getTenantId(), documentVersion.getTenantId())) {
-                    continue;
-                }
-                dataScopeService.assertAllowedEngineer(record.getEngineerId());
+                assertCertificationEvidenceEngineerAccess(record.getEngineerId());
                 anyAllowed = true;
                 break;
             } catch (BusinessException ignored) {
-                // generic ENGINEER link等は評価せず、typed linkのみで判定（mixed link対策）
+                // typed linkごとの拒否は和集合で次へ。最終的に1件も許可できなければ403。
             }
         }
         if (!anyAllowed) {
             throw BusinessException.of(403, "error.forbidden");
         }
+    }
+
+    /**
+     * 資格証憑の要員境界。CertificationEvidenceAccessService と同じ契約を専用downloadで再検証する。
+     * 要員=本人紐付けのみ / 営業=明示の担当または組織scopeが無い限りdeny / HR・管理者・マネージャー=既存org matrix。
+     */
+    private void assertCertificationEvidenceEngineerAccess(Long engineerId) {
+        if (engineerId == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        String role = SecurityUtils.currentRole();
+        if ("要員".equals(role)) {
+            com.ses.service.EngineerAccountLinkService linkService =
+                    engineerAccountLinkServiceProvider.getIfAvailable();
+            Long ownEngineerId = linkService == null
+                    ? null : linkService.findEngineerIdByUserId(SecurityUtils.currentUserId());
+            if (ownEngineerId == null || !ownEngineerId.equals(engineerId)) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            return;
+        }
+        if ("営業".equals(role)) {
+            // 営業は資格証憑を既定拒否。明示の担当scopeまたは組織絞り込みがある場合のみ許可。
+            if (!dataScopeService.isScoped()) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            dataScopeService.assertAllowedEngineer(engineerId);
+            return;
+        }
+        if ("HR".equals(role) || "管理者".equals(role) || "マネージャー".equals(role)) {
+            dataScopeService.assertAllowedEngineer(engineerId);
+            return;
+        }
+        throw BusinessException.of(403, "error.forbidden");
     }
 
     private String currentTenant() {

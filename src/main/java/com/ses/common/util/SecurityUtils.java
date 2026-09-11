@@ -2,6 +2,7 @@ package com.ses.common.util;
 
 import com.ses.config.LoginUser;
 import com.ses.config.OidcLoginUser;
+import com.ses.config.integrationhub.ExternalApiPrincipal;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -82,9 +83,18 @@ public final class SecurityUtils {
             return null;
         }
         Object principal = authentication.getPrincipal();
+        if (principal instanceof ExternalApiPrincipal external && hasText(external.tenantId())) {
+            return external.tenantId().trim();
+        }
         if (principal instanceof OidcLoginUser oidc) {
             String claim = firstText(oidc.getClaims(), "tenant_id", "tenantId", "tenant");
-            return claim;
+            if (hasText(claim)) {
+                return claim;
+            }
+            if (hasText(oidc.getTenantId())) {
+                return oidc.getTenantId().trim();
+            }
+            return null;
         }
         if (principal instanceof LoginUser loginUser && hasText(loginUser.getTenantId())) {
             return loginUser.getTenantId().trim();
