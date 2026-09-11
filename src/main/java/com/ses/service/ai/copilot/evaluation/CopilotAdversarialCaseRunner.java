@@ -105,7 +105,7 @@ public final class CopilotAdversarialCaseRunner {
             return ResolvedCitationDto.unavailable(citationKey);
         }
         SemanticCatalogEntry entry = SemanticCatalogRegistry.find(citationKey).orElse(null);
-        if (entry == null || !entry.enabled()) {
+        if (entry == null) {
             return ResolvedCitationDto.unavailable(citationKey);
         }
         if (role == null || !entry.allowedRoles().contains(role)) {
