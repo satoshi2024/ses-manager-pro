@@ -23,7 +23,8 @@
    - merge commit: `df4b42d69a92315f16673feb562a386925e21da4`  
    - parents: `b776c792` + `6d4aa875`
 3. 以降の tenant/fixture/コンパイル整合コミット群（既存 R3 作業、HEAD 直前は `92289f9a`）
-4. 最終 R3 integration commit（本証跡と V162/V179/portal/fixture 仕上げ）
+4. 最終 R3 integration commit: `b14b45cb3cb8c6ee1c3bf3149d8e712cfff63c7d`  
+   （V162/V179/portal/fixture 仕上げ + 本証跡）
 
 ## 衝突ファイルと意味論処理
 
