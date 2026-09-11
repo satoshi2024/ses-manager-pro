@@ -123,12 +123,17 @@ public class LegacyAiEndpointBoundary {
         }
     }
 
-    public CopilotExecutionContext createContext() {
-        // feature gate → tenant/legal entity/scope の順。controllerへgate複製を置かない。
+    /** resource無しchat等でもmatch/proposalと同じai.enabled・provider境界を通す。 */
+    public void assertEndpointAllowed() {
         if (featureGate == null) {
             throw new BusinessException(503, "AI機能は現在無効化されています。");
         }
         featureGate.assertLegacyEndpointAllowed();
+    }
+
+    public CopilotExecutionContext createContext() {
+        // feature gate → tenant/legal entity/scope の順。controllerへgate複製を置かない。
+        assertEndpointAllowed();
         if (contextBinder == null || contextFactory == null) throw denied();
         try {
             return contextBinder.bind(contextFactory.create());

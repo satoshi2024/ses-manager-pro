@@ -54,19 +54,35 @@ class ApiCoverageIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = "管理者")
     void testAiApi() throws Exception {
-        // AI Matching endpoints — ai.enabled=false のtest既定では統一feature gateが503。
+        // LoginUser+tenantでfilterを通過し、ai.enabled=false既定の統一gateが503であることを検証する。
         String matchEngBody = "{\"engineerId\": 1}";
         mockMvc.perform(post("/api/ai/match/engineer-to-projects")
+                        .with(tenantUser("default"))
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(matchEngBody))
                 .andExpect(status().isServiceUnavailable());
 
         mockMvc.perform(get("/api/ai/matching/project/1")
+                        .with(tenantUser("default"))
                         .with(csrf()))
                 .andExpect(status().isServiceUnavailable());
+    }
+
+    private org.springframework.test.web.servlet.request.RequestPostProcessor tenantUser(String tenantId) {
+        com.ses.entity.SysUser user = new com.ses.entity.SysUser();
+        user.setId(1L);
+        user.setUsername("admin");
+        user.setPassword("admin123");
+        user.setRole("管理者");
+        user.setStatus(1);
+        user.setTenantId(tenantId);
+        com.ses.config.LoginUser principal = new com.ses.config.LoginUser(user,
+                java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_管理者")));
+        return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                .authentication(new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        principal, null, principal.getAuthorities()));
     }
 
     @Test

@@ -1,6 +1,5 @@
 package com.ses.controller.api;
 
-import com.ses.config.AiConfig;
 import com.ses.entity.Engineer;
 import com.ses.service.EngineerService;
 import com.ses.service.ProjectService;
@@ -22,6 +21,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
@@ -38,9 +38,6 @@ class AiRestControllerContextPropagationTest {
 
     @Test
     void resourceBearingChatは同じExecutionContextとscopeHashをgatewayへ渡す() {
-        AiConfig config = new AiConfig();
-        config.setEnabled(true);
-        config.setProvider("mock");
         Engineer engineer = new Engineer();
         engineer.setId(1L);
         engineer.setLegalEntityId(77L);
@@ -50,7 +47,7 @@ class AiRestControllerContextPropagationTest {
         when(gateway.execute(any())).thenReturn(new AiGatewayResult("ok", "trace", null, "prompt"));
 
         AiRestController controller = new AiRestController(gateway, engineerService, projectService,
-                dataScopeService, config, boundary);
+                dataScopeService, boundary);
         AiRestController.AiChatRequest request = new AiRestController.AiChatRequest();
         request.setEngineerId(1L);
         request.setPrompt("説明");
@@ -64,6 +61,24 @@ class AiRestControllerContextPropagationTest {
         assertEquals(context.scope(), gatewayRequest.getScopeContext());
         assertEquals(context.scopeHash(), gatewayRequest.getScopeHash());
         assertTrue(gatewayRequest.isResourceBearing());
+    }
+
+    @Test
+    void resource無しchatも統一gateを通しcreateContextは呼ばない() {
+        when(gateway.execute(any())).thenReturn(new AiGatewayResult("ok", "trace", null, "prompt"));
+
+        AiRestController controller = new AiRestController(gateway, engineerService, projectService,
+                dataScopeService, boundary);
+        AiRestController.AiChatRequest request = new AiRestController.AiChatRequest();
+        request.setPrompt("こんにちは");
+
+        controller.chat(request);
+
+        verify(boundary).assertEndpointAllowed();
+        ArgumentCaptor<AiGatewayRequest> captor = ArgumentCaptor.forClass(AiGatewayRequest.class);
+        verify(gateway).execute(captor.capture());
+        assertNull(captor.getValue().getExecutionContext());
+        org.mockito.Mockito.verify(boundary, org.mockito.Mockito.never()).createContext();
     }
 
     private static CopilotExecutionContext context() {

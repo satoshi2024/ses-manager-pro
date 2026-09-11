@@ -138,6 +138,21 @@ class AiExecutionGatewayLegacyBoundaryTest {
         verify(aiTextService, never()).generate(org.mockito.ArgumentMatchers.anyString());
     }
 
+    @Test
+    void mockのlegacyChatでもproductionApprovalGateを通す() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+        try {
+            AiConfig config = config("mock", false);
+            config.setExternalSendEnabled(true); // local providerでもexternal-send=trueは拒否
+            AiExecutionGateway gateway = gateway(config);
+            assertEquals(503, assertThrows(BusinessException.class, () -> gateway.execute(
+                    AiGatewayRequest.builder().useCase(AiGatewayRequest.USE_CHAT).build())).getCode());
+            verify(aiTextService, never()).generate(org.mockito.ArgumentMatchers.anyString());
+        } finally {
+            com.ses.service.accounting.AccountingTenantContextHolder.clear();
+        }
+    }
+
     private AiExecutionGateway gateway(AiConfig config) {
         return new AiExecutionGatewayImpl(aiTextService, config, outboundProbe,
                 new ObjectMapper(), versionMapper, runMapper, transactionManager,

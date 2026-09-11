@@ -121,6 +121,19 @@ class LegacyAiEndpointBoundaryContextTest {
         assertEquals(503, ex.getCode());
     }
 
+    @Test
+    void assertEndpointAllowedもaiEnabledFalseで503() {
+        AiConfig config = new AiConfig();
+        config.setEnabled(false);
+        config.setProvider("mock");
+        LegacyAiEndpointBoundary boundary = new LegacyAiEndpointBoundary(
+                engineerService, projectService, dataScopeService, organizationScopeService,
+                contextFactory, contextBinder, new CopilotFeatureGate(config));
+
+        BusinessException ex = assertThrows(BusinessException.class, boundary::assertEndpointAllowed);
+        assertEquals(503, ex.getCode());
+    }
+
     private LegacyAiEndpointBoundary boundary() {
         AiConfig config = new AiConfig();
         config.setEnabled(true);

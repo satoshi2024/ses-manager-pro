@@ -145,8 +145,12 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
             }
             throw new BusinessException(503, "LEGACY_AI_PROVIDER_DISABLED");
         }
-        if (policy == AiUseCasePolicy.Mode.LEGACY_LOCAL && requiresLegacyContext(request)) {
-            assertLegacyResourceContext(request);
+        if (policy == AiUseCasePolicy.Mode.LEGACY_LOCAL) {
+            // controller直調を含む全LEGACY（CHAT含む）をproduction provider境界へ通す。
+            if (requiresLegacyContext(request)) {
+                assertLegacyResourceContext(request);
+            }
+            productionApprovalGateAsserted();
         }
     }
 

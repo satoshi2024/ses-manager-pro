@@ -25,7 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * NF08: legacy match / proposal-draft は ai.enabled 統一gateを通り、OFF時は503で副作用なし。
+ * NF08: legacy match / proposal-draft / chat は ai.enabled 統一gateを通り、OFF時は503で副作用なし。
  */
 @TestPropertySource(properties = {
         "ai.enabled=false",
@@ -75,6 +75,36 @@ class AiLegacyEndpointFeatureGateMockMvcTest extends BaseIntegrationTest {
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"engineerId\":1,\"projectId\":1}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value(503));
+
+        assertEquals(before, countRuns());
+    }
+
+    @Test
+    void aiEnabledFalseのchat無resourceは503でrecommendationRunを作らない() throws Exception {
+        long before = countRuns();
+
+        mockMvc.perform(post("/api/ai/chat")
+                        .with(tenantUser("default"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"prompt\":\"こんにちは\"}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value(503));
+
+        assertEquals(before, countRuns());
+    }
+
+    @Test
+    void aiEnabledFalseのchat有resourceは503で副作用なし() throws Exception {
+        long before = countRuns();
+
+        mockMvc.perform(post("/api/ai/chat")
+                        .with(tenantUser("default"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"prompt\":\"候補を教えて\",\"engineerId\":1,\"projectId\":1}"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value(503));
 
