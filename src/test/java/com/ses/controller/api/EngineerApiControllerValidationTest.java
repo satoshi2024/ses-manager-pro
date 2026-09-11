@@ -58,6 +58,8 @@ class EngineerApiControllerValidationTest {
     private com.ses.service.security.TenantOwnershipResolver tenantOwnershipResolver;
     @MockBean
     private com.ses.mapper.EngineerMapper engineerMapper;
+    @MockBean
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
 
     @BeforeEach
     void allowFullScopeForExistingControllerCases() {

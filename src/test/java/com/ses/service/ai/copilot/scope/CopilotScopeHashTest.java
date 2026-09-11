@@ -83,7 +83,7 @@ class CopilotScopeHashTest {
                 engineerIds=
                 legalEntity=9
                 organizationIds=
-                policyVersion=nf08-scope-2
+                policyVersion=nf08-effective-scope-1
                 scopeType=SALES_DATA_SCOPED
                 tenant=default
                 """, canonical);

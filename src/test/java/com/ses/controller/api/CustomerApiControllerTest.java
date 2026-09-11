@@ -68,6 +68,8 @@ class CustomerApiControllerTest {
     private com.ses.mapper.ProjectMapper projectMapper;
     @MockBean
     private com.ses.mapper.ContractMapper contractMapper;
+    @MockBean
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
 
     @BeforeEach
     void allowFullOrganizationScope() {
