@@ -12,6 +12,9 @@ import com.ses.service.ai.copilot.CopilotExecutionContextFactory;
 import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
+import java.util.Set;
+
 /**
  * 既存 /api/ai/match と /api/ai/chat はNF08 management-copilot入口とは別のlegacy local-only入口。
  * ただし本番provider・組織・営業・法人scopeを迂回することは許さない。
@@ -48,12 +51,27 @@ public class LegacyAiEndpointBoundary {
 
     /** 同一リクエストの認可判定で共有するExecutionContextを明示的に受け取る。 */
     public Engineer assertEngineer(Long id, CopilotExecutionContext context) {
-        if (id == null) throw denied();
-        EffectiveScopeSnapshot snapshot = requireSnapshot(context);
-        if (!snapshot.allowsEngineer(id)) throw denied();
+        if (id == null || context == null) throw denied();
+        EffectiveScopeSnapshot snapshot = context.effectiveScopeSnapshot();
+        if (snapshot != null) {
+            if (context.scope() != snapshot.scope() || !snapshot.allowsEngineer(id)) {
+                throw denied();
+            }
+        } else {
+            LocalDate asOf = context.asOfDate();
+            if (dataScopeService != null && dataScopeService.isScoped()) {
+                Set<Long> allowed = dataScopeService.allowedEngineerIds(asOf);
+                if (allowed != null && !allowed.contains(id)) throw denied();
+            }
+            if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
+                Set<Long> allowed = organizationScopeService.allowedEngineerIds(asOf);
+                if (allowed != null && !allowed.contains(id)) throw denied();
+            }
+        }
         Engineer engineer = engineerService.getById(id);
+        Long expectedLegalEntityId = snapshot != null ? snapshot.legalEntityId() : context.legalEntityId();
         if (engineer == null || engineer.getLegalEntityId() == null
-                || !snapshot.legalEntityId().equals(engineer.getLegalEntityId())) throw denied();
+                || !expectedLegalEntityId.equals(engineer.getLegalEntityId())) throw denied();
         return engineer;
     }
 
@@ -63,12 +81,27 @@ public class LegacyAiEndpointBoundary {
 
     /** 同一リクエストの認可判定で共有するExecutionContextを明示的に受け取る。 */
     public Project assertProject(Long id, CopilotExecutionContext context) {
-        if (id == null) throw denied();
-        EffectiveScopeSnapshot snapshot = requireSnapshot(context);
-        if (!snapshot.allowsProject(id)) throw denied();
+        if (id == null || context == null) throw denied();
+        EffectiveScopeSnapshot snapshot = context.effectiveScopeSnapshot();
+        if (snapshot != null) {
+            if (context.scope() != snapshot.scope() || !snapshot.allowsProject(id)) {
+                throw denied();
+            }
+        } else {
+            LocalDate asOf = context.asOfDate();
+            if (dataScopeService != null && dataScopeService.isScoped()) {
+                Set<Long> allowed = dataScopeService.allowedProjectIds(asOf);
+                if (allowed != null && !allowed.contains(id)) throw denied();
+            }
+            if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
+                Set<Long> allowed = organizationScopeService.allowedProjectIds(asOf);
+                if (allowed != null && !allowed.contains(id)) throw denied();
+            }
+        }
         Project project = projectService.getById(id);
+        Long expectedLegalEntityId = snapshot != null ? snapshot.legalEntityId() : context.legalEntityId();
         if (project == null || project.getLegalEntityId() == null
-                || !snapshot.legalEntityId().equals(project.getLegalEntityId())) throw denied();
+                || !expectedLegalEntityId.equals(project.getLegalEntityId())) throw denied();
         return project;
     }
 
@@ -78,7 +111,7 @@ public class LegacyAiEndpointBoundary {
     }
 
     public void assertSameLegalEntity(Long engineerId, Long projectId, CopilotExecutionContext context) {
-        requireSnapshot(context);
+        if (context == null) throw denied();
         Engineer engineer = assertEngineer(engineerId, context);
         Project project = assertProject(projectId, context);
         if (!engineer.getLegalEntityId().equals(project.getLegalEntityId())) {
@@ -89,14 +122,6 @@ public class LegacyAiEndpointBoundary {
     public CopilotExecutionContext createContext() {
         if (contextBinder == null) throw denied();
         return contextBinder.bind(contextFactory.create());
-    }
-
-    private EffectiveScopeSnapshot requireSnapshot(CopilotExecutionContext context) {
-        if (context == null || context.effectiveScopeSnapshot() == null
-                || context.scope() != context.effectiveScopeSnapshot().scope()) {
-            throw denied();
-        }
-        return context.effectiveScopeSnapshot();
     }
 
     private BusinessException denied() {

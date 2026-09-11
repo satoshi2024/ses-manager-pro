@@ -86,6 +86,7 @@ class LegacyAiEndpointBoundaryContextTest {
         Engineer engineer = engineer(1L, 88L);
         when(engineerService.getById(1L)).thenReturn(engineer);
         when(dataScopeService.isScoped()).thenReturn(false);
+        when(organizationScopeService.hasFullAccess()).thenReturn(true);
         LegacyAiEndpointBoundary boundary = boundary();
         CopilotExecutionContext context = context("2026-03-01T00:00:00Z", "UTC");
 

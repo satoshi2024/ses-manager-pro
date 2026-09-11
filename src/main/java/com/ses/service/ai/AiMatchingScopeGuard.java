@@ -9,6 +9,7 @@ import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -39,7 +40,7 @@ public class AiMatchingScopeGuard {
     }
 
     public boolean allowsEngineer(Long engineerId, CopilotExecutionContext context) {
-        if (engineerId == null || context == null || context.effectiveScopeSnapshot() == null) return false;
+        if (engineerId == null || context == null) return false;
         Set<Long> allowed = allowedEngineerIds(context);
         return allowed == null || allowed.contains(engineerId);
     }
@@ -53,31 +54,71 @@ public class AiMatchingScopeGuard {
     /** nullは全件許可ではなく、追加ID predicate不要を表す（full access時のみ）。 */
     public Set<Long> allowedEngineerIds(CopilotExecutionContext context) {
         EffectiveScopeSnapshot snapshot = snapshot(context);
-        return snapshot == null ? Set.of() : snapshot.engineerIds();
+        if (snapshot != null) {
+            return snapshot.engineerIds();
+        }
+        if (context == null) return Set.of();
+        LocalDate asOfDate = context.asOfDate();
+        if ((dataScopeService == null || !dataScopeService.isScoped())
+                && (organizationScopeService == null || organizationScopeService.hasFullAccess())) {
+            return null;
+        }
+        Set<Long> data = (dataScopeService != null && dataScopeService.isScoped())
+                ? dataScopeService.allowedEngineerIds(asOfDate) : null;
+        Set<Long> org = (organizationScopeService != null && !organizationScopeService.hasFullAccess())
+                ? organizationScopeService.allowedEngineerIds(asOfDate) : null;
+        return intersect(data, org);
     }
 
     /** nullは全件許可ではなく、追加ID predicate不要を表す（full access時のみ）。 */
     public Set<Long> allowedProjectIds(CopilotExecutionContext context) {
         EffectiveScopeSnapshot snapshot = snapshot(context);
-        return snapshot == null ? Set.of() : snapshot.projectIds();
+        if (snapshot != null) {
+            return snapshot.projectIds();
+        }
+        if (context == null) return Set.of();
+        LocalDate asOfDate = context.asOfDate();
+        if ((dataScopeService == null || !dataScopeService.isScoped())
+                && (organizationScopeService == null || organizationScopeService.hasFullAccess())) {
+            return null;
+        }
+        Set<Long> data = (dataScopeService != null && dataScopeService.isScoped())
+                ? dataScopeService.allowedProjectIds(asOfDate) : null;
+        Set<Long> org = (organizationScopeService != null && !organizationScopeService.hasFullAccess())
+                ? organizationScopeService.allowedProjectIds(asOfDate) : null;
+        return intersect(data, org);
     }
 
     /** BP在現行モデルに組織列を持たないため、非全社組織scopeでは推測せず公開しない。 */
     public boolean allowsBp(BpAvailability bp, Project project, CopilotExecutionContext context) {
-        EffectiveScopeSnapshot snapshot = snapshot(context);
         if (bp == null || project == null || context == null
-                || bp.getLegalEntityId() == null || project.getLegalEntityId() == null
-                || snapshot == null || !snapshot.legalEntityId().equals(project.getLegalEntityId())
-                || !snapshot.legalEntityId().equals(bp.getLegalEntityId())) {
+                || bp.getLegalEntityId() == null || project.getLegalEntityId() == null) {
             return false;
         }
-        return allowsProject(project.getId(), context) && snapshot.organizationFullAccess();
+        EffectiveScopeSnapshot snapshot = snapshot(context);
+        Long legalEntityId = snapshot != null ? snapshot.legalEntityId() : context.legalEntityId();
+        if (!legalEntityId.equals(project.getLegalEntityId())
+                || !legalEntityId.equals(bp.getLegalEntityId())) {
+            return false;
+        }
+        boolean orgFullAccess = snapshot != null ? snapshot.organizationFullAccess()
+                : (organizationScopeService == null || organizationScopeService.hasFullAccess());
+        return allowsProject(project.getId(), context) && orgFullAccess;
     }
 
     public boolean sameLegalEntity(Long rowLegalEntityId, CopilotExecutionContext context) {
+        if (rowLegalEntityId == null || context == null) return false;
         EffectiveScopeSnapshot snapshot = snapshot(context);
-        return rowLegalEntityId != null && snapshot != null
-                && snapshot.legalEntityId().equals(rowLegalEntityId);
+        Long expected = snapshot != null ? snapshot.legalEntityId() : context.legalEntityId();
+        return rowLegalEntityId.equals(expected);
+    }
+
+    private static Set<Long> intersect(Set<Long> first, Set<Long> second) {
+        if (first == null) return second;
+        if (second == null) return first;
+        Set<Long> result = new HashSet<>(first);
+        result.retainAll(second);
+        return result;
     }
 
     private EffectiveScopeSnapshot snapshot(CopilotExecutionContext context) {
