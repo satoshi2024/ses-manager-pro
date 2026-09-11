@@ -160,6 +160,7 @@ class AiFeedbackOutcomeTest {
                         .eq(AiArtifactVersion::getStatus, "ACTIVE")
                         .last("LIMIT 1"));
         AiRecommendationRun run = new AiRecommendationRun();
+        run.setTenantId("default");
         run.setTraceId(UUID.randomUUID().toString());
         run.setUseCase("MATCHING");
         run.setArtifactVersionId(artifact.getId());
@@ -170,6 +171,7 @@ class AiFeedbackOutcomeTest {
         recommendationRunMapper.insert(run);
 
         AiRecommendationItem item = new AiRecommendationItem();
+        item.setTenantId("default");
         item.setRunId(run.getId());
         item.setRankNo(1);
         item.setTargetType("PROJECT");
@@ -180,9 +182,10 @@ class AiFeedbackOutcomeTest {
     }
 
     private static void setRole(String userId, String role) {
-        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
-                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
-                        userId, "x",
-                        List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_" + role))));
+        var auth = new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                userId, "x",
+                List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_" + role)));
+        auth.setDetails(java.util.Map.of("tenant_id", "default"));
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(auth);
     }
 }
