@@ -9,6 +9,8 @@ import com.ses.dto.lifecycle.ResignationGateResultDto;
 import com.ses.entity.*;
 import com.ses.mapper.*;
 import com.ses.service.AssetOffboardingService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -75,6 +77,12 @@ class ResignationGateFailureDrillTest {
     private ContractMapper contractMapper;
 
     @Autowired
+    private CustomerMapper customerMapper;
+
+    @Autowired
+    private ProjectMapper projectMapper;
+
+    @Autowired
     private LifecycleScopeService scopeService;
 
     @Autowired
@@ -113,8 +121,10 @@ class ResignationGateFailureDrillTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         long suffix = System.nanoTime();
         adminUser = SysUser.builder()
+                .tenantId("default")
                 .username("admin_drill_" + suffix)
                 .password("pass")
                 .realName("管理者ドリル")
@@ -124,6 +134,7 @@ class ResignationGateFailureDrillTest {
         sysUserMapper.insert(adminUser);
 
         salesUser = SysUser.builder()
+                .tenantId("default")
                 .username("sales_drill_" + suffix)
                 .password("pass")
                 .realName("営業ドリル")
@@ -133,6 +144,7 @@ class ResignationGateFailureDrillTest {
         sysUserMapper.insert(salesUser);
 
         SysUser hrUser = SysUser.builder()
+                .tenantId("default")
                 .username("hr_drill_" + suffix)
                 .password("pass")
                 .realName("人事ドリル")
@@ -142,6 +154,7 @@ class ResignationGateFailureDrillTest {
         sysUserMapper.insert(hrUser);
 
         engineerUser = SysUser.builder()
+                .tenantId("default")
                 .username("eng_drill_" + suffix)
                 .password("pass")
                 .realName("退職要員")
@@ -151,6 +164,8 @@ class ResignationGateFailureDrillTest {
         sysUserMapper.insert(engineerUser);
 
         org = OrganizationUnit.builder()
+                .tenantId(1L)
+                .legalEntityId(1L)
                 .code("ORG-DRILL-" + suffix)
                 .name("システム開発本部-" + suffix)
                 .type("DEPARTMENT")
@@ -160,6 +175,8 @@ class ResignationGateFailureDrillTest {
         organizationUnitMapper.insert(org);
 
         engineer = Engineer.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
                 .fullName("退職要員-" + suffix)
                 .status("稼動中")
                 .employmentType("正社員")
@@ -169,6 +186,7 @@ class ResignationGateFailureDrillTest {
 
         // 要員とユーザーの紐付け
         EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId("default");
         link.setEngineerId(engineer.getId());
         link.setSysUserId(engineerUser.getId());
         engineerAccountLinkMapper.insert(link);
@@ -184,6 +202,7 @@ class ResignationGateFailureDrillTest {
 
         // 組織所属 (アクティブ)
         UserOrganization uo = UserOrganization.builder()
+                .tenantId("default")
                 .userId(engineerUser.getId())
                 .organizationId(org.getId())
                 .managerUserId(adminUser.getId())
@@ -227,6 +246,11 @@ class ResignationGateFailureDrillTest {
                                 .build()
                 ))
                 .build(), adminUser.getId());
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -431,14 +455,36 @@ class ResignationGateFailureDrillTest {
     @DisplayName("M-4: 稼働中契約残存によるゲートFAIL検証 (LC-P1-09)")
     void testResignationBlockedByActiveContract() {
         // 稼働中の契約を作成
-        Engineer testEng = Engineer.builder().fullName("退職要員3").status("稼動中").employmentType("正社員").build();
+        Engineer testEng = Engineer.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
+                .fullName("退職要員3")
+                .status("稼動中")
+                .employmentType("正社員")
+                .build();
         engineerMapper.insert(testEng);
 
-        // t_contractに稼働中の契約を挿入（最低限の必須フィールドのみ）
+        Customer customer = Customer.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
+                .companyName("退職ドリル顧客")
+                .build();
+        customerMapper.insert(customer);
+
+        Project project = Project.builder()
+                .legalEntityId(1L)
+                .customerId(customer.getId())
+                .projectName("退職ドリル案件")
+                .build();
+        projectMapper.insert(project);
+
+        // t_contractに稼働中の契約を挿入
         Contract contract = new Contract();
+        contract.setTenantId("default");
+        contract.setLegalEntityId(1L);
         contract.setEngineerId(testEng.getId());
-        contract.setProjectId(1L);
-        contract.setCustomerId(1L);
+        contract.setProjectId(project.getId());
+        contract.setCustomerId(customer.getId());
         contract.setStartDate(LocalDate.now().minusMonths(3));
         contract.setSellingPrice(BigDecimal.valueOf(500000));
         contract.setCostPrice(BigDecimal.valueOf(400000));

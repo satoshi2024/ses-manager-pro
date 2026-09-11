@@ -4,6 +4,9 @@ import com.ses.common.exception.BusinessException;
 import com.ses.entity.Engineer;
 import com.ses.service.ContractService;
 import com.ses.service.EngineerService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -32,8 +35,28 @@ class LifecycleStatusIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    private Long customerId;
+    private Long projectId;
+
+    @BeforeEach
+    void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, legal_entity_id, company_name, deleted_flag) VALUES ('default', 1, 'テスト顧客', 0)");
+        customerId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM m_customer", Long.class);
+
+        jdbcTemplate.update("INSERT INTO t_project (legal_entity_id, customer_id, project_name, deleted_flag) VALUES (1, ?, 'テスト案件', 0)", customerId);
+        projectId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_project", Long.class);
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
+    }
+
     private Long insertEngineer(String status) {
         Engineer e = new Engineer();
+        e.setTenantId("default");
+        e.setLegalEntityId(1L);
         e.setFullName("要員");
         e.setEmploymentType("正社員");
         e.setStatus(status);
@@ -42,9 +65,9 @@ class LifecycleStatusIntegrationTest {
     }
 
     private Long insertContract(Long engineerId, String status) {
-        jdbcTemplate.update("INSERT INTO t_contract (contract_no, engineer_id, contract_type, start_date, "
-                + "selling_price, cost_price, status, deleted_flag) VALUES (?, ?, '準委任', CURRENT_DATE, 80, 60, ?, 0)",
-                "C-" + System.nanoTime(), engineerId, status);
+        jdbcTemplate.update("INSERT INTO t_contract (tenant_id, legal_entity_id, contract_no, engineer_id, customer_id, project_id, contract_type, start_date, "
+                + "selling_price, cost_price, status, deleted_flag, version) VALUES ('default', 1, ?, ?, ?, ?, '準委任', CURRENT_DATE, 80, 60, ?, 0, 0)",
+                "C-" + System.nanoTime(), engineerId, customerId, projectId, status);
         return jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_contract", Long.class);
     }
 

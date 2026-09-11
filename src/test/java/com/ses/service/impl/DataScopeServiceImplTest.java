@@ -8,6 +8,9 @@ import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -37,6 +40,16 @@ class DataScopeServiceImplTest {
     @InjectMocks
     private DataScopeServiceImpl service;
 
+    @BeforeEach
+    void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
+    }
+
     @Test
     void isScoped_configFalseは常に非スコープ() {
         when(systemConfigService.getString(anyString(), any())).thenReturn("false");
@@ -63,6 +76,7 @@ class DataScopeServiceImplTest {
         Contract c2 = new Contract(); c2.setId(2L);
         // Wrapper 条件（sales_user_id=me OR NULL）はマッパーが解決する前提。ここでは返却分を検証。
         when(contractMapper.selectList(any())).thenReturn(List.of(c1, c2));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1, c2));
         Set<Long> ids = service.computeContractIds(9L);
         assertEquals(Set.of(1L, 2L), ids);
     }
