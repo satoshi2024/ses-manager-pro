@@ -176,6 +176,63 @@ class LegalEntityContextServiceTest {
         assertEquals("TENANT_CONTEXT_REQUIRED", ex.getMessage());
     }
 
+    @Test
+    void PortalLoginUserはtenantを解決し唯一法人のみ受け入れる() {
+        AttendanceScopeMapper mapper = mock(AttendanceScopeMapper.class);
+        AccountingTimezoneResolver timezoneResolver = mock(AccountingTimezoneResolver.class);
+        when(timezoneResolver.resolve("default")).thenReturn(ZoneId.of("Asia/Tokyo"));
+        when(mapper.selectAllLegalEntityIds()).thenReturn(List.of(55L));
+        com.ses.portal.PortalLoginUser portal = com.ses.portal.PortalLoginUser.builder()
+                .portalUserId(1L).tenantId("default").email("bp@ex.com")
+                .userStatus("ACTIVE").orgStatus("ACTIVE").orgType("BP").build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(portal, null, portal.getAuthorities()));
+
+        LegalEntityContextService service = new LegalEntityContextService(
+                clock, mapper, timezoneResolver, new OidcSecurityProperties());
+
+        assertEquals(55L, service.requireCurrentLegalEntityId());
+    }
+
+    @Test
+    void PortalLoginUserで多法人はfailClosed() {
+        AttendanceScopeMapper mapper = mock(AttendanceScopeMapper.class);
+        AccountingTimezoneResolver timezoneResolver = mock(AccountingTimezoneResolver.class);
+        when(timezoneResolver.resolve("default")).thenReturn(ZoneId.of("Asia/Tokyo"));
+        when(mapper.selectAllLegalEntityIds()).thenReturn(List.of(1L, 2L));
+        com.ses.portal.PortalLoginUser portal = com.ses.portal.PortalLoginUser.builder()
+                .portalUserId(1L).tenantId("default").email("bp@ex.com")
+                .userStatus("ACTIVE").orgStatus("ACTIVE").orgType("BP").build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(portal, null, portal.getAuthorities()));
+
+        LegalEntityContextService service = new LegalEntityContextService(
+                clock, mapper, timezoneResolver, new OidcSecurityProperties());
+
+        BusinessException ex = assertThrows(BusinessException.class, service::requireCurrentLegalEntityId);
+        assertEquals(403, ex.getCode());
+        assertEquals("LEGAL_ENTITY_CONTEXT_REQUIRED", ex.getMessage());
+    }
+
+    @Test
+    void PortalLoginUserで空法人はfailClosedし1Lを返さない() {
+        AttendanceScopeMapper mapper = mock(AttendanceScopeMapper.class);
+        AccountingTimezoneResolver timezoneResolver = mock(AccountingTimezoneResolver.class);
+        when(timezoneResolver.resolve("default")).thenReturn(ZoneId.of("Asia/Tokyo"));
+        when(mapper.selectAllLegalEntityIds()).thenReturn(List.of());
+        com.ses.portal.PortalLoginUser portal = com.ses.portal.PortalLoginUser.builder()
+                .portalUserId(1L).tenantId("default").email("bp@ex.com")
+                .userStatus("ACTIVE").orgStatus("ACTIVE").orgType("BP").build();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(portal, null, portal.getAuthorities()));
+
+        LegalEntityContextService service = new LegalEntityContextService(
+                clock, mapper, timezoneResolver, new OidcSecurityProperties());
+
+        BusinessException ex = assertThrows(BusinessException.class, service::requireCurrentLegalEntityId);
+        assertEquals(403, ex.getCode());
+    }
+
     private void authenticate(String tenantId, String role, Long userId) {
         SysUser user = new SysUser();
         user.setId(userId);

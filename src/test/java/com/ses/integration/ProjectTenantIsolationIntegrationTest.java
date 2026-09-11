@@ -66,6 +66,7 @@ class ProjectTenantIsolationIntegrationTest extends BaseIntegrationTest {
     @AfterEach
     void clearTenant() {
         AccountingTenantContextHolder.clear();
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
     }
 
     @Test
@@ -127,6 +128,43 @@ class ProjectTenantIsolationIntegrationTest extends BaseIntegrationTest {
         assertThat(page.getRecords()).extracting(ProjectListDto::getId)
                 .containsExactly(tenantA.projectId());
     }
+
+    @Test
+    void 管理者検索でも他tenant案件はヒットしない() {
+        AccountingTenantContextHolder.setTenantId("tenant-a");
+        SysUser user = tenantA.user();
+        LoginUser principal = new LoginUser(user,
+                List.of(new SimpleGrantedAuthority("ROLE_管理者")), "tenant-a");
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+
+        var hits = projectSearchProvider.search("案件", 20);
+        assertThat(hits).extracting(com.ses.dto.search.GlobalSearchResultDTO::getId)
+                .contains(tenantA.projectId())
+                .doesNotContain(tenantB.projectId());
+    }
+
+    @Test
+    void 検索はtenant欠落でfailClosedしmismatch案件を返さない() {
+        Customer nullTenantCustomer = customer(null, "検索用NULL顧客");
+        project(nullTenantCustomer.getId(), "案件NULL検索");
+        Customer wrong = customer("tenant-b", "検索用B顧客");
+        Project mismatch = project(wrong.getId(), "案件mismatch検索");
+
+        AccountingTenantContextHolder.clear();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> projectSearchProvider.search("案件", 20))
+                .isInstanceOf(com.ses.common.exception.BusinessException.class)
+                .hasMessageContaining("TENANT_CONTEXT_REQUIRED");
+
+        AccountingTenantContextHolder.setTenantId("tenant-a");
+        var hits = projectSearchProvider.search("案件", 50);
+        assertThat(hits).extracting(com.ses.dto.search.GlobalSearchResultDTO::getId)
+                .contains(tenantA.projectId())
+                .doesNotContain(tenantB.projectId(), mismatch.getId());
+    }
+
+    @Autowired
+    private com.ses.service.search.provider.ProjectSearchProvider projectSearchProvider;
 
     private Fixture fixture(String tenantId, String label) {
         SysUser user = new SysUser();

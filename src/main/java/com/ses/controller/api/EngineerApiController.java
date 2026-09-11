@@ -167,7 +167,7 @@ public class EngineerApiController {
     public ApiResult<Engineer> save(@Valid @RequestBody com.ses.dto.engineer.EngineerSaveDto engineerDto) {
         Engineer engineer = new Engineer();
         org.springframework.beans.BeanUtils.copyProperties(engineerDto, engineer);
-        requireLegalEntityContext().ifPresent(ctx -> engineer.setLegalEntityId(ctx.requireCurrentLegalEntityId()));
+        engineer.setLegalEntityId(requireLegalEntityContext().requireCurrentLegalEntityId());
         com.ses.common.util.EntityProtectUtil.protectForCreate(engineer);
         engineerService.save(engineer);
         return ApiResult.success(engineer);
@@ -179,20 +179,19 @@ public class EngineerApiController {
         org.springframework.beans.BeanUtils.copyProperties(engineerDto, engineer);
         engineer.setId(id);
         assertEngineerVisible(id);
-        Engineer existing = engineerService.getById(id);
+        Engineer existing = tenantOwnershipResolver.selectEngineer(currentTenant(), id);
         if (existing == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
-        requireLegalEntityContext().ifPresent(ctx -> {
-            ctx.assertCurrent(existing.getLegalEntityId());
-            engineer.setLegalEntityId(existing.getLegalEntityId());
-        });
+        com.ses.service.security.LegalEntityContextService ctx = requireLegalEntityContext();
+        ctx.assertCurrent(existing.getLegalEntityId());
+        engineer.setLegalEntityId(existing.getLegalEntityId());
         return ApiResult.success(engineerService.updateWithStatusGuard(engineer));
     }
 
-    private java.util.Optional<com.ses.service.security.LegalEntityContextService> requireLegalEntityContext() {
+    private com.ses.service.security.LegalEntityContextService requireLegalEntityContext() {
         if (legalEntityContextService == null) {
             throw com.ses.common.exception.BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
-        return java.util.Optional.of(legalEntityContextService);
+        return legalEntityContextService;
     }
 
     /**
@@ -206,6 +205,10 @@ public class EngineerApiController {
         if (!java.util.Objects.equals(current.getVersion(), version)) {
             throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
         }
+        if (current.getLegalEntityId() == null) {
+            throw com.ses.common.exception.BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        requireLegalEntityContext().assertCurrent(current.getLegalEntityId());
         boolean success = engineerService.removeById(id, version);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         return ApiResult.success(true);
