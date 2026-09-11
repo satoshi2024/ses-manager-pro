@@ -43,7 +43,7 @@ ALTER TABLE t_engineer_certification
 
 ALTER TABLE t_engineer_certification
     ADD CONSTRAINT chk_eng_cert_current_holder
-    CHECK ((current_flag = 1 AND current_holder_key = continuity_group_id)
+    CHECK ((current_flag = 1 AND current_holder_key = continuity_group_id AND current_holder_key IS NOT NULL)
         OR (current_flag = 0 AND current_holder_key IS NULL));
 
 SELECT 1;

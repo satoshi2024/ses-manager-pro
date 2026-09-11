@@ -83,7 +83,7 @@ ALTER TABLE t_engineer_certification ADD CONSTRAINT IF NOT EXISTS fk_eng_cert_co
     FOREIGN KEY (tenant_id, engineer_id, certification_id, continuity_group_id)
     REFERENCES t_certification_continuity_group(tenant_id, engineer_id, certification_id, continuity_group_id);
 ALTER TABLE t_engineer_certification ADD CONSTRAINT IF NOT EXISTS chk_eng_cert_current_holder
-    CHECK ((current_flag = 1 AND current_holder_key = continuity_group_id)
+    CHECK ((current_flag = 1 AND current_holder_key = continuity_group_id AND current_holder_key IS NOT NULL)
         OR (current_flag = 0 AND current_holder_key IS NULL));
 
 -- ---- F1-2: 資格event・証憑文書種別 ----

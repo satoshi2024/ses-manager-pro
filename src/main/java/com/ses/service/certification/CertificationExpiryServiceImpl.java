@@ -40,7 +40,10 @@ public class CertificationExpiryServiceImpl implements CertificationExpiryServic
 
     @Override
     public List<CertificationExpiryCandidate> findCandidates(LocalDate asOf, Long recipientUserId) {
-        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        String tenantId = AccountingTenantContextHolder.getExplicitTenantId();
+        if (tenantId == null) {
+            throw com.ses.common.exception.BusinessException.of(403, "error.tenant.contextRequired");
+        }
         if (asOf == null || recipientUserId == null) {
             return List.of();
         }
