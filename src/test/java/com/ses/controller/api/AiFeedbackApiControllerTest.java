@@ -81,6 +81,7 @@ class AiFeedbackApiControllerTest {
                         .eq(AiArtifactVersion::getStatus, "ACTIVE")
                         .last("LIMIT 1"));
         AiRecommendationRun run = new AiRecommendationRun();
+        run.setTenantId("default");
         run.setTraceId(UUID.randomUUID().toString());
         run.setUseCase("MATCHING");
         run.setArtifactVersionId(artifact.getId());
@@ -91,6 +92,7 @@ class AiFeedbackApiControllerTest {
         recommendationRunMapper.insert(run);
 
         AiRecommendationItem item = new AiRecommendationItem();
+        item.setTenantId("default");
         item.setRunId(run.getId());
         item.setRankNo(1);
         item.setTargetType("PROJECT");
