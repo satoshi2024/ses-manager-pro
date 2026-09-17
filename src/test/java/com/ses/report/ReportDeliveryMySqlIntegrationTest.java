@@ -14,6 +14,7 @@ import com.ses.mapper.ReportRunMapper;
 import com.ses.service.report.ReportDeliveryService;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.notification.WebhookNotifier;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -95,6 +96,7 @@ class ReportDeliveryMySqlIntegrationTest {
 
     @BeforeEach
     void authenticateAdmin() {
+        AccountingTenantContextHolder.setTenantId("default");
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("1", "N/A",
                         List.of(new SimpleGrantedAuthority("ROLE_管理者"))));
@@ -115,6 +117,7 @@ class ReportDeliveryMySqlIntegrationTest {
             jdbcTemplate.update("DELETE FROM t_report_run WHERE id = ?", runId);
         }
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -154,14 +157,15 @@ class ReportDeliveryMySqlIntegrationTest {
     }
 
     private void assertNotificationIsActionOnly(Long runId, String dedupeKey) {
+        String canonicalDedupeKey = dedupeKey + "#u1";
         Integer notificationCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM t_notification WHERE dedupe_key = ?", Integer.class, dedupeKey);
+                "SELECT COUNT(*) FROM t_notification WHERE dedupe_key = ?", Integer.class, canonicalDedupeKey);
         Integer outboxCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM t_notification_outbox WHERE dedupe_key = ?", Integer.class, dedupeKey);
+                "SELECT COUNT(*) FROM t_notification_outbox WHERE dedupe_key = ?", Integer.class, canonicalDedupeKey);
         String notificationLink = jdbcTemplate.queryForObject(
-                "SELECT link_url FROM t_notification WHERE dedupe_key = ?", String.class, dedupeKey);
+                "SELECT link_url FROM t_notification WHERE dedupe_key = ?", String.class, canonicalDedupeKey);
         String outboxLink = jdbcTemplate.queryForObject(
-                "SELECT link_url FROM t_notification_outbox WHERE dedupe_key = ?", String.class, dedupeKey);
+                "SELECT link_url FROM t_notification_outbox WHERE dedupe_key = ?", String.class, canonicalDedupeKey);
         assertThat(notificationCount).isEqualTo(1);
         assertThat(outboxCount).isEqualTo(1);
         assertThat(notificationLink).contains("/api/management-reports/deliveries/")

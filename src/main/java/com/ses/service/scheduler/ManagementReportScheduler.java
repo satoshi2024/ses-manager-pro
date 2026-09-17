@@ -93,12 +93,10 @@ public class ManagementReportScheduler {
     @SchedulerLock(name = "managementReportScheduleDispatch", lockAtLeastFor = "PT10S", lockAtMostFor = "PT10M")
     public void dispatchDue() {
         ExecutionActorContext.runAsSystem("management-report-scheduler", "SCHEDULER_POLL", () -> {
-            if (tenantAwareBatchRunner != null) {
-                tenantAwareBatchRunner.run(this::dispatchDueForTenant);
-            } else {
-                String tenant = AccountingTenantContextHolder.getTenantContext();
-                dispatchDueForTenant(tenant != null && !tenant.isBlank() ? tenant : "default");
+            if (tenantAwareBatchRunner == null) {
+                throw BusinessException.of(500, "error.tenant.contextRequired");
             }
+            tenantAwareBatchRunner.run(this::dispatchDueForTenant);
             return null;
         });
     }

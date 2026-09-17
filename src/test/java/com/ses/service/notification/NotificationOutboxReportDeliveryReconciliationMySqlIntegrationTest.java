@@ -4,6 +4,7 @@ import com.ses.entity.NotificationOutbox;
 import com.ses.entity.ReportDelivery;
 import com.ses.mapper.NotificationOutboxMapper;
 import com.ses.mapper.ReportDeliveryMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.report.ReportDeliveryNotificationBridge;
 import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.AfterEach;
@@ -90,24 +91,27 @@ class NotificationOutboxReportDeliveryReconciliationMySqlIntegrationTest {
     @BeforeEach
     void setUp() {
         when(webhookNotifier.notifyNow(ArgumentMatchers.any())).thenReturn(true);
+        AccountingTenantContextHolder.setTenantId("default");
         doAnswer(invocation -> {
             if (failSynchronization.getAndSet(false)) {
                 throw new IllegalStateException("テスト用の同期失敗");
             }
             Map<String, Object> parameters = new HashMap<>();
-            parameters.put("outboxId", invocation.getArgument(0));
-            parameters.put("status", invocation.getArgument(1));
-            parameters.put("errorCode", invocation.getArgument(2));
-            parameters.put("errorMessage", invocation.getArgument(3));
+            parameters.put("tenantId", invocation.getArgument(0));
+            parameters.put("outboxId", invocation.getArgument(1));
+            parameters.put("status", invocation.getArgument(2));
+            parameters.put("errorCode", invocation.getArgument(3));
+            parameters.put("errorMessage", invocation.getArgument(4));
             return sqlSessionTemplate.update(
                     ReportDeliveryMapper.class.getName() + ".syncOutboxStatus", parameters);
         }).when(reportDeliveryMapperSpy).syncOutboxStatus(
-                ArgumentMatchers.anyLong(), ArgumentMatchers.anyString(),
+                ArgumentMatchers.anyString(), ArgumentMatchers.anyLong(), ArgumentMatchers.anyString(),
                 ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
     @AfterEach
     void cleanupFixtures() {
+        AccountingTenantContextHolder.clear();
         if (deliveryId != null) {
             jdbcTemplate.update("DELETE FROM t_report_delivery WHERE id = ?", deliveryId);
         }

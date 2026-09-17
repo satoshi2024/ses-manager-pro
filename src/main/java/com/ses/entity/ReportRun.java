@@ -1,5 +1,7 @@
 package com.ses.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
 import com.ses.common.base.BaseEntity;
@@ -42,7 +44,9 @@ public class ReportRun extends BaseEntity {
     private String status;
     private String snapshotSchemaVersion;
     private String sourcePolicyHash;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String failureCode;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String failureMessage;
     private LocalDateTime generatedAt;
     private Long createdBy;

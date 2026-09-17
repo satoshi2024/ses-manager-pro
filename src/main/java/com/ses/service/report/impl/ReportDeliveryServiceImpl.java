@@ -1,6 +1,7 @@
 package com.ses.service.report.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
@@ -12,6 +13,7 @@ import com.ses.dto.report.ReportDocumentArtifact;
 import com.ses.dto.report.ReportScheduledDeliveryContext;
 import com.ses.entity.Document;
 import com.ses.entity.DocumentVersion;
+import com.ses.entity.NotificationOutbox;
 import com.ses.entity.ReportDelivery;
 import com.ses.entity.ReportRun;
 import com.ses.entity.SysUser;
@@ -44,7 +46,8 @@ import java.util.Base64;
 import java.util.List;
 
 /**
- * delivery状態と通知dedupeを管理する。plaintext tokenはDBへ保存せず、通知linkへ一度だけ載せる。
+ * delivery状態と通知dedupeを管理する。
+ * raw tokenはDB/通知/outboxへ保存せずhashのみ保持し、通知は認証済みaction URLを使う。
  * 文書生成・storage read/writeは短いDB TXの外で実行する。
  */
 @Service
@@ -122,12 +125,43 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
                 deliveries.add(delivery);
                 continue;
             }
+            if (delivery != null) {
+                ensurePreviousOutboxSettled(delivery, tenantId);
+            }
             if (artifact == null) {
                 artifact = documentRegistrar.registerArtifact(run.getId(), "PDF");
             }
             deliveries.add(deliveryIssueService.issue(run, delivery, recipient, artifact));
         }
         return new ReportDeliveryResult(preview, deliveries);
+    }
+
+    private void ensurePreviousOutboxSettled(ReportDelivery delivery, String tenantId) {
+        Long previousOutboxId = delivery.getNotificationOutboxId();
+        if (previousOutboxId == null) {
+            return;
+        }
+        NotificationOutbox outbox = notificationOutboxMapper.selectByIdForDispatch(tenantId, previousOutboxId);
+        if (outbox == null) {
+            delivery.setLastErrorCode("DELIVERY_OUTBOX_REFERENCE_MISSING");
+            delivery.setLastErrorMessage("旧通知outboxを確認できないため再照合が必要です");
+            updateDeliveryChecked(delivery);
+            throw BusinessException.of(409, "error.managementReport.deliveryReconciliationPending");
+        }
+        if (outbox.getTenantId() == null || !tenantId.equals(outbox.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.contextMismatch");
+        }
+        if ("PENDING".equals(outbox.getStatus()) || "RETRY".equals(outbox.getStatus())) {
+            if (notificationOutboxMapper.cancelPendingReport(tenantId, previousOutboxId) > 0) {
+                return;
+            }
+            outbox = notificationOutboxMapper.selectByIdForDispatch(tenantId, previousOutboxId);
+        }
+        if (outbox != null && ("PROCESSING".equals(outbox.getStatus())
+                || Integer.valueOf(1).equals(outbox.getReconciliationRequired())
+                || "PENDING".equals(outbox.getStatus()) || "RETRY".equals(outbox.getStatus()))) {
+            throw BusinessException.of(409, "error.managementReport.deliveryReconciliationPending");
+        }
     }
 
     @Override
@@ -264,6 +298,20 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         delivery.setLastErrorCode("DELIVERY_CANCELLED");
         delivery.setLastErrorMessage("管理者により取消されました");
         updateDeliveryChecked(delivery);
+        if (delivery.getNotificationOutboxId() != null) {
+            int cancelled = notificationOutboxMapper.cancelPendingReport(
+                    tenantId, delivery.getNotificationOutboxId());
+            if (cancelled == 0) {
+                NotificationOutbox outbox = notificationOutboxMapper.selectByIdForDispatch(
+                        tenantId, delivery.getNotificationOutboxId());
+                if (outbox != null && "PROCESSING".equals(outbox.getStatus())) {
+                    if (notificationOutboxMapper.markReconciliationRequired(
+                            tenantId, outbox.getId(), "REPORT_DELIVERY_CANCELLED_DURING_PROCESSING") == 0) {
+                        throw new IllegalStateException("取消済みレポート配布の再照合登録に失敗しました");
+                    }
+                }
+            }
+        }
     }
 
     @Override
@@ -282,9 +330,11 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         String tenantId = requireTenant();
         ReportDelivery delivery;
         if (token == null || token.isBlank()) {
-            delivery = deliveryMapper.selectById(deliveryId);
+            // 認証済みaction endpoint: deliveryId + ログイン主体で解決する（token不要）。
+            delivery = deliveryMapper.selectOne(new QueryWrapper<ReportDelivery>()
+                    .eq("tenant_id", tenantId).eq("id", deliveryId));
         } else {
-            delivery = deliveryMapper.selectByLinkTokenHash(sha256(token));
+            delivery = deliveryMapper.selectByLinkTokenHash(tenantId, sha256(token));
             if (delivery == null || !deliveryId.equals(delivery.getId())
                     || delivery.getLinkTokenHash() == null
                     || !delivery.getLinkTokenHash().equals(sha256(token))) {
@@ -294,7 +344,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         if (delivery == null || !deliveryId.equals(delivery.getId())) {
             throw BusinessException.of(403, "error.managementReport.linkInvalid");
         }
-        if (delivery.getTenantId() != null && !tenantId.equals(delivery.getTenantId())) {
+        if (delivery.getTenantId() == null || !tenantId.equals(delivery.getTenantId())) {
             throw BusinessException.of(403, "error.managementReport.linkInvalid");
         }
         Long userId = currentUserId();
@@ -395,8 +445,8 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     }
 
     private ReportDelivery findRequiredForReplay(Long deliveryId, String tenantId) {
-        ReportDelivery delivery = deliveryMapper.selectByIdForReplay(deliveryId);
-        if (delivery == null || (delivery.getTenantId() != null && !tenantId.equals(delivery.getTenantId()))) {
+        ReportDelivery delivery = deliveryMapper.selectByIdForReplay(tenantId, deliveryId);
+        if (delivery == null || delivery.getTenantId() == null || !tenantId.equals(delivery.getTenantId())) {
             throw BusinessException.of(404, "error.managementReport.deliveryNotFound");
         }
         return delivery;
@@ -412,9 +462,12 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     }
 
     private ReportDocumentArtifact resolveArtifact(ReportRun run, ReportDelivery delivery) {
+        String tenantId = requireTenant();
         if (delivery.getDocumentId() != null && delivery.getDocumentVersionNo() != null) {
-            Document document = documentMapper.selectById(delivery.getDocumentId());
+            Document document = documentMapper.selectOne(new QueryWrapper<Document>()
+                    .eq("tenant_id", tenantId).eq("id", delivery.getDocumentId()));
             DocumentVersion version = documentVersionMapper.selectOne(new QueryWrapper<DocumentVersion>()
+                    .eq("tenant_id", tenantId)
                     .eq("document_id", delivery.getDocumentId())
                     .eq("version_no", delivery.getDocumentVersionNo()));
             if (document != null && version != null
@@ -426,6 +479,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     }
 
     private void rotateDownloadToken(ReportDelivery delivery) {
+        // 旧raw tokenを即時失効させる。通知/outboxへは載せない。
         delivery.setLinkTokenHash(sha256(randomToken()));
         delivery.setLinkExpiresAt(now().plusDays(LINK_DAYS));
         delivery.setReauthRequired(1);
@@ -433,22 +487,38 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     }
 
     private void reconcileReplayConflict(ReportDelivery delivery, String errorCode) {
+        String tenantId = requireTenant();
+        boolean outboxMarked = delivery.getNotificationOutboxId() != null
+                && notificationOutboxMapper.markReconciliationRequired(
+                tenantId, delivery.getNotificationOutboxId(), errorCode) > 0;
+        if (!outboxMarked) {
+            delivery.setLastErrorCode(errorCode + "_OUTBOX_MISSING");
+            delivery.setLastErrorMessage("通知outbox参照を確認できないため配布側で再照合を保留しています");
+            updateDeliveryChecked(delivery);
+            return;
+        }
         delivery.setLastErrorCode(errorCode);
         delivery.setLastErrorMessage("通知outboxの状態競合を検出したため再照合が必要です");
         updateDeliveryChecked(delivery);
     }
 
     private void updateDeliveryChecked(ReportDelivery delivery) {
-        int updated = deliveryMapper.updateById(delivery);
+        String tenantId = requireTenant();
+        int updated = deliveryMapper.update(delivery, new UpdateWrapper<ReportDelivery>()
+                .eq("tenant_id", tenantId)
+                .eq("id", delivery.getId()));
         if (updated > 0) {
             return;
         }
-        ReportDelivery current = delivery.getId() == null ? null : deliveryMapper.selectById(delivery.getId());
+        ReportDelivery current = delivery.getId() == null ? null : deliveryMapper.selectOne(
+                new QueryWrapper<ReportDelivery>().eq("tenant_id", tenantId).eq("id", delivery.getId()));
         boolean terminal = "SENT".equals(delivery.getDeliveryStatus())
                 || "FAILED".equals(delivery.getDeliveryStatus())
                 || "CANCELLED".equals(delivery.getDeliveryStatus());
         if (terminal && current != null && java.util.Objects.equals(current.getDeliveryStatus(), delivery.getDeliveryStatus())
-                && java.util.Objects.equals(current.getNotificationOutboxId(), delivery.getNotificationOutboxId())) {
+                && java.util.Objects.equals(current.getNotificationOutboxId(), delivery.getNotificationOutboxId())
+                && java.util.Objects.equals(current.getLastErrorCode(), delivery.getLastErrorCode())
+                && java.util.Objects.equals(current.getLastErrorMessage(), delivery.getLastErrorMessage())) {
             return;
         }
         throw new IllegalStateException("レポート配布状態の更新に失敗しました。再照合が必要です (deliveryId="

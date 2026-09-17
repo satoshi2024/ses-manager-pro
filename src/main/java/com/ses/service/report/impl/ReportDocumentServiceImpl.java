@@ -11,6 +11,7 @@ import com.ses.entity.ReportRun;
 import com.ses.entity.ReportSectionSnapshot;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.DocumentService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.report.ReportDocumentService;
 import com.ses.service.report.ReportSnapshotService;
 import com.lowagie.text.Chunk;
@@ -101,7 +102,11 @@ public class ReportDocumentServiceImpl implements ReportDocumentService {
         if (document != null && "DRAFT".equals(document.getStatus())) {
             documentService.confirm(document.getId());
         }
-        DocumentVersion version = documentVersionMapper.findLatestByDocumentId(document.getId());
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        if (document.getTenantId() == null || !tenantId.equals(document.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.contextMismatch");
+        }
+        DocumentVersion version = documentVersionMapper.findLatestByTenantAndDocumentId(tenantId, document.getId());
         return new ReportDocumentArtifact(runId, normalized, hash, document, version);
     }
 

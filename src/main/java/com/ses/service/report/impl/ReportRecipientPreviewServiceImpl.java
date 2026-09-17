@@ -82,7 +82,9 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
 
     @Override
     public ReportRecipientPreviewResult preview(Long templateVersionId, YearMonth period) {
-        ReportTemplateVersion version = versionMapper.selectById(templateVersionId);
+        String tenantId = requireTenant();
+        ReportTemplateVersion version = versionMapper.selectOne(new QueryWrapper<ReportTemplateVersion>()
+                .eq("tenant_id", tenantId).eq("id", templateVersionId));
         if (version == null || !"PUBLISHED".equals(version.getStatus())) {
             throw BusinessException.of(400, "error.managementReport.templateVersionNotPublished");
         }
@@ -99,7 +101,12 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
         if (run == null || run.getTemplateVersionId() == null || run.getPeriodFrom() == null) {
             throw BusinessException.of(400, "error.managementReport.runInvalid");
         }
-        ReportTemplateVersion version = versionMapper.selectById(run.getTemplateVersionId());
+        String tenantId = requireTenant();
+        if (run.getTenantId() == null || !tenantId.equals(run.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.contextMismatch");
+        }
+        ReportTemplateVersion version = versionMapper.selectOne(new QueryWrapper<ReportTemplateVersion>()
+                .eq("tenant_id", tenantId).eq("id", run.getTemplateVersionId()));
         if (version == null || !"PUBLISHED".equals(version.getStatus())) {
             throw BusinessException.of(400, "error.managementReport.templateVersionNotPublished");
         }
@@ -146,7 +153,8 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
                 || !scope.getHash().equals(sha256(scope.getJson()))) {
             throw BusinessException.of(403, "error.managementReport.scopeChanged");
         }
-        ReportTemplateVersion version = versionMapper.selectById(templateVersionId);
+        ReportTemplateVersion version = versionMapper.selectOne(new QueryWrapper<ReportTemplateVersion>()
+                .eq("tenant_id", requireTenant()).eq("id", templateVersionId));
         if (version == null || !"PUBLISHED".equals(version.getStatus())) {
             throw BusinessException.of(400, "error.managementReport.templateVersionNotPublished");
         }
@@ -190,7 +198,10 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
         if (policy.roles().isEmpty()) {
             return List.of();
         }
-        QueryWrapper<SysUser> query = new QueryWrapper<SysUser>().eq("status", 1);
+        String tenantId = requireTenant();
+        QueryWrapper<SysUser> query = new QueryWrapper<SysUser>()
+                .eq("tenant_id", tenantId)
+                .eq("status", 1);
         // recipient設定のuserIdsだけを信頼せず、承認済みroleの交差条件を必ず付ける。
         // これにより、誤設定で営業・HR等を配布対象へ混入させない。
         Set<String> allowedRoles = Set.of("管理者", "マネージャー");
@@ -202,6 +213,7 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
         if (users == null) return List.of();
         return users.stream()
                 .filter(user -> user != null && user.getId() != null && user.getStatus() != null && user.getStatus() == 1)
+                .filter(user -> tenantId.equals(user.getTenantId()))
                 .filter(user -> allowedRoles.contains(user.getRole()))
                 .filter(user -> !strictMenuCheck || hasManagementReportMenu(user.getRole()))
                 .toList();
@@ -332,6 +344,10 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
 
     private LocalDate currentAsOf() {
         return LocalDate.now(ZoneId.of(TIMEZONE));
+    }
+
+    private String requireTenant() {
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 
     private String sha256(String value) {

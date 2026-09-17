@@ -3,6 +3,8 @@ package com.ses.controller.api;
 import com.ses.dto.report.ReportDeliveryResult;
 import com.ses.dto.report.ReportRecipientPreview;
 import com.ses.dto.report.ReportRecipientPreviewResult;
+import com.ses.config.LoginUser;
+import com.ses.entity.SysUser;
 import com.ses.service.report.ReportDeliveryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,9 +15,12 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -66,6 +71,7 @@ class ManagementReportDeliveryApiControllerTest {
 
         mockMvc.perform(post("/api/management-reports/runs/10/deliver")
                         .param("previewHash", "preview-hash")
+                        .with(tenantUser())
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
@@ -78,6 +84,7 @@ class ManagementReportDeliveryApiControllerTest {
     @WithMockUser(username = "admin", roles = "管理者")
     void deliverはpreviewHash未指定を拒否する() throws Exception {
         mockMvc.perform(post("/api/management-reports/runs/10/deliver")
+                        .with(tenantUser())
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isBadRequest())
@@ -91,11 +98,26 @@ class ManagementReportDeliveryApiControllerTest {
     void deliverはblankPreviewHashを拒否する() throws Exception {
         mockMvc.perform(post("/api/management-reports/runs/10/deliver")
                         .param("previewHash", "   ")
+                        .with(tenantUser())
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
 
         verify(deliveryService, never()).deliverUser(eq(10L), org.mockito.ArgumentMatchers.anyString());
+    }
+
+    private RequestPostProcessor tenantUser() {
+        SysUser user = new SysUser();
+        user.setId(1L);
+        user.setUsername("admin");
+        user.setPassword("admin123");
+        user.setRole("管理者");
+        user.setStatus(1);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user, List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                .authentication(new UsernamePasswordAuthenticationToken(
+                        principal, null, principal.getAuthorities()));
     }
 }

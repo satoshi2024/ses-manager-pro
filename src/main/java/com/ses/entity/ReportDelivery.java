@@ -1,5 +1,7 @@
 package com.ses.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
 import com.ses.common.base.BaseEntity;
@@ -18,6 +20,7 @@ public class ReportDelivery extends BaseEntity {
     private Long runId;
     private Long documentId;
     private Integer documentVersionNo;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Long notificationOutboxId;
     private Long recipientUserId;
     private Long organizationId;
@@ -29,13 +32,17 @@ public class ReportDelivery extends BaseEntity {
     private String deliveryChannel;
     private String deliveryStatus;
     private String notificationDedupeKey;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String linkTokenHash;
     private LocalDateTime linkExpiresAt;
     private Integer reauthRequired;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDateTime reauthenticatedAt;
     private Integer attemptCount;
     private LocalDateTime downloadedAt;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String lastErrorCode;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String lastErrorMessage;
 
     @Version

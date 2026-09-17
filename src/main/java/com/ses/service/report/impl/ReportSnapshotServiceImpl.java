@@ -1,6 +1,7 @@
 package com.ses.service.report.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
@@ -337,7 +338,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         run.setStatus("RUNNING");
         run.setFailureCode(null);
         run.setFailureMessage(null);
-        runMapper.updateById(run);
+        updateRunForTenant(run);
 
         List<String> sectionKeys = readSectionKeys(templateVersion.getSectionConfigJson());
         Map<String, JsonNode> sourceCache = new HashMap<>();
@@ -366,7 +367,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             run.setFailureCode("SECTION_FAILED");
             run.setFailureMessage("1つ以上のsection生成に失敗したため配布を停止しました");
         }
-        runMapper.updateById(run);
+        updateRunForTenant(run);
         return new ReportGenerationResult(run, listSectionsWithoutLookup(run.getId()), false);
         });
     }
@@ -403,7 +404,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         if (existing == null) {
             sectionMapper.insert(snapshot);
         } else {
-            sectionMapper.updateById(snapshot);
+            updateSectionForTenant(snapshot);
         }
         insertAttempt(run, snapshot, attemptNo, attemptStartedAt, LocalDateTime.now(tenantZone()));
     }
@@ -442,7 +443,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         if (existing == null) {
             sectionMapper.insert(snapshot);
         } else {
-            sectionMapper.updateById(snapshot);
+            updateSectionForTenant(snapshot);
         }
         insertAttempt(run, snapshot, attemptNo, attemptStartedAt, LocalDateTime.now(tenantZone()));
     }
@@ -474,6 +475,31 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         attempt.setErrorMessage(snapshot.getErrorMessage());
         attempt.setSnapshotHash(snapshot.getSnapshotHash());
         sectionAttemptMapper.insert(attempt);
+    }
+
+    private void updateRunForTenant(ReportRun run) {
+        String tenantId = currentTenant();
+        if (run.getTenantId() == null || !tenantId.equals(run.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.contextMismatch");
+        }
+        int updated = runMapper.update(run, new UpdateWrapper<ReportRun>()
+                .eq("tenant_id", tenantId).eq("id", run.getId()));
+        if (updated == 0) {
+            throw new IllegalStateException("レポートrun状態の更新に失敗しました");
+        }
+    }
+
+    private void updateSectionForTenant(ReportSectionSnapshot snapshot) {
+        String tenantId = currentTenant();
+        if (snapshot.getTenantId() == null || !tenantId.equals(snapshot.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.contextMismatch");
+        }
+        int updated = sectionMapper.update(snapshot, new UpdateWrapper<ReportSectionSnapshot>()
+                .eq("tenant_id", tenantId).eq("run_id", snapshot.getRunId())
+                .eq("id", snapshot.getId()));
+        if (updated == 0) {
+            throw new IllegalStateException("レポートsection状態の更新に失敗しました");
+        }
     }
 
     private SectionValue loadSection(String sectionKey, YearMonth target,
@@ -552,21 +578,26 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
 
     /** Dashboard KPIと同一のUtilizationCalcService口径で実績稼働/Benchを取得する。 */
     private UtilizationCalcService.UtilizationSnapshot loadUtilizationActual(YearMonth target) {
-        QueryWrapper<Engineer> engineerQuery = new QueryWrapper<>();
+        String tenantId = currentTenant();
+        List<Engineer> engineers;
         if (!organizationScopeService.hasFullAccess()) {
             Set<Long> allowedEngineerIds = organizationScopeService.allowedEngineerIds(target.atEndOfMonth());
             if (allowedEngineerIds.isEmpty()) {
                 return new UtilizationCalcService.UtilizationSnapshot(0, 0, 0, 0.0);
             }
-            engineerQuery.in("id", allowedEngineerIds);
+            engineers = engineerMapper.selectByIdsForTenant(allowedEngineerIds, tenantId);
+        } else {
+            engineers = engineerMapper.selectPopulationForTenant(tenantId, null, null, null, null);
         }
-        List<Engineer> engineers = engineerMapper.selectList(engineerQuery);
+        if (engineers == null) {
+            engineers = List.of();
+        }
         Set<Long> engineerIds = engineers.stream().map(Engineer::getId).filter(Objects::nonNull).collect(Collectors.toSet());
         Map<Long, List<Contract>> contractsByEngineer = engineerIds.isEmpty()
                 ? Map.of()
                 : contractMapper.selectListForTenant(new QueryWrapper<Contract>()
                         .in("status", UtilizationCalcService.targetContractStatuses())
-                        .in("engineer_id", engineerIds), currentTenant())
+                        .in("engineer_id", engineerIds), tenantId)
                 .stream()
                 .filter(contract -> contract.getEngineerId() != null)
                 .collect(Collectors.groupingBy(Contract::getEngineerId));

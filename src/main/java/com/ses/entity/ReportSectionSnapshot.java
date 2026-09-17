@@ -1,5 +1,7 @@
 package com.ses.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
 import com.ses.common.base.BaseEntity;
@@ -27,13 +29,19 @@ public class ReportSectionSnapshot extends BaseEntity {
     private LocalDateTime asOfAt;
     private LocalDateTime dataAsOfAt;
     private String freshnessStatus;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String canonicalService;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String canonicalDto;
     private String adapterVersion;
     private Long sourceRowCount;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String sourceHash;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String valueJson;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String errorCode;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String errorMessage;
     private String snapshotHash;
     private Integer attemptCount;

@@ -39,13 +39,17 @@ public class NotificationOutboxDispatcher {
     }
 
     private void recoverStaleRowsInternal() {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime staleBefore = now.minusMinutes(30);
-        List<NotificationOutbox> staleRows = outboxMapper.selectStale(staleBefore, 100);
+        List<NotificationOutbox> staleRows = outboxMapper.selectStale(tenantId, staleBefore, 100);
         for (NotificationOutbox stale : staleRows) {
-            int updated = outboxMapper.recoverStale(stale.getId(), staleBefore, now);
+            if (stale.getTenantId() == null || !tenantId.equals(stale.getTenantId())) {
+                continue;
+            }
+            int updated = outboxMapper.recoverStale(tenantId, stale.getId(), staleBefore, now);
             if (updated == 1) {
-                syncReportDelivery(stale.getTenantId(), stale.getId(), STATUS_RETRY, "DELIVERY_STALE_RECOVERED",
+                syncReportDelivery(tenantId, stale.getId(), STATUS_RETRY, "DELIVERY_STALE_RECOVERED",
                         "staleなprocessingを再送可能状態へ戻しました");
             }
         }
@@ -56,16 +60,20 @@ public class NotificationOutboxDispatcher {
     public int reconcilePending() {
         return ExecutionActorContext.runAsSystem("notification-outbox-reconciliation", "SCHEDULER_POLL",
                 () -> {
+                    String tenantId = AccountingTenantContextHolder.requireTenantContext();
                     int repaired = 0;
-                    for (NotificationOutbox row : outboxMapper.selectReconciliationDue(100)) {
+                    for (NotificationOutbox row : outboxMapper.selectReconciliationDue(tenantId, 100)) {
+                        if (row.getTenantId() == null || !tenantId.equals(row.getTenantId())) {
+                            continue;
+                        }
                         try {
-                            if (syncReportDelivery(row.getTenantId(), row.getId(), row.getStatus(),
+                            if (syncReportDelivery(tenantId, row.getId(), row.getStatus(),
                                     "DELIVERY_RECONCILIATION", row.getLastError())) {
-                                int cleared = outboxMapper.clearReconciliationRequired(row.getId());
+                                int cleared = outboxMapper.clearReconciliationRequired(tenantId, row.getId());
                                 if (cleared > 0) {
                                     repaired++;
                                 } else {
-                                    NotificationOutbox current = outboxMapper.selectById(row.getId());
+                                    NotificationOutbox current = outboxMapper.selectByIdForDispatch(tenantId, row.getId());
                                     if (current == null || !Integer.valueOf(1).equals(current.getReconciliationRequired())) {
                                         repaired++;
                                     } else {
@@ -92,36 +100,28 @@ public class NotificationOutboxDispatcher {
     }
 
     private boolean dispatchOneInternal(Long outboxId) {
-        String tenantId = AccountingTenantContextHolder.getExplicitTenantId();
-        NotificationOutbox beforeClaim = tenantId != null
-                ? outboxMapper.selectByIdForDispatch(tenantId, outboxId)
-                : outboxMapper.selectByIdForDispatch(outboxId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        NotificationOutbox beforeClaim = outboxMapper.selectByIdForDispatch(tenantId, outboxId);
         if (beforeClaim == null) {
             return false;
         }
-        if (tenantId == null && beforeClaim.getTenantId() != null) {
-            tenantId = beforeClaim.getTenantId();
+        if (beforeClaim.getTenantId() == null || !tenantId.equals(beforeClaim.getTenantId())) {
+            return false;
         }
-        int claimed = tenantId != null
-                ? outboxMapper.claim(tenantId, outboxId)
-                : outboxMapper.claim(outboxId);
+        int claimed = outboxMapper.claim(tenantId, outboxId);
         if (claimed == 0) {
             return false;
         }
-        NotificationOutbox row = tenantId != null
-                ? outboxMapper.selectByIdForDispatch(tenantId, outboxId)
-                : outboxMapper.selectByIdForDispatch(outboxId);
+        NotificationOutbox row = outboxMapper.selectByIdForDispatch(tenantId, outboxId);
         if (row == null) {
             return false;
         }
 
         boolean delivered = webhookNotifier.notifyNow(toNotification(row));
         if (delivered) {
-            int updated = tenantId != null
-                    ? outboxMapper.markSent(tenantId, outboxId)
-                    : outboxMapper.markSent(outboxId);
+            int updated = outboxMapper.markSent(tenantId, outboxId);
             if (updated == 0) {
-                handleOutboxStateConflict(outboxId, "OUTBOX_SENT_UPDATE_CONFLICT");
+                handleOutboxStateConflict(tenantId, outboxId, "OUTBOX_SENT_UPDATE_CONFLICT");
                 return false;
             }
             // outboxはSENTでもdelivery同期が失敗した場合は、reconciliation済みとして成功扱いにしない。
@@ -132,64 +132,89 @@ public class NotificationOutboxDispatcher {
         String status = attempts >= MAX_ATTEMPTS ? STATUS_FAILED : STATUS_RETRY;
         long backoffMinutes = Math.min(60L, 1L << Math.min(Math.max(attempts - 1, 0), 6));
         String error = "Webhook通知に失敗しました（attempt=" + attempts + "）";
-        int updated = tenantId != null
-                ? outboxMapper.markResult(tenantId, outboxId, status,
-                        LocalDateTime.now().plusMinutes(backoffMinutes), error)
-                : outboxMapper.markResult(outboxId, status,
-                        LocalDateTime.now().plusMinutes(backoffMinutes), error);
+        int updated = outboxMapper.markResult(tenantId, outboxId, status,
+                LocalDateTime.now().plusMinutes(backoffMinutes), error);
         if (updated > 0) {
-            syncReportDelivery(tenantId, outboxId, status, attempts >= MAX_ATTEMPTS ? "DELIVERY_DLQ" : "DELIVERY_FAILED", error);
+            syncReportDelivery(tenantId, outboxId, status,
+                    attempts >= MAX_ATTEMPTS ? "DELIVERY_DLQ" : "DELIVERY_FAILED", error);
         } else {
-            handleOutboxStateConflict(outboxId, "OUTBOX_RESULT_UPDATE_CONFLICT");
+            handleOutboxStateConflict(tenantId, outboxId, "OUTBOX_RESULT_UPDATE_CONFLICT");
         }
         return false;
     }
 
     private boolean syncReportDelivery(String tenantId, Long outboxId, String status, String errorCode, String errorMessage) {
-        if (reportDeliveryMapper == null) {
-            return true;
+        if (tenantId == null || tenantId.isBlank()) {
+            markReconciliation(AccountingTenantContextHolder.requireTenantContext(), outboxId,
+                    "REPORT_DELIVERY_SYNC_TENANT_REQUIRED");
+            return false;
         }
         try {
-            com.ses.entity.ReportDelivery delivery = reportDeliveryMapper.selectByNotificationOutboxId(outboxId);
-            if (delivery == null) {
+            NotificationOutbox currentOutbox = outboxMapper.selectByIdForDispatch(tenantId, outboxId);
+            if (currentOutbox == null) {
+                markReconciliation(tenantId, outboxId, "REPORT_DELIVERY_SYNC_OUTBOX_NOT_FOUND");
+                return false;
+            }
+            if (!"MANAGEMENT_REPORT".equals(currentOutbox.getType())) {
                 return true;
             }
-            NotificationOutbox currentOutbox = tenantId != null
-                    ? outboxMapper.selectByIdForDispatch(tenantId, outboxId)
-                    : outboxMapper.selectById(outboxId);
+            if (reportDeliveryMapper == null) {
+                markReconciliation(tenantId, outboxId, "REPORT_DELIVERY_MAPPER_UNAVAILABLE");
+                return false;
+            }
+            com.ses.entity.ReportDelivery delivery =
+                    reportDeliveryMapper.selectByNotificationOutboxId(tenantId, outboxId);
+            if (delivery == null) {
+                markReconciliation(tenantId, outboxId, "REPORT_DELIVERY_SYNC_DELIVERY_NOT_FOUND");
+                return false;
+            }
+            if (delivery.getTenantId() == null || !tenantId.equals(delivery.getTenantId())) {
+                markReconciliation(tenantId, outboxId, "REPORT_DELIVERY_SYNC_TENANT_MISMATCH");
+                log.error("[通知outbox] deliveryとoutboxのtenant不一致のため同期せず再照合へ移行しました: outboxId={}",
+                        outboxId);
+                return false;
+            }
+            if ("CANCELLED".equals(delivery.getDeliveryStatus())) {
+                int cancelled = outboxMapper.cancelPendingReport(tenantId, outboxId);
+                if (cancelled > 0 || "CANCELLED".equals(currentOutbox.getStatus())
+                        || "SENT".equals(currentOutbox.getStatus())
+                        || "FAILED".equals(currentOutbox.getStatus())) {
+                    return true;
+                }
+                markReconciliation(tenantId, outboxId, "REPORT_DELIVERY_CANCELLED_DURING_PROCESSING");
+                return false;
+            }
             if (currentOutbox == null || !java.util.Objects.equals(currentOutbox.getStatus(), status)) {
-                markReconciliation(outboxId, "REPORT_DELIVERY_SYNC_STALE_OUTBOX");
+                markReconciliation(tenantId, outboxId, "REPORT_DELIVERY_SYNC_STALE_OUTBOX");
                 log.error("[通知outbox] outbox状態が変化したため配布状態を同期せず再照合へ移行しました: outboxId={} status={}",
                         outboxId, status);
                 return false;
             }
-            int updated = tenantId != null
-                    ? reportDeliveryMapper.syncOutboxStatus(tenantId, outboxId, status, errorCode, errorMessage)
-                    : reportDeliveryMapper.syncOutboxStatus(outboxId, status, errorCode, errorMessage);
+            int updated = reportDeliveryMapper.syncOutboxStatus(tenantId, outboxId, status, errorCode, errorMessage);
             if (updated > 0 || status.equals(delivery.getDeliveryStatus())) {
                 return true;
             }
-            markReconciliation(outboxId, "REPORT_DELIVERY_SYNC_UPDATE_COUNT_ZERO");
+            markReconciliation(tenantId, outboxId, "REPORT_DELIVERY_SYNC_UPDATE_COUNT_ZERO");
             log.error("[通知outbox] レポート配布状態の同期結果が0件のため再照合へ移行しました: outboxId={} status={}",
                     outboxId, status);
             return false;
         } catch (Exception e) {
-            markReconciliation(outboxId, "REPORT_DELIVERY_SYNC_FAILED");
+            markReconciliation(tenantId, outboxId, "REPORT_DELIVERY_SYNC_FAILED");
             log.error("[通知outbox] レポート配布状態の同期に失敗したため再照合へ移行しました: outboxId={} status={} exceptionClass={}",
                     outboxId, status, e.getClass().getName());
             return false;
         }
     }
 
-    private void handleOutboxStateConflict(Long outboxId, String error) {
-        markReconciliation(outboxId, error);
+    private void handleOutboxStateConflict(String tenantId, Long outboxId, String error) {
+        markReconciliation(tenantId, outboxId, error);
         log.error("[通知outbox] outbox状態更新が0件のため再照合へ移行しました: outboxId={} errorCode={}",
                 outboxId, error);
     }
 
-    private void markReconciliation(Long outboxId, String error) {
+    private void markReconciliation(String tenantId, Long outboxId, String error) {
         try {
-            if (outboxMapper.markReconciliationRequired(outboxId, error) == 0) {
+            if (outboxMapper.markReconciliationRequired(tenantId, outboxId, error) == 0) {
                 throw new IllegalStateException("通知outbox再照合フラグの保存に失敗しました");
             }
         } catch (Exception markerFailure) {

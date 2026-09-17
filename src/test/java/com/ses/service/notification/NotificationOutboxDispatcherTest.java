@@ -57,7 +57,7 @@ class NotificationOutboxDispatcherTest {
         when(outboxMapper.claim("default", 7L)).thenReturn(1);
         when(outboxMapper.markSent("default", 7L)).thenReturn(1);
         when(webhookNotifier.notifyNow(any(Notification.class))).thenReturn(true);
-        when(reportDeliveryMapper.selectByNotificationOutboxId(7L)).thenReturn(reportDelivery());
+        when(reportDeliveryMapper.selectByNotificationOutboxId("default", 7L)).thenReturn(reportDelivery());
         when(reportDeliveryMapper.syncOutboxStatus("default", 7L, "SENT", null, null)).thenReturn(1);
 
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
@@ -68,7 +68,7 @@ class NotificationOutboxDispatcherTest {
         verify(outboxMapper).claim("default", 7L);
         verify(outboxMapper).markSent("default", 7L);
         verify(reportDeliveryMapper).syncOutboxStatus("default", 7L, "SENT", null, null);
-        verify(outboxMapper, never()).markResult(any(), any(), any(), any());
+        verify(outboxMapper, never()).markResult(any(), any(), any(), any(), any());
         ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
         verify(webhookNotifier).notifyNow(notification.capture());
         assertTrue(notification.getValue().getDedupeKey().contains("approval-requested"));
@@ -80,7 +80,7 @@ class NotificationOutboxDispatcherTest {
         when(outboxMapper.claim("default", 7L)).thenReturn(1);
         when(outboxMapper.markResult(eq("default"), eq(7L), eq("RETRY"), any(LocalDateTime.class), any())).thenReturn(1);
         when(webhookNotifier.notifyNow(any(Notification.class))).thenReturn(false);
-        when(reportDeliveryMapper.selectByNotificationOutboxId(7L)).thenReturn(reportDelivery());
+        when(reportDeliveryMapper.selectByNotificationOutboxId("default", 7L)).thenReturn(reportDelivery());
         when(reportDeliveryMapper.syncOutboxStatus(eq("default"), eq(7L), eq("RETRY"), eq("DELIVERY_FAILED"), any())).thenReturn(1);
 
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
@@ -98,7 +98,7 @@ class NotificationOutboxDispatcherTest {
         when(outboxMapper.claim("default", 7L)).thenReturn(1);
         when(outboxMapper.markResult(eq("default"), eq(7L), eq("FAILED"), any(LocalDateTime.class), any())).thenReturn(1);
         when(webhookNotifier.notifyNow(any(Notification.class))).thenReturn(false);
-        when(reportDeliveryMapper.selectByNotificationOutboxId(7L)).thenReturn(reportDelivery());
+        when(reportDeliveryMapper.selectByNotificationOutboxId("default", 7L)).thenReturn(reportDelivery());
         when(reportDeliveryMapper.syncOutboxStatus(eq("default"), eq(7L), eq("FAILED"), eq("DELIVERY_DLQ"), any())).thenReturn(1);
 
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
@@ -120,18 +120,48 @@ class NotificationOutboxDispatcherTest {
         assertFalse(dispatcher.dispatchOne(7L));
 
         verify(webhookNotifier, never()).notifyNow(any());
-        verify(outboxMapper, never()).markSent(any());
-        verify(outboxMapper, never()).markResult(any(), any(), any(), any());
+        verify(outboxMapper, never()).markSent(any(), any());
+        verify(outboxMapper, never()).markResult(any(), any(), any(), any(), any());
     }
 
     @Test
-    void recoverStaleRowsは処理中の古い行を再送可能へ戻す() {
+    void recoverStaleRowsは処理中の古い行をtenant境界で再送可能へ戻す() {
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
-        when(outboxMapper.selectStale(any(LocalDateTime.class), anyInt())).thenReturn(java.util.List.of());
+        when(outboxMapper.selectStale(eq("default"), any(LocalDateTime.class), anyInt())).thenReturn(java.util.List.of());
 
         dispatcher.recoverStaleRows();
 
-        verify(outboxMapper).selectStale(any(LocalDateTime.class), eq(100));
+        verify(outboxMapper).selectStale(eq("default"), any(LocalDateTime.class), eq(100));
+    }
+
+    @Test
+    void reconcilePendingは取消済みdeliveryと送信済みoutboxを終端状態として収束させる() {
+        NotificationOutbox row = rowWithStatus("SENT");
+        row.setReconciliationRequired(1);
+        when(outboxMapper.selectReconciliationDue("default", 100)).thenReturn(java.util.List.of(row));
+        when(outboxMapper.selectByIdForDispatch("default", 7L)).thenReturn(row);
+        ReportDelivery cancelled = reportDelivery();
+        cancelled.setDeliveryStatus("CANCELLED");
+        when(reportDeliveryMapper.selectByNotificationOutboxId("default", 7L)).thenReturn(cancelled);
+        when(outboxMapper.cancelPendingReport("default", 7L)).thenReturn(0);
+        when(outboxMapper.clearReconciliationRequired("default", 7L)).thenReturn(1);
+
+        NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
+        org.springframework.test.util.ReflectionTestUtils.setField(dispatcher, "reportDeliveryMapper", reportDeliveryMapper);
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, dispatcher.reconcilePending());
+        verify(outboxMapper).clearReconciliationRequired("default", 7L);
+        verify(reportDeliveryMapper, never()).syncOutboxStatus(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void dispatchOneはtenant無しではfailClosedする() {
+        AccountingTenantContextHolder.clear();
+        NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
+
+        org.junit.jupiter.api.Assertions.assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> dispatcher.dispatchOne(7L));
+        verify(outboxMapper, never()).selectByIdForDispatch(any(), any());
     }
 
     private NotificationOutbox row(int attempts) {
@@ -139,8 +169,8 @@ class NotificationOutboxDispatcherTest {
                 .id(7L)
                 .tenantId("default")
                 .notificationId(9L)
-                .type("APPROVAL_REQUESTED")
-                .title("承認申請")
+                .type("MANAGEMENT_REPORT")
+                .title("月次管理レポート")
                 .message("本文")
                 .linkUrl("/approval/inbox")
                 .menuKey("approval")
@@ -162,6 +192,7 @@ class NotificationOutboxDispatcherTest {
 
     private ReportDelivery reportDelivery() {
         ReportDelivery delivery = new ReportDelivery();
+        delivery.setTenantId("default");
         delivery.setDeliveryStatus("PROCESSING");
         return delivery;
     }

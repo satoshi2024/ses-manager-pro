@@ -10,6 +10,7 @@ import com.ses.entity.ReportRun;
 import com.ses.entity.ReportSectionSnapshot;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.DocumentService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.report.ReportSnapshotService;
 import com.ses.service.report.impl.ReportDocumentServiceImpl;
 import com.ses.service.billing.MonthlyRevenueCalcService;
@@ -17,6 +18,7 @@ import com.lowagie.text.pdf.PdfReader;
 import com.lowagie.text.pdf.parser.PdfTextExtractor;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 
@@ -40,6 +42,7 @@ class ReportDocumentServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         snapshotService = mock(ReportSnapshotService.class);
         documentService = mock(DocumentService.class);
         documentVersionMapper = mock(DocumentVersionMapper.class);
@@ -48,6 +51,7 @@ class ReportDocumentServiceImplTest {
 
         ReportRun run = new ReportRun();
         run.setId(10L);
+        run.setTenantId("default");
         run.setStatus("SUCCEEDED");
         run.setPeriodFrom(LocalDate.of(2026, 8, 1));
         run.setPeriodTo(LocalDate.of(2026, 8, 31));
@@ -66,6 +70,11 @@ class ReportDocumentServiceImplTest {
         section.setValueJson("=SUM(A1:A2)");
         when(snapshotService.findRun(10L)).thenReturn(run);
         when(snapshotService.listSections(10L)).thenReturn(List.of(section));
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -139,12 +148,13 @@ class ReportDocumentServiceImplTest {
     void registerは同一businessKeyの再呼び出しでDocumentServiceの冪等経路を再利用する() {
         Document document = new Document();
         document.setId(20L);
+        document.setTenantId("default");
         document.setStatus("DRAFT");
         DocumentVersion version = new DocumentVersion();
         version.setDocumentId(20L);
         version.setVersionNo(1);
         when(documentService.registerGenerated(any(), any())).thenReturn(document);
-        when(documentVersionMapper.findLatestByDocumentId(20L)).thenReturn(version);
+        when(documentVersionMapper.findLatestByTenantAndDocumentId("default", 20L)).thenReturn(version);
 
         ReportDocumentArtifact first = service.register(10L, "PDF");
         ReportDocumentArtifact second = service.register(10L, "PDF");
@@ -160,12 +170,13 @@ class ReportDocumentServiceImplTest {
     void registersGeneratedDocumentAndConfirmsRetentionThroughDocumentService() {
         Document document = new Document();
         document.setId(20L);
+        document.setTenantId("default");
         document.setStatus("DRAFT");
         DocumentVersion version = new DocumentVersion();
         version.setDocumentId(20L);
         version.setVersionNo(1);
         when(documentService.registerGenerated(any(), any())).thenReturn(document);
-        when(documentVersionMapper.findLatestByDocumentId(20L)).thenReturn(version);
+        when(documentVersionMapper.findLatestByTenantAndDocumentId("default", 20L)).thenReturn(version);
 
         ReportDocumentArtifact artifact = service.register(10L, "CSV");
 

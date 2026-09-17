@@ -13,6 +13,8 @@ import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -81,6 +83,7 @@ public class InvoiceServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         // ServiceImpl の baseMapper フィールドを手動で注入
         ReflectionTestUtils.setField(invoiceService, "baseMapper", invoiceMapper);
         lenient().when(organizationScopeService.hasFullAccess()).thenReturn(true);
@@ -92,6 +95,11 @@ public class InvoiceServiceImplTest {
         lenient().when(customerMapper.selectById(anyLong())).thenReturn(customer);
         lenient().when(invoiceMapper.selectLegalEntityIdsByWorkRecordIds(anyList()))
                 .thenAnswer(invocation -> ((List<?>) invocation.getArgument(0)).stream().map(id -> 1L).toList());
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -386,7 +394,8 @@ public class InvoiceServiceImplTest {
         sent.setStatus("送付済");
         sent.setDueDate(LocalDate.now().minusDays(45)); // 31-60日
         sent.setBalance(new BigDecimal("30000"));
-        when(invoiceMapper.selectOutstandingBalances()).thenReturn(java.util.List.of(unsent, sent));
+        when(invoiceMapper.selectOutstandingBalancesForTenant("default"))
+                .thenReturn(java.util.List.of(unsent, sent));
 
         com.ses.dto.invoice.AgingReportDto report = invoiceService.aging(LocalDate.now());
         assertEquals(0, new BigDecimal("50000").compareTo(report.getTotal().getUnsent()));
@@ -407,14 +416,14 @@ public class InvoiceServiceImplTest {
         balance.setStatus("送付済");
         balance.setBalance(new BigDecimal("30000"));
         balance.setDueDate(asOf.minusDays(1));
-        when(invoiceMapper.selectOutstandingBalancesScoped(any(), any())).thenReturn(java.util.List.of(balance));
+        when(invoiceMapper.selectOutstandingBalancesScoped(any(), any(), any())).thenReturn(java.util.List.of(balance));
 
         com.ses.dto.invoice.AgingReportDto report = invoiceService.aging(asOf);
 
         assertEquals(0, new BigDecimal("30000").compareTo(report.getTotal().getD1to30()));
         verify(invoiceMapper).selectOutstandingBalancesScoped(
-                isNull(), eq(java.util.List.of(7L)));
-        verify(invoiceMapper, never()).selectOutstandingBalances();
+                eq("default"), isNull(), eq(java.util.List.of(7L)));
+        verify(invoiceMapper, never()).selectOutstandingBalancesForTenant(any());
     }
 
     @Test

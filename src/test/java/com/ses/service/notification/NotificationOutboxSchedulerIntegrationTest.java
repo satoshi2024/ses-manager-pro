@@ -60,6 +60,7 @@ class NotificationOutboxSchedulerIntegrationTest {
     void schedulerを二回起動しても同一通知は一件だけ送信済みになる() {
         String dedupeKey = "b1-scheduler-demo:" + System.nanoTime();
         Notification notification = new Notification();
+        notification.setTenantId("default");
         notification.setType("SYSTEM");
         notification.setTitle("B1 scheduler demo");
         notification.setMessage("同一通知");

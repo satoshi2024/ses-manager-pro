@@ -106,9 +106,36 @@ class NotificationOutboxServiceTest {
         verify(dispatcher).dispatchOne(32L);
     }
 
+    @Test
+    void enqueue_他tenantの通知はfailClosedする() {
+        Notification notification = notification();
+        notification.setTenantId("tenant-b");
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> service.enqueue(notification));
+    }
+
+    @Test
+    void enqueue_tenant未設定の通知はfailClosedする() {
+        Notification notification = notification();
+        notification.setTenantId(null);
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> service.enqueue(notification));
+    }
+
+    @Test
+    void dispatchDueはtenant無しではfailClosedする() {
+        AccountingTenantContextHolder.clear();
+
+        org.junit.jupiter.api.Assertions.assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> service.dispatchDue(10));
+    }
+
     private Notification notification() {
         Notification notification = new Notification();
         notification.setId(9L);
+        notification.setTenantId("default");
         notification.setType("APPROVAL_REQUESTED");
         notification.setTitle("承認申請");
         notification.setMessage("本文");

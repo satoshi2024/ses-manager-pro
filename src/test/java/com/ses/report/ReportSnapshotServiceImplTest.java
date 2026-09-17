@@ -3,6 +3,7 @@ package com.ses.report;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.dto.dashboard.DashboardSummaryDto;
 import com.ses.common.audit.ExecutionActorContext;
+import com.ses.dto.invoice.AgingReportDto;
 import com.ses.dto.report.ReportGenerationCommand;
 import com.ses.dto.report.ReportGenerationResult;
 import com.ses.dto.report.ReportRecipientPreviewResult;
@@ -54,8 +55,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -140,6 +143,7 @@ class ReportSnapshotServiceImplTest {
             currentRun.setId(10L);
             return 1;
         }).when(runMapper).insert(any(ReportRun.class));
+        when(runMapper.update(any(ReportRun.class), any())).thenReturn(1);
         when(sectionMapper.selectOne(any())).thenAnswer(invocation -> snapshots.values().stream()
                 .findFirst().orElse(null));
         doAnswer(invocation -> {
@@ -148,6 +152,7 @@ class ReportSnapshotServiceImplTest {
             snapshots.put(snapshot.getSectionKey(), snapshot);
             return 1;
         }).when(sectionMapper).insert(any(ReportSectionSnapshot.class));
+        when(sectionMapper.update(any(ReportSectionSnapshot.class), any())).thenReturn(1);
         when(sectionMapper.selectList(any())).thenAnswer(invocation -> new ArrayList<>(snapshots.values()));
 
         SecurityContextHolder.getContext().setAuthentication(
@@ -348,8 +353,11 @@ class ReportSnapshotServiceImplTest {
         when(scopeService.hasFullAccess()).thenReturn(true);
         Engineer engineer = new Engineer();
         engineer.setId(1L);
-        when(engineerMapper.selectList(any())).thenReturn(List.of(engineer));
-        when(contractMapper.selectList(any())).thenReturn(List.of(new Contract() {{ setEngineerId(1L); }}));
+        engineer.setTenantId("default");
+        when(engineerMapper.selectPopulationForTenant(eq("default"), any(), any(), any(), any()))
+                .thenReturn(List.of(engineer));
+        when(contractMapper.selectListForTenant(any(), eq("default")))
+                .thenReturn(List.of(new Contract() {{ setEngineerId(1L); }}));
         when(systemConfigService.getString(any(), any())).thenReturn("true");
         when(utilizationCalcService.calc(any(), any(), any(), any(Boolean.class)))
                 .thenReturn(new UtilizationCalcService.UtilizationSnapshot(8, 2, 10, 80.0));
@@ -362,5 +370,60 @@ class ReportSnapshotServiceImplTest {
             assertThat(section.getCanonicalService()).isEqualTo("UtilizationCalcService");
             assertThat(section.getValueJson()).contains("80.0", "\"workingCount\":8");
         });
+        verify(engineerMapper).selectPopulationForTenant(eq("default"), any(), any(), any(), any());
+        verify(engineerMapper, never()).selectList(any());
+    }
+
+    @Test
+    void utilization母集はtenant境界のEngineerMapperだけを使う() {
+        ReportTemplateVersion version = templateVersionMapper.selectOne(any());
+        version.setSectionConfigJson("{\"sections\":[\"utilization\"]}");
+        when(monthlyClosingService.isClosed("2026-08")).thenReturn(true);
+        when(scopeService.hasFullAccess()).thenReturn(true);
+        Engineer engineer = new Engineer();
+        engineer.setId(1L);
+        engineer.setTenantId("default");
+        when(engineerMapper.selectPopulationForTenant(eq("default"), any(), any(), any(), any()))
+                .thenReturn(List.of(engineer));
+        when(contractMapper.selectListForTenant(any(), eq("default"))).thenReturn(List.of());
+        when(systemConfigService.getString(any(), any())).thenReturn("true");
+        when(utilizationCalcService.calc(any(), any(), any(), any(Boolean.class)))
+                .thenReturn(new UtilizationCalcService.UtilizationSnapshot(0, 1, 1, 0.0));
+
+        service.generate(ReportGenerationCommand.manual(3L, YearMonth.of(2026, 8), "確定", "preview-1"));
+
+        verify(engineerMapper).selectPopulationForTenant(eq("default"), any(), any(), any(), any());
+        verify(engineerMapper, never()).selectList(any());
+    }
+
+    @Test
+    void arAgingはInvoiceServiceのagingへ委譲しtenant無し全表経路を使わない() {
+        InvoiceService invoiceService = mock(InvoiceService.class);
+        service = new ReportSnapshotServiceImpl(templateVersionMapper, runMapper, sectionAttemptMapper, sectionMapper,
+                userMapper, scopeService, monthlyClosingService, dashboardService, utilizationCalcService,
+                mock(UtilizationForecastService.class), engineerMapper, contractMapper, systemConfigService,
+                mock(CashFlowForecastService.class), mock(ManagementAccountingService.class),
+                invoiceService, new ObjectMapper().findAndRegisterModules(), recipientPreviewService, timezoneResolver);
+        ReportTemplateVersion version = new ReportTemplateVersion();
+        version.setId(3L);
+        version.setTemplateId(2L);
+        version.setStatus("PUBLISHED");
+        version.setSectionConfigJson("{\"sections\":[\"ar-aging\"]}");
+        when(templateVersionMapper.selectOne(any())).thenReturn(version);
+        when(monthlyClosingService.isClosed("2026-08")).thenReturn(true);
+        AgingReportDto aging = new AgingReportDto();
+        aging.setAsOf(LocalDate.of(2026, 8, 31));
+        aging.setRows(List.of());
+        AgingReportDto.Row total = new AgingReportDto.Row();
+        aging.setTotal(total);
+        when(invoiceService.aging(any())).thenReturn(aging);
+
+        ReportGenerationResult result = service.generate(ReportGenerationCommand.manual(
+                3L, YearMonth.of(2026, 8), "確定", "preview-1"));
+
+        verify(invoiceService).aging(LocalDate.of(2026, 8, 31));
+        assertThat(result.getSections()).isNotEmpty();
+        assertThat(result.getSections().get(0).getSectionStatus()).isEqualTo("SUCCEEDED");
+        assertThat(result.getSections().get(0).getCanonicalService()).isEqualTo("InvoiceService");
     }
 }

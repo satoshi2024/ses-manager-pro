@@ -16,6 +16,7 @@ import com.ses.service.report.ReportDeliveryDocumentRegistrar;
 import com.ses.service.report.ReportDeliveryIssueService;
 import com.ses.service.report.ReportDeliveryService;
 import com.ses.service.report.ReportRecipientPreviewService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -80,6 +81,7 @@ class ReportDeliveryTransactionIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         Mockito.reset(deliveryMapper);
         recipientUserId = jdbcTemplate.queryForObject(
                 "SELECT id FROM sys_user WHERE username = 'admin' AND deleted_flag = 0", Long.class);
@@ -89,6 +91,7 @@ class ReportDeliveryTransactionIntegrationTest {
     @AfterEach
     void cleanupTestData() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
         if (runId != null) {
             String notificationDedupeKey = notificationDedupeKey(runId, recipientUserId);
             jdbcTemplate.update("DELETE FROM t_notification_outbox WHERE dedupe_key = ?", notificationDedupeKey);
@@ -106,7 +109,7 @@ class ReportDeliveryTransactionIntegrationTest {
                 throw new RuntimeException("delivery最終更新の意図的失敗");
             }
             return invocation.callRealMethod();
-        }).when(deliveryMapper).updateById(any(ReportDelivery.class));
+        }).when(deliveryMapper).update(any(ReportDelivery.class), any());
 
         String notificationDedupeKey = notificationDedupeKey(runId, recipientUserId);
         ReportRun run = runMapper.selectById(runId);
@@ -138,8 +141,10 @@ class ReportDeliveryTransactionIntegrationTest {
 
         Document document = new Document();
         document.setId(9901L);
+        document.setTenantId("default");
         DocumentVersion version = new DocumentVersion();
         version.setVersionNo(1);
+        version.setTenantId("default");
         when(recipientPreviewService.previewForRun(any(ReportRun.class))).thenReturn(preview);
         when(documentRegistrar.registerArtifact(run.getId(), "PDF"))
                 .thenReturn(new ReportDocumentArtifact(run.getId(), "PDF", "artifact-hash", document, version));
@@ -157,6 +162,30 @@ class ReportDeliveryTransactionIntegrationTest {
         assertThat(delivery.getDeliveryStatus()).isEqualTo("RETRY");
         assertThat(delivery.getLastErrorCode()).isEqualTo("DELIVERY_FAILED");
         assertThat(delivery.getDocumentId()).isEqualTo(9901L);
+        assertThat(delivery.getLinkTokenHash()).isNotBlank();
+    }
+
+    @Test
+    void issueは通知linkへrawTokenを載せない() {
+        when(notificationService.publishToUserAndGetOutboxIdWithoutDispatch(
+                anyLong(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString()))
+                .thenAnswer(invocation -> {
+                    String link = invocation.getArgument(4);
+                    assertThat(link).contains("/api/management-reports/deliveries/")
+                            .doesNotContain("token=")
+                            .doesNotContain("?");
+                    return 555L;
+                });
+
+        ReportRun run = runMapper.selectById(runId);
+        ReportRecipientPreview recipient = new ReportRecipientPreview(
+                recipientUserId, "管理者", "ALLOW", "SCOPE_MATCH", "scope-hash");
+
+        ReportDelivery delivery = deliveryIssueService.issue(run, null, recipient, null);
+
+        assertThat(delivery.getDeliveryStatus()).isEqualTo("ENQUEUED");
+        assertThat(delivery.getLinkTokenHash()).hasSize(64);
+        assertThat(delivery.getNotificationOutboxId()).isEqualTo(555L);
     }
 
     private static String deliveryDedupeKey(Long runId, Long recipientUserId) {

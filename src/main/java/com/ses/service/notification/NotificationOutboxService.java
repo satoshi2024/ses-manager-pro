@@ -30,7 +30,8 @@ public class NotificationOutboxService {
         }
         LocalDateTime now = LocalDateTime.now();
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
-        if (notification.getTenantId() != null && !tenantId.equals(notification.getTenantId())) {
+        if (notification.getTenantId() == null || notification.getTenantId().isBlank()
+                || !tenantId.equals(notification.getTenantId())) {
             throw new IllegalStateException("通知とoutboxのtenantが一致しません");
         }
         NotificationOutbox row = NotificationOutbox.builder()

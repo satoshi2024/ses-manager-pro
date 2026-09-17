@@ -24,7 +24,6 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ReportTemplateServiceImpl implements ReportTemplateService {
 
-    private static final String DEFAULT_TENANT = "default";
     private static final String DEFAULT_TIMEZONE = "Asia/Tokyo";
     private final ReportTemplateMapper templateMapper;
     private final ReportTemplateVersionMapper versionMapper;
@@ -32,29 +31,32 @@ public class ReportTemplateServiceImpl implements ReportTemplateService {
 
     @Override
     public List<ReportTemplate> listTemplates() {
+        String tenantId = currentTenant();
         return templateMapper.selectList(new QueryWrapper<ReportTemplate>()
-                .eq("tenant_id", DEFAULT_TENANT).orderByAsc("id"));
+                .eq("tenant_id", tenantId).orderByAsc("id"));
     }
 
     @Override
     public List<ReportTemplateVersion> listVersions(Long templateId) {
+        String tenantId = currentTenant();
         return versionMapper.selectList(new QueryWrapper<ReportTemplateVersion>()
-                .eq("tenant_id", DEFAULT_TENANT).eq("template_id", templateId)
+                .eq("tenant_id", tenantId).eq("template_id", templateId)
                 .orderByDesc("version_no"));
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ReportTemplate createTemplate(String key, String name) {
+        String tenantId = currentTenant();
         if (key == null || key.isBlank() || name == null || name.isBlank()) {
             throw BusinessException.of(400, "error.managementReport.templateInvalid");
         }
         if (templateMapper.selectOne(new QueryWrapper<ReportTemplate>()
-                .eq("tenant_id", DEFAULT_TENANT).eq("template_key", key)) != null) {
+                .eq("tenant_id", tenantId).eq("template_key", key)) != null) {
             throw BusinessException.of(409, "error.managementReport.templateDuplicated");
         }
         ReportTemplate template = new ReportTemplate();
-        template.setTenantId(DEFAULT_TENANT);
+        template.setTenantId(tenantId);
         template.setTemplateKey(key.trim());
         template.setTemplateName(name.trim());
         template.setStatus("DRAFT");
@@ -67,16 +69,18 @@ public class ReportTemplateServiceImpl implements ReportTemplateService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ReportTemplateVersion createVersion(Long templateId, ReportTemplateVersionCreateRequest request) {
-        ReportTemplate template = templateMapper.selectById(templateId);
+        String tenantId = currentTenant();
+        ReportTemplate template = templateMapper.selectOne(new QueryWrapper<ReportTemplate>()
+                .eq("tenant_id", tenantId).eq("id", templateId));
         if (template == null) {
             throw BusinessException.of(404, "error.managementReport.templateNotFound");
         }
         int nextVersion = versionMapper.selectList(new QueryWrapper<ReportTemplateVersion>()
-                        .eq("template_id", templateId))
+                        .eq("tenant_id", tenantId).eq("template_id", templateId))
                 .stream().map(ReportTemplateVersion::getVersionNo)
                 .filter(java.util.Objects::nonNull).mapToInt(Integer::intValue).max().orElse(0) + 1;
         ReportTemplateVersion version = new ReportTemplateVersion();
-        version.setTenantId(DEFAULT_TENANT);
+        version.setTenantId(tenantId);
         version.setTemplateId(templateId);
         version.setVersionNo(nextVersion);
         version.setStatus("DRAFT");
@@ -103,7 +107,9 @@ public class ReportTemplateServiceImpl implements ReportTemplateService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ReportTemplateVersion updateVersion(Long versionId, ReportTemplateVersionCreateRequest request) {
-        ReportTemplateVersion version = versionMapper.selectById(versionId);
+        String tenantId = currentTenant();
+        ReportTemplateVersion version = versionMapper.selectOne(new QueryWrapper<ReportTemplateVersion>()
+                .eq("tenant_id", tenantId).eq("id", versionId));
         if (version == null) {
             throw BusinessException.of(404, "error.managementReport.templateVersionNotFound");
         }
@@ -135,33 +141,49 @@ public class ReportTemplateServiceImpl implements ReportTemplateService {
                 || version.getRetentionYears() != 7) {
             throw BusinessException.of(400, "error.managementReport.policyFixed");
         }
-        versionMapper.updateById(version);
+        int updated = versionMapper.update(version, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<ReportTemplateVersion>()
+                .eq("tenant_id", tenantId).eq("id", versionId));
+        if (updated == 0) {
+            throw BusinessException.of(404, "error.managementReport.templateVersionNotFound");
+        }
         return version;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ReportTemplateVersion publishVersion(Long versionId) {
-        ReportTemplateVersion version = versionMapper.selectById(versionId);
+        String tenantId = currentTenant();
+        ReportTemplateVersion version = versionMapper.selectOne(new QueryWrapper<ReportTemplateVersion>()
+                .eq("tenant_id", tenantId).eq("id", versionId));
         if (version == null) {
             throw BusinessException.of(404, "error.managementReport.templateVersionNotFound");
         }
         versionMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<ReportTemplateVersion>()
-                .eq("template_id", version.getTemplateId()).eq("status", "PUBLISHED")
+                .eq("tenant_id", tenantId).eq("template_id", version.getTemplateId()).eq("status", "PUBLISHED")
                 .set("status", "ARCHIVED"));
         version.setStatus("PUBLISHED");
         version.setPublishedAt(LocalDateTime.now(java.time.ZoneId.of(DEFAULT_TIMEZONE)));
-        versionMapper.updateById(version);
+        int updated = versionMapper.update(version, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<ReportTemplateVersion>()
+                .eq("tenant_id", tenantId).eq("id", versionId));
+        if (updated == 0) {
+            throw BusinessException.of(404, "error.managementReport.templateVersionNotFound");
+        }
         return version;
     }
 
     @Override
     public ReportTemplateVersion getPublishedVersion(Long versionId) {
-        ReportTemplateVersion version = versionMapper.selectById(versionId);
+        String tenantId = currentTenant();
+        ReportTemplateVersion version = versionMapper.selectOne(new QueryWrapper<ReportTemplateVersion>()
+                .eq("tenant_id", tenantId).eq("id", versionId));
         if (version == null || !"PUBLISHED".equals(version.getStatus())) {
             throw BusinessException.of(404, "error.managementReport.templateVersionNotFound");
         }
         return version;
+    }
+
+    private String currentTenant() {
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 
     private String defaultSectionsJson() {

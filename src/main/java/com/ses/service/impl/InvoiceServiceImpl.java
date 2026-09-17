@@ -559,12 +559,13 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         return out;
     }
 
-    /** エイジングのscopeは行取得後ではなく残高SQLのWHEREへ適用する。 */
+    /** エイジングのscopeは行取得後ではなく残高SQLのWHEREへ適用する。tenantは必ず明示する。 */
     private List<InvoiceBalanceDto> selectOutstandingBalances(LocalDate asOf) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         boolean organizationScoped = !organizationScopeService.hasFullAccess();
         boolean dataScoped = dataScopeService.isSalesDataScoped();
         if (!organizationScoped && !dataScoped) {
-            return baseMapper.selectOutstandingBalances();
+            return baseMapper.selectOutstandingBalancesForTenant(tenantId);
         }
 
         List<Long> invoiceIds = organizationScoped
@@ -574,7 +575,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if ((invoiceIds != null && invoiceIds.isEmpty()) || (customerIds != null && customerIds.isEmpty())) {
             return java.util.Collections.emptyList();
         }
-        return baseMapper.selectOutstandingBalancesScoped(invoiceIds, customerIds);
+        return baseMapper.selectOutstandingBalancesScoped(tenantId, invoiceIds, customerIds);
     }
 
     /**
