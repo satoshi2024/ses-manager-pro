@@ -16,10 +16,12 @@ class ExternalAccountProviderProfileTest {
     @Test
     void devAndTestCanUseMockByDefault() {
         try (var context = context(new String[]{"dev"}, null)) {
+            assertThat(context.getBeansOfType(ExternalAccountProviderClient.class)).hasSize(1);
             assertThat(context.getBean(ExternalAccountProviderClient.class))
                     .isInstanceOf(MockExternalAccountProviderClientImpl.class);
         }
         try (var context = context(new String[]{"test"}, "mock")) {
+            assertThat(context.getBeansOfType(ExternalAccountProviderClient.class)).hasSize(1);
             assertThat(context.getBean(ExternalAccountProviderClient.class))
                     .isInstanceOf(MockExternalAccountProviderClientImpl.class);
         }
@@ -29,6 +31,7 @@ class ExternalAccountProviderProfileTest {
     void prodOnlyAndMixedProfilesNeverSelectMockEvenWhenConfigured() {
         for (String[] profiles : new String[][]{{"prod"}, {"prod", "test"}}) {
             try (var context = context(profiles, "mock")) {
+                assertThat(context.getBeansOfType(ExternalAccountProviderClient.class)).hasSize(1);
                 ExternalAccountProviderClient provider = context.getBean(ExternalAccountProviderClient.class);
                 assertThat(provider).isInstanceOf(FailClosedExternalAccountProviderClient.class);
                 assertThat(provider.requestRevoke(null)).isFalse();
@@ -43,6 +46,7 @@ class ExternalAccountProviderProfileTest {
     void missingOrUnknownProviderFailsClosedWithoutFallbackToMock() {
         for (String configuredProvider : new String[]{null, "unrecognized"}) {
             try (var context = context(new String[]{"prod"}, configuredProvider)) {
+                assertThat(context.getBeansOfType(ExternalAccountProviderClient.class)).hasSize(1);
                 ExternalAccountProviderClient provider = context.getBean(ExternalAccountProviderClient.class);
                 assertThat(provider).isInstanceOf(FailClosedExternalAccountProviderClient.class);
                 assertThat(provider.requestRevoke(null)).isFalse();
@@ -56,6 +60,7 @@ class ExternalAccountProviderProfileTest {
     @Test
     void unknownProviderOutsideProdAlsoDoesNotSilentlySelectMock() {
         try (var context = context(new String[]{"dev"}, "unrecognized")) {
+            assertThat(context.getBeansOfType(ExternalAccountProviderClient.class)).hasSize(1);
             assertThat(context.getBean(ExternalAccountProviderClient.class))
                     .isInstanceOf(FailClosedExternalAccountProviderClient.class);
         }
