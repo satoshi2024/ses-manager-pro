@@ -1,5 +1,22 @@
 # NF07 現行source coverage 再確認
 
+## 最新の統合source scan
+
+- 固定Head: `cde61306`（V183、NF07 SF-W1統合後）。
+- commandは下記と同じread-only scanner。DB/provider接続なし、providerCallCount/writeCountとも0。
+- statusは **BLOCKED_COVERAGE_INCOMPLETE / exit 2**。
+- migration 183 scripts、254 table、244 entity table、708 provider候補。
+- privacy catalog未分類74 table、既存catalog policy unknown78、構造欠落column1082、
+  provider285、entity68。policy unknown78は全sourceの未承認件数ではない。
+- source manifest SHA-256: `590890d027164e388c84968b77697d0480aa5b5373e72b57940bc7e5ceda03ff`。
+- raw JSON、固定Head/終了metadata、hash manifestは
+  `verification-evidence/20261001-privacy-coverage-02/`へ保存した。
+
+旧catalogを現行sourceへ同期する作業は未完了。追加table/provider候補を機械的に列挙しても、
+保持期間・処分権限・Privacy Owner・Legal承認を自動付与しない。
+
+## B0時点の履歴
+
 - 実行日: 2026-10-01、Asia/Tokyo
 - code/schema base: `1443fb68943849a3260d7ebe005259f3eb609d60`
 - worktree: `C:\work\ses-snf-status-audit`
