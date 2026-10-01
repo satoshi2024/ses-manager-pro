@@ -121,3 +121,24 @@ durable撤権trigger、NF03 retention/Privacy gateと全体受入は未完。統
   immutable sourceSystemか出自を持つ親target IDをbindingし、裸externalKeyの跨source比較を禁止する。
 - 18/19桁、64/65文字、負零の境界は静的照合のみ。次波で回帰へ追加する。
   完全なF2 Demo、実resolver/apply、NF06全機能・production受入は未完了。
+
+## NF07 SF-W2a 初回静的審査（2026-10-02）
+
+- Reviewer: astra_review_baseline / gpt-6-astra。作業tree adapter hash
+  `2A3D30D5F2050ED37B25863D3B1D2030AD1A33D158DF017FEA8EA1BB0ABE360D`、port hash
+  `FC9FD31041E5ACD965B0B36FDFE0D5947314F1679467D8CF525DD870094ABF96`。
+  **CODE FAIL、P1×2/P2×2**。未統合。単一journalのsynthetic incrementのみ対象。
+- P1: command projectionのrevision/event hashをevent正本へ照合せずreplay ACKへ返している。
+  正本にないACKや誤bindingを拒否し、command欠落/改竄の回帰を追加する。
+- P1: action projection欠落時に同actionの別commandを再認可できる。command/action/leaseを
+  eventから再構成して正確に照合し、欠落/余分/異なるcase/hash/世代を拒否する。
+- P2: eventsとheadの独立autocommit読取は合法的な並行appendを破損と誤認する。
+  同partitionの一貫したtransaction/lockで検証し、head単独でも未検証projectionを公開しない。
+- P2: writerの全table UPDATE権限は過剰。headのみUPDATE、履歴tableはSELECT/INSERTとし、
+  writerで履歴UPDATE/DELETEが失敗することを確認する。破損注入には別admin接続を使用する。
+- P1並行testの開始barrierだけではlock待機を直接証明しておらず、P5も逐次試験である。
+  connection/partition/PRIMARY lockを結ぶ直接証拠と必要な双方順序を追加する。
+- trusted clock、microsecond正規化、binary identity、durability/profileチェックの方向は妥当。
+  HOLD_RELEASEDは未実装として拒否し、synthetic dispatch ACKを実送信権限として使わない。
+- MySQL初回runはBoundary testのInstant import不足でtestCompile FAIL。testsは未実行であり、
+  既存pure 3件成功と合算しない。原因修復・上記finding対応後に再実行する。
