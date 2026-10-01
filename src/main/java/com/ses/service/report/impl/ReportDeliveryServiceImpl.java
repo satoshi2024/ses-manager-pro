@@ -37,6 +37,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import jakarta.servlet.http.HttpServletRequest;
 
 import java.nio.charset.StandardCharsets;
@@ -176,12 +178,16 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             throw BusinessException.of(403, "error.managementReport.reauthenticationRequired");
         }
         SysUser user = sysUserMapper.selectByIdAndTenant(userId, tenantId);
-        if (user == null || !passwordEncoder.matches(password, user.getPassword())) {
+        if (user == null || !Integer.valueOf(1).equals(user.getStatus())) {
+            throw BusinessException.of(403, "error.managementReport.reauthenticationRequired");
+        }
+        if (!passwordEncoder.matches(password, user.getPassword())) {
             throw BusinessException.of(403, "error.managementReport.reauthenticationFailed");
         }
-        reauthenticationGrant.issue(request, tenantId, userId, deliveryId, delivery.getRecipientScopeHash());
         delivery.setReauthenticatedAt(now());
         updateDeliveryChecked(delivery);
+        issueReauthenticationGrantAfterCommit(request, tenantId, userId, deliveryId,
+                delivery.getRecipientScopeHash());
     }
 
     @Override
@@ -352,6 +358,10 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             throw BusinessException.of(403, "error.managementReport.linkInvalid");
         }
         Long userId = currentUserId();
+        SysUser recipientUser = sysUserMapper.selectByIdAndTenant(userId, tenantId);
+        if (recipientUser == null || !Integer.valueOf(1).equals(recipientUser.getStatus())) {
+            throw BusinessException.of(403, "error.managementReport.scopeDenied");
+        }
         if (!userId.equals(delivery.getRecipientUserId())) {
             throw BusinessException.of(403, "error.managementReport.scopeDenied");
         }
@@ -406,6 +416,22 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             throw BusinessException.of(404, "error.managementReport.documentNotFound");
         }
         return new ResolvedDownload(documentId, versionNo, fileName, contentType);
+    }
+
+    private void issueReauthenticationGrantAfterCommit(HttpServletRequest request, String tenantId,
+                                                        Long userId, Long deliveryId, String scopeHash) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()
+                || !TransactionSynchronizationManager.isActualTransactionActive()) {
+            // 直接constructed unit testなど、Spring transaction proxy外では成功済みupdate直後に発行する。
+            reauthenticationGrant.issue(request, tenantId, userId, deliveryId, scopeHash);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                reauthenticationGrant.issue(request, tenantId, userId, deliveryId, scopeHash);
+            }
+        });
     }
 
     private void requirePreviewHash(String previewHash) {
