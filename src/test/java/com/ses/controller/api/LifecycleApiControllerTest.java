@@ -77,6 +77,7 @@ class LifecycleApiControllerTest {
     @BeforeEach
     void setUp() {
         adminUser = SysUser.builder()
+                .tenantId("default")
                 .username("admin_api_test")
                 .password("pass")
                 .realName("管理者テスト")
@@ -86,6 +87,7 @@ class LifecycleApiControllerTest {
         sysUserMapper.insert(adminUser);
 
         SysUser hrUser = SysUser.builder()
+                .tenantId("default")
                 .username("hr_api_test")
                 .password("pass")
                 .realName("人事テスト")
@@ -113,6 +115,7 @@ class LifecycleApiControllerTest {
         userOrganizationMapper.insert(uo);
 
         engineer = Engineer.builder()
+                .tenantId("default")
                 .fullName("要員APIテスト")
                 .status("稼動中")
                 .employmentType("正社員")

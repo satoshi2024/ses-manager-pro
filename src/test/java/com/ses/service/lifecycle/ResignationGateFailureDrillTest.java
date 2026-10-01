@@ -438,7 +438,7 @@ class ResignationGateFailureDrillTest {
                 .build(), adminUser.getId());
 
         // 新規要員で案件起票
-        Engineer testEng2 = Engineer.builder().fullName("退職要員2").status("稼動中").employmentType("正社員").build();
+        Engineer testEng2 = Engineer.builder().tenantId("default").fullName("退職要員2").status("稼動中").employmentType("正社員").build();
         engineerMapper.insert(testEng2);
 
         LifecycleCaseDto caseDto = caseService.createCase(adminUser.getId(), CreateLifecycleCaseCommand.builder()
