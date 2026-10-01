@@ -1,5 +1,30 @@
 # 受入後機能候補 — 対応表・決定台帳
 
+## 2026-10-01 Production Readiness 再判定（最新追記）
+
+**総合NO-GO。** 下記の2026-08/09の承認・COMPLETE・Gate記録は当時のscope/Headの履歴として保持し、
+現在のproduction approvalへ継承しない。2026-10-01の依頼者による技術選定・隔離開発の委任は、
+外部契約・法的判断・正式Owner署名・実credential使用・production deployの代理承認ではない。
+最新の統合・固定Head・試験は`2026-10-01-snf-production-execution-ledger.md`と修復Review記録を参照する。
+
+| NF | 現行実装/Reviewの再判定 | productionの未完条件 |
+|---|---|---|
+| 01 | 歴史COMPLETEを再審査。R01a `135d34b2`は限定CODE CONDITIONAL、採番/actor P2補強中。DUAL確認等のP1未完 | 文書ACL/version、二者確認、信頼できる退社撤権要求・確認、legacy scope、運用承認 |
+| 02 | CANDIDATE維持。独立再審査でrecipient現在scope/owner tenantにP1、未修復 | DG-02、正式Owner/最終Review、release |
+| 03 | 聚合完了修復は限定CODE PASS。MySQL実並行を`3202ff23`で補強し再Review待ち | 最終Review、NF07 policy、retention、staging/運用承認 |
+| 04 | 独立再審査でoffline conflict PII、queue version、tab間撤回にP1 | 修復・実PWA/browser検証・正式release |
+| 05 | 開発scope CONDITIONAL。総deadline P2、新実transport未完 | provider/credential、許可先、正式production enablement |
+| 06 | W0技術契約を具体化中。Plan CONDITIONAL、業務本体未実装 | 全synthetic実装/Review、実source/mapping/data owner、移行承認 |
+| 07 | DEV履歴を維持。現行coverage不完、SYNTHETIC_FOUNDATION設計再Review待ち、実装未着手 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
+| 08 | 開発scope CONDITIONAL。summary検証/予算/実行記録P2、disabled catalog残存 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
+| 09 | fail-closed修復 `da850b97`限定CODE PASS、control統合済み。実providerの完成ではない | V182 PENDING=0/帰属不明0/親子一致、実撤権/session/token、production owner |
+| 10 | session共有reauthにP1、隔離branchで修復中 | 固定Head独立Review、staging、正式release |
+
+NF01の「退社確定時一括失効trigger」は現行コードでNF01呼出が確認できず、下記承認範囲の記述を
+実装済み証拠としない。NF06/NF07のflag OFFを全機能完成として扱わない。
+PR101 CIは全7 SUCCESSだったがmerge後main CIはBrowser FAILURE。Browser修復はlocalで独立PASSを得た段階であり、
+remote mainのCIをPASSに変更したとは報告しない。
+
 - 親文書: `2026-08-27-post-acceptance-feature-backlog.md`
 - 状態: 候補。各Decisionが`APPROVED`になるまでproduction変更を開始しない。
 
