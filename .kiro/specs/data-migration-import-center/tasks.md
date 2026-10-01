@@ -52,6 +52,7 @@ t_import_job、t_import_mapping、t_import_row_result、t_import_checkpoint、t_
 - V1へ逆戻りして列を追加せず、新テーブルは独立migration、H2は専用schema fixtureとして同期する。
 - source file全量やrow payloadをJSON保存せず、document_id、row number、row hash、error/id/result hashを保存する。
 - external identityはtenant/source-system/entity/normalized external keyでcross-job unique。binding revision/target version、row transaction、audit/outbox、fencing generationをMySQLで検証する。checkpointはrow resultから再構築できるprojectionとする。
+- 実registryではsource-system名をimmutableな管理namespaceとして登録・固定し、同じ外部キーでもsource-system/entity/tenantが違えば混同しない。parent-child importのbindingは子の外部keyだけで推測せず、source parent identityと承認済target parent ID/versionを同じrow transactionで検証する。現F2の合成resolverが扱う裸externalKeyは単一synthetic namespace専用であり、cross-job registryの実identity実装ではない。
 - IMPORT_JOBのDocumentLinkをFileScopeValidationServiceへ登録し、FileReferenceProviderとは別に閲覧/download/error exportのfail-closed認可を確認する。
 
 ### Test requirements
@@ -104,6 +105,12 @@ CSV parser（XLSX拒否）とentityごとのcanonical DTO、read-only resolver�
   - 同じ定向コマンド、`BUILD SUCCESS`、17 tests / 0 failures / 0 errors / 0 skipped。
   - `TEST-com.ses.importcenter.foundation.SesCsvParserTest.xml` SHA-256: `4A5BB47A2269350C6786D5BB5B573A6860054D085C831883CD90436E75F8715C`
   - `TEST-com.ses.importcenter.foundation.ImportValidationServiceTest.xml` SHA-256: `EA4A06949B53B21F8A420D9A73CEB488D9FAAD5C43508A52C7232AF981689B6E`
+
+### Astra foundation review
+
+- Astra はcommit `1e8aa651e6ec4901e1e498aca1a484a7b88fe4c8` のF2 foundation限定CODE PASSを2026-10-02に判定し、3件のfindingを閉じた。PASS対象は純parser/canonical/read-only validation foundationとその定向testである。
+- これはF2 Demo、DB resolver実装、write-mock/DB無変更の統合証跡、実source適合、A1以降、NF-06全体完了の承認ではない。
+- 追加回帰境界：JPY整数有効18/19桁、入力長64/65文字、`-0`/`-0.0`をsynthetic unit caseへ追加する。F1 registry実装前にsource-system immutable namespaceとparent target identity/version bindingをPlan/unique設計へ反映する。
 
 ## A1. Upload / mapping / preview / error UI（synthetic F1/F2 Review後）
 
