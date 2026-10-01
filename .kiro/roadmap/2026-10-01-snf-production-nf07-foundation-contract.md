@@ -1,6 +1,9 @@
 # NF07 SYNTHETIC_FOUNDATION 技術契約案
 
-状態: **PLAN_REVIEW_PENDING**。旧`NF07-DEV-GATE-20260828`の範囲と署名を変更しない。
+状態: **履歴設計案（後続specへ同期済み）**。最新の技術Planはspec側`synthetic-foundation.md`、
+実装・独立Reviewは`2026-10-01-snf-production-fix-reviews.md`を参照する。
+Plan `f007ef9a`はPASS、SF-W1 `6ec4ca28`は限定CODE PASS。W2以降は未実装。
+旧`NF07-DEV-GATE-20260828`の範囲と署名を変更しない。
 根拠は2026-10-01の依頼者による技術方式選定・開発実行の委任である。
 本incrementはgeneric安全機構を合成データで実装・検証する案であり、DG-07、Privacy Owner、
 法的保持期間、実DSAR交付、実処分、実provider、production enablementを承認しない。
