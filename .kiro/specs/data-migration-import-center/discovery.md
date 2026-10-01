@@ -54,14 +54,14 @@ Engineer CSVは、既存仕様として日本語11列、UTF-8 BOM付き出力、
 
 | 対象 | 現行の正本候補 | Import Centerの扱い |
 |---|---|---|
-| Engineer | EngineerSaveDto、EngineerService.save、updateWithStatusGuard | applyだけがdomain serviceを呼ぶ。status変更時の契約有無、会計履歴、scope invalidationを迂回しない |
+| Engineer | EngineerSaveDto、EngineerService.save、updateWithStatusGuard | 初期Benchのみ、updateはstatusを保持。会計履歴とscope invalidationを維持。skills/user/org/assignment child mutationなし |
 | Customer | Customer entity/CustomerSaveDto、CustomerService.updateWithOptimisticLock | 更新はversion必須。新規createは現在 generic saveであり、F2でcreate用facade/validation境界を明文化するまでapplyしない |
-| Project | ProjectSaveDto、ProjectService.saveProjectWithSkills/updateProjectWithSkills、ProjectSkillService | 顧客参照、価格/日付range、契約・open proposal制約、skills置換をservice経由にする |
-| Proposal | ProposalService.save/changeStatus | 新規status、position整合、重複提案、成約時の契約draft生成をservice経由にする。statusをmapperから直接変更しない |
-| Contract | ContractSaveDto、ContractService.saveWithBusinessRules/updateWithBusinessRules/changeStatus | 顧客・案件・要員・position整合、価格、検収理由、sales user、compliance、採番、staffing同期をservice経由にする |
-| Engineer skill | SkillTagResolver、EngineerSkillService.replaceSkills | validateではresolveOrCreateを呼ばない。lookup-only検証を用い、apply時だけresolver/serviceを使う |
-| Project skill | SkillTagResolver、ProjectSkillService.replaceSkills | 同上。直insertしない |
-| Engineer-sales | EngineerSalesService | released_atで履歴を保ち、primary切替/解除規則をservice経由にする。hard deleteしない |
+| Project | ProjectSaveDto、typed ProjectImportFacade、ProjectService.saveProjectWithSkills/updateProjectWithSkills | 顧客参照、価格/日付range、契約・open proposal制約を維持。skills DTO nullでchild置換なし。status遷移なし |
+| Proposal | ProposalService.save相当のimport専用typed entry point | 初期書類選考中のみ。status変更・Engineer状態連動・成約・Contract draft/history/通知なし。重複/既存position整合は検証 |
+| Contract | ContractSaveDto、ContractService.saveWithBusinessRules/updateWithBusinessRules | 初期準備中のみ、status遷移なし。顧客・案件・要員の整合、価格、compliance、採番、staffing同期を維持。position等scope外参照は明示既存refのみ |
+| Engineer skill | scope外 | validateはread-only lookupのみ。apply/create/replaceしない |
+| Project skill | scope外 | validateはread-only lookupのみ。apply/create/replaceしない |
+| Engineer-sales | scope外 | apply/importでcreate/update/releaseをしない |
 | Document | DocumentService.registerReceived/link/verifyIntegrity | source原本はDocumentServiceとDocumentLinkで管理し、独自storage名や直接ファイル保存を作らない |
 
 ### 2.4 既存の文書・監査・batch
@@ -100,8 +100,8 @@ Engineer CSVは、既存仕様として日本語11列、UTF-8 BOM付き出力、
 | Project | project_nameはuniqueでない。source_opportunity_idは別機能の一意候補 | source_project_codeをcustomer scope付きで要求 | insert-only候補。名前+日付の推測結合をしない |
 | Proposal | active重複制約は業務条件でありlegacy keyではない | source_proposal_code | insert-only候補。重複はrejected/candidate resolution |
 | Contract | contract_noはunique、order_line_idも一意 | source_contract_codeをcontract_noへ写像できる場合 | source key不在はinsert-onlyまたは要承認。複合推測upsert禁止 |
-| Engineer-sales / assignment | engineer_id、sales_user_id、released_atの履歴モデル | source_assignment_codeまたはengineer source key + sales source key + effective dates | EngineerSalesService経由。releaseをdeleteで表現しない |
-| Career / history | 一意制約なし | source_history_code。無ければ完全な業務keyを承認 | insert-only候補。後続参照を持つ行のhard delete禁止 |
+| Engineer-sales / assignment | scope外 | create/update/releaseなし | — | — | child mutation禁止 |
+| Career / history | scope外child/history | read-only参照のみ | — | apply mutationなし |
 
 上表は承認済み設計ではない。DG-06で値が埋まらない限り、mapping versionをREADYへ進めず、applyを拒否する。
 
@@ -169,16 +169,16 @@ Spikeでは、DB接続をread-only datasourceまたはtransaction rollbackで隔
 | 指標 | 定義 |
 |---|---|
 | source | parserが観測した非空データ行 |
-| accepted | canonical validationを通過した行 |
+| validated_accepted_total | canonical validationを通過したrow count。apply結果とは別の不変基数 |
 | rejected | structural/field/cross-row validationで拒否した行 |
 | applied | applyで新規作成された行 |
 | updated | 承認済みupsertで更新された行 |
-| skipped | idempotent再実行または明示skipされた行 |
-| apply_failed | accepted後に業務処理が失敗し、jobがFAILEDになった行 |
+| business_skipped | mappingで明示した業務no-op行（REUSED/DEDUPED restart attemptは別記録） |
+| apply_failed | retry終了後に未適用終端となった行 |
 | empty_skipped | header以外の完全空行として除外した行 |
 | amount_excluded | 空/不正/formula-likeで金額合計から除外した行 |
-| amount source/accepted/applied/updated/skipped/apply_failed/rejected | 各状態に属する既知JPY金額の合計 |
-| difference (当時の案・撤回) | W0でphase別へ置換。execution-contract.md §4参照 |
+| amount source/validated_accepted/applied/updated/business_skipped/apply_failed/rejected | 各bucketの既知JPY amount。apply_pendingは動的残数 |
+| current formula | source=validated_accepted_total+rejected; physical_rows=source+empty_skipped; terminal validated_accepted_total=applied+updated+business_skipped+apply_failed; apply_pendingは動的残数 |
 
 amountが空・不正・非金額entityの場合は、合計対象外件数と理由を別に保持し、ゼロ金額と欠損を混同しない。
 
@@ -198,3 +198,6 @@ amountが空・不正・非金額entityの場合は、合計対象外件数と�
 ## 9. 2026-10-01 技術increment追記（履歴記録は保持）
 
 §1-8は当時のworktree/base/schema観測履歴であり、今回の開発head・実source承認の表明ではない。今回のTD-02技術委任による選択は[execution-contract.md](execution-contract.md)に記録する。W1の合成実装はAstra Plan Review PASS後に開始でき、実source approvalはproduction data apply gateに限る。対象はCUSTOMER/ENGINEER/PROJECT/PROPOSAL/CONTRACTの合成W0のみ。実legacy schema、data owner、DG-06、production移行は未承認。技術決定案は現行max V182としてmigration versionを予約していない。
+
+
+現行adapter契約では全5 entityのstatus transition methodを呼ばず、初期state固定・更新status不変、全子collection操作(scope外skills/positions/history/EngineerSalesを含む)なし、5 entity全てhard-delete rollback禁止。Proposal createは現行saveのEngineer状態変更を含めないImport専用entry pointが必要。旧§2.3/§4の反対記述は当時の候補履歴でありexecution-contract.mdへ置換済み。

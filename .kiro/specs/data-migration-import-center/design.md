@@ -26,7 +26,7 @@ UPLOADED → MAPPED → VALIDATED → READY → APPLYING → COMPLETED
 
 - UPLOADED: source documentがCLEANで、source SHA-256が確定。
 - MAPPED: schema versionとmapping version/hashが確定。
-- VALIDATED: DB no-domain-write validationが完了し、accepted_pending/rejected/empty_skippedが確定。metadata allowlistはexecution-contract.md。
+- VALIDATED: DB no-domain-write validationが完了し、validated_accepted_total/rejected/empty_skippedが確定。metadata allowlistはexecution-contract.md。
 - READY: source hash、mapping hash、base snapshot、承認条件がvalidate結果と一致。
 - APPLYING: CAS付きlease generationを取得し、chunkを有限の進捗単位として処理。
 - COMPLETED:全row結果、件数/金額、result hash、auditが確定。
@@ -36,7 +36,7 @@ UPLOADED → MAPPED → VALIDATED → READY → APPLYING → COMPLETED
 - ROLLED_BACK:承認済みrollbackとcompensationの結果が確定。
 - ROLLBACK_FAILED:一部の補償が失敗し、再実行または管理者対応を必要とする終端状態。
 
-不許可遷移、同じjobの二重apply、source hashが同じでもmapping hashが異なるapply、mapping変更後のREADY再利用を拒否する。COMPLETEDから直接APPLYINGへ戻すことはできず、再importは同一source identityの既存jobを返すか、別mappingとして拒否する。
+不許可遷移、同じjobの二重apply、source identityが同じでmapping hashが異なる登録/再開を拒否する（409）。COMPLETEDから直接APPLYINGへ戻すことはできず、再importは同一identityかつ同一mapping hashの既存job再利用に限る。
 
 ### 2.3 platform-invariantsの3決定表
 
@@ -70,7 +70,7 @@ UPLOADED → MAPPED → VALIDATED → READY → APPLYING → COMPLETED
 | 資源 | 競合制御 | 一意性/再開規則 |
 |---|---|---|
 | job | version CAS + apply lease | READY→APPLYINGは1回。lease期限後だけ同じjobを再開 |
-| source identity | tenant + source-system + entity + schema + source_sha256がunique。mapping_hashはimmutable property。external key registryはtenant/source-system/entity/normalized key unique | 同一mappingのFAILEDのみ再開。別mappingでも既存bindingと衝突すれば409 |
+| source identity | tenant + source-system + entity + schema + source_sha256がunique。mapping_hashはimmutable property。external key registryはtenant/source-system/entity/normalized key unique | 同一identityはmapping hash一致時のみ再利用。hash不一致は409、別job禁止 |
 | mapping | mapping_version + mapping_hash | hash再計算不一致でREADY/apply拒否 |
 | row | job_id + source_row_number、source row hash、attempt sequence/fencing generation | fingerprint一致はREUSED/DEDUPED attempt。business action/result/counters/hash維持 |
 | target natural key | target domain unique/行lock | id-mapとtarget lookupを同一row transactionで照合 |
@@ -106,12 +106,12 @@ job単位の不変入力と状態を保持する。sourceの全payloadやPIIをJ
 - state: status、version/CAS、apply_lock_owner、apply_started_at、finished_at
 - source: document_id、source_sha256、source_size_bytes、detected_encoding、source_name
 - actor: created_by、approved_by、executor、correlation_id
-- reconciliation: source/accepted_pending/rejected/applied/updated/business_skipped count、各amount、amount_excluded_count、currency、period_from/to
+- reconciliation: source/validated_accepted_total/apply_pending/rejected/applied/updated/business_skipped/apply_failed/empty_skipped count、各amount、amount_excluded_count、currency、period_from/to
 - evidence: base_snapshot_hash、mapping_hash、result_hash、failure_code、failure_message
 
 source原本はDocumentService.registerReceivedで登録し、DocumentService.link(documentId, "IMPORT_JOB", jobId)で紐付ける。job作成とdocument登録の失敗は、sourceを孤児にしないcleanup-safeな状態へ記録する。source documentは業務rollbackで削除しない。
 
-job identityはtenant/source-system/entity/schema/source hash/mapping hashで照合する。cross-job external key registryはtenant/source-system/entity/normalized external keyでunique。異なるmappingは別job identityだが既存bindingと違うaction/target/versionを要求すれば409。same identityのFAILEDのみ再開し、COMPLETEDはattempt=REUSEDとして返してbusiness resultを変更しない。
+source identityは`(tenant, source-system, entity, schema_version, source_sha256)`でDB unique。mapping_hashはidentity外のimmutable job property。unique identity既存時はmapping hash一致だけ再利用し、不一致は409で拒否し、異なるmapping用の別jobを作らない。cross-job external key registryはtenant/source-system/entity/normalized external keyでunique。
 
 ### 3.2 t_import_mapping（候補）
 
@@ -121,7 +121,7 @@ job identityはtenant/source-system/entity/schema/source hash/mapping hashで照
 - natural key columns、duplicate policy、upsert policy、existing-row approval policy
 - mapping status、created_by、approved_by、created_at
 
-同一source identity `(tenant, source-system, entity, schema, source_sha256)`のjob登録を一意にし、mapping_hashはimmutable propertyとする。同じidentityがあればhash一致時だけ再開/再利用し、不一致は409。mapping変更後の取込は新source hashとして再登録し、cross-job external key bindingの衝突を別途承認解決する。
+同一source identity `(tenant, source-system, entity, schema, source_sha256)`のjob登録を一意にし、mapping_hashはimmutable propertyとする。同じidentityがあればhash一致時だけ再開/再利用し、不一致は409。mapping変更だけでは同一identityの別jobを作成できず409とする。実際に異なるsource bytes/hashの場合だけ別jobを登録し、cross-job external key bindingの衝突を別途承認解決する。
 
 ### 3.3 t_import_row_result（候補）
 
@@ -158,17 +158,17 @@ DG-06未決定のため、これは候補値と保留理由を示す表であり
 
 | entity | 依存 | canonical/既存service | 候補自然キー | duplicate policy候補 | いま許可すること |
 |---|---|---|---|---|---|
-| Customer | なし | CustomerSaveDto / CustomerService | source_customer_code。無い場合はcompany_name正規化を候補検索だけに使用 | code一致のみupsert。名前だけはmanual | read-only候補表示 |
-| Engineer | なし | EngineerSaveDto / EngineerService | source_engineer_code。既存CSVはkey無しlegacy insert-only | legacyはinsert-only。code有りのみ承認後upsert | 既存CSV形式のmapping観測 |
-| SkillTag | なし | SkillTagResolver | normalize(skill_name) | exact normalized match。新規作成はapplyのみ | lookup-only |
-| Project | Customer | ProjectSaveDto / ProjectService | source_project_code + customer key | code一致のみupsert。name+date推測禁止 | customer候補との参照表示 |
-| EngineerCareer | Engineer | EngineerCareerServiceまたは専用facade | source_history_code。無い場合はengineer + period + project_nameを候補だけに使用 | insert-only/manual | 参照欠損検出 |
-| EngineerSkill / ProjectSkill | parent + SkillTag | replaceSkills service | parent source key + normalized skill key | mapping定義がreplaceかappendかを承認 | lookup-only |
-| ProjectPosition | Project | ProjectPosition domain path | project key + source position code/position_no | source code一致のみ | 参照候補表示 |
-| Proposal | Engineer + Project | ProposalService | source_proposal_code | source code一致。それ以外はinsert-only/manual | duplicate候補表示 |
-| EngineerSales | Engineer + sys_user | EngineerSalesService | source_assignment_code、または両者のsource key + assigned_at | 現任重複はreject。releaseはdomain operation | read-only履歴表示 |
-| Contract | Customer + Project + Engineer | ContractSaveDto / ContractService | source_contract_codeをcontract_noへ写像。現行contract_noはunique | source code一致のみupsert。複合値推測禁止 | 参照整合表示 |
-| ProposalHistory / career history | parent | 専用history service | source_history_code | insert-only。existing後続参照はdelete禁止 | row candidate |
+| Customer | なし | CustomerSaveDto / CustomerImportFacade | source_customer_codeはreal source approval待ち。syntheticではregistry externalKey | insert-only。更新は別mapping/binding approval/version時だけ | synthetic create、real sourceはcandidate resolution |
+| Engineer | なし | EngineerSaveDto / EngineerImportFacade | source_engineer_codeはreal source approval待ち。syntheticはregistry externalKey | insert-only、updateは別承認binding/version時のみ | 既存CSV互換mappingの観測のみ |
+| SkillTag / EngineerSkill / ProjectSkill | scope外 | create/replaceなし | — | — | child mutation禁止 |
+| Project | Customer | ProjectSaveDto / ProjectImportFacade | source_project_codeはreal source approval待ち。syntheticはregistry externalKey | insert-only、updateは別承認binding/version時のみ | preceding Customer ref resolve |
+| EngineerCareer / history | scope外child/history | — | — | — | 読取参照のみ。apply mutationなし |
+| EngineerSkill / ProjectSkill | scope外 | create/replaceなし | — | — | child mutation禁止 |
+| ProjectPosition | scope外child | create/update/assignなし | — | — | 参照取込/assignmentなし |
+| Proposal | Engineer + Project | ProposalImportFacade | source_proposal_codeはreal source approval待ち。syntheticはregistry externalKey | insert-only、updateは別承認binding/version時のみ | duplicate finding |
+| EngineerSales / assignment | scope外 | create/update/releaseなし | — | — | child mutation禁止 |
+| Contract | Customer + Project + Engineer | ContractSaveDto / ContractImportFacade | source_contract_codeはreal source approval待ち。syntheticはregistry externalKey（contract_noへ写像しない） | insert-only、updateは別承認binding/version時のみ | relation consistency |
+| ProposalHistory / career history | scope外child/history | create/updateなし | — | — | hard delete/compensationなし |
 
 特にCustomer.company_name、Engineer.full_name、Project.project_nameは現行schemaで一意ではない。Contractのcontract_noは現行で一意だが、legacy側に欠損する場合の代替keyは承認なしに発明しない。
 
@@ -182,7 +182,7 @@ validateは以下のread-only順序を通る。
 2. canonical conversion（trim、enum、date、JPY BigDecimal、formula文字列）
 3. source-row duplicate validation
 4. reference resolver（現行DBのid、論理削除、候補複数、scope）
-5. cross-row/entity validation（customer-project-contract、engineer-project-position、period/amount/status）
+5. cross-row/entity validation（customer-project-contract、engineer-project、period/amount/status）
 6. rejection/error export candidate生成
 7. count/amount previewとvalidation snapshot保存
 
@@ -194,11 +194,11 @@ applyはcanonical DTOを各domain serviceへ渡す。
 
 - Engineer: EngineerService.save / updateWithStatusGuard。statusの契約整合、会計履歴、scope invalidationを維持する。
 - Customer: 新規createの明示domain facadeを追加し、updateはversion付きCustomerService.updateWithOptimisticLockを使う。versionなしupdateは拒否する。
-- Project: ProjectService.saveProjectWithSkills / updateProjectWithSkills。skillsはProjectSkillService経由でreplace policyを守る。
-- Proposal: ProposalService.save。status changeはProposalService.changeStatusのみを使い、成約時のcontract draft side effectを承認されたmappingに含める。
-- Contract: ContractService.saveWithBusinessRules / updateWithBusinessRules。status changeはContractService.changeStatus、採番・compliance・staffing同期を維持する。
-- Skill: SkillTagResolverはapply時のみ必要なら使用し、EngineerSkillService/ProjectSkillServiceへ渡す。
-- Engineer-sales: EngineerSalesServiceでactive sales user、primary、released_atを検証する。履歴をhard deleteしない。
+- Project: `ProjectImportFacade.createWithoutSkills/updateWithoutSkills`というtyped facadeを追加する。DTOからskills項目を拒否し、serviceのnull guardに依存して`skills=null`を強制してから`saveProjectWithSkills/updateProjectWithSkills`を呼ぶ。
+- Proposal: import専用typed create entry point。初期「書類選考中」のみ。ProposalService.saveのEngineer status連動を起動せず、ProposalService.changeStatus/成約/Contract draft/history/通知を呼ばない。
+- Contract: ContractService.saveWithBusinessRules / updateWithBusinessRules。初期「準備中」のみでContractService.changeStatusは呼ばない。採番・compliance・staffing同期を維持する。
+- SkillTag/EngineerSkill/ProjectSkill: 全てscope外。Import applyでresolveOrCreate/replaceSkills/createしない。
+- EngineerSales/assignment: 全てscope外。Import applyでcreate/update/releaseしない。
 
 既存serviceのsaveがgeneric IServiceを継承していて業務規則を持たない場合、Import Centerから直接呼ばず、ドメイン規則を集約するfacadeをF2で用意する。mapper直接insertは永続化の近道として認めない。
 
@@ -206,23 +206,23 @@ applyはcanonical DTOを各domain serviceへ渡す。
 
 ### 6.1 apply lock
 
-job version CASでREADY→APPLYINGを1回だけ許可する。scheduler/HTTP retryはcorrelation idとjob idで同一applyと判定する。lock timeout後の再開は、last checkpoint、row result、id-map、target lookupを照合してから行う。
+READY→APPLYINGとlease takeoverはjob/lease rowのatomic lock+CASでgenerationを増加させ排他取得する。各row transactionは同じrowをFOR UPDATE/equivalent CASでlockし、generationを検証してcommitまで保持する。二回の通常SELECTは不可。restartはcheckpointでなくrow result/registryから復元する。
 
 ### 6.2 chunk境界
 
 1. source streamを一定数のchunkへ読み、canonical rowを検証する。chunkはメモリ/進捗単位であり、未確定の業務writeを意味しない。
 2. rowごとにcross-job registryとtarget versionをlookup/lockする。fingerprint一致はattempt=REUSED/DEDUPEDを追記し、確定business result/counter/amount/hashを保持。不一致は停止。
 3. 未処理rowだけdomain serviceへ渡す。
-4. row単位transactionでdomain facade、target lock、cross-job registry binding/revision、id-map、business row result、audit/outboxを原子的にcommitする。lease generationを開始時とcommit直前に検証。
-5. row transactionでtarget/registry/id-map/business result/audit outboxをcommitする。lease generationは開始時とcommit直前に照合。cache/外部通知はoutbox経由。
+4. row単位transactionでdomain facade、target lock、cross-job registry binding/revision、id-map、business row result、audit/outboxを原子的にcommitする。同じjob/lease row lockとCASでtakeover/row transactionを直列化し、generationをtransaction中有効化。
+5. `checkpoint`、`apply_pending`、終端counterはcommit済みrow resultから再構築可能なprojectionとして別途更新し、row/chunk transactionの原子性根拠にしない。projectionの遅延・破損はrow result再走査で修復する。
 6. chunk checkpointをprojectionとして更新。全row resultからjob終端状態・reconciliation/result hashを確定する。
 
 crash windowは次のとおり固定する。
 
-- row transaction commit前: target変更、row result、id-map、checkpointが同時にrollbackされ、再開時に同じrowを再処理する。
+- row transaction commit前: target/registry/id-map/business result/audit/outboxは同時rollback。checkpoint/apply_pending/終端counter projectionは別管理され未変更またはrow resultsから再構築され、同じrowを再処理する。
 - commit後、checkpoint更新前: target/registry/resultが揃う。再開時はattempt=REUSEDとし、business counter/amount/hashを変更しない。
 - job状態更新前: row resultを正本として照合し、未完了rowだけを処理する。
-- lease期限切れ: 同じjobのCASを再取得し、異なるexecutorが同時にapplyしない。
+- lease期限切れ: 同じjob/lease rowを一つのtransaction内でlockし、generationをatomic CASで増加させたworkerだけが取得する。workerのrow transactionも同じlease row lockをcommitまで保持するためtakeoverとapplyが排他となり、旧generationのcommitを拒否する。通常SELECTの前後比較では代替できない。
 
 これによりmid-chunk crash後の再開で重複作成を起こさない。10,000行ではread/parserをchunk化し、row transactionを既定の安全境界とする。target domainにnatural key unique/idempotency commandが不足する場合は、B1より前にそのdomain facade/constraintを追加する。
 
@@ -232,10 +232,10 @@ entityごとに次の表をmapping versionへ記録する。
 
 | rollback class | 動作 |
 |---|---|
-| 可逆新規で後続参照なし | domain delete/void facade。ただしhard delete可否はentity ruleで明示 |
-| 論理削除・履歴保持が正本 | domain serviceのlogical delete/voidのみ |
-| 後続参照あり | hard delete禁止。補償更新、取消、status revert、link解除などをdomain service/approvalで実施 |
-| source既存行を更新 | 自動rollback禁止またはbefore snapshot復元を管理者承認。version conflictで停止 |
+| 5 adapterの全row | hard delete、自動void、自動restoreを禁止。domain compensationの承認済operationが無ければmanual remediation |
+| 論理削除・履歴保持が正本 | Import rollbackからのlogical delete/void/restoreも禁止。承認済み補償operationがなければmanual remediation |
+| 後続参照あり/なし | 同上。参照の有無でhard-delete禁止を緩和しない |
+| source既存行を更新 | 自動restore禁止。承認済みdomain compensationのみ。version conflictで停止しmanual remediation |
 | Document/source/error/audit | rollbackから除外。retention/legal holdと監査証跡を保つ |
 
 契約・提案成約・assignment・work record・invoice・document linkが存在する行は、親rowをhard deleteしない。compensationが失敗した場合はROLLBACK_FAILEDとし、成功扱いにしない。
@@ -247,19 +247,19 @@ entityごとに次の表をmapping versionへ記録する。
 - row hash: source rowの元値をencoding復元後のcanonical representationでSHA-256。PIIをログへ出さない。
 - result hash: row number順のrow result（target id、action、status、error code、amount、row hash）をstable serializeしてSHA-256。
 
-amountはJPY BigDecimalで正規化し、scale/roundingをmapping versionに含める。validateはsource=accepted_pending+rejected（empty_skippedは別加算）、apply終端はaccepted=applied+updated+business_skipped+apply_failed。attemptのREUSED/DEDUPEDはbusiness_skippedではない。各amount対象カウンタには金額を、empty_skipped/amount_excludedには理由付き件数を保存する。
+amountはJPY BigDecimalで正規化し、scale/roundingをmapping versionに含める。validate時に不変基数`validated_accepted_total`を確定する。`source=validated_accepted_total+rejected`、`physical_rows=source+empty_skipped`。動的残数`apply_pending`はvalidated_accepted_totalから終端bucket合計を引く。終端式は`validated_accepted_total=applied+updated+business_skipped+apply_failed`。nonterminal errorはpending、終端失敗だけapply_failed。attemptのREUSED/DEDUPEDはbusiness_skippedではない。各amount対象カウンタには金額を、empty_skipped/amount_excludedには理由付き件数を保存する。
 
 分類式は次で固定する。
 
-- source_rows = accepted_pending_rows + rejected_rows
+- source_rows = validated_accepted_total + rejected_rows
 - physical_data_rows = source_rows + empty_skipped_rows
-- accepted_rows = applied_rows + updated_rows + business_skipped_rows + apply_failed_rows
-- validate完了時は apply_failed_rows = 0
-- source_amount_known = accepted_pending_amount + rejected_amount
-- accepted_pending_amount = applied_amount + updated_amount + business_skipped_amount + apply_failed_amount
-- validate_difference_count = source_rows - accepted_pending_rows - rejected_rows
-- validate_difference_amount = source_amount_known - accepted_pending_amount - rejected_amount
-
+- apply_pending_rows = validated_accepted_total - applied_rows - updated_rows - business_skipped_rows - apply_failed_rows
+- terminal時: validated_accepted_total = applied_rows + updated_rows + business_skipped_rows + apply_failed_rows（apply_failedはretry終了後のterminal行のみ）
+- source_amount_known = validated_accepted_amount + rejected_amount
+- apply_pending_amount = validated_accepted_amount - applied_amount - updated_amount - business_skipped_amount - apply_failed_amount
+- terminal時: validated_accepted_amount = applied_amount + updated_amount + business_skipped_amount + apply_failed_amount（apply_failedはretry終了後のterminal行のみ）
+- validate_difference_count = source_rows - validated_accepted_total - rejected_rows
+- validate_difference_amount = source_amount_known - validated_accepted_amount - rejected_amount
 blank/invalid/formula-like amountはamount_excludedへ分離し、数値合計へ入れない。duplicateは同一source内の二重rowとしてrejected。既存registry/result一致によるrestartはREUSED/DEDUPED attemptのみで、business_skippedへ数えない。COMPLETEDの条件はvalidate_difference_count=0、validate_difference_amount=0、apply_failed_rows=0、apply terminal差異=0、result hash確定である。
 
 金額の決定主体と確定時点も固定する。technical defaultはcurrency=JPY、scale=0、rounding=UNNECESSARYをmapping versionへ保存する。real sourceの適合承認者は別途必要。既定のrounding modeはUNNECESSARYとし、小数を含むsource amountは丸めずamount_excluded/rejectedにする。ROUND_HALF_UP等を使う場合はDG-06の承認理由とmapping versionへ明記し、canonical conversion時に一度だけ適用する。apply時に現在設定を再読込して丸め直すことは禁止する。
