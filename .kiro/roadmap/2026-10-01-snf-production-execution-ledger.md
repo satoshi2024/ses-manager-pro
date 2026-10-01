@@ -29,11 +29,15 @@
 |---|---|---|---|
 | F0 統括・決定包 | root | `codex/snf-prod-control` / `C:\work\ses-snf-status-audit` | IN_PROGRESS |
 | C0 Browser fixture | gpt-6-luna | `codex/snf-prod-browser-isolation` / `C:\work\ses-nf02-remediation` | IN_PROGRESS |
-| R09 provider境界 | gpt-6-luna | `codex/snf-prod-nf09-provider-boundary` / `C:\work\ses-nf09-system-actor-attribution` | IN_PROGRESS |
-| R02/R03/R10 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | IN_PROGRESS、静的Review。試験PASSを生成しない |
+| R09 provider境界 | gpt-6-luna | `codex/snf-prod-nf09-provider-boundary` / `C:\work\ses-nf09-system-actor-attribution` | `bbeca7c7`、定向16/0/0/0、Astra Review中 |
+| R03 training修復 | gpt-6-luna | `codex/snf-prod-nf03-training` / `C:\work\ses-nf03-remediation` | PRD-NF03-001対応中 |
+| R10 reauth準備 | 未割当 | `codex/snf-prod-nf10-reauth` / `C:\work\ses-nf10-remediation` | worktree準備済み、実装待ち |
+| R02/R03/R10 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1計4件。専用report参照 |
+| R04 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1×3/P2×1。専用report参照 |
+| N06/N07技術Plan Review | gpt-6-astra | control `09ab55a8` | CONDITIONAL。W0可、W1前に契約補正と再Review |
 
-再利用した3 worktreeは開始時clean、origin/main未包含commit 0、当該path依存processなしを確認した。
-試験用2 worktreeの旧`target`は、同一worktree内`target-preserved-20261001-prod-start`へ移動して保存した。
+再利用した5 worktreeは開始時clean、origin/main未包含commit 0、当該path依存processなしを確認した。
+試験用4 worktreeの旧`target`は、同一worktree内`target-preserved-20261001-prod-start`へ移動して保存した。
 これらをstage、削除、上書きしない。`git add .`は禁止し、変更pathを列挙する。
 
 ## 残作業キュー
@@ -54,6 +58,7 @@
 
 ## 共通Gate
 
+- local preflight: Java 21.0.12.1 / Maven 3.9.6 / Docker daemon / Node 24.19.0 / Chrome / Git Bashを確認済み。これは全suiteやproduction環境のPASSではない。
 - 試験は一run一suiteでSHA、command、開始/終了、環境、test/failure/error/skipped、log/XML hashを保存する。
 - Maven重負荷suiteは総括が直列化し、異なるagentのDocker/browser試験の干渉を避ける。
 - migration番号、H2 schema/init、shared security/document/config、中央traceabilityは総括が調整する。
