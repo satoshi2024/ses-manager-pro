@@ -56,7 +56,7 @@ push、PR 作成、main への merge、production approval は実施していな
 
 | Gate | 結果 |
 |---|---|
-| `mvn test` | **4007 / 0 failures / 0 errors / 0 skipped**、BUILD SUCCESS（12:58） |
+| `mvn test` | **4007 / 0 failures / 0 errors / 0 skipped**、BUILD SUCCESS（13:15） |
 | `mvn test -Pmysql-tests` | **160 / 0 / 0 / 0**、BUILD SUCCESS（Docker / MySQL 8、40:44） |
 | `mvn test -Pperformance-tests` | **1 / 0 / 0 / 0**、BUILD SUCCESS、p95 63ms、heap 増加 53KB |
 | `mvn test -Pbrowser-tests` | **14 / 0 / 0 / 0**、BUILD SUCCESS（real Chrome、2:05） |
