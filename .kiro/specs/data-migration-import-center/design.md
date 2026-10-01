@@ -195,7 +195,7 @@ applyはcanonical DTOを各domain serviceへ渡す。
 - Engineer: EngineerService.save / updateWithStatusGuard。statusの契約整合、会計履歴、scope invalidationを維持する。
 - Customer: 新規createの明示domain facadeを追加し、updateはversion付きCustomerService.updateWithOptimisticLockを使う。versionなしupdateは拒否する。
 - Project: `ProjectImportFacade.createWithoutSkills/updateWithoutSkills`というtyped facadeを追加する。DTOからskills項目を拒否し、serviceのnull guardに依存して`skills=null`を強制してから`saveProjectWithSkills/updateProjectWithSkills`を呼ぶ。
-- Proposal: import専用typed create entry point。初期「書類選考中」のみ。ProposalService.saveのEngineer status連動を起動せず、ProposalService.changeStatus/成約/Contract draft/history/通知を呼ばない。
+- Proposal: 通常のProposal create pathと共有するtyped create commandを設け、validatePosition、active重複検査、proposedAt/proposedBy、EngineerStatusService.onProposalCreated（Bench→提案中）、AiOutcomeService.onProposalSaved相当（aiItemIdがある場合。positionIdは承認済み既存参照のみ）、auditを保つ。現行AI outcome helperの例外握りつぶしをImport pathで再利用せず、適用outcomeは厳格insertまたは一意キー付きdurable outboxで確定する。これらはproposal rowと同じrow transactionで確定し、例外時は全体rollbackする。非transaction効果はdurable idempotent outboxへ同transactionで記録する。初期「書類選考中」の新規作成だけを許し、status遷移/成約/Contract draft/history/通知を実行しない。確定済みrowの再開はattempt追記のみで副作用を再実行しない。
 - Contract: ContractService.saveWithBusinessRules / updateWithBusinessRules。初期「準備中」のみでContractService.changeStatusは呼ばない。採番・compliance・staffing同期を維持する。
 - SkillTag/EngineerSkill/ProjectSkill: 全てscope外。Import applyでresolveOrCreate/replaceSkills/createしない。
 - EngineerSales/assignment: 全てscope外。Import applyでcreate/update/releaseしない。
@@ -232,7 +232,7 @@ entityごとに次の表をmapping versionへ記録する。
 
 | rollback class | 動作 |
 |---|---|
-| 5 adapterの全row | hard delete、自動void、自動restoreを禁止。domain compensationの承認済operationが無ければmanual remediation |
+| 5 adapterの全row | hard delete、自動void、自動restoreを禁止。domain compensationの承認済operationが無ければjobを停止してmanual remediation要とする。manual remediation要表示だけでNF-06全体のrollback/運用機能完了とは扱わない |
 | 論理削除・履歴保持が正本 | Import rollbackからのlogical delete/void/restoreも禁止。承認済み補償operationがなければmanual remediation |
 | 後続参照あり/なし | 同上。参照の有無でhard-delete禁止を緩和しない |
 | source既存行を更新 | 自動restore禁止。承認済みdomain compensationのみ。version conflictで停止しmanual remediation |

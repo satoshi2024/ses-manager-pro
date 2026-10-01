@@ -94,4 +94,4 @@ CSV fixture groupは`utf8-bom`、`utf8-no-bom`、`shift-jis`の明示encoding別
 現行CSV parserはUTF-8固定で全sourceをStringへ読み込むため、Import Centerの実装にはそのまま流用せず、互換golden testを残した上でstreaming parser/canonical adapterを新設する。既存Engineer CSV endpointは変更せず、DG-06承認後にlegacy-engineer mappingを明示的に適用する。
 
 
-技術scopeはexecution-contract.mdに定める5 adapterのみ。全て初期status限定・status遷移なし・children (skills/SkillTag/position/history/EngineerSales/assignment等)なし・hard-delete rollbackなし。Engineer CSVの旧legacy mapping観測は実source承認を意味しない。
+技術scopeはexecution-contract.mdに定める5 adapterのみ。全て初期status限定・status遷移なし・children (skills/SkillTag/history/EngineerSales/assignment等)作成/置換なし。Proposal新規作成は通常作成と同じvalidation、Bench→提案中同期、outcome/auditをrow transactionまたはdurable idempotent outboxで確定し（linked outcomeの失敗を握りつぶさない）、成約/Contract派生なし。hard-delete rollbackなし。Engineer CSVの旧legacy mapping観測は実source承認を意味しない。

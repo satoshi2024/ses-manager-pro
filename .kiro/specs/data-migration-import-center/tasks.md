@@ -124,12 +124,12 @@ READYのjobだけを、canonical DTOからdomain service経由でchunk applyし�
 - READY→APPLYINGをCAS/lockで一度だけ許可する。
 - 各rowでtarget/registry/id-map/business result/audit/outboxを同一DB transactionで確定する。checkpointとapply_pending/終端counterはrow resultから再構築可能なprojectionとし、row transactionに含めない。
 - crash再開で確定済みbusiness resultは保持し、REUSED/DEDUPED attemptだけをappendする。business SKIPPEDへ再分類しない。
-- importではどのadapterもstatus変更/遷移methodを呼ばない。各新規rowの初期状態のみ契約値で確定し、更新では既存statusを保持する。Proposal作成でEngineer状態が変化しないtyped domain entry pointを用意する。
+- importではstatus遷移を行わず、各新規rowの初期状態のみ契約値で確定する。Proposal作成は通常作成と同じvalidatePosition/重複検証、Bench→提案中Engineer同期、onProposalSaved相当outcome（aiItemId有りの場合、positionIdは既存承認bindingのみ）、auditを保つtyped create commandを使う。Import pathは現行AI outcome helperの例外握りつぶしを使わず、required outcome failureをrollbackさせるか一意key付きdurable outboxで回復する。proposal row・同期状態・outcome・row result・registry・id-map・audit/outboxをrow transactionで確定し、失敗はrollbackする。outbox配信とrow replayは冪等にし、確定済みresultの副作用を再実行しない。成約status遷移、Contract draft/history/通知は行わない。
 - updateはversion/既存行承認、clearable ALWAYS fields、scope、audit、side effectを維持する。
 
 ### Test requirements
 
-- double apply、same source identity/different mapping hash拒否、chunk境界crash、restart、target natural key collision、version conflictをtestする。
+- double apply、same source identity/different mapping hash拒否、chunk境界crash、restart、target natural key collision、version conflictをtestする。ProposalではBench/非Bench両ケース、初期状態、必要AI outcome/audit、同期/保存例外時の全row rollback、再開時の副作用二重発生なし、成約/Contract派生なしをtestする。
 - 10,000行でtarget重複0、row resultとcheckpointの整合をtestする。
 - row commit前後、checkpoint/counter projection遅延/破損、同じlease row lock/CASによるtakeover排他、generation更新後の旧worker commit拒否をtestする。同一counter/amount/result hashを中断なしと再開で比較する。
 
@@ -145,7 +145,7 @@ apply前に宣言したrollback classに従い、後続参照を壊さず補償�
 
 ### Implementation guidance
 
-- 5 adapter全てでhard delete rollbackを禁止する。status遷移、skills/SkillTag、positions、history、EngineerSales/assignmentのcreate/update/replace/releaseはscope外。5 adapterは全rowでhard delete/自動void/取消/restoreを禁止し、compensationが未定義ならmanual remediation。
+- 5 adapter全てでhard delete rollbackを禁止する。status遷移、skills/SkillTag、positions、history、EngineerSales/assignmentのcreate/update/replace/releaseはscope外。5 adapterは全rowでhard delete/自動void/取消/restoreを禁止する。未知/未対応補償は初期増分でjob停止・manual remediation要とするだけで、NF-06全体のrollback/運用機能完了とは扱わない。
 - source existing row updateは自動復元せず、before snapshot/version conflict/管理者承認を要求する。
 - compensation actionとrollback failureをrow/job/auditへ記録する。
 - source document、error export、auditはretention/legal holdを尊重し、rollbackで削除しない。
@@ -153,7 +153,7 @@ apply前に宣言したrollback classに従い、後続参照を壊さず補償�
 
 ### Test requirements
 
-- downstream referenceありのrollback拒否/補償、compensation failure、partial rollbackをtestする。
+- downstream referenceありのrollback拒否/補償、compensation failure、partial rollbackをtestする。manual remediation要の表示だけではB2完了にせず、実運用の記録・割当・再開/閉鎖手順を実装/検証する。
 - source/mapping/result hash、actor、time、base snapshot、auditの証拠をtestする。
 
 ### Demo

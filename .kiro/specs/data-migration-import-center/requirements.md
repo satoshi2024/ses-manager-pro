@@ -56,8 +56,8 @@
 2. jobはUPLOADED→MAPPED→VALIDATED→READY→APPLYING→COMPLETED/FAILED/ROLLED_BACKの公開状態と、rollback時のROLLBACK_REQUESTED→ROLLING_BACK→ROLLED_BACK/ROLLBACK_FAILEDの内部状態を持ち、許可遷移、terminal性、retry/reopen条件、CAS条件を設計表どおりに検証しなければならない。二重apply、同一source identityで異なるmapping hashのjob登録/再開、COMPLETED/ROLLED_BACKからの直接再applyを拒否しなければならない。
 3. chunkは有限の計画・進捗単位。target、cross-job registry binding、id-map、business row result、audit/outboxをrow transactionで原子的に確定する。checkpointはrow resultから再構築可能なprojection。
 4. 再開はfencing generation、source row hash、registry revision、target version、result fingerprintを検証する。REUSED/DEDUPED attemptを記録してもbusiness result/counter/hashを変更しない。
-5. 各adapterは固定した初期statusでのみcreateし、status変更/遷移、child collectionの取込/置換は行わない。mapper直insert/update/deleteでvalidation、監査、履歴、関連同期を迂回してはならない。
-6. apply中の業務エラーはrow単位でcode/message/correlation idを残し、chunkの再試行可否とjobの最終状態を決定論的に記録しなければならない。
+5. 各adapterは固定した初期statusの新規createだけを許可し、status変更/遷移、child collectionの取込/置換は行わない。Proposal createは通常作成と同じdomain validation、Engineer派生状態同期、outcome/auditを保持し、proposal rowとrow result等と同一row transactionまたは同transactionのdurable idempotent outboxで確定する。AI outcomeが必要なlinked rowでは永続化失敗を握りつぶさず、冪等キーで再送する。失敗は原子rollbackし、再開時は確定済み副作用を再実行しない。mapper直insert/update/deleteでvalidation、監査、履歴、関連同期を迂回してはならない。
+6. apply中の業務エラーはrow単位でcode/message/correlation idを残し、chunkの再試行可否とjobの最終状態を決定論的に記録しなければならない。Proposal import成功後条件は通常のProposal新規作成と同じくEngineer status同期と必要outcome/auditを含み、成約遷移やContract派生は含めない。未知/未対応補償は初期incrementでjob停止・manual remediation要として扱うが、これをNF-06全体のrollback/運用機能完了とみなしてはならない。
 
 ### R4. Rollback・compensation
 
