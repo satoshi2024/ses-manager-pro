@@ -94,9 +94,9 @@ DISPATCH_AUTHORIZED後は権威ある取消receiptを持たない限りCANCELLED
 W2 dispatch直前にはpolicy/case署名、anchor有効期限、失効状態を再検証し、未知/照会不能な失効状態を拒否する。
 既に外部処理が発生した可能性のあるactionは取消要求で未実行扱いにしない。
 
-W2のtyped journal port、expiry後の新dispatch拒否と既存action observation受入の分離、MySQL lock order、
-signed watermark/replay/quarantine、試験harnessとacceptance matrixの実行契約は
-[`sf-w2-protocol.md`](sf-w2-protocol.md)を参照する。これは追加技術Plan Review待ちであり、SF-W2 code/DDL開始の許可ではない。
+W2のtyped journal port、event一件=一revision、expiry後の新dispatch拒否とkey/time trust検証を通した既存action observation受入の分離、MySQL lock order、
+attestor最新witness付きsigned watermark/replay/quarantine、test-only capability/harnessとacceptance matrixの実行契約は
+[`sf-w2-protocol.md`](sf-w2-protocol.md)を参照する。旧plan headはAstra CONDITIONALのため、本書を補正版Planとして再提出する。追加技術Plan Review待ちであり、SF-W2 code/DDL開始の許可ではない。
 
 ## SF-04 独立journalと復元後の公開gate
 
