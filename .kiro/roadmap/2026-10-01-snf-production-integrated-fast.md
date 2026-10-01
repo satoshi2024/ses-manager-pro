@@ -54,3 +54,22 @@
 
 実行時は既存の必要JVM optionを維持し、当該shell/processにのみpropertyを追加する。
 全体環境やOS設定は変更しない。CIのLinux等にWindows固有pathを埋め込まない。
+
+## 第2回: FAIL（2026-10-02 JST）
+
+- 固定Head: `deb43f3cb2ca5c7674b871f7e5ad0d46d30f0200`。開始時clean、終了Headも一致。
+- command: `mvn -B -Dsurefire.runOrder.random.seed=48992185070100 test`。
+  process限定で`JAVA_TOOL_OPTIONS`へ短いsocket directoryを設定した。
+- 開始UTC `2026-10-01T15:07:04.1447343Z`、終了UTC `2026-10-01T15:21:55.1751550Z`。
+- raw XML 665 class、**4069 tests / failures 0 / errors 5 / skipped 0**、exit 1、Maven 14:49。
+- 5 errorは全て`OvertimeComplianceWiringTest.setUp:81`。
+  `t_engineer_account_link`へ新規engineer ID 4〜8を挿入する際に既存unique keyと衝突した。
+  このrunでは第1回のfixture/socket errorは再現しなかったが、全fastの判定はFAILのまま。
+- log、run/result metadata、全raw XML/text、class集計、失敗一覧、report SHA-256 manifestを
+  `verification-evidence/20261002-control-fast-02/`へ保存した。旧target reportは別subdirectoryに保存し、
+  今回の665 class集計へ混ぜていない。
+- 修復は`C:\work\ses-nf02-remediation` / `codex/snf-prod-fast-isolation`へ隔離。
+  再fetch base B0を確認し、審査済み依存を上記固定Headまでfast-forwardした。
+  旧browser branchとtarget証拠を保存し、今回の原因と正確なfixture ownershipを調査する。
+- unique制約削除、他fixtureのlink削除、test skip、順序固定による隠蔽は禁止。
+  固定Headの限定回帰＋Astra独立Reviewを経て統合し、その後全fastを再実行する。

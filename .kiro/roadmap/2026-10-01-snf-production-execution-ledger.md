@@ -29,6 +29,7 @@
 |---|---|---|---|
 | F0 統括・決定包 | root | `codex/snf-prod-control` / `C:\work\ses-snf-status-audit` | IN_PROGRESS |
 | C0 Browser fixture | gpt-6-luna | `codex/snf-prod-browser-isolation` / `C:\work\ses-nf02-remediation` | `0d78cc13` Astra CODE PASS、control `778e372d`へ統合。main CI再実行なし |
+| Q0 Fast fixture | gpt-6-luna / browser_fix | `codex/snf-prod-fast-isolation` / `C:\work\ses-nf02-remediation` | C0を保存後再利用。B0＋審査済み統合`deb43f3c`が開始Head。OvertimeComplianceWiringTestの5 errorを診断中 |
 | R09 provider境界 | gpt-6-luna | `codex/snf-prod-nf09-provider-boundary` / `C:\work\ses-nf09-system-actor-attribution` | 最終`da850b97`、profile4＋実service反復2=6/0/0/0、Astra CODE PASS、control `036b3eed`へ統合 |
 | R03 training修復 | gpt-6-luna | `codex/snf-prod-nf03-training` / `C:\work\ses-nf03-remediation` | 最終`89384928` Astra CODE PASS、MySQL4/0/0/0、control `626aa967`へ統合 |
 | R10 reauth | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf10-reauth` / `C:\work\ses-nf10-remediation` | 最終`20cce0f7` Astra CODE PASS、単一targeted 46/0/0/0、control `cc6510d5`へ統合。全NF10/stagingは未完 |
@@ -90,6 +91,9 @@
   raw証拠をrun別に保存した。詳細は`2026-10-01-snf-production-integrated-fast.md`。
 - このhostのMaven/Java実行は当該processの`JAVA_TOOL_OPTIONS`に
   `-Djdk.net.unixdomain.tmpdir=C:\work\jdk-uds`を指定する。既存の必要optionを維持し、global設定は変更しない。
+- 第2回全fast（2026-10-02 JST）は固定`deb43f3c`で**4069/0/5/0、FAIL**。
+  旧12 errorは再現せず、全5 errorはOvertimeComplianceWiringTestのaccount link unique衝突。
+  保存済み665 class XMLをrun別集計した。Q0修復・Astra・全再実行を要求する。
 
 ## 現在の総合判定
 
