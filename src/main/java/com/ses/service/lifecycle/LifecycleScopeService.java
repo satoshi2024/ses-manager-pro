@@ -8,6 +8,7 @@ import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.LifecycleCase;
 import com.ses.entity.LifecycleTask;
 import com.ses.entity.SysUser;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.EngineerSalesService;
 import com.ses.service.security.OrganizationScopeService;
@@ -31,12 +32,20 @@ public class LifecycleScopeService {
     private final OrganizationScopeService organizationScopeService;
     private final EngineerSalesService engineerSalesService;
     private final EngineerAccountLinkService engineerAccountLinkService;
+    private final SysUserMapper sysUserMapper;
 
     public String requireTenant(SysUser currentUser) {
-        if (currentUser == null || currentUser.getId() == null || !isKnownRole(currentUser.getRole())) {
+        if (currentUser == null || currentUser.getId() == null) {
             throw BusinessException.of(403, "error.lifecycle.accessDenied");
         }
-        String actorTenant = normalized(currentUser.getTenantId());
+        SysUser persistedUser = sysUserMapper.selectById(currentUser.getId());
+        if (persistedUser == null || !Integer.valueOf(1).equals(persistedUser.getStatus())
+                || !Objects.equals(currentUser.getRole(), persistedUser.getRole())
+                || !Objects.equals(normalized(currentUser.getTenantId()), normalized(persistedUser.getTenantId()))
+                || !isKnownRole(persistedUser.getRole())) {
+            throw BusinessException.of(403, "error.lifecycle.accessDenied");
+        }
+        String actorTenant = normalized(persistedUser.getTenantId());
         String requestTenant = normalized(SecurityUtils.currentTenantId());
         if (actorTenant == null || (requestTenant != null && !actorTenant.equals(requestTenant))) {
             throw BusinessException.of(403, "error.lifecycle.accessDenied");

@@ -64,6 +64,9 @@ class LifecycleDomainServiceTest {
     private LifecycleCaseMapper caseMapper;
 
     @Autowired
+    private LifecycleCaseSequenceMapper caseSequenceMapper;
+
+    @Autowired
     private LifecycleTaskMapper taskMapper;
 
     @Autowired
@@ -723,6 +726,85 @@ class LifecycleDomainServiceTest {
             assertEquals(terminal, taskMapper.selectById(task.getId()).getStatus());
             assertEquals(eventCount, eventMapper.selectByCaseId(lcCase.getId()).size());
         }
+    }
+
+    @Test
+    @DisplayName("R01a-P2: DBで無効化されたactorは詳細・開始・完了冪等・免除・案件変更を拒否する")
+    void disabledActorCannotReadOrMutateLifecycleState() {
+        LifecycleTemplateDto tpl = templateService.createTemplate(LifecycleTemplateDto.builder()
+                .templateType("JOIN").name("無効actor境界").validFrom(LocalDate.now().minusDays(1))
+                .tasks(List.of(LifecycleTemplateTaskDto.builder().taskCode("DISABLED_ACTOR_TASK")
+                        .taskName("actor無効化確認").assigneeRule("ROLE").assigneeRuleValue("HR")
+                        .isEngineerVisible(1).build()))
+                .build(), adminUser.getId());
+        LifecycleCaseDto created = caseService.createCase(hrUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(testEngineer.getId()).lifecycleType("JOIN").templateId(tpl.getId())
+                .anchorDate(LocalDate.now()).build());
+        LifecycleTask task = taskMapper.selectById(created.getTasks().get(0).getId());
+        task.setStatus("COMPLETED");
+        taskMapper.updateById(task);
+        int eventCount = eventMapper.selectByCaseId(created.getId()).size();
+        hrUser.setStatus(0);
+        sysUserMapper.updateById(hrUser);
+
+        assertThrows(BusinessException.class, () -> caseService.getCaseDetail(created.getId(), hrUser));
+        assertThrows(BusinessException.class, () -> taskService.startTask(task.getId(), hrUser.getId()));
+        assertThrows(BusinessException.class, () -> taskService.completeTask(task.getId(), hrUser.getId(), null));
+        assertThrows(BusinessException.class, () -> taskService.waiveTask(task.getId(), hrUser.getId(), null, "再生防止"));
+        assertThrows(BusinessException.class, () -> caseService.holdCase(created.getId(), hrUser.getId(), "再生防止"));
+        assertThrows(BusinessException.class, () -> caseService.getCaseDetail(created.getId(), null));
+        assertEquals("COMPLETED", taskMapper.selectById(task.getId()).getStatus());
+        assertEquals("ACTIVE", caseMapper.selectById(created.getId()).getStatus());
+        assertEquals(eventCount, eventMapper.selectByCaseId(created.getId()).size());
+    }
+
+    @Test
+    @DisplayName("R01a-P2: 既存番号の最大値から初期化し9999から10000・10001へ進む")
+    void caseSequenceContinuesPastFourDigitsFromExistingCases() {
+        String month = "207703";
+        LifecycleTemplateDto tpl = templateService.createTemplate(LifecycleTemplateDto.builder()
+                .templateType("JOIN").name("採番引継ぎ").validFrom(LocalDate.of(2077, 3, 1))
+                .tasks(List.of(LifecycleTemplateTaskDto.builder().taskCode("SEQUENCE_TASK")
+                        .taskName("採番確認").assigneeRule("ROLE").assigneeRuleValue("HR").build()))
+                .build(), adminUser.getId());
+        LifecycleCase existing = LifecycleCase.builder().tenantId("default").caseNo("LC-" + month + "-9999")
+                .lifecycleType("JOIN").engineerId(testEngineer.getId()).templateId(tpl.getId())
+                .templateVersion(1).anchorDate(LocalDate.of(2077, 3, 4)).status("COMPLETED")
+                .title("既存番号").applicantUserId(hrUser.getId()).engineerSnapshotJson("{}")
+                .version(0).build();
+        caseMapper.insert(existing);
+
+        LifecycleCaseDto first = caseService.createCase(hrUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(testEngineer.getId()).lifecycleType("JOIN").templateId(tpl.getId())
+                .anchorDate(LocalDate.of(2077, 3, 5)).build());
+        LifecycleCaseDto second = caseService.createCase(hrUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(testEngineer.getId()).lifecycleType("JOIN").templateId(tpl.getId())
+                .anchorDate(LocalDate.of(2077, 3, 6)).build());
+
+        assertTrue(first.getCaseNo().endsWith("-10000"), first.getCaseNo());
+        assertTrue(second.getCaseNo().endsWith("-10001"), second.getCaseNo());
+        assertNotEquals(first.getCaseNo(), second.getCaseNo());
+        assertEquals(10001L, caseSequenceMapper.selectLastNumber("default", month));
+    }
+
+    @Test
+    @DisplayName("R01a-P2: 案件番号容量上限で失敗しカウンタを折り返さない")
+    void caseSequenceFailsClosedAtVarcharCapacity() {
+        String month = "207704";
+        long maximum = 999_999_999_999_999L;
+        caseSequenceMapper.ensureRow("default", month, maximum);
+        LifecycleTemplateDto tpl = templateService.createTemplate(LifecycleTemplateDto.builder()
+                .templateType("JOIN").name("採番上限").validFrom(LocalDate.of(2077, 4, 1))
+                .tasks(List.of(LifecycleTemplateTaskDto.builder().taskCode("CAPACITY_TASK")
+                        .taskName("上限確認").assigneeRule("ROLE").assigneeRuleValue("HR").build()))
+                .build(), adminUser.getId());
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> caseService.createCase(hrUser.getId(),
+                CreateLifecycleCaseCommand.builder().engineerId(testEngineer.getId()).lifecycleType("JOIN")
+                        .templateId(tpl.getId()).anchorDate(LocalDate.of(2077, 4, 2)).build()));
+
+        assertEquals("error.lifecycle.caseNumberCapacityExceeded", ex.getMessageKey());
+        assertEquals(maximum, caseSequenceMapper.selectLastNumber("default", month));
     }
 
     @Test
