@@ -1,0 +1,224 @@
+diff --git a/src/main/java/com/ses/service/report/impl/ReportDeliveryServiceImpl.java b/src/main/java/com/ses/service/report/impl/ReportDeliveryServiceImpl.java
+index dba5f3b4..884d2af8 100644
+--- a/src/main/java/com/ses/service/report/impl/ReportDeliveryServiceImpl.java
++++ b/src/main/java/com/ses/service/report/impl/ReportDeliveryServiceImpl.java
+@@ -37,6 +37,8 @@ import lombok.RequiredArgsConstructor;
+ import org.springframework.security.crypto.password.PasswordEncoder;
+ import org.springframework.stereotype.Service;
+ import org.springframework.transaction.annotation.Transactional;
++import org.springframework.transaction.support.TransactionSynchronization;
++import org.springframework.transaction.support.TransactionSynchronizationManager;
+ import jakarta.servlet.http.HttpServletRequest;
+ 
+ import java.nio.charset.StandardCharsets;
+@@ -176,12 +178,16 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
+             throw BusinessException.of(403, "error.managementReport.reauthenticationRequired");
+         }
+         SysUser user = sysUserMapper.selectByIdAndTenant(userId, tenantId);
+-        if (user == null || !passwordEncoder.matches(password, user.getPassword())) {
++        if (user == null || !Integer.valueOf(1).equals(user.getStatus())) {
++            throw BusinessException.of(403, "error.managementReport.reauthenticationRequired");
++        }
++        if (!passwordEncoder.matches(password, user.getPassword())) {
+             throw BusinessException.of(403, "error.managementReport.reauthenticationFailed");
+         }
+-        reauthenticationGrant.issue(request, tenantId, userId, deliveryId, delivery.getRecipientScopeHash());
+         delivery.setReauthenticatedAt(now());
+         updateDeliveryChecked(delivery);
++        issueReauthenticationGrantAfterCommit(request, tenantId, userId, deliveryId,
++                delivery.getRecipientScopeHash());
+     }
+ 
+     @Override
+@@ -352,6 +358,10 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
+             throw BusinessException.of(403, "error.managementReport.linkInvalid");
+         }
+         Long userId = currentUserId();
++        SysUser recipientUser = sysUserMapper.selectByIdAndTenant(userId, tenantId);
++        if (recipientUser == null || !Integer.valueOf(1).equals(recipientUser.getStatus())) {
++            throw BusinessException.of(403, "error.managementReport.scopeDenied");
++        }
+         if (!userId.equals(delivery.getRecipientUserId())) {
+             throw BusinessException.of(403, "error.managementReport.scopeDenied");
+         }
+@@ -408,6 +418,22 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
+         return new ResolvedDownload(documentId, versionNo, fileName, contentType);
+     }
+ 
++    private void issueReauthenticationGrantAfterCommit(HttpServletRequest request, String tenantId,
++                                                        Long userId, Long deliveryId, String scopeHash) {
++        if (!TransactionSynchronizationManager.isSynchronizationActive()
++                || !TransactionSynchronizationManager.isActualTransactionActive()) {
++            // 直接constructed unit testなど、Spring transaction proxy外では成功済みupdate直後に発行する。
++            reauthenticationGrant.issue(request, tenantId, userId, deliveryId, scopeHash);
++            return;
++        }
++        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
++            @Override
++            public void afterCommit() {
++                reauthenticationGrant.issue(request, tenantId, userId, deliveryId, scopeHash);
++            }
++        });
++    }
++
+     private void requirePreviewHash(String previewHash) {
+         if (previewHash == null || previewHash.isBlank()) {
+             throw BusinessException.of(400, "error.managementReport.recipientPreviewRequired");
+diff --git a/src/test/java/com/ses/report/ReportDeliveryServiceImplTest.java b/src/test/java/com/ses/report/ReportDeliveryServiceImplTest.java
+index 39c5d9a1..bde3d55d 100644
+--- a/src/test/java/com/ses/report/ReportDeliveryServiceImplTest.java
++++ b/src/test/java/com/ses/report/ReportDeliveryServiceImplTest.java
+@@ -82,6 +82,14 @@ class ReportDeliveryServiceImplTest {
+         when(deliveryMapper.update(any(ReportDelivery.class), any())).thenReturn(1);
+         notificationOutboxMapper = mock(NotificationOutboxMapper.class);
+         userMapper = mock(SysUserMapper.class);
++        when(userMapper.selectByIdAndTenant(anyLong(), eq("default"))).thenAnswer(invocation -> {
++            SysUser user = new SysUser();
++            user.setId(invocation.getArgument(0));
++            user.setTenantId("default");
++            user.setStatus(1);
++            user.setDeletedFlag(0);
++            return user;
++        });
+         previewService = mock(ReportRecipientPreviewService.class);
+         snapshotService = mock(ReportSnapshotService.class);
+         documentService = mock(ReportDocumentService.class);
+diff --git a/src/test/java/com/ses/report/ReportReauthenticationSessionIntegrationTest.java b/src/test/java/com/ses/report/ReportReauthenticationSessionIntegrationTest.java
+index 55bd304e..8f86fcfa 100644
+--- a/src/test/java/com/ses/report/ReportReauthenticationSessionIntegrationTest.java
++++ b/src/test/java/com/ses/report/ReportReauthenticationSessionIntegrationTest.java
+@@ -8,6 +8,7 @@ import com.ses.service.DocumentService;
+ import com.ses.service.report.ReportRecipientPreviewService;
+ import com.ses.service.report.ReportReauthenticationGrant;
+ import com.ses.service.report.ReportSnapshotService;
++import com.ses.mapper.ReportDeliveryMapper;
+ import com.ses.service.accounting.AccountingTenantContextHolder;
+ import jakarta.servlet.http.HttpServletRequest;
+ import org.junit.jupiter.api.AfterEach;
+@@ -17,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+ import org.springframework.boot.test.context.SpringBootTest;
+ import org.springframework.boot.test.mock.mockito.MockBean;
++import org.springframework.boot.test.mock.mockito.SpyBean;
+ import org.springframework.http.MediaType;
+ import org.springframework.jdbc.core.JdbcTemplate;
+ import org.springframework.mock.web.MockHttpSession;
+@@ -26,7 +28,6 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
+ import org.springframework.security.crypto.password.PasswordEncoder;
+ import org.springframework.test.context.ActiveProfiles;
+ import org.springframework.test.web.servlet.MockMvc;
+-import org.springframework.transaction.annotation.Transactional;
+ 
+ import java.io.ByteArrayInputStream;
+ import java.nio.charset.StandardCharsets;
+@@ -38,6 +39,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
+ import static org.mockito.ArgumentMatchers.anyLong;
+ import static org.mockito.ArgumentMatchers.anyString;
+ import static org.mockito.Mockito.when;
++import static org.mockito.Mockito.doReturn;
+ import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+ import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+@@ -48,7 +50,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
+ @SpringBootTest
+ @AutoConfigureMockMvc
+ @ActiveProfiles("test")
+-@Transactional
+ class ReportReauthenticationSessionIntegrationTest {
+ 
+     @Autowired private MockMvc mockMvc;
+@@ -58,15 +59,24 @@ class ReportReauthenticationSessionIntegrationTest {
+     @MockBean private ReportSnapshotService snapshotService;
+     @MockBean private DocumentService documentService;
+     @MockBean private PasswordEncoder passwordEncoder;
++    @SpyBean private ReportDeliveryMapper deliveryMapper;
+ 
+     private Long userId;
+     private Long runId;
+     private Long deliveryId;
++    private String username;
++    private String runKey;
+     private ReportRecipientPreviewResult currentPreview;
+ 
+     @BeforeEach
+     void setUp() {
+-        userId = jdbc.queryForObject("SELECT id FROM sys_user WHERE username='admin' AND deleted_flag=0", Long.class);
++        String unique = Long.toUnsignedString(System.nanoTime(), 36);
++        username = "reauth-it-" + unique;
++        jdbc.update("INSERT INTO sys_user (tenant_id, username, password, real_name, role, email, status, deleted_flag) " +
++                        "VALUES ('default', ?, 'correct', '再認証テスト', '管理者', ?, 1, 0)",
++                username, username + "@test.invalid");
++        userId = jdbc.queryForObject("SELECT id FROM sys_user WHERE username=? AND tenant_id='default'", Long.class, username);
++        runKey = "reauth-session-" + unique;
+         runId = insertRun();
+         deliveryId = insertDelivery();
+         ReportRecipientPreview allow = new ReportRecipientPreview(userId, "管理者", "ALLOW", "SCOPE_MATCH", "scope-a");
+@@ -82,6 +92,10 @@ class ReportReauthenticationSessionIntegrationTest {
+ 
+     @AfterEach
+     void tearDown() {
++        if (deliveryId != null) jdbc.update("DELETE FROM t_report_delivery WHERE id=?", deliveryId);
++        if (runId != null) jdbc.update("DELETE FROM t_report_run WHERE id=?", runId);
++        if (userId != null) jdbc.update("DELETE FROM sys_user WHERE id=? AND username=?", userId, username);
++        org.mockito.Mockito.reset(deliveryMapper);
+         AccountingTenantContextHolder.clear();
+     }
+ 
+@@ -117,6 +131,34 @@ class ReportReauthenticationSessionIntegrationTest {
+         download(session, auth("same-user-new-authentication-instance")).andExpect(status().isForbidden());
+     }
+ 
++    @Test
++    void delivery更新失敗時はgrantを発行せずdownloadを拒否する() throws Exception {
++        MockHttpSession session = new MockHttpSession();
++        Authentication auth = auth("update-failure");
++        doReturn(0).when(deliveryMapper).update(any(), any());
++
++        reauthenticate(session, auth).andExpect(status().is5xxServerError());
++        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
++                "SELECT reauthenticated_at FROM t_report_delivery WHERE id=?", LocalDateTime.class, deliveryId))
++                .isNull();
++
++        org.mockito.Mockito.reset(deliveryMapper);
++        download(session, auth).andExpect(status().isForbidden());
++    }
++
++    @Test
++    void DBで停止されたrecipientは再認証も既存grant後downloadも拒否される() throws Exception {
++        MockHttpSession session = new MockHttpSession();
++        Authentication auth = auth("disabled-user");
++        jdbc.update("UPDATE sys_user SET status=0 WHERE id=?", userId);
++
++        reauthenticate(session, auth).andExpect(status().isForbidden());
++        jdbc.update("UPDATE sys_user SET status=1 WHERE id=?", userId);
++        reauthenticate(session, auth).andExpect(status().isOk());
++        jdbc.update("UPDATE sys_user SET status=0 WHERE id=?", userId);
++        download(session, auth).andExpect(status().isForbidden());
++    }
++
+     private org.springframework.test.web.servlet.ResultActions reauthenticate(MockHttpSession session,
+                                                                                Authentication authentication) throws Exception {
+         return mockMvc.perform(post("/api/management-reports/deliveries/{id}/reauthenticate", deliveryId)
+@@ -158,8 +200,8 @@ class ReportReauthenticationSessionIntegrationTest {
+                     '{"companyWide":true,"organizationIds":[],"directUserIds":[]}', 'v1', 'run-scope',
+                     '2026-08-01', '2026-08-31', '速報', CURRENT_TIMESTAMP, 'Asia/Tokyo', CURRENT_TIMESTAMP,
+                     'SUCCEEDED', 'report-1.0', 'policy', CURRENT_TIMESTAMP)
+-                """, "reauth-session-" + System.nanoTime(), userId);
+-        return jdbc.queryForObject("SELECT MAX(id) FROM t_report_run", Long.class);
++                """, runKey, userId);
++        return jdbc.queryForObject("SELECT id FROM t_report_run WHERE tenant_id='default' AND run_key=?", Long.class, runKey);
+     }
+ 
+     private Long insertDelivery() {
+diff --git a/src/test/java/com/ses/testsupport/TestIsolationAuditTest.java b/src/test/java/com/ses/testsupport/TestIsolationAuditTest.java
+index 1cad0518..96e64368 100644
+--- a/src/test/java/com/ses/testsupport/TestIsolationAuditTest.java
++++ b/src/test/java/com/ses/testsupport/TestIsolationAuditTest.java
+@@ -63,6 +63,7 @@ class TestIsolationAuditTest {
+             entry("com.ses.changerequest.EngineerChangeRequestAttachmentApiTest", "添付公開metadataの可視性", true, "テスト固有attachmentをdelete", "change-request-attachment"),
+             entry("com.ses.mapper.IntegrationHubWebhookResourceScopeMapperIntegrationTest", "jdbcTemplate更新後の再読込", true, "テスト固有resource scopeをdelete", "integration-hub-resource-scope"),
+             entry("com.ses.report.ReportDeliveryTransactionIntegrationTest", "ReportDeliveryIssueService実Spring proxy TX rollback検証", true, "テスト専用行を@AfterEachで明示削除", "report-delivery-tx"),
++            entry("com.ses.report.ReportReauthenticationSessionIntegrationTest", "afterCommit grantとsession間境界の実service検証", true, "一意なテストuser/delivery/runをIDで削除", "report-reauth-session"),
+             entry("com.ses.service.ai.AiExecutionGatewayPersistMetadataTest", "gateway永続化metadataの実DB再読込", true, "trace_id固定prefixを@AfterEachでdelete", "ai-gateway-persist-metadata"),
+             entry("com.ses.service.ai.AiRecommendationRetentionTenantIsolationH2Test", "tenant別retentionのcommit可視性", true, "trace_id固定prefixを@AfterEachでdelete", "ai-retention-tenant-isolation")
+     );

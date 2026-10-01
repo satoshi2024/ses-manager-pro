@@ -82,6 +82,14 @@ class ReportDeliveryServiceImplTest {
         when(deliveryMapper.update(any(ReportDelivery.class), any())).thenReturn(1);
         notificationOutboxMapper = mock(NotificationOutboxMapper.class);
         userMapper = mock(SysUserMapper.class);
+        when(userMapper.selectByIdAndTenant(anyLong(), eq("default"))).thenAnswer(invocation -> {
+            SysUser user = new SysUser();
+            user.setId(invocation.getArgument(0));
+            user.setTenantId("default");
+            user.setStatus(1);
+            user.setDeletedFlag(0);
+            return user;
+        });
         previewService = mock(ReportRecipientPreviewService.class);
         snapshotService = mock(ReportSnapshotService.class);
         documentService = mock(ReportDocumentService.class);

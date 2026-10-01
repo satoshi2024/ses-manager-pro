@@ -8,6 +8,7 @@ import com.ses.service.DocumentService;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.report.ReportReauthenticationGrant;
 import com.ses.service.report.ReportSnapshotService;
+import com.ses.mapper.ReportDeliveryMapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterEach;
@@ -17,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
@@ -26,7 +28,6 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -38,6 +39,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doReturn;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -48,7 +50,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Transactional
 class ReportReauthenticationSessionIntegrationTest {
 
     @Autowired private MockMvc mockMvc;
@@ -58,15 +59,24 @@ class ReportReauthenticationSessionIntegrationTest {
     @MockBean private ReportSnapshotService snapshotService;
     @MockBean private DocumentService documentService;
     @MockBean private PasswordEncoder passwordEncoder;
+    @SpyBean private ReportDeliveryMapper deliveryMapper;
 
     private Long userId;
     private Long runId;
     private Long deliveryId;
+    private String username;
+    private String runKey;
     private ReportRecipientPreviewResult currentPreview;
 
     @BeforeEach
     void setUp() {
-        userId = jdbc.queryForObject("SELECT id FROM sys_user WHERE username='admin' AND deleted_flag=0", Long.class);
+        String unique = Long.toUnsignedString(System.nanoTime(), 36);
+        username = "reauth-it-" + unique;
+        jdbc.update("INSERT INTO sys_user (tenant_id, username, password, real_name, role, email, status, deleted_flag) " +
+                        "VALUES ('default', ?, 'correct', '再認証テスト', '管理者', ?, 1, 0)",
+                username, username + "@test.invalid");
+        userId = jdbc.queryForObject("SELECT id FROM sys_user WHERE username=? AND tenant_id='default'", Long.class, username);
+        runKey = "reauth-session-" + unique;
         runId = insertRun();
         deliveryId = insertDelivery();
         ReportRecipientPreview allow = new ReportRecipientPreview(userId, "管理者", "ALLOW", "SCOPE_MATCH", "scope-a");
@@ -82,6 +92,10 @@ class ReportReauthenticationSessionIntegrationTest {
 
     @AfterEach
     void tearDown() {
+        if (deliveryId != null) jdbc.update("DELETE FROM t_report_delivery WHERE id=?", deliveryId);
+        if (runId != null) jdbc.update("DELETE FROM t_report_run WHERE id=?", runId);
+        if (userId != null) jdbc.update("DELETE FROM sys_user WHERE id=? AND username=?", userId, username);
+        org.mockito.Mockito.reset(deliveryMapper);
         AccountingTenantContextHolder.clear();
     }
 
@@ -115,6 +129,34 @@ class ReportReauthenticationSessionIntegrationTest {
         when(recipientPreviewService.previewForRun(any())).thenReturn(currentPreview);
         reauthenticate(session, auth).andExpect(status().isOk());
         download(session, auth("same-user-new-authentication-instance")).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void delivery更新失敗時はgrantを発行せずdownloadを拒否する() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        Authentication auth = auth("update-failure");
+        doReturn(0).when(deliveryMapper).update(any(), any());
+
+        reauthenticate(session, auth).andExpect(status().is5xxServerError());
+        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
+                "SELECT reauthenticated_at FROM t_report_delivery WHERE id=?", LocalDateTime.class, deliveryId))
+                .isNull();
+
+        org.mockito.Mockito.reset(deliveryMapper);
+        download(session, auth).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void DBで停止されたrecipientは再認証も既存grant後downloadも拒否される() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        Authentication auth = auth("disabled-user");
+        jdbc.update("UPDATE sys_user SET status=0 WHERE id=?", userId);
+
+        reauthenticate(session, auth).andExpect(status().isForbidden());
+        jdbc.update("UPDATE sys_user SET status=1 WHERE id=?", userId);
+        reauthenticate(session, auth).andExpect(status().isOk());
+        jdbc.update("UPDATE sys_user SET status=0 WHERE id=?", userId);
+        download(session, auth).andExpect(status().isForbidden());
     }
 
     private org.springframework.test.web.servlet.ResultActions reauthenticate(MockHttpSession session,
@@ -158,8 +200,8 @@ class ReportReauthenticationSessionIntegrationTest {
                     '{"companyWide":true,"organizationIds":[],"directUserIds":[]}', 'v1', 'run-scope',
                     '2026-08-01', '2026-08-31', '速報', CURRENT_TIMESTAMP, 'Asia/Tokyo', CURRENT_TIMESTAMP,
                     'SUCCEEDED', 'report-1.0', 'policy', CURRENT_TIMESTAMP)
-                """, "reauth-session-" + System.nanoTime(), userId);
-        return jdbc.queryForObject("SELECT MAX(id) FROM t_report_run", Long.class);
+                """, runKey, userId);
+        return jdbc.queryForObject("SELECT id FROM t_report_run WHERE tenant_id='default' AND run_key=?", Long.class, runKey);
     }
 
     private Long insertDelivery() {

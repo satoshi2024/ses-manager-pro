@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: com.ses.report.ReportReauthenticationSessionIntegrationTest
+-------------------------------------------------------------------------------
+Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 24.86 s -- in com.ses.report.ReportReauthenticationSessionIntegrationTest
