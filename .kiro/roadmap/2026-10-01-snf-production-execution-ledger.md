@@ -30,8 +30,8 @@
 | F0 統括・決定包 | root | `codex/snf-prod-control` / `C:\work\ses-snf-status-audit` | IN_PROGRESS |
 | C0 Browser fixture | gpt-6-luna | `codex/snf-prod-browser-isolation` / `C:\work\ses-nf02-remediation` | `0d78cc13` Astra CODE PASS、control `778e372d`へ統合。main CI再実行なし |
 | R09 provider境界 | gpt-6-luna | `codex/snf-prod-nf09-provider-boundary` / `C:\work\ses-nf09-system-actor-attribution` | 最終`da850b97`、profile4＋実service反復2=6/0/0/0、Astra CODE PASS、control `036b3eed`へ統合 |
-| R03 training修復 | gpt-6-luna | `codex/snf-prod-nf03-training` / `C:\work\ses-nf03-remediation` | `3202ff23` 製品CODE PASS。unit17＋inventory1、MySQL4は全0。並行証拠P2を再補強中 |
-| R10 reauth準備 | 未割当 | `codex/snf-prod-nf10-reauth` / `C:\work\ses-nf10-remediation` | worktree準備済み、実装待ち |
+| R03 training修復 | gpt-6-luna | `codex/snf-prod-nf03-training` / `C:\work\ses-nf03-remediation` | 最終`89384928`、対象connection/record lockと実競合を補強、MySQL4/0/0/0。固定Head再審査待ち |
+| R10 reauth | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf10-reauth` / `C:\work\ses-nf10-remediation` | session/authenticationへgrantを束縛する修復中。未commit・未Review、成功証拠なし |
 | R02/R03/R10 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1計4件。専用report参照 |
 | R04 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1×3/P2×1。専用report参照 |
 | N06/N07技術Plan Review | gpt-6-astra | NF06 `c2a95cd5` / NF07 `f007ef9a` | 両方synthetic技術PLAN PASS。実装・実環境・人の承認とは別。専用report参照 |
@@ -40,7 +40,7 @@
 | N06 contracts | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf06-contracts` / `C:\work\ses-review-snf-r3-b` | `c2a95cd5`計画PASS、control `d08c4b4f`へ統合。実装/DDL未着手 |
 | N07 foundation | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf07-foundation-plan` / `C:\work\ses-review-snf-r3-c` | `f007ef9a` synthetic技術PLAN PASS、control `cf974a65`まで計画統合。SF-W1実装を委任、W2以降未着手 |
 | E05/E08 baseline Review | gpt-6-astra | R3固定Head | 新規P2計4件、専用report参照。production BLOCKED |
-| R01a lifecycle境界 | gpt-6-luna | `codex/snf-prod-nf01-lifecycle` / `C:\work\ses-engineer-lifecycle-workflow` | 安全再利用済み、01/02/04/05/06修復中。NF01現行実装FAIL、歴史COMPLETEを継承しない |
+| R01a lifecycle境界 | gpt-6-luna | `codex/snf-prod-nf01-lifecycle` / `C:\work\ses-engineer-lifecycle-workflow` | 最終`ced64304`、active actorとV183原子採番を補強。H2 26/0/0/0、MySQL3/0/0/0、再審査待ち。DUAL等は未完 |
 
 再利用したworktreeは開始時clean、origin/main未包含commit 0、当該path依存processなしを確認した。
 既存の試験用`target`は、同一worktree内`target-preserved-20261001-prod-start`へ移動して保存した。
