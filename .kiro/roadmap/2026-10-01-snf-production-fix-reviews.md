@@ -12,7 +12,7 @@
 - 本testがinsert成功したengineer/user組だけを記録し、AfterEachで精密削除する。
   既存linkを削除せず、unique例外の抑制、制約緩和、順序固定、skipを追加しない。
 - 限界: 全fixtureの完全隔離、JVM強制終了後の復元を証明していない。
-  既存linkのtenant変更を復元しない分岐は既存動作であり、本差分の阻断findingではない。
+  既存linkのtenant変更を復元しない分岐は既存動作であり、本差分の阻害findingではない。
 - control統合commit: `778e372d585d7e5a6a98a3899667ca18dfe97b3d`。
   統合後全suite/remote main CIは未実行であり、main CI失敗をPASSへ更新しない。
 
@@ -33,6 +33,6 @@
 - 残るP2: 実FailClosed client→ExternalAccountService→offboardingの保存状態/確認event/retry/clearanceを
   integrationで示すこと。既存testのinstanceofによる早期returnをPASS証明に使わない。
 - 実providerなしの安全拒否と実provider導入完了を混同しない。
-- 回帰追加Head `02105ce6a92d61736d44ce727f028059618a64c4` は定向5/0/0/0。
+- 回帰追加Head `02105ce6a92d61736d44ce727f028059618a64c4` は対象限定5/0/0/0。
   root照合で非transaction testのfixture後始末不足、固定engineer/actorと実scopeの不一致を検出したため、
   isolated tenant/owner、精密cleanup、確認eventの不在証拠を補強中。Astra再Review未実施、未統合。

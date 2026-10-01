@@ -27,11 +27,11 @@ contracts/careers等が含まれ、最小payload allow-listを迂回する。
 ## PRD-NF04-003 / P1 / OPEN
 
 `common.js:1047-1064`のlogoutは現tabだけreset/DB清掃する。
-`pwa-queue.js:758`のresetはclosureのみ、`:711-713`に跨tab撤回listenerがない。
+`pwa-queue.js:758`のresetはclosureのみ、`:711-713`にtab間撤回listenerがない。
 `:633,666-667`は非同期処理後にepoch/scopeを再確認せずputでき、logout後に旧payloadを再作成し得る。
 clearUserScopeのblocked/error/timeoutを成功相当として扱う点も境界未完了。
 
-修正: 永続revocation epoch、跨tab通知、UI clear、in-flight停止、各await/DB書込/送信/応答時のscope再検証。
+修正: 永続revocation epoch、tab間通知、UI clear、in-flight停止、各await/DB書込/送信/応答時のscope再検証。
 清掃失敗は隔離し、旧scopeを復活しない。
 回帰: 2 tab logout、遅延hash/通信失敗callback、IndexedDB blocked/error、A→B、清掃後の再書込0。
 

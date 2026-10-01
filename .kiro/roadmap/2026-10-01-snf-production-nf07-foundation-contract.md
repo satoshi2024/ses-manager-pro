@@ -76,4 +76,4 @@ EXECUTING→CONFIRMED、またはBLOCKED/UNKNOWN/PARTIAL_FAILED/CANCELLED。
 
 coverageの構造欠落とpolicy未決定は別counterとする。現在のsource baselineは
 `2026-10-01-snf-production-privacy-coverage.md`を参照し、73未分類table等を0と偽らない。
-各波は実装→定向試験→Astra固定Head Reviewを要求し、NF06/NF07未実装のflag OFFを全機能PASSへ変換しない。
+各波は実装→対象限定試験→Astra固定Head Reviewを要求し、NF06/NF07未実装のflag OFFを全機能PASSへ変換しない。

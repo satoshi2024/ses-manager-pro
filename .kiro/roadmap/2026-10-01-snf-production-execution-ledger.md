@@ -29,8 +29,8 @@
 |---|---|---|---|
 | F0 統括・決定包 | root | `codex/snf-prod-control` / `C:\work\ses-snf-status-audit` | IN_PROGRESS |
 | C0 Browser fixture | gpt-6-luna | `codex/snf-prod-browser-isolation` / `C:\work\ses-nf02-remediation` | `0d78cc13` Astra CODE PASS、control `778e372d`へ統合。main CI再実行なし |
-| R09 provider境界 | gpt-6-luna | `codex/snf-prod-nf09-provider-boundary` / `C:\work\ses-nf09-system-actor-attribution` | `bbeca7c7`、定向16/0/0/0、Astra CONDITIONAL PASS。実service→offboarding回帰補強待ち |
-| R03 training修復 | gpt-6-luna | `codex/snf-prod-nf03-training` / `C:\work\ses-nf03-remediation` | `5facee22` 定向16/0/0/0、限定CODE PASS。MySQL実並行P2補強中 |
+| R09 provider境界 | gpt-6-luna | `codex/snf-prod-nf09-provider-boundary` / `C:\work\ses-nf09-system-actor-attribution` | `bbeca7c7`、対象限定16/0/0/0、Astra CONDITIONAL PASS。実service→offboarding回帰補強待ち |
+| R03 training修復 | gpt-6-luna | `codex/snf-prod-nf03-training` / `C:\work\ses-nf03-remediation` | `5facee22` 対象限定16/0/0/0、限定CODE PASS。MySQL実並行P2補強中 |
 | R10 reauth準備 | 未割当 | `codex/snf-prod-nf10-reauth` / `C:\work\ses-nf10-remediation` | worktree準備済み、実装待ち |
 | R02/R03/R10 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1計4件。専用report参照 |
 | R04 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1×3/P2×1。専用report参照 |

@@ -21,7 +21,7 @@
 - ResignationGateChecker.java:137-158 と ExternalAccountReferenceMapper.java:47 は非REVOKEDをblockerとする。
   PENDING/UNKNOWNでwaiverがなければfinalizationを許さない。既知mock問題は重複計上しない。
 - `triggerOffboardingRevocations` は定義のみでNF01からの呼出なし。
-  退社完了の阻断check後へ呼出を追加せず、撤销要求と確認待ちを独立段階として設計・検証する。
+  退社完了の阻害check後へ呼出を追加せず、失効要求と確認待ちを独立段階として設計・検証する。
 - DOCUMENT_LINKは存在性確認と任意documentVersionId受理に留まる（TaskServiceImpl:129-136）。
   歴史ledgerの未閉鎖ACL項目として残す。本Reviewは文書読み出しchain未検証のため新規漏洩findingとはしていない。
 - 実provider、実撤権、production演習は未完了。
@@ -30,6 +30,6 @@
 
 - R01a: tenant/current scope、終端状態、template mutation、可視投影を先に修復する（01/02/04/05/06）。
   既存schemaを使う。NULL tenantを推定で埋めない。既存不明行は運用repair対象として残す。
-- R01b: DUAL_CONFIRMATIONの二段階確認、文書ACL/version、NF09撤销要求段階を設計しAstraで確認後に実装する。
+- R01b: DUAL_CONFIRMATIONの二段階確認、文書ACL/version、NF09失効要求段階を設計しAstraで確認後に実装する。
   必要なmigrationは総括採番とし、R01aで旧migrationを変更しない。
 - R01aだけのPASSをNF01全体のPASS/COMPLETEとしない。
