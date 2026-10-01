@@ -69,6 +69,10 @@
 - 試験は一run一suiteでSHA、command、開始/終了、環境、test/failure/error/skipped、log/XML hashを保存する。
 - Maven重負荷suiteは総括が直列化し、異なるagentのDocker/browser試験の干渉を避ける。
 - migration番号、H2 schema/init、shared security/document/config、中央traceabilityは総括が調整する。
+- 2026-10-01再fetchでorigin/mainが`1443fb68943849a3260d7ebe005259f3eb609d60`のまま、V183以降なしを再確認。
+  **V183をNF01 R01aのtenant/月次案件採番tableに予約**した。担当browser_fixのみ追加可。
+  現在の初期base inventory 181 versioned + 1 repeatableと、実装中の追加scriptを混同しない。
+  必要なH2 schema/initとMySQL shardだけ同批で同期する。適用済みV1/V182等は変更しない。
 - checksum改変、skip、固定順序による問題隠し、tenant default推測、mock成功へのproduction fallbackは禁止。
 - push前に`scripts/verify-like-ci.ps1`。最終RCではFast/MySQL/Performance/real Chrome/backup、fresh/upgrade、PITR、安全・運用演習を要求する。
 - `PENDING=0`だけでV182完了にしない。4表のscope未確定0、親子scope一致、callback一意性、実際の業務帰属・actorを確認する。
