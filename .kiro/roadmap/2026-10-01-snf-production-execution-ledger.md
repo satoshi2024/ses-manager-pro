@@ -29,7 +29,7 @@
 |---|---|---|---|
 | F0 統括・決定包 | root | `codex/snf-prod-control` / `C:\work\ses-snf-status-audit` | IN_PROGRESS |
 | C0 Browser fixture | gpt-6-luna | `codex/snf-prod-browser-isolation` / `C:\work\ses-nf02-remediation` | `0d78cc13` Astra CODE PASS、control `778e372d`へ統合。main CI再実行なし |
-| Q0 Fast fixture | gpt-6-luna / browser_fix | `codex/snf-prod-fast-isolation` / `C:\work\ses-nf02-remediation` | `b1775812` Astra限定CODE PASS、control `198ee8e5`へ統合。2 classの両実行順序・最終態で各12/0/0/0。全fast再検証待ち |
+| Q0 Fast fixture | gpt-6-luna / browser_fix | `codex/snf-prod-fast-isolation` / `C:\work\ses-nf02-remediation` | `b1775812` Astra限定CODE PASS、control `198ee8e5`へ統合。2 classの両実行順序・最終態で各12/0/0/0。第3回全fastで旧5 errorは非再現。全体は別Portal failureでFAIL |
 | R09 provider境界 | gpt-6-luna | `codex/snf-prod-nf09-provider-boundary` / `C:\work\ses-nf09-system-actor-attribution` | 最終`da850b97`、profile4＋実service反復2=6/0/0/0、Astra CODE PASS、control `036b3eed`へ統合 |
 | R03 training修復 | gpt-6-luna | `codex/snf-prod-nf03-training` / `C:\work\ses-nf03-remediation` | 最終`89384928` Astra CODE PASS、MySQL4/0/0/0、control `626aa967`へ統合 |
 | R10 reauth | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf10-reauth` / `C:\work\ses-nf10-remediation` | 最終`20cce0f7` Astra CODE PASS、単一targeted 46/0/0/0、control `cc6510d5`へ統合。全NF10/stagingは未完 |
@@ -37,11 +37,11 @@
 | R04 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1×3/P2×1。専用report参照 |
 | N06/N07技術Plan Review | gpt-6-astra | NF06 `c2a95cd5` / NF07 `f007ef9a` | 両方synthetic技術PLAN PASS。実装・実環境・人の承認とは別。専用report参照 |
 | R02 scope | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf02-scope` / `C:\work\ses-manager-pro-nf02-nf03-review-v2` | `36dcfdfc` Astra限定CODE PASS、両P1閉鎖。4 class 31件成功と最終integration 1件成功は別run。controlへ統合、全NF02/production承認ではない |
-| R04 offline | gpt-6-luna / browser_fix | `codex/snf-prod-nf04-offline` / `C:\work\ses-review-snf-r3-a` | B0 clean/processを再確認、P1×3/P2×1の修復と実browser証拠を委任 |
+| R04 offline | gpt-6-luna / browser_fix | `codex/snf-prod-nf04-offline` / `C:\work\ses-review-snf-r3-a` | 7 source WIPは保存・一時停止。Astra CODE FAIL（撤回/DOM/時計）。追加G1/G2技術Plan d9d53112限定PASS、Owner/Securityの要件差分承認は未取得 |
 | N06 contracts | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf06-contracts` / `C:\work\ses-review-snf-r3-b` | F2最終`1e8aa651` foundation限定CODE PASS、17/0/0/0、control `5b2e5db3`へ統合。実resolver/mapping/apply/UI/DDL未実装 |
-| N07 foundation | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf07-foundation-plan` / `C:\work\ses-review-snf-r3-c` | SF-W1 `6ec4ca28`限定CODE PASS、18/0/0/0。SF-W2 Plan `e5530c01`追加PLAN PASS、control `55fa2b5b`へ統合。W2a実装枠待ち、W2以降未実装、人工gate未承認 |
+| N07 foundation | gpt-6-luna / browser_fix | `codex/snf-prod-nf07-foundation-plan` / `C:\work\ses-review-snf-r3-c` | SF-W1 `6ec4ca28`限定CODE PASS、18/0/0/0。SF-W2 Plan `e5530c01`追加PLAN PASS、control `55fa2b5b`へ統合。W2a JDBC synthetic journal実装中、pure Boundary/Inventory 3/0/0/0。実MySQLとCODE Review未完。hold release/dispatch proof・W2b以降・人工gate未完 |
 | E05/E08 baseline Review | gpt-6-astra | R3固定Head | 新規P2計4件、専用report参照。production BLOCKED |
-| E05 deadline | 未着手 | `codex/snf-prod-nf05-deadline` / `C:\work\ses-nf05-remediation` | clean/包含/process確認後B0から再利用準備済み。変更範囲と必須回帰を専用batch文書へ固定 |
+| E05 deadline | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf05-deadline` / `C:\work\ses-nf05-remediation` | nonblocking socket総deadline修復中。初回targeted 26/1/0/0、context fixture修復再検証中。独立CODE Review未完 |
 | R01a lifecycle境界 | gpt-6-luna | `codex/snf-prod-nf01-lifecycle` / `C:\work\ses-engineer-lifecycle-workflow` | `ced64304` CODE PASS、H2 26/0/0/0、MySQL3/0/0/0。追加fixture `e3944774` CODE PASS、5/0/0/0、control `e90daaf1`へ統合。DUAL等は未完 |
 
 再利用したworktreeは開始時clean、origin/main未包含commit 0、当該path依存processなしを確認した。
@@ -99,3 +99,22 @@
 
 **NO-GO / ACTIVE_REMEDIATION**。独立Review、NF06/NF07実装、実provider、policy、production環境の証拠は未完了。
 この台帳の作成はproduction approvalではない。
+
+## 2026-10-02 01:40 JST 再統括
+
+- 第3回全fast fixed `c9bd265555f2197784f2728a50ed7468bab1f853` は **4075/1/0/0、FAIL**。
+  667 class XML、seed `48992185070100`。証拠は `verification-evidence/20261002-control-fast-03/`。
+  Q0の5 errorは消失した。残るPortalBpApiTestの403は、Astra静的診断では共有H2に
+  ExpenseRequestFlowIntegrationTestが残す法人70001が強い候補。OneOnOneの70002も候補である。
+  元例外と順序を伴う動的再現前に根因確定とはしない。製品の法人一意性guardは変更しない。
+- Q1作業先は `codex/snf-prod-portal-isolation` / `C:\work\ses-nf02-remediation`。
+  fresh origin/main B0から審査済みcontrol `e8c685a6c523384711803d7ae273c57455c257aa`までfast-forward。
+  Q0 branchと旧targetは保持し、今回の開始前targetを `target-preserved-20261002-portal-start`へ保存した。
+- NF02両P1はsource `36dcfdfc`でAstra限定CODE PASS、control `1c0df340`へ統合済み。
+  全NF02のDG/Owner/release承認へ格上げしない。
+- NF04追加技術Plan `d9d53112`はAstra限定PLAN PASS。後続説明 `e754d26d`もcontrolへ統合した。
+  source WIPはCODE FAILのままである。fresh password reauth＋明示restoreをG1/G2で実装する。
+  全永続媒体故障時の即時物理削除や通知不能tabの即時撤回は保証不能であり、人の残余risk判断が必要。
+- nf06_contracts agentはthread上限により再開できなかった。既存Luna browser_fixをNF07 W2aへ再配分した。
+  NF04 sourceを上書きせず保存し、重いMaven/MySQL/Browserは引き続き総括が直列化する。
+- production approval、remote push/PR/merge、実credential、deployは実施していない。

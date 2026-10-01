@@ -10,12 +10,12 @@
 | NF | 現行実装/Reviewの再判定 | productionの未完条件 |
 |---|---|---|
 | 01 | R01a `ced64304` CODE PASS、採番/actor P2閉鎖。追加fixture `e3944774` CODE PASS。DUAL確認等は未完 | 文書ACL/version、二者確認、信頼できる退社撤権要求・確認、legacy scope、運用承認 |
-| 02 | CANDIDATE維持。recipient現在scope/owner tenantのP1修復WIP、未検証/未Review | DG-02、正式Owner/最終Review、release |
+| 02 | CANDIDATE維持。recipient現在scope/owner tenantの両P1は36dcfdfcでAstra限定CODE PASS、control統合済み | DG-02、正式Owner/最終Review、release |
 | 03 | 集約完了修復と実MySQL並行証拠 `89384928`は限定CODE PASS、control統合済み | 全体最終Review、NF07 policy、retention、staging/運用承認 |
-| 04 | offline conflict PII、queue version、tab間撤回の修復WIP。Chrome frontend contract検証中 | 固定Head Review・実PWA/browser全体検証・正式release |
-| 05 | 開発scope CONDITIONAL。総deadline P2、新実transport未完 | provider/credential、許可先、正式production enablement |
+| 04 | source WIPはAstra CODE FAIL。撤回/DOM/時計の残課題あり。G1/G2追加技術Plan d9d53112は限定PLAN PASS | 固定Head Review・実PWA/browser全体検証・正式release |
+| 05 | 開発scope CONDITIONAL。総deadline修復・targeted再検証中、新実transport未完 | provider/credential、許可先、正式production enablement |
 | 06 | W0技術Plan `c2a95cd5` PASS。F2 foundation `1e8aa651`限定CODE PASS、17/0/0/0、control統合済み。DB apply/UI未実装 | 実resolver/sourceSystem境界、全synthetic実装/Review、実source/mapping/data owner、移行承認 |
-| 07 | DEV履歴を維持。SF-W1 `6ec4ca28`限定CODE PASS、18/0/0/0、control統合済み。coverage不完、W2以降未実装 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
+| 07 | DEV履歴を維持。SF-W1 `6ec4ca28`限定CODE PASS、18/0/0/0、control統合済み。coverage不完。W2 Plan e5530c01限定PASS、W2a synthetic JDBC実装中、実MySQL/Review未完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
 | 08 | 開発scope CONDITIONAL。summary検証/予算/実行記録P2、disabled catalog残存 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
 | 09 | fail-closed修復 `da850b97`限定CODE PASS、control統合済み。実providerの完成ではない | V182 PENDING=0/帰属不明0/親子一致、実撤権/session/token、production owner |
 | 10 | session共有reauth修復 `20cce0f7`限定CODE PASS、46/0/0/0、control統合済み | 全体独立Review、実browser/session環境、staging、正式release |
@@ -23,7 +23,7 @@
 NF01の「退社確定時一括失効trigger」は現行コードでNF01呼出が確認できず、下記承認範囲の記述を
 実装済み証拠としない。NF06/NF07のflag OFFを全機能完成として扱わない。
 PR101 CIは全7 SUCCESSだったがmerge後main CIはBrowser FAILURE。Browser修復はlocalで独立PASSを得た段階であり、
-remote mainのCIをPASSに変更したとは報告しない。
+remote mainのCIをPASSに変更したとは報告しない。最新local全fastは2026-10-02 JSTの第3回、fixed c9bd2655、4075/1/0/0でFAIL。Portal共有fixtureを調査中。
 
 - 親文書: `2026-08-27-post-acceptance-feature-backlog.md`
 - 状態: 候補。各Decisionが`APPROVED`になるまでproduction変更を開始しない。
