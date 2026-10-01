@@ -109,3 +109,15 @@ durable撤権trigger、NF03 retention/Privacy gateと全体受入は未完。統
 - raw XML 6+9=15/0/0/0とhash一致は確認したが、上記3条件をカバーしていなかった。
   対象test成功を安全境界全体のPASSとしない。
 - resolver実adapter、job/mapping identity、apply/UI/DDL、transaction/recoveryは後続波。
+
+### NF06 F2 再審査
+
+- 最終Head `1e8aa651e6ec4901e1e498aca1a484a7b88fe4c8`、Astra **foundation限定CODE PASS**。
+  上記P1×1/P2×2は閉鎖、新規の確認済みfindingなし。
+- 金額をBigDecimal構築前にASCII十進文法/64文字/有効整数18桁へ制限し、指数を拒否。
+  Contract startDate必須値と、同tenant/legalEntityのposition→project親key照合を追加した。
+- raw XML **11+6=17/0/0/0**と2 hashを照合。control `a79e2171`、`5b2e5db3`へ統合した。
+- 現ValidationContext/resolverは単一synthetic namespaceに限定する。実registry接続前には
+  immutable sourceSystemか出自を持つ親target IDをbindingし、裸externalKeyの跨source比較を禁止する。
+- 18/19桁、64/65文字、負零の境界は静的照合のみ。次波で回帰へ追加する。
+  完全なF2 Demo、実resolver/apply、NF06全機能・production受入は未完了。

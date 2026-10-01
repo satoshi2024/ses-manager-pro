@@ -14,7 +14,7 @@
 | 03 | 集約完了修復と実MySQL並行証拠 `89384928`は限定CODE PASS、control統合済み | 全体最終Review、NF07 policy、retention、staging/運用承認 |
 | 04 | offline conflict PII、queue version、tab間撤回の修復WIP。Chrome frontend contract検証中 | 固定Head Review・実PWA/browser全体検証・正式release |
 | 05 | 開発scope CONDITIONAL。総deadline P2、新実transport未完 | provider/credential、許可先、正式production enablement |
-| 06 | W0技術Plan `c2a95cd5` PASS。F2 parser/DTO/validator実装中、DB apply/UI未実装 | 全synthetic実装/Review、実source/mapping/data owner、移行承認 |
+| 06 | W0技術Plan `c2a95cd5` PASS。F2 foundation `1e8aa651`限定CODE PASS、17/0/0/0、control統合済み。DB apply/UI未実装 | 実resolver/sourceSystem境界、全synthetic実装/Review、実source/mapping/data owner、移行承認 |
 | 07 | DEV履歴を維持。SF-W1 `6ec4ca28`限定CODE PASS、18/0/0/0、control統合済み。coverage不完、W2以降未実装 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
 | 08 | 開発scope CONDITIONAL。summary検証/予算/実行記録P2、disabled catalog残存 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
 | 09 | fail-closed修復 `da850b97`限定CODE PASS、control統合済み。実providerの完成ではない | V182 PENDING=0/帰属不明0/親子一致、実撤権/session/token、production owner |
