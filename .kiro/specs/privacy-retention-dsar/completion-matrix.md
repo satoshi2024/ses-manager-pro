@@ -1,5 +1,12 @@
 # completion mapping
 
+## 2026-10-01 現行追加scope
+
+`SYNTHETIC_FOUNDATION`は新しい技術incrementであり、SF-W0〜SF-Mは全て未完了。
+spec同期のみ、型/worker/処分/recoveryは未実装、技術Plan Review待ち、production BLOCKED。
+初期baseは`1443fb68943849a3260d7ebe005259f3eb609d60`、branchは`codex/snf-prod-nf07-foundation-plan`。
+以下のDEV-0/D0行、旧base、旧coverage件数は過去の証跡として保持し、現行HeadのPASSへ転用しない。
+
 開始時base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`
 fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（base drift。`<BASE_COMMIT>`未確定のためrebaseなし）
 DEV decision: `NF07-DEV-GATE-20260828` / `APPROVED_DEV_ONLY` / Owner role `Project Maintainer（development-only）` / formal Privacy Owner `UNASSIGNED_UNTIL_PRE_PRODUCTION`。Full Feature/Productionのapproved policy/scope、正式owner、approved Base branch/SHAは未提供でBLOCKED。上記origin/mainは技術比較境界であり承認済みBaseではない。
