@@ -18,7 +18,7 @@
 | 07 | DEV履歴を維持。SF-W1 `6ec4ca28`限定CODE PASS、18/0/0/0、control統合済み。coverage不完、W2以降未実装 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
 | 08 | 開発scope CONDITIONAL。summary検証/予算/実行記録P2、disabled catalog残存 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
 | 09 | fail-closed修復 `da850b97`限定CODE PASS、control統合済み。実providerの完成ではない | V182 PENDING=0/帰属不明0/親子一致、実撤権/session/token、production owner |
-| 10 | session共有reauthにP1、隔離branchで修復中 | 固定Head独立Review、staging、正式release |
+| 10 | session共有reauth修復 `20cce0f7`限定CODE PASS、46/0/0/0、control統合済み | 全体独立Review、実browser/session環境、staging、正式release |
 
 NF01の「退社確定時一括失効trigger」は現行コードでNF01呼出が確認できず、下記承認範囲の記述を
 実装済み証拠としない。NF06/NF07のflag OFFを全機能完成として扱わない。

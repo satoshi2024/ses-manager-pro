@@ -80,3 +80,19 @@ durable撤権trigger、NF03 retention/Privacy gateと全体受入は未完。統
 `e3944774e667a226848d3883e7333ddb8b2ef1f6`は明示tenant/active DB actorを既存2 classへ設定した。
 対象5/0/0/0、Astra CODE PASS。製品側境界とdocument/cancel断言を維持し、control `e90daaf1`へ統合した。
 全fastの再実行は別gateとして残る。
+
+## NF10 session-bound再認証
+
+- 固定Head `20cce0f72734ac1dad9a9f07278475eb4a7fe048`、Astra **限定CODE PASS**。
+  共有deliveryの再認証timestampで別sessionも許可されたP1は閉鎖。新規P0/P1/P2なし。
+- grantをsession ID、Authentication instance、tenant/user/delivery、scopeHash、authorities、
+  10分期限へ束縛し、rotation/logout/別sessionで継承しない。downloadで現行DB active userと
+  recipient previewを再検証する。grant発行はtransaction afterCommitに限定する。
+- 監査timestampが残ってもgrant発行失敗時の認可根拠にしない。
+  integrationは自身のuser/run/deliveryだけを作成・精密削除し、seed adminを変更しない。
+- 最新単一runのraw XMLは**46/0/0/0**。10 report hashとsource patch hashの一致をReviewerが確認した。
+  `docs/review/NF10-reauth-session-boundary-evidence.md`に履歴と最終runを区分した。
+- control統合: `4766936e`、`cc6510d5`。
+- integrationのrecipient previewはmock。実DBのrole/組織再計算は静的照合であり、
+  commit故障注入・実browser・session replicationの動的証拠は未取得。
+  全NF10受入、staging、production releaseの承認を付与しない。

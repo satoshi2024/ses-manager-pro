@@ -31,7 +31,7 @@
 | C0 Browser fixture | gpt-6-luna | `codex/snf-prod-browser-isolation` / `C:\work\ses-nf02-remediation` | `0d78cc13` Astra CODE PASS、control `778e372d`へ統合。main CI再実行なし |
 | R09 provider境界 | gpt-6-luna | `codex/snf-prod-nf09-provider-boundary` / `C:\work\ses-nf09-system-actor-attribution` | 最終`da850b97`、profile4＋実service反復2=6/0/0/0、Astra CODE PASS、control `036b3eed`へ統合 |
 | R03 training修復 | gpt-6-luna | `codex/snf-prod-nf03-training` / `C:\work\ses-nf03-remediation` | 最終`89384928` Astra CODE PASS、MySQL4/0/0/0、control `626aa967`へ統合 |
-| R10 reauth | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf10-reauth` / `C:\work\ses-nf10-remediation` | grant境界・afterCommit公開・DB active再検証を実装中。旧37件/追加4件の限定成功は旧版のみ。最新版targeted＋isolation検証中、未Review |
+| R10 reauth | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf10-reauth` / `C:\work\ses-nf10-remediation` | 最終`20cce0f7` Astra CODE PASS、単一targeted 46/0/0/0、control `cc6510d5`へ統合。全NF10/stagingは未完 |
 | R02/R03/R10 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1計4件。専用report参照 |
 | R04 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1×3/P2×1。専用report参照 |
 | N06/N07技術Plan Review | gpt-6-astra | NF06 `c2a95cd5` / NF07 `f007ef9a` | 両方synthetic技術PLAN PASS。実装・実環境・人の承認とは別。専用report参照 |
@@ -40,6 +40,7 @@
 | N06 contracts | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf06-contracts` / `C:\work\ses-review-snf-r3-b` | `c2a95cd5`計画PASS。F2 parser/DTO/validator実装WIP、未検証/未Review。DB apply/UI/DDLは未実装 |
 | N07 foundation | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf07-foundation-plan` / `C:\work\ses-review-snf-r3-c` | SF-W1 `6ec4ca28` Astra CODE PASS、18/0/0/0。control `985eedf7`へ統合。W2以降未実装、人工gate未承認 |
 | E05/E08 baseline Review | gpt-6-astra | R3固定Head | 新規P2計4件、専用report参照。production BLOCKED |
+| E05 deadline | 未着手 | `codex/snf-prod-nf05-deadline` / `C:\work\ses-nf05-remediation` | clean/包含/process確認後B0から再利用準備済み。変更範囲と必須回帰を専用batch文書へ固定 |
 | R01a lifecycle境界 | gpt-6-luna | `codex/snf-prod-nf01-lifecycle` / `C:\work\ses-engineer-lifecycle-workflow` | `ced64304` CODE PASS、H2 26/0/0/0、MySQL3/0/0/0。追加fixture `e3944774` CODE PASS、5/0/0/0、control `e90daaf1`へ統合。DUAL等は未完 |
 
 再利用したworktreeは開始時clean、origin/main未包含commit 0、当該path依存processなしを確認した。
