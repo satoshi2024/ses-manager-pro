@@ -2,11 +2,11 @@
 
 ## 進行ルール
 
-- NF-06がCANDIDATE、DG-06が未決定の間はTask 0だけを完了可能とする。
-- 各完了Taskは、実装と自動testに加えて、下記のDemoを実施し、専用branchへ日本語の小粒commitを作成してpushする。
+- 実sourceのDG-06は未決定のまま保持する。技術委任によるW0文書・合成schema/fixture設計は完了可能。DDL/business code/実source取込は対象外。
+- 各完了Taskは該当waveのReview gateを通し、Demo証拠を記録する。commit/push範囲は親タスクの明示指示に従う。
 - 通常checkout C:\work\ses-manager-proは変更しない。
-- Reviewへ渡すのはremote head、approved requirements/design/tasks、完了対応表、test/Demo証拠である。実装対話ではPRを作成しない。
-- F1以降は、Approved scope、Owner、Base commit、legacy schema fixture、DG-06承認記録が揃うまで開始しない。
+- Reviewへ渡すのはfixed head、technical scopeと実source承認の区別、requirements/design/tasks、完了対応表、test/Demo証拠である。
+- Synthetic W1はAstra Plan Review PASS後に開始可能。実legacy適合とproduction data applyにはOwner、source/schema/binding/DG-06等の既存human gateが必要で、synthetic実装の開始条件にしない。
 
 ## 0. Source schema / discovery / gate（完了）
 
@@ -20,7 +20,7 @@
 - entityごとの候補自然キー、依存順、insert-only/upsert候補、rollback/compensation境界を承認前の候補として記録した。
 - parser → canonical DTO → read-only validator → domain serviceの境界を明記した。
 - validate中のwrite、mapper直insert、後続参照行のhard delete rollbackを禁止した。
-- source/accepted/rejected/applied/updated/skippedと金額reconciliation、source/mapping/result hashの計画を固定した。
+- phase別accepted_pending/apply counters、JPY集計、business result hashとattempt logをexecution-contract.mdで定義した。
 
 ### Test requirements
 
@@ -39,7 +39,7 @@
 - requirements.md R0/R6/R7
 - design.md §§2–5、§8
 
-## F1. Job / mapping / row / checkpoint / id-map DDL（承認後）
+## F1. Job / mapping / registry / row / checkpoint schema（Astra Plan PASS後。versionは総括割当）
 
 ### Objective
 
@@ -51,29 +51,31 @@ t_import_job、t_import_mapping、t_import_row_result、t_import_checkpoint、t_
 - MySQL fresh、legacy/upgrade、partial/backfill、repairの各schema shapeを検証する。
 - V1へ逆戻りして列を追加せず、新テーブルは独立migration、H2は専用schema fixtureとして同期する。
 - source file全量やrow payloadをJSON保存せず、document_id、row number、row hash、error/id/result hashを保存する。
-- source identity（tenant/entity/schema/source_sha256）のjob間unique/lock、job state、chunk、row、id-mapの一意制約とCAS/lockをMySQLで確認する。
+- external identityはtenant/source-system/entity/normalized external keyでcross-job unique。binding revision/target version、row transaction、audit/outbox、fencing generationをMySQLで検証する。checkpointはrow resultから再構築できるprojectionとする。
 - IMPORT_JOBのDocumentLinkをFileScopeValidationServiceへ登録し、FileReferenceProviderとは別に閲覧/download/error exportのfail-closed認可を確認する。
 
 ### Test requirements
 
 - Flyway fresh/legacy/partial、H2 context、MySQL Testcontainersを実行する。
-- duplicate job, duplicate row, duplicate source key, same source hash/different mapping、checkpoint raceをtestする。
+- duplicate job, duplicate row, duplicate source key, same source identity/different mapping hash、checkpoint raceをtestする。
 
 ### Demo
 
 - EXPLAIN/DDL確認で、重複applyを一意制約とCASが拒否することを示す。
 - source documentとIMPORT_JOB link、FileReferenceProviderの参照が確認できる。
 
-## F2. Parser / canonical adapter / validate no-write（承認後）
+## F2. Parser / canonical adapter / validate no-write（Astra Plan PASS後）
+
+- Project.statusのEntity Patternとt_project DB enum値が不一致。W1でdomain validationの整合計画を含め、import adapterだけの局所回避をしない。
 
 ### Objective
 
-CSV/XLSX parserとentityごとのcanonical DTO、read-only resolver、field/cross-row validationを実装する。
+CSV parser（XLSX拒否）とentityごとのcanonical DTO、read-only resolver、field/cross-row validationを実装する。
 
 ### Implementation guidance
 
 - UTF-8 BOM/no BOM、Shift_JIS、CRLF/LF/CR、quoted newline、escaped quoteをstreamで処理する。
-- XLSXを対象外にする場合は明示的reject、対象にする場合はcell/formula/sheet/row/巨大cell制限を実装する。
+- XLSXは初期scope外。拡張子とmagicの両方で拒否する。
 - formula injectionと通常の負数を別分類し、numeric parse結果で扱う。
 - Customer/Engineer/Project/Proposal/Contract/assignment/historyのnatural key候補をmapping versionと照合する。
 - validateではCustomerService.save、ProjectService.saveProjectWithSkills、ContractService.saveWithBusinessRules、ProposalService.save、EngineerService.save、SkillTagResolver.resolveOrCreate、skill replace、mapper writeを呼ばない。
@@ -89,7 +91,7 @@ CSV/XLSX parserとentityごとのcanonical DTO、read-only resolver、field/cros
 
 - sample sourceからcanonical row、candidate、error code、source row hashだけを表示し、DB差分が0であることを示す。
 
-## A1. Upload / mapping / preview / error UI（承認後）
+## A1. Upload / mapping / preview / error UI（synthetic F1/F2 Review後）
 
 ### Objective
 
@@ -109,9 +111,9 @@ CSV/XLSX parserとentityごとのcanonical DTO、read-only resolver、field/cros
 
 ### Demo
 
-- 管理者でsampleをuploadし、preview/error/reconciliationを確認する。ApplyボタンはDG-06未承認時に表示/実行不可であることを確認する。
+- 管理者でsampleをuploadし、preview/error/reconciliationを確認する。synthetic Applyを実行し、production data applyだけがsource/Owner/DG-06 gateで表示/実行不可であることを確認する。
 
-## B1. Apply / chunk / restart / idempotency（承認後）
+## B1. Apply / restart / idempotency（synthetic facade Review後）
 
 ### Objective
 
@@ -121,21 +123,21 @@ READYのjobだけを、canonical DTOからdomain service経由でchunk applyし�
 
 - READY→APPLYINGをCAS/lockで一度だけ許可する。
 - chunkのrow result、id-map、checkpoint、job counterを同一transaction境界で確定する。
-- mid-chunk crashではtarget result、natural key、row hashを再照合し、完了済みrowをSKIPPEDとして二重作成しない。
+- crash再開で確定済みbusiness resultは保持し、REUSED/DEDUPED attemptだけをappendする。business SKIPPEDへ再分類しない。
 - status changeはEngineerService/ProposalService/ContractServiceの状態機械を使い、mapper updateをしない。
 - updateはversion/既存行承認、clearable ALWAYS fields、scope、audit、side effectを維持する。
 
 ### Test requirements
 
-- double apply、same hash/different mapping拒否、chunk境界crash、restart、target natural key collision、version conflictをtestする。
+- double apply、same source identity/different mapping hash拒否、chunk境界crash、restart、target natural key collision、version conflictをtestする。
 - 10,000行でtarget重複0、row resultとcheckpointの整合をtestする。
-- row transaction commit前/後、checkpoint完成前後、lease期限切れのcrash windowをtestする。
+- row commit前後、checkpoint遅延/破損、lease generation更新後に残存する旧workerのcommit拒否をtestする。同一counter/amount/result hashを中断なしと再開で比較する。
 
 ### Demo
 
 - 途中chunkでプロセスを止め、再起動後にCOMPLETEDまで進め、target件数・id-map・row resultの重複0を示す。
 
-## B2. Rollback / compensation / reconciliation（承認後）
+## B2. Rollback / compensation / reconciliation（rollback classのReview後）
 
 ### Objective
 
@@ -147,7 +149,7 @@ apply前に宣言したrollback classに従い、後続参照を壊さず補償�
 - source existing row updateは自動復元せず、before snapshot/version conflict/管理者承認を要求する。
 - compensation actionとrollback failureをrow/job/auditへ記録する。
 - source document、error export、auditはretention/legal holdを尊重し、rollbackで削除しない。
-- source/accepted/rejected/applied/updated/skipped/apply_failed/empty_skipped/amount_excludedの拡張9カウンタ、JPY amount、excluded reasonを再計算し、designの分類式とdifference 0を完了条件にする。
+- validate/apply phase別source/accepted_pending/rejected/applied/updated/business_skipped/apply_failed/empty_skipped/amount_excluded counters、JPY amount、excluded reasonを再計算し、designの分類式とdifference 0を完了条件にする。
 
 ### Test requirements
 
@@ -158,7 +160,7 @@ apply前に宣言したrollback classに従い、後続参照を壊さず補償�
 
 - 後続参照ありrowでhard deleteが起きないこと、compensationまたはapproval queueになること、reconciliation差異0を示す。
 
-## M. 10,000行 / 障害 / 復元 / compatibility（承認後）
+## M. 10,000行 / 障害 / 復元 / compatibility（MySQL + browser gate）
 
 ### Objective
 
@@ -166,20 +168,27 @@ apply前に宣言したrollback classに従い、後続参照を壊さず補償�
 
 ### Implementation guidance
 
-- 10,000行をstream/chunkで処理し、heap、DB lock、checkpoint、audit、FileCleanupの参照を計測する。
+- synthetic 10,000行をstream/chunkで処理し、heap、DB lock、checkpoint、audit、FileCleanupの参照を計測する。
 - source hash、mapping version/hash、result hash、row/amount reconciliationをartifactとして保存する。
 - H2 fast suite、MySQL gate、performance gateを分離して実行し、skip 0を維持する。
 - Engineer CSVの既存endpoint/golden fixtureを変更せず、新mappingは明示的に別経路で検証する。
 
 ### Test requirements
 
-- UTF-8 BOM/Shift_JIS、quoted newline、formula injection、巨大cell、duplicate/missing ref、10,000行を実データfixtureでtestする。
+- UTF-8 BOM/Shift_JIS、quoted newline、formula injection、巨大cell、duplicate/missing ref、10,000行をsynthetic fixtureでtestする。
 - mid-chunk crash、restart、double apply、rollback/compensation、document/source retentionを再実行する。
 - numeric列の-50000/-1.5/+1と、String列またはnumeric parse不能の-1+cmdを分離してtestする。
 
 ### Demo
 
-- source hash、mapping version/hash、result hash、拡張9カウンタ、amount reconciliation、target duplicate count、restart/rollback outcomeをReview artifactとして渡す。
+- source hash、mapping version/hash、result hash、phase別counter、amount reconciliation、target duplicate count、restart/rollback outcomeをReview artifactとして渡す。
+
+## W0 technical increment gate
+
+- [ ] execution-contract.mdとrequirements/design/tasks/mapping-spikeが同じcounter・restart・identity・source scopeを記述する。
+- [ ] 各5 adapterのpositive/negative/tenant/relation/side effect/compensation synthetic scenarioを揃える。
+- [ ] Astra Plan Review PASS後に限りW1へ進む。
+- [ ] migration versionはrootが一括割当し、このfeature文書で番号を予約しない。
 
 ## 完了対応表（現時点）
 
