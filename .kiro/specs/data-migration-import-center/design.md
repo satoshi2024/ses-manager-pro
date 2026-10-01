@@ -2,7 +2,7 @@
 
 ## 1. 設計状態
 
-実source適合・Owner・legacy schema・binding・実移行は未承認。技術委任の合成W0契約は[execution-contract.md](execution-contract.md)を正本とし、業務コード/DDLは本W0で追加しない。
+実source適合・Owner・legacy schema・binding・実移行は未承認。合成技術PlanはAstra PASS済みで、[execution-contract.md](execution-contract.md)を正本としてW1のF2純parser/read-only validatorを実装する。業務DDL/apply/API/UIは本F2へ含めない。
 
 原則は、source file → parser → canonical DTO → read-only validator / domain service → row result・reconciliationである。parserからmapperへ直接渡す経路、canonical DTOを飛ばしてentityを組み立てる汎用reflection経路、validate中の業務writeは採用しない。
 
@@ -16,6 +16,12 @@
 4. Apply facade: canonical DTO、executor、correlation id、mapping versionを受け、既存domain serviceの公開メソッドを呼ぶ。domain serviceが不足するentityは、F2で明示的なfacadeを追加してから利用する。
 5. Job state/checkpoint: job/row/checkpoint/id-map/reconciliationを同一のidempotency規則で管理する。
 6. Evidence/export: source document、error CSV、row result、result hash、監査ログを運用者へ提供する。
+
+F2純parserは既存`CsvUtils.parse`を再利用しない。同utilityは全sourceをStringへ蓄積し、malformed quoteを拒否しないためである。新parserは明示charset decoderとCSV state machineでstream処理し、source上限64 MiB、logical data record 100,000件、64列、field 65,536文字を固定適用する。BOMはUTF-8選択時のみ許し、XLSX magic/拡張子、未知/重複/必須header欠損、不正quote、列数不一致、不正byte sequenceを拒否する。
+
+canonical DTOはheader欠損を`NOT_PROVIDED`、セルの予約token `\\N`を`EXPLICIT_NULL`、空cellを`VALUE("")`として保持する。externalKeyはNFC後も大小文字を保持し、前後空白/制御文字/256 UTF-8 byte超過を拒否する。JPYはBigDecimal scale=0/UNNECESSARYで構築し、負数・小数円・桁超過・空値を0へ丸めず、unknown/excluded reasonへ分ける。error CSVはRFC4180 quotingとformula-safe文字列処理を適用し、PII row payloadを出力しない。
+
+row hashはheader順に各decoded cellのUTF-8 byte lengthとbyte sequenceを連結したSHA-256とし、row numberは含めない。文字コードBOMや元byte列が違っても同じUnicode cell列なら同hash、外部keyのNFC identity hashとは別物である。source file hashはBOMを含む元byte列全体から別途計算する。
 
 ### 2.2 Job state
 

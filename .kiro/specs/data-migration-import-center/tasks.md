@@ -91,6 +91,16 @@ CSV parser（XLSX拒否）とentityごとのcanonical DTO、read-only resolver�
 
 - sample sourceからcanonical row、candidate、error code、source row hashだけを表示し、DB差分が0であることを示す。
 
+### 実装候補の定向検証（Review待ち）
+
+- 2026-10-01、`JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:\work\jdk-uds`を設定して以下を実行した。main/test全source compile後、指定2クラスのみ実行。
+  - `..\apache-maven-3.9.6\bin\mvn.cmd test -Dtest=SesCsvParserTest,ImportValidationServiceTest`
+  - `BUILD SUCCESS`、15 tests / 0 failures / 0 errors / 0 skipped。
+  - `TEST-com.ses.importcenter.foundation.SesCsvParserTest.xml` SHA-256: `892AB8EA453F7730B1157A3644796DC7896672A4629DC4ADE4D5E76BDE0D3617`
+  - `TEST-com.ses.importcenter.foundation.ImportValidationServiceTest.xml` SHA-256: `2FC959CF7E94B2EBFA5726E824546CBFB0FDE79908C1B3933FC1FAFF266CA82D`
+- 検証対象は合成CSVのみ。parser/DTO/validator単体試験であり、DB差分、domain apply、HTTP/UI、実source適合、業務Demoは未検証である。F2のDemo完了やNF-06全体完了を意味しない。
+- 空行/全空多列行は`empty_skipped`へ計上し、header列数不一致扱いしない。quoted newlineは1 source recordとして保持し、末尾改行だけで空recordを生成しない。
+
 ## A1. Upload / mapping / preview / error UI（synthetic F1/F2 Review後）
 
 ### Objective
