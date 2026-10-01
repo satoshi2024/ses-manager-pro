@@ -96,3 +96,16 @@ durable撤権trigger、NF03 retention/Privacy gateと全体受入は未完。統
 - integrationのrecipient previewはmock。実DBのrole/組織再計算は静的照合であり、
   commit故障注入・実browser・session replicationの動的証拠は未取得。
   全NF10受入、staging、production releaseの承認を付与しない。
+
+## NF06 F2 初回審査
+
+- 固定Head `8913518863bee02124ae715fde5dc7d8a33f3ce3`、Astra **限定CODE FAIL**。
+  P0/P1/P2=0/1/2。controlへ未統合、修復と再審査待ち。
+- P1: `ImportAmountParser`がprecision検査より先に`setScale(0)`を行うため、
+  短い巨大指数入力で多量の計算/メモリを消費し得る。変換前の数値文法/桁数制限が必要。
+- P2: Contract startDateの空値/明示NULLが必須検査を通過する。
+- P2: Proposalのpositionとprojectを個別解決するだけで所属関係を照合していない。
+  関係不一致または検証不能は拒否する必要がある。
+- raw XML 6+9=15/0/0/0とhash一致は確認したが、上記3条件をカバーしていなかった。
+  対象test成功を安全境界全体のPASSとしない。
+- resolver実adapter、job/mapping identity、apply/UI/DDL、transaction/recoveryは後続波。

@@ -37,7 +37,7 @@
 | N06/N07技術Plan Review | gpt-6-astra | NF06 `c2a95cd5` / NF07 `f007ef9a` | 両方synthetic技術PLAN PASS。実装・実環境・人の承認とは別。専用report参照 |
 | R02 scope | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf02-scope` / `C:\work\ses-manager-pro-nf02-nf03-review-v2` | recipient本人の現行role/menu/customer scope・owner境界修復WIP、未検証/未Review |
 | R04 offline | gpt-6-luna / browser_fix | `codex/snf-prod-nf04-offline` / `C:\work\ses-review-snf-r3-a` | B0 clean/processを再確認、P1×3/P2×1の修復と実browser証拠を委任 |
-| N06 contracts | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf06-contracts` / `C:\work\ses-review-snf-r3-b` | `c2a95cd5`計画PASS。F2 parser/DTO/validator実装WIP、未検証/未Review。DB apply/UI/DDLは未実装 |
+| N06 contracts | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf06-contracts` / `C:\work\ses-review-snf-r3-b` | `c2a95cd5`計画PASS。F2 `89135188`対象15/0/0/0だがAstra CODE FAIL（P1×1/P2×2）、未統合・修復中。DB apply/UI/DDL未実装 |
 | N07 foundation | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf07-foundation-plan` / `C:\work\ses-review-snf-r3-c` | SF-W1 `6ec4ca28` Astra CODE PASS、18/0/0/0。control `985eedf7`へ統合。W2以降未実装、人工gate未承認 |
 | E05/E08 baseline Review | gpt-6-astra | R3固定Head | 新規P2計4件、専用report参照。production BLOCKED |
 | E05 deadline | 未着手 | `codex/snf-prod-nf05-deadline` / `C:\work\ses-nf05-remediation` | clean/包含/process確認後B0から再利用準備済み。変更範囲と必須回帰を専用batch文書へ固定 |
