@@ -26,9 +26,4 @@ public interface LifecycleCaseMapper extends BaseMapper<LifecycleCase> {
     java.util.List<LifecycleCase> selectByEngineerIdAndTenant(@Param("engineerId") Long engineerId,
                                                                @Param("tenantId") String tenantId);
 
-    @Select("SELECT MAX(case_no) FROM t_lifecycle_case WHERE case_no LIKE CONCAT(#{prefix}, '%')")
-    String selectMaxCaseNoIncludingDeleted(@Param("prefix") String prefix);
-
-    @Select("SELECT MAX(case_no) FROM t_lifecycle_case WHERE case_no LIKE CONCAT(#{prefix}, '%') AND tenant_id = #{tenantId}")
-    String selectMaxCaseNoIncludingDeletedByTenant(@Param("prefix") String prefix, @Param("tenantId") String tenantId);
 }

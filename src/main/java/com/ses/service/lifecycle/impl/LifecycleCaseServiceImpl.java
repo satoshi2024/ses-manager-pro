@@ -26,6 +26,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.math.BigInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -38,6 +39,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         implements LifecycleCaseService {
 
     private final LifecycleCaseMapper caseMapper;
+    private final LifecycleCaseSequenceMapper caseSequenceMapper;
     private final LifecycleTaskMapper taskMapper;
     private final LifecycleTaskDepMapper taskDepMapper;
     private final LifecycleEventMapper eventMapper;
@@ -121,19 +123,40 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         // DAG検証 (フィルタ後のタスクと依存関係で検証)
         dagValidator.validateTemplateDag(tplTasks, tplDeps);
 
-        // 案件番号採番 (LC-yyyyMM-XXXX)
-        // tenantごとの名前空間を案件番号に含め、他tenantの件数を検索せず全体一意制約を満たす。
-        String prefix = "LC-" + anchorDate.format(DateTimeFormatter.ofPattern("yyyyMM"))
-                + "-" + tenantKey(tenantId) + "-";
-        String maxCaseNo = caseMapper.selectMaxCaseNoIncludingDeletedByTenant(prefix, tenantId);
-        int seq = 1;
-        if (maxCaseNo != null && maxCaseNo.length() > prefix.length()) {
-            try {
-                seq = Integer.parseInt(maxCaseNo.substring(prefix.length())) + 1;
-            } catch (NumberFormatException ignored) {
-            }
+        // 既存案件番号から初期値を復元し、tenant・月のDB行更新で並行採番する。
+        String caseMonth = anchorDate.format(DateTimeFormatter.ofPattern("yyyyMM"));
+        String legacyPrefix = "LC-" + caseMonth + "-";
+        String prefix = legacyPrefix + tenantKey(tenantId) + "-";
+        int maxDigits = 50 - prefix.length();
+        if (maxDigits < 1) {
+            throw caseNumberCapacityExceeded();
         }
-        String caseNo = String.format("%s%04d", prefix, seq);
+        long maximumNumber = BigInteger.TEN.pow(maxDigits).subtract(BigInteger.ONE).longValueExact();
+        LocalDate monthStart = anchorDate.withDayOfMonth(1);
+        LocalDate nextMonth = monthStart.plusMonths(1);
+        BigInteger existingMaximum = caseSequenceMapper.selectExistingCaseNos(tenantId, monthStart, nextMonth).stream()
+                .filter(Objects::nonNull)
+                .filter(caseNo -> caseNo.startsWith(legacyPrefix))
+                .map(caseNo -> caseNo.substring(caseNo.lastIndexOf('-') + 1))
+                .filter(suffix -> suffix.matches("[0-9]+"))
+                .map(BigInteger::new)
+                .max(BigInteger::compareTo)
+                .orElse(BigInteger.ZERO);
+        if (existingMaximum.compareTo(BigInteger.valueOf(maximumNumber)) > 0) {
+            throw caseNumberCapacityExceeded();
+        }
+        caseSequenceMapper.ensureRow(tenantId, caseMonth, existingMaximum.longValueExact());
+        if (caseSequenceMapper.incrementIfAvailable(tenantId, caseMonth, maximumNumber) != 1) {
+            throw caseNumberCapacityExceeded();
+        }
+        Long nextNumber = caseSequenceMapper.selectLastNumber(tenantId, caseMonth);
+        if (nextNumber == null || nextNumber < 1 || nextNumber > maximumNumber) {
+            throw caseNumberCapacityExceeded();
+        }
+        String caseNo = prefix + String.format(Locale.ROOT, "%04d", nextNumber);
+        if (caseNo.length() > 50) {
+            throw caseNumberCapacityExceeded();
+        }
 
         // 要員スナップショット作成
         Map<String, Object> snapshot = new HashMap<>();
@@ -262,6 +285,11 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         } catch (java.security.NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 is unavailable", ex);
         }
+    }
+
+    private BusinessException caseNumberCapacityExceeded() {
+        return BusinessException.of(409, "error.lifecycle.caseNumberCapacityExceeded",
+                "案件番号の上限に達したため採番できません");
     }
 
     @Override
