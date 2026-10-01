@@ -50,6 +50,30 @@ EXECUTING→CONFIRMED、またはBLOCKED/UNKNOWN/PARTIAL_FAILED/CANCELLED。
 - 本人不明、第三者情報、未知provider、active business blocker、immutable audit、法定原本は拒否する。
 - emergency stopは新規claimと未開始実行を止める。in-flight結果の記録・安全確認を放棄しない。
 
+### SF-03a 外部dispatchとholdの線形化
+
+独立journalをhold/dispatch認可の正本とし、application DBはそのrevisionを投影する。
+journalはtenant/subject単位の単調sequenceとexpected-revision CASを持ち、holdとdispatch認可を
+同一のdurable transactionで排他制御できるadapterを必要とする。単なる非同期log writerでは不足する。
+
+| 操作 | 正本のatomic遷移 | 結果 |
+|---|---|---|
+| hold開始 | 現在revisionを検証しHOLD_STARTEDをdurable append | ACK後に成立。後続DISPATCH_AUTHORIZEDを拒否 |
+| dispatch認可 | policy/case/対象hash/現在hold/期限/fenceを検証し、intentとDISPATCH_AUTHORIZEDを同時append | ACKと認可receiptがある対象のみ外部実行可能 |
+| 認可後のhold | HOLD_STARTEDをappendし、既存認可action IDをin-flightとして列挙 | 後続認可を拒否。既認可操作の未実行/取消完了を偽らない |
+| hold解除 | 明示権限/SoD/expected revisionを検証しHOLD_RELEASEDをappend | 古いDB snapshotや未確認releaseで解除しない |
+
+外部I/O中にDB lockを保持しない。dispatch認可commitが本synthetic protocolの線形化点であり、
+認可後に成立したholdは、既認可actionがHTTP開始前でも取り消せるという保証を持たない。
+providerがfencing/cancellationを提供する場合のみ別の取消receiptを確認する。
+実処分時点までの取消を必要とするpolicyに対し、その機能のないproviderを有効化しない。
+実policyのこの整合モデルへの適合はPrivacy/Legalとprovider検証の人工gateに残す。
+
+workerは認可receiptのaction/対象version/hash/有効期限を検証する。期限切れ未開始操作は
+再認可が必要であり、holdを迂回して古いreceiptを再利用しない。
+認可commit〜HTTP送信をbarrierで停止し、その間にholdを入れる試験で、前後のsequence、
+in-flight表示、後続禁止、取消保証の限界を観測する。
+
 ## SF-04 独立journalと復元後の公開gate
 
 - disposition receiptとholdの追加/解除journalを、復元するDB/object snapshotとは別の保護領域へ追記する。
@@ -62,6 +86,21 @@ EXECUTING→CONFIRMED、またはBLOCKED/UNKNOWN/PARTIAL_FAILED/CANCELLED。
 - 二回再適用、旧snapshot復元、復元中の新hold、partial external resultを検証し、
   誤ってPIIを再公開しないことをendpointとstorageの双方から確認する。
 - 実journalの耐久性、署名鍵、WORM/アクセス分離、RPO/RTO、当番はOperations/Securityの別gate。
+
+### SF-04a intent先行とcrash recovery
+
+- 不可逆操作の前に、action ID、安定idempotency key、target version/hash、policy/case revisionを含む
+  intentを独立journalへdurable保存し、SF-03aの認可receiptを取得する。未ACKなら外部呼出0件を要求する。
+- provider結果の後にreceiptを追加する。外部成功〜receipt前crashではintentが残るため、
+  restore後はUNKNOWN/quarantineを維持し、provider照会または同keyの安全な冪等確認で解決する。
+  intentのみを未実行・成功のどちらにも自動分類しない。
+- holdはjournalのdurable ACKを先に取り、application DBのhold projectionを後で更新する。
+  DB更新失敗でもjournalのholdは有効であり、全認可入口は古いDB projectionで許可しない。
+  journal timeout/不明ACKはfail-closed。同command IDで照会・再送し、二重holdを作らない。
+- local holdだけが存在しjournal ACKのない中断状態を注入した場合も、不一致を検出して公開/dispatchを
+  拒否し、権限付きreconciliationまでquarantineとする。local DB更新を先に成功応答する実装は禁止する。
+- 復元前snapshotにないintent、receipt欠落、journalとDBのrevision不一致、復元中の新holdを検査し、
+  信頼watermarkまで照合できない間はwrite-enableも再公開も許可しない。
 
 ## SF-05 必須試験と依存
 
