@@ -19,6 +19,7 @@ import com.ses.service.lifecycle.LifecycleCaseService;
 import com.ses.service.lifecycle.LifecycleTaskService;
 import com.ses.service.lifecycle.LifecycleTemplateService;
 import com.ses.test.MySQLContainer;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -42,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @ActiveProfiles("test")
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
+@EnableDefaultTenantTestContext
 class LifecycleMySqlIntegrationTest {
 
     @Container

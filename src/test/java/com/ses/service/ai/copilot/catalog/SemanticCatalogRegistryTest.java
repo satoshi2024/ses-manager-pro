@@ -11,12 +11,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SemanticCatalogRegistryTest {
 
     @Test
-    void 既知queryIdを解決できる() {
-        var entry = SemanticCatalogRegistry.requireEnabled("dashboard.summary");
+    void provisionalCatalogの既知queryIdは解決できてもdisabled() {
+        var entry = SemanticCatalogRegistry.find("dashboard.summary").orElseThrow();
 
         assertEquals("dashboard.summary", entry.queryId());
         assertEquals(SemanticCatalogRegistry.CATALOG_VERSION, entry.catalogVersion());
-        assertTrue(entry.enabled());
+        assertFalse(entry.enabled());
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> SemanticCatalogRegistry.requireEnabled("dashboard.summary"));
+        assertEquals(403, ex.getCode());
     }
 
     @Test
@@ -34,6 +37,12 @@ class SemanticCatalogRegistryTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> SemanticCatalogRegistry.requireEnabled("sales-performance.monthly"));
         assertEquals(403, ex.getCode());
+    }
+
+    @Test
+    void provisionalCatalogの全entryがdisabled() {
+        assertFalse(SemanticCatalogRegistry.all().isEmpty());
+        assertTrue(SemanticCatalogRegistry.all().stream().noneMatch(SemanticCatalogEntry::enabled));
     }
 
     @Test

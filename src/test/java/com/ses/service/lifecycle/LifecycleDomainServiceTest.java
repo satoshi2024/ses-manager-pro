@@ -6,7 +6,9 @@ import com.ses.dto.lifecycle.*;
 import com.ses.entity.*;
 import com.ses.mapper.*;
 import com.ses.service.approval.ApprovalSnapshot;
+import com.ses.test.TenantTestSecurity;
 import com.ses.service.lifecycle.impl.LifecycleExceptionApprovalAdapter;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -90,9 +92,12 @@ class LifecycleDomainServiceTest {
 
     @BeforeEach
     void setUp() {
+        TenantTestSecurity.bindAs("default", "管理者");
         long suffix = System.nanoTime();
         // テスト用組織
         testOrg = OrganizationUnit.builder()
+                .tenantId(1L)
+                .legalEntityId(1L)
                 .code("ORG-TECH-" + suffix)
                 .name("開発第1部-" + suffix)
                 .type("DEPARTMENT")
@@ -103,6 +108,7 @@ class LifecycleDomainServiceTest {
 
         // テスト用ユーザー
         adminUser = SysUser.builder()
+                .tenantId("default")
                 .username("admin_test_" + suffix)
                 .password("pass")
                 .realName("管理者一郎")
@@ -112,6 +118,7 @@ class LifecycleDomainServiceTest {
         sysUserMapper.insert(adminUser);
 
         hrUser = SysUser.builder()
+                .tenantId("default")
                 .username("hr_test_" + suffix)
                 .password("pass")
                 .realName("人事花子")
@@ -121,6 +128,7 @@ class LifecycleDomainServiceTest {
         sysUserMapper.insert(hrUser);
 
         salesUser = SysUser.builder()
+                .tenantId("default")
                 .username("sales_test_" + suffix)
                 .password("pass")
                 .realName("営業次郎")
@@ -130,6 +138,7 @@ class LifecycleDomainServiceTest {
         sysUserMapper.insert(salesUser);
 
         engineerUser = SysUser.builder()
+                .tenantId("default")
                 .username("eng_test_" + suffix)
                 .password("pass")
                 .realName("要員三郎")
@@ -140,6 +149,7 @@ class LifecycleDomainServiceTest {
 
         // 組織マネージャー設定
         UserOrganization userOrg = UserOrganization.builder()
+                .tenantId("default")
                 .userId(adminUser.getId())
                 .organizationId(testOrg.getId())
                 .managerUserId(adminUser.getId())
@@ -150,6 +160,8 @@ class LifecycleDomainServiceTest {
 
         // テスト用エンジニア
         testEngineer = Engineer.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
                 .fullName("要員三郎-" + suffix)
                 .status("稼動中")
                 .employmentType("正社員")
@@ -158,6 +170,7 @@ class LifecycleDomainServiceTest {
         engineerMapper.insert(testEngineer);
 
         EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId("default");
         link.setEngineerId(testEngineer.getId());
         link.setSysUserId(engineerUser.getId());
         engineerAccountLinkMapper.insert(link);
@@ -170,6 +183,11 @@ class LifecycleDomainServiceTest {
                 .assignedAt(LocalDate.now().minusMonths(1))
                 .build();
         engineerSalesMapper.insert(engSales);
+    }
+
+    @AfterEach
+    void clearTenant() {
+        TenantTestSecurity.clear();
     }
 
     @Test

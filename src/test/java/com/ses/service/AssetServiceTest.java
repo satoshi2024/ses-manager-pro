@@ -9,10 +9,13 @@ import com.ses.mapper.AssetEventMapper;
 import com.ses.mapper.AssetLostIncidentMapper;
 import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.NotificationMapper;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.test.context.support.WithMockUser;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -60,6 +63,9 @@ class AssetServiceTest extends BaseIntegrationTest {
 
     @Autowired
     private LicenseService licenseService;
+
+    @Autowired
+    private EngineerMapper engineerMapper;
 
     @Test
     @DisplayName("Asset Lifecycle: create -> assign -> return -> dispose")
@@ -155,6 +161,7 @@ class AssetServiceTest extends BaseIntegrationTest {
     }
 
     @Test
+    @EnableDefaultTenantTestContext
     @DisplayName("Asset status transitions reject forbidden resurrection and assignment shortcuts")
     void testAssetStatusTransitionGuard() {
         Asset inStock = Asset.builder()
@@ -320,8 +327,18 @@ class AssetServiceTest extends BaseIntegrationTest {
     }
 
     @Test
+    @WithMockUser(username = "admin", roles = {"管理者"})
+    @EnableDefaultTenantTestContext
     @DisplayName("External Account Reference: register, search, confirm revoke")
     void testExternalAccountReferenceFlow() {
+        Engineer accountOwner = Engineer.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
+                .fullName("外部アカウントService要員-" + System.nanoTime())
+                .employmentType("正社員")
+                .status("Bench")
+                .build();
+        engineerMapper.insert(accountOwner);
         ExternalAccountSystem system = ExternalAccountSystem.builder()
                 .systemCode("GOOGLE_TEST")
                 .systemName("Google Workspace")
@@ -334,7 +351,7 @@ class AssetServiceTest extends BaseIntegrationTest {
                 system.getId(),
                 "test.engineer@ses-test.jp",
                 "ENGINEER",
-                601L,
+                accountOwner.getId(),
                 "MEMBER",
                 1L
         );
@@ -342,7 +359,8 @@ class AssetServiceTest extends BaseIntegrationTest {
         assertThat(ref.getStatus()).isEqualTo("ACTIVE");
 
         // 検索
-        IPage<ExternalAccountReference> page = externalAccountService.searchAccounts(1, 10, system.getId(), "ENGINEER", 601L, "ACTIVE");
+        IPage<ExternalAccountReference> page = externalAccountService.searchAccounts(
+                1, 10, system.getId(), "ENGINEER", accountOwner.getId(), "ACTIVE");
         assertThat(page.getRecords()).hasSize(1);
 
         // 失効完了確認
@@ -354,6 +372,7 @@ class AssetServiceTest extends BaseIntegrationTest {
     }
 
     @Test
+    @EnableDefaultTenantTestContext
     @DisplayName("紛失インシデント: 専用報告で全対応項目を保持し緊急通知を一重化する")
     void testLostIncidentLedgerAndEmergencyAlert() {
         Asset asset = Asset.builder()
@@ -365,6 +384,7 @@ class AssetServiceTest extends BaseIntegrationTest {
 
         Document evidence = new Document();
         evidence.setTenantId("default");
+        evidence.setLegalEntityId("1");
         evidence.setDocumentType("INTERNAL");
         evidence.setTitle("紛失届証跡");
         evidence.setDirection("INTERNAL");

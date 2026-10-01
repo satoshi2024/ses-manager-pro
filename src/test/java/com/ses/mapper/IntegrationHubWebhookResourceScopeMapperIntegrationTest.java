@@ -3,6 +3,7 @@ package com.ses.mapper;
 import com.ses.dto.integrationhub.ExternalApiResourceMembership;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -43,6 +44,11 @@ class IntegrationHubWebhookResourceScopeMapperIntegrationTest {
         jdbcTemplate.update("DELETE FROM t_project WHERE id IN (?, ?)", PROJECT_A, PROJECT_B);
         jdbcTemplate.update("DELETE FROM t_engineer WHERE id = ?", ENGINEER);
         jdbcTemplate.update("DELETE FROM m_customer WHERE id IN (?, ?)", CUSTOMER_A, CUSTOMER_B);
+    }
+
+    @AfterEach
+    void cleanupFixtureAfterEach() {
+        cleanupFixture();
     }
 
     @Test

@@ -27,6 +27,7 @@ public class ExpenseAccountingJob {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    private String tenantId;
     /** 経費申請ID（UNIQUE） */
     private Long expenseRequestId;
 

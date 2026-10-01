@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * NF-02 カスタマーサクセス・サービスデスクのMySQL smokeテスト。
- * V147のDDL shape・seed・FKを実MySQLで検証する。
+ * NF02のDDL shape・seed・FKを実MySQLで検証する。
  */
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
@@ -30,7 +30,7 @@ class FlywayCustomerSuccessServiceDeskSchemaSmokeTest {
             .withPassword("ses");
 
     @Test
-    void V147のNF02_shapeがMySQLで成立する() throws Exception {
+    void NF02_shapeが最新migrationまでMySQLで成立する() throws Exception {
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
@@ -40,16 +40,24 @@ class FlywayCustomerSuccessServiceDeskSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("149", latestVersion, "最新マイグレーションバージョンは149であること");
+            assertEquals("182", latestVersion,
+                    "NF02境界・添付補償・通知tenant migrationを含む最新版まで適用されていること");
 
             for (String table : new String[]{
                     "m_service_sla_policy", "t_service_request", "t_service_sla_clock",
                     "t_service_sla_escalation",
                     "t_service_attachment_link", "t_service_comment", "t_service_state_event",
                     "t_customer_csat", "t_customer_qbr", "t_customer_qbr_action",
-                    "t_customer_health_snapshot"}) {
+                    "t_customer_health_snapshot", "t_service_request_sequence"}) {
                 assertTableExists(statement, table);
             }
+
+            // 採番シーケンス管理テーブル列
+            assertColumnExists(statement, "t_service_request_sequence", "tenant_id");
+            assertColumnExists(statement, "t_service_request_sequence", "request_month");
+            assertColumnExists(statement, "t_service_request_sequence", "last_number");
+            assertColumnExists(statement, "t_service_request_sequence", "created_at");
+            assertColumnExists(statement, "t_service_request_sequence", "updated_at");
 
             // スナップショットの非破壊リビジョン管理列
             assertColumnExists(statement, "t_customer_health_snapshot", "version_no");
@@ -64,6 +72,14 @@ class FlywayCustomerSuccessServiceDeskSchemaSmokeTest {
             assertColumnExists(statement, "t_service_sla_clock", "response_breached");
             assertColumnExists(statement, "t_service_sla_clock", "resolve_breached");
             assertColumnExists(statement, "t_service_sla_clock", "total_pause_minutes");
+            assertColumnExists(statement, "t_service_request", "tenant_id");
+            assertColumnExists(statement, "t_document_link", "tenant_id");
+            assertColumnExists(statement, "t_service_attachment_link", "tenant_id");
+            assertColumnExists(statement, "t_service_attachment_link", "business_key");
+            assertColumnExists(statement, "t_notification", "tenant_id");
+            assertTableExists(statement, "t_service_attachment_compensation");
+            assertIndexExists(statement, "t_service_attachment_link", "uk_service_attachment_tenant_business_key");
+            assertIndexExists(statement, "t_notification", "uk_notification_tenant_dedupe");
 
             // 初期シードデータ検証 (P0〜P3 SLAポリシー)
             int policyCount = queryInt(statement, "SELECT COUNT(*) FROM m_service_sla_policy");
@@ -89,6 +105,15 @@ class FlywayCustomerSuccessServiceDeskSchemaSmokeTest {
                         + tableName + "' AND column_name = '" + columnName + "'")) {
             assertTrue(rs.next());
             assertEquals(1, rs.getInt(1), "列が存在しません: " + tableName + "." + columnName);
+        }
+    }
+
+    private static void assertIndexExists(Statement statement, String tableName, String indexName) throws Exception {
+        try (ResultSet rs = statement.executeQuery(
+            "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() "
+                        + "AND table_name = '" + tableName + "' AND index_name = '" + indexName + "'")) {
+            assertTrue(rs.next());
+            assertTrue(rs.getInt(1) > 0, "索引が存在しません: " + tableName + "." + indexName);
         }
     }
 

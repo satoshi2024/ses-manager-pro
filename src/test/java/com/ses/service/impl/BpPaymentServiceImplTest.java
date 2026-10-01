@@ -4,6 +4,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.dto.bp.BpPaymentTreeDto;
 import com.ses.entity.BpPayment;
 import com.ses.mapper.BpPaymentMapper;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,9 +20,12 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
+@EnableDefaultTenantTestContext
 class BpPaymentServiceImplTest {
 
     @Mock
@@ -231,7 +235,7 @@ class BpPaymentServiceImplTest {
         workRecord.setWorkMonth("2026-07");
 
         when(bpPaymentMapper.selectById(1L)).thenReturn(existing);
-        when(workRecordMapper.selectById(7L)).thenReturn(workRecord);
+        when(workRecordMapper.selectByIdForTenant(eq(7L), anyString())).thenReturn(workRecord);
         when(bpPaymentMapper.selectByWorkRecordIdOrderByLayer(7L)).thenReturn(Collections.emptyList());
         when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
         when(bpPaymentMapper.update(isNull(), any())).thenReturn(1);

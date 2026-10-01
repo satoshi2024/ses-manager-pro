@@ -3,6 +3,7 @@ package com.ses.expense;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.exception.BusinessException;
+import com.ses.config.LoginUser;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.ApprovalRoute;
 import com.ses.entity.ApprovalRouteStep;
@@ -26,6 +27,7 @@ import com.ses.mapper.NotificationOutboxMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.expense.ExpenseAccountingJobScheduler;
 import com.ses.service.expense.ExpenseAccountingSender;
@@ -33,6 +35,7 @@ import com.ses.service.expense.ExpenseRequestService;
 import com.ses.service.expense.impl.MockExpenseAccountingSender;
 import com.ses.service.notification.NotificationOutboxService;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -109,9 +112,25 @@ class ExpenseRequestFlowIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @BeforeEach
+    void ensureReceiptDocumentType() {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM m_document_type WHERE code = 'RECEIPT' AND deleted_flag = 0",
+                Integer.class);
+        if (count == null || count == 0) {
+            jdbcTemplate.update("""
+                    INSERT INTO m_document_type
+                        (code, name, direction, retention_years, retention_start_rule,
+                         legal_hold_supported, deleted_flag)
+                    VALUES ('RECEIPT', '経費領収書', 'INCOMING', 7, 'TRANSACTION_DATE', 1, 0)
+                    """);
+        }
+    }
+
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -366,6 +385,9 @@ class ExpenseRequestFlowIntegrationTest {
         long engineer2 = createEngineer(org2);
         // マネージャーはorg1を主所属として管理する（組織scope=org1配下）
         insertManagerAssignment(manager, org1);
+        // 管理一覧のownership正本（要員account link→sys_user→tenant）もfixtureへ明示する。
+        link(engineer1, admin);
+        link(engineer2, approver);
 
         authenticate(sales, "要員");
         ExpenseRequestService.ExpenseRequestDto e1 = expenseRequestService.createDraft(engineer1,
@@ -417,6 +439,7 @@ class ExpenseRequestFlowIntegrationTest {
                 .password("x")
                 .realName("経費テスト")
                 .role(role)
+                .tenantId("default")
                 .status(1)
                 .build();
         sysUserMapper.insert(user);
@@ -425,6 +448,7 @@ class ExpenseRequestFlowIntegrationTest {
 
     long createEngineer(Long organizationId) {
         Engineer engineer = Engineer.builder()
+                .tenantId("default")
                 .fullName("経費テスト要員-" + System.nanoTime())
                 .employmentType("正社員")
                 .status("Bench")
@@ -444,6 +468,7 @@ class ExpenseRequestFlowIntegrationTest {
         EngineerAccountLink link = new EngineerAccountLink();
         link.setEngineerId(engineerId);
         link.setSysUserId(sysUserId);
+        link.setTenantId("default");
         engineerAccountLinkMapper.insert(link);
     }
 
@@ -468,7 +493,7 @@ class ExpenseRequestFlowIntegrationTest {
         // 共有H2には他のexpense.request routeも残るため、このrouteが最新になるよう
         // version_noを単調増加の一意値にする（RouteResolverはversion_no降順で採用）。
         ApprovalRoute route = ApprovalRoute.builder()
-                .tenantId(1L)
+                .tenantId("default")
                 .requestType("expense.request")
                 .organizationId(null)
                 .minAmount(null)
@@ -494,8 +519,13 @@ class ExpenseRequestFlowIntegrationTest {
     }
 
     void authenticate(long userId, String role) {
+        SysUser user = sysUserMapper.selectById(userId);
+        user.setRole(role);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user,
+                List.of(new SimpleGrantedAuthority("ROLE_" + role)));
         SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(String.valueOf(userId), "n/a",
-                        List.of(new SimpleGrantedAuthority("ROLE_" + role))));
+                new UsernamePasswordAuthenticationToken(principal, "n/a", principal.getAuthorities()));
+        AccountingTenantContextHolder.setTenantId("default");
     }
 }

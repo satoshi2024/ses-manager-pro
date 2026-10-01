@@ -12,6 +12,9 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.MonthlyAccountingDimensionMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.mapper.WorkRecordMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -33,6 +36,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /** 月次締めsnapshotが所属異動で書き換わらないことを検証する。 */
 @ExtendWith(MockitoExtension.class)
 class MonthlyAccountingSnapshotServiceImplTest {
+
+    @BeforeEach
+    void bindTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Mock private WorkRecordMapper workRecordMapper;
     @Mock private ContractMapper contractMapper;
@@ -65,11 +78,11 @@ class MonthlyAccountingSnapshotServiceImplTest {
                 .workMonth(LocalDate.of(2026, 6, 1)).sourceType("work-record").sourceId(501L)
                 .organizationId(1001L).build();
 
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(record));
+        when(workRecordMapper.selectConfirmedByWorkMonthForTenant(any(), any())).thenReturn(List.of(record));
         when(dimensionMapper.selectList(any())).thenReturn(List.of()).thenReturn(List.of(existing));
-        when(contractMapper.selectBatchIds(anyList())).thenReturn(List.of(contract));
-        when(engineerAccountLinkMapper.selectByEngineerIds(anyList())).thenReturn(null);
-        when(engineerAccountLinkMapper.selectByEngineerId(701L)).thenReturn(link);
+        when(contractMapper.selectByIdsForTenant(anyList(), any())).thenReturn(List.of(contract));
+        when(engineerAccountLinkMapper.selectByEngineerIdsAndTenant(anyList(), any())).thenReturn(null);
+        when(engineerAccountLinkMapper.selectByEngineerIdAndTenant(any(), any())).thenReturn(link);
         when(userOrganizationMapper.selectList(any())).thenReturn(null).thenReturn(null);
         when(userOrganizationMapper.selectOne(any())).thenReturn(beforeTransfer);
         when(dimensionMapper.insert(any(MonthlyAccountingDimension.class))).thenReturn(1);
@@ -100,11 +113,11 @@ class MonthlyAccountingSnapshotServiceImplTest {
         engineer.setId(702L);
         engineer.setOrganizationId(2002L);
 
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(record));
+        when(workRecordMapper.selectConfirmedByWorkMonthForTenant(any(), any())).thenReturn(List.of(record));
         when(dimensionMapper.selectList(any())).thenReturn(List.of());
-        when(contractMapper.selectBatchIds(anyList())).thenReturn(List.of(contract));
-        when(engineerMapper.selectBatchIds(anyList())).thenReturn(List.of(engineer));
-        when(engineerAccountLinkMapper.selectByEngineerIds(anyList())).thenReturn(List.of());
+        when(contractMapper.selectByIdsForTenant(anyList(), any())).thenReturn(List.of(contract));
+        when(engineerMapper.selectByIdsForTenant(anyList(), any())).thenReturn(List.of(engineer));
+        when(engineerAccountLinkMapper.selectByEngineerIdsAndTenant(anyList(), any())).thenReturn(List.of());
         when(dimensionMapper.insert(any(MonthlyAccountingDimension.class))).thenReturn(1);
 
         assertEquals(1, service.snapshotMonth("2026-06"));
@@ -141,11 +154,11 @@ class MonthlyAccountingSnapshotServiceImplTest {
         frozenCenter.setId(4004L);
         frozenCenter.setOrganizationId(3003L);
 
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(record));
+        when(workRecordMapper.selectConfirmedByWorkMonthForTenant(any(), any())).thenReturn(List.of(record));
         when(dimensionMapper.selectList(any())).thenReturn(List.of());
-        when(contractMapper.selectBatchIds(anyList())).thenReturn(List.of(contract));
-        when(engineerMapper.selectBatchIds(anyList())).thenReturn(List.of(movedEngineer));
-        when(engineerAccountLinkMapper.selectByEngineerIds(anyList())).thenReturn(List.of());
+        when(contractMapper.selectByIdsForTenant(anyList(), any())).thenReturn(List.of(contract));
+        when(engineerMapper.selectByIdsForTenant(anyList(), any())).thenReturn(List.of(movedEngineer));
+        when(engineerAccountLinkMapper.selectByEngineerIdsAndTenant(anyList(), any())).thenReturn(List.of());
         when(costCenterMapper.selectById(4004L)).thenReturn(frozenCenter);
         when(dimensionMapper.insert(any(MonthlyAccountingDimension.class))).thenReturn(1);
 
@@ -168,8 +181,8 @@ class MonthlyAccountingSnapshotServiceImplTest {
         wait.setCostCenterId(1002L);
         wait.setWaitCost(new BigDecimal("350000"));
 
-        when(workRecordMapper.selectList(any())).thenReturn(List.of());
-        when(engineerMapper.selectAccountingWaitCostByEngineer(any(), any())).thenReturn(List.of(wait));
+        when(workRecordMapper.selectConfirmedByWorkMonthForTenant(any(), any())).thenReturn(List.of());
+        when(engineerMapper.selectAccountingWaitCostByEngineerForTenant(any(), any(), any())).thenReturn(List.of(wait));
         when(costCenterMapper.selectById(1002L)).thenReturn(null);
         when(dimensionMapper.insert(any(MonthlyAccountingDimension.class))).thenReturn(1);
 
@@ -204,11 +217,11 @@ class MonthlyAccountingSnapshotServiceImplTest {
         movedEngineer.setOrganizationId(9009L);
         movedEngineer.setCostCenterId(9999L);
 
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(record));
+        when(workRecordMapper.selectConfirmedByWorkMonthForTenant(any(), any())).thenReturn(List.of(record));
         when(dimensionMapper.selectList(any())).thenReturn(List.of());
-        when(contractMapper.selectBatchIds(anyList())).thenReturn(List.of(contract));
-        when(engineerMapper.selectBatchIds(anyList())).thenReturn(List.of(movedEngineer));
-        when(engineerAccountLinkMapper.selectByEngineerIds(anyList())).thenReturn(List.of());
+        when(contractMapper.selectByIdsForTenant(anyList(), any())).thenReturn(List.of(contract));
+        when(engineerMapper.selectByIdsForTenant(anyList(), any())).thenReturn(List.of(movedEngineer));
+        when(engineerAccountLinkMapper.selectByEngineerIdsAndTenant(anyList(), any())).thenReturn(List.of());
         when(dimensionMapper.insert(any(MonthlyAccountingDimension.class))).thenReturn(1);
 
         assertEquals(1, service.snapshotMonth("2026-06"));
@@ -225,6 +238,6 @@ class MonthlyAccountingSnapshotServiceImplTest {
     void invalidMonth_isRejectedBeforeReadingRecords() {
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
                 () -> service.snapshotMonth("2026/06"));
-        verify(workRecordMapper, never()).selectList(any());
+        verify(workRecordMapper, never()).selectConfirmedByWorkMonthForTenant(any(), any());
     }
 }

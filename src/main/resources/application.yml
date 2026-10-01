@@ -207,6 +207,10 @@ logging:
 
 # ===== アプリ固有設定 =====
 app:
+  accounting:
+    tenants:
+      # 本番系profileでは空欄を許可しない。ACCOUNTING_TENANT_IDSをカンマ区切りで指定すること。
+      ids: ${ACCOUNTING_TENANT_IDS:}
   # ===== Prometheus スクレイパー・マシン認証（REV-RP-P1-004 / ACC-OPS-P1-002） =====
   # 秘密情報は環境変数のみ。リポジトリ・設定ファイルへ平文パスワードを書かないこと。
   # username/password が両方非空のときだけ ROLE_METRICS_SCRAPER のインメモリユーザーを登録する。
@@ -242,7 +246,8 @@ app:
       enabled: ${OIDC_ENABLED:false}
       local-login-enabled: ${LOCAL_LOGIN_ENABLED:true}
       break-glass-login-enabled: ${BREAK_GLASS_LOGIN_ENABLED:true}
-      tenant-id: ${OIDC_TENANT_ID:default}
+      # 設定された場合だけ認証ユーザーtenantと一致検証する。未設定時にdefaultへ寄せない。
+      tenant-id: ${OIDC_TENANT_ID:}
       provider-registration-id: ${OIDC_PROVIDER_REGISTRATION_ID:enterprise}
       issuer-uri: ${OIDC_ISSUER_URI:}
       client-id: ${OIDC_CLIENT_ID:}
@@ -270,6 +275,7 @@ app:
   # ファイルアップロード保存先（相対パスはアプリ起動ディレクトリ基準）
   upload:
     base-path: ${UPLOAD_BASE_PATH:./uploads}
+    service-request-uploads-per-minute: ${SERVICE_REQUEST_UPLOADS_PER_MINUTE:60}
     scanner-enabled: ${FILE_SCANNER_ENABLED:true}
     scanner-host: ${FILE_SCANNER_HOST:localhost}
     scanner-port: ${FILE_SCANNER_PORT:3310}
@@ -340,6 +346,9 @@ ai:
   retention:
     redacted-days: 730
     raw-prompt-days: 0
+    scheduler-enabled: true
+    purge-batch-size: 100
+    purge-fixed-delay-ms: 86400000
   evaluation:
     min-segment-count: 5
     max-regression-pp: 5
@@ -424,6 +433,8 @@ integration:
       cursor-ttl-seconds: 300
       read-snapshot-purge-batch-size: 32
       read-snapshot-purge-fixed-delay-ms: 60000
+      retention-purge-batch-size: 100
+      retention-purge-fixed-delay-ms: 60000
     external-transport:
       enabled: false
       batch-size: 32
@@ -436,6 +447,9 @@ integration:
     security:
       trusted-proxies: []
       allowed-loopback-ports: []
+    topology:
+      mode: DEDICATED_DATABASE
+      bound-tenant-id: ${INTEGRATION_HUB_BOUND_TENANT_ID:}
     crypto:
       current-key-version: ${INTEGRATION_HUB_CRYPTO_CURRENT_KEY_VERSION:}
       keys: {}

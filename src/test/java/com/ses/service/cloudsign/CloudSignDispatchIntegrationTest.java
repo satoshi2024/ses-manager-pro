@@ -15,7 +15,10 @@ import com.ses.entity.ContractTemplate;
 import com.ses.mapper.ContractDocumentMapper;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.ContractTemplateMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -55,6 +58,7 @@ import static org.mockito.Mockito.*;
         "cloudsign.dispatch-cron=-",
         "cloudsign.stale-claim-minutes=1"
 })
+@EnableDefaultTenantTestContext
 @ActiveProfiles("test")
 @Sql("/sql/engineer-schema-h2.sql")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -79,6 +83,9 @@ class CloudSignDispatchIntegrationTest {
     @Autowired
     private ContractTemplateMapper templateMapper;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     @MockBean
     private CloudSignApiClient api;
 
@@ -91,6 +98,12 @@ class CloudSignDispatchIntegrationTest {
         documentMapper.delete(null);
         templateMapper.delete(null);
         contractMapper.delete(null);
+        jdbcTemplate.update("DELETE FROM t_project WHERE id = 3");
+        jdbcTemplate.update("DELETE FROM m_customer WHERE id = 3");
+        jdbcTemplate.update("DELETE FROM t_engineer WHERE id = 1");
+        jdbcTemplate.update("INSERT INTO m_customer (id, company_name, tenant_id, deleted_flag) VALUES (3, 'Dispatch Customer', 'default', 0)");
+        jdbcTemplate.update("INSERT INTO t_engineer (id, full_name, tenant_id, deleted_flag) VALUES (1, 'Dispatch Engineer', 'default', 0)");
+        jdbcTemplate.update("INSERT INTO t_project (id, project_name, customer_id, deleted_flag) VALUES (3, 'Dispatch Project', 3, 0)");
 
         ContractTemplate template = new ContractTemplate();
         template.setName("dispatch-test-template");
@@ -106,12 +119,25 @@ class CloudSignDispatchIntegrationTest {
         contract.setEngineerId(1L);
         contract.setProjectId(3L);
         contract.setCustomerId(3L);
+        contract.setTenantId("default");
         contract.setStartDate(LocalDate.now());
         contract.setSellingPrice(java.math.BigDecimal.valueOf(500000));
         contract.setCostPrice(java.math.BigDecimal.valueOf(300000));
         contract.setStatus("準備中");
         contractMapper.insert(contract);
         contractId = contract.getId();
+    }
+
+    @AfterEach
+    void cleanupFixture() {
+        if (contractId != null) {
+            documentMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<ContractDocument>()
+                    .eq("contract_id", contractId));
+            contractMapper.deleteById(contractId);
+        }
+        if (templateId != null) {
+            templateMapper.deleteById(templateId);
+        }
     }
 
     private Path writeSourcePdf(String name, String content) throws Exception {
@@ -202,7 +228,8 @@ class CloudSignDispatchIntegrationTest {
                     return;
                 }
                 try {
-                    ContractDocument result = documentService.queueSend(d.getId(), request);
+                    ContractDocument result = AccountingTenantContextHolder.runWithTenant("default",
+                            () -> documentService.queueSend(d.getId(), request));
                     if (result != null && result.getOperationId() != null) {
                         accepted.incrementAndGet();
                     }
@@ -246,7 +273,8 @@ class CloudSignDispatchIntegrationTest {
                     return;
                 }
                 try {
-                    ContractDocument result = documentService.queueSend(d.getId(), request);
+                    ContractDocument result = AccountingTenantContextHolder.runWithTenant("default",
+                            () -> documentService.queueSend(d.getId(), request));
                     if (result != null && result.getOperationId() != null) {
                         accepted.incrementAndGet();
                     }
@@ -445,8 +473,10 @@ class CloudSignDispatchIntegrationTest {
             return remoteDocument(0);
         });
 
-        Thread t1 = new Thread(() -> dispatchService.dispatchDue(10));
-        Thread t2 = new Thread(() -> dispatchService.dispatchDue(10));
+        Thread t1 = new Thread(() -> com.ses.service.accounting.AccountingTenantContextHolder
+                .runWithTenant("default", () -> dispatchService.dispatchDue(10)));
+        Thread t2 = new Thread(() -> com.ses.service.accounting.AccountingTenantContextHolder
+                .runWithTenant("default", () -> dispatchService.dispatchDue(10)));
         t1.start();
         t2.start();
         t1.join(30000);
@@ -556,14 +586,16 @@ class CloudSignDispatchIntegrationTest {
             return remoteDocument(1);
         });
 
-        Thread t1 = new Thread(() -> dispatchService.dispatchDue(10));
+        Thread t1 = new Thread(() -> com.ses.service.accounting.AccountingTenantContextHolder
+                .runWithTenant("default", () -> dispatchService.dispatchDue(10)));
         Thread t2 = new Thread(() -> {
             try {
                 assertTrue(inSend.await(15, java.util.concurrent.TimeUnit.SECONDS));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
-            dispatchService.dispatchDue(10);
+            com.ses.service.accounting.AccountingTenantContextHolder
+                    .runWithTenant("default", () -> dispatchService.dispatchDue(10));
             release.countDown();
         });
         t1.start();

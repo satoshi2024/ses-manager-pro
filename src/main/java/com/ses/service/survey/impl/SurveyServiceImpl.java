@@ -24,6 +24,7 @@ import com.ses.mapper.SurveyTemplateMapper;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.NotificationService;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.survey.SurveyService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -333,6 +334,7 @@ public class SurveyServiceImpl implements SurveyService {
     @Override
     @Transactional(readOnly = true)
     public AggregateResult aggregate(Long campaignId) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         SurveyCampaign campaign = requireCampaign(campaignId);
         String questionsJson = (campaign.getTemplateSnapshotJson() != null && !campaign.getTemplateSnapshotJson().isBlank())
                 ? campaign.getTemplateSnapshotJson()
@@ -341,7 +343,7 @@ public class SurveyServiceImpl implements SurveyService {
         int minAnswers = Math.max(1, systemConfigService.getInt(MIN_ANSWERS_KEY, 3));
         boolean confidentialVisible = isHrOrAdmin();
 
-        Set<Long> visibleEngineerIds = visibleEngineers();
+        Set<Long> visibleEngineerIds = visibleEngineers(tenantId);
         if (visibleEngineerIds != null && visibleEngineerIds.isEmpty()) {
             return new AggregateResult(campaignId, campaign.getTitle(), List.of(), List.of(), minAnswers,
                     new RetentionRiskSummary(0, 0, null, List.of(), true));
@@ -356,7 +358,7 @@ public class SurveyServiceImpl implements SurveyService {
 
         Map<Long, Long> orgOfEngineer = new java.util.HashMap<>();
         responses.stream().map(SurveyResponse::getEngineerId).distinct().forEach(id -> {
-            Engineer e = engineerMapper.selectById(id);
+            Engineer e = engineerMapper.selectByIdForTenant(id, tenantId);
             orgOfEngineer.put(id, e == null || e.getOrganizationId() == null ? 0L : e.getOrganizationId());
         });
 
@@ -454,17 +456,23 @@ public class SurveyServiceImpl implements SurveyService {
     @Override
     @Transactional(readOnly = true)
     public List<ResponseView> responses(Long campaignId) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (!isHrOrAdmin()) {
             throw BusinessException.of(403, "error.accessDenied");
         }
         requireCampaign(campaignId);
+        Set<Long> visibleEngineerIds = visibleEngineers(tenantId);
+        if (visibleEngineerIds.isEmpty()) {
+            return List.of();
+        }
         List<SurveyResponse> responses = responseMapper.selectList(new LambdaQueryWrapper<SurveyResponse>()
                 .eq(SurveyResponse::getCampaignId, campaignId)
+                .in(SurveyResponse::getEngineerId, visibleEngineerIds)
                 .orderByAsc(SurveyResponse::getEngineerId));
         Map<Long, String> names = responses.stream().map(SurveyResponse::getEngineerId).distinct()
                 .collect(Collectors.toMap(Function.identity(),
                         id -> {
-                            Engineer e = engineerMapper.selectById(id);
+                            Engineer e = engineerMapper.selectByIdForTenant(id, tenantId);
                             return e == null ? "" : (e.getFullName() == null ? "" : e.getFullName());
                         }));
         return responses.stream().map(r -> new ResponseView(r.getId(), r.getEngineerId(),
@@ -537,10 +545,12 @@ public class SurveyServiceImpl implements SurveyService {
     }
 
     /** マネージャーは配下要員の回答だけを集計対象にする（HR/管理者は全件）。 */
-    private Set<Long> visibleEngineers() {
+    private Set<Long> visibleEngineers(String tenantId) {
         String role = SecurityUtils.currentRole();
-        Set<Long> all = accountLinkMapper.selectList(new LambdaQueryWrapper<EngineerAccountLink>())
-                .stream().map(EngineerAccountLink::getEngineerId).collect(Collectors.toSet());
+        Set<Long> all = engineerMapper.selectOwnedEngineerIds(tenantId);
+        if (all == null) {
+            all = Set.of();
+        }
         if ("HR".equals(role) || "管理者".equals(role)) {
             return all;
         }
@@ -563,7 +573,8 @@ public class SurveyServiceImpl implements SurveyService {
     }
 
     private void notifyCampaign(SurveyCampaign campaign) {
-        List<EngineerAccountLink> links = accountLinkMapper.selectList(new LambdaQueryWrapper<EngineerAccountLink>());
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        List<EngineerAccountLink> links = accountLinkMapper.selectAllForTenant(tenantId);
         for (EngineerAccountLink link : links) {
             String message = "[\"notification.msg.SURVEY_CAMPAIGN\", \"" + campaign.getTitle() + "\"]";
             notificationService.publishToUser(link.getSysUserId(), "SURVEY_CAMPAIGN", "サーベイの回答をお願いします",

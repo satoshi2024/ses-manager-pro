@@ -18,6 +18,7 @@ import com.ses.dto.WorkRecordGridDto;
 import com.ses.entity.SysUser;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.service.billing.CashFlowForecastService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.entity.Invoice;
 import com.ses.entity.Customer;
 import com.ses.entity.SalesActivity;
@@ -108,6 +109,7 @@ class NotificationGenerateServiceTest {
 
     @org.junit.jupiter.api.BeforeEach
     void stubNewNotificationDependencies() {
+        AccountingTenantContextHolder.setTenantId("default");
         // 既存testが通知基盤の追加分で壊れないよう、新規通知は空を既定にする
         org.mockito.Mockito.lenient().when(salesOrderMapper.selectList(org.mockito.ArgumentMatchers.any()))
                 .thenReturn(java.util.Collections.emptyList());
@@ -128,6 +130,11 @@ class NotificationGenerateServiceTest {
         org.mockito.Mockito.lenient().when(engineerAccountingHistoryMapper.selectAt(
                         org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(null);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -303,9 +310,10 @@ class NotificationGenerateServiceTest {
     void testContractEnding_更新ドラフト生成済みは通知しない() {
         when(systemConfigService.getInt(eq("notice.contract-end-days"), any(Integer.class))).thenReturn(30);
         // 1回目: 終了間近の契約、2回目: 更新ドラフト(renewed_from=100)
-        when(contractMapper.selectList(any()))
+        when(contractMapper.selectEndingForTenant(any(), any(), eq("default")))
                 .thenReturn(List.of(endingContract(100L)))
                 .thenReturn(List.of(renewalDraftOf(100L)));
+        when(contractMapper.selectRenewedOriginalIdsForTenant("default")).thenReturn(List.of(100L));
 
         notificationGenerateService.contractEnding();
 
@@ -316,9 +324,10 @@ class NotificationGenerateServiceTest {
     void testContractEnding_ドラフト未生成は通知する() {
         when(systemConfigService.getInt(eq("notice.contract-end-days"), any(Integer.class))).thenReturn(30);
         // 1回目: 終了間近の契約、2回目: ドラフトなし
-        when(contractMapper.selectList(any()))
+        when(contractMapper.selectEndingForTenant(any(), any(), eq("default")))
                 .thenReturn(List.of(endingContract(100L)))
                 .thenReturn(List.of());
+        when(contractMapper.selectRenewedOriginalIdsForTenant("default")).thenReturn(List.of());
 
         notificationGenerateService.contractEnding();
 
@@ -354,9 +363,10 @@ class NotificationGenerateServiceTest {
         when(systemConfigService.getInt(eq("attendance.submission-closing-day"), any(Integer.class)))
                 .thenReturn(LocalDate.now().getDayOfMonth());
         // workRecordId=null（勤怠レコード無し）＝未提出。既存グリッドのLEFT JOINと同じ形。
-        when(workRecordMapper.selectMonthlyGrid(any(), any())).thenReturn(List.of(gridRow(100L, null)));
-        when(contractMapper.selectById(100L)).thenReturn(contractWithEngineer(100L, 10L));
-        when(engineerAccountLinkMapper.selectByEngineerId(10L)).thenReturn(linkOf(10L, 999L));
+        when(workRecordMapper.selectMonthlyGrid(any(), any(), eq("default"))).thenReturn(List.of(gridRow(100L, null)));
+        when(contractMapper.selectByIdForTenant(100L, "default")).thenReturn(contractWithEngineer(100L, 10L));
+        when(engineerAccountLinkMapper.selectByEngineerIdAndTenant(10L, "default"))
+                .thenReturn(linkOf(10L, 999L));
 
         notificationGenerateService.attendanceUnsubmitted();
 
@@ -375,23 +385,23 @@ class NotificationGenerateServiceTest {
     void testAttendanceUnsubmitted_提出済みまたは確定は通知しない() {
         when(systemConfigService.getInt(eq("attendance.submission-closing-day"), any(Integer.class)))
                 .thenReturn(LocalDate.now().getDayOfMonth());
-        when(workRecordMapper.selectMonthlyGrid(any(), any()))
+        when(workRecordMapper.selectMonthlyGrid(any(), any(), eq("default")))
                 .thenReturn(List.of(gridRow(200L, "提出済"), gridRow(201L, "確定")));
 
         notificationGenerateService.attendanceUnsubmitted();
 
         verify(notificationService, never()).publishToUser(
                 any(), eq("ATTENDANCE_UNSUBMITTED"), any(), any(), any(), any(), any());
-        verify(contractMapper, never()).selectById(any());
+        verify(contractMapper, never()).selectByIdForTenant(any(), any());
     }
 
     @Test
     void testAttendanceUnsubmitted_要員アカウント未紐付けは全体配信せず通知しない() {
         when(systemConfigService.getInt(eq("attendance.submission-closing-day"), any(Integer.class)))
                 .thenReturn(LocalDate.now().getDayOfMonth());
-        when(workRecordMapper.selectMonthlyGrid(any(), any())).thenReturn(List.of(gridRow(300L, "入力中")));
-        when(contractMapper.selectById(300L)).thenReturn(contractWithEngineer(300L, 30L));
-        when(engineerAccountLinkMapper.selectByEngineerId(30L)).thenReturn(null);
+        when(workRecordMapper.selectMonthlyGrid(any(), any(), eq("default"))).thenReturn(List.of(gridRow(300L, "入力中")));
+        when(contractMapper.selectByIdForTenant(300L, "default")).thenReturn(contractWithEngineer(300L, 30L));
+        when(engineerAccountLinkMapper.selectByEngineerIdAndTenant(30L, "default")).thenReturn(null);
 
         notificationGenerateService.attendanceUnsubmitted();
 
@@ -408,7 +418,7 @@ class NotificationGenerateServiceTest {
 
         notificationGenerateService.attendanceUnsubmitted();
 
-        verify(workRecordMapper, never()).selectMonthlyGrid(any(), any());
+        verify(workRecordMapper, never()).selectMonthlyGrid(any(), any(), any());
         verify(notificationService, never()).publishToUser(
                 any(), eq("ATTENDANCE_UNSUBMITTED"), any(), any(), any(), any(), any());
     }
@@ -417,9 +427,10 @@ class NotificationGenerateServiceTest {
     void testAttendanceUnsubmitted_同日2回実行しても通知が増えない() {
         when(systemConfigService.getInt(eq("attendance.submission-closing-day"), any(Integer.class)))
                 .thenReturn(LocalDate.now().getDayOfMonth());
-        when(workRecordMapper.selectMonthlyGrid(any(), any())).thenReturn(List.of(gridRow(400L, null)));
-        when(contractMapper.selectById(400L)).thenReturn(contractWithEngineer(400L, 40L));
-        when(engineerAccountLinkMapper.selectByEngineerId(40L)).thenReturn(linkOf(40L, 888L));
+        when(workRecordMapper.selectMonthlyGrid(any(), any(), eq("default"))).thenReturn(List.of(gridRow(400L, null)));
+        when(contractMapper.selectByIdForTenant(400L, "default")).thenReturn(contractWithEngineer(400L, 40L));
+        when(engineerAccountLinkMapper.selectByEngineerIdAndTenant(40L, "default"))
+                .thenReturn(linkOf(40L, 888L));
 
         String expectedMonth = YearMonth.now().minusMonths(1).toString();
         String expectedDedupeKey = "ATTENDANCE_UNSUBMITTED:400:" + expectedMonth;
@@ -485,18 +496,19 @@ class NotificationGenerateServiceTest {
         String workMonth = YearMonth.now().minusMonths(1).toString();
         LocalDate monthEnd = YearMonth.parse(workMonth).atEndOfMonth();
 
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(confirmedRecord(100L, workMonth)));
-        when(contractMapper.selectById(100L)).thenReturn(contractWithSales(100L, 10L, 999L));
+        when(workRecordMapper.selectByWorkMonthAndStatusesForTenant(workMonth, List.of("確定"), "default"))
+                .thenReturn(List.of(confirmedRecord(100L, workMonth)));
+        when(contractMapper.selectByIdForTenant(100L, "default")).thenReturn(contractWithSales(100L, 10L, 999L));
         when(acceptanceMapper.selectByContractAndMonth(100L, workMonth)).thenReturn(null);
 
         // 担当営業999・管理者1
-        when(sysUserMapper.selectById(999L)).thenReturn(user(999L, "営業"));
+        when(sysUserMapper.selectByIdAndTenant(999L, "default")).thenReturn(user(999L, "営業"));
         when(sysUserMapper.selectList(any()))
                 .thenReturn(List.of(user(1L, "管理者")))       // resolveSalesRecipients: 管理者一覧
                 .thenReturn(List.of(user(500L, "マネージャー"))); // resolveOrgManagerUserIds: 組織100のマネージャー
         // 要員10の所属組織は対象月末時点で100（会計履歴なし→現在のengineer組織）
         when(engineerAccountingHistoryMapper.selectAt(10L, monthEnd)).thenReturn(null);
-        when(engineerMapper.selectById(10L)).thenReturn(engineerOf(10L, 100L));
+        when(engineerMapper.selectByIdForTenant(10L, "default")).thenReturn(engineerOf(10L, 100L));
         // 組織100のマネージャー所属は500のみ。600は組織200に所属するため解決されない
         when(userOrganizationMapper.selectList(any()))
                 .thenReturn(List.of(orgMember(500L, 100L, LocalDate.of(2020, 1, 1), null)));
@@ -533,14 +545,14 @@ class NotificationGenerateServiceTest {
         com.ses.entity.Acceptance acceptance = acceptanceOf(200L, 100L, workMonth, "提出済");
         acceptance.setSubmittedAt(LocalDate.now().minusDays(10).atStartOfDay());
         when(acceptanceMapper.selectList(any())).thenReturn(List.of(acceptance));
-        when(contractMapper.selectById(100L)).thenReturn(contractWithSales(100L, 10L, 999L));
+        when(contractMapper.selectByIdForTenant(100L, "default")).thenReturn(contractWithSales(100L, 10L, 999L));
 
-        when(sysUserMapper.selectById(999L)).thenReturn(user(999L, "営業"));
+        when(sysUserMapper.selectByIdAndTenant(999L, "default")).thenReturn(user(999L, "営業"));
         when(sysUserMapper.selectList(any()))
                 .thenReturn(List.of(user(1L, "管理者")))
                 .thenReturn(List.of(user(500L, "マネージャー")));
         when(engineerAccountingHistoryMapper.selectAt(10L, monthEnd)).thenReturn(null);
-        when(engineerMapper.selectById(10L)).thenReturn(engineerOf(10L, 100L));
+        when(engineerMapper.selectByIdForTenant(10L, "default")).thenReturn(engineerOf(10L, 100L));
         when(userOrganizationMapper.selectList(any()))
                 .thenReturn(List.of(orgMember(500L, 100L, LocalDate.of(2020, 1, 1), null)));
 
@@ -561,14 +573,14 @@ class NotificationGenerateServiceTest {
 
         when(acceptanceMapper.selectList(any()))
                 .thenReturn(List.of(acceptanceOf(300L, 100L, workMonth, "差戻し")));
-        when(contractMapper.selectById(100L)).thenReturn(contractWithSales(100L, 10L, 999L));
+        when(contractMapper.selectByIdForTenant(100L, "default")).thenReturn(contractWithSales(100L, 10L, 999L));
 
-        when(sysUserMapper.selectById(999L)).thenReturn(user(999L, "営業"));
+        when(sysUserMapper.selectByIdAndTenant(999L, "default")).thenReturn(user(999L, "営業"));
         when(sysUserMapper.selectList(any()))
                 .thenReturn(List.of(user(1L, "管理者")))
                 .thenReturn(List.of(user(500L, "マネージャー")));
         when(engineerAccountingHistoryMapper.selectAt(10L, monthEnd)).thenReturn(null);
-        when(engineerMapper.selectById(10L)).thenReturn(engineerOf(10L, 100L));
+        when(engineerMapper.selectByIdForTenant(10L, "default")).thenReturn(engineerOf(10L, 100L));
         when(userOrganizationMapper.selectList(any()))
                 .thenReturn(List.of(orgMember(500L, 100L, LocalDate.of(2020, 1, 1), null)));
 
@@ -587,17 +599,18 @@ class NotificationGenerateServiceTest {
         when(systemConfigService.getInt("acceptance.submission-target-month-offset", 1)).thenReturn(1);
         String workMonth = YearMonth.now().minusMonths(1).toString();
 
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(confirmedRecord(100L, workMonth)));
-        when(contractMapper.selectById(100L)).thenReturn(contractWithSales(100L, 10L, 999L));
+        when(workRecordMapper.selectByWorkMonthAndStatusesForTenant(workMonth, List.of("確定"), "default"))
+                .thenReturn(List.of(confirmedRecord(100L, workMonth)));
+        when(contractMapper.selectByIdForTenant(100L, "default")).thenReturn(contractWithSales(100L, 10L, 999L));
         when(acceptanceMapper.selectByContractAndMonth(100L, workMonth)).thenReturn(null);
 
-        when(sysUserMapper.selectById(999L)).thenReturn(user(999L, "営業"));
+        when(sysUserMapper.selectByIdAndTenant(999L, "default")).thenReturn(user(999L, "営業"));
         when(sysUserMapper.selectList(any())).thenReturn(List.of(user(1L, "管理者")));
         // 会計履歴なし・engineer組織なし・アカウント連携なし → 組織解決不可
         when(engineerAccountingHistoryMapper.selectAt(org.mockito.ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.any())).thenReturn(null);
-        when(engineerMapper.selectById(10L)).thenReturn(engineerOf(10L, null));
-        when(engineerAccountLinkMapper.selectByEngineerId(10L)).thenReturn(null);
+        when(engineerMapper.selectByIdForTenant(10L, "default")).thenReturn(engineerOf(10L, null));
+        when(engineerAccountLinkMapper.selectByEngineerIdAndTenant(10L, "default")).thenReturn(null);
 
         notificationGenerateService.acceptanceUnsubmitted();
 
@@ -614,16 +627,17 @@ class NotificationGenerateServiceTest {
         String workMonth = YearMonth.now().minusMonths(1).toString();
         LocalDate monthEnd = YearMonth.parse(workMonth).atEndOfMonth();
 
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(confirmedRecord(100L, workMonth)));
-        when(contractMapper.selectById(100L)).thenReturn(contractWithSales(100L, 10L, 999L));
+        when(workRecordMapper.selectByWorkMonthAndStatusesForTenant(workMonth, List.of("確定"), "default"))
+                .thenReturn(List.of(confirmedRecord(100L, workMonth)));
+        when(contractMapper.selectByIdForTenant(100L, "default")).thenReturn(contractWithSales(100L, 10L, 999L));
         when(acceptanceMapper.selectByContractAndMonth(100L, workMonth)).thenReturn(null);
 
-        when(sysUserMapper.selectById(999L)).thenReturn(user(999L, "営業"));
+        when(sysUserMapper.selectByIdAndTenant(999L, "default")).thenReturn(user(999L, "営業"));
         when(sysUserMapper.selectList(any()))
                 .thenReturn(List.of(user(1L, "管理者")))
                 .thenReturn(List.of(user(500L, "マネージャー")));
         when(engineerAccountingHistoryMapper.selectAt(10L, monthEnd)).thenReturn(null);
-        when(engineerMapper.selectById(10L)).thenReturn(engineerOf(10L, 100L));
+        when(engineerMapper.selectByIdForTenant(10L, "default")).thenReturn(engineerOf(10L, 100L));
         // 同じマネージャーが組織所属行を2件持つ場合も1回だけ配信する（distinct）
         when(userOrganizationMapper.selectList(any()))
                 .thenReturn(List.of(orgMember(500L, 100L, LocalDate.of(2020, 1, 1), null),
@@ -646,11 +660,12 @@ class NotificationGenerateServiceTest {
         String workMonth = YearMonth.now().minusMonths(1).toString();
         LocalDate monthEnd = YearMonth.parse(workMonth).atEndOfMonth();
 
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(confirmedRecord(100L, workMonth)));
-        when(contractMapper.selectById(100L)).thenReturn(contractWithSales(100L, 10L, 999L));
+        when(workRecordMapper.selectByWorkMonthAndStatusesForTenant(workMonth, List.of("確定"), "default"))
+                .thenReturn(List.of(confirmedRecord(100L, workMonth)));
+        when(contractMapper.selectByIdForTenant(100L, "default")).thenReturn(contractWithSales(100L, 10L, 999L));
         when(acceptanceMapper.selectByContractAndMonth(100L, workMonth)).thenReturn(null);
 
-        when(sysUserMapper.selectById(999L)).thenReturn(user(999L, "営業"));
+        when(sysUserMapper.selectByIdAndTenant(999L, "default")).thenReturn(user(999L, "営業"));
         // 管理者一覧→1L、組織100のマネージャー一覧→500のみ（600は組織200所属のため対象外）
         when(sysUserMapper.selectList(any()))
                 .thenReturn(List.of(user(1L, "管理者")))
@@ -660,8 +675,7 @@ class NotificationGenerateServiceTest {
         history.setEngineerId(10L);
         history.setOrganizationId(100L);
         when(engineerAccountingHistoryMapper.selectAt(10L, monthEnd)).thenReturn(history);
-        // 現在のengineer組織は200（履歴が存在するためフォールバックしない）
-        when(engineerMapper.selectById(10L)).thenReturn(engineerOf(10L, 200L));
+        // 履歴が存在するため現在のengineer組織は参照しない。
         // 組織100のマネージャー所属は500のみ
         when(userOrganizationMapper.selectList(any()))
                 .thenReturn(List.of(orgMember(500L, 100L, LocalDate.of(2020, 1, 1), null)));

@@ -3,6 +3,8 @@ package com.ses.web;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.dto.payroll.PayrollItemDto;
 import com.ses.dto.payroll.PayrollStatementDto;
+import com.ses.config.LoginUser;
+import com.ses.config.OidcSecurityProperties;
 import com.ses.entity.ApprovalRoute;
 import com.ses.entity.ApprovalRouteStep;
 import com.ses.entity.Contract;
@@ -25,6 +27,7 @@ import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.FreeeIntegrationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.SystemConfigService;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.changerequest.EngineerChangeRequestService;
@@ -73,7 +76,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -136,6 +139,8 @@ class EngineerSelfServicePortalMRegressionTest {
     private ExpenseAccountingJobScheduler expenseScheduler;
     @Autowired
     private SystemConfigService systemConfigService;
+    @Autowired
+    private OidcSecurityProperties oidcSecurityProperties;
 
     @MockBean
     private FreeeIntegrationService freeeService;
@@ -152,6 +157,7 @@ class EngineerSelfServicePortalMRegressionTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         systemConfigService.put("survey.min-answers", "1", "テスト用閾値");
 
         adminUserId = insertUser("管理者", "admin");
@@ -160,6 +166,9 @@ class EngineerSelfServicePortalMRegressionTest {
         managerUserId = insertUser("マネージャー", "manager");
 
         orgId = createOrg();
+        assignManager(adminUserId, orgId);
+        assignManager(hrUserId, orgId);
+        assignManager(salesUserId, orgId);
         assignManager(managerUserId, orgId);
 
         userIdA = insertUser("要員", "engineerA");
@@ -194,18 +203,63 @@ class EngineerSelfServicePortalMRegressionTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
+        oidcSecurityProperties.setTenantId("default");
     }
 
     private RequestPostProcessor engineerUser(long userId) {
-        return user(String.valueOf(userId)).roles("要員");
+        return loginUser(userId, "要員");
     }
 
     private void authenticateAs(Long userId, String role) {
+        SysUser sysUser = authenticatedFixtureUser(userId);
+        LoginUser principal = new LoginUser(sysUser,
+                List.of(new SimpleGrantedAuthority("ROLE_" + role)));
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(
-                        String.valueOf(userId), "N/A", List.of(new SimpleGrantedAuthority("ROLE_" + role))
+                        principal, "N/A", principal.getAuthorities()
                 )
         );
+    }
+
+    /** InternalTenantContextFilter が検証する実体付きprincipalを各MockMvcリクエストへ設定する。 */
+    private RequestPostProcessor loginUser(long userId, String role) {
+        return loginUser(authenticatedFixtureUser(userId), role);
+    }
+
+    private RequestPostProcessor loginUser(SysUser principalUser, String role) {
+        LoginUser principal = new LoginUser(principalUser,
+                List.of(new SimpleGrantedAuthority("ROLE_" + role)));
+        return authentication(new UsernamePasswordAuthenticationToken(
+                principal, "N/A", principal.getAuthorities()));
+    }
+
+    private SysUser authenticatedFixtureUser(long userId) {
+        SysUser principalUser = sysUserMapper.selectById(userId);
+        assertNotNull(principalUser, "認証fixtureのユーザーが存在しません: " + userId);
+        assertEquals("default", principalUser.getTenantId(), "認証fixtureのtenantが未設定です");
+        return principalUser;
+    }
+
+    @Test
+    @DisplayName("tenant付きLoginUserを必須とし、OIDC tenant不一致もfail-closedにする")
+    void internalPrincipalTenantBoundaryIsRetained() throws Exception {
+        SysUser missingTenant = authenticatedFixtureUser(userIdA);
+        missingTenant.setTenantId(null);
+        mockMvc.perform(get("/my/timesheet").with(loginUser(missingTenant, "要員")))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("X-SES-Error-Code", "TENANT_CONTEXT_REQUIRED"))
+                .andExpect(jsonPath("$.message").value("TENANT_CONTEXT_REQUIRED"));
+
+        oidcSecurityProperties.setTenantId("tenant-b");
+        mockMvc.perform(get("/my/timesheet").with(loginUser(userIdA, "要員")))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("X-SES-Error-Code", "OIDC_TENANT_MISMATCH"))
+                .andExpect(jsonPath("$.message").value("OIDC_TENANT_MISMATCH"));
+
+        oidcSecurityProperties.setTenantId("default");
+        mockMvc.perform(get("/my/timesheet").with(engineerUser(userIdA)))
+                .andExpect(status().isOk());
     }
 
     // ============================================================
@@ -342,7 +396,7 @@ class EngineerSelfServicePortalMRegressionTest {
 
         // 営業が管理詳細を見てもconfidential memoは入らない
         mockMvc.perform(get("/api/one-on-ones/" + oneOnOneA.id())
-                        .with(user(String.valueOf(salesUserId)).roles("営業")))
+                        .with(loginUser(salesUserId, "営業")))
                 .andExpect(status().isOk())
                 .andExpect(content().string(not(containsString("極秘健康相談メモ"))))
                 .andExpect(jsonPath("$.data.privateNoteRef").doesNotExist());
@@ -419,18 +473,18 @@ class EngineerSelfServicePortalMRegressionTest {
 
         // 管理者: 管理画面へアクセス可能
         for (String path : managementPages) {
-            mockMvc.perform(get(path).with(user(String.valueOf(adminUserId)).roles("管理者")))
+            mockMvc.perform(get(path).with(loginUser(adminUserId, "管理者")))
                     .andExpect(status().isOk());
         }
 
         // 営業: 1on1管理画面へアクセス可能、経費・変更申請・サーベイ管理は403
-        mockMvc.perform(get("/one-on-ones").with(user(String.valueOf(salesUserId)).roles("営業")))
+        mockMvc.perform(get("/one-on-ones").with(loginUser(salesUserId, "営業")))
                 .andExpect(status().isOk());
-        mockMvc.perform(get("/expenses").with(user(String.valueOf(salesUserId)).roles("営業")))
+        mockMvc.perform(get("/expenses").with(loginUser(salesUserId, "営業")))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(get("/engineer-change-requests").with(user(String.valueOf(salesUserId)).roles("営業")))
+        mockMvc.perform(get("/engineer-change-requests").with(loginUser(salesUserId, "営業")))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(get("/surveys").with(user(String.valueOf(salesUserId)).roles("営業")))
+        mockMvc.perform(get("/surveys").with(loginUser(salesUserId, "営業")))
                 .andExpect(status().isForbidden());
     }
 
@@ -444,6 +498,7 @@ class EngineerSelfServicePortalMRegressionTest {
         Customer customer = new Customer();
         customer.setCompanyName("テスト顧客-" + System.nanoTime());
         customer.setContactEmail("test" + System.nanoTime() + "@example.com");
+        customer.setTenantId("default");
         customerMapper.insert(customer);
 
         Project project = new Project();
@@ -465,6 +520,7 @@ class EngineerSelfServicePortalMRegressionTest {
         contractA.setEndDate(LocalDate.of(2026, 8, 31));
         contractA.setSellingPrice(new BigDecimal("700000"));
         contractA.setCostPrice(new BigDecimal("500000"));
+        contractA.setTenantId("default");
         contractMapper.insert(contractA);
 
         Contract contractB = new Contract();
@@ -478,6 +534,7 @@ class EngineerSelfServicePortalMRegressionTest {
         contractB.setEndDate(LocalDate.of(2026, 8, 31));
         contractB.setSellingPrice(new BigDecimal("700000"));
         contractB.setCostPrice(new BigDecimal("500000"));
+        contractB.setTenantId("default");
         contractMapper.insert(contractB);
 
         // Aが日次勤怠を登録
@@ -654,6 +711,7 @@ class EngineerSelfServicePortalMRegressionTest {
                 .password(name)
                 .realName(name)
                 .role("要員".equals(role) ? "管理者" : role)
+                .tenantId("default")
                 .status(1)
                 .build();
         sysUserMapper.insert(user);
@@ -668,6 +726,8 @@ class EngineerSelfServicePortalMRegressionTest {
                 .status("稼動中")
                 .nearestStation("新宿駅")
                 .organizationId(organizationId)
+                .legalEntityId(70003L)
+                .tenantId("default")
                 .experienceYears(3)
                 .build();
         engineerMapper.insert(engineer);
@@ -681,6 +741,7 @@ class EngineerSelfServicePortalMRegressionTest {
         accountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
                 .eq(EngineerAccountLink::getSysUserId, sysUserId));
         EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId("default");
         link.setEngineerId(engineerId);
         link.setSysUserId(sysUserId);
         accountLinkMapper.insert(link);
@@ -711,6 +772,7 @@ class EngineerSelfServicePortalMRegressionTest {
 
     private void assignManager(Long managerUserId, Long organizationId) {
         UserOrganization row = new UserOrganization();
+        row.setTenantId("default");
         row.setUserId(managerUserId);
         row.setOrganizationId(organizationId);
         row.setPrimaryFlag(1);
@@ -721,7 +783,7 @@ class EngineerSelfServicePortalMRegressionTest {
 
     private void insertRoute(String requestType, List<List<Long>> steps) {
         ApprovalRoute route = ApprovalRoute.builder()
-                .tenantId(1L)
+                .tenantId("default")
                 .requestType(requestType)
                 .organizationId(null)
                 .minAmount(null)

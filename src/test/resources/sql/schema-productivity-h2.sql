@@ -45,8 +45,27 @@ CREATE INDEX IF NOT EXISTS idx_saved_view_page_owner ON m_saved_view(page_key, o
 
 CREATE TABLE IF NOT EXISTS t_task_notification_log (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
     task_id BIGINT NOT NULL,
     notify_date DATE NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uk_task_notify_date UNIQUE (task_id, notify_date)
+    status VARCHAR(20) NOT NULL DEFAULT 'RETRY',
+    sent_at TIMESTAMP,
+    last_error VARCHAR(255),
+    attempt_count INT NOT NULL DEFAULT 0,
+    next_retry_at TIMESTAMP,
+    CONSTRAINT uk_task_notify_tenant_date UNIQUE (tenant_id, task_id, notify_date)
 );
+
+-- V1が先に同名の旧テーブルを作るため、H2でもforward migration相当を適用する。
+ALTER TABLE t_task_notification_log ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100) NOT NULL DEFAULT 'default';
+ALTER TABLE t_task_notification_log ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'RETRY';
+ALTER TABLE t_task_notification_log ADD COLUMN IF NOT EXISTS sent_at TIMESTAMP;
+ALTER TABLE t_task_notification_log ADD COLUMN IF NOT EXISTS last_error VARCHAR(255);
+ALTER TABLE t_task_notification_log ADD COLUMN IF NOT EXISTS attempt_count INT NOT NULL DEFAULT 0;
+ALTER TABLE t_task_notification_log ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP;
+DROP INDEX IF EXISTS uk_task_notify_date;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_task_notify_tenant_date
+    ON t_task_notification_log(tenant_id, task_id, notify_date);
+CREATE INDEX IF NOT EXISTS idx_task_notify_retry
+    ON t_task_notification_log(tenant_id, status, next_retry_at, notify_date);

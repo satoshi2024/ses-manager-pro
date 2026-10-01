@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -36,6 +37,7 @@ import static org.mockito.Mockito.*;
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@Transactional
 class AccountingWorkerRawExceptionLogTest {
 
     private static final String SECRET = "secret@example.com";
@@ -178,7 +180,8 @@ class AccountingWorkerRawExceptionLogTest {
                 dueSalesService,
                 duePurchaseService,
                 mock(com.ses.service.DigitalInvoiceService.class),
-                new com.fasterxml.jackson.databind.ObjectMapper()
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                mock(com.ses.service.accounting.AccountingTimezoneResolver.class)
         ).processDueJobs();
 
         List<ILoggingEvent> workerEvents = appender.list.stream()
@@ -202,6 +205,8 @@ class AccountingWorkerRawExceptionLogTest {
         IntegrationJob job = new IntegrationJob();
         job.setId(id);
         job.setJobType(jobType);
+        job.setTenantId("default");
+        job.setLegalEntityId(1L);
         return job;
     }
 }

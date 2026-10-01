@@ -4,11 +4,14 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.certification.EngineerCertificationViewDto;
 import com.ses.entity.Certification;
+import com.ses.entity.CertificationContinuityGroup;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerCertification;
 import com.ses.entity.CertificationEvent;
+import com.ses.mapper.CertificationContinuityGroupMapper;
 import com.ses.mapper.CertificationEventMapper;
 import com.ses.mapper.CertificationMapper;
+import com.ses.mapper.CertificationContinuityGroupMapper;
 import com.ses.mapper.EngineerCertificationMapper;
 import com.ses.mapper.EngineerMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +32,8 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
     private final CertificationEventMapper eventMapper;
     private final CertificationEvidenceValidator evidenceValidator;
     private final java.time.Clock clock;
+    private final CertificationContinuityGroupMapper continuityGroupMapper;
+
 
     /** F1互換の直接生成用。Springは下記の@Autowired constructorを使用する。 */
     public EngineerCertificationServiceImpl(EngineerCertificationMapper engineerCertificationMapper,
@@ -36,7 +41,18 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
                                             EngineerMapper engineerMapper,
                                             CertificationNumberCryptoService cryptoService) {
         this(engineerCertificationMapper, certificationMapper, engineerMapper, cryptoService, null, null,
-                java.time.Clock.system(java.time.ZoneId.of("Asia/Tokyo")));
+                java.time.Clock.system(java.time.ZoneId.of("Asia/Tokyo")), null);
+    }
+
+    public EngineerCertificationServiceImpl(EngineerCertificationMapper engineerCertificationMapper,
+                                            CertificationMapper certificationMapper,
+                                            EngineerMapper engineerMapper,
+                                            CertificationNumberCryptoService cryptoService,
+                                            CertificationEventMapper eventMapper,
+                                            CertificationEvidenceValidator evidenceValidator,
+                                            java.time.Clock clock) {
+        this(engineerCertificationMapper, certificationMapper, engineerMapper, cryptoService, eventMapper,
+                evidenceValidator, clock, null);
     }
 
     @Autowired
@@ -46,7 +62,8 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
                                             CertificationNumberCryptoService cryptoService,
                                             CertificationEventMapper eventMapper,
                                             CertificationEvidenceValidator evidenceValidator,
-                                            java.time.Clock clock) {
+                                            java.time.Clock clock,
+                                            CertificationContinuityGroupMapper continuityGroupMapper) {
         this.engineerCertificationMapper = engineerCertificationMapper;
         this.certificationMapper = certificationMapper;
         this.engineerMapper = engineerMapper;
@@ -54,6 +71,7 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
         this.eventMapper = eventMapper;
         this.evidenceValidator = evidenceValidator;
         this.clock = clock;
+        this.continuityGroupMapper = continuityGroupMapper;
     }
 
     @Override
@@ -61,11 +79,12 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
     public EngineerCertificationViewDto submitApplication(Long engineerId, Long certificationId, LocalDate acquiredOn,
                                                           LocalDate expiresOn, String certificateNumberPlaintext,
                                                           Long actorUserId, boolean canViewFullNumber) {
-        Engineer engineer = engineerMapper.selectById(engineerId);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        Engineer engineer = engineerMapper.selectByIdForTenant(engineerId, tenantId);
         if (engineer == null) {
             throw BusinessException.of(404, "error.engineer.notFound");
         }
-        Certification certification = certificationMapper.selectById(certificationId);
+        Certification certification = certificationMapper.selectByIdForTenant(certificationId, tenantId);
         if (certification == null || certification.getActiveFlag() == null || certification.getActiveFlag() != 1) {
             throw BusinessException.of(404, "certification.master.notFound");
         }
@@ -77,18 +96,27 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
             throw BusinessException.of(400, "certification.record.expiryBeforeAcquired");
         }
 
-        String tenantId = StringUtils.hasText(certification.getTenantId()) ? certification.getTenantId() : "default";
-
         if (engineerCertificationMapper.countNonTerminalAcquisition(tenantId, engineerId, certificationId,
                 acquiredOn, null) > 0) {
             throw BusinessException.of(409, "certification.record.duplicate");
+        }
+
+        if (continuityGroupMapper == null) {
+            throw BusinessException.of(503, "certification.continuity.mapperUnavailable");
+        }
+        CertificationContinuityGroup group = new CertificationContinuityGroup();
+        group.setTenantId(tenantId);
+        group.setEngineerId(engineerId);
+        group.setCertificationId(certificationId);
+        if (continuityGroupMapper.insert(group) != 1 || group.getContinuityGroupId() == null) {
+            throw BusinessException.of(503, "certification.continuity.sequenceUnavailable");
         }
 
         EngineerCertification record = new EngineerCertification();
         record.setTenantId(tenantId);
         record.setEngineerId(engineerId);
         record.setCertificationId(certificationId);
-        record.setContinuityGroupId(Math.abs(System.nanoTime()));
+        record.setContinuityGroupId(group.getContinuityGroupId());
         record.setAcquiredOn(acquiredOn);
         record.setExpiresOn(expiresOn);
         record.setExpiryRuleVersion(certification.getRuleVersion());
@@ -107,7 +135,13 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
             record.setCertificateNumberKeyVersion(encrypted.keyVersion());
             record.setCertificateNumberCipherFormat(encrypted.cipherFormat());
             record.setCertificateNumberMasked(encrypted.masked());
-            engineerCertificationMapper.updateById(record);
+            Integer expectedVersion = record.getVersion() == null ? 0 : record.getVersion();
+            if (engineerCertificationMapper.updateCertificateNumberForTenant(record.getId(), tenantId,
+                    expectedVersion, encrypted.encrypted(), encrypted.keyVersion(), encrypted.cipherFormat(),
+                    encrypted.masked()) != 1) {
+                throw BusinessException.of(409, "certification.record.optimisticLock");
+            }
+            record.setVersion(expectedVersion + 1);
         }
 
         appendEvent(record, "SUBMIT", actorUserId, null, null, null, null);
@@ -115,8 +149,27 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public EngineerCertificationViewDto resubmit(Long recordId, Integer expectedVersion, Long actorUserId,
+                                                 String certificateNumberPlaintext, boolean canViewFullNumber) {
+        EngineerCertification previous = locked(recordId, expectedVersion);
+        if (!CertificationRecordStates.CANCELLED.equals(previous.getRecordState())
+                && !CertificationRecordStates.REJECTED.equals(previous.getRecordState())) {
+            throw BusinessException.of(400, "certification.record.invalidTransition");
+        }
+        // 元recordをversion CASで消費し、append-only履歴へ再申請操作を記録する。
+        update(previous, previous.getRecordState(), previous.getCurrentFlag(), previous.getCurrentHolderKey(),
+                previous.getAcquiredOn(), previous.getExpiresOn(), previous.getExpiryRuleVersion(),
+                nextRevision(previous), actorUserId);
+        appendEvent(previous, "RESUBMIT", actorUserId, "再申請", null, null, null);
+        return submitApplication(previous.getEngineerId(), previous.getCertificationId(), previous.getAcquiredOn(),
+                previous.getExpiresOn(), certificateNumberPlaintext, actorUserId, canViewFullNumber);
+    }
+
+    @Override
     public EngineerCertification getEntity(Long id) {
-        return engineerCertificationMapper.selectById(id);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        return id == null ? null : engineerCertificationMapper.selectByIdForTenant(id, tenantId);
     }
 
     @Override
@@ -243,11 +296,18 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
         if (recordId == null) {
             throw BusinessException.of(404, "certification.record.notFound");
         }
-        EngineerCertification record = engineerCertificationMapper.selectByIdForUpdate(recordId);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        EngineerCertification record = engineerCertificationMapper.selectByTenantIdForUpdate(tenantId, recordId);
         if (record == null) {
             throw BusinessException.of(404, "certification.record.notFound");
         }
-        if (expectedVersion != null && !expectedVersion.equals(record.getVersion())) {
+        if (!tenantId.equals(record.getTenantId())) {
+            throw BusinessException.of(404, "certification.record.notFound");
+        }
+        if (expectedVersion == null) {
+            throw BusinessException.of(400, "certification.record.expectedVersionRequired");
+        }
+        if (!expectedVersion.equals(record.getVersion())) {
             throw BusinessException.of(409, "certification.record.optimisticLock");
         }
         return record;
@@ -257,8 +317,10 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
                         LocalDate acquiredOn, LocalDate expiresOn, Integer expiryRuleVersion,
                         Integer revision, Long actorUserId) {
         Integer version = record.getVersion() == null ? 0 : record.getVersion();
-        if (engineerCertificationMapper.updateLifecycleCas(record.getId(), version, state, currentFlag, holder,
-                acquiredOn, expiresOn, expiryRuleVersion, revision, actorUserId) == 0) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        if (!tenantId.equals(record.getTenantId())
+                || engineerCertificationMapper.updateLifecycleCas(record.getId(), tenantId, version, state,
+                currentFlag, holder, acquiredOn, expiresOn, expiryRuleVersion, revision, actorUserId) == 0) {
             throw BusinessException.of(409, "certification.record.optimisticLock");
         }
         record.setRecordState(state);

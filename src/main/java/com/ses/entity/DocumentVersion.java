@@ -77,4 +77,10 @@ public class DocumentVersion extends BaseEntity {
     /** 登録ユーザーID */
     @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
+
+    private String actorType;
+    private String confirmationSource;
+    private Long humanUserId;
+    private String correlationId;
+    private String idempotencyKey;
 }

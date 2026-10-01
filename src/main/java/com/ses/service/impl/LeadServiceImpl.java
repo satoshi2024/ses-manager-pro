@@ -46,6 +46,12 @@ public class LeadServiceImpl implements LeadService {
     private final OpportunityMapper opportunityMapper;
     private final DataScopeService dataScopeService;
     @Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+    @Autowired(required = false)
+    private com.ses.service.CustomerService customerService;
+    @Autowired(required = false)
+    private com.ses.service.OpportunityService opportunityService;
+    @Autowired(required = false)
     private CrmScopeService crmScopeService;
 
     @Override
@@ -76,6 +82,7 @@ public class LeadServiceImpl implements LeadService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Lead create(LeadSaveRequest request) {
+        requireLegalEntityContext();
         Lead lead = new Lead();
         apply(lead, request);
         if (!StringUtils.hasText(lead.getStatus())) lead.setStatus(STATUS_NEW);
@@ -84,6 +91,7 @@ public class LeadServiceImpl implements LeadService {
             throw BusinessException.of(400, "error.crm.leadInitialStatusInvalid");
         }
         assertOwnerScope(lead.getOwnerUserId());
+        lead.setLegalEntityId(legalEntityContextService.requireCurrentLegalEntityId());
         applySearchKeys(lead);
         if (leadMapper.insert(lead) != 1) throw BusinessException.of("error.crm.leadSaveFailed");
         return leadMapper.selectById(lead.getId());
@@ -94,6 +102,8 @@ public class LeadServiceImpl implements LeadService {
     public Lead update(Long id, LeadSaveRequest request) {
         Lead current = leadMapper.selectByIdForUpdate(id);
         if (current == null || !isVisible(current)) throw BusinessException.of(404, "error.crm.leadNotFound");
+        requireLegalEntityContext();
+        legalEntityContextService.assertCurrent(current.getLegalEntityId());
         if (STATUS_CONVERTED.equals(current.getStatus()) || STATUS_DISCARDED.equals(current.getStatus())) {
             throw BusinessException.of(400, "error.crm.leadTerminalUpdate");
         }
@@ -106,6 +116,7 @@ public class LeadServiceImpl implements LeadService {
         assertOwnerScope(current.getOwnerUserId());
         UpdateWrapper<Lead> update = new UpdateWrapper<Lead>()
                 .eq("id", id).eq("version", current.getVersion())
+                .set("legal_entity_id", current.getLegalEntityId())
                 .set("company_name", current.getCompanyName())
                 .set("company_name_normalized", current.getCompanyNameNormalized())
                 .set("contact_name", current.getContactName())
@@ -165,6 +176,8 @@ public class LeadServiceImpl implements LeadService {
     public LeadConversionDto convert(Long id, Integer expectedVersion) {
         Lead lead = leadMapper.selectByIdForUpdate(id);
         if (lead == null || !isVisible(lead)) throw BusinessException.of(404, "error.crm.leadNotFound");
+        requireLegalEntityContext();
+        legalEntityContextService.assertCurrent(lead.getLegalEntityId());
         if (STATUS_CONVERTED.equals(lead.getStatus())
                 && lead.getConvertedCustomerId() != null && lead.getConvertedOpportunityId() != null) {
             return new LeadConversionDto(id, lead.getConvertedCustomerId(), lead.getConvertedOpportunityId());
@@ -173,8 +186,12 @@ public class LeadServiceImpl implements LeadService {
         assertVersion(lead, expectedVersion);
 
         Customer customer = new Customer();
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId();
+        if (tenantId != null) {
+            customer.setTenantId(tenantId);
+        }
         customer.setCompanyName(lead.getCompanyName());
-        customerMapper.insert(customer);
+        requireService(customerService, "CUSTOMER_WRITE_BOUNDARY_UNAVAILABLE").save(customer);
 
         if (StringUtils.hasText(lead.getContactName()) || StringUtils.hasText(lead.getContactEmail())
                 || StringUtils.hasText(lead.getContactPhone())) {
@@ -184,7 +201,7 @@ public class LeadServiceImpl implements LeadService {
             contact.setEmail(lead.getContactEmail());
             contact.setPhone(lead.getContactPhone());
             contact.setPrimaryFlag(1);
-            contact.setValidFrom(LocalDate.now());
+            contact.setValidFrom(requireLegalEntityContext().requireCurrentDate());
             contact.setStatus("有効");
             contact.setVersion(1);
             customerContactMapper.insert(contact);
@@ -198,7 +215,8 @@ public class LeadServiceImpl implements LeadService {
         opportunity.setProbability(20);
         opportunity.setOwnerUserId(lead.getOwnerUserId());
         opportunity.setVersion(1);
-        opportunityMapper.insert(opportunity);
+        opportunity.setLegalEntityId(customer.getLegalEntityId());
+        requireService(opportunityService, "OPPORTUNITY_WRITE_BOUNDARY_UNAVAILABLE").save(opportunity);
 
         UpdateWrapper<Lead> update = new UpdateWrapper<Lead>()
                 .eq("id", id).eq("version", lead.getVersion())
@@ -208,6 +226,18 @@ public class LeadServiceImpl implements LeadService {
                 .set("version", lead.getVersion() + 1);
         if (leadMapper.update(null, update) != 1) throw BusinessException.of(409, "error.crm.leadVersionConflict");
         return new LeadConversionDto(id, customer.getId(), opportunity.getId());
+    }
+
+    private com.ses.service.security.LegalEntityContextService requireLegalEntityContext() {
+        if (legalEntityContextService == null) {
+            throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        return legalEntityContextService;
+    }
+
+    private <T> T requireService(T service, String code) {
+        if (service == null) throw BusinessException.of(503, code);
+        return service;
     }
 
     private void assertOwnerScope(Long ownerUserId) {

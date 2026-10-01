@@ -26,6 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
+@com.ses.test.EnableDefaultTenantTestContext
 class CsrfProtectionTest {
 
     @Autowired

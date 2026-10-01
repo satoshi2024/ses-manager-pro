@@ -20,6 +20,7 @@ import com.ses.common.util.PageUtils;
 import com.ses.service.MonthlyClosingService;
 import com.ses.service.NotificationService;
 import com.ses.service.WorkRecordService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.billing.SettlementCalculator;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +33,7 @@ import org.springframework.dao.DuplicateKeyException;
 import com.ses.common.constant.StatusConstants;
 
 import java.math.BigDecimal;
+import java.io.Serializable;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -119,15 +121,17 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
     @Override
     public List<WorkRecordGridDto> monthlyGrid(String workMonth) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
-            return baseMapper.selectMonthlyGrid(workMonth, monthEndOf(workMonth));
+            return baseMapper.selectMonthlyGrid(workMonth, monthEndOf(workMonth), tenantId);
         }
         LocalDate asOf = com.ses.common.util.DateUtils.parseYearMonth(workMonth).atDay(1);
         List<Long> dataScopeIds = isSalesDataScoped()
                 ? new java.util.ArrayList<>(dataScopeService.allowedContractIds()) : null;
         return baseMapper.selectMonthlyGridScoped(workMonth, monthEndOf(workMonth), asOf, false,
                 new java.util.ArrayList<>(organizationScopeService.allowedOrganizationIds(asOf)),
-                new java.util.ArrayList<>(organizationScopeService.allowedDirectUserIds(asOf)), dataScopeIds);
+                new java.util.ArrayList<>(organizationScopeService.allowedDirectUserIds(asOf)), dataScopeIds,
+                tenantId);
     }
 
     @Override
@@ -138,8 +142,9 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         String keywordFilter = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
         String statusFilter = (status == null || status.isBlank()) ? null : status.trim();
         String monthEnd = monthEndOf(workMonth);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
-            return baseMapper.selectMonthlyGridPage(page, workMonth, monthEnd, keywordFilter, statusFilter);
+            return baseMapper.selectMonthlyGridPage(page, workMonth, monthEnd, keywordFilter, statusFilter, tenantId);
         }
         LocalDate asOf = com.ses.common.util.DateUtils.parseYearMonth(workMonth).atDay(1);
         List<Long> dataScopeIds = isSalesDataScoped()
@@ -147,7 +152,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         return baseMapper.selectMonthlyGridScopedPage(page, workMonth, monthEnd, asOf, false,
                 new java.util.ArrayList<>(organizationScopeService.allowedOrganizationIds(asOf)),
                 new java.util.ArrayList<>(organizationScopeService.allowedDirectUserIds(asOf)),
-                dataScopeIds, keywordFilter, statusFilter);
+                dataScopeIds, keywordFilter, statusFilter, tenantId);
     }
 
     @Override
@@ -158,12 +163,13 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 size == null ? PageUtils.DEFAULT_PAGE_SIZE : size,
                 PageUtils.DEFAULT_PAGE_SIZE);
         String monthEnd = monthEndOf(workMonth);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         com.baomidou.mybatisplus.extension.plugins.pagination.Page<PendingApprovalItemDto> result;
         LocalDateTime oldestUpdatedAt;
         if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
-            result = baseMapper.selectPendingApprovalPage(page, workMonth, monthEnd);
+            result = baseMapper.selectPendingApprovalPage(page, workMonth, monthEnd, tenantId);
             oldestUpdatedAt = result.getTotal() == 0 ? null
-                    : baseMapper.selectOldestPendingUpdatedAt(workMonth, monthEnd);
+                    : baseMapper.selectOldestPendingUpdatedAt(workMonth, monthEnd, tenantId);
         } else {
             LocalDate asOf = com.ses.common.util.DateUtils.parseYearMonth(workMonth).atDay(1);
             List<Long> dataScopeIds = isSalesDataScoped()
@@ -171,10 +177,10 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             List<Long> orgIds = new java.util.ArrayList<>(organizationScopeService.allowedOrganizationIds(asOf));
             List<Long> directUserIds = new java.util.ArrayList<>(organizationScopeService.allowedDirectUserIds(asOf));
             result = baseMapper.selectPendingApprovalScopedPage(
-                    page, workMonth, monthEnd, asOf, false, orgIds, directUserIds, dataScopeIds);
+                    page, workMonth, monthEnd, asOf, false, orgIds, directUserIds, dataScopeIds, tenantId);
             oldestUpdatedAt = result.getTotal() == 0 ? null
                     : baseMapper.selectOldestPendingUpdatedAtScoped(
-                            workMonth, monthEnd, asOf, false, orgIds, directUserIds, dataScopeIds);
+                            workMonth, monthEnd, asOf, false, orgIds, directUserIds, dataScopeIds, tenantId);
         }
 
         LocalDate today = LocalDate.now();
@@ -246,8 +252,9 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         // 現在値は当月の新規入力に限って利用し、過去月は明示された履歴または
         // platform-invariantsで定めた既知の直属account-linkだけを参照する。
         if (YearMonth.from(asOf).equals(YearMonth.now())) {
+            String tenantId = AccountingTenantContextHolder.requireTenantContext();
             com.ses.entity.Engineer engineer = engineerMapper == null ? null
-                    : engineerMapper.selectById(contract.getEngineerId());
+                    : engineerMapper.selectByIdForTenant(contract.getEngineerId(), tenantId);
             if (engineer != null && engineer.getOrganizationId() != null) {
                 if (allowedOrganizationIds.contains(engineer.getOrganizationId())) {
                     return;
@@ -266,17 +273,23 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (engineerAccountLinkMapper == null) {
             return false;
         }
-        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper
+                .selectByEngineerIdAndTenant(contract.getEngineerId(), tenantId);
         Set<Long> directUserIds = organizationScopeService.allowedDirectUserIds(asOf);
         return link != null && directUserIds != null && directUserIds.contains(link.getSysUserId());
     }
 
     @Override
     public void assertAllowed(Long workRecordId) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (organizationScopeService == null && !isSalesDataScoped()) {
+            if (baseMapper.selectByIdForTenant(workRecordId, tenantId) == null) {
+                throw BusinessException.of("error.workRecord.notFound2");
+            }
             return;
         }
-        String workMonth = baseMapper.selectWorkMonthById(workRecordId);
+        String workMonth = baseMapper.selectWorkMonthByIdForTenant(workRecordId, tenantId);
         if (workMonth == null) {
             throw BusinessException.of("error.workRecord.notFound2");
         }
@@ -289,9 +302,19 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         List<Long> dataScopeIds = isSalesDataScoped()
                 ? new java.util.ArrayList<>(dataScopeService.allowedContractIds()) : null;
         if (baseMapper.selectByIdScoped(workRecordId, asOf, fullAccess, organizationIds,
-                directUserIds, dataScopeIds) == null) {
+                directUserIds, dataScopeIds, tenantId) == null) {
             throw BusinessException.of("error.workRecord.notFound2");
         }
+    }
+
+    /** WorkRecordのID取得も必ず契約・顧客ownershipを経由する。 */
+    @Override
+    public WorkRecord getById(Serializable id) {
+        if (id == null) {
+            return null;
+        }
+        return baseMapper.selectByIdForTenant(Long.valueOf(id.toString()),
+                AccountingTenantContextHolder.requireTenantContext());
     }
 
     /** 営業固有のDataScopeだけを勤怠へ渡す。マネージャーは対象月の組織scopeを正とする。 */
@@ -325,11 +348,13 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
     private WorkRecord saveHoursInternal(Long contractId, String workMonth, BigDecimal actualHours,
                                          String remarks, boolean fromDaily, Integer expectedVersion) {
-        Contract contract = contractMapper.selectByIdForUpdate(contractId);
+        Contract contract = contractMapper.selectByIdForUpdateForTenant(contractId,
+                AccountingTenantContextHolder.requireTenantContext());
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
-        WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdate(contractId, workMonth);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdateForTenant(contractId, workMonth, tenantId);
         assertContractScope(contract, workMonth, record);
         assertAcceptanceNotAccepted(contractId, workMonth);
 
@@ -426,7 +451,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         try {
             if (isNew) {
                 this.save(record);
-            } else if (baseMapper.updateById(record) != 1) {
+            } else if (baseMapper.updateByIdForTenant(record, record.getVersion(), tenantId) != 1) {
                 throw BusinessException.of(409, "error.common.optimisticLock");
             }
         } catch (DuplicateKeyException e) {
@@ -434,7 +459,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
 
         if (!isNew && record.getPaymentAmount() != null) {
-            String employmentType = baseMapper.selectEmploymentTypeByContractId(record.getContractId());
+            String employmentType = baseMapper.selectEmploymentTypeByContractIdForTenant(record.getContractId(), tenantId);
             if ("BP".equals(employmentType)) {
                 syncRootBpAmount(record);
             }
@@ -448,10 +473,10 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     public void confirmMonth(String workMonth) {
         com.ses.common.util.DateUtils.parseYearMonth(workMonth);
         checkClosing(workMonth);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         // 入力中・提出済 を一括確定対象とする。差戻し（＝数値誤りの明示フラグ）は黙って確定させない。
-        List<WorkRecord> records = baseMapper.selectList(new QueryWrapper<WorkRecord>()
-                .eq("work_month", workMonth)
-                .in("status", "入力中", "提出済"));
+        List<WorkRecord> records = baseMapper.selectByWorkMonthAndStatusesForTenant(
+                workMonth, List.of("入力中", "提出済"), tenantId);
 
         if (records.isEmpty()) {
             return;
@@ -461,10 +486,11 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         List<Long> contractIds = records.stream().map(WorkRecord::getContractId).distinct().sorted().collect(Collectors.toList());
         Map<Long, Contract> lockedContracts = new java.util.HashMap<>();
         for (Long cid : contractIds) {
-            Contract lockedContract = contractMapper.selectByIdForUpdate(cid);
-            if (lockedContract != null) {
-                lockedContracts.put(cid, lockedContract);
+            Contract lockedContract = contractMapper.selectByIdForUpdateForTenant(cid, tenantId);
+            if (lockedContract == null) {
+                throw BusinessException.of(404, "error.workRecord.notFound2");
             }
+            lockedContracts.put(cid, lockedContract);
         }
 
         // ロック後に再取得し、並行する revisePrice や saveHours の最新単価・状態を反映する。
@@ -472,7 +498,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         // FOR UPDATE による current read が必要（ロック待ち中に commit された値を確実に読む）。
         List<Long> recordIds = records.stream().map(WorkRecord::getId).distinct().sorted().collect(Collectors.toList());
         records = recordIds.stream()
-                .map(baseMapper::selectByIdForUpdate)
+                .map(id -> baseMapper.selectByIdForUpdateForTenant(id, tenantId))
                 .filter(r -> r != null && ("入力中".equals(r.getStatus()) || "提出済".equals(r.getStatus())))
                 .collect(Collectors.toList());
 
@@ -482,23 +508,18 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             freezeAccountingDimension(record, lockedContracts.get(record.getContractId()));
             // updateById ではなく、ステータスのみを条件付き(CAS)で安全に更新する。
             // 組織・原価部門は明示的にSETし、NULLも「未配賦」として凍結する。
-            UpdateWrapper<WorkRecord> statusUpdate = new UpdateWrapper<WorkRecord>()
-                    .eq("id", record.getId())
-                    .in("status", "入力中", "提出済")
-                    .set("status", "確定")
-                    .set("organization_id", record.getOrganizationId())
-                    .set("cost_center_id", record.getCostCenterId())
-                    .set("accounting_dimension_frozen", 1);
-            int updated = baseMapper.update(null, statusUpdate);
-            if (updated == 1) {
-                record.setStatus("確定");
+            int updated = baseMapper.updateToConfirmedForTenant(record.getId(), record.getVersion(),
+                    record.getOrganizationId(), record.getCostCenterId(), tenantId);
+            if (updated != 1) {
+                throw BusinessException.of(409, "error.common.optimisticLock");
             }
+            record.setStatus("確定");
         }
 
         // BP支払を生成(雇用形態がBPの要員に紐づく契約の確定実績について)
         for (WorkRecord record : records) {
             if ("確定".equals(record.getStatus())) {
-                String employmentType = baseMapper.selectEmploymentTypeByContractId(record.getContractId());
+                String employmentType = baseMapper.selectEmploymentTypeByContractIdForTenant(record.getContractId(), tenantId);
                 if ("BP".equals(employmentType)) {
                     generateOrSyncBpFor(record);
                 }
@@ -511,8 +532,9 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (record == null || contract == null || Integer.valueOf(1).equals(record.getAccountingDimensionFrozen())) {
             return;
         }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         com.ses.entity.Engineer engineer = engineerMapper == null || contract.getEngineerId() == null
-                ? null : engineerMapper.selectById(contract.getEngineerId());
+                ? null : engineerMapper.selectByIdForTenant(contract.getEngineerId(), tenantId);
         LocalDate asOf = record.getWorkMonth() == null || record.getWorkMonth().isBlank()
                 ? LocalDate.now().withDayOfMonth(1)
                 : com.ses.common.util.DateUtils.parseYearMonth(record.getWorkMonth()).atDay(1);
@@ -522,9 +544,10 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (engineerAccountLinkMapper != null && userOrganizationMapper != null
                 && contract.getEngineerId() != null) {
             com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper
-                    .selectByEngineerId(contract.getEngineerId());
+                    .selectByEngineerIdAndTenant(contract.getEngineerId(), tenantId);
             if (link != null && link.getSysUserId() != null) {
-                organizationId = userOrganizationMapper.selectPrimaryOrganizationId(link.getSysUserId(), asOf);
+                organizationId = userOrganizationMapper.selectPrimaryOrganizationIdByTenant(
+                        tenantId, link.getSysUserId(), asOf);
             }
         }
         // 直接所属しか持たない要員は当月分だけ現在マスタを使う。過去月に履歴が
@@ -583,7 +606,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 || bpCompanyMapper == null) {
             throw BusinessException.of(400, "error.bpPayment.bpCompanyRequired");
         }
-        Contract contract = contractMapper.selectById(record.getContractId());
+        Contract contract = contractMapper.selectByIdForTenant(record.getContractId(),
+                AccountingTenantContextHolder.requireTenantContext());
         if (contract == null || contract.getEngineerId() == null) {
             throw BusinessException.of(400, "error.bpPayment.bpCompanyRequired");
         }
@@ -644,9 +668,9 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     public void reopenMonth(String workMonth) {
         com.ses.common.util.DateUtils.parseYearMonth(workMonth);
         checkClosing(workMonth);
-        List<WorkRecord> initialRecords = this.list(new QueryWrapper<WorkRecord>()
-                .eq("work_month", workMonth)
-                .eq("status", "確定"));
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        List<WorkRecord> initialRecords = baseMapper.selectByWorkMonthAndStatusesForTenant(
+                workMonth, List.of("確定"), tenantId);
 
         if (initialRecords.isEmpty()) {
             return;
@@ -654,12 +678,14 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
         List<Long> contractIds = initialRecords.stream().map(WorkRecord::getContractId).distinct().sorted().collect(Collectors.toList());
         for (Long cid : contractIds) {
-            contractMapper.selectByIdForUpdate(cid);
+            if (contractMapper.selectByIdForUpdateForTenant(cid, tenantId) == null) {
+                throw BusinessException.of(404, "error.workRecord.notFound2");
+            }
         }
 
         List<Long> recordIds = initialRecords.stream().map(WorkRecord::getId).sorted().collect(Collectors.toList());
         List<WorkRecord> records = recordIds.stream()
-                .map(baseMapper::selectByIdForUpdate)
+                .map(id -> baseMapper.selectByIdForUpdateForTenant(id, tenantId))
                 .filter(r -> r != null && "確定".equals(r.getStatus()))
                 .collect(Collectors.toList());
 
@@ -697,9 +723,11 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
 
         for (WorkRecord record : records) {
+            if (baseMapper.updateToInputForTenant(record.getId(), record.getVersion(), tenantId) != 1) {
+                throw BusinessException.of(409, "error.common.optimisticLock");
+            }
             record.setStatus("入力中");
         }
-        this.updateBatchById(records);
 
         bpPaymentMapper.delete(new QueryWrapper<BpPayment>()
                 .in("work_record_id", ids)
@@ -735,11 +763,13 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             throw BusinessException.of("error.workRecord.invalidMonth");
         }
         
-        Contract contract = contractMapper.selectByIdForUpdate(contractId);
+        Contract contract = contractMapper.selectByIdForUpdateForTenant(contractId,
+                AccountingTenantContextHolder.requireTenantContext());
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
-        WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdate(contractId, workMonth);
+        WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdateForTenant(contractId, workMonth,
+                AccountingTenantContextHolder.requireTenantContext());
         assertContractScope(contract, workMonth, record);
         assertAcceptanceNotAccepted(contractId, workMonth);
 
@@ -803,11 +833,13 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Transactional(rollbackFor = Exception.class)
     public void deleteDaily(Long contractId, String workMonth, LocalDate workDate) {
         checkClosing(workMonth);
-        Contract contract = contractMapper.selectByIdForUpdate(contractId);
+        Contract contract = contractMapper.selectByIdForUpdateForTenant(contractId,
+                AccountingTenantContextHolder.requireTenantContext());
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
-        WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdate(contractId, workMonth);
+        WorkRecord record = baseMapper.selectByContractIdAndMonthForUpdateForTenant(contractId, workMonth,
+                AccountingTenantContextHolder.requireTenantContext());
         if (record == null) {
             return;
         }
@@ -877,9 +909,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Transactional(rollbackFor = Exception.class)
     public void submitByMonth(Long contractId, String workMonth) {
         checkClosing(workMonth);
-        WorkRecord w = baseMapper.selectOne(new QueryWrapper<WorkRecord>()
-                .eq("contract_id", contractId)
-                .eq("work_month", workMonth), false);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        WorkRecord w = baseMapper.selectByContractIdAndMonthForTenant(contractId, workMonth, tenantId);
         if (w == null) {
             // 0h提出も契約期間・状態検証済みの内部保存経路を通す（R3R-15）。
             w = saveHoursInternal(contractId, workMonth, BigDecimal.ZERO, null, false);
@@ -897,19 +928,19 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
         checkClosing(record.getWorkMonth());
 
-        Contract contract = contractMapper.selectByIdForUpdate(record.getContractId());
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Contract contract = contractMapper.selectByIdForUpdateForTenant(record.getContractId(), tenantId);
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
-        record = this.getById(workRecordId); // 再取得して最新状態を反映
+        record = baseMapper.selectByIdForTenant(workRecordId, tenantId); // 再取得して最新状態を反映
+        if (record == null) {
+            throw BusinessException.of(404, "error.workRecord.notFound2");
+        }
 
         requireTransition(record, "提出済");
         // 条件付きUPDATE（CAS）。再提出で差戻しコメントをクリアする（R3R-10/R3R-12）。
-        int updated = baseMapper.update(null, new UpdateWrapper<WorkRecord>()
-                .eq("id", workRecordId)
-                .in("status", "入力中", "差戻し")
-                .set("status", "提出済")
-                .set("reject_comment", null));
+        int updated = baseMapper.updateToSubmittedForTenant(workRecordId, record.getVersion(), tenantId);
         if (updated != 1) {
             throw BusinessException.of(409, "error.workRecord.concurrentModified");
         }
@@ -927,7 +958,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             return;
         }
         List<Long> organizationIds = contractMapper.selectOrganizationIdsByContractIds(
-                List.of(record.getContractId()));
+                List.of(record.getContractId()), AccountingTenantContextHolder.requireTenantContext());
         if (organizationIds == null) {
             return;
         }
@@ -947,12 +978,16 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
         checkClosing(record.getWorkMonth());
 
-        Contract contract = contractMapper.selectByIdForUpdate(record.getContractId());
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Contract contract = contractMapper.selectByIdForUpdateForTenant(record.getContractId(), tenantId);
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
         // Contractロック後に再度行ロックを取得して、月次締めや他者との競合を防ぐ（A7-06/R7-03）
-        record = baseMapper.selectByIdForUpdate(workRecordId);
+        record = baseMapper.selectByIdForUpdateForTenant(workRecordId, tenantId);
+        if (record == null) {
+            throw BusinessException.of(404, "error.workRecord.notFound2");
+        }
 
         // 並行 approve/reject の敗者は、先勝ちで 確定/差戻し になった後にここに来る。
         // 遷移不正ではなく楽観競合（409）として返す（REV-RP-P2-003）。
@@ -962,13 +997,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         requireTransition(record, "確定");
         // 単件承認も月次一括確定と同じ帰属凍結を行い、NULLを含む次元を明示的に保存する。
         freezeAccountingDimension(record, contract);
-        int updated = baseMapper.update(null, new UpdateWrapper<WorkRecord>()
-                .eq("id", workRecordId)
-                .eq("status", "提出済")
-                .set("status", "確定")
-                .set("organization_id", record.getOrganizationId())
-                .set("cost_center_id", record.getCostCenterId())
-                .set("accounting_dimension_frozen", 1));
+        int updated = baseMapper.updateToConfirmedForTenant(workRecordId, record.getVersion(),
+                record.getOrganizationId(), record.getCostCenterId(), tenantId);
         if (updated != 1) {
             // 再試行。状態が変わったか、他のトランザクションが確定した
             throw BusinessException.of(409, "error.workRecord.concurrentModified");
@@ -976,7 +1006,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         record.setStatus("確定");
 
         // confirmMonth と同じBP生成後続処理を単契約分行う（BP要員のみ）。
-        String employmentType = baseMapper.selectEmploymentTypeByContractId(record.getContractId());
+        String employmentType = baseMapper.selectEmploymentTypeByContractIdForTenant(record.getContractId(), tenantId);
         if ("BP".equals(employmentType)) {
             generateOrSyncBpFor(record);
         }
@@ -992,12 +1022,16 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
         checkClosing(record.getWorkMonth());
         
-        Contract contract = contractMapper.selectByIdForUpdate(record.getContractId());
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Contract contract = contractMapper.selectByIdForUpdateForTenant(record.getContractId(), tenantId);
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
         // Contractロック後に再度行ロックを取得して、月次締めや他者との競合を防ぐ（A7-06/R7-03）
-        record = baseMapper.selectByIdForUpdate(workRecordId);
+        record = baseMapper.selectByIdForUpdateForTenant(workRecordId, tenantId);
+        if (record == null) {
+            throw BusinessException.of(404, "error.workRecord.notFound2");
+        }
 
         // 差戻しコメントはtrim後必須・最大500文字（R3R-12）。
         String trimmed = comment == null ? "" : comment.trim();
@@ -1013,11 +1047,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
         requireTransition(record, "差戻し");
         // 条件付きUPDATE（CAS）で差戻しコメントを保存する（R3R-10/R3R-12）。
-        int updated = baseMapper.update(null, new UpdateWrapper<WorkRecord>()
-                .eq("id", workRecordId)
-                .eq("status", "提出済")
-                .set("status", "差戻し")
-                .set("reject_comment", trimmed));
+        int updated = baseMapper.updateToRejectedForTenant(workRecordId, record.getVersion(), trimmed, tenantId);
         if (updated != 1) {
             throw BusinessException.of(409, "error.workRecord.concurrentModified");
         }
@@ -1040,12 +1070,13 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
     /** 契約IDから稼働要員に紐付くログインユーザーIDを解決する（未紐付けは null）。 */
     private Long resolveEngineerUserId(Long contractId) {
-        Contract contract = contractMapper.selectById(contractId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Contract contract = contractMapper.selectByIdForTenant(contractId, tenantId);
         if (contract == null || contract.getEngineerId() == null) {
             return null;
         }
         com.ses.entity.EngineerAccountLink link =
-                engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
+                engineerAccountLinkMapper.selectByEngineerIdAndTenant(contract.getEngineerId(), tenantId);
         return link == null ? null : link.getSysUserId();
     }
 }

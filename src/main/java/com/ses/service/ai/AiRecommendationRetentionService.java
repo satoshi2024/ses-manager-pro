@@ -8,4 +8,8 @@ import java.time.LocalDateTime;
 public interface AiRecommendationRetentionService {
 
     int purgeExpiredRedactedSummaries(LocalDateTime now);
+
+    default int purgeExpiredRedactedSummaries(LocalDateTime now, int maxRows) {
+        return purgeExpiredRedactedSummaries(now);
+    }
 }

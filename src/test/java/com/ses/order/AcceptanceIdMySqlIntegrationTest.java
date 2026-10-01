@@ -74,13 +74,13 @@ class AcceptanceIdMySqlIntegrationTest {
     @DisplayName("実MySQL8: 通常1ページ目外の目標検収が acceptanceId 指定で1件取得され、越権主体では0件となる")
     void mysql_pageGrid_withAcceptanceId_scopeAndBoundaryIntegration() {
         String suffix = "-MYSQL-" + System.nanoTime();
-        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, deleted_flag) VALUES (?, 'B', 0)",
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, company_name, trust_level, deleted_flag) VALUES ('default', ?, 'B', 0)",
                 "MYSQL顧客" + suffix);
         Long customerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM m_customer WHERE company_name = ?", Long.class, "MYSQL顧客" + suffix);
 
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) "
-                + "VALUES (?, '正社員', '稼動中', NULL)", "MYSQL要員1" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status, organization_id) "
+                + "VALUES ('default', ?, '正社員', '稼動中', NULL)", "MYSQL要員1" + suffix);
         Long eng1Id = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "MYSQL要員1" + suffix);
 
@@ -110,13 +110,13 @@ class AcceptanceIdMySqlIntegrationTest {
         organizationService.assignUser(UserOrganization.builder()
                 .userId(engineerUser1.getId()).organizationId(orgAId).primaryFlag(1)
                 .validFrom(LocalDate.of(2020, 1, 1)).build());
-        jdbcTemplate.update("INSERT INTO t_engineer_account_link (engineer_id, sys_user_id) VALUES (?, ?)",
+        jdbcTemplate.update("INSERT INTO t_engineer_account_link (tenant_id, engineer_id, sys_user_id) VALUES ('default', ?, ?)",
                 eng1Id, engineerUser1.getId());
 
         // 契約1（最古、定点抽出ターゲット）を登録・提出
         jdbcTemplate.update(
-                "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, start_date, selling_price, cost_price, status, acceptance_required)"
-                        + " VALUES (?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', 1)",
+                "INSERT INTO t_contract (tenant_id, contract_no, engineer_id, project_id, customer_id, start_date, selling_price, cost_price, status, acceptance_required)"
+                        + " VALUES ('default', ?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', 1)",
                 "MYSQL-C1" + suffix, eng1Id, projectId, customerId);
         Long targetContractId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_contract WHERE contract_no = ?", Long.class, "MYSQL-C1" + suffix);
@@ -130,13 +130,13 @@ class AcceptanceIdMySqlIntegrationTest {
 
         // 契約2〜5を追加作成
         for (int i = 2; i <= 5; i++) {
-            jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', '稼動中', ?)",
+            jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status, organization_id) VALUES ('default', ?, '正社員', '稼動中', ?)",
                     "MYSQL要員" + i + suffix, orgAId);
             Long engId = jdbcTemplate.queryForObject(
                     "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "MYSQL要員" + i + suffix);
             jdbcTemplate.update(
-                    "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, start_date, selling_price, cost_price, status, acceptance_required)"
-                            + " VALUES (?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', 1)",
+                    "INSERT INTO t_contract (tenant_id, contract_no, engineer_id, project_id, customer_id, start_date, selling_price, cost_price, status, acceptance_required)"
+                            + " VALUES ('default', ?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', 1)",
                     "MYSQL-C" + i + suffix, engId, projectId, customerId);
             Long cId = jdbcTemplate.queryForObject(
                     "SELECT id FROM t_contract WHERE contract_no = ?", Long.class, "MYSQL-C" + i + suffix);
@@ -175,6 +175,7 @@ class AcceptanceIdMySqlIntegrationTest {
         user.setRealName(realName);
         user.setRole(role);
         user.setStatus(1);
+        user.setTenantId("default");
         sysUserMapper.insert(user);
         return user;
     }

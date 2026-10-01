@@ -11,7 +11,9 @@ import com.ses.service.security.DataScopeService;
 import com.ses.service.security.MfaService;
 import com.ses.service.security.OrganizationScopeService;
 import com.ses.service.security.PersistentSessionService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -20,7 +22,10 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.test.context.TestSecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.ArrayList;
@@ -61,6 +66,20 @@ class ContractPaginationTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("tenant-a");
+        com.ses.entity.SysUser user = new com.ses.entity.SysUser();
+        user.setId(1L);
+        user.setUsername("contract-pagination-test");
+        user.setPassword("password");
+        user.setRole("管理者");
+        user.setStatus(1);
+        user.setTenantId("tenant-a");
+        com.ses.config.LoginUser principal = new com.ses.config.LoginUser(user,
+                List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_管理者")));
+        SecurityContext securityContext = SecurityContextHolder.createEmptyContext();
+        securityContext.setAuthentication(new UsernamePasswordAuthenticationToken(principal, null,
+                principal.getAuthorities()));
+        TestSecurityContextHolder.setContext(securityContext);
         datasetTotal = 147L;
         when(organizationScopeService.hasFullAccess()).thenReturn(true);
         lenient().when(organizationScopeService.intersectWithDataScope(any(), any()))
@@ -71,7 +90,7 @@ class ContractPaginationTest {
         when(authorizationService.isAllowed(any(), any())).thenReturn(true);
         when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
         when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+                any(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
             @SuppressWarnings("unchecked")
             Page<ContractListDto> page = invocation.getArgument(0);
             String status = invocation.getArgument(1);
@@ -100,8 +119,12 @@ class ContractPaginationTest {
         });
     }
 
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
+
     @Test
-    @WithMockUser(username = "admin", roles = "管理者")
     @DisplayName("既定20件で147件を8ページに分割する")
     void defaultPageSize_is20And147RowsHaveEightPages() throws Exception {
         mockMvc.perform(get("/api/contracts"))
@@ -123,7 +146,6 @@ class ContractPaginationTest {
             "101,2,1",
             "147,2,47"
     })
-    @WithMockUser(username = "admin", roles = "管理者")
     @DisplayName("0/1/100/101/147件の境界で欠落しない")
     void rowCountBoundaries_areReachable(long total, long current, int expectedRecords) throws Exception {
         datasetTotal = total;
@@ -147,7 +169,6 @@ class ContractPaginationTest {
             "1,101,1,100",
             "2,1000,2,100"
     })
-    @WithMockUser(username = "admin", roles = "管理者")
     @DisplayName("負数・0・100件超のpage指定を正規化する")
     void unsafePageParameters_areNormalized(long current, long size, long expectedCurrent, long expectedSize)
             throws Exception {
@@ -160,7 +181,6 @@ class ContractPaginationTest {
     }
 
     @Test
-    @WithMockUser(username = "manager", roles = "マネージャー")
     @DisplayName("マネージャーの37件はscope後total 37・2ページになる")
     void managerScope_totalIsCalculatedAfterScope() throws Exception {
         Set<Long> visibleIds = LongStream.rangeClosed(1, 37).boxed().collect(java.util.stream.Collectors.toSet());
@@ -178,12 +198,11 @@ class ContractPaginationTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<Long>> idsCaptor = ArgumentCaptor.forClass(List.class);
         verify(contractMapper).selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), idsCaptor.capture());
+                any(), any(), any(), any(), idsCaptor.capture(), any());
         org.junit.jupiter.api.Assertions.assertEquals(37, idsCaptor.getValue().size());
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = "管理者")
     @DisplayName("filter後のtotalをページング母数にする")
     void filteredTotal_isReturnedByPageQuery() throws Exception {
         mockMvc.perform(get("/api/contracts").param("status", "稼動中").param("size", "20"))
@@ -193,7 +212,6 @@ class ContractPaginationTest {
     }
 
     @Test
-    @WithMockUser(username = "manager", roles = "マネージャー")
     @DisplayName("scope 0件でも正規化済み空ページを返す")
     void emptyScope_returnsNormalizedEmptyPageWithoutMapperCall() throws Exception {
         when(organizationScopeService.hasFullAccess()).thenReturn(false);
@@ -206,6 +224,6 @@ class ContractPaginationTest {
                 .andExpect(jsonPath("$.data.size").value(20))
                 .andExpect(jsonPath("$.data.total").value(0));
         verify(contractMapper, never()).selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), any());
+                any(), any(), any(), any(), any(), any());
     }
 }

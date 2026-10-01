@@ -113,7 +113,7 @@ class LeaveApprovalFlowIntegrationTest {
         jdbcTemplate.update("INSERT INTO m_organization_unit (tenant_id, legal_entity_id, code, name, type, valid_from, status) "
                 + "VALUES (1, 70001, ?, ?, '部門', '2026-01-01', '有効')", code, name);
         long organizationId = jdbcTemplate.queryForObject("SELECT id FROM m_organization_unit WHERE code = ?", Long.class, code);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', 'Bench', ?)",
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status, organization_id) VALUES ('default', ?, '正社員', 'Bench', ?)",
                 name, organizationId);
         engineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, name);
         jdbcTemplate.update("INSERT INTO m_work_calendar (legal_entity_id, organization_id, engineer_id, name, valid_from, status) "
@@ -126,11 +126,13 @@ class LeaveApprovalFlowIntegrationTest {
                 .or()
                 .eq(EngineerAccountLink::getEngineerId, engineerId));
         EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId("default");
         link.setEngineerId(engineerId);
         link.setSysUserId(APPLICANT_USER_ID);
         engineerAccountLinkMapper.insert(link);
         // H2 replayのsys_user.role ENUMはV1の4ロール（要員はV32で追加されるためH2 contextに無い）。
         // 申請者DB行のroleは承認engineの自己承認除外（ID比較）に影響しないため管理者を使う。
+        sysUserMapper.deleteById(APPLICANT_USER_ID);
         insertUser(APPLICANT_USER_ID, "leave-applicant", "管理者");
         authenticate(APPLICANT_USER_ID, "要員");
         insertRoute(List.of(List.of(approverId)));
@@ -141,6 +143,7 @@ class LeaveApprovalFlowIntegrationTest {
         SecurityContextHolder.clearContext();
         engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
                 .eq(EngineerAccountLink::getSysUserId, APPLICANT_USER_ID));
+        sysUserMapper.deleteById(APPLICANT_USER_ID);
     }
 
     @Test
@@ -258,7 +261,14 @@ class LeaveApprovalFlowIntegrationTest {
     }
 
     private long insertUser(Long fixedId, String prefix, String role) {
+        if (fixedId != null) {
+            String username = prefix + "-" + System.nanoTime();
+            jdbcTemplate.update("INSERT INTO sys_user (id, tenant_id, username, password, real_name, role, status) VALUES (?, 'default', ?, 'x', ?, ?, 1)",
+                    fixedId, username, prefix, role);
+            return fixedId;
+        }
         SysUser user = SysUser.builder()
+                .tenantId("default")
                 .username(prefix + "-" + System.nanoTime())
                 .password("x")
                 .realName(prefix)

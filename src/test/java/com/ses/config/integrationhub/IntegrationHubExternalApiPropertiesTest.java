@@ -42,6 +42,32 @@ class IntegrationHubExternalApiPropertiesTest {
     }
 
     @Test
+    void enabledPublicApiRequiresDedicatedDatabaseAndBoundTenant() {
+        IntegrationHubExternalApiProperties properties = new IntegrationHubExternalApiProperties();
+        properties.getPublicApi().setEnabled(true);
+        properties.getPublicApi().setPublicIdKey("test-integration-hub-public-id-key-at-least-32-bytes");
+        properties.getExternalTransport().setEnabled(false);
+        properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.MOCK);
+
+        assertThrows(IllegalStateException.class, properties::validateBoundaries);
+
+        properties.getTopology().setMode("SHARED_DATABASE");
+        properties.getTopology().setBoundTenantId("tenant-a");
+        assertThrows(IllegalStateException.class, properties::validateBoundaries);
+    }
+
+    @Test
+    void tenantBindingMismatchIsForbidden() {
+        IntegrationHubExternalApiProperties properties = new IntegrationHubExternalApiProperties();
+        properties.getTopology().setMode("DEDICATED_DATABASE");
+        properties.getTopology().setBoundTenantId("tenant-a");
+
+        assertDoesNotThrow(() -> properties.assertTenantBound("tenant-a"));
+        assertThrows(ExternalApiSecurityException.class,
+                () -> properties.assertTenantBound("tenant-b"));
+    }
+
+    @Test
     void enabledLoopbackTransportWithoutExplicitPortFailsClosedAtStartup() {
         IntegrationHubExternalApiProperties properties = new IntegrationHubExternalApiProperties();
         properties.getPublicApi().setEnabled(false);

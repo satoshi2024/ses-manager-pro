@@ -392,6 +392,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public byte[] download(Long contractId, Long deliveryId) {
         Contract contract = requireVisibleContract(contractId);
         requireAnyContractRole();
@@ -608,7 +609,9 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
             accessLog.setOccurredAt(LocalDateTime.now());
             documentAccessLogMapper.insert(accessLog);
         } catch (Exception e) {
-            log.warn("document access logの記録に失敗しました（documentId={}）", documentId, e);
+            log.error("文書アクセス監査ログの記録に失敗したためダウンロードをロールバックします: documentId={} exceptionClass={}",
+                    documentId, e.getClass().getName());
+            throw new BusinessException(500, "文書アクセス監査ログの記録に失敗しました。", e);
         }
     }
 
@@ -616,6 +619,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         com.ses.dto.document.DocumentRegisterRequest registerRequest =
                 com.ses.dto.document.DocumentRegisterRequest.builder()
                         .documentType(documentType)
+                        .direction("DISPATCH_LEDGER".equals(documentType) ? "INTERNAL" : "OUTGOING")
                         .title(messageSource.getMessage("doc.title." + documentType,
                                 null, documentType, org.springframework.context.i18n.LocaleContextHolder.getLocale()))
                         .counterpartyType("CUSTOMER")

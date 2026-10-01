@@ -2,6 +2,7 @@ package com.ses.service.impl;
 
 import com.ses.mapper.ResumeIngestionMapper;
 import com.ses.service.FileReferenceProvider;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -21,7 +22,8 @@ public class ResumeIngestionFileReferenceProvider implements FileReferenceProvid
     @Override
     public Set<String> referencedFileNames() {
         Set<String> refs = new HashSet<>();
-        for (String name : resumeIngestionMapper.selectAllStoredFileNames()) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        for (String name : resumeIngestionMapper.selectAllStoredFileNamesForTenant(tenantId)) {
             if (name != null && !name.isBlank()) {
                 refs.add(name);
             }

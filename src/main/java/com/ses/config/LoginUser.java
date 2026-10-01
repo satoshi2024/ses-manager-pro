@@ -12,10 +12,17 @@ public class LoginUser implements UserDetails, CredentialsContainer {
 
     private final SysUser sysUser;
     private final Collection<? extends GrantedAuthority> authorities;
+    /** 認証時に束縛されたtenant。未束縛の手動principalは推測せずfail-closedする。 */
+    private final String tenantId;
 
     public LoginUser(SysUser sysUser, Collection<? extends GrantedAuthority> authorities) {
+        this(sysUser, authorities, null);
+    }
+
+    public LoginUser(SysUser sysUser, Collection<? extends GrantedAuthority> authorities, String tenantId) {
         this.sysUser = sysUser;
         this.authorities = authorities;
+        this.tenantId = tenantId;
     }
 
     @Override
@@ -27,6 +34,11 @@ public class LoginUser implements UserDetails, CredentialsContainer {
 
     public SysUser getSysUser() {
         return sysUser;
+    }
+
+    /** 認証済みユーザーへ固定されたtenantを返す。認証主体以外からtenantを解決しない。 */
+    public String getTenantId() {
+        return tenantId != null ? tenantId : (sysUser == null ? null : sysUser.getTenantId());
     }
 
     @Override

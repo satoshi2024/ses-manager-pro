@@ -27,6 +27,11 @@ public class EngineerApiController {
     private final com.ses.service.ProposalService proposalService;
     private final com.ses.service.RetentionRiskService retentionRiskService;
     private final com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
+    private final com.ses.service.security.TenantOwnershipResolver tenantOwnershipResolver;
+    private final com.ses.mapper.EngineerMapper engineerMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
 
     /**
      * エンジニア一覧（ページネーション）
@@ -53,53 +58,14 @@ public class EngineerApiController {
         if (allowedIds != null && allowedIds.isEmpty()) {
             return ApiResult.success(new Page<>(current, size, 0));
         }
-        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Engineer> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-        if (allowedIds != null) {
-            queryWrapper.in(Engineer::getId, allowedIds);
-        }
-
-        if (org.springframework.util.StringUtils.hasText(fullName)) {
-            queryWrapper.like(Engineer::getFullName, fullName);
-        }
-        if (org.springframework.util.StringUtils.hasText(status)) {
-            queryWrapper.eq(Engineer::getStatus, status);
-        }
-        if (org.springframework.util.StringUtils.hasText(employmentType)) {
-            queryWrapper.eq(Engineer::getEmploymentType, employmentType);
-        }
-        if (skillIds != null && !skillIds.isEmpty()) {
-            for (Long skillId : skillIds) {
-                if (skillId == null) {
-                    continue;
-                }
-                queryWrapper.inSql(Engineer::getId,
-                    "SELECT engineer_id FROM t_engineer_skill WHERE skill_id = " + skillId);
-            }
-        }
-        if (salesUserId != null) {
-            queryWrapper.inSql(Engineer::getId,
-                "SELECT engineer_id FROM t_engineer_sales WHERE sales_user_id = " + salesUserId + " AND released_at IS NULL AND deleted_flag = 0");
-        }
-        if (accountLinked != null) {
-            // 要員セルフサービス勤怠の初期設定漏れ（＝ログインアカウント未紐付け）を探すための絞り込み。
-            // engineer_id IS NOT NULL を明示するのは、NULL が1件でも混ざると NOT IN が
-            // 全行 UNKNOWN になり結果が黙って空になるため。
-            String subQuery = "SELECT engineer_id FROM t_engineer_account_link WHERE engineer_id IS NOT NULL";
-            if (accountLinked) {
-                queryWrapper.inSql(Engineer::getId, subQuery);
-            } else {
-                queryWrapper.notInSql(Engineer::getId, subQuery);
-            }
-        }
-
-        queryWrapper.orderByDesc(Engineer::getId);
 
         boolean highRiskOnly = "high".equalsIgnoreCase(riskLevel);
         Page<com.ses.dto.engineer.EngineerListDto> dtoPage;
         if (highRiskOnly) {
             // 定着リスクは算出項目のためDBクエリで絞り込めない。上限(1000件)まで取得しメモリ上でフィルタ・ページングする。
-            queryWrapper.last("LIMIT " + PageUtils.MAX_PAGE_SIZE);
-            java.util.List<Engineer> all = engineerService.list(queryWrapper);
+            java.util.List<Engineer> all = engineerMapper.selectPageForTenant(
+                    new Page<>(1, PageUtils.MAX_PAGE_SIZE), currentTenant(), allowedIds,
+                    fullName, status, employmentType, skillIds, salesUserId, accountLinked).getRecords();
             java.util.List<com.ses.dto.engineer.EngineerListDto> filtered = toDtoList(all).stream()
                     .filter(dto -> Boolean.TRUE.equals(dto.getRetentionHighRisk()))
                     .collect(java.util.stream.Collectors.toList());
@@ -111,7 +77,8 @@ public class EngineerApiController {
             dtoPage = new Page<>(page.getCurrent(), page.getSize(), total);
             dtoPage.setRecords(filtered.subList(fromIndex, toIndex));
         } else {
-            Page<Engineer> resultPage = engineerService.page(page, queryWrapper);
+            Page<Engineer> resultPage = engineerMapper.selectPageForTenant(page, currentTenant(), allowedIds,
+                    fullName, status, employmentType, skillIds, salesUserId, accountLinked);
             dtoPage = new Page<>(resultPage.getCurrent(), resultPage.getSize(), resultPage.getTotal());
             dtoPage.setRecords(toDtoList(resultPage.getRecords()));
         }
@@ -163,15 +130,11 @@ public class EngineerApiController {
      */
     @GetMapping("/options")
     public ApiResult<java.util.List<com.ses.dto.common.OptionDto>> getOptions() {
-        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Engineer> queryWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+        String tenantId = currentTenant();
         java.util.Set<Long> allowed = effectiveEngineerIds();
-        if (allowed != null) {
-            if (allowed.isEmpty()) return ApiResult.success(java.util.Collections.emptyList());
-            queryWrapper.in(Engineer::getId, allowed);
-        }
-        queryWrapper.select(Engineer::getId, Engineer::getFullName)
-                    .orderByDesc(Engineer::getId);
-        java.util.List<com.ses.dto.common.OptionDto> options = engineerService.list(queryWrapper).stream()
+        if (allowed.isEmpty()) return ApiResult.success(java.util.Collections.emptyList());
+        java.util.List<com.ses.dto.common.OptionDto> options = tenantOwnershipResolver.selectEngineers(
+                tenantId, allowed, null, null, null).stream()
                 .map(e -> new com.ses.dto.common.OptionDto(e.getId(), e.getFullName()))
                 .collect(java.util.stream.Collectors.toList());
         return ApiResult.success(options);
@@ -183,7 +146,7 @@ public class EngineerApiController {
     @GetMapping("/{id}")
     public ApiResult<Engineer> getById(@PathVariable Long id) {
         assertEngineerVisible(id);
-        var entity = engineerService.getById(id);
+        var entity = tenantOwnershipResolver.selectEngineer(currentTenant(), id);
         if (entity == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         return ApiResult.success(entity);
     }
@@ -204,6 +167,7 @@ public class EngineerApiController {
     public ApiResult<Engineer> save(@Valid @RequestBody com.ses.dto.engineer.EngineerSaveDto engineerDto) {
         Engineer engineer = new Engineer();
         org.springframework.beans.BeanUtils.copyProperties(engineerDto, engineer);
+        engineer.setLegalEntityId(requireLegalEntityContext().requireCurrentLegalEntityId());
         com.ses.common.util.EntityProtectUtil.protectForCreate(engineer);
         engineerService.save(engineer);
         return ApiResult.success(engineer);
@@ -215,34 +179,61 @@ public class EngineerApiController {
         org.springframework.beans.BeanUtils.copyProperties(engineerDto, engineer);
         engineer.setId(id);
         assertEngineerVisible(id);
+        Engineer existing = tenantOwnershipResolver.selectEngineer(currentTenant(), id);
+        if (existing == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        com.ses.service.security.LegalEntityContextService ctx = requireLegalEntityContext();
+        ctx.assertCurrent(existing.getLegalEntityId());
+        engineer.setLegalEntityId(existing.getLegalEntityId());
         return ApiResult.success(engineerService.updateWithStatusGuard(engineer));
+    }
+
+    private com.ses.service.security.LegalEntityContextService requireLegalEntityContext() {
+        if (legalEntityContextService == null) {
+            throw com.ses.common.exception.BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        return legalEntityContextService;
     }
 
     /**
      * エンジニア削除
      */
     @DeleteMapping("/{id}")
-    public ApiResult<Boolean> delete(@PathVariable Long id) {
+    public ApiResult<Boolean> delete(@PathVariable Long id, @RequestParam Integer version) {
         assertEngineerVisible(id);
-        boolean success = engineerService.removeById(id);
+        Engineer current = tenantOwnershipResolver.selectEngineer(currentTenant(), id);
+        if (current == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        if (!java.util.Objects.equals(current.getVersion(), version)) {
+            throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
+        }
+        if (current.getLegalEntityId() == null) {
+            throw com.ses.common.exception.BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        requireLegalEntityContext().assertCurrent(current.getLegalEntityId());
+        boolean success = engineerService.removeById(id, version);
         if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         return ApiResult.success(true);
     }
 
     private java.util.Set<Long> effectiveEngineerIds() {
+        String tenantId = currentTenant();
+        java.util.Set<Long> ownedIds = new java.util.HashSet<>(tenantOwnershipResolver.resolveEngineerIds(tenantId));
         java.util.Set<Long> dataIds = dataScopeService.isScoped()
                 ? dataScopeService.allowedEngineerIds() : null;
-        if (organizationScopeService.hasFullAccess()) {
-            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        if (dataIds != null) ownedIds.retainAll(dataIds);
+        if (!organizationScopeService.hasFullAccess()) {
+            ownedIds.retainAll(organizationScopeService.allowedEngineerIds(java.time.LocalDate.now()));
         }
-        return organizationScopeService.intersectWithDataScope(
-                organizationScopeService.allowedEngineerIds(java.time.LocalDate.now()), dataIds);
+        return ownedIds;
     }
 
     private void assertEngineerVisible(Long id) {
         java.util.Set<Long> allowed = effectiveEngineerIds();
-        if (allowed != null && !allowed.contains(id)) {
+        if (!allowed.contains(id)) {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
+    }
+
+    private String currentTenant() {
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 }

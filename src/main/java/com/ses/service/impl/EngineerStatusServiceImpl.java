@@ -29,7 +29,8 @@ public class EngineerStatusServiceImpl implements EngineerStatusService {
 
     @Override
     public void onProposalCreated(Long engineerId) {
-        Engineer engineer = engineerMapper.selectByIdForUpdate(engineerId);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        Engineer engineer = engineerMapper.selectByIdForUpdateForTenant(engineerId, tenantId);
         if (engineer != null && "Bench".equals(engineer.getStatus())) {
             engineer.setStatus("提案中");
             engineerMapper.updateById(engineer);
@@ -38,7 +39,8 @@ public class EngineerStatusServiceImpl implements EngineerStatusService {
 
     @Override
     public void onContractActive(Long engineerId) {
-        Engineer engineer = engineerMapper.selectByIdForUpdate(engineerId);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        Engineer engineer = engineerMapper.selectByIdForUpdateForTenant(engineerId, tenantId);
         if (engineer != null) {
             engineer.setStatus("稼動中");
             engineerMapper.updateById(engineer);
@@ -47,7 +49,8 @@ public class EngineerStatusServiceImpl implements EngineerStatusService {
 
     @Override
     public void releaseIfIdle(Long engineerId) {
-        Engineer engineer = engineerMapper.selectByIdForUpdate(engineerId);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        Engineer engineer = engineerMapper.selectByIdForUpdateForTenant(engineerId, tenantId);
         if (engineer == null) {
             return;
         }
@@ -56,11 +59,9 @@ public class EngineerStatusServiceImpl implements EngineerStatusService {
                 .eq(Proposal::getEngineerId, engineerId)
                 .notIn(Proposal::getStatus, Arrays.asList("成約", "見送り")));
 
-        Long contractCount = contractMapper.selectCount(new LambdaQueryWrapper<Contract>()
-                .eq(Contract::getEngineerId, engineerId)
-                .eq(Contract::getStatus, "稼動中"));
+        long contractCount = contractMapper.countActiveByEngineerForTenant(engineerId, tenantId);
 
-        if ((proposalCount == null || proposalCount == 0L) && (contractCount == null || contractCount == 0L)) {
+        if ((proposalCount == null || proposalCount == 0L) && contractCount == 0L) {
             engineer.setStatus("Bench");
             engineerMapper.updateById(engineer);
         }

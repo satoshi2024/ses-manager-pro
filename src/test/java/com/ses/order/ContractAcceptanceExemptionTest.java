@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Transactional
 @DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_CLASS)
 @Sql(scripts = "/sql/engineer-schema-h2.sql")
+@com.ses.test.EnableDefaultTenantTestContext
 class ContractAcceptanceExemptionTest {
 
     @Autowired ContractService contractService;
@@ -39,10 +40,11 @@ class ContractAcceptanceExemptionTest {
 
     @BeforeEach
     void setUp() {
+        com.ses.test.TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
         String suffix = "-" + System.nanoTime();
-        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, deleted_flag) VALUES (?, 'B', 0)", "EX顧客" + suffix);
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, company_name, trust_level, deleted_flag) VALUES ('default', ?, 'B', 0)", "EX顧客" + suffix);
         customerId = jdbcTemplate.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, "EX顧客" + suffix);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')", "EX要員" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status) VALUES ('default', ?, '正社員', 'Bench')", "EX要員" + suffix);
         engineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "EX要員" + suffix);
         jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) VALUES (?, ?, '募集中')", "EX案件" + suffix, customerId);
         projectId = jdbcTemplate.queryForObject("SELECT id FROM t_project WHERE project_name = ?", Long.class, "EX案件" + suffix);
@@ -87,8 +89,7 @@ class ContractAcceptanceExemptionTest {
         c.setAcceptanceExemptionReason("旧理由");
         contractService.saveWithBusinessRules(c);
 
-        Contract reverted = baseContract();
-        reverted.setId(c.getId());
+        Contract reverted = contractService.getById(c.getId());
         reverted.setAcceptanceRequired(true);
         contractService.updateWithBusinessRules(reverted);
         Contract reloaded = contractService.getById(c.getId());

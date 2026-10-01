@@ -11,12 +11,15 @@ import com.ses.mapper.ProjectPositionMapper;
 import com.ses.service.ContractService;
 import com.ses.service.ProposalService;
 import com.ses.service.staffing.StaffingContractSyncService;
+import com.ses.test.EnableDefaultTenantTestContext;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.transaction.BeforeTransaction;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -37,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional
+@EnableDefaultTenantTestContext
 class StaffingContractSyncTest {
 
     @Autowired
@@ -68,18 +72,24 @@ class StaffingContractSyncTest {
     private long positionId;
     private String suffix;
 
+    // 更新処理のREQUIRES_NEWから参照できるよう、法人fixtureをテストtx開始前に確定する。
+    @BeforeTransaction
+    void ensureLegalEntityBeforeTransaction() {
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
+    }
+
     @BeforeEach
     void setUp() {
         suffix = String.valueOf(System.nanoTime());
-        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "T076sync-" + suffix);
+        jdbcTemplate.update("INSERT INTO m_customer (company_name, tenant_id) VALUES (?, 'default')", "T076sync-" + suffix);
         long customerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM m_customer WHERE company_name = ?", Long.class, "T076sync-" + suffix);
         jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) "
                 + "VALUES (?, ?, '募集中')", "T076sync-prj-" + suffix, customerId);
         projectId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_project WHERE project_name = ?", Long.class, "T076sync-prj-" + suffix);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) "
-                + "VALUES (?, '正社員', 'Bench')", "T076sync-eng-" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, tenant_id) "
+                + "VALUES (?, '正社員', 'Bench', 'default')", "T076sync-eng-" + suffix);
         engineerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "T076sync-eng-" + suffix);
         positionId = insertPosition(projectId, "P1");
@@ -146,15 +156,15 @@ class StaffingContractSyncTest {
         setupTx.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         Contract contract = setupTx.execute(s -> {
             String suffix = String.valueOf(System.nanoTime());
-            jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "T076renew-" + suffix);
+            jdbcTemplate.update("INSERT INTO m_customer (company_name, tenant_id) VALUES (?, 'default')", "T076renew-" + suffix);
             long customerId = jdbcTemplate.queryForObject(
                     "SELECT id FROM m_customer WHERE company_name = ?", Long.class, "T076renew-" + suffix);
             jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) "
                     + "VALUES (?, ?, '募集中')", "T076renew-prj-" + suffix, customerId);
             long projectRow = jdbcTemplate.queryForObject(
                     "SELECT id FROM t_project WHERE project_name = ?", Long.class, "T076renew-prj-" + suffix);
-            jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) "
-                    + "VALUES (?, '正社員', 'Bench')", "T076renew-eng-" + suffix);
+            jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, tenant_id) "
+                    + "VALUES (?, '正社員', 'Bench', 'default')", "T076renew-eng-" + suffix);
             long engRow = jdbcTemplate.queryForObject(
                     "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "T076renew-eng-" + suffix);
             jdbcTemplate.update("INSERT INTO t_project_position "
@@ -293,7 +303,7 @@ class StaffingContractSyncTest {
 
     private long insertProject() {
         String name = "T076sync-prj2-" + suffix;
-        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", name);
+        jdbcTemplate.update("INSERT INTO m_customer (company_name, tenant_id) VALUES (?, 'default')", name);
         long customerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM m_customer WHERE company_name = ?", Long.class, name);
         jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) "

@@ -1,12 +1,12 @@
 package com.ses.service.cloudsign;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.enums.CloudSignErrorCode;
 import com.ses.common.enums.DispatchState;
 import com.ses.config.CloudSignProperties;
 import com.ses.dto.cloudsign.CloudSignDocument;
 import com.ses.entity.ContractDocument;
 import com.ses.mapper.ContractDocumentMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -65,10 +65,11 @@ public class CloudSignSyncService {
      * terminal行・外部ID未設定行はGETせずそのまま（逆戻り・不要呼出し防止）。
      */
     public void syncDocument(Long id) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (!properties.isEnabled()) {
             return;
         }
-        ContractDocument doc = mapper.selectById(id);
+        ContractDocument doc = mapper.selectByIdForTenant(id, tenantId);
         if (doc == null) {
             return;
         }
@@ -94,18 +95,21 @@ public class CloudSignSyncService {
 
     /** poll対象のactive行を古い順にbatchで同期する。一行の失敗でbatch全体を止めない。 */
     public int pollDue(int limit) {
+        return pollDue(limit, AccountingTenantContextHolder.requireTenantContext());
+    }
+
+    /** inventory runnerからtenantを明示して呼び出すpoll本体。 */
+    public int pollDue(int limit, String tenantId) {
+        if (tenantId == null || tenantId.isBlank()
+                || !tenantId.equals(AccountingTenantContextHolder.requireTenantContext())) {
+            throw new IllegalStateException("契約書pollのtenant contextが不正です");
+        }
         if (!properties.isEnabled()) {
             return 0;
         }
         LocalDateTime now = LocalDateTime.now();
-        java.util.List<ContractDocument> due = mapper.selectList(new LambdaQueryWrapper<ContractDocument>()
-                .in(ContractDocument::getDispatchState, POLL_STATES)
-                .isNotNull(ContractDocument::getCloudsignDocumentId)
-                .and(w -> w.isNull(ContractDocument::getNextAttemptAt)
-                        .or().le(ContractDocument::getNextAttemptAt, now))
-                .orderByAsc(ContractDocument::getLastSyncedAt)
-                .orderByAsc(ContractDocument::getId)
-                .last("LIMIT " + Math.max(1, limit)));
+        java.util.List<ContractDocument> due = mapper.selectDispatchDueForTenant(POLL_STATES, now,
+                Math.max(1, limit), tenantId);
         int processed = 0;
         for (ContractDocument doc : due) {
             try {

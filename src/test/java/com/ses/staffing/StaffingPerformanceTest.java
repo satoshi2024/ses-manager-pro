@@ -5,7 +5,9 @@ import com.ses.entity.AllocationPlan;
 import com.ses.entity.Engineer;
 import com.ses.entity.ProjectPosition;
 import com.ses.mapper.ProjectPositionMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.staffing.StaffingHeatmapService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -51,6 +53,7 @@ class StaffingPerformanceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         String suffix = String.valueOf(System.nanoTime());
         jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "T080perf-" + suffix);
         long customerId = jdbcTemplate.queryForObject(
@@ -59,6 +62,11 @@ class StaffingPerformanceTest {
                 + "VALUES (?, ?, '募集中')", "T080perf-prj-" + suffix, customerId);
         projectId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_project WHERE project_name = ?", Long.class, "T080perf-prj-" + suffix);
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test

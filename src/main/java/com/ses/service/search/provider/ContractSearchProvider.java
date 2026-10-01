@@ -6,6 +6,7 @@ import com.ses.dto.search.GlobalSearchResultDTO;
 import com.ses.entity.Contract;
 import com.ses.mapper.ContractMapper;
 import com.ses.service.search.GlobalSearchProvider;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.DataScopeService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -51,7 +52,8 @@ public class ContractSearchProvider implements GlobalSearchProvider {
 
         wrapper.orderByDesc(Contract::getUpdatedAt);
 
-        Page<Contract> page = contractMapper.selectPage(new Page<>(1, maxResults), wrapper);
+        Page<Contract> page = contractMapper.selectPageForTenant(new Page<>(1, maxResults), wrapper,
+                AccountingTenantContextHolder.requireTenantContext());
         return page.getRecords().stream().map(c -> GlobalSearchResultDTO.builder()
                 .type(getType())
                 .id(c.getId())

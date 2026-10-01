@@ -2,6 +2,8 @@ package com.ses.portal;
 
 import com.ses.entity.PortalOrganization;
 import com.ses.entity.PortalUser;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -16,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -31,6 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
+@com.ses.test.DisableDefaultTenantTestContext
 class PortalAdminApiTest extends PortalTestSupport {
 
     @Autowired
@@ -48,6 +52,16 @@ class PortalAdminApiTest extends PortalTestSupport {
     @Autowired
     protected com.ses.service.SystemConfigService systemConfigService;
 
+    @BeforeEach
+    void setTenantContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
+
     @Override
     protected JdbcTemplate jdbcTemplate() {
         return jdbcTemplate;
@@ -58,31 +72,36 @@ class PortalAdminApiTest extends PortalTestSupport {
     }
 
     private org.springframework.test.web.servlet.request.RequestPostProcessor adminUser() {
-        return user("admin").roles("管理者");
+        return authentication(com.ses.test.TenantTestSecurity.authentication(
+                1L, "admin", "default", "管理者"));
     }
 
     private org.springframework.test.web.servlet.request.RequestPostProcessor salesUser() {
-        return user("sales").roles("営業");
+        return authentication(com.ses.test.TenantTestSecurity.authentication(
+                2L, "sales", "default", "営業"));
     }
 
     private long insertCustomerOrg() {
-        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "admin-customer-" + unique());
+        jdbcTemplate.update("INSERT INTO m_customer (company_name, tenant_id) VALUES (?, 'default')",
+                "admin-customer-" + unique());
         long customerId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM m_customer", Long.class);
         PortalOrganization org = new PortalOrganization();
         org.setType("CUSTOMER");
         org.setCustomerId(customerId);
+        org.setTenantId("default");
         org.setStatus("ACTIVE");
         organizationMapper.insert(org);
         return org.getId();
     }
 
     private long insertBpOrg() {
-        jdbcTemplate.update("INSERT INTO m_bp_company (legal_name, entity_type, status) "
-                + "VALUES (?, 'CORPORATE', 'ACTIVE')", "admin-bp-" + unique());
+        jdbcTemplate.update("INSERT INTO m_bp_company (legal_name, entity_type, status, tenant_id) "
+                + "VALUES (?, 'CORPORATE', 'ACTIVE', 1)", "admin-bp-" + unique());
         long bpCompanyId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM m_bp_company", Long.class);
         PortalOrganization org = new PortalOrganization();
         org.setType("BP");
         org.setBpCompanyId(bpCompanyId);
+        org.setTenantId("default");
         org.setStatus("ACTIVE");
         organizationMapper.insert(org);
         return org.getId();
@@ -320,8 +339,8 @@ class PortalAdminApiTest extends PortalTestSupport {
                 "ntf-project-" + unique(), orgA.getCustomerId());
         long projectId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_project", Long.class);
         jdbcTemplate.update("INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, status,"
-                        + " start_date, end_date, selling_price, cost_price, acceptance_required)"
-                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, 1)",
+                        + " start_date, end_date, selling_price, cost_price, acceptance_required, tenant_id)"
+                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, 1, 'default')",
                 "NTF-C-" + unique(), engineerId, projectId, orgA.getCustomerId());
         long contractId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_contract", Long.class);
         jdbcTemplate.update("INSERT INTO t_work_record (contract_id, work_month, actual_hours, billing_amount,"
@@ -350,8 +369,8 @@ class PortalAdminApiTest extends PortalTestSupport {
                 "ntf-project2-" + unique(), orgA.getCustomerId());
         long projectId2 = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_project", Long.class);
         jdbcTemplate.update("INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, status,"
-                        + " start_date, end_date, selling_price, cost_price, acceptance_required)"
-                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, 1)",
+                        + " start_date, end_date, selling_price, cost_price, acceptance_required, tenant_id)"
+                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, 1, 'default')",
                 "NTF-C2-" + unique(), engineerId2, projectId2, orgA.getCustomerId());
         long contractId2 = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_contract", Long.class);
         jdbcTemplate.update("INSERT INTO t_work_record (contract_id, work_month, actual_hours, billing_amount,"
@@ -388,22 +407,22 @@ class PortalAdminApiTest extends PortalTestSupport {
 
         // --- 営業DataScope: orgIdなしの招待/access-logs一覧（S13-R1-P1-01） ---
         // 実在営業user＋担当契約からDataScopeを解決する
-        jdbcTemplate.update("INSERT INTO sys_user (username, password, real_name, role, status) "
-                + "VALUES (?, 'x', '営業A', '営業', 1)", "sales-scope-" + unique());
+        jdbcTemplate.update("INSERT INTO sys_user (username, password, real_name, role, status, tenant_id) "
+                + "VALUES (?, 'x', '営業A', '営業', 1, 'default')", "sales-scope-" + unique());
         long salesUserId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM sys_user", Long.class);
         long orgB = insertCustomerOrg();
         long orgC = insertCustomerOrg();
         PortalOrganization orgBEntity = organizationMapper.selectById(orgB);
         // 営業の担当顧客=orgBのcustomerのみ（契約sales_user_idで紐付け）
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')",
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, tenant_id) VALUES (?, '正社員', 'Bench', 'default')",
                 "scope-e-" + unique());
         long engineerId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_engineer", Long.class);
         jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) VALUES (?, ?, '募集中')",
                 "scope-p-" + unique(), orgBEntity.getCustomerId());
         long projectId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_project", Long.class);
         jdbcTemplate.update("INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, status,"
-                        + " start_date, end_date, selling_price, cost_price, sales_user_id, acceptance_required)"
-                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, ?, 1)",
+                        + " start_date, end_date, selling_price, cost_price, sales_user_id, acceptance_required, tenant_id)"
+                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, ?, 1, 'default')",
                 "SCOPE-C-" + unique(), engineerId, projectId, orgBEntity.getCustomerId(), salesUserId);
         // orgBの招待1件・orgCの招待1件
         mockMvc.perform(post("/api/portal-admin/orgs/" + orgB + "/invitations").with(adminUser()).with(csrf())
@@ -425,7 +444,17 @@ class PortalAdminApiTest extends PortalTestSupport {
                     systemConfigService.put("scope.sales-own-data-only", "true", "test"));
 
             // 営業（DataScope有効）: 自担当顧客（orgB）の招待のみ・access logもorgBのみ
-            var salesPrincipal = user(String.valueOf(salesUserId)).roles("営業");
+            com.ses.entity.SysUser salesEntity = new com.ses.entity.SysUser();
+            salesEntity.setId(salesUserId);
+            salesEntity.setUsername("sales-scope");
+            salesEntity.setRole("営業");
+            salesEntity.setStatus(1);
+            salesEntity.setTenantId("default");
+            var salesPrincipal = authentication(new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                    new com.ses.config.LoginUser(salesEntity,
+                            java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_営業"))),
+                    null,
+                    java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_営業"))));
             mockMvc.perform(get("/api/portal-admin/invitations").with(salesPrincipal))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.total").value(1))
@@ -477,7 +506,7 @@ class PortalAdminApiTest extends PortalTestSupport {
     }
 
     private long insertEngineer() {
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')",
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, tenant_id) VALUES (?, '正社員', 'Bench', 'default')",
                 "ntf-engineer-" + unique());
         return jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_engineer", Long.class);
     }

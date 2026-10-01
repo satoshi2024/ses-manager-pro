@@ -10,6 +10,7 @@ import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.ResumeIngestionMapper;
 import com.ses.service.security.impl.FileScopeValidationService;
 import com.ses.service.storage.impl.LocalDocumentStorage;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,6 +34,7 @@ import static org.mockito.Mockito.when;
  * T023 Storage Adapter & Stream Download 単体テスト。
  */
 @ExtendWith(MockitoExtension.class)
+@EnableDefaultTenantTestContext
 class DocumentStorageTest {
 
     @Mock ResumeIngestionMapper resumeIngestionMapper;

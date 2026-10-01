@@ -44,47 +44,47 @@ class ExternalApiReadMapperIntegrationTest {
     @Test
     void engineerProjectionExcludesDeletedRowsAndNeverRequiresInternalDtoColumns() {
         jdbcTemplate.update("""
-                INSERT INTO t_engineer (id, full_name, employment_type, status, available_date, deleted_flag)
-                VALUES (?, ?, ?, ?, ?, 0), (?, ?, ?, ?, ?, 1)
+                INSERT INTO t_engineer (id, full_name, employment_type, status, available_date, legal_entity_id, deleted_flag)
+                VALUES (?, ?, ?, ?, ?, 9, 0), (?, ?, ?, ?, ?, 9, 1)
                 """, ENGINEER_ALLOWED, "fixture-a", "正社員", "Bench", LocalDate.of(2026, 9, 1),
                 ENGINEER_DELETED, "fixture-deleted", "正社員", "Bench", LocalDate.of(2026, 9, 2));
 
         List<ExternalApiReadRow> rows = mapper.selectEngineers(
-                List.of(ENGINEER_ALLOWED, ENGINEER_DELETED), null, 10);
+                List.of(ENGINEER_ALLOWED, ENGINEER_DELETED), null, 10, 9L);
 
         assertEquals(1, rows.size());
         assertEquals(ENGINEER_ALLOWED, rows.get(0).getId());
-        assertEquals(1, mapper.countEngineers(List.of(ENGINEER_ALLOWED, ENGINEER_DELETED)));
+        assertEquals(1, mapper.countEngineers(List.of(ENGINEER_ALLOWED, ENGINEER_DELETED), 9L));
     }
 
     @Test
     void relatedScopeIsAppliedIdenticallyToProjectContractAndInvoiceListAndCount() {
         jdbcTemplate.update("""
-                INSERT INTO m_customer (id, company_name)
-                VALUES (?, ?), (?, ?)
+                INSERT INTO m_customer (id, company_name, legal_entity_id)
+                VALUES (?, ?, 9), (?, ?, 9)
                 """, 9060001L, "fixture-customer-a", 9060002L, "fixture-customer-b");
         jdbcTemplate.update("""
-                INSERT INTO t_engineer (id, full_name, employment_type, status, available_date, deleted_flag)
-                VALUES (?, ?, ?, ?, ?, 0)
+                INSERT INTO t_engineer (id, full_name, employment_type, status, available_date, legal_entity_id, deleted_flag)
+                VALUES (?, ?, ?, ?, ?, 9, 0)
                 """, ENGINEER_ALLOWED, "fixture-contract-engineer", "正社員", "稼動中",
                 LocalDate.of(2026, 1, 1));
         jdbcTemplate.update("""
-                INSERT INTO t_project (id, project_name, customer_id, status, start_date, end_date, deleted_flag)
-                VALUES (?, ?, ?, ?, ?, ?, 0), (?, ?, ?, ?, ?, ?, 0)
+                INSERT INTO t_project (id, project_name, customer_id, status, start_date, end_date, legal_entity_id, deleted_flag)
+                VALUES (?, ?, ?, ?, ?, ?, 9, 0), (?, ?, ?, ?, ?, ?, 9, 0)
                 """, PROJECT_ALLOWED, "internal-a", 9060001L, "募集中",
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31),
                 PROJECT_OTHER_CUSTOMER, "internal-b", 9060002L, "募集中",
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31));
 
         List<ExternalApiReadRow> projects = mapper.selectProjects(
-                List.of(PROJECT_ALLOWED, PROJECT_OTHER_CUSTOMER), List.of(9060001L), null, 10);
+                List.of(PROJECT_ALLOWED, PROJECT_OTHER_CUSTOMER), List.of(9060001L), null, 10, 9L);
         assertEquals(List.of(PROJECT_ALLOWED), projects.stream().map(ExternalApiReadRow::getId).toList());
-        assertEquals(1, mapper.countProjects(List.of(PROJECT_ALLOWED, PROJECT_OTHER_CUSTOMER), List.of(9060001L)));
+        assertEquals(1, mapper.countProjects(List.of(PROJECT_ALLOWED, PROJECT_OTHER_CUSTOMER), List.of(9060001L), 9L));
 
         jdbcTemplate.update("""
                 INSERT INTO t_contract (id, engineer_id, project_id, customer_id, start_date, selling_price, cost_price,
-                                       status, end_date, renewal_decision, deleted_flag)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                                       status, end_date, renewal_decision, legal_entity_id, deleted_flag)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 9, 0), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 9, 0)
                 """, CONTRACT_ALLOWED, ENGINEER_ALLOWED, PROJECT_ALLOWED, 9060001L, LocalDate.of(2026, 1, 1),
                 100L, 50L, "稼動中", LocalDate.of(2026, 12, 31), "継続", CONTRACT_OTHER_PROJECT,
                 ENGINEER_ALLOWED, PROJECT_OTHER_CUSTOMER, 9060002L, LocalDate.of(2026, 1, 1),
@@ -92,10 +92,10 @@ class ExternalApiReadMapperIntegrationTest {
                 "終了");
 
         List<ExternalApiReadRow> contracts = mapper.selectContracts(
-                List.of(CONTRACT_ALLOWED, CONTRACT_OTHER_PROJECT), List.of(PROJECT_ALLOWED), null, 10);
+                List.of(CONTRACT_ALLOWED, CONTRACT_OTHER_PROJECT), List.of(PROJECT_ALLOWED), null, 10, 9L);
         assertEquals(List.of(CONTRACT_ALLOWED), contracts.stream().map(ExternalApiReadRow::getId).toList());
         assertEquals(1, mapper.countContracts(
-                List.of(CONTRACT_ALLOWED, CONTRACT_OTHER_PROJECT), List.of(PROJECT_ALLOWED)));
+                 List.of(CONTRACT_ALLOWED, CONTRACT_OTHER_PROJECT), List.of(PROJECT_ALLOWED), 9L));
 
         jdbcTemplate.update("""
                 INSERT INTO t_work_record (id, contract_id, work_month, actual_hours, status)
@@ -107,11 +107,11 @@ class ExternalApiReadMapperIntegrationTest {
                 WORK_RECORD_MULTI_OTHER, CONTRACT_OTHER_PROJECT, "2026-10", 160.0, "確定");
         jdbcTemplate.update("""
                 INSERT INTO t_invoice (id, invoice_no, customer_id, billing_month, subtotal, tax, total,
-                                       status, issued_date, due_date, paid_date, deleted_flag)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0),
-                       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0),
-                       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0),
-                       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                                       status, issued_date, due_date, paid_date, legal_entity_id, deleted_flag)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 9, 0),
+                       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 9, 0),
+                       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 9, 0),
+                       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 9, 0)
                 """, INVOICE_ALLOWED, "INV-A1-0001", 9060001L, "2026-08", 100L, 10L, 110L,
                 "入金済", LocalDate.of(2026, 8, 31), LocalDate.of(2026, 9, 30), LocalDate.of(2026, 9, 15),
                 INVOICE_OTHER_CONTRACT, "INV-A1-0002", 9060002L, "2026-08", 200L, 20L, 220L,
@@ -131,7 +131,7 @@ class ExternalApiReadMapperIntegrationTest {
 
         List<ExternalApiReadRow> invoices = mapper.selectInvoices(
                 List.of(INVOICE_ALLOWED, INVOICE_OTHER_CONTRACT, INVOICE_WRONG_CUSTOMER, INVOICE_MULTI_CONTRACT),
-                List.of(CONTRACT_ALLOWED), List.of(9060001L), null, 10);
+                 List.of(CONTRACT_ALLOWED), List.of(9060001L), null, 10, 9L);
         assertEquals(List.of(INVOICE_MULTI_CONTRACT, INVOICE_ALLOWED), invoices.stream()
                 .map(ExternalApiReadRow::getId).toList());
         ExternalApiReadRow allowed = invoices.stream()
@@ -141,17 +141,18 @@ class ExternalApiReadMapperIntegrationTest {
         assertTrue(allowed.getPaidDate() != null);
         assertEquals(2, mapper.countInvoices(
                 List.of(INVOICE_ALLOWED, INVOICE_OTHER_CONTRACT, INVOICE_WRONG_CUSTOMER, INVOICE_MULTI_CONTRACT),
-                List.of(CONTRACT_ALLOWED), List.of(9060001L)));
+                 List.of(CONTRACT_ALLOWED), List.of(9060001L), 9L));
 
         assertTrue(mapper.selectInvoices(List.of(INVOICE_WRONG_CUSTOMER), List.of(CONTRACT_OTHER_PROJECT),
-                List.of(9060001L), null, 1).isEmpty());
+                List.of(9060001L), null, 1, 9L).isEmpty());
         assertEquals(0, mapper.countInvoices(List.of(INVOICE_WRONG_CUSTOMER), List.of(CONTRACT_OTHER_PROJECT),
-                List.of(9060001L)));
+                List.of(9060001L), 9L));
 
         List<ExternalApiReadRow> multi = mapper.selectInvoices(
                 List.of(INVOICE_MULTI_CONTRACT), List.of(CONTRACT_ALLOWED, CONTRACT_OTHER_PROJECT),
-                List.of(9060001L), null, 10);
+                List.of(9060001L), null, 10, 9L);
         assertEquals(1, multi.size());
-        assertEquals(2L, multi.get(0).getContractCount());
+        // 同一invoiceに別customerのwork recordが混在しても、invoice customerと同一の契約だけを数える。
+        assertEquals(1L, multi.get(0).getContractCount());
     }
 }

@@ -1,6 +1,5 @@
 package com.ses.service.cloudsign;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.enums.CloudSignErrorCode;
 import com.ses.common.enums.DispatchState;
 import com.ses.config.CloudSignProperties;
@@ -12,6 +11,7 @@ import com.ses.entity.Contract;
 import com.ses.entity.ContractDocument;
 import com.ses.mapper.ContractDocumentMapper;
 import com.ses.mapper.ContractMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -105,16 +105,18 @@ public class CloudSignDispatchService {
 
     /** kill switch: disabledなら何もしない（HFP-02-AC-12-03）。 */
     public void dispatchDue(int limit) {
+        dispatchDue(limit, AccountingTenantContextHolder.requireTenantContext());
+    }
+
+    /** inventory runnerからtenantを明示して呼び出すdispatch本体。 */
+    public void dispatchDue(int limit, String tenantId) {
+        requireSameTenant(tenantId);
         if (!properties.isEnabled()) {
             return;
         }
         LocalDateTime now = LocalDateTime.now();
-        List<ContractDocument> due = mapper.selectList(new LambdaQueryWrapper<ContractDocument>()
-                .in(ContractDocument::getDispatchState, DUE_STATES)
-                .and(w -> w.isNull(ContractDocument::getNextAttemptAt)
-                        .or().le(ContractDocument::getNextAttemptAt, now))
-                .orderByAsc(ContractDocument::getId)
-                .last("LIMIT " + Math.max(1, limit)));
+        List<ContractDocument> due = mapper.selectDispatchDueForTenant(DUE_STATES, now,
+                Math.max(1, limit), tenantId);
         for (ContractDocument doc : due) {
             try {
                 String to = CLAIM_TO.get(doc.getDispatchState());
@@ -126,13 +128,13 @@ public class CloudSignDispatchService {
                 if (claimed == 0) {
                     continue; // 他workerがclaim済み（version/state CASで二重処理なし）
                 }
-                runStep(mapper.selectById(doc.getId()));
+                runStep(mapper.selectByIdForTenant(doc.getId(), tenantId));
             } catch (RuntimeException e) {
                 log.warn("[契約書dispatch] 処理中に例外: docId={} error={}",
                         doc.getId(), safeError(e));
             }
         }
-        reconcileStaleClaims(now);
+        reconcileStaleClaims(now, tenantId);
     }
 
     /**
@@ -436,7 +438,8 @@ public class CloudSignDispatchService {
      */
     private ConfirmedSendRequest resolveConfirmedPayload(ContractDocument working) {
         Contract contract = working.getContractId() == null ? null
-                : contractMapper.selectById(working.getContractId());
+                : contractMapper.selectByIdForTenant(working.getContractId(),
+                AccountingTenantContextHolder.requireTenantContext());
         if (contract == null || contract.getContractNo() == null || contract.getContractNo().isBlank()) {
             return null;
         }
@@ -503,11 +506,12 @@ public class CloudSignDispatchService {
     /** stale claim検出: claim保持のまま長時間経過したwork行は結果不明へ（自動未実行へ戻さない）。
      * SENDINGのみGET照合（verifyThenAdvance）。盲目のsend POST禁止（HFP-02-BUG-01）。 */
     void reconcileStaleClaims(LocalDateTime now) {
+        reconcileStaleClaims(now, AccountingTenantContextHolder.requireTenantContext());
+    }
+
+    private void reconcileStaleClaims(LocalDateTime now, String tenantId) {
         LocalDateTime threshold = now.minusMinutes(Math.max(1, properties.getStaleClaimMinutes()));
-        List<ContractDocument> stale = mapper.selectList(new LambdaQueryWrapper<ContractDocument>()
-                .in(ContractDocument::getDispatchState, WORK_STATES)
-                .isNotNull(ContractDocument::getClaimedAt)
-                .lt(ContractDocument::getClaimedAt, threshold));
+        List<ContractDocument> stale = mapper.selectStaleClaimsForTenant(threshold, tenantId);
         for (ContractDocument doc : stale) {
             if (DispatchState.SENDING.name().equals(doc.getDispatchState())) {
                 log.warn("[契約書dispatch] stale SENDINGをGET照合: docId={} claimedAt={} owner={}",
@@ -523,6 +527,13 @@ public class CloudSignDispatchService {
                 log.warn("[契約書dispatch] stale claimを結果不明へ: docId={} state={} claimedAt={} owner={}",
                         doc.getId(), doc.getDispatchState(), doc.getClaimedAt(), maskedOwner(doc.getClaimOwner()));
             }
+        }
+    }
+
+    private void requireSameTenant(String tenantId) {
+        if (tenantId == null || tenantId.isBlank()
+                || !tenantId.equals(AccountingTenantContextHolder.requireTenantContext())) {
+            throw new IllegalStateException("契約書dispatchのtenant contextが不正です");
         }
     }
 

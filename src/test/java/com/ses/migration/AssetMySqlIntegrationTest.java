@@ -33,6 +33,8 @@ import com.ses.service.provider.ExternalAccountProviderClient;
 import com.ses.service.provider.impl.MockExternalAccountProviderClientImpl;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -138,6 +140,19 @@ class AssetMySqlIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @BeforeEach
+    void bindExternalAccountScope() {
+        com.ses.test.TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
+        bindTenantAndSecurityContext();
+        jdbcTemplate.update("UPDATE t_engineer SET tenant_id = 'default', legal_entity_id = 1 WHERE id = 1");
+    }
+
+    @AfterEach
+    void clearExternalAccountScope() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
+
     @Test
     @DisplayName("MySQL DDL: Asset creation and row lock verification")
     void testAssetCreationAndRowLockOnMySQL() {
@@ -194,7 +209,7 @@ class AssetMySqlIntegrationTest {
         externalAccountSystemMapper.insert(system);
 
         ExternalAccountReference ref = externalAccountService.registerAccountReference(
-                system.getId(), "mysql.user@ses-test.jp", "ENGINEER", 7002L, "MEMBER", 1L);
+                system.getId(), "mysql.user@ses-test.jp", "ENGINEER", 1L, "MEMBER", 1L);
         assertNotNull(ref.getId());
         assertEquals("ACTIVE", ref.getStatus());
 
@@ -236,7 +251,7 @@ class AssetMySqlIntegrationTest {
 
         // 1. 手動確認
         ExternalAccountReference manualRef = externalAccountService.registerAccountReference(
-                system.getId(), "mysql.manual@ses-test.jp", "ENGINEER", 7010L, "MEMBER", 9001L);
+                system.getId(), "mysql.manual@ses-test.jp", "ENGINEER", 1L, "MEMBER", 9001L);
         ExternalAccountReference manualRevoked = externalAccountService.confirmRevoke(manualRef.getId(), 1L);
         assertEquals("REVOKED", manualRevoked.getStatus());
         assertEquals(1L, manualRevoked.getRevokeConfirmedBy());
@@ -249,7 +264,7 @@ class AssetMySqlIntegrationTest {
 
         // 2. システム自動ポーリング (confirmedBy == null, source == SYSTEM, ユーザー1偽装禁止)
         ExternalAccountReference autoRef = externalAccountService.registerAccountReference(
-                system.getId(), "mysql.poll@ses-test.jp", "ENGINEER", 7011L, "MEMBER", 9001L);
+                system.getId(), "mysql.poll@ses-test.jp", "ENGINEER", 1L, "MEMBER", 9001L);
         mockClient.setMockStatus(autoRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.FAILED_OR_TIMEOUT);
         externalAccountService.requestRevokeWithIdempotency(autoRef.getId(), "mysql-poll-key-" + autoRef.getId(), 9001L);
         mockClient.setMockStatus(autoRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
@@ -280,7 +295,7 @@ class AssetMySqlIntegrationTest {
                 .build();
         externalAccountSystemMapper.insert(system);
         ExternalAccountReference ref = externalAccountService.registerAccountReference(
-                system.getId(), "mysql-concurrent@ses-test.jp", "ENGINEER", 7101L, "MEMBER", 1L);
+                system.getId(), "mysql-concurrent@ses-test.jp", "ENGINEER", 1L, "MEMBER", 1L);
         mockClient.setMockStatus(ref.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.PENDING);
         mockClient.resetRequestCount();
 
@@ -315,9 +330,9 @@ class AssetMySqlIntegrationTest {
                 .build();
         externalAccountSystemMapper.insert(system);
         ExternalAccountReference firstRef = externalAccountService.registerAccountReference(
-                system.getId(), "mysql-cross-a@ses-test.jp", "ENGINEER", 7104L, "MEMBER", 1L);
+                system.getId(), "mysql-cross-a@ses-test.jp", "ENGINEER", 1L, "MEMBER", 1L);
         ExternalAccountReference secondRef = externalAccountService.registerAccountReference(
-                system.getId(), "mysql-cross-b@ses-test.jp", "ENGINEER", 7105L, "MEMBER", 1L);
+                system.getId(), "mysql-cross-b@ses-test.jp", "ENGINEER", 1L, "MEMBER", 1L);
         mockClient.setMockStatus(firstRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.PENDING);
         mockClient.setMockStatus(secondRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.PENDING);
         mockClient.resetRequestCount();
@@ -329,12 +344,14 @@ class AssetMySqlIntegrationTest {
         Future<ExternalAccountReference> first = pool.submit(() -> {
             ready.countDown();
             start.await();
-            return externalAccountService.requestRevokeWithIdempotency(firstRef.getId(), key, 1L);
+            return withTenantAndSecurityContext(() ->
+                    externalAccountService.requestRevokeWithIdempotency(firstRef.getId(), key, 1L));
         });
         Future<ExternalAccountReference> second = pool.submit(() -> {
             ready.countDown();
             start.await();
-            return externalAccountService.requestRevokeWithIdempotency(secondRef.getId(), key, 1L);
+            return withTenantAndSecurityContext(() ->
+                    externalAccountService.requestRevokeWithIdempotency(secondRef.getId(), key, 1L));
         });
         try {
             assertTrue(ready.await(10, TimeUnit.SECONDS));
@@ -367,10 +384,35 @@ class AssetMySqlIntegrationTest {
         try {
             ready.countDown();
             start.await();
-            externalAccountService.requestRevokeWithIdempotency(refId, idempotencyKey, 1L);
+            withTenantAndSecurityContext(() ->
+                    externalAccountService.requestRevokeWithIdempotency(refId, idempotencyKey, 1L));
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(ex);
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    private void bindTenantAndSecurityContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+        com.ses.entity.SysUser user = com.ses.entity.SysUser.builder().tenantId("default")
+                .username("admin").role("管理者").status(1).build();
+        user.setId(1L);
+        com.ses.config.LoginUser principal = new com.ses.config.LoginUser(user,
+                List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_管理者")));
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        principal, null, principal.getAuthorities()));
+    }
+
+    private <T> T withTenantAndSecurityContext(java.util.concurrent.Callable<T> task) throws Exception {
+        bindTenantAndSecurityContext();
+        try {
+            return task.call();
+        } finally {
+            com.ses.service.accounting.AccountingTenantContextHolder.clear();
+            org.springframework.security.core.context.SecurityContextHolder.clearContext();
         }
     }
 
@@ -387,6 +429,7 @@ class AssetMySqlIntegrationTest {
         AssetAssignment assignment = assetAssignmentService.createAssignment(
                 asset.getId(), "ENGINEER", 7102L, LocalDate.now(), LocalDate.now().plusDays(30), null, "MySQL concurrency", 1L);
         ApprovalRequest approval = ApprovalRequest.builder()
+                .tenantId("default")
                 .requestNo("AR-RW-" + assignment.getId() + "-" + (System.nanoTime() % 1000000))
                 .requestType("LIFECYCLE_EXCEPTION")
                 .targetType("ASSET_ASSIGNMENT")
@@ -430,10 +473,14 @@ class AssetMySqlIntegrationTest {
     private void awaitAndRun(CountDownLatch start, AtomicInteger success, AtomicInteger failure, Runnable operation) {
         try {
             start.await();
+            bindTenantAndSecurityContext();
             operation.run();
             success.incrementAndGet();
         } catch (Exception ex) {
             failure.incrementAndGet();
+        } finally {
+            com.ses.service.accounting.AccountingTenantContextHolder.clear();
+            org.springframework.security.core.context.SecurityContextHolder.clearContext();
         }
     }
 
@@ -567,7 +614,7 @@ class AssetMySqlIntegrationTest {
         String latest = jdbcTemplate.queryForObject(
                 "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1",
                 String.class);
-        assertEquals("149", latest);
+        assertEquals("182", latest);
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_asset_offboarding_waiver' AND column_name = 'lifecycle_case_id'"));
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_asset_offboarding_waiver' AND column_name = 'lifecycle_task_id'"));
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 't_asset_offboarding_waiver' AND index_name = 'uk_asset_offboarding_waiver_request'"));

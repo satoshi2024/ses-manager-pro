@@ -4,11 +4,14 @@ import com.ses.entity.ApprovalRoute;
 import com.ses.entity.ApprovalRouteStep;
 import com.ses.entity.PortalOrganization;
 import com.ses.entity.PortalUser;
+import com.ses.entity.SysUser;
+import com.ses.config.LoginUser;
 import com.ses.mapper.ApprovalRouteMapper;
 import com.ses.mapper.ApprovalRouteStepMapper;
 import com.ses.mapper.BpAvailabilityMapper;
 import com.ses.service.approval.ApprovalEngineService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,6 +21,7 @@ import org.springframework.mock.web.MockCookie;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -27,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -44,6 +49,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
+@com.ses.test.DisableDefaultTenantTestContext
 class PortalBpApiTest extends PortalTestSupport {
 
     @Autowired
@@ -64,19 +70,38 @@ class PortalBpApiTest extends PortalTestSupport {
         return jdbcTemplate;
     }
 
+    @BeforeEach
+    void ensurePortalLegalEntityFixture() {
+        // portal principalもavailability登録時は一意の法人へfail-closedで束縛される。
+        com.ses.test.TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
+    }
+
     private String unique() {
         return java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 8);
     }
 
+    private org.springframework.test.web.servlet.request.RequestPostProcessor internalAdmin() {
+        SysUser admin = new SysUser();
+        admin.setId(jdbcTemplate.queryForObject("SELECT id FROM sys_user WHERE username = 'admin'", Long.class));
+        admin.setUsername("admin");
+        admin.setTenantId("default");
+        admin.setRole("管理者");
+        admin.setStatus(1);
+        LoginUser principal = new LoginUser(admin,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        return authentication(new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                principal, null, principal.getAuthorities()));
+    }
+
     private long insertSalesUser() {
-        jdbcTemplate.update("INSERT INTO sys_user (username, password, real_name, role, status) "
-                + "VALUES (?, 'x', ?, '営業', 1)", "sales-" + unique(), "営業テスト");
+        jdbcTemplate.update("INSERT INTO sys_user (username, password, real_name, role, status, tenant_id) "
+                + "VALUES (?, 'x', ?, '営業', 1, 'default')", "sales-" + unique(), "営業テスト");
         return jdbcTemplate.queryForObject("SELECT MAX(id) FROM sys_user", Long.class);
     }
 
     private long insertApproverUser() {
-        jdbcTemplate.update("INSERT INTO sys_user (username, password, real_name, role, status) "
-                + "VALUES (?, 'x', ?, '管理者', 1)", "approver-" + unique(), "承認テスト");
+        jdbcTemplate.update("INSERT INTO sys_user (username, password, real_name, role, status, tenant_id) "
+                + "VALUES (?, 'x', ?, '管理者', 1, 'default')", "approver-" + unique(), "承認テスト");
         return jdbcTemplate.queryForObject("SELECT MAX(id) FROM sys_user", Long.class);
     }
 
@@ -86,12 +111,13 @@ class PortalBpApiTest extends PortalTestSupport {
 
     private BpFixture bpFixture() {
         long salesUserId = insertSalesUser();
-        jdbcTemplate.update("INSERT INTO m_bp_company (legal_name, entity_type, status, primary_sales_user_id) "
-                + "VALUES (?, 'CORPORATE', 'ACTIVE', ?)", "portal-bp-" + unique(), salesUserId);
+        jdbcTemplate.update("INSERT INTO m_bp_company (legal_name, entity_type, status, primary_sales_user_id, tenant_id) "
+                + "VALUES (?, 'CORPORATE', 'ACTIVE', ?, 1)", "portal-bp-" + unique(), salesUserId);
         long bpCompanyId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM m_bp_company", Long.class);
         PortalOrganization org = createBpOrg("org-" + unique());
         // createBpOrgが作ったorgのbp_company_idを差し替え（1:1ユニークを満たすため）
         org.setBpCompanyId(bpCompanyId);
+        org.setTenantId("default");
         organizationMapper.updateById(org);
         PortalUser user = createUser(org, "bp-" + unique() + "@example.com");
         String secret = uniqueSecret();
@@ -101,26 +127,29 @@ class PortalBpApiTest extends PortalTestSupport {
     }
 
     private long insertEngineer() {
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')",
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, tenant_id, legal_entity_id) "
+                        + "VALUES (?, '正社員', 'Bench', 'default', 1)",
                 "bp-portal-engineer-" + unique());
         return jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_engineer", Long.class);
     }
 
     private long insertProject(long customerId) {
-        jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) VALUES (?, ?, '募集中')",
+        jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status, legal_entity_id) "
+                        + "VALUES (?, ?, '募集中', 1)",
                 "bp-portal-project-" + unique(), customerId);
         return jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_project", Long.class);
     }
 
     /** work record＋BP支払行を作る（発注相当）。 */
     private long seedBpPayment(long bpCompanyId) {
-        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "bp-portal-customer-" + unique());
+        jdbcTemplate.update("INSERT INTO m_customer (company_name, tenant_id, legal_entity_id) VALUES (?, 'default', 1)",
+                "bp-portal-customer-" + unique());
         long customerId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM m_customer", Long.class);
         long engineerId = insertEngineer();
         long projectId = insertProject(customerId);
         jdbcTemplate.update("INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, status,"
-                        + " start_date, end_date, selling_price, cost_price, acceptance_required)"
-                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, 1)",
+                        + " start_date, end_date, selling_price, cost_price, acceptance_required, tenant_id, legal_entity_id)"
+                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, 1, 'default', 1)",
                 "BP-CONTRACT-" + unique(), engineerId, projectId, customerId);
         long contractId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_contract", Long.class);
         jdbcTemplate.update("INSERT INTO t_work_record (contract_id, work_month, actual_hours, billing_amount,"
@@ -140,7 +169,7 @@ class PortalBpApiTest extends PortalTestSupport {
 
     private void insertRoute(String requestType, Long approverUserId) {
         ApprovalRoute route = ApprovalRoute.builder()
-                .tenantId(1L)
+                .tenantId("default")
                 .requestType(requestType)
                 .activeFlag(1)
                 .validFrom(LocalDate.now().minusDays(1))
@@ -240,15 +269,13 @@ class PortalBpApiTest extends PortalTestSupport {
                 "SELECT MAX(id) FROM t_bp_availability WHERE bp_company_id = ?", Long.class, bp.bpCompanyId());
 
         // review前は内部候補（/api/bp-availabilities）に出ない
-        mockMvc.perform(get("/api/bp-availabilities").with(org.springframework.security.test.web.servlet.request
-                        .SecurityMockMvcRequestPostProcessors.user("admin").roles("管理者")))
+        mockMvc.perform(get("/api/bp-availabilities").with(internalAdmin()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.records.length()").value(0));
 
         // 内部review（却下）→ 却下。編集可能
         mockMvc.perform(post("/api/bp-availabilities/" + id + "/review")
-                        .with(org.springframework.security.test.web.servlet.request
-                                .SecurityMockMvcRequestPostProcessors.user("admin").roles("管理者"))
+                        .with(internalAdmin())
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"approved\":false,\"comment\":\"単価が想定外\"}"))
@@ -265,8 +292,7 @@ class PortalBpApiTest extends PortalTestSupport {
 
         // 内部review（承認）→ 提案可能
         mockMvc.perform(post("/api/bp-availabilities/" + id + "/review")
-                        .with(org.springframework.security.test.web.servlet.request
-                                .SecurityMockMvcRequestPostProcessors.user("admin").roles("管理者"))
+                        .with(internalAdmin())
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"approved\":true}"))
@@ -274,8 +300,7 @@ class PortalBpApiTest extends PortalTestSupport {
                 .andExpect(jsonPath("$.data.status").value("提案可能"));
 
         // 有効化後は内部候補に出る
-        mockMvc.perform(get("/api/bp-availabilities").with(org.springframework.security.test.web.servlet.request
-                        .SecurityMockMvcRequestPostProcessors.user("admin").roles("管理者")))
+        mockMvc.perform(get("/api/bp-availabilities").with(internalAdmin()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.records.length()").value(1));
 
@@ -324,7 +349,8 @@ class PortalBpApiTest extends PortalTestSupport {
         assertNotNull(requestId, "承認申請が作成されるはず");
 
         // 承認者（管理者user）で承認 → APPROVEDへ反映
-        approvalEngineService.approve(requestId, approverId, "承認します");
+        com.ses.service.accounting.AccountingTenantContextHolder.runWithTenant(
+                "default", () -> approvalEngineService.approve(requestId, approverId, "承認します"));
         String after = jdbcTemplate.queryForObject(
                 "SELECT approval_status FROM t_bp_bank_account WHERE bp_company_id = ?",
                 String.class, bp.bpCompanyId());
@@ -342,8 +368,8 @@ class PortalBpApiTest extends PortalTestSupport {
 
     @Test
     void 口座変更は担当営業未設定なら申請できない() throws Exception {
-        jdbcTemplate.update("INSERT INTO m_bp_company (legal_name, entity_type, status) "
-                + "VALUES (?, 'CORPORATE', 'ACTIVE')", "portal-bp-nosales-" + unique());
+        jdbcTemplate.update("INSERT INTO m_bp_company (legal_name, entity_type, status, tenant_id) "
+                + "VALUES (?, 'CORPORATE', 'ACTIVE', 1)", "portal-bp-nosales-" + unique());
         long bpCompanyId = jdbcTemplate.queryForObject(
                 "SELECT MAX(id) FROM m_bp_company WHERE legal_name LIKE 'portal-bp-nosales%'", Long.class);
         PortalOrganization org = createBpOrg("nosales-" + unique());

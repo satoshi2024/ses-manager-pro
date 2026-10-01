@@ -3,15 +3,22 @@ package com.ses.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.BaseIntegrationTest;
 import com.ses.common.exception.BusinessException;
+import com.ses.config.LoginUser;
 import com.ses.dto.asset.OffboardingClearanceResultDto;
 import com.ses.entity.*;
 import com.ses.mapper.*;
 import com.ses.service.provider.ExternalAccountProviderClient;
 import com.ses.service.provider.impl.MockExternalAccountProviderClientImpl;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDate;
@@ -35,6 +42,37 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @DisplayName("Asset Comprehensive Boundary & Integration Tests (境界・並行性・Recovery・スコープ検証)")
 class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
+
+    @BeforeEach
+    void bindTenantContext() {
+        AccountingTenantContextHolder.setTenantId("default");
+        Long organizationId = ensureLegalEntityFixture(organizationUnitMapper);
+        SysUser user = SysUser.builder().tenantId("default")
+                .username("asset-boundary-" + System.nanoTime())
+                .password("pass")
+                .role("HR").status(1).build();
+        sysUserMapper.insert(user);
+        userOrganizationMapper.insert(UserOrganization.builder()
+                .tenantId("default")
+                .userId(user.getId())
+                .organizationId(organizationId)
+                .primaryFlag(1)
+                .validFrom(LocalDate.of(2020, 1, 1))
+                .build());
+        LoginUser principal = new LoginUser(user, List.of(new SimpleGrantedAuthority("ROLE_HR")));
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+        engineerMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Engineer>()
+                .eq(Engineer::getId, 1L)
+                .set(Engineer::getTenantId, "default")
+                .set(Engineer::getLegalEntityId, 1L));
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
 
     @Autowired
     private AssetService assetService;
@@ -492,6 +530,8 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         externalAccountSystemMapper.insert(system);
 
         ExternalAccountReference ref = ExternalAccountReference.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
                 .systemId(system.getId())
                 .accountIdentifier("recovery.user@ses-test.jp")
                 .assigneeType("ENGINEER")
@@ -524,6 +564,8 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
 
             // 応答形式を分類できない場合だけ UNKNOWN とし、退社 blocker を維持する
             ExternalAccountReference unknownRef = ExternalAccountReference.builder()
+                    .tenantId("default")
+                    .legalEntityId(1L)
                     .systemId(system.getId())
                     .accountIdentifier("unknown.user@ses-test.jp")
                     .assigneeType("ENGINEER")
@@ -536,6 +578,12 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                     unknownRef.getId(), "REVOKE-UNKNOWN-" + unknownRef.getId(), 1L);
             assertThat(unknown.getStatus()).isEqualTo("UNKNOWN");
             assertThat(unknown.getRevokeConfirmedAt()).isNull();
+
+            // ジョブ実行時刻やテスト順序に依存せず、この2件を確実にポーリング対象へする。
+            requested.setNextRetryAt(LocalDateTime.now().minusMinutes(1));
+            unknown.setNextRetryAt(LocalDateTime.now().minusMinutes(1));
+            assertThat(externalAccountReferenceMapper.updateById(requested)).isEqualTo(1);
+            assertThat(externalAccountReferenceMapper.updateById(unknown)).isEqualTo(1);
 
             // プロバイダ復旧
             mockClient.setMockStatus(ref.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
@@ -579,9 +627,18 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                     .build();
             externalAccountService.saveSystem(system);
 
+            Engineer scopedEngineer = Engineer.builder()
+                    .fullName("Actor帰属要員-" + System.nanoTime())
+                    .employmentType("正社員")
+                    .status("稼動中")
+                    .tenantId("default")
+                    .legalEntityId(1L)
+                    .build();
+            engineerMapper.insert(scopedEngineer);
+
             // 1. 手動失効確認: 実ユーザーIDが記録され、source = MANUAL
             ExternalAccountReference manualRef = externalAccountService.createAccountReference(
-                    system.getId(), "manual-actor@ses-test.jp", "ENGINEER", 7701L, "DEVELOPER", 9901L);
+                    system.getId(), "manual-actor@ses-test.jp", "ENGINEER", scopedEngineer.getId(), "DEVELOPER", 9901L);
             assertThat(manualRef.getStatus()).isEqualTo("ACTIVE");
 
             // H2のseed済みadmin(sys_user.id=1)を実在する確認主体として使う。
@@ -594,9 +651,15 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
 
             // 2. 自動ポーリング失効確認: confirmedBy は NULL（主キー1の偽装禁止）、source = SYSTEM
             ExternalAccountReference autoRef = externalAccountService.createAccountReference(
-                    system.getId(), "auto-poll-actor@ses-test.jp", "ENGINEER", 7702L, "MEMBER", 9901L);
+                    system.getId(), "auto-poll-actor@ses-test.jp", "ENGINEER", scopedEngineer.getId(), "MEMBER", 9901L);
             mockClient.setMockStatus(autoRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.FAILED_OR_TIMEOUT);
-            externalAccountService.requestRevokeWithIdempotency(autoRef.getId(), "auto-key-" + autoRef.getId(), 9901L);
+            ExternalAccountReference pendingRef = externalAccountService.requestRevokeWithIdempotency(
+                    autoRef.getId(), "auto-key-" + autoRef.getId(), 9901L);
+            assertThat(pendingRef.getStatus()).isEqualTo("PENDING_CONFIRMATION");
+
+            // DBの時刻精度や実行順序に依存せず、このテストの対象だけをポーリング対象にする。
+            pendingRef.setNextRetryAt(LocalDateTime.now().minusMinutes(1));
+            assertThat(externalAccountReferenceMapper.updateById(pendingRef)).isEqualTo(1);
 
             mockClient.setMockStatus(autoRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
 
@@ -633,6 +696,8 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .build();
         externalAccountSystemMapper.insert(system);
         ExternalAccountReference ref = ExternalAccountReference.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
                 .systemId(system.getId())
                 .accountIdentifier("blk@ses-test.jp")
                 .assigneeType("ENGINEER")
@@ -747,11 +812,15 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .fullName("資産Scope要員A-" + suffix)
                 .employmentType("正社員")
                 .status("稼動中")
+                .tenantId("default")
+                .legalEntityId(1L)
                 .build();
         Engineer engineerB = Engineer.builder()
                 .fullName("資産Scope要員B-" + suffix)
                 .employmentType("正社員")
                 .status("稼動中")
+                .tenantId("default")
+                .legalEntityId(1L)
                 .build();
         engineerMapper.insert(engineerA);
         engineerMapper.insert(engineerB);
@@ -791,6 +860,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .password("pass")
                 .role("要員")
                 .status(1)
+                .tenantId("default")
                 .build();
         sysUserMapper.insert(userEngA);
         linkEngineerAccountIsolated(engineerA.getId(), userEngA.getId(), 1L);
@@ -800,6 +870,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .password("pass")
                 .role("要員")
                 .status(1)
+                .tenantId("default")
                 .build();
         sysUserMapper.insert(userEngB);
         linkEngineerAccountIsolated(engineerB.getId(), userEngB.getId(), 1L);
@@ -836,19 +907,23 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         organizationUnitMapper.insert(orgB);
 
         Engineer engineerA = Engineer.builder().fullName("資産Scope要員A-" + suffix)
-                .employmentType("正社員").status("稼動中").organizationId(orgA.getId()).build();
+                .employmentType("正社員").status("稼動中").organizationId(orgA.getId())
+                .tenantId("default").build();
         Engineer engineerB = Engineer.builder().fullName("資産Scope要員B-" + suffix)
-                .employmentType("正社員").status("稼動中").organizationId(orgB.getId()).build();
+                .employmentType("正社員").status("稼動中").organizationId(orgB.getId())
+                .tenantId("default").build();
         engineerMapper.insert(engineerA);
         engineerMapper.insert(engineerB);
 
-        SysUser sales = SysUser.builder().username("asset-sales-" + suffix).password("pass").role("営業").status(1).build();
-        SysUser manager = SysUser.builder().username("asset-manager-" + suffix).password("pass").role("マネージャー").status(1).build();
+        SysUser sales = SysUser.builder().username("asset-sales-" + suffix).password("pass").role("営業").status(1)
+                .tenantId("default").build();
+        SysUser manager = SysUser.builder().username("asset-manager-" + suffix).password("pass").role("マネージャー").status(1)
+                .tenantId("default").build();
         sysUserMapper.insert(sales);
         sysUserMapper.insert(manager);
-        userOrganizationMapper.insert(UserOrganization.builder().userId(sales.getId()).organizationId(orgA.getId())
+        userOrganizationMapper.insert(UserOrganization.builder().tenantId("default").userId(sales.getId()).organizationId(orgA.getId())
                 .primaryFlag(1).validFrom(LocalDate.of(2026, 1, 1)).build());
-        userOrganizationMapper.insert(UserOrganization.builder().userId(manager.getId()).organizationId(orgA.getId())
+        userOrganizationMapper.insert(UserOrganization.builder().tenantId("default").userId(manager.getId()).organizationId(orgA.getId())
                 .primaryFlag(1).validFrom(LocalDate.of(2026, 1, 1)).build());
         engineerSalesMapper.insert(EngineerSales.builder().engineerId(engineerA.getId()).salesUserId(sales.getId())
                 .primaryFlag(1).assignedAt(LocalDate.of(2026, 1, 1)).build());
@@ -929,8 +1004,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         documentMapper.insert(lostEvidence);
         assetService.reportLost(managerLostAsset.getId(), "担当範囲内の紛失", 1L, lostEvidence.getId());
         mockMvc.perform(get("/api/documents/" + lostEvidence.getId())
-                        .with(SecurityMockMvcRequestPostProcessors.user(String.valueOf(manager.getId()))
-                                .roles("マネージャー")))
+                        .with(loginAs(manager)))
                 .andExpect(status().isOk());
     }
 
@@ -942,11 +1016,13 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .fullName("資産DocLink要員A-" + suffix)
                 .employmentType("正社員")
                 .status("稼動中")
+                .tenantId("default")
                 .build();
         Engineer engineerB = Engineer.builder()
                 .fullName("資産DocLink要員B-" + suffix)
                 .employmentType("正社員")
                 .status("稼動中")
+                .tenantId("default")
                 .build();
         engineerMapper.insert(engineerA);
         engineerMapper.insert(engineerB);
@@ -994,6 +1070,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .password("pass")
                 .role("要員")
                 .status(1)
+                .tenantId("default")
                 .build();
         sysUserMapper.insert(userEngA);
         linkEngineerAccountIsolated(engineerAId, userEngA.getId(), 1L);
@@ -1008,6 +1085,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .password("pass")
                 .role("要員")
                 .status(1)
+                .tenantId("default")
                 .build();
         sysUserMapper.insert(userEngB);
         linkEngineerAccountIsolated(engineerBId, userEngB.getId(), 1L);
@@ -1017,13 +1095,13 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
 
         // Document APIも実在Document -> DocumentLink -> assignment -> assetの認可を通る。
         mockMvc.perform(get("/api/documents/" + evidenceDocId)
-                        .with(SecurityMockMvcRequestPostProcessors.user(userEngA.getUsername()).roles("要員")))
+                        .with(loginAs(userEngA)))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/documents/" + evidenceDocId)
-                        .with(SecurityMockMvcRequestPostProcessors.user(userEngB.getUsername()).roles("要員")))
+                        .with(loginAs(userEngB)))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/documents/" + evidenceDocId + "/versions/1/download")
-                        .with(SecurityMockMvcRequestPostProcessors.user(userEngB.getUsername()).roles("要員")))
+                        .with(loginAs(userEngB)))
                 .andExpect(status().isForbidden());
 
         // 6. 管理者は DocumentLink 経由でも全件アクセス可能
@@ -1051,13 +1129,13 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         // 返却後も旧assignmentの本人には自分の受領証跡だけを再表示できるが、他要員へ継承しない。
         assertThat(assetScopeServiceImpl.isAccessibleByDocumentLink(evidenceDocId, "要員", userEngA.getId())).isTrue();
         mockMvc.perform(get("/api/documents/" + evidenceDocId)
-                        .with(SecurityMockMvcRequestPostProcessors.user(userEngA.getUsername()).roles("要員")))
+                        .with(loginAs(userEngA)))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/documents/" + evidenceDocId)
-                        .with(SecurityMockMvcRequestPostProcessors.user(userEngB.getUsername()).roles("要員")))
+                        .with(loginAs(userEngB)))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/documents/" + evidenceDocId + "/versions/1/download")
-                        .with(SecurityMockMvcRequestPostProcessors.user(userEngB.getUsername()).roles("要員")))
+                        .with(loginAs(userEngB)))
                 .andExpect(status().isForbidden());
     }
 
@@ -1068,6 +1146,8 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .fullName("SoftDelete要員-" + System.nanoTime())
                 .employmentType("正社員")
                 .status("稼動中")
+                .tenantId("default")
+                .legalEntityId(1L)
                 .build();
         engineerMapper.insert(engineer);
 
@@ -1154,7 +1234,34 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
      * 共有H2では他テスト（NOT_SUPPORTED等）が残した link 行と engineer ID 再利用が衝突しうるため、
      * 該当 engineer/user の既存 link を先に削除してから紐付ける。
      */
+    private RequestPostProcessor loginAs(SysUser user) {
+        LoginUser principal = new LoginUser(user,
+                List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole())));
+        return SecurityMockMvcRequestPostProcessors.authentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+    }
+
+    private Long ensureLegalEntityFixture(OrganizationUnitMapper mapper) {
+        List<OrganizationUnit> existing = mapper.selectList(new LambdaQueryWrapper<OrganizationUnit>()
+                .eq(OrganizationUnit::getLegalEntityId, 1L));
+        if (existing.isEmpty()) {
+            OrganizationUnit fixture = OrganizationUnit.builder()
+                    .tenantId(1L).legalEntityId(1L)
+                    .code("EXT_SCOPE_TEST").name("外部アカウント境界テスト法人")
+                    .type("COMPANY").validFrom(LocalDate.of(2020, 1, 1))
+                    .status("ACTIVE").version(0).build();
+            mapper.insert(fixture);
+            return fixture.getId();
+        }
+        return existing.get(0).getId();
+    }
+
     private void linkEngineerAccountIsolated(long engineerId, long sysUserId, long linkedBy) {
+        Engineer eng = engineerMapper.selectById(engineerId);
+        if (eng != null && (eng.getTenantId() == null || eng.getTenantId().isBlank())) {
+            eng.setTenantId("default");
+            engineerMapper.updateById(eng);
+        }
         engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
                 .eq(EngineerAccountLink::getEngineerId, engineerId));
         engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()

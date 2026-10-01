@@ -69,6 +69,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
     @Override
     public AccountingReconciliationSummaryDto reconcileMonth(String month) {
         // R4-T06: 月はテナントタイムゾーン基準の「今月」を既定とする (design §6.1)
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         java.time.ZoneId zoneId = AccountingTenantContextHolder.getZoneId();
         if (month == null || month.isBlank()) {
             month = YearMonth.now(zoneId).toString();
@@ -81,7 +82,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
         List<ReconciliationItemDto> items = new ArrayList<>();
         Map<String, String> ignoreMap = loadIgnoreMap(month);
 
-        IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
+        IntegrationConnection conn = resolveConnection(tenantId, null, "freee", "accounting");
         boolean externalFetchFailed = false;
         List<CanonicalPaymentSync> extDeals = new ArrayList<>();    // deal単位 (売上/仕入/経費照合・EXTERNAL_ONLY)
         List<CanonicalPaymentSync> extPayments = new ArrayList<>(); // payment単位 (入金 1:1 消込)
@@ -255,8 +256,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
         if (isManager) {
             bpPayments = bpPaymentMapper.selectForReconciliationScoped(month, new java.util.ArrayList<>(allowedOrgIds));
         } else {
-            List<WorkRecord> workRecords = workRecordMapper.selectList(new LambdaQueryWrapper<WorkRecord>()
-                    .eq(WorkRecord::getWorkMonth, month));
+            List<WorkRecord> workRecords = workRecordMapper.selectByWorkMonthForTenant(month, tenantId);
             List<Long> wrIds = workRecords.stream().map(WorkRecord::getId).toList();
             bpPayments = wrIds.isEmpty() ? Collections.emptyList() :
                     bpPaymentMapper.selectList(new LambdaQueryWrapper<BpPayment>().in(BpPayment::getWorkRecordId, wrIds));
@@ -340,11 +340,10 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
         // R1-P1-06: マネージャーは組織条件を最初のSQLへ適用 (UNKNOWN履歴はfail-closed)
         List<ExpenseRequest> expenses;
         if (isManager) {
-            expenses = expenseRequestMapper.selectForReconciliationScoped(startOfMonth, endOfMonth, new java.util.ArrayList<>(allowedOrgIds));
+            expenses = expenseRequestMapper.selectForReconciliationScoped(startOfMonth, endOfMonth,
+                    new java.util.ArrayList<>(allowedOrgIds), tenantId);
         } else {
-            expenses = expenseRequestMapper.selectList(new LambdaQueryWrapper<ExpenseRequest>()
-                    .ge(ExpenseRequest::getExpenseDate, startOfMonth)
-                    .le(ExpenseRequest::getExpenseDate, endOfMonth));
+            expenses = expenseRequestMapper.selectForReconciliationByTenant(startOfMonth, endOfMonth, tenantId);
         }
 
         for (ExpenseRequest exp : expenses) {
@@ -352,7 +351,8 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             String itemKey = "EXPENSE:" + exp.getId();
             String ignoreReason = ignoreMap.get(itemKey);
 
-            Engineer eng = exp.getEngineerId() != null ? engineerMapper.selectById(exp.getEngineerId()) : null;
+            Engineer eng = exp.getEngineerId() != null
+                    ? engineerMapper.selectByIdForTenant(exp.getEngineerId(), tenantId) : null;
             String engineerName = eng != null ? eng.getFullName() : "要員ID:" + exp.getEngineerId();
 
             if (latestJob != null && "SUCCEEDED".equals(latestJob.getStatus()) && latestJob.getExternalId() != null) {

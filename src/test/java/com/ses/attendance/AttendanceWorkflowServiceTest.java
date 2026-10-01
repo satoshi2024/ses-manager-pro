@@ -2,14 +2,17 @@ package com.ses.attendance;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
+import com.ses.config.LoginUser;
 import com.ses.dto.attendance.AttendanceBreakRequest;
 import com.ses.dto.attendance.AttendanceDayRequest;
 import com.ses.entity.AttendanceMonth;
 import com.ses.entity.EngineerAccountLink;
+import com.ses.entity.SysUser;
 import com.ses.mapper.AttendanceMonthMapper;
 import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.AttendanceService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,16 +63,19 @@ class AttendanceWorkflowServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         String name = "T070-" + System.nanoTime();
         String code = "T070-" + System.nanoTime();
         jdbcTemplate.update("INSERT INTO m_organization_unit (tenant_id, legal_entity_id, code, name, type, valid_from, status) "
-                + "VALUES (1, 70001, ?, ?, '部門', '2026-01-01', '有効')", code, name);
+                + "VALUES (1, 1, ?, ?, '部門', '2026-01-01', '有効')", code, name);
         organizationId = jdbcTemplate.queryForObject("SELECT id FROM m_organization_unit WHERE code = ?", Long.class, code);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', 'Bench', ?)",
+        insertScopedUser(USER_ID, "attendance-engineer", organizationId);
+        insertScopedUser(93001L, "attendance-admin", organizationId);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, legal_entity_id, full_name, employment_type, status, organization_id) VALUES ('default', 1, ?, '正社員', 'Bench', ?)",
                 name, organizationId);
         engineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, name);
         jdbcTemplate.update("INSERT INTO m_work_calendar (legal_entity_id, organization_id, engineer_id, name, valid_from, status) "
-                + "VALUES (70001, ?, ?, ?, '2026-01-01', '有効')", organizationId, engineerId, name);
+                + "VALUES (1, ?, ?, ?, '2026-01-01', '有効')", organizationId, engineerId, name);
         calendarId = jdbcTemplate.queryForObject("SELECT id FROM m_work_calendar WHERE engineer_id = ?", Long.class, engineerId);
         jdbcTemplate.update("INSERT INTO m_work_calendar_day (calendar_id, calendar_date, day_type, scheduled_minutes) "
                 + "VALUES (?, '2026-08-03', '通常', 480)", calendarId);
@@ -79,6 +85,7 @@ class AttendanceWorkflowServiceTest {
                 .or()
                 .eq(EngineerAccountLink::getEngineerId, engineerId));
         EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId("default");
         link.setEngineerId(engineerId);
         link.setSysUserId(USER_ID);
         engineerAccountLinkMapper.insert(link);
@@ -87,6 +94,7 @@ class AttendanceWorkflowServiceTest {
 
     @AfterEach
     void tearDown() {
+        AccountingTenantContextHolder.clear();
         SecurityContextHolder.clearContext();
     }
 
@@ -166,8 +174,26 @@ class AttendanceWorkflowServiceTest {
     }
 
     private void authenticate(long userId, String role) {
+        SysUser user = new SysUser();
+        user.setId(userId);
+        user.setTenantId("default");
+        user.setUsername("attendance-" + userId);
+        user.setRole(role);
+        user.setStatus(1);
+        LoginUser principal = new LoginUser(user,
+                List.of(new SimpleGrantedAuthority("ROLE_" + role)), "default");
         SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(String.valueOf(userId), "n/a",
-                        List.of(new SimpleGrantedAuthority("ROLE_" + role))));
+                new UsernamePasswordAuthenticationToken(principal, "n/a", principal.getAuthorities()));
+    }
+
+    private void insertScopedUser(long userId, String username, long scopedOrganizationId) {
+        jdbcTemplate.update("INSERT INTO sys_user "
+                        + "(id, tenant_id, username, password, real_name, role, status, deleted_flag) "
+                        + "VALUES (?, 'default', ?, 'x', ?, '管理者', 1, 0)",
+                userId, username + "-" + System.nanoTime(), username);
+        jdbcTemplate.update("INSERT INTO t_user_organization "
+                        + "(tenant_id, user_id, organization_id, primary_flag, valid_from, version, deleted_flag) "
+                        + "VALUES ('default', ?, ?, 1, '2026-01-01', 0, 0)",
+                userId, scopedOrganizationId);
     }
 }

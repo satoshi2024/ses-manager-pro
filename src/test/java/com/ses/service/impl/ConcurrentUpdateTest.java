@@ -12,6 +12,8 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.WorkRecordService;
+import com.ses.test.EnableDefaultTenantTestContext;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 @ActiveProfiles("test")
 @Tag("mysql")
 @Testcontainers
+@EnableDefaultTenantTestContext
 class ConcurrentUpdateTest {
 
     @Container
@@ -79,14 +82,19 @@ class ConcurrentUpdateTest {
     void testConcurrentApproveAndReject() throws InterruptedException {
         Customer customer = new Customer();
         customer.setCompanyName("Test Customer");
+        customer.setTenantId("default");
+        customer.setLegalEntityId(1L);
         customerMapper.insert(customer);
 
         Project project = new Project();
         project.setProjectName("Test Project");
         project.setCustomerId(customer.getId());
+        project.setLegalEntityId(1L);
+        project.setCreatedBy(1L);
         projectMapper.insert(project);
 
-        Engineer engineer = Engineer.builder().fullName("Test Engineer").build();
+        Engineer engineer = Engineer.builder().fullName("Test Engineer")
+                .tenantId("default").legalEntityId(1L).build();
         engineerMapper.insert(engineer);
         
         Contract contract = new Contract();
@@ -97,6 +105,8 @@ class ConcurrentUpdateTest {
         contract.setStatus("稼動中");
         contract.setSellingPrice(new BigDecimal("500000"));
         contract.setCostPrice(new BigDecimal("300000"));
+        contract.setTenantId("default");
+        contract.setLegalEntityId(1L);
         contractMapper.insert(contract);
 
         WorkRecord record = new WorkRecord();
@@ -106,6 +116,7 @@ class ConcurrentUpdateTest {
         // MySQL の strict モードでは未設定だと INSERT が失敗する。
         record.setActualHours(new BigDecimal("160.0"));
         record.setStatus("提出済");
+        record.setCreatedBy(1L);
         workRecordMapper.insert(record);
 
         int threads = 2;
@@ -120,6 +131,7 @@ class ConcurrentUpdateTest {
 
         Runnable approveTask = () -> {
             try {
+                TenantTestSecurity.bindAs("default", "管理者");
                 ready.countDown();
                 start.await();
                 workRecordService.approve(record.getId());
@@ -134,12 +146,14 @@ class ConcurrentUpdateTest {
             } catch (Exception e) {
                 unexpected.compareAndSet(null, e);
             } finally {
+                TenantTestSecurity.clear();
                 done.countDown();
             }
         };
 
         Runnable rejectTask = () -> {
             try {
+                TenantTestSecurity.bindAs("default", "管理者");
                 ready.countDown();
                 start.await();
                 workRecordService.reject(record.getId(), "Reject reason");
@@ -153,6 +167,7 @@ class ConcurrentUpdateTest {
             } catch (Exception e) {
                 unexpected.compareAndSet(null, e);
             } finally {
+                TenantTestSecurity.clear();
                 done.countDown();
             }
         };

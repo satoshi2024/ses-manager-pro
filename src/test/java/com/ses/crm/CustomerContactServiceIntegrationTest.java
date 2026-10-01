@@ -11,6 +11,9 @@ import com.ses.mapper.OpportunityMapper;
 import com.ses.service.CustomerContactService;
 import com.ses.service.CustomerService;
 import com.ses.service.SalesActivityService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -30,12 +33,23 @@ import static org.junit.jupiter.api.Assertions.*;
 @Transactional
 @WithMockUser(username = "admin", roles = "管理者")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@com.ses.test.EnableDefaultTenantTestContext
 class CustomerContactServiceIntegrationTest {
     @Autowired private CustomerContactService contactService;
     @Autowired private CustomerContactMapper contactMapper;
     @Autowired private CustomerService customerService;
     @Autowired private OpportunityMapper opportunityMapper;
     @Autowired private SalesActivityService activityService;
+
+    @BeforeEach
+    void bindTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Test
     void primaryPeriodIsInclusiveAndOverlappingClosedIntervalsAreRejected() {

@@ -2,6 +2,9 @@ package com.ses.service.impl;
 
 import com.ses.entity.EmailTemplate;
 import com.ses.service.EmailTemplateService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.mail.SimpleMailMessage;
@@ -18,6 +21,16 @@ import static org.mockito.Mockito.*;
  * 設定済み時はJavaMailSenderへ送信されることを検証する。
  */
 class MailServiceImplTest {
+
+    @BeforeEach
+    void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @SuppressWarnings("unchecked")
     private ObjectProvider<JavaMailSender> senderProvider(JavaMailSender sender) {

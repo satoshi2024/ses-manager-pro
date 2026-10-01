@@ -280,6 +280,25 @@ NF-07の承認証跡は現在提供されていない。`<APPROVED_SCOPE>`、`<O
 - [ ] PRの自動merge/branch削除を行っていない。
 - [ ] 外部契約/法務/セキュリティgate完了。
 
+## 7. S-NF01〜S-NF10 統合 Gate checkpoint（2026-09-07）
+
+本節は、固定 base `996289c00983bfccd0b75c4d3bdd3dcc26904136` から `codex/snf-integration-gate` へ指定6 branchを順序統合した結果である。過去のStatus列・feature ledgerの独立 Review 判定を上書きせず、implementation evidence と production approval を分離して記録する。完全な証跡は `.kiro/roadmap/2026-09-07-snf-integration-gate-evidence.md` にある。
+
+| NF | Implementation evidence | Independent Review | Production approval / flag | 統合時点 |
+|---|---|---|---|---|
+| NF-01 | 既存証跡 PASS | 既存 PASS | 既存 COMPLETE記録 | COMPLETEを維持 |
+| NF-02 | targeted 13/0/0/0。全体Gate未PASS | PENDING | Owner/DG-02未確定 | IMPLEMENTED / REVIEW_PENDING |
+| NF-03 | targeted 39/0/0/0、V151/H2同期 | 再Review PENDING | production gate未完 | IMPLEMENTED / REVIEW_PENDING |
+| NF-04 | automated evidence | PENDING | real Browser evidence未取得 | BROWSER_BLOCKED |
+| NF-05 | targeted 116/0/0/0、統合snapshot回帰OPEN | PENDING | production enablement不可 | IMPLEMENTATION_BLOCKED / PRODUCTION_BLOCKED |
+| NF-06 | 未着手 | N/A | CANDIDATE | DISCOVERY維持 |
+| NF-07 | 未着手 | N/A | CANDIDATE | DISCOVERY維持 |
+| NF-08 | R-NF08 implementation evidence PASS | Plan CONDITIONAL / implementation evidenceあり | `management-copilot-enabled=false`、`external-send-enabled=false` | CONDITIONAL_PASS / PRODUCTION_BLOCKED |
+| NF-09 | 対象evidence PASS、全体Gate未PASS | **PENDING** | 未承認 | REVIEW_PENDING（PASSにしない） |
+| NF-10 | targeted 30/0/0/0、隔離監査回帰OPEN | PENDING | Browser screenshot未生成 | IMPLEMENTATION_BLOCKED / REVIEW_PENDING |
+
+統合Gateは fast `3670/2/7/0`、MySQL `118/0/1/116`（Docker未検出）、performance `1/0/0/0`、verify-like-ci exit 1、real browser profile `15/0/15/0` だった。従って全体PASS、production approval、NF02〜NF10のCOMPLETE checkboxは付与しない。NF05/NF10の回帰は各feature AIへ戻し、NF04は標準loopback許可環境で指定Browser evidenceを再取得する。
+
 ## NF-05 B2 remediation handoff
 
 独立B2 Implementation Reviewの固定Head `0514e00a1cd27fdedba8d15b5bc87d2fd02d706c` はP0=0、P1=4、P2=1でFAILだった。

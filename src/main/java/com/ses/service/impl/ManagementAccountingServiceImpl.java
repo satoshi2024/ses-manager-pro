@@ -16,6 +16,8 @@ import com.ses.mapper.WorkRecordMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.dto.accounting.AccountingWaitCostRow;
 import com.ses.service.ManagementAccountingService;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
 import com.ses.service.billing.MonthlyRevenueCalcService;
 import com.ses.service.security.OrganizationScopeService;
 import com.ses.service.security.DataScopeService;
@@ -72,23 +74,53 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
     }
 
     @Override
+    public ManagementAccountingSummaryDto summary(String month, CopilotExecutionContext context) {
+        EffectiveScopeSnapshot snapshot = requireSnapshot(context);
+        return summaryInternal(month, snapshot.legalEntityId(), null, null, null, null, null,
+                snapshot.asOf(), snapshot);
+    }
+
+    @Override
     public ManagementAccountingSummaryDto summary(String month, Long legalEntityId, Long organizationId,
                                                   Long costCenterId, Long customerId, Long projectId,
                                                   Long salesUserId) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        YearMonth yearMonth = com.ses.common.util.DateUtils.parseYearMonth(month);
+        return summaryInternal(month, legalEntityId, organizationId, costCenterId, customerId, projectId,
+                salesUserId, yearMonth.atDay(1));
+    }
+
+    private ManagementAccountingSummaryDto summaryInternal(String month, Long legalEntityId, Long organizationId,
+                                                           Long costCenterId, Long customerId, Long projectId,
+                                                           Long salesUserId, LocalDate scopeAsOf) {
+        return summaryInternal(month, legalEntityId, organizationId, costCenterId, customerId, projectId,
+                salesUserId, scopeAsOf, null);
+    }
+
+    private ManagementAccountingSummaryDto summaryInternal(String month, Long legalEntityId, Long organizationId,
+                                                           Long costCenterId, Long customerId, Long projectId,
+                                                           Long salesUserId, LocalDate scopeAsOf,
+                                                           EffectiveScopeSnapshot scopeSnapshot) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         YearMonth yearMonth = com.ses.common.util.DateUtils.parseYearMonth(month);
         LocalDate monthStart = yearMonth.atDay(1);
         LocalDate monthEnd = yearMonth.atEndOfMonth();
-        boolean fullAccess = organizationScopeService.hasFullAccess();
-        Set<Long> allowedIds = organizationScopeService.allowedOrganizationIds(monthStart);
+        boolean fullAccess = scopeSnapshot == null
+                ? organizationScopeService.hasFullAccess() : scopeSnapshot.organizationFullAccess();
+        Set<Long> allowedIds = scopeSnapshot == null
+                ? organizationScopeService.allowedOrganizationIds(scopeAsOf) : scopeSnapshot.organizationIds();
         boolean scopedOrganization = !fullAccess;
-        List<Long> queryAllowed = scopedOrganization ? new ArrayList<>(allowedIds) : null;
+        List<Long> queryAllowed = scopedOrganization ? copyIds(allowedIds) : null;
         List<Long> queryDirectUsers = scopedOrganization
-                ? new ArrayList<>(organizationScopeService.allowedDirectUserIds(monthStart)) : null;
-        List<Long> allowedContractIds = dataScopeService != null && dataScopeService.isScoped()
-                ? new ArrayList<>(dataScopeService.allowedContractIds()) : null;
-        if (dataScopeService != null && dataScopeService.isScoped()) {
+                ? copyIds(scopeSnapshot == null
+                ? organizationScopeService.allowedDirectUserIds(scopeAsOf) : scopeSnapshot.directUserIds()) : null;
+        List<Long> allowedContractIds = scopeSnapshot != null
+                ? copyIds(scopeSnapshot.contractIds())
+                : dataScopeService != null && dataScopeService.isScoped()
+                ? new ArrayList<>(dataScopeService.allowedContractIds(scopeAsOf)) : null;
+        if (scopeSnapshot == null && dataScopeService != null && dataScopeService.isScoped()) {
             allowedIds = organizationScopeService.intersectWithDataScope(allowedIds,
-                    dataScopeService.allowedOrganizationIds());
+                    dataScopeService.allowedOrganizationIds(scopeAsOf));
             queryAllowed = new ArrayList<>(allowedIds);
         }
         if (allowedContractIds != null && allowedContractIds.isEmpty()) {
@@ -101,11 +133,12 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
                 organizationId, costCenterId, customerId, projectId, salesUserId)
                 : contractMapper.selectAccountingContracts(monthStart, monthEnd, fullAccess, queryAllowed, queryDirectUsers);
 
-        Map<Long, MonthlyAccountingDimension> snapshots = visibleSnapshots(monthStart, legalEntityId,
-                organizationId, costCenterId);
+        Map<Long, MonthlyAccountingDimension> snapshots = visibleSnapshots(monthStart, scopeAsOf, legalEntityId,
+                organizationId, costCenterId, scopeSnapshot);
         // 確定実績の存在判定はsnapshotの可視性と独立させる。別組織へ異動した契約を
         // 現在の所属でforecastとして再表示すると、旧組織の実績と二重計上になるため。
-        Map<Long, WorkRecord> confirmed = confirmedRecords(month, null);
+        Map<Long, WorkRecord> confirmed = confirmedRecords(month, null,
+                scopeSnapshot == null ? null : scopeSnapshot.contractIds());
         Set<Long> confirmedContractIds = confirmed.values().stream()
                 .map(WorkRecord::getContractId).filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toSet());
         Map<Long, ContractContext> contexts = new LinkedHashMap<>();
@@ -123,13 +156,24 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
             List<Long> actualContractIds = confirmed.values().stream().map(WorkRecord::getContractId)
                     .filter(java.util.Objects::nonNull).distinct().toList();
             if (!actualContractIds.isEmpty()) {
-                List<Contract> actualContracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+                List<Contract> actualContracts = contractMapper.selectListForTenant(new LambdaQueryWrapper<Contract>()
                         .in(Contract::getId, actualContractIds)
+                        .eq(legalEntityId != null, Contract::getLegalEntityId, legalEntityId)
+                        .apply(legalEntityId != null,
+                                "EXISTS (SELECT 1 FROM t_engineer e WHERE e.id = t_contract.engineer_id "
+                                        + "AND e.deleted_flag = 0 AND e.legal_entity_id = {0})", legalEntityId)
+                        .apply(legalEntityId != null,
+                                "EXISTS (SELECT 1 FROM t_project p WHERE p.id = t_contract.project_id "
+                                        + "AND p.deleted_flag = 0 AND p.legal_entity_id = {0})", legalEntityId)
+                        .apply(legalEntityId != null,
+                                "EXISTS (SELECT 1 FROM m_customer customer WHERE customer.id = t_contract.customer_id "
+                                        + "AND customer.deleted_flag = 0 AND customer.legal_entity_id = {0})", legalEntityId)
                         .eq(customerId != null, Contract::getCustomerId, customerId)
                         .eq(projectId != null, Contract::getProjectId, projectId)
                         .eq(salesUserId != null, Contract::getSalesUserId, salesUserId)
                         .in(allowedContractIds != null, Contract::getId,
-                                allowedContractIds == null ? List.of(-1L) : allowedContractIds));
+                                 allowedContractIds == null ? List.of(-1L) : allowedContractIds),
+                        tenantId);
                 if (actualContracts != null) {
                     for (Contract actual : actualContracts) {
                         MonthlyAccountingDimension snapshot = snapshots.values().stream()
@@ -179,8 +223,10 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
                 .eq(ManagementBudget::getBudgetMonth, monthStart)
                 .eq(costCenterId != null, ManagementBudget::getCostCenterId, costCenterId)
                 .eq(organizationId != null, ManagementBudget::getOrganizationId, organizationId);
-        if (legalEntityId != null) {
-            List<Long> legalOrganizationIds = organizationScopeService.listVisibleOrganizations(legalEntityId, monthStart)
+        if (scopeSnapshot != null) {
+            applySnapshotOrganizationFilter(budgetQuery, ManagementBudget::getOrganizationId, scopeSnapshot);
+        } else if (legalEntityId != null) {
+            List<Long> legalOrganizationIds = organizationScopeService.listVisibleOrganizations(legalEntityId, scopeAsOf)
                     .stream().map(OrganizationUnit::getId).toList();
             if (legalOrganizationIds.isEmpty()) {
                 budgetQuery.in(ManagementBudget::getOrganizationId, List.of(-1L));
@@ -188,7 +234,9 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
                 budgetQuery.in(ManagementBudget::getOrganizationId, legalOrganizationIds);
             }
         }
-        organizationScopeService.applyOrganizationScope(budgetQuery, ManagementBudget::getOrganizationId, monthStart);
+        if (scopeSnapshot == null) {
+            organizationScopeService.applyOrganizationScope(budgetQuery, ManagementBudget::getOrganizationId, scopeAsOf);
+        }
         budgetMapper.selectList(budgetQuery).forEach(budget -> {
             MutableRow row = rows.computeIfAbsent(
                     new OrganizationKey(budget.getOrganizationId(), budget.getCostCenterId()), MutableRow::new);
@@ -198,8 +246,8 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
             row.hireCount += budget.getHireCount();
         });
 
-        List<MonthlyAccountingDimension> waitSnapshots = visibleWaitSnapshots(monthStart, legalEntityId,
-                organizationId, costCenterId);
+        List<MonthlyAccountingDimension> waitSnapshots = visibleWaitSnapshots(monthStart, scopeAsOf, legalEntityId,
+                organizationId, costCenterId, scopeSnapshot);
         boolean hasWaitSnapshots = hasWaitSnapshots(monthStart);
         if (!waitSnapshots.isEmpty() || hasWaitSnapshots) {
             // Benchは月次snapshotを正とし、後日の要員異動・原価部門変更を参照しない。
@@ -212,8 +260,10 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
             }
         } else {
             // snapshot導入前のlegacy/未締め月だけ従来SQLをfallbackとして利用する。
-            List<AccountingWaitCostRow> waitCosts = engineerMapper.selectAccountingWaitCost(
-                    monthStart, monthEnd, fullAccess, queryAllowed, legalEntityId, organizationId, costCenterId);
+            List<AccountingWaitCostRow> waitCosts = scopeSnapshot == null
+                    ? engineerMapper.selectAccountingWaitCost(
+                    monthStart, monthEnd, fullAccess, queryAllowed, legalEntityId, organizationId, costCenterId)
+                    : List.of();
             if (waitCosts != null) {
                 for (AccountingWaitCostRow wait : waitCosts) {
                     MutableRow row = rows.computeIfAbsent(
@@ -266,8 +316,8 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
                                                                             Long legalEntityId, Long organizationId,
                                                                             Long costCenterId, Long customerId,
                                                                             Long projectId, Long salesUserId) {
-        return contractMapper.selectAccountingContractsFiltered(start, end, full, ids, directUserIds, allowedContractIds, legalEntityId, organizationId,
-                costCenterId, customerId, projectId, salesUserId);
+        return contractMapper.selectAccountingContractsFiltered(start, end, full, ids, directUserIds, allowedContractIds, legalEntityId,
+                organizationId, costCenterId, customerId, projectId, salesUserId);
     }
 
     private ManagementAccountingSummaryDto emptySummary(String month) {
@@ -277,15 +327,25 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
                 .revenueVariance(BigDecimal.ZERO).grossProfitVariance(BigDecimal.ZERO).build();
     }
 
-    private Map<Long, MonthlyAccountingDimension> visibleSnapshots(LocalDate month, Long legalEntityId,
+    private Map<Long, MonthlyAccountingDimension> visibleSnapshots(LocalDate month, LocalDate scopeAsOf,
+                                                                    Long legalEntityId,
                                                                     Long organizationId, Long costCenterId) {
+        return visibleSnapshots(month, scopeAsOf, legalEntityId, organizationId, costCenterId, null);
+    }
+
+    private Map<Long, MonthlyAccountingDimension> visibleSnapshots(LocalDate month, LocalDate scopeAsOf,
+                                                                    Long legalEntityId,
+                                                                    Long organizationId, Long costCenterId,
+                                                                    EffectiveScopeSnapshot scopeSnapshot) {
         LambdaQueryWrapper<MonthlyAccountingDimension> query = new LambdaQueryWrapper<MonthlyAccountingDimension>()
                 .eq(MonthlyAccountingDimension::getWorkMonth, month)
                 .eq(MonthlyAccountingDimension::getSourceType, "work-record")
                 .eq(organizationId != null, MonthlyAccountingDimension::getOrganizationId, organizationId)
                 .eq(costCenterId != null, MonthlyAccountingDimension::getCostCenterId, costCenterId);
-        if (legalEntityId != null) {
-            List<Long> legalOrganizationIds = organizationScopeService.listVisibleOrganizations(legalEntityId, month)
+        if (scopeSnapshot != null) {
+            applySnapshotOrganizationFilter(query, MonthlyAccountingDimension::getOrganizationId, scopeSnapshot);
+        } else if (legalEntityId != null) {
+            List<Long> legalOrganizationIds = organizationScopeService.listVisibleOrganizations(legalEntityId, scopeAsOf)
                     .stream().map(OrganizationUnit::getId).toList();
             if (legalOrganizationIds.isEmpty()) {
                 query.eq(MonthlyAccountingDimension::getOrganizationId, -1L);
@@ -293,21 +353,33 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
                 query.in(MonthlyAccountingDimension::getOrganizationId, legalOrganizationIds);
             }
         }
-        organizationScopeService.applyOrganizationScope(query, MonthlyAccountingDimension::getOrganizationId, month);
+        if (scopeSnapshot == null) {
+            organizationScopeService.applyOrganizationScope(query, MonthlyAccountingDimension::getOrganizationId, scopeAsOf);
+        }
         Map<Long, MonthlyAccountingDimension> result = new HashMap<>();
         dimensionMapper.selectList(query).forEach(snapshot -> result.put(snapshot.getSourceId(), snapshot));
         return result;
     }
 
-    private List<MonthlyAccountingDimension> visibleWaitSnapshots(LocalDate month, Long legalEntityId,
+    private List<MonthlyAccountingDimension> visibleWaitSnapshots(LocalDate month, LocalDate scopeAsOf,
+                                                                   Long legalEntityId,
                                                                    Long organizationId, Long costCenterId) {
+        return visibleWaitSnapshots(month, scopeAsOf, legalEntityId, organizationId, costCenterId, null);
+    }
+
+    private List<MonthlyAccountingDimension> visibleWaitSnapshots(LocalDate month, LocalDate scopeAsOf,
+                                                                   Long legalEntityId,
+                                                                   Long organizationId, Long costCenterId,
+                                                                   EffectiveScopeSnapshot scopeSnapshot) {
         LambdaQueryWrapper<MonthlyAccountingDimension> query = new LambdaQueryWrapper<MonthlyAccountingDimension>()
                 .eq(MonthlyAccountingDimension::getWorkMonth, month)
                 .eq(MonthlyAccountingDimension::getSourceType, "bench-engineer")
                 .eq(organizationId != null, MonthlyAccountingDimension::getOrganizationId, organizationId)
                 .eq(costCenterId != null, MonthlyAccountingDimension::getCostCenterId, costCenterId);
-        if (legalEntityId != null) {
-            List<Long> legalOrganizationIds = organizationScopeService.listVisibleOrganizations(legalEntityId, month)
+        if (scopeSnapshot != null) {
+            applySnapshotOrganizationFilter(query, MonthlyAccountingDimension::getOrganizationId, scopeSnapshot);
+        } else if (legalEntityId != null) {
+            List<Long> legalOrganizationIds = organizationScopeService.listVisibleOrganizations(legalEntityId, scopeAsOf)
                     .stream().map(OrganizationUnit::getId).toList();
             if (legalOrganizationIds.isEmpty()) {
                 query.eq(MonthlyAccountingDimension::getOrganizationId, -1L);
@@ -315,7 +387,9 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
                 query.in(MonthlyAccountingDimension::getOrganizationId, legalOrganizationIds);
             }
         }
-        organizationScopeService.applyOrganizationScope(query, MonthlyAccountingDimension::getOrganizationId, month);
+        if (scopeSnapshot == null) {
+            organizationScopeService.applyOrganizationScope(query, MonthlyAccountingDimension::getOrganizationId, scopeAsOf);
+        }
         List<MonthlyAccountingDimension> snapshots = dimensionMapper.selectList(query);
         if (snapshots == null) {
             return List.of();
@@ -333,13 +407,30 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
     }
 
     private Map<Long, WorkRecord> confirmedRecords(String month, java.util.Collection<Long> sourceIds) {
+        return confirmedRecords(month, sourceIds, null);
+    }
+
+    private Map<Long, WorkRecord> confirmedRecords(String month, java.util.Collection<Long> sourceIds,
+                                                   java.util.Collection<Long> contractIds) {
         Map<Long, WorkRecord> result = new HashMap<>();
-        QueryWrapper<WorkRecord> query = new QueryWrapper<WorkRecord>().eq("work_month", month).eq("status", "確定");
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        if (sourceIds != null && sourceIds.isEmpty()) return result;
+        if (contractIds != null && contractIds.isEmpty()) return result;
+
+        List<WorkRecord> records;
         if (sourceIds != null) {
-            if (sourceIds.isEmpty()) return result;
-            query.in("id", sourceIds);
+            records = workRecordMapper.selectConfirmedByWorkMonthAndIdsForTenant(month,
+                    new ArrayList<>(sourceIds), tenantId);
+        } else if (contractIds != null) {
+            records = workRecordMapper.selectConfirmedByWorkMonthsAndContractIdsForTenant(
+                    List.of(month), new ArrayList<>(contractIds), tenantId);
+        } else {
+            records = workRecordMapper.selectConfirmedByWorkMonthsForTenant(List.of(month), tenantId);
         }
-        workRecordMapper.selectList(query).forEach(record -> result.put(record.getId(), record));
+        if (contractIds != null && sourceIds != null) {
+            records = records.stream().filter(r -> contractIds.contains(r.getContractId())).toList();
+        }
+        records.forEach(record -> result.put(record.getId(), record));
         return result;
     }
 
@@ -416,6 +507,52 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
     private BigDecimal sum(List<ManagementAccountingSummaryDto.Row> rows,
                            java.util.function.Function<ManagementAccountingSummaryDto.Row, BigDecimal> getter) {
         return rows.stream().map(getter).reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private EffectiveScopeSnapshot requireSnapshot(CopilotExecutionContext context) {
+        if (context == null) {
+            throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+        }
+        EffectiveScopeSnapshot snapshot = context.effectiveScopeSnapshot();
+        if (snapshot == null || context.scope() != snapshot.scope()
+                || !context.tenantId().equals(snapshot.tenantId())
+                || !context.legalEntityId().equals(snapshot.legalEntityId())
+                || !context.asOfDate().equals(snapshot.asOf())
+                || !snapshot.scopeHash().equals(context.scopeHash())) {
+            throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_SCOPE_MISMATCH");
+        }
+        return snapshot;
+    }
+
+    private List<Long> copyIds(java.util.Collection<Long> ids) {
+        return ids == null ? null : new ArrayList<>(ids);
+    }
+
+    private <T> void applyIdFilter(LambdaQueryWrapper<T> query,
+                                   com.baomidou.mybatisplus.core.toolkit.support.SFunction<T, ?> column,
+                                   java.util.Collection<Long> ids) {
+        if (ids == null) {
+            return;
+        }
+        if (ids.isEmpty()) {
+            query.apply("1 = 0");
+        } else {
+            query.in(column, ids);
+        }
+    }
+
+    private <T> void applySnapshotOrganizationFilter(
+            LambdaQueryWrapper<T> query,
+            com.baomidou.mybatisplus.core.toolkit.support.SFunction<T, ?> column,
+            EffectiveScopeSnapshot snapshot) {
+        if ("COMPANY_WIDE".equals(snapshot.scopeType())) {
+            return;
+        }
+        if (snapshot.organizationIds() == null) {
+            query.apply("1 = 0");
+            return;
+        }
+        applyIdFilter(query, column, snapshot.organizationIds());
     }
 
     /** 予実行のキー。予算・待機原価が存在する粒度と一致させる。 */

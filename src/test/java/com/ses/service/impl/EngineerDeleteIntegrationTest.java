@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 @Sql(scripts = "/sql/engineer-schema-h2.sql")
 @Transactional
+@com.ses.test.EnableDefaultTenantTestContext
 class EngineerDeleteIntegrationTest {
 
     @Autowired

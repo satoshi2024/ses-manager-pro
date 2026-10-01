@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS m_service_sla_policy (
 
 CREATE TABLE IF NOT EXISTS t_service_request (
     id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id         VARCHAR(100) NOT NULL DEFAULT 'default',
     request_no        VARCHAR(64) NOT NULL,
     customer_id       BIGINT NOT NULL,
     contact_id        BIGINT NULL,
@@ -41,7 +42,17 @@ CREATE TABLE IF NOT EXISTS t_service_request (
     version           INT NOT NULL DEFAULT 0,
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (request_no)
+    UNIQUE (tenant_id, request_no)
+);
+
+CREATE TABLE IF NOT EXISTS t_service_request_sequence (
+    tenant_id VARCHAR(100) NOT NULL,
+    request_month CHAR(6) NOT NULL,
+    last_number INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, request_month),
+    CONSTRAINT chk_service_request_sequence_range CHECK (last_number BETWEEN 0 AND 9999)
 );
 
 CREATE TABLE IF NOT EXISTS t_service_sla_clock (
@@ -53,9 +64,13 @@ CREATE TABLE IF NOT EXISTS t_service_sla_clock (
     resolve_deadline    DATETIME NOT NULL,
     first_responded_at  DATETIME NULL,
     response_breached   TINYINT(1) NOT NULL DEFAULT 0,
+    response_breached_at DATETIME NULL,
+    response_breach_time_unknown TINYINT(1) NOT NULL DEFAULT 0,
     response_warning_sent TINYINT(1) NOT NULL DEFAULT 0,
     resolved_at         DATETIME NULL,
     resolve_breached    TINYINT(1) NOT NULL DEFAULT 0,
+    resolve_breached_at DATETIME NULL,
+    resolve_breach_time_unknown TINYINT(1) NOT NULL DEFAULT 0,
     resolve_warning_sent TINYINT(1) NOT NULL DEFAULT 0,
     last_response_alert_at DATETIME NULL,
     last_resolve_alert_at DATETIME NULL,
@@ -100,14 +115,44 @@ CREATE TABLE IF NOT EXISTS t_service_comment (
 
 CREATE TABLE IF NOT EXISTS t_service_attachment_link (
     id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id           VARCHAR(100) NOT NULL DEFAULT 'default',
     service_request_id  BIGINT NOT NULL,
     comment_id          BIGINT NULL,
     document_id         BIGINT NOT NULL,
     visibility          VARCHAR(20) NOT NULL DEFAULT 'PORTAL_VISIBLE',
+    business_key        VARCHAR(512) NOT NULL,
     file_name           VARCHAR(255) NOT NULL,
     file_size           BIGINT NOT NULL,
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uk_service_attachment_tenant_business_key
+    ON t_service_attachment_link (tenant_id, business_key);
+
+CREATE TABLE IF NOT EXISTS t_service_attachment_compensation (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL,
+    service_request_id BIGINT NOT NULL,
+    comment_id BIGINT,
+    document_id BIGINT NOT NULL,
+    visibility VARCHAR(20) NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    file_size BIGINT NOT NULL,
+    business_key VARCHAR(512) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'RETRY',
+    attempt_count INT NOT NULL DEFAULT 1,
+    last_error VARCHAR(255),
+    next_retry_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    resolved_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, business_key)
+);
+CREATE INDEX IF NOT EXISTS idx_service_attachment_compensation_due
+    ON t_service_attachment_compensation(status, next_retry_at);
+
+INSERT INTO m_document_type (code, name, direction, retention_years, retention_start_rule, legal_hold_supported)
+SELECT 'SERVICE_REQUEST_ATTACHMENT', 'サービスリクエスト添付', 'INCOMING', 7, 'TRANSACTION_DATE', 1
+WHERE NOT EXISTS (SELECT 1 FROM m_document_type WHERE code = 'SERVICE_REQUEST_ATTACHMENT');
 
 CREATE TABLE IF NOT EXISTS t_service_state_event (
     id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -172,6 +217,7 @@ CREATE TABLE IF NOT EXISTS t_customer_health_snapshot (
     total_score                 INT NOT NULL,
     open_critical_issues_count  INT NOT NULL DEFAULT 0,
     sla_breach_count_30d        INT NOT NULL DEFAULT 0,
+    sla_breach_historical_unknown_count INT NOT NULL DEFAULT 0,
     avg_csat_score              DECIMAL(3,2) NULL,
     ar_overdue_flag             TINYINT(1) NOT NULL DEFAULT 0,
     missing_inputs_json         CLOB NULL,
@@ -185,6 +231,13 @@ CREATE TABLE IF NOT EXISTS t_customer_health_snapshot (
     created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (customer_id, snapshot_date, version_no),
     CONSTRAINT chk_health_snapshot_revision_reason CHECK (CHAR_LENGTH(TRIM(revision_reason)) > 0)
+);
+
+CREATE TABLE IF NOT EXISTS t_service_request_sequence (
+    sequence_month  VARCHAR(6) NOT NULL PRIMARY KEY,
+    current_val     INT NOT NULL DEFAULT 0,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 初期マスタデータ
@@ -221,3 +274,10 @@ CROSS JOIN (
 WHERE g.tenant_id = 'default'
   AND g.enabled = 1
   AND g.group_key IN ('role-sales', 'role-manager', 'role-admin');
+
+-- 共通V1の既存テーブルにも、tenant-aware entity/queryが要求する列を付与する。
+ALTER TABLE sys_user ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100) NOT NULL DEFAULT 'default';
+ALTER TABLE t_notification ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100) NOT NULL DEFAULT 'default';
+ALTER TABLE t_engineer_account_link ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100) NOT NULL DEFAULT 'default';
+ALTER TABLE t_user_organization ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100) NOT NULL DEFAULT 'default';
+ALTER TABLE t_lifecycle_case ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100) NOT NULL DEFAULT 'default';

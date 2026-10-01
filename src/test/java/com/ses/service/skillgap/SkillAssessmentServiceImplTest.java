@@ -10,11 +10,16 @@ import com.ses.entity.LearningDecisionEvent;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.EngineerAccountLinkMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.EngineerSkillAssessmentMapper;
 import com.ses.mapper.LearningDecisionEventMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.EngineerSkillService;
+import com.ses.service.security.TenantOwnershipResolver;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -30,6 +35,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -45,17 +51,31 @@ class SkillAssessmentServiceImplTest {
     @Mock private UserOrganizationMapper userOrganizationMapper;
     @Mock private SysUserMapper sysUserMapper;
     @Mock private EngineerSkillService engineerSkillService;
+    @Mock private TenantOwnershipResolver tenantOwnershipResolver;
+    @Mock private EngineerMapper engineerMapper;
+
+    @BeforeEach
+    void setTenantContext() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Test
     void selfとmanagerはproposalだけで公式projectionを変更しない() {
         stubAccount(501L);
-        when(sysUserMapper.selectById(700L)).thenReturn(user(700L, "マネージャー"));
+        when(tenantOwnershipResolver.selectEngineer("default", 10L)).thenReturn(engineer(10L));
+        when(sysUserMapper.selectByIdAndTenant(700L, "default")).thenReturn(user(700L, "マネージャー"));
         UserOrganization assignment = new UserOrganization();
         assignment.setUserId(501L);
         assignment.setManagerUserId(700L);
         assignment.setPrimaryFlag(1);
         assignment.setValidFrom(LocalDate.of(2026, 1, 1));
-        when(userOrganizationMapper.selectList(any())).thenReturn(List.of(assignment));
+        when(userOrganizationMapper.selectManagerAssignmentByTenant(eq("default"), eq(501L), eq(700L), any()))
+                .thenReturn(List.of(assignment));
         doAnswer(invocation -> {
             EngineerSkillAssessment assessment = invocation.getArgument(0);
             assessment.setId(80L);
@@ -69,7 +89,7 @@ class SkillAssessmentServiceImplTest {
         assertEquals(EngineerSkillAssessment.TYPE_SELF, self.getAssessmentType());
         assertEquals(EngineerSkillAssessment.TYPE_MANAGER, manager.getAssessmentType());
         assertEquals("PROPOSED", self.getAssessmentState());
-        verify(engineerSkillService, never()).replaceSkills(any(), any());
+        verify(engineerSkillService, never()).replaceSkills(any(), any(java.util.List.class));
     }
 
     @Test
@@ -79,20 +99,23 @@ class SkillAssessmentServiceImplTest {
 
         assertThrows(BusinessException.class,
                 () -> service.submitSelf(10L, 1L, "中級", date(), 502L, "他人です"));
-        when(sysUserMapper.selectById(700L)).thenReturn(user(700L, "営業"));
+        when(tenantOwnershipResolver.selectEngineer("default", 10L)).thenReturn(engineer(10L));
+        when(sysUserMapper.selectByIdAndTenant(700L, "default")).thenReturn(user(700L, "営業"));
         assertThrows(BusinessException.class,
                 () -> service.submitManager(10L, 1L, "中級", date(), 700L, "営業確認"));
     }
 
     @Test
     void HR_FINALだけが共通service経由で公式skillを更新しdecision監査を残す() {
-        when(sysUserMapper.selectById(900L)).thenReturn(user(900L, "HR"));
+        when(tenantOwnershipResolver.selectEngineer("default", 10L)).thenReturn(engineer(10L));
+        when(sysUserMapper.selectByIdAndTenant(900L, "default")).thenReturn(user(900L, "HR"));
         EngineerSkill existing = new EngineerSkill();
         existing.setEngineerId(10L);
         existing.setSkillId(1L);
         existing.setProficiency("初級");
-        when(engineerSkillService.list(any(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class)))
+        when(engineerSkillService.listForTenant(10L))
                 .thenReturn(List.of(existing));
+        when(engineerMapper.selectByIdForTenant(10L, "default")).thenReturn(engineer(10L));
         doAnswer(invocation -> {
             EngineerSkillAssessment assessment = invocation.getArgument(0);
             assessment.setId(81L);
@@ -104,9 +127,10 @@ class SkillAssessmentServiceImplTest {
 
         assertEquals(EngineerSkillAssessment.TYPE_HR_FINAL, result.getAssessmentType());
         assertEquals("FINAL", result.getAssessmentState());
-        ArgumentCaptor<List<EngineerSkill>> skills = ArgumentCaptor.forClass(List.class);
-        verify(engineerSkillService).replaceSkills(org.mockito.ArgumentMatchers.eq(10L), skills.capture());
-        assertEquals("上級", skills.getValue().get(0).getProficiency());
+        ArgumentCaptor<com.ses.dto.skill.SkillReplaceRequest> request =
+                ArgumentCaptor.forClass(com.ses.dto.skill.SkillReplaceRequest.class);
+        verify(engineerSkillService).replaceSkills(org.mockito.ArgumentMatchers.eq(10L), request.capture());
+        assertEquals("上級", request.getValue().getSkills().get(0).getProficiency());
         ArgumentCaptor<LearningDecisionEvent> event = ArgumentCaptor.forClass(LearningDecisionEvent.class);
         verify(decisionEventMapper).insertEvent(event.capture());
         assertEquals("SKILL_LEVEL", event.getValue().getDecisionDomain());
@@ -126,15 +150,16 @@ class SkillAssessmentServiceImplTest {
         return new SkillAssessmentServiceImpl(assessmentMapper, decisionEventMapper, accountLinkMapper,
                 userOrganizationMapper, sysUserMapper, engineerSkillService,
                 Clock.fixed(Instant.parse("2026-08-28T00:00:00Z"), ZoneId.of("Asia/Tokyo")),
-                new ObjectMapper().registerModule(new JavaTimeModule()));
+                new ObjectMapper().registerModule(new JavaTimeModule()), tenantOwnershipResolver, engineerMapper);
     }
 
     private void stubAccount(Long userId) {
         EngineerAccountLink link = new EngineerAccountLink();
         link.setEngineerId(10L);
         link.setSysUserId(userId);
-        when(accountLinkMapper.selectByEngineerId(10L)).thenReturn(link);
-        lenient().when(sysUserMapper.selectById(userId)).thenReturn(user(userId, "要員"));
+        when(tenantOwnershipResolver.selectEngineer("default", 10L)).thenReturn(engineer(10L));
+        when(accountLinkMapper.selectByEngineerIdAndTenant(10L, "default")).thenReturn(link);
+        lenient().when(sysUserMapper.selectByIdAndTenant(userId, "default")).thenReturn(user(userId, "要員"));
     }
 
     private SysUser user(Long id, String role) {
@@ -143,6 +168,14 @@ class SkillAssessmentServiceImplTest {
         user.setRole(role);
         user.setStatus(1);
         return user;
+    }
+
+    private com.ses.entity.Engineer engineer(Long id) {
+        com.ses.entity.Engineer engineer = new com.ses.entity.Engineer();
+        engineer.setId(id);
+        engineer.setTenantId("default");
+        engineer.setVersion(0);
+        return engineer;
     }
 
     private LocalDate date() {

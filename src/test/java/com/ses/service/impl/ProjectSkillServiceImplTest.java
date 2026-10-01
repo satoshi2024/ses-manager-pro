@@ -1,8 +1,11 @@
 package com.ses.service.impl;
 
 import com.ses.entity.ProjectSkill;
+import com.ses.dto.skill.SkillReplaceRequest;
 import com.ses.service.ProjectSkillService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.effective.EffectiveIntervalSupport;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +19,10 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import com.ses.common.exception.BusinessException;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -36,18 +43,24 @@ class ProjectSkillServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         String skillName = "skill-" + System.nanoTime();
         jdbcTemplate.update("INSERT INTO m_skill_tag (skill_name) VALUES (?)", skillName);
         skillId = jdbcTemplate.queryForObject(
                 "SELECT id FROM m_skill_tag WHERE skill_name = ?", Long.class, skillName);
         String name = "proj-skill-" + System.nanoTime();
-        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", name);
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, company_name) VALUES ('default', ?)", name);
         long customerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM m_customer WHERE company_name = ?", Long.class, name);
         jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) VALUES (?, ?, '募集中')",
                 name, customerId);
         projectId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_project WHERE project_name = ?", Long.class, name);
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -59,11 +72,40 @@ class ProjectSkillServiceImplTest {
 
         projectSkillService.replaceSkills(projectId, List.of());
 
-        List<com.ses.entity.ProjectSkillEvent> events = projectSkillEventMapper.selectByProjectId(projectId);
+        List<com.ses.entity.ProjectSkillEvent> events = projectSkillEventMapper.selectByTenantAndProjectId(
+                "default", projectId);
         assertEquals(1, events.size());
         LocalDate today = LocalDate.now();
         assertEquals(today.minusDays(1), events.get(0).getEffectiveTo());
         assertTrue(noActiveOpenEvent(events, skillId, today));
+    }
+
+    @Test
+    void replaceSkills_explicitRequestのreasonとversionを監査する() {
+        SkillReplaceRequest request = new SkillReplaceRequest();
+        request.setExpectedVersion(0);
+        request.setReason("案件要件更新");
+        SkillReplaceRequest.SkillItem item = new SkillReplaceRequest.SkillItem();
+        item.setSkillId(skillId);
+        item.setRequiredLevel("上級");
+        request.setSkills(List.of(item));
+
+        projectSkillService.replaceSkills(projectId, request);
+
+        com.ses.entity.ProjectSkillEvent event = projectSkillEventMapper
+                .selectByTenantAndProjectId("default", projectId).get(0);
+        assertEquals("案件要件更新", event.getReason());
+        assertEquals("OPEN", event.getEventType());
+        assertNotNull(event.getEffectiveFrom());
+        assertNull(event.getEffectiveTo());
+
+        SkillReplaceRequest stale = new SkillReplaceRequest();
+        stale.setExpectedVersion(0);
+        stale.setReason("古い案件更新");
+        stale.setSkills(List.of(item));
+        BusinessException conflict = assertThrows(BusinessException.class,
+                () -> projectSkillService.replaceSkills(projectId, stale));
+        assertTrue(conflict.getMessage().contains("error.common.optimisticLock"));
     }
 
     private static boolean noActiveOpenEvent(List<com.ses.entity.ProjectSkillEvent> events, Long skillId,

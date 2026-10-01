@@ -146,6 +146,7 @@ public class PortalSessionServiceImpl implements PortalSessionService {
                 .portalUserId(user.getId())
                 .portalOrgId(org.getId())
                 .orgType(org.getType())
+                .tenantId(org.getTenantId())
                 .customerId(org.getCustomerId())
                 .bpCompanyId(org.getBpCompanyId())
                 .email(user.getEmail())

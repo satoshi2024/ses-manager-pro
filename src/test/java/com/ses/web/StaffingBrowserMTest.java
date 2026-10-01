@@ -11,6 +11,7 @@ import com.ses.mapper.ProjectPositionMapper;
 import com.ses.service.ContractService;
 import com.ses.service.staffing.AllocationPlanService;
 import com.ses.service.staffing.StaffingScenarioService;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -18,7 +19,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
@@ -71,7 +71,14 @@ class StaffingBrowserMTest {
     void captureStaffingScreensWithRealBrowser() throws Exception {
         Path chrome = CdpBrowser.chromeExecutable();
         assertNotNull(chrome, "Chrome実行ファイルが見つかりません");
-        DemoData demo = seedDemoData();
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L, 1L);
+        TenantTestSecurity.bindAs(1L, "admin", "default", "管理者");
+        DemoData demo;
+        try {
+            demo = seedDemoData();
+        } finally {
+            TenantTestSecurity.clear();
+        }
         String baseUrl = "http://localhost:" + port;
         Path evidenceDir = Path.of("target", "browser-m-evidence", "staffing-capacity-planning");
         Files.createDirectories(evidenceDir);
@@ -266,20 +273,17 @@ class StaffingBrowserMTest {
 
     /** position→配置→契約（actual）→scenarioまでをシードする。 */
     private DemoData seedDemoData() {
-        // scenario作成は現在ユーザーをownerにするため、テスト内で認証してからシードする
-        SecurityContextHolder.getContext().setAuthentication(
-                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
-                        "92001", "n/a", List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_管理者"))));
         String suffix = String.valueOf(System.nanoTime());
-        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "T080demo-" + suffix);
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, legal_entity_id, company_name) VALUES ('default', 1, ?)",
+                "T080demo-" + suffix);
         long customerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM m_customer WHERE company_name = ?", Long.class, "T080demo-" + suffix);
-        jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) "
-                + "VALUES (?, ?, '募集中')", "T080demo-prj-" + suffix, customerId);
+        jdbcTemplate.update("INSERT INTO t_project (legal_entity_id, project_name, customer_id, status) "
+                + "VALUES (1, ?, ?, '募集中')", "T080demo-prj-" + suffix, customerId);
         long projectId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_project WHERE project_name = ?", Long.class, "T080demo-prj-" + suffix);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, expected_unit_price) "
-                + "VALUES (?, '正社員', '稼動中', 800000)", "T080demo-eng-" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, legal_entity_id, full_name, employment_type, status, expected_unit_price) "
+                + "VALUES ('default', 1, ?, '正社員', '稼動中', 800000)", "T080demo-eng-" + suffix);
         long engineerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "T080demo-eng-" + suffix);
 
@@ -335,6 +339,8 @@ class StaffingBrowserMTest {
         contract.setSellingPrice(new BigDecimal("900000"));
         contract.setCostPrice(new BigDecimal("700000"));
         contract.setPositionId(position.getId());
+        contract.setTenantId("default");
+        contract.setLegalEntityId(1L);
         contractService.saveWithBusinessRules(contract);
 
         // scenario（比較対象）

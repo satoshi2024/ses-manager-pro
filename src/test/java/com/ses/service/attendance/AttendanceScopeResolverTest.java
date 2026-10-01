@@ -8,6 +8,9 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.OrganizationUnitMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -28,6 +31,16 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 @Transactional
 @Sql("/sql/engineer-schema-h2.sql")
 class AttendanceScopeResolverTest {
+
+    @BeforeEach
+    void bindTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Autowired
     private AttendanceScopeResolver resolver;
@@ -95,6 +108,7 @@ class AttendanceScopeResolverTest {
 
     private SysUser user(String username, String role) {
         SysUser user = new SysUser();
+        user.setTenantId("default");
         user.setUsername(username);
         user.setPassword("pass");
         user.setRealName(username);
@@ -106,7 +120,8 @@ class AttendanceScopeResolverTest {
 
     private Engineer engineer(String name, Long organizationId) {
         Engineer engineer = Engineer.builder().fullName(name + System.nanoTime())
-                .employmentType("正社員").status("Bench").organizationId(organizationId).build();
+                .employmentType("正社員").status("Bench").organizationId(organizationId)
+                .tenantId("default").build();
         engineerMapper.insert(engineer);
         return engineer;
     }

@@ -23,6 +23,8 @@ CREATE TABLE t_mail_delivery (
 DROP TABLE IF EXISTS m_customer CASCADE;
 CREATE TABLE m_customer (
   id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id   BIGINT DEFAULT 1,
+  tenant_id         VARCHAR(100) DEFAULT 'default',
   company_name      VARCHAR(200) NOT NULL,
   company_name_kana VARCHAR(200),
   contact_person    VARCHAR(100),
@@ -43,6 +45,8 @@ DROP TABLE IF EXISTS t_engineer CASCADE;
 
 CREATE TABLE t_engineer (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id     BIGINT DEFAULT 1,
+  tenant_id           VARCHAR(100) DEFAULT 'default',
   full_name           VARCHAR(100),
   full_name_kana      VARCHAR(100),
   initial_name        VARCHAR(10),
@@ -145,6 +149,7 @@ CREATE TABLE t_project_skill (
 DROP TABLE IF EXISTS t_notification CASCADE;
 CREATE TABLE t_notification (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
   type        VARCHAR(30)  NOT NULL,
   title       VARCHAR(200) NOT NULL,
   message     VARCHAR(500),
@@ -152,9 +157,10 @@ CREATE TABLE t_notification (
   menu_key    VARCHAR(50),
   organization_id BIGINT,
   recipient_user_id BIGINT,
-  dedupe_key  VARCHAR(200) NOT NULL UNIQUE,
+  dedupe_key  VARCHAR(200) NOT NULL,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX uk_notification_tenant_dedupe ON t_notification(tenant_id, dedupe_key);
 
 DROP TABLE IF EXISTS t_notification_read CASCADE;
 CREATE TABLE t_notification_read (
@@ -168,6 +174,7 @@ CREATE TABLE t_notification_read (
 DROP TABLE IF EXISTS t_project CASCADE;
 CREATE TABLE t_project (
   id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id   BIGINT DEFAULT 1,
   project_name      VARCHAR(200) NOT NULL,
   customer_id       BIGINT,
   commercial_flow   VARCHAR(50),
@@ -183,6 +190,7 @@ CREATE TABLE t_project (
   end_date          DATE,
   remarks           TEXT,
   source_opportunity_id BIGINT,
+  version                INT NOT NULL DEFAULT 0,
   created_by        BIGINT,
   created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -193,6 +201,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_project_source_opportunity ON t_project(sou
 DROP TABLE IF EXISTS t_contract CASCADE;
 CREATE TABLE t_contract (
   id                      BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id         BIGINT DEFAULT 1,
+  tenant_id               VARCHAR(100) DEFAULT 'default',
   contract_no             VARCHAR(50),
   proposal_id             BIGINT,
   engineer_id             BIGINT,
@@ -394,6 +404,7 @@ CREATE TABLE t_work_record (
 DROP TABLE IF EXISTS t_invoice CASCADE;
 CREATE TABLE t_invoice (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id BIGINT DEFAULT 1,
   invoice_no    VARCHAR(30) NOT NULL UNIQUE,
   customer_id   BIGINT NOT NULL,
   billing_month CHAR(7) NOT NULL,
@@ -519,6 +530,7 @@ CREATE TABLE t_customer_contact (
 
 CREATE TABLE t_lead (
   id                       BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id          BIGINT,
   company_name             VARCHAR(200) NOT NULL,
   company_name_normalized  VARCHAR(200),
   contact_name             VARCHAR(100),
@@ -540,6 +552,7 @@ CREATE TABLE t_lead (
 
 CREATE TABLE t_opportunity (
   id                     BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id        BIGINT,
   customer_id            BIGINT NOT NULL,
   title                  VARCHAR(200) NOT NULL,
   stage                  VARCHAR(30) NOT NULL DEFAULT '見込',
@@ -567,6 +580,7 @@ DROP TABLE IF EXISTS t_candidate_activity CASCADE;
 DROP TABLE IF EXISTS t_candidate CASCADE;
 CREATE TABLE t_candidate (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id             VARCHAR(100) DEFAULT 'default',
   name                  VARCHAR(100) NOT NULL,
   contact_email         VARCHAR(200),
   contact_phone         VARCHAR(20),
@@ -576,6 +590,7 @@ CREATE TABLE t_candidate (
   current_stage         VARCHAR(20) NOT NULL DEFAULT '応募受付',
   next_action_date      DATE,
   converted_engineer_id BIGINT,
+  version               INT NOT NULL DEFAULT 0,
   remarks               VARCHAR(1000),
   deleted_flag          TINYINT NOT NULL DEFAULT 0,
   created_by            BIGINT,
@@ -639,6 +654,7 @@ WHERE m.menu_key = 'myLifecycle'
 DROP TABLE IF EXISTS sys_user CASCADE;
 CREATE TABLE sys_user (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id     VARCHAR(100) NOT NULL DEFAULT 'default',
   username      VARCHAR(50) NOT NULL UNIQUE,
   password      VARCHAR(255) NOT NULL,
   real_name     VARCHAR(50),
@@ -762,6 +778,7 @@ CREATE TABLE t_freee_employee_link (
 DROP TABLE IF EXISTS t_engineer_account_link CASCADE;
 CREATE TABLE t_engineer_account_link (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
   engineer_id BIGINT NOT NULL UNIQUE,
   sys_user_id BIGINT NOT NULL UNIQUE,
   linked_by   BIGINT,
@@ -800,9 +817,11 @@ CREATE TABLE t_contract_price_history (
 DROP TABLE IF EXISTS t_resume_ingestion;
 CREATE TABLE t_resume_ingestion (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
-  original_file_name    VARCHAR(255) NOT NULL,
-  stored_file_name      VARCHAR(120) NOT NULL,
-  file_ext              VARCHAR(10)  NOT NULL,
+  legal_entity_id       BIGINT DEFAULT 1,
+  tenant_id             VARCHAR(100) DEFAULT 'default',
+  original_file_name    VARCHAR(255),
+  stored_file_name      VARCHAR(120),
+  file_ext              VARCHAR(10),
   status                VARCHAR(20)  NOT NULL DEFAULT '取込待ち',
   extracted_text        LONGTEXT,
   parsed_json           LONGTEXT,
@@ -811,16 +830,21 @@ CREATE TABLE t_resume_ingestion (
   error_message         VARCHAR(500),
   converted_engineer_id BIGINT,
   candidate_id          BIGINT,
+  version               INT NOT NULL DEFAULT 0,
   review_note           VARCHAR(500),
   created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag          TINYINT NOT NULL DEFAULT 0,
   created_by            BIGINT
 );
+CREATE INDEX IF NOT EXISTS idx_resume_ingestion_tenant_status_file
+    ON t_resume_ingestion (tenant_id, status, stored_file_name, deleted_flag);
 
 DROP TABLE IF EXISTS t_project_ingestion;
 CREATE TABLE t_project_ingestion (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id     BIGINT DEFAULT 1,
+  tenant_id           VARCHAR(100) DEFAULT 'default',
   source_type         VARCHAR(10) NOT NULL,
   original_file_name  VARCHAR(255),
   stored_file_name    VARCHAR(120),
@@ -835,12 +859,17 @@ CREATE TABLE t_project_ingestion (
   created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag        TINYINT NOT NULL DEFAULT 0,
-  created_by          BIGINT
+  created_by          BIGINT,
+  version             INT NOT NULL DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS idx_project_ingestion_tenant_status
+    ON t_project_ingestion (tenant_id, status, deleted_flag, id);
 
 DROP TABLE IF EXISTS t_bp_availability;
 CREATE TABLE t_bp_availability (
   id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id    BIGINT DEFAULT 1,
+  tenant_id          VARCHAR(100) DEFAULT 'default',
   initial_name       VARCHAR(50),
   bp_company         VARCHAR(120),
   bp_company_id      BIGINT,
@@ -860,6 +889,7 @@ CREATE TABLE t_bp_availability (
 DROP TABLE IF EXISTS t_bp_availability_ingestion;
 CREATE TABLE t_bp_availability_ingestion (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id       BIGINT,
   original_file_name    VARCHAR(255),
   stored_file_name      VARCHAR(120),
   file_ext              VARCHAR(10)  NOT NULL,
@@ -1098,6 +1128,7 @@ CREATE TABLE m_organization_unit (
 
 CREATE TABLE t_user_organization (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
   user_id BIGINT NOT NULL,
   organization_id BIGINT NOT NULL,
   position_name VARCHAR(100),
@@ -1161,6 +1192,22 @@ CREATE TABLE t_monthly_accounting_dimension (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- V181相当。月次締め（tenant×月）。confirmed_at NULL = 未締め。
+DROP TABLE IF EXISTS t_monthly_closing CASCADE;
+CREATE TABLE t_monthly_closing (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id VARCHAR(100),
+  work_month VARCHAR(7) NOT NULL,
+  confirmed_by BIGINT,
+  confirmed_at DATETIME,
+  version INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (tenant_id, work_month)
+);
+CREATE INDEX IF NOT EXISTS idx_monthly_closing_tenant_confirmed
+  ON t_monthly_closing (tenant_id, confirmed_at, work_month);
 
 DROP TABLE IF EXISTS t_break_glass_incident CASCADE;
 CREATE TABLE t_break_glass_incident (
@@ -2795,6 +2842,8 @@ CREATE INDEX idx_job_event_job_id ON t_integration_job_event (job_id);
 
 CREATE TABLE IF NOT EXISTS t_peppol_participant (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(100) NULL,
+    legal_entity_id BIGINT NULL,
     owner_type VARCHAR(50) NOT NULL,
     owner_id BIGINT NOT NULL,
     scheme_id VARCHAR(50) NOT NULL,
@@ -2807,11 +2856,15 @@ CREATE TABLE IF NOT EXISTS t_peppol_participant (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     updated_by VARCHAR(50) NULL,
     deleted_flag TINYINT(1) DEFAULT 0,
-    UNIQUE KEY uk_peppol_participant_owner (owner_type, owner_id)
+    callback_active_slot TINYINT AS (CASE WHEN deleted_flag = 0 AND status = 'VERIFIED' THEN 1 ELSE NULL END),
+    UNIQUE KEY uk_peppol_scope_owner (tenant_id, legal_entity_id, owner_type, owner_id),
+    UNIQUE KEY uk_peppol_callback_active (provider, scheme_id, participant_id, callback_active_slot)
 );
 
 CREATE TABLE IF NOT EXISTS t_digital_invoice (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(100) NULL,
+    legal_entity_id BIGINT NULL,
     invoice_id BIGINT NULL,
     direction VARCHAR(20) NOT NULL,
     profile VARCHAR(50) NOT NULL,
@@ -2828,6 +2881,11 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice (
     purchase_order_id BIGINT NULL,
     contract_id BIGINT NULL,
     match_status VARCHAR(20) NULL,
+    actor_type VARCHAR(20) NULL,
+    confirmation_source VARCHAR(40) NULL,
+    human_user_id BIGINT NULL,
+    correlation_id VARCHAR(128) NULL,
+    idempotency_key VARCHAR(190) NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(50) NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -2842,21 +2900,66 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice (
             ELSE NULL
         END
     ),
-    UNIQUE KEY uk_digital_invoice_message (message_id),
-    UNIQUE KEY uk_digital_invoice_send (invoice_id, direction, profile, specification_version, send_active_slot)
+    UNIQUE KEY uk_digital_invoice_scope_message (tenant_id, legal_entity_id, message_id),
+    UNIQUE KEY uk_digital_invoice_provider_message (provider_message_id),
+    UNIQUE KEY uk_digital_invoice_scope_send (tenant_id, legal_entity_id, invoice_id, direction, profile, specification_version, send_active_slot),
+    UNIQUE KEY uk_digital_invoice_scope_id (tenant_id, legal_entity_id, id),
+    CONSTRAINT ck_digital_invoice_actor_pair CHECK (
+        actor_type IS NOT NULL AND confirmation_source IS NOT NULL AND (
+            (actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND human_user_id IS NOT NULL AND human_user_id > 0)
+            OR (actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND human_user_id IS NULL)
+            OR (actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND human_user_id IS NULL)
+            OR (actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND human_user_id IS NULL)
+        )
+    )
 );
 
 CREATE TABLE IF NOT EXISTS t_digital_invoice_event (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(100) NULL,
+    legal_entity_id BIGINT NULL,
     digital_invoice_id BIGINT NOT NULL,
     provider_event_id VARCHAR(100) NOT NULL,
     event_type VARCHAR(50) NOT NULL,
     event_at DATETIME NOT NULL,
     payload_hash VARCHAR(64) NOT NULL,
+    canonical_payload_hash VARCHAR(64),
     signature_valid TINYINT(1) NOT NULL,
+    actor_type VARCHAR(20) NULL,
+    confirmation_source VARCHAR(40) NULL,
+    human_user_id BIGINT NULL,
+    correlation_id VARCHAR(128) NULL,
+    idempotency_key VARCHAR(190) NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(50) NULL,
-    UNIQUE KEY uk_digital_invoice_event_provider (provider_event_id)
+    UNIQUE KEY uk_digital_invoice_event_provider (provider_event_id),
+    CONSTRAINT fk_digital_invoice_event_scope
+        FOREIGN KEY (tenant_id, legal_entity_id, digital_invoice_id)
+        REFERENCES t_digital_invoice (tenant_id, legal_entity_id, id),
+    CONSTRAINT ck_digital_invoice_event_actor_pair CHECK (
+        actor_type IS NOT NULL AND confirmation_source IS NOT NULL AND (
+            (actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND human_user_id IS NOT NULL AND human_user_id > 0)
+            OR (actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND human_user_id IS NULL)
+            OR (actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND human_user_id IS NULL)
+            OR (actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND human_user_id IS NULL)
+        )
+    )
+);
+
+CREATE TABLE IF NOT EXISTS t_nf09_scope_repair_queue (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    entity_type VARCHAR(40) NOT NULL,
+    entity_id BIGINT NOT NULL,
+    reason VARCHAR(80) NOT NULL,
+    candidate_tenant_id VARCHAR(100) NULL,
+    candidate_legal_entity_id BIGINT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    version INT NOT NULL DEFAULT 0,
+    resolved_at DATETIME NULL,
+    resolved_by BIGINT NULL,
+    resolution_note VARCHAR(500) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_nf09_scope_repair_entity UNIQUE (entity_type, entity_id)
 );
 
 ALTER TABLE t_proposal ADD COLUMN IF NOT EXISTS ai_trace_id VARCHAR(36);
@@ -2878,4 +2981,15 @@ CREATE TABLE t_pwa_client_mutation (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at DATETIME,
     CONSTRAINT uk_pwa_client_mutation_user_request UNIQUE (user_id, client_request_id)
+);
+CREATE TABLE IF NOT EXISTS t_legal_entity_backfill_audit (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    entity_type VARCHAR(40) NOT NULL,
+    entity_id BIGINT NOT NULL,
+    previous_legal_entity_id BIGINT,
+    resolved_legal_entity_id BIGINT,
+    decision VARCHAR(20) NOT NULL,
+    reason VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_legal_entity_backfill_audit UNIQUE (entity_type, entity_id, decision)
 );

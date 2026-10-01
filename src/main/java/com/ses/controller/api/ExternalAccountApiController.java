@@ -12,6 +12,7 @@ import com.ses.entity.SysUser;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.ExternalAccountService;
 import com.ses.service.AssetScopeService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -86,7 +87,8 @@ public class ExternalAccountApiController {
         String username = SecurityUtils.currentUsername();
         Long currentUserId = null;
         if (username != null && !username.isBlank()) {
-            SysUser principalUser = sysUserMapper.selectByUsername(username);
+            SysUser principalUser = sysUserMapper.selectByUsernameAndTenant(
+                    username, AccountingTenantContextHolder.requireTenantContext());
             currentUserId = principalUser != null ? principalUser.getId() : null;
         }
         // principalをsys_user.idへ解決できない場合はサービス側で拒否する。SYSTEMへの降格は禁止。

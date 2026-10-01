@@ -25,6 +25,8 @@ import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.approval.ApprovalRequestCommand;
 import com.ses.service.approval.RouteSnapshot;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -86,10 +88,16 @@ class ApprovalEngineServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         applicantId = insertUser("engine-applicant");
         approver1Id = insertUser("engine-approver1");
         approver2Id = insertUser("engine-approver2");
         delegateId = insertUser("engine-delegate");
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     private Long insertUser(String prefix) {
@@ -98,6 +106,7 @@ class ApprovalEngineServiceTest {
                 .password("x")
                 .realName(prefix)
                 .role("管理者")
+                .tenantId("default")
                 .status(1)
                 .build();
         sysUserMapper.insert(user);
@@ -112,7 +121,7 @@ class ApprovalEngineServiceTest {
     private Long insertRouteWithAmount(String requestType, BigDecimal minAmount, BigDecimal maxAmount,
                                         List<List<Long>> steps) {
         ApprovalRoute route = ApprovalRoute.builder()
-                .tenantId(1L).requestType(requestType).organizationId(null)
+                .tenantId("default").requestType(requestType).organizationId(null)
                 .minAmount(minAmount).maxAmount(maxAmount).versionNo(1)
                 .validFrom(LocalDate.now().minusDays(1)).activeFlag(1).build();
         approvalRouteMapper.insert(route);
@@ -144,6 +153,7 @@ class ApprovalEngineServiceTest {
 
     private UserOrganization insertUserOrganization(Long userId, Long organizationId, Long managerUserId) {
         UserOrganization assignment = UserOrganization.builder()
+                .tenantId("default")
                 .userId(userId)
                 .organizationId(organizationId)
                 .managerUserId(managerUserId)
@@ -157,7 +167,7 @@ class ApprovalEngineServiceTest {
 
     private void insertApplicantManagerRoute(String requestType, Long organizationId) {
         ApprovalRoute route = ApprovalRoute.builder()
-                .tenantId(1L).requestType(requestType).organizationId(organizationId)
+                .tenantId("default").requestType(requestType).organizationId(organizationId)
                 .minAmount(null).maxAmount(null).versionNo(1)
                 .validFrom(LocalDate.now().minusDays(1)).activeFlag(1).build();
         approvalRouteMapper.insert(route);
@@ -300,7 +310,7 @@ class ApprovalEngineServiceTest {
                 .build();
         approvalDelegationMapper.insert(allowed);
         approvalDelegationTypeMapper.insert(ApprovalDelegationType.builder()
-                .delegationId(allowed.getId()).requestType(typeAllowed).build());
+                .tenantId("default").delegationId(allowed.getId()).requestType(typeAllowed).build());
 
         ApprovalRequest allowedRequest = request(typeAllowed);
         approvalEngineService.approve(allowedRequest.getId(), delegateId, "子表で許可");
@@ -315,7 +325,7 @@ class ApprovalEngineServiceTest {
                 .build();
         approvalDelegationMapper.insert(denied);
         approvalDelegationTypeMapper.insert(ApprovalDelegationType.builder()
-                .delegationId(denied.getId()).requestType(typeAllowed).build());
+                .tenantId("default").delegationId(denied.getId()).requestType(typeAllowed).build());
 
         ApprovalRequest deniedRequest = request(typeDenied);
         assertThrows(BusinessException.class,

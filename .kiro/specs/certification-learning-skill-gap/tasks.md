@@ -171,3 +171,19 @@
   - Demo: 本人BrowserでDRAFT申請→証憑1件、cancel→resubmit、0円plan→`APPROVED`、course enrollment→`PLANNED`を確認した。非0円planはapproval route fixture未設定により400となり、production実装の失敗ではない環境制約としてpacketへ記録した。
 
 独立Review Head `0e3d9b69`のP1-M-01/P1-M-02/P1-A2-01は上記で製品HTTP/UIまで修正済みであり、独立再Reviewを待つ。旧Mの`[x]`自己判定は再Review PASSまで有効な完了証拠ではない。
+
+## continuity group 一意性永続化および本番プロファイル安全化のremediation（2026-09-07）
+
+- [x] **Task SEC-R: 本番暗号鍵プロファイル判定におけるtest優先脆弱性を修正する**
+  - Objective: `prod` プロファイルがアクティブな場合、`test` やその他プロファイルの指定に左右されず最優先で本番モードと判定し、不正/欠落鍵に対して即座に fail-fast 停止する。
+  - Implementation: `561a40c1`。`CertificationNumberKeyProviderImpl`、`ComplianceReviewerFingerprintKeyProviderImpl`、`ComplianceGateCredentialKeyProviderImpl`、`BatchOperationServiceImpl` の全4クラスで `isProdProfile()` の判定順序を修正し、`prod` 最優先の fail-fast を担保。
+  - Test: `CertificationNumberKeyProviderImplTest`（12件）、`ComplianceReviewerFingerprintKeyProviderImplTest`、`ComplianceGateCredentialCryptoServiceTest`、`BatchOperationServiceH2Test` で混在プロファイルおよび鍵不正を検証。全件PASS。
+  - Demo: `prod,test` 混在指定時にテスト鍵へのフォールバックが阻止され、セキュアな本番鍵が要求されることをテストで実証。
+
+- [x] **Task DATA-R: continuity group を DB シーケンスで永続化し整合性制約を強化する**
+  - Objective: `Math.abs(System.nanoTime())` による一意性リスクを廃止し、DB 管理の `t_certification_continuity_group` による採番と、複合FK・CHECK制約による整合性を担保する。
+  - Implementation: `eb6748b9`。`t_certification_continuity_group` エンティティ/Mapper、V151 マイグレーション、H2 スキーマ同期、`EngineerCertificationServiceImpl` での新規発行・renew 継承、複合外部キー制約、CHECK制約 `chk_eng_cert_current_holder` を実装。
+  - Test: `EngineerCertificationServiceTest`（6件）、`FlywayCertificationLearningSkillGapSchemaSmokeTest`（V151検証、10並行マルチスレッド採番、renew 整合性、CHECK制約違反拒絶、FK制約違反拒絶）、`AllMappersSchemaSweepTest`、`MigrationScriptIntegrityTest`。全件PASS。
+  - Demo: 独立申請チェーンで独立した continuityGroupId が永続化採番され、renew で同一グループIDが正しく継承され、current holder 不変条件違反およびFK違反が拒絶されることをテストで実演。
+
+※ 本remediation完了後も、Task M（独立Implementation再レビュー待ち）は完了とせず `[ ]` を維持する。

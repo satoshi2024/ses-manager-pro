@@ -44,6 +44,14 @@ public class BusinessException extends RuntimeException {
         this.args = null;
     }
 
+    /** 安全な外向き文言を維持しつつ、内部診断用の原因例外を保持する。 */
+    public BusinessException(int code, String message, Throwable cause) {
+        super(message, cause);
+        this.code = code;
+        this.messageKey = null;
+        this.args = null;
+    }
+
     private BusinessException(int code, String messageKey, Object[] args) {
         super(messageKey); // For stacktrace
         this.code = code;

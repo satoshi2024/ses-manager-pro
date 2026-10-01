@@ -9,7 +9,7 @@ import com.ses.entity.SysUser;
 import com.ses.service.CustomerService;
 import com.ses.service.EngineerService;
 import com.ses.service.ProjectService;
-import com.ses.service.SysUserService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,21 +27,21 @@ public class AutocompleteApiController {
     private final EngineerService engineerService;
     private final CustomerService customerService;
     private final ProjectService projectService;
-    private final SysUserService sysUserService;
+    private final com.ses.mapper.SysUserMapper sysUserMapper;
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
     private final com.ses.service.CostCenterService costCenterService;
+    private final com.ses.service.security.TenantOwnershipResolver tenantOwnershipResolver;
+    private final com.ses.mapper.ProjectMapper projectMapper;
 
     @GetMapping("/engineers")
     public ApiResult<List<String>> getEngineers() {
-        QueryWrapper<Engineer> qw = new QueryWrapper<Engineer>().select("full_name");
-        // スコープONの営業には担当要員のみ返す（全件列挙IDOR防止 / R3R-31）。
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         java.util.Set<Long> ids = effectiveEngineerIds();
-        if (ids != null) {
-            if (ids.isEmpty()) return ApiResult.success(List.of());
-            qw.in("id", ids);
-        }
-        List<String> names = engineerService.listObjs(qw, obj -> (String) obj);
+        if (ids.isEmpty()) return ApiResult.success(List.of());
+        List<String> names = tenantOwnershipResolver.selectEngineers(tenantId, ids, null, null, null).stream()
+                .map(Engineer::getFullName)
+                .toList();
         return ApiResult.success(names.stream()
                 .filter(n -> n != null && !n.trim().isEmpty())
                 .distinct()
@@ -50,13 +50,11 @@ public class AutocompleteApiController {
 
     @GetMapping("/customers")
     public ApiResult<List<String>> getCustomers() {
-        QueryWrapper<Customer> qw = new QueryWrapper<Customer>().select("company_name");
         java.util.Set<Long> ids = effectiveCustomerIds();
-        if (ids != null) {
-            if (ids.isEmpty()) return ApiResult.success(List.of());
-            qw.in("id", ids);
-        }
-        List<String> names = customerService.listObjs(qw, obj -> (String) obj);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        List<String> names = tenantOwnershipResolver.selectCustomers(tenantId, ids, null).stream()
+                .map(Customer::getCompanyName)
+                .toList();
         return ApiResult.success(names.stream()
                 .filter(n -> n != null && !n.trim().isEmpty())
                 .distinct()
@@ -65,13 +63,11 @@ public class AutocompleteApiController {
 
     @GetMapping("/projects")
     public ApiResult<List<String>> getProjects() {
-        QueryWrapper<Project> qw = new QueryWrapper<Project>().select("project_name");
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         java.util.Set<Long> ids = effectiveProjectIds();
-        if (ids != null) {
-            if (ids.isEmpty()) return ApiResult.success(List.of());
-            qw.in("id", ids);
-        }
-        List<String> names = projectService.listObjs(qw, obj -> (String) obj);
+        if (ids.isEmpty()) return ApiResult.success(List.of());
+        List<String> names = projectMapperForTenant(tenantId, ids).stream()
+                .map(Project::getProjectName).toList();
         return ApiResult.success(names.stream()
                 .filter(n -> n != null && !n.trim().isEmpty())
                 .distinct()
@@ -79,33 +75,47 @@ public class AutocompleteApiController {
     }
 
     private java.util.Set<Long> effectiveEngineerIds() {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        java.util.Set<Long> owned = new java.util.HashSet<>(tenantOwnershipResolver.resolveEngineerIds(tenantId));
         java.util.Set<Long> dataIds = dataScopeService.isScoped()
                 ? dataScopeService.allowedEngineerIds() : null;
-        if (organizationScopeService.hasFullAccess()) {
-            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+        if (dataIds != null) owned.retainAll(dataIds);
+        if (!organizationScopeService.hasFullAccess()) {
+            owned.retainAll(organizationScopeService.allowedEngineerIds(java.time.LocalDate.now()));
         }
-        return organizationScopeService.intersectWithDataScope(
-                organizationScopeService.allowedEngineerIds(java.time.LocalDate.now()), dataIds);
+        return owned;
     }
 
     private java.util.Set<Long> effectiveCustomerIds() {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        java.util.Set<Long> ownedIds = new java.util.HashSet<>(tenantOwnershipResolver.resolveCustomerIds(tenantId));
         java.util.Set<Long> dataIds = dataScopeService.isScoped()
                 ? dataScopeService.allowedCustomerIds() : null;
+        if (dataIds != null) ownedIds.retainAll(dataIds);
         if (organizationScopeService.hasFullAccess()) {
-            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
+            return ownedIds;
         }
-        return organizationScopeService.intersectWithDataScope(
+        java.util.Set<Long> scoped = organizationScopeService.intersectWithDataScope(
                 organizationScopeService.allowedCustomerIds(java.time.LocalDate.now()), dataIds);
+        if (scoped == null) return ownedIds;
+        ownedIds.retainAll(scoped);
+        return ownedIds;
     }
 
     private java.util.Set<Long> effectiveProjectIds() {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         java.util.Set<Long> dataIds = dataScopeService.isScoped()
                 ? dataScopeService.allowedProjectIds() : null;
-        if (organizationScopeService.hasFullAccess()) {
-            return dataIds == null ? null : new java.util.HashSet<>(dataIds);
-        }
-        return organizationScopeService.intersectWithDataScope(
-                organizationScopeService.allowedProjectIds(java.time.LocalDate.now()), dataIds);
+        java.util.Set<Long> scoped = organizationScopeService.hasFullAccess() ? null
+                : organizationScopeService.allowedProjectIds(java.time.LocalDate.now());
+        java.util.Set<Long> ids = new java.util.HashSet<>(tenantOwnershipResolver.resolveProjectIds(tenantId));
+        if (dataIds != null) ids.retainAll(dataIds);
+        if (scoped != null) ids.retainAll(scoped);
+        return ids;
+    }
+
+    private java.util.List<Project> projectMapperForTenant(String tenantId, java.util.Set<Long> ids) {
+        return projectMapper.selectByIdsForTenant(tenantId, ids);
     }
 
     /**
@@ -119,31 +129,21 @@ public class AutocompleteApiController {
      */
     @GetMapping("/customer-options")
     public ApiResult<List<com.ses.dto.common.OptionDto>> getCustomerOptions() {
-        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Customer> query =
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Customer>()
-                        .orderByAsc(Customer::getId);
         java.util.Set<Long> ids = effectiveCustomerIds();
-        if (ids != null) {
-            if (ids.isEmpty()) return ApiResult.success(List.of());
-            query.in(Customer::getId, ids);
-        }
-        return ApiResult.success(customerService.list(query).stream()
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        return ApiResult.success(tenantOwnershipResolver.selectCustomers(tenantId, ids, null).stream()
                 .map(c -> new com.ses.dto.common.OptionDto(c.getId(), c.getCompanyName()))
+                .sorted(java.util.Comparator.comparing(com.ses.dto.common.OptionDto::getId))
                 .collect(Collectors.toList()));
     }
 
     /** 案件の選択肢（id + 表示名）。{@link #getCustomerOptions()} と同じ理由で自由入力用とは別に持つ。 */
     @GetMapping("/project-options")
     public ApiResult<List<com.ses.dto.common.OptionDto>> getProjectOptions() {
-        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Project> query =
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Project>()
-                        .orderByAsc(Project::getId);
         java.util.Set<Long> ids = effectiveProjectIds();
-        if (ids != null) {
-            if (ids.isEmpty()) return ApiResult.success(List.of());
-            query.in(Project::getId, ids);
-        }
-        return ApiResult.success(projectService.list(query).stream()
+        if (ids.isEmpty()) return ApiResult.success(List.of());
+        return ApiResult.success(projectMapper.selectByIdsForTenant(
+                        AccountingTenantContextHolder.requireTenantContext(), ids).stream()
                 .map(p -> new com.ses.dto.common.OptionDto(p.getId(), p.getProjectName()))
                 .collect(Collectors.toList()));
     }
@@ -209,10 +209,10 @@ public class AutocompleteApiController {
      */
     @GetMapping("/assignable-users")
     public ApiResult<List<com.ses.dto.organization.AssignableUserDto>> getAssignableUsers() {
-        List<SysUser> users = sysUserService.list(new QueryWrapper<SysUser>()
-                .select("id", "username", "real_name", "role")
-                .eq("status", 1)
-                .orderByAsc("id"));
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        List<SysUser> users = sysUserMapper.selectByTenant(tenantId).stream()
+                .filter(user -> Integer.valueOf(1).equals(user.getStatus()))
+                .toList();
         return ApiResult.success(users.stream()
                 .filter(user -> organizationScopeService.hasFullAccess()
                         || organizationScopeService.isAllowedUser(user.getId(), java.time.LocalDate.now()))
@@ -230,11 +230,8 @@ public class AutocompleteApiController {
      */
     @GetMapping("/sales-users")
     public ApiResult<List<com.ses.dto.organization.AssignableUserDto>> getSalesUsers() {
-        List<SysUser> users = sysUserService.list(new QueryWrapper<SysUser>()
-                .select("id", "username", "real_name", "role")
-                .eq("status", 1)
-                .eq("role", "営業")
-                .orderByAsc("id"));
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        List<SysUser> users = sysUserMapper.selectActiveByRoleAndTenant("営業", tenantId);
         return ApiResult.success(users.stream()
                 .map(user -> new com.ses.dto.organization.AssignableUserDto(
                         user.getId(), user.getUsername(), user.getRealName(), user.getRole()))
@@ -245,10 +242,8 @@ public class AutocompleteApiController {
     @GetMapping("/users")
     @PreAuthorize("hasRole('管理者')")
     public ApiResult<List<String>> getUsers() {
-        List<String> names = sysUserService.listObjs(
-                new QueryWrapper<SysUser>().select("username"),
-                obj -> (String) obj
-        );
+        List<String> names = sysUserMapper.selectUsernamesByTenant(
+                AccountingTenantContextHolder.requireTenantContext());
         return ApiResult.success(names.stream()
                 .filter(n -> n != null && !n.trim().isEmpty())
                 .distinct()

@@ -39,11 +39,11 @@ public class DigitalInvoiceApiController {
     public ApiResult<Map<String, Object>> previewDelivery(@PathVariable Long invoiceId) {
         CorrelationContext.put(CorrelationContext.INVOICE_ID, invoiceId);
         try {
+            digitalInvoiceService.assertInvoiceAccessAllowed(invoiceId, null);
             Invoice invoice = invoiceService.getById(invoiceId);
             if (invoice == null) {
                 return ApiResult.error("error.invoice.notFound");
             }
-
             dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
             Customer customer = customerService.getById(invoice.getCustomerId());
             if (customer == null) {
@@ -55,10 +55,7 @@ public class DigitalInvoiceApiController {
             result.put("deliveryPreference", customer.getDeliveryPreference());
 
             if ("PEPPOL".equalsIgnoreCase(customer.getDeliveryPreference())) {
-                PeppolParticipant participant = peppolParticipantService.lambdaQuery()
-                        .eq(PeppolParticipant::getOwnerType, "CUSTOMER")
-                        .eq(PeppolParticipant::getOwnerId, customer.getId())
-                        .one();
+                PeppolParticipant participant = peppolParticipantService.findCurrent("CUSTOMER", customer.getId());
 
                 if (participant != null && participant.getVerifiedAt() != null) {
                     result.put("peppolStatus", "VERIFIED");
@@ -72,13 +69,7 @@ public class DigitalInvoiceApiController {
                 result.put("canSend", true);
             }
 
-            long sentCount = digitalInvoiceService.lambdaQuery()
-                    .eq(DigitalInvoice::getInvoiceId, invoiceId)
-                    .eq(DigitalInvoice::getDirection, "SEND")
-                    .eq(DigitalInvoice::getProfile, "Standard")
-                    .notIn(DigitalInvoice::getStatus, "CANCELLED", "REVOKED")
-                    .count();
-            if (sentCount > 0) {
+            if (digitalInvoiceService.hasActiveSendForInvoice(invoiceId)) {
                 result.put("alreadySent", true);
                 result.put("canSend", false);
                 result.put("reason", "すでに送信処理中です。");
@@ -101,6 +92,7 @@ public class DigitalInvoiceApiController {
     public ApiResult<Void> dispatchInvoice(@PathVariable Long invoiceId, @RequestParam(defaultValue = "1.1.3") String specVersion) {
         CorrelationContext.put(CorrelationContext.INVOICE_ID, invoiceId);
         try {
+            digitalInvoiceService.assertInvoiceAccessAllowed(invoiceId, null);
             Invoice invoice = invoiceService.getById(invoiceId);
             if (invoice == null) {
                 return ApiResult.error("error.invoice.notFound");
@@ -123,17 +115,14 @@ public class DigitalInvoiceApiController {
     public ApiResult<Map<String, Object>> getStatusHistory(@PathVariable Long invoiceId) {
         CorrelationContext.put(CorrelationContext.INVOICE_ID, invoiceId);
         try {
+            digitalInvoiceService.assertInvoiceAccessAllowed(invoiceId, null);
             Invoice invoice = invoiceService.getById(invoiceId);
             if (invoice == null) {
                 return ApiResult.error("error.invoice.notFound");
             }
             dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
 
-            DigitalInvoice di = digitalInvoiceService.lambdaQuery()
-                    .eq(DigitalInvoice::getInvoiceId, invoiceId)
-                    .orderByDesc(DigitalInvoice::getCreatedAt)
-                    .last("LIMIT 1")
-                    .one();
+            DigitalInvoice di = digitalInvoiceService.findLatestForInvoice(invoiceId);
             if (di == null) {
                 Map<String, Object> empty = new HashMap<>();
                 empty.put("digitalInvoiceId", null);
@@ -170,15 +159,15 @@ public class DigitalInvoiceApiController {
     public ApiResult<Void> cancelInvoice(@PathVariable Long id) {
         CorrelationContext.put(CorrelationContext.DIGITAL_INVOICE_ID, id);
         try {
-            DigitalInvoice di = digitalInvoiceService.getById(id);
+            DigitalInvoice di = digitalInvoiceService.getScopedById(id);
             if (di == null || !"SEND".equals(di.getDirection())) {
                 return ApiResult.error("error.invoice.notFound");
             }
             CorrelationContext.put(CorrelationContext.INVOICE_ID, di.getInvoiceId());
             Invoice invoice = invoiceService.getById(di.getInvoiceId());
-            if (invoice != null) {
-                dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
-            }
+            if (invoice == null) return ApiResult.error("error.invoice.notFound");
+            digitalInvoiceService.assertInvoiceAccessAllowed(di.getInvoiceId(), invoice.getCustomerId());
+            dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
             digitalInvoiceService.cancelInvoice(id);
             return ApiResult.success(null);
         } catch (BusinessException e) {
@@ -203,13 +192,19 @@ public class DigitalInvoiceApiController {
                 return org.springframework.http.ResponseEntity.status(403).build();
             }
 
-            DigitalInvoice di = digitalInvoiceService.getById(id);
+            DigitalInvoice di = digitalInvoiceService.getScopedById(id);
             if (di == null) return org.springframework.http.ResponseEntity.notFound().build();
             CorrelationContext.put(CorrelationContext.INVOICE_ID, di.getInvoiceId());
-            if (di.getInvoiceId() != null) {
+            if ("RECEIVE".equals(di.getDirection())) {
+                // 受信行はinvoiceIdがレビュー前にNULLでも、関連先解決を含むservice境界で認可する。
+                digitalInvoiceService.assertInboundAccessAllowed(id);
+            } else if (di.getInvoiceId() != null) {
                 Invoice invoice = invoiceService.getById(di.getInvoiceId());
                 if (invoice == null) return org.springframework.http.ResponseEntity.notFound().build();
+                digitalInvoiceService.assertInvoiceAccessAllowed(di.getInvoiceId(), invoice.getCustomerId());
                 dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
+            } else {
+                return org.springframework.http.ResponseEntity.notFound().build();
             }
             if (di.getXmlDocumentId() == null) {
                 return org.springframework.http.ResponseEntity.notFound().build();

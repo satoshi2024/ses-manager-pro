@@ -3,6 +3,7 @@ package com.ses.service.certification;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Certification;
 import com.ses.mapper.CertificationMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,6 +28,12 @@ class CertificationMasterServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new CertificationMasterServiceImpl(mapper, new CertificationIdentityNormalizer());
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -36,22 +43,22 @@ class CertificationMasterServiceImplTest {
         input.setIssuerDisplay("IPA");
         input.setExternalCode("FE");
         when(mapper.selectCount(any())).thenReturn(0L);
-        when(mapper.selectById(10L)).thenReturn(master(10L, "旧資格", 1));
-        when(mapper.updateById(any(Certification.class))).thenReturn(1);
+        when(mapper.selectOne(any())).thenReturn(master(10L, "旧資格", 1));
+        when(mapper.update(org.mockito.ArgumentMatchers.<Certification>isNull(), any())).thenReturn(1);
 
         Certification created = service.createMaster(input, 7L);
         Certification updated = new Certification();
         updated.setDisplayName("新資格");
         updated.setIssuerDisplay("IPA");
         updated.setExternalCode("FE2");
-        updated = service.updateMaster(10L, updated, 7L);
-        Certification deactivated = service.deactivateMaster(10L, 7L);
+        updated = service.updateMaster(10L, updated, 7L, 0);
+        Certification deactivated = service.deactivateMaster(10L, 7L, 1);
 
         assertEquals("基本情報技術者", created.getDisplayName());
         assertEquals("新資格", updated.getDisplayName());
         assertEquals(0, deactivated.getActiveFlag());
         verify(mapper).insert(any(Certification.class));
-        verify(mapper, org.mockito.Mockito.times(2)).updateById(any(Certification.class));
+        verify(mapper, org.mockito.Mockito.times(2)).update(org.mockito.ArgumentMatchers.<Certification>isNull(), any());
     }
 
     @Test
@@ -60,16 +67,25 @@ class CertificationMasterServiceImplTest {
         input.setDisplayName("同一資格");
         input.setIssuerDisplay("issuer");
         input.setExternalCode("CODE");
-        when(mapper.selectById(10L)).thenReturn(master(10L, "旧", 1));
+        when(mapper.selectOne(any())).thenReturn(master(10L, "旧", 1));
         when(mapper.selectCount(any())).thenReturn(1L);
 
-        assertThrows(BusinessException.class, () -> service.updateMaster(10L, input, 7L));
+        assertThrows(BusinessException.class, () -> service.updateMaster(10L, input, 7L, 0));
     }
 
     @Test
     void active指定なし一覧は有効masterだけを読む() {
         when(mapper.selectList(any())).thenReturn(List.of(master(1L, "A", 1)));
         assertEquals(1, service.listMasters(false).size());
+    }
+
+    @Test
+    void expectedVersionがない更新とtenant偽装は拒否する() {
+        Certification input = new Certification();
+        input.setTenantId("other-tenant");
+        input.setDisplayName("資格");
+        assertThrows(BusinessException.class, () -> service.updateMaster(10L, input, 7L, null));
+        assertThrows(BusinessException.class, () -> service.createMaster(input, 7L));
     }
 
     private Certification master(Long id, String name, int active) {
@@ -81,6 +97,7 @@ class CertificationMasterServiceImplTest {
         certification.setExternalCode("CODE-" + id);
         certification.setIdentityKey("key-" + id);
         certification.setActiveFlag(active);
+        certification.setVersion(0);
         certification.setRuleVersion(1);
         return certification;
     }

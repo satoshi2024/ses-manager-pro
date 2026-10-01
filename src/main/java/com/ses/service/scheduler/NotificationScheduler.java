@@ -10,10 +10,11 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class NotificationScheduler {
     private final NotificationGenerateService generateService;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(cron = "0 0 8 * * *")
     @SchedulerLock(name = "notificationGenerateDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void generateDaily() {
-        generateService.generateAll();
+        tenantAwareBatchRunner.run(tenant -> generateService.generateAll());
     }
 }

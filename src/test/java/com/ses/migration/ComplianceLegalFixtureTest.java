@@ -2,6 +2,7 @@ package com.ses.migration;
 
 import com.ses.dto.compliance.ComplianceFinding;
 import com.ses.service.compliance.ComplianceRuleEngine;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @ActiveProfiles("test")
 @Transactional
 @Sql(scripts = "/sql/engineer-schema-h2.sql")
+@EnableDefaultTenantTestContext
 class ComplianceLegalFixtureTest {
 
     @Autowired

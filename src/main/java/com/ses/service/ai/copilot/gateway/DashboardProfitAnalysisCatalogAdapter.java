@@ -2,6 +2,7 @@ package com.ses.service.ai.copilot.gateway;
 
 import com.ses.dto.dashboard.ContractProfitDto;
 import com.ses.service.DashboardService;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.result.BoundedResultRow;
@@ -31,8 +32,15 @@ class DashboardProfitAnalysisCatalogAdapter extends CatalogAdapterSupport implem
 
     @Override
     public TypedResultEnvelope execute(SemanticCatalogEntry entry, CopilotQueryParameters parameters, CopilotScopeContext scope) {
-        List<ContractProfitDto> profits = dashboardService.getProfitAnalysis();
-        String period = YearMonth.now().toString();
+        throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+    }
+
+    @Override
+    public TypedResultEnvelope execute(SemanticCatalogEntry entry, CopilotQueryParameters parameters,
+                                       CopilotScopeContext scope, CopilotExecutionContext context) {
+        requireContext(context);
+        List<ContractProfitDto> profits = dashboardService.getProfitAnalysis(context);
+        String period = context.asOfMonth().toString();
         long totalGross = profits.stream()
                 .mapToLong(row -> row.getGrossProfitAmount() == null ? 0L : row.getGrossProfitAmount())
                 .sum();
@@ -50,6 +58,6 @@ class DashboardProfitAnalysisCatalogAdapter extends CatalogAdapterSupport implem
             rows.add(new BoundedResultRow(row.getContractNo(), fields));
         });
 
-        return envelope(entry, scope, values, rows, MetricBasis.ACTUAL, truncated, maxRows);
+        return envelope(entry, scope, values, rows, MetricBasis.ACTUAL, truncated, maxRows, context);
     }
 }

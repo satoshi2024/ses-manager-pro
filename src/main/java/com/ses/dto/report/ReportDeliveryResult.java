@@ -7,7 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
-/** recipient previewと配布状態。link token自体は通知本文のみに含め、DBにはhashだけを保存する。 */
+/** recipient previewと配布状態。通知linkは認証済みsessionのaction URLであり、raw tokenを含めない。 */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

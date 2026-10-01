@@ -56,13 +56,13 @@ class ExternalApiReadSnapshotPurgeIntegrationTest {
     @Test
     void publicReadDoesNotPurgeExpiredRows() {
         insertExpiredSnapshot("purge-must-not-run-from-read");
-        jdbcTemplate.update("INSERT INTO m_customer (id, company_name) VALUES (?, ?)",
-                9020001L, "purge-read-customer");
+        jdbcTemplate.update("INSERT INTO m_customer (id, company_name, legal_entity_id) VALUES (?, ?, ?)",
+                9020001L, "purge-read-customer", 902L);
         jdbcTemplate.update("""
-                INSERT INTO t_project (id, project_name, customer_id, status, start_date, end_date, deleted_flag)
-                VALUES (?, ?, ?, ?, ?, ?, 0)
+                INSERT INTO t_project (id, project_name, customer_id, status, start_date, end_date, deleted_flag, legal_entity_id)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?)
                 """, 9020002L, "purge-read-project", 9020001L, "募集中",
-                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 12, 31));
+                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 12, 31), 902L);
         int before = countSnapshots();
 
         ExternalApiPrincipal principal = new ExternalApiPrincipal(

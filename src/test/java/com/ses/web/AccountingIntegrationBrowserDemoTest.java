@@ -9,16 +9,19 @@ import com.ses.entity.IntegrationJob;
 import com.ses.entity.OrganizationUnit;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.BpPaymentMapper;
+import com.ses.mapper.ContractMapper;
 import com.ses.mapper.ExpenseRequestMapper;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.InvoicePaymentMapper;
 import com.ses.mapper.OrganizationUnitMapper;
+import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.integration.ExternalMappingService;
 import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -26,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -127,6 +131,9 @@ class AccountingIntegrationBrowserDemoTest {
     private int port;
 
     @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
     private IntegrationConnectionService connectionService;
 
     @Autowired
@@ -165,6 +172,12 @@ class AccountingIntegrationBrowserDemoTest {
     @Autowired
     private com.ses.mapper.EngineerMapper engineerMapper;
 
+    @Autowired
+    private ProjectMapper projectMapper;
+
+    @Autowired
+    private ContractMapper contractMapper;
+
     private Long managerOrgId;
     private Long managerJobId;
     private Long adminJobId;
@@ -174,6 +187,13 @@ class AccountingIntegrationBrowserDemoTest {
     void captureAccountingScreensWithRealBrowser() throws Exception {
         Path chrome = CdpBrowser.chromeExecutable();
         assertNotNull(chrome, "Chrome実行ファイルが見つかりません");
+
+        com.ses.entity.SysUser adminUser = sysUserMapper.selectByUsername("admin");
+        assertNotNull(adminUser, "管理者fixtureが存在すること");
+        adminUser.setTenantId("default");
+        sysUserMapper.updateById(adminUser);
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L, adminUser.getId());
+        TenantTestSecurity.bindAs(adminUser.getId(), "admin", "default", "管理者");
 
         // ===== シードデータ準備 =====
         String month = YearMonth.now().toString();
@@ -204,15 +224,40 @@ class AccountingIntegrationBrowserDemoTest {
         // ===== 4母集団 (当月) =====
         LocalDate today = LocalDate.now();
         com.ses.entity.Customer demoCustomer = new com.ses.entity.Customer();
+        demoCustomer.setTenantId("default");
+        demoCustomer.setLegalEntityId(1L);
         demoCustomer.setCompanyName("デモ顧客株式会社");
         customerMapper.insert(demoCustomer);
 
         com.ses.entity.Engineer demoEngineer = new com.ses.entity.Engineer();
+        demoEngineer.setTenantId("default");
+        demoEngineer.setLegalEntityId(1L);
         demoEngineer.setFullName("デモ要員");
         demoEngineer.setEmploymentType("正社員");
         engineerMapper.insert(demoEngineer);
 
+        com.ses.entity.Project demoProject = new com.ses.entity.Project();
+        demoProject.setLegalEntityId(1L);
+        demoProject.setProjectName("会計照合デモ案件");
+        demoProject.setCustomerId(demoCustomer.getId());
+        demoProject.setStatus("募集中");
+        projectMapper.insert(demoProject);
+
+        com.ses.entity.Contract demoContract = new com.ses.entity.Contract();
+        demoContract.setTenantId("default");
+        demoContract.setLegalEntityId(1L);
+        demoContract.setContractNo("CON-ACCOUNTING-DEMO-" + System.nanoTime());
+        demoContract.setEngineerId(demoEngineer.getId());
+        demoContract.setProjectId(demoProject.getId());
+        demoContract.setCustomerId(demoCustomer.getId());
+        demoContract.setStartDate(today.withDayOfMonth(1));
+        demoContract.setSellingPrice(new BigDecimal("1000000"));
+        demoContract.setCostPrice(new BigDecimal("800000"));
+        demoContract.setStatus("稼動中");
+        contractMapper.insert(demoContract);
+
         com.ses.entity.Invoice invoice = new com.ses.entity.Invoice();
+        invoice.setLegalEntityId(1L);
         invoice.setInvoiceNo("INV-DEMO-A");
         invoice.setCustomerId(demoCustomer.getId());
         invoice.setBillingMonth(month);
@@ -226,7 +271,7 @@ class AccountingIntegrationBrowserDemoTest {
         invoiceMapper.insert(invoice);
 
         com.ses.entity.WorkRecord workRecord = new com.ses.entity.WorkRecord();
-        workRecord.setContractId(1L);
+        workRecord.setContractId(demoContract.getId());
         workRecord.setWorkMonth(month);
         workRecord.setActualHours(new BigDecimal("160.00"));
         workRecordMapper.insert(workRecord);
@@ -295,10 +340,16 @@ class AccountingIntegrationBrowserDemoTest {
         managerUser.setRealName("デモマネージャー");
         managerUser.setRole("マネージャー");
         managerUser.setStatus(1);
+        managerUser.setTenantId("default");
         sysUserMapper.insert(managerUser);
         userOrganizationMapper.insert(UserOrganization.builder()
+                .tenantId("default")
                 .userId(managerUser.getId()).organizationId(orgX.getId()).primaryFlag(1)
                 .validFrom(LocalDate.of(2026, 1, 1)).build());
+        jdbcTemplate.update("""
+                INSERT INTO t_engineer_account_link (tenant_id, engineer_id, sys_user_id, linked_by, linked_at)
+                VALUES ('default', ?, ?, ?, CURRENT_TIMESTAMP)
+                """, demoEngineer.getId(), managerUser.getId(), adminUser.getId());
 
         IntegrationJob job2 = jobService.createJob(
                 conn.getId(), "SALES_INVOICE_SYNC", "INVOICE", 202L, "INV-DEMO-002", "hash-demo-202",
@@ -308,6 +359,7 @@ class AccountingIntegrationBrowserDemoTest {
         managerJobId = job2.getId();
         assertEquals(orgX.getId(), jobService.getById(managerJobId).getOrganizationId(),
                 "マネージャー境界検証用ジョブに自組織が付与されていること");
+        TenantTestSecurity.clear();
 
         String baseUrl = "http://localhost:" + port;
         Path evidenceDir = Path.of("target", "browser-evidence", "accounting-payment-integration");

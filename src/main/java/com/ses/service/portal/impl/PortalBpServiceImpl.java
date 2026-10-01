@@ -71,6 +71,10 @@ public class PortalBpServiceImpl implements PortalBpService {
     private final ApprovalTargetAdapterRegistry approvalTargetAdapterRegistry;
     private final Clock clock;
 
+    /** NF05 法人境界: portal提出の空き要員にも権威法人を刻印する（内部review/promoteで必須）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
     // ===== 空き要員 =====
 
     @Override
@@ -79,10 +83,12 @@ public class PortalBpServiceImpl implements PortalBpService {
             Page<PortalBpAvailabilityDto> empty = PageUtils.safePage(current, size);
             return new Page<>(empty.getCurrent(), empty.getSize(), 0);
         }
+        requireBpTenant(bpCompanyId);
         Page<BpAvailability> page = availabilityMapper.selectPage(
                 PageUtils.safePage(current, size),
                 new LambdaQueryWrapper<BpAvailability>()
                         .eq(BpAvailability::getBpCompanyId, bpCompanyId)
+                        .eq(BpAvailability::getTenantId, tenantId())
                         .orderByDesc(BpAvailability::getId));
         Page<PortalBpAvailabilityDto> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(page.getRecords().stream().map(this::toAvailabilityDto).toList());
@@ -92,9 +98,11 @@ public class PortalBpServiceImpl implements PortalBpService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public PortalBpAvailabilityDto createAvailability(Long bpCompanyId, PortalBpAvailabilityRequest request) {
+        requireBpTenant(bpCompanyId);
         BpAvailability entity = new BpAvailability();
+        entity.setTenantId(tenantId());
         entity.setBpCompanyId(bpCompanyId);
-        BpCompany company = bpCompanyMapper.selectById(bpCompanyId);
+        BpCompany company = bpCompanyMapper.selectByIdForTenant(bpCompanyId, legacyTenantId());
         entity.setBpCompany(company == null ? null : company.getLegalName());
         entity.setInitialName(request.getInitialName().trim());
         entity.setSkillsJson(request.getSkillsJson());
@@ -103,6 +111,12 @@ public class PortalBpServiceImpl implements PortalBpService {
         entity.setExperienceYears(request.getExperienceYears());
         entity.setStatus(AVAILABILITY_PENDING);
         entity.setRemarks(request.getRemarks());
+        // portal principalは内部組織scopeを持たないが、NF05書込み境界のため権威法人を刻印する。
+        // 硬编码 1L は禁止。bean 欠落は 503、解決不能は LegalEntityContextService 側で fail-closed。
+        if (legalEntityContextService == null) {
+            throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        entity.setLegalEntityId(legalEntityContextService.requireCurrentLegalEntityId());
         availabilityMapper.insert(entity);
         return toAvailabilityDto(entity);
     }
@@ -111,9 +125,11 @@ public class PortalBpServiceImpl implements PortalBpService {
     @Transactional(rollbackFor = Exception.class)
     public PortalBpAvailabilityDto updateAvailability(Long availabilityId, Long bpCompanyId,
                                                       PortalBpAvailabilityRequest request) {
+        requireBpTenant(bpCompanyId);
         BpAvailability existing = availabilityMapper.selectOne(new LambdaQueryWrapper<BpAvailability>()
                 .eq(BpAvailability::getId, availabilityId)
-                .eq(BpAvailability::getBpCompanyId, bpCompanyId));
+                .eq(BpAvailability::getBpCompanyId, bpCompanyId)
+                .eq(BpAvailability::getTenantId, tenantId()));
         if (existing == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -138,9 +154,11 @@ public class PortalBpServiceImpl implements PortalBpService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void stopAvailability(Long availabilityId, Long bpCompanyId) {
+        requireBpTenant(bpCompanyId);
         int updated = availabilityMapper.update(null, new UpdateWrapper<BpAvailability>()
                 .eq("id", availabilityId)
                 .eq("bp_company_id", bpCompanyId)
+                .eq("tenant_id", tenantId())
                 .eq("status", AVAILABILITY_ACTIVE)
                 .set("status", AVAILABILITY_EXPIRED));
         if (updated == 0) {
@@ -156,11 +174,13 @@ public class PortalBpServiceImpl implements PortalBpService {
             Page<PortalBpPaymentDto> empty = PageUtils.safePage(current, size);
             return new Page<>(empty.getCurrent(), empty.getSize(), 0);
         }
+        requireBpTenant(bpCompanyId);
         Page<PortalBpPaymentDto> page = paymentMapper.selectPortalPageDto(
                 PageUtils.safePage(current, size), bpCompanyId, status);
         page.getRecords().forEach(dto -> {
             dto.setPaymentScheduleDate(estimatePaymentDate(bpCompanyId));
-            dto.setSubmissionCount(documentLinkMapper.findDocumentIdsByTarget(LINK_TARGET_BP_PAYMENT, dto.getId()).size());
+            dto.setSubmissionCount(documentLinkMapper.findDocumentIdsByTargetForTenant(
+                    tenantId(), LINK_TARGET_BP_PAYMENT, dto.getId()).size());
         });
         return page;
     }
@@ -179,9 +199,9 @@ public class PortalBpServiceImpl implements PortalBpService {
     // ===== 提出物 =====
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public PortalBpSubmissionDto submitDocument(Long paymentId, Long bpCompanyId, String originalName,
                                                 String contentType, byte[] content) {
+        requireBpTenant(bpCompanyId);
         if (content == null || content.length == 0) {
             throw BusinessException.of(400, "error.portal.bp.documentRequired");
         }
@@ -199,8 +219,9 @@ public class PortalBpServiceImpl implements PortalBpService {
         String businessKey = "BP_PORTAL_SUBMISSION:" + paymentId + ":" + contentHash;
         // t_document_version.created_by はNOT NULL。portal principalには内部user IDがないため、
         // BPの担当営業（内部user）を明示的に作成者として指定する（監査の一貫性。R4.2）
-        BpCompany company = bpCompanyMapper.selectById(bpCompanyId);
+        BpCompany company = bpCompanyMapper.selectByIdForTenant(bpCompanyId, legacyTenantId());
         DocumentRegisterRequest req = DocumentRegisterRequest.builder()
+                .tenantId(tenantId())
                 .documentType("BP_SUBMISSION")
                 .title("BP提出物: " + (scope.getWorkMonth() == null ? "未確定" : scope.getWorkMonth()))
                 .counterpartyType("BP")
@@ -232,10 +253,13 @@ public class PortalBpServiceImpl implements PortalBpService {
     @Override
     public List<PortalBpSubmissionDto> submissions(Long paymentId, Long bpCompanyId) {
         requirePayment(paymentId, bpCompanyId);
-        return documentLinkMapper.findDocumentIdsByTarget(LINK_TARGET_BP_PAYMENT, paymentId).stream()
+        String tenantId = tenantId();
+        return documentLinkMapper.findDocumentIdsByTargetForTenant(tenantId, LINK_TARGET_BP_PAYMENT, paymentId).stream()
                 .map(documentId -> {
-                    DocumentVersion latest = documentVersionMapper.findLatestByDocumentId(documentId);
-                    com.ses.entity.Document doc = documentMapper.selectById(documentId);
+                    DocumentVersion latest = documentVersionMapper.findLatestByTenantAndDocumentId(tenantId, documentId);
+                    com.ses.entity.Document doc = documentMapper.selectOne(new LambdaQueryWrapper<com.ses.entity.Document>()
+                            .eq(com.ses.entity.Document::getId, documentId)
+                            .eq(com.ses.entity.Document::getTenantId, tenantId));
                     boolean clean = latest != null && "CLEAN".equals(latest.getScanStatus());
                     return toSubmissionDto(documentId, doc == null ? null : doc.getTitle(),
                             latest == null ? null : latest.getOriginalName(), clean);
@@ -245,7 +269,8 @@ public class PortalBpServiceImpl implements PortalBpService {
     @Override
     public InputStream downloadSubmission(Long documentId, Long paymentId, Long bpCompanyId) {
         requirePayment(paymentId, bpCompanyId);
-        List<Long> documentIds = documentLinkMapper.findDocumentIdsByTarget(LINK_TARGET_BP_PAYMENT, paymentId);
+        List<Long> documentIds = documentLinkMapper.findDocumentIdsByTargetForTenant(
+                tenantId(), LINK_TARGET_BP_PAYMENT, paymentId);
         if (!documentIds.contains(documentId)) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -256,13 +281,15 @@ public class PortalBpServiceImpl implements PortalBpService {
 
     @Override
     public PortalBpPaymentDto payment(Long paymentId, Long bpCompanyId) {
+        requireBpTenant(bpCompanyId);
         // SQL境界（id AND bp_company_id）で1行解決（S13-R1-P1-02: 一覧の並びに依存しない）
         PortalBpPaymentDto dto = paymentMapper.selectPortalDetailById(paymentId, bpCompanyId);
         if (dto == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
         dto.setPaymentScheduleDate(estimatePaymentDate(bpCompanyId));
-        dto.setSubmissionCount(documentLinkMapper.findDocumentIdsByTarget(LINK_TARGET_BP_PAYMENT, paymentId).size());
+        dto.setSubmissionCount(documentLinkMapper.findDocumentIdsByTargetForTenant(
+                tenantId(), LINK_TARGET_BP_PAYMENT, paymentId).size());
         return dto;
     }
 
@@ -270,6 +297,7 @@ public class PortalBpServiceImpl implements PortalBpService {
 
     @Override
     public List<BpBankAccountDto> bankAccounts(Long bpCompanyId) {
+        requireBpTenant(bpCompanyId);
         List<BpBankAccountDto> accounts = bpCompanyService.getBankAccounts(bpCompanyId);
         // 内部user ID（approvedBy）をportalへ露出しない（S13-R1-P2-13）
         accounts.forEach(account -> account.setApprovedBy(null));
@@ -279,6 +307,7 @@ public class PortalBpServiceImpl implements PortalBpService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void requestBankAccountChange(Long bpCompanyId, PortalBpBankAccountRequest request) {
+        requireBpTenant(bpCompanyId);
         BpCompany company = bpCompanyMapper.selectById(bpCompanyId);
         if (company == null) {
             throw BusinessException.of(404, "error.scope.notFound");
@@ -299,11 +328,38 @@ public class PortalBpServiceImpl implements PortalBpService {
     // ===== ヘルパー =====
 
     private void requirePayment(Long paymentId, Long bpCompanyId) {
+        // 支払行の有無を調べる前にBP会社とtenantを確定し、別tenantの存在を観測できないようにする。
+        requireBpTenant(bpCompanyId);
         com.ses.entity.BpPayment payment = paymentMapper.selectOne(new LambdaQueryWrapper<com.ses.entity.BpPayment>()
                 .eq(com.ses.entity.BpPayment::getId, paymentId)
                 .eq(com.ses.entity.BpPayment::getBpCompanyId, bpCompanyId));
         if (payment == null) {
             throw BusinessException.of(404, "error.scope.notFound");
+        }
+    }
+
+    private String tenantId() {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        return tenantId;
+    }
+
+    private void requireBpTenant(Long bpCompanyId) {
+        BpCompany company = bpCompanyMapper.selectByIdForTenant(bpCompanyId, legacyTenantId());
+        if (company == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+    }
+
+    private Long legacyTenantId() {
+        String tenantId = tenantId();
+        if ("default".equals(tenantId)) return 1L;
+        try {
+            return Long.valueOf(tenantId);
+        } catch (NumberFormatException e) {
+            throw BusinessException.of(403, "error.tenant.mappingRequired");
         }
     }
 

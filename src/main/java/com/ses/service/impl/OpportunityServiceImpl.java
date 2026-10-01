@@ -69,11 +69,24 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
     private final DataScopeService dataScopeService;
     private final CustomerMapper customerMapper;
     @Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+    @Autowired(required = false)
+    private com.ses.service.ProjectService projectService;
+    @Autowired(required = false)
     private Clock clock = Clock.systemDefaultZone();
     @Autowired(required = false)
     private CrmScopeService crmScopeService;
     @Autowired(required = false)
     private org.springframework.beans.factory.ObjectProvider<com.ses.service.ai.AiOutcomeService> aiOutcomeService;
+
+    /** generic saveも顧客の権威法人へ束縛し、clientの法人値を採用しない。 */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean save(Opportunity entity) {
+        Customer customer = requireVisibleCustomer(entity == null ? null : entity.getCustomerId());
+        bindLegalEntity(entity, customer, null);
+        return super.save(entity);
+    }
 
     /**
      * 汎用CRUD経路から状態機械を迂回させない。stage変更はchangeStageだけが許可し、
@@ -93,12 +106,23 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
             throw BusinessException.of(400, "error.opportunity.stageUpdateRequiresTransition");
         }
         assertExpectedVersion(current, entity.getVersion());
-        requireVisibleCustomer(entity.getCustomerId() == null
+        Customer customer = requireVisibleCustomer(entity.getCustomerId() == null
                 ? current.getCustomerId() : entity.getCustomerId());
+        bindLegalEntity(entity, customer, current);
         if (!super.updateById(entity)) {
             throw BusinessException.of(409, "error.opportunity.versionConflict");
         }
         return true;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean removeById(java.io.Serializable id) {
+        Opportunity current = id == null ? null : super.getById(id);
+        if (current == null) return false;
+        requireVisibleCustomer(current.getCustomerId());
+        bindLegalEntity(current, customerMapper.selectById(current.getCustomerId()), current);
+        return super.removeById(id);
     }
 
     @Override
@@ -250,7 +274,7 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Opportunity createBasic(OpportunitySaveRequest request) {
-        requireVisibleCustomer(request.getCustomerId());
+        Customer customer = requireVisibleCustomer(request.getCustomerId());
         validateProbability(request, STAGE_PROSPECT);
         assertOwnerScope(request.getOwnerUserId());
         Opportunity opportunity = new Opportunity();
@@ -273,12 +297,14 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         if (request.getVersion() == null || !Objects.equals(current.getVersion(), request.getVersion())) {
             throw BusinessException.of(409, "error.opportunity.versionConflict");
         }
-        requireVisibleCustomer(request.getCustomerId());
+        Customer customer = requireVisibleCustomer(request.getCustomerId());
+        bindLegalEntity(current, customer, current);
         validateProbability(request, current.getStage());
         assertOwnerScope(request.getOwnerUserId());
         com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Opportunity> update =
                 new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Opportunity>()
                 .eq("id", id).eq("version", current.getVersion())
+                .set("legal_entity_id", current.getLegalEntityId())
                 .set("customer_id", request.getCustomerId())
                 .set("title", request.getTitle())
                 .set("expected_start_month", request.getExpectedStartMonth())
@@ -318,6 +344,7 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         if (current == null) {
             throw BusinessException.of(404, "error.opportunity.notFound");
         }
+        requireLegalEntityContext().assertCurrent(current.getLegalEntityId());
         assertCustomerScope(current.getCustomerId());
         return current;
     }
@@ -346,7 +373,27 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
             throw BusinessException.of(404, "error.crm.customerNotFound");
         }
         assertCustomerScope(customerId);
+        requireLegalEntityContext().assertCurrent(customer.getLegalEntityId());
         return customer;
+    }
+
+    private void bindLegalEntity(Opportunity opportunity, Customer customer, Opportunity old) {
+        if (opportunity == null || customer == null || customer.getLegalEntityId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        requireLegalEntityContext().assertCurrent(customer.getLegalEntityId());
+        if (old != null) requireLegalEntityContext().assertSame(old.getLegalEntityId(), customer.getLegalEntityId());
+        if (opportunity.getLegalEntityId() != null) {
+            requireLegalEntityContext().assertSame(opportunity.getLegalEntityId(), customer.getLegalEntityId());
+        }
+        opportunity.setLegalEntityId(customer.getLegalEntityId());
+    }
+
+    private com.ses.service.security.LegalEntityContextService requireLegalEntityContext() {
+        if (legalEntityContextService == null) {
+            throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        return legalEntityContextService;
     }
 
     private void validateProbability(OpportunitySaveRequest request, String stage) {
@@ -434,7 +481,10 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         project.setStatus("募集中");
         project.setSourceOpportunityId(opportunity.getId());
         try {
-            projectMapper.insert(project);
+            if (projectService == null) {
+                throw BusinessException.of(503, "PROJECT_WRITE_BOUNDARY_UNAVAILABLE");
+            }
+            projectService.save(project);
         } catch (DuplicateKeyException e) {
             // source_opportunity_id UNIQUEは行ロックと併用する二重防御。既存行を再取得して冪等化する。
             Project existing = projectMapper.selectBySourceOpportunityIdIncludingDeleted(opportunity.getId());

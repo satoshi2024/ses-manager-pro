@@ -4,6 +4,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.entity.BpPayment;
 import com.ses.entity.ExpenseRequest;
 import com.ses.service.accounting.PurchaseExpensePaymentIntegrationService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,6 +14,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 
 /**
@@ -51,6 +54,7 @@ class AccountingNullGuardTest {
     }
 
     @Test
+    @EnableDefaultTenantTestContext
     @DisplayName("NULL金額・NULL発生日の経費申請は enqueue 時に拒否される (R1-P1-08)")
     void expenseNullAmountAndDate_rejected() {
         ExpenseRequest nullAmount = new ExpenseRequest();
@@ -60,6 +64,7 @@ class AccountingNullGuardTest {
         nullAmount.setCategory("交通費");
         nullAmount.setStatus("承認済");
         doReturn(nullAmount).when(expenseRequestMapper).selectById(2L);
+        doReturn(nullAmount).when(expenseRequestMapper).selectByIdForTenant(eq(2L), any());
 
         assertThatThrownBy(() -> purchaseIntegrationService.triggerExpenseSync(2L, 1L))
                 .isInstanceOf(BusinessException.class)
@@ -73,6 +78,7 @@ class AccountingNullGuardTest {
         nullDate.setAmount(new java.math.BigDecimal("1000"));
         nullDate.setStatus("承認済");
         doReturn(nullDate).when(expenseRequestMapper).selectById(3L);
+        doReturn(nullDate).when(expenseRequestMapper).selectByIdForTenant(eq(3L), any());
 
         assertThatThrownBy(() -> purchaseIntegrationService.triggerExpenseSync(3L, 1L))
                 .isInstanceOf(BusinessException.class)

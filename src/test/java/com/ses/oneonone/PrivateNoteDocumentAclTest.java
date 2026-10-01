@@ -18,14 +18,14 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserPermissionGroupMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.security.impl.FileScopeValidationService;
+import com.ses.test.EnableDefaultTenantTestContext;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
@@ -48,6 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * document archiveのlist/detail/countがSQL母集団でPRIVATE_NOTEを除外することも検証する。
  */
 @SpringBootTest
+@EnableDefaultTenantTestContext
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Transactional
@@ -265,8 +266,6 @@ class PrivateNoteDocumentAclTest {
     }
 
     void authenticate(long userId, String role) {
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(String.valueOf(userId), "n/a",
-                        List.of(new SimpleGrantedAuthority("ROLE_" + role))));
+        TenantTestSecurity.bindAs(userId, String.valueOf(userId), "default", role);
     }
 }

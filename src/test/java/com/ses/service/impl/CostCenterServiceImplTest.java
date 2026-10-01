@@ -10,6 +10,8 @@ import com.ses.mapper.ManagementBudgetMapper;
 import com.ses.mapper.MonthlyAccountingDimensionMapper;
 import com.ses.mapper.OrganizationUnitMapper;
 import com.ses.mapper.WorkRecordMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -40,6 +42,7 @@ class CostCenterServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         ReflectionTestUtils.setField(service, "baseMapper", costCenterMapper);
         ReflectionTestUtils.setField(service, "engineerMapper", engineerMapper);
         ReflectionTestUtils.setField(service, "contractMapper", contractMapper);
@@ -50,9 +53,16 @@ class CostCenterServiceImplTest {
         lenient().when(monthlyAccountingDimensionMapper.selectCount(any())).thenReturn(0L);
         lenient().when(engineerMapper.selectCount(any())).thenReturn(0L);
         lenient().when(contractMapper.selectCount(any())).thenReturn(0L);
+        lenient().when(contractMapper.selectCountForTenant(any(), any())).thenReturn(0L);
         lenient().when(invoiceMapper.selectCount(any())).thenReturn(0L);
         lenient().when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
         lenient().when(workRecordMapper.selectCount(any())).thenReturn(0L);
+        lenient().when(workRecordMapper.countByCostCenterIdForTenant(any(), any())).thenReturn(0L);
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -63,7 +73,7 @@ class CostCenterServiceImplTest {
 
     @Test
     void contract参照中は削除を拒否する() {
-        when(contractMapper.selectCount(any())).thenReturn(1L);
+        when(contractMapper.selectCountForTenant(any(), any())).thenReturn(1L);
         assertThrows(BusinessException.class, () -> service.removeById(10L));
     }
 
@@ -75,7 +85,7 @@ class CostCenterServiceImplTest {
 
     @Test
     void workRecord参照中は削除を拒否する() {
-        when(workRecordMapper.selectCount(any())).thenReturn(1L);
+        when(workRecordMapper.countByCostCenterIdForTenant(any(), any())).thenReturn(1L);
         assertThrows(BusinessException.class, () -> service.removeById(10L));
     }
 

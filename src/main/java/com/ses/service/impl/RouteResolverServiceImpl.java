@@ -17,6 +17,7 @@ import com.ses.service.approval.ResolvedRoute;
 import com.ses.service.approval.RouteResolverService;
 import com.ses.service.approval.RouteSlot;
 import com.ses.service.approval.RouteStepGroup;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -50,11 +51,12 @@ public class RouteResolverServiceImpl implements RouteResolverService {
     @Override
     public ResolvedRoute resolve(String requestType, Long organizationId, BigDecimal amountSnapshot,
                                   Long applicantId, LocalDate asOf) {
-        SysUser applicant = applicantId == null ? null : sysUserMapper.selectById(applicantId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        SysUser applicant = applicantId == null ? null : sysUserMapper.selectByIdAndTenant(applicantId, tenantId);
         String applicantRole = applicant == null ? null : applicant.getRole();
         List<ApprovalRoute> candidates = approvalRouteMapper.selectList(
                 new LambdaQueryWrapper<ApprovalRoute>()
-                        .eq(ApprovalRoute::getTenantId, 1L)
+                        .in(ApprovalRoute::getTenantId, routeTenantValues(tenantId))
                         .eq(ApprovalRoute::getRequestType, requestType)
                         .eq(ApprovalRoute::getActiveFlag, 1)
                         .le(ApprovalRoute::getValidFrom, asOf)
@@ -145,6 +147,7 @@ public class RouteResolverServiceImpl implements RouteResolverService {
     /** 職務分離(R1.4): 申請者自身をstepの承認候補から除外する。 */
     private List<Long> resolveStepCandidates(ApprovalRouteStep step, Long applicantId,
                                              Long organizationId, LocalDate asOf) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         List<Long> ids = switch (step.getApproverType()) {
             case "USER" -> {
                 try {
@@ -156,6 +159,7 @@ public class RouteResolverServiceImpl implements RouteResolverService {
             case "ROLE" -> sysUserMapper.selectList(
                             new LambdaQueryWrapper<SysUser>()
                                     .eq(SysUser::getRole, step.getApproverValue())
+                                    .eq(SysUser::getTenantId, tenantId)
                                     .eq(SysUser::getStatus, 1))
                     .stream().map(SysUser::getId).toList();
             case "PERMISSION_GROUP" -> resolvePermissionGroup(step.getApproverValue());
@@ -171,7 +175,8 @@ public class RouteResolverServiceImpl implements RouteResolverService {
         if (groupKey == null || groupKey.isBlank()) {
             return List.of();
         }
-        return userPermissionGroupMapper.selectActiveUserIdsByGroupKey("default", groupKey.trim());
+        return userPermissionGroupMapper.selectActiveUserIdsByGroupKey(
+                AccountingTenantContextHolder.requireTenantContext(), groupKey.trim());
     }
 
     private List<Long> resolveResponsibilities(String responsibilityType, Long organizationId, LocalDate asOf) {
@@ -179,7 +184,8 @@ public class RouteResolverServiceImpl implements RouteResolverService {
             return List.of();
         }
         LambdaQueryWrapper<ApprovalResponsibility> query = new LambdaQueryWrapper<ApprovalResponsibility>()
-                .eq(ApprovalResponsibility::getTenantId, 1L)
+                .in(ApprovalResponsibility::getTenantId,
+                        routeTenantValues(AccountingTenantContextHolder.requireTenantContext()))
                 .eq(ApprovalResponsibility::getResponsibilityType, responsibilityType)
                 .eq(ApprovalResponsibility::getActiveFlag, 1)
                 .le(ApprovalResponsibility::getValidFrom, asOf)
@@ -200,6 +206,7 @@ public class RouteResolverServiceImpl implements RouteResolverService {
     private List<Long> resolveApplicantManager(Long applicantId, LocalDate asOf) {
         List<UserOrganization> rows = userOrganizationMapper.selectList(
                 new LambdaQueryWrapper<UserOrganization>()
+                        .eq(UserOrganization::getTenantId, AccountingTenantContextHolder.requireTenantContext())
                         .eq(UserOrganization::getUserId, applicantId)
                         .eq(UserOrganization::getPrimaryFlag, 1)
                         .le(UserOrganization::getValidFrom, asOf)
@@ -213,10 +220,21 @@ public class RouteResolverServiceImpl implements RouteResolverService {
     /** 固定userや申請者上長も、存在しない/無効なuserを承認候補として残さない。 */
     private List<Long> activeUserIds(List<Long> candidateIds) {
         return candidateIds.stream()
-                .map(sysUserMapper::selectById)
+                .map(id -> sysUserMapper.selectByIdAndTenant(
+                        id, AccountingTenantContextHolder.requireTenantContext()))
                 .filter(Objects::nonNull)
                 .filter(user -> Objects.equals(user.getStatus(), 1))
                 .map(SysUser::getId)
                 .toList();
+    }
+
+    private List<String> routeTenantValues(String tenantId) {
+        if ("default".equals(tenantId)) {
+            return List.of("default", "1");
+        }
+        if ("1".equals(tenantId)) {
+            return List.of("1", "default");
+        }
+        return List.of(tenantId);
     }
 }

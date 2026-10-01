@@ -94,6 +94,29 @@ parserの出力へSQL、table、column、repository、Java class、raw free text
 
 `scopeHash`は対象IDそのものではなく、scope type、policy version、対象集合の一方向hashだけを保存する。回答、summary、provider prompt、ログへscope外IDを出さない。
 
+#### scopeHash canonical 入力（`nf08-scope-2`）
+
+`CopilotScopeHash` は UTF-8 の行形式 canonical 入力を SHA-256（小文字 hex）する。各行は `key=value`、キーは辞書順固定:
+
+```text
+asOf=yyyy-MM-dd
+contractIds=<sorted unique ids, comma-separated; empty if none>
+customerIds=...
+directUserIds=...
+engineerIds=...
+legalEntity=<tenant legal entity id or empty>
+organizationIds=...
+policyVersion=nf08-scope-2
+scopeType=<COMPANY_WIDE|SALES_DATA_SCOPED|ORGANIZATION_SCOPED|DATA_SCOPED>
+tenant=<tenant id>
+```
+
+同一 ID が異なる次元に存在しても次元名で区別する。集合内は昇順・重複除去。空母集団は fail-closed（`SCOPE_DENIED`）。
+
+#### query 実行コンテキスト
+
+`CopilotExecutionContextFactory` が query 開始時に一度だけ `Clock` + `AccountingTimezoneResolver` から `Instant` / `ZoneId` / `LocalDate asOf` / `YearMonth` を生成する。`TypedParameterBinder`、`CopilotScopeResolver`、全 `CatalogQueryAdapter` は `LocalDate.now()` / `YearMonth.now()` / `Instant.now()` を直接呼ばない。
+
 ### 4.2 SalesPerformanceの既知gap
 
 現行`SalesPerformanceService`は営業自身の条件を一部扱うが、`DataScopeService`を正本として注入する契約がない。このため、`sales-performance.monthly`をcatalogへ追加する前に、次のどちらかを実装してcontract testで固定する。

@@ -14,6 +14,8 @@ import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.SalesOrderLineMapper;
 import com.ses.mapper.SalesOrderMapper;
 import com.ses.service.ContractService;
+import com.ses.test.EnableDefaultTenantTestContext;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
+@EnableDefaultTenantTestContext
 class ConcurrentContractizationTest {
 
     @Container
@@ -90,24 +93,34 @@ class ConcurrentContractizationTest {
     }
 
     private Contract contractize(Fixture fixture, CountDownLatch ready, CountDownLatch start) throws Exception {
-        ready.countDown();
-        assertTrue(start.await(10, TimeUnit.SECONDS));
-        return contractService.createDraftFromSalesOrderLine(fixture.line(), fixture.order());
+        try {
+            TenantTestSecurity.bindAs("default", "管理者");
+            ready.countDown();
+            assertTrue(start.await(10, TimeUnit.SECONDS));
+            return contractService.createDraftFromSalesOrderLine(fixture.line(), fixture.order());
+        } finally {
+            TenantTestSecurity.clear();
+        }
     }
 
     private Fixture fixture() {
         long nonce = System.nanoTime();
         Customer customer = new Customer();
         customer.setCompanyName("contractization-customer-" + nonce);
+        customer.setTenantId("default");
+        customer.setLegalEntityId(1L);
         customerMapper.insert(customer);
 
         Project project = new Project();
         project.setProjectName("contractization-project-" + nonce);
         project.setCustomerId(customer.getId());
+        project.setLegalEntityId(1L);
         project.setStatus("募集中");
         projectMapper.insert(project);
 
         Engineer engineer = Engineer.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
                 .fullName("contractization-engineer-" + nonce)
                 .employmentType("正社員")
                 .status("Bench")
@@ -117,6 +130,8 @@ class ConcurrentContractizationTest {
         SalesOrder order = new SalesOrder();
         order.setOrderNo("SO-CONCURRENT-" + nonce);
         order.setCustomerId(customer.getId());
+        order.setTenantId("default");
+        order.setLegalEntityId(1L);
         order.setOrderDate(LocalDate.now());
         order.setStatus("注文請提出");
         salesOrderMapper.insert(order);

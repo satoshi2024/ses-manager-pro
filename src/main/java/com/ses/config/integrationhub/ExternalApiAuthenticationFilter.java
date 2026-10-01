@@ -98,6 +98,7 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
             if (!usableClient(client, now) || !clientId.equals(client.getClientId())) {
                 throw ExternalApiSecurityException.authentication("CLIENT_INVALID");
             }
+            properties.assertTenantBound(client.getTenantId());
             CredentialVersion credential = credentialVersionService
                     .getByClientAndVersion(client.getId(), credentialVersion);
             if (!usableCredential(credential, client.getId(), keyId, now)) {

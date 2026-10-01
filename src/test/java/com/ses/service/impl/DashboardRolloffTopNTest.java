@@ -10,8 +10,11 @@ import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -62,6 +65,16 @@ class DashboardRolloffTopNTest {
     @Spy
     private UtilizationCalcServiceImpl utilizationCalcService;
 
+    @BeforeEach
+    void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
+    }
+
     @Test
     @DisplayName("retiringListは最大10件に制限される")
     void retiringListIsCappedAtTop10() {
@@ -83,6 +96,7 @@ class DashboardRolloffTopNTest {
         }
 
         when(contractMapper.selectList(any())).thenReturn(contracts);
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(contracts);
         when(engineerMapper.selectList(any())).thenReturn(engineers);
         when(engineerMapper.selectBatchIds(any())).thenReturn(engineers);
         when(engineerSkillMapper.selectTopSkillCandidates(any())).thenReturn(List.of());

@@ -51,6 +51,7 @@ class FlywayCertificationF11SchemaSmokeTest {
             assertTrue(columnExists(statement, "t_engineer_certification", "certificate_number_key_version"));
             assertTrue(columnExists(statement, "t_engineer_certification", "certificate_number_cipher_format"));
             assertTrue(columnExists(statement, "t_engineer_certification", "certificate_number_masked"));
+            assertTrue(columnExists(statement, "m_certification", "version"));
             assertEquals(0, queryInt(statement,
                     "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() "
                             + "AND table_name = 't_engineer_certification' AND column_name = 'certificate_number_ref'"));

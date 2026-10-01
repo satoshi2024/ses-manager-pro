@@ -373,16 +373,16 @@ public class PwaMutationApiController {
             Long contractId = requiredLong(payload, "contractId");
             // 既存の勤怠更新・月次確定と同じ Contract -> WorkRecord 順でロックする。
             // 先に WorkRecord をロックすると、月次確定（Contract -> WorkRecord）との相互待機になる。
-            Contract contract = contractMapper.selectByIdForUpdate(contractId);
+            Contract contract = contractMapper.selectByIdForUpdateForTenant(contractId,
+                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
             if (contract == null) throw BusinessException.of(404, "error.workRecord.noContract2");
             if (!Objects.equals(context.engineerId(), contract.getEngineerId())) {
                 throw BusinessException.of(403, "error.my.notOwner");
             }
             String month = text(payload, "workMonth", command.month());
-            WorkRecord row = workRecordMapper.selectOne(new LambdaQueryWrapper<WorkRecord>()
-                    .eq(WorkRecord::getContractId, contractId)
-                    .eq(WorkRecord::getWorkMonth, month)
-                    .last("LIMIT 1 FOR UPDATE"));
+            WorkRecord row = workRecordMapper.selectByContractIdAndMonthForUpdateForTenant(
+                    contractId, month,
+                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
             if (row == null) return new VersionSnapshot(0, Map.of("exists", false));
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("exists", true); data.put("id", row.getId()); data.put("version", value(row.getVersion()));
@@ -407,7 +407,8 @@ public class PwaMutationApiController {
         }
         if ("expense".equals(command.screen())) {
             Long id = payload.has("id") && !payload.path("id").isNull() ? payload.path("id").asLong() : null;
-            ExpenseRequest row = id == null ? null : expenseRequestMapper.selectByIdForUpdate(id);
+            ExpenseRequest row = id == null ? null : expenseRequestMapper.selectByIdForUpdateForTenant(
+                    id, com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
             if (row == null) return new VersionSnapshot(0, Map.of("exists", false));
             if (!Objects.equals(context.engineerId(), row.getEngineerId())) {
                 throw BusinessException.of(403, "error.my.notOwner");
@@ -419,7 +420,8 @@ public class PwaMutationApiController {
             return new VersionSnapshot(value(row.getVersion()), data);
         }
         if ("change-request".equals(command.screen())) {
-            Engineer row = engineerMapper.selectByIdForUpdate(context.engineerId());
+            Engineer row = engineerMapper.selectByIdForUpdateForTenant(context.engineerId(),
+                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
             if (row == null) throw BusinessException.of(404, "error.my.notLinked");
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("exists", true); data.put("id", row.getId()); data.put("version", value(row.getVersion()));
@@ -431,7 +433,8 @@ public class PwaMutationApiController {
     }
 
     private void assertOwnedContract(Long engineerId, Long contractId) {
-        Contract contract = contractMapper.selectById(contractId);
+        Contract contract = contractMapper.selectByIdForTenant(contractId,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (contract == null) throw BusinessException.of(404, "error.workRecord.noContract2");
         if (!Objects.equals(engineerId, contract.getEngineerId())) {
             throw BusinessException.of(403, "error.my.notOwner");

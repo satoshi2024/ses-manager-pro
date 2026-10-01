@@ -15,6 +15,7 @@ import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.OrganizationService;
 import com.ses.service.billing.MonthlyRevenueCalcService;
 import com.ses.service.security.OrganizationScopeService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -42,6 +43,7 @@ import static org.mockito.Mockito.when;
 
 /** 管理会計が既存金額口径と組織scopeを同じ集計に使うことを検証する。 */
 @ExtendWith(MockitoExtension.class)
+@EnableDefaultTenantTestContext
 class ManagementAccountingServiceImplTest {
 
     @Mock private ContractMapper contractMapper;
@@ -73,8 +75,8 @@ class ManagementAccountingServiceImplTest {
         Contract actualContract = new Contract();
         actualContract.setId(10L);
         actualContract.setCustomerId(500L);
-        when(contractMapper.selectList(any())).thenReturn(List.of(actualContract));
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(record));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(actualContract));
+        when(workRecordMapper.selectConfirmedByWorkMonthsForTenant(any(), any())).thenReturn(List.of(record));
         when(dimensionMapper.selectList(any())).thenReturn(List.of(snapshot));
         when(budgetMapper.selectList(any())).thenReturn(List.of(budget(100L, new BigDecimal("110"), new BigDecimal("40"))));
         when(organizationService.namesByIds(any())).thenReturn(Map.of(100L, "営業本部"));
@@ -102,7 +104,7 @@ class ManagementAccountingServiceImplTest {
         when(organizationScopeService.hasFullAccess()).thenReturn(true);
         when(organizationScopeService.allowedOrganizationIds(any())).thenReturn(Set.of());
         when(contractMapper.selectAccountingContracts(any(), any(), eq(true), isNull(), isNull())).thenReturn(List.of());
-        when(workRecordMapper.selectList(any())).thenReturn(List.of());
+        when(workRecordMapper.selectConfirmedByWorkMonthsForTenant(any(), any())).thenReturn(List.of());
         when(dimensionMapper.selectList(any())).thenReturn(List.of()).thenReturn(List.of(waitSnapshot));
         when(dimensionMapper.selectCount(any())).thenReturn(1L);
         when(budgetMapper.selectList(any())).thenReturn(List.of());
@@ -119,7 +121,7 @@ class ManagementAccountingServiceImplTest {
         when(organizationScopeService.hasFullAccess()).thenReturn(false);
         when(organizationScopeService.allowedOrganizationIds(LocalDate.of(2026, 6, 1))).thenReturn(Set.of(100L));
         when(contractMapper.selectAccountingContracts(any(), any(), eq(false), anyList(), anyList())).thenReturn(List.of());
-        when(workRecordMapper.selectList(any())).thenReturn(List.of());
+        when(workRecordMapper.selectConfirmedByWorkMonthsForTenant(any(), any())).thenReturn(List.of());
         when(dimensionMapper.selectList(any())).thenReturn(List.of()).thenReturn(List.of());
         when(dimensionMapper.selectCount(any())).thenReturn(1L);
         when(budgetMapper.selectList(any())).thenReturn(List.of());
@@ -146,7 +148,7 @@ class ManagementAccountingServiceImplTest {
         when(organizationScopeService.allowedOrganizationIds(LocalDate.of(2026, 6, 1))).thenReturn(Set.of(100L));
         when(contractMapper.selectAccountingContracts(any(), any(), eq(false), anyList(), anyList()))
                 .thenReturn(List.of(contract));
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(record));
+        when(workRecordMapper.selectConfirmedByWorkMonthsForTenant(any(), any())).thenReturn(List.of(record));
         // 旧所属(200)のsnapshotはscope queryで不可視となり、現在所属100のforecastへ戻してはいけない。
         when(dimensionMapper.selectList(any())).thenReturn(List.of()).thenReturn(List.of());
         when(budgetMapper.selectList(any())).thenReturn(List.of());

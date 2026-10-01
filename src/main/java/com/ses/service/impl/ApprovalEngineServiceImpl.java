@@ -20,6 +20,7 @@ import com.ses.mapper.ApprovalParticipantMapper;
 import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.approval.ApprovalNotificationService;
 import com.ses.service.approval.ApprovalNotificationKeys;
 import com.ses.service.approval.ApprovalEngineService;
@@ -103,8 +104,13 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ApprovalRequest request(ApprovalRequestCommand command) {
+        String tenantId = requireTenant();
+        SysUser applicant = sysUserMapper.selectByIdAndTenant(command.applicantId(), tenantId);
+        if (applicant == null || !Objects.equals(applicant.getStatus(), 1)) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
         if (command.idempotencyKey() != null) {
-            ApprovalRequest existing = approvalRequestMapper.selectByIdempotencyKey(command.idempotencyKey());
+            ApprovalRequest existing = approvalRequestMapper.selectByIdempotencyKey(command.idempotencyKey(), tenantId);
             if (existing != null) {
                 return existing;
             }
@@ -131,6 +137,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
                 .orElseThrow(() -> BusinessException.of("error.approval.approverUnresolved"));
 
         ApprovalRequest entity = ApprovalRequest.builder()
+                .tenantId(tenantId)
                 .requestType(command.requestType())
                 .targetType(command.targetType())
                 .targetId(command.targetId())
@@ -153,6 +160,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         entity.setRequestNo("AR-" + entity.getId());
         approvalRequestMapper.update(null, new UpdateWrapper<ApprovalRequest>()
                 .eq("id", entity.getId())
+                .eq("tenant_id", tenantId)
                 .set("request_no", entity.getRequestNo()));
         insertParticipants(entity, snapshot, 1);
         notifyApprovers(entity, firstStep);
@@ -459,6 +467,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         }
 
         List<ApprovalAction> actions = approvalActionMapper.selectList(new LambdaQueryWrapper<ApprovalAction>()
+                .eq(ApprovalAction::getTenantId, request.getTenantId())
                 .eq(ApprovalAction::getRequestId, request.getId())
                 .eq(ApprovalAction::getRoundNo, roundNo(request))
                 .eq(ApprovalAction::getStepNo, step.stepNo()));
@@ -488,7 +497,8 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
                                 occupied.getSlotIndex() == null ? slot.slotIndex() : occupied.getSlotIndex());
                     }
                     boolean delegatedRetry = approvalDelegationMapper.selectList(new LambdaQueryWrapper<ApprovalDelegation>()
-                                    .eq(ApprovalDelegation::getFromUserId, slotOwner)
+                    .eq(ApprovalDelegation::getFromUserId, slotOwner)
+                                    .eq(ApprovalDelegation::getTenantId, request.getTenantId())
                                     .eq(ApprovalDelegation::getToUserId, actingUserId)
                                     .le(ApprovalDelegation::getValidFrom, today)
                                     .and(w -> w.isNull(ApprovalDelegation::getValidTo).or()
@@ -504,7 +514,8 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
                     return new ApproverResolution(slotOwner, false, slot.slotIndex());
                 }
                 boolean delegated = approvalDelegationMapper.selectList(new LambdaQueryWrapper<ApprovalDelegation>()
-                                .eq(ApprovalDelegation::getFromUserId, slotOwner)
+                        .eq(ApprovalDelegation::getFromUserId, slotOwner)
+                                .eq(ApprovalDelegation::getTenantId, request.getTenantId())
                                 .eq(ApprovalDelegation::getToUserId, actingUserId)
                                 .le(ApprovalDelegation::getValidFrom, today)
                                 .and(w -> w.isNull(ApprovalDelegation::getValidTo).or()
@@ -521,13 +532,15 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
 
     /** 子表を正本とする。子行0件は全種別対象。request_types_jsonは参照しない。 */
     private boolean requestTypeAllowed(ApprovalDelegation delegation, String requestType) {
-        List<String> types = approvalDelegationTypeMapper.selectRequestTypes(delegation.getId());
+        List<String> types = approvalDelegationTypeMapper.selectRequestTypes(delegation.getId(),
+                delegation.getTenantId());
         return types == null || types.isEmpty() || types.contains(requestType);
     }
 
     private boolean insertActionIdempotent(ApprovalRequest request, int stepNo, Long actingUserId,
                                             ApproverResolution resolution, String action, String comment) {
         ApprovalAction row = ApprovalAction.builder()
+                .tenantId(request.getTenantId())
                 .requestId(request.getId())
                 .roundNo(roundNo(request))
                 .stepNo(stepNo)
@@ -550,6 +563,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
     /** 各slotのrequiredCountを満たした場合だけstep成立とする。現行requiredCountは1。 */
     private boolean allSlotsSatisfied(ApprovalRequest request, RouteStepGroup step) {
         List<ApprovalAction> approvals = approvalActionMapper.selectList(new LambdaQueryWrapper<ApprovalAction>()
+                .eq(ApprovalAction::getTenantId, request.getTenantId())
                 .eq(ApprovalAction::getRequestId, request.getId())
                 .eq(ApprovalAction::getRoundNo, roundNo(request))
                 .eq(ApprovalAction::getStepNo, step.stepNo())
@@ -567,6 +581,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
     /** 申請時点の現在roundの申請者・全slot候補をSQL可視性用participantへ保存する。 */
     private void insertParticipants(ApprovalRequest request, RouteSnapshot snapshot, int round) {
         approvalParticipantMapper.insert(ApprovalParticipant.builder()
+                .tenantId(request.getTenantId())
                 .requestId(request.getId()).userId(request.getApplicantId())
                 .participantRole("applicant").roundNo(round).build());
         snapshot.steps().stream()
@@ -575,6 +590,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
                 .filter(Objects::nonNull)
                 .distinct()
                 .forEach(userId -> approvalParticipantMapper.insert(ApprovalParticipant.builder()
+                        .tenantId(request.getTenantId())
                         .requestId(request.getId()).userId(userId)
                         .participantRole("approver").roundNo(round).build()));
     }
@@ -584,6 +600,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
                                java.util.function.UnaryOperator<UpdateWrapper<ApprovalRequest>> customize) {
         UpdateWrapper<ApprovalRequest> wrapper = new UpdateWrapper<ApprovalRequest>()
                 .eq("id", request.getId())
+                .eq("tenant_id", request.getTenantId())
                 .eq("status", request.getStatus())
                 .eq("current_step", request.getCurrentStep())
                 .eq("version", request.getVersion() == null ? 1 : request.getVersion());
@@ -613,6 +630,10 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         String message = writeJson(List.of(messageKey, request.getRequestNo(), request.getCurrentStep()));
         notificationService.publishToUser(request.getApplicantId(), type, title, message,
                 NotificationLinks.APPROVAL_INBOX, dedupeKey, "approval");
+    }
+
+    private String requireTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 
     private String writeJson(Object value) {

@@ -46,6 +46,9 @@ class FlywayMigrationVersionResolutionTest {
         assertTrue(seenVersions.contains("147"), "V147 (customer_success_service_desk) が解決されること");
         assertTrue(seenVersions.contains("148"), "V148 (ai_management_copilot_f1_artifact) が解決されること");
         assertTrue(seenVersions.contains("149"), "V149 (ai_management_copilot_a1_menu) が解決されること");
+        assertTrue(seenVersions.contains("154"), "V154 (certification_continuity_group) が解決されること");
+        assertTrue(seenVersions.contains("162"), "V162 (nf02_nf03_boundary_repair) が解決されること");
+        assertTrue(seenVersions.contains("182"), "V182 (nf09_tenant_scope_hardening) が解決されること");
 
         // V144 のスクリプト名が digital_invoice_safe_diagnostics であること
         List<MigrationInfo> v144Info = Arrays.stream(allMigrations)
@@ -75,5 +78,31 @@ class FlywayMigrationVersionResolutionTest {
         assertEquals(1, v149Info.size(), "V149 は1件のみ存在すること");
         assertTrue(v149Info.get(0).getScript().contains("ai_management_copilot_a1_menu"),
                 "V149 のスクリプト名は ai_management_copilot_a1_menu であること: " + v149Info.get(0).getScript());
+
+        List<MigrationInfo> v154Info = Arrays.stream(allMigrations)
+                .filter(m -> m.getVersion() != null && "154".equals(m.getVersion().getVersion()))
+                .toList();
+        assertEquals(1, v154Info.size(), "V154 は1件のみ存在すること");
+        assertTrue(v154Info.get(0).getScript().contains("certification_continuity_group"),
+                "V154 のスクリプト名は certification_continuity_group であること: " + v154Info.get(0).getScript());
+
+        List<MigrationInfo> v162Info = Arrays.stream(allMigrations)
+                .filter(m -> m.getVersion() != null && "162".equals(m.getVersion().getVersion()))
+                .toList();
+        assertEquals(1, v162Info.size(), "V162 は1件のみ存在すること");
+        assertTrue(v162Info.get(0).getScript().contains("nf02_nf03_boundary_repair"),
+                "V162 のスクリプト名は nf02_nf03_boundary_repair であること: " + v162Info.get(0).getScript());
+
+        assertTrue(v154Info.get(0).getVersion().compareTo(v162Info.get(0).getVersion()) < 0,
+                "V154 は V162 より前に解決されること");
+
+        List<MigrationInfo> v182Info = Arrays.stream(allMigrations)
+                .filter(m -> m.getVersion() != null && "182".equals(m.getVersion().getVersion()))
+                .toList();
+        assertEquals(1, v182Info.size(), "V182 は1件のみ存在すること");
+        assertTrue(v182Info.get(0).getScript().contains("nf09_tenant_scope_hardening"),
+                "V182 のスクリプト名は nf09_tenant_scope_hardening であること: " + v182Info.get(0).getScript());
+        assertTrue(v162Info.get(0).getVersion().compareTo(v182Info.get(0).getVersion()) < 0,
+                "V162 は V182 より前に解決されること");
     }
 }

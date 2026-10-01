@@ -16,6 +16,9 @@ import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.EngineerSalesService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -78,6 +81,16 @@ class UtilizationCalcConsistencyTest {
     @InjectMocks
     private UtilizationForecastServiceImpl forecastService;
 
+    @BeforeEach
+    void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
+    }
+
     private Engineer engineer(Long id, String status) {
         Engineer e = new Engineer();
         e.setId(id);
@@ -120,9 +133,10 @@ class UtilizationCalcConsistencyTest {
                 contract(5L, 5L, currentYm.atDay(1), farFuture, StatusConstants.CONTRACT_ACTIVE)
         );
 
-        when(engineerMapper.selectList(any())).thenReturn(engineers);
-        when(contractMapper.selectList(any())).thenReturn(contracts);
-        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        lenient().when(engineerMapper.selectList(any())).thenReturn(engineers);
+        lenient().when(contractMapper.selectList(any())).thenReturn(contracts);
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(contracts);
+        lenient().when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
         lenient().when(systemConfigService.getString(eq("forecast.assume-renew"), any())).thenReturn("true");
         lenient().when(engineerSalesService.mapPrimaryByEngineerIds(any())).thenReturn(Collections.emptyMap());
 

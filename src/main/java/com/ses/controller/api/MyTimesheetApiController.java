@@ -51,6 +51,7 @@ public class MyTimesheetApiController {
     private EngineerMapper engineerMapper;
 
     private Long currentEngineerId() {
+        com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         Long engineerId = linkService.findEngineerIdByUserId(SecurityUtils.currentUserId());
         if (engineerId == null) {
             // 認可違反（未紐付け）は403とし、system障害(500)へ混入させない（R3R-17）。
@@ -61,7 +62,8 @@ public class MyTimesheetApiController {
 
     /** contractId が本人の担当契約かを検証する（越権防止）。 */
     private void assertOwnedContract(Long engineerId, Long contractId) {
-        Contract c = contractMapper.selectById(contractId);
+        Contract c = contractMapper.selectByIdForTenant(contractId,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (c == null) {
             // 純粋な不存在は404（R3R-17）。
             throw BusinessException.of(404, "error.workRecord.noContract2");
@@ -82,10 +84,12 @@ public class MyTimesheetApiController {
 
     @GetMapping
     public ApiResult<?> myTimesheet(@RequestParam String month) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         Long engineerId = currentEngineerId();
         // 不正な年月形式は400へ統一する（YearMonth.parse直呼びだと500になる／R3R-15）。
         String monthEnd = com.ses.common.util.DateUtils.parseYearMonth(month).atEndOfMonth().toString();
-        List<WorkRecordGridDto> rows = workRecordMapper.selectMonthlyGridForEngineer(engineerId, month, monthEnd);
+        List<WorkRecordGridDto> rows = workRecordMapper.selectMonthlyGridForEngineer(
+                engineerId, month, monthEnd, tenantId);
         List<Map<String, Object>> result = new ArrayList<>();
         for (WorkRecordGridDto row : rows) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -95,7 +99,7 @@ public class MyTimesheetApiController {
             m.put("workRecordId", row.getWorkRecordId());
             m.put("version", row.getVersion());
             m.put("status", row.getStatus());
-            Contract c = contractMapper.selectById(row.getContractId());
+            Contract c = contractMapper.selectByIdForTenant(row.getContractId(), tenantId);
             if (c != null) {
                 m.put("contractStartDate", c.getStartDate());
                 m.put("contractEndDate", c.getEndDate());
@@ -111,7 +115,7 @@ public class MyTimesheetApiController {
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("month", month);
         resp.put("rows", result);
-        Engineer eng = engineerMapper.selectById(engineerId);
+        Engineer eng = engineerMapper.selectByIdForTenant(engineerId, tenantId);
         if (eng != null) {
             resp.put("engineerName", eng.getFullName());
         }

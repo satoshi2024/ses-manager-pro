@@ -6,11 +6,15 @@ import com.ses.service.ContractRenewalService;
 import com.ses.service.ContractService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.test.context.TestSecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
@@ -34,6 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.dto.contract.ContractListDto;
 import com.ses.mapper.ContractMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 
 /**
  * 契約APIのテスト（P8 Task9）: 登録・必須項目バリデーション。
@@ -68,13 +73,32 @@ class ContractApiControllerTest {
 
     @BeforeEach
     void allowFullScopeForExistingControllerCases() {
+        AccountingTenantContextHolder.setTenantId("tenant-a");
+        com.ses.entity.SysUser user = new com.ses.entity.SysUser();
+        user.setId(1L);
+        user.setUsername("contract-test");
+        user.setPassword("password");
+        user.setRole("管理者");
+        user.setStatus(1);
+        user.setTenantId("tenant-a");
+        com.ses.config.LoginUser principal = new com.ses.config.LoginUser(user,
+                List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_管理者")));
+        SecurityContext securityContext = SecurityContextHolder.createEmptyContext();
+        securityContext.setAuthentication(new UsernamePasswordAuthenticationToken(principal, null,
+                principal.getAuthorities()));
+        TestSecurityContextHolder.setContext(securityContext);
         when(organizationScopeService.hasFullAccess()).thenReturn(true);
         when(authorizationService.isAllowed(any(), any())).thenReturn(true);
         when(persistentSessionService.validateAndTouch(any(), any())).thenReturn(true);
+        when(contractMapper.selectByIdForTenant(any(), eq("tenant-a"))).thenReturn(new Contract());
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
-    @WithMockUser
     void page_原価閲覧権限がない場合はcostPriceをmaskする() throws Exception {
         ContractListDto row = new ContractListDto();
         row.setId(1L);
@@ -83,7 +107,7 @@ class ContractApiControllerTest {
         result.setRecords(List.of(row));
         result.setTotal(1);
         when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), any())).thenReturn(result);
+                any(), any(), any(), any(), any(), any())).thenReturn(result);
         when(authorizationService.isAllowed(any(), eq("contract.cost.view"))).thenReturn(false);
 
         mockMvc.perform(get("/api/contracts"))
@@ -92,7 +116,6 @@ class ContractApiControllerTest {
     }
 
     @Test
-    @WithMockUser
     void create_必須が揃えば200() throws Exception {
         Contract c = new Contract();
         c.setEngineerId(1L);
@@ -109,7 +132,6 @@ class ContractApiControllerTest {
     }
 
     @Test
-    @WithMockUser
     void update_version未指定は400でサービスを呼ばない() throws Exception {
         Map<String, Object> body = new java.util.LinkedHashMap<>();
         body.put("engineerId", 1);
@@ -129,7 +151,6 @@ class ContractApiControllerTest {
     }
 
     @Test
-    @WithMockUser
     void create_要員ID欠落は400() throws Exception {
         // engineerId を欠落させる
         Map<String, Object> body = Map.of(
@@ -143,10 +164,9 @@ class ContractApiControllerTest {
     }
 
     @Test
-    @WithMockUser
     void page_パラメータなしで全件取得() throws Exception {
         Page<ContractListDto> mockPage = new Page<>(1, 100);
-        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
+        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
 
         mockMvc.perform(get("/api/contracts"))
                 .andExpect(status().isOk())
@@ -154,19 +174,17 @@ class ContractApiControllerTest {
     }
 
     @Test
-    @WithMockUser
     void page_組織scopeを契約Mapperのページング条件へ渡す() throws Exception {
         when(organizationScopeService.hasFullAccess()).thenReturn(false);
         when(organizationScopeService.allowedContractIds(any(LocalDate.class))).thenReturn(java.util.Set.of(10L));
         when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                argThat(ids -> ids != null && ids.equals(List.of(10L))))).thenReturn(new Page<>(1, 10, 1));
+                argThat(ids -> ids != null && ids.equals(List.of(10L))), any())).thenReturn(new Page<>(1, 10, 1));
 
         mockMvc.perform(get("/api/contracts"))
                 .andExpect(status().isOk());
     }
 
     @Test
-    @WithMockUser
     void detail_組織scope外の契約IDはサービス取得前に404() throws Exception {
         when(organizationScopeService.hasFullAccess()).thenReturn(false);
         when(organizationScopeService.allowedContractIds(any(LocalDate.class))).thenReturn(java.util.Set.of(10L));
@@ -177,10 +195,9 @@ class ContractApiControllerTest {
     }
 
     @Test
-    @WithMockUser
     void page_検索パラメータ複合で絞れる_contractNo部分一致() throws Exception {
         Page<ContractListDto> mockPage = new Page<>(1, 100);
-        when(contractMapper.selectPageWithNames(any(), eq("稼動中"), eq(10L), any(), any(), eq("C-001"), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
+        when(contractMapper.selectPageWithNames(any(), eq("稼動中"), eq(10L), any(), any(), eq("C-001"), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
 
         mockMvc.perform(get("/api/contracts?status=稼動中&customerId=10&contractNo=C-001"))
                 .andExpect(status().isOk())
@@ -188,14 +205,13 @@ class ContractApiControllerTest {
     }
 
     @Test
-    @WithMockUser
     void page_engineerNameが解決される() throws Exception {
         Page<ContractListDto> mockPage = new Page<>(1, 100);
         ContractListDto dto = new ContractListDto();
         dto.setEngineerName("テスト 太郎");
         mockPage.setRecords(List.of(dto));
         
-        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
+        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
 
         mockMvc.perform(get("/api/contracts"))
                 .andExpect(status().isOk())
@@ -203,14 +219,13 @@ class ContractApiControllerTest {
     }
 
     @Test
-    @WithMockUser
     void page_削除済み要員の契約はengineerNameがnullで返る() throws Exception {
         Page<ContractListDto> mockPage = new Page<>(1, 100);
         ContractListDto dto = new ContractListDto();
         dto.setEngineerName(null);
         mockPage.setRecords(List.of(dto));
         
-        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
+        when(contractMapper.selectPageWithNames(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(mockPage);
 
         mockMvc.perform(get("/api/contracts"))
                 .andExpect(status().isOk())
@@ -218,7 +233,6 @@ class ContractApiControllerTest {
     }
 
     @Test
-    @WithMockUser
     void update_状態項目は専用API以外では無視する() throws Exception {
         Contract c = new Contract();
         c.setEngineerId(1L);
@@ -246,7 +260,6 @@ class ContractApiControllerTest {
      * サービス側で old 回填される（ALWAYS の NULL 上書きを防ぐ）。
      */
     @Test
-    @WithMockUser
     void update_省略したALWAYSキーはpresentに含めない() throws Exception {
         Map<String, Object> body = new java.util.LinkedHashMap<>();
         body.put("engineerId", 1);
@@ -283,7 +296,6 @@ class ContractApiControllerTest {
      * CON-01: JSON で "salesUserId": null と明示した場合のみ present に入り、クリアが許可される。
      */
     @Test
-    @WithMockUser
     void update_明示nullの担当営業はpresentに含める() throws Exception {
         Map<String, Object> body = new java.util.LinkedHashMap<>();
         body.put("engineerId", 1);
@@ -309,13 +321,12 @@ class ContractApiControllerTest {
     }
 
     @Test
-    @WithMockUser
     void getById_契約詳細を返す() throws Exception {
         Contract c = new Contract();
         c.setId(10L);
         c.setContractNo("C-202607-0001");
         c.setEngineerId(1L);
-        when(contractService.getById(10L)).thenReturn(c);
+        when(contractMapper.selectByIdForTenant(10L, "tenant-a")).thenReturn(c);
 
         mockMvc.perform(get("/api/contracts/10"))
                 .andExpect(status().isOk())
@@ -324,7 +335,6 @@ class ContractApiControllerTest {
     }
 
     @Test
-    @WithMockUser
     void changeStatus_解約日を渡すとサービスへ引き継がれる() throws Exception {
         Map<String, Object> body = Map.of("status", "解約", "cancelDate", "2026-07-15");
 

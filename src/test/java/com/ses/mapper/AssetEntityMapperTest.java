@@ -168,6 +168,8 @@ class AssetEntityMapperTest extends BaseIntegrationTest {
     @DisplayName("ExternalAccountReference confirm revoke CAS (Manual & System)")
     void testExternalAccountConfirmRevoke() {
         ExternalAccountReference ref = ExternalAccountReference.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
                 .systemId(1L)
                 .accountIdentifier("dev-user@ses-test.jp")
                 .assigneeType("ENGINEER")
@@ -177,7 +179,7 @@ class AssetEntityMapperTest extends BaseIntegrationTest {
         externalAccountReferenceMapper.insert(ref);
 
         int updated = externalAccountReferenceMapper.confirmRevokeWithCas(
-                ref.getId(), LocalDateTime.now(), 1L, "MANUAL", 0);
+                ref.getId(), LocalDateTime.now(), 1L, "MANUAL", "default", 1L, 0);
         assertThat(updated).isEqualTo(1);
 
         ExternalAccountReference current = externalAccountReferenceMapper.selectById(ref.getId());
@@ -188,6 +190,8 @@ class AssetEntityMapperTest extends BaseIntegrationTest {
 
         // システム実行（ポーリング）時のCAS更新（confirmedBy = null, source = SYSTEM）
         ExternalAccountReference sysRef = ExternalAccountReference.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
                 .systemId(1L)
                 .accountIdentifier("sys-user@ses-test.jp")
                 .assigneeType("ENGINEER")
@@ -197,7 +201,7 @@ class AssetEntityMapperTest extends BaseIntegrationTest {
         externalAccountReferenceMapper.insert(sysRef);
 
         int sysUpdated = externalAccountReferenceMapper.confirmRevokeWithCas(
-                sysRef.getId(), LocalDateTime.now(), null, "SYSTEM", 0);
+                sysRef.getId(), LocalDateTime.now(), null, "SYSTEM", "default", 1L, 0);
         assertThat(sysUpdated).isEqualTo(1);
 
         ExternalAccountReference sysCurrent = externalAccountReferenceMapper.selectById(sysRef.getId());

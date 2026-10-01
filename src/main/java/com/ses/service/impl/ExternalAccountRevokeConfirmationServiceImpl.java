@@ -8,9 +8,11 @@ import com.ses.entity.ExternalAccountReference;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ExternalAccountReferenceMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.AssetEventService;
 import com.ses.service.AuditLogService;
 import com.ses.service.ExternalAccountRevokeConfirmationService;
+import com.ses.service.security.LegalEntityContextService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +31,7 @@ public class ExternalAccountRevokeConfirmationServiceImpl implements ExternalAcc
     private final SysUserMapper sysUserMapper;
     private final AssetEventService assetEventService;
     private final AuditLogService auditLogService;
+    private final LegalEntityContextService legalEntityContextService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -37,17 +40,22 @@ public class ExternalAccountRevokeConfirmationServiceImpl implements ExternalAcc
             throw new BusinessException("失効確認対象と確認主体は必須です。");
         }
 
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        ExternalAccountReference current = referenceMapper.selectOwnedByIdForTenant(referenceId, tenantId);
+        if (current == null) {
+            throw new BusinessException("指定されたアカウント参照が見つかりません。");
+        }
+        if (current.getLegalEntityId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+
         SysUser human = null;
         if (attribution.actorType() == ActorType.HUMAN) {
-            human = sysUserMapper.selectById(attribution.humanUserId());
+            legalEntityContextService.assertCurrent(current.getLegalEntityId());
+            human = sysUserMapper.selectByIdAndTenant(attribution.humanUserId(), tenantId);
             if (human == null || !Integer.valueOf(1).equals(human.getStatus())) {
                 throw new BusinessException(401, "確認主体のユーザーを解決できないため、失効確認を拒否しました。");
             }
-        }
-
-        ExternalAccountReference current = referenceMapper.selectById(referenceId);
-        if (current == null) {
-            throw new BusinessException("指定されたアカウント参照が見つかりません。");
         }
         if ("REVOKED".equals(current.getStatus())) {
             return current;
@@ -71,6 +79,8 @@ public class ExternalAccountRevokeConfirmationServiceImpl implements ExternalAcc
                 humanUserId,
                 effectiveAttribution.actorType().name(),
                 effectiveAttribution.confirmationSource().name(),
+                tenantId,
+                current.getLegalEntityId(),
                 current.getVersion());
         if (rows != 1) {
             throw new BusinessException(409, "失効確認の排他更新に失敗しました。他の操作と競合した可能性があります。");

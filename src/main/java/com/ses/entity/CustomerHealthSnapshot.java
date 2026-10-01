@@ -55,6 +55,9 @@ public class CustomerHealthSnapshot {
     @com.baomidou.mybatisplus.annotation.TableField("sla_breach_count_30d")
     private Integer slaBreachCount30d;
 
+    /** breachフラグはあるが検知時刻を復元できない旧履歴件数。 */
+    private Integer slaBreachHistoricalUnknownCount;
+
     /** 直近90日平均CSATスコア */
     private BigDecimal avgCsatScore;
 

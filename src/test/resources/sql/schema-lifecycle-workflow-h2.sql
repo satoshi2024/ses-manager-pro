@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS m_lifecycle_template_task_dep (
 
 CREATE TABLE IF NOT EXISTS t_lifecycle_case (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
     case_no VARCHAR(50) NOT NULL,
     lifecycle_type VARCHAR(30) NOT NULL,
     engineer_id BIGINT NOT NULL,

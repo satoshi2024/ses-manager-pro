@@ -94,6 +94,20 @@ class LogRedactionTest {
     }
 
     @Test
+    @DisplayName("secret keyのcamelCase・snake_case・kebab-caseと入れ子JSONを一律秘匿する")
+    void secretKeyの表記揺れと入れ子JSONを秘匿する() {
+        String[] keys = {"apiKey", "api_key", "api-key", "clientSecret", "client_secret", "client-secret",
+                "privateKey", "private_key", "private-key", "webhookSecret", "webhook_secret", "webhook-secret"};
+        for (String key : keys) {
+            String secret = key + "-raw-secret";
+            String input = "{\"outer\":{\"" + key + "\":\"" + secret + "\"},'" + key + "':'" + secret + "'}";
+            String redacted = LogRedaction.redact(input);
+            assertFalse(redacted.contains(secret), () -> key + "が秘匿されていません");
+            assertTrue(redacted.contains("***"));
+        }
+    }
+
+    @Test
     @DisplayName("超長入力と大量のSELECTを短時間で安全に処理する")
     void 超長Sqlの脱敏は時間内に完了する() {
         String repeatedSelect = "SELECT password FROM t WHERE token='select-secret';".repeat(150);

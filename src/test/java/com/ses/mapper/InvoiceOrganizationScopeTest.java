@@ -2,6 +2,7 @@ package com.ses.mapper;
 
 import com.ses.BaseIntegrationTest;
 import com.ses.dto.invoice.UnbilledWorkRecordDto;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,8 +30,14 @@ class InvoiceOrganizationScopeTest extends BaseIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @org.junit.jupiter.api.AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+    }
+
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         insertCustomer();
         insertOrganization(100L);
         insertOrganization(200L);
@@ -76,7 +83,7 @@ class InvoiceOrganizationScopeTest extends BaseIntegrationTest {
     }
 
     private void insertCustomer() {
-        jdbcTemplate.update("INSERT INTO m_customer (id, company_name, deleted_flag) VALUES (99, 'scope-customer', 0)");
+        jdbcTemplate.update("INSERT INTO m_customer (id, company_name, tenant_id, deleted_flag) VALUES (99, 'scope-customer', 'default', 0)");
     }
 
     @Test
@@ -139,7 +146,7 @@ class InvoiceOrganizationScopeTest extends BaseIntegrationTest {
     }
 
     private void insertEngineer(long id, long organizationId) {
-        jdbcTemplate.update("INSERT INTO t_engineer (id, full_name, employment_type, organization_id, deleted_flag) VALUES (?, ?, '正社員', ?, 0)",
+        jdbcTemplate.update("INSERT INTO t_engineer (id, full_name, employment_type, organization_id, tenant_id, deleted_flag) VALUES (?, ?, '正社員', ?, 'default', 0)",
                 id, "scope-engineer-" + id, organizationId);
     }
 
@@ -149,8 +156,8 @@ class InvoiceOrganizationScopeTest extends BaseIntegrationTest {
     }
 
     private void insertContract(long id, long engineerId, long projectId) {
-        jdbcTemplate.update("INSERT INTO t_contract (id, contract_no, engineer_id, project_id, customer_id, start_date, selling_price, cost_price, status, deleted_flag) "
-                        + "VALUES (?, ?, ?, ?, 99, '2026-01-01', 100000, 50000, '稼動中', 0)",
+        jdbcTemplate.update("INSERT INTO t_contract (id, contract_no, engineer_id, project_id, customer_id, tenant_id, start_date, selling_price, cost_price, status, deleted_flag) "
+                        + "VALUES (?, ?, ?, ?, 99, 'default', '2026-01-01', 100000, 50000, '稼動中', 0)",
                 id, "scope-contract-" + id, engineerId, projectId);
     }
 

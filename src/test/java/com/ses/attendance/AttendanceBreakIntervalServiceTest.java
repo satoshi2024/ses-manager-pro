@@ -66,7 +66,7 @@ class AttendanceBreakIntervalServiceTest {
         jdbcTemplate.update("INSERT INTO m_organization_unit (tenant_id, legal_entity_id, code, name, type, valid_from, status) "
                 + "VALUES (1, 70001, ?, ?, '部門', '2026-01-01', '有効')", code, name);
         organizationId = jdbcTemplate.queryForObject("SELECT id FROM m_organization_unit WHERE code = ?", Long.class, code);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', 'Bench', ?)",
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status, organization_id) VALUES ('default', ?, '正社員', 'Bench', ?)",
                 name, organizationId);
         engineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, name);
         jdbcTemplate.update("INSERT INTO m_work_calendar (legal_entity_id, organization_id, engineer_id, name, valid_from, status) "
@@ -76,7 +76,17 @@ class AttendanceBreakIntervalServiceTest {
             jdbcTemplate.update("INSERT INTO m_work_calendar_day (calendar_id, calendar_date, day_type, scheduled_minutes) "
                     + "VALUES (?, ?, '通常', 480)", calendarId, date);
         }
+        Integer userCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM sys_user WHERE id = ?", Integer.class, USER_ID);
+        if (userCount == null || userCount == 0) {
+            jdbcTemplate.update("INSERT INTO sys_user (id, username, password, real_name, role, status, tenant_id, deleted_flag) "
+                            + "VALUES (?, ?, 'pass', '勤怠区間テスト', '要員', 1, 'default', 0)",
+                    USER_ID, "t070-break-" + USER_ID);
+        } else {
+            jdbcTemplate.update("UPDATE sys_user SET tenant_id = 'default', deleted_flag = 0, status = 1 WHERE id = ?", USER_ID);
+        }
+        jdbcTemplate.update("DELETE FROM t_engineer_account_link WHERE engineer_id = ? OR sys_user_id = ?", engineerId, USER_ID);
         EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId("default");
         link.setEngineerId(engineerId);
         link.setSysUserId(USER_ID);
         engineerAccountLinkMapper.insert(link);

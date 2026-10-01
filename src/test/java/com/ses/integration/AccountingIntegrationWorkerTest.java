@@ -59,7 +59,7 @@ class AccountingIntegrationWorkerTest {
 
     @BeforeEach
     void setUp() {
-        IntegrationConnection conn = connectionService.getOrCreateConnection("default", null, "freee", "accounting");
+        IntegrationConnection conn = connectionService.getOrCreateConnection("default", 1L, "freee", "accounting");
         connId = conn.getId();
     }
 
@@ -72,11 +72,11 @@ class AccountingIntegrationWorkerTest {
     @Test
     @DisplayName("Worker Dispatch: 5種類のジョブ種別が正しく対応サービスへdispatchされること")
     void worker_dispatchesAllJobTypes() {
-        IntegrationJob j1 = jobService.createJob(connId, "SALES_INVOICE_SYNC", "INVOICE", 101L, "KEY-1", "hash1");
-        IntegrationJob j2 = jobService.createJob(connId, "SALES_INVOICE_CANCEL", "INVOICE", 102L, "KEY-2", "hash2");
-        IntegrationJob j3 = jobService.createJob(connId, "BP_PURCHASE_SYNC", "BP_PAYMENT", 103L, "KEY-3", "hash3");
-        IntegrationJob j4 = jobService.createJob(connId, "EXPENSE_DEAL_SYNC", "EXPENSE_REQUEST", 104L, "KEY-4", "hash4");
-        IntegrationJob j5 = jobService.createJob(connId, "PAYMENT_SYNC", "BP_PAYMENT", 105L, "KEY-5", "hash5");
+        IntegrationJob j1 = createScopedJob("SALES_INVOICE_SYNC", "INVOICE", 101L, "KEY-1", "hash1");
+        IntegrationJob j2 = createScopedJob("SALES_INVOICE_CANCEL", "INVOICE", 102L, "KEY-2", "hash2");
+        IntegrationJob j3 = createScopedJob("BP_PURCHASE_SYNC", "BP_PAYMENT", 103L, "KEY-3", "hash3");
+        IntegrationJob j4 = createScopedJob("EXPENSE_DEAL_SYNC", "EXPENSE_REQUEST", 104L, "KEY-4", "hash4");
+        IntegrationJob j5 = createScopedJob("PAYMENT_SYNC", "BP_PAYMENT", 105L, "KEY-5", "hash5");
 
         targetWorker().processDueJobs();
 
@@ -90,7 +90,7 @@ class AccountingIntegrationWorkerTest {
     @Test
     @DisplayName("Worker Dispatch: 未知のジョブ種別は FAILED / UNKNOWN_JOB_TYPE としてマークされること")
     void worker_handlesUnknownJobType() {
-        IntegrationJob j = jobService.createJob(connId, "UNKNOWN_SPECIAL_TYPE", "OTHER", 999L, "KEY-UNK", "hashU");
+        IntegrationJob j = createScopedJob("UNKNOWN_SPECIAL_TYPE", "OTHER", 999L, "KEY-UNK", "hashU");
 
         targetWorker().dispatchJob(j);
 
@@ -102,7 +102,7 @@ class AccountingIntegrationWorkerTest {
     @Test
     @DisplayName("Stale Running Recovery: 期限切れの RUNNING ジョブが RETRYABLE へ復旧されること")
     void worker_recoversStaleRunningJobs() {
-        IntegrationJob j = jobService.createJob(connId, "SALES_INVOICE_SYNC", "INVOICE", 201L, "KEY-STALE", "hashS");
+        IntegrationJob j = createScopedJob("SALES_INVOICE_SYNC", "INVOICE", 201L, "KEY-STALE", "hashS");
         IntegrationJob claimed = jobService.claimJob(j.getId());
         assertThat(claimed.getStatus()).isEqualTo("RUNNING");
 
@@ -123,7 +123,7 @@ class AccountingIntegrationWorkerTest {
     void worker_recoversStaleRunningToSucceededWhenDealExists() {
         IntegrationJob j = jobService.createJob(connId, "BP_PURCHASE_SYNC", "BP_PAYMENT", 301L,
                 "KEY-STALE-EXIST", "hashE",
-                "{\"bpPaymentId\":301}", "default", null, null);
+                "{\"bpPaymentId\":301}", "default", 1L, null);
         IntegrationJob claimed = jobService.claimJob(j.getId());
         claimed.setUpdatedAt(java.time.LocalDateTime.now().minusMinutes(20));
         jobService.update(new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<IntegrationJob>()
@@ -141,5 +141,11 @@ class AccountingIntegrationWorkerTest {
         assertThat(recovered.getExternalId()).isEqualTo("deal-901");
         verify(provider, times(1)).findDealIdByRefNumber(any(), eq("BP-301"));
         verify(purchaseService, never()).processBpPurchaseJob(any());
+    }
+
+    private IntegrationJob createScopedJob(String jobType, String targetType, Long targetId,
+                                           String idempotencyKey, String payloadHash) {
+        return jobService.createJob(connId, jobType, targetType, targetId,
+                idempotencyKey, payloadHash, null, "default", 1L, null);
     }
 }

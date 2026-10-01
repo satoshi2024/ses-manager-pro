@@ -5,6 +5,8 @@ import com.ses.dto.ai.MatchResultDto;
 import com.ses.service.ai.AiMatchingService;
 import com.ses.service.ai.AiRecommendationRecorder;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.ai.LegacyAiEndpointBoundary;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.*;
@@ -23,32 +25,32 @@ public class AiApiController {
     private final AiMatchingService aiMatchingService;
     private final DataScopeService dataScopeService;
     private final ObjectProvider<AiRecommendationRecorder> recommendationRecorder;
+    private final LegacyAiEndpointBoundary endpointBoundary;
 
     @PostMapping("/match/engineer-to-projects")
     public ApiResult<List<MatchResultDto>> matchEngineerToProjects(@RequestBody java.util.Map<String, Long> payload) {
         Long engineerId = payload.get("engineerId");
-        if (engineerId != null) {
-            dataScopeService.assertAllowedEngineer(engineerId);
-        }
-        List<MatchResultDto> results = aiMatchingService.findMatchingProjects(engineerId);
-        record(results, engineerId, null);
+        CopilotExecutionContext context = endpointBoundary.createContext();
+        endpointBoundary.assertEngineer(engineerId, context);
+        List<MatchResultDto> results = aiMatchingService.findMatchingProjects(engineerId, context);
+        record(results, engineerId, null, context);
         return ApiResult.success(results);
     }
 
     @GetMapping("/matching/project/{projectId}")
     public ApiResult<List<MatchResultDto>> findMatchingEngineers(@PathVariable Long projectId) {
-        if (projectId != null) {
-            dataScopeService.assertAllowedProject(projectId);
-        }
-        List<MatchResultDto> results = aiMatchingService.findMatchingEngineers(projectId);
-        record(results, null, projectId);
+        CopilotExecutionContext context = endpointBoundary.createContext();
+        endpointBoundary.assertProject(projectId, context);
+        List<MatchResultDto> results = aiMatchingService.findMatchingEngineers(projectId, context);
+        record(results, null, projectId, context);
         return ApiResult.success(results);
     }
 
-    private void record(List<MatchResultDto> results, Long engineerId, Long projectId) {
+    private void record(List<MatchResultDto> results, Long engineerId, Long projectId,
+                        CopilotExecutionContext context) {
         AiRecommendationRecorder recorder = recommendationRecorder.getIfAvailable();
         if (recorder != null) {
-            recorder.recordMatch("MATCHING", null, results, engineerId, projectId);
+            recorder.recordMatch("MATCHING", null, results, engineerId, projectId, context);
         }
     }
 }

@@ -14,6 +14,7 @@ import com.ses.service.SystemConfigService;
 import com.ses.service.UtilizationCalcService;
 import com.ses.service.impl.StaffingCapacityServiceImpl;
 import com.ses.service.staffing.StaffingCapacityService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -34,6 +35,7 @@ import static org.mockito.Mockito.when;
 
 /** supplyBatchが要員×月ごとのN+1 queryへ退行しないことを検証する。 */
 @ExtendWith(MockitoExtension.class)
+@EnableDefaultTenantTestContext
 class StaffingCapacityBatchQueryTest {
 
     @Mock private WorkCalendarMapper workCalendarMapper;
@@ -52,7 +54,7 @@ class StaffingCapacityBatchQueryTest {
         when(workCalendarMapper.selectList(any(Wrapper.class))).thenReturn(List.<WorkCalendar>of());
         when(leaveRequestMapper.selectList(any(Wrapper.class))).thenReturn(List.<LeaveRequest>of());
         when(allocationMapper.selectList(any(Wrapper.class))).thenReturn(List.<AllocationPlan>of());
-        when(contractMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of());
 
         List<Engineer> engineers = LongStream.rangeClosed(1, 200)
                 .mapToObj(id -> {
@@ -70,7 +72,7 @@ class StaffingCapacityBatchQueryTest {
         verify(workCalendarMapper, times(1)).selectList(any(Wrapper.class));
         verify(leaveRequestMapper, times(1)).selectList(any(Wrapper.class));
         verify(allocationMapper, times(1)).selectList(any(Wrapper.class));
-        verify(contractMapper, times(1)).selectList(any(Wrapper.class));
+        verify(contractMapper, times(1)).selectListForTenant(any(), any());
         verify(workCalendarDayMapper, never()).selectList(any(Wrapper.class));
     }
 }

@@ -1,6 +1,5 @@
 package com.ses.service.servicedesk.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.constant.NotificationLinks;
 import com.ses.entity.Contract;
 import com.ses.entity.Customer;
@@ -16,6 +15,8 @@ import com.ses.mapper.ServiceSlaEscalationMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationService;
 import com.ses.service.servicedesk.ServiceSlaMonitoringService;
+import com.ses.service.security.CustomerScopeResolver;
+import com.ses.common.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,7 @@ import java.time.LocalDateTime;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * SLA監視・アラート通知サービス実装
@@ -38,6 +40,9 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringService {
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CustomerScopeResolver customerScopeResolver;
+
     private final ServiceSlaClockMapper slaClockMapper;
     private final ServiceSlaEscalationMapper escalationMapper;
     private final ServiceRequestMapper serviceRequestMapper;
@@ -48,25 +53,25 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
     private final Clock clock;
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void checkAndNotifyBreaches() {
         checkSlaBreaches(LocalDateTime.now(clock));
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public int checkSlaBreaches(LocalDateTime asOf) {
         LocalDateTime now = asOf != null ? asOf : LocalDateTime.now(clock);
         int breachedCount = 0;
 
-        List<ServiceSlaClock> runningClocks = slaClockMapper.selectList(
-                new LambdaQueryWrapper<ServiceSlaClock>()
-                        .eq(ServiceSlaClock::getStatus, "RUNNING")
-        );
+        String tenantId = currentTenant();
+        List<ServiceSlaClock> runningClocks = slaClockMapper.selectRunningByTenant(tenantId);
 
         for (ServiceSlaClock clk : runningClocks) {
-            ServiceRequest req = serviceRequestMapper.selectById(clk.getServiceRequestId());
-            if (req == null || "RESOLVED".equals(req.getStatus()) || "CLOSED".equals(req.getStatus())) {
+            ServiceRequest req = serviceRequestMapper.selectByIdAndTenant(clk.getServiceRequestId(), tenantId);
+            if (req == null || !tenantId.equals(req.getTenantId())
+                    || "RESOLVED".equals(req.getStatus()) || "CLOSED".equals(req.getStatus())) {
+                continue;
+            }
+            if (!isVisibleCustomer(req.getCustomerId())) {
                 continue;
             }
 
@@ -74,17 +79,14 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             boolean responseWasBreached = Boolean.TRUE.equals(clk.getResponseBreached());
             boolean resolveWasBreached = Boolean.TRUE.equals(clk.getResolveBreached());
             List<SlaNotice> notices = new java.util.ArrayList<>();
-            List<ServiceSlaEscalation> retryRows = escalationMapper.selectList(
-                    new LambdaQueryWrapper<ServiceSlaEscalation>()
-                            .eq(ServiceSlaEscalation::getSlaClockId, clk.getId())
-                            .eq(ServiceSlaEscalation::getStatus, "RETRY"));
+            List<ServiceSlaEscalation> retryRows = escalationMapper.selectRetryByClockAndTenant(clk.getId(), tenantId);
             boolean responseFirstRetryPending = hasRetry(retryRows, "RESPONSE", "FIRST");
             boolean resolveFirstRetryPending = hasRetry(retryRows, "RESOLVE", "FIRST");
 
             // 1. 初回応答期限超過チェック
             if (!responseWasBreached && clk.getFirstRespondedAt() == null
                     && clk.getResponseDeadline() != null && !clk.getResponseDeadline().isAfter(now)) {
-                clk.setResponseBreached(true);
+                markResponseBreach(clk, now);
                 clockUpdated = true;
                 breachedCount++;
                 notices.add(new SlaNotice("RESPONSE", "FIRST", "SLA初回応答期限超過",
@@ -99,7 +101,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             // 2. 解決目標期限超過チェック
             if (!resolveWasBreached && clk.getResolvedAt() == null
                     && clk.getResolveDeadline() != null && !clk.getResolveDeadline().isAfter(now)) {
-                clk.setResolveBreached(true);
+                markResolveBreach(clk, now);
                 clockUpdated = true;
                 breachedCount++;
                 notices.add(new SlaNotice("RESOLVE", "FIRST", "SLA解決目標期限超過",
@@ -145,8 +147,12 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                         .eq(ServiceSlaClock::getId, clk.getId())
                         .eq(ServiceSlaClock::getVersion, version)
                         .set(ServiceSlaClock::getResponseBreached, clk.getResponseBreached())
+                        .set(ServiceSlaClock::getResponseBreachedAt, clk.getResponseBreachedAt())
+                        .set(ServiceSlaClock::getResponseBreachTimeUnknown, clk.getResponseBreachTimeUnknown())
                         .set(ServiceSlaClock::getResponseWarningSent, clk.getResponseWarningSent())
                         .set(ServiceSlaClock::getResolveBreached, clk.getResolveBreached())
+                        .set(ServiceSlaClock::getResolveBreachedAt, clk.getResolveBreachedAt())
+                        .set(ServiceSlaClock::getResolveBreachTimeUnknown, clk.getResolveBreachTimeUnknown())
                         .set(ServiceSlaClock::getResolveWarningSent, clk.getResolveWarningSent())
                         .set(ServiceSlaClock::getLastResponseAlertAt, clk.getLastResponseAlertAt())
                         .set(ServiceSlaClock::getLastResolveAlertAt, clk.getLastResolveAlertAt())
@@ -235,6 +241,22 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
         return deadline != null && deadline.isAfter(now) && !deadline.minusMinutes(30).isAfter(now);
     }
 
+    private void markResponseBreach(ServiceSlaClock clockRow, LocalDateTime breachedAt) {
+        clockRow.setResponseBreached(true);
+        clockRow.setResponseBreachTimeUnknown(false);
+        if (clockRow.getResponseBreachedAt() == null) {
+            clockRow.setResponseBreachedAt(breachedAt);
+        }
+    }
+
+    private void markResolveBreach(ServiceSlaClock clockRow, LocalDateTime breachedAt) {
+        clockRow.setResolveBreached(true);
+        clockRow.setResolveBreachTimeUnknown(false);
+        if (clockRow.getResolveBreachedAt() == null) {
+            clockRow.setResolveBreachedAt(breachedAt);
+        }
+    }
+
     private boolean shouldContinue(LocalDateTime lastAlertAt, LocalDateTime now) {
         return lastAlertAt == null || Duration.between(lastAlertAt, now).toMinutes() >= 30;
     }
@@ -264,8 +286,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
 
     private void persistEscalation(ServiceRequest req, ServiceSlaClock clk, SlaNotice notice,
                                    String dedupeKey, int recipientCount, String error, LocalDateTime now) {
-        ServiceSlaEscalation row = escalationMapper.selectOne(new LambdaQueryWrapper<ServiceSlaEscalation>()
-                .eq(ServiceSlaEscalation::getDedupeKey, dedupeKey));
+        ServiceSlaEscalation row = escalationMapper.selectByDedupeKeyAndTenant(dedupeKey, currentTenant());
         if (row == null) {
             row = ServiceSlaEscalation.builder()
                     .serviceRequestId(req.getId()).slaClockId(clk.getId()).roundNo(clk.getRoundNo())
@@ -305,9 +326,15 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             return Collections.emptyList();
         }
 
+        String tenantId = currentTenant();
+        if (req.getTenantId() == null || !tenantId.equals(req.getTenantId())
+                || !isVisibleCustomer(req.getCustomerId())) {
+            return Collections.emptyList();
+        }
+
         // ① リクエスト担当者
         if (req.getOwnerUserId() != null) {
-            SysUser owner = sysUserMapper.selectById(req.getOwnerUserId());
+            SysUser owner = sysUserMapper.selectByIdAndTenant(req.getOwnerUserId(), tenantId);
             if (owner != null && Integer.valueOf(1).equals(owner.getStatus()) && Integer.valueOf(0).equals(owner.getDeletedFlag())) {
                 return List.of(owner.getId());
             }
@@ -315,9 +342,13 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
 
         // ② 関連契約の担当営業
         if (req.getContractId() != null) {
-            Contract contract = contractMapper.selectById(req.getContractId());
-            if (contract != null && contract.getSalesUserId() != null) {
-                SysUser salesUser = sysUserMapper.selectById(contract.getSalesUserId());
+            Contract contract = contractMapper.selectByIdForTenant(req.getContractId(), tenantId);
+            if (contract == null || !Objects.equals(req.getCustomerId(), contract.getCustomerId())) {
+                // 明示された契約のtenant/customerが解決できない場合、別契約への推測fallbackは禁止する。
+                return Collections.emptyList();
+            }
+            if (contract.getSalesUserId() != null) {
+                SysUser salesUser = sysUserMapper.selectByIdAndTenant(contract.getSalesUserId(), tenantId);
                 if (salesUser != null && Integer.valueOf(1).equals(salesUser.getStatus()) && Integer.valueOf(0).equals(salesUser.getDeletedFlag())) {
                     return List.of(salesUser.getId());
                 }
@@ -326,15 +357,12 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
 
         // ③ 顧客の有効契約担当営業
         if (req.getCustomerId() != null) {
-            List<Contract> contracts = contractMapper.selectList(
-                    new LambdaQueryWrapper<Contract>()
-                            .eq(Contract::getCustomerId, req.getCustomerId())
-                            .eq(Contract::getStatus, "稼動中")
-                            .isNotNull(Contract::getSalesUserId)
-                            .orderByDesc(Contract::getId)
-            );
+            List<Contract> contracts = contractMapper.selectActiveByCustomerAndTenant(req.getCustomerId(), tenantId);
+            if (contracts == null) {
+                contracts = List.of();
+            }
             for (Contract c : contracts) {
-                SysUser salesUser = sysUserMapper.selectById(c.getSalesUserId());
+                SysUser salesUser = sysUserMapper.selectByIdAndTenant(c.getSalesUserId(), tenantId);
                 if (salesUser != null && Integer.valueOf(1).equals(salesUser.getStatus()) && Integer.valueOf(0).equals(salesUser.getDeletedFlag())) {
                     return List.of(salesUser.getId());
                 }
@@ -342,16 +370,27 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
         }
 
         // ④ 有効な全管理者へのエスカレーション
-        List<SysUser> activeAdmins = sysUserMapper.selectList(
-                new LambdaQueryWrapper<SysUser>()
-                        .eq(SysUser::getRole, "管理者")
-                        .eq(SysUser::getStatus, 1)
-                        .eq(SysUser::getDeletedFlag, 0)
-        );
+        List<SysUser> activeAdmins = sysUserMapper.selectActiveByRoleAndTenant("管理者", tenantId);
         if (!activeAdmins.isEmpty()) {
             return activeAdmins.stream().map(SysUser::getId).toList();
         }
 
         return Collections.emptyList();
+    }
+
+    private boolean isVisibleCustomer(Long customerId) {
+        if (customerScopeResolver == null || SecurityUtils.currentRole() == null) {
+            return true;
+        }
+        try {
+            customerScopeResolver.assertAllowed(customerId);
+            return true;
+        } catch (com.ses.common.exception.BusinessException denied) {
+            return false;
+        }
+    }
+
+    private String currentTenant() {
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 }

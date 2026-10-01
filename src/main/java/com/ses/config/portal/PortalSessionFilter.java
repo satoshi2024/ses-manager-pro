@@ -3,6 +3,8 @@ package com.ses.config.portal;
 import com.ses.config.PortalSecurityProperties;
 import com.ses.service.portal.PortalRateLimiter;
 import com.ses.service.portal.PortalSessionService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.portal.PortalLoginUser;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -29,29 +31,48 @@ public class PortalSessionFilter extends OncePerRequestFilter {
 
     private final PortalSessionService sessionService;
     private final PortalSecurityProperties properties;
+    private final AccountingTimezoneResolver timezoneResolver;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
         PortalLoginUser user = sessionService.resolve(request);
-        if (user != null) {
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-            if (user.isTermsPending() && !isTermsAllowedPath(request.getRequestURI())) {
-                if (request.getRequestURI().startsWith("/api/portal/")) {
-                    response.setStatus(403);
-                    response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-                    response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-                    response.getWriter().write("{\"code\":403,\"message\":\"" + TERMS_REQUIRED_CODE + "\"}");
-                } else {
-                    response.sendRedirect("/portal/terms");
+        java.util.concurrent.atomic.AtomicReference<Exception> failure = new java.util.concurrent.atomic.AtomicReference<>();
+        Runnable requestChain = () -> {
+            try {
+                if (user != null) {
+                    UsernamePasswordAuthenticationToken authentication =
+                            new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                    if (user.isTermsPending() && !isTermsAllowedPath(request.getRequestURI())) {
+                        if (request.getRequestURI().startsWith("/api/portal/")) {
+                            response.setStatus(403);
+                            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+                            response.getWriter().write("{\"code\":403,\"message\":\"" + TERMS_REQUIRED_CODE + "\"}");
+                        } else {
+                            response.sendRedirect("/portal/terms");
+                        }
+                        return;
+                    }
                 }
+                filterChain.doFilter(request, response);
+            } catch (Exception e) {
+                failure.set(e);
                 return;
             }
+        };
+        if (user != null && user.getTenantId() != null && !user.getTenantId().isBlank()) {
+            AccountingTenantContextHolder.runWithTenant(user.getTenantId(),
+                    timezoneResolver.resolve(user.getTenantId()), requestChain);
+        } else {
+            requestChain.run();
         }
         try {
-            filterChain.doFilter(request, response);
+            Exception e = failure.get();
+            if (e instanceof IOException io) throw io;
+            if (e instanceof ServletException servlet) throw servlet;
+            if (e != null) throw new ServletException(e);
         } finally {
             // STATELESS chainのため毎リクエストでcontextを破棄する（thread再利用対策）
             SecurityContextHolder.clearContext();

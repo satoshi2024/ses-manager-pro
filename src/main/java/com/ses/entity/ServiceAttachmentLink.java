@@ -20,6 +20,9 @@ import java.time.LocalDateTime;
 @TableName("t_service_attachment_link")
 public class ServiceAttachmentLink {
 
+    /** request・documentと同じtenantであることを短transaction内で確定する。 */
+    private String tenantId;
+
     @TableId(type = IdType.AUTO)
     private Long id;
 
@@ -34,6 +37,9 @@ public class ServiceAttachmentLink {
 
     /** 公開範囲 (PORTAL_VISIBLE, INTERNAL) */
     private String visibility;
+
+    /** request・comment・visibility・content hashを含む安定した業務冪等キー。 */
+    private String businessKey;
 
     /** ファイル名 */
     private String fileName;

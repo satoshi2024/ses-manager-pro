@@ -13,6 +13,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.SysUserService;
 import com.ses.service.SystemConfigService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,6 +39,7 @@ import static org.mockito.Mockito.when;
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional
+@EnableDefaultTenantTestContext
 public class SalesPerformanceServiceImplTest {
 
     @MockBean private SysUserService sysUserService;
@@ -56,9 +58,11 @@ public class SalesPerformanceServiceImplTest {
         lenient().when(systemConfigService.getString("commission.base-type", StatusConstants.COMMISSION_BASE_PROFIT)).thenReturn(StatusConstants.COMMISSION_BASE_PROFIT);
         lenient().when(systemConfigService.getDecimal("commission.rate", new BigDecimal("5.0"))).thenReturn(new BigDecimal("5.0"));
         lenient().when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Collections.emptyList());
+        lenient().when(contractMapper.selectListForTenant(ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(Collections.emptyList());
         lenient().when(engineerSalesMapper.countActivePrimaryGroupBySalesUser()).thenReturn(Collections.emptyList());
         lenient().when(proposalMapper.selectList(ArgumentMatchers.any())).thenReturn(Collections.emptyList());
         lenient().when(workRecordMapper.selectList(ArgumentMatchers.any())).thenReturn(Collections.emptyList());
+        lenient().when(workRecordMapper.selectConfirmedByWorkMonthsAndContractIdsForTenant(ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(Collections.emptyList());
         lenient().when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Collections.emptyList());
     }
 
@@ -116,7 +120,7 @@ public class SalesPerformanceServiceImplTest {
                 .thenReturn(Arrays.asList(currentSales));
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any()))
                 .thenReturn(Arrays.asList(currentSales, formerSales));
-        when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(historicalContract));
+        when(contractMapper.selectListForTenant(ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(Arrays.asList(historicalContract));
 
         List<SalesPerformanceDto> result = service.calculateMonthlyPerformance("2023-10");
 
@@ -138,7 +142,7 @@ public class SalesPerformanceServiceImplTest {
                 .thenReturn(Collections.emptyList());
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any()))
                 .thenReturn(Arrays.asList(formerSales));
-        when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(historicalContract));
+        when(contractMapper.selectListForTenant(ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(Arrays.asList(historicalContract));
 
         SalesPerformanceDto dto = service.calculateMonthlyPerformance("2023-10").get(0);
 
@@ -162,8 +166,8 @@ public class SalesPerformanceServiceImplTest {
         when(sysUserService.list(ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>>any()))
                 .thenReturn(Arrays.asList(u1));
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
-        when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(actualContract, overrideContract));
-        when(workRecordMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(confirmed));
+        when(contractMapper.selectListForTenant(ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(Arrays.asList(actualContract, overrideContract));
+        when(workRecordMapper.selectConfirmedByWorkMonthsAndContractIdsForTenant(ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(Arrays.asList(confirmed));
 
         SalesPerformanceDto dto = service.calculateMonthlyPerformance("2023-10").get(0);
 
@@ -185,7 +189,7 @@ public class SalesPerformanceServiceImplTest {
         when(sysUserService.list(ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>>any()))
                 .thenReturn(Arrays.asList(u1));
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
-        when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(newContract, renewalContract));
+        when(contractMapper.selectListForTenant(ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(Arrays.asList(newContract, renewalContract));
 
         SalesPerformanceDto dto = service.calculateMonthlyPerformance("2023-10").get(0);
 
@@ -204,7 +208,7 @@ public class SalesPerformanceServiceImplTest {
         when(sysUserService.list(ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>>any()))
                 .thenReturn(Arrays.asList(u1));
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
-        when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(lossContract));
+        when(contractMapper.selectListForTenant(ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(Arrays.asList(lossContract));
 
         SalesPerformanceDto dto = service.calculateMonthlyPerformance("2023-10").get(0);
 
@@ -222,7 +226,7 @@ public class SalesPerformanceServiceImplTest {
         when(sysUserService.list(ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>>any()))
                 .thenReturn(Arrays.asList(u1));
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
-        when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(invalidContract));
+        when(contractMapper.selectListForTenant(ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(Arrays.asList(invalidContract));
 
         List<SalesPerformanceDto> result = assertDoesNotThrow(() -> service.calculateMonthlyPerformance("2023-10"));
 
@@ -244,7 +248,7 @@ public class SalesPerformanceServiceImplTest {
         when(sysUserService.list(ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SysUser>>any()))
                 .thenReturn(Arrays.asList(u1));
         when(sysUserMapper.selectByIdsIncludingDeleted(ArgumentMatchers.any())).thenReturn(Arrays.asList(u1));
-        when(contractMapper.selectList(ArgumentMatchers.any())).thenReturn(Arrays.asList(attributed, unassigned));
+        when(contractMapper.selectListForTenant(ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(Arrays.asList(attributed, unassigned));
 
         List<SalesPerformanceDto> result = service.calculateMonthlyPerformance("2023-10");
 

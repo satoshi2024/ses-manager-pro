@@ -1,18 +1,13 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.ApprovalAction;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.SysUser;
-import com.ses.entity.SystemConfig;
 import com.ses.mapper.ApprovalActionMapper;
+import com.ses.mapper.MonthlyClosingMapper;
 import com.ses.mapper.SysUserMapper;
-import com.ses.mapper.SystemConfigMapper;
 import com.ses.service.MonthlyClosingService;
-import com.ses.service.SystemConfigService;
 import com.ses.service.approval.ApprovalPayloads;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.approval.ApprovalTargetAdapter;
@@ -22,44 +17,45 @@ import org.springframework.stereotype.Component;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
 /** 月次締め/reopenを承認engineへ接続するadapter。金額なしrouteを使用する。 */
 @Component
 public class MonthlyClosingApprovalAdapter implements ApprovalTargetAdapter {
-    private static final String CONFIG_KEY = "closing.confirmed-months";
 
     private final MonthlyClosingService service;
-    private final ObjectMapper objectMapper;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final ApprovalActionMapper approvalActionMapper;
     private final SysUserMapper sysUserMapper;
-    private final SystemConfigService systemConfigService;
-    private final SystemConfigMapper systemConfigMapper;
+    private final MonthlyClosingMapper monthlyClosingMapper;
 
-    /** 本番DI用。締め済み月の現在値はDB行をFOR UPDATEで取得し、JVM cacheを経由しない。 */
+    /** 本番DI用。締め済み月は t_monthly_closing を tenant 境界で読む。 */
     @Autowired
-    public MonthlyClosingApprovalAdapter(MonthlyClosingService service, ObjectMapper objectMapper,
-                                         ApprovalActionMapper approvalActionMapper, SysUserMapper sysUserMapper,
-                                         SystemConfigService systemConfigService,
-                                         SystemConfigMapper systemConfigMapper) {
+    public MonthlyClosingApprovalAdapter(MonthlyClosingService service,
+                                         com.fasterxml.jackson.databind.ObjectMapper objectMapper,
+                                         ApprovalActionMapper approvalActionMapper,
+                                         SysUserMapper sysUserMapper,
+                                         MonthlyClosingMapper monthlyClosingMapper) {
         this.service = service;
         this.objectMapper = objectMapper;
         this.approvalActionMapper = approvalActionMapper;
         this.sysUserMapper = sysUserMapper;
-        this.systemConfigService = systemConfigService;
-        this.systemConfigMapper = systemConfigMapper;
+        this.monthlyClosingMapper = monthlyClosingMapper;
     }
 
     /** 既存のadapter直接テストconstructorを維持する。 */
-    public MonthlyClosingApprovalAdapter(MonthlyClosingService service, ObjectMapper objectMapper,
-                                         ApprovalActionMapper approvalActionMapper, SysUserMapper sysUserMapper) {
-        this(service, objectMapper, approvalActionMapper, sysUserMapper, null, null);
+    public MonthlyClosingApprovalAdapter(MonthlyClosingService service,
+                                         com.fasterxml.jackson.databind.ObjectMapper objectMapper,
+                                         ApprovalActionMapper approvalActionMapper,
+                                         SysUserMapper sysUserMapper) {
+        this(service, objectMapper, approvalActionMapper, sysUserMapper, null);
     }
 
     @Override public String requestType() { return "closing.confirm"; }
-    @Override public java.util.Set<String> supportedRequestTypes() { return java.util.Set.of("closing.confirm", "closing.reopen"); }
+    @Override public java.util.Set<String> supportedRequestTypes() {
+        return java.util.Set.of("closing.confirm", "closing.reopen");
+    }
 
     @Override
     public ApprovalSnapshot snapshot(Long targetId, Map<String, Object> command) {
@@ -88,15 +84,16 @@ public class MonthlyClosingApprovalAdapter implements ApprovalTargetAdapter {
         Map<String, Object> p = ApprovalPayloads.read(objectMapper, request.getPayloadJson());
         String month = ApprovalPayloads.text(p, "month");
         int round = request.getRoundNo() == null ? 1 : request.getRoundNo();
-        ApprovalAction finalAction = approvalActionMapper.selectList(new LambdaQueryWrapper<ApprovalAction>()
-                        .eq(ApprovalAction::getRequestId, request.getId())
-                        .eq(ApprovalAction::getRoundNo, round)
-                        .eq(ApprovalAction::getStepNo, request.getCurrentStep())
-                        .eq(ApprovalAction::getAction, "APPROVE")
-                        .orderByDesc(ApprovalAction::getId))
-                .stream().findFirst()
-                .orElseThrow(() -> BusinessException.of(500, "error.approval.approverUnresolved"));
-        SysUser approver = sysUserMapper.selectById(finalAction.getApproverUserId());
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        if (request.getTenantId() == null || !tenantId.equals(request.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        ApprovalAction finalAction = approvalActionMapper.selectLatestApprovalForStep(
+                        request.getId(), tenantId, round, request.getCurrentStep());
+        if (finalAction == null) {
+            throw BusinessException.of(500, "error.approval.approverUnresolved");
+        }
+        SysUser approver = sysUserMapper.selectByIdAndTenant(finalAction.getApproverUserId(), tenantId);
         if (approver == null || approver.getRole() == null) {
             throw BusinessException.of(500, "error.approval.approverUnresolved");
         }
@@ -109,54 +106,14 @@ public class MonthlyClosingApprovalAdapter implements ApprovalTargetAdapter {
         }
     }
 
-    /**
-     * 最終承認時は同一m_system_config行を悲観ロックして読む。行が無い異常環境でも
-     * MonthlyClosingServiceImpl.lockConfig()と同じinsert-if-absent経路で直列化を維持する。
-     */
-    private String currentConfigValue() {
-        if (systemConfigMapper == null) {
-            // 直接テストconstructor向け。本番DIでは必ずmapper経路を使う。
-            return systemConfigService == null ? "[]" : systemConfigService.getString(CONFIG_KEY, "[]");
-        }
-        SystemConfig config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
-        if (config == null) {
-            SystemConfig created = new SystemConfig();
-            created.setConfigKey(CONFIG_KEY);
-            created.setConfigValue("[]");
-            created.setDescription("月次締め済み月の記録(JSON)");
-            try {
-                systemConfigMapper.insert(created);
-            } catch (RuntimeException ignored) {
-                // 同時insertは既存行を再取得して同じロックを取る。
-            }
-            config = systemConfigMapper.selectByIdForUpdate(CONFIG_KEY);
-        }
-        if (config == null) {
-            throw BusinessException.of(500, "error.closing.corrupted");
-        }
-        return config.getConfigValue();
-    }
-
-    /** JSON内のClosingRecordから月だけを抽出し、順序を正規化する。 */
+    /** 現在tenantの締め済み月だけを返す。mapper未配線の直接テストでは空集合。 */
     private List<String> currentClosedMonths() {
-        String json = currentConfigValue();
-        try {
-            JsonNode root = objectMapper.readTree(json == null || json.isBlank() ? "[]" : json);
-            if (!root.isArray()) {
-                throw new IllegalArgumentException("締め済み月JSONが配列ではありません");
-            }
-            LinkedHashSet<String> months = new LinkedHashSet<>();
-            for (JsonNode item : root) {
-                String month = item.isTextual() ? item.asText()
-                        : item.path("month").isTextual() ? item.path("month").asText() : null;
-                if (month != null && !month.isBlank()) {
-                    months.add(month);
-                }
-            }
-            return months.stream().sorted().toList();
-        } catch (Exception e) {
-            throw BusinessException.of(500, "error.closing.corrupted");
+        if (monthlyClosingMapper == null) {
+            return List.of();
         }
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        List<String> months = monthlyClosingMapper.selectClosedMonths(tenantId);
+        return months == null ? List.of() : months;
     }
 
     /** 月集合だけを対象にした安定fingerprint。締め実行者・日時の変更は競合要因にしない。 */

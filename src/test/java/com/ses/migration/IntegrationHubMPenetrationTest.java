@@ -46,9 +46,9 @@ class IntegrationHubMPenetrationTest {
         insertCustomersAndProjects();
 
         List<ExternalApiReadRow> rows = mapper.selectProjects(
-                List.of(PROJECT_A, PROJECT_B), List.of(CUSTOMER_A), null, 10);
+                List.of(PROJECT_A, PROJECT_B), List.of(CUSTOMER_A), null, 10, 71L);
         assertEquals(List.of(PROJECT_A), rows.stream().map(ExternalApiReadRow::getId).toList());
-        assertEquals(1, mapper.countProjects(List.of(PROJECT_A, PROJECT_B), List.of(CUSTOMER_A)));
+        assertEquals(1, mapper.countProjects(List.of(PROJECT_A, PROJECT_B), List.of(CUSTOMER_A), 71L));
     }
 
     @Test
@@ -68,9 +68,14 @@ class IntegrationHubMPenetrationTest {
         String outOfScope = codec.encode(clientA, "project", PROJECT_B);
         String invalid = "not-a-valid-public-id";
 
-        assertEquals("募集中", readService.getProject(clientA, scopeA, inScope).status());
-        assertNull(readService.getProject(clientA, scopeA, outOfScope));
-        assertNull(readService.getProject(clientA, scopeA, invalid));
+        var project = readService.getProject(clientA, scopeA, inScope);
+        org.junit.jupiter.api.Assertions.assertNotNull(project);
+        assertEquals("OPEN", project.status());
+        org.junit.jupiter.api.Assertions.assertFalse(project.status().contains("募集中"));
+        org.junit.jupiter.api.Assertions.assertFalse(project.status().matches(".*[\\u3040-\\u30ff\\u4e00-\\u9fff].*"));
+        org.junit.jupiter.api.Assertions.assertFalse(project.publicProjectId().contains(String.valueOf(PROJECT_A)));
+        org.junit.jupiter.api.Assertions.assertNull(readService.getProject(clientA, scopeA, outOfScope));
+        org.junit.jupiter.api.Assertions.assertNull(readService.getProject(clientA, scopeA, invalid));
     }
 
     @Test
@@ -88,11 +93,11 @@ class IntegrationHubMPenetrationTest {
     }
 
     private void insertCustomersAndProjects() {
-        jdbcTemplate.update("INSERT INTO m_customer (id, company_name) VALUES (?, ?), (?, ?)",
+        jdbcTemplate.update("INSERT INTO m_customer (id, company_name, legal_entity_id) VALUES (?, ?, 71), (?, ?, 72)",
                 CUSTOMER_A, "m-penetration-a", CUSTOMER_B, "m-penetration-b");
         jdbcTemplate.update("""
-                INSERT INTO t_project (id, project_name, customer_id, status, start_date, end_date, deleted_flag)
-                VALUES (?, ?, ?, ?, ?, ?, 0), (?, ?, ?, ?, ?, ?, 0)
+                INSERT INTO t_project (id, project_name, customer_id, status, start_date, end_date, legal_entity_id, deleted_flag)
+                VALUES (?, ?, ?, ?, ?, ?, 71, 0), (?, ?, ?, ?, ?, ?, 72, 0)
                 """, PROJECT_A, "project-a", CUSTOMER_A, "募集中",
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31),
                 PROJECT_B, "project-b", CUSTOMER_B, "募集中",

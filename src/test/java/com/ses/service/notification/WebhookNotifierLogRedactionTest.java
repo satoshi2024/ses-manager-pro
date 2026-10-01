@@ -10,6 +10,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
@@ -52,7 +54,7 @@ class WebhookNotifierLogRedactionTest {
         OutboundUrlGuard guard = mock(OutboundUrlGuard.class);
         RestTemplate rest = mock(RestTemplate.class);
         doThrow(new RestClientException("failed POST " + webhookUrl))
-                .when(rest).postForEntity(anyString(), any(), eq(String.class));
+                .when(rest).exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class));
 
         Notification n = new Notification();
         n.setType("SYSTEM");

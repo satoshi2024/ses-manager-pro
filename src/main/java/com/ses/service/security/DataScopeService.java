@@ -24,9 +24,14 @@ public interface DataScopeService {
 
     /** 現任担当（t_engineer_sales.released_at IS NULL）の要員ID集合。 */
     Set<Long> allowedEngineerIds();
+    default Set<Long> allowedEngineerIds(java.time.LocalDate asOf) { return allowedEngineerIds(); }
 
     /** sales_user_id=自分 ∪ sales_user_id IS NULL（未帰属は可視）の契約ID集合。 */
     Set<Long> allowedContractIds();
+    default Set<Long> allowedContractIds(java.time.LocalDate asOf) { return allowedContractIds(); }
+    default Set<Long> allowedCustomerIds(java.time.LocalDate asOf) { return allowedCustomerIds(); }
+    default Set<Long> allowedProjectIds(java.time.LocalDate asOf) { return allowedProjectIds(); }
+    default Set<Long> allowedProposalIds(java.time.LocalDate asOf) { return allowedProposalIds(); }
 
     /** 担当契約・担当要員の提案の顧客ID集合。 */
     Set<Long> allowedCustomerIds();
@@ -39,6 +44,7 @@ public interface DataScopeService {
 
     /** 担当契約から導出した組織ID。組織scopeとの積集合にのみ利用する。 */
     default Set<Long> allowedOrganizationIds() { return Set.of(); }
+    default Set<Long> allowedOrganizationIds(java.time.LocalDate asOf) { return allowedOrganizationIds(); }
 
     /**
      * asOf時点の許可契約ID集合（order-acceptance-workflow R09-P1-04対応）。

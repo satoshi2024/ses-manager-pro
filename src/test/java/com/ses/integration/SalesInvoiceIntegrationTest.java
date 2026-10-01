@@ -10,11 +10,14 @@ import com.ses.service.accounting.SalesInvoiceIntegrationService;
 import com.ses.service.integration.ExternalMappingService;
 import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -60,7 +63,10 @@ class SalesInvoiceIntegrationTest {
     private MonthlyClosingService monthlyClosingService;
 
     @Autowired
-    private com.ses.mapper.SystemConfigMapper systemConfigMapper;
+    private com.ses.mapper.MonthlyClosingMapper monthlyClosingMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private RestTemplate restTemplate;
@@ -70,8 +76,30 @@ class SalesInvoiceIntegrationTest {
     private Customer customer;
     private Invoice invoice;
 
+    @AfterEach
+    void cleanupFixtures() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+        if (invoice != null && invoice.getId() != null) {
+            invoiceService.removeById(invoice.getId());
+            jdbcTemplate.update("DELETE FROM t_invoice_item WHERE invoice_id = ?", invoice.getId());
+        }
+        if (customer != null && customer.getId() != null) {
+            jdbcTemplate.update("DELETE FROM t_invoice_item WHERE invoice_id IN (SELECT id FROM t_invoice WHERE customer_id = ?)", customer.getId());
+            jdbcTemplate.update("DELETE FROM t_invoice WHERE customer_id = ?", customer.getId());
+            customerService.removeById(customer.getId());
+        }
+        if (connection != null && connection.getId() != null) {
+            jdbcTemplate.update("DELETE FROM t_integration_job_event WHERE job_id IN "
+                    + "(SELECT id FROM t_integration_job WHERE connection_id = ?)", connection.getId());
+            jdbcTemplate.update("DELETE FROM t_integration_job WHERE connection_id = ?", connection.getId());
+            jdbcTemplate.update("DELETE FROM m_external_mapping WHERE connection_id = ?", connection.getId());
+        }
+    }
+
     @BeforeEach
     void setUp() {
+        TenantTestSecurity.bindAs(1L, "sales-invoice-test", "default", "営業");
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L, 1L);
         mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
 
         connection = connectionService.getOrCreateConnection("default", null, "freee", "accounting");
@@ -144,7 +172,13 @@ class SalesInvoiceIntegrationTest {
         for (int i = 0; i < threads; i++) {
             futures.add(executor.submit(() -> {
                 latch.await();
-                return salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+                try {
+                    com.ses.test.TenantTestSecurity.bindAs(
+                            1L, "admin", "default", "管理者");
+                    return salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+                } finally {
+                    com.ses.test.TenantTestSecurity.clear();
+                }
             }));
         }
 
@@ -249,16 +283,12 @@ class SalesInvoiceIntegrationTest {
         closedInvoice.setTaxRate(new BigDecimal("0.100"));
         invoiceService.save(closedInvoice);
 
-        // 2025-01 を締め済みに設定
-        SystemConfig config = systemConfigMapper.selectById("closing.confirmed-months");
-        if (config == null) {
-            config = new SystemConfig();
-            config.setConfigKey("closing.confirmed-months");
-            config.setConfigValue("[{\"month\":\"2025-01\",\"by\":1,\"at\":\"2025-02-01T00:00:00\"}]");
-            systemConfigMapper.insert(config);
-        } else {
-            config.setConfigValue("[{\"month\":\"2025-01\",\"by\":1,\"at\":\"2025-02-01T00:00:00\"}]");
-            systemConfigMapper.updateById(config);
+        // 2025-01 を default tenant の締め済みに設定
+        monthlyClosingMapper.ensureRow("default", "2025-01");
+        var row = monthlyClosingMapper.selectByTenantAndMonth("default", "2025-01");
+        if (row.getConfirmedAt() == null) {
+            monthlyClosingMapper.confirmCas("default", "2025-01", 1L,
+                    java.time.LocalDateTime.of(2025, 2, 1, 0, 0), row.getVersion());
         }
 
         assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(closedInvoice.getId(), 1L))

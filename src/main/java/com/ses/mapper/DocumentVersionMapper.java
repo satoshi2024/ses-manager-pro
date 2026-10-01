@@ -26,6 +26,16 @@ public interface DocumentVersionMapper extends BaseMapper<DocumentVersion> {
     @Select("SELECT * FROM t_document_version WHERE document_id = #{documentId} AND deleted_flag = 0 ORDER BY version_no DESC LIMIT 1")
     DocumentVersion findLatestByDocumentId(@Param("documentId") Long documentId);
 
+    @Select("SELECT * FROM t_document_version WHERE tenant_id = #{tenantId} AND document_id = #{documentId} "
+            + "AND deleted_flag = 0 ORDER BY version_no ASC")
+    List<DocumentVersion> findByTenantAndDocumentId(@Param("tenantId") String tenantId,
+                                                    @Param("documentId") Long documentId);
+
+    @Select("SELECT * FROM t_document_version WHERE tenant_id = #{tenantId} AND document_id = #{documentId} "
+            + "AND deleted_flag = 0 ORDER BY version_no DESC LIMIT 1")
+    DocumentVersion findLatestByTenantAndDocumentId(@Param("tenantId") String tenantId,
+                                                    @Param("documentId") Long documentId);
+
     /**
      * 冪等キーで既存版を検索する（tenant_id対応）。
      */

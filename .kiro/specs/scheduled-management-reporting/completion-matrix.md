@@ -4,7 +4,19 @@
 
 `APPROVED / IMPLEMENTED / INDEPENDENT_REVIEW_PENDING`
 
+Review remediation（`codex/nf10-review-remediation`）: delivery TX/outbox/previewHash/system path の再検証中。**COMPLETE にはしない。**
+
 2026-08-28にNF-10/DG-10が正式承認された。Ownerは管理者（経営管理責任者）、Base branchは`origin/main`、Base policyは再開時fetchの最新`origin/main`。今回の承認Baseは`455fc92e3aa259d2a93f25c6a545ca6c6af835bc`。
+
+## Remediation（2026-09-07）
+
+| 項目 | 内容 |
+|---|---|
+| トランザクション分割 | 短TX（claim/issue）→ TX外で文書生成/storage → 短TX（download記録） |
+| 単一recipient発行 | `ReportDeliveryIssueService` が delivery + outbox を同一 `@Transactional` で束ねる |
+| ユーザー配布 | `deliverUser(runId, requiredPreviewHash)` — missing/blank/stale は fail-closed |
+| scheduler配布 | `deliverScheduled(runId, ReportScheduledDeliveryContext)` — null hash 禁止 |
+| 検証 | `ReportDeliveryTransactionIntegrationTest`（実Spring proxy）、`ManagementReportDeliveryApiControllerTest` |
 
 ## 完了対応表
 

@@ -17,6 +17,7 @@ import com.ses.mapper.ExternalAccountSystemMapper;
 import com.ses.service.provider.ExternalAccountProviderClient;
 import com.ses.service.provider.impl.MockExternalAccountProviderClientImpl;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +48,21 @@ import static org.mockito.Mockito.reset;
 /** NF-09の主体/チャネル分離、DB制約、監査原子性を検証する。 */
 class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
 
+    @BeforeEach
+    void bindTenantAndSecurityContext() {
+        bindTenantAndSecurityContext("default");
+        if (organizationUnitMapper.selectCount(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.OrganizationUnit>()
+                        .eq(com.ses.entity.OrganizationUnit::getLegalEntityId, 1L)) == 0) {
+            organizationUnitMapper.insert(com.ses.entity.OrganizationUnit.builder()
+                    .tenantId(1L).legalEntityId(1L)
+                    .code("EXT_SCOPE_TEST").name("外部アカウント境界テスト法人")
+                    .type("COMPANY").validFrom(java.time.LocalDate.of(2020, 1, 1))
+                    .status("ACTIVE").version(0).build());
+        }
+        jdbcTemplate.update("UPDATE t_engineer SET tenant_id = 'default', legal_entity_id = 1 WHERE id = 1");
+    }
+
     @Autowired
     private ExternalAccountService externalAccountService;
 
@@ -55,6 +71,9 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
 
     @Autowired
     private ExternalAccountReferenceMapper externalAccountReferenceMapper;
+
+    @Autowired
+    private com.ses.mapper.OrganizationUnitMapper organizationUnitMapper;
 
     @Autowired
     private AssetEventMapper assetEventMapper;
@@ -71,6 +90,8 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
     @AfterEach
     void resetAuditMapper() {
         reset(auditLogMapper);
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
     }
 
     @Test
@@ -197,12 +218,19 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
     void concurrentSchedulersAndManualPollProduceOneConfirmation() throws Exception {
         ExternalAccountReference doublePoll = newReference("double-poll");
         setPendingProviderStatus(doublePoll);
+        // 共有default tenantに残る他テストのpending行を読まず、このテストが作成した行だけをpollする。
+        String pollTenant = "nf09-double-poll-" + System.nanoTime();
+        assertThat(jdbcTemplate.update(
+                "UPDATE t_external_account_reference SET tenant_id = ?, next_retry_at = ? WHERE id = ?",
+                pollTenant, java.time.LocalDateTime.now().minusSeconds(1), doublePoll.getId())).isEqualTo(1);
+        bindTenantAndSecurityContext(pollTenant);
         int pollSuccesses = runConcurrently(
                 () -> externalAccountService.processPendingRevokePollJob(),
                 () -> externalAccountService.processPendingRevokePollJob());
         assertThat(pollSuccesses).isGreaterThanOrEqualTo(1);
         assertSingleConfirmation(doublePoll.getId());
 
+        bindTenantAndSecurityContext("default");
         ExternalAccountReference manualAndPoll = newReference("manual-poll-race");
         int raceSuccesses = runConcurrently(
                 () -> externalAccountService.confirmRevokeManually(
@@ -306,16 +334,17 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
     }
 
     private int runConcurrently(Callable<?> first, Callable<?> second) throws Exception {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         ExecutorService executor = Executors.newFixedThreadPool(2);
         CountDownLatch start = new CountDownLatch(1);
         List<Future<?>> futures = List.of(
                 executor.submit(() -> {
                     start.await(10, TimeUnit.SECONDS);
-                    return first.call();
+                    return withTenantAndSecurityContext(first, tenantId);
                 }),
                 executor.submit(() -> {
                     start.await(10, TimeUnit.SECONDS);
-                    return second.call();
+                    return withTenantAndSecurityContext(second, tenantId);
                 }));
         try {
             start.countDown();
@@ -345,5 +374,27 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
                 .filter(event -> referenceId.equals(event.getReferenceId()))).hasSize(1);
         assertThat(auditLogMapper.selectList(null).stream()
                 .filter(log -> referenceId.equals(log.getReferenceId()))).hasSize(1);
+    }
+
+    private <T> T withTenantAndSecurityContext(Callable<T> task, String tenantId) throws Exception {
+        bindTenantAndSecurityContext(tenantId);
+        try {
+            return task.call();
+        } finally {
+            com.ses.service.accounting.AccountingTenantContextHolder.clear();
+            org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        }
+    }
+
+    private void bindTenantAndSecurityContext(String tenantId) {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId(tenantId);
+        com.ses.entity.SysUser user = com.ses.entity.SysUser.builder().tenantId(tenantId)
+                .username("admin").role("管理者").status(1).build();
+        user.setId(1L);
+        com.ses.config.LoginUser principal = new com.ses.config.LoginUser(user,
+                List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_管理者")));
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        principal, null, principal.getAuthorities()));
     }
 }

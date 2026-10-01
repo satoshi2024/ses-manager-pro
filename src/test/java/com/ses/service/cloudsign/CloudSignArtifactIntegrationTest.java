@@ -8,6 +8,7 @@ import com.ses.entity.ContractDocument;
 import com.ses.mapper.ContractDocumentMapper;
 import com.ses.service.security.FileScanResult;
 import com.ses.service.security.FileScanner;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -43,6 +44,7 @@ import static org.mockito.Mockito.*;
         "cloudsign.poll-cron=-",
         "cloudsign.legacy-read-base-path=./target/test-uploads"
 })
+@EnableDefaultTenantTestContext
 @ActiveProfiles("test")
 @Sql("/sql/engineer-schema-h2.sql")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -94,6 +96,10 @@ class CloudSignArtifactIntegrationTest {
         jdbcTemplate.execute("DELETE FROM t_document_link");
         jdbcTemplate.execute("DELETE FROM t_document");
         when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.clean("clean"));
+        jdbcTemplate.update("DELETE FROM t_contract WHERE id = 1");
+        jdbcTemplate.update("DELETE FROM m_customer WHERE id = 1");
+        jdbcTemplate.update("INSERT INTO m_customer (id, company_name, tenant_id, deleted_flag) VALUES (1, 'Artifact Customer', 'default', 0)");
+        jdbcTemplate.update("INSERT INTO t_contract (id, contract_no, customer_id, tenant_id, deleted_flag) VALUES (1, 'CON-1', 1, 'default', 0)");
     }
 
     private ContractDocument insertCompleted(String signedPath, String certPath) {

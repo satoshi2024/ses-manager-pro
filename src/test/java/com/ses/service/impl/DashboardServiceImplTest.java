@@ -74,9 +74,15 @@ class DashboardServiceImplTest {
     @InjectMocks
     private DashboardServiceImpl dashboardService;
 
+    @org.junit.jupiter.api.BeforeEach
+    void setUpTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+    }
+
     @AfterEach
     void clearSecurityContext() {
         org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
     }
 
     private Contract createContract(Long id, String contractNo, Integer sellingPrice, Integer costPrice, LocalDate startDate) {
@@ -111,7 +117,7 @@ class DashboardServiceImplTest {
         Engineer e1 = createEngineer(1L, "Test Engineer 1");
         Project p1 = createProject(1L, "Test Project 1");
 
-        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1));
         when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(e1));
         when(projectMapper.selectBatchIds(any())).thenReturn(List.of(p1));
 
@@ -134,7 +140,7 @@ class DashboardServiceImplTest {
         Engineer e1 = createEngineer(1L, "Test Engineer 1");
         Project p1 = createProject(1L, "Test Project 1");
 
-        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1));
         when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(e1));
         when(projectMapper.selectBatchIds(any())).thenReturn(List.of(p1));
 
@@ -151,7 +157,7 @@ class DashboardServiceImplTest {
         Contract c1 = createContract(1L, "C001", 1000000, 600000, LocalDate.of(2026, 7, 1)); // Older
         Contract c2 = createContract(2L, "C002", 800000, 500000, LocalDate.of(2026, 8, 1)); // Newer
         
-        when(contractMapper.selectList(any())).thenReturn(List.of(c1, c2));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1, c2));
         when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(createEngineer(1L, "Eng")));
         when(projectMapper.selectBatchIds(any())).thenReturn(List.of(createProject(1L, "Proj")));
 
@@ -164,7 +170,7 @@ class DashboardServiceImplTest {
 
     @Test
     void testGetProfitAnalysis_Empty() {
-        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(Collections.emptyList());
         List<ContractProfitDto> result = dashboardService.getProfitAnalysis();
         assertTrue(result.isEmpty());
     }
@@ -175,7 +181,7 @@ class DashboardServiceImplTest {
         Contract c1 = createContract(1L, "C-BIG", null, null, LocalDate.of(2026, 7, 1));
         c1.setSellingPrice(new java.math.BigDecimal("3000000000"));
         c1.setCostPrice(new java.math.BigDecimal("1000000000"));
-        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1));
         when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(createEngineer(1L, "Eng")));
         when(projectMapper.selectBatchIds(any())).thenReturn(List.of(createProject(1L, "Proj")));
 
@@ -191,10 +197,6 @@ class DashboardServiceImplTest {
     @Test
     void testGetSummary_FiscalYear_下々月開始の稼動契約も売上に含む() {
         // 旧実装は start_date <= 当月末+1ヶ月 のため、下々月開始契約がFY図から欠落していた。
-        // Export(buildMonthlyRevenueRows) と同様、対象月内なら MonthlyRevenueCalc が拾う。
-        when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
-
         java.time.YearMonth startYm = java.time.YearMonth.now().plusMonths(2);
         int fiscalYear = startYm.getMonthValue() >= 4 ? startYm.getYear() : startYm.getYear() - 1;
 
@@ -205,7 +207,10 @@ class DashboardServiceImplTest {
         future.setEndDate(null);
         future.setSellingPrice(new java.math.BigDecimal("800000"));
         future.setCostPrice(new java.math.BigDecimal("500000"));
-        when(contractMapper.selectList(any())).thenReturn(List.of(future));
+
+        when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(future));
+        when(workRecordMapper.selectConfirmedByWorkMonthsAndContractIdsForTenant(any(), any(), any())).thenReturn(Collections.emptyList());
 
         var revenue = dashboardService.getSummary(fiscalYear).getCharts().getRevenue();
 
@@ -220,8 +225,7 @@ class DashboardServiceImplTest {
     @Test
     void testGetSummary_WithYear() {
         when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(Collections.emptyList());
 
         var result = dashboardService.getSummary(2026);
         assertNotNull(result);
@@ -233,8 +237,7 @@ class DashboardServiceImplTest {
     @Test
     void testGetSummary_ForecastEnabled_addsPipelineToFutureMonths() {
         when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(Collections.emptyList());
         when(systemConfigService.getString(eq("forecast.enabled"), any())).thenReturn("true");
         when(systemConfigService.getDecimal(any(), any())).thenAnswer(inv -> inv.getArgument(1));
         com.ses.entity.Proposal p = new com.ses.entity.Proposal();
@@ -254,8 +257,7 @@ class DashboardServiceImplTest {
     @Test
     void testGetSummary_ForecastPipeline_usesEffectiveEngineerScope() {
         org.mockito.Mockito.lenient().when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
-        org.mockito.Mockito.lenient().when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
-        org.mockito.Mockito.lenient().when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        org.mockito.Mockito.lenient().when(contractMapper.selectListForTenant(any(), any())).thenReturn(Collections.emptyList());
         org.mockito.Mockito.lenient().when(systemConfigService.getString(eq("forecast.enabled"), any())).thenReturn("true");
         org.mockito.Mockito.lenient().when(systemConfigService.getDecimal(any(), any())).thenAnswer(inv -> inv.getArgument(1));
         org.mockito.Mockito.lenient().when(dataScopeService.isScoped()).thenReturn(false);
@@ -285,8 +287,7 @@ class DashboardServiceImplTest {
     @Test
     void testGetSummary_ForecastDisabled_forecastNull() {
         when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(Collections.emptyList());
         when(systemConfigService.getString(eq("forecast.enabled"), any())).thenReturn("false");
 
         var revenue = dashboardService.getSummary(2026).getCharts().getRevenue();
@@ -297,8 +298,7 @@ class DashboardServiceImplTest {
     @Test
     void testGetSummary_WithoutYear() {
         when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(Collections.emptyList());
 
         var result = dashboardService.getSummary(null);
         assertNotNull(result);
@@ -315,14 +315,14 @@ class DashboardServiceImplTest {
         c1.setStatus("稼動中");
         c1.setStartDate(actualMonth.atDay(1));
         c1.setEndDate(null);
-        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1));
 
         WorkRecord wr = new WorkRecord();
         wr.setContractId(1L);
         wr.setWorkMonth(actualMonth.toString());
         wr.setBillingAmount(java.math.BigDecimal.valueOf(1000000));
         wr.setPaymentAmount(java.math.BigDecimal.valueOf(600000));
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(wr));
+        when(workRecordMapper.selectConfirmedByWorkMonthsAndContractIdsForTenant(any(), any(), any())).thenReturn(List.of(wr));
 
         var result = dashboardService.getSummary(null);
         assertNotNull(result);
@@ -354,7 +354,7 @@ class DashboardServiceImplTest {
         c2.setStatus("稼動中");
         c2.setEndDate(LocalDate.now().plusDays(10)); // 対象
         
-        when(contractMapper.selectList(any())).thenReturn(List.of(c1, c2));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1, c2));
 
         when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(e2));
 
@@ -375,8 +375,8 @@ class DashboardServiceImplTest {
         contract.setEngineerId(1L);
         contract.setStatus("稼動中");
         contract.setEndDate(LocalDate.now().plusDays(10));
-        when(contractMapper.selectList(any())).thenReturn(List.of(contract));
-        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(contract));
+        when(workRecordMapper.selectConfirmedByWorkMonthsAndContractIdsForTenant(any(), any(), any())).thenReturn(Collections.emptyList());
         when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(engineer));
         when(engineerSkillMapper.selectTopSkillCandidates(any())).thenReturn(Collections.emptyList());
         when(proposalMapper.selectList(any())).thenReturn(Collections.emptyList());
@@ -401,8 +401,8 @@ class DashboardServiceImplTest {
         earlier.setEngineerId(1L);
         earlier.setStatus("稼動中");
         earlier.setEndDate(LocalDate.now().plusDays(10));
-        when(contractMapper.selectList(any())).thenReturn(List.of(later, earlier));
-        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(later, earlier));
+        when(workRecordMapper.selectConfirmedByWorkMonthsAndContractIdsForTenant(any(), any(), any())).thenReturn(Collections.emptyList());
         when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(engineer));
         when(engineerSkillMapper.selectTopSkillCandidates(any())).thenReturn(Collections.emptyList());
         when(proposalMapper.selectList(any())).thenReturn(Collections.emptyList());
@@ -423,7 +423,7 @@ class DashboardServiceImplTest {
         c1.setStatus("稼動中");
         c1.setStartDate(java.time.YearMonth.now().minusMonths(2).atDay(1));
         c1.setEndDate(null);
-        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1));
 
         WorkRecord currentWr = new WorkRecord();
         currentWr.setContractId(1L);
@@ -437,7 +437,7 @@ class DashboardServiceImplTest {
         prevWr.setBillingAmount(java.math.BigDecimal.valueOf(1000000));
         prevWr.setPaymentAmount(java.math.BigDecimal.valueOf(700000));
 
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(currentWr, prevWr));
+        when(workRecordMapper.selectConfirmedByWorkMonthsAndContractIdsForTenant(any(), any(), any())).thenReturn(List.of(currentWr, prevWr));
 
         var result = dashboardService.getSummary(null);
         assertNotNull(result);
@@ -455,7 +455,7 @@ class DashboardServiceImplTest {
         Contract c = createContract(1L, "C001", 1000000, 600000, LocalDate.now().minusDays(10));
         c.setEndDate(LocalDate.now().plusDays(10));
         c.setStatus("稼動中");
-        when(contractMapper.selectList(any())).thenReturn(List.of(c));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c));
         
         when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(e));
 
@@ -486,7 +486,7 @@ class DashboardServiceImplTest {
         when(organizationScopeService.hasFullAccess()).thenReturn(true);
         Contract contract = createContract(77L, "KPI-77", 600000, 300000, LocalDate.now().minusMonths(1));
         contract.setStatus("稼動中");
-        when(contractMapper.selectList(any())).thenReturn(List.of(contract));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(contract));
         when(acceptanceMapper.sumUnacceptedSales(org.mockito.ArgumentMatchers.nullable(List.class)))
                 .thenReturn(java.math.BigDecimal.ZERO);
         when(acceptanceMapper.selectAcceptanceDurations(org.mockito.ArgumentMatchers.nullable(List.class)))

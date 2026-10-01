@@ -36,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
                 "integration.hub.public-api.public-id-key=test-integration-hub-public-id-key-at-least-32-bytes",
                 "integration.hub.external-transport.enabled=false",
                 "integration.hub.provider.mode=MOCK",
+                "integration.hub.topology.bound-tenant-id=tenant-a1-e2e",
                 "integration.hub.crypto.current-key-version=test-key-v1",
                 "integration.hub.crypto.keys.test-key-v1=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         })
@@ -63,12 +64,13 @@ class ExternalApiEnabledConnectorE2ETest {
     @BeforeEach
     void insertFixture() {
         deleteFixture();
-        jdbcTemplate.update("INSERT INTO m_customer (id, company_name) VALUES (?, ?)",
-                CUSTOMER_ID, "a1-e2e-customer");
+        completeDedicatedTenantBackfill();
+        jdbcTemplate.update("INSERT INTO m_customer (id, tenant_id, legal_entity_id, company_name) VALUES (?, ?, ?, ?)",
+                CUSTOMER_ID, "tenant-a1-e2e", 77L, "a1-e2e-customer");
         jdbcTemplate.update("""
-                INSERT INTO t_project (id, project_name, customer_id, status, start_date, end_date, deleted_flag)
-                VALUES (?, ?, ?, ?, ?, ?, 0)
-                """, PROJECT_ID, "a1-e2e-internal-project", CUSTOMER_ID, "募集中",
+                INSERT INTO t_project (id, legal_entity_id, project_name, customer_id, status, start_date, end_date, deleted_flag)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+                """, PROJECT_ID, 77L, "a1-e2e-internal-project", CUSTOMER_ID, "募集中",
                 LocalDate.of(2026, 9, 1), LocalDate.of(2026, 12, 31));
         String dataScope = "{\"tenantIds\":[\"tenant-a1-e2e\"],\"legalEntityIds\":[\"77\"],"
                 + "\"projectIds\":[\"" + PROJECT_ID + "\"],\"customerIds\":[\"" + CUSTOMER_ID + "\"]}";
@@ -129,10 +131,12 @@ class ExternalApiEnabledConnectorE2ETest {
         ResponseEntity<String> response = restTemplate.exchange(target, HttpMethod.GET,
                 new HttpEntity<>(headers), String.class);
 
-        assertEquals(200, response.getStatusCode().value());
+        assertEquals(200, response.getStatusCode().value(), auditDiagnostic(response));
         assertTrue(response.getHeaders().containsKey("X-Correlation-ID"));
         assertTrue(response.getBody() != null && response.getBody().contains("publicProjectId"));
         assertTrue(response.getBody() != null && response.getBody().contains("2026-09-01"));
+        assertTrue(response.getBody() != null && response.getBody().contains("\"status\":\"OPEN\""));
+        assertFalse(response.getBody() != null && response.getBody().contains("募集中"));
         assertFalse(response.getBody() != null && response.getBody().contains("internal-project"));
         assertFalse(response.getBody() != null && response.getBody().contains("\"id\""));
         assertFalse(response.getBody() != null && response.getBody().contains("project_name"));
@@ -145,5 +149,29 @@ class ExternalApiEnabledConnectorE2ETest {
         jdbcTemplate.update("DELETE FROM m_api_client WHERE id = ?", CLIENT_DB_ID);
         jdbcTemplate.update("DELETE FROM t_project WHERE id = ?", PROJECT_ID);
         jdbcTemplate.update("DELETE FROM m_customer WHERE id = ?", CUSTOMER_ID);
+    }
+
+    /** dedicated DBの既存seedも同一tenant/法人へbackfill済みである状態を再現する。 */
+    private void completeDedicatedTenantBackfill() {
+        jdbcTemplate.update("UPDATE m_customer SET tenant_id = 'tenant-a1-e2e', legal_entity_id = 77 WHERE deleted_flag = 0");
+        jdbcTemplate.update("UPDATE t_engineer SET tenant_id = 'tenant-a1-e2e', legal_entity_id = 77 WHERE deleted_flag = 0");
+        jdbcTemplate.update("UPDATE t_project SET legal_entity_id = 77 WHERE deleted_flag = 0");
+        jdbcTemplate.update("UPDATE t_contract SET tenant_id = 'tenant-a1-e2e', legal_entity_id = 77 WHERE deleted_flag = 0");
+        jdbcTemplate.update("UPDATE t_invoice SET legal_entity_id = 77 WHERE deleted_flag = 0");
+        jdbcTemplate.update("UPDATE t_lead SET legal_entity_id = 77 WHERE deleted_flag = 0");
+        jdbcTemplate.update("UPDATE t_opportunity SET legal_entity_id = 77 WHERE deleted_flag = 0");
+        jdbcTemplate.update("UPDATE t_resume_ingestion SET legal_entity_id = 77 WHERE deleted_flag = 0");
+        jdbcTemplate.update("UPDATE t_project_ingestion SET legal_entity_id = 77 WHERE deleted_flag = 0");
+        jdbcTemplate.update("UPDATE t_bp_availability SET legal_entity_id = 77 WHERE deleted_flag = 0");
+        jdbcTemplate.update("UPDATE t_bp_availability_ingestion SET legal_entity_id = 77 WHERE deleted_flag = 0");
+    }
+
+    private String auditDiagnostic(ResponseEntity<String> response) {
+        String correlationId = response.getHeaders().getFirst("X-Correlation-ID");
+        return response.getBody() + " audit=" + jdbcTemplate.queryForMap("""
+                SELECT authentication_decision, scope_decision, data_scope_decision,
+                       command_decision, rate_decision
+                FROM t_external_api_audit WHERE correlation_id = ?
+                """, correlationId);
     }
 }

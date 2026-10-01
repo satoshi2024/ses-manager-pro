@@ -36,10 +36,11 @@ public class MyAcceptanceApiController {
         if (engineerId == null) {
             throw BusinessException.of(403, "error.my.notLinked");
         }
-        List<Contract> contracts = contractMapper.selectList(
+        List<Contract> contracts = contractMapper.selectListForTenant(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Contract>()
                         .eq(Contract::getEngineerId, engineerId)
-                        .eq(Contract::getAcceptanceRequired, true));
+                        .eq(Contract::getAcceptanceRequired, true),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         List<Map<String, Object>> result = new ArrayList<>();
         for (Contract contract : contracts) {
             List<Acceptance> acceptances = acceptanceMapper.selectList(

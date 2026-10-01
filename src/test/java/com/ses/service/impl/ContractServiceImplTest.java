@@ -11,6 +11,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.EngineerSalesService;
 import com.ses.service.EngineerStatusService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -22,9 +23,20 @@ import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.*;
 
 class ContractServiceImplTest {
+
+    private Contract contractFixture() {
+        Contract result = new Contract();
+        result.setCustomerId(300L);
+        result.setProjectId(200L);
+        result.setEngineerId(1L);
+        result.setVersion(0);
+        return result;
+    }
 
     @Mock
     private ContractMapper contractMapper;
@@ -74,11 +86,72 @@ class ContractServiceImplTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("tenant-a");
         org.springframework.test.util.ReflectionTestUtils.setField(contractService, "baseMapper", contractMapper);
         // Mockitoの@InjectMocksはコンストラクタ注入が成功すると、非final(任意注入)フィールドへの
         // フィールド注入を行わない。@Autowired(required=false)のscopeChangeInvalidatorは
         // 明示的に注入する必要がある。
         org.springframework.test.util.ReflectionTestUtils.setField(contractService, "scopeChangeInvalidator", scopeChangeInvalidator);
+        when(contractMapper.countOwnedReferencesForTenant(nullable(Long.class), nullable(Long.class),
+                nullable(Long.class), eq("tenant-a"))).thenReturn(1L);
+        when(contractMapper.selectByIdForUpdateForTenant(anyLong(), eq("tenant-a")))
+                .thenAnswer(invocation -> {
+                    Contract old = contractMapper.selectByIdForUpdate(invocation.getArgument(0));
+                    if (old == null) {
+                        old = contractMapper.selectById(invocation.getArgument(0));
+                    }
+                    if (old != null && old.getVersion() == null) {
+                        old.setVersion(0);
+                    }
+                    return old;
+                });
+        when(contractMapper.updateById(any(Contract.class))).thenReturn(1);
+        when(contractMapper.selectMaxContractNoIncludingDeleted(anyString(), eq("tenant-a")))
+                .thenAnswer(invocation -> contractMapper.selectMaxContractNoIncludingDeleted(invocation.getArgument(0)));
+        when(contractMapper.selectByIdForTenant(anyLong(), eq("tenant-a")))
+                .thenAnswer(invocation -> {
+                    Contract current = contractMapper.selectById(invocation.getArgument(0));
+                    if (current == null) {
+                        current = new Contract();
+                        current.setId(invocation.getArgument(0));
+                        current.setVersion(0);
+                    }
+                    return current;
+                });
+        when(contractMapper.selectByProposalForTenant(anyLong(), eq("tenant-a")))
+                .thenAnswer(invocation -> contractMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Contract>()));
+        when(contractMapper.selectByQuotationForTenant(anyLong(), eq("tenant-a")))
+                .thenAnswer(invocation -> contractMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Contract>()));
+        when(contractMapper.selectByOrderLineForTenant(anyLong(), eq("tenant-a")))
+                .thenAnswer(invocation -> contractMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Contract>()));
+        when(projectMapper.selectByIdForTenant(anyLong(), eq("tenant-a")))
+                .thenAnswer(invocation -> projectMapper.selectById(invocation.getArgument(0)));
+        when(positionMapper.selectByIdForTenant(anyLong(), eq("tenant-a")))
+                .thenAnswer(invocation -> positionMapper.selectById(invocation.getArgument(0)));
+        when(contractMapper.updateByIdForTenant(any(Contract.class), eq("tenant-a"), any()))
+                .thenAnswer(invocation -> contractMapper.updateById((Contract) invocation.getArgument(0)));
+        when(contractMapper.updateStatusForTenant(anyLong(), eq("tenant-a"), any(), any(), any()))
+                .thenReturn(1);
+        when(contractMapper.updatePriceOnlyForTenant(anyLong(), eq("tenant-a"), any(), any(), any()))
+                .thenReturn(1);
+        when(contractMapper.updateRenewalDecisionForTenant(anyLong(), eq("tenant-a"), any(), any()))
+                .thenReturn(1);
+        when(contractMapper.deleteByIdForTenant(anyLong(), eq("tenant-a"), any()))
+                .thenReturn(1);
+        when(priceHistoryMapper.selectByContractIdForTenant(anyLong(), eq("tenant-a")))
+                .thenAnswer(invocation -> priceHistoryMapper.selectList(
+                        new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<>()));
+        when(workRecordMapper.countConfirmedByContractIdForTenant(anyLong(), anyString(), eq("tenant-a")))
+                .thenAnswer(invocation -> workRecordMapper.selectCount(
+                        new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<>()));
+        when(priceHistoryMapper.deleteByContractAndMonthForTenant(anyLong(), anyString(), eq("tenant-a")))
+                .thenAnswer(invocation -> priceHistoryMapper.delete(
+                        new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<>()));
+    }
+
+    @AfterEach
+    void tearDown() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -93,7 +166,7 @@ class ContractServiceImplTest {
 
     @Test
     void saveWithBusinessRules_validateDateError() {
-        Contract contract = new Contract();
+        Contract contract = contractFixture();
         contract.setStartDate(LocalDate.of(2026, 7, 10));
         contract.setEndDate(LocalDate.of(2026, 7, 5));
 
@@ -105,7 +178,7 @@ class ContractServiceImplTest {
 
     @Test
     void saveWithBusinessRules_validateSettlementHoursError() {
-        Contract contract = new Contract();
+        Contract contract = contractFixture();
         contract.setSettlementHoursMin(new BigDecimal("160"));
         contract.setSettlementHoursMax(new BigDecimal("140"));
 
@@ -117,7 +190,7 @@ class ContractServiceImplTest {
 
     @Test
     void saveWithBusinessRules_successWithAutoNumbering() {
-        Contract contract = new Contract();
+        Contract contract = contractFixture();
         contract.setStartDate(LocalDate.of(2026, 7, 1));
         // 呼び出し側が稼動中を指定しても、新規作成は常に準備中で開始する（状態機械の入口を一本化）。
         contract.setStatus("稼動中");
@@ -138,7 +211,7 @@ class ContractServiceImplTest {
 
     @Test
     void saveWithBusinessRules_defaultsBlankContractTypeToQuasiMandate() {
-        Contract contract = new Contract();
+        Contract contract = contractFixture();
         contract.setContractNo("MANUAL-001");
         contract.setContractType(" ");
         when(contractMapper.insert(contract)).thenReturn(1);
@@ -151,7 +224,7 @@ class ContractServiceImplTest {
 
     @Test
     void saveWithBusinessRules_retryOnDuplicateKeyException() {
-        Contract contract = new Contract();
+        Contract contract = contractFixture();
         contract.setStartDate(LocalDate.of(2026, 7, 1));
         
         when(contractMapper.selectMaxContractNoIncludingDeleted(anyString()))
@@ -169,23 +242,24 @@ class ContractServiceImplTest {
 
     @Test
     void saveWithBusinessRules_rejectsProjectCustomerMismatch() {
-        Contract contract = new Contract();
+        Contract contract = contractFixture();
         contract.setProjectId(10L);
         contract.setCustomerId(20L);
         Project project = new Project();
         project.setCustomerId(21L);
         when(projectMapper.selectById(10L)).thenReturn(project);
+        when(contractMapper.countOwnedReferencesForTenant(20L, 10L, 1L, "tenant-a")).thenReturn(0L);
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> contractService.saveWithBusinessRules(contract));
 
-        assertEquals("error.contract.projectCustomerMismatch", ex.getMessage());
+        assertEquals("error.scope.notFound", ex.getMessage());
         verify(contractMapper, never()).insert(any(Contract.class));
     }
 
     @Test
     void saveWithBusinessRules_rejectsInactiveSalesUser() {
-        Contract contract = new Contract();
+        Contract contract = contractFixture();
         contract.setSalesUserId(30L);
         SysUser salesUser = new SysUser();
         salesUser.setRole("営業");
@@ -236,15 +310,9 @@ class ContractServiceImplTest {
         oldContract.setStatus("稼動中");
         oldContract.setEngineerId(200L);
 
-        Contract newContract = new Contract();
-        newContract.setId(1L);
-        newContract.setStatus("終了");
-        newContract.setEngineerId(200L);
-
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(oldContract);
-        when(contractMapper.updateById(newContract)).thenReturn(1);
 
-        contractService.updateWithBusinessRules(newContract);
+        contractService.changeStatus(1L, "終了", null);
 
         verify(engineerStatusService, times(1)).releaseIfIdle(200L);
     }
@@ -256,7 +324,8 @@ class ContractServiceImplTest {
         oldContract.setStatus("稼動中");
         oldContract.setEngineerId(100L);
 
-        Contract newContract = new Contract();
+        Contract newContract = contractFixture();
+        newContract.setVersion(0);
         newContract.setId(1L);
         newContract.setStatus("稼動中");
         newContract.setEngineerId(200L);
@@ -277,7 +346,8 @@ class ContractServiceImplTest {
         oldContract.setStatus("稼動中");
         oldContract.setEngineerId(100L);
 
-        Contract newContract = new Contract();
+        Contract newContract = contractFixture();
+        newContract.setVersion(0);
         newContract.setId(1L);
         newContract.setStatus("終了");
         newContract.setEngineerId(200L);
@@ -289,7 +359,7 @@ class ContractServiceImplTest {
 
         verify(engineerStatusService).releaseIfIdle(100L);
         verify(engineerStatusService, never()).releaseIfIdle(200L);
-        verify(engineerStatusService, never()).onContractActive(any());
+        verify(engineerStatusService).onContractActive(200L);
     }
 
     @Test
@@ -297,16 +367,11 @@ class ContractServiceImplTest {
         Contract oldContract = new Contract();
         oldContract.setId(1L);
         oldContract.setStatus("準備中");
-
-        Contract newContract = new Contract();
-        newContract.setId(1L);
-        newContract.setStatus("稼動中");
-        newContract.setEngineerId(300L);
+        oldContract.setEngineerId(300L);
 
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(oldContract);
-        when(contractMapper.updateById(newContract)).thenReturn(1);
 
-        contractService.updateWithBusinessRules(newContract);
+        contractService.changeStatus(1L, "稼動中", null);
 
         // 更新経由の 準備中→稼動中 でも要員を稼動中に連動させること
         verify(engineerStatusService, times(1)).onContractActive(300L);
@@ -315,13 +380,14 @@ class ContractServiceImplTest {
     @Test
     void updateWithBusinessRules_退職済み担当のまま更新できる() {
         // 既存契約の担当営業(退職済み)を変更しない更新は、在職チェックを免除して通す。
-        Contract old = new Contract();
+        Contract old = contractFixture();
         old.setId(1L);
         old.setStatus("稼動中");
         old.setEngineerId(100L);
         old.setSalesUserId(99L);
 
-        Contract update = new Contract();
+        Contract update = contractFixture();
+        update.setVersion(0);
         update.setId(1L);
         update.setStatus("稼動中");
         update.setEngineerId(100L);
@@ -339,12 +405,13 @@ class ContractServiceImplTest {
 
     @Test
     void updateWithBusinessRules_退職済み担当への変更は拒否される() {
-        Contract old = new Contract();
+        Contract old = contractFixture();
         old.setId(1L);
         old.setStatus("稼動中");
         old.setSalesUserId(null); // 元は未設定
 
-        Contract update = new Contract();
+        Contract update = contractFixture();
+        update.setVersion(0);
         update.setId(1L);
         update.setStatus("稼動中");
         update.setSalesUserId(99L); // 退職済み営業へ変更
@@ -363,7 +430,8 @@ class ContractServiceImplTest {
 
     @Test
     void updateWithBusinessRules_notFoundThrowsBusinessException() {
-        Contract newContract = new Contract();
+        Contract newContract = contractFixture();
+        newContract.setVersion(0);
         newContract.setId(999L);
         newContract.setStatus("稼動中");
 
@@ -376,13 +444,13 @@ class ContractServiceImplTest {
 
     @Test
     void updateWithBusinessRules_version不一致は409で更新しない() {
-        Contract old = new Contract();
+        Contract old = contractFixture();
         old.setId(1L);
         old.setVersion(2);
         old.setStatus("準備中");
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
 
-        Contract update = new Contract();
+        Contract update = contractFixture();
         update.setId(1L);
         update.setVersion(1);
 
@@ -396,13 +464,14 @@ class ContractServiceImplTest {
 
     @Test
     void updateWithBusinessRules_version付き更新の更新件数0は409() {
-        Contract old = new Contract();
+        Contract old = contractFixture();
         old.setId(1L);
         old.setVersion(2);
         old.setStatus("準備中");
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
 
-        Contract update = new Contract();
+        Contract update = contractFixture();
+        update.setVersion(0);
         update.setId(1L);
         update.setVersion(2);
         when(contractMapper.updateById(update)).thenReturn(0);
@@ -524,7 +593,7 @@ class ContractServiceImplTest {
     @Test
     void createDraftFromProposal_isIdempotent() {
         Proposal p = proposal(50L, 2L, 9L, null);
-        Contract existing = new Contract();
+        Contract existing = contractFixture();
         existing.setId(77L);
         existing.setProposalId(50L);
         when(contractMapper.selectOne(any())).thenReturn(existing);
@@ -619,17 +688,20 @@ class ContractServiceImplTest {
         winner.setId(900L);
         winner.setOrderLineId(700L);
 
-        when(contractMapper.selectOne(any())).thenReturn(null, winner);
+        when(contractMapper.selectByOrderLineForTenant(700L, "tenant-a")).thenReturn(null);
+        when(contractMapper.selectByOrderLineForUpdateForTenant(700L, "tenant-a")).thenReturn(winner);
         when(projectMapper.selectById(9L)).thenReturn(project);
         when(engineerSalesService.findPrimarySalesUserId(2L)).thenReturn(null);
         when(contractMapper.selectMaxContractNoIncludingDeleted(anyString())).thenReturn(null);
         when(contractMapper.insert(any(Contract.class)))
                 .thenThrow(new org.springframework.dao.DataIntegrityViolationException("duplicate order_line_id"));
+        clearInvocations(contractMapper);
 
         Contract result = contractService.createDraftFromSalesOrderLine(line, order);
 
         assertEquals(900L, result.getId());
-        verify(contractMapper, times(2)).selectOne(any());
+        verify(contractMapper).selectByOrderLineForTenant(700L, "tenant-a");
+        verify(contractMapper, atLeastOnce()).selectByOrderLineForUpdateForTenant(700L, "tenant-a");
     }
 
     // ===== 見積からのドラフト生成（quotation-management / P4） =====
@@ -674,7 +746,7 @@ class ContractServiceImplTest {
     @Test
     void createDraftFromQuotation_冪等() {
         com.ses.entity.Quotation q = quotation(30L, 2L, 9L, 4L, new BigDecimal("700000"));
-        Contract existing = new Contract();
+        Contract existing = contractFixture();
         existing.setId(88L);
         when(contractMapper.selectOne(any())).thenReturn(existing);
 
@@ -775,16 +847,15 @@ class ContractServiceImplTest {
 
     @Test
     void deleteFuturePriceRevision_将来は削除可() {
-        when(priceHistoryMapper.delete(any())).thenReturn(1);
         contractService.deleteFuturePriceRevision(1L, "2999-12");
-        verify(priceHistoryMapper).delete(any());
+        verify(priceHistoryMapper).deleteByContractAndMonthForTenant(1L, "2999-12", "tenant-a");
     }
 
     // ===== labor-compliance-check (FR-10) 呼び出し・記録連携 =====
 
     @Test
     void saveWithBusinessRules_findingが無ければ監査ログに記録しない() {
-        Contract contract = new Contract();
+        Contract contract = contractFixture();
         contract.setStartDate(LocalDate.of(2026, 7, 1));
         when(contractMapper.insert(contract)).thenReturn(1);
         when(laborComplianceService.check(contract)).thenReturn(java.util.List.of());
@@ -797,7 +868,7 @@ class ContractServiceImplTest {
 
     @Test
     void saveWithBusinessRules_findingがあれば監査ログに記録し返り値に含む() {
-        Contract contract = new Contract();
+        Contract contract = contractFixture();
         contract.setStartDate(LocalDate.of(2026, 7, 1));
         when(contractMapper.insert(contract)).thenAnswer(inv -> { contract.setId(99L); return 1; });
         com.ses.dto.compliance.ComplianceFinding finding =
@@ -813,13 +884,14 @@ class ContractServiceImplTest {
 
     @Test
     void updateWithBusinessRules_findingがあれば監査ログに記録する() {
-        Contract old = new Contract();
+        Contract old = contractFixture();
         old.setId(1L);
         old.setStatus("準備中");
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
         when(priceHistoryMapper.selectList(any())).thenReturn(new java.util.ArrayList<>());
 
-        Contract update = new Contract();
+        Contract update = contractFixture();
+        update.setVersion(0);
         update.setId(1L);
         com.ses.dto.compliance.ComplianceFinding finding =
                 new com.ses.dto.compliance.ComplianceFinding("DOUBLE_DISPATCH", "warning", "二重派遣兆候", 1L);
@@ -841,7 +913,7 @@ class ContractServiceImplTest {
      */
     @Test
     void updateWithBusinessRules_DTOに無いALWAYS項目はoldから回填される() {
-        Contract old = new Contract();
+        Contract old = contractFixture();
         old.setId(1L);
         old.setStatus("準備中");
         old.setPositionId(55L);
@@ -863,7 +935,8 @@ class ContractServiceImplTest {
         when(projectMapper.selectById(200L)).thenReturn(project);
 
         // 画面保存相当: DTO が運ぶ列だけセット。positionId / renewalDecision は未設定(null)
-        Contract update = new Contract();
+        Contract update = contractFixture();
+        update.setVersion(0);
         update.setId(1L);
         update.setEngineerId(100L);
         update.setProjectId(200L);
@@ -891,7 +964,7 @@ class ContractServiceImplTest {
      */
     @Test
     void updateWithBusinessRules_payloadに無い担当営業は維持される() {
-        Contract old = new Contract();
+        Contract old = contractFixture();
         old.setId(1L);
         old.setStatus("準備中");
         old.setSalesUserId(10L);
@@ -905,7 +978,8 @@ class ContractServiceImplTest {
         position.setProjectId(200L);
         when(positionMapper.selectById(55L)).thenReturn(position);
 
-        Contract update = new Contract();
+        Contract update = contractFixture();
+        update.setVersion(0);
         update.setId(1L);
         update.setStartDate(LocalDate.of(2026, 7, 1));
         update.setSellingPrice(new BigDecimal("600000"));
@@ -930,7 +1004,7 @@ class ContractServiceImplTest {
      */
     @Test
     void updateWithBusinessRules_payloadで明示nullの担当営業はクリアできる() {
-        Contract old = new Contract();
+        Contract old = contractFixture();
         old.setId(1L);
         old.setStatus("準備中");
         old.setSalesUserId(10L);
@@ -944,7 +1018,8 @@ class ContractServiceImplTest {
         position.setProjectId(200L);
         when(positionMapper.selectById(55L)).thenReturn(position);
 
-        Contract update = new Contract();
+        Contract update = contractFixture();
+        update.setVersion(0);
         update.setId(1L);
         update.setStartDate(LocalDate.of(2026, 7, 1));
         update.setSellingPrice(new BigDecimal("600000"));
@@ -967,7 +1042,7 @@ class ContractServiceImplTest {
      */
     @Test
     void updateWithBusinessRules_省略キーは維持し明示nullだけクリア() {
-        Contract old = new Contract();
+        Contract old = contractFixture();
         old.setId(1L);
         old.setStatus("準備中");
         old.setSalesUserId(10L);
@@ -984,7 +1059,8 @@ class ContractServiceImplTest {
         position.setProjectId(200L);
         when(positionMapper.selectById(55L)).thenReturn(position);
 
-        Contract update = new Contract();
+        Contract update = contractFixture();
+        update.setVersion(0);
         update.setId(1L);
         update.setStartDate(LocalDate.of(2026, 7, 1));
         update.setSellingPrice(new BigDecimal("600000"));
@@ -1017,23 +1093,12 @@ class ContractServiceImplTest {
      */
     @Test
     void updateRenewalDecision_renewalDecision以外のカラムを更新しない() {
-        Contract existing = new Contract();
+        Contract existing = contractFixture();
         existing.setId(1L);
         when(contractMapper.selectById(1L)).thenReturn(existing);
-        when(contractMapper.update(isNull(), any())).thenReturn(1);
 
         contractService.updateRenewalDecision(1L, "CONTINUE");
-
-        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.Wrapper<Contract>> captor =
-                org.mockito.ArgumentCaptor.captor();
-        verify(contractMapper).update(isNull(), captor.capture());
-
-        String setSql = captor.getValue().getSqlSet();
-        assertNotNull(setSql, "SET句が生成されていること");
-        assertTrue(setSql.contains("renewal_decision"), "renewal_decision を更新すること: " + setSql);
-        assertFalse(setSql.contains("sales_user_id"), "担当営業を巻き込んで更新しないこと: " + setSql);
-        assertFalse(setSql.contains("commission_base_type"), "インセンティブ基準を巻き込まないこと: " + setSql);
-        assertFalse(setSql.contains("commission_rate"), "インセンティブ率を巻き込まないこと: " + setSql);
+        verify(contractMapper).updateRenewalDecisionForTenant(1L, "tenant-a", 0, "CONTINUE");
     }
 
     @Test
@@ -1052,7 +1117,7 @@ class ContractServiceImplTest {
      */
     @Test
     void updateWithBusinessRules_担当営業変更時のみscope世代を進める() {
-        Contract old = new Contract();
+        Contract old = contractFixture();
         old.setId(1L);
         old.setStatus("準備中");
         old.setSalesUserId(10L);
@@ -1060,12 +1125,14 @@ class ContractServiceImplTest {
         when(priceHistoryMapper.selectList(any())).thenReturn(new java.util.ArrayList<>());
 
         Contract sameSalesUser = new Contract();
+        sameSalesUser.setVersion(0);
         sameSalesUser.setId(1L);
         sameSalesUser.setSalesUserId(10L);
         contractService.updateWithBusinessRules(sameSalesUser);
         verify(scopeChangeInvalidator, never()).invalidate();
 
         Contract changedSalesUser = new Contract();
+        changedSalesUser.setVersion(0);
         changedSalesUser.setId(1L);
         changedSalesUser.setSalesUserId(20L);
         when(engineerSalesService.isActiveSalesUser(20L)).thenReturn(true);
@@ -1075,7 +1142,10 @@ class ContractServiceImplTest {
 
     @Test
     void saveWithBusinessRules_新規契約の担当営業もscope世代を進める() {
-        Contract contract = new Contract();
+        Contract contract = contractFixture();
+        contract.setCustomerId(1L);
+        contract.setProjectId(1L);
+        contract.setEngineerId(1L);
         contract.setStartDate(LocalDate.of(2026, 7, 1));
         contract.setSalesUserId(30L);
         when(engineerSalesService.isActiveSalesUser(30L)).thenReturn(true);
@@ -1089,37 +1159,33 @@ class ContractServiceImplTest {
 
     @Test
     void updateWithBusinessRules_customerContract_activatesSuccessfullyWithoutBpCompliance() {
-        Contract old = new Contract();
+        Contract old = contractFixture();
         old.setId(1L);
         old.setEngineerId(10L);
         old.setStatus("準備中");
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
 
-        Contract update = new Contract();
-        update.setId(1L);
-        update.setCustomerId(100L); // 顧客IDあり
-        update.setEngineerId(10L);
-        update.setStatus("稼動中");
+        old.setEngineerId(10L);
 
         // 要員はBP所属なし
         when(engineerBpAffiliationService.getActiveAffiliationAsOf(eq(10L), any(LocalDate.class))).thenReturn(null);
 
-        contractService.updateWithBusinessRules(update);
+        contractService.changeStatus(1L, "稼動中", null);
 
-        verify(contractMapper).updateById(any(Contract.class));
         verify(engineerStatusService).onContractActive(10L);
         verifyNoInteractions(bpComplianceService);
     }
 
     @Test
     void updateWithBusinessRules_bpContract_rejectsWhenComplianceHasError() {
-        Contract old = new Contract();
+        Contract old = contractFixture();
         old.setId(2L);
         old.setEngineerId(20L);
-        old.setStatus("準備中");
+        old.setStatus("稼動中");
         when(contractMapper.selectByIdForUpdate(2L)).thenReturn(old);
 
-        Contract update = new Contract();
+        Contract update = contractFixture();
+        update.setVersion(0);
         update.setId(2L);
         update.setEngineerId(20L);
         update.setStatus("稼動中");

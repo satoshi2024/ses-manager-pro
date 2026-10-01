@@ -29,6 +29,11 @@ public interface CertificationEventMapper {
     @Select("SELECT * FROM t_certification_event WHERE certification_record_id = #{recordId} ORDER BY occurred_at, id")
     List<CertificationEvent> selectByRecordId(@Param("recordId") Long recordId);
 
+    @Select("SELECT * FROM t_certification_event WHERE tenant_id = #{tenantId} "
+            + "AND certification_record_id = #{recordId} ORDER BY occurred_at, id")
+    List<CertificationEvent> selectByTenantAndRecordId(@Param("tenantId") String tenantId,
+                                                        @Param("recordId") Long recordId);
+
     @Select("SELECT * FROM t_certification_event WHERE tenant_id = #{tenantId} AND idempotency_key = #{idempotencyKey} LIMIT 1")
     CertificationEvent selectByIdempotencyKey(@Param("tenantId") String tenantId,
                                               @Param("idempotencyKey") String idempotencyKey);

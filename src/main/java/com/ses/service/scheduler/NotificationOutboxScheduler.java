@@ -1,5 +1,6 @@
 package com.ses.service.scheduler;
 
+import com.ses.common.audit.ExecutionActorContext;
 import com.ses.service.notification.NotificationOutboxService;
 import lombok.RequiredArgsConstructor;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
@@ -12,10 +13,12 @@ import org.springframework.stereotype.Component;
 public class NotificationOutboxScheduler {
 
     private final NotificationOutboxService notificationOutboxService;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(cron = "0 * * * * *")
     @SchedulerLock(name = "notificationOutboxDispatch", lockAtLeastFor = "PT10S", lockAtMostFor = "PT5M")
     public void dispatchPending() {
-        notificationOutboxService.dispatchDue(100);
+        ExecutionActorContext.runAsSystem("notification-outbox-scheduler", "SCHEDULER_POLL",
+                () -> tenantAwareBatchRunner.runAndSum(tenant -> notificationOutboxService.dispatchDue(100)));
     }
 }

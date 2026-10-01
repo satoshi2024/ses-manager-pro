@@ -1,7 +1,6 @@
 package com.ses.controller.api;
 
 import com.ses.common.result.ApiResult;
-import com.ses.config.AiConfig;
 import com.ses.entity.Engineer;
 import com.ses.entity.Project;
 import com.ses.service.EngineerService;
@@ -11,6 +10,8 @@ import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.ai.LegacyAiEndpointBoundary;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,7 +33,7 @@ public class AiRestController {
     private final EngineerService engineerService;
     private final ProjectService projectService;
     private final DataScopeService dataScopeService;
-    private final AiConfig aiConfig;
+    private final LegacyAiEndpointBoundary endpointBoundary;
 
     /**
      * AI対話リクエスト。APIキーはサーバー側設定(ai.api-key)のみを使用するため、
@@ -75,34 +76,31 @@ public class AiRestController {
             // 旧 apiKey を含む未知フィールドはサイレントに無視せず拒否する（値はエコーしない）。
             return ApiResult.error(400, "許可されていないフィールドが含まれています。APIキーはサーバー側で管理されます。");
         }
-        if (!aiConfig.isEnabled()) {
-            return ApiResult.error(400, "AI機能は現在無効化されています。");
+        // match/proposal-draftと同じ統一gate。BusinessExceptionはGlobalExceptionHandlerへ渡しHTTP 503等にする。
+        CopilotExecutionContext context;
+        if (request.getEngineerId() != null || request.getProjectId() != null) {
+            context = endpointBoundary.createContext();
+        } else {
+            endpointBoundary.assertEndpointAllowed();
+            context = null;
         }
-        try {
-            Map<String, Object> fields = new LinkedHashMap<>();
-            if (request.getEngineerId() != null) {
-                dataScopeService.assertAllowedEngineer(request.getEngineerId());
-                Engineer eng = engineerService.getById(request.getEngineerId());
-                fields.putAll(AiAllowlistFields.engineer(eng, null));
-            }
-            if (request.getProjectId() != null) {
-                dataScopeService.assertAllowedProject(request.getProjectId());
-                Project proj = projectService.getById(request.getProjectId());
-                fields.putAll(AiAllowlistFields.project(proj));
-            }
-            AiGatewayResult result = aiExecutionGateway.execute(AiGatewayRequest.builder()
-                    .useCase(AiGatewayRequest.USE_CHAT)
-                    .trustedInstruction("SES営業アシスタントとして、ALLOWLIST_CONTEXT のみを根拠に簡潔に答えてください。HTMLは出力しないでください。")
-                    .allowlistedFields(fields)
-                    .untrustedSourceText(request.getPrompt())
-                    .persistRun(true)
-                    .requireJson(false)
-                    .build());
-            return ApiResult.success(result.getText());
-        } catch (com.ses.common.exception.BusinessException e) {
-            return ApiResult.error(e.getCode(), e.getMessage());
-        } catch (Exception e) {
-            return ApiResult.error(500, "AI呼び出し中にエラーが発生しました。");
+        Map<String, Object> fields = new LinkedHashMap<>();
+        if (request.getEngineerId() != null) {
+            Engineer eng = endpointBoundary.assertEngineer(request.getEngineerId(), context);
+            fields.putAll(AiAllowlistFields.engineer(eng, null));
         }
+        if (request.getProjectId() != null) {
+            Project proj = endpointBoundary.assertProject(request.getProjectId(), context);
+            fields.putAll(AiAllowlistFields.project(proj));
+        }
+        AiGatewayResult result = aiExecutionGateway.execute(AiGatewayRequest.legacyChat(
+                        request.getEngineerId(), request.getProjectId(), context)
+                .trustedInstruction("SES営業アシスタントとして、ALLOWLIST_CONTEXT のみを根拠に簡潔に答えてください。HTMLは出力しないでください。")
+                .allowlistedFields(fields)
+                .untrustedSourceText(request.getPrompt())
+                .persistRun(true)
+                .requireJson(false)
+                .build());
+        return ApiResult.success(result.getText());
     }
 }

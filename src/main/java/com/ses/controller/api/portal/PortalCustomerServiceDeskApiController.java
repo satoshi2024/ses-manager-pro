@@ -9,6 +9,7 @@ import com.ses.dto.portal.PortalServiceCommentCreateRequest;
 import com.ses.dto.portal.PortalServiceCommentDto;
 import com.ses.dto.portal.PortalServiceRequestCreateRequest;
 import com.ses.dto.portal.PortalServiceRequestDto;
+import com.ses.dto.portal.PortalAttachmentResponse;
 import com.ses.dto.servicedesk.ServiceCommentCreateRequest;
 import com.ses.dto.servicedesk.ServiceCommentDto;
 import com.ses.dto.servicedesk.ServiceRequestCreateRequest;
@@ -29,6 +30,7 @@ import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.portal.PortalAuthorizationService;
 import com.ses.service.security.impl.FileScopeValidationService;
+import com.ses.service.security.TenantOwnershipResolver;
 import com.ses.service.servicedesk.ServiceDeskExecutionContext;
 import com.ses.service.servicedesk.ServiceRequestService;
 import jakarta.validation.Valid;
@@ -46,6 +48,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URLConnection;
 import java.io.InputStream;
@@ -76,6 +80,9 @@ public class PortalCustomerServiceDeskApiController {
     private final EngineerMapper engineerMapper;
     private final AccountingTimezoneResolver timezoneResolver;
     private final Clock clock;
+    private final com.ses.service.servicedesk.ServiceRequestAttachmentService attachmentService;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
+
 
     private Long customerId() {
         PortalLoginUser user = authorizationService.requireUser();
@@ -129,10 +136,11 @@ public class PortalCustomerServiceDeskApiController {
         authorizationService.assertPermission(authorizationService.requireUser(), "service-desk.create");
         Long custId = customerId();
         Long userId = portalUserId();
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
 
         // 契約が指定された場合、自社契約であることを検証
         if (req.getContractId() != null) {
-            Contract contract = contractMapper.selectById(req.getContractId());
+            Contract contract = contractMapper.selectByIdForCustomerAndTenant(req.getContractId(), custId, tenantId);
             if (contract == null || !Objects.equals(contract.getCustomerId(), custId)) {
                 throw BusinessException.of(400, "指定された契約は自社に紐付いていません");
             }
@@ -140,7 +148,7 @@ public class PortalCustomerServiceDeskApiController {
 
         // 案件が指定された場合、自社案件であることを検証
         if (req.getProjectId() != null) {
-            Project project = projectMapper.selectById(req.getProjectId());
+            Project project = projectMapper.selectByIdForCustomerAndTenant(req.getProjectId(), custId, tenantId);
             if (project == null || !Objects.equals(project.getCustomerId(), custId)) {
                 throw BusinessException.of(400, "指定された案件は自社に紐付いていません");
             }
@@ -148,7 +156,7 @@ public class PortalCustomerServiceDeskApiController {
 
         // 顧客担当者が指定された場合、自社担当者であることを検証
         if (req.getContactId() != null) {
-            CustomerContact contact = contactMapper.selectById(req.getContactId());
+            CustomerContact contact = contactMapper.selectByIdForTenant(req.getContactId(), custId, tenantId);
             if (contact == null || !Objects.equals(contact.getCustomerId(), custId)) {
                 throw BusinessException.of(400, "指定された顧客担当者は自社に紐付いていません");
             }
@@ -156,15 +164,12 @@ public class PortalCustomerServiceDeskApiController {
 
         // 要員が指定された場合の存在検証および自社契約所属検証
         if (req.getEngineerId() != null) {
-            Engineer engineer = engineerMapper.selectById(req.getEngineerId());
+            Engineer engineer = tenantOwnershipResolver.selectEngineer(tenantId, req.getEngineerId());
             if (engineer == null) {
                 throw BusinessException.of(400, "指定された要員が見つかりません");
             }
-            Long contractCount = contractMapper.selectCount(
-                    new LambdaQueryWrapper<Contract>()
-                            .eq(Contract::getCustomerId, custId)
-                            .eq(Contract::getEngineerId, req.getEngineerId())
-            );
+            Long contractCount = contractMapper.countByCustomerAndEngineerForTenant(
+                    custId, req.getEngineerId(), tenantId);
             if (contractCount == null || contractCount == 0) {
                 throw BusinessException.of(400, "指定された要員は自社の契約に紐付いていません");
             }
@@ -184,7 +189,6 @@ public class PortalCustomerServiceDeskApiController {
                 .ownerUserId(null)
                 .build();
 
-        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
         ServiceDeskExecutionContext ctx = serviceRequestService.bindCalendarScope(
                 new ServiceDeskExecutionContext(tenantId, timezoneResolver.resolve(tenantId),
                         Instant.now(clock), null, null, userId, "PORTAL_USER", portalUserName(), "PORTAL_REQUEST"),
@@ -209,7 +213,7 @@ public class PortalCustomerServiceDeskApiController {
                 .visibility("PORTAL_VISIBLE")
                 .build();
 
-        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         // 顧客から法人既定を解決。addComment内で契約紐付きを再解決して自動再開にも使う。
         ServiceDeskExecutionContext ctx = serviceRequestService.bindCalendarScope(
                 new ServiceDeskExecutionContext(tenantId, timezoneResolver.resolve(tenantId),
@@ -240,6 +244,15 @@ public class PortalCustomerServiceDeskApiController {
         return ApiResult.success(null);
     }
 
+    @PostMapping(value = "/{id}/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResult<PortalAttachmentResponse> uploadAttachment(@PathVariable Long id,
+                                                                @RequestPart("file") MultipartFile file,
+                                                                @RequestParam(required = false) Long commentId) {
+        authorizationService.assertPermission(authorizationService.requireUser(), "service-desk.create");
+        ServiceAttachmentLink link = attachmentService.uploadPortal(id, commentId, file, customerId(), portalUserId());
+        return ApiResult.success(PortalAttachmentResponse.from(link));
+    }
+
     /**
      * ポータル添付ファイルダウンロード
      */
@@ -251,7 +264,8 @@ public class PortalCustomerServiceDeskApiController {
         serviceRequestService.getPortalDetail(id, customerId());
 
         // 2. 添付ファイルリンク検証
-        ServiceAttachmentLink link = attachmentLinkMapper.selectById(attachmentId);
+        ServiceAttachmentLink link = attachmentLinkMapper.selectByTenantIdAndRequest(
+                com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId(), attachmentId, id);
         if (link == null || !Objects.equals(link.getServiceRequestId(), id) || !"PORTAL_VISIBLE".equals(link.getVisibility())) {
             throw BusinessException.of(404, "error.notFound");
         }
@@ -262,7 +276,7 @@ public class PortalCustomerServiceDeskApiController {
             throw BusinessException.of(404, "error.notFound");
         }
         fileScopeValidationService.assertPortalServiceRequestDownloadAllowed(
-                storageKey, id, customerId(), link.getDocumentId());
+                storageKey, id, customerId(), link.getDocumentId(), link);
         InputStream stream = documentService.download(link.getDocumentId(), null);
         Resource resource = new InputStreamResource(stream);
 

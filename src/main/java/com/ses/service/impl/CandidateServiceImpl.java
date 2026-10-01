@@ -1,6 +1,6 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.constant.StatusConstants;
 import com.ses.common.exception.BusinessException;
@@ -12,12 +12,14 @@ import com.ses.mapper.CandidateActivityMapper;
 import com.ses.mapper.CandidateMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.service.CandidateService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
 
@@ -63,6 +65,11 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean save(Candidate candidate) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        if (candidate.getTenantId() != null && !tenantId.equals(candidate.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        candidate.setTenantId(tenantId);
         if (!StringUtils.hasText(candidate.getCurrentStage())) {
             candidate.setCurrentStage(StatusConstants.CANDIDATE_STAGE_APPLIED);
         } else {
@@ -72,15 +79,70 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
     }
 
     @Override
+    public Page<Candidate> pageForCurrentTenant(Page<Candidate> page, String name, String stage,
+                                                String skillKeyword) {
+        return baseMapper.selectPageForTenant(page,
+                AccountingTenantContextHolder.requireTenantContext(), name, stage, skillKeyword);
+    }
+
+    @Override
+    public List<Candidate> overdueForCurrentTenant(LocalDate today) {
+        return baseMapper.selectOverdueForTenant(
+                AccountingTenantContextHolder.requireTenantContext(), today);
+    }
+
+    @Override
+    public Candidate getForCurrentTenant(Long candidateId) {
+        return baseMapper.selectByIdForTenant(candidateId,
+                AccountingTenantContextHolder.requireTenantContext());
+    }
+
+    @Override
+    public boolean createForCurrentTenant(Candidate candidate) {
+        return save(candidate);
+    }
+
+    @Override
+    public boolean updateForCurrentTenant(Long candidateId, Candidate candidate, Integer expectedVersion) {
+        if (expectedVersion == null) {
+            throw BusinessException.of(400, "error.common.expectedVersionRequired");
+        }
+        candidate.setId(candidateId);
+        candidate.setVersion(expectedVersion);
+        return updateById(candidate);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean deleteForCurrentTenant(Long candidateId, Integer expectedVersion) {
+        if (expectedVersion == null) {
+            throw BusinessException.of(400, "error.common.expectedVersionRequired");
+        }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Candidate current = baseMapper.selectByIdForUpdateForTenant(candidateId, tenantId);
+        if (current == null) return false;
+        if (!expectedVersion.equals(current.getVersion())) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
+        return baseMapper.deleteByIdForTenant(candidateId, tenantId, expectedVersion) == 1;
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean updateById(Candidate candidate) {
-        if (candidate == null || candidate.getId() == null) return false;
-        Candidate existing = getById(candidate.getId());
+        if (candidate == null || candidate.getId() == null || candidate.getVersion() == null) {
+            throw BusinessException.of(400, "error.common.expectedVersionRequired");
+        }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Candidate existing = baseMapper.selectByIdForUpdateForTenant(candidate.getId(), tenantId);
         if (existing == null) return false;
-        boolean updated = super.updateById(candidate);
+        if (!candidate.getVersion().equals(existing.getVersion())) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
+        boolean updated = baseMapper.updateByIdForTenant(candidate, tenantId, candidate.getVersion()) == 1;
         if (updated && existing.getConvertedEngineerId() != null) {
             Long engineerId = existing.getConvertedEngineerId();
-            com.ses.entity.Engineer eng = engineerMapper.selectById(engineerId);
+            com.ses.entity.Engineer eng = engineerMapper.selectByIdForTenant(engineerId, tenantId);
             if (eng != null) {
                 boolean engChanged = false;
                 if (candidate.getDesiredRate() != null && !candidate.getDesiredRate().equals(eng.getExpectedUnitPrice())) {
@@ -88,7 +150,10 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
                     engChanged = true;
                 }
                 if (engChanged) {
-                    engineerMapper.updateById(eng);
+                    if (eng.getVersion() == null
+                            || engineerMapper.updateByIdForTenant(eng, tenantId, eng.getVersion()) != 1) {
+                        throw BusinessException.of(409, "error.common.optimisticLock");
+                    }
                 }
             }
         }
@@ -98,9 +163,28 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void changeStage(Long candidateId, String newStage, String reason, String remarks) {
-        Candidate candidate = this.getById(candidateId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Candidate candidate = baseMapper.selectByIdForTenant(candidateId, tenantId);
         if (candidate == null) {
             throw BusinessException.of("error.candidate.notFound");
+        }
+        changeStage(candidateId, newStage, reason, remarks, candidate.getVersion());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void changeStage(Long candidateId, String newStage, String reason, String remarks,
+                            Integer expectedVersion) {
+        if (expectedVersion == null) {
+            throw BusinessException.of(400, "error.common.expectedVersionRequired");
+        }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Candidate candidate = baseMapper.selectByIdForUpdateForTenant(candidateId, tenantId);
+        if (candidate == null) {
+            throw BusinessException.of("error.candidate.notFound");
+        }
+        if (!expectedVersion.equals(candidate.getVersion())) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
         }
         if (!StringUtils.hasText(newStage)) {
             throw BusinessException.of("error.candidate.stageRequired");
@@ -135,10 +219,10 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
         candidateActivityMapper.insert(activity);
 
         // currentStage(非正規化キャッシュ)の同期更新
-        Candidate update = new Candidate();
-        update.setId(candidateId);
-        update.setCurrentStage(newStage);
-        this.updateById(update);
+        if (baseMapper.updateStageForTenant(candidateId, tenantId, currentStage, newStage,
+                expectedVersion) != 1) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
     }
 
     private void validateStage(String stage) {
@@ -149,15 +233,26 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
 
     @Override
     public List<CandidateActivity> getActivities(Long candidateId) {
-        LambdaQueryWrapper<CandidateActivity> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(CandidateActivity::getCandidateId, candidateId)
-               .orderByDesc(CandidateActivity::getChangedAt);
-        return candidateActivityMapper.selectList(wrapper);
+        return getActivitiesForCurrentTenant(candidateId);
+    }
+
+    @Override
+    public List<CandidateActivity> getActivitiesForCurrentTenant(Long candidateId) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        if (baseMapper.selectByIdForTenant(candidateId, tenantId) == null) {
+            throw BusinessException.of(404, "error.candidate.notFound");
+        }
+        return candidateActivityMapper.selectByCandidateIdForTenant(candidateId, tenantId);
     }
 
     @Override
     public CandidateEngineerInitialDto getEngineerInitialDto(Long candidateId) {
-        Candidate candidate = this.getById(candidateId);
+        return getEngineerInitialDtoForCurrentTenant(candidateId);
+    }
+
+    @Override
+    public CandidateEngineerInitialDto getEngineerInitialDtoForCurrentTenant(Long candidateId) {
+        Candidate candidate = getForCurrentTenant(candidateId);
         if (candidate == null) {
             throw BusinessException.of("error.candidate.notFound");
         }
@@ -170,9 +265,27 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void linkConvertedEngineer(Long candidateId, Long engineerId) {
-        Candidate candidate = this.getById(candidateId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Candidate candidate = baseMapper.selectByIdForTenant(candidateId, tenantId);
         if (candidate == null) {
             throw BusinessException.of("error.candidate.notFound");
+        }
+        linkConvertedEngineer(candidateId, engineerId, candidate.getVersion());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void linkConvertedEngineer(Long candidateId, Long engineerId, Integer expectedVersion) {
+        if (expectedVersion == null) {
+            throw BusinessException.of(400, "error.common.expectedVersionRequired");
+        }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Candidate candidate = baseMapper.selectByIdForUpdateForTenant(candidateId, tenantId);
+        if (candidate == null) {
+            throw BusinessException.of("error.candidate.notFound");
+        }
+        if (!expectedVersion.equals(candidate.getVersion())) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
         }
         if (!StatusConstants.CANDIDATE_STAGE_HIRED.equals(candidate.getCurrentStage())) {
             throw BusinessException.of("error.candidate.notHiredStage");
@@ -181,7 +294,7 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
         if (engineerId == null) {
             throw BusinessException.of(400, "error.candidate.invalidEngineerId");
         }
-        com.ses.entity.Engineer eng = engineerMapper.selectById(engineerId);
+        com.ses.entity.Engineer eng = engineerMapper.selectByIdForTenant(engineerId, tenantId);
         if (eng == null) {
             throw BusinessException.of(404, "error.engineer.notFound");
         }
@@ -194,24 +307,13 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
         }
         
         // 他候補者との重複チェック
-        LambdaQueryWrapper<Candidate> dupCheck = new LambdaQueryWrapper<>();
-        dupCheck.eq(Candidate::getConvertedEngineerId, engineerId);
-        if (this.count(dupCheck) > 0) {
+        if (baseMapper.countByConvertedEngineerForTenant(engineerId, tenantId) > 0) {
             throw BusinessException.of(409, "error.candidate.alreadyLinked");
         }
 
-        com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Candidate> updateWrapper = new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
-        updateWrapper.eq(Candidate::getId, candidateId)
-                     .isNull(Candidate::getConvertedEngineerId)
-                     .set(Candidate::getConvertedEngineerId, engineerId);
-        
-        boolean updated = this.update(updateWrapper);
-        if (!updated) {
-            // Concurrent modification check
-            Candidate current = this.getById(candidateId);
-            if (current != null && engineerId.equals(current.getConvertedEngineerId())) {
-                return;
-            }
+        if (candidate.getVersion() == null
+                || baseMapper.linkConvertedEngineerForTenant(candidateId, engineerId, tenantId,
+                candidate.getVersion()) != 1) {
             throw BusinessException.of(409, "error.candidate.alreadyLinked");
         }
     }

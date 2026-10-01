@@ -1,9 +1,12 @@
 package com.ses.service.impl;
 
 import com.ses.entity.EngineerSkill;
+import com.ses.dto.skill.SkillReplaceRequest;
 import com.ses.service.EngineerSkillService;
 import com.ses.service.effective.EffectiveIntervalSupport;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
@@ -26,7 +29,7 @@ import com.ses.common.exception.BusinessException;
 @org.springframework.test.context.jdbc.Sql("/sql/engineer-schema-h2.sql")
 // replaceSkills は要員・スキルタグの存在を検証するため、対象データをseedする。
 @org.springframework.test.context.jdbc.Sql(statements = {
-        "INSERT INTO t_engineer (id, full_name) VALUES (1, 'テスト要員')",
+        "INSERT INTO t_engineer (id, tenant_id, full_name) VALUES (1, 'default', 'テスト要員')",
         "INSERT INTO m_skill_tag (id, skill_name) VALUES (10, 'Java'), (20, 'Python')"
 })
 public class EngineerSkillServiceImplTest {
@@ -36,6 +39,16 @@ public class EngineerSkillServiceImplTest {
 
     @Autowired
     private com.ses.mapper.EngineerSkillEventMapper engineerSkillEventMapper;
+
+    @BeforeEach
+    void bindTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
 
     @Test
     public void testReplaceSkills() {
@@ -138,6 +151,33 @@ public class EngineerSkillServiceImplTest {
 
         BusinessException ex = assertThrows(BusinessException.class, () -> engineerSkillService.replaceSkills(engineerId, skills));
         assertTrue(ex.getMessage().contains("error.skill.notFound"));
+    }
+
+    @Test
+    void replaceSkills_explicitRequestのreasonとversionを監査する() {
+        SkillReplaceRequest request = new SkillReplaceRequest();
+        request.setExpectedVersion(0);
+        request.setReason("HR手動資格更新");
+        SkillReplaceRequest.SkillItem item = new SkillReplaceRequest.SkillItem();
+        item.setSkillId(10L);
+        item.setProficiency("上級");
+        request.setSkills(List.of(item));
+
+        engineerSkillService.replaceSkills(1L, request);
+
+        com.ses.entity.EngineerSkillEvent event = engineerSkillEventMapper.selectByEngineerId(1L).get(0);
+        assertEquals("HR手動資格更新", event.getReason());
+        assertEquals("OPEN", event.getEventType());
+        assertNotNull(event.getEffectiveFrom());
+        assertNull(event.getEffectiveTo());
+
+        SkillReplaceRequest stale = new SkillReplaceRequest();
+        stale.setExpectedVersion(0);
+        stale.setReason("古い更新");
+        stale.setSkills(List.of(item));
+        BusinessException conflict = assertThrows(BusinessException.class,
+                () -> engineerSkillService.replaceSkills(1L, stale));
+        assertTrue(conflict.getMessage().contains("error.common.optimisticLock"));
     }
 
     private static boolean noActiveOpenEvent(List<com.ses.entity.EngineerSkillEvent> events, Long skillId,

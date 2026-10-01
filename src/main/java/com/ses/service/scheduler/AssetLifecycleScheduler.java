@@ -19,6 +19,7 @@ public class AssetLifecycleScheduler {
 
     private final AssetAlertService assetAlertService;
     private final com.ses.service.ExternalAccountService externalAccountService;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
 
     /**
      * 毎日午前9時に返却期限超過およびリース満了接近を監視し、未確認失効の定期ポーリングを実行
@@ -27,6 +28,10 @@ public class AssetLifecycleScheduler {
     @SchedulerLock(name = "assetLifecycleDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void runDailyAssetChecks() {
         log.info("Running daily asset lifecycle check job...");
+        tenantAwareBatchRunner.run(tenant -> runForTenant());
+    }
+
+    private void runForTenant() {
         try {
             int overdueCount = assetAlertService.checkOverdueAssignments();
             int leaseCount = assetAlertService.checkExpiringLeases();
@@ -34,7 +39,7 @@ public class AssetLifecycleScheduler {
             log.info("Daily asset check finished: overdueAlerts={}, leaseAlerts={}, polledRevokes={}",
                     overdueCount, leaseCount, polledCount);
         } catch (Exception e) {
-            log.error("Failed to execute daily asset lifecycle check job", e);
+            log.error("Failed to execute daily asset check job", e);
         }
     }
 }

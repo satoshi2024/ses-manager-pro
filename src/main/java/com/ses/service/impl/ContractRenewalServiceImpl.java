@@ -1,6 +1,5 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.entity.Contract;
 import com.ses.mapper.ContractMapper;
 import com.ses.service.ContractRenewalService;
@@ -12,6 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -39,16 +39,12 @@ public class ContractRenewalServiceImpl implements ContractRenewalService {
 
     @Override
     public int generateRenewalDrafts() {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         int days = systemConfigService.getInt("notice.contract-end-days", 30);
         LocalDate today = LocalDate.now();
         LocalDate horizon = today.plusDays(days);
 
-        List<Contract> candidates = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
-                .eq(Contract::getAutoRenew, 1)
-                .eq(Contract::getStatus, "稼動中")
-                .isNotNull(Contract::getEndDate)
-                .ge(Contract::getEndDate, today)
-                .le(Contract::getEndDate, horizon));
+        List<Contract> candidates = contractMapper.selectAutoRenewCandidatesForTenant(tenantId, today, horizon);
 
         int created = 0;
         ContractRenewalService self = applicationContext.getBean(ContractRenewalService.class);
@@ -94,11 +90,13 @@ public class ContractRenewalServiceImpl implements ContractRenewalService {
     }
 
     private boolean hasExistingDraft(Long originalContractId) {
-        return contractMapper.countRenewedDraftsIncludingDeleted(originalContractId) > 0;
+        return contractMapper.countRenewedDraftsIncludingDeleted(originalContractId,
+                AccountingTenantContextHolder.requireTenantContext()) > 0;
     }
 
     private Contract buildDraft(Contract original) {
         Contract draft = new Contract();
+        draft.setTenantId(AccountingTenantContextHolder.requireTenantContext());
         draft.setEngineerId(original.getEngineerId());
         draft.setProjectId(original.getProjectId());
         draft.setCustomerId(original.getCustomerId());

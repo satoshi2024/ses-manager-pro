@@ -6,6 +6,7 @@ import com.ses.entity.DocumentVersion;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.storage.DocumentStorage;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -28,6 +29,7 @@ import static org.mockito.Mockito.when;
  * Task B2 DocumentExportServiceImpl テスト。
  */
 @ExtendWith(MockitoExtension.class)
+@EnableDefaultTenantTestContext
 class DocumentExportServiceImplTest {
 
     @Mock DocumentMapper documentMapper;
@@ -58,7 +60,7 @@ class DocumentExportServiceImplTest {
         version.setScanStatus("CLEAN");
 
         when(documentMapper.selectList(any())).thenReturn(List.of(doc));
-        when(documentVersionMapper.findByDocumentId(100L)).thenReturn(List.of(version));
+        when(documentVersionMapper.findByTenantAndDocumentId("default", 100L)).thenReturn(List.of(version));
         when(documentStorage.open("key-100")).thenReturn(new ByteArrayInputStream("PDF content".getBytes()));
         org.mockito.Mockito.doNothing().when(documentService).applyDataScopeFilter(any());
 
@@ -105,7 +107,7 @@ class DocumentExportServiceImplTest {
         dirty.setScanStatus("PENDING");
 
         when(documentMapper.selectList(any())).thenReturn(List.of(doc));
-        when(documentVersionMapper.findByDocumentId(200L)).thenReturn(List.of(dirty));
+        when(documentVersionMapper.findByTenantAndDocumentId("default", 200L)).thenReturn(List.of(dirty));
         org.mockito.Mockito.doNothing().when(documentService).applyDataScopeFilter(any());
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();

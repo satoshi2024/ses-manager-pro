@@ -7,6 +7,8 @@ import com.ses.entity.TrainingCourseSkill;
 import com.ses.mapper.SkillTagMapper;
 import com.ses.mapper.TrainingCourseMapper;
 import com.ses.mapper.TrainingCourseSkillMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,25 +35,34 @@ class TrainingCourseMasterServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new TrainingCourseMasterServiceImpl(courseMapper, courseSkillMapper, skillTagMapper);
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
     void courseとcanonicalSkillを登録更新無効化できる() {
         when(skillTagMapper.selectBatchIds(List.of(5L))).thenReturn(List.of(skill(5L)));
-        when(courseMapper.updateById(any(TrainingCourse.class))).thenReturn(1);
+        when(courseMapper.updateForTenant(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(1);
+        when(courseMapper.deactivateForTenant(any(), any(), any(), any())).thenReturn(1);
         TrainingCourseMasterService.TrainingCourseCommand command = command(List.of(5L), 0);
 
-        TrainingCourse created = service.create(command, 7L);
+        var created = service.create(command, 7L);
         TrainingCourse current = course(11L, 1);
-        when(courseMapper.selectById(11L)).thenReturn(current);
-        TrainingCourse updated = service.update(11L, command(List.of(5L), 1), 7L);
-        TrainingCourse disabled = service.deactivate(11L, 7L);
+        when(courseMapper.selectForUpdateByIdForTenant(11L, "default")).thenReturn(current);
+        var updated = service.update(11L, command(List.of(5L), 1), 7L);
+        var disabled = service.deactivate(11L, 2, 7L);
 
-        assertEquals("AWS研修", created.getName());
-        assertEquals(11L, updated.getId());
-        assertEquals(0, disabled.getActiveFlag());
+        assertEquals("AWS研修", created.name());
+        assertEquals(11L, updated.id());
+        assertEquals(0, disabled.activeFlag());
         verify(courseSkillMapper, org.mockito.Mockito.times(2)).insert(any(TrainingCourseSkill.class));
-        verify(courseSkillMapper, org.mockito.Mockito.times(2)).delete(any());
+        verify(courseSkillMapper).deleteByCourseForTenant("default", null);
+        verify(courseSkillMapper).deleteByCourseForTenant("default", 11L);
     }
 
     @Test
@@ -66,8 +77,10 @@ class TrainingCourseMasterServiceImplTest {
                 "default", "provider", "name", null, new BigDecimal("-1"), null, null, 1, null, List.of());
         assertThrows(BusinessException.class, () -> service.create(invalid, 7L));
 
-        when(courseMapper.selectById(11L)).thenReturn(course(11L, 2));
+        when(courseMapper.selectForUpdateByIdForTenant(11L, "default")).thenReturn(course(11L, 2));
         assertThrows(BusinessException.class, () -> service.update(11L, command(List.of(), 1), 7L));
+        assertThrows(BusinessException.class, () -> service.update(11L, command(List.of(), null), 7L));
+        assertThrows(BusinessException.class, () -> service.deactivate(11L, null, 7L));
     }
 
     private TrainingCourseMasterService.TrainingCourseCommand command(List<Long> skills, Integer version) {

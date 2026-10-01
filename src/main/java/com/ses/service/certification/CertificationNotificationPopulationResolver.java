@@ -9,6 +9,7 @@ import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.LifecycleCaseMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -28,66 +29,76 @@ public class CertificationNotificationPopulationResolver {
     private final EngineerAccountLinkMapper accountLinkMapper;
     private final UserOrganizationMapper userOrganizationMapper;
     private final SysUserMapper sysUserMapper;
+    private final CertificationLifecycleStateResolver lifecycleStateResolver;
 
     public CertificationNotificationPopulationResolver(LifecycleCaseMapper lifecycleCaseMapper,
                                                        EngineerAccountLinkMapper accountLinkMapper,
                                                        UserOrganizationMapper userOrganizationMapper,
                                                        SysUserMapper sysUserMapper) {
+        this(lifecycleCaseMapper, accountLinkMapper, userOrganizationMapper, sysUserMapper,
+                new CertificationLifecycleStateResolver());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public CertificationNotificationPopulationResolver(LifecycleCaseMapper lifecycleCaseMapper,
+                                                       EngineerAccountLinkMapper accountLinkMapper,
+                                                       UserOrganizationMapper userOrganizationMapper,
+                                                       SysUserMapper sysUserMapper,
+                                                       CertificationLifecycleStateResolver lifecycleStateResolver) {
         this.lifecycleCaseMapper = lifecycleCaseMapper;
         this.accountLinkMapper = accountLinkMapper;
         this.userOrganizationMapper = userOrganizationMapper;
         this.sysUserMapper = sysUserMapper;
+        this.lifecycleStateResolver = lifecycleStateResolver;
     }
 
     public Population resolve(Long engineerId, LocalDate asOf) {
+        return resolve(AccountingTenantContextHolder.requireTenantContext(), engineerId, asOf);
+    }
+
+    /** tenantを全母集団queryへ渡す資格期限通知用resolver。 */
+    public Population resolve(String tenantId, Long engineerId, LocalDate asOf) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw com.ses.common.exception.BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        return resolveInternal(tenantId, engineerId, asOf);
+    }
+
+    private Population resolveInternal(String tenantId, Long engineerId, LocalDate asOf) {
         if (engineerId == null || asOf == null) {
             return Population.empty();
         }
-        List<LifecycleCase> cases = lifecycleCaseMapper.selectList(new LambdaQueryWrapper<LifecycleCase>()
-                .eq(LifecycleCase::getEngineerId, engineerId)
-                .orderByAsc(LifecycleCase::getAnchorDate)
-                .orderByAsc(LifecycleCase::getId));
-        LifecycleCase latestResignation = latestCompleted(cases, "RESIGNATION", asOf);
-        LifecycleCase latestReinstatement = latestCompleted(cases, "REINSTATEMENT", asOf);
-        boolean reinstatedNow = latestReinstatement != null
-                && (latestReinstatement.getCompletedAt() != null
-                ? asOf.equals(latestReinstatement.getCompletedAt().toLocalDate())
-                : asOf.equals(latestReinstatement.getAnchorDate()));
-        if (latestResignation != null && !isAfter(latestReinstatement, latestResignation)) {
-            return populationFor(cases, engineerId, asOf, PopulationCase.RESIGNATION, false);
+        List<LifecycleCase> cases = lifecycleCaseMapper.selectByEngineerIdAndTenant(engineerId, tenantId);
+        CertificationLifecycleStateResolver.Resolution lifecycle = lifecycleStateResolver.resolve(cases, asOf);
+        if ("RESIGNED".equals(lifecycle.state())) {
+            return populationFor(tenantId, cases, engineerId, asOf, PopulationCase.RESIGNATION, false);
         }
-
-        boolean onLeave = cases.stream().anyMatch(item -> "LEAVE".equals(item.getLifecycleType())
-                && ("ACTIVE".equals(item.getStatus()) || "ON_HOLD".equals(item.getStatus()))
-                && !after(item.getAnchorDate(), asOf));
-        if (onLeave) {
-            return populationFor(cases, engineerId, asOf, PopulationCase.LEAVE, false);
+        if ("ON_LEAVE".equals(lifecycle.state())) {
+            return populationFor(tenantId, cases, engineerId, asOf, PopulationCase.LEAVE, false);
         }
-        return populationFor(cases, engineerId, asOf,
-                reinstatedNow ? PopulationCase.REINSTATEMENT : PopulationCase.NORMAL, reinstatedNow);
+        return populationFor(tenantId, cases, engineerId, asOf,
+                lifecycle.reinstatement() ? PopulationCase.REINSTATEMENT : PopulationCase.NORMAL,
+                lifecycle.reinstatement());
     }
 
-    private Population populationFor(List<LifecycleCase> cases, Long engineerId, LocalDate asOf,
+    private Population populationFor(String tenantId, List<LifecycleCase> cases, Long engineerId, LocalDate asOf,
                                      PopulationCase state, boolean reinstatement) {
-        EngineerAccountLink link = accountLinkMapper.selectByEngineerId(engineerId);
-        SysUser account = link == null ? null : sysUserMapper.selectById(link.getSysUserId());
+        EngineerAccountLink link = accountLinkMapper.selectByEngineerIdAndTenant(engineerId, tenantId);
+        SysUser account = link == null ? null : sysUserMapper.selectByIdAndTenant(link.getSysUserId(), tenantId);
         boolean accountActive = account != null && Integer.valueOf(1).equals(account.getStatus());
         boolean allowSelf = accountActive && state != PopulationCase.RESIGNATION && state != PopulationCase.LEAVE;
 
         Set<Long> managerIds = new LinkedHashSet<>();
         if (state != PopulationCase.RESIGNATION && link != null) {
-            List<UserOrganization> assignments = userOrganizationMapper.selectList(
-                    new LambdaQueryWrapper<UserOrganization>()
-                            .eq(UserOrganization::getUserId, link.getSysUserId())
-                            .eq(UserOrganization::getPrimaryFlag, 1)
-                            .eq(UserOrganization::getDeletedFlag, 0)
-                            .le(UserOrganization::getValidFrom, asOf)
-                            .and(wrapper -> wrapper.isNull(UserOrganization::getValidTo)
-                                    .or().ge(UserOrganization::getValidTo, asOf))
-                            .orderByDesc(UserOrganization::getId));
+            List<UserOrganization> assignments = userOrganizationMapper
+                    .selectByUserAndTenant(link.getSysUserId(), tenantId).stream()
+                        .filter(item -> Integer.valueOf(1).equals(item.getPrimaryFlag()))
+                        .filter(item -> item.getValidFrom() == null || !item.getValidFrom().isAfter(asOf))
+                        .filter(item -> item.getValidTo() == null || !item.getValidTo().isBefore(asOf))
+                        .toList();
             for (UserOrganization assignment : assignments) {
                 Long managerId = assignment.getManagerUserId();
-                if (managerId == null || !isActiveUser(managerId)) {
+                if (managerId == null || !isActiveUser(managerId, tenantId)) {
                     continue;
                 }
                 managerIds.add(managerId);
@@ -95,12 +106,8 @@ public class CertificationNotificationPopulationResolver {
             }
         }
 
-        List<Long> hrIds = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
-                        .eq(SysUser::getRole, "HR")
-                        .eq(SysUser::getStatus, 1)
-                        .eq(SysUser::getDeletedFlag, 0)
-                        .orderByAsc(SysUser::getId))
-                .stream().map(SysUser::getId).filter(java.util.Objects::nonNull).toList();
+        List<SysUser> hrUsers = sysUserMapper.selectActiveByRoleAndTenant("HR", tenantId);
+        List<Long> hrIds = hrUsers.stream().map(SysUser::getId).filter(java.util.Objects::nonNull).toList();
 
         List<Long> recipients = new ArrayList<>();
         if (allowSelf) {
@@ -113,8 +120,8 @@ public class CertificationNotificationPopulationResolver {
                 reinstatement, account != null);
     }
 
-    private boolean isActiveUser(Long userId) {
-        SysUser user = sysUserMapper.selectById(userId);
+    private boolean isActiveUser(Long userId, String tenantId) {
+        SysUser user = sysUserMapper.selectByIdAndTenant(userId, tenantId);
         return user != null && Integer.valueOf(1).equals(user.getStatus());
     }
 

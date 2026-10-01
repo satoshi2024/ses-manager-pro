@@ -39,16 +39,23 @@ import com.ses.mapper.PortalUserMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ServiceCommentMapper;
 import com.ses.mapper.ServiceRequestMapper;
+import com.ses.mapper.ServiceRequestSequenceMapper;
 import com.ses.mapper.ServiceSlaClockMapper;
 import com.ses.mapper.ServiceSlaPolicyMapper;
 import com.ses.mapper.ServiceStateEventMapper;
+import com.ses.mapper.ServiceRequestSequenceMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.CustomerScopeResolver;
+import com.ses.service.security.TenantOwnershipResolver;
 import com.ses.service.servicedesk.ServiceRequestService;
 import com.ses.service.servicedesk.ServiceSlaCalculator;
 import com.ses.service.servicedesk.ServiceDeskExecutionContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -70,7 +77,14 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ServiceRequestServiceImpl implements ServiceRequestService {
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CustomerScopeResolver customerScopeResolver;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ServiceRequestSequenceMapper requestSequenceMapper;
+
     private final ServiceRequestMapper serviceRequestMapper;
+    private final ServiceRequestSequenceMapper sequenceMapper;
     private final ServiceSlaPolicyMapper slaPolicyMapper;
     private final ServiceSlaClockMapper slaClockMapper;
     private final ServiceCommentMapper commentMapper;
@@ -87,6 +101,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     private final ServiceSlaCalculator slaCalculator;
     private final DataScopeService dataScopeService;
     private final Clock clock;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
 
     private static final Set<String> VALID_CATEGORIES = Set.of(
             "CONTRACT", "BILLING", "ATTENDANCE", "QUALITY", "SYSTEM", "OTHER"
@@ -94,6 +109,10 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
 
     private static final Set<String> VALID_PRIORITIES = Set.of(
             "P0", "P1", "P2", "P3"
+    );
+
+    private static final Set<String> VALID_CHANNELS = Set.of(
+            "PORTAL", "EMAIL", "PHONE", "MEETING", "INTERNAL"
     );
 
     @Override
@@ -114,25 +133,56 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             throw BusinessException.of(400, "無効な優先度です: " + req.getPriority());
         }
 
-        Customer customer = customerMapper.selectById(req.getCustomerId());
+        requireExecutionContext(executionContext);
+
+        String tenantId = currentTenant();
+        if (!tenantId.equals(executionContext.tenantId().trim())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+
+        // チャネルの検証およびポータル強制上書き
+        String effectiveChannel;
+        if (isPortal) {
+            effectiveChannel = "PORTAL";
+        } else {
+            effectiveChannel = StringUtils.hasText(req.getChannel()) ? req.getChannel().trim() : "INTERNAL";
+            if (!VALID_CHANNELS.contains(effectiveChannel)) {
+                throw BusinessException.of(400, "無効なチャネルです: " + effectiveChannel);
+            }
+        }
+
+        Customer customer = tenantOwnershipResolver != null
+                ? tenantOwnershipResolver.selectCustomer(tenantId, req.getCustomerId())
+                : customerMapper.selectById(req.getCustomerId());
         if (customer == null || Integer.valueOf(1).equals(customer.getDeletedFlag())) {
             throw BusinessException.of(404, "指定された顧客が見つかりません");
         }
 
-        if (!isPortal && dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(req.getCustomerId());
+        if (!isPortal) {
+            assertInternalCustomerAllowed(req.getCustomerId());
         }
 
-        requireExecutionContext(executionContext);
-        validateLinkedEntities(req.getCustomerId(), req.getContactId(), req.getContractId(),
+        validateLinkedEntities(tenantId, req.getCustomerId(), req.getContactId(), req.getContractId(),
                 req.getProjectId(), req.getEngineerId());
+
+        // 担当者検証 (ポータル起票時は常にnull、内部起票時は存在・有効・適格ロール検証)
+        Long effectiveOwnerUserId = isPortal ? null : req.getOwnerUserId();
+        validateOwnerUser(effectiveOwnerUserId);
+
         executionContext = bindCalendarScope(executionContext, req.getCustomerId(), req.getContractId());
 
+        // SLA ポリシー取得（存在しない場合は起票トランザクションを即時fail-closedロールバック）
+        ServiceSlaPolicy policy = getActivePolicy(req.getPriority());
+        if (policy == null) {
+            throw BusinessException.of(400, "優先度 " + req.getPriority() + " に対応する有効なSLAポリシーが見つかりません");
+        }
+
         LocalDateTime now = executionContext.occurredAt().atZone(executionContext.zoneId()).toLocalDateTime();
-        String requestNo = generateRequestNo(now);
+        String requestNo = generateRequestNo(now, executionContext.tenantId());
         Long effectiveActorId = isPortal ? portalUserId : executionContext.actorId();
 
         ServiceRequest serviceRequest = ServiceRequest.builder()
+                .tenantId(executionContext.tenantId())
                 .requestNo(requestNo)
                 .customerId(req.getCustomerId())
                 .contactId(req.getContactId())
@@ -141,10 +191,10 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .engineerId(req.getEngineerId())
                 .category(req.getCategory())
                 .priority(req.getPriority())
-                .channel(StringUtils.hasText(req.getChannel()) ? req.getChannel() : (isPortal ? "PORTAL" : "INTERNAL"))
+                .channel(effectiveChannel)
                 .subject(req.getSubject())
                 .description(req.getDescription())
-                .ownerUserId(req.getOwnerUserId())
+                .ownerUserId(effectiveOwnerUserId)
                 .status("RECEIVED")
                 .reopenCount(0)
                 .portalUserId(isPortal ? portalUserId : null)
@@ -154,11 +204,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .updatedAt(now)
                 .build();
 
-        serviceRequestMapper.insert(serviceRequest);
+        try {
+            serviceRequestMapper.insert(serviceRequest);
 
-        // SLA ポリシー取得・初期SLA計時作成
-        ServiceSlaPolicy policy = getActivePolicy(req.getPriority());
-        if (policy != null) {
             LocalDateTime responseDeadline = slaCalculator.calculateDeadline(executionContext.occurredAt(),
                     policy.getResponseTimeHours(), policy, executionContext.organizationId(),
                     executionContext.legalEntityId(), executionContext.zoneId())
@@ -175,7 +223,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     .responseDeadline(responseDeadline)
                     .resolveDeadline(resolveDeadline)
                     .responseBreached(false)
+                    .responseBreachedAt(null)
                     .resolveBreached(false)
+                    .resolveBreachedAt(null)
                     .totalPauseMinutes(0)
                     .status("RUNNING")
                     .version(0)
@@ -183,36 +233,45 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     .updatedAt(now)
                     .build();
             slaClockMapper.insert(slaClock);
+
+            // 初期監査イベント記録
+            ServiceStateEvent event = ServiceStateEvent.builder()
+                    .serviceRequestId(serviceRequest.getId())
+                    .roundNo(1)
+                    .fromStatus(null)
+                    .toStatus("RECEIVED")
+                    .reason("新規起票")
+                    .actorType(executionContext.actorType())
+                    .actorId(effectiveActorId != null ? effectiveActorId : 0L)
+                    .actorName(StringUtils.hasText(executionContext.actorName()) ? executionContext.actorName()
+                            : (isPortal ? resolvePortalUserName(portalUserId) : resolveUserName(effectiveActorId)))
+                    .createdAt(now)
+                    .build();
+            stateEventMapper.insert(event);
+
+            return serviceRequest;
+        } catch (BusinessException be) {
+            throw be;
+        } catch (DuplicateKeyException dke) {
+            log.warn("サービスリクエスト起票で一意制約違反が発生しました: {}", dke.getMessage());
+            throw BusinessException.of(409, "リクエスト番号が重複しました。再試行してください");
+        } catch (TransientDataAccessException tdae) {
+            log.warn("サービスリクエスト起票でトランザクション競合が発生しました: {}", tdae.getMessage());
+            throw BusinessException.of(503, "データベース処理で一時的な競合が発生しました。再試行してください");
+        } catch (DataAccessException dae) {
+            log.error("サービスリクエスト起票でDB例外が発生しました: {}", dae.getMessage(), dae);
+            throw BusinessException.of(503, "サービスリクエストの登録に失敗しました: " + dae.getMessage());
         }
-
-        // 初期監査イベント記録
-        ServiceStateEvent event = ServiceStateEvent.builder()
-                .serviceRequestId(serviceRequest.getId())
-                .roundNo(1)
-                .fromStatus(null)
-                .toStatus("RECEIVED")
-                .reason("新規起票")
-                .actorType(executionContext.actorType())
-                .actorId(effectiveActorId != null ? effectiveActorId : 0L)
-                .actorName(StringUtils.hasText(executionContext.actorName()) ? executionContext.actorName()
-                        : (isPortal ? resolvePortalUserName(portalUserId) : resolveUserName(effectiveActorId)))
-                .createdAt(now)
-                .build();
-        stateEventMapper.insert(event);
-
-        return serviceRequest;
     }
 
     @Override
     @Transactional(readOnly = true)
     public ServiceRequestDto getInternalDetail(Long id) {
-        ServiceRequest req = serviceRequestMapper.selectById(id);
-        if (req == null) {
+        ServiceRequest req = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
+        if (req == null || !currentTenant().equals(req.getTenantId())) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
-        if (dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(req.getCustomerId());
-        }
+        assertInternalCustomerAllowed(req.getCustomerId());
 
         return convertToInternalDto(req);
     }
@@ -220,8 +279,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Override
     @Transactional(readOnly = true)
     public PortalServiceRequestDto getPortalDetail(Long id, Long customerId) {
-        ServiceRequest req = serviceRequestMapper.selectById(id);
-        if (req == null || !Objects.equals(req.getCustomerId(), customerId)) {
+        ServiceRequest req = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
+        if (req == null || !currentTenant().equals(req.getTenantId()) || !Objects.equals(req.getCustomerId(), customerId)) {
             // 他社または存在しない場合は404秘匿
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
@@ -235,18 +294,21 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                                                           String priority, String category, Long customerId) {
         Page<ServiceRequest> mpPage = new Page<>(page, size);
         LambdaQueryWrapper<ServiceRequest> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ServiceRequest::getTenantId, currentTenant());
 
         if (customerId != null) {
-            if (dataScopeService.isScoped()) {
-                dataScopeService.assertAllowedCustomer(customerId);
-            }
+            assertInternalCustomerAllowed(customerId);
             wrapper.eq(ServiceRequest::getCustomerId, customerId);
-        } else if (dataScopeService.isScoped()) {
-            Set<Long> allowed = dataScopeService.allowedCustomerIds();
-            if (allowed == null || allowed.isEmpty()) {
-                return new Page<>(page, size, 0);
+        } else {
+            Set<Long> allowed = resolvedCustomerIds();
+            if (allowed == null) {
+                // all件可視
+            } else {
+                if (allowed.isEmpty()) {
+                    return new Page<>(page, size, 0);
+                }
+                wrapper.in(ServiceRequest::getCustomerId, allowed);
             }
-            wrapper.in(ServiceRequest::getCustomerId, allowed);
         }
 
         if (StringUtils.hasText(status)) {
@@ -285,6 +347,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
 
         Page<ServiceRequest> mpPage = new Page<>(page, size);
         LambdaQueryWrapper<ServiceRequest> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ServiceRequest::getTenantId, currentTenant());
         wrapper.eq(ServiceRequest::getCustomerId, customerId);
 
         if (StringUtils.hasText(status)) {
@@ -310,13 +373,14 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateRequest(Long id, ServiceRequestUpdateRequest req) {
-        ServiceRequest existing = serviceRequestMapper.selectById(id);
-        if (existing == null) {
+        if (req == null || req.getVersion() == null) {
+            throw BusinessException.of(400, "サービスリクエストversionは必須です");
+        }
+        ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
+        if (existing == null || !currentTenant().equals(existing.getTenantId())) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
-        if (dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(existing.getCustomerId());
-        }
+        assertInternalCustomerAllowed(existing.getCustomerId());
 
         if (!VALID_CATEGORIES.contains(req.getCategory())) {
             throw BusinessException.of(400, "無効なカテゴリです: " + req.getCategory());
@@ -325,13 +389,14 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             throw BusinessException.of(400, "無効な優先度です: " + req.getPriority());
         }
 
-        validateLinkedEntities(existing.getCustomerId(), req.getContactId(), req.getContractId(),
+        validateLinkedEntities(currentTenant(), existing.getCustomerId(), req.getContactId(), req.getContractId(),
                 req.getProjectId(), req.getEngineerId());
+        validateOwnerUser(req.getOwnerUserId());
 
-        int expectedVersion = req.getVersion() != null ? req.getVersion()
-                : (existing.getVersion() != null ? existing.getVersion() : 0);
+        int expectedVersion = req.getVersion();
         int updated = serviceRequestMapper.update(null, new LambdaUpdateWrapper<ServiceRequest>()
                 .eq(ServiceRequest::getId, id)
+                .eq(ServiceRequest::getTenantId, currentTenant())
                 .eq(ServiceRequest::getVersion, expectedVersion)
                 .set(ServiceRequest::getContactId, req.getContactId())
                 .set(ServiceRequest::getContractId, req.getContractId())
@@ -353,19 +418,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void changeStatus(Long id, ServiceRequestStatusChangeRequest req, Long actorId, String actorType, String actorName) {
-        // 既存のservice直呼び出し互換。HTTP/明示context経路はversionを必須にする。
-        if (req.getVersion() == null) {
-            ServiceRequest current = serviceRequestMapper.selectById(id);
-            if (current == null) {
-                throw BusinessException.of(404, "指定されたリクエストが見つかりません");
-            }
-            req = ServiceRequestStatusChangeRequest.builder()
-                    .toStatus(req.getToStatus())
-                    .reason(req.getReason())
-                    .version(current.getVersion() == null ? 0 : current.getVersion())
-                    .organizationId(req.getOrganizationId())
-                    .legalEntityId(req.getLegalEntityId())
-                    .build();
+        // 既存のservice直呼び出し互換でも、クライアントのexpectedVersionを省略した更新は許可しない。
+        if (req == null || req.getVersion() == null) {
+            throw BusinessException.of(400, "サービスリクエストversionは必須です");
         }
         changeStatus(id, req, legacyContext(actorId, "PORTAL_USER".equals(actorType), actorId,
                 actorType, actorName, null, null));
@@ -375,18 +430,18 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Transactional(rollbackFor = Exception.class)
     public void changeStatus(Long id, ServiceRequestStatusChangeRequest req,
                              ServiceDeskExecutionContext executionContext) {
-        requireExecutionContext(executionContext);
         if (req == null || req.getVersion() == null) {
             throw BusinessException.of(400, "サービスリクエストversionは必須です");
         }
-        ServiceRequest existing = serviceRequestMapper.selectById(id);
-        if (existing == null) {
+        requireExecutionContext(executionContext);
+        ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
+        if (existing == null || !currentTenant().equals(existing.getTenantId())) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
         // クライアント指定の法人は受理せず、顧客・契約から解決した法人既定カレンダーを使う。
         executionContext = bindCalendarScope(executionContext, existing.getCustomerId(), existing.getContractId());
-        if ("INTERNAL_USER".equals(executionContext.actorType()) && dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(existing.getCustomerId());
+        if ("INTERNAL_USER".equals(executionContext.actorType())) {
+            assertInternalCustomerAllowed(existing.getCustomerId());
         }
 
         String fromStatus = existing.getStatus();
@@ -401,8 +456,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         }
         String toStatus = "REOPENED".equals(requestedStatus) ? "IN_PROGRESS" : requestedStatus;
 
-        int expectedVersion = req.getVersion() != null ? req.getVersion()
-                : (existing.getVersion() != null ? existing.getVersion() : 0);
+        int expectedVersion = req.getVersion();
         int currentVersion = existing.getVersion() != null ? existing.getVersion() : 0;
         if (expectedVersion != currentVersion) {
             throw BusinessException.of(409, "サービスリクエストが更新済みです。再読込してください");
@@ -435,7 +489,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     if (clockRow.getFirstRespondedAt() == null) {
                         clockRow.setFirstRespondedAt(now);
                     if (clockRow.getResponseDeadline() != null && now.isAfter(clockRow.getResponseDeadline())) {
-                            clockRow.setResponseBreached(true);
+                        markResponseBreach(clockRow, now);
                         }
                     }
                 }
@@ -454,7 +508,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     clockRow.setResolvedAt(now);
                     clockRow.setStatus("COMPLETED");
                     if (clockRow.getResolveDeadline() != null && now.isAfter(clockRow.getResolveDeadline())) {
-                        clockRow.setResolveBreached(true);
+                        markResolveBreach(clockRow, now);
                     }
                 }
                 break;
@@ -465,6 +519,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     clockRow.setStatus("COMPLETED");
                     if (clockRow.getResolvedAt() == null) {
                         clockRow.setResolvedAt(now);
+                    }
+                    if (clockRow.getResolveDeadline() != null && now.isAfter(clockRow.getResolveDeadline())) {
+                        markResolveBreach(clockRow, now);
                     }
                 }
                 break;
@@ -481,8 +538,10 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
 
                     // 新規ラウンド SLA クロック作成
                     ServiceSlaPolicy policy = getActivePolicy(existing.getPriority());
-                    if (policy != null) {
-                        LocalDateTime responseDeadline = slaCalculator.calculateDeadline(executionContext.occurredAt(),
+                    if (policy == null) {
+                        throw BusinessException.of(400, "優先度 " + existing.getPriority() + " に対応する有効なSLAポリシーが見つかりません");
+                    }
+                    LocalDateTime responseDeadline = slaCalculator.calculateDeadline(executionContext.occurredAt(),
                                 policy.getResponseTimeHours(), policy, executionContext.organizationId(),
                                 executionContext.legalEntityId(), executionContext.zoneId())
                                 .atZone(executionContext.zoneId()).toLocalDateTime();
@@ -498,7 +557,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                                 .responseDeadline(responseDeadline)
                                 .resolveDeadline(resolveDeadline)
                                 .responseBreached(false)
+                                .responseBreachedAt(null)
                                 .resolveBreached(false)
+                                .resolveBreachedAt(null)
                                 .totalPauseMinutes(0)
                                 .status("RUNNING")
                                 .version(0)
@@ -506,7 +567,6 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                                 .updatedAt(now)
                                 .build();
                         slaClockMapper.insert(newClock);
-                    }
                     // 旧ラウンドは履歴として不変。今回の状態変更では更新しない。
                     clockRow = null;
                 }
@@ -521,6 +581,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         existing.setUpdatedAt(now);
         LambdaUpdateWrapper<ServiceRequest> requestUpdate = new LambdaUpdateWrapper<ServiceRequest>()
                 .eq(ServiceRequest::getId, existing.getId())
+                .eq(ServiceRequest::getTenantId, currentTenant())
                 .eq(ServiceRequest::getVersion, expectedVersion)
                 .eq(ServiceRequest::getStatus, fromStatus)
                 .set(ServiceRequest::getStatus, existing.getStatus())
@@ -545,8 +606,10 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     .eq(ServiceSlaClock::getVersion, clockVersion)
                     .set(ServiceSlaClock::getFirstRespondedAt, clockRow.getFirstRespondedAt())
                     .set(ServiceSlaClock::getResponseBreached, clockRow.getResponseBreached())
+                    .set(ServiceSlaClock::getResponseBreachedAt, clockRow.getResponseBreachedAt())
                     .set(ServiceSlaClock::getResolvedAt, clockRow.getResolvedAt())
                     .set(ServiceSlaClock::getResolveBreached, clockRow.getResolveBreached())
+                    .set(ServiceSlaClock::getResolveBreachedAt, clockRow.getResolveBreachedAt())
                     .set(ServiceSlaClock::getTotalPauseMinutes, clockRow.getTotalPauseMinutes())
                     .set(ServiceSlaClock::getLastPausedAt, clockRow.getLastPausedAt())
                     .set(ServiceSlaClock::getResolveDeadline, clockRow.getResolveDeadline())
@@ -590,14 +653,14 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     public ServiceCommentDto addComment(Long id, ServiceCommentCreateRequest req, boolean isPortal,
                                         ServiceDeskExecutionContext executionContext) {
         requireExecutionContext(executionContext);
-        ServiceRequest existing = serviceRequestMapper.selectById(id);
+        ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
         if (existing == null) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
         // 顧客返信による WAITING_CUSTOMER→IN_PROGRESS 自動復帰でも法人既定カレンダーを使う。
         executionContext = bindCalendarScope(executionContext, existing.getCustomerId(), existing.getContractId());
-        if (!isPortal && "INTERNAL_USER".equals(executionContext.actorType()) && dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(existing.getCustomerId());
+        if (!isPortal && "INTERNAL_USER".equals(executionContext.actorType())) {
+            assertInternalCustomerAllowed(existing.getCustomerId());
         }
 
         String visibility = isPortal ? "PORTAL_VISIBLE" : (StringUtils.hasText(req.getVisibility()) ? req.getVisibility() : "PORTAL_VISIBLE");
@@ -628,6 +691,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             int requestVersion = existing.getVersion() == null ? 0 : existing.getVersion();
             int requestUpdated = serviceRequestMapper.update(null, new LambdaUpdateWrapper<ServiceRequest>()
                     .eq(ServiceRequest::getId, existing.getId())
+                    .eq(ServiceRequest::getTenantId, currentTenant())
                     .eq(ServiceRequest::getVersion, requestVersion)
                     .set(ServiceRequest::getFirstResponseAt, existing.getFirstResponseAt())
                     .set(ServiceRequest::getUpdatedAt, now)
@@ -646,7 +710,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             if (clockRow != null && clockRow.getFirstRespondedAt() == null) {
                 clockRow.setFirstRespondedAt(now);
                 if (clockRow.getResponseDeadline() != null && now.isAfter(clockRow.getResponseDeadline())) {
-                    clockRow.setResponseBreached(true);
+                    markResponseBreach(clockRow, now);
                 }
                 clockRow.setUpdatedAt(now);
                 int clockVersion = clockRow.getVersion() == null ? 0 : clockRow.getVersion();
@@ -655,6 +719,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                         .eq(ServiceSlaClock::getVersion, clockVersion)
                         .set(ServiceSlaClock::getFirstRespondedAt, clockRow.getFirstRespondedAt())
                         .set(ServiceSlaClock::getResponseBreached, clockRow.getResponseBreached())
+                        .set(ServiceSlaClock::getResponseBreachedAt, clockRow.getResponseBreachedAt())
                         .set(ServiceSlaClock::getUpdatedAt, clockRow.getUpdatedAt())
                         .set(ServiceSlaClock::getVersion, clockVersion + 1));
                 if (clockUpdated != 1) {
@@ -692,20 +757,13 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void submitCsat(Long id, PortalCsatCreateRequest req, Long customerId, Long portalUserId) {
-        ServiceRequest existing = serviceRequestMapper.selectById(id);
-        if (existing == null || !Objects.equals(existing.getCustomerId(), customerId)) {
+        ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
+        if (existing == null || !currentTenant().equals(existing.getTenantId()) || !Objects.equals(existing.getCustomerId(), customerId)) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
 
         if (!"RESOLVED".equals(existing.getStatus()) && !"CLOSED".equals(existing.getStatus())) {
             throw BusinessException.of(400, "CSAT回答は解決または完了済みのリクエストのみ可能です");
-        }
-
-        CustomerCsat existingCsat = csatMapper.selectOne(
-                new LambdaQueryWrapper<CustomerCsat>().eq(CustomerCsat::getServiceRequestId, id)
-        );
-        if (existingCsat != null) {
-            throw BusinessException.of(409, "このリクエストに対するCSAT回答は既に提出済みです");
         }
 
         CustomerCsat csat = CustomerCsat.builder()
@@ -717,7 +775,12 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .answeredAt(LocalDateTime.now(clock))
                 .build();
 
-        csatMapper.insert(csat);
+        try {
+            // 事前selectは競合防止に使わず、uk_csat_requestを最終防線とする。
+            csatMapper.insert(csat);
+        } catch (org.springframework.dao.DuplicateKeyException duplicate) {
+            throw BusinessException.of(409, "このリクエストに対するCSAT回答は既に提出済みです");
+        }
     }
 
     private ServiceSlaPolicy getActivePolicy(String priority) {
@@ -742,15 +805,19 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                                                       Long organizationId, Long legalEntityId) {
         ZoneId zone = com.ses.service.accounting.AccountingTenantContextHolder.getZoneId();
         return new ServiceDeskExecutionContext(
-                com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId(),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext(),
                 zone, Instant.now(clock), organizationId, legalEntityId, actorId,
                 actorType, StringUtils.hasText(actorName) ? actorName : "内部ユーザー",
                 portal ? "PORTAL_REQUEST" : "INTERNAL_REQUEST");
     }
 
     private void requireExecutionContext(ServiceDeskExecutionContext context) {
-        if (context == null) {
+        if (context == null || context.tenantId() == null || context.tenantId().isBlank()) {
             throw BusinessException.of(400, "サービスデスクの実行コンテキストが必要です");
+        }
+        String explicitTenantId = currentTenant();
+        if (!explicitTenantId.equals(context.tenantId().trim())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
         }
     }
 
@@ -785,7 +852,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
      */
     private Long resolveLegalEntityId(Long customerId, Long contractId) {
         if (contractId != null) {
-            Contract contract = contractMapper.selectById(contractId);
+            Contract contract = contractMapper.selectByIdForCustomerAndTenant(contractId, customerId, currentTenant());
             if (contract != null && (customerId == null || Objects.equals(contract.getCustomerId(), customerId))) {
                 Long fromContract = legalEntityFromCostCenter(contract.getCostCenterId());
                 if (fromContract != null) {
@@ -796,12 +863,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (customerId == null) {
             return null;
         }
-        List<Contract> contracts = contractMapper.selectList(
-                new LambdaQueryWrapper<Contract>()
-                        .eq(Contract::getCustomerId, customerId)
-                        .isNotNull(Contract::getCostCenterId)
-                        .orderByDesc(Contract::getId)
-                        .last("LIMIT 10"));
+        List<Contract> contracts = contractMapper.selectByCustomerAndTenant(customerId, currentTenant());
         for (Contract contract : contracts) {
             Long legalEntityId = legalEntityFromCostCenter(contract.getCostCenterId());
             if (legalEntityId != null) {
@@ -853,23 +915,23 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     }
 
     /** 問い合わせに紐づく4種の業務対象が同一顧客に属することをservice境界で保証する。 */
-    private void validateLinkedEntities(Long customerId, Long contactId, Long contractId,
+    private void validateLinkedEntities(String tenantId, Long customerId, Long contactId, Long contractId,
                                         Long projectId, Long engineerId) {
         if (contactId != null) {
-            CustomerContact contact = contactMapper.selectById(contactId);
+            CustomerContact contact = contactMapper.selectByIdForTenant(contactId, customerId, tenantId);
             if (contact == null || !Objects.equals(customerId, contact.getCustomerId())) {
                 throw BusinessException.of(400, "指定された顧客担当者は顧客と一致しません");
             }
         }
         Contract contract = null;
         if (contractId != null) {
-            contract = contractMapper.selectById(contractId);
+            contract = contractMapper.selectByIdForCustomerAndTenant(contractId, customerId, tenantId);
             if (contract == null || !Objects.equals(customerId, contract.getCustomerId())) {
                 throw BusinessException.of(400, "指定された契約は顧客と一致しません");
             }
         }
         if (projectId != null) {
-            Project project = projectMapper.selectById(projectId);
+            Project project = projectMapper.selectByIdForCustomerAndTenant(projectId, customerId, tenantId);
             if (project == null || !Objects.equals(customerId, project.getCustomerId())) {
                 throw BusinessException.of(400, "指定された案件は顧客と一致しません");
             }
@@ -878,40 +940,88 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             }
         }
         if (engineerId != null) {
-            Engineer engineer = engineerMapper.selectById(engineerId);
+            Engineer engineer = tenantOwnershipResolver.selectEngineer(tenantId, engineerId);
             if (engineer == null) {
                 throw BusinessException.of(400, "指定された要員が見つかりません");
             }
             if (contract != null && !Objects.equals(engineerId, contract.getEngineerId())) {
                 throw BusinessException.of(400, "指定された要員は契約と一致しません");
             }
-            if (contract == null && contractMapper.selectCount(new LambdaQueryWrapper<Contract>()
-                    .eq(Contract::getCustomerId, customerId)
-                    .eq(Contract::getEngineerId, engineerId)) == 0) {
+            if (contract == null && contractMapper.countByCustomerAndEngineerForTenant(customerId, engineerId, tenantId) == 0) {
                 throw BusinessException.of(400, "指定された要員は顧客の契約に紐付いていません");
             }
         }
     }
 
-    private String generateRequestNo(LocalDateTime now) {
-        String prefix = "REQ-" + now.format(DateTimeFormatter.ofPattern("yyyyMM")) + "-";
-        List<ServiceRequest> latest = serviceRequestMapper.selectList(
-                new LambdaQueryWrapper<ServiceRequest>()
-                        .likeRight(ServiceRequest::getRequestNo, prefix)
-                        .orderByDesc(ServiceRequest::getRequestNo)
-                        .last("LIMIT 1")
-        );
-
-        int seq = 1;
-        if (!latest.isEmpty() && latest.get(0).getRequestNo() != null) {
-            String lastNo = latest.get(0).getRequestNo();
-            try {
-                String seqStr = lastNo.substring(prefix.length());
-                seq = Integer.parseInt(seqStr) + 1;
-            } catch (Exception ignored) {
-            }
+    private String generateRequestNo(LocalDateTime now, String executionTenantId) {
+        String month = now.format(DateTimeFormatter.ofPattern("yyyyMM"));
+        ServiceRequestSequenceMapper seqMapper = requestSequenceMapper != null ? requestSequenceMapper : sequenceMapper;
+        if (seqMapper == null) {
+            throw BusinessException.of(503, "service.request.sequenceUnavailable");
         }
-        return String.format("%s%04d", prefix, seq);
+        if (executionTenantId == null || executionTenantId.isBlank()) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        String tenantId = executionTenantId.trim();
+        seqMapper.ensureRow(tenantId, month);
+        if (seqMapper.incrementIfAvailable(tenantId, month) != 1) {
+            throw BusinessException.of(400, "月間リクエスト採番上限（9999件）を超過しました");
+        }
+        Integer next = seqMapper.selectLastNumber(tenantId, month);
+        if (next == null || next < 1 || next > 9999) {
+            throw BusinessException.of(409, "リクエスト採番状態が不正です");
+        }
+        return String.format("REQ-%s-%04d", month, next);
+    }
+
+    private void validateOwnerUser(Long ownerUserId) {
+        if (ownerUserId == null) {
+            return;
+        }
+        SysUser user = sysUserMapper.selectById(ownerUserId);
+        if (user == null || Integer.valueOf(1).equals(user.getDeletedFlag())) {
+            throw BusinessException.of(400, "指定された担当ユーザーが存在しません: " + ownerUserId);
+        }
+        if (user.getStatus() == null || user.getStatus() != 1) {
+            throw BusinessException.of(400, "指定された担当ユーザーは無効です: " + user.getRealName());
+        }
+        if (!Set.of("管理者", "営業", "マネージャー").contains(user.getRole())) {
+            throw BusinessException.of(400, "指定されたユーザーは内部担当者として設定できません（管理者・営業・マネージャーのみ設定可能）: " + user.getRole());
+        }
+    }
+
+    private String currentTenant() {
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+    }
+
+    private Set<Long> resolvedCustomerIds() {
+        String tenantId = currentTenant();
+        Set<Long> owned = new java.util.HashSet<>(tenantOwnershipResolver.resolveCustomerIds(tenantId));
+        if (customerScopeResolver != null) {
+            Set<Long> scoped = customerScopeResolver.resolve(java.time.LocalDate.now(clock));
+            // nullは「現在のtenant内でscope制限なし」を表す。全DBを意味しないため、
+            // tenant ownership resolverが解決した母集団はそのまま維持する。
+            if (scoped != null) owned.retainAll(scoped);
+        } else if (dataScopeService.isScoped()) {
+            Set<Long> scoped = dataScopeService.allowedCustomerIds();
+            if (scoped == null) owned.clear(); else owned.retainAll(scoped);
+        }
+        return owned;
+    }
+
+    private void assertInternalCustomerAllowed(Long customerId) {
+        String tenantId = currentTenant();
+        if (tenantOwnershipResolver.selectCustomer(tenantId, customerId) == null) {
+            throw BusinessException.of(404, "指定された顧客が見つかりません");
+        }
+        if (SecurityUtils.currentRole() == null) return;
+        if (customerScopeResolver == null) {
+            if (dataScopeService.isScoped()) {
+                dataScopeService.assertAllowedCustomer(customerId);
+            }
+            return;
+        }
+        customerScopeResolver.assertAllowed(customerId);
     }
 
     private ServiceRequestDto convertToInternalDto(ServiceRequest req) {
@@ -936,8 +1046,12 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     .resolveDeadline(clockRow.getResolveDeadline())
                     .firstRespondedAt(clockRow.getFirstRespondedAt())
                     .responseBreached(clockRow.getResponseBreached())
+                    .responseBreachedAt(clockRow.getResponseBreachedAt())
+                    .responseBreachTimeUnknown(clockRow.getResponseBreachTimeUnknown())
                     .resolvedAt(clockRow.getResolvedAt())
                     .resolveBreached(clockRow.getResolveBreached())
+                    .resolveBreachedAt(clockRow.getResolveBreachedAt())
+                    .resolveBreachTimeUnknown(clockRow.getResolveBreachTimeUnknown())
                     .totalPauseMinutes(clockRow.getTotalPauseMinutes())
                     .lastPausedAt(clockRow.getLastPausedAt())
                     .status(clockRow.getStatus())
@@ -968,13 +1082,18 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 new LambdaQueryWrapper<CustomerCsat>().eq(CustomerCsat::getServiceRequestId, req.getId())
         );
 
-        Customer customer = customerMapper.selectById(req.getCustomerId());
-        CustomerContact contact = req.getContactId() != null ? contactMapper.selectById(req.getContactId()) : null;
-        Contract contract = req.getContractId() != null ? contractMapper.selectById(req.getContractId()) : null;
-        Project project = req.getProjectId() != null ? projectMapper.selectById(req.getProjectId()) : null;
-        Engineer engineer = req.getEngineerId() != null ? engineerMapper.selectById(req.getEngineerId()) : null;
-        SysUser ownerUser = req.getOwnerUserId() != null ? sysUserMapper.selectById(req.getOwnerUserId()) : null;
-        SysUser creatorUser = req.getCreatedBy() != null ? sysUserMapper.selectById(req.getCreatedBy()) : null;
+        String tenantId = currentTenant();
+        Customer customer = tenantOwnershipResolver.selectCustomer(tenantId, req.getCustomerId());
+        CustomerContact contact = req.getContactId() != null
+                ? contactMapper.selectByIdForTenant(req.getContactId(), req.getCustomerId(), tenantId) : null;
+        Contract contract = req.getContractId() != null
+                ? contractMapper.selectByIdForCustomerAndTenant(req.getContractId(), req.getCustomerId(), tenantId) : null;
+        Project project = req.getProjectId() != null
+                ? projectMapper.selectByIdForCustomerAndTenant(req.getProjectId(), req.getCustomerId(), tenantId) : null;
+        Engineer engineer = req.getEngineerId() != null
+                ? tenantOwnershipResolver.selectEngineer(tenantId, req.getEngineerId()) : null;
+        SysUser ownerUser = req.getOwnerUserId() != null ? sysUserMapper.selectByIdAndTenant(req.getOwnerUserId(), tenantId) : null;
+        SysUser creatorUser = req.getCreatedBy() != null ? sysUserMapper.selectByIdAndTenant(req.getCreatedBy(), tenantId) : null;
 
         return ServiceRequestDto.builder()
                 .id(req.getId())
@@ -1060,9 +1179,25 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .build();
     }
 
+    /** breach時刻は最初の検知時だけ設定し、完了roundの履歴を上書きしない。 */
+    private void markResponseBreach(ServiceSlaClock clockRow, LocalDateTime breachedAt) {
+        clockRow.setResponseBreached(true);
+        if (clockRow.getResponseBreachedAt() == null) {
+            clockRow.setResponseBreachedAt(breachedAt);
+        }
+    }
+
+    /** breach時刻は最初の検知時だけ設定し、完了roundの履歴を上書きしない。 */
+    private void markResolveBreach(ServiceSlaClock clockRow, LocalDateTime breachedAt) {
+        clockRow.setResolveBreached(true);
+        if (clockRow.getResolveBreachedAt() == null) {
+            clockRow.setResolveBreachedAt(breachedAt);
+        }
+    }
+
     private String resolveUserName(Long userId) {
         if (userId == null) return "SYSTEM";
-        SysUser u = sysUserMapper.selectById(userId);
+        SysUser u = sysUserMapper.selectByIdAndTenant(userId, currentTenant());
         return u != null && u.getRealName() != null ? u.getRealName() : "ユーザー#" + userId;
     }
 

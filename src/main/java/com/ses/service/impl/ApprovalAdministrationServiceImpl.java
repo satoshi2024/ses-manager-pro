@@ -35,6 +35,7 @@ import com.ses.service.approval.ApprovalAdministrationService;
 import com.ses.service.approval.ResolvedRoute;
 import com.ses.service.approval.RouteResolverService;
 import com.ses.service.approval.RouteStepGroup;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -66,6 +67,7 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
     @Override
     public List<ApprovalRouteView> listRoutes(LocalDate asOf) {
         List<ApprovalRoute> routes = routeMapper.selectList(new LambdaQueryWrapper<ApprovalRoute>()
+                .in(ApprovalRoute::getTenantId, routeTenantValues())
                 .orderByAsc(ApprovalRoute::getRequestType)
                 .orderByDesc(ApprovalRoute::getVersionNo)
                 .orderByDesc(ApprovalRoute::getValidFrom));
@@ -81,7 +83,9 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
     @Transactional(rollbackFor = Exception.class)
     public ApprovalRouteView createRouteVersion(ApprovalRouteSaveRequest request, Long actorId) {
         validateRoute(request);
-        ApprovalRoute base = request.routeId() == null ? null : routeMapper.selectById(request.routeId());
+        ApprovalRoute base = request.routeId() == null ? null : routeMapper.selectOne(new LambdaQueryWrapper<ApprovalRoute>()
+                .in(ApprovalRoute::getTenantId, routeTenantValues())
+                .eq(ApprovalRoute::getId, request.routeId()));
         if (request.routeId() != null && base == null) {
             throw BusinessException.of(404, "error.approval.routeNotFound");
         }
@@ -89,6 +93,7 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
             throw BusinessException.of(400, "error.approval.routeTypeImmutable");
         }
         List<ApprovalRoute> sameKey = routeMapper.selectList(new LambdaQueryWrapper<ApprovalRoute>()
+                .in(ApprovalRoute::getTenantId, routeTenantValues())
                 .eq(ApprovalRoute::getRequestType, request.requestType()));
         int version = sameKey.stream()
                 .filter(r -> Objects.equals(r.getOrganizationId(), request.organizationId()))
@@ -98,7 +103,7 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
                 .map(ApprovalRoute::getVersionNo).filter(Objects::nonNull)
                 .max(Comparator.naturalOrder()).orElse(0) + 1;
         ApprovalRoute route = ApprovalRoute.builder()
-                .tenantId(1L).requestType(request.requestType())
+                .tenantId(tenant()).requestType(request.requestType())
                 .applicantRoleCondition(normalizeOptional(request.applicantRoleCondition()))
                 .organizationId(request.organizationId())
                 .minAmount(request.minAmount()).maxAmount(request.maxAmount()).versionNo(version)
@@ -130,6 +135,7 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
     @Override
     public List<ApprovalResponsibilityView> listResponsibilities(LocalDate asOf) {
         List<ApprovalResponsibility> rows = responsibilityMapper.selectList(new LambdaQueryWrapper<ApprovalResponsibility>()
+                .in(ApprovalResponsibility::getTenantId, routeTenantValues())
                 .orderByAsc(ApprovalResponsibility::getResponsibilityType)
                 .orderByAsc(ApprovalResponsibility::getOrganizationId)
                 .orderByDesc(ApprovalResponsibility::getValidFrom)
@@ -140,7 +146,7 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
                     .filter(r -> r.getValidTo() == null || !r.getValidTo().isBefore(asOf)).toList();
         }
         Map<Long, SysUser> users = new LinkedHashMap<>();
-        rows.forEach(row -> users.putIfAbsent(row.getUserId(), userMapper.selectById(row.getUserId())));
+        rows.forEach(row -> users.putIfAbsent(row.getUserId(), userMapper.selectByIdAndTenant(row.getUserId(), tenant())));
         return rows.stream().map(row -> toResponsibilityView(row, users)).toList();
     }
 
@@ -149,7 +155,7 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
     public ApprovalResponsibilityView createResponsibility(ApprovalResponsibilitySaveRequest request, Long actorId) {
         validateResponsibility(request);
         ApprovalResponsibility row = ApprovalResponsibility.builder()
-                .tenantId(1L)
+                .tenantId(tenant())
                 .responsibilityType(request.responsibilityType().trim().toUpperCase())
                 .organizationId(request.organizationId())
                 .userId(request.userId())
@@ -161,15 +167,19 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
         if (responsibilityMapper.insert(row) != 1) {
             throw BusinessException.of("error.approval.responsibilitySaveFailed");
         }
-        SysUser user = userMapper.selectById(row.getUserId());
+        SysUser user = userMapper.selectByIdAndTenant(row.getUserId(), tenant());
         return toResponsibilityView(row, Map.of(row.getUserId(), user));
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteResponsibility(Long id) {
-        if (responsibilityMapper.selectById(id) == null
-                || responsibilityMapper.deleteById(id) != 1) {
+        if (responsibilityMapper.selectOne(new LambdaQueryWrapper<ApprovalResponsibility>()
+                .eq(ApprovalResponsibility::getTenantId, tenant())
+                .eq(ApprovalResponsibility::getId, id)) == null
+                || responsibilityMapper.delete(new LambdaQueryWrapper<ApprovalResponsibility>()
+                .eq(ApprovalResponsibility::getTenantId, tenant())
+                .eq(ApprovalResponsibility::getId, id)) != 1) {
             throw BusinessException.of(404, "error.approval.responsibilityNotFound");
         }
     }
@@ -178,9 +188,10 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
     public List<ApprovalDelegationView> listDelegations() {
         Map<Long, SysUser> users = new LinkedHashMap<>();
         List<ApprovalDelegation> rows = delegationMapper.selectList(new LambdaQueryWrapper<ApprovalDelegation>()
+                .eq(ApprovalDelegation::getTenantId, tenant())
                 .orderByDesc(ApprovalDelegation::getValidFrom).orderByDesc(ApprovalDelegation::getId));
-        rows.forEach(d -> { users.putIfAbsent(d.getFromUserId(), userMapper.selectById(d.getFromUserId()));
-            users.putIfAbsent(d.getToUserId(), userMapper.selectById(d.getToUserId())); });
+        rows.forEach(d -> { users.putIfAbsent(d.getFromUserId(), userMapper.selectByIdAndTenant(d.getFromUserId(), tenant()));
+            users.putIfAbsent(d.getToUserId(), userMapper.selectByIdAndTenant(d.getToUserId(), tenant())); });
         return rows.stream().map(d -> toDelegationView(d, users)).toList();
     }
 
@@ -198,33 +209,38 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
         assertActiveUser(request.toUserId());
         List<String> types = request.requestTypes() == null ? List.of() : request.requestTypes().stream()
                 .filter(Objects::nonNull).map(String::trim).filter(s -> !s.isBlank()).distinct().toList();
-        ApprovalDelegation row = ApprovalDelegation.builder().fromUserId(request.fromUserId()).toUserId(request.toUserId())
+        ApprovalDelegation row = ApprovalDelegation.builder().tenantId(tenant())
+                .fromUserId(request.fromUserId()).toUserId(request.toUserId())
                 .validFrom(request.validFrom()).validTo(request.validTo()).requestTypesJson(types.isEmpty() ? null : writeJson(types))
                 .reason(request.reason().trim()).approvedBy(actorId).createdBy(actorId).build();
         delegationMapper.insert(row);
         for (String type : types) {
             delegationTypeMapper.insert(ApprovalDelegationType.builder()
-                    .delegationId(row.getId()).requestType(type).build());
+                    .tenantId(tenant()).delegationId(row.getId()).requestType(type).build());
         }
-        Map<Long, SysUser> users = Map.of(request.fromUserId(), userMapper.selectById(request.fromUserId()),
-                request.toUserId(), userMapper.selectById(request.toUserId()));
+        Map<Long, SysUser> users = Map.of(request.fromUserId(), userMapper.selectByIdAndTenant(request.fromUserId(), tenant()),
+                request.toUserId(), userMapper.selectByIdAndTenant(request.toUserId(), tenant()));
         return toDelegationView(row, users);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteDelegation(Long id) {
-        if (delegationMapper.selectById(id) == null) {
+        if (delegationMapper.selectOne(new LambdaQueryWrapper<ApprovalDelegation>()
+                .eq(ApprovalDelegation::getTenantId, tenant())
+                .eq(ApprovalDelegation::getId, id)) == null) {
             throw BusinessException.of(404, "error.approval.delegationNotFound");
         }
-        delegationTypeMapper.deleteByDelegationId(id);
-        if (delegationMapper.deleteById(id) != 1) {
+        delegationTypeMapper.deleteByDelegationId(id, tenant());
+        if (delegationMapper.delete(new LambdaQueryWrapper<ApprovalDelegation>()
+                .eq(ApprovalDelegation::getTenantId, tenant())
+                .eq(ApprovalDelegation::getId, id)) != 1) {
             throw BusinessException.of(404, "error.approval.delegationNotFound");
         }
     }
 
     private void assertActiveUser(Long id) {
-        SysUser user = userMapper.selectById(id);
+        SysUser user = userMapper.selectByIdAndTenant(id, tenant());
         if (user == null || !Objects.equals(user.getStatus(), 1)) {
             throw BusinessException.of(400, "error.approval.userInvalid");
         }
@@ -249,14 +265,15 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
             }
             if ("USER".equals(type)) {
                 try {
-                    Long.parseLong(step.approverValue().trim());
+                    Long userId = Long.parseLong(step.approverValue().trim());
+                    assertActiveUser(userId);
                 } catch (NumberFormatException e) {
                     throw BusinessException.of(400, "error.approval.approverType");
                 }
             }
             if ("PERMISSION_GROUP".equals(type)) {
                 PermissionGroup group = permissionGroupMapper.selectOne(new LambdaQueryWrapper<PermissionGroup>()
-                        .eq(PermissionGroup::getTenantId, "default")
+                        .eq(PermissionGroup::getTenantId, tenant())
                         .eq(PermissionGroup::getGroupKey, step.approverValue().trim())
                         .eq(PermissionGroup::getEnabled, 1));
                 if (group == null) {
@@ -313,7 +330,7 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
     }
 
     private ApprovalDelegationView toDelegationView(ApprovalDelegation row, Map<Long, SysUser> users) {
-        List<String> types = delegationTypeMapper.selectRequestTypes(row.getId());
+        List<String> types = delegationTypeMapper.selectRequestTypes(row.getId(), tenant());
         if (types == null) {
             types = List.of();
         }
@@ -332,5 +349,20 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
     private String writeJson(Object value) {
         try { return objectMapper.writeValueAsString(value); }
         catch (JsonProcessingException e) { throw new IllegalStateException("代理対象のJSON化に失敗しました", e); }
+    }
+
+    private String tenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
+    }
+
+    private List<String> routeTenantValues() {
+        String t = tenant();
+        if ("default".equals(t)) {
+            return List.of("default", "1");
+        }
+        if ("1".equals(t)) {
+            return List.of("1", "default");
+        }
+        return List.of(t);
     }
 }

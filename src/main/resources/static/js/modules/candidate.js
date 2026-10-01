@@ -4,6 +4,7 @@
 // ==========================================
 
 let candidateId = null;
+let candidateVersion = null;
 
 $(document).ready(function() {
     // 一覧画面
@@ -124,7 +125,7 @@ function renderCandidates(records) {
 <div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><div class="btn-group btn-group-sm" role="group">
                         <a href="/candidate/detail?id=${c.id}" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
                         <button type="button" class="btn btn-outline-primary text-primary border-primary ms-1" onclick="editCandidate(${c.id})"><i class="bi bi-pencil"></i></button>
-                        <button type="button" class="btn btn-outline-danger text-danger border-danger ms-1" onclick="deleteCandidate(${c.id})"><i class="bi bi-trash"></i></button>
+                        <button type="button" class="btn btn-outline-danger text-danger border-danger ms-1" onclick="deleteCandidate(${c.id}, ${Number.isInteger(c.version) ? c.version : 0})"><i class="bi bi-trash"></i></button>
                     </div>
                 </div>
 </td>
@@ -175,6 +176,7 @@ function editCandidate(id) {
         success: function(res) {
             if (res.code === 200 && res.data) {
                 const c = res.data;
+                candidateVersion = c.version;
                 $('#cand-id').val(c.id);
                 $('#cand-name').val(c.name || '');
                 $('#cand-contactEmail').val(c.contactEmail || '');
@@ -218,6 +220,9 @@ function saveCandidate() {
         nextActionDate: $('#cand-nextActionDate').val() || null,
         remarks: $('#cand-remarks').val() || null
     };
+    if (isUpdate) {
+        data.expectedVersion = candidateVersion;
+    }
 
     $.ajax({
         url: url,
@@ -242,7 +247,7 @@ function saveCandidate() {
     });
 }
 
-function deleteCandidate(id) {
+function deleteCandidate(id, version) {
     Swal.fire({
         title: SES.i18n.t('common.deleteConfirmTitle'),
         text: SES.i18n.t('confirm.deleteCandidate'),
@@ -257,6 +262,7 @@ function deleteCandidate(id) {
             $.ajax({
                 url: '/api/candidates/' + id,
                 method: 'DELETE',
+                data: { expectedVersion: version },
                 success: function(res) {
                     if (res.code === 200) {
                         Toast.success(SES.i18n.t('success.delete'));
@@ -297,6 +303,7 @@ function loadCandidateDetail() {
 }
 
 function renderCandidateDetail(c) {
+    candidateVersion = c.version;
     $('#header-candidate-name').text(c.name || '-');
     $('#info-name').text(c.name || '-');
     $('#info-currentStage').text(stageLabel(c.currentStage));
@@ -392,7 +399,8 @@ function saveStageChange() {
     const data = {
         stage: newStage,
         reason: reason || null,
-        remarks: $('#stage-remarks').val() || null
+        remarks: $('#stage-remarks').val() || null,
+        expectedVersion: candidateVersion
     };
 
     $.ajax({

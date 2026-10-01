@@ -7,9 +7,12 @@ import com.ses.entity.BpTerms;
 import com.ses.entity.SysUser;
 import com.ses.mapper.NotificationMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.BpCompanyService;
 import com.ses.service.BpRiskDashboardService;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -25,6 +28,16 @@ import static org.junit.jupiter.api.Assertions.*;
 @ActiveProfiles("test")
 @Transactional
 class BpRiskDashboardServiceImplTest {
+
+    @BeforeEach
+    void bindTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Autowired
     private BpRiskDashboardService riskDashboardService;

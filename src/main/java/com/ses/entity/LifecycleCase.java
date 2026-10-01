@@ -19,6 +19,9 @@ import java.time.LocalDateTime;
 @TableName("t_lifecycle_case")
 public class LifecycleCase extends BaseEntity {
 
+    /** 資格期限通知のlifecycle母集団をtenantへ固定する。 */
+    private String tenantId;
+
     /**
      * 案件番号 (例: LC-202608-0001)
      */

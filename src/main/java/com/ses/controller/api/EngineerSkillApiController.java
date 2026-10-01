@@ -2,11 +2,12 @@ package com.ses.controller.api;
 
 import com.ses.common.result.ApiResult;
 import com.ses.dto.engineer.EngineerSkillDetailDto;
-import com.ses.entity.EngineerSkill;
+import com.ses.dto.skill.SkillReplaceRequest;
 import com.ses.service.EngineerSkillService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.List;
 
@@ -26,10 +27,11 @@ public class EngineerSkillApiController {
     }
 
     @PutMapping
-    public ApiResult<Void> replaceSkills(@PathVariable Long engineerId, @RequestBody List<@Valid EngineerSkill> skills) {
+    @PreAuthorize("hasAnyRole('管理者','HR')")
+    public ApiResult<Void> replaceSkills(@PathVariable Long engineerId, @Valid @RequestBody SkillReplaceRequest request) {
         // 親要員のスコープを検証（担当外要員のスキル書込IDOR防止 / R3R-32）。
         dataScopeService.assertAllowedEngineer(engineerId);
-        engineerSkillService.replaceSkills(engineerId, skills);
+        engineerSkillService.replaceSkills(engineerId, request);
         return ApiResult.success(null);
     }
 }

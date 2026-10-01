@@ -14,6 +14,7 @@ import com.ses.mapper.EngineerChangeRequestMapper;
 import com.ses.service.EngineerService;
 import com.ses.service.EngineerSkillService;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.approval.ApprovalTargetAdapter;
 import com.ses.service.changerequest.EngineerChangeRequestService;
@@ -232,7 +233,23 @@ public class EngineerChangeRequestApprovalAdapter implements ApprovalTargetAdapt
                     : Integer.valueOf(String.valueOf(m.get("experienceYears"))));
             return skill;
         }).toList();
-        engineerSkillService.replaceSkills(change.getEngineerId(), new java.util.ArrayList<>(skills));
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Engineer current = engineerMapper.selectByIdForTenant(change.getEngineerId(), tenantId);
+        if (current == null || current.getVersion() == null) {
+            throw BusinessException.of(404, "error.engineer.notFound");
+        }
+        com.ses.dto.skill.SkillReplaceRequest request = new com.ses.dto.skill.SkillReplaceRequest();
+        request.setExpectedVersion(current.getVersion());
+        request.setReason("承認済み変更申請を反映");
+        request.setSkills(skills.stream().map(skill -> {
+            com.ses.dto.skill.SkillReplaceRequest.SkillItem item =
+                    new com.ses.dto.skill.SkillReplaceRequest.SkillItem();
+            item.setSkillId(skill.getSkillId());
+            item.setProficiency(skill.getProficiency());
+            item.setExperienceYears(skill.getExperienceYears());
+            return item;
+        }).toList());
+        engineerSkillService.replaceSkills(change.getEngineerId(), request);
     }
 
     private void applyCareers(EngineerChangeRequest change) {

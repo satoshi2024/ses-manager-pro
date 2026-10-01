@@ -3,6 +3,7 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.document.DocumentRegisterRequest;
+import com.ses.dto.document.DocumentSearchQuery;
 import com.ses.dto.document.IntegrityFinding;
 import com.ses.entity.Document;
 import com.ses.entity.DocumentAccessLog;
@@ -19,6 +20,7 @@ import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.security.FileScanResult;
 import com.ses.service.security.FileScanner;
 import com.ses.service.storage.DocumentStorage;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -66,11 +68,13 @@ class DocumentServiceImplTest {
     @Mock ObjectProvider<com.ses.service.EngineerAccountLinkService> engineerAccountLinkServiceProvider;
     @Mock ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
     @Mock com.ses.service.AssetScopeService assetScopeService;
+    @Mock com.ses.service.security.LegalEntityContextService legalEntityContextService;
 
     DocumentServiceImpl sut;
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         var config = new com.baomidou.mybatisplus.core.MybatisConfiguration();
         var assistant = new org.apache.ibatis.builder.MapperBuilderAssistant(config, "");
         com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(assistant, Document.class);
@@ -89,6 +93,18 @@ class DocumentServiceImplTest {
         lenient().when(authorizationServiceProvider.getIfAvailable()).thenReturn(null);
         lenient().when(engineerAccountLinkServiceProvider.getIfAvailable()).thenReturn(null);
         lenient().when(organizationScopeServiceProvider.getIfAvailable()).thenReturn(null);
+        org.mockito.stubbing.Answer<DocumentType> documentTypeAnswer = invocation -> {
+            String code = invocation.getArgument(0, String.class);
+            DocumentType type = new DocumentType();
+            type.setCode(code);
+            type.setDirection(("INVOICE_IN".equals(code) || "ORDER_RECEIVED".equals(code)
+                    || "ESIGN_CERT".equals(code) || "SERVICE_REQUEST_ATTACHMENT".equals(code))
+                    ? "INCOMING" : "OUTGOING");
+            type.setRetentionYears(10);
+            type.setRetentionStartRule("TRANSACTION_DATE");
+            return type;
+        };
+        lenient().when(documentTypeMapper.selectActiveByCode(anyString())).thenAnswer(documentTypeAnswer);
 
         // ObjectProvider は型消去で @InjectMocks が取り違えるため、コンストラクタで明示配線する
         sut = new DocumentServiceImpl(
@@ -108,11 +124,15 @@ class DocumentServiceImplTest {
                 engineerAccountLinkServiceProvider,
                 organizationScopeServiceProvider,
                 assetScopeService);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                sut, "legalEntityContextService", legalEntityContextService);
+        lenient().when(legalEntityContextService.requireCurrentLegalEntityId()).thenReturn(1L);
     }
 
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -130,14 +150,18 @@ class DocumentServiceImplTest {
 
         Document existingDoc = new Document();
         existingDoc.setId(1L);
+        existingDoc.setTenantId("default");
+        existingDoc.setLegalEntityId("1");
+        existingDoc.setDocumentType("INVOICE_OUT");
         existingDoc.setStatus("DRAFT");
 
         when(documentVersionMapper.findByIdempotencyKey(anyString(), eq("GENERATED"), eq("INVOICE:1"), eq("v1")))
                 .thenReturn(existingVersion);
-        when(documentMapper.selectById(1L)).thenReturn(existingDoc);
+        when(documentMapper.selectOne(any())).thenReturn(existingDoc);
 
         var req = DocumentRegisterRequest.builder()
                 .documentType("INVOICE_OUT")
+                .legalEntityId(1L)
                 .sourceType("GENERATED")
                 .businessKey("INVOICE:1")
                 .versionDiscriminator("v1")
@@ -181,7 +205,6 @@ class DocumentServiceImplTest {
             d.setId(10L);
             return 1;
         });
-        when(documentVersionMapper.findLatestByDocumentId(anyLong())).thenReturn(null);
         when(documentVersionMapper.insert(any(DocumentVersion.class))).thenReturn(1);
         when(documentAccessLogMapper.insert(any(DocumentAccessLog.class))).thenReturn(1);
 
@@ -202,7 +225,7 @@ class DocumentServiceImplTest {
     }
 
     @Test
-    void registerReceived_hashClaim重複はstorage保存前に409を返す() {
+    void registerReceived_hashClaim重複はCLEAN後metadata保存で409となりStorageを補償削除する() {
         when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
         when(documentMapper.insert(any(Document.class))).thenAnswer(inv -> {
             ((Document) inv.getArgument(0)).setId(10L);
@@ -219,7 +242,8 @@ class DocumentServiceImplTest {
 
         assertEquals(409, ex.getCode());
         assertEquals("error.order.duplicateSourceDocument", ex.getMessageKey());
-        verify(documentStorage, never()).put(anyString(), any(InputStream.class), anyBoolean());
+        verify(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
+        verify(documentStorage).delete(anyString());
     }
 
     @Test
@@ -230,7 +254,6 @@ class DocumentServiceImplTest {
             return 1;
         });
         when(documentHashClaimMapper.insertClaim(anyString(), eq("ORDER_RECEIVED"), anyString(), eq(11L))).thenReturn(1);
-        when(documentVersionMapper.findLatestByDocumentId(11L)).thenReturn(null);
         when(documentVersionMapper.insert(any(DocumentVersion.class))).thenReturn(1);
         when(documentAccessLogMapper.insert(any(DocumentAccessLog.class))).thenReturn(1);
         var req = DocumentRegisterRequest.builder()
@@ -251,14 +274,8 @@ class DocumentServiceImplTest {
     }
 
     @Test
-    void registerReceived_storagePutFailureでもtransaction中に即時cleanupする() {
+    void registerReceived_storagePutFailureでも即時cleanupする() {
         when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
-        when(documentMapper.insert(any(Document.class))).thenAnswer(inv -> {
-            ((Document) inv.getArgument(0)).setId(12L);
-            return 1;
-        });
-        when(documentHashClaimMapper.insertClaim(anyString(), eq("ORDER_RECEIVED"), anyString(), eq(12L)))
-                .thenReturn(1);
         doThrow(new RuntimeException("simulated put failure"))
                 .when(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
         var req = DocumentRegisterRequest.builder()
@@ -270,8 +287,8 @@ class DocumentServiceImplTest {
             assertThrows(RuntimeException.class, () ->
                     sut.registerReceived(req, new ByteArrayInputStream("content".getBytes())));
             verify(documentStorage).delete(anyString());
-            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager
-                    .getSynchronizations().isEmpty(), "put前にrollback補償が登録されているべき");
+            assertTrue(org.springframework.transaction.support.TransactionSynchronizationManager
+                    .getSynchronizations().isEmpty(), "Storage put前にDB transaction補償を登録しない");
         } finally {
             org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
         }
@@ -281,9 +298,10 @@ class DocumentServiceImplTest {
     void addVersion_confirmedDocument_updatesStatusToAmended() {
         Document doc = new Document();
         doc.setId(10L);
+        doc.setTenantId("default");
         doc.setStatus("CONFIRMED");
         doc.setVersion(1L);
-        when(documentMapper.selectById(10L)).thenReturn(doc);
+        when(documentMapper.selectOne(any())).thenReturn(doc);
         when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
         doNothing().when(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
         doNothing().when(documentStorage).promote(anyString());
@@ -291,7 +309,7 @@ class DocumentServiceImplTest {
 
         DocumentVersion latest = new DocumentVersion();
         latest.setVersionNo(1);
-        when(documentVersionMapper.findLatestByDocumentId(10L)).thenReturn(latest);
+        when(documentVersionMapper.findLatestByTenantAndDocumentId("default", 10L)).thenReturn(latest);
         when(documentVersionMapper.insert(any(DocumentVersion.class))).thenReturn(1);
         when(documentAccessLogMapper.insert(any(DocumentAccessLog.class))).thenReturn(1);
 
@@ -300,7 +318,7 @@ class DocumentServiceImplTest {
                 .sourceType("RECEIVED")
                 .businessKey("CONTRACT:5")
                 .versionDiscriminator("v2")
-                .direction("INCOMING")
+                .direction("OUTGOING")
                 .originalName("contract_v2.pdf")
                 .build();
 
@@ -316,9 +334,10 @@ class DocumentServiceImplTest {
     void addVersion_optimisticLockConflict_throws409() {
         Document doc = new Document();
         doc.setId(10L);
+        doc.setTenantId("default");
         doc.setStatus("CONFIRMED");
         doc.setVersion(1L);
-        when(documentMapper.selectById(10L)).thenReturn(doc);
+        when(documentMapper.selectOne(any())).thenReturn(doc);
         when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
         doNothing().when(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
         when(documentMapper.update(any(), any())).thenReturn(0); // CAS 失敗
@@ -328,7 +347,7 @@ class DocumentServiceImplTest {
                 .sourceType("RECEIVED")
                 .businessKey("CONTRACT:5")
                 .versionDiscriminator("v2")
-                .direction("INCOMING")
+                .direction("OUTGOING")
                 .build();
 
         BusinessException ex = assertThrows(BusinessException.class, () ->
@@ -341,10 +360,11 @@ class DocumentServiceImplTest {
     void requestDisposal_legalHoldActive_throwsBusinessException() {
         Document doc = new Document();
         doc.setId(5L);
+        doc.setTenantId("default");
         doc.setLegalHoldFlag(1);
         doc.setRetentionUntil(LocalDate.now().plusYears(5));
         doc.setStatus("CONFIRMED");
-        when(documentMapper.selectById(5L)).thenReturn(doc);
+        when(documentMapper.selectOne(any())).thenReturn(doc);
 
         var ex = assertThrows(BusinessException.class, () -> sut.requestDisposal(5L, "廃棄理由"));
         assertEquals(400, ex.getCode());
@@ -355,10 +375,11 @@ class DocumentServiceImplTest {
     void requestDisposal_retentionUntilNull_throwsBusinessException() {
         Document doc = new Document();
         doc.setId(6L);
+        doc.setTenantId("default");
         doc.setLegalHoldFlag(0);
         doc.setRetentionUntil(null);
         doc.setStatus("CONFIRMED");
-        when(documentMapper.selectById(6L)).thenReturn(doc);
+        when(documentMapper.selectOne(any())).thenReturn(doc);
 
         var ex = assertThrows(BusinessException.class, () -> sut.requestDisposal(6L, "廃棄理由"));
         assertEquals(400, ex.getCode());
@@ -369,9 +390,10 @@ class DocumentServiceImplTest {
     void placeLegalHold_optimisticLockConflict_throwsBusinessException() {
         Document doc = new Document();
         doc.setId(7L);
+        doc.setTenantId("default");
         doc.setLegalHoldFlag(0);
         doc.setVersion(1L);
-        when(documentMapper.selectById(7L)).thenReturn(doc);
+        when(documentMapper.selectOne(any())).thenReturn(doc);
         when(documentMapper.update(any(), any())).thenReturn(0);
 
         var ex = assertThrows(BusinessException.class, () -> sut.placeLegalHold(7L, true, "訴訟対応"));
@@ -388,8 +410,9 @@ class DocumentServiceImplTest {
 
         Document doc = new Document();
         doc.setId(5L);
+        doc.setTenantId("default");
         doc.setLegalHoldFlag(1); // 途中で hold が設定された
-        when(documentMapper.selectById(5L)).thenReturn(doc);
+        when(documentMapper.selectOne(any())).thenReturn(doc);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> sut.executeDisposal(200L));
         assertEquals(400, ex.getCode());
@@ -405,6 +428,11 @@ class DocumentServiceImplTest {
         req.setRequestedBy(1L); // SecurityContext の 1L と一致
 
         when(documentDisposalRequestMapper.selectById(200L)).thenReturn(req);
+        Document doc = new Document();
+        doc.setId(5L);
+        doc.setTenantId("default");
+        doc.setDocumentType("CONTRACT");
+        when(documentMapper.selectOne(any())).thenReturn(doc);
 
         var ex = assertThrows(BusinessException.class, () -> sut.approveDisposal(200L));
         assertEquals(400, ex.getCode());
@@ -421,7 +449,7 @@ class DocumentServiceImplTest {
         type.setCode("CONTRACT");
         type.setRetentionYears(10);
         type.setRetentionStartRule("CLOSED_AT");
-        when(documentTypeMapper.selectOne(any())).thenReturn(type);
+        when(documentTypeMapper.selectActiveByCode(anyString())).thenReturn(type);
 
         LocalDate result = sut.computeRetentionUntil(doc);
 
@@ -430,13 +458,18 @@ class DocumentServiceImplTest {
 
     @Test
     void verifyIntegrity_hashMismatch_returnsMismatchFinding() {
+        Document document = new Document();
+        document.setId(50L);
+        document.setTenantId("default");
+        when(documentMapper.selectOne(any())).thenReturn(document);
         DocumentVersion v = new DocumentVersion();
         v.setId(101L);
         v.setDocumentId(50L);
+        v.setTenantId("default");
         v.setStorageKey("path/to/key.pdf");
         v.setSha256("0000000000000000000000000000000000000000000000000000000000000000");
 
-        when(documentVersionMapper.findByDocumentId(50L)).thenReturn(List.of(v));
+        when(documentVersionMapper.findByTenantAndDocumentId("default", 50L)).thenReturn(List.of(v));
         when(documentStorage.open("path/to/key.pdf")).thenReturn(new ByteArrayInputStream("actual bytes".getBytes()));
 
         List<IntegrityFinding> findings = sut.verifyIntegrity(50L);
@@ -448,13 +481,18 @@ class DocumentServiceImplTest {
 
     @Test
     void verifyIntegrity_storageMissing_returnsMissingFinding() {
+        Document document = new Document();
+        document.setId(51L);
+        document.setTenantId("default");
+        when(documentMapper.selectOne(any())).thenReturn(document);
         DocumentVersion v = new DocumentVersion();
         v.setId(102L);
         v.setDocumentId(51L);
+        v.setTenantId("default");
         v.setStorageKey("path/missing.pdf");
         v.setSha256("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
 
-        when(documentVersionMapper.findByDocumentId(51L)).thenReturn(List.of(v));
+        when(documentVersionMapper.findByTenantAndDocumentId("default", 51L)).thenReturn(List.of(v));
         when(documentStorage.open("path/missing.pdf")).thenThrow(new RuntimeException("File not found"));
 
         List<IntegrityFinding> findings = sut.verifyIntegrity(51L);
@@ -462,6 +500,35 @@ class DocumentServiceImplTest {
         assertEquals(1, findings.size());
         assertEquals("STORAGE_MISSING", findings.get(0).getFindingType());
         assertEquals(51L, findings.get(0).getDocumentId());
+    }
+
+    @Test
+    void verifyIntegrity_storage例外の秘密値をfindingへ含めない() {
+        Document document = new Document();
+        document.setId(52L);
+        document.setTenantId("default");
+        when(documentMapper.selectOne(any())).thenReturn(document);
+        DocumentVersion v = new DocumentVersion();
+        v.setId(502L);
+        v.setDocumentId(52L);
+        v.setTenantId("default");
+        v.setStorageKey("documents/52/v1.pdf");
+        v.setSha256("expected");
+        when(documentVersionMapper.findByTenantAndDocumentId("default", 52L)).thenReturn(List.of(v));
+        when(documentStorage.open("documents/52/v1.pdf"))
+                .thenThrow(new IllegalStateException(
+                        "secret-token=do-not-leak signedUrl=https://secret.example"));
+
+        List<IntegrityFinding> findings = sut.verifyIntegrity(52L);
+
+        assertEquals(1, findings.size());
+        assertEquals("STORAGE_MISSING", findings.get(0).getFindingType());
+        assertTrue(findings.get(0).getMessage().contains("IllegalStateException"));
+        assertTrue(findings.get(0).getMessage().contains("versionId=502"));
+        assertFalse(findings.get(0).getMessage().contains("secret-token"));
+        assertFalse(findings.get(0).getMessage().contains("do-not-leak"));
+        assertFalse(findings.get(0).getMessage().contains("signedUrl"));
+        assertFalse(findings.get(0).getMessage().contains("secret.example"));
     }
 
     private void loginAsRole(String role) {
@@ -483,7 +550,8 @@ class DocumentServiceImplTest {
         doc.setDocumentType("CONTRACT");
         doc.setLegalHoldFlag(0);
         doc.setVersion(1L);
-        when(documentMapper.selectById(70L)).thenReturn(doc);
+        doc.setTenantId("default");
+        when(documentMapper.selectOne(any())).thenReturn(doc);
         when(documentLinkMapper.selectList(any())).thenReturn(List.of());
 
         var ex = assertThrows(BusinessException.class, () -> sut.placeLegalHold(70L, true, "訴訟"));
@@ -500,7 +568,8 @@ class DocumentServiceImplTest {
         doc.setLegalHoldFlag(0);
         doc.setRetentionUntil(LocalDate.now().plusYears(1));
         doc.setStatus("CONFIRMED");
-        when(documentMapper.selectById(71L)).thenReturn(doc);
+        doc.setTenantId("default");
+        when(documentMapper.selectOne(any())).thenReturn(doc);
         when(documentLinkMapper.selectList(any())).thenReturn(List.of());
 
         var ex = assertThrows(BusinessException.class, () -> sut.requestDisposal(71L, "廃棄"));
@@ -554,12 +623,167 @@ class DocumentServiceImplTest {
     }
 
     @Test
+    void searchDocuments_digitalInvoiceListIsRestrictedToCurrentLegalEntityForAdmin() {
+        var resultPage = new com.baomidou.mybatisplus.extension.plugins.pagination.Page<Document>(1, 20, 0);
+        resultPage.setRecords(List.of());
+        when(documentMapper.selectPage(any(), any())).thenReturn(resultPage);
+        when(documentTypeMapper.selectList(any())).thenReturn(List.of());
+
+        sut.searchDocuments(new DocumentSearchQuery());
+
+        ArgumentCaptor<LambdaQueryWrapper<Document>> wrapperCaptor =
+                ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(documentMapper).selectPage(any(), wrapperCaptor.capture());
+        LambdaQueryWrapper<Document> wrapper = wrapperCaptor.getValue();
+        String sql = wrapper.getSqlSegment();
+        assertTrue(sql.contains("legal_entity_id"), () -> "法人境界条件が必要: " + sql);
+        assertTrue(sql.contains("document_type"), () -> "電子インボイス種別条件が必要: " + sql);
+        assertTrue(wrapper.getParamNameValuePairs().containsValue("1"),
+                () -> "現在法人IDが検索条件に必要: " + wrapper.getParamNameValuePairs());
+    }
+
+    @Test
     void getVersionStorageKey_returnsDbKey() {
+        Document doc = new Document();
+        doc.setId(1L);
+        doc.setTenantId("default");
+        when(documentMapper.selectOne(any())).thenReturn(doc);
         DocumentVersion v = new DocumentVersion();
         v.setStorageKey("real-db-key");
         when(documentVersionMapper.selectOne(any())).thenReturn(v);
 
         assertEquals("real-db-key", sut.getVersionStorageKey(1L, 1));
+    }
+
+    @Test
+    void registerGenerated_digitalInvoiceWithForgedLegalEntity_rejectedBeforeLookup() {
+        var request = DocumentRegisterRequest.builder()
+                .documentType("INVOICE_OUT")
+                .legalEntityId(2L)
+                .direction("OUTGOING")
+                .sourceType("GENERATED")
+                .businessKey("DIGITAL:FORGED")
+                .versionDiscriminator("1")
+                .build();
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> sut.registerGenerated(request, new ByteArrayInputStream(new byte[]{1})));
+
+        assertEquals(403, error.getCode());
+        assertEquals("LEGAL_ENTITY_CONTEXT_MISMATCH", error.getMessageKey());
+        verifyNoInteractions(documentVersionMapper);
+    }
+
+    @Test
+    void registerGenerated_digitalInvoiceIdempotencyCannotReuseOtherLegalEntityDocument() {
+        DocumentVersion existingVersion = new DocumentVersion();
+        existingVersion.setDocumentId(91L);
+        Document foreign = digitalInvoiceDocument(91L, "2", "INVOICE_OUT");
+        when(documentVersionMapper.findByIdempotencyKey(
+                "default", "GENERATED", "DIGITAL:SAME", "1")).thenReturn(existingVersion);
+        when(documentMapper.selectOne(any())).thenReturn(foreign);
+        var request = DocumentRegisterRequest.builder()
+                .documentType("INVOICE_OUT")
+                .legalEntityId(1L)
+                .direction("OUTGOING")
+                .sourceType("GENERATED")
+                .businessKey("DIGITAL:SAME")
+                .versionDiscriminator("1")
+                .build();
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> sut.registerGenerated(request, new ByteArrayInputStream(new byte[]{1})));
+
+        assertEquals(404, error.getCode());
+    }
+
+    @Test
+    void registerGenerated_digitalInvoiceIdempotencyCannotReuseOtherDocumentType() {
+        DocumentVersion existingVersion = new DocumentVersion();
+        existingVersion.setDocumentId(911L);
+        Document foreignType = digitalInvoiceDocument(911L, "1", "GENERAL");
+        when(documentVersionMapper.findByIdempotencyKey(
+                "default", "GENERATED", "DIGITAL:SAME-TYPE-COLLISION", "1")).thenReturn(existingVersion);
+        when(documentMapper.selectOne(any())).thenReturn(foreignType);
+        var request = DocumentRegisterRequest.builder()
+                .documentType("INVOICE_OUT")
+                .legalEntityId(1L)
+                .direction("OUTGOING")
+                .sourceType("GENERATED")
+                .businessKey("DIGITAL:SAME-TYPE-COLLISION")
+                .versionDiscriminator("1")
+                .build();
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> sut.registerGenerated(request, new ByteArrayInputStream(new byte[]{1})));
+
+        assertEquals(409, error.getCode());
+        verify(documentStorage, never()).put(anyString(), any(InputStream.class), anyBoolean());
+    }
+
+    @Test
+    void digitalInvoiceDetailAndDownload_otherLegalEntityRejectedForAdmin() {
+        when(documentMapper.selectOne(any())).thenReturn(digitalInvoiceDocument(92L, "2", "INVOICE_IN"));
+
+        BusinessException detailError = assertThrows(BusinessException.class,
+                () -> sut.getDocumentDetail(92L));
+        BusinessException downloadError = assertThrows(BusinessException.class,
+                () -> sut.download(92L, null));
+
+        assertEquals(404, detailError.getCode());
+        assertEquals(404, downloadError.getCode());
+        verify(documentStorage, never()).open(anyString());
+    }
+
+    @Test
+    void addVersion_digitalInvoiceOtherLegalEntityRejected() {
+        when(documentMapper.selectOne(any())).thenReturn(digitalInvoiceDocument(93L, "2", "INVOICE_OUT"));
+        var request = DocumentRegisterRequest.builder()
+                .documentType("INVOICE_OUT")
+                .legalEntityId(1L)
+                .direction("OUTGOING")
+                .sourceType("GENERATED")
+                .build();
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> sut.addVersion(93L, request, new ByteArrayInputStream(new byte[]{1})));
+
+        assertEquals(404, error.getCode());
+        verifyNoInteractions(documentVersionMapper);
+    }
+
+    @Test
+    void addVersion_idempotencyCollisionWithOtherDocumentRejected() {
+        when(documentMapper.selectOne(any())).thenReturn(digitalInvoiceDocument(94L, "1", "INVOICE_OUT"));
+        DocumentVersion foreignVersion = new DocumentVersion();
+        foreignVersion.setId(951L);
+        foreignVersion.setDocumentId(95L);
+        when(documentVersionMapper.findByIdempotencyKey(
+                "default", "GENERATED", "DIGITAL:SAME", "1")).thenReturn(foreignVersion);
+        var request = DocumentRegisterRequest.builder()
+                .documentType("INVOICE_OUT")
+                .legalEntityId(1L)
+                .direction("OUTGOING")
+                .sourceType("GENERATED")
+                .businessKey("DIGITAL:SAME")
+                .versionDiscriminator("1")
+                .build();
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> sut.addVersion(94L, request, new ByteArrayInputStream(new byte[]{1})));
+
+        assertEquals(409, error.getCode());
+        verify(documentStorage, never()).put(anyString(), any(InputStream.class), anyBoolean());
+    }
+
+    private Document digitalInvoiceDocument(Long id, String legalEntityId, String type) {
+        Document document = new Document();
+        document.setId(id);
+        document.setTenantId("default");
+        document.setLegalEntityId(legalEntityId);
+        document.setDocumentType(type);
+        document.setStatus("DRAFT");
+        return document;
     }
 
 }

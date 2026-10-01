@@ -62,9 +62,20 @@ class ContractDocumentApiControllerTest {
     private com.ses.service.cloudsign.CloudSignSyncService cloudSignSyncService;
     @MockBean
     private com.ses.service.cloudsign.CloudSignArtifactService cloudSignArtifactService;
+    @MockBean
+    private com.ses.mapper.ContractMapper contractMapper;
+    @MockBean
+    private com.ses.mapper.CustomerMapper customerMapper;
 
     @BeforeEach
     void allowFullScope() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+        com.ses.entity.Contract mockContract = new com.ses.entity.Contract();
+        mockContract.setId(100L);
+        mockContract.setTenantId("default");
+        mockContract.setContractNo("CTR-100");
+        when(contractMapper.selectByIdForTenant(eq(100L), any())).thenReturn(mockContract);
+
         when(dataScopeService.isScoped()).thenReturn(false);
         when(organizationScopeService.hasFullAccess()).thenReturn(true);
         when(service.getById(10L)).thenReturn(document());
@@ -79,6 +90,11 @@ class ContractDocumentApiControllerTest {
             jdbcTemplate.update("INSERT INTO t_role_menu(role, menu_id) "
                     + "SELECT ?, id FROM m_menu WHERE menu_key='contract-document'", role);
         }
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
     }
 
     private ContractDocument document() {

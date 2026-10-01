@@ -5,6 +5,12 @@ public record CopilotScopeContext(
         String scopeType,
         String policyVersion,
         String scopeHash,
-        boolean emptyPopulation
+        boolean emptyPopulation,
+        String tenantId,
+        Long legalEntityId,
+        String canonicalMembers
 ) {
+    public CopilotScopeContext(String scopeType, String policyVersion, String scopeHash, boolean emptyPopulation) {
+        this(scopeType, policyVersion, scopeHash, emptyPopulation, "legacy", 0L, "legacy");
+    }
 }

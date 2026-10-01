@@ -3,6 +3,7 @@ package com.ses.service.impl;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Task;
 import com.ses.mapper.TaskMapper;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,6 +30,7 @@ class TaskServiceImplTest {
     }
 
     @Test
+    @EnableDefaultTenantTestContext
     void createTask_validInput_success() {
         Task task = new Task();
         task.setTitle("新規タスク");

@@ -9,12 +9,16 @@ import com.ses.entity.SysUser;
 import com.ses.mapper.AssetAssignmentMapper;
 import com.ses.mapper.AssetMapper;
 import com.ses.mapper.EngineerAccountLinkMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.NotificationMapper;
 import com.ses.mapper.SysUserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -23,6 +27,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @DisplayName("Asset Alert & Deadline Monitoring Tests")
 class AssetAlertServiceTest extends BaseIntegrationTest {
+
+    @BeforeEach
+    void bindTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Autowired
     private AssetAlertService assetAlertService;
@@ -43,6 +57,9 @@ class AssetAlertServiceTest extends BaseIntegrationTest {
     private EngineerAccountLinkMapper engineerAccountLinkMapper;
 
     @Autowired
+    private EngineerMapper engineerMapper;
+
+    @Autowired
     private NotificationMapper notificationMapper;
 
     @Test
@@ -54,10 +71,25 @@ class AssetAlertServiceTest extends BaseIntegrationTest {
                 .realName("資産通知テスト要員")
                 .role("要員")
                 .status(1)
+                .tenantId("default")
                 .build();
         sysUserMapper.insert(engineerUser);
+        com.ses.entity.Engineer engineer = com.ses.entity.Engineer.builder()
+                .fullName("資産通知要員")
+                .employmentType("正社員")
+                .status("Bench")
+                .tenantId("default")
+                .build();
+        engineerMapper.insert(engineer);
+        // 共有H2の別テストがロールバック外で残した同IDの古いlinkを掃除し、
+        // 新しいtenant-aware linkを決定的に作成する。
+        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getEngineerId, engineer.getId())
+                .or()
+                .eq(EngineerAccountLink::getSysUserId, engineerUser.getId()));
         EngineerAccountLink accountLink = new EngineerAccountLink();
-        accountLink.setEngineerId(101L);
+        accountLink.setTenantId("default");
+        accountLink.setEngineerId(engineer.getId());
         accountLink.setSysUserId(engineerUser.getId());
         engineerAccountLinkMapper.insert(accountLink);
 
@@ -73,7 +105,7 @@ class AssetAlertServiceTest extends BaseIntegrationTest {
         AssetAssignment assignment = AssetAssignment.builder()
                 .assetId(asset.getId())
                 .assigneeType("ENGINEER")
-                .assigneeId(101L)
+                .assigneeId(engineer.getId())
                 .startDate(LocalDate.now().minusMonths(2))
                 .expectedReturnDate(LocalDate.now().minusDays(5))
                 .status("ACTIVE")

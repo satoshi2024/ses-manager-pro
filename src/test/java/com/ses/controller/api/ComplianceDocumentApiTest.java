@@ -4,6 +4,7 @@ import com.lowagie.text.pdf.PdfReader;
 import com.lowagie.text.pdf.parser.PdfTextExtractor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.service.storage.DocumentStorage;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -86,6 +87,11 @@ class ComplianceDocumentApiTest {
         jdbcTemplate.update("DELETE FROM m_compliance_external_reviewer_type");
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void cleanupFixtures() {
+        clearGateSeed();
+    }
+
     @Test
     void 生成するとsnapshotとdocumentとdeliveryが作成され同じ内容の再生成は増えない() throws Exception {
         long contractId = insertContractWithProfile();
@@ -134,7 +140,7 @@ class ComplianceDocumentApiTest {
 
         // マネージャー（MASK）のdownload: FULLと異なるバイト列（再maskされたPDF）
         byte[] managerPdf = mockMvc.perform(get("/api/contracts/" + contractId + "/compliance-documents/" + deliveryId + "/download")
-                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("2").roles("マネージャー")))
+                        .with(tenantAuthentication(2L, "マネージャー")))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsByteArray();
         assertThat(new String(adminPdf, java.nio.charset.StandardCharsets.ISO_8859_1)).startsWith("%PDF");
@@ -143,7 +149,7 @@ class ComplianceDocumentApiTest {
 
         // 営業（LIMITED）のdownloadも可能（masked）
         byte[] salesPdf = mockMvc.perform(get("/api/contracts/" + contractId + "/compliance-documents/" + deliveryId + "/download")
-                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("3").roles("営業")))
+                        .with(tenantAuthentication(3L, "営業")))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsByteArray();
         assertThat(salesPdf).isNotEqualTo(adminPdf);
@@ -154,8 +160,7 @@ class ComplianceDocumentApiTest {
     void 営業は一覧とmaskedDownloadができ生成は403() throws Exception {
         long contractId = insertContractWithProfile();
         long deliveryId = generate(contractId, "DISPATCH_NOTICE", "EMAIL",
-                org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
-                        .user("1").roles("管理者"));
+                tenantAuthentication(1L, "管理者"));
 
         // 一覧は可能
         mockMvc.perform(get("/api/contracts/" + contractId + "/compliance-documents"))
@@ -260,14 +265,12 @@ class ComplianceDocumentApiTest {
 
         byte[] managerPdf = mockMvc.perform(get("/api/contracts/" + contractId
                         + "/compliance-documents/" + secondId + "/download")
-                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
-                                .user("2").roles("マネージャー")))
+                        .with(tenantAuthentication(2L, "マネージャー")))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsByteArray();
         byte[] salesPdf = mockMvc.perform(get("/api/contracts/" + contractId
                         + "/compliance-documents/" + secondId + "/download")
-                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
-                                .user("3").roles("営業")))
+                        .with(tenantAuthentication(3L, "営業")))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsByteArray();
         assertThat(extractPdfText(managerPdf)).doesNotContain("AT_VERSION", "BEFORE_VERSION", "AFTER_VERSION");
@@ -504,20 +507,34 @@ class ComplianceDocumentApiTest {
     }
 
     private long insertContract() {
-        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES ('doc customer')");
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, legal_entity_id, company_name) "
+                + "VALUES ('default', 1, 'doc customer')");
         Long customerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM m_customer WHERE company_name='doc customer'", Long.class);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES ('doc engineer', '正社員', 'Bench')");
+        jdbcTemplate.update("INSERT INTO t_engineer "
+                + "(tenant_id, legal_entity_id, full_name, employment_type, status) "
+                + "VALUES ('default', 1, 'doc engineer', '正社員', 'Bench')");
         Long engineerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_engineer WHERE full_name='doc engineer'", Long.class);
-        jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id) VALUES ('doc project', ?)", customerId);
+        jdbcTemplate.update("INSERT INTO t_project "
+                + "(legal_entity_id, project_name, customer_id) "
+                + "VALUES (1, 'doc project', ?)", customerId);
         Long projectId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_project WHERE project_name='doc project'", Long.class);
         jdbcTemplate.update("INSERT INTO t_contract "
-                + "(engineer_id, project_id, customer_id, contract_type, start_date, end_date, status, selling_price, cost_price, contract_no) "
-                + "VALUES (?, ?, ?, '派遣', '2026-01-01', '2026-12-31', '稼動中', 100, 50, 'C-DOC-1')",
+                + "(tenant_id, legal_entity_id, engineer_id, project_id, customer_id, contract_type, "
+                + "start_date, end_date, status, selling_price, cost_price, contract_no) "
+                + "VALUES ('default', 1, ?, ?, ?, '派遣', '2026-01-01', '2026-12-31', "
+                + "'稼動中', 100, 50, 'C-DOC-1')",
                 engineerId, projectId, customerId);
         return jdbcTemplate.queryForObject("SELECT id FROM t_contract WHERE engineer_id=?", Long.class, engineerId);
+    }
+
+    private org.springframework.test.web.servlet.request.RequestPostProcessor tenantAuthentication(
+            long userId, String role) {
+        return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                .authentication(TenantTestSecurity.authentication(
+                        userId, String.valueOf(userId), "default", role));
     }
 
     private int queryInt(String sql) {

@@ -82,14 +82,16 @@ public class CostCenterServiceImpl extends ServiceImpl<CostCenterMapper, CostCen
                         .eq(MonthlyAccountingDimension::getCostCenterId, costCenterId));
         long engineerReferences = engineerMapper == null ? 0 : engineerMapper.selectCount(
                 new LambdaQueryWrapper<Engineer>().eq(Engineer::getCostCenterId, costCenterId));
-        long contractReferences = contractMapper == null ? 0 : contractMapper.selectCount(
-                new LambdaQueryWrapper<Contract>().eq(Contract::getCostCenterId, costCenterId));
+        long contractReferences = contractMapper == null ? 0 : contractMapper.selectCountForTenant(
+                new LambdaQueryWrapper<Contract>().eq(Contract::getCostCenterId, costCenterId),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         long invoiceReferences = invoiceMapper == null ? 0 : invoiceMapper.selectCount(
                 new LambdaQueryWrapper<Invoice>().eq(Invoice::getCostCenterId, costCenterId));
         long bpPaymentReferences = bpPaymentMapper == null ? 0 : bpPaymentMapper.selectCount(
                 new LambdaQueryWrapper<BpPayment>().eq(BpPayment::getCostCenterId, costCenterId));
-        long workRecordReferences = workRecordMapper == null ? 0 : workRecordMapper.selectCount(
-                new LambdaQueryWrapper<com.ses.entity.WorkRecord>().eq(com.ses.entity.WorkRecord::getCostCenterId, costCenterId));
+        long workRecordReferences = workRecordMapper == null ? 0 : workRecordMapper.countByCostCenterIdForTenant(
+                costCenterId,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (budgetReferences > 0 || snapshotReferences > 0 || engineerReferences > 0
                 || contractReferences > 0 || invoiceReferences > 0 || bpPaymentReferences > 0
                 || workRecordReferences > 0) {

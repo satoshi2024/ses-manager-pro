@@ -1,15 +1,21 @@
 package com.ses.service.notification;
 
+import com.ses.common.audit.ExecutionActorContext;
 import com.ses.common.security.OutboundUrlException;
 import com.ses.common.security.OutboundUrlGuard;
 import com.ses.entity.Notification;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestTemplate;
+import org.apache.commons.codec.digest.DigestUtils;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -53,11 +59,23 @@ public class WebhookNotifier {
      */
     @Async
     public void notify(Notification notification) {
-        notifyNow(notification);
+        if (notification == null || !StringUtils.hasText(notification.getTenantId())) {
+            log.warn("tenantがないWebhook通知を破棄しました");
+            return;
+        }
+        String tenantId = notification.getTenantId().trim();
+        AccountingTenantContextHolder.runWithTenant(tenantId, () ->
+                ExecutionActorContext.runAsSystem("notification-webhook-callback", "BACKGROUND_CALLBACK",
+                        () -> notifyNowInternal(notification)));
     }
 
     /** outbox workerから同期実行し、成功/再送要否を返す。 */
     public boolean notifyNow(Notification notification) {
+        return ExecutionActorContext.runAsSystem("notification-webhook-dispatch", "BACKGROUND_CALLBACK",
+                () -> notifyNowInternal(notification));
+    }
+
+    private boolean notifyNowInternal(Notification notification) {
         String url = systemConfigService.getString(KEY_WEBHOOK_URL, null);
         if (!StringUtils.hasText(url)) {
             // Webhook未設定時は配信対象外として成功扱いにする。
@@ -79,7 +97,13 @@ public class WebhookNotifier {
         try {
             Map<String, String> payload = new HashMap<>();
             payload.put("text", buildText(notification));
-            restTemplate.postForEntity(url, payload, String.class);
+            HttpHeaders headers = new HttpHeaders();
+            String dedupeKey = notification.getDedupeKey();
+            if (StringUtils.hasText(dedupeKey)) {
+                // 外部送信側が再送を冪等化できるよう、業務キーそのものではなく固定hashを渡す。
+                headers.set("Idempotency-Key", "notification-" + DigestUtils.sha256Hex(dedupeKey));
+            }
+            restTemplate.exchange(url, HttpMethod.POST, new HttpEntity<>(payload, headers), String.class);
             return true;
         } catch (Exception e) {
             // outbox workerが再送するため、ここでは例外を外へ投げず失敗だけ返す。

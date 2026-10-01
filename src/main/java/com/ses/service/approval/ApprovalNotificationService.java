@@ -5,6 +5,7 @@ import com.ses.common.constant.NotificationLinks;
 import com.ses.entity.SysUser;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -26,7 +27,9 @@ public class ApprovalNotificationService {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void notifyConfigGap(ApprovalRequestCommand command) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         List<Long> adminIds = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                        .eq(SysUser::getTenantId, tenantId)
                         .eq(SysUser::getRole, "管理者")
                         .eq(SysUser::getStatus, 1))
                 .stream().map(SysUser::getId).toList();

@@ -10,6 +10,7 @@ import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.SystemConfigService;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,7 @@ import static org.mockito.Mockito.lenient;
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("Dashboard scope表記テスト (R3-017)")
+@EnableDefaultTenantTestContext
 class DashboardScopeLabelTest {
 
     @Mock

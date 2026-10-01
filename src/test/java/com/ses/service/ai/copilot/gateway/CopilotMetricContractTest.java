@@ -9,12 +9,16 @@ import com.ses.service.DashboardService;
 import com.ses.service.ManagementAccountingService;
 import com.ses.service.UtilizationForecastService;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogRegistry;
+import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.result.MetricBasis;
 import com.ses.service.ai.copilot.result.MetricState;
 import com.ses.service.ai.copilot.result.MetricValue;
 import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import com.ses.service.ai.copilot.scope.CopilotScopeResolver;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshotFactory;
 import com.ses.service.billing.CashFlowForecastService;
 import com.ses.service.security.OrganizationScopeService;
 import org.junit.jupiter.api.Test;
@@ -25,6 +29,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.YearMonth;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -37,8 +43,12 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class CopilotMetricContractTest {
 
-    private static final CopilotScopeContext SCOPE =
-            new CopilotScopeContext("COMPANY_WIDE", CopilotScopeResolver.POLICY_VERSION, "hash", false);
+    private static final EffectiveScopeSnapshot EFFECTIVE_SCOPE_SNAPSHOT = new EffectiveScopeSnapshot(
+            "tenant-a", 1L, java.time.LocalDate.of(2026, 9, 8), "COMPANY_WIDE", true, false, false,
+            null, null, null, null, null, null, null, null, null,
+            EffectiveScopeSnapshotFactory.POLICY_VERSION, false, "ALL",
+            "5b64c70bf1618ee7f063e89a5a3b4b7022740dcda0b43477d56ed64540efe076");
+    private static final CopilotScopeContext SCOPE = EFFECTIVE_SCOPE_SNAPSHOT.scope();
 
     @Mock
     private DashboardService dashboardService;
@@ -48,8 +58,6 @@ class CopilotMetricContractTest {
     private ManagementAccountingService managementAccountingService;
     @Mock
     private CashFlowForecastService cashFlowForecastService;
-    @Mock
-    private OrganizationScopeService organizationScopeService;
 
     @InjectMocks
     private DashboardSummaryCatalogAdapter dashboardSummaryAdapter;
@@ -72,13 +80,13 @@ class CopilotMetricContractTest {
                 .unacceptedSales(500_000L)
                 .avgAcceptanceDays(3.5)
                 .build();
-        when(dashboardService.getSummary(any())).thenReturn(
+        when(dashboardService.getSummary(any(), any())).thenReturn(
                 DashboardSummaryDto.builder().kpi(kpi).build());
 
+        CopilotQueryParameters parameters = new CopilotQueryParameters("dashboard.summary", 2026, null, null, null);
         var envelope = dashboardSummaryAdapter.execute(
-                SemanticCatalogRegistry.requireEnabled("dashboard.summary"),
-                new CopilotQueryParameters("dashboard.summary", 2026, null, null, null),
-                SCOPE);
+                testApprovedEntry("dashboard.summary"), parameters, SCOPE,
+                contextFor("dashboard.summary", parameters));
 
         assertEquals(82.5, findMetric(envelope.values(), "kpi.utilization").numericValue().doubleValue());
         assertEquals(12_000_000L, findMetric(envelope.values(), "kpi.revenue").longValue());
@@ -88,7 +96,7 @@ class CopilotMetricContractTest {
 
     @Test
     void utilizationForecastは正本予測と一致する() {
-        when(utilizationForecastService.getForecast(3)).thenReturn(UtilizationForecastDto.builder()
+        when(utilizationForecastService.getForecast(any(), anyInt(), any())).thenReturn(UtilizationForecastDto.builder()
                 .monthlyForecasts(List.of(UtilizationForecastDto.MonthlyForecastDto.builder()
                         .yearMonth("2026-09")
                         .utilizationRate(75.0)
@@ -98,10 +106,10 @@ class CopilotMetricContractTest {
                 .rolloffEngineers(List.of())
                 .build());
 
+        CopilotQueryParameters parameters = new CopilotQueryParameters("dashboard.utilization-forecast", null, 3, null, null);
         var envelope = utilizationForecastAdapter.execute(
-                SemanticCatalogRegistry.requireEnabled("dashboard.utilization-forecast"),
-                new CopilotQueryParameters("dashboard.utilization-forecast", null, 3, null, null),
-                SCOPE);
+                testApprovedEntry("dashboard.utilization-forecast"), parameters, SCOPE,
+                contextFor("dashboard.utilization-forecast", parameters));
 
         assertEquals(75.0, findMetric(envelope.values(), "forecast.utilization.2026-09").numericValue().doubleValue());
         assertEquals(3L, findMetric(envelope.values(), "forecast.benchCount.2026-09").longValue());
@@ -115,12 +123,11 @@ class CopilotMetricContractTest {
         ContractProfitDto row = new ContractProfitDto();
         row.setContractNo("C-001");
         row.setGrossProfitAmount(1_500_000L);
-        when(dashboardService.getProfitAnalysis()).thenReturn(List.of(row));
-
+        CopilotQueryParameters parameters = new CopilotQueryParameters("dashboard.profit-analysis", null, null, null, null);
+        when(dashboardService.getProfitAnalysis(any())).thenReturn(List.of(row));
         var envelope = profitAnalysisAdapter.execute(
-                SemanticCatalogRegistry.requireEnabled("dashboard.profit-analysis"),
-                new CopilotQueryParameters("dashboard.profit-analysis", null, null, null, null),
-                SCOPE);
+                testApprovedEntry("dashboard.profit-analysis"), parameters, SCOPE,
+                contextFor("dashboard.profit-analysis", parameters));
 
         assertEquals(1L, findMetric(envelope.values(), "profit.rowCount").longValue());
         assertEquals(1_500_000L, findMetric(envelope.values(), "profit.totalGross").longValue());
@@ -130,7 +137,7 @@ class CopilotMetricContractTest {
 
     @Test
     void managementAccountingは正本サマリーと一致する() {
-        when(managementAccountingService.summary("2026-09")).thenReturn(ManagementAccountingSummaryDto.builder()
+        when(managementAccountingService.summary(any(), any())).thenReturn(ManagementAccountingSummaryDto.builder()
                 .month("2026-09")
                 .totalRevenue(new BigDecimal("10000000"))
                 .totalGrossProfit(new BigDecimal("3000000"))
@@ -138,10 +145,10 @@ class CopilotMetricContractTest {
                 .grossProfitVariance(new BigDecimal("200000"))
                 .build());
 
+        CopilotQueryParameters parameters = new CopilotQueryParameters("management-accounting.summary", null, null, null, YearMonth.of(2026, 9));
         var envelope = managementAccountingAdapter.execute(
-                SemanticCatalogRegistry.requireEnabled("management-accounting.summary"),
-                new CopilotQueryParameters("management-accounting.summary", null, null, YearMonth.of(2026, 9), null),
-                SCOPE);
+                testApprovedEntry("management-accounting.summary"), parameters, SCOPE,
+                contextFor("management-accounting.summary", parameters));
 
         assertEquals(10_000_000L, findMetric(envelope.values(), "accounting.totalRevenue").longValue());
         assertEquals(3_000_000L, findMetric(envelope.values(), "accounting.totalGrossProfit").longValue());
@@ -151,7 +158,6 @@ class CopilotMetricContractTest {
 
     @Test
     void cashflowForecastは正本予測と一致する() {
-        when(organizationScopeService.hasFullAccess()).thenReturn(true);
         CashFlowForecastDto.CashFlowMonthDto month = new CashFlowForecastDto.CashFlowMonthDto();
         month.setMonth("2026-09");
         month.setInflow(new BigDecimal("8000000"));
@@ -166,12 +172,12 @@ class CopilotMetricContractTest {
         CashFlowForecastDto forecast = new CashFlowForecastDto();
         forecast.setMonths(List.of(month));
         forecast.setReconciliation(reconciliation);
-        when(cashFlowForecastService.forecast(any(), anyInt(), isNull(), isNull())).thenReturn(forecast);
+        when(cashFlowForecastService.forecast(any(), anyInt(), isNull(), isNull(), any())).thenReturn(forecast);
 
+        CopilotQueryParameters parameters = new CopilotQueryParameters("cashflow.forecast", null, 6, null, YearMonth.of(2026, 9));
         var envelope = cashFlowForecastAdapter.execute(
-                SemanticCatalogRegistry.requireEnabled("cashflow.forecast"),
-                new CopilotQueryParameters("cashflow.forecast", null, 6, null, YearMonth.of(2026, 9)),
-                SCOPE);
+                testApprovedEntry("cashflow.forecast"), parameters, SCOPE,
+                contextFor("cashflow.forecast", parameters));
 
         assertEquals(8_000_000L, findMetric(envelope.values(), "cashflow.inflow.2026-09").longValue());
         assertEquals(5_000_000L, findMetric(envelope.values(), "cashflow.outflow.2026-09").longValue());
@@ -184,5 +190,19 @@ class CopilotMetricContractTest {
 
     private MetricValue findMetric(List<MetricValue> values, String key) {
         return values.stream().filter(v -> key.equals(v.key())).findFirst().orElseThrow();
+    }
+
+    private CopilotExecutionContext contextFor(String queryId, CopilotQueryParameters parameters) {
+        CopilotExecutionContext context = new CopilotExecutionContext(
+                "tenant-a", 1L, Instant.parse("2026-09-08T00:00:00Z"), ZoneId.of("Asia/Tokyo"));
+        context.bindSnapshot(EFFECTIVE_SCOPE_SNAPSHOT);
+        context.bind(queryId, parameters, SCOPE);
+        return context;
+    }
+
+    private SemanticCatalogEntry testApprovedEntry(String queryId) {
+        SemanticCatalogEntry provisional = SemanticCatalogRegistry.find(queryId).orElseThrow();
+        return new SemanticCatalogEntry(queryId, "test-approved-catalog", "test-result",
+                provisional.allowedRoles(), true, provisional.resultLimit(), provisional.citationKeys());
     }
 }

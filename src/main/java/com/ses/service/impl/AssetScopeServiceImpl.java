@@ -105,6 +105,7 @@ public class AssetScopeServiceImpl implements AssetScopeService {
                 return List.of();
             }
             return safeList(engineerAccountLinkMapper.selectEngineerIdsByOrganizationScope(
+                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext(),
                     new ArrayList<>(organizationIds), new ArrayList<>(directUserIds), LocalDate.now()));
         }
         return List.of();

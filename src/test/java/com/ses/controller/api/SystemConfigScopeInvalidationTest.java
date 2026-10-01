@@ -63,6 +63,7 @@ class SystemConfigScopeInvalidationTest {
 
     @AfterEach
     void clearSecurityContext() {
+        resetToFalse();
         SecurityContextHolder.clearContext();
     }
 

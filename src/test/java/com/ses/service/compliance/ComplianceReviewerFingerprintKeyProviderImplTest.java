@@ -102,6 +102,32 @@ class ComplianceReviewerFingerprintKeyProviderImplTest {
         assertArrayEquals(decode(KEY_V1_URL), provider.getKey("default", "v1"));
     }
 
+    @Test
+    void prodとtest混在プロファイルではprodとして扱われfailFastする() {
+        MockEnvironment env = new MockEnvironment();
+        env.setActiveProfiles("prod", "test");
+        ComplianceReviewerFingerprintKeyProviderImpl provider = new ComplianceReviewerFingerprintKeyProviderImpl(env);
+        assertThrows(IllegalStateException.class, provider::init);
+    }
+
+    @Test
+    void testとprod混在プロファイルでもprodとして扱われfailFastする() {
+        MockEnvironment env = new MockEnvironment();
+        env.setActiveProfiles("test", "prod");
+        ComplianceReviewerFingerprintKeyProviderImpl provider = new ComplianceReviewerFingerprintKeyProviderImpl(env);
+        assertThrows(IllegalStateException.class, provider::init);
+    }
+
+    @Test
+    void プロファイル未指定時はdevFallbackとして扱われる() {
+        MockEnvironment env = new MockEnvironment();
+        ComplianceReviewerFingerprintKeyProviderImpl provider = new ComplianceReviewerFingerprintKeyProviderImpl(env);
+        provider.init();
+
+        assertEquals("v1", provider.getCurrentKeyVersion("default"));
+        assertArrayEquals(decode(KEY_V1_URL), provider.getKey("default", "v1"));
+    }
+
     private static byte[] decode(String url) {
         return Base64.getUrlDecoder().decode(url);
     }

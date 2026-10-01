@@ -19,8 +19,9 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.OvertimeFollowupMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
-import com.ses.service.EngineerAccountLinkService;
+import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -60,7 +61,7 @@ public class OvertimeComplianceServiceImpl implements OvertimeComplianceService 
     private final AttendanceMonthMapper attendanceMonthMapper;
     private final EngineerMapper engineerMapper;
     private final OvertimeFollowupMapper overtimeFollowupMapper;
-    private final EngineerAccountLinkService engineerAccountLinkService;
+    private final EngineerAccountLinkMapper engineerAccountLinkMapper;
     private final UserOrganizationMapper userOrganizationMapper;
     private final SysUserMapper sysUserMapper;
     private final NotificationService notificationService;
@@ -71,6 +72,10 @@ public class OvertimeComplianceServiceImpl implements OvertimeComplianceService 
     public List<OvertimeComplianceFinding> evaluateAndPersist(Long engineerId, YearMonth targetMonth) {
         Objects.requireNonNull(engineerId, "engineerId");
         Objects.requireNonNull(targetMonth, "targetMonth");
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        if (engineerAccountLinkMapper.selectByEngineerIdAndTenant(engineerId, tenantId) == null) {
+            return List.of();
+        }
 
         Engineer engineer = engineerMapper.selectById(engineerId);
         if (engineer == null) {
@@ -106,7 +111,7 @@ public class OvertimeComplianceServiceImpl implements OvertimeComplianceService 
         if (!findings.isEmpty()) {
             OvertimeComplianceService self = selfProvider.getIfAvailable();
             if (self != null) {
-                self.notifyFindingsAsync(engineerId, targetMonth, findings);
+                self.notifyFindingsAsync(tenantId, engineerId, targetMonth, findings);
             } else {
                 notifyFindingsSync(engineerId, targetMonth, findings);
             }
@@ -131,10 +136,19 @@ public class OvertimeComplianceServiceImpl implements OvertimeComplianceService 
     }
 
     @Override
-    @Async("taskExecutor")
     public void notifyFindingsAsync(Long engineerId, YearMonth targetMonth,
                                     List<OvertimeComplianceFinding> findings) {
-        notifyFindingsSync(engineerId, targetMonth, findings);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        AccountingTenantContextHolder.runWithTenant(tenantId,
+                () -> notifyFindingsSync(engineerId, targetMonth, findings));
+    }
+
+    @Override
+    @Async("taskExecutor")
+    public void notifyFindingsAsync(String tenantId, Long engineerId, YearMonth targetMonth,
+                                    List<OvertimeComplianceFinding> findings) {
+        AccountingTenantContextHolder.runWithTenant(tenantId,
+                () -> notifyFindingsSync(engineerId, targetMonth, findings));
     }
 
     private void notifyFindingsSync(Long engineerId, YearMonth targetMonth,
@@ -162,7 +176,8 @@ public class OvertimeComplianceServiceImpl implements OvertimeComplianceService 
     private Set<Long> resolveRecipients(Long engineerId, YearMonth targetMonth,
                                         OvertimeComplianceFinding finding) {
         Set<Long> recipients = new LinkedHashSet<>();
-        EngineerAccountLink link = engineerAccountLinkService.findByEngineerId(engineerId);
+        EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerIdAndTenant(
+                engineerId, AccountingTenantContextHolder.requireTenantContext());
         if (link != null && link.getSysUserId() != null) {
             recipients.add(link.getSysUserId());
         }
@@ -181,6 +196,7 @@ public class OvertimeComplianceServiceImpl implements OvertimeComplianceService 
         if (rule5 || indeterminate || (violation && recipients.isEmpty())) {
             for (SysUser hr : sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
                     .in(SysUser::getRole, "管理者", "HR")
+                    .eq(SysUser::getTenantId, AccountingTenantContextHolder.requireTenantContext())
                     .eq(SysUser::getStatus, 1))) {
                 recipients.add(hr.getId());
             }
@@ -196,6 +212,7 @@ public class OvertimeComplianceServiceImpl implements OvertimeComplianceService 
         List<UserOrganization> rows = userOrganizationMapper.selectList(
                 new LambdaQueryWrapper<UserOrganization>()
                         .eq(UserOrganization::getUserId, applicantUserId)
+                        .eq(UserOrganization::getTenantId, AccountingTenantContextHolder.requireTenantContext())
                         .eq(UserOrganization::getPrimaryFlag, 1)
                         .le(UserOrganization::getValidFrom, asOf)
                         .and(w -> w.isNull(UserOrganization::getValidTo)

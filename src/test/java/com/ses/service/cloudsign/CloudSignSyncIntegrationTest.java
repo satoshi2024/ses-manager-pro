@@ -6,6 +6,7 @@ import com.ses.dto.cloudsign.CloudSignFile;
 import com.ses.dto.cloudsign.CloudSignParticipant;
 import com.ses.entity.ContractDocument;
 import com.ses.mapper.ContractDocumentMapper;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +38,7 @@ import static org.mockito.Mockito.*;
         "cloudsign.dispatch-cron=-",
         "cloudsign.poll-cron=-"
 })
+@EnableDefaultTenantTestContext
 @ActiveProfiles("test")
 @Sql("/sql/engineer-schema-h2.sql")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -55,9 +57,16 @@ class CloudSignSyncIntegrationTest {
     @MockBean
     private CloudSignApiClient api;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     @BeforeEach
     void clean() {
         mapper.delete(null);
+        jdbcTemplate.update("DELETE FROM t_contract WHERE id = 1");
+        jdbcTemplate.update("DELETE FROM m_customer WHERE id = 1");
+        jdbcTemplate.update("INSERT INTO m_customer (id, company_name, tenant_id, deleted_flag) VALUES (1, 'CloudSign Customer', 'default', 0)");
+        jdbcTemplate.update("INSERT INTO t_contract (id, contract_no, customer_id, tenant_id, deleted_flag) VALUES (1, 'CON-1', 1, 'default', 0)");
     }
 
     private ContractDocument insert(DispatchState state, String externalId, Integer cloudsignStatus) {

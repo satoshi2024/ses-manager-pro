@@ -6,8 +6,13 @@ import com.ses.dto.analytics.EngineerCreatedAtDto;
 import com.ses.dto.contract.ContractListDto;
 import com.ses.entity.Contract;
 import com.ses.entity.Engineer;
+import com.ses.entity.Project;
+import com.ses.mapper.ProjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
@@ -30,11 +35,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Transactional
 class AnalyticsProjectionMapperIntegrationTest {
 
+    @BeforeEach
+    void bindTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+        jdbcTemplate.update("INSERT INTO m_customer (id, tenant_id, company_name, deleted_flag, version) "
+                + "VALUES (1, 'default', '分析テスト顧客', 0, 0)");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
+
     @Autowired
     private EngineerMapper engineerMapper;
 
     @Autowired
     private ContractMapper contractMapper;
+
+    @Autowired
+    private ProjectMapper projectMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void selectCreatedAtOnly_論理削除フラグ付きで全件返す() {
@@ -65,9 +88,13 @@ class AnalyticsProjectionMapperIntegrationTest {
 
     @Test
     void selectActiveDateRanges_稼動中終了以外のステータスは除外される() {
+        Engineer engineer1 = tenantEngineer("分析要員1");
+        Engineer engineer2 = tenantEngineer("分析要員2");
+        Long projectId = tenantProject();
         Contract activeContract = new Contract();
-        activeContract.setEngineerId(1L);
-        activeContract.setProjectId(1L);
+        activeContract.setTenantId("default");
+        activeContract.setEngineerId(engineer1.getId());
+        activeContract.setProjectId(projectId);
         activeContract.setCustomerId(1L);
         activeContract.setStatus("稼動中");
         activeContract.setStartDate(LocalDate.of(2026, 1, 1));
@@ -76,8 +103,9 @@ class AnalyticsProjectionMapperIntegrationTest {
         contractMapper.insert(activeContract);
 
         Contract preparingContract = new Contract();
-        preparingContract.setEngineerId(2L);
-        preparingContract.setProjectId(1L);
+        preparingContract.setTenantId("default");
+        preparingContract.setEngineerId(engineer2.getId());
+        preparingContract.setProjectId(projectId);
         preparingContract.setCustomerId(1L);
         preparingContract.setStatus("準備中");
         preparingContract.setStartDate(LocalDate.of(2026, 1, 1));
@@ -88,7 +116,7 @@ class AnalyticsProjectionMapperIntegrationTest {
         List<ContractDateRangeDto> result = contractMapper.selectActiveDateRanges();
 
         assertEquals(1, result.size());
-        assertEquals(1L, result.get(0).getEngineerId());
+        assertEquals(engineer1.getId(), result.get(0).getEngineerId());
     }
 
     /**
@@ -99,9 +127,12 @@ class AnalyticsProjectionMapperIntegrationTest {
      */
     @Test
     void selectPageWithNames_担当営業joinが実行でき営業名を取得できる() {
+        Engineer engineer = tenantEngineer("営業join要員");
+        Long projectId = tenantProject();
         Contract contract = new Contract();
-        contract.setEngineerId(1L);
-        contract.setProjectId(1L);
+        contract.setTenantId("default");
+        contract.setEngineerId(engineer.getId());
+        contract.setProjectId(projectId);
         contract.setCustomerId(1L);
         contract.setSalesUserId(1L); // engineer-schema-h2.sql が seed する admin(id=1)
         contract.setStatus("稼動中");
@@ -123,6 +154,25 @@ class AnalyticsProjectionMapperIntegrationTest {
         Page<ContractListDto> filtered = contractMapper.selectPageWithNames(
                 new Page<>(1, 10), null, null, null, null, null, null, null, 1L, null, null, null, null);
         assertTrue(filtered.getRecords().stream().allMatch(r -> Long.valueOf(1L).equals(r.getSalesUserId())));
+    }
+
+    private Engineer tenantEngineer(String name) {
+        Engineer engineer = new Engineer();
+        engineer.setTenantId("default");
+        engineer.setFullName(name);
+        engineer.setEmploymentType("正社員");
+        engineer.setStatus("稼動中");
+        engineerMapper.insert(engineer);
+        return engineer;
+    }
+
+    private Long tenantProject() {
+        Project project = new Project();
+        project.setCustomerId(1L);
+        project.setProjectName("分析案件-" + System.nanoTime());
+        project.setStatus("募集中");
+        projectMapper.insert(project);
+        return project.getId();
     }
 
     /**

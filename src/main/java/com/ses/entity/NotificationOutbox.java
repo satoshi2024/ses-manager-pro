@@ -19,6 +19,7 @@ import java.time.LocalDateTime;
 public class NotificationOutbox {
     @TableId(type = IdType.AUTO)
     private Long id;
+    private String tenantId;
     private Long notificationId;
     private String type;
     private String title;
@@ -33,6 +34,8 @@ public class NotificationOutbox {
     private LocalDateTime nextAttemptAt;
     private LocalDateTime lockedAt;
     private String lastError;
+    /** report deliveryとoutboxの状態が未同期で、後続reconciliationが必要な場合は1。 */
+    private Integer reconciliationRequired;
     private LocalDateTime sentAt;
     private LocalDateTime createdAt;
 }

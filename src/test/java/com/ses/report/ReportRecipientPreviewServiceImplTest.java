@@ -6,9 +6,11 @@ import com.ses.config.LoginUser;
 import com.ses.entity.ReportTemplateVersion;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ReportTemplateVersionMapper;
+import com.ses.mapper.RoleMenuMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.report.impl.ReportRecipientPreviewServiceImpl;
 import com.ses.service.security.OrganizationScopeService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,7 +26,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -37,6 +39,7 @@ class ReportRecipientPreviewServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         versionMapper = mock(ReportTemplateVersionMapper.class);
         userMapper = mock(SysUserMapper.class);
         scopeService = mock(OrganizationScopeService.class);
@@ -48,13 +51,14 @@ class ReportRecipientPreviewServiceImplTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
     void reportScopeがrecipientScopeに包含される場合だけmanagerへ許可する() {
         ReportTemplateVersion version = publishedVersion();
-        SysUser recipient = user(2L, "マネージャー");
-        when(versionMapper.selectById(3L)).thenReturn(version);
+        SysUser recipient = user(2L, "マネージャー", "default");
+        when(versionMapper.selectOne(any())).thenReturn(version);
         when(userMapper.selectList(any())).thenReturn(List.of(recipient));
         when(scopeService.allowedOrganizationIds(any(LocalDate.class)))
                 .thenReturn(Set.of(10L), Set.of(10L, 11L));
@@ -70,8 +74,8 @@ class ReportRecipientPreviewServiceImplTest {
     @Test
     void recipientScopeがreportScopeより狭い場合は配布対象にしない() {
         ReportTemplateVersion version = publishedVersion();
-        SysUser recipient = user(2L, "マネージャー");
-        when(versionMapper.selectById(3L)).thenReturn(version);
+        SysUser recipient = user(2L, "マネージャー", "default");
+        when(versionMapper.selectOne(any())).thenReturn(version);
         when(userMapper.selectList(any())).thenReturn(List.of(recipient));
         when(scopeService.allowedOrganizationIds(any(LocalDate.class)))
                 .thenReturn(Set.of(10L, 11L), Set.of(10L));
@@ -83,24 +87,81 @@ class ReportRecipientPreviewServiceImplTest {
                 .hasMessage("error.managementReport.recipientScopeDenied");
     }
 
+    @Test
+    void 不正roleのみのrecipient設定は既定の管理者へフォールバックしない() {
+        ReportTemplateVersion version = publishedVersion();
+        version.setRecipientConfigJson("{\"roles\":[\"営業\"]}");
+        when(versionMapper.selectOne(any())).thenReturn(version);
+
+        assertThatThrownBy(() -> service.preview(3L, YearMonth.of(2026, 8)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.managementReport.recipientConfigInvalid");
+    }
+
+    @Test
+    void 営業とマネージャーの混在設定はマネージャーだけを候補にする() {
+        ReportTemplateVersion version = publishedVersion();
+        version.setRecipientConfigJson("{\"roles\":[\"営業\",\"マネージャー\"]}");
+        SysUser recipient = user(2L, "マネージャー", "default");
+        when(versionMapper.selectOne(any())).thenReturn(version);
+        when(userMapper.selectList(any())).thenReturn(List.of(recipient));
+        when(scopeService.allowedOrganizationIds(any(LocalDate.class))).thenReturn(Set.of(10L), Set.of(10L));
+        when(scopeService.allowedDirectUserIds(any(LocalDate.class))).thenReturn(Set.of(), Set.of());
+
+        var result = service.preview(3L, YearMonth.of(2026, 8));
+
+        assertThat(result.getRecipients()).singleElement().extracting(item -> item.getRecipientRole())
+                .isEqualTo("マネージャー");
+    }
+
+    @Test
+    void managementReportメニューを持たない候補者は配布対象にならない() {
+        RoleMenuMapper menuMapper = mock(RoleMenuMapper.class);
+        when(menuMapper.selectMenuKeysByRole("マネージャー")).thenReturn(List.of("dashboard"));
+        service = new ReportRecipientPreviewServiceImpl(versionMapper, userMapper, scopeService,
+                new ObjectMapper(), menuMapper);
+        ReportTemplateVersion version = publishedVersion();
+        SysUser recipient = user(2L, "マネージャー", "default");
+        when(versionMapper.selectOne(any())).thenReturn(version);
+        when(userMapper.selectList(any())).thenReturn(List.of(recipient));
+
+        assertThatThrownBy(() -> service.preview(3L, YearMonth.of(2026, 8)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.managementReport.recipientScopeDenied");
+    }
+
+    @Test
+    void 他tenantのuserIdsは候補に解決されない() {
+        ReportTemplateVersion version = publishedVersion();
+        version.setRecipientConfigJson("{\"roles\":[\"マネージャー\"],\"userIds\":[99]}");
+        when(versionMapper.selectOne(any())).thenReturn(version);
+        when(userMapper.selectList(argThat(query -> query != null))).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.preview(3L, YearMonth.of(2026, 8)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.managementReport.recipientScopeDenied");
+    }
+
     private ReportTemplateVersion publishedVersion() {
         ReportTemplateVersion version = new ReportTemplateVersion();
         version.setId(3L);
+        version.setTenantId("default");
         version.setStatus("PUBLISHED");
         version.setRecipientConfigJson("{\"roles\":[\"マネージャー\"]}");
         return version;
     }
 
-    private SysUser user(Long id, String role) {
+    private SysUser user(Long id, String role, String tenantId) {
         SysUser user = new SysUser();
         user.setId(id);
         user.setStatus(1);
         user.setRole(role);
+        user.setTenantId(tenantId);
         return user;
     }
 
     private LoginUser loginUser(Long id, String role) {
-        SysUser user = user(id, role);
+        SysUser user = user(id, role, "default");
         return new LoginUser(user, List.of(new SimpleGrantedAuthority("ROLE_" + role)));
     }
 }

@@ -17,17 +17,96 @@ import java.util.Collection;
 @Mapper
 public interface ProjectMapper extends BaseMapper<Project> {
 
+    @Select("SELECT p.* FROM t_project p INNER JOIN m_customer c ON c.id = p.customer_id "
+            + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
+            + "WHERE p.id = #{id} AND p.customer_id = #{customerId} AND p.deleted_flag = 0")
+    Project selectByIdForCustomerAndTenant(@Param("id") Long id,
+                                           @Param("customerId") Long customerId,
+                                           @Param("tenantId") String tenantId);
+
+    /** 案件詳細・更新・削除の正本。顧客tenant不一致・NULL ownershipは不可視。 */
+    @Select("SELECT p.* FROM t_project p INNER JOIN m_customer c ON c.id = p.customer_id "
+            + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
+            + "WHERE p.id = #{id} AND p.deleted_flag = 0")
+    Project selectByIdForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    @Select("SELECT p.* FROM t_project p JOIN m_customer c ON c.id = p.customer_id "
+            + "WHERE p.id = #{id} AND c.tenant_id = #{tenantId} "
+            + "AND p.deleted_flag = 0 AND c.deleted_flag = 0 FOR UPDATE")
+    Project selectByIdForUpdateForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    @org.apache.ibatis.annotations.Update("UPDATE t_project SET version = version + 1 "
+            + "WHERE id = #{id} AND version = #{expectedVersion} AND deleted_flag = 0 "
+            + "AND customer_id IN (SELECT c.id FROM m_customer c WHERE c.tenant_id = #{tenantId} AND c.deleted_flag = 0)")
+    int bumpVersionForTenant(@Param("id") Long id, @Param("tenantId") String tenantId,
+                             @Param("expectedVersion") Integer expectedVersion);
+
+    @Select("SELECT p.* FROM t_project p JOIN m_customer c ON c.id = p.customer_id "
+            + "WHERE p.id = #{id} AND c.tenant_id = #{tenantId} "
+            + "AND p.deleted_flag = 0 AND c.deleted_flag = 0 LIMIT 1")
+    Project selectByIdAndTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    @Select("SELECT p.* FROM t_project p JOIN m_customer c ON c.id = p.customer_id "
+            + "WHERE c.tenant_id = #{tenantId} AND p.status = #{status} "
+            + "AND p.deleted_flag = 0 AND c.deleted_flag = 0 ORDER BY p.id")
+    java.util.List<Project> selectListForTenant(@Param("tenantId") String tenantId,
+                                                @Param("status") String status);
+
+    @Select("""
+        <script>
+        SELECT p.* FROM t_project p JOIN m_customer c ON c.id = p.customer_id
+        WHERE c.tenant_id = #{tenantId} AND p.status = #{status}
+          AND p.deleted_flag = 0 AND c.deleted_flag = 0 AND p.id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY p.id
+        </script>
+        """)
+    java.util.List<Project> selectListForTenantAndIds(@Param("tenantId") String tenantId,
+                                                      @Param("status") String status,
+                                                      @Param("ids") Collection<Long> ids);
+
+    @Select("""
+        <script>
+        SELECT p.* FROM t_project p JOIN m_customer c ON c.id = p.customer_id
+        WHERE c.tenant_id = #{tenantId} AND p.deleted_flag = 0 AND c.deleted_flag = 0
+          AND p.id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY p.id
+        </script>
+        """)
+    java.util.List<Project> selectByIdsForTenant(@Param("tenantId") String tenantId,
+                                                 @Param("ids") Collection<Long> ids);
+
+    /** 顧客の明示的tenant ownershipから案件母集団を解決する。NULL ownershipは含めない。 */
+    @Select("SELECT p.id FROM t_project p JOIN m_customer c ON c.id = p.customer_id "
+            + "WHERE c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} "
+            + "AND p.deleted_flag = 0 AND c.deleted_flag = 0")
+    java.util.Set<Long> selectOwnedProjectIds(@Param("tenantId") String tenantId);
+
+    @Select("SELECT p.id FROM t_project p JOIN m_customer c ON c.id = p.customer_id "
+            + "WHERE p.customer_id = #{customerId} AND c.tenant_id = #{tenantId} "
+            + "AND p.deleted_flag = 0 AND c.deleted_flag = 0 ORDER BY p.id")
+    java.util.List<Long> selectIdsByCustomerAndTenant(@Param("customerId") Long customerId,
+                                                      @Param("tenantId") String tenantId);
+
     /** 商機変換の冪等判定用。論理削除済みも含めてsourceを一意に解決する。 */
     @Select("SELECT * FROM t_project WHERE source_opportunity_id = #{opportunityId} LIMIT 1")
     Project selectBySourceOpportunityIdIncludingDeleted(@Param("opportunityId") Long opportunityId);
     
+    /**
+     * 案件一覧。顧客JOINのtenant条件は常に必須（allowedIdsがnull/空でもtenant外へ漏れない）。
+     * allowedIdsは顧客IDの組織/DataScope絞り込みであり、nullは「tenant内全顧客」、空は0件。
+     */
     @Select("""
         <script>
         SELECT
             p.*,
             c.company_name AS customer_name
         FROM t_project p
-        LEFT JOIN m_customer c ON p.customer_id = c.id
+        INNER JOIN m_customer c ON p.customer_id = c.id
+            AND c.tenant_id IS NOT NULL
+            AND c.tenant_id = #{tenantId}
+            AND c.deleted_flag = 0
         WHERE p.deleted_flag = 0
         <if test="projectName != null and projectName != ''">
             AND p.project_name LIKE CONCAT('%', #{projectName}, '%')
@@ -62,5 +141,6 @@ public interface ProjectMapper extends BaseMapper<Project> {
                                              @Param("status") String status,
                                              @Param("customerId") Long customerId,
                                              @Param("customerName") String customerName,
-                                             @Param("allowedIds") Collection<Long> allowedIds);
+                                             @Param("allowedIds") Collection<Long> allowedIds,
+                                             @Param("tenantId") String tenantId);
 }

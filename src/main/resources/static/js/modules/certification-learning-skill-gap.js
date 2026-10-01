@@ -8,6 +8,7 @@
     let trainingCourses = [];
     let skillTags = [];
     let editingCourseVersion = null;
+    let editingCertificationVersion = null;
 
     function value(id) { return document.getElementById(id)?.value || ''; }
 
@@ -90,10 +91,13 @@
     function detailHtml(row) {
         const certs = (row.certifications || []).map(function (item) {
             const number = item.certificateNumber ? esc(item.certificateNumber) : esc(item.certificateNumberMasked || '未登録');
+            const downloadable = item.recordState === 'ACTIVE';
             const evidences = (item.evidences || []).map(function (evidence) {
+                const label = esc(evidence.originalName || '証憑');
+                if (!downloadable) return '<span class="d-block text-muted">' + label + '（確認待ち）</span>';
                 return '<a class="d-block" href="/api/certification-learning-gap/' + encodeURIComponent(row.engineerId)
                     + '/certifications/' + encodeURIComponent(item.id) + '/evidence/' + encodeURIComponent(evidence.documentId)
-                    + '/versions/' + encodeURIComponent(evidence.versionNo) + '/download">' + esc(evidence.originalName || '証憑') + '</a>';
+                    + '/versions/' + encodeURIComponent(evidence.versionNo) + '/download">' + label + '</a>';
             }).join('');
             const state = item.recordState || '';
             let actions = '';
@@ -130,9 +134,26 @@
             const result = await SES.api.get('/api/certification-learning-gap/' + encodeURIComponent(engineerId) + '/ai-candidates', query);
             const candidate = result.aiCandidate;
             const rule = result.ruleGap || {};
-            Swal.fire({ title: '学習course候補', html: '<p>rule gap: ' + esc(rule.status || '-') + '</p><p>as-of: ' + esc(rule.asOf || '-') + '</p><p>候補: ' + esc(candidate ? (candidate.aiSuggestedCourseIds || []).join(', ') : 'AI停止または履歴不足') + '</p><p class="text-muted small">AIは評価・配置・採否を確定しません。</p>', confirmButtonText: '閉じる' });
+            const candidateId = candidate && candidate.aiRunId;
+            const decisionButtons = candidateId && candidate.humanDecisionRequired && candidate.status === 'AI_CANDIDATE'
+                ? '<div class="d-flex justify-content-center gap-2 mt-3"><button id="cert-gap-ai-accept" type="button" class="btn btn-sm btn-outline-success">候補を採用</button><button id="cert-gap-ai-reject" type="button" class="btn btn-sm btn-outline-danger">候補を却下</button></div>' : '';
+            Swal.fire({ title: '学習course候補', html: '<p>rule gap: ' + esc(rule.status || '-') + '</p><p>as-of: ' + esc(rule.asOf || '-') + '</p><p>候補: ' + esc(candidate ? (candidate.aiSuggestedCourseIds || []).join(', ') : 'AI停止または履歴不足') + '</p><p class="text-muted small">AIは評価・配置・採否を確定しません。</p>' + decisionButtons, showConfirmButton: !decisionButtons, confirmButtonText: '閉じる', didOpen: function () {
+                const accept = document.getElementById('cert-gap-ai-accept');
+                const reject = document.getElementById('cert-gap-ai-reject');
+                if (accept) accept.addEventListener('click', function () { decideCertificationLearningGapCandidate(engineerId, candidateId, 'accept'); });
+                if (reject) reject.addEventListener('click', function () { decideCertificationLearningGapCandidate(engineerId, candidateId, 'reject'); });
+            } });
         } catch (e) { showCertificationError(e, '学習course候補の取得に失敗しました'); }
     };
+
+    async function decideCertificationLearningGapCandidate(engineerId, candidateId, decision) {
+        const result = await Swal.fire({ title: decision === 'accept' ? 'AI候補を採用' : 'AI候補を却下', input: 'text', inputLabel: '理由', inputValidator: function (value) { return value && value.trim() ? undefined : '理由を入力してください'; }, showCancelButton: true, confirmButtonText: decision === 'accept' ? '採用' : '却下', cancelButtonText: '戻る' });
+        if (!result.isConfirmed) return;
+        try {
+            await SES.api.post('/api/certification-learning-gap/' + encodeURIComponent(engineerId) + '/ai-candidates/' + encodeURIComponent(candidateId) + '/' + decision, { reason: result.value });
+            Toast.success('AI候補の判断を記録しました');
+        } catch (e) { showCertificationError(e, 'AI候補の判断に失敗しました'); }
+    }
 
     window.verifyCertificationRecord = async function (recordId, version, documentId, documentVersionId, evidenceHash) {
         const result = await Swal.fire({ title: '証憑を確認してACTIVE化', text: '指定版のCLEAN証憑を確認します。', showCancelButton: true, confirmButtonText: '確認', cancelButtonText: '戻る' });
@@ -172,19 +193,21 @@
 
     function renderMasters() {
         document.getElementById('cert-gap-master-body').innerHTML = certificationMasters.map(function (item) {
-            return '<tr><td>' + esc(item.displayName || '-') + '</td><td>' + esc(item.issuerDisplay || '-') + '</td><td>' + esc(item.expiryType || 'NONE') + (item.expiryMonths ? ' / ' + esc(item.expiryMonths) + 'か月' : '') + '</td><td>' + (item.activeFlag === 1 ? '有効' : '無効') + '</td><td><div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><button class="btn btn-sm btn-outline-info" onclick="openCertificationMasterForm(' + item.id + ')">編集</button>' + (item.activeFlag === 1 ? '<button class="btn btn-sm btn-outline-danger" onclick="deactivateCertificationMaster(' + item.id + ')">無効化</button>' : '') + '</div></td></tr>';
+            return '<tr><td>' + esc(item.displayName || '-') + '</td><td>' + esc(item.issuerDisplay || '-') + '</td><td>' + esc(item.expiryType || 'NONE') + (item.expiryMonths ? ' / ' + esc(item.expiryMonths) + 'か月' : '') + '</td><td>' + (item.activeFlag === 1 ? '有効' : '無効') + '</td><td><div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><button class="btn btn-sm btn-outline-info" onclick="openCertificationMasterForm(' + item.id + ')">編集</button>' + (item.activeFlag === 1 ? '<button class="btn btn-sm btn-outline-danger" onclick="deactivateCertificationMaster(' + item.id + ',' + item.version + ')">無効化</button>' : '') + '</div></td></tr>';
         }).join('') || '<tr><td colspan="5" class="text-muted">資格masterはありません</td></tr>';
     }
 
     function renderCourses() {
         document.getElementById('cert-gap-course-body').innerHTML = trainingCourses.map(function (item) {
-            return '<tr><td>' + esc(item.name || '-') + '</td><td>' + esc(item.provider || '-') + '</td><td>' + esc(item.costJpy == null ? '-' : item.costJpy + '円') + '</td><td>' + (item.skills || []).map(function (skill) { return esc(skill.skillName || ('ID:' + skill.skillId)); }).join('、') + '</td><td><div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><button class="btn btn-sm btn-outline-info" onclick="openTrainingCourseForm(' + item.id + ')">編集</button>' + (item.activeFlag === 1 ? '<button class="btn btn-sm btn-outline-danger" onclick="deactivateTrainingCourse(' + item.id + ')">無効化</button>' : '') + '</div></td></tr>';
+            return '<tr><td>' + esc(item.name || '-') + '</td><td>' + esc(item.provider || '-') + '</td><td>' + esc(item.costJpy == null ? '-' : item.costJpy + '円') + '</td><td>' + (item.skills || []).map(function (skill) { return esc(skill.skillName || ('ID:' + skill.skillId)); }).join('、') + '</td><td><div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><button class="btn btn-sm btn-outline-info" onclick="openTrainingCourseForm(' + item.id + ')">編集</button>' + (item.activeFlag === 1 ? '<button class="btn btn-sm btn-outline-danger" onclick="deactivateTrainingCourse(' + item.id + ',' + item.version + ')">無効化</button>' : '') + '</div></td></tr>';
         }).join('') || '<tr><td colspan="5" class="text-muted">courseはありません</td></tr>';
     }
 
     window.openCertificationMasterForm = async function (id) {
         try {
+            editingCertificationVersion = null;
             const item = id ? await SES.api.get('/api/certification-learning-gap/masters/certifications/' + id) : {};
+            if (id) editingCertificationVersion = item.version;
             document.getElementById('cert-gap-master-id').value = item.id || '';
             document.getElementById('cert-gap-master-name').value = item.displayName || '';
             document.getElementById('cert-gap-master-issuer').value = item.issuerDisplay || '';
@@ -200,10 +223,10 @@
     window.saveCertificationMaster = async function () {
         const id = document.getElementById('cert-gap-master-id').value;
         const expiryType = document.getElementById('cert-gap-master-expiry-type').value;
-        const payload = { displayName: document.getElementById('cert-gap-master-name').value, issuerDisplay: document.getElementById('cert-gap-master-issuer').value, externalCode: document.getElementById('cert-gap-master-code').value, expiryType: expiryType, expiryMonths: expiryType === 'FIXED_MONTHS' ? Number(document.getElementById('cert-gap-master-expiry-months').value) : null, ruleVersion: Number(document.getElementById('cert-gap-master-rule-version').value || 1), activeFlag: Number(document.getElementById('cert-gap-master-active').value) };
+        const payload = { displayName: document.getElementById('cert-gap-master-name').value, issuerDisplay: document.getElementById('cert-gap-master-issuer').value, externalCode: document.getElementById('cert-gap-master-code').value, expiryType: expiryType, expiryMonths: expiryType === 'FIXED_MONTHS' ? Number(document.getElementById('cert-gap-master-expiry-months').value) : null, ruleVersion: Number(document.getElementById('cert-gap-master-rule-version').value || 1), activeFlag: Number(document.getElementById('cert-gap-master-active').value), expectedVersion: editingCertificationVersion };
         try { if (id) await SES.api.put('/api/certification-learning-gap/masters/certifications/' + id, payload); else await SES.api.post('/api/certification-learning-gap/masters/certifications', payload); bootstrap.Modal.getInstance(document.getElementById('cert-gap-master-modal')).hide(); loadCatalogs(); } catch (e) { showCertificationError(e, '資格masterの保存に失敗しました'); }
     };
-    window.deactivateCertificationMaster = async function (id) { const result = await Swal.fire({ title: '資格masterを無効化', showCancelButton: true, confirmButtonText: '無効化', cancelButtonText: '戻る' }); if (!result.isConfirmed) return; try { await SES.api.delete('/api/certification-learning-gap/masters/certifications/' + id); loadCatalogs(); } catch (e) { showCertificationError(e, '資格masterの無効化に失敗しました'); } };
+    window.deactivateCertificationMaster = async function (id, version) { const result = await Swal.fire({ title: '資格masterを無効化', showCancelButton: true, confirmButtonText: '無効化', cancelButtonText: '戻る' }); if (!result.isConfirmed) return; try { await SES.api.delete('/api/certification-learning-gap/masters/certifications/' + id + '?expectedVersion=' + encodeURIComponent(version)); loadCatalogs(); } catch (e) { showCertificationError(e, '資格masterの無効化に失敗しました'); } };
 
     window.openTrainingCourseForm = async function (id) {
         try {
@@ -226,10 +249,10 @@
     };
     window.saveTrainingCourse = async function () {
         const id = document.getElementById('cert-gap-course-id').value;
-        const payload = { provider: document.getElementById('cert-gap-course-provider').value, name: document.getElementById('cert-gap-course-name').value, description: document.getElementById('cert-gap-course-description').value, costJpy: Number(document.getElementById('cert-gap-course-cost').value), periodDays: document.getElementById('cert-gap-course-period').value ? Number(document.getElementById('cert-gap-course-period').value) : null, capacity: document.getElementById('cert-gap-course-capacity').value ? Number(document.getElementById('cert-gap-course-capacity').value) : null, version: editingCourseVersion, requiredSkillIds: Array.from(document.getElementById('cert-gap-course-skills').selectedOptions).map(function (option) { return Number(option.value); }) };
+        const payload = { provider: document.getElementById('cert-gap-course-provider').value, name: document.getElementById('cert-gap-course-name').value, description: document.getElementById('cert-gap-course-description').value, costJpy: Number(document.getElementById('cert-gap-course-cost').value), periodDays: document.getElementById('cert-gap-course-period').value ? Number(document.getElementById('cert-gap-course-period').value) : null, capacity: document.getElementById('cert-gap-course-capacity').value ? Number(document.getElementById('cert-gap-course-capacity').value) : null, expectedVersion: editingCourseVersion, requiredSkillIds: Array.from(document.getElementById('cert-gap-course-skills').selectedOptions).map(function (option) { return Number(option.value); }) };
         try { if (id) await SES.api.put('/api/certification-learning-gap/masters/courses/' + id, payload); else await SES.api.post('/api/certification-learning-gap/masters/courses', payload); bootstrap.Modal.getInstance(document.getElementById('cert-gap-course-modal')).hide(); loadCatalogs(); } catch (e) { showCertificationError(e, '学習courseの保存に失敗しました'); }
     };
-    window.deactivateTrainingCourse = async function (id) { const result = await Swal.fire({ title: 'courseを無効化', showCancelButton: true, confirmButtonText: '無効化', cancelButtonText: '戻る' }); if (!result.isConfirmed) return; try { await SES.api.delete('/api/certification-learning-gap/masters/courses/' + id); loadCatalogs(); } catch (e) { showCertificationError(e, '学習courseの無効化に失敗しました'); } };
+    window.deactivateTrainingCourse = async function (id, version) { const result = await Swal.fire({ title: 'courseを無効化', showCancelButton: true, confirmButtonText: '無効化', cancelButtonText: '戻る' }); if (!result.isConfirmed) return; try { await SES.api.delete('/api/certification-learning-gap/masters/courses/' + id + '?expectedVersion=' + encodeURIComponent(version)); loadCatalogs(); } catch (e) { showCertificationError(e, '学習courseの無効化に失敗しました'); } };
 
     window.exportCertificationLearningGap = async function () {
         const query = params(); delete query.current; delete query.size;

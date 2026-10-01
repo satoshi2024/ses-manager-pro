@@ -13,6 +13,7 @@ import com.ses.service.security.BreakGlassService;
 import com.ses.service.security.ActionPermissionResolver;
 import com.ses.service.security.PersistentSessionService;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
@@ -57,8 +58,18 @@ public class BreakGlassServiceImpl implements BreakGlassService {
 
     @Override
     public boolean isLoginAllowed(String username) {
-        return properties.isBreakGlassLoginEnabled() && properties.isBreakGlassUsername(username)
-                && hasActiveIncident();
+        if (!properties.isBreakGlassLoginEnabled() || !properties.isBreakGlassUsername(username)) {
+            return false;
+        }
+        try {
+            SysUser user = sysUserMapper.selectByUsername(username);
+            String tenantId = authenticatedTenant(user);
+            return tenantId != null && oidcTenantMatches(tenantId)
+                    && incidentMapper.selectActive(tenantId, LocalDateTime.now(clock)) != null;
+        } catch (RuntimeException e) {
+            log.warn("break-glass loginのtenant/incidentを確認できないため無効として扱います", e);
+            return false;
+        }
     }
 
     @Override
@@ -132,8 +143,20 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (!properties.isBreakGlassUsername(username)) {
             return true;
         }
-        BreakGlassIncident incident = activeIncident();
-        if (incident == null) {
+        SysUser user = sysUserMapper.selectByUsername(username);
+        String tenantId = authenticatedTenant(user);
+        if (tenantId == null || !oidcTenantMatches(tenantId)) {
+            return false;
+        }
+        BreakGlassIncident incident;
+        try {
+            incident = incidentMapper.selectActive(tenantId, LocalDateTime.now(clock));
+        } catch (RuntimeException e) {
+            log.warn("break-glass incidentを取得出来ないためsessionを発行しません", e);
+            return false;
+        }
+        if (incident == null || !tenantId.equals(incident.getTenantId())
+                || !"ACTIVE".equals(incident.getStatus())) {
             return false;
         }
         HttpSession session = request.getSession(true);
@@ -147,19 +170,27 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (authentication == null || !properties.isBreakGlassUsername(authentication.getName())) {
             return BreakGlassDecision.ALLOW;
         }
+        String tenantId = authenticatedTenant(authentication);
+        if (tenantId == null || !oidcTenantMatches(tenantId)) {
+            // InternalTenantContextFilterより前に実行されるため、ここでtenant欠落・不一致を止める。
+            return BreakGlassDecision.DENY_SCOPE;
+        }
         HttpSession session = request.getSession(false);
         if (session == null || !(session.getAttribute(INCIDENT_ID_ATTRIBUTE) instanceof Long incidentId)) {
             return revokeAndReject(request, authentication, "BREAK_GLASS_INCIDENT_UNBOUND");
         }
         BreakGlassIncident incident;
         try {
-            incident = incidentMapper.selectById(incidentId);
+            incident = incidentMapper.selectByIdAndTenant(tenantId, incidentId);
         } catch (RuntimeException e) {
             log.warn("break-glass incidentの再検証に失敗しました", e);
             return revokeAndReject(request, authentication, "BREAK_GLASS_INCIDENT_UNAVAILABLE");
         }
         LocalDateTime now = LocalDateTime.now(clock);
-        if (!isActiveBoundIncident(incident, now)) {
+        if (incident != null && !tenantId.equals(incident.getTenantId())) {
+            return BreakGlassDecision.DENY_SCOPE;
+        }
+        if (!isActiveBoundIncident(incident, tenantId, now)) {
             return revokeAndReject(request, authentication, "BREAK_GLASS_INCIDENT_EXPIRED");
         }
         if (isAuthenticationInfrastructure(request) || isPassiveInfrastructure(request)) {
@@ -194,7 +225,7 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         auditRequired(actorId, incident, "BREAK_GLASS_CLOSED", 200);
         if (properties.getBreakGlassUsernames() != null) {
             for (String username : properties.getBreakGlassUsernames()) {
-                SysUser user = sysUserMapper.selectByUsername(username);
+                SysUser user = sysUserMapper.selectByUsernameAndTenant(username, tenantId());
                 if (user != null) {
                     persistentSessionService.revokeAllForUser(user.getId(), "BREAK_GLASS_INCIDENT_CLOSED");
                 }
@@ -203,7 +234,7 @@ public class BreakGlassServiceImpl implements BreakGlassService {
     }
 
     private void requireAdmin(Long actorId) {
-        SysUser user = actorId == null ? null : sysUserMapper.selectById(actorId);
+        SysUser user = actorId == null ? null : sysUserMapper.selectByIdAndTenant(actorId, tenantId());
         if (user == null || !ADMIN_ROLE.equals(user.getRole()) || !Integer.valueOf(1).equals(user.getStatus())) {
             throw BusinessException.of(403, "error.accessDenied");
         }
@@ -218,8 +249,8 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         }
     }
 
-    private boolean isActiveBoundIncident(BreakGlassIncident incident, LocalDateTime now) {
-        return incident != null && tenantId().equals(incident.getTenantId())
+    private boolean isActiveBoundIncident(BreakGlassIncident incident, String tenantId, LocalDateTime now) {
+        return incident != null && tenantId.equals(incident.getTenantId())
                 && "ACTIVE".equals(incident.getStatus())
                 && Integer.valueOf(1).equals(incident.getIdpOutageConfirmed())
                 && incident.getApprovedBy1() != null && incident.getApprovedBy2() != null
@@ -273,11 +304,13 @@ public class BreakGlassServiceImpl implements BreakGlassService {
 
     private void notifyActivation(BreakGlassIncident incident) {
         Set<Long> recipients = Set.of(incident.getRequestedBy(), incident.getApprovedBy1(), incident.getApprovedBy2());
-        for (Long userId : recipients) {
-            notificationService.publishToUser(userId, "BREAK_GLASS_ACTIVE", "緊急アクセスが有効になりました",
-                    "監査ログで対象操作と期限を確認してください", "/audit-log",
-                    "break-glass-active:" + incident.getId() + ":" + userId, "audit-log");
-        }
+        AccountingTenantContextHolder.runWithTenant(incident.getTenantId(), () -> {
+            for (Long userId : recipients) {
+                notificationService.publishToUser(userId, "BREAK_GLASS_ACTIVE", "緊急アクセスが有効になりました",
+                        "監査ログで対象操作と期限を確認してください", "/audit-log",
+                        "break-glass-active:" + incident.getId() + ":" + userId, "audit-log");
+            }
+        });
     }
 
     private void auditRequired(Long actorId, BreakGlassIncident incident, String code, int status) {
@@ -295,6 +328,31 @@ public class BreakGlassServiceImpl implements BreakGlassService {
     }
 
     private String tenantId() {
-        return StringUtils.hasText(properties.getTenantId()) ? properties.getTenantId() : "default";
+        String contextTenant = AccountingTenantContextHolder.requireTenantContext();
+        if (!oidcTenantMatches(contextTenant)) {
+            throw BusinessException.of(403, "error.tenant.contextMismatch");
+        }
+        return contextTenant;
+    }
+
+    /** 認証主体のSysUserだけからtenantを解決する。設定値・request入力をtenantの代替にしない。 */
+    private String authenticatedTenant(Authentication authentication) {
+        if (authentication == null || !(authentication.getPrincipal() instanceof com.ses.config.LoginUser loginUser)) {
+            return null;
+        }
+        return authenticatedTenant(loginUser.getSysUser());
+    }
+
+    private String authenticatedTenant(SysUser user) {
+        if (user == null || !StringUtils.hasText(user.getTenantId())) {
+            return null;
+        }
+        return user.getTenantId().trim();
+    }
+
+    private boolean oidcTenantMatches(String tenantId) {
+        return StringUtils.hasText(tenantId)
+                && (!StringUtils.hasText(properties.getTenantId())
+                || tenantId.equals(properties.getTenantId().trim()));
     }
 }

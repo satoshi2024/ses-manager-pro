@@ -20,6 +20,7 @@ import com.ses.service.MenuCacheService;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.security.AuthorizationService;
 import com.ses.service.security.impl.FileScopeValidationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -78,6 +79,7 @@ class FileScopeValidationServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         service = new FileScopeValidationService(
                 resumeIngestionMapper,
                 engineerMapper,
@@ -99,6 +101,7 @@ class FileScopeValidationServiceTest {
     @AfterEach
     void clearAuth() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     private void loginAs(String role) {
@@ -116,6 +119,8 @@ class FileScopeValidationServiceTest {
     /** 先行する3判定（レジュメ/写真/スキルシート）に該当させないための共通スタブ。 */
     private void noMatchOnEarlierTables() {
         lenient().when(resumeIngestionMapper.selectOne(any())).thenReturn(null);
+        lenient().when(resumeIngestionMapper.selectByStoredFileNameForTenant(any(), any())).thenReturn(null);
+        lenient().when(resumeIngestionMapper.countByStoredFileName(any())).thenReturn(0);
         lenient().when(engineerMapper.selectOne(any())).thenReturn(null);
         lenient().when(proposalMapper.selectOne(any())).thenReturn(null);
     }
@@ -123,7 +128,9 @@ class FileScopeValidationServiceTest {
     @Test
     void 案件メール取込の原本はproject_ingestionメニューを持たないロールに403() {
         noMatchOnEarlierTables();
-        when(projectIngestionMapper.selectOne(any())).thenReturn(new ProjectIngestion());
+        ProjectIngestion ingestion = new ProjectIngestion();
+        ingestion.setTenantId("default");
+        when(projectIngestionMapper.selectByStoredFileNameForTenant("default", "abc.eml")).thenReturn(ingestion);
         loginAs("HR");
         when(menuCacheServiceProvider.getIfAvailable()).thenReturn(menuCacheService);
         when(menuCacheService.getMenuKeysByRole("HR")).thenReturn(List.of("engineer"));
@@ -136,7 +143,9 @@ class FileScopeValidationServiceTest {
     @Test
     void 案件メール取込の原本はメニューを持つロールなら許可() {
         noMatchOnEarlierTables();
-        when(projectIngestionMapper.selectOne(any())).thenReturn(new ProjectIngestion());
+        ProjectIngestion ingestion = new ProjectIngestion();
+        ingestion.setTenantId("default");
+        when(projectIngestionMapper.selectByStoredFileNameForTenant("default", "abc.eml")).thenReturn(ingestion);
         loginAs("営業");
         when(menuCacheServiceProvider.getIfAvailable()).thenReturn(menuCacheService);
         when(menuCacheService.getMenuKeysByRole("営業")).thenReturn(List.of("project-ingestion"));
@@ -147,7 +156,7 @@ class FileScopeValidationServiceTest {
     @Test
     void 要員空き状況取込の原本はbp_availability_ingestionメニューで判定する() {
         noMatchOnEarlierTables();
-        when(projectIngestionMapper.selectOne(any())).thenReturn(null);
+        when(projectIngestionMapper.selectByStoredFileNameForTenant("default", "abc.pdf")).thenReturn(null);
         when(bpAvailabilityIngestionMapper.selectOne(any())).thenReturn(new BpAvailabilityIngestion());
         loginAs("HR");
         when(menuCacheServiceProvider.getIfAvailable()).thenReturn(menuCacheService);
@@ -161,7 +170,9 @@ class FileScopeValidationServiceTest {
     @Test
     void 管理者はメニュー設定によらず取込原本を参照できる() {
         noMatchOnEarlierTables();
-        when(projectIngestionMapper.selectOne(any())).thenReturn(new ProjectIngestion());
+        ProjectIngestion ingestion = new ProjectIngestion();
+        ingestion.setTenantId("default");
+        when(projectIngestionMapper.selectByStoredFileNameForTenant("default", "abc.eml")).thenReturn(ingestion);
         loginAs("管理者");
 
         assertDoesNotThrow(() -> service.assertDownloadAllowed("abc.eml"));
@@ -182,13 +193,15 @@ class FileScopeValidationServiceTest {
         noMatchOnEarlierTables();
         DocumentVersion version = new DocumentVersion();
         version.setDocumentId(9001L);
+        version.setTenantId("default");
         version.setScanStatus("CLEAN");
         Document document = new Document();
         document.setDocumentType("MANAGEMENT_REPORT");
+        document.setTenantId("default");
         when(documentVersionMapperProvider.getIfAvailable()).thenReturn(documentVersionMapper);
         when(documentVersionMapper.selectOne(any())).thenReturn(version);
         when(documentMapperProvider.getIfAvailable()).thenReturn(documentMapper);
-        when(documentMapper.selectById(9001L)).thenReturn(document);
+        when(documentMapper.selectOne(any())).thenReturn(document);
         loginAs("管理者");
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -200,15 +213,17 @@ class FileScopeValidationServiceTest {
         DocumentVersion version = new DocumentVersion();
         version.setId(versionId);
         version.setDocumentId(9100L);
+        version.setTenantId("default");
         version.setStorageKey(storageKey);
         version.setScanStatus("CLEAN");
         version.setSha256(hash);
         Document document = new Document();
         document.setDocumentType("CERTIFICATION_EVIDENCE");
+        document.setTenantId("default");
         lenient().when(documentVersionMapperProvider.getIfAvailable()).thenReturn(documentVersionMapper);
         lenient().when(documentVersionMapper.selectOne(any())).thenReturn(version);
         lenient().when(documentMapperProvider.getIfAvailable()).thenReturn(documentMapper);
-        lenient().when(documentMapper.selectById(9100L)).thenReturn(document);
+        lenient().when(documentMapper.selectOne(any())).thenReturn(document);
         lenient().when(documentLinkMapperProvider.getIfAvailable()).thenReturn(documentLinkMapper);
         lenient().when(engineerCertificationMapperProvider.getIfAvailable()).thenReturn(engineerCertificationMapper);
         return version;
@@ -216,19 +231,18 @@ class FileScopeValidationServiceTest {
 
     @Test
     void 資格証憑はtyped_CERTIFICATION_RECORD_linkがなければ403() {
-        noMatchOnEarlierTables();
-        certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
+        DocumentVersion version = certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
         when(documentLinkMapper.selectList(any())).thenReturn(List.of());
         loginAs("HR");
 
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.assertDownloadAllowed("cert-evidence.pdf"));
+                () -> service.assertCertificationEvidenceDownloadAllowed(
+                        "cert-evidence.pdf", 200L, 9100L, 100L, "abc123"));
         assertEquals(403, ex.getCode());
     }
 
     @Test
     void 資格証憑はENGINEER_linkだけでは403() {
-        noMatchOnEarlierTables();
         certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
         DocumentLink engineerLink = new DocumentLink();
         engineerLink.setTargetType("ENGINEER");
@@ -237,13 +251,13 @@ class FileScopeValidationServiceTest {
         loginAs("管理者");
 
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.assertDownloadAllowed("cert-evidence.pdf"));
+                () -> service.assertCertificationEvidenceDownloadAllowed(
+                        "cert-evidence.pdf", 200L, 9100L, 100L, "abc123"));
         assertEquals(403, ex.getCode());
     }
 
     @Test
     void 資格証憑は管理者でもtyped_linkとDataScopeが必要() {
-        noMatchOnEarlierTables();
         certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
         DocumentLink recordLink = new DocumentLink();
         recordLink.setTargetType("CERTIFICATION_RECORD");
@@ -252,19 +266,20 @@ class FileScopeValidationServiceTest {
         EngineerCertification record = new EngineerCertification();
         record.setId(200L);
         record.setEngineerId(50L);
-        when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        record.setTenantId("default");
+        when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
         org.mockito.Mockito.doThrow(BusinessException.of(403, "error.forbidden"))
                 .when(dataScopeService).assertAllowedEngineer(50L);
         loginAs("管理者");
 
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.assertDownloadAllowed("cert-evidence.pdf"));
+                () -> service.assertCertificationEvidenceDownloadAllowed(
+                        "cert-evidence.pdf", 200L, 9100L, 100L, "abc123"));
         assertEquals(403, ex.getCode());
     }
 
     @Test
     void 資格証憑はmixed_linkでもCERTIFICATION_RECORDで許可() {
-        noMatchOnEarlierTables();
         certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
         DocumentLink engineerLink = new DocumentLink();
         engineerLink.setTargetType("ENGINEER");
@@ -276,15 +291,16 @@ class FileScopeValidationServiceTest {
         EngineerCertification record = new EngineerCertification();
         record.setId(200L);
         record.setEngineerId(50L);
-        when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        record.setTenantId("default");
+        when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
         loginAs("HR");
 
-        assertDoesNotThrow(() -> service.assertDownloadAllowed("cert-evidence.pdf"));
+        assertDoesNotThrow(() -> service.assertCertificationEvidenceDownloadAllowed(
+                "cert-evidence.pdf", 200L, 9100L, 100L, "abc123"));
     }
 
     @Test
     void 資格証憑はversion不一致を拒否() {
-        noMatchOnEarlierTables();
         certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
         DocumentLink recordLink = new DocumentLink();
         recordLink.setTargetType("CERTIFICATION_RECORD");
@@ -293,17 +309,18 @@ class FileScopeValidationServiceTest {
         EngineerCertification record = new EngineerCertification();
         record.setId(200L);
         record.setEngineerId(50L);
-        lenient().when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        record.setTenantId("default");
+        lenient().when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
         loginAs("HR");
 
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.assertDownloadAllowed("cert-evidence.pdf", 999L, null));
+                () -> service.assertCertificationEvidenceDownloadAllowed(
+                        "cert-evidence.pdf", 200L, 9100L, 999L, null));
         assertEquals("error.file.versionMismatch", ex.getMessage());
     }
 
     @Test
     void 資格証憑はhash不一致を拒否() {
-        noMatchOnEarlierTables();
         certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
         DocumentLink recordLink = new DocumentLink();
         recordLink.setTargetType("CERTIFICATION_RECORD");
@@ -312,17 +329,18 @@ class FileScopeValidationServiceTest {
         EngineerCertification record = new EngineerCertification();
         record.setId(200L);
         record.setEngineerId(50L);
-        lenient().when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        record.setTenantId("default");
+        lenient().when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
         loginAs("HR");
 
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.assertDownloadAllowed("cert-evidence.pdf", 100L, "deadbeef"));
+                () -> service.assertCertificationEvidenceDownloadAllowed(
+                        "cert-evidence.pdf", 200L, 9100L, 100L, "deadbeef"));
         assertEquals("error.file.hashMismatch", ex.getMessage());
     }
 
     @Test
     void 資格証憑はCLEANかつversion_hash一致なら許可() {
-        noMatchOnEarlierTables();
         certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
         DocumentLink recordLink = new DocumentLink();
         recordLink.setTargetType("CERTIFICATION_RECORD");
@@ -331,24 +349,94 @@ class FileScopeValidationServiceTest {
         EngineerCertification record = new EngineerCertification();
         record.setId(200L);
         record.setEngineerId(50L);
-        when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        record.setTenantId("default");
+        when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
         loginAs("HR");
 
-        assertDoesNotThrow(() -> service.assertDownloadAllowed("cert-evidence.pdf", 100L, "abc123"));
+        assertDoesNotThrow(() -> service.assertCertificationEvidenceDownloadAllowed(
+                "cert-evidence.pdf", 200L, 9100L, 100L, "abc123"));
     }
 
     @Test
     void 資格証憑はlegal_hold中のdownloadを拒否する() {
-        noMatchOnEarlierTables();
         certificationEvidenceVersion(100L, "cert-evidence-held.pdf", "abc123");
         Document held = new Document();
         held.setDocumentType("CERTIFICATION_EVIDENCE");
+        held.setTenantId("default");
         held.setLegalHoldFlag(1);
-        when(documentMapper.selectById(9100L)).thenReturn(held);
+        when(documentMapper.selectOne(any())).thenReturn(held);
         loginAs("HR");
 
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.assertDownloadAllowed("cert-evidence-held.pdf", 100L, "abc123"));
+                () -> service.assertCertificationEvidenceDownloadAllowed(
+                        "cert-evidence-held.pdf", 200L, 9100L, 100L, "abc123"));
         assertEquals("error.file.legalHoldActive", ex.getMessage());
+    }
+
+    @Test
+    void 汎用document_downloadは資格証憑を常に拒否する() {
+        noMatchOnEarlierTables();
+        certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
+        DocumentLink recordLink = new DocumentLink();
+        recordLink.setTargetType("CERTIFICATION_RECORD");
+        recordLink.setTargetId(200L);
+        lenient().when(documentLinkMapper.selectList(any())).thenReturn(List.of(recordLink));
+        EngineerCertification record = new EngineerCertification();
+        record.setId(200L);
+        record.setEngineerId(50L);
+        record.setTenantId("default");
+        lenient().when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
+        loginAs("HR");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("cert-evidence.pdf", 100L, "abc123"));
+        assertEquals(403, ex.getCode());
+        assertEquals("error.forbidden", ex.getMessage());
+    }
+
+    @Test
+    void 資格証憑専用境界は営業を未スコープ時に拒否する() {
+        certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
+        DocumentLink recordLink = new DocumentLink();
+        recordLink.setTargetType("CERTIFICATION_RECORD");
+        recordLink.setTargetId(200L);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(recordLink));
+        EngineerCertification record = new EngineerCertification();
+        record.setId(200L);
+        record.setEngineerId(50L);
+        record.setTenantId("default");
+        when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
+        when(dataScopeService.isScoped()).thenReturn(false);
+        loginAs("営業");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.assertCertificationEvidenceDownloadAllowed(
+                        "cert-evidence.pdf", 200L, 9100L, 100L, "abc123"));
+        assertEquals(403, ex.getCode());
+    }
+
+    @Test
+    void 資格証憑専用境界はrecordと文書のtenantが一致しなければ拒否する() {
+        DocumentVersion version = certificationEvidenceVersion(100L, "cert-evidence-tenant.pdf", "abc123");
+        version.setTenantId("default");
+        Document document = new Document();
+        document.setDocumentType("CERTIFICATION_EVIDENCE");
+        document.setTenantId("default");
+        when(documentMapper.selectOne(any())).thenReturn(document);
+
+        EngineerCertification record = new EngineerCertification();
+        record.setId(200L);
+        record.setTenantId("tenant-b");
+        record.setEngineerId(50L);
+        DocumentLink recordLink = new DocumentLink();
+        recordLink.setDocumentId(9100L);
+        recordLink.setTargetType("CERTIFICATION_RECORD");
+        recordLink.setTargetId(200L);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(recordLink));
+        when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
+        loginAs("HR");
+
+        assertThrows(BusinessException.class, () -> service.assertCertificationEvidenceDownloadAllowed(
+                "cert-evidence-tenant.pdf", 200L, 9100L, 100L, "abc123"));
     }
 }

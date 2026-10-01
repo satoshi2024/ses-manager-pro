@@ -23,7 +23,7 @@ class ExternalApiDtoContractTest {
 
     @Test
     void projectDtoContainsOnlyApprovedFields() throws Exception {
-        JsonNode json = objectMapper.valueToTree(new ExternalApiProject("public-project", "ACTIVE",
+        JsonNode json = objectMapper.valueToTree(new ExternalApiProject("public-project", "OPEN",
                 LocalDate.of(2026, 1, 1), null, "public-customer"));
 
         assertFields(json, Set.of("publicProjectId", "status", "startDate", "publicCustomerId"));
@@ -37,10 +37,10 @@ class ExternalApiDtoContractTest {
                 Set.of("publicEngineerId", "availabilityStatus", "availableFrom", "availableTo", "skillTagCode"));
         assertFields(objectMapper.valueToTree(new ExternalApiContractStatus(
                         "public-contract", "public-project", "ACTIVE", LocalDate.of(2026, 1, 1),
-                        LocalDate.of(2026, 12, 31), "RENEW")),
+                        LocalDate.of(2026, 12, 31), "CONTINUE")),
                 Set.of("publicContractId", "publicProjectId", "status", "startDate", "endDate", "renewalStatus"));
         assertFields(objectMapper.valueToTree(new ExternalApiInvoiceStatus(
-                        "public-invoice", "public-contract", "OUTSTANDING", LocalDate.of(2026, 1, 1),
+                        "public-invoice", "public-contract", "UNSENT", LocalDate.of(2026, 1, 1),
                         LocalDate.of(2026, 2, 1), Instant.parse("2026-02-01T00:00:00Z"), "OUTSTANDING")),
                 Set.of("publicInvoiceId", "publicContractId", "status", "issueDate", "dueDate", "paidAt",
                         "settlementStatus"));
@@ -68,7 +68,7 @@ class ExternalApiDtoContractTest {
     @Test
     void publicDtoDoesNotSerializeInternalEntityFields() throws Exception {
         JsonNode publicJson = objectMapper.valueToTree(new ExternalApiProject(
-                "public-project", "ACTIVE", LocalDate.of(2026, 1, 1), null, "public-customer"));
+                "public-project", "OPEN", LocalDate.of(2026, 1, 1), null, "public-customer"));
         Project internalEntity = new Project();
         internalEntity.setProjectName("internal-project");
         internalEntity.setCustomerId(42L);
@@ -88,7 +88,7 @@ class ExternalApiDtoContractTest {
     @Test
     void listAndCountContractsDoNotExposeInternalPagingFields() throws Exception {
         JsonNode list = objectMapper.valueToTree(new ExternalApiListResponse<>(java.util.List.of(
-                new ExternalApiProject("public-project", "ACTIVE", null, null, null)),
+                new ExternalApiProject("public-project", "OPEN", null, null, null)),
                 "v1.encrypted", false, java.time.Instant.parse("2026-08-30T00:00:00Z")));
         JsonNode count = objectMapper.valueToTree(new ExternalApiCountResponse(1L,
                 java.time.Instant.parse("2026-08-30T00:00:00Z")));

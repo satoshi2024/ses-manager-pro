@@ -3,6 +3,10 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.audit.ActorAttribution;
+import com.ses.common.audit.ActorType;
+import com.ses.common.audit.ConfirmationSource;
+import com.ses.common.audit.ExecutionActorContext;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.document.DocumentRegisterRequest;
 import com.ses.dto.document.IntegrityFinding;
@@ -28,6 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.support.TransactionSynchronization;
 import java.util.Set;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -56,6 +61,12 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class DocumentServiceImpl implements DocumentService {
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DocumentMetadataCommitService metadataCommitService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
     private final DocumentMapper documentMapper;
     private final DocumentVersionMapper documentVersionMapper;
     private final DocumentLinkMapper documentLinkMapper;
@@ -74,31 +85,39 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     private final ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
     private final AssetScopeService assetScopeService;
 
-    private static final String DEFAULT_TENANT_ID = "default";
     private static final Set<String> HASH_CLAIM_DOCUMENT_TYPES = Set.of(
             "ORDER_RECEIVED", "ORDER_ACKNOWLEDGEMENT", "ACCEPTANCE");
     /** FileScopeValidationService と同一の専用ACL文書種別（decision table §6.2）。 */
     private static final Set<String> FILE_SCOPE_SPECIAL_DOCUMENT_TYPES = Set.of(
             "PRIVATE_NOTE", "RECEIPT", "CHANGE_REQUEST_ATTACHMENT");
-
+    /** 電子インボイス原本はtenant内でも法人を越えて共有しない。 */
+    private static final Set<String> DIGITAL_INVOICE_DOCUMENT_TYPES = Set.of(
+            "INVOICE_IN", "INVOICE_OUT");
     // ----------------------------------------------------------------
     // 登録
     // ----------------------------------------------------------------
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public Document registerGenerated(DocumentRegisterRequest request, InputStream content) {
         return doRegister(request, content);
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public Document registerReceived(DocumentRegisterRequest request, InputStream content) {
         return doRegister(request, content);
     }
 
     private Document doRegister(DocumentRegisterRequest request, InputStream content) {
+        if (request == null || content == null) {
+            throw BusinessException.of(400, "error.document.invalidRequest");
+        }
         String sourceType = request.getSourceType() != null ? request.getSourceType() : "GENERATED";
+        ActorAttribution actor = resolveActor(request);
+        String direction = request.getDirection() != null ? request.getDirection()
+                : ("RECEIVED".equalsIgnoreCase(sourceType) ? "INCOMING" : "OUTGOING");
+        validateDocumentType(request.getDocumentType(), direction);
         String businessKey = (request.getBusinessKey() != null && !request.getBusinessKey().isBlank())
                 ? request.getBusinessKey()
                 : sourceType + ":" + UUID.randomUUID();
@@ -107,12 +126,16 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                 : "v1";
 
         // 1. 冪等チェック（tenant_id対応）
-        DocumentVersion existingVersion = documentVersionMapper.findByIdempotencyKey(
-                DEFAULT_TENANT_ID, sourceType, businessKey, discriminator);
+        String tenantId = currentTenant(request);
+        Long legalEntityId = resolveRegistrationLegalEntity(request);
+        DocumentVersion existingVersion = metadataCommitService == null
+                ? documentVersionMapper.findByIdempotencyKey(tenantId, sourceType, businessKey, discriminator)
+                : metadataCommitService.findByIdempotencyKey(tenantId, sourceType, businessKey, discriminator);
         if (existingVersion != null) {
             log.info("[文書台帳] 冪等登録: sourceType={} businessKey={} discriminator={} → 既存documentId={}",
                     sourceType, businessKey, discriminator, existingVersion.getDocumentId());
-            return documentMapper.selectById(existingVersion.getDocumentId());
+            return getRegisteredDocumentOrThrow(
+                    existingVersion.getDocumentId(), tenantId, legalEntityId, request.getDocumentType());
         }
 
         // 2. 一時ファイルへストリーミング書き出し＆SHA-256ハッシュ算出（固定ヒープ化）
@@ -128,39 +151,48 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         }
 
         try {
-            // 4. DB tx: document作成後にHashをアトミックClaimする。
-            Document doc = buildDocument(request);
-            documentMapper.insert(doc);
-            claimHashIfRequired(doc, streamResult.sha256());
-
-            // 5. put前にrollback補償を登録する。putが部分書込みで失敗しても
-            // transaction中のcatchで即時削除し、rollback後にも冪等削除する。
-            registerStorageRollbackCompensation(storageKey);
-            // Claim成功後だけStorageのquarantine領域へ保存する。
+            // Storage I/OはDB transaction外で完了させる。DB未確定時はcatchで補償削除する。
             try (InputStream tempIs = Files.newInputStream(streamResult.tempPath())) {
                 documentStorage.put(storageKey, tempIs, true);
             }
+            documentStorage.promote(storageKey);
 
-            // 6. version・業務リンクを保存する。
-            DocumentVersion version = buildVersion(request, doc.getId(), storageKey, streamResult.sizeBytes(), streamResult.sha256());
+            Document doc = buildDocument(request, tenantId, legalEntityId, actor);
+            DocumentVersion version = buildVersion(request, tenantId, null, storageKey,
+                    streamResult.sizeBytes(), streamResult.sha256(), actor);
             version.setBusinessKey(businessKey);
             version.setVersionDiscriminator(discriminator);
             version.setScanStatus("CLEAN");
-            // portal等の内部ログインuser以外からの登録時は作成者を明示指定できる（NOT NULL列対応）
             if (request.getCreatedBy() != null) {
                 version.setCreatedBy(request.getCreatedBy());
             }
-            documentVersionMapper.insert(version);
-
-            if (request.getTargetType() != null && request.getTargetId() != null) {
-                link(doc.getId(), request.getTargetType(), request.getTargetId());
+            if (metadataCommitService != null) {
+                try {
+                    metadataCommitService.commitNew(doc, version, request.getTargetType(), request.getTargetId());
+                } catch (org.springframework.dao.DuplicateKeyException duplicate) {
+                    // 同一tenantの並行retryはDB一意制約を正本にし、確定済み文書を返す。
+                    DocumentVersion concurrent = metadataCommitService == null
+                            ? documentVersionMapper.findByIdempotencyKey(tenantId, sourceType, businessKey, discriminator)
+                            : metadataCommitService.findByIdempotencyKey(tenantId, sourceType, businessKey, discriminator);
+                    if (concurrent == null) {
+                        throw duplicate;
+                    }
+                    cleanupStorageAfterFailure(storageKey);
+                    return getRegisteredDocumentOrThrow(
+                            concurrent.getDocumentId(), tenantId, legalEntityId, request.getDocumentType());
+                }
+            } else {
+                // 直接生成された旧テストadapter向け。Spring経路は必ず上記commit serviceを使用する。
+                registerStorageRollbackCompensation(storageKey);
+                documentMapper.insert(doc);
+                version.setDocumentId(doc.getId());
+                claimHashIfRequired(doc, streamResult.sha256());
+                documentVersionMapper.insert(version);
+                if (request.getTargetType() != null && request.getTargetId() != null) {
+                    linkWithinRegistration(doc.getId(), tenantId, request.getTargetType(), request.getTargetId());
+                }
+                recordAccessLog(doc.getId(), version.getId(), "REGISTER");
             }
-
-            // 7. storage promote
-            documentStorage.promote(storageKey);
-
-            // 8. アクセスログ
-            recordAccessLog(doc.getId(), version.getId(), "REGISTER");
 
             log.info("[文書台帳] 登録完了: documentId={} versionId={} sha256={}", doc.getId(), version.getId(), streamResult.sha256());
             return doc;
@@ -185,11 +217,25 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     // ----------------------------------------------------------------
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public DocumentVersion addVersion(Long documentId, DocumentRegisterRequest request, InputStream content) {
+        if (request == null || content == null) {
+            throw BusinessException.of(400, "error.document.invalidRequest");
+        }
         Document doc = getDocumentOrThrow(documentId);
-
+        String tenantId = currentTenant(request);
+        if (!tenantId.equals(doc.getTenantId())) {
+            throw BusinessException.of(404, "error.document.notFound");
+        }
+        if (isDigitalInvoiceDocument(doc)) {
+            Long requestedLegalEntityId = resolveRegistrationLegalEntity(request);
+            assertDocumentLegalEntity(doc, requestedLegalEntityId);
+        }
         String sourceType = request.getSourceType() != null ? request.getSourceType() : "RECEIVED";
+        String direction = request.getDirection() != null ? request.getDirection()
+                : ("RECEIVED".equalsIgnoreCase(sourceType) ? "INCOMING" : "OUTGOING");
+        validateDocumentType(request.getDocumentType(), direction);
+
         String businessKey = (request.getBusinessKey() != null && !request.getBusinessKey().isBlank())
                 ? request.getBusinessKey()
                 : sourceType + ":" + documentId + ":" + UUID.randomUUID();
@@ -198,8 +244,11 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                 : "v" + System.currentTimeMillis();
 
         DocumentVersion existing = documentVersionMapper.findByIdempotencyKey(
-                DEFAULT_TENANT_ID, sourceType, businessKey, discriminator);
+                tenantId, sourceType, businessKey, discriminator);
         if (existing != null) {
+            if (!documentId.equals(existing.getDocumentId())) {
+                throw new BusinessException(409, "冪等性キーが別の文書版に割り当て済みです。");
+            }
             log.info("[文書台帳] 冪等addVersion: 既存versionId={}", existing.getId());
             return existing;
         }
@@ -215,34 +264,38 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         }
 
         try {
-            claimHashIfRequired(doc, streamResult.sha256());
-            registerStorageRollbackCompensation(storageKey);
+            // put失敗時はcatchで部分実体を補償する。
             try (InputStream tempIs = Files.newInputStream(streamResult.tempPath())) {
                 documentStorage.put(storageKey, tempIs, true);
             }
+            documentStorage.promote(storageKey);
 
-            DocumentVersion version = buildVersion(request, documentId, storageKey, streamResult.sizeBytes(), streamResult.sha256());
+            ActorAttribution actor = resolveActor(request);
+            DocumentVersion version = buildVersion(request, tenantId, documentId, storageKey, streamResult.sizeBytes(), streamResult.sha256(), actor);
             version.setBusinessKey(businessKey);
             version.setVersionDiscriminator(discriminator);
             version.setScanStatus("CLEAN");
             if (request.getCreatedBy() != null) {
                 version.setCreatedBy(request.getCreatedBy());
             }
-            documentVersionMapper.insert(version);
-
-            if ("CONFIRMED".equals(doc.getStatus())) {
-                int updated = documentMapper.update(null, new LambdaUpdateWrapper<Document>()
-                        .eq(Document::getId, documentId)
-                        .eq(Document::getVersion, doc.getVersion())
-                        .set(Document::getStatus, "AMENDED")
-                        .set(Document::getVersion, doc.getVersion() + 1));
-                if (updated == 0) {
-                    throw BusinessException.of(409, "error.document.optimisticLock");
+            if (metadataCommitService != null) {
+                metadataCommitService.commitVersion(doc, version);
+            } else {
+                // 直接生成された旧test adapterでは外側transactionのrollbackを補償する。
+                registerStorageRollbackCompensation(storageKey);
+                documentVersionMapper.insert(version);
+                if ("CONFIRMED".equals(doc.getStatus())) {
+                    int updated = documentMapper.update(null, new LambdaUpdateWrapper<Document>()
+                            .eq(Document::getId, documentId)
+                            .eq(Document::getVersion, doc.getVersion())
+                            .set(Document::getStatus, "AMENDED")
+                            .set(Document::getVersion, doc.getVersion() + 1));
+                    if (updated == 0) {
+                        throw BusinessException.of(409, "error.document.optimisticLock");
+                    }
+                    recordAccessLog(documentId, version.getId(), "AMEND");
                 }
             }
-
-            documentStorage.promote(storageKey);
-            recordAccessLog(documentId, version.getId(), "AMEND");
 
             log.info("[文書台帳] 版追加完了: documentId={} newVersionId={}", documentId, version.getId());
             return version;
@@ -267,8 +320,10 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                 || !HASH_CLAIM_DOCUMENT_TYPES.contains(doc.getDocumentType())) {
             return;
         }
-        String tenantId = doc.getTenantId() != null && !doc.getTenantId().isBlank()
-                ? doc.getTenantId() : DEFAULT_TENANT_ID;
+        String tenantId = doc.getTenantId();
+        if (tenantId == null || tenantId.isBlank() || !tenantId.equals(currentTenant(null))) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
         try {
             documentHashClaimMapper.insertClaim(tenantId, doc.getDocumentType(), sha256, doc.getId());
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
@@ -321,12 +376,18 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     @Transactional(rollbackFor = Exception.class)
     public void link(Long documentId, String targetType, Long targetId) {
         getDocumentOrThrow(documentId);
+        linkWithinRegistration(documentId, currentTenant(null), targetType, targetId);
+    }
+
+    private void linkWithinRegistration(Long documentId, String tenantId, String targetType, Long targetId) {
         DocumentLink existing = documentLinkMapper.selectOne(new LambdaQueryWrapper<DocumentLink>()
+                .eq(DocumentLink::getTenantId, tenantId)
                 .eq(DocumentLink::getDocumentId, documentId)
                 .eq(DocumentLink::getTargetType, targetType)
                 .eq(DocumentLink::getTargetId, targetId));
         if (existing == null) {
             DocumentLink link = new DocumentLink();
+            link.setTenantId(tenantId);
             link.setDocumentId(documentId);
             link.setTargetType(targetType);
             link.setTargetId(targetId);
@@ -465,7 +526,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             return;
         }
 
-        List<DocumentVersion> versions = documentVersionMapper.findByDocumentId(req.getDocumentId());
+        List<DocumentVersion> versions = findVersions(doc.getTenantId(), req.getDocumentId());
 
         documentMapper.update(null, new LambdaUpdateWrapper<Document>()
                 .eq(Document::getId, req.getDocumentId())
@@ -526,8 +587,9 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
     @Override
     public List<IntegrityFinding> verifyIntegrity(Long documentId) {
+        Document document = getDocumentOrThrow(documentId);
         List<IntegrityFinding> findings = new ArrayList<>();
-        List<DocumentVersion> versions = documentVersionMapper.findByDocumentId(documentId);
+        List<DocumentVersion> versions = findVersions(document.getTenantId(), documentId);
 
         for (DocumentVersion v : versions) {
             try (InputStream is = documentStorage.open(v.getStorageKey())) {
@@ -557,7 +619,11 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                         .storageKey(v.getStorageKey())
                         .expectedSha256(v.getSha256())
                         .findingType("STORAGE_MISSING")
-                        .message("Storageに実体が見つかりません: " + e.getMessage())
+                        // Storage SDKの例外messageにはcredential、署名URL、内部pathが混入し得る。
+                        // findingには固定文言・例外型・関連IDだけを残す。
+                        .message("Storage実体の取得に失敗しました"
+                                + " (exceptionType=" + e.getClass().getSimpleName()
+                                + ", versionId=" + v.getId() + ")")
                         .build());
             }
         }
@@ -608,12 +674,24 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     }
 
     private DocumentVersion findVersion(Long documentId, Integer versionNo) {
+        Document doc = getDocumentOrThrow(documentId);
         if (versionNo == null) {
-            return documentVersionMapper.findLatestByDocumentId(documentId);
+            return findLatestVersion(doc.getTenantId(), documentId);
         }
         return documentVersionMapper.selectOne(new LambdaQueryWrapper<DocumentVersion>()
+                .eq(DocumentVersion::getTenantId, doc.getTenantId())
                 .eq(DocumentVersion::getDocumentId, documentId)
                 .eq(DocumentVersion::getVersionNo, versionNo));
+    }
+
+    private List<DocumentVersion> findVersions(String tenantId, Long documentId) {
+        List<DocumentVersion> versions = documentVersionMapper.findByTenantAndDocumentId(tenantId, documentId);
+        return versions == null ? List.of() : versions;
+    }
+
+    private DocumentVersion findLatestVersion(String tenantId, Long documentId) {
+        DocumentVersion latest = documentVersionMapper.findLatestByTenantAndDocumentId(tenantId, documentId);
+        return latest;
     }
 
     // ----------------------------------------------------------------
@@ -621,11 +699,34 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     // ----------------------------------------------------------------
 
     private Document getDocumentOrThrow(Long documentId) {
-        Document doc = documentMapper.selectById(documentId);
+        String tenantId = currentTenant(null);
+        Document doc = getDocumentByTenant(documentId, tenantId);
         if (doc == null) {
             throw BusinessException.of(404, "error.document.notFound");
         }
+        assertDigitalInvoiceDocumentAccess(doc);
         return doc;
+    }
+
+    private Document getRegisteredDocumentOrThrow(
+            Long documentId, String tenantId, Long legalEntityId, String expectedDocumentType) {
+        Document doc = getDocumentByTenant(documentId, tenantId);
+        if (doc == null) {
+            throw BusinessException.of(404, "error.document.notFound");
+        }
+        if (!java.util.Objects.equals(expectedDocumentType, doc.getDocumentType())) {
+            throw new BusinessException(409, "冪等性キーが別の文書種別に割り当て済みです。");
+        }
+        if (DIGITAL_INVOICE_DOCUMENT_TYPES.contains(expectedDocumentType)) {
+            assertDocumentLegalEntity(doc, legalEntityId);
+        }
+        return doc;
+    }
+
+    private Document getDocumentByTenant(Long documentId, String tenantId) {
+        return documentMapper.selectOne(new LambdaQueryWrapper<Document>()
+                .eq(Document::getId, documentId)
+                .eq(Document::getTenantId, tenantId));
     }
 
     private DocumentDisposalRequest getDisposalRequestOrThrow(Long id) {
@@ -633,12 +734,16 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         if (req == null) {
             throw BusinessException.of(404, "error.document.disposalNotFound");
         }
+        // 申請IDだけで別法人の廃棄操作へ到達できないよう、親文書の境界も検証する。
+        getDocumentOrThrow(req.getDocumentId());
         return req;
     }
 
-    private Document buildDocument(DocumentRegisterRequest request) {
+    private Document buildDocument(DocumentRegisterRequest request, String tenantId, Long legalEntityId,
+                                   ActorAttribution actor) {
         Document doc = new Document();
-        doc.setTenantId(DEFAULT_TENANT_ID);
+        doc.setTenantId(tenantId);
+        doc.setLegalEntityId(legalEntityId == null ? null : String.valueOf(legalEntityId));
         doc.setDocumentType(request.getDocumentType());
         doc.setDocumentNo(request.getDocumentNo());
         doc.setTitle(request.getTitle());
@@ -648,20 +753,26 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         doc.setTransactionDate(request.getTransactionDate());
         doc.setAmount(request.getAmount());
         doc.setCurrency("JPY");
-        doc.setDirection(request.getDirection() != null ? request.getDirection() : "OUTGOING");
+        String direction = request.getDirection() != null ? request.getDirection()
+                : ("RECEIVED".equalsIgnoreCase(request.getSourceType()) ? "INCOMING" : "OUTGOING");
+        doc.setDirection(direction);
         doc.setStatus("DRAFT");
         doc.setLegalHoldFlag(0);
         doc.setVersion(1L);
+        doc.setCreatedBy(actor.humanUserId());
+        setActorFields(doc, actor);
         return doc;
     }
 
-    private DocumentVersion buildVersion(DocumentRegisterRequest request, Long documentId,
-                                          String storageKey, long sizeBytes, String sha256) {
-        DocumentVersion latest = documentVersionMapper.findLatestByDocumentId(documentId);
+    private DocumentVersion buildVersion(DocumentRegisterRequest request, String tenantId, Long documentId,
+                                          String storageKey, long sizeBytes, String sha256,
+                                          ActorAttribution actor) {
+        DocumentVersion latest = documentId == null ? null
+                : documentVersionMapper.findLatestByTenantAndDocumentId(tenantId, documentId);
         int nextVersionNo = (latest == null) ? 1 : latest.getVersionNo() + 1;
 
         DocumentVersion v = new DocumentVersion();
-        v.setTenantId(DEFAULT_TENANT_ID);
+        v.setTenantId(tenantId);
         v.setDocumentId(documentId);
         v.setVersionNo(nextVersionNo);
         v.setStorageKey(storageKey);
@@ -672,7 +783,118 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         v.setSourceType(request.getSourceType());
         v.setExternalId(request.getExternalId());
         v.setChangeReason(request.getChangeReason());
+        v.setCreatedBy(actor.humanUserId());
+        v.setActorType(actor.actorType().name());
+        v.setConfirmationSource(actor.confirmationSource().name());
+        v.setHumanUserId(actor.humanUserId());
+        v.setCorrelationId(actor.correlationId());
+        v.setIdempotencyKey(actor.idempotencyKey());
         return v;
+    }
+
+    /** 文書種別マスタと方向を必ず突合し、未登録種別は保存前に拒否する。 */
+    private void validateDocumentType(String documentType, String direction) {
+        if (documentType == null || documentType.isBlank() || direction == null || direction.isBlank()) {
+            throw BusinessException.of(400, "error.document.invalidType");
+        }
+        DocumentType registered = documentTypeMapper.selectActiveByCode(documentType);
+        if (registered == null) {
+            // 未登録種別は、既知コードであっても本番の正本マスタが欠落しているため許可しない。
+            throw BusinessException.of(400, "error.document.invalidType");
+        }
+        if (!documentType.equals(registered.getCode())
+                || registered.getDirection() == null || !registered.getDirection().equalsIgnoreCase(direction)) {
+            throw BusinessException.of(400, "error.document.invalidType");
+        }
+    }
+
+    private ActorAttribution resolveActor(DocumentRegisterRequest request) {
+        if (request.getActorType() == null && request.getConfirmationSource() == null
+                && request.getHumanUserId() == null && request.getCreatedBy() == null) {
+            return ExecutionActorContext.resolve();
+        }
+        ActorType type = request.getActorType() == null ? ActorType.HUMAN : request.getActorType();
+        ConfirmationSource source = request.getConfirmationSource();
+        Long humanUserId = request.getHumanUserId() != null ? request.getHumanUserId() : request.getCreatedBy();
+        if (source == null) {
+            source = switch (type) {
+                case HUMAN -> ConfirmationSource.MANUAL_API;
+                case SYSTEM -> ConfirmationSource.SCHEDULER_POLL;
+                case PROVIDER -> ConfirmationSource.PROVIDER_CALLBACK;
+                case LEGACY_UNRESOLVED -> ConfirmationSource.LEGACY_UNRESOLVED;
+            };
+        }
+        return new ActorAttribution(type, source, humanUserId,
+                request.getCorrelationId(), request.getIdempotencyKey());
+    }
+
+    private void setActorFields(Document doc, ActorAttribution actor) {
+        doc.setActorType(actor.actorType().name());
+        doc.setConfirmationSource(actor.confirmationSource().name());
+        doc.setHumanUserId(actor.humanUserId());
+        doc.setCorrelationId(actor.correlationId());
+        doc.setIdempotencyKey(actor.idempotencyKey());
+    }
+
+    private String currentTenant(DocumentRegisterRequest request) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        if (request != null && request.getTenantId() != null && !request.getTenantId().isBlank()
+                && !tenantId.equals(request.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        return tenantId;
+    }
+
+    private Long resolveRegistrationLegalEntity(DocumentRegisterRequest request) {
+        if (request == null || !DIGITAL_INVOICE_DOCUMENT_TYPES.contains(request.getDocumentType())) {
+            return request == null ? null : request.getLegalEntityId();
+        }
+        Long requested = request.getLegalEntityId();
+        if (requested == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        ActorAttribution explicitActor = ExecutionActorContext.current();
+        if (explicitActor != null && (explicitActor.actorType() == ActorType.SYSTEM
+                || explicitActor.actorType() == ActorType.PROVIDER)) {
+            if (request.getActorType() != null && request.getActorType() != explicitActor.actorType()) {
+                throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_MISMATCH");
+            }
+            return requested;
+        }
+        Long authoritative = requireLegalEntityContextService().requireCurrentLegalEntityId();
+        if (!authoritative.equals(requested)) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_MISMATCH");
+        }
+        return authoritative;
+    }
+
+    private com.ses.service.security.LegalEntityContextService requireLegalEntityContextService() {
+        if (legalEntityContextService == null) {
+            throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        return legalEntityContextService;
+    }
+
+    private boolean isDigitalInvoiceDocument(Document doc) {
+        return doc != null && doc.getDocumentType() != null
+                && DIGITAL_INVOICE_DOCUMENT_TYPES.contains(doc.getDocumentType());
+    }
+
+    private void assertDigitalInvoiceDocumentAccess(Document doc) {
+        if (!isDigitalInvoiceDocument(doc)) {
+            return;
+        }
+        assertDocumentLegalEntity(doc, requireLegalEntityContextService().requireCurrentLegalEntityId());
+    }
+
+    private void assertDocumentLegalEntity(Document doc, Long expectedLegalEntityId) {
+        if (doc == null || expectedLegalEntityId == null || doc.getLegalEntityId() == null
+                || !String.valueOf(expectedLegalEntityId).equals(doc.getLegalEntityId())) {
+            throw BusinessException.of(404, "error.document.notFound");
+        }
     }
 
     /**
@@ -680,8 +902,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
      * 起算日が明確に確定できない場合は null を返し、勝手に LocalDate.now() へフォールバックしない。
      */
     LocalDate computeRetentionUntil(Document doc) {
-        DocumentType docType = documentTypeMapper.selectOne(
-                new LambdaQueryWrapper<DocumentType>().eq(DocumentType::getCode, doc.getDocumentType()));
+        DocumentType docType = documentTypeMapper.selectActiveByCode(doc.getDocumentType());
         if (docType == null || docType.getRetentionYears() == null) {
             return null;
         }
@@ -758,14 +979,21 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             log.setDocumentId(documentId);
             log.setVersionId(versionId);
             log.setAction(action);
-            log.setUserId(SecurityUtils.currentUserId() != null ? SecurityUtils.currentUserId() : -1L);
+            ActorAttribution actor = ExecutionActorContext.resolve();
+            log.setUserId(actor.humanUserId());
+            log.setActorType(actor.actorType().name());
+            log.setConfirmationSource(actor.confirmationSource().name());
+            log.setHumanUserId(actor.humanUserId());
+            log.setCorrelationId(actor.correlationId());
+            log.setIdempotencyKey(actor.idempotencyKey());
             log.setOccurredAt(LocalDateTime.now());
             documentAccessLogMapper.insert(log);
         } catch (Exception e) {
-            log.warn("[文書台帳] アクセスログ記録失敗: documentId={} action={} exceptionClass={} detail={}",
+            log.error("[文書台帳] アクセスログ記録失敗のため業務をロールバックします: documentId={} action={} exceptionClass={} detail={}",
                     documentId, action,
                     com.ses.common.util.LogRedaction.exceptionType(e),
                     com.ses.common.util.LogRedaction.safeThrowableSummary(e));
+            throw new BusinessException(500, "文書アクセス監査ログの記録に失敗しました。", e);
         }
     }
 
@@ -779,7 +1007,9 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                 com.ses.common.util.PageUtils.safePage(query.getPage(), query.getPageSize(), 1000L);
 
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>()
-                .eq(Document::getTenantId, DEFAULT_TENANT_ID);
+                .eq(Document::getTenantId, currentTenant(null));
+
+        applyDigitalInvoiceLegalEntityFilter(wrapper);
 
         applyDataScopeFilter(wrapper);
 
@@ -821,7 +1051,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
         List<com.ses.dto.document.DocumentListDTO> dtoList = new ArrayList<>();
         for (Document doc : pageResult.getRecords()) {
-            DocumentVersion latestVersion = documentVersionMapper.findLatestByDocumentId(doc.getId());
+            DocumentVersion latestVersion = findLatestVersion(doc.getTenantId(), doc.getId());
             String typeName = typeNameMap.getOrDefault(doc.getDocumentType(), doc.getDocumentType());
 
             com.ses.dto.document.DocumentListDTO dto = com.ses.dto.document.DocumentListDTO.builder()
@@ -862,7 +1092,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         assertDocumentAccessAllowed(doc);
         DocumentType type = documentTypeMapper.selectOne(new LambdaQueryWrapper<DocumentType>().eq(DocumentType::getCode, doc.getDocumentType()));
 
-        List<DocumentVersion> versionEntities = documentVersionMapper.findByDocumentId(documentId);
+        List<DocumentVersion> versionEntities = findVersions(doc.getTenantId(), documentId);
         List<com.ses.dto.document.DocumentVersionDTO> versionDTOs = new ArrayList<>();
         for (DocumentVersion v : versionEntities) {
             versionDTOs.add(com.ses.dto.document.DocumentVersionDTO.builder()
@@ -885,7 +1115,9 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                     .build());
         }
 
-        List<DocumentLink> linkEntities = documentLinkMapper.selectList(new LambdaQueryWrapper<DocumentLink>().eq(DocumentLink::getDocumentId, documentId));
+        List<DocumentLink> linkEntities = documentLinkMapper.selectList(new LambdaQueryWrapper<DocumentLink>()
+                .eq(DocumentLink::getDocumentId, documentId)
+                .eq(DocumentLink::getTenantId, doc.getTenantId()));
         List<com.ses.dto.document.DocumentLinkDTO> linkDTOs = new ArrayList<>();
         for (DocumentLink l : linkEntities) {
             linkDTOs.add(com.ses.dto.document.DocumentLinkDTO.builder()
@@ -923,6 +1155,8 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     }
 
     public void assertDocumentAccessAllowed(Document doc) {
+        // 管理者も法人境界は越えない。歴史NULLは修復完了までfail-closedとする。
+        assertDigitalInvoiceDocumentAccess(doc);
         // FileScopeValidationService と同一の専用種別ACL（RECEIPT/CRA/PRIVATE_NOTE）。
         // リンク DataScope より先に適用し、営業が ENGINEER リンク経由で領収書へ到達できないようにする。
         if (doc != null && doc.getDocumentType() != null
@@ -958,7 +1192,8 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         }
 
         List<DocumentLink> links = documentLinkMapper.selectList(
-                new LambdaQueryWrapper<DocumentLink>().eq(DocumentLink::getDocumentId, doc.getId()));
+                new LambdaQueryWrapper<DocumentLink>().eq(DocumentLink::getDocumentId, doc.getId())
+                        .eq(DocumentLink::getTenantId, currentTenant(null)));
         if (links.isEmpty()) {
             throw BusinessException.of(403, "error.forbidden");
         }
@@ -1153,6 +1388,9 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             return;
         }
 
+        if (hasCondition) {
+            linkWrapper.eq("tenant_id", currentTenant(null));
+        }
         List<DocumentLink> links = hasCondition ? documentLinkMapper.selectList(linkWrapper) : List.of();
         Set<Long> allowedDocIds = links.stream().map(DocumentLink::getDocumentId).collect(Collectors.toSet());
 
@@ -1174,6 +1412,20 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                             .eq(Document::getDocumentType, "ACCEPTANCE")
                             .in(Document::getId, allowedAcceptanceDocIds)));
         }
+    }
+
+    private void applyDigitalInvoiceLegalEntityFilter(LambdaQueryWrapper<Document> wrapper) {
+        Long legalEntityId;
+        try {
+            legalEntityId = requireLegalEntityContextService().requireCurrentLegalEntityId();
+        } catch (BusinessException unresolved) {
+            // 法人を一意に解決できない利用者には電子インボイス原本だけを表示しない。
+            wrapper.notIn(Document::getDocumentType, DIGITAL_INVOICE_DOCUMENT_TYPES);
+            return;
+        }
+        wrapper.and(scope -> scope.notIn(Document::getDocumentType, DIGITAL_INVOICE_DOCUMENT_TYPES)
+                .or(invoice -> invoice.in(Document::getDocumentType, DIGITAL_INVOICE_DOCUMENT_TYPES)
+                        .eq(Document::getLegalEntityId, String.valueOf(legalEntityId))));
     }
 
     public static String computeSha256(byte[] data) {

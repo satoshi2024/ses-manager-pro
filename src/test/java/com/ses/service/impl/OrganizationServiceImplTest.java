@@ -13,6 +13,7 @@ import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.OrganizationService;
 import com.ses.service.ManagementBudgetService;
 import com.ses.service.CostCenterService;
+import com.ses.test.DisableDefaultLegalEntityTestFixture;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -34,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 @Transactional
 @Sql("/sql/engineer-schema-h2.sql")
+@DisableDefaultLegalEntityTestFixture
 class OrganizationServiceImplTest {
 
     @Autowired

@@ -54,6 +54,7 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
             targetMonth = com.ses.common.util.DateUtils.parseYearMonth(yearMonth);
         }
         String ymStr = targetMonth.toString();
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         
         LocalDate startOfMonthDate = targetMonth.atDay(1);
         LocalDate endOfMonthDate = targetMonth.atEndOfMonth();
@@ -62,10 +63,10 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
 
         List<SysUser> salesUsers = sysUserService.list(new QueryWrapper<SysUser>().eq("role", StatusConstants.ROLE_SALES).eq("status", 1));
 
-        List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<Contract>()
+        List<Contract> allContracts = contractMapper.selectListForTenant(new QueryWrapper<Contract>()
                 .in("status", Arrays.asList("稼動中", "終了", "解約"))
                 .and(w -> w.le("start_date", endOfMonthDate).or().between("created_at", startOfMonthTime, endOfMonthTime))
-        );
+                , com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
 
         Set<Long> userIds = salesUsers.stream().map(SysUser::getId).collect(Collectors.toSet());
         for (Contract c : allContracts) {
@@ -113,9 +114,9 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
         Map<Long, BigDecimal> totalProfitMap = new HashMap<>();
         Map<Long, BigDecimal> totalCommissionMap = new HashMap<>();
 
-        List<WorkRecord> workRecords = workRecordMapper.selectList(new QueryWrapper<WorkRecord>()
-                .eq("work_month", ymStr)
-                .eq("status", "確定"));
+        List<Long> contractIds = allContracts.stream().map(Contract::getId).toList();
+        List<WorkRecord> workRecords = workRecordMapper.selectConfirmedByWorkMonthsAndContractIdsForTenant(
+                List.of(ymStr), contractIds, tenantId);
         Map<Long, WorkRecord> workRecordMap = workRecords.stream()
                 .collect(Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1));
 

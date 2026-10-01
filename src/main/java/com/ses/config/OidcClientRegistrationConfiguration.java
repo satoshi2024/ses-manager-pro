@@ -24,7 +24,7 @@ import java.util.List;
 /** OIDC有効時も起動時のremote discoveryへ依存しない固定metadata設定。 */
 @Configuration
 @EnableConfigurationProperties({OidcSecurityProperties.class, MfaSecurityProperties.class,
-        PersistentSessionProperties.class})
+        PersistentSessionProperties.class, com.ses.service.accounting.AccountingTenantInventoryProperties.class})
 public class OidcClientRegistrationConfiguration {
 
     @Bean

@@ -83,4 +83,17 @@ class ComplianceGateCredentialCryptoServiceTest {
         assertNull(cryptoService.encrypt("default", 100L, "MAPPING-2026-07", "op-123", ""));
         assertNull(cryptoService.decrypt("default", 100L, "MAPPING-2026-07", "op-123", null));
     }
+
+    @Test
+    void prodとtest混在プロファイルではprodとして扱われ鍵欠損時にfailFastする() {
+        MockEnvironment env1 = new MockEnvironment();
+        env1.setActiveProfiles("prod", "test");
+        ComplianceGateCredentialKeyProviderImpl provider1 = new ComplianceGateCredentialKeyProviderImpl(env1);
+        assertThrows(IllegalStateException.class, provider1::init);
+
+        MockEnvironment env2 = new MockEnvironment();
+        env2.setActiveProfiles("test", "prod");
+        ComplianceGateCredentialKeyProviderImpl provider2 = new ComplianceGateCredentialKeyProviderImpl(env2);
+        assertThrows(IllegalStateException.class, provider2::init);
+    }
 }

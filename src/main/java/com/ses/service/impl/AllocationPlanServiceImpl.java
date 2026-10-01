@@ -338,7 +338,8 @@ public class AllocationPlanServiceImpl implements AllocationPlanService {
         if (allocation.getApprovalRequestId() == null) {
             return false;
         }
-        ApprovalRequest approval = approvalRequestMapper.selectById(allocation.getApprovalRequestId());
+        ApprovalRequest approval = approvalRequestMapper.selectByIdAndTenant(allocation.getApprovalRequestId(),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         return approval != null && "approved".equals(approval.getStatus());
     }
 

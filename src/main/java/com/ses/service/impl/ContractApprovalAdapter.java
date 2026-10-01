@@ -6,6 +6,7 @@ import com.ses.entity.ApprovalRequest;
 import com.ses.entity.Contract;
 import com.ses.mapper.ContractMapper;
 import com.ses.service.ContractService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.approval.ApprovalOrganizationResolver;
 import com.ses.service.approval.ApprovalPayloads;
 import com.ses.service.approval.ApprovalSnapshot;
@@ -55,7 +56,8 @@ public class ContractApprovalAdapter implements ApprovalTargetAdapter {
 
     @Override
     public long currentVersion(Long targetId) {
-        Contract c = targetId == null ? null : mapper.selectByIdForUpdate(targetId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Contract c = targetId == null ? null : mapper.selectByIdForUpdateForTenant(targetId, tenantId);
         if (c == null) throw BusinessException.of(404, "error.scope.notFound");
         return version(c.getVersion());
     }
@@ -63,6 +65,14 @@ public class ContractApprovalAdapter implements ApprovalTargetAdapter {
 
     @Override
     public void applyApproved(ApprovalRequest request) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        if (request == null || request.getTargetId() == null
+                || request.getTenantId() == null || !tenantId.equals(request.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        if (mapper.selectByIdForTenant(request.getTargetId(), tenantId) == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
         Map<String, Object> p = ApprovalPayloads.read(objectMapper, request.getPayloadJson());
         String op = ApprovalPayloads.text(p, "operation");
         if ("revisePrice".equals(op)) {
@@ -73,7 +83,12 @@ public class ContractApprovalAdapter implements ApprovalTargetAdapter {
         service.changeStatus(request.getTargetId(), ApprovalPayloads.text(p, "status"),
                 parseDate(ApprovalPayloads.text(p, "cancelDate")));
     }
-    private Contract require(Long id) { Contract c = id == null ? null : mapper.selectById(id); if (c == null) throw BusinessException.of(404, "error.scope.notFound"); return c; }
+    private Contract require(Long id) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Contract c = id == null ? null : mapper.selectByIdForTenant(id, tenantId);
+        if (c == null) throw BusinessException.of(404, "error.scope.notFound");
+        return c;
+    }
     private java.time.LocalDate parseDate(String value) { return value == null || value.isBlank() ? null : java.time.LocalDate.parse(value); }
     private long version(Integer version) { return version == null ? 0L : version.longValue(); }
 }

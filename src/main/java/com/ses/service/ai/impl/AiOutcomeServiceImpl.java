@@ -6,7 +6,9 @@ import com.ses.entity.Contract;
 import com.ses.entity.Opportunity;
 import com.ses.entity.Proposal;
 import com.ses.mapper.AiOutcomeMapper;
+import com.ses.mapper.AiRecommendationItemMapper;
 import com.ses.mapper.ProposalMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.ai.AiOutcomeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +30,9 @@ public class AiOutcomeServiceImpl implements AiOutcomeService {
 
     private final AiOutcomeMapper outcomeMapper;
     private final ProposalMapper proposalMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private AiRecommendationItemMapper itemMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -148,7 +153,13 @@ public class AiOutcomeServiceImpl implements AiOutcomeService {
 
     private void insert(Long itemId, String outcomeType, String sourceType, Long sourceId,
                         LocalDateTime occurredAt, LocalDate originalEnd, String valueJson) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        if (itemMapper == null || itemMapper.selectByIdAndTenant(itemId, tenantId) == null) {
+            // itemが現在tenantに属さない場合は、outcomeも記録しない（越境・存在性漏えいを防ぐ）。
+            return;
+        }
         AiOutcome outcome = new AiOutcome();
+        outcome.setTenantId(tenantId);
         outcome.setItemId(itemId);
         outcome.setOutcomeType(outcomeType);
         outcome.setSourceType(sourceType);

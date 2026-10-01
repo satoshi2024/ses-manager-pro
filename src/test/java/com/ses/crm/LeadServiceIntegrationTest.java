@@ -29,11 +29,22 @@ import static org.junit.jupiter.api.Assertions.*;
 @Transactional
 @WithMockUser(username = "admin", roles = "管理者")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@com.ses.test.EnableDefaultTenantTestContext
 class LeadServiceIntegrationTest {
     @Autowired private LeadService leadService;
     @Autowired private CustomerMapper customerMapper;
     @Autowired private CustomerContactMapper contactMapper;
     @Autowired private OpportunityMapper opportunityMapper;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
 
     @Test
     void duplicateCandidatesAreWarningsOnlyAndDoNotMerge() {

@@ -7,6 +7,8 @@ import com.ses.service.DocumentService;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.impl.FileScopeValidationService;
 import com.ses.service.impl.DocumentServiceImpl;
+import com.ses.test.EnableDefaultTenantTestContext;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,9 +16,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +33,7 @@ import static org.mockito.Mockito.when;
  * 注文一覧と同じscope（顧客DataScope）を通す（design §5.2 / archive spec §6.2）。
  */
 @SpringBootTest
+@EnableDefaultTenantTestContext
 @ActiveProfiles("test")
 @Transactional
 @DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_CLASS)
@@ -130,9 +130,7 @@ class SalesOrderDocumentScopeTest {
     }
 
     private void login(String role) {
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken("user", "x",
-                        List.of(new SimpleGrantedAuthority("ROLE_" + role))));
+        TenantTestSecurity.bindAs(1L, "user", "default", role);
     }
 
     @Test

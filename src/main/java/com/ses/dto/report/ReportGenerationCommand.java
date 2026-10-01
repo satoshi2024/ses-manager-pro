@@ -21,6 +21,12 @@ public record ReportGenerationCommand(
                 false, null, false, null, null, null, null);
     }
 
+    public static ReportGenerationCommand manual(Long templateVersionId, YearMonth period,
+                                                  String cutoffKind, String recipientPreviewHash) {
+        return new ReportGenerationCommand(templateVersionId, period, cutoffKind,
+                false, null, false, null, null, recipientPreviewHash, null);
+    }
+
     public static ReportGenerationCommand scheduled(Long templateVersionId, YearMonth period,
                                                     String cutoffKind, Long scheduleId,
                                                     Long effectivePrincipalUserId) {
@@ -36,13 +42,24 @@ public record ReportGenerationCommand(
                 false, scheduleId, true, effectivePrincipalUserId, null, null, scopeSnapshot);
     }
 
+    public static ReportGenerationCommand scheduled(Long templateVersionId, YearMonth period,
+                                                    String cutoffKind, Long scheduleId,
+                                                    Long effectivePrincipalUserId,
+                                                    ReportScopeSnapshot scopeSnapshot,
+                                                    String recipientPreviewHash) {
+        return new ReportGenerationCommand(templateVersionId, period, cutoffKind,
+                false, scheduleId, true, effectivePrincipalUserId, null,
+                recipientPreviewHash, scopeSnapshot);
+    }
+
     public ReportGenerationCommand forRegeneration() {
         return new ReportGenerationCommand(templateVersionId, period, cutoffKind,
-                true, scheduleId, systemPrincipal, principalUserId, null, null, scopeSnapshot);
+                true, scheduleId, systemPrincipal, principalUserId, null, recipientPreviewHash, scopeSnapshot);
     }
 
     public ReportGenerationCommand forRegenerationOf(Long previousRunId) {
         return new ReportGenerationCommand(templateVersionId, period, cutoffKind,
-                true, scheduleId, systemPrincipal, principalUserId, previousRunId, null, scopeSnapshot);
+                true, scheduleId, systemPrincipal, principalUserId, previousRunId,
+                recipientPreviewHash, scopeSnapshot);
     }
 }

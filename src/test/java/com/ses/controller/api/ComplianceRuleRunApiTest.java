@@ -69,22 +69,22 @@ class ComplianceRuleRunApiTest {
     }
 
     private long insertContractAndProfile() {
-        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES ('F2 run customer')");
+        jdbcTemplate.update("INSERT INTO m_customer (company_name, tenant_id) VALUES ('F2 run customer', 'default')");
         Long customerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM m_customer WHERE company_name='F2 run customer'", Long.class);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES ('F2 run engineer', '正社員', 'Bench')");
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, tenant_id) VALUES ('F2 run engineer', '正社員', 'Bench', 'default')");
         Long engineerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_engineer WHERE full_name='F2 run engineer'", Long.class);
         jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id) VALUES ('F2 run project', ?)", customerId);
         Long projectId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_project WHERE project_name='F2 run project'", Long.class);
         jdbcTemplate.update("INSERT INTO t_contract "
-                + "(engineer_id, project_id, customer_id, contract_type, start_date, end_date, status, selling_price, cost_price) "
-                + "VALUES (?, ?, ?, '派遣', '2026-01-01', '2026-12-31', '稼動中', 100, 50)", engineerId, projectId, customerId);
+                + "(engineer_id, project_id, customer_id, contract_type, start_date, end_date, status, selling_price, cost_price, tenant_id) "
+                + "VALUES (?, ?, ?, '派遣', '2026-01-01', '2026-12-31', '稼動中', 100, 50, 'default')", engineerId, projectId, customerId);
         Long id = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_contract WHERE engineer_id=?", Long.class, engineerId);
-        jdbcTemplate.update("INSERT INTO m_workplace (customer_id, name, organization_unit) "
-                + "VALUES (?, 'F2 run workplace', '開発部')", customerId);
+        jdbcTemplate.update("INSERT INTO m_workplace (customer_id, name, organization_unit, tenant_id) "
+                + "VALUES (?, 'F2 run workplace', '開発部', 'default')", customerId);
         Long workplaceId = jdbcTemplate.queryForObject(
                 "SELECT id FROM m_workplace WHERE name='F2 run workplace'", Long.class);
         jdbcTemplate.update("INSERT INTO t_contract_compliance_profile "

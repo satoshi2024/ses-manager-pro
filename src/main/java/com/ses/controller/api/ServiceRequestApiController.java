@@ -29,6 +29,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.MediaType;
 
 import java.io.IOException;
 import java.time.LocalDate;
@@ -49,6 +52,7 @@ public class ServiceRequestApiController {
     private final ServiceRequestExportService exportService;
     private final AccountingTimezoneResolver timezoneResolver;
     private final Clock clock;
+    private final com.ses.service.servicedesk.ServiceRequestAttachmentService attachmentService;
 
     /**
      * 問い合わせ一覧検索（ページネーション・DataScope適用）
@@ -129,6 +133,15 @@ public class ServiceRequestApiController {
         return ApiResult.success(commentDto);
     }
 
+    @PostMapping(value = "/{id}/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResult<com.ses.entity.ServiceAttachmentLink> uploadAttachment(
+            @PathVariable Long id, @RequestPart("file") MultipartFile file,
+            @RequestParam(required = false) Long commentId,
+            @RequestParam(defaultValue = "INTERNAL") String visibility) {
+        return ApiResult.success(attachmentService.uploadInternal(id, commentId, file, visibility,
+                SecurityUtils.currentUserId()));
+    }
+
     /**
      * SLAポリシー一覧取得
      */
@@ -164,7 +177,7 @@ public class ServiceRequestApiController {
 
     private ServiceDeskExecutionContext executionContext(Long actorId, String actorType, String actorName,
                                                          String source, Long organizationId, Long legalEntityId) {
-        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         return new ServiceDeskExecutionContext(tenantId, timezoneResolver.resolve(tenantId),
                 Instant.now(clock), organizationId, legalEntityId, actorId, actorType, actorName, source);
     }

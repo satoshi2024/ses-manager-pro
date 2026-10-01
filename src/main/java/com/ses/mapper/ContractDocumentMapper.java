@@ -4,9 +4,11 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.ses.entity.ContractDocument;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 契約書ドキュメントMapper。
@@ -15,6 +17,49 @@ import java.time.LocalDateTime;
  */
 @Mapper
 public interface ContractDocumentMapper extends BaseMapper<ContractDocument> {
+
+    /** 契約・顧客ownershipを満たす書類だけを取得する。tenant不明のlegacy行は不可視。 */
+    @Select("SELECT d.* FROM t_contract_document d JOIN t_contract c ON c.id = d.contract_id "
+            + "JOIN m_customer mc ON mc.id = c.customer_id "
+            + "WHERE d.id = #{id} AND d.deleted_flag = 0 "
+            + "AND c.deleted_flag = 0 AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} "
+            + "AND mc.deleted_flag = 0 AND mc.tenant_id = #{tenantId}")
+    ContractDocument selectByIdForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    /** tenantごとのdispatch対象を取得する。 */
+    @Select("<script>SELECT d.* FROM t_contract_document d JOIN t_contract c ON c.id = d.contract_id "
+            + "JOIN m_customer mc ON mc.id = c.customer_id WHERE d.deleted_flag = 0 "
+            + "AND c.deleted_flag = 0 AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} "
+            + "AND mc.deleted_flag = 0 AND mc.tenant_id = #{tenantId} "
+            + "AND d.dispatch_state IN "
+            + "<foreach collection='states' item='state' open='(' separator=',' close=')'>#{state}</foreach> "
+            + "AND (d.next_attempt_at IS NULL OR d.next_attempt_at &lt;= #{now}) "
+            + "ORDER BY d.id LIMIT #{limit}</script>")
+    List<ContractDocument> selectDispatchDueForTenant(@Param("states") java.util.Collection<String> states,
+                                                       @Param("now") LocalDateTime now,
+                                                       @Param("limit") int limit,
+                                                       @Param("tenantId") String tenantId);
+
+    /** tenantごとのartifact未回収行を取得する。 */
+    @Select("SELECT d.* FROM t_contract_document d JOIN t_contract c ON c.id = d.contract_id "
+            + "JOIN m_customer mc ON mc.id = c.customer_id WHERE d.deleted_flag = 0 "
+            + "AND c.deleted_flag = 0 AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} "
+            + "AND mc.deleted_flag = 0 AND mc.tenant_id = #{tenantId} "
+            + "AND d.dispatch_state = 'COMPLETED' "
+            + "AND (d.signed_archive_document_id IS NULL OR d.certificate_archive_document_id IS NULL) "
+            + "ORDER BY d.id LIMIT #{limit}")
+    List<ContractDocument> selectArtifactPendingForTenant(@Param("limit") int limit,
+                                                          @Param("tenantId") String tenantId);
+
+    /** tenantごとのstale claimを取得する。 */
+    @Select("SELECT d.* FROM t_contract_document d JOIN t_contract c ON c.id = d.contract_id "
+            + "JOIN m_customer mc ON mc.id = c.customer_id WHERE d.deleted_flag = 0 "
+            + "AND c.deleted_flag = 0 AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} "
+            + "AND mc.deleted_flag = 0 AND mc.tenant_id = #{tenantId} "
+            + "AND d.dispatch_state IN ('CREATING','UPLOADING','ADDING_PARTICIPANT','SENDING') "
+            + "AND d.claimed_at IS NOT NULL AND d.claimed_at < #{threshold} ORDER BY d.id")
+    List<ContractDocument> selectStaleClaimsForTenant(@Param("threshold") LocalDateTime threshold,
+                                                       @Param("tenantId") String tenantId);
 
     /**
      * 状態CAS: 期待する(dispatch_state, version)のときだけ新状態へ遷移する。

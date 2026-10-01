@@ -12,10 +12,12 @@ import com.ses.mapper.AiOutcomeMapper;
 import com.ses.mapper.AiRecommendationItemMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
 import javax.sql.DataSource;
@@ -33,6 +35,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -43,6 +47,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest
 @ActiveProfiles("test")
 class AiFeedbackLearningSchemaTest {
+
+    @BeforeEach
+    void bindTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
 
     private static final String HASH =
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -63,9 +77,25 @@ class AiFeedbackLearningSchemaTest {
     private AiOutcomeMapper outcomeMapper;
     @Autowired
     private AiRecommendationRetentionService retentionService;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @AfterEach
+    void cleanupFixtures() {
+        jdbcTemplate.update("DELETE FROM t_ai_outcome WHERE item_id IN "
+                + "(SELECT id FROM t_ai_recommendation_item WHERE run_id IN "
+                + "(SELECT id FROM t_ai_recommendation_run WHERE trace_id LIKE 'nf10-%'))");
+        jdbcTemplate.update("DELETE FROM t_ai_feedback WHERE item_id IN "
+                + "(SELECT id FROM t_ai_recommendation_item WHERE run_id IN "
+                + "(SELECT id FROM t_ai_recommendation_run WHERE trace_id LIKE 'nf10-%'))");
+        jdbcTemplate.update("DELETE FROM t_ai_recommendation_item WHERE run_id IN "
+                + "(SELECT id FROM t_ai_recommendation_run WHERE trace_id LIKE 'nf10-%')");
+        jdbcTemplate.update("DELETE FROM t_ai_recommendation_run WHERE trace_id LIKE 'nf10-%'");
+        jdbcTemplate.update("DELETE FROM m_ai_artifact_version WHERE use_case LIKE 'T110%'");
+    }
 
     @Test
-    void tenant列とrawPrompt列が無い() throws Exception {
+    void aiRunRecommendationFeedbackOutcomeがtenant境界を持ちrawPrompt列は持たない() throws Exception {
         try (Connection connection = dataSource.getConnection()) {
             DatabaseMetaData meta = connection.getMetaData();
             for (String table : List.of(
@@ -73,8 +103,11 @@ class AiFeedbackLearningSchemaTest {
                     "T_AI_RECOMMENDATION_ITEM", "T_AI_FEEDBACK",
                     "T_AI_OUTCOME", "T_AI_EVALUATION")) {
                 List<String> columns = columnNames(meta, table);
-                assertTrue(columns.stream().noneMatch(c -> "TENANT_ID".equalsIgnoreCase(c)),
-                        table + " に tenant_id がある");
+                boolean tenantExpected = !"M_AI_ARTIFACT_VERSION".equalsIgnoreCase(table)
+                        && !"T_AI_EVALUATION".equalsIgnoreCase(table);
+                assertEquals(tenantExpected,
+                        columns.stream().anyMatch(c -> "TENANT_ID".equalsIgnoreCase(c)),
+                        table + " のtenant境界が不正です");
                 assertTrue(columns.stream().noneMatch(c ->
                                 c.equalsIgnoreCase("RAW_PROMPT")
                                         || c.equalsIgnoreCase("REQUEST_PARAMS")
@@ -150,8 +183,9 @@ class AiFeedbackLearningSchemaTest {
                         .last("LIMIT 1"));
         assertNotNull(version);
 
-        String traceId = UUID.randomUUID().toString();
+        String traceId = ("nf10-" + UUID.randomUUID()).substring(0, 36);
         AiRecommendationRun run = new AiRecommendationRun();
+        run.setTenantId("default");
         run.setTraceId(traceId);
         run.setUseCase("MATCHING");
         run.setArtifactVersionId(version.getId());
@@ -163,6 +197,7 @@ class AiFeedbackLearningSchemaTest {
         runMapper.insert(run);
 
         AiRecommendationItem item = new AiRecommendationItem();
+        item.setTenantId("default");
         item.setRunId(run.getId());
         item.setRankNo(1);
         item.setTargetType("ENGINEER");
@@ -171,12 +206,14 @@ class AiFeedbackLearningSchemaTest {
         itemMapper.insert(item);
 
         AiFeedback feedback = new AiFeedback();
+        feedback.setTenantId("default");
         feedback.setItemId(item.getId());
         feedback.setDecision("ACCEPT");
         feedback.setReasonCode("SKILL_MISMATCH");
         feedbackMapper.insert(feedback);
 
         AiOutcome outcome = new AiOutcome();
+        outcome.setTenantId("default");
         outcome.setItemId(item.getId());
         outcome.setOutcomeType("WIN");
         outcome.setSourceType("PROPOSAL");
@@ -207,7 +244,8 @@ class AiFeedbackLearningSchemaTest {
                         .eq(AiArtifactVersion::getStatus, "ACTIVE")
                         .last("LIMIT 1"));
         AiRecommendationRun run = new AiRecommendationRun();
-        run.setTraceId(UUID.randomUUID().toString());
+        run.setTenantId("default");
+        run.setTraceId(("nf10-" + UUID.randomUUID()).substring(0, 36));
         run.setUseCase("MATCHING");
         run.setArtifactVersionId(version.getId());
         run.setInputHash(HASH);
@@ -215,6 +253,7 @@ class AiFeedbackLearningSchemaTest {
         run.setStatusVersion(0);
         runMapper.insert(run);
         AiRecommendationItem item = new AiRecommendationItem();
+        item.setTenantId("default");
         item.setRunId(run.getId());
         item.setRankNo(1);
         item.setTargetType("ENGINEER");
@@ -222,6 +261,7 @@ class AiFeedbackLearningSchemaTest {
         itemMapper.insert(item);
 
         AiOutcome first = new AiOutcome();
+        first.setTenantId("default");
         first.setItemId(item.getId());
         first.setOutcomeType("WIN");
         first.setSourceType("PROPOSAL");
@@ -230,6 +270,7 @@ class AiFeedbackLearningSchemaTest {
         outcomeMapper.insert(first);
 
         AiOutcome duplicate = new AiOutcome();
+        duplicate.setTenantId("default");
         duplicate.setItemId(item.getId());
         duplicate.setOutcomeType("WIN");
         duplicate.setSourceType("PROPOSAL");
@@ -246,7 +287,8 @@ class AiFeedbackLearningSchemaTest {
                         .eq(AiArtifactVersion::getStatus, "ACTIVE")
                         .last("LIMIT 1"));
         AiRecommendationRun run = new AiRecommendationRun();
-        run.setTraceId(UUID.randomUUID().toString());
+        run.setTenantId("default");
+        run.setTraceId(("nf10-" + UUID.randomUUID()).substring(0, 36));
         run.setUseCase("CHAT");
         run.setArtifactVersionId(version.getId());
         run.setInputHash(HASH);

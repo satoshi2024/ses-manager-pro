@@ -1,5 +1,7 @@
 package com.ses.service.accounting;
 
+import com.ses.common.exception.BusinessException;
+
 import java.time.ZoneId;
 
 /**
@@ -31,6 +33,32 @@ public final class AccountingTenantContextHolder {
 
     public static String getCurrentTenantId() {
         return getTenantId();
+    }
+
+    /**
+     * 明示tenantまたはsecurity-bound tenantを必須化する。
+     * どちらも無い場合は暗黙の {@code "default"} へ落とさず失敗する。
+     * 互換用途の {@link #getTenantId()} は安全な書込み経路のfallbackに使わないこと。
+     */
+    public static String requireTenantContext() {
+        String tenant = getExplicitTenantId();
+        if (tenant == null) {
+            tenant = com.ses.common.util.SecurityUtils.currentTenantId();
+        }
+        if (tenant == null || tenant.isBlank()) {
+            throw BusinessException.of(403, "TENANT_CONTEXT_REQUIRED");
+        }
+        return tenant.trim();
+    }
+
+    /** 明示的に設定されたtenantだけを返す。定期処理のinventory検証で使用する。 */
+    public static String getExplicitTenantId() {
+        String tenant = CURRENT_TENANT.get();
+        return (tenant != null && !tenant.isBlank()) ? tenant : null;
+    }
+
+    public static String getTenantContext() {
+        return getExplicitTenantId();
     }
 
     /** テナントの会計タイムゾーンを設定する。未設定時は Asia/Tokyo を返す。 */

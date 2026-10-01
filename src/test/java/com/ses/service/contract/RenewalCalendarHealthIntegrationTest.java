@@ -11,6 +11,8 @@ import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.service.RenewalCalendarService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -53,12 +55,15 @@ class RenewalCalendarHealthIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         testCustomer = Customer.builder()
+                .tenantId("default")
                 .companyName("更新カレンダーテスト顧客-" + UUID.randomUUID().toString().substring(0, 6))
                 .build();
         customerMapper.insert(testCustomer);
 
         Engineer eng = Engineer.builder()
+                .tenantId("default")
                 .fullName("要員-" + UUID.randomUUID().toString().substring(0, 4))
                 .employmentType("正社員")
                 .status("稼動中")
@@ -73,6 +78,7 @@ class RenewalCalendarHealthIntegrationTest {
         projectMapper.insert(project);
 
         testContract = new Contract();
+        testContract.setTenantId("default");
         testContract.setContractNo("CT-RENEW-" + UUID.randomUUID().toString().substring(0, 6));
         testContract.setCustomerId(testCustomer.getId());
         testContract.setEngineerId(eng.getId());
@@ -83,6 +89,11 @@ class RenewalCalendarHealthIntegrationTest {
         testContract.setCostPrice(new BigDecimal("550000"));
         testContract.setStatus("稼動中");
         contractMapper.insert(testContract);
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test

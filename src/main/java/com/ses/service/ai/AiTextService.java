@@ -6,6 +6,11 @@ package com.ses.service.ai;
  */
 public interface AiTextService {
 
+    /** registryで設定providerと実装beanを照合するための固定ID。test doubleはnullでもよい。 */
+    default String providerId() {
+        return null;
+    }
+
     /**
      * プロンプトを送信してテキスト応答を得る。
      *

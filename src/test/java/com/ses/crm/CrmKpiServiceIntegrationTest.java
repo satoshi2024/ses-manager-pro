@@ -31,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Transactional
 @WithMockUser(username = "admin", roles = "管理者")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@com.ses.test.EnableDefaultTenantTestContext
 class CrmKpiServiceIntegrationTest {
     @Autowired private CrmKpiService crmKpiService;
     @Autowired private CustomerService customerService;

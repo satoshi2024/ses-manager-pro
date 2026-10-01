@@ -11,7 +11,9 @@ import com.ses.entity.EngineerCertification;
 import com.ses.entity.ProjectIngestion;
 import com.ses.entity.Proposal;
 import com.ses.entity.ResumeIngestion;
+import com.ses.entity.ServiceAttachmentLink;
 import com.ses.entity.ServiceRequest;
+import com.ses.entity.FileSecurityMetadata;
 import com.ses.mapper.BpAvailabilityIngestionMapper;
 import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentVersionMapper;
@@ -20,6 +22,7 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectIngestionMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.ResumeIngestionMapper;
+import com.ses.mapper.FileSecurityMetadataMapper;
 import com.ses.service.MenuCacheService;
 import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +30,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * ファイルダウンロード時のアクセス制御（A8-04）を行うサービス。
@@ -51,6 +55,9 @@ public class FileScopeValidationService {
     private final ObjectProvider<EngineerCertificationMapper> engineerCertificationMapperProvider;
     private final java.time.Clock clock;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private FileSecurityMetadataMapper fileSecurityMetadataMapper;
+
     /** 注文文書（SALES_ORDER link）のscope解決用。テストスライス互換のため任意注入。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.SalesOrderMapper salesOrderMapper;
@@ -58,6 +65,14 @@ public class FileScopeValidationService {
     /** サービスリクエスト添付（SERVICE_REQUEST link）のscope解決用。テストスライス互換のため任意注入。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.ServiceRequestMapper serviceRequestMapper;
+
+    /** SERVICE_REQUEST添付の参照集合。未取得時はfail-closedとする。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.impl.ServiceRequestFileReferenceProvider serviceRequestFileReferenceProvider;
+
+    /** Portal入口以外からも添付リンクを再検証するためのmapper。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.ServiceAttachmentLinkMapper serviceAttachmentLinkMapper;
 
     public void assertDownloadAllowed(String storedName) {
         assertDownloadAllowed(storedName, null, null);
@@ -69,9 +84,29 @@ public class FileScopeValidationService {
      */
     public void assertPortalServiceRequestDownloadAllowed(String storedName, Long serviceRequestId,
                                                            Long customerId, Long documentId) {
+        ServiceAttachmentLink link = serviceAttachmentLinkMapper == null ? null
+                : serviceAttachmentLinkMapper.selectOne(new QueryWrapper<ServiceAttachmentLink>()
+                        .eq("service_request_id", serviceRequestId).eq("document_id", documentId)
+                        .last("LIMIT 1"));
+        assertPortalServiceRequestDownloadAllowed(storedName, serviceRequestId, customerId, documentId, link);
+    }
+
+    /** Portal添付の全認可条件を単一のfail-closed境界で検証する。 */
+    public void assertPortalServiceRequestDownloadAllowed(String storedName, Long serviceRequestId,
+                                                           Long customerId, Long documentId,
+                                                           ServiceAttachmentLink attachmentLink) {
+        if (attachmentLink == null
+                || !java.util.Objects.equals(attachmentLink.getServiceRequestId(), serviceRequestId)
+                || !java.util.Objects.equals(attachmentLink.getDocumentId(), documentId)
+                || !"PORTAL_VISIBLE".equals(attachmentLink.getVisibility())) {
+            throw BusinessException.of(404, "error.notFound");
+        }
         DocumentVersionMapper versionMapper = documentVersionMapperProvider.getIfAvailable();
+        String tenantId = currentTenant();
         DocumentVersion version = versionMapper == null ? null : versionMapper.selectOne(
-                new QueryWrapper<DocumentVersion>().eq("storage_key", storedName).last("LIMIT 1"));
+                new QueryWrapper<DocumentVersion>().eq("tenant_id", tenantId)
+                        .eq("storage_key", storedName)
+                        .eq("document_id", documentId).last("LIMIT 1"));
         if (version == null || !java.util.Objects.equals(version.getDocumentId(), documentId)) {
             throw BusinessException.of(404, "error.notFound");
         }
@@ -81,10 +116,72 @@ public class FileScopeValidationService {
         if (serviceRequestMapper == null || serviceRequestId == null || customerId == null) {
             throw BusinessException.of(403, "error.forbidden");
         }
-        ServiceRequest request = serviceRequestMapper.selectById(serviceRequestId);
+        ServiceRequest request = serviceRequestMapper.selectOne(new QueryWrapper<ServiceRequest>()
+                .eq("tenant_id", tenantId).eq("id", serviceRequestId));
         if (request == null || !java.util.Objects.equals(request.getCustomerId(), customerId)) {
             throw BusinessException.of(404, "error.notFound");
         }
+
+        com.ses.mapper.DocumentMapper documentMapper = documentMapperProvider.getIfAvailable();
+        com.ses.entity.Document document = documentMapper == null ? null : documentMapper.selectOne(
+                new QueryWrapper<com.ses.entity.Document>().eq("id", documentId).eq("tenant_id", tenantId));
+        if (document == null || !"SERVICE_REQUEST_ATTACHMENT".equals(document.getDocumentType())
+                || !java.util.Objects.equals(tenantId, document.getTenantId())
+                || !java.util.Objects.equals(tenantId, version.getTenantId())) {
+            throw BusinessException.of(404, "error.notFound");
+        }
+        if (Integer.valueOf(1).equals(document.getLegalHoldFlag())
+                || (document.getRetentionUntil() != null
+                && document.getRetentionUntil().isBefore(java.time.LocalDate.now(clock)))) {
+            throw BusinessException.of(403, "error.file.legalHoldActive");
+        }
+
+        DocumentLinkMapper linkMapper = documentLinkMapperProvider.getIfAvailable();
+        boolean typedLink = linkMapper != null && linkMapper.selectList(new QueryWrapper<DocumentLink>()
+                        .eq("tenant_id", tenantId)
+                        .eq("document_id", documentId)
+                        .eq("target_type", "SERVICE_REQUEST")
+                        .eq("target_id", serviceRequestId))
+                .stream().anyMatch(link -> !Integer.valueOf(1).equals(link.getDeletedFlag()));
+        if (!typedLink) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        if (serviceRequestFileReferenceProvider == null
+                || serviceRequestFileReferenceProvider.referencedFileNames() == null
+                || !serviceRequestFileReferenceProvider.referencedFileNames().contains(storedName)) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+    }
+
+    /** 資格証憑の専用認可境界。汎用文書リンク規則へフォールバックしない。 */
+    public void assertCertificationEvidenceDownloadAllowed(String storedName, Long recordId,
+                                                            Long documentId, Long expectedDocumentVersionId,
+                                                            String expectedHash) {
+        DocumentVersionMapper versionMapper = documentVersionMapperProvider.getIfAvailable();
+        String tenantId = currentTenant();
+        DocumentVersion version = versionMapper == null ? null : versionMapper.selectOne(
+                new QueryWrapper<DocumentVersion>().eq("tenant_id", tenantId)
+                        .eq("storage_key", storedName).last("LIMIT 1"));
+        if (version == null || !Objects.equals(documentId, version.getDocumentId())
+                || !"CLEAN".equals(version.getScanStatus())) {
+            throw BusinessException.of(403, "error.file.scanNotReady");
+        }
+
+        com.ses.mapper.DocumentMapper documentMapper = documentMapperProvider.getIfAvailable();
+        com.ses.entity.Document document = documentMapper == null
+                ? null : documentMapper.selectOne(new QueryWrapper<com.ses.entity.Document>()
+                .eq("id", version.getDocumentId()).eq("tenant_id", tenantId));
+        if (document == null || !"CERTIFICATION_EVIDENCE".equals(document.getDocumentType())
+                || !Objects.equals(tenantId, document.getTenantId())
+                || !Objects.equals(tenantId, version.getTenantId())) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        if (Integer.valueOf(1).equals(document.getLegalHoldFlag())
+                || (document.getRetentionUntil() != null
+                && document.getRetentionUntil().isBefore(java.time.LocalDate.now(clock)))) {
+            throw BusinessException.of(403, "error.file.legalHoldActive");
+        }
+        assertCertificationEvidenceAllowed(version, expectedDocumentVersionId, expectedHash, recordId);
     }
 
     /**
@@ -95,11 +192,54 @@ public class FileScopeValidationService {
      */
     public void assertDownloadAllowed(String storedName, Long expectedDocumentVersionId, String expectedHash) {
         // 1. t_resume_ingestion の原本ファイル
-        ResumeIngestion ingestion = resumeIngestionMapper.selectOne(
-                new QueryWrapper<ResumeIngestion>().eq("stored_file_name", storedName).last("LIMIT 1"));
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        ResumeIngestion ingestion = resumeIngestionMapper.selectByStoredFileNameForTenant(tenantId, storedName);
         if (ingestion != null) {
             assertMenuAllowed("resume-ingestion");
+            if (fileSecurityMetadataMapper == null) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            FileSecurityMetadata metadata = fileSecurityMetadataMapper.selectByStoredName(tenantId, storedName);
+            if (metadata == null || !tenantId.equals(metadata.getTenantId())
+                    || !"PUBLISHED".equals(metadata.getStorageState())
+                    || !"CLEAN".equals(metadata.getScanStatus())) {
+                throw BusinessException.of(403, "error.file.scanNotReady");
+            }
+            if (ingestion.getConvertedEngineerId() != null) {
+                dataScopeService.assertAllowedEngineer(ingestion.getConvertedEngineerId());
+            }
+            DocumentLinkMapper linkMapper = documentLinkMapperProvider.getIfAvailable();
+            com.ses.mapper.DocumentMapper documentMapper = documentMapperProvider.getIfAvailable();
+            if (linkMapper == null || documentMapper == null) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            boolean typedLink = false;
+            for (Long documentId : linkMapper.findDocumentIdsByTargetForTenant(tenantId,
+                    "RESUME_INGESTION", ingestion.getId())) {
+                com.ses.entity.Document document = documentMapper.selectOne(new QueryWrapper<com.ses.entity.Document>()
+                        .eq("id", documentId).eq("tenant_id", tenantId).eq("document_type", "RESUME_INGESTION")
+                        .eq("deleted_flag", 0));
+                if (document == null || Integer.valueOf(1).equals(document.getLegalHoldFlag())
+                        || (document.getRetentionUntil() != null
+                        && document.getRetentionUntil().isBefore(java.time.LocalDate.now(clock)))) {
+                    continue;
+                }
+                DocumentVersionMapper mapper = documentVersionMapperProvider.getIfAvailable();
+                if (mapper != null && mapper.findByTenantAndDocumentId(tenantId, documentId).stream()
+                        .anyMatch(version -> "CLEAN".equals(version.getScanStatus()))) {
+                    typedLink = true;
+                    break;
+                }
+            }
+            if (!typedLink) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
             return;
+        }
+        // 現在tenantに見えない履歴原本が別tenantに存在しても、後続の汎用file参照へ
+        // フォールスルーさせない。stored_file_nameの全体一致は認可根拠にしない。
+        if (resumeIngestionMapper.countByStoredFileName(storedName) > 0) {
+            throw BusinessException.of(403, "error.forbidden");
         }
 
         // 2. t_engineer の顔写真 (photo_url)
@@ -119,11 +259,15 @@ public class FileScopeValidationService {
         }
 
         // 4. t_project_ingestion の原本
-        ProjectIngestion projectIngestion = projectIngestionMapper.selectOne(
-                new QueryWrapper<ProjectIngestion>().eq("stored_file_name", storedName).last("LIMIT 1"));
+        ProjectIngestion projectIngestion = projectIngestionMapper.selectByStoredFileNameForTenant(
+                currentTenant(), storedName);
         if (projectIngestion != null) {
             assertMenuAllowed("project-ingestion");
             return;
+        }
+        // 別tenantの案件取込原本が同名でも、汎用参照へフォールスルーさせない。
+        if (projectIngestionMapper.countByStoredFileName(storedName) > 0) {
+            throw BusinessException.of(403, "error.forbidden");
         }
 
         // 5. t_bp_availability_ingestion の原本
@@ -137,7 +281,9 @@ public class FileScopeValidationService {
         // 6. t_document_version の法定文書台帳ファイル (R5.2 & R5.3)
         DocumentVersionMapper versionMapper = documentVersionMapperProvider.getIfAvailable();
             DocumentVersion documentVersion = versionMapper != null
-                ? versionMapper.selectOne(new QueryWrapper<DocumentVersion>().eq("storage_key", storedName).last("LIMIT 1"))
+                ? versionMapper.selectOne(new QueryWrapper<DocumentVersion>()
+                        .eq("tenant_id", currentTenant())
+                        .eq("storage_key", storedName).last("LIMIT 1"))
                 : null;
         if (documentVersion != null) {
             // P1-02: scan未完了・拒否はfail-closedで拒否 (CLEAN 以外は不可)
@@ -204,16 +350,9 @@ public class FileScopeValidationService {
                 throw BusinessException.of(403, "error.forbidden");
             }
             if ("CERTIFICATION_EVIDENCE".equals(documentType)) {
-                // 資格証憑は保持中のdownload/exportを許可しない契約。汎用文書台帳の
-                // legal hold（通常は廃棄だけを止める）より厳しい専用境界を先に適用する。
-                com.ses.mapper.DocumentMapper documentMapper = documentMapperProvider.getIfAvailable();
-                com.ses.entity.Document document = documentMapper == null
-                        ? null : documentMapper.selectById(documentVersion.getDocumentId());
-                if (document == null || Integer.valueOf(1).equals(document.getLegalHoldFlag())) {
-                    throw BusinessException.of(403, "error.file.legalHoldActive");
-                }
-                assertCertificationEvidenceAllowed(documentVersion, expectedDocumentVersionId, expectedHash);
-                return;
+                // 資格証憑は専用API（CertificationEvidenceAccessService）のみ。
+                // 汎用 /api/documents/.../download からの迂回を許可しない（NF03 IDOR）。
+                throw BusinessException.of(403, "error.forbidden");
             }
 
             // P1-03: メニュー権限判定
@@ -226,7 +365,9 @@ public class FileScopeValidationService {
                 DocumentLinkMapper linkMapper = documentLinkMapperProvider.getIfAvailable();
                 if (linkMapper != null) {
                     List<DocumentLink> links = linkMapper.selectList(
-                            new QueryWrapper<DocumentLink>().eq("document_id", documentVersion.getDocumentId()));
+                            new QueryWrapper<DocumentLink>()
+                                    .eq("tenant_id", currentTenant())
+                                    .eq("document_id", documentVersion.getDocumentId()));
                     if (!links.isEmpty()) {
                         boolean anyAllowed = false;
                         for (DocumentLink link : links) {
@@ -308,8 +449,17 @@ public class FileScopeValidationService {
         if (documentMapper == null || documentId == null) {
             return null;
         }
-        com.ses.entity.Document document = documentMapper.selectById(documentId);
+        com.ses.entity.Document document = findDocumentForCurrentTenant(documentMapper, documentId);
         return document == null ? null : document.getDocumentType();
+    }
+
+    /** 現在tenantの文書だけを取得する。tenant未設定行は認可対象にしない。 */
+    private com.ses.entity.Document findDocumentForCurrentTenant(
+            com.ses.mapper.DocumentMapper documentMapper, Long documentId) {
+        String tenantId = currentTenant();
+        com.ses.entity.Document document = documentMapper.selectOne(new QueryWrapper<com.ses.entity.Document>()
+                .eq("id", documentId).eq("tenant_id", tenantId));
+        return document;
     }
 
     /** 文書のENGINEER linkから要員IDを解決する（複数あれば先頭。無ければnull）。 */
@@ -319,6 +469,7 @@ public class FileScopeValidationService {
             return null;
         }
         return linkMapper.selectList(new QueryWrapper<DocumentLink>()
+                        .eq("tenant_id", currentTenant())
                         .eq("document_id", documentId).eq("target_type", "ENGINEER").last("LIMIT 1"))
                 .stream().map(DocumentLink::getTargetId).findFirst().orElse(null);
     }
@@ -344,16 +495,22 @@ public class FileScopeValidationService {
     /**
      * 資格証憑（CERTIFICATION_EVIDENCE）の専用scope。
      * typed {@code CERTIFICATION_RECORD} linkのみを認可根拠とし、管理者bypass・empty-link・
-     * ENGINEER-only mixed linkを拒否する（design §3.6）。
+     * ENGINEER-only mixed link・tenant NULL・engineer不一致を拒否する（design §3.6 / NF03）。
+     * 汎用download経路からは呼ばず、専用API経由の {@link #assertCertificationEvidenceDownloadAllowed} のみ。
      */
     private void assertCertificationEvidenceAllowed(DocumentVersion documentVersion,
                                                     Long expectedDocumentVersionId,
-                                                    String expectedHash) {
+                                                    String expectedHash,
+                                                    Long expectedRecordId) {
         if (expectedDocumentVersionId != null && !expectedDocumentVersionId.equals(documentVersion.getId())) {
             throw BusinessException.of(403, "error.file.versionMismatch");
         }
         if (expectedHash != null && !expectedHash.equalsIgnoreCase(documentVersion.getSha256())) {
             throw BusinessException.of(403, "error.file.hashMismatch");
+        }
+        if (documentVersion.getTenantId() == null || documentVersion.getTenantId().isBlank()
+                || !Objects.equals(documentVersion.getTenantId(), currentTenant())) {
+            throw BusinessException.of(403, "error.forbidden");
         }
 
         DocumentLinkMapper linkMapper = documentLinkMapperProvider.getIfAvailable();
@@ -363,9 +520,12 @@ public class FileScopeValidationService {
         }
 
         List<DocumentLink> links = linkMapper.selectList(
-                new QueryWrapper<DocumentLink>().eq("document_id", documentVersion.getDocumentId()));
+                new QueryWrapper<DocumentLink>().eq("tenant_id", currentTenant())
+                        .eq("document_id", documentVersion.getDocumentId()));
         List<DocumentLink> certificationLinks = links.stream()
-                .filter(link -> "CERTIFICATION_RECORD".equals(link.getTargetType()))
+                .filter(link -> "CERTIFICATION_RECORD".equals(link.getTargetType())
+                        && link.getTargetId() != null
+                        && (expectedRecordId == null || Objects.equals(expectedRecordId, link.getTargetId())))
                 .toList();
         if (certificationLinks.isEmpty()) {
             throw BusinessException.of(403, "error.forbidden");
@@ -374,20 +534,66 @@ public class FileScopeValidationService {
         boolean anyAllowed = false;
         for (DocumentLink link : certificationLinks) {
             try {
-                EngineerCertification record = certificationMapper.selectById(link.getTargetId());
-                if (record == null) {
+                EngineerCertification record = certificationMapper.selectOne(
+                        new QueryWrapper<EngineerCertification>()
+                                .eq("id", link.getTargetId())
+                                .eq("tenant_id", currentTenant()));
+                if (record == null || record.getTenantId() == null || record.getTenantId().isBlank()
+                        || record.getEngineerId() == null) {
                     continue;
                 }
-                dataScopeService.assertAllowedEngineer(record.getEngineerId());
+                if (!Objects.equals(record.getTenantId(), documentVersion.getTenantId())
+                        || !Objects.equals(record.getTenantId(), currentTenant())) {
+                    continue;
+                }
+                assertCertificationEvidenceEngineerAccess(record.getEngineerId());
                 anyAllowed = true;
                 break;
             } catch (BusinessException ignored) {
-                // generic ENGINEER link等は評価せず、typed linkのみで判定（mixed link対策）
+                // typed linkごとの拒否は和集合で次へ。最終的に1件も許可できなければ403。
             }
         }
         if (!anyAllowed) {
             throw BusinessException.of(403, "error.forbidden");
         }
+    }
+
+    /**
+     * 資格証憑の要員境界。CertificationEvidenceAccessService と同じ契約を専用downloadで再検証する。
+     * 要員=本人紐付けのみ / 営業=明示の担当または組織scopeが無い限りdeny / HR・管理者・マネージャー=既存org matrix。
+     */
+    private void assertCertificationEvidenceEngineerAccess(Long engineerId) {
+        if (engineerId == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        String role = SecurityUtils.currentRole();
+        if ("要員".equals(role)) {
+            com.ses.service.EngineerAccountLinkService linkService =
+                    engineerAccountLinkServiceProvider.getIfAvailable();
+            Long ownEngineerId = linkService == null
+                    ? null : linkService.findEngineerIdByUserId(SecurityUtils.currentUserId());
+            if (ownEngineerId == null || !ownEngineerId.equals(engineerId)) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            return;
+        }
+        if ("営業".equals(role)) {
+            // 営業は資格証憑を既定拒否。明示の担当scopeまたは組織絞り込みがある場合のみ許可。
+            if (!dataScopeService.isScoped()) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            dataScopeService.assertAllowedEngineer(engineerId);
+            return;
+        }
+        if ("HR".equals(role) || "管理者".equals(role) || "マネージャー".equals(role)) {
+            dataScopeService.assertAllowedEngineer(engineerId);
+            return;
+        }
+        throw BusinessException.of(403, "error.forbidden");
+    }
+
+    private String currentTenant() {
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 
     /** マネージャー（組織scope ∩ DataScope）の配下か判定する。 */

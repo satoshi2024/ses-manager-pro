@@ -14,6 +14,7 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.survey.SurveyService;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -21,8 +22,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 
@@ -148,6 +147,7 @@ class EngineerSelfServiceBrowserMTest {
                     .realName(DEMO_REAL_NAME)
                     .role("要員")
                     .status(1)
+                    .tenantId("default")
                     .build();
             sysUserMapper.insert(user);
             userId = user.getId();
@@ -156,15 +156,19 @@ class EngineerSelfServiceBrowserMTest {
             user.setRealName(DEMO_REAL_NAME);
             user.setRole("要員");
             user.setStatus(1);
+            user.setTenantId("default");
             sysUserMapper.updateById(user);
             userId = user.getId();
         }
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L, userId);
 
         Engineer existingEng = engineerMapper.selectOne(
                 new LambdaQueryWrapper<Engineer>().eq(Engineer::getFullName, DEMO_REAL_NAME));
         Long engineerId;
         if (existingEng == null) {
             Engineer eng = Engineer.builder()
+                    .tenantId("default")
+                    .legalEntityId(1L)
                     .fullName(DEMO_REAL_NAME)
                     .phone("090-9999-8888")
                     .nearestStation("新宿")
@@ -175,6 +179,9 @@ class EngineerSelfServiceBrowserMTest {
             engineerId = eng.getId();
             jdbcTemplate.update("DELETE FROM t_engineer_accounting_history WHERE engineer_id = ?", engineerId);
         } else {
+            existingEng.setTenantId("default");
+            existingEng.setLegalEntityId(1L);
+            engineerMapper.updateById(existingEng);
             engineerId = existingEng.getId();
         }
 
@@ -182,9 +189,13 @@ class EngineerSelfServiceBrowserMTest {
                 .eq(EngineerAccountLink::getSysUserId, userId));
         if (link == null) {
             link = new EngineerAccountLink();
+            link.setTenantId("default");
             link.setEngineerId(engineerId);
             link.setSysUserId(userId);
             accountLinkMapper.insert(link);
+        } else if (!"default".equals(link.getTenantId())) {
+            link.setTenantId("default");
+            accountLinkMapper.updateById(link);
         }
 
         // ---- 本人B（PII非漏洩検証用。ログインしない） ----
@@ -197,10 +208,13 @@ class EngineerSelfServiceBrowserMTest {
                     .realName("B氏")
                     .role("要員")
                     .status(1)
+                    .tenantId("default")
                     .build();
             sysUserMapper.insert(userB);
             userBId = userB.getId();
         } else {
+            userB.setTenantId("default");
+            sysUserMapper.updateById(userB);
             userBId = userB.getId();
         }
         Engineer engineerB = engineerMapper.selectOne(
@@ -208,6 +222,8 @@ class EngineerSelfServiceBrowserMTest {
         Long engineerBId;
         if (engineerB == null) {
             engineerB = Engineer.builder()
+                    .tenantId("default")
+                    .legalEntityId(1L)
                     .fullName(B_PII_NAME)
                     .phone(B_PII_PHONE)
                     .nearestStation("秘密駅")
@@ -218,15 +234,22 @@ class EngineerSelfServiceBrowserMTest {
             engineerBId = engineerB.getId();
             jdbcTemplate.update("DELETE FROM t_engineer_accounting_history WHERE engineer_id = ?", engineerBId);
         } else {
+            engineerB.setTenantId("default");
+            engineerB.setLegalEntityId(1L);
+            engineerMapper.updateById(engineerB);
             engineerBId = engineerB.getId();
         }
         EngineerAccountLink linkB = accountLinkMapper.selectOne(new LambdaQueryWrapper<EngineerAccountLink>()
                 .eq(EngineerAccountLink::getSysUserId, userBId));
         if (linkB == null) {
             linkB = new EngineerAccountLink();
+            linkB.setTenantId("default");
             linkB.setEngineerId(engineerBId);
             linkB.setSysUserId(userBId);
             accountLinkMapper.insert(linkB);
+        } else if (!"default".equals(linkB.getTenantId())) {
+            linkB.setTenantId("default");
+            accountLinkMapper.updateById(linkB);
         }
 
         // ---- 担当営業（1on1相手） ----
@@ -240,10 +263,13 @@ class EngineerSelfServiceBrowserMTest {
                     .realName("ポータルデモ営業")
                     .role("営業")
                     .status(1)
+                    .tenantId("default")
                     .build();
             sysUserMapper.insert(salesUser);
             salesUserId = salesUser.getId();
         } else {
+            salesUser.setTenantId("default");
+            sysUserMapper.updateById(salesUser);
             salesUserId = salesUser.getId();
         }
         EngineerSales existingPrimary = engineerSalesMapper.selectOne(new LambdaQueryWrapper<EngineerSales>()
@@ -269,9 +295,8 @@ class EngineerSelfServiceBrowserMTest {
     private Long seedSurveyCampaign() {
         // 共有H2にHR既定ユーザーは居ないため、service層の管理ロール制約を満たすHRを一時認証で立てる。
         // キャンペーンは毎回新規作成する（他テストの残存キャンペーンは設問が異なるため再利用しない）。
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken("999999999", "n/a",
-                        List.of(new SimpleGrantedAuthority("ROLE_HR"))));
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L, 1L);
+        TenantTestSecurity.bindAs(1L, "survey-browser-hr", "default", "HR");
         try {
             SurveyService.TemplateDto template = surveyService.createTemplate(
                     "T093-BROWSER-" + System.nanoTime(), "稼働満足度ブラウザ実測",
@@ -284,7 +309,7 @@ class EngineerSelfServiceBrowserMTest {
             surveyService.activateCampaign(campaign.id());
             return campaign.id();
         } finally {
-            SecurityContextHolder.clearContext();
+            TenantTestSecurity.clear();
         }
     }
 

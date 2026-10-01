@@ -32,6 +32,9 @@ public class EngineerCsvServiceImpl implements EngineerCsvService {
     private final EngineerService engineerService;
     private final Validator validator;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
     /** ヘッダー（エクスポート/インポート共通の列順） */
     static final String[] HEADER = {
             "氏名", "氏名カナ", "イニシャル", "性別", "雇用形態", "ステータス",
@@ -146,6 +149,10 @@ public class EngineerCsvServiceImpl implements EngineerCsvService {
                     result.addError(lineNo, msg);
                     continue;
                 }
+                if (legalEntityContextService == null) {
+                    throw com.ses.common.exception.BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+                }
+                e.setLegalEntityId(legalEntityContextService.requireCurrentLegalEntityId());
                 engineerService.save(e);
                 result.incrementSuccess();
             } catch (NumberFormatException nfe) {
@@ -192,5 +199,4 @@ public class EngineerCsvServiceImpl implements EngineerCsvService {
         return s == null ? "" : s;
     }
 }
-
 

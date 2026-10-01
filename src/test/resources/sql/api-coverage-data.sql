@@ -1,10 +1,10 @@
 INSERT INTO m_customer (id, company_name) VALUES (1, 'Test Customer');
 
-INSERT INTO t_project (id, project_name, customer_id, status, start_date, end_date) 
-VALUES (1, 'Test Project', 1, '募集中', '2024-04-01', '2025-03-31');
+INSERT INTO t_project (id, legal_entity_id, project_name, customer_id, status, start_date, end_date)
+VALUES (1, NULL, 'Test Project', 1, '募集中', '2024-04-01', '2025-03-31');
 
-INSERT INTO t_engineer (id, full_name, status, expected_unit_price, employment_type, created_at) 
-VALUES (1, 'Test Engineer', 'Bench', 800000, '正社員', '2024-04-01 10:00:00');
+INSERT INTO t_engineer (id, legal_entity_id, full_name, status, expected_unit_price, employment_type, created_at)
+VALUES (1, NULL, 'Test Engineer', 'Bench', 800000, '正社員', '2024-04-01 10:00:00');
 
 INSERT INTO t_contract (id, contract_no, engineer_id, project_id, customer_id, contract_type, status)
 VALUES (1, 'C-001', 1, 1, 1, 'BP', '稼動中');

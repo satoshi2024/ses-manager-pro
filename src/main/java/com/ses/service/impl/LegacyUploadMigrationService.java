@@ -7,6 +7,7 @@ import com.ses.mapper.FileSecurityMetadataMapper;
 import com.ses.service.FileReferenceProvider;
 import com.ses.service.security.FileScanResult;
 import com.ses.service.security.FileScanner;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -65,7 +66,10 @@ public class LegacyUploadMigrationService {
         if (!Files.isDirectory(base)) {
             return new Result(0, 0, 0);
         }
-        Set<String> referenced = collectReferencedFileNames();
+        // 旧upload rootはV63時点のdefault tenant専用移行対象。通常業務の認可fallbackには使わず、
+        // provider実行中だけ明示的な移行contextを設定する。
+        Set<String> referenced = AccountingTenantContextHolder.runWithTenant(
+                TENANT_ID, this::collectReferencedFileNames);
         if (referenced.isEmpty()) {
             return new Result(0, 0, 0);
         }

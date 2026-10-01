@@ -16,6 +16,7 @@ import com.ses.service.FreeeIntegrationService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.billing.CashFlowForecastService;
 import com.ses.service.billing.MonthlyRevenueCalcService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.dto.payroll.PayrollStatementDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +25,10 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.YearMonth;
+import java.time.Clock;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -42,20 +46,34 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
     private final ContractMapper contractMapper;
     private final WorkRecordMapper workRecordMapper;
     private final MonthlyRevenueCalcService monthlyRevenueCalcService;
+    private final Clock clock;
 
     @Override
     public CashFlowForecastDto forecast(YearMonth from, int months, BigDecimal openingBalance) {
-        return forecast(from, months, openingBalance, null);
+        return forecast(from == null ? serverMonth() : from, months, openingBalance, null);
     }
 
     @Override
     public CashFlowForecastDto forecast(YearMonth from, int months, BigDecimal openingBalance,
                                        com.ses.service.billing.CashFlowForecastScope scope) {
-        return forecastInternal(from, months, openingBalance, scope);
+        return forecastInternal(from == null ? serverMonth() : from, months, openingBalance, scope,
+                null);
+    }
+
+    @Override
+    public CashFlowForecastDto forecast(YearMonth from, int months, BigDecimal openingBalance,
+                                        com.ses.service.billing.CashFlowForecastScope scope,
+                                        com.ses.service.ai.copilot.CopilotExecutionContext context) {
+        if (context == null) {
+            throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+        }
+        return forecastInternal(from == null ? context.asOfMonth() : from, months, openingBalance, scope,
+                context);
     }
 
     private CashFlowForecastDto forecastInternal(YearMonth from, int months, BigDecimal openingBalance,
-                                                  com.ses.service.billing.CashFlowForecastScope scope) {
+                                                  com.ses.service.billing.CashFlowForecastScope scope,
+                                                  com.ses.service.ai.copilot.CopilotExecutionContext context) {
         boolean scoped = scope != null && !scope.companyWide();
         if (scoped) {
             // manager向けreportへ全社の期首残高・固定費・閾値を混ぜない。
@@ -73,7 +91,8 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
         int bpSiteMonths = scoped ? 1
                 : systemConfigService.getInt("cashflow.bp-payment-site-months", 1);
 
-        BigDecimal estimatedPayroll = getEstimatedPayroll(scope);
+        BigDecimal estimatedPayroll = getEstimatedPayroll(scope,
+                context == null ? serverMonth() : context.asOfMonth());
 
         List<CashFlowForecastDto.CashFlowMonthDto> monthDtos = new ArrayList<>();
         BigDecimal currentBalance = openingBalance;
@@ -84,6 +103,9 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
         if (scope != null && !scope.companyWide()) {
             unpaidInvoiceQuery.in(Invoice::getId,
                     scope.invoiceIds().isEmpty() ? List.of(-1L) : scope.invoiceIds());
+        }
+        if (context != null) {
+            unpaidInvoiceQuery.eq(Invoice::getLegalEntityId, context.legalEntityId());
         }
         List<Invoice> unpaidInvoices = invoiceMapper.selectList(unpaidInvoiceQuery);
         
@@ -103,11 +125,24 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
         }
 
         // Fetch all unpaid BP payments upfront
-        List<BpPaymentListDto> unpaidBpPayments = scope == null || scope.companyWide()
-                ? bpPaymentMapper.selectListWithDetails(null, "未払")
-                : bpPaymentMapper.selectListWithDetailsScoped(null, "未払",
-                scope.contractIds().isEmpty() ? List.of(-1L) : scope.contractIds(),
-                nullIfEmpty(scope.organizationIds()), nullIfEmpty(scope.directUserIds()), scope.asOf());
+        List<BpPaymentListDto> unpaidBpPayments;
+        if (context != null) {
+            List<Long> contractIds = scope == null || scope.companyWide() ? null
+                    : (scope.contractIds().isEmpty() ? List.of(-1L) : scope.contractIds());
+            List<Long> organizationIds = scope == null || scope.companyWide()
+                    ? null : nullIfEmpty(scope.organizationIds());
+            List<Long> directUserIds = scope == null || scope.companyWide()
+                    ? null : nullIfEmpty(scope.directUserIds());
+            unpaidBpPayments = bpPaymentMapper.selectListWithDetailsScopedForLegal(
+                    null, "未払", contractIds, organizationIds, directUserIds,
+                    context.asOfDate(), context.legalEntityId());
+        } else if (scope == null || scope.companyWide()) {
+            unpaidBpPayments = bpPaymentMapper.selectListWithDetails(null, "未払");
+        } else {
+            unpaidBpPayments = bpPaymentMapper.selectListWithDetailsScoped(null, "未払",
+                    scope.contractIds().isEmpty() ? List.of(-1L) : scope.contractIds(),
+                    nullIfEmpty(scope.organizationIds()), nullIfEmpty(scope.directUserIds()), scope.asOf());
+        }
 
         for (int i = 0; i < months; i++) {
             YearMonth ym = from.plusMonths(i);
@@ -174,7 +209,7 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
         CashFlowForecastDto result = new CashFlowForecastDto();
         result.setMonths(monthDtos);
         result.setAlertThreshold(alertThreshold);
-        result.setReconciliation(buildReconciliation(from, scope));
+        result.setReconciliation(buildReconciliation(from, scope, context));
         return result;
     }
 
@@ -184,18 +219,16 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
      * 請求額が全社KPIの売上と同じ母集団から来ていることを確認できるようにする。
      */
     private CashFlowForecastDto.ReconciliationDto buildReconciliation(YearMonth month,
-                                                                       com.ses.service.billing.CashFlowForecastScope scope) {
+                                                                       com.ses.service.billing.CashFlowForecastScope scope,
+                                                                       com.ses.service.ai.copilot.CopilotExecutionContext context) {
         String monthStr = month.toString();
 
-        // 当月の確定実績（contract_id -> record）。DashboardServiceImpl と同一の絞り込み。
-        LambdaQueryWrapper<WorkRecord> workRecordQuery = new LambdaQueryWrapper<WorkRecord>()
-                .eq(WorkRecord::getWorkMonth, monthStr)
-                .eq(WorkRecord::getStatus, "確定");
-        if (scope != null && !scope.companyWide()) {
-            workRecordQuery.in(WorkRecord::getContractId,
-                    scope.contractIds().isEmpty() ? List.of(-1L) : scope.contractIds());
-        }
-        Map<Long, WorkRecord> confirmedByContractId = workRecordMapper.selectList(workRecordQuery)
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        List<WorkRecord> confirmedRecords = scope != null && !scope.companyWide()
+                ? (scope.contractIds().isEmpty() ? Collections.emptyList() : workRecordMapper.selectConfirmedByWorkMonthsAndContractIdsForTenant(
+                        List.of(monthStr), scope.contractIds(), tenantId))
+                : workRecordMapper.selectConfirmedByWorkMonthsForTenant(List.of(monthStr), tenantId);
+        Map<Long, WorkRecord> confirmedByContractId = confirmedRecords
                 .stream()
                 .filter(w -> w.getContractId() != null)
                 .collect(Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1));
@@ -207,7 +240,10 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
             contractQuery.in(Contract::getId,
                     scope.contractIds().isEmpty() ? List.of(-1L) : scope.contractIds());
         }
-        List<Contract> contracts = contractMapper.selectList(contractQuery);
+        if (context != null) {
+            contractQuery.eq(Contract::getLegalEntityId, context.legalEntityId());
+        }
+        List<Contract> contracts = contractMapper.selectListForTenant(contractQuery, tenantId);
 
         MonthlyRevenueCalcService.MonthlyAmount amount =
                 monthlyRevenueCalcService.calc(month, contracts, confirmedByContractId);
@@ -219,6 +255,9 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
         if (scope != null && !scope.companyWide()) {
             invoiceQuery.in(Invoice::getId,
                     scope.invoiceIds().isEmpty() ? List.of(-1L) : scope.invoiceIds());
+        }
+        if (context != null) {
+            invoiceQuery.eq(Invoice::getLegalEntityId, context.legalEntityId());
         }
         BigDecimal invoicedSubtotal = invoiceMapper.selectList(invoiceQuery)
                 .stream()
@@ -243,13 +282,14 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
      * </ol>
      * 給与0円が正式値である月は0円のまま返す（fallbackしない）。
      */
-    private BigDecimal getEstimatedPayroll(com.ses.service.billing.CashFlowForecastScope scope) {
+    private BigDecimal getEstimatedPayroll(com.ses.service.billing.CashFlowForecastScope scope,
+                                           YearMonth asOfMonth) {
         if (!freeeIntegrationService.connected()) {
             return scope != null && !scope.companyWide()
                     ? BigDecimal.ZERO
                     : systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO);
         }
-        YearMonth lastMonth = YearMonth.now().minusMonths(1);
+        YearMonth lastMonth = asOfMonth.minusMonths(1);
         for (int attempt = 0; attempt < 2; attempt++) {
             YearMonth ym = lastMonth.minusMonths(attempt);
             try {
@@ -318,5 +358,10 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
 
     private List<Long> nullIfEmpty(List<Long> values) {
         return values == null || values.isEmpty() ? null : values;
+    }
+
+    private YearMonth serverMonth() {
+        Clock source = clock == null ? Clock.system(ZoneId.of("Asia/Tokyo")) : clock;
+        return YearMonth.from(source.instant().atZone(ZoneId.of("Asia/Tokyo")));
     }
 }

@@ -109,6 +109,7 @@ CREATE TABLE sys_user (
 -- ============================================================
 CREATE TABLE m_customer (
   id                BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  legal_entity_id   BIGINT                                  COMMENT '法人境界（公開API）',
   company_name      VARCHAR(200) NOT NULL                   COMMENT '会社名',
   company_name_kana VARCHAR(200)                            COMMENT '会社名カナ',
   contact_person    VARCHAR(100)                            COMMENT '担当者名',
@@ -123,7 +124,8 @@ CREATE TABLE m_customer (
   deleted_flag      TINYINT      DEFAULT 0                  COMMENT '論理削除フラグ',
 
   INDEX idx_customer_company_name (company_name),
-  INDEX idx_customer_trust_level  (trust_level)
+  INDEX idx_customer_trust_level  (trust_level),
+  INDEX idx_customer_legal_entity (legal_entity_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='顧客マスタ';
 
 
@@ -132,6 +134,7 @@ CREATE TABLE m_customer (
 -- ============================================================
 CREATE TABLE t_engineer (
   id                 BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  legal_entity_id    BIGINT                                  COMMENT '法人境界（公開API）',
   full_name          VARCHAR(100) NOT NULL                   COMMENT '氏名',
   full_name_kana     VARCHAR(100)                            COMMENT '氏名カナ',
   initial_name       VARCHAR(10)                             COMMENT 'イニシャル表記',
@@ -164,6 +167,7 @@ CREATE TABLE t_engineer (
   INDEX idx_engineer_available_date  (available_date),
   INDEX idx_engineer_overtime_exempt (overtime_exempt_flag),
   INDEX idx_engineer_created_by      (created_by),
+  INDEX idx_engineer_legal_entity    (legal_entity_id, id),
 
   CONSTRAINT fk_engineer_created_by
     FOREIGN KEY (created_by) REFERENCES sys_user(id)
@@ -233,6 +237,7 @@ CREATE TABLE t_engineer_skill (
 -- ============================================================
 CREATE TABLE t_project (
   id              BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  legal_entity_id BIGINT                                  COMMENT '法人境界（公開API）',
   project_name    VARCHAR(200) NOT NULL                   COMMENT '案件名',
   customer_id     BIGINT       NOT NULL                   COMMENT '顧客ID',
   commercial_flow VARCHAR(50)                             COMMENT '商流',
@@ -257,6 +262,7 @@ CREATE TABLE t_project (
   INDEX idx_project_priority    (priority),
   INDEX idx_project_start_date  (start_date),
   INDEX idx_project_created_by  (created_by),
+  INDEX idx_project_legal_entity_customer (legal_entity_id, customer_id, id),
 
   CONSTRAINT fk_project_customer
     FOREIGN KEY (customer_id) REFERENCES m_customer(id)
@@ -395,6 +401,7 @@ CREATE TABLE t_proposal_history (
 -- ============================================================
 CREATE TABLE t_contract (
   id                    BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  legal_entity_id       BIGINT                                 COMMENT '法人境界（公開API）',
   contract_no           VARCHAR(50)  UNIQUE                    COMMENT '契約番号',
   proposal_id           BIGINT                                 COMMENT '提案ID',
   engineer_id           BIGINT       NOT NULL                  COMMENT '要員ID',
@@ -433,6 +440,7 @@ CREATE TABLE t_contract (
   INDEX idx_contract_customer_id (customer_id),
   INDEX idx_contract_start_date  (start_date),
   INDEX idx_contract_end_date    (end_date),
+  INDEX idx_contract_legal_entity_relation (legal_entity_id, project_id, engineer_id, customer_id, id),
   UNIQUE KEY uk_contract_order_line (order_line_id),
 
   CONSTRAINT fk_contract_proposal
@@ -725,6 +733,11 @@ CREATE TABLE t_document (
   legal_hold_flag          TINYINT       NOT NULL DEFAULT 0,
   `version`                BIGINT        NOT NULL DEFAULT 1,
   created_by               BIGINT,
+  actor_type               VARCHAR(20),
+  confirmation_source     VARCHAR(40),
+  human_user_id            BIGINT,
+  correlation_id           VARCHAR(128),
+  idempotency_key          VARCHAR(190),
   created_at               DATETIME      DEFAULT CURRENT_TIMESTAMP,
   updated_at               DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag             TINYINT       NOT NULL DEFAULT 0,
@@ -754,7 +767,12 @@ CREATE TABLE t_document_version (
   external_id      VARCHAR(200),
   scan_status      VARCHAR(30)   NOT NULL DEFAULT 'PENDING',
   change_reason    VARCHAR(500),
-  created_by       BIGINT        NOT NULL,
+  created_by       BIGINT,
+  actor_type       VARCHAR(20),
+  confirmation_source VARCHAR(40),
+  human_user_id    BIGINT,
+  correlation_id   VARCHAR(128),
+  idempotency_key  VARCHAR(190),
   created_at       DATETIME      DEFAULT CURRENT_TIMESTAMP,
   updated_at       DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag     TINYINT       NOT NULL DEFAULT 0,
@@ -786,7 +804,12 @@ CREATE TABLE t_document_access_log (
   document_id BIGINT       NOT NULL,
   version_id  BIGINT,
   action      VARCHAR(30)  NOT NULL,
-  user_id     BIGINT       NOT NULL,
+  user_id     BIGINT,
+  actor_type  VARCHAR(20),
+  confirmation_source VARCHAR(40),
+  human_user_id BIGINT,
+  correlation_id VARCHAR(128),
+  idempotency_key VARCHAR(190),
   ip_hash     VARCHAR(64),
   occurred_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_dal_document   (document_id),

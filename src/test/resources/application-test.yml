@@ -20,6 +20,8 @@ spring:
         - classpath:db/migration/V7__create_analytics_report.sql
         - classpath:db/migration/V8__user_security_columns.sql
         - classpath:db/migration/V9__system_config_and_menu.sql
+        - classpath:sql/schema-candidate-h2.sql
+        - classpath:sql/schema-external-api-resource-isolation-h2.sql
         - classpath:sql/schema-organization-accounting-h2.sql
         - classpath:sql/schema-engineer-sales-h2.sql
         - classpath:db/migration/V34__data_scope_config.sql
@@ -66,6 +68,7 @@ spring:
         - classpath:sql/schema-integration-hub-a1-h2.sql
         - classpath:sql/schema-integration-hub-b2-h2.sql
         - classpath:sql/schema-service-desk-h2.sql
+        - classpath:sql/schema-nf02-nf03-tenant-ownership-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 
@@ -84,6 +87,8 @@ integration:
       enabled: false
       public-id-key: test-integration-hub-public-id-key-at-least-32-bytes
       cursor-ttl-seconds: 300
+      retention-purge-batch-size: 100
+      retention-purge-fixed-delay-ms: 60000
     external-transport:
       enabled: false
       batch-size: 32
@@ -96,6 +101,9 @@ integration:
       approved-inbound-providers:
         - provider-a
         - provider-b2
+    topology:
+      mode: DEDICATED_DATABASE
+      bound-tenant-id: default
 
 organization:
   scope:
@@ -139,6 +147,9 @@ app:
       local-login-enabled: true
       tenant-id: default
       break-glass-usernames: []
+  accounting:
+    tenants:
+      ids: default
   mail:
     from: test@example.com
 
@@ -149,6 +160,9 @@ ai:
   retention:
     redacted-days: 730
     raw-prompt-days: 0
+    scheduler-enabled: false
+    purge-batch-size: 100
+    purge-fixed-delay-ms: 86400000
   evaluation:
     min-segment-count: 5
     max-regression-pp: 5

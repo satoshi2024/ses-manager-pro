@@ -45,6 +45,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import com.ses.test.MySQLContainer;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -88,6 +89,7 @@ import static org.mockito.Mockito.when;
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@EnableDefaultTenantTestContext
 class OperationalBoundaryMySqlIntegrationTest {
 
     @Container
@@ -170,6 +172,7 @@ class OperationalBoundaryMySqlIntegrationTest {
     void 独立JVM二つが同じoutbox行をclaimすると一つだけ成功する() throws Exception {
         String dedupeKey = "multi-jvm-claim-" + System.nanoTime();
         Notification notification = new Notification();
+        notification.setTenantId("default");
         notification.setType("SYSTEM");
         notification.setTitle("multi JVM claim test");
         notification.setMessage("loopback claim");
@@ -180,6 +183,7 @@ class OperationalBoundaryMySqlIntegrationTest {
         assertNotNull(notification.getId());
 
         NotificationOutbox outbox = NotificationOutbox.builder()
+                .tenantId("default")
                 .notificationId(notification.getId())
                 .type(notification.getType())
                 .title(notification.getTitle())
@@ -223,7 +227,8 @@ class OperationalBoundaryMySqlIntegrationTest {
         Long applicantId = insertUser("rollback-applicant-" + suffix);
         Long approverId = insertUser("rollback-approver-" + suffix);
 
-        Customer customer = Customer.builder().companyName("rollback-customer-" + suffix).build();
+        Customer customer = Customer.builder().companyName("rollback-customer-" + suffix)
+                .tenantId("default").build();
         customerMapper.insert(customer);
         Quotation quotation = new Quotation();
         quotation.setQuotationNo("Q-RB-" + suffix);
@@ -299,6 +304,7 @@ class OperationalBoundaryMySqlIntegrationTest {
 
     private Long insertUser(String username) {
         SysUser user = SysUser.builder()
+                .tenantId("default")
                 .username(username)
                 .password("x")
                 .realName(username)

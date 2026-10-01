@@ -20,16 +20,14 @@ import java.time.YearMonth;
 public class OvertimeComplianceScheduler {
 
     private final OvertimeComplianceService overtimeComplianceService;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(cron = "0 30 7 * * *")
     @SchedulerLock(name = "overtimeComplianceDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void evaluateDaily() {
         YearMonth target = YearMonth.now();
-        try {
-            int count = overtimeComplianceService.evaluateApprovedOrClosedMonths(target);
-            log.info("[時間外compliance] 日次判定完了: month={}, processed={}", target, count);
-        } catch (RuntimeException e) {
-            log.warn("[時間外compliance] 日次判定で例外: month={}, error={}", target, e.getMessage());
-        }
+        int count = tenantAwareBatchRunner.runAndSum(tenant ->
+                overtimeComplianceService.evaluateApprovedOrClosedMonths(target));
+        log.info("[時間外compliance] 日次判定完了: month={}, processed={}", target, count);
     }
 }

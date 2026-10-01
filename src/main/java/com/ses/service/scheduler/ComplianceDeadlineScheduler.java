@@ -19,10 +19,11 @@ public class ComplianceDeadlineScheduler {
 
     private final ComplianceDeadlineService complianceDeadlineService;
     private final Clock clock;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(cron = "0 30 6 * * *")
     @SchedulerLock(name = "complianceDeadlineNotification", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void runDeadlineCheck() {
-        complianceDeadlineService.process(LocalDateTime.now(clock));
+        tenantAwareBatchRunner.run(tenant -> complianceDeadlineService.process(LocalDateTime.now(clock)));
     }
 }

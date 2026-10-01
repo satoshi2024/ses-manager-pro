@@ -34,10 +34,19 @@ public class ServiceSlaClockDto {
 
     private Boolean responseBreached;
 
+    private LocalDateTime responseBreachedAt;
+
+    /** 旧履歴でresponse breach検知時刻を復元できない場合。 */
+    private Boolean responseBreachTimeUnknown;
+
     private LocalDateTime resolvedAt;
 
     private Boolean resolveBreached;
 
+    private LocalDateTime resolveBreachedAt;
+
+    /** 旧履歴でresolve breach検知時刻を復元できない場合。 */
+    private Boolean resolveBreachTimeUnknown;
     private Integer totalPauseMinutes;
 
     private LocalDateTime lastPausedAt;

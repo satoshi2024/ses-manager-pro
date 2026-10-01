@@ -9,6 +9,7 @@ import com.ses.entity.UserOrganization;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.AcceptanceService;
 import com.ses.service.OrganizationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -67,6 +68,7 @@ class AcceptanceAsOfScopeTest {
     @AfterEach
     void clearAuthentication() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -95,13 +97,13 @@ class AcceptanceAsOfScopeTest {
 
     private void setUpTransferFixture() {
         String suffix = "-" + System.nanoTime();
-        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, deleted_flag) VALUES (?, 'B', 0)",
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, company_name, trust_level, deleted_flag) VALUES ('default', ?, 'B', 0)",
                 "ASOF顧客" + suffix);
         Long customerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM m_customer WHERE company_name = ?", Long.class, "ASOF顧客" + suffix);
 
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) "
-                + "VALUES (?, '正社員', '稼動中', NULL)", "ASOF要員" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status, organization_id) "
+                + "VALUES ('default', ?, '正社員', '稼動中', NULL)", "ASOF要員" + suffix);
         Long engineerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "ASOF要員" + suffix);
 
@@ -139,13 +141,13 @@ class AcceptanceAsOfScopeTest {
                 .userId(engineerUser.getId()).organizationId(orgBId).primaryFlag(1)
                 .validFrom(LocalDate.of(2026, 8, 1)).build());
 
-        jdbcTemplate.update("INSERT INTO t_engineer_account_link (engineer_id, sys_user_id) VALUES (?, ?)",
+        jdbcTemplate.update("INSERT INTO t_engineer_account_link (tenant_id, engineer_id, sys_user_id) VALUES ('default', ?, ?)",
                 engineerId, engineerUser.getId());
 
         jdbcTemplate.update(
-                "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, start_date,"
+                "INSERT INTO t_contract (tenant_id, contract_no, engineer_id, project_id, customer_id, start_date,"
                         + " selling_price, cost_price, status, acceptance_required)"
-                        + " VALUES (?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', 1)",
+                        + " VALUES ('default', ?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', 1)",
                 "ASOF-C-" + suffix, engineerId, projectId, customerId);
         contractId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_contract WHERE contract_no = ?", Long.class, "ASOF-C-" + suffix);
@@ -169,6 +171,7 @@ class AcceptanceAsOfScopeTest {
         user.setRealName(realName);
         user.setRole(role);
         user.setStatus(1);
+        user.setTenantId("default");
         sysUserMapper.insert(user);
         return user;
     }
@@ -178,6 +181,7 @@ class AcceptanceAsOfScopeTest {
                 List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole())));
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+        AccountingTenantContextHolder.setTenantId(user.getTenantId());
     }
 
     @Test
@@ -211,13 +215,13 @@ class AcceptanceAsOfScopeTest {
      */
     private void setUpHistoryTransferFixture() {
         String suffix = "-H-" + System.nanoTime();
-        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, deleted_flag) VALUES (?, 'B', 0)",
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, company_name, trust_level, deleted_flag) VALUES ('default', ?, 'B', 0)",
                 "ASOF顧客" + suffix);
         Long customerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM m_customer WHERE company_name = ?", Long.class, "ASOF顧客" + suffix);
 
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) "
-                + "VALUES (?, '正社員', '稼動中', NULL)", "ASOF要員" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status, organization_id) "
+                + "VALUES ('default', ?, '正社員', '稼動中', NULL)", "ASOF要員" + suffix);
         Long engineerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "ASOF要員" + suffix);
 
@@ -253,9 +257,9 @@ class AcceptanceAsOfScopeTest {
                 + " VALUES (?, ?, 'KNOWN', '2026-08-01', NULL)", engineerId, orgBId);
 
         jdbcTemplate.update(
-                "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, start_date,"
+                "INSERT INTO t_contract (tenant_id, contract_no, engineer_id, project_id, customer_id, start_date,"
                         + " selling_price, cost_price, status, acceptance_required)"
-                        + " VALUES (?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', 1)",
+                        + " VALUES ('default', ?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', 1)",
                 "ASOF-H-C-" + suffix, engineerId, projectId, customerId);
         contractId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_contract WHERE contract_no = ?", Long.class, "ASOF-H-C-" + suffix);
@@ -336,13 +340,13 @@ class AcceptanceAsOfScopeTest {
         // 契約2〜5を登録し、c.id DESC順で1ページ目の上位を占有させる
         for (int i = 2; i <= 5; i++) {
             jdbcTemplate.update(
-                    "INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', '稼動中', ?)",
+                    "INSERT INTO t_engineer (tenant_id, full_name, employment_type, status, organization_id) VALUES ('default', ?, '正社員', '稼動中', ?)",
                     "BOUNDARY要員" + i + suffix, orgAId);
             Long engId = jdbcTemplate.queryForObject(
                     "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "BOUNDARY要員" + i + suffix);
             jdbcTemplate.update(
-                    "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, start_date, selling_price, cost_price, status, acceptance_required)"
-                            + " VALUES (?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', 1)",
+                    "INSERT INTO t_contract (tenant_id, contract_no, engineer_id, project_id, customer_id, start_date, selling_price, cost_price, status, acceptance_required)"
+                            + " VALUES ('default', ?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', 1)",
                     "BOUNDARY-C" + i + suffix, engId, projectId, customerId);
             Long extraContractId = jdbcTemplate.queryForObject(
                     "SELECT id FROM t_contract WHERE contract_no = ?", Long.class, "BOUNDARY-C" + i + suffix);

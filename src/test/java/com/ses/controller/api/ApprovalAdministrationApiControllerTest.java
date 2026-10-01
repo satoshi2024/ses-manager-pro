@@ -4,7 +4,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.security.test.context.support.WithMockUser;
+import com.ses.config.LoginUser;
+import com.ses.entity.SysUser;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,11 +29,20 @@ class ApprovalAdministrationApiControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
+    private RequestPostProcessor admin() {
+        SysUser user = SysUser.builder().username("approval-admin").role("管理者")
+                .status(1).tenantId("default").build();
+        user.setId(1L);
+        LoginUser principal = new LoginUser(user,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        return SecurityMockMvcRequestPostProcessors.authentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+    }
+
     @Test
-    @WithMockUser(username = "1", roles = "管理者")
     void routeの不正approverTypeは400で返す() throws Exception {
         mockMvc.perform(post("/api/approval/routes")
-                        .with(csrf())
+                        .with(admin()).with(csrf())
                         .contentType("application/json")
                         .content("""
                                 {
@@ -42,10 +56,9 @@ class ApprovalAdministrationApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "1", roles = "管理者")
     void routeの逆期間は400で返す() throws Exception {
         mockMvc.perform(post("/api/approval/routes")
-                        .with(csrf())
+                        .with(admin()).with(csrf())
                         .contentType("application/json")
                         .content("""
                                 {
@@ -60,10 +73,9 @@ class ApprovalAdministrationApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "1", roles = "管理者")
     void responsibilityの不正typeは400で返す() throws Exception {
         mockMvc.perform(post("/api/approval/responsibilities")
-                        .with(csrf())
+                        .with(admin()).with(csrf())
                         .contentType("application/json")
                         .content("""
                                 {
@@ -77,10 +89,9 @@ class ApprovalAdministrationApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "1", roles = "管理者")
     void responsibilityの不存在組織は404で返す() throws Exception {
         mockMvc.perform(post("/api/approval/responsibilities")
-                        .with(csrf())
+                        .with(admin()).with(csrf())
                         .contentType("application/json")
                         .content("""
                                 {
@@ -95,10 +106,9 @@ class ApprovalAdministrationApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "1", roles = "管理者")
     void responsibilityの無効userは400で返す() throws Exception {
         mockMvc.perform(post("/api/approval/responsibilities")
-                        .with(csrf())
+                        .with(admin()).with(csrf())
                         .contentType("application/json")
                         .content("""
                                 {
@@ -112,10 +122,9 @@ class ApprovalAdministrationApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "1", roles = "管理者")
     void responsibilityの逆期間はHTTP400かつApiResultcode400で返す() throws Exception {
         mockMvc.perform(post("/api/approval/responsibilities")
-                        .with(csrf())
+                        .with(admin()).with(csrf())
                         .contentType("application/json")
                         .content("""
                                 {

@@ -1,12 +1,13 @@
 package com.ses.config;
 
+import com.ses.test.DisableDefaultTenantTestContext;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -18,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -34,6 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
+@DisableDefaultTenantTestContext
 class ActuatorPrometheusEndpointTest {
 
     private static final String SCRAPER_USER = "metrics-scraper";
@@ -71,12 +74,13 @@ class ActuatorPrometheusEndpointTest {
                 "SELECT COUNT(*) FROM sys_user WHERE username = ?", Integer.class, username);
         if (count != null && count > 0) {
             jdbcTemplate.update(
-                    "UPDATE sys_user SET password = ?, role = ?, status = 1 WHERE username = ?",
+                    "UPDATE sys_user SET password = ?, role = ?, tenant_id = 'default', status = 1 WHERE username = ?",
                     password, role, username);
             return;
         }
         jdbcTemplate.update(
-                "INSERT INTO sys_user (username, password, real_name, role, email, status) VALUES (?,?,?,?,?,1)",
+                "INSERT INTO sys_user (username, password, real_name, role, email, tenant_id, status) "
+                        + "VALUES (?,?,?,?,?,'default',1)",
                 username, password, "Prometheus Test " + role, role, username + "@ses.test");
     }
 
@@ -137,10 +141,11 @@ class ActuatorPrometheusEndpointTest {
     }
 
     @Test
-    @WithMockUser(roles = "要員")
     void prometheus_要員は403() throws Exception {
-        // H2 の V1 ENUM に要員が無いため、ロール拒否だけを @WithMockUser で検証する
-        mockMvc.perform(get("/actuator/prometheus"))
+        // H2 の V1 ENUM に要員が無いため、tenant対応principalでロール拒否だけを検証する
+        mockMvc.perform(get("/actuator/prometheus")
+                        .with(authentication(TenantTestSecurity.authentication(
+                                99001L, "prom-personnel", "default", "要員"))))
                 .andExpect(status().isForbidden());
     }
 

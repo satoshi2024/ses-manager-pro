@@ -10,7 +10,9 @@ import com.ses.service.LeaveService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.approval.ApprovalRequestCommand;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.test.MySQLContainer;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -19,9 +21,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -103,14 +102,15 @@ class LeaveOverlapConcurrentTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         String suffix = String.valueOf(System.nanoTime());
         jdbcTemplate.update("INSERT INTO m_organization_unit (tenant_id, legal_entity_id, code, name, type, valid_from, status) "
                 + "VALUES (1, 70001, ?, ?, '部門', '2026-01-01', '有効')",
                 "leave-ov-" + suffix, "leave-ov-" + suffix);
         long organizationId = jdbcTemplate.queryForObject(
                 "SELECT id FROM m_organization_unit WHERE code = ?", Long.class, "leave-ov-" + suffix);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) "
-                + "VALUES (?, '正社員', 'Bench', ?)", "leave-ov-eng-" + suffix, organizationId);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, legal_entity_id, full_name, employment_type, status, organization_id) "
+                + "VALUES ('default', 70001, ?, '正社員', 'Bench', ?)", "leave-ov-eng-" + suffix, organizationId);
         engineerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "leave-ov-eng-" + suffix);
         jdbcTemplate.update("INSERT INTO m_work_calendar (legal_entity_id, organization_id, engineer_id, name, valid_from, status) "
@@ -123,10 +123,11 @@ class LeaveOverlapConcurrentTest {
                 USER_ID, engineerId);
         // MySQL は t_engineer_account_link.sys_user_id → sys_user の FK を強制する
         jdbcTemplate.update("DELETE FROM sys_user WHERE id = ?", USER_ID);
-        jdbcTemplate.update("INSERT INTO sys_user (id, username, password, real_name, role, status) "
-                + "VALUES (?, ?, 'x', 'leave-ov-user', '要員', 1)",
+        jdbcTemplate.update("INSERT INTO sys_user (id, tenant_id, username, password, real_name, role, status) "
+                + "VALUES (?, 'default', ?, 'x', 'leave-ov-user', '要員', 1)",
                 USER_ID, "leave-ov-" + suffix);
         EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId("default");
         link.setEngineerId(engineerId);
         link.setSysUserId(USER_ID);
         engineerAccountLinkMapper.insert(link);
@@ -144,10 +145,13 @@ class LeaveOverlapConcurrentTest {
 
     @AfterEach
     void tearDown() {
-        SecurityContextHolder.clearContext();
-        jdbcTemplate.update("DELETE FROM t_engineer_account_link WHERE sys_user_id = ? OR engineer_id = ?",
-                USER_ID, engineerId);
-        jdbcTemplate.update("DELETE FROM sys_user WHERE id = ?", USER_ID);
+        try {
+            jdbcTemplate.update("DELETE FROM t_engineer_account_link WHERE sys_user_id = ? OR engineer_id = ?",
+                    USER_ID, engineerId);
+            jdbcTemplate.update("DELETE FROM sys_user WHERE id = ?", USER_ID);
+        } finally {
+            TenantTestSecurity.clear();
+        }
     }
 
     @Test
@@ -162,20 +166,14 @@ class LeaveOverlapConcurrentTest {
             List<Future<?>> futures = new ArrayList<>();
             for (int i = 0; i < 2; i++) {
                 futures.add(pool.submit(() -> {
-                    SecurityContextHolder.getContext().setAuthentication(
-                            new UsernamePasswordAuthenticationToken(String.valueOf(USER_ID), "n/a",
-                                    List.of(new SimpleGrantedAuthority("ROLE_要員"))));
-                    TransactionTemplate tx = new TransactionTemplate(transactionManager);
-                    tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-                    ready.countDown();
                     try {
-                        go.await(10, TimeUnit.SECONDS);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        unexpected.compareAndSet(null, e);
-                        return;
-                    }
-                    try {
+                        TenantTestSecurity.bindAs(USER_ID, String.valueOf(USER_ID), "default", "要員");
+                        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+                        tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                        ready.countDown();
+                        if (!go.await(10, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("並行申請の開始待機がタイムアウトしました");
+                        }
                         tx.executeWithoutResult(status -> {
                             LeaveApplyRequest request = new LeaveApplyRequest();
                             request.setLeaveType("有給");
@@ -196,8 +194,11 @@ class LeaveOverlapConcurrentTest {
                         }
                     } catch (RuntimeException ex) {
                         unexpected.compareAndSet(null, ex);
+                    } catch (InterruptedException ex) {
+                        Thread.currentThread().interrupt();
+                        unexpected.compareAndSet(null, ex);
                     } finally {
-                        SecurityContextHolder.clearContext();
+                        TenantTestSecurity.clear();
                     }
                 }));
             }

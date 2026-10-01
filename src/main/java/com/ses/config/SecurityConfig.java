@@ -52,6 +52,7 @@ public class SecurityConfig {
     private final ObjectProvider<ClientRegistrationRepository> clientRegistrationRepositoryProvider;
     private final MfaEnforcementFilter mfaEnforcementFilter;
     private final PersistentSessionFilter persistentSessionFilter;
+    private final InternalTenantContextFilter internalTenantContextFilter;
     private final com.ses.service.AuditLogService auditLogService;
     private final com.ses.service.security.PersistentSessionService persistentSessionService;
     private final ObjectProvider<org.springframework.security.oauth2.client.endpoint.OAuth2AccessTokenResponseClient<
@@ -105,6 +106,15 @@ public class SecurityConfig {
         return registrationBean;
     }
 
+    /** 内部tenant context filterのServletコンテナへの自動登録を無効化する。 */
+    @Bean
+    public FilterRegistrationBean<InternalTenantContextFilter> disableInternalTenantAutoRegistration(
+            InternalTenantContextFilter filter) {
+        FilterRegistrationBean<InternalTenantContextFilter> registrationBean = new FilterRegistrationBean<>(filter);
+        registrationBean.setEnabled(false);
+        return registrationBean;
+    }
+
     /**
      * セキュリティフィルタチェーンの設定
      * アクセス制御、フォームログイン、ログアウト、CSRF設定を定義する
@@ -116,14 +126,17 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+            // 認証済みLoginUserのtenantを以降の内部Security/業務チェーン全体へ固定する
+            .addFilterAfter(internalTenantContextFilter, UsernamePasswordAuthenticationFilter.class)
+            // break-glassを認証主体・incident tenantで再検証してから、業務tenantを固定する。
+            // persistent session filterはThreadLocalに依存しないため、InternalTenantContextFilterより前に置く。
+            .addFilterBefore(persistentSessionFilter, InternalTenantContextFilter.class)
             // ロール別メニューアクセス制御フィルター（認証フィルターの後、認可判定の前に実行）
-            .addFilterAfter(menuPermissionFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterAfter(menuPermissionFilter, InternalTenantContextFilter.class)
             // API操作ログフィルター（メニュー権限フィルターの後に実行）
             .addFilterAfter(apiAuditFilter, MenuPermissionFilter.class)
             // break-glassのMFA未完了中はMFA endpoint以外を遮断
             .addFilterAfter(mfaEnforcementFilter, ApiAuditFilter.class)
-            // DB上で失効・期限切れになったsessionを即時拒否
-            .addFilterAfter(persistentSessionFilter, MfaEnforcementFilter.class)
             // アクセス制御の設定
                 .authorizeHttpRequests(auth -> auth
                 // 認証不要のパス（ログインページ、静的リソース、認証API）
@@ -239,6 +252,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/notifications", "/api/notifications/**").authenticated()
                 // 資産貸与証跡のdetail/downloadはDocumentServiceのDocumentLink認可を通す。
                 // 一覧/exportは要員へ開放せず、本人証跡の対象IDだけをserviceで再検証する。
+                // CERTIFICATION_EVIDENCE は本経路では認可しない（FileScopeが403）。
+                // 資格証憑は /api/certification-learning-gap/** または /api/my/** の専用境界のみ。
                 .requestMatchers(HttpMethod.GET, "/api/documents/*",
                         "/api/documents/*/versions/*/download")
                 .hasAnyRole("管理者", "営業", "HR", "マネージャー", "要員")

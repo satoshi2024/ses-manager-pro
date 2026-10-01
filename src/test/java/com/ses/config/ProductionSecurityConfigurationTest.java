@@ -72,6 +72,7 @@ class ProductionSecurityConfigurationTest {
     }
 
     @Test
+    @com.ses.test.DisableDefaultTenantTestContext
     void XForwardedProtoがHTTPSならログインページへアクセスできる() throws Exception {
         mockMvc.perform(get("/login").header("X-Forwarded-Proto", "https"))
             .andExpect(status().isOk())

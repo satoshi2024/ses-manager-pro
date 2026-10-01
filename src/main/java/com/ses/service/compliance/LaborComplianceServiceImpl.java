@@ -54,8 +54,9 @@ public class LaborComplianceServiceImpl implements LaborComplianceService {
     @Override
     public List<ContractComplianceDto> findCurrentRisks() {
         // 現在の「リスク一覧」はdesign §2のとおり、常時実行で算出する表示用のため、契約や勤怠の業務状態は変更しない。
-        List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
-                .in(Contract::getStatus, ACTIVE_CONTRACT_STATUSES));
+        List<Contract> contracts = contractMapper.selectListForTenant(new LambdaQueryWrapper<Contract>()
+                .in(Contract::getStatus, ACTIVE_CONTRACT_STATUSES),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (contracts.isEmpty()) {
             return List.of();
         }

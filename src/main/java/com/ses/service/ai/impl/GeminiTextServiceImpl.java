@@ -34,6 +34,11 @@ import java.util.Set;
 @ConditionalOnProperty(name = "ai.provider", havingValue = "gemini")
 public class GeminiTextServiceImpl implements AiTextService {
 
+    @Override
+    public String providerId() {
+        return "gemini";
+    }
+
     private static final String DEFAULT_API_URL =
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 

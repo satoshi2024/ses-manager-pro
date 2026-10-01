@@ -10,6 +10,9 @@ import com.ses.mapper.LearningDecisionEventMapper;
 import com.ses.service.SkillGapService;
 import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiGatewayResult;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -34,6 +37,16 @@ class AiLearningCandidateServiceImplTest {
 
     @Mock private AiExecutionGateway gateway;
     @Mock private LearningDecisionEventMapper decisionEventMapper;
+
+    @BeforeEach
+    void setTenantContext() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Test
     void AI停止時はruleCourseとgapの正本を維持しgatewayを呼ばない() {

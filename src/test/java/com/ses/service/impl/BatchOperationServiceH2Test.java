@@ -7,7 +7,11 @@ import com.ses.dto.batch.BatchPreviewResultDTO;
 import com.ses.entity.Engineer;
 import com.ses.mapper.EngineerMapper;
 import com.ses.service.BatchOperationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.DataScopeService;
+import com.ses.test.EnableDefaultTenantTestContext;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -25,6 +29,7 @@ import static org.mockito.BDDMockito.given;
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional
+@EnableDefaultTenantTestContext
 public class BatchOperationServiceH2Test {
 
     @Autowired
@@ -35,6 +40,27 @@ public class BatchOperationServiceH2Test {
 
     @MockBean
     private DataScopeService dataScopeService;
+
+    @BeforeEach
+    void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
+    }
+
+    private Engineer createEngineer(String fullName, String status) {
+        Engineer eng = new Engineer();
+        eng.setTenantId("default");
+        eng.setLegalEntityId(1L);
+        eng.setFullName(fullName);
+        eng.setEmploymentType("正社員");
+        eng.setStatus(status);
+        engineerMapper.insert(eng);
+        return eng;
+    }
 
     @Test
     void testBatchLimitExceededThrowsException() {
@@ -60,11 +86,7 @@ public class BatchOperationServiceH2Test {
 
     @Test
     void testPreviewAndApplyWithTokenVerification() {
-        Engineer eng1 = new Engineer();
-        eng1.setFullName("要員一");
-        eng1.setEmploymentType("正社員");
-        eng1.setStatus("Bench");
-        engineerMapper.insert(eng1);
+        Engineer eng1 = createEngineer("要員一", "Bench");
 
         List<Long> ids = List.of(eng1.getId());
         given(dataScopeService.isScoped()).willReturn(false);
@@ -95,11 +117,7 @@ public class BatchOperationServiceH2Test {
 
     @Test
     void testApplyRejectsTokenFromDifferentUser() {
-        Engineer eng1 = new Engineer();
-        eng1.setFullName("要員一");
-        eng1.setEmploymentType("正社員");
-        eng1.setStatus("Bench");
-        engineerMapper.insert(eng1);
+        Engineer eng1 = createEngineer("要員一", "Bench");
 
         List<Long> ids = List.of(eng1.getId());
         given(dataScopeService.isScoped()).willReturn(false);
@@ -117,17 +135,8 @@ public class BatchOperationServiceH2Test {
 
     @Test
     void testPartialSuccessAndFailureIsolation() {
-        Engineer eng1 = new Engineer();
-        eng1.setFullName("要員一");
-        eng1.setEmploymentType("正社員");
-        eng1.setStatus("Bench");
-        engineerMapper.insert(eng1);
-
-        Engineer eng2 = new Engineer();
-        eng2.setFullName("要員二");
-        eng2.setEmploymentType("正社員");
-        eng2.setStatus("Bench");
-        engineerMapper.insert(eng2);
+        Engineer eng1 = createEngineer("要員一", "Bench");
+        Engineer eng2 = createEngineer("要員二", "Bench");
 
         Long validId1 = eng1.getId();
         Long validId2 = eng2.getId();
@@ -158,17 +167,8 @@ public class BatchOperationServiceH2Test {
 
     @Test
     void testBatchOperationDataScopeIsolation() {
-        Engineer eng1 = new Engineer();
-        eng1.setFullName("営業A担当要員");
-        eng1.setEmploymentType("正社員");
-        eng1.setStatus("Bench");
-        engineerMapper.insert(eng1);
-
-        Engineer eng2 = new Engineer();
-        eng2.setFullName("営業B担当要員");
-        eng2.setEmploymentType("正社員");
-        eng2.setStatus("Bench");
-        engineerMapper.insert(eng2);
+        Engineer eng1 = createEngineer("営業A担当要員", "Bench");
+        Engineer eng2 = createEngineer("営業B担当要員", "Bench");
 
         given(dataScopeService.isScoped()).willReturn(true);
         given(dataScopeService.allowedEngineerIds()).willReturn(Set.of(eng1.getId()));
@@ -185,5 +185,18 @@ public class BatchOperationServiceH2Test {
         assertEquals(1, result.getSuccessCount());
         assertEquals(1, result.getFailureCount());
         assertEquals(eng2.getId(), result.getErrors().get(0).getId());
+    }
+
+    @Test
+    void testProdWithTestProfile_failsFastWhenTokenSecretMissing() {
+        org.springframework.mock.env.MockEnvironment env = new org.springframework.mock.env.MockEnvironment();
+        env.setActiveProfiles("prod", "test");
+        BatchOperationServiceImpl service = new BatchOperationServiceImpl(null, null, null, env);
+        assertThrows(IllegalStateException.class, service::validateTokenSecretOnStartup);
+
+        org.springframework.mock.env.MockEnvironment env2 = new org.springframework.mock.env.MockEnvironment();
+        env2.setActiveProfiles("test", "prod");
+        BatchOperationServiceImpl service2 = new BatchOperationServiceImpl(null, null, null, env2);
+        assertThrows(IllegalStateException.class, service2::validateTokenSecretOnStartup);
     }
 }

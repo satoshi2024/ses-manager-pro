@@ -3,6 +3,7 @@ package com.ses.changerequest;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.config.LoginUser;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.SysUser;
@@ -19,6 +20,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -26,12 +29,13 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -45,13 +49,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * - 営業は管理側download 403、管理者は管理側download 200
  * - ApiAuditFilterが /api/{my,engineer-}change-requests/{id}/attachment を監査ログへ記録する
  */
-@SpringBootTest
+@SpringBootTest(properties =
+        "spring.datasource.url=jdbc:h2:mem:change-request-attachment-api-test;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL")
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class EngineerChangeRequestAttachmentApiTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final long LEGAL_ENTITY_ID = 1L;
+    private static final String ORGANIZATION_CODE = "CR-ATTACHMENT-TEST";
 
     @Autowired
     private MockMvc mockMvc;
@@ -65,9 +72,12 @@ class EngineerChangeRequestAttachmentApiTest {
     private EngineerAccountLinkMapper accountLinkMapper;
     @Autowired
     private MenuCacheService menuCacheService;
+    private Long organizationId;
 
     @BeforeEach
     void restoreSelfServiceMenus() {
+        organizationId = ensureOrganizationFixture();
+        ensureDocumentTypeFixture();
         // 共有 H2 + 乱数順で engineer-schema 等がメニューを削っても /api/my と管理APIが届くようにする
         Integer myCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM m_menu WHERE menu_key = 'my-timesheet'", Integer.class);
@@ -268,12 +278,12 @@ class EngineerChangeRequestAttachmentApiTest {
 
         // 営業は管理APIへ到達できない（@PreAuthorize hasAnyRole('管理者','HR','マネージャー')）
         mockMvc.perform(get("/api/engineer-change-requests/" + requestId + "/attachment")
-                        .with(user(String.valueOf(insertUser("営業"))).roles("営業")))
+                        .with(tenantUser(insertUser("営業"), "営業")))
                 .andExpect(status().isForbidden());
 
         // 管理者は管理側download 200
         mockMvc.perform(get("/api/engineer-change-requests/" + requestId + "/attachment")
-                        .with(user(String.valueOf(insertUser("管理者"))).roles("管理者")))
+                        .with(tenantUser(insertUser("管理者"), "管理者")))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("%PDF-1.4 mgmt")));
     }
@@ -283,7 +293,17 @@ class EngineerChangeRequestAttachmentApiTest {
     // ----------------------------------------------------------------
 
     private RequestPostProcessor engineerUser(long userId) {
-        return user(String.valueOf(userId)).roles("要員");
+        return tenantUser(userId, "要員");
+    }
+
+    private RequestPostProcessor tenantUser(long userId, String role) {
+        SysUser user = sysUserMapper.selectById(userId);
+        user.setTenantId("default");
+        user.setRole(role);
+        LoginUser principal = new LoginUser(user,
+                List.of(new SimpleGrantedAuthority("ROLE_" + role)), "default");
+        return authentication(new UsernamePasswordAuthenticationToken(
+                principal, null, principal.getAuthorities()));
     }
 
     private long readLong(MvcResult result, String jsonPointer) throws Exception {
@@ -300,6 +320,7 @@ class EngineerChangeRequestAttachmentApiTest {
         // H2のsys_user.role ENUMはV32未適用のため'要員'を持たない。DBは'管理者'で保存し、
         // 実際のロールはMockMvcのwith(user(...)).roles(...)で表現する（既存テストと同じ規約）。
         SysUser user = SysUser.builder()
+                .tenantId("default")
                 .username("cr-api-" + role + "-" + System.nanoTime())
                 .password("x")
                 .realName("添付APIテスト")
@@ -307,11 +328,47 @@ class EngineerChangeRequestAttachmentApiTest {
                 .status(1)
                 .build();
         sysUserMapper.insert(user);
+        jdbcTemplate.update("INSERT INTO t_user_organization "
+                        + "(tenant_id, user_id, organization_id, primary_flag, valid_from, version, deleted_flag) "
+                        + "VALUES ('default', ?, ?, 1, CURRENT_DATE, 0, 0)",
+                user.getId(), organizationId);
         return user.getId();
+    }
+
+    private Long ensureOrganizationFixture() {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM m_organization_unit "
+                        + "WHERE legal_entity_id = ? AND code = ? AND deleted_flag = 0",
+                Integer.class, LEGAL_ENTITY_ID, ORGANIZATION_CODE);
+        if (count == null || count == 0) {
+            jdbcTemplate.update("INSERT INTO m_organization_unit "
+                            + "(tenant_id, legal_entity_id, code, name, type, valid_from, status, version, deleted_flag) "
+                            + "VALUES (?, ?, ?, '変更申請添付APIテスト法人', '法人', "
+                            + "DATE '2020-01-01', '有効', 0, 0)",
+                    1L, LEGAL_ENTITY_ID, ORGANIZATION_CODE);
+        }
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM m_organization_unit "
+                        + "WHERE legal_entity_id = ? AND code = ? AND deleted_flag = 0",
+                Long.class, LEGAL_ENTITY_ID, ORGANIZATION_CODE);
+    }
+
+    private void ensureDocumentTypeFixture() {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM m_document_type WHERE code = 'CHANGE_REQUEST_ATTACHMENT'",
+                Integer.class);
+        if (count == null || count == 0) {
+            jdbcTemplate.update("INSERT INTO m_document_type "
+                    + "(code, name, direction, retention_years, retention_start_rule, active_flag) "
+                    + "VALUES ('CHANGE_REQUEST_ATTACHMENT', '変更申請添付', 'INCOMING', 7, "
+                    + "'TRANSACTION_DATE', 1)");
+        }
     }
 
     long createEngineer() {
         Engineer engineer = Engineer.builder()
+                .tenantId("default")
+                .legalEntityId(LEGAL_ENTITY_ID)
                 .fullName("添付API要員-" + System.nanoTime())
                 .employmentType("正社員")
                 .status("Bench")
@@ -328,6 +385,7 @@ class EngineerChangeRequestAttachmentApiTest {
         accountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
                 .eq(EngineerAccountLink::getSysUserId, sysUserId));
         EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId("default");
         link.setEngineerId(engineerId);
         link.setSysUserId(sysUserId);
         accountLinkMapper.insert(link);

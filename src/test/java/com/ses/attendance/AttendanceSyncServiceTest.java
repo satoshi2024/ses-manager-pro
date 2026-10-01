@@ -11,6 +11,8 @@ import com.ses.mapper.OvertimeFollowupMapper;
 import com.ses.service.SystemConfigService;
 import com.ses.service.attendance.AttendanceSyncService;
 import com.ses.service.attendance.provider.MockAttendanceProvider;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.test.TenantTestSecurity;
 import com.ses.dto.attendance.sync.AttendanceSyncResultDto;
 import com.ses.dto.attendance.sync.ExternalAttendanceRecord;
 import org.junit.jupiter.api.AfterEach;
@@ -19,9 +21,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
@@ -73,6 +72,7 @@ class AttendanceSyncServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         systemConfigService.put("attendance.sync.provider", "mock", "test");
         mockAttendanceProvider.reset();
         String name = "T072-" + System.nanoTime();
@@ -80,20 +80,18 @@ class AttendanceSyncServiceTest {
         jdbcTemplate.update("INSERT INTO m_organization_unit (tenant_id, legal_entity_id, code, name, type, valid_from, status) "
                 + "VALUES (1, 72001, ?, ?, '部門', '2026-01-01', '有効')", code, name);
         organizationId = jdbcTemplate.queryForObject("SELECT id FROM m_organization_unit WHERE code = ?", Long.class, code);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', 'Bench', ?)",
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status, organization_id) VALUES ('default', ?, '正社員', 'Bench', ?)",
                 name, organizationId);
         engineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, name);
     }
 
     @AfterEach
     void tearDown() {
-        SecurityContextHolder.clearContext();
+        TenantTestSecurity.clear();
     }
 
     private void authenticate(long userId, String role) {
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(userId, "test",
-                        List.of(new SimpleGrantedAuthority("ROLE_" + role))));
+        TenantTestSecurity.bindAs(userId, String.valueOf(userId), "default", role);
     }
 
     private AttendanceMonth insertMonth(String status, String month) {
@@ -122,7 +120,7 @@ class AttendanceSyncServiceTest {
         jdbcTemplate.update("INSERT INTO m_organization_unit (tenant_id, legal_entity_id, code, name, type, valid_from, status) "
                 + "VALUES (1, 72002, ?, ?, '部門', '2026-01-01', '有効')", code, name);
         long otherOrgId = jdbcTemplate.queryForObject("SELECT id FROM m_organization_unit WHERE code = ?", Long.class, code);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, organization_id) VALUES (?, '正社員', 'Bench', ?)",
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status, organization_id) VALUES ('default', ?, '正社員', 'Bench', ?)",
                 name, otherOrgId);
         return jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, name);
     }

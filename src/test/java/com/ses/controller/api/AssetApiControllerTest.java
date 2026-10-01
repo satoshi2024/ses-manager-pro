@@ -2,6 +2,7 @@ package com.ses.controller.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.BaseIntegrationTest;
+import com.ses.config.LoginUser;
 import com.ses.entity.Asset;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerSales;
@@ -16,19 +17,24 @@ import com.ses.service.AssetAssignmentService;
 import com.ses.service.AssetService;
 import com.ses.service.ExternalAccountService;
 import com.ses.service.LicenseService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Map;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -36,6 +42,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @DisplayName("Asset / Inventory / Account / License API Integration Tests")
+@EnableDefaultTenantTestContext
 class AssetApiControllerTest extends BaseIntegrationTest {
 
     @Autowired
@@ -150,6 +157,7 @@ class AssetApiControllerTest extends BaseIntegrationTest {
     @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("External Account & License API Flow")
     void testAccountAndLicenseApiFlow() throws Exception {
+        Engineer accountOwner = createScopedEngineer("外部アカウントAPI要員");
         ExternalAccountSystem system = ExternalAccountSystem.builder()
                 .systemCode("MS365_TEST")
                 .systemName("Microsoft 365")
@@ -163,7 +171,7 @@ class AssetApiControllerTest extends BaseIntegrationTest {
                 "systemId", system.getId(),
                 "accountIdentifier", "api.user@ses-test.jp",
                 "assigneeType", "ENGINEER",
-                "assigneeId", 901L,
+                "assigneeId", accountOwner.getId(),
                 "permissionLevel", "DEVELOPER"
         ));
 
@@ -203,6 +211,7 @@ class AssetApiControllerTest extends BaseIntegrationTest {
     @WithMockUser(username = "principal-does-not-exist", roles = {"管理者"})
     @DisplayName("Manual revoke confirmation rejects a principal that cannot resolve to sys_user")
     void testManualConfirmRejectsUnresolvedPrincipal() throws Exception {
+        Engineer accountOwner = createScopedEngineer("未解決principal要員");
         ExternalAccountSystem system = ExternalAccountSystem.builder()
                 .systemCode("UNRESOLVED_PRINCIPAL_" + System.nanoTime())
                 .systemName("Unresolved principal test")
@@ -211,7 +220,7 @@ class AssetApiControllerTest extends BaseIntegrationTest {
                 .build();
         externalAccountService.saveSystem(system);
         var ref = externalAccountService.registerAccountReference(
-                system.getId(), "unresolved@ses-test.jp", "ENGINEER", 902L, "MEMBER", 1L);
+                system.getId(), "unresolved@ses-test.jp", "ENGINEER", accountOwner.getId(), "MEMBER", 1L);
 
         mockMvc.perform(post("/api/external-accounts/" + ref.getId() + "/confirm-revoke")
                         .with(csrf()))
@@ -270,12 +279,15 @@ class AssetApiControllerTest extends BaseIntegrationTest {
     void testSalesCannotReadLostIncidentDetails() throws Exception {
         String suffix = Long.toString(System.nanoTime());
         Engineer engineer = Engineer.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
                 .fullName("紛失scope要員-" + suffix)
                 .employmentType("正社員")
                 .status("稼動中")
                 .build();
         engineerMapper.insert(engineer);
         SysUser sales = SysUser.builder()
+                .tenantId("default")
                 .username("asset-r10-sales-" + suffix)
                 .password("pass")
                 .role("営業")
@@ -301,8 +313,28 @@ class AssetApiControllerTest extends BaseIntegrationTest {
         assetService.reportLost(asset.getId(), "営業閲覧拒否確認", 1L, null);
 
         mockMvc.perform(get("/api/assets/" + asset.getId() + "/lost-incident")
-                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
-                                .user(String.valueOf(sales.getId())).roles("営業")))
+                        .with(tenantUser(sales, "営業")))
                 .andExpect(status().isForbidden());
+    }
+
+    private Engineer createScopedEngineer(String name) {
+        Engineer engineer = Engineer.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
+                .fullName(name + "-" + System.nanoTime())
+                .employmentType("正社員")
+                .status("Bench")
+                .build();
+        engineerMapper.insert(engineer);
+        return engineer;
+    }
+
+    private org.springframework.test.web.servlet.request.RequestPostProcessor tenantUser(
+            SysUser user, String role) {
+        user.setRole(role);
+        LoginUser principal = new LoginUser(user,
+                List.of(new SimpleGrantedAuthority("ROLE_" + role)), "default");
+        return authentication(new UsernamePasswordAuthenticationToken(
+                principal, null, principal.getAuthorities()));
     }
 }

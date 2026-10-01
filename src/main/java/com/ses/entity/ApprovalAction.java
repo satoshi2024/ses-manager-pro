@@ -27,6 +27,7 @@ public class ApprovalAction implements Serializable {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    private String tenantId;
     private Long requestId;
     private Integer roundNo;
     private Integer stepNo;

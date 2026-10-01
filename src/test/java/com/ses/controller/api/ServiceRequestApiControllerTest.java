@@ -7,8 +7,12 @@ import com.ses.dto.servicedesk.ServiceRequestStatusChangeRequest;
 import com.ses.dto.servicedesk.ServiceRequestUpdateRequest;
 import com.ses.entity.Customer;
 import com.ses.entity.ServiceRequest;
+import com.ses.entity.SysUser;
+import com.ses.config.LoginUser;
 import com.ses.mapper.CustomerMapper;
 import com.ses.service.servicedesk.ServiceRequestService;
+import com.ses.mapper.ServiceRequestMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -17,9 +21,15 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -29,7 +39,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(properties = "app.security.oidc.tenant-id=")
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
@@ -47,13 +57,31 @@ public class ServiceRequestApiControllerTest {
     @Autowired
     private ServiceRequestService serviceRequestService;
 
+    @Autowired
+    private ServiceRequestMapper serviceRequestMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private Customer testCustomer;
     private ServiceRequest testRequest;
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("tenant-a");
+        SysUser user = new SysUser();
+        user.setId(1L);
+        user.setUsername("admin");
+        user.setRole("管理者");
+        user.setStatus(1);
+        user.setTenantId("tenant-a");
+        LoginUser principal = new LoginUser(user,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
         testCustomer = new Customer();
         testCustomer.setCompanyName("株式会社APIテスト顧客");
+        testCustomer.setTenantId("tenant-a");
         customerMapper.insert(testCustomer);
 
         ServiceRequestCreateRequest req = ServiceRequestCreateRequest.builder()
@@ -64,10 +92,17 @@ public class ServiceRequestApiControllerTest {
                 .description("APIテスト本文")
                 .build();
         testRequest = serviceRequestService.createRequest(req, 100L, false, null);
+        org.junit.jupiter.api.Assertions.assertEquals("tenant-a",
+                jdbcTemplate.queryForObject("SELECT tenant_id FROM t_service_request WHERE id = ?",
+                        String.class, testRequest.getId()));
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("GET /api/service-desk/requests - 一覧取得が成功すること")
     void testListRequests() throws Exception {
         mockMvc.perform(get("/api/service-desk/requests")
@@ -82,7 +117,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("GET /api/service-desk/requests/{id} - 詳細取得が成功すること")
     void testGetRequest() throws Exception {
         mockMvc.perform(get("/api/service-desk/requests/" + testRequest.getId())
@@ -95,7 +129,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("POST /api/service-desk/requests - 新規起票が成功すること")
     void testCreateRequest() throws Exception {
         ServiceRequestCreateRequest newReq = ServiceRequestCreateRequest.builder()
@@ -117,7 +150,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("PUT /api/service-desk/requests/{id} - 属性更新が成功すること")
     void testUpdateRequest() throws Exception {
         ServiceRequestUpdateRequest updateReq = ServiceRequestUpdateRequest.builder()
@@ -125,6 +157,7 @@ public class ServiceRequestApiControllerTest {
                 .description("更新された本文")
                 .priority("P2")
                 .category("BILLING")
+                .version(testRequest.getVersion())
                 .build();
 
         mockMvc.perform(put("/api/service-desk/requests/" + testRequest.getId())
@@ -141,7 +174,23 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
+    @DisplayName("属性更新はversionなしを拒否すること")
+    void testUpdateRequest_requiresVersion() throws Exception {
+        ServiceRequestUpdateRequest updateReq = ServiceRequestUpdateRequest.builder()
+                .subject("version無し更新")
+                .description("拒否されるべき")
+                .priority("P2")
+                .category("BILLING")
+                .build();
+
+        mockMvc.perform(put("/api/service-desk/requests/" + testRequest.getId())
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(updateReq)))
+                .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
     @DisplayName("POST /api/service-desk/requests/{id}/status - ステータス変更が成功すること")
     void testChangeStatus() throws Exception {
         ServiceRequestStatusChangeRequest statusReq = ServiceRequestStatusChangeRequest.builder()
@@ -164,7 +213,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("HTTP状態変更はversionなしを拒否すること")
     void testChangeStatus_requiresVersion() throws Exception {
         ServiceRequestStatusChangeRequest statusReq = ServiceRequestStatusChangeRequest.builder()
@@ -180,7 +228,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("POST /api/service-desk/requests/{id}/comments - コメント投稿が成功すること")
     void testAddComment() throws Exception {
         ServiceCommentCreateRequest commentReq = ServiceCommentCreateRequest.builder()
@@ -198,7 +245,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("GET /api/service-desk/requests/policies - SLAポリシー一覧取得が成功すること")
     void testGetPolicies() throws Exception {
         mockMvc.perform(get("/api/service-desk/requests/policies")
@@ -209,11 +255,78 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("GET /api/service-desk/requests/export - CSVエクスポートが成功すること")
     void testExportCsv() throws Exception {
         mockMvc.perform(get("/api/service-desk/requests/export"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", "text/csv; charset=UTF-8"));
+    }
+
+    @Test
+    @DisplayName("認証主体tenantをサービスデスクの読み書きへ固定しrequest入力を無視すること")
+    void authenticatedTenantBindsServiceDeskHttpScope() throws Exception {
+        AccountingTenantContextHolder.clear();
+        mockMvc.perform(get("/api/service-desk/requests")
+                        .with(authentication("tenant-a"))
+                        .param("tenantId", "tenant-b")
+                        .header("X-Tenant-Id", "tenant-b"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.records[0].subject").value("APIテスト件名"));
+        org.junit.jupiter.api.Assertions.assertEquals("tenant-a",
+                serviceRequestMapper.selectById(testRequest.getId()).getTenantId());
+        org.junit.jupiter.api.Assertions.assertNull(AccountingTenantContextHolder.getExplicitTenantId());
+    }
+
+    @Test
+    @DisplayName("別tenantはサービスデスク詳細更新添付exportへ到達してもtenant-a資料を扱えないこと")
+    void otherTenantCannotReadWriteUploadOrExportServiceDeskData() throws Exception {
+        AccountingTenantContextHolder.clear();
+        mockMvc.perform(get("/api/service-desk/requests/" + testRequest.getId())
+                        .with(authentication("tenant-b")))
+                .andExpect(status().isNotFound());
+
+        ServiceRequestUpdateRequest update = ServiceRequestUpdateRequest.builder()
+                .subject("越境更新")
+                .description("拒否される更新")
+                .priority("P2")
+                .category("SYSTEM")
+                .version(testRequest.getVersion())
+                .build();
+        mockMvc.perform(put("/api/service-desk/requests/" + testRequest.getId())
+                        .with(authentication("tenant-b"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(update)))
+                .andExpect(status().isNotFound());
+
+        MockMultipartFile file = new MockMultipartFile("file", "越境.pdf", "application/pdf", "PDF".getBytes());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .multipart("/api/service-desk/requests/" + testRequest.getId() + "/attachments")
+                        .file(file)
+                        .with(authentication("tenant-b"))
+                        .with(csrf()))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(get("/api/service-desk/requests/export").with(authentication("tenant-b")))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(
+                                testRequest.getRequestNo()))));
+        org.junit.jupiter.api.Assertions.assertNull(AccountingTenantContextHolder.getExplicitTenantId());
+    }
+
+    private RequestPostProcessor authentication(String tenantId) {
+        com.ses.entity.SysUser user = new com.ses.entity.SysUser();
+        user.setId(1L);
+        user.setUsername("admin");
+        user.setPassword("admin123");
+        user.setRole("管理者");
+        user.setStatus(1);
+        user.setTenantId(tenantId);
+        com.ses.config.LoginUser principal = new com.ses.config.LoginUser(user,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                .authentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
     }
 }

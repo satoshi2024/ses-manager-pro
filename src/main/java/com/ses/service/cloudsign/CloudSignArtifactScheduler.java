@@ -18,6 +18,7 @@ public class CloudSignArtifactScheduler {
 
     private final CloudSignArtifactService artifactService;
     private final com.ses.config.CloudSignProperties properties;
+    private final com.ses.service.scheduler.TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(cron = "${cloudsign.poll-cron:0 */2 * * * *}")
     @SchedulerLock(name = "cloudsignArtifact", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
@@ -27,8 +28,10 @@ public class CloudSignArtifactScheduler {
         }
         long start = System.currentTimeMillis();
         try {
-            int processed = artifactService.collectPending(properties.getPollBatchSize());
-            log.info("[契約書artifact] 回収batch完了: {}件 {}ms", processed,
+            final int[] processed = {0};
+            tenantAwareBatchRunner.run(tenantId ->
+                    processed[0] += artifactService.collectPending(properties.getPollBatchSize(), tenantId));
+            log.info("[契約書artifact] 回収batch完了: {}件 {}ms", processed[0],
                     System.currentTimeMillis() - start);
         } catch (RuntimeException e) {
             log.warn("[契約書artifact] scheduler run中に例外: error={}", e.getMessage());

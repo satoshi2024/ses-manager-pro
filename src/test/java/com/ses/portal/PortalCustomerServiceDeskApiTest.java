@@ -8,23 +8,31 @@ import com.ses.dto.servicedesk.ServiceCommentCreateRequest;
 import com.ses.dto.servicedesk.ServiceRequestCreateRequest;
 import com.ses.dto.servicedesk.ServiceRequestStatusChangeRequest;
 import com.ses.entity.DocumentVersion;
+import com.ses.entity.Document;
+import com.ses.entity.DocumentLink;
 import com.ses.entity.Engineer;
 import com.ses.entity.PortalOrganization;
 import com.ses.entity.ServiceAttachmentLink;
 import com.ses.entity.ServiceRequest;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.DocumentVersionMapper;
+import com.ses.mapper.DocumentMapper;
+import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ServiceAttachmentLinkMapper;
 import com.ses.service.DocumentService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.servicedesk.ServiceRequestAttachmentService;
 import com.ses.service.servicedesk.ServiceRequestService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -32,9 +40,13 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayInputStream;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.UUID;
+import java.util.Set;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -70,10 +82,19 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
     private DocumentVersionMapper documentVersionMapper;
 
     @Autowired
+    private DocumentMapper documentMapper;
+
+    @Autowired
+    private DocumentLinkMapper documentLinkMapper;
+
+    @Autowired
     private ServiceAttachmentLinkMapper attachmentLinkMapper;
 
     @MockBean
     private DocumentService documentService;
+
+    @MockBean
+    private ServiceRequestAttachmentService attachmentService;
 
     @Override
     protected JdbcTemplate jdbcTemplate() {
@@ -92,6 +113,7 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         String uA = unique();
         String uB = unique();
         customerAOrg = createCustomerOrg("A-" + uA);
@@ -121,6 +143,11 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
         serviceRequestService.addComment(customerARequest.getId(),
                 ServiceCommentCreateRequest.builder().commentText("お問い合わせありがとうございます。担当よりご連絡します。").visibility("PORTAL_VISIBLE").build(),
                 100L, "INTERNAL_USER", "サポート担当", false);
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     private void grantServiceDeskPermissions(Long portalUserId) {
@@ -221,6 +248,48 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
     }
 
     @Test
+    @DisplayName("ポータル添付uploadは公開可能な表示項目だけを返し内部link entityを返さないこと")
+    void testAttachmentUpload_returnsSafeProjectionOnly() throws Exception {
+        ServiceAttachmentLink internalLink = ServiceAttachmentLink.builder()
+                .tenantId("tenant-a")
+                .id(7001L)
+                .serviceRequestId(customerARequest.getId())
+                .commentId(7002L)
+                .documentId(7003L)
+                .visibility("PORTAL_VISIBLE")
+                .businessKey("SERVICE_REQUEST:secret")
+                .fileName("portal-report.pdf")
+                .fileSize(123L)
+                .createdAt(java.time.LocalDateTime.of(2026, 9, 8, 12, 30))
+                .build();
+        when(attachmentService.uploadPortal(eq(customerARequest.getId()), eq(null), org.mockito.ArgumentMatchers.any(),
+                eq(customerAOrg.getCustomerId()), eq(customerAUser.user().getId())))
+                .thenReturn(internalLink);
+        CsrfPair csrf = fetchPortalCsrf(mockMvc);
+
+        String response = mockMvc.perform(multipart("/api/portal/customer/service-desk/requests/"
+                        + customerARequest.getId() + "/attachments")
+                        .file(new MockMultipartFile("file", "portal-report.pdf", "application/pdf", "PDF".getBytes()))
+                        .cookie(customerAUser.sessionCookie(), csrf.cookie())
+                        .header("X-XSRF-TOKEN-PORTAL", csrf.headerValue())
+                        .contentType(MediaType.MULTIPART_FORM_DATA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.attachmentId").value(7001))
+                .andExpect(jsonPath("$.data.fileName").value("portal-report.pdf"))
+                .andExpect(jsonPath("$.data.fileSize").value(123))
+                .andExpect(jsonPath("$.data.createdAt").value("2026-09-08T12:30:00"))
+                .andReturn().getResponse().getContentAsString();
+
+        Set<String> fields = new HashSet<>();
+        Iterator<String> names = objectMapper.readTree(response).get("data").fieldNames();
+        while (names.hasNext()) {
+            fields.add(names.next());
+        }
+        org.junit.jupiter.api.Assertions.assertEquals(Set.of("attachmentId", "fileName", "fileSize", "createdAt"), fields);
+    }
+
+    @Test
     @DisplayName("ポータルからの返信コメントがPORTAL_VISIBLEとして投稿され詳細に反映されること")
     void testReplyComment_fromPortal() throws Exception {
         CsrfPair csrf = fetchPortalCsrf(mockMvc);
@@ -245,11 +314,14 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
         CsrfPair csrf = fetchPortalCsrf(mockMvc);
 
         // 管理者がリクエストを解決済みにする
+        Integer currentVersion = jdbcTemplate.queryForObject(
+                "SELECT version FROM t_service_request WHERE id = ?", Integer.class, customerARequest.getId());
         serviceRequestService.changeStatus(customerARequest.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").version(currentVersion).build(),
                 100L, "INTERNAL_USER", "管理者");
         serviceRequestService.changeStatus(customerARequest.getId(),
-                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("対応完了").build(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("対応完了")
+                        .version(currentVersion + 1).build(),
                 100L, "INTERNAL_USER", "管理者");
 
         PortalCsatCreateRequest csatReq = PortalCsatCreateRequest.builder()
@@ -310,7 +382,23 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
     @DisplayName("ポータル添付はDocumentServiceとCLEAN検証を通過した場合だけダウンロードできること")
     void testAttachmentDownload_requiresCleanDocumentVersion() throws Exception {
         DocumentVersion version = new DocumentVersion();
+        Document document = new Document();
+        document.setId(9001L);
+        document.setTenantId("default");
+        document.setDocumentType("SERVICE_REQUEST_ATTACHMENT");
+        document.setDirection("INCOMING");
+        document.setStatus("DRAFT");
+        document.setLegalHoldFlag(0);
+        document.setVersion(1L);
+        documentMapper.insert(document);
+        DocumentLink documentLink = new DocumentLink();
+        documentLink.setDocumentId(9001L);
+        documentLink.setTargetType("SERVICE_REQUEST");
+        documentLink.setTargetId(customerARequest.getId());
+        documentLinkMapper.insert(documentLink);
+
         version.setDocumentId(9001L);
+        version.setTenantId("default");
         version.setVersionNo(1);
         version.setStorageKey("service-desk-clean-" + unique());
         version.setScanStatus("CLEAN");
@@ -326,6 +414,7 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
                 .serviceRequestId(customerARequest.getId())
                 .documentId(version.getDocumentId())
                 .visibility("PORTAL_VISIBLE")
+                .businessKey("portal-service-desk-link:" + version.getDocumentId())
                 .fileName("portal-report.pdf")
                 .fileSize(3L)
                 .build();

@@ -6,6 +6,7 @@ import com.ses.entity.*;
 import com.ses.mapper.BpBankAccountMapper;
 import com.ses.mapper.BpCompanyMapper;
 import com.ses.mapper.BpPaymentMapper;
+import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.SystemConfigMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
@@ -15,10 +16,12 @@ import com.ses.service.integration.ExternalMappingService;
 import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -63,6 +66,9 @@ class PurchaseExpenseIntegrationTest {
     private BpPaymentMapper bpPaymentMapper;
 
     @Autowired
+    private EngineerAccountLinkMapper engineerAccountLinkMapper;
+
+    @Autowired
     private WorkRecordMapper workRecordMapper;
 
     @Autowired
@@ -75,7 +81,13 @@ class PurchaseExpenseIntegrationTest {
     private SystemConfigMapper systemConfigMapper;
 
     @Autowired
+    private com.ses.mapper.MonthlyClosingMapper monthlyClosingMapper;
+
+    @Autowired
     private AccountingTimezoneResolver timezoneResolver;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private RestTemplate restTemplate;
@@ -87,7 +99,21 @@ class PurchaseExpenseIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
+        // V163後の明示的Engineer ownershipを既存seed engineerにも設定する。
+        ensureCanonicalOwnerRows();
+        jdbcTemplate.update("UPDATE sys_user SET tenant_id = 'default', deleted_flag = 0, status = 1 WHERE id = 1");
+        jdbcTemplate.update("UPDATE t_engineer SET tenant_id = 'default', deleted_flag = 0 WHERE id = 1");
         mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
+        engineerAccountLinkMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getEngineerId, 1L)
+                .or()
+                .eq(EngineerAccountLink::getSysUserId, 1L));
+        EngineerAccountLink ownerLink = new EngineerAccountLink();
+        ownerLink.setEngineerId(1L);
+        ownerLink.setSysUserId(1L);
+        ownerLink.setTenantId("default");
+        engineerAccountLinkMapper.insert(ownerLink);
 
         connection = connectionService.getOrCreateConnection("default", null, "freee", "accounting");
         IntegrationTokensDto tokens = IntegrationTokensDto.builder()
@@ -128,6 +154,7 @@ class PurchaseExpenseIntegrationTest {
         contract.setEngineerId(1L);
         contract.setProjectId(1L);
         contract.setCustomerId(1L);
+        contract.setTenantId("default");
         contract.setContractType("準委任");
         contract.setStatus("稼動中");
         contract.setStartDate(LocalDate.of(2026, 1, 1));
@@ -181,6 +208,53 @@ class PurchaseExpenseIntegrationTest {
         mappingService.saveOrUpdateMapping(taxMap);
         ExternalMapping savedTax = mappingService.getMapping(connection.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10");
         mappingService.verifyMapping(savedTax.getId(), "{\"verified\":true}");
+    }
+
+    /** 共有H2の別コンテキストでseed行が削除されても、固定IDに依存する既存テストの所有者を復元する。 */
+     private void ensureCanonicalOwnerRows() {
+         Integer customerCount = jdbcTemplate.queryForObject(
+                 "SELECT COUNT(*) FROM m_customer WHERE id = 1", Integer.class);
+         if (customerCount == null || customerCount == 0) {
+             jdbcTemplate.update("INSERT INTO m_customer "
+                             + "(id, company_name, tenant_id, deleted_flag) "
+                             + "VALUES (1, '会計連携テスト顧客', 'default', 0)");
+         } else {
+             jdbcTemplate.update("UPDATE m_customer SET tenant_id = 'default', deleted_flag = 0 WHERE id = 1");
+         }
+        Integer userCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sys_user WHERE id = 1", Integer.class);
+        if (userCount == null || userCount == 0) {
+            String username = "purchase-owner-" + UUID.randomUUID();
+            jdbcTemplate.update("INSERT INTO sys_user "
+                            + "(id, username, password, real_name, role, tenant_id, status, deleted_flag) "
+                            + "VALUES (1, ?, 'x', '会計連携テスト所有者', '管理者', 'default', 1, 0)",
+                    username);
+        } else {
+            jdbcTemplate.update("UPDATE sys_user SET tenant_id = 'default', deleted_flag = 0, status = 1 WHERE id = 1");
+        }
+        Integer engineerCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_engineer WHERE id = 1", Integer.class);
+        if (engineerCount == null || engineerCount == 0) {
+            jdbcTemplate.update("INSERT INTO t_engineer "
+                            + "(id, full_name, employment_type, status, tenant_id, created_by, deleted_flag) "
+                            + "VALUES (1, '会計連携テスト要員', '正社員', 'Bench', 'default', 1, 0)");
+        } else {
+            jdbcTemplate.update("UPDATE t_engineer SET tenant_id = 'default', deleted_flag = 0 WHERE id = 1");
+        }
+        Integer projectCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_project WHERE id = 1", Integer.class);
+        if (projectCount == null || projectCount == 0) {
+            jdbcTemplate.update("INSERT INTO t_project "
+                            + "(id, project_name, customer_id, commercial_flow, status, created_by, deleted_flag) "
+                            + "VALUES (1, '金融系基盤システム移行', 1, '元請け', '募集中', 1, 0)");
+        } else {
+            jdbcTemplate.update("UPDATE t_project SET customer_id = 1, created_by = 1, deleted_flag = 0 WHERE id = 1");
+        }
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -354,7 +428,7 @@ class PurchaseExpenseIntegrationTest {
         mappingService.verifyMapping(mappingService.getMapping(connection.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10").getId(), "{\"verified\":true}");
 
         ExpenseRequest exp = new ExpenseRequest();
-        exp.setEngineerId(1001L);
+        exp.setEngineerId(1L);
         exp.setExpenseNo("EX-202608-999");
         exp.setExpenseDate(LocalDate.of(2026, 8, 10));
         exp.setCategory("交通費");
@@ -412,16 +486,12 @@ class PurchaseExpenseIntegrationTest {
         closedPayment.setStatus("未払");
         bpPaymentMapper.insert(closedPayment);
 
-        // 2025-01 を締め済みに設定
-        SystemConfig config = systemConfigMapper.selectById("closing.confirmed-months");
-        if (config == null) {
-            config = new SystemConfig();
-            config.setConfigKey("closing.confirmed-months");
-            config.setConfigValue("[{\"month\":\"2025-01\",\"by\":1,\"at\":\"2025-02-01T00:00:00\"}]");
-            systemConfigMapper.insert(config);
-        } else {
-            config.setConfigValue("[{\"month\":\"2025-01\",\"by\":1,\"at\":\"2025-02-01T00:00:00\"}]");
-            systemConfigMapper.updateById(config);
+        // 2025-01 を default tenant の締め済みに設定
+        monthlyClosingMapper.ensureRow("default", "2025-01");
+        var row = monthlyClosingMapper.selectByTenantAndMonth("default", "2025-01");
+        if (row.getConfirmedAt() == null) {
+            monthlyClosingMapper.confirmCas("default", "2025-01", 1L,
+                    java.time.LocalDateTime.of(2025, 2, 1, 0, 0), row.getVersion());
         }
 
         assertThatThrownBy(() -> purchaseIntegrationService.triggerBpPurchaseSync(closedPayment.getId(), 1L))

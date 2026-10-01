@@ -34,7 +34,7 @@ public class ResumeIngestionPageController {
      */
     @GetMapping("/review/{id}")
     public String review(@PathVariable Long id, Model model) {
-        ResumeIngestion job = resumeIngestionService.getById(id);
+        ResumeIngestion job = resumeIngestionService.getForCurrentTenant(id);
         if (job == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "error.scope.notFound");
         }

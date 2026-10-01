@@ -15,6 +15,9 @@ import lombok.EqualsAndHashCode;
 @TableName("t_document_link")
 public class DocumentLink extends BaseEntity {
 
+    /** 文書と同じtenantであることを保持する。typed linkの認可根拠には必ず親も再検証する。 */
+    private String tenantId;
+
     /** 文書ID */
     private Long documentId;
 

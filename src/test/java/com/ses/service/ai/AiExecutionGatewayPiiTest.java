@@ -3,6 +3,12 @@ package com.ses.service.ai;
 import com.ses.config.AiConfig;
 import com.ses.entity.AiRecommendationRun;
 import com.ses.mapper.AiRecommendationRunMapper;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
+import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshotFactory;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -32,6 +38,16 @@ class AiExecutionGatewayPiiTest {
     private AiConfig aiConfig;
     @Autowired
     private org.springframework.context.ApplicationContext context;
+
+    @BeforeEach
+    void bindTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
 
     @Test
     void AiTextServiceは一意() {
@@ -76,11 +92,16 @@ class AiExecutionGatewayPiiTest {
 
     @Test
     void workLocationの番地は送らない() {
+        CopilotExecutionContext context = matchingContext();
         gateway.execute(AiGatewayRequest.builder()
                 .useCase(AiGatewayRequest.USE_MATCHING)
                 .allowlistedFields(Map.of(
                         "project.workLocation", "東京都千代田区丸の内1-1-1",
                         "engineer.initialName", "Y.T"))
+                .executionContext(context)
+                .scopeContext(context.scope())
+                .scopeHash(context.scopeHash())
+                .resourceBearing(true)
                 .persistRun(true)
                 .requireJson(false)
                 .build());
@@ -89,6 +110,36 @@ class AiExecutionGatewayPiiTest {
         assertFalse(outbound.contains("丸の内1-1-1"));
         assertTrue(outbound.contains("東京都千代田区"));
         assertNull(WorkLocationNormalizer.normalize("丸の内1-1-1"));
+    }
+
+    private CopilotExecutionContext matchingContext() {
+        String tenantId = "default";
+        long legalEntityId = 1L;
+        java.time.LocalDate asOf = java.time.LocalDate.of(2026, 9, 1);
+        CopilotExecutionContext context = new CopilotExecutionContext(
+                tenantId, legalEntityId, java.time.Instant.parse("2026-09-01T00:00:00Z"),
+                java.time.ZoneId.of("Asia/Tokyo"));
+        EffectiveScopeSnapshot snapshot = new EffectiveScopeSnapshot(
+                tenantId, legalEntityId, asOf, "COMPANY_WIDE",
+                true, false, false, null, null, null, null, null, null, null, null, null,
+                EffectiveScopeSnapshotFactory.POLICY_VERSION, false, "ALL",
+                scopeHash(tenantId, legalEntityId, asOf));
+        context.bindSnapshot(snapshot);
+        context.bind(AiGatewayRequest.USE_MATCHING,
+                CopilotQueryParameters.ofQuery(AiGatewayRequest.USE_MATCHING), snapshot.scope());
+        return context;
+    }
+
+    private static String scopeHash(String tenantId, long legalEntityId, java.time.LocalDate asOf) {
+        String canonical = "tenant=" + tenantId + "|legalEntity=" + legalEntityId
+                + "|asOf=" + asOf + "|scopeType=COMPANY_WIDE|policy="
+                + EffectiveScopeSnapshotFactory.POLICY_VERSION + "|members=ALL";
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
     }
 
     @Test
@@ -109,19 +160,18 @@ class AiExecutionGatewayPiiTest {
     }
 
     @Test
-    void geminiでも外部送信禁止ならmockに落とす() {
+    void 未承認providerは外部送信禁止時にfailClosedする() {
         aiConfig.setProvider("gemini");
         aiConfig.setExternalSendEnabled(false);
         try {
-            AiGatewayResult result = gateway.execute(AiGatewayRequest.builder()
+            org.junit.jupiter.api.Assertions.assertThrows(com.ses.common.exception.BusinessException.class,
+                    () -> gateway.execute(AiGatewayRequest.builder()
                     .useCase(AiGatewayRequest.USE_CHAT)
                     .trustedInstruction("hello")
                     .untrustedSourceText("ping")
                     .persistRun(false)
                     .requireJson(false)
-                    .build());
-            assertNotNull(result.getText());
-            assertFalse(result.getText().isBlank());
+                    .build()));
         } finally {
             aiConfig.setProvider("mock");
         }

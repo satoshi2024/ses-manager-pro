@@ -7,7 +7,11 @@ import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProposalMapper;
+import com.ses.mapper.SalesActivityMapper;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -15,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.List;
 import java.util.Set;
@@ -34,8 +39,22 @@ class DataScopeServiceImplTest {
     @Mock private ProposalMapper proposalMapper;
     @Mock private ProjectMapper projectMapper;
 
+    @Mock private SalesActivityMapper salesActivityMapper;
+    @Mock private ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
+    @Mock private ObjectProvider<com.ses.service.EngineerAccountLinkService> engineerAccountLinkServiceProvider;
+
     @InjectMocks
     private DataScopeServiceImpl service;
+
+    @BeforeEach
+    void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Test
     void isScoped_configFalseは常に非スコープ() {
@@ -63,6 +82,7 @@ class DataScopeServiceImplTest {
         Contract c2 = new Contract(); c2.setId(2L);
         // Wrapper 条件（sales_user_id=me OR NULL）はマッパーが解決する前提。ここでは返却分を検証。
         when(contractMapper.selectList(any())).thenReturn(List.of(c1, c2));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1, c2));
         Set<Long> ids = service.computeContractIds(9L);
         assertEquals(Set.of(1L, 2L), ids);
     }

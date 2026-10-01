@@ -31,6 +31,7 @@ import static org.mockito.Mockito.*;
 @ActiveProfiles("test")
 @Transactional
 @org.springframework.test.context.jdbc.Sql(scripts = "/sql/engineer-schema-h2.sql")
+@com.ses.test.EnableDefaultTenantTestContext
 public class ProposalServiceImplTest {
 
     @Autowired
@@ -48,17 +49,43 @@ public class ProposalServiceImplTest {
     @Autowired
     private ContractMapper contractMapper;
 
+    @Autowired
+    private com.ses.mapper.EngineerMapper engineerMapper;
+
+    @Autowired
+    private com.ses.mapper.CustomerMapper customerMapper;
+
     @MockBean
     private EngineerStatusService engineerStatusService;
 
     @MockBean
     private com.ses.service.security.DataScopeService dataScopeService;
 
-    /** createDraftFromProposal が案件を解決できるよう、指定IDの案件を用意する。 */
+    private Long seedEngineer(Long engineerId) {
+        if (engineerMapper.selectById(engineerId) == null) {
+            com.ses.entity.Engineer e = new com.ses.entity.Engineer();
+            e.setId(engineerId);
+            e.setFullName("テスト要員" + engineerId);
+            e.setTenantId("default");
+            e.setLegalEntityId(1L);
+            engineerMapper.insert(e);
+        }
+        return engineerId;
+    }
+
     private Long seedProject(Long customerId) {
+        if (customerMapper.selectById(customerId) == null) {
+            com.ses.entity.Customer c = new com.ses.entity.Customer();
+            c.setId(customerId);
+            c.setCompanyName("テスト顧客" + customerId);
+            c.setTenantId("default");
+            c.setLegalEntityId(1L);
+            customerMapper.insert(c);
+        }
         Project prj = new Project();
         prj.setProjectName("テスト案件");
         prj.setCustomerId(customerId);
+        prj.setLegalEntityId(1L);
         projectMapper.insert(prj);
         return prj.getId();
     }
@@ -69,6 +96,8 @@ public class ProposalServiceImplTest {
     public void setUp() {
         mockedSecurityUtils = Mockito.mockStatic(SecurityUtils.class);
         mockedSecurityUtils.when(SecurityUtils::currentUserId).thenReturn(1L);
+        mockedSecurityUtils.when(SecurityUtils::currentTenantId).thenReturn("default");
+        mockedSecurityUtils.when(SecurityUtils::currentRole).thenReturn("管理者");
     }
 
     @AfterEach
@@ -121,6 +150,7 @@ public class ProposalServiceImplTest {
     @Test
     public void testChangeStatusToWon() {
         Long projectId = seedProject(3L);
+        seedEngineer(1L);
         Proposal p = new Proposal();
         p.setProjectId(projectId);
         p.setEngineerId(1L);
@@ -220,12 +250,6 @@ public class ProposalServiceImplTest {
         
         verify(engineerStatusService, times(1)).releaseIfIdle(1L);
     }
-
-    @Autowired
-    private com.ses.mapper.EngineerMapper engineerMapper;
-
-    @Autowired
-    private com.ses.mapper.CustomerMapper customerMapper;
 
     @Test
     public void testFindActiveDuplicates() {

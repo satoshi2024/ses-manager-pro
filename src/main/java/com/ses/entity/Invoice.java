@@ -20,6 +20,8 @@ public class Invoice {
     private Long id;
     private String invoiceNo;
     private Long customerId;
+    /** 法人境界。公開請求書readでは顧客・契約と同一値を要求する。 */
+    private Long legalEntityId;
     private String billingMonth;
     private BigDecimal subtotal;
     private BigDecimal tax;

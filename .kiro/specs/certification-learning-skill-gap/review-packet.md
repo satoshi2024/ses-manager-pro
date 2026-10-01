@@ -52,16 +52,19 @@ git diff --stat 76e45340a23cfee964fac778b7b4d856fa2c9e7b..HEAD
 | remediation handoff docs | `97443937` | final Head、merge-base、migration、Browser、残余未検証をhandoffへ固定 |
 | final Head pin docs | `e24131a8` | review packet/matrix/remediationのlocal/remote Headを固定 |
 | remediation docs | このpacketを含むdocs commit | tasks/completion/remediation/Review packetを独立Review FAILと修正証拠に同期 |
+| SEC remediation | `561a40c1` | 本番プロファイル判定におけるtest優先の脆弱性を修正しprod fail-fastを担保 |
+| DATA/V151 remediation | `eb6748b9` | V151によるcontinuity_group永続化と整合性制約の強化 |
 
-変更ファイルはBaseからのdiffで再計算する。今回の追加はA1/A2のproduction HTTP/UI、V128 migration/H2/schema smoke、tests、spec/receipt docsであり、旧Mの完了宣言は独立Review FAILにより最終証拠として扱わない。
+変更ファイルはBaseからのdiffで再計算する。今回の追加はA1/A2のproduction HTTP/UI、V128 migration/H2/schema smoke、tests、spec/receipt docs、および2026-09-07のSEC/DATA remediation（V151、KeyProvider、tests）であり、旧Mの完了宣言は独立Review FAILにより最終証拠として扱わない。
 
 ## Migration and schema
 
 - `origin/main`の`V115__pwa_client_mutation_ledger.sql`は変更せず保持した。
 - NF-03のmigrationは`V116`〜`V128`へ順延し、V115との重複を解消した。
 - V116 certification master/record、V117 certification event/evidence type、V118 training、V119 skill-gap events、V120 assessment/decision、V121 lifecycle/PII permission、V122 expense relation/audit、V123 taxonomy alias、V124 AI artifact、V125 audit timestamps、V126 management menu/action、V127 self-service menu/action、V128既存ExpenseRequestの研修費科目許可。
-- `MigrationScriptIntegrityTest` 28件、`AllMappersSchemaSweepTest` 188件、合計216件PASS。
-- 修正後MySQL smokeは`FlywayCertificationLearningSkillGapSchemaSmokeTest`のV128検証1件PASS。V128追加前の3クラス6件実行では追加検証クエリの誤りによる1件FAILがあり、検証を`SHOW CREATE TABLE`へ修正して該当1件を再実行PASS（他5件は初回PASS）。
+- 2026-09-07 remediation: `V151__certification_continuity_group.sql` を追加。`t_certification_continuity_group` のAUTO_INCREMENT一意採番、複合FK `fk_eng_cert_continuity_group`、CHECK制約 `chk_eng_cert_current_holder` を実MySQLおよびH2統合スキーマへ反映。
+- `MigrationScriptIntegrityTest` 28件、`AllMappersSchemaSweepTest` 225件全件PASS。
+- 修正後MySQL smokeは`FlywayCertificationLearningSkillGapSchemaSmokeTest`で最新バージョン151、テーブル・列・FK・CHECK制約の存在および並行生成・renew継承・制約違反拒絶を検証。
 
 ## Test gates
 

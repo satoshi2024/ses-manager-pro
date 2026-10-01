@@ -32,10 +32,14 @@ public class CertificationEvidenceValidator {
         if (documentId == null || documentVersionId == null || expectedHash == null || expectedHash.isBlank()) {
             throw BusinessException.of(400, "certification.evidence.versionRequired");
         }
-        Document document = documentMapper.selectById(documentId);
-        DocumentVersion version = documentVersionMapper.selectById(documentVersionId);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        Document document = documentMapper.selectOne(new QueryWrapper<Document>()
+                .eq("id", documentId).eq("tenant_id", tenantId));
+        DocumentVersion version = documentVersionMapper.selectOne(new QueryWrapper<DocumentVersion>()
+                .eq("id", documentVersionId).eq("tenant_id", tenantId));
         if (document == null || !"CERTIFICATION_EVIDENCE".equals(document.getDocumentType())
-                || version == null || !documentId.equals(version.getDocumentId())) {
+                || version == null || !documentId.equals(version.getDocumentId())
+                || !Objects.equals(document.getTenantId(), version.getTenantId())) {
             throw BusinessException.of(403, "certification.evidence.invalid");
         }
         if (!"CLEAN".equals(version.getScanStatus())) {
@@ -45,10 +49,12 @@ public class CertificationEvidenceValidator {
             throw BusinessException.of(403, "error.file.hashMismatch");
         }
         boolean linked = documentLinkMapper.selectList(new QueryWrapper<DocumentLink>()
-                        .eq("document_id", documentId).eq("target_type", "CERTIFICATION_RECORD")
-                        .eq("target_id", certificationRecordId))
+                .eq("document_id", documentId).eq("target_type", "CERTIFICATION_RECORD")
+                        .eq("target_id", certificationRecordId).eq("tenant_id", tenantId))
                 .stream().anyMatch(link -> "CERTIFICATION_RECORD".equals(link.getTargetType())
                         && Objects.equals(certificationRecordId, link.getTargetId())
+                        && (Objects.equals(tenantId, link.getTenantId())
+                            || ("default".equals(tenantId) && link.getTenantId() == null))
                         && !Integer.valueOf(1).equals(link.getDeletedFlag()));
         if (!linked) {
             throw BusinessException.of(403, "certification.evidence.linkRequired");

@@ -36,6 +36,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @org.springframework.security.test.context.support.WithMockUser(username = "1", roles = "管理者")
 class ComplianceMappingServiceImplTest {
 
+    private static final LocalDate TEST_AS_OF =
+            LocalDate.now(java.time.ZoneId.of("Asia/Tokyo"));
+
+    private static LocalDate testAsOf() {
+        return TEST_AS_OF;
+    }
+
+    private static LocalDate currentFrom() {
+        return testAsOf().minusYears(1);
+    }
+
+    private static LocalDate currentTo() {
+        return testAsOf().plusYears(1);
+    }
+
+    private static LocalDate nextFrom() {
+        return testAsOf().minusMonths(6);
+    }
+
+    private static LocalDate nextTo() {
+        return testAsOf().plusYears(2);
+    }
+
     @Autowired
     private ComplianceMappingService complianceMappingService;
 
@@ -55,7 +78,7 @@ class ComplianceMappingServiceImplTest {
     void createはcanonicalizerでhashを計算しDRAFTで登録する() {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07",
-                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30),
+                currentFrom(), currentTo(),
                 allSources());
 
         assertNotNull(version.getId());
@@ -71,7 +94,7 @@ class ComplianceMappingServiceImplTest {
         incomplete.removeIf(s -> "SRC-INDEX".equals(s.getSourceCode()));
         ComplianceMappingVersion incompleteVersion = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-TEST-1",
-                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), incomplete);
+                currentFrom(), currentTo(), incomplete);
         setupPolicy(incompleteVersion.getId());
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> complianceMappingService.transition(incompleteVersion.getId(), "PROVISIONAL_REVIEWED"));
@@ -79,7 +102,7 @@ class ComplianceMappingServiceImplTest {
         // policy未設定（Requirement Groupなし） → 400 (P2-N1)
         ComplianceMappingVersion noPolicyVersion = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-TEST-NOPOLICY",
-                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+                currentFrom(), currentTo(), allSources());
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> complianceMappingService.transition(noPolicyVersion.getId(), "PROVISIONAL_REVIEWED"),
                 "policy未設定のままPROVISIONAL化は不可");
@@ -87,7 +110,7 @@ class ComplianceMappingServiceImplTest {
         // source完全＋policy設定あり → 遷移成功・freeze（status変更でhash不変）
         ComplianceMappingVersion complete = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-TEST-2",
-                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+                currentFrom(), currentTo(), allSources());
         setupPolicy(complete.getId());
         String draftHash = complete.getMappingHash();
         ComplianceMappingVersion reviewed = complianceMappingService.transition(complete.getId(), "PROVISIONAL_REVIEWED");
@@ -103,12 +126,14 @@ class ComplianceMappingServiceImplTest {
     void ACTIVE化は承認eventが無ければ証跡gateで保留される() {
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-TEST-3",
-                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+                currentFrom(), currentTo(), allSources());
         setupPolicy(version.getId());
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
         // 承認eventなし → approvalRequiredで保留
-        assertThrows(com.ses.common.exception.BusinessException.class,
+        com.ses.common.exception.BusinessException ex = assertThrows(
+                com.ses.common.exception.BusinessException.class,
                 () -> complianceMappingService.transition(version.getId(), "ACTIVE"));
+        assertEquals("compliance.gate.approvalRequired", ex.getMessageKey());
     }
 
     @Test
@@ -128,7 +153,7 @@ class ComplianceMappingServiceImplTest {
 
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-TEST-4",
-                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+                currentFrom(), currentTo(), allSources());
         setupPolicy(version.getId());
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
 
@@ -167,7 +192,7 @@ class ComplianceMappingServiceImplTest {
 
         ComplianceMappingVersion version = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-REVOKE-TEST",
-                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+                currentFrom(), currentTo(), allSources());
         setupPolicy(version.getId());
         complianceMappingService.transition(version.getId(), "PROVISIONAL_REVIEWED");
 
@@ -175,8 +200,10 @@ class ComplianceMappingServiceImplTest {
                 version.getId(), workplaceId, "一次source確認済み", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
 
         // approvalEventId未指定は拒否
-        assertThrows(com.ses.common.exception.BusinessException.class,
+        com.ses.common.exception.BusinessException missingApproval = assertThrows(
+                com.ses.common.exception.BusinessException.class,
                 () -> complianceMappingService.transition(version.getId(), "ACTIVE", null));
+        assertEquals("compliance.gate.approvalRequired", missingApproval.getMessageKey());
 
         // 後続REVOKEイベントを挿入
         jdbcTemplate.update("INSERT INTO t_compliance_mapping_approval_event "
@@ -189,8 +216,10 @@ class ComplianceMappingServiceImplTest {
                 approval.getAssignmentId(), approval.getWorkplaceIdSnapshot(), approval.getId());
 
         // 取消済みの承認イベントでのACTIVE化は拒否
-        assertThrows(com.ses.common.exception.BusinessException.class,
+        com.ses.common.exception.BusinessException revokedApproval = assertThrows(
+                com.ses.common.exception.BusinessException.class,
                 () -> complianceMappingService.transition(version.getId(), "ACTIVE", approval.getId()));
+        assertEquals("compliance.gate.approvalRevoked", revokedApproval.getMessageKey());
     }
 
     @Test
@@ -210,7 +239,7 @@ class ComplianceMappingServiceImplTest {
         // Version 1 (現在版)
         ComplianceMappingVersion v1 = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-07-V1",
-                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+                currentFrom(), currentTo(), allSources());
         setupPolicy(v1.getId());
         complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
@@ -220,7 +249,7 @@ class ComplianceMappingServiceImplTest {
         // Version 2 (future保留版)
         ComplianceMappingVersion v2 = complianceMappingService.create(
                 "G2-MAPPING", "MAPPING-2026-10-V2",
-                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 12, 31), allSources());
+                nextFrom(), nextTo(), allSources());
         setupPolicy(v2.getId());
         complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
@@ -233,7 +262,7 @@ class ComplianceMappingServiceImplTest {
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> complianceMappingService.create(
                         "G2-MAPPING", "MAPPING-2027-01-V3",
-                        LocalDate.of(2027, 1, 1), LocalDate.of(2027, 3, 31), allSources()),
+                        testAsOf().plusYears(3), testAsOf().plusYears(4), allSources()),
                 "2件目future候補はcreate時点で拒否される");
 
         // Promote: v2をactive_slot=1へ昇格、v1はSUPERSEDED化
@@ -266,7 +295,7 @@ class ComplianceMappingServiceImplTest {
         // Active version
         ComplianceMappingVersion v1 = complianceMappingService.create(
                 "G2-MAPPING-PRO", "MAPPING-2026-07-P1",
-                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+                currentFrom(), currentTo(), allSources());
         setupPolicy(v1.getId());
         complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
@@ -276,7 +305,7 @@ class ComplianceMappingServiceImplTest {
         // Future candidate version
         ComplianceMappingVersion v2 = complianceMappingService.create(
                 "G2-MAPPING-PRO", "MAPPING-2026-10-P2",
-                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 12, 31), allSources());
+                nextFrom(), nextTo(), allSources());
         setupPolicy(v2.getId());
         complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
@@ -303,7 +332,7 @@ class ComplianceMappingServiceImplTest {
     void createはeffectiveToがnullの無期限マスタを許可しcanonicalizerのhashが安定して出力される() {
         ComplianceMappingVersion indefinite = complianceMappingService.create(
                 "G2-MAPPING-INDEFINITE", "MAPPING-2026-10",
-                LocalDate.of(2026, 10, 1), null, allSources());
+                currentFrom(), null, allSources());
 
         assertNotNull(indefinite.getId());
         assertNull(indefinite.getEffectiveTo());
@@ -313,7 +342,7 @@ class ComplianceMappingServiceImplTest {
     @Test
     void createは将来候補asOf未満でfuture_slotを1予約し同一マスタコードの2件目を409で拒否する() {
         // effectiveFrom > now (e.g. 2099-01-01) -> future candidate
-        LocalDate futureFrom = LocalDate.of(2099, 1, 1);
+        LocalDate futureFrom = testAsOf().plusYears(10);
         ComplianceMappingVersion futureCandidate = complianceMappingService.create(
                 "G2-MAPPING-FUTURE-RESERVE", "MAPPING-2099-01",
                 futureFrom, null, allSources());
@@ -346,7 +375,7 @@ class ComplianceMappingServiceImplTest {
         // Version 1 (現在版)
         ComplianceMappingVersion v1 = complianceMappingService.create(
                 "G2-MAPPING-UUID", "MAPPING-2026-07-UUID1",
-                LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), allSources());
+                currentFrom(), currentTo(), allSources());
         setupPolicy(v1.getId());
         complianceMappingService.transition(v1.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app1 = complianceApprovalService.approve(v1.getId(), workplaceId, "v1確認", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
@@ -356,7 +385,7 @@ class ComplianceMappingServiceImplTest {
         // Version 2 (future候補)
         ComplianceMappingVersion v2 = complianceMappingService.create(
                 "G2-MAPPING-UUID", "MAPPING-2026-10-UUID2",
-                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 12, 31), allSources());
+                nextFrom(), nextTo(), allSources());
         setupPolicy(v2.getId());
         complianceMappingService.transition(v2.getId(), "PROVISIONAL_REVIEWED");
         ComplianceMappingApprovalEvent app2 = complianceApprovalService.approve(v2.getId(), workplaceId, "v2確認", insertEvidenceVersion()[0], insertEvidenceVersion()[1]);
@@ -550,8 +579,9 @@ class ComplianceMappingServiceImplTest {
         input.setSourceCode(code);
         input.setSourceUrl(url);
         input.setSourceVersion(version);
-        input.setConfirmedOn(LocalDate.of(2026, 8, 9));        input.setEffectiveFrom(LocalDate.of(2026, 7, 1));
-        input.setEffectiveTo(LocalDate.of(2026, 9, 30));
+        input.setConfirmedOn(testAsOf().minusDays(1));
+        input.setEffectiveFrom(currentFrom());
+        input.setEffectiveTo(currentTo());
         return input;
     }
 }

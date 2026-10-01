@@ -15,6 +15,8 @@ import lombok.EqualsAndHashCode;
 @TableName("t_bp_availability_ingestion")
 public class BpAvailabilityIngestion extends BaseEntity {
 
+    private Long legalEntityId;
+
     private String originalFileName;
     private String storedFileName;
     private String fileExt;

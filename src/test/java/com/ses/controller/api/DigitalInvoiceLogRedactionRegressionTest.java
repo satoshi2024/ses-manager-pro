@@ -21,6 +21,7 @@ import com.ses.service.invoice.InvoiceDeliveryDispatcher;
 import com.ses.service.invoice.JpPintRenderer;
 import com.ses.service.invoice.provider.DigitalInvoiceProvider;
 import com.ses.service.invoice.provider.DigitalInvoiceProviderResponse;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -32,6 +33,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -51,6 +53,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -94,6 +97,9 @@ class DigitalInvoiceLogRedactionRegressionTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private InvoiceService invoiceService;
@@ -146,6 +152,9 @@ class DigitalInvoiceLogRedactionRegressionTest {
 
     @BeforeEach
     void setUp() {
+        TenantTestSecurity.bind("default");
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
+        registerInboundParticipants("nf09-log-receiver", "nf09-log-supplier");
         appender = new ListAppender<>();
         appender.start();
 
@@ -179,6 +188,7 @@ class DigitalInvoiceLogRedactionRegressionTest {
         globalHandlerLogger.detachAppender(appender);
         auditFilterLogger.detachAppender(appender);
         appender.stop();
+        TenantTestSecurity.clear();
     }
 
     private String compositeSecretExceptionMessage() {
@@ -361,6 +371,7 @@ class DigitalInvoiceLogRedactionRegressionTest {
     @WithMockUser(roles = "管理者")
     @DisplayName("受信ACCEPT例外パス: ログ・レスポンスに機密を出さず診断情報を記録")
     void 受入例外で機密を隠し診断情報を残す() throws Exception {
+        doNothing().when(digitalInvoiceService).assertInboundAccessAllowed(999L);
         doThrow(new RuntimeException(compositeSecretExceptionMessage()))
                 .when(digitalInvoiceService).acceptInboundReview(999L);
 
@@ -516,8 +527,12 @@ class DigitalInvoiceLogRedactionRegressionTest {
                 .thenThrow(new RuntimeException(compositeSecretExceptionMessage()));
 
         org.junit.jupiter.api.Assertions.assertThrows(BusinessException.class, () ->
-                digitalInvoiceService.processInboundInvoice("prov-msg-leak-1", "evt-leak-1",
-                        "<Invoice/>", "hash123", LocalDateTime.now()));
+                com.ses.common.audit.ExecutionActorContext.runAsProviderCallback(
+                        "test-provider-callback", "evt-leak-1",
+                        () -> digitalInvoiceService.processInboundInvoice(
+                                "prov-msg-leak-1", "evt-leak-1",
+                                inboundXml("INV-LOG-SECRET", "nf09-log-receiver", "nf09-log-supplier"),
+                                "hash123", LocalDateTime.now())));
 
         assertNoSecretsInLogsAndResponses(null);
 
@@ -571,7 +586,11 @@ class DigitalInvoiceLogRedactionRegressionTest {
                         .get("/api/inbound-invoices"))
                 .andExpect(status().isOk());
 
+        // MockMvc完了後のservice直呼びは、HTTP filterに依存せず明示的に同じscopeへ再束縛する。
+        TenantTestSecurity.bindAs(1L, "digital-invoice-log-test", "default", "管理者");
         DigitalInvoice inbound = new DigitalInvoice();
+        inbound.setTenantId("default");
+        inbound.setLegalEntityId(1L);
         inbound.setDirection("RECEIVE");
         inbound.setProfile("Standard");
         inbound.setSpecificationVersion("1.1.3");
@@ -582,7 +601,10 @@ class DigitalInvoiceLogRedactionRegressionTest {
                         .param("action", "REJECT").with(csrf()))
                 .andExpect(status().isOk());
 
+        TenantTestSecurity.bindAs(1L, "digital-invoice-log-test", "default", "管理者");
         DigitalInvoice downloadable = new DigitalInvoice();
+        downloadable.setTenantId("default");
+        downloadable.setLegalEntityId(1L);
         downloadable.setInvoiceId(invoice.getId());
         downloadable.setDirection("SEND");
         downloadable.setProfile("Standard");
@@ -686,6 +708,8 @@ class DigitalInvoiceLogRedactionRegressionTest {
     @DisplayName("Webhook JSONエラー本文を保存せず安全な分類と相関情報だけを残す")
     void WebhookのJSONエラー本文を保存しない() throws Exception {
         when(digitalInvoiceProvider.verifyWebhookSignature(anyString(), anyString())).thenReturn(true);
+        // Webhook は外部プロバイダからの未認証コールであり、画面ユーザーの権限境界を通さない。
+        TenantTestSecurity.clear();
         String body = "{\"status\":\"DELIVERED\",\"messageId\":\"msg-webhook-safe\","
                 + "\"eventId\":\"op-webhook-safe\",\"error_description\":\""
                 + SECRET_DB_PASS + " " + SECRET_BEARER + "\",\"token\":\""
@@ -720,6 +744,33 @@ class DigitalInvoiceLogRedactionRegressionTest {
         pp.setParticipantId(participantId);
         peppolParticipantService.save(pp);
         return pp;
+    }
+
+    private void registerInboundParticipants(String receiverId, String supplierId) {
+        peppolParticipantService.save(inboundParticipant("ORGANIZATION", 1L, receiverId));
+        peppolParticipantService.save(inboundParticipant("BP_COMPANY", 2L, supplierId));
+    }
+
+    private PeppolParticipant inboundParticipant(String ownerType, Long ownerId, String participantId) {
+        PeppolParticipant participant = new PeppolParticipant();
+        participant.setOwnerType(ownerType);
+        participant.setOwnerId(ownerId);
+        participant.setSchemeId("0188");
+        participant.setParticipantId(participantId);
+        participant.setProvider("FAST_ACCOUNTING");
+        participant.setStatus("VERIFIED");
+        participant.setVerifiedAt(LocalDateTime.now());
+        return participant;
+    }
+
+    private String inboundXml(String invoiceNo, String receiverId, String supplierId) {
+        return "<Invoice><ID>" + invoiceNo + "</ID><IssueDate>2026-08-01</IssueDate>"
+                + "<AccountingSupplierParty><Party><EndpointID schemeID=\"0188\">" + supplierId
+                + "</EndpointID></Party></AccountingSupplierParty>"
+                + "<AccountingCustomerParty><Party><EndpointID schemeID=\"0188\">" + receiverId
+                + "</EndpointID></Party></AccountingCustomerParty>"
+                + "<LegalMonetaryTotal><TaxInclusiveAmount>100</TaxInclusiveAmount></LegalMonetaryTotal>"
+                + "</Invoice>";
     }
 
     private Invoice createInvoice(Customer c, String invoiceNo) {

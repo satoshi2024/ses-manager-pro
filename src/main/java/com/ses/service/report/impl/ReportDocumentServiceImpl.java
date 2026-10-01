@@ -1,8 +1,8 @@
 package com.ses.service.report.impl;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.common.audit.ExecutionActorContext;
 import com.ses.common.util.PdfFontUtils;
-import com.ses.common.util.SecurityUtils;
 import com.ses.dto.document.DocumentRegisterRequest;
 import com.ses.dto.report.ReportDocumentArtifact;
 import com.ses.entity.Document;
@@ -11,6 +11,7 @@ import com.ses.entity.ReportRun;
 import com.ses.entity.ReportSectionSnapshot;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.DocumentService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.report.ReportDocumentService;
 import com.ses.service.report.ReportSnapshotService;
 import com.lowagie.text.Chunk;
@@ -41,7 +42,6 @@ import java.util.List;
 public class ReportDocumentServiceImpl implements ReportDocumentService {
 
     private static final int MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
-    private static final String TENANT_ID = "default";
     private final ReportSnapshotService snapshotService;
     private final DocumentService documentService;
     private final DocumentVersionMapper documentVersionMapper;
@@ -91,15 +91,22 @@ public class ReportDocumentServiceImpl implements ReportDocumentService {
                 .versionDiscriminator(run.getSourcePolicyHash() + ":" + normalized)
                 .originalName("management-report-" + run.getPeriodFrom().toString().substring(0, 7) + "." + extension)
                 .contentType(contentType)
-                // schedulerはHTTP sessionを持たないため、非HTTP実行ではrunの監査principalを使う。
-                .createdBy(SecurityUtils.currentUserId() != null
-                        ? SecurityUtils.currentUserId() : run.getPrincipalUserId())
+                .actorType(ExecutionActorContext.resolve().actorType())
+                .confirmationSource(ExecutionActorContext.resolve().confirmationSource())
+                .humanUserId(ExecutionActorContext.resolve().humanUserId())
+                .correlationId(ExecutionActorContext.resolve().correlationId())
+                .idempotencyKey(ExecutionActorContext.resolve().idempotencyKey())
+                .createdBy(ExecutionActorContext.resolve().humanUserId())
                 .build();
         Document document = documentService.registerGenerated(request, new java.io.ByteArrayInputStream(bytes));
         if (document != null && "DRAFT".equals(document.getStatus())) {
             documentService.confirm(document.getId());
         }
-        DocumentVersion version = documentVersionMapper.findLatestByDocumentId(document.getId());
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        if (document.getTenantId() == null || !tenantId.equals(document.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.contextMismatch");
+        }
+        DocumentVersion version = documentVersionMapper.findLatestByTenantAndDocumentId(tenantId, document.getId());
         return new ReportDocumentArtifact(runId, normalized, hash, document, version);
     }
 

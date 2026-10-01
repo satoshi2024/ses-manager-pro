@@ -40,12 +40,12 @@ class OrderAcceptanceSchemaTest {
     @Autowired private JdbcTemplate jdbcTemplate;
 
     private long newCustomer(String name) {
-        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, deleted_flag) VALUES (?, 'B', 0)", name);
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, company_name, trust_level, deleted_flag) VALUES ('default', ?, 'B', 0)", name);
         return jdbcTemplate.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, name);
     }
 
     private long newEngineer(String name) {
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')", name);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, full_name, employment_type, status) VALUES ('default', ?, '正社員', 'Bench')", name);
         return jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, name);
     }
 
@@ -56,9 +56,9 @@ class OrderAcceptanceSchemaTest {
 
     private long newContract(long engineerId, long projectId, long customerId, String contractNo) {
         jdbcTemplate.update(
-                "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id,"
+                "INSERT INTO t_contract (tenant_id, contract_no, engineer_id, project_id, customer_id,"
                         + " start_date, selling_price, cost_price, status, acceptance_required)"
-                        + " VALUES (?, ?, ?, ?, '2026-01-01', 500000, 300000, '準備中', 1)",
+                        + " VALUES ('default', ?, ?, ?, ?, '2026-01-01', 500000, 300000, '準備中', 1)",
                 contractNo, engineerId, projectId, customerId);
         return jdbcTemplate.queryForObject(
                 "SELECT id FROM t_contract WHERE contract_no = ?", Long.class, contractNo);

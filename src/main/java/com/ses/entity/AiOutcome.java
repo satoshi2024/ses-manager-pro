@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 @TableName("t_ai_outcome")
 public class AiOutcome extends BaseEntity {
 
+    private String tenantId;
     private Long itemId;
     private String outcomeType;
     private String sourceType;

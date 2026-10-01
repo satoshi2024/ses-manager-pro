@@ -6,15 +6,14 @@ import com.ses.entity.AllocationPlan;
 import com.ses.entity.Engineer;
 import com.ses.entity.ProjectPosition;
 import com.ses.service.staffing.StaffingHeatmapService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -57,6 +56,7 @@ class StaffingHeatmapServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         suffix = String.valueOf(System.nanoTime());
         jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "T078hm-" + suffix);
         long customerId = jdbcTemplate.queryForObject(
@@ -296,13 +296,11 @@ class StaffingHeatmapServiceTest {
     }
 
     private void authenticate(String user, String role) {
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(user, "n/a",
-                        List.of(new SimpleGrantedAuthority("ROLE_" + role))));
+        TenantTestSecurity.bindAs(1L, user, "default", role);
     }
 
     @AfterEach
     void tearDown() {
-        SecurityContextHolder.clearContext();
+        TenantTestSecurity.clear();
     }
 }

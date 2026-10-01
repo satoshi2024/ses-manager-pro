@@ -57,6 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_customer_contact_valid ON t_customer_contact(cust
 -- ============================================================
 CREATE TABLE IF NOT EXISTS t_lead (
   id                       BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id          BIGINT,
   company_name             VARCHAR(200) NOT NULL,
   company_name_normalized  VARCHAR(200),
   contact_name             VARCHAR(100),
@@ -86,6 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_lead_email ON t_lead(contact_email);
 -- ============================================================
 CREATE TABLE IF NOT EXISTS t_opportunity (
   id                     BIGINT        AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id        BIGINT,
   customer_id            BIGINT        NOT NULL,
   title                  VARCHAR(200)  NOT NULL,
   stage                  VARCHAR(30)   NOT NULL DEFAULT '見込',

@@ -4,6 +4,7 @@ import com.ses.dto.accounting.AccountingWaitCostSnapshotRow;
 import com.ses.dto.accounting.AccountingWaitCostRow;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountingHistory;
+import com.ses.test.DisableDefaultLegalEntityTestFixture;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -30,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 @ActiveProfiles("test")
 @Transactional
 @Sql("/sql/engineer-schema-h2.sql")
+@DisableDefaultLegalEntityTestFixture
 class EngineerAccountingHistoryMapperTest {
 
     @Autowired

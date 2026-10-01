@@ -18,6 +18,7 @@ import com.ses.service.NotificationService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.impl.CashFlowForecastServiceImpl;
 import com.ses.service.impl.MonthlyRevenueCalcServiceImpl;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -43,6 +44,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
+@EnableDefaultTenantTestContext
 class CashFlowForecastServiceTest {
 
     @Mock
@@ -293,7 +295,7 @@ class CashFlowForecastServiceTest {
         contract.setStatus("稼動中");
         contract.setStartDate(LocalDate.of(2026, 1, 1));
         contract.setSellingPrice(new BigDecimal("700000")); // 確定実績があるので使われない
-        when(contractMapper.selectList(any())).thenReturn(List.of(contract));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(contract));
 
         WorkRecord confirmed = new WorkRecord();
         confirmed.setContractId(10L);
@@ -301,7 +303,7 @@ class CashFlowForecastServiceTest {
         confirmed.setStatus("確定");
         confirmed.setBillingAmount(new BigDecimal("800000"));
         confirmed.setPaymentAmount(new BigDecimal("600000"));
-        when(workRecordMapper.selectList(any())).thenReturn(List.of(confirmed));
+        when(workRecordMapper.selectConfirmedByWorkMonthsForTenant(any(), any())).thenReturn(List.of(confirmed));
 
         // 上記実績から生成された請求書（税抜 800,000 / 税込 880,000、支払期限は翌月末）
         Invoice invoice = new Invoice();

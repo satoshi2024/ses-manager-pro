@@ -14,8 +14,8 @@ import java.util.List;
  * <h3>設計上の不変条件（design §6.3）</h3>
  * <ul>
  *   <li>冪等キー {@code (source_type, business_key, version_discriminator)} で重複登録を防ぐ。</li>
- *   <li>storage put成功後にDB commitが失敗した場合、storageはorphanとして残す。
- *       補償削除は {@code cleanup-safety-hours} 経過後（即削除しない）。</li>
+ *   <li>Storage I/OはDB transaction外で行い、metadata commit失敗時は即時補償を試みる。
+ *       残存orphanは {@code cleanup-safety-hours} 経過後のcleanupでも回収する。</li>
  *   <li>verifyIntegrity はread-onlyで、hash不一致時に自動修復・自動削除をしない。</li>
  *   <li>外部API（CloudSign等）はDB transaction外で呼ぶ（platform-invariants §3.3）。</li>
  * </ul>
@@ -24,7 +24,7 @@ public interface DocumentService {
 
     /**
      * 生成文書（PDF等）をアーカイブに登録する。
-     * 保存順: quarantine put → scan → hash検証 → DB tx metadata → promote（design §2）。
+     * 保存順: temp scan → quarantine put → promote → 短いDB metadata commit（design §2）。
      *
      * @param request   登録リクエスト
      * @param content   バイナリコンテンツ

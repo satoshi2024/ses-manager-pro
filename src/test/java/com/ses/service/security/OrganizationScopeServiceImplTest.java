@@ -10,7 +10,10 @@ import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.service.OrganizationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.test.DisableDefaultLegalEntityTestFixture;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -34,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 @Transactional
 @Sql("/sql/engineer-schema-h2.sql")
+@DisableDefaultLegalEntityTestFixture
 class OrganizationScopeServiceImplTest {
 
     @Autowired
@@ -54,9 +58,15 @@ class OrganizationScopeServiceImplTest {
     @Autowired
     private EngineerAccountLinkMapper engineerAccountLinkMapper;
 
+    @BeforeEach
+    void bindTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
     @AfterEach
     void clearAuthentication() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -265,12 +275,14 @@ class OrganizationScopeServiceImplTest {
             // 本テストは@Transactionalで未コミットのため、別スレッド(別コネクション)からは
             // 登録した組織が見えない。ここで確認するのは「例外にならず、ロール判定が効くこと」。
             java.util.concurrent.Future<java.util.Set<Long>> scoped = executor.submit(() -> {
+                AccountingTenantContextHolder.setTenantId("default");
                 authenticate(manager);
                 try {
                     assertFalse(scopeService.hasFullAccess(), "部門責任者はリクエスト外でも全件にしない");
                     return scopeService.allowedOrganizationIds(LocalDate.of(2026, 7, 1));
                 } finally {
                     SecurityContextHolder.clearContext();
+                    AccountingTenantContextHolder.clear();
                 }
             });
             assertTrue(scoped.get().isEmpty(), "未コミットの組織は別コネクションから見えない");

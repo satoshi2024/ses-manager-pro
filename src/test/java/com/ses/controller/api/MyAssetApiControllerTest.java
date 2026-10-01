@@ -11,18 +11,23 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.AssetService;
 import com.ses.service.EngineerAccountLinkService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.time.LocalDate;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.hasItem;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -30,6 +35,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @DisplayName("My Asset API Integration Tests (要員マイポータル)")
 class MyAssetApiControllerTest extends BaseIntegrationTest {
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Autowired
     private MockMvc mockMvc;
@@ -50,11 +60,15 @@ class MyAssetApiControllerTest extends BaseIntegrationTest {
     private EngineerMapper engineerMapper;
 
     @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
     private EngineerAccountLinkService engineerAccountLinkService;
 
     @Test
     @DisplayName("GET /api/my/assets and POST /api/my/assets/report-lost")
     void testMyAssetPortalFlow() throws Exception {
+        AccountingTenantContextHolder.setTenantId("default");
         String username = "eng_portal_user_" + System.nanoTime();
         // 1. ユーザー & 要員作成 & 紐付け
         SysUser user = SysUser.builder()
@@ -62,16 +76,24 @@ class MyAssetApiControllerTest extends BaseIntegrationTest {
                 .password("pass123")
                 .realName("山田 太郎")
                 .role("要員")
+                .tenantId("default")
                 .status(1)
                 .build();
         sysUserMapper.insert(user);
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L, user.getId());
 
         Engineer engineer = Engineer.builder()
                 .fullName("山田 太郎")
+                .tenantId("default")
+                .legalEntityId(1L)
                 .employmentType("正社員")
                 .status("稼動中")
                 .build();
         engineerMapper.insert(engineer);
+
+        // 共有H2の既存fixtureが同じ採番値を再利用しても、リンクのDB一意制約に依存して失敗しないようにする。
+        jdbcTemplate.update("DELETE FROM t_engineer_account_link WHERE engineer_id = ? OR sys_user_id = ?",
+                engineer.getId(), user.getId());
 
         engineerAccountLinkService.link(engineer.getId(), user.getId(), 1L);
 
@@ -80,6 +102,7 @@ class MyAssetApiControllerTest extends BaseIntegrationTest {
                 .assetTag("AST-MY-001")
                 .assetName("Surface Laptop 5")
                 .category("PC")
+                .ownerCompanyId(1L)
                 .status("IN_STOCK")
                 .build();
         assetService.createAsset(asset, 1L);
@@ -94,8 +117,8 @@ class MyAssetApiControllerTest extends BaseIntegrationTest {
         assetAssignmentMapper.insert(assignment);
 
         // 3. マイ資産一覧取得
-        mockMvc.perform(get("/api/my/assets")
-                        .with(user(username).roles("要員"))
+                mockMvc.perform(get("/api/my/assets")
+                        .with(asEngineer(user))
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
@@ -108,12 +131,17 @@ class MyAssetApiControllerTest extends BaseIntegrationTest {
         ));
 
         mockMvc.perform(post("/api/my/assets/report-lost")
-                        .with(user(username).roles("要員"))
+                        .with(asEngineer(user))
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(lostPayload))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.status").value("LOST"));
+    }
+
+    private RequestPostProcessor asEngineer(SysUser user) {
+        return authentication(TenantTestSecurity.authentication(
+                user.getId(), user.getUsername(), "default", "要員"));
     }
 }

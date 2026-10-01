@@ -13,20 +13,50 @@ import com.ses.mapper.LifecycleTaskMapper;
 import com.ses.mapper.LifecycleTemplateMapper;
 import com.ses.service.provider.ExternalAccountProviderClient;
 import com.ses.service.provider.impl.MockExternalAccountProviderClientImpl;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DisplayName("Asset Offboarding & Provider Integration Tests (退社ゲート・プロバイダ連携)")
 class AssetOffboardingServiceTest extends BaseIntegrationTest {
+
+    private static final String SCOPE_USERNAME = "asset-offboarding-scope-user";
+
+    @BeforeEach
+    void bindTenantAndSecurityContext() {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sys_user WHERE username = ? AND deleted_flag = 0",
+                Integer.class, SCOPE_USERNAME);
+        if (count == null || count == 0) {
+            jdbcTemplate.update("""
+                    INSERT INTO sys_user
+                        (tenant_id, username, password, real_name, role, status, deleted_flag)
+                    VALUES ('default', ?, 'N/A', '資産退社テスト', 'HR', 1, 0)
+                    """, SCOPE_USERNAME);
+        }
+        Long scopeUserId = jdbcTemplate.queryForObject(
+                "SELECT id FROM sys_user WHERE username = ? AND deleted_flag = 0",
+                Long.class, SCOPE_USERNAME);
+        jdbcTemplate.update("DELETE FROM t_user_organization WHERE user_id = ?", scopeUserId);
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L, scopeUserId);
+        TenantTestSecurity.bindAs(scopeUserId, SCOPE_USERNAME, "default", "HR");
+    }
+
+    @AfterEach
+    void clearTenantAndSecurityContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
 
     @Autowired
     private AssetOffboardingService assetOffboardingService;
@@ -42,6 +72,9 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
 
     @Autowired
     private ExternalAccountSystemMapper externalAccountSystemMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private LicenseAssignmentMapper licenseAssignmentMapper;
@@ -173,6 +206,8 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
         externalAccountSystemMapper.insert(system);
 
         ExternalAccountReference ref = ExternalAccountReference.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
                 .systemId(system.getId())
                 .accountIdentifier("dev9902@ses-test.jp")
                 .assigneeType("ENGINEER")
@@ -242,11 +277,13 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
                 .build();
         externalAccountSystemMapper.insert(system);
         ExternalAccountReference failed = ExternalAccountReference.builder()
+                .tenantId("default").legalEntityId(1L)
                 .systemId(system.getId()).accountIdentifier("poll-failed@ses-test.jp")
                 .assigneeType("ENGINEER").assigneeId(9910L)
                 .status("PENDING_CONFIRMATION").retryCount(0)
                 .nextRetryAt(LocalDate.now().atStartOfDay()).build();
         ExternalAccountReference confirmed = ExternalAccountReference.builder()
+                .tenantId("default").legalEntityId(1L)
                 .systemId(system.getId()).accountIdentifier("poll-confirmed@ses-test.jp")
                 .assigneeType("ENGINEER").assigneeId(9911L)
                 .status("PENDING_CONFIRMATION").retryCount(0)

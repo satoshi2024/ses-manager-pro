@@ -26,6 +26,9 @@ public class SysUser extends BaseEntity {
 
     private static final long serialVersionUID = 1L;
 
+    /** ユーザー母集団を資格期限通知のtenantへ固定する。 */
+    private String tenantId;
+
     /**
      * ユーザー名（ログインID）
      */

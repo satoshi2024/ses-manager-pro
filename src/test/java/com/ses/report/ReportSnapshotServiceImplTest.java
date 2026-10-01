@@ -2,6 +2,8 @@ package com.ses.report;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.dto.dashboard.DashboardSummaryDto;
+import com.ses.common.audit.ExecutionActorContext;
+import com.ses.dto.invoice.AgingReportDto;
 import com.ses.dto.report.ReportGenerationCommand;
 import com.ses.dto.report.ReportGenerationResult;
 import com.ses.dto.report.ReportRecipientPreviewResult;
@@ -11,6 +13,7 @@ import com.ses.entity.Engineer;
 import com.ses.entity.ReportSectionAttempt;
 import com.ses.entity.ReportSectionSnapshot;
 import com.ses.entity.ReportTemplateVersion;
+import com.ses.entity.SysUser;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ReportRunMapper;
@@ -26,6 +29,7 @@ import com.ses.service.SystemConfigService;
 import com.ses.service.UtilizationCalcService;
 import com.ses.service.UtilizationForecastService;
 import com.ses.service.accounting.AccountingTimezoneResolver;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.billing.CashFlowForecastService;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.report.impl.ReportSnapshotServiceImpl;
@@ -51,8 +55,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -81,6 +87,7 @@ class ReportSnapshotServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         templateVersionMapper = mock(ReportTemplateVersionMapper.class);
         runMapper = mock(ReportRunMapper.class);
         sectionAttemptMapper = mock(ReportSectionAttemptMapper.class);
@@ -112,7 +119,7 @@ class ReportSnapshotServiceImplTest {
         version.setTemplateId(2L);
         version.setStatus("PUBLISHED");
         version.setSectionConfigJson("{\"sections\":[\"sales\"]}");
-        when(templateVersionMapper.selectById(3L)).thenReturn(version);
+        when(templateVersionMapper.selectOne(any())).thenReturn(version);
         when(monthlyClosingService.isClosed("2026-08")).thenReturn(false);
         when(recipientPreviewService.preview(3L, YearMonth.of(2026, 8)))
                 .thenReturn(new ReportRecipientPreviewResult("preview-1", "APPROVED_SCOPE_CHECKED",
@@ -136,6 +143,7 @@ class ReportSnapshotServiceImplTest {
             currentRun.setId(10L);
             return 1;
         }).when(runMapper).insert(any(ReportRun.class));
+        when(runMapper.update(any(ReportRun.class), any())).thenReturn(1);
         when(sectionMapper.selectOne(any())).thenAnswer(invocation -> snapshots.values().stream()
                 .findFirst().orElse(null));
         doAnswer(invocation -> {
@@ -144,6 +152,7 @@ class ReportSnapshotServiceImplTest {
             snapshots.put(snapshot.getSectionKey(), snapshot);
             return 1;
         }).when(sectionMapper).insert(any(ReportSectionSnapshot.class));
+        when(sectionMapper.update(any(ReportSectionSnapshot.class), any())).thenReturn(1);
         when(sectionMapper.selectList(any())).thenAnswer(invocation -> new ArrayList<>(snapshots.values()));
 
         SecurityContextHolder.getContext().setAuthentication(
@@ -154,12 +163,13 @@ class ReportSnapshotServiceImplTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
     void 月末runは対象期間とAsiaTokyoを保存し同一retryでsnapshotを重複生成しない() {
         ReportGenerationCommand command = ReportGenerationCommand.manual(
-                3L, YearMonth.of(2026, 8), "速報");
+                3L, YearMonth.of(2026, 8), "速報", "preview-1");
 
         ReportGenerationResult first = service.generate(command);
         ReportGenerationResult retry = service.generate(command);
@@ -180,13 +190,13 @@ class ReportSnapshotServiceImplTest {
     @Test
     void 確定版は月次締め未完了なら生成しない() {
         assertThatThrownBy(() -> service.generate(ReportGenerationCommand.manual(
-                3L, YearMonth.of(2026, 8), "確定")))
+                3L, YearMonth.of(2026, 8), "確定", "preview-1")))
                 .hasMessageContaining("error.managementReport.closingRequired");
     }
 
     @Test
     void section失敗はpartialになり配布可能な成功runにしない() {
-        ReportTemplateVersion version = templateVersionMapper.selectById(3L);
+        ReportTemplateVersion version = templateVersionMapper.selectOne(any());
         version.setSectionConfigJson("{\"sections\":[\"sales\",\"gross-profit\"]}");
         reset(dashboardService);
         when(dashboardService.getSummary(anyInt())).thenThrow(new IllegalStateException("source failure"));
@@ -194,7 +204,7 @@ class ReportSnapshotServiceImplTest {
         when(sectionMapper.selectOne(any())).thenReturn(null);
 
         ReportGenerationResult result = service.generate(ReportGenerationCommand.manual(
-                3L, YearMonth.of(2026, 8), "速報"));
+                3L, YearMonth.of(2026, 8), "速報", "preview-1"));
 
         assertThat(result.getRun().getStatus()).isEqualTo("PARTIAL");
         assertThat(result.getSections()).hasSize(2)
@@ -207,7 +217,7 @@ class ReportSnapshotServiceImplTest {
         when(dashboardService.getSummary(anyInt())).thenThrow(new IllegalStateException("source failure"));
 
         ReportGenerationCommand command = ReportGenerationCommand.manual(
-                3L, YearMonth.of(2026, 8), "速報");
+                3L, YearMonth.of(2026, 8), "速報", "preview-1");
         service.generate(command);
         service.generate(command);
 
@@ -229,7 +239,7 @@ class ReportSnapshotServiceImplTest {
         when(sectionMapper.selectOne(any())).thenReturn(null);
 
         ReportGenerationResult result = service.generate(ReportGenerationCommand.manual(
-                        3L, YearMonth.of(2026, 8), "速報").forRegenerationOf(99L));
+                        3L, YearMonth.of(2026, 8), "速報", "preview-1").forRegenerationOf(99L));
 
         assertThat(result.isReused()).isFalse();
         assertThat(result.getRun().getRegenerationOfRunId()).isEqualTo(99L);
@@ -249,7 +259,7 @@ class ReportSnapshotServiceImplTest {
         when(scopeService.allowedInvoiceIds(any())).thenReturn(Set.of(50L));
 
         ReportGenerationResult result = service.generate(ReportGenerationCommand.manual(
-                3L, YearMonth.of(2026, 8), "速報"));
+                3L, YearMonth.of(2026, 8), "速報", "preview-1"));
 
         assertThat(result.getRun().getScopeOwnerType()).isEqualTo("ORGANIZATION");
         assertThat(result.getRun().getScopeOwnerId()).isEqualTo(7L);
@@ -267,15 +277,17 @@ class ReportSnapshotServiceImplTest {
         manager.setId(7L);
         manager.setRole("マネージャー");
         manager.setStatus(1);
-        when(userMapper.selectById(7L)).thenReturn(manager);
+        when(userMapper.selectByIdAndTenant(7L, "default")).thenReturn(manager);
         when(scopeService.allowedOrganizationIds(any())).thenReturn(Set.of(20L));
         when(scopeService.allowedDirectUserIds(any())).thenReturn(Set.of(21L));
         when(scopeService.allowedEngineerIds(any())).thenReturn(Set.of(22L));
         when(scopeService.allowedContractIds(any())).thenReturn(Set.of(23L));
         when(scopeService.allowedInvoiceIds(any())).thenReturn(Set.of(24L));
 
-        ReportGenerationResult result = service.generate(ReportGenerationCommand.scheduled(
-                3L, YearMonth.of(2026, 8), "速報", 5L, 7L));
+        ReportGenerationResult result = ExecutionActorContext.runAsSystem(
+                "report-principal-test", "SCHEDULER_POLL",
+                () -> service.generate(ReportGenerationCommand.scheduled(
+                        3L, YearMonth.of(2026, 8), "速報", 5L, 7L)));
 
         assertThat(result.getRun().getScopeOwnerId()).isEqualTo(7L);
         assertThat(result.getRun().getOrganizationScopeJson()).contains("\"organizationIds\":[20]");
@@ -284,26 +296,134 @@ class ReportSnapshotServiceImplTest {
     }
 
     @Test
+    void scheduledRunはprincipalがnullならadminへ昇格せず拒否する() {
+        assertThatThrownBy(() -> ExecutionActorContext.runAsSystem(
+                "report-null-principal-test", "SCHEDULER_POLL",
+                () -> service.generate(ReportGenerationCommand.scheduled(
+                        3L, YearMonth.of(2026, 8), "速報", 5L, null))))
+                .hasMessageContaining("error.managementReport.principalDenied");
+    }
+
+    @Test
+    void scheduledRunは存在しないprincipalを拒否する() {
+        when(userMapper.selectById(999L)).thenReturn(null);
+
+        assertThatThrownBy(() -> ExecutionActorContext.runAsSystem(
+                "report-invalid-principal-test", "SCHEDULER_POLL",
+                () -> service.generate(ReportGenerationCommand.scheduled(
+                        3L, YearMonth.of(2026, 8), "速報", 5L, 999L))))
+                .hasMessageContaining("error.managementReport.principalDenied");
+    }
+
+    @Test
+    void scheduledRunは無効化されたprincipalを拒否する() {
+        SysUser disabled = new SysUser();
+        disabled.setId(1000L);
+        disabled.setRole("管理者");
+        disabled.setStatus(0);
+        when(userMapper.selectById(1000L)).thenReturn(disabled);
+
+        assertThatThrownBy(() -> ExecutionActorContext.runAsSystem(
+                "report-disabled-principal-test", "SCHEDULER_POLL",
+                () -> service.generate(ReportGenerationCommand.scheduled(
+                        3L, YearMonth.of(2026, 8), "速報", 5L, 1000L))))
+                .hasMessageContaining("error.managementReport.principalDenied");
+    }
+
+    @Test
+    void scheduledRunは許可されないroleのprincipalを拒否する() {
+        SysUser sales = new SysUser();
+        sales.setId(1001L);
+        sales.setRole("営業");
+        sales.setStatus(1);
+        when(userMapper.selectById(1001L)).thenReturn(sales);
+
+        assertThatThrownBy(() -> ExecutionActorContext.runAsSystem(
+                "report-disallowed-role-test", "SCHEDULER_POLL",
+                () -> service.generate(ReportGenerationCommand.scheduled(
+                        3L, YearMonth.of(2026, 8), "速報", 5L, 1001L))))
+                .hasMessageContaining("error.managementReport.principalDenied");
+    }
+
+    @Test
     void 確定runの稼働率sectionはUtilizationCalcServiceの実績口径を使う() {
-        ReportTemplateVersion version = templateVersionMapper.selectById(3L);
+        ReportTemplateVersion version = templateVersionMapper.selectOne(any());
         version.setSectionConfigJson("{\"sections\":[\"utilization\"]}");
         when(monthlyClosingService.isClosed("2026-08")).thenReturn(true);
         when(scopeService.hasFullAccess()).thenReturn(true);
         Engineer engineer = new Engineer();
         engineer.setId(1L);
-        when(engineerMapper.selectList(any())).thenReturn(List.of(engineer));
-        when(contractMapper.selectList(any())).thenReturn(List.of(new Contract() {{ setEngineerId(1L); }}));
+        engineer.setTenantId("default");
+        when(engineerMapper.selectPopulationForTenant(eq("default"), any(), any(), any(), any()))
+                .thenReturn(List.of(engineer));
+        when(contractMapper.selectListForTenant(any(), eq("default")))
+                .thenReturn(List.of(new Contract() {{ setEngineerId(1L); }}));
         when(systemConfigService.getString(any(), any())).thenReturn("true");
         when(utilizationCalcService.calc(any(), any(), any(), any(Boolean.class)))
                 .thenReturn(new UtilizationCalcService.UtilizationSnapshot(8, 2, 10, 80.0));
 
         ReportGenerationResult result = service.generate(ReportGenerationCommand.manual(
-                3L, YearMonth.of(2026, 8), "確定"));
+                3L, YearMonth.of(2026, 8), "確定", "preview-1"));
 
         assertThat(result.getSections()).singleElement().satisfies(section -> {
             assertThat(section.getFactType()).isEqualTo("実績");
             assertThat(section.getCanonicalService()).isEqualTo("UtilizationCalcService");
             assertThat(section.getValueJson()).contains("80.0", "\"workingCount\":8");
         });
+        verify(engineerMapper).selectPopulationForTenant(eq("default"), any(), any(), any(), any());
+        verify(engineerMapper, never()).selectList(any());
+    }
+
+    @Test
+    void utilization母集はtenant境界のEngineerMapperだけを使う() {
+        ReportTemplateVersion version = templateVersionMapper.selectOne(any());
+        version.setSectionConfigJson("{\"sections\":[\"utilization\"]}");
+        when(monthlyClosingService.isClosed("2026-08")).thenReturn(true);
+        when(scopeService.hasFullAccess()).thenReturn(true);
+        Engineer engineer = new Engineer();
+        engineer.setId(1L);
+        engineer.setTenantId("default");
+        when(engineerMapper.selectPopulationForTenant(eq("default"), any(), any(), any(), any()))
+                .thenReturn(List.of(engineer));
+        when(contractMapper.selectListForTenant(any(), eq("default"))).thenReturn(List.of());
+        when(systemConfigService.getString(any(), any())).thenReturn("true");
+        when(utilizationCalcService.calc(any(), any(), any(), any(Boolean.class)))
+                .thenReturn(new UtilizationCalcService.UtilizationSnapshot(0, 1, 1, 0.0));
+
+        service.generate(ReportGenerationCommand.manual(3L, YearMonth.of(2026, 8), "確定", "preview-1"));
+
+        verify(engineerMapper).selectPopulationForTenant(eq("default"), any(), any(), any(), any());
+        verify(engineerMapper, never()).selectList(any());
+    }
+
+    @Test
+    void arAgingはInvoiceServiceのagingへ委譲しtenant無し全表経路を使わない() {
+        InvoiceService invoiceService = mock(InvoiceService.class);
+        service = new ReportSnapshotServiceImpl(templateVersionMapper, runMapper, sectionAttemptMapper, sectionMapper,
+                userMapper, scopeService, monthlyClosingService, dashboardService, utilizationCalcService,
+                mock(UtilizationForecastService.class), engineerMapper, contractMapper, systemConfigService,
+                mock(CashFlowForecastService.class), mock(ManagementAccountingService.class),
+                invoiceService, new ObjectMapper().findAndRegisterModules(), recipientPreviewService, timezoneResolver);
+        ReportTemplateVersion version = new ReportTemplateVersion();
+        version.setId(3L);
+        version.setTemplateId(2L);
+        version.setStatus("PUBLISHED");
+        version.setSectionConfigJson("{\"sections\":[\"ar-aging\"]}");
+        when(templateVersionMapper.selectOne(any())).thenReturn(version);
+        when(monthlyClosingService.isClosed("2026-08")).thenReturn(true);
+        AgingReportDto aging = new AgingReportDto();
+        aging.setAsOf(LocalDate.of(2026, 8, 31));
+        aging.setRows(List.of());
+        AgingReportDto.Row total = new AgingReportDto.Row();
+        aging.setTotal(total);
+        when(invoiceService.aging(any())).thenReturn(aging);
+
+        ReportGenerationResult result = service.generate(ReportGenerationCommand.manual(
+                3L, YearMonth.of(2026, 8), "確定", "preview-1"));
+
+        verify(invoiceService).aging(LocalDate.of(2026, 8, 31));
+        assertThat(result.getSections()).isNotEmpty();
+        assertThat(result.getSections().get(0).getSectionStatus()).isEqualTo("SUCCEEDED");
+        assertThat(result.getSections().get(0).getCanonicalService()).isEqualTo("InvoiceService");
     }
 }

@@ -39,6 +39,7 @@ public class TrainingCourseMasterServiceImpl implements TrainingCourseMasterServ
     @Override
     public List<TrainingCourseMasterView> list(boolean includeInactive) {
         LambdaQueryWrapper<TrainingCourse> query = new LambdaQueryWrapper<TrainingCourse>()
+                .eq(TrainingCourse::getTenantId, currentTenant())
                 .orderByAsc(TrainingCourse::getName).orderByAsc(TrainingCourse::getId);
         if (!includeInactive) {
             query.eq(TrainingCourse::getActiveFlag, 1);
@@ -53,11 +54,11 @@ public class TrainingCourseMasterServiceImpl implements TrainingCourseMasterServ
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public TrainingCourse create(TrainingCourseCommand command, Long actorUserId) {
+    public TrainingCourseMasterView create(TrainingCourseCommand command, Long actorUserId) {
         validate(command);
         List<Long> skillIds = validateSkillIds(command.requiredSkillIds());
         TrainingCourse course = new TrainingCourse();
-        course.setTenantId(defaultTenant(command.tenantId()));
+        course.setTenantId(tenantFor(command.tenantId()));
         copyFields(course, command);
         course.setActiveFlag(command.activeFlag() == null ? 1 : command.activeFlag());
         course.setVersion(0);
@@ -65,48 +66,75 @@ public class TrainingCourseMasterServiceImpl implements TrainingCourseMasterServ
         course.setUpdatedBy(actorUserId);
         courseMapper.insert(course);
         replaceSkills(course, skillIds);
-        return course;
+        return toView(course);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public TrainingCourse update(Long id, TrainingCourseCommand command, Long actorUserId) {
+    public TrainingCourseMasterView update(Long id, TrainingCourseCommand command, Long actorUserId) {
         validate(command);
+        requireExpectedVersion(command.version());
         List<Long> skillIds = validateSkillIds(command.requiredSkillIds());
-        TrainingCourse course = requireCourse(id);
-        if (command.version() != null && !Objects.equals(command.version(), course.getVersion())) {
+        String tenantId = currentTenant();
+        TrainingCourse course = requireCourseForUpdate(id, tenantId);
+        if (!Objects.equals(command.version(), course.getVersion())) {
+            throw BusinessException.of(409, "training.course.optimisticLock");
+        }
+        Integer activeFlag = command.activeFlag() == null ? course.getActiveFlag() : command.activeFlag();
+        int updated = courseMapper.updateForTenant(id, tenantId, command.version(), command.provider(),
+                command.name(), command.description(), command.costJpy(), command.periodDays(), command.capacity(),
+                activeFlag, actorUserId);
+        if (updated != 1) {
             throw BusinessException.of(409, "training.course.optimisticLock");
         }
         copyFields(course, command);
-        if (command.activeFlag() != null) {
-            course.setActiveFlag(command.activeFlag());
-        }
+        course.setActiveFlag(activeFlag);
         course.setUpdatedBy(actorUserId);
-        if (courseMapper.updateById(course) != 1) {
-            throw BusinessException.of(409, "training.course.optimisticLock");
-        }
+        course.setVersion(command.version() + 1);
         replaceSkills(course, skillIds);
-        return course;
+        return toView(course);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public TrainingCourse deactivate(Long id, Long actorUserId) {
-        TrainingCourse course = requireCourse(id);
-        course.setActiveFlag(0);
-        course.setUpdatedBy(actorUserId);
-        if (courseMapper.updateById(course) != 1) {
+    public TrainingCourseMasterView deactivate(Long id, Integer expectedVersion, Long actorUserId) {
+        requireExpectedVersion(expectedVersion);
+        String tenantId = currentTenant();
+        TrainingCourse course = requireCourseForUpdate(id, tenantId);
+        if (!Objects.equals(expectedVersion, course.getVersion())) {
             throw BusinessException.of(409, "training.course.optimisticLock");
         }
-        return course;
+        if (courseMapper.deactivateForTenant(id, tenantId, expectedVersion, actorUserId) != 1) {
+            throw BusinessException.of(409, "training.course.optimisticLock");
+        }
+        course.setActiveFlag(0);
+        course.setUpdatedBy(actorUserId);
+        course.setVersion(expectedVersion + 1);
+        return toView(course);
     }
 
     private TrainingCourse requireCourse(Long id) {
-        TrainingCourse course = id == null ? null : courseMapper.selectById(id);
+        String tenantId = currentTenant();
+        TrainingCourse course = id == null ? null : courseMapper.selectOne(new LambdaQueryWrapper<TrainingCourse>()
+                .eq(TrainingCourse::getId, id).eq(TrainingCourse::getTenantId, tenantId));
         if (course == null) {
             throw BusinessException.of(404, "training.course.notFound");
         }
         return course;
+    }
+
+    private TrainingCourse requireCourseForUpdate(Long id, String tenantId) {
+        TrainingCourse course = id == null ? null : courseMapper.selectForUpdateByIdForTenant(id, tenantId);
+        if (course == null) {
+            throw BusinessException.of(404, "training.course.notFound");
+        }
+        return course;
+    }
+
+    private void requireExpectedVersion(Integer expectedVersion) {
+        if (expectedVersion == null || expectedVersion < 0) {
+            throw BusinessException.of(400, "training.course.expectedVersionRequired");
+        }
     }
 
     private void validate(TrainingCourseCommand command) {
@@ -143,11 +171,10 @@ public class TrainingCourseMasterServiceImpl implements TrainingCourseMasterServ
     }
 
     private void replaceSkills(TrainingCourse course, List<Long> skillIds) {
-        courseSkillMapper.delete(new LambdaQueryWrapper<TrainingCourseSkill>()
-                .eq(TrainingCourseSkill::getCourseId, course.getId()));
+        courseSkillMapper.deleteByCourseForTenant(course.getTenantId(), course.getId());
         for (Long skillId : skillIds) {
             TrainingCourseSkill relation = new TrainingCourseSkill();
-            relation.setTenantId(defaultTenant(course.getTenantId()));
+            relation.setTenantId(tenantFor(course.getTenantId()));
             relation.setCourseId(course.getId());
             relation.setSkillId(skillId);
             relation.setRequiredFlag(1);
@@ -157,6 +184,7 @@ public class TrainingCourseMasterServiceImpl implements TrainingCourseMasterServ
 
     private TrainingCourseMasterView toView(TrainingCourse course) {
         List<TrainingCourseSkill> relations = courseSkillMapper.selectList(new LambdaQueryWrapper<TrainingCourseSkill>()
+                .eq(TrainingCourseSkill::getTenantId, course.getTenantId())
                 .eq(TrainingCourseSkill::getCourseId, course.getId())
                 .eq(TrainingCourseSkill::getRequiredFlag, 1)
                 .orderByAsc(TrainingCourseSkill::getSkillId));
@@ -174,12 +202,23 @@ public class TrainingCourseMasterServiceImpl implements TrainingCourseMasterServ
                     tag == null ? null : tag.getCategory(), relation.getTargetLevel(),
                     Integer.valueOf(1).equals(relation.getRequiredFlag()));
         }).toList();
-        return new TrainingCourseMasterView(course.getId(), course.getTenantId(), course.getProvider(), course.getName(),
+        return new TrainingCourseMasterView(course.getId(), course.getProvider(), course.getName(),
                 course.getDescription(), course.getCostJpy(), course.getPeriodDays(), course.getCapacity(),
                 course.getActiveFlag(), course.getVersion(), skills);
     }
 
-    private String defaultTenant(String tenantId) {
-        return StringUtils.hasText(tenantId) ? tenantId : "default";
+    private String tenantFor(String tenantId) {
+        String current = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        if (!StringUtils.hasText(current)) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        if (StringUtils.hasText(tenantId) && !current.equals(tenantId)) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        return current;
+    }
+
+    private String currentTenant() {
+        return tenantFor(null);
     }
 }

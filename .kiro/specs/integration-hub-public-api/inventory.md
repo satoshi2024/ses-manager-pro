@@ -258,6 +258,15 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 | command surface | disabled | なし | integration.command.* | 適用なし | NOT_APPLICABLE_UNDER_CURRENT_DECISION（approved command=0件） | DISABLED |
 | export | disabled | なし | 適用なし | 適用なし | NOT_APPLICABLE_UNDER_CURRENT_DECISION | DISABLED |
 
+公開ステータスコード契約（承認済み大文字ASCII enum）:
+
+- `availabilityStatus`: `AVAILABLE`, `UNAVAILABLE`, `UNKNOWN`
+- `project.status`: `OPEN`, `SELECTING`, `FILLED`, `CLOSED`, `UNKNOWN`
+- `contract-status.status`: `DRAFT`, `ACTIVE`, `COMPLETED`, `CANCELLED`, `UNKNOWN`
+- `contract-status.renewalStatus`: `CONTINUE`, `END`, `UNKNOWN`（未設定時はnull）
+- `invoice-status.status`: `UNSENT`, `SENT`, `PARTIALLY_PAID`, `PAID`, `UNKNOWN`
+- `invoice-status.settlementStatus`: `SETTLED`, `PARTIALLY_SETTLED`, `OUTSTANDING`, `UNKNOWN`
+
 明示的に公開しないdeny-list:
 
 - password、OAuth token、API key、TOTP/recovery code、暗号文、secret ref。

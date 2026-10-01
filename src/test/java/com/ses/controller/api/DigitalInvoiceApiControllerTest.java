@@ -7,9 +7,13 @@ import com.ses.entity.Invoice;
 import com.ses.entity.PeppolParticipant;
 import com.ses.service.CustomerService;
 import com.ses.service.DigitalInvoiceService;
+import com.ses.service.DocumentService;
 import com.ses.service.InvoiceService;
 import com.ses.service.PeppolParticipantService;
 import com.ses.service.invoice.InvoiceDeliveryDispatcher;
+import com.ses.test.TenantTestSecurity;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -17,6 +21,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +36,8 @@ import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -49,6 +56,9 @@ class DigitalInvoiceApiControllerTest {
     private MockMvc mockMvc;
 
     @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
     private InvoiceService invoiceService;
 
     @Autowired
@@ -62,6 +72,20 @@ class DigitalInvoiceApiControllerTest {
 
     @MockBean
     private InvoiceDeliveryDispatcher deliveryDispatcher;
+
+    @MockBean
+    private DocumentService documentService;
+
+    @BeforeEach
+    void tenant付き認証主体を設定する() {
+        TenantTestSecurity.bind("default");
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
+    }
+
+    @AfterEach
+    void tenant付き認証主体を破棄する() {
+        TenantTestSecurity.clear();
+    }
 
     @Test
     @WithMockUser(roles = "管理者")
@@ -167,6 +191,66 @@ class DigitalInvoiceApiControllerTest {
 
         mockMvc.perform(get("/api/digital-invoices/" + di.getId() + "/xml"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "マネージャー")
+    void invoiceIdがNULLのscope外受信XMLはDocumentServiceを呼ばず403にする() throws Exception {
+        DigitalInvoice inbound = new DigitalInvoice();
+        inbound.setDirection("RECEIVE");
+        inbound.setProfile("Standard");
+        inbound.setSpecificationVersion("1.1.3");
+        inbound.setMessageId("MSG-SCOPE-DENIED-NULL-INVOICE");
+        inbound.setProviderMessageId("PROVIDER-SCOPE-DENIED");
+        inbound.setStatus("PENDING_REVIEW");
+        inbound.setXmlDocumentId(8801L);
+        digitalInvoiceService.save(inbound);
+        doThrow(BusinessException.of(403, "error.accessDenied"))
+                .when(digitalInvoiceService).assertInboundAccessAllowed(inbound.getId());
+
+        mockMvc.perform(get("/api/digital-invoices/" + inbound.getId() + "/xml"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+        verify(documentService, never()).download(anyLong(), org.mockito.ArgumentMatchers.isNull());
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 管理者でも別tenant法人のpreview_dispatch_history_cancel_downloadを拒否する() throws Exception {
+        Customer foreignCustomer = customer("Foreign Tenant Co", "PDF");
+        Invoice foreignInvoice = invoice(foreignCustomer, "INV-FOREIGN-TENANT");
+        DigitalInvoice foreignDigital = new DigitalInvoice();
+        foreignDigital.setInvoiceId(foreignInvoice.getId());
+        foreignDigital.setDirection("SEND");
+        foreignDigital.setProfile("Standard");
+        foreignDigital.setSpecificationVersion("1.1.3");
+        foreignDigital.setMessageId("MSG-FOREIGN-" + foreignInvoice.getId());
+        foreignDigital.setStatus("QUEUED");
+        foreignDigital.setXmlDocumentId(8899L);
+        digitalInvoiceService.save(foreignDigital);
+
+        jdbcTemplate.update("UPDATE m_customer SET tenant_id='foreign-tenant', legal_entity_id=2 WHERE id=?",
+                foreignCustomer.getId());
+        jdbcTemplate.update("UPDATE t_invoice SET legal_entity_id=2 WHERE id=?", foreignInvoice.getId());
+        jdbcTemplate.update("UPDATE t_digital_invoice SET tenant_id='foreign-tenant', legal_entity_id=2 WHERE id=?",
+                foreignDigital.getId());
+
+        mockMvc.perform(get("/api/digital-invoices/preview/" + foreignInvoice.getId()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/digital-invoices/dispatch/" + foreignInvoice.getId()).with(csrf()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/digital-invoices/" + foreignInvoice.getId() + "/status-history"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/digital-invoices/" + foreignDigital.getId() + "/cancel").with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message", is("error.invoice.notFound")));
+        mockMvc.perform(get("/api/digital-invoices/" + foreignDigital.getId() + "/xml"))
+                .andExpect(status().isNotFound());
+
+        org.assertj.core.api.Assertions.assertThat(digitalInvoiceService.getById(foreignDigital.getId()).getStatus())
+                .isEqualTo("QUEUED");
+        verify(documentService, never()).download(org.mockito.ArgumentMatchers.eq(8899L),
+                org.mockito.ArgumentMatchers.isNull());
     }
 
     @Test

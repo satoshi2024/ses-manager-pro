@@ -6,12 +6,17 @@ import com.ses.entity.DigitalInvoiceEvent;
 import com.ses.service.DigitalInvoiceEventService;
 import com.ses.service.DigitalInvoiceService;
 import com.ses.service.invoice.provider.DigitalInvoiceProvider;
+import com.ses.test.DisableDefaultTenantTestContext;
+import com.ses.test.TenantTestSecurity;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,10 +33,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
+@DisableDefaultTenantTestContext
 class DigitalInvoiceWebhookApiControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private DigitalInvoiceService digitalInvoiceService;
@@ -45,6 +54,18 @@ class DigitalInvoiceWebhookApiControllerTest {
     @org.springframework.boot.test.mock.mockito.MockBean
     private com.ses.service.DocumentService documentService;
 
+    @BeforeEach
+    void setUpTenantScope() {
+        TenantTestSecurity.bindAs("default", "管理者");
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
+        TenantTestSecurity.clear();
+    }
+
+    @AfterEach
+    void clearTenantScope() {
+        TenantTestSecurity.clear();
+    }
+
     @Test
     void 有効な署名のWebhookを受け付ける() throws Exception {
         DigitalInvoice di = new DigitalInvoice();
@@ -55,7 +76,8 @@ class DigitalInvoiceWebhookApiControllerTest {
         di.setMessageId("MSG-1");
         di.setProviderMessageId("provider-msg-1");
         di.setStatus("SENT");
-        digitalInvoiceService.save(di);
+        scope(di);
+        saveWithTenantContext(di);
 
         String json = "{\"messageId\":\"provider-msg-1\", \"status\":\"DELIVERED\", \"eventId\":\"evt-1\"}";
 
@@ -87,7 +109,8 @@ class DigitalInvoiceWebhookApiControllerTest {
         di.setMessageId("MSG-2");
         di.setProviderMessageId("provider-msg-2");
         di.setStatus("SENT");
-        digitalInvoiceService.save(di);
+        scope(di);
+        saveWithTenantContext(di);
 
         String json = "{\"messageId\":\"provider-msg-2\", \"status\":\"DELIVERED\", \"eventId\":\"evt-2\"}";
 
@@ -120,7 +143,8 @@ class DigitalInvoiceWebhookApiControllerTest {
         di.setMessageId("MSG-3");
         di.setProviderMessageId("provider-msg-3");
         di.setStatus("SENT");
-        digitalInvoiceService.save(di);
+        scope(di);
+        saveWithTenantContext(di);
 
         String json = "{\"messageId\":\"provider-msg-3\", \"status\":\"DELIVERED\", \"eventId\":\"evt-3\"}";
 
@@ -146,24 +170,13 @@ class DigitalInvoiceWebhookApiControllerTest {
         archived.setId(9001L);
         when(documentService.registerReceived(any(), any())).thenReturn(archived);
 
-        com.ses.entity.PeppolParticipant pp = new com.ses.entity.PeppolParticipant();
-        pp.setOwnerType("BP");
-        pp.setOwnerId(1L);
-        pp.setSchemeId("0188");
-        pp.setParticipantId("1234567890123");
-        pp.setProvider("FAST_ACCOUNTING");
-        pp.setStatus("VERIFIED");
-        pp.setVerifiedAt(java.time.LocalDateTime.now());
-
-        org.springframework.context.ApplicationContext ctx =
-            org.springframework.web.context.support.WebApplicationContextUtils.getRequiredWebApplicationContext(
-                mockMvc.getDispatcherServlet().getServletContext());
-        ctx.getBean(com.ses.service.PeppolParticipantService.class).save(pp);
+        registerInboundParticipants("receiver-123", "1234567890123");
 
         String xmlContent = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice>"
                 + "<ID>INV-999</ID>"
                 + "<IssueDate>2026-08-01</IssueDate>"
-                + "<EndpointID schemeID=\"0188\">1234567890123</EndpointID>"
+                + party("AccountingSupplierParty", "1234567890123")
+                + party("AccountingCustomerParty", "receiver-123")
                 + "<LegalMonetaryTotal><TaxInclusiveAmount>1100</TaxInclusiveAmount></LegalMonetaryTotal>"
                 + "</Invoice>";
         String payload = "{\"status\": \"RECEIVED\", \"messageId\": \"msg-in-1\", \"eventId\": \"ev-in-1\", \"eventAt\": \"2026-08-20T12:00:00Z\", \"xmlContent\": \""+ xmlContent.replace("\"", "\\\"") +"\"}";
@@ -190,10 +203,13 @@ class DigitalInvoiceWebhookApiControllerTest {
         com.ses.entity.Document archived = new com.ses.entity.Document();
         archived.setId(9002L);
         when(documentService.registerReceived(any(), any())).thenReturn(archived);
+        registerInboundParticipants("receiver-dup", "supplier-dup");
 
         String xmlContent = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice>"
                 + "<ID>INV-888</ID>"
                 + "<IssueDate>2026-08-01</IssueDate>"
+                + party("AccountingSupplierParty", "supplier-dup")
+                + party("AccountingCustomerParty", "receiver-dup")
                 + "<LegalMonetaryTotal><TaxInclusiveAmount>500</TaxInclusiveAmount></LegalMonetaryTotal>"
                 + "</Invoice>";
         String payload = "{\"status\": \"RECEIVED\", \"messageId\": \"msg-dup\", \"eventId\": \"ev-dup\", \"eventAt\": \"2026-08-20T12:00:00Z\", \"xmlContent\": \""+ xmlContent.replace("\"", "\\\"") +"\"}";
@@ -215,5 +231,53 @@ class DigitalInvoiceWebhookApiControllerTest {
                 .count();
 
         assertEquals(1, count, "Should not create duplicate DigitalInvoice on duplicate webhook");
+    }
+
+    private void registerInboundParticipants(String receiverId, String supplierId) {
+        TenantTestSecurity.bindAs("default", "管理者");
+        try {
+            com.ses.service.PeppolParticipantService service =
+                    org.springframework.web.context.support.WebApplicationContextUtils
+                            .getRequiredWebApplicationContext(mockMvc.getDispatcherServlet().getServletContext())
+                            .getBean(com.ses.service.PeppolParticipantService.class);
+            service.save(participant("ORGANIZATION", 1L, receiverId));
+            service.save(participant("BP_COMPANY", 2L, supplierId));
+        } finally {
+            TenantTestSecurity.clear();
+        }
+    }
+
+    private com.ses.entity.PeppolParticipant participant(String ownerType, Long ownerId, String participantId) {
+        com.ses.entity.PeppolParticipant participant = new com.ses.entity.PeppolParticipant();
+        participant.setOwnerType(ownerType);
+        participant.setOwnerId(ownerId);
+        participant.setSchemeId("0188");
+        participant.setParticipantId(participantId);
+        participant.setProvider("FAST_ACCOUNTING");
+        participant.setStatus("VERIFIED");
+        participant.setVerifiedAt(java.time.LocalDateTime.now());
+        return participant;
+    }
+
+    private String party(String partyName, String participantId) {
+        return "<" + partyName + "><Party><EndpointID schemeID=\"0188\">"
+                + participantId + "</EndpointID></Party></" + partyName + ">";
+    }
+
+    private void scope(DigitalInvoice invoice) {
+        invoice.setTenantId("default");
+        invoice.setLegalEntityId(1L);
+        invoice.setActorType("PROVIDER");
+        invoice.setConfirmationSource("PROVIDER_CALLBACK");
+        invoice.setHumanUserId(null);
+    }
+
+    private void saveWithTenantContext(DigitalInvoice invoice) {
+        TenantTestSecurity.bindAs("default", "管理者");
+        try {
+            digitalInvoiceService.save(invoice);
+        } finally {
+            TenantTestSecurity.clear();
+        }
     }
 }

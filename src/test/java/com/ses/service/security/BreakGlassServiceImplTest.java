@@ -9,7 +9,11 @@ import com.ses.mapper.BreakGlassIncidentMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.security.impl.BreakGlassServiceImpl;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.config.LoginUser;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import jakarta.servlet.DispatcherType;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -43,13 +47,22 @@ class BreakGlassServiceImplTest {
     private final Clock clock = Clock.fixed(Instant.parse("2026-07-29T12:00:00Z"), ZoneOffset.UTC);
     private BreakGlassServiceImpl service;
 
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
+    }
+
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         properties.setBreakGlassLoginEnabled(true);
         properties.setBreakGlassUsernames(Set.of("BG-01", "BG-02"));
         when(auditMapper.insert(any(com.ses.entity.AuditLog.class))).thenReturn(1);
         when(incidentMapper.updateById(any(BreakGlassIncident.class))).thenReturn(1);
         when(userMapper.selectById(any())).thenAnswer(invocation -> admin(invocation.getArgument(0)));
+        when(userMapper.selectByIdAndTenant(any(), eq("default")))
+                .thenAnswer(invocation -> admin(invocation.getArgument(0)));
+        when(userMapper.selectByUsername(any())).thenReturn(admin(1L));
         service = new BreakGlassServiceImpl(incidentMapper, userMapper, auditMapper,
                 sessionService, notificationService, properties, clock);
     }
@@ -104,20 +117,53 @@ class BreakGlassServiceImplTest {
     void incident期限切れは既存sessionを即時失効する() {
         BreakGlassIncident incident = active();
         incident.setEnabledUntil(java.time.LocalDateTime.now(clock));
-        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(incident);
         MockHttpServletRequest request = boundRequest("dashboard.view");
-        var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
+        var authentication = breakGlassAuthentication();
 
         assertEquals(BreakGlassService.BreakGlassDecision.REVOKE, service.validateBoundSession(request, authentication));
         verify(sessionService).revokeCurrent(request, authentication, "BREAK_GLASS_INCIDENT_EXPIRED");
     }
 
     @Test
+    void tenant欠落のbreakGlass主体は認証前scopeで拒否する() {
+        BreakGlassIncident incident = active();
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(incident);
+        SysUser user = admin(1L);
+        user.setUsername("BG-01");
+        user.setTenantId(null);
+        var authorities = java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者"));
+        var authentication = new UsernamePasswordAuthenticationToken(new LoginUser(user, authorities), "n/a", authorities);
+
+        assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE,
+                service.validateBoundSession(boundRequest("dashboard.view"), authentication));
+        verifyNoInteractions(incidentMapper);
+    }
+
+    @Test
+    void incidentと認証主体のtenantが不一致ならscope拒否する() {
+        BreakGlassIncident incident = active();
+        incident.setTenantId("tenant-a");
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(incident);
+
+        assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE,
+                service.validateBoundSession(boundRequest("dashboard.view"), breakGlassAuthentication()));
+    }
+
+    @Test
+    void OIDC設定tenantとbreakGlass主体が不一致ならscope拒否する() {
+        properties.setTenantId("tenant-a");
+        assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE,
+                service.validateBoundSession(boundRequest("dashboard.view"), breakGlassAuthentication()));
+        verifyNoInteractions(incidentMapper);
+    }
+
+    @Test
     void 承認scope外のactionはDENY_SCOPEを返しsessionは維持する() {
         BreakGlassIncident incident = active();
-        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(incident);
         MockHttpServletRequest request = boundRequest("invoice.view");
-        var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
+        var authentication = breakGlassAuthentication();
 
         assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE, service.validateBoundSession(request, authentication));
         verifyNoInteractions(sessionService);
@@ -126,11 +172,11 @@ class BreakGlassServiceImplTest {
     @Test
     void dashboardだけ承認されたsessionは管理者MfaResetを実行できない() {
         BreakGlassIncident incident = active();
-        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(incident);
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", "/api/security/mfa/123/reset");
         request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
-        var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
+        var authentication = breakGlassAuthentication();
 
         assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE, service.validateBoundSession(request, authentication));
         verifyNoInteractions(sessionService);
@@ -139,11 +185,11 @@ class BreakGlassServiceImplTest {
     @Test
     void 本人MfaStatusはincidentScope外でも認証継続のため許可する() {
         BreakGlassIncident incident = active();
-        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(incident);
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "GET", "/api/security/mfa/status");
         request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
-        var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
+        var authentication = breakGlassAuthentication();
 
         assertEquals(BreakGlassService.BreakGlassDecision.ALLOW, service.validateBoundSession(request, authentication));
     }
@@ -151,10 +197,10 @@ class BreakGlassServiceImplTest {
     @Test
     void MfaPageと同じUriでも誤ったmethodはscope免除しない() {
         BreakGlassIncident incident = active();
-        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(incident);
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/mfa/setup");
         request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
-        var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
+        var authentication = breakGlassAuthentication();
 
         assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE, service.validateBoundSession(request, authentication));
         verifyNoInteractions(sessionService);
@@ -162,8 +208,8 @@ class BreakGlassServiceImplTest {
 
     @Test
     void 安全methodの静的resourceはincident検証後にscope判定をskipする() {
-        when(incidentMapper.selectById(10L)).thenReturn(active());
-        var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(active());
+        var authentication = breakGlassAuthentication();
 
         for (String uri : java.util.List.of(
                 "/css/common.css", "/js/common.js", "/lib/bootstrap/bootstrap.min.js",
@@ -181,10 +227,10 @@ class BreakGlassServiceImplTest {
 
     @Test
     void 静的resourceと同じUriでも安全でないmethodはscope違反にする() {
-        when(incidentMapper.selectById(10L)).thenReturn(active());
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(active());
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/css/common.css");
         request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
-        var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
+        var authentication = breakGlassAuthentication();
 
         assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE, service.validateBoundSession(request, authentication));
         verifyNoInteractions(sessionService);
@@ -192,8 +238,8 @@ class BreakGlassServiceImplTest {
 
     @Test
     void 内部errorDispatchだけscope判定をskipし直接error要求は拒否する() {
-        when(incidentMapper.selectById(10L)).thenReturn(active());
-        var authentication = new UsernamePasswordAuthenticationToken("BG-01", "n/a");
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(active());
+        var authentication = breakGlassAuthentication();
         MockHttpServletRequest dispatch = new MockHttpServletRequest("GET", "/error");
         dispatch.setDispatcherType(DispatcherType.ERROR);
         dispatch.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
@@ -210,13 +256,13 @@ class BreakGlassServiceImplTest {
     void 管理者MfaResetは独立actionが明示承認された場合だけ許可する() {
         BreakGlassIncident incident = active();
         incident.setAllowedActions("mfa.reset");
-        when(incidentMapper.selectById(10L)).thenReturn(incident);
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(incident);
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", "/api/security/mfa/123/reset");
         request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
 
         assertEquals(BreakGlassService.BreakGlassDecision.ALLOW, service.validateBoundSession(request,
-                new UsernamePasswordAuthenticationToken("BG-01", "n/a")));
+                breakGlassAuthentication()));
     }
 
     private BreakGlassIncident pending() {
@@ -253,6 +299,15 @@ class BreakGlassServiceImplTest {
         user.setId(id);
         user.setRole("管理者");
         user.setStatus(1);
+        user.setTenantId("default");
         return user;
+    }
+
+    private UsernamePasswordAuthenticationToken breakGlassAuthentication() {
+        SysUser user = admin(1L);
+        user.setUsername("BG-01");
+        var authorities = java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者"));
+        LoginUser principal = new LoginUser(user, authorities);
+        return new UsernamePasswordAuthenticationToken(principal, "n/a", authorities);
     }
 }

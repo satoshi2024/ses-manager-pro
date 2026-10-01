@@ -9,6 +9,8 @@ import com.ses.entity.SalesOrder;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.QuotationMapper;
 import com.ses.service.SalesOrderService;
+import com.ses.test.DisableDefaultLegalEntityTestFixture;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,6 +39,8 @@ import static org.junit.jupiter.api.Assertions.*;
 // Contractエンティティの全カラムSELECTに耐える完全スキーマを用意する
 // （共有replayスキーマはrenewed_from_contract_id等が無いため、既存testと同じ@Sql方式を使う）。
 @Sql(scripts = "/sql/engineer-schema-h2.sql")
+@DisableDefaultLegalEntityTestFixture
+@com.ses.test.EnableDefaultTenantTestContext
 class SalesOrderQuotationContractIntegrationTest {
 
     @Autowired private SalesOrderService orderService;
@@ -53,18 +57,15 @@ class SalesOrderQuotationContractIntegrationTest {
     @BeforeEach
     void setUp() {
         String suffix = "-" + System.nanoTime();
-        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, deleted_flag) VALUES (?, 'B', 0)", "F2顧客" + suffix);
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, legalEntityId);
+        jdbcTemplate.update("INSERT INTO m_customer (tenant_id, legal_entity_id, company_name, trust_level, deleted_flag) VALUES ('default', ?, ?, 'B', 0)", legalEntityId, "F2顧客" + suffix);
         customerId = jdbcTemplate.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, "F2顧客" + suffix);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')", "F2要員A" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, legal_entity_id, full_name, employment_type, status) VALUES ('default', ?, ?, '正社員', 'Bench')", legalEntityId, "F2要員A" + suffix);
         engineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "F2要員A" + suffix);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')", "F2要員B" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (tenant_id, legal_entity_id, full_name, employment_type, status) VALUES ('default', ?, ?, '正社員', 'Bench')", legalEntityId, "F2要員B" + suffix);
         engineerId2 = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "F2要員B" + suffix);
-        jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) VALUES (?, ?, '募集中')", "F2案件" + suffix, customerId);
+        jdbcTemplate.update("INSERT INTO t_project (legal_entity_id, project_name, customer_id, status) VALUES (?, ?, ?, '募集中')", legalEntityId, "F2案件" + suffix, customerId);
         projectId = jdbcTemplate.queryForObject("SELECT id FROM t_project WHERE project_name = ?", Long.class, "F2案件" + suffix);
-        jdbcTemplate.update("INSERT INTO m_organization_unit "
-                        + "(legal_entity_id, code, name, type, valid_from, status, deleted_flag) "
-                        + "VALUES (?, 'F2-LEGAL', ?, '会社', ?, '有効', 0)",
-                legalEntityId, "F2テスト法人" + suffix, LocalDate.of(2020, 1, 1));
     }
 
     private Quotation newQuotation(String title, BigDecimal unitPrice, BigDecimal settlementMin, BigDecimal settlementMax) {

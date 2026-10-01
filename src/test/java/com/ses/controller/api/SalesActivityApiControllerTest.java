@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,10 +49,15 @@ public class SalesActivityApiControllerTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private Customer testCustomer;
 
     @BeforeEach
     void setUp() {
+        com.ses.test.TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
+        com.ses.test.TenantTestSecurity.bind("default");
         testCustomer = new Customer();
         testCustomer.setCompanyName("Test Company");
         customerService.save(testCustomer);
