@@ -12,6 +12,12 @@ public interface LifecycleCaseMapper extends BaseMapper<LifecycleCase> {
     @Select("SELECT * FROM t_lifecycle_case WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     LifecycleCase selectByIdForUpdate(@Param("id") Long id);
 
+    @Select("SELECT * FROM t_lifecycle_case WHERE id = #{id} AND tenant_id = #{tenantId} AND deleted_flag = 0")
+    LifecycleCase selectByIdAndTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    @Select("SELECT * FROM t_lifecycle_case WHERE id = #{id} AND tenant_id = #{tenantId} AND deleted_flag = 0 FOR UPDATE")
+    LifecycleCase selectByIdForUpdateAndTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
     @Select("SELECT l.* FROM t_lifecycle_case l "
             + "INNER JOIN t_engineer_certification c ON c.engineer_id = l.engineer_id "
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
@@ -22,4 +28,7 @@ public interface LifecycleCaseMapper extends BaseMapper<LifecycleCase> {
 
     @Select("SELECT MAX(case_no) FROM t_lifecycle_case WHERE case_no LIKE CONCAT(#{prefix}, '%')")
     String selectMaxCaseNoIncludingDeleted(@Param("prefix") String prefix);
+
+    @Select("SELECT MAX(case_no) FROM t_lifecycle_case WHERE case_no LIKE CONCAT(#{prefix}, '%') AND tenant_id = #{tenantId}")
+    String selectMaxCaseNoIncludingDeletedByTenant(@Param("prefix") String prefix, @Param("tenantId") String tenantId);
 }

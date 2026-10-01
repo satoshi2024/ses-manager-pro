@@ -9,9 +9,11 @@ import com.ses.dto.lifecycle.LifecycleTemplateTaskDto;
 import com.ses.entity.LifecycleTemplate;
 import com.ses.entity.LifecycleTemplateTask;
 import com.ses.entity.LifecycleTemplateTaskDep;
+import com.ses.entity.SysUser;
 import com.ses.mapper.LifecycleTemplateMapper;
 import com.ses.mapper.LifecycleTemplateTaskDepMapper;
 import com.ses.mapper.LifecycleTemplateTaskMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.lifecycle.LifecycleDagValidator;
 import com.ses.service.lifecycle.LifecycleTemplateService;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +38,7 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     private final LifecycleTemplateTaskMapper templateTaskMapper;
     private final LifecycleTemplateTaskDepMapper templateTaskDepMapper;
     private final LifecycleDagValidator dagValidator;
+    private final SysUserMapper sysUserMapper;
 
     @Override
     public LifecycleTemplate findActiveByTypeAndDate(String templateType, LocalDate asOf) {
@@ -145,6 +148,7 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     @Override
     @Transactional(rollbackFor = Exception.class)
     public LifecycleTemplateDto createTemplate(LifecycleTemplateDto dto, Long userId) {
+        requireTemplateManager(userId);
         dagValidator.validateDtoDag(dto.getTasks());
 
         Integer maxVer = templateMapper.selectMaxVersionNo(dto.getTemplateType());
@@ -176,6 +180,7 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     @Override
     @Transactional(rollbackFor = Exception.class)
     public LifecycleTemplateDto updateTemplate(Long id, LifecycleTemplateDto dto, Long userId) {
+        requireTemplateManager(userId);
         LifecycleTemplate existing = templateMapper.selectById(id);
         if (existing == null) {
             throw BusinessException.of(404, "error.lifecycle.templateNotFound", "テンプレートが見つかりません");
@@ -231,6 +236,10 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void toggleStatus(Long id, String status, Long userId) {
+        requireTemplateManager(userId);
+        if (!"ACTIVE".equals(status) && !"INACTIVE".equals(status)) {
+            throw BusinessException.of(400, "error.lifecycle.invalidTemplateStatus");
+        }
         LifecycleTemplate entity = templateMapper.selectById(id);
         if (entity == null) {
             throw BusinessException.of(404, "error.lifecycle.templateNotFound", "テンプレートが見つかりません");
@@ -238,6 +247,14 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
         entity.setStatus(status);
         entity.setUpdatedBy(userId);
         templateMapper.updateById(entity);
+    }
+
+    private void requireTemplateManager(Long userId) {
+        SysUser user = userId == null ? null : sysUserMapper.selectById(userId);
+        if (user == null || user.getStatus() == null || user.getStatus() != 1
+                || !("管理者".equals(user.getRole()) || "HR".equals(user.getRole()))) {
+            throw BusinessException.of(403, "error.lifecycle.templateMutationDenied");
+        }
     }
 
     private void saveTasksAndDeps(Long templateId, List<LifecycleTemplateTaskDto> taskDtos) {
