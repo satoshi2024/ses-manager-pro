@@ -83,6 +83,7 @@ public final class ImportValidationService {
             }
             case CONTRACT -> {
                 allow(row, "status", CONTRACT_STATUS, findings);
+                required(row, "startDate", findings);
                 date(row, "startDate", findings); date(row, "endDate", findings);
                 dateRange(row, "startDate", "endDate", findings);
                 length(row, "contractType", 50, findings); length(row, "remarks", 4000, findings);
@@ -98,8 +99,27 @@ public final class ImportValidationService {
         if (row.entity() == ImportEntity.PROJECT) resolve(row, context, "customerExternalKey", ReferenceType.CUSTOMER, findings);
         if (row.entity() == ImportEntity.PROPOSAL) {
             resolve(row, context, "engineerExternalKey", ReferenceType.ENGINEER, findings);
-            resolve(row, context, "projectExternalKey", ReferenceType.PROJECT, findings);
-            resolveOptional(row, context, "positionExternalKey", ReferenceType.POSITION, findings);
+            ReferenceTarget project = resolve(row, context, "projectExternalKey", ReferenceType.PROJECT, findings);
+            FieldValue<String> positionKey = field(row, "positionExternalKey");
+            ReferenceTarget position = resolveOptional(row, context, "positionExternalKey", ReferenceType.POSITION, findings);
+            if (positionKey.presence() == FieldValue.Presence.VALUE && !positionKey.value().isBlank()) {
+                if (project == null || position == null) {
+                    add(findings, row.metadata(), "RELATIONSHIP_UNVERIFIABLE", "positionとprojectの所属関係を検証できません");
+                } else {
+                    String positionProject = position.relationKeys().get("projectExternalKey");
+                    if (positionProject == null) {
+                        add(findings, row.metadata(), "RELATIONSHIP_UNVERIFIABLE", "positionのproject所属を検証できません");
+                    } else {
+                        try {
+                            if (!ExternalKeyNormalizer.normalize(positionProject).equals(project.externalKey())) {
+                                add(findings, row.metadata(), "RELATIONSHIP_MISMATCH", "positionが指定projectに所属していません");
+                            }
+                        } catch (IllegalArgumentException invalidRelationKey) {
+                            add(findings, row.metadata(), "RELATIONSHIP_UNVERIFIABLE", "positionのproject externalKeyが不正です");
+                        }
+                    }
+                }
+            }
         }
         if (row.entity() == ImportEntity.CONTRACT) {
             ReferenceTarget customer = resolve(row, context, "customerExternalKey", ReferenceType.CUSTOMER, findings);
@@ -161,12 +181,13 @@ public final class ImportValidationService {
         }
     }
 
-    private static void resolveOptional(CanonicalImportRow row, ValidationContext context, String fieldName,
-                                        ReferenceType referenceType, List<ImportFinding> findings) {
+    private static ReferenceTarget resolveOptional(CanonicalImportRow row, ValidationContext context, String fieldName,
+                                                   ReferenceType referenceType, List<ImportFinding> findings) {
         FieldValue<String> value = field(row, fieldName);
         if (value.presence() == FieldValue.Presence.VALUE && !value.value().isBlank()) {
-            resolve(row, context, fieldName, referenceType, findings);
+            return resolve(row, context, fieldName, referenceType, findings);
         }
+        return null;
     }
 
     private static void required(CanonicalImportRow row, String name, List<ImportFinding> findings) {

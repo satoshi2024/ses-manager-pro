@@ -91,9 +91,36 @@ class ImportValidationServiceTest {
     }
 
     @Test
+    void contractStartDateIsRequiredForBlankAndExplicitNullButAcceptsIsoDate() throws Exception {
+        for (String cell : List.of("", "   ", "\\N")) {
+            CanonicalImportRow contract = contractWithStartDate(cell);
+            assertTrue(validator.validate(contract, context(null), new ImportValidationSession()).findings().stream()
+                    .anyMatch(f -> f.code().equals("FIELD_REQUIRED")), "cell=" + cell);
+        }
+        CanonicalImportRow valid = contractWithStartDate("2026-01-01");
+        assertFalse(validator.validate(valid, context(null), new ImportValidationSession()).findings().stream()
+                .anyMatch(f -> f.code().equals("FIELD_REQUIRED") || f.code().equals("DATE_INVALID")));
+    }
+
+    @Test
+    void proposalPositionMustBelongToResolvedProjectAndUnknownRelationFailsClosed() throws Exception {
+        CanonicalImportRow proposal = CanonicalRowFactory.create(ImportEntity.PROPOSAL,
+                parse(ImportEntity.PROPOSAL, "externalKey,engineerExternalKey,projectExternalKey,positionExternalKey\nPR-SYN-2,E-SYN-1,P-SYN-1,POS-SYN-1\n").get(0));
+        assertFalse(validator.validate(proposal, contextWithPosition("P-SYN-1"), new ImportValidationSession()).findings().stream()
+                .anyMatch(f -> f.code().startsWith("RELATIONSHIP_")));
+        assertTrue(validator.validate(proposal, contextWithPosition("P-SYN-OTHER"), new ImportValidationSession()).findings().stream()
+                .anyMatch(f -> f.code().equals("RELATIONSHIP_MISMATCH")));
+        assertTrue(validator.validate(proposal, contextWithPosition(null), new ImportValidationSession()).findings().stream()
+                .anyMatch(f -> f.code().equals("RELATIONSHIP_UNVERIFIABLE")));
+    }
+
+    @Test
     void jpyIsExactIntegerNoSilentRoundingOrEmptyToZero() {
         assertEquals(new BigDecimal("12"), ImportAmountParser.parse(FieldValue.of("12")).value());
+        assertEquals(new BigDecimal("12"), ImportAmountParser.parse(FieldValue.of("00012.000")).value());
         assertEquals("AMOUNT_INVALID_OR_FRACTIONAL_YEN", ImportAmountParser.parse(FieldValue.of("12.5")).excludedReason());
+        assertEquals("AMOUNT_INVALID_OR_FRACTIONAL_YEN", ImportAmountParser.parse(FieldValue.of("1E100000000")).excludedReason());
+        assertEquals("AMOUNT_INVALID_OR_FRACTIONAL_YEN", ImportAmountParser.parse(FieldValue.of("-1E-100000000")).excludedReason());
         assertEquals("AMOUNT_NEGATIVE_NOT_ALLOWED", ImportAmountParser.parse(FieldValue.of("-12")).excludedReason());
         assertEquals("AMOUNT_UNKNOWN_OR_EMPTY", ImportAmountParser.parse(FieldValue.of("")).excludedReason());
         assertEquals("AMOUNT_UNKNOWN_OR_EMPTY", ImportAmountParser.parse(FieldValue.explicitNull()).excludedReason());
@@ -148,6 +175,11 @@ class ImportValidationServiceTest {
         return rows;
     }
 
+    private static CanonicalImportRow contractWithStartDate(String startDate) throws Exception {
+        return CanonicalRowFactory.create(ImportEntity.CONTRACT,
+                parse(ImportEntity.CONTRACT, "externalKey,customerExternalKey,engineerExternalKey,projectExternalKey,startDate,sellingPrice,costPrice\nCT-SYN-DATE,C-SYN-1,E-SYN-1,P-SYN-1," + startDate + ",100,80\n").get(0));
+    }
+
     private static ValidationContext context(String projectCustomer) { return context(projectCustomer, LookupStatus.UNIQUE_ACTIVE); }
     private static ValidationContext context(String projectCustomer, LookupStatus override) {
         return new ValidationContext("tenant-synthetic", "legal-synthetic", (type, tenant, legal, key) -> {
@@ -156,6 +188,18 @@ class ImportValidationServiceTest {
                     ? Map.of("customerExternalKey", projectCustomer == null ? "C-SYN-1" : projectCustomer) : Map.of();
             ReferenceTarget target = new ReferenceTarget("id-" + key, tenant, legal, key, "version-1", true, relation);
             return new ReferenceLookup(override, List.of(target));
+        });
+    }
+
+    private static ValidationContext contextWithPosition(String positionProject) {
+        return new ValidationContext("tenant-synthetic", "legal-synthetic", (type, tenant, legal, key) -> {
+            Map<String, String> relation = switch (type) {
+                case PROJECT -> Map.of("customerExternalKey", "C-SYN-1");
+                case POSITION -> positionProject == null ? Map.of() : Map.of("projectExternalKey", positionProject);
+                default -> Map.of();
+            };
+            return new ReferenceLookup(LookupStatus.UNIQUE_ACTIVE,
+                    List.of(new ReferenceTarget("id-" + key, tenant, legal, key, "version-1", true, relation)));
         });
     }
 }

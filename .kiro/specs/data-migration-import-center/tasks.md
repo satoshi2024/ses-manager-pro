@@ -100,6 +100,10 @@ CSV parser（XLSX拒否）とentityごとのcanonical DTO、read-only resolver�
   - `TEST-com.ses.importcenter.foundation.ImportValidationServiceTest.xml` SHA-256: `2FC959CF7E94B2EBFA5726E824546CBFB0FDE79908C1B3933FC1FAFF266CA82D`
 - 検証対象は合成CSVのみ。parser/DTO/validator単体試験であり、DB差分、domain apply、HTTP/UI、実source適合、業務Demoは未検証である。F2のDemo完了やNF-06全体完了を意味しない。
 - 空行/全空多列行は`empty_skipped`へ計上し、header列数不一致扱いしない。quoted newlineは1 source recordとして保持し、末尾改行だけで空recordを生成しない。
+- Astra F2 CODE FAIL指摘の修正定向検証（2026-10-02）：JPY parserはASCII十進形式・最大64文字・整数有効18桁をBigDecimal化前に検証し、指数表記/巨大指数を拒否。Contract `startDate`の空/空白/`\N`を必須違反とし、ISO日付を許可。Proposalはpositionの`projectExternalKey`と解決済project identityを比較し、関係欠損/lookup不能はfail-closed。
+  - 同じ定向コマンド、`BUILD SUCCESS`、17 tests / 0 failures / 0 errors / 0 skipped。
+  - `TEST-com.ses.importcenter.foundation.SesCsvParserTest.xml` SHA-256: `4A5BB47A2269350C6786D5BB5B573A6860054D085C831883CD90436E75F8715C`
+  - `TEST-com.ses.importcenter.foundation.ImportValidationServiceTest.xml` SHA-256: `EA4A06949B53B21F8A420D9A73CEB488D9FAAD5C43508A52C7232AF981689B6E`
 
 ## A1. Upload / mapping / preview / error UI（synthetic F1/F2 Review後）
 
