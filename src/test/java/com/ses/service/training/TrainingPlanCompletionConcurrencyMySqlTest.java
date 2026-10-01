@@ -32,6 +32,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
@@ -45,7 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest
 @ActiveProfiles("test")
 @Tag("mysql")
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class TrainingPlanCompletionConcurrencyMySqlTest {
 
     @Container
@@ -81,11 +82,14 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
         CountDownLatch firstChanged = new CountDownLatch(1);
         CountDownLatch secondStarted = new CountDownLatch(1);
         CountDownLatch releaseFirst = new CountDownLatch(1);
+        AtomicLong blockingConnectionId = new AtomicLong();
+        AtomicLong requestingConnectionId = new AtomicLong();
         try {
             Future<?> first = pool.submit(() -> {
                 tenant();
                 try {
                     new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        blockingConnectionId.set(connectionId());
                         planMapper.selectByIdForUpdateWithTenant(f.planId, "default");
                         service.completeEnrollment(f.enrollmentIds.get(0), 0,
                                 LocalDate.of(2026, 9, 1), null, 1L);
@@ -95,17 +99,19 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
                 } finally { AccountingTenantContextHolder.clear(); }
             });
             assertTrue(firstChanged.await(10, TimeUnit.SECONDS), "先行transactionがplan lockを保持する");
-            assertTrue(grantedPlanLocks() > 0, "performance_schemaで先行transactionの実plan行lockを確認する。locks=" + locks());
+            assertTrue(hasGrantedPlanRecordLock(f.planId, blockingConnectionId.get()),
+                    "先行connectionが対象planのPRIMARY RECORD lockを保持する。locks=" + locks());
             Future<?> second = pool.submit(() -> {
                 tenant();
                 try {
+                    requestingConnectionId.set(connectionId());
                     secondStarted.countDown();
                     service.completeEnrollment(f.enrollmentIds.get(1), 0,
                             LocalDate.of(2026, 9, 2), null, 1L);
                 } finally { AccountingTenantContextHolder.clear(); }
             });
             assertTrue(secondStarted.await(5, TimeUnit.SECONDS), "後続transactionがworkerで開始する");
-            awaitLockWait(second);
+            awaitLockWait(second, f.planId, requestingConnectionId, blockingConnectionId);
             releaseFirst.countDown();
             first.get(20, TimeUnit.SECONDS);
             second.get(20, TimeUnit.SECONDS);
@@ -149,11 +155,14 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
         CountDownLatch enrolled = new CountDownLatch(1);
         CountDownLatch completionStarted = new CountDownLatch(1);
         CountDownLatch releaseEnroll = new CountDownLatch(1);
+        AtomicLong blockingConnectionId = new AtomicLong();
+        AtomicLong requestingConnectionId = new AtomicLong();
         try {
             Future<?> first = pool.submit(() -> {
                 tenant();
                 try {
                     new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        blockingConnectionId.set(connectionId());
                         planMapper.selectByIdForUpdateWithTenant(f.planId, "default");
                         service.enroll(f.planId, 0, extra.getId(), 1L);
                         enrolled.countDown();
@@ -162,17 +171,19 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
                 } finally { AccountingTenantContextHolder.clear(); }
             });
             assertTrue(enrolled.await(10, TimeUnit.SECONDS), "enrollment insert後もplan lockを保持する");
-            assertTrue(grantedPlanLocks() > 0, "performance_schemaでenroll transactionの実plan行lockを確認する。locks=" + locks());
+            assertTrue(hasGrantedPlanRecordLock(f.planId, blockingConnectionId.get()),
+                    "enroll connectionが対象planのPRIMARY RECORD lockを保持する。locks=" + locks());
             Future<?> completion = pool.submit(() -> {
                 tenant();
                 try {
+                    requestingConnectionId.set(connectionId());
                     completionStarted.countDown();
                     service.completeEnrollment(f.enrollmentIds.get(0), 0,
                             LocalDate.of(2026, 9, 3), null, 1L);
                 } finally { AccountingTenantContextHolder.clear(); }
             });
             assertTrue(completionStarted.await(5, TimeUnit.SECONDS), "完了transactionがworkerで開始する");
-            awaitLockWait(completion);
+            awaitLockWait(completion, f.planId, requestingConnectionId, blockingConnectionId);
             releaseEnroll.countDown();
             first.get(20, TimeUnit.SECONDS);
             completion.get(20, TimeUnit.SECONDS);
@@ -191,20 +202,63 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
     }
 
     @Test
-    void 完了取消のどちらの順序でも最後の非取消enrollment完了時にplanが完了する() {
-        Fixture completeThenCancel = fixture("complete-cancel", 2);
-        service.completeEnrollment(completeThenCancel.enrollmentIds.get(0), 0,
-                LocalDate.of(2026, 9, 5), null, 1L);
-        assertEquals(TrainingPlanService.PLAN_IN_PROGRESS, plan(completeThenCancel.planId).getStatus());
-        service.cancelEnrollment(completeThenCancel.enrollmentIds.get(1), 0, 1L, "受講不要");
-        assertEquals(TrainingPlanService.PLAN_COMPLETED, plan(completeThenCancel.planId).getStatus());
+    void 完了取消の同時実行を両方のplanロック取得順で直列化する() throws Exception {
+        assertCompleteCancelRace("complete-first", true);
+        assertCompleteCancelRace("cancel-first", false);
+    }
 
-        Fixture cancelThenComplete = fixture("cancel-complete", 2);
-        service.cancelEnrollment(cancelThenComplete.enrollmentIds.get(0), 0, 1L, "受講不要");
-        assertEquals(TrainingPlanService.PLAN_IN_PROGRESS, plan(cancelThenComplete.planId).getStatus());
-        service.completeEnrollment(cancelThenComplete.enrollmentIds.get(1), 0,
-                LocalDate.of(2026, 9, 6), null, 1L);
-        assertEquals(TrainingPlanService.PLAN_COMPLETED, plan(cancelThenComplete.planId).getStatus());
+    private void assertCompleteCancelRace(String suffix, boolean completeFirst) throws Exception {
+        Fixture f = fixture(suffix, 2);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch firstChanged = new CountDownLatch(1);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        AtomicLong blockingConnectionId = new AtomicLong();
+        AtomicLong requestingConnectionId = new AtomicLong();
+        try {
+            Future<?> first = pool.submit(() -> {
+                tenant();
+                try {
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        blockingConnectionId.set(connectionId());
+                        planMapper.selectByIdForUpdateWithTenant(f.planId, "default");
+                        if (completeFirst) complete(f.enrollmentIds.get(0), LocalDate.of(2026, 9, 5));
+                        else service.cancelEnrollment(f.enrollmentIds.get(0), 0, 1L, "受講不要");
+                        firstChanged.countDown();
+                        await(releaseFirst);
+                    });
+                } finally { AccountingTenantContextHolder.clear(); }
+            });
+            assertTrue(firstChanged.await(10, TimeUnit.SECONDS), "先行operationがplan lockを保持する");
+            assertTrue(hasGrantedPlanRecordLock(f.planId, blockingConnectionId.get()),
+                    "先行connectionが対象planのPRIMARY RECORD lockを保持する。locks=" + locks());
+            Future<?> second = pool.submit(() -> {
+                tenant();
+                try {
+                    requestingConnectionId.set(connectionId());
+                    secondStarted.countDown();
+                    if (completeFirst) service.cancelEnrollment(f.enrollmentIds.get(1), 0, 1L, "受講不要");
+                    else complete(f.enrollmentIds.get(1), LocalDate.of(2026, 9, 6));
+                } finally { AccountingTenantContextHolder.clear(); }
+            });
+            assertTrue(secondStarted.await(5, TimeUnit.SECONDS), "後続operationが独立connectionで開始する");
+            awaitLockWait(second, f.planId, requestingConnectionId, blockingConnectionId);
+            releaseFirst.countDown();
+            first.get(20, TimeUnit.SECONDS);
+            second.get(20, TimeUnit.SECONDS);
+            assertEquals(TrainingPlanService.PLAN_COMPLETED, plan(f.planId).getStatus());
+            assertEquals(1, eventMapper.selectByPlanId(f.planId).stream()
+                    .filter(e -> "ENROLLMENT_COMPLETED".equals(e.getEventType())).count());
+            assertEquals(1, eventMapper.selectByPlanId(f.planId).stream()
+                    .filter(e -> "ENROLLMENT_CANCELLED".equals(e.getEventType())).count());
+        } finally {
+            releaseFirst.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    private void complete(Long enrollmentId, LocalDate completedOn) {
+        service.completeEnrollment(enrollmentId, 0, completedOn, null, 1L);
     }
 
     private Fixture fixture(String suffix, int count) {
@@ -235,13 +289,11 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
         courseMapper.insert(course); return course;
     }
 
-    private void awaitLockWait(Future<?> worker) {
+    private void awaitLockWait(Future<?> worker, Long planId, AtomicLong requestingConnectionId,
+                               AtomicLong blockingConnectionId) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
-            Integer waits = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.innodb_trx WHERE trx_state='LOCK WAIT'",
-                    Integer.class);
-            Integer dataWaits = jdbc.queryForObject("SELECT COUNT(*) FROM performance_schema.data_lock_waits", Integer.class);
-            if ((waits != null && waits > 0) || (dataWaits != null && dataWaits > 0)) return;
+            if (hasTargetPlanRecordLockWait(planId, requestingConnectionId.get(), blockingConnectionId.get())) return;
             if (worker.isDone()) {
                 try {
                     worker.get();
@@ -256,13 +308,40 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
             }
             Thread.yield();
         }
-        throw new AssertionError("別connectionのtransactionがInnoDB lock waitへ入らなかった。transactions="
-                + transactions() + "; locks=" + locks());
+        throw new AssertionError("worker同士が対象plan PRIMARY RECORD lockで待機しなかった。planId=" + planId
+                + ", requestingConnectionId=" + requestingConnectionId.get() + ", blockingConnectionId="
+                + blockingConnectionId.get() + "; transactions=" + transactions() + "; lockWaits=" + lockWaits());
     }
 
-    private int grantedPlanLocks() {
-        return jdbc.queryForObject("SELECT COUNT(*) FROM performance_schema.data_locks "
-                + "WHERE object_name='t_learning_plan' AND lock_status='GRANTED'", Integer.class);
+    private boolean hasGrantedPlanRecordLock(Long planId, long connectionId) {
+        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM performance_schema.data_locks dl "
+                + "JOIN performance_schema.threads th ON th.THREAD_ID=dl.THREAD_ID "
+                + "WHERE dl.OBJECT_SCHEMA=DATABASE() AND dl.OBJECT_NAME='t_learning_plan' "
+                + "AND dl.INDEX_NAME='PRIMARY' AND dl.LOCK_TYPE='RECORD' AND dl.LOCK_STATUS='GRANTED' "
+                + "AND CAST(dl.LOCK_DATA AS UNSIGNED)=? AND th.PROCESSLIST_ID=?", Integer.class, planId, connectionId);
+        return count != null && count > 0;
+    }
+
+    private boolean hasTargetPlanRecordLockWait(Long planId, long requestingConnectionId, long blockingConnectionId) {
+        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM performance_schema.data_lock_waits w "
+                + "JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE "
+                + "AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
+                + "JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE "
+                + "AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID "
+                + "JOIN performance_schema.threads rt ON rt.THREAD_ID=req.THREAD_ID "
+                + "JOIN performance_schema.threads bt ON bt.THREAD_ID=blk.THREAD_ID "
+                + "WHERE req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='t_learning_plan' "
+                + "AND req.INDEX_NAME='PRIMARY' AND req.LOCK_TYPE='RECORD' "
+                + "AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='t_learning_plan' "
+                + "AND blk.INDEX_NAME='PRIMARY' AND blk.LOCK_TYPE='RECORD' "
+                + "AND CAST(req.LOCK_DATA AS UNSIGNED)=? AND CAST(blk.LOCK_DATA AS UNSIGNED)=? "
+                + "AND rt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?", Integer.class,
+                planId, planId, requestingConnectionId, blockingConnectionId);
+        return count != null && count > 0;
+    }
+
+    private long connectionId() {
+        return jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class);
     }
 
     private String locks() {
@@ -277,6 +356,21 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
     private String transactions() {
         return jdbc.query("SELECT CONCAT(trx_state, ':', trx_mysql_thread_id, ':', COALESCE(trx_query, 'NULL')) "
                         + "FROM information_schema.innodb_trx", rs -> {
+            java.util.List<String> states = new java.util.ArrayList<>();
+            while (rs.next()) states.add(rs.getString(1));
+            return states.toString();
+        });
+    }
+
+    private String lockWaits() {
+        return jdbc.query("SELECT CONCAT(req.OBJECT_SCHEMA, '.', req.OBJECT_NAME, ':', req.INDEX_NAME, ':', "
+                + "req.LOCK_TYPE, ':', req.LOCK_DATA, ':', rt.PROCESSLIST_ID, ' -> ', "
+                + "blk.LOCK_TYPE, ':', blk.LOCK_DATA, ':', bt.PROCESSLIST_ID) "
+                + "FROM performance_schema.data_lock_waits w "
+                + "JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
+                + "JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID "
+                + "JOIN performance_schema.threads rt ON rt.THREAD_ID=req.THREAD_ID "
+                + "JOIN performance_schema.threads bt ON bt.THREAD_ID=blk.THREAD_ID", rs -> {
             java.util.List<String> states = new java.util.ArrayList<>();
             while (rs.next()) states.add(rs.getString(1));
             return states.toString();
