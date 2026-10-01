@@ -1,0 +1,68 @@
+# S-NF01〜10 Production Readiness 実行台帳
+
+## 実行権限と判定境界
+
+- 依頼者は2026-10-01の対話で、総括agentによる実行統括、実装に`gpt-6-luna`、独立Reviewに`gpt-6-astra`の使用を指示した。
+- 依頼者は技術方式・優先順位の選定を総括agentへ委任した。これは法的判断、外部契約、実在する責任者の署名、production接続・credential使用・deployの代理承認ではない。
+- 開発・テスト用の実装と修復、分離branch、既存worktreeの安全な再利用、ローカルcommitを進める。外部公開・push/PR/merge・production操作は別途実行権限を確認する。
+- 各featureの既存承認記録は履歴として保持する。新しい技術実行の委任を過去のDG/Privacy/Legal承認へ読み替えない。
+- `IMPLEMENTATION_PASS`、`REVIEW_PASS`、`PRODUCTION_APPROVED`、`ENABLED`を独立した状態として管理する。NF06/NF07をOFFのまま全機能完了にしない。
+
+## 固定された事実
+
+| 項目 | 証跡 |
+|---|---|
+| 再fetchした初期base | `1443fb68943849a3260d7ebe005259f3eb609d60` |
+| PR101 Head | `8ad0c34eacbb04a031667934f313a2b6965583f1`。baseとのtree差分なし、baseに全commit包含 |
+| PR101 CI | run `36857893770`、7 jobs SUCCESS |
+| main CI | run `36858538460`、6 SUCCESS / Browser FAILURE |
+| Browser失敗 | `AccountingIntegrationBrowserDemoTest:349`、account linkのengineer_id unique競合。14/0/1/0。seed `101246425020` |
+| migration | 157 versioned scripts、最大V182、重複version 0 |
+| 主checkout | `C:\work\ses-manager-pro`。`application-dev.yml`の利用者変更あり。変更・reset・cleanしない |
+| 最終R3証跡 | `C:\work\ses-snf-r3-remediation-b2-b`を保存。試験結果の混合集計を新runの証拠にしない |
+
+## 分離と現在の担当
+
+全初期branchのbaseは上記SHA。依存変更を取り込む際はactual base/headを追記する。
+
+| Batch | 担当model | branch / worktree | 状態 |
+|---|---|---|---|
+| F0 統括・決定包 | root | `codex/snf-prod-control` / `C:\work\ses-snf-status-audit` | IN_PROGRESS |
+| C0 Browser fixture | gpt-6-luna | `codex/snf-prod-browser-isolation` / `C:\work\ses-nf02-remediation` | IN_PROGRESS |
+| R09 provider境界 | gpt-6-luna | `codex/snf-prod-nf09-provider-boundary` / `C:\work\ses-nf09-system-actor-attribution` | IN_PROGRESS |
+| R02/R03/R10 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | IN_PROGRESS、静的Review。試験PASSを生成しない |
+
+再利用した3 worktreeは開始時clean、origin/main未包含commit 0、当該path依存processなしを確認した。
+試験用2 worktreeの旧`target`は、同一worktree内`target-preserved-20261001-prod-start`へ移動して保存した。
+これらをstage、削除、上書きしない。`git add .`は禁止し、変更pathを列挙する。
+
+## 残作業キュー
+
+| 順序 | Batch | 開始・完了条件 |
+|---|---|---|
+| 1 | C0 | 原seed再現→原因修正→全Browser原seed/別seed→Astra固定Head Review |
+| 1 | R09 | prod/mock混在のfail-closed、実provider未設定時の誤確認防止→Astra Review。実provider完了とは別 |
+| 2 | R02/R03/R04/R10 | 現行scopeの独立Review→finding修復→専用Demo→再Review |
+| 2 | N06 Plan delta | 委任範囲で技術scopeを具体化し、Astra Plan Review。実source/production移行承認を分離 |
+| 2 | P07 Policy/Plan | 現行coverage再生成、未確定policy・署名欄を明示。法的期間を推測しない |
+| 3 | E05/E08/R09 real adapter | 既存統合と互換の技術案、prod設定契約、sandboxテスト。実credential/外部送信は別権限 |
+| 3 | N06 implementation | approved technical planの全波をsynthetic環境で実装・検証し、実source未検証を残す |
+| 3 | N07 implementation | policyを入力として受ける安全な基盤の技術Planを独立Review。未承認policyで実データを処分しない |
+| 4 | M5/O6 | fresh/upgrade/V182 repair、staging、代表性restore、環境adapterとrunbook |
+| 5 | Q6 | 固定RCでFast/MySQL/Performance/Browser/backup全gate、zero skipped、独立Review |
+| 6 | G7 | 有効な人の署名・実環境証拠・停止/rollback条件が揃って初めてGo/No-Go提出 |
+
+## 共通Gate
+
+- 試験は一run一suiteでSHA、command、開始/終了、環境、test/failure/error/skipped、log/XML hashを保存する。
+- Maven重負荷suiteは総括が直列化し、異なるagentのDocker/browser試験の干渉を避ける。
+- migration番号、H2 schema/init、shared security/document/config、中央traceabilityは総括が調整する。
+- checksum改変、skip、固定順序による問題隠し、tenant default推測、mock成功へのproduction fallbackは禁止。
+- push前に`scripts/verify-like-ci.ps1`。最終RCではFast/MySQL/Performance/real Chrome/backup、fresh/upgrade、PITR、安全・運用演習を要求する。
+- `PENDING=0`だけでV182完了にしない。4表のscope未確定0、親子scope一致、callback一意性、実際の業務帰属・actorを確認する。
+- 完了のための人工gate: Production Owner、Security、Privacy/Legal、Operations、provider契約/credential、production topology/representative profile、最終deploy権限。
+
+## 現在の総合判定
+
+**NO-GO / ACTIVE_REMEDIATION**。独立Review、NF06/NF07実装、実provider、policy、production環境の証拠は未完了。
+この台帳の作成はproduction approvalではない。
