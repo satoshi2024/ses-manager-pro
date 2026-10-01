@@ -3,7 +3,8 @@
 ## 2026-10-01 新incrementの設計正本
 
 下記Discovery/DEV-0/D0設計は歴史scopeとして保持する。新SYNTHETIC_FOUNDATIONは
-`synthetic-foundation.md` SF-01〜05、SF-03a、SF-04aを正本とし、現在Plan Review待ちである。
+`synthetic-foundation.md` SF-01〜05、SF-03a、SF-04aを正本とする。Astraは計画固定Head
+`f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`を技術Plan PASSと判定した。実装Reviewと全人手gateは別途必要である。
 実処分/実PII/外部provider/正式Legal承認をこの変更で許可しない。
 
 | 資源 | 状態遷移 | 原子性・失敗時動作 |

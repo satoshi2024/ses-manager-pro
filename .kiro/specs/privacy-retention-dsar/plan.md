@@ -4,7 +4,8 @@
 
 SYNTHETIC_FOUNDATIONを旧DEV-0/D0と分けて計画する。依頼者による技術方式・隔離開発の委任が入力であり、
 正式Privacy OwnerやDG-07を代行していない。正本`synthetic-foundation.md`、新requirements SF-R1〜6、
-tasks SF-W0〜Mは技術Plan Review待ち。初期base `1443fb68943849a3260d7ebe005259f3eb609d60`。
+計画固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`はAstraの技術Plan Review PASS。
+SF-W0完了、SF-W1実装済み・対象試験再実行と独立Implementation Review待ち。初期base `1443fb68943849a3260d7ebe005259f3eb609d60`。
 下記の古いbase/件数/実装scopeは当時の記録であり、現行coverageや新incrementの承認と混同しない。
 現行scanは253 migration table、244 entity table、699 provider候補、未分類73 table、欠落column1077、
 欠落provider276、missing entity68でBLOCKED_COVERAGE_INCOMPLETE。policy unknownの正式判定は別途必要。

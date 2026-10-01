@@ -1,10 +1,24 @@
 # NF07 SYNTHETIC_FOUNDATION 技術契約案
 
-状態: **PLAN_REVIEW_PENDING**。旧`NF07-DEV-GATE-20260828`の範囲と署名を変更しない。
+状態: **SF-W0 TECHNICAL PLAN PASS / SF-W1 実装済み・対象試験と独立Review待ち**。旧`NF07-DEV-GATE-20260828`の範囲と署名を変更しない。
 根拠は2026-10-01の依頼者による技術方式選定・開発実行の委任である。
 本incrementはgeneric安全機構を合成データで実装・検証する案であり、DG-07、Privacy Owner、
 法的保持期間、実DSAR交付、実処分、実provider、production enablementを承認しない。
-この文書と同じincrementをrequirements/design/tasksへ同期した。Astra固定Head Plan Reviewは未実施である。
+この文書と同じincrementをrequirements/design/tasksへ同期した。Astraは計画固定Head
+`f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`を技術Plan PASSと判定した。
+これは実装Review、DG-07、法務/Privacy Owner、本番gateの承認ではない。
+
+SF-W1の実装はmain側のimmutable envelope、Ed25519 verifier、profile/provider拒否、純粋FSMに限定する。
+2026-10-01に対象3 test classを再実行し16件成功、失敗/例外/skipは0。default `prod` profile、未知schema version、
+下流proof転用拒否を含む。実provider呼出しは0。Surefire XMLのSHA-256:
+
+| XML | SHA-256 |
+|---|---|
+| `TEST-com.ses.privacy.foundation.ApprovalEnvelopeVerifierTest.xml` | `0FF5C5532DD5E386632FCDF2DC3A6CA670D00D5EA19AC4F7C8147813F0319F17` |
+| `TEST-com.ses.privacy.foundation.PrivacyCaseStateMachineTest.xml` | `31B1EFFE2727B075B8E4D426FA90F7942AE45C4DB1B5F6DCC89BE3231CE238B9` |
+| `TEST-com.ses.privacy.foundation.PrivacyFoundationIsolationTest.xml` | `1294A193184B3F44C9A4AD1A7CC5E7180062D6FBEA6795CAEBB3EC0919345BC0` |
+
+実行はsocket temp directoryを明示した対象限定Mavenであり、全suiteではない。独立Implementation Reviewは未完了。
 
 ## SF-01 実行領域と拒否条件
 
@@ -14,14 +28,14 @@
   実account、既存DB、uploads、credential、外部providerを参照しない。sourceデータはgenerated fixture manifestへ限定する。
 - harnessはcontainer identity、random database/session ID、生成manifest hash、network、volumeを検証する。
   任意DB_URLやpathへの差替えを受け付けない。host既存serviceや他worktree環境は停止・再利用しない。
-- prodまたはprod,test混在ではsynthetic verifier/policy/providerを常に拒否する。
+- active/default profileのいずれかがprod、またはprod,test混在ではsynthetic verifier/policy/providerを常に拒否する。
   production用verifier/provider未登録なら起動・処分・exportはfail-closedで、mock fallbackを持たない。
 - mainの実adapterは正式policy/署名・外部契約・環境gateが揃った後の別incrementに残す。
   synthetic testで処分が動くことを、旧F1-M全体やNF07 production完成としない。
 
 ## SF-02 信頼境界
 
-policy approvalとcase approvalは別のimmutable envelopeで表現する。
+policy approvalとcase approvalは別のimmutable envelopeで表現する。SF-W1で解釈するschema versionは`1`のみとし、未知versionは署名が正しくても拒否する。
 共通にissuer/authority/key ID、schema version、tenant、scope、issued/effective/expiry、revocation reference、
 canonical payload hash、signatureを含む。単なる`approved=true`入力は不可。
 
