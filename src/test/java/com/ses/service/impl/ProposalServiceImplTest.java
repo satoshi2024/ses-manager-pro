@@ -31,6 +31,7 @@ import static org.mockito.Mockito.*;
 @ActiveProfiles("test")
 @Transactional
 @org.springframework.test.context.jdbc.Sql(scripts = "/sql/engineer-schema-h2.sql")
+@com.ses.test.EnableDefaultTenantTestContext
 public class ProposalServiceImplTest {
 
     @Autowired
@@ -66,6 +67,7 @@ public class ProposalServiceImplTest {
             e.setId(engineerId);
             e.setFullName("テスト要員" + engineerId);
             e.setTenantId("default");
+            e.setLegalEntityId(1L);
             engineerMapper.insert(e);
         }
         return engineerId;
@@ -77,11 +79,13 @@ public class ProposalServiceImplTest {
             c.setId(customerId);
             c.setCompanyName("テスト顧客" + customerId);
             c.setTenantId("default");
+            c.setLegalEntityId(1L);
             customerMapper.insert(c);
         }
         Project prj = new Project();
         prj.setProjectName("テスト案件");
         prj.setCustomerId(customerId);
+        prj.setLegalEntityId(1L);
         projectMapper.insert(prj);
         return prj.getId();
     }
@@ -92,6 +96,8 @@ public class ProposalServiceImplTest {
     public void setUp() {
         mockedSecurityUtils = Mockito.mockStatic(SecurityUtils.class);
         mockedSecurityUtils.when(SecurityUtils::currentUserId).thenReturn(1L);
+        mockedSecurityUtils.when(SecurityUtils::currentTenantId).thenReturn("default");
+        mockedSecurityUtils.when(SecurityUtils::currentRole).thenReturn("管理者");
     }
 
     @AfterEach

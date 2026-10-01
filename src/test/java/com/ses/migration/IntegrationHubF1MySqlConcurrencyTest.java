@@ -25,13 +25,16 @@ import com.ses.service.integrationhub.ApiRetentionPurgeService;
 import com.ses.service.integrationhub.ApiUsageBucketService;
 import com.ses.service.integrationhub.ExternalDtoSnapshot;
 import com.ses.service.integrationhub.InboundEventService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.ContractService;
 import com.ses.service.CustomerService;
 import com.ses.service.EngineerService;
 import com.ses.service.InvoiceService;
 import com.ses.service.ProjectService;
 import com.ses.test.MySQLContainer;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,9 +43,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -53,8 +53,7 @@ import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -131,6 +130,11 @@ class IntegrationHubF1MySqlConcurrencyTest {
 
     private long clientDatabaseId;
 
+    @BeforeEach
+    void bindTenant() {
+        AccountingTenantContextHolder.setTenantId(TENANT_ID);
+    }
+
     @AfterEach
     void cleanup() throws Exception {
         try (Connection connection = MYSQL.createConnection("")) {
@@ -146,6 +150,8 @@ class IntegrationHubF1MySqlConcurrencyTest {
                 statement.executeUpdate("DELETE FROM t_api_retention_hold");
                 statement.executeUpdate("DELETE FROM t_api_purge_checkpoint");
             }
+        } finally {
+            TenantTestSecurity.clear();
         }
     }
 
@@ -157,11 +163,11 @@ class IntegrationHubF1MySqlConcurrencyTest {
         CountDownLatch start = new CountDownLatch(1);
         List<java.util.concurrent.Future<Integer>> futures = new ArrayList<>();
         for (int i = 0; i < workers; i++) {
-            futures.add(executor.submit(() -> {
+            futures.add(executor.submit(() -> withTenant(() -> {
                 ready.countDown();
                 start.await(10, TimeUnit.SECONDS);
                 return usageBucketService.consumeAt(CLIENT_ID, SCOPE, TENANT_ID, ROUTE, NOW).allowed() ? 1 : 0;
-            }));
+            })));
         }
         ready.await(10, TimeUnit.SECONDS);
         start.countDown();
@@ -366,6 +372,7 @@ class IntegrationHubF1MySqlConcurrencyTest {
             Customer customer = customerMapper.selectById(customerId);
             CustomerSaveDto customerUpdate = new CustomerSaveDto();
             customerUpdate.setCompanyName(customerName + " updated");
+            customerUpdate.setDeliveryPreference("PDF");
             customerUpdate.setVersion(customer.getVersion());
             assertEquals(200, customerApiController.update(customerId, customerUpdate).getCode());
             assertEquals(legalEntityId, selectLong("m_customer", "legal_entity_id", customerId));
@@ -445,8 +452,12 @@ class IntegrationHubF1MySqlConcurrencyTest {
             invoiceService.changeStatus(invoiceId, "送付済", null);
             assertEquals(legalEntityId, selectLong("t_invoice", "legal_entity_id", invoiceId));
         } finally {
-            deleteLegalEntityWriteFixture(customerName, engineerName, projectName, proposalId, organizationId);
-            SecurityContextHolder.clearContext();
+            try {
+                deleteLegalEntityWriteFixture(customerName, engineerName, projectName, proposalId, organizationId);
+            } finally {
+                TenantTestSecurity.clear();
+                AccountingTenantContextHolder.setTenantId(TENANT_ID);
+            }
         }
     }
 
@@ -470,11 +481,8 @@ class IntegrationHubF1MySqlConcurrencyTest {
                 membership.executeUpdate();
             }
         }
-        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                "1", "n/a", List.of(new SimpleGrantedAuthority("ROLE_営業")));
-        // LegalEntityContextServiceは認証principal/detailsへ明示的に束縛されたtenantだけを受け付ける。
-        authentication.setDetails(Map.of("tenant_id", "default"));
-        SecurityContextHolder.getContext().setAuthentication(authentication);
+        // 法人境界の書込みだけdefault tenantの営業主体として実行する。
+        TenantTestSecurity.bindAs(1L, "1", "default", "営業");
     }
 
     private Long selectId(String table, String column, String value) throws Exception {
@@ -589,13 +597,13 @@ class IntegrationHubF1MySqlConcurrencyTest {
         CountDownLatch start = new CountDownLatch(1);
         List<java.util.concurrent.Future<Boolean>> futures = new ArrayList<>();
         for (int i = 0; i < 2; i++) {
-            futures.add(executor.submit(() -> {
+            futures.add(executor.submit(() -> withTenant(() -> {
                 ready.countDown();
                 start.await(10, TimeUnit.SECONDS);
                 return deliveryService.markSucceeded(claimed.getId(), claimed.getVersion(),
                         claimed.getDeliveryGeneration(), claimed.getLeaseToken(), claimed.getProviderIdempotencyKey(),
                         claimed.getPayloadHash(), "provider-request-1", NOW);
-            }));
+            })));
         }
         ready.await(10, TimeUnit.SECONDS);
         start.countDown();
@@ -691,11 +699,11 @@ class IntegrationHubF1MySqlConcurrencyTest {
         List<java.util.concurrent.Future<ApiDelivery>> futures = new ArrayList<>();
         for (int i = 0; i < 2; i++) {
             int worker = i;
-            futures.add(executor.submit(() -> {
+            futures.add(executor.submit(() -> withTenant(() -> {
                 ready.countDown();
                 start.await(10, TimeUnit.SECONDS);
                 return deliveryService.claim(delivery.getId(), "lease-race-" + worker, NOW, NOW.plusMinutes(5));
-            }));
+            })));
         }
         assertTrue(ready.await(10, TimeUnit.SECONDS));
         start.countDown();
@@ -810,16 +818,16 @@ class IntegrationHubF1MySqlConcurrencyTest {
         ExecutorService executor = Executors.newFixedThreadPool(2);
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
-        var holdFuture = executor.submit(() -> {
+        var holdFuture = executor.submit(() -> withTenant(() -> {
             ready.countDown();
             start.await(10, TimeUnit.SECONDS);
             return retentionPurgeService.acquireHold("DELIVERY", deliveryId, "MYSQL_RACE", NOW);
-        });
-        var purgeFuture = executor.submit(() -> {
+        }));
+        var purgeFuture = executor.submit(() -> withTenant(() -> {
             ready.countDown();
             start.await(10, TimeUnit.SECONDS);
             return retentionPurgeService.purgeExpired("DELIVERY", "SUCCEEDED_PAYLOAD_30D", NOW, 10);
-        });
+        }));
         ready.await(10, TimeUnit.SECONDS);
         start.countDown();
         boolean held = holdFuture.get(30, TimeUnit.SECONDS);
@@ -931,9 +939,9 @@ class IntegrationHubF1MySqlConcurrencyTest {
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(2);
-        var first = executor.submit(() -> recordInbound(HASH, ready, start));
-        var second = executor.submit(() -> recordInbound(
-                "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", ready, start));
+        var first = executor.submit(() -> withTenant(() -> recordInbound(HASH, ready, start)));
+        var second = executor.submit(() -> withTenant(() -> recordInbound(
+                "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", ready, start)));
         assertTrue(ready.await(10, TimeUnit.SECONDS));
         start.countDown();
         var firstReceipt = first.get(30, TimeUnit.SECONDS);
@@ -998,6 +1006,15 @@ class IntegrationHubF1MySqlConcurrencyTest {
             }
         }
         throw new IllegalStateException("unreachable inbound record retry loop");
+    }
+
+    private <T> T withTenant(Callable<T> action) throws Exception {
+        AccountingTenantContextHolder.setTenantId(TENANT_ID);
+        try {
+            return action.call();
+        } finally {
+            AccountingTenantContextHolder.clear();
+        }
     }
 
     private long insertSubscription(Connection connection) throws Exception {

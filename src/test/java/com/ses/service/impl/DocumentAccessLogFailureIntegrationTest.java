@@ -12,8 +12,10 @@ import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.SpyBean;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
+import org.springframework.test.context.transaction.BeforeTransaction;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +33,7 @@ import static org.mockito.Mockito.doThrow;
 @ActiveProfiles("test")
 @Sql("/sql/schema-document-archive-h2.sql")
 @Transactional
+@com.ses.test.EnableDefaultTenantTestContext
 class DocumentAccessLogFailureIntegrationTest {
 
     @Autowired
@@ -42,8 +45,16 @@ class DocumentAccessLogFailureIntegrationTest {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @SpyBean
     private DocumentAccessLogMapper documentAccessLogMapper;
+
+    @BeforeTransaction
+    void prepareLegalEntityContext() {
+        com.ses.test.TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
+    }
 
     @AfterEach
     void tearDown() {
@@ -60,6 +71,7 @@ class DocumentAccessLogFailureIntegrationTest {
         assertThatThrownBy(() -> isolated.executeWithoutResult(status -> documentService.registerGenerated(
                 DocumentRegisterRequest.builder()
                         .documentType("INVOICE_OUT")
+                        .legalEntityId(1L)
                         .sourceType("GENERATED")
                         .businessKey("audit-failure-transaction")
                         .versionDiscriminator("v1")

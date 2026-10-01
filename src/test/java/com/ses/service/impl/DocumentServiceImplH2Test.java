@@ -11,11 +11,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
+import org.springframework.test.context.transaction.BeforeTransaction;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayInputStream;
@@ -26,15 +28,23 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * H2インメモリDBを用いた実SQL往復・UNIQUE制約・CRUD統合テスト。
  */
-@SpringBootTest
+@SpringBootTest(properties =
+        "spring.datasource.url=jdbc:h2:mem:document-service-impl-h2-test;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL")
 @ActiveProfiles("test")
 @Sql("/sql/schema-document-archive-h2.sql")
 @Transactional
+@com.ses.test.EnableDefaultTenantTestContext
 class DocumentServiceImplH2Test {
 
     @Autowired DocumentService documentService;
     @Autowired DocumentMapper documentMapper;
     @Autowired DocumentVersionMapper documentVersionMapper;
+    @Autowired JdbcTemplate jdbcTemplate;
+
+    @BeforeTransaction
+    void prepareLegalEntityContext() {
+        com.ses.test.TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
+    }
 
     @BeforeEach
     void setUp() {
@@ -54,6 +64,7 @@ class DocumentServiceImplH2Test {
     void H2DB_registerAndIdempotentCheck_persistsAndReuses() {
         var req = DocumentRegisterRequest.builder()
                 .documentType("INVOICE_OUT")
+                .legalEntityId(1L)
                 .sourceType("GENERATED")
                 .businessKey("INV:2026-001")
                 .versionDiscriminator("v1")
@@ -90,6 +101,7 @@ class DocumentServiceImplH2Test {
     void H2DB_confirm_updatesStatusAndVersion() {
         var req = DocumentRegisterRequest.builder()
                 .documentType("INVOICE_OUT")
+                .legalEntityId(1L)
                 .sourceType("GENERATED")
                 .businessKey("INV:2026-002")
                 .versionDiscriminator("v1")
@@ -110,6 +122,7 @@ class DocumentServiceImplH2Test {
         LocalDate transactionDate = LocalDate.of(2026, 8, 1);
         var req = DocumentRegisterRequest.builder()
                 .documentType("INVOICE_OUT")
+                .legalEntityId(1L)
                 .sourceType("GENERATED")
                 .businessKey("INV-RETENTION-001")
                 .versionDiscriminator("v1")

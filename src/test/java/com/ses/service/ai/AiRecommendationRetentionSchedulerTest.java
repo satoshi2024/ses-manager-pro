@@ -31,6 +31,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** NF-08 AI redacted retention schedulerはtenant inventory単位でpurgeし、ThreadLocalを必ず清掃する。 */
+@com.ses.test.DisableDefaultTenantTestContext
 class AiRecommendationRetentionSchedulerTest {
 
     @AfterEach

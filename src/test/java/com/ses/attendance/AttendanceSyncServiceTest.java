@@ -11,6 +11,8 @@ import com.ses.mapper.OvertimeFollowupMapper;
 import com.ses.service.SystemConfigService;
 import com.ses.service.attendance.AttendanceSyncService;
 import com.ses.service.attendance.provider.MockAttendanceProvider;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.test.TenantTestSecurity;
 import com.ses.dto.attendance.sync.AttendanceSyncResultDto;
 import com.ses.dto.attendance.sync.ExternalAttendanceRecord;
 import org.junit.jupiter.api.AfterEach;
@@ -19,9 +21,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
@@ -73,6 +72,7 @@ class AttendanceSyncServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         systemConfigService.put("attendance.sync.provider", "mock", "test");
         mockAttendanceProvider.reset();
         String name = "T072-" + System.nanoTime();
@@ -87,13 +87,11 @@ class AttendanceSyncServiceTest {
 
     @AfterEach
     void tearDown() {
-        SecurityContextHolder.clearContext();
+        TenantTestSecurity.clear();
     }
 
     private void authenticate(long userId, String role) {
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(userId, "test",
-                        List.of(new SimpleGrantedAuthority("ROLE_" + role))));
+        TenantTestSecurity.bindAs(userId, String.valueOf(userId), "default", role);
     }
 
     private AttendanceMonth insertMonth(String status, String month) {

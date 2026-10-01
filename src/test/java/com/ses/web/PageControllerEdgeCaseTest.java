@@ -1,6 +1,7 @@
 package com.ses.web;
 
 import com.ses.BaseIntegrationTest;
+import com.ses.test.DisableDefaultTenantTestContext;
 import jakarta.servlet.RequestDispatcher;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ public class PageControllerEdgeCaseTest extends BaseIntegrationTest {
     private MockMvc mockMvc;
 
     @Test
+    @DisableDefaultTenantTestContext
     @DisplayName("Directly hit /error without attributes should return 500 error page")
     void testDirectErrorEndpoint() throws Exception {
         mockMvc.perform(get("/error"))
@@ -29,6 +31,7 @@ public class PageControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisableDefaultTenantTestContext
     @DisplayName("Hit /error with simulated 404 status code")
     void testErrorEndpointWith404() throws Exception {
         mockMvc.perform(get("/error")
@@ -40,6 +43,7 @@ public class PageControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisableDefaultTenantTestContext
     @DisplayName("Hit /error with simulated 403 status code")
     void testErrorEndpointWith403() throws Exception {
         mockMvc.perform(get("/error")
@@ -51,6 +55,7 @@ public class PageControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisableDefaultTenantTestContext
     @DisplayName("Hit /error with simulated 400 status code")
     void testErrorEndpointWith400() throws Exception {
         mockMvc.perform(get("/error")
@@ -62,6 +67,7 @@ public class PageControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisableDefaultTenantTestContext
     @DisplayName("Hit /error for API request (JSON) should return JSON")
     void testErrorEndpointForApiJson() throws Exception {
         mockMvc.perform(get("/error")
@@ -74,6 +80,7 @@ public class PageControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisableDefaultTenantTestContext
     @DisplayName("Hit /error with X-Requested-With header should return JSON")
     void testErrorEndpointForAjax() throws Exception {
         mockMvc.perform(get("/error")
@@ -94,6 +101,7 @@ public class PageControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisableDefaultTenantTestContext
     @DisplayName("Unauthenticated request to protected endpoint should redirect to login (or 401 if API)")
     void testUnauthenticatedRequestToProtectedEndpoint() throws Exception {
         // Assuming /api/dashboard or similar requires authentication
@@ -102,6 +110,7 @@ public class PageControllerEdgeCaseTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisableDefaultTenantTestContext
     @DisplayName("Unauthenticated request to non-existent endpoint should redirect to login (or 401 if API)")
     void testUnauthenticatedRequestToNonExistentEndpoint() throws Exception {
         mockMvc.perform(get("/api/another-non-existent-endpoint"))

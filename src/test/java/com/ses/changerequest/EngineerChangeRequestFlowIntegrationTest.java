@@ -2,6 +2,7 @@ package com.ses.changerequest;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
+import com.ses.config.LoginUser;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.ApprovalRoute;
 import com.ses.entity.ApprovalRouteStep;
@@ -30,6 +31,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -57,9 +59,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Transactional
 class EngineerChangeRequestFlowIntegrationTest {
 
+    private static final long LEGAL_ENTITY_ID = 1L;
+    private static final String ORGANIZATION_CODE = "CR-FLOW-TEST";
+    private Long organizationId;
+
     @BeforeEach
     void bindDefaultTenant() {
         AccountingTenantContextHolder.setTenantId("default");
+        organizationId = ensureOrganizationFixture();
     }
 
     @AfterEach
@@ -96,6 +103,8 @@ class EngineerChangeRequestFlowIntegrationTest {
     private SkillTagMapper skillTagMapper;
     @Autowired
     private NotificationMapper notificationMapper;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void 職務経歴変更申請でfingerprint競合時に再申請できる() {
@@ -128,7 +137,7 @@ class EngineerChangeRequestFlowIntegrationTest {
         engineerCareerMapper.updateById(career);
 
         // 承認実行 -> 競合検知（ApprovalRequest.status が CONFLICT になる）
-        authenticate(approver, "管理者");
+        authenticate(approver, "HR");
         approvalEngineService.approve(submitted.approvalRequestId(), approver, "OK");
 
         ApprovalRequest ar = approvalRequestMapper.selectById(submitted.approvalRequestId());
@@ -139,7 +148,7 @@ class EngineerChangeRequestFlowIntegrationTest {
         EngineerChangeRequestService.ChangeRequestDto resubmitted = changeRequestService.resubmit(engineerId, draft.id());
         assertEquals("申請中", resubmitted.status());
 
-        authenticate(approver, "管理者");
+        authenticate(approver, "HR");
         approvalEngineService.approve(resubmitted.approvalRequestId(), approver, "OK");
 
         authenticate(applicant, "要員");
@@ -195,7 +204,7 @@ class EngineerChangeRequestFlowIntegrationTest {
                 "profile.change", Map.of("phone", "090-1234-5678"));
         EngineerChangeRequestService.ChangeRequestDto submitted = changeRequestService.submit(engineerId, draft.id());
 
-        authenticate(approver, "管理者");
+        authenticate(approver, "HR");
         approvalEngineService.approve(submitted.approvalRequestId(), approver, "OK");
 
         Engineer updatedEngineer = engineerMapper.selectById(engineerId);
@@ -221,7 +230,7 @@ class EngineerChangeRequestFlowIntegrationTest {
         EngineerChangeRequestService.ChangeRequestDto submitted = changeRequestService.submit(engineerId, draft.id());
 
         // 承認前に管理者がSysUserのemailを直接更新
-        authenticate(approver, "管理者");
+        authenticate(approver, "HR");
         sysUserMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<com.ses.entity.SysUser>()
                 .eq("id", applicant)
                 .set("email", "concurrent-admin-changed@example.com"));
@@ -283,7 +292,7 @@ class EngineerChangeRequestFlowIntegrationTest {
         assertEquals("申請中", applied.status());
         assertNotNull(applied.approvalRequestId());
 
-        authenticate(approver, "管理者");
+        authenticate(approver, "HR");
         approvalEngineService.approve(applied.approvalRequestId(), approver, "OK");
 
         EngineerChangeRequest after = changeRequestMapper.selectById(draft.id());
@@ -324,7 +333,7 @@ class EngineerChangeRequestFlowIntegrationTest {
         current.setPrefecture("東京");
         engineerMapper.updateById(current);
 
-        authenticate(approver, "管理者");
+        authenticate(approver, "HR");
         approvalEngineService.approve(applied.approvalRequestId(), approver, "承認");
         ApprovalRequest approval = approvalRequestMapper.selectById(applied.approvalRequestId());
         assertEquals("conflict", approval.getStatus());
@@ -334,7 +343,7 @@ class EngineerChangeRequestFlowIntegrationTest {
         // 再申請（engineが最新fingerprintで再snapshot）→ 承認 → 反映
         authenticate(applicant, "要員");
         changeRequestService.resubmit(engineerId, draft.id());
-        authenticate(approver, "管理者");
+        authenticate(approver, "HR");
         approvalEngineService.approve(applied.approvalRequestId(), approver, "再承認");
         assertEquals("反映済", changeRequestMapper.selectById(draft.id()).getStatus());
         assertEquals("変更駅", engineerMapper.selectById(engineerId).getNearestStation());
@@ -379,7 +388,7 @@ class EngineerChangeRequestFlowIntegrationTest {
                         Map.of("skillId", tagId, "proficiency", "上級", "experienceYears", 4))));
         EngineerChangeRequestService.ChangeRequestDto applied = changeRequestService.submit(engineerId, draft.id());
 
-        authenticate(approver, "管理者");
+        authenticate(approver, "HR");
         approvalEngineService.approve(applied.approvalRequestId(), approver, "OK");
 
         EngineerSkill after = engineerSkillMapper.selectOne(new LambdaQueryWrapper<EngineerSkill>()
@@ -439,6 +448,7 @@ class EngineerChangeRequestFlowIntegrationTest {
 
     long insertUser() {
         SysUser user = SysUser.builder()
+                .tenantId("default")
                 .username("cr-" + System.nanoTime())
                 .password("x")
                 .realName("変更申請テスト")
@@ -446,12 +456,35 @@ class EngineerChangeRequestFlowIntegrationTest {
                 .status(1)
                 .build();
         sysUserMapper.insert(user);
+        jdbcTemplate.update("INSERT INTO t_user_organization "
+                        + "(tenant_id, user_id, organization_id, primary_flag, valid_from, version, deleted_flag) "
+                        + "VALUES ('default', ?, ?, 1, CURRENT_DATE, 0, 0)",
+                user.getId(), organizationId);
         return user.getId();
+    }
+
+    private Long ensureOrganizationFixture() {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM m_organization_unit "
+                        + "WHERE legal_entity_id = ? AND code = ? AND deleted_flag = 0",
+                Integer.class, LEGAL_ENTITY_ID, ORGANIZATION_CODE);
+        if (count == null || count == 0) {
+            jdbcTemplate.update("INSERT INTO m_organization_unit "
+                            + "(tenant_id, legal_entity_id, code, name, type, valid_from, status, version, deleted_flag) "
+                            + "VALUES (?, ?, ?, '変更申請フローテスト法人', '法人', "
+                            + "DATE '2020-01-01', '有効', 0, 0)",
+                    1L, LEGAL_ENTITY_ID, ORGANIZATION_CODE);
+        }
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM m_organization_unit "
+                        + "WHERE legal_entity_id = ? AND code = ? AND deleted_flag = 0",
+                Long.class, LEGAL_ENTITY_ID, ORGANIZATION_CODE);
     }
 
     long createEngineer() {
         Engineer engineer = Engineer.builder()
                 .tenantId("default")
+                .legalEntityId(LEGAL_ENTITY_ID)
                 .fullName("変更申請要員-" + System.nanoTime())
                 .fullNameKana("ヘンコウ")
                 .employmentType("正社員")
@@ -469,6 +502,7 @@ class EngineerChangeRequestFlowIntegrationTest {
         engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
                 .eq(EngineerAccountLink::getSysUserId, sysUserId));
         EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId("default");
         link.setEngineerId(engineerId);
         link.setSysUserId(sysUserId);
         engineerAccountLinkMapper.insert(link);
@@ -505,10 +539,13 @@ class EngineerChangeRequestFlowIntegrationTest {
     }
 
     void authenticate(long userId, String role) {
+        SysUser user = sysUserMapper.selectById(userId);
+        user.setTenantId("default");
+        user.setRole(role);
+        LoginUser principal = new LoginUser(user,
+                List.of(new SimpleGrantedAuthority("ROLE_" + role)), "default");
         UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                String.valueOf(userId), "n/a",
-                List.of(new SimpleGrantedAuthority("ROLE_" + role)));
-        auth.setDetails(Map.of("tenant_id", "default"));
+                principal, "n/a", principal.getAuthorities());
         SecurityContextHolder.getContext().setAuthentication(auth);
     }
 }

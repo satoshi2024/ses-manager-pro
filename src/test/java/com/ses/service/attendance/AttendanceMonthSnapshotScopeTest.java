@@ -12,13 +12,13 @@ import com.ses.mapper.OrganizationUnitMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.AttendanceService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,9 +49,14 @@ class AttendanceMonthSnapshotScopeTest {
     @Autowired
     private UserOrganizationMapper userOrganizationMapper;
 
+    @BeforeEach
+    void bindTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
     @AfterEach
     void clearSecurityContext() {
-        SecurityContextHolder.clearContext();
+        TenantTestSecurity.clear();
     }
 
     @Test
@@ -106,8 +111,6 @@ class AttendanceMonthSnapshotScopeTest {
     }
 
     private void authenticate(SysUser user) {
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(String.valueOf(user.getId()), "n/a",
-                        List.of(new SimpleGrantedAuthority("ROLE_HR"))));
+        TenantTestSecurity.bindAs(user.getId(), user.getUsername(), "default", "HR");
     }
 }

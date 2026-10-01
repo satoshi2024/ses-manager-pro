@@ -4,14 +4,18 @@ import com.ses.common.exception.BusinessException;
 import com.ses.entity.Customer;
 import com.ses.entity.DigitalInvoice;
 import com.ses.entity.IntegrationJob;
+import com.ses.entity.Invoice;
 import com.ses.entity.PeppolParticipant;
 import com.ses.service.CustomerService;
 import com.ses.service.DigitalInvoiceService;
+import com.ses.service.InvoiceService;
 import com.ses.service.PeppolParticipantService;
 import com.ses.service.integration.IntegrationJobService;
 import com.ses.service.invoice.provider.DigitalInvoiceProvider;
 import com.ses.test.MySQLContainer;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +28,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -82,6 +88,9 @@ class DigitalInvoiceEnqueueConcurrentTest {
     @Autowired
     private IntegrationJobService integrationJobService;
 
+    @Autowired
+    private InvoiceService invoiceService;
+
     @MockBean
     private DigitalInvoiceProvider digitalInvoiceProvider;
 
@@ -93,6 +102,12 @@ class DigitalInvoiceEnqueueConcurrentTest {
 
     private final AtomicReference<Long> customerIdRef = new AtomicReference<>();
     private final AtomicReference<Long> invoiceIdRef = new AtomicReference<>();
+
+    @BeforeEach
+    void setUpTenantScope() {
+        TenantTestSecurity.bindAs("default", "管理者");
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
+    }
 
     @AfterEach
     void cleanup() {
@@ -107,6 +122,7 @@ class DigitalInvoiceEnqueueConcurrentTest {
                         diId);
             }
             jdbcTemplate.update("DELETE FROM t_digital_invoice WHERE invoice_id = ?", invoiceId);
+            jdbcTemplate.update("DELETE FROM t_invoice WHERE id = ?", invoiceId);
         }
         Long customerId = customerIdRef.getAndSet(null);
         if (customerId != null) {
@@ -115,6 +131,7 @@ class DigitalInvoiceEnqueueConcurrentTest {
                     customerId);
             jdbcTemplate.update("DELETE FROM m_customer WHERE id = ?", customerId);
         }
+        TenantTestSecurity.clear();
     }
 
     @Test
@@ -139,11 +156,22 @@ class DigitalInvoiceEnqueueConcurrentTest {
         pp.setVerifiedAt(LocalDateTime.now());
         pp.setParticipantId("concurrent-peppol-" + UUID.randomUUID());
         pp.setSchemeId("0192");
-        pp.setProvider("FASTACCOUNTING");
-        pp.setStatus("ACTIVE");
+        pp.setProvider("FAST_ACCOUNTING");
+        pp.setStatus("VERIFIED");
         peppolParticipantService.save(pp);
 
-        long invoiceId = 8_800_000L + (System.nanoTime() % 1_000_000L);
+        Invoice invoice = new Invoice();
+        invoice.setInvoiceNo("NF09-C-" + System.nanoTime());
+        invoice.setCustomerId(c.getId());
+        invoice.setBillingMonth("2026-08");
+        invoice.setSubtotal(new BigDecimal("1000"));
+        invoice.setTax(new BigDecimal("100"));
+        invoice.setTotal(new BigDecimal("1100"));
+        invoice.setTaxRate(new BigDecimal("0.10"));
+        invoice.setStatus("未送付");
+        invoice.setIssuedDate(LocalDate.now());
+        invoiceService.save(invoice);
+        long invoiceId = invoice.getId();
         invoiceIdRef.set(invoiceId);
 
         CountDownLatch ready = new CountDownLatch(2);
@@ -159,6 +187,7 @@ class DigitalInvoiceEnqueueConcurrentTest {
                 futures.add(executor.submit(() -> {
                     ready.countDown();
                     try {
+                        TenantTestSecurity.bindAs("default", "管理者");
                         assertTrue(start.await(10, TimeUnit.SECONDS));
                         digitalInvoiceService.enqueueInvoiceForSend(invoiceId, "1.1.3", c.getId());
                         success.incrementAndGet();
@@ -170,6 +199,8 @@ class DigitalInvoiceEnqueueConcurrentTest {
                         }
                     } catch (Throwable t) {
                         otherErrors.add(t);
+                    } finally {
+                        TenantTestSecurity.clear();
                     }
                 }));
             }
@@ -194,7 +225,8 @@ class DigitalInvoiceEnqueueConcurrentTest {
         assertEquals(1, sendRows);
 
         long jobs = integrationJobService.lambdaQuery()
-                .eq(IntegrationJob::getIdempotencyKey, "digital_invoice_send_" + invoiceId + "_Standard_1.1.3_g0")
+                .eq(IntegrationJob::getIdempotencyKey,
+                        "digital_invoice_send_default_1_" + invoiceId + "_Standard_1.1.3_g0")
                 .count();
         assertEquals(1, jobs);
     }

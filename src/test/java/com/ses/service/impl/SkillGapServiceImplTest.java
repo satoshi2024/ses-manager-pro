@@ -14,6 +14,7 @@ import com.ses.mapper.ProjectSkillEventMapper;
 import com.ses.mapper.SkillGapSnapshotMapper;
 import com.ses.service.SkillGapService;
 import com.ses.service.SkillGapTaxonomyResolver;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -40,6 +41,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
+@EnableDefaultTenantTestContext
 class SkillGapServiceImplTest {
 
     private static final LocalDate FEATURE_START = LocalDate.of(2026, 8, 28);

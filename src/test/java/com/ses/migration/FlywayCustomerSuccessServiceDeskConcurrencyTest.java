@@ -392,15 +392,15 @@ class FlywayCustomerSuccessServiceDeskConcurrencyTest {
     @Test
     void MySQLで20並行トランザクションによる同月リクエスト採番と一意性を検証しロールバックで汚染されないこと() throws Exception {
         migrate();
-        long customerId = insertCustomer(88004L, "採番並行テスト顧客");
+        long customerId = insertCustomer(88005L, "採番並行テスト顧客");
 
         String month = "202609";
 
         // 事前初期化（テーブル行の作成）
         try (Connection connection = MYSQL.createConnection("")) {
             try (PreparedStatement stmt = connection.prepareStatement(
-                    "INSERT INTO t_service_request_sequence (sequence_month, current_val, updated_at) "
-                            + "VALUES (?, 0, NOW()) ON DUPLICATE KEY UPDATE sequence_month = sequence_month")) {
+                    "INSERT INTO t_service_request_sequence (tenant_id, request_month, last_number, updated_at) "
+                            + "VALUES ('default', ?, 0, NOW()) ON DUPLICATE KEY UPDATE tenant_id = tenant_id")) {
                 stmt.setString(1, month);
                 stmt.executeUpdate();
             }
@@ -427,15 +427,16 @@ class FlywayCustomerSuccessServiceDeskConcurrencyTest {
 
         try (Connection connection = MYSQL.createConnection(""); Statement stmt = connection.createStatement()) {
             assertEquals(1, queryInt(stmt, "SELECT COUNT(*) FROM t_service_request WHERE customer_id = " + customerId));
-            assertEquals(1, queryInt(stmt, "SELECT current_val FROM t_service_request_sequence WHERE sequence_month = '" + month + "'"));
+            assertEquals(1, queryInt(stmt, "SELECT last_number FROM t_service_request_sequence "
+                    + "WHERE tenant_id = 'default' AND request_month = '" + month + "'"));
         }
 
         // --- 2. 20並行トランザクションによる採番・一意性検証 ---
         String testMonth = "202610";
         try (Connection connection = MYSQL.createConnection("")) {
             try (PreparedStatement stmt = connection.prepareStatement(
-                    "INSERT INTO t_service_request_sequence (sequence_month, current_val, updated_at) "
-                            + "VALUES (?, 0, NOW()) ON DUPLICATE KEY UPDATE sequence_month = sequence_month")) {
+                    "INSERT INTO t_service_request_sequence (tenant_id, request_month, last_number, updated_at) "
+                            + "VALUES ('default', ?, 0, NOW()) ON DUPLICATE KEY UPDATE tenant_id = tenant_id")) {
                 stmt.setString(1, testMonth);
                 stmt.executeUpdate();
             }
@@ -491,20 +492,22 @@ class FlywayCustomerSuccessServiceDeskConcurrencyTest {
             assertEquals(concurrency, queryInt(stmt,
                     "SELECT COUNT(*) FROM t_service_request WHERE request_no LIKE 'REQ-" + testMonth + "-%'"));
             assertEquals(concurrency, queryInt(stmt,
-                    "SELECT current_val FROM t_service_request_sequence WHERE sequence_month = '" + testMonth + "'"));
+                    "SELECT last_number FROM t_service_request_sequence "
+                            + "WHERE tenant_id = 'default' AND request_month = '" + testMonth + "'"));
         }
     }
 
     private static int allocateSequence(Connection connection, String month) throws SQLException {
         try (PreparedStatement insert = connection.prepareStatement(
-                "INSERT INTO t_service_request_sequence (sequence_month, current_val, updated_at) "
-                        + "VALUES (?, 0, NOW()) ON DUPLICATE KEY UPDATE sequence_month = sequence_month")) {
+                "INSERT INTO t_service_request_sequence (tenant_id, request_month, last_number, updated_at) "
+                        + "VALUES ('default', ?, 0, NOW()) ON DUPLICATE KEY UPDATE tenant_id = tenant_id")) {
             insert.setString(1, month);
             insert.executeUpdate();
         }
         int currentVal = 0;
         try (PreparedStatement select = connection.prepareStatement(
-                "SELECT current_val FROM t_service_request_sequence WHERE sequence_month = ? FOR UPDATE")) {
+                "SELECT last_number FROM t_service_request_sequence "
+                        + "WHERE tenant_id = 'default' AND request_month = ? FOR UPDATE")) {
             select.setString(1, month);
             try (ResultSet rs = select.executeQuery()) {
                 if (rs.next()) {
@@ -514,7 +517,8 @@ class FlywayCustomerSuccessServiceDeskConcurrencyTest {
         }
         int nextVal = currentVal + 1;
         try (PreparedStatement update = connection.prepareStatement(
-                "UPDATE t_service_request_sequence SET current_val = ?, updated_at = NOW() WHERE sequence_month = ?")) {
+                "UPDATE t_service_request_sequence SET last_number = ?, updated_at = NOW() "
+                        + "WHERE tenant_id = 'default' AND request_month = ?")) {
             update.setInt(1, nextVal);
             update.setString(2, month);
             update.executeUpdate();

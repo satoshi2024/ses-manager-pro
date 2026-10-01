@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.security.test.context.support.WithAnonymousUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,6 +31,7 @@ class ActuatorHealthEndpointTest {
     private MockMvc mockMvc;
 
     @Test
+    @WithAnonymousUser
     @DisplayName("未認証で liveness / readiness が 200 UP、集約 health は status のみ（200 または 503）")
     void healthEndpoint_unauthenticated_returnsStatusUp() throws Exception {
         mockMvc.perform(get("/actuator/health/liveness"))

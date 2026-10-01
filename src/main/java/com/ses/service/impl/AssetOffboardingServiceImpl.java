@@ -14,7 +14,6 @@ import com.ses.mapper.AssetAssignmentMapper;
 import com.ses.mapper.AssetMapper;
 import com.ses.mapper.AssetOffboardingWaiverMapper;
 import com.ses.mapper.ApprovalRequestMapper;
-import com.ses.mapper.ExternalAccountReferenceMapper;
 import com.ses.mapper.LifecycleCaseMapper;
 import com.ses.mapper.LifecycleTaskMapper;
 import com.ses.mapper.LicenseAssignmentMapper;
@@ -40,7 +39,6 @@ import java.util.List;
 public class AssetOffboardingServiceImpl implements AssetOffboardingService {
 
     private final AssetAssignmentMapper assetAssignmentMapper;
-    private final ExternalAccountReferenceMapper externalAccountReferenceMapper;
     private final LicenseAssignmentMapper licenseAssignmentMapper;
     private final AssetMapper assetMapper;
     private final AssetOffboardingWaiverMapper assetOffboardingWaiverMapper;
@@ -63,7 +61,8 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
         List<AssetAssignment> activeAssignments = assetAssignmentMapper.selectActiveByAssignee("ENGINEER", engineerId);
 
         // 2. 未失効の外部アカウント（ACTIVE or SUSPENDED）
-        List<ExternalAccountReference> activeAccounts = externalAccountReferenceMapper.selectActiveByAssignee("ENGINEER", engineerId);
+        List<ExternalAccountReference> activeAccounts =
+                externalAccountService.getActiveAccountsByAssignee("ENGINEER", engineerId);
 
         // 3. 未解放のライセンス（ACTIVE）
         List<LicenseAssignment> activeLicenses = licenseAssignmentMapper.selectActiveByAssignee("ENGINEER", engineerId);
@@ -105,7 +104,8 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
         log.info("Triggering offboarding revocations for engineerId={}, actorUserId={}", engineerId, actorUserId);
 
         // 1. 外部アカウントの失効要求
-        List<ExternalAccountReference> activeAccounts = externalAccountReferenceMapper.selectActiveByAssignee("ENGINEER", engineerId);
+        List<ExternalAccountReference> activeAccounts =
+                externalAccountService.getActiveAccountsByAssignee("ENGINEER", engineerId);
         for (ExternalAccountReference acc : activeAccounts) {
             // 要求送信・確認・タイムアウト再試行の契約を共通サービスへ委譲する。
             externalAccountService.requestRevokeWithIdempotency(acc.getId(), acc.getIdempotencyKey(), actorUserId);

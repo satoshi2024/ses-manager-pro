@@ -41,6 +41,7 @@ import static org.mockito.Mockito.*;
 @Transactional
 @WithMockUser(username = "1", roles = "営業")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@com.ses.test.EnableDefaultTenantTestContext
 class CrmKpiScopeIntegrationTest {
     @Autowired private CrmKpiService crmKpiService;
     @Autowired private LeadService leadService;

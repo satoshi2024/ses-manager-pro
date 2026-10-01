@@ -182,13 +182,12 @@ public class CustomerContactServiceImpl implements CustomerContactService {
         if (customerMapper.selectByIdForUpdateForTenant(customerId, currentTenant()) == null) {
             throw BusinessException.of(404, "error.crm.customerNotFound");
         }
-        mapper.selectListForTenant(customerId, currentTenant(), null, null, null);
     }
 
     private void validatePrimaryPeriod(Long customerId, Long excludedId, Integer primaryFlag, String status,
                                        LocalDate from, LocalDate to) {
         if (!Integer.valueOf(1).equals(primaryFlag) || !"有効".equals(status)) return;
-        List<CustomerContact> contacts = mapper.selectListForTenant(customerId, currentTenant(), "有効", null, null)
+        List<CustomerContact> contacts = mapper.selectListForUpdateForTenant(customerId, currentTenant(), "有効")
                 .stream().filter(c -> Integer.valueOf(1).equals(c.getPrimaryFlag())
                         && !c.getValidFrom().isAfter(to == null ? LocalDate.of(9999, 12, 31) : to)
                         && (c.getValidTo() == null || !c.getValidTo().isBefore(from)))

@@ -42,7 +42,6 @@ class CustomerContactServiceImplTest {
     void rolesJsonは5値配列へ正規化して保存する() {
     CustomerContactServiceImpl service = service();
         CustomerContact saved = contact("[\"決裁者\",\"請求\"]");
-        when(mapper.selectListForTenant(any(), any(), any(), any(), any())).thenReturn(List.of());
         when(mapper.insert(any(CustomerContact.class))).thenAnswer(invocation -> {
             CustomerContact value = invocation.getArgument(0);
             value.setId(1L);
@@ -61,7 +60,6 @@ class CustomerContactServiceImplTest {
     @Test
     void 不正なrolesJsonは400で拒否する() {
         CustomerContactServiceImpl service = service();
-        when(mapper.selectListForTenant(any(), any(), any(), any(), any())).thenReturn(List.of());
         com.ses.dto.customer.CustomerContactSaveRequest request = request("決裁者,調達");
 
         var exception = assertThrows(com.ses.common.exception.BusinessException.class,

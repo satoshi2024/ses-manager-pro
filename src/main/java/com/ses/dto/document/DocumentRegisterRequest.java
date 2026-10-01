@@ -18,6 +18,9 @@ public class DocumentRegisterRequest {
     /** 呼び出し側が提示できる検証済みtenant。実際の採用値はcontextと一致する場合のみ。 */
     private String tenantId;
 
+    /** 呼び出し側で検証済みの法人境界。 */
+    private Long legalEntityId;
+
     /** 文書種別コード（m_document_type.code） */
     private String documentType;
 

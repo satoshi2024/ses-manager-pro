@@ -9,12 +9,15 @@ import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.OrganizationUnit;
 import com.ses.entity.SysUser;
+import com.ses.entity.UserOrganization;
 import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.OrganizationUnitMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.lifecycle.LifecycleCaseService;
 import com.ses.service.lifecycle.LifecycleTemplateService;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,6 +28,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -32,6 +36,7 @@ import java.util.List;
 
 import static org.hamcrest.Matchers.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -65,6 +70,9 @@ class MyLifecycleApiControllerTest {
     @Autowired
     private EngineerAccountLinkMapper engineerAccountLinkMapper;
 
+    @Autowired
+    private UserOrganizationMapper userOrganizationMapper;
+
     private SysUser adminUser;
     private SysUser engineerUser1;
     private SysUser engineerUser2;
@@ -79,6 +87,7 @@ class MyLifecycleApiControllerTest {
     void setUp() {
         long suffix = System.nanoTime();
         adminUser = SysUser.builder()
+                .tenantId("default")
                 .username("admin_my_test")
                 .password("pass")
                 .realName("管理者テスト")
@@ -88,6 +97,7 @@ class MyLifecycleApiControllerTest {
         sysUserMapper.insert(adminUser);
 
         SysUser hrUser = SysUser.builder()
+                .tenantId("default")
                 .username("hr_my_test")
                 .password("pass")
                 .realName("人事テスト")
@@ -97,6 +107,7 @@ class MyLifecycleApiControllerTest {
         sysUserMapper.insert(hrUser);
 
         engineerUser1 = SysUser.builder()
+                .tenantId("default")
                 .username("eng_user_01")
                 .password("pass")
                 .realName("要員テスト1")
@@ -106,6 +117,7 @@ class MyLifecycleApiControllerTest {
         sysUserMapper.insert(engineerUser1);
 
         engineerUser2 = SysUser.builder()
+                .tenantId("default")
                 .username("eng_user_02")
                 .password("pass")
                 .realName("要員テスト2")
@@ -115,6 +127,8 @@ class MyLifecycleApiControllerTest {
         sysUserMapper.insert(engineerUser2);
 
         OrganizationUnit org = OrganizationUnit.builder()
+                .tenantId(1L)
+                .legalEntityId(1L)
                 .code("ORG-MY-" + suffix)
                 .name("開発部-" + suffix)
                 .type("DEPARTMENT")
@@ -122,8 +136,14 @@ class MyLifecycleApiControllerTest {
                 .validFrom(LocalDate.now().minusYears(1))
                 .build();
         organizationUnitMapper.insert(org);
+        assignOrganization(adminUser.getId(), org.getId());
+        assignOrganization(hrUser.getId(), org.getId());
+        assignOrganization(engineerUser1.getId(), org.getId());
+        assignOrganization(engineerUser2.getId(), org.getId());
 
         engineer1 = Engineer.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
                 .fullName("要員テスト1-" + suffix)
                 .status("稼動中")
                 .employmentType("正社員")
@@ -132,6 +152,8 @@ class MyLifecycleApiControllerTest {
         engineerMapper.insert(engineer1);
 
         engineer2 = Engineer.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
                 .fullName("要員テスト2-" + suffix)
                 .status("稼動中")
                 .employmentType("正社員")
@@ -140,11 +162,13 @@ class MyLifecycleApiControllerTest {
         engineerMapper.insert(engineer2);
 
         EngineerAccountLink link1 = new EngineerAccountLink();
+        link1.setTenantId("default");
         link1.setEngineerId(engineer1.getId());
         link1.setSysUserId(engineerUser1.getId());
         engineerAccountLinkMapper.insert(link1);
 
         EngineerAccountLink link2 = new EngineerAccountLink();
+        link2.setTenantId("default");
         link2.setEngineerId(engineer2.getId());
         link2.setSysUserId(engineerUser2.getId());
         engineerAccountLinkMapper.insert(link2);
@@ -192,6 +216,22 @@ class MyLifecycleApiControllerTest {
         taskInternalId = caseDto.getTasks().stream().filter(t -> "INTERNAL_SECURITY_CHECK".equals(t.getTaskCode())).findFirst().get().getId();
     }
 
+    private void assignOrganization(Long userId, Long organizationId) {
+        userOrganizationMapper.insert(UserOrganization.builder()
+                .tenantId("default")
+                .userId(userId)
+                .organizationId(organizationId)
+                .primaryFlag(1)
+                .validFrom(LocalDate.now().minusYears(1))
+                .version(0)
+                .build());
+    }
+
+    private RequestPostProcessor asEngineer(SysUser user) {
+        return authentication(TenantTestSecurity.authentication(
+                user.getId(), user.getUsername(), "default", "要員"));
+    }
+
     @Test
     @DisplayName("A2-1: 要員本人画面 (/my/lifecycle, /my/lifecycle/{id}) のアクセス検証")
     @WithMockUser(username = "eng_user_01", roles = {"要員"})
@@ -210,14 +250,14 @@ class MyLifecycleApiControllerTest {
     @DisplayName("A2-2: 要員本人APIで自案件が取得でき、社内専用タスクとスナップショットが除外されていること")
     @WithMockUser(username = "eng_user_01", roles = {"要員"})
     void testListMyCasesAndConcealedInternalTasks() throws Exception {
-        mockMvc.perform(get("/api/my/lifecycle/cases"))
+        mockMvc.perform(get("/api/my/lifecycle/cases").with(asEngineer(engineerUser1)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data", hasSize(1)))
                 .andExpect(jsonPath("$.data[0].id").value(case1Id))
                 .andExpect(jsonPath("$.data[0].title").value("要員1入社手続き"));
 
-        mockMvc.perform(get("/api/my/lifecycle/cases/" + case1Id))
+        mockMvc.perform(get("/api/my/lifecycle/cases/" + case1Id).with(asEngineer(engineerUser1)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 // 公開タスク1件のみが含まれ、社内専用タスクは0件 (除外)
@@ -236,6 +276,7 @@ class MyLifecycleApiControllerTest {
                 .build();
 
         mockMvc.perform(post("/api/my/lifecycle/tasks/" + taskVisibleId + "/complete")
+                        .with(asEngineer(engineerUser1))
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(cmd)))
@@ -252,6 +293,7 @@ class MyLifecycleApiControllerTest {
                 .build();
 
         mockMvc.perform(post("/api/my/lifecycle/tasks/" + taskInternalId + "/complete")
+                        .with(asEngineer(engineerUser1))
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(cmd)))
@@ -263,7 +305,7 @@ class MyLifecycleApiControllerTest {
     @DisplayName("A2-5: 別要員 (eng_user_02) が他要員の案件詳細やタスクにアクセスした場合 404 で拒否されること")
     @WithMockUser(username = "eng_user_02", roles = {"要員"})
     void testRejectAccessToOtherEngineerCase() throws Exception {
-        mockMvc.perform(get("/api/my/lifecycle/cases/" + case1Id))
+        mockMvc.perform(get("/api/my/lifecycle/cases/" + case1Id).with(asEngineer(engineerUser2)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404));
 
@@ -272,6 +314,7 @@ class MyLifecycleApiControllerTest {
                 .build();
 
         mockMvc.perform(post("/api/my/lifecycle/tasks/" + taskVisibleId + "/complete")
+                        .with(asEngineer(engineerUser2))
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(cmd)))

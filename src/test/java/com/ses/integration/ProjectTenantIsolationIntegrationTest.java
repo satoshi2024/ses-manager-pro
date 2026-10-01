@@ -145,6 +145,7 @@ class ProjectTenantIsolationIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    @com.ses.test.DisableDefaultTenantTestContext
     void 検索はtenant欠落でfailClosedしmismatch案件を返さない() {
         Customer nullTenantCustomer = customer(null, "検索用NULL顧客");
         project(nullTenantCustomer.getId(), "案件NULL検索");

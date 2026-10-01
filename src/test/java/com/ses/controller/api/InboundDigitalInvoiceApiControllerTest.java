@@ -4,6 +4,9 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.DigitalInvoice;
 import com.ses.service.DigitalInvoiceService;
+import com.ses.test.TenantTestSecurity;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -41,6 +44,16 @@ class InboundDigitalInvoiceApiControllerTest {
 
     @MockBean
     private DigitalInvoiceService digitalInvoiceService;
+
+    @BeforeEach
+    void tenant付き認証主体を設定する() {
+        TenantTestSecurity.bind("default");
+    }
+
+    @AfterEach
+    void tenant付き認証主体を破棄する() {
+        TenantTestSecurity.clear();
+    }
 
     @Test
     @WithMockUser(roles = "マネージャー")

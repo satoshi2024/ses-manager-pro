@@ -3,8 +3,6 @@ package com.ses.controller.api;
 import com.ses.entity.Customer;
 import com.ses.entity.OrganizationUnit;
 import com.ses.entity.Project;
-import com.ses.entity.SysUser;
-import com.ses.config.LoginUser;
 import com.ses.service.CustomerService;
 import com.ses.service.EngineerService;
 import com.ses.service.ProjectService;
@@ -12,14 +10,13 @@ import com.ses.service.SysUserService;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
 import com.ses.service.CostCenterService;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.test.web.servlet.MockMvc;
@@ -91,7 +88,7 @@ class AutocompleteApiControllerTest {
         Project project = new Project();
         project.setId(20L);
         project.setProjectName("基幹システム移行");
-        when(projectMapper.selectOwnedProjectIds("default")).thenReturn(Set.of(20L));
+        when(tenantOwnershipResolver.resolveProjectIds("default")).thenReturn(Set.of(20L));
         when(projectMapper.selectByIdsForTenant("default", Set.of(20L))).thenReturn(List.of(project));
 
         mockMvc.perform(get("/api/autocomplete/project-options").with(authentication("管理者")))
@@ -134,16 +131,7 @@ class AutocompleteApiControllerTest {
     }
 
     private RequestPostProcessor authentication(String role) {
-        SysUser user = new SysUser();
-        user.setId(1L);
-        user.setUsername("autocomplete-test-user");
-        user.setPassword("password");
-        user.setRole(role);
-        user.setStatus(1);
-        user.setTenantId("default");
-        LoginUser principal = new LoginUser(user,
-                List.of(new SimpleGrantedAuthority("ROLE_" + role)));
         return SecurityMockMvcRequestPostProcessors.authentication(
-                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+                TenantTestSecurity.authentication(1L, "autocomplete-test-user", "default", role));
     }
 }

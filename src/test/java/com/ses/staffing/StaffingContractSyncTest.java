@@ -11,12 +11,15 @@ import com.ses.mapper.ProjectPositionMapper;
 import com.ses.service.ContractService;
 import com.ses.service.ProposalService;
 import com.ses.service.staffing.StaffingContractSyncService;
+import com.ses.test.EnableDefaultTenantTestContext;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.transaction.BeforeTransaction;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -37,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional
+@EnableDefaultTenantTestContext
 class StaffingContractSyncTest {
 
     @Autowired
@@ -67,6 +71,12 @@ class StaffingContractSyncTest {
     private long projectId;
     private long positionId;
     private String suffix;
+
+    // 更新処理のREQUIRES_NEWから参照できるよう、法人fixtureをテストtx開始前に確定する。
+    @BeforeTransaction
+    void ensureLegalEntityBeforeTransaction() {
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
+    }
 
     @BeforeEach
     void setUp() {

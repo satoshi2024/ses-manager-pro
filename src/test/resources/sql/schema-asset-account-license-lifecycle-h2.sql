@@ -161,6 +161,8 @@ CREATE TABLE IF NOT EXISTS m_external_account_system (
 
 CREATE TABLE IF NOT EXISTS t_external_account_reference (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(100) NULL,
+    legal_entity_id BIGINT NULL,
     system_id BIGINT NOT NULL,
     account_identifier VARCHAR(255) NOT NULL,
     assignee_type VARCHAR(32) NOT NULL,
@@ -168,7 +170,7 @@ CREATE TABLE IF NOT EXISTS t_external_account_reference (
     permission_level VARCHAR(64),
     status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
     provisioned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    idempotency_key VARCHAR(128) UNIQUE,
+    idempotency_key VARCHAR(128),
     retry_count INT NOT NULL DEFAULT 0,
     next_retry_at TIMESTAMP,
     last_error_message VARCHAR(500),
@@ -185,6 +187,7 @@ CREATE TABLE IF NOT EXISTS t_external_account_reference (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_flag INT NOT NULL DEFAULT 0,
+    CONSTRAINT uq_ext_scope_idempotency UNIQUE (tenant_id, legal_entity_id, idempotency_key),
     CONSTRAINT ck_ext_revoke_actor_type CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED')),
     CONSTRAINT ck_ext_revoke_confirmation_source CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED')),
     CONSTRAINT ck_ext_revoke_attribution CHECK (
@@ -198,6 +201,14 @@ CREATE TABLE IF NOT EXISTS t_external_account_reference (
     ),
     CONSTRAINT ck_ext_revoke_status_attribution CHECK (status IS NOT NULL AND (status <> 'REVOKED' OR (revoke_confirmed_at IS NOT NULL AND actor_type IS NOT NULL AND confirmation_source IS NOT NULL)))
 );
+
+-- V1を先に読むSpringBootテストでも既存tableへNF09 scope列を反映する。
+ALTER TABLE t_external_account_reference ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100);
+ALTER TABLE t_external_account_reference ADD COLUMN IF NOT EXISTS legal_entity_id BIGINT;
+ALTER TABLE t_external_account_reference DROP CONSTRAINT IF EXISTS uq_ext_idempotency;
+DROP INDEX IF EXISTS uq_ext_idempotency;
+ALTER TABLE t_external_account_reference ADD CONSTRAINT IF NOT EXISTS uq_ext_scope_idempotency
+    UNIQUE (tenant_id, legal_entity_id, idempotency_key);
 
 CREATE TABLE IF NOT EXISTS m_license_plan (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

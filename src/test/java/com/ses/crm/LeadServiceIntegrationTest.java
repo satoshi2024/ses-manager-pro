@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Transactional
 @WithMockUser(username = "admin", roles = "管理者")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@com.ses.test.EnableDefaultTenantTestContext
 class LeadServiceIntegrationTest {
     @Autowired private LeadService leadService;
     @Autowired private CustomerMapper customerMapper;

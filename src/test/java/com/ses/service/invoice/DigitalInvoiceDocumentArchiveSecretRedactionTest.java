@@ -27,6 +27,7 @@ import com.ses.service.security.FileScanner;
 import com.ses.SesManagerApplication;
 import com.ses.entity.FileSecurityMetadata;
 import com.ses.service.storage.DocumentStorage;
+import com.ses.test.TenantTestSecurity;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -38,6 +39,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.InputStream;
@@ -82,6 +84,9 @@ class DigitalInvoiceDocumentArchiveSecretRedactionTest {
 
     @Autowired
     private DigitalInvoiceService digitalInvoiceService;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private DocumentService documentService;
@@ -130,6 +135,9 @@ class DigitalInvoiceDocumentArchiveSecretRedactionTest {
 
     @BeforeEach
     void setUp() {
+        TenantTestSecurity.bindAs("default", "管理者");
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
+        registerInboundParticipants("nf09-doc-receiver", "nf09-doc-supplier");
         appender = new ListAppender<>();
         appender.start();
 
@@ -156,6 +164,7 @@ class DigitalInvoiceDocumentArchiveSecretRedactionTest {
         digitalInvoiceLogger.detachAppender(appender);
         rootLogger.detachAppender(appender);
         appender.stop();
+        TenantTestSecurity.clear();
     }
 
     @Test
@@ -198,8 +207,9 @@ class DigitalInvoiceDocumentArchiveSecretRedactionTest {
                 .when(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
 
         assertThrows(BusinessException.class, () ->
-                digitalInvoiceService.processInboundInvoice("prov-inbound-secret-msg-1", "evt-inbound-secret-1",
-                        "<Invoice/>", "hash123", LocalDateTime.now()));
+                processInboundAsProvider("prov-inbound-secret-msg-1", "evt-inbound-secret-1",
+                        inboundXml("INV-DOC-SECRET", "nf09-doc-receiver", "nf09-doc-supplier"),
+                        "hash123", LocalDateTime.now()));
 
         // ログの検証
         assertNoSecretsInAppenderLogs();
@@ -243,9 +253,13 @@ class DigitalInvoiceDocumentArchiveSecretRedactionTest {
     @DisplayName("受信XMLはINVOICE_INとして実DBへ保存される")
     void 受信XMLを実DocumentService経由で保存し文書種別を確認する() {
         String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice>"
-                + "<ID>INV-ARCHIVE-IN-1</ID><IssueDate>2026-08-01</IssueDate></Invoice>";
+                + "<ID>INV-ARCHIVE-IN-1</ID><IssueDate>2026-08-01</IssueDate>"
+                + party("AccountingSupplierParty", "nf09-doc-supplier")
+                + party("AccountingCustomerParty", "nf09-doc-receiver")
+                + "<LegalMonetaryTotal><TaxInclusiveAmount>100</TaxInclusiveAmount></LegalMonetaryTotal>"
+                + "</Invoice>";
 
-        digitalInvoiceService.processInboundInvoice("provider-persist-in", "event-persist-in", xml,
+        processInboundAsProvider("provider-persist-in", "event-persist-in", xml,
                 org.apache.commons.codec.digest.DigestUtils.sha256Hex(xml), LocalDateTime.of(2026, 8, 2, 10, 0));
 
         DigitalInvoice saved = digitalInvoiceService.lambdaQuery()
@@ -256,6 +270,35 @@ class DigitalInvoiceDocumentArchiveSecretRedactionTest {
         assertThat(document.getDocumentType()).isEqualTo("INVOICE_IN");
         assertThat(document.getDirection()).isEqualTo("INCOMING");
         assertThat(documentVersionMapper.findLatestByDocumentId(document.getId())).isNotNull();
+    }
+
+    @Test
+    @DisplayName("受信XMLの要員リンクは同一tenant・法人のBP所属だけを採用する")
+    void 受信XMLの要員リンクは同一scopeだけを採用する() {
+        jdbcTemplate.update("INSERT INTO t_engineer "
+                + "(id, tenant_id, legal_entity_id, full_name, employment_type, status, deleted_flag, version) "
+                + "VALUES (99101, 'other-tenant', 2, '他tenant要員', 'BP', '稼動中', 0, 0), "
+                + "(99102, 'default', 1, '同一scope要員', 'BP', '稼動中', 0, 0)");
+        jdbcTemplate.update("INSERT INTO t_engineer_bp_affiliation "
+                + "(id, tenant_id, engineer_id, bp_company_id, valid_from, valid_to, deleted_flag) "
+                + "VALUES (99101, 1, 99101, 2, '2026-01-01', NULL, 0), "
+                + "(99102, 1, 99102, 2, '2026-01-01', NULL, 0)");
+
+        String xml = inboundXml("INV-SCOPED-DOC-LINK", "nf09-doc-receiver", "nf09-doc-supplier");
+        processInboundAsProvider(
+                "provider-scoped-doc-link", "event-scoped-doc-link", xml,
+                org.apache.commons.codec.digest.DigestUtils.sha256Hex(xml),
+                LocalDateTime.of(2026, 8, 2, 11, 0));
+
+        DigitalInvoice saved = digitalInvoiceService.lambdaQuery()
+                .eq(DigitalInvoice::getProviderMessageId, "provider-scoped-doc-link").one();
+        assertThat(saved).isNotNull();
+        List<java.util.Map<String, Object>> links = jdbcTemplate.queryForList(
+                "SELECT target_type, target_id FROM t_document_link WHERE document_id = ?",
+                saved.getXmlDocumentId());
+        assertThat(links).hasSize(1);
+        assertThat(links.get(0).get("TARGET_TYPE")).isEqualTo("ENGINEER");
+        assertThat(((Number) links.get(0).get("TARGET_ID")).longValue()).isEqualTo(99102L);
     }
 
     @Test
@@ -349,6 +392,44 @@ class DigitalInvoiceDocumentArchiveSecretRedactionTest {
         pp.setParticipantId(participantId);
         peppolParticipantService.save(pp);
         return pp;
+    }
+
+    private void registerInboundParticipants(String receiverId, String supplierId) {
+        peppolParticipantService.save(inboundParticipant("ORGANIZATION", 1L, receiverId));
+        peppolParticipantService.save(inboundParticipant("BP_COMPANY", 2L, supplierId));
+    }
+
+    private PeppolParticipant inboundParticipant(String ownerType, Long ownerId, String participantId) {
+        PeppolParticipant participant = new PeppolParticipant();
+        participant.setOwnerType(ownerType);
+        participant.setOwnerId(ownerId);
+        participant.setSchemeId("0188");
+        participant.setParticipantId(participantId);
+        participant.setProvider("FAST_ACCOUNTING");
+        participant.setStatus("VERIFIED");
+        participant.setVerifiedAt(LocalDateTime.now());
+        return participant;
+    }
+
+    private String inboundXml(String invoiceNo, String receiverId, String supplierId) {
+        return "<Invoice><ID>" + invoiceNo + "</ID><IssueDate>2026-08-01</IssueDate>"
+                + party("AccountingSupplierParty", supplierId)
+                + party("AccountingCustomerParty", receiverId)
+                + "<LegalMonetaryTotal><TaxInclusiveAmount>100</TaxInclusiveAmount></LegalMonetaryTotal>"
+                + "</Invoice>";
+    }
+
+    private void processInboundAsProvider(String providerMessageId, String eventId, String xml,
+                                          String payloadHash, LocalDateTime eventAt) {
+        com.ses.common.audit.ExecutionActorContext.runAsProviderCallback(
+                "test-provider-callback", eventId,
+                () -> digitalInvoiceService.processInboundInvoice(
+                        providerMessageId, eventId, xml, payloadHash, eventAt));
+    }
+
+    private String party(String partyName, String participantId) {
+        return "<" + partyName + "><Party><EndpointID schemeID=\"0188\">"
+                + participantId + "</EndpointID></Party></" + partyName + ">";
     }
 
     private Invoice createInvoice(Customer c, String invoiceNo) {

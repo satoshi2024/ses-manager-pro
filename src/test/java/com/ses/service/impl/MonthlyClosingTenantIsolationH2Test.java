@@ -35,6 +35,7 @@ import static org.mockito.Mockito.doNothing;
 @ActiveProfiles("test")
 @Transactional
 @Sql("/sql/engineer-schema-h2.sql")
+@com.ses.test.DisableDefaultTenantTestContext
 class MonthlyClosingTenantIsolationH2Test {
 
     private static final String MONTH = "2026-08";

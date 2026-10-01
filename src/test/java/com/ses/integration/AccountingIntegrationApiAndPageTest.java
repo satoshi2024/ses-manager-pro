@@ -39,6 +39,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
+@com.ses.test.EnableDefaultTenantTestContext
 class AccountingIntegrationApiAndPageTest {
 
     @Autowired
@@ -273,6 +274,8 @@ class AccountingIntegrationApiAndPageTest {
     @DisplayName("マネージャースコープ空組織境界: 組織未所属マネージャーは0件返却・詳細404 (R1-P1-06 / design §5.2)")
     @WithMockUser(username = "isolated_manager", roles = {"マネージャー"})
     void managerScope_emptyOrgs_returnsZeroRows() throws Exception {
+        com.ses.test.TenantTestSecurity.bindAs(
+                990001L, "isolated_manager", "default", "マネージャー");
         // 接続一覧: 空リストが返る
         mockMvc.perform(get("/api/accounting/connections"))
                 .andExpect(status().isOk())

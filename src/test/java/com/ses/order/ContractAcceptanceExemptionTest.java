@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Transactional
 @DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_CLASS)
 @Sql(scripts = "/sql/engineer-schema-h2.sql")
+@com.ses.test.EnableDefaultTenantTestContext
 class ContractAcceptanceExemptionTest {
 
     @Autowired ContractService contractService;
@@ -39,6 +40,7 @@ class ContractAcceptanceExemptionTest {
 
     @BeforeEach
     void setUp() {
+        com.ses.test.TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
         String suffix = "-" + System.nanoTime();
         jdbcTemplate.update("INSERT INTO m_customer (tenant_id, company_name, trust_level, deleted_flag) VALUES ('default', ?, 'B', 0)", "EX顧客" + suffix);
         customerId = jdbcTemplate.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, "EX顧客" + suffix);

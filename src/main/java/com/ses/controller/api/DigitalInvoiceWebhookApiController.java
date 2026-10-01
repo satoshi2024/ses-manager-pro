@@ -84,8 +84,7 @@ public class DigitalInvoiceWebhookApiController {
                 String xmlContent = root.path("xmlContent").asText();
                 String rawPayloadHash = org.apache.commons.codec.digest.DigestUtils.sha256Hex(rawBody);
                 digitalInvoiceService.processInboundInvoice(providerMessageId, eventId, xmlContent, rawPayloadHash, eventAt);
-                DigitalInvoice received = digitalInvoiceService.lambdaQuery()
-                        .eq(DigitalInvoice::getProviderMessageId, providerMessageId).one();
+                DigitalInvoice received = digitalInvoiceService.getForProviderCallback(providerMessageId);
                 if (received != null) {
                     CorrelationContext.put(CorrelationContext.DIGITAL_INVOICE_ID, received.getId());
                 }
@@ -93,9 +92,7 @@ public class DigitalInvoiceWebhookApiController {
             }
             
             // 送信済みインボイスの検索
-            DigitalInvoice di = digitalInvoiceService.lambdaQuery()
-                    .eq(DigitalInvoice::getProviderMessageId, providerMessageId)
-                    .one();
+            DigitalInvoice di = digitalInvoiceService.getForProviderCallback(providerMessageId);
                     
             if (di == null) {
                 // 不明なインボイスは処理せず、再送を防止する。

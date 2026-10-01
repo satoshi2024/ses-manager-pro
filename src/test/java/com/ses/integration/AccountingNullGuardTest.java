@@ -4,6 +4,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.entity.BpPayment;
 import com.ses.entity.ExpenseRequest;
 import com.ses.service.accounting.PurchaseExpensePaymentIntegrationService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +54,7 @@ class AccountingNullGuardTest {
     }
 
     @Test
+    @EnableDefaultTenantTestContext
     @DisplayName("NULL金額・NULL発生日の経費申請は enqueue 時に拒否される (R1-P1-08)")
     void expenseNullAmountAndDate_rejected() {
         ExpenseRequest nullAmount = new ExpenseRequest();

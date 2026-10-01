@@ -6,6 +6,7 @@ import com.ses.dto.cloudsign.CloudSignFile;
 import com.ses.dto.cloudsign.CloudSignParticipant;
 import com.ses.entity.ContractDocument;
 import com.ses.mapper.ContractDocumentMapper;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +38,7 @@ import static org.mockito.Mockito.*;
         "cloudsign.dispatch-cron=-",
         "cloudsign.poll-cron=-"
 })
+@EnableDefaultTenantTestContext
 @ActiveProfiles("test")
 @Sql("/sql/engineer-schema-h2.sql")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)

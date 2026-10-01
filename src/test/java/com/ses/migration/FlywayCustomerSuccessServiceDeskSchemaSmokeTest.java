@@ -40,8 +40,8 @@ class FlywayCustomerSuccessServiceDeskSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertTrue(Integer.parseInt(latestVersion) >= 157,
-                    "NF02境界・添付補償・通知tenant migration以降まで適用されていること");
+            assertEquals("182", latestVersion,
+                    "NF02境界・添付補償・通知tenant migrationを含む最新版まで適用されていること");
 
             for (String table : new String[]{
                     "m_service_sla_policy", "t_service_request", "t_service_sla_clock",
@@ -53,8 +53,10 @@ class FlywayCustomerSuccessServiceDeskSchemaSmokeTest {
             }
 
             // 採番シーケンス管理テーブル列
-            assertColumnExists(statement, "t_service_request_sequence", "sequence_month");
-            assertColumnExists(statement, "t_service_request_sequence", "current_val");
+            assertColumnExists(statement, "t_service_request_sequence", "tenant_id");
+            assertColumnExists(statement, "t_service_request_sequence", "request_month");
+            assertColumnExists(statement, "t_service_request_sequence", "last_number");
+            assertColumnExists(statement, "t_service_request_sequence", "created_at");
             assertColumnExists(statement, "t_service_request_sequence", "updated_at");
 
             // スナップショットの非破壊リビジョン管理列

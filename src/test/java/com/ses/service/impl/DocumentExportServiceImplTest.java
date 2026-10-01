@@ -6,6 +6,7 @@ import com.ses.entity.DocumentVersion;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.storage.DocumentStorage;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -28,6 +29,7 @@ import static org.mockito.Mockito.when;
  * Task B2 DocumentExportServiceImpl テスト。
  */
 @ExtendWith(MockitoExtension.class)
+@EnableDefaultTenantTestContext
 class DocumentExportServiceImplTest {
 
     @Mock DocumentMapper documentMapper;

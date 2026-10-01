@@ -9,6 +9,7 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.service.BatchOperationService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.DataScopeService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,7 @@ import static org.mockito.BDDMockito.given;
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional
+@EnableDefaultTenantTestContext
 public class BatchOperationServiceH2Test {
 
     @Autowired

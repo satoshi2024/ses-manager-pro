@@ -1,19 +1,19 @@
 package com.ses.crm;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.ses.common.exception.BusinessException;
 import com.ses.dto.customer.CustomerContactSaveRequest;
 import com.ses.entity.Customer;
 import com.ses.entity.CustomerContact;
 import com.ses.mapper.CustomerContactMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.service.CustomerContactService;
+import com.ses.test.EnableDefaultTenantTestContext;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -22,7 +22,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
-import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 有限期間の主担当を空顧客へ同時作成した場合の親行ロックを実MySQLで検証する。 */
@@ -37,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
+@EnableDefaultTenantTestContext
 class CustomerContactPrimaryConcurrencyTest {
 
     @Container
@@ -67,6 +69,8 @@ class CustomerContactPrimaryConcurrencyTest {
     void simultaneousFinitePrimaryCreationAllowsOnlyOneWriter() throws Exception {
         Customer customer = new Customer();
         customer.setCompanyName("同時主担当検証社");
+        customer.setTenantId("default");
+        customer.setLegalEntityId(1L);
         customerMapper.insert(customer);
 
         CustomerContactSaveRequest request = new CustomerContactSaveRequest();
@@ -82,7 +86,7 @@ class CustomerContactPrimaryConcurrencyTest {
         CountDownLatch start = new CountDownLatch(1);
         CountDownLatch done = new CountDownLatch(threads);
         AtomicInteger successCount = new AtomicInteger();
-        AtomicInteger failureCount = new AtomicInteger();
+        ConcurrentLinkedQueue<Throwable> failures = new ConcurrentLinkedQueue<>();
 
         Runnable createTask = () -> {
             try {
@@ -91,31 +95,31 @@ class CustomerContactPrimaryConcurrencyTest {
                 start.await();
                 customerContactService.create(customer.getId(), request);
                 successCount.incrementAndGet();
-            } catch (Exception e) {
-                failureCount.incrementAndGet();
+            } catch (Throwable e) {
+                failures.add(e);
             } finally {
-                SecurityContextHolder.clearContext();
+                TenantTestSecurity.clear();
                 done.countDown();
             }
         };
 
         executor.submit(createTask);
         executor.submit(createTask);
-        assertTrue(ready.await(10, TimeUnit.SECONDS), "2 transactionが開始待ちになるはず");
+        assertTrue(ready.await(10, TimeUnit.SECONDS), "2 transactionが開始待ちになるはず: " + failures);
         start.countDown();
         assertTrue(done.await(20, TimeUnit.SECONDS), "2 transactionが完了するはず");
         executor.shutdownNow();
 
-        assertEquals(1, successCount.get(), "同時作成では主担当1件だけが成功するはず");
-        assertEquals(1, failureCount.get(), "重複期間側は明示的に失敗するはず");
+        assertEquals(1, successCount.get(), "同時作成では主担当1件だけが成功するはず: " + failures);
+        assertEquals(1, failures.size(), "重複期間側は明示的に失敗するはず: " + failures);
+        BusinessException overlap = assertInstanceOf(BusinessException.class, failures.peek());
+        assertEquals("error.crm.primaryContactOverlap", overlap.getMessageKey());
         assertEquals(1, customerContactMapper.selectCount(new LambdaQueryWrapper<CustomerContact>()
                 .eq(CustomerContact::getCustomerId, customer.getId())),
                 "失敗transactionはcontactを残してはいけない");
     }
 
     private void setAdminContext() {
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken("admin", null,
-                        List.of(new SimpleGrantedAuthority("ROLE_管理者"))));
+        TenantTestSecurity.bindAs(1L, "admin", "default", "管理者");
     }
 }

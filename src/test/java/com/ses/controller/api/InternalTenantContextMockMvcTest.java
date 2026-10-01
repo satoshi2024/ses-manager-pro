@@ -1,5 +1,7 @@
 package com.ses.controller.api;
 
+import com.ses.test.DisableDefaultTenantTestContext;
+
 import com.ses.config.LoginUser;
 import com.ses.config.OidcLoginUser;
 import com.ses.config.OidcSecurityProperties;
@@ -45,6 +47,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
+@DisableDefaultTenantTestContext
 class InternalTenantContextMockMvcTest {
 
     @Autowired

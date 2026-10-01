@@ -34,6 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
+@com.ses.test.DisableDefaultTenantTestContext
 class PortalAdminApiTest extends PortalTestSupport {
 
     @Autowired
@@ -71,11 +72,13 @@ class PortalAdminApiTest extends PortalTestSupport {
     }
 
     private org.springframework.test.web.servlet.request.RequestPostProcessor adminUser() {
-        return user("admin").roles("管理者");
+        return authentication(com.ses.test.TenantTestSecurity.authentication(
+                1L, "admin", "default", "管理者"));
     }
 
     private org.springframework.test.web.servlet.request.RequestPostProcessor salesUser() {
-        return user("sales").roles("営業");
+        return authentication(com.ses.test.TenantTestSecurity.authentication(
+                2L, "sales", "default", "営業"));
     }
 
     private long insertCustomerOrg() {

@@ -55,10 +55,10 @@ class FlywaySelfServiceSchemaSmokeTest {
                 .migrate();
 
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
-            // ---- 最新version=149（repeatable migration（version=NULL）を除く） ----
+            // ---- 最新version=182（repeatable migration（version=NULL）を除く） ----
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("149", latestVersion, "最新のマイグレーションバージョンは149であること");
+            assertEquals("182", latestVersion, "最新のマイグレーションバージョンは182であること");
 
             for (String table : new String[]{
                     "t_engineer_change_request", "t_expense_request", "t_expense_accounting_job",
@@ -168,16 +168,16 @@ class FlywaySelfServiceSchemaSmokeTest {
                     + "VALUES (" + engineerId + ", '2026-08-01', '交通費', 1500)");
             long expenseId = queryLong(statement,
                     "SELECT id FROM t_expense_request WHERE engineer_id=" + engineerId + " AND amount=1500");
-            statement.executeUpdate("INSERT INTO t_expense_accounting_job (expense_request_id, payload_hash) "
-                    + "VALUES (" + expenseId + ", '" + "a".repeat(64) + "')");
+            statement.executeUpdate("INSERT INTO t_expense_accounting_job (tenant_id, expense_request_id, payload_hash) "
+                    + "VALUES ('default', " + expenseId + ", '" + "a".repeat(64) + "')");
             long jobId = queryLong(statement,
                     "SELECT id FROM t_expense_accounting_job WHERE expense_request_id=" + expenseId);
             statement.executeUpdate("UPDATE t_expense_request SET accounting_job_id=" + jobId
                     + " WHERE id=" + expenseId);
             boolean duplicateJobRejected = false;
             try {
-                statement.executeUpdate("INSERT INTO t_expense_accounting_job (expense_request_id, payload_hash) "
-                        + "VALUES (" + expenseId + ", '" + "b".repeat(64) + "')");
+                statement.executeUpdate("INSERT INTO t_expense_accounting_job (tenant_id, expense_request_id, payload_hash) "
+                        + "VALUES ('default', " + expenseId + ", '" + "b".repeat(64) + "')");
             } catch (SQLException expected) {
                 duplicateJobRejected = true;
             }
@@ -304,7 +304,7 @@ class FlywaySelfServiceSchemaSmokeTest {
         try (Connection connection = LEGACY_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("149", latestVersion, "legacy DBの最新マイグレーションバージョンは149であること");
+            assertEquals("182", latestVersion, "legacy DBの最新マイグレーションバージョンは182であること");
 
             for (String table : new String[]{
                     "t_engineer_change_request", "t_expense_request", "t_expense_accounting_job",

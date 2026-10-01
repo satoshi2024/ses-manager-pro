@@ -11,6 +11,7 @@ import com.ses.mapper.ApprovalRouteStepMapper;
 import com.ses.mapper.BpAvailabilityMapper;
 import com.ses.service.approval.ApprovalEngineService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -48,6 +49,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
+@com.ses.test.DisableDefaultTenantTestContext
 class PortalBpApiTest extends PortalTestSupport {
 
     @Autowired
@@ -66,6 +68,12 @@ class PortalBpApiTest extends PortalTestSupport {
     @Override
     protected JdbcTemplate jdbcTemplate() {
         return jdbcTemplate;
+    }
+
+    @BeforeEach
+    void ensurePortalLegalEntityFixture() {
+        // portal principalもavailability登録時は一意の法人へfail-closedで束縛される。
+        com.ses.test.TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
     }
 
     private String unique() {
@@ -119,27 +127,29 @@ class PortalBpApiTest extends PortalTestSupport {
     }
 
     private long insertEngineer() {
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, tenant_id) VALUES (?, '正社員', 'Bench', 'default')",
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, tenant_id, legal_entity_id) "
+                        + "VALUES (?, '正社員', 'Bench', 'default', 1)",
                 "bp-portal-engineer-" + unique());
         return jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_engineer", Long.class);
     }
 
     private long insertProject(long customerId) {
-        jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) VALUES (?, ?, '募集中')",
+        jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status, legal_entity_id) "
+                        + "VALUES (?, ?, '募集中', 1)",
                 "bp-portal-project-" + unique(), customerId);
         return jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_project", Long.class);
     }
 
     /** work record＋BP支払行を作る（発注相当）。 */
     private long seedBpPayment(long bpCompanyId) {
-        jdbcTemplate.update("INSERT INTO m_customer (company_name, tenant_id) VALUES (?, 'default')",
+        jdbcTemplate.update("INSERT INTO m_customer (company_name, tenant_id, legal_entity_id) VALUES (?, 'default', 1)",
                 "bp-portal-customer-" + unique());
         long customerId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM m_customer", Long.class);
         long engineerId = insertEngineer();
         long projectId = insertProject(customerId);
         jdbcTemplate.update("INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, status,"
-                        + " start_date, end_date, selling_price, cost_price, acceptance_required, tenant_id)"
-                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, 1, 'default')",
+                        + " start_date, end_date, selling_price, cost_price, acceptance_required, tenant_id, legal_entity_id)"
+                        + " VALUES (?, ?, ?, ?, '稼動中', '2026-01-01', '2026-12-31', 900000, 600000, 1, 'default', 1)",
                 "BP-CONTRACT-" + unique(), engineerId, projectId, customerId);
         long contractId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM t_contract", Long.class);
         jdbcTemplate.update("INSERT INTO t_work_record (contract_id, work_month, actual_hours, billing_amount,"

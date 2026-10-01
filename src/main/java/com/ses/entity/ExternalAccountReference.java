@@ -19,6 +19,12 @@ import java.time.LocalDateTime;
 @TableName("t_external_account_reference")
 public class ExternalAccountReference extends BaseEntity {
 
+    /** 所有tenant。NULLのlegacy行は業務処理対象へ入れない。 */
+    private String tenantId;
+
+    /** 所有法人。NULLのlegacy行は業務処理対象へ入れない。 */
+    private Long legalEntityId;
+
     /**
      * 外部システムID (m_external_account_system.id)
      */

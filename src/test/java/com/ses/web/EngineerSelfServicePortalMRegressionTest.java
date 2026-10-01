@@ -166,6 +166,9 @@ class EngineerSelfServicePortalMRegressionTest {
         managerUserId = insertUser("マネージャー", "manager");
 
         orgId = createOrg();
+        assignManager(adminUserId, orgId);
+        assignManager(hrUserId, orgId);
+        assignManager(salesUserId, orgId);
         assignManager(managerUserId, orgId);
 
         userIdA = insertUser("要員", "engineerA");
@@ -723,6 +726,7 @@ class EngineerSelfServicePortalMRegressionTest {
                 .status("稼動中")
                 .nearestStation("新宿駅")
                 .organizationId(organizationId)
+                .legalEntityId(70003L)
                 .tenantId("default")
                 .experienceYears(3)
                 .build();

@@ -18,6 +18,7 @@ import com.ses.service.NotificationService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.impl.CashFlowForecastServiceImpl;
 import com.ses.service.impl.MonthlyRevenueCalcServiceImpl;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -43,6 +44,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
+@EnableDefaultTenantTestContext
 class CashFlowForecastServiceTest {
 
     @Mock

@@ -14,6 +14,8 @@ import com.ses.mapper.LifecycleTemplateMapper;
 import com.ses.service.provider.ExternalAccountProviderClient;
 import com.ses.service.provider.impl.MockExternalAccountProviderClientImpl;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Propagation;
@@ -27,6 +29,34 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @DisplayName("Asset Offboarding & Provider Integration Tests (退社ゲート・プロバイダ連携)")
 class AssetOffboardingServiceTest extends BaseIntegrationTest {
+
+    @BeforeEach
+    void bindTenantAndSecurityContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+        SysUser user = SysUser.builder().tenantId("default").username("admin")
+                .role("管理者").status(1).build();
+        user.setId(1L);
+        com.ses.config.LoginUser principal = new com.ses.config.LoginUser(user,
+                List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_管理者")));
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        principal, null, principal.getAuthorities()));
+        if (organizationUnitMapper.selectCount(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<OrganizationUnit>()
+                        .eq(OrganizationUnit::getLegalEntityId, 1L)) == 0) {
+            organizationUnitMapper.insert(OrganizationUnit.builder()
+                    .tenantId(1L).legalEntityId(1L)
+                    .code("EXT_SCOPE_TEST").name("外部アカウント境界テスト法人")
+                    .type("COMPANY").validFrom(LocalDate.of(2020, 1, 1))
+                    .status("ACTIVE").version(0).build());
+        }
+    }
+
+    @AfterEach
+    void clearTenantAndSecurityContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
 
     @Autowired
     private AssetOffboardingService assetOffboardingService;
@@ -42,6 +72,9 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
 
     @Autowired
     private ExternalAccountSystemMapper externalAccountSystemMapper;
+
+    @Autowired
+    private com.ses.mapper.OrganizationUnitMapper organizationUnitMapper;
 
     @Autowired
     private LicenseAssignmentMapper licenseAssignmentMapper;
@@ -173,6 +206,8 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
         externalAccountSystemMapper.insert(system);
 
         ExternalAccountReference ref = ExternalAccountReference.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
                 .systemId(system.getId())
                 .accountIdentifier("dev9902@ses-test.jp")
                 .assigneeType("ENGINEER")
@@ -242,11 +277,13 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
                 .build();
         externalAccountSystemMapper.insert(system);
         ExternalAccountReference failed = ExternalAccountReference.builder()
+                .tenantId("default").legalEntityId(1L)
                 .systemId(system.getId()).accountIdentifier("poll-failed@ses-test.jp")
                 .assigneeType("ENGINEER").assigneeId(9910L)
                 .status("PENDING_CONFIRMATION").retryCount(0)
                 .nextRetryAt(LocalDate.now().atStartOfDay()).build();
         ExternalAccountReference confirmed = ExternalAccountReference.builder()
+                .tenantId("default").legalEntityId(1L)
                 .systemId(system.getId()).accountIdentifier("poll-confirmed@ses-test.jp")
                 .assigneeType("ENGINEER").assigneeId(9911L)
                 .status("PENDING_CONFIRMATION").retryCount(0)

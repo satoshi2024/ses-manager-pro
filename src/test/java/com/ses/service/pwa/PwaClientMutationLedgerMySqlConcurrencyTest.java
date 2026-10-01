@@ -428,6 +428,7 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
 
     private Long seedEngineer() {
         Engineer engineer = Engineer.builder()
+                .tenantId("default")
                 .fullName("PWA concurrency engineer")
                 .employmentType("正社員")
                 .status("稼動中")

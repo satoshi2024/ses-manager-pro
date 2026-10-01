@@ -23,14 +23,12 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -79,10 +77,8 @@ class AiRecommendationRecorderHashTest {
     @WithMockUser(username = "1", roles = "管理者")
     void matchingのrunはallowlistのhashとgrain済み勤務地スキルを残す() {
         long stamp = System.nanoTime();
-        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("tenant-recorder");
-        ((org.springframework.security.authentication.AbstractAuthenticationToken)
-                SecurityContextHolder.getContext().getAuthentication())
-                .setDetails(Map.of("tenant_id", "tenant-recorder"));
+        com.ses.test.TenantTestSecurity.bindAs(
+                1L, "1", "tenant-recorder", "管理者");
 
         Engineer engineer = new Engineer();
         engineer.setTenantId("tenant-recorder");

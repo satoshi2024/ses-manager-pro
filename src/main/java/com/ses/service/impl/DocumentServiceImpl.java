@@ -64,6 +64,9 @@ public class DocumentServiceImpl implements DocumentService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private DocumentMetadataCommitService metadataCommitService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
     private final DocumentMapper documentMapper;
     private final DocumentVersionMapper documentVersionMapper;
     private final DocumentLinkMapper documentLinkMapper;
@@ -87,6 +90,9 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     /** FileScopeValidationService と同一の専用ACL文書種別（decision table §6.2）。 */
     private static final Set<String> FILE_SCOPE_SPECIAL_DOCUMENT_TYPES = Set.of(
             "PRIVATE_NOTE", "RECEIPT", "CHANGE_REQUEST_ATTACHMENT");
+    /** 電子インボイス原本はtenant内でも法人を越えて共有しない。 */
+    private static final Set<String> DIGITAL_INVOICE_DOCUMENT_TYPES = Set.of(
+            "INVOICE_IN", "INVOICE_OUT");
     // ----------------------------------------------------------------
     // 登録
     // ----------------------------------------------------------------
@@ -121,13 +127,15 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
         // 1. 冪等チェック（tenant_id対応）
         String tenantId = currentTenant(request);
+        Long legalEntityId = resolveRegistrationLegalEntity(request);
         DocumentVersion existingVersion = metadataCommitService == null
                 ? documentVersionMapper.findByIdempotencyKey(tenantId, sourceType, businessKey, discriminator)
                 : metadataCommitService.findByIdempotencyKey(tenantId, sourceType, businessKey, discriminator);
         if (existingVersion != null) {
             log.info("[文書台帳] 冪等登録: sourceType={} businessKey={} discriminator={} → 既存documentId={}",
                     sourceType, businessKey, discriminator, existingVersion.getDocumentId());
-            return getDocumentOrThrow(existingVersion.getDocumentId());
+            return getRegisteredDocumentOrThrow(
+                    existingVersion.getDocumentId(), tenantId, legalEntityId, request.getDocumentType());
         }
 
         // 2. 一時ファイルへストリーミング書き出し＆SHA-256ハッシュ算出（固定ヒープ化）
@@ -149,7 +157,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             }
             documentStorage.promote(storageKey);
 
-            Document doc = buildDocument(request, tenantId, actor);
+            Document doc = buildDocument(request, tenantId, legalEntityId, actor);
             DocumentVersion version = buildVersion(request, tenantId, null, storageKey,
                     streamResult.sizeBytes(), streamResult.sha256(), actor);
             version.setBusinessKey(businessKey);
@@ -170,7 +178,8 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                         throw duplicate;
                     }
                     cleanupStorageAfterFailure(storageKey);
-                    return getDocumentOrThrow(concurrent.getDocumentId());
+                    return getRegisteredDocumentOrThrow(
+                            concurrent.getDocumentId(), tenantId, legalEntityId, request.getDocumentType());
                 }
             } else {
                 // 直接生成された旧テストadapter向け。Spring経路は必ず上記commit serviceを使用する。
@@ -180,7 +189,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                 claimHashIfRequired(doc, streamResult.sha256());
                 documentVersionMapper.insert(version);
                 if (request.getTargetType() != null && request.getTargetId() != null) {
-                    link(doc.getId(), request.getTargetType(), request.getTargetId());
+                    linkWithinRegistration(doc.getId(), tenantId, request.getTargetType(), request.getTargetId());
                 }
                 recordAccessLog(doc.getId(), version.getId(), "REGISTER");
             }
@@ -218,6 +227,10 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         if (!tenantId.equals(doc.getTenantId())) {
             throw BusinessException.of(404, "error.document.notFound");
         }
+        if (isDigitalInvoiceDocument(doc)) {
+            Long requestedLegalEntityId = resolveRegistrationLegalEntity(request);
+            assertDocumentLegalEntity(doc, requestedLegalEntityId);
+        }
         String sourceType = request.getSourceType() != null ? request.getSourceType() : "RECEIVED";
         String direction = request.getDirection() != null ? request.getDirection()
                 : ("RECEIVED".equalsIgnoreCase(sourceType) ? "INCOMING" : "OUTGOING");
@@ -233,6 +246,9 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         DocumentVersion existing = documentVersionMapper.findByIdempotencyKey(
                 tenantId, sourceType, businessKey, discriminator);
         if (existing != null) {
+            if (!documentId.equals(existing.getDocumentId())) {
+                throw new BusinessException(409, "冪等性キーが別の文書版に割り当て済みです。");
+            }
             log.info("[文書台帳] 冪等addVersion: 既存versionId={}", existing.getId());
             return existing;
         }
@@ -360,14 +376,18 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     @Transactional(rollbackFor = Exception.class)
     public void link(Long documentId, String targetType, Long targetId) {
         getDocumentOrThrow(documentId);
+        linkWithinRegistration(documentId, currentTenant(null), targetType, targetId);
+    }
+
+    private void linkWithinRegistration(Long documentId, String tenantId, String targetType, Long targetId) {
         DocumentLink existing = documentLinkMapper.selectOne(new LambdaQueryWrapper<DocumentLink>()
-                .eq(DocumentLink::getTenantId, currentTenant(null))
+                .eq(DocumentLink::getTenantId, tenantId)
                 .eq(DocumentLink::getDocumentId, documentId)
                 .eq(DocumentLink::getTargetType, targetType)
                 .eq(DocumentLink::getTargetId, targetId));
         if (existing == null) {
             DocumentLink link = new DocumentLink();
-            link.setTenantId(currentTenant(null));
+            link.setTenantId(tenantId);
             link.setDocumentId(documentId);
             link.setTargetType(targetType);
             link.setTargetId(targetId);
@@ -599,7 +619,11 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                         .storageKey(v.getStorageKey())
                         .expectedSha256(v.getSha256())
                         .findingType("STORAGE_MISSING")
-                        .message("Storageに実体が見つかりません: " + e.getMessage())
+                        // Storage SDKの例外messageにはcredential、署名URL、内部pathが混入し得る。
+                        // findingには固定文言・例外型・関連IDだけを残す。
+                        .message("Storage実体の取得に失敗しました"
+                                + " (exceptionType=" + e.getClass().getSimpleName()
+                                + ", versionId=" + v.getId() + ")")
                         .build());
             }
         }
@@ -676,12 +700,33 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
     private Document getDocumentOrThrow(Long documentId) {
         String tenantId = currentTenant(null);
-        Document doc = documentMapper.selectOne(new LambdaQueryWrapper<Document>()
-                .eq(Document::getId, documentId).eq(Document::getTenantId, tenantId));
+        Document doc = getDocumentByTenant(documentId, tenantId);
         if (doc == null) {
             throw BusinessException.of(404, "error.document.notFound");
         }
+        assertDigitalInvoiceDocumentAccess(doc);
         return doc;
+    }
+
+    private Document getRegisteredDocumentOrThrow(
+            Long documentId, String tenantId, Long legalEntityId, String expectedDocumentType) {
+        Document doc = getDocumentByTenant(documentId, tenantId);
+        if (doc == null) {
+            throw BusinessException.of(404, "error.document.notFound");
+        }
+        if (!java.util.Objects.equals(expectedDocumentType, doc.getDocumentType())) {
+            throw new BusinessException(409, "冪等性キーが別の文書種別に割り当て済みです。");
+        }
+        if (DIGITAL_INVOICE_DOCUMENT_TYPES.contains(expectedDocumentType)) {
+            assertDocumentLegalEntity(doc, legalEntityId);
+        }
+        return doc;
+    }
+
+    private Document getDocumentByTenant(Long documentId, String tenantId) {
+        return documentMapper.selectOne(new LambdaQueryWrapper<Document>()
+                .eq(Document::getId, documentId)
+                .eq(Document::getTenantId, tenantId));
     }
 
     private DocumentDisposalRequest getDisposalRequestOrThrow(Long id) {
@@ -689,12 +734,16 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         if (req == null) {
             throw BusinessException.of(404, "error.document.disposalNotFound");
         }
+        // 申請IDだけで別法人の廃棄操作へ到達できないよう、親文書の境界も検証する。
+        getDocumentOrThrow(req.getDocumentId());
         return req;
     }
 
-    private Document buildDocument(DocumentRegisterRequest request, String tenantId, ActorAttribution actor) {
+    private Document buildDocument(DocumentRegisterRequest request, String tenantId, Long legalEntityId,
+                                   ActorAttribution actor) {
         Document doc = new Document();
         doc.setTenantId(tenantId);
+        doc.setLegalEntityId(legalEntityId == null ? null : String.valueOf(legalEntityId));
         doc.setDocumentType(request.getDocumentType());
         doc.setDocumentNo(request.getDocumentNo());
         doc.setTitle(request.getTitle());
@@ -797,6 +846,55 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             throw BusinessException.of(403, "error.tenant.mismatch");
         }
         return tenantId;
+    }
+
+    private Long resolveRegistrationLegalEntity(DocumentRegisterRequest request) {
+        if (request == null || !DIGITAL_INVOICE_DOCUMENT_TYPES.contains(request.getDocumentType())) {
+            return request == null ? null : request.getLegalEntityId();
+        }
+        Long requested = request.getLegalEntityId();
+        if (requested == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        ActorAttribution explicitActor = ExecutionActorContext.current();
+        if (explicitActor != null && (explicitActor.actorType() == ActorType.SYSTEM
+                || explicitActor.actorType() == ActorType.PROVIDER)) {
+            if (request.getActorType() != null && request.getActorType() != explicitActor.actorType()) {
+                throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_MISMATCH");
+            }
+            return requested;
+        }
+        Long authoritative = requireLegalEntityContextService().requireCurrentLegalEntityId();
+        if (!authoritative.equals(requested)) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_MISMATCH");
+        }
+        return authoritative;
+    }
+
+    private com.ses.service.security.LegalEntityContextService requireLegalEntityContextService() {
+        if (legalEntityContextService == null) {
+            throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        return legalEntityContextService;
+    }
+
+    private boolean isDigitalInvoiceDocument(Document doc) {
+        return doc != null && doc.getDocumentType() != null
+                && DIGITAL_INVOICE_DOCUMENT_TYPES.contains(doc.getDocumentType());
+    }
+
+    private void assertDigitalInvoiceDocumentAccess(Document doc) {
+        if (!isDigitalInvoiceDocument(doc)) {
+            return;
+        }
+        assertDocumentLegalEntity(doc, requireLegalEntityContextService().requireCurrentLegalEntityId());
+    }
+
+    private void assertDocumentLegalEntity(Document doc, Long expectedLegalEntityId) {
+        if (doc == null || expectedLegalEntityId == null || doc.getLegalEntityId() == null
+                || !String.valueOf(expectedLegalEntityId).equals(doc.getLegalEntityId())) {
+            throw BusinessException.of(404, "error.document.notFound");
+        }
     }
 
     /**
@@ -910,6 +1008,8 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>()
                 .eq(Document::getTenantId, currentTenant(null));
+
+        applyDigitalInvoiceLegalEntityFilter(wrapper);
 
         applyDataScopeFilter(wrapper);
 
@@ -1055,6 +1155,8 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     }
 
     public void assertDocumentAccessAllowed(Document doc) {
+        // 管理者も法人境界は越えない。歴史NULLは修復完了までfail-closedとする。
+        assertDigitalInvoiceDocumentAccess(doc);
         // FileScopeValidationService と同一の専用種別ACL（RECEIPT/CRA/PRIVATE_NOTE）。
         // リンク DataScope より先に適用し、営業が ENGINEER リンク経由で領収書へ到達できないようにする。
         if (doc != null && doc.getDocumentType() != null
@@ -1310,6 +1412,20 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                             .eq(Document::getDocumentType, "ACCEPTANCE")
                             .in(Document::getId, allowedAcceptanceDocIds)));
         }
+    }
+
+    private void applyDigitalInvoiceLegalEntityFilter(LambdaQueryWrapper<Document> wrapper) {
+        Long legalEntityId;
+        try {
+            legalEntityId = requireLegalEntityContextService().requireCurrentLegalEntityId();
+        } catch (BusinessException unresolved) {
+            // 法人を一意に解決できない利用者には電子インボイス原本だけを表示しない。
+            wrapper.notIn(Document::getDocumentType, DIGITAL_INVOICE_DOCUMENT_TYPES);
+            return;
+        }
+        wrapper.and(scope -> scope.notIn(Document::getDocumentType, DIGITAL_INVOICE_DOCUMENT_TYPES)
+                .or(invoice -> invoice.in(Document::getDocumentType, DIGITAL_INVOICE_DOCUMENT_TYPES)
+                        .eq(Document::getLegalEntityId, String.valueOf(legalEntityId))));
     }
 
     public static String computeSha256(byte[] data) {

@@ -33,6 +33,9 @@ public class CustomerSaveDto {
     @Size(max = 1, message = "信頼度ランクは1文字以内で入力してください")
     private String trustLevel;
 
+    @Size(max = 20, message = "送付方法は20文字以内で入力してください")
+    private String deliveryPreference;
+
     @Size(max = 1000, message = "備考は1000文字以内で入力してください")
     private String remarks;
 

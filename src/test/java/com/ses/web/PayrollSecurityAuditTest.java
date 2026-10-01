@@ -1,6 +1,7 @@
 package com.ses.web;
 
 import com.ses.service.FreeeIntegrationService;
+import com.ses.test.DisableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -185,6 +186,7 @@ class PayrollSecurityAuditTest {
     }
 
     @Test
+    @DisableDefaultTenantTestContext
     @DisplayName("未認証はpage/APIとも401（本アプリの既存契約）")
     void 未認証は拒否される() throws Exception {
         mockMvc.perform(get("/payroll")).andExpect(status().isUnauthorized());

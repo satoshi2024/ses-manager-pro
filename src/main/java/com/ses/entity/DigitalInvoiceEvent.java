@@ -10,6 +10,12 @@ public class DigitalInvoiceEvent {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 親デジタルインボイスから固定するテナント境界。 */
+    private String tenantId;
+
+    /** 親デジタルインボイスから固定する法人境界。 */
+    private Long legalEntityId;
+
     private Long digitalInvoiceId;
     private String providerEventId;
     private String eventType;

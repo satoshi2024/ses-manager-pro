@@ -1,7 +1,6 @@
 package com.ses.service.invoice;
 
 import com.ses.common.exception.BusinessException;
-import com.ses.entity.DigitalInvoice;
 import com.ses.service.DigitalInvoiceService;
 import com.ses.service.security.FileScanResult;
 import com.ses.service.security.FileScanner;
@@ -49,6 +48,13 @@ import static org.mockito.Mockito.when;
 @Testcontainers(disabledWithoutDocker = true)
 class DigitalInvoiceInboundMySqlConcurrencyTest {
 
+    private static final String TENANT = "nf09-tenant-a";
+    private static final long LEGAL_ENTITY = 1L;
+    private static final String RECEIVER_ID = "nf09-receiver-a";
+    private static final String SUPPLIER_ID = "nf09-supplier-a";
+    private static final String RECEIVER_ID_B = "nf09-receiver-b";
+    private static final String SUPPLIER_ID_B = "nf09-supplier-b";
+
     @Container
     @SuppressWarnings("resource")
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
@@ -79,6 +85,12 @@ class DigitalInvoiceInboundMySqlConcurrencyTest {
     @BeforeEach
     void setUp() throws Exception {
         dropFailureTriggers();
+        jdbcTemplate.update("DELETE FROM t_peppol_participant WHERE participant_id IN (?, ?, ?, ?)",
+                RECEIVER_ID, SUPPLIER_ID, RECEIVER_ID_B, SUPPLIER_ID_B);
+        insertParticipant(TENANT, LEGAL_ENTITY, "ORGANIZATION", 910001L, RECEIVER_ID);
+        insertParticipant(TENANT, LEGAL_ENTITY, "BP_COMPANY", 910002L, SUPPLIER_ID);
+        insertParticipant("nf09-tenant-b", 2L, "ORGANIZATION", 920001L, RECEIVER_ID_B);
+        insertParticipant("nf09-tenant-b", 2L, "BP_COMPANY", 920002L, SUPPLIER_ID_B);
         when(fileScanner.scan(any(Path.class), any())).thenReturn(FileScanResult.clean("nf09-test"));
         doNothing().when(documentStorage).put(any(String.class), any(InputStream.class), anyBoolean());
         doNothing().when(documentStorage).promote(any(String.class));
@@ -100,15 +112,17 @@ class DigitalInvoiceInboundMySqlConcurrencyTest {
                 + "WHERE d.document_type = 'INVOICE_IN' AND NOT EXISTS "
                 + "(SELECT 1 FROM t_document_version v WHERE v.document_id = d.id)");
         jdbcTemplate.update("DELETE FROM t_digital_invoice WHERE provider_message_id LIKE 'nf09-mysql-%'");
+        jdbcTemplate.update("DELETE FROM t_peppol_participant WHERE participant_id IN (?, ?, ?, ?)",
+                RECEIVER_ID, SUPPLIER_ID, RECEIVER_ID_B, SUPPLIER_ID_B);
     }
 
     @Test
     void 同一providerMessageIdの並行受信は一つのinvoice_event_documentへ収束する() throws Exception {
         String xml = xml("NF09-SAME-MESSAGE");
         List<Throwable> errors = runConcurrently(
-                () -> digitalInvoiceService.processInboundInvoice(
+                () -> processInboundAsProvider(
                         "nf09-mysql-same-message", "nf09-mysql-event-same", xml, "hash-same", LocalDateTime.now()),
-                () -> digitalInvoiceService.processInboundInvoice(
+                () -> processInboundAsProvider(
                         "nf09-mysql-same-message", "nf09-mysql-event-same", xml, "hash-same", LocalDateTime.now()));
 
         assertTrue(errors.isEmpty(), () -> "予期しない並行受信エラー: " + errors
@@ -123,11 +137,11 @@ class DigitalInvoiceInboundMySqlConcurrencyTest {
     @Test
     void 同一providerMessageIdでeventIdが異なる場合はfailClosedする() {
         String xml = xml("NF09-EVENT-ID-CONFLICT");
-        digitalInvoiceService.processInboundInvoice(
+        processInboundAsProvider(
                 "nf09-mysql-event-id-conflict", "nf09-mysql-event-one", xml, "hash-same", LocalDateTime.now());
 
         BusinessException error = assertThrows(BusinessException.class,
-                () -> digitalInvoiceService.processInboundInvoice(
+                () -> processInboundAsProvider(
                         "nf09-mysql-event-id-conflict", "nf09-mysql-event-two", xml, "hash-same", LocalDateTime.now()));
 
         assertEquals(409, error.getCode());
@@ -137,7 +151,7 @@ class DigitalInvoiceInboundMySqlConcurrencyTest {
     @Test
     void 不正XMLは実シリアライズ例外をcauseに保持して何も登録しない() {
         BusinessException error = assertThrows(BusinessException.class,
-                () -> digitalInvoiceService.processInboundInvoice(
+                () -> processInboundAsProvider(
                         "nf09-mysql-malformed", "nf09-mysql-malformed-event",
                         "<Invoice><ID>broken", "hash-malformed", LocalDateTime.now()));
 
@@ -148,12 +162,12 @@ class DigitalInvoiceInboundMySqlConcurrencyTest {
 
     @Test
     void 同一providerMessageIdでcanonicalXMLが異なる場合は既存archiveを変更せず拒否する() {
-        digitalInvoiceService.processInboundInvoice(
+        processInboundAsProvider(
                 "nf09-mysql-payload-conflict", "nf09-mysql-payload-event",
                 xml("NF09-PAYLOAD-ONE"), "hash-one", LocalDateTime.now());
 
         BusinessException error = assertThrows(BusinessException.class,
-                () -> digitalInvoiceService.processInboundInvoice(
+                () -> processInboundAsProvider(
                         "nf09-mysql-payload-conflict", "nf09-mysql-payload-event",
                         xml("NF09-PAYLOAD-TWO"), "hash-two", LocalDateTime.now()));
 
@@ -166,17 +180,19 @@ class DigitalInvoiceInboundMySqlConcurrencyTest {
 
     @Test
     void 既存送信電文と同じproviderMessageIdの受信は方向不一致で拒否する() {
-        DigitalInvoice outgoing = new DigitalInvoice();
-        outgoing.setDirection("SEND");
-        outgoing.setProviderMessageId("nf09-mysql-direction-conflict");
-        outgoing.setSpecificationVersion("1.1.3");
-        outgoing.setProfile("Standard");
-        outgoing.setMessageId("NF09-DIRECTION-CONFLICT");
-        outgoing.setStatus("SENT");
-        digitalInvoiceService.save(outgoing);
+        // 本テストの前提データは受信service境界を通さず、V182のactor pairを満たす形で固定する。
+        jdbcTemplate.update("""
+                INSERT INTO t_digital_invoice
+                    (tenant_id, legal_entity_id, direction, profile, specification_version,
+                     message_id, provider_message_id, status, actor_type, confirmation_source,
+                     created_at, updated_at)
+                VALUES (?, ?, 'SEND', 'Standard', '1.1.3', ?, ?, 'SENT',
+                        'LEGACY_UNRESOLVED', 'LEGACY_UNRESOLVED', NOW(), NOW())
+                """, TENANT, LEGAL_ENTITY, "NF09-DIRECTION-CONFLICT",
+                "nf09-mysql-direction-conflict");
 
         BusinessException error = assertThrows(BusinessException.class,
-                () -> digitalInvoiceService.processInboundInvoice(
+                () -> processInboundAsProvider(
                         "nf09-mysql-direction-conflict", "nf09-mysql-direction-event",
                         xml("NF09-DIRECTION-CONFLICT-IN"), "hash-direction", LocalDateTime.now()));
 
@@ -192,32 +208,46 @@ class DigitalInvoiceInboundMySqlConcurrencyTest {
     @Test
     void 異なるproviderMessageIdでも同一XMLmessageIdなら一つへ収束する() {
         String xml = xml("NF09-SAME-XML-ID");
-        digitalInvoiceService.processInboundInvoice(
+        processInboundAsProvider(
                 "nf09-mysql-message-a", "nf09-mysql-event-c", xml, "hash-xml", LocalDateTime.now());
-        digitalInvoiceService.processInboundInvoice(
+        processInboundAsProvider(
                 "nf09-mysql-message-b", "nf09-mysql-event-d", xml, "hash-xml", LocalDateTime.now());
 
         assertCounts("nf09-mysql-message-", 1, 1, 1);
     }
 
     @Test
+    void 同一businessIdでもreceiverScopeが異なれば別invoiceとして保存する() {
+        String invoiceNo = "NF09-SAME-BUSINESS-ID";
+        String xmlA = xml(invoiceNo, RECEIVER_ID, SUPPLIER_ID);
+        String xmlB = xml(invoiceNo, RECEIVER_ID_B, SUPPLIER_ID_B);
+
+        processInboundAsProvider(
+                "nf09-mysql-cross-scope-a", "nf09-mysql-cross-event-a",
+                xmlA, "hash-cross-a", LocalDateTime.now());
+        processInboundAsProvider(
+                "nf09-mysql-cross-scope-b", "nf09-mysql-cross-event-b",
+                xmlB, "hash-cross-b", LocalDateTime.now());
+
+        assertEquals(2L, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_digital_invoice WHERE message_id = ? AND direction = 'RECEIVE'",
+                Long.class, invoiceNo));
+        assertEquals(2L, jdbcTemplate.queryForObject(
+                "SELECT COUNT(DISTINCT CONCAT(tenant_id, ':', legal_entity_id)) "
+                        + "FROM t_digital_invoice WHERE message_id = ? AND direction = 'RECEIVE'",
+                Long.class, invoiceNo));
+    }
+
+    @Test
     void 同一providerEventIdでpayloadHashが異なる場合は409で既存eventを保持する() {
         String xml = xml("NF09-EVENT-CONFLICT");
-        digitalInvoiceService.processInboundInvoice(
+        processInboundAsProvider(
                 "nf09-mysql-event-message", "nf09-mysql-event-conflict", xml, "hash-original", LocalDateTime.now());
-        DigitalInvoice invoice = digitalInvoiceService.lambdaQuery()
-                .eq(DigitalInvoice::getProviderMessageId, "nf09-mysql-event-message").one();
-
-        var conflicting = new com.ses.entity.DigitalInvoiceEvent();
-        conflicting.setDigitalInvoiceId(invoice.getId());
-        conflicting.setProviderEventId("nf09-mysql-event-conflict");
-        conflicting.setEventType("RECEIVED");
-        conflicting.setEventAt(LocalDateTime.now());
-        conflicting.setPayloadHash("hash-tampered");
-        conflicting.setSignatureValid(true);
 
         BusinessException error = assertThrows(BusinessException.class,
-                () -> digitalInvoiceService.processProviderEvent(conflicting));
+                () -> processInboundAsProvider(
+                        "nf09-mysql-event-message", "nf09-mysql-event-conflict",
+                        xml, "hash-tampered", LocalDateTime.now()));
         assertEquals(409, error.getCode());
         assertEquals(1L, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_digital_invoice_event WHERE provider_event_id = ?",
@@ -229,7 +259,7 @@ class DigitalInvoiceInboundMySqlConcurrencyTest {
         doThrow(new IllegalStateException("archive-failure-secret"))
                 .when(documentStorage).put(any(String.class), any(InputStream.class), anyBoolean());
 
-        BusinessException error = assertThrows(BusinessException.class, () -> digitalInvoiceService.processInboundInvoice(
+        BusinessException error = assertThrows(BusinessException.class, () -> processInboundAsProvider(
                 "nf09-mysql-archive-failure", "nf09-mysql-event-failure-a",
                 xml("NF09-ARCHIVE-FAILURE"), "hash-failure", LocalDateTime.now()));
 
@@ -242,7 +272,7 @@ class DigitalInvoiceInboundMySqlConcurrencyTest {
     void business行insert失敗時はdocumentを残さない() {
         createBusinessInsertFailureTrigger();
 
-        assertThrows(RuntimeException.class, () -> digitalInvoiceService.processInboundInvoice(
+        assertThrows(RuntimeException.class, () -> processInboundAsProvider(
                 "nf09-mysql-business-failure", "nf09-mysql-event-failure-b",
                 xml("NF09-BUSINESS-FAILURE"), "hash-business", LocalDateTime.now()));
 
@@ -253,7 +283,7 @@ class DigitalInvoiceInboundMySqlConcurrencyTest {
     void eventinsert失敗時はinvoiceとdocumentを同時rollbackする() {
         createEventInsertFailureTrigger();
 
-        assertThrows(RuntimeException.class, () -> digitalInvoiceService.processInboundInvoice(
+        assertThrows(RuntimeException.class, () -> processInboundAsProvider(
                 "nf09-mysql-event-failure", "nf09-mysql-event-failure-c",
                 xml("NF09-EVENT-FAILURE"), "hash-event", LocalDateTime.now()));
 
@@ -275,9 +305,37 @@ class DigitalInvoiceInboundMySqlConcurrencyTest {
         jdbcTemplate.execute("DROP TRIGGER IF EXISTS nf09_event_insert_failure");
     }
 
+    private void processInboundAsProvider(String providerMessageId, String eventId, String xml,
+                                          String payloadHash, LocalDateTime eventAt) {
+        com.ses.common.audit.ExecutionActorContext.runAsProviderCallback(
+                "test-provider-callback", eventId,
+                () -> digitalInvoiceService.processInboundInvoice(
+                        providerMessageId, eventId, xml, payloadHash, eventAt));
+    }
+
     private String xml(String invoiceNo) {
+        return xml(invoiceNo, RECEIVER_ID, SUPPLIER_ID);
+    }
+
+    private String xml(String invoiceNo, String receiverId, String supplierId) {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice>"
-                + "<ID>" + invoiceNo + "</ID><IssueDate>2026-08-01</IssueDate></Invoice>";
+                + "<ID>" + invoiceNo + "</ID><IssueDate>2026-08-01</IssueDate>"
+                + "<AccountingSupplierParty><Party><EndpointID schemeID=\"0188\">" + supplierId
+                + "</EndpointID></Party></AccountingSupplierParty>"
+                + "<AccountingCustomerParty><Party><EndpointID schemeID=\"0188\">" + receiverId
+                + "</EndpointID></Party></AccountingCustomerParty>"
+                + "<LegalMonetaryTotal><TaxInclusiveAmount>100</TaxInclusiveAmount></LegalMonetaryTotal>"
+                + "</Invoice>";
+    }
+
+    private void insertParticipant(String tenantId, Long legalEntityId,
+                                   String ownerType, Long ownerId, String participantId) {
+        jdbcTemplate.update("""
+                INSERT INTO t_peppol_participant
+                    (tenant_id, legal_entity_id, owner_type, owner_id, scheme_id,
+                     participant_id, provider, status, verified_at, deleted_flag)
+                VALUES (?, ?, ?, ?, '0188', ?, 'FAST_ACCOUNTING', 'VERIFIED', NOW(), 0)
+                """, tenantId, legalEntityId, ownerType, ownerId, participantId);
     }
 
     private List<Throwable> runConcurrently(CheckedAction... actions) throws Exception {

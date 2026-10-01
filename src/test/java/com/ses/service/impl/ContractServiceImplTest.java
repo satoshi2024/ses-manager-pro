@@ -688,17 +688,20 @@ class ContractServiceImplTest {
         winner.setId(900L);
         winner.setOrderLineId(700L);
 
-        when(contractMapper.selectOne(any())).thenReturn(null, winner);
+        when(contractMapper.selectByOrderLineForTenant(700L, "tenant-a")).thenReturn(null);
+        when(contractMapper.selectByOrderLineForUpdateForTenant(700L, "tenant-a")).thenReturn(winner);
         when(projectMapper.selectById(9L)).thenReturn(project);
         when(engineerSalesService.findPrimarySalesUserId(2L)).thenReturn(null);
         when(contractMapper.selectMaxContractNoIncludingDeleted(anyString())).thenReturn(null);
         when(contractMapper.insert(any(Contract.class)))
                 .thenThrow(new org.springframework.dao.DataIntegrityViolationException("duplicate order_line_id"));
+        clearInvocations(contractMapper);
 
         Contract result = contractService.createDraftFromSalesOrderLine(line, order);
 
         assertEquals(900L, result.getId());
-        verify(contractMapper, times(2)).selectOne(any());
+        verify(contractMapper).selectByOrderLineForTenant(700L, "tenant-a");
+        verify(contractMapper, atLeastOnce()).selectByOrderLineForUpdateForTenant(700L, "tenant-a");
     }
 
     // ===== 見積からのドラフト生成（quotation-management / P4） =====

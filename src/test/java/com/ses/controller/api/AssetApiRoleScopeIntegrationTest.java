@@ -2,18 +2,24 @@ package com.ses.controller.api;
 
 import com.ses.BaseIntegrationTest;
 import com.ses.entity.Asset;
+import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.SysUser;
 import com.ses.mapper.EngineerAccountLinkMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.AssetService;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -38,7 +44,14 @@ class AssetApiRoleScopeIntegrationTest extends BaseIntegrationTest {
     @Autowired
     private EngineerAccountLinkMapper engineerAccountLinkMapper;
 
+    @Autowired
+    private EngineerMapper engineerMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private Long assetId;
+    private Long engineerUserId;
 
     @BeforeEach
     void setUp() {
@@ -48,17 +61,37 @@ class AssetApiRoleScopeIntegrationTest extends BaseIntegrationTest {
                     .username("eng-scope-api-test")
                     .password("pass")
                     .role("要員")
+                    .tenantId("default")
                     .status(1)
                     .build();
             sysUserMapper.insert(engineerUser);
         }
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L, engineerUser.getId());
+        Engineer engineer = engineerMapper.selectById(28801L);
+        if (engineer == null) {
+            engineer = Engineer.builder()
+                    .tenantId("default")
+                    .legalEntityId(1L)
+                    .fullName("資産スコープ要員")
+                    .employmentType("正社員")
+                    .status("稼動中")
+                    .build();
+            engineer.setId(28801L);
+            engineerMapper.insert(engineer);
+        } else {
+            engineer.setTenantId("default");
+            engineer.setLegalEntityId(1L);
+            engineerMapper.updateById(engineer);
+        }
         if (engineerAccountLinkMapper.selectByUserId(engineerUser.getId()) == null) {
             EngineerAccountLink link = new EngineerAccountLink();
+            link.setTenantId("default");
             link.setEngineerId(28801L);
             link.setSysUserId(engineerUser.getId());
             link.setLinkedBy(1L);
             engineerAccountLinkMapper.insert(link);
         }
+        this.engineerUserId = engineerUser.getId();
         Asset asset = Asset.builder()
                 .assetTag("AST-SCOPE-API-" + System.nanoTime())
                 .assetName("Scope Test MacBook")
@@ -98,7 +131,7 @@ class AssetApiRoleScopeIntegrationTest extends BaseIntegrationTest {
     @WithMockUser(username = "eng-scope-api-test", roles = "要員")
     @DisplayName("CR-01(d): 要員ロールはメイン /api/assets 一覧に HTTP 403 でブロックされる")
     void engineerBlockedFromAdminAssetList() throws Exception {
-        mockMvc.perform(get("/api/assets"))
+        mockMvc.perform(get("/api/assets").with(engineerAuthentication()))
                 .andExpect(status().isForbidden());
     }
 
@@ -106,7 +139,7 @@ class AssetApiRoleScopeIntegrationTest extends BaseIntegrationTest {
     @WithMockUser(username = "eng-scope-api-test", roles = "要員")
     @DisplayName("CR-01(e): 要員ロールは /api/my/assets API にアクセス可能（自己スコープのみ）")
     void engineerCanAccessMyAssets() throws Exception {
-        mockMvc.perform(get("/api/my/assets"))
+        mockMvc.perform(get("/api/my/assets").with(engineerAuthentication()))
                 .andExpect(status().isOk());
     }
 
@@ -114,7 +147,7 @@ class AssetApiRoleScopeIntegrationTest extends BaseIntegrationTest {
     @WithMockUser(username = "eng-scope-api-test", roles = "要員")
     @DisplayName("CR-01(f): 要員ロールは管理者向け /api/assets/{id} 詳細に HTTP 403 でブロックされる")
     void engineerBlockedFromAdminAssetDetail() throws Exception {
-        mockMvc.perform(get("/api/assets/" + assetId))
+        mockMvc.perform(get("/api/assets/" + assetId).with(engineerAuthentication()))
                 .andExpect(status().isForbidden());
     }
 
@@ -122,7 +155,7 @@ class AssetApiRoleScopeIntegrationTest extends BaseIntegrationTest {
     @WithMockUser(username = "eng-scope-api-test", roles = "要員")
     @DisplayName("CR-01(g): 要員ロールは /api/assets/export CSV エクスポートに HTTP 403 でブロックされる")
     void engineerBlockedFromExport() throws Exception {
-        mockMvc.perform(get("/api/assets/export"))
+        mockMvc.perform(get("/api/assets/export").with(engineerAuthentication()))
                 .andExpect(status().isForbidden());
     }
 
@@ -178,7 +211,12 @@ class AssetApiRoleScopeIntegrationTest extends BaseIntegrationTest {
     @WithMockUser(username = "eng-scope-api-test", roles = "要員")
     @DisplayName("CR-01(n): 要員ロールは /api/notifications にアクセスできる（自己通知スコープ）")
     void engineerCanAccessNotifications() throws Exception {
-        mockMvc.perform(get("/api/notifications"))
+        mockMvc.perform(get("/api/notifications").with(engineerAuthentication()))
                 .andExpect(status().isOk());
+    }
+
+    private RequestPostProcessor engineerAuthentication() {
+        return authentication(TenantTestSecurity.authentication(
+                engineerUserId, "eng-scope-api-test", "default", "要員"));
     }
 }

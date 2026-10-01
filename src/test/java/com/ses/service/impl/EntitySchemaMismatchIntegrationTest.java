@@ -9,6 +9,7 @@ import com.ses.mapper.AiLogMapper;
 import com.ses.service.EmailTemplateService;
 import com.ses.service.ProposalService;
 import com.ses.service.SkillTagService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -36,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 @Sql(scripts = "/sql/schema-mismatch-h2.sql")
 @Transactional
+@EnableDefaultTenantTestContext
 class EntitySchemaMismatchIntegrationTest {
 
     @Autowired

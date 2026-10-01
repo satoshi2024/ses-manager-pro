@@ -10,6 +10,7 @@ import com.ses.service.accounting.SalesInvoiceIntegrationService;
 import com.ses.service.integration.ExternalMappingService;
 import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.AfterEach;
@@ -97,7 +98,8 @@ class SalesInvoiceIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+        TenantTestSecurity.bindAs(1L, "sales-invoice-test", "default", "営業");
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L, 1L);
         mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
 
         connection = connectionService.getOrCreateConnection("default", null, "freee", "accounting");
@@ -170,7 +172,13 @@ class SalesInvoiceIntegrationTest {
         for (int i = 0; i < threads; i++) {
             futures.add(executor.submit(() -> {
                 latch.await();
-                return salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+                try {
+                    com.ses.test.TenantTestSecurity.bindAs(
+                            1L, "admin", "default", "管理者");
+                    return salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+                } finally {
+                    com.ses.test.TenantTestSecurity.clear();
+                }
             }));
         }
 

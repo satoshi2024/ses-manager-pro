@@ -10,6 +10,8 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.oneonone.OneOnOneRequestService;
 import com.ses.service.survey.SurveyService;
+import com.ses.test.EnableDefaultTenantTestContext;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,8 +21,6 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
@@ -44,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * decision table §6.1 の「翌日以降（date >= today.plusDays(1)）のみ有効」「両端Inclusive」と一致する。
  */
 @SpringBootTest
+@EnableDefaultTenantTestContext
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Import(OneOnOneSurveyBoundaryClockTest.FixedClockConfig.class)
@@ -212,8 +213,6 @@ class OneOnOneSurveyBoundaryClockTest {
     }
 
     void authenticate(long userId, String role) {
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(String.valueOf(userId), "n/a",
-                        List.of(new SimpleGrantedAuthority("ROLE_" + role))));
+        TenantTestSecurity.bindAs(userId, String.valueOf(userId), "default", role);
     }
 }

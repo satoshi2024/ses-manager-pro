@@ -3,6 +3,7 @@ package com.ses.service.impl;
 import com.ses.entity.Contract;
 import com.ses.mapper.ContractMapper;
 import com.ses.service.ComplianceDeadlineService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @ActiveProfiles("test")
 @Transactional
 @Sql(scripts = "/sql/engineer-schema-h2.sql")
+@EnableDefaultTenantTestContext
 class ComplianceDeadlineServiceTest {
 
     @Autowired

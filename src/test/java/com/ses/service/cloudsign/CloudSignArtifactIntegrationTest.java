@@ -8,6 +8,7 @@ import com.ses.entity.ContractDocument;
 import com.ses.mapper.ContractDocumentMapper;
 import com.ses.service.security.FileScanResult;
 import com.ses.service.security.FileScanner;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -43,6 +44,7 @@ import static org.mockito.Mockito.*;
         "cloudsign.poll-cron=-",
         "cloudsign.legacy-read-base-path=./target/test-uploads"
 })
+@EnableDefaultTenantTestContext
 @ActiveProfiles("test")
 @Sql("/sql/engineer-schema-h2.sql")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)

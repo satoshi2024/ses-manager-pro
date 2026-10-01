@@ -36,6 +36,23 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 @WithMockUser(username = "1", roles = "管理者")
 class G2GatePhaseAE2ETest {
 
+    private static final LocalDate TEST_AS_OF =
+            LocalDate.now(java.time.ZoneId.of("Asia/Tokyo"));
+    private static final LocalDateTime TEST_VERIFIED_AT =
+            LocalDateTime.now(java.time.ZoneId.of("Asia/Tokyo"));
+
+    private static LocalDate testAsOf() {
+        return TEST_AS_OF;
+    }
+
+    private static LocalDate currentFrom() {
+        return testAsOf().minusYears(1);
+    }
+
+    private static LocalDate currentTo() {
+        return testAsOf().plusYears(1);
+    }
+
     @Autowired
     private ComplianceMappingService complianceMappingService;
     @Autowired
@@ -121,9 +138,9 @@ class G2GatePhaseAE2ETest {
         input.setSourceCode(code);
         input.setSourceUrl("https://example/" + code);
         input.setSourceVersion("2026-07");
-        input.setConfirmedOn(LocalDate.of(2026, 8, 9));
-        input.setEffectiveFrom(LocalDate.of(2026, 7, 1));
-        input.setEffectiveTo(LocalDate.of(2026, 9, 30));
+        input.setConfirmedOn(testAsOf().minusDays(1));
+        input.setEffectiveFrom(currentFrom());
+        input.setEffectiveTo(currentTo());
         return input;
     }
 
@@ -131,7 +148,7 @@ class G2GatePhaseAE2ETest {
     void PhaseAfixtureでmappingからACTIVEまでの完全パスが成立する() {
         // 1. mapping作成＋policy freeze（§4-3: 最低1group・最低1type）
         ComplianceMappingVersion v = complianceMappingService.create(
-                "PHASEA-MAP", "PHASEA-V1", LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30),
+                "PHASEA-MAP", "PHASEA-V1", currentFrom(), currentTo(),
                 List.of(source("SRC-C"), source("SRC-E"), source("SRC-N"),
                         source("SRC-L"), source("SRC-INDEX")));
         com.ses.entity.ComplianceMappingReviewRequirementGroup group =
@@ -162,13 +179,16 @@ class G2GatePhaseAE2ETest {
                 "SUBMITTED", LocalDateTime.now(), null, null, null, null);
         assertNotNull(review.getReviewChainId());
 
+        LocalDateTime verifiedAt = TEST_VERIFIED_AT;
+        LocalDateTime verificationExpiresAt = verifiedAt.plusYears(1);
+
         // 5. verification 4 kind（§3.3・IDENTITY/AUTHORSHIP常時・QUALIFICATION/ACTIVE_STATUSはfrozen flag=true）
         ComplianceExternalReviewerVerificationEvent identity = verificationService.record(
                 review.getId(), subject, reviewerTypeId(), "IDENTITY", "VERIFIED",
                 "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
                 "https://example/registry", "REG-PHASEA-1",
-                LocalDateTime.of(2026, 8, 14, 10, 0, 0), LocalDateTime.of(2026, 8, 14, 10, 0, 0),
-                365, LocalDateTime.of(2027, 8, 14, 10, 0, 0),
+                verifiedAt, verifiedAt,
+                365, verificationExpiresAt,
                 1L, evidenceIds()[0], evidenceIds()[1], v.getMappingVersion(), v.getReviewPolicyHash(),
                 v.getId(), v.getMappingVersion(), v.getMappingHash(),
                 review.getId(), review.getReviewChainId(), "PHASEA-ID");
@@ -176,8 +196,8 @@ class G2GatePhaseAE2ETest {
                 review.getId(), subject, reviewerTypeId(), "QUALIFICATION", "VERIFIED",
                 "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
                 "https://example/registry", "REG-PHASEA-1",
-                LocalDateTime.of(2026, 8, 14, 10, 0, 0), LocalDateTime.of(2026, 8, 14, 10, 0, 0),
-                365, LocalDateTime.of(2027, 8, 14, 10, 0, 0),
+                verifiedAt, verifiedAt,
+                365, verificationExpiresAt,
                 1L, evidenceIds()[0], evidenceIds()[1], v.getMappingVersion(), v.getReviewPolicyHash(),
                 v.getId(), v.getMappingVersion(), v.getMappingHash(),
                 review.getId(), review.getReviewChainId(), "PHASEA-Q");
@@ -185,8 +205,8 @@ class G2GatePhaseAE2ETest {
                 review.getId(), subject, reviewerTypeId(), "ACTIVE_STATUS", "VERIFIED",
                 "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
                 "https://example/registry", "REG-PHASEA-1",
-                LocalDateTime.of(2026, 8, 14, 10, 0, 0), LocalDateTime.of(2026, 8, 14, 10, 0, 0),
-                365, LocalDateTime.of(2027, 8, 14, 10, 0, 0),
+                verifiedAt, verifiedAt,
+                365, verificationExpiresAt,
                 1L, evidenceIds()[0], evidenceIds()[1], v.getMappingVersion(), v.getReviewPolicyHash(),
                 v.getId(), v.getMappingVersion(), v.getMappingHash(),
                 review.getId(), review.getReviewChainId(), "PHASEA-A");
@@ -194,8 +214,8 @@ class G2GatePhaseAE2ETest {
                 review.getId(), subject, reviewerTypeId(), "REVIEW_AUTHORSHIP", "VERIFIED",
                 "MANUAL_PUBLIC_SOURCE", "PUBLIC_REGISTRY", "公的登録",
                 "https://example/registry", "REG-PHASEA-1",
-                LocalDateTime.of(2026, 8, 14, 10, 0, 0), LocalDateTime.of(2026, 8, 14, 10, 0, 0),
-                365, LocalDateTime.of(2027, 8, 14, 10, 0, 0),
+                verifiedAt, verifiedAt,
+                365, verificationExpiresAt,
                 1L, evidenceIds()[0], evidenceIds()[1], v.getMappingVersion(), v.getReviewPolicyHash(),
                 v.getId(), v.getMappingVersion(), v.getMappingHash(),
                 review.getId(), review.getReviewChainId(), "PHASEA-AU");

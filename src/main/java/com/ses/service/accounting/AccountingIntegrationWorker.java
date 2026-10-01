@@ -50,6 +50,7 @@ public class AccountingIntegrationWorker {
     private final PurchaseExpensePaymentIntegrationService purchaseIntegrationService;
     private final com.ses.service.DigitalInvoiceService digitalInvoiceService;
     private final ObjectMapper objectMapper;
+    private final AccountingTimezoneResolver timezoneResolver;
 
     /**
      * due job (PENDING/RETRYABLE かつ next_retry_at <= now) を最大10件 claim して dispatch する。
@@ -118,16 +119,23 @@ public class AccountingIntegrationWorker {
         for (IntegrationJob job : stale) {
             CorrelationContext.beginJob(job.getId(), job.getCorrelationId());
             try {
-                Optional<String> existingDealId = findExistingDealIfCreateJob(job);
-                if (existingDealId.isPresent()) {
-                    jobService.markSucceeded(job.getId(), existingDealId.get(), null,
-                            "外部取引の存在を照合して復旧しました。");
-                    succeeded++;
-                } else {
-                    jobService.markRetryable(job.getId(), "STALE_LEASE",
-                            "error.integration.maxAttemptsExceeded", 0);
-                    retryable++;
+                if (job.getTenantId() == null || job.getTenantId().isBlank() || job.getLegalEntityId() == null) {
+                    jobService.markFailed(job.getId(), "SCOPE_MISSING", "error.tenant.contextRequired");
+                    continue;
                 }
+                boolean recovered = AccountingTenantContextHolder.runWithTenant(
+                        job.getTenantId(), timezoneResolver.resolve(job.getTenantId()), () -> {
+                            Optional<String> existingDealId = findExistingDealIfCreateJob(job);
+                            if (existingDealId.isPresent()) {
+                                jobService.markSucceeded(job.getId(), existingDealId.get(), null,
+                                        "外部取引の存在を照合して復旧しました。");
+                                return true;
+                            }
+                            jobService.markRetryable(job.getId(), "STALE_LEASE",
+                                    "error.integration.maxAttemptsExceeded", 0);
+                            return false;
+                        });
+                if (recovered) succeeded++; else retryable++;
             } catch (Exception e) {
                 log.warn("滞留連携ジョブの復旧照合に失敗: jobId={} category=SYSTEM errorCode=STALE_RECOVERY_ERROR exceptionClass={} detail={}",
                         job.getId(), LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
@@ -150,10 +158,18 @@ public class AccountingIntegrationWorker {
 
     /** ジョブ種別ごとに適切な process メソッドへ dispatch する (P1-01)。 */
     public void dispatchJob(IntegrationJob job) {
-        ExecutionActorContext.runAsSystem(
-                job == null ? "accounting-integration-worker" : job.getCorrelationId(),
-                job == null || job.getId() == null ? "SCHEDULER_POLL" : "job:" + job.getId(),
-                () -> dispatchJobInternal(job));
+        if (job == null || job.getTenantId() == null || job.getTenantId().isBlank()
+                || job.getLegalEntityId() == null) {
+            if (job != null && job.getId() != null) {
+                jobService.markFailed(job.getId(), "SCOPE_MISSING", "error.tenant.contextRequired");
+            }
+            return;
+        }
+        AccountingTenantContextHolder.runWithTenant(
+                job.getTenantId(), timezoneResolver.resolve(job.getTenantId()),
+                () -> ExecutionActorContext.runAsSystem(
+                        job.getCorrelationId(), "job:" + job.getId(),
+                        () -> dispatchJobInternal(job)));
     }
 
     private void dispatchJobInternal(IntegrationJob job) {

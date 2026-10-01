@@ -274,7 +274,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                     // 注文明細の一意制約競合は採番競合として再試行しない。
                     // 先行txのcommit後に勝者を可視化し、呼出元で同一契約を返す。
                     if (contract.getOrderLineId() != null) {
-                        Contract winner = this.baseMapper.selectByOrderLineForTenant(contract.getOrderLineId(), tenantId);
+                        Contract winner = this.baseMapper.selectByOrderLineForUpdateForTenant(
+                                contract.getOrderLineId(), tenantId);
                         if (winner != null) {
                             throw e;
                         }
@@ -746,7 +747,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             saveWithBusinessRules(contract);
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
             if (src.orderLineId() != null) {
-                Contract existing = baseMapper.selectByOrderLineForTenant(src.orderLineId(), requireTenant());
+                Contract existing = baseMapper.selectByOrderLineForUpdateForTenant(
+                        src.orderLineId(), requireTenant());
                 if (existing != null) {
                     return existing;
                 }

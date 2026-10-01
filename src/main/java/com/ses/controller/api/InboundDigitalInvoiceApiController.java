@@ -53,15 +53,7 @@ public class InboundDigitalInvoiceApiController {
                 return ApiResult.success(request);
             }
             if ("REJECT".equalsIgnoreCase(action)) {
-                DigitalInvoice di = digitalInvoiceService.getById(id);
-                if (di == null || !"RECEIVE".equals(di.getDirection())) {
-                    return ApiResult.error("error.invoice.notFound");
-                }
-                if (!"PENDING_REVIEW".equals(di.getStatus())) {
-                    return ApiResult.error("error.invoice.rejectFailed");
-                }
-                di.setStatus("REJECTED_MANUAL");
-                digitalInvoiceService.updateById(di);
+                digitalInvoiceService.rejectInboundReview(id);
                 return ApiResult.success(null);
             }
             return ApiResult.error("error.invoice.rejectFailed");

@@ -298,6 +298,14 @@ public interface ContractMapper extends BaseMapper<Contract> {
     Contract selectByOrderLineForTenant(@org.apache.ibatis.annotations.Param("sourceId") Long sourceId,
                                         @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
+    /** 一意制約競合後、REPEATABLE READのsnapshotを避けて勝者行の現在値を取得する。 */
+    @Select("SELECT c.* FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
+            + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.order_line_id = #{sourceId} "
+            + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0"
+            + CONTRACT_REFERENCE_OWNERSHIP_C + " LIMIT 1 FOR UPDATE")
+    Contract selectByOrderLineForUpdateForTenant(@org.apache.ibatis.annotations.Param("sourceId") Long sourceId,
+                                                 @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
+
     @Select("SELECT c.* FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.tenant_id IS NOT NULL "
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 AND c.status = '稼動中' "

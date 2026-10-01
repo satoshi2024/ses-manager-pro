@@ -3,6 +3,7 @@ package com.ses.service.impl;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Task;
 import com.ses.service.TaskService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -17,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional
+@EnableDefaultTenantTestContext
 public class TaskServiceH2Test {
 
     @Autowired

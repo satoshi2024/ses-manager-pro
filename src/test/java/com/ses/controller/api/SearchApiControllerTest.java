@@ -1,5 +1,6 @@
 package com.ses.controller.api;
 
+import com.ses.test.DisableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -36,6 +37,7 @@ public class SearchApiControllerTest {
     }
 
     @Test
+    @DisableDefaultTenantTestContext
     void testSearchApi_unauthenticated_unauthorized() throws Exception {
         mockMvc.perform(get("/api/search").param("q", "テスト"))
                 .andExpect(status().is4xxClientError());

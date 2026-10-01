@@ -12,6 +12,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,6 +37,9 @@ class EngineerAccountLinkTenantIsolationIntegrationTest {
     @Autowired
     private SysUserMapper sysUserMapper;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @AfterEach
     void clearTenantContext() {
         AccountingTenantContextHolder.clear();
@@ -47,6 +51,10 @@ class EngineerAccountLinkTenantIsolationIntegrationTest {
         Engineer engineerB = insertEngineer("tenant-b", "要員B");
         SysUser userA = insertUser("tenant-a", "要員ユーザーA");
         SysUser userB = insertUser("tenant-b", "要員ユーザーB");
+
+        // 共有H2の採番が他テストの物理削除後に再利用されても、本テストで採番した主体だけを確実に独立させる。
+        jdbcTemplate.update("DELETE FROM t_engineer_account_link WHERE engineer_id IN (?, ?) OR sys_user_id IN (?, ?)",
+                engineerA.getId(), engineerB.getId(), userA.getId(), userB.getId());
 
         AccountingTenantContextHolder.setTenantId("tenant-a");
         EngineerAccountLink created = linkService.link(engineerA.getId(), userA.getId(), null);

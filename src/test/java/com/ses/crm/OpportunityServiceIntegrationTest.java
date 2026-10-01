@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @ActiveProfiles("test")
 @Transactional
 @WithMockUser(username = "admin", roles = "管理者")
+@com.ses.test.EnableDefaultTenantTestContext
 class OpportunityServiceIntegrationTest {
 
     @Autowired
@@ -83,7 +84,8 @@ class OpportunityServiceIntegrationTest {
     }
 
     private long newCustomer(String name) {
-        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, legal_entity_id, deleted_flag) VALUES (?, 'B', 1, 0)", name);
+        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, tenant_id, legal_entity_id, deleted_flag) "
+                + "VALUES (?, 'B', 'default', 1, 0)", name);
         return jdbcTemplate.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, name);
     }
 

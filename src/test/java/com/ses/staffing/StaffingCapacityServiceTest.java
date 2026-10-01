@@ -11,6 +11,7 @@ import com.ses.mapper.ProjectPositionMapper;
 import com.ses.service.ContractService;
 import com.ses.service.UtilizationCalcService;
 import com.ses.service.staffing.StaffingCapacityService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional
+@EnableDefaultTenantTestContext
 class StaffingCapacityServiceTest {
 
     private static final YearMonth SEPT = YearMonth.of(2026, 9);

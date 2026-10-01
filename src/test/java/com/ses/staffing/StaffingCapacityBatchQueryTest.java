@@ -14,6 +14,7 @@ import com.ses.service.SystemConfigService;
 import com.ses.service.UtilizationCalcService;
 import com.ses.service.impl.StaffingCapacityServiceImpl;
 import com.ses.service.staffing.StaffingCapacityService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -34,6 +35,7 @@ import static org.mockito.Mockito.when;
 
 /** supplyBatchが要員×月ごとのN+1 queryへ退行しないことを検証する。 */
 @ExtendWith(MockitoExtension.class)
+@EnableDefaultTenantTestContext
 class StaffingCapacityBatchQueryTest {
 
     @Mock private WorkCalendarMapper workCalendarMapper;

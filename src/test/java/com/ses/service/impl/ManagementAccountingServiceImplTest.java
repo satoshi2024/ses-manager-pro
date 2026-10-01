@@ -15,6 +15,7 @@ import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.OrganizationService;
 import com.ses.service.billing.MonthlyRevenueCalcService;
 import com.ses.service.security.OrganizationScopeService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -42,6 +43,7 @@ import static org.mockito.Mockito.when;
 
 /** 管理会計が既存金額口径と組織scopeを同じ集計に使うことを検証する。 */
 @ExtendWith(MockitoExtension.class)
+@EnableDefaultTenantTestContext
 class ManagementAccountingServiceImplTest {
 
     @Mock private ContractMapper contractMapper;

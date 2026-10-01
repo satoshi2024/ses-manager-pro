@@ -194,12 +194,15 @@ class WorkRecordTenantIsolationIntegrationTest extends BaseIntegrationTest {
         Customer customer = customer(tenantId, "顧客" + label);
         Project project = new Project();
         project.setCustomerId(customer.getId());
+        project.setLegalEntityId(1L);
+        project.setCreatedBy(user.getId());
         project.setProjectName("案件" + label);
         project.setStatus("募集中");
         projectMapper.insert(project);
 
         Engineer engineer = new Engineer();
         engineer.setTenantId(tenantId);
+        engineer.setLegalEntityId(1L);
         engineer.setFullName("要員" + label);
         engineer.setEmploymentType("正社員");
         engineer.setStatus("稼動中");
@@ -208,6 +211,7 @@ class WorkRecordTenantIsolationIntegrationTest extends BaseIntegrationTest {
         String month = YearMonth.now().minusMonths(1).toString();
         Contract contract = new Contract();
         contract.setTenantId(tenantId);
+        contract.setLegalEntityId(1L);
         contract.setContractNo("WR-" + tenantId);
         contract.setCustomerId(customer.getId());
         contract.setProjectId(project.getId());
@@ -233,6 +237,7 @@ class WorkRecordTenantIsolationIntegrationTest extends BaseIntegrationTest {
     private Customer customer(String tenantId, String name) {
         Customer customer = new Customer();
         customer.setTenantId(tenantId);
+        customer.setLegalEntityId(1L);
         customer.setCompanyName(name);
         customerMapper.insert(customer);
         return customer;
@@ -241,11 +246,14 @@ class WorkRecordTenantIsolationIntegrationTest extends BaseIntegrationTest {
     private Contract contract(Fixture owner, Long customerId, String label) {
         Project project = new Project();
         project.setCustomerId(customerId);
+        project.setLegalEntityId(1L);
+        project.setCreatedBy(owner.user().getId());
         project.setProjectName("案件" + owner.tenantId() + "-" + label);
         project.setStatus("募集中");
         projectMapper.insert(project);
         Contract contract = new Contract();
         contract.setTenantId(owner.tenantId());
+        contract.setLegalEntityId(1L);
         contract.setContractNo("WR-" + owner.tenantId() + "-" + label);
         contract.setCustomerId(customerId);
         contract.setProjectId(project.getId());
@@ -263,6 +271,7 @@ class WorkRecordTenantIsolationIntegrationTest extends BaseIntegrationTest {
                                             Long projectId, Long salesUserId, String label) {
         Contract contract = new Contract();
         contract.setTenantId(owner.tenantId());
+        contract.setLegalEntityId(1L);
         contract.setContractNo("WR-" + owner.tenantId() + "-" + label);
         contract.setCustomerId(customerId);
         contract.setProjectId(projectId);

@@ -37,6 +37,25 @@ public interface CustomerContactMapper extends BaseMapper<CustomerContact> {
                                               @Param("asOf") LocalDate asOf,
                                               @Param("role") String role);
 
+    /** 親顧客ロック取得後の重複判定を、REPEATABLE READの古いsnapshotではなく現在値で行う。 */
+    @Select("""
+        <script>
+        SELECT cc.*
+          FROM t_customer_contact cc
+          INNER JOIN m_customer c ON c.id = cc.customer_id
+                                 AND c.deleted_flag = 0
+                                 AND c.tenant_id = #{tenantId}
+         WHERE cc.customer_id = #{customerId}
+           AND cc.deleted_flag = 0
+           <if test="status != null and status != ''">AND cc.status = #{status}</if>
+         ORDER BY cc.valid_from DESC, cc.id DESC
+         FOR UPDATE
+        </script>
+        """)
+    List<CustomerContact> selectListForUpdateForTenant(@Param("customerId") Long customerId,
+                                                       @Param("tenantId") String tenantId,
+                                                       @Param("status") String status);
+
     @Select("SELECT cc.* FROM t_customer_contact cc "
             + "INNER JOIN m_customer c ON c.id = cc.customer_id AND c.deleted_flag = 0 "
             + "AND c.tenant_id = #{tenantId} "

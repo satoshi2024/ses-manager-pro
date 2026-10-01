@@ -5,6 +5,7 @@ import com.ses.entity.ApprovalRequest;
 import com.ses.mapper.ApprovalParticipantMapper;
 import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.service.approval.ApprovalViewService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** P1-08: 承認一覧の可視性をSQLで絞った後にページ境界を適用する回帰。 */
 @SpringBootTest
+@EnableDefaultTenantTestContext
 @ActiveProfiles("test")
 @Transactional
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)

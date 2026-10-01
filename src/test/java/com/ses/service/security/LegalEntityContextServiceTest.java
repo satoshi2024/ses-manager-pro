@@ -1,5 +1,7 @@
 package com.ses.service.security;
 
+import com.ses.test.DisableDefaultTenantTestContext;
+
 import com.ses.common.exception.BusinessException;
 import com.ses.config.LoginUser;
 import com.ses.config.OidcSecurityProperties;
@@ -28,6 +30,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** 認証requestのtenantを正本とし、未束縛tenantやdefault/1L推測を拒否する。 */
+@DisableDefaultTenantTestContext
 class LegalEntityContextServiceTest {
     private final Clock clock = Clock.fixed(Instant.parse("2026-08-31T15:00:00Z"), ZoneId.of("UTC"));
 

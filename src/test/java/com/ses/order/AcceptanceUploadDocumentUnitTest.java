@@ -13,6 +13,7 @@ import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.impl.AcceptanceServiceImpl;
 import com.ses.service.security.DataScopeService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,6 +40,7 @@ import static org.mockito.Mockito.when;
 
 /** S09-P2-01: 検収書uploadの行ロック＋document_id IS NULL条件更新（L0）。 */
 @ExtendWith(MockitoExtension.class)
+@EnableDefaultTenantTestContext
 @MockitoSettings(strictness = Strictness.LENIENT)
 class AcceptanceUploadDocumentUnitTest {
 

@@ -15,6 +15,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.EngineerSalesService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.security.DataScopeService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -36,6 +37,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
+@EnableDefaultTenantTestContext
 class UtilizationForecastServiceTest {
 
     @Mock

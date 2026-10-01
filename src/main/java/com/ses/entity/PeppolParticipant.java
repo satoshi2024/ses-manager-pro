@@ -10,6 +10,12 @@ public class PeppolParticipant {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 参加者IDの権威テナント。 */
+    private String tenantId;
+
+    /** 参加者IDの権威法人。 */
+    private Long legalEntityId;
+
     private String ownerType;
     private Long ownerId;
     private String schemeId;

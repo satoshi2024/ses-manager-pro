@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @ActiveProfiles("test")
 @Transactional
 @Sql(scripts = "/sql/engineer-schema-h2.sql")
+@com.ses.test.EnableDefaultTenantTestContext
 class ReferentialIntegrityGuardTest {
 
     @Autowired private EngineerService engineerService;

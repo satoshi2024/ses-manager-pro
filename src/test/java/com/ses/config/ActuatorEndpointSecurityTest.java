@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.test.DisableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -34,6 +35,7 @@ class ActuatorEndpointSecurityTest {
     private MockMvc mockMvc;
 
     @Test
+    @DisableDefaultTenantTestContext
     void liveness_匿名でアクセス可能でUPを返す() throws Exception {
         mockMvc.perform(get("/actuator/health/liveness"))
                 .andExpect(status().isOk())
@@ -41,6 +43,7 @@ class ActuatorEndpointSecurityTest {
     }
 
     @Test
+    @DisableDefaultTenantTestContext
     void readiness_匿名でアクセス可能でUPを返す() throws Exception {
         mockMvc.perform(get("/actuator/health/readiness"))
                 .andExpect(status().isOk())
@@ -48,6 +51,7 @@ class ActuatorEndpointSecurityTest {
     }
 
     @Test
+    @DisableDefaultTenantTestContext
     void health_匿名で最小情報のみ返す_内部詳細を漏らさない() throws Exception {
         // 集約 health は mail 等の indicator 次第で UP(200) / DOWN(503) になり得る（ALB は readiness のみ）。
         mockMvc.perform(get("/actuator/health"))
@@ -75,6 +79,7 @@ class ActuatorEndpointSecurityTest {
     }
 
     @Test
+    @DisableDefaultTenantTestContext
     void env_匿名では200にならない() throws Exception {
         // 匿名は permitAll 対象外のため 200 では到達できない（認可でブロックされる）
         mockMvc.perform(get("/actuator/env"))
@@ -82,6 +87,7 @@ class ActuatorEndpointSecurityTest {
     }
 
     @Test
+    @DisableDefaultTenantTestContext
     void configprops_匿名では200にならない() throws Exception {
         mockMvc.perform(get("/actuator/configprops"))
                 .andExpect(status().is(org.hamcrest.Matchers.not(200)));
@@ -95,6 +101,7 @@ class ActuatorEndpointSecurityTest {
     }
 
     @Test
+    @DisableDefaultTenantTestContext
     void 回帰_未認証の業務APIは401を返す() throws Exception {
         mockMvc.perform(get("/api/engineers"))
                 .andExpect(status().isUnauthorized());

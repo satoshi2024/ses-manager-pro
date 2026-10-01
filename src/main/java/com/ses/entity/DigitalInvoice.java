@@ -10,6 +10,12 @@ public class DigitalInvoice {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** デジタルインボイスの権威テナント。legacy NULL 行は業務操作から除外する。 */
+    private String tenantId;
+
+    /** デジタルインボイスの権威法人。legacy NULL 行は業務操作から除外する。 */
+    private Long legalEntityId;
+
     private Long invoiceId;
     private String direction;
     private String profile;
@@ -31,6 +37,8 @@ public class DigitalInvoice {
 
     private String actorType;
     private String confirmationSource;
+    /** PROVIDER/SYSTEMへ主体が遷移する更新では旧human IDを必ずNULLへ落とす。 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Long humanUserId;
     private String correlationId;
     private String idempotencyKey;

@@ -180,7 +180,8 @@ class AccountingWorkerRawExceptionLogTest {
                 dueSalesService,
                 duePurchaseService,
                 mock(com.ses.service.DigitalInvoiceService.class),
-                new com.fasterxml.jackson.databind.ObjectMapper()
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                mock(com.ses.service.accounting.AccountingTimezoneResolver.class)
         ).processDueJobs();
 
         List<ILoggingEvent> workerEvents = appender.list.stream()
@@ -204,6 +205,8 @@ class AccountingWorkerRawExceptionLogTest {
         IntegrationJob job = new IntegrationJob();
         job.setId(id);
         job.setJobType(jobType);
+        job.setTenantId("default");
+        job.setLegalEntityId(1L);
         return job;
     }
 }

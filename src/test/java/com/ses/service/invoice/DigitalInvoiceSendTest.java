@@ -12,7 +12,9 @@ import com.ses.service.CustomerService;
 import com.ses.service.DigitalInvoiceService;
 import com.ses.service.InvoiceService;
 import com.ses.service.PeppolParticipantService;
+import com.ses.test.TenantTestSecurity;
 import com.ses.service.invoice.provider.DigitalInvoiceProvider;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -20,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -39,6 +42,9 @@ class DigitalInvoiceSendTest {
 
     @Autowired
     private DigitalInvoiceService digitalInvoiceService;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private PeppolParticipantService peppolParticipantService;
@@ -63,6 +69,8 @@ class DigitalInvoiceSendTest {
 
     @BeforeEach
     void プロバイダの既定応答を設定する() {
+        TenantTestSecurity.bindAs("default", "管理者");
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L);
         when(digitalInvoiceProvider.sendInvoice(anyString(), anyString(), anyString()))
                 .thenAnswer(inv -> "mock-provider-" + inv.getArgument(2));
         when(documentService.registerGenerated(any(), any())).thenAnswer(inv -> {
@@ -72,12 +80,18 @@ class DigitalInvoiceSendTest {
         });
     }
 
+    @AfterEach
+    void tenantContextを破棄する() {
+        TenantTestSecurity.clear();
+    }
+
     @Test
     void 請求書送信をキューへ登録する() {
         Customer c = newCustomer("Test Co");
         verifiedParticipant(c, "test-id");
+        Invoice inv = validInvoice("INV-QUEUE-1", c.getId());
 
-        DigitalInvoice di = digitalInvoiceService.enqueueInvoiceForSend(10L, "1.1.3", c.getId());
+        DigitalInvoice di = digitalInvoiceService.enqueueInvoiceForSend(inv.getId(), "1.1.3", c.getId());
         assertNotNull(di.getId());
         assertEquals("QUEUED", di.getStatus());
 
@@ -90,16 +104,17 @@ class DigitalInvoiceSendTest {
     void 請求書送信の重複登録を拒否する() {
         Customer c = newCustomer("Test Co 2");
         verifiedParticipant(c, "test-id-2");
+        Invoice inv = validInvoice("INV-DUPLICATE-1", c.getId());
 
-        DigitalInvoice first = digitalInvoiceService.enqueueInvoiceForSend(20L, "1.1.3", c.getId());
+        DigitalInvoice first = digitalInvoiceService.enqueueInvoiceForSend(inv.getId(), "1.1.3", c.getId());
         assertNotNull(first.getId());
 
         BusinessException ex = assertThrows(BusinessException.class, () ->
-                digitalInvoiceService.enqueueInvoiceForSend(20L, "1.1.3", c.getId()));
+                digitalInvoiceService.enqueueInvoiceForSend(inv.getId(), "1.1.3", c.getId()));
         assertEquals(409, ex.getCode());
 
         long sendRows = digitalInvoiceService.lambdaQuery()
-                .eq(DigitalInvoice::getInvoiceId, 20L)
+                .eq(DigitalInvoice::getInvoiceId, inv.getId())
                 .eq(DigitalInvoice::getDirection, "SEND")
                 .eq(DigitalInvoice::getProfile, "Standard")
                 .count();
@@ -107,7 +122,7 @@ class DigitalInvoiceSendTest {
 
         long jobs = integrationJobService.lambdaQuery()
                 .eq(com.ses.entity.IntegrationJob::getIdempotencyKey,
-                        "digital_invoice_send_20_Standard_1.1.3_g0")
+                        "digital_invoice_send_default_1_" + inv.getId() + "_Standard_1.1.3_g0")
                 .count();
         assertEquals(1, jobs);
     }
@@ -181,7 +196,8 @@ class DigitalInvoiceSendTest {
         com.ses.entity.IntegrationJob job = integrationJobService.createJob(
                 null, "DIGITAL_INVOICE_SEND", "t_digital_invoice", cn.getId(),
                 "wrong_" + cn.getMessageId(),
-                org.apache.commons.codec.digest.DigestUtils.sha256Hex(payload));
+                org.apache.commons.codec.digest.DigestUtils.sha256Hex(payload), payload,
+                cn.getTenantId(), cn.getLegalEntityId(), null);
 
         digitalInvoiceService.processSendJob(job.getId());
 

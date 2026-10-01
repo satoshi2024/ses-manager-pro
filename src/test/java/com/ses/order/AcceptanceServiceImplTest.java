@@ -35,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Transactional
 @DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_CLASS)
 @Sql(scripts = "/sql/engineer-schema-h2.sql")
+@com.ses.test.EnableDefaultTenantTestContext
 class AcceptanceServiceImplTest {
 
     @Autowired AcceptanceService acceptanceService;

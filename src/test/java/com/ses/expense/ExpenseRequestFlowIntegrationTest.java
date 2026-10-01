@@ -35,6 +35,7 @@ import com.ses.service.expense.ExpenseRequestService;
 import com.ses.service.expense.impl.MockExpenseAccountingSender;
 import com.ses.service.notification.NotificationOutboxService;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -110,6 +111,21 @@ class ExpenseRequestFlowIntegrationTest {
     private SystemConfigService systemConfigService;
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @BeforeEach
+    void ensureReceiptDocumentType() {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM m_document_type WHERE code = 'RECEIPT' AND deleted_flag = 0",
+                Integer.class);
+        if (count == null || count == 0) {
+            jdbcTemplate.update("""
+                    INSERT INTO m_document_type
+                        (code, name, direction, retention_years, retention_start_rule,
+                         legal_hold_supported, deleted_flag)
+                    VALUES ('RECEIPT', '経費領収書', 'INCOMING', 7, 'TRANSACTION_DATE', 1, 0)
+                    """);
+        }
+    }
 
     @AfterEach
     void tearDown() {

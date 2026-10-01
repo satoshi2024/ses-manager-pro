@@ -62,7 +62,9 @@ class TestIsolationAuditTest {
             entry("com.ses.web.EngineerSelfServicePortalMRegressionTest", "portal commit可視性", true, "テスト固有portal rowをdelete", "portal-regression"),
             entry("com.ses.changerequest.EngineerChangeRequestAttachmentApiTest", "添付公開metadataの可視性", true, "テスト固有attachmentをdelete", "change-request-attachment"),
             entry("com.ses.mapper.IntegrationHubWebhookResourceScopeMapperIntegrationTest", "jdbcTemplate更新後の再読込", true, "テスト固有resource scopeをdelete", "integration-hub-resource-scope"),
-            entry("com.ses.report.ReportDeliveryTransactionIntegrationTest", "ReportDeliveryIssueService実Spring proxy TX rollback検証", true, "テスト専用行を@AfterEachで明示削除", "report-delivery-tx")
+            entry("com.ses.report.ReportDeliveryTransactionIntegrationTest", "ReportDeliveryIssueService実Spring proxy TX rollback検証", true, "テスト専用行を@AfterEachで明示削除", "report-delivery-tx"),
+            entry("com.ses.service.ai.AiExecutionGatewayPersistMetadataTest", "gateway永続化metadataの実DB再読込", true, "trace_id固定prefixを@AfterEachでdelete", "ai-gateway-persist-metadata"),
+            entry("com.ses.service.ai.AiRecommendationRetentionTenantIsolationH2Test", "tenant別retentionのcommit可視性", true, "trace_id固定prefixを@AfterEachでdelete", "ai-retention-tenant-isolation")
     );
 
     private static Map.Entry<String, IsolationExceptionMetadata> entry(String className, String reason,

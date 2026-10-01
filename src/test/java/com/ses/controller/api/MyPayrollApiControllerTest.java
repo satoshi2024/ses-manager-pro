@@ -4,6 +4,7 @@ import com.ses.dto.payroll.PayrollItemDto;
 import com.ses.dto.payroll.PayrollStatementDto;
 import com.ses.service.FreeeIntegrationService;
 import com.ses.service.security.BreakGlassService;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -13,7 +14,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
-import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
@@ -33,8 +33,8 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -101,21 +101,29 @@ class MyPayrollApiControllerTest {
     }
 
     private RequestPostProcessor engineerUser(long userId) {
-        return user(String.valueOf(userId)).roles("要員");
+        return tenantUser(userId, "要員");
+    }
+
+    private RequestPostProcessor tenantUser(long userId, String role) {
+        return authentication(TenantTestSecurity.authentication(
+                userId, String.valueOf(userId), "default", role));
     }
 
     private void insertUser(long userId, long engineerId, String name, String password) {
         // 共有H2のsys_user.role ENUMはV1の4ロール（要員はV32のためH2 contextに無い）ため
         // DB行のroleは管理者を使う。認可は@WithMockUser相当のauthorities（roles=要員）が決める。
-        jdbcTemplate.update("INSERT INTO sys_user (id, username, password, real_name, role, email, status) "
-                + "VALUES (?, ?, ?, ?, '管理者', ?, 1)",
+        jdbcTemplate.update("INSERT INTO sys_user "
+                + "(id, username, password, real_name, role, email, tenant_id, status) "
+                + "VALUES (?, ?, ?, ?, '管理者', ?, 'default', 1)",
                 userId, "my-payroll-" + userId, password, name, userId + "@example.invalid");
-        jdbcTemplate.update("INSERT INTO t_engineer (id, full_name, employment_type, status) "
-                + "VALUES (?, ?, '正社員', '稼動中')", engineerId, name);
+        jdbcTemplate.update("INSERT INTO t_engineer "
+                + "(id, tenant_id, legal_entity_id, full_name, employment_type, status) "
+                + "VALUES (?, 'default', 1, ?, '正社員', '稼動中')", engineerId, name);
     }
 
     private void insertAccountLink(long engineerId, long userId) {
-        jdbcTemplate.update("INSERT INTO t_engineer_account_link (engineer_id, sys_user_id) VALUES (?, ?)",
+        jdbcTemplate.update("INSERT INTO t_engineer_account_link (tenant_id, engineer_id, sys_user_id) "
+                        + "VALUES ('default', ?, ?)",
                 engineerId, userId);
     }
 
@@ -267,7 +275,7 @@ class MyPayrollApiControllerTest {
     @DisplayName("営業ロールは本人給与APIへ到達できない")
     void 営業は本人給与APIへ到達できない() throws Exception {
         mockMvc.perform(get("/api/my/payroll/statements")
-                        .with(user("93000").roles("営業"))
+                        .with(tenantUser(93000L, "営業"))
                         .param("year", "2026").param("month", "8"))
                 .andExpect(status().isForbidden());
     }
@@ -475,7 +483,7 @@ class MyPayrollApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("my-payroll.js")));
 
-        mockMvc.perform(get("/my/payroll").with(user("93000").roles("営業")))
+        mockMvc.perform(get("/my/payroll").with(tenantUser(93000L, "営業")))
                 .andExpect(status().isForbidden());
     }
 

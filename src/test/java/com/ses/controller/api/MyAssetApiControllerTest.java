@@ -6,13 +6,13 @@ import com.ses.entity.Asset;
 import com.ses.entity.AssetAssignment;
 import com.ses.entity.Engineer;
 import com.ses.entity.SysUser;
-import com.ses.config.LoginUser;
 import com.ses.mapper.AssetAssignmentMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.AssetService;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -21,15 +21,13 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 import java.time.LocalDate;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.hasItem;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -82,10 +80,12 @@ class MyAssetApiControllerTest extends BaseIntegrationTest {
                 .status(1)
                 .build();
         sysUserMapper.insert(user);
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L, user.getId());
 
         Engineer engineer = Engineer.builder()
                 .fullName("山田 太郎")
                 .tenantId("default")
+                .legalEntityId(1L)
                 .employmentType("正社員")
                 .status("稼動中")
                 .build();
@@ -102,6 +102,7 @@ class MyAssetApiControllerTest extends BaseIntegrationTest {
                 .assetTag("AST-MY-001")
                 .assetName("Surface Laptop 5")
                 .category("PC")
+                .ownerCompanyId(1L)
                 .status("IN_STOCK")
                 .build();
         assetService.createAsset(asset, 1L);
@@ -140,9 +141,7 @@ class MyAssetApiControllerTest extends BaseIntegrationTest {
     }
 
     private RequestPostProcessor asEngineer(SysUser user) {
-        LoginUser principal = new LoginUser(user,
-                java.util.List.of(new SimpleGrantedAuthority("ROLE_要員")));
-        return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
-                .authentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+        return authentication(TenantTestSecurity.authentication(
+                user.getId(), user.getUsername(), "default", "要員"));
     }
 }

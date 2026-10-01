@@ -3,6 +3,7 @@ package com.ses.config;
 import com.ses.entity.SysUser;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.accounting.AccountingTimezoneResolver;
+import com.ses.test.DisableDefaultTenantTestContext;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import org.junit.jupiter.api.AfterEach;
@@ -29,6 +30,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@DisableDefaultTenantTestContext
 class InternalTenantContextFilterTest {
 
     private OidcSecurityProperties oidcProperties;

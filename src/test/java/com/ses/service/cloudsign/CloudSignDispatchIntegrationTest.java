@@ -15,6 +15,8 @@ import com.ses.entity.ContractTemplate;
 import com.ses.mapper.ContractDocumentMapper;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.ContractTemplateMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -56,6 +58,7 @@ import static org.mockito.Mockito.*;
         "cloudsign.dispatch-cron=-",
         "cloudsign.stale-claim-minutes=1"
 })
+@EnableDefaultTenantTestContext
 @ActiveProfiles("test")
 @Sql("/sql/engineer-schema-h2.sql")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -225,7 +228,8 @@ class CloudSignDispatchIntegrationTest {
                     return;
                 }
                 try {
-                    ContractDocument result = documentService.queueSend(d.getId(), request);
+                    ContractDocument result = AccountingTenantContextHolder.runWithTenant("default",
+                            () -> documentService.queueSend(d.getId(), request));
                     if (result != null && result.getOperationId() != null) {
                         accepted.incrementAndGet();
                     }
@@ -269,7 +273,8 @@ class CloudSignDispatchIntegrationTest {
                     return;
                 }
                 try {
-                    ContractDocument result = documentService.queueSend(d.getId(), request);
+                    ContractDocument result = AccountingTenantContextHolder.runWithTenant("default",
+                            () -> documentService.queueSend(d.getId(), request));
                     if (result != null && result.getOperationId() != null) {
                         accepted.incrementAndGet();
                     }
@@ -468,8 +473,10 @@ class CloudSignDispatchIntegrationTest {
             return remoteDocument(0);
         });
 
-        Thread t1 = new Thread(() -> dispatchService.dispatchDue(10));
-        Thread t2 = new Thread(() -> dispatchService.dispatchDue(10));
+        Thread t1 = new Thread(() -> com.ses.service.accounting.AccountingTenantContextHolder
+                .runWithTenant("default", () -> dispatchService.dispatchDue(10)));
+        Thread t2 = new Thread(() -> com.ses.service.accounting.AccountingTenantContextHolder
+                .runWithTenant("default", () -> dispatchService.dispatchDue(10)));
         t1.start();
         t2.start();
         t1.join(30000);
@@ -579,14 +586,16 @@ class CloudSignDispatchIntegrationTest {
             return remoteDocument(1);
         });
 
-        Thread t1 = new Thread(() -> dispatchService.dispatchDue(10));
+        Thread t1 = new Thread(() -> com.ses.service.accounting.AccountingTenantContextHolder
+                .runWithTenant("default", () -> dispatchService.dispatchDue(10)));
         Thread t2 = new Thread(() -> {
             try {
                 assertTrue(inSend.await(15, java.util.concurrent.TimeUnit.SECONDS));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
-            dispatchService.dispatchDue(10);
+            com.ses.service.accounting.AccountingTenantContextHolder
+                    .runWithTenant("default", () -> dispatchService.dispatchDue(10));
             release.countDown();
         });
         t1.start();

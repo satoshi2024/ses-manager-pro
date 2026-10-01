@@ -9,6 +9,7 @@ import com.ses.mapper.EngineerFollowupMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.service.RetentionRiskService;
 import com.ses.service.SystemConfigService;
+import com.ses.test.EnableDefaultTenantTestContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 @Transactional
 @Sql("/sql/engineer-schema-h2.sql")
+@EnableDefaultTenantTestContext
 class RetentionRiskServiceImplTest {
 
     @Autowired

@@ -1,6 +1,7 @@
 package com.ses.service.lifecycle;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.config.LoginUser;
 import com.ses.dto.lifecycle.CreateLifecycleCaseCommand;
 import com.ses.dto.lifecycle.LifecycleCaseDto;
 import com.ses.dto.lifecycle.LifecycleTemplateDto;
@@ -16,6 +17,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -132,6 +136,11 @@ class ResignationGateFailureDrillTest {
                 .status(1)
                 .build();
         sysUserMapper.insert(adminUser);
+        LoginUser principal = new LoginUser(adminUser,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(
+                        principal, null, principal.getAuthorities()));
 
         salesUser = SysUser.builder()
                 .tenantId("default")
@@ -251,6 +260,7 @@ class ResignationGateFailureDrillTest {
     @AfterEach
     void tearDown() {
         AccountingTenantContextHolder.clear();
+        SecurityContextHolder.clearContext();
     }
 
     @Test
@@ -301,6 +311,7 @@ class ResignationGateFailureDrillTest {
                 .systemName("Gate Blocker SaaS").systemType("SAAS_SCM").isActive(1).build();
         externalAccountSystemMapper.insert(system);
         externalAccountReferenceMapper.insert(ExternalAccountReference.builder()
+                .tenantId("default").legalEntityId(1L)
                 .systemId(system.getId()).accountIdentifier("gate.blocker@example.jp")
                 .assigneeType("ENGINEER").assigneeId(engineer.getId()).status("ACTIVE").build());
 
@@ -634,7 +645,13 @@ class ResignationGateFailureDrillTest {
                 .build(), adminUser.getId());
 
         // 新規要員で案件起票 (主担当営業: salesUser)
-        Engineer testEng = Engineer.builder().fullName("営業マスク検証要員").status("稼動中").employmentType("正社員").build();
+        Engineer testEng = Engineer.builder()
+                .tenantId("default")
+                .legalEntityId(1L)
+                .fullName("営業マスク検証要員")
+                .status("稼動中")
+                .employmentType("正社員")
+                .build();
         engineerMapper.insert(testEng);
         EngineerSales es = EngineerSales.builder()
                 .engineerId(testEng.getId())
@@ -646,6 +663,7 @@ class ResignationGateFailureDrillTest {
 
         // 要員本人アカウント連携 (ENGINEER_SELF解決用)
         SysUser testEngUser = SysUser.builder()
+                .tenantId("default")
                 .username("eng_mask_user")
                 .password("pass")
                 .realName("マスク要員")

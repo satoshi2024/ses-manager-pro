@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 @Transactional
 @Sql("/sql/engineer-schema-h2.sql")
+@com.ses.test.EnableDefaultTenantTestContext
 class LifecycleStatusIntegrationTest {
 
     @Autowired

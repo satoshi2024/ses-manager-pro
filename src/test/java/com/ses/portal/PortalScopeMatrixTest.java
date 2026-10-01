@@ -35,6 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
+@com.ses.test.DisableDefaultTenantTestContext
 class PortalScopeMatrixTest extends PortalTestSupport {
 
     @Autowired

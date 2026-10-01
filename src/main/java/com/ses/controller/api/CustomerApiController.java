@@ -131,6 +131,10 @@ public class CustomerApiController {
         dataScopeService.assertAllowedCustomer(id);
         Customer existing = customerService.getById(id);
         if (existing == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        // 旧クライアントが送付方法を未送信でも、NOT NULL列をnullで上書きしない。
+        if (customer.getDeliveryPreference() == null || customer.getDeliveryPreference().isBlank()) {
+            customer.setDeliveryPreference(existing.getDeliveryPreference());
+        }
         requireLegalEntityContext().ifPresent(ctx -> {
             ctx.assertCurrent(existing.getLegalEntityId());
             customer.setLegalEntityId(existing.getLegalEntityId());
