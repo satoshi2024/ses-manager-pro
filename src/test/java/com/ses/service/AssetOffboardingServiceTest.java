@@ -13,43 +13,43 @@ import com.ses.mapper.LifecycleTaskMapper;
 import com.ses.mapper.LifecycleTemplateMapper;
 import com.ses.service.provider.ExternalAccountProviderClient;
 import com.ses.service.provider.impl.MockExternalAccountProviderClientImpl;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DisplayName("Asset Offboarding & Provider Integration Tests (退社ゲート・プロバイダ連携)")
 class AssetOffboardingServiceTest extends BaseIntegrationTest {
 
+    private static final String SCOPE_USERNAME = "asset-offboarding-scope-user";
+
     @BeforeEach
     void bindTenantAndSecurityContext() {
-        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
-        SysUser user = SysUser.builder().tenantId("default").username("admin")
-                .role("管理者").status(1).build();
-        user.setId(1L);
-        com.ses.config.LoginUser principal = new com.ses.config.LoginUser(user,
-                List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_管理者")));
-        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
-                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
-                        principal, null, principal.getAuthorities()));
-        if (organizationUnitMapper.selectCount(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<OrganizationUnit>()
-                        .eq(OrganizationUnit::getLegalEntityId, 1L)) == 0) {
-            organizationUnitMapper.insert(OrganizationUnit.builder()
-                    .tenantId(1L).legalEntityId(1L)
-                    .code("EXT_SCOPE_TEST").name("外部アカウント境界テスト法人")
-                    .type("COMPANY").validFrom(LocalDate.of(2020, 1, 1))
-                    .status("ACTIVE").version(0).build());
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sys_user WHERE username = ? AND deleted_flag = 0",
+                Integer.class, SCOPE_USERNAME);
+        if (count == null || count == 0) {
+            jdbcTemplate.update("""
+                    INSERT INTO sys_user
+                        (tenant_id, username, password, real_name, role, status, deleted_flag)
+                    VALUES ('default', ?, 'N/A', '資産退社テスト', 'HR', 1, 0)
+                    """, SCOPE_USERNAME);
         }
+        Long scopeUserId = jdbcTemplate.queryForObject(
+                "SELECT id FROM sys_user WHERE username = ? AND deleted_flag = 0",
+                Long.class, SCOPE_USERNAME);
+        jdbcTemplate.update("DELETE FROM t_user_organization WHERE user_id = ?", scopeUserId);
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L, scopeUserId);
+        TenantTestSecurity.bindAs(scopeUserId, SCOPE_USERNAME, "default", "HR");
     }
 
     @AfterEach
@@ -74,7 +74,7 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
     private ExternalAccountSystemMapper externalAccountSystemMapper;
 
     @Autowired
-    private com.ses.mapper.OrganizationUnitMapper organizationUnitMapper;
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private LicenseAssignmentMapper licenseAssignmentMapper;

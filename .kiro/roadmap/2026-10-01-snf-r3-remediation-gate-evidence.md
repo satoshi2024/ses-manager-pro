@@ -47,6 +47,8 @@ push、PR 作成、main への merge、production approval は実施していな
 - performance test は暗黙 default tenant に依存せず、明示的に tenant context を設定・解放する。
 - real Chrome の connector / Browser Demo fixture を dedicated tenant、法人、account link、
   契約 ownership へ明示的に揃えた。production の fail-closed 境界は緩和していない。
+- fast suite のランダム順序で検出した AssetOffboarding の法人 fixture と External Account
+  二重 poll の共有 `default` tenant 依存を、専用 user / tenant fixture へ分離した。
 
 ## Gate 結果
 
