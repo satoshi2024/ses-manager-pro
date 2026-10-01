@@ -80,4 +80,15 @@ Astraは2026-10-02、B0 `1443fb68943849a3260d7ebe005259f3eb609d60`上の凍結WI
 
 追加回帰: proof再利用/並行消費、session/nonce/scope差替、発行後role/link/password変更、DB commit failure、logoutと遅延reauth/confirm、BFCache、通知不能tab、120秒境界、lock中の正しいpassword拒否、並行失敗加算。
 
+## 追加Plan再Review結果とwave
+
+`d9d5311287ccc50f336b48cb72234ff59ab62e20`をAstraが再審査し、本批安全基盤の**技術PLAN PASS**とした。G1 server proof/API/testの後にG2 client/UI/real Chromeへ進める。原ACの達成・人工承認・production PASSとは別である。
+
+G2の具体化条件は次で固定する。
+
+- focus等の現行状態確認は、同documentが既に明示復元済みで、撤回を受けず認可継続性が確認できる短い中断に限る。LOCKED/QUARANTINED、未知継続性、BFCache復帰はfresh reauth/confirmへ戻す。GETは初期解錠に使わない。
+- confirmはnonce、確定scope、serverTime、`permitExpiresAt`を含む復元結果を返す。消費済みproofは消去し再利用しない。復元結果はdocument memoryだけに保持する。許可期間は最大15分かつ現在sessionのmaxInactiveInterval以下（無期限sessionでも15分上限）。期限ちょうどで停止し、延長はfresh reauth/confirmを要求する。recordの30日保持期限は別途短い方を適用し、送信時のserver現行認可を代替しない。
+- 新draftは現行authenticated contextをonlineで確認したdocumentが新規に生成したrequest IDだけをmemory allow-listへ追加して扱う。旧scope不在に架空値を作らない。この新規入口で既存queueをread/display/flushしない。reloadでmemory allow-listを失ったrecordは旧draftとなり、上記復元gateを要求する。既存recordの再bindを新規生成として偽装しない。
+- 新規と復元を混在させるaggregateのversion/順序はserver現行versionと未処理recordの衝突を検査し、不明なら新規queueを停止して明示復元/破棄を案内する。保存失敗を新規成功に見せない。
+
 追加Plan Reviewと実装・独立CODE Reviewが済んでも、OwnerによるAC差分承認、stagingとproduction enablementは別gateである。
