@@ -31,10 +31,24 @@
 [OpenJDK nio-devのWindows議論](https://mail.openjdk.org/pipermail/nio-dev/2023-March/013297.html)でも別directoryによる診断が示されている。
 実際のhostにおける上記の成功/失敗は、本runとは別の最小診断による観測である。
 
+## 限定再検証（全体PASSとは別）
+
+- NF01 fixture修復Head `e3944774e667a226848d3883e7333ddb8b2ef1f6`は対象2 class、
+  **5/0/0/0**。Astraが製品側認可・document/cancel断言を緩和していないことを確認しCODE PASS。
+  controlへ`e90daaf1`として統合した。
+- loopback対象4 classは固定Head `e3ca3ae0eda203e568b463b331cfc2a9fcbae349`で
+  `jdk.net.unixdomain.tmpdir=C:\work\jdk-uds`を指定して再実行、**12/0/0/0、exit 0**。
+  開始UTC `2026-10-01T14:34:37.1297892Z`、終了UTC `2026-10-01T14:36:10.0248126Z`。
+  PinningHttpsTransportTest 4、PrometheusScraperLabE2ETest 1、CapacityBaselineScriptTest 5、
+  WebhookNotifierLoopbackIntegrationTest 2。該当4 XML/textだけをlog/metadata/hashと共に
+  `verification-evidence/20261001-control-loopback-02/`へ保存した。
+- これらの限定成功を足して第1回全fastをPASSへ変更しない。後続実装を統合した固定Headで
+  全fastを再実行する。現在のtarget内XMLは複数runが混在するため全件合算禁止。
+
 ## 次のgate
 
-1. 2 classのfixtureを修復し、対象限定5件を正しい環境で実行、固定HeadをAstraへ提示する。
-2. 上記4 classのloopback試験を明示socket directoryで再実行する。単に環境原因と分類してPASSにはしない。
+1. fixture修復・Astra CODE PASS・統合を完了した。全fast内での再検証は残る。
+2. 上記4 classのloopback限定再検証は成功した。全fast内での再検証は残る。
 3. 原因修復と独立Review後の統合Headで全fastを再実行し、raw evidenceを別directoryへ保存する。
 4. MySQL/Performance/Browser/backup/staging/production gateは本runで代替しない。
 

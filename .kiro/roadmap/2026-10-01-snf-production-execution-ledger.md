@@ -31,16 +31,16 @@
 | C0 Browser fixture | gpt-6-luna | `codex/snf-prod-browser-isolation` / `C:\work\ses-nf02-remediation` | `0d78cc13` Astra CODE PASS、control `778e372d`へ統合。main CI再実行なし |
 | R09 provider境界 | gpt-6-luna | `codex/snf-prod-nf09-provider-boundary` / `C:\work\ses-nf09-system-actor-attribution` | 最終`da850b97`、profile4＋実service反復2=6/0/0/0、Astra CODE PASS、control `036b3eed`へ統合 |
 | R03 training修復 | gpt-6-luna | `codex/snf-prod-nf03-training` / `C:\work\ses-nf03-remediation` | 最終`89384928` Astra CODE PASS、MySQL4/0/0/0、control `626aa967`へ統合 |
-| R10 reauth | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf10-reauth` / `C:\work\ses-nf10-remediation` | session/authenticationへgrantを束縛する修復中。未commit・未Review、成功証拠なし |
+| R10 reauth | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf10-reauth` / `C:\work\ses-nf10-remediation` | grant境界・afterCommit公開・DB active再検証を実装中。旧37件/追加4件の限定成功は旧版のみ。最新版targeted＋isolation検証中、未Review |
 | R02/R03/R10 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1計4件。専用report参照 |
 | R04 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1×3/P2×1。専用report参照 |
 | N06/N07技術Plan Review | gpt-6-astra | NF06 `c2a95cd5` / NF07 `f007ef9a` | 両方synthetic技術PLAN PASS。実装・実環境・人の承認とは別。専用report参照 |
-| R02 scope | 未割当 | `codex/snf-prod-nf02-scope` / `C:\work\ses-manager-pro-nf02-nf03-review-v2` | clean/包含/process確認済み、準備完了 |
+| R02 scope | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf02-scope` / `C:\work\ses-manager-pro-nf02-nf03-review-v2` | recipient本人の現行role/menu/customer scope・owner境界修復WIP、未検証/未Review |
 | R04 offline | gpt-6-luna / browser_fix | `codex/snf-prod-nf04-offline` / `C:\work\ses-review-snf-r3-a` | B0 clean/processを再確認、P1×3/P2×1の修復と実browser証拠を委任 |
-| N06 contracts | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf06-contracts` / `C:\work\ses-review-snf-r3-b` | `c2a95cd5`計画PASS、control `d08c4b4f`へ統合。実装/DDL未着手 |
-| N07 foundation | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf07-foundation-plan` / `C:\work\ses-review-snf-r3-c` | `f007ef9a` synthetic技術PLAN PASS、control `cf974a65`まで計画統合。SF-W1実装を委任、W2以降未着手 |
+| N06 contracts | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf06-contracts` / `C:\work\ses-review-snf-r3-b` | `c2a95cd5`計画PASS。F2 parser/DTO/validator実装WIP、未検証/未Review。DB apply/UI/DDLは未実装 |
+| N07 foundation | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf07-foundation-plan` / `C:\work\ses-review-snf-r3-c` | SF-W1 `6ec4ca28` Astra CODE PASS、18/0/0/0。control `985eedf7`へ統合。W2以降未実装、人工gate未承認 |
 | E05/E08 baseline Review | gpt-6-astra | R3固定Head | 新規P2計4件、専用report参照。production BLOCKED |
-| R01a lifecycle境界 | gpt-6-luna | `codex/snf-prod-nf01-lifecycle` / `C:\work\ses-engineer-lifecycle-workflow` | 最終`ced64304` Astra CODE PASS、H2 26/0/0/0、MySQL3/0/0/0、control `ced8aa59`へ統合。DUAL等は未完 |
+| R01a lifecycle境界 | gpt-6-luna | `codex/snf-prod-nf01-lifecycle` / `C:\work\ses-engineer-lifecycle-workflow` | `ced64304` CODE PASS、H2 26/0/0/0、MySQL3/0/0/0。追加fixture `e3944774` CODE PASS、5/0/0/0、control `e90daaf1`へ統合。DUAL等は未完 |
 
 再利用したworktreeは開始時clean、origin/main未包含commit 0、当該path依存processなしを確認した。
 既存の試験用`target`は、同一worktree内`target-preserved-20261001-prod-start`へ移動して保存した。
@@ -65,7 +65,7 @@
 ## 共通Gate
 
 - local preflight: Java 21.0.12.1 / Maven 3.9.6 / Docker daemon / Node 24.19.0 / Chrome / Git Bashを確認済み。これは全suiteやproduction環境のPASSではない。
-- NF07 mechanical scan再実行: `BLOCKED_COVERAGE_INCOMPLETE` / exit 2。253 table、244 entity table、699 provider候補、未分類73 table、欠落column1077、欠落provider276。旧coverage PASSは現行Headに適用不可。
+- NF07 mechanical scanのB0/V182時点: `BLOCKED_COVERAGE_INCOMPLETE` / exit 2。253 table、244 entity table、699 provider候補、未分類73 table、欠落column1077、欠落provider276。V183と後続実装統合後は再生成が必要。旧coverage PASSは現行Headに適用不可。
 - 試験は一run一suiteでSHA、command、開始/終了、環境、test/failure/error/skipped、log/XML hashを保存する。
 - Maven重負荷suiteは総括が直列化し、異なるagentのDocker/browser試験の干渉を避ける。
 - migration番号、H2 schema/init、shared security/document/config、中央traceabilityは総括が調整する。
@@ -77,6 +77,18 @@
 - push前に`scripts/verify-like-ci.ps1`。最終RCではFast/MySQL/Performance/real Chrome/backup、fresh/upgrade、PITR、安全・運用演習を要求する。
 - `PENDING=0`だけでV182完了にしない。4表のscope未確定0、親子scope一致、callback一意性、実際の業務帰属・actorを確認する。
 - 完了のための人工gate: Production Owner、Security、Privacy/Legal、Operations、provider契約/credential、production topology/representative profile、最終deploy権限。
+
+### 現在の統合検証
+
+- 再fetch後origin/mainは引き続き`1443fb68943849a3260d7ebe005259f3eb609d60`。
+  主checkoutの利用者変更3件を保存し、開発は隔離worktreeのみ。
+- 現統合migrationは182 versioned + 1 repeatable = 183 scripts、最大V183。
+  V184以降は未割当。上記B0 inventoryと区別する。
+- 第1回統合fastは4021/0/12/0でFAIL。旧fixture5 errorとsocket環境7 errorを分類した。
+  修復後fixture5/0/0/0、loopback4 class12/0/0/0は限定再検証の成功であり全fast PASSではない。
+  raw証拠をrun別に保存した。詳細は`2026-10-01-snf-production-integrated-fast.md`。
+- このhostのMaven/Java実行は当該processの`JAVA_TOOL_OPTIONS`に
+  `-Djdk.net.unixdomain.tmpdir=C:\work\jdk-uds`を指定する。既存の必要optionを維持し、global設定は変更しない。
 
 ## 現在の総合判定
 

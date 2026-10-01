@@ -61,3 +61,22 @@ Reviewer `astra_review_baseline`（gpt-6-astra）が固定Headとraw証拠をrea
 
 これらは全NF01/NF03の受入・production承認ではない。NF01のDUAL二者確認、document ACL/version、
 durable撤権trigger、NF03 retention/Privacy gateと全体受入は未完。統合後full suiteは未実行。
+
+## NF07 SF-W1 限定再審査
+
+- 固定実装Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`、Astra **CODE PASS**。
+  新規P0/P1/P2なし。元のP1（認可後取消の迂回）とP2（authority期限の持越し）は閉鎖した。
+- DISPATCH_AUTHORIZEDからCANCELLEDへの直接遷移を削除し、receipt無し・通常結果receipt・
+  別action receiptでも拒否する。認可後のin-flightを取消要求だけで消去しない。
+- VerifiedApproval期限はpolicy/case envelopeと両authority validUntilの最小値。
+  envelopeより早いanchor失効時点から状態進行を拒否する回帰を追加した。
+- raw XMLの9+5+4=**18/0/0/0**と文書内SHA-256一致をReviewerが確認した。
+  control統合commitは`756d2a5e`、`985eedf7`。
+- SF-W2 journal/CAS、durable intent、dispatch直前の失効再検証、実DB並行は未実装。
+  worker/取消確認/復旧は後続波。DG07、Privacy/Legal、実処置、production承認を付与しない。
+
+## NF01 既存fixture追従
+
+`e3944774e667a226848d3883e7333ddb8b2ef1f6`は明示tenant/active DB actorを既存2 classへ設定した。
+対象5/0/0/0、Astra CODE PASS。製品側境界とdocument/cancel断言を維持し、control `e90daaf1`へ統合した。
+全fastの再実行は別gateとして残る。
