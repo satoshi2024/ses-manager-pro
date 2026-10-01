@@ -73,3 +73,12 @@
   旧browser branchとtarget証拠を保存し、今回の原因と正確なfixture ownershipを調査する。
 - unique制約削除、他fixtureのlink削除、test skip、順序固定による隠蔽は禁止。
   固定Headの限定回帰＋Astra独立Reviewを経て統合し、その後全fastを再実行する。
+
+### Q0修復と限定Review
+
+- fixed source `b17758127b102d132ed044e40e07a40d1cca09f6`、control `198ee8e5`へ統合。
+- 未修復の2 classでPortal 7件の後にOvertime 5 errorを再現した。Portalが共有H2へ残すaccount linkと、次contextによるengineer ID再採番の衝突だった。
+- Portalは専用H2・`DB_CLOSE_DELAY=0`・既存DirtiesContextで所有範囲を限定。Overtimeはseed user 1の変更をやめ、自己所有のactive userを作成する。製品コード・unique制約・assertionは変更しない。
+- 元seed、逆順seed、最終ファイル態の元seedはそれぞれ12/0/0/0。別runを合算せず、全fastのPASSへ読み替えない。
+- Astraがdiff、既存AsyncConfigのshutdown待機、pool終了、4 logと最終2 XMLのhashを照合し限定CODE PASS。新規findingなし。
+- 詳細は`.kiro/evidence/20261002-fast-engineer-account-link-isolation.md`。rawはsource worktreeの`verification-evidence/20261002-fast-isolation/`に保存。第3回全fastは未実行。
