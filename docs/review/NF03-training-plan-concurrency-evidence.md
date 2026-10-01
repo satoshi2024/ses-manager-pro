@@ -25,6 +25,8 @@ MySQL 8.0 Testcontainersの4ケースを実行した。
 
 以前のprobeは全DBの`LOCK WAIT`/`data_lock_waits`件数を見ていたため、Astra指摘の通り対象plan・workerとの対応は証明できなかった。本追補ではworker開始barrierに加え、両connection ID、対象主キーrecord lock、InnoDBのrequesting/blocking lock pairを結びつけるprobeへ変更した。Future完了時は成功・例外causeを即時伝播し、wait観測には10秒の上限を残す。complete/cancelの2順序も個別transaction、別enrollment、別connectionでlock waitまで観測した。
 
+追加確認では、requesting workerの`CONNECTION_ID()`、`started` barrier、および対象service操作を同じ`TransactionTemplate`のtransaction内に置いた。これにより、接続ID取得後のHikari再借用でprobeが別connectionを観測する余地をなくした。先行workerと同様、serviceの`@Transactional`はこのtransactionに参加する。
+
 ## 検証結果
 
 1. 実MySQL競合回帰:
@@ -35,6 +37,7 @@ MySQL 8.0 Testcontainersの4ケースを実行した。
 
 MySQL image: `mysql:8.0` (Testcontainers)。結果: `Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`、`BUILD SUCCESS`。
 この追補後のSurefire test-class実行は2026-10-01 22:47:30〜22:48:37 JST（Maven終了ログの`Finished at: 2026-10-01T22:48:37+09:00`を根拠とする。commandにはcompile時間が含まれ、Surefireログ時刻はJST）。image id/digest: `sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b`。Surefire report `TrainingPlanCompletionConcurrencyMySqlTest.txt` のSHA-256: `F6D14E9B9FF14BAC3695FC067DFF44517A09C0A087C240FC36A7D8A0CD2C2286`。XML report SHA-256: `60346F3879974FAD7D7027B903CC178AC316EEB7DB3C0F69E4FDC7776765C5CD`。
+その後のconnectionId同一transaction修正を含む最終再実行は2026-10-01 23:00:11〜23:01:10 JST（Surefire `Running`時刻およびMaven `Finished at`）。結果は4/0/0/0、BUILD SUCCESS。最終`.txt` report SHA-256は`9427AEB4857A0D8E35CE85CFD9F43CCE9C7A962260EE8E685E714B3EE1A87C9D`、XML report SHA-256は`A79A84CBF7F836F0658E0AE3E65001AD05B2E528A882BB743D6986CD08E41093`。先行実行の`F6D14E...`および初版`A74382...`は各時点の旧raw report hashであり、最終証跡として混同しない。
 
 2. fast unitとshard inventory:
 

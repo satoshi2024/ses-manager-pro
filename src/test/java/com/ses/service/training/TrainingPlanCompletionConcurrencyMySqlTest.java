@@ -104,10 +104,12 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
             Future<?> second = pool.submit(() -> {
                 tenant();
                 try {
-                    requestingConnectionId.set(connectionId());
-                    secondStarted.countDown();
-                    service.completeEnrollment(f.enrollmentIds.get(1), 0,
-                            LocalDate.of(2026, 9, 2), null, 1L);
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        requestingConnectionId.set(connectionId());
+                        secondStarted.countDown();
+                        service.completeEnrollment(f.enrollmentIds.get(1), 0,
+                                LocalDate.of(2026, 9, 2), null, 1L);
+                    });
                 } finally { AccountingTenantContextHolder.clear(); }
             });
             assertTrue(secondStarted.await(5, TimeUnit.SECONDS), "後続transactionがworkerで開始する");
@@ -176,10 +178,12 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
             Future<?> completion = pool.submit(() -> {
                 tenant();
                 try {
-                    requestingConnectionId.set(connectionId());
-                    completionStarted.countDown();
-                    service.completeEnrollment(f.enrollmentIds.get(0), 0,
-                            LocalDate.of(2026, 9, 3), null, 1L);
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        requestingConnectionId.set(connectionId());
+                        completionStarted.countDown();
+                        service.completeEnrollment(f.enrollmentIds.get(0), 0,
+                                LocalDate.of(2026, 9, 3), null, 1L);
+                    });
                 } finally { AccountingTenantContextHolder.clear(); }
             });
             assertTrue(completionStarted.await(5, TimeUnit.SECONDS), "完了transactionがworkerで開始する");
@@ -235,10 +239,12 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
             Future<?> second = pool.submit(() -> {
                 tenant();
                 try {
-                    requestingConnectionId.set(connectionId());
-                    secondStarted.countDown();
-                    if (completeFirst) service.cancelEnrollment(f.enrollmentIds.get(1), 0, 1L, "受講不要");
-                    else complete(f.enrollmentIds.get(1), LocalDate.of(2026, 9, 6));
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        requestingConnectionId.set(connectionId());
+                        secondStarted.countDown();
+                        if (completeFirst) service.cancelEnrollment(f.enrollmentIds.get(1), 0, 1L, "受講不要");
+                        else complete(f.enrollmentIds.get(1), LocalDate.of(2026, 9, 6));
+                    });
                 } finally { AccountingTenantContextHolder.clear(); }
             });
             assertTrue(secondStarted.await(5, TimeUnit.SECONDS), "後続operationが独立connectionで開始する");
