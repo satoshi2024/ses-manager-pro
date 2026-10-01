@@ -34,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
                 "integration.hub.public-api.public-id-key=test-integration-hub-public-id-key-at-least-32-bytes",
                 "integration.hub.external-transport.enabled=false",
                 "integration.hub.provider.mode=MOCK",
+                "integration.hub.topology.bound-tenant-id=tenant-b2-e2e",
                 "integration.hub.provider.approved-inbound-providers=provider-b2",
                 "integration.hub.crypto.current-key-version=test-key-v1",
                 "integration.hub.crypto.keys.test-key-v1=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -87,7 +88,7 @@ class ExternalApiInboundConnectorE2ETest {
     @Test
     void connectorInboundは初回を処理し同hashをduplicate別hashをconflictにする() throws Exception {
         ResponseEntity<String> first = send(BODY);
-        assertEquals(202, first.getStatusCode().value());
+        assertEquals(202, first.getStatusCode().value(), auditDiagnostic(first));
         assertTrue(first.getBody() != null && first.getBody().contains("PROCESSED"));
 
         ResponseEntity<String> duplicate = send(BODY);
@@ -143,7 +144,7 @@ class ExternalApiInboundConnectorE2ETest {
         ResponseEntity<String> response = send(TARGET, body(eventId, "health.ping"), eventId,
                 "application/jsonp");
 
-        assertEquals(400, response.getStatusCode().value());
+        assertEquals(400, response.getStatusCode().value(), auditDiagnostic(response));
         assertTrue(response.getBody() != null && response.getBody().contains("REQUEST_INVALID"));
         assertEquals(0, inboundCount(eventId));
     }
@@ -197,5 +198,14 @@ class ExternalApiInboundConnectorE2ETest {
         jdbcTemplate.update("DELETE FROM m_api_client_scope WHERE api_client_id = ?", CLIENT_DB_ID);
         jdbcTemplate.update("DELETE FROM t_credential_version WHERE api_client_id = ?", CLIENT_DB_ID);
         jdbcTemplate.update("DELETE FROM m_api_client WHERE id = ?", CLIENT_DB_ID);
+    }
+
+    private String auditDiagnostic(ResponseEntity<String> response) {
+        String correlationId = response.getHeaders().getFirst("X-Correlation-ID");
+        return response.getBody() + " audit=" + jdbcTemplate.queryForMap("""
+                SELECT authentication_decision, scope_decision, data_scope_decision,
+                       command_decision, rate_decision
+                FROM t_external_api_audit WHERE correlation_id = ?
+                """, correlationId);
     }
 }

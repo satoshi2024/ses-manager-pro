@@ -14,6 +14,7 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.WorkRecordMapper;
+import com.ses.test.TenantTestSecurity;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -82,28 +83,40 @@ class RealBrowserScreenshotTest {
             adminUser.setRealName("管理者ユーザー");
             adminUser.setRole("管理者");
             adminUser.setStatus(1);
+            adminUser.setTenantId("default");
             sysUserMapper.insert(adminUser);
+        } else if (!"default".equals(adminUser.getTenantId())) {
+            adminUser.setTenantId("default");
+            sysUserMapper.updateById(adminUser);
         }
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L, adminUser.getId());
 
         String suffix = "-R8-" + System.currentTimeMillis();
         Customer customer = new Customer();
+        customer.setTenantId("default");
+        customer.setLegalEntityId(1L);
         customer.setCompanyName("テックソリューションズ株式会社" + suffix);
         customer.setTrustLevel("A");
         customerMapper.insert(customer);
 
         Engineer engineer = new Engineer();
+        engineer.setTenantId("default");
+        engineer.setLegalEntityId(1L);
         engineer.setFullName("山田 太郎" + suffix);
         engineer.setEmploymentType("正社員");
         engineer.setStatus("稼動中");
         engineerMapper.insert(engineer);
 
         Project project = new Project();
+        project.setLegalEntityId(1L);
         project.setProjectName("基幹システム刷新" + suffix);
         project.setCustomerId(customer.getId());
         project.setStatus("募集中");
         projectMapper.insert(project);
 
         Contract contract = new Contract();
+        contract.setTenantId("default");
+        contract.setLegalEntityId(1L);
         Integer existing = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_contract WHERE contract_no = 'CON-2026-0001'", Integer.class);
         contract.setContractNo((existing != null && existing > 0)

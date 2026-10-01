@@ -45,6 +45,8 @@ push、PR 作成、main への merge、production approval は実施していな
 - fast suite の共有 H2 に依存していた Asset 法人 principal と Expense `RECEIPT` 文書種別を
   各テストの明示 fixture へ変更した。
 - performance test は暗黙 default tenant に依存せず、明示的に tenant context を設定・解放する。
+- real Chrome の connector / Browser Demo fixture を dedicated tenant、法人、account link、
+  契約 ownership へ明示的に揃えた。production の fail-closed 境界は緩和していない。
 
 ## Gate 結果
 
@@ -55,6 +57,7 @@ push、PR 作成、main への merge、production approval は実施していな
 | `mvn test` | **4007 / 0 failures / 0 errors / 0 skipped**、BUILD SUCCESS（12:58） |
 | `mvn test -Pmysql-tests` | **160 / 0 / 0 / 0**、BUILD SUCCESS（Docker / MySQL 8、40:44） |
 | `mvn test -Pperformance-tests` | **1 / 0 / 0 / 0**、BUILD SUCCESS、p95 63ms、heap 増加 53KB |
+| `mvn test -Pbrowser-tests` | **14 / 0 / 0 / 0**、BUILD SUCCESS（real Chrome、2:05） |
 | `mvn -DskipTests test-compile` | PASS |
 | `MySqlTestShardInventoryTest` | **1 / 0 / 0 / 0**、PASS |
 | migration inventory | 157 files / duplicate version 0 / latest V182 |
@@ -62,7 +65,13 @@ push、PR 作成、main への merge、production approval は実施していな
 
 fast suite の数値は本実行で更新された 656 件の Surefire XML を合算して確認した。
 MySQL profile は production code / migration の最終修正後に全件を実行した。その後の変更は
-fast / performance の test fixture と assertion のみであり、production code / migration は変更していない。
+fast / performance / browser の test fixture と assertion のみであり、production code / migration は変更していない。
+
+browser profile は旧 loopback blocker の解消後、real Chrome で全件を実行した。初回は新しい
+tenant / 法人 fail-closed 境界に未適合だった legacy fixture を検出したため、各 fixture に
+security-bound tenant、法人、一意な dedicated DB binding を明示した。修正後の全 profile は
+zero failure / zero error / zero skipped であり、証跡は `target/browser-evidence`、
+`target/browser-g2-evidence`、`target/browser-m-evidence`、`target/browser-r8-evidence` に生成した。
 
 追加の収束確認:
 
@@ -78,6 +87,7 @@ fast / performance の test fixture と assertion のみであり、production c
 - `@Test` / `@ParameterizedTest` の削除なし。
 - `@Disabled` の追加なし。
 - skip 追加なし。fast / MySQL / performance の全 Gate で skipped 0。
+- browser Gate も skipped 0。Chrome 未検出時の skip や offline fallback は使用していない。
 - tenant / 法人の暗黙 default 注入は全テストへ戻していない。必要な legacy test のみ
   opt-in annotation または明示 fixture を使用する。
 - migration の `outOfOrder` / ignore 設定による回避は追加していない。
