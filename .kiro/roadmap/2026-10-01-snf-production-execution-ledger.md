@@ -39,7 +39,7 @@
 | R02 scope | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf02-scope` / `C:\work\ses-manager-pro-nf02-nf03-review-v2` | recipient本人の現行role/menu/customer scope・owner境界修復WIP、未検証/未Review |
 | R04 offline | gpt-6-luna / browser_fix | `codex/snf-prod-nf04-offline` / `C:\work\ses-review-snf-r3-a` | B0 clean/processを再確認、P1×3/P2×1の修復と実browser証拠を委任 |
 | N06 contracts | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf06-contracts` / `C:\work\ses-review-snf-r3-b` | F2最終`1e8aa651` foundation限定CODE PASS、17/0/0/0、control `5b2e5db3`へ統合。実resolver/mapping/apply/UI/DDL未実装 |
-| N07 foundation | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf07-foundation-plan` / `C:\work\ses-review-snf-r3-c` | SF-W1 `6ec4ca28` Astra CODE PASS、18/0/0/0。control `985eedf7`へ統合。W2以降未実装、人工gate未承認 |
+| N07 foundation | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf07-foundation-plan` / `C:\work\ses-review-snf-r3-c` | SF-W1 `6ec4ca28`限定CODE PASS、18/0/0/0。SF-W2 Plan `e5530c01`追加PLAN PASS、control `55fa2b5b`へ統合。W2a実装枠待ち、W2以降未実装、人工gate未承認 |
 | E05/E08 baseline Review | gpt-6-astra | R3固定Head | 新規P2計4件、専用report参照。production BLOCKED |
 | E05 deadline | 未着手 | `codex/snf-prod-nf05-deadline` / `C:\work\ses-nf05-remediation` | clean/包含/process確認後B0から再利用準備済み。変更範囲と必須回帰を専用batch文書へ固定 |
 | R01a lifecycle境界 | gpt-6-luna | `codex/snf-prod-nf01-lifecycle` / `C:\work\ses-engineer-lifecycle-workflow` | `ced64304` CODE PASS、H2 26/0/0/0、MySQL3/0/0/0。追加fixture `e3944774` CODE PASS、5/0/0/0、control `e90daaf1`へ統合。DUAL等は未完 |
