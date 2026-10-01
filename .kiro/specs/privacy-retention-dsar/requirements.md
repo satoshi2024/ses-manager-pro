@@ -1,5 +1,28 @@
 # privacy-retention-dsar 要件
 
+## 2026-10-01 SYNTHETIC_FOUNDATION increment
+
+初期技術base `1443fb68943849a3260d7ebe005259f3eb609d60`、branch `codex/snf-prod-nf07-foundation-plan`。
+依頼者の技術選定・隔離開発の委任に基づく新incrementであり、下記の旧DEV-0/D0承認とFull Feature/Production
+の停止条件を履歴として維持する。正式Privacy Owner、DG-07、法的policy、実処分・交付の承認は未完了。
+新incrementの正本は`synthetic-foundation.md`で、現在PLAN_REVIEW_PENDING、実装未着手。
+
+- SF-R1: generated fixture、独立temporary DB/object store/journal、test-only authority/provider、
+  prodおよびprod,test拒否を強制し、実datasource/path/credentialへ切替できない。
+- SF-R2: policy approvalとcase approvalを別signature envelopeとして検証する。issuer/scope/tenant/subject/
+  action/version/hash/失効/期限/SoDのどれかが不明なら拒否し、approved booleanを信用しない。
+- SF-R3: holdとDISPATCH_AUTHORIZEDを独立journalの同一subject sequence/CASで直列化する。
+  前者が先なら外部呼出0、後者が先ならin-flight事実を保存して後続を止める。
+  実実行前までの取消を要求するpolicyはprovider cancellation/fencingなしでは対応不可とする。
+- SF-R4: 不可逆操作より先にintentと認可receiptを独立journalへdurable保存する。receipt未記録のintentは
+  restore後もUNKNOWN/quarantineであり、未実行とは推測しない。holdもjournal ACKを先行させる。
+- SF-R5: restoreはread-only/quarantineで開始し、信頼watermarkまでのhold/intent/receiptを冪等再適用する。
+  journal欠落/改竄/gap/遅延/ACK不明/DB projection不一致なら公開とwrite-enableを禁止する。
+- SF-R6: NF03/NF08は未承認policyでretention/処分/外送を有効化しない。技術上の現在値を法的期間に変換しない。
+
+synthetic protocolの技術Plan PASS後に隔離環境の実装を進められるが、旧DG-07/F1-M全体やproductionのPASSを意味しない。
+現時点の準備許可は文書・型/純状態機械/拒否契約・合成fixture設計までで、worker/処分/復元実装は技術Review待ち。
+
 ## 0. 承認状態と今回の実装境界
 
 開発段階のdecision `NF07-DEV-GATE-20260828`（Decision source: `依頼者によるdevelopment-only technical authorization`）により、DEV-0/D0 scopeだけが `APPROVED_DEV_ONLY` である。Owner roleは `Project Maintainer（development-only）`、正式Privacy Ownerは `UNASSIGNED_UNTIL_PRE_PRODUCTION` である。このdecisionは法的結論や本番承認ではない。

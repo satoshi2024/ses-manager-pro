@@ -1,5 +1,24 @@
 # privacy-retention-dsar tasks
 
+## 2026-10-01 SYNTHETIC_FOUNDATION 作業列（未完了）
+
+旧DEV-0/D0とFull Feature/Productionのtask状態は変更しない。新技術委任に基づく隔離合成incrementを別管理する。
+Base: `1443fb68943849a3260d7ebe005259f3eb609d60`。現在Plan Review待ち、下記全て未実装。
+技術Plan PASSは実Privacy/Legal/production承認を代行しない。
+
+| Wave | 実装と試験 | Demo・完了条件 |
+|---|---|---|
+| [ ] SF-W0 | requirements/design/正本の整合、全source inventory差分、型/拒否/署名interfaceとfixture設計 | Astraが固定Headの技術Planを審査し、所見を明示する。policy UNKNOWNを埋めない |
+| [ ] SF-W1 | pure state machine、envelope verifier、test-only authority、隔離harness。prod/mixed profile、偽署名/失効/SoD/実URL注入拒否 | generated fixtureだけを扱い、実provider call=0。対象限定試験と独立Review |
+| [ ] SF-W2 | journal authoritative hold/intent/authorization CAS、DB projection、独立署名watermark | MySQL実並行でholdと認可順序、journal ACK前call=0、local失敗後hold有効を観測 |
+| [ ] SF-W3 | outbox worker、action receipt、lease/idempotency、UNKNOWN/partial/emergency stop | 認可commit〜HTTP間hold、送信前後crash、外部成功〜receipt前crash、二worker、stale fenceを検証 |
+| [ ] SF-W4 | restore quarantine、journal replay、DSAR合成export/redaction、NF03/NF08拒否integration | old snapshotへ新hold/intentを再適用、gap/改竄/遅延で公開不可、第三者情報0、反復hash一致 |
+| [ ] SF-M | 全synthetic waveを固定RCで試験し独立Review | synthetic foundationの達成範囲と未完人工gateを記録。全NF07完成へ読み替えない |
+
+W2以降のworker/処分/journal recoveryは追加protocolの技術Plan PASS前に開始しない。
+migration採番は総括が管理し、旧migrationとV1を変更しない。実adapter、正式policy、交付/処分は別人工gate。
+試験でDBを扱う場合もharness生成の隔離container/dataだけとし、既存DBやユーザーdataを再利用しない。
+
 ## 二段階Gateと停止条件
 
 `NF07-DEV-GATE-20260828` により、`Task 0`、`D0`、`0.3`、`0.5`だけが `APPROVED_DEV_ONLY` である。Owner roleは `Project Maintainer（development-only）`、正式Privacy Ownerは `UNASSIGNED_UNTIL_PRE_PRODUCTION`。許可されるdataはsynthetic/redacted only、external I/Oは禁止、providerCall/writeは0、destructive operationは禁止する。
