@@ -5,7 +5,7 @@
 | 項目 | 値 |
 |---|---|
 | Feature | data-migration-import-center / NF-06 |
-| Status | TECHNICAL_SCOPE_SELECTED / SYNTHETIC_PLAN_PASS（F2実装候補・定向test完了、Review待ち。実source移行は未承認） |
+| Status | TECHNICAL_SCOPE_SELECTED / SYNTHETIC_PLAN_PASS / F2_FOUNDATION_CODE_PASS（Astra 2026-10-02、fixed head 1e8aa651。DemoとF2全範囲は未完了、実source移行は未承認） |
 | Approved entity/schema | <APPROVED_SCOPE>（未入力） |
 | Owner | <OWNER>（未入力） |
 | Base | 1443fb68943849a3260d7ebe005259f3eb609d60（今回の開発基線。実source承認ではない） |
