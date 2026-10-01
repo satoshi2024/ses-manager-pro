@@ -97,6 +97,24 @@ PASSにはPENDING=0、4表unresolved=0、孤児/不整合/重複=0、repair承�
 SQLの一致だけでは実業務帰属を証明しない。invoice/customer/order/contractの全参照とlegal entity正本も
 承認済みrepair packetで照合する。LEGACY_UNRESOLVEDを架空の人のIDへ置換しない。
 
+## NF01 legacy案件の帰属照合
+
+V163の`t_lifecycle_case.tenant_id`はNOT NULL DEFAULT 'default'である。
+旧createがtenantを明示しなかった行はNULLではなくdefaultに入る可能性があるため、NULL数だけでは不十分。
+次の読取結果を案件ownerが根拠付きで照合する。defaultを一括置換したり旧案件を削除したりしない。
+
+```sql
+SELECT c.status, COUNT(*) AS orphan_or_scope_mismatch
+FROM t_lifecycle_case c
+LEFT JOIN t_engineer e ON e.id = c.engineer_id
+WHERE e.id IS NULL OR c.tenant_id IS NULL OR TRIM(c.tenant_id) = ''
+   OR NOT (c.tenant_id <=> e.tenant_id)
+GROUP BY c.status;
+```
+
+scope修復は別の承認済みdata repairとして扱い、case/task/event/証拠/承認の親子関係を維持する。
+非default tenantで新規案件作成、所属tenant SLA、別tenant一覧/更新拒否をstagingで実証する。
+
 ## Staging・運用・有効化
 
 - synthetic stagingでrole/tenant/CSRF/session、NF01〜10の実装済み全動線を確認する。
