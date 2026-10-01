@@ -8,7 +8,7 @@ Reviewer: `astra_review_baseline` / gpt-6-astra、read-only。
 
 1. **P1: 歴史receiptの信頼境界**。approval/lease期限切れは新dispatchを禁止するが既存結果を消さない。
    一方、receipt署名者のscope、署名、compromise/revocationの効力発生時点は引き続き検証する。
-   自己申告の署名時刻だけを信じない。可信な歴史時刻がない、漏洩範囲不明、provider照会不能の場合は
+   自己申告の署名時刻だけを信じない。信頼できる歴史時刻がない、漏洩範囲不明、provider照会不能の場合は
    observation hashと固定reasonだけを追記しUNKNOWNを維持する。
    一度trustedとした結果の鍵漏洩が判明した場合も、trust-change eventを追記し、
    原記録の静かな削除や無条件な成功扱いを禁止する。
@@ -20,7 +20,7 @@ Reviewer: `astra_review_baseline` / gpt-6-astra、read-only。
    journal中の旧署名を検証するだけでは不可。正しい旧watermarkと完全な旧prefixの組合せを
    replayしても復元公開/write-enableを拒否する回帰を要求する。
 
-## 最小追加验収と開工条件
+## 最小追加検証と着手条件
 
 - 正常な鍵rotation後のlate receipt、鍵漏洩後のbackdated偽receipt、歴史妥当性UNKNOWN、
   authoritative provider queryによる確認、対象binding不一致。
