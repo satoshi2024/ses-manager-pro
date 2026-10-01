@@ -82,3 +82,13 @@
 - 元seed、逆順seed、最終ファイル態の元seedはそれぞれ12/0/0/0。別runを合算せず、全fastのPASSへ読み替えない。
 - Astraがdiff、既存AsyncConfigのshutdown待機、pool終了、4 logと最終2 XMLのhashを照合し限定CODE PASS。新規findingなし。
 - 詳細は`.kiro/evidence/20261002-fast-engineer-account-link-isolation.md`。rawはsource worktreeの`verification-evidence/20261002-fast-isolation/`に保存。第3回全fastは未実行。
+
+## 第3回: FAIL（2026-10-02 JST）
+
+- fixed Head `c9bd265555f2197784f2728a50ed7468bab1f853`。Q0とNF02限定審査済み修復を含む。開始clean、終了Head一致。
+- `mvn -B -Dsurefire.runOrder.random.seed=48992185070100 test`、process限定socket directory指定。
+- UTC `2026-10-01T16:16:09.7232635Z`〜`2026-10-01T16:31:19.8062943Z`、exit 1、Maven 15:08。
+- **4075 tests / 1 failure / 0 errors / 0 skipped、667 class XML**。第2回のaccount-link 5 errorは解消したが、全fastはFAILのまま。
+- 唯一のfailureは`PortalBpApiTest.空き要員はreview後に有効化されreview前は内部候補に出ない:266`。最初の`POST /api/portal/bp/availabilities`が期待200に対して403だった。法人contextの一意性と共有fixture状態を調査するが、現時点では根因未確定。
+- raw全XML/text、全log、preflight/run/result、class totals、failures、report SHA-256 manifestは`verification-evidence/20261002-control-fast-03/`へ保存した。旧target reportはpreexisting-reportsへ分離済み。途中集計の成功を最終PASSにしない。
+- 修復後は限定再現/独立Reviewと第4回全fastを必要とする。MySQL/Performance/Browser/backup gateは別途未完。
