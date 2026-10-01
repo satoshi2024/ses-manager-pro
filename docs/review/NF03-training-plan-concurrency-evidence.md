@@ -14,16 +14,16 @@ MySQL 8.0 Testcontainersの4ケースを実行した。
 
 1. 別々のenrollmentを完了するtransactionを同一planの実行行lockで直列化し、両eventとplan完了を確認する。同じversionでの再送がeventを増やさないことも確認する。
 2. 新規enrollのcommitと最後のenrollment完了が競合するとき、後続完了が新規のPLANNED enrollmentを認識してplanをIN_PROGRESSのままにする。そのenrollment開始・完了後だけplanがCOMPLETEDになる。
-3. `完了→取消` と `取消→完了` の両順序を確認する。
+3. 別connectionでcomplete/cancelを同時実行し、complete側が先にplan lockを得る場合とcancel側が先に得る場合の両方を確認する。
 4. event insert失敗を発生させ、実MySQL transactionでenrollment状態/version、plan状態/version、event行がまとめてrollbackすることを確認する。
 
-競合テストはsleepやmock lockを使わない。先行transactionが`SELECT ... FOR UPDATE`を実行した後もbarrierで保持し、後続workerの開始barrier、`performance_schema.data_locks`のGRANTED plan lock、`information_schema.innodb_trx`または`performance_schema.data_lock_waits`の実waitを観測してから先行transactionを解放する。
+競合テストはsleepやmock lockを使わない。Dockerが使えない場合にskipする設定も置かず、Testcontainers/MySQL起動失敗をテスト失敗として扱う。先行workerと後続workerそれぞれから`CONNECTION_ID()`を記録する。`performance_schema.data_locks`では対象connection、現在schema、`t_learning_plan`、`PRIMARY`、`LOCK_TYPE=RECORD`、対象plan IDの全条件で先行lockを確認する。`data_lock_waits`もrequesting/blocking connection IDをthreadsへjoinし、双方の要求lockが同じ対象planのPRIMARY recordであることを照合してから先行barrierを解放する。table intention lockや他plan・他transactionの待機では通過しない。
 
 ## 初回の観測失敗と修正
 
 初回実行は2つの競合ケースがlock wait観測timeoutになった。workerの起動をbarrierで確認しておらず、診断用transaction表示も`RUNNING`かつ`trx_query=NULL`だったため、後続SQLがplan lockを要求した事実を観測できていなかった。Future完了時は例外causeを出す診断も追加したが、worker開始と実lock取得の証拠は別々に見る必要があった。
 
-修正後は先行transactionが実plan lockを保持することを`performance_schema.data_locks`でassertし、後続workerの起動barrier後にInnoDBのlock-wait記録が現れるまで進行を止める。最終MySQL実行では4ケース全てが成功し、このlock-wait条件を通過してから各barrierを解放した。単なるservice結果の順序確認ではなく、InnoDBが実際に待機した競合を確認している。
+以前のprobeは全DBの`LOCK WAIT`/`data_lock_waits`件数を見ていたため、Astra指摘の通り対象plan・workerとの対応は証明できなかった。本追補ではworker開始barrierに加え、両connection ID、対象主キーrecord lock、InnoDBのrequesting/blocking lock pairを結びつけるprobeへ変更した。Future完了時は成功・例外causeを即時伝播し、wait観測には10秒の上限を残す。complete/cancelの2順序も個別transaction、別enrollment、別connectionでlock waitまで観測した。
 
 ## 検証結果
 
@@ -34,6 +34,7 @@ MySQL 8.0 Testcontainersの4ケースを実行した。
 ```
 
 MySQL image: `mysql:8.0` (Testcontainers)。結果: `Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`、`BUILD SUCCESS`。
+この追補後のSurefire test-class実行は2026-10-01 22:47:30〜22:48:37 JST（Maven終了ログの`Finished at: 2026-10-01T22:48:37+09:00`を根拠とする。commandにはcompile時間が含まれ、Surefireログ時刻はJST）。image id/digest: `sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b`。Surefire report `TrainingPlanCompletionConcurrencyMySqlTest.txt` のSHA-256: `F6D14E9B9FF14BAC3695FC067DFF44517A09C0A087C240FC36A7D8A0CD2C2286`。XML report SHA-256: `60346F3879974FAD7D7027B903CC178AC316EEB7DB3C0F69E4FDC7776765C5CD`。
 
 2. fast unitとshard inventory:
 
