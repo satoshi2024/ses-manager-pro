@@ -36,7 +36,7 @@
 | R02/R03/R10 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1計4件。専用report参照 |
 | R04 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1×3/P2×1。専用report参照 |
 | N06/N07技術Plan Review | gpt-6-astra | NF06 `c2a95cd5` / NF07 `f007ef9a` | 両方synthetic技術PLAN PASS。実装・実環境・人の承認とは別。専用report参照 |
-| R02 scope | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf02-scope` / `C:\work\ses-manager-pro-nf02-nf03-review-v2` | recipient本人の現行role/menu/customer scope・owner境界修復WIP、未検証/未Review |
+| R02 scope | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf02-scope` / `C:\work\ses-manager-pro-nf02-nf03-review-v2` | `36dcfdfc` Astra限定CODE PASS、両P1閉鎖。4 class 31件成功と最終integration 1件成功は別run。controlへ統合、全NF02/production承認ではない |
 | R04 offline | gpt-6-luna / browser_fix | `codex/snf-prod-nf04-offline` / `C:\work\ses-review-snf-r3-a` | B0 clean/processを再確認、P1×3/P2×1の修復と実browser証拠を委任 |
 | N06 contracts | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf06-contracts` / `C:\work\ses-review-snf-r3-b` | F2最終`1e8aa651` foundation限定CODE PASS、17/0/0/0、control `5b2e5db3`へ統合。実resolver/mapping/apply/UI/DDL未実装 |
 | N07 foundation | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf07-foundation-plan` / `C:\work\ses-review-snf-r3-c` | SF-W1 `6ec4ca28`限定CODE PASS、18/0/0/0。SF-W2 Plan `e5530c01`追加PLAN PASS、control `55fa2b5b`へ統合。W2a実装枠待ち、W2以降未実装、人工gate未承認 |
