@@ -1,5 +1,14 @@
 # NF10 再認証grant session境界のP1修正記録
 
+## 統合後のraw保管先補足（2026-10-02）
+
+統合branch全体の`git diff origin/main --check`でraw patch/logの空白を検出したため、以下2ファイルは原byteを変更せず、統括worktreeのGit対象外`C:\work\ses-snf-status-audit\verification-evidence\20261002-nf10-raw-archive\`へ移動した。下記の旧相対path記述は履歴であり、現在はこの保管先を参照する。他の10件の最終Surefire reportは従来pathのままである。source worktreeと既存commit履歴にも元証拠は残る。
+
+- `source-diff.patch`: SHA-256 `22B61BFD798980D075CD4C5385F23263E6866885D7BC0F8445783B003773B739`。
+- 初回失敗の`com.ses.report.ReportDeliveryServiceImplTest.txt`: SHA-256 `ECDA3E3FA4CC0D7F6FE553518B241458FECDBF86C66BD67D4E3B965217D45CC6`。
+
+移動前後のhash一致を確認した。試験結果の変更や再実行ではなく、raw保全とGit検査の分離である。
+
 ## 対象
 
 - Finding: `PRD-NF10-001`（共有deliveryの`reauthenticated_at`により別sessionがpassword再認証を継承する）
