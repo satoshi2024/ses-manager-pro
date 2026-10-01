@@ -20,7 +20,7 @@
 - entityごとの候補自然キー、依存順、insert-only/upsert候補、rollback/compensation境界を承認前の候補として記録した。
 - parser → canonical DTO → read-only validator → domain serviceの境界を明記した。
 - validate中のwrite、mapper直insert、後続参照行のhard delete rollbackを禁止した。
-- phase別accepted_pending/apply counters、JPY集計、business result hashとattempt logをexecution-contract.mdで定義した。
+- validated_accepted_total固定基数/apply_pending projection、JPY集計、business result hashとattempt logをexecution-contract.mdで定義した。
 
 ### Test requirements
 
@@ -57,7 +57,7 @@ t_import_job、t_import_mapping、t_import_row_result、t_import_checkpoint、t_
 ### Test requirements
 
 - Flyway fresh/legacy/partial、H2 context、MySQL Testcontainersを実行する。
-- duplicate job, duplicate row, duplicate source key, same source identity/different mapping hash、checkpoint raceをtestする。
+- duplicate job, duplicate row, duplicate source key, same source identity/different mapping hash 409、checkpoint/counter projection rebuildをtestする。
 
 ### Demo
 
@@ -77,7 +77,7 @@ CSV parser（XLSX拒否）とentityごとのcanonical DTO、read-only resolver�
 - UTF-8 BOM/no BOM、Shift_JIS、CRLF/LF/CR、quoted newline、escaped quoteをstreamで処理する。
 - XLSXは初期scope外。拡張子とmagicの両方で拒否する。
 - formula injectionと通常の負数を別分類し、numeric parse結果で扱う。
-- Customer/Engineer/Project/Proposal/Contract/assignment/historyのnatural key候補をmapping versionと照合する。
+- 5 adapter以外のskills/SkillTag、positions、history、EngineerSales/assignmentは全てscope外とし、lookup/create/replace/releaseを行わない。
 - validateではCustomerService.save、ProjectService.saveProjectWithSkills、ContractService.saveWithBusinessRules、ProposalService.save、EngineerService.save、SkillTagResolver.resolveOrCreate、skill replace、mapper writeを呼ばない。
 - Customer createにdomain validationが不足する場合は、generic saveの横に明示facadeを追加し、importからgeneric mapper pathを直接呼ばない。
 
@@ -122,16 +122,16 @@ READYのjobだけを、canonical DTOからdomain service経由でchunk applyし�
 ### Implementation guidance
 
 - READY→APPLYINGをCAS/lockで一度だけ許可する。
-- chunkのrow result、id-map、checkpoint、job counterを同一transaction境界で確定する。
+- 各rowでtarget/registry/id-map/business result/audit/outboxを同一DB transactionで確定する。checkpointとapply_pending/終端counterはrow resultから再構築可能なprojectionとし、row transactionに含めない。
 - crash再開で確定済みbusiness resultは保持し、REUSED/DEDUPED attemptだけをappendする。business SKIPPEDへ再分類しない。
-- status changeはEngineerService/ProposalService/ContractServiceの状態機械を使い、mapper updateをしない。
+- importではどのadapterもstatus変更/遷移methodを呼ばない。各新規rowの初期状態のみ契約値で確定し、更新では既存statusを保持する。Proposal作成でEngineer状態が変化しないtyped domain entry pointを用意する。
 - updateはversion/既存行承認、clearable ALWAYS fields、scope、audit、side effectを維持する。
 
 ### Test requirements
 
 - double apply、same source identity/different mapping hash拒否、chunk境界crash、restart、target natural key collision、version conflictをtestする。
 - 10,000行でtarget重複0、row resultとcheckpointの整合をtestする。
-- row commit前後、checkpoint遅延/破損、lease generation更新後に残存する旧workerのcommit拒否をtestする。同一counter/amount/result hashを中断なしと再開で比較する。
+- row commit前後、checkpoint/counter projection遅延/破損、同じlease row lock/CASによるtakeover排他、generation更新後の旧worker commit拒否をtestする。同一counter/amount/result hashを中断なしと再開で比較する。
 
 ### Demo
 
@@ -145,11 +145,11 @@ apply前に宣言したrollback classに従い、後続参照を壊さず補償�
 
 ### Implementation guidance
 
-- 後続参照がある契約、提案成約、assignment/history、work record、invoice、document linkをhard deleteしない。
+- 5 adapter全てでhard delete rollbackを禁止する。status遷移、skills/SkillTag、positions、history、EngineerSales/assignmentのcreate/update/replace/releaseはscope外。5 adapterは全rowでhard delete/自動void/取消/restoreを禁止し、compensationが未定義ならmanual remediation。
 - source existing row updateは自動復元せず、before snapshot/version conflict/管理者承認を要求する。
 - compensation actionとrollback failureをrow/job/auditへ記録する。
 - source document、error export、auditはretention/legal holdを尊重し、rollbackで削除しない。
-- validate/apply phase別source/accepted_pending/rejected/applied/updated/business_skipped/apply_failed/empty_skipped/amount_excluded counters、JPY amount、excluded reasonを再計算し、designの分類式とdifference 0を完了条件にする。
+- validate/apply source/validated_accepted_total/apply_pending/rejected/applied/updated/business_skipped/apply_failed/empty_skipped/amount_excluded counters、JPY amount、excluded reasonを再計算し、designの分類式とdifference 0を完了条件にする。
 
 ### Test requirements
 

@@ -88,7 +88,10 @@ CSV fixture groupは`utf8-bom`、`utf8-no-bom`、`shift-jis`の明示encoding別
 
 ## 8. Reconciliation/hashの確定契約
 
-旧§7の単一式を撤回する。validateは`source = accepted_pending + rejected`、完全空行`empty_skipped`は別counter。apply終端は`accepted = applied + updated + business_skipped + apply_failed`。row transaction済みの再開はREUSED/DEDUPED attemptだけを追記し、business result、bucket、amount、result hashを不変にする。result hashはbusiness disposition由来でattempt/timestamp/workerを含めず、中断なしと再開後を一致させる。JPYはscale=0/UNNECESSARY。空値・小数・不正値はreason付きamount_excludedで0円と同一視しない。
+旧§7の単一式を撤回する。counter定義とcount/amount式はexecution-contract.md §8を正本とする。validateは`source = validated_accepted_total + rejected`、物理行は`physical_rows = source + empty_skipped`。`validated_accepted_total`は不変、`apply_pending`は動的未処理数。再開はREUSED/DEDUPED attemptだけを追記し、business result/projection基数/amount/result hashを不変にする。result hashはbusiness disposition由来でattempt/timestamp/workerを含めず、中断なしと再開後を一致させる。JPYはscale=0/UNNECESSARY。空値・小数・不正値はreason付きamount_excludedで0円と同一視しない。
 ## 9. Spikeの結論
 
 現行CSV parserはUTF-8固定で全sourceをStringへ読み込むため、Import Centerの実装にはそのまま流用せず、互換golden testを残した上でstreaming parser/canonical adapterを新設する。既存Engineer CSV endpointは変更せず、DG-06承認後にlegacy-engineer mappingを明示的に適用する。
+
+
+技術scopeはexecution-contract.mdに定める5 adapterのみ。全て初期status限定・status遷移なし・children (skills/SkillTag/position/history/EngineerSales/assignment等)なし・hard-delete rollbackなし。Engineer CSVの旧legacy mapping観測は実source承認を意味しない。

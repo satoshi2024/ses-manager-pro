@@ -24,3 +24,8 @@
 Build resultはSUCCESSである。既存Engineer CSVの正常行/不正行partial-success、UTF-8 BOM・quoted field・quoted newline・formula injection、CSV export APIのkeyset/scope/件数上限を含む回帰を確認した。
 
 このevidenceはTask 0の実測記録であり、read-only mapping spikeそのものがDBへ書き込んだことを示すものではない。DB no-write、Shift_JIS、10,000行、mid-chunk crash等の実装testはF2/B1/Mで追加し、このTask 0の完了条件には含めない。
+
+
+## 適用範囲注記（2026-10-01）
+
+上記は2026-08-27時点の既存Engineer CSV regression実測であり、新Import Centerのcounter/registry/apply契約を検証した結果ではない。現行の不変counter基数はalidated_accepted_total、pply_pendingはprojectionである。新機能の検証はsynthetic W1後に別途実施する。
