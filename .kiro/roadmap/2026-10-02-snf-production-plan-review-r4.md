@@ -31,3 +31,14 @@ Reviewer: `astra_review_baseline` / gpt-6-astra、read-only。
 Astraは補完済み範囲からW2a port/harness/hold/replay/lease/hash-chainを進める選択肢を認めたが、
 総括は先に上記契約を一つの固定Planへ反映し、追加Reviewを受ける方針とした。
 現在W2のworker/DDL/実処置は未開始。migration番号も未割当。
+
+## 再Review結果
+
+固定Head `e5530c01b7697e125f3b4b7f2db168bfc385bd97`をAstraが再審査し、限定**技術PLAN PASS**。
+歴史receiptのexact digest/signatureと独立trusted time、単一compound event revision、
+独立latest witnessによる旧有効prefix拒否を契約へ反映した。production/policy承認ではない。
+
+次はsynthetic W2aのtyped port、test schema、Journal CAS/chain/command replay/hold/leaseを実装する。
+P1–P5/P9/P13に加え、**P14のtransaction途中失敗とP15の接続前profile/capability拒否をW2aで検証**する。
+W2aの固定CODE Review後にW2bへ進み、W3 worker/receipt、実処置、production adapterはこの着手範囲へ含めない。
+既存migrationの変更・番号予約なし。MySQL試験の実行時間は総括が割り当てる。
