@@ -19,7 +19,12 @@
 ## R03 training
 
 - 実装Head: `5facee224d4e59dad15981d29b3accb8b89c9661`
-- 実装者報告: TrainingPlanServiceTest 16/0/0/0。独立Review待ち、未統合。
+- Astra独立照合: TrainingPlanServiceTest XML/text 16/0/0/0。限定修復のCODE PASS、検証P2が1件残る。
+- complete/cancel/enrollは共通のtenant-bound plan lockを使用し、非取消件数>0かつ全件COMPLETEDでのみ終端化する。
+  event keyはenrollment ID/versionを含み、更新とeventは同一transaction。
+- P2: Mockito/ReentrantLockの同一enrollment再送試験では、異なるenrollmentを持つ同planの
+  MySQL実並行を証明していない。complete×2、complete/cancel、enrollと最終complete、rollback、
+  空集合と両取消順序の追加回帰待ち。全NF03/production承認ではない。未統合。
 
 ## R09 provider境界
 
@@ -28,3 +33,6 @@
 - 残るP2: 実FailClosed client→ExternalAccountService→offboardingの保存状態/確認event/retry/clearanceを
   integrationで示すこと。既存testのinstanceofによる早期returnをPASS証明に使わない。
 - 実providerなしの安全拒否と実provider導入完了を混同しない。
+- 回帰追加Head `02105ce6a92d61736d44ce727f028059618a64c4` は定向5/0/0/0。
+  root照合で非transaction testのfixture後始末不足、固定engineer/actorと実scopeの不一致を検出したため、
+  isolated tenant/owner、精密cleanup、確認eventの不在証拠を補強中。Astra再Review未実施、未統合。
