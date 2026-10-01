@@ -13,7 +13,7 @@
 | 02 | CANDIDATE維持。recipient現在scope/owner tenantの両P1は36dcfdfcでAstra限定CODE PASS、control統合済み | DG-02、正式Owner/最終Review、release |
 | 03 | 集約完了修復と実MySQL並行証拠 `89384928`は限定CODE PASS、control統合済み | 全体最終Review、NF07 policy、retention、staging/運用承認 |
 | 04 | source WIPはAstra CODE FAIL。撤回/DOM/時計の残課題あり。G1/G2追加技術Plan d9d53112は限定PLAN PASS | 固定Head Review・実PWA/browser全体検証・正式release |
-| 05 | 開発scope CONDITIONAL。総deadline修復・targeted再検証中、新実transport未完 | provider/credential、許可先、正式production enablement |
+| 05 | 開発scope CONDITIONAL。総deadline 2187b5f9限定CODE PASS、26/0/0/0、control統合。実transport未完 | provider/credential、許可先、正式production enablement |
 | 06 | W0技術Plan `c2a95cd5` PASS。F2 foundation `1e8aa651`限定CODE PASS、17/0/0/0、control統合済み。DB apply/UI未実装 | 実resolver/sourceSystem境界、全synthetic実装/Review、実source/mapping/data owner、移行承認 |
 | 07 | DEV履歴を維持。SF-W1 `6ec4ca28`限定CODE PASS、18/0/0/0、control統合済み。coverage不完。W2 Plan e5530c01限定PASS、W2a synthetic JDBC実装中、実MySQL/Review未完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
 | 08 | 開発scope CONDITIONAL。summary検証/予算/実行記録P2、disabled catalog残存 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |

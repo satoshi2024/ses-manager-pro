@@ -41,7 +41,7 @@
 | N06 contracts | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf06-contracts` / `C:\work\ses-review-snf-r3-b` | F2最終`1e8aa651` foundation限定CODE PASS、17/0/0/0、control `5b2e5db3`へ統合。実resolver/mapping/apply/UI/DDL未実装 |
 | N07 foundation | gpt-6-luna / browser_fix | `codex/snf-prod-nf07-foundation-plan` / `C:\work\ses-review-snf-r3-c` | SF-W1 `6ec4ca28`限定CODE PASS、18/0/0/0。SF-W2 Plan `e5530c01`追加PLAN PASS、control `55fa2b5b`へ統合。W2a JDBC synthetic journal実装中、pure Boundary/Inventory 3/0/0/0。実MySQLとCODE Review未完。hold release/dispatch proof・W2b以降・人工gate未完 |
 | E05/E08 baseline Review | gpt-6-astra | R3固定Head | 新規P2計4件、専用report参照。production BLOCKED |
-| E05 deadline | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf05-deadline` / `C:\work\ses-nf05-remediation` | nonblocking socket総deadline修復中。初回targeted 26/1/0/0、context fixture修復再検証中。独立CODE Review未完 |
+| E05 deadline | gpt-6-luna / nf09_boundary | `codex/snf-prod-nf05-deadline` / `C:\work\ses-nf05-remediation` | 2187b5f9 Astra限定CODE PASS、最終targeted 26/0/0/0。control 540b27d9/acb8bf66へ統合。実transport/production gateは未完 |
 | R01a lifecycle境界 | gpt-6-luna | `codex/snf-prod-nf01-lifecycle` / `C:\work\ses-engineer-lifecycle-workflow` | `ced64304` CODE PASS、H2 26/0/0/0、MySQL3/0/0/0。追加fixture `e3944774` CODE PASS、5/0/0/0、control `e90daaf1`へ統合。DUAL等は未完 |
 
 再利用したworktreeは開始時clean、origin/main未包含commit 0、当該path依存processなしを確認した。

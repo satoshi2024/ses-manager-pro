@@ -142,3 +142,17 @@ durable撤権trigger、NF03 retention/Privacy gateと全体受入は未完。統
   HOLD_RELEASEDは未実装として拒否し、synthetic dispatch ACKを実送信権限として使わない。
 - MySQL初回runはBoundary testのInstant import不足でtestCompile FAIL。testsは未実行であり、
   既存pure 3件成功と合算しない。原因修復・上記finding対応後に再実行する。
+## NF05 総deadline 限定再審査
+
+- fixed code `2187b5f9ebc7319c899b4074d54f2b8bf448eb3b`、evidence
+  `53de7b2b0da7dd1c66834a8ceb6af0e51c6b5f04`。Astra **限定CODE PASS**。
+  総deadline P2、厳格status P2、constructor注入P1は閉鎖、新しい阻害findingなし。
+- nonblocking socketのconnect/write/header readへ一つのmonotonic deadlineを適用し、
+  期限切れはTIMEOUT/retryableとする。bodyを無制限にdrainしない。送信結果不明を成功扱いしない。
+- raw単一runは **26/0/0/0**（transport 12、boundary 2、guard 2、worker 10）。
+  root/Astraが全4 XMLとlogのhashを照合した。最終源码の日文comment/exceptionをメモリ内で
+  tested文言へ戻すと実行時hashと一致し、実行後に挙動変更がないことをAstraが確認した。
+- 失敗したfixture runもそれぞれ26/1/0/0として保持し、成功runと混算しない。
+  実OP_WRITE背圧の動的証明はない。本文を読まないpeerでの有限終了とは区別する。
+- control integration: `540b27d9`（code）、`acb8bf66`（evidence）。全branch diff check PASS。
+  実provider/sandbox/credential、全NF05、production approvalは未完。
