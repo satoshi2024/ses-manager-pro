@@ -251,6 +251,23 @@ class TrainingPlanServiceTest {
     }
 
     @Test
+    void 空のstatus集合ではplanを完了扱いしない() {
+        LearningPlan plan = draft(1L, BigDecimal.ZERO);
+        plan.setStatus(TrainingPlanService.PLAN_IN_PROGRESS);
+        TrainingEnrollment enrollment = startedEnrollment(90L);
+        when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(enrollment);
+        when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
+        when(enrollmentMapper.update(any(), any())).thenReturn(1);
+        when(enrollmentMapper.selectStatusesByPlanIdAndTenant(1L, "default")).thenReturn(java.util.List.of());
+
+        service.completeEnrollment(90L, 0, LocalDate.of(2026, 9, 1), null, 7L);
+
+        assertEquals(TrainingPlanService.PLAN_IN_PROGRESS, plan.getStatus());
+        verify(planMapper, never()).update(any(), any());
+        verify(eventMapper).insertEvent(any());
+    }
+
+    @Test
     void 同一enrollmentの並行completion再送は一方だけがeventを記録する() throws Exception {
         LearningPlan plan = draft(1L, BigDecimal.ZERO);
         plan.setStatus(TrainingPlanService.PLAN_IN_PROGRESS);
