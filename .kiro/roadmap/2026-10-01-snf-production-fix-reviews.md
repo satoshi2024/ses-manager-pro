@@ -43,3 +43,21 @@
 - domain-event tableが存在しないため、架空のevent countを記録せず確認正本列をassertした。
   full prod Spring起動、NF01 completeCase、全cleanup障害窓、実Keycloak/session/token失効の証拠ではない。
 - control統合Head: `036b3eed83cad61d385cce1973b7db5838d0619f`。最終全suiteは未実行。
+
+## R01a / R03 最終限定再審査
+
+Reviewer `astra_review_baseline`（gpt-6-astra）が固定Headとraw証拠をread-onlyで確認した。
+新規試験は実行していない。いずれも **CODE PASS / 新規P0/P1/P2=0/0/0**。
+
+- R01a `ced643043de8bec2cf00588b93bf2eedd5c80513`: V183のtenant/月序号行を同一transactionで
+  原子的に更新し、並行番号重複・9999以降・容量上限を修復。DBで再取得したactive actorの
+  role/tenantを冪等応答前に検査する。H2 26/0/0/0、MySQL 3/0/0/0の成功logと新規回帰を照合。
+  既存2件のP2を閉鎖。control統合は`9a456611`、`ced8aa59`。
+- R03 `893849284bf57803b8f9480adbc33a4a6b862f8a`: Docker欠如によるskipを除去。
+  complete/cancel両順序は実競合、双方connectionと対象plan PRIMARY RECORDを結ぶlock probe、
+  requester connection IDとservice操作の同transactionを確認。MySQL 4/0/0/0。
+  最終XML SHA-256 `A79A84CBF7F836F0658E0AE3E65001AD05B2E528A882BB743D6986CD08E41093`一致。
+  並行証拠P2と後続補正を閉鎖。control統合は`8f19cf43`〜`626aa967`の5commit。
+
+これらは全NF01/NF03の受入・production承認ではない。NF01のDUAL二者確認、document ACL/version、
+durable撤権trigger、NF03 retention/Privacy gateと全体受入は未完。統合後full suiteは未実行。
