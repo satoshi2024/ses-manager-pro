@@ -10,7 +10,7 @@ Base: `1443fb68943849a3260d7ebe005259f3eb609d60`。計画固定Head `f007ef9aecc
 |---|---|---|
 | [x] SF-W0 | requirements/design/正本の整合、全source inventory差分、型/拒否/署名interfaceとfixture設計 | Astraが固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`の技術PlanをPASS。policy UNKNOWNは未解決のまま |
 | [x] SF-W1 | pure state machine、envelope verifier、test-only authority、隔離harness。active/default prod、未知schema、偽署名/失効/SoD/実URL注入拒否 | Astraは固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`を限定CODE PASS。generated fixtureのみ、実provider call=0、3 class 18/0/0/0。SF-W1のDemo/コード範囲だけ完了 |
-| [ ] SF-W2 | journal authoritative hold/intent/authorization CAS、DB projection、独立署名watermark | MySQL実並行でholdと認可順序、journal ACK前call=0、local失敗後hold有効を観測 |
+| [ ] SF-W2 | [`sf-w2-protocol.md`](sf-w2-protocol.md)のAstra追加Plan PASS後に、journal authoritative hold/intent/authorization CAS、DB projection、独立署名watermarkを実装 | MySQL実並行でholdと認可順序、journal ACK前call=0、local失敗後hold有効を観測 |
 | [ ] SF-W3 | outbox worker、action receipt、lease/idempotency、dispatch直前revocation再検証、UNKNOWN/partial/emergency stop | 認可commit〜HTTP間hold、送信前後crash、外部成功〜receipt前crash、二worker、stale fenceを検証。取消receiptなしでCANCELLEDにせず、in-flight/UNKNOWNを保持 |
 | [ ] SF-W4 | restore quarantine、journal replay、DSAR合成export/redaction、NF03/NF08拒否integration | old snapshotへ新hold/intentを再適用、gap/改竄/遅延で公開不可、第三者情報0、反復hash一致 |
 | [ ] SF-M | 全synthetic waveを固定RCで試験し独立Review | synthetic foundationの達成範囲と未完人工gateを記録。全NF07完成へ読み替えない |
