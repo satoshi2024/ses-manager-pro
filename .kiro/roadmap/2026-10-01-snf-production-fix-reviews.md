@@ -35,4 +35,11 @@
 - 実providerなしの安全拒否と実provider導入完了を混同しない。
 - 回帰追加Head `02105ce6a92d61736d44ce727f028059618a64c4` は対象限定5/0/0/0。
   root照合で非transaction testのfixture後始末不足、固定engineer/actorと実scopeの不一致を検出したため、
-  isolated tenant/owner、精密cleanup、確認eventの不在証拠を補強中。Astra再Review未実施、未統合。
+  isolated tenant/owner、精密cleanup、確認正本列の不在証拠を補強した。
+- 最終Head `da850b97b93a870a0e3888e95fd5557cf829e97a` のAstra再Reviewは **CODE PASS**、P0/P1/P2=0/0/0。
+  profile 4/0/0/0＋同JVM integration反復2/0/0/0をraw XML/textで照合し、以前の接続回帰P2を閉じた。
+  prod/mixed profileは単一fail-closed bean、独立tenant/法人/HR/Engineerと精密cleanup、
+  実service/mapper経由のPENDING→UNKNOWN、確認時間/人/actor/source=NULL、clearance拒否を確認した。
+- domain-event tableが存在しないため、架空のevent countを記録せず確認正本列をassertした。
+  full prod Spring起動、NF01 completeCase、全cleanup障害窓、実Keycloak/session/token失効の証拠ではない。
+- control統合Head: `036b3eed83cad61d385cce1973b7db5838d0619f`。最終全suiteは未実行。
