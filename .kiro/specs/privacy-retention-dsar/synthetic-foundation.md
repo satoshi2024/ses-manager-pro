@@ -114,5 +114,5 @@ in-flight表示、後続禁止、取消保証の限界を観測する。
    retention/disposition/外送を安全な拒否へ維持する。既存期間を法的期間へ昇格しない。
 
 coverageの構造欠落とpolicy未決定は別counterとする。現在のsource baselineは
-`../../roadmap/2026-10-01-snf-production-privacy-coverage.md`を参照し、73未分類table等を0と偽らない。
+`plan.md`の2026-10-01追記を参照し、73未分類table等を0と偽らない。
 各波は実装→対象限定試験→Astra固定Head Reviewを要求し、NF06/NF07未実装のflag OFFを全機能PASSへ変換しない。
