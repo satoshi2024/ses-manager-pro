@@ -74,6 +74,7 @@ class LifecycleEvidenceAndCompensationTest {
                 .realName("管理者B2")
                 .role("管理者")
                 .status(1)
+                .tenantId("default")
                 .build();
         sysUserMapper.insert(adminUser);
 
@@ -83,6 +84,7 @@ class LifecycleEvidenceAndCompensationTest {
                 .realName("人事B2")
                 .role("HR")
                 .status(1)
+                .tenantId("default")
                 .build();
         sysUserMapper.insert(hrUser);
 
@@ -99,6 +101,7 @@ class LifecycleEvidenceAndCompensationTest {
                 .fullName("要員B2テスト")
                 .status("稼動中")
                 .employmentType("正社員")
+                .tenantId("default")
                 .build();
         engineer.setOrganizationId(org.getId());
         engineerMapper.insert(engineer);
