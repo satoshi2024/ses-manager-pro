@@ -17,7 +17,7 @@
 | PR101 CI | run `36857893770`、7 jobs SUCCESS |
 | main CI | run `36858538460`、6 SUCCESS / Browser FAILURE |
 | Browser失敗 | `AccountingIntegrationBrowserDemoTest:349`、account linkのengineer_id unique競合。14/0/1/0。seed `101246425020` |
-| migration | 157 versioned scripts、最大V182、重複version 0 |
+| migration | **181 versioned scripts + 1 repeatable**、最大V182、正規化version重複0。旧157件は24件の小数相当version（`V102_1`等）を除外した誤集計 |
 | 主checkout | `C:\work\ses-manager-pro`。`application-dev.yml`の利用者変更あり。変更・reset・cleanしない |
 | 最終R3証跡 | `C:\work\ses-snf-r3-remediation-b2-b`を保存。試験結果の混合集計を新runの証拠にしない |
 
@@ -59,6 +59,7 @@
 ## 共通Gate
 
 - local preflight: Java 21.0.12.1 / Maven 3.9.6 / Docker daemon / Node 24.19.0 / Chrome / Git Bashを確認済み。これは全suiteやproduction環境のPASSではない。
+- NF07 mechanical scan再実行: `BLOCKED_COVERAGE_INCOMPLETE` / exit 2。253 table、244 entity table、699 provider候補、未分類73 table、欠落column1077、欠落provider276。旧coverage PASSは現行Headに適用不可。
 - 試験は一run一suiteでSHA、command、開始/終了、環境、test/failure/error/skipped、log/XML hashを保存する。
 - Maven重負荷suiteは総括が直列化し、異なるagentのDocker/browser試験の干渉を避ける。
 - migration番号、H2 schema/init、shared security/document/config、中央traceabilityは総括が調整する。
