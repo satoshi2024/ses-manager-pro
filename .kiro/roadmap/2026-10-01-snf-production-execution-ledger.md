@@ -34,11 +34,11 @@
 | R10 reauth準備 | 未割当 | `codex/snf-prod-nf10-reauth` / `C:\work\ses-nf10-remediation` | worktree準備済み、実装待ち |
 | R02/R03/R10 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1計4件。専用report参照 |
 | R04 baseline Review | gpt-6-astra | R3最終証跡worktreeをread-only参照 | 静的Review完了、P1×3/P2×1。専用report参照 |
-| N06/N07技術Plan Review | gpt-6-astra | NF06 `bbdbaa83` / NF07 `f007ef9a` | 第3回: NF06はProposal不変条件P1、NF07 synthetic技術PLAN PASS。専用report参照 |
+| N06/N07技術Plan Review | gpt-6-astra | NF06 `c2a95cd5` / NF07 `f007ef9a` | 両方synthetic技術PLAN PASS。実装・実環境・人の承認とは別。専用report参照 |
 | R02 scope | 未割当 | `codex/snf-prod-nf02-scope` / `C:\work\ses-manager-pro-nf02-nf03-review-v2` | clean/包含/process確認済み、準備完了 |
 | R04 offline | 未割当 | `codex/snf-prod-nf04-offline` / `C:\work\ses-review-snf-r3-a` | clean/包含/process確認済み、準備完了 |
-| N06 contracts | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf06-contracts` / `C:\work\ses-review-snf-r3-b` | 5 adapterの実domainと照合しW0契約同期中。実装/DDL未着手 |
-| N07 foundation plan | root設計、Astra審査済み | `codex/snf-prod-nf07-foundation-plan` / `C:\work\ses-review-snf-r3-c` | `f007ef9a` synthetic技術PLAN PASS、control `cf974a65`まで計画統合。W1実装待ち |
+| N06 contracts | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf06-contracts` / `C:\work\ses-review-snf-r3-b` | `c2a95cd5`計画PASS、control `d08c4b4f`へ統合。実装/DDL未着手 |
+| N07 foundation | gpt-6-luna / nf06_contracts | `codex/snf-prod-nf07-foundation-plan` / `C:\work\ses-review-snf-r3-c` | `f007ef9a` synthetic技術PLAN PASS、control `cf974a65`まで計画統合。SF-W1実装を委任、W2以降未着手 |
 | E05/E08 baseline Review | gpt-6-astra | R3固定Head | 新規P2計4件、専用report参照。production BLOCKED |
 | R01a lifecycle境界 | gpt-6-luna | `codex/snf-prod-nf01-lifecycle` / `C:\work\ses-engineer-lifecycle-workflow` | 安全再利用済み、01/02/04/05/06修復中。NF01現行実装FAIL、歴史COMPLETEを継承しない |
 

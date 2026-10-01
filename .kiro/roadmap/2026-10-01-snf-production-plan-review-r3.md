@@ -42,3 +42,14 @@ W2開始前に実行可能CAS状態表、W3で認可後hold・送信前後crash�
 W4で独立journalからの復元・公開拒否を検証する。
 合成基盤PlanのPASSであり、DG-07/Privacy/Legal/実provider/production承認を変更しない。
 審査済み計画のcontrol統合commitは`010973da`、`cf974a65`。
+
+## NF06 契約補正後の限定再審査
+
+Astraは`c2a95cd5c543e327c124951a2aca2b6a7130b207`の5文書を再審査し、
+**全synthetic W1技術 PLAN PASS**とした。Proposal不変条件のP1は閉鎖。新規重大所見なし。
+通常作成のvalidation、派生状態同期、outcome/audit、原子rollback、冪等outboxを維持し、
+成約遷移・Contract派生は拒否する。F2→F1→A1→B1→B2→Mの各波を実装・審査する。
+requirements.mdの「新規createだけ」は新規作成時の初期状態制限と明確化する非阻断指摘がある。
+Proposalはcreate-only、他4 adapterの承認範囲内updateは維持する。
+controlには`2c475a7a`、`1300d200`、`d08c4b4f`で計画を統合した。
+実装PASS、実source移行、production承認ではない。
