@@ -88,8 +88,10 @@ zero failure / zero error / zero skipped であり、証跡は `target/browser-e
 - `@Disabled` の追加なし。
 - skip 追加なし。fast / MySQL / performance の全 Gate で skipped 0。
 - browser Gate も skipped 0。Chrome 未検出時の skip や offline fallback は使用していない。
-- tenant / 法人の暗黙 default 注入は全テストへ戻していない。必要な legacy test のみ
-  opt-in annotation または明示 fixture を使用する。
+- service loader の互換拡張は、認証済み `@WithMockUser` のみを `default` tenant の
+  `LoginUser` へ置換する。未認証テストへの管理者生成と法人 fixture 投入は
+  `@EnableDefaultTenantTestContext` の明示 opt-in に限定し、tenant 欠落境界のテストは
+  `@DisableDefaultTenantTestContext` で互換変換を無効化する。
 - migration の `outOfOrder` / ignore 設定による回避は追加していない。
 
 ## production enablement 条件
