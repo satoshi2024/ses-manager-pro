@@ -24,6 +24,7 @@ import com.ses.service.report.ReportDeliveryDocumentRegistrar;
 import com.ses.service.report.ReportDeliveryIssueService;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.report.ReportSnapshotService;
+import com.ses.service.report.ReportReauthenticationGrant;
 import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.report.impl.ReportDeliveryServiceImpl;
@@ -35,6 +36,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpSession;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -67,6 +70,8 @@ class ReportDeliveryServiceImplTest {
     private DocumentMapper documentMapper;
     private DocumentVersionMapper documentVersionMapper;
     private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+    private ReportReauthenticationGrant reauthenticationGrant;
+    private MockHttpServletRequest servletRequest;
     private ReportDeliveryServiceImpl service;
 
     @BeforeEach
@@ -90,10 +95,13 @@ class ReportDeliveryServiceImplTest {
         AccountingTimezoneResolver timezoneResolver = mock(AccountingTimezoneResolver.class);
         when(timezoneResolver.resolve("default")).thenReturn(java.time.ZoneId.of("Asia/Tokyo"));
         when(timezoneResolver.now("default")).thenAnswer(invocation -> LocalDateTime.now());
+        reauthenticationGrant = new ReportReauthenticationGrant(java.time.Clock.systemUTC());
+        servletRequest = new MockHttpServletRequest();
+        servletRequest.setSession(new MockHttpSession());
         service = new ReportDeliveryServiceImpl(runMapper, deliveryMapper, notificationOutboxMapper, userMapper, previewService,
                 snapshotService, documentService, documentRegistrar, deliveryIssueService, archiveService,
                 documentMapper, documentVersionMapper, passwordEncoder,
-                new ObjectMapper(), timezoneResolver);
+                new ObjectMapper(), timezoneResolver, reauthenticationGrant);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("1", "N/A",
                         List.of(new SimpleGrantedAuthority("ROLE_管理者"))));
@@ -266,7 +274,7 @@ class ReportDeliveryServiceImplTest {
         when(deliveryMapper.selectByLinkTokenHash("default", sha256("token"))).thenReturn(delivery);
         when(deliveryMapper.selectOne(any())).thenReturn(delivery);
 
-        assertThatThrownBy(() -> service.download(7L, "token", "PDF"))
+        assertThatThrownBy(() -> service.download(7L, "token", "PDF", servletRequest))
                 .hasMessageContaining("error.managementReport.linkExpired");
         verifyNoInteractions(archiveService);
     }
@@ -284,9 +292,9 @@ class ReportDeliveryServiceImplTest {
         when(deliveryMapper.selectByLinkTokenHash("default", sha256("7"))).thenReturn(null);
         when(deliveryMapper.selectByLinkTokenHash("default", sha256("wrong-token"))).thenReturn(null);
 
-        assertThatThrownBy(() -> service.download(7L, "7", "PDF"))
+        assertThatThrownBy(() -> service.download(7L, "7", "PDF", servletRequest))
                 .hasMessageContaining("error.managementReport.linkInvalid");
-        assertThatThrownBy(() -> service.download(7L, "wrong-token", "PDF"))
+        assertThatThrownBy(() -> service.download(7L, "wrong-token", "PDF", servletRequest))
                 .hasMessageContaining("error.managementReport.linkInvalid");
         verifyNoInteractions(archiveService);
     }
@@ -297,6 +305,7 @@ class ReportDeliveryServiceImplTest {
         delivery.setId(7L);
         delivery.setRecipientUserId(1L);
         delivery.setTenantId("default");
+        delivery.setRecipientScopeHash("recipient-scope");
         when(deliveryMapper.selectOne(any())).thenReturn(delivery);
         SysUser user = new SysUser();
         user.setId(1L);
@@ -304,9 +313,10 @@ class ReportDeliveryServiceImplTest {
         when(userMapper.selectByIdAndTenant(1L, "default")).thenReturn(user);
         when(passwordEncoder.matches("pass", "encoded")).thenReturn(true);
 
-        service.reauthenticate(7L, "pass");
+        service.reauthenticate(7L, "pass", servletRequest);
 
         assertThat(delivery.getReauthenticatedAt()).isNotNull();
+        reauthenticationGrant.require(servletRequest, "default", 1L, 7L, "recipient-scope");
         verify(deliveryMapper).update(eq(delivery), any());
     }
 
@@ -328,7 +338,7 @@ class ReportDeliveryServiceImplTest {
                 1L, "マネージャー", "DENY", "RECIPIENT_SCOPE_MISMATCH", "changed");
         when(previewService.previewForRun(any())).thenReturn(preview(recipient));
 
-        assertThatThrownBy(() -> service.download(7L, "token", "PDF"))
+        assertThatThrownBy(() -> service.download(7L, "token", "PDF", servletRequest))
                 .hasMessageContaining("error.managementReport.scopeChanged");
         verifyNoInteractions(archiveService);
     }
@@ -360,8 +370,9 @@ class ReportDeliveryServiceImplTest {
         when(previewService.previewForRun(any())).thenReturn(preview(recipient));
         when(archiveService.getVersionStorageKey(20L, 1)).thenReturn("published/report.pdf");
         when(archiveService.download(20L, 1)).thenReturn(new ByteArrayInputStream("data".getBytes(StandardCharsets.UTF_8)));
+        reauthenticationGrant.issue(servletRequest, "default", 1L, 7L, "recipient-scope");
 
-        ReportDownload download = service.download(7L, "token", "PDF");
+        ReportDownload download = service.download(7L, "token", "PDF", servletRequest);
 
         assertThat(download.getFileName()).isEqualTo("management-report.pdf");
         verify(snapshotService).scopeSnapshotOf(run);
@@ -611,7 +622,7 @@ class ReportDeliveryServiceImplTest {
         foreign.setReauthRequired(0);
         when(deliveryMapper.selectOne(any())).thenReturn(null);
 
-        assertThatThrownBy(() -> service.download(7L, null, "PDF"))
+        assertThatThrownBy(() -> service.download(7L, null, "PDF", servletRequest))
                 .hasMessageContaining("error.managementReport.linkInvalid");
         verifyNoInteractions(archiveService);
     }
@@ -636,7 +647,7 @@ class ReportDeliveryServiceImplTest {
         assertThat(delivery.getLinkTokenHash()).isNull();
         verify(deliveryMapper).update(eq(delivery), any());
 
-        assertThatThrownBy(() -> service.download(7L, "token", "PDF"))
+        assertThatThrownBy(() -> service.download(7L, "token", "PDF", servletRequest))
                 .hasMessageContaining("error.managementReport.linkInvalid");
         verifyNoInteractions(archiveService);
     }
@@ -662,8 +673,9 @@ class ReportDeliveryServiceImplTest {
                 new ReportRecipientPreview(1L, "マネージャー", "ALLOW", "SCOPE_MATCH", "recipient-scope")));
         when(archiveService.getVersionStorageKey(20L, 1)).thenReturn("published/report.pdf");
         when(archiveService.download(20L, 1)).thenReturn(new ByteArrayInputStream("data".getBytes(StandardCharsets.UTF_8)));
+        reauthenticationGrant.issue(servletRequest, "default", 1L, 7L, "recipient-scope");
 
-        ReportDownload download = service.download(7L, null, "PDF");
+        ReportDownload download = service.download(7L, null, "PDF", servletRequest);
 
         assertThat(download.getFileName()).isEqualTo("management-report.pdf");
         verify(deliveryMapper, never()).selectByLinkTokenHash(anyString(), anyString());

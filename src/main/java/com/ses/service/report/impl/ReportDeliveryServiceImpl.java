@@ -26,6 +26,7 @@ import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.report.ReportDeliveryService;
+import com.ses.service.report.ReportReauthenticationGrant;
 import com.ses.service.report.ReportDocumentService;
 import com.ses.service.report.ReportDeliveryDocumentRegistrar;
 import com.ses.service.report.ReportDeliveryIssueService;
@@ -36,6 +37,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import jakarta.servlet.http.HttpServletRequest;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -55,7 +57,6 @@ import java.util.List;
 public class ReportDeliveryServiceImpl implements ReportDeliveryService {
 
     private static final int MAX_ATTEMPTS = 5;
-    private static final int REAUTH_MINUTES = 10;
     private static final int LINK_DAYS = 7;
     private static final SecureRandom TOKEN_RANDOM = new SecureRandom();
 
@@ -74,6 +75,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     private final PasswordEncoder passwordEncoder;
     private final ObjectMapper objectMapper;
     private final AccountingTimezoneResolver timezoneResolver;
+    private final ReportReauthenticationGrant reauthenticationGrant;
 
     @Override
     public ReportDeliveryResult deliverUser(Long runId, String requiredPreviewHash) {
@@ -166,7 +168,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void reauthenticate(Long deliveryId, String password) {
+    public void reauthenticate(Long deliveryId, String password, HttpServletRequest request) {
         String tenantId = requireTenant();
         ReportDelivery delivery = findRequired(deliveryId, tenantId);
         Long userId = currentUserId();
@@ -177,13 +179,14 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         if (user == null || !passwordEncoder.matches(password, user.getPassword())) {
             throw BusinessException.of(403, "error.managementReport.reauthenticationFailed");
         }
+        reauthenticationGrant.issue(request, tenantId, userId, deliveryId, delivery.getRecipientScopeHash());
         delivery.setReauthenticatedAt(now());
         updateDeliveryChecked(delivery);
     }
 
     @Override
-    public ReportDownload download(Long deliveryId, String token, String format) {
-        ResolvedDownload resolved = resolveDownload(deliveryId, token, format);
+    public ReportDownload download(Long deliveryId, String token, String format, HttpServletRequest request) {
+        ResolvedDownload resolved = resolveDownload(deliveryId, token, format, request);
         deliveryIssueService.markDownloaded(deliveryId);
         return new ReportDownload(
                 documentService.download(resolved.documentId, resolved.versionNo),
@@ -192,8 +195,8 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     }
 
     @Override
-    public ReportDownload preview(Long deliveryId, String token, String format) {
-        return download(deliveryId, token, format);
+    public ReportDownload preview(Long deliveryId, String token, String format, HttpServletRequest request) {
+        return download(deliveryId, token, format, request);
     }
 
     @Override
@@ -326,7 +329,8 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
                 .eq("tenant_id", tenantId).eq("run_id", runId).orderByAsc("id"));
     }
 
-    private ResolvedDownload resolveDownload(Long deliveryId, String token, String format) {
+    private ResolvedDownload resolveDownload(Long deliveryId, String token, String format,
+                                             HttpServletRequest request) {
         String tenantId = requireTenant();
         ReportDelivery delivery;
         if (token == null || token.isBlank()) {
@@ -357,11 +361,6 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         if (delivery.getLinkExpiresAt() == null || !delivery.getLinkExpiresAt().isAfter(now())) {
             throw BusinessException.of(403, "error.managementReport.linkExpired");
         }
-        if (delivery.getReauthRequired() != null && delivery.getReauthRequired() == 1
-                && (delivery.getReauthenticatedAt() == null
-                || delivery.getReauthenticatedAt().isBefore(now().minusMinutes(REAUTH_MINUTES)))) {
-            throw BusinessException.of(403, "error.managementReport.reauthenticationRequired");
-        }
         ReportRun run = findRun(delivery.getRunId(), tenantId);
         snapshotService.scopeSnapshotOf(run);
         ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
@@ -380,6 +379,10 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         if (delivery.getRecipientScopeHash() == null
                 || !delivery.getRecipientScopeHash().equals(currentRecipient.getRecipientScopeHash())) {
             throw BusinessException.of(403, "error.managementReport.scopeChanged");
+        }
+        if (delivery.getReauthRequired() != null && delivery.getReauthRequired() == 1) {
+            reauthenticationGrant.require(request, tenantId, userId, deliveryId,
+                    currentRecipient.getRecipientScopeHash());
         }
 
         String normalized = format == null ? "PDF" : format.toUpperCase(java.util.Locale.ROOT);
