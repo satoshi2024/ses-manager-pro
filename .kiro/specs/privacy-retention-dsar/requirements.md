@@ -5,11 +5,14 @@
 初期技術base `1443fb68943849a3260d7ebe005259f3eb609d60`、branch `codex/snf-prod-nf07-foundation-plan`。
 依頼者の技術選定・隔離開発の委任に基づく新incrementであり、下記の旧DEV-0/D0承認とFull Feature/Production
 の停止条件を履歴として維持する。正式Privacy Owner、DG-07、法的policy、実処分・交付の承認は未完了。
-新incrementの正本は`synthetic-foundation.md`で、現在PLAN_REVIEW_PENDING、実装未着手。
+新incrementの正本は`synthetic-foundation.md`で、Astraは固定計画Head
+`f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`を技術Plan PASSと判定した。
+SF-W1は実装済みで、追加した安全拒否試験の再実行と独立Implementation Reviewは未完了。
+この判定はDG-07、実PII、法的policy、実処分/交付、本番承認を許可しない。
 
 - SF-R1: generated fixture、独立temporary DB/object store/journal、test-only authority/provider、
-  prodおよびprod,test拒否を強制し、実datasource/path/credentialへ切替できない。
-- SF-R2: policy approvalとcase approvalを別signature envelopeとして検証する。issuer/scope/tenant/subject/
+  active/default prodおよびprod,test拒否を強制し、実datasource/path/credentialへ切替できない。
+- SF-R2: policy approvalとcase approvalを別signature envelopeとして検証し、schema version `1`以外を拒否する。issuer/scope/tenant/subject/
   action/version/hash/失効/期限/SoDのどれかが不明なら拒否し、approved booleanを信用しない。
 - SF-R3: holdとDISPATCH_AUTHORIZEDを独立journalの同一subject sequence/CASで直列化する。
   前者が先なら外部呼出0、後者が先ならin-flight事実を保存して後続を止める。
