@@ -178,7 +178,7 @@ Spikeでは、DB接続をread-only datasourceまたはtransaction rollbackで隔
 | empty_skipped | header以外の完全空行として除外した行 |
 | amount_excluded | 空/不正/formula-likeで金額合計から除外した行 |
 | amount source/accepted/applied/updated/skipped/apply_failed/rejected | 各状態に属する既知JPY金額の合計 |
-| difference | source = accepted + rejected、accepted = applied + updated + skipped + apply_failedの差。COMPLETEDでは件数・金額・apply_failedとも0 |
+| difference (当時の案・撤回) | W0でphase別へ置換。execution-contract.md §4参照 |
 
 amountが空・不正・非金額entityの場合は、合計対象外件数と理由を別に保持し、ゼロ金額と欠損を混同しない。
 
@@ -190,7 +190,11 @@ amountが空・不正・非金額entityの場合は、合計対象外件数と�
 - 旧schema DDL/fixtureとsource fileの提供
 - DG-06の自然キー、upsert/insert-only、既存行更新承認
 - rollbackの対象、後続参照時のcompensation、再実行時の運用者承認
-- XLSXをMVPへ含めるか、CSV onlyで始めるか
+- XLSXは今回のtechnical incrementでは拒否。実legacy encoding/schema適合はOwner承認待ち
 - source原本のretention、legal hold、error export retention
 
 これらの未解決事項が残る限り、F1以降のDDL/apply/rollback実装を開始しない。
+
+## 9. 2026-10-01 技術increment追記（履歴記録は保持）
+
+§1-8は当時のworktree/base/schema観測履歴であり、今回の開発head・実source承認の表明ではない。今回のTD-02技術委任による選択は[execution-contract.md](execution-contract.md)に記録する。W1の合成実装はAstra Plan Review PASS後に開始でき、実source approvalはproduction data apply gateに限る。対象はCUSTOMER/ENGINEER/PROJECT/PROPOSAL/CONTRACTの合成W0のみ。実legacy schema、data owner、DG-06、production移行は未承認。技術決定案は現行max V182としてmigration versionを予約していない。
