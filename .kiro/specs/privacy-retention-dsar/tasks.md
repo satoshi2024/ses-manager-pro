@@ -3,19 +3,19 @@
 ## 2026-10-01 SYNTHETIC_FOUNDATION 作業列（未完了）
 
 旧DEV-0/D0とFull Feature/Productionのtask状態は変更しない。新技術委任に基づく隔離合成incrementを別管理する。
-Base: `1443fb68943849a3260d7ebe005259f3eb609d60`。計画固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`はAstra技術Plan PASS。SF-W0完了。SF-W1対象3 test classは18/0/0/0で通過済み、独立Implementation Review待ち。
+Base: `1443fb68943849a3260d7ebe005259f3eb609d60`。計画固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`はAstra技術Plan PASS。SF-W0完了。SF-W1固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`はAstra限定CODE PASS、対象3 test class 18/0/0/0。これはSF-W1 foundationのみで、SF-W2以降とFull Feature/Productionは未完了。
 技術Plan PASSは実Privacy/Legal/production承認を代行しない。
 
 | Wave | 実装と試験 | Demo・完了条件 |
 |---|---|---|
 | [x] SF-W0 | requirements/design/正本の整合、全source inventory差分、型/拒否/署名interfaceとfixture設計 | Astraが固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`の技術PlanをPASS。policy UNKNOWNは未解決のまま |
-| [ ] SF-W1 | pure state machine、envelope verifier、test-only authority、隔離harness。active/default prod、未知schema、偽署名/失効/SoD/実URL注入拒否 | 実装済み。generated fixtureだけ、実provider call=0。3 class 18/0/0/0。独立Review後に完了判定 |
+| [x] SF-W1 | pure state machine、envelope verifier、test-only authority、隔離harness。active/default prod、未知schema、偽署名/失効/SoD/実URL注入拒否 | Astraは固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`を限定CODE PASS。generated fixtureのみ、実provider call=0、3 class 18/0/0/0。SF-W1のDemo/コード範囲だけ完了 |
 | [ ] SF-W2 | journal authoritative hold/intent/authorization CAS、DB projection、独立署名watermark | MySQL実並行でholdと認可順序、journal ACK前call=0、local失敗後hold有効を観測 |
 | [ ] SF-W3 | outbox worker、action receipt、lease/idempotency、dispatch直前revocation再検証、UNKNOWN/partial/emergency stop | 認可commit〜HTTP間hold、送信前後crash、外部成功〜receipt前crash、二worker、stale fenceを検証。取消receiptなしでCANCELLEDにせず、in-flight/UNKNOWNを保持 |
 | [ ] SF-W4 | restore quarantine、journal replay、DSAR合成export/redaction、NF03/NF08拒否integration | old snapshotへ新hold/intentを再適用、gap/改竄/遅延で公開不可、第三者情報0、反復hash一致 |
 | [ ] SF-M | 全synthetic waveを固定RCで試験し独立Review | synthetic foundationの達成範囲と未完人工gateを記録。全NF07完成へ読み替えない |
 
-W2以降のworker/処分/journal recoveryは追加protocolの技術Plan PASS前に開始しない。
+W2以降のworker/処分/journal recoveryは追加protocolの技術Plan PASS前に開始しない。SF-W1 CODE PASSは独立journal、worker、restore recovery、NF07全featureの完成を意味しない。
 migration採番は総括が管理し、旧migrationとV1を変更しない。実adapter、正式policy、交付/処分は別人工gate。
 試験でDBを扱う場合もharness生成の隔離container/dataだけとし、既存DBやユーザーdataを再利用しない。
 

@@ -1,6 +1,6 @@
 # NF07 SYNTHETIC_FOUNDATION 技術契約案
 
-状態: **SF-W0 TECHNICAL PLAN PASS / SF-W1 実装済み・対象試験と独立Review待ち**。旧`NF07-DEV-GATE-20260828`の範囲と署名を変更しない。
+状態: **SF-W0 TECHNICAL PLAN PASS / SF-W1 FOUNDATION CODE PASS（Astra限定Review） / SF-W2以降未着手**。旧`NF07-DEV-GATE-20260828`の範囲と署名を変更しない。
 根拠は2026-10-01の依頼者による技術方式選定・開発実行の委任である。
 本incrementはgeneric安全機構を合成データで実装・検証する案であり、DG-07、Privacy Owner、
 法的保持期間、実DSAR交付、実処分、実provider、production enablementを承認しない。
@@ -19,7 +19,7 @@ envelopeより先に失効するtrusted anchor期限のproof拘束を含む。�
 | `TEST-com.ses.privacy.foundation.PrivacyCaseStateMachineTest.xml` | `F0FB094DAE15E25DB01886A153DE3347752E7091AB86C4BE63F2B886B20F4989` |
 | `TEST-com.ses.privacy.foundation.PrivacyFoundationIsolationTest.xml` | `2F554A7025D8C9227863F4CA23B78E4E2A2BCA9DE268A975C7AEFFB89F1F0B18` |
 
-実行はsocket temp directoryを明示した対象限定Mavenであり、全suiteではない。独立Implementation Reviewは未完了。
+実行はsocket temp directoryを明示した対象限定Mavenであり、全suiteではない。Astraは固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`のSF-W1 foundationをCODE PASSとした。これはW1の限定判定であり、SF-W2以降、NF07全feature、DG-07、Privacy/Legal/production gateのPASSではない。
 
 ## SF-01 実行領域と拒否条件
 
