@@ -54,7 +54,8 @@ EXECUTING→CONFIRMED、またはBLOCKED/UNKNOWN/PARTIAL_FAILED/CANCELLED。
 
 - disposition receiptとholdの追加/解除journalを、復元するDB/object snapshotとは別の保護領域へ追記する。
 - journalはtenant/opaque subject reference、policy/case/action hash、対象version、sequence、
-  previous hash、receipt hash、時刻、署名checkpointを保持する。削除したPIIや原本文書を再保存しない。
+  previous hash、receipt hash、時刻、署名checkpointを保持する。削除した原文PIIや原本文書を再保存しない。
+  opaque reference/hashも無条件に匿名情報とは扱わず、対応表・アクセス・保持の別policy対象とする。
 - 信頼watermarkは古いsnapshot内の値だけから決めない。独立authorityの署名checkpointと突合する。
 - restore環境はread-only/quarantineで開始し、snapshot以降のhold/dispositionを冪等再適用する。
   journal欠落/破損/sequence gap/遅延/署名不正/未知provider確認があれば公開とwrite-enableを拒否する。
