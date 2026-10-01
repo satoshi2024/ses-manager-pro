@@ -29,6 +29,8 @@
 8. **外部連携の正本とトランザクション境界**:
    - MDMは端末状態、IdP/SaaSはアカウント失効状態の外部正本です。DBは参照・要求・確認結果・再試行の証跡正本です。
    - 失効要求送信と失効確認は別状態・別時刻で保持します。プロバイダ呼出しはDBトランザクション外で実行し、timeout/5xx/429は成功扱いにせず `PENDING_CONFIRMATION` のまま再試行します。応答形式を分類できない場合は `UNKNOWN` として blocker を維持します。
+   - 現在、実プロバイダadapterは未配線です。`dev`/`test` の `external-account.provider=mock` はテスト用であり、`prod` が有効なら（`prod,test` の混合を含む）mock beanを登録しません。prod既定値は `none` で、未設定・未知値・未配線値はfail-closed adapterとなり、要求を送らず確認結果を `UNKNOWN` とします。人の明示的な失効確認経路は別に維持されます。実provider導入前にプロトコル、credential供給、監査・障害検証を別途確定してください。
+   - 今後の実adapter候補は self-hosted Keycloak です。userの `enabled=false` だけを根拠に、既存session・offline session・発行済みtokenも無効化済みとは判定しません。必要な失効範囲と確認APIの意味を決め、権威ある状態を確認できない場合は `UNKNOWN`/`PENDING_CONFIRMATION` を保ちます。
 
 ---
 
