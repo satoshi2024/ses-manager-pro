@@ -60,7 +60,7 @@ public final class PrivacyCaseStateMachine {
         transitions.put(PrivacyCaseState.CLAIMED, EnumSet.of(PrivacyCaseState.DISPATCH_AUTHORIZED,
                 PrivacyCaseState.BLOCKED, PrivacyCaseState.UNKNOWN, PrivacyCaseState.CANCELLED));
         transitions.put(PrivacyCaseState.DISPATCH_AUTHORIZED, EnumSet.of(PrivacyCaseState.EXECUTING,
-                PrivacyCaseState.BLOCKED, PrivacyCaseState.UNKNOWN, PrivacyCaseState.CANCELLED));
+                PrivacyCaseState.BLOCKED, PrivacyCaseState.UNKNOWN));
         transitions.put(PrivacyCaseState.EXECUTING, EnumSet.of(PrivacyCaseState.CONFIRMED,
                 PrivacyCaseState.UNKNOWN, PrivacyCaseState.PARTIAL_FAILED));
         return transitions;

@@ -3,7 +3,7 @@
 ## 2026-10-01 現行追加scope
 
 `SYNTHETIC_FOUNDATION`は新しい技術incrementであり、計画固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`はAstra技術Plan PASS。
-SF-W0完了、SF-W1対象3 classは16/0/0/0で通過し独立Review待ち。worker/処分/recoveryは未実装、production BLOCKED。
+SF-W0完了、SF-W1対象3 classは18/0/0/0で通過し独立Review待ち。worker/処分/recoveryは未実装、production BLOCKED。
 初期baseは`1443fb68943849a3260d7ebe005259f3eb609d60`、branchは`codex/snf-prod-nf07-foundation-plan`。
 以下のDEV-0/D0行、旧base、旧coverage件数は過去の証跡として保持し、現行HeadのPASSへ転用しない。
 

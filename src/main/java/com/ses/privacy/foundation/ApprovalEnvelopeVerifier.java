@@ -33,9 +33,9 @@ public final class ApprovalEnvelopeVerifier {
         Objects.requireNonNull(approval, "case承認が必要です");
         environmentGuard.requireSyntheticAllowed(policy.metadata().audience());
         Instant now = clock.instant();
-        verifyEnvelope("POLICY", policy.dataElementId(), policy.metadata(), policy.signature(), ApprovalEnvelopeCanonicalizer.canonicalBytes(policy),
+        TrustedAuthority policyAuthority = verifyEnvelope("POLICY", policy.dataElementId(), policy.metadata(), policy.signature(), ApprovalEnvelopeCanonicalizer.canonicalBytes(policy),
                 policy.action(), policy.providerId(), now);
-        verifyEnvelope("CASE", null, approval.metadata(), approval.signature(), ApprovalEnvelopeCanonicalizer.canonicalBytes(approval),
+        TrustedAuthority caseAuthority = verifyEnvelope("CASE", null, approval.metadata(), approval.signature(), ApprovalEnvelopeCanonicalizer.canonicalBytes(approval),
                 approval.action(), approval.providerId(), now);
 
         String policyDigest = ApprovalEnvelopeCanonicalizer.digest(ApprovalEnvelopeCanonicalizer.canonicalBytes(policy));
@@ -61,10 +61,11 @@ public final class ApprovalEnvelopeVerifier {
         return new VerifiedApproval(currentTenant, approval.caseId(), policyDigest, expectedAction, expectedProvider,
                 approval.targetId(), approval.targetVersion(), approval.targetHash(),
                 approval.metadata().revision(), policy.metadata().revision(),
-                min(policy.metadata().expiresAt(), approval.metadata().expiresAt()));
+                min(min(policy.metadata().expiresAt(), approval.metadata().expiresAt()),
+                        min(policyAuthority.validUntil(), caseAuthority.validUntil())));
     }
 
-    private void verifyEnvelope(String envelopeKind, String dataElementId, ApprovalEnvelopeMetadata metadata,
+    private TrustedAuthority verifyEnvelope(String envelopeKind, String dataElementId, ApprovalEnvelopeMetadata metadata,
                                byte[] signature, byte[] payload,
                                String action, String provider, Instant now) {
         if (!SUPPORTED_SCHEMA_VERSION.equals(metadata.schemaVersion())) {
@@ -96,6 +97,7 @@ public final class ApprovalEnvelopeVerifier {
         } catch (GeneralSecurityException exception) {
             throw new SecurityException("承認署名を検証できません", exception);
         }
+        return anchor;
     }
 
     private static void requireEqual(String expected, String actual, String reason) {
