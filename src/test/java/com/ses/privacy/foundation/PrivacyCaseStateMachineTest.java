@@ -96,6 +96,34 @@ class PrivacyCaseStateMachineTest {
                 SyntheticAuthorityFixture.NOW));
     }
 
+    @Test
+    void dispatchAuthorizedCannotBeCancelledWithoutAuthoritativeCancellationReceipt() throws Exception {
+        SyntheticAuthorityFixture fixture = new SyntheticAuthorityFixture();
+        VerifiedApproval approval = fixture.verify();
+        TransitionBinding binding = fixture.binding(approval);
+        VerifiedDispatchFence fence = new VerifiedDispatchFence(binding.tenantId(), binding.caseId(), "auth-1",
+                binding.fingerprint(), SyntheticAuthorityFixture.NOW.plusSeconds(100));
+        VerifiedActionReceipt noCancellationReceipt = new VerifiedActionReceipt(binding.tenantId(), binding.caseId(),
+                "auth-1", "sha256:ordinary-action-result", binding.fingerprint(), SyntheticAuthorityFixture.NOW.plusSeconds(50));
+        TransitionBinding differentAction = new TransitionBinding(binding.tenantId(), binding.caseId(), binding.targetId(),
+                binding.targetVersion(), binding.targetHash(), binding.policyDigest(), binding.caseRevision(),
+                binding.policyRevision(), "DELETE", binding.providerId());
+        VerifiedDispatchFence differentActionFence = new VerifiedDispatchFence(binding.tenantId(), binding.caseId(), "auth-2",
+                differentAction.fingerprint(), SyntheticAuthorityFixture.NOW.plusSeconds(100));
+        VerifiedActionReceipt differentActionReceipt = new VerifiedActionReceipt(binding.tenantId(), binding.caseId(),
+                "auth-2", "sha256:different-action-result", differentAction.fingerprint(), SyntheticAuthorityFixture.NOW.plusSeconds(50));
+
+        assertThrows(SecurityException.class, () -> PrivacyCaseStateMachine.transition(
+                PrivacyCaseState.DISPATCH_AUTHORIZED, PrivacyCaseState.CANCELLED, binding, approval, fence, null,
+                SyntheticAuthorityFixture.NOW));
+        assertThrows(SecurityException.class, () -> PrivacyCaseStateMachine.transition(
+                PrivacyCaseState.DISPATCH_AUTHORIZED, PrivacyCaseState.CANCELLED, binding, approval, fence,
+                noCancellationReceipt, SyntheticAuthorityFixture.NOW));
+        assertThrows(SecurityException.class, () -> PrivacyCaseStateMachine.transition(
+                PrivacyCaseState.DISPATCH_AUTHORIZED, PrivacyCaseState.CANCELLED, binding, approval,
+                differentActionFence, differentActionReceipt, SyntheticAuthorityFixture.NOW));
+    }
+
     private static TransitionBinding emptyBinding() {
         return new TransitionBinding("tenant", "case", "target", "v1", "hash", "policy", "c1", "p1",
                 "RESTRICT", "synthetic-store");

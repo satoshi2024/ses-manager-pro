@@ -33,6 +33,30 @@ class ApprovalEnvelopeVerifierTest {
     }
 
     @Test
+    void verifiedProofExpiresAtTrustedAuthorityExpiryEvenWhenEnvelopesRemainValid() throws Exception {
+        SyntheticAuthorityFixture fixture = new SyntheticAuthorityFixture();
+        Instant authorityExpiry = SyntheticAuthorityFixture.NOW.plusSeconds(120);
+        TrustedAuthority shortLivedAnchor = new TrustedAuthority(fixture.anchor.authorityId(), fixture.anchor.keyId(),
+                fixture.anchor.publicKey(), fixture.anchor.tenants(), fixture.anchor.scopes(), fixture.anchor.dataElements(),
+                fixture.anchor.envelopeKinds(), fixture.anchor.audiences(), fixture.anchor.actions(), fixture.anchor.providers(),
+                fixture.anchor.validFrom(), authorityExpiry);
+        ApprovalEnvelopeVerifier verifier = new ApprovalEnvelopeVerifier(
+                Map.of("synthetic-authority:key-ephemeral", shortLivedAnchor), ignored -> RevocationStatus.ACTIVE,
+                java.time.Clock.fixed(SyntheticAuthorityFixture.NOW, java.time.ZoneOffset.UTC),
+                new SyntheticEnvironmentGuard(new MockEnvironment()));
+
+        VerifiedApproval proof = verifier.verify(fixture.policy, fixture.approval, SyntheticAuthorityFixture.TENANT,
+                SyntheticAuthorityFixture.TARGET_VERSION, SyntheticAuthorityFixture.TARGET_HASH,
+                SyntheticAuthorityFixture.ACTION, SyntheticAuthorityFixture.PROVIDER);
+        assertEquals(authorityExpiry, proof.expiresAt());
+        TransitionBinding binding = fixture.binding(proof);
+        assertTrue(fixture.policy.metadata().expiresAt().isAfter(authorityExpiry));
+        assertTrue(fixture.approval.metadata().expiresAt().isAfter(authorityExpiry));
+        assertThrows(SecurityException.class, () -> PrivacyCaseStateMachine.transition(
+                PrivacyCaseState.APPROVAL_PENDING, PrivacyCaseState.APPROVED, binding, proof, null, null, authorityExpiry));
+    }
+
+    @Test
     void signatureCoversPolicyAndCaseClaimsAndCanonicalEncodingIsLengthDelimited() throws Exception {
         SyntheticAuthorityFixture fixture = new SyntheticAuthorityFixture();
         CaseApprovalEnvelope changed = new CaseApprovalEnvelope(fixture.approval.metadata(), fixture.approval.caseId(),

@@ -9,14 +9,15 @@
 これは実装Review、DG-07、法務/Privacy Owner、本番gateの承認ではない。
 
 SF-W1の実装はmain側のimmutable envelope、Ed25519 verifier、profile/provider拒否、純粋FSMに限定する。
-2026-10-01に対象3 test classを再実行し16件成功、失敗/例外/skipは0。default `prod` profile、未知schema version、
-下流proof転用拒否を含む。実provider呼出しは0。Surefire XMLのSHA-256:
+2026-10-01にAstra CONDITIONAL指摘を補正後、対象3 test classを再実行し18件成功、失敗/例外/skipは0。
+default `prod` profile、未知schema version、下流proof転用拒否、DISPATCH_AUTHORIZED後の取消拒否、
+envelopeより先に失効するtrusted anchor期限のproof拘束を含む。実provider呼出しは0。Surefire XMLのSHA-256:
 
 | XML | SHA-256 |
 |---|---|
-| `TEST-com.ses.privacy.foundation.ApprovalEnvelopeVerifierTest.xml` | `0FF5C5532DD5E386632FCDF2DC3A6CA670D00D5EA19AC4F7C8147813F0319F17` |
-| `TEST-com.ses.privacy.foundation.PrivacyCaseStateMachineTest.xml` | `31B1EFFE2727B075B8E4D426FA90F7942AE45C4DB1B5F6DCC89BE3231CE238B9` |
-| `TEST-com.ses.privacy.foundation.PrivacyFoundationIsolationTest.xml` | `1294A193184B3F44C9A4AD1A7CC5E7180062D6FBEA6795CAEBB3EC0919345BC0` |
+| `TEST-com.ses.privacy.foundation.ApprovalEnvelopeVerifierTest.xml` | `42E1144A92D47E4F8F3879B3FD691502EC7DFDAB1BE0B97C0E6F489F2C43009A` |
+| `TEST-com.ses.privacy.foundation.PrivacyCaseStateMachineTest.xml` | `F0FB094DAE15E25DB01886A153DE3347752E7091AB86C4BE63F2B886B20F4989` |
+| `TEST-com.ses.privacy.foundation.PrivacyFoundationIsolationTest.xml` | `2F554A7025D8C9227863F4CA23B78E4E2A2BCA9DE268A975C7AEFFB89F1F0B18` |
 
 実行はsocket temp directoryを明示した対象限定Mavenであり、全suiteではない。独立Implementation Reviewは未完了。
 
@@ -87,6 +88,11 @@ workerは認可receiptのaction/対象version/hash/有効期限を検証する�
 再認可が必要であり、holdを迂回して古いreceiptを再利用しない。
 認可commit〜HTTP送信をbarrierで停止し、その間にholdを入れる試験で、前後のsequence、
 in-flight表示、後続禁止、取消保証の限界を観測する。
+
+DISPATCH_AUTHORIZED後は権威ある取消receiptを持たない限りCANCELLEDへ遷移できない。
+取消要求またはhold開始はin-flight事実を消去せず、結果未確定ならUNKNOWN/quarantineを維持する。
+W2 dispatch直前にはpolicy/case署名、anchor有効期限、失効状態を再検証し、未知/照会不能な失効状態を拒否する。
+既に外部処理が発生した可能性のあるactionは取消要求で未実行扱いにしない。
 
 ## SF-04 独立journalと復元後の公開gate
 
