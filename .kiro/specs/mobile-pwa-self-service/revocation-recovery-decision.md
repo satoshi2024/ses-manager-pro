@@ -49,4 +49,35 @@ Astraは2026-10-02、B0 `1443fb68943849a3260d7ebe005259f3eb609d60`上の凍結WI
 - lease旧ownerの遅延結果はconflict/errorまたは後継record改変を試みさせ、guard拒否の可視差を作る。HTTP barrier timeoutをassertしfinallyで解放する。重要なCDP変更命令は結果を確認し、evaluateのnullを成功扱いしない。
 - synthetic HTML stubは実Spring認証を証明しない。専用APIのMVC/session testsと、実Springを使うreal Chromeで再認証・A→B・失効・offline→onlineを確認する。
 
+## Astra追加条件と具体化（実装前）
+
+初稿`eeeb206d`への追加ReviewはPLAN CONDITIONAL。以下を技術契約へ追加する。
+
+### StateとAPI
+
+- document状態は`LOCKED → REAUTHENTICATED → RESTORE_CONFIRMED → ACTIVE`。新documentは必ずLOCKED。revoke、principal変更、未知状態はQUARANTINEDへ移り、reload/online/GETだけでは解除しない。
+- `POST /api/my/pwa/restore/reauthenticate`はCSRF必須。入力はpassword、128-bit以上のdocument nonce、厳密なold scopeのみ。password DTOはtoString/検証error/logに秘密を出さない。通常のqueue operation allowlistへこのpathを追加しない。
+- `POST /api/my/pwa/restore/confirm`は本人の明示操作からのみ呼び、proof、同nonce、同old scopeを提示する。reauth成功だけではdraftを読まない・DOMへ出さない・flushしない。confirm失敗はLOCKED/QUARANTINEDを維持し、通常GETへfallbackしない。
+- proofは256-bit以上のopaque乱数、serverには摘要のみ保持。発行から120秒、expiry同時刻も拒否、原子的な単回消費、response loss時も自動再発行/再消費しない。本人の再操作からreauthをやり直す。
+- proof bindingはtenant/user/current engineer link、session ID、Authentication instance/authority snapshot、document nonce、exact old scope hash。発行・消費双方で現在DB active/deleted/role/link/lock状態とscope署名を再検査する。password変更後も無効化できるよう認証credential revision相当のfingerprintをserver内比較する。raw passwordは保持しない。
+- PWA専用session grant registryを使い、同じsession mutexの下で消費/revoke generationを直列化する。最大4個の未消費proof、同nonceは旧proofを失効。失効/expire時は削除する。session消失、複製先でinstance binding不成立、registry不在は拒否し、復元成功と推測しない。分散session topology/sticky sessionの実証はproduction gateに残す。
+- 発行はDB検証transaction成功後だけ。sessionがその間に失効/認証変更した場合は発行しない。server logout/session invalidationと消費の交差では、そのinstanceのsession失効またはgeneration driftを拒否し、遅い応答はclient側generationも確認する。
+- nonceはprotocol上のdocument bindingであり、同源悪意scriptによる完全credential複写に耐える物理tab identityとは呼ばない。proof/解錠許可はBroadcastChannel/opener/shared storageへ渡さない。
+
+### 認証失敗と復元准入
+
+- 既存`AccountLockService`の5回失敗/30分lockを共用する。password照合前に現在DBのlockを検査し、失敗加算は外側例外でrollbackしない独立transactionで確定する。user名はclient入力でなく現在認証userから取る。成功によるlock解除を新入口で迂回させない。
+- 未知user、inactive、role/link失効、password不一致、proof不正は安全な固定errorを返し、password/proof/raw scope/payloadを監査へ出さない。既存API監査経路も実測する。
+- clientはconfirm成功後、serverが検証したexact old scopeだけを対象に、schema/version、request ID、一意性、canonical hash、allowlist、32KiB上限、recordの30日expiryを個別検査する。異なるscope、未知schema、既知tombstone/epoch不一致は復元しない。old scopeのcurrent principal署名一致だけで任意record内容をtrustedにしない。
+- document generationをreauth開始時に捕捉し、reauth応答、confirm直前と応答、IDB読取完了、DOM反映、送信直前に再検査する。logoutは同期的generation増分・DOM/メモリgrant消去を最初に行い、その後に永続削除・broadcastを試す。
+
+### 時刻と通知故障モデル
+
+- server responseのserverTimeとdocument内performance.now経過を基準とし、wall clockの逆行または両者の差が5秒超でquarantineする。performance.nowの値を別tabの値と直接比較しない。永続lease期限は共通server時刻推定に変換し、時間未知時は取得/接管を禁止する。再検証後も旧lease claimを再利用しない。
+- 休眠復帰、focus、visibility復帰、pageshow/BFCache復帰で旧許可を一旦無効化し、オンラインで現在認可/撤回を再検証する。BFCacheで保存されたACTIVEをそのまま復活させない。client基準時刻の更新でrecord.createdAt/expiresAtを延長しない。
+- 正常なBroadcastChannel/storage伝達では受信tabを同期quarantineする。broadcast作成/送信失敗、storage書込不能、受信状態UNKNOWNでは「全tab撤回完了」と表示しない。
+- **全durable書込と全tab通知が同時に失敗したとき、すでに表示済みの他tabを瞬時に消去する保証はない。** focus/visibility/送信前の再検証で再利用を止めるが、それを瞬時消去と呼ばない。この故障モデルの残余リスクもOwner/Security判断待ちであり、CODE修復だけでは承認しない。
+
+追加回帰: proof再利用/並行消費、session/nonce/scope差替、発行後role/link/password変更、DB commit failure、logoutと遅延reauth/confirm、BFCache、通知不能tab、120秒境界、lock中の正しいpassword拒否、並行失敗加算。
+
 追加Plan Reviewと実装・独立CODE Reviewが済んでも、OwnerによるAC差分承認、stagingとproduction enablementは別gateである。
