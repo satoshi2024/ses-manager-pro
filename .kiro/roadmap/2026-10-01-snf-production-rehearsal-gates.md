@@ -15,6 +15,12 @@ test selectionを狭める`-Dtest`を最終full gateに渡さない。
 
 隔離RC worktreeで実行し、主checkoutでは実行・開発しない。
 
+本Windows hostでは`Selector.open()`のpreflightがdefault socket directoryで失敗する。
+現在の検証済みdirectory `C:\work\jdk-uds`を使い、当該shellの`JAVA_TOOL_OPTIONS`へ
+`-Djdk.net.unixdomain.tmpdir=C:\work\jdk-uds`を追加して子JVMにも渡す。既存の必要optionは維持する。
+このhost固有設定をLinux CIへ持ち込まない。実測根拠と失敗runは
+`2026-10-01-snf-production-integrated-fast.md`を参照。設定欠落時はskipせずpreflight FAILとする。
+
 ```powershell
 & 'C:\work\ses-manager-pro\apache-maven-3.9.6\bin\mvn.cmd' -B test
 & 'C:\work\ses-manager-pro\apache-maven-3.9.6\bin\mvn.cmd' -B test -Pmysql-tests
