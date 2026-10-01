@@ -16,6 +16,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.survey.SurveyService;
 import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -78,6 +79,21 @@ class EngineerSelfServiceBrowserMTest {
     /** 本人BのPII（DOM/APIへ一切現れてはならない。R5）。 */
     private static final String B_PII_NAME = "非表示要員B-ブラウザ検証";
     private static final String B_PII_PHONE = "090-5555-0000";
+
+    /** この実行で作成した本人紐付けだけをテスト終了時に解放する。 */
+    private final List<AccountLinkFixture> createdAccountLinks = new java.util.ArrayList<>();
+
+    private record AccountLinkFixture(long engineerId, long userId) {
+    }
+
+    @AfterEach
+    void cleanupCreatedAccountLinks() {
+        for (AccountLinkFixture link : createdAccountLinks) {
+            jdbcTemplate.update("DELETE FROM t_engineer_account_link WHERE engineer_id = ? AND sys_user_id = ?",
+                    link.engineerId(), link.userId());
+        }
+        createdAccountLinks.clear();
+    }
 
     /** 画面ごとのページ固有DOM（表示待ち・エラーページ判定の境界）。表示順もこの順に固定する。 */
     private static final List<Map.Entry<String, String>> SCREENS = List.of(
@@ -193,6 +209,7 @@ class EngineerSelfServiceBrowserMTest {
             link.setEngineerId(engineerId);
             link.setSysUserId(userId);
             accountLinkMapper.insert(link);
+            createdAccountLinks.add(new AccountLinkFixture(engineerId, userId));
         } else if (!"default".equals(link.getTenantId())) {
             link.setTenantId("default");
             accountLinkMapper.updateById(link);
@@ -247,6 +264,7 @@ class EngineerSelfServiceBrowserMTest {
             linkB.setEngineerId(engineerBId);
             linkB.setSysUserId(userBId);
             accountLinkMapper.insert(linkB);
+            createdAccountLinks.add(new AccountLinkFixture(engineerBId, userBId));
         } else if (!"default".equals(linkB.getTenantId())) {
             linkB.setTenantId("default");
             accountLinkMapper.updateById(linkB);
