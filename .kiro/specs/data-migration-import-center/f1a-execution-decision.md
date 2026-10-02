@@ -125,3 +125,30 @@ FileReferenceProviderの完成はF1全体に必要であり、本metadata切出�
 6. DB時刻はjob lock取得後と最後の書込み段階に取り直す。expiry、generation、owner、current run一致を条件付きwriteへ含める。
 7. DDL draftはtenant/source/entity/mapping整合、単一active run、current pointer、immutable run inputを制約表に具体化する。
    次のschema Review前に、上記のsource reader・暗号adapter・permission resolverの呼出し位置/transaction表も提出する。
+
+## 2026-10-02 schema draft Review と共有境界の追加決定
+
+feature draft `f773fed7aa3a812c5301f14fbe3f1b2a5e837a7f` はAstra PLAN CONDITIONAL（P1×1、P2×4）。
+認可前のstorage open、active run/resume fenceの不足、source version/encoding/result項目の不足、
+mapping行サイズと参照整合、job/link初期登録循環を修正してから再Reviewする。まだDDL/実装開始を許可しない。
+Astraの「既存document/versionにtenant複合uniqueがない」という説明は誤りとして撤回された。
+V1の751/781行およびV102の77〜80行に存在する。残る論点はversionが指定documentに属することの保証である。
+
+総括は利用者から委任された技術判断として、次の最小共有変更を設計範囲に追加する。
+これはproduction、Privacy/Legal、実データ移行の承認ではない。
+
+1. FileScopeの専用IMPORT_JOB認可、汎用download経路からの迂回拒否、必要なDocumentService/Link読取・登録境界と
+   対応試験を許可する。他featureの認可緩和、共通SecurityConfig変更、管理者の無条件許可は含まない。
+   exact認可はstorage openより前に完了する。source/version/hash/tenant/legal entity/現在主体を再照合する。
+2. 既存DocumentServiceによる安全なアクセス監査ログは許可する。業務表の読取専用契約とこの安全監査副作用を区別し、
+   allowlist試験でも別分類にする。ログを抑止したりstorageへ直接アクセスして規約を回避しない。
+3. source system登録とidentity candidate登録は独立metadata操作とする。validationからregistryへ書き込まない。
+4. job/link初期化は受控登録transactionとして具体化する。既存Document認可と現在の明示import権限で
+   CLEANな正確な既存document versionを確認し、source/documentの必要なlockと状態照合後、job作成と
+   DocumentService.linkによるIMPORT_JOB link登録を同じtransactionで確定する。途中失敗は全rollback。
+   transaction内のstorage I/Oは禁止。upload/scanはA1の別操作であり、fixtureも登録境界を迂回しない。
+   既存link実装のtransaction参加・副作用・lock順をコードで検証し、成立しなければ設計を戻す。
+5. 必要最小限の参照整合indexは新V184内で設計できる。既存uniqueの重複追加、過去migrationの編集は禁止。
+   document/version/jobのtenant照合順序とcollation互換、単一active run、復旧generationを再Reviewする。
+
+V184は総括台帳でNF06 F1aへ専有予約済み。V183はNF01、V185以降は未割当である。
