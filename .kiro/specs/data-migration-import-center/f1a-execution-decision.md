@@ -103,3 +103,25 @@ FileReferenceProviderの完成はF1全体に必要であり、本metadata切出�
 3. 最終source SHA、全raw log/XML/hash、test countsの単一run集計、schema hash、実container識別子を記録する。
    profile内zero skipped、shard inventory、全branch diff check。H2をMySQL証拠の代わりにしない。
 4. 固定HeadでAstra独立Review。P0/P1未解消、必須証拠不足は統合不可。F1b/apply/UI/実移行gateは残す。
+## 第1回Astra Reviewと条件の解消方針
+
+固定`17d8ebb3f75395139ca3d76d5e6af8c84fcf157e`はPLAN CONDITIONAL（P2×2）。
+以下を総括の技術決定として追加する。DDL/実装のPASSはまだ付与しない。
+
+1. Candidate登録は独立したmetadata操作でありvalidateの一部ではない。validateからregistry書込みを呼ばない。
+   execution-contract §4のmetadata write allowlistを維持する。競合candidateは完全な復号identityまで照合してから同一と判定する。
+2. 金額・raw rowをvalidation metadataへ追加保存しない。SEALEDの集計は、現在のFileScope/ACLとCLEANな固定document versionを
+   再確認し、権威あるreaderでexact sourceをEOFまで再parseする。source SHA、parser/schema/mapping version、各source rowの
+   row hash/canonical fingerprintを保存済み正本と照合する。DB参照の再validationは行わず、保存済み各rowの
+   ACCEPTED/REJECTED dispositionとfinding codeを使い、F2の同じ純amount parserで各fieldのamount/excluded reasonを再計算する。
+   dispositionも個人情報を複製しない最小result metadataとして保存する。集計値・EOFをcaller申告から受けない。
+3. physical/source/empty数は上記reader/parserが計測する。sourceRowNumberには空行由来のgapがあるため1..N連続を要求しない。
+   非空source recordの順序・番号・hash集合が保存済みrow集合と完全一致することをSEALの必要条件にする。
+4. crash再開ではexact sourceを先頭から再parseし、確定prefixのrow hash/fingerprint/dispositionを照合してから続行する。
+   job内duplicate集合をprefixのnormalized identityから再構築し、境界以降の重複keyを拒否する。
+   sourceの一致不能、prefixに不足/余分/異なるrow、暗号鍵不明、document読取不可なら再開しない。
+5. chunk、seal、publishは各々current actor/permission/source/document状態を再確認する。権限失効やsource disableを
+   凍結versionだけで許可しない。document変化は既存readonly facadeのrevisionを再検証し、未確認はfail-closedとする。
+6. DB時刻はjob lock取得後と最後の書込み段階に取り直す。expiry、generation、owner、current run一致を条件付きwriteへ含める。
+7. DDL draftはtenant/source/entity/mapping整合、単一active run、current pointer、immutable run inputを制約表に具体化する。
+   次のschema Review前に、上記のsource reader・暗号adapter・permission resolverの呼出し位置/transaction表も提出する。
