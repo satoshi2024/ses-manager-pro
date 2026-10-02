@@ -167,8 +167,51 @@ CREATE TABLE t_import_validation_run (
     CONSTRAINT chk_import_run_state CHECK (state IN ('BUILDING', 'SEALED', 'COMPLETED', 'ABORTED')),
     CONSTRAINT chk_import_run_entity CHECK (entity_type IN ('CUSTOMER', 'ENGINEER', 'PROJECT', 'PROPOSAL', 'CONTRACT')),
     CONSTRAINT chk_import_run_encoding CHECK (source_encoding IN ('UTF8', 'SHIFT_JIS')),
-    CONSTRAINT chk_import_run_slots CHECK ((state IN ('BUILDING', 'SEALED') AND active_slot = 1 AND published_slot IS NULL) OR (state IN ('COMPLETED', 'ABORTED') AND active_slot IS NULL AND (state <> 'ABORTED' OR published_slot IS NULL))),
+    CONSTRAINT chk_import_run_slots CHECK ((state IN ('BUILDING', 'SEALED') AND active_slot IS NOT NULL AND active_slot = 1 AND published_slot IS NULL) OR (state = 'COMPLETED' AND active_slot IS NULL AND (published_slot IS NULL OR published_slot = 1)) OR (state = 'ABORTED' AND active_slot IS NULL AND published_slot IS NULL)),
     CONSTRAINT chk_import_run_counts CHECK ((source_row_count IS NULL OR source_row_count >= 0) AND (physical_row_count IS NULL OR physical_row_count >= 0) AND (empty_row_count IS NULL OR empty_row_count >= 0) AND (accepted_row_count IS NULL OR accepted_row_count >= 0) AND (rejected_row_count IS NULL OR rejected_row_count >= 0)),
+    CONSTRAINT chk_import_run_summary_counts CHECK (
+        (expected_unit_price_accepted_known_count IS NULL OR expected_unit_price_accepted_known_count >= 0) AND
+        (expected_unit_price_rejected_known_count IS NULL OR expected_unit_price_rejected_known_count >= 0) AND
+        (expected_unit_price_excluded_count IS NULL OR expected_unit_price_excluded_count >= 0) AND
+        (unit_price_min_accepted_known_count IS NULL OR unit_price_min_accepted_known_count >= 0) AND
+        (unit_price_min_rejected_known_count IS NULL OR unit_price_min_rejected_known_count >= 0) AND
+        (unit_price_min_excluded_count IS NULL OR unit_price_min_excluded_count >= 0) AND
+        (unit_price_max_accepted_known_count IS NULL OR unit_price_max_accepted_known_count >= 0) AND
+        (unit_price_max_rejected_known_count IS NULL OR unit_price_max_rejected_known_count >= 0) AND
+        (unit_price_max_excluded_count IS NULL OR unit_price_max_excluded_count >= 0) AND
+        (selling_price_accepted_known_count IS NULL OR selling_price_accepted_known_count >= 0) AND
+        (selling_price_rejected_known_count IS NULL OR selling_price_rejected_known_count >= 0) AND
+        (selling_price_excluded_count IS NULL OR selling_price_excluded_count >= 0) AND
+        (cost_price_accepted_known_count IS NULL OR cost_price_accepted_known_count >= 0) AND
+        (cost_price_rejected_known_count IS NULL OR cost_price_rejected_known_count >= 0) AND
+        (cost_price_excluded_count IS NULL OR cost_price_excluded_count >= 0)
+    ),
+    CONSTRAINT chk_import_run_amount_nulls CHECK (
+        (expected_unit_price_accepted_known_count IS NULL OR ((expected_unit_price_accepted_known_count = 0 AND expected_unit_price_accepted_sum_yen IS NULL) OR (expected_unit_price_accepted_known_count > 0 AND expected_unit_price_accepted_sum_yen IS NOT NULL))) AND
+        (expected_unit_price_rejected_known_count IS NULL OR ((expected_unit_price_rejected_known_count = 0 AND expected_unit_price_rejected_sum_yen IS NULL) OR (expected_unit_price_rejected_known_count > 0 AND expected_unit_price_rejected_sum_yen IS NOT NULL))) AND
+        (unit_price_min_accepted_known_count IS NULL OR ((unit_price_min_accepted_known_count = 0 AND unit_price_min_accepted_sum_yen IS NULL) OR (unit_price_min_accepted_known_count > 0 AND unit_price_min_accepted_sum_yen IS NOT NULL))) AND
+        (unit_price_min_rejected_known_count IS NULL OR ((unit_price_min_rejected_known_count = 0 AND unit_price_min_rejected_sum_yen IS NULL) OR (unit_price_min_rejected_known_count > 0 AND unit_price_min_rejected_sum_yen IS NOT NULL))) AND
+        (unit_price_max_accepted_known_count IS NULL OR ((unit_price_max_accepted_known_count = 0 AND unit_price_max_accepted_sum_yen IS NULL) OR (unit_price_max_accepted_known_count > 0 AND unit_price_max_accepted_sum_yen IS NOT NULL))) AND
+        (unit_price_max_rejected_known_count IS NULL OR ((unit_price_max_rejected_known_count = 0 AND unit_price_max_rejected_sum_yen IS NULL) OR (unit_price_max_rejected_known_count > 0 AND unit_price_max_rejected_sum_yen IS NOT NULL))) AND
+        (selling_price_accepted_known_count IS NULL OR ((selling_price_accepted_known_count = 0 AND selling_price_accepted_sum_yen IS NULL) OR (selling_price_accepted_known_count > 0 AND selling_price_accepted_sum_yen IS NOT NULL))) AND
+        (selling_price_rejected_known_count IS NULL OR ((selling_price_rejected_known_count = 0 AND selling_price_rejected_sum_yen IS NULL) OR (selling_price_rejected_known_count > 0 AND selling_price_rejected_sum_yen IS NOT NULL))) AND
+        (cost_price_accepted_known_count IS NULL OR ((cost_price_accepted_known_count = 0 AND cost_price_accepted_sum_yen IS NULL) OR (cost_price_accepted_known_count > 0 AND cost_price_accepted_sum_yen IS NOT NULL))) AND
+        (cost_price_rejected_known_count IS NULL OR ((cost_price_rejected_known_count = 0 AND cost_price_rejected_sum_yen IS NULL) OR (cost_price_rejected_known_count > 0 AND cost_price_rejected_sum_yen IS NOT NULL)))
+    ),
+    CONSTRAINT chk_import_run_completed_summary CHECK (state <> 'COMPLETED' OR (
+        source_row_count IS NOT NULL AND physical_row_count IS NOT NULL AND empty_row_count IS NOT NULL AND
+        accepted_row_count IS NOT NULL AND rejected_row_count IS NOT NULL AND
+        physical_row_count = source_row_count + empty_row_count AND
+        source_row_count = accepted_row_count + rejected_row_count AND
+        finding_summary_bytes IS NOT NULL AND finding_summary_sha256 IS NOT NULL AND
+        expected_unit_price_accepted_known_count IS NOT NULL AND expected_unit_price_rejected_known_count IS NOT NULL AND expected_unit_price_excluded_count IS NOT NULL AND
+        unit_price_min_accepted_known_count IS NOT NULL AND unit_price_min_rejected_known_count IS NOT NULL AND unit_price_min_excluded_count IS NOT NULL AND
+        unit_price_max_accepted_known_count IS NOT NULL AND unit_price_max_rejected_known_count IS NOT NULL AND unit_price_max_excluded_count IS NOT NULL AND
+        selling_price_accepted_known_count IS NOT NULL AND selling_price_rejected_known_count IS NOT NULL AND selling_price_excluded_count IS NOT NULL AND
+        cost_price_accepted_known_count IS NOT NULL AND cost_price_rejected_known_count IS NOT NULL AND cost_price_excluded_count IS NOT NULL AND
+        amount_excluded_reason_counts IS NOT NULL AND amount_excluded_reason_sha256 IS NOT NULL AND
+        row_set_sha256 IS NOT NULL AND summary_sha256 IS NOT NULL
+    )),
     CONSTRAINT fk_import_run_job_snapshot FOREIGN KEY (tenant_id, job_id, source_system_id, source_version, entity_type)
         REFERENCES t_import_job (tenant_id, id, source_system_id, source_version, entity_type) ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT fk_import_run_mapping_snapshot FOREIGN KEY (tenant_id, job_id, mapping_id, source_system_id, entity_type, schema_version, mapping_version, mapping_sha256)
