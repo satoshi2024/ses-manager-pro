@@ -142,3 +142,18 @@ Q1 source `32dc10ce`はAstra限定CODE PASS、control `98ac6172`へ統合した�
 2026-10-02午前にGitHubを再照会し、PR101 run36857893770の7 jobs SUCCESS、
 origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであることを確認した。
 ローカル修復をremote CI成功として扱わない。remote操作は行っていない。
+
+### NF07 synthetic journalの限定統合と第4回Fastの準備
+
+- Luna source `da44b267` / `504349ea7e5bd8a85f8313b53c13044d662d317e`を
+  control `7c66eb11` / `dddf622a`へ統合した。Astra固定Head限定CODE PASS、未解消P0/P1/P2=0/0/0。
+- run13 MySQLは25/0/0/0、run14 boundary/inventoryは4/0/0/0。P1両順序の実writer PRIMARY待機と、
+  takeover後の旧generation/owner拒否を確認した。後者は新revision=2と未失効の新leaseを使い、CAS/expiry先行拒否と区別する。
+- 原raw証拠74 fileをsourceとcontrol双方の`verification-evidence/nf07-w2a/`へbyte同一保存し、全SHA-256一致を確認。
+  tracked manifestは74 entryとheader 1行。原logの空白を変更せず、rawはignored、manifest/packetはtrackedとした。
+  run07の古いXMLコピーはstaleとして保存し、新runへ混算しない。整branch diff checkはPASS。
+- これはsynthetic journalの限定合格である。hold解除authority/SoD、実dispatch proof、W2b/W3、production接続/DDL、
+  NF07全体、Privacy/Legal承認は未完。実MySQL version/image digestは今回未収集で、最終RC rehearsalの追加条件とする。
+- 第4回FastはQ1、NF05 deadline、上記NF07を含む固定control Headで原seed `48992185070100`を再実行する。
+  開始/終了SHA、clean状態、run別XML/log/hashとzero skippedを確認し、終了までcontrolのtracked変更を停止する。
+  同時にLunaはNF06 schema修訂とNF04 G1 server codeを別worktreeで進めるが、Maven/Chromeは起動しない。
