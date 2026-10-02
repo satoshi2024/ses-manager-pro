@@ -152,3 +152,35 @@ restore gateではまず独立witnessへlatest checkpoint epoch/revision/hashを
 - `C:\work\ses-snf-status-audit\.kiro\roadmap\2026-10-01-snf-production-nf07-foundation-contract.md` §§SF-03a/SF-04a（control履歴、read-only）
 - `C:\work\ses-snf-status-audit\.kiro\roadmap\2026-10-01-snf-production-plan-review-r3.md` NF07（取消receipt、expiry/revocation差分、hold/dispatch gate）
 - Astra SF-W1 limited CODE PASS: `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`。SF-W2は独立追加Plan Review待ち。
+
+## 11. W2a実装境界で判明したproof未完了事項（追加Plan review待ち）
+
+この節は元のSF-W2 Plan PASSを置き換えず、W2aコード上の境界を明確にする追記案である。ここに書くproof/verifierはW2aでは実装しない。
+
+### 11.1 hold解除proof草案
+
+SF-W1の`VerifiedApproval`はpolicy/case、target、action/provider、revision、expiryを束縛するが、hold識別子、hold解除authority scope、解除理由、解除主体の権限、hold requesterとのSoDを持たない。`VerifiedDispatchFence`もW1ではjournal eventからの発行経路がない。したがってどちらもhold解除の資格証明として再利用しない。W2aの`HOLD_RELEASED` commandは権限モデルが未実装のためfail-closedとし、解除eventをappendしない。
+
+後続Planでは専用のprocess内`VerifiedHoldRelease`を導入する案とする。これはverifierだけが生成し、最低限次のcanonical bindingを含める。
+
+`tenant || subjectRef || holdId || expectedHoldRevision || action=HOLD_RELEASE || reasonHash || commandId || expectedJournalHead`
+
+issuerとapproverは、trust anchorで検証された署名付きauthority claimにより、上記の正確なtenant/subject/hold/action scopeについて解除権限を持つことを証明する。actor名やrole文字列、caller booleanからproofを作らない。要求者・issuer・approverの必要な分離条件を検証し、同一主体またはscope外authorityは拒否する。trust anchor不明、署名不正、失効状態UNKNOWN、期限切れ、理由hash不一致はいずれも拒否する。
+
+Journalはproof bindingとcommand payload hashを照合した後、partition headとhold revisionをlock/CASし、expected headが一致する場合だけ一つの`HOLD_RELEASED` eventをappendする。exact同一command ID/hashの再送は元ACKを返し、同ID異payload、古いhead/hold revision、異なるhold IDは競合として拒否する。解除event前後のtransaction失敗ではhead/event/command projectionを一切進めない。実装着手前にこのReleaseProofとauthority SoD契約を別Plan Reviewへ提出する。
+
+### 11.2 W2a dispatch ACKの非代替性
+
+W2aで`DISPATCH_AUTHORIZED`というsynthetic event名を使う場合も、そのACKは同一partitionのhead CAS、hold blocker、lease fenceに関する合成線形化記録に限る。署名済policy/case approval、expiry/revocation freshness、dispatch fenceを検証した証明ではなく、外部送信を許可しない。W2aにはworker/provider接続もproduction beanも存在しない。後続workerはこのevent/ACKだけで外部副作用を起こしてはならず、別のreview済みdispatch proof/verifier契約が必要である。
+
+W2aのReview packetは`HOLD_RELEASED proof未実装`と`実policy/expiry/revocation dispatch proof未実装`を明示し、このprotocol全体またはNF07全体の完了へ読み替えない。
+
+### 11.3 W2aの実装時に固定するDB境界
+
+lease expiry/takeover判定にはcommandから渡された時刻を使わず、adapterへ注入されたtrusted `Clock`の現在値を使う。event時刻は同じclockから記録し、MySQL `TIMESTAMP(6)`とhash再計算が一致するようInstant/lease expiryをmicrosecondへ正規化する。typed commandからevent時刻を指定するfieldは持たせない。
+
+append前にprimary接続上で`innodb_flush_log_at_trx_commit=1`、`sync_binlog=1`、binary log有効、read-only無効、`InnoDB`既定engine、全journal tableのInnoDB engineを確認する。不適合や照会不能ならjournal ACKを返さずfail-closedにする。合成Testcontainerはこの必要条件を満たす設定で起動し、test内で不適合設定を注入して拒否を検証する。これは実運用HA/WORM/独立witnessの証明ではない。
+
+tenant/subject/command/action/worker等のopaque identityは大小文字と末尾空白を区別するbinary NO PAD collationを使用する。command replay keyは`(tenant, subject, commandId)`であり、別partitionの同じcommand IDを衝突扱いしない。headに格納するheld/lease generation/owner/expiryはevent chainから再構築して照合し、head fieldの直接改変も拒否する。
+
+実装sourceはW1の`VerifiedApproval`等と同じ`com.ses.privacy.foundation` packageに置くため、synthetic JDBC adapter constructorはpackage-private、接続capabilityとMySQL initializer/test keyはtest source setだけに置く。この配置は既存NF featureや共通DB接続へ公開beanを追加するものではない。

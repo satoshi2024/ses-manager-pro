@@ -1,0 +1,33 @@
+-------------------------------------------------------------------------------
+Test set: com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest
+-------------------------------------------------------------------------------
+Tests run: 24, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 47.49 s <<< FAILURE! -- in com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest
+com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.P1_hold先行と認可先行の双方で実writer待機順序を検証する -- Time elapsed: 0.311 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: Unexpected exception type thrown, expected: <com.ses.privacy.foundation.JournalConflictException> but was: <java.util.concurrent.ExecutionException>
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:67)
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:35)
+	at org.junit.jupiter.api.Assertions.assertThrows(Assertions.java:3115)
+	at com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.assertOrderedP1Race(PrivacyJournalLinearizationMySqlTest.java:157)
+	at com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.P1_hold先行と認可先行の双方で実writer待機順序を検証する(PrivacyJournalLinearizationMySqlTest.java:126)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at com.ses.test.DefaultTenantTestContextExtension.interceptTestMethod(DefaultTenantTestContextExtension.java:81)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+Caused by: java.util.concurrent.ExecutionException: com.ses.privacy.foundation.JournalConflictException: journal revisionが競合しました
+	at java.base/java.util.concurrent.FutureTask.report(FutureTask.java:122)
+	at java.base/java.util.concurrent.FutureTask.get(FutureTask.java:205)
+	at com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.lambda$assertOrderedP1Race$4(PrivacyJournalLinearizationMySqlTest.java:157)
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:53)
+	... 8 more
+Caused by: com.ses.privacy.foundation.JournalConflictException: journal revisionが競合しました
+	at com.ses.privacy.foundation.JdbcPrivacyJournalAdapter.appendInTransaction(JdbcPrivacyJournalAdapter.java:79)
+	at com.ses.privacy.foundation.JdbcPrivacyJournalAdapter.lambda$append$0(JdbcPrivacyJournalAdapter.java:53)
+	at org.springframework.transaction.support.TransactionTemplate.execute(TransactionTemplate.java:140)
+	at com.ses.privacy.foundation.JdbcPrivacyJournalAdapter.append(JdbcPrivacyJournalAdapter.java:53)
+	at com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.lambda$assertOrderedP1Race$3(PrivacyJournalLinearizationMySqlTest.java:145)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+
