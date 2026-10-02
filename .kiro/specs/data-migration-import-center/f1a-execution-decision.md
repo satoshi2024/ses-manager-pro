@@ -26,8 +26,8 @@ validation metadata writerのleaseを今回実装する。後続apply workerと�
   一度束縛した内容は変更不可。同じmappingのretryだけ同じ結果を返し、別mappingは409。
   同じsource identityに別jobを作ってmapping競合を回避しない。
 - Mappingはtenant/source/entity/schemaのnamespaceでversion unique。canonical mapping bytesとSHA-256を一致確認し、
-  作成後のUPDATEは禁止。新versionを追加する。変換式は既存allow-listのみ、任意script/expressionは禁止。
-- Validation runと各rowはappend-only。runはjob/source/document/mappingの正確なversion/hash、
+  作成後のUPDATEは禁止。新versionを追加する。F1aのmappingはF2で実装済みのheader→canonical path直接対応のみ。未実装default/transform/lookup式、任意script/expressionは禁止。
+- Validation runの入力と各rowは不変。runはjob/source/document/mappingの正確なversion/hash、
   actor、schema version、validation hash、不変counterを束縛する。再validationは新runを作る。
   rowはrun＋source row numberでunique、row hash/canonical fingerprint/finding codeのみ保持しPII payloadを持たない。
 - READYへの昇格・approval発行は実装しない。旧runへの承認を新runへ継承する経路も提供しない。
