@@ -150,7 +150,7 @@ durable撤権trigger、NF03 retention/Privacy gateと全体受入は未完。統
 - nonblocking socketのconnect/write/header readへ一つのmonotonic deadlineを適用し、
   期限切れはTIMEOUT/retryableとする。bodyを無制限にdrainしない。送信結果不明を成功扱いしない。
 - raw単一runは **26/0/0/0**（transport 12、boundary 2、guard 2、worker 10）。
-  root/Astraが全4 XMLとlogのhashを照合した。最終源码の日文comment/exceptionをメモリ内で
+  root/Astraが全4 XMLとlogのhashを照合した。最終ソースの日文comment/exceptionをメモリ内で
   tested文言へ戻すと実行時hashと一致し、実行後に挙動変更がないことをAstraが確認した。
 - 失敗したfixture runもそれぞれ26/1/0/0として保持し、成功runと混算しない。
   実OP_WRITE背圧の動的証明はない。本文を読まないpeerでの有限終了とは区別する。
