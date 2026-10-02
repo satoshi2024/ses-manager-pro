@@ -9,7 +9,7 @@ F1aはmetadata切出しであり、READY/APPLY/target binding/UI/real data、F1�
 
 ## 1. 共通DDL規約
 
-- MySQL 8/InnoDB、`utf8mb4`、文字列比較はidentifierについてbinary相当の明示照合順序を用いる。
+- MySQL 8/InnoDB、`utf8mb4`を用いる。tenant FK列は既存親表の文字型・長さ・照合順序に一致させ、FK互換性を保つ。identifier比較にはbinary相当の照合順序を個別に指定する。
   tenantは既存文書・権限表と同じ`VARCHAR(100) NOT NULL`。全PKは`BIGINT NOT NULL AUTO_INCREMENT`。
 - tenantと親IDの複合unique/FKでtenant境界をDB制約にもする。API入力のtenant/actorは権威にしない。
 - 時刻は`DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)`。lease期限判定だけはMySQL primaryの
@@ -36,7 +36,7 @@ F1aはmetadata切出しであり、READY/APPLY/target binding/UI/real data、F1�
 | `updated_by` | BIGINT NOT NULL | 状態変更principal。作成時はcreated_by |
 | `updated_at` | DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) | CAS成功時のみ更新 |
 
-PK `id`; unique `(tenant_id,source_code)`、`(tenant_id,id)`、`(tenant_id,id,version_no)`。CHECK source_code lowercase済みを
+PK `id`; unique `(tenant_id,source_code)`、`(tenant_id,id)`。`version_no`は可変CAS値であり、外部snapshotから参照するunique/FKには使わない。CHECK source_code lowercase済みを
 DBで完全には表現しないため、保存前validatorとimmutable ID/codeに依存する。FK actorはuser削除/tenant表現差を
 踏まえ別レビューし、user FKを付けない場合はactor audit retentionを明記する。
 
@@ -93,8 +93,8 @@ DB repository allowlistでも提供しない。
 | `updated_at` | DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) | 遷移時刻 |
 
 Unique `(tenant_id,id)`、job identity `(tenant_id,source_system_id,entity_type,schema_version,source_sha256)`。
-FK source `(tenant_id,source_system_id)`、document `(tenant_id,document_id)`、document version `(tenant_id,document_version_id)`、source version
-`(tenant_id,source_system_id,source_version)`→source `(tenant_id,id,version_no)`。
+FK source `(tenant_id,source_system_id)`→source `(tenant_id,id)`、document `(tenant_id,document_id)`、document version `(tenant_id,document_version_id)`。
+`source_version`はjob作成時の不変snapshotであり、可変なsource `version_no`へのFKは設けない。各操作でsourceをlockし、statusと現在の`version_no`をsnapshotと比較して不一致をfail closedにする。
 V1にはdocumentとversionそれぞれに`(tenant_id,id)` uniqueがある（`V1__create_tables.sql:751,781`）。version IDだけでは
 参照先versionが指定documentに属することをFKで保証できないため、registrationおよび各exact source readで
 `(tenant_id,document_id,id,version_no)`を同じquery/lockで照合する。既存のtenant unique/indexを重複追加せず、旧V1/V162も変更しない。
@@ -104,15 +104,13 @@ mapping全値の組合せ一致を保証する。mapping列は全てNULLか全�
 `(tenant_id,id,pointer)`で結び、別job runを指せないようにする。jobにはさらにunique
 `(tenant_id,id,source_system_id,source_version,entity_type)`を置き、runの同じsnapshot tupleからFK参照できるようにする。
 CHECK leaseはowner/expiry両方NULLまたは両方NOT NULL。active pointerはactive slotを持つ唯一のBUILDING/SEALED runを指す。
-current pointerはpublished_slotを持つ最後のCOMPLETED runを指し、新runの処理中も前回のcurrent pointerを保持する。
+current pointerは現在有効な公開結果を指す。新validation開始transactionではjobの`current_validation_run_id`をNULLへCASし、旧COMPLETED runの`published_slot`をNULLにして履歴として保持した後、新BUILDING run/active slot/active pointerとjob state=VALIDATINGを同一transactionで作成する。publish時は（開始時に旧slotが解放済みのため）新runのpublished slotを設定し、pointerとjob stateを同一transactionでCASする。
 新validationはjob state=MAPPEDまたはVALIDATEDかつactive pointer=NULLの場合だけ開始できる。
-job lock下でrun作成とjobのactive pointer/state=VALIDATING更新を同一transactionでCASする。
+旧published runのslot解放を先に行い、MySQLのimmediate unique制約に抵触しない順序でpointer/run/jobを同一transaction内でCASする。
 active runがある間の別run開始は拒否する。resume/takeoverは同じactive runを先頭から再読込してprefix照合し、jobの現在lease_generationと
 active pointerをlock/CASし、`last_resumed_lease_generation`を更新する。`created_lease_generation`は変更しない。
-abortはrunをABORTED、active slot/pointerとjob leaseを解放し、current pointerがあればjobをVALIDATED、なければMAPPEDへ同一transactionでCASする。
-前回のcurrent completed pointerは維持する。
-publishはactive pointerとjobの現在generation/owner/expiryを照合し、runをCOMPLETED、active slotをNULL、published_slotを1にし、
-前current runのpublished_slotをNULLへ、job pointerを新runへ差し替え、jobをVALIDATEDへ同一transactionでCASする。
+abortはrunをABORTED、active slot/pointerとjob leaseを解放し、jobをMAPPEDへ同一transactionでCASする。current pointerと旧runのpublished slotは開始時にNULL化済みのためNULLのままとし、旧COMPLETED runは履歴として保持する。
+publishはactive pointerとjobの現在generation/owner/expiryを照合し、runをCOMPLETED、active slotをNULL、published_slotを1にし、job pointerを新runへ差し替え、jobをVALIDATEDへ同一transactionでCASする。
 
 ### 2.4 `t_import_validation_run`
 
@@ -177,7 +175,7 @@ Unique `(tenant_id,id)`、`(tenant_id,job_id,id)`、`(tenant_id,job_id,run_no)`�
 `(tenant_id,job_id,active_slot)`（NULLは複数許容）、`(tenant_id,job_id,published_slot)`（NULLは複数許容）、
 `(tenant_id,job_id,id,source_system_id,entity_type)`。
 FK `(tenant_id,job_id,source_system_id,source_version,entity_type)`→jobの同じ列順snapshotを張り、別source/entityのrunを拒否する。
-FK `(tenant_id,source_system_id,source_version)`→source `(tenant_id,id,version_no)`とmapping複合FKも付ける。
+source versionはjob/runに不変snapshotとして保持するが、可変なsource `version_no`へのFKは設けない。安定source identityへのFKはjobで保証し、各operationでsource rowをlockしてACTIVE状態と現在versionのsnapshot一致を検証する。不一致はfail closedにする。mapping複合FKも付ける。
 document versionはjobのexact tupleと照合する。run作成時はjob lock下で全input snapshot一致を条件にINSERTする。
 CHECKでcountersはNULLまたは>=0に制限し、
 COMPLETED時には全row counter、finding/amount reason summary、全known count、row/summary hashをNOT NULLとする。
@@ -307,7 +305,7 @@ snapshotだけを受け取る。exact IMPORT_JOB FileScope判定は必ずdownloa
    source SHAはversion SHAと一致させる。
 2. 専用FileScope判定へstoredName、jobId、documentId、versionId、expectedHash、tenantを渡し、`IMPORT_JOB` typed link、
    現在のユーザーのDataScope/メニュー/tenant、document/versionの状態とhashを再確認する。exact許可が得られない限り以後へ進まない。
-   汎用`assertDownloadAllowed`のdocument branchはIMPORT_JOBを明示拒否し、typed-link検証を省略するdownload経路を作らない。
+   汎用`assertDownloadAllowed`はtenant付き`IMPORT_JOB` typed link queryで対象documentにjob linkが存在することを検出し、専用exact authorizationを経ないgeneric downloadを拒否する。documentの`document_type`だけで判定しない（登録時にdocument typeは変更しない）。typed-link検証を省略するdownload経路を作らない。
 3. FileScope許可の直後にdocument IDとexact version numberを指定して`DocumentService.download`を呼び、管理されたstreamを取得する。
    `DocumentServiceImpl.download`自身はFileScope認可を行わないため、FileScope判定を先に完了する。storage providerを直接呼んだり、
    `getVersionStorageKey`でファイルを直接開いたりしない。
@@ -374,8 +372,7 @@ active runのresume/takeoverではjobの現generationとactive pointerをCASし�
 他workerによるtakeoverがまだなくても、無効または失効したownerのcommitは拒否する。actor、exact permission、source status/version、
 法人、documentのexact version/CLEAN/hash、mapping immutable fingerprintをstartと後続のchunk/seal/abort/publishで再確認する。
 
-source versionはjob登録時点で固定し、runにも同じ値をsnapshotする。sourceのstatus変更（DISABLED、再有効化を含む）はversion_noを増やす。
-current sourceがACTIVEかつversion_noがjob.source_versionと一致しない場合、古いjob/runの入力を更新して追従させず、操作を拒否する。
+source versionはjob登録時点で固定し、runにも同じ値をsnapshotする。source FKはtenant/source identityのみを参照し、可変な`version_no`には張らない。sourceのstatus変更（DISABLED、再有効化を含む）はversion_noを増やす。各entry/chunk/seal/abort/publishでsource rowをlockし、current sourceがACTIVEかつversion_noがjob/run snapshotと一致することを確認する。不一致時は古いjob/runの入力を更新して追従させず、操作を拒否する。
 active runがあれば次のchunk/resumeでrunをABORTED、active slot/pointerとleaseを解放し、jobをBLOCKEDへCASする。
 completed jobもsource version drift後は再validationできずBLOCKEDとする。再有効化しても古いjobは復活しない。
 再実行には新しいsource-system identity/job登録を要求し、source ID/code/versionや既存run snapshotを暗黙に差し替えない。
@@ -402,8 +399,7 @@ worker再起動時はexact sourceの先頭byteから読み直し、client offset
 disposition/finding commitmentを行ごとに照合し、normalized external identityからduplicate setを再構築する。
 prefixの不足/余分/変更、key version不明、source hash不一致、またはFileScope確認失敗があれば停止し、以前の結果を再利用しない。
 BUILDINGまたはSEALED runは、入力、mapping、policy fingerprintが同一の場合に同じrunとして再開する。
-新しいvalidationはMAPPED/VALIDATED jobから新runを作成し、旧completed runはimmutableな履歴として保持する。
-start時にcurrent pointerは維持し、abort時も維持する。新runのpublish transactionが成功した時点でのみcurrent pointerとpublished slotを切り替える。
+新しいvalidation開始transactionはjobの`current_validation_run_id`をNULLへCASし、旧runの`published_slot`をNULLにして旧completed runをimmutableな履歴として残したうえで、新runのactive pointer/slotを設定する。abort後もcurrent pointerはNULLであり、旧runは公開中の結果として扱わない。新runのpublish transaction成功時にのみ新runをCOMPLETED/currentとしてpointerとpublished slotを設定する。
 
 sourceのEOF到達後にwhole SHAを再確認する。全非空source recordの`(rowNumber,rowHash)`順序付き集合はstored row集合と完全一致させる。
 空recordに由来するnumber gapは許容する。job lockを取得してDB時刻を読み、同一CAS transactionでlease有効性とrunがBUILDINGであることを
@@ -432,7 +428,7 @@ F1aではREADYまたはapplyを実装しない。
 ## 7. Mapper/DTO境界と対象外
 
 6表にはfeature専用Mapperと、上記metadata列だけを含む内部DTOを用いる。job/run読取DTOにはraw row、外部key平文、ciphertext、nonce、
-credential、amount fieldを含めない。registry管理DTOを一般の一覧APIに公開せず、identityを復号して返さない。HTTP/UIの書込入口は設けない。
+credential、validation row単位のamount fieldを含めない。認可済みreaderには確定済み集約amount counterを返せる。registry管理DTOを一般の一覧APIに公開せず、identityを復号して返さない。HTTP/UIの書込入口は設けない。
 すべてのqueryをtenantで限定し、表をまたぐ読取では親子関係の一致を確認する。write mapperは明示的なinsert/CAS/append/select-for-updateだけを提供し、
 汎用updateById/deleteByIdを生成しない。DTOのstate/tenant/actor/counterを、外部booleanやrequest fieldでresolverを迂回して再構成できないようにする。
 
