@@ -135,3 +135,10 @@
   V183はNF01専有のまま、V185以降は未割当。reservationはproduction migration承認ではない。
 - feature単体のB0→V184検証と、V183も含むcontrol統合後のfresh/upgrade gateを区別する。
   新DDLは適用済みV1〜V183を変更せず、H2専用schema/shard/必要なinit参照を同期する。
+### Q1 統合と午前CI再確認
+
+Q1 source `32dc10ce`はAstra限定CODE PASS、control `98ac6172`へ統合した。
+原403の根因は未確定。両逆順で23/0/0/0のfixture隔離証拠と全Fastの判定を分ける。
+2026-10-02午前にGitHubを再照会し、PR101 run36857893770の7 jobs SUCCESS、
+origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであることを確認した。
+ローカル修復をremote CI成功として扱わない。remote操作は行っていない。

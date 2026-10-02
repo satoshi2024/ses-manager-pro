@@ -92,3 +92,14 @@
 - 唯一のfailureは`PortalBpApiTest.空き要員はreview後に有効化されreview前は内部候補に出ない:266`。最初の`POST /api/portal/bp/availabilities`が期待200に対して403だった。法人contextの一意性と共有fixture状態を調査するが、現時点では根因未確定。
 - raw全XML/text、全log、preflight/run/result、class totals、failures、report SHA-256 manifestは`verification-evidence/20261002-control-fast-03/`へ保存した。旧target reportはpreexisting-reportsへ分離済み。途中集計の成功を最終PASSにしない。
 - 修復後は限定再現/独立Reviewと第4回全fastを必要とする。MySQL/Performance/Browser/backup gateは別途未完。
+
+### Q1 テスト所有範囲の隔離と限定Review
+
+- source `32dc10ce4ad0b1ce8588caf0119ac2d28b1c4841`、Astra限定CODE PASS（P0/P1/P2=0/0/0）、
+  control `98ac6172`へ統合。変更はExpense/OneOnOne/Portal BPのprivate H2 URL、class後context閉鎖、説明のみ。
+  製品code、法人guard、既存assertionは変更しない。既存async shutdown待機も維持する。
+- seed `48992185070100`はExpense→Portal BP→OneOnOne、seed `1`は完全逆順。それぞれ**23/0/0/0**。
+  原始log、3 source hash、Portal XML/text、基準失敗証拠のhashをAstraが照合した。
+- 未変更の小pairでは元403を再現できなかった。cached contextで法人重複が起きたという根因は未確定であり、
+  この修復は確認済みのshared fixture依存を除去する。第3回FAILを後からPASSへ変更しない。
+- 詳細は`docs/review/q1-portal-h2-isolation-evidence.md`。全fast第4回は後続の固定統合Headで実施する。
