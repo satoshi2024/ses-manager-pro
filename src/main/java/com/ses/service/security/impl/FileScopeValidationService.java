@@ -74,6 +74,44 @@ public class FileScopeValidationService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.ServiceAttachmentLinkMapper serviceAttachmentLinkMapper;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.jdbc.core.JdbcTemplate importMetadataJdbc;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.beans.factory.ObjectProvider<com.ses.importcenter.metadata.ImportMetadataAuthorizationService>
+            importAuthorizationProvider;
+
+    /** 登録済みsourceの専用reader境界。認可・source snapshot確認より先にstorageを開かない。 */
+    public void assertImportJobDownloadAllowed(Long jobId, Long documentId, Long documentVersionId,
+                                               Integer versionNo, String storageKey, String expectedSha256) {
+        String tenantId = currentTenant();
+        var authorization = importAuthorizationProvider == null ? null : importAuthorizationProvider.getIfAvailable();
+        var context = authorization == null ? null : authorization.requireCurrentAuthorization();
+        if (context == null || !tenantId.equals(context.tenantId()) || importMetadataJdbc == null
+                || jobId == null || documentId == null || documentVersionId == null || versionNo == null
+                || storageKey == null || expectedSha256 == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        Integer matches = importMetadataJdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM t_import_job j
+                JOIN t_import_source_system s ON s.tenant_id=j.tenant_id AND s.id=j.source_system_id
+                JOIN t_document_link l ON l.tenant_id=j.tenant_id AND l.document_id=j.document_id
+                    AND l.target_type='IMPORT_JOB' AND l.target_id=j.id AND l.deleted_flag=0
+                JOIN t_document d ON d.tenant_id=j.tenant_id AND d.id=j.document_id AND d.deleted_flag=0
+                JOIN t_document_version v ON v.tenant_id=j.tenant_id AND v.document_id=j.document_id
+                    AND v.id=j.document_version_id AND v.deleted_flag=0
+                WHERE j.tenant_id=? AND j.id=? AND j.document_id=? AND j.document_version_id=?
+                  AND j.document_version_no=? AND j.document_sha256=UNHEX(?)
+                  AND s.status='ACTIVE' AND s.version_no=j.source_version
+                  AND d.legal_entity_id=? AND d.legal_hold_flag=0
+                  AND (d.retention_until IS NULL OR d.retention_until>=CURRENT_DATE())
+                  AND v.scan_status='CLEAN' AND v.storage_key=? AND LOWER(v.sha256)=LOWER(?)
+                """, Integer.class, tenantId, jobId, documentId, documentVersionId, versionNo,
+                expectedSha256, Long.toString(context.legalEntityId()), storageKey, expectedSha256);
+        if (matches == null || matches != 1) throw BusinessException.of(403, "error.forbidden");
+    }
+
     public void assertDownloadAllowed(String storedName) {
         assertDownloadAllowed(storedName, null, null);
     }
@@ -286,6 +324,25 @@ public class FileScopeValidationService {
                         .eq("storage_key", storedName).last("LIMIT 1"))
                 : null;
         if (documentVersion != null) {
+            String documentType = documentTypeOf(documentVersion.getDocumentId());
+            // 管理レポートは専用delivery経路のエラーを維持する。
+            if ("MANAGEMENT_REPORT".equals(documentType)) {
+                throw BusinessException.of(403, "error.managementReport.deliveryRequired");
+            }
+            // IMPORT_JOB文書はjob専用readerだけを許可し、汎用document/file経路を拒否する。
+            // document_typeは原文書の種別を保持するため、tenant-bound typed linkを根拠にする。
+            DocumentLinkMapper importLinkMapper = documentLinkMapperProvider.getIfAvailable();
+            if (importLinkMapper == null) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            boolean importJobLinked = importLinkMapper.selectList(new QueryWrapper<DocumentLink>()
+                            .eq("tenant_id", tenantId)
+                            .eq("document_id", documentVersion.getDocumentId())
+                            .eq("target_type", "IMPORT_JOB"))
+                    .stream().anyMatch(link -> !Integer.valueOf(1).equals(link.getDeletedFlag()));
+            if (importJobLinked) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
             // P1-02: scan未完了・拒否はfail-closedで拒否 (CLEAN 以外は不可)
             String scanStatus = documentVersion.getScanStatus();
             if (scanStatus == null || !"CLEAN".equals(scanStatus)) {
@@ -296,12 +353,8 @@ public class FileScopeValidationService {
             // PRIVATE_NOTE（1on1 confidential相談）はHR/明示権限割当管理者のみ。RECEIPT（経費領収書）は
             // 本人/管理者/マネージャー（配下）のみで、営業・HRは不可視（給与・経費は営業不可視）。
             // CHANGE_REQUEST_ATTACHMENT（変更申請添付）は本人/HR/管理者/マネージャー（組織scope∩DataScope）のみ。
-            String documentType = documentTypeOf(documentVersion.getDocumentId());
             // 管理レポートはrecipient deliveryのtoken/期限/再認証/scopeを必須とし、
             // 汎用文書台帳downloadからの迂回を許可しない。
-            if ("MANAGEMENT_REPORT".equals(documentType)) {
-                throw BusinessException.of(403, "error.managementReport.deliveryRequired");
-            }
             if ("PRIVATE_NOTE".equals(documentType)) {
                 String role = SecurityUtils.currentRole();
                 if ("HR".equals(role)) {

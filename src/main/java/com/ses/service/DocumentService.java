@@ -62,6 +62,15 @@ public interface DocumentService {
      */
     void link(Long documentId, String targetType, Long targetId);
 
+    /** import job登録前に既存CLEAN版と通常のdocument/FileScope権限を確認する。storage I/Oは行わない。 */
+    DocumentVersion authorizeImportSourceRegistration(Long documentId, Long documentVersionId,
+                                                       Integer versionNo, String expectedSha256,
+                                                       Long expectedLegalEntityId);
+
+    /** 登録済みIMPORT_JOBのsourceを開く前に通常文書権限と専用scopeを再検証する。 */
+    DocumentVersion authorizeImportJobDownload(Long jobId, Long documentId, Long documentVersionId,
+                                                Integer versionNo, String expectedSha256);
+
     /**
      * 文書に法的holdを設定または解除する。
      * hold中は廃棄申請を受け付けない（R4.2）。

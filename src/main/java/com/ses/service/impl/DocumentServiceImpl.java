@@ -80,6 +80,8 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     private final com.ses.mapper.AcceptanceMapper acceptanceMapper;
     private final com.ses.mapper.DocumentHashClaimMapper documentHashClaimMapper;
     private final ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ObjectProvider<com.ses.service.security.impl.FileScopeValidationService> fileScopeValidationServiceProvider;
     /** FileScope の RECEIPT/CRA 規則を list/detail で再利用（規則自体は広げない）。 */
     private final ObjectProvider<com.ses.service.EngineerAccountLinkService> engineerAccountLinkServiceProvider;
     private final ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
@@ -377,6 +379,70 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     public void link(Long documentId, String targetType, Long targetId) {
         getDocumentOrThrow(documentId);
         linkWithinRegistration(documentId, currentTenant(null), targetType, targetId);
+    }
+
+    @Override
+    public DocumentVersion authorizeImportSourceRegistration(Long documentId, Long documentVersionId,
+                                                              Integer versionNo, String expectedSha256,
+                                                              Long expectedLegalEntityId) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        Document document = documentMapper.selectOne(new LambdaQueryWrapper<Document>()
+                .eq(Document::getTenantId, tenantId)
+                .eq(Document::getId, documentId)
+                .eq(Document::getDeletedFlag, 0)
+                .last("FOR UPDATE"));
+        if (document == null || documentId == null || documentVersionId == null || versionNo == null
+                || expectedLegalEntityId == null
+                || !String.valueOf(expectedLegalEntityId).equals(document.getLegalEntityId())) {
+            throw BusinessException.of(404, "error.document.notFound");
+        }
+        DocumentVersion version = documentVersionMapper.selectOne(new LambdaQueryWrapper<DocumentVersion>()
+                .eq(DocumentVersion::getTenantId, tenantId)
+                .eq(DocumentVersion::getDocumentId, documentId)
+                .eq(DocumentVersion::getId, documentVersionId)
+                .eq(DocumentVersion::getVersionNo, versionNo)
+                .eq(DocumentVersion::getDeletedFlag, 0)
+                .last("FOR UPDATE"));
+        if (version == null || !"CLEAN".equals(version.getScanStatus())
+                || expectedSha256 == null || !expectedSha256.equalsIgnoreCase(version.getSha256())
+                || Integer.valueOf(1).equals(document.getLegalHoldFlag())
+                || (document.getRetentionUntil() != null && document.getRetentionUntil().isBefore(LocalDate.now()))) {
+            throw BusinessException.of(403, "error.file.scanNotReady");
+        }
+        assertDocumentAccessAllowed(document);
+        com.ses.service.security.impl.FileScopeValidationService fileScope =
+                fileScopeValidationServiceProvider.getIfAvailable();
+        if (fileScope == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        fileScope.assertDownloadAllowed(version.getStorageKey(), version.getId(), version.getSha256());
+        return version;
+    }
+
+    @Override
+    public DocumentVersion authorizeImportJobDownload(Long jobId, Long documentId, Long documentVersionId,
+                                                       Integer versionNo, String expectedSha256) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        Document document = documentMapper.selectOne(new LambdaQueryWrapper<Document>()
+                .eq(Document::getTenantId, tenantId).eq(Document::getId, documentId)
+                .eq(Document::getDeletedFlag, 0));
+        DocumentVersion version = documentVersionMapper.selectOne(new LambdaQueryWrapper<DocumentVersion>()
+                .eq(DocumentVersion::getTenantId, tenantId).eq(DocumentVersion::getDocumentId, documentId)
+                .eq(DocumentVersion::getId, documentVersionId).eq(DocumentVersion::getVersionNo, versionNo)
+                .eq(DocumentVersion::getDeletedFlag, 0));
+        if (document == null || version == null || !"CLEAN".equals(version.getScanStatus())
+                || expectedSha256 == null || !expectedSha256.equalsIgnoreCase(version.getSha256())
+                || Integer.valueOf(1).equals(document.getLegalHoldFlag())
+                || (document.getRetentionUntil() != null && document.getRetentionUntil().isBefore(LocalDate.now()))) {
+            throw BusinessException.of(403, "error.file.scanNotReady");
+        }
+        assertDocumentAccessAllowed(document);
+        com.ses.service.security.impl.FileScopeValidationService fileScope =
+                fileScopeValidationServiceProvider.getIfAvailable();
+        if (fileScope == null) throw BusinessException.of(403, "error.forbidden");
+        fileScope.assertImportJobDownloadAllowed(jobId, documentId, documentVersionId, versionNo,
+                version.getStorageKey(), version.getSha256());
+        return version;
     }
 
     private void linkWithinRegistration(Long documentId, String tenantId, String targetType, Long targetId) {
