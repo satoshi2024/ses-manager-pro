@@ -393,6 +393,50 @@ class PrivacyJournalLinearizationMySqlTest {
     }
 
     @Test
+    void P5_takeover後revisionを指定した旧generation要求はhead待機後に拒否される() throws Exception {
+        Instant now = Instant.parse("2026-10-02T00:00:00Z");
+        JournalAck claimed = journal.append(JournalCommand.create("lease-fenced-wait-old", partition, 0, LEASE_CLAIMED,
+                null, null, null, "worker-old", 0, now.plusSeconds(1)));
+        CLOCK.set(now.plusSeconds(2));
+        HeadUpsertGate gate = new HeadUpsertGate(writerDataSource);
+        JdbcPrivacyJournalAdapter fencedJournal = new JdbcPrivacyJournalAdapter(gate.dataSource(), context.getEnvironment(), CLOCK);
+        JournalCommand takeover = JournalCommand.create("lease-fenced-wait-new", partition, claimed.revision(),
+                LEASE_TAKEN_OVER, null, null, null, "worker-new", 1, now.plusSeconds(60));
+        JournalCommand staleAuthorization = JournalCommand.create("auth-fenced-wait-stale", partition, claimed.revision() + 1,
+                DISPATCH_AUTHORIZED, "case-1", "action-fenced-wait-stale", hash('d'), "worker-old", 1, null);
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            var takeoverResult = pool.submit(() -> fencedJournal.append(takeover));
+            assertTrue(gate.firstHeadLockAcquired.await(10, TimeUnit.SECONDS), "takeoverがhead PRIMARY lockを取得する必要があります");
+            var staleResult = pool.submit(() -> fencedJournal.append(staleAuthorization));
+            assertTrue(gate.statementAttempts.await(10, TimeUnit.SECONDS), "旧generation要求が同じheadへのappendを開始する必要があります");
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            boolean observed = false;
+            while (System.nanoTime() < deadline && !observed) {
+                observed = primaryHeadWait(gate.connectionIds.get(1), gate.connectionIds.get(0));
+                if (!observed && staleResult.isDone()) staleResult.get(1, TimeUnit.SECONDS);
+                if (!observed) Thread.sleep(50);
+            }
+            assertTrue(observed, "post-takeover expectedRevisionを持つ旧generation writerのPRIMARY待機が必要です");
+            gate.releaseFirstHeadLock.countDown();
+            assertEquals(2, takeoverResult.get(10, TimeUnit.SECONDS).revision());
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class, () -> staleResult.get(10, TimeUnit.SECONDS));
+            assertInstanceOf(JournalConflictException.class, failure.getCause());
+            assertTrue(failure.getCause().getMessage().contains("stale"), "旧lease generation/ownerで拒否する必要があります");
+            assertEquals(2, journal.head(partition).revision());
+            assertEquals(2, journal.head(partition).leaseGeneration());
+            assertEquals("worker-new", journal.head(partition).leaseOwner());
+            assertEquals(0, admin.queryForObject("SELECT COUNT(*) FROM sf_journal_action", Integer.class));
+            assertEquals(List.of(LEASE_CLAIMED, LEASE_TAKEN_OVER), journal.events(partition).stream().map(JournalEvent::type).toList());
+            System.out.printf("SF_W2A_P5_FENCED_WAIT takeoverConnectionId=%d staleConnectionId=%d expectedRevision=%d expectedGeneration=1 currentGeneration=2 object=sf_journal_head index=PRIMARY result=REJECTED%n",
+                    gate.connectionIds.get(0), gate.connectionIds.get(1), staleAuthorization.expectedRevision());
+        } finally {
+            gate.releaseFirstHeadLock.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
     void P14_compound認可commit途中失敗では追加eventやactionACKが残らない() {
         JournalAck lease = claimLease("lease-fault", CLOCK.instant());
         admin.execute("CREATE TRIGGER sf_fail_command BEFORE INSERT ON sf_journal_command FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='injected transaction boundary failure'");
