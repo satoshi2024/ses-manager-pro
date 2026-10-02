@@ -136,8 +136,8 @@ state=MAPPED、pointer=NULLにし、旧completed run自体は保持する。
 
 Unique `(tenant_id,id)`、`(tenant_id,job_id,id)`、`(tenant_id,job_id,run_no)`。
 FK `(tenant_id,job_id)`→job。snapshot FK `(tenant_id,source_system_id)`→source、mapping複合FKを付与し、
-job snapshotとの同一性はcreate-run条件付きINSERTで照合する。CHECK counters NULLまたは>=0、completed时
-全部not null；`SEALED/COMPLETED` row追加不可はtransaction/service/CASで強制する。
+job snapshotとの同一性はcreate-run条件付きINSERTで照合する。CHECKでcountersはNULLまたは>=0に制限し、
+COMPLETED時には全counterをNOT NULLとする。`SEALED/COMPLETED`後のrow追加禁止はtransaction/service/CASで強制する。
 Runはappend-only。state遷移以外のsnapshot/counter UPDATE、DELETEを提供しない。
 
 ### 2.5 `t_import_validation_row`
@@ -181,149 +181,167 @@ duplicate external identityはvalidation sessionで暗号/registry lookupし、r
 | `created_at` | DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) | first candidate time |
 | `updated_at` | DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) | identical candidate observation only |
 
-Unique `(tenant_id,source_system_id,entity_type,lookup_digest)`; unique `(tenant_id,id)`。
+Unique `(tenant_id,source_system_id,entity_type,lookup_digest)` と unique `(tenant_id,id)`。
 FK `(tenant_id,source_system_id)`→source。candidate provenance FK `(tenant_id,first_job_id,first_validation_run_id)`
-→run同一job。index `(tenant_id,first_job_id)`。collision duplicate INSERT時decrypt existing ciphertext并对
-normalized UTF-8 bytes用`MessageDigest.isEqual` constant-time compare；相同identity只幂等复用candidate，不更新
-ciphertext/key version；不相同视为HMAC collision/corruption并fail-stop。registry只允许独立候选登记操作，validate
-transaction绝不写registry；候选操作自己的失败不影响validation run。
+→同一jobのrun。index `(tenant_id,first_job_id)`。collisionによる重複INSERT時は既存ciphertextを復号し、
+normalized UTF-8 bytesを`MessageDigest.isEqual`でconstant-time compareする。同一identityならcandidateを冪等に再利用し、
+ciphertext/key versionは更新しない。一致しない場合はHMAC collision/corruptionとしてfail-stopする。
+registryへの書込みは独立したcandidate登録操作だけに許可し、validate transactionからは決して書き込まない。
+candidate登録操作の失敗はvalidation runに影響させない。
 
-## 3. Source key暗号与namespace构造
+## 3. Source key暗号とnamespaceの構成
 
-先用F2 `ExternalKeyNormalizer.normalize` (NFC、保留大小写、拒绝前后空白/控制字符、UTF-8最大256 bytes)，得到
-normalized UTF-8 bytes。采用无歧义length-prefix编码：`formatVersion || len(tenant)||tenantUTF8 || len(sourceCode)||sourceCodeUTF8 || len(entity)||entityASCII || len(key)||keyBytes`。
-Lookup HMAC用独立`import.identity.lookup` purpose key，AES-GCM用独立`import.identity.encrypt` key，二者不得复用；
-key provider仅按显式version返回用途专用key，不允许dev/production fallback。AAD为
-`cipherFormatVersion || tenant || sourceCode || entity || lookupDigest`相同length-prefix格式。
-HMAC版本来自source创建时固定的`lookup_key_version`。ciphertext必须包含GCM tag，不存明文；nonce 96-bit CSPRNG，
-同一AES key下不得复用。cryptographic adapter每次校验expected tenant/source/entity与DB行快照一致后才解密。
-缺key、unknown version、tag/AAD错误均拒绝，禁止尝试其他namespace/key版本或返回明文异常。
+最初にF2の`ExternalKeyNormalizer.normalize`を適用する（NFC、大小文字を保持、前後空白/制御文字を拒否、UTF-8で最大256 bytes）。
+その結果をnormalized UTF-8 bytesとする。曖昧さのないlength-prefix encodingを用いる：
+`formatVersion || len(tenant)||tenantUTF8 || len(sourceCode)||sourceCodeUTF8 || len(entity)||entityASCII || len(key)||keyBytes`。
+Lookup HMACには専用の`import.identity.lookup` purpose keyを、AES-GCMには専用の`import.identity.encrypt` keyを用い、
+両者を共用しない。key providerは明示されたversionに対応する用途別keyだけを返し、dev/production fallbackを設けない。
+AADには`cipherFormatVersion || tenant || sourceCode || entity || lookupDigest`を同じlength-prefix形式で含める。
+HMAC versionはsource作成時に固定した`lookup_key_version`から取得する。ciphertextにはGCM tagを含め、平文は保存しない。
+nonceは96-bit CSPRNGで生成し、同一AES keyの下で再利用しない。cryptographic adapterは復号前にexpected tenant/source/entityと
+DB行snapshotの一致を毎回確認する。key欠落、unknown version、tag/AAD不一致はいずれも拒否し、別namespace/key versionを試さず、
+平文を含む例外も返さない。
 
-实现代码尚不存在的key-provider接口在Astra review后才能命名；本稿不把它描述为现有facade。
+実装コードにまだ存在しないkey-provider interfaceの命名はAstra review後に行う。本稿では既存facadeとして扱わない。
 
-## 4. Current admin与exact permission
+## 4. 現在の管理者とexact permission
 
-调用点应在feature service事务入口调用feature-owned resolver，resolver内部读取当前`Authentication`/`SecurityUtils`主体，
-再从DB核对用户仍active、未deleted、role=`管理者`、tenant与`AccountingTenantContextHolder`一致及请求法人仍归属tenant。
-随后查询当前tenant、用户的active `t_user_permission_group` assignment、enabled/non-deleted `m_permission_group`、
-`t_permission_group_action`。必须存在精确`import.metadata.manage` ALLOW；精确DENY、`import.*` DENY或`*` DENY先于ALLOW；
-wildcard ALLOW不替代exact grant。不可调用`AuthorizationService.isAllowed`作为充分条件：
-`src/main/java/com/ses/service/security/impl/AuthorizationServiceImpl.java:41-56`对一般action的管理员直接true，
-并在无组时走legacy fallback（89-90）。现有action mapper的数据模型和deny顺序可作读路径参考，但当前service不满足本条exact规则。
+feature serviceの各transaction入口でfeature専用resolverを呼び出す。resolverは現在の`Authentication`/`SecurityUtils`主体を読み取り、
+DBでユーザーがactiveかつ未deletedであること、role=`管理者`であること、tenantが`AccountingTenantContextHolder`と一致すること、
+要求された法人がtenantに属することを確認する。その後、現在tenant/ユーザーのactiveな
+`t_user_permission_group` assignment、enabledかつ未deletedの`m_permission_group`、`t_permission_group_action`を検索する。
+`import.metadata.manage`のexact ALLOWを必須とする。exact DENY、`import.*` DENY、`*` DENYはALLOWより優先する。
+wildcard ALLOWだけではexact grantの代わりにならない。`AuthorizationService.isAllowed`の結果だけで許可してはならない：
+`src/main/java/com/ses/service/security/impl/AuthorizationServiceImpl.java:41-56`では、一般actionに対して管理者を直接trueとし、
+また、group未割当時にはlegacy fallbackを通る（89-90）。既存action mapperのデータモデルとDENY優先順は読取実装の参考にできるが、
+現行serviceは本項のexact permission要件を満たさない。
 
-当前用户active查询可参考`SysUserMapper.selectByIdAndTenant`和`SysUser`的status/deleted字段；permission读模型为
+現在ユーザーのactive確認には`SysUserMapper.selectByIdAndTenant`と`SysUser`のstatus/deleted項目を参考にできる。permissionの読取元は
 `UserPermissionGroupMapper`、`PermissionGroupMapper`、`PermissionGroupActionMapper`及V63/V66 schema。
-这些表/共通security无需本增量自动seed权限。新增action inventory、permission group模板或seed均须root另批。
+本incrementでこれらの表や共通securityへ権限を自動seedしない。action inventory、permission group templateまたはseedの追加は、
+別途rootの判断を得る。
 每次source create/update、mapping create、job create/bind、validation start/chunk/seal/publish、candidate register
-均重新检查当前管理员与exact permission，而不是复用过期boolean或start时结果。
+各操作で現在の管理者状態とexact permissionを再確認し、期限切れのbooleanやstart時の判定結果を使い回さない。
 
-## 5. Exact document reader：现有调用与必须review的缺口
+## 5. Exact document reader：既存APIとreviewが必要な不足点
 
-### 5.1 可复用的真实API
+### 5.1 利用可能な既存API
 
-- `DocumentService.download(Long documentId, Integer versionNo)`定义于
-  `src/main/java/com/ses/service/DocumentService.java:137-152`，可按document和exact version number打开受控流。
+- `DocumentService.download(Long documentId, Integer versionNo)`は
+  `src/main/java/com/ses/service/DocumentService.java:137-152`に定義され、documentとexact version numberを指定して管理されたstreamを開ける。
 - `DocumentServiceImpl.download`在`src/main/java/com/ses/service/impl/DocumentServiceImpl.java:656`附近选取
-  tenant内指定版、拒绝非`CLEAN`，记录document access log后调用storage provider；它没有expected version ID/hash参数。
+  tenant内の指定版を取得し、`CLEAN`以外を拒否する。document access logを記録してからstorage providerを呼び出すが、
+  expected version ID/hashを引数に取らない。
 - `DocumentVersionMapper.findByTenantAndDocumentId`和`findLatestByTenantAndDocumentId`位于
-  `src/main/java/com/ses/mapper/DocumentVersionMapper.java:29-37`。它们可读version metadata，但单独查询不能授权下载。
+  `src/main/java/com/ses/mapper/DocumentVersionMapper.java:29-37`にある。version metadataの読取には使えるが、
+  これらのqueryだけではdownloadを認可できない。
 - `FileScopeValidationService.assertCertificationEvidenceDownloadAllowed`位于
   `src/main/java/com/ses/service/security/impl/FileScopeValidationService.java:156-185`，能核exact version/hash，
-  但其权限语义硬编码`CERTIFICATION_EVIDENCE`，不能用于`IMPORT_JOB`。
-- 通用`assertDownloadAllowed(storedName,expectedVersionId,expectedHash)`位于同文件193-193ff；它只在特定
-  文件类型分支实现专属ACL，t_document_version通用分支从281ff开始做CLEAN及documentType权限，当前没有
-  IMPORT_JOB exact typed-link分支。`t_document_link`为多态target且当前没有tenant_id，不能靠它证明tenant FK。
+  ただしpermissionの意味は`CERTIFICATION_EVIDENCE`に固定されており、`IMPORT_JOB`には使えない。
+- 共通の`assertDownloadAllowed(storedName,expectedVersionId,expectedHash)`は同ファイル193行以降にある。特定の
+  file type分岐で個別ACLを適用し、t_document_versionの共通分岐は281行以降でCLEANとdocumentTypeのpermissionを確認するが、
+  現時点でIMPORT_JOB exact typed-link分岐はない。`t_document_link`は多態的targetでtenant_idを持たないため、tenant FKの根拠にはできない。
 
-### 5.2 F1a拟议的reader调用顺序
+### 5.2 F1aで提案するreaderの呼出順
 
-feature-owned `ImportSourceDocumentReader`（新设计名称，不是仓库现存类）只接收已授权的内部job snapshot，流程为：
-1. 在tenant context内重读`Document`、`DocumentVersion`与`IMPORT_JOB` typed link；要求document未deleted、tenant一致、
-   version ID/number/hash均与job snapshot相同、scan=`CLEAN`、未legal hold/retention阻断；source SHA必须等于version SHA。
-2. 以document ID/exact version number调用`DocumentService.download`取得受控stream，禁止调用storage provider或用
-   `getVersionStorageKey`直接开文件。
-3. 共享security边界新增经root批准的专用exact IMPORT_JOB FileScope方法，输入应绑定storedName、jobId、documentId、
-   versionId、expectedHash、tenant；该方法重查`IMPORT_JOB` typed link、当前用户DataScope/菜单/tenant、document/version
-   当前状态和hash，并fail-closed。调用发生在每个initial read、restart、chunk continuation、seal recount之前。
-4. Reader以F2 parser实际消费到EOF；用parser返回的whole-source SHA与job/document version hash比对。metadata查询或调用者
-   声称EOF不可作为source读取成功证明。读完关闭stream；在DB事务外做文件I/O。
+feature専用の`ImportSourceDocumentReader`（新たな設計名であり、既存repositoryに実在するclassではない）は、認可済みの内部job
+snapshotだけを受け取る。処理順は次のとおり。
+1. tenant context内で`Document`、`DocumentVersion`、`IMPORT_JOB` typed linkを再読込する。documentが未deletedでtenantが一致し、
+   version ID/number/hashがjob snapshotと一致すること、scan=`CLEAN`であること、legal hold/retentionによる制限がないことを確認する。
+   source SHAはversion SHAと一致させる。
+2. document IDとexact version numberを指定して`DocumentService.download`を呼び、管理されたstreamを取得する。
+   storage providerを直接呼び出したり、`getVersionStorageKey`でファイルを直接開いたりしない。
+3. 共通security境界にIMPORT_JOB専用のexact FileScope判定を追加する。引数はstoredName、jobId、documentId、versionId、
+   expectedHash、tenantに結び付ける。判定処理で`IMPORT_JOB` typed link、現在のユーザーのDataScope/メニュー/tenant、
+   document/versionの現在状態とhashを再確認し、確認できない場合は拒否する。initial read、restart、chunk continuation、
+   seal recountの各読取前に実行する。
+4. F2 parserが実際にEOFまで読んだ後、parserが返すwhole-source SHAをjob/document version hashと照合する。
+   metadata検索結果や呼出元のEOF申告をsource読取完了の証明にしない。読取後はstreamをcloseし、DB transaction外でI/Oを行う。
 
-### 5.3 需root决定的shared change/审计delta
+### 5.3 shared changeと監査ログの扱い
 
-1. 当前FileScope没有`IMPORT_JOB`分支，当前specialized exact方法只能授权CERTIFICATION。实现需要修改
-   `FileScopeValidationService`及可能的link/mapper查询；这是共通安全边界的shared change，必须先由root明确批准并由Astra review。
-2. `DocumentServiceImpl.download`会写`t_document_access_log`。execution-contract允许的F1a metadata write allowlist
-   若被解释为只准写4张import表，则该reader与既有download API冲突。root需明确将合规安全访问日志列为只读业务数据外的
-   允许副作用，或批准新增受控read-only audit策略。不得静默绕开DocumentService或删除日志。
-3. `t_document_link`无tenant列且多态target无FK。reader必须join当前tenant document/version并逐项核typed link；不能声称
-   DB FK已保证typed link tenant一致。若root要求DB强约束，需另批shared document schema变更。
+1. 現行FileScopeに`IMPORT_JOB`分岐はなく、既存のspecialized exact methodが扱うのはCERTIFICATIONだけである。
+   実装時には`FileScopeValidationService`と、必要に応じてlink/mapper queryの拡張を検討する。共通security境界への変更範囲はrootが管理し、
+   Astra reviewで設計を確認する。
+2. `DocumentServiceImpl.download`は`t_document_access_log`へ記録する。execution-contractのF1a metadata write allowlistと
+   既存download APIの監査ログをどう整理するかはrootが決める。DocumentServiceを迂回したり、ログを削除したりしない。
+3. `t_document_link`にはtenant列がなく、多態的targetへのFKもない。readerは現在tenantのdocument/versionとjoinし、typed linkを
+   個別に確認する。DB FKがtyped linkのtenant一致を保証すると記載しない。DBでの追加制約が必要な場合は、rootの範囲決定に従う。
 
-没有上述决定和Astra review前，不写reader生产实现，也不编造mapper/facade已经存在。
+readerの具体的な実装は、共通境界の変更範囲と監査ログの扱いをrootが決定し、Astra reviewで設計を確認した後に進める。
+既存していないmapper/facadeを実装済みのものとして記述しない。
 
-## 6. Validation与恢复状态机
+## 6. Validationと復旧状態機械
 
-### 6.1 启动与lease
+### 6.1 開始とlease
 
-验证入口只接受MAPPED job，锁序固定为source system→job→mapping→run/registry key按tenant/source/entity/digest升序。
-每次事务锁与变更都用同一顺序。禁止在锁持有期间读文件、调用KMS/provider或等待。
-job行`SELECT ... FOR UPDATE`后读取MySQL `CURRENT_TIMESTAMP(6)`；成功takeover/首取时generation+1，owner随机值，
-expiry=DB time+30 seconds。same owner/same generation且未过期renew只延长expiry，不增generation；heartbeat目标10秒。
-无效/失效owner即使尚无另一个takeover也不能commit。actor、exact permission、source ACTIVE/version、法人、document
-精确版/CLEAN/hash与mapping immutable fingerprint在start及后续chunk/seal/publish再核。
+validation入口はMAPPED jobだけを受け付ける。lock順序はsource system→job→mapping→run/registry keyとし、
+tenant/source/entity/digestの昇順で取得する。すべてのtransactionで同じ順序を守る。lock保持中にfileを読んだり、
+KMS/providerを呼び出したり、待機したりしない。
+job行を`SELECT ... FOR UPDATE`でlockしてからMySQL `CURRENT_TIMESTAMP(6)`を読む。初回取得/takeover時はgenerationを+1し、
+ownerにはrandom値を設定する。expiryはDB time+30 secondsとする。同一owner・同一generationかつ未失効のrenewではexpiryだけを延長し、
+generationは増やさない。heartbeatは10秒間隔を目安とする。
+他workerによるtakeoverがまだなくても、無効または失効したownerのcommitは拒否する。actor、exact permission、sourceのACTIVE/version、
+法人、documentのexact version/CLEAN/hash、mapping immutable fingerprintをstartと後続のchunk/seal/publishで再確認する。
 
-### 6.2 BUILDING与250行chunk
+### 6.2 BUILDINGと250行chunk
 
-创建新的BUILDING run，snapshot job/source/document/mapping/schema/validator/actor和generation。F2调用点为
+新しいBUILDING runを作成し、job/source/document/mapping/schema/validator/actorとgenerationのsnapshotを保存する。F2の呼出点は
 `SesCsvParser.parse` (`src/main/java/com/ses/importcenter/foundation/SesCsvParser.java:29-80`)、
 `ImportValidationPipeline.validate` (`.../ImportValidationPipeline.java:18-38`)、
-`CanonicalRowFactory.create` (`.../CanonicalRowFactory.java:9-46`)和纯
-`ImportAmountParser.parse` (`.../ImportAmountParser.java:10-33`)。F2 pipeline自身不读DB/HTTP/domain。
+`CanonicalRowFactory.create` (`.../CanonicalRowFactory.java:9-46`)とpure
+`ImportAmountParser.parse` (`.../ImportAmountParser.java:10-33`)である。F2 pipeline自体はDB/HTTP/domainを参照しない。
 
-原source按物理data record number流式读；`SesCsvParser`在`:61-77`跳过全空records并让后续行号保留gap。
-每最多250个非空row写短transaction：重检principal/permission/source/document/lease fencing，按source row number有序
-插入只含hash/fingerprint/disposition/finding codes的row metadata。冲突retry只有相同run/row number且所有metadata/hash
-精确一致时幂等返回；任何差异拒绝。source blank行数只从实际parser回传记数，不以row number连续性推导。
+元のsourceをphysical data record number順にstream処理する。`SesCsvParser`は61-77行で全空recordをskipし、後続行番号にはgapを残す。
+最大250件の非空rowごとに短いtransactionを実行し、principal/permission/source/document/lease fencingを再確認してから、
+source row number順にhash/fingerprint/disposition/finding codesだけを含むrow metadataをinsertする。
+競合時のretryは、同じrun/row numberで全metadata/hashが完全一致する場合のみ冪等に扱う。それ以外は拒否する。
+sourceのblank行数はparserが実際に返した値だけを使い、row numberの連続性から推測しない。
 
-### 6.3 重启、SEALED、COMPLETED与counter
+### 6.3 再起動、SEALED、COMPLETEDとcounter
 
-worker重启从exact source字节开头重读，不跳到客户端offset。读取已提交prefix时逐行比较row number/hash/fingerprint/
-disposition/finding commitment，并从normalized external identity重建duplicate set；prefix缺失、额外、变化、key版本不明、
-source hash不同或任何FileScope状态失败时终止，不续用旧结果。正在BUILDING的run只有在同一输入、mapping和policy
-fingerprint下可续跑；新validation则创建新run，旧completed run只作immutable历史。
+worker再起動時はexact sourceの先頭byteから読み直し、client offsetから再開しない。commit済みprefixについてrow number/hash/fingerprint/
+disposition/finding commitmentを行ごとに照合し、normalized external identityからduplicate setを再構築する。
+prefixの不足/余分/変更、key version不明、source hash不一致、またはFileScope確認失敗があれば停止し、以前の結果を再利用しない。
+BUILDING runを再開できるのは入力、mapping、policy fingerprintが同一の場合に限る。新しいvalidationでは新runを作成し、
+旧completed runはimmutableな履歴として保持する。
 
-source实际EOF后再次核whole SHA。所有非空source records的`(rowNumber,rowHash)`有序集合必须与stored row集合完全相同，
-允许空record产生的number gap。取得job lock、再读DB时间，在同一CAS transaction确认lease有效和run仍BUILDING后写实际
-physical/empty counts并转SEALED；SEALED不接受row insert/update/delete。
+sourceのEOF到達後にwhole SHAを再確認する。全非空source recordの`(rowNumber,rowHash)`順序付き集合はstored row集合と完全一致させる。
+空recordに由来するnumber gapは許容する。job lockを取得してDB時刻を読み、同一CAS transactionでlease有効性とrunがBUILDINGであることを
+確認してから、実測したphysical/empty countsを保存しSEALEDへ遷移させる。SEALED後のrow insert/update/deleteは拒否する。
 
-SEALED recount再次经exact-source reader从头到EOF解析，不重做DB/domain validation。每行重新确认row hash与canonical
-fingerprint；用已保存的immutable disposition/finding code，不再次查询业务实体。金额/excluded-reason通过F2同一纯
-`ImportAmountParser`从本次内存source字段重新计算，按disposition累计接受/拒绝金额及数量；不把raw field、amount或CSV row
-落表。summary中保存count/row-set/source/policy commitments。最终短transaction重新取得job lock与DB时间，条件更新必须匹配
-owner、generation、expiry、current run、job version、source/mapping snapshot；run由SEALED CAS至COMPLETED，并原子写counter/hash、
-job.current_validation_run_id和VALIDATED。返回成功前确认更新行数精确为1。
+SEALED recountではexact-source readerを使って先頭からEOFまで再解析し、DB/domain validationはやり直さない。
+各rowのrow hashとcanonical fingerprintを再確認し、保存済みのimmutable disposition/finding codeを使用する。業務entityを再照会しない。
+金額/excluded-reasonはF2の同一pure `ImportAmountParser`を使い、この読取中のsource fieldから再計算し、disposition別に件数と金額を集計する。
+raw field、amount、CSV rowはtableへ保存しない。summaryにはcount/row-set/source/policy commitmentsを保存する。
+最後の短いtransactionでjob lockとDB時刻を再取得し、owner、generation、expiry、current run、job version、source/mapping snapshotの一致を条件にする。
+runをSEALEDからCOMPLETEDへCASし、counter/hash、job.current_validation_run_id、VALIDATED状態を原子的に記録する。
+成功を返す前に更新件数が正確に1であることを確認する。
 
-只有COMPLETED并由job pointer引用的run是当前结果。BUILDING/SEALED/ABORTED不发布。candidate注册是独立metadata操作；
-validate/start/chunk/seal/recount/publish都不调用registry写方法。F1a未实现READY或apply。
+COMPLETEDでjob pointerから参照されるrunだけを現在の結果とする。BUILDING/SEALED/ABORTEDは公開しない。
+candidate登録は独立したmetadata操作とし、validate/start/chunk/seal/recount/publishからregistry書込methodを呼び出さない。
+F1aではREADYまたはapplyを実装しない。
 
-## 7. Mapper/DTO边界与非目标
+## 7. Mapper/DTO境界と対象外
 
-六表使用feature专属Mapper及只含上述metadata列的内部DTO。job/run读DTO不得含raw row、外部key明文、ciphertext、nonce、
-credential或amount field；registry管理DTO不向普通列表API公开且绝不解密回显identity。没有HTTP/UI写入口。
-所有查询至少tenant限定；跨表读必须验证parent一致。写mapper方法只提供明确的insert/CAS/append/select-for-update，
-不生成通用updateById/deleteById。DTO的状态/tenant/actor/counter不可由外部boolean或请求字段绕过resolver重建。
+6表にはfeature専用Mapperと、上記metadata列だけを含む内部DTOを用いる。job/run読取DTOにはraw row、外部key平文、ciphertext、nonce、
+credential、amount fieldを含めない。registry管理DTOを一般の一覧APIに公開せず、identityを復号して返さない。HTTP/UIの書込入口は設けない。
+すべてのqueryをtenantで限定し、表をまたぐ読取では親子関係の一致を確認する。write mapperは明示的なinsert/CAS/append/select-for-updateだけを提供し、
+汎用updateById/deleteByIdを生成しない。DTOのstate/tenant/actor/counterを、外部booleanやrequest fieldでresolverを迂回して再構成できないようにする。
 
-本稿没有新增production class/mapper/controller/DDL，也没有声称这些接口已存在。具体实现命名、byte serialization、
-MySQL CHECK/索引长度与迁移编号留待schema review决议。
+本稿ではproduction class/mapper/controller/DDLを追加せず、これらのinterfaceが既存するとも主張しない。
+具体的な実装名、byte serialization、MySQL CHECK/index長、migration番号はschema reviewで決定する。
 
-## 8. 文档差分与Astra review请求
+## 8. 文書の差分とAstra review依頼
 
-- 不改已批准requirements/design/tasks/execution-contract；这些文件描述更宽的F1/NF06目标。本文将本次实现截面限定为
-  F1a并明确未实现READY/apply/UI/real-data。
-- execution-contract的metadata write allowlist为四张`job/mapping/validation_run/validation_row`；新增
-  `source_system`及独立`identity_registry`写入需确认其属于本feature独立metadata动作，validation本身不写registry。
-- 当前Document/FileScope API不满足IMPORT_JOB exact source读取；shared security授权和Document access log副作用需root决定。
-- 请Astra逐表审column/type/collation/constraint/FK/index、唯一active run/current pointer、canonical mapping容量、
-  crypto namespace/AAD/constant-time比较、exact permission查询语义、reader/FileScope缺口、chunk/lease fencing及seal恢复。
-  所有审查未通过项解决并获得root批准前，不开始DDL/production实现。
+- 承認済みrequirements/design/tasks/execution-contractは変更しない。これらの文書はF1/NF06のより広い目標を記載している。
+  本文では今回の実装範囲をF1aに限定し、READY/apply/UI/real-dataを含まないことを明確にする。
+- execution-contractのmetadata write allowlistは`job/mapping/validation_run/validation_row`の4表である。
+  `source_system`と独立した`identity_registry`への書込が本featureの独立metadata操作に該当することを確認する。validation自体はregistryへ書き込まない。
+- 現行Document/FileScope APIにはIMPORT_JOB exact source読取に不足がある。shared security変更とDocument access logの扱いはrootの決定に従う。
+- Astraには、各表のcolumn/type/collation/constraint/FK/index、唯一のactive run/current pointer、canonical mapping容量、
+  crypto namespace/AAD/constant-time比較、exact permission queryの意味、reader/FileScopeの不足、chunk/lease fencing、sealからの復旧をレビューしてもらう。
+  DDL/production実装は設計レビュー後に進める。
 
 ## 参照実装（現状確認。設計名を実在APIと誤認しないこと）
 
