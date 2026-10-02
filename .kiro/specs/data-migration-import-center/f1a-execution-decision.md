@@ -71,9 +71,14 @@ source/jobの各write transactionでもactor/source状態とversionを再確認�
   DB transaction途中にprovider/file I/Oや待機を行わない。source document read/crypto準備は必要な再検証と分離する。
 - metadata writerはjob行FOR UPDATEをcommitまで保持し、state/owner/generation/expiry/source versionを確認する。
   必要ならcommit直前もDB時刻を再取得し、失効を拒否する。2回の通常SELECTだけでfencingを証明しない。
-- validation run、全row metadata、counter/hashとjobのrun参照を同一transactionで確定する。
-  100,000行全体を単一長期transactionにしない。詳細chunk/staging状態と最終publishの原子性は実装前Reviewで固定する。
-  中間rowを完成runの結果として公開してはならない。
+- validationはBUILDING→SEALED→COMPLETEDの内部状態を持つ。入力は開始時に固定し、各最大250行のchunkを
+  job fence付き短transactionでappendする。同run/row番号のretryはhash/全metadata一致だけ許し、不一致は拒否。
+  source全量終了後、同job lockで入力件数・prefix連続性を確認してSEALEDへCASし、以後のrow追加/変更を拒否する。
+  SEALEDの不変rowから外側のread-only処理でhash/counterを再計算し、最終短transactionでjob fence、run/version、
+  source/mapping一致と計算結果を照合してCOMPLETED、counter/hash、job.current_validation_run_id、VALIDATEDを原子的にpublishする。
+  BUILDING/SEALEDは進捗としてのみ表示でき、完成したvalidation結果として公開しない。
+  crash後は同source/mappingの同runへ新generationで再取得し、確定prefixまたはSEALEDから再開する。
+  再validation開始時は旧COMPLETED runを保持したままjobをMAPPEDへCASし、current pointerを解除する。旧runを再編集しない。
 - commit前失敗は全rollback。commit応答喪失は不変run/job identityで照合し、別結果を作らない。
 
 ## DDLと実装範囲
