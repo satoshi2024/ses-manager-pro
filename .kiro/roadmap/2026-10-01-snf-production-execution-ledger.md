@@ -118,3 +118,20 @@
 - nf06_contracts agentはthread上限により再開できなかった。既存Luna browser_fixをNF07 W2aへ再配分した。
   NF04 sourceを上書きせず保存し、重いMaven/MySQL/Browserは引き続き総括が直列化する。
 - production approval、remote push/PR/merge、実credential、deployは実施していない。
+## 2026-10-02 午前の再開とNF06採番
+
+- 再fetch後origin/mainは`1443fb68943849a3260d7ebe005259f3eb609d60`。主checkoutの利用者変更3件を保持。
+  停止済みagentを再起動せず、Luna `portal_isolation_r2` / `privacy_journal_r2` とAstra `astra_gate_r2`へ
+  現存worktree・未commit差分・失敗証拠を引き継いだ。再開時に残存Java processはなかった。
+- NF06 F1aは既存clean worktree `C:\work\ses-review-snf-r3-b`を再利用し、
+  `codex/snf-prod-nf06-metadata`をfresh B0から作成、審査済みF2依存 `936890a7`へfast-forwardした。
+  旧`codex/snf-prod-nf06-contracts`とtarget証拠は保存。追加計画取り込みHead `fc52da55`。
+- F1a追加計画は独立PLAN CONDITIONAL。validationからregistry書込を分離し、exact source再parseによる
+  集計再検算、空行gap、prefix/duplicate集合再構築、権限再確認の条件を追記した。
+  次担当はDDL/constraint/transaction draftを先に作り、Astra確認後に実装する。
+- 2026-10-02 09:54 JST時点の全refのpath履歴と全登録worktreeのmigrationディレクトリを確認し、
+  `V184*`は0件だった。**V184をNF06 F1a metadata/identity基盤へ専有予約する。**
+  作成予定は`V184__create_import_metadata_foundation.sql`。他batchは使用しない。
+  V183はNF01専有のまま、V185以降は未割当。reservationはproduction migration承認ではない。
+- feature単体のB0→V184検証と、V183も含むcontrol統合後のfresh/upgrade gateを区別する。
+  新DDLは適用済みV1〜V183を変更せず、H2専用schema/shard/必要なinit参照を同期する。
