@@ -70,6 +70,7 @@ spring:
         - classpath:sql/schema-integration-hub-b2-h2.sql
         - classpath:sql/schema-service-desk-h2.sql
         - classpath:sql/schema-nf02-nf03-tenant-ownership-h2.sql
+        - classpath:sql/schema-import-center-f1a-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 
