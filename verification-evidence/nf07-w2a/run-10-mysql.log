@@ -1,0 +1,142 @@
+Picked up JAVA_TOOL_OPTIONS: -Djdk.net.unixdomain.tmpdir=C:\work\jdk-uds
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ----------------------< com.ses:ses-manager-pro >-----------------------
+[INFO] Building SES Manager Pro 1.0.0-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- jacoco:0.8.12:prepare-agent (prepare-agent) @ ses-manager-pro ---
+[INFO] jacocoArgLine set to -javaagent:C:\\Users\\Peter_pack\\.m2\\repository\\org\\jacoco\\org.jacoco.agent\\0.8.12\\org.jacoco.agent-0.8.12-runtime.jar=destfile=C:\\work\\ses-review-snf-r3-c\\target\\jacoco.exec,excludes=com/ses/dto/**:com/ses/entity/**:com/ses/*Application.class
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ ses-manager-pro ---
+[INFO] Copying 3 resources from src\main\resources to target\classes
+[INFO] Copying 420 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ ses-manager-pro ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 1973 source files with javac [debug parameters release 17] to target\classes
+[INFO] 由于在类路径中发现了一个或多个处理程序，因此启用了
+  批注处理。未来发行版的 javac 可能会禁用批注处理，
+  除非至少按名称指定了一个处理程序 (-processor)，
+  或指定了搜索路径 (--processor-path, --processor-module-path)，
+  或显式启用了批注处理 (-proc:only, -proc:full)。
+  可使用 -Xlint:-options 隐藏此消息。
+  可使用 -proc:none 禁用批注处理。
+[WARNING] /C:/work/ses-review-snf-r3-c/src/main/java/com/ses/service/cloudsign/CloudSignApiClientImpl.java:[196,49] org.springframework.http.client.ClientHttpResponse 中的 getRawStatusCode() 已过时, 且标记为待删除
+[INFO] /C:/work/ses-review-snf-r3-c/src/main/java/com/ses/config/PortalSecurityConfig.java: 某些输入文件使用或覆盖了已过时的 API。
+[INFO] /C:/work/ses-review-snf-r3-c/src/main/java/com/ses/config/PortalSecurityConfig.java: 有关详细信息, 请使用 -Xlint:deprecation 重新编译。
+[INFO] /C:/work/ses-review-snf-r3-c/src/main/java/com/ses/controller/api/PwaMutationApiController.java: C:\work\ses-review-snf-r3-c\src\main\java\com\ses\controller\api\PwaMutationApiController.java使用了未经检查或不安全的操作。
+[INFO] /C:/work/ses-review-snf-r3-c/src/main/java/com/ses/controller/api/PwaMutationApiController.java: 有关详细信息, 请使用 -Xlint:unchecked 重新编译。
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ ses-manager-pro ---
+[INFO] Copying 93 resources from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ ses-manager-pro ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 759 source files with javac [debug parameters release 17] to target\test-classes
+[INFO] 由于在类路径中发现了一个或多个处理程序，因此启用了
+  批注处理。未来发行版的 javac 可能会禁用批注处理，
+  除非至少按名称指定了一个处理程序 (-processor)，
+  或指定了搜索路径 (--processor-path, --processor-module-path)，
+  或显式启用了批注处理 (-proc:only, -proc:full)。
+  可使用 -Xlint:-options 隐藏此消息。
+  可使用 -proc:none 禁用批注处理。
+[INFO] /C:/work/ses-review-snf-r3-c/src/test/java/com/ses/common/exception/GlobalExceptionHandlerTest.java: 某些输入文件使用或覆盖了已过时的 API。
+[INFO] /C:/work/ses-review-snf-r3-c/src/test/java/com/ses/common/exception/GlobalExceptionHandlerTest.java: 有关详细信息, 请使用 -Xlint:deprecation 重新编译。
+[INFO] /C:/work/ses-review-snf-r3-c/src/test/java/com/ses/config/ContractDocumentBackfillRunnerTest.java: 某些输入文件使用了未经检查或不安全的操作。
+[INFO] /C:/work/ses-review-snf-r3-c/src/test/java/com/ses/config/ContractDocumentBackfillRunnerTest.java: 有关详细信息, 请使用 -Xlint:unchecked 重新编译。
+[INFO] 
+[INFO] --- surefire:3.2.5:test (default-test) @ ses-manager-pro ---
+[INFO] Tests will run in random order. To reproduce ordering use flag -Dsurefire.runOrder.random.seed=23043658166200
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+Picked up JAVA_TOOL_OPTIONS: -Djdk.net.unixdomain.tmpdir=C:\work\jdk-uds
+[INFO] Running com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest
+09:54:28.926 [main] INFO org.testcontainers.images.PullPolicy -- Image pull policy will be performed by: DefaultPullPolicy()
+09:54:28.941 [main] INFO org.testcontainers.utility.ImageNameSubstitutor -- Image name substitution will be performed by: DefaultImageNameSubstitutor (composite of 'ConfigurationFileImageNameSubstitutor' and 'PrefixingImageNameSubstitutor')
+09:54:28.965 [main] INFO org.testcontainers.DockerClientFactory -- Testcontainers version: 1.20.6
+09:54:29.535 [main] INFO org.testcontainers.dockerclient.DockerClientProviderStrategy -- Loaded org.testcontainers.dockerclient.NpipeSocketClientProviderStrategy from ~/.testcontainers.properties, will try it first
+09:54:30.312 [main] INFO org.testcontainers.dockerclient.DockerClientProviderStrategy -- Found Docker environment with local Npipe socket (npipe:////./pipe/docker_engine)
+09:54:30.315 [main] INFO org.testcontainers.DockerClientFactory -- Docker host IP address is localhost
+09:54:30.357 [main] INFO org.testcontainers.DockerClientFactory -- Connected to docker: 
+  Server Version: 29.7.2
+  API Version: 1.55
+  Operating System: Docker Desktop
+  Total Memory: 11658 MB
+  Labels: 
+    com.docker.desktop.address=npipe://\\.\pipe\docker_cli
+09:54:30.561 [main] INFO tc.testcontainers/ryuk:0.11.0 -- Creating container for image: testcontainers/ryuk:0.11.0
+09:54:30.734 [main] INFO org.testcontainers.utility.RegistryAuthLocator -- Credential helper/store (docker-credential-desktop) does not have credentials for https://index.docker.io/v1/
+09:54:31.088 [main] INFO tc.testcontainers/ryuk:0.11.0 -- Container testcontainers/ryuk:0.11.0 is starting: 00d859d03a3dff94bd431b592388176f9ee9a91fff888d611f6e8687c4dc2c15
+09:54:31.712 [main] INFO tc.testcontainers/ryuk:0.11.0 -- Container testcontainers/ryuk:0.11.0 started in PT1.1510668S
+09:54:31.734 [main] INFO org.testcontainers.utility.RyukResourceReaper -- Ryuk started - will monitor and terminate Testcontainers containers on JVM exit
+09:54:31.735 [main] INFO org.testcontainers.DockerClientFactory -- Checking the system...
+09:54:31.736 [main] INFO org.testcontainers.DockerClientFactory -- ✔︎ Docker server version should be at least 1.6.0
+09:54:31.743 [main] INFO tc.mysql:8.0 -- Creating container for image: mysql:8.0
+09:54:32.101 [main] INFO tc.mysql:8.0 -- Container mysql:8.0 is starting: 8edf4fa44f25ba5dc1abd65cd27c28716152706c20a18559e40b004f62891689
+09:54:32.506 [main] INFO tc.mysql:8.0 -- Waiting for database connection to become available at jdbc:mysql://localhost:53643/sfj_489f99afed1847979c1288ac936ebc96 using query 'SELECT 1'
+09:55:05.119 [main] INFO tc.mysql:8.0 -- Container mysql:8.0 started in PT33.3753474S
+09:55:05.119 [main] INFO tc.mysql:8.0 -- Container is started (JDBC URL: jdbc:mysql://localhost:53643/sfj_489f99afed1847979c1288ac936ebc96)
+SF_W2A_CONTAINER id=8edf4fa44f25ba5dc1abd65cd27c28716152706c20a18559e40b004f62891689 database=sfj_489f99afed1847979c1288ac936ebc96 host=localhost mappedPort=53643 schemaSha256=9b9d235555c38241573e0fed75ddc8648ed3b12da2ce4c929840eaa1ab68e29b manifestSha256=d0cdd71c640309b2d2c8815060baed29ea1dbc6c7e3ede63941c5071fff1ecd1
+SF_W2A_LOCK_WAIT tenant=tenant-synthetic subject=subject-opaque-01 writerConnectionId=76 blockerConnectionId=75 object=sf_journal_head index=PRIMARY lockType=RECORD waitCount=1
+[ERROR] Tests run: 24, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 47.49 s <<< FAILURE! -- in com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest
+[ERROR] com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.P1_hold先行と認可先行の双方で実writer待機順序を検証する -- Time elapsed: 0.311 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: Unexpected exception type thrown, expected: <com.ses.privacy.foundation.JournalConflictException> but was: <java.util.concurrent.ExecutionException>
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:67)
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:35)
+	at org.junit.jupiter.api.Assertions.assertThrows(Assertions.java:3115)
+	at com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.assertOrderedP1Race(PrivacyJournalLinearizationMySqlTest.java:157)
+	at com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.P1_hold先行と認可先行の双方で実writer待機順序を検証する(PrivacyJournalLinearizationMySqlTest.java:126)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at com.ses.test.DefaultTenantTestContextExtension.interceptTestMethod(DefaultTenantTestContextExtension.java:81)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+Caused by: java.util.concurrent.ExecutionException: com.ses.privacy.foundation.JournalConflictException: journal revisionが競合しました
+	at java.base/java.util.concurrent.FutureTask.report(FutureTask.java:122)
+	at java.base/java.util.concurrent.FutureTask.get(FutureTask.java:205)
+	at com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.lambda$assertOrderedP1Race$4(PrivacyJournalLinearizationMySqlTest.java:157)
+	at org.junit.jupiter.api.AssertThrows.assertThrows(AssertThrows.java:53)
+	... 8 more
+Caused by: com.ses.privacy.foundation.JournalConflictException: journal revisionが競合しました
+	at com.ses.privacy.foundation.JdbcPrivacyJournalAdapter.appendInTransaction(JdbcPrivacyJournalAdapter.java:79)
+	at com.ses.privacy.foundation.JdbcPrivacyJournalAdapter.lambda$append$0(JdbcPrivacyJournalAdapter.java:53)
+	at org.springframework.transaction.support.TransactionTemplate.execute(TransactionTemplate.java:140)
+	at com.ses.privacy.foundation.JdbcPrivacyJournalAdapter.append(JdbcPrivacyJournalAdapter.java:53)
+	at com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.lambda$assertOrderedP1Race$3(PrivacyJournalLinearizationMySqlTest.java:145)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+
+[INFO] 
+[INFO] Results:
+[INFO] 
+[ERROR] Failures: 
+[ERROR]   PrivacyJournalLinearizationMySqlTest.P1_hold先行と認可先行の双方で実writer待機順序を検証する:126->assertOrderedP1Race:157 Unexpected exception type thrown, expected: <com.ses.privacy.foundation.JournalConflictException> but was: <java.util.concurrent.ExecutionException>
+[INFO] 
+[ERROR] Tests run: 24, Failures: 1, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  01:50 min
+[INFO] Finished at: 2026-10-02T09:55:16+09:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.2.5:test (default-test) on project ses-manager-pro: There are test failures.
+[ERROR] 
+[ERROR] Please refer to C:\work\ses-review-snf-r3-c\target\surefire-reports for the individual test results.
+[ERROR] Please refer to dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+EXIT_CODE=1
+END_UTC=2026-10-02T00:55:17.0654096Z

@@ -1,0 +1,61 @@
+-------------------------------------------------------------------------------
+Test set: com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest
+-------------------------------------------------------------------------------
+Tests run: 22, Failures: 1, Errors: 1, Skipped: 0, Time elapsed: 54.32 s <<< FAILURE! -- in com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest
+com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.partitionHeadの実行ロック待ちをMySQLのinnodb_trxで観測する -- Time elapsed: 10.23 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: journal writerがInnoDBのrow lock待ちに入る必要があります ==> expected: <true> but was: <false>
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+	at org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
+	at org.junit.jupiter.api.AssertTrue.failNotTrue(AssertTrue.java:63)
+	at org.junit.jupiter.api.AssertTrue.assertTrue(AssertTrue.java:36)
+	at org.junit.jupiter.api.Assertions.assertTrue(Assertions.java:214)
+	at com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.partitionHeadの実行ロック待ちをMySQLのinnodb_trxで観測する(PrivacyJournalLinearizationMySqlTest.java:137)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at com.ses.test.DefaultTenantTestContextExtension.interceptTestMethod(DefaultTenantTestContextExtension.java:81)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+
+com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.P1_holdと認可の競合はpartitionの単一revision順序に線形化される -- Time elapsed: 0.188 s <<< ERROR!
+java.util.concurrent.ExecutionException: java.lang.AssertionError: com.ses.privacy.foundation.JournalUnavailableException: journal durable appendに失敗しました
+	at java.base/java.util.concurrent.FutureTask.report(FutureTask.java:122)
+	at java.base/java.util.concurrent.FutureTask.get(FutureTask.java:205)
+	at com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.P1_holdと認可の競合はpartitionの単一revision順序に線形化される(PrivacyJournalLinearizationMySqlTest.java:102)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at com.ses.test.DefaultTenantTestContextExtension.interceptTestMethod(DefaultTenantTestContextExtension.java:81)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+Caused by: java.lang.AssertionError: com.ses.privacy.foundation.JournalUnavailableException: journal durable appendに失敗しました
+	at com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.race(PrivacyJournalLinearizationMySqlTest.java:427)
+	at com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.lambda$P1_holdと認可の競合はpartitionの単一revision順序に線形化される$0(PrivacyJournalLinearizationMySqlTest.java:98)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Caused by: com.ses.privacy.foundation.JournalUnavailableException: journal durable appendに失敗しました
+	at com.ses.privacy.foundation.JdbcPrivacyJournalAdapter.append(JdbcPrivacyJournalAdapter.java:59)
+	at com.ses.privacy.foundation.PrivacyJournalLinearizationMySqlTest.race(PrivacyJournalLinearizationMySqlTest.java:424)
+	... 5 more
+Caused by: org.springframework.dao.CannotAcquireLockException: PreparedStatementCallback; SQL [SELECT revision, event_hash, held, lease_generation, lease_owner, lease_until FROM sf_journal_head WHERE tenant_id = ? AND subject_ref = ? FOR UPDATE]; Deadlock found when trying to get lock; try restarting transaction
+	at org.springframework.jdbc.support.SQLExceptionSubclassTranslator.doTranslate(SQLExceptionSubclassTranslator.java:78)
+	at org.springframework.jdbc.support.AbstractFallbackSQLExceptionTranslator.translate(AbstractFallbackSQLExceptionTranslator.java:107)
+	at org.springframework.jdbc.core.JdbcTemplate.translateException(JdbcTemplate.java:1548)
+	at org.springframework.jdbc.core.JdbcTemplate.execute(JdbcTemplate.java:677)
+	at org.springframework.jdbc.core.JdbcTemplate.query(JdbcTemplate.java:723)
+	at org.springframework.jdbc.core.JdbcTemplate.query(JdbcTemplate.java:754)
+	at org.springframework.jdbc.core.JdbcTemplate.query(JdbcTemplate.java:767)
+	at org.springframework.jdbc.core.JdbcTemplate.queryForObject(JdbcTemplate.java:896)
+	at com.ses.privacy.foundation.JdbcPrivacyJournalAdapter.lockedHead(JdbcPrivacyJournalAdapter.java:187)
+	at com.ses.privacy.foundation.JdbcPrivacyJournalAdapter.appendInTransaction(JdbcPrivacyJournalAdapter.java:67)
+	at com.ses.privacy.foundation.JdbcPrivacyJournalAdapter.lambda$append$0(JdbcPrivacyJournalAdapter.java:53)
+	at org.springframework.transaction.support.TransactionTemplate.execute(TransactionTemplate.java:140)
+	at com.ses.privacy.foundation.JdbcPrivacyJournalAdapter.append(JdbcPrivacyJournalAdapter.java:53)
+	... 6 more
+Caused by: com.mysql.cj.jdbc.exceptions.MySQLTransactionRollbackException: Deadlock found when trying to get lock; try restarting transaction
+	at com.mysql.cj.jdbc.exceptions.SQLError.createSQLException(SQLError.java:124)
+	at com.mysql.cj.jdbc.exceptions.SQLExceptionsMapping.translateException(SQLExceptionsMapping.java:122)
+	at com.mysql.cj.jdbc.ClientPreparedStatement.executeInternal(ClientPreparedStatement.java:912)
+	at com.mysql.cj.jdbc.ClientPreparedStatement.executeQuery(ClientPreparedStatement.java:968)
+	at org.springframework.jdbc.core.JdbcTemplate$1.doInPreparedStatement(JdbcTemplate.java:732)
+	at org.springframework.jdbc.core.JdbcTemplate.execute(JdbcTemplate.java:658)
+	... 15 more
+
