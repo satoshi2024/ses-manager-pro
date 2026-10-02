@@ -92,3 +92,21 @@ G2の具体化条件は次で固定する。
 - 新規と復元を混在させるaggregateのversion/順序はserver現行versionと未処理recordの衝突を検査し、不明なら新規queueを停止して明示復元/破棄を案内する。保存失敗を新規成功に見せない。
 
 追加Plan Reviewと実装・独立CODE Reviewが済んでも、OwnerによるAC差分承認、stagingとproduction enablementは別gateである。
+
+## G1 server実装メモ（未検証・独立CODE Review前）
+
+2026-10-02時点のG1コード案は、専用`/api/my/pwa/restore/reauthenticate`と`/confirm`だけでproofを発行・消費する。proofは256-bit乱数のopaque値で、sessionにはSHA-256摘要のみを保存する。proofは120秒で失効し、同一nonceでの再発行は旧proofを失効させる。sessionごとの未消費proof上限は4件。confirmは同一session mutex上でproofを単回消費し、現在DBのuser状態・tenant・要員role・engineer link・lock状態・password fingerprintを再検査する。応答permitはdocument nonceとscopeを結び、15分以内かつsession inactivity以内とする。
+
+scope v2署名はversion/purpose/domainを分離し、tenant、user、engineer、link ID、link作成時刻、発行時刻、nonceをlength-prefixしてHMACへ含める。linkの解除・再接続後は以前のscopeを使えない。従来scopeはtenantを署名していないため、restore proofでは常に拒否する。従来scopeを示すsession-context requestはqueueをpreserveせず、新scopeへ移行する。通常mutation側のlegacy scope解析は互換経路として残るが、restore認可証明とは扱わない。legacy queueの復元可否はこの変更で解決済みとは主張しない。
+
+再認証失敗は既存`AccountLockService`へ委譲し、その呼出しを独立transactionで確定する。`sys_user.username`はV1でglobal UNIQUEだが、usernameはclientから取らず、current user IDとtenantで取得したDB rowから解決する。正しいpasswordによる既存lock解除処理を呼び出して失敗加算を消すことはしない。
+
+session破棄listenerはPWA session registryを同一mutexで失効させる。logoutとconsume/revokeの実サーブレットrace、transaction境界、CSRF、AccountLock永続化、endpoint/session統合、real browser、分散session topologyはまだ実測されていない。このメモは実装状況の記録であり、CODE PASS、NF04完了、受入条件差分承認、production許可を意味しない。
+
+### 2026-10-02 実装・証拠補記
+
+限定selectorのrun-03は`mvn test -Dtest=PwaRestoreAuthorizationServiceTest,PwaUserContextServiceTest,PwaRestoreAuditFilterTest,MyPwaRestoreApiControllerTest`で実行し、18/0/0/0、終了コード0だった。raw log、実行時source SHA-256、4件の新規Surefire XMLと各SHA-256はignored evidenceの`verification-evidence/nf04-g1/run-03/`に保持する。rootの別worktree MySQL gateと時間が重なった限定実行であることも同directoryに記録した。run-03はDTO秘密値redactionを含むsourceを検証したが、後述の精度修正とH2 transaction testは含まない。
+
+静的指摘によりscope v2の`linkedAt`と`issuedAt`はmillisecond値からISO-8601 `Instant`の完全精度値へ変更した。新しいnanosecond Clockとmicrosecond link時刻のroundtrip回帰を追加した。H2 transaction integration testは固有memory DBと`DirtiesContext`で共有DBから分離し、外側rollback後のREQUIRES_NEW failure count、同時加算後のlock/count、DB active/link/lock再読込、およびtest-only transaction-manager commit fault時にproofをsessionへ発行しないことを確認する設計である。これらの補記時点の変更は未コンパイル・未実行で、source SHA-256一覧を`verification-evidence/nf04-g1/run-04-unverified/source-sha256.txt`へ置く。commit fault injectionはSpring transaction境界の模擬であり、H2/JDBC engine自体のcommit故障証拠ではない。
+
+次のruntime窓でH2 integration testと限定selectorを検証し、実Spring servlet containerでのlistener登録・logout順序raceは別途確認する。DB engine commit故障、実servlet listener/logout統合、Chrome/CSRF、分散session topologyは引き続き未検証である。run-03 PASSをこれらの証明として扱わず、G1またはNF04全体の完了とも扱わない。
