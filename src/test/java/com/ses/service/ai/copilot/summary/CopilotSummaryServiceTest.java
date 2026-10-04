@@ -180,7 +180,8 @@ class CopilotSummaryServiceTest {
 
     private CopilotRunService.CopilotArtifactSnapshot pinnedArtifact() {
         return new CopilotRunService.CopilotArtifactSnapshot(7L, "mock", "mock-management-copilot",
-                "nf08-f1", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                CopilotSummaryPromptTemplate.VERSION,
+                CopilotSummaryPromptTemplate.localConfigHash("mock", "mock-management-copilot"),
                 "catalog-v1", 0);
     }
 

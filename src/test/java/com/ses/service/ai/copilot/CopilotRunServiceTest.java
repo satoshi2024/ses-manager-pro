@@ -5,6 +5,10 @@ import com.ses.entity.AiArtifactVersion;
 import com.ses.entity.AiRecommendationRun;
 import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
+import com.ses.service.ai.copilot.summary.SummaryResponse;
+import com.ses.service.ai.copilot.summary.CopilotSummaryPromptTemplate;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
@@ -27,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -53,7 +58,7 @@ class CopilotRunServiceTest {
         active.setProvider("mock");
         active.setModelName("mock-management-copilot");
         active.setPromptVersion("nf08-f1");
-        active.setConfigHash("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        active.setConfigHash(CopilotSummaryPromptTemplate.localConfigHash("mock", "mock-management-copilot"));
         active.setRuleVersion("catalog-v1");
         active.setStatus("ACTIVE");
         active.setStatusVersion(4);
@@ -76,11 +81,14 @@ class CopilotRunServiceTest {
                 false, "tenant-a", 10L, "ALL");
         context.bind(entry.queryId(), CopilotQueryParameters.ofQuery(entry.queryId()), scope);
 
+        CopilotRunService.CopilotAttemptRecord[] attempts = new CopilotRunService.CopilotAttemptRecord[2];
         AccountingTenantContextHolder.runWithTenant("tenant-a", () -> {
             CopilotRunService.CopilotAttemptRecord query = service.beginQueryAttempt(
                     entry, "parameter-hash", context, artifact);
             CopilotRunService.CopilotAttemptRecord summary = service.beginSummaryAttempt(
                     entry, "parameter-hash", context, artifact, query);
+            attempts[0] = query;
+            attempts[1] = summary;
             assertNotEquals(query.traceId(), summary.traceId());
             assertEquals(query.traceId(), summary.parentTraceId());
             assertEquals(artifact, summary.artifact());
@@ -107,5 +115,41 @@ class CopilotRunServiceTest {
         assertFalse(runs.get(0).getRedactedSummaryJson().contains("raw prompt"));
         assertTrue(runs.get(1).getRedactedSummaryJson().contains("promptVersion"));
         verify(versionMapper, times(1)).selectOne(any());
+
+        CopilotRunService.CopilotArtifactSnapshot driftedArtifact = new CopilotRunService.CopilotArtifactSnapshot(
+                73L, artifact.provider(), artifact.modelName(), artifact.promptVersion(), artifact.configHash(),
+                artifact.ruleVersion(), artifact.statusVersion());
+        AccountingTenantContextHolder.runWithTenant("tenant-a", () -> assertThrows(IllegalArgumentException.class,
+                () -> service.beginSummaryAttempt(entry, "parameter-hash", context,
+                        driftedArtifact, attempts[0])));
+        verify(runMapper, times(2)).insert(any(AiRecommendationRun.class));
+
+        when(runMapper.update((AiRecommendationRun) null, any(Wrapper.class))).thenReturn(0, 1, 1);
+        AccountingTenantContextHolder.runWithTenant("tenant-a", () -> {
+            assertThrows(IllegalStateException.class,
+                    () -> service.completeQueryAttempt(attempts[0], 23, true, 4));
+            service.completeQueryAttempt(attempts[0], 23, true, 4);
+            service.completeSummaryAttempt(attempts[1], 47, SummaryResponse.unavailable("COST_UNKNOWN"));
+        });
+
+        ArgumentCaptor<Wrapper<AiRecommendationRun>> updateCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(runMapper, times(3)).update((AiRecommendationRun) null, updateCaptor.capture());
+        LambdaUpdateWrapper<AiRecommendationRun> queryUpdate =
+                (LambdaUpdateWrapper<AiRecommendationRun>) updateCaptor.getAllValues().get(1);
+        LambdaUpdateWrapper<AiRecommendationRun> summaryUpdate =
+                (LambdaUpdateWrapper<AiRecommendationRun>) updateCaptor.getAllValues().get(2);
+        assertTrue(queryUpdate.getParamNameValuePairs().containsValue("SUCCEEDED"));
+        assertTrue(queryUpdate.getParamNameValuePairs().containsValue(23));
+        assertTrue(queryUpdate.getParamNameValuePairs().containsValue("PENDING"));
+        assertTrue(queryUpdate.getParamNameValuePairs().containsValue(0));
+        assertTrue(summaryUpdate.getParamNameValuePairs().containsValue("FAILED"));
+        assertTrue(summaryUpdate.getParamNameValuePairs().containsValue("COST_UNKNOWN"));
+        assertTrue(summaryUpdate.getParamNameValuePairs().containsValue("UNKNOWN"));
+        assertTrue(summaryUpdate.getParamNameValuePairs().containsValue(47));
+        assertTrue(summaryUpdate.getSqlSet().contains("cost_jpy"));
+        assertTrue(summaryUpdate.getParamNameValuePairs().values().stream()
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .anyMatch(value -> value.contains("\"costState\":\"UNKNOWN\"")));
     }
 }

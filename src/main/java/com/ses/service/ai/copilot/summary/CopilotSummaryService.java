@@ -31,8 +31,8 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class CopilotSummaryService {
 
-    public static final String TASK_MARKER = "[TASK:MANAGEMENT_COPILOT]";
-    public static final String OUTPUT_SCHEMA_VERSION = "nf08-summary-1";
+    public static final String TASK_MARKER = CopilotSummaryPromptTemplate.TASK_MARKER;
+    public static final String OUTPUT_SCHEMA_VERSION = CopilotSummaryPromptTemplate.OUTPUT_SCHEMA_VERSION;
 
     private final AiExecutionGateway aiExecutionGateway;
     private final ObjectMapper objectMapper;
@@ -121,11 +121,7 @@ public class CopilotSummaryService {
                 .useCase(AiGatewayRequest.USE_COPILOT)
                 .traceId(traceId)
                 .taskMarker(TASK_MARKER)
-                .trustedInstruction("""
-                        Return JSON only: {"summaryText":"...","claimKeys":["..."]}.
-                        summaryText must not contain HTML, numbers, currency symbols, or recalculated metrics.
-                        claimKeys must be chosen only from summary.claimKeys in ALLOWLIST_CONTEXT.
-                        """)
+                .trustedInstruction(CopilotSummaryPromptTemplate.TRUSTED_INSTRUCTION)
                 .allowlistedFields(masked)
                 .untrustedSourceText(null)
                 .persistRun(false)
@@ -134,7 +130,7 @@ public class CopilotSummaryService {
                 .scopeContext(scope)
                 .scopeHash(scopeHash)
                 .deadlineNanos(deadlineNanos)
-                .costBudgetYen(request.maxCostYen())
+                .costBudgetYen(request.costBudgetYen())
                 .expectedArtifactVersionId(artifact.artifactVersionId())
                 .expectedProvider(artifact.provider())
                 .expectedModel(artifact.modelName())
@@ -203,6 +199,21 @@ public class CopilotSummaryService {
         }
         if ("COPILOT_DEADLINE_EXCEEDED".equals(ex.getMessage())) {
             return SummaryResponse.unavailable("DEADLINE_EXCEEDED");
+        }
+        if ("COPILOT_PROMPT_VERSION_MISMATCH".equals(ex.getMessage())) {
+            return SummaryResponse.unavailable("PROMPT_VERSION_MISMATCH");
+        }
+        if ("COPILOT_CONFIG_HASH_MISMATCH".equals(ex.getMessage())) {
+            return SummaryResponse.unavailable("CONFIG_HASH_MISMATCH");
+        }
+        if ("COPILOT_ARTIFACT_PROVIDER_MISMATCH".equals(ex.getMessage())) {
+            return SummaryResponse.unavailable("ARTIFACT_PROVIDER_MISMATCH");
+        }
+        if ("COPILOT_BOUNDED_PROVIDER_MISMATCH".equals(ex.getMessage())) {
+            return SummaryResponse.unavailable("BOUNDED_PROVIDER_MISMATCH");
+        }
+        if ("COPILOT_EXECUTION_SNAPSHOT_INVALID".equals(ex.getMessage())) {
+            return SummaryResponse.unavailable("ARTIFACT_SNAPSHOT_INVALID");
         }
         if (code == 429) {
             return SummaryResponse.unavailable("PROVIDER_429");

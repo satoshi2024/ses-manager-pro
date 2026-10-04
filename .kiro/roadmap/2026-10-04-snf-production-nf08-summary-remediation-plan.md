@@ -3,7 +3,7 @@
 ## 1. 基線と状態
 
 - 対象: `NF08-R-P2-01`（summary自由文の数値）、`NF08-R-P2-02`（実行deadline/cost）、`NF08-R-P2-03`（query/summary attemptとartifact固定）
-- 状態: **計画レビュー待ち**。本書は実装許可やproduction承認ではない。
+- 状態: **`a91b5ee` Astra限定技術PLAN PASS。実装Review/runtime検証pending、production blocked**。
 - Base: `origin/main@1443fb68943849a3260d7ebe005259f3eb609d60`
 - Branch: `codex/snf-prod-nf08-summary-boundary`
 - Provider: ローカルmock/ruleのみ。`ai.external-send-enabled=false` と `ai.management-copilot-enabled=false` を維持する。
@@ -50,6 +50,8 @@
 - queryとsummaryは既存`t_ai_recommendation_run`に別rowとして記録し、それぞれ異なるUUID trace IDを使う（`uk_ai_run_trace`が一意）。redacted metadataには用途、attempt kind、親query trace/correlation ID、固定artifact identity、query/catalog/schema/data/prompt version、outcome、latency、cost stateを記録する。raw質問、raw prompt、provider request/response本文は保存しない。
 - query実行開始から正本service完了までをquery latencyとして記録する。summary attemptはprovider呼出開始からparse/validation outcome確定までの実測latencyを記録する。query成功はsummary成功を意味しない。失敗・reject・timeoutもattemptとしてbounded outcomeを記録し、typed resultはsummary failure時に維持する。
 - DB既存列`latency_ms`/`cost_jpy`はnullable、`status`/`error_code`と`redacted_summary_json`も利用可能。cost不明はNULLと明示状態を併記する。V108 `trace_id`一意制約を守る。よって本scopeのDDLは不要。
+- 既存V148のmock artifact `config_hash`は固定placeholder値で、local adapter/templateから算出するcanonical hashとは一致しない。gatewayはこれを有効identityとして扱わずsummaryをfail-closedし、typed query結果は維持する。既存migrationや適用済みartifactをこの修復で書き換えない。
+- 現行artifact seedをcanonical identityへ更新する必要がある。artifact publish APIと承認経路を別途調査し、再計算済みのprovider/model/prompt/config identityを人がreviewして発行する独立したartifact refresh gateを設ける。今回のコード修復は既存rowを自動更新せず、artifact publishも実行しない。
 - testsはquery/summary分離、各latency/status/cost state、成功/429/timeout/invalid JSON/reject、execution中のACTIVE artifact切替、親correlation一致、raw prompt/body非保存、trace ID重複なしを確認する。
 
 ## 4. 予定変更範囲

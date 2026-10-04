@@ -2,6 +2,7 @@ package com.ses.service.ai.impl;
 
 import com.ses.service.ai.AiTextService;
 import com.ses.service.ai.CopilotBoundedAiTextService;
+import com.ses.service.ai.copilot.summary.CopilotSummaryPromptTemplate;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -26,6 +27,16 @@ public class MockAiTextServiceImpl implements CopilotBoundedAiTextService {
     @Override
     public String copilotModelId() {
         return "mock-management-copilot";
+    }
+
+    @Override
+    public String copilotPromptVersion() {
+        return CopilotSummaryPromptTemplate.VERSION;
+    }
+
+    @Override
+    public String copilotConfigHash() {
+        return CopilotSummaryPromptTemplate.localConfigHash(providerId(), copilotModelId());
     }
 
     @Override

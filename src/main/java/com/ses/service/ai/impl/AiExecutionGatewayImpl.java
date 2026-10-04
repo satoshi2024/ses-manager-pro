@@ -145,6 +145,12 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 || !request.getExpectedModel().equals(bounded.copilotModelId())) {
             throw BusinessException.of(503, "COPILOT_BOUNDED_PROVIDER_MISMATCH");
         }
+        if (!request.getExpectedPromptVersion().equals(bounded.copilotPromptVersion())) {
+            throw BusinessException.of(503, "COPILOT_PROMPT_VERSION_MISMATCH");
+        }
+        if (!request.getExpectedConfigHash().equals(bounded.copilotConfigHash())) {
+            throw BusinessException.of(503, "COPILOT_CONFIG_HASH_MISMATCH");
+        }
     }
 
     private String callCopilotProvider(String prompt, AiGatewayRequest request) {
