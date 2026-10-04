@@ -5,6 +5,7 @@ import com.ses.entity.BpAvailabilityIngestion;
 import com.ses.entity.Document;
 import com.ses.entity.DocumentLink;
 import com.ses.entity.DocumentVersion;
+import com.ses.entity.Engineer;
 import com.ses.entity.EngineerCertification;
 import com.ses.entity.ProjectIngestion;
 import com.ses.mapper.BpAvailabilityIngestionMapper;
@@ -40,6 +41,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -80,6 +83,9 @@ class FileScopeValidationServiceTest {
     @BeforeEach
     void setUp() {
         AccountingTenantContextHolder.setTenantId("default");
+        lenient().when(documentVersionMapperProvider.getIfAvailable()).thenReturn(documentVersionMapper);
+        lenient().when(documentLinkMapperProvider.getIfAvailable()).thenReturn(documentLinkMapper);
+        lenient().when(documentVersionMapper.selectList(any())).thenReturn(List.of());
         service = new FileScopeValidationService(
                 resumeIngestionMapper,
                 engineerMapper,
@@ -176,6 +182,55 @@ class FileScopeValidationServiceTest {
         loginAs("管理者");
 
         assertDoesNotThrow(() -> service.assertDownloadAllowed("abc.eml"));
+    }
+
+    @Test
+    void 既存engineer写真参照があっても同じdocumentのIMPORT_JOB_linkで汎用downloadを拒否() {
+        noMatchOnEarlierTables();
+        String storageKey = "shared-engineer-import.csv";
+        Engineer engineer = new Engineer();
+        engineer.setId(77L);
+        when(engineerMapper.selectOne(any())).thenReturn(engineer);
+        DocumentVersion version = importJobVersion(storageKey, 880L);
+        when(documentVersionMapper.selectList(any())).thenReturn(List.of(version));
+        DocumentLink link = new DocumentLink();
+        link.setTenantId("default");
+        link.setDocumentId(880L);
+        link.setTargetType("IMPORT_JOB");
+        link.setTargetId(990L);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(link));
+
+        loginAs("HR");
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed(storageKey, 41L, "ab".repeat(32)));
+
+        assertEquals(403, ex.getCode());
+        verify(engineerMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void IMPORT_JOB_linkがなければ既存engineer写真のdownload認可を維持() {
+        noMatchOnEarlierTables();
+        String storageKey = "ordinary-engineer-photo.png";
+        Engineer engineer = new Engineer();
+        engineer.setId(78L);
+        when(engineerMapper.selectOne(any())).thenReturn(engineer);
+        when(documentVersionMapper.selectList(any())).thenReturn(List.of(importJobVersion(storageKey, 881L)));
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of());
+        loginAs("HR");
+
+        assertDoesNotThrow(() -> service.assertDownloadAllowed(storageKey));
+    }
+
+    private DocumentVersion importJobVersion(String storageKey, long documentId) {
+        DocumentVersion version = new DocumentVersion();
+        version.setId(41L);
+        version.setTenantId("default");
+        version.setDocumentId(documentId);
+        version.setStorageKey(storageKey);
+        version.setSha256("ab".repeat(32));
+        version.setScanStatus("CLEAN");
+        return version;
     }
 
     @Test

@@ -229,6 +229,7 @@ public class FileScopeValidationService {
      * @param expectedHash eventに保存したSHA-256 hex（nullなら検証しない）
      */
     public void assertDownloadAllowed(String storedName, Long expectedDocumentVersionId, String expectedHash) {
+        assertImportJobNotAccessibleThroughGenericFilePath(storedName);
         // 1. t_resume_ingestion の原本ファイル
         String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         ResumeIngestion ingestion = resumeIngestionMapper.selectByStoredFileNameForTenant(tenantId, storedName);
@@ -328,20 +329,6 @@ public class FileScopeValidationService {
             // 管理レポートは専用delivery経路のエラーを維持する。
             if ("MANAGEMENT_REPORT".equals(documentType)) {
                 throw BusinessException.of(403, "error.managementReport.deliveryRequired");
-            }
-            // IMPORT_JOB文書はjob専用readerだけを許可し、汎用document/file経路を拒否する。
-            // document_typeは原文書の種別を保持するため、tenant-bound typed linkを根拠にする。
-            DocumentLinkMapper importLinkMapper = documentLinkMapperProvider.getIfAvailable();
-            if (importLinkMapper == null) {
-                throw BusinessException.of(403, "error.forbidden");
-            }
-            boolean importJobLinked = importLinkMapper.selectList(new QueryWrapper<DocumentLink>()
-                            .eq("tenant_id", tenantId)
-                            .eq("document_id", documentVersion.getDocumentId())
-                            .eq("target_type", "IMPORT_JOB"))
-                    .stream().anyMatch(link -> !Integer.valueOf(1).equals(link.getDeletedFlag()));
-            if (importJobLinked) {
-                throw BusinessException.of(403, "error.forbidden");
             }
             // P1-02: scan未完了・拒否はfail-closedで拒否 (CLEAN 以外は不可)
             String scanStatus = documentVersion.getScanStatus();
@@ -482,6 +469,48 @@ public class FileScopeValidationService {
 
         // 未登録・未知のstoredNameは拒否（fail-closed）
         throw BusinessException.of(403, "error.file.unknownReference");
+    }
+
+    /**
+     * IMPORT_JOBの原本は専用readerだけに限定する。業務テーブルの早期returnより先に、
+     * tenant内のexact storage key→document version→active typed linkを確認する。
+     */
+    private void assertImportJobNotAccessibleThroughGenericFilePath(String storedName) {
+        if (storedName == null || storedName.isBlank()) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        String tenantId = currentTenant();
+        DocumentVersionMapper versionMapper = documentVersionMapperProvider.getIfAvailable();
+        if (versionMapper == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        List<DocumentVersion> versions = versionMapper.selectList(new QueryWrapper<DocumentVersion>()
+                .eq("tenant_id", tenantId)
+                .eq("storage_key", storedName)
+                .eq("deleted_flag", 0));
+        if (versions == null || versions.isEmpty()) {
+            return;
+        }
+        DocumentLinkMapper linkMapper = documentLinkMapperProvider.getIfAvailable();
+        if (linkMapper == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        for (DocumentVersion version : versions) {
+            if (version == null || !tenantId.equals(version.getTenantId())
+                    || version.getDocumentId() == null || version.getId() == null
+                    || !storedName.equals(version.getStorageKey())) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            boolean importJobLinked = linkMapper.selectList(new QueryWrapper<DocumentLink>()
+                            .eq("tenant_id", tenantId)
+                            .eq("document_id", version.getDocumentId())
+                            .eq("target_type", "IMPORT_JOB")
+                            .eq("deleted_flag", 0))
+                    .stream().anyMatch(link -> !Integer.valueOf(1).equals(link.getDeletedFlag()));
+            if (importJobLinked) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+        }
     }
 
     private void assertMenuAllowed(String menuKey) {
