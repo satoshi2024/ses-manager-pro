@@ -93,7 +93,7 @@ class PwaRestoreTransactionIntegrationTest {
     }
 
     @Test
-    void identityTransactionのcommit失敗時はreauthentication proofをsessionへ発行しない() {
+    void identityTransactionのcommit失敗時は再認証proofをsessionへ発行しない() {
         SysUser user = new SysUser();
         user.setId(userId);
         user.setUsername(username);
