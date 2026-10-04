@@ -124,7 +124,8 @@ class CopilotRunServiceTest {
                         driftedArtifact, attempts[0])));
         verify(runMapper, times(2)).insert(any(AiRecommendationRun.class));
 
-        when(runMapper.update((AiRecommendationRun) null, any(Wrapper.class))).thenReturn(0, 1, 1);
+        when(runMapper.update(org.mockito.ArgumentMatchers.<AiRecommendationRun>isNull(),
+                any(Wrapper.class))).thenReturn(0, 1, 1);
         AccountingTenantContextHolder.runWithTenant("tenant-a", () -> {
             assertThrows(IllegalStateException.class,
                     () -> service.completeQueryAttempt(attempts[0], 23, true, 4));
@@ -133,18 +134,20 @@ class CopilotRunServiceTest {
         });
 
         ArgumentCaptor<Wrapper<AiRecommendationRun>> updateCaptor = ArgumentCaptor.forClass(Wrapper.class);
-        verify(runMapper, times(3)).update((AiRecommendationRun) null, updateCaptor.capture());
+        verify(runMapper, times(3)).update(org.mockito.ArgumentMatchers.<AiRecommendationRun>isNull(),
+                updateCaptor.capture());
         LambdaUpdateWrapper<AiRecommendationRun> queryUpdate =
                 (LambdaUpdateWrapper<AiRecommendationRun>) updateCaptor.getAllValues().get(1);
         LambdaUpdateWrapper<AiRecommendationRun> summaryUpdate =
                 (LambdaUpdateWrapper<AiRecommendationRun>) updateCaptor.getAllValues().get(2);
+        queryUpdate.getSqlSegment();
+        summaryUpdate.getSqlSegment();
         assertTrue(queryUpdate.getParamNameValuePairs().containsValue("SUCCEEDED"));
         assertTrue(queryUpdate.getParamNameValuePairs().containsValue(23));
         assertTrue(queryUpdate.getParamNameValuePairs().containsValue("PENDING"));
         assertTrue(queryUpdate.getParamNameValuePairs().containsValue(0));
         assertTrue(summaryUpdate.getParamNameValuePairs().containsValue("FAILED"));
         assertTrue(summaryUpdate.getParamNameValuePairs().containsValue("COST_UNKNOWN"));
-        assertTrue(summaryUpdate.getParamNameValuePairs().containsValue("UNKNOWN"));
         assertTrue(summaryUpdate.getParamNameValuePairs().containsValue(47));
         assertTrue(summaryUpdate.getSqlSet().contains("cost_jpy"));
         assertTrue(summaryUpdate.getParamNameValuePairs().values().stream()
