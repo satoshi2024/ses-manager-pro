@@ -96,10 +96,10 @@ class PwaRestoreServletBoundaryIntegrationTest {
         Browser browser = login();
         String scope = userScope(browser);
         String nonce = "AAAAAAAAAAAAAAAAAAAAAA";
-        JsonNode issued = postJson(browser, "/api/my/pwa/restore/reauthenticate", ""
+        HttpResponse<String> issued = postJson(browser, "/api/my/pwa/restore/reauthenticate", ""
                 + "{\"password\":\"" + PASSWORD + "\",\"documentNonce\":\"" + nonce
                 + "\",\"userScope\":\"" + scope + "\"}", true);
-        assertThat(issued.status()).isEqualTo(200);
+        assertThat(issued.statusCode()).isEqualTo(200);
         String proof = JSON.readTree(issued.body()).path("data").path("proof").asText();
         assertThat(proof).hasSize(43);
         String sessionId = browser.sessionId();
@@ -107,14 +107,40 @@ class PwaRestoreServletBoundaryIntegrationTest {
         HttpResponse<String> logout = postForm(browser, "/logout", csrf(browser));
         assertThat(logout.statusCode()).isEqualTo(302);
         assertThat(logout.headers().firstValue("location").orElse("")).contains("/login?logout");
-        // Registry spy wraps the real bean injected into the registered listener. This verifies a real
-        // container sessionDestroyed callback for the exact session that held the proof.
+        // Registry spyを通じ、proofを保持したsession idの実container sessionDestroyed通知を確認する。
         org.mockito.Mockito.verify(sessionRegistry, org.mockito.Mockito.timeout(3000)).destroyed(sessionId);
 
-        JsonNode denied = postJson(browser, "/api/my/pwa/restore/confirm", ""
+        // logoutはCSRF cookieも削除するため、login画面を再取得して匿名CSRFを用意する。
+        refreshCsrf(browser);
+        HttpResponse<String> denied = postJson(browser, "/api/my/pwa/restore/confirm", ""
                 + "{\"proof\":\"" + proof + "\",\"documentNonce\":\"" + nonce
                 + "\",\"userScope\":\"" + scope + "\"}", true);
-        assertThat(denied.status()).isIn(302, 401, 403);
+        assertThat(denied.statusCode()).isIn(302, 401, 403);
+    }
+
+    @Test
+    void csrfなしを拒否しcsrf付き再認証後は実confirmでpermitを返す() throws Exception {
+        Browser browser = login();
+        String scope = userScope(browser);
+        String nonce = "CCCCCCCCCCCCCCCCCCCCCC";
+        String reauthBody = "{\"password\":\"" + PASSWORD + "\",\"documentNonce\":\"" + nonce
+                + "\",\"userScope\":\"" + scope + "\"}";
+        HttpResponse<String> noCsrfReauth = postJson(browser, "/api/my/pwa/restore/reauthenticate", reauthBody, false);
+        assertThat(noCsrfReauth.statusCode()).isEqualTo(403);
+        HttpResponse<String> issued = postJson(browser, "/api/my/pwa/restore/reauthenticate", reauthBody, true);
+        assertThat(issued.statusCode()).isEqualTo(200);
+        String proof = JSON.readTree(issued.body()).path("data").path("proof").asText();
+
+        String confirmBody = "{\"proof\":\"" + proof + "\",\"documentNonce\":\"" + nonce
+                + "\",\"userScope\":\"" + scope + "\"}";
+        HttpResponse<String> noCsrfConfirm = postJson(browser, "/api/my/pwa/restore/confirm", confirmBody, false);
+        assertThat(noCsrfConfirm.statusCode()).isEqualTo(403);
+        HttpResponse<String> confirmed = postJson(browser, "/api/my/pwa/restore/confirm", confirmBody, true);
+        assertThat(confirmed.statusCode()).isEqualTo(200);
+        JsonNode permit = JSON.readTree(confirmed.body()).path("data");
+        assertThat(permit.path("documentNonce").asText()).isEqualTo(nonce);
+        assertThat(permit.path("userScope").asText()).isEqualTo(scope);
+        assertThat(permit.path("permitExpiresAt").asText()).isNotBlank();
     }
 
     @Test
@@ -122,10 +148,10 @@ class PwaRestoreServletBoundaryIntegrationTest {
         Browser browser = login();
         String scope = userScope(browser);
         String nonce = "BBBBBBBBBBBBBBBBBBBBBB";
-        JsonNode issued = postJson(browser, "/api/my/pwa/restore/reauthenticate", ""
+        HttpResponse<String> issued = postJson(browser, "/api/my/pwa/restore/reauthenticate", ""
                 + "{\"password\":\"" + PASSWORD + "\",\"documentNonce\":\"" + nonce
                 + "\",\"userScope\":\"" + scope + "\"}", true);
-        assertThat(issued.status()).isEqualTo(200);
+        assertThat(issued.statusCode()).isEqualTo(200);
         String proof = JSON.readTree(issued.body()).path("data").path("proof").asText();
 
         CountDownLatch identityReadEntered = new CountDownLatch(1);
@@ -135,7 +161,7 @@ class PwaRestoreServletBoundaryIntegrationTest {
             if (blockNextRead.compareAndSet(true, false)) {
                 identityReadEntered.countDown();
                 if (!releaseIdentityRead.await(10, TimeUnit.SECONDS)) {
-                    throw new AssertionError("identity read barrier timed out");
+                    throw new AssertionError("本人確認情報の読取バリアがタイムアウトしました");
                 }
             }
             return invocation.callRealMethod();
@@ -158,7 +184,9 @@ class PwaRestoreServletBoundaryIntegrationTest {
             assertThat(result.statusCode()).isEqualTo(403);
             JsonNode body = JSON.readTree(result.body());
             assertThat(body.path("code").asInt()).isEqualTo(403);
-            assertThat(body.path("message").asText()).isEqualTo("error.pwa.restore.rejected");
+            assertThat(body.path("message").asText())
+                    .isEqualTo("PWA復元の再認証を確認できませんでした。再認証からやり直してください。");
+            assertThat(body.path("data").isMissingNode()).isTrue();
         } finally {
             releaseIdentityRead.countDown();
             executor.shutdownNow();
@@ -169,9 +197,11 @@ class PwaRestoreServletBoundaryIntegrationTest {
     private Browser login() throws Exception {
         CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
         HttpClient client = HttpClient.newBuilder().cookieHandler(cookies)
+                .connectTimeout(java.time.Duration.ofSeconds(5))
                 .followRedirects(HttpClient.Redirect.NEVER).build();
         URI base = URI.create("http://localhost:" + port);
-        HttpResponse<String> loginPage = client.send(HttpRequest.newBuilder(base.resolve("/login")).GET().build(),
+        HttpResponse<String> loginPage = client.send(HttpRequest.newBuilder(base.resolve("/login"))
+                        .timeout(java.time.Duration.ofSeconds(10)).GET().build(),
                 HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         assertThat(loginPage.statusCode()).isEqualTo(200);
         String csrf = cookie(cookies, "XSRF-TOKEN");
@@ -181,6 +211,7 @@ class PwaRestoreServletBoundaryIntegrationTest {
         form.add("password", PASSWORD);
         form.add("_csrf", csrf);
         HttpRequest request = HttpRequest.newBuilder(base.resolve("/login"))
+                .timeout(java.time.Duration.ofSeconds(10))
                 .header("Content-Type", MediaType.APPLICATION_FORM_URLENCODED_VALUE)
                 .POST(HttpRequest.BodyPublishers.ofString(formEncode(form), StandardCharsets.UTF_8)).build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -202,7 +233,9 @@ class PwaRestoreServletBoundaryIntegrationTest {
 
     private HttpResponse<String> send(Browser browser, String method, String path, String body, String csrf)
             throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(browser.base.resolve(path));
+        HttpRequest.Builder request = HttpRequest.newBuilder(browser.base.resolve(path))
+                .timeout(java.time.Duration.ofSeconds(10))
+                .header("Accept-Language", "ja");
         if (csrf != null) request.header("X-XSRF-TOKEN", csrf);
         if (body == null) request.method(method, HttpRequest.BodyPublishers.noBody());
         else request.header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
@@ -212,6 +245,7 @@ class PwaRestoreServletBoundaryIntegrationTest {
 
     private HttpResponse<String> postForm(Browser browser, String path, String csrf) throws Exception {
         HttpRequest request = HttpRequest.newBuilder(browser.base.resolve(path))
+                .timeout(java.time.Duration.ofSeconds(10))
                 .header("Content-Type", MediaType.APPLICATION_FORM_URLENCODED_VALUE)
                 .POST(HttpRequest.BodyPublishers.ofString("_csrf=" + encode(csrf), StandardCharsets.UTF_8)).build();
         return browser.client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -221,6 +255,14 @@ class PwaRestoreServletBoundaryIntegrationTest {
         String value = cookie(browser.cookies, "XSRF-TOKEN");
         assertThat(value).isNotBlank();
         return value;
+    }
+
+    private static void refreshCsrf(Browser browser) throws Exception {
+        HttpResponse<String> response = browser.client.send(HttpRequest.newBuilder(browser.base.resolve("/login"))
+                        .timeout(java.time.Duration.ofSeconds(10)).GET().build(),
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(csrf(browser)).isNotBlank();
     }
 
     private static String cookie(CookieManager manager, String name) {
