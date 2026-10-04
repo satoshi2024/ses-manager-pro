@@ -464,3 +464,15 @@ credential、validation row単位のamount fieldを含めない。認可済みre
 - Admin bypass / legacy fallback: `src/main/java/com/ses/service/security/impl/AuthorizationServiceImpl.java:41-95`
 - Current assignment/group/action schema reference: `src/main/resources/db/migration/V63__enterprise_identity_security.sql`,
   `src/main/resources/db/migration/V66__permission_action_deny.sql`。
+
+## 9. Candidate登録のsource membership確認案（Astra review待ち）
+
+Candidate登録のrequestは`jobId`、`validationRunId`、`sourceRowNumber`のみを受け取り、external key、source row hash、fingerprint、`verified`等のcaller申告値を受け取らない。候補操作はvalidation pipelineから呼び出さず、完了済みvalidationへの独立metadata操作とする。
+
+1. DB lock取得前に、現在のprincipal/tenant/明示`import.metadata.manage`権限を確認する。既存の認可済みexact source readerを通して、jobに固定されたdocument ID/version ID/version number/hash、CLEAN状態、tenant、legal entity、FileScopeおよび正確な`IMPORT_JOB` typed linkを検査してからstreamを開く。generic link/FileScope経路やstorage provider直接呼出しを使わない。
+2. readerが返すjob snapshotのentity、encoding、source SHAとimmutable mapping ID/version/hashを取り、sourceを先頭からEOFまでF2 parserで再parseする。mappingのcanonical bytes/hashを再検証し、直接header mappingからcanonical `externalKey`列を特定する。要求row numberのrow hashと正規化前keyをstream内で一時取得し、全source SHA/EOFを照合する。source hash不一致、mapping不整合、row欠落、key欠損/不正、reader非対応なら登録を拒否する。ファイルI/O完了後にstreamを閉じ、PIIをログ/例外/DTOへ出さない。
+3. 短いmetadata transactionを開始し、source→job→mapping→validation run→validation rowの順にlockする。lock後に権限/current userとsource active/version、job identity・document snapshot・mapping snapshot、runが`COMPLETED`かつjobの`current_validation_run_id`であり`published_slot=1`であることを再検証する。行は当該run/jobに属し`ACCEPTED`で、DB保存済みsource row hashがreaderで再取得したrow hashと一定時間比較一致しなければ拒否する。
+4. canonical fingerprintを同一のF2 canonical fingerprint実装で再計算して保存済みfingerprintと比較する。保存済みfingerprintがraw row/hashと結び付くcanonical algorithmを実装が提供できない間、candidate登録は利用不可とする。run fingerprint/source EOF/mappingのいずれかをcaller proofで代替しない。
+5. 保存済みsource namespaceのlookup key versionでcandidateを暗号化し、最後にdigest順でregistry keyをlock/insertする。既存digestは復号後の正規化済みidentity byte列を一定時間比較し、完全一致の同一candidateだけを冪等に返す。不一致、unknown key、decrypt/AAD failureはfail closed。transaction内でsource/file/crypto provider I/O、待機、業務domain書込を行わない。
+
+この操作はcandidateを`CANDIDATE`として記録するだけで、target ID/version、parent binding、approval、READY/APPLYを生成しない。必要なfingerprint再計算がF2 DTO/algorithmだけでは安全に完了しない場合は、F1a側にPIIを永続化せずcanonicalization再利用境界を先に追加してから実装する。
