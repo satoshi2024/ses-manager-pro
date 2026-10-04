@@ -2,8 +2,6 @@ package com.ses.service.ai.copilot.summary;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
-import com.ses.entity.AiArtifactVersion;
-import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
@@ -17,6 +15,7 @@ import com.ses.service.ai.copilot.result.MetricValue;
 import com.ses.service.ai.copilot.result.TypedResultEnvelope;
 import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.CopilotFeatureGate;
+import com.ses.service.ai.copilot.CopilotRunService;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
@@ -44,8 +43,6 @@ class CopilotSummaryServiceTest {
     @Mock
     private AiExecutionGateway aiExecutionGateway;
     @Mock
-    private AiArtifactVersionMapper artifactVersionMapper;
-    @Mock
     private CopilotFeatureGate featureGate;
 
     private CopilotSummaryService service;
@@ -54,17 +51,13 @@ class CopilotSummaryServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new CopilotSummaryService(aiExecutionGateway, artifactVersionMapper, new ObjectMapper(), featureGate);
+        service = new CopilotSummaryService(aiExecutionGateway, new ObjectMapper(), featureGate);
         boundSnapshot = new EffectiveScopeSnapshot(
                 "tenant-a", 10L, java.time.LocalDate.of(2026, 10, 1), "COMPANY_WIDE",
                 true, false, false, null, null, null, null, null, null, null, null, null,
                 EffectiveScopeSnapshotFactory.POLICY_VERSION, false, "ALL",
                 "6811db559741de8ebd33485d5982d4f8ca0f05a008231a12e22b1ee85dceea7e");
         boundScope = boundSnapshot.scope();
-        AiArtifactVersion artifact = new AiArtifactVersion();
-        artifact.setPromptVersion("nf08-f1");
-        artifact.setModelName("mock");
-        when(artifactVersionMapper.selectOne(any())).thenReturn(artifact);
     }
 
     @Test
@@ -79,11 +72,11 @@ class CopilotSummaryServiceTest {
                 "trace-1", null, null));
 
         SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
-                sampleScope().scopeHash(), "trace-1");
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
 
         assertTrue(response.isAvailable());
         assertEquals(SummaryResponse.STATUS_SUCCEEDED, response.providerStatus());
-        assertEquals("mock", response.modelVersion());
+        assertEquals("mock-management-copilot", response.modelVersion());
         assertEquals(List.of("forecast.utilization.2026-09"), response.claimKeys());
     }
 
@@ -99,7 +92,7 @@ class CopilotSummaryServiceTest {
                 "trace-1", null, null));
 
         SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
-                sampleScope().scopeHash(), "trace-1");
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
 
         assertFalse(response.isAvailable());
         assertEquals(SummaryResponse.STATUS_REJECTED, response.providerStatus());
@@ -110,7 +103,7 @@ class CopilotSummaryServiceTest {
         when(aiExecutionGateway.execute(any())).thenReturn(new AiGatewayResult("not-json", "trace-1", null, null));
 
         SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
-                sampleScope().scopeHash(), "trace-1");
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
 
         assertFalse(response.isAvailable());
         assertEquals("PROVIDER_INVALID_JSON", response.providerStatus());
@@ -121,7 +114,7 @@ class CopilotSummaryServiceTest {
         when(aiExecutionGateway.execute(any())).thenThrow(new BusinessException(429, "rate limited"));
 
         SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
-                sampleScope().scopeHash(), "trace-1");
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
 
         assertFalse(response.isAvailable());
         assertEquals("PROVIDER_429", response.providerStatus());
@@ -132,18 +125,16 @@ class CopilotSummaryServiceTest {
         TypedResultEnvelope envelope = sampleEnvelopeWithQueryId(AiGatewayRequest.CANARY);
 
         SummaryResponse response = service.summarize(envelope, sampleContext(AiGatewayRequest.CANARY), sampleScope(),
-                sampleScope().scopeHash(), "trace-1");
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
 
         assertFalse(response.isAvailable());
         assertEquals(SummaryResponse.STATUS_REJECTED, response.providerStatus());
     }
 
     @Test
-    void artifact未登録はunavailableになる() {
-        when(artifactVersionMapper.selectOne(any())).thenReturn(null);
-
+    void pinnedArtifactがない場合はunavailableになる() {
         SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
-                sampleScope().scopeHash(), "trace-1");
+                sampleScope().scopeHash(), null, "trace-1");
 
         assertFalse(response.isAvailable());
         assertEquals("ARTIFACT_MISSING", response.providerStatus());
@@ -175,6 +166,12 @@ class CopilotSummaryServiceTest {
 
     private CopilotScopeContext sampleScope() {
         return boundScope;
+    }
+
+    private CopilotRunService.CopilotArtifactSnapshot pinnedArtifact() {
+        return new CopilotRunService.CopilotArtifactSnapshot(7L, "mock", "mock-management-copilot",
+                "nf08-f1", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "catalog-v1", 0);
     }
 
     private CopilotExecutionContext sampleContext() {

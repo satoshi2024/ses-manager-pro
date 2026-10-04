@@ -98,11 +98,23 @@ public class CopilotQueryService {
             throw BusinessException.of(403, "SCOPE_CONTEXT_REQUIRED");
         }
         context.bind(entry.queryId(), parameters, scope);
-        TypedResultEnvelope envelope = catalogQueryGateway.execute(entry, parameters, scope, context);
-
         String parameterHash = sha256(parameterBinder.parameterHash(parameters, context));
-        CopilotRunService.CopilotRunRecord run = copilotRunService.recordQueryRun(
-                entry, parameterHash, context, envelope.values().size());
+        CopilotRunService.CopilotArtifactSnapshot artifact = copilotRunService.pinActiveArtifact();
+        CopilotRunService.CopilotAttemptRecord queryAttempt = copilotRunService.beginQueryAttempt(
+                entry, parameterHash, context, artifact);
+        long queryStarted = System.nanoTime();
+        TypedResultEnvelope envelope;
+        try {
+            envelope = catalogQueryGateway.execute(entry, parameters, scope, context);
+            copilotRunService.completeQueryAttempt(queryAttempt,
+                    elapsedMillis(queryStarted), true, envelope == null || envelope.values() == null
+                            ? 0 : envelope.values().size());
+        } catch (RuntimeException ex) {
+            copilotRunService.completeQueryAttempt(queryAttempt, elapsedMillis(queryStarted), false, 0);
+            throw ex;
+        }
+        CopilotRunService.CopilotRunRecord run = new CopilotRunService.CopilotRunRecord(
+                queryAttempt.runId(), queryAttempt.traceId(), entry.queryId(), entry.catalogVersion());
 
         List<ResolvedCitationDto> citations = citationAuthorizationService.authorizeAll(
                 entry.citationKeys(), context, parameters, scope, scope.scopeHash());
@@ -110,8 +122,17 @@ public class CopilotQueryService {
                 .filter(ResolvedCitationDto::available)
                 .map(ResolvedCitationDto::key)
                 .toList();
-        SummaryResponse summaryResponse = copilotSummaryService.summarize(
-                envelope, context, scope, scope.scopeHash(), run.traceId());
+        CopilotRunService.CopilotAttemptRecord summaryAttempt = copilotRunService.beginSummaryAttempt(
+                entry, parameterHash, context, artifact, queryAttempt);
+        long summaryStarted = System.nanoTime();
+        SummaryResponse summaryResponse;
+        try {
+            summaryResponse = copilotSummaryService.summarize(
+                    envelope, context, scope, scope.scopeHash(), artifact, summaryAttempt.traceId());
+        } catch (RuntimeException ex) {
+            summaryResponse = SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE);
+        }
+        copilotRunService.completeSummaryAttempt(summaryAttempt, elapsedMillis(summaryStarted), summaryResponse);
         CopilotSummaryView summary = toSummaryView(summaryResponse);
 
         return new CopilotQueryResult(
@@ -174,5 +195,9 @@ public class CopilotQueryService {
         } catch (Exception ex) {
             return "0".repeat(64);
         }
+    }
+
+    private static long elapsedMillis(long startedNanos) {
+        return Math.max(0L, (System.nanoTime() - startedNanos) / 1_000_000L);
     }
 }
