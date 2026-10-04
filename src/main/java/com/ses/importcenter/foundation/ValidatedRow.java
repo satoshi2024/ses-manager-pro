@@ -17,6 +17,8 @@ public record ValidatedRow(CanonicalImportRow row, List<ImportFinding> findings,
                 excludedReason == null ? Map.of() : Map.of("TOTAL", excludedReason));
     }
     public boolean accepted() { return findings.isEmpty(); }
+    /** metadata writerがF1a candidate再検証と同じcanonical fingerprintを保存できる。 */
+    public byte[] canonicalFingerprint() { return CanonicalImportRowFingerprint.sha256(row); }
     public BigDecimal knownAmount() { return knownAmounts.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add); }
     public String amountExcludedReason() { return excludedAmountReasons.values().stream().findFirst().orElse(null); }
 }

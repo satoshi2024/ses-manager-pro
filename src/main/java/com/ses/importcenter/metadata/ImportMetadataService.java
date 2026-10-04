@@ -345,7 +345,7 @@ public class ImportMetadataService {
         }
     }
 
-    private byte[] canonicalMapping(Map<String, String> mapping) {
+    static byte[] canonicalMapping(Map<String, String> mapping) {
         StringBuilder json = new StringBuilder("{");
         boolean first = true;
         for (Map.Entry<String, String> entry : new TreeMap<>(mapping).entrySet()) {
