@@ -1,5 +1,6 @@
 ConcurrentContractizationTest
 ConcurrentLoginSessionSmokeTest
+AccountLockServiceMySqlTest
 ConcurrentSubmitReopenTest
 WorkRecordTenantIsolationMySqlTest
 CustomerContactPrimaryConcurrencyTest
