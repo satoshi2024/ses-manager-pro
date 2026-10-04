@@ -157,3 +157,23 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
 - 第4回FastはQ1、NF05 deadline、上記NF07を含む固定control Headで原seed `48992185070100`を再実行する。
   開始/終了SHA、clean状態、run別XML/log/hashとzero skippedを確認し、終了までcontrolのtracked変更を停止する。
   同時にLunaはNF06 schema修訂とNF04 G1 server codeを別worktreeで進めるが、Maven/Chromeは起動しない。
+
+## 2026-10-04 再開・保存証拠の確定
+
+- 完全なAGENTS.md再読とfetchを実施。origin/mainはB0 `1443fb68943849a3260d7ebe005259f3eb609d60`のまま。
+  mainの利用者変更3件（CustomUserDetailsService/LoginUser/application-dev.yml）を保持する。
+- fixed control `3d9e3a8790cca94409719ca0a44a303809cf8efe`の第4回Fastは4088/0/0/0、PASS。
+  全MySQL第1回は190/7/0/0、FAIL。開始/終了Head一致・clean、保存manifest全件一致を再確認。
+  詳細とSHA-256はintegrated-fast記録へ追記した。中断前のRUNNINGを成功扱いせず最終結果を取得した。
+- Q2/Q3は既存clean worktree `C:\work\ses-nf02-remediation`を再利用。
+  branch `codex/snf-prod-migration-latest-q2`、baseは上記審査済みcontrol固定Head。
+  `910a4c78`（latest183）、`ecfc99b9`（子JVM protocol）、`557b74a4`（起動失敗cleanup）。
+  Astra静的待修findingなし。5 class再検証第1回はDocker不在で20件全skip、Gate FAIL。
+- NF04 G1 `c6feef5f`に対し、test method名のcompile阻害、confirmの最終期限/nonce generation不足を確認。
+  Luna修復`15252684`を独立Reviewへ渡した。旧run03の18/0/0/0は最新修復の証拠ではない。
+  7つのG2 WIPと旧exitcode証拠を保持し、G1以外をstageしない。
+- NF06 V184 schema `3b6f1ae`は静的限定PASS。slice `7a4cdb1`は@Transactional final classのP1を修復中。
+  candidate exact source membership追加案`08baeda7`は審査待ち。任意caller keyを信頼して登録しない。
+- 前回Astraはusage limitで中断したため未了ReviewをPASSにせず、新しいAstraで固定SHA審査を再開した。
+  Lunaは実装、Astraは独立Reviewを担当し、重い実行窓は総括が割り当てる。
+- 総合判定はNO-GO。remote push/PR/merge、実credential、production deploy/代理署名は未実施。

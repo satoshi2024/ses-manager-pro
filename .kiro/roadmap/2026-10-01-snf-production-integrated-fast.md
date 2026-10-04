@@ -103,3 +103,41 @@
 - 未変更の小pairでは元403を再現できなかった。cached contextで法人重複が起きたという根因は未確定であり、
   この修復は確認済みのshared fixture依存を除去する。第3回FAILを後からPASSへ変更しない。
 - 詳細は`docs/review/q1-portal-h2-isolation-evidence.md`。全fast第4回は後続の固定統合Headで実施する。
+
+## 第4回: PASS（2026-10-04に保存証拠を再照合）
+
+- fixed Head `3d9e3a8790cca94409719ca0a44a303809cf8efe`、開始/終了clean、Head一致。
+- `mvn -B -Dsurefire.runOrder.random.seed=48992185070100 test`、process限定socket directory指定。
+- UTC `2026-10-02T01:14:20.5694536Z`〜`2026-10-02T01:28:09.9737852Z`、exit 0。
+- **4088 tests / 0 failures / 0 errors / 0 skipped、668 class XML**。
+- `verification-evidence/20261002-control-fast-04/`のXML/text manifest 1336件を再照合し不一致0。
+  Maven log SHA-256: `98BEDCC36711FB61E1181D95D6553726A7B637B9397FB5078977AA03444D8C68`。
+  totals JSON SHA-256: `6BC17B2FDA642FF8986D2A0B70184AB874DD02ED2E9FDD5CC0A736059BF135D3`。
+- Q0/Q1修復後の全fast合格である。Q1元403の根因が動的に確定したという意味ではない。
+  後続NF04/NF06実装、MySQL、Browser、production approvalの合格へ転用しない。
+
+## 同じ固定Headの全MySQL第1回: FAIL
+
+- command: `mvn -B -Dsurefire.runOrder.random.seed=48992185070100 test -Pmysql-tests`。
+- UTC `2026-10-02T01:29:10.1912076Z`〜`2026-10-02T02:13:19.4022749Z`、exit 1、開始/終了clean、Head一致。
+- **190 tests / 7 failures / 0 errors / 0 skipped、78 class XML**。
+- 5 failureは4 classの最新版断言が182のままで、実際はNF01 V183まで適用済みだった。
+  CustomerSuccess 1、SelfService 2、Asset 1、V110AdminBoundaryUpgrade 1。
+- OperationalBoundaryの2 failureは子JVMの`JAVA_TOOL_OPTIONS`通知がstderrからprotocolへ混入したもの。
+  先頭行のlock判定と、protocol以外を含めたpid distinct判定が誤った。業務assertionを削除せず修復する。
+- `verification-evidence/20261002-control-mysql-01/`のXML/text manifest 156件を再照合し不一致0。
+  Maven log SHA-256: `EBD4327E6CD8F9C4BC0FBEE3459954CF601B7936D5CCB72D2AB8690EBBC4E25E`。
+  totals JSON SHA-256: `C7C730E197273971DADA71DE08C8114D9E4567EDFF4CEBEA515F6DC416DA080D`。
+- このrunの実containerでMySQL `8.0.46`とimage digest
+  `sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b`を観測した。
+  `observed-mysql-runtime.json`参照。全containerや過去NF07 run13の個別観測を意味しない。
+- NF04の限定4 class試験が一部時間帯に重複した。scheduling-noteを保持し、完全な単独負荷測定とは呼ばない。
+
+### Q2/Q3限定再検証第1回: FAIL_SKIPPED（2026-10-04）
+
+- source fixed `557b74a4c4ed4c89531eb89831f57b06ad346bb1`、作業先`C:\work\ses-nf02-remediation`。
+  Q2 `910a4c78`、Q3 `ecfc99b9`、起動失敗cleanup追加`557b74a4`。Astra静的待修findingなし。
+- 上記5 class限定のMySQL profileで**20 tests / 0 failures / 0 errors / 20 skipped**。
+  Docker daemon未起動による`disabledWithoutDocker`であり、Maven exit 0でもGateはFAIL。
+- 証拠は`verification-evidence/20261004-q2-q3-mysql-01/`。原始結果を保存し、成功へ読み替えない。
+  Docker起動確認後、同じscopeを別runで再実行する。限定成功も全MySQL第1回をPASSに変更しない。

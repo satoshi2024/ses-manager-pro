@@ -14,8 +14,8 @@
 | 03 | 集約完了修復と実MySQL並行証拠 `89384928`は限定CODE PASS、control統合済み | 全体最終Review、NF07 policy、retention、staging/運用承認 |
 | 04 | source WIPはAstra CODE FAIL。撤回/DOM/時計の残課題あり。G1/G2追加技術Plan d9d53112は限定PLAN PASS | 固定Head Review・実PWA/browser全体検証・正式release |
 | 05 | 開発scope CONDITIONAL。総deadline 2187b5f9限定CODE PASS、26/0/0/0、control統合。実transport未完 | provider/credential、許可先、正式production enablement |
-| 06 | W0技術Plan `c2a95cd5` PASS。F2 foundation `1e8aa651`限定CODE PASS、17/0/0/0、control統合済み。DB apply/UI未実装 | 実resolver/sourceSystem境界、全synthetic実装/Review、実source/mapping/data owner、移行承認 |
-| 07 | DEV履歴を維持。SF-W1 `6ec4ca28`限定CODE PASS、18/0/0/0、control統合済み。coverage不完。W2 Plan e5530c01限定PASS、W2a synthetic JDBC実装中、実MySQL/Review未完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
+| 06 | F2 foundation `1e8aa651`限定CODE PASS、17/0/0/0、control統合済み。F1a schema `3b6f1ae`静的限定PASS、実装slice `7a4cdb1`はSpring proxy P1修復/実行検証中。DB apply/UI未実装 | 実resolver/sourceSystem境界、全synthetic実装/Review、実source/mapping/data owner、移行承認 |
+| 07 | SF-W1限定CODE PASS。synthetic journal `504349ea`もAstra限定CODE PASS、MySQL25/0/0/0・boundary/inventory4/0/0/0を別runで確認、control統合済み。W2b/W3・実dispatch/処分は未完、coverage不完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
 | 08 | 開発scope CONDITIONAL。summary検証/予算/実行記録P2、disabled catalog残存 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
 | 09 | fail-closed修復 `da850b97`限定CODE PASS、control統合済み。実providerの完成ではない | V182 PENDING=0/帰属不明0/親子一致、実撤権/session/token、production owner |
 | 10 | session共有reauth修復 `20cce0f7`限定CODE PASS、46/0/0/0、control統合済み | 全体独立Review、実browser/session環境、staging、正式release |
@@ -23,7 +23,7 @@
 NF01の「退社確定時一括失効trigger」は現行コードでNF01呼出が確認できず、下記承認範囲の記述を
 実装済み証拠としない。NF06/NF07のflag OFFを全機能完成として扱わない。
 PR101 CIは全7 SUCCESSだったがmerge後main CIはBrowser FAILURE。Browser修復はlocalで独立PASSを得た段階であり、
-remote mainのCIをPASSに変更したとは報告しない。最新local全fastは2026-10-02 JSTの第3回、fixed c9bd2655、4075/1/0/0でFAIL。Portal共有fixtureを調査中。
+remote mainのCIをPASSに変更したとは報告しない。2026-10-04再照合では最新local全fastは第4回、fixed `3d9e3a87`、4088/0/0/0でPASS。同Headの全MySQLは190/7/0/0でFAIL。Q2/Q3限定修復は独立静的審査済みだが、初回再試験はDocker未起動で20件全skipのためFAIL。NF04 G1 `15252684`は審査・実行待ち、G2 WIPは未統合。これらをproduction approvalへ格上げしない。
 
 - 親文書: `2026-08-27-post-acceptance-feature-backlog.md`
 - 状態: 候補。各Decisionが`APPROVED`になるまでproduction変更を開始しない。
