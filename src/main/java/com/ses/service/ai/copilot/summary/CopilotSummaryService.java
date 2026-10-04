@@ -3,18 +3,16 @@ package com.ses.service.ai.copilot.summary;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
-import com.ses.entity.AiArtifactVersion;
-import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.ai.AiPiiMasker;
+import com.ses.service.ai.copilot.CopilotRunService;
 import com.ses.service.ai.copilot.result.MetricValue;
 import com.ses.service.ai.copilot.result.TypedResultEnvelope;
 import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import com.ses.service.ai.copilot.CopilotFeatureGate;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -37,12 +35,12 @@ public class CopilotSummaryService {
     public static final String OUTPUT_SCHEMA_VERSION = "nf08-summary-1";
 
     private final AiExecutionGateway aiExecutionGateway;
-    private final AiArtifactVersionMapper artifactVersionMapper;
     private final ObjectMapper objectMapper;
     private final CopilotFeatureGate featureGate;
 
     public SummaryResponse summarize(TypedResultEnvelope envelope, CopilotExecutionContext context,
-                                     CopilotScopeContext scope, String scopeHash, String traceId) {
+                                     CopilotScopeContext scope, String scopeHash,
+                                     CopilotRunService.CopilotArtifactSnapshot artifact, String traceId) {
         if (!isBound(envelope, context, scope, scopeHash)) {
             return SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE);
         }
@@ -63,10 +61,6 @@ public class CopilotSummaryService {
             return SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE);
         }
 
-        AiArtifactVersion artifact = artifactVersionMapper.selectOne(new LambdaQueryWrapper<AiArtifactVersion>()
-                .eq(AiArtifactVersion::getUseCase, AiGatewayRequest.USE_COPILOT)
-                .eq(AiArtifactVersion::getStatus, "ACTIVE")
-                .last("LIMIT 1"));
         if (artifact == null) {
             return SummaryResponse.unavailable("ARTIFACT_MISSING");
         }
@@ -74,7 +68,7 @@ public class CopilotSummaryService {
         SummaryRequest request = new SummaryRequest(
                 envelope.queryId(),
                 envelope.catalogVersion(),
-                artifact.getPromptVersion(),
+                artifact.promptVersion(),
                 OUTPUT_SCHEMA_VERSION,
                 allowedClaimKeys,
                 Duration.ofSeconds(15),
@@ -90,7 +84,7 @@ public class CopilotSummaryService {
                     parsed.summaryText(),
                     parsed.claimKeys(),
                     SummaryResponse.STATUS_SUCCEEDED,
-                    artifact.getModelName(),
+                    artifact.modelName(),
                     latencyMs,
                     null,
                     0);
