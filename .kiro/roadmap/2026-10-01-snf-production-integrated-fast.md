@@ -141,3 +141,16 @@
   Docker daemon未起動による`disabledWithoutDocker`であり、Maven exit 0でもGateはFAIL。
 - 証拠は`verification-evidence/20261004-q2-q3-mysql-01/`。原始結果を保存し、成功へ読み替えない。
   Docker起動確認後、同じscopeを別runで再実行する。限定成功も全MySQL第1回をPASSに変更しない。
+
+### Q2/Q3限定再検証第2回: PASS
+
+- 同じfixed source `557b74a4c4ed4c89531eb89831f57b06ad346bb1`、clean start/end、Head一致。
+- UTC `2026-10-04T07:48:24.3032998Z`〜`2026-10-04T07:54:13.0555109Z`。
+- Docker事前確認後、同じ5 classで**20/0/0/0、exit 0**。原7 failure methodを全て含む。
+  Asset 11、CustomerSuccess 1、SelfService 3、V110AdminBoundaryUpgrade 2、OperationalBoundary 3。
+- 原log、全10 XML/textとhash、metadata、zero-skipped gate判定、実MySQL8.0.46の観測を
+  sourceおよびcontrolの`verification-evidence/20261004-q2-q3-mysql-02/`へ保存した。
+  log SHA-256: `2E0C70E6CA055D4CFE05440312086540752B4274EBE4397089CF16D9631670EF`。
+- Astraがraw/report hash、原失敗method包含、child実PID/claim/lock断言を確認し、限定CODE PASS。
+  controlへ`47ca275b`、`2d1b60e6`、`b978fbac`として統合した。
+- これは5 classの修復完了であり、全MySQL190件の再合格ではない。第1回全体FAILと20 skipped runを履歴として保持する。

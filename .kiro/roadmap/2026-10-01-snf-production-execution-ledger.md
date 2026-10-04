@@ -177,3 +177,21 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
 - 前回Astraはusage limitで中断したため未了ReviewをPASSにせず、新しいAstraで固定SHA審査を再開した。
   Lunaは実装、Astraは独立Reviewを担当し、重い実行窓は総括が割り当てる。
 - 総合判定はNO-GO。remote push/PR/merge、実credential、production deploy/代理署名は未実施。
+
+### Q2/Q3統合・G1の干净検証
+
+- Q2/Q3 fixed557b74a4は5 class 20/0/0/0、Astra限定CODE PASSとなり、control `b978fbac`まで統合した。
+  全MySQLの再実行完了とは区別する。2026-10-04の再照会でもPR101は7 SUCCESS、mainの最新run36858538460はFAILURE。
+- NF04 G1はnonce index無界増加とbarrier誤合格を`9af23bbf`で修復し、Astra静的待修findingなし。
+  cleanな既存`C:\work\ses-review-snf-r3-c`を再利用し、fresh B0から`codex/snf-prod-nf04-g1-verify`を作り9af23bbfへfast-forward。
+  旧NF07 branchは保持し、targetは同worktreeの`verification-evidence/nf04-g1-fixed/prior-nf07-target`へ原状保存。
+  G2 WIPを含む元r3-aは変更しない。
+- G1干净5 class run01はfixed9af23bbf、UTC07:54:23.8338725〜07:56:10.4788195（2026-10-04）、clean start/end。
+  **25/0/1/0、FAIL**。H2の`TIMESTAMPADD(MINUTE, ?, ?)`型推論でREQUIRES_NEW failure-counter testが失敗。
+  原log SHA-256 `8000018E85A795BC6CDB21459422EA39B096C6979E4732C45AC07651548025AE`。
+  証拠はr3-cの`verification-evidence/nf04-g1-fixed/20261004-run-01/`。
+- failure-counterは既存共用SQLのMySQL更新順序も含めて調査し、実MySQLで第1〜4回/第5回lock/追加失敗/期限切れ/並行加算を確認する。
+  H2の並行性をMySQL証拠へ転用せず、H2では実transaction/rollback境界を検証する。現在G1 CODE PASSは未授与。
+- NF06 proxy/constructor修復`ed14ba95`、candidate Plan条件修復`f9fbddeb`は静的指摘を閉鎖した。
+  限定H2/cryptoは6/0/0/0だがWIPを含み原log/source manifest不足、固定commit合格として扱わない。
+  generic file権限のIMPORT_JOB重複引用P2を追加修復中。candidate implementationとvalidation lifecycleは未完。
