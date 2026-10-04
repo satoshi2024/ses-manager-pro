@@ -221,10 +221,11 @@ class OperationalBoundaryMySqlIntegrationTest {
 
         long startAt = System.currentTimeMillis() + 1500L;
         ChildOutput first = startChild("claim", "-", outbox.getId(), startAt);
-        ChildOutput second = startChild("claim", "-", outbox.getId(), startAt);
+        ChildOutput second = null;
         List<String> firstLines;
         List<String> secondLines;
         try {
+            second = startChild("claim", "-", outbox.getId(), startAt);
             firstLines = finishChild(first, 15);
             secondLines = finishChild(second, 15);
         } finally {
