@@ -357,7 +357,7 @@ public class ImportMetadataService {
         return json.append('}').toString().getBytes(StandardCharsets.UTF_8);
     }
 
-    private String escapeJson(String input) {
+    private static String escapeJson(String input) {
         StringBuilder result = new StringBuilder(input.length());
         for (int i = 0; i < input.length(); i++) {
             char value = input.charAt(i);
