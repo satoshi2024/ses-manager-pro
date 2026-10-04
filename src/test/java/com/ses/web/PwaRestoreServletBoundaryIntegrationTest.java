@@ -66,6 +66,7 @@ class PwaRestoreServletBoundaryIntegrationTest {
         String database = "pwa_servlet_" + UUID.randomUUID().toString().replace("-", "");
         registry.add("spring.datasource.url", () -> "jdbc:h2:mem:" + database
                 + ";DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL");
+        registry.add("app.security.oidc.tenant-id", () -> TENANT);
     }
 
     @BeforeEach
@@ -231,7 +232,15 @@ class PwaRestoreServletBoundaryIntegrationTest {
     private String userScope(Browser browser) throws Exception {
         HttpResponse<String> response = send(browser, "GET", "/api/my/session-context", null, null);
         assertThat(response.statusCode()).isEqualTo(200);
-        return JSON.readTree(response.body()).path("data").path("userScope").asText();
+        String scope = JSON.readTree(response.body()).path("data").path("userScope").asText();
+        String payload = new String(java.util.Base64.getUrlDecoder().decode(scope.split("\\.", -1)[0]),
+                StandardCharsets.UTF_8);
+        String[] fields = payload.split("\\.", -1);
+        assertThat(fields).hasSize(6);
+        assertThat(fields[0]).isEqualTo("v2");
+        assertThat(new String(java.util.Base64.getUrlDecoder().decode(fields[1]), StandardCharsets.UTF_8))
+                .isEqualTo(TENANT);
+        return scope;
     }
 
     private HttpResponse<String> postJson(Browser browser, String path, String body, boolean withCsrf) throws Exception {
