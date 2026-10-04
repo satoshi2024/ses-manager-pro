@@ -25,14 +25,17 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -173,6 +176,80 @@ class PwaRestoreAuthorizationServiceTest {
         clock.set(NOW.plusSeconds(120));
         assertThatThrownBy(() -> service.confirm(confirm(proof.proof(), nonce(13), "scope-v2"),
                 session, authentication)).hasMessage("error.pwa.restore.rejected");
+    }
+
+    @Test
+    void DB再読込中に同nonceで再認証されたconfirmはgeneration不一致で拒否する() throws Exception {
+        String documentNonce = nonce(20);
+        var proof = service.reauthenticate(reauth(documentNonce, "scope-v2"), session, authentication);
+        var enteredDbRead = new CountDownLatch(1);
+        var releaseDbRead = new CountDownLatch(1);
+        var shouldBlock = new AtomicBoolean(true);
+        doAnswer(invocation -> {
+            if (shouldBlock.compareAndSet(true, false)) {
+                enteredDbRead.countDown();
+                if (!releaseDbRead.await(3, TimeUnit.SECONDS)) throw new IllegalStateException("同期バリアがタイムアウトしました");
+            }
+            return identity;
+        }).when(identityService).load(7L, "tenant-a");
+
+        var pool = Executors.newSingleThreadExecutor();
+        try {
+            var oldConfirm = pool.submit(() -> {
+                SecurityContextHolder.setContext(contextFor(authentication));
+                try {
+                    return service.confirm(confirm(proof.proof(), documentNonce, "scope-v2"), session, authentication);
+                } finally {
+                    SecurityContextHolder.clearContext();
+                }
+            });
+            assertThat(enteredDbRead.await(2, TimeUnit.SECONDS)).isTrue();
+            service.reauthenticate(reauth(documentNonce, "scope-v2"), session, authentication);
+            releaseDbRead.countDown();
+            assertThatThrownBy(() -> oldConfirm.get(3, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(RuntimeException.class);
+            assertThat((Map<?, ?>) ReflectionTestUtils.getField(session.getAttribute(
+                    PwaRestoreAuthorizationService.SESSION_STATE_ATTRIBUTE), "permits")).isEmpty();
+        } finally {
+            releaseDbRead.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void DB再読込中にproof期限へ達したconfirmは最終検査で拒否する() throws Exception {
+        String documentNonce = nonce(21);
+        var proof = service.reauthenticate(reauth(documentNonce, "scope-v2"), session, authentication);
+        var enteredDbRead = new CountDownLatch(1);
+        var releaseDbRead = new CountDownLatch(1);
+        var shouldBlock = new AtomicBoolean(true);
+        doAnswer(invocation -> {
+            if (shouldBlock.compareAndSet(true, false)) {
+                enteredDbRead.countDown();
+                if (!releaseDbRead.await(3, TimeUnit.SECONDS)) throw new IllegalStateException("同期バリアがタイムアウトしました");
+            }
+            return identity;
+        }).when(identityService).load(7L, "tenant-a");
+
+        var pool = Executors.newSingleThreadExecutor();
+        try {
+            var pending = pool.submit(() -> {
+                SecurityContextHolder.setContext(contextFor(authentication));
+                try {
+                    return service.confirm(confirm(proof.proof(), documentNonce, "scope-v2"), session, authentication);
+                } finally {
+                    SecurityContextHolder.clearContext();
+                }
+            });
+            assertThat(enteredDbRead.await(2, TimeUnit.SECONDS)).isTrue();
+            clock.set(NOW.plusSeconds(120));
+            releaseDbRead.countDown();
+            assertThatThrownBy(() -> pending.get(3, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(RuntimeException.class);
+        } finally {
+            releaseDbRead.countDown();
+            pool.shutdownNow();
+        }
     }
 
     @Test

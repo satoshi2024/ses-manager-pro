@@ -105,6 +105,9 @@ public class PwaRestoreAuthorizationService {
                 state.proofs.values().removeIf(old -> old.nonceHash.equals(nonceHash));
                 state.permits.values().removeIf(old -> old.nonceHash.equals(nonceHash));
                 if (state.proofs.size() >= MAX_PROOFS) reject();
+                long generation = state.nonceGenerations.getOrDefault(nonceHash, 0L) + 1L;
+                state.nonceGenerations.put(nonceHash, generation);
+                entry.generation = generation;
                 state.proofs.put(proofHash, entry);
                 session.setAttribute(SESSION_STATE_ATTRIBUTE, state);
             } catch (IllegalStateException e) {
@@ -124,6 +127,7 @@ public class PwaRestoreAuthorizationService {
         String nonceHash = digest(request.getDocumentNonce());
         String scopeHash = digest(request.getUserScope());
         ProofEntry entry;
+        long claimedGeneration;
         synchronized (WebUtils.getSessionMutex(session)) {
             if (sessionRegistry.isDestroyed(sessionId) || !sessionStillAuthenticated(session, sessionId, authentication)) {
                 reject();
@@ -138,6 +142,8 @@ public class PwaRestoreAuthorizationService {
                     || !entry.authSnapshot.equals(snapshot(authentication))
                     || !constantTimeEquals(entry.nonceHash, nonceHash)
                     || !constantTimeEquals(entry.scopeHash, scopeHash)) reject();
+            claimedGeneration = state.nonceGenerations.getOrDefault(nonceHash, 0L);
+            if (entry.generation != claimedGeneration) reject();
         }
 
         CurrentIdentity current = loadIdentity(entry.userId, entry.tenantId);
@@ -154,9 +160,16 @@ public class PwaRestoreAuthorizationService {
         if (sessionExpiry.isBefore(permitExpiresAt)) permitExpiresAt = sessionExpiry;
         if (!permitExpiresAt.isAfter(now)) reject();
         synchronized (WebUtils.getSessionMutex(session)) {
-            if (sessionRegistry.isDestroyed(sessionId)
-                    || !sessionStillAuthenticated(session, sessionId, authentication)) reject();
-            SessionState state = state(session, true);
+            Instant finalNow = clock.instant();
+            SessionState state = state(session, false);
+            if (state == null || !entry.expiresAt.isAfter(finalNow)
+                    || state.nonceGenerations.getOrDefault(nonceHash, 0L) != claimedGeneration
+                    || sessionRegistry.isDestroyed(sessionId)
+                    || !sessionStillAuthenticated(session, sessionId, authentication)
+                    || entry.authentication != authentication
+                    || !entry.authSnapshot.equals(snapshot(authentication))
+                    || !isCurrentAuthentication(authentication, current)) reject();
+            if (!permitExpiresAt.isAfter(finalNow)) reject();
             state.permits.values().removeIf(old -> old.nonceHash.equals(nonceHash));
             state.permits.put(nonceHash, new PermitEntry(nonceHash, scopeHash, entry.userId,
                     entry.tenantId, entry.engineerId, entry.linkId, permitExpiresAt));
@@ -279,6 +292,7 @@ public class PwaRestoreAuthorizationService {
         private static final long serialVersionUID = 1L;
         private final Map<String, ProofEntry> proofs = new HashMap<>();
         private final Map<String, PermitEntry> permits = new HashMap<>();
+        private final Map<String, Long> nonceGenerations = new HashMap<>();
     }
 
     private static final class ProofEntry implements java.io.Serializable {
@@ -288,6 +302,7 @@ public class PwaRestoreAuthorizationService {
         private final Instant linkedAt, issuedAt, expiresAt;
         private final transient Authentication authentication;
         private final AuthSnapshot authSnapshot;
+        private long generation;
         private ProofEntry(String proofHash, String nonceHash, String scopeHash, String sessionId,
                            Long userId, String tenantId, Long engineerId, Long linkId, Instant linkedAt,
                            String role, String passwordFingerprint, Instant issuedAt, Instant expiresAt,
