@@ -11,9 +11,9 @@ public final class CopilotSummaryValidator {
 
     private static final Pattern HTML = Pattern.compile("(?i)<[^>]+>");
     private static final Set<Integer> NUMBER_TYPES = Set.of(
-            Character.DECIMAL_DIGIT_NUMBER,
-            Character.LETTER_NUMBER,
-            Character.OTHER_NUMBER);
+            (int) Character.DECIMAL_DIGIT_NUMBER,
+            (int) Character.LETTER_NUMBER,
+            (int) Character.OTHER_NUMBER);
     private static final String KANJI_NUMERALS = "〇零一二三四五六七八九十百千万億兆京垓"
             + "壱弐参肆伍陸漆捌玖拾佰阡仟萬";
     private static final Set<Integer> PERCENT_SYMBOLS = Set.of(
