@@ -41,6 +41,8 @@ public class CopilotSummaryService {
     public SummaryResponse summarize(TypedResultEnvelope envelope, CopilotExecutionContext context,
                                      CopilotScopeContext scope, String scopeHash,
                                      CopilotRunService.CopilotArtifactSnapshot artifact, String traceId) {
+        long started = System.nanoTime();
+        long deadlineNanos = started + Duration.ofSeconds(15).toNanos();
         if (!isBound(envelope, context, scope, scopeHash)) {
             return SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE);
         }
@@ -74,11 +76,13 @@ public class CopilotSummaryService {
                 Duration.ofSeconds(15),
                 0);
 
-        long started = System.nanoTime();
         try {
             AiGatewayResult gatewayResult = aiExecutionGateway.execute(
-                    buildGatewayRequest(request, context, scope, scopeHash, traceId));
+                    buildGatewayRequest(request, context, scope, scopeHash, traceId, artifact, deadlineNanos));
             SummaryResponse parsed = parseProviderJson(gatewayResult.getText(), allowedClaimKeys);
+            if (System.nanoTime() >= deadlineNanos) {
+                return SummaryResponse.unavailable("COPILOT_DEADLINE_EXCEEDED");
+            }
             long latencyMs = (System.nanoTime() - started) / 1_000_000L;
             return new SummaryResponse(
                     parsed.summaryText(),
@@ -101,7 +105,9 @@ public class CopilotSummaryService {
     }
 
     private AiGatewayRequest buildGatewayRequest(SummaryRequest request, CopilotExecutionContext context,
-                                                  CopilotScopeContext scope, String scopeHash, String traceId) {
+                                                  CopilotScopeContext scope, String scopeHash, String traceId,
+                                                  CopilotRunService.CopilotArtifactSnapshot artifact,
+                                                  long deadlineNanos) {
         Map<String, Object> allowlisted = new LinkedHashMap<>();
         allowlisted.put("catalog.queryId", request.queryId());
         allowlisted.put("catalog.catalogVersion", request.catalogVersion());
@@ -127,6 +133,13 @@ public class CopilotSummaryService {
                 .executionContext(context)
                 .scopeContext(scope)
                 .scopeHash(scopeHash)
+                .deadlineNanos(deadlineNanos)
+                .costBudgetYen(request.maxCostYen())
+                .expectedArtifactVersionId(artifact.artifactVersionId())
+                .expectedProvider(artifact.provider())
+                .expectedModel(artifact.modelName())
+                .expectedPromptVersion(artifact.promptVersion())
+                .expectedConfigHash(artifact.configHash())
                 .build();
     }
 
@@ -185,6 +198,12 @@ public class CopilotSummaryService {
 
     private SummaryResponse mapProviderError(BusinessException ex) {
         int code = ex.getCode();
+        if ("COPILOT_COST_UNKNOWN".equals(ex.getMessage())) {
+            return SummaryResponse.unavailable("COST_UNKNOWN");
+        }
+        if ("COPILOT_DEADLINE_EXCEEDED".equals(ex.getMessage())) {
+            return SummaryResponse.unavailable("DEADLINE_EXCEEDED");
+        }
         if (code == 429) {
             return SummaryResponse.unavailable("PROVIDER_429");
         }
