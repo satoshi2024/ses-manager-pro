@@ -195,3 +195,28 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
 - NF06 proxy/constructor修復`ed14ba95`、candidate Plan条件修復`f9fbddeb`は静的指摘を閉鎖した。
   限定H2/cryptoは6/0/0/0だがWIPを含み原log/source manifest不足、固定commit合格として扱わない。
   generic file権限のIMPORT_JOB重複引用P2を追加修復中。candidate implementationとvalidation lifecycleは未完。
+
+### 2026-10-04 G1限定統合・NF06 reader固定検証
+
+- G1 source fixed `776dc5b03361431098875fd1ee81abe791dc0386`をAstraが限定CODE PASSと判定した。
+  run03は7 class **34/0/0/0**、UTC08:14:08.1303747〜08:15:52.5360711、exit0、起止Head一致・clean。
+  log SHA-256 `4D9467EDEB73D9735BF71B9634ECFC47757FFC7B7E2DB3B4E7FCA517A0E1F833`。
+  mysql01はAccountLockServiceMySqlTest **4/0/0/0**、UTC08:23:33.3429714〜08:25:21.0485684、exit0、同じHead・clean。
+  log SHA-256 `94DE7A39131364A12B13C03C03F5A8A4EC59D59788A5C97B5EB802EC7E2F4C61`。
+  実containerのMySQL8.0.46、Docker29.7.2、image IDはruntime-observation.jsonへ現場取得した。
+- G1原run01のH2 error、run02のcompile failureも保存した。run02はテスト未実行であり0件PASSではない。
+  source/controlの `verification-evidence/nf04-g1-fixed/` に4 runの79 fileをbyte同一保存した。
+  control統合commitは `f8012ac6 / 6e41b071 / 3cb8f092 / 347ee003 / 72dfb1bc / 6874511b`。
+  proof/scope/CSRF MVC、独立failure transaction、account lockの直列・実MySQL並行意味に限定する。
+  実servlet listener/logout race、実principal endpoint、Browser、分散session、実DB engine commit障害は未検証。
+  既存onLoginSuccessの認証途中lock-reset競合は本変更由来ではなく、今回の合格範囲にも含めない。
+- NF06固定 `1f3beb750db994abae92c180c0ac7acdd596f989` のrun02は3 class25/0/0/0。
+  generic fileのIMPORT_JOB guardを全business shortcutの前へ移し、重複引用の迂回P2を閉鎖した。
+  続く固定 `103c75876004dd0b072a39f1fff4aad00305b3cb` のrun03は7 class53/0/0/0、exit0、起止Head一致・clean。
+  parser旧entry互換、canonical mapping、exact EOF/source hash、正規化key、redacted record、fingerprint固定vectorを含む。
+  rawは `C:\work\ses-nf05-remediation\verification-evidence\nf06-fixed\`。candidate `0258d9fd` は独立Review/実行中。
+  metadata lifecycle、全Spring wiring、V184実MySQLとV183併合rehearsal、apply/UIは未完。
+- NF08 Plan `a91b5ee0`はAstra限定技術PLAN PASS。numeric `95bfb674` の静的findingは閉鎖したが実行証拠は未取得。
+  snapshot/別attempt `0b0b10de`は独立Review中。bounded transportは小batchへ分けて実装する。
+  OFFやunknown-cost拒否だけで実transportの実装完了にしない。
+- 全体は引き続きNO-GO。上記限定統合後の全Fast/MySQL/Performance/Browser/backup Gateは未実行。
