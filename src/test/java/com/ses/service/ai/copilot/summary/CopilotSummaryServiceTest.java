@@ -25,6 +25,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -36,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class CopilotSummaryServiceTest {
@@ -78,6 +80,14 @@ class CopilotSummaryServiceTest {
         assertEquals(SummaryResponse.STATUS_SUCCEEDED, response.providerStatus());
         assertEquals("mock-management-copilot", response.modelVersion());
         assertEquals(List.of("forecast.utilization.2026-09"), response.claimKeys());
+        ArgumentCaptor<AiGatewayRequest> request = ArgumentCaptor.forClass(AiGatewayRequest.class);
+        verify(aiExecutionGateway).execute(request.capture());
+        assertEquals(7L, request.getValue().getExpectedArtifactVersionId());
+        assertEquals("mock", request.getValue().getExpectedProvider());
+        assertEquals("mock-management-copilot", request.getValue().getExpectedModel());
+        assertEquals("nf08-f1", request.getValue().getExpectedPromptVersion());
+        assertEquals(0, request.getValue().getCostBudgetYen());
+        assertTrue(request.getValue().getDeadlineNanos() > System.nanoTime());
     }
 
     @Test

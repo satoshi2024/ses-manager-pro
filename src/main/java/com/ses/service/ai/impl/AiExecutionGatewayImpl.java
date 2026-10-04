@@ -15,6 +15,7 @@ import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.ai.AiOutboundProbe;
 import com.ses.service.ai.AiPiiMasker;
 import com.ses.service.ai.AiTextService;
+import com.ses.service.ai.CopilotBoundedAiTextService;
 import com.ses.service.ai.AiProductionApprovalGate;
 import com.ses.service.ai.AiProviderRegistry;
 import com.ses.service.ai.AiUseCasePolicy;
@@ -74,6 +75,9 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         if (prompt.contains(AiGatewayRequest.CANARY)) {
             throw new BusinessException(400, "PII canary を外部送信できません");
         }
+        if (AiGatewayRequest.USE_COPILOT.equals(request.getUseCase())) {
+            assertCopilotBoundedRequest(request);
+        }
         assertFinalProviderBoundary(request);
         outboundProbe.record(prompt);
         if (request.getTraceId() == null || request.getTraceId().isBlank()) {
@@ -85,7 +89,8 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         String error = null;
         try {
             // HTTP / provider 呼び出しは TX 外（接続プール占有を避ける）
-            text = AiPiiMasker.stripHtml(callProvider(prompt));
+            text = AiPiiMasker.stripHtml(AiGatewayRequest.USE_COPILOT.equals(request.getUseCase())
+                    ? callCopilotProvider(prompt, request) : callProvider(prompt));
             if (request.isRequireJson()) {
                 assertJson(text);
             }
@@ -112,6 +117,41 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
 
     private String callProvider(String prompt) {
         return aiTextService.generate(prompt);
+    }
+
+    private void assertCopilotBoundedRequest(AiGatewayRequest request) {
+        if (request.getDeadlineNanos() == null
+                || request.getCostBudgetYen() == null || request.getCostBudgetYen() < 0
+                || request.getExpectedArtifactVersionId() == null
+                || request.getExpectedProvider() == null || request.getExpectedProvider().isBlank()
+                || request.getExpectedModel() == null || request.getExpectedModel().isBlank()
+                || request.getExpectedPromptVersion() == null || request.getExpectedPromptVersion().isBlank()
+                || request.getExpectedConfigHash() == null || request.getExpectedConfigHash().isBlank()) {
+            throw BusinessException.of(503, "COPILOT_EXECUTION_SNAPSHOT_INVALID");
+        }
+        if (System.nanoTime() >= request.getDeadlineNanos()) {
+            throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
+        }
+        AiProviderRegistry.ProviderDescriptor configured = providerRegistry.requireRegistered(aiConfig.getProvider());
+        if (!configured.name().equals(request.getExpectedProvider())) {
+            throw BusinessException.of(503, "COPILOT_ARTIFACT_PROVIDER_MISMATCH");
+        }
+        if (!configured.localOnly()) {
+            // provider費用を上限内と事前に保証できる契約が未登録。未知費用を0円扱いしない。
+            throw BusinessException.of(503, "COPILOT_COST_UNKNOWN");
+        }
+        if (!(aiTextService instanceof CopilotBoundedAiTextService bounded)
+                || !configured.name().equals(aiTextService.providerId())
+                || !request.getExpectedModel().equals(bounded.copilotModelId())) {
+            throw BusinessException.of(503, "COPILOT_BOUNDED_PROVIDER_MISMATCH");
+        }
+    }
+
+    private String callCopilotProvider(String prompt, AiGatewayRequest request) {
+        if (!(aiTextService instanceof CopilotBoundedAiTextService bounded)) {
+            throw BusinessException.of(503, "COPILOT_BOUNDED_PROVIDER_UNAVAILABLE");
+        }
+        return bounded.generateCopilotSummary(prompt, request.getDeadlineNanos());
     }
 
     /** controllerを経由しない呼出しも、provider I/O直前に最終gateを通す。 */
