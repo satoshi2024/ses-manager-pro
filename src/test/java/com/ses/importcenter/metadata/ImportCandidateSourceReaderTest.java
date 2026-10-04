@@ -84,7 +84,7 @@ class ImportCandidateSourceReaderTest {
 
     @Test
     void appliesExplicitAliasMappingBeforeCanonicalRowConversionAndRedactsCandidateKey() throws Exception {
-        byte[] source = "顧客ID,会社名\ncustomer-1,Example\n".getBytes(StandardCharsets.UTF_8);
+        byte[] source = "顧客ID,会社名\ncustomer 1,Example\n".getBytes(StandardCharsets.UTF_8);
         String sourceHash = sha256(source);
         Map<String, String> mappingValues = Map.of("顧客ID", "externalKey", "会社名", "companyName");
         byte[] mapping = ImportMetadataService.canonicalMapping(mappingValues);
@@ -95,7 +95,7 @@ class ImportCandidateSourceReaderTest {
         var actual = reader.read(9L, 1L, new ImportCandidateSourceReader.Snapshot(ImportEntity.CUSTOMER,
                 ImportEncoding.UTF8, sourceHash, mapping, mappingHash));
 
-        assertEquals("customer-1", actual.externalKey());
+        assertEquals("customer 1", actual.externalKey());
         assertEquals("VerifiedCandidateRow[redacted]", actual.toString());
     }
 
@@ -114,7 +114,7 @@ class ImportCandidateSourceReaderTest {
 
     @Test
     void rejectsInvalidIdentityKeyInsteadOfReturningUnnormalizedValue() throws Exception {
-        byte[] source = "externalKey,companyName\nbad key,Example\n".getBytes(StandardCharsets.UTF_8);
+        byte[] source = "externalKey,companyName\n bad,Example\n".getBytes(StandardCharsets.UTF_8);
         String sourceHash = sha256(source);
         byte[] mapping = ImportMetadataService.canonicalMapping(Map.of("externalKey", "externalKey",
                 "companyName", "companyName"));
