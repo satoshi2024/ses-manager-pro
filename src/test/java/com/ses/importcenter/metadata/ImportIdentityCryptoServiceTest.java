@@ -12,13 +12,14 @@ class ImportIdentityCryptoServiceTest {
 
     @Test
     void encryptsWithPinnedLookupVersionAndAuthenticatesNamespace() {
-        var first = crypto.encrypt("tenant-a", 42, ImportEntity.CUSTOMER, "lookup-v1", "  Acme-01 ");
-        var second = crypto.encrypt("tenant-a", 42, ImportEntity.CUSTOMER, "lookup-v1", "acme-01");
+        var first = crypto.encrypt("tenant-a", 42, ImportEntity.CUSTOMER, "lookup-v1", "Acme-01");
+        var second = crypto.encrypt("tenant-a", 42, ImportEntity.CUSTOMER, "lookup-v1", "Acme-01");
 
         assertEquals("lookup-v1", first.lookupKeyVersion());
         assertArrayEquals(first.lookupDigest(), second.lookupDigest());
         assertFalse(java.util.Arrays.equals(first.nonce(), second.nonce()));
-        assertTrue(crypto.matches(first, "tenant-a", 42, ImportEntity.CUSTOMER, "ACME-01"));
+        assertTrue(crypto.matches(first, "tenant-a", 42, ImportEntity.CUSTOMER, "Acme-01"));
+        assertFalse(crypto.matches(first, "tenant-a", 42, ImportEntity.CUSTOMER, "acme-01"));
         assertThrows(IllegalStateException.class,
                 () -> crypto.decrypt("tenant-b", 42, ImportEntity.CUSTOMER, first.lookupKeyVersion(),
                         first.lookupDigest(), first.cipherFormatVersion(), first.encryptionKeyVersion(),
@@ -29,6 +30,12 @@ class ImportIdentityCryptoServiceTest {
     void rejectsUnknownPinnedKeyVersion() {
         assertThrows(IllegalStateException.class,
                 () -> crypto.encrypt("tenant-a", 42, ImportEntity.CUSTOMER, "retired-key", "key-1"));
+    }
+
+    @Test
+    void rejectsExternalKeysWithSurroundingWhitespace() {
+        assertThrows(IllegalArgumentException.class,
+                () -> crypto.encrypt("tenant-a", 42, ImportEntity.CUSTOMER, "lookup-v1", " Acme-01 "));
     }
 
     private static final class TestKeys implements ImportIdentityKeyProvider {
