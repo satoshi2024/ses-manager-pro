@@ -42,6 +42,7 @@ class CopilotSummaryValidatorTest {
                 "稼働率は７５％です",
                 "稼働率は75‰です",
                 "差分は一件です",
+                "売上は七です",
                 "利益は壱萬円です")) {
             CopilotSummaryValidationException exception = assertThrows(
                     CopilotSummaryValidationException.class,
@@ -53,8 +54,13 @@ class CopilotSummaryValidatorTest {
 
     @Test
     void 数値や通貨記号を含まない自然な説明文は通過する() {
-        assertDoesNotThrow(() -> CopilotSummaryValidator.validateSummaryText(
-                "全体の傾向を確認できました。必要に応じて詳細画面をご覧ください。"));
+        for (String summary : List.of(
+                "全体の傾向を確認できました。必要に応じて詳細画面をご覧ください。",
+                "一般的な傾向です。",
+                "一方で改善しています。",
+                "案件参画が進んでいます。")) {
+            assertDoesNotThrow(() -> CopilotSummaryValidator.validateSummaryText(summary), summary);
+        }
     }
 
     @Test
