@@ -178,7 +178,7 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   Lunaは実装、Astraは独立Reviewを担当し、重い実行窓は総括が割り当てる。
 - 総合判定はNO-GO。remote push/PR/merge、実credential、production deploy/代理署名は未実施。
 
-### Q2/Q3統合・G1の干净検証
+### Q2/Q3統合・G1のclean検証
 
 - Q2/Q3 fixed557b74a4は5 class 20/0/0/0、Astra限定CODE PASSとなり、control `b978fbac`まで統合した。
   全MySQLの再実行完了とは区別する。2026-10-04の再照会でもPR101は7 SUCCESS、mainの最新run36858538460はFAILURE。
@@ -186,7 +186,7 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   cleanな既存`C:\work\ses-review-snf-r3-c`を再利用し、fresh B0から`codex/snf-prod-nf04-g1-verify`を作り9af23bbfへfast-forward。
   旧NF07 branchは保持し、targetは同worktreeの`verification-evidence/nf04-g1-fixed/prior-nf07-target`へ原状保存。
   G2 WIPを含む元r3-aは変更しない。
-- G1干净5 class run01はfixed9af23bbf、UTC07:54:23.8338725〜07:56:10.4788195（2026-10-04）、clean start/end。
+- G1 clean 5 class run01はfixed9af23bbf、UTC07:54:23.8338725〜07:56:10.4788195（2026-10-04）、clean start/end。
   **25/0/1/0、FAIL**。H2の`TIMESTAMPADD(MINUTE, ?, ?)`型推論でREQUIRES_NEW failure-counter testが失敗。
   原log SHA-256 `8000018E85A795BC6CDB21459422EA39B096C6979E4732C45AC07651548025AE`。
   証拠はr3-cの`verification-evidence/nf04-g1-fixed/20261004-run-01/`。
