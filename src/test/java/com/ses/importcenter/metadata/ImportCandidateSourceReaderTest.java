@@ -5,7 +5,6 @@ import com.ses.importcenter.foundation.CanonicalImportRowFingerprint;
 import com.ses.importcenter.foundation.CanonicalRowFactory;
 import com.ses.importcenter.foundation.ImportEncoding;
 import com.ses.importcenter.foundation.ImportEntity;
-import com.ses.importcenter.foundation.SesCsvParser;
 import com.ses.importcenter.foundation.SourceRow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +32,7 @@ class ImportCandidateSourceReaderTest {
 
     @BeforeEach
     void setUp() {
-        reader = new ImportCandidateSourceReader(metadata, new SesCsvParser(), objectMapper);
+        reader = new ImportCandidateSourceReader(metadata, objectMapper);
     }
 
     @Test
@@ -81,6 +80,66 @@ class ImportCandidateSourceReaderTest {
                 new ImportCandidateSourceReader.Snapshot(ImportEntity.CUSTOMER, ImportEncoding.UTF8,
                         "11".repeat(32), mapping, mappingHash)));
         verifyNoInteractions(metadata);
+    }
+
+    @Test
+    void appliesExplicitAliasMappingBeforeCanonicalRowConversionAndRedactsCandidateKey() throws Exception {
+        byte[] source = "顧客ID,会社名\ncustomer-1,Example\n".getBytes(StandardCharsets.UTF_8);
+        String sourceHash = sha256(source);
+        Map<String, String> mappingValues = Map.of("顧客ID", "externalKey", "会社名", "companyName");
+        byte[] mapping = ImportMetadataService.canonicalMapping(mappingValues);
+        byte[] mappingHash = MessageDigest.getInstance("SHA-256").digest(mapping);
+        when(metadata.openSource(9L)).thenReturn(new ImportSourceContent(new ByteArrayInputStream(source),
+                "source.csv", ImportEncoding.UTF8, ImportEntity.CUSTOMER, sourceHash));
+
+        var actual = reader.read(9L, 1L, new ImportCandidateSourceReader.Snapshot(ImportEntity.CUSTOMER,
+                ImportEncoding.UTF8, sourceHash, mapping, mappingHash));
+
+        assertEquals("customer-1", actual.externalKey());
+        assertEquals("VerifiedCandidateRow[redacted]", actual.toString());
+    }
+
+    @Test
+    void rejectsDuplicateCanonicalTargetsBeforeOpeningSource() throws Exception {
+        Map<String, String> duplicateTargets = Map.of("externalKey", "externalKey", "alternateKey", "externalKey",
+                "companyName", "companyName");
+        byte[] mapping = ImportMetadataService.canonicalMapping(duplicateTargets);
+        byte[] mappingHash = MessageDigest.getInstance("SHA-256").digest(mapping);
+
+        assertThrows(RuntimeException.class, () -> reader.read(9L, 1L,
+                new ImportCandidateSourceReader.Snapshot(ImportEntity.CUSTOMER, ImportEncoding.UTF8,
+                        "11".repeat(32), mapping, mappingHash)));
+        verifyNoInteractions(metadata);
+    }
+
+    @Test
+    void rejectsInvalidIdentityKeyInsteadOfReturningUnnormalizedValue() throws Exception {
+        byte[] source = "externalKey,companyName\nbad key,Example\n".getBytes(StandardCharsets.UTF_8);
+        String sourceHash = sha256(source);
+        byte[] mapping = ImportMetadataService.canonicalMapping(Map.of("externalKey", "externalKey",
+                "companyName", "companyName"));
+        byte[] mappingHash = MessageDigest.getInstance("SHA-256").digest(mapping);
+        when(metadata.openSource(9L)).thenReturn(new ImportSourceContent(new ByteArrayInputStream(source),
+                "source.csv", ImportEncoding.UTF8, ImportEntity.CUSTOMER, sourceHash));
+
+        assertThrows(RuntimeException.class, () -> reader.read(9L, 1L,
+                new ImportCandidateSourceReader.Snapshot(ImportEntity.CUSTOMER, ImportEncoding.UTF8,
+                        sourceHash, mapping, mappingHash)));
+    }
+
+    @Test
+    void readsToEofAndRejectsActualBytesWhoseDigestDiffersFromSnapshot() throws Exception {
+        byte[] source = "externalKey,companyName\ncustomer-1,Changed\n".getBytes(StandardCharsets.UTF_8);
+        String registeredHash = "11".repeat(32);
+        byte[] mapping = ImportMetadataService.canonicalMapping(Map.of("externalKey", "externalKey",
+                "companyName", "companyName"));
+        byte[] mappingHash = MessageDigest.getInstance("SHA-256").digest(mapping);
+        when(metadata.openSource(9L)).thenReturn(new ImportSourceContent(new ByteArrayInputStream(source),
+                "source.csv", ImportEncoding.UTF8, ImportEntity.CUSTOMER, registeredHash));
+
+        assertThrows(RuntimeException.class, () -> reader.read(9L, 1L,
+                new ImportCandidateSourceReader.Snapshot(ImportEntity.CUSTOMER, ImportEncoding.UTF8,
+                        registeredHash, mapping, mappingHash)));
     }
 
     private static String sha256(byte[] value) throws Exception {

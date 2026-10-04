@@ -44,4 +44,14 @@ class CanonicalImportRowFingerprintTest {
         assertFalse(java.util.Arrays.equals(value, changedValue));
         assertFalse(java.util.Arrays.equals(explicitNull, missing));
     }
+
+    @Test
+    void versionOneFingerprintHasFixedCanonicalVector() {
+        byte[] actual = CanonicalImportRowFingerprint.sha256(new CustomerImportRow(
+                new ImportRowMetadata(1, "11".repeat(32), "k"),
+                Map.of("companyName", FieldValue.of("x"))));
+
+        assertArrayEquals(java.util.HexFormat.of().parseHex(
+                "1709dc91fa969a50019e2856a9f4b9a1070a7bec665e3a7ab67053d8305c54ae"), actual);
+    }
 }
