@@ -16,6 +16,9 @@ public interface AccountLockService {
      */
     void onLoginFailure(String username);
 
+    /** 信頼済みuser IDとtenantに対する失敗を記録する（PWA再認証などログイン名非依存の入口用）。 */
+    void onLoginFailure(Long userId, String tenantId);
+
     /**
      * ログイン成功時に失敗回数・ロックをリセットする。
      */
