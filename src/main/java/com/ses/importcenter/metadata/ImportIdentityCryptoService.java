@@ -3,6 +3,7 @@ package com.ses.importcenter.metadata;
 import com.ses.importcenter.foundation.ExternalKeyNormalizer;
 import com.ses.importcenter.foundation.ImportEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import javax.crypto.Cipher;
 import javax.crypto.Mac;
@@ -23,6 +24,7 @@ public final class ImportIdentityCryptoService {
     private final ImportIdentityKeyProvider keys;
     private final SecureRandom secureRandom;
 
+    @Autowired
     public ImportIdentityCryptoService(ImportIdentityKeyProvider keys) {
         this(keys, new SecureRandom());
     }

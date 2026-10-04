@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
 
 /** F1a source/mapping/job metadataのtransaction境界。HTTP/UIを提供しない。 */
 @Service
-public final class ImportMetadataService {
+public class ImportMetadataService {
     private static final Pattern SOURCE_CODE = Pattern.compile("[A-Za-z][A-Za-z0-9_-]{0,63}");
     private static final Pattern SHA256 = Pattern.compile("[0-9a-fA-F]{64}");
     private final JdbcTemplate jdbc;
