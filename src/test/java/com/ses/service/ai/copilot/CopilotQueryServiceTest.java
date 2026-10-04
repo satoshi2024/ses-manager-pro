@@ -146,7 +146,7 @@ class CopilotQueryServiceTest {
         when(copilotRunService.pinActiveArtifact()).thenReturn(artifact);
         when(copilotRunService.beginQueryAttempt(any(), anyString(), any(), any())).thenReturn(queryAttempt);
         when(copilotRunService.beginSummaryAttempt(any(), anyString(), any(), any(), any())).thenReturn(summaryAttempt);
-        when(catalogQueryGateway.execute(any(), any(), any(), any())).thenReturn(envelopeFor(executionContext));
+        when(catalogQueryGateway.execute(any(), any(), any(), any())).thenReturn(envelopeFor(executionContext, queryId));
         when(citationAuthorizationService.authorizeAll(any(), any(), any(), any(), anyString())).thenReturn(List.of());
         when(copilotSummaryService.summarize(any(), any(), any(), anyString(), any(), anyString()))
                 .thenReturn(new SummaryResponse("指標を確認しました。", List.of(),
@@ -188,16 +188,16 @@ class CopilotQueryServiceTest {
                 "1");
     }
 
-    private TypedResultEnvelope envelopeFor(CopilotExecutionContext context) {
+    private TypedResultEnvelope envelopeFor(CopilotExecutionContext context, String queryId) {
         Instant now = context.asOf();
         return new TypedResultEnvelope(
-                context.queryId(), SemanticCatalogRegistry.CATALOG_VERSION,
+                queryId, SemanticCatalogRegistry.CATALOG_VERSION,
                 SemanticCatalogRegistry.RESULT_SCHEMA_VERSION, now, now, context.zoneId().getId(),
                 new CopilotScopeInfo("COMPANY_WIDE", CopilotScopeResolver.POLICY_VERSION,
                         context.scope().scopeHash()),
                 List.of(new MetricValue("forecast.utilization.2026-09", BigDecimal.TEN, null,
                         MetricUnit.PERCENT, MetricState.VALUE, "2026-09", MetricBasis.FORECAST, 1)),
-                List.of(), new CopilotFreshnessInfo(now, false, MetricBasis.FORECAST), List.of(context.queryId()),
+                List.of(), new CopilotFreshnessInfo(now, false, MetricBasis.FORECAST), List.of(queryId),
                 new CopilotLimitInfo(200, false), "1");
     }
 
