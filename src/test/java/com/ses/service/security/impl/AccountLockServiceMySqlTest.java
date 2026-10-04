@@ -132,7 +132,7 @@ class AccountLockServiceMySqlTest {
     }
 
     @Test
-    void 5回以上の初回並行失敗で一度だけロックする() throws Exception {
+    void 初回の5回以上の並行失敗で一度だけロックする() throws Exception {
         runConcurrentFailures(16);
         assertThat(failedCount()).isZero();
         assertThat(lockedUntil()).isNotNull();
