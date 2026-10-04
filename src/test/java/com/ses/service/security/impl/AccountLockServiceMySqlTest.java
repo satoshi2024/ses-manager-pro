@@ -8,6 +8,9 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -15,7 +18,10 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -32,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class AccountLockServiceMySqlTest {
+    private static final Instant TEST_NOW = Instant.parse("2026-10-04T01:00:00Z");
 
     @Container
     @SuppressWarnings("resource")
@@ -52,12 +59,14 @@ class AccountLockServiceMySqlTest {
 
     @Autowired private AccountLockService accountLockService;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private AccountLockClock clock;
 
     private String username;
     private Long userId;
 
     @BeforeEach
     void createUser() {
+        clock.set(TEST_NOW);
         username = "account-lock-" + UUID.randomUUID().toString().replace("-", "");
         jdbc.update("INSERT INTO sys_user (tenant_id, username, password, role, status, failed_count, deleted_flag) "
                 + "VALUES ('lock-test', ?, 'unused', '要員', 1, 0, 0)", username);
@@ -83,13 +92,53 @@ class AccountLockServiceMySqlTest {
         assertThat(originalLock).isNotNull();
 
         accountLockService.onLoginFailure(username);
-        assertThat(failedCount()).isEqualTo(1);
+        assertThat(failedCount()).isZero();
         assertThat(lockedUntil()).isEqualTo(originalLock);
     }
 
     @Test
-    void 同一ユーザーへの並行失敗は行ロックで更新消失を防ぎ閾値を一度だけ越える() throws Exception {
-        int attempts = 16;
+    void 閾値前の並行失敗を保持し有効ロック中の並行失敗では状態を変えない() throws Exception {
+        runConcurrentFailures(4);
+        assertThat(failedCount()).isEqualTo(4);
+        assertThat(lockedUntil()).isNull();
+
+        accountLockService.onLoginFailure(username);
+        LocalDateTime originalLock = lockedUntil();
+        assertThat(failedCount()).isZero();
+        assertThat(originalLock).isNotNull();
+
+        clock.set(TEST_NOW.plusSeconds(60));
+        runConcurrentFailures(16);
+        assertThat(failedCount()).isZero();
+        assertThat(lockedUntil()).isEqualTo(originalLock);
+    }
+
+    @Test
+    void 期限切れ後は新しい周期の5回目で再ロックする() {
+        LocalDateTime expiredAt = LocalDateTime.now(clock).minusMinutes(1);
+        jdbc.update("UPDATE sys_user SET failed_count = 4, locked_until = ? WHERE id = ?", expiredAt, userId);
+
+        accountLockService.onLoginFailure(username);
+        assertThat(failedCount()).isEqualTo(1);
+        assertThat(lockedUntil()).isNull();
+        for (int failure = 2; failure <= 4; failure++) {
+            accountLockService.onLoginFailure(username);
+            assertThat(failedCount()).isEqualTo(failure);
+            assertThat(lockedUntil()).isNull();
+        }
+        accountLockService.onLoginFailure(username);
+        assertThat(failedCount()).isZero();
+        assertThat(lockedUntil()).isNotNull();
+    }
+
+    @Test
+    void 5回以上の初回並行失敗で一度だけロックする() throws Exception {
+        runConcurrentFailures(16);
+        assertThat(failedCount()).isZero();
+        assertThat(lockedUntil()).isNotNull();
+    }
+
+    private void runConcurrentFailures(int attempts) throws Exception {
         var ready = new CountDownLatch(attempts);
         var start = new CountDownLatch(1);
         var pool = Executors.newFixedThreadPool(attempts);
@@ -112,9 +161,6 @@ class AccountLockServiceMySqlTest {
             start.countDown();
             pool.shutdownNow();
         }
-
-        assertThat(failedCount()).isEqualTo(attempts - AccountLockService.MAX_FAILED);
-        assertThat(lockedUntil()).isNotNull();
     }
 
     private int failedCount() {
@@ -123,5 +169,24 @@ class AccountLockServiceMySqlTest {
 
     private LocalDateTime lockedUntil() {
         return jdbc.queryForObject("SELECT locked_until FROM sys_user WHERE id = ?", LocalDateTime.class, userId);
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class TestClockConfiguration {
+        @Bean
+        @Primary
+        AccountLockClock accountLockClock() {
+            return new AccountLockClock();
+        }
+    }
+
+    static final class AccountLockClock extends Clock {
+        private volatile Instant instant = TEST_NOW;
+
+        void set(Instant value) { instant = value; }
+
+        @Override public ZoneId getZone() { return ZoneId.of("Asia/Tokyo"); }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return instant; }
     }
 }
