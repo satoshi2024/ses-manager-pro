@@ -67,11 +67,11 @@ public class ImportIdentityCandidateService {
             try {
                 Long id = transaction.execute(status -> registerLocked(context, snapshot, validationRunId,
                         sourceRowNumber, verifiedRow, encrypted, existing));
-                if (id == null) throw new IllegalStateException("candidate transaction returned no ID");
+                if (id == null) throw new IllegalStateException("candidate登録transactionからIDが返りません");
                 return id;
             } catch (ExistingIdentityAppeared raced) {
-                // source row lock serializes same-namespace writers. Resolve a newly committed identity
-                // outside the transaction so decryption/key-provider work never holds DB locks.
+                // source row lockで同一namespaceの登録を直列化する。新規identityは次の試行で
+                // transaction外から再取得し、復号と鍵解決をDB lockの保持中に行わない。
                 if (attempt == 1) throw BusinessException.of(409, "error.import.identityCandidateConflict");
             } catch (DuplicateKeyException racedInsert) {
                 if (attempt == 1) throw BusinessException.of(409, "error.import.identityCandidateConflict");
@@ -104,10 +104,11 @@ public class ImportIdentityCandidateService {
                 """, rs -> rs.next() ? new Document(rs.getString(1), rs.getInt(2), rs.getDate(3) == null
                 ? null : rs.getDate(3).toLocalDate(), rs.getInt(4)) : null,
                 context.tenantId(), snapshot.documentId());
+        LocalDate databaseToday = jdbc.queryForObject("SELECT CURRENT_DATE", LocalDate.class);
         if (document == null || document.deletedFlag() != 0
                 || !Long.toString(context.legalEntityId()).equals(document.legalEntityId())
                 || document.legalHoldFlag() != 0
-                || (document.retentionUntil() != null && document.retentionUntil().isBefore(LocalDate.now()))) {
+                || (document.retentionUntil() != null && document.retentionUntil().isBefore(databaseToday))) {
             throw BusinessException.of(403, "error.import.documentSnapshotMismatch");
         }
 
@@ -132,7 +133,7 @@ public class ImportIdentityCandidateService {
                 """, (rs, row) -> rs.getLong(1), context.tenantId(), snapshot.documentId(), snapshot.jobId());
         if (links.size() != 1) throw BusinessException.of(403, "error.import.documentLinkMissing");
 
-        // DocumentService performs the live ACL/FileScope/legal-entity/scan/hold/retention check again.
+        // current ACL、FileScope、法人、scan、hold、retentionを再確認する。
         documentService.authorizeImportJobDownload(snapshot.jobId(), snapshot.documentId(),
                 snapshot.documentVersionId(), snapshot.documentVersionNo(), HexFormat.of().formatHex(snapshot.documentSha256()));
 
@@ -198,7 +199,7 @@ public class ImportIdentityCandidateService {
             return locked.id();
         }
         if (prechecked != null) throw BusinessException.of(409, "error.import.identityCandidateConflict");
-        // Permission is rechecked after all source/document/run/row locks and immediately before write.
+        // 全てのsource/document/run/row lock取得後、registry書込み直前に権限を再確認する。
         finalContext = authorization.requireCurrentAuthorization();
         requireSameActor(originalContext, finalContext);
         return insert(context, snapshot, runId, encrypted);

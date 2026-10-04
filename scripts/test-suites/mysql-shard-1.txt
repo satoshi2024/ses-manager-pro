@@ -21,3 +21,4 @@ AiFeedbackLearningSchemaTest
 LifecycleMySqlIntegrationTest
 PrivacyJournalLinearizationMySqlTest
 AssetMySqlIntegrationTest
+ImportIdentityCandidateMySqlTest
