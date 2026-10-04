@@ -17,6 +17,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /** BOM/Shift_JISを明示選択して読み取る、上限付きstream CSV parser。 */
@@ -28,6 +29,22 @@ public final class SesCsvParser {
 
     public ParseSummary parse(InputStream source, String fileName, ImportEntity entity,
                               ImportEncoding encoding, Consumer<SourceRow> rowConsumer) throws IOException {
+        return parseInternal(source, fileName, entity, encoding, null, rowConsumer);
+    }
+
+    /** 明示mappingだけを適用する。既存F2 parse入口のschema header規則は変更しない。 */
+    public ParseSummary parseMapped(InputStream source, String fileName, ImportEntity entity,
+                                    ImportEncoding encoding, Map<String, String> sourceToCanonical,
+                                    Consumer<SourceRow> rowConsumer) throws IOException {
+        if (sourceToCanonical == null || sourceToCanonical.isEmpty()) {
+            throw new IllegalArgumentException("明示header mappingが必要です");
+        }
+        return parseInternal(source, fileName, entity, encoding, Map.copyOf(sourceToCanonical), rowConsumer);
+    }
+
+    private ParseSummary parseInternal(InputStream source, String fileName, ImportEntity entity,
+                                       ImportEncoding encoding, Map<String, String> sourceToCanonical,
+                                       Consumer<SourceRow> rowConsumer) throws IOException {
         if (source == null || fileName == null || entity == null || encoding == null || rowConsumer == null) {
             throw new IllegalArgumentException("入力source、file名、entity、encoding、row consumerが必要です");
         }
@@ -57,7 +74,8 @@ public final class SesCsvParser {
             List<String> header = records.next();
             if (header == null) throw new CsvFormatException("headerがありません");
             SesImportV1Schema.Definition definition = SesImportV1Schema.definition(entity);
-            validateHeader(header, definition);
+            if (sourceToCanonical == null) validateHeader(header, definition);
+            else validateMappedHeader(header, definition, sourceToCanonical);
             long physicalRows = 0;
             long emptySkipped = 0;
             long accepted = 0;
@@ -67,7 +85,10 @@ public final class SesCsvParser {
                 if (values.stream().allMatch(String::isEmpty)) { emptySkipped++; continue; }
                 if (values.size() != header.size()) throw new CsvFormatException("headerとdata rowの列数が一致しません: row=" + physicalRows);
                 Map<String, String> mapped = new LinkedHashMap<>();
-                for (int i = 0; i < header.size(); i++) mapped.put(header.get(i), values.get(i));
+                for (int i = 0; i < header.size(); i++) {
+                    String outputHeader = sourceToCanonical == null ? header.get(i) : sourceToCanonical.get(header.get(i));
+                    mapped.put(outputHeader, values.get(i));
+                }
                 String rowHash = hashRow(values);
                 rowConsumer.accept(new SourceRow(physicalRows, rowHash, mapped));
                 accepted++;
@@ -89,6 +110,25 @@ public final class SesCsvParser {
         }
         for (String required : definition.requiredHeaders()) {
             if (!seen.contains(required)) throw new CsvFormatException("必須headerがありません: " + required);
+        }
+    }
+
+    private static void validateMappedHeader(List<String> header, SesImportV1Schema.Definition definition,
+                                             Map<String, String> sourceToCanonical) throws IOException {
+        Set<String> seen = new java.util.HashSet<>();
+        Set<String> targets = new java.util.HashSet<>();
+        for (String sourceHeader : header) {
+            if (sourceHeader.isBlank() || !seen.add(sourceHeader)) {
+                throw new CsvFormatException("空または重複headerを拒否しました");
+            }
+            String canonical = sourceToCanonical.get(sourceHeader);
+            if (canonical == null || !definition.allowedHeaders().contains(canonical) || !targets.add(canonical)) {
+                throw new CsvFormatException("header mappingが不正です");
+            }
+        }
+        if (seen.size() != sourceToCanonical.size() || !seen.containsAll(sourceToCanonical.keySet())
+                || !targets.containsAll(definition.requiredHeaders())) {
+            throw new CsvFormatException("header mappingがsource schemaと一致しません");
         }
     }
 

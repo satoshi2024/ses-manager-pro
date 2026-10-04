@@ -6,6 +6,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.importcenter.foundation.CanonicalImportRow;
 import com.ses.importcenter.foundation.CanonicalImportRowFingerprint;
 import com.ses.importcenter.foundation.CanonicalRowFactory;
+import com.ses.importcenter.foundation.ExternalKeyNormalizer;
 import com.ses.importcenter.foundation.ImportEncoding;
 import com.ses.importcenter.foundation.ImportEntity;
 import com.ses.importcenter.foundation.SesCsvParser;
@@ -24,28 +25,25 @@ import java.util.Map;
 final class ImportCandidateSourceReader {
     private static final TypeReference<Map<String, String>> MAPPING_TYPE = new TypeReference<>() { };
     private final ImportMetadataService metadata;
-    private final SesCsvParser parser;
+    private final SesCsvParser parser = new SesCsvParser();
     private final ObjectMapper objectMapper;
 
-    ImportCandidateSourceReader(ImportMetadataService metadata, SesCsvParser parser, ObjectMapper objectMapper) {
+    ImportCandidateSourceReader(ImportMetadataService metadata, ObjectMapper objectMapper) {
         this.metadata = metadata;
-        this.parser = parser;
         this.objectMapper = objectMapper;
     }
 
     VerifiedCandidateRow read(long jobId, long sourceRowNumber, Snapshot snapshot) {
         if (sourceRowNumber < 1) throw BusinessException.of(400, "error.import.sourceRowInvalid");
         Map<String, String> mapping = decodeMapping(snapshot);
-        String externalKeyHeader = mapping.entrySet().stream()
-                .filter(entry -> "externalKey".equals(entry.getValue()))
-                .map(Map.Entry::getKey).findFirst()
+        String externalKeyField = mapping.values().stream()
+                .filter("externalKey"::equals).findFirst()
                 .orElseThrow(() -> BusinessException.of(409, "error.import.mappingSnapshotMismatch"));
         if (mapping.values().stream().filter("externalKey"::equals).count() != 1) {
             throw BusinessException.of(409, "error.import.mappingSnapshotMismatch");
         }
 
-        CandidateRowBuilder candidate = new CandidateRowBuilder(sourceRowNumber, externalKeyHeader, mapping,
-                snapshot.entity());
+        CandidateRowBuilder candidate = new CandidateRowBuilder(sourceRowNumber, externalKeyField, snapshot.entity());
         String actualSourceHash;
         try (ImportSourceContent content = metadata.openSource(jobId)) {
             if (content.entity() != snapshot.entity() || content.encoding() != snapshot.encoding()
@@ -53,7 +51,8 @@ final class ImportCandidateSourceReader {
                     HexFormat.of().parseHex(content.sha256Hex()))) {
                 throw BusinessException.of(409, "error.import.sourceSnapshotMismatch");
             }
-            var parsed = parser.parse(content.stream(), content.originalFileName(), content.entity(), content.encoding(), candidate::accept);
+            var parsed = parser.parseMapped(content.stream(), content.originalFileName(), content.entity(),
+                    content.encoding(), mapping, candidate::accept);
             actualSourceHash = parsed.sourceSha256();
         } catch (IOException | IllegalArgumentException failure) {
             throw BusinessException.of(409, "error.import.sourceReadFailed");
@@ -110,36 +109,35 @@ final class ImportCandidateSourceReader {
         }
         @Override public byte[] sourceRowSha256() { return sourceRowSha256.clone(); }
         @Override public byte[] canonicalFingerprint() { return canonicalFingerprint.clone(); }
+        @Override public String toString() { return "VerifiedCandidateRow[redacted]"; }
     }
 
     private static final class CandidateRowBuilder {
         private final long requestedRowNumber;
-        private final String externalKeyHeader;
-        private final Map<String, String> mapping;
+        private final String externalKeyField;
         private final ImportEntity entity;
         private VerifiedCandidateRow result;
 
-        private CandidateRowBuilder(long requestedRowNumber, String externalKeyHeader,
-                                    Map<String, String> mapping, ImportEntity entity) {
+        private CandidateRowBuilder(long requestedRowNumber, String externalKeyField, ImportEntity entity) {
             this.requestedRowNumber = requestedRowNumber;
-            this.externalKeyHeader = externalKeyHeader;
-            this.mapping = mapping;
+            this.externalKeyField = externalKeyField;
             this.entity = entity;
         }
 
         private void accept(SourceRow sourceRow) {
             if (sourceRow.sourceRowNumber() != requestedRowNumber) return;
             if (result != null) throw BusinessException.of(409, "error.import.sourceRowAmbiguous");
-            Map<String, String> canonicalValues = new LinkedHashMap<>();
-            mapping.forEach((sourceHeader, canonicalField) -> {
-                String value = sourceRow.values().get(sourceHeader);
-                if (value == null) throw BusinessException.of(409, "error.import.mappingSnapshotMismatch");
-                canonicalValues.put(canonicalField, value);
-            });
+            Map<String, String> canonicalValues = new LinkedHashMap<>(sourceRow.values());
+            final String normalizedExternalKey;
+            try {
+                normalizedExternalKey = ExternalKeyNormalizer.normalize(canonicalValues.get(externalKeyField));
+            } catch (IllegalArgumentException invalidKey) {
+                throw BusinessException.of(409, "error.import.identityKeyInvalid");
+            }
             SourceRow canonicalSourceRow = new SourceRow(sourceRow.sourceRowNumber(), sourceRow.sourceRowHash(), canonicalValues);
             CanonicalImportRow canonical = CanonicalRowFactory.create(entity, canonicalSourceRow);
             String key = canonical.metadata().externalKey();
-            if (key == null || sourceRow.values().get(externalKeyHeader) == null) {
+            if (key == null || !normalizedExternalKey.equals(key)) {
                 throw BusinessException.of(409, "error.import.identityKeyInvalid");
             }
             result = new VerifiedCandidateRow(key, HexFormat.of().parseHex(sourceRow.sourceRowHash()),

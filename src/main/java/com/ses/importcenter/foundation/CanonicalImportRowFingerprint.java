@@ -9,7 +9,11 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Map;
 import java.util.TreeMap;
 
-/** F2/F1aで共用するcanonical field fingerprintの唯一のserialization実装。 */
+/**
+ * F2/F1aが共用するcanonical field fingerprintのserialization実装。
+ * V1はentity、externalKey、昇順field名、presence、valueを32bit big-endian length-prefixで符号化してSHA-256化する。
+ * 値推測への耐性や匿名化を提供しないため、保存値も機微metadataとして保持・参照を制限する。
+ */
 public final class CanonicalImportRowFingerprint {
     private static final byte[] DOMAIN = "SES-IMPORT-CANONICAL-ROW-V1".getBytes(StandardCharsets.US_ASCII);
 

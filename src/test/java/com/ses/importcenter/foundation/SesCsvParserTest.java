@@ -8,6 +8,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -86,6 +87,22 @@ class SesCsvParserTest {
         assertThrows(SesCsvParser.CsvFormatException.class, () -> parse("x.csv", "externalKey,companyName,unknown\n", ImportEncoding.UTF8));
         assertThrows(SesCsvParser.CsvFormatException.class, () -> parse("x.csv", "externalKey,companyName\nC,\"broken\n", ImportEncoding.UTF8));
         assertThrows(SesCsvParser.CsvFormatException.class, () -> parse("x.csv", "externalKey,companyName\nC,\"closed\"x\n", ImportEncoding.UTF8));
+    }
+
+    @Test
+    void explicitMappingAcceptsAliasesWhileTheDefaultF2EntryPointStillRejectsThem() throws Exception {
+        byte[] source = "顧客ID,会社名\nC-SYN-1,架空会社\n".getBytes(StandardCharsets.UTF_8);
+        Map<String, String> mapping = Map.of("顧客ID", "externalKey", "会社名", "companyName");
+
+        assertThrows(SesCsvParser.CsvFormatException.class, () -> parser.parse(new ByteArrayInputStream(source),
+                "mapped.csv", ImportEntity.CUSTOMER, ImportEncoding.UTF8, ignored -> { }));
+        List<SourceRow> rows = new ArrayList<>();
+        var summary = parser.parseMapped(new ByteArrayInputStream(source), "mapped.csv", ImportEntity.CUSTOMER,
+                ImportEncoding.UTF8, mapping, rows::add);
+
+        assertEquals("C-SYN-1", rows.get(0).values().get("externalKey"));
+        assertEquals("架空会社", rows.get(0).values().get("companyName"));
+        assertEquals(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(source)), summary.sourceSha256());
     }
 
     @Test
