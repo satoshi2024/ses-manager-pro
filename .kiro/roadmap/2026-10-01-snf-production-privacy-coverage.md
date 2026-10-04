@@ -1,6 +1,19 @@
 # NF07 現行source coverage 再確認
 
-## 最新の統合source scan
+## 最新の統合source scan（2026-10-04）
+
+- 固定Head: `ad9bb1c6a58c37643e8753a2fd42c87b180f5ce5`（NF04 G1限定統合後）。
+- 下記と同じread-only scannerを実行し、起止Head一致・cleanを確認した。DB/provider接続なし。
+- statusは **BLOCKED_COVERAGE_INCOMPLETE / scanner exit 2**。providerCallCount/writeCountとも0。
+- migration 183 scripts、254 table、244 entity table、724 provider候補。
+- privacy catalog未分類74 table、既存catalog policy unknown78、構造欠落column1082、
+  provider301、entity68。provider候補は機械抽出であり、全件が実外部送信経路とは限らない。
+- source manifest SHA-256: `d3bb9b8d1ea1a610f0854c835e697cb4f5a213a0a2230c4a46adf943e725380e`。
+- raw JSON、起止metadata、hashは `verification-evidence/20261004-privacy-coverage-03/`。
+  scanner wrapperのexit 0は収集処理終了であり、内側scanner exit 2をPASSへ変更しない。
+- 未統合NF06 V184、NF08後続sliceはこのscanに含まれない。最終RCで再実行する。
+
+## 2026-10-01の統合source scan履歴
 
 - 固定Head: `cde61306`（V183、NF07 SF-W1統合後）。
 - commandは下記と同じread-only scanner。DB/provider接続なし、providerCallCount/writeCountとも0。
