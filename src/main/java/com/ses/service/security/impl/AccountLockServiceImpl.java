@@ -44,6 +44,9 @@ public class AccountLockServiceImpl implements AccountLockService {
         }
         LocalDateTime now = LocalDateTime.now(clock);
         boolean lockExpired = user.getLockedUntil() != null && !user.getLockedUntil().isAfter(now);
+        if (user.getLockedUntil() != null && !lockExpired) {
+            return;
+        }
         int current = lockExpired ? 0 : (user.getFailedCount() != null ? user.getFailedCount() : 0);
         int next = current + 1;
         if (next >= MAX_FAILED) {
@@ -51,7 +54,7 @@ public class AccountLockServiceImpl implements AccountLockService {
             sysUserMapper.updateLockState(user.getId(), 0, lockedUntil);
             log.warn("アカウントをロックしました: userId={} 解除予定={}", user.getId(), lockedUntil);
         } else {
-            sysUserMapper.updateLockState(user.getId(), next, user.getLockedUntil());
+            sysUserMapper.updateLockState(user.getId(), next, null);
         }
     }
 

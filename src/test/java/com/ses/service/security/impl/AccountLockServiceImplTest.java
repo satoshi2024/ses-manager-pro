@@ -91,7 +91,7 @@ class AccountLockServiceImplTest {
 
         service.onLoginFailure("tester");
 
-        verify(mapper).updateLockState(1L, 1, lockedUntil);
+        verify(mapper, never()).updateLockState(anyLong(), anyInt(), any());
     }
 
     @Test
