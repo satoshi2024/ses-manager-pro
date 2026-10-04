@@ -97,6 +97,10 @@ class ImportIdentityCandidateMySqlTest {
         mysqlDataSource.setPassword(MYSQL.getPassword());
         dataSource = mysqlDataSource;
         jdbc = new JdbcTemplate(dataSource);
+        jdbc.execute("SET GLOBAL time_zone = '+09:00'");
+        assertEquals("+09:00", jdbc.queryForObject("SELECT @@session.time_zone", String.class));
+        assertEquals(1, jdbc.queryForObject("SELECT CURRENT_DATE = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00'))",
+                Integer.class));
         createSchema();
         seedSnapshot();
 
