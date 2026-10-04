@@ -1,5 +1,6 @@
 package com.ses.service.pwa;
 
+import com.ses.common.exception.BusinessException;
 import com.ses.dto.pwa.PwaRestoreConfirmRequest;
 import com.ses.dto.pwa.PwaRestoreReauthenticateRequest;
 import com.ses.config.LoginUser;
@@ -26,10 +27,12 @@ import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -204,12 +207,11 @@ class PwaRestoreAuthorizationServiceTest {
                 }
             });
             assertThat(enteredDbRead.await(2, TimeUnit.SECONDS)).isTrue();
-            service.reauthenticate(reauth(documentNonce, "scope-v2"), session, authentication);
+            var replacement = service.reauthenticate(reauth(documentNonce, "scope-v2"), session, authentication);
             releaseDbRead.countDown();
-            assertThatThrownBy(() -> oldConfirm.get(3, TimeUnit.SECONDS))
-                    .hasCauseInstanceOf(RuntimeException.class);
-            assertThat((Map<?, ?>) ReflectionTestUtils.getField(session.getAttribute(
-                    PwaRestoreAuthorizationService.SESSION_STATE_ATTRIBUTE), "permits")).isEmpty();
+            assertRejectedFuture(oldConfirm);
+            assertThat(service.confirm(confirm(replacement.proof(), documentNonce, "scope-v2"), session, authentication)
+                    .userScope()).isEqualTo("scope-v2");
         } finally {
             releaseDbRead.countDown();
             pool.shutdownNow();
@@ -244,11 +246,37 @@ class PwaRestoreAuthorizationServiceTest {
             assertThat(enteredDbRead.await(2, TimeUnit.SECONDS)).isTrue();
             clock.set(NOW.plusSeconds(120));
             releaseDbRead.countDown();
-            assertThatThrownBy(() -> pending.get(3, TimeUnit.SECONDS))
-                    .hasCauseInstanceOf(RuntimeException.class);
+            assertRejectedFuture(pending);
+            assertThat((Map<?, ?>) ReflectionTestUtils.getField(session.getAttribute(
+                    PwaRestoreAuthorizationService.SESSION_STATE_ATTRIBUTE), "permits")).isEmpty();
         } finally {
             releaseDbRead.countDown();
             pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void activePermit数を制限し期限切れnonce状態を多回復元後に回収する() {
+        for (int i = 30; i < 34; i++) {
+            String value = nonce(i);
+            var proof = service.reauthenticate(reauth(value, "scope-v2"), session, authentication);
+            service.confirm(confirm(proof.proof(), value, "scope-v2"), session, authentication);
+        }
+        assertThatThrownBy(() -> service.reauthenticate(reauth(nonce(34), "scope-v2"), session, authentication))
+                .isInstanceOfSatisfying(BusinessException.class, error -> {
+                    assertThat(error.getCode()).isEqualTo(403);
+                    assertThat(error.getMessage()).isEqualTo("error.pwa.restore.rejected");
+                });
+
+        for (int i = 35; i < 55; i++) {
+            clock.set(clock.instant().plusSeconds(901));
+            String value = nonce(i);
+            var proof = service.reauthenticate(reauth(value, "scope-v2"), session, authentication);
+            service.confirm(confirm(proof.proof(), value, "scope-v2"), session, authentication);
+            Object state = session.getAttribute(PwaRestoreAuthorizationService.SESSION_STATE_ATTRIBUTE);
+            assertThat(((Map<?, ?>) ReflectionTestUtils.getField(state, "permits"))).hasSize(1);
+            assertThat(((Map<?, ?>) ReflectionTestUtils.getField(state, "nonceGenerations"))).hasSize(1);
+            assertThat(((java.util.Set<?>) ReflectionTestUtils.getField(state, "claims"))).isEmpty();
         }
     }
 
@@ -286,7 +314,9 @@ class PwaRestoreAuthorizationServiceTest {
         var proof = service.reauthenticate(reauth(nonce(14), "scope-v2"), session, authentication);
         var acquired = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        var pool = Executors.newSingleThreadExecutor();
+        var listenerStarted = new CountDownLatch(1);
+        var listenerThread = new AtomicReference<Thread>();
+        var pool = Executors.newFixedThreadPool(2);
         try {
             var holder = pool.submit(() -> {
                 synchronized (WebUtils.getSessionMutex(session)) {
@@ -296,8 +326,17 @@ class PwaRestoreAuthorizationServiceTest {
                 return null;
             });
             assertThat(acquired.await(2, TimeUnit.SECONDS)).isTrue();
-            var logout = pool.submit(() -> new PwaRestoreSessionListener(registry)
-                    .sessionDestroyed(new HttpSessionEvent(session)));
+            var logout = pool.submit(() -> {
+                listenerThread.set(Thread.currentThread());
+                listenerStarted.countDown();
+                new PwaRestoreSessionListener(registry).sessionDestroyed(new HttpSessionEvent(session));
+            });
+            assertThat(listenerStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (listenerThread.get().getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) {
+                Thread.yield();
+            }
+            assertThat(listenerThread.get().getState()).isEqualTo(Thread.State.BLOCKED);
             assertThat(registry.isDestroyed(session.getId())).isFalse();
             release.countDown();
             holder.get(2, TimeUnit.SECONDS);
@@ -309,6 +348,18 @@ class PwaRestoreAuthorizationServiceTest {
             release.countDown();
             pool.shutdownNow();
         }
+    }
+
+    private static void assertRejectedFuture(java.util.concurrent.Future<?> future) throws Exception {
+        assertThatThrownBy(() -> future.get(3, TimeUnit.SECONDS))
+                .isInstanceOf(ExecutionException.class)
+                .satisfies(thrown -> {
+                    Throwable cause = thrown.getCause();
+                    assertThat(cause).isInstanceOfSatisfying(BusinessException.class, error -> {
+                        assertThat(error.getCode()).isEqualTo(403);
+                        assertThat(error.getMessage()).isEqualTo("error.pwa.restore.rejected");
+                    });
+                });
     }
 
     private boolean consumeAfter(CountDownLatch start, PwaRestoreConfirmRequest request) throws Exception {
