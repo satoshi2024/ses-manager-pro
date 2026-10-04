@@ -185,7 +185,7 @@ class FileScopeValidationServiceTest {
     }
 
     @Test
-    void 既存engineer写真参照があっても同じdocumentのIMPORT_JOB_linkで汎用downloadを拒否() {
+    void 既存engineer写真参照は許可し後から付いたIMPORT_JOB_linkは汎用downloadを拒否() {
         noMatchOnEarlierTables();
         String storageKey = "shared-engineer-import.csv";
         Engineer engineer = new Engineer();
@@ -198,9 +198,13 @@ class FileScopeValidationServiceTest {
         link.setDocumentId(880L);
         link.setTargetType("IMPORT_JOB");
         link.setTargetId(990L);
-        when(documentLinkMapper.selectList(any())).thenReturn(List.of(link));
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of());
 
         loginAs("HR");
+        assertDoesNotThrow(() -> service.assertDownloadAllowed(storageKey, 41L, "ab".repeat(32)));
+
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(link));
+        org.mockito.Mockito.clearInvocations(engineerMapper);
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.assertDownloadAllowed(storageKey, 41L, "ab".repeat(32)));
 
