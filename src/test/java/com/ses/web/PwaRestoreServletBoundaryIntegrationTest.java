@@ -186,7 +186,9 @@ class PwaRestoreServletBoundaryIntegrationTest {
             assertThat(body.path("code").asInt()).isEqualTo(403);
             assertThat(body.path("message").asText())
                     .isEqualTo("PWA復元の再認証を確認できませんでした。再認証からやり直してください。");
-            assertThat(body.path("data").isMissingNode()).isTrue();
+            JsonNode data = body.path("data");
+            assertThat(data.isMissingNode() || data.isNull()).isTrue();
+            assertThat(body.toString()).doesNotContain("permitExpiresAt", "documentNonce", "userScope");
         } finally {
             releaseIdentityRead.countDown();
             executor.shutdownNow();
@@ -216,7 +218,13 @@ class PwaRestoreServletBoundaryIntegrationTest {
                 .POST(HttpRequest.BodyPublishers.ofString(formEncode(form), StandardCharsets.UTF_8)).build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         assertThat(response.statusCode()).isEqualTo(302);
-        assertThat(response.headers().firstValue("location").orElse("")).isEqualTo("/");
+        URI redirect = base.resolve(response.headers().firstValue("location").orElseThrow());
+        assertThat(redirect.getScheme()).isEqualTo(base.getScheme());
+        assertThat(redirect.getHost()).isEqualTo(base.getHost());
+        assertThat(redirect.getPort()).isEqualTo(base.getPort());
+        assertThat(redirect.getPath()).isEqualTo("/");
+        assertThat(redirect.getQuery()).isNull();
+        assertThat(redirect.getFragment()).isNull();
         return new Browser(client, cookies, base);
     }
 
