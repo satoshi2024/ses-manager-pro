@@ -67,7 +67,6 @@ class WatermarkCanonicalizerTest {
     }
 
     @Test
-    @Test
     void 取得済みDataSourceもprod切替後の実接続を拒否する() throws Exception {
         try (AnnotationConfigApplicationContext context = context(new String[]{"test"}, new String[0])) {
             java.util.concurrent.atomic.AtomicInteger attempts = new java.util.concurrent.atomic.AtomicInteger();
