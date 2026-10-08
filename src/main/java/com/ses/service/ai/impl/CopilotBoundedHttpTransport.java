@@ -10,6 +10,7 @@ import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.async.CloseableHttpAsyncClient;
 import org.apache.hc.client5.http.impl.async.HttpAsyncClients;
 import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManagerBuilder;
+import org.apache.hc.client5.http.protocol.HttpClientContext;
 import org.apache.hc.core5.concurrent.FutureCallback;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.HttpResponse;
@@ -23,6 +24,7 @@ import org.springframework.util.Assert;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.util.Locale;
 import java.util.concurrent.ExecutionException;
@@ -33,7 +35,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Management Copilot専用HTTP/1.1 transport。外部呼出側はURL allowlistとTLS identityを検査する。 */
+/** Management Copilot専用HTTP/1.1 transport。呼出側でURL allowlistとTLS identityを検査する。 */
 public final class CopilotBoundedHttpTransport implements AutoCloseable {
 
     public static final int MAX_RESPONSE_BYTES = 64 * 1024;
@@ -41,9 +43,13 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
     private static final int MAX_ACTIVE_EXCHANGES = 8;
     private static final int MAX_ADMITTED_EXCHANGES = 12;
     private static final String PROVIDER_HOST = "generativelanguage.googleapis.com";
+    private static final String DNS_HOST_CONTEXT = "copilot.dns-host";
+    private static final String DEADLINE_CONTEXT = "copilot.deadline-nanos";
 
     private final CopilotDnsSnapshotResolver dnsResolver;
     private final boolean testLoopbackMode;
+    private final Runnable testAdmissionObserver;
+    private final Runnable testSubmissionObserver;
     private final Semaphore exchangePermits = new Semaphore(MAX_ACTIVE_EXCHANGES, true);
     private final Semaphore admissionPermits = new Semaphore(MAX_ADMITTED_EXCHANGES, true);
     private final AtomicInteger activeExchanges = new AtomicInteger();
@@ -51,13 +57,25 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
     private volatile boolean started;
 
     public CopilotBoundedHttpTransport(CopilotDnsSnapshotResolver dnsResolver) {
-        this(dnsResolver, false);
+        this(dnsResolver, false, () -> { }, () -> { });
     }
 
-    /** Package-private seam: loopback HTTP is possible only in isolated transport tests. */
+    /** loopback接続とsubmission観測はpackage内テスト専用とする。 */
     CopilotBoundedHttpTransport(CopilotDnsSnapshotResolver dnsResolver, boolean testLoopbackMode) {
+        this(dnsResolver, testLoopbackMode, () -> { }, () -> { });
+    }
+
+    CopilotBoundedHttpTransport(CopilotDnsSnapshotResolver dnsResolver, boolean testLoopbackMode,
+                                Runnable testSubmissionObserver) {
+        this(dnsResolver, testLoopbackMode, () -> { }, testSubmissionObserver);
+    }
+
+    CopilotBoundedHttpTransport(CopilotDnsSnapshotResolver dnsResolver, boolean testLoopbackMode,
+                                Runnable testAdmissionObserver, Runnable testSubmissionObserver) {
         this.dnsResolver = dnsResolver;
         this.testLoopbackMode = testLoopbackMode;
+        this.testAdmissionObserver = testAdmissionObserver;
+        this.testSubmissionObserver = testSubmissionObserver;
         var connectionManager = PoolingAsyncClientConnectionManagerBuilder.create()
                 .setDnsResolver(dnsResolver)
                 .setMaxConnTotal(MAX_ACTIVE_EXCHANGES)
@@ -89,6 +107,22 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
                 .disableAutomaticRetries()
                 .disableCookieManagement()
                 .disableAuthCaching()
+                .addRequestInterceptorFirst((request, entity, context) -> {
+                    Object dnsHost = context.getAttribute(DNS_HOST_CONTEXT);
+                    Object requestDeadline = context.getAttribute(DEADLINE_CONTEXT);
+                    if (!(dnsHost instanceof String host) || !(requestDeadline instanceof Long deadline)) {
+                        throw new DnsSnapshotUnavailableException();
+                    }
+                    if (remainingNanos(deadline) <= 0) {
+                        throw new DeadlineExceededException();
+                    }
+                    try {
+                        // HC5はendpoint lease/connect後、送信直前にprocessorを呼ぶ（再利用接続も同じ）。
+                        dnsResolver.resolve(host);
+                    } catch (IOException ex) {
+                        throw new DnsSnapshotUnavailableException();
+                    }
+                })
                 .build();
     }
 
@@ -99,9 +133,9 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
         }
     }
 
-    /** Returns a bounded response body; body and transport exception text are never logged. */
+    /** 応答本文を上限付きで返し、本文とtransport例外文は記録しない。 */
     public Response post(URI uri, byte[] requestBody, long deadlineNanos) {
-        Assert.state(started, "Copilot async transport is not started");
+        Assert.state(started, "Copilot async transportは開始されていません");
         validateDestination(uri);
         if (requestBody == null || requestBody.length > MAX_REQUEST_BYTES) {
             throw BusinessException.of(413, "COPILOT_REQUEST_TOO_LARGE");
@@ -113,6 +147,7 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
         if (!admissionPermits.tryAcquire()) {
             throw BusinessException.of(503, "COPILOT_TRANSPORT_BUSY");
         }
+        testAdmissionObserver.run();
 
         AtomicBoolean released = new AtomicBoolean();
         AtomicBoolean activeCounted = new AtomicBoolean();
@@ -163,6 +198,9 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
                     .setRequestConfig(requestConfig)
                     .build();
             BoundedResponseConsumer consumer = new BoundedResponseConsumer(deadlineNanos);
+            HttpClientContext clientContext = HttpClientContext.create();
+            clientContext.setAttribute(DNS_HOST_CONTEXT, uri.getHost());
+            clientContext.setAttribute(DEADLINE_CONTEXT, deadlineNanos);
             remaining = remainingNanos(deadlineNanos);
             if (remaining <= 0) {
                 throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
@@ -174,7 +212,8 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
                 if (remainingNanos(deadlineNanos) <= 0) {
                     throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
                 }
-                future = client.execute(SimpleRequestProducer.create(request), consumer, new FutureCallback<>() {
+                future = client.execute(SimpleRequestProducer.create(request), consumer, clientContext,
+                        new FutureCallback<>() {
                     @Override
                     public void completed(Response result) {
                         releasePermit.run();
@@ -191,6 +230,7 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
                     }
                 });
                 submitted = true;
+                testSubmissionObserver.run();
             } catch (BusinessException ex) {
                 throw ex;
             } catch (RuntimeException ex) {
@@ -216,8 +256,18 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
             throw BusinessException.of(503, "COPILOT_TRANSPORT_INTERRUPTED");
         } catch (ExecutionException ex) {
             Throwable cause = ex.getCause();
+            if (remainingNanos(deadlineNanos) <= 0) {
+                throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
+            }
             if (cause instanceof BoundedResponseException bounded) {
                 throw BusinessException.of(bounded.code, bounded.reasonCode);
+            }
+            if (hasCause(cause, DnsSnapshotUnavailableException.class)
+                    || hasCause(cause, UnknownHostException.class)) {
+                throw BusinessException.of(503, "COPILOT_DNS_UNAVAILABLE");
+            }
+            if (hasCause(cause, DeadlineExceededException.class)) {
+                throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
             }
             throw BusinessException.of(503, "COPILOT_TRANSPORT_FAILED");
         } finally {
@@ -260,6 +310,15 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
 
     private static long remainingNanos(long deadlineNanos) {
         return deadlineNanos - System.nanoTime();
+    }
+
+    private static boolean hasCause(Throwable cause, Class<? extends Throwable> type) {
+        for (Throwable current = cause; current != null; current = current.getCause()) {
+            if (type.isInstance(current)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -336,6 +395,18 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
             super(reasonCode);
             this.code = code;
             this.reasonCode = reasonCode;
+        }
+    }
+
+    private static final class DnsSnapshotUnavailableException extends IOException {
+        private DnsSnapshotUnavailableException() {
+            super("COPILOT_DNS_UNAVAILABLE");
+        }
+    }
+
+    private static final class DeadlineExceededException extends IOException {
+        private DeadlineExceededException() {
+            super("COPILOT_DEADLINE_EXCEEDED");
         }
     }
 }
