@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -36,16 +38,24 @@ class CopilotBoundedHttpTransportTest {
 
     private static final String TEST_HOST = "copilot-transport.test";
     private HttpServer server;
+    private ServerSocket tlsServer;
+    private Socket tlsClient;
     private ExecutorService serverExecutor;
     private CopilotBoundedHttpTransport transport;
 
     @AfterEach
-    void closeResources() throws InterruptedException {
+    void closeResources() throws Exception {
         if (transport != null) {
             transport.close();
         }
         if (server != null) {
             server.stop(0);
+        }
+        if (tlsServer != null) {
+            tlsServer.close();
+        }
+        if (tlsClient != null) {
+            tlsClient.close();
         }
         if (serverExecutor != null) {
             serverExecutor.shutdownNow();
@@ -375,6 +385,52 @@ class CopilotBoundedHttpTransportTest {
             caller.shutdownNow();
             assertTrue(caller.awaitTermination(2, TimeUnit.SECONDS));
         }
+    }
+
+    @Test
+    void TLS握手応答が停止してもdeadlineでcancelしpoolを解放する() throws Exception {
+        CountDownLatch clientHelloRead = new CountDownLatch(1);
+        CountDownLatch releaseTlsPeer = new CountDownLatch(1);
+        tlsServer = new ServerSocket(0, 4, InetAddress.getByAddress(new byte[]{127, 0, 0, 1}));
+        tlsServer.setSoTimeout(3000);
+        serverExecutor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(2), new ThreadPoolExecutor.AbortPolicy());
+        serverExecutor.submit(() -> {
+            try (Socket accepted = tlsServer.accept()) {
+                tlsClient = accepted;
+                accepted.setSoTimeout(3000);
+                byte[] recordHeader = accepted.getInputStream().readNBytes(5);
+                if (recordHeader.length != 5 || recordHeader[0] != 0x16) {
+                    throw new IOException("TLS ClientHello recordを受信できませんでした");
+                }
+                int recordLength = ((recordHeader[3] & 0xff) << 8) | (recordHeader[4] & 0xff);
+                byte[] clientHello = accepted.getInputStream().readNBytes(recordLength);
+                if (clientHello.length != recordLength) {
+                    throw new IOException("TLS ClientHelloが途中で終了しました");
+                }
+                clientHelloRead.countDown();
+                awaitRelease(releaseTlsPeer);
+            } catch (IOException ex) {
+                if (releaseTlsPeer.getCount() != 0 && clientHelloRead.getCount() == 0) {
+                    return;
+                }
+                serverFailure.compareAndSet(null, ex);
+            }
+        });
+        transport = newTransport(snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC());
+        transport.start();
+        URI tlsUri = URI.create("https://" + TEST_HOST + ":" + tlsServer.getLocalPort() + "/");
+
+        BusinessException deadline = assertThrows(BusinessException.class,
+                () -> transport.post(tlsUri, request(), deadlineAfter(600, TimeUnit.MILLISECONDS)));
+        assertEquals("COPILOT_DEADLINE_EXCEEDED", deadline.getMessage());
+        assertTrue(clientHelloRead.await(2, TimeUnit.SECONDS));
+        awaitNoLeasedConnections(transport, 2, TimeUnit.SECONDS);
+        releaseTlsPeer.countDown();
+        tlsServer.close();
+        serverExecutor.shutdownNow();
+        assertTrue(serverExecutor.awaitTermination(2, TimeUnit.SECONDS));
+        assertNull(serverFailure.get(), () -> "TLSテストfixtureで非同期失敗: " + serverFailure.get());
     }
 
     @Test

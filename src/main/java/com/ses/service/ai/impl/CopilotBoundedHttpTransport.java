@@ -292,7 +292,8 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
             throw BusinessException.of(503, "COPILOT_DESTINATION_REJECTED");
         }
         String host = uri.getHost().toLowerCase(Locale.ROOT);
-        if (testLoopbackMode && "http".equalsIgnoreCase(uri.getScheme())
+        if (testLoopbackMode && ("http".equalsIgnoreCase(uri.getScheme())
+                || "https".equalsIgnoreCase(uri.getScheme()))
                 && host.endsWith(".test") && uri.getPort() > 0 && uri.getPort() <= 65535) {
             try {
                 if (dnsResolver.resolvesOnlyToLoopback(host)) {
