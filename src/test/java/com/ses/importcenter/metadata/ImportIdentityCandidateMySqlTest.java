@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
@@ -39,6 +40,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.ses.importcenter.foundation.CanonicalImportRowFingerprint;
 import com.ses.importcenter.foundation.CanonicalRowFactory;
@@ -76,6 +78,7 @@ class ImportIdentityCandidateMySqlTest {
     private ImportMetadataAuthorizationService authorization;
     private LegalEntityContextService legalEntityContext;
     private DocumentService documentService;
+    private CapturingDataSourceTransactionManager transactionManager;
     private ImportIdentityCandidateService service;
     private String tenant;
     private long sourceId;
@@ -115,8 +118,9 @@ class ImportIdentityCandidateMySqlTest {
         documentService = mock(DocumentService.class);
         var crypto = new ImportIdentityCryptoService(new TestKeyProvider());
         var reader = new ImportCandidateSourceReader(metadata, new ObjectMapper());
+        transactionManager = new CapturingDataSourceTransactionManager(dataSource);
         service = new ImportIdentityCandidateService(jdbc, authorization, crypto, reader, documentService,
-                new DataSourceTransactionManager(dataSource));
+                transactionManager);
 
         SysUser principalUser = new SysUser();
         principalUser.setId(actorUserId);
@@ -158,6 +162,7 @@ class ImportIdentityCandidateMySqlTest {
     void sameNamespaceConcurrentRegistrationCommitsExactlyOneIdentityAndReturnsOneId() throws Exception {
         sourceReads = new CountDownLatch(2);
         ExecutorService executor = Executors.newFixedThreadPool(2);
+        Throwable failure = null;
         try {
             Future<Long> first = executor.submit(this::registerOnAuthenticatedThread);
             Future<Long> second = executor.submit(this::registerOnAuthenticatedThread);
@@ -166,9 +171,11 @@ class ImportIdentityCandidateMySqlTest {
 
             assertEquals(firstId, secondId);
             assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_identity_registry WHERE tenant_id=?", Integer.class, tenant));
+        } catch (Exception | Error primary) {
+            failure = primary;
+            throw primary;
         } finally {
-            executor.shutdownNow();
-            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS), "candidate workerが終了していません");
+            shutdownAndAwait(executor, failure);
         }
     }
 
@@ -188,37 +195,94 @@ class ImportIdentityCandidateMySqlTest {
             }
         };
         ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<Long> requestingConnectionId = new AtomicReference<>();
+        transactionManager.captureNextConnectionId(requestingConnectionId);
+        Throwable failure = null;
         try (Connection blocker = dataSource.getConnection(); Statement statement = blocker.createStatement()) {
             blocker.setAutoCommit(false);
-            statement.executeQuery("SELECT id FROM t_import_source_system WHERE tenant_id='" + tenant
-                    + "' AND id=" + sourceId + " FOR UPDATE").close();
+            try (PreparedStatement lock = blocker.prepareStatement(
+                    "SELECT id FROM t_import_source_system WHERE tenant_id=? AND id=? FOR UPDATE")) {
+                lock.setString(1, tenant);
+                lock.setLong(2, sourceId);
+                lock.executeQuery().close();
+            }
+            long blockerConnectionId;
+            try (var connectionId = statement.executeQuery("SELECT CONNECTION_ID()")) {
+                assertTrue(connectionId.next());
+                blockerConnectionId = connectionId.getLong(1);
+            }
+            String sourceLockData = sourcePrimaryLockData(blockerConnectionId);
             Future<Long> registration = executor.submit(this::registerOnAuthenticatedThread);
             assertTrue(readerPaused.await(5, TimeUnit.SECONDS), "source readerが停止地点へ到達しませんでした");
             continueReader.countDown();
-            awaitSourceRowLockWait();
+            awaitSourceRowLockWait(requestingConnectionId, blockerConnectionId, sourceLockData);
             blocker.commit();
             assertTrue(registration.get(15, TimeUnit.SECONDS) > 0, "candidate IDが返りませんでした");
+        } catch (Exception | Error primary) {
+            failure = primary;
+            throw primary;
         } finally {
             continueReader.countDown();
-            executor.shutdownNow();
-            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS), "candidate workerが終了していません");
+            shutdownAndAwait(executor, failure);
         }
     }
 
-    private void awaitSourceRowLockWait() throws InterruptedException {
+    private String sourcePrimaryLockData(long blockerConnectionId) {
+        String lockData = jdbc.queryForObject("""
+                SELECT dl.LOCK_DATA
+                FROM performance_schema.data_locks dl
+                JOIN performance_schema.threads t ON t.THREAD_ID = dl.THREAD_ID
+                WHERE t.PROCESSLIST_ID=? AND dl.OBJECT_SCHEMA=DATABASE()
+                  AND dl.OBJECT_NAME='t_import_source_system' AND dl.INDEX_NAME='PRIMARY'
+                  AND dl.LOCK_DATA IS NOT NULL
+                """, String.class, blockerConnectionId);
+        assertTrue(lockData.contains(tenant) && lockData.contains(Long.toString(sourceId)),
+                "blockerのPRIMARY lock_dataが対象source rowを示していません: " + lockData);
+        return lockData;
+    }
+
+    private void awaitSourceRowLockWait(AtomicReference<Long> requestingConnectionId,
+                                        long blockerConnectionId, String sourceLockData) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
+            Long requesterId = requestingConnectionId.get();
+            if (requesterId == null) {
+                Thread.sleep(25);
+                continue;
+            }
             Integer waits = jdbc.queryForObject("""
                     SELECT COUNT(*)
                     FROM performance_schema.data_lock_waits w
+                    JOIN performance_schema.threads wt ON wt.THREAD_ID = w.REQUESTING_THREAD_ID
+                    JOIN performance_schema.threads bt ON bt.THREAD_ID = w.BLOCKING_THREAD_ID
                     JOIN performance_schema.data_locks req
                       ON req.ENGINE = w.ENGINE AND req.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID
-                    WHERE req.OBJECT_SCHEMA = DATABASE() AND req.OBJECT_NAME = 't_import_source_system'
-                    """, Integer.class);
+                    JOIN performance_schema.data_locks blk
+                      ON blk.ENGINE = w.ENGINE AND blk.ENGINE_LOCK_ID = w.BLOCKING_ENGINE_LOCK_ID
+                    WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
+                      AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='t_import_source_system'
+                      AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='t_import_source_system'
+                      AND req.INDEX_NAME='PRIMARY' AND blk.INDEX_NAME='PRIMARY'
+                      AND req.LOCK_DATA=? AND blk.LOCK_DATA=?
+                    """, Integer.class, requesterId, blockerConnectionId, sourceLockData, sourceLockData);
             if (waits != null && waits > 0) return;
             Thread.sleep(25);
         }
-        throw new AssertionError("performance_schemaにt_import_source_systemの実ロック待機が記録されませんでした");
+        throw new AssertionError("候補接続とblocker接続間の対象source PRIMARY行ロック待機をperformance_schemaで確認できませんでした");
+    }
+
+    private static void shutdownAndAwait(ExecutorService executor, Throwable primaryFailure) throws InterruptedException {
+        executor.shutdownNow();
+        try {
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS), "candidate workerが終了していません");
+        } catch (InterruptedException cleanupFailure) {
+            Thread.currentThread().interrupt();
+            if (primaryFailure != null) primaryFailure.addSuppressed(cleanupFailure);
+            else throw cleanupFailure;
+        } catch (AssertionError cleanupFailure) {
+            if (primaryFailure != null) primaryFailure.addSuppressed(cleanupFailure);
+            else throw cleanupFailure;
+        }
     }
 
     @Test
@@ -337,5 +401,24 @@ class ImportIdentityCandidateMySqlTest {
         @Override public byte[] lookupKey(String keyVersion) { return TEST_KEY.clone(); }
         @Override public String currentEncryptionKeyVersion() { return ENCRYPTION_VERSION; }
         @Override public byte[] encryptionKey(String keyVersion) { return TEST_KEY.clone(); }
+    }
+
+    private final class CapturingDataSourceTransactionManager extends DataSourceTransactionManager {
+        private volatile AtomicReference<Long> nextConnectionId;
+
+        private CapturingDataSourceTransactionManager(DataSource dataSource) {
+            super(dataSource);
+        }
+
+        private void captureNextConnectionId(AtomicReference<Long> target) {
+            nextConnectionId = target;
+        }
+
+        @Override
+        protected void doBegin(Object transaction, TransactionDefinition definition) {
+            super.doBegin(transaction, definition);
+            AtomicReference<Long> target = nextConnectionId;
+            if (target != null) target.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+        }
     }
 }
