@@ -319,3 +319,37 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   rawを保持し、strict evaluatorと実waitの成立を修復後に再実行する。Chromeでの合格はまだない。
 - NF08 `45a3c224`の3c fixture修復は限定静的受理、実行中。leased connection帰還とOS socket全回収、
   故障解放後のhealthyと故障継続中のavailabilityを区別し、TLS stall/strict parserは未完とする。
+
+### 10月8日 継続検証・固定証拠の更新
+
+- NF07 W2b Slice B fixed `27dc74d7168613dc7b24d60616227e90c68899e6` は三DB MySQL **10/0/0/0**。
+  UTC01:25:12.3622622〜01:28:02.6160367、log SHA-256 `5FBFFD65CB4203F73DCE9A3151AC1AEE90C2D264D5C3796D62FA5CF56259D953`。
+  Astraはprojection CAS後の最新journal prefix検証、応答喪失回復、偽造projection拒否を限定受理し、raw hashを照合した。
+  controlへ `f3b25bd2/17c14fb2/61b0b979` として統合した。fixed `61b0b979aa0a1e11dafa235fcc63b3b48ba3e615` の
+  `PrivacyWatermarkWitnessBoundaryMySqlTest` 再試験も **10/0/0/0**、exit0、起止SHA一致・clean。
+  UTC01:56:55.4390953〜01:59:48.2483776、log SHA-256 `D13BC764AE2F9A0FAE535E4B2BB77B3D4A3A372C788F6AE260D605D560E9AAD8`。
+  rawは `verification-evidence/20261008-control-w2b-mysql-01/`。本run固有のmysql binary/image観測はcontainer終了により未取得。
+  witness署名・latest CAS・復元rollback検出のSlice C以降、および本番anti-rollback承認は含まない。
+- NF06 COMMENT日本語化後のfixed `aba94e6f3a8a75d05d11e63d1762b22370d9956a` migration02は **2/0/0/0**、exit0、起止SHA一致・clean。
+  UTC01:17:32.1350139〜01:19:28.6063800、log SHA-256 `910968BB013466274B15A0077984BFA9CC72C13C5504C7C239F3A3A0F4F2E313`。
+  `verification-evidence/nf06-fixed/20261008-migration-02/`。V183併合rehearsalは未実行。
+  lease fixed `c69ef8ca8e5a5f4017af61065fba2176e6336205` のAstra再Reviewは **REQUEST CHANGES**。
+  P1は異なるservice instanceのgrantによりrenew競合がDB待機へ到達しないテスト、P2はrenew再試行のversion不変assertionと
+  hashを含まない状態の誤比較。新instance takeover経路の修復は確認したが、この三件の修復・実試験前にlease PASSを付与しない。
+- NF08 fixed `45a3c2244cdd237a81e795de923de51caeab4250` のrun06は **47/0/0/0**。
+  UTC01:12:37.6611557〜01:14:17.8615113、log SHA-256 `7BC4D6211A5A37FE3768C218B6386AD1BE44D8BD61BF514CD37DC8F3BF45F389`。
+  続くstrict UTF-8/JSONとTLS停滞修復 fixed `020dc4d142b4fa3eccbf67168eab1c1dd282bf97` のrun07は10 class **53/0/0/0**。
+  UTC01:29:41.4918040〜01:31:04.4571463、log SHA-256 `150AC513110D35D785042FA7A6067E6EA450D9249DCB0BA8E1E5AB13E18D94DD`。
+  両runはexit0、起止SHA一致・clean。Astraはrun07の20/20 report hashとXML集計を独立照合した。
+  raw28 fileをcontrolの `verification-evidence/nf08-fixed/20261008-run-07/` へbyte同一保存。
+  TLSはClientHello後の停滞・deadline/cancel/pool帰還だけの証拠であり、正常証明書/hostname検証、実provider全chainの合格ではない。
+  Gemini接線草案はPLAN REQUEST CHANGES。証明可能な費用上限、送信後失敗の費用証拠保持、immutable invocation/config、
+  strict envelope/duplicate keyを明確化する。最初のsliceはproduction cost deny-all、loopback許可はsrc/testのみとする。
+- NF04 G2 Chrome run02（fixed `e69fd88e3a3adf3a11153fdc00938392534cfcb8`）、run03（fixed `b1ecfbe7e43814741815d52393351fb8aeb3c732`）は
+  ともに **2/2/0/0、FAIL**。run03は合成restart後XSRF cookie欠落で送信前拒否、実Springはworker経由応答でもoffline shellにならなかった。
+  requestが発生していない拒否とサーバー拒否を混同しない。pageのCDP offlineをworkerの実fetch障害の証拠へ拡大しない。
+  Chrome01/02/03 raw計37 fileをcontrol `verification-evidence/nf04-g2-fixed/` へhash一致保存した。
+  source `c423d506e6d4c8b0e8f4a5bd1a7007b3855e79b9` のstrict hookとnavigation単位のresponse対応は未実行。
+  Set-Cookieがsession cookieのままであるため、HTTP発行への変更だけで再起動問題が解決したとは判断しない。
+- 総合 **NO-GO** を維持する。以上は局所的なcode/synthetic証拠であり、完全CI、全機能完成、実staging/provider、
+  backup/restore/PITR、V182本番照合、Security/Privacy-Legal/Operations/Production Owner署名を代替しない。
