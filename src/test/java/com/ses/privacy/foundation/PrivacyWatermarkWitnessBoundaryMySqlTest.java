@@ -19,10 +19,12 @@ import java.time.ZoneOffset;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** W2b Slice A: 3独立MySQLとwitness ACL境界を確認する。 */
+/** W2b Slice A/B: 3独立MySQL、projection CAS、witness ACL境界を確認する。 */
 @Tag("mysql")
 @Testcontainers
 class PrivacyWatermarkWitnessBoundaryMySqlTest {
@@ -151,14 +153,96 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             Future<PrivacyProjectionPort.ProjectionResult> a = pool.submit(() -> { start.await(); return projectionService.projectAcknowledged(partition, first); });
             Future<PrivacyProjectionPort.ProjectionResult> b = pool.submit(() -> { start.await(); return projectionService.projectAcknowledged(partition, second); });
             start.countDown();
-            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, a.get().status());
-            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, b.get().status());
+            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, a.get(10, TimeUnit.SECONDS).status());
+            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, b.get(10, TimeUnit.SECONDS).status());
         } finally {
             pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "projection worker termination timeout");
         }
         var snapshot = new JdbcPrivacyProjectionAdapter(harness.application().createApplicationProjectionDataSource(), context.getEnvironment()).snapshot(partition);
         assertEquals(2L, snapshot.revision());
         assertEquals(second.eventHash(), snapshot.eventHash());
+    }
+
+    @Test
+    void r1投影後に別workerがr2へ進めても先行readbackは検証済みprefixとしてnoOp収束する() throws Exception {
+        var partition = partition();
+        var first = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-interleave-a");
+        var second = append(partition, 1, PrivacyJournalPort.CommandType.LEASE_CLAIMED, "cmd-interleave-b");
+        var r1Committed = new CountDownLatch(1);
+        var allowFirstReadBack = new CountDownLatch(1);
+        var jdbcProjection = new JdbcPrivacyProjectionAdapter(harness.application().createApplicationProjectionDataSource(), context.getEnvironment());
+        PrivacyProjectionPort interleavingProjection = new PrivacyProjectionPort() {
+            @Override public ProjectionResult apply(JournalProjectionService.VerifiedJournalEvent event) {
+                ProjectionResult result = jdbcProjection.apply(event);
+                if (event.event().revision() == 1) {
+                    r1Committed.countDown();
+                    awaitLatch(allowFirstReadBack);
+                }
+                return result;
+            }
+            @Override public ProjectionSnapshot snapshot(PrivacyJournalPort.JournalPartition p) { return jdbcProjection.snapshot(p); }
+        };
+        JournalProjectionService interleavingService = new JournalProjectionService(journalAdapter, interleavingProjection);
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<PrivacyProjectionPort.ProjectionResult> a = pool.submit(() -> interleavingService.projectAcknowledged(partition, first));
+            assertTrue(r1Committed.await(10, TimeUnit.SECONDS), "r1 commit barrier timeout");
+            Future<PrivacyProjectionPort.ProjectionResult> b = pool.submit(() -> interleavingService.projectAcknowledged(partition, second));
+            assertEquals(PrivacyProjectionPort.Status.APPLIED, b.get(10, TimeUnit.SECONDS).status());
+            allowFirstReadBack.countDown();
+            assertEquals(PrivacyProjectionPort.Status.NO_OP, a.get(10, TimeUnit.SECONDS).status());
+            var snapshot = jdbcProjection.snapshot(partition);
+            assertEquals(2L, snapshot.revision());
+            assertEquals(second.eventHash(), snapshot.eventHash());
+        } finally {
+            allowFirstReadBack.countDown();
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "projection worker termination timeout");
+        }
+    }
+
+    @Test
+    void projection状態改竄とjournalより先のrevisionはquarantineする() {
+        var partition = partition();
+        var ack = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-projection-tamper");
+        assertEquals(PrivacyProjectionPort.Status.APPLIED, projectionService.projectAcknowledged(partition, ack).status());
+        projectionAdmin.update("UPDATE sf_w2b_projection SET held = FALSE WHERE tenant_id = ? AND subject_ref = ?", tenantId, subjectRef);
+        assertEquals(PrivacyProjectionPort.Status.QUARANTINED, projectionService.projectAcknowledged(partition, ack).status());
+        projectionAdmin.update("UPDATE sf_w2b_projection SET held = TRUE, event_hash = ? WHERE tenant_id = ? AND subject_ref = ?",
+                "f".repeat(64), tenantId, subjectRef);
+        assertEquals(PrivacyProjectionPort.Status.QUARANTINED, projectionService.projectAcknowledged(partition, ack).status());
+        projectionAdmin.update("UPDATE sf_w2b_projection SET last_applied_revision = 2, event_hash = ? WHERE tenant_id = ? AND subject_ref = ?",
+                "e".repeat(64), tenantId, subjectRef);
+        assertEquals(PrivacyProjectionPort.Status.QUARANTINED, projectionService.projectAcknowledged(partition, ack).status());
+    }
+
+    @Test
+    void commit後のresponseLossは独立readbackでnoOp収束する() {
+        var partition = partition();
+        var ack = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-response-loss");
+        var jdbcProjection = new JdbcPrivacyProjectionAdapter(harness.application().createApplicationProjectionDataSource(), context.getEnvironment());
+        var loseResponseOnce = new AtomicBoolean(true);
+        PrivacyProjectionPort responseLostProjection = new PrivacyProjectionPort() {
+            @Override public ProjectionResult apply(JournalProjectionService.VerifiedJournalEvent event) {
+                ProjectionResult result = jdbcProjection.apply(event);
+                if (loseResponseOnce.compareAndSet(true, false)) throw new IllegalStateException("commit ACK喪失を合成");
+                return result;
+            }
+            @Override public ProjectionSnapshot snapshot(PrivacyJournalPort.JournalPartition p) { return jdbcProjection.snapshot(p); }
+        };
+        var service = new JournalProjectionService(journalAdapter, responseLostProjection);
+        assertEquals(PrivacyProjectionPort.Status.NO_OP, service.projectAcknowledged(partition, ack).status());
+        assertEquals(1L, jdbcProjection.snapshot(partition).revision());
+    }
+
+    private static void awaitLatch(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("projection barrier timeout");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("projection barrier interrupted", interrupted);
+        }
     }
 
     @Test

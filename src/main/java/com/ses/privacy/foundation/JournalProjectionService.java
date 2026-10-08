@@ -66,36 +66,40 @@ final class JournalProjectionService {
         }
 
         boolean applied = false;
-        for (int i = Math.toIntExact(current.revision()); i < ackIndex + 1; i++) {
-            JournalEvent event = events.get(i);
-            PrivacyProjectionPort.ProjectionResult result = projection.apply(new VerifiedJournalEvent(partition, event));
-            if (result.status() == PrivacyProjectionPort.Status.QUARANTINED) {
-                PrivacyProjectionPort.ProjectionSnapshot observed;
-                try {
-                    observed = projection.snapshot(partition);
-                } catch (RuntimeException unavailable) {
-                    return result;
-                }
-                if (observed.revision() >= ack.revision() && snapshotMatchesJournal(partition, observed, events)) {
-                    return PrivacyProjectionPort.ProjectionResult.noOp(observed.revision(), observed.eventHash());
-                }
-                return result;
+        while (current.revision() < ack.revision()) {
+            JournalEvent event = events.get(Math.toIntExact(current.revision()));
+            PrivacyProjectionPort.ProjectionResult result = null;
+            try {
+                result = projection.apply(new VerifiedJournalEvent(partition, event));
+            } catch (RuntimeException uncertain) {
+                // commit応答不明は下の独立snapshot read-backで収束判定する。
             }
-            applied |= result.status() == PrivacyProjectionPort.Status.APPLIED;
+
+            PrivacyProjectionPort.ProjectionSnapshot observed;
+            try {
+                observed = projection.snapshot(partition);
+            } catch (RuntimeException unavailable) {
+                return quarantine(ack.revision(), ack.eventHash(), PrivacyProjectionPort.QuarantineCode.PROJECTION_UNAVAILABLE);
+            }
+            if (!snapshotMatchesJournal(partition, observed, events) || observed.revision() < current.revision()) {
+                return quarantine(ack.revision(), ack.eventHash(), PrivacyProjectionPort.QuarantineCode.PROJECTION_MISMATCH);
+            }
+            if (observed.revision() == current.revision()) {
+                PrivacyProjectionPort.QuarantineCode reason = result != null && result.status() == PrivacyProjectionPort.Status.QUARANTINED
+                        ? result.reason() : PrivacyProjectionPort.QuarantineCode.PROJECTION_UNAVAILABLE;
+                return quarantine(ack.revision(), ack.eventHash(), reason);
+            }
+            applied |= result != null && result.status() == PrivacyProjectionPort.Status.APPLIED;
+            current = observed;
         }
 
-        PrivacyProjectionPort.ProjectionSnapshot completed;
-        try {
-            completed = projection.snapshot(partition);
-        } catch (RuntimeException unavailable) {
-            return quarantine(ack.revision(), ack.eventHash(), PrivacyProjectionPort.QuarantineCode.PROJECTION_UNAVAILABLE);
-        }
-        if (completed.revision() != ack.revision() || !completed.eventHash().equals(ack.eventHash())
-                || !snapshotMatchesJournal(partition, completed, events)) {
+        if (!snapshotMatchesJournal(partition, current, events) || current.revision() < ack.revision()
+                || (current.revision() == ack.revision() && !current.eventHash().equals(ack.eventHash()))) {
             return quarantine(ack.revision(), ack.eventHash(), PrivacyProjectionPort.QuarantineCode.PROJECTION_MISMATCH);
         }
-        return applied ? PrivacyProjectionPort.ProjectionResult.applied(completed.revision(), completed.eventHash())
-                : PrivacyProjectionPort.ProjectionResult.noOp(completed.revision(), completed.eventHash());
+        return current.revision() > ack.revision() || !applied
+                ? PrivacyProjectionPort.ProjectionResult.noOp(current.revision(), current.eventHash())
+                : PrivacyProjectionPort.ProjectionResult.applied(current.revision(), current.eventHash());
     }
 
     private JournalSnapshot readStableJournal(JournalPartition partition) {
