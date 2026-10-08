@@ -271,7 +271,7 @@ class ImportValidationLeaseMySqlTest {
             blocker.commit();
             assertNotNull(result.get(15, TimeUnit.SECONDS));
             assertEquals(2L, generation());
-            assert409(() -> service.renew(original));
+            assert409(() -> renewingService.renew(original));
         } catch (Exception | Error primary) {
             takeoverFailure = primary;
             throw primary;
@@ -659,7 +659,10 @@ class ImportValidationLeaseMySqlTest {
             super(source);
             this.jdbc = jdbc;
         }
-        private void captureNextConnectionId(AtomicReference<Long> target) { nextConnectionId = target; }
+        private void captureNextConnectionId(AtomicReference<Long> target) {
+            target.set(null);
+            nextConnectionId = target;
+        }
         @Override protected void doBegin(Object transaction, org.springframework.transaction.TransactionDefinition definition) {
             super.doBegin(transaction, definition);
             AtomicReference<Long> target = nextConnectionId;
