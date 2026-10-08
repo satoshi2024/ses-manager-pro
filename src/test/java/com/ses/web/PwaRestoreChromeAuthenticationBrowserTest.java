@@ -222,6 +222,8 @@ class PwaRestoreChromeAuthenticationBrowserTest {
         Set<String> configuredSessions = new HashSet<>();
         Map<String, String> targetTypesBySession = new HashMap<>();
         Map<String, String> workerUrlsBySession = new HashMap<>();
+        Map<String, String> targetIdsBySession = new HashMap<>();
+        Map<String, String> sessionLifecycle = new HashMap<>();
         Throwable failure = null;
         OfflineNavigationProof proof = null;
         PROBES.put(token, probeCounts);
@@ -232,6 +234,8 @@ class PwaRestoreChromeAuthenticationBrowserTest {
             liveSessions.add(initialSession);
             targetTypesBySession.put(initialSession, "service_worker");
             workerUrlsBySession.put(initialSession, workerUrl);
+            targetIdsBySession.put(initialSession, workerTargetId);
+            sessionLifecycle.put(initialSession, "attached");
             configureWorkerOffline(browser, initialSession);
             configuredSessions.add(initialSession);
             browser.sendBrowser("Target.setDiscoverTargets", Map.of("discover", true));
@@ -263,20 +267,47 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                 List<JsonNode> events = browser.protocolEvents();
                 for (int i = eventBoundary; i < events.size(); i++) {
                     JsonNode event = events.get(i);
+                    if ("Target.detachedFromTarget".equals(event.path("method").asText())) {
+                        String detached = event.path("params").path("sessionId").asText();
+                        if (!detached.isBlank()) {
+                            sessionLifecycle.put(detached, "detached");
+                            liveSessions.remove(detached);
+                            pausedSessions.remove(detached);
+                        }
+                        continue;
+                    }
                     if (!"Target.attachedToTarget".equals(event.path("method").asText())) continue;
                     JsonNode info = event.path("params").path("targetInfo");
-                    if (!"service_worker".equals(info.path("type").asText())
-                            || !workerUrl.equals(info.path("url").asText())) continue;
                     String session = event.path("params").path("sessionId").asText();
-                    restartedTargetId = info.path("targetId").asText();
-                    targetTypesBySession.put(session, info.path("type").asText("unknown"));
-                    workerUrlsBySession.put(session, info.path("url").asText(""));
+                    if (session.isBlank()) continue;
+                    String targetId = info.path("targetId").asText("");
+                    String targetType = info.path("type").asText("unknown");
+                    String targetUrl = info.path("url").asText("");
+                    if (targetUrl.isBlank() && !targetId.isBlank()) {
+                        JsonNode refreshed = browser.sendBrowser("Target.getTargetInfo", Map.of("targetId", targetId)).path("targetInfo");
+                        targetType = refreshed.path("type").asText(targetType);
+                        targetUrl = refreshed.path("url").asText("");
+                    }
+                    targetTypesBySession.put(session, targetType);
+                    workerUrlsBySession.put(session, targetUrl);
+                    targetIdsBySession.put(session, targetId);
+                    sessionLifecycle.put(session, "attached");
                     if (!session.isBlank() && liveSessions.add(session)) {
                         pausedSessions.add(session);
-                        configureWorkerOffline(browser, session);
-                        configuredSessions.add(session);
-                        browser.sendOnSession(session, "Runtime.runIfWaitingForDebugger", Map.of());
-                        pausedSessions.remove(session);
+                        if ("service_worker".equals(targetType) && workerUrl.equals(targetUrl)) {
+                            restartedTargetId = targetId;
+                            configureWorkerOffline(browser, session);
+                            configuredSessions.add(session);
+                            browser.sendOnSession(session, "Runtime.runIfWaitingForDebugger", Map.of());
+                            pausedSessions.remove(session);
+                        } else {
+                            browser.sendOnSession(session, "Network.enable", Map.of());
+                            browser.sendOnSession(session, "Network.emulateNetworkConditions", Map.of("offline", false,
+                                    "latency", 0, "downloadThroughput", -1, "uploadThroughput", -1, "connectionType", "wifi"));
+                            browser.sendOnSession(session, "Runtime.runIfWaitingForDebugger", Map.of());
+                            pausedSessions.remove(session);
+                            configuredSessions.add(session);
+                        }
                     }
                 }
                 for (int i = eventBoundary; i < events.size(); i++) {
@@ -352,12 +383,23 @@ class PwaRestoreChromeAuthenticationBrowserTest {
             List<JsonNode> cleanupEvents = browser.protocolEvents();
             for (int i = eventBoundary; i < cleanupEvents.size(); i++) {
                 JsonNode event = cleanupEvents.get(i);
-                if (!"Target.attachedToTarget".equals(event.path("method").asText())) continue;
-                String session = event.path("params").path("sessionId").asText();
+                String method = event.path("method").asText();
+                String session = "Target.attachedToTarget".equals(method)
+                        ? event.path("params").path("sessionId").asText()
+                        : "Target.detachedFromTarget".equals(method) ? event.path("params").path("sessionId").asText() : "";
                 if (session.isBlank()) continue;
+                if ("Target.detachedFromTarget".equals(method)) {
+                    sessionLifecycle.put(session, "detached");
+                    liveSessions.remove(session);
+                    pausedSessions.remove(session);
+                    continue;
+                }
+                JsonNode info = event.path("params").path("targetInfo");
                 liveSessions.add(session);
-                targetTypesBySession.put(session, event.path("params").path("targetInfo").path("type").asText("unknown"));
-                workerUrlsBySession.put(session, event.path("params").path("targetInfo").path("url").asText(""));
+                targetTypesBySession.put(session, info.path("type").asText("unknown"));
+                workerUrlsBySession.put(session, info.path("url").asText(""));
+                targetIdsBySession.put(session, info.path("targetId").asText(""));
+                sessionLifecycle.put(session, "attached");
                 if (!configuredSessions.contains(session)) pausedSessions.add(session);
             }
             try {
@@ -366,6 +408,8 @@ class PwaRestoreChromeAuthenticationBrowserTest {
             } catch (Throwable thrown) {
                 if (cleanupFailure == null) cleanupFailure = thrown; else cleanupFailure.addSuppressed(thrown);
             }
+            // 全sessionのnetwork設定とdebugger待機を先に戻す。同じtargetに複数sessionが
+            // 接続されている場合、1つでもoffline設定を残したままworker fetchを判定しない。
             for (String session : new HashSet<>(liveSessions)) {
                 try {
                     if (!browser.isSessionAttached(session)) continue;
@@ -373,46 +417,69 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                     browser.sendOnSession(session, "Network.emulateNetworkConditions", Map.of("offline", false,
                             "latency", 0, "downloadThroughput", -1, "uploadThroughput", -1, "connectionType", "wifi"));
                     if (pausedSessions.contains(session)) browser.sendOnSession(session, "Runtime.runIfWaitingForDebugger", Map.of());
-                    if (!"service_worker".equals(targetTypesBySession.get(session))
-                            || !workerUrl.equals(workerUrlsBySession.get(session))) {
-                        IllegalStateException wrongTarget = new IllegalStateException(
-                                "復旧対象のCDP sessionが期待したService Workerではありません: type="
-                                        + safeTargetType(targetTypesBySession.get(session))
-                                        + ",scriptUrlMatches=" + workerUrl.equals(workerUrlsBySession.get(session)));
-                        if (cleanupFailure == null) cleanupFailure = wrongTarget;
-                        else cleanupFailure.addSuppressed(wrongTarget);
-                    } else {
-                        try {
-                            browser.sendOnSession(session, "Runtime.enable", Map.of());
-                            JsonNode workerFetch = browser.sendOnSession(session, "Runtime.evaluate", Map.of(
-                                    "expression", "(async()=>{const r=await fetch('/api/my/session-context',"
-                                            + "{credentials:'include',cache:'no-store'});const text=await r.text();"
-                                            + "let body=null;try{body=JSON.parse(text)}catch(_){}return {status:r.status,"
-                                            + "apiCode:body&&body.code,redirected:r.redirected,contentType:r.headers.get('content-type')}})()",
-                                    "returnByValue", true, "awaitPromise", true));
-                            JsonNode fetchValue = workerFetch.path("result").path("value");
-                            int status = fetchValue.path("status").asInt(-1);
-                            int apiCode = fetchValue.path("apiCode").asInt(-1);
-                            if (status != 200 || apiCode != 200) {
-                                throw new SafeWorkerFetchFailure("復旧後のworker fetch失敗: "
-                                        + workerFetchDiagnostic(workerFetch, targetTypesBySession.get(session), true));
-                            }
-                        } catch (Throwable fetchFailure) {
-                            Throwable classified = fetchFailure instanceof SafeWorkerFetchFailure
-                                    ? fetchFailure : new IllegalStateException(
-                                            "worker Runtime.evaluate failure category=" + safeFailureCategory(fetchFailure));
-                            if (cleanupFailure == null) cleanupFailure = classified;
-                            else cleanupFailure.addSuppressed(classified);
-                        }
-                    }
-                    try {
-                        browser.sendBrowser("Target.detachFromTarget", Map.of("sessionId", session));
-                    } catch (Throwable detachFailure) {
-                        if (cleanupFailure == null) cleanupFailure = detachFailure;
-                        else cleanupFailure.addSuppressed(detachFailure);
-                    }
                 } catch (Throwable thrown) {
                     if (cleanupFailure == null) cleanupFailure = thrown; else cleanupFailure.addSuppressed(thrown);
+                }
+            }
+            String recoveryUrl = base + "/api/my/session-context";
+            for (String session : new HashSet<>(liveSessions)) {
+                try {
+                    if (!browser.isSessionAttached(session)) continue;
+                    String targetId = targetIdsBySession.get(session);
+                    if (targetId == null || targetId.isBlank()) {
+                        throw new IllegalStateException("worker sessionにtargetIdがありません: session=" + session);
+                    }
+                    JsonNode refreshed = browser.sendBrowser("Target.getTargetInfo", Map.of("targetId", targetId)).path("targetInfo");
+                    String mappedType = targetTypesBySession.getOrDefault(session, "unknown");
+                    String mappedUrl = workerUrlsBySession.getOrDefault(session, "");
+                    String currentType = refreshed.path("type").asText("unknown");
+                    String currentUrl = refreshed.path("url").asText("");
+                    if (mappedUrl.isBlank()) {
+                        workerUrlsBySession.put(session, currentUrl);
+                        mappedUrl = currentUrl;
+                    }
+                    if (!mappedUrl.equals(currentUrl) || !mappedType.equals(currentType)) {
+                        throw new IllegalStateException("復旧対象sessionのtarget mapping不一致: targetId=" + targetId
+                                + ",session=" + session + ",lifecycle=" + sessionLifecycle.getOrDefault(session, "unknown")
+                                + ",mappedType=" + safeTargetType(mappedType) + ",currentType=" + safeTargetType(currentType)
+                                + ",mappedScriptUrlMatches=" + workerUrl.equals(mappedUrl)
+                                + ",currentScriptUrlMatches=" + workerUrl.equals(currentUrl));
+                    }
+                    if (!"service_worker".equals(currentType) || !workerUrl.equals(currentUrl)) continue;
+                    browser.sendOnSession(session, "Runtime.enable", Map.of());
+                    JsonNode workerFetch = browser.sendOnSession(session, "Runtime.evaluate", Map.of(
+                            "expression", "(async()=>{const r=await fetch(" + JSON.writeValueAsString(recoveryUrl)
+                                    + ",{credentials:'include',cache:'no-store'});const text=await r.text();"
+                                    + "let body=null;try{body=JSON.parse(text)}catch(_){}return {status:r.status,"
+                                    + "apiCode:body&&body.code,redirected:r.redirected,contentType:r.headers.get('content-type')}})()",
+                            "returnByValue", true, "awaitPromise", true));
+                    JsonNode fetchValue = workerFetch.path("result").path("value");
+                    int status = fetchValue.path("status").asInt(-1);
+                    int apiCode = fetchValue.path("apiCode").asInt(-1);
+                    if (status != 200 || apiCode != 200 || workerFetch.has("exceptionDetails")) {
+                        String networkFailure = safeNetworkFailure(browser.protocolEvents(), session, recoveryUrl);
+                        throw new SafeWorkerFetchFailure("復旧後のworker fetch失敗: targetId=" + targetId
+                                + ",session=" + session + ",lifecycle=" + sessionLifecycle.getOrDefault(session, "unknown")
+                                + "," + workerFetchDiagnostic(workerFetch, currentType, workerUrl.equals(currentUrl))
+                                + ",networkFailure=" + networkFailure);
+                    }
+                } catch (Throwable fetchFailure) {
+                    Throwable classified = fetchFailure instanceof SafeWorkerFetchFailure
+                            ? fetchFailure : new IllegalStateException("worker recovery category="
+                                    + safeFailureCategory(fetchFailure) + ",session=" + session);
+                    if (cleanupFailure == null) cleanupFailure = classified;
+                    else cleanupFailure.addSuppressed(classified);
+                }
+            }
+            for (String session : new HashSet<>(liveSessions)) {
+                try {
+                    if (browser.isSessionAttached(session)) {
+                        browser.sendBrowser("Target.detachFromTarget", Map.of("sessionId", session));
+                        sessionLifecycle.put(session, "detached");
+                    }
+                } catch (Throwable detachFailure) {
+                    if (cleanupFailure == null) cleanupFailure = detachFailure;
+                    else cleanupFailure.addSuppressed(detachFailure);
                 }
             }
             try { browser.sendBrowser("Target.setAutoAttach", Map.of("autoAttach", false,
@@ -445,6 +512,29 @@ class PwaRestoreChromeAuthenticationBrowserTest {
         browser.sendOnSession(session, "Network.enable", Map.of());
         browser.sendOnSession(session, "Network.emulateNetworkConditions", Map.of("offline", true,
                 "latency", 0, "downloadThroughput", 0, "uploadThroughput", 0, "connectionType", "none"));
+    }
+
+    /** 指定worker sessionのURL一致requestに限り、errorTextを固定allowlistへ分類する。 */
+    private static String safeNetworkFailure(List<JsonNode> events, String session, String url) {
+        Set<String> requestIds = new HashSet<>();
+        for (JsonNode event : events) {
+            if ("Network.requestWillBeSent".equals(event.path("method").asText())
+                    && session.equals(event.path("codexSessionId").asText())
+                    && url.equals(event.path("params").path("request").path("url").asText())) {
+                requestIds.add(event.path("params").path("requestId").asText());
+            }
+        }
+        Set<String> categories = new HashSet<>();
+        for (JsonNode event : events) {
+            if (!"Network.loadingFailed".equals(event.path("method").asText())
+                    || !session.equals(event.path("codexSessionId").asText())
+                    || !requestIds.contains(event.path("params").path("requestId").asText())) continue;
+            String error = event.path("params").path("errorText").asText("");
+            categories.add(Set.of("net::ERR_INTERNET_DISCONNECTED", "net::ERR_FAILED", "net::ERR_BLOCKED_BY_CLIENT",
+                            "net::ERR_NAME_NOT_RESOLVED", "net::ERR_CONNECTION_CLOSED", "net::ERR_ABORTED")
+                    .contains(error) ? error : error.isBlank() ? "missing" : "other");
+        }
+        return categories.isEmpty() ? "no-loadingFailed-event" : String.join(",", categories);
     }
 
     /** CDPの形状と固定categoryだけを失敗文へ出し、任意メッセージやtokenは出力しない。 */
