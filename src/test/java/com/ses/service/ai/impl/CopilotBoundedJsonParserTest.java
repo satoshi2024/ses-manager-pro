@@ -19,6 +19,7 @@ class CopilotBoundedJsonParserTest {
         String exactDepth = "[".repeat(CopilotBoundedJsonParser.MAX_NESTING_DEPTH) + "0"
                 + "]".repeat(CopilotBoundedJsonParser.MAX_NESTING_DEPTH);
         String exactString = "\"" + "a".repeat(CopilotBoundedJsonParser.MAX_STRING_LENGTH) + "\"";
+        String exactName = "n".repeat(CopilotBoundedJsonParser.MAX_NAME_LENGTH);
         String exactNumber = "1" + "0".repeat(CopilotBoundedJsonParser.MAX_NUMBER_LENGTH - 1);
         byte[] exactBodySize = ("null" + " ".repeat(CopilotBoundedJsonParser.MAX_JSON_BYTES - 4))
                 .getBytes(StandardCharsets.UTF_8);
@@ -30,6 +31,8 @@ class CopilotBoundedJsonParserTest {
         assertEquals(0, parsedDepth.asInt());
         assertEquals(CopilotBoundedJsonParser.MAX_STRING_LENGTH,
                 parser.parse(exactString.getBytes(StandardCharsets.UTF_8), 10L).asText().length());
+        assertEquals(1, parser.parse(("{\"" + exactName + "\":1}").getBytes(StandardCharsets.UTF_8), 10L)
+                .get(exactName).asInt());
         assertEquals(exactNumber, parser.parse(exactNumber.getBytes(StandardCharsets.UTF_8), 10L).asText());
         assertEquals(CopilotBoundedJsonParser.MAX_JSON_BYTES, exactBodySize.length);
         assertTrue(parser.parse(exactBodySize, 10L).isNull());
@@ -41,11 +44,13 @@ class CopilotBoundedJsonParserTest {
         String depth = "[".repeat(CopilotBoundedJsonParser.MAX_NESTING_DEPTH + 1) + "0"
                 + "]".repeat(CopilotBoundedJsonParser.MAX_NESTING_DEPTH + 1);
         String string = "\"" + "a".repeat(CopilotBoundedJsonParser.MAX_STRING_LENGTH + 1) + "\"";
+        String name = "n".repeat(CopilotBoundedJsonParser.MAX_NAME_LENGTH + 1);
         String number = "1" + "0".repeat(CopilotBoundedJsonParser.MAX_NUMBER_LENGTH);
         byte[] oversized = new byte[CopilotBoundedJsonParser.MAX_JSON_BYTES + 1];
 
         assertInvalid(parser, depth.getBytes(StandardCharsets.UTF_8));
         assertInvalid(parser, string.getBytes(StandardCharsets.UTF_8));
+        assertInvalid(parser, ("{\"" + name + "\":1}").getBytes(StandardCharsets.UTF_8));
         assertInvalid(parser, number.getBytes(StandardCharsets.UTF_8));
         assertInvalid(parser, oversized);
     }
@@ -60,6 +65,20 @@ class CopilotBoundedJsonParserTest {
         assertEquals("COPILOT_RESPONSE_INVALID", malformed.getMessage());
         assertFalse(malformed.toString().contains("private-response-marker"));
         assertInvalid(parser, new byte[]{'"', (byte) 0xc3, '"'});
+        assertInvalid(parser, new byte[]{'"', (byte) 0xed, (byte) 0xa0, (byte) 0x80, '"'});
+        assertInvalid(parser, new byte[]{'"', (byte) 0xc0, (byte) 0xaf, '"'});
+        assertInvalid(parser, new byte[]{'"', (byte) 0xe2, (byte) 0x82});
+        assertInvalid(parser, "\"\\uD800\"".getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void UTF8BOMは受け付けUTF16とUTF32は拒否する() {
+        CopilotBoundedJsonParser parser = new CopilotBoundedJsonParser(() -> 1L);
+        assertTrue(parser.parse(new byte[]{(byte) 0xef, (byte) 0xbb, (byte) 0xbf, '{', '}'}, 10L).isObject());
+        assertInvalid(parser, new byte[]{(byte) 0xff, (byte) 0xfe, '{', 0, '}', 0});
+        assertInvalid(parser, new byte[]{(byte) 0xfe, (byte) 0xff, 0, '{', 0, '}'});
+        assertInvalid(parser, new byte[]{0, 0, (byte) 0xfe, (byte) 0xff, 0, 0, 0, '{', 0, 0, 0, '}'});
+        assertInvalid(parser, new byte[]{(byte) 0xff, (byte) 0xfe, 0, 0, '{', 0, 0, 0, '}', 0, 0, 0});
     }
 
     @Test

@@ -39,7 +39,7 @@ class CopilotBoundedHttpTransportTest {
     private static final String TEST_HOST = "copilot-transport.test";
     private HttpServer server;
     private ServerSocket tlsServer;
-    private Socket tlsClient;
+    private volatile Socket tlsClient;
     private ExecutorService serverExecutor;
     private CopilotBoundedHttpTransport transport;
 
@@ -388,48 +388,84 @@ class CopilotBoundedHttpTransportTest {
     }
 
     @Test
-    void TLS握手応答が停止してもdeadlineでcancelしpoolを解放する() throws Exception {
+    void TLS握手応答が停止してもdeadlineでcancelしpoolを解放する() throws Throwable {
         CountDownLatch clientHelloRead = new CountDownLatch(1);
         CountDownLatch releaseTlsPeer = new CountDownLatch(1);
-        tlsServer = new ServerSocket(0, 4, InetAddress.getByAddress(new byte[]{127, 0, 0, 1}));
-        tlsServer.setSoTimeout(3000);
-        serverExecutor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
-                new ArrayBlockingQueue<>(2), new ThreadPoolExecutor.AbortPolicy());
-        serverExecutor.submit(() -> {
-            try (Socket accepted = tlsServer.accept()) {
-                tlsClient = accepted;
-                accepted.setSoTimeout(3000);
-                byte[] recordHeader = accepted.getInputStream().readNBytes(5);
-                if (recordHeader.length != 5 || recordHeader[0] != 0x16) {
-                    throw new IOException("TLS ClientHello recordを受信できませんでした");
+        Throwable primaryFailure = null;
+        try {
+            tlsServer = new ServerSocket(0, 4, InetAddress.getByAddress(new byte[]{127, 0, 0, 1}));
+            tlsServer.setSoTimeout(3000);
+            serverExecutor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
+                    new ArrayBlockingQueue<>(2), new ThreadPoolExecutor.AbortPolicy());
+            serverExecutor.submit(() -> {
+                try (Socket accepted = tlsServer.accept()) {
+                    tlsClient = accepted;
+                    accepted.setSoTimeout(3000);
+                    byte[] recordHeader = accepted.getInputStream().readNBytes(5);
+                    if (recordHeader.length != 5 || recordHeader[0] != 0x16) {
+                        throw new IOException("TLS ClientHello recordを受信できませんでした");
+                    }
+                    int recordLength = ((recordHeader[3] & 0xff) << 8) | (recordHeader[4] & 0xff);
+                    byte[] clientHello = accepted.getInputStream().readNBytes(recordLength);
+                    if (clientHello.length != recordLength || clientHello.length == 0 || clientHello[0] != 0x01) {
+                        throw new IOException("TLS ClientHello handshakeを受信できませんでした");
+                    }
+                    clientHelloRead.countDown();
+                    awaitRelease(releaseTlsPeer);
+                } catch (Throwable failure) {
+                    serverFailure.compareAndSet(null, failure);
                 }
-                int recordLength = ((recordHeader[3] & 0xff) << 8) | (recordHeader[4] & 0xff);
-                byte[] clientHello = accepted.getInputStream().readNBytes(recordLength);
-                if (clientHello.length != recordLength) {
-                    throw new IOException("TLS ClientHelloが途中で終了しました");
-                }
-                clientHelloRead.countDown();
-                awaitRelease(releaseTlsPeer);
-            } catch (IOException ex) {
-                if (releaseTlsPeer.getCount() != 0 && clientHelloRead.getCount() == 0) {
-                    return;
-                }
-                serverFailure.compareAndSet(null, ex);
-            }
-        });
-        transport = newTransport(snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC());
-        transport.start();
-        URI tlsUri = URI.create("https://" + TEST_HOST + ":" + tlsServer.getLocalPort() + "/");
+            });
+            transport = newTransport(snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC());
+            transport.start();
+            URI tlsUri = URI.create("https://" + TEST_HOST + ":" + tlsServer.getLocalPort() + "/");
 
-        BusinessException deadline = assertThrows(BusinessException.class,
-                () -> transport.post(tlsUri, request(), deadlineAfter(600, TimeUnit.MILLISECONDS)));
-        assertEquals("COPILOT_DEADLINE_EXCEEDED", deadline.getMessage());
-        assertTrue(clientHelloRead.await(2, TimeUnit.SECONDS));
-        awaitNoLeasedConnections(transport, 2, TimeUnit.SECONDS);
-        releaseTlsPeer.countDown();
-        tlsServer.close();
-        serverExecutor.shutdownNow();
-        assertTrue(serverExecutor.awaitTermination(2, TimeUnit.SECONDS));
+            BusinessException deadline = assertThrows(BusinessException.class,
+                    () -> transport.post(tlsUri, request(), deadlineAfter(600, TimeUnit.MILLISECONDS)));
+            assertEquals("COPILOT_DEADLINE_EXCEEDED", deadline.getMessage());
+            assertTrue(clientHelloRead.await(2, TimeUnit.SECONDS));
+            awaitNoLeasedConnections(transport, 2, TimeUnit.SECONDS);
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            releaseTlsPeer.countDown();
+            Throwable cleanupFailure = null;
+            try {
+                if (tlsClient != null) {
+                    tlsClient.close();
+                }
+                if (tlsServer != null) {
+                    tlsServer.close();
+                }
+            } catch (Throwable failure) {
+                cleanupFailure = failure;
+            }
+            if (serverExecutor != null) {
+                try {
+                    serverExecutor.shutdown();
+                    if (!serverExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
+                        serverExecutor.shutdownNow();
+                        if (!serverExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
+                            throw new AssertionError("TLSテストfixtureの終了が時間切れになりました");
+                        }
+                    }
+                } catch (Throwable failure) {
+                    if (cleanupFailure == null) {
+                        cleanupFailure = failure;
+                    } else {
+                        cleanupFailure.addSuppressed(failure);
+                    }
+                }
+            }
+            if (cleanupFailure != null) {
+                if (primaryFailure != null) {
+                    primaryFailure.addSuppressed(cleanupFailure);
+                } else {
+                    throw cleanupFailure;
+                }
+            }
+        }
         assertNull(serverFailure.get(), () -> "TLSテストfixtureで非同期失敗: " + serverFailure.get());
     }
 
