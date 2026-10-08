@@ -61,6 +61,13 @@
         state.permitMonotonicTime = null;
     }
 
+    function clearDraftDom() {
+        const conflictBox = document.getElementById('pwa-conflicts');
+        if (conflictBox) conflictBox.replaceChildren();
+        const panel = document.getElementById('pwa-queue-panel');
+        if (panel) panel.hidden = true;
+    }
+
     function restorePermitIsCurrent() {
         if (!state.permitDeadline || !state.restoreScope) return false;
         const elapsed = performance.now() - state.permitMonotonicTime;
@@ -69,6 +76,8 @@
             state.quarantined = true;
             state.paused = true;
             clearRestorePermit();
+            clearDraftDom();
+            window.dispatchEvent(new CustomEvent('ses:pwa-revoked'));
             return false;
         }
         if (performance.now() >= state.permitDeadline) {
@@ -81,6 +90,7 @@
                     render();
                 }
             }).catch(() => undefined);
+            clearDraftDom();
             window.dispatchEvent(new CustomEvent('ses:pwa-revoked'));
             return false;
         }
@@ -130,6 +140,7 @@
         state.candidateRestoreScope = null;
         state.lockedDraftCount = 0;
         clearRestorePermit();
+        clearDraftDom();
         window.dispatchEvent(new CustomEvent('ses:pwa-revoked'));
         state.revocationEpoch = epoch || newRevocationEpoch();
         state.scope = null;
@@ -148,6 +159,7 @@
         state.scope = null;
         state.paused = true;
         state.quarantined = true;
+        clearDraftDom();
         window.dispatchEvent(new CustomEvent('ses:pwa-revoked'));
         render();
     }
@@ -168,6 +180,7 @@
         state.candidateRestoreScope = null;
         state.lockedDraftCount = 0;
         clearRestorePermit();
+        clearDraftDom();
         window.dispatchEvent(new CustomEvent('ses:pwa-revoked'));
         const epoch = newRevocationEpoch();
         state.revocationEpoch = epoch;
