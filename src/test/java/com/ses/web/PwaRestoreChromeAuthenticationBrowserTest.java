@@ -18,6 +18,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -97,27 +102,15 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                     + "return JSON.stringify({id:stored&&stored.clientRequestId,scope:SES.pwaQueue.getScope()})})()");
             String requestId = JSON.readTree(draft.asText()).path("id").asText();
             assertThat(requestId).isNotBlank();
-            int requestBoundary = browser.networkRequests().size();
-            int responseBoundary = browser.networkResponses().size();
-            browser.send("Network.emulateNetworkConditions", java.util.Map.of("offline", true, "latency", 0,
-                    "downloadThroughput", 0, "uploadThroughput", 0, "connectionType", "none"));
-            browser.navigate(base + "/my/timesheet");
-            boolean offlineShellLoaded = browser.waitForStrict("!!document.title.includes('オフライン')", Duration.ofSeconds(15));
-            boolean navigationServedByWorker = navigationResponseFromWorker(browser, base + "/my/timesheet",
-                    requestBoundary, responseBoundary, Duration.ofSeconds(5));
-            assertThat(offlineShellLoaded && navigationServedByWorker)
-                    .as("offline時の実Document fetch失敗後にService Workerがoffline shellを返す。診断="
-                            + browser.evaluateStrict("(async()=>JSON.stringify({title:document.title,href:location.href,online:navigator.onLine,controlled:!!navigator.serviceWorker.controller,offlineAssetCached:!!(await caches.match('/offline.html'))}))()").asText()
-                            + ", workerResponse=" + navigationServedByWorker).isTrue();
-            assertThat(browser.evaluateStrict("!navigator.onLine").asBoolean())
-                    .as("CDP network offlineがページにも反映される").isTrue();
+            OfflineNavigationProof offlineProof = proveWorkerOfflineNavigation(browser, base);
+            assertThat(offlineProof.workerRequestFailed()).as("worker target内の実fetchがERR_INTERNET_DISCONNECTEDで失敗する").isTrue();
+            assertThat(offlineProof.pageResponseFromWorker()).as("本navigationのmain-frame responseはService Worker由来").isTrue();
+            assertThat(offlineProof.offlineShellLoaded()).as("失敗後にoffline shellを表示する").isTrue();
             assertThat(browser.evaluateStrict("document.getElementById('offline-drafts').hidden").asBoolean())
                     .as("通常のoffline表示では復元下書きはロック").isTrue();
             assertThat(browser.evaluateStrict("document.getElementById('offline-confirm-restore').hidden").asBoolean())
                     .as("再認証前は確認操作を表示しない").isTrue();
 
-            browser.send("Network.emulateNetworkConditions", java.util.Map.of("offline", false, "latency", 0,
-                    "downloadThroughput", -1, "uploadThroughput", -1, "connectionType", "wifi"));
             assertThat(browser.waitForStrict("!!navigator.onLine", Duration.ofSeconds(10))).isTrue();
             assertThat(browser.waitForStrict("!!(document.getElementById('offline-reauth') && !document.getElementById('offline-reauth').disabled)", Duration.ofSeconds(10))).isTrue();
             browser.evaluate("document.getElementById('offline-restore-password').value="
@@ -152,29 +145,201 @@ class PwaRestoreChromeAuthenticationBrowserTest {
         }
     }
 
-    private static boolean navigationResponseFromWorker(CdpBrowser browser, String url,
-                                                         int requestBoundary, int responseBoundary,
-                                                         Duration timeout) throws InterruptedException {
-        long deadline = System.nanoTime() + timeout.toNanos();
-        while (System.nanoTime() < deadline) {
-            String navigationRequestId = null;
-            for (int i = requestBoundary; i < browser.networkRequests().size(); i++) {
-                JsonNode event = browser.networkRequests().get(i);
-                if ("Document".equals(event.path("params").path("type").asText())
-                        && url.equals(event.path("params").path("request").path("url").asText())) {
-                    navigationRequestId = event.path("params").path("requestId").asText();
-                }
+    private record OfflineNavigationProof(boolean workerRequestFailed,
+                                          boolean pageResponseFromWorker,
+                                          boolean offlineShellLoaded) { }
+
+    private static OfflineNavigationProof proveWorkerOfflineNavigation(CdpBrowser browser, String base)
+            throws Exception {
+        String token = UUID.randomUUID().toString().replace("-", "");
+        String businessUrl = base + "/my/timesheet?nf04_offline_probe=" + token;
+        String workerUrl = base + "/service-worker.js";
+        JsonNode registration = JSON.readTree(browser.evaluateStrict("(async()=>{const r=await navigator.serviceWorker.getRegistration();"
+                + "return JSON.stringify({scope:r&&r.scope,script:r&&r.active&&r.active.scriptURL,"
+                + "controller:navigator.serviceWorker.controller&&navigator.serviceWorker.controller.scriptURL,"
+                + "offline:!!(await caches.match('/offline.html'))})})()").asText());
+        assertThat(registration.path("scope").asText()).isEqualTo(base + "/");
+        assertThat(registration.path("script").asText()).isEqualTo(workerUrl);
+        assertThat(registration.path("controller").asText()).isEqualTo(workerUrl);
+        assertThat(registration.path("offline").asBoolean()).isTrue();
+
+        JsonNode targets = browser.sendBrowser("Target.getTargets", Map.of()).path("targetInfos");
+        String pageTargetId = null;
+        String workerTargetId = null;
+        for (JsonNode target : targets) {
+            if ("page".equals(target.path("type").asText()) && target.path("url").asText().startsWith(base + "/my/timesheet")) {
+                pageTargetId = target.path("targetId").asText();
             }
-            if (navigationRequestId != null) {
-                for (int i = responseBoundary; i < browser.networkResponses().size(); i++) {
-                    JsonNode event = browser.networkResponses().get(i);
-                    if (navigationRequestId.equals(event.path("params").path("requestId").asText())) {
-                        return event.path("params").path("response").path("fromServiceWorker").asBoolean();
+            if ("service_worker".equals(target.path("type").asText())
+                    && workerUrl.equals(target.path("url").asText())) {
+                if (workerTargetId != null) throw new IllegalStateException("同じscriptURLのworker targetが複数あります");
+                workerTargetId = target.path("targetId").asText();
+            }
+        }
+        assertThat(pageTargetId).as("対象のChrome page target").isNotBlank();
+        assertThat(workerTargetId).as("登録scriptURLに一致するworker target").isNotBlank();
+        String mainFrameId = browser.send("Page.getFrameTree", Map.of()).path("frameTree").path("frame").path("id").asText();
+        int eventBoundary = browser.protocolEvents().size();
+        Set<String> liveSessions = new HashSet<>();
+        Set<String> pausedSessions = new HashSet<>();
+        Set<String> configuredSessions = new HashSet<>();
+        Throwable failure = null;
+        OfflineNavigationProof proof = null;
+        try {
+            JsonNode attached = browser.sendBrowser("Target.attachToTarget", Map.of("targetId", workerTargetId, "flatten", true));
+            String initialSession = attached.path("sessionId").asText();
+            if (initialSession.isBlank()) throw new IllegalStateException("既存workerへのflatten attachに失敗しました");
+            liveSessions.add(initialSession);
+            configureWorkerOffline(browser, initialSession);
+            configuredSessions.add(initialSession);
+            browser.sendBrowser("Target.setDiscoverTargets", Map.of("discover", true));
+            browser.sendBrowser("Target.setAutoAttach", Map.of("autoAttach", true,
+                    "waitForDebuggerOnStart", true, "flatten", true,
+                    "filter", List.of(Map.of("type", "service_worker"), Map.of("exclude", true))));
+            browser.send("Network.emulateNetworkConditions", Map.of("offline", true, "latency", 0,
+                    "downloadThroughput", 0, "uploadThroughput", 0, "connectionType", "none"));
+            assertThat(browser.waitForStrict("!navigator.onLine", Duration.ofSeconds(10))).isTrue();
+            JsonNode closed = browser.sendBrowser("Target.closeTarget", Map.of("targetId", workerTargetId));
+            if (!closed.path("success").asBoolean()) throw new IllegalStateException("worker targetを停止できませんでした");
+            browser.navigate(businessUrl);
+
+            long deadline = System.nanoTime() + Duration.ofSeconds(25).toNanos();
+            String restartedTargetId = null;
+            boolean workerFailureObserved = false;
+            boolean pageResponseObserved = false;
+            boolean mainFrameNavigated = false;
+            boolean shellObserved = false;
+            while (System.nanoTime() < deadline && !(workerFailureObserved && pageResponseObserved && mainFrameNavigated)) {
+                List<JsonNode> events = browser.protocolEvents();
+                for (int i = eventBoundary; i < events.size(); i++) {
+                    JsonNode event = events.get(i);
+                    if (!"Target.attachedToTarget".equals(event.path("method").asText())) continue;
+                    JsonNode info = event.path("params").path("targetInfo");
+                    if (!"service_worker".equals(info.path("type").asText())
+                            || !workerUrl.equals(info.path("url").asText())) continue;
+                    String session = event.path("params").path("sessionId").asText();
+                    restartedTargetId = info.path("targetId").asText();
+                    if (!session.isBlank() && liveSessions.add(session)) {
+                        pausedSessions.add(session);
+                        configureWorkerOffline(browser, session);
+                        configuredSessions.add(session);
+                        browser.sendOnSession(session, "Runtime.runIfWaitingForDebugger", Map.of());
+                        pausedSessions.remove(session);
                     }
                 }
+                for (int i = eventBoundary; i < events.size(); i++) {
+                    JsonNode event = events.get(i);
+                    String method = event.path("method").asText();
+                    String eventTarget = event.path("codexTargetId").asText();
+                    JsonNode params = event.path("params");
+                    if ("Network.requestWillBeSent".equals(method)
+                            && eventTarget.equals(restartedTargetId)
+                            && businessUrl.equals(params.path("request").path("url").asText())) {
+                        String requestId = params.path("requestId").asText();
+                        String sessionId = event.path("codexSessionId").asText();
+                        for (int j = eventBoundary; j < events.size(); j++) {
+                            JsonNode failed = events.get(j);
+                            if ("Network.loadingFailed".equals(failed.path("method").asText())
+                                    && eventTarget.equals(failed.path("codexTargetId").asText())
+                                    && sessionId.equals(failed.path("codexSessionId").asText())
+                                    && requestId.equals(failed.path("params").path("requestId").asText())
+                                    && "net::ERR_INTERNET_DISCONNECTED".equals(failed.path("params").path("errorText").asText())) {
+                                workerFailureObserved = true;
+                            }
+                        }
+                    }
+                    if ("Network.requestWillBeSent".equals(method) && pageTargetId.equals(eventTarget)
+                            && "Document".equals(params.path("type").asText())
+                            && mainFrameId.equals(params.path("frameId").asText())
+                            && businessUrl.equals(params.path("request").path("url").asText())) {
+                        String requestId = params.path("requestId").asText();
+                        for (int j = eventBoundary; j < events.size(); j++) {
+                            JsonNode response = events.get(j);
+                            if ("Network.responseReceived".equals(response.path("method").asText())
+                                    && pageTargetId.equals(response.path("codexTargetId").asText())
+                                    && requestId.equals(response.path("params").path("requestId").asText())
+                                    && response.path("params").path("response").path("fromServiceWorker").asBoolean()) {
+                                pageResponseObserved = true;
+                            }
+                        }
+                    }
+                    if ("Page.frameNavigated".equals(method) && pageTargetId.equals(eventTarget)
+                            && mainFrameId.equals(params.path("frame").path("id").asText())
+                            && businessUrl.equals(params.path("frame").path("url").asText())) {
+                        mainFrameNavigated = true;
+                    }
+                }
+                Thread.sleep(100);
             }
-            Thread.sleep(50);
+            if (mainFrameNavigated) {
+                boolean rendered = browser.waitForStrict("location.href===" + JSON.writeValueAsString(businessUrl)
+                        + "&&document.title.includes('オフライン')&&!navigator.onLine"
+                        + "&&!!document.getElementById('offline-drafts')&&document.getElementById('offline-drafts').hidden"
+                        + "&&!!document.getElementById('offline-confirm-restore')&&document.getElementById('offline-confirm-restore').hidden",
+                        Duration.ofSeconds(10));
+                shellObserved = rendered;
+            }
+            proof = new OfflineNavigationProof(workerFailureObserved, pageResponseObserved, shellObserved);
+            if (!workerFailureObserved || !pageResponseObserved || !shellObserved) {
+                throw new IllegalStateException("同一business navigationのworker実通信offline証跡が不足: " + proof);
+            }
+        } catch (Throwable thrown) {
+            failure = thrown;
+        } finally {
+            Throwable cleanupFailure = null;
+            try { browser.sendBrowser("Target.setAutoAttach", Map.of("autoAttach", false,
+                    "waitForDebuggerOnStart", false, "flatten", true)); }
+            catch (Throwable thrown) { cleanupFailure = thrown; }
+            List<JsonNode> cleanupEvents = browser.protocolEvents();
+            for (int i = eventBoundary; i < cleanupEvents.size(); i++) {
+                JsonNode event = cleanupEvents.get(i);
+                if (!"Target.attachedToTarget".equals(event.path("method").asText())) continue;
+                String session = event.path("params").path("sessionId").asText();
+                if (session.isBlank()) continue;
+                liveSessions.add(session);
+                if (!configuredSessions.contains(session)) pausedSessions.add(session);
+            }
+            try {
+                browser.send("Network.emulateNetworkConditions", Map.of("offline", false, "latency", 0,
+                        "downloadThroughput", -1, "uploadThroughput", -1, "connectionType", "wifi"));
+            } catch (Throwable thrown) {
+                if (cleanupFailure == null) cleanupFailure = thrown; else cleanupFailure.addSuppressed(thrown);
+            }
+            for (String session : new HashSet<>(liveSessions)) {
+                try {
+                    if (!browser.isSessionAttached(session)) continue;
+                    browser.sendOnSession(session, "Network.enable", Map.of());
+                    browser.sendOnSession(session, "Network.emulateNetworkConditions", Map.of("offline", false,
+                            "latency", 0, "downloadThroughput", -1, "uploadThroughput", -1, "connectionType", "wifi"));
+                    if (pausedSessions.contains(session)) browser.sendOnSession(session, "Runtime.runIfWaitingForDebugger", Map.of());
+                    browser.sendBrowser("Target.detachFromTarget", Map.of("sessionId", session));
+                } catch (Throwable thrown) {
+                    if (cleanupFailure == null) cleanupFailure = thrown; else cleanupFailure.addSuppressed(thrown);
+                }
+            }
+            try {
+                JsonNode bootstrap = JSON.readTree(browser.evaluateStrict("(async()=>{const r=await fetch('/api/my/session-context',"
+                        + "{method:'GET',cache:'no-store',credentials:'same-origin',headers:{'Accept':'application/json'}});"
+                        + "const j=await r.json();return JSON.stringify({status:r.status,code:j.code,"
+                        + "cookie:document.cookie.split(';').some(x=>x.trim().startsWith('XSRF-TOKEN='))})})()").asText());
+                if (bootstrap.path("status").asInt() != 200 || bootstrap.path("code").asInt() != 200
+                        || !bootstrap.path("cookie").asBoolean()) throw new IllegalStateException("正規online CSRF bootstrapに失敗しました");
+            } catch (Throwable thrown) { if (cleanupFailure == null) cleanupFailure = thrown; else cleanupFailure.addSuppressed(thrown); }
+            if (cleanupFailure != null) {
+                if (failure == null) failure = cleanupFailure; else failure.addSuppressed(cleanupFailure);
+            }
         }
-        return false;
+        if (failure != null) {
+            if (failure instanceof Exception exception) throw exception;
+            if (failure instanceof Error error) throw error;
+            throw new IllegalStateException(failure);
+        }
+        return proof;
+    }
+
+    private static void configureWorkerOffline(CdpBrowser browser, String session) throws Exception {
+        browser.sendOnSession(session, "Network.enable", Map.of());
+        browser.sendOnSession(session, "Network.emulateNetworkConditions", Map.of("offline", true,
+                "latency", 0, "downloadThroughput", 0, "uploadThroughput", 0, "connectionType", "none"));
     }
 }
