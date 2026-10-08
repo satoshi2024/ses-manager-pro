@@ -146,14 +146,14 @@ class PwaQueueChromeIsolationBrowserTest {
                     "downloadThroughput", -1, "uploadThroughput", -1, "connectionType", "wifi"));
             assertTrue(browser.waitForStrict("navigator.onLine", Duration.ofSeconds(10)));
             assertTrue(browser.waitForStrict("!!(document.getElementById('offline-reauth') && !document.getElementById('offline-reauth').disabled)", Duration.ofSeconds(10)));
-            browser.evaluate("window.__nativeFetch=window.fetch.bind(window);window.__protectedSendCount=0;"
+            assertTrue(browser.evaluateStrict("window.__nativeFetch=window.fetch.bind(window);window.__protectedSendCount=0;"
                     + "window.fetch=(input,init)=>{if(String(input).includes('/api/my/pwa/attendance/daily')){window.__protectedSendCount++;return Promise.reject(new TypeError('fenced'));}return window.__nativeFetch(input,init)};"
                     + "window.__reauthDiagnostics=[];const beforeReauth=window.fetch;window.fetch=async(input,init)=>{if(String(input).includes('/api/my/pwa/restore/reauthenticate')){const h=new Headers(init&&init.headers||{});const rec={csrfHeaderPresent:h.has('X-XSRF-TOKEN'),cookiePresent:document.cookie.split(';').some(x=>x.trim().startsWith('XSRF-TOKEN='))};try{const r=await beforeReauth(input,init);rec.status=r.status;window.__reauthDiagnostics.push(rec);return r}catch(e){rec.errorClass=e&&e.name||'Error';window.__reauthDiagnostics.push(rec);throw e}}return beforeReauth(input,init)};"
                     + "window.__prepareDiagnostics=null;const originalPrepare=SES.pwaQueue.prepareRestore;SES.pwaQueue.prepareRestore=async secret=>{const d={online:navigator.onLine,passwordPresent:!!secret,xsrfCookiePresent:document.cookie.split(';').some(x=>x.trim().startsWith('XSRF-TOKEN=')),stateReady:false,scopePresent:false,epochConsistent:false,scopeRecordCount:-1};"
                     + "try{await SES.pwaQueue.whenReady();d.stateReady=true}catch(e){};try{const scope=localStorage.getItem('ses_pwa_user_scope');const local=localStorage.getItem('ses_pwa_revocation_epoch');const match=document.cookie.match(/(?:^|;\\s*)ses_pwa_revocation_epoch=([^;]+)/);const cookie=match?decodeURIComponent(match[1]):null;d.scopePresent=!!scope;d.epochConsistent=!!local&&local===cookie&&localStorage.getItem('ses_pwa_scope_epoch')===local;const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});const rows=await new Promise((ok,no)=>{const q=db.transaction('queue').objectStore('queue').getAll();q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)});db.close();d.scopeRecordCount=rows.filter(x=>x.userScope===scope).length}catch(e){d.databaseReadError=e&&e.name||'Error'}"
                     + "try{return await originalPrepare(secret)}catch(e){const m=String(e&&e.message||'');d.errorName=e&&e.name||'Error';d.errorCategory=m==='オンラインでログインし直してください'?'state-precondition':m==='復元対象を一意に確認できません'?'restore-target-empty':m.includes('CSRF')?'csrf-precondition':e&&e.name==='TypeError'?'request-or-bootstrap-typeerror':'other';window.__prepareDiagnostics=d;throw e}};"
                     + "document.getElementById('offline-restore-password').value='test-password';"
-                    + "document.getElementById('offline-reauth').click();true");
+                    + "document.getElementById('offline-reauth').click();true").asBoolean(), "診断hookをChromeへ確実に設置する");
             boolean reauthReady = browser.waitForStrict("!!(document.getElementById('offline-confirm-restore') && !document.getElementById('offline-confirm-restore').hidden)", Duration.ofSeconds(15));
             assertTrue(reauthReady, "common.jsのないoffline.htmlからXSRF cookieで再認証する。診断="
                     + browser.evaluateStrict("JSON.stringify({status:document.getElementById('offline-restore-status').textContent,request:window.__reauthDiagnostics,prepare:window.__prepareDiagnostics})").asText());
@@ -257,9 +257,9 @@ class PwaQueueChromeIsolationBrowserTest {
             assertFalse(browser.evaluateStrict("window.__raceConfirmSettled").asBoolean(), "削除transaction待機中はconfirmRestoreが未完了");
             assertTrue(browser.evaluateStrict("(async()=>{const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});const rows=await new Promise((ok,no)=>{const q=db.transaction('queue').objectStore('queue').getAll();q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)});db.close();return !rows.some(x=>x.clientRequestId==='locked-delete-sentinel')})()").asBoolean(),
                     "実IndexedDB上では旧scope削除をcommit済み");
-            browser.evaluate("window.__protectedSendCount=0;window.__nativeFetch=window.fetch.bind(window);"
+            assertTrue(browser.evaluateStrict("window.__protectedSendCount=0;window.__nativeFetch=window.fetch.bind(window);"
                     + "window.fetch=(input,init)=>{if(String(input).includes('/api/my/pwa/attendance/daily')){window.__protectedSendCount++;return Promise.reject(new TypeError('fenced'));}return window.__nativeFetch(input,init)};"
-                    + "window.__raceReset=SES.pwaQueue.reset();true");
+                    + "window.__raceReset=SES.pwaQueue.reset();true").asBoolean(), "送信fenceと削除barrier hookを設置する");
             assertTrue(browser.evaluateStrict("document.getElementById('pwa-queue-panel').hidden").asBoolean(),
                     "confirmを待つ間の撤回がqueue DOMを即時隠す");
             browser.evaluate("window.__releaseDeleteBarrier();true");
@@ -392,11 +392,12 @@ class PwaQueueChromeIsolationBrowserTest {
                                AtomicBoolean rebindScopeOnNextContext) throws java.io.IOException {
         String path = exchange.getRequestURI().getPath();
         if (path.equals("/test.html")) {
+            // Chrome再起動後も同じoriginから発行されたCSRF cookieを使う。
+            exchange.getResponseHeaders().add("Set-Cookie", "XSRF-TOKEN=synthetic-csrf; Path=/; SameSite=Lax");
             reply(exchange, 200, "text/html; charset=utf-8", """
                     <!doctype html><html lang="ja"><head><meta charset="utf-8"></head><body>
                     <div id="pwa-queue-panel"><div id="pwa-queue-status"></div><div id="pwa-conflicts"></div></div>
                     <script>
-                    document.cookie='XSRF-TOKEN=synthetic-csrf; Path=/; SameSite=Lax';
                     const initialScope='scope-'+(new URL(location.href).searchParams.get('user')||'A');
                     localStorage.setItem('ses_pwa_user_scope',initialScope);
                     localStorage.setItem('ses_pwa_scope_epoch',localStorage.getItem('ses_pwa_revocation_epoch')||'0');
