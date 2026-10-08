@@ -88,7 +88,7 @@ class AiExecutionGatewayCopilotSnapshotTest {
                 .persistRun(false)
                 .executionContext(context)
                 .scopeContext(context.scope())
-                .scopeHash("nf08-local-scope-hash")
+                .scopeHash(context.scopeHash())
                 .deadlineNanos(System.nanoTime() + 10_000_000_000L)
                 .costBudgetYen(0)
                 .expectedArtifactVersionId(7L)
