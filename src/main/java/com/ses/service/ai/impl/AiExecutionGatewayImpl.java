@@ -21,8 +21,13 @@ import com.ses.service.ai.AiProviderRegistry;
 import com.ses.service.ai.AiUseCasePolicy;
 import com.ses.service.ai.copilot.CopilotFeatureGate;
 import com.ses.service.ai.copilot.CopilotExecutionContext;
+import com.ses.service.ai.copilot.CopilotConfigSnapshot;
+import com.ses.service.ai.copilot.CopilotInvocation;
+import com.ses.service.ai.copilot.summary.CopilotProviderCostPolicy;
+import com.ses.service.ai.copilot.summary.PreflightCostEvidence;
+import com.ses.service.ai.copilot.summary.ProductionDenyAllCopilotCostPolicy;
+import com.ses.service.ai.copilot.summary.DispatchOutcome;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -37,7 +42,6 @@ import java.util.Objects;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class AiExecutionGatewayImpl implements AiExecutionGateway {
 
     private final AiTextService aiTextService;
@@ -54,6 +58,30 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
     private final AiProductionApprovalGate productionApprovalGate;
     private final CopilotFeatureGate copilotFeatureGate;
     private final AiProviderRegistry providerRegistry = new AiProviderRegistry();
+    /** 起動時に一度だけ固定し、Copilot経路ではAiConfigを再読しない。 */
+    private final CopilotConfigSnapshot startupCopilotConfigSnapshot;
+    /** production policyはコード固定で、外部設定からallowへ変更できない。 */
+    private final CopilotProviderCostPolicy copilotCostPolicy = new ProductionDenyAllCopilotCostPolicy();
+
+    public AiExecutionGatewayImpl(AiTextService aiTextService, AiConfig aiConfig,
+                                  AiOutboundProbe outboundProbe, ObjectMapper objectMapper,
+                                  AiArtifactVersionMapper versionMapper,
+                                  AiRecommendationRunMapper runMapper,
+                                  PlatformTransactionManager transactionManager, Clock clock,
+                                  AiProductionApprovalGate productionApprovalGate,
+                                  CopilotFeatureGate copilotFeatureGate) {
+        this.aiTextService = aiTextService;
+        this.aiConfig = aiConfig;
+        this.outboundProbe = outboundProbe;
+        this.objectMapper = objectMapper;
+        this.versionMapper = versionMapper;
+        this.runMapper = runMapper;
+        this.transactionManager = transactionManager;
+        this.clock = clock;
+        this.productionApprovalGate = productionApprovalGate;
+        this.copilotFeatureGate = copilotFeatureGate;
+        this.startupCopilotConfigSnapshot = CopilotConfigSnapshot.capture(aiConfig, aiTextService);
+    }
 
     /**
      * Provider HTTP はトランザクション外。persist のみ短トランザクション（S17-P2-01）。
@@ -75,8 +103,9 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         if (prompt.contains(AiGatewayRequest.CANARY)) {
             throw new BusinessException(400, "PII canary を外部送信できません");
         }
+        CopilotInvocation invocation = null;
         if (AiGatewayRequest.USE_COPILOT.equals(request.getUseCase())) {
-            assertCopilotBoundedRequest(request);
+            invocation = assertCopilotBoundedRequest(request);
         }
         assertFinalProviderBoundary(request);
         outboundProbe.record(prompt);
@@ -90,7 +119,7 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         try {
             // HTTP / provider 呼び出しは TX 外（接続プール占有を避ける）
             text = AiPiiMasker.stripHtml(AiGatewayRequest.USE_COPILOT.equals(request.getUseCase())
-                    ? callCopilotProvider(prompt, request) : callProvider(prompt));
+                    ? callCopilotProvider(prompt, invocation) : callProvider(prompt));
             if (request.isRequireJson()) {
                 assertJson(text);
             }
@@ -119,9 +148,11 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         return aiTextService.generate(prompt);
     }
 
-    private void assertCopilotBoundedRequest(AiGatewayRequest request) {
+    private CopilotInvocation assertCopilotBoundedRequest(AiGatewayRequest request) {
+        if (request.getCostBudgetYen() == null || request.getCostBudgetYen() < 0) {
+            throw BusinessException.of(503, "COPILOT_COST_BUDGET_REQUIRED");
+        }
         if (request.getDeadlineNanos() == null
-                || request.getCostBudgetYen() == null || request.getCostBudgetYen() < 0
                 || request.getExpectedArtifactVersionId() == null
                 || request.getExpectedProvider() == null || request.getExpectedProvider().isBlank()
                 || request.getExpectedModel() == null || request.getExpectedModel().isBlank()
@@ -132,38 +163,71 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         if (System.nanoTime() >= request.getDeadlineNanos()) {
             throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
         }
-        AiProviderRegistry.ProviderDescriptor configured = providerRegistry.requireRegistered(aiConfig.getProvider());
+        AiProviderRegistry.ProviderDescriptor configured = providerRegistry.requireRegistered(
+                startupCopilotConfigSnapshot.configuredProvider());
         if (!configured.name().equals(request.getExpectedProvider())) {
             throw BusinessException.of(503, "COPILOT_ARTIFACT_PROVIDER_MISMATCH");
         }
+        PreflightCostEvidence preflight;
         if (!configured.localOnly()) {
-            // provider費用を上限内と事前に保証できる契約が未登録。未知費用を0円扱いしない。
+            // production cost policyは固定deny-all。budget欠落を0円へ補完しない。
+            preflight = copilotCostPolicy.preflight(startupCopilotConfigSnapshot, request.getCostBudgetYen());
+            if (preflight.dispatchAllowed()) {
+                throw BusinessException.of(503, "COPILOT_COST_POLICY_INVALID");
+            }
             throw BusinessException.of(503, "COPILOT_COST_UNKNOWN");
         }
+        if (!startupCopilotConfigSnapshot.hasBoundedIdentity()
+                || !configured.name().equals(startupCopilotConfigSnapshot.adapterProvider())) {
+            throw BusinessException.of(503, "COPILOT_EXECUTION_SNAPSHOT_INVALID");
+        }
         if (!(aiTextService instanceof CopilotBoundedAiTextService bounded)
-                || !configured.name().equals(aiTextService.providerId())
-                || !request.getExpectedModel().equals(bounded.copilotModelId())) {
+                || !configured.name().equals(startupCopilotConfigSnapshot.adapterProvider())
+                || !request.getExpectedModel().equals(startupCopilotConfigSnapshot.modelId())) {
             throw BusinessException.of(503, "COPILOT_BOUNDED_PROVIDER_MISMATCH");
         }
-        if (!request.getExpectedPromptVersion().equals(bounded.copilotPromptVersion())) {
+        if (!request.getExpectedPromptVersion().equals(startupCopilotConfigSnapshot.promptVersion())) {
             throw BusinessException.of(503, "COPILOT_PROMPT_VERSION_MISMATCH");
         }
-        if (!request.getExpectedConfigHash().equals(bounded.copilotConfigHash())) {
+        if (!request.getExpectedConfigHash().equals(startupCopilotConfigSnapshot.configHash())) {
             throw BusinessException.of(503, "COPILOT_CONFIG_HASH_MISMATCH");
         }
+        if (request.getCostBudgetYen() == null) {
+            throw BusinessException.of(503, "COPILOT_COST_BUDGET_REQUIRED");
+        }
+        preflight = new PreflightCostEvidence("local-no-egress-v1", request.getCostBudgetYen(), true,
+                com.ses.service.ai.copilot.summary.CopilotCostState.NOT_SENT,
+                DispatchOutcome.notStarted("LOCAL_PROVIDER_NO_EGRESS"), "LOCAL_PROVIDER_NO_EGRESS");
+        CopilotInvocation invocation = new CopilotInvocation(startupCopilotConfigSnapshot,
+                request.getExpectedArtifactVersionId(), request.getExpectedProvider(), request.getExpectedModel(),
+                request.getExpectedPromptVersion(), request.getExpectedConfigHash(), request.getDeadlineNanos(),
+                preflight);
+        if (!invocation.identityMatchesSnapshot()) {
+            throw BusinessException.of(503, "COPILOT_EXECUTION_SNAPSHOT_INVALID");
+        }
+        return invocation;
     }
 
-    private String callCopilotProvider(String prompt, AiGatewayRequest request) {
+    private String callCopilotProvider(String prompt, CopilotInvocation invocation) {
         if (!(aiTextService instanceof CopilotBoundedAiTextService bounded)) {
             throw BusinessException.of(503, "COPILOT_BOUNDED_PROVIDER_UNAVAILABLE");
         }
-        return bounded.generateCopilotSummary(prompt, request.getDeadlineNanos());
+        return bounded.generateCopilotSummary(prompt, invocation);
     }
 
     /** controllerを経由しない呼出しも、provider I/O直前に最終gateを通す。 */
     private void assertFinalProviderBoundary(AiGatewayRequest request) {
-        AiProviderRegistry.ProviderDescriptor provider = providerRegistry.requireRegistered(aiConfig.getProvider());
-        providerRegistry.assertImplementation(provider.name(), aiTextService);
+        boolean copilot = AiGatewayRequest.USE_COPILOT.equals(request.getUseCase());
+        String configuredProvider = copilot
+                ? startupCopilotConfigSnapshot.configuredProvider() : aiConfig.getProvider();
+        AiProviderRegistry.ProviderDescriptor provider = providerRegistry.requireRegistered(configuredProvider);
+        if (copilot) {
+            if (!provider.name().equals(startupCopilotConfigSnapshot.adapterProvider())) {
+                throw BusinessException.of(503, "AI_PROVIDER_IMPLEMENTATION_MISMATCH");
+            }
+        } else {
+            providerRegistry.assertImplementation(provider.name(), aiTextService);
+        }
         AiUseCasePolicy.Mode policy = AiUseCasePolicy.require(request.getUseCase());
         if (policy == AiUseCasePolicy.Mode.MANAGEMENT_COPILOT) {
             CopilotExecutionContext context = request.getExecutionContext();
@@ -180,7 +244,7 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 throw new BusinessException(403, "EXECUTION_CONTEXT_REQUIRED");
             }
             copilotFeatureGate.assertQueryAllowed();
-            productionApprovalGateAsserted();
+            productionApprovalGateAsserted(startupCopilotConfigSnapshot.configuredProvider());
             return;
         }
 
@@ -196,7 +260,7 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
             if (requiresLegacyContext(request)) {
                 assertLegacyResourceContext(request);
             }
-            productionApprovalGateAsserted();
+            productionApprovalGateAsserted(aiConfig.getProvider());
         }
     }
 
@@ -229,8 +293,8 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         }
     }
 
-    private void productionApprovalGateAsserted() {
-        productionApprovalGate.assertProviderAllowed(aiConfig.getProvider());
+    private void productionApprovalGateAsserted(String provider) {
+        productionApprovalGate.assertProviderAllowed(provider);
     }
 
 
