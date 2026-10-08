@@ -64,13 +64,13 @@ class PwaQueueChromeIsolationBrowserTest {
             browser = launchChrome(profile);
             String base = "http://127.0.0.1:" + server.getAddress().getPort();
             browser.navigate(base + "/test.html?user=A");
-            assertTrue(browser.waitFor("window.SES && SES.pwaQueue && SES.pwaQueue.getScope() === 'scope-A'", Duration.ofSeconds(20)),
-                    "初期scope確認: " + browser.evaluate("JSON.stringify({href:location.href,scope:window.SES&&SES.pwaQueue&&SES.pwaQueue.getScope(),epoch:localStorage.getItem('ses_pwa_revocation_epoch'),scopeEpoch:localStorage.getItem('ses_pwa_scope_epoch'),cookie:document.cookie,online:navigator.onLine})").asText()
+            assertTrue(browser.waitForStrict("window.SES && SES.pwaQueue && SES.pwaQueue.getScope() === 'scope-A'", Duration.ofSeconds(20)),
+                    "初期scope確認: " + browser.evaluateStrict("JSON.stringify({href:location.href,scope:window.SES&&SES.pwaQueue&&SES.pwaQueue.getScope(),epoch:localStorage.getItem('ses_pwa_revocation_epoch'),scopeEpoch:localStorage.getItem('ses_pwa_scope_epoch'),cookie:document.cookie,online:navigator.onLine})").asText()
                             + " / console=" + browser.consoleEvents());
-            assertTrue(browser.waitFor("navigator.serviceWorker.getRegistration().then(r=>!!(r&&r.active))", Duration.ofSeconds(20)));
+            assertTrue(browser.waitForStrict("navigator.serviceWorker.getRegistration().then(r=>!!(r&&r.active))", Duration.ofSeconds(20)));
             // 初回installは現在documentをcontroller化しないため、activation後に再navigationする。
             browser.navigate(base + "/test.html?user=A");
-            assertTrue(browser.waitFor("!!(navigator.serviceWorker && navigator.serviceWorker.controller)", Duration.ofSeconds(20)));
+            assertTrue(browser.waitForStrict("!!(navigator.serviceWorker && navigator.serviceWorker.controller)", Duration.ofSeconds(20)));
             browser.evaluate("window.__setOnline(false)");
 
             JsonNode chromeVersion = browser.send("Browser.getVersion", Map.of());
@@ -89,17 +89,17 @@ class PwaQueueChromeIsolationBrowserTest {
                     + "breakMinutes:60,workType:'出勤',workplaceType:'客先',remarks:'demo'}});return true})()");
             assertTrue(queued.asBoolean());
             browser.evaluate("window.__setOnline(true); SES.pwaQueue.flush()");
-            assertTrue(browser.waitFor("(async()=>{const r=await indexedDB.open('ses-pwa-self-service');return await new Promise(ok=>{r.onsuccess=()=>{const tx=r.result.transaction('queue');const q=tx.objectStore('queue').getAll();q.onsuccess=()=>ok(q.result.length===0)}})})()", Duration.ofSeconds(20)));
+            assertTrue(browser.waitForStrict("(async()=>{const r=await indexedDB.open('ses-pwa-self-service');return await new Promise(ok=>{r.onsuccess=()=>{const tx=r.result.transaction('queue');const q=tx.objectStore('queue').getAll();q.onsuccess=()=>ok(q.result.length===0)}})})()", Duration.ofSeconds(20)));
             assertEquals(List.of(0, 1, 2), new ArrayList<>(sentVersions), "同月の連続commandは直前のversionを使う");
 
             conflictNext.set(true);
             browser.evaluate("(async()=>{await SES.pwaQueue.request({screen:'change-request',month:null,method:'POST',"
                     + "path:'/api/my/pwa/change-requests/drafts',baseVersion:0,resourceKey:'change-request:profile',"
                     + "payload:{requestType:'profile.change',reason:'demo',payload:{fullName:'本人',email:'me@example.test'}}})})()");
-            assertTrue(browser.waitFor("!!document.querySelector('[data-pwa-refresh]')", Duration.ofSeconds(10)));
+            assertTrue(browser.waitForStrict("!!document.querySelector('[data-pwa-refresh]')", Duration.ofSeconds(10)));
             browser.evaluate("document.querySelector('[data-pwa-refresh]').click()");
-            assertTrue(browser.waitFor("(async()=>{const r=indexedDB.open('ses-pwa-self-service');return await new Promise(ok=>{r.onsuccess=()=>{const q=r.result.transaction('queue').objectStore('queue').getAll();q.onsuccess=()=>ok(q.result.some(x=>x.conflict&&x.conflict.server))}})})()", Duration.ofSeconds(10)));
-            String storedConflict = browser.evaluate("(async()=>{const r=indexedDB.open('ses-pwa-self-service');return await new Promise(ok=>{r.onsuccess=()=>{const q=r.result.transaction('queue').objectStore('queue').getAll();q.onsuccess=()=>ok(JSON.stringify(q.result.filter(x=>x.conflict)))}})})()").asText();
+            assertTrue(browser.waitForStrict("(async()=>{const r=indexedDB.open('ses-pwa-self-service');return await new Promise(ok=>{r.onsuccess=()=>{const q=r.result.transaction('queue').objectStore('queue').getAll();q.onsuccess=()=>ok(q.result.some(x=>x.conflict&&x.conflict.server))}})})()", Duration.ofSeconds(10)));
+            String storedConflict = browser.evaluateStrict("(async()=>{const r=indexedDB.open('ses-pwa-self-service');return await new Promise(ok=>{r.onsuccess=()=>{const q=r.result.transaction('queue').objectStore('queue').getAll();q.onsuccess=()=>ok(JSON.stringify(q.result.filter(x=>x.conflict)))}})})()").asText();
             assertFalse(storedConflict.contains("営業秘密氏名"));
             assertFalse(storedConflict.contains("contractName"));
             assertFalse(storedConflict.contains("careerSummary"));
@@ -112,7 +112,7 @@ class PwaQueueChromeIsolationBrowserTest {
                     .asText();
             String offlineDraftRequestId = JSON.readTree(offlineDraftRequest).path("clientRequestId").asText();
             assertFalse(offlineDraftRequestId.isBlank(), "offline commandのrequestIdを取得する");
-            assertTrue(browser.waitFor("document.querySelector('#pwa-queue-status').textContent.includes('未送信')", Duration.ofSeconds(10)));
+            assertTrue(browser.waitForStrict("document.querySelector('#pwa-queue-status').textContent.includes('未送信')", Duration.ofSeconds(10)));
 
             // ブラウザprocessを終了し、同じChrome profileで再起動してIndexedDB/SW永続化を確認する。
             assertTrue(closeChrome(browser, profile), "Chromeの終了完了後に同じprofileを再起動する");
@@ -121,12 +121,12 @@ class PwaQueueChromeIsolationBrowserTest {
             browser.send("Network.emulateNetworkConditions", Map.of("offline", true, "latency", 0,
                     "downloadThroughput", 0, "uploadThroughput", 0, "connectionType", "none"));
             browser.navigate(base + "/my/timesheet");
-            assertTrue(browser.waitFor("document.title.includes('オフライン')", Duration.ofSeconds(15)));
-            assertTrue(browser.waitFor("document.getElementById('offline-drafts').hidden", Duration.ofSeconds(15)),
+            assertTrue(browser.waitForStrict("document.title.includes('オフライン')", Duration.ofSeconds(15)));
+            assertTrue(browser.waitForStrict("document.getElementById('offline-drafts').hidden", Duration.ofSeconds(15)),
                     "Chrome再起動後の同一scope draftもロックする");
-            assertTrue(browser.evaluate("SES.pwaQueue.getOfflineDrafts().then(x=>x.length===0)").asBoolean(),
+            assertTrue(browser.evaluateStrict("SES.pwaQueue.getOfflineDrafts().then(x=>x.length===0)").asBoolean(),
                     "明示確認前はqueue APIからもdraftを読めない");
-            String restoredRecordJson = browser.evaluate("(async()=>{const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});const rows=await new Promise(ok=>{const q=db.transaction('queue').objectStore('queue').getAll();q.onsuccess=()=>ok(q.result)});const record=rows.find(x=>x.clientRequestId==="
+            String restoredRecordJson = browser.evaluateStrict("(async()=>{const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});const rows=await new Promise(ok=>{const q=db.transaction('queue').objectStore('queue').getAll();q.onsuccess=()=>ok(q.result)});const record=rows.find(x=>x.clientRequestId==="
                     + JSON.writeValueAsString(offlineDraftRequestId) + ");db.close();return JSON.stringify(record||null)})()")
                     .asText();
             JsonNode restoredRecord = JSON.readTree(restoredRecordJson);
@@ -144,21 +144,23 @@ class PwaQueueChromeIsolationBrowserTest {
 
             browser.send("Network.emulateNetworkConditions", Map.of("offline", false, "latency", 0,
                     "downloadThroughput", -1, "uploadThroughput", -1, "connectionType", "wifi"));
-            assertTrue(browser.waitFor("navigator.onLine", Duration.ofSeconds(10)));
-            assertTrue(browser.waitFor("!document.getElementById('offline-reauth').disabled", Duration.ofSeconds(10)));
+            assertTrue(browser.waitForStrict("navigator.onLine", Duration.ofSeconds(10)));
+            assertTrue(browser.waitForStrict("!document.getElementById('offline-reauth').disabled", Duration.ofSeconds(10)));
             browser.evaluate("window.__nativeFetch=window.fetch.bind(window);window.__protectedSendCount=0;"
                     + "window.fetch=(input,init)=>{if(String(input).includes('/api/my/pwa/attendance/daily')){window.__protectedSendCount++;return Promise.reject(new TypeError('fenced'));}return window.__nativeFetch(input,init)};"
+                    + "window.__reauthDiagnostics=[];const beforeReauth=window.fetch;window.fetch=async(input,init)=>{if(String(input).includes('/api/my/pwa/restore/reauthenticate')){const h=new Headers(init&&init.headers||{});const rec={csrfHeaderPresent:h.has('X-XSRF-TOKEN'),cookiePresent:document.cookie.split(';').some(x=>x.trim().startsWith('XSRF-TOKEN='))};try{const r=await beforeReauth(input,init);rec.status=r.status;window.__reauthDiagnostics.push(rec);return r}catch(e){rec.errorClass=e&&e.name||'Error';window.__reauthDiagnostics.push(rec);throw e}}return beforeReauth(input,init)};"
                     + "document.getElementById('offline-restore-password').value='test-password';"
                     + "document.getElementById('offline-reauth').click();true");
-            assertTrue(browser.waitFor("!document.getElementById('offline-confirm-restore').hidden", Duration.ofSeconds(15)),
-                    "common.jsのないoffline.htmlからXSRF cookieで再認証する");
-            assertTrue(browser.evaluate("document.getElementById('offline-drafts').hidden").asBoolean(),
+            boolean reauthReady = browser.waitForStrict("!document.getElementById('offline-confirm-restore').hidden", Duration.ofSeconds(15));
+            assertTrue(reauthReady, "common.jsのないoffline.htmlからXSRF cookieで再認証する。診断="
+                    + browser.evaluateStrict("JSON.stringify({status:document.getElementById('offline-restore-status').textContent,request:window.__reauthDiagnostics})").asText());
+            assertTrue(browser.evaluateStrict("document.getElementById('offline-drafts').hidden").asBoolean(),
                     "再認証のみでは内容を表示しない");
             browser.evaluate("document.getElementById('offline-confirm-restore').click();true");
-            assertTrue(browser.waitFor("!document.getElementById('offline-drafts').hidden", Duration.ofSeconds(15)),
+            assertTrue(browser.waitForStrict("!document.getElementById('offline-drafts').hidden", Duration.ofSeconds(15)),
                     "ユーザーの明示確認後にのみdraftを表示する");
-            assertTrue(browser.evaluate("document.getElementById('offline-draft-list').textContent.includes('2026-10-06')").asBoolean());
-            assertFalse(browser.evaluate("document.getElementById('offline-draft-list').textContent.includes('offline-draft')").asBoolean());
+            assertTrue(browser.evaluateStrict("document.getElementById('offline-draft-list').textContent.includes('2026-10-06')").asBoolean());
+            assertFalse(browser.evaluateStrict("document.getElementById('offline-draft-list').textContent.includes('offline-draft')").asBoolean());
 
             // 実IndexedDB claimを占有し、復元permitの失効を同期待ち中に発生させる。
             browser.evaluate("(async()=>{const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});"
@@ -168,19 +170,19 @@ class PwaQueueChromeIsolationBrowserTest {
             browser.evaluate("window.__claimProbeCount=0;const originalGet=IDBObjectStore.prototype.get;window.__originalGet=originalGet;"
                     + "IDBObjectStore.prototype.get=function(key){if(this.name==='meta'&&key==='aggregate:attendance:2026-10')window.__claimProbeCount++;return originalGet.call(this,key)};"
                     + "window.__expiryFlush=SES.pwaQueue.flush();true");
-            assertTrue(browser.waitFor("window.__claimProbeCount>0", Duration.ofSeconds(15)), "IndexedDB claim待ちを観測する");
+            assertTrue(browser.waitForStrict("window.__claimProbeCount>0", Duration.ofSeconds(15)), "IndexedDB claim待ちを観測する");
             browser.evaluate("window.__nativeDateNow=Date.now.bind(Date);window.__nativePerformanceNow=performance.now.bind(performance);"
                     + "Object.defineProperty(performance,'now',{configurable:true,value:()=>window.__nativePerformanceNow()+16*60*1000});"
                     + "Date.now=()=>window.__nativeDateNow()+16*60*1000");
-            assertTrue(browser.evaluate("SES.pwaQueue.getOfflineDrafts().then(x=>x.length===0)").asBoolean(),
+            assertTrue(browser.evaluateStrict("SES.pwaQueue.getOfflineDrafts().then(x=>x.length===0)").asBoolean(),
                     "permit失効後は復元下書きを同期的に隔離する");
-            assertTrue(browser.evaluate("document.getElementById('offline-drafts').hidden").asBoolean(),
+            assertTrue(browser.evaluateStrict("document.getElementById('offline-drafts').hidden").asBoolean(),
                     "permit失効イベントで表示DOMを消去する");
             browser.evaluate("(async()=>{const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});"
                     + "await new Promise((ok,no)=>{const tx=db.transaction('meta','readwrite');tx.objectStore('meta').delete('aggregate:attendance:2026-10');tx.oncomplete=ok;tx.onerror=()=>no(tx.error)});db.close();"
                     + "Date.now=window.__nativeDateNow;Object.defineProperty(performance,'now',{configurable:true,value:window.__nativePerformanceNow});"
                     + "await window.__expiryFlush;return true})()");
-            assertEquals(1, browser.evaluate("window.__protectedSendCount").asInt(),
+            assertEquals(1, browser.evaluateStrict("window.__protectedSendCount").asInt(),
                     "expired permit後、claim解放を待つ送信はfetchへ到達しない");
             browser.evaluate("IDBObjectStore.prototype.get=window.__originalGet");
             browser.evaluate("(async()=>{const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});"
@@ -190,8 +192,8 @@ class PwaQueueChromeIsolationBrowserTest {
             browser.send("Network.emulateNetworkConditions", Map.of("offline", false, "latency", 0,
                     "downloadThroughput", -1, "uploadThroughput", -1, "connectionType", "wifi"));
             browser.navigate(base + "/test.html?user=A");
-            assertTrue(browser.waitFor("window.SES && SES.pwaQueue && SES.pwaQueue.getScope()==='scope-A'", Duration.ofSeconds(15)));
-            assertTrue(browser.evaluate("SES.pwaQueue.getOfflineDrafts().then(x=>x.length===0)").asBoolean(),
+            assertTrue(browser.waitForStrict("window.SES && SES.pwaQueue && SES.pwaQueue.getScope()==='scope-A'", Duration.ofSeconds(15)));
+            assertTrue(browser.evaluateStrict("SES.pwaQueue.getOfflineDrafts().then(x=>x.length===0)").asBoolean(),
                     "新documentでは前documentが復元したdraftもpermitを引き継がない");
             browser.evaluate("(async()=>{window.__setOnline(false);await SES.pwaQueue.request({screen:'attendance',month:'2026-10',method:'POST',"
                     + "path:'/api/my/pwa/attendance/daily',baseVersion:0,resourceKey:'attendance:2026-10',"
@@ -200,21 +202,21 @@ class PwaQueueChromeIsolationBrowserTest {
 
             browser.send("Runtime.evaluate", Map.of("expression", "window.open('/test.html?user=A&child=true','pwa-child');true",
                     "userGesture", true, "returnByValue", true));
-            assertTrue(browser.waitFor("window.__child && window.__child.SES && window.__child.SES.pwaQueue.getScope()==='scope-A'", Duration.ofSeconds(15)));
+            assertTrue(browser.waitForStrict("window.__child && window.__child.SES && window.__child.SES.pwaQueue.getScope()==='scope-A'", Duration.ofSeconds(15)));
 
             // HTTP応答をbarrierで止め、lease引継ぎ後の旧応答がcommitされないことを検証する。
             browser.evaluate("window.__leaseFlush=SES.pwaQueue.flush(); true");
             assertTrue(leaseFirstStarted.await(15, TimeUnit.SECONDS), "最初のtabがHTTP barrierへ到達する");
             browser.evaluate("window.__child.location='/offline.html';true");
-            assertTrue(browser.waitFor("window.__child.document.title.includes('オフライン')", Duration.ofSeconds(15)));
-            assertTrue(browser.waitFor("!window.__child.document.getElementById('offline-reauth').disabled", Duration.ofSeconds(10)));
+            assertTrue(browser.waitForStrict("window.__child.document.title.includes('オフライン')", Duration.ofSeconds(15)));
+            assertTrue(browser.waitForStrict("!window.__child.document.getElementById('offline-reauth').disabled", Duration.ofSeconds(10)));
             browser.evaluate("window.__child.document.getElementById('offline-restore-password').value='test-password';"
                     + "window.__child.document.getElementById('offline-reauth').click();true");
-            assertTrue(browser.waitFor("!window.__child.document.getElementById('offline-confirm-restore').hidden", Duration.ofSeconds(15)));
+            assertTrue(browser.waitForStrict("!window.__child.document.getElementById('offline-confirm-restore').hidden", Duration.ofSeconds(15)));
             browser.evaluate("const child=window.__child;child.__claimProbeCount=0;child.__originalGet=child.IDBObjectStore.prototype.get;"
                     + "child.IDBObjectStore.prototype.get=function(key){if(this.name==='meta'&&key==='aggregate:attendance:2026-10')child.__claimProbeCount++;return child.__originalGet.call(this,key)};"
                     + "child.document.getElementById('offline-confirm-restore').click();true");
-            assertTrue(browser.waitFor("window.__child.__claimProbeCount>0", Duration.ofSeconds(15)),
+            assertTrue(browser.waitForStrict("window.__child.__claimProbeCount>0", Duration.ofSeconds(15)),
                     "明示復元後の第2documentが実IndexedDB leaseを待つ");
             browser.evaluate("(async()=>{const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});"
                     + "await new Promise((ok,no)=>{const tx=db.transaction('meta','readwrite');const s=tx.objectStore('meta');const r=s.get('aggregate:attendance:2026-10');r.onsuccess=()=>{const lease=r.result;lease.expiresAt=0;s.put(lease)};tx.oncomplete=ok;tx.onerror=()=>no(tx.error)});db.close()})()");
@@ -222,8 +224,8 @@ class PwaQueueChromeIsolationBrowserTest {
             assertEquals(2, leaseRequestCount.get(), "lease takeoverは同一pending commandを再送しidempotency keyで保護する");
             assertEquals(1L, leaseRequestIds.stream().distinct().count(), "両tabは同じclientRequestIdを再利用する");
             releaseLeaseFirst.countDown();
-            assertTrue(browser.evaluate("window.__leaseFlush.then(()=>true)").asBoolean());
-            assertTrue(browser.waitFor("(async()=>{const r=indexedDB.open('ses-pwa-self-service');return await new Promise(ok=>{r.onsuccess=()=>{const q=r.result.transaction('queue').objectStore('queue').getAll();q.onsuccess=()=>ok(!q.result.some(x=>x.status==='PENDING'))}})})()", Duration.ofSeconds(10)),
+            assertTrue(browser.evaluateStrict("window.__leaseFlush.then(()=>true)").asBoolean());
+            assertTrue(browser.waitForStrict("(async()=>{const r=indexedDB.open('ses-pwa-self-service');return await new Promise(ok=>{r.onsuccess=()=>{const q=r.result.transaction('queue').objectStore('queue').getAll();q.onsuccess=()=>ok(!q.result.some(x=>x.status==='PENDING'))}})})()", Duration.ofSeconds(10)),
                     "新ownerのack後に旧ownerの遅延responseがpending recordを復活させない");
 
             // 不正statusの旧scope recordを残し、confirm中の実IndexedDB deleteScope cursorを止めて撤回と競合させる。
@@ -235,76 +237,84 @@ class PwaQueueChromeIsolationBrowserTest {
                     + "await new Promise((ok,no)=>{const tx=db.transaction('queue','readwrite');tx.objectStore('queue').put({clientRequestId:'locked-delete-sentinel',"
                     + "userScope:'scope-A',revocationEpoch:localStorage.getItem('ses_pwa_revocation_epoch'),status:'ERROR',createdAt:Date.now(),payload:null});"
                     + "tx.oncomplete=ok;tx.onerror=()=>no(tx.error)});db.close();return true})()");
-            assertTrue(browser.evaluate("SES.pwaQueue.prepareRestore('test-password').then(()=>true)").asBoolean(),
+            assertTrue(browser.evaluateStrict("SES.pwaQueue.prepareRestore('test-password').then(()=>true)").asBoolean(),
                     "再認証proofを実queue状態へ束縛する");
-            assertTrue(browser.evaluate("fetch('/__test/enable-scope-drift').then(r=>r.ok)").asBoolean());
-            browser.evaluate("window.__deleteReached=false;window.__nativeOpenKeyCursor=IDBIndex.prototype.openKeyCursor;"
+            assertTrue(browser.evaluateStrict("fetch('/__test/enable-scope-drift').then(r=>r.ok)").asBoolean());
+            browser.evaluate("window.__deleteReached=false;window.__deleteKeepalive=false;window.__deleteKeepaliveCount=0;window.__nativeOpenKeyCursor=IDBIndex.prototype.openKeyCursor;"
                     + "IDBIndex.prototype.openKeyCursor=function(query){const request=window.__nativeOpenKeyCursor.call(this,query);"
                     + "if(this.name==='userScope'&&this.objectStore.transaction.mode==='readwrite'){let handler;"
                     + "Object.defineProperty(request,'onsuccess',{configurable:true,get:()=>handler,set:fn=>{handler=function(event){"
-                    + "const cursor=request.result;if(cursor&&!window.__deleteReached){window.__deleteReached=true;const next=cursor.continue.bind(cursor);"
-                    + "Object.defineProperty(cursor,'continue',{configurable:true,value:()=>{window.__resumeDelete=next}})}return fn.call(this,event)}}})}return request};"
-                    + "window.__raceConfirm=SES.pwaQueue.confirmRestore().then(()=>({ok:true}),e=>({ok:false,message:e.message}));true");
-            assertTrue(browser.waitFor("window.__deleteReached", Duration.ofSeconds(15)),
+                    + "const cursor=request.result;if(cursor&&!window.__deleteReached){window.__deleteReached=true;const next=cursor.continue.bind(cursor);const tx=request.transaction;window.__deleteKeepalive=true;"
+                    + "const keep=()=>{if(!window.__deleteKeepalive)return;if(window.__deleteKeepaliveCount>10000){window.__deleteKeepalive=false;return}window.__deleteKeepaliveCount++;const ping=tx.objectStore('queue').get('__nf04_keepalive__');ping.onsuccess=()=>keep();ping.onerror=()=>{window.__deleteKeepalive=false}};keep();"
+                    + "window.__resumeDelete=()=>{window.__deleteKeepalive=false;next()};window.__releaseDeleteBarrier=()=>{window.__deleteKeepalive=false;next()};"
+                    + "Object.defineProperty(cursor,'continue',{configurable:true,value:()=>{}})}return fn.call(this,event)}}})}return request};"
+                    + "window.__raceConfirmSettled=false;window.__raceConfirm=SES.pwaQueue.confirmRestore().then(()=>{window.__raceConfirmSettled=true;return {ok:true}},e=>{window.__raceConfirmSettled=true;return {ok:false,message:e.message}});true");
+            assertTrue(browser.waitForStrict("window.__deleteReached", Duration.ofSeconds(15)),
                     "実IndexedDBの旧scope削除cursor到達を検出する");
+            assertTrue(browser.waitForStrict("window.__deleteKeepaliveCount>1", Duration.ofSeconds(10)), "IDB transaction keepaliveを確認する");
+            assertFalse(browser.evaluateStrict("window.__raceConfirmSettled").asBoolean(), "削除transaction待機中はconfirmRestoreが未完了");
             browser.evaluate("window.__protectedSendCount=0;window.__nativeFetch=window.fetch.bind(window);"
                     + "window.fetch=(input,init)=>{if(String(input).includes('/api/my/pwa/attendance/daily')){window.__protectedSendCount++;return Promise.reject(new TypeError('fenced'));}return window.__nativeFetch(input,init)};"
                     + "window.__raceReset=SES.pwaQueue.reset();true");
-            assertTrue(browser.evaluate("document.getElementById('pwa-queue-panel').hidden").asBoolean(),
+            assertTrue(browser.evaluateStrict("document.getElementById('pwa-queue-panel').hidden").asBoolean(),
                     "confirmを待つ間の撤回がqueue DOMを即時隠す");
-            browser.evaluate("window.__resumeDelete();true");
-            assertTrue(browser.evaluate("Promise.all([window.__raceReset,window.__raceConfirm]).then(x=>x[1].ok===false)").asBoolean(),
+            browser.evaluate("window.__releaseDeleteBarrier();true");
+            assertTrue(browser.evaluateStrict("Promise.all([window.__raceReset,window.__raceConfirm]).then(x=>x[1].ok===false)").asBoolean(),
                     "deleteScope完了後も古いconfirmは撤回状態を上書きしない");
-            assertEquals(0, browser.evaluate("window.__protectedSendCount").asInt(),
+            assertEquals(0, browser.evaluateStrict("window.__protectedSendCount").asInt(),
                     "撤回競合のconfirmはqueue送信へ到達しない");
-            assertTrue(browser.evaluate("SES.pwaQueue.getScope()===null&&document.getElementById('pwa-queue-panel').hidden").asBoolean(),
+            assertTrue(browser.evaluateStrict("SES.pwaQueue.getScope()===null&&document.getElementById('pwa-queue-panel').hidden").asBoolean(),
                     "競合終了後もscopeとDOMをロック状態に保つ");
             browser.evaluate("IDBIndex.prototype.openKeyCursor=window.__nativeOpenKeyCursor");
-            browser.evaluate("window.__child.close();true");
+            browser.evaluate("if(window.__child)window.__child.close();true");
             browser.navigate(base + "/test.html?user=A");
-            assertTrue(browser.waitFor("window.SES&&SES.pwaQueue&&SES.pwaQueue.getScope()==='scope-A'", Duration.ofSeconds(15)),
+            assertTrue(browser.waitForStrict("window.SES&&SES.pwaQueue&&SES.pwaQueue.getScope()==='scope-A'", Duration.ofSeconds(15)),
                     "撤回完了後は新documentでのみ通常の新規queueを開始する");
+            browser.send("Runtime.evaluate", Map.of("expression", "window.open('/test.html?user=A&child=true','pwa-child-after-race');true",
+                    "userGesture", true, "returnByValue", true));
+            assertTrue(browser.waitForStrict("!!window.__child&&!!window.__child.SES&&window.__child.SES.pwaQueue.getScope()==='scope-A'", Duration.ofSeconds(15)),
+                    "新documentから独立した2つ目のdocumentを作成する");
 
-            browser.evaluate("(async()=>{const native=crypto.subtle.digest.bind(crypto.subtle);let release;crypto.subtle.digest=(a,b)=>new Promise(ok=>{release=()=>native(a,b).then(ok)});window.__late=SES.pwaQueue.request({screen:'attendance',month:'2026-10',method:'POST',path:'/api/my/pwa/attendance/daily',baseVersion:0,resourceKey:'attendance:2026-10',payload:{workDate:'2026-10-05',clockIn:'09:00',clockOut:'18:00',breaks:[],breakMinutes:60,workType:'出勤',workplaceType:'客先',remarks:'late'}});window.__releaseDigest=()=>release();return true})()");
+            browser.evaluate("(async()=>{const native=crypto.subtle.digest.bind(crypto.subtle);window.__nativeDigest=native;let release;crypto.subtle.digest=(a,b)=>new Promise(ok=>{release=()=>native(a,b).then(ok)});window.__late=SES.pwaQueue.request({screen:'attendance',month:'2026-10',method:'POST',path:'/api/my/pwa/attendance/daily',baseVersion:0,resourceKey:'attendance:2026-10',payload:{workDate:'2026-10-05',clockIn:'09:00',clockOut:'18:00',breaks:[],breakMinutes:60,workType:'出勤',workplaceType:'客先',remarks:'late'}});window.__releaseDigest=()=>release();return true})()");
             browser.evaluate("SES.pwaQueue.reset()");
             browser.evaluate("window.__releaseDigest && window.__releaseDigest()");
             browser.evaluate("window.__child.SES.pwaQueue.getOfflineDrafts()");
-            assertTrue(browser.waitFor("window.__child.SES.pwaQueue.getScope()===null", Duration.ofSeconds(10)), "logout epochは他tabへ伝播する");
-            String late = browser.evaluate("window.__late && window.__late.then(x=>JSON.stringify(x))").asText("");
+            assertTrue(browser.waitForStrict("window.__child.SES.pwaQueue.getScope()===null", Duration.ofSeconds(10)), "logout epochは他tabへ伝播する");
+            String late = browser.evaluateStrict("window.__late && window.__late.then(x=>JSON.stringify(x))").asText("");
             assertFalse(late.contains("queued"), "logout後の遅延hash結果が旧commandを復活させない");
 
             browser.evaluate("window.__child.close()");
             browser.navigate(base + "/test.html?user=B");
-            assertTrue(browser.waitFor("window.SES && SES.pwaQueue && SES.pwaQueue.getScope()==='scope-B'", Duration.ofSeconds(15)));
-            assertTrue(browser.evaluate("SES.pwaQueue.getOfflineDrafts().then(x=>x.length===0)").asBoolean(), "scope BへAのdraftを表示しない");
+            assertTrue(browser.waitForStrict("window.SES && SES.pwaQueue && SES.pwaQueue.getScope()==='scope-B'", Duration.ofSeconds(15)));
+            assertTrue(browser.evaluateStrict("SES.pwaQueue.getOfflineDrafts().then(x=>x.length===0)").asBoolean(), "scope BへAのdraftを表示しない");
 
             browser.evaluate("window.__setOnline(false)");
             browser.evaluate("(async()=>await SES.pwaQueue.request({screen:'attendance',month:'2026-10',method:'POST',"
                     + "path:'/api/my/pwa/attendance/daily',baseVersion:0,resourceKey:'attendance:2026-10',"
                     + "payload:{workDate:'2026-10-07',clockIn:'09:00',clockOut:'18:00',breaks:[],"
                     + "breakMinutes:60,workType:'出勤',workplaceType:'客先',remarks:'clear-failure'}}))()");
-            JsonNode clearFailure = browser.evaluate("(async()=>{const original=IDBFactory.prototype.open;"
+            JsonNode clearFailure = browser.evaluate("(async()=>{const original=IDBFactory.prototype.open;window.__nativeIdbOpen=original;"
                     + "IDBFactory.prototype.open=function(){throw new Error('blocked-test')};"
                     + "try{return JSON.stringify(await SES.pwaQueue.reset())}finally{IDBFactory.prototype.open=original}})()");
             assertFalse(JSON.readTree(clearFailure.asText()).path("cleared").asBoolean(), "IDB clear失敗を成功扱いしない");
-            assertTrue(browser.evaluate("SES.pwaQueue.getOfflineDrafts().then(x=>x.length===0)").asBoolean(), "clear失敗後も旧epochを隔離する");
+            assertTrue(browser.evaluateStrict("SES.pwaQueue.getOfflineDrafts().then(x=>x.length===0)").asBoolean(), "clear失敗後も旧epochを隔離する");
             browser.navigate(base + "/test.html?user=B");
-            assertTrue(browser.waitFor("window.SES && SES.pwaQueue && SES.pwaQueue.getScope()==='scope-B'", Duration.ofSeconds(15)));
-            assertTrue(browser.evaluate("SES.pwaQueue.getOfflineDrafts().then(x=>x.length===0)").asBoolean(), "同一user再表示でも撤回済draftを復活しない");
+            assertTrue(browser.waitForStrict("window.SES && SES.pwaQueue && SES.pwaQueue.getScope()==='scope-B'", Duration.ofSeconds(15)));
+            assertTrue(browser.evaluateStrict("SES.pwaQueue.getOfflineDrafts().then(x=>x.length===0)").asBoolean(), "同一user再表示でも撤回済draftを復活しない");
             browser.evaluate("window.__setOnline(false)");
             browser.evaluate("SES.pwaQueue.request({screen:'attendance',month:'2026-10',method:'POST',path:'/api/my/pwa/attendance/daily',baseVersion:0,resourceKey:'attendance:2026-10',payload:{workDate:'2026-10-08',clockIn:'09:00',clockOut:'18:00',breaks:[],breakMinutes:60,workType:'出勤',workplaceType:'客先',remarks:'partial-tombstone'}})");
-            JsonNode partialTombstone = browser.evaluate("(async()=>{const originalSet=Storage.prototype.setItem;const originalNow=Date.now;const oldLocal=localStorage.getItem('ses_pwa_revocation_epoch');Storage.prototype.setItem=function(k,v){if(k==='ses_pwa_revocation_epoch')throw new Error('storage-denied');return originalSet.call(this,k,v)};Date.now=()=>1;try{const result=await SES.pwaQueue.reset();const cookie=(document.cookie.match(/(?:^|;\\s*)ses_pwa_revocation_epoch=([^;]+)/)||[])[1]||null;return {cleared:result.cleared,oldLocal,cookie}}finally{Date.now=originalNow;Storage.prototype.setItem=originalSet}})()");
+            JsonNode partialTombstone = browser.evaluate("(async()=>{const originalSet=Storage.prototype.setItem;window.__nativeStorageSet=originalSet;const originalNow=Date.now;const oldLocal=localStorage.getItem('ses_pwa_revocation_epoch');Storage.prototype.setItem=function(k,v){if(k==='ses_pwa_revocation_epoch')throw new Error('storage-denied');return originalSet.call(this,k,v)};Date.now=()=>1;try{const result=await SES.pwaQueue.reset();const cookie=(document.cookie.match(/(?:^|;\\s*)ses_pwa_revocation_epoch=([^;]+)/)||[])[1]||null;return {cleared:result.cleared,oldLocal,cookie}}finally{Date.now=originalNow;Storage.prototype.setItem=originalSet}})()");
             assertFalse(partialTombstone.path("cleared").asBoolean(), "単一の撤回保存先だけでは永続撤回成功と扱わない");
             assertNotEquals(partialTombstone.path("oldLocal").asText(), partialTombstone.path("cookie").asText(), "時計巻き戻し中でも異なる撤回tokenを識別する");
-            assertTrue(browser.evaluate("SES.pwaQueue.getOfflineDrafts().then(x=>x.length===0)").asBoolean(), "撤回保存先が不一致ならdraftを隔離する");
+            assertTrue(browser.evaluateStrict("SES.pwaQueue.getOfflineDrafts().then(x=>x.length===0)").asBoolean(), "撤回保存先が不一致ならdraftを隔離する");
             assertTrue(closeChrome(browser, profile), "Chromeの終了完了後に撤回後のprofileを再起動する");
             browser = null;
             browser = launchChrome(profile);
             browser.send("Network.emulateNetworkConditions", Map.of("offline", true, "latency", 0,
                     "downloadThroughput", 0, "uploadThroughput", 0, "connectionType", "none"));
             browser.navigate(base + "/my/timesheet");
-            assertTrue(browser.waitFor("document.title.includes('オフライン')", Duration.ofSeconds(15)));
-            assertTrue(browser.waitFor("document.getElementById('offline-drafts').hidden", Duration.ofSeconds(10)), "撤回記録の不一致は再起動後もoffline復元を拒否する");
+            assertTrue(browser.waitForStrict("document.title.includes('オフライン')", Duration.ofSeconds(15)));
+            assertTrue(browser.waitForStrict("document.getElementById('offline-drafts').hidden", Duration.ofSeconds(10)), "撤回記録の不一致は再起動後もoffline復元を拒否する");
             JsonNode finalCache = browser.evaluate("(async()=>{const out=[];for(const n of await caches.keys()){const c=await caches.open(n);for(const r of await c.keys())out.push(new URL(r.url).pathname)}return out})()");
             assertNotNull(finalCache);
             for (JsonNode entry : finalCache) {
@@ -327,15 +337,38 @@ class PwaQueueChromeIsolationBrowserTest {
                     Map.entry("offlineRestartDraftLockedUntilConfirmed", true), Map.entry("expiredPermitFetchCount", 1),
                     Map.entry("deleteScopeRaceFetchCount", 0))), StandardCharsets.UTF_8);
         } finally {
+            releaseLeaseFirst.countDown();
+            releaseBrowserBarriers(browser);
             if (browser != null && !closeChrome(browser, profile)) browser.close();
             server.stop(0);
             httpExecutor.shutdownNow();
+            assertTrue(httpExecutor.awaitTermination(5, TimeUnit.SECONDS), "HTTP test executorを期限内に終了する");
             // Chrome profileはtest実行用一時ディレクトリ。ユーザーデータや既存profileは使わない。
             try (var paths = Files.walk(profile)) {
                 paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
                     try { Files.deleteIfExists(path); } catch (Exception ignored) { }
                 });
             }
+        }
+    }
+
+    private static void releaseBrowserBarriers(CdpBrowser browser) {
+        if (browser == null) return;
+        try {
+            browser.evaluate("if(window.__releaseDeleteBarrier)window.__releaseDeleteBarrier();"
+                    + "if(window.__nativeOpenKeyCursor)IDBIndex.prototype.openKeyCursor=window.__nativeOpenKeyCursor;"
+                    + "if(window.__originalGet)IDBObjectStore.prototype.get=window.__originalGet;"
+                    + "if(window.__nativeFetch)window.fetch=window.__nativeFetch;"
+                    + "if(window.__nativeDateNow)Date.now=window.__nativeDateNow;"
+                    + "if(window.__nativePerformanceNow)Object.defineProperty(performance,'now',{configurable:true,value:window.__nativePerformanceNow});"
+                    + "if(window.__nativeDigest)crypto.subtle.digest=window.__nativeDigest;"
+                    + "if(window.__nativeStorageSet)Storage.prototype.setItem=window.__nativeStorageSet;"
+                    + "if(window.__nativeIdbOpen)IDBFactory.prototype.open=window.__nativeIdbOpen;true");
+            browser.evaluate("if(window.__child){if(window.__child.__releaseDeleteBarrier)window.__child.__releaseDeleteBarrier();"
+                    + "if(window.__child.__originalGet)window.__child.IDBObjectStore.prototype.get=window.__child.__originalGet;"
+                    + "if(window.__child.__nativeOpenKeyCursor)window.__child.IDBIndex.prototype.openKeyCursor=window.__child.__nativeOpenKeyCursor;}true");
+        } catch (Exception ignored) {
+            // 終了処理では残存documentの差し替え失敗を許容し、Chrome processを終了する。
         }
     }
 

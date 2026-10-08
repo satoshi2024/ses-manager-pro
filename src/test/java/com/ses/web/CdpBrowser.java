@@ -256,6 +256,22 @@ public final class CdpBrowser implements AutoCloseable {
         }
     }
 
+    /** JS例外やundefinedをnullへ潰さず、テスト失敗として扱う。 */
+    public JsonNode evaluateStrict(String expression) throws Exception {
+        JsonNode response = send("Runtime.evaluate", Map.of(
+                "expression", expression,
+                "returnByValue", true,
+                "awaitPromise", true));
+        if (response.has("exceptionDetails")) {
+            throw new IllegalStateException("Chrome JavaScript evaluation failed");
+        }
+        JsonNode remote = response.path("result");
+        if ("error".equals(remote.path("subtype").asText()) || !remote.has("value")) {
+            throw new IllegalStateException("Chrome JavaScript evaluation returned no value");
+        }
+        return remote.path("value");
+    }
+
     public void navigate(String url) throws Exception {
         send("Page.navigate", Map.of("url", url));
     }
@@ -277,6 +293,18 @@ public final class CdpBrowser implements AutoCloseable {
             if (value.isBoolean() && value.asBoolean()) {
                 return true;
             }
+            Thread.sleep(300);
+        }
+        return false;
+    }
+
+    /** JS例外を隠さず、boolean式がtrueになるまで待つ。 */
+    public boolean waitForStrict(String jsExpression, Duration timeout) throws Exception {
+        long deadline = System.currentTimeMillis() + timeout.toMillis();
+        while (System.currentTimeMillis() < deadline) {
+            JsonNode value = evaluateStrict(jsExpression);
+            if (!value.isBoolean()) throw new IllegalStateException("Chrome wait condition is not boolean");
+            if (value.asBoolean()) return true;
             Thread.sleep(300);
         }
         return false;
