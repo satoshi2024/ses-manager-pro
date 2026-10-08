@@ -10,7 +10,7 @@
 
 ## 最小の成功経路
 
-1. test-only storage providerへ合成CSVを登録し、実`DocumentServiceImpl`経由でCLEAN状態のdocument/versionを作る。tenant/legal entity、retention、hold、FileScopeのdocument種別・scope情報と、source grantを実DBへseedする。
+1. 実mapperで既存の合成CLEAN document/version fixtureをDBへseedし、合成CSV bytesをtest-only storage providerへ登録する。tenant/legal entity、retention、hold、FileScopeのdocument種別・scope情報と、source grantも実DBへseedする。この成功経路はupload、scan、DocumentServiceによるdocument作成・登録、`IMPORT_SOURCE`種別の登録検証を証明しない。
 2. `SecurityContextHolder`に実`LoginUser` principalを設定し、DB active user、tenant、`LegalEntityContextService`、permission group/actionから`ImportMetadataAuthorizationService`がexact `import.metadata.manage` ALLOWを解決することを確認する。管理者ロールだけでは認可されない。
 3. 実`ImportMetadataService`でsource作成、mapping登録、CLEAN documentに対するjob登録、`IMPORT_JOB` typed link作成、mapping bindを行い、`openSource(jobId)`が同一document/version/hashのbytesを返すことを確認する。streamを閉じ、テスト終了時にDB/storage stateを消す。
 4. success側でもstorage open count、DB上のversion/hash、CLEAN状態、legal hold/retention、typed link、source status/version、mapping ID/version/hash、job identityをassertする。`openSource`後にDocumentServiceのDOWNLOAD監査行がdocument ID・version ID・認証user ID・action=`DOWNLOAD`へ一致することを確認する。job拒否auditが現在存在するとは仮定せず、拒否auditは後続sliceの対象とする。source row/PII/credentialはログへ出さない。
