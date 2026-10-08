@@ -87,8 +87,8 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
 
     @Test
     void applicationProjection権限は専用DB内のprojection行に限定される() {
-        assertEquals(1, appProjection.update("INSERT INTO sf_w2b_projection(tenant_id, subject_ref, last_applied_revision, event_hash, projected_state) VALUES (?, ?, ?, ?, ?)",
-                tenantId, subjectRef, 1L, "a".repeat(64), "HELD"));
+        assertEquals(1, appProjection.update("INSERT INTO sf_w2b_projection(tenant_id, subject_ref, last_applied_revision, event_hash, held, last_action_state) VALUES (?, ?, ?, ?, ?, ?)",
+                tenantId, subjectRef, 1L, "a".repeat(64), true, "NONE"));
         assertEquals(1, appProjection.update("UPDATE sf_w2b_projection SET last_applied_revision = ? WHERE tenant_id = ? AND subject_ref = ? AND last_applied_revision = ?",
                 2L, tenantId, subjectRef, 1L));
         assertThrows(org.springframework.dao.DataAccessException.class,
