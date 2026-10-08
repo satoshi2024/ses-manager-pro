@@ -219,6 +219,29 @@ public final class CdpBrowser implements AutoCloseable {
         return message.path("result");
     }
 
+    /** Chromeへ終了を指示し、このインスタンスが起動したprocessの終了を上限時間まで待つ。 */
+    public boolean closeGracefully(Duration timeout) {
+        if (process.isAlive()) {
+            try {
+                long id = nextId.getAndIncrement();
+                ObjectNode node = MAPPER.createObjectNode();
+                node.put("id", id);
+                node.put("method", "Browser.close");
+                ws.sendText(node.toString(), true).get(2, TimeUnit.SECONDS);
+            } catch (Exception ignored) {
+                // 終了指示と競合してCDP接続が切れた場合もprocess終了を確認する。
+            }
+        }
+        try {
+            if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) return false;
+            if (ws != null) ws.abort();
+            return !process.isAlive();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
     /** ページ内JSを評価し、値（returnByValue）を返す。例外・実行コンテキスト破棄時はnullNode。 */
     public JsonNode evaluate(String expression) throws Exception {
         try {
