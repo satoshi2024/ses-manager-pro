@@ -13,6 +13,12 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.UUID;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -34,6 +40,10 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
     private static JdbcTemplate attestor;
     private static JdbcTemplate reader;
     private static JdbcTemplate appProjection;
+    private static JdbcTemplate journalAdmin;
+    private static JdbcTemplate projectionAdmin;
+    private static JournalProjectionService projectionService;
+    private static JdbcPrivacyJournalAdapter journalAdapter;
     private static JdbcTemplate journalPrincipalOnWitness;
     private static JdbcTemplate appProjectionPrincipalOnWitness;
     private static SyntheticAttestorKeyFixture keyFixture;
@@ -50,6 +60,12 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         harness.initializeSchemas();
         witnessAdmin = new JdbcTemplate(harness.witness().adminDataSource());
         appProjection = new JdbcTemplate(harness.application().createApplicationProjectionDataSource());
+        projectionAdmin = new JdbcTemplate(harness.application().adminDataSource());
+        journalAdmin = new JdbcTemplate(harness.journal().adminDataSource());
+        journalAdapter = new JdbcPrivacyJournalAdapter(harness.journal().createJournalWriterDataSource(), context.getEnvironment(),
+                Clock.fixed(Instant.parse("2026-10-02T00:00:00Z"), ZoneOffset.UTC));
+        projectionService = new JournalProjectionService(journalAdapter,
+                new JdbcPrivacyProjectionAdapter(harness.application().createApplicationProjectionDataSource(), context.getEnvironment()));
         attestor = new JdbcTemplate(harness.witness().createWitnessAttestorDataSource());
         reader = new JdbcTemplate(harness.witness().createWitnessReaderDataSource());
         journalPrincipalOnWitness = new JdbcTemplate(harness.witness().createUnprivilegedJournalDataSourceOnWitness());
@@ -81,8 +97,101 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
                 journalId, tenantId, subjectRef);
         witnessAdmin.update("DELETE FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
                 journalId, tenantId, subjectRef);
-        new JdbcTemplate(harness.application().adminDataSource()).update(
-                "DELETE FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ?", tenantId, subjectRef);
+        projectionAdmin.update("DELETE FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ?", tenantId, subjectRef);
+        journalAdmin.update("DELETE FROM sf_journal_action WHERE tenant_id = ? AND subject_ref = ?", tenantId, subjectRef);
+        journalAdmin.update("DELETE FROM sf_journal_lease WHERE tenant_id = ? AND subject_ref = ?", tenantId, subjectRef);
+        journalAdmin.update("DELETE FROM sf_journal_command WHERE tenant_id = ? AND subject_ref = ?", tenantId, subjectRef);
+        journalAdmin.update("DELETE FROM sf_journal_event WHERE tenant_id = ? AND subject_ref = ?", tenantId, subjectRef);
+        journalAdmin.update("DELETE FROM sf_journal_head WHERE tenant_id = ? AND subject_ref = ?", tenantId, subjectRef);
+    }
+
+    @Test
+    void journalACK後のprojectionは順序逆転再送crossnamespaceを検証する() {
+        var partition = partition();
+        var first = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-a");
+        var second = append(partition, 1, PrivacyJournalPort.CommandType.LEASE_CLAIMED, "cmd-b");
+        assertEquals(PrivacyProjectionPort.Status.QUARANTINED, projectionService.projectAcknowledged(partition,
+                new PrivacyJournalPort.JournalAck("caller-asserted-ack", second.revision(), second.eventHash(), true)).status());
+        assertEquals(0, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ?",
+                Integer.class, tenantId, subjectRef));
+        assertEquals(PrivacyProjectionPort.Status.APPLIED, projectionService.projectAcknowledged(partition, second).status());
+        assertEquals(PrivacyProjectionPort.Status.NO_OP, projectionService.projectAcknowledged(partition, first).status());
+        assertEquals(PrivacyProjectionPort.Status.NO_OP, projectionService.projectAcknowledged(partition, second).status());
+        var snapshot = new JdbcPrivacyProjectionAdapter(harness.application().createApplicationProjectionDataSource(), context.getEnvironment()).snapshot(partition);
+        assertEquals(second.revision(), snapshot.revision());
+        assertTrue(snapshot.held());
+        assertEquals(PrivacyProjectionPort.Status.QUARANTINED,
+                projectionService.projectAcknowledged(new PrivacyJournalPort.JournalPartition("other-" + tenantId, subjectRef), first).status());
+    }
+
+    @Test
+    void journalACK順のprojectionはrevisionごとにCASし完全再送をnoOpにする() {
+        var partition = partition();
+        var first = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-forward-a");
+        var second = append(partition, 1, PrivacyJournalPort.CommandType.LEASE_CLAIMED, "cmd-forward-b");
+        assertEquals(0, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ?",
+                Integer.class, tenantId, subjectRef));
+        assertEquals(PrivacyProjectionPort.Status.APPLIED, projectionService.projectAcknowledged(partition, first).status());
+        assertEquals(PrivacyProjectionPort.Status.APPLIED, projectionService.projectAcknowledged(partition, second).status());
+        assertEquals(PrivacyProjectionPort.Status.NO_OP, projectionService.projectAcknowledged(partition, second).status());
+        assertEquals(2L, projectionAdmin.queryForObject("SELECT last_applied_revision FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ?",
+                Long.class, tenantId, subjectRef));
+    }
+
+    @Test
+    void concurrentCASは同一prefixへ収束しACK以前のprojectionを作らない() throws Exception {
+        var partition = partition();
+        var first = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-c");
+        var second = append(partition, 1, PrivacyJournalPort.CommandType.LEASE_CLAIMED, "cmd-d");
+        assertEquals(0, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ?",
+                Integer.class, tenantId, subjectRef));
+        var start = new CountDownLatch(1);
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<PrivacyProjectionPort.ProjectionResult> a = pool.submit(() -> { start.await(); return projectionService.projectAcknowledged(partition, first); });
+            Future<PrivacyProjectionPort.ProjectionResult> b = pool.submit(() -> { start.await(); return projectionService.projectAcknowledged(partition, second); });
+            start.countDown();
+            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, a.get().status());
+            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, b.get().status());
+        } finally {
+            pool.shutdownNow();
+        }
+        var snapshot = new JdbcPrivacyProjectionAdapter(harness.application().createApplicationProjectionDataSource(), context.getEnvironment()).snapshot(partition);
+        assertEquals(2L, snapshot.revision());
+        assertEquals(second.eventHash(), snapshot.eventHash());
+    }
+
+    @Test
+    void journalchainGapとhash分岐はquarantineしprojectionをtrusted状態にしない() {
+        var partition = partition();
+        var first = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-e");
+        var second = append(partition, 1, PrivacyJournalPort.CommandType.LEASE_CLAIMED, "cmd-f");
+        journalAdmin.update("UPDATE sf_journal_event SET event_hash = ? WHERE tenant_id = ? AND subject_ref = ? AND revision = 1",
+                "f".repeat(64), tenantId, subjectRef);
+        assertEquals(PrivacyProjectionPort.Status.QUARANTINED, projectionService.projectAcknowledged(partition, second).status());
+        assertEquals(0, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ?",
+                Integer.class, tenantId, subjectRef));
+        journalAdmin.update("UPDATE sf_journal_event SET event_hash = ? WHERE tenant_id = ? AND subject_ref = ? AND revision = 1",
+                first.eventHash(), tenantId, subjectRef);
+        assertEquals(PrivacyProjectionPort.Status.APPLIED, projectionService.projectAcknowledged(partition, second).status());
+        projectionAdmin.update("DELETE FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ?", tenantId, subjectRef);
+        journalAdmin.update("DELETE FROM sf_journal_command WHERE tenant_id = ? AND subject_ref = ? AND revision = 1", tenantId, subjectRef);
+        journalAdmin.update("DELETE FROM sf_journal_event WHERE tenant_id = ? AND subject_ref = ? AND revision = 1", tenantId, subjectRef);
+        assertEquals(PrivacyProjectionPort.Status.QUARANTINED, projectionService.projectAcknowledged(partition, second).status());
+        assertEquals(0, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ?",
+                Integer.class, tenantId, subjectRef));
+    }
+
+    private PrivacyJournalPort.JournalPartition partition() {
+        return new PrivacyJournalPort.JournalPartition(tenantId, subjectRef);
+    }
+
+    private PrivacyJournalPort.JournalAck append(PrivacyJournalPort.JournalPartition partition, long revision,
+                                                   PrivacyJournalPort.CommandType type, String commandId) {
+        var command = PrivacyJournalPort.JournalCommand.create(commandId, partition, revision, type,
+                null, null, null, type == PrivacyJournalPort.CommandType.LEASE_CLAIMED ? "worker-1" : null,
+                0, type == PrivacyJournalPort.CommandType.LEASE_CLAIMED ? Instant.parse("2026-10-02T00:01:00Z") : null);
+        return journalAdapter.append(command);
     }
 
     @Test
