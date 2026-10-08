@@ -95,7 +95,7 @@ class AiExecutionGatewayCopilotSnapshotTest {
                 .expectedConfigHash(expectedConfigHash)
                 .build();
 
-        String result = AccountingTenantContextHolder.runWithTenant("tenant-a", () -> gateway.execute(request).text());
+        String result = AccountingTenantContextHolder.runWithTenant("tenant-a", () -> gateway.execute(request).getText());
 
         assertEquals("local-summary", result);
         CopilotInvocation invocation = receivedInvocation.get();
