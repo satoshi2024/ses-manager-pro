@@ -258,16 +258,31 @@ public final class CdpBrowser implements AutoCloseable {
 
     /** JS例外やundefinedをnullへ潰さず、テスト失敗として扱う。 */
     public JsonNode evaluateStrict(String expression) throws Exception {
-        JsonNode response = send("Runtime.evaluate", Map.of(
-                "expression", expression,
-                "returnByValue", true,
-                "awaitPromise", true));
+        JsonNode response;
+        try {
+            response = send("Runtime.evaluate", Map.of(
+                    "expression", expression,
+                    "returnByValue", true,
+                    "awaitPromise", true));
+        } catch (IllegalStateException protocolFailure) {
+            String message = protocolFailure.getMessage();
+            if (message != null && (message.contains("Cannot find context with specified id")
+                    || message.contains("Execution context was destroyed"))) {
+                throw new TransientEvaluationException();
+            }
+            throw protocolFailure;
+        }
         if (response.has("exceptionDetails")) {
-            throw new IllegalStateException("Chrome JavaScript evaluation failed");
+            JsonNode details = response.path("exceptionDetails");
+            String text = details.path("text").asText("") + " "
+                    + details.path("exception").path("description").asText("");
+            if (text.contains("Execution context was destroyed")
+                    || text.contains("Cannot find context with specified id")) throw new TransientEvaluationException();
+            throw new IllegalStateException("ChromeのJavaScript評価が例外で終了しました");
         }
         JsonNode remote = response.path("result");
         if ("error".equals(remote.path("subtype").asText()) || !remote.has("value")) {
-            throw new IllegalStateException("Chrome JavaScript evaluation returned no value");
+            throw new IllegalStateException("ChromeのJavaScript評価で値を取得できませんでした");
         }
         return remote.path("value");
     }
@@ -302,12 +317,22 @@ public final class CdpBrowser implements AutoCloseable {
     public boolean waitForStrict(String jsExpression, Duration timeout) throws Exception {
         long deadline = System.currentTimeMillis() + timeout.toMillis();
         while (System.currentTimeMillis() < deadline) {
-            JsonNode value = evaluateStrict(jsExpression);
-            if (!value.isBoolean()) throw new IllegalStateException("Chrome wait condition is not boolean");
+            JsonNode value;
+            try {
+                value = evaluateStrict(jsExpression);
+            } catch (TransientEvaluationException navigationRace) {
+                Thread.sleep(100);
+                continue;
+            }
+            if (!value.isBoolean()) throw new IllegalStateException("Chromeの待機条件がboolean値ではありません");
             if (value.asBoolean()) return true;
             Thread.sleep(300);
         }
         return false;
+    }
+
+    private static final class TransientEvaluationException extends IllegalStateException {
+        private TransientEvaluationException() { super("ページ遷移で実行コンテキストが置き換わりました"); }
     }
 
     public byte[] screenshot() throws Exception {
