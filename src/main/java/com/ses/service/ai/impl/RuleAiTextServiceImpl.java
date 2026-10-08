@@ -3,6 +3,7 @@ package com.ses.service.ai.impl;
 import com.ses.service.ai.AiTextService;
 import com.ses.service.ai.CopilotBoundedAiTextService;
 import com.ses.service.ai.copilot.summary.CopilotSummaryPromptTemplate;
+import com.ses.service.ai.copilot.CopilotConfigSnapshot;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -12,6 +13,11 @@ import org.springframework.stereotype.Service;
 @Service
 @ConditionalOnProperty(name = "ai.provider", havingValue = "rule")
 public class RuleAiTextServiceImpl implements CopilotBoundedAiTextService {
+
+    private static final String MODEL_ID = "mock-management-copilot";
+    private static final CopilotConfigSnapshot COPILOT_CONFIG = new CopilotConfigSnapshot(
+            "rule", "rule", "", MODEL_ID, CopilotSummaryPromptTemplate.VERSION,
+            CopilotSummaryPromptTemplate.localConfigHash("rule", MODEL_ID), 0);
 
     @Override
     public String providerId() {
@@ -27,17 +33,17 @@ public class RuleAiTextServiceImpl implements CopilotBoundedAiTextService {
 
     @Override
     public String copilotModelId() {
-        return "mock-management-copilot";
+        return COPILOT_CONFIG.modelId();
     }
 
     @Override
     public String copilotPromptVersion() {
-        return CopilotSummaryPromptTemplate.VERSION;
+        return COPILOT_CONFIG.promptVersion();
     }
 
     @Override
     public String copilotConfigHash() {
-        return CopilotSummaryPromptTemplate.localConfigHash(providerId(), copilotModelId());
+        return COPILOT_CONFIG.configHash();
     }
 
     @Override
