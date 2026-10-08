@@ -8,9 +8,11 @@ public final class ProductionDenyAllCopilotCostPolicy implements CopilotProvider
 
     @Override
     public PreflightCostEvidence preflight(CopilotConfigSnapshot snapshot, Integer budgetYen) {
-        if (budgetYen == null || budgetYen < 0) {
+        if (snapshot == null || budgetYen == null || budgetYen < 0) {
             throw new IllegalArgumentException("費用budgetが必要です");
         }
-        return PreflightCostEvidence.denied(POLICY_ID, budgetYen, "COPILOT_COST_UNKNOWN");
+        String configIdentity = snapshot.configHash().isBlank() ? "unbound-config" : snapshot.configHash();
+        return PreflightCostEvidence.denied(POLICY_ID, configIdentity,
+                "production-deny-all-proof-v1", null, budgetYen, "COPILOT_COST_UNKNOWN");
     }
 }

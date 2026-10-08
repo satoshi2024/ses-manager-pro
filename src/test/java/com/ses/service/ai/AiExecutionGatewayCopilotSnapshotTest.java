@@ -9,13 +9,23 @@ import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.ai.copilot.CopilotFeatureGate;
 import com.ses.service.ai.copilot.CopilotConfigSnapshot;
 import com.ses.service.ai.copilot.CopilotInvocation;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshotFactory;
+import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.summary.CopilotSummaryPromptTemplate;
+import com.ses.service.ai.copilot.summary.CopilotCostState;
 import com.ses.service.ai.impl.AiExecutionGatewayImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -23,10 +33,83 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AiExecutionGatewayCopilotSnapshotTest {
+
+    @Test
+    void localCopilot成功時はstartupSnapshot付き新overloadと同じprobe経路を使う() {
+        AiConfig config = new AiConfig();
+        config.setProvider("mock");
+        config.setMaxTokens(192);
+        AtomicReference<CopilotInvocation> receivedInvocation = new AtomicReference<>();
+        AtomicInteger deadlineCalls = new AtomicInteger();
+        AtomicInteger legacyCalls = new AtomicInteger();
+        CopilotBoundedAiTextService adapter = new CopilotBoundedAiTextService() {
+            @Override public String providerId() { return "mock"; }
+            @Override public String copilotModelId() { return "mock-management-copilot"; }
+            @Override public String copilotPromptVersion() { return CopilotSummaryPromptTemplate.VERSION; }
+            @Override public String copilotConfigHash() {
+                return CopilotSummaryPromptTemplate.localConfigHash("mock", "mock-management-copilot");
+            }
+            @Override public String generate(String prompt) {
+                legacyCalls.incrementAndGet();
+                return "legacy";
+            }
+            @Override public String generateCopilotSummary(String prompt, long deadlineNanos) {
+                deadlineCalls.incrementAndGet();
+                return "local-summary";
+            }
+            @Override public String generateCopilotSummary(String prompt, CopilotInvocation invocation) {
+                receivedInvocation.set(invocation);
+                return CopilotBoundedAiTextService.super.generateCopilotSummary(prompt, invocation);
+            }
+        };
+        AiOutboundProbe probe = mock(AiOutboundProbe.class);
+        AiExecutionGatewayImpl gateway = new AiExecutionGatewayImpl(
+                adapter, config, probe, new ObjectMapper(), mock(AiArtifactVersionMapper.class),
+                mock(AiRecommendationRunMapper.class), mock(PlatformTransactionManager.class), Clock.systemUTC(),
+                mock(AiProductionApprovalGate.class), mock(CopilotFeatureGate.class));
+        String expectedConfigHash = adapter.copilotConfigHash();
+        config.setProvider("gemini");
+        config.setMaxTokens(1);
+
+        CopilotExecutionContext context = copilotContext();
+        AiGatewayRequest request = AiGatewayRequest.builder()
+                .useCase(AiGatewayRequest.USE_COPILOT)
+                .taskMarker(CopilotSummaryPromptTemplate.TASK_MARKER)
+                .trustedInstruction(CopilotSummaryPromptTemplate.TRUSTED_INSTRUCTION)
+                .allowlistedFields(Map.of("summary.claimKeys", "forecast.utilization.2026-09"))
+                .persistRun(false)
+                .executionContext(context)
+                .scopeContext(context.scope())
+                .scopeHash("nf08-local-scope-hash")
+                .deadlineNanos(System.nanoTime() + 10_000_000_000L)
+                .costBudgetYen(0)
+                .expectedArtifactVersionId(7L)
+                .expectedProvider("mock")
+                .expectedModel("mock-management-copilot")
+                .expectedPromptVersion(CopilotSummaryPromptTemplate.VERSION)
+                .expectedConfigHash(expectedConfigHash)
+                .build();
+
+        String result = AccountingTenantContextHolder.runWithTenant("tenant-a", () -> gateway.execute(request).text());
+
+        assertEquals("local-summary", result);
+        CopilotInvocation invocation = receivedInvocation.get();
+        org.junit.jupiter.api.Assertions.assertNotNull(invocation);
+        assertEquals("mock", invocation.configSnapshot().configuredProvider());
+        assertEquals(192, invocation.configSnapshot().maxOutputTokens());
+        assertEquals(expectedConfigHash, invocation.configSnapshot().configHash());
+        assertEquals(expectedConfigHash, invocation.preflightCostEvidence().configIdentity());
+        assertEquals(0, invocation.preflightCostEvidence().upperBoundYen());
+        assertEquals(CopilotCostState.NOT_SENT, invocation.preflightCostEvidence().costState());
+        assertEquals(1, deadlineCalls.get());
+        assertEquals(0, legacyCalls.get());
+        verify(probe, times(1)).record(any());
+    }
 
     @Test
     void remoteCopilotは承認flagや予算額にかかわらず送信前拒否する() {
@@ -146,4 +229,17 @@ class AiExecutionGatewayCopilotSnapshotTest {
                 .expectedConfigHash(configHash)
                 .build();
     }
+
+    private CopilotExecutionContext copilotContext() {
+        CopilotExecutionContext context = new CopilotExecutionContext("tenant-a", 1L,
+                Instant.parse("2026-09-08T00:00:00Z"), ZoneId.of("Asia/Tokyo"));
+        EffectiveScopeSnapshot snapshot = new EffectiveScopeSnapshot("tenant-a", 1L,
+                LocalDate.of(2026, 9, 8), "COMPANY_WIDE", true, false, false,
+                null, null, null, null, null, null, null, null, null,
+                EffectiveScopeSnapshotFactory.POLICY_VERSION, false, "ALL", "nf08-local-scope-hash");
+        context.bindSnapshot(snapshot);
+        context.bind("dashboard.summary", CopilotQueryParameters.ofQuery("dashboard.summary"), snapshot.scope());
+        return context;
+    }
+
 }
