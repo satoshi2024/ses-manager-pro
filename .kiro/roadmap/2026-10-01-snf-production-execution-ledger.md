@@ -275,3 +275,22 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   SQLSTATE/vendor code、Flyway validateを補い、Astra静的受理。実MySQL fresh/upgrade runを開始した。
 - NF07 Slice A `b1248e6c`はAstra未受理。共有testの順序依存、profile変更後のraw接続/key利用、Unicode canonical衝突、
   witness signed envelope不足とpackage可視性を修復する。W2aの合格を新sliceへ流用しない。
+
+### V184限定rehearsal完了・G2検証worktree
+
+- NF06 fixed `b0d5f56e7bbbd8ffacaf592761c09c3334a6433d`のmigration01は**2/0/0/0**、exit0、起止SHA一致・clean。
+  UTC00:59:42.4573191〜01:01:43.5726718。log SHA-256 `6C0EF395CBED8E5087A61A4A616D609C2BC2BAAAB5E754FF5639FAF4D0403805`。
+  freshとV182→V184の2独立container、旧sentinel全主要field、18 unique/12 FK列対応、制約エラー分類、Flyway validateを確認した。
+  Astraが原XML/text全2 hashとcontainer ID/log対応を照合。両containerのmysql binaryは8.0.46、image IDは
+  `sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b`。
+  runtime-observation SHA-256 `367A533FEE35C76FA9FDA6C06E2DDD649FA131EA716BD1DE0DAA33211D83F55C`。
+  source/controlの`verification-evidence/nf06-fixed/20261008-migration-01/`へraw13 fileをbyte同一保存。
+  このbranchにはV183がない。V183併合後のrehearsalと実運用移行を別gateのまま保持する。
+- NF04 verify worktree `C:\work\ses-nf02-remediation`はclean確認後、旧servlet branchを保持し、
+  `codex/snf-prod-nf04-g2-verify`を固定a0969030から作成した。元remote baseはB0。
+  G2aを`f8de9cf9/3c58de31/c844c434`として局所検証用に適用し、controlへは未統合。
+  fixed`c844c434c67f40c5498c400a12914abe7b88451e`のasset contractは**8/0/0/0**、exit0、起止SHA一致・clean。
+  UTC01:02:13.4154781〜01:03:09.2700919、log SHA-256 `21CC023316D58DD59CEB000F53A668192A86B4F60C0FFD85310427D320F05A45`。
+  Node helper/page mock/worker模擬も成功したが、実queue/IndexedDB/Chromeの代替にしない。
+- NF07 Slice A修復`c3140628`の静的findingは閉鎖方向となり、重複@Testを`06b4d52f`で除去した。
+  同固定SHAでpure/inventoryから実行する。三DB ACLの実測、後続projection/witness CAS/recoveryはまだ未完。
