@@ -240,13 +240,13 @@ class PwaQueueChromeIsolationBrowserTest {
             assertTrue(browser.evaluateStrict("SES.pwaQueue.prepareRestore('test-password').then(()=>true)").asBoolean(),
                     "再認証proofを実queue状態へ束縛する");
             assertTrue(browser.evaluateStrict("fetch('/__test/enable-scope-drift').then(r=>r.ok)").asBoolean());
-            browser.evaluate("window.__deleteReached=false;window.__deleteBarrierTimedOut=false;window.__releaseDeleteRequested=false;window.__releaseDeleteBarrier=null;"
+            browser.evaluate(completionBarrierScript() + "window.__deleteReached=false;window.__deleteBarrierTimedOut=false;window.__releaseDeleteRequested=false;window.__releaseDeleteBarrier=null;"
                     + "window.__deleteBarrierDeadline=Date.now()+20000;window.__nativeTransaction=IDBDatabase.prototype.transaction;"
                     + "IDBDatabase.prototype.transaction=function(names,mode,options){const tx=window.__nativeTransaction.call(this,names,mode,options);"
                     + "const storeNames=Array.from(tx.objectStoreNames);if(window.__holdDeleteCompletion&&mode==='readwrite'&&storeNames.length===1&&storeNames[0]==='queue'){"
-                    + "window.__holdDeleteCompletion=false;let handler=null;Object.defineProperty(tx,'oncomplete',{configurable:true,get:()=>handler,set:fn=>{handler=event=>{"
-                    + "window.__deleteReached=true;const resume=()=>{if(window.__deleteBarrierDeadline<Date.now())window.__deleteBarrierTimedOut=true;fn.call(tx,event)};"
-                    + "if(window.__releaseDeleteRequested||window.__deleteBarrierDeadline<Date.now()){window.__deleteBarrierTimedOut=true;resume()}else{window.__releaseDeleteBarrier=resume}}}})}return tx};"
+                    + "window.__holdDeleteCompletion=false;let handler=null;Object.defineProperty(tx,'oncomplete',{configurable:true,get:()=>handler,set:fn=>{handler=fn;window.sesDelayIndexedDbCompletion(tx,fn,(resume,event)=>{"
+                    + "window.__deleteReached=true;const releaseProduction=()=>{if(window.__deleteBarrierDeadline<Date.now())window.__deleteBarrierTimedOut=true;resume()};"
+                    + "if(window.__releaseDeleteRequested||window.__deleteBarrierDeadline<Date.now()){window.__deleteBarrierTimedOut=true;releaseProduction()}else{window.__releaseDeleteBarrier=releaseProduction}})}})}return tx};"
                     + "window.__holdDeleteCompletion=true;window.__raceConfirmSettled=false;window.__raceConfirm=SES.pwaQueue.confirmRestore().then(()=>{window.__raceConfirmSettled=true;return {ok:true}},e=>{window.__raceConfirmSettled=true;return {ok:false,message:e.message}});true");
             assertTrue(browser.waitForStrict("window.__deleteReached", Duration.ofSeconds(15)),
                     "実IndexedDB削除完了イベントのPromise解決を保留する");
@@ -351,6 +351,14 @@ class PwaQueueChromeIsolationBrowserTest {
                     try { Files.deleteIfExists(path); } catch (Exception ignored) { }
                 });
             }
+        }
+    }
+
+    private static String completionBarrierScript() throws Exception {
+        try (var stream = PwaQueueChromeIsolationBrowserTest.class.getResourceAsStream(
+                "/js/pwa-delete-completion-barrier.js")) {
+            if (stream == null) throw new IllegalStateException("IndexedDB完了barrier helperを取得できません");
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
         }
     }
 
