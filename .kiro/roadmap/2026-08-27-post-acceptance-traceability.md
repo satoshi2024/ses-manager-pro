@@ -12,11 +12,11 @@
 | 01 | R01a `ced64304` CODE PASS、採番/actor P2閉鎖。追加fixture `e3944774` CODE PASS。DUAL確認等は未完 | 文書ACL/version、二者確認、信頼できる退社撤権要求・確認、legacy scope、運用承認 |
 | 02 | CANDIDATE維持。recipient現在scope/owner tenantの両P1は36dcfdfcでAstra限定CODE PASS、control統合済み | DG-02、正式Owner/最終Review、release |
 | 03 | 集約完了修復と実MySQL並行証拠 `89384928`は限定CODE PASS、control統合済み | 全体最終Review、NF07 policy、retention、staging/運用承認 |
-| 04 | G1限定CODE PASS、34/0/0/0とMySQL4/0/0/0。実servlet修復91dbca13は独立Review・3/0/0/0、control統合後40/0/0/0。G2a静的4 P1閉鎖後もChrome run03 fixed b1ecfbe7は2/2/0/0でFAIL。再起動後CSRF欠落とworkerの実offline障害注入を修復中 | 実PWA/browser全体検証、非通知tab/分散session環境、正式release |
+| 04 | G1限定CODE PASS、34/0/0/0とMySQL4/0/0/0。実servlet修復91dbca13は独立Review・3/0/0/0、control統合後40/0/0/0。Chrome run04 fixed485c2db6は2/1/1/0でFAIL。CSRF修復後、実IDB削除barrierとworker復旧fetchを修復中 | 実PWA/browser全体検証、非通知tab/分散session環境、正式release |
 | 05 | 開発scope CONDITIONAL。総deadline 2187b5f9限定CODE PASS、26/0/0/0、control統合。実transport未完 | provider/credential、許可先、正式production enablement |
-| 06 | F2 foundation限定CODE PASS・control統合済み。F1a 66/0/0/0、candidate fe54実MySQL6/0/0/0。日本語COMMENT後V184 fixed aba94e6f fresh/upgrade2/0/0/0。lease c69ef8caはAstraテストP1=1/P2=2で再修復。validation lifecycle・実Document ACL統合・apply/UI未完 | V183併合rehearsal、全synthetic実装/Review、実source/mapping/data owner、移行承認 |
-| 07 | SF-W1/W2a・W2b Slice A/B限定CODE PASS。Slice B fixed27dc74d7三DB MySQL10/0/0/0、Astra証拠照合後control61b0b979へ統合。同control限定MySQL再試験10/0/0/0。Slice C以降・W3・実dispatch/処分未完、coverage不完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
-| 08 | 開発scope CONDITIONAL。fixed020dc4d1は10 class53/0/0/0、Astra全20 report hash照合。DNS送信直前期限、slow/cancel、TLS停滞、strict JSONの限定証拠。実Gemini adapter接線・cost policy・artifact refresh未完 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
+| 06 | F2 foundation限定CODE PASS・control統合済み。F1a 66/0/0/0、candidate6/0/0/0、V184 fixedaba94e6f fresh/upgrade2/0/0/0。MAPPED leaseはH2 fixed696221cf 6/0/0/0、MySQL fixed14f81ae5 9/0/0/0、Astra限定受理。実metadata/Document ACL統合、validation lifecycle・apply/UI未完 | V183併合rehearsal、全synthetic実装/Review、実source/mapping/data owner、移行承認 |
+| 07 | SF-W1/W2a・W2b Slice A/B限定CODE PASS。Slice B三DB MySQL10/0/0/0、control61b0b979統合後も10/0/0/0。Slice Cは旧13/0/0/0後、main commit故障fixtureで16/1/0/0、次はcompile FAIL。修復97641ce9はMySQL16/0/0/0・Astra限定CODE/証拠PASS。D以降・実dispatch/処分・coverage未完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
+| 08 | 開発scope CONDITIONAL。fixed020dc4d1は10 class53/0/0/0、Astra証拠照合。immutable config/invocationと費用上限契約のSlice A fixed39550ec2は限定静的PASS・実行待ち。実Gemini adapter接線・失敗cost伝播・実cost policy・artifact refresh未完 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
 | 09 | fail-closed修復 `da850b97`限定CODE PASS、control統合済み。実providerの完成ではない | V182 PENDING=0/帰属不明0/親子一致、実撤権/session/token、production owner |
 | 10 | session共有reauth修復 `20cce0f7`限定CODE PASS、46/0/0/0、control統合済み | 全体独立Review、実browser/session環境、staging、正式release |
 

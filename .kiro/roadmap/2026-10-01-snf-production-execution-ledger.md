@@ -377,3 +377,17 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   A: immutable config/invocationと費用/dispatch契約、B: bounded adapterとstrict protocol、C: attempt/失敗費用伝播の順とする。
   最初のproduction cost policyは固定deny-all、loopback許可policyはsrc/testのみ。実費用上限・provider承認・artifact publishは別gate。
   secretは既に供給済みのlocal accessorに限定し、無界なsecret-store I/Oを導入しない。A slice実装を開始したが未完である。
+
+### W2b Slice C限定受理
+
+- fixed `97641ce9dd836696bc8c69570bae25bf2f6fa3da` のMySQL06は **16/0/0/0**、exit0、起止SHA一致・clean。
+  UTC02:20:57.7813741〜02:23:51.8939070、log SHA-256 `71DBB29FE4AE7161F8173DCC8C4DC4C2547B193A152B4AA04B3BF271FC445076`。
+  Astraは全2 report hash、XML集計、同run固有の三container ID・SELECT VERSION()=8.0.46・image ID/schema hashを確認した。
+  実JDBC commit後の例外readback、rollback後のquarantine、readback不能、witness並行CASの異なる候補両順序と同一候補収束を含む。
+  待機はglobal countではなく実transaction connection IDsと対象PRIMARY/LOCK_DATA、holderへの待機graphで確認する。
+  signature/append/latest/限定合成統合の **CODE＋証拠PASS** とし、raw10 fileをcontrolへhash一致保存した。
+- MySQL04 fixed `f792ebe1` は **16/1/0/0**。BEFORE_COMMITの未rollbackによりconnection cleanupがcommitし、REPLAYEDとなった。
+  MySQL05 fixed `5b803720` はコンパイルFAIL・新規XMLなしであり、0件PASSではない。裸tryと接続IDの固定snapshotを修復して上記06へ進んだ。
+  失敗raw16 fileも `verification-evidence/nf07-w2b-fixed/` に保持し、成功結果で上書きしない。
+- Dの独立latest再取得/replay後確認、静止partitionのfreshness、完全restore/anti-rollback、外部witness運用・Privacy/Legal承認は未完。
+  この合格をNF07全体完成やproduction approvalへ昇格しない。
