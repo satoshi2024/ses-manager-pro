@@ -75,7 +75,11 @@ class ImportValidationLeaseServiceTest {
         assertThrows(TransactionSystemException.class, () -> lost.renew(grant));
         var renewedBeforeRetry = state();
         var renewed = lost.renew(grant);
-        assertEquals(renewedBeforeRetry, state());
+        var renewedAfterRetry = state();
+        assertEquals(renewedBeforeRetry.owner(), renewedAfterRetry.owner());
+        assertEquals(renewedBeforeRetry.generation(), renewedAfterRetry.generation());
+        assertEquals(renewedBeforeRetry.version() + 1, renewedAfterRetry.version());
+        assertFalse(renewedAfterRetry.expiresAt().before(renewedBeforeRetry.expiresAt()));
         assertEquals(1L, generation());
         assertTrue(jdbc.queryForObject("SELECT lease_expires_at > CURRENT_TIMESTAMP(6) FROM t_import_job WHERE tenant_id=? AND id=?", Boolean.class, context.tenantId(), jobId));
         jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?", context.tenantId(), jobId);
@@ -142,11 +146,18 @@ class ImportValidationLeaseServiceTest {
         setUp();
         op = service.beginAcquire(jobId);
         before = state();
+        byte[] originalDocumentHash = jdbc.queryForObject(
+                "SELECT document_sha256 FROM t_import_job WHERE tenant_id=? AND id=?", byte[].class,
+                context.tenantId(), jobId);
         jdbc.update("UPDATE t_import_job SET document_sha256=? WHERE tenant_id=? AND id=?", hash("different document hash"), context.tenantId(), jobId);
         var documentHashOp = op;
         var documentHashBefore = state();
         assertEquals(documentHashBefore, assertRejectedWithoutWrite(() -> service.acquire(documentHashOp)));
-        assertNotEquals(before, documentHashBefore);
+        byte[] changedDocumentHash = jdbc.queryForObject(
+                "SELECT document_sha256 FROM t_import_job WHERE tenant_id=? AND id=?", byte[].class,
+                context.tenantId(), jobId);
+        assertFalse(java.util.Arrays.equals(originalDocumentHash, changedDocumentHash), "document hash自体が変更されている");
+        assertEquals(before, documentHashBefore, "document hash変更はlease stateを変更しない");
 
         setUp();
         op = service.beginAcquire(jobId);
