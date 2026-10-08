@@ -20,13 +20,14 @@ main sourceは`src/main/java/com/ses/privacy/foundation/`内のpackage-private�
 | `JdbcPrivacyProjectionAdapter` | app DB test schemaだけを更新。`last_applied_revision`とevent hashをCASし、同revision/same hashはno-op、same revision/different hash、gap、projection revisionがjournal headを超えるケースはQUARANTINED。 |
 | `JournalProjectionService` | journal event/head検証→app projection適用の順を制御。journal DB transaction完了後に別app DB transactionを開始し、両DB間transactionを作らない。 |
 | `WatermarkCanonicalizer` | domain/version prefix付きcanonical UTF-8 bytesを一意に生成し、null/長さ/順序/Instant精度を固定。domainはW2b専用。 |
-| `SyntheticWatermarkAttestor` | test-only private keyで連続journal prefixを署名。attestorはjournal tail/event hashを再読してheadとの一致を確認してから署名する。 |
-| `LatestWitnessPort` / `JdbcLatestWitnessAdapter` | 第3独立DBにcheckpoint epoch/revision/hash/key ID/signature digestをCAS保存し、latest値を取得。witness値がjournal/app snapshot内にだけ存在する構成は禁止。 |
+| `LatestWitnessPort` / `JdbcLatestWitnessAdapter` | 第3独立DBにcheckpoint epoch/revision/hash/key ID/signature digestを保存し、latest値を取得する境界。witness値がjournal/app snapshot内にだけ存在する構成は禁止。append-only checkpoint logと更新可能なlatest CAS pointerは別テーブル・別権限とする。 |
 | `SignedWatermarkVerifier` | public trust anchor, key history, signature, canonical payload, latest witness一致、checkpoint freshnessを検証。古いが正しい署名だけではrestoreを通さない。 |
 | `ProjectionRecoveryService` | 起動時・restore時はREAD_ONLY_QUARANTINEDで開始し、witness latestから信頼可能範囲とjournal tailを検査後、冪等replayと一致検証を行う。write/publication有効化を返すAPIはこの合成層にも置かない。 |
-| test-only `TemporaryW2bHarness`, `SyntheticAttestorKeyFixture`, schema resources | Testcontainersでjournal/app/witness各MySQLを個別起動し、test内Ed25519 keyを生成し、private keyはtest source set外へ保存しない。環境credential/URLは読まない。 |
+| test-only `TemporaryW2bHarness`, `SyntheticAttestorKeyFixture`, signer実装、schema resources | Testcontainersでjournal/app/witness各MySQLを個別起動し、test内Ed25519 keyを生成する。具体的signer、private key生成、key fixtureはすべて`src/test/java`に置き、main source/artifactに含めない。環境credential/URLは読まない。 |
 
-Application projectionはtenant/subject partition、applied revision、event hash、projected hold/action stateの最小opaque値だけを保持する。削除原文やprovider responseは保存しない。app projection schemaは`src/test/resources/privacy-journal/`等の合成test-only resourceとし、versioned migrationは作らない。W2a schema resourceを変更せず別ファイルに置く。
+main sourceに置けるのはprojection/recoveryのportと実装、canonicalizer、署名検証器などの非秘密処理だけとする。`SyntheticWatermarkAttestor`または同等の署名実装、秘密鍵生成/保持/loader、fixture signerはmainに置かない（`sf-w2-protocol.md` §7）。witness schemaではcheckpoint logをattestor専用INSERT権限のappend-only表とし、latest CAS pointerを独立表にする。journal/app projection用DBユーザーはwitnessへのUPDATE/DELETEを含む書込権限を持たず、witness readerは読取専用とする。合成MySQL権限はこの分離を検査するが、MySQL自体がDB全体のsnapshot/volume rollbackを検出・阻止できるとは扱わない。
+
+Application projectionはtenant/subject partition、applied revision、event hash、projected hold/action stateの最小opaque値だけを保持する。削除原文やprovider responseは保存しない。app projection schemaは`src/test/resources/privacy-journal/`等の合成test-only resourceとし、versioned migrationは作らない。W2a schema resourceを変更せず別ファイルに置く。合成restore fixtureはapplication DBとjournal DBだけを巻き戻し対象にし、witness container/volumeをrestore対象から明示的に除外してlatestを保持する。これはMySQL単体のanti-rollback性の証明ではない。
 
 ## 3. Canonical bytes・鍵・checkpoint
 
@@ -38,7 +39,7 @@ Checkpoint envelopeはschema versionとdomain separationを必須とし、以下
 
 各test harnessがattestor private keyを新規生成し、対応public keyだけをverifier trust anchorへ登録する。private key fixtureは`src/test/java`に限定し、生成鍵にTEST/SYNTHETIC audienceを持たせる。main sourceにprivate key、key loader、環境変数key fallbackを置かない。unknown key、signature不正、compromise/revocation state unknown、witness unavailableはfail-closedとする。
 
-Witness `latest`はpartitionごとに単調epoch、revision、event hash、checkpoint hashをCAS更新する。attestor/witness updateは一つの複合test operationだがDBを跨いだatomicityは主張しない。witness更新後にapp projectionが失敗しても、recoveryはlatest checkpointまで再投影して収束する。attestor生成中のcrash/ACK unknownはcommand/checkpoint IDで照会し、値を推定しない。witness巻戻り、同epoch異hash、revision後退は拒否する。
+Witness checkpoint logはappend-onlyとし、attestor test userだけにINSERTを許しUPDATE/DELETEを許さない。latest pointerは別表のCASで進め、journal/app userはwitness上のいずれの表にも書けない。Witness `latest`はpartitionごとに単調epoch、revision、event hash、checkpoint hashをCAS更新する。attestor/witness updateは一つの複合test operationだがDBを跨いだatomicityは主張しない。witness更新後にapp projectionが失敗しても、recoveryはlatest checkpointまで再投影して収束する。attestor生成中のcrash/ACK unknownはcommand/checkpoint IDで照会し、値を推定しない。witness読取値の巻戻り、同epoch異hash、revision後退は拒否する。合成試験は外部に保持されたwitnessによる巻戻り検出を模擬するだけで、本番anti-rollback保証はWORM/独立耐久境界/運用者権限分離を定めるhuman gateに残す。
 
 ## 4. CAS・ロック順・recovery
 
@@ -50,7 +51,7 @@ journal本体を変更するcommandはW2aの固定lock orderを維持し、W2b p
 4. gap (`incomingRevision > currentRevision+1`)、backward (`incomingRevision < currentRevision`で未照合)、app revision > journal head、snapshot/head hash不一致はQUARANTINED。自動でrevision/hashを補正しない。
 5. row transaction commit後にのみ適用済み結果を返す。commit ACK不明ではsnapshotを再読し、same revision/hashなら収束、その他はQUARANTINED。
 
-Restoreはapp projectionをREAD_ONLY_QUARANTINEDとして起動し、witnessから最新checkpointを取得する。witnessが不在/読取不能、signature/key unknown、checkpoint epoch/revision/hashが後退・分岐、journal prefixが欠落/改竄、witness latestより先に未attested tailがある場合はpublication/write-enableを拒否する。watermark検証だけでjournal headが完全とはみなさず、witness checkpoint以降のtailも連続hash chainとして全件検証してからreplayする。
+Synthetic restoreはapp projectionとjournalのsnapshotを巻き戻し、witnessをrestore対象外にして別container/volumeでlatestを維持する。app projectionをREAD_ONLY_QUARANTINEDとして起動し、witnessから最新checkpointを取得する。witnessが不在/読取不能、signature/key unknown、checkpoint epoch/revision/hashが後退・分岐、journal prefixが欠落/改竄、witness latestより先に未attested tailがある場合はpublication/write-enableを拒否する。watermark検証だけでjournal headが完全とはみなさず、witness checkpoint以降のtailも連続hash chainとして全件検証してからreplayする。MySQL上のACL/CASはDB全体の過去snapshot/volume復元を防がないため、この合成restore結果をproduction anti-rollback証明に読み替えず、production witness耐久性・非巻戻し境界・運用者分離は未充足human gateとして扱う。
 
 回復順は (a) witness latest read、(b) journal chainとcheckpoint対応prefix検証、(c) projection snapshotとの比較、(d) 必要eventをrevision順に適用、(e) headと全event hash再照合、(f) 同一手順を二回実行して二回目が全件NO_OPであること、で固定する。recovery中の新event/holdはhead再読で検知し、watermark/replay対象を更新して再検査する。local projection値はhold/dispatchの認可根拠に使わない。W2bにはdispatch worker/認可APIが存在しない。
 
@@ -80,14 +81,15 @@ P10–P12、P14を専用W2b MySQL classで実証する。各caseはtest-owned一
 | P12b replay repeatability | 一度目replay、同じsnapshotから再度replay、復元中に新hold/event注入 | 二度目全件NO_OP。新eventが見えたらquarantine維持し再照合。 |
 | P14 projection/checkpoint transaction boundaries | 各app row書込段階、checkpoint/witness前後、commit前後でfault/response loss | partial transactionはrollbackまたはquarantine。witness進行後のprojection遅れは復旧可能。ACK不明を成功扱いしない。 |
 | P15 connection capability | arbitrary DataSource/DB_URL/env credential、prod、prod+test、default-prod、test permitなし、test後のprofile変更 | DB接続試行・attestor鍵生成・schema作成=0で拒否。 |
+| P16 witness ACL/restore境界 | journal/app DB userによるwitness log/latest書込、attestorによるlog UPDATE/DELETE、synthetic restore | journal/app userのwitness書込およびlog UPDATE/DELETEは拒否。latestは独立CAS。restore対象からwitnessを除外してlatest保持を確認し、MySQL単体の全体rollback防止は主張しない。 |
 
 Fault injectionはtest-only JDBC wrapper/trigger/barrierに閉じる。providerは存在せず、external provider call countは常に0であることをassertする。
 
 ## 7. 実装batchとreview固定点
 
-1. **Batch A — 契約/fixture schema**: test-only 3-DB harness, app/witness schema resources, typed records, canonicalizer, synthetic Ed25519 fixture。boundary/pure testsのみ。
+1. **Batch A — 契約/fixture schema**: test-only 3-DB harness, app/witness schema resources, typed records, canonicalizer, `src/test/java`内synthetic Ed25519 key fixture/signer。boundary/pure testsのみ。
 2. **Batch B — projection CAS**: `PrivacyProjectionPort`, JDBC projection adapter, quarantine result types。P10/P14 projection fault subset。
-3. **Batch C — attestor/witness**: checkpoint signer/verifier, independent latest witness CAS, profile/capability refusal。P11/P15。
+3. **Batch C — attestor/witness**: test-only checkpoint signer、main側署名verifier、independent latest witness CAS/ACL、profile/capability refusal。P11/P15/P16。
 4. **Batch D — restore/replay**: recovery service, latest checkpoint reconciliation, repeat replay and old snapshot tests。P12/P12b。
 5. **Batch E — evidence packet**: fixed HEAD/source/schema manifest hashes, test output and 0 skip evidence, provider call count=0, explicit未実装範囲。実装後にW2b limited code reviewを依頼する。
 
