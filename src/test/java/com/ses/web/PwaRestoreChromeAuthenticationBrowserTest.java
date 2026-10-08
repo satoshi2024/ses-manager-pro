@@ -97,17 +97,20 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                     + "return JSON.stringify({id:stored&&stored.clientRequestId,scope:SES.pwaQueue.getScope()})})()");
             String requestId = JSON.readTree(draft.asText()).path("id").asText();
             assertThat(requestId).isNotBlank();
-            browser.send("Network.setBlockedURLs", java.util.Map.of("urls", java.util.List.of(base + "/my/timesheet")));
+            int requestBoundary = browser.networkRequests().size();
+            int responseBoundary = browser.networkResponses().size();
+            browser.send("Network.emulateNetworkConditions", java.util.Map.of("offline", true, "latency", 0,
+                    "downloadThroughput", 0, "uploadThroughput", 0, "connectionType", "none"));
             browser.navigate(base + "/my/timesheet");
             boolean offlineShellLoaded = browser.waitForStrict("!!document.title.includes('オフライン')", Duration.ofSeconds(15));
-            boolean navigationServedByWorker = browser.networkResponses().stream().anyMatch(event ->
-                    event.path("params").path("response").path("url").asText().equals(base + "/my/timesheet")
-                            && event.path("params").path("response").path("fromServiceWorker").asBoolean());
+            boolean navigationServedByWorker = navigationResponseFromWorker(browser, base + "/my/timesheet",
+                    requestBoundary, responseBoundary, Duration.ofSeconds(5));
             assertThat(offlineShellLoaded && navigationServedByWorker)
-                    .as("blocked navigationがService Worker経由でoffline shellを返す。診断="
+                    .as("offline時の実Document fetch失敗後にService Workerがoffline shellを返す。診断="
                             + browser.evaluateStrict("(async()=>JSON.stringify({title:document.title,href:location.href,online:navigator.onLine,controlled:!!navigator.serviceWorker.controller,offlineAssetCached:!!(await caches.match('/offline.html'))}))()").asText()
                             + ", workerResponse=" + navigationServedByWorker).isTrue();
-            browser.send("Network.setBlockedURLs", java.util.Map.of("urls", java.util.List.of()));
+            assertThat(browser.evaluateStrict("!navigator.onLine").asBoolean())
+                    .as("CDP network offlineがページにも反映される").isTrue();
             assertThat(browser.evaluateStrict("document.getElementById('offline-drafts').hidden").asBoolean())
                     .as("通常のoffline表示では復元下書きはロック").isTrue();
             assertThat(browser.evaluateStrict("document.getElementById('offline-confirm-restore').hidden").asBoolean())
@@ -128,8 +131,8 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                     .asInt()).isZero();
 
             // 確認後の自動flushだけを遮断し、実API認証・scope確認・明示復元を保ったままdraftを観察する。
-            browser.evaluate("window.__nativeFetch=window.fetch.bind(window);window.fetch=(input,init)=>"
-                    + "String(input).includes('/api/my/pwa/attendance/daily')?Promise.reject(new TypeError('offline test fence')):window.__nativeFetch(input,init);true");
+            assertThat(browser.evaluateStrict("window.__nativeFetch=window.fetch.bind(window);window.fetch=(input,init)=>"
+                    + "String(input).includes('/api/my/pwa/attendance/daily')?Promise.reject(new TypeError('offline test fence')):window.__nativeFetch(input,init);true").asBoolean()).isTrue();
             browser.evaluate("document.getElementById('offline-confirm-restore').click();true");
             assertThat(browser.waitForStrict("!!(document.getElementById('offline-drafts') && !document.getElementById('offline-drafts').hidden)", Duration.ofSeconds(15)))
                     .as("実reauthenticate/confirm API成功後、ユーザー確認操作で下書きを表示").isTrue();
@@ -147,5 +150,31 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                 });
             }
         }
+    }
+
+    private static boolean navigationResponseFromWorker(CdpBrowser browser, String url,
+                                                         int requestBoundary, int responseBoundary,
+                                                         Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            String navigationRequestId = null;
+            for (int i = requestBoundary; i < browser.networkRequests().size(); i++) {
+                JsonNode event = browser.networkRequests().get(i);
+                if ("Document".equals(event.path("params").path("type").asText())
+                        && url.equals(event.path("params").path("request").path("url").asText())) {
+                    navigationRequestId = event.path("params").path("requestId").asText();
+                }
+            }
+            if (navigationRequestId != null) {
+                for (int i = responseBoundary; i < browser.networkResponses().size(); i++) {
+                    JsonNode event = browser.networkResponses().get(i);
+                    if (navigationRequestId.equals(event.path("params").path("requestId").asText())) {
+                        return event.path("params").path("response").path("fromServiceWorker").asBoolean();
+                    }
+                }
+            }
+            Thread.sleep(50);
+        }
+        return false;
     }
 }
