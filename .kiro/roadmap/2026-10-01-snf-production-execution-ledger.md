@@ -220,3 +220,39 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   snapshot/別attempt `0b0b10de`は独立Review中。bounded transportは小batchへ分けて実装する。
   OFFやunknown-cost拒否だけで実transportの実装完了にしない。
 - 全体は引き続きNO-GO。上記限定統合後の全Fast/MySQL/Performance/Browser/backup Gateは未実行。
+
+## 2026-10-08 再開・限定検証と次工程
+
+- 根AGENTS全文を再読しfetchしたorigin/mainはB0 `1443fb68943849a3260d7ebe005259f3eb609d60`。
+  PR101の7 jobはCOMPLETED/SUCCESS、main最新run36858538460はCOMPLETED/FAILUREのまま。
+  worktree/branch/未commit/未push相当の差分一覧は`verification-evidence/20261008-resume-inventory/worktrees.json`。
+  main checkoutの利用者変更3件を保持し、remote push/PR/merge、credential操作、deployは行っていない。
+- NF06 candidate fixed `fe54dc31e0ce376e6235a3c747f621316022b793` は実MySQLで1 class **6/0/0/0**。
+  UTC00:45:07.5116950〜00:46:41.2144970、exit0、起止SHA一致・clean。
+  log SHA-256 `0FE67E72E5956942C922635AEA42D1AA5F143D2245D379892CFB210664BCEABC`。
+  AstraはXML/textのmanifestと実container起動記録を再確認した。実行固有のMySQL version/image IDは未取得で、旧runから転記しない。
+  rawはsource/controlの`verification-evidence/nf06-fixed/20261008-mysql-01/`。
+  同じ実transactionのconnection IDとPRIMARY LOCK_DATAによる待機証拠、cleanup時の原例外保持を含む限定合格。
+  手組schemaとmock DocumentServiceによる試験であり、V184 Flyway、実Document ACL、全NF06の合格ではない。
+  次はfresh installとB0(V182)からV184へのupgrade。V183併合はcontrol統合後に別途実行する。
+- NF04実Servlet run04（fixed5813973）は**3/1/0/0**。通常confirm/CSRFとlistenerは成功したが、logout競合が期待403に対し500だった。
+  safe logはIllegalStateExceptionの種類のみであり、stackによる呼出箇所断定はしない。
+  source `91dbca139514951b2f58b2e6eab8c3f131a9262d`はmutex再取得をfinallyから除き、失効sessionアクセスを局所的に拒否する。
+  Astra限定静的受理後、clean verify `a0969030ed98f50e3e794e0f20053656f24e47d4`のrun05で**3/0/0/0**。
+  UTC00:52:23.2476986〜00:54:05.3162567、exit0、起止SHA一致・clean。
+  log SHA-256 `F5D8CC84CBE2F822CD7863AF4C21A7B5CF02D3515956EB602AD437C836CA17FD`。
+  rawはverify worktreeの`verification-evidence/nf04-servlet-fixed/20261008-run-05/`。runtime証拠の独立再確認・control統合は未了。
+- NF04 G2a `189cb6db` + `1dda69f7`はAstra **FAIL / P1=4**。
+  standalone offlineのCSRF依存欠落、permit失効後の旧送信継続、IDB await後の撤回無効化、worker v2 cache残存を修復する。
+  同期DOM消去だけでは解除しない。旧synthetic Chromeの自動復元assertionと未検証の新実Spring Chrome fixtureをPASS扱いしない。
+- NF08 fixed `1d3873c49f8484b278cc7842cd6175818b8d2e01`はHC5 API可視性修復後の9 class検証中。
+  前run04の39/1/0/0を保持する。DNS snapshotがpool待機中に失効した場合の送信境界、slow drip/TLS/cancel cleanup、strict JSON parserは未了。
+  transportの合成loopback試験は実provider、DPA、費用、production enablementの証拠にならない。
+- NF07 W2bはclean既存`C:\work\ses-manager-pro-privacy-retention-dsar`を安全確認して再利用した。
+  branch `codex/snf-prod-nf07-attestation`、fresh B0からcontrol `b58403409a9b0ae66d33c3003fb5a0ea4b6939e4`へfast-forward。
+  旧branchとtargetを保持。計画`88f5887632bc9f4d48c350a338b7ee11fdd2a308`はAstra限定技術PLAN PASS。
+  signer/秘密鍵生成はtestのみ、witness log/latest CAS分離、journal/appからwitness書込禁止を固定した。
+  第三MySQLが全体rollbackを検出するとは主張せず、synthetic restoreでwitnessを除外する。本番anti-rollbackは人間のgate。
+  Slice Aの三DB capability/schema/canonical/fixtureを開始。production migration、実処分/送信、法的判断は許可していない。
+- 全NF完成とproduction approvalは引き続き**NO-GO**。NF03/NF08のNF07 policy依存、NF05/NF08実provider、
+  NF09 V182 production照合、Security/Privacy-Legal/Operations/Production Ownerの署名は未解消。
