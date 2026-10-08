@@ -323,7 +323,7 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
         }
 
         @Override
-        protected void releaseResources() {
+        public void releaseResources() {
             output.reset();
         }
     }
