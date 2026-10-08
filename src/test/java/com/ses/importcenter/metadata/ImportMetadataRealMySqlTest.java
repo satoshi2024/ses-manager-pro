@@ -59,6 +59,7 @@ class ImportMetadataRealMySqlTest {
     private static final byte[] SOURCE = "externalKey,companyName\ncustomer-1,Example\n"
             .getBytes(StandardCharsets.UTF_8);
     private static final String SOURCE_HASH = sha256(SOURCE);
+    private static final String TEST_TENANT = "nf06-real-metadata-test";
     private static final long LEGAL_ENTITY_ID = 7_601_234L;
     private static final String LOOKUP_KEY_VERSION = "nf06-test-key-v1";
     private static final byte[] LOOKUP_KEY = new byte[32];
@@ -78,6 +79,7 @@ class ImportMetadataRealMySqlTest {
         registry.add("spring.datasource.driver-class-name", MYSQL::getDriverClassName);
         registry.add("spring.flyway.enabled", () -> "true");
         registry.add("spring.sql.init.mode", () -> "never");
+        registry.add("app.security.oidc.tenant-id", () -> TEST_TENANT);
     }
 
     @Autowired private JdbcTemplate jdbc;
@@ -100,7 +102,7 @@ class ImportMetadataRealMySqlTest {
 
     @BeforeEach
     void prepareAuthorizedFixture() {
-        tenantId = "nf06-real-" + UUID.randomUUID().toString().replace("-", "");
+        tenantId = TEST_TENANT;
         AccountingTenantContextHolder.setTenantId(tenantId);
         var user = SysUser.builder().username("nf06-" + tenantId.substring(10, 26))
                 .password("test-only").realName("取込テスト管理者").role("管理者").status(1).tenantId(tenantId).build();
