@@ -39,11 +39,13 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -151,12 +153,16 @@ class CopilotQueryServiceTest {
         when(copilotSummaryService.summarize(any(), any(), any(), anyString(), any(), anyString()))
                 .thenReturn(new SummaryResponse("指標を確認しました。", List.of(),
                         SummaryResponse.STATUS_SUCCEEDED, "mock-management-copilot", 10L, null, 0));
-        Mockito.doThrow(new IllegalStateException("audit persistence failed"))
-                .when(copilotRunService).completeSummaryAttempt(eq(summaryAttempt), anyInt(), any());
+        IllegalStateException auditFailure = new IllegalStateException("audit persistence failed");
+        Mockito.doThrow(auditFailure)
+                .when(copilotRunService).completeSummaryAttempt(eq(summaryAttempt), anyLong(), any());
 
         try (org.mockito.MockedStatic<SemanticCatalogRegistry> registry = Mockito.mockStatic(SemanticCatalogRegistry.class)) {
             registry.when(() -> SemanticCatalogRegistry.requireEnabled(queryId)).thenReturn(entry);
-            assertThrows(IllegalStateException.class, () -> copilotQueryService.query("稼働率"));
+            IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                    () -> copilotQueryService.query("稼働率"));
+            assertSame(auditFailure, thrown);
+            verify(copilotRunService).completeSummaryAttempt(eq(summaryAttempt), anyLong(), any());
         }
     }
 
