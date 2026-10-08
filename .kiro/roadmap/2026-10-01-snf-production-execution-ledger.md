@@ -391,3 +391,24 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   失敗raw16 fileも `verification-evidence/nf07-w2b-fixed/` に保持し、成功結果で上書きしない。
 - Dの独立latest再取得/replay後確認、静止partitionのfreshness、完全restore/anti-rollback、外部witness運用・Privacy/Legal承認は未完。
   この合格をNF07全体完成やproduction approvalへ昇格しない。
+
+### 統合witness再試験と新たなChrome阻害
+
+- Slice Cをcontrolへ `afe544cd/30bc7b3d/b1ae3c94/a0a05f7d` として統合した。
+  fixed `a0a05f7d4d179d314469413cf7270fe3986ed8d9` のcontrol MySQL02も **16/0/0/0**、exit0、起止SHA一致・clean。
+  UTC02:29:02.0566741〜02:32:04.3232022、log SHA-256 `6A526642C5EEA838A668227B089E18817A9DE1D9D730548C3BF57F89CB5675AE`。
+  `verification-evidence/20261008-control-w2b-mysql-02/` に三DB個別の実version/image記録を含む。全MySQL gateの再合格ではない。
+- 再fetchしたorigin/mainはB0のまま、最新remote main run36858538460はCOMPLETED/FAILURE。main利用者変更3件は保持している。
+- NF04 Chrome04 fixed `485c2db6ca014ac067f3abada0db0560c8488b80` とChrome05 fixed `9313108e7ccc5e834b3eaa11fdab4908d33d4a28` は
+  いずれも **2/1/1/0、FAIL**。厳密な削除transaction完了barrierとworker復旧時FETCH_FAILEDの問題を分離して追跡する。
+  `pwa-queue.js` のdeleteScope/cleanupExpiredはopenKeyCursorのcursor.delete()を呼んでいる。
+  W3C IndexedDB 3.0のdelete手順6によりkey-only cursorではInvalidStateErrorとなることをrootとAstraが独立確認した。
+  参照: https://www.w3.org/TR/IndexedDB/#dom-idbcursor-delete 。同一transactionのstore.delete(primaryKey)へ修復し、実IDBのscope/TTLを再検証する。
+  worker TypeErrorの原因はこれとは別で、現在の安全診断だけでは確定しない。全sessionのonline復旧と実fetch成功を引き続き要求する。
+  両失敗raw各12 fileをcontrolへhash一致保存。過去のNode helper合格を実Chromeの代替にしない。
+- NF08 Slice A fixed `39550ec2` はAstra限定静的PASS後、run08でテストのtext() API不存在によりcompile FAILとなった。
+  `e0ce3686` はgetText()へ最小修正し、run09で12 class **64/0/1/0**。新local成功fixtureのEffectiveScopeSnapshotが不正である。
+  いずれもPASSへ昇格せず、実scope契約を満たすfixtureへ修復して同selectorを再実行する。B/Cは未実装。
+- NF06 `0c109fa1` のdisableSource不存在/foreign tenant NPE修復はAstra限定受理。
+  実metadata/Document成功経路test `32b36a6f` はfixture tenantとconfigured tenant不一致で静的REQUEST CHANGES。
+  実サービスの認可をmockへ置換せず、同じsynthetic tenantで設定とfixtureを一致させる。文書は人工的な既存CLEAN状態でありupload/scan実証ではない。
