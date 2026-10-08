@@ -3,6 +3,7 @@ package com.ses.service.ai.impl;
 import com.ses.common.exception.BusinessException;
 import org.apache.hc.client5.http.async.methods.AbstractBinResponseConsumer;
 import org.apache.hc.client5.http.async.methods.SimpleHttpRequest;
+import org.apache.hc.client5.http.async.methods.SimpleRequestProducer;
 import org.apache.hc.client5.http.async.methods.SimpleRequestBuilder;
 import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.config.RequestConfig;
@@ -11,12 +12,9 @@ import org.apache.hc.client5.http.impl.async.HttpAsyncClients;
 import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManagerBuilder;
 import org.apache.hc.core5.concurrent.FutureCallback;
 import org.apache.hc.core5.http.ContentType;
-import org.apache.hc.core5.http.HttpException;
 import org.apache.hc.core5.http.HttpResponse;
 import org.apache.hc.core5.http.HttpVersion;
-import org.apache.hc.core5.http.nio.entity.AbstractBinDataConsumer;
 import org.apache.hc.core5.http2.HttpVersionPolicy;
-import org.apache.hc.core5.io.ModalCloseable;
 import org.apache.hc.core5.reactor.IOReactorConfig;
 import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
@@ -41,11 +39,13 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
     public static final int MAX_RESPONSE_BYTES = 64 * 1024;
     private static final int MAX_REQUEST_BYTES = 64 * 1024;
     private static final int MAX_ACTIVE_EXCHANGES = 8;
+    private static final int MAX_ADMITTED_EXCHANGES = 12;
     private static final String PROVIDER_HOST = "generativelanguage.googleapis.com";
 
     private final CopilotDnsSnapshotResolver dnsResolver;
     private final boolean testLoopbackMode;
     private final Semaphore exchangePermits = new Semaphore(MAX_ACTIVE_EXCHANGES, true);
+    private final Semaphore admissionPermits = new Semaphore(MAX_ADMITTED_EXCHANGES, true);
     private final AtomicInteger activeExchanges = new AtomicInteger();
     private final CloseableHttpAsyncClient client;
     private volatile boolean started;
@@ -110,62 +110,93 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
         if (remaining <= 0) {
             throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
         }
-        try {
-            if (!exchangePermits.tryAcquire(remaining, TimeUnit.NANOSECONDS)) {
-                throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
-            }
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            throw BusinessException.of(503, "COPILOT_TRANSPORT_INTERRUPTED");
+        if (!admissionPermits.tryAcquire()) {
+            throw BusinessException.of(503, "COPILOT_TRANSPORT_BUSY");
         }
 
         AtomicBoolean released = new AtomicBoolean();
+        AtomicBoolean activeCounted = new AtomicBoolean();
+        AtomicBoolean exchangeAcquired = new AtomicBoolean();
         Runnable releasePermit = () -> {
             if (released.compareAndSet(false, true)) {
-                activeExchanges.decrementAndGet();
-                exchangePermits.release();
+                if (activeCounted.get()) {
+                    activeExchanges.decrementAndGet();
+                }
+                if (exchangeAcquired.get()) {
+                    exchangePermits.release();
+                }
+                admissionPermits.release();
             }
         };
-        activeExchanges.incrementAndGet();
-        RequestConfig requestConfig = RequestConfig.custom()
-                .setRedirectsEnabled(false)
-                .setHardCancellationEnabled(true)
-                .setContentCompressionEnabled(false)
-                .setConnectionRequestTimeout(Timeout.ofNanoseconds(remaining))
-                .setConnectTimeout(Timeout.ofNanoseconds(remaining))
-                .setResponseTimeout(Timeout.ofNanoseconds(remaining))
-                .build();
-        SimpleHttpRequest request = SimpleRequestBuilder.post(uri)
-                .setVersion(HttpVersion.HTTP_1_1)
-                .setHeader("Content-Type", ContentType.APPLICATION_JSON.toString())
-                .setBody(requestBody, ContentType.APPLICATION_JSON)
-                .setRequestConfig(requestConfig)
-                .build();
-        BoundedResponseConsumer consumer = new BoundedResponseConsumer(deadlineNanos);
-        Future<Response> future;
+        boolean submitted = false;
+        Future<Response> future = null;
         try {
-            future = client.execute(request, consumer, new FutureCallback<>() {
-                @Override
-                public void completed(Response result) {
-                    releasePermit.run();
+            remaining = remainingNanos(deadlineNanos);
+            if (remaining <= 0) {
+                throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
+            }
+            try {
+                if (!exchangePermits.tryAcquire(remaining, TimeUnit.NANOSECONDS)) {
+                    throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
                 }
-
-                @Override
-                public void failed(Exception ex) {
-                    releasePermit.run();
+                exchangeAcquired.set(true);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw BusinessException.of(503, "COPILOT_TRANSPORT_INTERRUPTED");
+            }
+            remaining = remainingNanos(deadlineNanos);
+            if (remaining <= 0) {
+                throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
+            }
+            RequestConfig requestConfig = RequestConfig.custom()
+                    .setRedirectsEnabled(false)
+                    .setHardCancellationEnabled(true)
+                    .setContentCompressionEnabled(false)
+                    .setConnectionRequestTimeout(Timeout.ofNanoseconds(remaining))
+                    .setConnectTimeout(Timeout.ofNanoseconds(remaining))
+                    .setResponseTimeout(Timeout.ofNanoseconds(remaining))
+                    .build();
+            SimpleHttpRequest request = SimpleRequestBuilder.post(uri)
+                    .setVersion(HttpVersion.HTTP_1_1)
+                    .setHeader("Content-Type", ContentType.APPLICATION_JSON.toString())
+                    .setBody(requestBody, ContentType.APPLICATION_JSON)
+                    .setRequestConfig(requestConfig)
+                    .build();
+            BoundedResponseConsumer consumer = new BoundedResponseConsumer(deadlineNanos);
+            remaining = remainingNanos(deadlineNanos);
+            if (remaining <= 0) {
+                throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
+            }
+            activeExchanges.incrementAndGet();
+            activeCounted.set(true);
+            try {
+                // Recheck immediately before execute: serialization and admission consume the same deadline.
+                if (remainingNanos(deadlineNanos) <= 0) {
+                    throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
                 }
+                future = client.execute(SimpleRequestProducer.create(request), consumer, new FutureCallback<>() {
+                    @Override
+                    public void completed(Response result) {
+                        releasePermit.run();
+                    }
 
-                @Override
-                public void cancelled() {
-                    releasePermit.run();
-                }
-            });
-        } catch (RuntimeException ex) {
-            releasePermit.run();
-            throw BusinessException.of(503, "COPILOT_TRANSPORT_FAILED");
-        }
+                    @Override
+                    public void failed(Exception ex) {
+                        releasePermit.run();
+                    }
 
-        try {
+                    @Override
+                    public void cancelled() {
+                        releasePermit.run();
+                    }
+                });
+                submitted = true;
+            } catch (BusinessException ex) {
+                throw ex;
+            } catch (RuntimeException ex) {
+                throw BusinessException.of(503, "COPILOT_TRANSPORT_FAILED");
+            }
+
             remaining = remainingNanos(deadlineNanos);
             if (remaining <= 0) {
                 future.cancel(true);
@@ -189,6 +220,10 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
                 throw BusinessException.of(bounded.code, bounded.reasonCode);
             }
             throw BusinessException.of(503, "COPILOT_TRANSPORT_FAILED");
+        } finally {
+            if (!submitted) {
+                releasePermit.run();
+            }
         }
     }
 
@@ -230,7 +265,11 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
     @Override
     public void close() {
         started = false;
-        client.close();
+        try {
+            client.close();
+        } catch (IOException ex) {
+            throw new IllegalStateException("Copilot transport shutdown failed", ex);
+        }
     }
 
     public record Response(int statusCode, String contentType, byte[] body) {
@@ -279,17 +318,13 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
         }
 
         @Override
-        protected void completed() {
-        }
-
-        @Override
         protected Response buildResult() {
             return new Response(statusCode, contentType, output.toByteArray());
         }
 
         @Override
-        public void failed(Exception cause) {
-            super.failed(cause);
+        protected void releaseResources() {
+            output.reset();
         }
     }
 

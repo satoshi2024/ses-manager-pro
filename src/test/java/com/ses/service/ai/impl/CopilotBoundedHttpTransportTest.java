@@ -15,6 +15,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -37,6 +38,14 @@ class CopilotBoundedHttpTransportTest {
 
     @Test
     void missingAndExpiredSnapshotsFailBeforeSending() throws Exception {
+        AtomicInteger requestsReceived = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), 0), 0);
+        server.createContext("/", exchange -> {
+            requestsReceived.incrementAndGet();
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
         transport = newTransport(CopilotDnsSnapshotResolver.DnsSnapshot.empty(), Clock.systemUTC());
         transport.start();
         BusinessException missing = assertThrows(BusinessException.class,
@@ -52,6 +61,7 @@ class CopilotBoundedHttpTransportTest {
                 () -> transport.post(uri(), request(), deadlineAfter(2, TimeUnit.SECONDS)));
         assertEquals("COPILOT_DNS_UNAVAILABLE", stale.getMessage());
         assertEquals(0, transport.activeExchangeCount());
+        assertEquals(0, requestsReceived.get());
     }
 
     @Test
@@ -85,6 +95,26 @@ class CopilotBoundedHttpTransportTest {
         CopilotBoundedHttpTransport.Response recovered = transport.post(uri("/"), request(),
                 deadlineAfter(3, TimeUnit.SECONDS));
         assertEquals(200, recovered.statusCode());
+    }
+
+    @Test
+    void expiredDeadlineDoesNotReachServer() throws Exception {
+        AtomicInteger requestsReceived = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), 0), 0);
+        server.createContext("/", exchange -> {
+            requestsReceived.incrementAndGet();
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+        transport = newTransport(snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC());
+        transport.start();
+
+        BusinessException expired = assertThrows(BusinessException.class,
+                () -> transport.post(uri(), request(), System.nanoTime() - 1));
+        assertEquals("COPILOT_DEADLINE_EXCEEDED", expired.getMessage());
+        assertEquals(0, requestsReceived.get());
+        assertEquals(0, transport.activeExchangeCount());
     }
 
     private CopilotBoundedHttpTransport newTransport(CopilotDnsSnapshotResolver.DnsSnapshot snapshot,
