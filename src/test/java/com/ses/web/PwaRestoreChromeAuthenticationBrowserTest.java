@@ -422,6 +422,7 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                 }
             }
             String recoveryUrl = base + "/api/my/session-context";
+            int successfulWorkerFetches = 0;
             for (String session : new HashSet<>(liveSessions)) {
                 try {
                     if (!browser.isSessionAttached(session)) continue;
@@ -463,6 +464,7 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                                 + "," + workerFetchDiagnostic(workerFetch, currentType, workerUrl.equals(currentUrl))
                                 + ",networkFailure=" + networkFailure);
                     }
+                    successfulWorkerFetches++;
                 } catch (Throwable fetchFailure) {
                     Throwable classified = fetchFailure instanceof SafeWorkerFetchFailure
                             ? fetchFailure : new IllegalStateException("worker recovery category="
@@ -470,6 +472,12 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                     if (cleanupFailure == null) cleanupFailure = classified;
                     else cleanupFailure.addSuppressed(classified);
                 }
+            }
+            if (successfulWorkerFetches == 0) {
+                IllegalStateException noWorkerProof = new IllegalStateException(
+                        "復旧後に登録scriptURLへ一致するService Worker session内fetch成功を確認できませんでした: successfulFetches=0");
+                if (cleanupFailure == null) cleanupFailure = noWorkerProof;
+                else cleanupFailure.addSuppressed(noWorkerProof);
             }
             for (String session : new HashSet<>(liveSessions)) {
                 try {
