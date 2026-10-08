@@ -9,6 +9,7 @@ import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.async.CloseableHttpAsyncClient;
 import org.apache.hc.client5.http.impl.async.HttpAsyncClients;
+import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManager;
 import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManagerBuilder;
 import org.apache.hc.client5.http.protocol.HttpClientContext;
 import org.apache.hc.core5.concurrent.FutureCallback;
@@ -53,6 +54,7 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
     private final Semaphore exchangePermits = new Semaphore(MAX_ACTIVE_EXCHANGES, true);
     private final Semaphore admissionPermits = new Semaphore(MAX_ADMITTED_EXCHANGES, true);
     private final AtomicInteger activeExchanges = new AtomicInteger();
+    private final PoolingAsyncClientConnectionManager connectionManager;
     private final CloseableHttpAsyncClient client;
     private volatile boolean started;
 
@@ -76,7 +78,7 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
         this.testLoopbackMode = testLoopbackMode;
         this.testAdmissionObserver = testAdmissionObserver;
         this.testSubmissionObserver = testSubmissionObserver;
-        var connectionManager = PoolingAsyncClientConnectionManagerBuilder.create()
+        this.connectionManager = PoolingAsyncClientConnectionManagerBuilder.create()
                 .setDnsResolver(dnsResolver)
                 .setMaxConnTotal(MAX_ACTIVE_EXCHANGES)
                 .setMaxConnPerRoute(4)
@@ -279,6 +281,10 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
 
     public int activeExchangeCount() {
         return activeExchanges.get();
+    }
+
+    int leasedConnectionCount() {
+        return connectionManager.getTotalStats().getLeased();
     }
 
     private void validateDestination(URI uri) {
