@@ -13,6 +13,13 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import jakarta.servlet.Filter;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,6 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Import(PwaRestoreChromeAuthenticationBrowserTest.ProbeFilterConfiguration.class)
 class PwaRestoreChromeAuthenticationBrowserTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String PASSWORD = "chrome-restore-password";
@@ -49,6 +57,33 @@ class PwaRestoreChromeAuthenticationBrowserTest {
     @Autowired private JdbcTemplate jdbc;
     private Long userId;
     private Long engineerId;
+    private static final Map<String, ProbeCounts> PROBES = new ConcurrentHashMap<>();
+
+    private static final class ProbeCounts {
+        final AtomicInteger arrivals = new AtomicInteger();
+        final AtomicInteger successful = new AtomicInteger();
+    }
+
+    @TestConfiguration
+    static class ProbeFilterConfiguration {
+        @Bean
+        FilterRegistrationBean<Filter> nf04RequestProbeFilter() {
+            FilterRegistrationBean<Filter> registration = new FilterRegistrationBean<>();
+            registration.setFilter((request, response, chain) -> {
+                jakarta.servlet.http.HttpServletRequest http = (jakarta.servlet.http.HttpServletRequest) request;
+                String token = http.getParameter("nf04_offline_probe");
+                ProbeCounts counts = http.getRequestURI().equals("/my/timesheet") && token != null
+                        ? PROBES.get(token) : null;
+                if (counts != null) counts.arrivals.incrementAndGet();
+                chain.doFilter(request, response);
+                if (counts != null && response instanceof jakarta.servlet.http.HttpServletResponse httpResponse
+                        && httpResponse.getStatus() < 400) counts.successful.incrementAndGet();
+            });
+            registration.addUrlPatterns("/my/timesheet");
+            registration.setOrder(Integer.MIN_VALUE);
+            return registration;
+        }
+    }
 
     @AfterEach
     void cleanup() {
@@ -152,6 +187,7 @@ class PwaRestoreChromeAuthenticationBrowserTest {
     private static OfflineNavigationProof proveWorkerOfflineNavigation(CdpBrowser browser, String base)
             throws Exception {
         String token = UUID.randomUUID().toString().replace("-", "");
+        ProbeCounts probeCounts = new ProbeCounts();
         String businessUrl = base + "/my/timesheet?nf04_offline_probe=" + token;
         String workerUrl = base + "/service-worker.js";
         JsonNode registration = JSON.readTree(browser.evaluateStrict("(async()=>{const r=await navigator.serviceWorker.getRegistration();"
@@ -185,6 +221,7 @@ class PwaRestoreChromeAuthenticationBrowserTest {
         Set<String> configuredSessions = new HashSet<>();
         Throwable failure = null;
         OfflineNavigationProof proof = null;
+        PROBES.put(token, probeCounts);
         try {
             JsonNode attached = browser.sendBrowser("Target.attachToTarget", Map.of("targetId", workerTargetId, "flatten", true));
             String initialSession = attached.path("sessionId").asText();
@@ -201,7 +238,8 @@ class PwaRestoreChromeAuthenticationBrowserTest {
             assertThat(browser.waitForStrict("!navigator.onLine", Duration.ofSeconds(10))).isTrue();
             JsonNode closed = browser.sendBrowser("Target.closeTarget", Map.of("targetId", workerTargetId));
             if (!closed.path("success").asBoolean()) throw new IllegalStateException("worker targetを停止できませんでした");
-            browser.navigate(businessUrl);
+            var navigationFuture = browser.startNavigation(businessUrl);
+            String navigationLoaderId = null;
 
             long deadline = System.nanoTime() + Duration.ofSeconds(25).toNanos();
             String restartedTargetId = null;
@@ -210,6 +248,13 @@ class PwaRestoreChromeAuthenticationBrowserTest {
             boolean mainFrameNavigated = false;
             boolean shellObserved = false;
             while (System.nanoTime() < deadline && !(workerFailureObserved && pageResponseObserved && mainFrameNavigated)) {
+                if (navigationLoaderId == null && navigationFuture.isDone()) {
+                    JsonNode nav = navigationFuture.get(1, java.util.concurrent.TimeUnit.SECONDS);
+                    String errorText = nav.path("errorText").asText("");
+                    if (!errorText.isBlank()) throw new IllegalStateException("business navigationに失敗: " + errorText);
+                    navigationLoaderId = nav.path("loaderId").asText("");
+                    if (navigationLoaderId.isBlank()) throw new IllegalStateException("Page.navigateがloaderIdを返しませんでした: " + nav);
+                }
                 List<JsonNode> events = browser.protocolEvents();
                 for (int i = eventBoundary; i < events.size(); i++) {
                     JsonNode event = events.get(i);
@@ -250,6 +295,7 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                     }
                     if ("Network.requestWillBeSent".equals(method) && pageTargetId.equals(eventTarget)
                             && "Document".equals(params.path("type").asText())
+                            && navigationLoaderId != null && navigationLoaderId.equals(params.path("loaderId").asText())
                             && mainFrameId.equals(params.path("frameId").asText())
                             && businessUrl.equals(params.path("request").path("url").asText())) {
                         String requestId = params.path("requestId").asText();
@@ -265,6 +311,7 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                     }
                     if ("Page.frameNavigated".equals(method) && pageTargetId.equals(eventTarget)
                             && mainFrameId.equals(params.path("frame").path("id").asText())
+                            && navigationLoaderId != null && navigationLoaderId.equals(params.path("frame").path("loaderId").asText())
                             && businessUrl.equals(params.path("frame").path("url").asText())) {
                         mainFrameNavigated = true;
                     }
@@ -283,13 +330,18 @@ class PwaRestoreChromeAuthenticationBrowserTest {
             if (!workerFailureObserved || !pageResponseObserved || !shellObserved) {
                 throw new IllegalStateException("同一business navigationのworker実通信offline証跡が不足: " + proof);
             }
+            if (navigationFuture.isDone()) {
+                JsonNode nav = navigationFuture.get(1, java.util.concurrent.TimeUnit.SECONDS);
+                if (!nav.path("errorText").asText("").isBlank()) throw new IllegalStateException("navigation errorText: " + nav);
+                if (navigationLoaderId == null || !navigationLoaderId.equals(nav.path("loaderId").asText()))
+                    throw new IllegalStateException("navigation loaderIdが観測証跡と一致しません: " + nav);
+            } else throw new IllegalStateException("Page.navigate応答が完了しませんでした");
+            assertThat(probeCounts.arrivals.get()).as("一意token付きtimesheet要求のServlet到達数").isZero();
+            assertThat(probeCounts.successful.get()).as("一意token付きtimesheet成功応答数").isZero();
         } catch (Throwable thrown) {
             failure = thrown;
         } finally {
             Throwable cleanupFailure = null;
-            try { browser.sendBrowser("Target.setAutoAttach", Map.of("autoAttach", false,
-                    "waitForDebuggerOnStart", false, "flatten", true)); }
-            catch (Throwable thrown) { cleanupFailure = thrown; }
             List<JsonNode> cleanupEvents = browser.protocolEvents();
             for (int i = eventBoundary; i < cleanupEvents.size(); i++) {
                 JsonNode event = cleanupEvents.get(i);
@@ -312,11 +364,26 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                     browser.sendOnSession(session, "Network.emulateNetworkConditions", Map.of("offline", false,
                             "latency", 0, "downloadThroughput", -1, "uploadThroughput", -1, "connectionType", "wifi"));
                     if (pausedSessions.contains(session)) browser.sendOnSession(session, "Runtime.runIfWaitingForDebugger", Map.of());
+                    browser.sendOnSession(session, "Runtime.enable", Map.of());
+                    JsonNode workerFetch = browser.sendOnSession(session, "Runtime.evaluate", Map.of(
+                            "expression", "fetch('/api/my/session-context',{credentials:'include',cache:'no-store'})"
+                                    + ".then(async r=>({status:r.status,body:await r.json()}))",
+                            "returnByValue", true, "awaitPromise", true));
+                    JsonNode fetchValue = workerFetch.path("result").path("value");
+                    if (fetchValue.path("status").asInt() != 200
+                            || fetchValue.path("body").path("code").asInt() != 200) {
+                        throw new IllegalStateException("復旧後のService Worker内fetchが成功しません: " + fetchValue);
+                    }
                     browser.sendBrowser("Target.detachFromTarget", Map.of("sessionId", session));
                 } catch (Throwable thrown) {
                     if (cleanupFailure == null) cleanupFailure = thrown; else cleanupFailure.addSuppressed(thrown);
                 }
             }
+            try { browser.sendBrowser("Target.setAutoAttach", Map.of("autoAttach", false,
+                    "waitForDebuggerOnStart", false, "flatten", true)); }
+            catch (Throwable thrown) { if (cleanupFailure == null) cleanupFailure = thrown; else cleanupFailure.addSuppressed(thrown); }
+            try { browser.sendBrowser("Target.setDiscoverTargets", Map.of("discover", false)); }
+            catch (Throwable thrown) { if (cleanupFailure == null) cleanupFailure = thrown; else cleanupFailure.addSuppressed(thrown); }
             try {
                 JsonNode bootstrap = JSON.readTree(browser.evaluateStrict("(async()=>{const r=await fetch('/api/my/session-context',"
                         + "{method:'GET',cache:'no-store',credentials:'same-origin',headers:{'Accept':'application/json'}});"
@@ -328,6 +395,7 @@ class PwaRestoreChromeAuthenticationBrowserTest {
             if (cleanupFailure != null) {
                 if (failure == null) failure = cleanupFailure; else failure.addSuppressed(cleanupFailure);
             }
+            PROBES.remove(token);
         }
         if (failure != null) {
             if (failure instanceof Exception exception) throw exception;
