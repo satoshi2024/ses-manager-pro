@@ -96,7 +96,7 @@ class PwaRestoreServletBoundaryIntegrationTest {
     void realLoginCsrfAndListenerRegistrationAreExercisedThroughServletContainer() throws Exception {
         Browser browser = login();
         String scope = userScope(browser);
-        String nonce = "AAAAAAAAAAAAAAAAAAAAAA";
+        String nonce = documentNonce(1);
         HttpResponse<String> issued = postJson(browser, "/api/my/pwa/restore/reauthenticate", ""
                 + "{\"password\":\"" + PASSWORD + "\",\"documentNonce\":\"" + nonce
                 + "\",\"userScope\":\"" + scope + "\"}", true);
@@ -123,7 +123,7 @@ class PwaRestoreServletBoundaryIntegrationTest {
     void csrfなしを拒否しcsrf付き再認証後は実confirmでpermitを返す() throws Exception {
         Browser browser = login();
         String scope = userScope(browser);
-        String nonce = "CCCCCCCCCCCCCCCCCCCCCC";
+        String nonce = documentNonce(2);
         String reauthBody = "{\"password\":\"" + PASSWORD + "\",\"documentNonce\":\"" + nonce
                 + "\",\"userScope\":\"" + scope + "\"}";
         HttpResponse<String> noCsrfReauth = postJson(browser, "/api/my/pwa/restore/reauthenticate", reauthBody, false);
@@ -148,7 +148,7 @@ class PwaRestoreServletBoundaryIntegrationTest {
     void logoutCompletedDuringConfirmIdentityReadRejectsWithRestoreBusinessCode() throws Exception {
         Browser browser = login();
         String scope = userScope(browser);
-        String nonce = "BBBBBBBBBBBBBBBBBBBBBB";
+        String nonce = documentNonce(3);
         HttpResponse<String> issued = postJson(browser, "/api/my/pwa/restore/reauthenticate", ""
                 + "{\"password\":\"" + PASSWORD + "\",\"documentNonce\":\"" + nonce
                 + "\",\"userScope\":\"" + scope + "\"}", true);
@@ -197,6 +197,11 @@ class PwaRestoreServletBoundaryIntegrationTest {
         }
     }
 
+    private static String documentNonce(int seed) {
+        byte[] bytes = new byte[16];
+        for (int index = 0; index < bytes.length; index++) bytes[index] = (byte) (seed + index);
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
     private Browser login() throws Exception {
         CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
         HttpClient client = HttpClient.newBuilder().cookieHandler(cookies)
