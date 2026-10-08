@@ -1,17 +1,20 @@
 package com.ses.importcenter.metadata;
 
+import com.ses.common.exception.BusinessException;
 import com.ses.service.DocumentService;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.TransactionSystemException;
 
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
@@ -55,33 +58,150 @@ class ImportValidationLeaseServiceTest {
 
     @Test
     void acquireRenewExpiredTakeoverAndResponseLossAreFenced() {
+        var lostManager = new CommitResponseLostManager(jdbc.getDataSource());
         var lost = new ImportValidationLeaseService(jdbc, mockAuthorization(), mock(DocumentService.class),
-                new CommitResponseLostManager(jdbc.getDataSource()));
+                lostManager);
         var operation = lost.beginAcquire(jobId);
         assertThrows(TransactionSystemException.class, () -> lost.acquire(operation));
+        var acquiredBeforeRetry = state();
         var grant = lost.acquire(operation);
+        assertEquals(acquiredBeforeRetry, state());
         assertEquals(1L, generation());
-        assertThrows(RuntimeException.class, () -> service.renew(grant));
-        assertThrows(RuntimeException.class, () -> lost.acquire(lost.beginAcquire(jobId)));
+        assertThrows(BusinessException.class, () -> service.renew(grant));
+        assertThrows(BusinessException.class, () -> lost.acquire(lost.beginAcquire(jobId)));
+        assertTrue(jdbc.queryForObject("SELECT TIMESTAMPDIFF(SECOND,CURRENT_TIMESTAMP(6),lease_expires_at) BETWEEN 25 AND 30 FROM t_import_job WHERE tenant_id=? AND id=?", Boolean.class, context.tenantId(), jobId));
 
+        lostManager.loseNextCommit();
+        assertThrows(TransactionSystemException.class, () -> lost.renew(grant));
+        var renewedBeforeRetry = state();
         var renewed = lost.renew(grant);
+        assertEquals(renewedBeforeRetry, state());
         assertEquals(1L, generation());
         assertTrue(jdbc.queryForObject("SELECT lease_expires_at > CURRENT_TIMESTAMP(6) FROM t_import_job WHERE tenant_id=? AND id=?", Boolean.class, context.tenantId(), jobId));
         jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?", context.tenantId(), jobId);
-        var takeover = lost.beginTakeover(renewed);
-        lost.takeOver(takeover);
-        lost.takeOver(takeover);
+        var expiredState = state();
+        assertThrows(BusinessException.class, () -> lost.renew(renewed));
+        assertEquals(expiredState, state());
+        var restarted = new ImportValidationLeaseService(jdbc, mockAuthorization(), mock(DocumentService.class),
+                new CommitResponseLostManager(jdbc.getDataSource()));
+        var takeover = restarted.beginTakeover(jobId);
+        assertThrows(TransactionSystemException.class, () -> restarted.takeOver(takeover));
+        var takeoverBeforeRetry = state();
+        restarted.takeOver(takeover);
+        assertEquals(takeoverBeforeRetry, state());
+        restarted.takeOver(takeover);
         assertEquals(2L, generation());
-        assertThrows(RuntimeException.class, () -> lost.renew(renewed));
+        var takenOverState = state();
+        assertThrows(BusinessException.class, () -> lost.renew(renewed));
+        assertEquals(takenOverState, state());
     }
 
     @Test
     void nonMappedJobOrRunPointerCannotAcquire() {
         jdbc.update("UPDATE t_import_job SET state='BLOCKED' WHERE tenant_id=? AND id=?", context.tenantId(), jobId);
-        assertThrows(RuntimeException.class, () -> service.beginAcquire(jobId));
-        jdbc.update("UPDATE t_import_job SET state='MAPPED',current_validation_run_id=12 WHERE tenant_id=? AND id=?", context.tenantId(), jobId);
-        assertThrows(RuntimeException.class, () -> service.beginAcquire(jobId));
-        assertEquals(0L, generation());
+        assertEquals(state(), assertRejectedWithoutWrite(() -> service.beginAcquire(jobId)));
+        jdbc.update("UPDATE t_import_job SET state='MAPPED',active_validation_run_id=12 WHERE tenant_id=? AND id=?", context.tenantId(), jobId);
+        assertEquals(state(), assertRejectedWithoutWrite(() -> service.beginAcquire(jobId)));
+        jdbc.update("UPDATE t_import_job SET active_validation_run_id=NULL,current_validation_run_id=12 WHERE tenant_id=? AND id=?", context.tenantId(), jobId);
+        assertEquals(state(), assertRejectedWithoutWrite(() -> service.beginAcquire(jobId)));
+    }
+
+    @Test
+    void sourceAndDocumentSnapshotDriftAreRejectedWithoutLeaseWrites() {
+        var op = service.beginAcquire(jobId);
+        var before = state();
+        jdbc.update("UPDATE t_import_source_system SET version_no=version_no+1 WHERE tenant_id=? AND id=2", context.tenantId());
+        var sourceOp = op;
+        assertThrows(BusinessException.class, () -> service.acquire(sourceOp));
+        assertEquals(before, state());
+
+        setUp();
+        op = service.beginAcquire(jobId);
+        before = state();
+        jdbc.update("UPDATE t_import_source_system SET status='DISABLED' WHERE tenant_id=? AND id=2", context.tenantId());
+        var inactiveSourceOp = op;
+        var inactiveSourceState = state();
+        assertEquals(inactiveSourceState, assertRejectedWithoutWrite(() -> service.acquire(inactiveSourceOp)));
+
+        setUp();
+        op = service.beginAcquire(jobId);
+        before = state();
+        jdbc.update("UPDATE t_document SET legal_hold_flag=1 WHERE tenant_id=? AND id=3", context.tenantId());
+        var holdOp = op;
+        var holdBefore = before;
+        assertEquals(holdBefore, assertRejectedWithoutWrite(() -> service.acquire(holdOp)));
+
+        setUp();
+        op = service.beginAcquire(jobId);
+        before = state();
+        jdbc.update("UPDATE t_document_version SET sha256=? WHERE tenant_id=? AND id=4", HexFormat.of().formatHex(hash("different")), context.tenantId());
+        var versionOp = op;
+        var versionBefore = before;
+        assertEquals(versionBefore, assertRejectedWithoutWrite(() -> service.acquire(versionOp)));
+
+        setUp();
+        op = service.beginAcquire(jobId);
+        before = state();
+        jdbc.update("UPDATE t_import_job SET document_sha256=? WHERE tenant_id=? AND id=?", hash("different document hash"), context.tenantId(), jobId);
+        var documentHashOp = op;
+        var documentHashBefore = state();
+        assertEquals(documentHashBefore, assertRejectedWithoutWrite(() -> service.acquire(documentHashOp)));
+        assertNotEquals(before, documentHashBefore);
+
+        setUp();
+        op = service.beginAcquire(jobId);
+        before = state();
+        jdbc.update("DELETE FROM t_document_link WHERE tenant_id=? AND target_id=?", context.tenantId(), jobId);
+        var linkOp = op;
+        var linkBefore = before;
+        assertEquals(linkBefore, assertRejectedWithoutWrite(() -> service.acquire(linkOp)));
+
+        setUp();
+        op = service.beginAcquire(jobId);
+        before = state();
+        jdbc.update("UPDATE t_import_job SET version_no=version_no+1 WHERE tenant_id=? AND id=?", context.tenantId(), jobId);
+        var jobOp = op;
+        var jobBefore = state();
+        assertEquals(jobBefore, assertRejectedWithoutWrite(() -> service.acquire(jobOp)));
+        assertNotEquals(before.version(), jobBefore.version());
+    }
+
+    @Test
+    void authRevocationAfterLocksAndImmediatelyBeforeCasWritesNothing() {
+        for (int deniedCall : new int[]{3, 4}) {
+            var auth = mock(ImportMetadataAuthorizationService.class);
+            var calls = new AtomicInteger();
+            when(auth.requireCurrentAuthorization()).thenAnswer(invocation -> {
+                if (calls.incrementAndGet() == deniedCall) throw BusinessException.of(403, "error.forbidden");
+                return context;
+            });
+            var guarded = new ImportValidationLeaseService(jdbc, auth, mock(DocumentService.class),
+                    new DataSourceTransactionManager(jdbc.getDataSource()));
+            var op = guarded.beginAcquire(jobId);
+            var before = state();
+            assertThrows(BusinessException.class, () -> guarded.acquire(op));
+            assertEquals(deniedCall, calls.get());
+            assertEquals(before, state());
+            setUp();
+        }
+    }
+
+    @Test
+    void failedLeaseUpdateRollsBackOwnerGenerationExpiryAndVersion() {
+        jdbc.execute("ALTER TABLE t_import_job ADD CONSTRAINT ck_test_reject_lease CHECK (lease_owner IS NULL)");
+        var op = service.beginAcquire(jobId);
+        var before = state();
+        assertThrows(DataIntegrityViolationException.class, () -> service.acquire(op));
+        assertEquals(before, state());
+    }
+
+    @Test
+    void unexpiredLeaseCannotBeTakenOver() {
+        var grant = service.acquire(service.beginAcquire(jobId));
+        var before = state();
+        assertThrows(BusinessException.class, () -> service.beginTakeover(jobId));
+        assertEquals(before, state());
+        assertNotNull(grant);
     }
 
     private ImportMetadataAuthorizationService mockAuthorization() {
@@ -93,6 +213,21 @@ class ImportValidationLeaseServiceTest {
     private long generation() {
         return jdbc.queryForObject("SELECT lease_generation FROM t_import_job WHERE tenant_id=? AND id=?", Long.class, context.tenantId(), jobId);
     }
+
+    private LeaseState state() {
+        return jdbc.query("SELECT lease_owner,lease_generation,lease_expires_at,version_no FROM t_import_job WHERE tenant_id=? AND id=?",
+                rs -> rs.next() ? new LeaseState(rs.getString(1), rs.getLong(2), rs.getTimestamp(3), rs.getLong(4)) : null,
+                context.tenantId(), jobId);
+    }
+
+    private LeaseState assertRejectedWithoutWrite(Runnable action) {
+        var before = state();
+        assertThrows(BusinessException.class, action::run);
+        assertEquals(before, state());
+        return before;
+    }
+
+    private record LeaseState(String owner, long generation, java.sql.Timestamp expiresAt, long version) { }
 
     private static void createSchema(JdbcTemplate j) {
         j.execute("CREATE TABLE t_import_source_system(tenant_id VARCHAR(100),id BIGINT,version_no BIGINT,status VARCHAR(16),PRIMARY KEY(tenant_id,id))");
@@ -111,6 +246,7 @@ class ImportValidationLeaseServiceTest {
     private static final class CommitResponseLostManager extends DataSourceTransactionManager {
         private final AtomicBoolean lose = new AtomicBoolean(true);
         private CommitResponseLostManager(javax.sql.DataSource source) { super(source); }
+        private void loseNextCommit() { lose.set(true); }
         @Override protected void doCommit(org.springframework.transaction.support.DefaultTransactionStatus status) {
             super.doCommit(status);
             if (lose.compareAndSet(true, false)) throw new TransactionSystemException("commit response lost (test)");

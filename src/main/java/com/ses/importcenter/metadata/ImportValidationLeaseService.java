@@ -39,19 +39,20 @@ public class ImportValidationLeaseService {
         ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
         Snapshot snapshot = snapshot(context, jobId);
         if (snapshot.owner() != null || snapshot.expiresAt() != null) conflict();
-        return new AcquireOperation(serviceInstanceId, UUID.randomUUID().toString(), UUID.randomUUID().toString(), snapshot);
+        String operationId = UUID.randomUUID().toString();
+        return new AcquireOperation(serviceInstanceId, operationId, workerId(operationId), snapshot);
     }
 
-    /** expired grantからだけtakeover試行を作れる。worker/operation identityはserver発行。 */
-    public TakeoverOperation beginTakeover(LeaseGrant expiredGrant) {
-        if (expiredGrant == null || !serviceInstanceId.equals(expiredGrant.serviceInstanceId)) conflict();
+    /** jobIdと現在の権限だけから、旧worker不在でも期限切れleaseを回復する。 */
+    public TakeoverOperation beginTakeover(long jobId) {
         ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
-        requireActor(expiredGrant.snapshot.context(), context);
-        Snapshot current = snapshot(context, expiredGrant.snapshot.jobId());
-        if (!sameInput(expiredGrant.snapshot, current) || current.generation() != expiredGrant.generation
-                || !expiredGrant.workerId.equals(current.owner()) || current.expiresAt() == null) conflict();
-        return new TakeoverOperation(serviceInstanceId, UUID.randomUUID().toString(), UUID.randomUUID().toString(),
-                expiredGrant.snapshot, expiredGrant.workerId, expiredGrant.generation);
+        Snapshot current = snapshot(context, jobId);
+        java.sql.Timestamp now = jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)", java.sql.Timestamp.class);
+        if (current.owner() == null || current.expiresAt() == null || now == null
+                || current.expiresAt().after(now)) conflict();
+        String operationId = UUID.randomUUID().toString();
+        return new TakeoverOperation(serviceInstanceId, operationId, workerId(operationId), current,
+                current.owner(), current.generation());
     }
 
     public LeaseGrant acquire(AcquireOperation operation) {
@@ -92,11 +93,13 @@ public class ImportValidationLeaseService {
         if (dbNow == null) conflict();
         if (mode == Mode.ACQUIRE && worker.equals(job.owner()) && job.generation() == expected.generation() + 1
                 && job.expiresAt() != null && job.expiresAt().after(dbNow)
+                && job.version() > expected.jobVersion()
                 && sameInput(expected, current)) {
             return new LeaseGrant(serviceInstanceId, expected, worker, operationId, job.generation());
         }
         if (mode == Mode.TAKEOVER && worker.equals(job.owner()) && job.generation() == expectedGeneration + 1
                 && job.expiresAt() != null && job.expiresAt().after(dbNow)
+                && job.version() > expected.jobVersion()
                 && sameInput(expected, current)) {
             return new LeaseGrant(serviceInstanceId, expected, worker, operationId, job.generation());
         }
@@ -106,9 +109,12 @@ public class ImportValidationLeaseService {
         requireActor(expected.context(), finalContext);
         java.sql.Timestamp finalNow = jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)", java.sql.Timestamp.class);
         if (finalNow == null) conflict();
+        if (mode == Mode.TAKEOVER && expected.expiresAt().after(finalNow)) conflict();
+        if (mode == Mode.RENEW && !job.expiresAt().after(finalNow)) conflict();
         int changed;
         if (mode == Mode.ACQUIRE) {
-            if (job.owner() != null || job.expiresAt() != null || job.generation() != expected.generation()) conflict();
+            if (job.owner() != null || job.expiresAt() != null || job.generation() != expected.generation()
+                    || job.version() != expected.jobVersion()) conflict();
             changed = jdbc.update("""
                     UPDATE t_import_job SET lease_owner=?, lease_generation=lease_generation+1,
                       lease_expires_at=TIMESTAMPADD(SECOND, ?, CURRENT_TIMESTAMP(6)), version_no=version_no+1,
@@ -124,19 +130,20 @@ public class ImportValidationLeaseService {
                     expected.documentVersionId(), expected.documentVersionNo(), expected.documentSha());
         } else if (mode == Mode.TAKEOVER) {
             if (!previousOwner.equals(job.owner()) || job.generation() != expectedGeneration
-                    || job.expiresAt() == null || job.expiresAt().after(dbNow)) conflict();
+                    || job.expiresAt() == null || job.expiresAt().after(dbNow)
+                    || job.version() != expected.jobVersion()) conflict();
             changed = jdbc.update("""
                     UPDATE t_import_job SET lease_owner=?, lease_generation=lease_generation+1,
                       lease_expires_at=TIMESTAMPADD(SECOND, ?, CURRENT_TIMESTAMP(6)), version_no=version_no+1,
                       updated_at=CURRENT_TIMESTAMP(6)
                     WHERE tenant_id=? AND id=? AND version_no=? AND lease_generation=? AND lease_owner=?
-                      AND lease_expires_at<=CURRENT_TIMESTAMP(6) AND state='MAPPED'
+                      AND lease_expires_at=? AND lease_expires_at<=CURRENT_TIMESTAMP(6) AND state='MAPPED'
                       AND active_validation_run_id IS NULL AND current_validation_run_id IS NULL
                       AND source_system_id=? AND source_version=? AND mapping_id=? AND mapping_version=?
                       AND mapping_sha256=? AND source_sha256=? AND document_id=? AND document_version_id=?
                       AND document_version_no=? AND document_sha256=?
                     """, worker, LEASE_SECONDS, context.tenantId(), expected.jobId(), job.version(),
-                    expectedGeneration, previousOwner, expected.sourceId(), expected.sourceVersion(),
+                    expectedGeneration, previousOwner, expected.expiresAt(), expected.sourceId(), expected.sourceVersion(),
                     expected.mappingId(), expected.mappingVersion(), expected.mappingSha(), expected.sourceSha(),
                     expected.documentId(), expected.documentVersionId(), expected.documentVersionNo(), expected.documentSha());
         } else {
@@ -146,13 +153,13 @@ public class ImportValidationLeaseService {
                     UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND, ?, CURRENT_TIMESTAMP(6)),
                       version_no=version_no+1, updated_at=CURRENT_TIMESTAMP(6)
                     WHERE tenant_id=? AND id=? AND version_no=? AND lease_generation=? AND lease_owner=?
-                      AND lease_expires_at>CURRENT_TIMESTAMP(6) AND state='MAPPED'
+                      AND lease_expires_at=? AND lease_expires_at>CURRENT_TIMESTAMP(6) AND state='MAPPED'
                       AND active_validation_run_id IS NULL AND current_validation_run_id IS NULL
                       AND source_system_id=? AND source_version=? AND mapping_id=? AND mapping_version=?
                       AND mapping_sha256=? AND source_sha256=? AND document_id=? AND document_version_id=?
                       AND document_version_no=? AND document_sha256=?
                     """, LEASE_SECONDS, context.tenantId(), expected.jobId(), job.version(), expectedGeneration,
-                    worker, expected.sourceId(), expected.sourceVersion(), expected.mappingId(), expected.mappingVersion(),
+                    worker, job.expiresAt(), expected.sourceId(), expected.sourceVersion(), expected.mappingId(), expected.mappingVersion(),
                     expected.mappingSha(), expected.sourceSha(), expected.documentId(), expected.documentVersionId(),
                     expected.documentVersionNo(), expected.documentSha());
         }
@@ -265,6 +272,10 @@ public class ImportValidationLeaseService {
 
     private void requireActor(ImportAuthorizedContext expected, ImportAuthorizedContext actual) {
         if (!expected.equals(actual)) throw BusinessException.of(403, "error.forbidden");
+    }
+
+    private String workerId(String operationId) {
+        return operationId + ":" + UUID.randomUUID();
     }
 
     private void conflict() { throw BusinessException.of(409, "error.import.jobStateConflict"); }

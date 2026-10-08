@@ -10,7 +10,7 @@ V184に6 metadata表とjobの`lease_owner`、`lease_generation`、`lease_expires
 
 HTTP endpointは作らず、専用の`ImportValidationLeaseService`内部操作を追加する。
 
-- 第一sliceの`acquire(jobId)`、`renew(grant)`、`takeOver(jobId, expectedGeneration)`はすべてjobが`MAPPED`で、`active_validation_run_id`と`current_validation_run_id`がNULLの場合に限る。`acquire`はowner/expiryがNULLのときgenerationを1増やす。`renew`は有効なgrantのowner/generationが一致し、未失効の場合だけexpiryを30秒後へ延ばし、generationを変えない。`takeOver`は期限切れかつgeneration一致の場合だけserver発行の新workerへ交代し、generationを1増やす。未失効leaseの横取りと他state/pointerの操作を拒否する。
+- 第一sliceの`acquire(jobId)`、`renew(grant)`、`beginTakeover(jobId)`はすべてjobが`MAPPED`で、`active_validation_run_id`と`current_validation_run_id`がNULLの場合に限る。`acquire`はowner/expiryがNULLのときgenerationを1増やす。`renew`は同一service instanceの非公開grantとowner/generationが一致し、未失効の場合だけexpiryを30秒後へ延ばし、generationを変えない。`beginTakeover(jobId)`は現在の認可を再確認し、server側で読んだowner/generation/input snapshotと新規server発行worker/operation identityから非公開試行contextを作る。呼出元のexpected generationや旧grantを要求せず、service再起動後も期限切れleaseを回復できる。transaction内で旧owner/generation/snapshot/期限を再検証し、CASに成功した場合だけgenerationを1増やす。未失効leaseの横取りと他state/pointerの操作を拒否する。
 
 期限はMySQL primaryの`CURRENT_TIMESTAMP(6)`をlock取得後に読み、最終CAS直前にも再取得する。CAS条件にはexpiry・owner・generation・job versionと入力snapshotを含める。lease worker ID、operation identity、grantはserverが生成する。serviceからだけ生成できる非公開constructorの不透明grantへtenant/actor/legal entity/job/source snapshot/worker/operation identity/generationを束縛し、request DTOからworker IDやgrantを復元できるAPIを作らない。heartbeat目安は10秒、leaseは30秒。期限切れownerはtakeover前でもrenew/commit不可。全操作で現在のactor・active admin・明示permissionを再解決し、source ACTIVE/version、job source version、mapping ID/version/hash、source encoding/hash、exact document/version/hash、tenant/legal entity、CLEAN状態とIMPORT_JOB typed linkを一致確認する。file stream、crypto provider、HTTP等のI/OはDB lock中に行わない。
 
@@ -26,7 +26,7 @@ leaseのみのsliceはjob列を更新し、run/row/registryを変更しない。
 
 ## 第一sliceの検証
 
-H2では初回取得、同owner renewでgeneration不変・期限更新、未失効横取り拒否、期限切れ時のみtakeover、旧generation/期限切れowner拒否、MAPPED以外またはrun pointer設定済みのjob拒否、応答喪失後の同一operation retryが同generation/grantを返すこと、異なるoperation retryの拒否、source version/status不一致、document/version/hash/link不一致、actor/permission失効時のwriteゼロを確認する。MySQL `@Tag("mysql")`では独立connection/threadで初回取得競合の勝者1件、renewとtakeoverの競合、takeover前後の旧grant拒否、DB時刻ベースの期限境界、lock取得とsource disableの直列化を実測する。第一sliceはjob lease CAS/fenceだけを確認し、run付きchunk/publishでの旧worker commit拒否は後続MySQL gateに残す。既存6表schemaを利用し、新migrationやschema重複作成は行わない。Astraが本計画をPASSした後にlease serviceとこれらのtestだけを実装する。
+H2では初回取得、同owner renewでgeneration不変・期限更新、未失効横取り拒否、期限切れ時のみtakeover、旧generation/期限切れowner拒否、MAPPED以外またはactive/current run pointer設定済みのjob拒否、応答喪失後の同operation retry、source/document/version/hash/link drift、job version drift、lock後と最終CAS直前のactor/permission失効、制約違反transaction rollbackでowner/generation/expiry/versionが変わらないことを確認する。MySQL `@Tag("mysql")`では独立connection/threadでInnoDB PRIMARY row lockを保持し、requester/blockerのconnection ID・LOCK_DATA・performance_schema.data_lock_waitsから実waitを確認する。acquire/acquire両投入順、expired renew/takeover両投入順、renew後takeover、source disable後のlease拒否とlease後のsource disable直列化を実測し、勝敗に数える拒否はBusinessException 409だけとする。lease/renew/takeoverのcommit response loss retryとservice再起動後のjobId takeoverを含める。第一sliceはjob lease CAS/fenceだけを確認し、run付きchunk/publishでの旧worker commit拒否は後続MySQL gateに残す。既存6表schemaを利用し、新migrationやschema重複作成は行わない。
 
 ## migration証跡
 
