@@ -294,3 +294,28 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   Node helper/page mock/worker模擬も成功したが、実queue/IndexedDB/Chromeの代替にしない。
 - NF07 Slice A修復`c3140628`の静的findingは閉鎖方向となり、重複@Testを`06b4d52f`で除去した。
   同固定SHAでpure/inventoryから実行する。三DB ACLの実測、後続projection/witness CAS/recoveryはまだ未完。
+
+### W2b Slice A限定統合・lease計画確定
+
+- NF07 fixed`06b4d52fb66afc8f770b8ce56edf3f7216bbf9d3`のpure/inventoryは**6/0/0/0**、
+  UTC01:05:22.3106993〜01:06:21.5531686、log SHA-256 `46C34FE41EB341C68D03F0ADB6325FBDE4F963AEFF9D3FF5E18419DF8FAADFD9`。
+  三独立MySQLのACL/signature/schema試験は**3/0/0/0**、UTC01:06:39.6398676〜01:09:28.3669067、
+  log SHA-256 `44120612CDE39FDFFCD8181379A7CA2E902DF0ECFC8861D03A755CFE210600A4`。両run exit0、起止SHA一致・clean。
+  Astraはpure全4 report hashとMySQL全2 report hash、container IDとlogの対応を照合した。
+  三containerのmysql binary8.0.46/image ID現場記録のSHA-256は
+  `EFEFD306ABA76813789CFAC8F881391BB25711D4F08DA5670DA491B5132EE2BE`と
+  `262EFDAAD4C89F8B85D12D9F1485DA4FA16C28CB14EA38142383CE6A4FC592C1`。
+  raw28 fileをsource/controlの`verification-evidence/nf07-w2b-fixed/`へbyte同一保存した。
+- Astraの結論はSlice A限定CODE＋synthetic integration ACCEPT。controlへ
+  `276c0083/816777a3/ce2f8eb4/6264b66f/3e016a0f`として統合した。
+  後続CAS/replay/latest freshness、完全anti-rollback、production ACL・実処分/dispatchは含まない。
+  既存計画に従いSlice Bのprojection CASへ進める。HOLD_RELEASEDは依然拒否する。
+- NF06 lease第一slice計画`aba94e6f3a8a75d05d11e63d1762b22370d9956a`はAstra限定PLAN PASS。
+  完全lock順、MAPPED＋両run pointer NULL、server-issued operation/grantとcommit応答喪失再試行を明確化した。
+  新serviceを実装するが、run-aware renew/chunk/publish、実workerの完結証拠は後続とする。
+  V184の6 COMMENTを日本語化したためchecksumが変わる。旧b0d5の実行証拠を新SHAへ転用しない。
+- NF04実Chrome run01 fixed`8d0e611b`は**2/2/0/0、FAIL**。実Spring側はqueue responseのID取得、
+  synthetic側はoffline再認証待機で失敗した。さらにAstraがwindow参照、IDB barrier、JS例外の誤合格、cleanupを指摘。
+  rawを保持し、strict evaluatorと実waitの成立を修復後に再実行する。Chromeでの合格はまだない。
+- NF08 `45a3c224`の3c fixture修復は限定静的受理、実行中。leased connection帰還とOS socket全回収、
+  故障解放後のhealthyと故障継続中のavailabilityを区別し、TLS stall/strict parserは未完とする。
