@@ -76,7 +76,7 @@ class PwaRestoreChromeAuthenticationBrowserTest {
             browser.evaluate("document.querySelector('input[name=username]').value=" + JSON.writeValueAsString(username)
                     + ";document.querySelector('input[name=password]').value=" + JSON.writeValueAsString(PASSWORD)
                     + ";document.querySelector('form').requestSubmit();true");
-            assertThat(browser.waitForStrict("location.pathname==='/my/timesheet'", Duration.ofSeconds(20)))
+            assertThat(browser.waitForStrict("!!(location.pathname==='/my/timesheet')", Duration.ofSeconds(20)))
                     .as("実フォームlogin後に要員ページへ遷移").isTrue();
             assertThat(browser.waitForStrict("!!(window.SES&&SES.pwaQueue&&SES.pwaQueue.getScope())", Duration.ofSeconds(20)))
                     .as("実session-contextでqueue scopeを確立").isTrue();
@@ -85,7 +85,7 @@ class PwaRestoreChromeAuthenticationBrowserTest {
 
             browser.send("Network.emulateNetworkConditions", java.util.Map.of("offline", true, "latency", 0,
                     "downloadThroughput", 0, "uploadThroughput", 0, "connectionType", "none"));
-            assertThat(browser.waitForStrict("!navigator.onLine", Duration.ofSeconds(10))).isTrue();
+            assertThat(browser.waitForStrict("!!(!navigator.onLine)", Duration.ofSeconds(10))).isTrue();
             JsonNode draft = browser.evaluateStrict("(async()=>{await SES.pwaQueue.whenReady();window.__draft="
                     + "await SES.pwaQueue.request({screen:'attendance',month:'2026-10',method:'POST',"
                     + "path:'/api/my/pwa/attendance/daily',baseVersion:0,resourceKey:'attendance:2026-10',"
@@ -94,11 +94,11 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                     + "const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});"
                     + "const rows=await new Promise((ok,no)=>{const q=db.transaction('queue').objectStore('queue').getAll();q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)});db.close();"
                     + "const stored=rows.find(x=>x.payload&&x.payload.remarks==='chrome-confirm-only');"
-                    + "JSON.stringify({id:stored&&stored.clientRequestId,scope:SES.pwaQueue.getScope()})})()");
+                    + "return JSON.stringify({id:stored&&stored.clientRequestId,scope:SES.pwaQueue.getScope()})})()");
             String requestId = JSON.readTree(draft.asText()).path("id").asText();
             assertThat(requestId).isNotBlank();
             browser.navigate(base + "/my/timesheet");
-            assertThat(browser.waitForStrict("document.title.includes('オフライン')", Duration.ofSeconds(15))).isTrue();
+            assertThat(browser.waitForStrict("!!document.title.includes('オフライン')", Duration.ofSeconds(15))).isTrue();
             assertThat(browser.evaluateStrict("document.getElementById('offline-drafts').hidden").asBoolean())
                     .as("通常のoffline表示では復元下書きはロック").isTrue();
             assertThat(browser.evaluateStrict("document.getElementById('offline-confirm-restore').hidden").asBoolean())
@@ -106,11 +106,11 @@ class PwaRestoreChromeAuthenticationBrowserTest {
 
             browser.send("Network.emulateNetworkConditions", java.util.Map.of("offline", false, "latency", 0,
                     "downloadThroughput", -1, "uploadThroughput", -1, "connectionType", "wifi"));
-            assertThat(browser.waitForStrict("navigator.onLine", Duration.ofSeconds(10))).isTrue();
-            assertThat(browser.waitForStrict("!document.getElementById('offline-reauth').disabled", Duration.ofSeconds(10))).isTrue();
+            assertThat(browser.waitForStrict("!!navigator.onLine", Duration.ofSeconds(10))).isTrue();
+            assertThat(browser.waitForStrict("!!(document.getElementById('offline-reauth') && !document.getElementById('offline-reauth').disabled)", Duration.ofSeconds(10))).isTrue();
             browser.evaluate("document.getElementById('offline-restore-password').value="
                     + JSON.writeValueAsString(PASSWORD) + ";document.getElementById('offline-reauth').click();true");
-            assertThat(browser.waitForStrict("!document.getElementById('offline-confirm-restore').hidden", Duration.ofSeconds(15)))
+            assertThat(browser.waitForStrict("!!(document.getElementById('offline-confirm-restore') && !document.getElementById('offline-confirm-restore').hidden)", Duration.ofSeconds(15)))
                     .as("実Spring Security再認証後に確認操作を提示").isTrue();
             assertThat(browser.evaluateStrict("document.getElementById('offline-drafts').hidden").asBoolean())
                     .as("再認証だけでは本文を表示しない").isTrue();
@@ -122,7 +122,7 @@ class PwaRestoreChromeAuthenticationBrowserTest {
             browser.evaluate("window.__nativeFetch=window.fetch.bind(window);window.fetch=(input,init)=>"
                     + "String(input).includes('/api/my/pwa/attendance/daily')?Promise.reject(new TypeError('offline test fence')):window.__nativeFetch(input,init);true");
             browser.evaluate("document.getElementById('offline-confirm-restore').click();true");
-            assertThat(browser.waitForStrict("!document.getElementById('offline-drafts').hidden", Duration.ofSeconds(15)))
+            assertThat(browser.waitForStrict("!!(document.getElementById('offline-drafts') && !document.getElementById('offline-drafts').hidden)", Duration.ofSeconds(15)))
                     .as("実reauthenticate/confirm API成功後、ユーザー確認操作で下書きを表示").isTrue();
             assertThat(browser.evaluateStrict("document.getElementById('offline-draft-list').textContent.includes('2026-10-07')").asBoolean())
                     .isTrue();
