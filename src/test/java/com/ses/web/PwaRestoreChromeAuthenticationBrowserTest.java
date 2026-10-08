@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -219,6 +220,8 @@ class PwaRestoreChromeAuthenticationBrowserTest {
         Set<String> liveSessions = new HashSet<>();
         Set<String> pausedSessions = new HashSet<>();
         Set<String> configuredSessions = new HashSet<>();
+        Map<String, String> targetTypesBySession = new HashMap<>();
+        Map<String, String> workerUrlsBySession = new HashMap<>();
         Throwable failure = null;
         OfflineNavigationProof proof = null;
         PROBES.put(token, probeCounts);
@@ -227,6 +230,8 @@ class PwaRestoreChromeAuthenticationBrowserTest {
             String initialSession = attached.path("sessionId").asText();
             if (initialSession.isBlank()) throw new IllegalStateException("既存workerへのflatten attachに失敗しました");
             liveSessions.add(initialSession);
+            targetTypesBySession.put(initialSession, "service_worker");
+            workerUrlsBySession.put(initialSession, workerUrl);
             configureWorkerOffline(browser, initialSession);
             configuredSessions.add(initialSession);
             browser.sendBrowser("Target.setDiscoverTargets", Map.of("discover", true));
@@ -264,6 +269,8 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                             || !workerUrl.equals(info.path("url").asText())) continue;
                     String session = event.path("params").path("sessionId").asText();
                     restartedTargetId = info.path("targetId").asText();
+                    targetTypesBySession.put(session, info.path("type").asText("unknown"));
+                    workerUrlsBySession.put(session, info.path("url").asText(""));
                     if (!session.isBlank() && liveSessions.add(session)) {
                         pausedSessions.add(session);
                         configureWorkerOffline(browser, session);
@@ -349,6 +356,8 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                 String session = event.path("params").path("sessionId").asText();
                 if (session.isBlank()) continue;
                 liveSessions.add(session);
+                targetTypesBySession.put(session, event.path("params").path("targetInfo").path("type").asText("unknown"));
+                workerUrlsBySession.put(session, event.path("params").path("targetInfo").path("url").asText(""));
                 if (!configuredSessions.contains(session)) pausedSessions.add(session);
             }
             try {
@@ -364,17 +373,44 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                     browser.sendOnSession(session, "Network.emulateNetworkConditions", Map.of("offline", false,
                             "latency", 0, "downloadThroughput", -1, "uploadThroughput", -1, "connectionType", "wifi"));
                     if (pausedSessions.contains(session)) browser.sendOnSession(session, "Runtime.runIfWaitingForDebugger", Map.of());
-                    browser.sendOnSession(session, "Runtime.enable", Map.of());
-                    JsonNode workerFetch = browser.sendOnSession(session, "Runtime.evaluate", Map.of(
-                            "expression", "fetch('/api/my/session-context',{credentials:'include',cache:'no-store'})"
-                                    + ".then(async r=>({status:r.status,body:await r.json()}))",
-                            "returnByValue", true, "awaitPromise", true));
-                    JsonNode fetchValue = workerFetch.path("result").path("value");
-                    if (fetchValue.path("status").asInt() != 200
-                            || fetchValue.path("body").path("code").asInt() != 200) {
-                        throw new IllegalStateException("復旧後のService Worker内fetchが成功しません: " + fetchValue);
+                    if (!"service_worker".equals(targetTypesBySession.get(session))
+                            || !workerUrl.equals(workerUrlsBySession.get(session))) {
+                        IllegalStateException wrongTarget = new IllegalStateException(
+                                "復旧対象のCDP sessionが期待したService Workerではありません: type="
+                                        + safeTargetType(targetTypesBySession.get(session))
+                                        + ",scriptUrlMatches=" + workerUrl.equals(workerUrlsBySession.get(session)));
+                        if (cleanupFailure == null) cleanupFailure = wrongTarget;
+                        else cleanupFailure.addSuppressed(wrongTarget);
+                    } else {
+                        try {
+                            browser.sendOnSession(session, "Runtime.enable", Map.of());
+                            JsonNode workerFetch = browser.sendOnSession(session, "Runtime.evaluate", Map.of(
+                                    "expression", "(async()=>{const r=await fetch('/api/my/session-context',"
+                                            + "{credentials:'include',cache:'no-store'});const text=await r.text();"
+                                            + "let body=null;try{body=JSON.parse(text)}catch(_){}return {status:r.status,"
+                                            + "apiCode:body&&body.code,redirected:r.redirected,contentType:r.headers.get('content-type')}})()",
+                                    "returnByValue", true, "awaitPromise", true));
+                            JsonNode fetchValue = workerFetch.path("result").path("value");
+                            int status = fetchValue.path("status").asInt(-1);
+                            int apiCode = fetchValue.path("apiCode").asInt(-1);
+                            if (status != 200 || apiCode != 200) {
+                                throw new SafeWorkerFetchFailure("復旧後のworker fetch失敗: "
+                                        + workerFetchDiagnostic(workerFetch, targetTypesBySession.get(session), true));
+                            }
+                        } catch (Throwable fetchFailure) {
+                            Throwable classified = fetchFailure instanceof SafeWorkerFetchFailure
+                                    ? fetchFailure : new IllegalStateException(
+                                            "worker Runtime.evaluate failure category=" + safeFailureCategory(fetchFailure));
+                            if (cleanupFailure == null) cleanupFailure = classified;
+                            else cleanupFailure.addSuppressed(classified);
+                        }
                     }
-                    browser.sendBrowser("Target.detachFromTarget", Map.of("sessionId", session));
+                    try {
+                        browser.sendBrowser("Target.detachFromTarget", Map.of("sessionId", session));
+                    } catch (Throwable detachFailure) {
+                        if (cleanupFailure == null) cleanupFailure = detachFailure;
+                        else cleanupFailure.addSuppressed(detachFailure);
+                    }
                 } catch (Throwable thrown) {
                     if (cleanupFailure == null) cleanupFailure = thrown; else cleanupFailure.addSuppressed(thrown);
                 }
@@ -409,5 +445,79 @@ class PwaRestoreChromeAuthenticationBrowserTest {
         browser.sendOnSession(session, "Network.enable", Map.of());
         browser.sendOnSession(session, "Network.emulateNetworkConditions", Map.of("offline", true,
                 "latency", 0, "downloadThroughput", 0, "uploadThroughput", 0, "connectionType", "none"));
+    }
+
+    /** CDPの形状と固定categoryだけを失敗文へ出し、任意メッセージやtokenは出力しない。 */
+    private static String workerFetchDiagnostic(JsonNode evaluation, String targetType, boolean scriptUrlMatches) {
+        JsonNode remote = evaluation.path("result");
+        JsonNode exceptionDetails = evaluation.path("exceptionDetails");
+        JsonNode exception = exceptionDetails.path("exception");
+        String exceptionClass = safeExceptionClass(exception.path("className").asText(""));
+        String exceptionText = exceptionDetails.path("text").asText("").toLowerCase(java.util.Locale.ROOT);
+        String description = exception.path("description").asText("").toLowerCase(java.util.Locale.ROOT);
+        String category;
+        if (evaluation.has("exceptionDetails")) {
+            if (description.contains("failed to parse url")) category = "INVALID_URL";
+            else if (description.contains("failed to fetch")) category = "FETCH_FAILED";
+            else if (description.contains("cannot find context")) category = "CONTEXT_MISSING";
+            else if (description.contains("execution context was destroyed")) category = "CONTEXT_DESTROYED";
+            else if (description.contains("permission denied")) category = "PERMISSION_DENIED";
+            else category = "JAVASCRIPT_EXCEPTION";
+        } else if ("error".equals(remote.path("subtype").asText())) {
+            category = "REMOTE_ERROR";
+        } else if (!remote.has("value")) {
+            category = "NO_BY_VALUE_RESULT";
+        } else {
+            JsonNode value = remote.path("value");
+            int status = value.path("status").asInt(-1);
+            int apiCode = value.path("apiCode").asInt(-1);
+            category = status != 200 ? "HTTP_STATUS" : apiCode != 200 ? "API_CODE" : "UNKNOWN_RESULT";
+        }
+        JsonNode value = remote.path("value");
+        var diagnostic = JSON.createObjectNode();
+        diagnostic.put("targetType", safeTargetType(targetType));
+        diagnostic.put("scriptUrlMatchesExpected", scriptUrlMatches);
+        diagnostic.put("category", category);
+        diagnostic.put("exceptionDetailsPresent", evaluation.has("exceptionDetails"));
+        diagnostic.put("exceptionTextCategory", exceptionText.contains("uncaught") ? "UNCAUGHT"
+                : exceptionText.isBlank() ? "MISSING" : "OTHER");
+        diagnostic.put("exceptionClass", exceptionClass);
+        diagnostic.put("remoteType", safeRemoteType(remote.path("type").asText("")));
+        diagnostic.put("remoteSubtype", safeRemoteType(remote.path("subtype").asText("")));
+        diagnostic.put("hasByValue", remote.has("value"));
+        diagnostic.put("httpStatus", value.path("status").asInt(-1));
+        diagnostic.put("apiCode", value.path("apiCode").asInt(-1));
+        diagnostic.put("redirected", value.path("redirected").asBoolean(false));
+        String contentType = value.path("contentType").asText("").toLowerCase(java.util.Locale.ROOT);
+        diagnostic.put("contentType", contentType.contains("application/json") ? "application/json"
+                : contentType.contains("text/html") ? "text/html" : contentType.isBlank() ? "missing" : "other");
+        return diagnostic.toString();
+    }
+
+    private static String safeTargetType(String type) {
+        if (type == null || type.isBlank()) return "unknown";
+        return Set.of("service_worker", "page", "worker", "shared_worker", "unknown").contains(type)
+                ? type : "other";
+    }
+
+    private static String safeExceptionClass(String name) {
+        return Set.of("TypeError", "ReferenceError", "SyntaxError", "RangeError", "Error").contains(name)
+                ? name : name.isBlank() ? "none" : "other";
+    }
+
+    private static String safeRemoteType(String type) {
+        return Set.of("object", "string", "number", "boolean", "undefined", "function", "symbol").contains(type)
+                ? type : type.isBlank() ? "missing" : "other";
+    }
+
+    private static String safeFailureCategory(Throwable failure) {
+        if (failure instanceof java.util.concurrent.TimeoutException) return "CDP_TIMEOUT";
+        if (failure instanceof IllegalStateException) return "CDP_OR_ASSERTION_ERROR";
+        if (failure instanceof java.io.IOException) return "IO_ERROR";
+        return "OTHER_" + safeExceptionClass(failure.getClass().getSimpleName());
+    }
+
+    private static final class SafeWorkerFetchFailure extends IllegalStateException {
+        private SafeWorkerFetchFailure(String message) { super(message); }
     }
 }
