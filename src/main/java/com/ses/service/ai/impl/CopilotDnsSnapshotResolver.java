@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Network DNSを行わず、事前承認された期限付きaddress snapshotだけを返すresolver。 */
+/** ネットワークDNSを行わず、事前承認済みで期限付きのaddress snapshotだけを返すresolver。 */
 public final class CopilotDnsSnapshotResolver implements DnsResolver {
 
     private final AtomicReference<DnsSnapshot> snapshot;
@@ -75,7 +75,7 @@ public final class CopilotDnsSnapshotResolver implements DnsResolver {
             Objects.requireNonNull(expiresAt);
         }
 
-        /** InetAddress.getByAddress accepts bytes without performing forward or reverse lookup. */
+        /** address byteから生成し、正引き・逆引きlookupを行わない。 */
         public static AddressSet fromAddressBytes(String host, List<byte[]> addressBytes, Instant expiresAt)
                 throws UnknownHostException {
             if (addressBytes == null || addressBytes.isEmpty()) {
