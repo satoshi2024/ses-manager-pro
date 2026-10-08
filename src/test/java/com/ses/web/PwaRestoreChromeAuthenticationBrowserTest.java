@@ -97,8 +97,12 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                     + "return JSON.stringify({id:stored&&stored.clientRequestId,scope:SES.pwaQueue.getScope()})})()");
             String requestId = JSON.readTree(draft.asText()).path("id").asText();
             assertThat(requestId).isNotBlank();
+            browser.send("Network.setBlockedURLs", java.util.Map.of("urls", java.util.List.of(base + "/my/timesheet")));
             browser.navigate(base + "/my/timesheet");
-            assertThat(browser.waitForStrict("!!document.title.includes('オフライン')", Duration.ofSeconds(15))).isTrue();
+            boolean offlineShellLoaded = browser.waitForStrict("!!document.title.includes('オフライン')", Duration.ofSeconds(15));
+            assertThat(offlineShellLoaded).as("network-only navigationの失敗時にService Worker offline shellを表示。診断="
+                    + browser.evaluateStrict("(async()=>JSON.stringify({title:document.title,href:location.href,online:navigator.onLine,controlled:!!navigator.serviceWorker.controller,offlineAssetCached:!!(await caches.match('/offline.html'))}))()").asText()).isTrue();
+            browser.send("Network.setBlockedURLs", java.util.Map.of("urls", java.util.List.of()));
             assertThat(browser.evaluateStrict("document.getElementById('offline-drafts').hidden").asBoolean())
                     .as("通常のoffline表示では復元下書きはロック").isTrue();
             assertThat(browser.evaluateStrict("document.getElementById('offline-confirm-restore').hidden").asBoolean())
