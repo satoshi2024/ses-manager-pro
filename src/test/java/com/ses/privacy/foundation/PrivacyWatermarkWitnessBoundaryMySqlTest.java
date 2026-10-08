@@ -648,29 +648,27 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
                 query.setString(3, partition.subjectRef());
                 try (var rows = query.executeQuery()) { assertTrue(rows.next()); }
             }
-            try {
-                SignedWatermark early = reverseSubmission ? second : first;
-                SignedWatermark late = reverseSubmission ? first : second;
-                Future<LatestWitnessPort.AppendResult> earlyFuture = pool.submit(() -> writerAdapter.append(early, 0, "0".repeat(64)));
-                awaitPrimaryLockWaits(1, writerDataSource.connectionIds(), holderId, WITNESS.getDatabaseName());
-                Future<LatestWitnessPort.AppendResult> lateFuture = pool.submit(() -> writerAdapter.append(late, 0, "0".repeat(64)));
-                awaitPrimaryLockWaits(2, writerDataSource.connectionIds(), holderId, WITNESS.getDatabaseName());
-                blocker.commit();
-                blockerReleased = true;
-                LatestWitnessPort.AppendResult earlyResult = earlyFuture.get(10, TimeUnit.SECONDS);
-                LatestWitnessPort.AppendResult lateResult = lateFuture.get(10, TimeUnit.SECONDS);
-                if (sameCandidate) {
-                    assertEquals(1, List.of(earlyResult, lateResult).stream().filter(r -> r == LatestWitnessPort.AppendResult.APPENDED).count());
-                    assertEquals(1, List.of(earlyResult, lateResult).stream().filter(r -> r == LatestWitnessPort.AppendResult.REPLAYED).count());
-                } else {
-                    assertEquals(1, List.of(earlyResult, lateResult).stream().filter(r -> r == LatestWitnessPort.AppendResult.APPENDED).count());
-                    assertEquals(1, List.of(earlyResult, lateResult).stream().filter(r -> r == LatestWitnessPort.AppendResult.QUARANTINED).count());
-                }
-                assertEquals(1, witnessAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
-                        Integer.class, partition.journalId(), partition.tenantId(), partition.subjectRef()));
-                assertEquals(SignedWatermarkVerifier.Status.VALID,
-                        watermarkVerifier.verify(partition, latestWitness.history(partition), latestWitness.latest(partition)).status());
+            SignedWatermark early = reverseSubmission ? second : first;
+            SignedWatermark late = reverseSubmission ? first : second;
+            Future<LatestWitnessPort.AppendResult> earlyFuture = pool.submit(() -> writerAdapter.append(early, 0, "0".repeat(64)));
+            awaitPrimaryLockWaits(1, writerDataSource, holderId, WITNESS.getDatabaseName());
+            Future<LatestWitnessPort.AppendResult> lateFuture = pool.submit(() -> writerAdapter.append(late, 0, "0".repeat(64)));
+            awaitPrimaryLockWaits(2, writerDataSource, holderId, WITNESS.getDatabaseName());
+            blocker.commit();
+            blockerReleased = true;
+            LatestWitnessPort.AppendResult earlyResult = earlyFuture.get(10, TimeUnit.SECONDS);
+            LatestWitnessPort.AppendResult lateResult = lateFuture.get(10, TimeUnit.SECONDS);
+            if (sameCandidate) {
+                assertEquals(1, List.of(earlyResult, lateResult).stream().filter(r -> r == LatestWitnessPort.AppendResult.APPENDED).count());
+                assertEquals(1, List.of(earlyResult, lateResult).stream().filter(r -> r == LatestWitnessPort.AppendResult.REPLAYED).count());
+            } else {
+                assertEquals(1, List.of(earlyResult, lateResult).stream().filter(r -> r == LatestWitnessPort.AppendResult.APPENDED).count());
+                assertEquals(1, List.of(earlyResult, lateResult).stream().filter(r -> r == LatestWitnessPort.AppendResult.QUARANTINED).count());
             }
+            assertEquals(1, witnessAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                    Integer.class, partition.journalId(), partition.tenantId(), partition.subjectRef()));
+            assertEquals(SignedWatermarkVerifier.Status.VALID,
+                    watermarkVerifier.verify(partition, latestWitness.history(partition), latestWitness.latest(partition)).status());
         } catch (Throwable failure) {
             primaryFailure = failure;
             throw failure;
@@ -695,12 +693,13 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         }
     }
 
-    private void awaitPrimaryLockWaits(int expected, List<Long> connectionIds, long holderId, String schema)
+    private void awaitPrimaryLockWaits(int expected, RecordingConnectionDataSource writerDataSource,
+            long holderId, String schema)
             throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         List<LockWait> observed = List.of();
         while (System.nanoTime() < deadline) {
-            List<Long> ids = connectionIds.stream().distinct().toList();
+            List<Long> ids = writerDataSource.connectionIds().stream().distinct().toList();
             if (ids.size() >= expected) {
                 observed = primaryLockWaits(schema);
                 List<LockWait> matching = observed.stream()
@@ -722,7 +721,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             Thread.sleep(25);
         }
         fail("対象PRIMARY行で既知writer接続のlock waitを確認できません。expected=" + expected
-                + " connectionIds=" + connectionIds + " holderId=" + holderId + " observed=" + observed);
+                + " connectionIds=" + writerDataSource.connectionIds() + " holderId=" + holderId + " observed=" + observed);
     }
 
     private List<LockWait> primaryLockWaits(String schema) {
