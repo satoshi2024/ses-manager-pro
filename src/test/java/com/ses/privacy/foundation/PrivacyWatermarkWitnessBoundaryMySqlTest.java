@@ -22,6 +22,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.time.Duration;
 import java.util.Map;
@@ -595,9 +596,11 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         var ack = append(partition(partition.tenantId(), partition.subjectRef()), 0,
                 PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-jdbc-rollback");
         var signed = sign(ack, 1, "0".repeat(64), Instant.parse("2026-10-02T00:00:00Z"));
-        var rollbackAdapter = new JdbcLatestWitnessAdapter(new CommitFaultDataSource(
-                harness.witness().createWitnessAttestorDataSource(), CommitFault.BEFORE_COMMIT), context.getEnvironment());
+        var rollbackFault = new CommitFaultDataSource(
+                harness.witness().createWitnessAttestorDataSource(), CommitFault.BEFORE_COMMIT);
+        var rollbackAdapter = new JdbcLatestWitnessAdapter(rollbackFault, context.getEnvironment());
         assertEquals(LatestWitnessPort.AppendResult.QUARANTINED, rollbackAdapter.append(signed, 0, "0".repeat(64)));
+        assertTrue(rollbackFault.rollbackCompleted(), "commit例外の前に実rollbackが完了すること");
         assertEquals(0, witnessAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
                 Integer.class, journalId, tenantId, subjectRef));
         assertEquals(0, witnessAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_latest_checkpoint WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
@@ -629,11 +632,16 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             SignedWatermark second, boolean reverseSubmission, boolean sameCandidate) throws Throwable {
         witnessAdmin.update("INSERT INTO sf_w2b_latest_checkpoint(journal_id, tenant_id, subject_ref, checkpoint_epoch, event_revision, event_hash, checkpoint_hash) VALUES (?, ?, ?, 0, 0, ?, ?)",
                 partition.journalId(), partition.tenantId(), partition.subjectRef(), "0".repeat(64), "0".repeat(64));
+        var writerDataSource = new RecordingConnectionDataSource(harness.witness().createWitnessAttestorDataSource());
+        var writerAdapter = new JdbcLatestWitnessAdapter(writerDataSource, context.getEnvironment());
         var pool = Executors.newFixedThreadPool(2);
         Throwable primaryFailure = null;
         boolean blockerReleased = false;
-        try (Connection blocker = harness.witness().adminDataSource().getConnection()) {
+        Connection blocker = null;
+        try {
+            blocker = harness.witness().adminDataSource().getConnection();
             blocker.setAutoCommit(false);
+            long holderId = connectionId(blocker);
             try (var query = blocker.prepareStatement("SELECT checkpoint_epoch FROM sf_w2b_latest_checkpoint WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ? FOR UPDATE")) {
                 query.setString(1, partition.journalId());
                 query.setString(2, partition.tenantId());
@@ -643,10 +651,10 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             try {
                 SignedWatermark early = reverseSubmission ? second : first;
                 SignedWatermark late = reverseSubmission ? first : second;
-                Future<LatestWitnessPort.AppendResult> earlyFuture = pool.submit(() -> latestWitness.append(early, 0, "0".repeat(64)));
-                awaitPrimaryLockWaits(1);
-                Future<LatestWitnessPort.AppendResult> lateFuture = pool.submit(() -> latestWitness.append(late, 0, "0".repeat(64)));
-                awaitPrimaryLockWaits(2);
+                Future<LatestWitnessPort.AppendResult> earlyFuture = pool.submit(() -> writerAdapter.append(early, 0, "0".repeat(64)));
+                awaitPrimaryLockWaits(1, writerDataSource.connectionIds(), holderId, WITNESS.getDatabaseName());
+                Future<LatestWitnessPort.AppendResult> lateFuture = pool.submit(() -> writerAdapter.append(late, 0, "0".repeat(64)));
+                awaitPrimaryLockWaits(2, writerDataSource.connectionIds(), holderId, WITNESS.getDatabaseName());
                 blocker.commit();
                 blockerReleased = true;
                 LatestWitnessPort.AppendResult earlyResult = earlyFuture.get(10, TimeUnit.SECONDS);
@@ -662,37 +670,129 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
                         Integer.class, partition.journalId(), partition.tenantId(), partition.subjectRef()));
                 assertEquals(SignedWatermarkVerifier.Status.VALID,
                         watermarkVerifier.verify(partition, latestWitness.history(partition), latestWitness.latest(partition)).status());
-            } catch (Throwable failure) {
-                primaryFailure = failure;
-                throw failure;
-            } finally {
-                if (!blockerReleased) {
-                    try { blocker.rollback(); }
-                    catch (Throwable cleanupFailure) {
-                        if (primaryFailure != null) primaryFailure.addSuppressed(cleanupFailure);
-                        else throw cleanupFailure;
-                    }
-                }
-                pool.shutdownNow();
-                try {
-                    if (!pool.awaitTermination(10, TimeUnit.SECONDS)) throw new AssertionError("witness writer termination timeout");
-                } catch (Throwable cleanupFailure) {
-                    if (primaryFailure != null) primaryFailure.addSuppressed(cleanupFailure);
-                    else throw cleanupFailure;
-                }
+            }
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            Throwable cleanupFailure = null;
+            if (blocker != null && !blockerReleased) {
+                try { blocker.rollback(); }
+                catch (Throwable failure) { cleanupFailure = appendFailure(cleanupFailure, failure); }
+            }
+            if (blocker != null) {
+                try { blocker.close(); }
+                catch (Throwable failure) { cleanupFailure = appendFailure(cleanupFailure, failure); }
+            }
+            pool.shutdownNow();
+            try {
+                if (!pool.awaitTermination(10, TimeUnit.SECONDS)) throw new AssertionError("witness writer termination timeout");
+            } catch (Throwable failure) { cleanupFailure = appendFailure(cleanupFailure, failure); }
+            if (cleanupFailure != null) {
+                if (primaryFailure != null) primaryFailure.addSuppressed(cleanupFailure);
+                else throw cleanupFailure;
             }
         }
     }
 
-    private void awaitPrimaryLockWaits(int expected) throws InterruptedException {
+    private void awaitPrimaryLockWaits(int expected, List<Long> connectionIds, long holderId, String schema)
+            throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        int observed = 0;
+        List<LockWait> observed = List.of();
         while (System.nanoTime() < deadline) {
-            observed = witnessAdmin.queryForObject("SELECT COUNT(*) FROM performance_schema.data_lock_waits", Integer.class);
-            if (observed >= expected) return;
+            List<Long> ids = connectionIds.stream().distinct().toList();
+            if (ids.size() >= expected) {
+                observed = primaryLockWaits(schema);
+                List<LockWait> matching = observed.stream()
+                        .filter(wait -> ids.subList(0, expected).contains(wait.requesterId()))
+                        .filter(wait -> wait.lockData() != null)
+                        .toList();
+                String targetLockData = matching.stream().filter(wait -> wait.requesterId() == ids.get(0))
+                        .map(LockWait::lockData).findFirst().orElse(null);
+                List<LockWait> targetWaits = matching.stream()
+                        .filter(wait -> wait.lockData().equals(targetLockData)).toList();
+                boolean allKnownRequestersWaiting = ids.subList(0, expected).stream()
+                        .allMatch(id -> targetWaits.stream().anyMatch(wait -> wait.requesterId() == id));
+                boolean firstReachesHolder = targetWaits.stream().anyMatch(wait -> wait.requesterId() == ids.get(0)
+                        && wait.blockerId() == holderId && "GRANTED".equals(wait.blockerStatus()));
+                boolean allReachHolder = ids.subList(0, expected).stream()
+                        .allMatch(id -> reachesHolder(targetWaits, id, holderId));
+                if (allKnownRequestersWaiting && firstReachesHolder && (expected == 1 || allReachHolder)) return;
+            }
             Thread.sleep(25);
         }
-        fail("InnoDB primary lock waitが" + expected + "件に達しませんでした。observed=" + observed);
+        fail("対象PRIMARY行で既知writer接続のlock waitを確認できません。expected=" + expected
+                + " connectionIds=" + connectionIds + " holderId=" + holderId + " observed=" + observed);
+    }
+
+    private List<LockWait> primaryLockWaits(String schema) {
+        return witnessAdmin.query("SELECT requester.PROCESSLIST_ID AS requester_id, blocker.PROCESSLIST_ID AS blocker_id, requested.LOCK_DATA AS lock_data, blocking.LOCK_STATUS AS blocker_status "
+                        + "FROM performance_schema.data_lock_waits waits "
+                        + "JOIN performance_schema.data_locks requested ON requested.ENGINE = waits.ENGINE AND requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID "
+                        + "JOIN performance_schema.data_locks blocking ON blocking.ENGINE = waits.ENGINE AND blocking.ENGINE_LOCK_ID = waits.BLOCKING_ENGINE_LOCK_ID "
+                        + "JOIN performance_schema.threads requester ON requester.THREAD_ID = requested.THREAD_ID "
+                        + "JOIN performance_schema.threads blocker ON blocker.THREAD_ID = blocking.THREAD_ID "
+                        + "WHERE requested.OBJECT_SCHEMA = ? AND requested.OBJECT_NAME = 'sf_w2b_latest_checkpoint' "
+                        + "AND requested.INDEX_NAME = 'PRIMARY' AND requested.LOCK_TYPE = 'RECORD' AND requested.LOCK_STATUS = 'WAITING' "
+                        + "AND blocking.OBJECT_SCHEMA = requested.OBJECT_SCHEMA AND blocking.OBJECT_NAME = requested.OBJECT_NAME "
+                        + "AND blocking.INDEX_NAME = 'PRIMARY' AND blocking.LOCK_TYPE = 'RECORD' "
+                        + "AND blocking.LOCK_DATA = requested.LOCK_DATA",
+                (rs, row) -> new LockWait(rs.getLong("requester_id"), rs.getLong("blocker_id"),
+                        rs.getString("lock_data"), rs.getString("blocker_status")), schema);
+    }
+
+    private boolean reachesHolder(List<LockWait> waits, long requesterId, long holderId) {
+        var reached = new java.util.HashSet<Long>();
+        var pending = new java.util.ArrayDeque<Long>();
+        pending.add(requesterId);
+        while (!pending.isEmpty()) {
+            long current = pending.removeFirst();
+            if (!reached.add(current)) continue;
+            if (current == holderId) return true;
+            waits.stream().filter(wait -> wait.requesterId() == current).map(LockWait::blockerId)
+                    .filter(blocker -> !reached.contains(blocker)).forEach(pending::addLast);
+        }
+        return false;
+    }
+
+    private long connectionId(Connection connection) throws SQLException {
+        try (var statement = connection.createStatement(); var result = statement.executeQuery("SELECT CONNECTION_ID()")) {
+            assertTrue(result.next());
+            return result.getLong(1);
+        }
+    }
+
+    private Throwable appendFailure(Throwable primary, Throwable next) {
+        if (primary == null) return next;
+        primary.addSuppressed(next);
+        return primary;
+    }
+
+    private record LockWait(long requesterId, long blockerId, String lockData, String blockerStatus) { }
+
+    private static final class RecordingConnectionDataSource extends DelegatingDataSource {
+        private final ConcurrentLinkedQueue<Long> ids = new ConcurrentLinkedQueue<>();
+
+        private RecordingConnectionDataSource(DataSource target) { super(target); }
+
+        @Override public Connection getConnection() throws SQLException {
+            Connection connection = super.getConnection();
+            try { ids.add(readConnectionId(connection)); }
+            catch (SQLException failure) {
+                try { connection.close(); } catch (SQLException closeFailure) { failure.addSuppressed(closeFailure); }
+                throw failure;
+            }
+            return connection;
+        }
+
+        private List<Long> connectionIds() { return List.copyOf(ids); }
+
+        private static long readConnectionId(Connection connection) throws SQLException {
+            try (var statement = connection.createStatement(); var result = statement.executeQuery("SELECT CONNECTION_ID()")) {
+                if (!result.next()) throw new SQLException("CONNECTION_ID()が取得できません");
+                return result.getLong(1);
+            }
+        }
     }
 
     private void cleanupWitness(LatestWitnessPort.Partition partition) {
@@ -707,11 +807,14 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
     private static final class CommitFaultDataSource extends DelegatingDataSource {
         private final CommitFault fault;
         private final AtomicBoolean injected = new AtomicBoolean();
+        private final AtomicBoolean rollbackCompleted = new AtomicBoolean();
 
         private CommitFaultDataSource(DataSource target, CommitFault fault) {
             super(target);
             this.fault = fault;
         }
+
+        private boolean rollbackCompleted() { return rollbackCompleted.get(); }
 
         @Override public Connection getConnection() throws SQLException {
             if (fault == CommitFault.AFTER_COMMIT_READBACK_UNAVAILABLE && injected.get())
@@ -721,7 +824,11 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
                     (proxy, method, args) -> {
                         if ("commit".equals(method.getName()) && method.getParameterCount() == 0
                                 && injected.compareAndSet(false, true)) {
-                            if (fault == CommitFault.BEFORE_COMMIT) throw new SQLException("fault injection: rollback before commit");
+                            if (fault == CommitFault.BEFORE_COMMIT) {
+                                invokeConnection(target, Connection.class.getMethod("rollback"), null);
+                                rollbackCompleted.set(true);
+                                throw new SQLException("fault injection: rollback completed before commit");
+                            }
                             Object committed = invokeConnection(target, method, args);
                             if (fault == CommitFault.AFTER_COMMIT || fault == CommitFault.AFTER_COMMIT_READBACK_UNAVAILABLE)
                                 throw new SQLException("fault injection: commit succeeded but ACK was lost");
