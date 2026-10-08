@@ -59,6 +59,7 @@ public class PwaRestoreAuthorizationService {
         if (request == null || request.getPassword() == null || request.getPassword().isEmpty()
                 || request.getPassword().length() > 1024) reject();
         validateBoundary(request.getDocumentNonce(), request.getUserScope(), session, authentication);
+        Object sessionMutex = sessionMutexOrReject(session);
         String tenantId = SecurityUtils.currentTenantId();
         Long userId = SecurityUtils.currentUserId();
         CurrentIdentity identity = loadIdentity(userId, tenantId);
@@ -89,7 +90,7 @@ public class PwaRestoreAuthorizationService {
         String proofHash = digest(rawProof);
         Instant issuedAt = clock.instant();
         Instant expiresAt = issuedAt.plus(PROOF_TTL);
-        String sessionId = session.getId();
+        String sessionId = sessionIdOrReject(session);
         AuthSnapshot authSnapshot = snapshot(authentication);
         ProofEntry entry = new ProofEntry(proofHash, nonceHash, scopeHash, sessionId, userId, tenantId,
                 identity.engineerId(), identity.linkId(), identity.linkedAt(), identity.role(),
@@ -99,7 +100,7 @@ public class PwaRestoreAuthorizationService {
         if (!sameIdentity(identity, current) || !isCurrentAuthentication(authentication, current)
                 || !sessionStillAuthenticated(session, sessionId, authentication)
                 || sessionRegistry.isDestroyed(sessionId)) reject();
-        synchronized (WebUtils.getSessionMutex(session)) {
+        synchronized (sessionMutex) {
             if (sessionRegistry.isDestroyed(sessionId)
                     || !sessionStillAuthenticated(session, sessionId, authentication)) reject();
             try {
@@ -129,30 +130,36 @@ public class PwaRestoreAuthorizationService {
                                             HttpSession session, Authentication authentication) {
         if (request == null) reject();
         validateBoundary(request.getDocumentNonce(), request.getUserScope(), session, authentication);
+        Object sessionMutex = sessionMutexOrReject(session);
         if (request.getProof() == null || !PROOF.matcher(request.getProof()).matches()) reject();
-        String sessionId = session.getId();
+        String sessionId = sessionIdOrReject(session);
         String proofHash = digest(request.getProof());
         String nonceHash = digest(request.getDocumentNonce());
         String scopeHash = digest(request.getUserScope());
         ProofEntry entry;
         long claimedGeneration;
-        synchronized (WebUtils.getSessionMutex(session)) {
+        synchronized (sessionMutex) {
             if (sessionRegistry.isDestroyed(sessionId) || !sessionStillAuthenticated(session, sessionId, authentication)) {
                 reject();
             }
-            SessionState state = state(session, false);
-            if (state == null) reject();
-            purge(state, clock.instant());
-            entry = state.proofs.remove(proofHash);
-            session.setAttribute(SESSION_STATE_ATTRIBUTE, state);
-            if (entry == null || !entry.expiresAt.isAfter(clock.instant())
-                    || !entry.sessionId.equals(sessionId) || entry.authentication != authentication
-                    || !entry.authSnapshot.equals(snapshot(authentication))
-                    || !constantTimeEquals(entry.nonceHash, nonceHash)
-                    || !constantTimeEquals(entry.scopeHash, scopeHash)) reject();
-            claimedGeneration = state.nonceGenerations.getOrDefault(nonceHash, 0L);
-            if (entry.generation != claimedGeneration) reject();
-            if (state.claims.size() >= MAX_CONFIRM_CLAIMS || !state.claims.add(nonceHash)) reject();
+            try {
+                SessionState state = state(session, false);
+                if (state == null) reject();
+                purge(state, clock.instant());
+                entry = state.proofs.remove(proofHash);
+                session.setAttribute(SESSION_STATE_ATTRIBUTE, state);
+                if (entry == null || !entry.expiresAt.isAfter(clock.instant())
+                        || !entry.sessionId.equals(sessionId) || entry.authentication != authentication
+                        || !entry.authSnapshot.equals(snapshot(authentication))
+                        || !constantTimeEquals(entry.nonceHash, nonceHash)
+                        || !constantTimeEquals(entry.scopeHash, scopeHash)) reject();
+                claimedGeneration = state.nonceGenerations.getOrDefault(nonceHash, 0L);
+                if (entry.generation != claimedGeneration) reject();
+                if (state.claims.size() >= MAX_CONFIRM_CLAIMS || !state.claims.add(nonceHash)) reject();
+            } catch (IllegalStateException invalidated) {
+                reject();
+                throw invalidated;
+            }
         }
 
         try {
@@ -164,31 +171,36 @@ public class PwaRestoreAuthorizationService {
                     entry.engineerId, entry.linkId, entry.linkedAt);
 
             Instant now = clock.instant();
-            int maxInactive = session.getMaxInactiveInterval();
+            int maxInactive = maxInactiveIntervalOrReject(session, sessionId, authentication);
             Instant sessionExpiry = maxInactive <= 0 ? now.plus(PERMIT_TTL) : now.plusSeconds(maxInactive);
             Instant permitExpiresAt = now.plus(PERMIT_TTL);
             if (sessionExpiry.isBefore(permitExpiresAt)) permitExpiresAt = sessionExpiry;
             if (!permitExpiresAt.isAfter(now)) reject();
-            synchronized (WebUtils.getSessionMutex(session)) {
+            synchronized (sessionMutex) {
                 Instant finalNow = clock.instant();
-                SessionState state = state(session, false);
-                if (state == null || !entry.expiresAt.isAfter(finalNow)
-                        || state.nonceGenerations.getOrDefault(nonceHash, 0L) != claimedGeneration
-                        || sessionRegistry.isDestroyed(sessionId)
-                        || !sessionStillAuthenticated(session, sessionId, authentication)
-                        || entry.authentication != authentication
-                        || !entry.authSnapshot.equals(snapshot(authentication))
-                        || !isCurrentAuthentication(authentication, current)) reject();
-                if (!permitExpiresAt.isAfter(finalNow)) reject();
-                state.permits.values().removeIf(old -> old.nonceHash.equals(nonceHash));
-                if (state.permits.size() >= MAX_PERMITS) reject();
-                state.permits.put(nonceHash, new PermitEntry(nonceHash, scopeHash, entry.userId,
-                        entry.tenantId, entry.engineerId, entry.linkId, permitExpiresAt));
-                session.setAttribute(SESSION_STATE_ATTRIBUTE, state);
+                try {
+                    SessionState state = state(session, false);
+                    if (state == null || !entry.expiresAt.isAfter(finalNow)
+                            || state.nonceGenerations.getOrDefault(nonceHash, 0L) != claimedGeneration
+                            || sessionRegistry.isDestroyed(sessionId)
+                            || !sessionStillAuthenticated(session, sessionId, authentication)
+                            || entry.authentication != authentication
+                            || !entry.authSnapshot.equals(snapshot(authentication))
+                            || !isCurrentAuthentication(authentication, current)) reject();
+                    if (!permitExpiresAt.isAfter(finalNow)) reject();
+                    state.permits.values().removeIf(old -> old.nonceHash.equals(nonceHash));
+                    if (state.permits.size() >= MAX_PERMITS) reject();
+                    state.permits.put(nonceHash, new PermitEntry(nonceHash, scopeHash, entry.userId,
+                            entry.tenantId, entry.engineerId, entry.linkId, permitExpiresAt));
+                    session.setAttribute(SESSION_STATE_ATTRIBUTE, state);
+                } catch (IllegalStateException invalidated) {
+                    reject();
+                    throw invalidated;
+                }
             }
             return new PwaRestorePermitResponse(request.getDocumentNonce(), request.getUserScope(), now, permitExpiresAt);
         } finally {
-            synchronized (WebUtils.getSessionMutex(session)) {
+            synchronized (sessionMutex) {
                 try {
                     SessionState state = state(session, false);
                     if (state != null) {
@@ -214,6 +226,37 @@ public class PwaRestoreAuthorizationService {
                     .equals(documentNonce)) reject();
         } catch (IllegalArgumentException e) {
             reject();
+        }
+    }
+
+    private static Object sessionMutexOrReject(HttpSession session) {
+        try {
+            return WebUtils.getSessionMutex(session);
+        } catch (IllegalStateException invalidated) {
+            reject();
+            return session;
+        }
+    }
+
+    private static String sessionIdOrReject(HttpSession session) {
+        try {
+            return session.getId();
+        } catch (IllegalStateException invalidated) {
+            reject();
+            return "";
+        }
+    }
+
+    private int maxInactiveIntervalOrReject(HttpSession session, String sessionId,
+                                            Authentication authentication) {
+        if (sessionRegistry.isDestroyed(sessionId) || !sessionStillAuthenticated(session, sessionId, authentication)) {
+            reject();
+        }
+        try {
+            return session.getMaxInactiveInterval();
+        } catch (IllegalStateException invalidated) {
+            reject();
+            return 0;
         }
     }
 
