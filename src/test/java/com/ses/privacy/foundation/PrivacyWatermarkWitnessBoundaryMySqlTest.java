@@ -13,6 +13,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.UUID;
+import java.util.List;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -21,10 +22,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.time.Duration;
+import java.util.Map;
+import java.security.MessageDigest;
+import java.security.PublicKey;
+import java.util.HexFormat;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** W2b Slice A/B: 3独立MySQL、projection CAS、witness ACL境界を確認する。 */
+/** W2b Slice A/B/C: 3独立MySQL、projection CAS、署名checkpoint、witness ACLを確認する。 */
 @Tag("mysql")
 @Testcontainers
 class PrivacyWatermarkWitnessBoundaryMySqlTest {
@@ -49,6 +55,10 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
     private static JdbcTemplate journalPrincipalOnWitness;
     private static JdbcTemplate appProjectionPrincipalOnWitness;
     private static SyntheticAttestorKeyFixture keyFixture;
+    private static SyntheticWatermarkAttestor watermarkAttestor;
+    private static JdbcLatestWitnessAdapter latestWitness;
+    private static WatermarkKeyHistory keyHistory;
+    private static SignedWatermarkVerifier watermarkVerifier;
     private String journalId;
     private String tenantId;
     private String subjectRef;
@@ -73,10 +83,20 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         journalPrincipalOnWitness = new JdbcTemplate(harness.witness().createUnprivilegedJournalDataSourceOnWitness());
         appProjectionPrincipalOnWitness = new JdbcTemplate(harness.witness().createUnprivilegedApplicationDataSourceOnWitness());
         keyFixture = harness.createAttestorKeyFixture();
-        System.out.printf("SF_W2B_SLICE_A journalContainer=%s journalSchemaSha256=%s appContainer=%s appSchemaSha256=%s witnessContainer=%s witnessSchemaSha256=%s%n",
-                harness.journal().containerId(), harness.journal().schemaHash(),
-                harness.application().containerId(), harness.application().schemaHash(),
-                harness.witness().containerId(), harness.witness().schemaHash());
+        watermarkAttestor = new SyntheticWatermarkAttestor(keyFixture);
+        latestWitness = new JdbcLatestWitnessAdapter(harness.witness().createWitnessAttestorDataSource(), context.getEnvironment());
+        keyHistory = new WatermarkKeyHistory(Map.of("key-synthetic", new WatermarkKeyHistory.Entry(
+                keyFixture.publicKey(), WatermarkKeyHistory.State.TRUSTED, SyntheticAttestorKeyFixture.AUDIENCE)));
+        watermarkVerifier = new SignedWatermarkVerifier(keyHistory,
+                Clock.fixed(Instant.parse("2026-10-02T12:00:00Z"), ZoneOffset.UTC), Duration.ofHours(24));
+        System.out.printf("SF_W2B_SLICE_C journalContainer=%s journalImageId=%s journalMysqlVersion=%s journalSchemaSha256=%s appContainer=%s appImageId=%s appMysqlVersion=%s appSchemaSha256=%s witnessContainer=%s witnessImageId=%s witnessMysqlVersion=%s witnessSchemaSha256=%s%n",
+                harness.journal().containerId(), JOURNAL.getContainerInfo().getImageId(),
+                new JdbcTemplate(harness.journal().adminDataSource()).queryForObject("SELECT VERSION()", String.class), harness.journal().schemaHash(),
+                harness.application().containerId(), APPLICATION.getContainerInfo().getImageId(),
+                new JdbcTemplate(harness.application().adminDataSource()).queryForObject("SELECT VERSION()", String.class), harness.application().schemaHash(),
+                harness.witness().containerId(), WITNESS.getContainerInfo().getImageId(),
+                new JdbcTemplate(harness.witness().adminDataSource()).queryForObject("SELECT VERSION()", String.class), harness.witness().schemaHash());
+        System.out.printf("SF_W2B_SLICE_C keyId=key-synthetic publicKeySha256=%s providerCallCount=0%n", publicKeyFingerprint(keyFixture.publicKey()));
         assertNotEquals(harness.journal().containerId(), harness.application().containerId());
         assertNotEquals(harness.journal().containerId(), harness.witness().containerId());
         assertNotEquals(harness.application().containerId(), harness.witness().containerId());
@@ -310,12 +330,17 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         context.getEnvironment().setDefaultProfiles("prod");
         try {
             assertThrows(SecurityException.class, harness::createAttestorKeyFixture);
+            assertThrows(SecurityException.class, () -> latestWitness.latest(witnessPartition()));
+            assertThrows(SecurityException.class, () -> harness.witness().createWitnessAttestorDataSource());
             context.getEnvironment().setDefaultProfiles(defaults);
             context.getEnvironment().setActiveProfiles("prod", "test");
             assertThrows(SecurityException.class, harness::createAttestorKeyFixture);
             assertThrows(SecurityException.class, () -> keyFixture.sign(payload));
             assertThrows(SecurityException.class, keyFixture::publicKey);
             assertThrows(SecurityException.class, () -> appProjection.getDataSource().getConnection());
+            assertThrows(SecurityException.class, () -> latestWitness.latest(witnessPartition()));
+            assertThrows(SecurityException.class, () -> harness.witness().createWitnessAttestorDataSource());
+            assertThrows(SecurityException.class, harness::initializeSchemas);
         } finally {
             context.getEnvironment().setDefaultProfiles(defaults);
             context.getEnvironment().setActiveProfiles("test");
@@ -378,11 +403,192 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         assertThrows(org.springframework.dao.DataAccessException.class,
                 () -> journalPrincipalOnWitness.update("DELETE FROM sf_w2b_checkpoint_log"));
         assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> journalPrincipalOnWitness.update("INSERT INTO sf_w2b_checkpoint_log(journal_id, tenant_id, subject_ref, checkpoint_epoch, event_revision, event_hash, checkpoint_hash, previous_checkpoint_hash, domain, schema_version, issued_at_micros, key_id, canonical_payload, signature_bytes, signature_digest) VALUES (?, ?, ?, 8, 8, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
+                        journalId, tenantId, subjectRef, "e".repeat(64), "f".repeat(64), "0".repeat(64), WatermarkCheckpoint.DOMAIN,
+                        WatermarkCheckpoint.SCHEMA_VERSION, "key-synthetic", new byte[]{1}, new byte[64], "a".repeat(64)));
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> journalPrincipalOnWitness.update("INSERT INTO sf_w2b_latest_checkpoint(journal_id, tenant_id, subject_ref, checkpoint_epoch, event_revision, event_hash, checkpoint_hash) VALUES (?, ?, ?, 3, 6, ?, ?)", journalId, tenantId, subjectRef, "e".repeat(64), "f".repeat(64)));
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> journalPrincipalOnWitness.update("UPDATE sf_w2b_latest_checkpoint SET checkpoint_epoch = 99 WHERE journal_id = ?", journalId));
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> journalPrincipalOnWitness.update("DELETE FROM sf_w2b_latest_checkpoint WHERE journal_id = ?", journalId));
+        assertThrows(org.springframework.dao.DataAccessException.class,
                 () -> appProjectionPrincipalOnWitness.queryForObject("SELECT COUNT(*) FROM sf_w2b_latest_checkpoint", Integer.class));
         assertThrows(org.springframework.dao.DataAccessException.class,
                 () -> appProjectionPrincipalOnWitness.update("UPDATE sf_w2b_latest_checkpoint SET checkpoint_epoch = 99"));
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> appProjectionPrincipalOnWitness.update("DELETE FROM sf_w2b_checkpoint_log WHERE journal_id = ?", journalId));
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> appProjectionPrincipalOnWitness.update("DELETE FROM sf_w2b_latest_checkpoint WHERE journal_id = ?", journalId));
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> appProjectionPrincipalOnWitness.update("INSERT INTO sf_w2b_latest_checkpoint(journal_id, tenant_id, subject_ref, checkpoint_epoch, event_revision, event_hash, checkpoint_hash) VALUES (?, ?, ?, 4, 7, ?, ?)", journalId, tenantId, subjectRef, "e".repeat(64), "f".repeat(64)));
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> appProjectionPrincipalOnWitness.update("INSERT INTO sf_w2b_checkpoint_log(journal_id, tenant_id, subject_ref, checkpoint_epoch, event_revision, event_hash, checkpoint_hash, previous_checkpoint_hash, domain, schema_version, issued_at_micros, key_id, canonical_payload, signature_bytes, signature_digest) VALUES (?, ?, ?, 9, 9, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
+                        journalId, tenantId, subjectRef, "e".repeat(64), "f".repeat(64), "0".repeat(64), WatermarkCheckpoint.DOMAIN,
+                        WatermarkCheckpoint.SCHEMA_VERSION, "key-synthetic", new byte[]{1}, new byte[64], "a".repeat(64)));
         assertEquals(2L, witnessAdmin.queryForObject("SELECT checkpoint_epoch FROM sf_w2b_latest_checkpoint WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
                 Long.class, journalId, tenantId, subjectRef));
+    }
+
+    @Test
+    void signedCheckpoint履歴latestCASとepochRevisionConflictを検証する() {
+        var partition = witnessPartition();
+        var firstAck = append(partition(partition.tenantId(), partition.subjectRef()), 0,
+                PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-watermark-1");
+        var first = sign(firstAck, 1, "0".repeat(64), Instant.parse("2026-10-02T00:00:00Z"));
+        assertEquals(LatestWitnessPort.AppendResult.APPENDED, latestWitness.append(first, 0, "0".repeat(64)));
+        assertEquals(LatestWitnessPort.AppendResult.REPLAYED, latestWitness.append(first, 0, "0".repeat(64)));
+        assertEquals(SignedWatermarkVerifier.Status.VALID,
+                watermarkVerifier.verify(partition, latestWitness.history(partition), latestWitness.latest(partition)).status());
+
+        var secondAck = append(partition(partition.tenantId(), partition.subjectRef()), 1,
+                PrivacyJournalPort.CommandType.LEASE_CLAIMED, "cmd-watermark-2");
+        var second = sign(secondAck, 2, first.checkpointHash(), Instant.parse("2026-10-02T01:00:00Z"));
+        var forked = sign(secondAck, 2, "a".repeat(64), Instant.parse("2026-10-02T01:00:00Z"));
+        assertEquals(SignedWatermarkVerifier.Reason.CHAIN_INVALID,
+                watermarkVerifier.verify(partition, List.of(first, forked), latestWitness.latest(partition)).reason());
+        assertEquals(LatestWitnessPort.AppendResult.QUARANTINED, latestWitness.append(second, 0, "0".repeat(64)));
+        var conflictingRevision = sign(secondAck, 2, first.checkpointHash(), Instant.parse("2026-10-02T01:00:00Z"), first.checkpoint().eventRevision());
+        assertEquals(LatestWitnessPort.AppendResult.QUARANTINED,
+                latestWitness.append(conflictingRevision, 1, first.checkpointHash()));
+        assertEquals(1, witnessAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                Integer.class, partition.journalId(), partition.tenantId(), partition.subjectRef()));
+        assertEquals(LatestWitnessPort.AppendResult.APPENDED, latestWitness.append(second, 1, first.checkpointHash()));
+        assertEquals(2, latestWitness.history(partition).size());
+        assertEquals(SignedWatermarkVerifier.Status.VALID,
+                watermarkVerifier.verify(partition, latestWitness.history(partition), latestWitness.latest(partition)).status());
+    }
+
+    @Test
+    void signatureCanonicalDomainUnknownCompromisedAndFreshness不一致をfailClosedする() throws Exception {
+        var partition = witnessPartition();
+        var ack = append(partition(partition.tenantId(), partition.subjectRef()), 0,
+                PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-watermark-invalid");
+        var signed = sign(ack, 1, "0".repeat(64), Instant.parse("2026-10-02T00:00:00Z"));
+        assertEquals(LatestWitnessPort.AppendResult.APPENDED, latestWitness.append(signed, 0, "0".repeat(64)));
+        var latest = latestWitness.latest(partition);
+        var history = latestWitness.history(partition);
+        assertEquals(SignedWatermarkVerifier.Reason.PARTITION_MISMATCH,
+                watermarkVerifier.verify(new LatestWitnessPort.Partition("different-" + journalId, tenantId, subjectRef), history, latest).reason());
+
+        byte[] badSignature = signed.signature();
+        badSignature[0] ^= 1;
+        var signatureTampered = new SignedWatermark(signed.checkpoint(), signed.canonicalPayload(), badSignature,
+                signed.checkpointHash(), sha256(badSignature));
+        assertEquals(SignedWatermarkVerifier.Reason.SIGNATURE_INVALID,
+                watermarkVerifier.verify(partition, List.of(signatureTampered), latest).reason());
+
+        byte[] badDomain = signed.canonicalPayload();
+        badDomain[4] ^= 1;
+        var domainTampered = new SignedWatermark(signed.checkpoint(), badDomain, signed.signature(), sha256(badDomain), signed.signatureDigest());
+        assertEquals(SignedWatermarkVerifier.Reason.CANONICAL_INVALID,
+                watermarkVerifier.verify(partition, List.of(domainTampered), latest).reason());
+        var fieldTampered = new WatermarkCheckpoint(journalId, tenantId, subjectRef, 1, ack.revision(), "c".repeat(64),
+                "0".repeat(64), signed.checkpoint().issuedAt(), signed.checkpoint().keyId());
+        var fieldEnvelope = new SignedWatermark(fieldTampered, signed.canonicalPayload(), signed.signature(),
+                signed.checkpointHash(), signed.signatureDigest());
+        assertEquals(SignedWatermarkVerifier.Reason.CANONICAL_INVALID,
+                watermarkVerifier.verify(partition, List.of(fieldEnvelope), latest).reason());
+
+        var noKey = new SignedWatermarkVerifier(new WatermarkKeyHistory(Map.of()),
+                Clock.fixed(Instant.parse("2026-10-02T12:00:00Z"), ZoneOffset.UTC), Duration.ofHours(24));
+        assertEquals(SignedWatermarkVerifier.Reason.UNKNOWN_KEY, noKey.verify(partition, history, latest).reason());
+        var compromised = new SignedWatermarkVerifier(new WatermarkKeyHistory(Map.of("key-synthetic",
+                new WatermarkKeyHistory.Entry(keyFixture.publicKey(), WatermarkKeyHistory.State.COMPROMISED, SyntheticAttestorKeyFixture.AUDIENCE))),
+                Clock.fixed(Instant.parse("2026-10-02T12:00:00Z"), ZoneOffset.UTC), Duration.ofHours(24));
+        assertEquals(SignedWatermarkVerifier.Reason.COMPROMISED_KEY, compromised.verify(partition, history, latest).reason());
+        var wrongAudience = new SignedWatermarkVerifier(new WatermarkKeyHistory(Map.of("key-synthetic",
+                new WatermarkKeyHistory.Entry(keyFixture.publicKey(), WatermarkKeyHistory.State.TRUSTED, "PRODUCTION"))),
+                Clock.fixed(Instant.parse("2026-10-02T12:00:00Z"), ZoneOffset.UTC), Duration.ofHours(24));
+        assertEquals(SignedWatermarkVerifier.Reason.KEY_AUDIENCE_INVALID, wrongAudience.verify(partition, history, latest).reason());
+        var stale = new SignedWatermarkVerifier(keyHistory, Clock.fixed(Instant.parse("2026-10-04T00:00:00Z"), ZoneOffset.UTC), Duration.ofHours(24));
+        assertEquals(SignedWatermarkVerifier.Reason.STALE, stale.verify(partition, history, latest).reason());
+        var future = new SignedWatermarkVerifier(keyHistory, Clock.fixed(Instant.parse("2026-10-01T00:00:00Z"), ZoneOffset.UTC), Duration.ofHours(24));
+        assertEquals(SignedWatermarkVerifier.Reason.FUTURE_ISSUED_AT, future.verify(partition, history, latest).reason());
+        var wrongLatest = new LatestWitnessPort.Latest(partition, latest.epoch(), latest.eventRevision(), "d".repeat(64), latest.checkpointHash());
+        assertEquals(SignedWatermarkVerifier.Reason.LATEST_MISMATCH, watermarkVerifier.verify(partition, history, wrongLatest).reason());
+
+        byte[] persistedSignature = reader.queryForObject("SELECT signature_bytes FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                (rs, row) -> rs.getBytes(1), journalId, tenantId, subjectRef);
+        byte[] persistedSignatureTampered = persistedSignature.clone();
+        persistedSignatureTampered[0] ^= 1;
+        witnessAdmin.update("UPDATE sf_w2b_checkpoint_log SET signature_bytes = ?, signature_digest = ? WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                persistedSignatureTampered, sha256(persistedSignatureTampered), journalId, tenantId, subjectRef);
+        assertEquals(SignedWatermarkVerifier.Reason.SIGNATURE_INVALID,
+                watermarkVerifier.verify(partition, latestWitness.history(partition), latest).reason());
+        witnessAdmin.update("UPDATE sf_w2b_checkpoint_log SET signature_bytes = ?, signature_digest = ? WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                persistedSignature, signed.signatureDigest(), journalId, tenantId, subjectRef);
+        witnessAdmin.update("UPDATE sf_w2b_checkpoint_log SET event_hash = ? WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                "c".repeat(64), journalId, tenantId, subjectRef);
+        assertThrows(RuntimeException.class, () -> latestWitness.history(partition));
+        witnessAdmin.update("UPDATE sf_w2b_checkpoint_log SET event_hash = ? WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                signed.checkpoint().eventHash(), journalId, tenantId, subjectRef);
+        witnessAdmin.update("UPDATE sf_w2b_checkpoint_log SET domain = 'OTHER' WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                journalId, tenantId, subjectRef);
+        assertThrows(RuntimeException.class, () -> latestWitness.history(partition));
+        witnessAdmin.update("UPDATE sf_w2b_checkpoint_log SET domain = ? WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                WatermarkCheckpoint.DOMAIN, journalId, tenantId, subjectRef);
+    }
+
+    @Test
+    void witnessLogとlatestCASは同一transactionでrollbackしcommit応答喪失をreadbackする() {
+        var partition = witnessPartition();
+        var ack = append(partition(partition.tenantId(), partition.subjectRef()), 0,
+                PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-watermark-atomic");
+        var signed = sign(ack, 1, "0".repeat(64), Instant.parse("2026-10-02T00:00:00Z"));
+        String trigger = "trg_w2b_fail_" + UUID.randomUUID().toString().replace("-", "");
+        witnessAdmin.execute("CREATE TRIGGER " + trigger + " BEFORE UPDATE ON sf_w2b_latest_checkpoint FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'test CAS failure'");
+        try {
+            assertEquals(LatestWitnessPort.AppendResult.QUARANTINED, latestWitness.append(signed, 0, "0".repeat(64)));
+            assertEquals(0, witnessAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                    Integer.class, journalId, tenantId, subjectRef));
+            assertEquals(0, witnessAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_latest_checkpoint WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                    Integer.class, journalId, tenantId, subjectRef));
+        } finally {
+            witnessAdmin.execute("DROP TRIGGER IF EXISTS " + trigger);
+        }
+
+        LatestWitnessPort responseLost = new LatestWitnessPort() {
+            private final AtomicBoolean loseOnce = new AtomicBoolean(true);
+            @Override public List<SignedWatermark> history(Partition p) { return latestWitness.history(p); }
+            @Override public Latest latest(Partition p) { return latestWitness.latest(p); }
+            @Override public AppendResult append(SignedWatermark value, long epoch, String hash) {
+                AppendResult result = latestWitness.append(value, epoch, hash);
+                if (loseOnce.compareAndSet(true, false)) throw new IllegalStateException("commit ACK lost");
+                return result;
+            }
+        };
+        assertEquals(LatestWitnessPort.AppendResult.REPLAYED,
+                watermarkAttestor.appendAndRecover(signed, 0, "0".repeat(64), responseLost, watermarkVerifier));
+        assertEquals(SignedWatermarkVerifier.Status.VALID,
+                watermarkVerifier.verify(partition, latestWitness.history(partition), latestWitness.latest(partition)).status());
+        assertEquals(1, witnessAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                Integer.class, journalId, tenantId, subjectRef));
+    }
+
+    private LatestWitnessPort.Partition witnessPartition() { return new LatestWitnessPort.Partition(journalId, tenantId, subjectRef); }
+
+    private PrivacyJournalPort.JournalPartition partition(String tenant, String subject) {
+        return new PrivacyJournalPort.JournalPartition(tenant, subject);
+    }
+
+    private SignedWatermark sign(PrivacyJournalPort.JournalAck ack, long epoch, String previousHash, Instant issuedAt) {
+        return sign(ack, epoch, previousHash, issuedAt, ack.revision());
+    }
+
+    private SignedWatermark sign(PrivacyJournalPort.JournalAck ack, long epoch, String previousHash, Instant issuedAt, long revision) {
+        var checkpoint = new WatermarkCheckpoint(journalId, tenantId, subjectRef, epoch, revision,
+                ack.eventHash(), previousHash, issuedAt, "key-synthetic");
+        return watermarkAttestor.sign(checkpoint);
+    }
+
+    private static String sha256(byte[] bytes) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    }
+
+    private static String publicKeyFingerprint(PublicKey key) {
+        try { return sha256(key.getEncoded()); }
+        catch (Exception impossible) { throw new IllegalStateException("public key fingerprintを計算できません", impossible); }
     }
 
     private static MySQLContainer<?> mysql(String prefix) {
