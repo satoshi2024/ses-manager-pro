@@ -46,6 +46,7 @@ import com.ses.importcenter.foundation.SourceRow;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -82,6 +83,7 @@ class ImportIdentityCandidateMySqlTest {
     private long runId;
     private long documentId;
     private long documentVersionId;
+    private long actorUserId;
     private org.springframework.security.core.Authentication authentication;
     private Runnable afterSourceRead;
     private CountDownLatch sourceReads;
@@ -90,6 +92,7 @@ class ImportIdentityCandidateMySqlTest {
     void setUp() throws Exception {
         tenant = "candidate-" + UUID.randomUUID().toString().replace("-", "");
         sourceId = 3L; jobId = 9L; runId = 11L; documentId = 21L; documentVersionId = 22L;
+        actorUserId = Math.max(1L, System.nanoTime());
         DriverManagerDataSource mysqlDataSource = new DriverManagerDataSource();
         mysqlDataSource.setDriverClassName(MYSQL.getDriverClassName());
         mysqlDataSource.setUrl(MYSQL.getJdbcUrl());
@@ -116,7 +119,7 @@ class ImportIdentityCandidateMySqlTest {
                 new DataSourceTransactionManager(dataSource));
 
         SysUser principalUser = new SysUser();
-        principalUser.setId(17L);
+        principalUser.setId(actorUserId);
         principalUser.setUsername("candidate-admin");
         principalUser.setPassword("test-only");
         principalUser.setRole("管理者");
@@ -145,6 +148,10 @@ class ImportIdentityCandidateMySqlTest {
     @AfterEach
     void clearSecurityContext() {
         SecurityContextHolder.clearContext();
+        if (jdbc != null && actorUserId > 0) {
+            jdbc.update("DELETE FROM t_user_permission_group WHERE tenant_id=? AND user_id=?", tenant, actorUserId);
+            jdbc.update("DELETE FROM sys_user WHERE id=?", actorUserId);
+        }
     }
 
     @Test
@@ -161,7 +168,57 @@ class ImportIdentityCandidateMySqlTest {
             assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_identity_registry WHERE tenant_id=?", Integer.class, tenant));
         } finally {
             executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS), "candidate workerが終了していません");
         }
+    }
+
+    @Test
+    void registrationWaitsOnMySqlSourceRowLock() throws Exception {
+        CountDownLatch readerPaused = new CountDownLatch(1);
+        CountDownLatch continueReader = new CountDownLatch(1);
+        afterSourceRead = () -> {
+            readerPaused.countDown();
+            try {
+                if (!continueReader.await(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("source reader barrierの待機がtimeoutしました");
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+        };
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try (Connection blocker = dataSource.getConnection(); Statement statement = blocker.createStatement()) {
+            blocker.setAutoCommit(false);
+            statement.executeQuery("SELECT id FROM t_import_source_system WHERE tenant_id='" + tenant
+                    + "' AND id=" + sourceId + " FOR UPDATE").close();
+            Future<Long> registration = executor.submit(this::registerOnAuthenticatedThread);
+            assertTrue(readerPaused.await(5, TimeUnit.SECONDS), "source readerが停止地点へ到達しませんでした");
+            continueReader.countDown();
+            awaitSourceRowLockWait();
+            blocker.commit();
+            assertTrue(registration.get(15, TimeUnit.SECONDS) > 0, "candidate IDが返りませんでした");
+        } finally {
+            continueReader.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS), "candidate workerが終了していません");
+        }
+    }
+
+    private void awaitSourceRowLockWait() throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            Integer waits = jdbc.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM performance_schema.data_lock_waits w
+                    JOIN performance_schema.data_locks req
+                      ON req.ENGINE = w.ENGINE AND req.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID
+                    WHERE req.OBJECT_SCHEMA = DATABASE() AND req.OBJECT_NAME = 't_import_source_system'
+                    """, Integer.class);
+            if (waits != null && waits > 0) return;
+            Thread.sleep(25);
+        }
+        throw new AssertionError("performance_schemaにt_import_source_systemの実ロック待機が記録されませんでした");
     }
 
     @Test
@@ -193,7 +250,7 @@ class ImportIdentityCandidateMySqlTest {
 
     @Test
     void permissionRevokedAfterReadIsRejectedByLiveAuthorizationQuery() {
-        afterSourceRead = () -> jdbc.update("DELETE FROM t_user_permission_group WHERE tenant_id=? AND user_id=17", tenant);
+        afterSourceRead = () -> jdbc.update("DELETE FROM t_user_permission_group WHERE tenant_id=? AND user_id=?", tenant, actorUserId);
 
         assertThrows(BusinessException.class, () -> service.registerCandidate(jobId, runId, 1L));
         assertNoRegistryRow();
@@ -236,9 +293,9 @@ class ImportIdentityCandidateMySqlTest {
         String rowHash = rowHash("customer-1", "Example");
         SourceRow row = new SourceRow(1L, rowHash, Map.of("externalKey", "customer-1", "companyName", "Example"));
         byte[] fingerprint = CanonicalImportRowFingerprint.sha256(CanonicalRowFactory.create(ImportEntity.CUSTOMER, row));
-        jdbc.update("INSERT INTO sys_user VALUES(17,?,?,1,0)", tenant, "管理者");
+        jdbc.update("INSERT INTO sys_user VALUES(?,?,?,1,0)", actorUserId, tenant, "管理者");
         jdbc.update("INSERT INTO m_permission_group VALUES(?,?,1,0)", tenant, 2L);
-        jdbc.update("INSERT INTO t_user_permission_group VALUES(?,?,?,0)", tenant, 17L, 2L);
+        jdbc.update("INSERT INTO t_user_permission_group VALUES(?,?,?,0)", tenant, actorUserId, 2L);
         jdbc.update("INSERT INTO t_permission_group_action VALUES(?,?,?,0,0)", tenant, 2L, ImportMetadataAuthorizationService.ACTION);
         jdbc.update("INSERT INTO t_import_source_system VALUES(?,?,?,?,?)", tenant, sourceId, 4L, "ACTIVE", LOOKUP_VERSION);
         jdbc.update("INSERT INTO t_document VALUES(?,?,?,?,?,?)", tenant, documentId, "77", 0, null, 0);
