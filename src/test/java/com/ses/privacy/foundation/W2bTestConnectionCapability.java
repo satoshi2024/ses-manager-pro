@@ -1,7 +1,7 @@
 package com.ses.privacy.foundation;
 
 import org.testcontainers.containers.MySQLContainer;
-import org.springframework.core.env.Environment;
+import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
@@ -17,7 +17,7 @@ import java.util.UUID;
 final class W2bTestConnectionCapability {
     enum Store { JOURNAL, APPLICATION, WITNESS }
 
-    private final Environment environment;
+    private final ApplicationContext context;
     private final Store store;
     private final String jdbcUrl;
     private final String username;
@@ -26,13 +26,13 @@ final class W2bTestConnectionCapability {
     private final String schemaResource;
     private final String containerId;
 
-    private W2bTestConnectionCapability(MySQLContainer<?> container, Environment environment, Store store) {
-        W2bTestEnvironment.requireTest(environment);
+    private W2bTestConnectionCapability(MySQLContainer<?> container, ApplicationContext context, Store store) {
+        W2bTestEnvironment.requireTest(context);
         if (container == null || !container.isRunning() || container.getContainerId() == null
                 || container.getContainerId().isBlank()) {
             throw new SecurityException("起動済みharness所有MySQLが必要です");
         }
-        this.environment = environment;
+        this.context = context;
         this.store = store;
         this.jdbcUrl = container.getJdbcUrl();
         this.username = container.getUsername();
@@ -60,14 +60,14 @@ final class W2bTestConnectionCapability {
     }
 
     static W2bTestConnectionCapability fromOwnedContainer(MySQLContainer<?> container,
-                                                           Environment environment, Store store) {
-        return new W2bTestConnectionCapability(container, environment, store);
+                                                           ApplicationContext context, Store store) {
+        return new W2bTestConnectionCapability(container, context, store);
     }
 
-    String containerId() { W2bTestEnvironment.requireTest(environment); return containerId; }
-    String database() { W2bTestEnvironment.requireTest(environment); return database; }
+    String containerId() { W2bTestEnvironment.requireTest(context); return containerId; }
+    String database() { W2bTestEnvironment.requireTest(context); return database; }
     String schemaHash() {
-        W2bTestEnvironment.requireTest(environment);
+        W2bTestEnvironment.requireTest(context);
         try (var input = getClass().getClassLoader().getResourceAsStream(schemaResource)) {
             if (input == null) throw new SecurityException("W2b test schemaがありません");
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(input.readAllBytes()));
@@ -77,12 +77,12 @@ final class W2bTestConnectionCapability {
     }
 
     DataSource adminDataSource() {
-        W2bTestEnvironment.requireTest(environment);
-        return new DriverManagerDataSource(jdbcUrl, username, password);
+        W2bTestEnvironment.requireTest(context);
+        return new ProfileGuardedDataSource(new DriverManagerDataSource(jdbcUrl, username, password), context);
     }
 
     void initializeSchema() {
-        W2bTestEnvironment.requireTest(environment);
+        W2bTestEnvironment.requireTest(context);
         new ResourceDatabasePopulator(new ClassPathResource(schemaResource)).execute(adminDataSource());
     }
 
@@ -93,7 +93,7 @@ final class W2bTestConnectionCapability {
         JdbcTemplate admin = new JdbcTemplate(adminDataSource());
         admin.execute("CREATE USER '" + user + "'@'%' IDENTIFIED BY '" + secret + "'");
         admin.execute("GRANT SELECT, INSERT, UPDATE ON `" + database + "`.sf_w2b_projection TO '" + user + "'@'%'");
-        return new DriverManagerDataSource(jdbcUrl, user, secret);
+        return new ProfileGuardedDataSource(new DriverManagerDataSource(jdbcUrl, user, secret), context);
     }
 
     DataSource createWitnessAttestorDataSource() {
@@ -104,7 +104,7 @@ final class W2bTestConnectionCapability {
         admin.execute("CREATE USER '" + user + "'@'%' IDENTIFIED BY '" + secret + "'");
         admin.execute("GRANT SELECT, INSERT ON `" + database + "`.sf_w2b_checkpoint_log TO '" + user + "'@'%'");
         admin.execute("GRANT SELECT, INSERT, UPDATE ON `" + database + "`.sf_w2b_latest_checkpoint TO '" + user + "'@'%'");
-        return new DriverManagerDataSource(jdbcUrl, user, secret);
+        return new ProfileGuardedDataSource(new DriverManagerDataSource(jdbcUrl, user, secret), context);
     }
 
     DataSource createWitnessReaderDataSource() {
@@ -115,7 +115,7 @@ final class W2bTestConnectionCapability {
         admin.execute("CREATE USER '" + user + "'@'%' IDENTIFIED BY '" + secret + "'");
         admin.execute("GRANT SELECT ON `" + database + "`.sf_w2b_checkpoint_log TO '" + user + "'@'%'");
         admin.execute("GRANT SELECT ON `" + database + "`.sf_w2b_latest_checkpoint TO '" + user + "'@'%'");
-        return new DriverManagerDataSource(jdbcUrl, user, secret);
+        return new ProfileGuardedDataSource(new DriverManagerDataSource(jdbcUrl, user, secret), context);
     }
 
     DataSource createUnprivilegedJournalDataSourceOnWitness() {
@@ -129,18 +129,18 @@ final class W2bTestConnectionCapability {
     }
 
     private DataSource createUnprivilegedWitnessPrincipal(String prefix) {
-        W2bTestEnvironment.requireTest(environment);
+        W2bTestEnvironment.requireTest(context);
         String user = newUser(prefix);
         String secret = newSecret();
         JdbcTemplate admin = new JdbcTemplate(adminDataSource());
         admin.execute("CREATE USER '" + user + "'@'%' IDENTIFIED BY '" + secret + "'");
-        return new DriverManagerDataSource(jdbcUrl, user, secret);
+        return new ProfileGuardedDataSource(new DriverManagerDataSource(jdbcUrl, user, secret), context);
     }
 
-    void requireAvailable() { W2bTestEnvironment.requireTest(environment); }
+    void requireAvailable() { W2bTestEnvironment.requireTest(context); }
 
     private void requireStore(Store expected) {
-        W2bTestEnvironment.requireTest(environment);
+        W2bTestEnvironment.requireTest(context);
         if (store != expected) throw new SecurityException("異なるstore capabilityの利用です");
     }
 

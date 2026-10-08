@@ -1,6 +1,6 @@
 package com.ses.privacy.foundation;
 
-import org.springframework.core.env.Environment;
+import org.springframework.context.ApplicationContext;
 
 import java.security.GeneralSecurityException;
 import java.security.KeyPair;
@@ -11,26 +11,32 @@ import java.security.Signature;
 final class SyntheticAttestorKeyFixture {
     static final String AUDIENCE = "TEST/SYNTHETIC";
     private final KeyPair keyPair;
+    private final ApplicationContext context;
 
-    private SyntheticAttestorKeyFixture(KeyPair keyPair) { this.keyPair = keyPair; }
+    private SyntheticAttestorKeyFixture(KeyPair keyPair, ApplicationContext context) {
+        this.keyPair = keyPair;
+        this.context = context;
+    }
 
-    static SyntheticAttestorKeyFixture generate(org.springframework.core.env.Environment environment) {
-        W2bTestEnvironment.requireTest(environment);
+    static SyntheticAttestorKeyFixture generateForHarness(TemporaryW2bHarness harness) {
+        if (harness == null) throw new SecurityException("W2b harnessが必要です");
+        ApplicationContext context = harness.contextForKeyFixture();
+        W2bTestEnvironment.requireTest(context);
         try {
-            return new SyntheticAttestorKeyFixture(KeyPairGenerator.getInstance("Ed25519").generateKeyPair());
+            return new SyntheticAttestorKeyFixture(KeyPairGenerator.getInstance("Ed25519").generateKeyPair(), context);
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("Ed25519合成鍵を生成できません", e);
         }
     }
 
     String audience() { return AUDIENCE; }
-    java.security.PublicKey publicKey(Environment environment) {
-        W2bTestEnvironment.requireTest(environment);
+    java.security.PublicKey publicKey() {
+        W2bTestEnvironment.requireTest(context);
         return keyPair.getPublic();
     }
 
-    byte[] sign(Environment environment, byte[] canonicalBytes) {
-        W2bTestEnvironment.requireTest(environment);
+    byte[] sign(byte[] canonicalBytes) {
+        W2bTestEnvironment.requireTest(context);
         try {
             Signature signature = Signature.getInstance("Ed25519");
             signature.initSign(keyPair.getPrivate());

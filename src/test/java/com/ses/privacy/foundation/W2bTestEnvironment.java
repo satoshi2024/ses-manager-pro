@@ -1,6 +1,6 @@
 package com.ses.privacy.foundation;
 
-import org.springframework.core.env.Environment;
+import org.springframework.context.ApplicationContext;
 
 import java.util.Arrays;
 
@@ -8,7 +8,9 @@ import java.util.Arrays;
 final class W2bTestEnvironment {
     private W2bTestEnvironment() { }
 
-    static void requireTest(Environment environment) {
+    static void requireTest(ApplicationContext context) {
+        if (context == null) throw new SecurityException("W2bのSpring contextが必要です");
+        org.springframework.core.env.Environment environment = context.getEnvironment();
         String[] active = environment.getActiveProfiles();
         String[] defaults = environment.getDefaultProfiles();
         if (!Arrays.asList(active).contains("test") || active.length == 0
