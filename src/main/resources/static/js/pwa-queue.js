@@ -405,7 +405,8 @@
             request.onsuccess = () => {
                 const cursor = request.result;
                 if (!cursor) return;
-                cursor.delete();
+                // key-only cursorにdelete()は使えないため、主キーをobjectStoreから削除する。
+                store.delete(cursor.primaryKey);
                 cursor.continue();
             };
             return request;
@@ -738,7 +739,8 @@
             request.onsuccess = () => {
                 const cursor = request.result;
                 if (!cursor) return;
-                cursor.delete();
+                // key-only cursorにdelete()は使えないため、主キーをobjectStoreから削除する。
+                store.delete(cursor.primaryKey);
                 cursor.continue();
             };
             return request;
