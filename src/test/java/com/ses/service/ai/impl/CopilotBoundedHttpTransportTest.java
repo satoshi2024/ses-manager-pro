@@ -1,6 +1,7 @@
 package com.ses.service.ai.impl;
 
 import com.ses.common.exception.BusinessException;
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -15,15 +16,19 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -31,28 +36,63 @@ class CopilotBoundedHttpTransportTest {
 
     private static final String TEST_HOST = "copilot-transport.test";
     private HttpServer server;
+    private ExecutorService serverExecutor;
     private CopilotBoundedHttpTransport transport;
 
     @AfterEach
-    void closeResources() {
+    void closeResources() throws InterruptedException {
         if (transport != null) {
             transport.close();
         }
         if (server != null) {
             server.stop(0);
         }
+        if (serverExecutor != null) {
+            serverExecutor.shutdownNow();
+            assertTrue(serverExecutor.awaitTermination(2, TimeUnit.SECONDS));
+        }
+        assertNull(serverFailure.get(), () -> "HTTPテストサーバーで非同期失敗: " + serverFailure.get());
+    }
+
+    private final AtomicReference<Throwable> serverFailure = new AtomicReference<>();
+
+    private void startServer() {
+        serverExecutor = new ThreadPoolExecutor(8, 8, 0, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(16), new ThreadPoolExecutor.AbortPolicy());
+        server.setExecutor(serverExecutor);
+        server.start();
+    }
+
+    private HttpHandler guarded(HttpHandler handler) {
+        return exchange -> {
+            try {
+                handler.handle(exchange);
+            } catch (Throwable failure) {
+                serverFailure.compareAndSet(null, failure);
+                if (failure instanceof IOException ioException) {
+                    throw ioException;
+                }
+                if (failure instanceof RuntimeException runtimeException) {
+                    throw runtimeException;
+                }
+                if (failure instanceof Error error) {
+                    throw error;
+                }
+                throw new IOException("HTTPテストサーバー処理に失敗しました", failure);
+            }
+        };
     }
 
     @Test
     void missingAndExpiredSnapshotsFailBeforeSending() throws Exception {
         AtomicInteger requestsReceived = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), 0), 0);
-        server.createContext("/", exchange -> {
+        server.createContext("/", guarded(exchange -> {
             requestsReceived.incrementAndGet();
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
-        });
-        server.start();
+        }));
+        startServer();
         transport = newTransport(CopilotDnsSnapshotResolver.DnsSnapshot.empty(), Clock.systemUTC());
         transport.start();
         BusinessException missing = assertThrows(BusinessException.class,
@@ -74,20 +114,20 @@ class CopilotBoundedHttpTransportTest {
     @Test
     void boundedHttpOneRequestSucceedsAndResponseCapFailsClosed() throws Exception {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), 0), 0);
-        server.createContext("/", exchange -> {
+        server.createContext("/", guarded(exchange -> {
             byte[] body = "{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
-        });
-        server.createContext("/large", exchange -> {
+        }));
+        server.createContext("/large", guarded(exchange -> {
             byte[] body = new byte[CopilotBoundedHttpTransport.MAX_RESPONSE_BYTES + 1];
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
-        });
-        server.start();
+        }));
+        startServer();
         transport = newTransport(snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC());
         transport.start();
 
@@ -108,12 +148,12 @@ class CopilotBoundedHttpTransportTest {
     void expiredDeadlineDoesNotReachServer() throws Exception {
         AtomicInteger requestsReceived = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), 0), 0);
-        server.createContext("/", exchange -> {
+        server.createContext("/", guarded(exchange -> {
             requestsReceived.incrementAndGet();
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
-        });
-        server.start();
+        }));
+        startServer();
         transport = newTransport(snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC());
         transport.start();
 
@@ -127,30 +167,35 @@ class CopilotBoundedHttpTransportTest {
     @Test
     void warmConnectionは送信直前のDNS期限切れを拒否する() throws Exception {
         AtomicInteger requestsReceived = new AtomicInteger();
+        List<Integer> remotePorts = new CopyOnWriteArrayList<>();
         server = HttpServer.create(loopbackAddress(), 0);
-        server.createContext("/", exchange -> {
+        server.createContext("/", guarded(exchange -> {
             requestsReceived.incrementAndGet();
+            remotePorts.add(exchange.getRemoteAddress().getPort());
             byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
-        });
-        server.start();
+        }));
+        startServer();
         ControlledClock clock = new ControlledClock();
         Instant dnsExpiry = Instant.now().plusSeconds(60);
         transport = newTransport(snapshot(dnsExpiry), clock);
         transport.start();
 
         assertEquals(200, transport.post(uri(), request(), deadlineAfter(3, TimeUnit.SECONDS)).statusCode());
+        assertEquals(200, transport.post(uri(), request(), deadlineAfter(3, TimeUnit.SECONDS)).statusCode());
+        assertEquals(2, requestsReceived.get());
+        assertEquals(remotePorts.get(0), remotePorts.get(1), "同一HTTP/1.1 connectionを再利用する");
         clock.expireAfterValidReads(1, dnsExpiry);
         BusinessException expired = assertThrows(BusinessException.class,
                 () -> transport.post(uri(), request(), deadlineAfter(3, TimeUnit.SECONDS)));
 
         assertEquals("COPILOT_DNS_UNAVAILABLE", expired.getMessage());
-        assertEquals(1, requestsReceived.get());
+        assertEquals(2, requestsReceived.get());
         clock.resume();
         assertEquals(200, transport.post(uri(), request(), deadlineAfter(3, TimeUnit.SECONDS)).statusCode());
-        assertEquals(2, requestsReceived.get());
+        assertEquals(3, requestsReceived.get());
     }
 
     @Test
@@ -161,7 +206,7 @@ class CopilotBoundedHttpTransportTest {
         CountDownLatch submittedFive = new CountDownLatch(5);
         AtomicInteger requestsReceived = new AtomicInteger();
         server = HttpServer.create(loopbackAddress(), 0);
-        server.createContext("/", exchange -> {
+        server.createContext("/", guarded(exchange -> {
             requestsReceived.incrementAndGet();
             if ("/hold".equals(exchange.getRequestURI().getPath())) {
                 firstFourReceived.countDown();
@@ -171,8 +216,8 @@ class CopilotBoundedHttpTransportTest {
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
-        });
-        server.start();
+        }));
+        startServer();
         ControlledClock clock = new ControlledClock();
         Instant dnsExpiry = Instant.now().plusSeconds(60);
         transport = newTransport(snapshot(dnsExpiry), clock, admittedFive::countDown, submittedFive::countDown);
@@ -207,7 +252,7 @@ class CopilotBoundedHttpTransportTest {
         } finally {
             releaseServer.countDown();
             callers.shutdownNow();
-            callers.awaitTermination(2, TimeUnit.SECONDS);
+            assertTrue(callers.awaitTermination(2, TimeUnit.SECONDS));
         }
     }
 
@@ -217,35 +262,40 @@ class CopilotBoundedHttpTransportTest {
         CountDownLatch releaseBody = new CountDownLatch(1);
         AtomicInteger healthyRequests = new AtomicInteger();
         server = HttpServer.create(loopbackAddress(), 0);
-        server.createContext("/drip", exchange -> {
+        server.createContext("/drip", guarded(exchange -> {
             exchange.sendResponseHeaders(200, 0);
             exchange.getResponseBody().write("{".getBytes(StandardCharsets.UTF_8));
             exchange.getResponseBody().flush();
             firstBodyChunk.countDown();
             try {
-                for (int index = 0; index < 20; index++) {
+                for (int index = 0; index < 8; index++) {
                     if (releaseBody.await(100, TimeUnit.MILLISECONDS)) {
                         break;
                     }
                     exchange.getResponseBody().write("a".getBytes(StandardCharsets.UTF_8));
                     exchange.getResponseBody().flush();
                 }
+                if (releaseBody.getCount() > 0) {
+                    awaitRelease(releaseBody);
+                }
             } catch (IOException ignored) {
-                // cancelによりsocketが閉じられた場合は本文送信が失敗する。
+                if (releaseBody.getCount() == 0) {
+                    throw ignored;
+                }
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
             } finally {
                 exchange.close();
             }
-        });
-        server.createContext("/healthy", exchange -> {
+        }));
+        server.createContext("/healthy", guarded(exchange -> {
             healthyRequests.incrementAndGet();
             byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
-        });
-        server.start();
+        }));
+        startServer();
         transport = newTransport(snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC());
         transport.start();
         ExecutorService caller = Executors.newSingleThreadExecutor();
@@ -260,15 +310,15 @@ class CopilotBoundedHttpTransportTest {
             });
             assertTrue(firstBodyChunk.await(2, TimeUnit.SECONDS));
             assertEquals("COPILOT_DEADLINE_EXCEEDED", slow.get(2, TimeUnit.SECONDS));
+            awaitNoLeasedConnections(transport, 2, TimeUnit.SECONDS);
             releaseBody.countDown();
             assertEquals(200, transport.post(uri("/healthy"), request(),
                     deadlineAfter(3, TimeUnit.SECONDS)).statusCode());
             assertEquals(1, healthyRequests.get());
-            awaitNoActiveExchanges(transport, 2, TimeUnit.SECONDS);
         } finally {
             releaseBody.countDown();
             caller.shutdownNow();
-            caller.awaitTermination(2, TimeUnit.SECONDS);
+            assertTrue(caller.awaitTermination(2, TimeUnit.SECONDS));
         }
     }
 
@@ -278,22 +328,29 @@ class CopilotBoundedHttpTransportTest {
         CountDownLatch releaseHeaders = new CountDownLatch(1);
         AtomicInteger healthyRequests = new AtomicInteger();
         server = HttpServer.create(loopbackAddress(), 0);
-        server.createContext("/header-stall", exchange -> {
+        server.createContext("/header-stall", guarded(exchange -> {
             requestReceived.countDown();
             awaitRelease(releaseHeaders);
-            byte[] body = "late".getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, body.length);
-            exchange.getResponseBody().write(body);
-            exchange.close();
-        });
-        server.createContext("/healthy", exchange -> {
+            try {
+                byte[] body = "late".getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, body.length);
+                exchange.getResponseBody().write(body);
+            } catch (IOException ex) {
+                if (releaseHeaders.getCount() != 0) {
+                    throw ex;
+                }
+            } finally {
+                exchange.close();
+            }
+        }));
+        server.createContext("/healthy", guarded(exchange -> {
             healthyRequests.incrementAndGet();
             byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
-        });
-        server.start();
+        }));
+        startServer();
         transport = newTransport(snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC());
         transport.start();
         ExecutorService caller = Executors.newSingleThreadExecutor();
@@ -308,15 +365,15 @@ class CopilotBoundedHttpTransportTest {
             });
             assertTrue(requestReceived.await(2, TimeUnit.SECONDS));
             assertEquals("COPILOT_DEADLINE_EXCEEDED", stalled.get(2, TimeUnit.SECONDS));
+            awaitNoLeasedConnections(transport, 2, TimeUnit.SECONDS);
             releaseHeaders.countDown();
             assertEquals(200, transport.post(uri("/healthy"), request(),
                     deadlineAfter(3, TimeUnit.SECONDS)).statusCode());
             assertEquals(1, healthyRequests.get());
-            awaitNoActiveExchanges(transport, 2, TimeUnit.SECONDS);
         } finally {
             releaseHeaders.countDown();
             caller.shutdownNow();
-            caller.awaitTermination(2, TimeUnit.SECONDS);
+            assertTrue(caller.awaitTermination(2, TimeUnit.SECONDS));
         }
     }
 
@@ -327,7 +384,7 @@ class CopilotBoundedHttpTransportTest {
         CountDownLatch admittedTwelve = new CountDownLatch(12);
         AtomicInteger requestsReceived = new AtomicInteger();
         server = HttpServer.create(loopbackAddress(), 0);
-        server.createContext("/", exchange -> {
+        server.createContext("/", guarded(exchange -> {
             requestsReceived.incrementAndGet();
             firstFourReceived.countDown();
             awaitRelease(releaseServer);
@@ -335,8 +392,8 @@ class CopilotBoundedHttpTransportTest {
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
-        });
-        server.start();
+        }));
+        startServer();
         transport = newTransport(snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC(),
                 admittedTwelve::countDown, () -> { });
         transport.start();
@@ -360,7 +417,7 @@ class CopilotBoundedHttpTransportTest {
         } finally {
             releaseServer.countDown();
             callers.shutdownNow();
-            callers.awaitTermination(2, TimeUnit.SECONDS);
+            assertTrue(callers.awaitTermination(2, TimeUnit.SECONDS));
         }
     }
 
@@ -394,22 +451,28 @@ class CopilotBoundedHttpTransportTest {
         return new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), 0);
     }
 
-    private static void awaitRelease(CountDownLatch latch) throws IOException {
+    private void awaitRelease(CountDownLatch latch) throws IOException {
         try {
-            latch.await(3, TimeUnit.SECONDS);
+            if (!latch.await(3, TimeUnit.SECONDS)) {
+                IOException failure = new IOException("テスト用barrierの解放が時間切れになりました");
+                serverFailure.compareAndSet(null, failure);
+                throw failure;
+            }
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            throw new IOException("テスト用barrierが中断されました", ex);
+            IOException failure = new IOException("テスト用barrierが中断されました", ex);
+            serverFailure.compareAndSet(null, failure);
+            throw failure;
         }
     }
 
-    private static void awaitNoActiveExchanges(CopilotBoundedHttpTransport transport, long amount,
-                                               TimeUnit unit) {
+    private static void awaitNoLeasedConnections(CopilotBoundedHttpTransport transport, long amount,
+                                                  TimeUnit unit) {
         long deadline = System.nanoTime() + unit.toNanos(amount);
-        while (transport.activeExchangeCount() != 0 && System.nanoTime() < deadline) {
+        while (transport.leasedConnectionCount() != 0 && System.nanoTime() < deadline) {
             Thread.yield();
         }
-        assertEquals(0, transport.activeExchangeCount());
+        assertEquals(0, transport.leasedConnectionCount(), "timeout後にpool leased connectionを解放する");
     }
 
     private static byte[] request() {
