@@ -20,3 +20,4 @@ AiFeedbackLearningSchemaTest
 LifecycleMySqlIntegrationTest
 AssetMySqlIntegrationTest
 ImportIdentityCandidateMySqlTest
+ImportMetadataRealMySqlTest
