@@ -22,6 +22,9 @@ public record CopilotInvocation(
                 || deadlineNanos <= 0 || preflightCostEvidence == null) {
             throw new IllegalArgumentException("Copilot invocationの必須項目が不足しています");
         }
+        if (!preflightCostEvidence.configIdentity().equals(configSnapshot.configHash())) {
+            throw new IllegalArgumentException("費用preflightとconfig snapshotが一致しません");
+        }
     }
 
     public boolean identityMatchesSnapshot() {

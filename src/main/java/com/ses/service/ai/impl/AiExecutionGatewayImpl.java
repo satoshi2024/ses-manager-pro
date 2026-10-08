@@ -26,7 +26,6 @@ import com.ses.service.ai.copilot.CopilotInvocation;
 import com.ses.service.ai.copilot.summary.CopilotProviderCostPolicy;
 import com.ses.service.ai.copilot.summary.PreflightCostEvidence;
 import com.ses.service.ai.copilot.summary.ProductionDenyAllCopilotCostPolicy;
-import com.ses.service.ai.copilot.summary.DispatchOutcome;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -195,9 +194,8 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         if (request.getCostBudgetYen() == null) {
             throw BusinessException.of(503, "COPILOT_COST_BUDGET_REQUIRED");
         }
-        preflight = new PreflightCostEvidence("local-no-egress-v1", request.getCostBudgetYen(), true,
-                com.ses.service.ai.copilot.summary.CopilotCostState.NOT_SENT,
-                DispatchOutcome.notStarted("LOCAL_PROVIDER_NO_EGRESS"), "LOCAL_PROVIDER_NO_EGRESS");
+        preflight = PreflightCostEvidence.localNoEgress(startupCopilotConfigSnapshot.configHash(),
+                request.getCostBudgetYen());
         CopilotInvocation invocation = new CopilotInvocation(startupCopilotConfigSnapshot,
                 request.getExpectedArtifactVersionId(), request.getExpectedProvider(), request.getExpectedModel(),
                 request.getExpectedPromptVersion(), request.getExpectedConfigHash(), request.getDeadlineNanos(),

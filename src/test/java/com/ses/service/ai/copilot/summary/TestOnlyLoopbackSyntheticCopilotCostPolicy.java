@@ -6,6 +6,8 @@ import java.net.URI;
 
 /** loopback合成fixture専用。src/mainには同等のallow policyを置かない。 */
 final class TestOnlyLoopbackSyntheticCopilotCostPolicy implements CopilotProviderCostPolicy {
+    static final int UPPER_BOUND_YEN = 2;
+
     @Override
     public PreflightCostEvidence preflight(CopilotConfigSnapshot snapshot, Integer budgetYen) {
         if (snapshot == null || budgetYen == null || budgetYen < 0) {
@@ -17,8 +19,17 @@ final class TestOnlyLoopbackSyntheticCopilotCostPolicy implements CopilotProvide
                 && !"::1".equals(host)) {
             throw new IllegalArgumentException("synthetic policy only accepts loopback hosts");
         }
-        return new PreflightCostEvidence("test-only-loopback-synthetic-v1", budgetYen, true,
-                CopilotCostState.UPPER_BOUND, DispatchOutcome.notStarted("SYNTHETIC_TEST_ONLY"),
-                "SYNTHETIC_TEST_ONLY");
+        String configIdentity = snapshot.configHash();
+        String proofIdentity = "loopback-upper-bound-v1:" + configIdentity;
+        if (configIdentity == null || configIdentity.isBlank()) {
+            throw new IllegalArgumentException("synthetic config identity is required");
+        }
+        if (budgetYen < UPPER_BOUND_YEN) {
+            return PreflightCostEvidence.denied("test-only-loopback-synthetic-v1", configIdentity,
+                    proofIdentity, UPPER_BOUND_YEN, budgetYen, "SYNTHETIC_BUDGET_EXCEEDED");
+        }
+        return new PreflightCostEvidence("test-only-loopback-synthetic-v1", configIdentity, proofIdentity,
+                UPPER_BOUND_YEN, budgetYen, true, CopilotCostState.UPPER_BOUND,
+                DispatchOutcome.notStarted("SYNTHETIC_TEST_ONLY"), "SYNTHETIC_TEST_ONLY");
     }
 }
