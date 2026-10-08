@@ -259,7 +259,11 @@ class PwaQueueChromeIsolationBrowserTest {
             } finally {
                 Throwable ttlCleanupFailure = null;
                 try {
-                    browser.evaluate("if(window.__nf04TtlNativeDateNow){Date.now=window.__nf04TtlNativeDateNow;delete window.__nf04TtlNativeDateNow}true");
+                    assertTrue(browser.evaluateStrict("(()=>{const original=window.__nf04TtlNativeDateNow;"
+                            + "if(typeof original!=='function')throw new Error('TTL test clock original Date.now is missing');"
+                            + "Date.now=original;delete window.__nf04TtlNativeDateNow;"
+                            + "if(Date.now!==original)throw new Error('TTL test clock Date.now restore failed');return true})()")
+                            .asBoolean(), "TTL試験realmのDate.nowを元の関数へ復旧する");
                 } catch (Throwable thrown) {
                     ttlCleanupFailure = thrown;
                 }
