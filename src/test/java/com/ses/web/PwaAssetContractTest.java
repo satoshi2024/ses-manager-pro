@@ -95,7 +95,7 @@ class PwaAssetContractTest {
                 "return method === 'PUT'", "URL IDとpayload.idが一致しません", "row.days", "row.dailies");
         assertThat(queue).contains("QUEUE_EXPIRED", "error.pwa.queueExpired");
         assertThat(queue).contains("sanitizeConflict", "REVOCATION_KEY", "SCOPE_EPOCH_KEY",
-                "BroadcastChannel", "claimAggregate", "revocationEpoch", "getOfflineDrafts");
+                "BroadcastChannel", "claimAggregate", "revocationEpoch", "getOfflineDrafts", "clearDraftDom");
         assertThat(queue).contains("const DB_VERSION = 2", "const META_STORE = 'meta'",
                 "DB_VERSION", "record.conflict", "record.payload = null");
         assertThat(queue).contains("state.paused = true", "response.redirected", "text/html");
