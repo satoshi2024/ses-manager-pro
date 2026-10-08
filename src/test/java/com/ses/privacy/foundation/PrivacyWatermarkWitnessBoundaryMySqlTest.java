@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DelegatingDataSource;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -27,6 +28,11 @@ import java.util.Map;
 import java.security.MessageDigest;
 import java.security.PublicKey;
 import java.util.HexFormat;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
+import javax.sql.DataSource;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -564,6 +570,171 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
                 watermarkVerifier.verify(partition, latestWitness.history(partition), latestWitness.latest(partition)).status());
         assertEquals(1, witnessAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
                 Integer.class, journalId, tenantId, subjectRef));
+    }
+
+    @Test
+    void mainAdapterは実commit後SQLExceptionをreadbackしてREPLAYEDに収束する() {
+        var partition = witnessPartition();
+        var ack = append(partition(partition.tenantId(), partition.subjectRef()), 0,
+                PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-jdbc-commit-lost");
+        var signed = sign(ack, 1, "0".repeat(64), Instant.parse("2026-10-02T00:00:00Z"));
+        var faultDataSource = new CommitFaultDataSource(harness.witness().createWitnessAttestorDataSource(), CommitFault.AFTER_COMMIT);
+        var faultedAdapter = new JdbcLatestWitnessAdapter(faultDataSource, context.getEnvironment());
+
+        assertEquals(LatestWitnessPort.AppendResult.REPLAYED, faultedAdapter.append(signed, 0, "0".repeat(64)));
+        assertEquals(1, witnessAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                Integer.class, journalId, tenantId, subjectRef));
+        assertEquals(1L, faultedAdapter.latest(partition).epoch());
+        assertEquals(SignedWatermarkVerifier.Status.VALID,
+                watermarkVerifier.verify(partition, faultedAdapter.history(partition), faultedAdapter.latest(partition)).status());
+    }
+
+    @Test
+    void mainAdapterのrollbackとreadback不能はACK成功と報告しない() {
+        var partition = witnessPartition();
+        var ack = append(partition(partition.tenantId(), partition.subjectRef()), 0,
+                PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-jdbc-rollback");
+        var signed = sign(ack, 1, "0".repeat(64), Instant.parse("2026-10-02T00:00:00Z"));
+        var rollbackAdapter = new JdbcLatestWitnessAdapter(new CommitFaultDataSource(
+                harness.witness().createWitnessAttestorDataSource(), CommitFault.BEFORE_COMMIT), context.getEnvironment());
+        assertEquals(LatestWitnessPort.AppendResult.QUARANTINED, rollbackAdapter.append(signed, 0, "0".repeat(64)));
+        assertEquals(0, witnessAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                Integer.class, journalId, tenantId, subjectRef));
+        assertEquals(0, witnessAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_latest_checkpoint WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                Integer.class, journalId, tenantId, subjectRef));
+
+        var unavailableAdapter = new JdbcLatestWitnessAdapter(new CommitFaultDataSource(
+                harness.witness().createWitnessAttestorDataSource(), CommitFault.AFTER_COMMIT_READBACK_UNAVAILABLE), context.getEnvironment());
+        assertEquals(LatestWitnessPort.AppendResult.QUARANTINED, unavailableAdapter.append(signed, 0, "0".repeat(64)));
+        assertEquals(1, witnessAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                Integer.class, journalId, tenantId, subjectRef));
+    }
+
+    @Test
+    void witnessCASはprimaryLock待ち後に候補一つだけを採用し同一候補を収束する() throws Throwable {
+        var partition = witnessPartition();
+        var candidateA = watermarkAttestor.sign(new WatermarkCheckpoint(journalId, tenantId, subjectRef, 1, 1,
+                "a".repeat(64), "0".repeat(64), Instant.parse("2026-10-02T00:00:00Z"), "key-synthetic"));
+        var candidateB = watermarkAttestor.sign(new WatermarkCheckpoint(journalId, tenantId, subjectRef, 1, 1,
+                "b".repeat(64), "0".repeat(64), Instant.parse("2026-10-02T00:00:00Z"), "key-synthetic"));
+
+        runPrimaryLockRace(partition, candidateA, candidateB, false, false);
+        cleanupWitness(partition);
+        runPrimaryLockRace(partition, candidateA, candidateB, true, false);
+        cleanupWitness(partition);
+        runPrimaryLockRace(partition, candidateA, candidateA, false, true);
+    }
+
+    private void runPrimaryLockRace(LatestWitnessPort.Partition partition, SignedWatermark first,
+            SignedWatermark second, boolean reverseSubmission, boolean sameCandidate) throws Throwable {
+        witnessAdmin.update("INSERT INTO sf_w2b_latest_checkpoint(journal_id, tenant_id, subject_ref, checkpoint_epoch, event_revision, event_hash, checkpoint_hash) VALUES (?, ?, ?, 0, 0, ?, ?)",
+                partition.journalId(), partition.tenantId(), partition.subjectRef(), "0".repeat(64), "0".repeat(64));
+        var pool = Executors.newFixedThreadPool(2);
+        Throwable primaryFailure = null;
+        boolean blockerReleased = false;
+        try (Connection blocker = harness.witness().adminDataSource().getConnection()) {
+            blocker.setAutoCommit(false);
+            try (var query = blocker.prepareStatement("SELECT checkpoint_epoch FROM sf_w2b_latest_checkpoint WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ? FOR UPDATE")) {
+                query.setString(1, partition.journalId());
+                query.setString(2, partition.tenantId());
+                query.setString(3, partition.subjectRef());
+                try (var rows = query.executeQuery()) { assertTrue(rows.next()); }
+            }
+            try {
+                SignedWatermark early = reverseSubmission ? second : first;
+                SignedWatermark late = reverseSubmission ? first : second;
+                Future<LatestWitnessPort.AppendResult> earlyFuture = pool.submit(() -> latestWitness.append(early, 0, "0".repeat(64)));
+                awaitPrimaryLockWaits(1);
+                Future<LatestWitnessPort.AppendResult> lateFuture = pool.submit(() -> latestWitness.append(late, 0, "0".repeat(64)));
+                awaitPrimaryLockWaits(2);
+                blocker.commit();
+                blockerReleased = true;
+                LatestWitnessPort.AppendResult earlyResult = earlyFuture.get(10, TimeUnit.SECONDS);
+                LatestWitnessPort.AppendResult lateResult = lateFuture.get(10, TimeUnit.SECONDS);
+                if (sameCandidate) {
+                    assertEquals(1, List.of(earlyResult, lateResult).stream().filter(r -> r == LatestWitnessPort.AppendResult.APPENDED).count());
+                    assertEquals(1, List.of(earlyResult, lateResult).stream().filter(r -> r == LatestWitnessPort.AppendResult.REPLAYED).count());
+                } else {
+                    assertEquals(1, List.of(earlyResult, lateResult).stream().filter(r -> r == LatestWitnessPort.AppendResult.APPENDED).count());
+                    assertEquals(1, List.of(earlyResult, lateResult).stream().filter(r -> r == LatestWitnessPort.AppendResult.QUARANTINED).count());
+                }
+                assertEquals(1, witnessAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                        Integer.class, partition.journalId(), partition.tenantId(), partition.subjectRef()));
+                assertEquals(SignedWatermarkVerifier.Status.VALID,
+                        watermarkVerifier.verify(partition, latestWitness.history(partition), latestWitness.latest(partition)).status());
+            } catch (Throwable failure) {
+                primaryFailure = failure;
+                throw failure;
+            } finally {
+                if (!blockerReleased) {
+                    try { blocker.rollback(); }
+                    catch (Throwable cleanupFailure) {
+                        if (primaryFailure != null) primaryFailure.addSuppressed(cleanupFailure);
+                        else throw cleanupFailure;
+                    }
+                }
+                pool.shutdownNow();
+                try {
+                    if (!pool.awaitTermination(10, TimeUnit.SECONDS)) throw new AssertionError("witness writer termination timeout");
+                } catch (Throwable cleanupFailure) {
+                    if (primaryFailure != null) primaryFailure.addSuppressed(cleanupFailure);
+                    else throw cleanupFailure;
+                }
+            }
+        }
+    }
+
+    private void awaitPrimaryLockWaits(int expected) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        int observed = 0;
+        while (System.nanoTime() < deadline) {
+            observed = witnessAdmin.queryForObject("SELECT COUNT(*) FROM performance_schema.data_lock_waits", Integer.class);
+            if (observed >= expected) return;
+            Thread.sleep(25);
+        }
+        fail("InnoDB primary lock waitが" + expected + "件に達しませんでした。observed=" + observed);
+    }
+
+    private void cleanupWitness(LatestWitnessPort.Partition partition) {
+        witnessAdmin.update("DELETE FROM sf_w2b_latest_checkpoint WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                partition.journalId(), partition.tenantId(), partition.subjectRef());
+        witnessAdmin.update("DELETE FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                partition.journalId(), partition.tenantId(), partition.subjectRef());
+    }
+
+    private enum CommitFault { AFTER_COMMIT, BEFORE_COMMIT, AFTER_COMMIT_READBACK_UNAVAILABLE }
+
+    private static final class CommitFaultDataSource extends DelegatingDataSource {
+        private final CommitFault fault;
+        private final AtomicBoolean injected = new AtomicBoolean();
+
+        private CommitFaultDataSource(DataSource target, CommitFault fault) {
+            super(target);
+            this.fault = fault;
+        }
+
+        @Override public Connection getConnection() throws SQLException {
+            if (fault == CommitFault.AFTER_COMMIT_READBACK_UNAVAILABLE && injected.get())
+                throw new SQLException("fault injection: independent read-back unavailable");
+            Connection target = super.getConnection();
+            return (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(), new Class<?>[]{Connection.class},
+                    (proxy, method, args) -> {
+                        if ("commit".equals(method.getName()) && method.getParameterCount() == 0
+                                && injected.compareAndSet(false, true)) {
+                            if (fault == CommitFault.BEFORE_COMMIT) throw new SQLException("fault injection: rollback before commit");
+                            Object committed = invokeConnection(target, method, args);
+                            if (fault == CommitFault.AFTER_COMMIT || fault == CommitFault.AFTER_COMMIT_READBACK_UNAVAILABLE)
+                                throw new SQLException("fault injection: commit succeeded but ACK was lost");
+                            return committed;
+                        }
+                        return invokeConnection(target, method, args);
+                    });
+        }
+
+        private static Object invokeConnection(Connection target, java.lang.reflect.Method method, Object[] args) throws Throwable {
+            try { return method.invoke(target, args); }
+            catch (InvocationTargetException invocationFailure) { throw invocationFailure.getCause(); }
+        }
     }
 
     private LatestWitnessPort.Partition witnessPartition() { return new LatestWitnessPort.Partition(journalId, tenantId, subjectRef); }
