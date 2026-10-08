@@ -23,7 +23,7 @@ public class CopilotTransportProperties {
         this.hosts = hosts == null ? new HashMap<>() : new HashMap<>(hosts);
     }
 
-    CopilotDnsSnapshotResolver.DnsSnapshot toSnapshot() {
+    public CopilotDnsSnapshotResolver.DnsSnapshot toSnapshot() {
         Map<String, CopilotDnsSnapshotResolver.AddressSet> snapshot = new HashMap<>();
         hosts.forEach((host, config) -> {
             try {
