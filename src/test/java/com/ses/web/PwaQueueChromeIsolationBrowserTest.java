@@ -241,23 +241,33 @@ class PwaQueueChromeIsolationBrowserTest {
                     + "path:'/api/my/pwa/attendance/daily',baseVersion:0,resourceKey:'attendance:2026-10',"
                     + "payload:{workDate:'2026-10-10',clockIn:'09:00',clockOut:'18:00',breaks:[],breakMinutes:60,"
                     + "workType:'出勤',workplaceType:'客先',remarks:'delete-race'}});window.__setOnline(true);"
+                    + "const sentinelScope=SES.pwaQueue.getScope();window.__deleteSentinelScope=sentinelScope;"
                     + "const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});"
                     + "await new Promise((ok,no)=>{const tx=db.transaction('queue','readwrite');tx.objectStore('queue').put({clientRequestId:'locked-delete-sentinel',"
-                    + "userScope:'scope-A',revocationEpoch:localStorage.getItem('ses_pwa_revocation_epoch'),status:'ERROR',createdAt:Date.now(),payload:null});"
+                    + "userScope:sentinelScope,revocationEpoch:localStorage.getItem('ses_pwa_revocation_epoch'),status:'ERROR',createdAt:Date.now(),payload:null});"
                     + "tx.oncomplete=ok;tx.onerror=()=>no(tx.error)});db.close();return true})()");
             assertTrue(browser.evaluateStrict("SES.pwaQueue.prepareRestore('test-password').then(()=>true)").asBoolean(),
                     "再認証proofを実queue状態へ束縛する");
             assertTrue(browser.evaluateStrict("fetch('/__test/enable-scope-drift').then(r=>r.ok)").asBoolean());
             browser.evaluate(completionBarrierScript() + "window.__deleteReached=false;window.__deleteBarrierTimedOut=false;window.__releaseDeleteRequested=false;window.__releaseDeleteBarrier=null;"
+                    + "window.__deleteScopeTransaction=null;window.__deleteScopeCursorScope=null;window.__nativeOpenKeyCursor=IDBIndex.prototype.openKeyCursor;"
+                    + "IDBIndex.prototype.openKeyCursor=function(range,direction){if(this.objectStore.name==='queue'&&this.name==='userScope'&&range"
+                    + "&&range.lower===window.__deleteSentinelScope&&range.upper===window.__deleteSentinelScope&&!range.lowerOpen&&!range.upperOpen){"
+                    + "window.__deleteScopeTransaction=this.objectStore.transaction;window.__deleteScopeCursorScope=range.lower}"
+                    + "return window.__nativeOpenKeyCursor.call(this,range,direction)};"
                     + "window.__deleteBarrierDeadline=Date.now()+20000;window.__nativeTransaction=IDBDatabase.prototype.transaction;"
                     + "IDBDatabase.prototype.transaction=function(names,mode,options){const tx=window.__nativeTransaction.call(this,names,mode,options);"
-                    + "const storeNames=Array.from(tx.objectStoreNames);if(window.__holdDeleteCompletion&&mode==='readwrite'&&storeNames.length===1&&storeNames[0]==='queue'){"
-                    + "window.__holdDeleteCompletion=false;let handler=null;Object.defineProperty(tx,'oncomplete',{configurable:true,get:()=>handler,set:fn=>{handler=fn;window.sesDelayIndexedDbCompletion(tx,fn,(resume,event)=>{"
+                    + "const storeNames=Array.from(tx.objectStoreNames);if(mode==='readwrite'&&storeNames.length===1&&storeNames[0]==='queue'){"
+                    + "let handler=null;Object.defineProperty(tx,'oncomplete',{configurable:true,get:()=>handler,set:fn=>{handler=fn;"
+                    + "if(window.__holdDeleteCompletion&&window.__deleteScopeTransaction===tx){window.__holdDeleteCompletion=false;window.sesDelayIndexedDbCompletion(tx,fn,(resume,event)=>{"
                     + "window.__deleteReached=true;const releaseProduction=()=>{if(window.__deleteBarrierDeadline<Date.now())window.__deleteBarrierTimedOut=true;resume()};"
-                    + "if(window.__releaseDeleteRequested||window.__deleteBarrierDeadline<Date.now()){window.__deleteBarrierTimedOut=true;releaseProduction()}else{window.__releaseDeleteBarrier=releaseProduction}})}})}return tx};"
+                    + "if(window.__releaseDeleteRequested||window.__deleteBarrierDeadline<Date.now()){window.__deleteBarrierTimedOut=true;releaseProduction()}else{window.__releaseDeleteBarrier=releaseProduction}})}"
+                    + "else tx.addEventListener('complete',event=>fn.call(tx,event),{once:true})}})}return tx};"
                     + "window.__holdDeleteCompletion=true;window.__raceConfirmSettled=false;window.__raceConfirm=SES.pwaQueue.confirmRestore().then(()=>{window.__raceConfirmSettled=true;return {ok:true}},e=>{window.__raceConfirmSettled=true;return {ok:false,message:e.message}});true");
             assertTrue(browser.waitForStrict("window.__deleteReached", Duration.ofSeconds(15)),
-                    "実IndexedDB削除完了イベントのPromise解決を保留する");
+                    "dynamic old scopeを対象にしたdeleteScope transactionの完了イベント解決を保留する");
+            assertTrue(browser.evaluateStrict("window.__deleteScopeTransaction!==null&&window.__deleteScopeCursorScope===window.__deleteSentinelScope").asBoolean(),
+                    "userScope index cursorがsentinelのdynamic old scopeを指定したtransactionである");
             assertFalse(browser.evaluateStrict("window.__deleteBarrierTimedOut").asBoolean(), "IDB完了barrierが期限内に到達する");
             assertFalse(browser.evaluateStrict("window.__raceConfirmSettled").asBoolean(), "削除transaction待機中はconfirmRestoreが未完了");
             assertTrue(browser.evaluateStrict("(async()=>{const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});const rows=await new Promise((ok,no)=>{const q=db.transaction('queue').objectStore('queue').getAll();q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)});db.close();return !rows.some(x=>x.clientRequestId==='locked-delete-sentinel')})()").asBoolean(),
@@ -275,7 +285,8 @@ class PwaQueueChromeIsolationBrowserTest {
                     "撤回競合のconfirmはqueue送信へ到達しない");
             assertTrue(browser.evaluateStrict("SES.pwaQueue.getScope()===null&&document.getElementById('pwa-queue-panel').hidden").asBoolean(),
                     "競合終了後もscopeとDOMをロック状態に保つ");
-            browser.evaluate("IDBDatabase.prototype.transaction=window.__nativeTransaction;true");
+            browser.evaluate("IDBDatabase.prototype.transaction=window.__nativeTransaction;"
+                    + "IDBIndex.prototype.openKeyCursor=window.__nativeOpenKeyCursor;true");
             browser.evaluate("if(window.__child)window.__child.close();true");
             browser.navigate(base + "/test.html?user=A");
             assertTrue(browser.waitForStrict("!!(window.SES&&SES.pwaQueue&&SES.pwaQueue.getScope()==='scope-A')", Duration.ofSeconds(15)),
@@ -376,6 +387,7 @@ class PwaQueueChromeIsolationBrowserTest {
             browser.evaluate("window.__releaseDeleteRequested=true;if(window.__releaseDeleteBarrier)window.__releaseDeleteBarrier();"
                     + "if(window.__nativeTransaction)IDBDatabase.prototype.transaction=window.__nativeTransaction;"
                     + "if(window.__originalGet)IDBObjectStore.prototype.get=window.__originalGet;"
+                    + "if(window.__nativeOpenKeyCursor)IDBIndex.prototype.openKeyCursor=window.__nativeOpenKeyCursor;"
                     + "if(window.__nativeFetch)window.fetch=window.__nativeFetch;"
                     + "if(window.__nativeDateNow)Date.now=window.__nativeDateNow;"
                     + "if(window.__nativePerformanceNow)Object.defineProperty(performance,'now',{configurable:true,value:window.__nativePerformanceNow});"
