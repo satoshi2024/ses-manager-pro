@@ -23,6 +23,9 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -236,10 +239,23 @@ class AiExecutionGatewayCopilotSnapshotTest {
         EffectiveScopeSnapshot snapshot = new EffectiveScopeSnapshot("tenant-a", 1L,
                 LocalDate.of(2026, 9, 8), "COMPANY_WIDE", true, false, false,
                 null, null, null, null, null, null, null, null, null,
-                EffectiveScopeSnapshotFactory.POLICY_VERSION, false, "ALL", "nf08-local-scope-hash");
+                EffectiveScopeSnapshotFactory.POLICY_VERSION, false, "ALL",
+                scopeHash("tenant-a", 1L, LocalDate.of(2026, 9, 8)));
         context.bindSnapshot(snapshot);
         context.bind("dashboard.summary", CopilotQueryParameters.ofQuery("dashboard.summary"), snapshot.scope());
         return context;
+    }
+
+    private static String scopeHash(String tenantId, long legalEntityId, LocalDate asOf) {
+        String canonical = "tenant=" + tenantId + "|legalEntity=" + legalEntityId
+                + "|asOf=" + asOf + "|scopeType=COMPANY_WIDE|policy="
+                + EffectiveScopeSnapshotFactory.POLICY_VERSION + "|members=ALL";
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception ex) {
+            throw new IllegalStateException("effective scope hash calculation failed", ex);
+        }
     }
 
 }
