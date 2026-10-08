@@ -12,13 +12,122 @@
         h1 { margin: 0 0 12px; font-size: 1.35rem; }
         p { margin: 0 0 20px; color: #cbd5e1; line-height: 1.7; }
         button { border: 0; border-radius: 8px; padding: 11px 18px; background: #38bdf8; color: #082f49; font-weight: 700; cursor: pointer; }
+        article { margin-top: 12px; padding: 12px; border: 1px solid #334155; border-radius: 10px; text-align: left; }
+        article dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 0; text-align: left; }
+        article dt { color: #94a3b8; }
+        article dd { margin: 0; overflow-wrap: anywhere; }
+        #offline-drafts[hidden] { display: none; }
     </style>
 </head>
 <body>
 <main>
     <h1>現在オフラインです</h1>
-    <p>通信が回復したら再読み込みしてください。保存対象の下書きは端末内で保護されています。</p>
+    <p>保存済みの下書きはロックされています。通常の再読み込みでは表示・送信されません。通信が回復した後、パスワードを再確認し、復元を明示してください。</p>
     <button type="button" onclick="location.reload()">再読み込み</button>
+    <section id="offline-restore" aria-live="polite">
+        <label for="offline-restore-password">パスワード</label>
+        <input id="offline-restore-password" type="password" autocomplete="current-password" disabled>
+        <button id="offline-reauth" type="button" disabled>再認証</button>
+        <button id="offline-confirm-restore" type="button" hidden>下書きを復元する</button>
+        <p id="offline-restore-status" role="status"></p>
+    </section>
+    <section id="offline-drafts" aria-live="polite" hidden>
+        <h2>この端末に保存した下書き</h2>
+        <div id="offline-draft-list"></div>
+    </section>
 </main>
+<script src="/js/pwa-queue.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const section = document.getElementById('offline-drafts');
+        const list = document.getElementById('offline-draft-list');
+        const password = document.getElementById('offline-restore-password');
+        const reauth = document.getElementById('offline-reauth');
+        const confirmRestore = document.getElementById('offline-confirm-restore');
+        const status = document.getElementById('offline-restore-status');
+        const screenLabels = { attendance: '勤怠', timesheet: '作業報告', expense: '経費', 'change-request': '変更申請' };
+        const statusLabels = { PENDING: '未送信', CONFLICT: '競合確認が必要' };
+        const fieldLabels = {
+            attendance: { workDate: '日付', clockIn: '出勤', clockOut: '退勤', breakMinutes: '休憩（分）', workType: '勤務区分', workplaceType: '勤務場所' },
+            timesheet: { workDate: '日付', startTime: '開始', endTime: '終了', breakMinutes: '休憩（分）' },
+            expense: { expenseDate: '日付', category: '費目', amount: '金額' }
+        };
+        function clearDrafts() {
+            list.replaceChildren();
+            section.hidden = true;
+            confirmRestore.hidden = true;
+            password.value = '';
+        }
+        function showDrafts(drafts) {
+            clearDrafts();
+            if (!drafts.length) { status.textContent = '復元できる下書きがありません。'; return; }
+            section.hidden = false;
+            drafts.forEach(function(draft) {
+                const article = document.createElement('article');
+                const heading = document.createElement('h3');
+                heading.textContent = `${screenLabels[draft.screen] || '下書き'} / ${statusLabels[draft.status] || '状態確認が必要'}`;
+                article.appendChild(heading);
+                const labels = fieldLabels[draft.screen];
+                if (labels) {
+                    const details = document.createElement('dl');
+                    Object.entries(labels).forEach(function(entry) {
+                        const key = entry[0];
+                        const value = draft.payload && draft.payload[key];
+                        if (value === undefined || value === null || value === '') return;
+                        const term = document.createElement('dt');
+                        term.textContent = entry[1];
+                        const description = document.createElement('dd');
+                        description.textContent = key === 'amount' && Number.isFinite(Number(value))
+                            ? `${new Intl.NumberFormat('ja-JP').format(Number(value))}円` : String(value);
+                        details.append(term, description);
+                    });
+                    article.appendChild(details);
+                } else {
+                    const note = document.createElement('p');
+                    note.textContent = '申請内容は通信回復後にログインして確認してください。';
+                    article.appendChild(note);
+                }
+                list.appendChild(article);
+            });
+        }
+        function updateNetwork() {
+            password.disabled = !navigator.onLine;
+            reauth.disabled = !navigator.onLine;
+            if (!navigator.onLine) status.textContent = '再認証には通信が必要です。下書きはロック中です。';
+        }
+        reauth.addEventListener('click', async function() {
+            reauth.disabled = true;
+            status.textContent = '再認証を確認しています。';
+            const secret = password.value;
+            password.value = '';
+            try {
+                await window.SES.pwaQueue.prepareRestore(secret);
+                confirmRestore.hidden = false;
+                status.textContent = '再認証できました。下書き内容を表示するには「下書きを復元する」を選択してください。';
+            } catch (_) {
+                status.textContent = '再認証できませんでした。オンライン状態とパスワードを確認してください。';
+            } finally {
+                reauth.disabled = !navigator.onLine;
+                password.value = '';
+            }
+        });
+        confirmRestore.addEventListener('click', async function() {
+            confirmRestore.disabled = true;
+            try {
+                await window.SES.pwaQueue.confirmRestore();
+                const drafts = await window.SES.pwaQueue.getOfflineDrafts();
+                showDrafts(drafts);
+                status.textContent = drafts.length ? '復元した下書きを確認してください。' : '復元できる下書きがありません。';
+            } catch (_) {
+                clearDrafts();
+                status.textContent = '復元できませんでした。下書きはロックされたままです。再認証からやり直してください。';
+            } finally { confirmRestore.disabled = false; }
+        });
+        window.addEventListener('online', updateNetwork);
+        window.addEventListener('offline', updateNetwork);
+        window.addEventListener('ses:pwa-revoked', clearDrafts);
+        updateNetwork();
+    });
+</script>
 </body>
 </html>
