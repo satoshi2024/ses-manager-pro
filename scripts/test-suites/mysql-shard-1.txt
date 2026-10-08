@@ -22,3 +22,4 @@ LifecycleMySqlIntegrationTest
 PrivacyJournalLinearizationMySqlTest
 AssetMySqlIntegrationTest
 ImportIdentityCandidateMySqlTest
+ImportMetadataRealMySqlTest
