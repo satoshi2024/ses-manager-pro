@@ -256,3 +256,22 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   Slice Aの三DB capability/schema/canonical/fixtureを開始。production migration、実処分/送信、法的判断は許可していない。
 - 全NF完成とproduction approvalは引き続き**NO-GO**。NF03/NF08のNF07 policy依存、NF05/NF08実provider、
   NF09 V182 production照合、Security/Privacy-Legal/Operations/Production Ownerの署名は未解消。
+
+### 10月8日 限定統合と後続Review
+
+- AstraがNF04 run05のXML/text全2 hash、起止SHA/clean、実login/CSRF/listener/logout raceを照合し、server＋fixture限定PASS。
+  controlへ`801c4e29/f1d62083/1923c3fc/8e05b816/681aa36a/d5c4fe3e`として統合した。G2aは含まない。
+  fixed `d5c4fe3e5daa5aced80e6021eb2f0e572dfed5c0`の10 classは**40/0/0/0**、exit0、起止SHA一致・clean。
+  UTC00:57:17.2652940〜00:59:25.6593070、log SHA-256 `DC202D8D3B8BCCDD4FC1CA2ED0DC597F77DE39DDBFCB953F3A1CB7CCA8DB71EE`。
+  `verification-evidence/20261008-control-servlet-integration-01/`を参照。全Fastの再合格ではない。
+- NF04 G2a追加`d7bd05f0d8e72ffd3731bfe804c2d10cff526dc7`で前4 P1をAstraが静的閉鎖した。
+  Node harnessはhelper抽出・mock queue・worker模擬であり、実queue/IndexedDB待機raceの実行証拠ではない。
+  完全queueと実Chromeの試験を補完してからG2a全体を判定する。旧失敗runと旧assertionを削除しない。
+- NF08 fixed`1d3873c49f8484b278cc7842cd6175818b8d2e01`のrun05は9 class **42/0/0/0**、exit0、起止SHA一致・clean。
+  UTC00:54:21.4522024〜00:56:19.0632496、log SHA-256 `6941B3A132C830509CE97E7B618E753BE155BA76750D29BE2AE4F507946C46A5`。
+  Astraが18 XML/text hashを照合した。5 runのraw 152 fileをcontrolへbyte同一保存。
+  transportは基礎3例に限る。DNS freshness/slow-response/cancel後再利用の実装・試験は次slice、production gateは未解除。
+- NF06 migration test`b0d5f56e7bbbd8ffacaf592761c09c3334a6433d`はrepeatable null、sentinel保持、18 unique/12 FK列対応、
+  SQLSTATE/vendor code、Flyway validateを補い、Astra静的受理。実MySQL fresh/upgrade runを開始した。
+- NF07 Slice A `b1248e6c`はAstra未受理。共有testの順序依存、profile変更後のraw接続/key利用、Unicode canonical衝突、
+  witness signed envelope不足とpackage可視性を修復する。W2aの合格を新sliceへ流用しない。

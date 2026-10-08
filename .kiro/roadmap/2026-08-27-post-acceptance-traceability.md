@@ -12,11 +12,11 @@
 | 01 | R01a `ced64304` CODE PASS、採番/actor P2閉鎖。追加fixture `e3944774` CODE PASS。DUAL確認等は未完 | 文書ACL/version、二者確認、信頼できる退社撤権要求・確認、legacy scope、運用承認 |
 | 02 | CANDIDATE維持。recipient現在scope/owner tenantの両P1は36dcfdfcでAstra限定CODE PASS、control統合済み | DG-02、正式Owner/最終Review、release |
 | 03 | 集約完了修復と実MySQL並行証拠 `89384928`は限定CODE PASS、control統合済み | 全体最終Review、NF07 policy、retention、staging/運用承認 |
-| 04 | G1 fixed776dc5はAstra限定CODE PASS、H2/unit 34/0/0/0・MySQL 4/0/0/0を別runで確認、control6874511bまで統合。G2 WIPの撤回/DOM/時計は未完 | 実servlet/logout、実PWA/browser全体検証、分散session環境、正式release |
+| 04 | G1限定CODE PASS、34/0/0/0とMySQL4/0/0/0。実servlet修復91dbca13は独立Review・3/0/0/0、control d5c4fe3eへ統合し10 class40/0/0/0。G2aの4 P1はd7bd05f0で静的閉鎖、実queue race/Chrome未検証 | 実PWA/browser全体検証、非通知tab/分散session環境、正式release |
 | 05 | 開発scope CONDITIONAL。総deadline 2187b5f9限定CODE PASS、26/0/0/0、control統合。実transport未完 | provider/credential、許可先、正式production enablement |
-| 06 | F2 foundationは限定CODE PASS、control統合済み。F1a reader/schema/crypto/file境界 fixed103c758の7 classは53/0/0/0。candidate0258d9fdは独立Review/実行待ち、metadata全体・validation lifecycle・DB apply/UI未完 | 実MySQL fresh/upgrade、全synthetic実装/Review、実source/mapping/data owner、移行承認 |
-| 07 | SF-W1限定CODE PASS。synthetic journal `504349ea`もAstra限定CODE PASS、MySQL25/0/0/0・boundary/inventory4/0/0/0を別runで確認、control統合済み。W2b/W3・実dispatch/処分は未完、coverage不完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
-| 08 | 開発scope CONDITIONAL。summary修復Plan a91b5ee0は限定PLAN PASS。numeric95bfb674は静的finding閉鎖、snapshot/attempt0b0b10deはReview待ち。bounded transportとdisabled catalog未完 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
+| 06 | F2 foundation限定CODE PASS・control統合済み。F1a fixed585の10 class66/0/0/0、candidate fe54の実MySQL6/0/0/0を限定確認。V184 fresh/upgrade b0d5f56e実行中。validation lifecycle・実Document ACL統合・apply/UI未完 | V183併合rehearsal、全synthetic実装/Review、実source/mapping/data owner、移行承認 |
+| 07 | SF-W1/W2a限定CODE PASS・control統合済み。W2b計画88f58876限定PLAN PASS。Slice A b1248e6cはprofile使用境界・canonical Unicode・witness envelope・test隔離等を修復中。W2b/W3・実dispatch/処分未完、coverage不完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
+| 08 | 開発scope CONDITIONAL。fixed1d3873c49は9 class42/0/0/0、独立証拠照合済み。bounded transport基礎3例のみ、DNS待機中失効・slow/cancel・strict parserとdisabled catalog未完 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
 | 09 | fail-closed修復 `da850b97`限定CODE PASS、control統合済み。実providerの完成ではない | V182 PENDING=0/帰属不明0/親子一致、実撤権/session/token、production owner |
 | 10 | session共有reauth修復 `20cce0f7`限定CODE PASS、46/0/0/0、control統合済み | 全体独立Review、実browser/session環境、staging、正式release |
 
