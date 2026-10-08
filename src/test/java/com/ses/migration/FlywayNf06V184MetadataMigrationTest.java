@@ -130,9 +130,15 @@ class FlywayNf06V184MetadataMigrationTest {
         assertEquals(1L, scalar(statement,
                 "SELECT COUNT(*) FROM flyway_schema_history WHERE version='184' AND success=1"));
         MigrationInfo migration = null;
+        boolean hasRepeatableMigration = false;
         for (MigrationInfo info : flyway.info().all()) {
-            if ("184".equals(info.getVersion().getVersion())) migration = info;
+            if (info.getVersion() == null) {
+                hasRepeatableMigration = true;
+            } else if ("184".equals(info.getVersion().getVersion())) {
+                migration = info;
+            }
         }
+        assertTrue(hasRepeatableMigration, "Flyway infoにはversionを持たないrepeatable migrationも含まれる");
         assertNotNull(migration, "V184のresolved migration情報が存在する");
         assertEquals(migration.getChecksum().intValue(), scalar(statement,
                 "SELECT checksum FROM flyway_schema_history WHERE version='184' AND success=1"),
