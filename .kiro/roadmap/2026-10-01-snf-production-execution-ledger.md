@@ -353,3 +353,27 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   Set-Cookieがsession cookieのままであるため、HTTP発行への変更だけで再起動問題が解決したとは判断しない。
 - 総合 **NO-GO** を維持する。以上は局所的なcode/synthetic証拠であり、完全CI、全機能完成、実staging/provider、
   backup/restore/PITR、V182本番照合、Security/Privacy-Legal/Operations/Production Owner署名を代替しない。
+
+### lease局所検証・W2b署名slice・Gemini契約計画
+
+- NF06 `696221cf701797e640f1865536f203bfdc8ad3dd` で三件のテストfindingを修復し、H2 leaseは **6/0/0/0**。
+  UTC02:01:55.1635827〜02:02:54.8990248、log SHA-256 `7A3B12E3C94990E52B690D77D99A5A797C28FE5DEE2F491FA45FEA03D42CDC9C`。
+  Astraはreport 2/2 hashと集計を照合した。追加で旧grant拒否が別instance拒否になっていたP2を検出し、
+  `14f81ae58d37f23162549da11c1f8d2f41c3baaa` で同instanceの旧generation拒否へ修正、capture再設定時の旧IDも消去した。
+  Astra静的findingは閉鎖し、同fixed SHAの実MySQL leaseは **9/0/0/0**、exit0、起止SHA一致・clean。
+  UTC02:08:02.3753415〜02:09:16.7386599、log SHA-256 `E46B7365DC5920F511435EA8FF3B77D55F4307B9A07753536F66E1571FE531A8`。
+  rawは `verification-evidence/nf06-fixed/20261008-lease-fast-01/` と `20261008-lease-mysql-01/`、各10 fileをhash一致保存。
+  MySQL runtime証拠の独立再照合、F1a全体Reviewとcontrol統合、run-aware validation/chunk/seal/publishはまだ別gateである。
+- NF07 W2b Slice C fixed `1803803f3d491a28ea118dd2aaad79a7e4e81528` の三DB MySQLは **13/0/0/0**。
+  UTC02:04:41.1907156〜02:07:37.4952254、exit0、起止SHA一致・clean。
+  log SHA-256 `3A7EDCD8149E8322C84D72C9A4561AC0E88E16D27DF3E36AFA78CED212290794`。
+  raw10 fileを `verification-evidence/nf07-w2b-fixed/20261008-mysql-03/` へhash一致保存した。
+  本runは三containerそれぞれのID、image ID、SELECT VERSION()=8.0.46、schema hashをtest内で記録した。
+  Astraは **REQUEST CHANGES（P2二件）**。既存ACK喪失はtest wrapperに限られ、main JDBC commit例外readbackを未検証。
+  witness CAS競合も逐次例だけで、projectionの並行試験では代替できない。真のcommit応答喪失とwitness実lock待機を追加する。
+  signature verifierへのhistory/latest引数は呼出元snapshotであり、live latestやrestore安全性の証拠ではない。
+  Slice Dで独立witness再取得・replay後再確認と静止partitionのfreshness方針を明示するまで本番復元を許可しない。
+- NF08 Gemini接線計画 fixed `dbed7529f5f875d1fc85674ca9cb50057aed886b` はAstra限定 **PLAN PASS**。
+  A: immutable config/invocationと費用/dispatch契約、B: bounded adapterとstrict protocol、C: attempt/失敗費用伝播の順とする。
+  最初のproduction cost policyは固定deny-all、loopback許可policyはsrc/testのみ。実費用上限・provider承認・artifact publishは別gate。
+  secretは既に供給済みのlocal accessorに限定し、無界なsecret-store I/Oを導入しない。A slice実装を開始したが未完である。
