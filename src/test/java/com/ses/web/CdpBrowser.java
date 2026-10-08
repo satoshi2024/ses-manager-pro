@@ -249,6 +249,16 @@ public final class CdpBrowser implements AutoCloseable {
         return send(ws, null, method, params);
     }
 
+    /** CDP応答を待たずにcommandを開始する。遷移とworker debugger解除の循環待ちを避ける。 */
+    public CompletableFuture<JsonNode> sendAsync(String method, Map<String, Object> params) {
+        return sendAsync(ws, null, method, params);
+    }
+
+    /** Page.navigateを非同期で開始し、loaderId/errorTextを含む応答Futureを返す。 */
+    public CompletableFuture<JsonNode> startNavigation(String url) {
+        return sendAsync("Page.navigate", Map.of("url", url));
+    }
+
     /** browser targetに送信する。Target discovery/attach用。 */
     public JsonNode sendBrowser(String method, Map<String, Object> params) throws Exception {
         return send(browserWs, null, method, params);
@@ -262,6 +272,21 @@ public final class CdpBrowser implements AutoCloseable {
 
     private JsonNode send(WebSocket socket, String sessionId, String method,
                           Map<String, Object> params) throws Exception {
+        try {
+            return sendAsync(socket, sessionId, method, params).get(COMMAND_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.ExecutionException failure) {
+            Throwable cause = failure.getCause();
+            if (cause instanceof java.util.concurrent.CompletionException completion && completion.getCause() != null) {
+                cause = completion.getCause();
+            }
+            if (cause instanceof Exception exception) throw exception;
+            if (cause instanceof Error error) throw error;
+            throw new IllegalStateException(cause);
+        }
+    }
+
+    private CompletableFuture<JsonNode> sendAsync(WebSocket socket, String sessionId, String method,
+                                                   Map<String, Object> params) {
         if (socket == null) throw new IllegalStateException("CDP websocket is not connected");
         long id = nextId.getAndIncrement();
         ObjectNode node = MAPPER.createObjectNode();
@@ -271,14 +296,16 @@ public final class CdpBrowser implements AutoCloseable {
         if (params != null) {
             node.set("params", MAPPER.valueToTree(params));
         }
-        CompletableFuture<JsonNode> future = new CompletableFuture<>();
-        pending.put(id, future);
-        socket.sendText(node.toString(), true);
-        JsonNode message = future.get(COMMAND_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-        if (message.has("error")) {
-            throw new IllegalStateException(method + " エラー: " + message.get("error"));
-        }
-        return message.path("result");
+        CompletableFuture<JsonNode> response = new CompletableFuture<>();
+        pending.put(id, response);
+        socket.sendText(node.toString(), true).whenComplete((ignored, failure) -> {
+            if (failure != null && pending.remove(id) != null) response.completeExceptionally(failure);
+        });
+        return response.thenApply(message -> {
+            if (message.has("error")) throw new java.util.concurrent.CompletionException(
+                    new IllegalStateException(method + " エラー: " + message.get("error")));
+            return message.path("result");
+        });
     }
 
     /** Chromeへ終了を指示し、このインスタンスが起動したprocessの終了を上限時間まで待つ。 */
