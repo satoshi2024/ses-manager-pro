@@ -38,11 +38,15 @@ public final class CdpBrowser implements AutoCloseable {
 
     private final Process process;
     private WebSocket ws;
+    private WebSocket browserWs;
     private final AtomicLong nextId = new AtomicLong(1);
     private final Map<Long, CompletableFuture<JsonNode>> pending = new ConcurrentHashMap<>();
+    private final Map<String, String> targetIdsBySession = new ConcurrentHashMap<>();
     private final List<JsonNode> consoleEvents = new CopyOnWriteArrayList<>();
     private final List<JsonNode> networkRequests = new CopyOnWriteArrayList<>();
     private final List<JsonNode> networkResponses = new CopyOnWriteArrayList<>();
+    private final List<JsonNode> networkFailures = new CopyOnWriteArrayList<>();
+    private final List<JsonNode> protocolEvents = new CopyOnWriteArrayList<>();
 
     private CdpBrowser(Process process) {
         this.process = process;
@@ -128,9 +132,11 @@ public final class CdpBrowser implements AutoCloseable {
                         .GET().build(),
                 HttpResponse.BodyHandlers.ofString()).body();
         String wsUrl = null;
+        String pageTargetId = null;
         for (JsonNode target : MAPPER.readTree(listJson)) {
             if ("page".equals(target.path("type").asText())) {
                 wsUrl = target.path("webSocketDebuggerUrl").asText();
+                pageTargetId = target.path("id").asText();
                 break;
             }
         }
@@ -139,12 +145,24 @@ public final class CdpBrowser implements AutoCloseable {
             throw new IllegalStateException("page target が取得できません: " + listJson);
         }
 
+        String browserWsUrl = MAPPER.readTree(client.send(
+                HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/json/version"))
+                        .GET().build(), HttpResponse.BodyHandlers.ofString()).body())
+                .path("webSocketDebuggerUrl").asText();
+        if (browserWsUrl.isBlank()) {
+            process.destroyForcibly();
+            throw new IllegalStateException("browser websocket URL が取得できません");
+        }
         CdpBrowser browser = new CdpBrowser(process);
         WebSocket ws = client.newWebSocketBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
-                .buildAsync(URI.create(wsUrl), browser.new Listener())
+                .buildAsync(URI.create(wsUrl), browser.new Listener(pageTargetId))
                 .get(30, TimeUnit.SECONDS);
         browser.ws = ws;
+        browser.browserWs = client.newWebSocketBuilder()
+                .connectTimeout(Duration.ofSeconds(30))
+                .buildAsync(URI.create(browserWsUrl), browser.new Listener(null))
+                .get(30, TimeUnit.SECONDS);
         browser.send("Page.enable", Map.of());
         browser.send("Runtime.enable", Map.of());
         browser.send("Log.enable", Map.of());
@@ -153,7 +171,12 @@ public final class CdpBrowser implements AutoCloseable {
     }
 
     private final class Listener implements WebSocket.Listener {
+        private final String directTargetId;
         private final StringBuilder text = new StringBuilder();
+
+        private Listener(String directTargetId) {
+            this.directTargetId = directTargetId;
+        }
 
         @Override
         public void onOpen(WebSocket webSocket) {
@@ -166,7 +189,7 @@ public final class CdpBrowser implements AutoCloseable {
             if (last) {
                 try {
                     JsonNode msg = MAPPER.readTree(text.toString());
-                    handleMessage(msg);
+                    handleMessage(msg, directTargetId);
                 } catch (Exception ignored) {
                     // 不正なメッセージは無視
                 }
@@ -182,36 +205,75 @@ public final class CdpBrowser implements AutoCloseable {
         }
     }
 
-    private void handleMessage(JsonNode msg) {
+    private void handleMessage(JsonNode msg, String directTargetId) {
         if (msg.has("id")) {
             CompletableFuture<JsonNode> future = pending.remove(msg.get("id").asLong());
             if (future != null) {
                 future.complete(msg);
             }
         } else {
+            ObjectNode event = ((ObjectNode) msg).deepCopy();
             String method = msg.path("method").asText("");
-            if ("Runtime.consoleAPICalled".equals(method) || "Log.entryAdded".equals(method)) {
-                consoleEvents.add(msg);
-            } else if ("Network.requestWillBeSent".equals(method)) {
-                networkRequests.add(msg);
-            } else if ("Network.responseReceived".equals(method)) {
-                networkResponses.add(msg);
+            String sessionId = msg.path("sessionId").asText("");
+            if ("Target.attachedToTarget".equals(method)) {
+                sessionId = msg.path("params").path("sessionId").asText("");
+                String targetId = msg.path("params").path("targetInfo").path("targetId").asText("");
+                if (!sessionId.isBlank() && !targetId.isBlank()) targetIdsBySession.put(sessionId, targetId);
+            } else if ("Target.detachedFromTarget".equals(method)) {
+                sessionId = msg.path("params").path("sessionId").asText("");
+            }
+            String targetId = sessionId.isBlank() ? directTargetId : targetIdsBySession.get(sessionId);
+            if (targetId != null && !targetId.isBlank()) event.put("codexTargetId", targetId);
+            if (!sessionId.isBlank()) event.put("codexSessionId", sessionId);
+            protocolEvents.add(event);
+            if ("Target.detachedFromTarget".equals(method) && !sessionId.isBlank()) {
+                targetIdsBySession.remove(sessionId);
+            }
+            // 既存の単一page用アクセサーは従来どおりpage targetだけを返す。
+            // worker/browser sessionの証跡はprotocolEvents()から個別に参照する。
+            boolean pageEvent = directTargetId != null && sessionId.isBlank();
+            if (pageEvent && ("Runtime.consoleAPICalled".equals(method) || "Log.entryAdded".equals(method))) {
+                consoleEvents.add(event);
+            } else if (pageEvent && "Network.requestWillBeSent".equals(method)) {
+                networkRequests.add(event);
+            } else if (pageEvent && "Network.responseReceived".equals(method)) {
+                networkResponses.add(event);
+            } else if (pageEvent && "Network.loadingFailed".equals(method)) {
+                networkFailures.add(event);
             }
         }
     }
 
     /** CDPコマンドを送信し、応答を待つ。 */
     public JsonNode send(String method, Map<String, Object> params) throws Exception {
+        return send(ws, null, method, params);
+    }
+
+    /** browser targetに送信する。Target discovery/attach用。 */
+    public JsonNode sendBrowser(String method, Map<String, Object> params) throws Exception {
+        return send(browserWs, null, method, params);
+    }
+
+    /** flattened target sessionへCDP commandを送信する。 */
+    public JsonNode sendOnSession(String sessionId, String method, Map<String, Object> params) throws Exception {
+        if (sessionId == null || sessionId.isBlank()) throw new IllegalArgumentException("sessionId is required");
+        return send(browserWs, sessionId, method, params);
+    }
+
+    private JsonNode send(WebSocket socket, String sessionId, String method,
+                          Map<String, Object> params) throws Exception {
+        if (socket == null) throw new IllegalStateException("CDP websocket is not connected");
         long id = nextId.getAndIncrement();
         ObjectNode node = MAPPER.createObjectNode();
         node.put("id", id);
         node.put("method", method);
+        if (sessionId != null) node.put("sessionId", sessionId);
         if (params != null) {
             node.set("params", MAPPER.valueToTree(params));
         }
         CompletableFuture<JsonNode> future = new CompletableFuture<>();
         pending.put(id, future);
-        ws.sendText(node.toString(), true);
+        socket.sendText(node.toString(), true);
         JsonNode message = future.get(COMMAND_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         if (message.has("error")) {
             throw new IllegalStateException(method + " エラー: " + message.get("error"));
@@ -352,12 +414,22 @@ public final class CdpBrowser implements AutoCloseable {
         return networkResponses;
     }
 
+    public List<JsonNode> networkFailures() { return networkFailures; }
+
+    public List<JsonNode> protocolEvents() { return protocolEvents; }
+
+    public boolean isSessionAttached(String sessionId) { return targetIdsBySession.containsKey(sessionId); }
+
     @Override
     public void close() {
         try {
             ws.sendClose(WebSocket.NORMAL_CLOSURE, "done");
         } catch (Exception ignored) {
             // ignore
+        }
+        if (browserWs != null) {
+            try { browserWs.sendClose(WebSocket.NORMAL_CLOSURE, "done"); }
+            catch (Exception ignored) { /* process teardown closes the browser websocket */ }
         }
         process.destroy();
         try {

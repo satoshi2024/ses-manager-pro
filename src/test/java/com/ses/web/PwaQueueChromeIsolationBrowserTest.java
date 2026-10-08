@@ -146,6 +146,11 @@ class PwaQueueChromeIsolationBrowserTest {
                     "downloadThroughput", -1, "uploadThroughput", -1, "connectionType", "wifi"));
             assertTrue(browser.waitForStrict("navigator.onLine", Duration.ofSeconds(10)));
             assertTrue(browser.waitForStrict("!!(document.getElementById('offline-reauth') && !document.getElementById('offline-reauth').disabled)", Duration.ofSeconds(10)));
+            JsonNode csrfBootstrap = browser.evaluateStrict("(async()=>{const r=await fetch('/api/my/session-context',{method:'GET',cache:'no-store',credentials:'same-origin',headers:{'Accept':'application/json'}});const j=await r.json();return JSON.stringify({status:r.status,code:j.code,cookie:document.cookie.split(';').some(x=>x.trim().startsWith('XSRF-TOKEN='))})})()");
+            JsonNode csrfBootstrapState = JSON.readTree(csrfBootstrap.asText());
+            assertEquals(200, csrfBootstrapState.path("status").asInt(), "onlineの正規bootstrap GETが成功する");
+            assertEquals(200, csrfBootstrapState.path("code").asInt(), "scope endpointのJSON successを受け取る");
+            assertTrue(csrfBootstrapState.path("cookie").asBoolean(), "server-issued XSRF cookieを同じChrome contextへ更新する");
             assertTrue(browser.evaluateStrict("window.__nativeFetch=window.fetch.bind(window);window.__protectedSendCount=0;"
                     + "window.fetch=(input,init)=>{if(String(input).includes('/api/my/pwa/attendance/daily')){window.__protectedSendCount++;return Promise.reject(new TypeError('fenced'));}return window.__nativeFetch(input,init)};"
                     + "window.__reauthDiagnostics=[];const beforeReauth=window.fetch;window.fetch=async(input,init)=>{if(String(input).includes('/api/my/pwa/restore/reauthenticate')){const h=new Headers(init&&init.headers||{});const rec={csrfHeaderPresent:h.has('X-XSRF-TOKEN'),cookiePresent:document.cookie.split(';').some(x=>x.trim().startsWith('XSRF-TOKEN='))};try{const r=await beforeReauth(input,init);rec.status=r.status;window.__reauthDiagnostics.push(rec);return r}catch(e){rec.errorClass=e&&e.name||'Error';window.__reauthDiagnostics.push(rec);throw e}}return beforeReauth(input,init)};"
@@ -392,8 +397,6 @@ class PwaQueueChromeIsolationBrowserTest {
                                AtomicBoolean rebindScopeOnNextContext) throws java.io.IOException {
         String path = exchange.getRequestURI().getPath();
         if (path.equals("/test.html")) {
-            // Chrome再起動後も同じoriginから発行されたCSRF cookieを使う。
-            exchange.getResponseHeaders().add("Set-Cookie", "XSRF-TOKEN=synthetic-csrf; Path=/; SameSite=Lax");
             reply(exchange, 200, "text/html; charset=utf-8", """
                     <!doctype html><html lang="ja"><head><meta charset="utf-8"></head><body>
                     <div id="pwa-queue-panel"><div id="pwa-queue-status"></div><div id="pwa-conflicts"></div></div>
@@ -422,6 +425,8 @@ class PwaQueueChromeIsolationBrowserTest {
             return;
         }
         if (path.equals("/api/my/session-context")) {
+            // Spring Securityと同じbootstrap契約を合成し、CSRF tokenは通常のHTTP応答で発行する。
+            exchange.getResponseHeaders().add("Set-Cookie", "XSRF-TOKEN=synthetic-csrf; Path=/; SameSite=Lax");
             String presented = exchange.getRequestHeaders().getFirst("X-User-Scope");
             String scope = presented == null || presented.isBlank() ? "scope-A" : presented;
             if (rebindScopeOnNextContext.compareAndSet(true, false)) scope += "-rebound";
