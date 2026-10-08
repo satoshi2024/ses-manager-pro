@@ -5,7 +5,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 
 /** SF-W2b checkpointの署名対象となるopaqueなtyped record。 */
-public record WatermarkCheckpoint(
+record WatermarkCheckpoint(
         String journalId,
         String tenantId,
         String subjectRef,
@@ -34,7 +34,22 @@ public record WatermarkCheckpoint(
 
     private static String required(String value, String name) {
         if (value == null || value.isBlank()) throw new IllegalArgumentException(name + "は必須です");
+        strictUtf8(value, name);
+        if (value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 128) {
+            throw new IllegalArgumentException(name + "はUTF-8 128 byte以下でなければなりません");
+        }
         return value;
+    }
+
+    private static void strictUtf8(String value, String name) {
+        try {
+            java.nio.charset.StandardCharsets.UTF_8.newEncoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .encode(java.nio.CharBuffer.wrap(value));
+        } catch (java.nio.charset.CharacterCodingException e) {
+            throw new IllegalArgumentException(name + "は正しいUnicodeでなければなりません", e);
+        }
     }
 
     private static String hash(String value, String name) {
