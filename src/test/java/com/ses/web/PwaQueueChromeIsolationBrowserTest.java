@@ -244,13 +244,38 @@ class PwaQueueChromeIsolationBrowserTest {
             browser.evaluate("(async()=>{const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});"
                     + ttlSetup + "db.close();return true})()");
             JsonNode ttlClockScript = browser.send("Page.addScriptToEvaluateOnNewDocument", Map.of("source",
-                    "if(location.search.includes('nf04_ttl_probe')){const fixed=" + ttlClock + ";Date.now=()=>fixed}"));
-            browser.navigate(base + "/test.html?user=A&nf04_ttl_probe=1");
-            assertTrue(browser.waitForStrict("window.SES&&SES.pwaQueue&&SES.pwaQueue.whenReady().then(()=>true)", Duration.ofSeconds(15)),
-                    "TTL cleanup transactionが完了する");
-            assertTrue(browser.evaluateStrict("(async()=>{const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});const ids=await new Promise((ok,no)=>{const q=db.transaction('queue').objectStore('queue').getAllKeys();q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)});db.close();return !ids.includes('ttl-old')&&ids.includes('ttl-exact')&&ids.includes('ttl-fresh')})()").asBoolean(),
-                    "TTLはthreshold未満だけ削除し、exact thresholdとfresh recordを保持する");
-            browser.send("Page.removeScriptToEvaluateOnNewDocument", Map.of("identifier", ttlClockScript.path("identifier").asText()));
+                    "if(location.search.includes('nf04_ttl_probe')){const fixed=" + ttlClock
+                            + ";window.__nf04TtlNativeDateNow=Date.now;Date.now=()=>fixed}"));
+            Throwable ttlPrimaryFailure = null;
+            try {
+                browser.navigate(base + "/test.html?user=A&nf04_ttl_probe=1");
+                assertTrue(browser.waitForStrict("window.SES&&SES.pwaQueue&&SES.pwaQueue.whenReady().then(()=>true)", Duration.ofSeconds(15)),
+                        "TTL cleanup transactionが完了する");
+                assertTrue(browser.evaluateStrict("(async()=>{const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});const ids=await new Promise((ok,no)=>{const q=db.transaction('queue').objectStore('queue').getAllKeys();q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)});db.close();return !ids.includes('ttl-old')&&ids.includes('ttl-exact')&&ids.includes('ttl-fresh')})()").asBoolean(),
+                        "TTLはthreshold未満だけ削除し、exact thresholdとfresh recordを保持する");
+            } catch (Exception | AssertionError thrown) {
+                ttlPrimaryFailure = thrown;
+                throw thrown;
+            } finally {
+                Throwable ttlCleanupFailure = null;
+                try {
+                    browser.evaluate("if(window.__nf04TtlNativeDateNow){Date.now=window.__nf04TtlNativeDateNow;delete window.__nf04TtlNativeDateNow}true");
+                } catch (Throwable thrown) {
+                    ttlCleanupFailure = thrown;
+                }
+                try {
+                    browser.send("Page.removeScriptToEvaluateOnNewDocument", Map.of("identifier", ttlClockScript.path("identifier").asText()));
+                } catch (Throwable thrown) {
+                    if (ttlCleanupFailure == null) ttlCleanupFailure = thrown;
+                    else ttlCleanupFailure.addSuppressed(thrown);
+                }
+                if (ttlCleanupFailure != null) {
+                    if (ttlPrimaryFailure != null) ttlPrimaryFailure.addSuppressed(ttlCleanupFailure);
+                    else if (ttlCleanupFailure instanceof Exception exception) throw exception;
+                    else if (ttlCleanupFailure instanceof Error error) throw error;
+                    else throw new IllegalStateException("TTL test clock cleanup failed", ttlCleanupFailure);
+                }
+            }
 
             // 不正statusの旧scope recordを残し、confirm中の実IndexedDB deleteScope transactionを止めて撤回と競合させる。
             browser.evaluate("(async()=>{window.__setOnline(false);await SES.pwaQueue.request({screen:'attendance',month:'2026-10',method:'POST',"
