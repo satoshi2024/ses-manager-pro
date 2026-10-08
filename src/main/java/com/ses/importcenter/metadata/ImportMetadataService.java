@@ -207,6 +207,9 @@ public class ImportMetadataService {
     public long disableSource(long sourceSystemId, long expectedVersion, boolean disabled) {
         ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
         SourceSnapshot source = lockSource(context.tenantId(), sourceSystemId);
+        if (source == null) {
+            throw BusinessException.of(404, "error.import.sourceNotFound");
+        }
         if (source.version() != expectedVersion) {
             throw BusinessException.of(409, "error.import.sourceVersionConflict");
         }
