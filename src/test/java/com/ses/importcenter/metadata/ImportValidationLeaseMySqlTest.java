@@ -115,7 +115,13 @@ class ImportValidationLeaseMySqlTest {
         assertThrows(TransactionSystemException.class, () -> lost.renew(recovered));
         var renewedBeforeRetry = state();
         var oldGrant = lost.renew(recovered);
-        assertEquals(renewedBeforeRetry, state());
+        var renewedAfterRetry = state();
+        assertEquals(renewedBeforeRetry.owner(), renewedAfterRetry.owner());
+        assertEquals(renewedBeforeRetry.generation(), renewedAfterRetry.generation());
+        assertEquals(renewedBeforeRetry.version() + 1, renewedAfterRetry.version());
+        assertFalse(renewedAfterRetry.expiresAt().before(renewedBeforeRetry.expiresAt()));
+        assertTrue(jdbc.queryForObject("SELECT lease_expires_at > CURRENT_TIMESTAMP(6) FROM t_import_job WHERE tenant_id=? AND id=?",
+                Boolean.class, context.tenantId(), jobId));
         assertEquals(1L, jdbc.queryForObject("SELECT lease_generation FROM t_import_job WHERE tenant_id=? AND id=?", Long.class, context.tenantId(), jobId));
         jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?", context.tenantId(), jobId);
         assert409(() -> lost.renew(oldGrant));
@@ -203,9 +209,11 @@ class ImportValidationLeaseMySqlTest {
 
     @Test
     void renewWaitsOnObservedSourceLockThenExpiredTakeoverWinsBeforeOldRenewal() throws Exception {
-        var original = service.acquire(service.beginAcquire(jobId));
         AtomicReference<Long> renewConnection = new AtomicReference<>();
-        var renewingService = serviceWithCapture(renewConnection);
+        AtomicReference<CapturingTransactionManager> renewManager = new AtomicReference<>();
+        var renewingService = serviceWithCapture(renewConnection, renewManager);
+        var original = renewingService.acquire(renewingService.beginAcquire(jobId));
+        renewManager.get().captureNextConnectionId(renewConnection);
         ExecutorService pool = Executors.newSingleThreadExecutor();
         CountDownLatch ready = new CountDownLatch(1);
         CountDownLatch start = new CountDownLatch(1);
@@ -384,11 +392,13 @@ class ImportValidationLeaseMySqlTest {
     }
 
     private void assertExpiredRenewTakeoverQueue(boolean takeoverFirst) throws Exception {
-        var oldGrant = service.acquire(service.beginAcquire(jobId));
-        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?", context.tenantId(), jobId);
         AtomicReference<Long> renewConnection = new AtomicReference<>();
+        AtomicReference<CapturingTransactionManager> renewManager = new AtomicReference<>();
+        var renewService = serviceWithCapture(renewConnection, renewManager);
+        var oldGrant = renewService.acquire(renewService.beginAcquire(jobId));
+        renewManager.get().captureNextConnectionId(renewConnection);
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?", context.tenantId(), jobId);
         AtomicReference<Long> takeoverConnection = new AtomicReference<>();
-        var renewService = serviceWithCapture(renewConnection);
         var takeoverService = serviceWithCapture(takeoverConnection);
         var takeover = takeoverService.beginTakeover(jobId);
         ExecutorService pool = Executors.newFixedThreadPool(2);
@@ -458,8 +468,14 @@ class ImportValidationLeaseMySqlTest {
     }
 
     private ImportValidationLeaseService serviceWithCapture(AtomicReference<Long> connectionId) {
+        return serviceWithCapture(connectionId, new AtomicReference<>());
+    }
+
+    private ImportValidationLeaseService serviceWithCapture(AtomicReference<Long> connectionId,
+                                                             AtomicReference<CapturingTransactionManager> managerCapture) {
         var manager = new CapturingTransactionManager(dataSource, jdbc);
         manager.captureNextConnectionId(connectionId);
+        managerCapture.set(manager);
         return new ImportValidationLeaseService(jdbc, authorization, mock(DocumentService.class), manager);
     }
 
