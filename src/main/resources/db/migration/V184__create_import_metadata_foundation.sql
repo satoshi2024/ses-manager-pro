@@ -18,7 +18,7 @@ CREATE TABLE t_import_source_system (
     UNIQUE KEY uk_import_source_tenant_id (tenant_id, id),
     CONSTRAINT chk_import_source_status CHECK (status IN ('ACTIVE', 'DISABLED')),
     CONSTRAINT chk_import_source_version CHECK (version_no > 0)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='F1a source system metadata';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='F1aの取込元システム情報';
 
 CREATE TABLE t_import_mapping (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -40,7 +40,7 @@ CREATE TABLE t_import_mapping (
     CONSTRAINT chk_import_mapping_size CHECK (OCTET_LENGTH(canonical_bytes) <= 32768),
     CONSTRAINT fk_import_mapping_source FOREIGN KEY (tenant_id, source_system_id)
         REFERENCES t_import_source_system (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='F1a immutable direct mapping';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='F1a変更不可の直接項目対応表';
 
 CREATE TABLE t_import_job (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -89,7 +89,7 @@ CREATE TABLE t_import_job (
     CONSTRAINT fk_import_job_mapping_snapshot FOREIGN KEY (tenant_id, mapping_id, source_system_id, entity_type, schema_version, mapping_version, mapping_sha256)
         REFERENCES t_import_mapping (tenant_id, id, source_system_id, entity_type, schema_version, mapping_version, mapping_sha256)
         ON UPDATE RESTRICT ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='F1a immutable source job and validation fence';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='F1a変更不可の取込jobと検証fence';
 
 CREATE TABLE t_import_validation_run (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -217,7 +217,7 @@ CREATE TABLE t_import_validation_run (
     CONSTRAINT fk_import_run_mapping_snapshot FOREIGN KEY (tenant_id, job_id, mapping_id, source_system_id, entity_type, schema_version, mapping_version, mapping_sha256)
         REFERENCES t_import_job (tenant_id, id, mapping_id, source_system_id, entity_type, schema_version, mapping_version, mapping_sha256)
         ON UPDATE RESTRICT ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='F1a append-only validation attempts';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='F1a追記専用の検証実行履歴';
 
 ALTER TABLE t_import_job
     ADD CONSTRAINT fk_import_job_active_run FOREIGN KEY (tenant_id, id, active_validation_run_id)
@@ -244,7 +244,7 @@ CREATE TABLE t_import_validation_row (
     CONSTRAINT chk_import_row_disposition CHECK (disposition IN ('ACCEPTED', 'REJECTED')),
     CONSTRAINT fk_import_row_run FOREIGN KEY (tenant_id, job_id, validation_run_id)
         REFERENCES t_import_validation_run (tenant_id, job_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='F1a privacy-safe append-only validation rows';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='F1a個人情報を含まない追記専用検証行';
 
 CREATE TABLE t_import_identity_registry (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -273,4 +273,4 @@ CREATE TABLE t_import_identity_registry (
         REFERENCES t_import_source_system (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT fk_import_identity_provenance FOREIGN KEY (tenant_id, first_job_id, first_validation_run_id, source_system_id, entity_type)
         REFERENCES t_import_validation_run (tenant_id, job_id, id, source_system_id, entity_type) ON UPDATE RESTRICT ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='F1a encrypted candidate identity registry';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='F1a暗号化した候補識別子台帳';

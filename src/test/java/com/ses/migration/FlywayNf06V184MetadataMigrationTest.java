@@ -59,24 +59,24 @@ class FlywayNf06V184MetadataMigrationTest {
                     "INSERT INTO t_import_source_system (tenant_id, source_code, display_name, status, "
                             + "lookup_key_version, created_by, updated_by) VALUES "
                             + "('tenant-a','invalid-state','invalid','PAUSED','key-v1',1,1)"),
-                    3819, "HY000", "source status CHECKをMySQLが実際に拒否する");
+                    3819, "HY000", "source status列のCHECK制約をMySQLが拒否する");
             assertMysqlFailure(() -> insertMapping(statement, "tenant-b", sourceId,
                     "CUSTOMER", 1, new byte[]{1}), 1452, "23000", "tenant複合source FKがtenant越境を拒否する");
             assertMysqlFailure(() -> insertMapping(statement, "tenant-a", sourceId,
-                    "UNKNOWN", 1, new byte[]{1}), 3819, "HY000", "entity CHECKをMySQLが実際に拒否する");
+                    "UNKNOWN", 1, new byte[]{1}), 3819, "HY000", "entity_typeのCHECK制約をMySQLが拒否する");
             assertMysqlFailure(() -> insertMapping(statement, "tenant-a", sourceId,
-                    "CUSTOMER", 0, new byte[]{1}), 3819, "HY000", "mapping version CHECKをMySQLが実際に拒否する");
+                    "CUSTOMER", 0, new byte[]{1}), 3819, "HY000", "mapping_versionのCHECK制約をMySQLが拒否する");
             assertMysqlFailure(() -> insertMapping(statement, "tenant-a", sourceId,
-                    "CUSTOMER", 1, new byte[32769]), 3819, "HY000", "canonical bytes上限CHECKをMySQLが実際に拒否する");
+                    "CUSTOMER", 1, new byte[32769]), 3819, "HY000", "canonical_bytesの上限CHECKをMySQLが拒否する");
 
             insertMapping(statement, "tenant-a", sourceId, "CUSTOMER", 1, new byte[]{1});
             assertMysqlFailure(() -> insertMapping(statement, "tenant-a", sourceId,
-                    "CUSTOMER", 1, new byte[]{2}), 1062, "23000", "同一namespaceのmapping version uniqueを確認する");
+                    "CUSTOMER", 1, new byte[]{2}), 1062, "23000", "同一namespaceのmapping版一意制約を確認する");
         }
     }
 
     @Test
-    void B0_V182からupgradeし既存業務行と履歴を保持してFlyway_validateに成功する() throws Exception {
+    void B0_V182から更新し既存業務行と履歴を保持してFlywayの検証に成功する() throws Exception {
         Flyway atB0 = flyway(UPGRADE).target("182").load();
         atB0.migrate();
         long before;
@@ -101,7 +101,7 @@ class FlywayNf06V184MetadataMigrationTest {
             assertEquals(before, scalar(statement, "SELECT COUNT(*) FROM sys_user"),
                     "upgrade前の既存ユーザー行が保持される");
             assertEquals(permissionActionsBefore, scalar(statement, "SELECT COUNT(*) FROM t_permission_group_action"),
-                    "V184 upgradeは既存permission actionを変更しない");
+                    "V184の適用は既存permission actionを変更しない");
             assertUpgradeSentinelPreserved(statement);
             assertEquals(1L, scalar(statement,
                     "SELECT COUNT(*) FROM sys_user WHERE username='admin'"),
@@ -139,21 +139,21 @@ class FlywayNf06V184MetadataMigrationTest {
         assertTrue(java.util.Arrays.stream(flyway.info().all())
                         .anyMatch(info -> info.getVersion() != null
                                 && "184".equals(info.getVersion().getVersion())),
-                "V184のresolved migration情報が存在する");
+                "V184のmigration情報を取得できる");
         boolean hasRepeatableMigration = false;
         for (MigrationInfo info : flyway.info().all()) {
             if (info.getVersion() == null) {
                 hasRepeatableMigration = true;
             }
         }
-        assertTrue(hasRepeatableMigration, "Flyway infoにはversionを持たないrepeatable migrationも含まれる");
+        assertTrue(hasRepeatableMigration, "Flywayの一覧にはversionを持たない反復migrationも含まれる");
     }
 
     private void assertMetadataSchema(Statement statement) throws Exception {
         for (String table : new String[]{"t_import_source_system", "t_import_mapping", "t_import_job",
                 "t_import_validation_run", "t_import_validation_row", "t_import_identity_registry"}) {
             assertEquals(1L, scalar(statement, "SELECT COUNT(*) FROM information_schema.tables "
-                    + "WHERE table_schema=DATABASE() AND table_name='" + table + "'"), table + " exists");
+                    + "WHERE table_schema=DATABASE() AND table_name='" + table + "'"), table + "が存在する");
         }
         for (String[] constraint : new String[][]{
                 {"t_import_source_system", "chk_import_source_status"},
@@ -169,7 +169,7 @@ class FlywayNf06V184MetadataMigrationTest {
             assertEquals(1L, scalar(statement, "SELECT COUNT(*) FROM information_schema.table_constraints "
                     + "WHERE constraint_schema=DATABASE() AND table_name='" + constraint[0]
                     + "' AND constraint_name='" + constraint[1] + "' AND constraint_type='CHECK'"),
-                    constraint[1] + " CHECK exists");
+                    constraint[1] + "のCHECK制約が存在する");
         }
         for (String[] index : new String[][]{
                 {"t_import_source_system", "uk_import_source_tenant_code", "tenant_id", "source_code"},
@@ -231,7 +231,7 @@ class FlywayNf06V184MetadataMigrationTest {
         try (PreparedStatement insert = statement.getConnection().prepareStatement(
                 "INSERT INTO sys_user (username,password,real_name,role,email,status,failed_count,locked_until,"
                         + "created_at,updated_at,deleted_flag) VALUES "
-                        + "('nf06-v184-sentinel','synthetic-password-hash','NF06 upgrade sentinel','営業',"
+                        + "('nf06-v184-sentinel','synthetic-password-hash','NF06更新確認用','営業',"
                         + "'nf06-v184-sentinel@example.local',1,3,'2031-02-03 04:05:06',"
                         + "'2026-01-02 03:04:05','2026-01-02 03:04:05',0)")) {
             insert.executeUpdate();
@@ -242,10 +242,10 @@ class FlywayNf06V184MetadataMigrationTest {
         try (ResultSet result = statement.executeQuery(
                 "SELECT username,password,real_name,role,email,status,failed_count,locked_until,created_at,updated_at,deleted_flag "
                         + "FROM sys_user WHERE username='nf06-v184-sentinel'")) {
-            assertTrue(result.next(), "V182後に挿入したsentinel行が残る");
+            assertTrue(result.next(), "V182後に挿入した確認用行が残る");
             assertEquals("nf06-v184-sentinel", result.getString("username"));
             assertEquals("synthetic-password-hash", result.getString("password"));
-            assertEquals("NF06 upgrade sentinel", result.getString("real_name"));
+            assertEquals("NF06更新確認用", result.getString("real_name"));
             assertEquals("営業", result.getString("role"));
             assertEquals("nf06-v184-sentinel@example.local", result.getString("email"));
             assertEquals(1, result.getInt("status"));
@@ -254,7 +254,7 @@ class FlywayNf06V184MetadataMigrationTest {
             assertEquals(Timestamp.valueOf("2026-01-02 03:04:05"), result.getTimestamp("created_at"));
             assertEquals(Timestamp.valueOf("2026-01-02 03:04:05"), result.getTimestamp("updated_at"));
             assertEquals(0, result.getInt("deleted_flag"));
-            assertTrue(!result.next(), "sentinel usernameは一意で1行だけ残る");
+            assertTrue(!result.next(), "確認用usernameは一意で1行だけ残る");
         }
     }
 
@@ -268,12 +268,12 @@ class FlywayNf06V184MetadataMigrationTest {
             query.setString(2, index);
             try (ResultSet rows = query.executeQuery()) {
                 while (rows.next()) {
-                    assertEquals(0, rows.getInt("non_unique"), index + " is unique");
+                    assertEquals(0, rows.getInt("non_unique"), index + "が一意索引である");
                     columns.add(rows.getString("column_name"));
                 }
             }
         }
-        assertEquals(List.of(expectedColumns), columns, index + "のunique列と順序が一致する");
+        assertEquals(List.of(expectedColumns), columns, index + "の一意索引列と順序が一致する");
     }
 
     private void assertForeignKey(Statement statement, String table, String constraint, String referencedTable,
@@ -301,8 +301,8 @@ class FlywayNf06V184MetadataMigrationTest {
     private void assertMysqlFailure(Executable operation, int expectedVendorCode, String expectedSqlState,
                                    String message) {
         SQLException failure = assertThrows(SQLException.class, operation, message);
-        assertEquals(expectedVendorCode, failure.getErrorCode(), message + " (vendor code)");
-        assertEquals(expectedSqlState, failure.getSQLState(), message + " (SQLSTATE)");
+        assertEquals(expectedVendorCode, failure.getErrorCode(), message + "（MySQLエラー番号）");
+        assertEquals(expectedSqlState, failure.getSQLState(), message + "（SQLSTATE）");
     }
 
     private void insertMapping(Statement statement, String tenant, long sourceId, String entity,
@@ -322,7 +322,7 @@ class FlywayNf06V184MetadataMigrationTest {
 
     private long scalar(Statement statement, String sql) throws SQLException {
         try (ResultSet result = statement.executeQuery(sql)) {
-            assertTrue(result.next(), "scalar query returned no row");
+            assertTrue(result.next(), "集計queryが結果行を返す");
             return result.getLong(1);
         }
     }
