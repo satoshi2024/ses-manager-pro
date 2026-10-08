@@ -97,6 +97,28 @@
         return true;
     }
 
+    function csrfHeader() {
+        const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
+        let token = '';
+        try { token = match ? decodeURIComponent(match[1]) : ''; }
+        catch (_) { /* 不正なcookieはCSRF tokenとして使わない */ }
+        if (!token) throw new Error('CSRFトークンを確認できません。オンラインで再読み込みしてください');
+        return { 'X-XSRF-TOKEN': token };
+    }
+
+    function hasCurrentSendAuthorization(record, ticket) {
+        if (!record || !ticketIsCurrent(ticket) || record.userScope !== ticket.scope
+                || record.revocationEpoch !== ticket.epoch) return false;
+        if (state.newRequestIds.has(record.clientRequestId)) return true;
+        return state.restoredRequestIds.has(record.clientRequestId) && restorePermitIsCurrent();
+    }
+
+    function restoreOperationIsCurrent(generation, epoch) {
+        return generation === state.documentGeneration && !state.quarantined
+            && restorePermitIsCurrent() && state.revocationEpoch === epoch
+            && readRevocationEpoch() === epoch;
+    }
+
     function readRevocationEpoch() {
         let localEpoch = null;
         try {
@@ -1034,16 +1056,18 @@
 
     async function sendRecordAcrossTabs(record) {
         const ticket = scopeTicket();
-        if (record.userScope !== state.scope || !ticketIsCurrent(ticket)) return { skipped: true };
+        if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
         let claim = await claimAggregate(record.resourceKey, ticket);
-        while (!claim && ticketIsCurrent(ticket) && navigator.onLine) {
+        while (!claim && hasCurrentSendAuthorization(record, ticket) && navigator.onLine) {
             await new Promise(resolve => setTimeout(resolve, 40));
+            if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
             claim = await claimAggregate(record.resourceKey, ticket);
         }
-        if (!claim || !ticketIsCurrent(ticket)) return { skipped: true };
+        if (!claim) return { skipped: true };
         try {
+            if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
             const latest = await readById(record.clientRequestId);
-            if (!ticketIsCurrent(ticket) || !latest || latest.status !== 'PENDING'
+            if (!hasCurrentSendAuthorization(latest, ticket) || !latest || latest.status !== 'PENDING'
                     || latest.revocationEpoch !== ticket.epoch
                     || latest.userScope !== ticket.scope) return { skipped: true };
             record = latest;
@@ -1052,13 +1076,11 @@
     }
 
     async function sendClaimedRecord(record, ticket, claim) {
-        if (state.restoredRequestIds.has(record.clientRequestId) && !restorePermitIsCurrent()) {
-            return { skipped: true };
-        }
+        if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
         if (!record.createdAt || record.createdAt < now() - MAX_AGE_MS) {
             return markExpired(record, undefined, ticket, claim);
         }
-        if (!navigator.onLine || !ticketIsCurrent(ticket)) return { queued: true, clientRequestId: record.clientRequestId };
+        if (!navigator.onLine) return { queued: true, clientRequestId: record.clientRequestId };
         const headers = Object.assign({
             'Accept': 'application/json',
             'Content-Type': 'application/json',
@@ -1067,15 +1089,14 @@
             'X-Client-Base-Version': String(record.baseVersion),
             'X-Client-Created-At': String(record.createdAt),
             'X-User-Scope': record.userScope
-        }, SES.csrf.header());
+        }, csrfHeader());
         try {
-            if (!ticketIsCurrent(ticket)) return { skipped: true };
+            if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
             const response = await fetch(record.path, {
                 method: record.method, cache: 'no-store', credentials: 'same-origin',
                 headers, body: JSON.stringify({ screen: record.screen, month: record.month, payload: record.payload })
             });
-            if (!ticketIsCurrent(ticket) || (state.restoredRequestIds.has(record.clientRequestId)
-                    && !restorePermitIsCurrent())) return { skipped: true };
+            if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
             const contentType = response.headers.get('content-type') || '';
             const sessionRedirect = (response.redirected && /\/login(?:[/?#]|$)/.test(response.url))
                 || contentType.toLowerCase().includes('text/html');
@@ -1088,7 +1109,7 @@
             }
             let result = null;
             try { result = await response.json(); } catch (_) { /* 非JSONは下記で処理 */ }
-            if (!ticketIsCurrent(ticket)) return { skipped: true };
+            if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
             if (response.status === 409 || (result && result.code === 409)) {
                 if (result && result.data && result.data.type === 'QUEUE_EXPIRED') {
                     const fallback = '保持期間（30日）を過ぎたため送信できません。破棄して再入力してください。';
@@ -1107,14 +1128,15 @@
                 await markError(record, message, ticket, claim);
                 throw new Error(message);
             }
-            if (!ticketIsCurrent(ticket)) return { skipped: true };
+            if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
             if (!await removeClaimed(record.clientRequestId, ticket, claim)) return { skipped: true };
+            if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
             await updateFollowingVersions(record, result.data, ticket, claim);
             await render();
             return { queued: false, data: result.data, clientRequestId: record.clientRequestId };
         } catch (error) {
             if (error && (error.name === 'TypeError' || error.name === 'NetworkError')) {
-                if (ticketIsCurrent(ticket)) await putClaimed(record, ticket, claim);
+                if (hasCurrentSendAuthorization(record, ticket)) await putClaimed(record, ticket, claim);
                 await render();
                 return { queued: true, clientRequestId: record.clientRequestId };
             }
@@ -1271,7 +1293,9 @@
         getOfflineDrafts: async () => {
             await state.ready;
             if (!restorePermitIsCurrent()) return [];
-            return (await readAllowedRecords()).filter(record => ['PENDING', 'CONFLICT'].includes(record.status))
+            const records = await readAllowedRecords();
+            if (!restorePermitIsCurrent()) return [];
+            return records.filter(record => ['PENDING', 'CONFLICT'].includes(record.status))
                 .map(record => ({ screen: record.screen, month: record.month, status: record.status,
                     createdAt: record.createdAt, payload: record.payload }));
         },
@@ -1282,9 +1306,12 @@
             const oldScope = state.candidateRestoreScope;
             if (generation !== state.documentGeneration || !oldScope
                     || await countScope(oldScope) === 0) throw new Error('復元対象を一意に確認できません');
+            if (generation !== state.documentGeneration || state.quarantined || oldScope !== state.candidateRestoreScope) {
+                throw new Error('復元が取り消されました。最初からやり直してください');
+            }
             const response = await fetch('/api/my/pwa/restore/reauthenticate', {
                 method: 'POST', cache: 'no-store', credentials: 'same-origin',
-                headers: Object.assign({ 'Accept': 'application/json', 'Content-Type': 'application/json' }, SES.csrf.header()),
+                headers: Object.assign({ 'Accept': 'application/json', 'Content-Type': 'application/json' }, csrfHeader()),
                 body: JSON.stringify({ password, documentNonce: state.documentNonce, userScope: oldScope })
             });
             if (generation !== state.documentGeneration) throw new Error('復元が取り消されました。最初からやり直してください');
@@ -1299,10 +1326,11 @@
         confirmRestore: async () => {
             await state.ready;
             const generation = state.documentGeneration;
+            const operationEpoch = state.revocationEpoch;
             if (!state.restoreProof || !state.restoreScope || !navigator.onLine) throw new Error('再認証からやり直してください');
             const response = await fetch('/api/my/pwa/restore/confirm', {
                 method: 'POST', cache: 'no-store', credentials: 'same-origin',
-                headers: Object.assign({ 'Accept': 'application/json', 'Content-Type': 'application/json' }, SES.csrf.header()),
+                headers: Object.assign({ 'Accept': 'application/json', 'Content-Type': 'application/json' }, csrfHeader()),
                 body: JSON.stringify({ proof: state.restoreProof, documentNonce: state.documentNonce, userScope: state.restoreScope })
             });
             const result = await response.json().catch(() => null);
@@ -1354,24 +1382,26 @@
                     restorable.push(record.clientRequestId);
                 } catch (_) { /* 不正recordは復元候補に含めない */ }
             }
-            if (generation !== state.documentGeneration || !restorePermitIsCurrent()) {
+            if (!restoreOperationIsCurrent(generation, operationEpoch)) {
                 clearRestorePermit();
                 throw new Error('復元が取り消されました。最初からやり直してください');
             }
             try {
                 await rebindScope(oldScope, newScope, new Set(restorable),
-                    () => generation === state.documentGeneration && restorePermitIsCurrent()
-                        && !state.quarantined && readRevocationEpoch() === state.revocationEpoch);
+                    () => restoreOperationIsCurrent(generation, operationEpoch));
             } catch (_) {
                 clearRestorePermit();
                 throw new Error('復元が取り消されました。最初からやり直してください');
             }
-            if (generation !== state.documentGeneration || !restorePermitIsCurrent() || state.quarantined
-                    || readRevocationEpoch() !== state.revocationEpoch) {
+            if (!restoreOperationIsCurrent(generation, operationEpoch)) {
                 clearRestorePermit();
                 throw new Error('復元が取り消されました。最初からやり直してください');
             }
             if (oldScope !== newScope) await deleteScope(oldScope);
+            if (!restoreOperationIsCurrent(generation, operationEpoch)) {
+                clearRestorePermit();
+                throw new Error('復元が取り消されました。最初からやり直してください');
+            }
             state.scope = newScope;
             state.candidateRestoreScope = newScope;
             state.lockedDraftCount = 0;
@@ -1380,6 +1410,11 @@
             state.paused = false;
             persistScope(newScope);
             await render();
+            if (!restoreOperationIsCurrent(generation, operationEpoch)) {
+                clearRestorePermit();
+                clearDraftDom();
+                throw new Error('復元が取り消されました。最初からやり直してください');
+            }
             await flush();
             return true;
         },
