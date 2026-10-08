@@ -104,7 +104,8 @@ class ImportMetadataRealMySqlTest {
     void prepareAuthorizedFixture() {
         tenantId = TEST_TENANT;
         AccountingTenantContextHolder.setTenantId(tenantId);
-        var user = SysUser.builder().username("nf06-" + tenantId.substring(10, 26))
+        String testUsername = "nf06-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        var user = SysUser.builder().username(testUsername)
                 .password("test-only").realName("取込テスト管理者").role("管理者").status(1).tenantId(tenantId).build();
         sysUserMapper.insert(user);
         actorUserId = user.getId();
