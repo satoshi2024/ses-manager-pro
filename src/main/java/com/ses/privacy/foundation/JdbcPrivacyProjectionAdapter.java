@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Objects;
 
 /** 合成application DBだけにjournal prefixをCAS投影するtest-only adapter。 */
-final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort {
+final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort, PrivacyRecoveryProjectionPort {
     private static final String ZERO_HASH = "0".repeat(64);
     private final JdbcTemplate jdbc;
     private final TransactionTemplate writeTransaction;

@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Objects;
 
 /** 合成witness DB専用のappend-only logと独立latest CAS。 */
-final class JdbcLatestWitnessAdapter implements LatestWitnessPort {
+final class JdbcLatestWitnessAdapter implements LatestWitnessPort, LatestWitnessReader {
     private static final String ZERO_HASH = "0".repeat(64);
     private final JdbcTemplate jdbc;
     private final TransactionTemplate write;

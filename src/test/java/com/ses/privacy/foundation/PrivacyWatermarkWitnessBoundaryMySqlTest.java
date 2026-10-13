@@ -30,9 +30,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 import java.security.MessageDigest;
 import java.security.PublicKey;
 import java.util.HexFormat;
+import java.time.ZoneId;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.lang.reflect.InvocationTargetException;
@@ -41,7 +43,7 @@ import javax.sql.DataSource;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** W2b Slice A/B/C: 3独立MySQL、projection CAS、署名checkpoint、witness ACLを確認する。 */
+/** W2b Slice A/B/C/D: 3独立MySQL、projection CAS、署名checkpoint、recovery ACL/fenceを確認する。 */
 @Tag("mysql")
 @Testcontainers
 class PrivacyWatermarkWitnessBoundaryMySqlTest {
@@ -63,10 +65,15 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
     private static JdbcTemplate projectionAdmin;
     private static DataSource appProjectionDataSource;
     private static DataSource appAdminDataSource;
+    private static DataSource recoveryJournalDataSource;
+    private static DataSource recoveryWitnessDataSource;
     private static JournalProjectionService projectionService;
     private static JdbcPrivacyJournalAdapter journalAdapter;
     private static JdbcTemplate journalPrincipalOnWitness;
     private static JdbcTemplate appProjectionPrincipalOnWitness;
+    private static LatestWitnessReader recoveryWitnessReader;
+    private static PrivacyJournalSnapshotReader recoveryJournalReader;
+    private static PrivacyRecoveryService recoveryService;
     private static SyntheticAttestorKeyFixture keyFixture;
     private static SyntheticWatermarkAttestor watermarkAttestor;
     private static JdbcLatestWitnessAdapter latestWitness;
@@ -104,6 +111,13 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
                 keyFixture.publicKey(), WatermarkKeyHistory.State.TRUSTED, SyntheticAttestorKeyFixture.AUDIENCE)));
         watermarkVerifier = new SignedWatermarkVerifier(keyHistory,
                 Clock.fixed(Instant.parse("2026-10-02T12:00:00Z"), ZoneOffset.UTC), Duration.ofHours(24));
+        recoveryWitnessDataSource = harness.witness().createWitnessReaderDataSource();
+        recoveryJournalDataSource = harness.journal().createJournalReaderDataSource();
+        recoveryWitnessReader = new JdbcLatestWitnessAdapter(recoveryWitnessDataSource, context.getEnvironment());
+        recoveryJournalReader = new JdbcPrivacyJournalSnapshotReader(recoveryJournalDataSource, context.getEnvironment());
+        recoveryService = new PrivacyRecoveryService(recoveryWitnessReader, watermarkVerifier, recoveryJournalReader,
+                new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment()),
+                new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()), context.getEnvironment());
         System.out.printf("SF_W2B_SLICE_C journalContainer=%s journalImageId=%s journalMysqlVersion=%s journalSchemaSha256=%s appContainer=%s appImageId=%s appMysqlVersion=%s appSchemaSha256=%s witnessContainer=%s witnessImageId=%s witnessMysqlVersion=%s witnessSchemaSha256=%s%n",
                 harness.journal().containerId(), JOURNAL.getContainerInfo().getImageId(),
                 new JdbcTemplate(harness.journal().adminDataSource()).queryForObject("SELECT VERSION()", String.class), harness.journal().schemaHash(),
@@ -172,7 +186,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
                 verified.set(event);
                 return projectionPort().apply(event);
             }
-            @Override public ProjectionSnapshot snapshot(PrivacyJournalPort.JournalPartition requested) {
+            @Override public PrivacyProjectionPort.ProjectionSnapshot snapshot(PrivacyJournalPort.JournalPartition requested) {
                 return projectionPort().snapshot(requested);
             }
         };
@@ -246,6 +260,201 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         assertEquals(PrivacyProjectionPort.Status.APPLIED, projectionService.projectAcknowledged(partition, ack).status());
         assertEquals(1L, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection "
                 + "WHERE tenant_id=? AND subject_ref=? AND last_applied_revision=1", Long.class, tenantId, subjectRef));
+    }
+
+    @Test
+    void liveWitness起点のrecoveryは古いprefixを再生し再実行はnoOpで隔離を維持する() {
+        var partition = partition();
+        var first = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-recovery-r1");
+        var second = append(partition, 1, PrivacyJournalPort.CommandType.LEASE_CLAIMED, "cmd-recovery-r2");
+        assertEquals(PrivacyProjectionPort.Status.APPLIED, projectionService.projectAcknowledged(partition, first).status());
+        assertEquals(PrivacyProjectionPort.Status.APPLIED, projectionService.projectAcknowledged(partition, second).status());
+        var firstCheckpoint = appendCheckpoint(first, 1, 0, "0".repeat(64));
+        appendCheckpoint(second, 2, 1, firstCheckpoint.checkpointHash());
+
+        var fixtureFence = new JdbcPrivacyPartitionFence(appAdminDataSource, context.getEnvironment());
+        var restoreOwner = new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()).quarantine(partition);
+        fixtureFence.underCurrentOwner(restoreOwner, tx -> {
+            assertEquals(1, tx.update("UPDATE sf_w2b_projection SET last_applied_revision=1, event_hash=?, held=TRUE, "
+                            + "last_action_id=NULL, last_action_state='NONE' WHERE tenant_id=? AND subject_ref=?",
+                    first.eventHash(), tenantId, subjectRef));
+            return null;
+        });
+
+        var recovered = recoveryService.recover(witnessPartition());
+        assertEquals(PrivacyRecoveryService.Status.RECOVERED_SYNTHETIC, recovered.status());
+        assertEquals(1, recovered.appliedCount());
+        assertEquals(2L, recovered.revision());
+        assertEquals(second.eventHash(), recovered.eventHash());
+        assertEquals(2L, new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment())
+                .snapshot(partition).revision());
+        assertEquals("QUARANTINED", new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
+                .snapshot(partition).state(), "成功しても通常投影の隔離を解除しない");
+
+        var repeated = recoveryService.recover(witnessPartition());
+        assertEquals(PrivacyRecoveryService.Status.RECOVERED_SYNTHETIC, repeated.status());
+        assertEquals(0, repeated.appliedCount());
+        assertEquals(0, repeated.noOpCount(), "同一headの再実行ではprojection writeもadapter-level no-opも発生しない");
+        assertTrue(repeated.generation() > recovered.generation());
+        assertEquals("QUARANTINED", new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
+                .snapshot(partition).state());
+    }
+
+    @Test
+    void journalが一度R10に進んだ後R7へ戻りliveWitnessがR5ならreplay前に拒否する() {
+        var partition = partition();
+        AtomicLong seconds = new AtomicLong();
+        Clock advancing = new Clock() {
+            @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return Instant.parse("2026-10-02T00:00:00Z").plusSeconds(seconds.getAndAdd(720)); }
+        };
+        var writer = new JdbcPrivacyJournalAdapter(harness.journal().createJournalWriterDataSource(), context.getEnvironment(), advancing);
+        List<PrivacyJournalPort.JournalAck> acknowledgements = new java.util.ArrayList<>();
+        for (int revision = 0; revision < 10; revision++) {
+            var type = revision == 0 ? PrivacyJournalPort.CommandType.LEASE_CLAIMED : PrivacyJournalPort.CommandType.LEASE_TAKEN_OVER;
+            String worker = "recovery-worker-" + (revision + 1);
+            Instant leaseUntil = Instant.parse("2026-10-02T00:00:00Z").plusSeconds(seconds.get() + 600);
+            long generation = revision;
+            var command = PrivacyJournalPort.JournalCommand.create("cmd-recovery-rollback-" + (revision + 1), partition,
+                    revision, type, null, null, null, worker, generation, leaseUntil);
+            acknowledgements.add(writer.append(command));
+        }
+        assertEquals(10L, journalAdmin.queryForObject("SELECT revision FROM sf_journal_head WHERE tenant_id=? AND subject_ref=?",
+                Long.class, tenantId, subjectRef));
+        String priorHash = "0".repeat(64);
+        for (int revision = 0; revision < 5; revision++) {
+            SignedWatermark signed = sign(acknowledgements.get(revision), revision + 1L, priorHash,
+                    Instant.parse("2026-10-02T00:00:00Z").plusSeconds(revision + 1L));
+            assertEquals(LatestWitnessPort.AppendResult.APPENDED,
+                    latestWitness.append(signed, revision, priorHash));
+            priorHash = signed.checkpointHash();
+        }
+        journalAdmin.update("UPDATE sf_journal_head SET revision=7, event_hash=(SELECT event_hash FROM sf_journal_event WHERE tenant_id=? AND subject_ref=? AND revision=7), held=FALSE, lease_generation=7, lease_owner=(SELECT worker_id FROM sf_journal_event WHERE tenant_id=? AND subject_ref=? AND revision=7), lease_until=(SELECT lease_until FROM sf_journal_event WHERE tenant_id=? AND subject_ref=? AND revision=7) WHERE tenant_id=? AND subject_ref=?",
+                tenantId, subjectRef, tenantId, subjectRef, tenantId, subjectRef,
+                tenantId, subjectRef);
+        journalAdmin.update("DELETE FROM sf_journal_lease WHERE tenant_id=? AND subject_ref=? AND event_revision>=8", tenantId, subjectRef);
+        journalAdmin.update("DELETE FROM sf_journal_command WHERE tenant_id=? AND subject_ref=? AND revision>=8", tenantId, subjectRef);
+        journalAdmin.update("DELETE FROM sf_journal_event WHERE tenant_id=? AND subject_ref=? AND revision>=8", tenantId, subjectRef);
+
+        assertEquals(7L, journalAdmin.queryForObject("SELECT revision FROM sf_journal_head WHERE tenant_id=? AND subject_ref=?",
+                Long.class, tenantId, subjectRef));
+        assertEquals(5L, latestWitness.latest(witnessPartition()).eventRevision());
+        var rejected = recoveryService.recover(witnessPartition());
+        assertEquals(PrivacyRecoveryService.Status.QUARANTINED, rejected.status());
+        assertEquals("WITNESS_JOURNAL_HEAD_MISMATCH", rejected.reason());
+        assertEquals(0, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=?",
+                Integer.class, tenantId, subjectRef), "R5 witnessより先のR7 tailをreplayしない");
+        assertEquals("QUARANTINED", new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
+                .snapshot(partition).state());
+    }
+
+    @Test
+    void witness履歴の先頭欠落は署名済みtailが残っていてもreplay前に拒否する() {
+        var partition = partition();
+        var first = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-history-truncated-r1");
+        var second = append(partition, 1, PrivacyJournalPort.CommandType.LEASE_CLAIMED, "cmd-history-truncated-r2");
+        var firstCheckpoint = appendCheckpoint(first, 1, 0, "0".repeat(64));
+        appendCheckpoint(second, 2, 1, firstCheckpoint.checkpointHash());
+        witnessAdmin.update("DELETE FROM sf_w2b_checkpoint_log WHERE journal_id=? AND tenant_id=? AND subject_ref=? AND checkpoint_epoch=1",
+                journalId, tenantId, subjectRef);
+
+        var rejected = recoveryService.recover(witnessPartition());
+        assertEquals(PrivacyRecoveryService.Status.QUARANTINED, rejected.status());
+        assertEquals("WITNESS_CHAIN_INVALID", rejected.reason());
+        assertEquals(0, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=?",
+                Integer.class, tenantId, subjectRef));
+        assertEquals("QUARANTINED", new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
+                .snapshot(partition).state());
+    }
+
+    @Test
+    void recovery用journalWitness主体は実MySQLでappendとDDLを拒否される() {
+        JdbcTemplate journalReader = new JdbcTemplate(recoveryJournalDataSource);
+        JdbcTemplate witnessReader = new JdbcTemplate(recoveryWitnessDataSource);
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> journalReader.update("UPDATE sf_journal_head SET revision=revision+1"));
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> journalReader.execute("CREATE TABLE forbidden_recovery_ddl(id INT)"));
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> witnessReader.update("UPDATE sf_w2b_latest_checkpoint SET checkpoint_epoch=checkpoint_epoch+1"));
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> witnessReader.update("INSERT INTO sf_w2b_checkpoint_log(journal_id, tenant_id, subject_ref, checkpoint_epoch, event_revision, event_hash, checkpoint_hash, previous_checkpoint_hash, domain, schema_version, issued_at_micros, key_id, canonical_payload, signature_bytes, signature_digest) VALUES ('j','t','s',1,1,REPEAT('a',64),REPEAT('b',64),REPEAT('0',64),'SES-SF-W2B-WATERMARK','v1',1,'key',X'00',REPEAT(X'00',64),REPEAT('c',64))"));
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> witnessReader.update("DELETE FROM sf_w2b_checkpoint_log"));
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> witnessReader.execute("CREATE TABLE forbidden_witness_ddl(id INT)"));
+    }
+
+    @Test
+    void replay後finalReadで進んだjournalとwitnessをbounded再読して追いつく() {
+        var partition = partition();
+        var first = append(partition, 0, PrivacyJournalPort.CommandType.LEASE_CLAIMED, "cmd-final-reread-r1");
+        var firstCheckpoint = appendCheckpoint(first, 1, 0, "0".repeat(64));
+        AtomicBoolean advanced = new AtomicBoolean();
+        JdbcPrivacyProjectionAdapter delegate = new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment());
+        PrivacyRecoveryProjectionPort advancingProjection = new PrivacyRecoveryProjectionPort() {
+            @Override public PrivacyProjectionPort.ProjectionSnapshot snapshot(PrivacyJournalPort.JournalPartition requested) {
+                return delegate.snapshot(requested);
+            }
+            @Override
+            public PrivacyProjectionPort.ProjectionResult applyRecovery(JournalProjectionService.VerifiedJournalEvent event,
+                    JdbcPrivacyPartitionFence.Lease lease) {
+                PrivacyProjectionPort.ProjectionResult result = delegate.applyRecovery(event, lease);
+                if (advanced.compareAndSet(false, true)) {
+                    String requestHash = "a".repeat(64);
+                    var command = PrivacyJournalPort.JournalCommand.create("cmd-final-reread-r2", partition, 1,
+                            PrivacyJournalPort.CommandType.DISPATCH_AUTHORIZED, "case-final-reread", "action-final-reread",
+                            requestHash, "worker-1", 1, null);
+                    var second = journalAdapter.append(command);
+                    PrivacyWatermarkWitnessBoundaryMySqlTest.this.appendCheckpoint(second, 2, 1,
+                            firstCheckpoint.checkpointHash());
+                }
+                return result;
+            }
+        };
+        var service = new PrivacyRecoveryService(recoveryWitnessReader, watermarkVerifier, recoveryJournalReader,
+                advancingProjection, new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()),
+                context.getEnvironment());
+
+        var result = service.recover(witnessPartition());
+        assertTrue(advanced.get(), "fixture中の進行を実際のprojection/journal/witness MySQLへ反映した");
+        assertEquals(PrivacyRecoveryService.Status.RECOVERED_SYNTHETIC, result.status());
+        assertEquals(2L, result.revision());
+        assertEquals("action-final-reread", new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment())
+                .snapshot(partition).lastActionId());
+        assertEquals("QUARANTINED", new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
+                .snapshot(partition).state());
+    }
+
+    @Test
+    void finalRead前にownerが更新された場合はrecovery成功を返さない() {
+        var partition = partition();
+        var ack = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-stale-final-owner-r1");
+        appendCheckpoint(ack, 1, 0, "0".repeat(64));
+        AtomicLong historyReads = new AtomicLong();
+        LatestWitnessReader rotatingWitness = new LatestWitnessReader() {
+            @Override public List<SignedWatermark> history(LatestWitnessPort.Partition requested) {
+                if (historyReads.incrementAndGet() == 3) {
+                    new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()).quarantine(partition);
+                }
+                return recoveryWitnessReader.history(requested);
+            }
+            @Override public LatestWitnessPort.Latest latest(LatestWitnessPort.Partition requested) {
+                return recoveryWitnessReader.latest(requested);
+            }
+        };
+        var service = new PrivacyRecoveryService(rotatingWitness, watermarkVerifier, recoveryJournalReader,
+                new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment()),
+                new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()), context.getEnvironment());
+
+        var result = service.recover(witnessPartition());
+        assertEquals(PrivacyRecoveryService.Status.QUARANTINED, result.status());
+        assertEquals("OWNER_GENERATION_STALE", result.reason());
+        assertEquals(1L, new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment())
+                .snapshot(partition).revision(), "replay済みprojectionは新ownerの隔離下に残る");
+        assertTrue(new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
+                .snapshot(partition).generation() > result.generation());
     }
 
     @Test
@@ -1013,6 +1222,15 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         var checkpoint = new WatermarkCheckpoint(journalId, tenantId, subjectRef, epoch, revision,
                 ack.eventHash(), previousHash, issuedAt, "key-synthetic");
         return watermarkAttestor.sign(checkpoint);
+    }
+
+    private SignedWatermark appendCheckpoint(PrivacyJournalPort.JournalAck ack, long epoch,
+            long expectedEpoch, String previousHash) {
+        SignedWatermark signed = sign(ack, epoch, previousHash,
+                Instant.parse("2026-10-02T00:00:00Z").plusSeconds(epoch));
+        assertEquals(LatestWitnessPort.AppendResult.APPENDED,
+                latestWitness.append(signed, expectedEpoch, previousHash));
+        return signed;
     }
 
     private static String sha256(byte[] bytes) throws Exception {

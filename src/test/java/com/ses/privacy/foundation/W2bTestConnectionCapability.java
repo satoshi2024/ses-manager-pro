@@ -111,6 +111,18 @@ final class W2bTestConnectionCapability {
         return new ProfileGuardedDataSource(new DriverManagerDataSource(jdbcUrl, user, secret), context);
     }
 
+    DataSource createJournalReaderDataSource() {
+        requireStore(Store.JOURNAL);
+        String user = newUser("sfw2jr_");
+        String secret = newSecret();
+        JdbcTemplate admin = new JdbcTemplate(adminDataSource());
+        admin.execute("CREATE USER '" + user + "'@'%' IDENTIFIED BY '" + secret + "'");
+        for (String table : java.util.List.of("sf_journal_head", "sf_journal_event")) {
+            admin.execute("GRANT SELECT ON `" + database + "`." + table + " TO '" + user + "'@'%'");
+        }
+        return new ProfileGuardedDataSource(new DriverManagerDataSource(jdbcUrl, user, secret), context);
+    }
+
     DataSource createWitnessAttestorDataSource() {
         requireStore(Store.WITNESS);
         String user = newUser("sfw2bt_");
