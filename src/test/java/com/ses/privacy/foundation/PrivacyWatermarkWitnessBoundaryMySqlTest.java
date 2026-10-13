@@ -213,6 +213,42 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
     }
 
     @Test
+    void quarantineは外側rollbackとfixture失敗から独立して永続する() {
+        var partition = partition();
+        var fence = new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment());
+        var outer = new TransactionTemplate(new DataSourceTransactionManager(appProjectionDataSource));
+        outer.execute(status -> {
+            fence.quarantine(partition);
+            status.setRollbackOnly();
+            return null;
+        });
+        assertEquals(1L, projectionAdmin.queryForObject("SELECT generation FROM sf_w2b_partition_fence "
+                + "WHERE tenant_id=? AND subject_ref=? AND state='QUARANTINED'", Long.class, tenantId, subjectRef),
+                "外側transaction rollback後も独立connectionで隔離取得が見える");
+
+        var owner = fence.quarantine(partition);
+        assertThrows(IllegalStateException.class, () -> fence.underCurrentOwner(owner, tx -> {
+            throw new IllegalStateException("synthetic fixture restore failure");
+        }));
+        assertEquals(2L, projectionAdmin.queryForObject("SELECT generation FROM sf_w2b_partition_fence "
+                + "WHERE tenant_id=? AND subject_ref=? AND state='QUARANTINED' AND owner_token=?",
+                Long.class, tenantId, subjectRef, owner.ownerToken()),
+                "fixture restore失敗後も直前の隔離generationが独立connectionから見える");
+    }
+
+    @Test
+    void revisionZeroの既存projection行はinsertでなくCAS更新する() {
+        var partition = partition();
+        var ack = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-existing-r0");
+        projectionAdmin.update("INSERT INTO sf_w2b_projection(tenant_id, subject_ref, last_applied_revision, event_hash, held, last_action_id, last_action_state) "
+                + "VALUES (?, ?, 0, ?, FALSE, NULL, 'NONE')", tenantId, subjectRef, "0".repeat(64));
+
+        assertEquals(PrivacyProjectionPort.Status.APPLIED, projectionService.projectAcknowledged(partition, ack).status());
+        assertEquals(1L, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection "
+                + "WHERE tenant_id=? AND subject_ref=? AND last_applied_revision=1", Long.class, tenantId, subjectRef));
+    }
+
+    @Test
     void recovery取得と競合するnormal投影は同一rowLock後に隔離を見て拒否する() throws Exception {
         var partition = partition();
         var first = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-fence-race-1");

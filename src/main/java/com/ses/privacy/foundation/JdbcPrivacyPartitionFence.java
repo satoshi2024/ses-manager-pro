@@ -17,23 +17,28 @@ import java.util.function.Function;
 /** test profile限定の永続partition隔離fence。解除APIは持たない。 */
 final class JdbcPrivacyPartitionFence {
     private final JdbcTemplate jdbc;
-    private final TransactionTemplate transaction;
+    private final TransactionTemplate acquireTransaction;
+    private final TransactionTemplate fixtureMutationTransaction;
     private final Environment environment;
 
     JdbcPrivacyPartitionFence(DataSource dataSource, Environment environment) {
         this.environment = Objects.requireNonNull(environment, "environment");
         requireTestProfile();
         this.jdbc = new JdbcTemplate(Objects.requireNonNull(dataSource, "dataSource"));
-        this.transaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
-        this.transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
-        this.transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(dataSource);
+        this.acquireTransaction = new TransactionTemplate(transactionManager);
+        this.acquireTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.acquireTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        this.fixtureMutationTransaction = new TransactionTemplate(transactionManager);
+        this.fixtureMutationTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+        this.fixtureMutationTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
 
     /** 現generationを失効させ、新しいownerで永続隔離する。隔離を解除する操作は存在しない。 */
     Lease quarantine(JournalPartition partition) {
         requireTestProfile();
         Objects.requireNonNull(partition, "partition");
-        return transaction.execute(status -> {
+        return acquireTransaction.execute(status -> {
             State current = lockState(partition);
             long generation = Math.addExact(current.generation(), 1L);
             String owner = UUID.randomUUID().toString();
@@ -81,7 +86,7 @@ final class JdbcPrivacyPartitionFence {
         requireTestProfile();
         Objects.requireNonNull(lease, "lease");
         Objects.requireNonNull(fixtureMutation, "fixtureMutation");
-        return transaction.execute(status -> {
+        return fixtureMutationTransaction.execute(status -> {
             if (!lockForRecoveryProjection(lease.partition(), lease)) {
                 throw new StaleOwnerException();
             }

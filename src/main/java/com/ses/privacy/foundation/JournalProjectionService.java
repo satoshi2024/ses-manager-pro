@@ -54,9 +54,12 @@ final class JournalProjectionService {
 
         PrivacyProjectionPort.ProjectionSnapshot current;
         try {
-            current = projection.snapshot(partition);
+            current = projection.snapshotForNormalProjection(partition);
         } catch (RuntimeException unavailable) {
             return quarantine(ack.revision(), ack.eventHash(), PrivacyProjectionPort.QuarantineCode.PROJECTION_UNAVAILABLE);
+        }
+        if (current == null) {
+            return quarantine(ack.revision(), ack.eventHash(), PrivacyProjectionPort.QuarantineCode.PARTITION_FENCED);
         }
         if (!snapshotMatchesJournal(partition, current, events)) {
             return quarantine(ack.revision(), ack.eventHash(), PrivacyProjectionPort.QuarantineCode.PROJECTION_MISMATCH);
@@ -77,9 +80,12 @@ final class JournalProjectionService {
 
             PrivacyProjectionPort.ProjectionSnapshot observed;
             try {
-                observed = projection.snapshot(partition);
+                observed = projection.snapshotForNormalProjection(partition);
             } catch (RuntimeException unavailable) {
                 return quarantine(ack.revision(), ack.eventHash(), PrivacyProjectionPort.QuarantineCode.PROJECTION_UNAVAILABLE);
+            }
+            if (observed == null) {
+                return quarantine(ack.revision(), ack.eventHash(), PrivacyProjectionPort.QuarantineCode.PARTITION_FENCED);
             }
             if (!snapshotMatchesJournal(partition, observed, events) || observed.revision() < current.revision()) {
                 return quarantine(ack.revision(), ack.eventHash(), PrivacyProjectionPort.QuarantineCode.PROJECTION_MISMATCH);
