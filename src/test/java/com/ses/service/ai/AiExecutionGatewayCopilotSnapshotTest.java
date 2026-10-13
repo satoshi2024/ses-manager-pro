@@ -128,6 +128,7 @@ class AiExecutionGatewayCopilotSnapshotTest {
         when(adapter.copilotModelId()).thenReturn("gemini-synthetic");
         when(adapter.copilotPromptVersion()).thenReturn("prompt-v1");
         when(adapter.copilotConfigHash()).thenReturn("config-hash-v1");
+        when(adapter.copilotCanonicalEndpoint()).thenReturn("");
         AiConfig config = new AiConfig();
         config.setProvider("gemini");
         config.setExternalSendEnabled(true);
@@ -171,6 +172,7 @@ class AiExecutionGatewayCopilotSnapshotTest {
         when(adapter.copilotPromptVersion()).thenReturn(CopilotSummaryPromptTemplate.VERSION);
         when(adapter.copilotConfigHash()).thenReturn(
                 CopilotSummaryPromptTemplate.localConfigHash("mock", "mock-management-copilot"));
+        when(adapter.copilotCanonicalEndpoint()).thenReturn("");
 
         CopilotConfigSnapshot snapshot = CopilotConfigSnapshot.capture(config, adapter);
         config.setProvider("gemini");
@@ -190,6 +192,7 @@ class AiExecutionGatewayCopilotSnapshotTest {
         when(adapter.copilotPromptVersion()).thenReturn(CopilotSummaryPromptTemplate.VERSION);
         when(adapter.copilotConfigHash()).thenReturn(
                 CopilotSummaryPromptTemplate.localConfigHash("mock", "mock-management-copilot"));
+        when(adapter.copilotCanonicalEndpoint()).thenReturn("");
         AiConfig config = new AiConfig();
         config.setProvider("mock");
         AiOutboundProbe probe = mock(AiOutboundProbe.class);

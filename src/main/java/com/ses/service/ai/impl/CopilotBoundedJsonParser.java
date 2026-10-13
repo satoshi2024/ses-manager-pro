@@ -52,14 +52,15 @@ public final class CopilotBoundedJsonParser {
         }
         assertDeadline(deadlineNanos);
         try {
+            int utf8BomOffset = jsonBytes.length >= 3
+                    && (jsonBytes[0] & 0xff) == 0xef
+                    && (jsonBytes[1] & 0xff) == 0xbb
+                    && (jsonBytes[2] & 0xff) == 0xbf ? 3 : 0;
             String json = StandardCharsets.UTF_8.newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
                     .onUnmappableCharacter(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(jsonBytes))
+                    .decode(ByteBuffer.wrap(jsonBytes, utf8BomOffset, jsonBytes.length - utf8BomOffset))
                     .toString();
-            if (!json.isEmpty() && json.charAt(0) == '\ufeff') {
-                throw new IOException("COPILOT_RESPONSE_INVALID");
-            }
             JsonNode result = mapper.readTree(json);
             if (result == null) {
                 throw BusinessException.of(502, "COPILOT_RESPONSE_INVALID");
