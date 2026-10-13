@@ -413,6 +413,11 @@
         });
     }
 
+    function bootstrapOperationIsCurrent(generation, epoch) {
+        return generation === state.documentGeneration && !state.quarantined
+            && epoch === readRevocationEpoch();
+    }
+
     async function rebindScope(oldScope, newScope, allowedRequestIds = null, guard = () => true) {
         return withStore('readwrite', store => {
             const ids = allowedRequestIds ? [...allowedRequestIds] : [];
@@ -670,6 +675,7 @@
     }
 
     async function bootstrapScope() {
+        const bootstrapGeneration = state.documentGeneration;
         let bootstrapEpoch = readRevocationEpoch();
         const oldScope = state.scope || persistedScope();
         if (!navigator.onLine) {
@@ -678,10 +684,17 @@
                 state.quarantined = true;
                 throw new Error('logout後の下書きは復元できません');
             }
+            if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
+                throw new Error('logout後のscope再確認が必要です');
+            }
             state.candidateRestoreScope = oldScope;
             state.scope = oldScope;
             state.revocationEpoch = bootstrapEpoch;
-            state.lockedDraftCount = await countLockedScope(state.candidateRestoreScope);
+            const lockedDraftCount = await countLockedScope(state.candidateRestoreScope);
+            if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
+                throw new Error('logout後のscope再確認が必要です');
+            }
+            state.lockedDraftCount = lockedDraftCount;
             if (!state.scope) throw new Error('offlineで利用するには一度オンラインでログインしてください');
             return state.scope;
         }
@@ -692,10 +705,13 @@
                 method: 'GET', cache: 'no-store', credentials: 'same-origin',
                 headers: contextHeaders
             });
+            if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
+                throw new Error('logout後のscope再確認が必要です');
+            }
             if (response.status === 401) throw Object.assign(new Error('Session timeout'), { sessionExpired: true });
             if (!response.ok) throw new Error('ユーザーscopeを確認できません');
             const result = await response.json();
-            if (bootstrapEpoch !== readRevocationEpoch() || state.quarantined) {
+            if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
                 throw new Error('logout後のscope再確認が必要です');
             }
             const scope = result && result.data && result.data.userScope;
@@ -712,15 +728,24 @@
                 state.scope = null;
                 if (!preserveQueue) await deleteScope(oldScope);
             }
+            if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
+                throw new Error('logout後のscope再確認が必要です');
+            }
             state.scope = scope;
             state.revocationEpoch = bootstrapEpoch;
             persistScope(scope);
-            try { localStorage.setItem(SCOPE_EPOCH_KEY, readRevocationEpoch()); } catch (_) {}
+            try { localStorage.setItem(SCOPE_EPOCH_KEY, bootstrapEpoch); } catch (_) {}
             state.quarantined = false;
             state.paused = false;
-            state.lockedDraftCount = await countLockedScope(state.candidateRestoreScope);
+            const lockedDraftCount = await countLockedScope(state.candidateRestoreScope);
+            if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)
+                    || state.scope !== scope || state.revocationEpoch !== bootstrapEpoch) {
+                throw new Error('logout後のscope再確認が必要です');
+            }
+            state.lockedDraftCount = lockedDraftCount;
             return scope;
         } catch (error) {
+            if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) throw error;
             if (error.sessionExpired) {
                 state.paused = true;
                 if (window.SES && SES.pwa) SES.pwa.sessionExpired();
