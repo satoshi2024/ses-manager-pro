@@ -293,8 +293,10 @@ class ImportMetadataRealMySqlTest {
                 AccountingTenantContextHolder.clear();
             }
         });
+        Throwable primaryFailure = null;
+        boolean expectedDenialObserved = false;
         try {
-            awaitSourcePrimaryWait(requesterId, blockerId, Long.toString(sourceId));
+            awaitSourcePrimaryWait(requesterId, blockerId, Long.toString(sourceId), registration);
             jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 WHERE tenant_id=? AND group_id=? AND action_key=? AND deny_flag=0",
                     tenantId, groupId, ImportMetadataAuthorizationService.ACTION);
             blocker.commit();
@@ -302,6 +304,7 @@ class ImportMetadataRealMySqlTest {
                     () -> registration.get(10, TimeUnit.SECONDS));
             assertTrue(failure.getCause() instanceof BusinessException);
             assertEquals(403, ((BusinessException) failure.getCause()).getCode());
+            expectedDenialObserved = true;
             assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_job WHERE tenant_id=? AND source_system_id=?",
                     Integer.class, tenantId, sourceId));
             assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_document_link WHERE tenant_id=? AND document_id=? AND target_type='IMPORT_JOB'",
@@ -309,11 +312,14 @@ class ImportMetadataRealMySqlTest {
             assertEquals(1, jdbc.queryForObject("SELECT version_no FROM t_import_source_system WHERE tenant_id=? AND id=?",
                     Integer.class, tenantId, sourceId));
             assertEquals(0, storage.openCount());
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
         } finally {
             try { blocker.rollback(); } catch (Exception ignored) { }
             try { blocker.close(); } catch (Exception ignored) { }
-            pool.shutdownNow();
-            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS));
+            List<Throwable> cleanupFailures = awaitFutures(List.of(registration), pool, expectedDenialObserved);
+            reportCleanupFailures("source lock競合fixture", cleanupFailures, primaryFailure);
         }
     }
 
@@ -356,9 +362,10 @@ class ImportMetadataRealMySqlTest {
         var writerId = new AtomicReference<Long>();
         Future<?> denyInsert = null;
         Future<?> membershipInsert = null;
+        Throwable primaryFailure = null;
         try {
-        assertTrue(gateHeld.await(5, TimeUnit.SECONDS), "認可gateを取得できませんでした");
-        denyInsert = pool.submit(() -> {
+            assertTrue(gateHeld.await(5, TimeUnit.SECONDS), "認可gateを取得できませんでした");
+            denyInsert = pool.submit(() -> {
             try (Connection connection = dataSource.getConnection()) {
                 try (var statement = connection.createStatement(); ResultSet rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
                     rows.next(); writerId.set(rows.getLong(1));
@@ -390,9 +397,9 @@ class ImportMetadataRealMySqlTest {
                     statement.executeUpdate();
                 }
             } catch (Exception failure) { throw new IllegalStateException(failure); }
-        });
-            awaitPermissionGroupWait(writerId, gateConnectionId, groupId);
-            awaitActorWait(membershipWriterId, gateConnectionId, actorUserId);
+            });
+            awaitPermissionGroupWait(writerId, gateConnectionId, groupId, gate, denyInsert, membershipInsert);
+            awaitActorWait(membershipWriterId, gateConnectionId, actorUserId, gate, denyInsert, membershipInsert);
             assertTrue(!denyInsert.isDone(), "permission groupを参照する新規deny行がgate commit前に挿入されました");
             assertTrue(!membershipInsert.isDone(), "sys_userを参照する新規membershipがgate commit前に挿入されました");
             releaseGate.countDown();
@@ -404,17 +411,25 @@ class ImportMetadataRealMySqlTest {
             assertEquals(403, denied.getCode());
             assertEquals(1, jdbc.queryForObject("SELECT version_no FROM t_import_source_system WHERE tenant_id=? AND id=?",
                     Integer.class, tenantId, sourceId));
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
         } finally {
             releaseGate.countDown();
-            pool.shutdownNow();
-            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS));
+            List<Future<?>> pending = new java.util.ArrayList<>();
+            pending.add(gate);
+            if (denyInsert != null) pending.add(denyInsert);
+            if (membershipInsert != null) pending.add(membershipInsert);
+            reportCleanupFailures("認可gate lock競合fixture", awaitFutures(pending, pool, false), primaryFailure);
         }
     }
 
     private void awaitActorWait(AtomicReference<Long> requesterId, AtomicReference<Long> blockerId,
-                                long lockData) throws InterruptedException {
+                                long lockData, Future<?> gate, Future<?> denyInsert,
+                                Future<?> membershipInsert) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
+            assertContentionTasksPending(gate, denyInsert, membershipInsert);
             Long requester = requesterId.get();
             Long blocker = blockerId.get();
             if (requester != null && blocker != null) {
@@ -433,13 +448,17 @@ class ImportMetadataRealMySqlTest {
             }
             Thread.sleep(25);
         }
-        throw new AssertionError("新規membership FKのsys_user PRIMARY lock waitを確認できませんでした");
+        assertContentionTasksPending(gate, denyInsert, membershipInsert);
+        throw new AssertionError("新規membership FKのsys_user PRIMARY lock waitを確認できませんでした。" +
+                safeWaitDetails(requesterId.get(), blockerId.get()));
     }
 
     private void awaitPermissionGroupWait(AtomicReference<Long> requesterId,
-                                         AtomicReference<Long> blockerId, long lockData) throws InterruptedException {
+                                         AtomicReference<Long> blockerId, long lockData, Future<?> gate,
+                                         Future<?> denyInsert, Future<?> membershipInsert) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
+            assertContentionTasksPending(gate, denyInsert, membershipInsert);
             Long requester = requesterId.get();
             Long blocker = blockerId.get();
             if (requester != null && blocker != null) {
@@ -458,13 +477,16 @@ class ImportMetadataRealMySqlTest {
             }
             Thread.sleep(25);
         }
-        throw new AssertionError("新規action FKのm_permission_group PRIMARY lock waitを確認できませんでした");
+        assertContentionTasksPending(gate, denyInsert, membershipInsert);
+        throw new AssertionError("新規action FKのm_permission_group PRIMARY lock waitを確認できませんでした。" +
+                safeWaitDetails(requesterId.get(), blockerId.get()));
     }
 
     private void awaitSourcePrimaryWait(AtomicReference<Long> requesterId, long blockerId,
-                                       String lockData) throws InterruptedException {
+                                       String lockData, Future<?> registration) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
+            assertFuturePending(registration, "metadata service");
             Long requester = requesterId.get();
             if (requester != null) {
                 Integer waits = jdbc.queryForObject("""
@@ -482,7 +504,106 @@ class ImportMetadataRealMySqlTest {
             }
             Thread.sleep(25);
         }
-        throw new AssertionError("対象source PRIMARY行のMySQL lock waitを確認できませんでした");
+        assertFuturePending(registration, "metadata service");
+        throw new AssertionError("対象source PRIMARY行のMySQL lock waitを確認できませんでした。" +
+                safeWaitDetails(requesterId.get(), blockerId));
+    }
+
+    private void assertContentionTasksPending(Future<?> gate, Future<?> denyInsert,
+                                              Future<?> membershipInsert) throws Exception {
+        assertFuturePending(gate, "認可gate");
+        assertFuturePending(denyInsert, "deny-action insert");
+        assertFuturePending(membershipInsert, "membership insert");
+    }
+
+    private void assertFuturePending(Future<?> future, String label) throws Exception {
+        if (future == null || !future.isDone()) return;
+        try {
+            future.get(0, TimeUnit.NANOSECONDS);
+            throw new AssertionError(label + "がgate解放前に完了しました");
+        } catch (java.util.concurrent.ExecutionException failure) {
+            throw new AssertionError(label + "が非同期実行中に失敗しました", failure.getCause());
+        } catch (java.util.concurrent.CancellationException cancelled) {
+            throw new AssertionError(label + "が予期せずcancelされました", cancelled);
+        }
+    }
+
+    private List<String> safeWaitDetails(Long requesterId, Long blockerId) {
+        if (requesterId == null || blockerId == null) return List.of("waiter/blocker connection id未取得");
+        return jdbc.query("""
+                SELECT req.OBJECT_NAME AS req_table, req.INDEX_NAME AS req_index,
+                       req.LOCK_TYPE AS req_type, req.LOCK_MODE AS req_mode,
+                       req.LOCK_STATUS AS req_status, req.LOCK_DATA AS req_key,
+                       blk.OBJECT_NAME AS blk_table, blk.INDEX_NAME AS blk_index,
+                       blk.LOCK_TYPE AS blk_type, blk.LOCK_MODE AS blk_mode,
+                       blk.LOCK_STATUS AS blk_status, blk.LOCK_DATA AS blk_key
+                FROM performance_schema.data_lock_waits w
+                JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
+                JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                JOIN performance_schema.data_locks req
+                  ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                JOIN performance_schema.data_locks blk
+                  ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
+                """, (rs, row) -> "request=" + rs.getString("req_table") + "/" + rs.getString("req_index")
+                + "," + rs.getString("req_type") + "," + rs.getString("req_mode") + "," + rs.getString("req_status")
+                + ",key=" + rs.getString("req_key") + "; blocker=" + rs.getString("blk_table") + "/"
+                + rs.getString("blk_index") + "," + rs.getString("blk_type") + "," + rs.getString("blk_mode")
+                + "," + rs.getString("blk_status") + ",key=" + rs.getString("blk_key"), requesterId, blockerId);
+    }
+
+    private List<Throwable> awaitFutures(List<? extends Future<?>> futures, ExecutorService pool,
+                                         boolean expectedRegistrationDenial) {
+        List<Throwable> failures = new java.util.ArrayList<>();
+        java.util.Set<Future<?>> unobserved = new java.util.HashSet<>(futures);
+        for (Future<?> future : futures) {
+            try {
+                future.get(3, TimeUnit.SECONDS);
+                unobserved.remove(future);
+            } catch (java.util.concurrent.ExecutionException failure) {
+                unobserved.remove(future);
+                Throwable cause = failure.getCause() == null ? failure : failure.getCause();
+                if (!(expectedRegistrationDenial && cause instanceof BusinessException denied
+                        && denied.getCode() == 403)) failures.add(cause);
+            } catch (Throwable failure) {
+                if (!(failure instanceof java.util.concurrent.TimeoutException)) unobserved.remove(future);
+                failures.add(failure);
+            }
+        }
+        pool.shutdownNow();
+        try {
+            if (!pool.awaitTermination(5, TimeUnit.SECONDS)) failures.add(new AssertionError("競合test workerが5秒以内に終了しませんでした"));
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            failures.add(interrupted);
+        }
+        for (Future<?> future : unobserved) {
+            if (!future.isDone()) {
+                failures.add(new AssertionError("競合test workerが終了後もFutureを完了できませんでした"));
+                continue;
+            }
+            try {
+                future.get(0, TimeUnit.NANOSECONDS);
+            } catch (java.util.concurrent.ExecutionException failure) {
+                Throwable cause = failure.getCause() == null ? failure : failure.getCause();
+                if (!(expectedRegistrationDenial && cause instanceof BusinessException denied
+                        && denied.getCode() == 403)) failures.add(cause);
+            } catch (Throwable failure) {
+                failures.add(failure);
+            }
+        }
+        return failures;
+    }
+
+    private void reportCleanupFailures(String label, List<Throwable> failures, Throwable primaryFailure) {
+        if (failures.isEmpty()) return;
+        if (primaryFailure != null) {
+            failures.forEach(primaryFailure::addSuppressed);
+            return;
+        }
+        AssertionError cleanupFailure = new AssertionError(label + "のcleanupで非同期failureが発生しました");
+        failures.forEach(cleanupFailure::addSuppressed);
+        throw cleanupFailure;
     }
 
     @Test
