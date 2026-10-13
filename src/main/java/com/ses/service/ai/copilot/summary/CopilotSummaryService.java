@@ -7,6 +7,7 @@ import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.ai.AiPiiMasker;
+import com.ses.service.ai.CopilotExecutionFailure;
 import com.ses.service.ai.copilot.CopilotRunService;
 import com.ses.service.ai.copilot.result.MetricValue;
 import com.ses.service.ai.copilot.result.TypedResultEnvelope;
@@ -76,14 +77,17 @@ public class CopilotSummaryService {
                 Duration.ofSeconds(15),
                 0);
 
+        AiGatewayResult gatewayResult = null;
         try {
-            AiGatewayResult gatewayResult = aiExecutionGateway.execute(
+            gatewayResult = aiExecutionGateway.execute(
                     buildGatewayRequest(request, context, scope, scopeHash, traceId, artifact, deadlineNanos));
             SummaryResponse parsed = parseProviderJson(gatewayResult.getText(), allowedClaimKeys);
             if (System.nanoTime() >= deadlineNanos) {
-                return SummaryResponse.unavailable("COPILOT_DEADLINE_EXCEEDED");
+                return SummaryResponse.unavailable("COPILOT_DEADLINE_EXCEEDED",
+                        costEvidence(gatewayResult, "COPILOT_DEADLINE_EXCEEDED"));
             }
             long latencyMs = (System.nanoTime() - started) / 1_000_000L;
+            SummaryCostEvidence costEvidence = costEvidence(gatewayResult, "SUMMARY_SUCCEEDED");
             return new SummaryResponse(
                     parsed.summaryText(),
                     parsed.claimKeys(),
@@ -91,17 +95,43 @@ public class CopilotSummaryService {
                     artifact.modelName(),
                     latencyMs,
                     null,
-                    0);
+                    costEvidence.actualCostYen(),
+                    costEvidence);
         } catch (CopilotSummaryValidationException ex) {
             log.debug("copilot summary rejected: {}", ex.reasonCode());
-            return SummaryResponse.unavailable(SummaryResponse.STATUS_REJECTED);
+            return SummaryResponse.unavailable(SummaryResponse.STATUS_REJECTED,
+                    gatewayResult == null ? SummaryCostEvidence.unknown(ex.reasonCode())
+                            : costEvidence(gatewayResult, ex.reasonCode()));
+        } catch (CopilotExecutionFailure ex) {
+            return SummaryResponse.unavailable(mapFailureStatus(ex.reasonCode()),
+                    SummaryCostEvidence.fromPreflight(ex.preflight(), ex.dispatchOutcome(), null, ex.reasonCode()));
         } catch (BusinessException ex) {
             log.debug("copilot summary provider error: code={}", ex.getCode());
-            return mapProviderError(ex);
+            SummaryResponse mapped = mapProviderError(ex);
+            return SummaryResponse.unavailable(mapped.providerStatus(),
+                    gatewayResult == null ? mapped.costEvidence() : costEvidence(gatewayResult, mapped.providerStatus()));
         } catch (RuntimeException ex) {
             log.debug("copilot summary provider failure", ex);
-            return SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE);
+            return SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE,
+                    gatewayResult == null ? SummaryCostEvidence.unknown("SUMMARY_FAILURE")
+                            : costEvidence(gatewayResult, "SUMMARY_FAILURE"));
         }
+    }
+
+    private SummaryCostEvidence costEvidence(AiGatewayResult result, String reasonCode) {
+        if (result == null) return SummaryCostEvidence.unknown(reasonCode);
+        return SummaryCostEvidence.fromPreflight(result.getCopilotPreflight(),
+                result.getCopilotDispatchOutcome(), result.getProviderUsage(), reasonCode);
+    }
+
+    private String mapFailureStatus(String reasonCode) {
+        return switch (reasonCode) {
+            case "COPILOT_COST_UNKNOWN" -> "COST_UNKNOWN";
+            case "COPILOT_DEADLINE_EXCEEDED" -> "DEADLINE_EXCEEDED";
+            case "COPILOT_PROVIDER_429" -> "PROVIDER_429";
+            case "PROVIDER_INVALID_JSON" -> "PROVIDER_INVALID_JSON";
+            default -> SummaryResponse.STATUS_UNAVAILABLE;
+        };
     }
 
     private AiGatewayRequest buildGatewayRequest(SummaryRequest request, CopilotExecutionContext context,

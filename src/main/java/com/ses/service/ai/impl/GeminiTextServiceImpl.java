@@ -147,6 +147,7 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         }
         String apiKey = aiConfig.getApiKey();
         if (apiKey == null || apiKey.isBlank()) throw BusinessException.of(503, "COPILOT_API_KEY_UNAVAILABLE");
+        boolean responseReceived = false;
         try {
             java.net.URI endpoint = java.net.URI.create(geminiEndpoint(copilotConfigSnapshot.canonicalEndpoint(),
                     copilotConfigSnapshot.modelId()));
@@ -162,6 +163,7 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
             byte[] body = objectMapper.writeValueAsBytes(request);
             assertDeadline(invocation.deadlineNanos());
             Response response = copilotTransport.postGemini(endpoint, body, invocation.deadlineNanos(), apiKey);
+            responseReceived = true;
             if (response.statusCode() == 429) {
                 throw BusinessException.of(429, "COPILOT_PROVIDER_429");
             }
@@ -176,10 +178,22 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
                     parsed.usage().totalTokenCount(), parsed.usage().thoughtsTokenCount(),
                     parsed.usage().cachedContentTokenCount()));
         } catch (BusinessException ex) {
+            if (responseReceived) {
+                throw new com.ses.service.ai.CopilotExecutionFailure(ex.getMessage(),
+                        invocation.preflightCostEvidence(), new com.ses.service.ai.copilot.summary.DispatchOutcome(
+                        com.ses.service.ai.copilot.summary.DispatchOutcome.State.RESPONSE_RECEIVED,
+                        "PROVIDER_RESPONSE_RECEIVED"));
+            }
             throw ex;
         } catch (OutboundUrlException ex) {
             throw BusinessException.of(503, "COPILOT_DESTINATION_REJECTED");
         } catch (Exception ex) {
+            if (responseReceived) {
+                throw new com.ses.service.ai.CopilotExecutionFailure("COPILOT_PROVIDER_RESPONSE_REJECTED",
+                        invocation.preflightCostEvidence(), new com.ses.service.ai.copilot.summary.DispatchOutcome(
+                        com.ses.service.ai.copilot.summary.DispatchOutcome.State.RESPONSE_RECEIVED,
+                        "PROVIDER_RESPONSE_RECEIVED"));
+            }
             throw BusinessException.of(502, "COPILOT_PROVIDER_RESPONSE_REJECTED");
         }
     }
