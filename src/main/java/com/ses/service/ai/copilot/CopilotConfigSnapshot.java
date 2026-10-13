@@ -36,6 +36,9 @@ public record CopilotConfigSnapshot(
             return new CopilotConfigSnapshot(provider, service == null ? "" : service.providerId(),
                     endpoint, "", "", "", maxOutputTokens);
         }
+        if (!bounded.copilotCanonicalEndpoint().isBlank()) {
+            endpoint = bounded.copilotCanonicalEndpoint();
+        }
         return new CopilotConfigSnapshot(provider, bounded.providerId(), endpoint,
                 bounded.copilotModelId(), bounded.copilotPromptVersion(), bounded.copilotConfigHash(),
                 maxOutputTokens);

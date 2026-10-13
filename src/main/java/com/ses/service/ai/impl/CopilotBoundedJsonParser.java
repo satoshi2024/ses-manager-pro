@@ -33,6 +33,7 @@ public final class CopilotBoundedJsonParser {
     CopilotBoundedJsonParser(LongSupplier monotonicClock) {
         this.monotonicClock = Objects.requireNonNull(monotonicClock);
         JsonFactory factory = JsonFactory.builder()
+                .enable(com.fasterxml.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION)
                 .streamReadConstraints(StreamReadConstraints.builder()
                         .maxNestingDepth(MAX_NESTING_DEPTH)
                         .maxStringLength(MAX_STRING_LENGTH)
@@ -57,7 +58,7 @@ public final class CopilotBoundedJsonParser {
                     .decode(ByteBuffer.wrap(jsonBytes))
                     .toString();
             if (!json.isEmpty() && json.charAt(0) == '\ufeff') {
-                json = json.substring(1);
+                throw new IOException("COPILOT_RESPONSE_INVALID");
             }
             JsonNode result = mapper.readTree(json);
             if (result == null) {

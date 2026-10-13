@@ -137,6 +137,18 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
 
     /** 応答本文を上限付きで返し、本文とtransport例外文は記録しない。 */
     public Response post(URI uri, byte[] requestBody, long deadlineNanos) {
+        return post(uri, requestBody, deadlineNanos, null);
+    }
+
+    /** Gemini Copilot専用。API key以外の任意headerを受け付けない。 */
+    public Response postGemini(URI uri, byte[] requestBody, long deadlineNanos, String apiKey) {
+        if (apiKey == null || apiKey.isBlank() || apiKey.indexOf('\r') >= 0 || apiKey.indexOf('\n') >= 0) {
+            throw BusinessException.of(503, "COPILOT_API_KEY_UNAVAILABLE");
+        }
+        return post(uri, requestBody, deadlineNanos, apiKey);
+    }
+
+    private Response post(URI uri, byte[] requestBody, long deadlineNanos, String geminiApiKey) {
         Assert.state(started, "Copilot async transportは開始されていません");
         validateDestination(uri);
         if (requestBody == null || requestBody.length > MAX_REQUEST_BYTES) {
@@ -193,12 +205,15 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
                     .setConnectTimeout(Timeout.ofNanoseconds(remaining))
                     .setResponseTimeout(Timeout.ofNanoseconds(remaining))
                     .build();
-            SimpleHttpRequest request = SimpleRequestBuilder.post(uri)
+            SimpleRequestBuilder requestBuilder = SimpleRequestBuilder.post(uri)
                     .setVersion(HttpVersion.HTTP_1_1)
                     .setHeader("Content-Type", ContentType.APPLICATION_JSON.toString())
                     .setBody(requestBody, ContentType.APPLICATION_JSON)
-                    .setRequestConfig(requestConfig)
-                    .build();
+                    .setRequestConfig(requestConfig);
+            if (geminiApiKey != null) {
+                requestBuilder.setHeader("x-goog-api-key", geminiApiKey);
+            }
+            SimpleHttpRequest request = requestBuilder.build();
             BoundedResponseConsumer consumer = new BoundedResponseConsumer(deadlineNanos);
             HttpClientContext clientContext = HttpClientContext.create();
             clientContext.setAttribute(DNS_HOST_CONTEXT, uri.getHost());

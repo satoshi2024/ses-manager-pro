@@ -155,6 +155,30 @@ class CopilotBoundedHttpTransportTest {
     }
 
     @Test
+    void geminiKeyIsSentOnlyAsHeaderOnLoopbackFixture() throws Exception {
+        AtomicReference<String> receivedKey = new AtomicReference<>();
+        AtomicReference<String> receivedBody = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), 0), 0);
+        server.createContext("/", guarded(exchange -> {
+            receivedKey.set(exchange.getRequestHeaders().getFirst("x-goog-api-key"));
+            receivedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        }));
+        startServer();
+        transport = newTransport(snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC());
+        transport.start();
+
+        transport.postGemini(uri(), "{\"prompt\":\"synthetic\"}".getBytes(StandardCharsets.UTF_8),
+                deadlineAfter(3, TimeUnit.SECONDS), "fixture-secret");
+        assertEquals("fixture-secret", receivedKey.get());
+        assertTrue(!receivedBody.get().contains("fixture-secret"));
+    }
+
+    @Test
     void expiredDeadlineDoesNotReachServer() throws Exception {
         AtomicInteger requestsReceived = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), 0), 0);

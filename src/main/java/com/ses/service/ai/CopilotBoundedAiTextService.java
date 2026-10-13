@@ -13,6 +13,8 @@ public interface CopilotBoundedAiTextService extends AiTextService {
 
     String copilotConfigHash();
 
+    default String copilotCanonicalEndpoint() { return ""; }
+
     /** 指定deadline内に応答し、時間切れ時に実行中I/Oを停止する。 */
     String generateCopilotSummary(String prompt, long deadlineNanos);
 
