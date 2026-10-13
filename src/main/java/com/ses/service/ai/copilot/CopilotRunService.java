@@ -108,9 +108,13 @@ public class CopilotRunService {
         boolean succeeded = response.isAvailable();
         SummaryCostEvidence evidence = response.costEvidence() == null
                 ? SummaryCostEvidence.unknown("COST_EVIDENCE_MISSING") : response.costEvidence();
-        Integer cost = evidence.costState() == com.ses.service.ai.copilot.summary.CopilotCostState.NOT_SENT
-                ? 0 : evidence.costState() == com.ses.service.ai.copilot.summary.CopilotCostState.ACTUAL
-                ? evidence.actualCostYen() : null;
+        Integer cost;
+        switch (evidence.costState()) {
+            case NOT_SENT -> cost = Integer.valueOf(0);
+            case ACTUAL -> cost = evidence.actualCostYen();
+            case UPPER_BOUND, UNKNOWN -> cost = null;
+            default -> throw new IllegalStateException("unsupported Copilot cost state");
+        }
         String costState = evidence.costState().name();
         String providerStatus = safeOutcome(response.providerStatus());
         completeAttempt(attempt, latencyMs, succeeded ? "SUCCEEDED" : "FAILED",
@@ -203,6 +207,8 @@ public class CopilotRunService {
         metadata.put("latencyMs", boundedLatency(latencyMs));
         metadata.put("costState", costState);
         if (costEvidence != null) {
+            metadata.remove("costJpy");
+            metadata.remove("costUpperBoundYen");
             metadata.put("dispatchOutcome", costEvidence.dispatchOutcome().state().name());
             putSafeCode(metadata, "dispatchReasonCode", costEvidence.dispatchOutcome().reasonCode());
             putSafeCode(metadata, "costReasonCode", costEvidence.reasonCode());
