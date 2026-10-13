@@ -29,4 +29,8 @@ public interface CopilotBoundedAiTextService extends AiTextService {
         }
         return generateCopilotSummary(prompt, invocation.deadlineNanos());
     }
+
+    default CopilotProviderResponse generateCopilotResponse(String prompt, CopilotInvocation invocation) {
+        return new CopilotProviderResponse(generateCopilotSummary(prompt, invocation), null);
+    }
 }

@@ -14,6 +14,8 @@ import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
 import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshotFactory;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.summary.CopilotSummaryPromptTemplate;
+import com.ses.service.ai.copilot.summary.CopilotSummaryValidator;
+import com.ses.service.ai.copilot.summary.CopilotSummaryValidationException;
 import com.ses.service.ai.copilot.summary.CopilotCostState;
 import com.ses.service.ai.impl.AiExecutionGatewayImpl;
 import org.junit.jupiter.api.Test;
@@ -63,7 +65,7 @@ class AiExecutionGatewayCopilotSnapshotTest {
             }
             @Override public String generateCopilotSummary(String prompt, long deadlineNanos) {
                 deadlineCalls.incrementAndGet();
-                return "local-summary";
+                return "{\"summaryText\":\"<b>summary</b>\",\"claimKeys\":[\"forecast.utilization.2026-09\"]}";
             }
             @Override public String generateCopilotSummary(String prompt, CopilotInvocation invocation) {
                 receivedInvocation.set(invocation);
@@ -100,7 +102,12 @@ class AiExecutionGatewayCopilotSnapshotTest {
 
         String result = AccountingTenantContextHolder.runWithTenant("tenant-a", () -> gateway.execute(request).getText());
 
-        assertEquals("local-summary", result);
+        assertEquals("{\"summaryText\":\"<b>summary</b>\",\"claimKeys\":[\"forecast.utilization.2026-09\"]}", result);
+        String summaryText = new ObjectMapper().readTree(result).path("summaryText").textValue();
+        assertEquals("<b>summary</b>", summaryText, "Copilot JSON応答はHTML除去で合法化しない");
+        org.junit.jupiter.api.Assertions.assertEquals("HTML_REJECTED",
+                org.junit.jupiter.api.Assertions.assertThrows(CopilotSummaryValidationException.class,
+                        () -> CopilotSummaryValidator.validateSummaryText(summaryText)).reasonCode());
         CopilotInvocation invocation = receivedInvocation.get();
         org.junit.jupiter.api.Assertions.assertNotNull(invocation);
         assertEquals("mock", invocation.configSnapshot().configuredProvider());

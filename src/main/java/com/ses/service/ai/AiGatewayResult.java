@@ -10,4 +10,9 @@ public class AiGatewayResult {
     private String traceId;
     private Long runId;
     private String outboundPrompt;
+    private CopilotProviderUsage providerUsage;
+
+    public AiGatewayResult(String text, String traceId, Long runId, String outboundPrompt) {
+        this(text, traceId, runId, outboundPrompt, null);
+    }
 }
