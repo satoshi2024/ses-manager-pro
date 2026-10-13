@@ -309,7 +309,8 @@ class EngineerSelfServiceBrowserMTest {
         EngineerSales exactAssignment = EngineerSales.builder()
                 .engineerId(engineerId)
                 .salesUserId(salesUserId)
-                .primaryFlag(1)
+                // 既存の主担当を保持しつつ、1on1が要求する有効担当営業だけを追加する。
+                .primaryFlag(0)
                 .assignedAt(LocalDate.now())
                 .build();
         engineerSalesMapper.insert(exactAssignment);
