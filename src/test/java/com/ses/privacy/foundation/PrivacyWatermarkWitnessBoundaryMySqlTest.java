@@ -8,7 +8,10 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DelegatingDataSource;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -26,6 +29,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.security.MessageDigest;
 import java.security.PublicKey;
 import java.util.HexFormat;
@@ -57,6 +61,8 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
     private static JdbcTemplate appProjection;
     private static JdbcTemplate journalAdmin;
     private static JdbcTemplate projectionAdmin;
+    private static DataSource appProjectionDataSource;
+    private static DataSource appAdminDataSource;
     private static JournalProjectionService projectionService;
     private static JdbcPrivacyJournalAdapter journalAdapter;
     private static JdbcTemplate journalPrincipalOnWitness;
@@ -78,7 +84,9 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         harness = TemporaryW2bHarness.fromOwnedContainers(context, JOURNAL, APPLICATION, WITNESS);
         harness.initializeSchemas();
         witnessAdmin = new JdbcTemplate(harness.witness().adminDataSource());
-        appProjection = new JdbcTemplate(harness.application().createApplicationProjectionDataSource());
+        appProjectionDataSource = harness.application().createApplicationProjectionDataSource();
+        appAdminDataSource = harness.application().adminDataSource();
+        appProjection = new JdbcTemplate(appProjectionDataSource);
         projectionAdmin = new JdbcTemplate(harness.application().adminDataSource());
         journalAdmin = new JdbcTemplate(harness.journal().adminDataSource());
         journalAdapter = new JdbcPrivacyJournalAdapter(harness.journal().createJournalWriterDataSource(), context.getEnvironment(),
@@ -127,6 +135,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         witnessAdmin.update("DELETE FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
                 journalId, tenantId, subjectRef);
         projectionAdmin.update("DELETE FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ?", tenantId, subjectRef);
+        projectionAdmin.update("DELETE FROM sf_w2b_partition_fence WHERE tenant_id = ? AND subject_ref = ?", tenantId, subjectRef);
         journalAdmin.update("DELETE FROM sf_journal_action WHERE tenant_id = ? AND subject_ref = ?", tenantId, subjectRef);
         journalAdmin.update("DELETE FROM sf_journal_lease WHERE tenant_id = ? AND subject_ref = ?", tenantId, subjectRef);
         journalAdmin.update("DELETE FROM sf_journal_command WHERE tenant_id = ? AND subject_ref = ?", tenantId, subjectRef);
@@ -151,6 +160,117 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         assertTrue(snapshot.held());
         assertEquals(PrivacyProjectionPort.Status.QUARANTINED,
                 projectionService.projectAcknowledged(new PrivacyJournalPort.JournalPartition("other-" + tenantId, subjectRef), first).status());
+    }
+
+    @Test
+    void recovery隔離はMySQLへ永続しowner交代後の旧generationとnormal投影を拒否する() {
+        var partition = partition();
+        var ack = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-fence-recovery");
+        AtomicReference<JournalProjectionService.VerifiedJournalEvent> verified = new AtomicReference<>();
+        PrivacyProjectionPort capturing = new PrivacyProjectionPort() {
+            @Override public ProjectionResult apply(JournalProjectionService.VerifiedJournalEvent event) {
+                verified.set(event);
+                return projectionPort().apply(event);
+            }
+            @Override public ProjectionSnapshot snapshot(PrivacyJournalPort.JournalPartition requested) {
+                return projectionPort().snapshot(requested);
+            }
+        };
+        var captureService = new JournalProjectionService(journalAdapter, capturing);
+        assertEquals(PrivacyProjectionPort.Status.APPLIED, captureService.projectAcknowledged(partition, ack).status());
+        assertNotNull(verified.get());
+
+        var fence = new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment());
+        var fixtureAdminFence = new JdbcPrivacyPartitionFence(appAdminDataSource, context.getEnvironment());
+        var firstOwner = fence.quarantine(partition);
+        assertTrue(fence.isCurrentOwner(firstOwner));
+        restoreProjectionUnderFence(fixtureAdminFence, firstOwner, partition);
+        assertEquals(PrivacyProjectionPort.Status.APPLIED,
+                new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment())
+                        .applyRecovery(verified.get(), firstOwner).status());
+        assertEquals("QUARANTINED", fence.snapshot(partition).state(), "成功しても永続隔離を自動解除しない");
+
+        var secondOwner = fence.quarantine(partition);
+        assertEquals(firstOwner.generation() + 1, secondOwner.generation());
+        assertFalse(fence.isCurrentOwner(firstOwner), "新generationが旧ownerを失効させる");
+        assertTrue(new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
+                .isCurrentOwner(secondOwner), "新しいadapter/fence instanceからもDB隔離stateを読める");
+        restoreProjectionUnderFence(fixtureAdminFence, secondOwner, partition);
+        var restartedProjection = new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment());
+        assertEquals(PrivacyProjectionPort.Status.QUARANTINED,
+                restartedProjection.applyRecovery(verified.get(), firstOwner).status(), "旧generationのreplay writeを拒否");
+        assertEquals(PrivacyProjectionPort.Status.APPLIED,
+                restartedProjection.applyRecovery(verified.get(), secondOwner).status(), "現ownerだけreplay projectionを進められる");
+        assertEquals(PrivacyProjectionPort.Status.QUARANTINED,
+                projectionService.projectAcknowledged(partition, ack).status(), "通常projectionは隔離中に拒否");
+        assertEquals(1, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_partition_fence "
+                + "WHERE tenant_id=? AND subject_ref=? AND generation=? AND state='QUARANTINED' AND owner_token=?",
+                Integer.class, tenantId, subjectRef, secondOwner.generation(), secondOwner.ownerToken()));
+        assertThrows(JdbcPrivacyPartitionFence.StaleOwnerException.class,
+                () -> restoreProjectionUnderFence(fixtureAdminFence, firstOwner, partition),
+                "fixture restoreも旧ownerで投影を書き換えられない");
+        assertEquals("QUARANTINED", fence.snapshot(partition).state());
+    }
+
+    @Test
+    void recovery取得と競合するnormal投影は同一rowLock後に隔離を見て拒否する() throws Exception {
+        var partition = partition();
+        var first = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-fence-race-1");
+        var second = append(partition, 1, PrivacyJournalPort.CommandType.LEASE_CLAIMED, "cmd-fence-race-2");
+        assertEquals(PrivacyProjectionPort.Status.APPLIED, projectionService.projectAcknowledged(partition, first).status());
+
+        CountDownLatch fenceLocked = new CountDownLatch(1);
+        CountDownLatch allowFenceCommit = new CountDownLatch(1);
+        CountDownLatch projectionStarted = new CountDownLatch(1);
+        var pool = Executors.newFixedThreadPool(2);
+        TransactionTemplate lockTransaction = new TransactionTemplate(new DataSourceTransactionManager(appProjectionDataSource));
+        lockTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        Future<?> recovery = pool.submit(() -> lockTransaction.execute(status -> {
+            Long generation = appProjection.queryForObject("SELECT generation FROM sf_w2b_partition_fence "
+                    + "WHERE tenant_id=? AND subject_ref=? FOR UPDATE", Long.class, tenantId, subjectRef);
+            appProjection.update("UPDATE sf_w2b_partition_fence SET generation=?, state='QUARANTINED', owner_token=? "
+                            + "WHERE tenant_id=? AND subject_ref=? AND generation=?",
+                    generation + 1, UUID.randomUUID().toString(), tenantId, subjectRef, generation);
+            fenceLocked.countDown();
+            awaitLatch(allowFenceCommit);
+            return null;
+        }));
+        Future<PrivacyProjectionPort.ProjectionResult> normal = null;
+        try {
+            assertTrue(fenceLocked.await(10, TimeUnit.SECONDS), "recovery fence row lockが取れる");
+            normal = pool.submit(() -> {
+                projectionStarted.countDown();
+                return projectionService.projectAcknowledged(partition, second);
+            });
+            assertTrue(projectionStarted.await(10, TimeUnit.SECONDS));
+            Thread.sleep(150);
+            assertFalse(normal.isDone(), "normal projectionはquarantine commit前に同じfence lockを待つ");
+            allowFenceCommit.countDown();
+            recovery.get(10, TimeUnit.SECONDS);
+            assertEquals(PrivacyProjectionPort.Status.QUARANTINED, normal.get(10, TimeUnit.SECONDS).status());
+            assertEquals(1L, projectionAdmin.queryForObject("SELECT last_applied_revision FROM sf_w2b_projection "
+                    + "WHERE tenant_id=? AND subject_ref=?", Long.class, tenantId, subjectRef));
+            assertEquals("QUARANTINED", new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
+                    .snapshot(partition).state());
+        } finally {
+            allowFenceCommit.countDown();
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "fence race worker termination timeout");
+        }
+    }
+
+    private PrivacyProjectionPort projectionPort() {
+        return new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment());
+    }
+
+    private void restoreProjectionUnderFence(JdbcPrivacyPartitionFence fixtureAdminFence,
+            JdbcPrivacyPartitionFence.Lease owner, PrivacyJournalPort.JournalPartition partition) {
+        fixtureAdminFence.underCurrentOwner(owner, tx -> {
+            assertEquals(1, tx.update("UPDATE sf_w2b_projection SET last_applied_revision=0, event_hash=?, held=FALSE, "
+                            + "last_action_id=NULL, last_action_state='NONE' WHERE tenant_id=? AND subject_ref=?",
+                    "0".repeat(64), partition.tenantId(), partition.subjectRef()));
+            return null;
+        });
     }
 
     @Test
