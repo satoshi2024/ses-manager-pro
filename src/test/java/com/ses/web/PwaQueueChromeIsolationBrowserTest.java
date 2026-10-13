@@ -107,9 +107,9 @@ class PwaQueueChromeIsolationBrowserTest {
                     + "localEpoch:localStorage.getItem('ses_pwa_revocation_epoch'),cookieEpoch:(document.cookie.match(/(?:^|;\\s*)ses_pwa_revocation_epoch=([^;]+)/)||[])[1]||null,"
                     + "queueCount:rows.length,offlineDrafts:await SES.pwaQueue.getOfflineDrafts(),panelHidden:document.getElementById('pwa-queue-panel').hidden})})()")
                     .asText());
-            assertNull(afterRace.get("scope"));
-            assertNull(afterRace.get("persistedScope"));
-            assertNull(afterRace.get("scopeEpoch"));
+            assertTrue(afterRace.has("scope") && afterRace.get("scope").isNull(), "応答scopeを明示的にnullへ保つ");
+            assertTrue(afterRace.has("persistedScope") && afterRace.get("persistedScope").isNull(), "persisted scope markerを明示的に除去する");
+            assertTrue(afterRace.has("scopeEpoch") && afterRace.get("scopeEpoch").isNull(), "scope epoch markerを明示的に除去する");
             assertEquals(revokedEpoch, afterRace.path("localEpoch").asText());
             assertEquals(revokedEpoch, java.net.URLDecoder.decode(afterRace.path("cookieEpoch").asText(), StandardCharsets.UTF_8));
             assertEquals(0, afterRace.path("queueCount").asInt(), "撤回後IndexedDB queueは空である");
