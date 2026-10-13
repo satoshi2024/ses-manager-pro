@@ -40,6 +40,104 @@ class PwaQueueChromeIsolationBrowserTest {
             "/js/modules/attendance-my.js", "/js/modules/my-expenses.js", "/js/modules/my-profile.js");
 
     @Test
+    void chromeのbootstrap中に撤回された旧scope応答はIndexedDB削除後も復活しない() throws Exception {
+        List<Integer> versions = new CopyOnWriteArrayList<>();
+        List<String> leaseIds = new CopyOnWriteArrayList<>();
+        AtomicInteger leaseCount = new AtomicInteger();
+        CountDownLatch leaseFirst = new CountDownLatch(1);
+        CountDownLatch leaseSecond = new CountDownLatch(1);
+        CountDownLatch releaseLease = new CountDownLatch(1);
+        AtomicBoolean conflict = new AtomicBoolean(false);
+        AtomicBoolean rebind = new AtomicBoolean(false);
+        AtomicBoolean discardQueue = new AtomicBoolean(false);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        ExecutorService httpExecutor = Executors.newCachedThreadPool();
+        server.setExecutor(httpExecutor);
+        server.createContext("/", exchange -> handle(exchange, versions, conflict, leaseIds, leaseCount,
+                leaseFirst, leaseSecond, releaseLease, rebind, discardQueue));
+        server.start();
+        Path profile = Files.createTempDirectory("ses-nf04-bootstrap-race-");
+        CdpBrowser browser = null;
+        try {
+            browser = launchChrome(profile);
+            String base = "http://127.0.0.1:" + server.getAddress().getPort();
+            browser.navigate(base + "/test.html?user=A");
+            assertTrue(browser.waitForStrict("!!(window.SES&&SES.pwaQueue&&SES.pwaQueue.whenReady)", Duration.ofSeconds(15)),
+                    "PWA queue APIを初期化する");
+            browser.evaluate("SES.pwaQueue.whenReady().then(()=>window.__initialBootstrapReady=true);true");
+            assertTrue(browser.waitForStrict("window.__initialBootstrapReady===true&&SES.pwaQueue.getScope()==='scope-A'",
+                    Duration.ofSeconds(15)), "実Chromeで通常scope bootstrapが完了する");
+            browser.evaluateStrict("(async()=>{const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});"
+                    + "await new Promise((ok,no)=>{const tx=db.transaction('queue','readwrite');tx.objectStore('queue').put({clientRequestId:'bootstrap-delete-sentinel',userScope:'scope-A',status:'ERROR',createdAt:Date.now()});tx.oncomplete=ok;tx.onerror=()=>no(tx.error)});"
+                    + "db.close();return true})()").asBoolean();
+            browser.evaluate(completionBarrierScript() + "window.__bootstrapDeleteReached=false;window.__releaseBootstrapDelete=null;"
+                    + "window.__bootstrapDeleteTransaction=null;window.__bootstrapCursorTransactions=[];"
+                    + "window.__nativeBootstrapOpenKeyCursor=IDBIndex.prototype.openKeyCursor;IDBIndex.prototype.openKeyCursor=function(range,direction){"
+                    + "if(this.objectStore.name==='queue'&&this.name==='userScope'&&range&&range.lower==='scope-A'&&range.upper==='scope-A'"
+                    + "&&!range.lowerOpen&&!range.upperOpen)window.__bootstrapCursorTransactions.push(this.objectStore.transaction);"
+                    + "return window.__nativeBootstrapOpenKeyCursor.call(this,range,direction)};"
+                    + "window.__nativeBootstrapStoreDelete=IDBObjectStore.prototype.delete;IDBObjectStore.prototype.delete=function(key){"
+                    + "if(this.name==='queue'&&key==='bootstrap-delete-sentinel'){window.__bootstrapDeleteTransaction=this.transaction;"
+                    + "window.__bootstrapCursorMatched=window.__bootstrapCursorTransactions.includes(this.transaction)}"
+                    + "return window.__nativeBootstrapStoreDelete.call(this,key)};"
+                    + "window.__nativeOpenKeyCursor=window.__nativeBootstrapOpenKeyCursor;window.__nativeStoreDelete=window.__nativeBootstrapStoreDelete;"
+                    + "window.__nativeBootstrapTransaction=IDBDatabase.prototype.transaction;IDBDatabase.prototype.transaction=function(names,mode,options){"
+                    + "window.__nativeTransaction=window.__nativeBootstrapTransaction;"
+                    + "const tx=window.__nativeBootstrapTransaction.call(this,names,mode,options);const storeNames=Array.from(tx.objectStoreNames);"
+                    + "if(mode==='readwrite'&&storeNames.length===1&&storeNames[0]==='queue'){let handler=null;Object.defineProperty(tx,'oncomplete',{configurable:true,get:()=>handler,set:fn=>{handler=fn;"
+                    + "window.sesDelayIndexedDbCompletion(tx,fn,(resume)=>{if(window.__bootstrapDeleteTransaction===tx){window.__bootstrapDeleteReached=true;"
+                    + "window.__releaseBootstrapDelete=resume;window.__releaseDeleteBarrier=resume}else resume()})}})}return tx};true");
+            assertTrue(browser.evaluateStrict("fetch('/__test/enable-bootstrap-delete-race').then(r=>r.ok)").asBoolean(),
+                    "次のsession-context応答を別scope/queue破棄契約へ切り替える");
+            browser.evaluateStrict("window.__bootstrapPromise=SES.pwaQueue.resume();true").asBoolean();
+            assertTrue(browser.waitForStrict("window.__bootstrapDeleteReached", Duration.ofSeconds(15)),
+                    "bootstrapScopeが実IndexedDB上の旧scope削除完了を待つ");
+            assertTrue(browser.evaluateStrict("window.__bootstrapDeleteTransaction!==null&&window.__bootstrapCursorMatched").asBoolean(),
+                    "scope index cursorとsentinel削除は同じIndexedDB transaction内である");
+            browser.evaluateStrict("window.__resetPromise=SES.pwaQueue.reset();true").asBoolean();
+            String revokedEpoch = JSON.readTree(browser.evaluateStrict("window.__resetPromise.then(x=>JSON.stringify(x))").asText())
+                    .path("epoch").asText();
+            assertFalse(revokedEpoch.isBlank(), "撤回は新epochを発行する");
+            browser.evaluateStrict("window.__releaseBootstrapDelete();true").asBoolean();
+            browser.evaluateStrict("Promise.all([window.__bootstrapPromise,window.__resetPromise]).then(()=>true)").asBoolean();
+
+            JsonNode afterRace = JSON.readTree(browser.evaluateStrict("(async()=>{const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});"
+                    + "const rows=await new Promise((ok,no)=>{const q=db.transaction('queue').objectStore('queue').getAll();q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)});db.close();"
+                    + "return JSON.stringify({scope:SES.pwaQueue.getScope(),persistedScope:localStorage.getItem('ses_pwa_user_scope'),scopeEpoch:localStorage.getItem('ses_pwa_scope_epoch'),"
+                    + "localEpoch:localStorage.getItem('ses_pwa_revocation_epoch'),cookieEpoch:(document.cookie.match(/(?:^|;\\s*)ses_pwa_revocation_epoch=([^;]+)/)||[])[1]||null,"
+                    + "queueCount:rows.length,offlineDrafts:await SES.pwaQueue.getOfflineDrafts(),panelHidden:document.getElementById('pwa-queue-panel').hidden})})()")
+                    .asText());
+            assertNull(afterRace.get("scope"));
+            assertNull(afterRace.get("persistedScope"));
+            assertNull(afterRace.get("scopeEpoch"));
+            assertEquals(revokedEpoch, afterRace.path("localEpoch").asText());
+            assertEquals(revokedEpoch, java.net.URLDecoder.decode(afterRace.path("cookieEpoch").asText(), StandardCharsets.UTF_8));
+            assertEquals(0, afterRace.path("queueCount").asInt(), "撤回後IndexedDB queueは空である");
+            assertEquals(0, afterRace.path("offlineDrafts").size(), "遅延bootstrap後にoffline draftを読めない");
+            assertTrue(afterRace.path("panelHidden").asBoolean(), "撤回後queue panelはhiddenのまま");
+            JsonNode blocked = JSON.readTree(browser.evaluateStrict("(async()=>{window.__protectedSendCount=0;window.__nativeFetch=window.fetch.bind(window);"
+                    + "window.fetch=(input,init)=>{if(String(input).includes('/api/my/pwa/attendance/daily'))window.__protectedSendCount++;return window.__nativeFetch(input,init)};"
+                    + "let rejected=false;try{await SES.pwaQueue.request({screen:'attendance',month:'2026-10',method:'POST',path:'/api/my/pwa/attendance/daily',baseVersion:0,"
+                    + "resourceKey:'attendance:2026-10',payload:{workDate:'2026-10-10',clockIn:'09:00',clockOut:'18:00',breaks:[],breakMinutes:60,workType:'出勤',workplaceType:'客先',remarks:'bootstrap-race'}})}catch(e){rejected=true}"
+                    + "return JSON.stringify({rejected,sends:window.__protectedSendCount})})()")
+                    .asText());
+            assertTrue(blocked.path("rejected").asBoolean(), "撤回後queue requestはfail closedする");
+            assertEquals(0, blocked.path("sends").asInt(), "遅延bootstrapからprotected POSTへ到達しない");
+        } finally {
+            releaseBrowserBarriers(browser);
+            if (browser != null && !closeChrome(browser, profile)) browser.close();
+            server.stop(0);
+            httpExecutor.shutdownNow();
+            assertTrue(httpExecutor.awaitTermination(5, TimeUnit.SECONDS), "HTTP test executorを期限内に終了する");
+            try (var paths = Files.walk(profile)) {
+                paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void chromeでqueue更新競合撤回offline再起動とcache境界を実測する() throws Exception {
         List<Integer> sentVersions = new CopyOnWriteArrayList<>();
         List<String> leaseRequestIds = new CopyOnWriteArrayList<>();
@@ -49,12 +147,13 @@ class PwaQueueChromeIsolationBrowserTest {
         CountDownLatch releaseLeaseFirst = new CountDownLatch(1);
         AtomicBoolean conflictNext = new AtomicBoolean(false);
         AtomicBoolean rebindScopeOnNextContext = new AtomicBoolean(false);
+        AtomicBoolean discardQueueOnNextContext = new AtomicBoolean(false);
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         ExecutorService httpExecutor = Executors.newCachedThreadPool();
         server.setExecutor(httpExecutor);
         server.createContext("/", exchange -> handle(exchange, sentVersions, conflictNext,
                 leaseRequestIds, leaseRequestCount, leaseFirstStarted, leaseSecondStarted,
-                releaseLeaseFirst, rebindScopeOnNextContext));
+                releaseLeaseFirst, rebindScopeOnNextContext, discardQueueOnNextContext));
         server.start();
         Path profile = Files.createTempDirectory("ses-nf04-chrome-");
         Path evidence = Path.of("target", "nf04-browser-evidence");
@@ -465,7 +564,8 @@ class PwaQueueChromeIsolationBrowserTest {
                                List<String> leaseRequestIds, AtomicInteger leaseRequestCount,
                                CountDownLatch leaseFirstStarted, CountDownLatch leaseSecondStarted,
                                CountDownLatch releaseLeaseFirst,
-                               AtomicBoolean rebindScopeOnNextContext) throws java.io.IOException {
+                               AtomicBoolean rebindScopeOnNextContext,
+                               AtomicBoolean discardQueueOnNextContext) throws java.io.IOException {
         String path = exchange.getRequestURI().getPath();
         if (path.equals("/test.html")) {
             reply(exchange, 200, "text/html; charset=utf-8", """
@@ -501,11 +601,18 @@ class PwaQueueChromeIsolationBrowserTest {
             String presented = exchange.getRequestHeaders().getFirst("X-User-Scope");
             String scope = presented == null || presented.isBlank() ? "scope-A" : presented;
             if (rebindScopeOnNextContext.compareAndSet(true, false)) scope += "-rebound";
-            reply(exchange, 200, "application/json", "{\"code\":200,\"data\":{\"userScope\":\"" + scope + "\",\"preserveQueue\":true}}");
+            boolean preserveQueue = !discardQueueOnNextContext.compareAndSet(true, false);
+            reply(exchange, 200, "application/json", "{\"code\":200,\"data\":{\"userScope\":\"" + scope + "\",\"preserveQueue\":" + preserveQueue + "}}");
             return;
         }
         if (path.equals("/__test/enable-scope-drift")) {
             rebindScopeOnNextContext.set(true);
+            reply(exchange, 200, "application/json", "{\"ok\":true}");
+            return;
+        }
+        if (path.equals("/__test/enable-bootstrap-delete-race")) {
+            rebindScopeOnNextContext.set(true);
+            discardQueueOnNextContext.set(true);
             reply(exchange, 200, "application/json", "{\"ok\":true}");
             return;
         }
