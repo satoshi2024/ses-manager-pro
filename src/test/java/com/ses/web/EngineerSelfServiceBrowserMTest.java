@@ -64,10 +64,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Chrome依存のため既定のfast suiteへ無条件追加しない。専用profile（-Pbrowser-tests）とCI gateで実行する。
  */
 @Tag("browser")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "spring.datasource.url=jdbc:h2:mem:engineer-self-service-browser;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL")
 @ActiveProfiles("test")
 @Import(EngineerSelfServiceBrowserMTest.BusinessExceptionDiagnosticConfiguration.class)
 class EngineerSelfServiceBrowserMTest {
+
+    // 実HTTP browser testは共有mem:testdbのcontext再初期化に依存しないよう、専用DBへsql.initを適用する。
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
