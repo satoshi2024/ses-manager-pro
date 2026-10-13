@@ -463,3 +463,24 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   永続quarantine/generation fence欠落、witness R5で未checkpointのR10→R7巻戻りを検出できない問題、recovery DB権限境界が対象である。
   計画修正版 `0fbd0515e71621194960ae754859d09b4f1971f2` はtest-only永続fence、witness latestとreplay headの厳密一致、
   reader/writer最小権限とfixture-admin分離を定義した。独立再Review前であり、D実装・合格ではない。
+
+### 2026-10-13 ACL実測と集成前の追加阻害
+
+- NF06 fixed `0e2962245beed1bd18cea44bcd04862a4962d890` のmetadata-acl01は **14/0/0/0**。
+  UTC04:39:57.4782515〜04:41:48.3766226、exit0、起止SHA一致・clean。
+  log SHA-256 `2C63B6BD6CE93F6272FDAA49EF3DE6D6533905574CAF875BC79F463FAE4182CC`。
+  Astraは2 report hashとXMLを照合し、限定CODE/証拠PASS。成功1件と呼出前の権限/状態変更後の拒否13件を含む。
+  principal tenant負例はconfigured tenant mismatchの入口拒否であり、有効な二tenantの全資源分離の証拠ではない。
+  metadata-mysql02/metadata-acl01各10 fileをcontrolへhash一致保存。前commitの英語messageは言語規約との不一致として認識し、固定SHAを改変しない。
+- Astraの集成前監査でmetadata writeにP1を検出した。createMapping/registerJob/bindMapping/disableSource等は入口認可後にsource行ロック待機し、
+  その間の権限取消後も更新/幂等成功を返し得る。14件の既存ACL拒否試験はこの競合を検証しない。**F1a集成を保留する。**
+  resource lock取得後にactor・全membership・group・actionをcurrent locking readし、同一transactionのcommitまで権限ロックを持つ修復を進める。
+  RRの通常SELECT再読、RCだけの変更、任意SQL例外を403として扱う試験は代替にならない。source待機中の取消とgate取得後の取消順序を実MySQLで区別する。
+  candidate/lease全体のcommit線形化や、未検証の組織変更までこの修復の保証へ拡張しない。
+- NF04 fixture修復 source `f919c0bc746a7aeb3c4ad554767c8ca5290f764c`、verify `0226ac542025144131a4024383cdd1cbfc0ee49a` の全browser02は
+  **11 class、16/1/0/0、FAIL**。UTC04:44:09.9629886〜04:47:05.1993785、exit1、起止SHA一致・clean。
+  log SHA-256 `F42FB6718494FCDAF4DC88B6AA5ACAF797FC0367BA79264A6E1F0C3BFC833AC2`。raw30 fileをhash一致保存した。
+  PWA 2 caseは合格したが、1on1業務400が残る。独立sales・精確関連だけで根本原因が解決したとは報告しない。
+  source `802964ac8bd0bd9e7b51dfdd73cb59a18e0a4d12` でtest-only resolverによる安全なmessageKey/status診断を追加し、実HTTPの通常例外処理を維持して再実行する。
+- NF07 D修正版 `0fbd0515e71621194960ae754859d09b4f1971f2` はAstra限定PLAN PASS。
+  D1は永続partition fenceを先行実装する。D2の独立live witness読取/replay/final reread、全復元、production解除は未実装である。
