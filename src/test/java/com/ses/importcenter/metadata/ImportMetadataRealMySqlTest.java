@@ -440,9 +440,9 @@ class ImportMetadataRealMySqlTest {
             });
             operationFuture = submittedOperation;
             awaitSourcePrimaryWait(requesterId, blockerId, Long.toString(sourceId), submittedOperation);
-            jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 "
+            assertEquals(1, jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 "
                             + "WHERE tenant_id=? AND group_id=? AND action_key=? AND deny_flag=0",
-                    tenantId, groupId, ImportMetadataAuthorizationService.ACTION);
+                    tenantId, groupId, ImportMetadataAuthorizationService.ACTION));
             blocker.commit();
             var failure = org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class,
                     () -> submittedOperation.get(10, TimeUnit.SECONDS));
