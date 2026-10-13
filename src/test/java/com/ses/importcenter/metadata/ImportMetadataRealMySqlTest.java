@@ -54,6 +54,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -325,6 +326,188 @@ class ImportMetadataRealMySqlTest {
         }
     }
 
+    // 以下7件は認可競合coverage候補（未実行）。service transaction自体のsource行待機分岐を検証する。
+    @Test
+    void source行待機中に権限を撤回するとcreateMappingは新規mappingを作らない() throws Exception {
+        sourceId = metadataService.createSource(new ImportSourceRequest("SyntheticSource", "合成source"));
+        assertRevokedWhileSourceLockHeld(() -> metadataService.createMapping(customerMappingRequest()));
+
+        assertEquals(0, mappingCountForSource());
+        assertSourceRemainsActiveAtVersionOne();
+    }
+
+    @Test
+    void source行待機中に権限を撤回するとcreateMappingの再試行も成功returnしない() throws Exception {
+        sourceId = metadataService.createSource(new ImportSourceRequest("SyntheticSource", "合成source"));
+        mappingId = metadataService.createMapping(customerMappingRequest());
+        assertRevokedWhileSourceLockHeld(() -> metadataService.createMapping(customerMappingRequest()));
+
+        assertEquals(1, mappingCountForSource());
+        assertEquals(1, jdbc.queryForObject("SELECT mapping_version FROM t_import_mapping WHERE tenant_id=? AND id=?",
+                Integer.class, tenantId, mappingId));
+        assertSourceRemainsActiveAtVersionOne();
+    }
+
+    @Test
+    void source行待機中に権限を撤回するとbindMappingの更新を拒否する() throws Exception {
+        prepareUnboundCustomerJob();
+        assertRevokedWhileSourceLockHeld(() -> metadataService.bindMapping(jobId, 1, mappingId));
+
+        assertJobBinding("UPLOADED", 1, null);
+        assertSourceRemainsActiveAtVersionOne();
+    }
+
+    @Test
+    void source行待機中に権限を撤回するとbindMappingの冪等returnも拒否する() throws Exception {
+        prepareBoundCustomerJob();
+        assertRevokedWhileSourceLockHeld(() -> metadataService.bindMapping(jobId, 2, mappingId));
+
+        assertJobBinding("MAPPED", 2, mappingId);
+        assertSourceRemainsActiveAtVersionOne();
+    }
+
+    @Test
+    void source行待機中に権限を撤回するとdisableSourceの更新を拒否する() throws Exception {
+        sourceId = metadataService.createSource(new ImportSourceRequest("SyntheticSource", "合成source"));
+        assertRevokedWhileSourceLockHeld(() -> metadataService.disableSource(sourceId, 1, true));
+
+        assertSourceRemainsActiveAtVersionOne();
+    }
+
+    @Test
+    void source行待機中に権限を撤回するとdisableSourceのnoOp returnも拒否する() throws Exception {
+        sourceId = metadataService.createSource(new ImportSourceRequest("SyntheticSource", "合成source"));
+        assertRevokedWhileSourceLockHeld(() -> metadataService.disableSource(sourceId, 1, false));
+
+        assertSourceRemainsActiveAtVersionOne();
+    }
+
+    @Test
+    void source行待機中に権限を撤回するとregisterJobの冪等returnとlink確認を拒否する() throws Exception {
+        sourceId = metadataService.createSource(new ImportSourceRequest("SyntheticSource", "合成source"));
+        jobId = metadataService.registerJob(customerJobRequest());
+        assertRevokedWhileSourceLockHeld(() -> metadataService.registerJob(customerJobRequest()));
+
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_job WHERE tenant_id=? AND source_system_id=?",
+                Integer.class, tenantId, sourceId));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_document_link WHERE tenant_id=? AND document_id=? "
+                + "AND target_type='IMPORT_JOB' AND target_id=? AND deleted_flag=0",
+                Integer.class, tenantId, documentId, jobId));
+        assertEquals(1, jdbc.queryForObject("SELECT version_no FROM t_import_job WHERE tenant_id=? AND id=?",
+                Integer.class, tenantId, jobId));
+        assertSourceRemainsActiveAtVersionOne();
+        assertEquals(0, storage.openCount());
+    }
+
+    private void assertRevokedWhileSourceLockHeld(Supplier<?> operation) throws Exception {
+        Connection blocker = null;
+        ExecutorService pool = null;
+        Future<?> operationFuture = null;
+        AtomicReference<Long> requesterId = new AtomicReference<>();
+        Throwable primaryFailure = null;
+        boolean expectedDenialObserved = false;
+        try {
+            blocker = dataSource.getConnection();
+            blocker.setAutoCommit(false);
+            try (var statement = blocker.prepareStatement(
+                    "SELECT id FROM t_import_source_system WHERE tenant_id=? AND id=? FOR UPDATE")) {
+                statement.setString(1, tenantId);
+                statement.setLong(2, sourceId);
+                try (ResultSet rows = statement.executeQuery()) { assertTrue(rows.next()); }
+            }
+            long blockerId;
+            try (var statement = blocker.createStatement();
+                 ResultSet rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
+                rows.next();
+                blockerId = rows.getLong(1);
+            }
+
+            pool = Executors.newSingleThreadExecutor();
+            Future<?> submittedOperation = pool.submit(() -> {
+                var authority = new SimpleGrantedAuthority("ROLE_管理者");
+                installPrincipal(tenantId, authority);
+                AccountingTenantContextHolder.setTenantId(tenantId);
+                try {
+                    return new org.springframework.transaction.support.TransactionTemplate(
+                            new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource)).execute(status -> {
+                        requesterId.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                        return operation.get();
+                    });
+                } finally {
+                    SecurityContextHolder.clearContext();
+                    AccountingTenantContextHolder.clear();
+                }
+            });
+            operationFuture = submittedOperation;
+            awaitSourcePrimaryWait(requesterId, blockerId, Long.toString(sourceId), submittedOperation);
+            jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 "
+                            + "WHERE tenant_id=? AND group_id=? AND action_key=? AND deny_flag=0",
+                    tenantId, groupId, ImportMetadataAuthorizationService.ACTION);
+            blocker.commit();
+            var failure = org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> submittedOperation.get(10, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException);
+            assertEquals(403, ((BusinessException) failure.getCause()).getCode());
+            expectedDenialObserved = true;
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            List<Throwable> cleanupFailures = new java.util.ArrayList<>();
+            if (blocker != null) {
+                try { blocker.rollback(); } catch (Exception failure) { cleanupFailures.add(failure); }
+                try { blocker.close(); } catch (Exception failure) { cleanupFailures.add(failure); }
+            }
+            if (pool != null) {
+                cleanupFailures.addAll(awaitFutures(operationFuture == null ? List.of() : List.of(operationFuture),
+                        pool, expectedDenialObserved));
+            }
+            reportCleanupFailures("metadata service source lock競合fixture", cleanupFailures, primaryFailure);
+        }
+    }
+
+    private ImportMappingRequest customerMappingRequest() {
+        return new ImportMappingRequest(sourceId, ImportEntity.CUSTOMER, "ses-import-v1",
+                Map.of("externalKey", "externalKey", "companyName", "companyName"));
+    }
+
+    private ImportJobRegistrationRequest customerJobRequest() {
+        return new ImportJobRegistrationRequest(sourceId, ImportEntity.CUSTOMER, "ses-import-v1",
+                ImportEncoding.UTF8, SOURCE_HASH, documentId, documentVersionId, 1);
+    }
+
+    private void prepareUnboundCustomerJob() {
+        sourceId = metadataService.createSource(new ImportSourceRequest("SyntheticSource", "合成source"));
+        mappingId = metadataService.createMapping(customerMappingRequest());
+        jobId = metadataService.registerJob(customerJobRequest());
+    }
+
+    private void prepareBoundCustomerJob() {
+        prepareUnboundCustomerJob();
+        assertEquals(2L, metadataService.bindMapping(jobId, 1, mappingId));
+    }
+
+    private int mappingCountForSource() {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM t_import_mapping WHERE tenant_id=? AND source_system_id=?",
+                Integer.class, tenantId, sourceId);
+    }
+
+    private void assertJobBinding(String expectedState, int expectedVersion, Long expectedMappingId) {
+        var actual = jdbc.queryForMap("SELECT state, version_no, mapping_id FROM t_import_job WHERE tenant_id=? AND id=?",
+                tenantId, jobId);
+        assertEquals(expectedState, actual.get("state"));
+        assertEquals((long) expectedVersion, ((Number) actual.get("version_no")).longValue());
+        Object actualMappingId = actual.get("mapping_id");
+        if (expectedMappingId == null) assertTrue(actualMappingId == null);
+        else assertEquals(expectedMappingId.longValue(), ((Number) actualMappingId).longValue());
+    }
+
+    private void assertSourceRemainsActiveAtVersionOne() {
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_source_system "
+                + "WHERE tenant_id=? AND id=? AND status='ACTIVE' AND version_no=1",
+                Integer.class, tenantId, sourceId));
+    }
+
     @Test
     void gate取得後の新規deny行insertはcommitまで待ち次回metadata操作を拒否する() throws Exception {
         sourceId = metadataService.createSource(new ImportSourceRequest("SyntheticSource", "合成source"));
@@ -493,10 +676,10 @@ class ImportMetadataRealMySqlTest {
     }
 
     private void awaitSourcePrimaryWait(AtomicReference<Long> requesterId, long blockerId,
-                                       String lockData, Future<?> registration) throws Exception {
+                                       String lockData, Future<?> sourceOperation) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
-            assertFuturePending(registration, "metadata service");
+            assertFuturePending(sourceOperation, "metadata service");
             Long requester = requesterId.get();
             if (requester != null) {
                 Integer waits = jdbc.queryForObject("""
@@ -514,7 +697,7 @@ class ImportMetadataRealMySqlTest {
             }
             Thread.sleep(25);
         }
-        assertFuturePending(registration, "metadata service");
+        assertFuturePending(sourceOperation, "metadata service");
         throw new AssertionError("対象source PRIMARY行のMySQL lock waitを確認できませんでした。" +
                 safeWaitDetails(requesterId.get(), blockerId));
     }
