@@ -53,6 +53,7 @@ public class ImportMetadataService {
         java.util.Arrays.fill(key, (byte) 0);
         String sql = "INSERT INTO t_import_source_system (tenant_id, source_code, display_name, status, version_no, lookup_key_version, created_by, updated_by) VALUES (?, ?, ?, 'ACTIVE', 1, ?, ?, ?)";
         try {
+            authorization.requireCurrentAuthorizationForWrite(context);
             return insertId(sql, context.tenantId(), normalizedCode, request.displayName().strip(),
                     lookupKeyVersion, context.actorUserId(), context.actorUserId());
         } catch (DuplicateKeyException duplicate) {
@@ -82,6 +83,7 @@ public class ImportMetadataService {
             if (!MessageDigest.isEqual(canonical, existingVersion.canonicalBytes())) {
                 throw BusinessException.of(409, "error.import.mappingHashCollision");
             }
+            authorization.requireCurrentAuthorizationForWrite(context);
             return jdbc.queryForObject("""
                     SELECT id FROM t_import_mapping
                     WHERE tenant_id=? AND source_system_id=? AND entity_type=? AND schema_version=?
@@ -93,6 +95,7 @@ public class ImportMetadataService {
                 SELECT COALESCE(MAX(mapping_version), 0) + 1 FROM t_import_mapping
                 WHERE tenant_id=? AND source_system_id=? AND entity_type=? AND schema_version=?
                 """, rs -> rs.next() ? rs.getInt(1) : 1, context.tenantId(), source.id(), request.entity().name(), request.schemaVersion());
+        authorization.requireCurrentAuthorizationForWrite(context);
         return insertId("INSERT INTO t_import_mapping (tenant_id, source_system_id, entity_type, schema_version, mapping_version, canonical_bytes, mapping_sha256, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 context.tenantId(), source.id(), request.entity().name(), request.schemaVersion(), next,
                 canonical, digest, context.actorUserId());
@@ -110,6 +113,7 @@ public class ImportMetadataService {
         if (alreadyRegistered != null) {
             documentService.authorizeImportJobDownload(alreadyRegistered, request.documentId(),
                     request.documentVersionId(), request.documentVersionNo(), request.sourceSha256Hex());
+            authorization.requireCurrentAuthorizationForWrite(context);
             ensureJobLink(context.tenantId(), request.documentId(), alreadyRegistered);
             return alreadyRegistered;
         }
@@ -128,6 +132,7 @@ public class ImportMetadataService {
                 """;
         long jobId;
         try {
+            authorization.requireCurrentAuthorizationForWrite(context);
             jobId = insertId(sql, context.tenantId(), source.id(), source.version(), request.entity().name(),
                     request.schemaVersion(), request.encoding().name(), sourceHash, Long.toString(context.legalEntityId()),
                     request.documentId(), request.documentVersionId(), request.documentVersionNo(), documentHash,
@@ -136,6 +141,7 @@ public class ImportMetadataService {
             Long existing = findIdempotentJob(context.tenantId(), source.id(), request, sourceHash, documentHash,
                     context.legalEntityId(), source.version());
             if (existing != null) {
+                authorization.requireCurrentAuthorizationForWrite(context);
                 ensureJobLink(context.tenantId(), request.documentId(), existing);
                 return existing;
             }
@@ -213,6 +219,7 @@ public class ImportMetadataService {
         if (source.version() != expectedVersion) {
             throw BusinessException.of(409, "error.import.sourceVersionConflict");
         }
+        authorization.requireCurrentAuthorizationForWrite(context);
         String target = disabled ? "DISABLED" : "ACTIVE";
         if (target.equals(source.status())) {
             return source.version();
@@ -252,6 +259,7 @@ public class ImportMetadataService {
         }
         if (job == null || !"UPLOADED".equals(job.state()) || job.version() != expectedJobVersion) {
             if (job != null && job.mappingId() != null && job.mappingId() == mappingId) {
+                authorization.requireCurrentAuthorizationForWrite(context);
                 return job.version();
             }
             throw BusinessException.of(409, "error.import.jobStateConflict");
@@ -265,6 +273,7 @@ public class ImportMetadataService {
         if (mapping == null || !job.entityType().equals(mapping.entityType()) || !job.schemaVersion().equals(mapping.schemaVersion())) {
             throw BusinessException.of(409, "error.import.mappingSnapshotMismatch");
         }
+        authorization.requireCurrentAuthorizationForWrite(context);
         int updated = jdbc.update("""
                 UPDATE t_import_job SET mapping_id=?, mapping_version=?, mapping_sha256=?, state='MAPPED',
                     version_no=version_no+1, updated_at=CURRENT_TIMESTAMP(6)

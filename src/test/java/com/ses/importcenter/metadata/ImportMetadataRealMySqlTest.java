@@ -45,6 +45,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -93,10 +99,13 @@ class ImportMetadataRealMySqlTest {
     @Autowired private DocumentVersionMapper documentVersionMapper;
     @Autowired private SysUserMapper sysUserMapper;
     @Autowired private TestDocumentStorage storage;
+    @Autowired private javax.sql.DataSource dataSource;
+    @Autowired private ImportMetadataAuthorizationService metadataAuthorization;
 
     private String tenantId;
     private long actorUserId;
     private long groupId;
+    private long foreignGroupId;
     private long sourceId;
     private long mappingId;
     private long jobId;
@@ -193,6 +202,10 @@ class ImportMetadataRealMySqlTest {
             jdbc.update("DELETE FROM t_user_permission_group WHERE tenant_id=? AND group_id=?", tenantId, groupId);
             jdbc.update("DELETE FROM m_permission_group WHERE tenant_id=? AND id=?", tenantId, groupId);
         }
+        if (foreignGroupId > 0) {
+            jdbc.update("DELETE FROM t_user_permission_group WHERE tenant_id=? AND group_id=?", tenantId, foreignGroupId);
+            jdbc.update("DELETE FROM m_permission_group WHERE tenant_id=? AND id=?", tenantId + "-foreign", foreignGroupId);
+        }
         if (actorUserId > 0) jdbc.update("DELETE FROM sys_user WHERE id=?", actorUserId);
         jdbc.update("DELETE FROM m_organization_unit WHERE legal_entity_id=? AND code=?", LEGAL_ENTITY_ID,
                 "NF06-" + tenantId);
@@ -245,6 +258,231 @@ class ImportMetadataRealMySqlTest {
                   AND v.id=? AND v.scan_status='CLEAN' AND v.sha256=?
                 """, Integer.class, tenantId, documentId, Long.toString(LEGAL_ENTITY_ID), documentVersionId,
                 SOURCE_HASH));
+    }
+
+    @Test
+    void source行待機中に権限を撤回するとregisterJobはlinkも含めて拒否する() throws Exception {
+        sourceId = metadataService.createSource(new ImportSourceRequest("SyntheticSource", "合成source"));
+        long blockerId;
+        Connection blocker = dataSource.getConnection();
+        blocker.setAutoCommit(false);
+        try (var statement = blocker.prepareStatement("SELECT id FROM t_import_source_system WHERE tenant_id=? AND id=? FOR UPDATE")) {
+            statement.setString(1, tenantId);
+            statement.setLong(2, sourceId);
+            try (ResultSet rows = statement.executeQuery()) { assertTrue(rows.next()); }
+        }
+        try (var statement = blocker.createStatement(); ResultSet rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
+            rows.next(); blockerId = rows.getLong(1);
+        }
+
+        var pool = Executors.newSingleThreadExecutor();
+        var requesterId = new AtomicReference<Long>();
+        Future<Long> registration = pool.submit(() -> {
+            var authority = new SimpleGrantedAuthority("ROLE_管理者");
+            installPrincipal(tenantId, authority);
+            AccountingTenantContextHolder.setTenantId(tenantId);
+            try {
+                return new org.springframework.transaction.support.TransactionTemplate(
+                        new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource)).execute(status -> {
+                    requesterId.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                    return metadataService.registerJob(new ImportJobRegistrationRequest(sourceId, ImportEntity.CUSTOMER,
+                            "ses-import-v1", ImportEncoding.UTF8, SOURCE_HASH, documentId, documentVersionId, 1));
+                });
+            } finally {
+                SecurityContextHolder.clearContext();
+                AccountingTenantContextHolder.clear();
+            }
+        });
+        try {
+            awaitSourcePrimaryWait(requesterId, blockerId, Long.toString(sourceId));
+            jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 WHERE tenant_id=? AND group_id=? AND action_key=? AND deny_flag=0",
+                    tenantId, groupId, ImportMetadataAuthorizationService.ACTION);
+            blocker.commit();
+            var failure = org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> registration.get(10, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException);
+            assertEquals(403, ((BusinessException) failure.getCause()).getCode());
+            assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_job WHERE tenant_id=? AND source_system_id=?",
+                    Integer.class, tenantId, sourceId));
+            assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_document_link WHERE tenant_id=? AND document_id=? AND target_type='IMPORT_JOB'",
+                    Integer.class, tenantId, documentId));
+            assertEquals(1, jdbc.queryForObject("SELECT version_no FROM t_import_source_system WHERE tenant_id=? AND id=?",
+                    Integer.class, tenantId, sourceId));
+            assertEquals(0, storage.openCount());
+        } finally {
+            try { blocker.rollback(); } catch (Exception ignored) { }
+            try { blocker.close(); } catch (Exception ignored) { }
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void gate取得後の新規deny行insertはcommitまで待ち次回metadata操作を拒否する() throws Exception {
+        sourceId = metadataService.createSource(new ImportSourceRequest("SyntheticSource", "合成source"));
+        String foreignTenant = tenantId + "-foreign";
+        jdbc.update("INSERT INTO m_permission_group(tenant_id,group_key,group_name,enabled,deleted_flag) VALUES(?,?,?,1,0)",
+                foreignTenant, "nf06-cross-tenant", "tenant境界テスト用");
+        foreignGroupId = jdbc.queryForObject("SELECT id FROM m_permission_group WHERE tenant_id=? AND group_key=?",
+                Long.class, foreignTenant, "nf06-cross-tenant");
+        ImportAuthorizedContext context = metadataAuthorization.requireCurrentAuthorization();
+        var gateHeld = new java.util.concurrent.CountDownLatch(1);
+        var releaseGate = new java.util.concurrent.CountDownLatch(1);
+        var gateConnectionId = new AtomicReference<Long>();
+        var pool = Executors.newFixedThreadPool(2);
+        Future<?> gate = pool.submit(() -> {
+            var authority = new SimpleGrantedAuthority("ROLE_管理者");
+            installPrincipal(tenantId, authority);
+            AccountingTenantContextHolder.setTenantId(tenantId);
+            try {
+                new org.springframework.transaction.support.TransactionTemplate(
+                        new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource)).execute(status -> {
+                    gateConnectionId.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                    metadataAuthorization.requireCurrentAuthorizationForWrite(context);
+                    gateHeld.countDown();
+                    try {
+                        if (!releaseGate.await(10, TimeUnit.SECONDS)) throw new AssertionError("gate解放待ちがtimeoutしました");
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(interrupted);
+                    }
+                    return null;
+                });
+            } finally {
+                SecurityContextHolder.clearContext();
+                AccountingTenantContextHolder.clear();
+            }
+        });
+        var writerId = new AtomicReference<Long>();
+        Future<?> denyInsert = null;
+        Future<?> membershipInsert = null;
+        try {
+        assertTrue(gateHeld.await(5, TimeUnit.SECONDS), "認可gateを取得できませんでした");
+        denyInsert = pool.submit(() -> {
+            try (Connection connection = dataSource.getConnection()) {
+                try (var statement = connection.createStatement(); ResultSet rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
+                    rows.next(); writerId.set(rows.getLong(1));
+                }
+                try (var statement = connection.prepareStatement("""
+                        INSERT INTO t_permission_group_action(tenant_id,group_id,action_key,deny_flag,deleted_flag)
+                        VALUES(?,?,'import.*',1,0)
+                        """)) {
+                    statement.setString(1, tenantId);
+                    statement.setLong(2, groupId);
+                    statement.executeUpdate();
+                }
+            } catch (Exception failure) { throw new IllegalStateException(failure); }
+        });
+        var membershipWriterId = new AtomicReference<Long>();
+        membershipInsert = pool.submit(() -> {
+            try (Connection connection = dataSource.getConnection()) {
+                try (var statement = connection.createStatement(); ResultSet rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
+                    rows.next(); membershipWriterId.set(rows.getLong(1));
+                }
+                try (var statement = connection.prepareStatement("""
+                        INSERT INTO t_user_permission_group(tenant_id,user_id,group_id,assigned_by,deleted_flag)
+                        VALUES(?,?,?,?,0)
+                        """)) {
+                    statement.setString(1, tenantId);
+                    statement.setLong(2, actorUserId);
+                    statement.setLong(3, foreignGroupId);
+                    statement.setLong(4, actorUserId);
+                    statement.executeUpdate();
+                }
+            } catch (Exception failure) { throw new IllegalStateException(failure); }
+        });
+            awaitPermissionGroupWait(writerId, gateConnectionId, groupId);
+            awaitActorWait(membershipWriterId, gateConnectionId, actorUserId);
+            assertTrue(!denyInsert.isDone(), "permission groupを参照する新規deny行がgate commit前に挿入されました");
+            assertTrue(!membershipInsert.isDone(), "sys_userを参照する新規membershipがgate commit前に挿入されました");
+            releaseGate.countDown();
+            gate.get(10, TimeUnit.SECONDS);
+            denyInsert.get(10, TimeUnit.SECONDS);
+            membershipInsert.get(10, TimeUnit.SECONDS);
+            BusinessException denied = assertThrows(BusinessException.class,
+                    () -> metadataService.disableSource(sourceId, 1, false));
+            assertEquals(403, denied.getCode());
+            assertEquals(1, jdbc.queryForObject("SELECT version_no FROM t_import_source_system WHERE tenant_id=? AND id=?",
+                    Integer.class, tenantId, sourceId));
+        } finally {
+            releaseGate.countDown();
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    private void awaitActorWait(AtomicReference<Long> requesterId, AtomicReference<Long> blockerId,
+                                long lockData) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            Long requester = requesterId.get();
+            Long blocker = blockerId.get();
+            if (requester != null && blocker != null) {
+                Integer waits = jdbc.queryForObject("""
+                        SELECT COUNT(*) FROM performance_schema.data_lock_waits w
+                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
+                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                        JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                        JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
+                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='sys_user' AND req.INDEX_NAME='PRIMARY'
+                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='sys_user' AND blk.INDEX_NAME='PRIMARY'
+                          AND req.LOCK_DATA=? AND blk.LOCK_DATA=?
+                        """, Integer.class, requester, blocker, Long.toString(lockData), Long.toString(lockData));
+                if (waits != null && waits > 0) return;
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError("新規membership FKのsys_user PRIMARY lock waitを確認できませんでした");
+    }
+
+    private void awaitPermissionGroupWait(AtomicReference<Long> requesterId,
+                                         AtomicReference<Long> blockerId, long lockData) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            Long requester = requesterId.get();
+            Long blocker = blockerId.get();
+            if (requester != null && blocker != null) {
+                Integer waits = jdbc.queryForObject("""
+                        SELECT COUNT(*) FROM performance_schema.data_lock_waits w
+                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
+                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                        JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                        JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
+                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='m_permission_group' AND req.INDEX_NAME='PRIMARY'
+                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='m_permission_group' AND blk.INDEX_NAME='PRIMARY'
+                          AND req.LOCK_DATA=? AND blk.LOCK_DATA=?
+                        """, Integer.class, requester, blocker, Long.toString(lockData), Long.toString(lockData));
+                if (waits != null && waits > 0) return;
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError("新規action FKのm_permission_group PRIMARY lock waitを確認できませんでした");
+    }
+
+    private void awaitSourcePrimaryWait(AtomicReference<Long> requesterId, long blockerId,
+                                       String lockData) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            Long requester = requesterId.get();
+            if (requester != null) {
+                Integer waits = jdbc.queryForObject("""
+                        SELECT COUNT(*) FROM performance_schema.data_lock_waits w
+                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
+                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                        JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                        JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
+                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='t_import_source_system' AND req.INDEX_NAME='PRIMARY'
+                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='t_import_source_system' AND blk.INDEX_NAME='PRIMARY'
+                          AND req.LOCK_DATA=? AND blk.LOCK_DATA=?
+                        """, Integer.class, requester, blockerId, lockData, lockData);
+                if (waits != null && waits > 0) return;
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError("対象source PRIMARY行のMySQL lock waitを確認できませんでした");
     }
 
     @Test
