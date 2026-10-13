@@ -517,3 +517,35 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   D2のlive witness/replay/final reread、実process restart、production SQL ACL、隔離解除、Privacy/Legal承認は未完。
 - 全体NO-GOを維持する。全fast/MySQL/performance/browser/backup gatesを最新controlで通した証拠はなく、
   staging、実provider、migration/restore rehearsal、各人間Ownerの署名を局所合格で代替しない。
+
+### 2026-10-13 全browser限定合格と追加非同期境界
+
+- NF04 fixed `360de89fa32b8989ca778bcb3e4f7d6f56da2cf6` の全browser05は **11 class、16/0/0/0**。
+  UTC05:20:52.5900622〜05:23:48.8188226、exit0、起止SHA一致・clean。
+  log SHA-256 `C59C0A78B70C05B8754B885EA72CDAD37F0486C0901B07172A0D9C12D4753C2D`。
+  Astraが22 report hash/XMLを独立照合し、既存CdpBrowser全consumerの限定証拠PASS。raw30 fileをhash一致保存した。
+  ただし統合前の追加ReviewでbootstrapScopeにP1を発見した。context検証後のdeleteScope待機中に撤回すると、
+  遅れて戻るbootstrapがscope/persisted markerを書き戻しquarantine/pausedを解除し得る。既存16件はこの競合を覆わない。
+  server認可迂回の証拠ではなく、撤回documentのローカル隔離契約違反として修復する。**G2統合は保留。**
+  G1/serverはcontrolへpatch-equivalentで統合済み。G2候補範囲は `f8de9cf9^..360de89f` の22 commit・12 fileでありcommon.jsを含まない。
+  sourceのcommon.js利用者変更および未追跡exitcodeは持ち込まない。新競合修復後も全browser gateを要求する。
+- NF06 auth-lock-02 fixed `cbe9904b` は **16/1/0/0**。実wait graphは指定gate ownerへの
+  `t_permission_group_action/uk_permission_group_action` のINSERT_INTENTION待機であり、元のFK親PRIMARY限定assertionが狭すぎた。
+  UTC05:15:14.1026794〜05:17:13.1410705、log SHA-256 `4B9F84D979C49CDF85E86296595B5E70BB75A785447AD1CAF8901102B91ADCCF`。
+  test修復後のauth-lock-03 fixed `718833da` も **16/1/0/0**。action待機は通過し、membershipは
+  `t_user_permission_group/uk_user_permission_group` のsupremum INSERT_INTENTION待機を実測した。
+  UTC05:24:10.1708395〜05:26:05.0135425、log SHA-256 `8A0EE4204E1830E8DD35841E5F4AD6402EFA0864082FC01B9D0A2F8D19F86E10`。
+  任意lock waitを許容せず、connection edge/schema/table/index/type/mode/statusを厳密に限定して再検証する。
+  これらの失敗はgate無効の実証ではないが、成功試験へ昇格しない。
+- NF07 D1 control fixed `a9e8c360f9d6661e35175bde4148d6d2a2e60d28` のMySQL再試験は **20/0/0/0**。
+  UTC05:17:37.3787664〜05:20:33.2794410、log SHA-256 `7F12EC481C9A3BB58100A1D8FA1DF9574906B1F9E77A0760903EADE7E2777F32`。
+  Astraが固定SHA、report hash、三DB version/schemaを独立照合した。sourceとcontrolのapplication schema hashは異なり、
+  各固定tree自身のschemaを基準に照合した。同じcontrolのpure/inventory回帰は **5 class、18/0/0/0**、
+  UTC05:26:27.7059412〜05:27:25.7342716、log SHA-256 `911FA2C2A3526956A5F26664F5360FD6CD97FC0C59D0DC06F2896A132AA0DDD3`。
+  後者の独立証拠照合は未完。全control CIの合格ではない。
+- NF07 D2候補 `52a3ac82` は独立Reviewでconstructor可視性のcompile阻害P1、retry計数P2、時間上限未実装P2を検出。
+  live witness/journalとowner-fenced replayを実装した候補だが、未コンパイル・未実測でありD2 PASSではない。
+  constructor/計数を先行修復し、総deadline/JDBC待機上限・追加競合matrix・復元ACL・実restartを未完gateとして残す。
+- NF08 C1候補 `df0aa935` は独立ReviewでdispatchのNOT_SENTへの逆行、未信頼public DTOからのUPPER_BOUND化、
+  headers受領後の失敗でdispatch証拠欠落を指摘された。実production deny-allは維持され、外送迂回のfindingではない。
+  C1修復後に定向検証する。ACTUAL/rate card、outer usageとinner失敗の分離、完全な費用/失敗matrixはC2の未完項目である。
