@@ -464,7 +464,7 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   計画修正版 `0fbd0515e71621194960ae754859d09b4f1971f2` はtest-only永続fence、witness latestとreplay headの厳密一致、
   reader/writer最小権限とfixture-admin分離を定義した。独立再Review前であり、D実装・合格ではない。
 
-### 2026-10-13 ACL実測と集成前の追加阻害
+### 2026-10-13 ACL実測と統合前の追加阻害
 
 - NF06 fixed `0e2962245beed1bd18cea44bcd04862a4962d890` のmetadata-acl01は **14/0/0/0**。
   UTC04:39:57.4782515〜04:41:48.3766226、exit0、起止SHA一致・clean。
@@ -472,8 +472,8 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   Astraは2 report hashとXMLを照合し、限定CODE/証拠PASS。成功1件と呼出前の権限/状態変更後の拒否13件を含む。
   principal tenant負例はconfigured tenant mismatchの入口拒否であり、有効な二tenantの全資源分離の証拠ではない。
   metadata-mysql02/metadata-acl01各10 fileをcontrolへhash一致保存。前commitの英語messageは言語規約との不一致として認識し、固定SHAを改変しない。
-- Astraの集成前監査でmetadata writeにP1を検出した。createMapping/registerJob/bindMapping/disableSource等は入口認可後にsource行ロック待機し、
-  その間の権限取消後も更新/幂等成功を返し得る。14件の既存ACL拒否試験はこの競合を検証しない。**F1a集成を保留する。**
+- Astraの統合前監査でmetadata writeにP1を検出した。createMapping/registerJob/bindMapping/disableSource等は入口認可後にsource行ロック待機し、
+  その間の権限取消後も更新/冪等成功を返し得る。14件の既存ACL拒否試験はこの競合を検証しない。**F1a統合を保留する。**
   resource lock取得後にactor・全membership・group・actionをcurrent locking readし、同一transactionのcommitまで権限ロックを持つ修復を進める。
   RRの通常SELECT再読、RCだけの変更、任意SQL例外を403として扱う試験は代替にならない。source待機中の取消とgate取得後の取消順序を実MySQLで区別する。
   candidate/lease全体のcommit線形化や、未検証の組織変更までこの修復の保証へ拡張しない。
@@ -484,3 +484,36 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   source `802964ac8bd0bd9e7b51dfdd73cb59a18e0a4d12` でtest-only resolverによる安全なmessageKey/status診断を追加し、実HTTPの通常例外処理を維持して再実行する。
 - NF07 D修正版 `0fbd0515e71621194960ae754859d09b4f1971f2` はAstra限定PLAN PASS。
   D1は永続partition fenceを先行実装する。D2の独立live witness読取/replay/final reread、全復元、production解除は未実装である。
+
+### 2026-10-13 adapter限定合格と永続fence統合
+
+- NF08 Slice B fixed `286ab361f3cfb8c07fbb412cea85559a102b0a0c` のadapter-b-03は **18 class、84/0/0/0**。
+  UTC05:09:44.1817905〜05:11:12.4818634、exit0、起止SHA一致・clean。
+  log SHA-256 `92C5929AC55831F36CAB6D13C95C4C0F544080739A731947FC7813BBD94C0A40`。
+  Astraは36 report hash・更新時刻・XMLを独立照合し、synthetic bounded Gemini adapter/parserの限定CODE・証拠PASS。
+  production deny-all、test seamのloopback固定、接続時DNS再検査、厳密なresponse/usage検査、HTML原文拒否、429分類、TLSを含む。
+  adapter-b-01はcompile FAIL・XMLなし、adapter-b-02は84/0/4/0であり、失敗履歴を保持する。
+  b-03 raw44 fileをcontrolへhash一致保存。実CopilotSummaryService全経路、Slice C失敗費用/attempt伝播、実料金policy、
+  DPA/外送承認・credential・flag・artifact publishは未完。NF08新adapterはまだcontrolへ統合していない。
+- NF04 selfservice診断単独は1/0/0/0、全browser03は16/0/1/0、全browser04 fixed
+  `78475cfe56b4c8912b86c360fd84d691fdcf7870` も **11 class、16/0/1/0、FAIL**。
+  全browser04 UTC05:06:06.0729458〜05:08:57.4041692、exit1、起止SHA一致・clean。
+  log SHA-256 `02BED0B028D4A089887E3A121AF50DCE88DADC405A1AF05921C81C193AC119B9`、raw30 fileをhash一致保存。
+  SelfServiceは専用H2 DBで合格したが、以前の400の正確な業務拒否分岐は確定していない。
+  PWA初期化前whenReadyがnullとなる競合をstrict assertionを維持して修復した後、今回はPwaQueueChromeIsolationBrowserTest
+  line354でJavaScript例外を検出した。G2全体合格・control統合は引き続き保留する。
+- NF06 auth-lock-01 fixed `6e728ba0e6f3baa1cf712c16ff1b8aa1a8a52b8a` は **16/1/0/0、FAIL**。
+  UTC04:58:27.0812982〜05:00:28.0134946、log SHA-256 `B15864955B84DF2C7901D512CA7884259F3D2B84C045176DAF639F2D5E557469`。
+  permission group PRIMARYへの待機が観測できず、FK親ロックの証明は成立していない。子index/gapで先に待機する可能性は仮説である。
+  fixed `cbe9904b1915f0e6280564166896e12909651f5a` はfuture例外と実wait graphの安全診断を追加し、単一file javacはexit0。
+  実MySQL再試験前に認可競合P1を閉鎖しない。raw10 fileを保存し、F1a/V184統合は保留する。
+- NF07 D1 fixed `8fd3bcb0feac378d46b7b86541f89c0d72221803` は実MySQL **20/0/0/0**。
+  UTC05:02:35.5433942〜05:05:32.6246229、exit0、起止SHA一致・clean。
+  log SHA-256 `DD3A53E11FE51BAEA0B4585B5D960533C75E570DBBC2E8A92ED58962009EC66A`。
+  Astraが2 report hash、三DBの実version/image/schemaを独立照合し限定CODE・証拠PASS。raw10 fileを保存した。
+  永続quarantineのREQUIRES_NEW、generation/owner fence、通常投影の拒否、復元・recovery apply、外側rollback後の隔離維持を含む。
+  計画とD1をcontrol `2c8f97cb/5ef1b1fa/f0bb8515/b4778dea` に統合した。統合後のruntime再試験は別gateである。
+  個別snapshot/applyのtransaction順序を検証したが、cross-DB service全体・返却後の持続的認可を保証しない。
+  D2のlive witness/replay/final reread、実process restart、production SQL ACL、隔離解除、Privacy/Legal承認は未完。
+- 全体NO-GOを維持する。全fast/MySQL/performance/browser/backup gatesを最新controlで通した証拠はなく、
+  staging、実provider、migration/restore rehearsal、各人間Ownerの署名を局所合格で代替しない。
