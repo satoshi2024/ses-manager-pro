@@ -549,3 +549,17 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
 - NF08 C1候補 `df0aa935` は独立ReviewでdispatchのNOT_SENTへの逆行、未信頼public DTOからのUPPER_BOUND化、
   headers受領後の失敗でdispatch証拠欠落を指摘された。実production deny-allは維持され、外送迂回のfindingではない。
   C1修復後に定向検証する。ACTUAL/rate card、outer usageとinner失敗の分離、完全な費用/失敗matrixはC2の未完項目である。
+
+### 2026-10-13 metadata認可ロックの限定実証
+
+- NF06 auth-lock-04 fixed `068aaad29f0a793a3defe39a322b62022d91b92e` は **16/0/0/0**、exit0、起止SHA一致・clean。
+  UTC05:28:36.1459996〜05:30:25.6412991、log SHA-256 `B5D441F3B5D76A6DDC36B99B481E7486DC1466E97873950D039B82A10DCE07A7`。
+  Astraが2 report hash/XMLを独立照合し限定受理。raw10 fileをcontrolへhash一致保存した。
+  実metadata registerJobのsource待機中撤権拒否、直接helperが持つ認可lock下のaction/membership INSERT待機、
+  解放後のinsert成功と次回403を実証した。観測対象はchild unique indexであり、FK parent PRIMARY待機の証明ではない。
+  createMapping/bindMapping/disableSource等の実service競合matrixは追加候補であり、全metadata write・candidate/leaseの競合解決へ拡張しない。
+- control D1 pure fixed `a9e8c360` の5 class18/0/0/0についてもAstraが10 report hash・起止SHA/cleanを独立照合し限定受理した。
+- NF04 bootstrap修復 `7541e3e8` はAstraがP1の静的閉鎖を確認した。新testのJSON null assertionを `70fe6d0a` で修正し、
+  verify fixed `38f684acbf8da9dae37d5473f7c2fa63fc9a7c21` の全browser再試験を次gateとする。前fixedの16件合格は新競合の実証ではない。
+- NF07 D2a `d83266af` はpublic constructor・retry計数修復をAstraが限定確認し、実MySQL診断を開始した。
+  試験が成功しても総deadline/JDBC待機上限、追加故障matrix、復元ACL/実restartの未完を消さない。
