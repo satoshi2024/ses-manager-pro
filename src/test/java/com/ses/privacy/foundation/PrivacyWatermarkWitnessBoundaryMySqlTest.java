@@ -196,7 +196,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
 
         var fence = new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment());
         var fixtureAdminFence = new JdbcPrivacyPartitionFence(appAdminDataSource, context.getEnvironment());
-        var firstOwner = fence.quarantine(partition);
+        var firstOwner = fence.quarantine(partition, RecoveryDeadline.startForTest(Duration.ofSeconds(30)));
         assertTrue(fence.isCurrentOwner(firstOwner));
         restoreProjectionUnderFence(fixtureAdminFence, firstOwner, partition);
         assertEquals(PrivacyProjectionPort.Status.APPLIED,
@@ -204,7 +204,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
                         .applyRecovery(verified.get(), firstOwner).status());
         assertEquals("QUARANTINED", fence.snapshot(partition).state(), "成功しても永続隔離を自動解除しない");
 
-        var secondOwner = fence.quarantine(partition);
+        var secondOwner = fence.quarantine(partition, RecoveryDeadline.startForTest(Duration.ofSeconds(30)));
         assertEquals(firstOwner.generation() + 1, secondOwner.generation());
         assertFalse(fence.isCurrentOwner(firstOwner), "新generationが旧ownerを失効させる");
         assertTrue(new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
@@ -232,7 +232,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         var fence = new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment());
         var outer = new TransactionTemplate(new DataSourceTransactionManager(appProjectionDataSource));
         outer.execute(status -> {
-            fence.quarantine(partition);
+            fence.quarantine(partition, RecoveryDeadline.startForTest(Duration.ofSeconds(30)));
             status.setRollbackOnly();
             return null;
         });
@@ -240,7 +240,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
                 + "WHERE tenant_id=? AND subject_ref=? AND state='QUARANTINED'", Long.class, tenantId, subjectRef),
                 "外側transaction rollback後も独立connectionで隔離取得が見える");
 
-        var owner = fence.quarantine(partition);
+        var owner = fence.quarantine(partition, RecoveryDeadline.startForTest(Duration.ofSeconds(30)));
         assertThrows(IllegalStateException.class, () -> fence.underCurrentOwner(owner, tx -> {
             throw new IllegalStateException("synthetic fixture restore failure");
         }));
@@ -273,7 +273,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         appendCheckpoint(second, 2, 1, firstCheckpoint.checkpointHash());
 
         var fixtureFence = new JdbcPrivacyPartitionFence(appAdminDataSource, context.getEnvironment());
-        var restoreOwner = new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()).quarantine(partition);
+        var restoreOwner = new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()).quarantine(partition, RecoveryDeadline.startForTest(Duration.ofSeconds(30)));
         fixtureFence.underCurrentOwner(restoreOwner, tx -> {
             assertEquals(1, tx.update("UPDATE sf_w2b_projection SET last_applied_revision=1, event_hash=?, held=TRUE, "
                             + "last_action_id=NULL, last_action_state='NONE' WHERE tenant_id=? AND subject_ref=?",
@@ -298,6 +298,150 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         assertTrue(repeated.generation() > recovered.generation());
         assertEquals("QUARANTINED", new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
                 .snapshot(partition).state());
+    }
+
+    @Test
+    void recoverydeadlineの実MySQL投影lock待ちは隔離を保ち資源回収後に再実行できる() throws Throwable {
+        var partition = partition();
+        var ack = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-deadline-lock");
+        appendCheckpoint(ack, 1, 0, "0".repeat(64));
+        projectionAdmin.update("INSERT INTO sf_w2b_projection(tenant_id, subject_ref, last_applied_revision, event_hash, held, last_action_id, last_action_state) "
+                + "VALUES (?, ?, 0, ?, FALSE, NULL, 'NONE')", tenantId, subjectRef, "0".repeat(64));
+
+        RecordingConnectionDataSource recording = new RecordingConnectionDataSource(appProjectionDataSource);
+        var timedProjection = new JdbcPrivacyProjectionAdapter(recording, context.getEnvironment());
+        var timedService = new PrivacyRecoveryService(recoveryWitnessReader, watermarkVerifier, recoveryJournalReader,
+                timedProjection, new JdbcPrivacyPartitionFence(recording, context.getEnvironment()), context.getEnvironment());
+        var pool = Executors.newSingleThreadExecutor();
+        Connection blocker = null;
+        boolean blockerReleased = false;
+        Throwable primaryFailure = null;
+        try {
+            blocker = appAdminDataSource.getConnection();
+            blocker.setAutoCommit(false);
+            long blockerId = connectionId(blocker);
+            try (var query = blocker.prepareStatement("SELECT last_applied_revision FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=? FOR UPDATE")) {
+                query.setString(1, tenantId);
+                query.setString(2, subjectRef);
+                try (var rows = query.executeQuery()) { assertTrue(rows.next()); }
+            }
+            long startedNanos = System.nanoTime();
+            Future<PrivacyRecoveryService.Result> recovery = pool.submit(() -> timedService.recover(witnessPartition()));
+            awaitTableLockWaits(1, recording, blockerId, APPLICATION.getDatabaseName(), "sf_w2b_projection");
+            PrivacyRecoveryService.Result timedOut = recovery.get(10, TimeUnit.SECONDS);
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+            assertEquals(PrivacyRecoveryService.Status.QUARANTINED, timedOut.status());
+            assertEquals("REPLAY_TIMEOUT", timedOut.reason());
+            assertTrue(elapsedMillis <= 7_000, "5秒work budgetと2秒cleanup tolerance内で同期終了する: " + elapsedMillis);
+            assertEquals("QUARANTINED", new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
+                    .snapshot(partition).state(), "既に確認済みの隔離はtimeout後も維持する");
+            assertEquals(0L, projectionAdmin.queryForObject("SELECT last_applied_revision FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=?",
+                    Long.class, tenantId, subjectRef));
+            pool.shutdown();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "deadline後にrecovery workerが残らない");
+            assertTrue(tableLockWaits(APPLICATION.getDatabaseName(), "sf_w2b_projection").stream()
+                    .noneMatch(wait -> recording.connectionIds().contains(wait.requesterId())), "timeout後にprojection lock waiterが残らない");
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            if (blocker != null && !blockerReleased) {
+                try { blocker.rollback(); blockerReleased = true; }
+                catch (java.sql.SQLException cleanup) { if (primaryFailure != null) primaryFailure.addSuppressed(cleanup); else throw cleanup; }
+            }
+            if (blocker != null) blocker.close();
+            pool.shutdownNow();
+            if (!pool.awaitTermination(10, TimeUnit.SECONDS)) throw new AssertionError("recovery worker termination timeout");
+        }
+
+        var healthy = recoveryService.recover(witnessPartition());
+        assertEquals(PrivacyRecoveryService.Status.RECOVERED_SYNTHETIC, healthy.status());
+        assertEquals(1L, new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment())
+                .snapshot(partition).revision(), "resource回収後の新recovery試行は収束する");
+        assertEquals("QUARANTINED", new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
+                .snapshot(partition).state(), "成功しても隔離は解除しない");
+    }
+
+    @Test
+    void 同一expiredLeaseは再replayでもprojectionを変更できない() throws Exception {
+        var partition = partition();
+        var ack = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-expired-lease");
+        var journal = recoveryJournalReader.read(partition);
+        var event = JournalProjectionService.verifiedEvents(partition, journal.head(), journal.events()).get(0);
+        projectionAdmin.update("INSERT INTO sf_w2b_projection(tenant_id, subject_ref, last_applied_revision, event_hash, held, last_action_id, last_action_state) "
+                + "VALUES (?, ?, 0, ?, FALSE, NULL, 'NONE')", tenantId, subjectRef, "0".repeat(64));
+        RecoveryDeadline sameDeadline = RecoveryDeadline.startForTest(Duration.ofSeconds(3));
+        JdbcPrivacyPartitionFence fence = new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment());
+        JdbcPrivacyPartitionFence.Lease sameLease = fence.quarantine(partition, sameDeadline);
+        Connection blocker = null;
+        try {
+            blocker = appAdminDataSource.getConnection();
+            blocker.setAutoCommit(false);
+            try (var query = blocker.prepareStatement("SELECT last_applied_revision FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=? FOR UPDATE")) {
+                query.setString(1, tenantId);
+                query.setString(2, subjectRef);
+                try (var rows = query.executeQuery()) { assertTrue(rows.next()); }
+            }
+            RecordingConnectionDataSource recording = new RecordingConnectionDataSource(appProjectionDataSource);
+            JdbcPrivacyProjectionAdapter adapter = new JdbcPrivacyProjectionAdapter(recording, context.getEnvironment());
+            assertEquals(PrivacyProjectionPort.Status.QUARANTINED, adapter.applyRecovery(event, sameLease).status());
+            assertTrue(sameDeadline.remainingNanos() < TimeUnit.SECONDS.toNanos(1), "元のdeadlineで最小JDBC timeoutを表せなくなる");
+            assertThrows(RecoveryDeadline.ExpiredException.class, sameDeadline::requireJdbcSeconds,
+                    "timeout=0へ丸めず、期限内に表現可能なDB操作がないことを確認する");
+            var ownerBefore = fence.snapshot(partition);
+            int connectionsAfterFirstAttempt = recording.connectionIds().size();
+            assertEquals(PrivacyProjectionPort.Status.QUARANTINED, adapter.applyRecovery(event, sameLease).status(),
+                    "generation/owner/deadlineを再発行せず同じLeaseで拒否する");
+            assertEquals(connectionsAfterFirstAttempt, recording.connectionIds().size(), "同じexpired leaseの再試行でDBへ再接続しない");
+            var ownerAfter = fence.snapshot(partition);
+            assertEquals(ownerBefore, ownerAfter);
+            assertEquals(0L, projectionAdmin.queryForObject("SELECT last_applied_revision FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=?",
+                    Long.class, tenantId, subjectRef));
+        } finally {
+            if (blocker != null) { blocker.rollback(); blocker.close(); }
+        }
+    }
+
+    @Test
+    void 初回fence取得のlocktimeoutは隔離済みと誤報せずreplayを開始しない() throws Exception {
+        var partition = partition();
+        var ack = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-acquire-timeout");
+        appendCheckpoint(ack, 1, 0, "0".repeat(64));
+        projectionAdmin.update("INSERT INTO sf_w2b_partition_fence(tenant_id, subject_ref, generation, state, owner_token) "
+                + "VALUES (?, ?, 0, 'ACTIVE', NULL)", tenantId, subjectRef);
+
+        RecordingConnectionDataSource recording = new RecordingConnectionDataSource(appProjectionDataSource);
+        var timedService = new PrivacyRecoveryService(recoveryWitnessReader, watermarkVerifier, recoveryJournalReader,
+                new JdbcPrivacyProjectionAdapter(recording, context.getEnvironment()),
+                new JdbcPrivacyPartitionFence(recording, context.getEnvironment()), context.getEnvironment());
+        var pool = Executors.newSingleThreadExecutor();
+        Connection blocker = null;
+        try {
+            blocker = appAdminDataSource.getConnection();
+            blocker.setAutoCommit(false);
+            long blockerId = connectionId(blocker);
+            try (var query = blocker.prepareStatement("SELECT generation FROM sf_w2b_partition_fence WHERE tenant_id=? AND subject_ref=? FOR UPDATE")) {
+                query.setString(1, tenantId);
+                query.setString(2, subjectRef);
+                try (var rows = query.executeQuery()) { assertTrue(rows.next()); }
+            }
+            Future<PrivacyRecoveryService.Result> recovery = pool.submit(() ->
+                    timedService.recover(witnessPartition(), Duration.ofSeconds(2)));
+            awaitTableLockWaits(1, recording, blockerId, APPLICATION.getDatabaseName(), "sf_w2b_partition_fence");
+            PrivacyRecoveryService.Result unconfirmed = recovery.get(5, TimeUnit.SECONDS);
+            assertEquals(PrivacyRecoveryService.Status.ABORTED_UNKNOWN, unconfirmed.status());
+            assertEquals("FENCE_ACQUIRE_UNCONFIRMED", unconfirmed.reason());
+            assertEquals("ACTIVE", new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
+                    .snapshot(partition).state(), "初回acquireの応答不明をdurable quarantineと扱わない");
+            assertEquals(0, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=?",
+                    Integer.class, tenantId, subjectRef), "acquire未確認時はreplayしない");
+            pool.shutdown();
+            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS), "acquire timeout後にworkerが残らない");
+        } finally {
+            if (blocker != null) { blocker.rollback(); blocker.close(); }
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS), "acquire worker termination timeout");
+        }
     }
 
     @Test
@@ -394,8 +538,9 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         AtomicBoolean advanced = new AtomicBoolean();
         JdbcPrivacyProjectionAdapter delegate = new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment());
         PrivacyRecoveryProjectionPort advancingProjection = new PrivacyRecoveryProjectionPort() {
-            @Override public PrivacyProjectionPort.ProjectionSnapshot snapshot(PrivacyJournalPort.JournalPartition requested) {
-                return delegate.snapshot(requested);
+            @Override public PrivacyProjectionPort.ProjectionSnapshot snapshot(PrivacyJournalPort.JournalPartition requested,
+                    JdbcPrivacyPartitionFence.Lease lease) {
+                return delegate.snapshot(requested, lease);
             }
             @Override
             public PrivacyProjectionPort.ProjectionResult applyRecovery(JournalProjectionService.VerifiedJournalEvent event,
@@ -438,7 +583,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         LatestWitnessReader rotatingWitness = new LatestWitnessReader() {
             @Override public List<SignedWatermark> history(LatestWitnessPort.Partition requested) {
                 if (historyReads.incrementAndGet() == 3) {
-                    new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()).quarantine(partition);
+                    new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()).quarantine(partition, RecoveryDeadline.startForTest(Duration.ofSeconds(30)));
                 }
                 return recoveryWitnessReader.history(requested);
             }
@@ -1063,48 +1208,59 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
     private void awaitPrimaryLockWaits(int expected, RecordingConnectionDataSource writerDataSource,
             long holderId, String schema)
             throws InterruptedException {
+        awaitTableLockWaits(expected, writerDataSource, holderId, schema, "sf_w2b_latest_checkpoint");
+    }
+
+    private void awaitTableLockWaits(int expected, RecordingConnectionDataSource writerDataSource,
+            long holderId, String schema, String table)
+            throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         List<LockWait> observed = List.of();
         while (System.nanoTime() < deadline) {
             List<Long> ids = writerDataSource.connectionIds().stream().distinct().toList();
             if (ids.size() >= expected) {
-                observed = primaryLockWaits(schema);
+                observed = tableLockWaits(schema, table);
                 List<LockWait> matching = observed.stream()
-                        .filter(wait -> ids.subList(0, expected).contains(wait.requesterId()))
+                        .filter(wait -> ids.contains(wait.requesterId()))
                         .filter(wait -> wait.lockData() != null)
                         .toList();
-                String targetLockData = matching.stream().filter(wait -> wait.requesterId() == ids.get(0))
-                        .map(LockWait::lockData).findFirst().orElse(null);
+                String targetLockData = matching.stream().map(LockWait::lockData).findFirst().orElse(null);
                 List<LockWait> targetWaits = matching.stream()
                         .filter(wait -> wait.lockData().equals(targetLockData)).toList();
-                boolean allKnownRequestersWaiting = ids.subList(0, expected).stream()
-                        .allMatch(id -> targetWaits.stream().anyMatch(wait -> wait.requesterId() == id));
-                boolean firstReachesHolder = targetWaits.stream().anyMatch(wait -> wait.requesterId() == ids.get(0)
-                        && wait.blockerId() == holderId && "GRANTED".equals(wait.blockerStatus()));
-                boolean allReachHolder = ids.subList(0, expected).stream()
+                List<Long> waitingIds = targetWaits.stream().map(LockWait::requesterId).distinct().toList();
+                boolean allReachHolder = waitingIds.size() >= expected && waitingIds.stream().limit(expected)
                         .allMatch(id -> reachesHolder(targetWaits, id, holderId));
-                if (allKnownRequestersWaiting && firstReachesHolder && (expected == 1 || allReachHolder)) return;
+                if (allReachHolder) return;
             }
             Thread.sleep(25);
         }
-        fail("対象PRIMARY行で既知writer接続のlock waitを確認できません。expected=" + expected
+        fail("対象PRIMARY行で既知接続のlock waitを確認できません。expected=" + expected
                 + " connectionIds=" + writerDataSource.connectionIds() + " holderId=" + holderId + " observed=" + observed);
     }
 
     private List<LockWait> primaryLockWaits(String schema) {
-        return witnessAdmin.query("SELECT requester.PROCESSLIST_ID AS requester_id, blocker.PROCESSLIST_ID AS blocker_id, requested.LOCK_DATA AS lock_data, blocking.LOCK_STATUS AS blocker_status "
+        return tableLockWaits(schema, "sf_w2b_latest_checkpoint");
+    }
+
+    private List<LockWait> tableLockWaits(String schema, String table) {
+        if (!List.of("sf_w2b_latest_checkpoint", "sf_w2b_projection", "sf_w2b_partition_fence").contains(table)) {
+            throw new IllegalArgumentException("unsupported fixture lock table");
+        }
+        JdbcTemplate lockObserver = List.of("sf_w2b_projection", "sf_w2b_partition_fence").contains(table)
+                ? projectionAdmin : witnessAdmin;
+        return lockObserver.query("SELECT requester.PROCESSLIST_ID AS requester_id, blocker.PROCESSLIST_ID AS blocker_id, requested.LOCK_DATA AS lock_data, blocking.LOCK_STATUS AS blocker_status "
                         + "FROM performance_schema.data_lock_waits waits "
                         + "JOIN performance_schema.data_locks requested ON requested.ENGINE = waits.ENGINE AND requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID "
                         + "JOIN performance_schema.data_locks blocking ON blocking.ENGINE = waits.ENGINE AND blocking.ENGINE_LOCK_ID = waits.BLOCKING_ENGINE_LOCK_ID "
                         + "JOIN performance_schema.threads requester ON requester.THREAD_ID = requested.THREAD_ID "
                         + "JOIN performance_schema.threads blocker ON blocker.THREAD_ID = blocking.THREAD_ID "
-                        + "WHERE requested.OBJECT_SCHEMA = ? AND requested.OBJECT_NAME = 'sf_w2b_latest_checkpoint' "
+                        + "WHERE requested.OBJECT_SCHEMA = ? AND requested.OBJECT_NAME = ? "
                         + "AND requested.INDEX_NAME = 'PRIMARY' AND requested.LOCK_TYPE = 'RECORD' AND requested.LOCK_STATUS = 'WAITING' "
                         + "AND blocking.OBJECT_SCHEMA = requested.OBJECT_SCHEMA AND blocking.OBJECT_NAME = requested.OBJECT_NAME "
                         + "AND blocking.INDEX_NAME = 'PRIMARY' AND blocking.LOCK_TYPE = 'RECORD' "
                         + "AND blocking.LOCK_DATA = requested.LOCK_DATA",
                 (rs, row) -> new LockWait(rs.getLong("requester_id"), rs.getLong("blocker_id"),
-                        rs.getString("lock_data"), rs.getString("blocker_status")), schema);
+                        rs.getString("lock_data"), rs.getString("blocker_status")), schema, table);
     }
 
     private boolean reachesHolder(List<LockWait> waits, long requesterId, long holderId) {

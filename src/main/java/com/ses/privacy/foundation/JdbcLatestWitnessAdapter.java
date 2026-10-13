@@ -21,11 +21,13 @@ final class JdbcLatestWitnessAdapter implements LatestWitnessPort, LatestWitness
     private final TransactionTemplate write;
     private final TransactionTemplate read;
     private final Environment environment;
+    private final DataSource dataSource;
 
     JdbcLatestWitnessAdapter(DataSource dataSource, Environment environment) {
         this.environment = Objects.requireNonNull(environment, "environment");
         requireTestProfile();
-        this.jdbc = new JdbcTemplate(Objects.requireNonNull(dataSource, "dataSource"));
+        this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
+        this.jdbc = new JdbcTemplate(this.dataSource);
         var manager = new DataSourceTransactionManager(dataSource);
         this.write = new TransactionTemplate(manager);
         this.write.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -36,21 +38,69 @@ final class JdbcLatestWitnessAdapter implements LatestWitnessPort, LatestWitness
     }
 
     @Override public List<SignedWatermark> history(Partition partition) {
+        return history(partition, null);
+    }
+
+    @Override public List<SignedWatermark> history(Partition partition, RecoveryDeadline deadline) {
         requireTestProfile();
-        return read.execute(status -> jdbc.query("SELECT checkpoint_epoch, event_revision, event_hash, checkpoint_hash, previous_checkpoint_hash, domain, schema_version, issued_at_micros, key_id, canonical_payload, signature_bytes, signature_digest FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ? ORDER BY checkpoint_epoch",
+        JdbcTemplate reader = deadline == null ? jdbc : boundedJdbc(deadline);
+        TransactionTemplate readerTx = deadline == null ? read : boundedTransaction(deadline);
+        if (deadline != null) deadline.check();
+        List<SignedWatermark> result = readerTx.execute(status -> {
+            if (deadline != null) reader.setQueryTimeout(deadline.requireJdbcSeconds());
+            List<SignedWatermark> rows = reader.query("SELECT checkpoint_epoch, event_revision, event_hash, checkpoint_hash, previous_checkpoint_hash, domain, schema_version, issued_at_micros, key_id, canonical_payload, signature_bytes, signature_digest FROM sf_w2b_checkpoint_log WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ? ORDER BY checkpoint_epoch",
                 (rs, row) -> readSigned(partition, rs.getLong("checkpoint_epoch"), rs.getLong("event_revision"), rs.getString("event_hash"),
                         rs.getString("checkpoint_hash"), rs.getString("previous_checkpoint_hash"), rs.getString("domain"),
                         rs.getString("schema_version"), rs.getBigDecimal("issued_at_micros"), rs.getString("key_id"),
                         rs.getBytes("canonical_payload"), rs.getBytes("signature_bytes"), rs.getString("signature_digest")),
-                partition.journalId(), partition.tenantId(), partition.subjectRef()));
+                partition.journalId(), partition.tenantId(), partition.subjectRef());
+            if (deadline != null) registerDeadlineCheck(deadline);
+            return rows;
+        });
+        if (deadline != null) deadline.check();
+        return result;
     }
 
     @Override public Latest latest(Partition partition) {
+        return latest(partition, null);
+    }
+
+    @Override public Latest latest(Partition partition, RecoveryDeadline deadline) {
         requireTestProfile();
-        List<Latest> rows = read.execute(status -> jdbc.query("SELECT checkpoint_epoch, event_revision, event_hash, checkpoint_hash FROM sf_w2b_latest_checkpoint WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
-                (rs, row) -> new Latest(partition, rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4)),
-                partition.journalId(), partition.tenantId(), partition.subjectRef()));
+        JdbcTemplate reader = deadline == null ? jdbc : boundedJdbc(deadline);
+        TransactionTemplate readerTx = deadline == null ? read : boundedTransaction(deadline);
+        if (deadline != null) deadline.check();
+        List<Latest> rows = readerTx.execute(status -> {
+            if (deadline != null) reader.setQueryTimeout(deadline.requireJdbcSeconds());
+            List<Latest> result = reader.query("SELECT checkpoint_epoch, event_revision, event_hash, checkpoint_hash FROM sf_w2b_latest_checkpoint WHERE journal_id = ? AND tenant_id = ? AND subject_ref = ?",
+                    (rs, row) -> new Latest(partition, rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4)),
+                    partition.journalId(), partition.tenantId(), partition.subjectRef());
+            if (deadline != null) registerDeadlineCheck(deadline);
+            return result;
+        });
+        if (deadline != null) deadline.check();
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private JdbcTemplate boundedJdbc(RecoveryDeadline deadline) {
+        JdbcTemplate bounded = new JdbcTemplate(dataSource);
+        bounded.setQueryTimeout(deadline.requireJdbcSeconds());
+        return bounded;
+    }
+
+    private TransactionTemplate boundedTransaction(RecoveryDeadline deadline) {
+        TransactionTemplate bounded = new TransactionTemplate(read.getTransactionManager());
+        bounded.setPropagationBehavior(read.getPropagationBehavior());
+        bounded.setIsolationLevel(read.getIsolationLevel());
+        bounded.setTimeout(deadline.requireJdbcSeconds());
+        return bounded;
+    }
+
+    private static void registerDeadlineCheck(RecoveryDeadline deadline) {
+        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override public void beforeCommit(boolean readOnly) { deadline.requireJdbcSeconds(); }
+                });
     }
 
     @Override public AppendResult append(SignedWatermark signed, long expectedEpoch, String expectedCheckpointHash) {

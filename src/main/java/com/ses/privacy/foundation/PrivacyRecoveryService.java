@@ -11,12 +11,13 @@ import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.time.Duration;
 
 /** partitionからlive authorityを読み直すtest-only recovery候補。成功後も隔離を解除しない。
- * 再試行は回数だけを制限し、JDBC deadline/statement timeoutやrestart・ACL全matrixは未実装。
+ * D2bのmonotonic deadline/statement timeoutは実装したが、end-to-end上限や未検証matrixは別gateに残る。
  */
 final class PrivacyRecoveryService {
-    enum Status { RECOVERED_SYNTHETIC, QUARANTINED }
+    enum Status { RECOVERED_SYNTHETIC, QUARANTINED, ABORTED_UNKNOWN }
     /** applied/noOpはこのrecover呼出し中に実行されたapplyRecoveryの結果を試行間で合算する。 */
     record Result(Status status, String reason, long revision, String eventHash,
                   int appliedCount, int noOpCount, long generation) { }
@@ -44,14 +45,31 @@ final class PrivacyRecoveryService {
 
     /** 入力はpartitionだけ。trusted snapshot、ACK、履歴、latestは受け取らない。 */
     Result recover(LatestWitnessPort.Partition partition) {
+        return recover(partition, RecoveryDeadline.startDefault());
+    }
+
+    Result recover(LatestWitnessPort.Partition partition, Duration workBudgetForTest) {
+        return recover(partition, RecoveryDeadline.startForTest(workBudgetForTest));
+    }
+
+    private Result recover(LatestWitnessPort.Partition partition, RecoveryDeadline deadline) {
         requireTestProfile();
         Objects.requireNonNull(partition, "partition");
-        LeaseHolder holder = new LeaseHolder(fence.quarantine(new JournalPartition(partition.tenantId(), partition.subjectRef())));
+        JdbcPrivacyPartitionFence.Lease acquired;
+        try {
+            acquired = fence.quarantine(new JournalPartition(partition.tenantId(), partition.subjectRef()), deadline);
+        } catch (JdbcPrivacyPartitionFence.AcquisitionUnconfirmedException | RecoveryDeadline.ExpiredException unknown) {
+            return new Result(Status.ABORTED_UNKNOWN, "FENCE_ACQUIRE_UNCONFIRMED", 0, null, 0, 0, 0);
+        }
+        LeaseHolder holder = new LeaseHolder(acquired);
         String lastReason = "RETRY_EXHAUSTED";
         int applied = 0;
         int noOp = 0;
+        try {
         for (int attempt = 0; attempt < RECOVERY_ATTEMPTS; attempt++) {
-            StableWitness firstWitness = readStableWitness(partition);
+            deadline.check();
+            StableWitness firstWitness = readStableWitness(partition, deadline);
+            deadline.check();
             if (firstWitness == null) return quarantined(lastReason = "WITNESS_UNSTABLE", 0, null, applied, noOp, holder.lease);
             SignedWatermarkVerifier.Result witnessResult = verifier.verify(partition,
                     firstWitness.history(), firstWitness.latest());
@@ -63,8 +81,11 @@ final class PrivacyRecoveryService {
 
             PrivacyJournalSnapshotReader.Snapshot journalSnapshot;
             try {
-                journalSnapshot = journal.read(new JournalPartition(partition.tenantId(), partition.subjectRef()));
+                journalSnapshot = journal.read(new JournalPartition(partition.tenantId(), partition.subjectRef()), deadline);
+                deadline.check();
             } catch (RuntimeException unavailable) {
+                if (unavailable instanceof RecoveryDeadline.ExpiredException) throw unavailable;
+                if (causedByTimeout(unavailable)) return quarantined("JOURNAL_READ_TIMEOUT", 0, null, applied, noOp, holder.lease);
                 lastReason = "JOURNAL_UNAVAILABLE";
                 continue;
             }
@@ -82,8 +103,15 @@ final class PrivacyRecoveryService {
 
             ProjectionSnapshot current;
             try {
-                current = projection.snapshot(new JournalPartition(partition.tenantId(), partition.subjectRef()));
+                current = projection.snapshot(new JournalPartition(partition.tenantId(), partition.subjectRef()), holder.lease);
             } catch (RuntimeException unavailable) {
+                if (unavailable instanceof JdbcPrivacyPartitionFence.StaleOwnerException) {
+                    return quarantined("OWNER_GENERATION_STALE", journalSnapshot.head().revision(),
+                            journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
+                }
+                if (unavailable instanceof RecoveryDeadline.ExpiredException) throw unavailable;
+                if (causedByTimeout(unavailable)) return quarantined("PROJECTION_READ_TIMEOUT",
+                        journalSnapshot.head().revision(), journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
                 return quarantined("PROJECTION_UNAVAILABLE", journalSnapshot.head().revision(),
                         journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
             }
@@ -101,15 +129,27 @@ final class PrivacyRecoveryService {
                 return quarantined("JOURNAL_CHAIN_INVALID", 0, null, applied, noOp, holder.lease);
             }
             for (int index = Math.toIntExact(current.revision()); index < verifiedEvents.size(); index++) {
+                deadline.check();
                 ProjectionResult result;
                 try {
                     result = projection.applyRecovery(verifiedEvents.get(index), holder.lease);
                 } catch (RuntimeException unavailable) {
+                    if (unavailable instanceof RecoveryDeadline.ExpiredException) throw unavailable;
+                    if (causedByTimeout(unavailable)) return quarantined("REPLAY_READ_TIMEOUT",
+                            journalSnapshot.head().revision(), journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
                     return quarantined("PROJECTION_UNAVAILABLE", journalSnapshot.head().revision(),
                             journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
                 }
                 if (result.status() == PrivacyProjectionPort.Status.QUARANTINED) {
-                    return quarantined("REPLAY_" + result.reason().name(), journalSnapshot.head().revision(),
+                    if (result.reason() == PrivacyProjectionPort.QuarantineCode.PARTITION_FENCED) {
+                        return quarantined("OWNER_GENERATION_STALE", journalSnapshot.head().revision(),
+                                journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
+                    }
+                    String reason = result.reason() == PrivacyProjectionPort.QuarantineCode.DEADLINE_EXCEEDED
+                            || result.reason() == PrivacyProjectionPort.QuarantineCode.COMMIT_CONFIRMED_QUARANTINED
+                            || result.reason() == PrivacyProjectionPort.QuarantineCode.COMMIT_OUTCOME_UNKNOWN
+                            ? "REPLAY_TIMEOUT" : "REPLAY_" + result.reason().name();
+                    return quarantined(reason, journalSnapshot.head().revision(),
                             journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
                 }
                 if (result.status() == PrivacyProjectionPort.Status.APPLIED) applied++;
@@ -118,8 +158,15 @@ final class PrivacyRecoveryService {
                             journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
                 ProjectionSnapshot observed;
                 try {
-                    observed = projection.snapshot(new JournalPartition(partition.tenantId(), partition.subjectRef()));
+                    observed = projection.snapshot(new JournalPartition(partition.tenantId(), partition.subjectRef()), holder.lease);
                 } catch (RuntimeException unavailable) {
+                    if (unavailable instanceof JdbcPrivacyPartitionFence.StaleOwnerException) {
+                        return quarantined("OWNER_GENERATION_STALE", journalSnapshot.head().revision(),
+                                journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
+                    }
+                    if (unavailable instanceof RecoveryDeadline.ExpiredException) throw unavailable;
+                    if (causedByTimeout(unavailable)) return quarantined("REPLAY_READ_TIMEOUT",
+                            journalSnapshot.head().revision(), journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
                     return quarantined("PROJECTION_UNAVAILABLE", journalSnapshot.head().revision(),
                             journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
                 }
@@ -130,16 +177,19 @@ final class PrivacyRecoveryService {
                 }
             }
 
-            StableWitness finalWitness = readStableWitness(partition);
+            StableWitness finalWitness = readStableWitness(partition, deadline);
+            deadline.check();
             PrivacyJournalSnapshotReader.Snapshot finalJournal;
             ProjectionSnapshot finalProjection;
             try {
-                finalJournal = journal.read(new JournalPartition(partition.tenantId(), partition.subjectRef()));
-                finalProjection = fence.readUnderCurrentOwner(holder.lease,
-                        tx -> projection.snapshot(new JournalPartition(partition.tenantId(), partition.subjectRef())));
+                finalJournal = journal.read(new JournalPartition(partition.tenantId(), partition.subjectRef()), deadline);
+                deadline.check();
+                finalProjection = projection.snapshot(new JournalPartition(partition.tenantId(), partition.subjectRef()), holder.lease);
             } catch (JdbcPrivacyPartitionFence.StaleOwnerException staleOwner) {
                 return quarantined("OWNER_GENERATION_STALE", 0, null, applied, noOp, holder.lease);
             } catch (RuntimeException unavailable) {
+                if (unavailable instanceof RecoveryDeadline.ExpiredException) throw unavailable;
+                if (causedByTimeout(unavailable)) return quarantined("FINAL_READ_TIMEOUT", 0, null, applied, noOp, holder.lease);
                 lastReason = "FINAL_READ_UNAVAILABLE";
                 continue;
             }
@@ -163,23 +213,44 @@ final class PrivacyRecoveryService {
                 return quarantined("FINAL_WITNESS_" + finalVerified.reason().name(), finalJournal.head().revision(),
                         finalJournal.head().eventHash(), applied, noOp, holder.lease);
             }
+            deadline.check();
             return new Result(Status.RECOVERED_SYNTHETIC, "VERIFIED_LIVE_HEAD", finalJournal.head().revision(),
                     finalJournal.head().eventHash(), applied, noOp, holder.lease.generation());
         }
         return quarantined(lastReason, 0, null, applied, noOp, holder.lease);
+        } catch (RecoveryDeadline.ExpiredException expired) {
+            return quarantined("RECOVERY_DEADLINE_EXCEEDED", 0, null, applied, noOp, holder.lease);
+        } catch (RecoveryDeadline.PhaseTimeoutException phaseTimeout) {
+            return quarantined(phaseTimeout.phase(), 0, null, applied, noOp, holder.lease);
+        }
     }
 
-    private StableWitness readStableWitness(LatestWitnessPort.Partition partition) {
+    private static boolean causedByTimeout(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            String name = current.getClass().getSimpleName();
+            if (name.contains("Timeout") || name.contains("TimedOut")) return true;
+        }
+        return false;
+    }
+
+    private StableWitness readStableWitness(LatestWitnessPort.Partition partition, RecoveryDeadline deadline) {
         for (int readAttempt = 0; readAttempt < STABLE_READ_ATTEMPTS; readAttempt++) {
             try {
-                List<SignedWatermark> historyA = List.copyOf(witness.history(partition));
-                LatestWitnessPort.Latest latestA = witness.latest(partition);
-                List<SignedWatermark> historyB = List.copyOf(witness.history(partition));
-                LatestWitnessPort.Latest latestB = witness.latest(partition);
+                deadline.check();
+                List<SignedWatermark> historyA = List.copyOf(witness.history(partition, deadline));
+                deadline.check();
+                LatestWitnessPort.Latest latestA = witness.latest(partition, deadline);
+                deadline.check();
+                List<SignedWatermark> historyB = List.copyOf(witness.history(partition, deadline));
+                deadline.check();
+                LatestWitnessPort.Latest latestB = witness.latest(partition, deadline);
+                deadline.check();
                 if (sameHistory(historyA, historyB) && sameLatest(latestA, latestB)) {
                     return new StableWitness(historyB, latestB);
                 }
             } catch (RuntimeException unavailable) {
+                if (unavailable instanceof RecoveryDeadline.ExpiredException) throw unavailable;
+                if (causedByTimeout(unavailable)) throw new RecoveryDeadline.PhaseTimeoutException("WITNESS_READ_TIMEOUT", unavailable);
                 // 読取失敗を値として扱わず、回数上限後に隔離結果へ倒す。
             }
         }
