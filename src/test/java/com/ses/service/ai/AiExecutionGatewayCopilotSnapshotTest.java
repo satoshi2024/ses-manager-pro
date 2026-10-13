@@ -45,7 +45,7 @@ import static org.mockito.Mockito.when;
 class AiExecutionGatewayCopilotSnapshotTest {
 
     @Test
-    void localCopilot成功時はstartupSnapshot付き新overloadと同じprobe経路を使う() {
+    void localCopilot成功時はstartupSnapshot付き新overloadと同じprobe経路を使う() throws Exception {
         AiConfig config = new AiConfig();
         config.setProvider("mock");
         config.setMaxTokens(192);
