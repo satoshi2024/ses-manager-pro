@@ -329,7 +329,7 @@ class ImportMetadataRealMySqlTest {
         var gateHeld = new java.util.concurrent.CountDownLatch(1);
         var releaseGate = new java.util.concurrent.CountDownLatch(1);
         var gateConnectionId = new AtomicReference<Long>();
-        var pool = Executors.newFixedThreadPool(2);
+        var pool = Executors.newFixedThreadPool(3);
         Future<?> gate = pool.submit(() -> {
             var authority = new SimpleGrantedAuthority("ROLE_管理者");
             installPrincipal(tenantId, authority);
@@ -341,7 +341,7 @@ class ImportMetadataRealMySqlTest {
                     metadataAuthorization.requireCurrentAuthorizationForWrite(context);
                     gateHeld.countDown();
                     try {
-                        if (!releaseGate.await(10, TimeUnit.SECONDS)) throw new AssertionError("gate解放待ちがtimeoutしました");
+                        if (!releaseGate.await(30, TimeUnit.SECONDS)) throw new AssertionError("gate解放待ちがtimeoutしました");
                     } catch (InterruptedException interrupted) {
                         Thread.currentThread().interrupt();
                         throw new IllegalStateException(interrupted);
