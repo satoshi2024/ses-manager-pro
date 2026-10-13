@@ -10,6 +10,9 @@ interface PrivacyProjectionPort {
                 QuarantineCode.PARTITION_FENCED);
     }
     ProjectionSnapshot snapshot(PrivacyJournalPort.JournalPartition partition);
+    default ProjectionSnapshot snapshotForNormalProjection(PrivacyJournalPort.JournalPartition partition) {
+        return snapshot(partition);
+    }
 
     enum Status { APPLIED, NO_OP, QUARANTINED }
     enum QuarantineCode {

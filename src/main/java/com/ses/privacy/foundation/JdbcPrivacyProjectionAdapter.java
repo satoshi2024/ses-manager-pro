@@ -82,6 +82,14 @@ final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort {
         return readTransaction.execute(status -> readSnapshot(partition));
     }
 
+    @Override
+    public ProjectionSnapshot snapshotForNormalProjection(JournalPartition partition) {
+        requireTestProfile();
+        Objects.requireNonNull(partition, "partition");
+        return writeTransaction.execute(status -> fence.lockForNormalProjection(partition)
+                ? readSnapshot(partition) : null);
+    }
+
     private ProjectionResult applyInTransaction(JournalPartition partition, JournalEvent event,
             JdbcPrivacyPartitionFence.Lease lease) {
         boolean writable = lease == null
@@ -111,7 +119,7 @@ final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort {
             return ProjectionResult.quarantine(event.revision(), event.eventHash(), QuarantineCode.HASH_CONFLICT);
         }
         ProjectedValues next = project(current, event);
-        if (current.revision() == 0) {
+        if (rows.isEmpty()) {
             jdbc.update("INSERT INTO sf_w2b_projection(tenant_id, subject_ref, last_applied_revision, event_hash, held, last_action_id, last_action_state) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     partition.tenantId(), partition.subjectRef(), event.revision(), event.eventHash(), next.held(),
                     next.lastActionId(), next.lastActionState());
