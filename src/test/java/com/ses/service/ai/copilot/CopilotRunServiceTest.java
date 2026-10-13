@@ -7,6 +7,10 @@ import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.ai.copilot.summary.SummaryResponse;
 import com.ses.service.ai.copilot.summary.CopilotSummaryPromptTemplate;
+import com.ses.service.ai.copilot.summary.CopilotCostState;
+import com.ses.service.ai.copilot.summary.DispatchOutcome;
+import com.ses.service.ai.copilot.summary.SummaryCostEvidence;
+import com.ses.service.ai.CopilotProviderUsage;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
@@ -24,6 +28,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -163,5 +168,58 @@ class CopilotRunServiceTest {
                 .filter(String.class::isInstance)
                 .map(String.class::cast)
                 .anyMatch(value -> value.contains("\"costState\":\"UNKNOWN\"")));
+    }
+
+    @Test
+    void summary費用状態ごとにnullを安全に保存しUNKNOWNで古い金額を消す() throws Exception {
+        CopilotRunService service = new CopilotRunService(versionMapper, runMapper, new ObjectMapper());
+        when(runMapper.update(org.mockito.ArgumentMatchers.<AiRecommendationRun>isNull(),
+                any(Wrapper.class))).thenReturn(1);
+        CopilotRunService.CopilotArtifactSnapshot artifact = new CopilotRunService.CopilotArtifactSnapshot(
+                72L, "mock", "mock-management-copilot", "nf08-f1", "config-hash", "catalog-v1", 4);
+
+        service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "not-sent"), 1,
+                SummaryResponse.unavailable("COST_UNKNOWN", new SummaryCostEvidence(
+                        CopilotCostState.NOT_SENT, null, null, DispatchOutcome.notStarted("DENIED"),
+                        null, null, "DENIED")));
+        service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "actual"), 2,
+                SummaryResponse.unavailable("FAILED", new SummaryCostEvidence(
+                        CopilotCostState.ACTUAL, 7, null,
+                        new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED, "RESPONSE_RECEIVED"),
+                        null, new CopilotProviderUsage(10, 2, 12, null, null), "USAGE_VALID")));
+        service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "unknown"), 3,
+                SummaryResponse.unavailable("FAILED", SummaryCostEvidence.unknown("USAGE_UNAVAILABLE")));
+
+        ArgumentCaptor<Wrapper<AiRecommendationRun>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(runMapper, times(3)).update(org.mockito.ArgumentMatchers.<AiRecommendationRun>isNull(),
+                captor.capture());
+        String notSentJson = updateMetadata(captor.getAllValues().get(0));
+        String actualJson = updateMetadata(captor.getAllValues().get(1));
+        String unknownJson = updateMetadata(captor.getAllValues().get(2));
+        assertTrue(notSentJson.contains("\"costState\":\"NOT_SENT\""));
+        assertTrue(notSentJson.contains("\"costJpy\":0"));
+        assertFalse(notSentJson.contains("costUpperBoundYen"));
+        assertTrue(actualJson.contains("\"costState\":\"ACTUAL\""));
+        assertTrue(actualJson.contains("\"costJpy\":7"));
+        assertTrue(unknownJson.contains("\"costState\":\"UNKNOWN\""));
+        assertFalse(unknownJson.contains("costJpy"));
+        assertFalse(unknownJson.contains("costUpperBoundYen"));
+    }
+
+    private CopilotRunService.CopilotAttemptRecord attemptWithStaleCosts(
+            CopilotRunService.CopilotArtifactSnapshot artifact, String traceId) {
+        return new CopilotRunService.CopilotAttemptRecord(88L, traceId, "query-trace", "SUMMARY", "tenant-a",
+                artifact, Map.of("attemptKind", "SUMMARY", "outcome", "PENDING", "costJpy", 99,
+                "costUpperBoundYen", 100, "costState", "ACTUAL"));
+    }
+
+    private String updateMetadata(Wrapper<AiRecommendationRun> wrapper) {
+        LambdaUpdateWrapper<AiRecommendationRun> update = (LambdaUpdateWrapper<AiRecommendationRun>) wrapper;
+        update.getSqlSegment();
+        return update.getParamNameValuePairs().values().stream()
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .filter(value -> value.contains("\"costState\""))
+                .findFirst().orElseThrow();
     }
 }
