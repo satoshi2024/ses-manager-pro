@@ -92,7 +92,9 @@ final class W2bTestConnectionCapability {
         String secret = newSecret();
         JdbcTemplate admin = new JdbcTemplate(adminDataSource());
         admin.execute("CREATE USER '" + user + "'@'%' IDENTIFIED BY '" + secret + "'");
-        admin.execute("GRANT SELECT, INSERT, UPDATE ON `" + database + "`.sf_w2b_projection TO '" + user + "'@'%'");
+        for (String table : java.util.List.of("sf_w2b_projection", "sf_w2b_partition_fence")) {
+            admin.execute("GRANT SELECT, INSERT, UPDATE ON `" + database + "`." + table + " TO '" + user + "'@'%'");
+        }
         return new ProfileGuardedDataSource(new DriverManagerDataSource(jdbcUrl, user, secret), context);
     }
 

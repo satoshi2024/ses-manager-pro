@@ -20,11 +20,13 @@ final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort {
     private final TransactionTemplate writeTransaction;
     private final TransactionTemplate readTransaction;
     private final Environment environment;
+    private final JdbcPrivacyPartitionFence fence;
 
     JdbcPrivacyProjectionAdapter(DataSource dataSource, Environment environment) {
         this.environment = Objects.requireNonNull(environment, "environment");
         requireTestProfile();
         this.jdbc = new JdbcTemplate(Objects.requireNonNull(dataSource, "dataSource"));
+        this.fence = new JdbcPrivacyPartitionFence(dataSource, environment);
         DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(dataSource);
         this.writeTransaction = new TransactionTemplate(transactionManager);
         this.writeTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -36,19 +38,34 @@ final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort {
 
     @Override
     public ProjectionResult apply(JournalProjectionService.VerifiedJournalEvent verified) {
+        return apply(verified, null);
+    }
+
+    @Override
+    public ProjectionResult applyRecovery(JournalProjectionService.VerifiedJournalEvent verified,
+            JdbcPrivacyPartitionFence.Lease lease) {
+        return apply(verified, Objects.requireNonNull(lease, "lease"));
+    }
+
+    private ProjectionResult apply(JournalProjectionService.VerifiedJournalEvent verified,
+            JdbcPrivacyPartitionFence.Lease lease) {
         requireTestProfile();
         if (verified == null || verified.partition() == null || verified.event() == null) {
             return ProjectionResult.quarantine(0, null, QuarantineCode.ACK_INVALID);
         }
         JournalEvent event = verified.event();
         try {
-            ProjectionResult result = writeTransaction.execute(status -> applyInTransaction(verified.partition(), event));
+            ProjectionResult result = writeTransaction.execute(status -> applyInTransaction(verified.partition(), event, lease));
             if (result == null) return ProjectionResult.quarantine(event.revision(), event.eventHash(), QuarantineCode.PROJECTION_UNAVAILABLE);
             return result;
         } catch (RuntimeException uncertain) {
             try {
                 ProjectionSnapshot observed = snapshot(verified.partition());
-                if (observed.revision() == event.revision() && observed.eventHash().equals(event.eventHash())) {
+                boolean currentAuthority = lease == null
+                        ? "ACTIVE".equals(fence.snapshot(verified.partition()).state())
+                        : fence.isCurrentOwner(lease);
+                if (currentAuthority && observed.revision() == event.revision()
+                        && observed.eventHash().equals(event.eventHash())) {
                     return ProjectionResult.noOp(observed.revision(), observed.eventHash());
                 }
             } catch (RuntimeException ignored) {
@@ -65,7 +82,14 @@ final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort {
         return readTransaction.execute(status -> readSnapshot(partition));
     }
 
-    private ProjectionResult applyInTransaction(JournalPartition partition, JournalEvent event) {
+    private ProjectionResult applyInTransaction(JournalPartition partition, JournalEvent event,
+            JdbcPrivacyPartitionFence.Lease lease) {
+        boolean writable = lease == null
+                ? fence.lockForNormalProjection(partition)
+                : fence.lockForRecoveryProjection(partition, lease);
+        if (!writable) {
+            return ProjectionResult.quarantine(event.revision(), event.eventHash(), QuarantineCode.PARTITION_FENCED);
+        }
         List<ProjectionSnapshot> rows = jdbc.query("SELECT last_applied_revision, event_hash, held, last_action_id, last_action_state FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ? FOR UPDATE",
                 (rs, rowNum) -> new ProjectionSnapshot(partition, rs.getLong("last_applied_revision"), rs.getString("event_hash"),
                         rs.getBoolean("held"), rs.getString("last_action_id"), rs.getString("last_action_state")),
