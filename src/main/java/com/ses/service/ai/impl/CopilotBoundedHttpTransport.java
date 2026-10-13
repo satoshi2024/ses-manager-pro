@@ -87,6 +87,9 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
         this.testLoopbackMode = testLoopbackMode;
         this.testAdmissionObserver = testAdmissionObserver;
         this.testSubmissionObserver = testSubmissionObserver;
+        if (testSslContext != null && !testLoopbackMode) {
+            throw new IllegalArgumentException("test SSLContextはloopback test mode専用です");
+        }
         ClientTlsStrategyBuilder tlsBuilder = ClientTlsStrategyBuilder.create()
                 .setHostnameVerifier(new DefaultHostnameVerifier());
         if (testSslContext != null) tlsBuilder.setSslContext(testSslContext);
@@ -318,13 +321,16 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
     }
 
     private void validateDestination(URI uri) {
-        if (uri == null || uri.getHost() == null || uri.getUserInfo() != null || uri.getFragment() != null) {
+        if (uri == null || uri.getHost() == null || uri.getUserInfo() != null || uri.getFragment() != null
+                || uri.getQuery() != null) {
             throw BusinessException.of(503, "COPILOT_DESTINATION_REJECTED");
         }
         String host = uri.getHost().toLowerCase(Locale.ROOT);
-        if (testLoopbackMode && ("http".equalsIgnoreCase(uri.getScheme())
-                || "https".equalsIgnoreCase(uri.getScheme()))
-                && host.endsWith(".test") && uri.getPort() > 0 && uri.getPort() <= 65535) {
+        if (testLoopbackMode) {
+            if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
+                    || !host.endsWith(".test") || uri.getPort() <= 0 || uri.getPort() > 65535) {
+                throw BusinessException.of(503, "COPILOT_DESTINATION_REJECTED");
+            }
             try {
                 if (dnsResolver.resolvesOnlyToLoopback(host)) {
                     return;
@@ -332,6 +338,7 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
             } catch (IOException ex) {
                 throw BusinessException.of(503, "COPILOT_DNS_UNAVAILABLE");
             }
+            throw BusinessException.of(503, "COPILOT_DESTINATION_REJECTED");
         }
         int port = uri.getPort() == -1 ? 443 : uri.getPort();
         if (!"https".equalsIgnoreCase(uri.getScheme()) || !PROVIDER_HOST.equals(host) || port != 443) {

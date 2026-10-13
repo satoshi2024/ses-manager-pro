@@ -1,5 +1,6 @@
 package com.ses.service.ai.impl;
 
+import com.ses.common.exception.BusinessException;
 import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsServer;
 import org.junit.jupiter.api.AfterEach;
@@ -88,8 +89,9 @@ class CopilotBoundedHttpTransportTlsTest {
         transport.start();
         assertEquals(200, transport.post(uri(HOST), "{}".getBytes(StandardCharsets.UTF_8), deadline()).statusCode());
         assertEquals(1, received.get());
-        assertThrows(RuntimeException.class,
+        BusinessException wrongHost = assertThrows(BusinessException.class,
                 () -> transport.post(uri(WRONG_HOST), "{}".getBytes(StandardCharsets.UTF_8), deadline()));
+        assertEquals("COPILOT_TRANSPORT_FAILED", wrongHost.getMessage());
         assertEquals(1, received.get(), "証明書hostname不一致の要求はHTTP handlerへ到達しない");
     }
 
@@ -97,9 +99,18 @@ class CopilotBoundedHttpTransportTlsTest {
     void untrustedCertificateFailsHandshake() throws Exception {
         transport = newTransport(null, List.of(HOST));
         transport.start();
-        assertThrows(RuntimeException.class,
+        BusinessException untrusted = assertThrows(BusinessException.class,
                 () -> transport.post(uri(HOST), "{}".getBytes(StandardCharsets.UTF_8), deadline()));
+        assertEquals("COPILOT_TRANSPORT_FAILED", untrusted.getMessage());
         assertEquals(0, received.get(), "未信頼証明書ではHTTP handlerへ到達しない");
+    }
+
+    @Test
+    void testOnlySslContextCannotBeInjectedIntoProductionMode() throws Exception {
+        CopilotDnsSnapshotResolver resolver = new CopilotDnsSnapshotResolver(
+                new CopilotDnsSnapshotResolver.DnsSnapshot(Map.of()), Clock.systemUTC());
+        assertThrows(IllegalArgumentException.class, () -> new CopilotBoundedHttpTransport(
+                resolver, false, () -> { }, () -> { }, trustedClientContext));
     }
 
     private CopilotBoundedHttpTransport newTransport(SSLContext clientContext, List<String> hosts) throws Exception {
