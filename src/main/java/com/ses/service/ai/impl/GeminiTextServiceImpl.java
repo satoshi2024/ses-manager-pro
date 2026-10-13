@@ -214,11 +214,14 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         }
         try {
             java.net.URI uri = java.net.URI.create(configured.trim());
-            if (testFixture && "http".equalsIgnoreCase(uri.getScheme())
-                    && uri.getHost() != null && uri.getHost().endsWith(".test")
-                    && uri.getPort() > 0 && uri.getUserInfo() == null && uri.getQuery() == null
-                    && uri.getFragment() == null && (uri.getRawPath() == null || uri.getRawPath().isEmpty()
-                    || "/".equals(uri.getRawPath()))) {
+            if (testFixture) {
+                if (!"http".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null
+                        || !uri.getHost().toLowerCase(java.util.Locale.ROOT).endsWith(".test")
+                        || uri.getPort() <= 0 || uri.getUserInfo() != null || uri.getQuery() != null
+                        || uri.getFragment() != null || (uri.getRawPath() != null && !uri.getRawPath().isEmpty()
+                        && !"/".equals(uri.getRawPath()))) {
+                    return "UNSAFE_ENDPOINT";
+                }
                 return "http://" + uri.getHost().toLowerCase(java.util.Locale.ROOT) + ":" + uri.getPort();
             }
             if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null
@@ -232,9 +235,21 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
     }
 
     private String geminiEndpoint(String base, String model) {
-        if ((!"https://generativelanguage.googleapis.com".equals(base)
-                && !(syntheticLoopbackFixture && base.startsWith("http://") && base.contains(".test:")))
-                || model == null || !model.matches("[A-Za-z0-9._-]{1,128}")) {
+        boolean validBase;
+        if (syntheticLoopbackFixture) {
+            try {
+                java.net.URI uri = java.net.URI.create(base);
+                validBase = "http".equals(uri.getScheme()) && uri.getHost() != null
+                        && uri.getHost().toLowerCase(java.util.Locale.ROOT).endsWith(".test")
+                        && uri.getPort() > 0 && uri.getUserInfo() == null && uri.getQuery() == null
+                        && uri.getFragment() == null && (uri.getRawPath() == null || uri.getRawPath().isEmpty());
+            } catch (RuntimeException ex) {
+                validBase = false;
+            }
+        } else {
+            validBase = "https://generativelanguage.googleapis.com".equals(base);
+        }
+        if (!validBase || model == null || !model.matches("[A-Za-z0-9._-]{1,128}")) {
             throw BusinessException.of(503, "COPILOT_DESTINATION_REJECTED");
         }
         return base + "/v1beta/models/" + model + ":generateContent";

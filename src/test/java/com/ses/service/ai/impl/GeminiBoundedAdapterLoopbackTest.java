@@ -99,13 +99,15 @@ class GeminiBoundedAdapterLoopbackTest {
         JsonNode summary = mapper.readTree(response.text());
 
         assertEquals("/v1beta/models/model-before:generateContent", path.get());
-        assertEquals("synthetic-header-key", apiKey.get());
+        assertTrue("synthetic-header-key".equals(apiKey.get()));
         assertEquals(17, request.get().path("generationConfig").path("maxOutputTokens").intValue());
         assertEquals("application/json", request.get().path("generationConfig").path("responseMimeType").textValue());
         assertEquals(2, response.usage().promptTokenCount());
         assertEquals(5, response.usage().totalTokenCount());
         CopilotSummaryValidator.validateSummaryText(summary.path("summaryText").textValue());
-        CopilotSummaryValidator.validateClaimKeys(List.of("sales"), List.of("sales"));
+        List<String> claimKeys = mapper.convertValue(summary.path("claimKeys"),
+                mapper.getTypeFactory().constructCollectionType(List.class, String.class));
+        CopilotSummaryValidator.validateClaimKeys(claimKeys, List.of("sales"));
         assertTrue(!response.text().contains("synthetic-header-key"));
         verify(legacy, never()).postForObject(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(String.class));
@@ -113,16 +115,55 @@ class GeminiBoundedAdapterLoopbackTest {
 
     @Test
     void innerHtmlIsPreservedThroughAdapterAndRejectedBySummaryValidator() throws Exception {
-        String raw = "{\"queryId\":\"q-1\",\"summaryText\":\"<b>summary</b>\",\"claimKeys\":[]}";
-        CopilotGeminiResponseParser parser = new CopilotGeminiResponseParser();
-        String envelope = "{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"role\":\"model\","
-                + "\"parts\":[{\"text\":\"" + raw.replace("\\", "\\\\").replace("\"", "\\\"")
-                + "\"}]}}],\"usageMetadata\":{\"promptTokenCount\":0,\"candidatesTokenCount\":0,\"totalTokenCount\":0}}";
-        String parsed = parser.extractSummaryJson(envelope.getBytes(StandardCharsets.UTF_8),
-                System.nanoTime() + TimeUnit.SECONDS.toNanos(2), "q-1");
-        JsonNode summary = mapper.readTree(parsed);
+        String inner = "{\"queryId\":\"q-1\",\"summaryText\":\"<b>summary</b>\",\"claimKeys\":[\"sales\"]}";
+        server = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), 0), 0);
+        server.createContext("/", exchange -> {
+            byte[] body = providerEnvelope(inner);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        CopilotDnsSnapshotResolver.AddressSet addresses = CopilotDnsSnapshotResolver.AddressSet.fromAddressBytes(
+                HOST, List.of(new byte[]{127, 0, 0, 1}), Instant.now().plusSeconds(60));
+        transport = new CopilotBoundedHttpTransport(new CopilotDnsSnapshotResolver(
+                new CopilotDnsSnapshotResolver.DnsSnapshot(Map.of(HOST, addresses)), Clock.systemUTC()), true);
+        transport.start();
+        AiConfig config = new AiConfig();
+        config.setProvider("gemini");
+        config.setApiUrl("http://" + HOST + ":" + server.getAddress().getPort());
+        config.setModel("model-before");
+        config.setMaxTokens(17);
+        config.setApiKey("synthetic-header-key");
+        RestTemplate legacy = mock(RestTemplate.class);
+        GeminiTextServiceImpl adapter = new GeminiTextServiceImpl(config, legacy, mapper,
+                mock(OutboundUrlGuard.class), transport, true);
+        CopilotConfigSnapshot snapshot = CopilotConfigSnapshot.capture(config, adapter);
+        PreflightCostEvidence evidence = new PreflightCostEvidence("synthetic-loopback-test-v1",
+                snapshot.configHash(), "synthetic-loopback-proof-v1", 0, 0, true,
+                CopilotCostState.UPPER_BOUND, DispatchOutcome.notStarted("TEST_ONLY"), "TEST_ONLY");
+        CopilotInvocation invocation = new CopilotInvocation(snapshot, 1L, "gemini", "model-before",
+                adapter.copilotPromptVersion(), adapter.copilotConfigHash(), "q-1",
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(5), evidence);
+        CopilotProviderResponse response = adapter.generateCopilotResponse("safe prompt", invocation);
+        JsonNode summary = mapper.readTree(response.text());
+
         assertEquals("<b>summary</b>", summary.path("summaryText").textValue());
         assertThrows(CopilotSummaryValidationException.class,
                 () -> CopilotSummaryValidator.validateSummaryText(summary.path("summaryText").textValue()));
+        List<String> claims = mapper.convertValue(summary.path("claimKeys"),
+                mapper.getTypeFactory().constructCollectionType(List.class, String.class));
+        CopilotSummaryValidator.validateClaimKeys(claims, List.of("sales"));
+        verify(legacy, never()).postForObject(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(String.class));
+    }
+
+    private static byte[] providerEnvelope(String innerJson) {
+        String escaped = innerJson.replace("\\", "\\\\").replace("\"", "\\\"");
+        String envelope = "{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"role\":\"model\","
+                + "\"parts\":[{\"text\":\"" + escaped + "\"}]}}],\"usageMetadata\":{"
+                + "\"promptTokenCount\":0,\"candidatesTokenCount\":0,\"totalTokenCount\":0}}";
+        return envelope.getBytes(StandardCharsets.UTF_8);
     }
 }
