@@ -1,6 +1,7 @@
 package com.ses.service.ai;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.common.exception.BusinessException;
 import com.ses.config.AiConfig;
 import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
