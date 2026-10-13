@@ -47,6 +47,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -316,9 +317,10 @@ class ImportMetadataRealMySqlTest {
             primaryFailure = failure;
             throw failure;
         } finally {
-            try { blocker.rollback(); } catch (Exception ignored) { }
-            try { blocker.close(); } catch (Exception ignored) { }
-            List<Throwable> cleanupFailures = awaitFutures(List.of(registration), pool, expectedDenialObserved);
+            List<Throwable> cleanupFailures = new java.util.ArrayList<>();
+            try { blocker.rollback(); } catch (Exception failure) { cleanupFailures.add(failure); }
+            try { blocker.close(); } catch (Exception failure) { cleanupFailures.add(failure); }
+            cleanupFailures.addAll(awaitFutures(List.of(registration), pool, expectedDenialObserved));
             reportCleanupFailures("source lock競合fixture", cleanupFailures, primaryFailure);
         }
     }
