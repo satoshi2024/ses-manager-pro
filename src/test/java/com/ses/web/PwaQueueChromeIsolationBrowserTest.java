@@ -210,7 +210,7 @@ class PwaQueueChromeIsolationBrowserTest {
 
             browser.send("Runtime.evaluate", Map.of("expression", "window.open('/test.html?user=A&child=true','pwa-child');true",
                     "userGesture", true, "returnByValue", true));
-            assertTrue(browser.waitForStrict("!!(window.__child && window.__child.SES && window.__child.SES.pwaQueue.getScope()==='scope-A')", Duration.ofSeconds(15)));
+            assertTrue(browser.waitForStrict("!!(window.__child && window.__child.SES && window.__child.SES.pwaQueue && window.__child.SES.pwaQueue.getScope()==='scope-A')", Duration.ofSeconds(15)));
 
             // HTTP応答をbarrierで止め、lease引継ぎ後の旧応答がcommitされないことを検証する。
             browser.evaluate("window.__leaseFlush=SES.pwaQueue.flush(); true");
@@ -351,7 +351,7 @@ class PwaQueueChromeIsolationBrowserTest {
                     "撤回完了後は新documentでのみ通常の新規queueを開始する");
             browser.send("Runtime.evaluate", Map.of("expression", "window.open('/test.html?user=A&child=true','pwa-child-after-race');true",
                     "userGesture", true, "returnByValue", true));
-            assertTrue(browser.waitForStrict("!!window.__child&&!!window.__child.SES&&window.__child.SES.pwaQueue.getScope()==='scope-A'", Duration.ofSeconds(15)),
+            assertTrue(browser.waitForStrict("!!window.__child&&!!window.__child.SES&&!!window.__child.SES.pwaQueue&&window.__child.SES.pwaQueue.getScope()==='scope-A'", Duration.ofSeconds(15)),
                     "新documentから独立した2つ目のdocumentを作成する");
 
             browser.evaluate("(async()=>{const native=crypto.subtle.digest.bind(crypto.subtle);window.__nativeDigest=native;let release;crypto.subtle.digest=(a,b)=>new Promise(ok=>{release=()=>native(a,b).then(ok)});window.__late=SES.pwaQueue.request({screen:'attendance',month:'2026-10',method:'POST',path:'/api/my/pwa/attendance/daily',baseVersion:0,resourceKey:'attendance:2026-10',payload:{workDate:'2026-10-05',clockIn:'09:00',clockOut:'18:00',breaks:[],breakMinutes:60,workType:'出勤',workplaceType:'客先',remarks:'late'}});window.__releaseDigest=()=>release();return true})()");
