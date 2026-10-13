@@ -36,8 +36,11 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 
+import org.junit.jupiter.api.AfterEach;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -75,6 +78,10 @@ class EngineerSelfServiceBrowserMTest {
     private static final String DEMO_USERNAME = "portal_engineer_demo";
     private static final String DEMO_PASSWORD = "demoPassword123";
     private static final String DEMO_REAL_NAME = "要員ポータル デモ太郎";
+
+    private Long fixtureEngineerId;
+    private Long fixtureSalesUserId;
+    private Long fixtureEngineerSalesId;
 
     /** 本人BのPII（DOM/APIへ一切現れてはならない。R5）。 */
     private static final String B_PII_NAME = "非表示要員B-ブラウザ検証";
@@ -143,6 +150,21 @@ class EngineerSelfServiceBrowserMTest {
     // ============================================================
 
     private record Seed(long userId, long engineerId, long salesUserId, long surveyCampaignId) {
+    }
+
+    @AfterEach
+    void cleanupOneOnOneSalesFixture() {
+        SecurityContextHolder.clearContext();
+        if (fixtureEngineerId != null && fixtureSalesUserId != null) {
+            jdbcTemplate.update("DELETE FROM t_one_on_one_request WHERE engineer_id=? AND counterpart_user_id=?",
+                    fixtureEngineerId, fixtureSalesUserId);
+        }
+        if (fixtureEngineerSalesId != null) {
+            engineerSalesMapper.deleteById(fixtureEngineerSalesId);
+        }
+        if (fixtureSalesUserId != null) {
+            sysUserMapper.deleteById(fixtureSalesUserId);
+        }
     }
 
     private Seed seedPortalData() {
@@ -271,38 +293,37 @@ class EngineerSelfServiceBrowserMTest {
         }
 
         // ---- 担当営業（1on1相手） ----
-        SysUser salesUser = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getUsername, "portal_demo_sales"));
-        Long salesUserId;
-        if (salesUser == null) {
-            salesUser = SysUser.builder()
-                    .username("portal_demo_sales")
-                    .password("x")
-                    .realName("ポータルデモ営業")
-                    .role("営業")
-                    .status(1)
-                    .tenantId("default")
-                    .build();
-            sysUserMapper.insert(salesUser);
-            salesUserId = salesUser.getId();
-        } else {
-            salesUser.setTenantId("default");
-            sysUserMapper.updateById(salesUser);
-            salesUserId = salesUser.getId();
-        }
-        EngineerSales existingPrimary = engineerSalesMapper.selectOne(new LambdaQueryWrapper<EngineerSales>()
-                .eq(EngineerSales::getEngineerId, engineerId)
-                .isNull(EngineerSales::getReleasedAt)
-                .last("LIMIT 1"));
-        if (existingPrimary == null) {
-            EngineerSales es = EngineerSales.builder()
-                    .engineerId(engineerId)
-                    .salesUserId(salesUserId)
-                    .primaryFlag(1)
-                    .assignedAt(LocalDate.now())
-                    .build();
-            engineerSalesMapper.insert(es);
-        }
+        SysUser salesUser = SysUser.builder()
+                .username("portal-oneonone-" + UUID.randomUUID().toString().replace("-", ""))
+                .password("x")
+                .realName("ポータルテスト営業")
+                .role("営業")
+                .status(1)
+                .tenantId("default")
+                .build();
+        sysUserMapper.insert(salesUser);
+        Long salesUserId = salesUser.getId();
+        fixtureEngineerId = engineerId;
+        fixtureSalesUserId = salesUserId;
+
+        EngineerSales exactAssignment = EngineerSales.builder()
+                .engineerId(engineerId)
+                .salesUserId(salesUserId)
+                .primaryFlag(1)
+                .assignedAt(LocalDate.now())
+                .build();
+        engineerSalesMapper.insert(exactAssignment);
+        fixtureEngineerSalesId = exactAssignment.getId();
+        assertEquals(1L, engineerSalesMapper.selectCount(new LambdaQueryWrapper<EngineerSales>()
+                        .eq(EngineerSales::getEngineerId, engineerId)
+                        .eq(EngineerSales::getSalesUserId, salesUserId)
+                        .isNull(EngineerSales::getReleasedAt)),
+                "指定した担当営業が対象要員へ有効割当済み");
+        assertEquals(1L, sysUserMapper.selectCount(new LambdaQueryWrapper<SysUser>()
+                        .eq(SysUser::getId, salesUserId)
+                        .eq(SysUser::getRole, "営業")
+                        .eq(SysUser::getStatus, 1)),
+                "指定した担当営業ユーザーが営業ロールかつ有効");
 
         // ---- 回答対象サーベイキャンペーン（HRとしてJVM側で作成・配信） ----
         Long campaignId = seedSurveyCampaign();
@@ -492,7 +513,7 @@ class EngineerSelfServiceBrowserMTest {
                 "headers:{'Content-Type':'application/json','X-XSRF-TOKEN':t}," +
                 "body:JSON.stringify({counterpartUserId:" + seed.salesUserId() + ",candidateDates:['" + tomorrow + "','" + dayAfter + "']})});" +
                 "return await r.text();})()");
-        assertTrue(oneOnOne.asText("").contains("\"code\":200"),
+        assertEquals(200, MAPPER.readTree(oneOnOne.asText("{}")).path("code").asInt(-1),
                 "1on1申請が200でない: " + truncate(oneOnOne.asText("")));
         String oneOnOneList = browser.evaluate("(async function(){" +
                 "const r=await fetch('/api/my/one-on-ones?current=1&size=50');return await r.text();})()").asText("");
