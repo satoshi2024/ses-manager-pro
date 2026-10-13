@@ -412,3 +412,54 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
 - NF06 `0c109fa1` のdisableSource不存在/foreign tenant NPE修復はAstra限定受理。
   実metadata/Document成功経路test `32b36a6f` はfixture tenantとconfigured tenant不一致で静的REQUEST CHANGES。
   実サービスの認可をmockへ置換せず、同じsynthetic tenantで設定とfixtureを一致させる。文書は人工的な既存CLEAN状態でありupload/scan実証ではない。
+
+### 2026-10-08 Chrome局所合格とfixture再検証
+
+- NF04 source `b94173667863cf2b773612f2c923bba781660680`、verify fixed `5b40590ee2792f2afd440a78848c40df05be358c` のChrome06は **2/0/0/0**。
+  UTC02:43:08.7034188〜02:44:30.5394342、exit0、起止SHA一致・clean。
+  log SHA-256 `12DCF277A912335E9C9695E5F98076E2B3CE035F8FE3DAB1259A1EB4748316CF`。
+  Astraは4 report hash・XMLを独立照合し、限定証拠PASS。key-only cursor削除を同一transactionのstore.delete(primaryKey)へ修復した。
+  合成HTTP側は実Chrome/IndexedDBのscope複数行削除・foreign scope維持・TTL境界・撤回競合を検証した。
+  実Spring側はworkerのoffline fetch障害・online復旧、再認証・明示確認を検証した。確認後の業務送信はtest fenceで停止するため、業務送信成功の証拠ではない。
+  Chrome版/cache記録を含む16 fileをcontrol `verification-evidence/nf04-g2-fixed/20261008-chrome-06/` へhash一致保存。
+  共通CdpBrowser変更に対する全11 class browser profileは別gateとして実行中。G2のcontrol統合・全体PASSはまだ付与しない。
+- NF07 control C MySQL02の16/0/0/0はAstraがreport hash、起止clean、三DBの実version/image/schemaを独立照合し、限定統合証拠PASS。
+  D recovery計画 `707987ac0d2b5d1083cab2167129c2db59143c66` は独立Review中。live witness再読・replay後確認を未実装のまま残す。
+- NF06 fixed `ebd89a278f6ac8c53f7a1a73e316dd0b3d65e7ee` metadata-fast01は3 class **9/0/0/0**。
+  UTC02:36:01.960733〜02:37:09.4785087、log SHA-256 `B0A9B108AA50DBE7DBE2FDF5D9F461FD01CB59331989B49027185B99DF5E860A`。
+  Astraは6 report hashを照合。内訳はlease6・不存在/foreign source2・shard inventory1であり、実Document ACL成功経路は含まない。
+  同fixed metadata-mysql01は **1/0/1/0、FAIL**。fixture usernameのsubstring範囲誤りで業務呼出前に失敗した。
+  UTC02:38:14.4031052〜02:40:02.6891868、log SHA-256 `B068FB1BF2818DAF00923C9E39D41D0ECC1DA92637BF391441491F063C99761B`。
+  修復 `23dbe662f88429803fdd4dc32d82fb60e440d225` はAstra限定静的PASS、実MySQL再実行待ち。成功/失敗raw各14/10 fileをcontrolへhash一致保存。
+- NF08 fixed `677a0ab0c86331886d686881a44dcba1d03a61e9` のrun10も12 class **64/0/1/0、FAIL**。
+  UTC02:40:34.8905933〜02:42:10.783192、log SHA-256 `C4CD8D411C91CB1FC958ABFA37DB63ABA5C23897582DA08A30FD6292FC36B402`。
+  fixture request.scopeHashがcontextの実hashと不一致でEXECUTION_CONTEXT_REQUIREDとなった。製品guardは弱めず、`6693abd1f9bbaf96c4b62a9f90070784adfd7b04` でfixtureを一致させた。
+  Astra静的PASS、run11待ち。run09/10各32 fileをcontrolへhash一致保存。Slice B実装中、C失敗cost伝播は未実装。
+- 全体NO-GOを維持する。局所成功は全CI、staging、実provider、移行/復元演習、人間の各署名を代替しない。
+
+### 2026-10-13 再開時の固定証拠と残留finding
+
+- 再fetch後のorigin/mainは `1443fb68943849a3260d7ebe005259f3eb609d60`。最新main run `36858538460` はcompleted/failureのままである。
+  main checkoutの利用者変更3件と各隔離worktreeの既存変更を保持した。push/PR/merge/deploy、実credential使用は行っていない。
+- NF08 Slice A fixed `6693abd1f9bbaf96c4b62a9f90070784adfd7b04` のrun11は **12 class、64/0/0/0**。
+  UTC2026-10-08 02:54:12.8212588〜02:55:49.8422075、exit0、起止SHA一致・clean。
+  log SHA-256 `DD4024BB6D07FC7A058429DD6F0BADC4A0D81343CE9AE427070F9A5A49740953`。
+  Astraが24 report hashとXMLを照合し、限定証拠PASS。raw32 fileをcontrolへhash一致保存した。
+  Slice B候補 `fdbbe56ddea8d798529cbc293ef591a15354b60f` はAstra **REQUEST CHANGES**。
+  adapter自身のproduction deny-all、無効transportによるboundary test偽陽性、TLS/全chain統合、blocked/index overflow、
+  usage次元整合、Copilot HTML清洗による不正入力の合法化を修復する。Aの合格をBの証拠へ流用しない。
+- NF04 fixed `5b40590ee2792f2afd440a78848c40df05be358c` の全browser01は **11 class、16/1/1/0、FAIL**。
+  UTC2026-10-08 02:50:56.5135404〜02:53:38.9543478、exit1、起止SHA一致・clean。
+  log SHA-256 `FA5AAF03C886B411CFBA1B5601D2FCBB50E92B3A9F91920EE6FA5B3EE5142E24`。
+  raw30 fileをcontrolへhash一致保存。AstraはPWA waitForStrictの未準備時undefinedを確定原因として特定した。
+  EngineerSelfServiceBrowserMTestの1on1は業務400。指定engineer×salesの関連と再利用salesのrole/statusのfixture欠落を検出したが、
+  失敗時DB snapshotがなく、今回の正確な拒否分岐は未確定。HTTP成功assertionを維持し、fixtureと安全な前提診断を補強する。
+- NF06 fixed `23dbe662f88429803fdd4dc32d82fb60e440d225` のmetadata-mysql02は **1/0/0/0**。
+  UTC2026-10-13 04:37:13.0164850〜04:39:17.3971670、exit0、起止SHA一致・clean。
+  log SHA-256 `A2733B89A83F40B62FE5E32913424F702282536ECE609DE928D935FCAB8C95D9`。
+  実metadata/Document/FileScopeを通るsource→mapping→job/link→bind→source open→DOWNLOAD監査の成功経路である。
+  人工seed済みCLEAN文書でありupload/scanの実証ではない。追加ACL負例 `0e2962245beed1bd18cea44bcd04862a4962d890` は別Review/実行gateとする。
+- NF07 D計画 `707987ac` のAstra reviewは2件P1・1件P2でREQUEST CHANGES。
+  永続quarantine/generation fence欠落、witness R5で未checkpointのR10→R7巻戻りを検出できない問題、recovery DB権限境界が対象である。
+  計画修正版 `0fbd0515e71621194960ae754859d09b4f1971f2` はtest-only永続fence、witness latestとreplay headの厳密一致、
+  reader/writer最小権限とfixture-admin分離を定義した。独立再Review前であり、D実装・合格ではない。
