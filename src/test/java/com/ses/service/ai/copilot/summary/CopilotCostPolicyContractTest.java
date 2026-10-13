@@ -88,7 +88,7 @@ class CopilotCostPolicyContractTest {
         PreflightCostEvidence wrongConfig = evidence("other-config", 2, 3, true,
                 CopilotCostState.UPPER_BOUND, DispatchOutcome.notStarted("TEST"));
         assertThrows(IllegalArgumentException.class, () -> new CopilotInvocation(snapshot, 7L,
-                "gemini", "gemini-synthetic", "prompt-v1", "config-hash-v1",
+                "gemini", "gemini-synthetic", "prompt-v1", "config-hash-v1", "query-synthetic",
                 System.nanoTime() + 1_000_000_000L, wrongConfig));
     }
 

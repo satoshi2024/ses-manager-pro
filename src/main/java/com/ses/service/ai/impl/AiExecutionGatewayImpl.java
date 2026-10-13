@@ -198,7 +198,8 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 request.getCostBudgetYen());
         CopilotInvocation invocation = new CopilotInvocation(startupCopilotConfigSnapshot,
                 request.getExpectedArtifactVersionId(), request.getExpectedProvider(), request.getExpectedModel(),
-                request.getExpectedPromptVersion(), request.getExpectedConfigHash(), request.getDeadlineNanos(),
+                request.getExpectedPromptVersion(), request.getExpectedConfigHash(),
+                request.getExecutionContext().queryId(), request.getDeadlineNanos(),
                 preflight);
         if (!invocation.identityMatchesSnapshot()) {
             throw BusinessException.of(503, "COPILOT_EXECUTION_SNAPSHOT_INVALID");

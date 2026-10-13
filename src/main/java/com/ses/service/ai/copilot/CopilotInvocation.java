@@ -10,6 +10,7 @@ public record CopilotInvocation(
         String expectedModel,
         String expectedPromptVersion,
         String expectedConfigHash,
+        String expectedQueryId,
         long deadlineNanos,
         PreflightCostEvidence preflightCostEvidence
 ) {
@@ -19,6 +20,7 @@ public record CopilotInvocation(
                 || expectedModel == null || expectedModel.isBlank()
                 || expectedPromptVersion == null || expectedPromptVersion.isBlank()
                 || expectedConfigHash == null || expectedConfigHash.isBlank()
+                || expectedQueryId == null || expectedQueryId.isBlank()
                 || deadlineNanos <= 0 || preflightCostEvidence == null) {
             throw new IllegalArgumentException("Copilot invocationの必須項目が不足しています");
         }

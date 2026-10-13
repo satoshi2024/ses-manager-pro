@@ -12,7 +12,8 @@ public final class CopilotSummaryPromptTemplate {
     public static final String OUTPUT_SCHEMA_VERSION = "nf08-summary-1";
     public static final String MOCK_RESPONSE_VERSION = "mock-response-v1";
     public static final String TRUSTED_INSTRUCTION = """
-            Return JSON only: {"summaryText":"...","claimKeys":["..."]}.
+            Return JSON only: {"queryId":"the exact catalog.queryId value","summaryText":"...","claimKeys":["..."]}.
+            queryId must exactly match catalog.queryId in ALLOWLIST_CONTEXT.
             summaryText must not contain HTML, numbers, currency symbols, or recalculated metrics.
             claimKeys must be chosen only from summary.claimKeys in ALLOWLIST_CONTEXT.
             """;
