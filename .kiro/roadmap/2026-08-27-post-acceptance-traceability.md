@@ -14,11 +14,13 @@
 | 03 | 集約完了修復と実MySQL並行証拠 `89384928`は限定CODE PASS、control統合済み | 全体最終Review、NF07 policy、retention、staging/運用承認 |
 | 04 | G1限定CODE PASS、34/0/0/0とMySQL4/0/0/0。実servlet修復91dbca13は独立Review・3/0/0/0、control統合後40/0/0/0。Chrome06 fixed5b40590eの2/0/0/0はAstra限定証拠PASS。bootstrap撤回競合P1を修復しfull06 fixed38f684acは11 class17/0/0/0。G2をcontrol6980dff8へ統合、同SHA browser17/0/0/0と定向fast13 class85/0/0/0をAstra限定受理 | 実PWA/browser全体検証、非通知tab/分散session環境、正式release |
 | 05 | 開発scope CONDITIONAL。総deadline 2187b5f9限定CODE PASS、26/0/0/0、control統合。実transport未完 | provider/credential、許可先、正式production enablement |
-| 06 | F2 foundation限定CODE PASS・control統合済み。F1a 66/0/0/0、candidate6/0/0/0、V184 fixedaba94e6f fresh/upgrade2/0/0/0。MAPPED leaseはH2 fixed696221cf 6/0/0/0、MySQL fixed14f81ae5 9/0/0/0、Astra限定受理。実metadata/Document ACL14/0/0/0を限定受理。ただしmetadata lock待機中の撤権P1を検出しF1a統合保留。auth-lock-04 fixed068aaad2は16/0/0/0・Astra限定証拠PASS。registerJob/direct-helper境界を実証し、他metadata実service競合matrixは追加候補。validation lifecycle・apply/UI未完 | V183併合rehearsal、全synthetic実装/Review、実source/mapping/data owner、移行承認 |
+| 06 | F2/F1a限定実装をcontrol338637a7へ統合。実metadata競合23/0/0/0、同controlのcandidate/metadata/lease/migrationは4 class40/0/0/0、Astra限定受理。空庫とB0/V182からV183/V184 upgradeを実証。candidate/lease認可待機競合P1は残り、修復計画abf84e8aは限定PLAN PASS・実装中。最新全fast05はH2初期化等でFAIL。validation lifecycle・apply/UI未完 | candidate/lease P1、全synthetic実装/Review、実source/mapping/data owner、移行承認 |
 | 07 | SF-W1/W2a・W2b Slice A/B限定CODE PASS。Slice B三DB MySQL10/0/0/0、control61b0b979統合後も10/0/0/0。Slice Cは旧13/0/0/0後、main commit故障fixtureで16/1/0/0、次はcompile FAIL。修復97641ce9はMySQL16/0/0/0・Astra限定CODE/証拠PASS、control a0a05f7d再実行も16/0/0/0。D plan0fbd0515は限定PLAN PASS。D1 fixed8fd3bcb0はMySQL20/0/0/0・Astra限定CODE/証拠PASS、control a9e8c360の再試験20/0/0/0もAstra証拠PASS、pure5 class18/0/0/0。D2a d83266afはMySQL26/0/0/0・Astra限定受理、未統合。D2b時間上限計画7ea5287fは限定PLAN PASS、実装・追加matrix未完。実dispatch/処分・coverage未完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
-| 08 | 開発scope CONDITIONAL。fixed020dc4d1は10 class53/0/0/0、Astra証拠照合。immutable config/invocationと費用上限契約のSlice A fixed6693abd1は12 class64/0/0/0、Astra証拠照合。Slice B fixed286ab361は18 class84/0/0/0、Astra限定CODE/証拠PASS、control未統合。C1候補df0aa935は独立Reviewのdispatch/信頼証拠P2修復中。C2 ACTUAL/失敗matrix・実cost policy・artifact refresh未完 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
+| 08 | 開発scope CONDITIONAL。A/B/C1をcontrol02f6ace4へ統合。C1修復source3d95d3f5は18 class91/0/0/0、Astra限定CODE/証拠PASS。最新全fast05はFAIL。C2 ACTUAL/信頼rate-card、outer usageとinner失敗の分離、実DB費用matrixは未完。C2計画f7d7b4caはReview前 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
 | 09 | fail-closed修復 `da850b97`限定CODE PASS、control統合済み。実providerの完成ではない | V182 PENDING=0/帰属不明0/親子一致、実撤権/session/token、production owner |
 | 10 | session共有reauth修復 `20cce0f7`限定CODE PASS、46/0/0/0、control統合済み | 全体独立Review、実browser/session環境、staging、正式release |
+
+2026-10-13の最新統合HEAD `02f6ace4` の全fast第5回は **691 class、3980/4/1498/0、FAIL**。NF06 joint MySQL40件・NF08定向91件の限定成功を全体成功へ拡張しない。NF07 D2b1 `dfd1d970` は実装候補・軽量compileのみ、Astra Review/実MySQL検証待ち。最新詳細は実行台帳冒頭を参照する。
 
 NF01の「退社確定時一括失効trigger」は現行コードでNF01呼出が確認できず、下記承認範囲の記述を
 実装済み証拠としない。NF06/NF07のflag OFFを全機能完成として扱わない。

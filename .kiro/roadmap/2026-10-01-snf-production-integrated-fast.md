@@ -154,3 +154,17 @@
 - Astraがraw/report hash、原失敗method包含、child実PID/claim/lock断言を確認し、限定CODE PASS。
   controlへ`47ca275b`、`2d1b60e6`、`b978fbac`として統合した。
 - これは5 classの修復完了であり、全MySQL190件の再合格ではない。第1回全体FAILと20 skipped runを履歴として保持する。
+
+## 2026-10-13 全fast第5回: FAIL
+
+- 固定統合Head `02f6ace46775f61accc9b38c010cd595cc9351a0`。NF04 G2、NF06 F1a/V184、NF07 D1、NF08 A/B/C1を含む。
+- command: `mvn -B -Dsurefire.runOrder.random.seed=48992185070100 test`。selectorなし。
+- UTC `2026-10-13T05:59:41.8878464Z`〜`2026-10-13T06:06:55.0276180Z`、起止SHA一致、clean、exit1。
+- 新規691 class XMLの集計は **3980 tests / 4 failures / 1498 errors / 0 skipped**。context初期化失敗を含むため、全テスト本体の正常実行証明ではない。
+- `verification-evidence/20261013-control-fast-05/` に原log、XML/text、manifest、totals、failure詳細を保存した。
+  log SHA-256: `E3B3F5D34BB2A47131352356F6B1EC705254810E3E53DF648250BA08B2014E0F`。
+- 初期診断: V184の文書外部キーとH2文書schema DROPの競合、H2複合ADD CONSTRAINTの構文、
+  ImportIdentityCandidateContext/PwaRestoreTransactionIntegration/PwaRestoreServletBoundaryIntegrationの隔離契約。
+  TENANT_ID欠落などの連鎖エラーと個別failureはさらに根因分類する。単純なallowlist追加や制約無効化で成功にしない。
+- 修復はbase `02f6ace4` の `codex/snf-prod-fast-v184-isolation` で実施し、Astra Reviewと必要な再検証を要求する。
+  第4回4088件成功や別SHAのNF06 MySQL40/NF08定向91件成功を、このrunの代替証拠にしない。

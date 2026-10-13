@@ -1,5 +1,41 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## 最新到達点（2026-10-13 15:15 JST）
+
+- **NO-GO**。最新統合 `02f6ace46775f61accc9b38c010cd595cc9351a0` の全fast第5回は **691 class、3980/4/1498/0、FAIL**。
+  UTC05:59:41.8878464〜06:06:55.0276180、起止SHA一致、clean、exit1。
+  証拠: `verification-evidence/20261013-control-fast-05/`、log SHA-256 `E3B3F5D34BB2A47131352356F6B1EC705254810E3E53DF648250BA08B2014E0F`。
+  H2文書schemaの再構築時にV184外部キーがDROPを阻止する問題、H2の複合ADD CONSTRAINT構文、
+  新規3クラスの非transactionalテスト隔離契約を調査・修復する。context連鎖エラーを1498個の独立製品不具合とは断定しない。
+  `codex/snf-prod-fast-v184-isolation` / `C:\work\ses-review-snf-r3-c` を固定base `02f6ace4` から安全に再利用した。
+  旧NF08検証branch・証跡を保持し、rootの全suite終了後に開始した。実装Luna、独立Review Astra。
+- NF06 F1aはsource `1daff170` の実metadata競合 **23/0/0/0** をAstraが限定受理した。
+  log SHA-256 `09322C5F79B5D30D9C63E7ED23296BEFC8405652D70A35ED0C93F46AA73503BE`。
+  45 commitをcontrol `338637a77207b593f0ee58c9234aba4e1eff3df7` まで統合した。
+  重複決定文書 `fc52da55` はcontrolに全文と後続決定が存在することを確認してskipした。Astraも内容包含を確認した。
+  同controlのjoint MySQLは **4 class、40/0/0/0**（candidate6、metadata23、lease9、migration2）。
+  UTC05:55:29.9954470〜05:58:55.1378422、log SHA-256 `01B1B7E7645717ACA830B1377B210073A2B6B4A213245DBBE1740B5E577DD77B`。
+  Astraが8 report hash、起止SHA/clean、H2/shard追加、V183保持/V184追加を照合した。
+  空庫とB0/V182 fixtureの双方でV183・V184適用、sentinel保存、Flyway validateを実証した。
+  既存V183業務データ単独のupgrade証明ではない。現在の統合migration最大はV184、V185は未割当。
+  candidate/leaseに別の認可待機競合P1が残る。READ-COMMITTEDの実service接続、auth後fresh DB time、
+  retry/renew期限失効と通常takeoverの区別を含む計画 `abf84e8a` はAstra限定PLAN PASS、実装中。
+  tenant全体の認可ロックによる競合・deadlockリスクP2、validation lifecycle/apply/UI未実装は継続する。
+- NF08 C1修復source `3d95d3f57dd9a9a5da6e458b3fd07f8bf145f070` は **18 class、91/0/0/0**。
+  UTC05:48:20.7208201〜05:49:45.9877677、log SHA-256 `68778BBCEB48329F68E1B94869ADDF816BD76C8D0E917DF3CC6F74257AD35E2D`。
+  Astraが36 report hashと限定CODEを受理し、A/B/C1の35 commitをcontrol `02f6ace4` まで統合した。
+  migration/config追加はない。C2の信頼できるACTUAL/rate-card、outer usageとinner失敗の分離、実DB費用matrixは未完。
+  C2計画 `f7d7b4ca` は作成済み・独立Review前。production adapterはdeny-all、外送/credential/DPA承認はない。
+- NF07 D2aの26件成功は未統合。D2b1 `dfd1d970` はdeadlineに結合したLease、DB待機上限、
+  初回隔離取得のABORTED_UNKNOWN分類と3追加MySQLテストの候補を提出した。軽量javacのみ、Astra CODE Review中。
+  実MySQL未実測、stable witness競合・no-replay owner交代・connect/socket stallは未完である。
+- 2026-10-13 14:51 JSTの再fetchでもorigin/mainは `1443fb68943849a3260d7ebe005259f3eb609d60`。
+  PR101の全7 checkはCOMPLETED/SUCCESS、head `8ad0c34e` はorigin/mainの祖先。
+  最新main run `36858538460` はCOMPLETED/FAILUREのまま。ローカル修復をremote CI成功へ読み替えない。
+  主checkoutの利用者変更3件を保持し、push/PR/remote merge/deploy/実credential操作は行っていない。
+
+以下の時点別記録は履歴であり、古い最大migrationや「未統合」記載は上記最新到達点で更新される。
+
 ## 実行権限と判定境界
 
 - 依頼者は2026-10-01の対話で、総括agentによる実行統括、実装に`gpt-6-luna`、独立Reviewに`gpt-6-astra`の使用を指示した。
