@@ -10,6 +10,7 @@ import com.ses.entity.AiRecommendationRun;
 import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.ai.AiExecutionGateway;
+import com.ses.service.ai.CopilotExecutionFailure;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.ai.AiOutboundProbe;
@@ -116,9 +117,11 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         com.ses.service.ai.CopilotProviderUsage providerUsage = null;
         String status = "SUCCEEDED";
         String error = null;
+        boolean copilotDispatchAttempted = false;
         try {
             // HTTP / provider 呼び出しは TX 外（接続プール占有を避ける）
             if (AiGatewayRequest.USE_COPILOT.equals(request.getUseCase())) {
+                copilotDispatchAttempted = true;
                 com.ses.service.ai.CopilotProviderResponse response = callCopilotProvider(prompt, invocation);
                 text = response.text();
                 providerUsage = response.usage();
@@ -132,6 +135,22 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
             status = "FAILED";
             error = "PROVIDER_ERROR";
             persistIfNeeded(request, masked, status, error, started);
+            if (ex instanceof CopilotExecutionFailure typedFailure) {
+                throw typedFailure;
+            }
+            if (invocation != null) {
+                var preflight = invocation.preflightCostEvidence();
+                var dispatch = preflight.costState() == com.ses.service.ai.copilot.summary.CopilotCostState.NOT_SENT
+                        ? com.ses.service.ai.copilot.summary.DispatchOutcome.notStarted(preflight.reasonCode())
+                        : new com.ses.service.ai.copilot.summary.DispatchOutcome(
+                                copilotDispatchAttempted
+                                        ? com.ses.service.ai.copilot.summary.DispatchOutcome.State.MAY_HAVE_BEEN_SENT
+                                        : com.ses.service.ai.copilot.summary.DispatchOutcome.State.NOT_STARTED,
+                                copilotDispatchAttempted ? "PROVIDER_CALL_FAILED" : "DISPATCH_NOT_STARTED");
+                String safeReason = ex instanceof BusinessException business
+                        ? business.getMessage() : "COPILOT_PROVIDER_FAILURE";
+                throw new CopilotExecutionFailure(safeReason, preflight, dispatch);
+            }
             throw ex;
         }
         persistIfNeeded(request, masked, status, error, started);
@@ -146,7 +165,15 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 runId = run.getId();
             }
         }
-        return new AiGatewayResult(text, request.getTraceId(), runId, prompt, providerUsage);
+        com.ses.service.ai.copilot.summary.DispatchOutcome dispatchOutcome = invocation == null ? null
+                : new com.ses.service.ai.copilot.summary.DispatchOutcome(
+                        invocation.preflightCostEvidence().costState()
+                                == com.ses.service.ai.copilot.summary.CopilotCostState.NOT_SENT
+                                ? com.ses.service.ai.copilot.summary.DispatchOutcome.State.NOT_STARTED
+                                : com.ses.service.ai.copilot.summary.DispatchOutcome.State.RESPONSE_RECEIVED,
+                        invocation.preflightCostEvidence().reasonCode());
+        return new AiGatewayResult(text, request.getTraceId(), runId, prompt, providerUsage,
+                invocation == null ? null : invocation.preflightCostEvidence(), dispatchOutcome);
     }
 
     private String callProvider(String prompt) {
@@ -180,7 +207,8 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
             if (preflight.dispatchAllowed()) {
                 throw BusinessException.of(503, "COPILOT_COST_POLICY_INVALID");
             }
-            throw BusinessException.of(503, "COPILOT_COST_UNKNOWN");
+            throw new CopilotExecutionFailure("COPILOT_COST_UNKNOWN", preflight,
+                    com.ses.service.ai.copilot.summary.DispatchOutcome.notStarted("COPILOT_COST_UNKNOWN"));
         }
         if (!startupCopilotConfigSnapshot.hasBoundedIdentity()
                 || !configured.name().equals(startupCopilotConfigSnapshot.adapterProvider())) {

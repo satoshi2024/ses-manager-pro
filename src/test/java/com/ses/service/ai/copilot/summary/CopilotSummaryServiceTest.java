@@ -5,6 +5,11 @@ import com.ses.common.exception.BusinessException;
 import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
+import com.ses.service.ai.CopilotExecutionFailure;
+import com.ses.service.ai.CopilotProviderUsage;
+import com.ses.service.ai.copilot.summary.DispatchOutcome;
+import com.ses.service.ai.copilot.summary.PreflightCostEvidence;
+import com.ses.service.ai.copilot.summary.CopilotCostState;
 import com.ses.service.ai.copilot.result.CopilotFreshnessInfo;
 import com.ses.service.ai.copilot.result.CopilotLimitInfo;
 import com.ses.service.ai.copilot.result.CopilotScopeInfo;
@@ -117,6 +122,41 @@ class CopilotSummaryServiceTest {
 
         assertFalse(response.isAvailable());
         assertEquals("PROVIDER_INVALID_JSON", response.providerStatus());
+    }
+
+    @Test
+    void innerJson拒否でも送信済み上限とusageを保持する() {
+        PreflightCostEvidence preflight = new PreflightCostEvidence(
+                "synthetic-test", "config-hash", "synthetic-loopback-proof-v1", 2, 5, true,
+                CopilotCostState.UPPER_BOUND, DispatchOutcome.notStarted("PREFLIGHT_ALLOWED"), "PREFLIGHT_ALLOWED");
+        CopilotProviderUsage usage = new CopilotProviderUsage(12, 4, 16, null, null);
+        when(aiExecutionGateway.execute(any())).thenReturn(new AiGatewayResult("not-json", "trace-1", null, null,
+                usage, preflight, new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED, "RESPONSE_RECEIVED")));
+
+        SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
+
+        assertEquals("PROVIDER_INVALID_JSON", response.providerStatus());
+        assertEquals(CopilotCostState.UPPER_BOUND, response.costEvidence().costState());
+        assertEquals(2, response.costEvidence().upperBoundYen());
+        assertEquals(usage, response.costEvidence().usage());
+        assertEquals(DispatchOutcome.State.RESPONSE_RECEIVED, response.costEvidence().dispatchOutcome().state());
+    }
+
+    @Test
+    void 送信前費用拒否はNOT_SENT証拠を保持する() {
+        PreflightCostEvidence denied = PreflightCostEvidence.denied(
+                "production-deny-all-v1", "config-hash", "deny-all-proof-v1", null, 0, "COPILOT_COST_UNKNOWN");
+        when(aiExecutionGateway.execute(any())).thenThrow(new CopilotExecutionFailure("COPILOT_COST_UNKNOWN",
+                denied, DispatchOutcome.notStarted("COPILOT_COST_UNKNOWN")));
+
+        SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
+
+        assertEquals("COST_UNKNOWN", response.providerStatus());
+        assertEquals(CopilotCostState.NOT_SENT, response.costEvidence().costState());
+        assertEquals(null, response.costEvidence().actualCostYen());
+        assertEquals(DispatchOutcome.State.NOT_STARTED, response.costEvidence().dispatchOutcome().state());
     }
 
     @Test

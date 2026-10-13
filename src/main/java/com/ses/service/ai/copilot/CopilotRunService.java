@@ -13,6 +13,7 @@ import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.summary.SummaryResponse;
+import com.ses.service.ai.copilot.summary.SummaryCostEvidence;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -75,7 +76,7 @@ public class CopilotRunService {
         }
         completeAttempt(attempt, latencyMs, succeeded ? "SUCCEEDED" : "FAILED",
                 succeeded ? null : "QUERY_EXECUTION_FAILED", null, "NOT_APPLICABLE",
-                succeeded ? "SUCCEEDED" : "FAILED", metricCount);
+                succeeded ? "SUCCEEDED" : "FAILED", metricCount, null);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -105,11 +106,15 @@ public class CopilotRunService {
             throw new IllegalArgumentException("summary attempt and outcome are required");
         }
         boolean succeeded = response.isAvailable();
-        Integer cost = response.costYen();
-        String costState = cost == null ? "UNKNOWN" : "KNOWN";
+        SummaryCostEvidence evidence = response.costEvidence() == null
+                ? SummaryCostEvidence.unknown("COST_EVIDENCE_MISSING") : response.costEvidence();
+        Integer cost = evidence.costState() == com.ses.service.ai.copilot.summary.CopilotCostState.NOT_SENT
+                ? 0 : evidence.costState() == com.ses.service.ai.copilot.summary.CopilotCostState.ACTUAL
+                ? evidence.actualCostYen() : null;
+        String costState = evidence.costState().name();
         String providerStatus = safeOutcome(response.providerStatus());
         completeAttempt(attempt, latencyMs, succeeded ? "SUCCEEDED" : "FAILED",
-                succeeded ? null : providerStatus, cost, costState, providerStatus, null);
+                succeeded ? null : providerStatus, cost, costState, providerStatus, null, evidence);
     }
 
     /** 旧呼出し経路は認可済みcontextを渡せないため拒否する。 */
@@ -192,11 +197,24 @@ public class CopilotRunService {
 
     private void completeAttempt(CopilotAttemptRecord attempt, long latencyMs, String runStatus,
                                  String errorCode, Integer costJpy, String costState,
-                                 String outcome, Integer metricCount) {
+                                 String outcome, Integer metricCount, SummaryCostEvidence costEvidence) {
         Map<String, Object> metadata = new LinkedHashMap<>(attempt.metadata());
         metadata.put("outcome", outcome);
         metadata.put("latencyMs", boundedLatency(latencyMs));
         metadata.put("costState", costState);
+        if (costEvidence != null) {
+            metadata.put("dispatchOutcome", costEvidence.dispatchOutcome().state().name());
+            putSafeCode(metadata, "dispatchReasonCode", costEvidence.dispatchOutcome().reasonCode());
+            putSafeCode(metadata, "costReasonCode", costEvidence.reasonCode());
+            if (costEvidence.upperBoundYen() != null) {
+                metadata.put("costUpperBoundYen", costEvidence.upperBoundYen());
+            }
+            if (costEvidence.preflight() != null) {
+                putSafeIdentity(metadata, "costPolicyId", costEvidence.preflight().policyId());
+                putSafeIdentity(metadata, "costConfigIdentity", costEvidence.preflight().configIdentity());
+                putSafeIdentity(metadata, "costProofIdentity", costEvidence.preflight().proofIdentity());
+            }
+        }
         if (costJpy != null) {
             metadata.put("costJpy", costJpy);
         }
@@ -222,6 +240,14 @@ public class CopilotRunService {
         if (runMapper.update(null, update) != 1) {
             throw new IllegalStateException("Copilot attempt outcome was not committed");
         }
+    }
+
+    private void putSafeCode(Map<String, Object> metadata, String key, String value) {
+        if (value != null && value.matches("[A-Z0-9_]{1,64}")) metadata.put(key, value);
+    }
+
+    private void putSafeIdentity(Map<String, Object> metadata, String key, String value) {
+        if (value != null && value.matches("[A-Za-z0-9._:-]{1,128}")) metadata.put(key, value);
     }
 
     private void assertBoundContext(CopilotExecutionContext context, SemanticCatalogEntry entry,
