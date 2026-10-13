@@ -348,4 +348,3 @@ B2はその判定までIMPLEMENTATION_REVIEW_PENDING、M・production enablement
 R-NF05 fixed Head `7757bfa49a4ece9aceddcedde2e835bc7466afe1` のP1（controller由来stable errorがwrapper経由で500化）を、
 `e564f400`でremediateした。`ExternalApiResponseBoundaryFilter`は厳密なsecurity exception causeだけをunwrapし、その他は500へ収束する。
 Linux実Tomcatで202/200/409/403/400、専用audit、拒否時ledger非作成を同じR-NF05へ独立再Reviewとしてhandoffする。
-
