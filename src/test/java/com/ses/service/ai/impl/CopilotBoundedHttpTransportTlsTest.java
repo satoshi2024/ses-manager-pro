@@ -91,7 +91,7 @@ class CopilotBoundedHttpTransportTlsTest {
         assertEquals(1, received.get());
         BusinessException wrongHost = assertThrows(BusinessException.class,
                 () -> transport.post(uri(WRONG_HOST), "{}".getBytes(StandardCharsets.UTF_8), deadline()));
-        assertEquals("COPILOT_TRANSPORT_FAILED", wrongHost.getMessage());
+        assertEquals("COPILOT_TLS_IDENTITY_REJECTED", wrongHost.getMessage());
         assertEquals(1, received.get(), "証明書hostname不一致の要求はHTTP handlerへ到達しない");
     }
 
@@ -101,7 +101,7 @@ class CopilotBoundedHttpTransportTlsTest {
         transport.start();
         BusinessException untrusted = assertThrows(BusinessException.class,
                 () -> transport.post(uri(HOST), "{}".getBytes(StandardCharsets.UTF_8), deadline()));
-        assertEquals("COPILOT_TRANSPORT_FAILED", untrusted.getMessage());
+        assertEquals("COPILOT_TLS_HANDSHAKE_REJECTED", untrusted.getMessage());
         assertEquals(0, received.get(), "未信頼証明書ではHTTP handlerへ到達しない");
     }
 

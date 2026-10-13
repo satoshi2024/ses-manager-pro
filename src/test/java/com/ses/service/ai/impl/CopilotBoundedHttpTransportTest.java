@@ -122,6 +122,37 @@ class CopilotBoundedHttpTransportTest {
     }
 
     @Test
+    void snapshotChangedToPublicAfterAdmissionIsRejectedByTheExactHc5Resolver() throws Exception {
+        AtomicInteger requestsReceived = new AtomicInteger();
+        AtomicInteger loopbackRejections = new AtomicInteger();
+        server = HttpServer.create(loopbackAddress(), 0);
+        server.createContext("/", guarded(exchange -> {
+            requestsReceived.incrementAndGet();
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        }));
+        startServer();
+        Instant expiry = Instant.now().plusSeconds(60);
+        CopilotDnsSnapshotResolver.AddressSet loopback = CopilotDnsSnapshotResolver.AddressSet.fromAddressBytes(
+                TEST_HOST, List.of(new byte[]{127, 0, 0, 1}), expiry);
+        CopilotDnsSnapshotResolver.AddressSet publicAddress = CopilotDnsSnapshotResolver.AddressSet.fromAddressBytes(
+                TEST_HOST, List.of(new byte[]{8, 8, 8, 8}), expiry);
+        CopilotDnsSnapshotResolver resolver = new CopilotDnsSnapshotResolver(
+                new CopilotDnsSnapshotResolver.DnsSnapshot(Map.of(TEST_HOST, loopback)), Clock.systemUTC());
+        transport = new CopilotBoundedHttpTransport(resolver, true,
+                () -> resolver.replaceSnapshot(new CopilotDnsSnapshotResolver.DnsSnapshot(
+                        Map.of(TEST_HOST, publicAddress))), () -> { }, null, loopbackRejections::incrementAndGet);
+        transport.start();
+
+        BusinessException rejected = assertThrows(BusinessException.class,
+                () -> transport.post(uri(), request(), deadlineAfter(3, TimeUnit.SECONDS)));
+
+        assertEquals("COPILOT_DESTINATION_REJECTED", rejected.getMessage());
+        assertEquals(1, loopbackRejections.get(), "HC5が同じ最新snapshotからpublic addressを拒否する");
+        assertEquals(0, requestsReceived.get(), "public addressへのsocket接続より前に拒否する");
+    }
+
+    @Test
     void boundedHttpOneRequestSucceedsAndResponseCapFailsClosed() throws Exception {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), 0), 0);
         server.createContext("/", guarded(exchange -> {

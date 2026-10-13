@@ -5,6 +5,7 @@ import org.apache.hc.client5.http.async.methods.AbstractBinResponseConsumer;
 import org.apache.hc.client5.http.async.methods.SimpleHttpRequest;
 import org.apache.hc.client5.http.async.methods.SimpleRequestProducer;
 import org.apache.hc.client5.http.async.methods.SimpleRequestBuilder;
+import org.apache.hc.client5.http.DnsResolver;
 import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.async.CloseableHttpAsyncClient;
@@ -30,6 +31,8 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLHandshakeException;
+import javax.net.ssl.SSLPeerUnverifiedException;
 import java.util.Locale;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -50,7 +53,7 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
     private static final String DNS_HOST_CONTEXT = "copilot.dns-host";
     private static final String DEADLINE_CONTEXT = "copilot.deadline-nanos";
 
-    private final CopilotDnsSnapshotResolver dnsResolver;
+    private final DnsResolver clientDnsResolver;
     private final boolean testLoopbackMode;
     private final Runnable testAdmissionObserver;
     private final Runnable testSubmissionObserver;
@@ -83,19 +86,27 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
     CopilotBoundedHttpTransport(CopilotDnsSnapshotResolver dnsResolver, boolean testLoopbackMode,
                                 Runnable testAdmissionObserver, Runnable testSubmissionObserver,
                                 SSLContext testSslContext) {
-        this.dnsResolver = dnsResolver;
+        this(dnsResolver, testLoopbackMode, testAdmissionObserver, testSubmissionObserver, testSslContext, () -> { });
+    }
+
+    CopilotBoundedHttpTransport(CopilotDnsSnapshotResolver dnsResolver, boolean testLoopbackMode,
+                                Runnable testAdmissionObserver, Runnable testSubmissionObserver,
+                                SSLContext testSslContext, Runnable testLoopbackRejectedObserver) {
         this.testLoopbackMode = testLoopbackMode;
         this.testAdmissionObserver = testAdmissionObserver;
         this.testSubmissionObserver = testSubmissionObserver;
         if (testSslContext != null && !testLoopbackMode) {
             throw new IllegalArgumentException("test SSLContextはloopback test mode専用です");
         }
+        this.clientDnsResolver = testLoopbackMode
+                ? new LoopbackOnlyDnsResolver(dnsResolver, testLoopbackRejectedObserver)
+                : dnsResolver;
         ClientTlsStrategyBuilder tlsBuilder = ClientTlsStrategyBuilder.create()
                 .setHostnameVerifier(new DefaultHostnameVerifier());
         if (testSslContext != null) tlsBuilder.setSslContext(testSslContext);
         this.connectionManager = PoolingAsyncClientConnectionManagerBuilder.create()
                 .setTlsStrategy(tlsBuilder.build())
-                .setDnsResolver(dnsResolver)
+                .setDnsResolver(clientDnsResolver)
                 .setMaxConnTotal(MAX_ACTIVE_EXCHANGES)
                 .setMaxConnPerRoute(4)
                 .setDefaultConnectionConfig(ConnectionConfig.custom()
@@ -136,7 +147,9 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
                     }
                     try {
                         // HC5はendpoint lease/connect後、送信直前にprocessorを呼ぶ（再利用接続も同じ）。
-                        dnsResolver.resolve(host);
+                        clientDnsResolver.resolve(host);
+                    } catch (CopilotDnsSnapshotResolver.LoopbackAddressRejectedException ex) {
+                        throw ex;
                     } catch (IOException ex) {
                         throw new DnsSnapshotUnavailableException();
                     }
@@ -295,8 +308,17 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
             if (cause instanceof BoundedResponseException bounded) {
                 throw BusinessException.of(bounded.code, bounded.reasonCode);
             }
+            if (hasCause(cause, SSLPeerUnverifiedException.class)) {
+                throw BusinessException.of(503, "COPILOT_TLS_IDENTITY_REJECTED");
+            }
+            if (hasCause(cause, SSLHandshakeException.class)) {
+                throw BusinessException.of(503, "COPILOT_TLS_HANDSHAKE_REJECTED");
+            }
             if (hasCause(cause, DnsSnapshotUnavailableException.class)
                     || hasCause(cause, UnknownHostException.class)) {
+                if (hasCause(cause, CopilotDnsSnapshotResolver.LoopbackAddressRejectedException.class)) {
+                    throw BusinessException.of(503, "COPILOT_DESTINATION_REJECTED");
+                }
                 throw BusinessException.of(503, "COPILOT_DNS_UNAVAILABLE");
             }
             if (hasCause(cause, DeadlineExceededException.class)) {
@@ -332,13 +354,13 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
                 throw BusinessException.of(503, "COPILOT_DESTINATION_REJECTED");
             }
             try {
-                if (dnsResolver.resolvesOnlyToLoopback(host)) {
-                    return;
-                }
+                clientDnsResolver.resolve(host);
+                return;
+            } catch (CopilotDnsSnapshotResolver.LoopbackAddressRejectedException ex) {
+                throw BusinessException.of(503, "COPILOT_DESTINATION_REJECTED");
             } catch (IOException ex) {
                 throw BusinessException.of(503, "COPILOT_DNS_UNAVAILABLE");
             }
-            throw BusinessException.of(503, "COPILOT_DESTINATION_REJECTED");
         }
         int port = uri.getPort() == -1 ? 443 : uri.getPort();
         if (!"https".equalsIgnoreCase(uri.getScheme()) || !PROVIDER_HOST.equals(host) || port != 443) {
@@ -346,7 +368,7 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
         }
         try {
             // Validate the immutable address snapshot synchronously before enqueueing any I/O.
-            dnsResolver.resolve(host);
+            clientDnsResolver.resolve(host);
         } catch (IOException ex) {
             throw BusinessException.of(503, "COPILOT_DNS_UNAVAILABLE");
         }
@@ -354,6 +376,27 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
 
     private static long remainingNanos(long deadlineNanos) {
         return deadlineNanos - System.nanoTime();
+    }
+
+    private static final class LoopbackOnlyDnsResolver implements DnsResolver {
+        private final CopilotDnsSnapshotResolver delegate;
+        private final Runnable rejectedObserver;
+
+        private LoopbackOnlyDnsResolver(CopilotDnsSnapshotResolver delegate, Runnable rejectedObserver) {
+            this.delegate = delegate;
+            this.rejectedObserver = rejectedObserver == null ? () -> { } : rejectedObserver;
+        }
+
+        @Override
+        public java.net.InetAddress[] resolve(String host) throws UnknownHostException {
+            return delegate.resolveLoopbackSnapshot(host, rejectedObserver);
+        }
+
+        @Override
+        public String resolveCanonicalHostname(String host) throws UnknownHostException {
+            resolve(host);
+            return host == null ? "" : host.toLowerCase(Locale.ROOT);
+        }
     }
 
     private static boolean hasCause(Throwable cause, Class<? extends Throwable> type) {
