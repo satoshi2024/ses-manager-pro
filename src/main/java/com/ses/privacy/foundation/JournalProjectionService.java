@@ -119,7 +119,7 @@ final class JournalProjectionService {
         return null;
     }
 
-    private static boolean verifyChain(JournalPartition partition, JournalHead head, List<JournalEvent> events) {
+    static boolean verifyChain(JournalPartition partition, JournalHead head, List<JournalEvent> events) {
         if (head == null || !partition.equals(head.partition()) || head.revision() != events.size()) return false;
         String previous = ZERO_HASH;
         long revision = 1;
@@ -137,7 +137,7 @@ final class JournalProjectionService {
         return head.eventHash().equals(previous);
     }
 
-    private static boolean snapshotMatchesJournal(JournalPartition partition,
+    static boolean snapshotMatchesJournal(JournalPartition partition,
             PrivacyProjectionPort.ProjectionSnapshot snapshot, List<JournalEvent> events) {
         if (snapshot == null || !partition.equals(snapshot.partition()) || snapshot.revision() < 0
                 || snapshot.revision() > events.size()) return false;
@@ -151,6 +151,12 @@ final class JournalProjectionService {
         return Objects.equals(snapshot.eventHash(), hash) && snapshot.held() == expected.held()
                 && Objects.equals(snapshot.lastActionId(), expected.lastActionId())
                 && Objects.equals(snapshot.lastActionState(), expected.lastActionState());
+    }
+
+    static List<VerifiedJournalEvent> verifiedEvents(JournalPartition partition, JournalHead head,
+            List<JournalEvent> events) {
+        if (!verifyChain(partition, head, events)) throw new IllegalArgumentException("journal chain検証に失敗しました");
+        return events.stream().map(event -> new VerifiedJournalEvent(partition, event)).toList();
     }
 
     private static String eventHash(JournalPartition partition, JournalEvent event, String previous) {

@@ -94,6 +94,17 @@ final class JdbcPrivacyPartitionFence {
         });
     }
 
+    /** 最終projection readbackとowner検査を同じrow lock/transaction内で行う。 */
+    <T> T readUnderCurrentOwner(Lease lease, Function<JdbcTemplate, T> readback) {
+        requireTestProfile();
+        Objects.requireNonNull(lease, "lease");
+        Objects.requireNonNull(readback, "readback");
+        return fixtureMutationTransaction.execute(status -> {
+            if (!lockForRecoveryProjection(lease.partition(), lease)) throw new StaleOwnerException();
+            return readback.apply(jdbc);
+        });
+    }
+
     private State lockState(JournalPartition partition) {
         jdbc.update("INSERT IGNORE INTO sf_w2b_partition_fence(tenant_id, subject_ref, generation, state, owner_token) "
                         + "VALUES(?, ?, 0, 'ACTIVE', NULL)", partition.tenantId(), partition.subjectRef());
