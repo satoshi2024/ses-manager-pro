@@ -375,7 +375,7 @@ class ImportMetadataRealMySqlTest {
     }
 
     @Test
-    void source行待機中に権限を撤回するとdisableSourceのnoOp returnも拒否する() throws Exception {
+    void source行待機中に権限を撤回するとdisableSourceのnoOpReturnも拒否する() throws Exception {
         sourceId = metadataService.createSource(new ImportSourceRequest("SyntheticSource", "合成source"));
         assertRevokedWhileSourceLockHeld(() -> metadataService.disableSource(sourceId, 1, false));
 
