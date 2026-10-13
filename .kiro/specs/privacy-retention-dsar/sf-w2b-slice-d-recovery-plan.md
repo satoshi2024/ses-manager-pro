@@ -89,6 +89,50 @@ runtime assertionには3 containerの識別子/image/version、partition opaque 
 
 Astra reviewでは特に、(1) history/latest stable-readの固定順序・byte完全比較とappend競合、(2) journal final replay headがlive witness latestとrevision/hash完全一致する契約、(3) projection partial progress・crash/restart・old owner復帰中も永続quarantine/fenceを保つ仕組み、(4) recovery SQL権限分離とfixture-admin restore境界、(5) final reread直後のTOCTOUをD結果が認可に転用しない境界、(6) idle maxAge後の運用可能性と別protocol refresh案、(7) full witness rollbackで証明できない限界を確認する。これらに合意するまで実装しない。
 
+## 7. D2b計画: monotonic deadlineと残り検証matrix
+
+状態: **計画のみ / Astra PLAN review待ち。D2b実装・試験合格・NF07 PASSを意味しない。** D2aの親報告はMySQL `26/0/0/0` だが、その実行結果は時間上限および下記の残件を証明しない。D2aからD2bへPASS状態を昇格させない。計画reviewを通るまでコード・test変更を開始しない。
+
+### 7.1 単一deadline契約
+
+- `recover(partition)`入口の最初に`System.nanoTime()`由来のmonotonic deadlineを一度だけ作り、DB fence取得開始からstable/final reread、final owner検査、transactionのrollback/closeまでを同じbudgetで扱う。wall clock、`issuedAt`、各retryでのdeadline再設定を使わない。test専用のpackage-private `Duration`引数または専用test constructorでbudgetを渡し、production property、bean、controller、protocol設定は追加しない。暫定test budgetは全体5秒、connection/socket/statement/lock wait各上限1–2秒を提案値とし、実装前のAstra reviewでlocal MySQLの実測余裕を確認する。これは運用値ではない。
+- witness read順序、journal snapshot、projection read/replay、final reread、fence lock/quarantineを含む全てのblocking DB境界の直前・直後にremaining budgetを評価する。remainingが0以下なら新しいread/write/retryを開始しない。retry count上限も維持し、試行回数上限だけを時間保証と呼ばない。
+- quarantine取得自体もdeadline配下とする。取得が確認できないtimeout/commit不明ではwitness読取やprojection操作を始めず、固定reason `FENCE_ACQUIRE_TIMEOUT` / `FENCE_ACQUIRE_UNCONFIRMED` のように「永続隔離を確認済み」と誤報しない。いったんDB上のgeneration/ownerを取得・確認した後のtimeoutは常にそのQUARANTINED rowを保持し、release、clear、暗黙のowner交代、timeout後の遅延retryを行わない。timeout中にtransactionがrollbackされる場合もfence取得transactionとreplay transactionを混同しない。
+- 同じdeadlineをreader/fence/projectionのtest-only operationへ明示的に伝える。hidden `ThreadLocal`期限や呼出し側のtrusted flagにしない。各`TransactionTemplate` timeoutとJDBC statement/query timeoutはremainingから設定し、各connectionの`connectTimeout`/`socketTimeout`もtest-only DataSource設定で有限にする。MySQL `innodb_lock_wait_timeout`はGLOBAL変更ではなく専用connection/session内でremaining以下に設定する。JDBC秒単位timeoutの丸め、transaction timeoutが効くstatement範囲、Connector/J `socketTimeout`との相互作用を実装時に確認し、丸め分のreturn toleranceを明示する。
+- active statement cancellationは`Statement.cancel()`等をbest-effortで用いる場合も、その応答で即座に成功扱いしない。同期JDBC callが戻り、transaction rollback/connection closeまで確認してからtimeout結果を返す。`QueryTimeoutException`、`TransactionTimedOutException`、`SQLTimeoutException`、socket timeoutなどは発生した操作境界からfixed phase code（例:`FENCE_ACQUIRE_TIMEOUT`, `WITNESS_READ_TIMEOUT`, `JOURNAL_READ_TIMEOUT`, `PROJECTION_READ_TIMEOUT`, `REPLAY_TIMEOUT`, `FINAL_READ_TIMEOUT`）へ写し、SQL本文、URL、driver例外message、credential、partition PIIをreason/logに出さない。deadline後のgeneric `JOURNAL_UNAVAILABLE`等への曖昧な変換でtimeout証拠を消さない。`Future.cancel(true)`やthread interruptだけでJDBC停止・transaction rollback・資源回収を保証したことにしない。watchdog/Futureを採用する場合、worker終了とconnection解放をjoin/readbackするまでretryや成功返却を許さず、孤児workerが後からprojectionを書けないfence証拠を必須とする。
+- deadlineはworkを止める契約であり、JDBC driver/OSがtimeout/cancelを無視した場合にも任意のwall-clock時刻でJava processが必ず戻る、と主張しない。Connector/J socket/connect timeoutとInnoDB/statement timeoutで実MySQLの同期callが有限に戻る実証、rollback/closeとpool/connection/thread回収の証拠を揃える。deadlineを越えてcleanupが必要ならcleanupを完了してからQUARANTINED timeout結果を返し、deadlineを守るためにDB resourceを放置しない。
+- final projection readbackは現在leaseのgeneration/owner row lockと同一transaction内で行う。deadline切れまたはlock timeoutの場合は成功を返さない。ownerが変わっていれば`OWNER_GENERATION_STALE`、期限切れなら段階別timeout理由を返す。どの最終確認もreturn後の将来dispatch権限ではない。
+
+### 7.2 D2b実MySQL受入matrix
+
+D2b最小の新規試験は既存`@Tag("mysql")` 3-container harnessを使い、実application projection DBのrow lock待ちを作る。sleepだけで「DBが待っていた」と推定せず、別admin connectionをblockerとして保持し、MySQL 8の`performance_schema.data_lock_waits`/`data_locks`（または同等に検証したInnoDB lock graph）からrecovery connection id → blocker connection id、対象object/lock waitをassertしてからtimeoutを待つ。test budgetはtest-only 5秒を初期案とし、timeout/cancelの実測時間はdriverのtimeout granularityを含む明示tolerance内とする。
+
+| D2bケース | 実fixtureと合格条件 | 現状 |
+|---|---|---|
+| recovery replay lock wait + deadline | valid live witness/journal chain、projectionにrevision-0 rowを用意する。fixture-admin connectionでそのrowを`SELECT ... FOR UPDATE`し、recoveryを別threadで起動する。実MySQL lock graphがrecovery waiterとfixture blockerを特定した後、設定したInnoDB/statement/transaction timeoutでcallが有限に戻り、固定`REPLAY_TIMEOUT`等のQUARANTINEDになる。timeout中に成功、SQL例外message露出、retry budget再開はしない。 | D2a未証明 |
+| timeout後のfence/old owner | 上記timeout後、独立connectionでgeneration/state/ownerを読みQUARANTINEDを確認する。期限切れownerのleaseでreplayを試しprojectionが不変で拒否される。timeout後にfenceがACTIVEへ戻らない。 | D2aのstale owner/永続fence試験はあるがtimeoutとの組合せ未証明 |
+| resource回収と次回健全性 | lock blockerをreleaseし、waiter/thread/active transaction/connectionが残っていないことをtest principal/connection idで確認する。その後、新owner・新generationで同じvalid recoveryを再実行し正常収束する。Future interruptだけを回収根拠にしない。 | 未実施 |
+| connect/socket budget | test-only Connector/J connection propertiesを固定確認し、可能ならtest-only TCP handshake/read stall proxyでconnect/socket timeoutが発火し同期callとconnection closeが完了することを確認する。実proxyを使えない場合、設定値の静的確認と実MySQL lock/statement試験を分けて記録し、socket stall実測済みとは扱わない。 | 未実施 |
+| statement/transaction/innodb lock wait | connection-scoped timeoutが同一deadlineより長くならず、MySQL lock graphのblockerを解放せずとも呼出しが有限に戻ることを確認する。lock wait timeoutをGLOBALに変更しない。timeout発生時のrollback完了、projection revision/hash/fields不変、QUARANTINED維持をassertする。 | 未実施 |
+| stable witness append race | 固定read順序の`history A → latest A → history B → latest B`の間にbarrierを置き、別attestor connectionから正当なevent/checkpointを実MySQLへappendする。混在した二組はbyte-equalにならず採用されず、budget内の再読で新しいhistory/latestが一致してからだけreplayする。attempt/reason/headをsafe assertionで記録する。 | stable read自体はD2a、途中append競合は未証明 |
+| unstable witness exhaustion | barrierで各安定read組の間に新しい合法appendを進め、規定回数またはdeadlineの先に達した方で有限終了する。`WITNESS_UNSTABLE`または専用deadline reasonでQUARANTINED、projection writeなし、永続fenceあり、旧owner拒否を確認する。無限producerやtest `sleep`での競合演出はしない。 | 未実施 |
+| final owner交代、no replay path | projectionを既にverified journal headと完全一致させ、replay loopが0回のcaseを作る。final stable rereadに同期したbarrierで別ownerがgenerationを交代してからfinal fenced snapshotを続ける。古いownerは`OWNER_GENERATION_STALE`となりRECOVEREDを返さず、projectionは不変、隔離が継続する。 | final owner交代後にreplayありのケースのみ存在。no-replay分岐は未証明 |
+
+上記のlock wait試験はMySQLでのJDBC/transaction/statement/row-lock timeout、quarantine保持、旧owner拒否、資源回収、次回健全性を一つの連続した証拠列として記録する。test全体のtimeoutでworkerをcancelしただけ、またはfutureがdoneになっただけでは合格にしない。connection graphが取得できない場合は試験失敗とし、時間経過のみから「DB lock waitを再現した」と扱わない。
+
+### 7.3 D2b後も残る境界
+
+- D2aで現在あるreader ACL拒否はjournal/witness reader principalに対するappend/DDL拒否の部分証拠である。application projection/recovery principalのtable/operation別SQL許可・拒否全matrix、特にfence/projection以外への書込、DELETE/DDL/他schema、restore/normal-operation権限分離はまだ受入済みとしない。D2b timeout計画でこれを「recovery SQL ACL PASS」に昇格させない。
+- 三container fixtureはapp/journal rollbackに対するlive witness保持条件を試験する。witness DB/volume自体を含む全store rollbackを検出・防止できる保証はない。
+- test recoveryの`RECOVERED_SYNTHETIC`、最終fence確認、最終readは将来時点のdispatch/publication認可ではない。本番bean、migration、production connection/provider、dispatcher、maxAge後のsame-revision renewal、quarantine releaseは引き続き対象外。
+
+### 7.4 実装着手と検証順
+
+1. AstraがこのD2b計画とtimeout toleranceをreviewする。合意前はplanだけを保持する。
+2. 承認後、最小test-only deadline value/objectとfixed reason mappingから実装し、deadlineをquarantine acquire、reader、journal transaction、projection/replay、final owner readへ明示伝播する。D1 fence semantics、Cのstrict revision/maxAge、D2a recovery behaviorを緩めない。
+3. D2b tableのlock-wait/resource-lifecycle caseを最初に追加し、rootがMaven/Dockerを直列実行する。失敗したtimeout/cancelはQUARANTINED維持または「隔離取得未確認」として扱い、失敗を通常成功・NO_OPへ変換しない。
+4. stable append race、unstable exhaustion、no-replay owner rotationの三caseを追加してから最小matrix完了をreviewする。MySQL実結果、skip=0、wait graph、elapsed tolerance、post-timeout fence/owner、resource cleanupを分けて記録する。D2aの既存26成功数だけでD2bまたはNF07 PASSを宣言しない。
+
 ## 参照
 
 - `sf-w2b-execution-plan.md` §§3–7（C watermark、projection CAS、P12/P12b、slice D）
