@@ -1,7 +1,6 @@
 package com.ses.service.ai;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ses.common.exception.BusinessException;
 import com.ses.config.AiConfig;
 import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
@@ -149,12 +148,16 @@ class AiExecutionGatewayCopilotSnapshotTest {
                 mock(AiProductionApprovalGate.class), mock(CopilotFeatureGate.class));
         config.setProvider("mock");
 
-        BusinessException error = AccountingTenantContextHolder.runWithTenant("tenant-a", () ->
-                assertThrows(BusinessException.class, () -> gateway.execute(request(
+        CopilotExecutionFailure error = AccountingTenantContextHolder.runWithTenant("tenant-a", () ->
+                assertThrows(CopilotExecutionFailure.class, () -> gateway.execute(request(
                         "prompt-v1", "config-hash-v1", "gemini", Integer.MAX_VALUE))));
 
-        assertEquals(503, error.getCode());
-        assertEquals("COPILOT_COST_UNKNOWN", error.getMessage());
+        assertEquals("COPILOT_COST_UNKNOWN", error.reasonCode());
+        assertEquals(CopilotCostState.NOT_SENT, error.preflight().costState());
+        assertEquals(com.ses.service.ai.copilot.summary.DispatchOutcome.State.NOT_STARTED,
+                error.preflight().dispatchOutcome().state());
+        assertEquals(com.ses.service.ai.copilot.summary.DispatchOutcome.State.NOT_STARTED,
+                error.dispatchOutcome().state());
         verify(adapter, never()).generateCopilotSummary(any(), any(CopilotInvocation.class));
         verify(adapter, never()).generate(any());
         verify(probe, never()).record(any());
