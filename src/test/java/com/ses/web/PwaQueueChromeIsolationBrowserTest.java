@@ -249,7 +249,8 @@ class PwaQueueChromeIsolationBrowserTest {
             Throwable ttlPrimaryFailure = null;
             try {
                 browser.navigate(base + "/test.html?user=A&nf04_ttl_probe=1");
-                assertTrue(browser.waitForStrict("window.SES&&SES.pwaQueue&&SES.pwaQueue.whenReady().then(()=>true)", Duration.ofSeconds(15)),
+                assertTrue(browser.waitForStrict("window.SES&&SES.pwaQueue&&typeof SES.pwaQueue.whenReady==='function'"
+                                + "?SES.pwaQueue.whenReady().then(()=>true):false", Duration.ofSeconds(15)),
                         "TTL cleanup transactionが完了する");
                 assertTrue(browser.evaluateStrict("(async()=>{const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});const ids=await new Promise((ok,no)=>{const q=db.transaction('queue').objectStore('queue').getAllKeys();q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)});db.close();return !ids.includes('ttl-old')&&ids.includes('ttl-exact')&&ids.includes('ttl-fresh')})()").asBoolean(),
                         "TTLはthreshold未満だけ削除し、exact thresholdとfresh recordを保持する");
