@@ -125,7 +125,7 @@ class CopilotSummaryServiceTest {
     }
 
     @Test
-    void innerJson拒否でも送信済み上限とusageを保持する() {
+    void 未検証のpreflight上限は送信後でもUNKNOWNにしusageを保持する() {
         PreflightCostEvidence preflight = new PreflightCostEvidence(
                 "synthetic-test", "config-hash", "synthetic-loopback-proof-v1", 2, 5, true,
                 CopilotCostState.UPPER_BOUND, DispatchOutcome.notStarted("PREFLIGHT_ALLOWED"), "PREFLIGHT_ALLOWED");
@@ -137,10 +137,36 @@ class CopilotSummaryServiceTest {
                 sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
 
         assertEquals("PROVIDER_INVALID_JSON", response.providerStatus());
-        assertEquals(CopilotCostState.UPPER_BOUND, response.costEvidence().costState());
-        assertEquals(2, response.costEvidence().upperBoundYen());
+        assertEquals(CopilotCostState.UNKNOWN, response.costEvidence().costState());
+        assertEquals(null, response.costEvidence().upperBoundYen());
         assertEquals(usage, response.costEvidence().usage());
         assertEquals(DispatchOutcome.State.RESPONSE_RECEIVED, response.costEvidence().dispatchOutcome().state());
+    }
+
+    @Test
+    void preflightのNOT_SENTは実際のdispatch証拠を上書きしない() {
+        PreflightCostEvidence preflight = PreflightCostEvidence.denied(
+                "production-deny-all-v1", "config-hash", "deny-all-proof-v1", null, 0, "DENIED");
+        CopilotProviderUsage usage = new CopilotProviderUsage(8, 3, 11, null, null);
+        DispatchOutcome dispatched = new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED, "HEADERS_RECEIVED");
+
+        SummaryCostEvidence evidence = SummaryCostEvidence.fromPreflight(preflight, dispatched, usage, "FAILED");
+
+        assertEquals(CopilotCostState.UNKNOWN, evidence.costState());
+        assertEquals(dispatched, evidence.dispatchOutcome());
+        assertEquals(usage, evidence.usage());
+    }
+
+    @Test
+    void preflightがnullでもdispatchとusageを保持する() {
+        CopilotProviderUsage usage = new CopilotProviderUsage(8, 3, 11, null, null);
+        DispatchOutcome dispatched = new DispatchOutcome(DispatchOutcome.State.MAY_HAVE_BEEN_SENT, "TRANSPORT_TIMEOUT");
+
+        SummaryCostEvidence evidence = SummaryCostEvidence.fromPreflight(null, dispatched, usage, "FAILED");
+
+        assertEquals(CopilotCostState.UNKNOWN, evidence.costState());
+        assertEquals(dispatched, evidence.dispatchOutcome());
+        assertEquals(usage, evidence.usage());
     }
 
     @Test
