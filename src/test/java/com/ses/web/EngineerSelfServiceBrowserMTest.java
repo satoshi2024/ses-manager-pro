@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.ses.common.exception.BusinessException;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.EngineerSales;
@@ -25,6 +26,11 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.web.servlet.HandlerExceptionResolver;
+import org.springframework.web.servlet.ModelAndView;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,6 +43,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import org.junit.jupiter.api.AfterEach;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -55,6 +66,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("browser")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
+@Import(EngineerSelfServiceBrowserMTest.BusinessExceptionDiagnosticConfiguration.class)
 class EngineerSelfServiceBrowserMTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -74,6 +86,8 @@ class EngineerSelfServiceBrowserMTest {
     private EngineerSalesMapper engineerSalesMapper;
     @Autowired
     private SurveyService surveyService;
+    @Autowired
+    private TestBusinessExceptionDiagnosticResolver businessExceptionDiagnostic;
 
     private static final String DEMO_USERNAME = "portal_engineer_demo";
     private static final String DEMO_PASSWORD = "demoPassword123";
@@ -509,13 +523,19 @@ class EngineerSelfServiceBrowserMTest {
         // ---- 3.4 1on1申請（明日以降の候補日。decision table §6.1） ----
         String tomorrow = LocalDate.now().plusDays(1).toString();
         String dayAfter = LocalDate.now().plusDays(2).toString();
+        String diagnosticId = UUID.randomUUID().toString();
         JsonNode oneOnOne = browser.evaluate("(async function(){const t='" + csrf + "';" +
                 "const r=await fetch('/api/my/one-on-ones',{method:'POST'," +
-                "headers:{'Content-Type':'application/json','X-XSRF-TOKEN':t}," +
+                "headers:{'Content-Type':'application/json','X-XSRF-TOKEN':t,'X-NF04-Diagnostic-Id':'" + diagnosticId + "'}," +
                 "body:JSON.stringify({counterpartUserId:" + seed.salesUserId() + ",candidateDates:['" + tomorrow + "','" + dayAfter + "']})});" +
                 "return await r.text();})()");
-        assertEquals(200, MAPPER.readTree(oneOnOne.asText("{}")).path("code").asInt(-1),
-                "1on1申請が200でない: " + truncate(oneOnOne.asText("")));
+        int oneOnOneCode = MAPPER.readTree(oneOnOne.asText("{}")).path("code").asInt(-1);
+        TestBusinessExceptionDiagnostic rejection = oneOnOneCode == 200
+                ? null : businessExceptionDiagnostic.consume(diagnosticId);
+        assertEquals(200, oneOnOneCode, "1on1申請が200でない: requestUri="
+                + (rejection == null ? "/api/my/one-on-ones" : rejection.requestUri())
+                + " businessStatus=" + (rejection == null ? "未捕捉" : rejection.status())
+                + " messageKey=" + (rejection == null ? "未捕捉" : rejection.messageKey()));
         String oneOnOneList = browser.evaluate("(async function(){" +
                 "const r=await fetch('/api/my/one-on-ones?current=1&size=50');return await r.text();})()").asText("");
         assertTrue(oneOnOneList.contains(tomorrow), "1on1一覧に申請した候補日が反映される");
@@ -600,6 +620,53 @@ class EngineerSelfServiceBrowserMTest {
                 }
             });
         } catch (Exception ignored) {
+        }
+    }
+
+    record TestBusinessExceptionDiagnostic(int status, String messageKey, String requestUri) { }
+
+    static final class TestBusinessExceptionDiagnosticResolver implements HandlerExceptionResolver {
+        private final ConcurrentMap<String, TestBusinessExceptionDiagnostic> diagnostics = new ConcurrentHashMap<>();
+
+        @Override
+        public ModelAndView resolveException(HttpServletRequest request, HttpServletResponse response,
+                Object handler, Exception exception) {
+            if (!"/api/my/one-on-ones".equals(request.getRequestURI())) return null;
+            String diagnosticId = request.getHeader("X-NF04-Diagnostic-Id");
+            if (diagnosticId == null || !diagnosticId.matches("[0-9a-f-]{36}")) return null;
+            Throwable cursor = exception;
+            for (int depth = 0; cursor != null && depth < 16; depth++, cursor = cursor.getCause()) {
+                if (cursor instanceof BusinessException business) {
+                    String key = business.getMessageKey();
+                    if (key == null || !key.matches("error\\.[A-Za-z0-9_.-]{1,120}")) key = "<no-safe-key>";
+                    diagnostics.put(diagnosticId, new TestBusinessExceptionDiagnostic(
+                            business.getCode(), key, "/api/my/one-on-ones"));
+                    break;
+                }
+            }
+            return null; // 診断だけを記録し、通常のGlobalExceptionHandler処理へ委ねる。
+        }
+
+        TestBusinessExceptionDiagnostic consume(String diagnosticId) {
+            return diagnostics.remove(diagnosticId);
+        }
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class BusinessExceptionDiagnosticConfiguration {
+        @Bean
+        TestBusinessExceptionDiagnosticResolver testBusinessExceptionDiagnosticResolver() {
+            return new TestBusinessExceptionDiagnosticResolver();
+        }
+
+        @Bean
+        WebMvcConfigurer testBusinessExceptionDiagnosticOrder(TestBusinessExceptionDiagnosticResolver resolver) {
+            return new WebMvcConfigurer() {
+                @Override
+                public void extendHandlerExceptionResolvers(List<HandlerExceptionResolver> resolvers) {
+                    resolvers.add(0, resolver);
+                }
+            };
         }
     }
 }
