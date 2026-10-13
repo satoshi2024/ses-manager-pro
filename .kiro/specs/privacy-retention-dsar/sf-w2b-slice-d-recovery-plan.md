@@ -10,7 +10,7 @@ Slice Cの`LatestWitnessPort`は`history(partition)`と`latest(partition)`を別
 
 | 境界 | Dでの扱い |
 |---|---|
-| `LatestWitnessPort` | recovery serviceだけがlive witness history/latestを読取る。historyとlatestは別readなので、read間にappendが起きた不整合を検出する安定snapshot読取を行う。 |
+| `LatestWitnessPort` | recovery serviceだけがlive witness history/latestを読取る。stable read順序は`history A → latest A → history B → latest B`に固定し、各history envelopeのcanonical payload/signature byte配列とlatest tupleの各byte配列を要素数・順序込みで完全比較する。二組が一致した場合だけ後半をsnapshotとして採用し、不一致ならbounded retry、上限超過はQUARANTINEDとする。 |
 | `SignedWatermarkVerifier` | Cの署名、canonical bytes、key state/audience、epoch/hash chain、latest一致、freshness検査を再利用する。古い呼出側snapshotを検証した結果をlive扱いしない。 |
 | `PrivacyJournalPort` | journal primaryからheadと全eventを一貫したsnapshotとして取得し、revision連番、previous hash、event hash、head一致を全件検証する。 |
 | `JournalProjectionService` / `PrivacyProjectionPort` | 現在の`projectAcknowledged(partition, ack)`はcaller ACK起点の通常投影であり、restore recoveryへ偽ACKを作って流用しない。共有chain/prefix検証とverified replayをpackage-private責務として抽出または拡張し、D自身のjournal読取結果からのみ`VerifiedJournalEvent`を発行する。 |
@@ -20,15 +20,17 @@ app projectionとjournalが別々にrollbackされても、witnessをrestore対�
 
 ## 2. Recovery契約と手順
 
-Recoveryは`recover(partition)`相当のpackage-private operationとし、開始時から対象projectionをQUARANTINED/read-onlyとして扱う。どの中間状態もtrusted/publication-readyとして公開しない。Dの成功結果は合成recovery検証結果に限り、dispatch、hold解除、利用者向けpublication gateを開かない。
+Recoveryは`recover(partition)`相当のpackage-private operationとし、開始時から対象partitionの永続的なtest-only quarantine stateをQUARANTINED/read-onlyとして扱う。これはprojection rowやJava memory上の戻り値だけではなく、fixture用DB上のpartition state rowで保持する。rowは単調増加generationとowner tokenを持ち、quarantine取得・状態更新・解放可否をgeneration/owner CASで制御する。normal projection、recovery replay、fixture restoreを含む全てのwrite経路は同じfenceを検証し、現generation/owner以外の書込を拒否する。新processで再開してもrowが残るためQUARANTINEDを継続する。old recovery ownerが後から復帰しても新generationへのwriteは拒否される。Dの成功でも隔離を自動解除しない。どの中間状態もtrusted/publication-readyとして公開しない。Dの成功結果は合成recovery検証結果に限り、dispatch、hold解除、利用者向けpublication gateを開かない。
 
-1. **witness stable read**: test-only witness primaryから`history`と`latest`を読み、readの前後でhistory全envelope（canonical payload/signature含む）とlatest tupleが同一であることを確認する。途中でappendされた場合は再読する。安定snapshotを得られない、空履歴、欠落epoch、同epoch分岐、latest/history不一致、署名/key/domain/audience/compromise/freshness不正は即QUARANTINED。
+Recovery主体へ注入する権限はwitness-reader、journal-reader、fenceで保護されたprojection writer、recovery-state writerだけとする。signer、witness append、journal append、DDL、fixture restoreの権限を持たせない。quarantine state tableはfixture-adminがtest schemaへ準備し、recovery主体にDDL権限を渡さない。fixture restoreはfixture-admin専用操作として同じpartition fenceを先に取得し、generationを進めてQUARANTINEDを記録してから実行する。restore完了時も自動解除せず、recovery検証を別途必要とする。fixture管理者は独立したtest component/credentialとし、recovery主体から分離する。実MySQLのSQL権限でrecovery主体によるsign/append/DDL/restoreを拒否することを試験する。
+
+1. **witness stable read**: 上記の固定順序でtest-only witness primaryから`history`と`latest`を2組読み、history全envelopeのcanonical payload/signature bytesとlatest tupleのbytesを完全一致比較する。途中append等で異なる場合は再読する。安定snapshotを得られない、空履歴、欠落epoch、同epoch分岐、latest/history不一致、署名/key/domain/audience/compromise/freshness不正は即QUARANTINED。
 2. **journal snapshot**: journal primaryからheadと全eventを一貫して読み、全revision・previous hash・event hash・head revision/hashを最初から再検証する。単なるwatermark一致だけでhistory完全性を推定しない。全event連番がない、headよりeventが欠ける、partitionが違う、hash分岐はprojectionへのwrite前にQUARANTINED。
-3. **watermark anchor照合**: witness最新signed checkpointの`eventRevision/eventHash`がjournal history中の同じrevision/hashに一致すること、journal headがwitness revision以上であることを要求する。journal headがwitnessより後ろなら、古いjournal snapshotへのrestore/巻戻りとして拒否する。witnessより後ろのjournal tailも全件hash-chain検証する。witness anchorをjournal内のold watermark copyで置き換えない。
+3. **watermark anchor照合**: witness最新signed checkpointの`eventRevision/eventHash`がjournalの最終replay head revision/hashと完全一致することを要求する。journal headがwitnessより前でも後でもQUARANTINEDとし、anchorより後ろの未witness journal tailを検証・replayしない。例えばjournalがR10まで進んでwitness latestがR5の状態で、R7へ戻したbackupをreplayしても拒否する。R5の署名が有効でR7が正しいchainでも受け入れない。witness anchorをjournal内のold watermark copyで置き換えない。最終replay headを最新witnessが厳密に覆う証拠がなければQUARANTINEDとする。
 4. **現projection検査**: projection snapshotが同partitionで、revisionがjournal head以下であり、そのrevisionまで再計算したheld/action fields・event hashと完全一致することを確認する。app projectionだけが古くても一致する過去prefixなら再構築可能。revision ahead、same revision異hash、field改変、prefixに対応しないstateはQUARANTINEDとし、勝手に初期値へ戻さない。
-5. **verified replay**: witness anchorを含む完全journal chain検証が完了した後に限り、現projection revisionの次からjournal headまでrevision順に適用する。各apply後にprojectionを独立read-backし、revision/hash/held/action全fieldが検証済みjournal prefixと一致することを確認する。same revision/same hashのretryだけNO_OP。途中失敗時はprojectionが部分的に進んでも隔離を維持し、次回の再検証で収束させる。
-6. **final live reread**: replay後にwitnessのhistory/latestとjournal head/eventsを再取得し、最初の検証後に進んだcheckpointまたはjournal eventを見逃していないか確認する。両DBのlive snapshotが進んでいれば、隔離を維持したまま新しい一貫snapshotからbounded retryする。安定回数上限/時間上限超過、read不達、改変、journalとwitnessの不整合はQUARANTINED。最終projectionが最終journal headと全fieldで一致した場合のみ`RECOVERED_SYNTHETIC`を返す。
-7. **repeatability**:同じ状態でrecoveryをもう一度実行し、event追加や状態変化なしの全件NO_OPと同一最終head/hashを確認する。最終read後に新しいeventが発生し得るため、この結果を後続操作時点の認可として使わない。
+5. **verified replay**: 最新witness checkpointが厳密に覆うheadまで完全journal chain検証が完了した後に限り、現projection revisionの次からそのheadまでrevision順に適用する。各applyとread-backはquarantine generation/owner CAS fenceを通し、revision/hash/held/action全fieldが検証済みjournal prefixと一致することを確認する。same revision/same hashのretryだけNO_OP。途中失敗時はprojectionが部分的に進んでも永続隔離を維持し、process再起動後も次のownerが新generationを取得し再検証する。以前のownerは新generationのprojection/recovery stateを更新できない。
+6. **final live reread**: replay後に固定read順序でwitnessを、stable snapshot規則でjournal head/eventsを再取得し、最初の検証後に進んだcheckpoint/eventを見逃していないか確認する。最新witness revision/hashとfinal journal replay head revision/hashはここでも完全一致必須。進んでいれば隔離を維持したまま新しい一致snapshotからbounded retryする。安定回数上限/時間上限超過、read不達、改変、不一致はQUARANTINED。projectionがfinal journal headと全fieldで一致した場合のみ`RECOVERED_SYNTHETIC`を返すが、永続隔離は解除しない。
+7. **repeatability**:同じ状態でrecoveryをもう一度実行し、event追加や状態変化なしの全件NO_OPと同一最終head/hashを確認する。新ownerは新generationで隔離を継続し、前owner tokenでの再開がCASで拒否されることも確認する。最終read後に新しいeventが発生し得るため、この結果を後続操作時点の認可として使わない。
 
 cross-DB transactionを装わない。bounded再試行とfinal rereadはrestore中の進行を検出するが、最終読取直後に新eventが発生するraceを消さない。将来の実利用者/workerは各操作の直前にもlive authorityを再検証する必要があり、そのgateはDの範囲外である。
 
@@ -42,6 +44,7 @@ cross-DB transactionを装わない。bounded再試行とfinal rereadはrestore�
 | journal event truncation/gap/hash改変/head不一致 | projection write前にQUARANTINED |
 | projection revision ahead、same-revision異hash、projected field drift | QUARANTINED。app stateをauthorityとして採用しない |
 | 初回または最終read中のwitness/journal更新、再読上限到達 | bounded retry後も安定しなければQUARANTINED |
+| recovery中のprocess crash/restart、old ownerの遅延復帰 | DB上のquarantine generation/owner fenceを維持し、旧ownerのCAS更新を拒否。成功後も隔離は自動解除しない |
 | commit response loss | projectionを独立read-backし、exact prefixなら再開/NO_OP。それ以外またはread unavailableはQUARANTINED |
 | witness unavailable、unknown/compromised key、署名/freshness不正 | QUARANTINED。cacheやjournal内checkpointへfallbackしない |
 
@@ -67,19 +70,22 @@ Cの`SignedWatermarkVerifier`はlatest checkpointの`issuedAt + maxAge`を検査
 | witness history truncation | 先頭/中間checkpointを除去、latest row保持または改変 | verifier/recoveryがchainまたはlatest照合で拒否し、projection stateをtrustedと返さない。 |
 | journal truncation/gap/hash fork | event row欠落、gap、previous/event/head hash改変 | apply前quarantine、event追加/補正なし。 |
 | old signed watermark | 過去の署名自体は有効だがlive witness latestより古いjournal backup | old signatureだけで復旧不可、latest/head mismatchを観測。 |
+| R10→R7 restore with witness R5 | live witness latestはR5、journalは一度R10を経てR7 backupへ戻す。R5 checkpointとR7 chainは個別には正当 | 最終replay head R7がlatest witness R5と不一致のためQUARANTINED。R7をreplay/acceptedせず、projectionをtrusted扱いしない。 |
 | projection tamper/ahead | revision/hash/held/action field改変またはjournalよりahead | `PROJECTION_MISMATCH`相当でquarantine、自動上書きなし。 |
 | concurrent event during replay | barrierでprojection replay中に別connectionからjournal event/checkpointを進める | 最終rereadが進行を検知し、隔離を保ったretryで最新に収束するか、bound超過ならquarantine。Future/lock waitはbounded、失敗を握りつぶさない。 |
 | concurrent witness append between history/latest reads | 2 connectionでlatest/history読取間にattestor append | 安定snapshot helperが混合snapshotを採用せず再読し、latestとhistoryの同じtailを検証。 |
 | maxAge idle boundary | event-free partitionのvalid checkpointをclockでmaxAge前/ちょうど/後へ進める | 期限後はfail-closed。same-revision renewalが未実装であることを明示し、成功と誤分類しない。 |
 | witness unavailable/rollback | witness read停止、latest epoch/revision/hash後退 | fallbackせずquarantine。witnessまで全体rollbackした場合は検出保証外と明記。 |
+| persistent quarantine fence / process restart | replay ownerを停止した後、別process/ownerで再開。さらに旧ownerを遅延復帰させる | 実MySQL rowにquarantine generation/ownerが永続し、新ownerの通常projection/replay/restoreだけがCAS通過。旧ownerの更新は拒否。成功時も隔離stateは残る。 |
+| recovery SQL privilege boundary | recovery principalでsign/append/DDL/fixture restoreを試行 | 実DB ACLが全て拒否。別fixture-admin principalだけがfixture setup/restore可能。 |
 
 runtime assertionには3 containerの識別子/image/version、partition opaque ID、checkpoint epoch/revision、判定reason、replay count、skip=0を安全に記録する。private key、DB credential/URI、PII/raw journal payloadは記録しない。Maven/Dockerはrootが直列実行する。
 
 ## 6. Dの実装範囲とレビュー条件
 
-実装承認後の最小候補はpackage-private `PrivacyRecoveryService`（partitionのみ受ける）、stable witness snapshot reader、stable journal snapshot/prefix verifierの共有化、projection replay/read-back、bounded retry/quarantine resultと上記MySQL testである。mainにsigner/private key/production bean/controllerを追加せず、schema migrationも作らない。Cのstrict revision/maxAge契約は変更しない。
+実装承認後の最小候補はpackage-private `PrivacyRecoveryService`（partitionのみ受ける）、固定順序・byte比較を行うstable witness reader、stable journal snapshot/prefix verifierの共有化、test-only永続quarantine generation/owner fence、fence付きprojection replay/read-back、recovery主体と分離したfixture-admin SQL権限、bounded retry/quarantine resultと上記MySQL testである。mainにsigner/private key/production bean/controllerを追加せず、schema migrationも作らない。Cのstrict revision/maxAge契約は変更しない。
 
-Astra reviewでは特に、(1) history/latest stable-readの線形化とappend競合、(2) witness anchor以降のjournal tailをreplayできる権威根拠、(3) projection partial progress中もquarantine/read-onlyを保つ仕組み、(4) final reread直後のTOCTOUをD結果が認可に転用しない境界、(5) idle maxAge後の運用可能性と別protocol refresh案、(6) full witness rollbackで証明できない限界を確認する。これらに合意するまで実装しない。
+Astra reviewでは特に、(1) history/latest stable-readの固定順序・byte完全比較とappend競合、(2) journal final replay headがlive witness latestとrevision/hash完全一致する契約、(3) projection partial progress・crash/restart・old owner復帰中も永続quarantine/fenceを保つ仕組み、(4) recovery SQL権限分離とfixture-admin restore境界、(5) final reread直後のTOCTOUをD結果が認可に転用しない境界、(6) idle maxAge後の運用可能性と別protocol refresh案、(7) full witness rollbackで証明できない限界を確認する。これらに合意するまで実装しない。
 
 ## 参照
 
