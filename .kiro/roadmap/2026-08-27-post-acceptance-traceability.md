@@ -12,10 +12,10 @@
 | 01 | R01a `ced64304` CODE PASS、採番/actor P2閉鎖。追加fixture `e3944774` CODE PASS。DUAL確認等は未完 | 文書ACL/version、二者確認、信頼できる退社撤権要求・確認、legacy scope、運用承認 |
 | 02 | CANDIDATE維持。recipient現在scope/owner tenantの両P1は36dcfdfcでAstra限定CODE PASS、control統合済み | DG-02、正式Owner/最終Review、release |
 | 03 | 集約完了修復と実MySQL並行証拠 `89384928`は限定CODE PASS、control統合済み | 全体最終Review、NF07 policy、retention、staging/運用承認 |
-| 04 | G1限定CODE PASS、34/0/0/0とMySQL4/0/0/0。実servlet修復91dbca13は独立Review・3/0/0/0、control統合後40/0/0/0。Chrome06 fixed5b40590eの2/0/0/0はAstra限定証拠PASS。全browser05 fixed360de89fは11 class16/0/0/0・Astra証拠PASS。ただしbootstrapのdelete待機中の撤回を上書きする追加P1を検出、G2統合保留 | 実PWA/browser全体検証、非通知tab/分散session環境、正式release |
+| 04 | G1限定CODE PASS、34/0/0/0とMySQL4/0/0/0。実servlet修復91dbca13は独立Review・3/0/0/0、control統合後40/0/0/0。Chrome06 fixed5b40590eの2/0/0/0はAstra限定証拠PASS。bootstrap撤回競合P1を修復しfull06 fixed38f684acは11 class17/0/0/0。G2をcontrol6980dff8へ統合、同SHA browser17/0/0/0と定向fast13 class85/0/0/0をAstra限定受理 | 実PWA/browser全体検証、非通知tab/分散session環境、正式release |
 | 05 | 開発scope CONDITIONAL。総deadline 2187b5f9限定CODE PASS、26/0/0/0、control統合。実transport未完 | provider/credential、許可先、正式production enablement |
 | 06 | F2 foundation限定CODE PASS・control統合済み。F1a 66/0/0/0、candidate6/0/0/0、V184 fixedaba94e6f fresh/upgrade2/0/0/0。MAPPED leaseはH2 fixed696221cf 6/0/0/0、MySQL fixed14f81ae5 9/0/0/0、Astra限定受理。実metadata/Document ACL14/0/0/0を限定受理。ただしmetadata lock待機中の撤権P1を検出しF1a統合保留。auth-lock-04 fixed068aaad2は16/0/0/0・Astra限定証拠PASS。registerJob/direct-helper境界を実証し、他metadata実service競合matrixは追加候補。validation lifecycle・apply/UI未完 | V183併合rehearsal、全synthetic実装/Review、実source/mapping/data owner、移行承認 |
-| 07 | SF-W1/W2a・W2b Slice A/B限定CODE PASS。Slice B三DB MySQL10/0/0/0、control61b0b979統合後も10/0/0/0。Slice Cは旧13/0/0/0後、main commit故障fixtureで16/1/0/0、次はcompile FAIL。修復97641ce9はMySQL16/0/0/0・Astra限定CODE/証拠PASS、control a0a05f7d再実行も16/0/0/0。D plan0fbd0515は限定PLAN PASS。D1 fixed8fd3bcb0はMySQL20/0/0/0・Astra限定CODE/証拠PASS、control a9e8c360の再試験20/0/0/0もAstra証拠PASS、pure5 class18/0/0/0。D2候補52a3ac82はcompile/計数修復と待機上限・追加matrixが未完。実dispatch/処分・coverage未完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
+| 07 | SF-W1/W2a・W2b Slice A/B限定CODE PASS。Slice B三DB MySQL10/0/0/0、control61b0b979統合後も10/0/0/0。Slice Cは旧13/0/0/0後、main commit故障fixtureで16/1/0/0、次はcompile FAIL。修復97641ce9はMySQL16/0/0/0・Astra限定CODE/証拠PASS、control a0a05f7d再実行も16/0/0/0。D plan0fbd0515は限定PLAN PASS。D1 fixed8fd3bcb0はMySQL20/0/0/0・Astra限定CODE/証拠PASS、control a9e8c360の再試験20/0/0/0もAstra証拠PASS、pure5 class18/0/0/0。D2a d83266afはMySQL26/0/0/0・Astra限定受理、未統合。D2b時間上限計画7ea5287fは限定PLAN PASS、実装・追加matrix未完。実dispatch/処分・coverage未完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
 | 08 | 開発scope CONDITIONAL。fixed020dc4d1は10 class53/0/0/0、Astra証拠照合。immutable config/invocationと費用上限契約のSlice A fixed6693abd1は12 class64/0/0/0、Astra証拠照合。Slice B fixed286ab361は18 class84/0/0/0、Astra限定CODE/証拠PASS、control未統合。C1候補df0aa935は独立Reviewのdispatch/信頼証拠P2修復中。C2 ACTUAL/失敗matrix・実cost policy・artifact refresh未完 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
 | 09 | fail-closed修復 `da850b97`限定CODE PASS、control統合済み。実providerの完成ではない | V182 PENDING=0/帰属不明0/親子一致、実撤権/session/token、production owner |
 | 10 | session共有reauth修復 `20cce0f7`限定CODE PASS、46/0/0/0、control統合済み | 全体独立Review、実browser/session環境、staging、正式release |
@@ -23,7 +23,7 @@
 NF01の「退社確定時一括失効trigger」は現行コードでNF01呼出が確認できず、下記承認範囲の記述を
 実装済み証拠としない。NF06/NF07のflag OFFを全機能完成として扱わない。
 PR101 CIは全7 SUCCESSだったがmerge後main CIはBrowser FAILURE。Browser修復はlocalで独立PASSを得た段階であり、
-remote mainのCIをPASSに変更したとは報告しない。2026-10-04再照合では最新local全fastは第4回、fixed `3d9e3a87`、4088/0/0/0でPASS。同Headの全MySQLは190/7/0/0でFAIL。Q2/Q3限定修復は再試験20/0/0/0とAstra限定CODE PASSを得てcontrolへ統合した。初回20件全skipのFAIL履歴を保持し、全MySQL再合格とは扱わない。NF04 G1は限定統合済み、G2 WIPは未統合。最新control全体Gateとproduction approvalは未完である。
+remote mainのCIをPASSに変更したとは報告しない。2026-10-04再照合では最新local全fastは第4回、fixed `3d9e3a87`、4088/0/0/0でPASS。同Headの全MySQLは190/7/0/0でFAIL。Q2/Q3限定修復は再試験20/0/0/0とAstra限定CODE PASSを得てcontrolへ統合した。初回20件全skipのFAIL履歴を保持し、全MySQL再合格とは扱わない。NF04 G1/G2は限定統合済みで、control6980dff8のbrowser17件/定向fast85件は限定受理。最新control全体Gateとproduction approvalは未完である。
 
 - 親文書: `2026-08-27-post-acceptance-feature-backlog.md`
 - 状態: 候補。各Decisionが`APPROVED`になるまでproduction変更を開始しない。

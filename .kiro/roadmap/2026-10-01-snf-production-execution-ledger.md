@@ -447,7 +447,7 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   Astraが24 report hashとXMLを照合し、限定証拠PASS。raw32 fileをcontrolへhash一致保存した。
   Slice B候補 `fdbbe56ddea8d798529cbc293ef591a15354b60f` はAstra **REQUEST CHANGES**。
   adapter自身のproduction deny-all、無効transportによるboundary test偽陽性、TLS/全chain統合、blocked/index overflow、
-  usage次元整合、Copilot HTML清洗による不正入力の合法化を修復する。Aの合格をBの証拠へ流用しない。
+  usage次元整合、Copilot HTML除去による不正入力の合法化を修復する。Aの合格をBの証拠へ流用しない。
 - NF04 fixed `5b40590ee2792f2afd440a78848c40df05be358c` の全browser01は **11 class、16/1/1/0、FAIL**。
   UTC2026-10-08 02:50:56.5135404〜02:53:38.9543478、exit1、起止SHA一致・clean。
   log SHA-256 `FA5AAF03C886B411CFBA1B5601D2FCBB50E92B3A9F91920EE6FA5B3EE5142E24`。
@@ -563,3 +563,36 @@ origin/main固定SHAの最新run36858538460はCOMPLETED/FAILUREのままであ�
   verify fixed `38f684acbf8da9dae37d5473f7c2fa63fc9a7c21` の全browser再試験を次gateとする。前fixedの16件合格は新競合の実証ではない。
 - NF07 D2a `d83266af` はpublic constructor・retry計数修復をAstraが限定確認し、実MySQL診断を開始した。
   試験が成功しても総deadline/JDBC待機上限、追加故障matrix、復元ACL/実restartの未完を消さない。
+
+### 2026-10-13 G2ローカル統合とrecovery限定実証
+
+- NF04 source修復 `7541e3e8/70fe6d0a`、verify fixed `38f684acbf8da9dae37d5473f7c2fa63fc9a7c21` の全browser06は
+  **11 class、17/0/0/0**。UTC05:35:28.7640580〜05:38:24.4984301、exit0、起止SHA一致・clean。
+  log SHA-256 `B8DDC05F1BEAE2A62801282F93AB438008CB40775F1C2B4BB62E3FA2BA74E358`。
+  Astraが22 report hash/XMLを独立照合し、実IndexedDB completion待機中の撤回と旧bootstrap帰還拒否を含め限定受理。
+  raw30 fileをhash一致保存した。G2の24 commitをcontrol `2053adb2`〜`6980dff8` に統合した。
+  common.js利用者変更は含まない。EngineerSelfService testの自動mergeはcontrol側account-link削除とG2側fixture/診断を両方保持する。
+- control fixed `6980dff8ae6bde28a5792cf724523d3f971acb7c` の全browser再試験も **11 class、17/0/0/0**。
+  UTC05:42:28.4528486〜05:45:25.2562488、exit0、起止SHA一致・clean。
+  log SHA-256 `BDA6A100D56917113EFA63B4981C4923347AA7C52E10885F18D377DA13053171`。
+  Astraは22 report hash/時刻、統合差分、common.js非混入を独立照合し、ローカル統合の限定CODE・証拠PASS。
+  同じcontrolのNF04 fast定向は **13 class、85/0/0/0**、UTC05:45:41.8642789〜05:47:44.5791058、
+  log SHA-256 `CBC4D46CCC44E8D1EF30AEDE25F45BEC4149DB8DA2A8B364D87E90AD68AAF1A8`。
+  Astraが26 report hash・XML・実行時刻を独立照合し、定向fastの証拠も限定受理した。最新control全fast/全MySQL/performance/backupやproduction多browserの証拠には拡張しない。
+- NF07 D2a fixed `d83266af6a1e3044b5ab76ce120272c6a1f1c6a0` は実MySQL **26/0/0/0**。
+  UTC05:31:40.4406508〜05:34:42.3743662、exit0、起止SHA一致・clean。
+  log SHA-256 `0AC01EFC4F4E086057D057872391DECCB2547EE896ED31F3A0DA68F4C3E846AE`。
+  Astraがreport hash・三DB/schemaを独立照合し限定受理、raw10 fileをcontrolへhash一致保存した。D2aは未統合。
+  総deadline、stable-read競合の全matrix、復元ACL、実process restartは未完である。
+  D2b計画 `66eeaf8d` はowner期限・隔離取得未確認の二P2を修正し、`7ea5287f` で限定PLAN PASS。
+  既に持続隔離を確認したpartitionを前提に、不可延長lease context、期限後の同一lease拒否、全JDBC/cleanupの予算共有を実装する。
+  初回隔離取得のcommit不明はABORTED/UNKNOWNであり、持続隔離済みとは報告しない。
+  5秒作業＋2秒cleanupは選定fixtureの測定基準であってdriver/OS任意挙動の一般的硬上限ではない。実装・試験は未完。
+- NF08 C1-01 fixed `20bfca42` は **18 class、90/0/1/0、FAIL**。
+  UTC05:38:45.8608091〜05:40:07.4240290、log SHA-256 `FC6632A8151B0C012C37D5D857FA994941951A8CD71F8417403D30ACCE46D7AB`。
+  completeSummaryAttemptの条件式でnull費用が自動unboxされNPEとなった。raw44 fileを保存し、
+  `3d95d3f5` でenum switchによるnullable代入と旧actual/upper metadata消去・回帰を追加。Astra静的受理、再試験待ち。
+  C2のACTUAL/rate-card・outer usage/inner失敗の分離は未実装であり、C1の定向成功で完成としない。
+- NF06実service撤権matrix候補 `a498b162/000b2574` はrace-matrix01で **compile FAIL・XMLなし**。
+  UTC05:41:07.1109752〜05:41:44.2104230、log SHA-256 `0235FCD764BBBBA7E02DBE152334417A2B26BCFA261FDEB9A76C46423490FF95`。
+  test method識別子内の空白を `1daff170` で修正し、単一file javacはexit0。raw6 fileを保存した。23件候補の実MySQL再試験前にPASSとしない。
