@@ -421,6 +421,8 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         assertTrue(advanced.get(), "fixture中の進行を実際のprojection/journal/witness MySQLへ反映した");
         assertEquals(PrivacyRecoveryService.Status.RECOVERED_SYNTHETIC, result.status());
         assertEquals(2L, result.revision());
+        assertEquals(2, result.appliedCount(), "最初の試行と追いつき試行で完了した実applyを合算する");
+        assertEquals(0, result.noOpCount(), "実際にno-opを返したapplyだけを数える");
         assertEquals("action-final-reread", new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment())
                 .snapshot(partition).lastActionId());
         assertEquals("QUARANTINED", new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
