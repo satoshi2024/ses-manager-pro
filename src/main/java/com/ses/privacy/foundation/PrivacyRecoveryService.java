@@ -12,9 +12,12 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
-/** partitionからlive authorityを読み直すtest-only recovery候補。成功後も隔離を解除しない。 */
+/** partitionからlive authorityを読み直すtest-only recovery候補。成功後も隔離を解除しない。
+ * 再試行は回数だけを制限し、JDBC deadline/statement timeoutやrestart・ACL全matrixは未実装。
+ */
 final class PrivacyRecoveryService {
     enum Status { RECOVERED_SYNTHETIC, QUARANTINED }
+    /** applied/noOpはこのrecover呼出し中に実行されたapplyRecoveryの結果を試行間で合算する。 */
     record Result(Status status, String reason, long revision, String eventHash,
                   int appliedCount, int noOpCount, long generation) { }
 
@@ -45,15 +48,17 @@ final class PrivacyRecoveryService {
         Objects.requireNonNull(partition, "partition");
         LeaseHolder holder = new LeaseHolder(fence.quarantine(new JournalPartition(partition.tenantId(), partition.subjectRef())));
         String lastReason = "RETRY_EXHAUSTED";
+        int applied = 0;
+        int noOp = 0;
         for (int attempt = 0; attempt < RECOVERY_ATTEMPTS; attempt++) {
             StableWitness firstWitness = readStableWitness(partition);
-            if (firstWitness == null) return quarantined(lastReason = "WITNESS_UNSTABLE", 0, null, 0, 0, holder.lease);
+            if (firstWitness == null) return quarantined(lastReason = "WITNESS_UNSTABLE", 0, null, applied, noOp, holder.lease);
             SignedWatermarkVerifier.Result witnessResult = verifier.verify(partition,
                     firstWitness.history(), firstWitness.latest());
             if (witnessResult.status() != SignedWatermarkVerifier.Status.VALID) {
                 return quarantined("WITNESS_" + witnessResult.reason().name(),
                         firstWitness.latest() == null ? 0 : firstWitness.latest().eventRevision(),
-                        firstWitness.latest() == null ? null : firstWitness.latest().eventHash(), 0, 0, holder.lease);
+                        firstWitness.latest() == null ? null : firstWitness.latest().eventHash(), applied, noOp, holder.lease);
             }
 
             PrivacyJournalSnapshotReader.Snapshot journalSnapshot;
@@ -67,7 +72,7 @@ final class PrivacyRecoveryService {
                     new JournalPartition(partition.tenantId(), partition.subjectRef()),
                     journalSnapshot.head(), journalSnapshot.events())
                     || !journalHeadMatchesEvents(journalSnapshot.head(), journalSnapshot.events())) {
-                return quarantined("JOURNAL_CHAIN_INVALID", 0, null, 0, 0, holder.lease);
+                return quarantined("JOURNAL_CHAIN_INVALID", 0, null, applied, noOp, holder.lease);
             }
             if (journalSnapshot.head().revision() != witnessResult.latest().checkpoint().eventRevision()
                     || !journalSnapshot.head().eventHash().equals(witnessResult.latest().checkpoint().eventHash())) {
@@ -80,12 +85,12 @@ final class PrivacyRecoveryService {
                 current = projection.snapshot(new JournalPartition(partition.tenantId(), partition.subjectRef()));
             } catch (RuntimeException unavailable) {
                 return quarantined("PROJECTION_UNAVAILABLE", journalSnapshot.head().revision(),
-                        journalSnapshot.head().eventHash(), 0, 0, holder.lease);
+                        journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
             }
             if (!JournalProjectionService.snapshotMatchesJournal(new JournalPartition(partition.tenantId(), partition.subjectRef()),
                     current, journalSnapshot.events())) {
                 return quarantined("PROJECTION_MISMATCH", journalSnapshot.head().revision(),
-                        journalSnapshot.head().eventHash(), 0, 0, holder.lease);
+                        journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
             }
 
             List<JournalProjectionService.VerifiedJournalEvent> verifiedEvents;
@@ -93,10 +98,8 @@ final class PrivacyRecoveryService {
                 verifiedEvents = JournalProjectionService.verifiedEvents(new JournalPartition(partition.tenantId(), partition.subjectRef()),
                         journalSnapshot.head(), journalSnapshot.events());
             } catch (RuntimeException invalid) {
-                return quarantined("JOURNAL_CHAIN_INVALID", 0, null, 0, 0, holder.lease);
+                return quarantined("JOURNAL_CHAIN_INVALID", 0, null, applied, noOp, holder.lease);
             }
-            int applied = 0;
-            int noOp = 0;
             for (int index = Math.toIntExact(current.revision()); index < verifiedEvents.size(); index++) {
                 ProjectionResult result;
                 try {
@@ -110,7 +113,9 @@ final class PrivacyRecoveryService {
                             journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
                 }
                 if (result.status() == PrivacyProjectionPort.Status.APPLIED) applied++;
-                else noOp++;
+                else if (result.status() == PrivacyProjectionPort.Status.NO_OP) noOp++;
+                else return quarantined("REPLAY_STATUS_INVALID", journalSnapshot.head().revision(),
+                            journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
                 ProjectionSnapshot observed;
                 try {
                     observed = projection.snapshot(new JournalPartition(partition.tenantId(), partition.subjectRef()));
@@ -161,7 +166,7 @@ final class PrivacyRecoveryService {
             return new Result(Status.RECOVERED_SYNTHETIC, "VERIFIED_LIVE_HEAD", finalJournal.head().revision(),
                     finalJournal.head().eventHash(), applied, noOp, holder.lease.generation());
         }
-        return quarantined(lastReason, 0, null, 0, 0, holder.lease);
+        return quarantined(lastReason, 0, null, applied, noOp, holder.lease);
     }
 
     private StableWitness readStableWitness(LatestWitnessPort.Partition partition) {

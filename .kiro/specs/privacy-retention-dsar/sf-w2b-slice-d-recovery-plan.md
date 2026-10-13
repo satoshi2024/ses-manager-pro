@@ -2,6 +2,8 @@
 
 状態: **設計案 / Astra review待ち。実装・合格・NF07完了を意味しない。** 対象はsynthetic test環境のapplication projection/journal restore後に、独立witnessのlive latestを起点としてjournal chainを再検証し、projectionを再構築できるかの技術検証に限る。production接続、migration、外部provider、credential、dispatch/publicationの有効化、人工承認は含めない。
 
+実装状態: 現在のコードは**D2a候補**であり、Slice DまたはNF07の完了ではない。retry回数の上限だけではJDBC呼出し全体の時間上限を保証しないため、statement/network deadlineは未実装。ACL拒否の全matrix、process再起動後の継続・旧owner拒否の全matrixも未完了として扱う。下記の設計受入条件を満たした証拠が揃うまで、`RECOVERED_SYNTHETIC`をproduction recovery readinessとして扱わない。
+
 ## 1. Slice Cから引き継ぐ信頼境界
 
 Slice Cの`LatestWitnessPort`は`history(partition)`と`latest(partition)`を別々に読むinterface、`SignedWatermarkVerifier.verify(partition, history, latest)`は渡された値を検証するpure verifierである。現在のCには「どの値を読むか」を固定するrecovery serviceがない。したがって、Dの入口はpartitionだけを受け、呼出側の`history`、`latest`、署名済みwatermark、`JournalAck`、trusted booleanを受け取らない。D自身がtest-only primaryに束縛されたportからlive値を読む。

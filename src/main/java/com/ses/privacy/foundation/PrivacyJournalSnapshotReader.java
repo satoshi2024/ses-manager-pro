@@ -11,6 +11,6 @@ interface PrivacyJournalSnapshotReader {
     Snapshot read(JournalPartition partition);
 
     record Snapshot(JournalHead head, List<JournalEvent> events) {
-        Snapshot { events = List.copyOf(events); }
+        public Snapshot { events = List.copyOf(events); }
     }
 }
