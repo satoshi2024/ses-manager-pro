@@ -11,6 +11,8 @@ import org.apache.hc.client5.http.impl.async.CloseableHttpAsyncClient;
 import org.apache.hc.client5.http.impl.async.HttpAsyncClients;
 import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManager;
 import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManagerBuilder;
+import org.apache.hc.client5.http.ssl.ClientTlsStrategyBuilder;
+import org.apache.hc.client5.http.ssl.DefaultHostnameVerifier;
 import org.apache.hc.client5.http.protocol.HttpClientContext;
 import org.apache.hc.core5.concurrent.FutureCallback;
 import org.apache.hc.core5.http.ContentType;
@@ -27,6 +29,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
+import javax.net.ssl.SSLContext;
 import java.util.Locale;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -74,11 +77,21 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
 
     CopilotBoundedHttpTransport(CopilotDnsSnapshotResolver dnsResolver, boolean testLoopbackMode,
                                 Runnable testAdmissionObserver, Runnable testSubmissionObserver) {
+        this(dnsResolver, testLoopbackMode, testAdmissionObserver, testSubmissionObserver, null);
+    }
+
+    CopilotBoundedHttpTransport(CopilotDnsSnapshotResolver dnsResolver, boolean testLoopbackMode,
+                                Runnable testAdmissionObserver, Runnable testSubmissionObserver,
+                                SSLContext testSslContext) {
         this.dnsResolver = dnsResolver;
         this.testLoopbackMode = testLoopbackMode;
         this.testAdmissionObserver = testAdmissionObserver;
         this.testSubmissionObserver = testSubmissionObserver;
+        ClientTlsStrategyBuilder tlsBuilder = ClientTlsStrategyBuilder.create()
+                .setHostnameVerifier(new DefaultHostnameVerifier());
+        if (testSslContext != null) tlsBuilder.setSslContext(testSslContext);
         this.connectionManager = PoolingAsyncClientConnectionManagerBuilder.create()
+                .setTlsStrategy(tlsBuilder.build())
                 .setDnsResolver(dnsResolver)
                 .setMaxConnTotal(MAX_ACTIVE_EXCHANGES)
                 .setMaxConnPerRoute(4)
@@ -297,6 +310,8 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
     public int activeExchangeCount() {
         return activeExchanges.get();
     }
+
+    boolean isTestLoopbackMode() { return testLoopbackMode; }
 
     int leasedConnectionCount() {
         return connectionManager.getTotalStats().getLeased();

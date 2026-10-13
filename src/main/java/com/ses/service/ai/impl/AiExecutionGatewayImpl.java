@@ -113,12 +113,18 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         }
         long started = System.nanoTime();
         String text = "";
+        com.ses.service.ai.CopilotProviderUsage providerUsage = null;
         String status = "SUCCEEDED";
         String error = null;
         try {
             // HTTP / provider 呼び出しは TX 外（接続プール占有を避ける）
-            text = AiPiiMasker.stripHtml(AiGatewayRequest.USE_COPILOT.equals(request.getUseCase())
-                    ? callCopilotProvider(prompt, invocation) : callProvider(prompt));
+            if (AiGatewayRequest.USE_COPILOT.equals(request.getUseCase())) {
+                com.ses.service.ai.CopilotProviderResponse response = callCopilotProvider(prompt, invocation);
+                text = response.text();
+                providerUsage = response.usage();
+            } else {
+                text = AiPiiMasker.stripHtml(callProvider(prompt));
+            }
             if (request.isRequireJson()) {
                 assertJson(text);
             }
@@ -140,7 +146,7 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 runId = run.getId();
             }
         }
-        return new AiGatewayResult(text, request.getTraceId(), runId, prompt);
+        return new AiGatewayResult(text, request.getTraceId(), runId, prompt, providerUsage);
     }
 
     private String callProvider(String prompt) {
@@ -207,11 +213,11 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         return invocation;
     }
 
-    private String callCopilotProvider(String prompt, CopilotInvocation invocation) {
+    private com.ses.service.ai.CopilotProviderResponse callCopilotProvider(String prompt, CopilotInvocation invocation) {
         if (!(aiTextService instanceof CopilotBoundedAiTextService bounded)) {
             throw BusinessException.of(503, "COPILOT_BOUNDED_PROVIDER_UNAVAILABLE");
         }
-        return bounded.generateCopilotSummary(prompt, invocation);
+        return bounded.generateCopilotResponse(prompt, invocation);
     }
 
     /** controllerを経由しない呼出しも、provider I/O直前に最終gateを通す。 */

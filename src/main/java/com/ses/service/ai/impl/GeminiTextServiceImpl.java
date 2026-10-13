@@ -8,6 +8,8 @@ import com.ses.common.security.OutboundUrlGuard;
 import com.ses.config.AiConfig;
 import com.ses.service.ai.AiTextService;
 import com.ses.service.ai.CopilotBoundedAiTextService;
+import com.ses.service.ai.CopilotProviderResponse;
+import com.ses.service.ai.CopilotProviderUsage;
 import com.ses.service.ai.copilot.CopilotConfigSnapshot;
 import com.ses.service.ai.copilot.CopilotInvocation;
 import com.ses.service.ai.copilot.summary.CopilotSummaryPromptTemplate;
@@ -61,6 +63,7 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
     private final OutboundUrlGuard outboundUrlGuard;
     private final CopilotBoundedHttpTransport copilotTransport;
     private final CopilotConfigSnapshot copilotConfigSnapshot;
+    private final boolean syntheticLoopbackFixture;
     private final CopilotGeminiResponseParser copilotResponseParser = new CopilotGeminiResponseParser();
 
     @Autowired
@@ -69,12 +72,23 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
                                   ObjectMapper objectMapper,
                                   OutboundUrlGuard outboundUrlGuard,
                                   CopilotBoundedHttpTransport copilotTransport) {
+        this(aiConfig, aiRestTemplate, objectMapper, outboundUrlGuard, copilotTransport, false);
+    }
+
+    /** package内合成loopback fixture専用。production DIからは呼び出せない。 */
+    GeminiTextServiceImpl(AiConfig aiConfig, RestTemplate aiRestTemplate, ObjectMapper objectMapper,
+                          OutboundUrlGuard outboundUrlGuard, CopilotBoundedHttpTransport copilotTransport,
+                          boolean syntheticLoopbackFixture) {
         this.aiConfig = aiConfig;
         this.aiRestTemplate = aiRestTemplate;
         this.objectMapper = objectMapper;
         this.outboundUrlGuard = outboundUrlGuard;
         this.copilotTransport = copilotTransport;
-        this.copilotConfigSnapshot = captureCopilotConfig(aiConfig);
+        this.syntheticLoopbackFixture = syntheticLoopbackFixture;
+        if (syntheticLoopbackFixture && (copilotTransport == null || !copilotTransport.isTestLoopbackMode())) {
+            throw new IllegalArgumentException("合成Gemini fixtureにはloopback transportが必要です");
+        }
+        this.copilotConfigSnapshot = captureCopilotConfig(aiConfig, syntheticLoopbackFixture);
     }
 
     /** legacyテスト互換用。bounded transportなしではCopilot呼出しをfail-closedにする。 */
@@ -85,7 +99,8 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         this.objectMapper = objectMapper;
         this.outboundUrlGuard = outboundUrlGuard;
         this.copilotTransport = null;
-        this.copilotConfigSnapshot = captureCopilotConfig(aiConfig);
+        this.syntheticLoopbackFixture = false;
+        this.copilotConfigSnapshot = captureCopilotConfig(aiConfig, false);
     }
 
     @Override
@@ -113,22 +128,31 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
 
     @Override
     public String generateCopilotSummary(String prompt, CopilotInvocation invocation) {
+        return generateCopilotResponse(prompt, invocation).text();
+    }
+
+    @Override
+    public CopilotProviderResponse generateCopilotResponse(String prompt, CopilotInvocation invocation) {
         assertDeadline(invocation == null ? 0 : invocation.deadlineNanos());
         if (copilotTransport == null || prompt == null || !invocation.identityMatchesSnapshot()
                 || !sameSnapshot(copilotConfigSnapshot, invocation.configSnapshot())
-                || !invocation.preflightCostEvidence().dispatchAllowed()
                 || !"gemini".equals(invocation.expectedProvider())
                 || !copilotConfigSnapshot.modelId().equals(invocation.expectedModel())
                 || !copilotPromptVersion().equals(invocation.expectedPromptVersion())
                 || !copilotConfigSnapshot.configHash().equals(invocation.expectedConfigHash())) {
             throw BusinessException.of(503, "COPILOT_EXECUTION_SNAPSHOT_INVALID");
         }
+        if (!allowsDispatch(invocation)) {
+            throw BusinessException.of(503, "COPILOT_COST_UNKNOWN");
+        }
         String apiKey = aiConfig.getApiKey();
         if (apiKey == null || apiKey.isBlank()) throw BusinessException.of(503, "COPILOT_API_KEY_UNAVAILABLE");
         try {
             java.net.URI endpoint = java.net.URI.create(geminiEndpoint(copilotConfigSnapshot.canonicalEndpoint(),
                     copilotConfigSnapshot.modelId()));
-            outboundUrlGuard.validateExactHostHttpsUrl(endpoint.toString(), ALLOWED_HOSTS);
+            if (!syntheticLoopbackFixture) {
+                outboundUrlGuard.validateExactHostHttpsUrl(endpoint.toString(), ALLOWED_HOSTS);
+            }
             ObjectNode request = objectMapper.createObjectNode();
             request.putArray("contents").addObject().putArray("parts").addObject().put("text", prompt);
             ObjectNode generation = request.putObject("generationConfig");
@@ -138,12 +162,19 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
             byte[] body = objectMapper.writeValueAsBytes(request);
             assertDeadline(invocation.deadlineNanos());
             Response response = copilotTransport.postGemini(endpoint, body, invocation.deadlineNanos(), apiKey);
+            if (response.statusCode() == 429) {
+                throw BusinessException.of(429, "COPILOT_PROVIDER_429");
+            }
             if (response.statusCode() < 200 || response.statusCode() >= 300
                     || !isJsonContentType(response.contentType())) {
                 throw BusinessException.of(502, "COPILOT_PROVIDER_RESPONSE_REJECTED");
             }
-            return copilotResponseParser.extractSummaryJson(response.body(), invocation.deadlineNanos(),
-                    invocation.expectedQueryId());
+            CopilotGeminiResponseParser.ParsedResponse parsed = copilotResponseParser.parse(
+                    response.body(), invocation.deadlineNanos(), invocation.expectedQueryId());
+            return new CopilotProviderResponse(parsed.summaryJson(), new CopilotProviderUsage(
+                    parsed.usage().promptTokenCount(), parsed.usage().candidateTokenCount(),
+                    parsed.usage().totalTokenCount(), parsed.usage().thoughtsTokenCount(),
+                    parsed.usage().cachedContentTokenCount()));
         } catch (BusinessException ex) {
             throw ex;
         } catch (OutboundUrlException ex) {
@@ -153,23 +184,43 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         }
     }
 
-    private static CopilotConfigSnapshot captureCopilotConfig(AiConfig config) {
+    private boolean allowsDispatch(CopilotInvocation invocation) {
+        var evidence = invocation.preflightCostEvidence();
+        if (!syntheticLoopbackFixture) return false; // production Gemini adapter is fixed deny-all
+        return evidence.dispatchAllowed()
+                && "synthetic-loopback-test-v1".equals(evidence.policyId())
+                && "synthetic-loopback-proof-v1".equals(evidence.proofIdentity())
+                && evidence.costState() == com.ses.service.ai.copilot.summary.CopilotCostState.UPPER_BOUND
+                && evidence.dispatchOutcome().state()
+                == com.ses.service.ai.copilot.summary.DispatchOutcome.State.NOT_STARTED;
+    }
+
+    private CopilotConfigSnapshot captureCopilotConfig(AiConfig config, boolean testFixture) {
         String model = config == null || config.getModel() == null || config.getModel().isBlank()
                 ? "gemini-1.5-flash" : config.getModel();
         String endpoint = config == null ? "" : config.getApiUrl();
         int tokens = config == null ? 0 : Math.max(0, config.getMaxTokens());
         String promptVersion = CopilotSummaryPromptTemplate.VERSION + "-gemini-json-v1";
-        String canonical = canonicalGeminiBase(endpoint);
+        String canonical = canonicalGeminiBase(endpoint, testFixture);
         String hash = sha256(String.join("\n", "gemini", canonical, model, promptVersion,
                 CopilotSummaryPromptTemplate.OUTPUT_SCHEMA_VERSION, Integer.toString(tokens),
                 "json-envelope-parser-v1", "production-deny-all-v1"));
         return new CopilotConfigSnapshot("gemini", "gemini", canonical, model, promptVersion, hash, tokens);
     }
 
-    private static String canonicalGeminiBase(String configured) {
-        if (configured == null || configured.isBlank()) return "https://generativelanguage.googleapis.com";
+    private static String canonicalGeminiBase(String configured, boolean testFixture) {
+        if (configured == null || configured.isBlank()) {
+            return testFixture ? "UNSAFE_ENDPOINT" : "https://generativelanguage.googleapis.com";
+        }
         try {
             java.net.URI uri = java.net.URI.create(configured.trim());
+            if (testFixture && "http".equalsIgnoreCase(uri.getScheme())
+                    && uri.getHost() != null && uri.getHost().endsWith(".test")
+                    && uri.getPort() > 0 && uri.getUserInfo() == null && uri.getQuery() == null
+                    && uri.getFragment() == null && (uri.getRawPath() == null || uri.getRawPath().isEmpty()
+                    || "/".equals(uri.getRawPath()))) {
+                return "http://" + uri.getHost().toLowerCase(java.util.Locale.ROOT) + ":" + uri.getPort();
+            }
             if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null
                     || !"generativelanguage.googleapis.com".equalsIgnoreCase(uri.getHost())
                     || uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null
@@ -180,8 +231,9 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         } catch (RuntimeException ex) { return "UNSAFE_ENDPOINT"; }
     }
 
-    private static String geminiEndpoint(String base, String model) {
-        if (!"https://generativelanguage.googleapis.com".equals(base)
+    private String geminiEndpoint(String base, String model) {
+        if ((!"https://generativelanguage.googleapis.com".equals(base)
+                && !(syntheticLoopbackFixture && base.startsWith("http://") && base.contains(".test:")))
                 || model == null || !model.matches("[A-Za-z0-9._-]{1,128}")) {
             throw BusinessException.of(503, "COPILOT_DESTINATION_REJECTED");
         }

@@ -28,17 +28,17 @@ final class CopilotGeminiResponseParser {
         this.parser = parser;
     }
 
-    String extractSummaryJson(byte[] response, long deadlineNanos, String expectedQueryId) {
+    ParsedResponse parse(byte[] response, long deadlineNanos, String expectedQueryId) {
         JsonNode root = parser.parse(response, deadlineNanos);
         requireObjectFields(root, ROOT_FIELDS);
         JsonNode usage = required(root, "usageMetadata");
-        validateUsage(usage);
+        UsageMetadata usageMetadata = validateUsage(usage);
         JsonNode candidates = required(root, "candidates");
         if (!candidates.isArray() || candidates.size() != 1) fail();
         JsonNode candidate = candidates.get(0);
         requireObjectFields(candidate, CANDIDATE_FIELDS);
         if (candidate.has("index") && (!candidate.get("index").isIntegralNumber()
-                || candidate.get("index").intValue() != 0)) fail();
+                || !candidate.get("index").canConvertToInt() || candidate.get("index").intValue() != 0)) fail();
         if (candidate.has("safetyRatings")) validateSafetyRatings(candidate.get("safetyRatings"));
         if (!"STOP".equals(text(required(candidate, "finishReason")))) fail();
         JsonNode content = required(candidate, "content");
@@ -53,7 +53,11 @@ final class CopilotGeminiResponseParser {
         assertDeadline(deadlineNanos);
         validateSummary(summary.getBytes(StandardCharsets.UTF_8), deadlineNanos, expectedQueryId);
         assertDeadline(deadlineNanos);
-        return summary;
+        return new ParsedResponse(summary, usageMetadata);
+    }
+
+    String extractSummaryJson(byte[] response, long deadlineNanos, String expectedQueryId) {
+        return parse(response, deadlineNanos, expectedQueryId).summaryJson();
     }
 
     private void validateSummary(byte[] bytes, long deadline, String queryId) {
@@ -67,7 +71,7 @@ final class CopilotGeminiResponseParser {
         assertDeadline(deadline);
     }
 
-    private static void validateUsage(JsonNode usage) {
+    private static UsageMetadata validateUsage(JsonNode usage) {
         requireObjectFields(usage, USAGE_FIELDS);
         for (String field : List.of("promptTokenCount", "candidatesTokenCount", "totalTokenCount")) {
             JsonNode value = required(usage, field);
@@ -75,11 +79,21 @@ final class CopilotGeminiResponseParser {
         }
         for (String field : List.of("thoughtsTokenCount", "cachedContentTokenCount")) {
             JsonNode value = usage.get(field);
-            if (value != null && (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 0)) fail();
+            if (value != null && (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() != 0)) fail();
         }
         long prompt = usage.get("promptTokenCount").longValue();
         long output = usage.get("candidatesTokenCount").longValue();
         if (usage.get("totalTokenCount").longValue() != prompt + output) fail();
+        return new UsageMetadata(usage.get("promptTokenCount").intValue(), outputAsInt(output),
+                usage.get("totalTokenCount").intValue(), optionalInt(usage, "thoughtsTokenCount"),
+                optionalInt(usage, "cachedContentTokenCount"));
+    }
+
+    private static int outputAsInt(long value) { return (int) value; }
+
+    private static Integer optionalInt(JsonNode usage, String field) {
+        JsonNode value = usage.get(field);
+        return value == null ? null : value.intValue();
     }
 
     private static void validateSafetyRatings(JsonNode ratings) {
@@ -90,7 +104,7 @@ final class CopilotGeminiResponseParser {
             text(required(rating, "category"));
             text(required(rating, "probability"));
             JsonNode blocked = rating.get("blocked");
-            if (blocked != null && !blocked.isBoolean()) fail();
+            if (blocked != null && (!blocked.isBoolean() || blocked.booleanValue())) fail();
             for (String score : List.of("probabilityScore", "severity")) {
                 JsonNode value = rating.get(score);
                 if (value != null && !value.isNumber()) fail();
@@ -124,4 +138,9 @@ final class CopilotGeminiResponseParser {
             throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
         }
     }
+
+    record ParsedResponse(String summaryJson, UsageMetadata usage) { }
+
+    record UsageMetadata(int promptTokenCount, int candidateTokenCount, int totalTokenCount,
+                         Integer thoughtsTokenCount, Integer cachedContentTokenCount) { }
 }

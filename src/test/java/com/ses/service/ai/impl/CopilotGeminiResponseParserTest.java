@@ -41,6 +41,15 @@ class CopilotGeminiResponseParserTest {
         assertThrows(BusinessException.class, () -> parse(envelope("{\"queryId\":\"q-1\",\"summaryText\":1,\"claimKeys\":[]}", 1)));
     }
 
+    @Test
+    void rejectsBlockedSafetyRatingInvalidCandidateIndexAndNonzeroOptionalUsage() {
+        String valid = envelope("{\"queryId\":\"q-1\",\"summaryText\":\"ok\",\"claimKeys\":[]}", 1);
+        assertThrows(BusinessException.class, () -> parse(valid.replace("\"finishReason\":", "\"index\":2147483648,\"finishReason\":")));
+        assertThrows(BusinessException.class, () -> parse(valid.replace("\"finishReason\":", "\"safetyRatings\":[{\"category\":\"HARM_CATEGORY_NONE\",\"probability\":\"LOW\",\"blocked\":true}],\"finishReason\":")));
+        assertThrows(BusinessException.class, () -> parse(valid.replace("\"totalTokenCount\":5", "\"totalTokenCount\":5,\"thoughtsTokenCount\":1")));
+        assertThrows(BusinessException.class, () -> parse(valid.replace("\"totalTokenCount\":5", "\"totalTokenCount\":5,\"cachedContentTokenCount\":1")));
+    }
+
     private void parse(String body) {
         parser.extractSummaryJson(body.getBytes(StandardCharsets.UTF_8), System.nanoTime() + 5_000_000_000L, "q-1");
     }
