@@ -1,6 +1,7 @@
 package com.ses.importcenter.metadata;
 
 import com.ses.config.LoginUser;
+import com.ses.common.exception.BusinessException;
 import com.ses.entity.Document;
 import com.ses.entity.DocumentVersion;
 import com.ses.entity.SysUser;
@@ -42,12 +43,15 @@ import java.time.LocalDate;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 実MySQL上でmetadata・document・FileScope・明示ACLを通るF1a最小成功経路を確認する。 */
 @SpringBootTest
@@ -99,16 +103,17 @@ class ImportMetadataRealMySqlTest {
     private long documentId;
     private long documentVersionId;
     private String storageKey;
+    private SysUser actorUser;
 
     @BeforeEach
     void prepareAuthorizedFixture() {
         tenantId = TEST_TENANT;
         AccountingTenantContextHolder.setTenantId(tenantId);
         String testUsername = "nf06-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
-        var user = SysUser.builder().username(testUsername)
+        actorUser = SysUser.builder().username(testUsername)
                 .password("test-only").realName("取込テスト管理者").role("管理者").status(1).tenantId(tenantId).build();
-        sysUserMapper.insert(user);
-        actorUserId = user.getId();
+        sysUserMapper.insert(actorUser);
+        actorUserId = actorUser.getId();
 
         jdbc.update("""
                 INSERT INTO m_organization_unit(legal_entity_id, code, name, type, valid_from, status, deleted_flag)
@@ -129,7 +134,7 @@ class ImportMetadataRealMySqlTest {
                 VALUES(?, ?, ?, 0, 0)
                 """, tenantId, groupId, ImportMetadataAuthorizationService.ACTION);
         var authority = new SimpleGrantedAuthority("ROLE_管理者");
-        var principal = new LoginUser(user, List.of(authority), tenantId);
+        var principal = new LoginUser(actorUser, List.of(authority), tenantId);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(principal, "test-only", List.of(authority)));
 
@@ -240,6 +245,153 @@ class ImportMetadataRealMySqlTest {
                   AND v.id=? AND v.scan_status='CLEAN' AND v.sha256=?
                 """, Integer.class, tenantId, documentId, Long.toString(LEGAL_ENTITY_ID), documentVersionId,
                 SOURCE_HASH));
+    }
+
+    @Test
+    void wildcardGrantだけでは実sourceを開けない() {
+        prepareDownloadableJob();
+        jdbc.update("UPDATE t_permission_group_action SET action_key='*' WHERE tenant_id=? AND group_id=? AND action_key=? AND deny_flag=0",
+                tenantId, groupId, ImportMetadataAuthorizationService.ACTION);
+
+        assertDeniedWithoutStorageOrAudit(403);
+    }
+
+    @Test
+    void importWildcardGrantだけでは実sourceを開けない() {
+        prepareDownloadableJob();
+        jdbc.update("UPDATE t_permission_group_action SET action_key='import.*' WHERE tenant_id=? AND group_id=? AND action_key=? AND deny_flag=0",
+                tenantId, groupId, ImportMetadataAuthorizationService.ACTION);
+
+        assertDeniedWithoutStorageOrAudit(403);
+    }
+
+    @Test
+    void exactAllowがあってもwildcardDenyが優先される() {
+        prepareDownloadableJob();
+        jdbc.update("INSERT INTO t_permission_group_action(tenant_id, group_id, action_key, deny_flag, deleted_flag) VALUES(?, ?, '*', 1, 0)",
+                tenantId, groupId);
+
+        assertDeniedWithoutStorageOrAudit(403);
+    }
+
+    @Test
+    void exactAllowがあってもimportWildcardDenyが優先される() {
+        prepareDownloadableJob();
+        jdbc.update("INSERT INTO t_permission_group_action(tenant_id, group_id, action_key, deny_flag, deleted_flag) VALUES(?, ?, 'import.*', 1, 0)",
+                tenantId, groupId);
+
+        assertDeniedWithoutStorageOrAudit(403);
+    }
+
+    @Test
+    void admin以外のprincipalでは実sourceを開けない() {
+        prepareDownloadableJob();
+        jdbc.update("UPDATE sys_user SET role='営業' WHERE id=? AND tenant_id=?", actorUserId, tenantId);
+        actorUser.setRole("営業");
+        var authority = new SimpleGrantedAuthority("ROLE_営業");
+        installPrincipal(tenantId, authority);
+
+        assertDeniedWithoutStorageOrAudit(403);
+    }
+
+    @Test
+    void inactiveUserは実sourceを開けない() {
+        prepareDownloadableJob();
+        jdbc.update("UPDATE sys_user SET status=0 WHERE id=? AND tenant_id=?", actorUserId, tenantId);
+
+        assertDeniedWithoutStorageOrAudit(403);
+    }
+
+    @Test
+    void deletedUserは実sourceを開けない() {
+        prepareDownloadableJob();
+        jdbc.update("UPDATE sys_user SET deleted_flag=1 WHERE id=? AND tenant_id=?", actorUserId, tenantId);
+
+        assertDeniedWithoutStorageOrAudit(403);
+    }
+
+    @Test
+    void 無効化されたpermissionGroupでは実sourceを開けない() {
+        prepareDownloadableJob();
+        jdbc.update("UPDATE m_permission_group SET enabled=0 WHERE tenant_id=? AND id=?", tenantId, groupId);
+
+        assertDeniedWithoutStorageOrAudit(403);
+    }
+
+    @Test
+    void 削除済みpermissionGroupでは実sourceを開けない() {
+        prepareDownloadableJob();
+        jdbc.update("UPDATE m_permission_group SET deleted_flag=1 WHERE tenant_id=? AND id=?", tenantId, groupId);
+
+        assertDeniedWithoutStorageOrAudit(403);
+    }
+
+    @Test
+    void 削除済みexplicitAllowでは実sourceを開けない() {
+        prepareDownloadableJob();
+        jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 WHERE tenant_id=? AND group_id=? AND action_key=? AND deny_flag=0",
+                tenantId, groupId, ImportMetadataAuthorizationService.ACTION);
+
+        assertDeniedWithoutStorageOrAudit(403);
+    }
+
+    @Test
+    void 無効化されたsourceでは実sourceを開けない() {
+        prepareDownloadableJob();
+        jdbc.update("UPDATE t_import_source_system SET status='DISABLED', version_no=version_no+1 WHERE tenant_id=? AND id=?",
+                tenantId, sourceId);
+
+        assertDeniedWithoutStorageOrAudit(409);
+    }
+
+    @Test
+    void 別tenantへ束縛されたprincipalでは実sourceを開けない() {
+        prepareDownloadableJob();
+        var authority = new SimpleGrantedAuthority("ROLE_管理者");
+        installPrincipal("nf06-foreign-tenant", authority);
+
+        assertDeniedWithoutStorageOrAudit(403);
+    }
+
+    @Test
+    void 別legalEntityのdocumentは実FileScope経路で開けない() {
+        prepareDownloadableJob();
+        jdbc.update("UPDATE t_document SET legal_entity_id=? WHERE tenant_id=? AND id=?",
+                Long.toString(LEGAL_ENTITY_ID + 1), tenantId, documentId);
+
+        BusinessException denied = assertThrows(BusinessException.class, () -> metadataService.openSource(jobId));
+        assertTrue(Set.of(403, 404).contains(denied.getCode()));
+        assertNoDownloadEffects();
+    }
+
+    private void prepareDownloadableJob() {
+        sourceId = metadataService.createSource(new ImportSourceRequest("SyntheticSource", "合成source"));
+        jobId = metadataService.registerJob(new ImportJobRegistrationRequest(sourceId, ImportEntity.CUSTOMER,
+                "ses-import-v1", ImportEncoding.UTF8, SOURCE_HASH, documentId, documentVersionId, 1));
+        storage.resetOpenCount();
+        assertEquals(0, downloadAuditCount());
+    }
+
+    private void assertDeniedWithoutStorageOrAudit(int expectedCode) {
+        BusinessException denied = assertThrows(BusinessException.class, () -> metadataService.openSource(jobId));
+        assertEquals(expectedCode, denied.getCode());
+        assertNoDownloadEffects();
+    }
+
+    private void assertNoDownloadEffects() {
+        assertEquals(0, storage.openCount());
+        assertEquals(0, downloadAuditCount());
+    }
+
+    private int downloadAuditCount() {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM t_document_access_log WHERE document_id=? AND version_id=? AND user_id=? AND action='DOWNLOAD'",
+                Integer.class, documentId, documentVersionId, actorUserId);
+    }
+
+    private void installPrincipal(String principalTenant, SimpleGrantedAuthority authority) {
+        var principal = new LoginUser(actorUser, List.of(authority), principalTenant);
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, "test-only", List.of(authority)));
     }
 
     private static String sha256(byte[] bytes) {
