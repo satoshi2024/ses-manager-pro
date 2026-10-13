@@ -5,6 +5,8 @@ DROP TABLE IF EXISTS t_document_hash_claim CASCADE;
 DROP TABLE IF EXISTS t_document_disposal_request CASCADE;
 DROP TABLE IF EXISTS t_document_access_log CASCADE;
 DROP TABLE IF EXISTS t_document_link CASCADE;
+-- NF-06 schemaを同一H2へ再投入すると、前回起動で作成した参照が残るため先に外す。
+ALTER TABLE IF EXISTS t_import_job DROP CONSTRAINT IF EXISTS fk_import_job_document_version;
 DROP TABLE IF EXISTS t_document_version CASCADE;
 DROP TABLE IF EXISTS t_document CASCADE;
 DROP TABLE IF EXISTS m_document_type CASCADE;

@@ -3217,7 +3217,9 @@ CREATE TABLE IF NOT EXISTS t_import_validation_run (
 
 ALTER TABLE t_import_job
     ADD CONSTRAINT IF NOT EXISTS fk_import_job_active_run FOREIGN KEY (tenant_id, id, active_validation_run_id)
-        REFERENCES t_import_validation_run (tenant_id, job_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+        REFERENCES t_import_validation_run (tenant_id, job_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+ALTER TABLE t_import_job
     ADD CONSTRAINT IF NOT EXISTS fk_import_job_current_run FOREIGN KEY (tenant_id, id, current_validation_run_id)
         REFERENCES t_import_validation_run (tenant_id, job_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 
