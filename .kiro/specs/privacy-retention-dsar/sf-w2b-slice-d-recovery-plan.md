@@ -91,7 +91,7 @@ Astra reviewでは特に、(1) history/latest stable-readの固定順序・byte�
 
 ## 7. D2b計画: monotonic deadlineと残り検証matrix
 
-状態: **計画のみ / Astra PLAN review待ち。D2b実装・試験合格・NF07 PASSを意味しない。** D2aの親報告はMySQL `26/0/0/0` だが、その実行結果は時間上限および下記の残件を証明しない。D2aからD2bへPASS状態を昇格させない。計画reviewを通るまでコード・test変更を開始しない。
+状態: **Astra PLAN review PASS後、D2b1実装候補あり / 実MySQL再検証待ち。D2b試験合格・NF07 PASSを意味しない。** D2aの親報告はMySQL `26/0/0/0` だが、その実行結果は時間上限および下記の残件を証明しない。D2b1では同一monotonic deadlineのLease束縛、reader/projection/fence/fixture mutationへのtimeout伝播、初回fence acquire結果不明の分類と、実MySQL lock待ち・同一expired Lease拒否・acquire不確定のtest caseを追加した。これらは未実行で、wait graph、elapsed tolerance、rollback/close/connection回収の実証ではない。stable witness競合matrix、no-replay owner rotation、connect/socket stall証明等は未実装である。D2aからD2bまたはNF07へPASS状態を昇格させない。
 
 ### 7.1 単一deadline契約
 
@@ -128,10 +128,10 @@ D2b最小の新規試験は既存`@Tag("mysql")` 3-container harnessを使い、
 
 ### 7.4 実装着手と検証順
 
-1. AstraがこのD2b計画とtimeout toleranceをreviewする。合意前はplanだけを保持する。
-2. 承認後、最小test-only deadline value/objectとfixed reason mappingから実装し、deadlineをquarantine acquire、reader、journal transaction、projection/replay、final owner readへ明示伝播する。D1 fence semantics、Cのstrict revision/maxAge、D2a recovery behaviorを緩めない。
-3. D2b tableのlock-wait/resource-lifecycle caseを最初に追加し、rootがMaven/Dockerを直列実行する。失敗したtimeout/cancelはQUARANTINED維持または「隔離取得未確認」として扱い、失敗を通常成功・NO_OPへ変換しない。
-4. stable append race、unstable exhaustion、no-replay owner rotationの三caseを追加してから最小matrix完了をreviewする。MySQL実結果、skip=0、wait graph、elapsed tolerance、post-timeout fence/owner、resource cleanupを分けて記録する。D2aの既存26成功数だけでD2bまたはNF07 PASSを宣言しない。
+1. AstraのD2b計画・timeout tolerance PLAN PASSを得た。実測前に時間上限をPASSへ昇格させない。
+2. D2b1 deadline objectとfence/read/projection/fixture writeへの伝播候補、およびfixed reason mappingを追加した。D1 fence semantics、Cのstrict revision/maxAge、D2a recovery behaviorを緩めていない。初回acquire応答不明は`ABORTED_UNKNOWN`で返し、witness read/replayへ進まない。
+3. D2b1の実MySQL lock-wait/resource-lifecycle、same expired Lease、acquire uncertainty caseはソース追加済み・実行待ちである。rootがMaven/Dockerを直列実行し、timeout後のfence/owner、projection不変、wait graph、elapsed tolerance、worker/connection回収を別々に確認する。
+4. stable append race、unstable exhaustion、no-replay owner rotationの三caseは未実装である。加えてconnect/socket stallや一般的なJDBC hard wall-clock boundも証明していない。残件を追加してからD2b全体をreviewする。D2aの既存26成功数やD2b1の未実行test sourceだけでD2bまたはNF07 PASSを宣言しない。
 
 ## 参照
 
