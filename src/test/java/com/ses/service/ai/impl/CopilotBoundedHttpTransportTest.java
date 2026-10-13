@@ -177,12 +177,65 @@ class CopilotBoundedHttpTransportTest {
         assertEquals(200, response.statusCode());
         assertEquals("{\"ok\":true}", new String(response.body(), StandardCharsets.UTF_8));
 
-        BusinessException oversized = assertThrows(BusinessException.class,
+        CopilotTransportFailure oversized = assertThrows(CopilotTransportFailure.class,
                 () -> transport.post(uri("/large"), request(), deadlineAfter(3, TimeUnit.SECONDS)));
         assertEquals("COPILOT_RESPONSE_TOO_LARGE", oversized.getMessage());
+        assertEquals(com.ses.service.ai.copilot.summary.DispatchOutcome.State.RESPONSE_RECEIVED,
+                oversized.outcome().state());
         CopilotBoundedHttpTransport.Response recovered = transport.post(uri("/"), request(),
                 deadlineAfter(3, TimeUnit.SECONDS));
         assertEquals(200, recovered.statusCode());
+    }
+
+    @Test
+    void executeの同期例外はMAY_HAVE_BEEN_SENTとして保持する() throws Exception {
+        server = HttpServer.create(loopbackAddress(), 0);
+        startServer();
+        CopilotDnsSnapshotResolver resolver = new CopilotDnsSnapshotResolver(
+                snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC());
+        transport = new CopilotBoundedHttpTransport(resolver, true, () -> { }, () -> { }, null, () -> { },
+                () -> { throw new IllegalStateException("synthetic execute failure"); });
+        transport.start();
+
+        CopilotTransportFailure failure = assertThrows(CopilotTransportFailure.class,
+                () -> transport.post(uri(), request(), deadlineAfter(2, TimeUnit.SECONDS)));
+
+        assertEquals(com.ses.service.ai.copilot.summary.DispatchOutcome.State.MAY_HAVE_BEEN_SENT,
+                failure.outcome().state());
+        assertEquals(0, transport.activeExchangeCount());
+    }
+
+    @Test
+    void header受信後のbody停止はRESPONSE_RECEIVEDを保持する() throws Exception {
+        CountDownLatch headersSent = new CountDownLatch(1);
+        CountDownLatch releaseBody = new CountDownLatch(1);
+        server = HttpServer.create(loopbackAddress(), 0);
+        server.createContext("/body-stall", guarded(exchange -> {
+            exchange.sendResponseHeaders(200, 4);
+            headersSent.countDown();
+            awaitRelease(releaseBody);
+            try { exchange.getResponseBody().write("late".getBytes(StandardCharsets.UTF_8)); }
+            catch (IOException ignored) { }
+            finally { exchange.close(); }
+        }));
+        startServer();
+        transport = newTransport(snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC());
+        transport.start();
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        try {
+            Future<CopilotTransportFailure> failed = caller.submit(() -> assertThrows(
+                    CopilotTransportFailure.class, () -> transport.post(uri("/body-stall"), request(),
+                            deadlineAfter(500, TimeUnit.MILLISECONDS))));
+            assertTrue(headersSent.await(2, TimeUnit.SECONDS));
+            CopilotTransportFailure failure = failed.get(2, TimeUnit.SECONDS);
+            assertEquals("COPILOT_DEADLINE_EXCEEDED", failure.getMessage());
+            assertEquals(com.ses.service.ai.copilot.summary.DispatchOutcome.State.RESPONSE_RECEIVED,
+                    failure.outcome().state());
+        } finally {
+            releaseBody.countDown();
+            caller.shutdownNow();
+            assertTrue(caller.awaitTermination(2, TimeUnit.SECONDS));
+        }
     }
 
     @Test

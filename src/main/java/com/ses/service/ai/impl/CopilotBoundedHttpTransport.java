@@ -41,6 +41,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Management Copilot専用HTTP/1.1 transport。呼出側でURL allowlistとTLS identityを検査する。 */
 public final class CopilotBoundedHttpTransport implements AutoCloseable {
@@ -57,6 +58,7 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
     private final boolean testLoopbackMode;
     private final Runnable testAdmissionObserver;
     private final Runnable testSubmissionObserver;
+    private final Runnable testExecuteObserver;
     private final Semaphore exchangePermits = new Semaphore(MAX_ACTIVE_EXCHANGES, true);
     private final Semaphore admissionPermits = new Semaphore(MAX_ADMITTED_EXCHANGES, true);
     private final AtomicInteger activeExchanges = new AtomicInteger();
@@ -92,9 +94,18 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
     CopilotBoundedHttpTransport(CopilotDnsSnapshotResolver dnsResolver, boolean testLoopbackMode,
                                 Runnable testAdmissionObserver, Runnable testSubmissionObserver,
                                 SSLContext testSslContext, Runnable testLoopbackRejectedObserver) {
+        this(dnsResolver, testLoopbackMode, testAdmissionObserver, testSubmissionObserver,
+                testSslContext, testLoopbackRejectedObserver, () -> { });
+    }
+
+    CopilotBoundedHttpTransport(CopilotDnsSnapshotResolver dnsResolver, boolean testLoopbackMode,
+                                Runnable testAdmissionObserver, Runnable testSubmissionObserver,
+                                SSLContext testSslContext, Runnable testLoopbackRejectedObserver,
+                                Runnable testExecuteObserver) {
         this.testLoopbackMode = testLoopbackMode;
         this.testAdmissionObserver = testAdmissionObserver;
         this.testSubmissionObserver = testSubmissionObserver;
+        this.testExecuteObserver = testExecuteObserver;
         if (testSslContext != null && !testLoopbackMode) {
             throw new IllegalArgumentException("test SSLContextはloopback test mode専用です");
         }
@@ -208,6 +219,8 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
         };
         boolean submitted = false;
         Future<Response> future = null;
+        AtomicReference<com.ses.service.ai.copilot.summary.DispatchOutcome.State> dispatchState =
+                new AtomicReference<>(com.ses.service.ai.copilot.summary.DispatchOutcome.State.NOT_STARTED);
         try {
             remaining = remainingNanos(deadlineNanos);
             if (remaining <= 0) {
@@ -243,7 +256,7 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
                 requestBuilder.setHeader("x-goog-api-key", geminiApiKey);
             }
             SimpleHttpRequest request = requestBuilder.build();
-            BoundedResponseConsumer consumer = new BoundedResponseConsumer(deadlineNanos);
+            BoundedResponseConsumer consumer = new BoundedResponseConsumer(deadlineNanos, dispatchState);
             HttpClientContext clientContext = HttpClientContext.create();
             clientContext.setAttribute(DNS_HOST_CONTEXT, uri.getHost());
             clientContext.setAttribute(DEADLINE_CONTEXT, deadlineNanos);
@@ -258,6 +271,9 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
                 if (remainingNanos(deadlineNanos) <= 0) {
                     throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
                 }
+                // execute呼出し自体が同期例外を投げても、送信可否が確定しないため保守的に進める。
+                dispatchState.set(com.ses.service.ai.copilot.summary.DispatchOutcome.State.MAY_HAVE_BEEN_SENT);
+                testExecuteObserver.run();
                 future = client.execute(SimpleRequestProducer.create(request), consumer, clientContext,
                         new FutureCallback<>() {
                     @Override
@@ -280,51 +296,52 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
             } catch (BusinessException ex) {
                 throw ex;
             } catch (RuntimeException ex) {
-                throw BusinessException.of(503, "COPILOT_TRANSPORT_FAILED");
+                throw new CopilotTransportFailure("COPILOT_TRANSPORT_FAILED",
+                        dispatchState.get());
             }
 
             remaining = remainingNanos(deadlineNanos);
             if (remaining <= 0) {
                 future.cancel(true);
-                throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
+                throw new CopilotTransportFailure("COPILOT_DEADLINE_EXCEEDED", dispatchState.get());
             }
             Response response = future.get(remaining, TimeUnit.NANOSECONDS);
             if (remainingNanos(deadlineNanos) <= 0) {
-                throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
+                throw new CopilotTransportFailure("COPILOT_DEADLINE_EXCEEDED", dispatchState.get());
             }
             return response;
         } catch (TimeoutException ex) {
             future.cancel(true);
-            throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
+            throw new CopilotTransportFailure("COPILOT_DEADLINE_EXCEEDED", dispatchState.get());
         } catch (InterruptedException ex) {
             future.cancel(true);
             Thread.currentThread().interrupt();
-            throw BusinessException.of(503, "COPILOT_TRANSPORT_INTERRUPTED");
+            throw new CopilotTransportFailure("COPILOT_TRANSPORT_INTERRUPTED", dispatchState.get());
         } catch (ExecutionException ex) {
             Throwable cause = ex.getCause();
             if (remainingNanos(deadlineNanos) <= 0) {
-                throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
+                throw new CopilotTransportFailure("COPILOT_DEADLINE_EXCEEDED", dispatchState.get());
             }
             if (cause instanceof BoundedResponseException bounded) {
-                throw BusinessException.of(bounded.code, bounded.reasonCode);
+                throw new CopilotTransportFailure(bounded.reasonCode, dispatchState.get());
             }
             if (hasCause(cause, SSLPeerUnverifiedException.class)) {
-                throw BusinessException.of(503, "COPILOT_TLS_IDENTITY_REJECTED");
+                throw new CopilotTransportFailure("COPILOT_TLS_IDENTITY_REJECTED", dispatchState.get());
             }
             if (hasCause(cause, SSLHandshakeException.class)) {
-                throw BusinessException.of(503, "COPILOT_TLS_HANDSHAKE_REJECTED");
+                throw new CopilotTransportFailure("COPILOT_TLS_HANDSHAKE_REJECTED", dispatchState.get());
             }
             if (hasCause(cause, DnsSnapshotUnavailableException.class)
                     || hasCause(cause, UnknownHostException.class)) {
                 if (hasCause(cause, CopilotDnsSnapshotResolver.LoopbackAddressRejectedException.class)) {
-                    throw BusinessException.of(503, "COPILOT_DESTINATION_REJECTED");
+                    throw new CopilotTransportFailure("COPILOT_DESTINATION_REJECTED", dispatchState.get());
                 }
-                throw BusinessException.of(503, "COPILOT_DNS_UNAVAILABLE");
+                throw new CopilotTransportFailure("COPILOT_DNS_UNAVAILABLE", dispatchState.get());
             }
             if (hasCause(cause, DeadlineExceededException.class)) {
-                throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
+                throw new CopilotTransportFailure("COPILOT_DEADLINE_EXCEEDED", dispatchState.get());
             }
-            throw BusinessException.of(503, "COPILOT_TRANSPORT_FAILED");
+            throw new CopilotTransportFailure("COPILOT_TRANSPORT_FAILED", dispatchState.get());
         } finally {
             if (!submitted) {
                 releasePermit.run();
@@ -431,16 +448,20 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
 
     private static final class BoundedResponseConsumer extends AbstractBinResponseConsumer<Response> {
         private final long deadlineNanos;
+        private final AtomicReference<com.ses.service.ai.copilot.summary.DispatchOutcome.State> dispatchState;
         private final ByteArrayOutputStream output = new ByteArrayOutputStream();
         private int statusCode;
         private String contentType;
 
-        private BoundedResponseConsumer(long deadlineNanos) {
+        private BoundedResponseConsumer(long deadlineNanos,
+                AtomicReference<com.ses.service.ai.copilot.summary.DispatchOutcome.State> dispatchState) {
             this.deadlineNanos = deadlineNanos;
+            this.dispatchState = dispatchState;
         }
 
         @Override
         protected void start(HttpResponse response, ContentType contentType) {
+            dispatchState.set(com.ses.service.ai.copilot.summary.DispatchOutcome.State.RESPONSE_RECEIVED);
             this.statusCode = response.getCode();
             this.contentType = contentType == null ? null : contentType.toString();
         }

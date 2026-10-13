@@ -177,6 +177,9 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
                     parsed.usage().promptTokenCount(), parsed.usage().candidateTokenCount(),
                     parsed.usage().totalTokenCount(), parsed.usage().thoughtsTokenCount(),
                     parsed.usage().cachedContentTokenCount()));
+        } catch (CopilotTransportFailure ex) {
+            throw new com.ses.service.ai.CopilotExecutionFailure(ex.reasonCode(),
+                    invocation.preflightCostEvidence(), ex.outcome());
         } catch (BusinessException ex) {
             if (responseReceived) {
                 throw new com.ses.service.ai.CopilotExecutionFailure(ex.getMessage(),

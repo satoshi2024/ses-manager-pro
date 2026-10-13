@@ -42,14 +42,19 @@ public record SummaryCostEvidence(
                                                     DispatchOutcome outcome,
                                                     CopilotProviderUsage usage,
                                                     String reasonCode) {
-        if (preflight == null) return unknown(reasonCode);
-        if (preflight.costState() == CopilotCostState.NOT_SENT
-                && preflight.dispatchOutcome().state() == DispatchOutcome.State.NOT_STARTED) {
+        DispatchOutcome actual = outcome == null
+                ? new DispatchOutcome(DispatchOutcome.State.MAY_HAVE_BEEN_SENT, "DISPATCH_EVIDENCE_MISSING")
+                : outcome;
+        boolean provenNotStarted = actual.state() == DispatchOutcome.State.NOT_STARTED
+                && preflight != null
+                && preflight.costState() == CopilotCostState.NOT_SENT
+                && preflight.dispatchOutcome().state() == DispatchOutcome.State.NOT_STARTED;
+        if (provenNotStarted) {
             return new SummaryCostEvidence(CopilotCostState.NOT_SENT, null, null,
-                    preflight.dispatchOutcome(), preflight, usage, reasonCode);
+                    actual, preflight, usage, reasonCode);
         }
-        Integer upper = preflight.upperBoundYen();
-        CopilotCostState state = upper == null ? CopilotCostState.UNKNOWN : CopilotCostState.UPPER_BOUND;
-        return new SummaryCostEvidence(state, null, upper, outcome, preflight, usage, reasonCode);
+        // 公開preflight DTOの値は呼出側が指定できるため、信頼済み検証器ができるまでは金額だけで上限を証明しない。
+        return new SummaryCostEvidence(CopilotCostState.UNKNOWN, null, null,
+                actual, preflight, usage, reasonCode);
     }
 }

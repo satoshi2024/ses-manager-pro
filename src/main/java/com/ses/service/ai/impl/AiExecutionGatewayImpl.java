@@ -140,6 +140,10 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
             }
             if (invocation != null) {
                 var preflight = invocation.preflightCostEvidence();
+                if (ex instanceof CopilotTransportFailure transportFailure) {
+                    throw new CopilotExecutionFailure(transportFailure.reasonCode(), preflight,
+                            transportFailure.outcome());
+                }
                 var dispatch = preflight.costState() == com.ses.service.ai.copilot.summary.CopilotCostState.NOT_SENT
                         ? com.ses.service.ai.copilot.summary.DispatchOutcome.notStarted(preflight.reasonCode())
                         : new com.ses.service.ai.copilot.summary.DispatchOutcome(
