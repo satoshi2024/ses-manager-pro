@@ -400,7 +400,7 @@ class ImportMetadataRealMySqlTest {
                 }
             } catch (Exception failure) { throw new IllegalStateException(failure); }
             });
-            awaitPermissionGroupWait(writerId, gateConnectionId, groupId, gate, denyInsert, membershipInsert);
+            awaitPermissionActionUniqueIndexWait(writerId, gateConnectionId, gate, denyInsert, membershipInsert);
             awaitActorWait(membershipWriterId, gateConnectionId, actorUserId, gate, denyInsert, membershipInsert);
             assertTrue(!denyInsert.isDone(), "permission groupを参照する新規deny行がgate commit前に挿入されました");
             assertTrue(!membershipInsert.isDone(), "sys_userを参照する新規membershipがgate commit前に挿入されました");
@@ -455,9 +455,9 @@ class ImportMetadataRealMySqlTest {
                 safeWaitDetails(requesterId.get(), blockerId.get()));
     }
 
-    private void awaitPermissionGroupWait(AtomicReference<Long> requesterId,
-                                         AtomicReference<Long> blockerId, long lockData, Future<?> gate,
-                                         Future<?> denyInsert, Future<?> membershipInsert) throws Exception {
+    private void awaitPermissionActionUniqueIndexWait(AtomicReference<Long> requesterId,
+                                                      AtomicReference<Long> blockerId, Future<?> gate,
+                                                      Future<?> denyInsert, Future<?> membershipInsert) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
             assertContentionTasksPending(gate, denyInsert, membershipInsert);
@@ -471,16 +471,19 @@ class ImportMetadataRealMySqlTest {
                         JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
                         JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
                         WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
-                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='m_permission_group' AND req.INDEX_NAME='PRIMARY'
-                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='m_permission_group' AND blk.INDEX_NAME='PRIMARY'
-                          AND req.LOCK_DATA=? AND blk.LOCK_DATA=?
-                        """, Integer.class, requester, blocker, Long.toString(lockData), Long.toString(lockData));
+                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='t_permission_group_action'
+                          AND req.INDEX_NAME='uk_permission_group_action' AND req.LOCK_TYPE='RECORD'
+                          AND req.LOCK_MODE='X,GAP,INSERT_INTENTION' AND req.LOCK_STATUS='WAITING'
+                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='t_permission_group_action'
+                          AND blk.INDEX_NAME='uk_permission_group_action' AND blk.LOCK_TYPE='RECORD'
+                          AND blk.LOCK_MODE='X' AND blk.LOCK_STATUS='GRANTED'
+                        """, Integer.class, requester, blocker);
                 if (waits != null && waits > 0) return;
             }
             Thread.sleep(25);
         }
         assertContentionTasksPending(gate, denyInsert, membershipInsert);
-        throw new AssertionError("新規action FKのm_permission_group PRIMARY lock waitを確認できませんでした。" +
+        throw new AssertionError("新規deny actionのunique index lock waitを確認できませんでした。" +
                 safeWaitDetails(requesterId.get(), blockerId.get()));
     }
 
