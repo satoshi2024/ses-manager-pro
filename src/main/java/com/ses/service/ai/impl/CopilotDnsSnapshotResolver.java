@@ -44,6 +44,22 @@ public final class CopilotDnsSnapshotResolver implements DnsResolver {
         return requireAddressSet(host).addresses().stream().allMatch(InetAddress::isLoopbackAddress);
     }
 
+    /** 1回のsnapshot readから検証済みloopback addressだけを返す。 */
+    InetAddress[] resolveLoopbackSnapshot(String host, Runnable rejectedObserver) throws UnknownHostException {
+        AddressSet addressSet = requireAddressSet(host);
+        InetAddress[] addresses = addressSet.addresses().toArray(InetAddress[]::new);
+        for (InetAddress address : addresses) {
+            if (!address.isLoopbackAddress()) {
+                rejectedObserver.run();
+                throw new LoopbackAddressRejectedException();
+            }
+        }
+        if (addresses.length == 0) {
+            throw new UnknownHostException("COPILOT_DNS_UNAVAILABLE");
+        }
+        return addresses;
+    }
+
     private AddressSet requireAddressSet(String host) throws UnknownHostException {
         String normalized = normalize(host);
         AddressSet set = snapshot.get().hosts().get(normalized);
@@ -55,6 +71,10 @@ public final class CopilotDnsSnapshotResolver implements DnsResolver {
 
     private static String normalize(String host) {
         return host == null ? "" : host.trim().toLowerCase(Locale.ROOT);
+    }
+
+    static final class LoopbackAddressRejectedException extends UnknownHostException {
+        LoopbackAddressRejectedException() { super("COPILOT_TEST_LOOPBACK_REJECTED"); }
     }
 
     public record DnsSnapshot(Map<String, AddressSet> hosts) {
