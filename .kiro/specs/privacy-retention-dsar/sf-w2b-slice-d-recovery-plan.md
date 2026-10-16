@@ -134,6 +134,18 @@ D2b最小の新規試験は既存`@Tag("mysql")` 3-container harnessを使い、
 3. D2b1の実MySQL lock-wait/resource-lifecycle、same expired Lease、acquire uncertainty、post-commit分類caseはソース追加済み・root固定再試験待ちである。現行fixture値はconnect 1秒/socket・network 7秒/InnoDB lock wait 30秒。rootがMaven/Dockerを直列実行し、5秒work+最大2秒cleanup、timeout後のfence/owner、projection不変、wait graph、rollback/worker/connection回収を確認する。値だけからhard boundやdriver ACK-lossを主張しない。
 4. stable append race、unstable exhaustion、no-replay owner rotationの三caseは実MySQL試験sourceを追加した。root固定実行待ちであり、MySQL成功前にD2b2/D2bまたはNF07へPASSを昇格させない。connect/socket stallや一般的なJDBC hard wall-clock boundも未証明である。D2a/D2b1の過去成功数やtest sourceだけで残りgateを代替しない。
 
+## 2026-10-16 固定sourceの追加検証
+
+上記の「root固定再試験待ち」は実装時点の記録である。D2b1固定 `64db441d` は32/0/0/0、
+D2b2固定 `ac894ac6ec9df2eada9e47c5f242f268270daec4` は35/0/0/0となり、Astraが限定証拠PASSとした。
+D2b2のUTCは06:03:47.8568879〜06:07:03.3878196、log SHA-256は
+`290576A0F38A424D1D948147344158EC29C913189CD654533B9B6F926B508C7E`。
+stable append race、unstable exhaustion、no-replay owner rotationが実行された。
+三つの異なるMySQL8.0.46 container/schemaとproviderCallCount=0を照合した。
+control `9f8568bd` へD2a〜D2b2を統合したが、control組合せ再検証は別gateとする。
+JaCoCo mismatchがあるためcoverage証拠ではない。§7.3の未完境界、一般network/JDBC hard bound、
+実ACK-loss、Privacy/Legal承認、production復元、NF07全体の未完は変更しない。
+
 ## 参照
 
 - `sf-w2b-execution-plan.md` §§3–7（C watermark、projection CAS、P12/P12b、slice D）

@@ -1,5 +1,35 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## 追加統合と固定検証（2026-10-16 15:12 JST）
+
+- **NO-GO継続**。sourceの限定成功をcontrol全体の合格として扱わない。
+- NF06認可競合修復の固定 `37c4c3d8` は実MySQL **39/0/0/0**、Astra限定証拠PASS。
+  UTC05:58:35.0022713〜06:01:20.9209408、log SHA-256
+  `20941A6054B5117DD97313F43B035516E3B0BE9854350AD3BAFC6BB8DD380856`。
+  3計画+5修復commitをcontrol `370b8b59` まで統合。auth後期限再確認・四expiry caseを含む。
+  JaCoCo class mismatchのためcoverage証拠には使用しない。
+- NF08 C2-A1固定 `15907043`（実装 `5585a5a1`）は **18 class、96/0/0/0**、Astra限定証拠PASS。
+  UTC06:01:45.0935031〜06:03:12.9580355、log
+  `0933EEAF8D4A573670681C81235EC6D8ABFB5AE760F558CD724B54A015E52F62`。
+  6commitをcontrol `7ff280bc` まで統合。inner失敗時のusage/dispatch保持をloopbackで確認した。
+  A2固定 `1e64cde2` は費用と予算の分離、署名card digest binding、負例前提を修復し限定CODE PASS、未実測。
+  A2はsynthetic receipt算術であり、実provider usage信頼経路・production実費・C2-B DB証明はない。
+- NF07 D2b2固定 `ac894ac6` は三DB MySQL **35/0/0/0**、Astra限定証拠PASS。
+  UTC06:03:47.8568879〜06:07:03.3878196、log
+  `290576A0F38A424D1D948147344158EC29C913189CD654533B9B6F926B508C7E`。
+  3container/MySQL8.0.46、schema hash、providerCallCount=0を照合した。JaCoCo mismatchはcoverageに使わない。
+  `8fd3bcb0..ac894ac6` の10commit（先頭 `52a3ac82` を含む）をcontrol `9f8568bd` へ統合。
+  control組合せ再実測、一般network/driver ACK-loss/完全ACLは未完。
+- NF06 F1b-1固定 `b766e3d1` のunit/H2は **3 class、23/1/4/0、FAIL**。
+  UTC06:07:23.3989887〜06:08:20.0958958、log
+  `A6A4A5065016E5A126B12CB83A72CEAFF1DA1B53B0807D20918E4037D6B380B6`。
+  LifecycleのH2 generated keyがIDとSTARTED_ATの複数列になり、getKeyが拒否した。
+  明示id列取得 `18b22524` はAstra限定CODE PASS、行末微修 `b8baee0c` 後の固定再試験を要する。
+  旧b766 MySQL実行中の結果を新修復の成功に流用しない。wave2は別WIPで未統合。
+- raw source証拠をcontrolの `verification-evidence/20261016-nf06-candidate-lease-auth-source-01/`、
+  `20261016-nf08-c2-a1-source-01/`、`20261016-nf07-d2b2-source-01/` へ各10/44/10file、hash一致で保存した。
+  最新全fastは依然として第6回FAIL、残留fixture修復後の全fastは未実施。
+
 ## 最新到達点（2026-10-16 15:00 JST）
 
 - **NO-GO**。control固定 `e09595c883afe62518281ac9a85f2343cbf716cb` の全fast第6回は
