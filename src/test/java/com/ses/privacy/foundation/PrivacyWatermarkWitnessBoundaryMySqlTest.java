@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -674,7 +675,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
     }
 
     @Test
-    void stableWitness読取中の実appendは混在snapshotを拒否して新headへ追いつく() throws Exception {
+    void stableWitness読取中の実appendは混在snapshotを拒否して新headへ追いつく() throws Throwable {
         var partition = partition();
         var first = append(partition, 0, PrivacyJournalPort.CommandType.LEASE_CLAIMED, "cmd-stable-race-r1");
         var firstCheckpoint = appendCheckpoint(first, 1, 0, "0".repeat(64));
@@ -698,8 +699,10 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
                 new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment()),
                 new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()), context.getEnvironment());
         var pool = Executors.newSingleThreadExecutor();
+        Future<PrivacyRecoveryService.Result> recovery = null;
+        Throwable primaryFailure = null;
         try {
-            Future<PrivacyRecoveryService.Result> recovery = pool.submit(() -> service.recover(witnessPartition(), Duration.ofSeconds(20)));
+            recovery = pool.submit(() -> service.recover(witnessPartition(), Duration.ofSeconds(20)));
             assertTrue(firstHistoryCaptured.await(10, TimeUnit.SECONDS), "historyAの実DB read完了後にbarrierへ到達する");
             var second = appendAuthorized(partition, 1, "cmd-stable-race-r2", "action-stable-race-r2");
             appendCheckpoint(second, 2, 1, firstCheckpoint.checkpointHash());
@@ -712,15 +715,17 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             assertEquals(6, historyReads.get(), "混在した初回pairを破棄し、安定pairとfinal pairを読む");
             assertEquals(2L, projectionAdmin.queryForObject("SELECT last_applied_revision FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=?",
                     Long.class, tenantId, subjectRef));
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
         } finally {
             appendCompleted.countDown();
-            pool.shutdownNow();
-            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "stable witness worker termination timeout");
+            finishRecoveryWorker(pool, recovery, primaryFailure, "stable witness");
         }
     }
 
     @Test
-    void witnessが各stableReadの途中で進み続けると規定回数で隔離終了する() throws Exception {
+    void witnessが各stableReadの途中で進み続けると規定回数で隔離終了する() throws Throwable {
         var partition = partition();
         var checkpoint = appendCheckpoint(append(partition, 0, PrivacyJournalPort.CommandType.LEASE_CLAIMED,
                 "cmd-unstable-r1"), 1, 0, "0".repeat(64));
@@ -746,11 +751,21 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
                 new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment()),
                 new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()), context.getEnvironment());
         var pool = Executors.newSingleThreadExecutor();
-        Future<PrivacyRecoveryService.Result> recovery = pool.submit(() -> service.recover(witnessPartition(), Duration.ofSeconds(25)));
+        Future<PrivacyRecoveryService.Result> recovery = null;
+        Throwable primaryFailure = null;
+        JdbcPrivacyPartitionFence.Snapshot ownerAtFirstHistoryBarrier = null;
         try {
+            recovery = pool.submit(() -> service.recover(witnessPartition(), Duration.ofSeconds(25)));
             String priorCheckpointHash = checkpoint.checkpointHash();
             for (int index = 0; index < barriers.length; index++) {
                 assertTrue(barriers[index].await(10, TimeUnit.SECONDS), "stable read attempt " + (index + 1) + " barrier");
+                if (index == 0) {
+                    ownerAtFirstHistoryBarrier = new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
+                            .snapshot(partition);
+                    assertEquals("QUARANTINED", ownerAtFirstHistoryBarrier.state(), "最初のhistoryA barrierで独立connectionから隔離を確認する");
+                    assertTrue(ownerAtFirstHistoryBarrier.generation() > 0);
+                    assertNotNull(ownerAtFirstHistoryBarrier.ownerToken());
+                }
                 long revision = index + 1L;
                 var ack = appendAuthorized(partition, revision, "cmd-unstable-r" + (revision + 1),
                         "action-unstable-r" + (revision + 1));
@@ -766,17 +781,19 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
                     Integer.class, tenantId, subjectRef), "unstable witness中はprojectionを書かない");
             var fenceState = new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()).snapshot(partition);
             assertEquals("QUARANTINED", fenceState.state());
-            assertEquals(result.generation(), fenceState.generation());
-            assertNotNull(fenceState.ownerToken());
+            assertEquals(ownerAtFirstHistoryBarrier, fenceState,
+                    "競合終了後も最初のbarrierで記録したstate/generation/ownerを維持する");
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
         } finally {
             for (CountDownLatch release : releases) release.countDown();
-            pool.shutdownNow();
-            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "unstable witness worker termination timeout");
+            finishRecoveryWorker(pool, recovery, primaryFailure, "unstable witness");
         }
     }
 
     @Test
-    void noReplay後finalWitnessBarrierでowner交代すると旧leaseを拒否する() throws Exception {
+    void noReplay後finalWitnessBarrierでowner交代すると旧leaseを拒否する() throws Throwable {
         var partition = partition();
         var ack = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-no-replay-owner-r1");
         appendCheckpoint(ack, 1, 0, "0".repeat(64));
@@ -812,8 +829,10 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         var service = new PrivacyRecoveryService(rotatingWitness, watermarkVerifier, recoveryJournalReader,
                 countingProjection, fence, context.getEnvironment());
         var pool = Executors.newSingleThreadExecutor();
+        Future<PrivacyRecoveryService.Result> recovery = null;
+        Throwable primaryFailure = null;
         try {
-            Future<PrivacyRecoveryService.Result> recovery = pool.submit(() -> service.recover(witnessPartition(), Duration.ofSeconds(20)));
+            recovery = pool.submit(() -> service.recover(witnessPartition(), Duration.ofSeconds(20)));
             assertTrue(finalWitnessRead.await(10, TimeUnit.SECONDS), "no-replay recoveryのfinal stable witness読取直後で停止する");
             var oldOwner = fence.snapshot(partition);
             var newLease = fence.quarantine(partition, RecoveryDeadline.startForTest(Duration.ofSeconds(20)));
@@ -831,10 +850,12 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             assertEquals(oldOwner.generation() + 1, currentOwner.generation());
             assertNotEquals(oldOwner.ownerToken(), currentOwner.ownerToken());
             assertEquals("QUARANTINED", currentOwner.state());
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
         } finally {
             ownerRotated.countDown();
-            pool.shutdownNow();
-            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "no-replay owner rotation worker termination timeout");
+            finishRecoveryWorker(pool, recovery, primaryFailure, "no-replay owner rotation");
         }
     }
 
@@ -1007,6 +1028,57 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         var service = new JournalProjectionService(journalAdapter, responseLostProjection);
         assertEquals(PrivacyProjectionPort.Status.NO_OP, service.projectAcknowledged(partition, ack).status());
         assertEquals(1L, jdbcProjection.snapshot(partition).revision());
+    }
+
+    private static void finishRecoveryWorker(ExecutorService pool, Future<?> worker,
+            Throwable primaryFailure, String label) {
+        pool.shutdown();
+        Throwable cleanupFailure = null;
+        if (worker != null) {
+            try {
+                worker.get(30, TimeUnit.SECONDS);
+            } catch (java.util.concurrent.ExecutionException workerFailure) {
+                Throwable cause = workerFailure.getCause();
+                if (primaryFailure == null) cleanupFailure = new AssertionError(label + " worker failed during cleanup", cause);
+                else if (primaryFailure != cause && primaryFailure.getCause() != cause) primaryFailure.addSuppressed(cause);
+            } catch (java.util.concurrent.TimeoutException timeout) {
+                worker.cancel(true);
+                pool.shutdownNow();
+                cleanupFailure = new AssertionError(label + " worker did not finish within bounded cleanup wait", timeout);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                worker.cancel(true);
+                pool.shutdownNow();
+                cleanupFailure = new AssertionError(label + " cleanup wait was interrupted", interrupted);
+            } catch (java.util.concurrent.CancellationException cancelled) {
+                if (primaryFailure == null) cleanupFailure = new AssertionError(label + " worker was unexpectedly cancelled", cancelled);
+            }
+        }
+        try {
+            if (!pool.awaitTermination(10, TimeUnit.SECONDS)) {
+                pool.shutdownNow();
+                cleanupFailure = appendCleanupFailure(cleanupFailure,
+                        new AssertionError(label + " worker pool did not terminate within bounded cleanup wait"));
+                if (!pool.awaitTermination(10, TimeUnit.SECONDS)) {
+                    cleanupFailure = appendCleanupFailure(cleanupFailure,
+                            new AssertionError(label + " worker pool remained active after interrupt cleanup"));
+                }
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            cleanupFailure = appendCleanupFailure(cleanupFailure,
+                    new AssertionError(label + " pool termination wait was interrupted", interrupted));
+        }
+        if (cleanupFailure != null) {
+            if (primaryFailure != null) primaryFailure.addSuppressed(cleanupFailure);
+            else throw new AssertionError(label + " worker cleanup failed", cleanupFailure);
+        }
+    }
+
+    private static Throwable appendCleanupFailure(Throwable first, Throwable next) {
+        if (first == null) return next;
+        first.addSuppressed(next);
+        return first;
     }
 
     private static void awaitLatch(CountDownLatch latch) {
