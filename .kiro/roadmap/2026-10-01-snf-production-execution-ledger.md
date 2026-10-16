@@ -1,5 +1,30 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## 再開時点（2026-10-16）
+
+- **NO-GO / 修復継続**。再fetchしたorigin/mainは `1443fb68943849a3260d7ebe005259f3eb609d60`。
+  PR101はMERGED、head `8ad0c34e` の祖先判定exit0、全7 checkはCOMPLETED/SUCCESS。
+  main最新run `36858538460` はCOMPLETED/FAILUREのまま。利用者のmain変更3件を保持した。
+- control fixed `736d25acba5fd7d22343f5eb53d3c14bfd221711` のperformance profileは **1/0/0/0、p95 64ms、heapDelta 58KB**。
+  UTC05:24:45.5325469〜05:26:15.9809383、起止SHA一致・clean、exit0。
+  証拠: `verification-evidence/20261016-control-performance-01/`。log SHA-256
+  `356E56D42A61D242AA9532649308CBA98CB2BC478E9AC8B549F7EA2D2E5DC187`、2 report hash一致。
+  この1件の性能回帰成功は全fastの失敗やproduction性能・容量試験の代替ではない。
+- H2修復candidate `a8045dea` の定向試験は **8 class、27/2/1/0、FAIL**。
+  UTC2026-10-13T06:13:29.0946214Z〜06:15:42.4631753Z、起止SHA一致・clean、exit1。
+  `verification-evidence/20261013-fast-v184-isolation-01/` の24 fileをhash一致で保存した。
+  log SHA-256 `C392122B1911C6A123C6CA51F8D52604B5DAF08B75E846451005B1AD598E4C2C`。
+  文書FK復元漏れ、V1先行DROPとimport FKの競合、Batch API 500が残る。
+  後続 `718d4553` はFKを復元したが、新testがH2にないMySQL metadata列を参照するP1をAstraが検出した。
+  IdentityContext単独DB化だけでは共通schema-locations再投入の修復を証明しない。実装Lunaが修復中。
+- NF06 `4900a621` はcandidate/lease write認可gateの候補。実MySQLの期限・resource変更両順序matrixは追加実装中で、
+  認可競合P1を閉鎖しない。NF07 `b3747262` はD2b1候補だが、retry owner期待値とserver timeout分類の二P2でAstra CODE FAIL。
+  commit確認済み/不明の追加経路も未実証。両treeの中断WIPを保全してLunaが接続し、重負荷試験はrootが直列化する。
+- NF08 C2-A1のusage分離は限定PLAN PASS。A2/Bはtrusted cardの構築境界、tokenの包含関係と丸め、
+  実Spring commit後の独立connection読込を計画に明確化するまで未承認。実料金/外送/法務承認ではない。
+
+以下は固定時点ごとの履歴であり、成功範囲・未解決事項を現在の全体PASSへ読み替えない。
+
 ## 最新到達点（2026-10-13 15:15 JST）
 
 - **NO-GO**。最新統合 `02f6ace46775f61accc9b38c010cd595cc9351a0` の全fast第5回は **691 class、3980/4/1498/0、FAIL**。
