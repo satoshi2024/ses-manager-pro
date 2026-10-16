@@ -89,6 +89,7 @@ public class ImportValidationLifecycleService {
         Run run = locked.run;
         long expectedGeneration = op.input.generation + 1;
         if (isStartRetry(op, job, run, expectedGeneration)) {
+            if (!job.expiresAt.after(now)) conflict();
             return lease(op.input, job.activeRunId, op.workerId, expectedGeneration, job.version, job.expiresAt);
         }
         requireExpectedInput(op.input, job);
@@ -100,7 +101,7 @@ public class ImportValidationLifecycleService {
         if (job.owner == null && job.expiresAt != null) conflict();
         if (job.currentRunId != null) {
             if (run == null || run.id != job.currentRunId || !"COMPLETED".equals(run.state)
-                    || !Integer.valueOf(1).equals(run.publishedSlot) || !sameRunInput(op.input, run)) conflict();
+                    || !Integer.valueOf(1).equals(run.publishedSlot) || !sameRunSnapshot(op.input, run)) conflict();
             if (jdbc.update("UPDATE t_import_validation_run SET published_slot=NULL WHERE tenant_id=? AND job_id=? AND id=? AND state='COMPLETED' AND published_slot=1",
                     context.tenantId(), job.id, run.id) != 1) conflict();
         } else if (run != null) {
@@ -147,6 +148,7 @@ public class ImportValidationLifecycleService {
         Run run = locked.run;
         long generation = expected.generation + 1;
         if (isTakeoverRetry(op, job, run, generation)) {
+            if (!job.expiresAt.after(now)) conflict();
             return lease(expected, run.id, op.workerId, generation, job.version, job.expiresAt);
         }
         requireExpectedInput(expected, job);
@@ -172,8 +174,10 @@ public class ImportValidationLifecycleService {
                   AND active_slot=1 AND last_resumed_lease_generation=?
                 """, generation, expected.context.tenantId(), job.id, op.runId, run.lastResumedGeneration);
         if (changedJob != 1 || changedRun != 1) conflict();
+        Timestamp expiresAt = jdbc.queryForObject("SELECT lease_expires_at FROM t_import_job WHERE tenant_id=? AND id=?",
+                Timestamp.class, expected.context.tenantId(), job.id);
         return lease(expected, op.runId, op.workerId, generation, job.version + 1,
-                Timestamp.valueOf(now.toLocalDateTime().plusSeconds(LEASE_SECONDS)));
+                expiresAt);
     }
 
     private RunLease renewInTransaction(RunLease grant) {
@@ -381,6 +385,10 @@ public class ImportValidationLifecycleService {
     }
 
     private boolean sameRunInput(Input in, Run run) {
+        return sameRunSnapshot(in, run) && MessageDigest.isEqual(run.fingerprint, fingerprint(in));
+    }
+
+    private boolean sameRunSnapshot(Input in, Run run) {
         return run.sourceId == in.sourceId && run.sourceVersion == in.sourceVersion
                 && run.sourceCode.equals(in.sourceCode) && run.entity.equals(in.entity) && run.schema.equals(in.schema)
                 && run.encoding.equals(in.encoding) && MessageDigest.isEqual(run.sourceSha, in.sourceSha)

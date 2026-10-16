@@ -91,7 +91,9 @@ class ImportValidationLifecycleServiceTest {
         assertEquals(2L, aborted.generation);
         assertEquals("ABORTED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?", String.class, TENANT, JOB, lease.runId()));
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_run WHERE tenant_id=? AND job_id=?", Integer.class, TENANT, JOB));
-        assertThrows(BusinessException.class, () -> service.abort(taken));
+        var afterFirstAbort = state();
+        service.abort(taken);
+        assertEquals(afterFirstAbort, state(), "commit response-loss retryは状態を変えず成功する");
     }
 
     @Test
@@ -133,6 +135,30 @@ class ImportValidationLifecycleServiceTest {
         assertEquals(afterCommit.activeRun, retried.runId());
         assertEquals(afterCommit, state());
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_run WHERE tenant_id=? AND job_id=?", Integer.class, TENANT, JOB));
+    }
+
+    @Test
+    void expiredSameOperationStartRetryIsRejectedWithoutFurtherWrites() {
+        var operation = service.beginStart(JOB);
+        var lease = service.start(operation);
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?", TENANT, JOB);
+        State before = state();
+        assertThrows(BusinessException.class, () -> service.start(operation));
+        assertEquals(before, state());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=? AND state='BUILDING'", Integer.class, TENANT, JOB, lease.runId()));
+    }
+
+    @Test
+    void 旧validatorFingerprintのBUILDINGrunはtakeover拒否される() {
+        var lease = service.start(service.beginStart(JOB));
+        jdbc.update("UPDATE t_import_validation_run SET validation_fingerprint=? WHERE tenant_id=? AND job_id=? AND id=?",
+                hash("old-validator"), TENANT, JOB, lease.runId());
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?", TENANT, JOB);
+        var takeover = service.beginTakeover(JOB, lease.runId());
+        State before = state();
+        assertThrows(BusinessException.class, () -> service.takeOver(takeover));
+        assertEquals(before, state());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=? AND state='BUILDING' AND last_resumed_lease_generation=1", Integer.class, TENANT, JOB, lease.runId()));
     }
 
     private long insertCompletedRun() {

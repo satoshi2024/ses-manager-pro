@@ -51,6 +51,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.Timestamp;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -331,6 +332,79 @@ class ImportMetadataRealMySqlTest {
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=? AND state='BUILDING' AND active_slot=1 AND published_slot IS NULL",
                 Integer.class, tenantId, jobId, lease.runId()));
         lifecycleService.abort(lease);
+    }
+
+    @Test
+    void 実MySQLtakeoverの期限はDB値と一致しrenew後にabortできる() {
+        prepareBoundCustomerJob();
+        var initial = lifecycleService.start(lifecycleService.beginStart(jobId));
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
+                tenantId, jobId);
+        var takeover = lifecycleService.takeOver(lifecycleService.beginTakeover(jobId, initial.runId()));
+        Timestamp storedTakeoverExpiry = jdbc.queryForObject("SELECT lease_expires_at FROM t_import_job WHERE tenant_id=? AND id=?",
+                Timestamp.class, tenantId, jobId);
+        assertEquals(storedTakeoverExpiry, takeover.expiresAt(), "grant期限はMySQLが保存した実値と一致します");
+        var renewed = lifecycleService.renew(takeover);
+        Timestamp storedRenewalExpiry = jdbc.queryForObject("SELECT lease_expires_at FROM t_import_job WHERE tenant_id=? AND id=?",
+                Timestamp.class, tenantId, jobId);
+        assertEquals(storedRenewalExpiry, renewed.expiresAt());
+        lifecycleService.abort(renewed);
+        Map<String, Object> aborted = leaseSnapshot();
+        assertEquals("MAPPED", aborted.get("state"));
+        assertEquals("ABORTED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, tenantId, jobId, initial.runId()));
+    }
+
+    @Test
+    void 同operationのstartretryはgate待機中に期限切れ後409で状態を変更しない() throws Exception {
+        prepareBoundCustomerJob();
+        var operation = lifecycleService.beginStart(jobId);
+        lifecycleService.start(operation);
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,8,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
+                tenantId, jobId);
+        Map<String, Object> before = leaseSnapshot();
+        BlockedLease blocked = blockLeaseAtAuthorizationGate(() -> lifecycleService.start(operation));
+        try {
+            assertLeaseExpiryHasRemainingMargin(3_000_000L);
+            awaitLeaseExpiryByDatabaseClock();
+            blocked.blocker().commit();
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> blocked.service().get(10, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException);
+            assertEquals(409, ((BusinessException) failure.getCause()).getCode());
+            assertEquals(before, leaseSnapshot());
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_run WHERE tenant_id=? AND job_id=?",
+                    Integer.class, tenantId, jobId));
+        } finally {
+            closeBlockedLease(blocked, 409);
+        }
+    }
+
+    @Test
+    void F1bの同operationtakeoverretryはgate待機中に期限切れ後409で状態を変更しない() throws Exception {
+        prepareBoundCustomerJob();
+        var initial = lifecycleService.start(lifecycleService.beginStart(jobId));
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
+                tenantId, jobId);
+        var operation = lifecycleService.beginTakeover(jobId, initial.runId());
+        lifecycleService.takeOver(operation);
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,8,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
+                tenantId, jobId);
+        Map<String, Object> before = leaseSnapshot();
+        BlockedLease blocked = blockLeaseAtAuthorizationGate(() -> lifecycleService.takeOver(operation));
+        try {
+            assertLeaseExpiryHasRemainingMargin(3_000_000L);
+            awaitLeaseExpiryByDatabaseClock();
+            blocked.blocker().commit();
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> blocked.service().get(10, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException);
+            assertEquals(409, ((BusinessException) failure.getCause()).getCode());
+            assertEquals(before, leaseSnapshot());
+            assertEquals(2L, ((Number) leaseSnapshot().get("lease_generation")).longValue());
+        } finally {
+            closeBlockedLease(blocked, 409);
+        }
     }
 
     @Test
@@ -946,10 +1020,10 @@ class ImportMetadataRealMySqlTest {
     }
 
     private BlockedLease blockLeaseAtAuthorizationGate(
-            java.util.concurrent.Callable<ImportValidationLeaseService.LeaseGrant> operation) throws Exception {
+            java.util.concurrent.Callable<?> operation) throws Exception {
         Connection blocker = null;
         ExecutorService pool = null;
-        Future<ImportValidationLeaseService.LeaseGrant> service = null;
+        Future<?> service = null;
         boolean transferred = false;
         Throwable primaryFailure = null;
         try {
@@ -1027,8 +1101,7 @@ class ImportMetadataRealMySqlTest {
         }
     }
 
-    private record BlockedLease(Connection blocker, ExecutorService pool,
-                                Future<ImportValidationLeaseService.LeaseGrant> service) { }
+    private record BlockedLease(Connection blocker, ExecutorService pool, Future<?> service) { }
 
     private GatePause pauseRealWriteGate() {
         GatePause pause = new GatePause();
