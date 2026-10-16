@@ -19,11 +19,14 @@ import org.junit.jupiter.api.RepeatedTest;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -31,6 +34,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestPropertySource(properties = {"external-account.provider=none", "app.security.oidc.tenant-id="})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class ExternalAccountFailClosedOffboardingIntegrationTest extends BaseIntegrationTest {
+    private static final String ISOLATED_DATABASE = "jdbc:h2:mem:offboarding-failclosed-"
+            + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL";
+
+    @DynamicPropertySource
+    static void isolateDatabase(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", () -> ISOLATED_DATABASE);
+    }
 
     private String tenantId;
     private String username;
@@ -122,6 +132,16 @@ class ExternalAccountFailClosedOffboardingIntegrationTest extends BaseIntegratio
         assertThat(afterRequest.getRevokeRequestedBy()).isEqualTo(actorUserId);
         assertThat(afterRequest.getRevokeConfirmedAt()).isNull();
         assertThat(afterRequest.getRetryCount()).isZero();
+
+        int madeDue = jdbcTemplate.update("""
+                UPDATE t_external_account_reference
+                SET next_retry_at = ?
+                WHERE id = ? AND tenant_id = ? AND legal_entity_id = ?
+                  AND status = 'PENDING_CONFIRMATION' AND deleted_flag = 0
+                """, LocalDateTime.now().minusMinutes(1), referenceId, tenantId, legalEntityId);
+        assertThat(madeDue).isEqualTo(1);
+        assertThat(referenceMapper.selectByIdAndScope(referenceId, tenantId, legalEntityId).getNextRetryAt())
+                .isBeforeOrEqualTo(LocalDateTime.now());
 
         int confirmedByPoll = externalAccountService.processPendingRevokePollJob();
 
