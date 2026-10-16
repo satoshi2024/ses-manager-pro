@@ -187,8 +187,6 @@ public class ImportIdentityCandidateService {
             throw BusinessException.of(409, "error.import.validationRowMismatch");
         }
 
-        ImportAuthorizedContext finalContext = authorization.requireCurrentAuthorization();
-        requireSameActor(originalContext, finalContext);
         Existing locked = findExisting(context.tenantId(), snapshot.sourceSystemId(), snapshot.entity(),
                 encrypted.lookupDigest(), true);
         if (locked != null) {
@@ -196,13 +194,16 @@ public class ImportIdentityCandidateService {
             if (!sameRegistrySnapshot(prechecked, locked)) {
                 throw BusinessException.of(409, "error.import.identityHashCollision");
             }
+            // 冪等returnもregistry lock待ち後の現在権限を取得してから許可する。
+            ImportAuthorizedContext finalContext = authorization.requireCurrentAuthorizationForWrite(originalContext);
+            requireSameActor(originalContext, finalContext);
             return locked.id();
         }
         if (prechecked != null) throw BusinessException.of(409, "error.import.identityCandidateConflict");
-        // 全てのsource/document/run/row lock取得後、registry書込み直前に権限を再確認する。
-        finalContext = authorization.requireCurrentAuthorization();
+        // resourceとregistryのlock待ち後、insert直前に現在権限を線形化する。
+        ImportAuthorizedContext finalContext = authorization.requireCurrentAuthorizationForWrite(originalContext);
         requireSameActor(originalContext, finalContext);
-        return insert(context, snapshot, runId, encrypted);
+        return insert(finalContext, snapshot, runId, encrypted);
     }
 
     private CandidateSnapshot loadSnapshot(ImportAuthorizedContext context, long jobId, long runId) {

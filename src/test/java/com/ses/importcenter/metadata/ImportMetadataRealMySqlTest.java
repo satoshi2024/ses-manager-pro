@@ -7,6 +7,9 @@ import com.ses.entity.DocumentVersion;
 import com.ses.entity.SysUser;
 import com.ses.importcenter.foundation.ImportEncoding;
 import com.ses.importcenter.foundation.ImportEntity;
+import com.ses.importcenter.foundation.CanonicalImportRowFingerprint;
+import com.ses.importcenter.foundation.CanonicalRowFactory;
+import com.ses.importcenter.foundation.SourceRow;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.SysUserMapper;
@@ -26,6 +29,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -55,6 +59,12 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -96,18 +106,21 @@ class ImportMetadataRealMySqlTest {
 
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ImportMetadataService metadataService;
+    @Autowired private ImportIdentityCandidateService candidateService;
+    @Autowired private ImportValidationLeaseService leaseService;
     @Autowired private DocumentService documentService;
     @Autowired private DocumentMapper documentMapper;
     @Autowired private DocumentVersionMapper documentVersionMapper;
     @Autowired private SysUserMapper sysUserMapper;
     @Autowired private TestDocumentStorage storage;
     @Autowired private javax.sql.DataSource dataSource;
-    @Autowired private ImportMetadataAuthorizationService metadataAuthorization;
+    @SpyBean private ImportMetadataAuthorizationService metadataAuthorization;
 
     private String tenantId;
     private long actorUserId;
     private long groupId;
     private long foreignGroupId;
+    private long denyGroupId;
     private long sourceId;
     private long mappingId;
     private long jobId;
@@ -193,6 +206,12 @@ class ImportMetadataRealMySqlTest {
         if (documentId > 0) {
             jdbc.update("DELETE FROM t_document_access_log WHERE document_id=?", documentId);
             jdbc.update("DELETE FROM t_document_link WHERE tenant_id=? AND document_id=?", tenantId, documentId);
+            jdbc.update("DELETE FROM t_import_identity_registry WHERE tenant_id=? AND first_job_id IN "
+                    + "(SELECT id FROM t_import_job WHERE tenant_id=? AND source_system_id=?)", tenantId, tenantId, sourceId);
+            jdbc.update("DELETE FROM t_import_validation_row WHERE tenant_id=? AND job_id=?", tenantId, jobId);
+            jdbc.update("UPDATE t_import_job SET active_validation_run_id=NULL,current_validation_run_id=NULL "
+                    + "WHERE tenant_id=? AND id=?", tenantId, jobId);
+            jdbc.update("DELETE FROM t_import_validation_run WHERE tenant_id=? AND job_id=?", tenantId, jobId);
             jdbc.update("DELETE FROM t_import_job WHERE tenant_id=? AND id=?", tenantId, jobId);
             jdbc.update("DELETE FROM t_document_version WHERE tenant_id=? AND id=?", tenantId, documentVersionId);
             jdbc.update("DELETE FROM t_document WHERE tenant_id=? AND id=?", tenantId, documentId);
@@ -207,6 +226,11 @@ class ImportMetadataRealMySqlTest {
         if (foreignGroupId > 0) {
             jdbc.update("DELETE FROM t_user_permission_group WHERE tenant_id=? AND group_id=?", tenantId, foreignGroupId);
             jdbc.update("DELETE FROM m_permission_group WHERE tenant_id=? AND id=?", tenantId + "-foreign", foreignGroupId);
+        }
+        if (denyGroupId > 0) {
+            jdbc.update("DELETE FROM t_user_permission_group WHERE tenant_id=? AND group_id=?", tenantId, denyGroupId);
+            jdbc.update("DELETE FROM t_permission_group_action WHERE tenant_id=? AND group_id=?", tenantId, denyGroupId);
+            jdbc.update("DELETE FROM m_permission_group WHERE tenant_id=? AND id=?", tenantId, denyGroupId);
         }
         if (actorUserId > 0) jdbc.update("DELETE FROM sys_user WHERE id=?", actorUserId);
         jdbc.update("DELETE FROM m_organization_unit WHERE legal_entity_id=? AND code=?", LEGAL_ENTITY_ID,
@@ -399,6 +423,392 @@ class ImportMetadataRealMySqlTest {
         assertEquals(0, storage.openCount());
     }
 
+    @Test
+    void registry行待機中に権限撤回が先にcommitすると既存candidateの冪等returnを拒否する() throws Exception {
+        long validationRunId = prepareValidatedCustomerJob();
+        long candidateId = candidateService.registerCandidate(jobId, validationRunId, 1);
+        storage.resetOpenCount();
+        byte[] lookupDigest = jdbc.queryForObject("SELECT lookup_digest FROM t_import_identity_registry WHERE tenant_id=? AND id=?",
+                byte[].class, tenantId, candidateId);
+        var before = jdbc.queryForMap("SELECT lookup_key_version, lookup_digest, encryption_key_version, nonce, "
+                        + "identity_ciphertext, first_job_id, first_validation_run_id FROM t_import_identity_registry "
+                        + "WHERE tenant_id=? AND id=?", tenantId, candidateId);
+
+        assertRevokedWhileRegistryLockHeld(validationRunId, lookupDigest);
+
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_identity_registry WHERE tenant_id=? AND id=?",
+                Integer.class, tenantId, candidateId));
+        var after = jdbc.queryForMap("SELECT lookup_key_version, lookup_digest, encryption_key_version, nonce, "
+                        + "identity_ciphertext, first_job_id, first_validation_run_id FROM t_import_identity_registry "
+                        + "WHERE tenant_id=? AND id=?", tenantId, candidateId);
+        assertEquals(before, after);
+        assertEquals(1, jdbc.queryForObject("SELECT version_no FROM t_import_job WHERE tenant_id=? AND id=?",
+                Integer.class, tenantId, jobId));
+        assertEquals(1, storage.openCount(), "検証済みsourceの候補確認ではsourceを一度だけ実読する");
+    }
+
+    @Test
+    void job行待機中に権限撤回が先にcommitするとlease取得を拒否し状態を保つ() throws Exception {
+        prepareBoundCustomerJob();
+        ImportValidationLeaseService.AcquireOperation operation = leaseService.beginAcquire(jobId);
+        Map<String, Object> before = leaseSnapshot();
+        assertRevokedWhileJobLockHeld(() -> leaseService.acquire(operation));
+        assertEquals(before, leaseSnapshot());
+    }
+
+    @Test
+    void candidate実serviceのgate後は新規deny行がcommitまで待機する() throws Exception {
+        long validationRunId = prepareValidatedCustomerJob();
+        GatePause pause = pauseRealWriteGate();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch writerMayCommit = new CountDownLatch(1);
+        Future<Long> service = null;
+        Future<?> mutation = null;
+        Throwable primaryFailure = null;
+        try {
+            service = pool.submit(() -> withActorContext(() ->
+                    candidateService.registerCandidate(jobId, validationRunId, 1)));
+            assertTrue(pause.entered.await(10, TimeUnit.SECONDS), "実candidate serviceのwrite gateに到達しませんでした");
+            assertGateRunsInReadCommittedTransaction(pause);
+            AtomicReference<Long> writerId = new AtomicReference<>();
+            mutation = pool.submit(() -> insertDenyActionAndWaitForCommit(writerId, writerMayCommit));
+            awaitPermissionActionWait(writerId, pause.connectionId, service, mutation);
+            assertTrue(!service.isDone(), "実candidate transactionがgate保持中に完了しました");
+            pause.release.countDown();
+            long candidateId = service.get(10, TimeUnit.SECONDS);
+            assertTrue(candidateId > 0);
+            writerMayCommit.countDown();
+            mutation.get(10, TimeUnit.SECONDS);
+            Map<String, Object> beforeDeniedRetry = jdbc.queryForMap("SELECT id,lookup_digest,identity_ciphertext "
+                    + "FROM t_import_identity_registry WHERE tenant_id=? AND id=?", tenantId, candidateId);
+            BusinessException denied = assertThrows(BusinessException.class,
+                    () -> candidateService.registerCandidate(jobId, validationRunId, 1));
+            assertEquals(403, denied.getCode());
+            assertEquals(beforeDeniedRetry, jdbc.queryForMap("SELECT id,lookup_digest,identity_ciphertext "
+                    + "FROM t_import_identity_registry WHERE tenant_id=? AND id=?", tenantId, candidateId));
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            pause.release.countDown();
+            writerMayCommit.countDown();
+            List<Throwable> cleanup = awaitFutures(futures(service, mutation), pool, false);
+            reportCleanupFailures("実candidate gate待機fixture", cleanup, primaryFailure);
+        }
+    }
+
+    @Test
+    void lease実serviceのgate後はdenygroupへのmembership追加がcommitまで待機する() throws Exception {
+        prepareBoundCustomerJob();
+        String denyGroupKey = "nf06-deny-" + UUID.randomUUID();
+        jdbc.update("INSERT INTO m_permission_group(tenant_id,group_key,group_name,enabled,deleted_flag) "
+                + "VALUES(?,?,?,1,0)", tenantId, denyGroupKey, "合成deny group");
+        denyGroupId = jdbc.queryForObject("SELECT id FROM m_permission_group WHERE tenant_id=? AND group_key=?",
+                Long.class, tenantId, denyGroupKey);
+        jdbc.update("INSERT INTO t_permission_group_action(tenant_id,group_id,action_key,deny_flag,deleted_flag) "
+                + "VALUES(?,?, 'import.*',1,0)", tenantId, denyGroupId);
+        ImportValidationLeaseService.AcquireOperation operation = leaseService.beginAcquire(jobId);
+        GatePause pause = pauseRealWriteGate();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch writerMayCommit = new CountDownLatch(1);
+        Future<ImportValidationLeaseService.LeaseGrant> service = null;
+        Future<?> mutation = null;
+        Throwable primaryFailure = null;
+        try {
+            service = pool.submit(() -> withActorContext(() -> leaseService.acquire(operation)));
+            assertTrue(pause.entered.await(10, TimeUnit.SECONDS), "実lease serviceのwrite gateに到達しませんでした");
+            assertGateRunsInReadCommittedTransaction(pause);
+            AtomicReference<Long> writerId = new AtomicReference<>();
+            mutation = pool.submit(() -> insertMembershipAndWaitForCommit(denyGroupId, writerId, writerMayCommit));
+            awaitMembershipWait(writerId, pause.connectionId, service, mutation);
+            assertTrue(!service.isDone(), "実lease transactionがgate保持中に完了しました");
+            pause.release.countDown();
+            ImportValidationLeaseService.LeaseGrant grant = service.get(10, TimeUnit.SECONDS);
+            writerMayCommit.countDown();
+            mutation.get(10, TimeUnit.SECONDS);
+            Map<String, Object> beforeDeniedRenewal = leaseSnapshot();
+            BusinessException denied = assertThrows(BusinessException.class, () -> leaseService.renew(grant));
+            assertEquals(403, denied.getCode());
+            assertEquals(beforeDeniedRenewal, leaseSnapshot());
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            pause.release.countDown();
+            writerMayCommit.countDown();
+            reportCleanupFailures("実lease gate待機fixture", awaitFutures(futures(service, mutation), pool, false),
+                    primaryFailure);
+        }
+    }
+
+    private GatePause pauseRealWriteGate() {
+        GatePause pause = new GatePause();
+        AtomicBoolean first = new AtomicBoolean();
+        doAnswer(invocation -> {
+            ImportAuthorizedContext authorized = (ImportAuthorizedContext) invocation.callRealMethod();
+            if (first.compareAndSet(false, true)) {
+                pause.connectionId.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                pause.transactionActive.set(TransactionSynchronizationManager.isActualTransactionActive());
+                pause.isolation.set(jdbc.queryForObject("SELECT @@transaction_isolation", String.class));
+                pause.entered.countDown();
+                if (!pause.release.await(10, TimeUnit.SECONDS)) throw new AssertionError("実service gate barrier timeout");
+            }
+            return authorized;
+        }).when(metadataAuthorization).requireCurrentAuthorizationForWrite(any());
+        return pause;
+    }
+
+    private void assertGateRunsInReadCommittedTransaction(GatePause pause) {
+        assertTrue(pause.transactionActive.get(), "write gateは実service transaction内で呼び出します");
+        assertEquals("READ-COMMITTED", pause.isolation.get());
+        assertTrue(pause.connectionId.get() != null);
+    }
+
+    private void insertDenyActionAndWaitForCommit(AtomicReference<Long> writerId, CountDownLatch commit) {
+        try (Connection connection = dataSource.getConnection()) {
+            connection.setAutoCommit(false);
+            try (var statement = connection.createStatement(); ResultSet rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
+                rows.next(); writerId.set(rows.getLong(1));
+            }
+            try (var statement = connection.prepareStatement("INSERT INTO t_permission_group_action "
+                    + "(tenant_id,group_id,action_key,deny_flag,deleted_flag) VALUES(?,?,'import.*',1,0)")) {
+                statement.setString(1, tenantId); statement.setLong(2, groupId); statement.executeUpdate();
+            }
+            if (!commit.await(10, TimeUnit.SECONDS)) throw new AssertionError("deny insert commit barrier timeout");
+            connection.commit();
+        } catch (Exception failure) { throw new IllegalStateException(failure); }
+    }
+
+    private void insertMembershipAndWaitForCommit(long targetGroup, AtomicReference<Long> writerId, CountDownLatch commit) {
+        try (Connection connection = dataSource.getConnection()) {
+            connection.setAutoCommit(false);
+            try (var statement = connection.createStatement(); ResultSet rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
+                rows.next(); writerId.set(rows.getLong(1));
+            }
+            try (var statement = connection.prepareStatement("INSERT INTO t_user_permission_group "
+                    + "(tenant_id,user_id,group_id,assigned_by,deleted_flag) VALUES(?,?,?, ?,0)")) {
+                statement.setString(1, tenantId); statement.setLong(2, actorUserId);
+                statement.setLong(3, targetGroup); statement.setLong(4, actorUserId); statement.executeUpdate();
+            }
+            if (!commit.await(10, TimeUnit.SECONDS)) throw new AssertionError("membership insert commit barrier timeout");
+            connection.commit();
+        } catch (Exception failure) { throw new IllegalStateException(failure); }
+    }
+
+    private void awaitPermissionActionWait(AtomicReference<Long> requester, AtomicReference<Long> blocker,
+                                           Future<?> service, Future<?> mutation) throws Exception {
+        awaitTargetedWait(requester, blocker, service, mutation, "t_permission_group_action", "uk_permission_group_action",
+                "X,GAP,INSERT_INTENTION", null);
+    }
+
+    private void awaitMembershipWait(AtomicReference<Long> requester, AtomicReference<Long> blocker,
+                                     Future<?> service, Future<?> mutation) throws Exception {
+        awaitTargetedWait(requester, blocker, service, mutation, "t_user_permission_group", "uk_user_permission_group",
+                "X,INSERT_INTENTION", "supremum pseudo-record");
+    }
+
+    private void awaitTargetedWait(AtomicReference<Long> requester, AtomicReference<Long> blocker,
+                                   Future<?> service, Future<?> mutation, String table, String index,
+                                   String requestMode, String lockData) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            assertFuturePending(service, "実metadata service");
+            assertFuturePending(mutation, "permission mutation");
+            Long requestId = requester.get(), blockerId = blocker.get();
+            if (requestId != null && blockerId != null) {
+                Integer found = jdbc.queryForObject("""
+                        SELECT COUNT(*) FROM performance_schema.data_lock_waits w
+                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
+                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                        JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                        JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
+                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=? AND req.INDEX_NAME=?
+                          AND req.LOCK_TYPE='RECORD' AND req.LOCK_MODE=? AND req.LOCK_STATUS='WAITING'
+                          AND (? IS NULL OR req.LOCK_DATA=?)
+                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=? AND blk.INDEX_NAME=?
+                          AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_STATUS='GRANTED'
+                          AND blk.LOCK_MODE IN ('X','X,REC_NOT_GAP')
+                        """, Integer.class, requestId, blockerId, table, index, requestMode, lockData, lockData,
+                        table, index);
+                if (found != null && found > 0) return;
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError("実service gateに対する指定permission lock waitを確認できませんでした: "
+                + safeWaitDetails(requester.get(), blocker.get()));
+    }
+
+    private List<Future<?>> futures(Future<?>... values) {
+        return java.util.Arrays.stream(values).filter(java.util.Objects::nonNull).map(value -> (Future<?>) value).toList();
+    }
+
+    private static final class GatePause {
+        private final CountDownLatch entered = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+        private final AtomicReference<Long> connectionId = new AtomicReference<>();
+        private final AtomicReference<String> isolation = new AtomicReference<>();
+        private final AtomicBoolean transactionActive = new AtomicBoolean();
+    }
+
+    private void assertRevokedWhileRegistryLockHeld(long validationRunId, byte[] lookupDigest) throws Exception {
+        Connection blocker = null;
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        Future<?> operationFuture = null;
+        AtomicReference<Long> blockerId = new AtomicReference<>();
+        Throwable primaryFailure = null;
+        boolean expectedDenialObserved = false;
+        try {
+            blocker = dataSource.getConnection();
+            blocker.setAutoCommit(false);
+            try (var statement = blocker.prepareStatement("SELECT id FROM t_import_identity_registry WHERE tenant_id=? "
+                    + "AND source_system_id=? AND entity_type='CUSTOMER' AND lookup_digest=? FOR UPDATE")) {
+                statement.setString(1, tenantId);
+                statement.setLong(2, sourceId);
+                statement.setBytes(3, lookupDigest);
+                try (ResultSet rows = statement.executeQuery()) { assertTrue(rows.next()); }
+            }
+            try (var statement = blocker.createStatement(); ResultSet rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
+                rows.next();
+                blockerId.set(rows.getLong(1));
+            }
+            String registryLockData = permissionLockData(blockerId.get(), "t_import_identity_registry",
+                    "uk_import_identity_namespace");
+            Future<?> submitted = pool.submit(() -> withActorContext(() ->
+                    candidateService.registerCandidate(jobId, validationRunId, 1)));
+            operationFuture = submitted;
+            long requester = awaitExactLockWait(blockerId.get(), "t_import_identity_registry",
+                    "uk_import_identity_namespace", registryLockData, submitted, "candidate registry");
+            assertEquals(1, jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 WHERE tenant_id=? "
+                            + "AND group_id=? AND action_key=? AND deny_flag=0",
+                    tenantId, groupId, ImportMetadataAuthorizationService.ACTION));
+            blocker.commit();
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> submitted.get(12, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException,
+                    "SQL lock error/timeoutを403として扱わない: " + failure.getCause());
+            assertEquals(403, ((BusinessException) failure.getCause()).getCode());
+            expectedDenialObserved = true;
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            if (blocker != null) {
+                try { blocker.rollback(); } catch (Exception failure) {
+                    if (primaryFailure != null) primaryFailure.addSuppressed(failure); else throw failure;
+                }
+                try { blocker.close(); } catch (Exception failure) {
+                    if (primaryFailure != null) primaryFailure.addSuppressed(failure); else throw failure;
+                }
+            }
+            reportCleanupFailures("candidate registry撤権競合fixture",
+                    awaitFutures(operationFuture == null ? List.of() : List.of(operationFuture), pool, expectedDenialObserved),
+                    primaryFailure);
+        }
+    }
+
+    private void assertRevokedWhileJobLockHeld(Supplier<?> operation) throws Exception {
+        Connection blocker = null;
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        Future<?> operationFuture = null;
+        AtomicReference<Long> blockerId = new AtomicReference<>();
+        Throwable primaryFailure = null;
+        boolean expectedDenialObserved = false;
+        try {
+            blocker = dataSource.getConnection();
+            blocker.setAutoCommit(false);
+            try (var statement = blocker.prepareStatement("SELECT id FROM t_import_job WHERE tenant_id=? AND id=? FOR UPDATE")) {
+                statement.setString(1, tenantId);
+                statement.setLong(2, jobId);
+                try (ResultSet rows = statement.executeQuery()) { assertTrue(rows.next()); }
+            }
+            try (var statement = blocker.createStatement(); ResultSet rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
+                rows.next();
+                blockerId.set(rows.getLong(1));
+            }
+            String jobLockData = permissionLockData(blockerId.get(), "t_import_job", "PRIMARY");
+            Future<?> submitted = pool.submit(() -> withActorContext(operation::get));
+            operationFuture = submitted;
+            awaitExactLockWait(blockerId.get(), "t_import_job", "PRIMARY", jobLockData, submitted, "validation lease job");
+            assertEquals(1, jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 WHERE tenant_id=? "
+                            + "AND group_id=? AND action_key=? AND deny_flag=0",
+                    tenantId, groupId, ImportMetadataAuthorizationService.ACTION));
+            blocker.commit();
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> submitted.get(12, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException,
+                    "SQL lock error/timeoutを403として扱わない: " + failure.getCause());
+            assertEquals(403, ((BusinessException) failure.getCause()).getCode());
+            expectedDenialObserved = true;
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            if (blocker != null) {
+                try { blocker.rollback(); } catch (Exception failure) {
+                    if (primaryFailure != null) primaryFailure.addSuppressed(failure); else throw failure;
+                }
+                try { blocker.close(); } catch (Exception failure) {
+                    if (primaryFailure != null) primaryFailure.addSuppressed(failure); else throw failure;
+                }
+            }
+            reportCleanupFailures("lease job撤権競合fixture",
+                    awaitFutures(operationFuture == null ? List.of() : List.of(operationFuture), pool, expectedDenialObserved),
+                    primaryFailure);
+        }
+    }
+
+    private String permissionLockData(long connectionId, String table, String index) {
+        return jdbc.queryForObject("SELECT dl.LOCK_DATA FROM performance_schema.data_locks dl "
+                        + "JOIN performance_schema.threads t ON t.THREAD_ID=dl.THREAD_ID "
+                        + "WHERE t.PROCESSLIST_ID=? AND dl.OBJECT_SCHEMA=DATABASE() AND dl.OBJECT_NAME=? "
+                        + "AND dl.INDEX_NAME=? AND dl.LOCK_TYPE='RECORD' AND dl.LOCK_STATUS='GRANTED' "
+                        + "AND dl.LOCK_DATA IS NOT NULL ORDER BY dl.LOCK_MODE LIMIT 1",
+                String.class, connectionId, table, index);
+    }
+
+    private long awaitExactLockWait(long blockerId, String table, String index, String lockData,
+                                   Future<?> operation, String label) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12);
+        while (System.nanoTime() < deadline) {
+            assertFuturePending(operation, label);
+            List<Long> requesters = jdbc.query("""
+                    SELECT wt.PROCESSLIST_ID
+                    FROM performance_schema.data_lock_waits w
+                    JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
+                    JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                    JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                    JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                    WHERE wt.PROCESSLIST_ID<>? AND bt.PROCESSLIST_ID=?
+                      AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=? AND req.INDEX_NAME=?
+                      AND req.LOCK_TYPE='RECORD' AND req.LOCK_MODE='X,REC_NOT_GAP' AND req.LOCK_STATUS='WAITING'
+                      AND req.LOCK_DATA=?
+                      AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=? AND blk.INDEX_NAME=?
+                      AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_MODE='X,REC_NOT_GAP' AND blk.LOCK_STATUS='GRANTED'
+                      AND blk.LOCK_DATA=?
+                    """, (rs, row) -> rs.getLong(1), blockerId, blockerId, table, index, lockData,
+                    table, index, lockData);
+            if (!requesters.isEmpty()) return requesters.get(0);
+            Thread.sleep(25);
+        }
+        assertFuturePending(operation, label);
+        throw new AssertionError(label + "の対象record X lock waitを確認できませんでした: "
+                + safeWaitDetails(null, blockerId));
+    }
+
+    private <T> T withActorContext(java.util.concurrent.Callable<T> operation) {
+        var authority = new SimpleGrantedAuthority("ROLE_管理者");
+        installPrincipal(tenantId, authority);
+        AccountingTenantContextHolder.setTenantId(tenantId);
+        try { return operation.call(); }
+        catch (RuntimeException | Error failure) { throw failure; }
+        catch (Exception failure) { throw new IllegalStateException(failure); }
+        finally {
+            SecurityContextHolder.clearContext();
+            AccountingTenantContextHolder.clear();
+        }
+    }
+
     private void assertRevokedWhileSourceLockHeld(Supplier<?> operation) throws Exception {
         Connection blocker = null;
         ExecutorService pool = null;
@@ -485,6 +895,70 @@ class ImportMetadataRealMySqlTest {
     private void prepareBoundCustomerJob() {
         prepareUnboundCustomerJob();
         assertEquals(2L, metadataService.bindMapping(jobId, 1, mappingId));
+    }
+
+    private long prepareValidatedCustomerJob() {
+        prepareBoundCustomerJob();
+        byte[] digest = HexFormat.of().parseHex(SOURCE_HASH);
+        jdbc.update("""
+                INSERT INTO t_import_validation_run(tenant_id,job_id,run_no,state,created_lease_generation,
+                  last_resumed_lease_generation,active_slot,actor_user_id,source_system_id,source_version,
+                  source_code_snapshot,entity_type,schema_version,source_encoding,source_sha256,document_id,
+                  document_version_id,document_version_no,document_sha256,mapping_id,mapping_version,
+                  mapping_sha256,validation_fingerprint)
+                VALUES(?,?,1,'BUILDING',0,0,1,?,?,1,?,'CUSTOMER','ses-import-v1','UTF8',?,?,?,?,?,?,1,?,?)
+                """, tenantId, jobId, actorUserId, sourceId, "nf06-candidate-" + tenantId, digest,
+                documentId, documentVersionId, 1, digest, mappingId,
+                jdbc.queryForObject("SELECT mapping_sha256 FROM t_import_mapping WHERE tenant_id=? AND id=?",
+                        byte[].class, tenantId, mappingId), digest);
+        long runId = jdbc.queryForObject("SELECT id FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND run_no=1",
+                Long.class, tenantId, jobId);
+        StringBuilder complete = new StringBuilder("UPDATE t_import_validation_run SET state='COMPLETED',active_slot=NULL,"
+                + "published_slot=1,source_row_count=1,physical_row_count=1,empty_row_count=0,accepted_row_count=1,"
+                + "rejected_row_count=0,finding_summary_bytes=?,finding_summary_sha256=?,amount_excluded_reason_counts=?,"
+                + "amount_excluded_reason_sha256=?,row_set_sha256=?,summary_sha256=?");
+        for (String field : List.of("expected_unit_price", "unit_price_min", "unit_price_max", "selling_price", "cost_price")) {
+            complete.append(',').append(field).append("_accepted_known_count=0,").append(field)
+                    .append("_accepted_sum_yen=NULL,").append(field).append("_rejected_known_count=0,")
+                    .append(field).append("_rejected_sum_yen=NULL,").append(field).append("_excluded_count=0");
+        }
+        complete.append(" WHERE tenant_id=? AND job_id=? AND id=?");
+        jdbc.update(complete.toString(), new byte[]{0}, new byte[32], new byte[]{0}, new byte[32],
+                new byte[32], new byte[32], tenantId, jobId, runId);
+        String rowHash = candidateRowHash(List.of("customer-1", "Example"));
+        var sourceRow = new SourceRow(1, rowHash,
+                Map.of("externalKey", "customer-1", "companyName", "Example"));
+        byte[] fingerprint = CanonicalImportRowFingerprint.sha256(
+                CanonicalRowFactory.create(ImportEntity.CUSTOMER, sourceRow));
+        jdbc.update("""
+                INSERT INTO t_import_validation_row(tenant_id,job_id,validation_run_id,source_row_number,
+                  source_row_sha256,canonical_fingerprint,disposition,finding_codes,row_commit_sha256)
+                VALUES(?,?,?,1,?,?,'ACCEPTED',?,?)
+                """, tenantId, jobId, runId, HexFormat.of().parseHex(rowHash), fingerprint,
+                new byte[]{0}, new byte[32]);
+        jdbc.update("UPDATE t_import_job SET state='VALIDATED',current_validation_run_id=?,version_no=version_no+1 "
+                + "WHERE tenant_id=? AND id=? AND state='MAPPED'", runId, tenantId, jobId);
+        return runId;
+    }
+
+    private String candidateRowHash(List<String> values) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (String value : values) {
+                byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+                digest.update(java.nio.ByteBuffer.allocate(4).putInt(bytes.length).array());
+                digest.update(bytes);
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (java.security.NoSuchAlgorithmException failure) {
+            throw new IllegalStateException(failure);
+        }
+    }
+
+    private Map<String, Object> leaseSnapshot() {
+        return jdbc.queryForMap("SELECT state,version_no,lease_owner,lease_generation,lease_expires_at,"
+                + "active_validation_run_id,current_validation_run_id FROM t_import_job WHERE tenant_id=? AND id=?",
+                tenantId, jobId);
     }
 
     private int mappingCountForSource() {

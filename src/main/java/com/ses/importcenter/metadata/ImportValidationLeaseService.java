@@ -87,8 +87,9 @@ public class ImportValidationLeaseService {
         Mapping mapping = lockMapping(context, expected.mappingId());
         requireMapping(expected, mapping);
 
-        ImportAuthorizedContext lockedContext = authorization.requireCurrentAuthorization();
+        ImportAuthorizedContext lockedContext = authorization.requireCurrentAuthorizationForWrite(expected.context());
         requireActor(expected.context(), lockedContext);
+        // 認可行のlock取得が待機した場合も、冪等grant判定には待機後のDB時刻を使う。
         java.sql.Timestamp dbNow = jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)", java.sql.Timestamp.class);
         if (dbNow == null) conflict();
         if (mode == Mode.ACQUIRE && worker.equals(job.owner()) && job.generation() == expected.generation() + 1
@@ -104,9 +105,8 @@ public class ImportValidationLeaseService {
             return new LeaseGrant(serviceInstanceId, expected, worker, operationId, job.generation());
         }
 
-        // 認可とDB時刻をCAS直前に再取得する。ここからCASまでは外部I/Oを行わない。
-        ImportAuthorizedContext finalContext = authorization.requireCurrentAuthorization();
-        requireActor(expected.context(), finalContext);
+        // gate取得後、CASの期限判定にも新しいprimary時刻を使う。
+        // UPDATE側のCURRENT_TIMESTAMP条件はDB内fenceとして引き続き保持する。
         java.sql.Timestamp finalNow = jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)", java.sql.Timestamp.class);
         if (finalNow == null) conflict();
         if (mode == Mode.TAKEOVER && expected.expiresAt().after(finalNow)) conflict();
@@ -124,7 +124,7 @@ public class ImportValidationLeaseService {
                       AND current_validation_run_id IS NULL AND source_system_id=? AND source_version=?
                       AND mapping_id=? AND mapping_version=? AND mapping_sha256=? AND source_sha256=?
                       AND document_id=? AND document_version_id=? AND document_version_no=? AND document_sha256=?
-                    """, worker, LEASE_SECONDS, context.tenantId(), expected.jobId(), job.version(),
+                    """, worker, LEASE_SECONDS, lockedContext.tenantId(), expected.jobId(), job.version(),
                     expected.generation(), expected.sourceId(), expected.sourceVersion(), expected.mappingId(),
                     expected.mappingVersion(), expected.mappingSha(), expected.sourceSha(), expected.documentId(),
                     expected.documentVersionId(), expected.documentVersionNo(), expected.documentSha());
@@ -142,7 +142,7 @@ public class ImportValidationLeaseService {
                       AND source_system_id=? AND source_version=? AND mapping_id=? AND mapping_version=?
                       AND mapping_sha256=? AND source_sha256=? AND document_id=? AND document_version_id=?
                       AND document_version_no=? AND document_sha256=?
-                    """, worker, LEASE_SECONDS, context.tenantId(), expected.jobId(), job.version(),
+                    """, worker, LEASE_SECONDS, lockedContext.tenantId(), expected.jobId(), job.version(),
                     expectedGeneration, previousOwner, expected.expiresAt(), expected.sourceId(), expected.sourceVersion(),
                     expected.mappingId(), expected.mappingVersion(), expected.mappingSha(), expected.sourceSha(),
                     expected.documentId(), expected.documentVersionId(), expected.documentVersionNo(), expected.documentSha());
@@ -158,7 +158,7 @@ public class ImportValidationLeaseService {
                       AND source_system_id=? AND source_version=? AND mapping_id=? AND mapping_version=?
                       AND mapping_sha256=? AND source_sha256=? AND document_id=? AND document_version_id=?
                       AND document_version_no=? AND document_sha256=?
-                    """, LEASE_SECONDS, context.tenantId(), expected.jobId(), job.version(), expectedGeneration,
+                    """, LEASE_SECONDS, lockedContext.tenantId(), expected.jobId(), job.version(), expectedGeneration,
                     worker, job.expiresAt(), expected.sourceId(), expected.sourceVersion(), expected.mappingId(), expected.mappingVersion(),
                     expected.mappingSha(), expected.sourceSha(), expected.documentId(), expected.documentVersionId(),
                     expected.documentVersionNo(), expected.documentSha());
@@ -166,7 +166,7 @@ public class ImportValidationLeaseService {
         if (changed != 1) conflict();
         if (mode != Mode.ACQUIRE) {
             Long generation = jdbc.query("SELECT lease_generation FROM t_import_job WHERE tenant_id=? AND id=?",
-                    rs -> rs.next() ? rs.getLong(1) : null, context.tenantId(), expected.jobId());
+                    rs -> rs.next() ? rs.getLong(1) : null, lockedContext.tenantId(), expected.jobId());
             if (generation == null || generation != (mode == Mode.TAKEOVER ? expectedGeneration + 1 : expectedGeneration)) conflict();
         }
         return new LeaseGrant(serviceInstanceId, expected, worker, operationId,

@@ -14,9 +14,9 @@ import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -52,6 +52,7 @@ class ImportValidationLeaseServiceTest {
                 "77", 3L, 4L, 1, SOURCE_HASH, 5L, 1, MAPPING_HASH);
         ImportMetadataAuthorizationService authorization = mock(ImportMetadataAuthorizationService.class);
         when(authorization.requireCurrentAuthorization()).thenReturn(context);
+        when(authorization.requireCurrentAuthorizationForWrite(any())).thenReturn(context);
         service = new ImportValidationLeaseService(jdbc, authorization, mock(DocumentService.class),
                 new DataSourceTransactionManager(ds));
     }
@@ -178,23 +179,17 @@ class ImportValidationLeaseServiceTest {
     }
 
     @Test
-    void authRevocationAfterLocksAndImmediatelyBeforeCasWritesNothing() {
-        for (int deniedCall : new int[]{3, 4}) {
-            var auth = mock(ImportMetadataAuthorizationService.class);
-            var calls = new AtomicInteger();
-            when(auth.requireCurrentAuthorization()).thenAnswer(invocation -> {
-                if (calls.incrementAndGet() == deniedCall) throw BusinessException.of(403, "error.forbidden");
-                return context;
-            });
-            var guarded = new ImportValidationLeaseService(jdbc, auth, mock(DocumentService.class),
-                    new DataSourceTransactionManager(jdbc.getDataSource()));
-            var op = guarded.beginAcquire(jobId);
-            var before = state();
-            assertThrows(BusinessException.class, () -> guarded.acquire(op));
-            assertEquals(deniedCall, calls.get());
-            assertEquals(before, state());
-            setUp();
-        }
+    void authRevocationAtWriteGateAfterLocksWritesNothing() {
+        var auth = mock(ImportMetadataAuthorizationService.class);
+        when(auth.requireCurrentAuthorization()).thenReturn(context);
+        when(auth.requireCurrentAuthorizationForWrite(any()))
+                .thenThrow(BusinessException.of(403, "error.forbidden"));
+        var guarded = new ImportValidationLeaseService(jdbc, auth, mock(DocumentService.class),
+                new DataSourceTransactionManager(jdbc.getDataSource()));
+        var op = guarded.beginAcquire(jobId);
+        var before = state();
+        assertThrows(BusinessException.class, () -> guarded.acquire(op));
+        assertEquals(before, state());
     }
 
     @Test
@@ -218,6 +213,7 @@ class ImportValidationLeaseServiceTest {
     private ImportMetadataAuthorizationService mockAuthorization() {
         var authorization = mock(ImportMetadataAuthorizationService.class);
         when(authorization.requireCurrentAuthorization()).thenReturn(context);
+        when(authorization.requireCurrentAuthorizationForWrite(any())).thenReturn(context);
         return authorization;
     }
 

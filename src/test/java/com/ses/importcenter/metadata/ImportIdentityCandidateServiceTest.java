@@ -96,9 +96,15 @@ class ImportIdentityCandidateServiceTest {
             if (revokeAfterSourceRead && authorizationCalls == 2) {
                 throw BusinessException.of(403, "error.forbidden");
             }
-            if (revokeAtFinalRecheck && authorizationCalls == 4) {
-                throw BusinessException.of(403, "error.forbidden");
+            return context;
+        });
+        when(authorization.requireCurrentAuthorizationForWrite(any())).thenAnswer(invocation -> {
+            authorizationCalls++;
+            if (registryChange != null && authorizationCalls == registryChangesAtAuthorizationCall) {
+                registryChange.run();
+                registryChange = null;
             }
+            if (revokeAtFinalRecheck) throw BusinessException.of(403, "error.forbidden");
             return context;
         });
         when(crypto.encrypt(eq(TENANT), eq(SOURCE), eq(ImportEntity.CUSTOMER), eq("lookup-v1"), anyString()))
