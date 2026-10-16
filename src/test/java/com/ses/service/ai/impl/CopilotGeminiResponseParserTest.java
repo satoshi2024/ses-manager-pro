@@ -50,6 +50,27 @@ class CopilotGeminiResponseParserTest {
         assertThrows(BusinessException.class, () -> parse(valid.replace("\"totalTokenCount\":5", "\"totalTokenCount\":5,\"cachedContentTokenCount\":1")));
     }
 
+    @Test
+    void validatedOuterUsageSurvivesInnerJsonAndDeadlineFailures() {
+        String malformedInner = envelope("{", 1);
+        CopilotGeminiResponseParser.ValidatedEnvelope envelope = parser.parseEnvelope(
+                malformedInner.getBytes(StandardCharsets.UTF_8), System.nanoTime() + 5_000_000_000L);
+
+        CopilotGeminiResponseParser.ValidatedEnvelopeFailure invalidJson = assertThrows(
+                CopilotGeminiResponseParser.ValidatedEnvelopeFailure.class,
+                () -> parser.validateInnerSummary(envelope, System.nanoTime() + 5_000_000_000L, "q-1"));
+        assertEquals("COPILOT_RESPONSE_INVALID", invalidJson.getMessage());
+        assertEquals(2, invalidJson.usage().promptTokenCount());
+        assertEquals(3, invalidJson.usage().candidateTokenCount());
+        assertEquals(5, invalidJson.usage().totalTokenCount());
+
+        CopilotGeminiResponseParser.ValidatedEnvelopeFailure deadline = assertThrows(
+                CopilotGeminiResponseParser.ValidatedEnvelopeFailure.class,
+                () -> parser.validateInnerSummary(envelope, System.nanoTime() - 1, "q-1"));
+        assertEquals("COPILOT_DEADLINE_EXCEEDED", deadline.getMessage());
+        assertEquals(envelope.usage(), deadline.usage());
+    }
+
     private void parse(String body) {
         parser.extractSummaryJson(body.getBytes(StandardCharsets.UTF_8), System.nanoTime() + 5_000_000_000L, "q-1");
     }

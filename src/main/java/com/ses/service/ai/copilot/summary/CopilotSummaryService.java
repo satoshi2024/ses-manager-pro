@@ -104,7 +104,7 @@ public class CopilotSummaryService {
                             : costEvidence(gatewayResult, ex.reasonCode()));
         } catch (CopilotExecutionFailure ex) {
             return SummaryResponse.unavailable(mapFailureStatus(ex.reasonCode()),
-                    SummaryCostEvidence.fromPreflight(ex.preflight(), ex.dispatchOutcome(), null, ex.reasonCode()));
+                    SummaryCostEvidence.fromPreflight(ex.preflight(), ex.dispatchOutcome(), ex.usage(), ex.reasonCode()));
         } catch (BusinessException ex) {
             log.debug("copilot summary provider error: code={}", ex.getCode());
             SummaryResponse mapped = mapProviderError(ex);
@@ -129,6 +129,7 @@ public class CopilotSummaryService {
             case "COPILOT_COST_UNKNOWN" -> "COST_UNKNOWN";
             case "COPILOT_DEADLINE_EXCEEDED" -> "DEADLINE_EXCEEDED";
             case "COPILOT_PROVIDER_429" -> "PROVIDER_429";
+            case "COPILOT_RESPONSE_INVALID" -> "PROVIDER_INVALID_JSON";
             case "PROVIDER_INVALID_JSON" -> "PROVIDER_INVALID_JSON";
             default -> SummaryResponse.STATUS_UNAVAILABLE;
         };

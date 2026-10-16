@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.security.OutboundUrlGuard;
 import com.ses.config.AiConfig;
 import com.ses.service.ai.CopilotProviderResponse;
+import com.ses.service.ai.CopilotExecutionFailure;
 import com.ses.service.ai.copilot.CopilotConfigSnapshot;
 import com.ses.service.ai.copilot.CopilotInvocation;
 import com.ses.service.ai.copilot.summary.CopilotCostState;
@@ -159,11 +160,61 @@ class GeminiBoundedAdapterLoopbackTest {
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(String.class));
     }
 
+    @Test
+    void malformedInnerJsonAfterLoopbackResponseCarriesUsageAndDispatchEvidence() throws Exception {
+        server = HttpServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), 0), 0);
+        server.createContext("/", exchange -> {
+            byte[] body = providerEnvelope("{", 2, 3, 5);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        CopilotDnsSnapshotResolver.AddressSet addresses = CopilotDnsSnapshotResolver.AddressSet.fromAddressBytes(
+                HOST, List.of(new byte[]{127, 0, 0, 1}), Instant.now().plusSeconds(60));
+        transport = new CopilotBoundedHttpTransport(new CopilotDnsSnapshotResolver(
+                new CopilotDnsSnapshotResolver.DnsSnapshot(Map.of(HOST, addresses)), Clock.systemUTC()), true);
+        transport.start();
+        AiConfig config = new AiConfig();
+        config.setProvider("gemini");
+        config.setApiUrl("http://" + HOST + ":" + server.getAddress().getPort());
+        config.setModel("model-before");
+        config.setMaxTokens(17);
+        config.setApiKey("synthetic-header-key");
+        RestTemplate legacy = mock(RestTemplate.class);
+        GeminiTextServiceImpl adapter = new GeminiTextServiceImpl(config, legacy, mapper,
+                mock(OutboundUrlGuard.class), transport, true);
+        CopilotConfigSnapshot snapshot = CopilotConfigSnapshot.capture(config, adapter);
+        PreflightCostEvidence evidence = new PreflightCostEvidence("synthetic-loopback-test-v1",
+                snapshot.configHash(), "synthetic-loopback-proof-v1", 0, 0, true,
+                CopilotCostState.UPPER_BOUND, DispatchOutcome.notStarted("TEST_ONLY"), "TEST_ONLY");
+        CopilotInvocation invocation = new CopilotInvocation(snapshot, 1L, "gemini", "model-before",
+                adapter.copilotPromptVersion(), adapter.copilotConfigHash(), "q-1",
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(5), evidence);
+
+        CopilotExecutionFailure failure = assertThrows(CopilotExecutionFailure.class,
+                () -> adapter.generateCopilotResponse("safe prompt", invocation));
+        assertEquals("COPILOT_RESPONSE_INVALID", failure.reasonCode());
+        assertEquals(2, failure.usage().promptTokenCount());
+        assertEquals(3, failure.usage().candidateTokenCount());
+        assertEquals(5, failure.usage().totalTokenCount());
+        assertEquals(DispatchOutcome.State.RESPONSE_RECEIVED, failure.dispatchOutcome().state());
+        assertEquals(snapshot.configHash(), failure.preflight().configIdentity());
+        verify(legacy, never()).postForObject(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(String.class));
+    }
+
     private static byte[] providerEnvelope(String innerJson) {
+        return providerEnvelope(innerJson, 0, 0, 0);
+    }
+
+    private static byte[] providerEnvelope(String innerJson, int promptTokens, int candidateTokens, int totalTokens) {
         String escaped = innerJson.replace("\\", "\\\\").replace("\"", "\\\"");
         String envelope = "{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"role\":\"model\","
                 + "\"parts\":[{\"text\":\"" + escaped + "\"}]}}],\"usageMetadata\":{"
-                + "\"promptTokenCount\":0,\"candidatesTokenCount\":0,\"totalTokenCount\":0}}";
+                + "\"promptTokenCount\":" + promptTokens + ",\"candidatesTokenCount\":" + candidateTokens
+                + ",\"totalTokenCount\":" + totalTokens + "}}";
         return envelope.getBytes(StandardCharsets.UTF_8);
     }
 }
