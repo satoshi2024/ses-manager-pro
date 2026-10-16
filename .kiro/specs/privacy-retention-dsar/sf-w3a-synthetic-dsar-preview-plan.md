@@ -1,6 +1,6 @@
 # SF-W3a Synthetic identity-and-scope preview persistence
 
-状態: **PLAN案 / Astra独立Plan Review待ち。未実装。** このsliceは、生成データだけを使う要求のidentity binding、scope限定read-only preview、およびpreview結果の合成test storeへの永続化を計画する。実PII、実業務DB、実file/object、実provider、Spring production bean/controller、migration、export/delivery、外部dispatch、approval、delete/anonymize/restrict、retention処分は含めない。
+状態: **PLAN再修正案 / Astra独立Plan Review待ち。未実装。** このsliceは、生成データだけを使う要求のidentity binding、scope限定read-only preview、およびpreview結果の合成test storeへの永続化を計画する。実PII、実業務DB、実file/object、実provider、Spring production bean/controller、migration、export/delivery、外部dispatch、approval、delete/anonymize/restrict、retention処分は含めない。
 
 W2b recoveryの`RECOVERED_SYNTHETIC`は合成projectionの検証結果であり、本人確認、scope、policy、case approval、dispatchの証明ではない。D2b2の実MySQL試験結果は別のAstra固定Head確認に委ねる。この文書はD2b2またはNF07全体のPASSを主張しない。
 
@@ -50,6 +50,14 @@ status: CANDIDATE | BLOCKED | UNKNOWN,
 reasonCode, dispositionLabel, PREVIEW_ONLY
 ```
 
+保存recordと読出viewは別型にする。保存recordは生成したscope内のread観測を再現する**immutable as-of history**であり、現時点の候補状態や認可を表さない。read/replay/exact retryのたびに、記録済みbindingの全項目を現在のidentity/scope/target/policy/hold/audit/journal状態へ再照合してからviewを作る。snapshotのresultが`CANDIDATE`でも、それをそのまま返すAPIや保存record直読は設けない。
+
+`PREVIEW_STALE`、`PREVIEW_BLOCKED`、`PREVIEW_UNKNOWN`は読出responseのclosed statusであり、`PrivacyCaseState`への新しい遷移ではない。既存case/revision/historyは不変のまま残し、同じrequestを再処理して状態を上書きしない。
+
+- 再照合が一致し必要なproofが期限内で、revocation/hold/policy/journal状態も既知の場合だけ、viewに`AS_OF_PREVIEW_ONLY`とsnapshotの`observedAt`範囲・`validatedAt`を付ける。これは各source read時点の合成previewであり、法的適格性、全storeの同時snapshot、commit時点または将来時点での有効性を意味しない。
+- expiry、identity/scope/case/target/policy revision/hash drift、hold/journal headの変化を検出した場合は`PREVIEW_STALE`（reason codeで対象を特定）を返し、保存済みcandidate detailを再表示しない。active holdは`PREVIEW_BLOCKED`、状態/失効/最新値が読めない場合は`PREVIEW_UNKNOWN`とする。失効・scope外・不一致をUNKNOWNへぼかさず、具体的なclosed reasonを保持する。
+- immutable historyは同一requestの正確な再送で更新/上書きしない。明示的な履歴読出も毎回完全再検証し、current bindingが変化した場合は`PREVIEW_STALE/BLOCKED/UNKNOWN`だけを返す。raw historyを開示する履歴UI/exportはW3aに含めない。
+
 raw field/value、file/artifact bytes、free text、provider response/message、secret、signed approval、`VerifiedApproval`、fence/dispatch proof、action receipt、実行可能なcommandは保存・出力しない。`dispositionLabel`はfixture表示用であり、実処分方式の選択や法的判断ではない。
 
 - `ACTIVE` holdは`BLOCKED`としcandidateを出さない。
@@ -61,11 +69,26 @@ raw field/value、file/artifact bytes、free text、provider response/message、
 
 case、case revision、identity/scope/policy snapshot hash、preview item、closed status/reason、idempotency recordはtest-only schema (`src/test/resources/privacy-journal/`等)に保存する。Flyway migrationやV1変更は作らない。schema準備権限はtest harnessに限る。
 
-1. `(tenant_id, request_id, idempotency_key)`をuniqueにし、同一key・同一request hashは同じrevision/resultを返し、同一key・異なるhashはconflictとする。case revisionはCASで単調増加し、case revisionと対応preview resultを同じ短いDB transactionでcommitする。
-2. provider read中はcase/projection row lockを保持しない。query開始前にverified identity/scope capabilityを検査し、commit直前に独立readでcase revision、identity revision、scope hash、target version/content hash、policy snapshot hashとjournal/hold状態を再確認する。
-3. いずれかの値がquery中に変わった場合、古いpreviewを保存/上書きせず`SCOPE_OR_TARGET_CHANGED`等のclosed codeで終了し、新しいrevisionまたはrequestで再previewを要求する。test barrierでread中およびcommit直前のdriftを実MySQL上で注入する。
-4. DB commit ACK不明は独立read-backで同一key/revision/hashを有限照合する。一致が確証できない場合は`UNKNOWN`とし再度query/writeせず、old previewを成功扱いにしない。
-5. persistenceは合成ケースとpreviewだけを保持する。identity envelopeのraw field、source payload、実際のPII/削除対象、provider receiptを記録しない。
+1. `(tenant_id, request_id, idempotency_key)`をuniqueにし、同一key・同一request hashは保存済みの**immutable snapshot**を参照し、同一key・異なるhashはconflictとする。exact retryでproviderを再queryしたりcase revision/resultを更新したりしない。返す前に下記の完全なcurrent revalidationを行い、drift/expiry/unknownなら旧candidateを返さずclosed viewにする。新しいsnapshotには新request ID/idempotency keyを要求する。
+2. case revisionはCASで単調増加し、case revisionとimmutable preview record/idempotency mappingは同じ合成test DB transactionでatomicにcommitする。このatomicityはtest DB内だけのものであり、identity/scope/provider/hold/journal等の別storeとは分散transactionでもglobal snapshotでもない。
+3. provider read中はcase/projection row lockを保持しない。query前・provider readごと・final readごとにidentity/scope capability、case revisionとexpiryを再検査する。各storeから得たobserved version/hashと時刻を集め、commit前にcase CASと、独立readによる一回のbounded final revalidationを行う。
+4. immutable preview recordは全source snapshot witnessと観測時刻を含む。最低限、identity envelopeのrevision/hash/key/audience/expiry状態、request/case revision、scope revision/hash、provider ID/audience、target synthetic ID/version/content hash、synthetic policy version/hash/effective/expiry/revocation state、hold/audit/blocker revision/hash、journal head revision/event hash、witness epoch/revision/checkpoint hash/key state、および各sourceの`observedAt`をopaque metadataとして束縛する。raw identity envelope、target data、signature/private keyは保存しない。異なるstoreの各readはひとつのDB snapshotを構成しないため、`observedAt`ベクトル/観測区間を記録し、global as-of atomicityを主張しない。
+5. 最終独立readの後からtest DB commitまでに別storeが変化するwindowを閉じたとは主張しない。commit barrier後にdriftを検出した場合、CASで確定したimmutable as-of recordは履歴として残してよいが、応答は`PREVIEW_STALE`/`PREVIEW_BLOCKED`/`PREVIEW_UNKNOWN`とsnapshot referenceだけにする。provider readや無限retryで同requestを更新しない。post-commit response validationを行う場合も一回に限定し、全bindingが一致したときだけ`AS_OF_PREVIEW_ONLY` viewと`validatedAt`を返す。validate不能・不一致ならclosed viewを返し、candidate detailは返さない。いずれのresponseも「commit時点で全storeが一致した」または将来も有効との保証ではない。
+6. DB commit ACK不明は独立read-backで同一key/revision/snapshot hashを有限照合する。一致してもimmutable recordを取得してから必ず完全なcurrent revalidationを行う。read-backまたは再検証で確証を得られない場合は`PREVIEW_UNKNOWN`とし再query/writeせず、旧previewを成功扱いにしない。
+7. persistenceは合成ケースとpreview witnessだけを保持する。identity envelopeのraw field、source payload、実際のPII/削除対象、provider receiptを記録しない。
+
+### 5.1 exact retryとread contract
+
+exact retryはidempotency keyによってimmutable recordを特定するだけであり、現在の表示許可を与えない。replay/view作成時に毎回次を再確認する: requester/request/case revision binding、identity signature/key/audience/expiry/revocation、scope revision/hash、provider registration/audience、各target version/content hash、policy version/hash/effective/expiry/revocation state、holdとblocker最新revision、journal head/event hashおよびwitness latest/key/freshness。いずれかの現在値を独立readできない場合も一致扱いにしない。
+
+| 再確認結果 | exact retry/read response | 再query/write |
+|---|---|---|
+| 全binding一致、expiry内、state既知 | `AS_OF_PREVIEW_ONLY` + 元snapshotの`observedAt`と再確認`validatedAt`。candidate detailも合成previewとして表示し、権限には変換しない | なし |
+| identity/scope/target/policy/case revision/hash drift、proof expiry/revoked | `PREVIEW_STALE` + closed reasonとsnapshot ref。旧candidate detailを現在表示として返さない | なし。新request/keyが必要 |
+| hold activeまたは明示blocker | `PREVIEW_BLOCKED` + blocker reason | なし |
+| policy/hold/audit/journal/witness状態不明、read timeout/ACK不明 | `PREVIEW_UNKNOWN` + closed reason | なし。状態を人または別承認sliceで解決して新request |
+
+成功後のexact retryについても各分類（identity expiry/revocation、scope変更、policy変更/expiry、hold開始/解除revision、journal/witness進行、target version/hash変更、case revision変更、source read unavailable）を個別MySQL testで実証する。drift検出後、同じidempotency keyは古いsnapshotをrefresh/overwriteしない。保持されたas-of recordを現在candidateへ昇格する経路はない。
 
 ## 6. Authorityと失敗時の拒否
 
@@ -78,7 +101,10 @@ case、case revision、identity/scope/policy snapshot hash、preview item、clos
 | scope/provider未登録またはscope不一致 | `UNKNOWN` or `BLOCKED` | 不一致確認前は0 / 0 |
 | hold active | `BLOCKED` | 0 / BLOCKED reasonのみ |
 | policy/audit/journal状態不明 | `UNKNOWN` | 新しいtarget readなし / UNKNOWN reasonのみ |
-| query中またはcommit前にbinding/hash drift | `UNKNOWN` / 再preview要求 | 古いresultは0保存 |
+| query中のdrift | `PREVIEW_STALE`/`PREVIEW_BLOCKED`/`PREVIEW_UNKNOWN` | immutable candidate recordを新規保存しない |
+| final independent read後〜test DB commit前の別store drift | immutable as-of historyは保存可。responseは必ずclosed status + snapshot ref | 同じrequestの再queryなし。candidate detail/authorizationは返さない |
+| post-commit validationでdrift/unavailable | `PREVIEW_STALE`/`PREVIEW_BLOCKED`/`PREVIEW_UNKNOWN` | 保存historyは変更しない。再試行はboundedで追加recovery/requeryなし |
+| successful preview後のexact retryでexpiry/scope/policy/hold/journal/target drift | 上記closed status。古いcandidate detailをcurrent viewとして出さない | 0 provider query、0 write、0 revision increment |
 | journal recoveryが`RECOVERED_SYNTHETIC` | そのstatusは診断情報のみ | identity/scope/approval/dispatch権限を与えない |
 
 `UNKNOWN`/`BLOCKED`からcandidateへ暗黙の再試行edgeを作らない。人が変更したscope/identity/policyを新revisionへ反映した後も、本sliceはpreviewまでに留まり、承認操作は別slice/別gateである。
@@ -92,8 +118,10 @@ rootがMySQLを直列実行する。すべてのcaseはharness所有の一時MyS
 | identity proof | valid ephemeral signatureとtenant/requester/subject/revisionを1字段ずつ差し替え、期限/audience/key/signatureも変更 | 完全bindingのvalid proofだけ`IDENTITY_VERIFIED`へ進む。bool/name-only、曖昧identityはreject、provider query=0 |
 | scope and provider | allowlisted synthetic targetに対するread-only provider。別tenant/subject/provider/targetを用意 | service経由のreadは同一scopeのみ。cross-scope access=0、未登録provider call=0 |
 | preview output | candidate、active hold、unknown policy/audit/provider/journal fixture | closed result schema、raw data/artifactなし、`PREVIEW_ONLY`常在。holdはBLOCKED、unknownはUNKNOWN、policy fixtureなしにcandidateなし |
-| CAS/idempotency | exact replay、same key/different payload、同revision競合2 worker | exact retryは同じ保存結果、異payload conflict、CAS成功は一つ、case/revision/result atomic |
-| read-to-commit drift | provider query後barrierでidentity/scope/target/policy/journal revisionを変更 | 古いsnapshot resultをcommitしない。reason closed、旧preview上書きなし、再queryには新revisionを要求 |
+| CAS/idempotency | exact replay、same key/different payload、同revision競合2 worker | exact retryはimmutable snapshotを再検証してからview化。異payload conflict、CAS成功は一つ、case/revision/history atomic |
+| successful-preview exact retry drift | 初回成功後にidentity expiry/revocation、scope、policy/期限、hold、journal/witness、target hash、case revisionを各々変更・停止 | 各再送は適切な`PREVIEW_STALE/BLOCKED/UNKNOWN`。古いcandidate current viewなし、provider query=0、write/revision increment=0 |
+| pre-commit drift | provider query後とfinal read前のbarrierでidentity/scope/target/policy/hold/journalを変更 | 古いsnapshotはcommitしない。closed reason、旧preview上書きなし、same request requeryなし |
+| final-read-to-commit race | 全independent final read完了後、test DB commit barrier前に別storeのscope/target/policy/hold/journalを変更 | test DBにimmutable as-of recordが保存されても、post-commit bounded revalidationはclosed viewだけを返しcandidate detailを返さない。recordは上書きしない。global atomicityをclaimしない |
 | state/authority boundary | `PREVIEWED → APPROVAL_PENDING`、有効synthetic approval、`RECOVERED_SYNTHETIC`を提示 | service遷移拒否。approval/fence/action receiptを生成しない。journal dispatch append、external call、disposition write各0 |
 | hold/recovery failures | hold ACTIVE、journal unavailable/ACK unknown/quarantine | BLOCKED/UNKNOWN。local stateやrecovery statusでhold解除/identity/policy/dispatchを推定しない |
 
