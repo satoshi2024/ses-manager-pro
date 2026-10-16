@@ -541,6 +541,342 @@ class ImportMetadataRealMySqlTest {
         }
     }
 
+    @Test
+    void gate待機後に失効した同operation取得retryは409でleaseを変更しない() throws Exception {
+        prepareBoundCustomerJob();
+        var operation = leaseService.beginAcquire(jobId);
+        var grant = leaseService.acquire(operation);
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,1,CURRENT_TIMESTAMP(6)) "
+                + "WHERE tenant_id=? AND id=?", tenantId, jobId);
+        Map<String, Object> before = leaseSnapshot();
+
+        BlockedLease blocked = blockLeaseAtAuthorizationGate(() -> leaseService.acquire(operation));
+        try {
+            Thread.sleep(1_500);
+            blocked.blocker().commit();
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> blocked.service().get(10, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException);
+            assertEquals(409, ((BusinessException) failure.getCause()).getCode());
+            assertEquals(before, leaseSnapshot());
+            assertTrue(grant.generation() == 1);
+        } finally {
+            closeBlockedLease(blocked, 409);
+        }
+    }
+
+    @Test
+    void gate待機後に失効したrenewは409でleaseを延長しない() throws Exception {
+        prepareBoundCustomerJob();
+        var grant = leaseService.acquire(leaseService.beginAcquire(jobId));
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,1,CURRENT_TIMESTAMP(6)) "
+                + "WHERE tenant_id=? AND id=?", tenantId, jobId);
+        Map<String, Object> before = leaseSnapshot();
+
+        BlockedLease blocked = blockLeaseAtAuthorizationGate(() -> leaseService.renew(grant));
+        try {
+            Thread.sleep(1_500);
+            blocked.blocker().commit();
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> blocked.service().get(10, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException);
+            assertEquals(409, ((BusinessException) failure.getCause()).getCode());
+            assertEquals(before, leaseSnapshot());
+        } finally {
+            closeBlockedLease(blocked, 409);
+        }
+    }
+
+    @Test
+    void 初回acquireはgate待機後も成功し期限を待機後DB時刻から設定する() throws Exception {
+        prepareBoundCustomerJob();
+        var operation = leaseService.beginAcquire(jobId);
+        int versionBefore = jdbc.queryForObject("SELECT version_no FROM t_import_job WHERE tenant_id=? AND id=?",
+                Integer.class, tenantId, jobId);
+        BlockedLease blocked = blockLeaseAtAuthorizationGate(() -> leaseService.acquire(operation));
+        try {
+            Thread.sleep(1_200);
+            blocked.blocker().commit();
+            var grant = blocked.service().get(10, TimeUnit.SECONDS);
+            assertEquals(1L, grant.generation());
+            assertEquals(1, jdbc.queryForObject("SELECT lease_expires_at>CURRENT_TIMESTAMP(6) FROM t_import_job "
+                    + "WHERE tenant_id=? AND id=?", Integer.class, tenantId, jobId));
+            assertEquals(versionBefore + 1, jdbc.queryForObject("SELECT version_no FROM t_import_job WHERE tenant_id=? AND id=?",
+                    Integer.class, tenantId, jobId));
+        } finally {
+            closeBlockedLease(blocked, 0);
+        }
+    }
+
+    @Test
+    void 期限切れtakeoverはgate待機後に成功してgenerationを一度だけ進める() throws Exception {
+        prepareBoundCustomerJob();
+        leaseService.acquire(leaseService.beginAcquire(jobId));
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) "
+                + "WHERE tenant_id=? AND id=?", tenantId, jobId);
+        var operation = leaseService.beginTakeover(jobId);
+        long generationBefore = (long) leaseSnapshot().get("lease_generation");
+        BlockedLease blocked = blockLeaseAtAuthorizationGate(() -> leaseService.takeOver(operation));
+        try {
+            Thread.sleep(1_200);
+            blocked.blocker().commit();
+            var grant = blocked.service().get(10, TimeUnit.SECONDS);
+            assertEquals(generationBefore + 1, grant.generation());
+            assertEquals(generationBefore + 1, (long) leaseSnapshot().get("lease_generation"));
+            assertEquals(1, jdbc.queryForObject("SELECT lease_expires_at>CURRENT_TIMESTAMP(6) FROM t_import_job "
+                    + "WHERE tenant_id=? AND id=?", Integer.class, tenantId, jobId));
+        } finally {
+            closeBlockedLease(blocked, 0);
+        }
+    }
+
+    @Test
+    void source変更先行はcandidate登録を409で拒否する() throws Exception {
+        long runId = prepareValidatedCustomerJob();
+        int versionBefore = jobVersion();
+        assertMutationWinsBeforeService("t_import_source_system", "SELECT id FROM t_import_source_system WHERE tenant_id=? AND id=? FOR UPDATE",
+                new Object[]{tenantId, sourceId},
+                "UPDATE t_import_source_system SET status='DISABLED',version_no=version_no+1 WHERE tenant_id=? AND id=?",
+                new Object[]{tenantId, sourceId},
+                () -> candidateService.registerCandidate(jobId, runId, 1), 409);
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_identity_registry WHERE tenant_id=? AND source_system_id=?",
+                Integer.class, tenantId, sourceId));
+        assertEquals(versionBefore, jobVersion());
+    }
+
+    @Test
+    void document変更先行はlease取得を409で拒否する() throws Exception {
+        prepareBoundCustomerJob();
+        var operation = leaseService.beginAcquire(jobId);
+        Map<String, Object> before = leaseSnapshot();
+        assertMutationWinsBeforeService("t_document", "SELECT id FROM t_document WHERE tenant_id=? AND id=? FOR UPDATE",
+                new Object[]{tenantId, documentId},
+                "UPDATE t_document SET legal_hold_flag=1 WHERE tenant_id=? AND id=?",
+                new Object[]{tenantId, documentId}, () -> leaseService.acquire(operation), 409);
+        assertEquals(before, leaseSnapshot());
+    }
+
+    @Test
+    void actor変更先行はjob待機後のlease認可を403で拒否する() throws Exception {
+        prepareBoundCustomerJob();
+        var operation = leaseService.beginAcquire(jobId);
+        Map<String, Object> before = leaseSnapshot();
+        assertMutationWinsBeforeService("t_import_job", "SELECT id FROM t_import_job WHERE tenant_id=? AND id=? FOR UPDATE",
+                new Object[]{tenantId, jobId},
+                "UPDATE sys_user SET status=0 WHERE tenant_id=? AND id=?",
+                new Object[]{tenantId, actorUserId}, () -> leaseService.acquire(operation), 403);
+        assertEquals(before, leaseSnapshot());
+    }
+
+    @Test
+    void source変更はcandidateのresourceLockとgate保持中に待機する() throws Exception {
+        long runId = prepareValidatedCustomerJob();
+        GatePause pause = pauseRealWriteGate();
+        assertServiceCommitsBeforeMutation(pause, "t_import_source_system",
+                "UPDATE t_import_source_system SET status='DISABLED',version_no=version_no+1 WHERE tenant_id=? AND id=?",
+                new Object[]{tenantId, sourceId},
+                () -> candidateService.registerCandidate(jobId, runId, 1));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_identity_registry WHERE tenant_id=? AND source_system_id=?",
+                Integer.class, tenantId, sourceId));
+        BusinessException drift = assertThrows(BusinessException.class,
+                () -> candidateService.registerCandidate(jobId, runId, 1));
+        assertEquals(409, drift.getCode());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_identity_registry WHERE tenant_id=? AND source_system_id=?",
+                Integer.class, tenantId, sourceId));
+    }
+
+    @Test
+    void document変更はleaseのresourceLockとgate保持中に待機する() throws Exception {
+        prepareBoundCustomerJob();
+        var operation = leaseService.beginAcquire(jobId);
+        GatePause pause = pauseRealWriteGate();
+        ImportValidationLeaseService.LeaseGrant grant = (ImportValidationLeaseService.LeaseGrant)
+                assertServiceCommitsBeforeMutation(pause, "t_document",
+                        "UPDATE t_document SET legal_hold_flag=1 WHERE tenant_id=? AND id=?",
+                        new Object[]{tenantId, documentId}, () -> leaseService.acquire(operation));
+        Map<String, Object> before = leaseSnapshot();
+        BusinessException changed = assertThrows(BusinessException.class, () -> leaseService.renew(grant));
+        assertEquals(409, changed.getCode());
+        assertEquals(before, leaseSnapshot());
+    }
+
+    @Test
+    void actor変更はwriteGateのactorLock保持中に待機し後続renewを403にする() throws Exception {
+        prepareBoundCustomerJob();
+        var operation = leaseService.beginAcquire(jobId);
+        GatePause pause = pauseRealWriteGate();
+        ImportValidationLeaseService.LeaseGrant grant = (ImportValidationLeaseService.LeaseGrant)
+                assertServiceCommitsBeforeMutation(pause, "sys_user",
+                        "UPDATE sys_user SET status=0 WHERE tenant_id=? AND id=?",
+                        new Object[]{tenantId, actorUserId}, () -> leaseService.acquire(operation));
+        Map<String, Object> before = leaseSnapshot();
+        BusinessException denied = assertThrows(BusinessException.class, () -> leaseService.renew(grant));
+        assertEquals(403, denied.getCode());
+        assertEquals(before, leaseSnapshot());
+    }
+
+    private void assertMutationWinsBeforeService(String table, String lockSql, Object[] lockParams,
+                                                String mutationSql, Object[] mutationParams,
+                                                java.util.concurrent.Callable<?> serviceAction,
+                                                int expectedCode) throws Exception {
+        Connection blocker = dataSource.getConnection();
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        Throwable primaryFailure = null;
+        try {
+            blocker.setAutoCommit(false);
+            executeQueryForUpdate(blocker, lockSql, lockParams);
+            long blockerId = connectionId(blocker);
+            String lockData = permissionLockData(blockerId, table, "PRIMARY");
+            Future<?> submitted = pool.submit(() -> withActorContext(serviceAction));
+            awaitExactLockWait(blockerId, table, "PRIMARY", lockData, submitted, table + " mutation-first service");
+            executeUpdate(blocker, mutationSql, mutationParams);
+            blocker.commit();
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> submitted.get(10, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException,
+                    "SQL lock error/timeoutをdomain拒否として扱わない: " + failure.getCause());
+            assertEquals(expectedCode, ((BusinessException) failure.getCause()).getCode());
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            try { blocker.rollback(); } catch (Exception failure) {
+                if (primaryFailure != null) primaryFailure.addSuppressed(failure); else throw failure;
+            }
+            try { blocker.close(); } catch (Exception failure) {
+                if (primaryFailure != null) primaryFailure.addSuppressed(failure); else throw failure;
+            }
+            pool.shutdownNow();
+            if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                AssertionError cleanupFailure = new AssertionError("mutation-first service workerが終了しませんでした");
+                if (primaryFailure != null) primaryFailure.addSuppressed(cleanupFailure); else throw cleanupFailure;
+            }
+        }
+    }
+
+    private Object assertServiceCommitsBeforeMutation(GatePause pause, String table, String mutationSql,
+                                                     Object[] mutationParams,
+                                                     java.util.concurrent.Callable<?> serviceAction) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        AtomicReference<Long> writerId = new AtomicReference<>();
+        Future<?> service = null;
+        Future<?> mutation = null;
+        Throwable primaryFailure = null;
+        try {
+            service = pool.submit(() -> withActorContext(serviceAction));
+            assertTrue(pause.entered.await(10, TimeUnit.SECONDS), "実serviceのwrite gateに到達しませんでした");
+            assertGateRunsInReadCommittedTransaction(pause);
+            String lockData = permissionLockData(pause.connectionId.get(), table, "PRIMARY");
+            mutation = pool.submit(() -> updateAndCommit(mutationSql, mutationParams, writerId));
+            awaitTargetedWait(writerId, pause.connectionId, service, mutation,
+                    table, "PRIMARY", "X,REC_NOT_GAP", lockData);
+            pause.release.countDown();
+            Object result = service.get(10, TimeUnit.SECONDS);
+            mutation.get(10, TimeUnit.SECONDS);
+            return result;
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            pause.release.countDown();
+            reportCleanupFailures("service-first resource fixture", awaitFutures(futures(service, mutation), pool, false),
+                    primaryFailure);
+        }
+    }
+
+    private void updateAndCommit(String sql, Object[] params, AtomicReference<Long> connectionId) {
+        try (Connection connection = dataSource.getConnection()) {
+            connection.setAutoCommit(false);
+            connectionId.set(connectionId(connection));
+            executeUpdate(connection, sql, params);
+            connection.commit();
+        } catch (Exception failure) { throw new IllegalStateException(failure); }
+    }
+
+    private void executeQueryForUpdate(Connection connection, String sql, Object[] params) throws Exception {
+        try (var statement = connection.prepareStatement(sql)) {
+            bind(statement, params);
+            try (ResultSet rows = statement.executeQuery()) { assertTrue(rows.next()); }
+        }
+    }
+
+    private void executeUpdate(Connection connection, String sql, Object[] params) throws Exception {
+        try (var statement = connection.prepareStatement(sql)) {
+            bind(statement, params);
+            assertEquals(1, statement.executeUpdate());
+        }
+    }
+
+    private void bind(java.sql.PreparedStatement statement, Object[] params) throws Exception {
+        for (int i = 0; i < params.length; i++) statement.setObject(i + 1, params[i]);
+    }
+
+    private long connectionId(Connection connection) throws Exception {
+        try (var statement = connection.createStatement(); ResultSet rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
+            assertTrue(rows.next());
+            return rows.getLong(1);
+        }
+    }
+
+    private int jobVersion() {
+        return jdbc.queryForObject("SELECT version_no FROM t_import_job WHERE tenant_id=? AND id=?",
+                Integer.class, tenantId, jobId);
+    }
+
+    private BlockedLease blockLeaseAtAuthorizationGate(
+            java.util.concurrent.Callable<ImportValidationLeaseService.LeaseGrant> operation) throws Exception {
+        Connection blocker = dataSource.getConnection();
+        blocker.setAutoCommit(false);
+        try (var statement = blocker.prepareStatement(
+                "SELECT id FROM m_permission_group WHERE tenant_id=? AND id=? FOR UPDATE")) {
+            statement.setString(1, tenantId);
+            statement.setLong(2, groupId);
+            try (ResultSet rows = statement.executeQuery()) { assertTrue(rows.next()); }
+        }
+        long blockerId;
+        try (var statement = blocker.createStatement(); ResultSet rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
+            rows.next(); blockerId = rows.getLong(1);
+        }
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        Future<ImportValidationLeaseService.LeaseGrant> service = null;
+        try {
+            service = pool.submit(() -> withActorContext(operation));
+            String lockData = permissionLockData(blockerId, "m_permission_group", "PRIMARY");
+            awaitExactLockWait(blockerId, "m_permission_group", "PRIMARY", lockData, service,
+                    "validation lease authorization gate");
+            return new BlockedLease(blocker, pool, service);
+        } catch (Exception failure) {
+            try { blocker.rollback(); } finally {
+                try { blocker.close(); } finally {
+                    pool.shutdownNow();
+                    if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                        failure.addSuppressed(new AssertionError("lease gate worker cleanup timeout"));
+                    }
+                }
+            }
+            throw failure;
+        }
+    }
+
+    private void closeBlockedLease(BlockedLease blocked, int expectedCode) throws Exception {
+        try { blocked.blocker().rollback(); } finally {
+            try { blocked.blocker().close(); } finally {
+                blocked.pool().shutdownNow();
+                assertTrue(blocked.pool().awaitTermination(5, TimeUnit.SECONDS), "lease gate workerが終了しませんでした");
+                try {
+                    blocked.service().get(0, TimeUnit.NANOSECONDS);
+                    assertEquals(0, expectedCode);
+                } catch (java.util.concurrent.ExecutionException failure) {
+                    assertTrue(failure.getCause() instanceof BusinessException);
+                    assertEquals(expectedCode, ((BusinessException) failure.getCause()).getCode());
+                }
+            }
+        }
+    }
+
+    private record BlockedLease(Connection blocker, ExecutorService pool,
+                                Future<ImportValidationLeaseService.LeaseGrant> service) { }
+
     private GatePause pauseRealWriteGate() {
         GatePause pause = new GatePause();
         AtomicBoolean first = new AtomicBoolean();
