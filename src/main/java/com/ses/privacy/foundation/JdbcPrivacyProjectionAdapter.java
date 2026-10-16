@@ -22,10 +22,17 @@ final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort, Priva
     private final TransactionTemplate readTransaction;
     private final Environment environment;
     private final JdbcPrivacyPartitionFence fence;
+    private final Runnable afterCommitHook;
 
     JdbcPrivacyProjectionAdapter(DataSource dataSource, Environment environment) {
+        this(dataSource, environment, () -> { });
+    }
+
+    /** 決定論的なcommit応答喪失を作るtest-only seam。 */
+    JdbcPrivacyProjectionAdapter(DataSource dataSource, Environment environment, Runnable afterCommitHook) {
         this.environment = Objects.requireNonNull(environment, "environment");
         requireTestProfile();
+        this.afterCommitHook = Objects.requireNonNull(afterCommitHook, "afterCommitHook");
         this.jdbc = new JdbcTemplate(Objects.requireNonNull(dataSource, "dataSource"));
         this.fence = new JdbcPrivacyPartitionFence(dataSource, environment);
         DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(dataSource);
@@ -75,6 +82,7 @@ final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort, Priva
                 return applied;
             });
             if (result == null) return ProjectionResult.quarantine(event.revision(), event.eventHash(), QuarantineCode.PROJECTION_UNAVAILABLE);
+            if (lease != null && result.status() == Status.APPLIED) afterCommitHook.run();
             if (deadline != null) deadline.check();
             return result;
         } catch (JdbcPrivacyPartitionFence.StaleOwnerException staleOwner) {
@@ -222,10 +230,14 @@ final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort, Priva
         return bounded;
     }
 
-    private static boolean causedByTimeout(Throwable failure) {
+    static boolean causedByTimeout(Throwable failure) {
         for (Throwable current = failure; current != null; current = current.getCause()) {
             String name = current.getClass().getSimpleName();
             if (name.contains("Timeout") || name.contains("TimedOut")) return true;
+            if (current instanceof java.sql.SQLException sql) {
+                // MySQL 1205 = lock wait timeout, 70100 = query interrupted. 1213 (deadlock) is not a timeout.
+                if (sql.getErrorCode() == 1205 || "70100".equals(sql.getSQLState())) return true;
+            }
         }
         return false;
     }
