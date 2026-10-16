@@ -43,13 +43,11 @@ public class ImportValidationLeaseService {
         return new AcquireOperation(serviceInstanceId, operationId, workerId(operationId), snapshot);
     }
 
-    /** jobIdと現在の権限だけから、旧worker不在でも期限切れleaseを回復する。 */
+    /** lease状態をsnapshotした回復operationを発行し、期限条件はtakeOver transaction内で判定する。 */
     public TakeoverOperation beginTakeover(long jobId) {
         ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
         Snapshot current = snapshot(context, jobId);
-        java.sql.Timestamp now = jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)", java.sql.Timestamp.class);
-        if (current.owner() == null || current.expiresAt() == null || now == null
-                || current.expiresAt().after(now)) conflict();
+        if (current.owner() == null || current.expiresAt() == null) conflict();
         String operationId = UUID.randomUUID().toString();
         return new TakeoverOperation(serviceInstanceId, operationId, workerId(operationId), current,
                 current.owner(), current.generation());
