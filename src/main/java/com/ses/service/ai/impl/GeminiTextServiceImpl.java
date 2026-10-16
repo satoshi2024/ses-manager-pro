@@ -64,7 +64,7 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
     private final CopilotBoundedHttpTransport copilotTransport;
     private final CopilotConfigSnapshot copilotConfigSnapshot;
     private final boolean syntheticLoopbackFixture;
-    private final CopilotGeminiResponseParser copilotResponseParser = new CopilotGeminiResponseParser();
+    private final CopilotGeminiResponseParser copilotResponseParser;
 
     @Autowired
     public GeminiTextServiceImpl(AiConfig aiConfig,
@@ -79,12 +79,21 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
     GeminiTextServiceImpl(AiConfig aiConfig, RestTemplate aiRestTemplate, ObjectMapper objectMapper,
                           OutboundUrlGuard outboundUrlGuard, CopilotBoundedHttpTransport copilotTransport,
                           boolean syntheticLoopbackFixture) {
+        this(aiConfig, aiRestTemplate, objectMapper, outboundUrlGuard, copilotTransport,
+                syntheticLoopbackFixture, new CopilotGeminiResponseParser());
+    }
+
+    /** package内テスト専用のparser clock seam。production DIからは利用しない。 */
+    GeminiTextServiceImpl(AiConfig aiConfig, RestTemplate aiRestTemplate, ObjectMapper objectMapper,
+                          OutboundUrlGuard outboundUrlGuard, CopilotBoundedHttpTransport copilotTransport,
+                          boolean syntheticLoopbackFixture, CopilotGeminiResponseParser responseParser) {
         this.aiConfig = aiConfig;
         this.aiRestTemplate = aiRestTemplate;
         this.objectMapper = objectMapper;
         this.outboundUrlGuard = outboundUrlGuard;
         this.copilotTransport = copilotTransport;
         this.syntheticLoopbackFixture = syntheticLoopbackFixture;
+        this.copilotResponseParser = responseParser;
         if (syntheticLoopbackFixture && (copilotTransport == null || !copilotTransport.isTestLoopbackMode())) {
             throw new IllegalArgumentException("合成Gemini fixtureにはloopback transportが必要です");
         }
@@ -100,6 +109,7 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         this.outboundUrlGuard = outboundUrlGuard;
         this.copilotTransport = null;
         this.syntheticLoopbackFixture = false;
+        this.copilotResponseParser = new CopilotGeminiResponseParser();
         this.copilotConfigSnapshot = captureCopilotConfig(aiConfig, false);
     }
 
