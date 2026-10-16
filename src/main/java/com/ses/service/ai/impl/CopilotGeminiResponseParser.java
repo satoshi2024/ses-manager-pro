@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.function.LongSupplier;
 
 /** Gemini Copilot envelopeとsummary JSONだけを厳密に読み取る。本文や値は例外へ含めない。 */
 final class CopilotGeminiResponseParser {
@@ -26,6 +27,10 @@ final class CopilotGeminiResponseParser {
 
     CopilotGeminiResponseParser(CopilotBoundedJsonParser parser) {
         this.parser = parser;
+    }
+
+    CopilotGeminiResponseParser(LongSupplier monotonicClock) {
+        this(new CopilotBoundedJsonParser(monotonicClock));
     }
 
     ParsedResponse parse(byte[] response, long deadlineNanos, String expectedQueryId) {
