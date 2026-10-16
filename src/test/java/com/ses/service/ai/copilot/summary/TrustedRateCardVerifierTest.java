@@ -85,7 +85,7 @@ class TrustedRateCardVerifierTest {
     void 母集合maxRateによる上限は部分集合がゼロでも過少評価しない() {
         SignedRateCard card = signedCard("prompt-3-cached-1", validWindow(),
                 rates("3", "1", "0", "0"));
-        Fixture fixture = fixture("attempt-bound", "idem-bound", usage(10_000, 0, 10_000, 0, 0),
+        Fixture fixture = fixture("attempt-bound", "idem-bound", null,
                 new TokenUsageBounds(10_000L, 0L, 2_000L, 0L), 30, possibleDispatch(), card);
 
         VerifiedCostEvaluation result = evaluate(card, fixture.execution, fixture.current,
@@ -94,8 +94,11 @@ class TrustedRateCardVerifierTest {
         assertEquals(CopilotCostState.UPPER_BOUND, result.evidence().costState());
         assertEquals(30, result.evidence().upperBoundYen());
         assertEquals(30, fixture.preflight.upperBoundYen());
-        assertReason("COST_MODE_MISMATCH", () -> evaluate(card, fixture.execution, fixture.current,
-                fixture.bounds, fixture.preflight, true));
+        Fixture usagePresent = fixture("attempt-bound-with-usage", "idem-bound-with-usage",
+                usage(10_000, 0, 10_000, 0, 0), new TokenUsageBounds(10_000L, 0L, 2_000L, 0L),
+                30, possibleDispatch(), card);
+        assertReason("COST_MODE_MISMATCH", () -> evaluate(card, usagePresent.execution,
+                usagePresent.current, usagePresent.bounds, usagePresent.preflight, false));
 
         Fixture missingUsage = fixture("attempt-bound-no-usage", "idem-bound-no-usage", null,
                 new TokenUsageBounds(10_000L, 0L, 2_000L, 0L), 30, possibleDispatch(), card);
@@ -110,7 +113,7 @@ class TrustedRateCardVerifierTest {
         SignedRateCard card = signedCard("prompt-3-cached-5", validWindow(),
                 rates("3", "5", "0", "0"));
         Fixture fixture = fixture("attempt-cache-high", "idem-cache-high",
-                usage(10_000, 0, 10_000, 0, 0), new TokenUsageBounds(10_000L, 0L), 50,
+                null, new TokenUsageBounds(10_000L, 0L), 50,
                 possibleDispatch(), card);
 
         VerifiedCostEvaluation upper = evaluate(card, fixture.execution, fixture.current,
@@ -133,7 +136,7 @@ class TrustedRateCardVerifierTest {
                 equalBoundary.current, equalBoundary.bounds, equalBoundary.preflight, true);
         assertEquals(30, equal.evidence().actualCostYen());
         Fixture equalUpper = fixture("attempt-cache-equal-upper", "idem-cache-equal-upper",
-                usage(10_000, 0, 10_000, 0, 0), new TokenUsageBounds(10_000L, 0L, 2_000L, 0L), 30,
+                null, new TokenUsageBounds(10_000L, 0L, 2_000L, 0L), 30,
                 possibleDispatch(), equalBoundary.card);
         assertEquals(30, evaluate(equalUpper.card, equalUpper.execution, equalUpper.current,
                 equalUpper.bounds, equalUpper.preflight, false).evidence().upperBoundYen());
@@ -148,7 +151,7 @@ class TrustedRateCardVerifierTest {
                 halfFixture.bounds, halfFixture.preflight, true).evidence().actualCostYen());
 
         SignedRateCard ceiling = signedCard("ceiling-bound", validWindow(), rates("1", "0", "0", "0"));
-        Fixture upperFixture = fixture("attempt-ceiling", "idem-ceiling", usage(1, 0, 1, 0, 0),
+        Fixture upperFixture = fixture("attempt-ceiling", "idem-ceiling", null,
                 new TokenUsageBounds(1L, 0L), 1, possibleDispatch(), ceiling);
         assertEquals(1, evaluate(ceiling, upperFixture.execution, upperFixture.current,
                 upperFixture.bounds, upperFixture.preflight, false).evidence().upperBoundYen());
