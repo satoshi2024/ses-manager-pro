@@ -329,7 +329,7 @@ public class ImportValidationLifecycleService {
         String sql = "INSERT INTO t_import_validation_run (tenant_id,job_id,run_no,state,created_lease_generation,last_resumed_lease_generation,active_slot,published_slot,actor_user_id,source_system_id,source_version,source_code_snapshot,entity_type,schema_version,source_encoding,source_sha256,document_id,document_version_id,document_version_no,document_sha256,mapping_id,mapping_version,mapping_sha256,validation_fingerprint) VALUES (?,?,?,'BUILDING',?,?,1,NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         KeyHolder keys = new GeneratedKeyHolder();
         jdbc.update(connection -> {
-            PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
+            PreparedStatement ps = connection.prepareStatement(sql, new String[]{"id"});
             int i = 1;
             ps.setString(i++, context.tenantId()); ps.setLong(i++, in.jobId); ps.setInt(i++, runNo);
             ps.setLong(i++, generation); ps.setLong(i++, generation); ps.setLong(i++, context.actorUserId());
