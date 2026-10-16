@@ -258,14 +258,18 @@ class TrustedRateCardVerifierTest {
                 fixture.current, fixture.bounds, changedPreflight, true));
         SignedRateCard otherModelCard = signedCard("other-model", validWindow(),
                 rates("3", "1", "12", "20"), "gemini", "model-other");
-        trust(otherModelCard);
+        Fixture otherModel = fixture("attempt-other-model", "idem-other-model",
+                usage(1_000, 500, 1_500, 100, 200), new TokenUsageBounds(10_000L, 2_000L),
+                70, responseReceived(), otherModelCard);
         assertReason("CARD_DOMAIN_OR_WINDOW_MISMATCH", () -> evaluate(otherModelCard,
-                fixture.execution, fixture.current, fixture.bounds, fixture.preflight, true));
+                otherModel.execution, otherModel.current, otherModel.bounds, otherModel.preflight, true));
         SignedRateCard otherProviderCard = signedCard("other-provider", validWindow(),
                 rates("3", "1", "12", "20"), "other-provider", "model-rev-1");
-        trust(otherProviderCard);
+        Fixture otherProvider = fixture("attempt-other-provider", "idem-other-provider",
+                usage(1_000, 500, 1_500, 100, 200), new TokenUsageBounds(10_000L, 2_000L),
+                70, responseReceived(), otherProviderCard);
         assertReason("CARD_DOMAIN_OR_WINDOW_MISMATCH", () -> evaluate(otherProviderCard,
-                fixture.execution, fixture.current, fixture.bounds, fixture.preflight, true));
+                otherProvider.execution, otherProvider.current, otherProvider.bounds, otherProvider.preflight, true));
     }
 
     @Test
@@ -283,9 +287,12 @@ class TrustedRateCardVerifierTest {
                 fixture.current, fixture.bounds, fixture.preflight, true));
         SignedRateCard expired = signedCard("expired", new Window(NOW.minusSeconds(60), NOW),
                 rates("3", "1", "12", "20"));
-        trust(expired);
+        Fixture expiredFixture = fixture("attempt-expired", "idem-expired",
+                usage(1_000, 500, 1_500, 100, 200), new TokenUsageBounds(10_000L, 2_000L),
+                70, responseReceived(), expired);
         assertReason("CARD_DOMAIN_OR_WINDOW_MISMATCH", () -> evaluate(expired,
-                fixture.execution, fixture.current, fixture.bounds, fixture.preflight, true));
+                expiredFixture.execution, expiredFixture.current, expiredFixture.bounds,
+                expiredFixture.preflight, true));
 
         assertInvalidUsage(fixture, usage(1_000, 500, 1_501, 100, 200));
         assertInvalidUsage(fixture, usage(-1, 500, 499, 100, 0));
