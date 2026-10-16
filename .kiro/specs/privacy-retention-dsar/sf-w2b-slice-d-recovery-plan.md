@@ -91,7 +91,7 @@ Astra reviewでは特に、(1) history/latest stable-readの固定順序・byte�
 
 ## 7. D2b計画: monotonic deadlineと残り検証matrix
 
-状態: **Astra PLAN review PASS後、D2b1実装候補あり / 実MySQL再検証待ち。D2b試験合格・NF07 PASSを意味しない。** D2aの親報告はMySQL `26/0/0/0` だが、その実行結果は時間上限および下記の残件を証明しない。D2b1では同一monotonic deadlineのLease束縛、reader/projection/fence/fixture mutationへのtimeout伝播、初回fence acquire結果不明の分類と、実MySQL lock待ち・同一expired Lease拒否・acquire不確定のtest caseを追加した。これらは未実行で、wait graph、elapsed tolerance、rollback/close/connection回収の実証ではない。stable witness競合matrix、no-replay owner rotation、connect/socket stall証明等は未実装である。D2aからD2bまたはNF07へPASS状態を昇格させない。
+状態: **Astra PLAN review PASS後、D2b1実装候補あり / 実MySQL再検証待ち。D2b試験合格・NF07 PASSを意味しない。** D2aの親報告はMySQL `26/0/0/0` だが、その実行結果は時間上限および下記の残件を証明しない。D2b1では同一monotonic deadlineのLease束縛、reader/projection/fence/fixture mutationへのtimeout伝播、初回fence acquire結果不明の分類と、実MySQL lock待ち・同一expired Lease拒否・acquire不確定のtest caseを追加した。さらに修正候補でtransaction開始前/書込前timeoutを`WRITE_NOT_STARTED`、commit後readback確認を`COMMIT_CONFIRMED_QUARANTINED`、判定不能を`COMMIT_OUTCOME_UNKNOWN`に分け、cleanup readback三回を同一絶対cleanup期限内で再検査する。対象MySQL fixtureには有限`connectTimeout`/`socketTimeout`とsession lock waitを設定し、testは実connection id/session/transaction消失とowner/generation不変を確認する。ただしこれらは未実行であり、connection設定値は構成証拠に留まる。rollback/close/connection回収の実証、end-to-end socket stallはまだない。stable witness競合matrix、no-replay owner rotationも未実装である。D2aからD2bまたはNF07へPASS状態を昇格させない。
 
 ### 7.1 単一deadline契約
 

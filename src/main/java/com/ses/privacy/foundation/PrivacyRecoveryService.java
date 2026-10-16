@@ -145,10 +145,7 @@ final class PrivacyRecoveryService {
                         return quarantined("OWNER_GENERATION_STALE", journalSnapshot.head().revision(),
                                 journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
                     }
-                    String reason = result.reason() == PrivacyProjectionPort.QuarantineCode.DEADLINE_EXCEEDED
-                            || result.reason() == PrivacyProjectionPort.QuarantineCode.COMMIT_CONFIRMED_QUARANTINED
-                            || result.reason() == PrivacyProjectionPort.QuarantineCode.COMMIT_OUTCOME_UNKNOWN
-                            ? "REPLAY_TIMEOUT" : "REPLAY_" + result.reason().name();
+                    String reason = "REPLAY_" + result.reason().name();
                     return quarantined(reason, journalSnapshot.head().revision(),
                             journalSnapshot.head().eventHash(), applied, noOp, holder.lease);
                 }

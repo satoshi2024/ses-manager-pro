@@ -12,6 +12,7 @@ import javax.sql.DataSource;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 合成application DBだけにjournal prefixをCAS投影するtest-only adapter。 */
 final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort, PrivacyRecoveryProjectionPort {
@@ -55,12 +56,15 @@ final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort, Priva
         }
         JournalEvent event = verified.event();
         RecoveryDeadline deadline = lease == null ? null : lease.deadline();
+        AtomicBoolean transactionEntered = new AtomicBoolean();
+        AtomicBoolean mutationAttempted = new AtomicBoolean();
         try {
             TransactionTemplate transaction = deadline == null ? writeTransaction : boundedTransaction(deadline);
             if (deadline != null) deadline.requireJdbcSeconds();
             ProjectionResult result = transaction.execute(status -> {
+                transactionEntered.set(true);
                 if (deadline != null) deadline.requireJdbcSeconds();
-                ProjectionResult applied = applyInTransaction(verified.partition(), event, lease, deadline);
+                ProjectionResult applied = applyInTransaction(verified.partition(), event, lease, deadline, mutationAttempted);
                 if (deadline != null) {
                     deadline.check();
                     org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
@@ -71,14 +75,19 @@ final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort, Priva
                 return applied;
             });
             if (result == null) return ProjectionResult.quarantine(event.revision(), event.eventHash(), QuarantineCode.PROJECTION_UNAVAILABLE);
+            if (deadline != null) deadline.check();
             return result;
         } catch (JdbcPrivacyPartitionFence.StaleOwnerException staleOwner) {
             return ProjectionResult.quarantine(event.revision(), event.eventHash(), QuarantineCode.PARTITION_FENCED);
         } catch (RuntimeException uncertain) {
             boolean timedOut = deadline != null && (deadline.remainingNanos() < java.util.concurrent.TimeUnit.SECONDS.toNanos(1)
                     || causedByTimeout(uncertain));
-            if (lease != null && (deadline.workBudgetExpired()
-                    || deadline.remainingNanos() < java.util.concurrent.TimeUnit.SECONDS.toNanos(1))) {
+            if (lease != null && !transactionEntered.get()) {
+                return ProjectionResult.quarantine(event.revision(), event.eventHash(), QuarantineCode.WRITE_NOT_STARTED);
+            }
+            if (lease != null && mutationAttempted.get() && (deadline.workBudgetExpired()
+                    || deadline.remainingNanos() < java.util.concurrent.TimeUnit.SECONDS.toNanos(1)
+                    || causedByTimeout(uncertain))) {
                 try {
                     boolean committed = cleanupReadbackMatches(verified.partition(), event, lease);
                     return ProjectionResult.quarantine(event.revision(), event.eventHash(), committed
@@ -86,6 +95,9 @@ final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort, Priva
                 } catch (RuntimeException cleanupUnavailable) {
                     return ProjectionResult.quarantine(event.revision(), event.eventHash(), QuarantineCode.COMMIT_OUTCOME_UNKNOWN);
                 }
+            }
+            if (lease != null && timedOut) {
+                return ProjectionResult.quarantine(event.revision(), event.eventHash(), QuarantineCode.WRITE_NOT_STARTED);
             }
             try {
                 if (deadline != null) deadline.check();
@@ -141,7 +153,7 @@ final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort, Priva
     }
 
     private ProjectionResult applyInTransaction(JournalPartition partition, JournalEvent event,
-            JdbcPrivacyPartitionFence.Lease lease, RecoveryDeadline deadline) {
+            JdbcPrivacyPartitionFence.Lease lease, RecoveryDeadline deadline, AtomicBoolean mutationAttempted) {
         JdbcTemplate txJdbc = deadline == null ? jdbc : jdbc(deadline);
         boolean writable = lease == null
                 ? fence.lockForNormalProjection(partition)
@@ -172,6 +184,7 @@ final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort, Priva
         }
         ProjectedValues next = project(current, event);
         if (deadline != null) txJdbc.setQueryTimeout(deadline.requireJdbcSeconds());
+        mutationAttempted.set(true);
         if (rows.isEmpty()) {
             txJdbc.update("INSERT INTO sf_w2b_projection(tenant_id, subject_ref, last_applied_revision, event_hash, held, last_action_id, last_action_state) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     partition.tenantId(), partition.subjectRef(), event.revision(), event.eventHash(), next.held(),
@@ -220,10 +233,13 @@ final class JdbcPrivacyProjectionAdapter implements PrivacyProjectionPort, Priva
     private boolean cleanupReadbackMatches(JournalPartition partition, JournalEvent event,
             JdbcPrivacyPartitionFence.Lease lease) {
         JdbcPrivacyPartitionFence.Snapshot before = fence.snapshotDuringCleanup(lease);
+        lease.deadline().checkCleanupRemaining();
         JdbcTemplate cleanup = new JdbcTemplate(jdbc.getDataSource());
-        cleanup.setQueryTimeout(lease.deadline().requireCleanupJdbcSeconds());
+        cleanup.setQueryTimeout(lease.deadline().requireCleanupJdbcSeconds(1));
         ProjectionSnapshot observed = readSnapshot(cleanup, partition);
+        lease.deadline().checkCleanupRemaining();
         JdbcPrivacyPartitionFence.Snapshot after = fence.snapshotDuringCleanup(lease);
+        lease.deadline().checkCleanupRemaining();
         boolean ownerStable = before != null && after != null && before.equals(after)
                 && "QUARANTINED".equals(after.state()) && after.generation() == lease.generation()
                 && lease.ownerToken().equals(after.ownerToken());

@@ -18,6 +18,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.UUID;
 import java.util.List;
+import java.util.Set;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -26,6 +27,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.time.Duration;
 import java.util.Map;
@@ -308,7 +310,8 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         projectionAdmin.update("INSERT INTO sf_w2b_projection(tenant_id, subject_ref, last_applied_revision, event_hash, held, last_action_id, last_action_state) "
                 + "VALUES (?, ?, 0, ?, FALSE, NULL, 'NONE')", tenantId, subjectRef, "0".repeat(64));
 
-        RecordingConnectionDataSource recording = new RecordingConnectionDataSource(appProjectionDataSource);
+        DataSource deadlineDataSource = harness.application().createApplicationProjectionDeadlineDataSource(1_000, 2_000);
+        RecordingConnectionDataSource recording = new RecordingConnectionDataSource(deadlineDataSource, 2_000);
         var timedProjection = new JdbcPrivacyProjectionAdapter(recording, context.getEnvironment());
         var timedService = new PrivacyRecoveryService(recoveryWitnessReader, watermarkVerifier, recoveryJournalReader,
                 timedProjection, new JdbcPrivacyPartitionFence(recording, context.getEnvironment()), context.getEnvironment());
@@ -316,6 +319,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         Connection blocker = null;
         boolean blockerReleased = false;
         Throwable primaryFailure = null;
+        JdbcPrivacyPartitionFence.Snapshot timeoutOwner = null;
         try {
             blocker = appAdminDataSource.getConnection();
             blocker.setAutoCommit(false);
@@ -331,16 +335,19 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             PrivacyRecoveryService.Result timedOut = recovery.get(10, TimeUnit.SECONDS);
             long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
             assertEquals(PrivacyRecoveryService.Status.QUARANTINED, timedOut.status());
-            assertEquals("REPLAY_TIMEOUT", timedOut.reason());
+            assertEquals("REPLAY_WRITE_NOT_STARTED", timedOut.reason(), "projection mutation前のdeadline到達をcommit結果不明と区別する");
             assertTrue(elapsedMillis <= 7_000, "5秒work budgetと2秒cleanup tolerance内で同期終了する: " + elapsedMillis);
-            assertEquals("QUARANTINED", new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
-                    .snapshot(partition).state(), "既に確認済みの隔離はtimeout後も維持する");
+            timeoutOwner = new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()).snapshot(partition);
+            assertEquals("QUARANTINED", timeoutOwner.state(), "既に確認済みの隔離はtimeout後も維持する");
+            assertTrue(timeoutOwner.generation() > 0 && timeoutOwner.ownerToken() != null, "timeout後のgeneration/ownerを記録する");
             assertEquals(0L, projectionAdmin.queryForObject("SELECT last_applied_revision FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=?",
                     Long.class, tenantId, subjectRef));
             pool.shutdown();
             assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "deadline後にrecovery workerが残らない");
             assertTrue(tableLockWaits(APPLICATION.getDatabaseName(), "sf_w2b_projection").stream()
                     .noneMatch(wait -> recording.connectionIds().contains(wait.requesterId())), "timeout後にprojection lock waiterが残らない");
+            assertEquals(0, recording.openConnectionIds().size(), "記録したJDBC connectionがすべてclose済み");
+            assertNoDatabaseSessions(recording.connectionIds(), "timeout後に実MySQL session/transactionが残らない");
         } catch (Throwable failure) {
             primaryFailure = failure;
             throw failure;
@@ -358,8 +365,8 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         assertEquals(PrivacyRecoveryService.Status.RECOVERED_SYNTHETIC, healthy.status());
         assertEquals(1L, new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment())
                 .snapshot(partition).revision(), "resource回収後の新recovery試行は収束する");
-        assertEquals("QUARANTINED", new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment())
-                .snapshot(partition).state(), "成功しても隔離は解除しない");
+        var afterHealthyRetry = new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()).snapshot(partition);
+        assertEquals(timeoutOwner, afterHealthyRetry, "新recovery試行後もtimeout時の隔離owner/generationを維持する");
     }
 
     @Test
@@ -393,6 +400,15 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             assertEquals(PrivacyProjectionPort.Status.QUARANTINED, adapter.applyRecovery(event, sameLease).status(),
                     "generation/owner/deadlineを再発行せず同じLeaseで拒否する");
             assertEquals(connectionsAfterFirstAttempt, recording.connectionIds().size(), "同じexpired leaseの再試行でDBへ再接続しない");
+            assertEquals(PrivacyProjectionPort.QuarantineCode.PARTITION_FENCED,
+                    adapter.apply(event).reason(),
+                    "expired recoveryのnormal projection/no-op入口も隔離で拒否する");
+            int connectionsAfterNormalRefusal = recording.connectionIds().size();
+            assertThrows(RecoveryDeadline.ExpiredException.class,
+                    () -> new JdbcPrivacyPartitionFence(recording, context.getEnvironment()).underCurrentOwner(sameLease, tx -> tx.update(
+                            "UPDATE sf_w2b_projection SET held=TRUE WHERE tenant_id=? AND subject_ref=?", tenantId, subjectRef)),
+                    "同じexpired Leaseのfixture restoreもSQL開始前に拒否する");
+            assertEquals(connectionsAfterNormalRefusal, recording.connectionIds().size(), "fixture write拒否でDBへ再接続しない");
             var ownerAfter = fence.snapshot(partition);
             assertEquals(ownerBefore, ownerAfter);
             assertEquals(0L, projectionAdmin.queryForObject("SELECT last_applied_revision FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=?",
@@ -1294,20 +1310,49 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
 
     private static final class RecordingConnectionDataSource extends DelegatingDataSource {
         private final ConcurrentLinkedQueue<Long> ids = new ConcurrentLinkedQueue<>();
+        private final java.util.Set<Long> openIds = ConcurrentHashMap.newKeySet();
+        private final int networkTimeoutMillis;
 
-        private RecordingConnectionDataSource(DataSource target) { super(target); }
+        private RecordingConnectionDataSource(DataSource target) { this(target, 0); }
+
+        private RecordingConnectionDataSource(DataSource target, int networkTimeoutMillis) {
+            super(target);
+            this.networkTimeoutMillis = networkTimeoutMillis;
+        }
 
         @Override public Connection getConnection() throws SQLException {
             Connection connection = super.getConnection();
-            try { ids.add(readConnectionId(connection)); }
+            try {
+                if (networkTimeoutMillis > 0) {
+                    connection.setNetworkTimeout(java.util.concurrent.ForkJoinPool.commonPool(), networkTimeoutMillis);
+                    int lockWaitSeconds = (networkTimeoutMillis + 999) / 1000;
+                    try (var statement = connection.createStatement()) {
+                        statement.execute("SET SESSION innodb_lock_wait_timeout = " + lockWaitSeconds);
+                    }
+                }
+                long connectionId = readConnectionId(connection);
+                ids.add(connectionId);
+                openIds.add(connectionId);
+                return (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(), new Class<?>[]{Connection.class},
+                        (proxy, method, args) -> {
+                            try {
+                                Object value = method.invoke(connection, args);
+                                if ("close".equals(method.getName())) openIds.remove(connectionId);
+                                return value;
+                            } catch (InvocationTargetException failure) {
+                                if ("close".equals(method.getName())) openIds.remove(connectionId);
+                                throw failure.getCause();
+                            }
+                        });
+            }
             catch (SQLException failure) {
                 try { connection.close(); } catch (SQLException closeFailure) { failure.addSuppressed(closeFailure); }
                 throw failure;
             }
-            return connection;
         }
 
         private List<Long> connectionIds() { return List.copyOf(ids); }
+        private java.util.Set<Long> openConnectionIds() { return Set.copyOf(openIds); }
 
         private static long readConnectionId(Connection connection) throws SQLException {
             try (var statement = connection.createStatement(); var result = statement.executeQuery("SELECT CONNECTION_ID()")) {
@@ -1315,6 +1360,16 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
                 return result.getLong(1);
             }
         }
+    }
+
+    private void assertNoDatabaseSessions(List<Long> connectionIds, String message) {
+        if (connectionIds.isEmpty()) return;
+        String placeholders = String.join(",", java.util.Collections.nCopies(connectionIds.size(), "?"));
+        Object[] ids = connectionIds.toArray();
+        assertEquals(0L, projectionAdmin.queryForObject("SELECT COUNT(*) FROM performance_schema.threads WHERE PROCESSLIST_ID IN ("
+                + placeholders + ")", Long.class, ids), message + " (session)");
+        assertEquals(0L, projectionAdmin.queryForObject("SELECT COUNT(*) FROM information_schema.innodb_trx WHERE trx_mysql_thread_id IN ("
+                + placeholders + ")", Long.class, ids), message + " (transaction)");
     }
 
     private void cleanupWitness(LatestWitnessPort.Partition partition) {

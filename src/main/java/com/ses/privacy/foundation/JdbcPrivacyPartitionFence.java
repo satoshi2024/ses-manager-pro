@@ -94,10 +94,11 @@ final class JdbcPrivacyPartitionFence {
     Snapshot snapshotDuringCleanup(Lease lease) {
         if (lease == null) return null;
         JdbcTemplate reader = new JdbcTemplate(dataSource);
-        reader.setQueryTimeout(lease.deadline().requireCleanupJdbcSeconds());
+        reader.setQueryTimeout(lease.deadline().requireCleanupJdbcSeconds(1));
         List<State> states = reader.query("SELECT generation, state, owner_token FROM sf_w2b_partition_fence WHERE tenant_id=? AND subject_ref=?",
                 (rs, row) -> new State(rs.getLong("generation"), rs.getString("state"), rs.getString("owner_token")),
                 lease.partition().tenantId(), lease.partition().subjectRef());
+        lease.deadline().checkCleanupRemaining();
         if (states.isEmpty()) return new Snapshot(lease.partition(), 0, "ACTIVE", null);
         State state = states.get(0);
         return new Snapshot(lease.partition(), state.generation(), state.status(), state.ownerToken());

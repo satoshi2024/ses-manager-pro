@@ -19,7 +19,7 @@ interface PrivacyProjectionPort {
         NONE, ACK_INVALID, ACK_NOT_FOUND, JOURNAL_UNAVAILABLE, JOURNAL_CHAIN_INVALID,
         PROJECTION_MISMATCH, REVISION_GAP, REVISION_BACKWARD, HASH_CONFLICT, CAS_CONFLICT,
         PROJECTION_UNAVAILABLE, PARTITION_FENCED, DEADLINE_EXCEEDED,
-        COMMIT_CONFIRMED_QUARANTINED, COMMIT_OUTCOME_UNKNOWN
+        WRITE_NOT_STARTED, COMMIT_CONFIRMED_QUARANTINED, COMMIT_OUTCOME_UNKNOWN
     }
     record ProjectionResult(Status status, long revision, String eventHash, QuarantineCode reason) {
         static ProjectionResult applied(long revision, String hash) { return new ProjectionResult(Status.APPLIED, revision, hash, QuarantineCode.NONE); }
