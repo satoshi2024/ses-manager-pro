@@ -547,13 +547,14 @@ class ImportMetadataRealMySqlTest {
         prepareBoundCustomerJob();
         var operation = leaseService.beginAcquire(jobId);
         assertTrue(leaseService.acquire(operation) != null);
-        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,1,CURRENT_TIMESTAMP(6)) "
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,8,CURRENT_TIMESTAMP(6)) "
                 + "WHERE tenant_id=? AND id=?", tenantId, jobId);
         Map<String, Object> before = leaseSnapshot();
 
         BlockedLease blocked = blockLeaseAtAuthorizationGate(() -> leaseService.acquire(operation));
         try {
-            Thread.sleep(1_500);
+            assertLeaseExpiryHasRemainingMargin(3_000_000L);
+            awaitLeaseExpiryByDatabaseClock();
             blocked.blocker().commit();
             var failure = assertThrows(java.util.concurrent.ExecutionException.class,
                     () -> blocked.service().get(10, TimeUnit.SECONDS));
@@ -569,13 +570,14 @@ class ImportMetadataRealMySqlTest {
     void gate待機後に失効したrenewは409でleaseを延長しない() throws Exception {
         prepareBoundCustomerJob();
         var grant = leaseService.acquire(leaseService.beginAcquire(jobId));
-        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,1,CURRENT_TIMESTAMP(6)) "
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,8,CURRENT_TIMESTAMP(6)) "
                 + "WHERE tenant_id=? AND id=?", tenantId, jobId);
         Map<String, Object> before = leaseSnapshot();
 
         BlockedLease blocked = blockLeaseAtAuthorizationGate(() -> leaseService.renew(grant));
         try {
-            Thread.sleep(1_500);
+            assertLeaseExpiryHasRemainingMargin(3_000_000L);
+            awaitLeaseExpiryByDatabaseClock();
             blocked.blocker().commit();
             var failure = assertThrows(java.util.concurrent.ExecutionException.class,
                     () -> blocked.service().get(10, TimeUnit.SECONDS));
@@ -635,14 +637,15 @@ class ImportMetadataRealMySqlTest {
     void 未期限takeoverはgate待機中に期限を越えた後freshDB時刻で成功する() throws Exception {
         prepareBoundCustomerJob();
         leaseService.acquire(leaseService.beginAcquire(jobId));
-        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,1,CURRENT_TIMESTAMP(6)) "
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,8,CURRENT_TIMESTAMP(6)) "
                 + "WHERE tenant_id=? AND id=?", tenantId, jobId);
         var operation = leaseService.beginTakeover(jobId);
         long generationBefore = ((Number) leaseSnapshot().get("lease_generation")).longValue();
         long versionBefore = ((Number) leaseSnapshot().get("version_no")).longValue();
         BlockedLease blocked = blockLeaseAtAuthorizationGate(() -> leaseService.takeOver(operation));
         try {
-            Thread.sleep(1_500);
+            assertLeaseExpiryHasRemainingMargin(3_000_000L);
+            awaitLeaseExpiryByDatabaseClock();
             blocked.blocker().commit();
             var grant = blocked.service().get(10, TimeUnit.SECONDS);
             assertTrue(grant != null);
@@ -665,12 +668,13 @@ class ImportMetadataRealMySqlTest {
         var operation = leaseService.beginTakeover(jobId);
         assertTrue(leaseService.takeOver(operation) != null);
         assertTrue(leaseService.takeOver(operation) != null, "期限内の同operation retryは冪等成功する");
-        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,1,CURRENT_TIMESTAMP(6)) "
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,8,CURRENT_TIMESTAMP(6)) "
                 + "WHERE tenant_id=? AND id=?", tenantId, jobId);
         Map<String, Object> before = leaseSnapshot();
         BlockedLease blocked = blockLeaseAtAuthorizationGate(() -> leaseService.takeOver(operation));
         try {
-            Thread.sleep(1_500);
+            assertLeaseExpiryHasRemainingMargin(3_000_000L);
+            awaitLeaseExpiryByDatabaseClock();
             blocked.blocker().commit();
             var failure = assertThrows(java.util.concurrent.ExecutionException.class,
                     () -> blocked.service().get(10, TimeUnit.SECONDS));
@@ -873,6 +877,25 @@ class ImportMetadataRealMySqlTest {
     private int jobVersion() {
         return jdbc.queryForObject("SELECT version_no FROM t_import_job WHERE tenant_id=? AND id=?",
                 Integer.class, tenantId, jobId);
+    }
+
+    private void assertLeaseExpiryHasRemainingMargin(long minimumMicros) {
+        Long remainingMicros = jdbc.queryForObject("SELECT TIMESTAMPDIFF(MICROSECOND,CURRENT_TIMESTAMP(6),"
+                + "lease_expires_at) FROM t_import_job WHERE tenant_id=? AND id=?", Long.class, tenantId, jobId);
+        assertTrue(remainingMicros != null, "lease expiry intervalが取得できませんでした");
+        assertTrue(remainingMicros >= minimumMicros,
+                "gate waitを確認した時点ですでに期限切れ、または余裕不足: remainingMicros=" + remainingMicros);
+    }
+
+    private void awaitLeaseExpiryByDatabaseClock() throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12);
+        while (System.nanoTime() < deadline) {
+            Integer expired = jdbc.queryForObject("SELECT lease_expires_at<=CURRENT_TIMESTAMP(6) FROM t_import_job "
+                    + "WHERE tenant_id=? AND id=?", Integer.class, tenantId, jobId);
+            if (Integer.valueOf(1).equals(expired)) return;
+            Thread.sleep(25);
+        }
+        throw new AssertionError("gateを保持したままDB時刻によるlease期限到達を確認できませんでした");
     }
 
     private BlockedLease blockLeaseAtAuthorizationGate(
