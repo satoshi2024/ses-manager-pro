@@ -1508,7 +1508,9 @@ class ImportMetadataRealMySqlTest {
                   document_version_id,document_version_no,document_sha256,mapping_id,mapping_version,
                   mapping_sha256,validation_fingerprint)
                 VALUES(?,?,1,'BUILDING',0,0,1,?,?,1,?,'CUSTOMER','ses-import-v1','UTF8',?,?,?,?,?,?,1,?,?)
-                """, tenantId, jobId, actorUserId, sourceId, "nf06-candidate-" + tenantId, digest,
+                """, tenantId, jobId, actorUserId, sourceId,
+                jdbc.queryForObject("SELECT source_code FROM t_import_source_system WHERE tenant_id=? AND id=?",
+                        String.class, tenantId, sourceId), digest,
                 documentId, documentVersionId, 1, digest, mappingId,
                 jdbc.queryForObject("SELECT mapping_sha256 FROM t_import_mapping WHERE tenant_id=? AND id=?",
                         byte[].class, tenantId, mappingId), digest);
