@@ -32,22 +32,27 @@
 
 ## C2-B: 実DB状態行列とCAS証明
 
-対象候補: `CopilotRunService.completeSummaryAttempt`、`AiRecommendationRunMapper`、専用MySQL Testcontainers integration test。既存テーブル/列だけを使いmigrationは追加しない。
+### B1（今回承認・最小範囲）
 
-実DBへfixture attemptをINSERTし、Spring管理の実service proxy経由で更新した後、transaction commit後に独立connectionから行を再読込して `status/status_version/cost_jpy/error_code/redacted_summary_json/input_hash/tenant_id/trace_id/use_case` を検査する。rollbackケースはproxy呼出しを含むSpring transactionをrollbackさせ、rollback完了後に独立connectionから元行を再読込する。各ケースは独立fixtureで実行し、試行前後の全対象列を比較する。
+対象は `CopilotRunService.completeSummaryAttempt`、必要最小限の `CopilotQueryService` stale応答処理、`AiRecommendationRunMapper` の実MySQL経路、および `CopilotRunServiceMySqlIntegrationTest` とする。Spring管理の実service proxyを呼び、test method自体には `@Transactional` を付けない。commit後は別の新規DataSource connectionで行を再読込する。rollback試験ではservice proxy呼出しを含むtest側transactionをrollbackし、完了後の独立connectionから元行を検査する。テスト用fixture attemptは既存artifact versionを参照する独立行として作り、各ケースで固有fixtureを使う。
 
 | 入力/遷移 | 期待DB状態 |
 |---|---|
-| `PENDING/v0` + dispatch未開始証拠 | `FAILED/v1`, cost 0, `NOT_SENT`, bounded reason/outcome |
-| `PENDING/v0` + valid usage/card | 成否に応じterminal/v1、ACTUAL円と全token dimension/card identity |
-| `PENDING/v0` + valid上限証拠 | terminal/v1、cost_jpy null、UPPER_BOUNDと上限円をredacted JSONに保存 |
-| `PENDING/v0` + 送信後のusage欠落/invalid | terminal/v1、cost_jpy null、UNKNOWN。0円/KNOWNにしない |
-| valid usage受領後のinner parse/validator失敗 | `FAILED/v1`だがACTUAL usage/cost/card evidence保持 |
-| 同一attemptを二度complete | 2回目CAS row count=0/明確なstale outcome。初回terminal行の全列不変 |
-| attempt tenant/trace/usecase不一致、またはDB行status!=PENDING/statusVersion!=0 | 更新0件。対象行と他tenant行の全列不変 |
-| metadata serialization/commit直前例外 | transaction rollback後に元のPENDING/v0行が全列不変 |
+| `PENDING/v0` + dispatch未開始を示す `NOT_SENT` | `FAILED/v1`、`cost_jpy=0`、redacted JSONに `NOT_SENT` とbounded reason/outcome |
+| `PENDING/v0` + response受領後の未認証usage構造 | `FAILED/v1`、`cost_jpy=NULL`、redacted JSONに `UNKNOWN`、dispatch状態と全usage dimension。金額は生成しない |
+| 同一attemptを二度complete | 初回は `COMPLETED`、2回目は例外でなく明示的 `STALE`。terminal行の対象列すべて不変 |
+| active tenant未設定、またはactive tenantとattempt tenant不一致 | completion前に拒否し、DB全列不変 |
+| 行とattemptのtenant/trace/usecase不一致、または行status/versionがPENDING/v0以外 | CAS更新0件は `STALE`。対象行および別tenant行の全列不変 |
+| 二threadをbarrierで同時complete | 1件だけ `COMPLETED`、他方は `STALE`（通常例外なし）。最後に独立connectionからterminal行1件を確認 |
+| transaction内でservice proxy更新後にtest側rollback | rollback後に元の `PENDING/v0` と全対象列が不変 |
 
-CAS where条件のid+tenant+trace+usecase+PENDING+version 0を保ち、更新件数!=1を成功扱いしない。tenant context必須性も実DB経路で確認し、別tenantの同じtraceや別usecaseの行へ副作用がないことを照合する。並行二重完了はbarrierで競合させ、terminal更新が厳密に1件、もう一方は例外ではなく明示的stale拒否となることを確認する。DB値はserviceの戻り値やMockito captorで代替せず、commit後に独立connectionから読み直す。
+既存CAS where条件の `id + tenant + trace + usecase + PENDING + version=0` を保つ。summary completionは更新件数1なら `COMPLETED`、0件だけ `STALE` を返す。SQL、serialization、commit等の例外は握りつぶさずtransaction rollbackさせる。query completionは従来通りstrict failureを維持し、失敗時に `FAILED` で二度目の更新を試みても最初の例外を置き換えない。`CopilotQueryService` はsummary completionが明示的 `STALE` の場合に生成済みだが未永続化のsummaryを返さず、bounded unavailable responseにする。Mockitoの未stub戻り値nullは完了扱いにしない。各workerは終了時に `AccountingTenantContextHolder.clear()` を `finally` で必ず実行する。
+
+B1の検証範囲はmetadata永続化、transaction rollback、tenant/CAS/stale境界に限る。A2 verifierはsynthetic算術試験専用でproduction usage認証経路へ接続されていないため、testがmock金額を注入してACTUAL/UPPER_BOUNDの信頼性を主張してはならない。`NOT_SENT` および金額nullの `UNKNOWN` に対しdispatch情報・usage dimensionがredacted JSONへ保存されることだけを検証する。schemaはV108/V161/V162/V173の既存列を使い、migration/DDLを追加しない。`CopilotRunServiceMySqlIntegrationTest` を `scripts/test-suites/mysql-shard-1.txt` に一度だけ登録する。既存 `recordQueryRun` / `recordCatalogRun` のcontext拒否を変えない。
+
+### B2（未承認・後続計画）
+
+実provider応答由来usageの真正性、production card署名/registry、usage receiptとcardのruntime結合、ACTUAL/UPPER_BOUND計算結果から `SummaryCostEvidence`・attempt metadata・DB `cost_jpy` への端から端までの経路、およびinner validation失敗後にACTUAL保持するDB試験はB1の範囲外である。production usage costは引き続きUNKNOWNとし、B2は実usage provenance設計と明示的な別PLAN review後に扱う。synthetic signing keyやfixture金額をB2の代替証拠にしない。
 
 ## バッチ順序とレビュー
 
