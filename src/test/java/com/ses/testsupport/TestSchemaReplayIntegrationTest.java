@@ -39,12 +39,19 @@ class TestSchemaReplayIntegrationTest {
         replayDocumentAndImportSchema();
         replayDocumentAndImportSchema();
 
-        Integer constraints = jdbc.queryForObject("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS "
-                        + "WHERE TABLE_SCHEMA = 'PUBLIC' AND TABLE_NAME = 'T_IMPORT_JOB' "
-                        + "AND CONSTRAINT_NAME IN ('FK_IMPORT_JOB_DOCUMENT_VERSION', "
-                        + "'FK_IMPORT_JOB_ACTIVE_RUN', 'FK_IMPORT_JOB_CURRENT_RUN')",
-                Integer.class);
-        assertThat(constraints).isEqualTo(3);
+        assertForeignKey("FK_IMPORT_JOB_DOCUMENT", "T_DOCUMENT", "ID");
+        assertForeignKey("FK_IMPORT_JOB_DOCUMENT_VERSION", "T_DOCUMENT_VERSION", "ID");
+        assertForeignKey("FK_IMPORT_JOB_ACTIVE_RUN", "T_IMPORT_VALIDATION_RUN", "ID");
+        assertForeignKey("FK_IMPORT_JOB_CURRENT_RUN", "T_IMPORT_VALIDATION_RUN", "ID");
+    }
+
+    private void assertForeignKey(String name, String targetTable, String targetColumn) {
+        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE "
+                        + "WHERE CONSTRAINT_SCHEMA = 'PUBLIC' AND TABLE_NAME = 'T_IMPORT_JOB' "
+                        + "AND CONSTRAINT_NAME = ? AND REFERENCED_TABLE_NAME = ? "
+                        + "AND REFERENCED_COLUMN_NAME = ?", Integer.class,
+                name, targetTable, targetColumn);
+        assertThat(count).as("%s の参照先", name).isEqualTo(1);
     }
 
     private void replayDocumentAndImportSchema() {

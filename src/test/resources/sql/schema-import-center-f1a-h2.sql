@@ -90,6 +90,14 @@ CREATE TABLE IF NOT EXISTS t_import_job (
         ON UPDATE RESTRICT ON DELETE RESTRICT
 );
 
+-- 文書schemaの再投入で親テーブルが再作成されても参照制約を復元する。
+ALTER TABLE t_import_job
+    ADD CONSTRAINT IF NOT EXISTS fk_import_job_document FOREIGN KEY (tenant_id, document_id)
+        REFERENCES t_document (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+ALTER TABLE t_import_job
+    ADD CONSTRAINT IF NOT EXISTS fk_import_job_document_version FOREIGN KEY (tenant_id, document_version_id)
+        REFERENCES t_document_version (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
 CREATE TABLE IF NOT EXISTS t_import_validation_run (
     id BIGINT NOT NULL AUTO_INCREMENT,
     tenant_id VARCHAR(100)  NOT NULL,
