@@ -199,6 +199,17 @@ class TrustedRateCardVerifierTest {
         assertReason("CARD_NOT_REGISTERED", () -> evaluate(sameIdentityChangedRate,
                 fixture.execution, fixture.current, fixture.bounds, fixture.preflight, true));
 
+        SignedRateCard sameDomainRateA = signedCard("same-domain-a", validWindow(),
+                rates("4", "1", "12", "20"));
+        SignedRateCard sameDomainRateB = signedCard("same-domain-b", validWindow(),
+                rates("5", "2", "13", "21"));
+        trust(fixture.card, sameDomainRateA, sameDomainRateB);
+        SignedUsageReceipt originalCardReceipt = signedUsage(fixture.execution);
+        assertReason("USAGE_CARD_BINDING_MISMATCH", () -> verifier.evaluate(sameDomainRateA,
+                originalCardReceipt, fixture.current, fixture.bounds, fixture.preflight, true));
+        assertReason("USAGE_CARD_BINDING_MISMATCH", () -> verifier.evaluate(sameDomainRateB,
+                originalCardReceipt, fixture.current, fixture.bounds, fixture.preflight, true));
+
         CurrentAttemptBinding wrongTenant = current(fixture.current, null, "tenant-b", null, null);
         assertReason("EXECUTION_BINDING_MISMATCH", () -> evaluate(fixture.card, fixture.execution,
                 wrongTenant, fixture.bounds, fixture.preflight, true));
@@ -231,7 +242,8 @@ class TrustedRateCardVerifierTest {
                 wrongUseCase, fixture.bounds, fixture.preflight, true));
 
         RateCardExecutionInput wrongConfig = new RateCardExecutionInput(fixture.execution.attemptId(),
-                fixture.execution.idempotencyKey(), fixture.execution.tenantId(), fixture.execution.traceId(),
+                fixture.execution.idempotencyKey(), fixture.execution.rateCardDigest(),
+                fixture.execution.tenantId(), fixture.execution.traceId(),
                 fixture.execution.useCase(), fixture.execution.attemptStatus(), fixture.execution.statusVersion(),
                 fixture.execution.dispatchNonce(), fixture.execution.provider(), fixture.execution.modelRevision(),
                 fixture.execution.region(), fixture.execution.tier(),
@@ -357,7 +369,8 @@ class TrustedRateCardVerifierTest {
                             SignedRateCard card) {
         trust(card);
         String digest = TrustedRateCardVerifier.preflightSnapshotDigest(preflight);
-        RateCardExecutionInput input = new RateCardExecutionInput(attemptId, idempotencyKey, "tenant-a",
+        RateCardExecutionInput input = new RateCardExecutionInput(attemptId, idempotencyKey,
+                TrustedRateCardVerifier.canonicalCardDigest(card), "tenant-a",
                 "trace-" + attemptId, "MANAGEMENT_COPILOT", "PENDING", 0, "nonce-" + attemptId,
                 "gemini", "model-rev-1", "synthetic-region", "synthetic-tier", "config-hash",
                 digest, NOW, usage, dispatch);
@@ -413,9 +426,10 @@ class TrustedRateCardVerifierTest {
                 source.priceUnit(), source.roundingMode(), keyId, source.rates(), signature);
     }
 
-    private void trust(SignedRateCard card) {
+    private void trust(SignedRateCard... cards) {
         verifier = new TrustedRateCardVerifier(Map.of("synthetic-test-key-v1", signingKey.getPublic()),
-                java.util.Set.of(TrustedRateCardVerifier.canonicalCardDigest(card)),
+                java.util.Arrays.stream(cards).map(TrustedRateCardVerifier::canonicalCardDigest)
+                        .collect(java.util.stream.Collectors.toSet()),
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -443,7 +457,8 @@ class TrustedRateCardVerifierTest {
 
     private static RateCardExecutionInput execution(RateCardExecutionInput source, String idempotencyKey,
                                                      CopilotProviderUsage usage, String preflightHash) {
-        return new RateCardExecutionInput(source.attemptId(), idempotencyKey, source.tenantId(), source.traceId(),
+        return new RateCardExecutionInput(source.attemptId(), idempotencyKey, source.rateCardDigest(),
+                source.tenantId(), source.traceId(),
                 source.useCase(), source.attemptStatus(), source.statusVersion(), source.dispatchNonce(),
                 source.provider(), source.modelRevision(), source.region(), source.tier(),
                 source.configHash(), preflightHash,

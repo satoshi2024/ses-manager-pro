@@ -59,6 +59,9 @@ final class TrustedRateCardVerifier {
         RateCardExecutionInput execution = usageReceipt.input();
         if (execution == null) throw rejected("EXECUTION_BINDING_MISMATCH");
         VerifiedRateCard verifiedCard = validateCardSignature(card);
+        if (!Objects.equals(execution.rateCardDigest(), verifiedCard.digest)) {
+            throw rejected("USAGE_CARD_BINDING_MISMATCH");
+        }
         CopilotProviderUsage validatedUsage = isValidUsage(execution.usage()) ? execution.usage() : null;
         if (actualCost && validatedUsage == null) throw rejected("USAGE_CONTRACT_INVALID");
         if (validatedUsage != null && execution.dispatchOutcome().state() == DispatchOutcome.State.NOT_STARTED) {
@@ -67,7 +70,7 @@ final class TrustedRateCardVerifier {
         VerifiedUsageBinding verifiedUsage = validateExecutionBinding(execution, currentAttempt, preflight, bounds,
                 verifiedCard.digest, validatedUsage);
         validateCardDomain(card, execution);
-        validatePreflightIdentity(preflight, execution);
+        validatePreflightIdentity(preflight, execution, verifiedCard.digest);
         boolean shouldCalculateActual = validatedUsage != null;
         if (actualCost != shouldCalculateActual) throw rejected("COST_MODE_MISMATCH");
         if (!actualCost) validatePreflight(preflight, execution, bounds, card);
@@ -155,7 +158,7 @@ final class TrustedRateCardVerifier {
         try {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(bytes);
-            for (String value : new String[]{input.attemptId(), input.idempotencyKey(), input.tenantId(),
+            for (String value : new String[]{input.attemptId(), input.idempotencyKey(), input.rateCardDigest(), input.tenantId(),
                     input.traceId(), input.useCase(), input.attemptStatus(), input.statusVersion() + "",
                     input.dispatchNonce(), input.provider(), input.modelRevision(), input.region(), input.tier(),
                     input.configHash(),
@@ -240,6 +243,7 @@ final class TrustedRateCardVerifier {
                                                           CopilotProviderUsage validatedUsage) {
         if (input == null || current == null || preflight == null
                 || !validText(input.attemptId(), 128) || !validText(input.idempotencyKey(), 128)
+                || !validText(input.rateCardDigest(), 64)
                 || !validText(input.tenantId(), 128) || !validText(input.traceId(), 128)
                 || !validText(input.useCase(), 64)
                 || !"PENDING".equals(input.attemptStatus())
@@ -292,10 +296,14 @@ final class TrustedRateCardVerifier {
         }
     }
 
-    private void validatePreflightIdentity(PreflightCostEvidence preflight, RateCardExecutionInput input) {
+    private void validatePreflightIdentity(PreflightCostEvidence preflight, RateCardExecutionInput input,
+                                           String cardDigest) {
         if (preflight == null || !Objects.equals(preflight.configIdentity(), input.configHash())
                 || !Objects.equals(input.preflightSnapshotHash(), preflightDigest(preflight))) {
             throw rejected("PREFLIGHT_SNAPSHOT_MISMATCH");
+        }
+        if (!Objects.equals(preflight.proofIdentity(), "synthetic-rate-card:" + cardDigest)) {
+            throw rejected("PREFLIGHT_CARD_BINDING_MISMATCH");
         }
     }
 
@@ -381,7 +389,7 @@ final class TrustedRateCardVerifier {
         try {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(bytes);
-            for (String value : new String[]{cardDigest, input.attemptId(), input.idempotencyKey(),
+            for (String value : new String[]{cardDigest, input.rateCardDigest(), input.attemptId(), input.idempotencyKey(),
                     input.tenantId(), input.traceId(), input.useCase(), input.attemptStatus(), input.dispatchNonce(),
                     input.provider(), input.modelRevision(), input.region(), input.tier(),
                     input.configHash(), input.preflightSnapshotHash(),
