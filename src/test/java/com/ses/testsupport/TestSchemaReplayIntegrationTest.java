@@ -6,7 +6,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -25,7 +24,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** 同じH2 DBにNF-06文書schemaとNF-08 import schemaを再投入して参照制約が維持されることを確認する。 */
+/** application-test.ymlのschema-locationsを同じH2 DBへ再投入して参照制約が維持されることを確認する。 */
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional
@@ -40,7 +39,6 @@ class TestSchemaReplayIntegrationTest {
     }
 
     @Autowired private DataSource dataSource;
-    @Autowired private JdbcTemplate jdbc;
     @Autowired private Environment environment;
     @Autowired private ResourceLoader resourceLoader;
 
