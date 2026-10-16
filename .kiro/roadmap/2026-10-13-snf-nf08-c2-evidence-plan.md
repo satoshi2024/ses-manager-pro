@@ -12,10 +12,11 @@
 対象候補: `CopilotGeminiResponseParser`、Copilot専用provider result/exception、`CopilotProviderUsage`、`SummaryCostEvidence`、`CopilotSummaryService`、cost policy/evaluatorとそのtest。
 
 1. parseをouter envelope段階とinner summary段階へ分ける。outer parse完了時点で、secret/raw bodyを含まないimmutable `EnvelopeEvidence`（strictly validated usage、HTTP/dispatch outcome、model/config identity）を返す。inner parse/schema/claim/numeric/deadlineが失敗してもこのevidenceを捨てず、typed failureへ添付してsummary serviceからattempt完了へ渡す。HTTP failureやouter envelope自体の破損でusageを信頼できない場合はusage=nullとし、実際にdispatchを開始した可能性に従ってUNKNOWN/UPPER_BOUNDへ進む。生応答や例外cause本文を記録しない。
-2. usageは縮小・丸め前の整数token countを保持し、prompt、candidate/output、thinking、cached等、料金表でbillableとなる全dimensionを明示する。strict JSON integer、非負、個別最大値、加算overflow、total整合を検証する。欠落/未知billable dimension/overflow/不整合はACTUAL計算不可。数値上限は実装契約として固定し、型変換前に検査する。
-3. cost evaluatorはversion付きrate-card snapshotを受け取る純粋関数とする。card identityにはprovider/model revision、region/tier、通貨JPY、effective window、全token dimension単価、FX provenance（外貨ならsource/time/rate）、料金単位、丸め規則を含める。金額はBigDecimal等でoverflowを検知しながら計算し、円への丸めはcardに明記された規則だけを使う。上限計算は各billable dimensionの最大量から保守的に円へ切上げ、budget比較も丸め後の円で行う。入力上限の根拠がないとき、`maxOutputTokens`や文字数推定を入力上限として使わず上限なしとする。
-4. `ACTUAL`は「検証済み実usage × 承認済みversioned cardから計算した確定額」を意味する。provider請求書照合済みの実請求額とは呼ばず、メタデータにも計算basis/card versionを残す。必要usage dimensionが欠ける/不正ならACTUAL禁止。送信有無不明または送信済みでACTUALを確定できず、独立に証明された有効な上限があればUPPER_BOUND、なければUNKNOWN。dispatch前に未開始を証明した場合のみNOT_SENT。inner validation失敗でもvalid usageがあれば費用状態を維持し、summary outcomeだけFAILEDにする。
-5. このC2実装の本番card/policyは引き続き固定deny-allとし、アプリ設定、DB値、artifact、承認booleanで解除不能にする。数値テスト用rate cardはtest sourceのsynthetic fixtureでのみ生成し、それは費用算術の正しさを示すだけで、実料金の正確性・dispatch許可・production evidenceを示さない。将来の本番cardには外部公式価格/契約・region・FX資料、effective date、承認者/有効化手続きが別途必要。
+2. usageは縮小・丸め前の整数token countを保持し、prompt、candidate/output、thinking、cached等、料金表でbillableとなる全dimensionを明示する。strict JSON integer、非負、個別最大値、加算overflow、total整合を検証する。各dimensionの意味を固定し、synthetic contractでは `total >= prompt + candidate`、`cached <= prompt`、`thinking <= candidate` を検証する。provider仕様がこの包含関係や丸め規則を保証しない場合は未対応としてUNKNOWNにし、推測で再分類しない。欠落/未知billable dimension/overflow/不整合はACTUAL計算不可。数値上限は実装契約として固定し、型変換前に検査する。
+3. cost evaluatorはversion付きtrusted rate-card snapshotを受け取る純粋関数とする。card identityにはprovider/model revision、region/tier、通貨JPY、effective window、全token dimension単価、FX provenance（外貨ならsource/time/rate）、料金単位、唯一の総額丸め規則を含める。金額はBigDecimal等でoverflowを検知しながら計算し、円への丸めはcardに明記された規則だけを一度適用する。円額の変換/合算もoverflowを検知し、overflow時はACTUALにしない。上限計算は各billable dimensionの最大量から保守的に円へ切上げ、budget比較も丸め後の円で行う。入力上限の根拠がないとき、`maxOutputTokens`や文字数推定を入力上限として使わず上限なしとする。
+4. trusted cardの生成・検証入口は内部に限定し、public DTO、利用者指定ID、文字列versionだけからtrusted扱いにしてはならない。cardを受領済みusage、provider/model revision、config hash、effective window、dispatch前preflight snapshotへ暗号学的または同等に検証可能な形で束縛し、後から別usage/別実行へ差し替えられない契約を定義する。synthetic issuer/card生成器はtest sourceにだけ置き、production beanや設定値から到達不能にする。実providerのbillable dimension包含関係、rounding、token semanticsが未確認なら、実usageをACTUALへ昇格させずUNKNOWNとする。
+5. `ACTUAL`は「検証済み実usage × 承認済みversioned cardから計算した確定額」を意味する。provider請求書照合済みの実請求額とは呼ばず、メタデータにも計算basis/card versionを残す。必要usage dimensionが欠ける/不正ならACTUAL禁止。送信有無不明または送信済みでACTUALを確定できず、独立に証明された有効な上限があればUPPER_BOUND、なければUNKNOWN。dispatch前に未開始を証明した場合のみNOT_SENT。inner validation失敗でもvalid usageがあれば費用状態を維持し、summary outcomeだけFAILEDにする。
+6. このC2実装の本番card/policyは引き続き固定deny-allとし、アプリ設定、DB値、artifact、承認booleanで解除不能にする。数値テスト用rate cardはtest sourceのsynthetic fixtureでのみ生成し、それは費用算術の正しさを示すだけで、実料金の正確性・dispatch許可・production evidenceを示さない。将来の本番cardには外部公式価格/契約・region・FX資料、effective date、承認者/有効化手続きが別途必要。
 
 ### C2-A 受入証拠
 
@@ -27,7 +28,7 @@
 
 対象候補: `CopilotRunService.completeSummaryAttempt`、`AiRecommendationRunMapper`、専用MySQL Testcontainers integration test。既存テーブル/列だけを使いmigrationは追加しない。
 
-実DBへfixture attemptをINSERTし、service経由で更新した後、同じDB接続で行を再読込して `status/status_version/cost_jpy/error_code/redacted_summary_json/input_hash/tenant_id/trace_id/use_case` を検査する。各ケースは独立fixtureで実行し、試行前後の全対象列を比較する。
+実DBへfixture attemptをINSERTし、Spring管理の実service proxy経由で更新した後、transaction commit後に独立connectionから行を再読込して `status/status_version/cost_jpy/error_code/redacted_summary_json/input_hash/tenant_id/trace_id/use_case` を検査する。rollbackケースはproxy呼出しを含むSpring transactionをrollbackさせ、rollback完了後に独立connectionから元行を再読込する。各ケースは独立fixtureで実行し、試行前後の全対象列を比較する。
 
 | 入力/遷移 | 期待DB状態 |
 |---|---|
@@ -40,7 +41,7 @@
 | attempt tenant/trace/usecase不一致、またはDB行status!=PENDING/statusVersion!=0 | 更新0件。対象行と他tenant行の全列不変 |
 | metadata serialization/commit直前例外 | transaction rollback後に元のPENDING/v0行が全列不変 |
 
-CAS where条件のid+tenant+trace+usecase+PENDING+version 0を保ち、更新件数!=1を成功扱いしない。tenant context必須性も実DB経路で確認し、別tenantの同じtraceや別usecaseの行へ副作用がないことを照合する。並行二重完了はbarrierで競合させ、terminal更新が厳密に1件、もう一方がstale拒否となることを確認する。DB値はserviceの戻り値やMockito captorで代替せず、commit後にmapper/JDBCから読み直す。
+CAS where条件のid+tenant+trace+usecase+PENDING+version 0を保ち、更新件数!=1を成功扱いしない。tenant context必須性も実DB経路で確認し、別tenantの同じtraceや別usecaseの行へ副作用がないことを照合する。並行二重完了はbarrierで競合させ、terminal更新が厳密に1件、もう一方は例外ではなく明示的stale拒否となることを確認する。DB値はserviceの戻り値やMockito captorで代替せず、commit後に独立connectionから読み直す。
 
 ## バッチ順序とレビュー
 
