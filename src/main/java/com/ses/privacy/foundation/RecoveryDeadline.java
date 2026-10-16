@@ -35,9 +35,22 @@ final class RecoveryDeadline {
     boolean workBudgetExpired() { return remainingNanos() <= 0; }
 
     int requireCleanupJdbcSeconds() {
-        long remaining = deadlineNanos + CLEANUP_TOLERANCE.toNanos() - System.nanoTime();
+        return requireCleanupJdbcSeconds(0);
+    }
+
+    int requireCleanupJdbcSeconds(int connectionReserveSeconds) {
+        if (connectionReserveSeconds < 0) throw new IllegalArgumentException("connection reserveは負数にできません");
+        long remaining = cleanupRemainingNanos() - TimeUnit.SECONDS.toNanos(connectionReserveSeconds);
         if (remaining < TimeUnit.SECONDS.toNanos(1)) throw new ExpiredException();
         return Math.toIntExact(Math.min(Integer.MAX_VALUE, TimeUnit.NANOSECONDS.toSeconds(remaining)));
+    }
+
+    void checkCleanupRemaining() {
+        if (cleanupRemainingNanos() <= 0) throw new ExpiredException();
+    }
+
+    private long cleanupRemainingNanos() {
+        return deadlineNanos + CLEANUP_TOLERANCE.toNanos() - System.nanoTime();
     }
 
     static final class ExpiredException extends RuntimeException {

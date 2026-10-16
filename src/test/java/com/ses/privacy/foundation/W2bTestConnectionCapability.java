@@ -25,6 +25,8 @@ final class W2bTestConnectionCapability {
     private final String database;
     private final String schemaResource;
     private final String containerId;
+    private String applicationProjectionUser;
+    private String applicationProjectionSecret;
 
     private W2bTestConnectionCapability(MySQLContainer<?> container, ApplicationContext context, Store store) {
         W2bTestEnvironment.requireTest(context);
@@ -90,12 +92,28 @@ final class W2bTestConnectionCapability {
         requireStore(Store.APPLICATION);
         String user = newUser("sfw2bp_");
         String secret = newSecret();
+        applicationProjectionUser = user;
+        applicationProjectionSecret = secret;
         JdbcTemplate admin = new JdbcTemplate(adminDataSource());
         admin.execute("CREATE USER '" + user + "'@'%' IDENTIFIED BY '" + secret + "'");
         for (String table : java.util.List.of("sf_w2b_projection", "sf_w2b_partition_fence")) {
             admin.execute("GRANT SELECT, INSERT, UPDATE ON `" + database + "`." + table + " TO '" + user + "'@'%'");
         }
         return new ProfileGuardedDataSource(new DriverManagerDataSource(jdbcUrl, user, secret), context);
+    }
+
+    DataSource createApplicationProjectionDeadlineDataSource(int connectTimeoutMillis, int socketTimeoutMillis) {
+        requireStore(Store.APPLICATION);
+        if (applicationProjectionUser == null || applicationProjectionSecret == null
+                || connectTimeoutMillis < 1 || socketTimeoutMillis < 1) {
+            throw new SecurityException("期限付きapplication projection接続が初期化されていません");
+        }
+        // Connector/Jのconnection/socket設定値は選定fixtureの構成証拠であり、一般的なJDBC hard boundではない。
+        String separator = jdbcUrl.contains("?") ? "&" : "?";
+        String timedUrl = jdbcUrl + separator + "connectTimeout=" + connectTimeoutMillis
+                + "&socketTimeout=" + socketTimeoutMillis;
+        return new ProfileGuardedDataSource(
+                new DriverManagerDataSource(timedUrl, applicationProjectionUser, applicationProjectionSecret), context);
     }
 
     DataSource createJournalWriterDataSource() {
