@@ -51,6 +51,37 @@ class TrustedRateCardVerifierTest {
     }
 
     @Test
+    void 有効usageのACTUALは予算や事前上限を超えても保持し上限なしでも計算する() {
+        SignedRateCard card = validWindowCard();
+        String proof = "synthetic-rate-card:" + TrustedRateCardVerifier.canonicalCardDigest(card);
+        Fixture overEstimate = fixture("attempt-over-estimate", "idem-over-estimate",
+                usage(1_000, 500, 1_500, 100, 200), new TokenUsageBounds(10_000L, 2_000L),
+                preflight("config-hash", 8, 100, proof), responseReceived(), card);
+        VerifiedCostEvaluation estimated = evaluate(card, overEstimate.execution, overEstimate.current,
+                overEstimate.bounds, overEstimate.preflight, true);
+        assertEquals(9, estimated.evidence().actualCostYen());
+        assertEquals("SYNTHETIC_RATE_CARD_ACTUAL_EXCEEDS_ESTIMATE", estimated.evidence().reasonCode());
+
+        Fixture overBudget = fixture("attempt-over-budget", "idem-over-budget",
+                usage(1_000, 500, 1_500, 100, 200), new TokenUsageBounds(10_000L, 2_000L),
+                preflight("config-hash", 5, 5, proof), responseReceived(), card);
+        VerifiedCostEvaluation budget = evaluate(card, overBudget.execution, overBudget.current,
+                overBudget.bounds, overBudget.preflight, true);
+        assertEquals(9, budget.evidence().actualCostYen());
+        assertEquals("SYNTHETIC_RATE_CARD_ACTUAL_OVER_BUDGET", budget.evidence().reasonCode());
+
+        PreflightCostEvidence denied = PreflightCostEvidence.denied("synthetic-test-policy-v1",
+                "config-hash", proof, null, 0, "PREFLIGHT_DENIED");
+        Fixture noUpper = fixture("attempt-no-upper", "idem-no-upper",
+                usage(1_000, 500, 1_500, 100, 200), null, denied,
+                responseReceived(), card);
+        VerifiedCostEvaluation actual = evaluate(card, noUpper.execution, noUpper.current,
+                noUpper.bounds, noUpper.preflight, true);
+        assertEquals(9, actual.evidence().actualCostYen());
+        assertEquals("SYNTHETIC_RATE_CARD_ACTUAL_NO_VALID_UPPER_BOUND", actual.evidence().reasonCode());
+    }
+
+    @Test
     void 母集合maxRateによる上限は部分集合がゼロでも過少評価しない() {
         SignedRateCard card = signedCard("prompt-3-cached-1", validWindow(),
                 rates("3", "1", "0", "0"));
@@ -271,20 +302,24 @@ class TrustedRateCardVerifierTest {
     }
 
     @Test
-    void dispatch前拒否やusage上限欠落とusage超過では金額を作らない() {
+    void 上限情報が欠けても検証済みusageのactualを保持する() {
         Fixture fixture = fixture("attempt-no-bound", "idem-no-bound", usage(1_000, 500, 1_500, 100, 200),
                 new TokenUsageBounds(10_000L, 2_000L), 70, responseReceived(), validWindowCard());
-        assertReason("PREFLIGHT_OR_USAGE_BOUND_INVALID", () -> evaluate(fixture.card,
-                fixture.execution, fixture.current, new TokenUsageBounds(null, 2_000L),
-                fixture.preflight, true));
+        VerifiedCostEvaluation missingBound = evaluate(fixture.card, fixture.execution,
+                fixture.current, new TokenUsageBounds(null, 2_000L), fixture.preflight, true);
+        assertEquals(9, missingBound.evidence().actualCostYen());
+        assertEquals("SYNTHETIC_RATE_CARD_ACTUAL_NO_VALID_UPPER_BOUND", missingBound.evidence().reasonCode());
 
         Fixture exceeded = fixture("attempt-exceeded", "idem-exceeded", usage(10_001, 0, 10_001, 0, 0),
                 new TokenUsageBounds(10_000L, 2_000L), 70, responseReceived(), validWindowCard());
-        assertReason("USAGE_EXCEEDS_PREFLIGHT_BOUND", () -> evaluate(exceeded.card,
-                exceeded.execution, exceeded.current, exceeded.bounds, exceeded.preflight, true));
+        VerifiedCostEvaluation actual = evaluate(exceeded.card, exceeded.execution,
+                exceeded.current, exceeded.bounds, exceeded.preflight, true);
+        assertEquals(30, actual.evidence().actualCostYen());
+        assertEquals("SYNTHETIC_RATE_CARD_ACTUAL", actual.evidence().reasonCode());
     }
 
     private void assertInvalidUsage(Fixture fixture, CopilotProviderUsage usage) {
+        trust(fixture.card);
         RateCardExecutionInput input = execution(fixture.execution, fixture.execution.idempotencyKey(), usage,
                 fixture.execution.preflightSnapshotHash());
         assertReason("USAGE_CONTRACT_INVALID", () -> evaluate(fixture.card, input,
@@ -314,6 +349,12 @@ class TrustedRateCardVerifierTest {
         int budget = Math.max(100, upperBound);
         PreflightCostEvidence preflight = preflight("config-hash", upperBound, budget,
                 "synthetic-rate-card:" + TrustedRateCardVerifier.canonicalCardDigest(card));
+        return fixture(attemptId, idempotencyKey, usage, bounds, preflight, dispatch, card);
+    }
+
+    private Fixture fixture(String attemptId, String idempotencyKey, CopilotProviderUsage usage,
+                            TokenUsageBounds bounds, PreflightCostEvidence preflight, DispatchOutcome dispatch,
+                            SignedRateCard card) {
         trust(card);
         String digest = TrustedRateCardVerifier.preflightSnapshotDigest(preflight);
         RateCardExecutionInput input = new RateCardExecutionInput(attemptId, idempotencyKey, "tenant-a",

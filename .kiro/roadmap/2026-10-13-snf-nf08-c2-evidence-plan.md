@@ -53,6 +53,7 @@ CAS where条件のid+tenant+trace+usecase+PENDING+version 0を保ち、更新件
 
 1. **C2-A1 usage carrier/parser境界** — usageをinner validation失敗と独立して運ぶ。parser・summary serviceのunit/loopback証拠を先に揃える。本番policy deny-allを同時に再確認。
 2. **C2-A2 rate-card evaluator** — versioned trusted-card契約、token dimension/overflow/roundingを実装。ただしproduction registryはdeny-all固定、synthetic cardはtest限定。Astraが料金意味と上限根拠を承認するまでproduction値を作らない。
+   本実装の署名済みsynthetic usage receiptはtest source内で署名・検証する算術境界試験専用であり、runtime usage署名サービス、provider応答の真正性証明、実usageのACTUAL昇格経路ではない。productionの実usage costは引き続きUNKNOWNとし、provider usageの取得・認証・attemptへの接続には別途承認済みplanが必要である。
 3. **C2-B DB persistence matrix** — Testcontainersの `@Tag("mysql")` 実DB試験で全表の状態遷移、CAS、tenant isolation、duplicate/stale、rollbackを証明。スキーマ変更なし。
 
 各バッチを実装前Astra PLAN review、実装後に対象専用gateと独立implementation reviewへ分ける。C1（18クラス/91件PASS）のcontrolは変更しない。今回のPLAN作成ではMaven、Docker、Chrome等のheavy testは実行しない。

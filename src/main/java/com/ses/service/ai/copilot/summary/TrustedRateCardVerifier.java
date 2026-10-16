@@ -61,14 +61,18 @@ final class TrustedRateCardVerifier {
         VerifiedRateCard verifiedCard = validateCardSignature(card);
         CopilotProviderUsage validatedUsage = isValidUsage(execution.usage()) ? execution.usage() : null;
         if (actualCost && validatedUsage == null) throw rejected("USAGE_CONTRACT_INVALID");
+        if (validatedUsage != null && execution.dispatchOutcome().state() == DispatchOutcome.State.NOT_STARTED) {
+            throw rejected("DISPATCH_USAGE_CONFLICT");
+        }
         VerifiedUsageBinding verifiedUsage = validateExecutionBinding(execution, currentAttempt, preflight, bounds,
                 verifiedCard.digest, validatedUsage);
         validateCardDomain(card, execution);
-        validatePreflight(preflight, execution, bounds, card);
-        boolean shouldCalculateActual = validatedUsage != null
-                && execution.dispatchOutcome().state() == DispatchOutcome.State.RESPONSE_RECEIVED;
+        validatePreflightIdentity(preflight, execution);
+        boolean shouldCalculateActual = validatedUsage != null;
         if (actualCost != shouldCalculateActual) throw rejected("COST_MODE_MISMATCH");
-        if (validatedUsage != null && (validatedUsage.promptTokenCount() > bounds.promptMax()
+        if (!actualCost) validatePreflight(preflight, execution, bounds, card);
+        if (!actualCost && validatedUsage != null && (bounds == null
+                || validatedUsage.promptTokenCount() > bounds.promptMax()
                 || validatedUsage.candidateTokenCount() > bounds.candidateMax())) {
             throw rejected("USAGE_EXCEEDS_PREFLIGHT_BOUND");
         }
@@ -81,14 +85,18 @@ final class TrustedRateCardVerifier {
                                                      boolean actualCost) {
         SignedRateCard card = verifiedCard.card;
         RateCardExecutionInput execution = verifiedUsage.input;
-        int upperBoundYen = calculateUpperBound(verifiedCard, verifiedUsage);
-        if (preflight.upperBoundYen() != upperBoundYen || upperBoundYen > preflight.budgetYen()) {
-            throw rejected("PREFLIGHT_BOUND_MISMATCH");
-        }
-        int calculatedYen = actualCost ? calculateActual(verifiedCard, verifiedUsage) : upperBoundYen;
-        if (actualCost && (execution.dispatchOutcome().state() != DispatchOutcome.State.RESPONSE_RECEIVED
-                || calculatedYen > upperBoundYen || calculatedYen > preflight.budgetYen())) {
-            throw rejected("ACTUAL_NOT_PROVEN_WITHIN_BOUND");
+        int calculatedYen;
+        int upperBoundYen = 0;
+        String reasonCode;
+        if (actualCost) {
+            calculatedYen = calculateActual(verifiedCard, verifiedUsage);
+            reasonCode = actualPreflightReason(verifiedCard, verifiedUsage, preflight, calculatedYen);
+        } else {
+            upperBoundYen = calculateUpperBound(verifiedCard, verifiedUsage);
+            if (!Objects.equals(preflight.upperBoundYen(), upperBoundYen)
+                    || upperBoundYen > preflight.budgetYen()) throw rejected("PREFLIGHT_BOUND_MISMATCH");
+            calculatedYen = upperBoundYen;
+            reasonCode = "SYNTHETIC_RATE_CARD_UPPER_BOUND";
         }
         if (!actualCost && execution.dispatchOutcome().state() == DispatchOutcome.State.NOT_STARTED) {
             throw rejected("UPPER_BOUND_REQUIRES_POSSIBLE_DISPATCH");
@@ -105,9 +113,9 @@ final class TrustedRateCardVerifier {
 
         SummaryCostEvidence evidence = actualCost
                 ? new SummaryCostEvidence(CopilotCostState.ACTUAL, calculatedYen, null,
-                execution.dispatchOutcome(), preflight, verifiedUsage.usage, "SYNTHETIC_RATE_CARD_ACTUAL")
+                execution.dispatchOutcome(), preflight, verifiedUsage.usage, reasonCode)
                 : new SummaryCostEvidence(CopilotCostState.UPPER_BOUND, null, upperBoundYen,
-                execution.dispatchOutcome(), preflight, verifiedUsage.usage, "SYNTHETIC_RATE_CARD_UPPER_BOUND");
+                execution.dispatchOutcome(), preflight, verifiedUsage.usage, reasonCode);
         VerifiedCostEvaluation result = new VerifiedCostEvaluation(evidence, card.cardId(), card.version(),
                 cardDigest, bindingDigest);
         completedAttempts.put(execution.attemptId(),
@@ -240,7 +248,7 @@ final class TrustedRateCardVerifier {
                 || !validText(input.region(), 64) || !validText(input.tier(), 64)
                 || !validText(input.configHash(), 128) || !validText(input.preflightSnapshotHash(), 64)
                 || input.evaluatedAt() == null
-                || input.dispatchOutcome() == null || input.statusVersion() < 0 || bounds == null
+                || input.dispatchOutcome() == null || input.statusVersion() < 0
                 || !validReason(input.dispatchOutcome().reasonCode())
                 || !Objects.equals(input.attemptId(), current.attemptId())
                 || !Objects.equals(input.tenantId(), current.tenantId())
@@ -282,6 +290,44 @@ final class TrustedRateCardVerifier {
                 || !REQUIRED_CURRENCY.equals(card.currency())) {
             throw rejected("PREFLIGHT_OR_USAGE_BOUND_INVALID");
         }
+    }
+
+    private void validatePreflightIdentity(PreflightCostEvidence preflight, RateCardExecutionInput input) {
+        if (preflight == null || !Objects.equals(preflight.configIdentity(), input.configHash())
+                || !Objects.equals(input.preflightSnapshotHash(), preflightDigest(preflight))) {
+            throw rejected("PREFLIGHT_SNAPSHOT_MISMATCH");
+        }
+    }
+
+    private String actualPreflightReason(VerifiedRateCard card, VerifiedUsageBinding usage,
+                                         PreflightCostEvidence preflight, int actualYen) {
+        if (preflight == null || !preflight.dispatchAllowed()
+                || preflight.costState() != CopilotCostState.UPPER_BOUND
+                || preflight.dispatchOutcome().state() != DispatchOutcome.State.NOT_STARTED
+                || preflight.upperBoundYen() == null || preflight.budgetYen() == null
+                || usage.bounds == null || !validBounds(usage.bounds)) {
+            return "SYNTHETIC_RATE_CARD_ACTUAL_NO_VALID_UPPER_BOUND";
+        }
+        if (actualYen > preflight.budgetYen()) return "SYNTHETIC_RATE_CARD_ACTUAL_OVER_BUDGET";
+        if (actualYen > preflight.upperBoundYen()) return "SYNTHETIC_RATE_CARD_ACTUAL_EXCEEDS_ESTIMATE";
+        try {
+            int calculatedUpper = calculateUpperBound(card, usage);
+            if (calculatedUpper != preflight.upperBoundYen()) {
+                return "SYNTHETIC_RATE_CARD_ACTUAL_PREFLIGHT_MISMATCH";
+            }
+            return "SYNTHETIC_RATE_CARD_ACTUAL";
+        } catch (RateCardVerificationException ex) {
+            return "SYNTHETIC_RATE_CARD_ACTUAL_NO_VALID_UPPER_BOUND";
+        }
+    }
+
+    private boolean validBounds(TokenUsageBounds bounds) {
+        return bounds.promptMax() != null && bounds.candidateMax() != null
+                && bounds.promptMax() >= 0 && bounds.candidateMax() >= 0
+                && (bounds.cachedMax() == null || (bounds.cachedMax() >= 0
+                && bounds.cachedMax() <= bounds.promptMax()))
+                && (bounds.thinkingMax() == null || (bounds.thinkingMax() >= 0
+                && bounds.thinkingMax() <= bounds.candidateMax()));
     }
 
     private boolean isValidUsage(CopilotProviderUsage usage) {
@@ -339,8 +385,8 @@ final class TrustedRateCardVerifier {
                     input.tenantId(), input.traceId(), input.useCase(), input.attemptStatus(), input.dispatchNonce(),
                     input.provider(), input.modelRevision(), input.region(), input.tier(),
                     input.configHash(), input.preflightSnapshotHash(),
-                    current.statusVersion() + "", bounds.promptMax() + "", bounds.candidateMax() + "",
-                    String.valueOf(bounds.cachedMax()), String.valueOf(bounds.thinkingMax()),
+                    current.statusVersion() + "", boundValue(bounds, "prompt"), boundValue(bounds, "candidate"),
+                    boundValue(bounds, "cached"), boundValue(bounds, "thinking"),
                     input.evaluatedAt().toString(), preflightDigest(preflight),
                     input.dispatchOutcome() == null ? "<missing>" : input.dispatchOutcome().state().name(),
                     input.dispatchOutcome() == null ? "<missing>" : input.dispatchOutcome().reasonCode(),
@@ -352,6 +398,17 @@ final class TrustedRateCardVerifier {
         } catch (Exception ex) {
             throw rejected("BINDING_CANONICALIZATION_FAILED");
         }
+    }
+
+    private static String boundValue(TokenUsageBounds bounds, String dimension) {
+        if (bounds == null) return "<missing>";
+        return switch (dimension) {
+            case "prompt" -> String.valueOf(bounds.promptMax());
+            case "candidate" -> String.valueOf(bounds.candidateMax());
+            case "cached" -> String.valueOf(bounds.cachedMax());
+            case "thinking" -> String.valueOf(bounds.thinkingMax());
+            default -> throw new IllegalArgumentException("unknown bound dimension");
+        };
     }
 
     private static String preflightDigest(PreflightCostEvidence evidence) {
