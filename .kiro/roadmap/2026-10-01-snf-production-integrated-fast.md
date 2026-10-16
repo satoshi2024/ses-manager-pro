@@ -1,5 +1,20 @@
 # 統合fast gateの実行記録
 
+## 最新: 第6回 FAIL（2026-10-16）
+
+- 固定Head `e09595c883afe62518281ac9a85f2343cbf716cb`、開始終了clean・SHA一致。
+- selectorなしの `mvn -B -Dsurefire.runOrder.random.seed=48992185070100 test`。
+- UTC05:38:46.2440343〜05:53:52.0586530、exit1、692 class **4210/2/1/0**。
+- AstraはFAIL証拠として受理。Maven集計は4209件、XMLは4210件であり、offboardingの反復Run 2: PASSを
+  伴う集計口径差を保持する。上記はXML口径、両口径ともfailure/error/skippedは2/1/0。
+- `verification-evidence/20261016-control-fast-06/` に全証拠を保存。1384 report hash一致。
+  log SHA-256 `0C2B7A2B2FAC7178BA5D025434749A929475A030867A49F4E51ADE8E31D981E8`。
+- IntegrationHubMPenetrationTest: readiness前提による1 failure/1 error。
+  ExternalAccountFailClosedOffboardingIntegrationTest: poll後UNKNOWN期待に対しPENDING_CONFIRMATIONの1 failure。
+- H2再構築修復は本runに包含され、前回の連鎖errorは非再現。残留fixture修復source `f1d57af2` は
+  Astra限定CODE PASS、control `f1ddc635` へ統合済みだが、本runの結果は修復後の証拠ではない。
+  再検証が終わるまで最新全fastをPASSへ変更しない。
+
 ## 第1回: FAIL
 
 - 固定Head: `9ce0c4dfd4eaceebe5cd29f5e91565d7ffad2efa`、開始時clean。

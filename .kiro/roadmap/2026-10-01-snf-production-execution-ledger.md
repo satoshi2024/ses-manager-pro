@@ -1,5 +1,42 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## 最新到達点（2026-10-16 15:00 JST）
+
+- **NO-GO**。control固定 `e09595c883afe62518281ac9a85f2343cbf716cb` の全fast第6回は
+  **692 class、4210/2/1/0、FAIL**。UTC05:38:46.2440343〜05:53:52.0586530、起止SHA一致・clean、exit1。
+  `verification-evidence/20261016-control-fast-06/`、1384 report hash一致、log SHA-256
+  `0C2B7A2B2FAC7178BA5D025434749A929475A030867A49F4E51ADE8E31D981E8`。
+  H2再初期化の連鎖errorは本runでは再現せず、IntegrationHubのreadiness前提2件と撤権poll状態1件が残った。
+  AstraはFAIL証拠として受理した。Maven集計は4209件、XML集計は4210件であり、offboardingの反復実行
+  Run 2: PASSを伴う集計口径差を保持する。両方とも2 failure/1 error/0 skippedで、PASSではない。
+- H2修復source `fd628f6e` は定向8 class **27/0/0/0**、Astra限定CODE/証拠PASS。
+  UTC05:31:43.3195066〜05:34:40.6311273、log
+  `F1F000175900B9D0D2D7E2FD01FBEE3379336635779BF92FB22316145C68B400`。
+  4 commitをcontrol `e09595c8` まで統合した。途中のcompile FAILも保存した。
+  fast第6回の残留fixture修復 `f1d57af2` はAstra限定CODE PASS、control `f1ddc635` へ統合。
+  UUID H2・実readiness前提・自fixtureのpoll到期を明示する。業務guardを緩和せず、修復後の実測は未完。
+- control `736d25ac` のperformance **1/0/0/0、p95 64ms** はAstraが限定証拠PASSとした。
+  全fast・容量・production性能の代替ではない。
+- NF06 candidate/lease認可修復 `37c4c3d8` は限定CODE PASS、別検証treeで実MySQLを実行中。
+  F1b計画 `16e9513d` は限定PLAN PASS、V184既存schemaでwave1を実装したが、`8cd94dc8` はCODE FAIL。
+  takeover返却expiryとDB実値の不一致、期限切れ同operation retry、validator fingerprint確認、abort冪等testを修復する。
+  append/seal/publish・apply/UIおよび全機能承認は未完。V185は未割当。
+  後続 `b766e3d1` は四指摘を修復しAstra限定CODE PASS。H2/MySQL実行証拠は未取得。
+- NF07 D2b1固定 `64db441d` は三DB MySQL **32/0/0/0**、Astra限定CODE/証拠PASS、未統合。
+  UTC05:34:53.8217602〜05:38:31.9762492、log
+  `2BD29423A034D14DEDF302FEAB70782E1CA16183391082A4A55F826E556873AE`。
+  証拠をcontrolへhash一致で保存した。5秒work/2秒cleanupは選択fixtureのみで、一般network停止や全回復時間保証ではない。
+  JaCoCo class mismatch警告がありcoverage証明に使用しない。D2b2 `ac894ac6` のwitness変化・owner交代3件は
+  限定CODE PASS、35件の実MySQLを待つ。実retention/DSAR/処分・policy・外部承認は未完。
+- NF08 C2-A1 `5585a5a1` は限定CODE PASS、固定検証tree `15907043` の18 class実測を待つ。
+  A2の署名rate-card/実行binding/保守上限計画 `15907043` はAstra限定PLAN PASS、synthetic実装中。
+  C2-B実DB費用matrixは未実装。実価格、DPA、外送、credential、feature flag承認を意味しない。
+  A2実装 `e9bb6be9` は軽量javacのみで独立CODE Review中。実行時費用証拠や実料金承認ではない。
+- 現在の検証再利用: NF06=`C:\work\ses-nf05-remediation` / `codex/snf-prod-nf06-verify`、
+  NF08=`C:\work\ses-review-snf-r3-c` / `codex/snf-prod-nf08-c2-verify`、
+  fast fixture=`C:\work\ses-nf02-remediation` / `codex/snf-prod-fast06-remediation`。
+  旧branch・target証拠を保持し、主checkout利用者変更を変更していない。push/PR/deployは行っていない。
+
 ## 再開時点（2026-10-16）
 
 - **NO-GO / 修復継続**。再fetchしたorigin/mainは `1443fb68943849a3260d7ebe005259f3eb609d60`。
