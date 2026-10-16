@@ -171,15 +171,23 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
                     || !isJsonContentType(response.contentType())) {
                 throw BusinessException.of(502, "COPILOT_PROVIDER_RESPONSE_REJECTED");
             }
-            CopilotGeminiResponseParser.ParsedResponse parsed = copilotResponseParser.parse(
-                    response.body(), invocation.deadlineNanos(), invocation.expectedQueryId());
-            return new CopilotProviderResponse(parsed.summaryJson(), new CopilotProviderUsage(
-                    parsed.usage().promptTokenCount(), parsed.usage().candidateTokenCount(),
-                    parsed.usage().totalTokenCount(), parsed.usage().thoughtsTokenCount(),
-                    parsed.usage().cachedContentTokenCount()));
+            try {
+                CopilotGeminiResponseParser.ValidatedEnvelope envelope = copilotResponseParser.parseEnvelope(
+                        response.body(), invocation.deadlineNanos());
+                copilotResponseParser.validateInnerSummary(envelope, invocation.deadlineNanos(),
+                        invocation.expectedQueryId());
+                return new CopilotProviderResponse(envelope.summaryJson(), toProviderUsage(envelope.usage()));
+            } catch (CopilotGeminiResponseParser.ValidatedEnvelopeFailure ex) {
+                throw new com.ses.service.ai.CopilotExecutionFailure(ex.getMessage(),
+                        invocation.preflightCostEvidence(), new com.ses.service.ai.copilot.summary.DispatchOutcome(
+                        com.ses.service.ai.copilot.summary.DispatchOutcome.State.RESPONSE_RECEIVED,
+                        "PROVIDER_RESPONSE_RECEIVED"), toProviderUsage(ex.usage()));
+            }
         } catch (CopilotTransportFailure ex) {
             throw new com.ses.service.ai.CopilotExecutionFailure(ex.reasonCode(),
                     invocation.preflightCostEvidence(), ex.outcome());
+        } catch (com.ses.service.ai.CopilotExecutionFailure ex) {
+            throw ex;
         } catch (BusinessException ex) {
             if (responseReceived) {
                 throw new com.ses.service.ai.CopilotExecutionFailure(ex.getMessage(),
@@ -210,6 +218,12 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
                 && evidence.costState() == com.ses.service.ai.copilot.summary.CopilotCostState.UPPER_BOUND
                 && evidence.dispatchOutcome().state()
                 == com.ses.service.ai.copilot.summary.DispatchOutcome.State.NOT_STARTED;
+    }
+
+    private static CopilotProviderUsage toProviderUsage(CopilotGeminiResponseParser.UsageMetadata usage) {
+        return usage == null ? null : new CopilotProviderUsage(usage.promptTokenCount(),
+                usage.candidateTokenCount(), usage.totalTokenCount(), usage.thoughtsTokenCount(),
+                usage.cachedContentTokenCount());
     }
 
     private CopilotConfigSnapshot captureCopilotConfig(AiConfig config, boolean testFixture) {

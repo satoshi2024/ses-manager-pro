@@ -220,6 +220,15 @@ public class CopilotRunService {
                 putSafeIdentity(metadata, "costConfigIdentity", costEvidence.preflight().configIdentity());
                 putSafeIdentity(metadata, "costProofIdentity", costEvidence.preflight().proofIdentity());
             }
+            if (costEvidence.usage() != null) {
+                Map<String, Object> usage = new LinkedHashMap<>();
+                usage.put("promptTokenCount", costEvidence.usage().promptTokenCount());
+                usage.put("candidateTokenCount", costEvidence.usage().candidateTokenCount());
+                usage.put("totalTokenCount", costEvidence.usage().totalTokenCount());
+                usage.put("thoughtsTokenCount", costEvidence.usage().thoughtsTokenCount());
+                usage.put("cachedContentTokenCount", costEvidence.usage().cachedContentTokenCount());
+                metadata.put("providerUsage", usage);
+            }
         }
         if (costJpy != null) {
             metadata.put("costJpy", costJpy);

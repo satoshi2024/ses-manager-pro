@@ -97,6 +97,9 @@ class CopilotSummaryServiceTest {
 
     @Test
     void 未知claimKeyは拒否してmetricsは呼び出し元で保持される() {
+        CopilotProviderUsage usage = new CopilotProviderUsage(8, 3, 11, 0, 0);
+        DispatchOutcome dispatch = new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED,
+                "PROVIDER_RESPONSE_RECEIVED");
         when(aiExecutionGateway.execute(any())).thenReturn(new AiGatewayResult(
                 """
                         {
@@ -104,13 +107,38 @@ class CopilotSummaryServiceTest {
                           "claimKeys": ["kpi.utilization"]
                         }
                         """,
-                "trace-1", null, null));
+                "trace-1", null, null, usage, null, dispatch));
 
         SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
                 sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
 
         assertFalse(response.isAvailable());
         assertEquals(SummaryResponse.STATUS_REJECTED, response.providerStatus());
+        assertEquals(usage, response.costEvidence().usage());
+        assertEquals(dispatch, response.costEvidence().dispatchOutcome());
+    }
+
+    @Test
+    void 数値claim拒否でも受領usageとdispatchを保持する() {
+        CopilotProviderUsage usage = new CopilotProviderUsage(9, 4, 13, 0, 0);
+        DispatchOutcome dispatch = new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED,
+                "PROVIDER_RESPONSE_RECEIVED");
+        when(aiExecutionGateway.execute(any())).thenReturn(new AiGatewayResult(
+                """
+                        {
+                          "summaryText": "売上は12円です。",
+                          "claimKeys": ["forecast.utilization.2026-09"]
+                        }
+                        """,
+                "trace-1", null, null, usage, null, dispatch));
+
+        SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
+
+        assertFalse(response.isAvailable());
+        assertEquals(SummaryResponse.STATUS_REJECTED, response.providerStatus());
+        assertEquals(usage, response.costEvidence().usage());
+        assertEquals(dispatch, response.costEvidence().dispatchOutcome());
     }
 
     @Test
@@ -141,6 +169,29 @@ class CopilotSummaryServiceTest {
         assertEquals(null, response.costEvidence().upperBoundYen());
         assertEquals(usage, response.costEvidence().usage());
         assertEquals(DispatchOutcome.State.RESPONSE_RECEIVED, response.costEvidence().dispatchOutcome().state());
+    }
+
+    @Test
+    void parserのinner失敗でもtypedFailureのusageと実dispatchを保持する() {
+        PreflightCostEvidence preflight = new PreflightCostEvidence(
+                "synthetic-loopback-test-v1", "config-hash", "synthetic-loopback-proof-v1", 0, 0, true,
+                CopilotCostState.UPPER_BOUND, DispatchOutcome.notStarted("PREFLIGHT_ALLOWED"), "PREFLIGHT_ALLOWED");
+        CopilotProviderUsage usage = new CopilotProviderUsage(12, 4, 16, null, null);
+        DispatchOutcome dispatch = new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED,
+                "PROVIDER_RESPONSE_RECEIVED");
+        when(aiExecutionGateway.execute(any())).thenThrow(new CopilotExecutionFailure(
+                "COPILOT_RESPONSE_INVALID", preflight, dispatch, usage));
+
+        SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
+
+        assertFalse(response.isAvailable());
+        assertEquals("PROVIDER_INVALID_JSON", response.providerStatus());
+        assertEquals(CopilotCostState.UNKNOWN, response.costEvidence().costState());
+        assertEquals(null, response.costEvidence().actualCostYen());
+        assertEquals(null, response.costEvidence().upperBoundYen());
+        assertEquals(usage, response.costEvidence().usage());
+        assertEquals(dispatch, response.costEvidence().dispatchOutcome());
     }
 
     @Test

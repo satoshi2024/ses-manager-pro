@@ -29,31 +29,48 @@ final class CopilotGeminiResponseParser {
     }
 
     ParsedResponse parse(byte[] response, long deadlineNanos, String expectedQueryId) {
+        ValidatedEnvelope envelope = parseEnvelope(response, deadlineNanos);
+        validateInnerSummary(envelope, deadlineNanos, expectedQueryId);
+        return new ParsedResponse(envelope.summaryJson(), envelope.usage());
+    }
+
+    ValidatedEnvelope parseEnvelope(byte[] response, long deadlineNanos) {
         JsonNode root = parser.parse(response, deadlineNanos);
         requireObjectFields(root, ROOT_FIELDS);
         JsonNode usage = required(root, "usageMetadata");
         UsageMetadata usageMetadata = validateUsage(usage);
-        JsonNode candidates = required(root, "candidates");
-        if (!candidates.isArray() || candidates.size() != 1) fail();
-        JsonNode candidate = candidates.get(0);
-        requireObjectFields(candidate, CANDIDATE_FIELDS);
-        if (candidate.has("index") && (!candidate.get("index").isIntegralNumber()
-                || !candidate.get("index").canConvertToInt() || candidate.get("index").intValue() != 0)) fail();
-        if (candidate.has("safetyRatings")) validateSafetyRatings(candidate.get("safetyRatings"));
-        if (!"STOP".equals(text(required(candidate, "finishReason")))) fail();
-        JsonNode content = required(candidate, "content");
-        requireObjectFields(content, CONTENT_FIELDS);
-        if (!"model".equals(text(required(content, "role")))) fail();
-        JsonNode parts = required(content, "parts");
-        if (!parts.isArray() || parts.size() != 1) fail();
-        JsonNode part = parts.get(0);
-        requireObjectFields(part, PART_FIELDS);
-        if (part.has("thought") && (!part.get("thought").isBoolean() || part.get("thought").booleanValue())) fail();
-        String summary = text(required(part, "text"));
-        assertDeadline(deadlineNanos);
-        validateSummary(summary.getBytes(StandardCharsets.UTF_8), deadlineNanos, expectedQueryId);
-        assertDeadline(deadlineNanos);
-        return new ParsedResponse(summary, usageMetadata);
+        try {
+            JsonNode candidates = required(root, "candidates");
+            if (!candidates.isArray() || candidates.size() != 1) fail();
+            JsonNode candidate = candidates.get(0);
+            requireObjectFields(candidate, CANDIDATE_FIELDS);
+            if (candidate.has("index") && (!candidate.get("index").isIntegralNumber()
+                    || !candidate.get("index").canConvertToInt() || candidate.get("index").intValue() != 0)) fail();
+            if (candidate.has("safetyRatings")) validateSafetyRatings(candidate.get("safetyRatings"));
+            if (!"STOP".equals(text(required(candidate, "finishReason")))) fail();
+            JsonNode content = required(candidate, "content");
+            requireObjectFields(content, CONTENT_FIELDS);
+            if (!"model".equals(text(required(content, "role")))) fail();
+            JsonNode parts = required(content, "parts");
+            if (!parts.isArray() || parts.size() != 1) fail();
+            JsonNode part = parts.get(0);
+            requireObjectFields(part, PART_FIELDS);
+            if (part.has("thought") && (!part.get("thought").isBoolean() || part.get("thought").booleanValue())) fail();
+            String summary = text(required(part, "text"));
+            assertDeadline(deadlineNanos);
+            return new ValidatedEnvelope(summary, usageMetadata);
+        } catch (BusinessException ex) {
+            throw new ValidatedEnvelopeFailure(ex.getCode(), safeReasonCode(ex.getMessage()), usageMetadata);
+        }
+    }
+
+    void validateInnerSummary(ValidatedEnvelope envelope, long deadlineNanos, String expectedQueryId) {
+        try {
+            validateSummary(envelope.summaryJson().getBytes(StandardCharsets.UTF_8), deadlineNanos, expectedQueryId);
+            assertDeadline(deadlineNanos);
+        } catch (BusinessException ex) {
+            throw new ValidatedEnvelopeFailure(ex.getCode(), safeReasonCode(ex.getMessage()), envelope.usage());
+        }
     }
 
     String extractSummaryJson(byte[] response, long deadlineNanos, String expectedQueryId) {
@@ -137,6 +154,23 @@ final class CopilotGeminiResponseParser {
         if (System.nanoTime() >= deadlineNanos) {
             throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
         }
+    }
+
+    private static String safeReasonCode(String message) {
+        return message != null && message.matches("[A-Z0-9_]{1,64}") ? message : "COPILOT_RESPONSE_INVALID";
+    }
+
+    record ValidatedEnvelope(String summaryJson, UsageMetadata usage) { }
+
+    static final class ValidatedEnvelopeFailure extends BusinessException {
+        private final UsageMetadata usage;
+
+        ValidatedEnvelopeFailure(int code, String reasonCode, UsageMetadata usage) {
+            super(code, reasonCode);
+            this.usage = usage;
+        }
+
+        UsageMetadata usage() { return usage; }
     }
 
     record ParsedResponse(String summaryJson, UsageMetadata usage) { }

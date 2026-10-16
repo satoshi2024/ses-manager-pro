@@ -187,8 +187,11 @@ class CopilotRunServiceTest {
                         CopilotCostState.ACTUAL, 7, null,
                         new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED, "RESPONSE_RECEIVED"),
                         null, new CopilotProviderUsage(10, 2, 12, null, null), "USAGE_VALID")));
+        CopilotProviderUsage rejectedUsage = new CopilotProviderUsage(12, 4, 16, 0, 0);
         service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "unknown"), 3,
-                SummaryResponse.unavailable("FAILED", SummaryCostEvidence.unknown("USAGE_UNAVAILABLE")));
+                SummaryResponse.unavailable("FAILED", SummaryCostEvidence.fromPreflight(null,
+                        new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED, "PROVIDER_RESPONSE_RECEIVED"),
+                        rejectedUsage, "COPILOT_RESPONSE_INVALID")));
 
         ArgumentCaptor<Wrapper<AiRecommendationRun>> captor = ArgumentCaptor.forClass(Wrapper.class);
         verify(runMapper, times(3)).update(org.mockito.ArgumentMatchers.<AiRecommendationRun>isNull(),
@@ -204,6 +207,11 @@ class CopilotRunServiceTest {
         assertTrue(unknownJson.contains("\"costState\":\"UNKNOWN\""));
         assertFalse(unknownJson.contains("costJpy"));
         assertFalse(unknownJson.contains("costUpperBoundYen"));
+        assertTrue(unknownJson.contains("\"dispatchOutcome\":\"RESPONSE_RECEIVED\""));
+        assertTrue(unknownJson.contains("\"providerUsage\":{"));
+        assertTrue(unknownJson.contains("\"promptTokenCount\":12"));
+        assertTrue(unknownJson.contains("\"candidateTokenCount\":4"));
+        assertTrue(unknownJson.contains("\"totalTokenCount\":16"));
     }
 
     private CopilotRunService.CopilotAttemptRecord attemptWithStaleCosts(
