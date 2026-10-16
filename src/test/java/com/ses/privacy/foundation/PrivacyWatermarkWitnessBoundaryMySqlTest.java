@@ -34,6 +34,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.security.MessageDigest;
 import java.security.PublicKey;
 import java.util.HexFormat;
@@ -673,6 +674,171 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
     }
 
     @Test
+    void stableWitness読取中の実appendは混在snapshotを拒否して新headへ追いつく() throws Exception {
+        var partition = partition();
+        var first = append(partition, 0, PrivacyJournalPort.CommandType.LEASE_CLAIMED, "cmd-stable-race-r1");
+        var firstCheckpoint = appendCheckpoint(first, 1, 0, "0".repeat(64));
+        CountDownLatch firstHistoryCaptured = new CountDownLatch(1);
+        CountDownLatch appendCompleted = new CountDownLatch(1);
+        AtomicInteger historyReads = new AtomicInteger();
+        LatestWitnessReader racingWitness = new LatestWitnessReader() {
+            @Override public List<SignedWatermark> history(LatestWitnessPort.Partition requested) {
+                List<SignedWatermark> captured = recoveryWitnessReader.history(requested);
+                if (historyReads.incrementAndGet() == 1) {
+                    firstHistoryCaptured.countDown();
+                    awaitLatch(appendCompleted);
+                }
+                return captured;
+            }
+            @Override public LatestWitnessPort.Latest latest(LatestWitnessPort.Partition requested) {
+                return recoveryWitnessReader.latest(requested);
+            }
+        };
+        var service = new PrivacyRecoveryService(racingWitness, watermarkVerifier, recoveryJournalReader,
+                new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment()),
+                new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()), context.getEnvironment());
+        var pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<PrivacyRecoveryService.Result> recovery = pool.submit(() -> service.recover(witnessPartition(), Duration.ofSeconds(20)));
+            assertTrue(firstHistoryCaptured.await(10, TimeUnit.SECONDS), "historyAの実DB read完了後にbarrierへ到達する");
+            var second = appendAuthorized(partition, 1, "cmd-stable-race-r2", "action-stable-race-r2");
+            appendCheckpoint(second, 2, 1, firstCheckpoint.checkpointHash());
+            appendCompleted.countDown();
+
+            var result = recovery.get(25, TimeUnit.SECONDS);
+            assertEquals(PrivacyRecoveryService.Status.RECOVERED_SYNTHETIC, result.status());
+            assertEquals(2L, result.revision());
+            assertEquals(2, result.appliedCount(), "実MySQL journalの両eventだけを新headへ投影した");
+            assertEquals(6, historyReads.get(), "混在した初回pairを破棄し、安定pairとfinal pairを読む");
+            assertEquals(2L, projectionAdmin.queryForObject("SELECT last_applied_revision FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=?",
+                    Long.class, tenantId, subjectRef));
+        } finally {
+            appendCompleted.countDown();
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "stable witness worker termination timeout");
+        }
+    }
+
+    @Test
+    void witnessが各stableReadの途中で進み続けると規定回数で隔離終了する() throws Exception {
+        var partition = partition();
+        var checkpoint = appendCheckpoint(append(partition, 0, PrivacyJournalPort.CommandType.LEASE_CLAIMED,
+                "cmd-unstable-r1"), 1, 0, "0".repeat(64));
+        CountDownLatch[] barriers = {new CountDownLatch(1), new CountDownLatch(1), new CountDownLatch(1)};
+        CountDownLatch[] releases = {new CountDownLatch(1), new CountDownLatch(1), new CountDownLatch(1)};
+        AtomicInteger historyReads = new AtomicInteger();
+        LatestWitnessReader advancingWitness = new LatestWitnessReader() {
+            @Override public List<SignedWatermark> history(LatestWitnessPort.Partition requested) {
+                List<SignedWatermark> captured = recoveryWitnessReader.history(requested);
+                int read = historyReads.incrementAndGet();
+                if (read == 1 || read == 3 || read == 5) {
+                    int barrier = (read - 1) / 2;
+                    barriers[barrier].countDown();
+                    awaitLatch(releases[barrier]);
+                }
+                return captured;
+            }
+            @Override public LatestWitnessPort.Latest latest(LatestWitnessPort.Partition requested) {
+                return recoveryWitnessReader.latest(requested);
+            }
+        };
+        var service = new PrivacyRecoveryService(advancingWitness, watermarkVerifier, recoveryJournalReader,
+                new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment()),
+                new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()), context.getEnvironment());
+        var pool = Executors.newSingleThreadExecutor();
+        Future<PrivacyRecoveryService.Result> recovery = pool.submit(() -> service.recover(witnessPartition(), Duration.ofSeconds(25)));
+        try {
+            String priorCheckpointHash = checkpoint.checkpointHash();
+            for (int index = 0; index < barriers.length; index++) {
+                assertTrue(barriers[index].await(10, TimeUnit.SECONDS), "stable read attempt " + (index + 1) + " barrier");
+                long revision = index + 1L;
+                var ack = appendAuthorized(partition, revision, "cmd-unstable-r" + (revision + 1),
+                        "action-unstable-r" + (revision + 1));
+                var next = appendCheckpoint(ack, revision + 1, revision, priorCheckpointHash);
+                priorCheckpointHash = next.checkpointHash();
+                releases[index].countDown();
+            }
+            var result = recovery.get(30, TimeUnit.SECONDS);
+            assertEquals(PrivacyRecoveryService.Status.QUARANTINED, result.status());
+            assertEquals("WITNESS_UNSTABLE", result.reason());
+            assertEquals(6, historyReads.get(), "規定された3回のstable pairだけを読んで終了する");
+            assertEquals(0, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=?",
+                    Integer.class, tenantId, subjectRef), "unstable witness中はprojectionを書かない");
+            var fenceState = new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment()).snapshot(partition);
+            assertEquals("QUARANTINED", fenceState.state());
+            assertEquals(result.generation(), fenceState.generation());
+            assertNotNull(fenceState.ownerToken());
+        } finally {
+            for (CountDownLatch release : releases) release.countDown();
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "unstable witness worker termination timeout");
+        }
+    }
+
+    @Test
+    void noReplay後finalWitnessBarrierでowner交代すると旧leaseを拒否する() throws Exception {
+        var partition = partition();
+        var ack = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-no-replay-owner-r1");
+        appendCheckpoint(ack, 1, 0, "0".repeat(64));
+        assertEquals(PrivacyProjectionPort.Status.APPLIED, projectionService.projectAcknowledged(partition, ack).status());
+        CountDownLatch finalWitnessRead = new CountDownLatch(1);
+        CountDownLatch ownerRotated = new CountDownLatch(1);
+        AtomicInteger latestReads = new AtomicInteger();
+        LatestWitnessReader rotatingWitness = new LatestWitnessReader() {
+            @Override public List<SignedWatermark> history(LatestWitnessPort.Partition requested) {
+                return recoveryWitnessReader.history(requested);
+            }
+            @Override public LatestWitnessPort.Latest latest(LatestWitnessPort.Partition requested) {
+                var value = recoveryWitnessReader.latest(requested);
+                if (latestReads.incrementAndGet() == 4) {
+                    finalWitnessRead.countDown();
+                    awaitLatch(ownerRotated);
+                }
+                return value;
+            }
+        };
+        JdbcPrivacyProjectionAdapter delegate = new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment());
+        AtomicInteger replayCalls = new AtomicInteger();
+        PrivacyRecoveryProjectionPort countingProjection = new PrivacyRecoveryProjectionPort() {
+            @Override public PrivacyProjectionPort.ProjectionSnapshot snapshot(PrivacyJournalPort.JournalPartition requested,
+                    JdbcPrivacyPartitionFence.Lease lease) { return delegate.snapshot(requested, lease); }
+            @Override public PrivacyProjectionPort.ProjectionResult applyRecovery(JournalProjectionService.VerifiedJournalEvent event,
+                    JdbcPrivacyPartitionFence.Lease lease) {
+                replayCalls.incrementAndGet();
+                return delegate.applyRecovery(event, lease);
+            }
+        };
+        var fence = new JdbcPrivacyPartitionFence(appProjectionDataSource, context.getEnvironment());
+        var service = new PrivacyRecoveryService(rotatingWitness, watermarkVerifier, recoveryJournalReader,
+                countingProjection, fence, context.getEnvironment());
+        var pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<PrivacyRecoveryService.Result> recovery = pool.submit(() -> service.recover(witnessPartition(), Duration.ofSeconds(20)));
+            assertTrue(finalWitnessRead.await(10, TimeUnit.SECONDS), "no-replay recoveryのfinal stable witness読取直後で停止する");
+            var oldOwner = fence.snapshot(partition);
+            var newLease = fence.quarantine(partition, RecoveryDeadline.startForTest(Duration.ofSeconds(20)));
+            ownerRotated.countDown();
+
+            var result = recovery.get(25, TimeUnit.SECONDS);
+            assertEquals(PrivacyRecoveryService.Status.QUARANTINED, result.status());
+            assertEquals("OWNER_GENERATION_STALE", result.reason());
+            assertEquals(0, result.appliedCount());
+            assertEquals(0, replayCalls.get(), "journal head既投影済みのno-replay pathではwriteを実行しない");
+            assertEquals(1L, projectionAdmin.queryForObject("SELECT last_applied_revision FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=?",
+                    Long.class, tenantId, subjectRef));
+            var currentOwner = fence.snapshot(partition);
+            assertEquals(newLease.generation(), currentOwner.generation());
+            assertEquals(oldOwner.generation() + 1, currentOwner.generation());
+            assertNotEquals(oldOwner.ownerToken(), currentOwner.ownerToken());
+            assertEquals("QUARANTINED", currentOwner.state());
+        } finally {
+            ownerRotated.countDown();
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "no-replay owner rotation worker termination timeout");
+        }
+    }
+
+    @Test
     void recovery取得と競合するnormal投影は同一rowLock後に隔離を見て拒否する() throws Exception {
         var partition = partition();
         var first = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-fence-race-1");
@@ -887,6 +1053,14 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         var command = PrivacyJournalPort.JournalCommand.create(commandId, partition, revision, type,
                 null, null, null, type == PrivacyJournalPort.CommandType.LEASE_CLAIMED ? "worker-1" : null,
                 0, type == PrivacyJournalPort.CommandType.LEASE_CLAIMED ? Instant.parse("2026-10-02T00:01:00Z") : null);
+        return journalAdapter.append(command);
+    }
+
+    private PrivacyJournalPort.JournalAck appendAuthorized(PrivacyJournalPort.JournalPartition partition, long revision,
+            String commandId, String actionId) {
+        var command = PrivacyJournalPort.JournalCommand.create(commandId, partition, revision,
+                PrivacyJournalPort.CommandType.DISPATCH_AUTHORIZED, "case-" + actionId, actionId,
+                "a".repeat(64), "worker-1", 1, null);
         return journalAdapter.append(command);
     }
 

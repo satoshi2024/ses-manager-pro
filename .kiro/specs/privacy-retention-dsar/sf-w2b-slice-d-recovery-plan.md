@@ -115,9 +115,9 @@ D2b最小の新規試験は既存`@Tag("mysql")` 3-container harnessを使い、
 | connect/socket budget | selected fixture値は`connectTimeout=1s`、`socketTimeout=7s`、JDBC `setNetworkTimeout=7s`。socket/network 7秒はcleanup tolerance 2秒を超え得るため、設定値確認だけでhard boundを主張しない。TCP handshake/read stall、同期call終了、connection closeは未検証。 | 未実施。socket stall / hard boundは主張しない |
 | statement/transaction/innodb lock wait | selected lock fixtureはsession `innodb_lock_wait_timeout=30s`、socket/network 7秒、work budget 5秒、cleanup最大2秒を使う。lock graph blockerを保持したままstatement/transaction deadlineで有限に戻ること、rollback/connection回収、projection不変、隔離維持を確認する。timeout値のremaining以下を意味せず、root再試験前。lock wait timeoutをGLOBALに変更しない。 | source追加済み / root固定再試験待ち |
 | post-commit response-loss classification | 実DB projection transactionをcommitした後、test-only seamでtimeout例外を注入し、readback一致時の`COMMIT_CONFIRMED_QUARANTINED`とreadback接続失敗時の`COMMIT_OUTCOME_UNKNOWN`を確認する。これはdriverの実commit ACK-loss、network stall、cleanup時間上限を再現しない。 | source追加済み / root固定再試験待ち |
-| stable witness append race | 固定read順序の`history A → latest A → history B → latest B`の間にbarrierを置き、別attestor connectionから正当なevent/checkpointを実MySQLへappendする。混在した二組はbyte-equalにならず採用されず、budget内の再読で新しいhistory/latestが一致してからだけreplayする。attempt/reason/headをsafe assertionで記録する。 | stable read自体はD2a、途中append競合は未証明 |
-| unstable witness exhaustion | barrierで各安定read組の間に新しい合法appendを進め、規定回数またはdeadlineの先に達した方で有限終了する。`WITNESS_UNSTABLE`または専用deadline reasonでQUARANTINED、projection writeなし、永続fenceあり、旧owner拒否を確認する。無限producerやtest `sleep`での競合演出はしない。 | 未実施 |
-| final owner交代、no replay path | projectionを既にverified journal headと完全一致させ、replay loopが0回のcaseを作る。final stable rereadに同期したbarrierで別ownerがgenerationを交代してからfinal fenced snapshotを続ける。古いownerは`OWNER_GENERATION_STALE`となりRECOVEREDを返さず、projectionは不変、隔離が継続する。 | final owner交代後にreplayありのケースのみ存在。no-replay分岐は未証明 |
+| stable witness append race | 固定read順序の`history A → latest A → history B → latest B`のうち最初のhistory取得後にbarrierを置き、recovery workerを止め、test threadから別attestor connectionで合法なjournal event/checkpointを実MySQLへappendする。混在した初回pairを拒否し、再読したhistory/latestが新headで一致してからだけreplayする。実revision、apply数、読み取り回数をassertする。 | source追加済み / root固定再試験待ち |
+| unstable witness exhaustion | 各stable pairのhistory A実読取後にbarrierでrecovery workerを止め、test threadが別attestor connectionから次の合法event/checkpointを実MySQLへappendしてから解放する。3回の不一致後に`WITNESS_UNSTABLE`で有限終了し、projection writeなし、永続QUARANTINED、generation/ownerをassertする。無限producerやtest `sleep`での競合演出はしない。 | source追加済み / root固定再試験待ち |
+| final owner交代、no replay path | projectionをverified journal headへ実MySQLで事前投影し、replay loopが0回のcaseを作る。final stable witness readの最後のlatest取得後、final projection snapshotより前のbarrierでtest threadがfenceを実際に新generation/ownerへrotateする。古いownerは`OWNER_GENERATION_STALE`となりRECOVEREDを返さず、apply呼出し0回、projection不変、新ownerの隔離継続をassertする。 | source追加済み / root固定再試験待ち |
 
 上記のlock wait試験はMySQLでのJDBC/transaction/statement/row-lock timeout、quarantine保持、旧owner拒否、資源回収、次回健全性を一つの連続した証拠列として記録する。test全体のtimeoutでworkerをcancelしただけ、またはfutureがdoneになっただけでは合格にしない。connection graphが取得できない場合は試験失敗とし、時間経過のみから「DB lock waitを再現した」と扱わない。
 
@@ -132,7 +132,7 @@ D2b最小の新規試験は既存`@Tag("mysql")` 3-container harnessを使い、
 1. AstraのD2b計画・timeout tolerance PLAN PASSを得た。実測前に時間上限をPASSへ昇格させない。
 2. D2b1 deadline objectとfence/read/projection/fixture writeへの伝播候補、およびfixed reason mappingを追加した。D1 fence semantics、Cのstrict revision/maxAge、D2a recovery behaviorを緩めていない。初回acquire応答不明は`ABORTED_UNKNOWN`で返し、witness read/replayへ進まない。
 3. D2b1の実MySQL lock-wait/resource-lifecycle、same expired Lease、acquire uncertainty、post-commit分類caseはソース追加済み・root固定再試験待ちである。現行fixture値はconnect 1秒/socket・network 7秒/InnoDB lock wait 30秒。rootがMaven/Dockerを直列実行し、5秒work+最大2秒cleanup、timeout後のfence/owner、projection不変、wait graph、rollback/worker/connection回収を確認する。値だけからhard boundやdriver ACK-lossを主張しない。
-4. stable append race、unstable exhaustion、no-replay owner rotationの三caseは未実装である。加えてconnect/socket stallや一般的なJDBC hard wall-clock boundも証明していない。残件を追加してからD2b全体をreviewする。D2aの既存26成功数やD2b1の未実行test sourceだけでD2bまたはNF07 PASSを宣言しない。
+4. stable append race、unstable exhaustion、no-replay owner rotationの三caseは実MySQL試験sourceを追加した。root固定実行待ちであり、MySQL成功前にD2b2/D2bまたはNF07へPASSを昇格させない。connect/socket stallや一般的なJDBC hard wall-clock boundも未証明である。D2a/D2b1の過去成功数やtest sourceだけで残りgateを代替しない。
 
 ## 参照
 
