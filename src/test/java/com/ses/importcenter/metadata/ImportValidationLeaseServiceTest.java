@@ -205,7 +205,8 @@ class ImportValidationLeaseServiceTest {
     void unexpiredLeaseCannotBeTakenOver() {
         var grant = service.acquire(service.beginAcquire(jobId));
         var before = state();
-        assertThrows(BusinessException.class, () -> service.beginTakeover(jobId));
+        var operation = service.beginTakeover(jobId);
+        assertThrows(BusinessException.class, () -> service.takeOver(operation));
         assertEquals(before, state());
         assertNotNull(grant);
     }
