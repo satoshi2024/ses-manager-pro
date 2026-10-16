@@ -108,6 +108,7 @@ class ImportMetadataRealMySqlTest {
     @Autowired private ImportMetadataService metadataService;
     @Autowired private ImportIdentityCandidateService candidateService;
     @Autowired private ImportValidationLeaseService leaseService;
+    @Autowired private ImportValidationLifecycleService lifecycleService;
     @Autowired private DocumentService documentService;
     @Autowired private DocumentMapper documentMapper;
     @Autowired private DocumentVersionMapper documentVersionMapper;
@@ -284,6 +285,52 @@ class ImportMetadataRealMySqlTest {
                   AND v.id=? AND v.scan_status='CLEAN' AND v.sha256=?
                 """, Integer.class, tenantId, documentId, Long.toString(LEGAL_ENTITY_ID), documentVersionId,
                 SOURCE_HASH));
+    }
+
+    @Test
+    void 実MySQLでstartはleaseとBUILDINGrunを原子的に作りabortでMAPPEDへ戻す() {
+        prepareBoundCustomerJob();
+        var operation = lifecycleService.beginStart(jobId);
+        var lease = lifecycleService.start(operation);
+        assertEquals(lease.runId(), lifecycleService.start(operation).runId(), "同operation retryは同一runへ収束します");
+        Map<String, Object> started = leaseSnapshot();
+        assertEquals("VALIDATING", started.get("state"));
+        assertEquals(lease.generation(), ((Number) started.get("lease_generation")).longValue());
+        assertEquals(lease.runId(), ((Number) started.get("active_validation_run_id")).longValue());
+        assertEquals(null, started.get("current_validation_run_id"));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=? AND state='BUILDING' AND created_lease_generation=? AND last_resumed_lease_generation=? AND active_slot=1 AND published_slot IS NULL AND actor_user_id=? AND source_sha256=UNHEX(?) AND document_sha256=UNHEX(?) AND mapping_sha256=?",
+                Integer.class, tenantId, jobId, lease.runId(), lease.generation(), lease.generation(), actorUserId,
+                SOURCE_HASH, SOURCE_HASH, jdbc.queryForObject("SELECT mapping_sha256 FROM t_import_mapping WHERE tenant_id=? AND id=?",
+                        byte[].class, tenantId, mappingId)));
+        assertEquals(0, storage.openCount(), "startはsource streamを開きません");
+
+        lifecycleService.abort(lease);
+        Map<String, Object> aborted = leaseSnapshot();
+        assertEquals("MAPPED", aborted.get("state"));
+        assertEquals(null, aborted.get("lease_owner"));
+        assertEquals(null, aborted.get("lease_expires_at"));
+        assertEquals(null, aborted.get("active_validation_run_id"));
+        assertEquals(null, aborted.get("current_validation_run_id"));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=? AND state='ABORTED' AND active_slot IS NULL AND published_slot IS NULL",
+                Integer.class, tenantId, jobId, lease.runId()));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=?",
+                Integer.class, tenantId, jobId));
+    }
+
+    @Test
+    void 実MySQLの再validationstartは旧completed結果を履歴保持しcurrentだけを解除する() {
+        long oldRunId = prepareValidatedCustomerJob();
+        var operation = lifecycleService.beginStart(jobId);
+        var lease = lifecycleService.start(operation);
+        Map<String, Object> started = leaseSnapshot();
+        assertEquals("VALIDATING", started.get("state"));
+        assertEquals(null, started.get("current_validation_run_id"));
+        assertEquals(lease.runId(), ((Number) started.get("active_validation_run_id")).longValue());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=? AND state='COMPLETED' AND active_slot IS NULL AND published_slot IS NULL",
+                Integer.class, tenantId, jobId, oldRunId));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=? AND state='BUILDING' AND active_slot=1 AND published_slot IS NULL",
+                Integer.class, tenantId, jobId, lease.runId()));
+        lifecycleService.abort(lease);
     }
 
     @Test
