@@ -11,6 +11,7 @@ spring:
       mode: always
       encoding: UTF-8
       schema-locations:
+        - classpath:sql/test-schema-import-precleanup-h2.sql
         - classpath:db/migration/V1__create_tables.sql
         - classpath:db/migration/V2__init_master_data.sql
         - classpath:db/migration/V4__create_notification.sql
