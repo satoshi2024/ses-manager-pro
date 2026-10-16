@@ -1,5 +1,29 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## 実測による追加修復（2026-10-16 15:19 JST）
+
+- **NO-GO**。control固定 `172a363d99c8920fcb55c0ca4ac7d3384759602c` の残留fast fixtureは
+  **3 class、11/0/0/0**（IntegrationHub3、撤権反復2、隔離監査6）。UTC06:12:48.7870050〜06:14:49.3788411。
+  log SHA-256 `519B35CE56392ABDEA96ED07F8290AFE94F5E108D6387BB9FEB0B111727131F0`、6 report hash一致。
+  これは定向gateで、全fast第6回FAILをPASSへ変更しない。
+- NF06 F1b-1旧固定 `b766e3d1` のMySQLは **44/0/1/0、FAIL**。
+  UTC06:08:52.9888783〜06:11:37.3274265、log
+  `FC6EE4989B689BC6F380FB950C6FA352F4EDCEDCE8467F9D93AF870AEB801A7F`。
+  旧completed fixtureのsource snapshotが実sourceと不一致だった。実source codeを取得する `ed433641` は
+  Astra限定CODE PASS。production snapshot/ACL/fingerprint検証は保持した。
+- 修復固定 `ed433641048c60d66cabbd2360d9dfdc72f09191` のunit/H2は **3 class、23/0/0/0**。
+  UTC06:17:13.3349644〜06:18:16.1640785、log
+  `69AB93847A5085A41E0B4CF9C5E85D6E5952E4401E37828019607A8AF63ADD56`。
+  同SHAのMySQL再試験を実行中。wave2のWIPを含まない。
+- NF08 A2固定 `1e64cde2` は限定CODE PASS後の実測で **19 class、105/0/3/0、FAIL**。
+  UTC06:15:12.6505544〜06:17:00.8004449、log
+  `8070C9F42B83CA59800C40D0C98030E90886ADFB30932EC0A115572F9A17340E`。
+  3 upper-bound算術fixtureが有効usageを渡してUPPERを指定し、COST_MODE_MISMATCHとなった。
+  guardを緩和せずfixture契約を修復する。A1成功とA2未受理を区別し、A2はcontrol未統合。
+- NF06 wave2は限定PLAN PASS後の実装WIP。NF07 W3a固定計画 `5126952b` はAstra限定PLAN PASS、
+  synthetic identity/scopeのas-of preview保存のみ実装開始。NF08 C2-B1はNOT_SENT/UNKNOWNの実DB
+  metadata/transaction/CAS/tenant証明のみ限定PLAN PASS、実装WIP。全て未実測であり全機能完了ではない。
+
 ## 追加統合と固定検証（2026-10-16 15:12 JST）
 
 - **NO-GO継続**。sourceの限定成功をcontrol全体の合格として扱わない。
