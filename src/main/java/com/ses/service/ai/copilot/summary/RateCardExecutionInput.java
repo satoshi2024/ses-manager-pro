@@ -8,6 +8,7 @@ import java.time.Instant;
 record RateCardExecutionInput(
         String attemptId,
         String idempotencyKey,
+        String rateCardDigest,
         String tenantId,
         String traceId,
         String useCase,
