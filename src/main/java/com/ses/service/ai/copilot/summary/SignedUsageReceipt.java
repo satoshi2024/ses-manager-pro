@@ -1,6 +1,6 @@
 package com.ses.service.ai.copilot.summary;
 
-/** signatureが無いDTOからは検証済みusage capabilityを作れない未信頼receipt。 */
+/** test sourceのsynthetic検証用receipt。本番usage署名サービスやprovider usageの証明には使用しない。 */
 final class SignedUsageReceipt {
     private final RateCardExecutionInput input;
     private final String keyId;
