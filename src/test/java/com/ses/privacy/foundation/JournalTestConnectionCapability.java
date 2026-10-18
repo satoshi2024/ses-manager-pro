@@ -24,6 +24,7 @@ final class JournalTestConnectionCapability {
     private final String adminUsername;
     private final String adminPassword;
     private final Environment environment;
+    private final java.util.concurrent.atomic.AtomicBoolean w3aStoreIssued = new java.util.concurrent.atomic.AtomicBoolean();
 
     private JournalTestConnectionCapability(MySQLContainer<?> container, ApplicationContext context) {
         this.environment = context.getEnvironment();
@@ -79,6 +80,11 @@ final class JournalTestConnectionCapability {
     DataSource adminDataSource() {
         requireTestEnvironment();
         return new DriverManagerDataSource(jdbcUrl, adminUsername, adminPassword);
+    }
+    W3aSyntheticPreviewStore createW3aPreviewStore() {
+        requireTestEnvironment();
+        if (!w3aStoreIssued.compareAndSet(false, true)) throw new SecurityException("W3a store capabilityは一度だけ発行できます");
+        return W3aSyntheticPreviewStore.fromOwnedContainer(adminDataSource(), containerId, database);
     }
     DataSource createJournalWriterDataSource() {
         requireTestEnvironment();

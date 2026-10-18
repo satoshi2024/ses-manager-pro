@@ -2,267 +2,330 @@ package com.ses.privacy.foundation;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.core.env.Environment;
-import org.springframework.core.env.Profiles;
 
-import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/** 合成preview専用。bean/controller登録禁止、test profile以外では構築できない。 */
+/** 合成preview専用。bean/controller登録禁止。persistenceはharness発行の限定portを使う。 */
 final class SyntheticPrivacyRequestService {
-    private static final ObjectMapper JSON = new ObjectMapper();
-    private final DataSource database;
+    private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
+    private final SyntheticPreviewStore store;
     private final SyntheticIdentityEvidenceVerifier identityVerifier;
+    private final SyntheticPreviewScopeVerifier scopeVerifier;
     private final SyntheticPreviewWitnessPort witnesses;
     private final SyntheticPreviewProviderRegistry providers;
-    private final SyntheticEnvironmentGuard guard;
     private final Clock clock;
+    private final Runnable beforeFinalRead;
     private final Runnable beforeCommit;
 
-    SyntheticPrivacyRequestService(DataSource database, Environment environment,
-            SyntheticIdentityEvidenceVerifier identityVerifier, SyntheticPreviewWitnessPort witnesses,
-            SyntheticPreviewProviderRegistry providers, SyntheticEnvironmentGuard guard, Clock clock) {
-        this(database, environment, identityVerifier, witnesses, providers, guard, clock, () -> { });
-    }
-
-    SyntheticPrivacyRequestService(DataSource database, Environment environment,
-            SyntheticIdentityEvidenceVerifier identityVerifier, SyntheticPreviewWitnessPort witnesses,
-            SyntheticPreviewProviderRegistry providers, SyntheticEnvironmentGuard guard, Clock clock, Runnable beforeCommit) {
-        if (environment == null || !environment.acceptsProfiles(Profiles.of("test"))
-                || environment.acceptsProfiles(Profiles.of("prod"))) throw new SecurityException("test profile専用serviceです");
-        this.database=java.util.Objects.requireNonNull(database); this.identityVerifier=identityVerifier;
-        this.witnesses=witnesses; this.providers=providers; this.guard=guard; this.clock=clock;
+    SyntheticPrivacyRequestService(SyntheticPreviewStore store, SyntheticIdentityEvidenceVerifier identityVerifier,
+            SyntheticPreviewScopeVerifier scopeVerifier, SyntheticPreviewWitnessPort witnesses,
+            SyntheticPreviewProviderRegistry providers, Clock clock,
+            Runnable beforeFinalRead, Runnable beforeCommit) {
+        this.store=java.util.Objects.requireNonNull(store);
+        this.identityVerifier=java.util.Objects.requireNonNull(identityVerifier);
+        this.scopeVerifier=java.util.Objects.requireNonNull(scopeVerifier);
+        this.witnesses=java.util.Objects.requireNonNull(witnesses);
+        this.providers=java.util.Objects.requireNonNull(providers);
+        this.clock=java.util.Objects.requireNonNull(clock);
+        this.beforeFinalRead=java.util.Objects.requireNonNull(beforeFinalRead);
         this.beforeCommit=java.util.Objects.requireNonNull(beforeCommit);
-        if (providers == null) throw new SecurityException("synthetic provider registryが必要です");
     }
 
     PreviewResult preview(Command command, SyntheticIdentityEnvelope evidence) {
         if (command == null || evidence == null) throw new IllegalArgumentException("requestとidentity proofが必要です");
-        final VerifiedSyntheticIdentity identity;
+        final SyntheticIdentityEvidenceVerifier.VerifiedIdentity identity;
         try {
-            identity = identityVerifier.verify(evidence, command.tenantId(), command.requesterId(),
-                    command.subjectRef(), command.requestId(), command.identityRevision());
+            identity = verifyIdentity(command, evidence);
         } catch (SecurityException rejected) {
-            return PreviewResult.closed(command.requestId(),0,"PREVIEW_STALE","IDENTITY_PROOF_INVALID_OR_EXPIRED",null);
+            return closed(command, "PREVIEW_STALE", "IDENTITY_PROOF_INVALID_OR_EXPIRED", null, 0);
         }
         try {
-            Snapshot prior = find(command);
+            SyntheticPreviewStore.PreviewSnapshot prior = store.find(command.tenantId(), command.requestId(), command.idempotencyKey());
             if (prior != null) {
-                if (!prior.requestHash().equals(command.fingerprint())) return PreviewResult.closed(command.requestId(), prior.caseRevision(), "PREVIEW_STALE", "IDEMPOTENCY_CONFLICT", prior.ref());
-                return validateView(command, identity, evidence, prior);
+                if (!prior.requestHash().equals(command.fingerprint()))
+                    return closed(command,"PREVIEW_STALE","IDEMPOTENCY_CONFLICT",prior.requestId(),prior.caseRevision());
+                if (!snapshotIntegrityValid(prior))
+                    return closed(command,"PREVIEW_UNKNOWN","SNAPSHOT_INTEGRITY_UNKNOWN",prior.requestId(),prior.caseRevision());
+                return validateView(command, evidence, identity, prior);
             }
-            SyntheticPreviewWitnessPort.SourceSnapshot first = witnesses.readCurrent(identity.tenantId(), identity.requesterId(), identity.subjectRef(),
-                    identity.requestId(), command.caseRef(), command.scopeId());
-            assertSourceBinding(identity, command, first);
-            PreviewResult firstClosed=sourceClosed(command,first,null);
-            if(firstClosed!=null)return firstClosed;
-            List<SyntheticPreviewWitnessPort.SourceSnapshot> observations=new ArrayList<>();observations.add(first);
-            VerifiedSyntheticPreviewScope scope = scope(identity, command, first);
+
+            SyntheticPreviewWitnessPort.SourceSnapshot first = readWitness(identity, command);
+            PreviewResult blocked = sourceClosed(command, first, 0, null);
+            if (blocked != null) return blocked;
+            long expectedRevision = parseRevision(first.values().get("caseRevision"));
+            SyntheticPreviewStore.CaseHead initialHead = store.readCaseHead(command.tenantId(), command.caseRef());
+            if (initialHead == null || initialHead.revision() != expectedRevision
+                    || !PrivacyCaseState.SCOPED.name().equals(initialHead.state()))
+                return closed(command,"PREVIEW_STALE","CASE_REVISION_WITNESS_MISMATCH",null,expectedRevision);
+            SyntheticPreviewScopeVerifier.VerifiedScope scope = scopeVerifier.verify(identity, command, first);
+            SyntheticPreviewPort provider = providers.require(scope);
+            ensurePreviewAllowed(identity, first);
+            List<SyntheticPreviewWitnessPort.SourceSnapshot> observations = new ArrayList<>();
+            observations.add(first);
             List<PreviewResult.PreviewItem> items = new ArrayList<>();
+
             for (String targetId : scope.targetIds()) {
-                if (!identity.expiresAt().isAfter(clock.instant())) return closed(command, "PREVIEW_STALE", "IDENTITY_EXPIRED", null);
-                SyntheticPreviewWitnessPort.SourceSnapshot before = witnesses.readCurrent(identity.tenantId(), identity.requesterId(), identity.subjectRef(),
-                        identity.requestId(), command.caseRef(), command.scopeId());
-                assertSourceBinding(identity, command, before);
+                ensureIdentityCurrent(command, evidence, identity);
+                requireExpectedCase(command, expectedRevision, PrivacyCaseState.SCOPED.name());
+                SyntheticPreviewWitnessPort.SourceSnapshot before = readWitness(identity, command);
                 observations.add(before);
-                PreviewResult beforeClosed=sourceClosed(command,before,null);
-                if(beforeClosed!=null)return beforeClosed;
-                if (!first.bindingHash().equals(before.bindingHash())) return closed(command, "PREVIEW_STALE", "SOURCE_DRIFT_BEFORE_READ", null);
-                SyntheticPreviewPort provider=providers.require(scope.providerId(),scope.providerAudience());
-                SyntheticPreviewPort.SyntheticTarget target = provider.read(scope.tenantId(), scope.subjectRef(), targetId);
-                if (target == null || !target.id().equals(targetId) || target.version() == null || target.contentHash() == null
-                        || target.observedAt() == null || !scope.targetIds().contains(target.id())) {
-                    return closed(command, "PREVIEW_STALE", "TARGET_SCOPE_MISMATCH", null);
-                }
-                SyntheticPreviewWitnessPort.SourceSnapshot after = witnesses.readCurrent(identity.tenantId(), identity.requesterId(), identity.subjectRef(),
-                        identity.requestId(), command.caseRef(), command.scopeId());
-                assertSourceBinding(identity, command, after);
+                blocked = sourceClosed(command, before, expectedRevision, null);
+                if (blocked != null) return blocked;
+                if (!first.bindingHash().equals(before.bindingHash()))
+                    return closed(command,"PREVIEW_STALE","SOURCE_DRIFT_BEFORE_READ",null,expectedRevision);
+                SyntheticPreviewPort.SyntheticTarget target = provider.read(scope, targetId);
+                if (!validTarget(target, targetId, scope))
+                    return closed(command,"PREVIEW_STALE","TARGET_SCOPE_MISMATCH",null,expectedRevision);
+                SyntheticPreviewWitnessPort.SourceSnapshot after = readWitness(identity, command);
                 observations.add(after);
-                PreviewResult afterClosed=sourceClosed(command,after,null);
-                if(afterClosed!=null)return afterClosed;
-                if (!first.bindingHash().equals(after.bindingHash())) return closed(command, "PREVIEW_STALE", "SOURCE_DRIFT_DURING_READ", null);
-                items.add(new PreviewResult.PreviewItem(target.id(), target.version(), target.contentHash(), target.observedAt(), "CANDIDATE"));
+                blocked = sourceClosed(command, after, expectedRevision, null);
+                if (blocked != null) return blocked;
+                if (!first.bindingHash().equals(after.bindingHash()))
+                    return closed(command,"PREVIEW_STALE","SOURCE_DRIFT_DURING_READ",null,expectedRevision);
+                requireExpectedCase(command, expectedRevision, PrivacyCaseState.SCOPED.name());
+                items.add(new PreviewResult.PreviewItem(target.id(),target.version(),target.contentHash(),
+                        target.observedAt(),null,"CANDIDATE"));
             }
-            SyntheticPreviewWitnessPort.SourceSnapshot finalRead = witnesses.readCurrent(identity.tenantId(), identity.requesterId(), identity.subjectRef(),
-                    identity.requestId(), command.caseRef(), command.scopeId());
-            assertSourceBinding(identity, command, finalRead);
+
+            beforeFinalRead.run();
+            ensureIdentityCurrent(command, evidence, identity);
+            SyntheticPreviewWitnessPort.SourceSnapshot finalRead = readWitness(identity, command);
             observations.add(finalRead);
-            PreviewResult finalClosed=sourceClosed(command,finalRead,null);
-            if(finalClosed!=null)return finalClosed;
-            if (!first.bindingHash().equals(finalRead.bindingHash())) return closed(command, "PREVIEW_STALE", "SOURCE_DRIFT_FINAL_READ", null);
+            blocked = sourceClosed(command, finalRead, expectedRevision, null);
+            if (blocked != null) return blocked;
+            if (!first.bindingHash().equals(finalRead.bindingHash()))
+                return closed(command,"PREVIEW_STALE","SOURCE_DRIFT_BEFORE_FINAL_METADATA",null,expectedRevision);
+            requireExpectedCase(command, expectedRevision, PrivacyCaseState.SCOPED.name());
+
+            List<PreviewResult.PreviewItem> finalItems = new ArrayList<>();
+            for (PreviewResult.PreviewItem item : items) {
+                SyntheticPreviewPort.SyntheticTarget current = provider.describeCurrent(scope,item.syntheticTargetId());
+                if (!validTarget(current,item.syntheticTargetId(),scope)
+                        || !item.targetVersion().equals(current.version()) || !item.contentHash().equals(current.contentHash()))
+                    return closed(command,"PREVIEW_STALE","TARGET_METADATA_DRIFT_BEFORE_COMMIT",null,expectedRevision);
+                finalItems.add(new PreviewResult.PreviewItem(item.syntheticTargetId(),item.targetVersion(),item.contentHash(),
+                        item.observedAt(),current.observedAt(),"CANDIDATE"));
+            }
+            ensurePreviewAllowed(identity, finalRead);
+            ensureIdentityCurrent(command,evidence,identity);
+            requireExpectedCase(command,expectedRevision,PrivacyCaseState.SCOPED.name());
             beforeCommit.run();
-            Snapshot saved = persist(command, identity, first, observations, items);
-            if (saved == null) {
-                Snapshot raced = find(command);
-                return raced == null ? closed(command, "PREVIEW_UNKNOWN", "CAS_OR_ACK_UNKNOWN", null)
-                        : validateView(command, identity, evidence, raced);
-            }
-            return validateView(command, identity, evidence, saved);
+
+            long nextRevision = expectedRevision + 1;
+            String witnessJson = JSON.writeValueAsString(observations.stream()
+                    .map(SyntheticPreviewWitnessPort.SourceSnapshot::canonical).toList());
+            String itemsJson = JSON.writeValueAsString(finalItems);
+            Instant observedTo = observations.stream().map(SyntheticPreviewWitnessPort.SourceSnapshot::observedAt)
+                    .max(Instant::compareTo).orElse(first.observedAt());
+            TransitionBinding binding = new TransitionBinding(command.tenantId(),command.caseRef(),finalItems.get(0).syntheticTargetId(),
+                    finalItems.get(0).targetVersion(),finalItems.get(0).contentHash(),finalRead.values().get("policyHash"),
+                    Long.toString(expectedRevision),finalRead.values().get("policyVersion"),"SYNTHETIC_PREVIEW",scope.providerId());
+            PrivacyCaseStateMachine.transition(PrivacyCaseState.SCOPED,PrivacyCaseState.PREVIEWED,binding,null,null,null,clock.instant());
+            String snapshotHash = snapshotDigest(command,expectedRevision,nextRevision,identity.digest(),first.bindingHash(),
+                    witnessJson,itemsJson,first.observedAt(),observedTo);
+            SyntheticPreviewStore.PreviewDraft draft = new SyntheticPreviewStore.PreviewDraft(command.tenantId(),command.requestId(),
+                    command.idempotencyKey(),command.fingerprint(),command.caseRef(),expectedRevision,nextRevision,identity.digest(),
+                    first.bindingHash(),snapshotHash,witnessJson,itemsJson,first.observedAt(),observedTo,finalItems.get(0).syntheticTargetId(),
+                    finalItems.get(0).targetVersion(),finalItems.get(0).contentHash(),finalRead.values().get("policyHash"),
+                    finalRead.values().get("policyVersion"),scope.providerId());
+
+            SyntheticPreviewStore.PersistOutcome outcome = store.persist(draft);
+            if (outcome == SyntheticPreviewStore.PersistOutcome.FAILED)
+                return closed(command,"PREVIEW_UNKNOWN","PERSISTENCE_FAILED",null,expectedRevision);
+            SyntheticPreviewStore.PreviewSnapshot saved = store.find(command.tenantId(),command.requestId(),command.idempotencyKey());
+            if (outcome == SyntheticPreviewStore.PersistOutcome.CAS_FAILED)
+                return sameIdempotentReadback(saved,draft) && snapshotIntegrityValid(saved)
+                        ? validateView(command,evidence,identity,saved)
+                        : saved!=null&&saved.tenantId().equals(draft.tenantId())&&saved.requestId().equals(draft.requestId())
+                                &&saved.idempotencyKey().equals(draft.idempotencyKey())
+                                ? closed(command,"PREVIEW_STALE","IDEMPOTENCY_CONFLICT",saved.requestId(),saved.caseRevision())
+                                : closed(command,"PREVIEW_STALE","CASE_CAS_FAILED",null,expectedRevision);
+            if (outcome == SyntheticPreviewStore.PersistOutcome.DUPLICATE)
+                return sameIdempotentReadback(saved,draft) && snapshotIntegrityValid(saved)
+                        ? validateView(command,evidence,identity,saved)
+                        : closed(command,"PREVIEW_STALE","IDEMPOTENCY_CONFLICT",null,expectedRevision);
+            if (!matchesReadback(saved,draft,outcome == SyntheticPreviewStore.PersistOutcome.ACK_UNKNOWN))
+                return closed(command,"PREVIEW_UNKNOWN","COMMIT_READBACK_UNCONFIRMED",null,expectedRevision);
+            return validateView(command,evidence,identity,saved);
+        } catch (IdentityExpiryException e) {
+            return closed(command,"PREVIEW_STALE","IDENTITY_EXPIRED",null,0);
+        } catch (PolicyExpiryException e) {
+            return closed(command,"PREVIEW_STALE","POLICY_OUTSIDE_EFFECTIVE_RANGE",null,0);
+        } catch (CaseDriftException e) {
+            return closed(command,"PREVIEW_STALE","CASE_REVISION_DRIFT",null,0);
+        } catch (SecurityException e) {
+            return closed(command,"PREVIEW_STALE","IDENTITY_OR_SCOPE_REVALIDATION_FAILED",null,0);
         } catch (RuntimeException e) {
-            return closed(command, "PREVIEW_UNKNOWN", "SOURCE_OR_STORE_UNAVAILABLE", null);
+            return closed(command,"PREVIEW_UNKNOWN","SOURCE_OR_STORE_UNAVAILABLE",null,0);
+        } catch (java.io.IOException e) {
+            return closed(command,"PREVIEW_UNKNOWN","SNAPSHOT_SERIALIZATION_FAILED",null,0);
         }
     }
 
-    private VerifiedSyntheticPreviewScope scope(VerifiedSyntheticIdentity identity, Command command, SyntheticPreviewWitnessPort.SourceSnapshot source) {
-        Map<String,String> v = source.values();
-        if (!identity.tenantId().equals(v.get("tenantId")) || !identity.subjectRef().equals(v.get("subjectRef")))
-            throw new SecurityException("scope binding不一致です");
-        SyntheticPreviewPort provider=providers.require(v.get("providerId"),v.get("providerAudience"));
-        if (!identity.revision().equals(v.get("identityRevision")) || !identity.digest().equals(v.get("identityHash"))
-                || !identity.keyId().equals(v.get("keyId")) || !identity.audience().equals(v.get("audience"))
-                || !identity.expiresAt().toString().equals(v.get("identityExpiresAt"))
-                || !"ACTIVE".equals(v.get("identityRevocation")) || !"ACTIVE".equals(v.get("scopeState"))) {
-            throw new SecurityException("identity/scope current witnessが一致しません");
-        }
-        if (!"ACTIVE".equals(v.get("policyRevocation"))) throw new SecurityException("synthetic policyが失効しています");
-        if (!"CLEAR".equals(v.get("holdState")) || !"KNOWN".equals(v.get("policyState"))
-                || !"KNOWN".equals(v.get("journalState")) || !"KNOWN".equals(v.get("auditState"))) {
-            throw new SecurityException("hold/policy/journal状態がpreview可能ではありません");
-        }
+    private SyntheticIdentityEvidenceVerifier.VerifiedIdentity verifyIdentity(Command command, SyntheticIdentityEnvelope evidence) {
+        return identityVerifier.verify(evidence,command.tenantId(),command.requesterId(),command.subjectRef(),
+                command.requestId(),command.identityRevision());
+    }
+    private void ensureIdentityCurrent(Command command, SyntheticIdentityEnvelope evidence,
+                                       SyntheticIdentityEvidenceVerifier.VerifiedIdentity identity) {
+        if(!identity.expiresAt().isAfter(clock.instant()))throw new IdentityExpiryException();
+        SyntheticIdentityEvidenceVerifier.VerifiedIdentity now = verifyIdentity(command,evidence);
+        if (!now.digest().equals(identity.digest())) throw new SecurityException("identity proofが変化しました");
+    }
+    private SyntheticPreviewWitnessPort.SourceSnapshot readWitness(SyntheticIdentityEvidenceVerifier.VerifiedIdentity identity,
+                                                                    Command command) {
+        SyntheticPreviewWitnessPort.SourceSnapshot snapshot = witnesses.readCurrent(identity.tenantId(),identity.requesterId(),
+                identity.subjectRef(),identity.requestId(),command.caseRef(),command.scopeId());
+        assertSourceBinding(identity,command,snapshot);
+        return snapshot;
+    }
+    private void ensurePreviewAllowed(SyntheticIdentityEvidenceVerifier.VerifiedIdentity identity,
+                                      SyntheticPreviewWitnessPort.SourceSnapshot source) {
         Instant now=clock.instant();
-        if (Instant.parse(v.get("policyEffective")).isAfter(now) || !Instant.parse(v.get("policyExpiresAt")).isAfter(now))
-            throw new SecurityException("synthetic policy有効期間外です");
-        List<String> ids = provider.registeredTargets(identity.tenantId(), identity.subjectRef(), command.scopeId());
-        if (ids == null || ids.isEmpty() || ids.stream().anyMatch(id -> !id.matches("target-synthetic-[a-zA-Z0-9-]+"))) {
-            throw new SecurityException("synthetic scope内のtargetがありません");
-        }
-        return new VerifiedSyntheticPreviewScope(identity.tenantId(), identity.subjectRef(), command.scopeId(),
-                provider.providerId(), provider.audience(), ids, VerifiedSyntheticPreviewScope.TOKEN);
-    }
-
-    private static void assertSourceBinding(VerifiedSyntheticIdentity identity, Command command, SyntheticPreviewWitnessPort.SourceSnapshot source) {
+        if (!identity.expiresAt().isAfter(now)) throw new IdentityExpiryException();
         Map<String,String> v=source.values();
-        if (!identity.tenantId().equals(v.get("tenantId")) || !identity.requesterId().equals(v.get("requesterId"))
-                || !identity.subjectRef().equals(v.get("subjectRef")) || !identity.requestId().equals(v.get("requestId"))
-                || !command.caseRef().equals(v.get("caseRef")) || !command.scopeId().equals(v.get("scopeId")))
-            throw new SecurityException("source witness request/case/scope binding不一致です");
+        if (Instant.parse(v.get("policyEffective")).isAfter(now) || !Instant.parse(v.get("policyExpiresAt")).isAfter(now))
+            throw new PolicyExpiryException();
+    }
+    private void requireExpectedCase(Command command,long revision,String state) {
+        SyntheticPreviewStore.CaseHead head=store.readCaseHead(command.tenantId(),command.caseRef());
+        if(head==null||head.revision()!=revision||!state.equals(head.state()))
+            throw new CaseDriftException();
+    }
+    private static boolean validTarget(SyntheticPreviewPort.SyntheticTarget target,String id,
+                                       SyntheticPreviewScopeVerifier.VerifiedScope scope) {
+        return target!=null && id.equals(target.id()) && target.version()!=null && target.contentHash()!=null
+                && target.observedAt()!=null && scope.targetIds().contains(id);
+    }
+    private static void assertSourceBinding(SyntheticIdentityEvidenceVerifier.VerifiedIdentity identity,Command command,
+                                             SyntheticPreviewWitnessPort.SourceSnapshot source) {
+        Map<String,String> v=source.values();
+        if(!identity.tenantId().equals(v.get("tenantId"))||!identity.requesterId().equals(v.get("requesterId"))
+                ||!identity.subjectRef().equals(v.get("subjectRef"))||!identity.requestId().equals(v.get("requestId"))
+                ||!command.caseRef().equals(v.get("caseRef"))||!command.scopeId().equals(v.get("scopeId")))
+            throw new SecurityException("source witness bindingが一致しません");
     }
 
-    private PreviewResult validateView(Command command, VerifiedSyntheticIdentity identity,
-                                       SyntheticIdentityEnvelope evidence, Snapshot snapshot) {
+    private PreviewResult validateView(Command command,SyntheticIdentityEnvelope evidence,
+                                       SyntheticIdentityEvidenceVerifier.VerifiedIdentity identity,
+                                       SyntheticPreviewStore.PreviewSnapshot snapshot) {
         try {
-            VerifiedSyntheticIdentity currentIdentity = identityVerifier.verify(evidence, command.tenantId(), command.requesterId(),
-                    command.subjectRef(), command.requestId(), command.identityRevision());
-            if (!currentIdentity.digest().equals(identity.digest()))
-                return PreviewResult.closed(command.requestId(), snapshot.caseRevision(), "PREVIEW_STALE", "IDENTITY_PROOF_DRIFT", snapshot.ref());
-            CaseHead caseHead = readCaseHead(command);
-            if (caseHead.revision() != snapshot.caseRevision() || !PrivacyCaseState.PREVIEWED.name().equals(caseHead.state()))
-                return PreviewResult.closed(command.requestId(), snapshot.caseRevision(), "PREVIEW_STALE", "CASE_REVISION_DRIFT", snapshot.ref());
-            SyntheticPreviewWitnessPort.SourceSnapshot current = witnesses.readCurrent(identity.tenantId(), identity.requesterId(), identity.subjectRef(),
-                    identity.requestId(), command.caseRef(), command.scopeId());
-            assertSourceBinding(identity,command,current);
-            PreviewResult currentClosed=sourceClosed(command,current,snapshot);
-            if(currentClosed!=null)return currentClosed;
-            if (!identity.expiresAt().isAfter(clock.instant()) || !"ACTIVE".equals(current.values().get("identityRevocation")))
-                return PreviewResult.closed(command.requestId(), snapshot.caseRevision(), "PREVIEW_STALE", "IDENTITY_EXPIRED_OR_REVOKED", snapshot.ref());
-            if (!identity.revision().equals(current.values().get("identityRevision"))
-                    || !identity.digest().equals(current.values().get("identityHash"))
-                    || !identity.keyId().equals(current.values().get("keyId"))
-                    || !identity.audience().equals(current.values().get("audience"))
-                    || !identity.expiresAt().toString().equals(current.values().get("identityExpiresAt")))
-                return PreviewResult.closed(command.requestId(), snapshot.caseRevision(), "PREVIEW_STALE", "IDENTITY_WITNESS_DRIFT", snapshot.ref());
-            if (!"ACTIVE".equals(current.values().get("scopeState")))
-                return PreviewResult.closed(command.requestId(), snapshot.caseRevision(), "PREVIEW_STALE", "SCOPE_REVOKED", snapshot.ref());
-            if (!"ACTIVE".equals(current.values().get("policyRevocation")))
-                return PreviewResult.closed(command.requestId(), snapshot.caseRevision(), "PREVIEW_STALE", "POLICY_REVOKED", snapshot.ref());
-            Instant policyStart=Instant.parse(current.values().get("policyEffective"));
-            Instant policyEnd=Instant.parse(current.values().get("policyExpiresAt"));
-            if (policyStart.isAfter(clock.instant()) || !policyEnd.isAfter(clock.instant()))
-                return PreviewResult.closed(command.requestId(), snapshot.caseRevision(), "PREVIEW_STALE", "POLICY_OUTSIDE_EFFECTIVE_RANGE", snapshot.ref());
-            if (!snapshot.witnessHash().equals(current.bindingHash())) return PreviewResult.closed(command.requestId(), snapshot.caseRevision(),
-                    "PREVIEW_STALE", "SOURCE_WITNESS_DRIFT", snapshot.ref());
-            List<PreviewResult.PreviewItem> savedItems = JSON.readValue(snapshot.itemsJson(), new TypeReference<>() { });
-            // Exact retry does not repeat target search/read; current target version/hash metadata is checked independently.
-            for (PreviewResult.PreviewItem item : savedItems) {
-                SyntheticPreviewPort provider=providers.require(current.values().get("providerId"),current.values().get("providerAudience"));
-                SyntheticPreviewPort.SyntheticTarget now = provider.describeCurrent(identity.tenantId(), identity.subjectRef(),
-                        command.scopeId(), item.syntheticTargetId());
-                if (now == null || !item.syntheticTargetId().equals(now.id()) || now.version() == null || now.contentHash() == null
-                        || now.observedAt() == null
-                        || !item.targetVersion().equals(now.version()) || !item.contentHash().equals(now.contentHash()))
-                    return PreviewResult.closed(command.requestId(), snapshot.caseRevision(), "PREVIEW_STALE", "TARGET_METADATA_DRIFT", snapshot.ref());
+            if(!identity.expiresAt().isAfter(clock.instant()))
+                return closed(command,"PREVIEW_STALE","IDENTITY_EXPIRED",snapshot.requestId(),snapshot.caseRevision());
+            SyntheticIdentityEvidenceVerifier.VerifiedIdentity currentIdentity=verifyIdentity(command,evidence);
+            if(!currentIdentity.digest().equals(identity.digest())) return closed(command,"PREVIEW_STALE","IDENTITY_PROOF_DRIFT",snapshot.requestId(),snapshot.caseRevision());
+            SyntheticPreviewStore.CaseHead head=store.readCaseHead(command.tenantId(),command.caseRef());
+            if(head==null||head.revision()!=snapshot.caseRevision()||!PrivacyCaseState.PREVIEWED.name().equals(head.state()))
+                return closed(command,"PREVIEW_STALE","CASE_REVISION_DRIFT",snapshot.requestId(),snapshot.caseRevision());
+            SyntheticPreviewWitnessPort.SourceSnapshot current=readWitness(identity,command);
+            PreviewResult closed=sourceClosed(command,current,snapshot.caseRevision(),snapshot.requestId());
+            if(closed!=null)return closed;
+            if(!identity.revision().equals(current.values().get("identityRevision"))
+                    ||!identity.digest().equals(current.values().get("identityHash"))
+                    ||!identity.keyId().equals(current.values().get("keyId"))
+                    ||!identity.audience().equals(current.values().get("audience"))
+                    ||!identity.expiresAt().toString().equals(current.values().get("identityExpiresAt")))
+                return closed(command,"PREVIEW_STALE","IDENTITY_WITNESS_DRIFT",snapshot.requestId(),snapshot.caseRevision());
+            if(!Long.toString(snapshot.baseCaseRevision()).equals(current.values().get("caseRevision")))
+                return closed(command,"PREVIEW_STALE","CASE_WITNESS_DRIFT",snapshot.requestId(),snapshot.caseRevision());
+            if(!snapshot.witnessHash().equals(current.bindingHash()))
+                return closed(command,"PREVIEW_STALE","SOURCE_WITNESS_DRIFT",snapshot.requestId(),snapshot.caseRevision());
+            if(!snapshotIntegrityValid(snapshot))
+                return closed(command,"PREVIEW_UNKNOWN","SNAPSHOT_INTEGRITY_UNKNOWN",snapshot.requestId(),snapshot.caseRevision());
+            SyntheticPreviewScopeVerifier.VerifiedScope scope=scopeVerifier.verify(identity,command,current);
+            SyntheticPreviewPort provider=providers.require(scope);
+            List<PreviewResult.PreviewItem> items=JSON.readValue(snapshot.itemsJson(),new TypeReference<>(){});
+            for(PreviewResult.PreviewItem item:items){
+                SyntheticPreviewPort.SyntheticTarget target=provider.describeCurrent(scope,item.syntheticTargetId());
+                if(!validTarget(target,item.syntheticTargetId(),scope)||!item.targetVersion().equals(target.version())
+                        ||!item.contentHash().equals(target.contentHash()))
+                    return closed(command,"PREVIEW_STALE","TARGET_METADATA_DRIFT",snapshot.requestId(),snapshot.caseRevision());
             }
-            Instant validated = clock.instant();
-            return new PreviewResult(command.requestId(), snapshot.caseRevision(), "AS_OF_PREVIEW_ONLY", null, snapshot.ref(),
-                    savedItems, snapshot.observedAt(), snapshot.observedTo(), validated, "PREVIEW_ONLY");
-        } catch (Exception e) {
-            return PreviewResult.closed(command.requestId(), snapshot.caseRevision(), "PREVIEW_UNKNOWN", "REVALIDATION_UNAVAILABLE", snapshot.ref());
+            SyntheticPreviewWitnessPort.SourceSnapshot finalCurrent=readWitness(identity,command);
+            closed=sourceClosed(command,finalCurrent,snapshot.caseRevision(),snapshot.requestId());
+            if(closed!=null)return closed;
+            if(!snapshot.witnessHash().equals(finalCurrent.bindingHash()))
+                return closed(command,"PREVIEW_STALE","SOURCE_DRIFT_DURING_RESPONSE_VALIDATION",snapshot.requestId(),snapshot.caseRevision());
+            head=store.readCaseHead(command.tenantId(),command.caseRef());
+            if(head==null||head.revision()!=snapshot.caseRevision()||!PrivacyCaseState.PREVIEWED.name().equals(head.state()))
+                return closed(command,"PREVIEW_STALE","CASE_REVISION_DRIFT",snapshot.requestId(),snapshot.caseRevision());
+            Instant validatedAt=clock.instant();
+            if(!identity.expiresAt().isAfter(validatedAt))
+                return closed(command,"PREVIEW_STALE","IDENTITY_EXPIRED_DURING_REVALIDATION",snapshot.requestId(),snapshot.caseRevision());
+            Instant policyEffective=Instant.parse(current.values().get("policyEffective"));
+            Instant policyExpires=Instant.parse(current.values().get("policyExpiresAt"));
+            if(policyEffective.isAfter(validatedAt)||!policyExpires.isAfter(validatedAt))
+                return closed(command,"PREVIEW_STALE","POLICY_EXPIRED_DURING_REVALIDATION",snapshot.requestId(),snapshot.caseRevision());
+            return new PreviewResult(command.requestId(),snapshot.caseRevision(),"AS_OF_PREVIEW_ONLY",null,snapshot.requestId(),
+                    items,snapshot.observedAt(),snapshot.observedTo(),validatedAt,"PREVIEW_ONLY");
+        }catch(Exception failure){
+            return closed(command,"PREVIEW_UNKNOWN","REVALIDATION_UNAVAILABLE",snapshot.requestId(),snapshot.caseRevision());
         }
     }
-
-    private PreviewResult sourceClosed(Command command,SyntheticPreviewWitnessPort.SourceSnapshot source,Snapshot snapshot){
-        Map<String,String> values=source.values();
-        long revision=snapshot==null?0:snapshot.caseRevision();String ref=snapshot==null?null:snapshot.ref();
-        if("ACTIVE".equals(values.get("holdState")))return PreviewResult.closed(command.requestId(),revision,"PREVIEW_BLOCKED","HOLD_ACTIVE",ref);
-        if(!"KNOWN".equals(values.get("policyState"))||!"KNOWN".equals(values.get("journalState"))
-                ||!"KNOWN".equals(values.get("auditState"))||!"ACTIVE".equals(values.get("witnessKeyState")))
-            return PreviewResult.closed(command.requestId(),revision,"PREVIEW_UNKNOWN","CURRENT_STATE_UNKNOWN",ref);
-        if (!"ACTIVE".equals(values.get("identityRevocation")) || !"ACTIVE".equals(values.get("scopeState"))
-                || !"ACTIVE".equals(values.get("policyRevocation")))
-            return PreviewResult.closed(command.requestId(),revision,"PREVIEW_STALE","CURRENT_BINDING_REVOKED",ref);
+    private PreviewResult sourceClosed(Command command,SyntheticPreviewWitnessPort.SourceSnapshot source,long revision,String ref){
+        Map<String,String> v=source.values();
+        if("ACTIVE".equals(v.get("holdState")))return closed(command,"PREVIEW_BLOCKED","HOLD_ACTIVE",ref,revision);
+        if(!"CLEAR".equals(v.get("holdState")))return closed(command,"PREVIEW_UNKNOWN","HOLD_STATE_UNKNOWN",ref,revision);
+        if(!"KNOWN".equals(v.get("policyState"))||!"KNOWN".equals(v.get("journalState"))
+                ||!"KNOWN".equals(v.get("auditState"))||!"ACTIVE".equals(v.get("witnessKeyState")))
+            return closed(command,"PREVIEW_UNKNOWN","CURRENT_STATE_UNKNOWN",ref,revision);
+        if("REVOKED".equals(v.get("identityRevocation"))||"REVOKED".equals(v.get("scopeState"))
+                ||"REVOKED".equals(v.get("policyRevocation")))
+            return closed(command,"PREVIEW_STALE","CURRENT_BINDING_REVOKED",ref,revision);
+        if(!"ACTIVE".equals(v.get("identityRevocation"))||!"ACTIVE".equals(v.get("scopeState"))
+                ||!"ACTIVE".equals(v.get("policyRevocation")))
+            return closed(command,"PREVIEW_UNKNOWN","REVOCATION_STATE_UNKNOWN",ref,revision);
         return null;
     }
-
-    private Snapshot find(Command command) {
-        try (Connection c=database.getConnection(); PreparedStatement p=c.prepareStatement("SELECT request_hash,case_revision,witness_hash,witness_json,items_json,observed_at,observed_to FROM sf_w3a_preview WHERE tenant_id=? AND request_id=? AND idempotency_key=?")) {
-            p.setString(1,command.tenantId()); p.setString(2,command.requestId()); p.setString(3,command.idempotencyKey());
-            try(ResultSet r=p.executeQuery()) { return r.next()?new Snapshot(command.requestId(),r.getString(1),r.getLong(2),r.getString(3),r.getString(4),r.getString(5),r.getTimestamp(6).toInstant(),r.getTimestamp(7).toInstant()):null; }
-        } catch(SQLException e) { throw new IllegalStateException(e); }
+    private boolean matchesReadback(SyntheticPreviewStore.PreviewSnapshot saved,SyntheticPreviewStore.PreviewDraft draft,
+                                    boolean exactHashRequired){
+        return sameIdempotentReadback(saved,draft)&&saved.identityHash().equals(draft.identityHash())
+                &&saved.witnessHash().equals(draft.witnessHash())
+                &&(!exactHashRequired||saved.snapshotHash().equals(draft.snapshotHash()))&&snapshotIntegrityValid(saved);
     }
-    private CaseHead readCaseHead(Command command) {
-        try (Connection c=database.getConnection(); PreparedStatement p=c.prepareStatement(
-                "SELECT revision,state FROM sf_w3a_case WHERE tenant_id=? AND case_ref=?")) {
-            p.setString(1, command.tenantId()); p.setString(2, command.caseRef());
-            try (ResultSet r=p.executeQuery()) {
-                if (!r.next()) throw new IllegalStateException("caseがありません");
-                return new CaseHead(r.getLong(1), r.getString(2));
-            }
-        } catch (SQLException e) { throw new IllegalStateException("case headを再検証できません", e); }
+    private boolean sameIdempotentReadback(SyntheticPreviewStore.PreviewSnapshot saved,SyntheticPreviewStore.PreviewDraft draft){
+        return saved!=null&&saved.tenantId().equals(draft.tenantId())&&saved.requestId().equals(draft.requestId())
+                &&saved.idempotencyKey().equals(draft.idempotencyKey())&&saved.requestHash().equals(draft.requestHash())
+                &&saved.caseRef().equals(draft.caseRef())&&saved.baseCaseRevision()==draft.baseCaseRevision()
+                &&saved.caseRevision()==draft.caseRevision();
     }
-    private Snapshot persist(Command cmd, VerifiedSyntheticIdentity identity, SyntheticPreviewWitnessPort.SourceSnapshot witness,
-                             List<SyntheticPreviewWitnessPort.SourceSnapshot> observations, List<PreviewResult.PreviewItem> items) {
-        if(items.isEmpty())return null;
-        TransitionBinding binding=new TransitionBinding(cmd.tenantId(),cmd.caseRef(),items.get(0).syntheticTargetId(),
-                items.get(0).targetVersion(),items.get(0).contentHash(),witness.values().get("policyHash"),
-                witness.values().get("caseRevision"),witness.values().get("policyVersion"),"SYNTHETIC_PREVIEW",
-                witness.values().get("providerId"));
-        PrivacyCaseStateMachine.transition(PrivacyCaseState.SCOPED,PrivacyCaseState.PREVIEWED,binding,null,null,null,clock.instant());
-        try(Connection c=database.getConnection()) {
-            c.setAutoCommit(false);
-            try {
-                try(PreparedStatement p=c.prepareStatement("INSERT INTO sf_w3a_case(tenant_id,case_ref,revision) VALUES(?,?,0) ON DUPLICATE KEY UPDATE case_ref=VALUES(case_ref)")) {p.setString(1,cmd.tenantId());p.setString(2,cmd.caseRef());p.executeUpdate();}
-                long current;String state;
-                try(PreparedStatement p=c.prepareStatement("SELECT revision,state FROM sf_w3a_case WHERE tenant_id=? AND case_ref=? FOR UPDATE")){p.setString(1,cmd.tenantId());p.setString(2,cmd.caseRef());try(ResultSet r=p.executeQuery()){if(!r.next())throw new SQLException("case missing");current=r.getLong(1);state=r.getString(2);}}
-                if(!PrivacyCaseState.SCOPED.name().equals(state))throw new SQLException("case stateがSCOPEDではありません");
-                long next=current+1;
-                try(PreparedStatement p=c.prepareStatement("UPDATE sf_w3a_case SET revision=?,state='PREVIEWED' WHERE tenant_id=? AND case_ref=? AND revision=? AND state='SCOPED'")){p.setLong(1,next);p.setString(2,cmd.tenantId());p.setString(3,cmd.caseRef());p.setLong(4,current);if(p.executeUpdate()!=1)throw new SQLException("case CAS failed");}
-                String itemsJson=JSON.writeValueAsString(items);
-                String witnessJson=JSON.writeValueAsString(observations.stream().map(SyntheticPreviewWitnessPort.SourceSnapshot::canonical).toList());
-                Instant observedTo=observations.stream().map(SyntheticPreviewWitnessPort.SourceSnapshot::observedAt).max(Instant::compareTo).orElse(witness.observedAt());
-                try(PreparedStatement p=c.prepareStatement("INSERT INTO sf_w3a_preview(tenant_id,request_id,idempotency_key,request_hash,case_ref,case_revision,identity_hash,witness_hash,witness_json,items_json,observed_at,observed_to) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")) {
-                    p.setString(1,cmd.tenantId());p.setString(2,cmd.requestId());p.setString(3,cmd.idempotencyKey());p.setString(4,cmd.fingerprint());p.setString(5,cmd.caseRef());p.setLong(6,next);p.setString(7,identity.digest());p.setString(8,witness.bindingHash());p.setString(9,witnessJson);p.setString(10,itemsJson);p.setTimestamp(11,java.sql.Timestamp.from(witness.observedAt()));p.setTimestamp(12,java.sql.Timestamp.from(observedTo));p.executeUpdate();
-                }
-                c.commit();
-                return new Snapshot(cmd.requestId(),cmd.fingerprint(),next,witness.bindingHash(),witnessJson,itemsJson,witness.observedAt(),observedTo);
-            } catch(Exception e) { try{c.rollback();}catch(SQLException x){e.addSuppressed(x);} if(e instanceof RuntimeException re)throw re; throw new IllegalStateException(e); }
-        } catch(SQLException e) { return null; }
+    private boolean snapshotIntegrityValid(SyntheticPreviewStore.PreviewSnapshot snapshot){
+        String expected=snapshotDigest(snapshot.tenantId(),snapshot.requestId(),snapshot.idempotencyKey(),snapshot.requestHash(),
+                snapshot.caseRef(),snapshot.baseCaseRevision(),snapshot.caseRevision(),snapshot.identityHash(),snapshot.witnessHash(),
+                snapshot.witnessJson(),snapshot.itemsJson(),snapshot.observedAt(),snapshot.observedTo());
+        return expected.equals(snapshot.snapshotHash());
     }
-    private PreviewResult closed(Command c,String status,String reason,String ref){ return PreviewResult.closed(c.requestId(),0,status,reason,ref); }
+    private String snapshotDigest(Command command,long base,long revision,String identityHash,String witnessHash,
+                                  String witnessJson,String itemsJson,Instant from,Instant to){
+        return snapshotDigest(command.tenantId(),command.requestId(),command.idempotencyKey(),command.fingerprint(),command.caseRef(),
+                base,revision,identityHash,witnessHash,witnessJson,itemsJson,from,to);
+    }
+    private String snapshotDigest(String tenant,String request,String key,String requestHash,String caseRef,long base,long revision,
+                                  String identityHash,String witnessHash,String witnessJson,String itemsJson,Instant from,Instant to){
+        byte[] canonical=SyntheticCanonicalizer.encode("SES-SYNTHETIC-PREVIEW-SNAPSHOT","v1",tenant,request,key,requestHash,
+                caseRef,Long.toString(base),Long.toString(revision),identityHash,witnessHash,witnessJson,itemsJson,from.toString(),to.toString());
+        return ApprovalEnvelopeCanonicalizer.digest(canonical);
+    }
+    private long parseRevision(String value){try{return Long.parseLong(value);}catch(NumberFormatException e){throw new IllegalStateException("case revision witnessが不正です",e);}}
+    private PreviewResult closed(Command c,String status,String reason,String ref,long revision){
+        return PreviewResult.closed(c.requestId(),revision,status,reason,ref);
+    }
     record Command(String tenantId,String requesterId,String subjectRef,String requestId,String identityRevision,
                    String caseRef,String scopeId,String idempotencyKey) {
-        String fingerprint() {
-            String canonical=String.join("\n",tenantId,requesterId,subjectRef,requestId,identityRevision,caseRef,scopeId,idempotencyKey);
-            return ApprovalEnvelopeCanonicalizer.digest(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Command {
+            for(String value:List.of(tenantId,requesterId,subjectRef,requestId,identityRevision,caseRef,scopeId,idempotencyKey))
+                if(value.isBlank()||value.length()>128)throw new IllegalArgumentException("request bindingが不正です");
+        }
+        String fingerprint(){
+            return ApprovalEnvelopeCanonicalizer.digest(SyntheticCanonicalizer.encode("SES-SYNTHETIC-PRIVACY-REQUEST","v1",
+                    tenantId,requesterId,subjectRef,requestId,identityRevision,caseRef,scopeId,idempotencyKey));
         }
     }
-    private record Snapshot(String ref,String requestHash,long caseRevision,String witnessHash,String witnessJson,String itemsJson,Instant observedAt,Instant observedTo) { }
-    private record CaseHead(long revision, String state) { }
+    private static final class CaseDriftException extends RuntimeException { }
+    private static final class IdentityExpiryException extends RuntimeException { }
+    private static final class PolicyExpiryException extends RuntimeException { }
 }

@@ -1,14 +1,14 @@
 package com.ses.privacy.foundation;
 
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
-import org.springframework.core.io.ClassPathResource;
+import org.springframework.mock.env.MockEnvironment;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -19,6 +19,11 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -32,29 +37,44 @@ class SyntheticPrivacyRequestServiceMySqlTest {
     private static AnnotationConfigApplicationContext context;
     private static JdbcTemplate jdbc;
     private static Environment environment;
+    private static W3aSyntheticPreviewStore store;
+    private static String containerId;
+    private static final ThreadLocal<Fixture> ACTIVE_FIXTURE=new ThreadLocal<>();
 
     @BeforeAll static void start() {
         context=new AnnotationConfigApplicationContext(); context.getEnvironment().setActiveProfiles("test"); context.refresh();
         JournalTestConnectionCapability capability=JournalTestConnectionCapability.fromOwnedContainer(MYSQL,context);
+        containerId=capability.containerId();
         var ds=capability.adminDataSource();
-        new ResourceDatabasePopulator(new ClassPathResource("privacy-journal/w3a-test-schema.sql")).execute(ds);
+        store=capability.createW3aPreviewStore(); store.initializeSchema();
+        assertThrows(SecurityException.class,capability::createW3aPreviewStore);
+        assertThrows(SecurityException.class,store::initializeSchema);
         jdbc=new JdbcTemplate(ds); environment=capability.environment();
         System.out.printf("SF_W3A_MYSQL containerId=%s database=%s schema=privacy-journal/w3a-test-schema.sql%n",capability.containerId(),capability.database());
     }
     @AfterAll static void stop(){if(context!=null)context.close();}
+    @AfterEach void evidence(){
+        Fixture f=ACTIVE_FIXTURE.get();
+        if(f!=null)System.out.printf("SF_W3A_EVIDENCE containerId=%s fixtureManifestHash=%s requestRef=%s providerRead=%d providerWrite=0 dispatch=0 disposition=0 crossScopeAccess=%d%n",
+                containerId,f.manifestHash,ApprovalEnvelopeCanonicalizer.digest(f.command.requestId().getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                f.provider.reads.get(),f.provider.crossScopeAttempts.get());
+        ACTIVE_FIXTURE.remove();
+    }
 
     @Test void exactRetryRevalidatesTargetMetadataWithoutRepeatingTargetRead() {
         Fixture f=new Fixture();
         PreviewResult first=f.service.preview(f.command,f.identity);
-        assertEquals("AS_OF_PREVIEW_ONLY",first.status()); assertEquals(1,f.provider.reads.get()); assertEquals(1,f.provider.describes.get());
+        assertEquals("AS_OF_PREVIEW_ONLY",first.status()); assertEquals(1,f.provider.reads.get()); assertEquals(2,f.provider.describes.get());
         PreviewResult retry=f.service.preview(f.command,f.identity);
-        assertEquals("AS_OF_PREVIEW_ONLY",retry.status()); assertEquals(1,f.provider.reads.get()); assertEquals(2,f.provider.describes.get());
+        assertEquals("AS_OF_PREVIEW_ONLY",retry.status()); assertEquals(1,f.provider.reads.get()); assertEquals(3,f.provider.describes.get());
         assertEquals(first.snapshotRef(),retry.snapshotRef());
         f.witness.values.put("scopeHash","scope-changed");
         PreviewResult drift=f.service.preview(f.command,f.identity);
         assertEquals("PREVIEW_STALE",drift.status()); assertTrue(drift.items().isEmpty());
-        assertEquals(1,f.provider.reads.get()); assertEquals(2,f.provider.describes.get());
-        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=?",Integer.class,"tenant-synthetic-w3a"));
+        assertEquals(1,f.provider.reads.get()); assertEquals(3,f.provider.describes.get());
+        assertEquals(0,f.provider.crossScopeAttempts.get());
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
+                f.command.tenantId(),f.command.requestId()));
     }
 
     @Test void sameKeyWithDifferentRequestAndLocalCaseRevisionDriftFailClosed() {
@@ -77,6 +97,24 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         assertEquals(reads,f.provider.reads.get());
     }
 
+    @Test void witnessRevisionMustMatchOwnedCaseHeadBeforeProviderRead() {
+        Fixture f=new Fixture(); f.witness.values.put("caseRevision","5");
+        PreviewResult result=f.service.preview(f.command,f.identity);
+        assertEquals("PREVIEW_STALE",result.status());
+        assertEquals("CASE_REVISION_WITNESS_MISMATCH",result.reasonCode());
+        assertEquals(0,f.provider.reads.get());
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
+                f.command.tenantId(),f.command.requestId()));
+    }
+
+    @Test void scopeHashMustBindAllowlistedSyntheticTargetIds() {
+        Fixture f=new Fixture(); f.witness.allowedTargetIds.add("target-synthetic-other-tenant");
+        PreviewResult result=f.service.preview(f.command,f.identity);
+        assertEquals("PREVIEW_STALE",result.status());
+        assertEquals(0,f.provider.reads.get());
+        assertEquals(0,f.provider.crossScopeAttempts.get());
+    }
+
     @Test void driftAfterFinalReadCanPersistOnlyAsOfHistoryAndReturnsClosedView() {
         Fixture f=new Fixture();
         SyntheticPrivacyRequestService raced=f.serviceWithPreCommit(()->f.witness.values.put("policyHash","policy-drift"));
@@ -84,7 +122,79 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         assertEquals("PREVIEW_STALE",result.status()); assertTrue(result.items().isEmpty());
         assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
                 f.command.tenantId(),f.command.requestId()));
-        assertEquals(1,f.provider.reads.get()); assertEquals(0,f.provider.describes.get());
+        assertEquals(1,f.provider.reads.get()); assertEquals(1,f.provider.describes.get());
+    }
+
+    @Test void scopeDriftBeforeFinalReadPreventsPersistence() {
+        Fixture f=new Fixture();
+        SyntheticPrivacyRequestService raced=f.serviceWithBarriers(()->f.witness.values.put("scopeHash","scope-drift"),()->{});
+        PreviewResult result=raced.preview(f.command,f.identity);
+        assertEquals("PREVIEW_STALE",result.status());
+        assertEquals("SOURCE_DRIFT_BEFORE_FINAL_METADATA",result.reasonCode());
+        assertTrue(result.items().isEmpty());
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
+                f.command.tenantId(),f.command.requestId()));
+        assertEquals(0,f.provider.crossScopeAttempts.get());
+    }
+
+    @Test void commitAckUnknownUsesIndependentReadBackAndCurrentRevalidation() {
+        Fixture f=new Fixture(); store.loseNextCommitAckAfterCommit();
+        PreviewResult result=f.service.preview(f.command,f.identity);
+        assertEquals("AS_OF_PREVIEW_ONLY",result.status());
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
+                f.command.tenantId(),f.command.requestId()));
+        assertEquals(1,f.provider.reads.get()); assertEquals(2,f.provider.describes.get());
+    }
+
+    @Test void twoWorkersUseOneCaseCasAndLoserReadsBackSameIdempotentPreview() throws Exception {
+        Fixture f=new Fixture(); CyclicBarrier barrier=new CyclicBarrier(2);
+        Runnable meet=()->{try{barrier.await();}catch(Exception e){throw new IllegalStateException(e);}};
+        SyntheticPrivacyRequestService left=f.serviceWithBarriers(()->{},meet);
+        SyntheticPrivacyRequestService right=f.serviceWithBarriers(()->{},meet);
+        ExecutorService workers=Executors.newFixedThreadPool(2);
+        try {
+            Future<PreviewResult> a=workers.submit(()->left.preview(f.command,f.identity));
+            Future<PreviewResult> b=workers.submit(()->right.preview(f.command,f.identity));
+            assertEquals("AS_OF_PREVIEW_ONLY",a.get().status()); assertEquals("AS_OF_PREVIEW_ONLY",b.get().status());
+        } finally {workers.shutdownNow();}
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
+                f.command.tenantId(),f.command.requestId()));
+        assertEquals(1L,jdbc.queryForObject("SELECT revision FROM sf_w3a_case WHERE tenant_id=? AND case_ref=?",Long.class,
+                f.command.tenantId(),f.command.caseRef()));
+        assertEquals(0,f.provider.crossScopeAttempts.get());
+    }
+
+    @Test void identityCanonicalFieldsCannotCollideAcrossNewlineBoundaries() {
+        Fixture f=new Fixture();
+        SyntheticIdentityEnvelope left=f.signer.sign("tenant-a\nb","requester-c","subject-w3a",f.command.requestId(),
+                "identity-r1",NOW.plusSeconds(3600),"SYNTHETIC");
+        SyntheticIdentityEnvelope right=f.signer.sign("tenant-a","b\nrequester-c","subject-w3a",f.command.requestId(),
+                "identity-r1",NOW.plusSeconds(3600),"SYNTHETIC");
+        assertNotEquals(left.digest(),right.digest());
+        assertFalse(java.util.Arrays.equals(left.canonicalBytes(),right.canonicalBytes()));
+        SyntheticIdentityEnvelope signatureSwap=new SyntheticIdentityEnvelope(right.tenantId(),right.requesterId(),right.opaqueSubjectRef(),
+                right.requestId(),right.revision(),right.keyId(),right.audience(),right.issuedAt(),right.expiresAt(),left.signature());
+        assertThrows(SecurityException.class,()->f.verifier.verify(signatureSwap,right.tenantId(),right.requesterId(),
+                right.opaqueSubjectRef(),right.requestId(),right.revision()));
+        assertNotEquals(commandFingerprint("tenant-a\nb","requester-c"),commandFingerprint("tenant-a","b\nrequester-c"));
+    }
+    private static String commandFingerprint(String tenant,String requester){
+        return new SyntheticPrivacyRequestService.Command(tenant,requester,"subject","request","identity-r1","case","scope","idem").fingerprint();
+    }
+
+    @Test void productionGuardPreventsAnySyntheticAccessOrPersistence() {
+        Fixture f=new Fixture();
+        MockEnvironment prodEnvironment=new MockEnvironment(); prodEnvironment.setActiveProfiles("prod");
+        SyntheticEnvironmentGuard prodGuard=new SyntheticEnvironmentGuard(prodEnvironment);
+        SyntheticIdentityEvidenceVerifier prodVerifier=new SyntheticIdentityEvidenceVerifier(Map.of(
+                SyntheticIdentityFixtureSigner.KEY_ID,f.signer.keyPair.getPublic()),Clock.fixed(NOW,ZoneOffset.UTC),prodGuard);
+        SyntheticPreviewProviderRegistry prodRegistry=new SyntheticPreviewProviderRegistry(Map.of(f.provider.providerId(),f.provider),prodGuard);
+        SyntheticPrivacyRequestService prodService=new SyntheticPrivacyRequestService(store,prodVerifier,new SyntheticPreviewScopeVerifier(),
+                f.witness,prodRegistry,Clock.fixed(NOW,ZoneOffset.UTC),()->{},()->{});
+        assertEquals("PREVIEW_STALE",prodService.preview(f.command,f.identity).status());
+        assertEquals(0,f.witness.reads.get()); assertEquals(0,f.provider.reads.get());
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
+                f.command.tenantId(),f.command.requestId()));
     }
 
     @Test void exactRetryClosesEachCurrentDriftClassWithoutOverwritingSnapshot() {
@@ -93,10 +203,12 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         int beforeReads=f.provider.reads.get();
         int beforeDescriptions=f.provider.describes.get();
         assertClosedAfterMutation(f,"scopeHash","scope-hash-r2","PREVIEW_STALE");
-        f.reset("scopeHash","scope-hash-r1");
+        f.reset("scopeHash",f.scopeHash);
         assertClosedAfterMutation(f,"policyHash","policy-hash-r2","PREVIEW_STALE");
         f.reset("policyHash","policy-hash-r1");
         assertClosedAfterMutation(f,"holdState","ACTIVE","PREVIEW_BLOCKED");
+        f.reset("holdState","CLEAR");
+        assertClosedAfterMutation(f,"holdState","UNKNOWN","PREVIEW_UNKNOWN");
         f.reset("holdState","CLEAR");
         assertClosedAfterMutation(f,"policyRevocation","REVOKED","PREVIEW_STALE");
         f.reset("policyRevocation","ACTIVE");
@@ -107,13 +219,31 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         f.provider.version="target-r2";
         assertEquals("PREVIEW_STALE",f.service.preview(f.command,f.identity).status());
         f.provider.version="target-r1";
+        f.provider.contentHash="sha256-synthetic-r2";
+        assertEquals("PREVIEW_STALE",f.service.preview(f.command,f.identity).status());
+        f.provider.contentHash="sha256-synthetic-r1";
         assertClosedAfterMutation(f,"caseRevision","9","PREVIEW_STALE");
         f.reset("caseRevision","0");
         assertClosedAfterMutation(f,"journalState","UNKNOWN","PREVIEW_UNKNOWN");
         assertEquals(beforeReads,f.provider.reads.get());
-        assertEquals(beforeDescriptions+1,f.provider.describes.get());
+        assertEquals(beforeDescriptions+2,f.provider.describes.get());
         assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
                 f.command.tenantId(),f.command.requestId()));
+    }
+
+    @Test void successfulExactRetryRechecksIdentityAndPolicyExpiryAtFinalClockRead() {
+        Fixture f=new Fixture();
+        f.witness.values.put("policyExpiresAt",NOW.plusSeconds(1800).toString());
+        assertEquals("AS_OF_PREVIEW_ONLY",f.service.preview(f.command,f.identity).status());
+        int reads=f.provider.reads.get();
+        f.clock.set(NOW.plusSeconds(2700));
+        PreviewResult policyExpired=f.service.preview(f.command,f.identity);
+        assertEquals("PREVIEW_STALE",policyExpired.status()); assertTrue(policyExpired.items().isEmpty());
+        assertEquals(reads,f.provider.reads.get());
+        f.clock.set(NOW.plusSeconds(3601));
+        PreviewResult identityExpired=f.service.preview(f.command,f.identity);
+        assertEquals("PREVIEW_STALE",identityExpired.status()); assertTrue(identityExpired.items().isEmpty());
+        assertEquals(reads,f.provider.reads.get());
     }
 
     private static void assertClosedAfterMutation(Fixture f,String key,String value,String expected){
@@ -126,9 +256,53 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         Fixture f=new Fixture();
         SyntheticIdentityEnvelope invalid=new SyntheticIdentityEnvelope("tenant-synthetic-w3a","requester-w3a","subject-w3a",
                 f.command.requestId(),"identity-r1",SyntheticIdentityFixtureSigner.KEY_ID,"SYNTHETIC",
-                NOW.plusSeconds(3600),new byte[]{1,2,3});
+                NOW.minusSeconds(10),NOW.plusSeconds(3600),new byte[]{1,2,3});
         assertEquals("PREVIEW_STALE",f.service.preview(f.command,invalid).status());
         assertEquals(0,f.provider.reads.get()); assertEquals(0,f.witness.reads.get());
+    }
+
+    @Test void everyIdentityBindingFieldAndTimeBoundaryIsVerifiedBeforeWitnessOrProviderRead() {
+        Fixture f=new Fixture();
+        List<SyntheticIdentityEnvelope> variants=List.of(
+                f.signer.signCustom("tenant-other","requester-w3a","subject-w3a",f.command.requestId(),"identity-r1",
+                        SyntheticIdentityFixtureSigner.KEY_ID,"SYNTHETIC",NOW.minusSeconds(60),NOW.plusSeconds(3600)),
+                f.signer.signCustom("tenant-synthetic-w3a","requester-other","subject-w3a",f.command.requestId(),"identity-r1",
+                        SyntheticIdentityFixtureSigner.KEY_ID,"SYNTHETIC",NOW.minusSeconds(60),NOW.plusSeconds(3600)),
+                f.signer.signCustom("tenant-synthetic-w3a","requester-w3a","subject-other",f.command.requestId(),"identity-r1",
+                        SyntheticIdentityFixtureSigner.KEY_ID,"SYNTHETIC",NOW.minusSeconds(60),NOW.plusSeconds(3600)),
+                f.signer.signCustom("tenant-synthetic-w3a","requester-w3a","subject-w3a","request-other","identity-r1",
+                        SyntheticIdentityFixtureSigner.KEY_ID,"SYNTHETIC",NOW.minusSeconds(60),NOW.plusSeconds(3600)),
+                f.signer.signCustom("tenant-synthetic-w3a","requester-w3a","subject-w3a",f.command.requestId(),"identity-r2",
+                        SyntheticIdentityFixtureSigner.KEY_ID,"SYNTHETIC",NOW.minusSeconds(60),NOW.plusSeconds(3600)),
+                f.signer.signCustom("tenant-synthetic-w3a","requester-w3a","subject-w3a",f.command.requestId(),"identity-r1",
+                        "unregistered-key","SYNTHETIC",NOW.minusSeconds(60),NOW.plusSeconds(3600)),
+                f.signer.signCustom("tenant-synthetic-w3a","requester-w3a","subject-w3a",f.command.requestId(),"identity-r1",
+                        SyntheticIdentityFixtureSigner.KEY_ID,"PRODUCTION",NOW.minusSeconds(60),NOW.plusSeconds(3600)),
+                f.signer.signCustom("tenant-synthetic-w3a","requester-w3a","subject-w3a",f.command.requestId(),"identity-r1",
+                        SyntheticIdentityFixtureSigner.KEY_ID,"SYNTHETIC",NOW.plusSeconds(1),NOW.plusSeconds(3600)),
+                f.signer.signCustom("tenant-synthetic-w3a","requester-w3a","subject-w3a",f.command.requestId(),"identity-r1",
+                        SyntheticIdentityFixtureSigner.KEY_ID,"SYNTHETIC",NOW.minusSeconds(3600),NOW.minusSeconds(1)));
+        for(SyntheticIdentityEnvelope variant:variants){
+            assertEquals("PREVIEW_STALE",f.service.preview(f.command,variant).status());
+            assertEquals(0,f.witness.reads.get()); assertEquals(0,f.provider.reads.get());
+        }
+    }
+
+    @Test void verifiedCapabilitiesHavePrivateConstructorsAndServiceHasNoAuthorityDependencies() {
+        assertTrue(java.lang.reflect.Modifier.isPrivate(SyntheticIdentityEvidenceVerifier.VerifiedIdentity.class
+                .getDeclaredConstructors()[0].getModifiers()));
+        assertTrue(java.lang.reflect.Modifier.isPrivate(SyntheticPreviewScopeVerifier.VerifiedScope.class
+                .getDeclaredConstructors()[0].getModifiers()));
+        assertFalse(java.util.Arrays.stream(SyntheticPrivacyRequestService.class.getDeclaredFields())
+                .anyMatch(field->field.getType()==VerifiedApproval.class||field.getType()==VerifiedDispatchFence.class
+                        ||field.getType()==VerifiedActionReceipt.class));
+        assertFalse(java.util.Arrays.stream(SyntheticPrivacyRequestService.class.getDeclaredFields())
+                .anyMatch(field->javax.sql.DataSource.class.isAssignableFrom(field.getType())));
+        assertFalse(java.util.Arrays.stream(SyntheticPrivacyRequestService.class.getDeclaredConstructors())
+                .flatMap(constructor->java.util.Arrays.stream(constructor.getParameterTypes()))
+                .anyMatch(type->javax.sql.DataSource.class.isAssignableFrom(type)));
+        assertEquals(0,java.util.Arrays.stream(SyntheticPreviewPort.class.getMethods())
+                .filter(method->method.getName().toLowerCase(java.util.Locale.ROOT).matches(".*(write|delete|dispatch|execute).*" )).count());
     }
 
     private static final Instant NOW=Instant.parse("2026-10-16T00:00:00Z");
@@ -137,37 +311,70 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         final TestProvider provider=new TestProvider();
         final TestWitness witness=new TestWitness();
         final SyntheticEnvironmentGuard guard=new SyntheticEnvironmentGuard(environment);
+        final MutableClock clock=new MutableClock(NOW);
         final SyntheticIdentityEnvelope identity=signer.sign("tenant-synthetic-w3a","requester-w3a","subject-w3a",
                 "request-w3a-"+java.util.UUID.randomUUID(),"identity-r1",NOW.plusSeconds(3600),"SYNTHETIC");
         final SyntheticPrivacyRequestService.Command command=new SyntheticPrivacyRequestService.Command("tenant-synthetic-w3a",
                 "requester-w3a","subject-w3a",identity.requestId(),"identity-r1","case-w3a-"+java.util.UUID.randomUUID(),
                 "scope-w3a","idem-w3a");
         final SyntheticIdentityEvidenceVerifier verifier=new SyntheticIdentityEvidenceVerifier(Map.of(
-                SyntheticIdentityFixtureSigner.KEY_ID,signer.keyPair.getPublic()),Clock.fixed(NOW,ZoneOffset.UTC),guard);
+                SyntheticIdentityFixtureSigner.KEY_ID,signer.keyPair.getPublic()),clock,guard);
         final SyntheticPreviewProviderRegistry registry=new SyntheticPreviewProviderRegistry(Map.of(provider.providerId(),provider),guard);
-        final SyntheticPrivacyRequestService service=serviceWithPreCommit(()->{});
-        Fixture(){witness.values.put("identityHash",identity.digest());witness.values.put("identityExpiresAt",identity.expiresAt().toString());}
+        final SyntheticPrivacyRequestService service;
+        String manifestHash;
+        Fixture(){
+            witness.values.put("identityHash",identity.digest());witness.values.put("identityExpiresAt",identity.expiresAt().toString());
+            scopeHash=SyntheticPreviewScopeVerifier.computeScopeHash(verifier.verify(identity,command.tenantId(),command.requesterId(),
+                    command.subjectRef(),command.requestId(),command.identityRevision()),command,"scope-r1",witness.allowedTargetIds);
+            witness.values.put("scopeHash",scopeHash);
+            List<String> manifestFields=new java.util.ArrayList<>(List.of(command.fingerprint(),identity.digest()));
+            witness.values.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(e->manifestFields.add(e.getKey()+"="+e.getValue()));
+            witness.allowedTargetIds.stream().sorted().forEach(manifestFields::add);
+            manifestHash=ApprovalEnvelopeCanonicalizer.digest(SyntheticCanonicalizer.encode("SF-W3A-GENERATED-FIXTURE","v1",
+                    manifestFields.toArray(String[]::new)));
+            provider.bind(command.requestId(),identity.digest(),scopeHash,command.caseRef());
+            store.seedScopedCase(command.tenantId(),command.caseRef(),0);
+            ACTIVE_FIXTURE.set(this);
+            service=serviceWithBarriers(()->{},()->{});
+        }
+        String scopeHash;
         void reset(String key,String value){witness.values.put(key,value);}
-        SyntheticPrivacyRequestService serviceWithPreCommit(Runnable hook){return new SyntheticPrivacyRequestService(jdbc.getDataSource(),environment,
-                verifier,witness,registry,guard,Clock.fixed(NOW,ZoneOffset.UTC),hook);}
+        SyntheticPrivacyRequestService serviceWithPreCommit(Runnable hook){return serviceWithBarriers(()->{},hook);}
+        SyntheticPrivacyRequestService serviceWithBarriers(Runnable beforeFinal,Runnable beforeCommit){return new SyntheticPrivacyRequestService(
+                store,verifier,new SyntheticPreviewScopeVerifier(),witness,registry,clock,beforeFinal,beforeCommit);}
     }
     private static class TestProvider implements SyntheticPreviewPort {
         final AtomicInteger reads=new AtomicInteger(), describes=new AtomicInteger();
         volatile String version="target-r1";
+        volatile String contentHash="sha256-synthetic-r1";
+        volatile String expectedRequestId,expectedIdentityHash,expectedScopeHash,expectedCaseRef;
         public String providerId(){return "synthetic-provider-w3a";} public String audience(){return "SYNTHETIC";}
-        public List<String> registeredTargets(String tenant,String subject,String scope){return List.of("target-synthetic-01");}
-        public SyntheticTarget read(String tenant,String subject,String target){reads.incrementAndGet();return current(target);}
-        public SyntheticTarget describeCurrent(String tenant,String subject,String scope,String target){
-            describes.incrementAndGet();
-            if (!"tenant-synthetic-w3a".equals(tenant) || !"subject-w3a".equals(subject) || !"scope-w3a".equals(scope))
-                throw new SecurityException("scope外metadata readは禁止です");
+        final AtomicInteger crossScopeAttempts=new AtomicInteger();
+        void bind(String request,String identityHash,String scopeHash,String caseRef){
+            expectedRequestId=request;expectedIdentityHash=identityHash;expectedScopeHash=scopeHash;expectedCaseRef=caseRef;
+        }
+        public SyntheticTarget read(SyntheticPreviewScopeVerifier.VerifiedScope scope,String target){
+            reads.incrementAndGet();
+            if(!scope.permits("tenant-synthetic-w3a","requester-w3a","subject-w3a",expectedRequestId,"identity-r1",expectedIdentityHash,
+                    "scope-w3a","scope-r1",expectedScopeHash,expectedCaseRef,"synthetic-provider-w3a","SYNTHETIC",target)){
+                crossScopeAttempts.incrementAndGet();throw new SecurityException("scope外readは禁止です");
+            }
             return current(target);
         }
-        private SyntheticTarget current(String id){return new SyntheticTarget(id,version,"sha256-synthetic-r1",NOW);}
+        public SyntheticTarget describeCurrent(SyntheticPreviewScopeVerifier.VerifiedScope scope,String target){
+            describes.incrementAndGet();
+            if(!scope.permits("tenant-synthetic-w3a","requester-w3a","subject-w3a",expectedRequestId,"identity-r1",expectedIdentityHash,
+                    "scope-w3a","scope-r1",expectedScopeHash,expectedCaseRef,"synthetic-provider-w3a","SYNTHETIC",target)){
+                crossScopeAttempts.incrementAndGet();throw new SecurityException("scope外metadata readは禁止です");
+            }
+            return current(target);
+        }
+        private SyntheticTarget current(String id){return new SyntheticTarget(id,version,contentHash,NOW);}
     }
     private static class TestWitness implements SyntheticPreviewWitnessPort {
         final AtomicInteger reads=new AtomicInteger();
         final Map<String,String> values=new HashMap<>();
+        final List<String> allowedTargetIds=new java.util.concurrent.CopyOnWriteArrayList<>(List.of("target-synthetic-01"));
         TestWitness(){
             values.put("identityRevision","identity-r1");values.put("identityHash","pending");values.put("keyId",SyntheticIdentityFixtureSigner.KEY_ID);
             values.put("audience","SYNTHETIC");values.put("identityExpiresAt",NOW.plusSeconds(3600).toString());values.put("identityRevocation","ACTIVE");
@@ -181,7 +388,18 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         public SourceSnapshot readCurrent(String tenant,String requester,String subject,String request,String caseRef,String scope){
             reads.incrementAndGet(); Map<String,String> current=new HashMap<>(values);current.put("requesterId",requester);
             current.put("requestId",request);current.put("caseRef",caseRef);current.put("scopeId",scope);
-            return new SourceSnapshot(Map.copyOf(current),NOW.plusNanos(reads.get()));
+            Instant observed=NOW.plusNanos(reads.get());
+            Map<String,Instant> sourceTimes=new HashMap<>();
+            SyntheticPreviewWitnessPort.SOURCE_NAMES.forEach(name->sourceTimes.put(name,observed));
+            return new SourceSnapshot(Map.copyOf(current),allowedTargetIds,sourceTimes,observed);
         }
+    }
+    private static final class MutableClock extends Clock {
+        private final AtomicReference<Instant> now;
+        MutableClock(Instant initial){now=new AtomicReference<>(initial);}
+        void set(Instant value){now.set(value);}
+        @Override public ZoneOffset getZone(){return ZoneOffset.UTC;}
+        @Override public Clock withZone(java.time.ZoneId zone){return this;}
+        @Override public Instant instant(){return now.get();}
     }
 }
