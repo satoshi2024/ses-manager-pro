@@ -849,10 +849,10 @@ class ImportMetadataRealMySqlTest {
     void source変更はcandidateのresourceLockとgate保持中に待機する() throws Exception {
         long runId = prepareValidatedCustomerJob();
         GatePause pause = pauseRealWriteGate();
-        assertServiceCommitsBeforeMutation(pause, "t_import_source_system",
+        assertSourceMutationWaitsForCandidate(pause,
                 "UPDATE t_import_source_system SET status='DISABLED',version_no=version_no+1 WHERE tenant_id=? AND id=?",
                 new Object[]{tenantId, sourceId},
-                () -> candidateService.registerCandidate(jobId, runId, 1), "uk_import_source_tenant_id");
+                () -> candidateService.registerCandidate(jobId, runId, 1));
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_identity_registry WHERE tenant_id=? AND source_system_id=?",
                 Integer.class, tenantId, sourceId));
         BusinessException drift = assertThrows(BusinessException.class,
@@ -967,6 +967,105 @@ class ImportMetadataRealMySqlTest {
                     primaryFailure);
         }
     }
+    private long assertSourceMutationWaitsForCandidate(GatePause pause, String mutationSql,
+                                                       Object[] mutationParams,
+                                                       java.util.concurrent.Callable<Long> serviceAction) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        AtomicReference<Long> writerId = new AtomicReference<>();
+        Future<Long> service = null;
+        Future<?> mutation = null;
+        Throwable primaryFailure = null;
+        try {
+            service = pool.submit(() -> withActorContext(serviceAction));
+            assertTrue(pause.entered.await(10, TimeUnit.SECONDS), "実candidate serviceのwrite gateに到達しませんでした");
+            assertGateRunsInReadCommittedTransaction(pause);
+            mutation = pool.submit(() -> updateAndCommit(mutationSql, mutationParams, writerId));
+            SourceLockWait observed = awaitSourceLockWait(writerId, pause.connectionId, service, mutation);
+            System.out.printf("NF06 source行lock wait確認: index=%s keyShape=%s request=%s/%s blocker=%s/%s%n",
+                    observed.indexName(), "PRIMARY".equals(observed.indexName()) ? "sourceId" : "(tenant_id,sourceId)",
+                    observed.requestType(), observed.requestMode(), observed.blockerType(), observed.blockerMode());
+            pause.release.countDown();
+            long result = service.get(10, TimeUnit.SECONDS);
+            mutation.get(10, TimeUnit.SECONDS);
+            return result;
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            pause.release.countDown();
+            reportCleanupFailures("candidate/source lock wait fixture",
+                    awaitFutures(futures(service, mutation), pool, false), primaryFailure);
+        }
+    }
+
+    private SourceLockWait awaitSourceLockWait(AtomicReference<Long> requester, AtomicReference<Long> blocker,
+                                               Future<?> service, Future<?> mutation) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            assertFuturePending(service, "candidate service");
+            assertFuturePending(mutation, "source mutation");
+            Long requesterId = requester.get(), blockerId = blocker.get();
+            if (requesterId != null && blockerId != null) {
+                List<SourceLockWait> waits = jdbc.query("""
+                        SELECT req.INDEX_NAME, req.LOCK_DATA, req.LOCK_TYPE, req.LOCK_MODE, req.LOCK_STATUS,
+                               blk.LOCK_TYPE, blk.LOCK_MODE, blk.LOCK_STATUS
+                        FROM performance_schema.data_lock_waits w
+                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
+                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                        JOIN performance_schema.data_locks req
+                          ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                        JOIN performance_schema.data_locks blk
+                          ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
+                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='t_import_source_system'
+                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='t_import_source_system'
+                          AND req.INDEX_NAME=blk.INDEX_NAME AND req.LOCK_DATA=blk.LOCK_DATA
+                          AND req.LOCK_TYPE='RECORD' AND req.LOCK_STATUS='WAITING'
+                          AND req.LOCK_MODE IN ('X','X,REC_NOT_GAP')
+                          AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_STATUS='GRANTED'
+                          AND blk.LOCK_MODE IN ('X','X,REC_NOT_GAP')
+                        """, (rs, row) -> new SourceLockWait(rs.getString(1), rs.getString(2),
+                        rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
+                        rs.getString(7), rs.getString(8)), requesterId, blockerId);
+                for (SourceLockWait wait : waits) {
+                    if (isExpectedSourceLock(wait)) return wait;
+                }
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError("candidate gate保持中のsource行ロック待機が確認できませんでした: "
+                + "requester/blocker=" + requester.get() + "/" + blocker.get()
+                + "; 許可index=PRIMARY(sourceId),uk_import_source_tenant_id(tenant_id,sourceId)");
+    }
+
+    private boolean isExpectedSourceLock(SourceLockWait wait) {
+        if (!"WAITING".equals(wait.requestStatus()) || !"GRANTED".equals(wait.blockerStatus())
+                || !"RECORD".equals(wait.requestType()) || !"RECORD".equals(wait.blockerType())
+                || !("X".equals(wait.requestMode()) || "X,REC_NOT_GAP".equals(wait.requestMode()))
+                || !("X".equals(wait.blockerMode()) || "X,REC_NOT_GAP".equals(wait.blockerMode()))) return false;
+        if ("PRIMARY".equals(wait.indexName())) return Long.toString(sourceId).equals(wait.lockData());
+        return "uk_import_source_tenant_id".equals(wait.indexName())
+                && isSourceTenantIdLockData(wait.lockData());
+    }
+
+    private boolean isSourceTenantIdLockData(String lockData) {
+        if (lockData == null) return false;
+        String[] keyParts = lockData.split(",", -1);
+        return keyParts.length == 2 && tenantId.equals(unquoteLockValue(keyParts[0].trim()))
+                && Long.toString(sourceId).equals(unquoteLockValue(keyParts[1].trim()));
+    }
+
+    private String unquoteLockValue(String value) {
+        if (value.length() >= 2 && ((value.startsWith("'") && value.endsWith("'"))
+                || (value.startsWith("\"") && value.endsWith("\"")))) {
+            return value.substring(1, value.length() - 1);
+        }
+        return value;
+    }
+
+    private record SourceLockWait(String indexName, String lockData, String requestType, String requestMode,
+                                  String requestStatus, String blockerType, String blockerMode,
+                                  String blockerStatus) { }
     private void updateAndCommit(String sql, Object[] params, AtomicReference<Long> connectionId) {
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
