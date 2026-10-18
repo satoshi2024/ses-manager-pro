@@ -10,9 +10,9 @@ final class SyntheticPreviewProviderRegistry {
         this.providers=Map.copyOf(providers);this.guard=guard;
         this.providers.forEach((id,p)->{if(!id.equals(p.providerId()))throw new IllegalArgumentException("provider IDが一致しません");});
     }
-    SyntheticPreviewPort require(String id,String audience){
-        SyntheticPreviewPort p=providers.get(id);
-        if(p==null||!p.audience().equals(audience))throw new SecurityException("synthetic provider未登録またはaudience不一致です");
+    SyntheticPreviewPort require(SyntheticPreviewScopeVerifier.VerifiedScope scope){
+        SyntheticPreviewPort p=providers.get(scope.providerId());
+        if(p==null||!p.audience().equals(scope.providerAudience()))throw new SecurityException("synthetic provider未登録またはaudience不一致です");
         guard.requireSyntheticAllowed(p.audience());return p;
     }
 }

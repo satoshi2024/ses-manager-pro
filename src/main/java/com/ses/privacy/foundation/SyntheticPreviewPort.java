@@ -7,8 +7,7 @@ import java.util.List;
 interface SyntheticPreviewPort {
     String providerId();
     String audience();
-    List<String> registeredTargets(String tenantId, String subjectRef, String scopeId);
-    SyntheticTarget read(String tenantId, String subjectRef, String targetId);
-    SyntheticTarget describeCurrent(String tenantId, String subjectRef, String scopeId, String targetId);
+    SyntheticTarget read(SyntheticPreviewScopeVerifier.VerifiedScope scope, String targetId);
+    SyntheticTarget describeCurrent(SyntheticPreviewScopeVerifier.VerifiedScope scope, String targetId);
     record SyntheticTarget(String id, String version, String contentHash, Instant observedAt) { }
 }
