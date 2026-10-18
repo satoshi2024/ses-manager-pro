@@ -25,6 +25,7 @@ import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /** MANAGEMENT_COPILOTのartifact snapshotとredacted attemptを記録する。 */
@@ -74,9 +75,10 @@ public class CopilotRunService {
         if (attempt == null || !"QUERY".equals(attempt.attemptKind())) {
             throw new IllegalArgumentException("query attempt is required");
         }
-        completeAttempt(attempt, latencyMs, succeeded ? "SUCCEEDED" : "FAILED",
+        int updated = completeAttempt(attempt, latencyMs, succeeded ? "SUCCEEDED" : "FAILED",
                 succeeded ? null : "QUERY_EXECUTION_FAILED", null, "NOT_APPLICABLE",
                 succeeded ? "SUCCEEDED" : "FAILED", metricCount, null);
+        if (updated != 1) throw new IllegalStateException("Copilot query attempt outcome was not committed");
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -100,8 +102,8 @@ public class CopilotRunService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public void completeSummaryAttempt(CopilotAttemptRecord attempt, long latencyMs,
-                                       SummaryResponse response) {
+    public SummaryCompletionResult completeSummaryAttempt(CopilotAttemptRecord attempt, long latencyMs,
+                                                           SummaryResponse response) {
         if (attempt == null || !"SUMMARY".equals(attempt.attemptKind()) || response == null) {
             throw new IllegalArgumentException("summary attempt and outcome are required");
         }
@@ -117,8 +119,11 @@ public class CopilotRunService {
         }
         String costState = evidence.costState().name();
         String providerStatus = safeOutcome(response.providerStatus());
-        completeAttempt(attempt, latencyMs, succeeded ? "SUCCEEDED" : "FAILED",
+        int updated = completeAttempt(attempt, latencyMs, succeeded ? "SUCCEEDED" : "FAILED",
                 succeeded ? null : providerStatus, cost, costState, providerStatus, null, evidence);
+        if (updated == 0) return SummaryCompletionResult.STALE;
+        if (updated != 1) throw new IllegalStateException("Copilot summary attempt update count was invalid");
+        return SummaryCompletionResult.COMPLETED;
     }
 
     /** 旧呼出し経路は認可済みcontextを渡せないため拒否する。 */
@@ -199,9 +204,13 @@ public class CopilotRunService {
         return metadata;
     }
 
-    private void completeAttempt(CopilotAttemptRecord attempt, long latencyMs, String runStatus,
+    private int completeAttempt(CopilotAttemptRecord attempt, long latencyMs, String runStatus,
                                  String errorCode, Integer costJpy, String costState,
                                  String outcome, Integer metricCount, SummaryCostEvidence costEvidence) {
+        String activeTenant = AccountingTenantContextHolder.requireTenantContext();
+        if (!Objects.equals(activeTenant, attempt.tenantId())) {
+            throw BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+        }
         Map<String, Object> metadata = new LinkedHashMap<>(attempt.metadata());
         metadata.put("outcome", outcome);
         metadata.put("latencyMs", boundedLatency(latencyMs));
@@ -252,9 +261,7 @@ public class CopilotRunService {
                 .set(AiRecommendationRun::getErrorCode, errorCode)
                 .set(AiRecommendationRun::getRedactedSummaryJson, json)
                 .set(AiRecommendationRun::getInputHash, sha256(json));
-        if (runMapper.update(null, update) != 1) {
-            throw new IllegalStateException("Copilot attempt outcome was not committed");
-        }
+        return runMapper.update(null, update);
     }
 
     private void putSafeCode(Map<String, Object> metadata, String key, String value) {
@@ -316,6 +323,8 @@ public class CopilotRunService {
                                        String attemptKind, String tenantId,
                                        CopilotArtifactSnapshot artifact, Map<String, Object> metadata) {
     }
+
+    public enum SummaryCompletionResult { COMPLETED, STALE }
 
     /** Query API互換用のresult view。summary attemptは別traceで永続化する。 */
     public record CopilotRunRecord(Long runId, String traceId, String queryId, String catalogVersion) {

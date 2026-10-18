@@ -178,20 +178,23 @@ class CopilotRunServiceTest {
         CopilotRunService.CopilotArtifactSnapshot artifact = new CopilotRunService.CopilotArtifactSnapshot(
                 72L, "mock", "mock-management-copilot", "nf08-f1", "config-hash", "catalog-v1", 4);
 
-        service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "not-sent"), 1,
-                SummaryResponse.unavailable("COST_UNKNOWN", new SummaryCostEvidence(
-                        CopilotCostState.NOT_SENT, null, null, DispatchOutcome.notStarted("DENIED"),
-                        null, null, "DENIED")));
-        service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "actual"), 2,
-                SummaryResponse.unavailable("FAILED", new SummaryCostEvidence(
-                        CopilotCostState.ACTUAL, 7, null,
-                        new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED, "RESPONSE_RECEIVED"),
-                        null, new CopilotProviderUsage(10, 2, 12, null, null), "USAGE_VALID")));
-        CopilotProviderUsage rejectedUsage = new CopilotProviderUsage(12, 4, 16, 0, 0);
-        service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "unknown"), 3,
-                SummaryResponse.unavailable("FAILED", SummaryCostEvidence.fromPreflight(null,
-                        new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED, "PROVIDER_RESPONSE_RECEIVED"),
-                        rejectedUsage, "COPILOT_RESPONSE_INVALID")));
+        AccountingTenantContextHolder.runWithTenant("tenant-a", () -> {
+            service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "not-sent"), 1,
+                    SummaryResponse.unavailable("COST_UNKNOWN", new SummaryCostEvidence(
+                            CopilotCostState.NOT_SENT, null, null, DispatchOutcome.notStarted("DENIED"),
+                            null, null, "DENIED")));
+            service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "actual"), 2,
+                    SummaryResponse.unavailable("FAILED", new SummaryCostEvidence(
+                            CopilotCostState.ACTUAL, 7, null,
+                            new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED, "RESPONSE_RECEIVED"),
+                            null, new CopilotProviderUsage(10, 2, 12, null, null), "USAGE_VALID")));
+            CopilotProviderUsage rejectedUsage = new CopilotProviderUsage(12, 4, 16, 0, 0);
+            service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "unknown"), 3,
+                    SummaryResponse.unavailable("FAILED", SummaryCostEvidence.fromPreflight(null,
+                            new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED,
+                                    "PROVIDER_RESPONSE_RECEIVED"),
+                            rejectedUsage, "COPILOT_RESPONSE_INVALID")));
+        });
 
         ArgumentCaptor<Wrapper<AiRecommendationRun>> captor = ArgumentCaptor.forClass(Wrapper.class);
         verify(runMapper, times(3)).update(org.mockito.ArgumentMatchers.<AiRecommendationRun>isNull(),
