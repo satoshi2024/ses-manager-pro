@@ -16,12 +16,16 @@ import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DataAccessException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.junit.jupiter.api.Tag;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -32,6 +36,8 @@ import java.security.MessageDigest;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,6 +48,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -49,6 +56,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.reset;
 
 /** C2-B1: MySQL実transactionでsummary metadata、tenant境界、CASとrollbackを検証する。 */
 @SpringBootTest
@@ -76,7 +87,7 @@ class CopilotRunServiceMySqlIntegrationTest {
     @Autowired private CopilotRunService runService;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private DataSource dataSource;
-    @Autowired private ObjectMapper objectMapper;
+    @SpyBean private ObjectMapper objectMapper;
     @Autowired private PlatformTransactionManager transactionManager;
 
     @AfterEach
@@ -145,6 +156,8 @@ class CopilotRunServiceMySqlIntegrationTest {
     @Test
     void 反復完了はSTALEとなりterminal行の全列を変更しない() throws Exception {
         Fixture fixture = createFixture("tenant-a");
+        Fixture tenantBSentinel = createFixture("tenant-b");
+        Snapshot sentinelBefore = readIndependently(tenantBSentinel.runId());
         SummaryCostEvidence evidence = unknownEvidence();
         SummaryResponse response = SummaryResponse.unavailable("SUMMARY_REJECTED", evidence);
         AccountingTenantContextHolder.runWithTenant("tenant-a",
@@ -157,6 +170,7 @@ class CopilotRunServiceMySqlIntegrationTest {
 
         assertEquals(CopilotRunService.SummaryCompletionResult.STALE, duplicate);
         assertEquals(terminal, readIndependently(fixture.runId()));
+        assertEquals(sentinelBefore, readIndependently(tenantBSentinel.runId()));
     }
 
     @Test
@@ -180,6 +194,8 @@ class CopilotRunServiceMySqlIntegrationTest {
     @Test
     void DB行のtenant_trace_usecase_status_version不一致はSTALEで全列不変() throws Exception {
         Fixture traceFixture = createFixture("tenant-a");
+        Fixture tenantBSentinel = createFixture("tenant-b");
+        Snapshot sentinelBefore = readIndependently(tenantBSentinel.runId());
         Snapshot traceBefore = readIndependently(traceFixture.runId());
         CopilotRunService.CopilotAttemptRecord wrongTrace = attempt(traceFixture, "wrong-trace", "tenant-a");
         assertEquals(CopilotRunService.SummaryCompletionResult.STALE,
@@ -220,6 +236,7 @@ class CopilotRunServiceMySqlIntegrationTest {
                 AccountingTenantContextHolder.runWithTenant("tenant-a", () -> runService.completeSummaryAttempt(
                         versionFixture.attempt(), 1, SummaryResponse.unavailable("STALE", unknownEvidence()))));
         assertEquals(versionBefore, readIndependently(versionFixture.runId()));
+        assertEquals(sentinelBefore, readIndependently(tenantBSentinel.runId()));
     }
 
     @Test
@@ -254,7 +271,9 @@ class CopilotRunServiceMySqlIntegrationTest {
     @Test
     void 外側transactionのrollback後はcommit前の全列へ戻る() throws Exception {
         Fixture fixture = createFixture("tenant-a");
+        Fixture tenantBSentinel = createFixture("tenant-b");
         Snapshot before = readIndependently(fixture.runId());
+        Snapshot sentinelBefore = readIndependently(tenantBSentinel.runId());
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
 
         assertThrows(RollbackMarker.class, () -> transaction.execute(status -> {
@@ -266,6 +285,127 @@ class CopilotRunServiceMySqlIntegrationTest {
         }));
 
         assertEquals(before, readIndependently(fixture.runId()));
+        assertEquals(sentinelBefore, readIndependently(tenantBSentinel.runId()));
+    }
+
+    @Test
+    void completionJSONの書込前serialization失敗は元causeを保ち二tenant全列不変() throws Exception {
+        assertTrue(AopUtils.isAopProxy(runService));
+        Fixture fixture = createFixture("tenant-a");
+        Fixture tenantBSentinel = createFixture("tenant-b");
+        Snapshot before = readIndependently(fixture.runId());
+        Snapshot sentinelBefore = readIndependently(tenantBSentinel.runId());
+        IllegalArgumentException serializationCause = new IllegalArgumentException("fixture serialization failure");
+
+        doAnswer(invocation -> {
+            Object value = invocation.getArgument(0);
+            if (value instanceof Map<?, ?> map && "SERIALIZATION_FAIL".equals(map.get("outcome"))) {
+                throw serializationCause;
+            }
+            return invocation.callRealMethod();
+        }).when(objectMapper).writeValueAsString(any());
+
+        try {
+            IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                    () -> AccountingTenantContextHolder.runWithTenant("tenant-a",
+                            () -> runService.completeSummaryAttempt(fixture.attempt(), 8,
+                                    SummaryResponse.unavailable("SERIALIZATION_FAIL", unknownEvidence()))));
+            assertSame(serializationCause, thrown.getCause());
+            assertEquals(before, readIndependently(fixture.runId()));
+            assertEquals(sentinelBefore, readIndependently(tenantBSentinel.runId()));
+        } finally {
+            reset(objectMapper);
+        }
+    }
+
+    @Test
+    void MySQL実UPDATE失敗はSQLStateとcauseを保ち二tenant全列不変() throws Exception {
+        assertTrue(AopUtils.isAopProxy(runService));
+        Fixture fixture = createFixture("tenant-a");
+        Fixture tenantBSentinel = createFixture("tenant-b");
+        Snapshot before = readIndependently(fixture.runId());
+        Snapshot sentinelBefore = readIndependently(tenantBSentinel.runId());
+        String triggerName = "tr_nf08_fail_" + UUID.randomUUID().toString().replace("-", "").substring(0, 20);
+
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TRIGGER " + triggerName + " BEFORE UPDATE ON t_ai_recommendation_run "
+                    + "FOR EACH ROW BEGIN IF OLD.id = " + fixture.runId() + " THEN "
+                    + "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'nf08 fixture update failure'; "
+                    + "END IF; END");
+        }
+        try {
+            DataAccessException thrown = assertThrows(DataAccessException.class,
+                    () -> AccountingTenantContextHolder.runWithTenant("tenant-a",
+                            () -> runService.completeSummaryAttempt(fixture.attempt(), 8,
+                                    SummaryResponse.unavailable("SQL_FAIL", unknownEvidence()))));
+            SQLException sqlCause = findSqlException(thrown);
+            assertNotNull(sqlCause);
+            assertEquals("45000", sqlCause.getSQLState());
+            assertEquals("nf08 fixture update failure", sqlCause.getMessage());
+            assertEquals(before, readIndependently(fixture.runId()));
+            assertEquals(sentinelBefore, readIndependently(tenantBSentinel.runId()));
+        } finally {
+            try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+                statement.execute("DROP TRIGGER IF EXISTS " + triggerName);
+            }
+        }
+    }
+
+    @Test
+    void beforeCommit失敗はCOMPLETED応答後にrollbackされafterCompletionと二tenant全列で確認する() throws Exception {
+        assertTrue(AopUtils.isAopProxy(runService));
+        Fixture fixture = createFixture("tenant-a");
+        Fixture tenantBSentinel = createFixture("tenant-b");
+        Snapshot before = readIndependently(fixture.runId());
+        Snapshot sentinelBefore = readIndependently(tenantBSentinel.runId());
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        AtomicInteger afterCompletionStatus = new AtomicInteger(-1);
+        CommitBeforeSuccessMarker marker = new CommitBeforeSuccessMarker();
+
+        CommitBeforeSuccessMarker thrown = assertThrows(CommitBeforeSuccessMarker.class,
+                () -> transaction.execute(status -> {
+                    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                        @Override public void beforeCommit(boolean readOnly) { throw marker; }
+                        @Override public void afterCompletion(int status) { afterCompletionStatus.set(status); }
+                    });
+                    CopilotRunService.SummaryCompletionResult result = AccountingTenantContextHolder.runWithTenant(
+                            "tenant-a", () -> runService.completeSummaryAttempt(fixture.attempt(), 8,
+                                    SummaryResponse.unavailable("BEFORE_COMMIT_FAIL", unknownEvidence())));
+                    assertEquals(CopilotRunService.SummaryCompletionResult.COMPLETED, result);
+                    return null;
+                }));
+
+        assertSame(marker, thrown);
+        assertEquals(TransactionSynchronization.STATUS_ROLLED_BACK, afterCompletionStatus.get());
+        assertEquals(before, readIndependently(fixture.runId()));
+        assertEquals(sentinelBefore, readIndependently(tenantBSentinel.runId()));
+    }
+
+    @Test
+    void commit後のcaller_ACK喪失はUNKNOWN扱いとしdurable行をrollback扱いしない() throws Exception {
+        Fixture fixture = createFixture("tenant-a");
+        Snapshot before = readIndependently(fixture.runId());
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        CopilotRunService.SummaryCompletionResult committed = transaction.execute(status ->
+                AccountingTenantContextHolder.runWithTenant("tenant-a",
+                        () -> runService.completeSummaryAttempt(fixture.attempt(), 8,
+                                SummaryResponse.unavailable("ACK_LOSS_CASE", unknownEvidence()))));
+        assertEquals(CopilotRunService.SummaryCompletionResult.COMPLETED, committed);
+        Snapshot durable = readIndependently(fixture.runId());
+        assertFalse(before.equals(durable), "proxy/transaction return後は独立connectionからcommit済み行を読む");
+
+        // DB commitの後にcallerへのACKだけが失われた場合を模擬する。これはrollbackではなく結果不明であり、
+        // 既にdurableな行をPENDINGへ戻す・pre-commit snapshotと等しいと主張することは禁止する。
+        RuntimeException lostCallerAck = new RuntimeException("simulated caller ACK loss after commit");
+        assertSame(lostCallerAck, assertThrows(RuntimeException.class, () -> { throw lostCallerAck; }));
+        assertEquals(durable, readIndependently(fixture.runId()));
+    }
+
+    private SQLException findSqlException(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof SQLException sqlException) return sqlException;
+        }
+        return null;
     }
 
     private CopilotRunService.SummaryCompletionResult completeAfterBarrier(
@@ -379,4 +519,5 @@ class CopilotRunServiceMySqlIntegrationTest {
                             int statusVersion, Integer costJpy, String errorCode,
                             String redactedSummaryJson, String inputHash, Map<String, Object> allColumns) { }
     private static final class RollbackMarker extends RuntimeException { }
+    private static final class CommitBeforeSuccessMarker extends RuntimeException { }
 }
