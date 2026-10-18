@@ -2,6 +2,7 @@ package com.ses.importcenter.metadata;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.service.DocumentService;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -23,7 +24,11 @@ import java.util.UUID;
 @Service
 public class ImportValidationLifecycleService {
     private static final int LEASE_SECONDS = 30;
+    private static final String PARSER_CONTRACT = "ses-csv-v1-stream-limits-64m-100k-64-65536";
+    private static final String CANONICAL_CONTRACT = "ses-import-canonical-row-v1";
     private static final String VALIDATOR_CONTRACT = "ses-import-v1-readonly-validator-v1";
+    private static final String RESOLVER_MODE = "synthetic-fail-closed-resolver-v1";
+    private static final String FINDING_CONTRACT = "ses-import-finding-code-v1";
     private final JdbcTemplate jdbc;
     private final ImportMetadataAuthorizationService authorization;
     private final DocumentService documents;
@@ -76,6 +81,85 @@ public class ImportValidationLifecycleService {
     public void abort(RunLease lease) {
         requireInstance(lease == null ? null : lease.instanceId);
         transaction.executeWithoutResult(status -> abortInTransaction(lease));
+    }
+
+    AppendSnapshot appendSnapshot(RunLease lease) {
+        requireInstance(lease == null ? null : lease.instanceId);
+        Input in = lease.input;
+        return new AppendSnapshot(in.context, in.jobId, in.sourceId, in.sourceVersion, in.sourceCode, in.entity,
+                in.schema, in.encoding, in.sourceSha, in.documentId, in.documentVersionId, in.documentVersionNo,
+                in.documentSha, in.mappingId, in.mappingVersion, in.mappingSha, lease.runId, lease.workerId,
+                lease.generation, lease.jobVersion, lease.expiresAt, fingerprint(in));
+    }
+
+    void appendChunk(RunLease lease, ImportValidationAppendService.ValidatedChunk chunk) {
+        requireInstance(lease == null ? null : lease.instanceId);
+        transaction.executeWithoutResult(status -> appendChunkInTransaction(lease, chunk));
+    }
+
+    private void appendChunkInTransaction(RunLease grant, ImportValidationAppendService.ValidatedChunk chunk) {
+        AppendSnapshot expected = appendSnapshot(grant);
+        if (chunk == null || chunk.lease() != grant || !chunk.matches(expected)
+                || chunk.rows().isEmpty() || chunk.rows().size() > 250) conflict();
+        Input input = grant.input;
+        current(input.context);
+        Locked locked = lockResources(input, grant.runId);
+        ImportAuthorizedContext gate = authorization.requireCurrentAuthorizationForWrite(input.context);
+        requireSameActor(input.context, gate);
+        Timestamp now = dbNow();
+        Job job = locked.job;
+        Run run = locked.run;
+        if (!activeLease(job, run, grant) || job.version != grant.jobVersion
+                || job.expiresAt == null || !job.expiresAt.equals(grant.expiresAt)
+                || !job.expiresAt.after(now) || !"BUILDING".equals(run.state)
+                || !MessageDigest.isEqual(run.fingerprint, expected.validatorFingerprint())) conflict();
+
+        long previous = 0;
+        for (ImportValidationAppendService.RowMetadata row : chunk.rows()) {
+            if (row.sourceRowNumber() <= previous) conflict();
+            previous = row.sourceRowNumber();
+        }
+        int found = 0;
+        for (ImportValidationAppendService.RowMetadata row : chunk.rows()) {
+            ImportValidationAppendService.RowMetadata existing = jdbc.query("""
+                    SELECT source_row_number,source_row_sha256,canonical_fingerprint,disposition,finding_codes,row_commit_sha256
+                    FROM t_import_validation_row WHERE tenant_id=? AND validation_run_id=? AND source_row_number=?
+                    FOR UPDATE
+                    """, rs -> rs.next() ? new ImportValidationAppendService.RowMetadata(rs.getLong(1), rs.getBytes(2),
+                    rs.getBytes(3), rs.getString(4), rs.getBytes(5), rs.getBytes(6)) : null,
+                    input.context.tenantId(), grant.runId, row.sourceRowNumber());
+            if (existing != null) {
+                if (!row.sameMetadata(existing)) conflict();
+                found++;
+            }
+        }
+        if (found == chunk.rows().size()) return;
+        if (found != 0) conflict();
+        Long maxExisting = jdbc.queryForObject("SELECT MAX(source_row_number) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Long.class, input.context.tenantId(), job.id, grant.runId);
+        if (maxExisting != null && chunk.rows().get(0).sourceRowNumber() <= maxExisting) conflict();
+
+        final int[][] inserted;
+        try {
+            inserted = jdbc.batchUpdate("""
+                    INSERT INTO t_import_validation_row(tenant_id,job_id,validation_run_id,source_row_number,
+                      source_row_sha256,canonical_fingerprint,disposition,finding_codes,row_commit_sha256)
+                    VALUES(?,?,?,?,?,?,?,?,?)
+                    """, chunk.rows(), chunk.rows().size(), (ps, row) -> {
+                int i = 1;
+                ps.setString(i++, input.context.tenantId()); ps.setLong(i++, job.id); ps.setLong(i++, grant.runId);
+                ps.setLong(i++, row.sourceRowNumber()); ps.setBytes(i++, row.sourceRowSha256());
+                ps.setBytes(i++, row.canonicalFingerprint()); ps.setString(i++, row.disposition());
+                ps.setBytes(i++, row.findingCodes()); ps.setBytes(i, row.rowCommitSha256());
+            });
+        } catch (DuplicateKeyException uniquenessConflict) {
+            conflict();
+            return;
+        }
+        int insertedCount = java.util.Arrays.stream(inserted).mapToInt(batch -> batch.length).sum();
+        if (insertedCount != chunk.rows().size()
+                || java.util.Arrays.stream(inserted).flatMapToInt(java.util.Arrays::stream)
+                .anyMatch(count -> count != 1 && count != Statement.SUCCESS_NO_INFO)) conflict();
     }
 
     private RunLease startInTransaction(StartOperation op) {
@@ -432,9 +516,34 @@ public class ImportValidationLifecycleService {
     }
 
     private byte[] fingerprint(Input in) {
-        String value = VALIDATOR_CONTRACT + "\n" + in.entity + "\n" + in.schema + "\n" + in.encoding
-                + "\n" + HexFormat.of().formatHex(in.mappingSha);
-        return sha256(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        try {
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            java.io.DataOutputStream out = new java.io.DataOutputStream(bytes);
+            writeFingerprintField(out, "SES-IMPORT-VALIDATION-FINGERPRINT-V1");
+            out.writeInt(1);
+            writeFingerprintField(out, PARSER_CONTRACT);
+            writeFingerprintField(out, CANONICAL_CONTRACT);
+            writeFingerprintField(out, VALIDATOR_CONTRACT);
+            writeFingerprintField(out, RESOLVER_MODE);
+            writeFingerprintField(out, FINDING_CONTRACT);
+            writeFingerprintField(out, in.entity);
+            writeFingerprintField(out, in.schema);
+            writeFingerprintField(out, in.encoding);
+            writeFingerprintField(out, in.mappingSha);
+            out.flush();
+            return sha256(bytes.toByteArray());
+        } catch (java.io.IOException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    private static void writeFingerprintField(java.io.DataOutputStream out, String value) throws java.io.IOException {
+        writeFingerprintField(out, value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private static void writeFingerprintField(java.io.DataOutputStream out, byte[] value) throws java.io.IOException {
+        out.writeInt(value.length);
+        out.write(value);
     }
 
     private byte[] sha256(byte[] value) {
@@ -492,7 +601,24 @@ public class ImportValidationLifecycleService {
         }
         public long runId() { return runId; }
         public long generation() { return generation; }
-        public Timestamp expiresAt() { return expiresAt; }
+        public Timestamp expiresAt() { return expiresAt == null ? null : new Timestamp(expiresAt.getTime()); }
+    }
+
+    record AppendSnapshot(ImportAuthorizedContext context, long jobId, long sourceId, long sourceVersion,
+                          String sourceCode, String entity, String schema, String encoding, byte[] sourceSha,
+                          long documentId, long documentVersionId, int documentVersionNo, byte[] documentSha,
+                          Long mappingId, int mappingVersion, byte[] mappingSha, long runId, String workerId,
+                          long generation, long jobVersion, Timestamp expiresAt, byte[] validatorFingerprint) {
+        AppendSnapshot {
+            sourceSha = sourceSha.clone(); documentSha = documentSha.clone(); mappingSha = mappingSha.clone();
+            validatorFingerprint = validatorFingerprint.clone();
+            expiresAt = expiresAt == null ? null : new Timestamp(expiresAt.getTime());
+        }
+        @Override public byte[] sourceSha() { return sourceSha.clone(); }
+        @Override public byte[] documentSha() { return documentSha.clone(); }
+        @Override public byte[] mappingSha() { return mappingSha.clone(); }
+        @Override public byte[] validatorFingerprint() { return validatorFingerprint.clone(); }
+        @Override public Timestamp expiresAt() { return expiresAt == null ? null : new Timestamp(expiresAt.getTime()); }
     }
 
     private record Source(long version, String status, String code) { }
