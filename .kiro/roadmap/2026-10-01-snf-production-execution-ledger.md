@@ -1,5 +1,36 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## 限定batch統合（2026-10-18 21:43 JST）
+
+- **NO-GO継続**。NF08 B1固定 `db25d2b75b5eebbd9bf3d7b2d302878d441a30a2` は
+  fast **20 class、108/0/0/0**（UTC12:34:36.1086521〜12:36:23.7453428、log
+  `60902A4677C67CC0E50B8B3239FE5B2CC42E685076E109979DEB5AE89B65BA16`）、
+  MySQL **6/0/0/0**（UTC12:37:03.4911871〜12:38:54.9271216、log
+  `611C882EE3FD572608BC10617D05DD55A2112F7166635B2B1D4060310BD22A04`）。
+  Astraが起止SHA/clean、40+2 report hashと実caseを限定受理した。
+  4commitをcontrol `5cbc0dc9` まで統合し、試験対象fileの一致を確認した。
+  shard-1 conflictは既存NF06二entryと新NF08一entryを全て一度ずつ保持して解消した。
+  旧FAILと再試験の証拠を48/10/48/10file、hash一致でcontrolへ保存した。
+  NOT_SENT/UNKNOWNの保存・transaction/CASに限り、ACTUAL/UPPER runtime信頼性は未完。
+- NF07 W3a固定 `92d91d58172288406f6048e69ad38aa85880eb04` はfresh compile後
+  **26/0/0/0**。UTC12:39:06.5468658〜12:40:50.7872174、log
+  `3C6B0CCCEBF3BED7B6C150EA5BC097624FF09BDA6B732A68C7810FD38C7158B6`。
+  Astraが2 report hashと26caseを限定受理した。9commitをcontrol `b6e2992b` へ統合し、対象file一致を確認。
+  10証拠fileをhash一致で保存した。synthetic preview persistence/as-of再検証/ACK_UNKNOWN/CASに限る。
+  providerReadとcrossScopeAccessはfixtureごとの動的counter。providerWrite/dispatch/dispositionの0は
+  固定ログ文字列であり、動的計測ではなく狭いportとauthority依存なしという構造検証に限る。
+  実本人同定、交付、処分、法務承認、全store原子性を受理したものではない。
+- NF06 joint-02の61/2/8/0 FAILはAstraが8report hashを独立照合した。
+  source変更先行testの診断文字列はhelperがnullを渡した結果であり、実worker接続未取得の証明ではなかった。
+  正確な結論は「指定waitが照合されなかった」で、今回実際にUKを使ったとの断定もしない。
+  wave2依存がある旧0de案をcontrolに入れず、e12上の独立fixture `132a17db` をAstra限定CODE PASS後、
+  control `54df4242` へ統合した。実transaction内worker接続を捕捉し、両接続とsource行の実索引/keyを照合する。
+  candidate/leaseの旧fixture修復と共に新固定joint検証を行う。wave2のREQUIRES_NEW接続・row/job key・
+  write-first順序の残留CODE findingは別途修復中。
+- B2全体planはprovenance capability・送信前durable claim・preflight順序・公開cost DTO迂回に未解決設計があり、
+  開発PASSではない。次の狭いwaveはB1の二tenant sentinelとserialization/SQL/before-commit故障証拠のみとする。
+  完全CI/全fast最新PASS、stagingおよび外部・人手production gateは未完。
+
 ## 追加到達点（2026-10-18 21:35 JST）
 
 - **NO-GO継続**。NF06 F1b wave1固定 `e12d43761e99e71072565f0db70527d5756f1c61` の実MySQLは
