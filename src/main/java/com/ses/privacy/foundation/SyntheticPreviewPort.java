@@ -9,5 +9,7 @@ interface SyntheticPreviewPort {
     String audience();
     SyntheticTarget read(SyntheticPreviewScopeVerifier.VerifiedScope scope, String targetId);
     SyntheticTarget describeCurrent(SyntheticPreviewScopeVerifier.VerifiedScope scope, String targetId);
-    record SyntheticTarget(String id, String version, String contentHash, Instant observedAt) { }
+    record SyntheticTarget(String id, String version, String contentHash, Instant observedAt) {
+        public SyntheticTarget { observedAt = SyntheticCanonicalizer.toMicros(observedAt); }
+    }
 }

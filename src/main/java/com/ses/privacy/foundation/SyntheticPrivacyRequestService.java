@@ -119,17 +119,20 @@ final class SyntheticPrivacyRequestService {
             String witnessJson = JSON.writeValueAsString(observations.stream()
                     .map(SyntheticPreviewWitnessPort.SourceSnapshot::canonical).toList());
             String itemsJson = JSON.writeValueAsString(finalItems);
-            Instant observedTo = observations.stream().map(SyntheticPreviewWitnessPort.SourceSnapshot::observedAt)
-                    .max(Instant::compareTo).orElse(first.observedAt());
+            List<Instant> asOfVector = new ArrayList<>();
+            observations.forEach(observation -> { asOfVector.add(observation.observedAt()); asOfVector.addAll(observation.sourceObservedAt().values()); });
+            finalItems.forEach(item -> { asOfVector.add(item.observedAt()); asOfVector.add(item.metadataObservedAt()); });
+            Instant observedFrom = asOfVector.stream().min(Instant::compareTo).orElse(first.observedAt());
+            Instant observedTo = asOfVector.stream().max(Instant::compareTo).orElse(first.observedAt());
             TransitionBinding binding = new TransitionBinding(command.tenantId(),command.caseRef(),finalItems.get(0).syntheticTargetId(),
                     finalItems.get(0).targetVersion(),finalItems.get(0).contentHash(),finalRead.values().get("policyHash"),
                     Long.toString(expectedRevision),finalRead.values().get("policyVersion"),"SYNTHETIC_PREVIEW",scope.providerId());
             PrivacyCaseStateMachine.transition(PrivacyCaseState.SCOPED,PrivacyCaseState.PREVIEWED,binding,null,null,null,clock.instant());
             String snapshotHash = snapshotDigest(command,expectedRevision,nextRevision,identity.digest(),first.bindingHash(),
-                    witnessJson,itemsJson,first.observedAt(),observedTo);
+                    witnessJson,itemsJson,observedFrom,observedTo);
             SyntheticPreviewStore.PreviewDraft draft = new SyntheticPreviewStore.PreviewDraft(command.tenantId(),command.requestId(),
                     command.idempotencyKey(),command.fingerprint(),command.caseRef(),expectedRevision,nextRevision,identity.digest(),
-                    first.bindingHash(),snapshotHash,witnessJson,itemsJson,first.observedAt(),observedTo,finalItems.get(0).syntheticTargetId(),
+                    first.bindingHash(),snapshotHash,witnessJson,itemsJson,observedFrom,observedTo,finalItems.get(0).syntheticTargetId(),
                     finalItems.get(0).targetVersion(),finalItems.get(0).contentHash(),finalRead.values().get("policyHash"),
                     finalRead.values().get("policyVersion"),scope.providerId());
 
@@ -262,6 +265,8 @@ final class SyntheticPrivacyRequestService {
                 return closed(command,"PREVIEW_STALE","POLICY_EXPIRED_DURING_REVALIDATION",snapshot.requestId(),snapshot.caseRevision());
             return new PreviewResult(command.requestId(),snapshot.caseRevision(),"AS_OF_PREVIEW_ONLY",null,snapshot.requestId(),
                     items,snapshot.observedAt(),snapshot.observedTo(),validatedAt,"PREVIEW_ONLY");
+        }catch(SecurityException rejected){
+            return closed(command,"PREVIEW_STALE","CURRENT_BINDING_REJECTED",snapshot.requestId(),snapshot.caseRevision());
         }catch(Exception failure){
             return closed(command,"PREVIEW_UNKNOWN","REVALIDATION_UNAVAILABLE",snapshot.requestId(),snapshot.caseRevision());
         }
@@ -307,7 +312,8 @@ final class SyntheticPrivacyRequestService {
     private String snapshotDigest(String tenant,String request,String key,String requestHash,String caseRef,long base,long revision,
                                   String identityHash,String witnessHash,String witnessJson,String itemsJson,Instant from,Instant to){
         byte[] canonical=SyntheticCanonicalizer.encode("SES-SYNTHETIC-PREVIEW-SNAPSHOT","v1",tenant,request,key,requestHash,
-                caseRef,Long.toString(base),Long.toString(revision),identityHash,witnessHash,witnessJson,itemsJson,from.toString(),to.toString());
+                caseRef,Long.toString(base),Long.toString(revision),identityHash,witnessHash,witnessJson,itemsJson,
+                SyntheticCanonicalizer.toMicros(from).toString(),SyntheticCanonicalizer.toMicros(to).toString());
         return ApprovalEnvelopeCanonicalizer.digest(canonical);
     }
     private long parseRevision(String value){try{return Long.parseLong(value);}catch(NumberFormatException e){throw new IllegalStateException("case revision witnessが不正です",e);}}

@@ -21,7 +21,9 @@ interface SyntheticPreviewWitnessPort {
         public SourceSnapshot {
             values = Map.copyOf(values);
             allowedTargetIds = java.util.List.copyOf(allowedTargetIds);
-            sourceObservedAt = Map.copyOf(sourceObservedAt);
+            sourceObservedAt = sourceObservedAt.entrySet().stream().collect(java.util.stream.Collectors.toUnmodifiableMap(
+                    Map.Entry::getKey, entry -> SyntheticCanonicalizer.toMicros(entry.getValue())));
+            observedAt = SyntheticCanonicalizer.toMicros(observedAt);
             if (observedAt == null) throw new IllegalArgumentException("observedAtが必要です");
             if (!sourceObservedAt.keySet().equals(SOURCE_NAMES) || sourceObservedAt.values().stream().anyMatch(java.util.Objects::isNull))
                 throw new IllegalArgumentException("sourceごとのobservedAtが必要です");
