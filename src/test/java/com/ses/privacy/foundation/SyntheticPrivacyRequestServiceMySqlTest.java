@@ -549,7 +549,11 @@ class SyntheticPrivacyRequestServiceMySqlTest {
                 crossScopeAttempts.incrementAndGet();throw new SecurityException("scope外metadata readは禁止です");
             }
             Instant metadataAt=NOW.plusSeconds(3).plusNanos(describes.get());
-            if(expectedClock!=null)expectedClock.set(metadataAt.plusSeconds(1));
+            if(expectedClock!=null){
+                Instant clockFloor=expectedClock.instant();
+                Instant metadataFloor=metadataAt.plusSeconds(1);
+                expectedClock.set(clockFloor.isAfter(metadataFloor)?clockFloor:metadataFloor);
+            }
             return new SyntheticTarget(target,version,contentHash,metadataAt);
         }
         private SyntheticTarget current(String id){return new SyntheticTarget(id,version,contentHash,NOW);}
