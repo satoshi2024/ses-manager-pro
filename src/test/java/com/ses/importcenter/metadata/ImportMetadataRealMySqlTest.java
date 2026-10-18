@@ -117,6 +117,7 @@ class ImportMetadataRealMySqlTest {
     @Autowired private TestDocumentStorage storage;
     @Autowired private javax.sql.DataSource dataSource;
     @SpyBean private ImportMetadataAuthorizationService metadataAuthorization;
+    private final ThreadLocal<AtomicReference<Long>> authorizationTransactionConnection = new ThreadLocal<>();
 
     private String tenantId;
     private long actorUserId;
@@ -898,14 +899,26 @@ class ImportMetadataRealMySqlTest {
                                                 int expectedCode) throws Exception {
         Connection blocker = dataSource.getConnection();
         ExecutorService pool = Executors.newSingleThreadExecutor();
+        AtomicReference<Long> requesterId = new AtomicReference<>();
         Throwable primaryFailure = null;
         try {
             blocker.setAutoCommit(false);
             executeQueryForUpdate(blocker, lockSql, lockParams);
             long blockerId = connectionId(blocker);
-            String lockData = permissionLockData(blockerId, table, "PRIMARY");
-            Future<?> submitted = pool.submit(() -> withActorContext(serviceAction));
-            awaitExactLockWait(blockerId, table, "PRIMARY", lockData, submitted, table + " mutation-first service");
+            org.mockito.Mockito.doAnswer(invocation -> {
+                Object authorized = invocation.callRealMethod();
+                AtomicReference<Long> captured = authorizationTransactionConnection.get();
+                if (captured != null && TransactionSynchronizationManager.isActualTransactionActive()) {
+                    captured.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                }
+                return authorized;
+            }).when(metadataAuthorization).requireCurrentAuthorization();
+            Future<?> submitted = pool.submit(() -> {
+                authorizationTransactionConnection.set(requesterId);
+                try { return withActorContext(serviceAction); }
+                finally { authorizationTransactionConnection.remove(); }
+            });
+            awaitMutationFirstSourceWait(requesterId, blockerId, submitted, table);
             executeUpdate(blocker, mutationSql, mutationParams);
             blocker.commit();
             var failure = assertThrows(java.util.concurrent.ExecutionException.class,
@@ -929,6 +942,59 @@ class ImportMetadataRealMySqlTest {
                 if (primaryFailure != null) primaryFailure.addSuppressed(cleanupFailure); else throw cleanupFailure;
             }
         }
+    }
+
+    private void awaitMutationFirstSourceWait(AtomicReference<Long> requester, long blockerId,
+                                              Future<?> service, String table) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12);
+        while (System.nanoTime() < deadline) {
+            assertFuturePending(service, table + " mutation-first service");
+            Long requesterId = requester.get();
+            if (requesterId != null) {
+                List<SourceLockWait> waits = jdbc.query("""
+                        SELECT req.INDEX_NAME, req.LOCK_DATA, req.LOCK_TYPE, req.LOCK_MODE, req.LOCK_STATUS,
+                               blk.LOCK_TYPE, blk.LOCK_MODE, blk.LOCK_STATUS
+                        FROM performance_schema.data_lock_waits w
+                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
+                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                        JOIN performance_schema.data_locks req
+                          ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                        JOIN performance_schema.data_locks blk
+                          ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
+                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=?
+                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=?
+                          AND req.INDEX_NAME=blk.INDEX_NAME AND req.LOCK_DATA=blk.LOCK_DATA
+                          AND req.LOCK_TYPE='RECORD' AND req.LOCK_STATUS='WAITING'
+                          AND req.LOCK_MODE IN ('X','X,REC_NOT_GAP')
+                          AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_STATUS='GRANTED'
+                          AND blk.LOCK_MODE IN ('X','X,REC_NOT_GAP')
+                        """, (rs, row) -> new SourceLockWait(rs.getString(1), rs.getString(2),
+                        rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
+                        rs.getString(7), rs.getString(8)), requesterId, blockerId, table, table);
+                for (SourceLockWait wait : waits) {
+                    if ("t_import_source_system".equals(table) && isExpectedSourceLock(wait)) {
+                        System.out.printf("NF06 mutation-first実wait確認: requester=%d blocker=%d schema=DATABASE() table=%s index=%s keyShape=%s request=%s/%s blocker=%s/%s%n",
+                                requesterId, blockerId, table, wait.indexName(),
+                                "PRIMARY".equals(wait.indexName()) ? "sourceId" : "(tenantId,sourceId)",
+                                wait.requestType(), wait.requestMode(), wait.blockerType(), wait.blockerMode());
+                        return;
+                    }
+                    if (!"t_import_source_system".equals(table)
+                            && "PRIMARY".equals(wait.indexName())
+                            && wait.lockData() != null) {
+                        System.out.printf("NF06 mutation-first実wait確認: requester=%d blocker=%d schema=DATABASE() table=%s index=%s request=%s/%s blocker=%s/%s%n",
+                                requesterId, blockerId, table, wait.indexName(), wait.requestType(),
+                                wait.requestMode(), wait.blockerType(), wait.blockerMode());
+                        return;
+                    }
+                }
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError(table + " mutation-first serviceの指定record lock waitを確認できませんでした: "
+                + "transaction-bound requester=" + requester.get() + ", blocker=" + blockerId
+                + "; source index candidates=PRIMARY(sourceId),uk_import_source_tenant_id(tenantId,sourceId)");
     }
 
     private Object assertServiceCommitsBeforeMutation(GatePause pause, String table, String mutationSql,
