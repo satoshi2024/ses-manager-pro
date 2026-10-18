@@ -1,5 +1,27 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## 追加到達点（2026-10-18 21:17 JST）
+
+- **NO-GO継続**。NF08 A2 fixed `ae17928b6f56b5865f9955f3197e07a7dc5089a9` は
+  **19 class、105/0/0/0**。UTC12:06:56.9843595〜12:09:16.5013550、起止SHA一致・clean。
+  log SHA-256 `5957A4861287EA23B68E0C7759C096446DE001F5C055789DAD112E0D944B43BA`。
+  Astraが38 report hashと9 verifier case＋既存96 caseを照合して限定受理した。
+  `15907043..ae17928` の6commitをcontrol `ca02c84b` へ統合し、46証拠fileをhash一致で保存した。
+  synthetic usage receiptの算術・card binding・拒否契約に限る。実usage認証/価格/跨process冪等の証明ではない。
+- NF08 B1 fixed `a82ded74` は限定CODE PASS。NOT_SENT/UNKNOWN metadata、tenant/CAS、実Spring transaction、
+  stale時に未保存summaryを返さない経路を対象とし、定向fast・MySQLを待つ。ACTUAL/UPPER信頼経路は含まない。
+  commit故障注入や二tenant実行の二行不変まで試験済みとはしない。
+- NF06 source競合証拠の初修復 `ba7e1f61` は固定索引仮定が残りCODE FAIL。
+  `e12d43761e99e71072565f0db70527d5756f1c61` はmutation開始後の実wait graphを使い、接続・schema・表・
+  index/key・RECORD X・WAITING/GRANTEDを確認する修復で限定CODE PASS。固定44件MySQLを実行中。
+  sourceのwave2 WIPを含めない。旧ed433のunit23PASSとMySQL44/0/1/0 FAILは別々にAstraが証拠受理した。
+- NF07 D2b2のcontrol fixed `ca02c84b129754d166cbb3067334605e407cb33e` 再試験は **35/0/0/0**。
+  UTC12:12:22.2605025〜12:16:02.5901104、log
+  `332EC65A3D816CEA32F059B3B747880C3D90150508E8D066860C6835B8005A1E`。Astra証拠照合中。
+  W3a初回 `4ddb8ff6` はCODE FAIL（署名canonical衝突P1、scope capability、case CAS、ACK read-back、
+  final target metadata、test store境界、expiry再確認、test隔離/coverageのP2）。W3aはcontrol未統合・修復中。
+  D2b2成功をW3aまたはNF07全体の成功へ拡張しない。
+
 ## 再開確認（2026-10-18 21:08 JST）
 
 - **NO-GO / 修復継続**。再fetchしたorigin/mainは `1443fb68943849a3260d7ebe005259f3eb609d60`。
