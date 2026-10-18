@@ -1,5 +1,41 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## 追加到達点（2026-10-18 21:35 JST）
+
+- **NO-GO継続**。NF06 F1b wave1固定 `e12d43761e99e71072565f0db70527d5756f1c61` の実MySQLは
+  **44/0/0/0**、UTC12:16:23.6377049〜12:19:29.1815762、log SHA-256
+  `0877E3440BCD491A912699A5AC1259E6EE6C07B5BA73BF552BD9A0731EEEE1A1`。
+  Astraが起止SHA/clean、report hash、実PRIMARY/sourceId record X waitを限定受理した。
+  wave1の9commitをcontrol `1c48e98f` まで統合し、対象fileのsource一致を確認した。
+  旧ed433 unit23PASSは別SHAであり、同一headの67件として合算しない。
+- そのcontrol固定 `1c48e98fb2e88ba82646c6dbd2247f767f17959e` のNF06 joint MySQLは
+  **4 class、61/2/8/0、FAIL**。UTC12:29:24.9279538〜12:34:17.6595139、起止SHA一致・clean。
+  log `12197C7640BB52FD9593383176CA166AC104F47B289C7BDCEC5763F98655D374`。
+  candidate fixtureの権限表id欠落2error、lease fixtureの新write認可mock未設定1failure/6error、
+  metadataのsource変更先行testでworker connection未取得1failure。migration2件はPASS。
+  source単独44PASSをjoint成功へ拡張しない。前二fixture修復 `f4ddf585` / `5e2d9a01` は
+  Astra限定CODE PASS、control `57e19d68` / `3e58194c` へ統合済み、再実測前。
+  lease fixtureは認可済み前提のmockであり、実権限撤回の証明ではない。
+- NF06 wave2 `23645fd1` の主要修復方向は限定受理されたが、wait前のgrant鮮度・実transaction接続・
+  期待例外cleanup・write-first順序のtestがCODE FAIL。境界0/249/250/251、job fence、drift等を補強中。
+  seal/publish/apply/UIと実source承認は未完。
+- NF08 B1旧fixed `a82ded74` はfast **20 class、108/0/1/0、FAIL**（context再bind fixture）、
+  UTC12:19:39.9034730〜12:21:31.0629895、log
+  `26DB0660236D53AC84B7FDB0B555A4E503BCED6CA0FE5547DF6E9138DCB28500`。
+  MySQLは **6/1/0/0、FAIL**、UTC12:21:58.5770128〜12:23:49.0119150、log
+  `764C4692DCF8BBB540E3DB7DF13602BBC27D565D609566AD88D02C3236E0B0E0`。
+  原因はDB再シリアライズJSONへ書込前byte hashを再計算する誤ったtest契約。
+  canonical化案 `7e892ed1` は採用せず、後続 `db25d2b7` で既存byte hash契約を復元した。
+  独立した書込前JSON期待値のhashとDB全metadata意味値を検証し、`67dee3d0` のcontext修復も保持。
+  Astra限定CODE PASS、固定20 class fastと6件MySQLを再検証する。B1はcontrol未統合。
+- NF07 W3a `dde57204` の精度/hash・store構築境界・観測区間・binding分類のCODE FAILを
+  `b7b81879` / `2d42ce4c` で修復し限定CODE PASS。追加 `5ea93339` のfixture時刻逆行は
+  `92d91d58` で修復し再Review待ち。ACK_UNKNOWN失敗読戻し・binding・witness driftを追加した。
+  旧targetはworktree内へ保存し、削除済みclassを流用しない初回実測を準備した。
+  構造的な任意DataSource入口の閉鎖を、外部DBへの実拒否試験とは表現しない。
+- 全fast最新結果は第6回FAILのまま。staging、実provider、Privacy/Legal/Operations/production署名は未取得。
+  push/PR/deploy/実credential操作は実施していない。
+
 ## 追加到達点（2026-10-18 21:17 JST）
 
 - **NO-GO継続**。NF08 A2 fixed `ae17928b6f56b5865f9955f3197e07a7dc5089a9` は
