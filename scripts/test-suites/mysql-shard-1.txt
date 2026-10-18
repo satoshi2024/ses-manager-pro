@@ -20,4 +20,5 @@ SalesOrderConcurrentCreateTest
 AiFeedbackLearningSchemaTest
 LifecycleMySqlIntegrationTest
 PrivacyJournalLinearizationMySqlTest
+SyntheticPrivacyRequestServiceMySqlTest
 AssetMySqlIntegrationTest
