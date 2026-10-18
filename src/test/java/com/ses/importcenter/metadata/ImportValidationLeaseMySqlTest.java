@@ -92,6 +92,7 @@ class ImportValidationLeaseMySqlTest {
                 "77", document, version, 1, SOURCE_HASH, mapping, 1, MAPPING_HASH);
         authorization = mock(ImportMetadataAuthorizationService.class);
         when(authorization.requireCurrentAuthorization()).thenReturn(context);
+        when(authorization.requireCurrentAuthorizationForWrite(context)).thenReturn(context);
         DocumentService documents = mock(DocumentService.class);
         transactionManager = new DataSourceTransactionManager(ds);
         service = new ImportValidationLeaseService(jdbc, authorization, documents, transactionManager);
