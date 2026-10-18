@@ -27,6 +27,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
 import java.time.ZoneId;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -113,6 +116,9 @@ class CopilotRunServiceTest {
         ArgumentCaptor<AiRecommendationRun> captor = ArgumentCaptor.forClass(AiRecommendationRun.class);
         verify(runMapper, times(2)).insert(captor.capture());
         List<AiRecommendationRun> runs = captor.getAllValues();
+        for (AiRecommendationRun run : runs) {
+            assertEquals(sha256(run.getRedactedSummaryJson()), run.getInputHash());
+        }
         assertEquals("PENDING", runs.get(0).getStatus());
         assertEquals("PENDING", runs.get(1).getStatus());
         assertNull(runs.get(0).getLatencyMs());
@@ -168,6 +174,7 @@ class CopilotRunServiceTest {
                 .filter(String.class::isInstance)
                 .map(String.class::cast)
                 .anyMatch(value -> value.contains("\"costState\":\"UNKNOWN\"")));
+        assertEquals(sha256(updateMetadata(summaryUpdate)), updateInputHash(summaryUpdate));
     }
 
     @Test
@@ -232,5 +239,19 @@ class CopilotRunServiceTest {
                 .map(String.class::cast)
                 .filter(value -> value.contains("\"costState\""))
                 .findFirst().orElseThrow();
+    }
+
+    private String updateInputHash(Wrapper<AiRecommendationRun> wrapper) {
+        LambdaUpdateWrapper<AiRecommendationRun> update = (LambdaUpdateWrapper<AiRecommendationRun>) wrapper;
+        return update.getParamNameValuePairs().values().stream()
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .filter(value -> value.matches("[a-f0-9]{64}"))
+                .findFirst().orElseThrow();
+    }
+
+    private String sha256(String value) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(value.getBytes(StandardCharsets.UTF_8)));
     }
 }

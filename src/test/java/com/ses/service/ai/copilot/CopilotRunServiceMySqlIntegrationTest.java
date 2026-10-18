@@ -27,15 +27,15 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import javax.sql.DataSource;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -105,7 +105,10 @@ class CopilotRunServiceMySqlIntegrationTest {
         JsonNode notSentMetadata = objectMapper.readTree(notSentRow.redactedSummaryJson());
         assertEquals("NOT_SENT", notSentMetadata.path("costState").asText());
         assertEquals("NOT_STARTED", notSentMetadata.path("dispatchOutcome").asText());
-        assertEquals(canonicalJsonHash(notSentRow.redactedSummaryJson()), notSentRow.inputHash());
+        String expectedNotSentJson = expectedCompletionJson(notSent.attempt(), "SUMMARY_REJECTED", 12,
+                "NOT_SENT", "NOT_STARTED", "PREFLIGHT_DENIED", "PREFLIGHT_DENIED", null, 0);
+        assertEquals(objectMapper.readTree(expectedNotSentJson), notSentMetadata);
+        assertEquals(sha256(expectedNotSentJson), notSentRow.inputHash());
 
         Fixture unknown = createFixture("tenant-a");
         CopilotProviderUsage usage = new CopilotProviderUsage(12, 4, 16, 0, 0);
@@ -132,7 +135,11 @@ class CopilotRunServiceMySqlIntegrationTest {
         assertEquals(0, storedUsage.path("thoughtsTokenCount").asInt());
         assertEquals(0, storedUsage.path("cachedContentTokenCount").asInt());
         assertFalse(unknownRow.redactedSummaryJson().contains("costJpy"));
-        assertEquals(canonicalJsonHash(unknownRow.redactedSummaryJson()), unknownRow.inputHash());
+        String expectedUnknownJson = expectedCompletionJson(unknown.attempt(), "INNER_VALIDATION_FAILED", 34,
+                "UNKNOWN", "RESPONSE_RECEIVED", "PROVIDER_RESPONSE_RECEIVED",
+                "INNER_VALIDATION_FAILED", usage, null);
+        assertEquals(objectMapper.readTree(expectedUnknownJson), unknownMetadata);
+        assertEquals(sha256(expectedUnknownJson), unknownRow.inputHash());
     }
 
     @Test
@@ -291,10 +298,14 @@ class CopilotRunServiceMySqlIntegrationTest {
         CopilotRunService.CopilotArtifactSnapshot artifact = new CopilotRunService.CopilotArtifactSnapshot(
                 artifactId, "mock", "mock-management-copilot", "nf08-f1",
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "catalog-v1", 0);
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("attemptKind", "SUMMARY");
+        metadata.put("traceId", traceId);
+        metadata.put("outcome", "PENDING");
+        metadata.put("costState", "UNKNOWN");
+        metadata.put("configHash", artifact.configHash());
         CopilotRunService.CopilotAttemptRecord attempt = new CopilotRunService.CopilotAttemptRecord(
-                runId, traceId, null, "SUMMARY", tenantId, artifact,
-                Map.of("attemptKind", "SUMMARY", "traceId", traceId, "outcome", "PENDING",
-                        "costState", "UNKNOWN", "configHash", artifact.configHash()));
+                runId, traceId, null, "SUMMARY", tenantId, artifact, metadata);
         return new Fixture(runId, attempt);
     }
 
@@ -331,24 +342,36 @@ class CopilotRunServiceMySqlIntegrationTest {
                 new CopilotProviderUsage(12, 4, 16, 0, 0), "INNER_VALIDATION_FAILED");
     }
 
-    private String canonicalJsonHash(String json) throws Exception {
-        JsonNode value = objectMapper.readTree(json);
-        byte[] canonical = objectMapper.writeValueAsBytes(canonicalValue(value));
-        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical));
+    private String expectedCompletionJson(CopilotRunService.CopilotAttemptRecord attempt,
+                                          String outcome, int latency, String costState,
+                                          String dispatchOutcome, String dispatchReason, String costReason,
+                                          CopilotProviderUsage usage, Integer costJpy) throws Exception {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("attemptKind", "SUMMARY");
+        metadata.put("traceId", attempt.traceId());
+        metadata.put("outcome", outcome);
+        metadata.put("costState", costState);
+        metadata.put("configHash", attempt.artifact().configHash());
+        metadata.put("latencyMs", latency);
+        metadata.put("dispatchOutcome", dispatchOutcome);
+        metadata.put("dispatchReasonCode", dispatchReason);
+        metadata.put("costReasonCode", costReason);
+        if (usage != null) {
+            Map<String, Object> usageMetadata = new LinkedHashMap<>();
+            usageMetadata.put("promptTokenCount", usage.promptTokenCount());
+            usageMetadata.put("candidateTokenCount", usage.candidateTokenCount());
+            usageMetadata.put("totalTokenCount", usage.totalTokenCount());
+            usageMetadata.put("thoughtsTokenCount", usage.thoughtsTokenCount());
+            usageMetadata.put("cachedContentTokenCount", usage.cachedContentTokenCount());
+            metadata.put("providerUsage", usageMetadata);
+        }
+        if (costJpy != null) metadata.put("costJpy", costJpy);
+        return objectMapper.writeValueAsString(metadata);
     }
 
-    private Object canonicalValue(JsonNode value) {
-        if (value.isObject()) {
-            Map<String, Object> sorted = new TreeMap<>();
-            value.fields().forEachRemaining(entry -> sorted.put(entry.getKey(), canonicalValue(entry.getValue())));
-            return sorted;
-        }
-        if (value.isArray()) {
-            List<Object> ordered = new ArrayList<>();
-            value.forEach(child -> ordered.add(canonicalValue(child)));
-            return ordered;
-        }
-        return value;
+    private static String sha256(String value) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(value.getBytes(StandardCharsets.UTF_8)));
     }
 
     private record Fixture(long runId, CopilotRunService.CopilotAttemptRecord attempt) { }
