@@ -141,7 +141,8 @@ D2b2固定 `ac894ac6ec9df2eada9e47c5f242f268270daec4` は35/0/0/0となり、Ast
 D2b2のUTCは06:03:47.8568879〜06:07:03.3878196、log SHA-256は
 `290576A0F38A424D1D948147344158EC29C913189CD654533B9B6F926B508C7E`。
 stable append race、unstable exhaustion、no-replay owner rotationが実行された。
-三つの異なるMySQL8.0.46 container/schemaとproviderCallCount=0を照合した。
+三つの異なるMySQL8.0.46 container/schemaを照合した。providerCallCount=0は固定ログ文字列であり、実測counter assertionではない。
+testにprovider fixture/call経路がないという構造上の限定確認で、実providerの呼出数測定証拠にしない。
 control `9f8568bd` へD2a〜D2b2を統合したが、control組合せ再検証は別gateとする。
 JaCoCo mismatchがあるためcoverage証拠ではない。§7.3の未完境界、一般network/JDBC hard bound、
 実ACK-loss、Privacy/Legal承認、production復元、NF07全体の未完は変更しない。

@@ -7,7 +7,7 @@
   log SHA-256 `5957A4861287EA23B68E0C7759C096446DE001F5C055789DAD112E0D944B43BA`。
   Astraが38 report hashと9 verifier case＋既存96 caseを照合して限定受理した。
   `15907043..ae17928` の6commitをcontrol `ca02c84b` へ統合し、46証拠fileをhash一致で保存した。
-  synthetic usage receiptの算術・card binding・拒否契約に限る。実usage認証/価格/跨process冪等の証明ではない。
+  synthetic usage receiptの算術・card binding・拒否契約に限る。実usage認証/価格/process間冪等の証明ではない。
 - NF08 B1 fixed `a82ded74` は限定CODE PASS。NOT_SENT/UNKNOWN metadata、tenant/CAS、実Spring transaction、
   stale時に未保存summaryを返さない経路を対象とし、定向fast・MySQLを待つ。ACTUAL/UPPER信頼経路は含まない。
   commit故障注入や二tenant実行の二行不変まで試験済みとはしない。
@@ -21,6 +21,14 @@
   W3a初回 `4ddb8ff6` はCODE FAIL（署名canonical衝突P1、scope capability、case CAS、ACK read-back、
   final target metadata、test store境界、expiry再確認、test隔離/coverageのP2）。W3aはcontrol未統合・修復中。
   D2b2成功をW3aまたはNF07全体の成功へ拡張しない。
+
+### D2b2証拠の独立照合と表現訂正
+
+Astraは上記control固定35件を限定証拠PASSとした。3 schema hashは固定commitのblobから再計算して一致した。
+ただし `providerCallCount=0` はtest sourceの固定ログ文字列であり、動的counter assertionではない。
+本testにはprovider fixture/call経路がないことを構造上確認した範囲で、実provider呼出数の測定証拠として扱わない。
+三つの専用test schemaを使用するため、NF06/V184が同controlに存在しても本runでそのmigrationを実行したとは言えない。
+JaCoCo mismatchはcoverage結論に使用しない。W3a CODE FAILおよびproduction未承認は不変。
 
 ## 再開確認（2026-10-18 21:08 JST）
 
@@ -81,7 +89,7 @@
 - NF07 D2b2固定 `ac894ac6` は三DB MySQL **35/0/0/0**、Astra限定証拠PASS。
   UTC06:03:47.8568879〜06:07:03.3878196、log
   `290576A0F38A424D1D948147344158EC29C913189CD654533B9B6F926B508C7E`。
-  3container/MySQL8.0.46、schema hash、providerCallCount=0を照合した。JaCoCo mismatchはcoverageに使わない。
+  3container/MySQL8.0.46、schema hashを照合した。providerCallCount=0は固定ログであり実測counterではない。JaCoCo mismatchはcoverageに使わない。
   `8fd3bcb0..ac894ac6` の10commit（先頭 `52a3ac82` を含む）をcontrol `9f8568bd` へ統合。
   control組合せ再実測、一般network/driver ACK-loss/完全ACLは未完。
 - NF06 F1b-1固定 `b766e3d1` のunit/H2は **3 class、23/1/4/0、FAIL**。
