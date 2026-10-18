@@ -337,9 +337,9 @@ class ImportIdentityCandidateMySqlTest {
 
     private void createSchema() {
         jdbc.execute("CREATE TABLE IF NOT EXISTS sys_user (id BIGINT PRIMARY KEY, tenant_id VARCHAR(100), role VARCHAR(30), status INT, deleted_flag INT)");
-        jdbc.execute("CREATE TABLE IF NOT EXISTS t_user_permission_group (tenant_id VARCHAR(100), user_id BIGINT, group_id BIGINT, deleted_flag INT, PRIMARY KEY(tenant_id,user_id,group_id)) ENGINE=InnoDB");
+        jdbc.execute("CREATE TABLE IF NOT EXISTS t_user_permission_group (id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100), user_id BIGINT, group_id BIGINT, assigned_by BIGINT NULL, assigned_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_flag INT, UNIQUE KEY uk_user_permission_group (tenant_id,user_id,group_id)) ENGINE=InnoDB");
         jdbc.execute("CREATE TABLE IF NOT EXISTS m_permission_group (tenant_id VARCHAR(100), id BIGINT, enabled INT, deleted_flag INT, PRIMARY KEY(tenant_id,id)) ENGINE=InnoDB");
-        jdbc.execute("CREATE TABLE IF NOT EXISTS t_permission_group_action (tenant_id VARCHAR(100), group_id BIGINT, action_key VARCHAR(100), deny_flag INT, deleted_flag INT, PRIMARY KEY(tenant_id,group_id,action_key,deny_flag)) ENGINE=InnoDB");
+        jdbc.execute("CREATE TABLE IF NOT EXISTS t_permission_group_action (id BIGINT AUTO_INCREMENT PRIMARY KEY, tenant_id VARCHAR(100), group_id BIGINT, action_key VARCHAR(160), deny_flag INT, deleted_flag INT, UNIQUE KEY uk_permission_group_action (tenant_id,group_id,action_key)) ENGINE=InnoDB");
         jdbc.execute("CREATE TABLE IF NOT EXISTS t_import_source_system (tenant_id VARCHAR(100), id BIGINT, version_no BIGINT, status VARCHAR(16), lookup_key_version VARCHAR(64), PRIMARY KEY(tenant_id,id)) ENGINE=InnoDB");
         jdbc.execute("CREATE TABLE IF NOT EXISTS t_document (tenant_id VARCHAR(100), id BIGINT, legal_entity_id VARCHAR(100), legal_hold_flag INT, retention_until DATE, deleted_flag INT, PRIMARY KEY(tenant_id,id)) ENGINE=InnoDB");
         jdbc.execute("CREATE TABLE IF NOT EXISTS t_document_version (tenant_id VARCHAR(100), document_id BIGINT, id BIGINT, version_no INT, storage_key VARCHAR(255), sha256 VARCHAR(64), scan_status VARCHAR(16), deleted_flag INT, PRIMARY KEY(tenant_id,id)) ENGINE=InnoDB");
@@ -359,8 +359,10 @@ class ImportIdentityCandidateMySqlTest {
         byte[] fingerprint = CanonicalImportRowFingerprint.sha256(CanonicalRowFactory.create(ImportEntity.CUSTOMER, row));
         jdbc.update("INSERT INTO sys_user VALUES(?,?,?,1,0)", actorUserId, tenant, "管理者");
         jdbc.update("INSERT INTO m_permission_group VALUES(?,?,1,0)", tenant, 2L);
-        jdbc.update("INSERT INTO t_user_permission_group VALUES(?,?,?,0)", tenant, actorUserId, 2L);
-        jdbc.update("INSERT INTO t_permission_group_action VALUES(?,?,?,0,0)", tenant, 2L, ImportMetadataAuthorizationService.ACTION);
+        jdbc.update("INSERT INTO t_user_permission_group (tenant_id,user_id,group_id,deleted_flag) VALUES(?,?,?,0)",
+                tenant, actorUserId, 2L);
+        jdbc.update("INSERT INTO t_permission_group_action (tenant_id,group_id,action_key,deny_flag,deleted_flag) VALUES(?,?,?,0,0)",
+                tenant, 2L, ImportMetadataAuthorizationService.ACTION);
         jdbc.update("INSERT INTO t_import_source_system VALUES(?,?,?,?,?)", tenant, sourceId, 4L, "ACTIVE", LOOKUP_VERSION);
         jdbc.update("INSERT INTO t_document VALUES(?,?,?,?,?,?)", tenant, documentId, "77", 0, null, 0);
         jdbc.update("INSERT INTO t_document_version VALUES(?,?,?,?,?,?,?,?)", tenant, documentId, documentVersionId,
