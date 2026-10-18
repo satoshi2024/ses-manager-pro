@@ -115,6 +115,36 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         assertEquals(0,f.provider.crossScopeAttempts.get());
     }
 
+    @Test void exactRetryLeavesCompleteImmutableAsOfWitnessAndCaseRevisionUntouched() {
+        Fixture f=new Fixture();
+        assertEquals("AS_OF_PREVIEW_ONLY",f.service.preview(f.command,f.identity).status());
+        String snapshotHash=jdbc.queryForObject("SELECT snapshot_hash FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",
+                String.class,f.command.tenantId(),f.command.requestId());
+        String witness=jdbc.queryForObject("SELECT witness_json FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",
+                String.class,f.command.tenantId(),f.command.requestId());
+        String items=jdbc.queryForObject("SELECT items_json FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",
+                String.class,f.command.tenantId(),f.command.requestId());
+        for(String source:SyntheticPreviewWitnessPort.SOURCE_NAMES)assertTrue(witness.contains("sourceObservedAt="+source+":"),source);
+        assertTrue(items.contains("metadataObservedAt")); assertTrue(items.contains("observedAt"));
+        assertEquals("AS_OF_PREVIEW_ONLY",f.service.preview(f.command,f.identity).status());
+        assertEquals(snapshotHash,jdbc.queryForObject("SELECT snapshot_hash FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",
+                String.class,f.command.tenantId(),f.command.requestId()));
+        assertEquals(1L,jdbc.queryForObject("SELECT revision FROM sf_w3a_case WHERE tenant_id=? AND case_ref=?",
+                Long.class,f.command.tenantId(),f.command.caseRef()));
+        assertEquals(1,f.provider.reads.get()); assertEquals(0,f.provider.crossScopeAttempts.get());
+    }
+
+    @Test void providerCannotSmuggleAnOutOfScopeTargetIntoImmutablePreview() {
+        Fixture f=new Fixture(); f.provider.returnedTargetId="target-synthetic-other-tenant";
+        PreviewResult result=f.service.preview(f.command,f.identity);
+        assertEquals("PREVIEW_STALE",result.status()); assertTrue(result.items().isEmpty());
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
+                f.command.tenantId(),f.command.requestId()));
+        assertEquals(0,f.provider.crossScopeAttempts.get());
+        assertEquals(PrivacyCaseState.SCOPED.name(),jdbc.queryForObject("SELECT state FROM sf_w3a_case WHERE tenant_id=? AND case_ref=?",
+                String.class,f.command.tenantId(),f.command.caseRef()));
+    }
+
     @Test void driftAfterFinalReadCanPersistOnlyAsOfHistoryAndReturnsClosedView() {
         Fixture f=new Fixture();
         SyntheticPrivacyRequestService raced=f.serviceWithPreCommit(()->f.witness.values.put("policyHash","policy-drift"));
@@ -347,6 +377,7 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         final AtomicInteger reads=new AtomicInteger(), describes=new AtomicInteger();
         volatile String version="target-r1";
         volatile String contentHash="sha256-synthetic-r1";
+        volatile String returnedTargetId;
         volatile String expectedRequestId,expectedIdentityHash,expectedScopeHash,expectedCaseRef;
         public String providerId(){return "synthetic-provider-w3a";} public String audience(){return "SYNTHETIC";}
         final AtomicInteger crossScopeAttempts=new AtomicInteger();
@@ -359,7 +390,7 @@ class SyntheticPrivacyRequestServiceMySqlTest {
                     "scope-w3a","scope-r1",expectedScopeHash,expectedCaseRef,"synthetic-provider-w3a","SYNTHETIC",target)){
                 crossScopeAttempts.incrementAndGet();throw new SecurityException("scope外readは禁止です");
             }
-            return current(target);
+            return current(returnedTargetId==null?target:returnedTargetId);
         }
         public SyntheticTarget describeCurrent(SyntheticPreviewScopeVerifier.VerifiedScope scope,String target){
             describes.incrementAndGet();
