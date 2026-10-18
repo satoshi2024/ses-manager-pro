@@ -23,6 +23,7 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -37,7 +38,7 @@ class SyntheticPrivacyRequestServiceMySqlTest {
     private static AnnotationConfigApplicationContext context;
     private static JdbcTemplate jdbc;
     private static Environment environment;
-    private static W3aSyntheticPreviewStore store;
+    private static JournalTestConnectionCapability.W3aSyntheticPreviewStore store;
     private static String containerId;
     private static final ThreadLocal<Fixture> ACTIVE_FIXTURE=new ThreadLocal<>();
 
@@ -176,17 +177,128 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         assertEquals(1,f.provider.reads.get()); assertEquals(2,f.provider.describes.get());
     }
 
+    @Test void driftAfterCommitAcknowledgementReturnsClosedViewAndPreservesHistory() {
+        Fixture f=new Fixture(); JournalTestConnectionCapability.W3aSyntheticPreviewStore storeRef=store;
+        storeRef.afterNextCommit(()->f.witness.values.put("policyHash","policy-after-ack"));
+        PreviewResult result=f.service.preview(f.command,f.identity);
+        assertEquals("PREVIEW_STALE",result.status()); assertTrue(result.items().isEmpty());
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
+                f.command.tenantId(),f.command.requestId()));
+    }
+
+    @Test void differentRequestCannotCommitAgainstAlreadyAdvancedCaseRevision() {
+        Fixture f=new Fixture();
+        assertEquals("AS_OF_PREVIEW_ONLY",f.service.preview(f.command,f.identity).status());
+        SyntheticPrivacyRequestService.Command competing=new SyntheticPrivacyRequestService.Command(f.command.tenantId(),
+                f.command.requesterId(),f.command.subjectRef(),"request-compete-"+java.util.UUID.randomUUID(),f.command.identityRevision(),
+                f.command.caseRef(),f.command.scopeId(),"idem-compete-"+java.util.UUID.randomUUID());
+        SyntheticIdentityEnvelope identity=f.signer.sign(f.command.tenantId(),f.command.requesterId(),f.command.subjectRef(),
+                competing.requestId(),competing.identityRevision(),NOW.plusSeconds(3600),"SYNTHETIC");
+        PreviewResult result=f.service.preview(competing,identity);
+        assertEquals("PREVIEW_STALE",result.status()); assertTrue(result.items().isEmpty());
+        assertEquals(1L,jdbc.queryForObject("SELECT revision FROM sf_w3a_case WHERE tenant_id=? AND case_ref=?",Long.class,
+                competing.tenantId(),competing.caseRef()));
+    }
+
+    @Test void differentRequestsCompeteOnTheSameObservedCaseRevision() throws Exception {
+        Fixture f=new Fixture();
+        SyntheticPrivacyRequestService.Command otherCommand=new SyntheticPrivacyRequestService.Command(f.command.tenantId(),
+                f.command.requesterId(),f.command.subjectRef(),"request-race-"+java.util.UUID.randomUUID(),f.command.identityRevision(),
+                f.command.caseRef(),f.command.scopeId(),"idem-race-"+java.util.UUID.randomUUID());
+        SyntheticIdentityEnvelope otherIdentity=f.signer.sign(f.command.tenantId(),f.command.requesterId(),f.command.subjectRef(),
+                otherCommand.requestId(),otherCommand.identityRevision(),NOW.plusSeconds(3600),"SYNTHETIC");
+        SyntheticIdentityEvidenceVerifier.VerifiedIdentity verified=f.verifier.verify(otherIdentity,otherCommand.tenantId(),
+                otherCommand.requesterId(),otherCommand.subjectRef(),otherCommand.requestId(),otherCommand.identityRevision());
+        TestWitness otherWitness=new TestWitness();
+        otherWitness.values.putAll(f.witness.values);otherWitness.values.put("identityHash",otherIdentity.digest());
+        otherWitness.values.put("identityExpiresAt",otherIdentity.expiresAt().toString());
+        String otherScopeHash=SyntheticPreviewScopeVerifier.computeScopeHash(verified,otherCommand,"scope-r1",otherWitness.allowedTargetIds);
+        otherWitness.values.put("scopeHash",otherScopeHash);
+        TestProvider otherProvider=new TestProvider();
+        otherProvider.bind(otherCommand.requestId(),otherIdentity.digest(),otherScopeHash,otherCommand.caseRef());
+        SyntheticPreviewProviderRegistry otherRegistry=new SyntheticPreviewProviderRegistry(Map.of(otherProvider.providerId(),otherProvider),f.guard);
+        SyntheticPrivacyRequestService otherService=new SyntheticPrivacyRequestService(store,f.verifier,new SyntheticPreviewScopeVerifier(),
+                otherWitness,otherRegistry,f.clock,()->{},()->{});
+        CyclicBarrier barrier=new CyclicBarrier(2);
+        Runnable meet=()->{try{barrier.await(5,TimeUnit.SECONDS);}catch(Exception e){throw new IllegalStateException(e);}};
+        SyntheticPrivacyRequestService left=f.serviceWithBarriers(()->{},meet);
+        SyntheticPrivacyRequestService right=new SyntheticPrivacyRequestService(store,f.verifier,new SyntheticPreviewScopeVerifier(),
+                otherWitness,otherRegistry,f.clock,()->{},meet);
+        ExecutorService workers=Executors.newFixedThreadPool(2);
+        try {
+            Future<PreviewResult> a=workers.submit(()->left.preview(f.command,f.identity));
+            Future<PreviewResult> b=workers.submit(()->right.preview(otherCommand,otherIdentity));
+            List<String> statuses=List.of(a.get(10,TimeUnit.SECONDS).status(),b.get(10,TimeUnit.SECONDS).status());
+            assertEquals(1,statuses.stream().filter("AS_OF_PREVIEW_ONLY"::equals).count());
+            assertEquals(1,statuses.stream().filter("PREVIEW_STALE"::equals).count());
+        } finally {workers.shutdownNow();assertTrue(workers.awaitTermination(5,TimeUnit.SECONDS),"worker停止");}
+        assertEquals(1L,jdbc.queryForObject("SELECT revision FROM sf_w3a_case WHERE tenant_id=? AND case_ref=?",Long.class,
+                f.command.tenantId(),f.command.caseRef()));
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND case_ref=?",Integer.class,
+                f.command.tenantId(),f.command.caseRef()));
+        assertEquals(0,f.provider.crossScopeAttempts.get());assertEquals(0,otherProvider.crossScopeAttempts.get());
+    }
+
+    @Test void observationVectorUsesMicrosecondPrecisionAndIncludesLateTargetMetadata() {
+        Fixture f=new Fixture();
+        PreviewResult result=f.service.preview(f.command,f.identity);
+        assertEquals("AS_OF_PREVIEW_ONLY",result.status());
+        assertEquals(0,result.observedFrom().getNano()%1_000);
+        assertEquals(0,result.observedTo().getNano()%1_000);
+        assertTrue(result.observedTo().isAfter(result.items().get(0).observedAt()));
+        assertEquals(result.items().get(0).metadataObservedAt(),result.observedTo());
+        assertEquals(result.observedTo(),store.find(f.command.tenantId(),f.command.requestId(),f.command.idempotencyKey()).observedTo());
+    }
+
+    @Test void describeCurrentExpiryDuringCallIsClosedAndDoesNotPersist() {
+        Fixture f=new Fixture();
+        f.provider.onDescribe=()->f.clock.set(NOW.plusSeconds(3601));
+        PreviewResult result=f.service.preview(f.command,f.identity);
+        assertEquals("PREVIEW_STALE",result.status()); assertTrue(result.items().isEmpty());
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
+                f.command.tenantId(),f.command.requestId()));
+    }
+
+    @Test void exactRetryClosesWhenIdentityExpiresInsideDescribeCurrent() {
+        Fixture f=new Fixture();
+        assertEquals("AS_OF_PREVIEW_ONLY",f.service.preview(f.command,f.identity).status());
+        int reads=f.provider.reads.get();
+        f.provider.onDescribe=()->f.clock.set(NOW.plusSeconds(3601));
+        PreviewResult result=f.service.preview(f.command,f.identity);
+        assertEquals("PREVIEW_STALE",result.status()); assertTrue(result.items().isEmpty());
+        assertEquals(reads,f.provider.reads.get());
+    }
+
+    @Test void metadataDriftBeforeFinalMetadataPreventsPersistence() {
+        Fixture f=new Fixture();
+        f.provider.onDescribe=()->f.provider.version="target-r2";
+        PreviewResult result=f.service.preview(f.command,f.identity);
+        assertEquals("PREVIEW_STALE",result.status()); assertEquals("TARGET_METADATA_DRIFT_BEFORE_COMMIT",result.reasonCode());
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
+                f.command.tenantId(),f.command.requestId()));
+    }
+
+    @Test void unavailableAndMismatchedStoreReadbackAreClosed() {
+        for(JournalTestConnectionCapability.W3aSyntheticPreviewStore.ReadbackFault fault:JournalTestConnectionCapability.W3aSyntheticPreviewStore.ReadbackFault.values()) {
+            if(fault==JournalTestConnectionCapability.W3aSyntheticPreviewStore.ReadbackFault.NONE) continue;
+            Fixture f=new Fixture(); store.faultNextReadback(fault);
+            PreviewResult result=f.service.preview(f.command,f.identity);
+            assertTrue(result.items().isEmpty());
+            assertTrue(List.of("PREVIEW_UNKNOWN","PREVIEW_STALE").contains(result.status()),fault.name());
+        }
+    }
+
     @Test void twoWorkersUseOneCaseCasAndLoserReadsBackSameIdempotentPreview() throws Exception {
         Fixture f=new Fixture(); CyclicBarrier barrier=new CyclicBarrier(2);
-        Runnable meet=()->{try{barrier.await();}catch(Exception e){throw new IllegalStateException(e);}};
+        Runnable meet=()->{try{barrier.await(5,TimeUnit.SECONDS);}catch(Exception e){throw new IllegalStateException(e);}};
         SyntheticPrivacyRequestService left=f.serviceWithBarriers(()->{},meet);
         SyntheticPrivacyRequestService right=f.serviceWithBarriers(()->{},meet);
         ExecutorService workers=Executors.newFixedThreadPool(2);
         try {
             Future<PreviewResult> a=workers.submit(()->left.preview(f.command,f.identity));
             Future<PreviewResult> b=workers.submit(()->right.preview(f.command,f.identity));
-            assertEquals("AS_OF_PREVIEW_ONLY",a.get().status()); assertEquals("AS_OF_PREVIEW_ONLY",b.get().status());
-        } finally {workers.shutdownNow();}
+            assertEquals("AS_OF_PREVIEW_ONLY",a.get(10,TimeUnit.SECONDS).status()); assertEquals("AS_OF_PREVIEW_ONLY",b.get(10,TimeUnit.SECONDS).status());
+        } finally {workers.shutdownNow();assertTrue(workers.awaitTermination(5,TimeUnit.SECONDS),"worker停止");}
         assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
                 f.command.tenantId(),f.command.requestId()));
         assertEquals(1L,jdbc.queryForObject("SELECT revision FROM sf_w3a_case WHERE tenant_id=? AND case_ref=?",Long.class,
@@ -234,6 +346,12 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         int beforeDescriptions=f.provider.describes.get();
         assertClosedAfterMutation(f,"scopeHash","scope-hash-r2","PREVIEW_STALE");
         f.reset("scopeHash",f.scopeHash);
+        assertClosedAfterMutation(f,"scopeRevision","scope-r2","PREVIEW_STALE"); f.reset("scopeRevision","scope-r1");
+        assertClosedAfterMutation(f,"providerId","provider-other","PREVIEW_STALE"); f.reset("providerId","synthetic-provider-w3a");
+        assertClosedAfterMutation(f,"providerAudience","OTHER","PREVIEW_STALE"); f.reset("providerAudience","SYNTHETIC");
+        assertClosedAfterMutation(f,"identityRevocation","REVOKED","PREVIEW_STALE"); f.reset("identityRevocation","ACTIVE");
+        assertClosedAfterMutation(f,"witnessKeyState","UNKNOWN","PREVIEW_UNKNOWN"); f.reset("witnessKeyState","ACTIVE");
+        assertClosedAfterMutation(f,"holdRevision","hold-r2","PREVIEW_STALE"); f.reset("holdRevision","hold-r1");
         assertClosedAfterMutation(f,"policyHash","policy-hash-r2","PREVIEW_STALE");
         f.reset("policyHash","policy-hash-r1");
         assertClosedAfterMutation(f,"holdState","ACTIVE","PREVIEW_BLOCKED");
@@ -333,6 +451,10 @@ class SyntheticPrivacyRequestServiceMySqlTest {
                 .anyMatch(type->javax.sql.DataSource.class.isAssignableFrom(type)));
         assertEquals(0,java.util.Arrays.stream(SyntheticPreviewPort.class.getMethods())
                 .filter(method->method.getName().toLowerCase(java.util.Locale.ROOT).matches(".*(write|delete|dispatch|execute).*" )).count());
+        assertTrue(java.util.Arrays.stream(JournalTestConnectionCapability.W3aSyntheticPreviewStore.class.getDeclaredConstructors())
+                .noneMatch(c->java.util.Arrays.stream(c.getParameterTypes()).anyMatch(javax.sql.DataSource.class::isAssignableFrom)));
+        assertFalse(java.util.Arrays.stream(JournalTestConnectionCapability.W3aSyntheticPreviewStore.class.getDeclaredMethods())
+                .anyMatch(m->m.getName().equals("fromOwnedContainer")));
     }
 
     private static final Instant NOW=Instant.parse("2026-10-16T00:00:00Z");
@@ -381,6 +503,7 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         volatile String expectedRequestId,expectedIdentityHash,expectedScopeHash,expectedCaseRef;
         public String providerId(){return "synthetic-provider-w3a";} public String audience(){return "SYNTHETIC";}
         final AtomicInteger crossScopeAttempts=new AtomicInteger();
+        volatile Runnable onDescribe=()->{};
         void bind(String request,String identityHash,String scopeHash,String caseRef){
             expectedRequestId=request;expectedIdentityHash=identityHash;expectedScopeHash=scopeHash;expectedCaseRef=caseRef;
         }
@@ -394,11 +517,12 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         }
         public SyntheticTarget describeCurrent(SyntheticPreviewScopeVerifier.VerifiedScope scope,String target){
             describes.incrementAndGet();
+            onDescribe.run();
             if(!scope.permits("tenant-synthetic-w3a","requester-w3a","subject-w3a",expectedRequestId,"identity-r1",expectedIdentityHash,
                     "scope-w3a","scope-r1",expectedScopeHash,expectedCaseRef,"synthetic-provider-w3a","SYNTHETIC",target)){
                 crossScopeAttempts.incrementAndGet();throw new SecurityException("scope外metadata readは禁止です");
             }
-            return current(target);
+            return new SyntheticTarget(target,version,contentHash,NOW.plusSeconds(3).plusNanos(describes.get()));
         }
         private SyntheticTarget current(String id){return new SyntheticTarget(id,version,contentHash,NOW);}
     }
@@ -419,7 +543,7 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         public SourceSnapshot readCurrent(String tenant,String requester,String subject,String request,String caseRef,String scope){
             reads.incrementAndGet(); Map<String,String> current=new HashMap<>(values);current.put("requesterId",requester);
             current.put("requestId",request);current.put("caseRef",caseRef);current.put("scopeId",scope);
-            Instant observed=NOW.plusNanos(reads.get());
+            Instant observed=NOW.plusNanos(reads.get()*1_234L);
             Map<String,Instant> sourceTimes=new HashMap<>();
             SyntheticPreviewWitnessPort.SOURCE_NAMES.forEach(name->sourceTimes.put(name,observed));
             return new SourceSnapshot(Map.copyOf(current),allowedTargetIds,sourceTimes,observed);
