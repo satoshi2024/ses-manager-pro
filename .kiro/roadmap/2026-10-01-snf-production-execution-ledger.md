@@ -1,5 +1,23 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## 再開確認（2026-10-18 21:08 JST）
+
+- **NO-GO / 修復継続**。再fetchしたorigin/mainは `1443fb68943849a3260d7ebe005259f3eb609d60`。
+  PR101はMERGED、head `8ad0c34e` の祖先判定exit0、全7 checkはCOMPLETED/SUCCESS。
+  最新main run `36858538460` はCOMPLETED/FAILUREのまま。主checkoutの利用者変更3件を保持した。
+- 前回中断後のNF06 fixed `ed433641048c60d66cabbd2360d9dfdc72f09191` MySQL再試験結果を回収した。
+  **44/0/1/0、FAIL**、UTC2026-10-16T06:18:28.0374975Z〜06:21:25.0563755Z、起止SHA一致・clean。
+  `verification-evidence/nf06-fixed/20261016-f1b1-lifecycle-mysql-02/`（NF06 verify tree）のlog SHA-256は
+  `45A4ECA8921438714D43AF668CDE2581E7B08EE9200BD63E279A489529AE3A74`。
+  唯一errorはsource変更service-first caseのpermissionLockData取得0行。mutation開始前の証拠取得に失敗しており、
+  その競合順序を検証済みとはしない。旧completed再validationのsnapshot errorは本runでは非再現。
+  Lunaがwave2 WIPを保持したまま独立修復し、Astraが証拠と固定差分を審査する。
+- NF08 A2 fixed `ae17928b` の19 class再試験を新しい `20261018-c2-a2-02` 証拠directoryで開始した。
+  sourceのC2-B1 WIPを検証treeに含めない。NF07 W3aの中断WIPも保持してLunaが再開した。
+  Maven/MySQL/Chromeはrootが直列化し、実装Luna・独立Review Astraの分担を維持する。
+- NF06/NF07の新機能、NF08の実usage信頼経路、staging、実provider、production承認は未完。
+  この再開記録は以前の限定成功や全fast第6回FAILを変更せず、push/PR/deploy/実credential操作も行わない。
+
 ## 実測による追加修復（2026-10-16 15:19 JST）
 
 - **NO-GO**。control固定 `172a363d99c8920fcb55c0ca4ac7d3384759602c` の残留fast fixtureは
