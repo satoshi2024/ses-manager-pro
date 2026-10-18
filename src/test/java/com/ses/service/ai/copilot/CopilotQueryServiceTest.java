@@ -173,7 +173,7 @@ class CopilotQueryServiceTest {
                 SemanticCatalogRegistry.CATALOG_VERSION, SemanticCatalogRegistry.RESULT_SCHEMA_VERSION,
                 Set.of("管理者"), true, 200, List.of());
         CopilotExecutionContext executionContext = context();
-        CopilotScopeContext boundScope = executionContext.scope();
+        CopilotExecutionContext retryContext = context();
         CopilotRunService.CopilotArtifactSnapshot artifact = new CopilotRunService.CopilotArtifactSnapshot(
                 7L, "mock", "mock-management-copilot", CopilotSummaryPromptTemplate.VERSION,
                 CopilotSummaryPromptTemplate.localConfigHash("mock", "mock-management-copilot"),
@@ -183,16 +183,18 @@ class CopilotQueryServiceTest {
         CopilotRunService.CopilotAttemptRecord summaryAttempt = new CopilotRunService.CopilotAttemptRecord(
                 12L, "summary-trace", "query-trace", "SUMMARY", "tenant-a", artifact, java.util.Map.of());
         Mockito.doNothing().when(featureGate).assertQueryAllowed();
-        when(contextFactory.create()).thenReturn(executionContext);
+        when(contextFactory.create()).thenReturn(executionContext, retryContext);
         when(intentParser.parse("稼働率")).thenReturn(new IntentParser.ParsedIntent(queryId, "SUPPORTED"));
-        when(parameterBinder.bind(queryId, "稼働率", executionContext))
-                .thenReturn(com.ses.service.ai.copilot.parameter.CopilotQueryParameters.ofQuery(queryId));
+        when(parameterBinder.bind(eq(queryId), eq("稼働率"), any()))
+                .thenAnswer(invocation -> com.ses.service.ai.copilot.parameter.CopilotQueryParameters.ofQuery(queryId));
         when(parameterBinder.parameterHash(any(), any())).thenReturn("parameter-hash");
-        when(scopeResolver.resolve(entry, executionContext)).thenReturn(boundScope);
+        when(scopeResolver.resolve(eq(entry), any()))
+                .thenAnswer(invocation -> ((CopilotExecutionContext) invocation.getArgument(1)).scope());
         when(copilotRunService.pinActiveArtifact()).thenReturn(artifact);
         when(copilotRunService.beginQueryAttempt(any(), anyString(), any(), any())).thenReturn(queryAttempt);
         when(copilotRunService.beginSummaryAttempt(any(), anyString(), any(), any(), any())).thenReturn(summaryAttempt);
-        when(catalogQueryGateway.execute(any(), any(), any(), any())).thenReturn(envelopeFor(executionContext, queryId));
+        when(catalogQueryGateway.execute(any(), any(), any(), any()))
+                .thenAnswer(invocation -> envelopeFor(invocation.getArgument(3), queryId));
         when(citationAuthorizationService.authorizeAll(any(), any(), any(), any(), anyString())).thenReturn(List.of());
         when(copilotSummaryService.summarize(any(), any(), any(), anyString(), any(), anyString()))
                 .thenReturn(new SummaryResponse("生成済みだが未保存", List.of(),
