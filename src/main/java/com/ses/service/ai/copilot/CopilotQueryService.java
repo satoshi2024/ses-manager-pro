@@ -110,7 +110,11 @@ public class CopilotQueryService {
                     elapsedMillis(queryStarted), true, envelope == null || envelope.values() == null
                             ? 0 : envelope.values().size());
         } catch (RuntimeException ex) {
-            copilotRunService.completeQueryAttempt(queryAttempt, elapsedMillis(queryStarted), false, 0);
+            try {
+                copilotRunService.completeQueryAttempt(queryAttempt, elapsedMillis(queryStarted), false, 0);
+            } catch (RuntimeException completionFailure) {
+                ex.addSuppressed(completionFailure);
+            }
             throw ex;
         }
         CopilotRunService.CopilotRunRecord run = new CopilotRunService.CopilotRunRecord(
@@ -132,7 +136,11 @@ public class CopilotQueryService {
         } catch (RuntimeException ex) {
             summaryResponse = SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE);
         }
-        copilotRunService.completeSummaryAttempt(summaryAttempt, elapsedMillis(summaryStarted), summaryResponse);
+        CopilotRunService.SummaryCompletionResult completion = copilotRunService.completeSummaryAttempt(
+                summaryAttempt, elapsedMillis(summaryStarted), summaryResponse);
+        if (completion != CopilotRunService.SummaryCompletionResult.COMPLETED) {
+            summaryResponse = SummaryResponse.unavailable("SUMMARY_ATTEMPT_STALE");
+        }
         CopilotSummaryView summary = toSummaryView(summaryResponse);
 
         return new CopilotQueryResult(
