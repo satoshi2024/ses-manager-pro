@@ -852,7 +852,7 @@ class ImportMetadataRealMySqlTest {
         assertServiceCommitsBeforeMutation(pause, "t_import_source_system",
                 "UPDATE t_import_source_system SET status='DISABLED',version_no=version_no+1 WHERE tenant_id=? AND id=?",
                 new Object[]{tenantId, sourceId},
-                () -> candidateService.registerCandidate(jobId, runId, 1));
+                () -> candidateService.registerCandidate(jobId, runId, 1), "uk_import_source_tenant_id");
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_identity_registry WHERE tenant_id=? AND source_system_id=?",
                 Integer.class, tenantId, sourceId));
         BusinessException drift = assertThrows(BusinessException.class,
@@ -934,6 +934,13 @@ class ImportMetadataRealMySqlTest {
     private Object assertServiceCommitsBeforeMutation(GatePause pause, String table, String mutationSql,
                                                      Object[] mutationParams,
                                                      java.util.concurrent.Callable<?> serviceAction) throws Exception {
+        return assertServiceCommitsBeforeMutation(pause, table, mutationSql, mutationParams, serviceAction, "PRIMARY");
+    }
+
+    private Object assertServiceCommitsBeforeMutation(GatePause pause, String table, String mutationSql,
+                                                     Object[] mutationParams,
+                                                     java.util.concurrent.Callable<?> serviceAction,
+                                                     String lockIndex) throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(2);
         AtomicReference<Long> writerId = new AtomicReference<>();
         Future<?> service = null;
@@ -943,10 +950,10 @@ class ImportMetadataRealMySqlTest {
             service = pool.submit(() -> withActorContext(serviceAction));
             assertTrue(pause.entered.await(10, TimeUnit.SECONDS), "実serviceのwrite gateに到達しませんでした");
             assertGateRunsInReadCommittedTransaction(pause);
-            String lockData = permissionLockData(pause.connectionId.get(), table, "PRIMARY");
+            String lockData = permissionLockData(pause.connectionId.get(), table, lockIndex);
             mutation = pool.submit(() -> updateAndCommit(mutationSql, mutationParams, writerId));
             awaitTargetedWait(writerId, pause.connectionId, service, mutation,
-                    table, "PRIMARY", "X,REC_NOT_GAP", lockData);
+                    table, lockIndex, "X,REC_NOT_GAP", lockData);
             pause.release.countDown();
             Object result = service.get(10, TimeUnit.SECONDS);
             mutation.get(10, TimeUnit.SECONDS);
@@ -960,7 +967,6 @@ class ImportMetadataRealMySqlTest {
                     primaryFailure);
         }
     }
-
     private void updateAndCommit(String sql, Object[] params, AtomicReference<Long> connectionId) {
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
