@@ -2,6 +2,7 @@ package com.ses.service.ai.copilot;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
@@ -22,6 +23,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -156,7 +159,7 @@ public class CopilotRunService {
         run.setUseCase(AiGatewayRequest.USE_COPILOT);
         run.setArtifactVersionId(artifact.artifactVersionId());
         run.setActorUserId(SecurityUtils.currentUserId());
-        run.setInputHash(sha256(json));
+        run.setInputHash(canonicalJsonHash(json));
         run.setRedactedSummaryJson(json);
         run.setLatencyMs(null);
         run.setCostJpy(null);
@@ -260,8 +263,35 @@ public class CopilotRunService {
                 .set(AiRecommendationRun::getCostJpy, costJpy)
                 .set(AiRecommendationRun::getErrorCode, errorCode)
                 .set(AiRecommendationRun::getRedactedSummaryJson, json)
-                .set(AiRecommendationRun::getInputHash, sha256(json));
+                .set(AiRecommendationRun::getInputHash, canonicalJsonHash(json));
         return runMapper.update(null, update);
+    }
+
+    /** MySQL JSONの再シリアライズ後も再検証できるよう、オブジェクトキー順を正規化してhash化する。 */
+    private String canonicalJsonHash(String json) {
+        try {
+            JsonNode parsed = objectMapper.readTree(json);
+            return sha256(objectMapper.writeValueAsString(canonicalizeJson(parsed)));
+        } catch (Exception ex) {
+            throw new IllegalStateException("run metadata canonical hash failed", ex);
+        }
+    }
+
+    private JsonNode canonicalizeJson(JsonNode value) {
+        if (value.isObject()) {
+            var object = objectMapper.createObjectNode();
+            var names = new ArrayList<String>();
+            value.fieldNames().forEachRemaining(names::add);
+            Collections.sort(names);
+            for (String name : names) object.set(name, canonicalizeJson(value.get(name)));
+            return object;
+        }
+        if (value.isArray()) {
+            var array = objectMapper.createArrayNode();
+            for (JsonNode child : value) array.add(canonicalizeJson(child));
+            return array;
+        }
+        return value.deepCopy();
     }
 
     private void putSafeCode(Map<String, Object> metadata, String key, String value) {
