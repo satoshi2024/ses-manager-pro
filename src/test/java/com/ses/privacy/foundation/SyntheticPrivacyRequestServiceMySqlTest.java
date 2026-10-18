@@ -179,9 +179,10 @@ class SyntheticPrivacyRequestServiceMySqlTest {
 
     @Test void driftAfterCommitAcknowledgementReturnsClosedViewAndPreservesHistory() {
         Fixture f=new Fixture(); JournalTestConnectionCapability.W3aSyntheticPreviewStore storeRef=store;
+        storeRef.loseNextCommitAckAfterCommit();
         storeRef.afterNextCommit(()->f.witness.values.put("policyHash","policy-after-ack"));
         PreviewResult result=f.service.preview(f.command,f.identity);
-        assertEquals("PREVIEW_STALE",result.status()); assertTrue(result.items().isEmpty());
+        assertEquals("PREVIEW_STALE",result.status());assertEquals("SOURCE_WITNESS_DRIFT",result.reasonCode());assertTrue(result.items().isEmpty());
         assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
                 f.command.tenantId(),f.command.requestId()));
     }
@@ -216,6 +217,7 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         otherWitness.values.put("scopeHash",otherScopeHash);
         TestProvider otherProvider=new TestProvider();
         otherProvider.bind(otherCommand.requestId(),otherIdentity.digest(),otherScopeHash,otherCommand.caseRef());
+        otherProvider.expectedClock=f.clock;
         SyntheticPreviewProviderRegistry otherRegistry=new SyntheticPreviewProviderRegistry(Map.of(otherProvider.providerId(),otherProvider),f.guard);
         SyntheticPrivacyRequestService otherService=new SyntheticPrivacyRequestService(store,f.verifier,new SyntheticPreviewScopeVerifier(),
                 otherWitness,otherRegistry,f.clock,()->{},()->{});
@@ -243,6 +245,7 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         Fixture f=new Fixture();
         PreviewResult result=f.service.preview(f.command,f.identity);
         assertEquals("AS_OF_PREVIEW_ONLY",result.status());
+        assertTrue(!result.validatedAt().isBefore(result.observedTo()),"validatedAtはtarget metadata観測後であること");
         assertEquals(0,result.observedFrom().getNano()%1_000);
         assertEquals(0,result.observedTo().getNano()%1_000);
         assertTrue(result.observedTo().isAfter(result.items().get(0).observedAt()));
@@ -281,10 +284,12 @@ class SyntheticPrivacyRequestServiceMySqlTest {
     @Test void unavailableAndMismatchedStoreReadbackAreClosed() {
         for(JournalTestConnectionCapability.W3aSyntheticPreviewStore.ReadbackFault fault:JournalTestConnectionCapability.W3aSyntheticPreviewStore.ReadbackFault.values()) {
             if(fault==JournalTestConnectionCapability.W3aSyntheticPreviewStore.ReadbackFault.NONE) continue;
-            Fixture f=new Fixture(); store.faultNextReadback(fault);
+            Fixture f=new Fixture(); store.faultNextReadback(fault);store.loseNextCommitAckAfterCommit();
             PreviewResult result=f.service.preview(f.command,f.identity);
             assertTrue(result.items().isEmpty());
-            assertTrue(List.of("PREVIEW_UNKNOWN","PREVIEW_STALE").contains(result.status()),fault.name());
+            assertEquals("PREVIEW_UNKNOWN",result.status(),fault.name());
+            assertEquals(fault==JournalTestConnectionCapability.W3aSyntheticPreviewStore.ReadbackFault.UNREADABLE
+                    ?"SOURCE_OR_STORE_UNAVAILABLE":"COMMIT_READBACK_UNCONFIRMED",result.reasonCode(),fault.name());
         }
     }
 
@@ -351,6 +356,9 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         assertClosedAfterMutation(f,"providerAudience","OTHER","PREVIEW_STALE"); f.reset("providerAudience","SYNTHETIC");
         assertClosedAfterMutation(f,"identityRevocation","REVOKED","PREVIEW_STALE"); f.reset("identityRevocation","ACTIVE");
         assertClosedAfterMutation(f,"witnessKeyState","UNKNOWN","PREVIEW_UNKNOWN"); f.reset("witnessKeyState","ACTIVE");
+        assertClosedAfterMutation(f,"witnessEpoch","epoch-r2","PREVIEW_STALE"); f.reset("witnessEpoch","epoch-r1");
+        assertClosedAfterMutation(f,"witnessRevision","witness-r2","PREVIEW_STALE"); f.reset("witnessRevision","witness-r1");
+        assertClosedAfterMutation(f,"checkpointHash","checkpoint-r2","PREVIEW_STALE"); f.reset("checkpointHash","checkpoint-hash-r1");
         assertClosedAfterMutation(f,"holdRevision","hold-r2","PREVIEW_STALE"); f.reset("holdRevision","hold-r1");
         assertClosedAfterMutation(f,"policyHash","policy-hash-r2","PREVIEW_STALE");
         f.reset("policyHash","policy-hash-r1");
@@ -398,6 +406,22 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         f.witness.values.put(key,value);
         PreviewResult result=f.service.preview(f.command,f.identity);
         assertEquals(expected,result.status(),key);assertTrue(result.items().isEmpty(),key);
+    }
+
+    @Test void currentWitnessTenantAndSubjectMismatchAreClassifiedAsClosedBindingRejection() {
+        Fixture f=new Fixture();assertEquals("AS_OF_PREVIEW_ONLY",f.service.preview(f.command,f.identity).status());
+        int reads=f.provider.reads.get();
+        for(String field:List.of("tenantId","subjectRef")){
+            String original=f.witness.values.get(field);f.witness.values.put(field,"synthetic-other-binding");
+            PreviewResult result=f.service.preview(f.command,f.identity);
+            assertEquals("PREVIEW_STALE",result.status(),field);assertEquals("CURRENT_BINDING_REJECTED",result.reasonCode(),field);
+            assertTrue(result.items().isEmpty(),field);f.witness.values.put(field,original);
+        }
+        assertEquals(reads,f.provider.reads.get());
+        assertEquals(1L,jdbc.queryForObject("SELECT revision FROM sf_w3a_case WHERE tenant_id=? AND case_ref=?",Long.class,
+                f.command.tenantId(),f.command.caseRef()));
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM sf_w3a_preview WHERE tenant_id=? AND request_id=?",Integer.class,
+                f.command.tenantId(),f.command.requestId()));
     }
 
     @Test void unverifiedIdentityIsRejectedBeforeAnyProviderOrDatabaseAccess() {
@@ -485,6 +509,7 @@ class SyntheticPrivacyRequestServiceMySqlTest {
             manifestHash=ApprovalEnvelopeCanonicalizer.digest(SyntheticCanonicalizer.encode("SF-W3A-GENERATED-FIXTURE","v1",
                     manifestFields.toArray(String[]::new)));
             provider.bind(command.requestId(),identity.digest(),scopeHash,command.caseRef());
+            provider.expectedClock=clock;
             store.seedScopedCase(command.tenantId(),command.caseRef(),0);
             ACTIVE_FIXTURE.set(this);
             service=serviceWithBarriers(()->{},()->{});
@@ -501,6 +526,7 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         volatile String contentHash="sha256-synthetic-r1";
         volatile String returnedTargetId;
         volatile String expectedRequestId,expectedIdentityHash,expectedScopeHash,expectedCaseRef;
+        volatile MutableClock expectedClock;
         public String providerId(){return "synthetic-provider-w3a";} public String audience(){return "SYNTHETIC";}
         final AtomicInteger crossScopeAttempts=new AtomicInteger();
         volatile Runnable onDescribe=()->{};
@@ -522,7 +548,9 @@ class SyntheticPrivacyRequestServiceMySqlTest {
                     "scope-w3a","scope-r1",expectedScopeHash,expectedCaseRef,"synthetic-provider-w3a","SYNTHETIC",target)){
                 crossScopeAttempts.incrementAndGet();throw new SecurityException("scope外metadata readは禁止です");
             }
-            return new SyntheticTarget(target,version,contentHash,NOW.plusSeconds(3).plusNanos(describes.get()));
+            Instant metadataAt=NOW.plusSeconds(3).plusNanos(describes.get());
+            if(expectedClock!=null)expectedClock.set(metadataAt.plusSeconds(1));
+            return new SyntheticTarget(target,version,contentHash,metadataAt);
         }
         private SyntheticTarget current(String id){return new SyntheticTarget(id,version,contentHash,NOW);}
     }
