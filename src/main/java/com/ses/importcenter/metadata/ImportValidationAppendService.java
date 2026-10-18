@@ -104,12 +104,13 @@ public class ImportValidationAppendService {
                                 batch.clear();
                                 current[0] = lifecycle.renew(current[0]);
                             }
-                        } else if (!write && processedRows[0] % CHUNK_ROWS == 0) {
+                        } else if (processedRows[0] % CHUNK_ROWS == 0) {
                             current[0] = lifecycle.renew(current[0]);
                         }
                     });
             prefix.requireExhausted();
             sourceSha = result.source().sourceSha256();
+            if (!MessageDigest.isEqual(snapshot.sourceSha(), HexFormat.of().parseHex(sourceSha))) conflict();
             if (write && !batch.isEmpty()) {
                 lifecycle.appendChunk(current[0], new ValidatedChunk(current[0],
                         lifecycle.appendSnapshot(current[0]), batch));

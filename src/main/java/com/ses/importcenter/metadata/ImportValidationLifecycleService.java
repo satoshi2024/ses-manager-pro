@@ -104,16 +104,8 @@ public class ImportValidationLifecycleService {
         Input input = grant.input;
         current(input.context);
         Locked locked = lockResources(input, grant.runId);
-        ImportAuthorizedContext gate = authorization.requireCurrentAuthorizationForWrite(input.context);
-        requireSameActor(input.context, gate);
-        Timestamp now = dbNow();
         Job job = locked.job;
         Run run = locked.run;
-        if (!activeLease(job, run, grant) || job.version != grant.jobVersion
-                || job.expiresAt == null || !job.expiresAt.equals(grant.expiresAt)
-                || !job.expiresAt.after(now) || !"BUILDING".equals(run.state)
-                || !MessageDigest.isEqual(run.fingerprint, expected.validatorFingerprint())) conflict();
-
         long previous = 0;
         for (ImportValidationAppendService.RowMetadata row : chunk.rows()) {
             if (row.sourceRowNumber() <= previous) conflict();
@@ -133,11 +125,20 @@ public class ImportValidationLifecycleService {
                 found++;
             }
         }
-        if (found == chunk.rows().size()) return;
-        if (found != 0) conflict();
+        if (found != chunk.rows().size() && found != 0) conflict();
         Long maxExisting = jdbc.queryForObject("SELECT MAX(source_row_number) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
                 Long.class, input.context.tenantId(), job.id, grant.runId);
-        if (maxExisting != null && chunk.rows().get(0).sourceRowNumber() <= maxExisting) conflict();
+        if (found == 0 && maxExisting != null && chunk.rows().get(0).sourceRowNumber() <= maxExisting) conflict();
+
+        // row lock待機の後で権限とDB時刻を再確認し、待機中の撤権・期限切れを拒否する。
+        ImportAuthorizedContext gate = authorization.requireCurrentAuthorizationForWrite(input.context);
+        requireSameActor(input.context, gate);
+        Timestamp now = dbNow();
+        if (!activeLease(job, run, grant) || job.version != grant.jobVersion
+                || job.expiresAt == null || !job.expiresAt.equals(grant.expiresAt)
+                || !job.expiresAt.after(now) || !"BUILDING".equals(run.state)
+                || !MessageDigest.isEqual(run.fingerprint, expected.validatorFingerprint())) conflict();
+        if (found == chunk.rows().size()) return;
 
         final int[][] inserted;
         try {
@@ -597,11 +598,12 @@ public class ImportValidationLifecycleService {
         private RunLease(String instanceId, Input input, long runId, String workerId, long generation,
                          long jobVersion, Timestamp expiresAt) {
             this.instanceId = instanceId; this.input = input; this.runId = runId; this.workerId = workerId;
-            this.generation = generation; this.jobVersion = jobVersion; this.expiresAt = expiresAt;
+            this.generation = generation; this.jobVersion = jobVersion;
+            this.expiresAt = expiresAt == null ? null : (Timestamp) expiresAt.clone();
         }
         public long runId() { return runId; }
         public long generation() { return generation; }
-        public Timestamp expiresAt() { return expiresAt == null ? null : new Timestamp(expiresAt.getTime()); }
+        public Timestamp expiresAt() { return expiresAt == null ? null : (Timestamp) expiresAt.clone(); }
     }
 
     record AppendSnapshot(ImportAuthorizedContext context, long jobId, long sourceId, long sourceVersion,
@@ -612,13 +614,13 @@ public class ImportValidationLifecycleService {
         AppendSnapshot {
             sourceSha = sourceSha.clone(); documentSha = documentSha.clone(); mappingSha = mappingSha.clone();
             validatorFingerprint = validatorFingerprint.clone();
-            expiresAt = expiresAt == null ? null : new Timestamp(expiresAt.getTime());
+            expiresAt = expiresAt == null ? null : (Timestamp) expiresAt.clone();
         }
         @Override public byte[] sourceSha() { return sourceSha.clone(); }
         @Override public byte[] documentSha() { return documentSha.clone(); }
         @Override public byte[] mappingSha() { return mappingSha.clone(); }
         @Override public byte[] validatorFingerprint() { return validatorFingerprint.clone(); }
-        @Override public Timestamp expiresAt() { return expiresAt == null ? null : new Timestamp(expiresAt.getTime()); }
+        @Override public Timestamp expiresAt() { return expiresAt == null ? null : (Timestamp) expiresAt.clone(); }
     }
 
     private record Source(long version, String status, String code) { }
