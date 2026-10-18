@@ -176,7 +176,9 @@ class CopilotRunServiceMySqlIntegrationTest {
     @Test
     void tenant未設定または不一致ではDBを変更しない() throws Exception {
         Fixture fixture = createFixture("tenant-a");
+        Fixture tenantBSentinel = createFixture("tenant-b");
         Snapshot before = readIndependently(fixture.runId());
+        Snapshot sentinelBefore = readIndependently(tenantBSentinel.runId());
 
         AccountingTenantContextHolder.clear();
         SecurityContextHolder.clearContext();
@@ -189,6 +191,7 @@ class CopilotRunServiceMySqlIntegrationTest {
                 () -> runService.completeSummaryAttempt(fixture.attempt(), 5,
                         SummaryResponse.unavailable("WRONG_TENANT", unknownEvidence()))));
         assertEquals(before, readIndependently(fixture.runId()));
+        assertEquals(sentinelBefore, readIndependently(tenantBSentinel.runId()));
     }
 
     @Test
@@ -382,7 +385,7 @@ class CopilotRunServiceMySqlIntegrationTest {
     }
 
     @Test
-    void commit後のcaller_ACK喪失はUNKNOWN扱いとしdurable行をrollback扱いしない() throws Exception {
+    void commit後のcaller例外simulationはdurable行をrollback扱いしない() throws Exception {
         Fixture fixture = createFixture("tenant-a");
         Snapshot before = readIndependently(fixture.runId());
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
@@ -394,10 +397,10 @@ class CopilotRunServiceMySqlIntegrationTest {
         Snapshot durable = readIndependently(fixture.runId());
         assertFalse(before.equals(durable), "proxy/transaction return後は独立connectionからcommit済み行を読む");
 
-        // DB commitの後にcallerへのACKだけが失われた場合を模擬する。これはrollbackではなく結果不明であり、
+        // commit後のcaller例外を単純に模擬するだけで、実ACK障害やUNKNOWN処理は検証しない。
         // 既にdurableな行をPENDINGへ戻す・pre-commit snapshotと等しいと主張することは禁止する。
-        RuntimeException lostCallerAck = new RuntimeException("simulated caller ACK loss after commit");
-        assertSame(lostCallerAck, assertThrows(RuntimeException.class, () -> { throw lostCallerAck; }));
+        RuntimeException callerFailure = new RuntimeException("simulated caller exception after commit");
+        assertSame(callerFailure, assertThrows(RuntimeException.class, () -> { throw callerFailure; }));
         assertEquals(durable, readIndependently(fixture.runId()));
     }
 
