@@ -975,6 +975,7 @@ class ImportMetadataRealMySqlTest {
         GatePause pause = pauseRealWriteGateAt(3);
         ExecutorService pool = Executors.newFixedThreadPool(2);
         AtomicReference<Long> takeoverWorkerId = new AtomicReference<>();
+        Set<Future<?>> verifiedFailures = new java.util.HashSet<>();
         captureActualAuthorizationConnection();
         Future<ImportValidationLifecycleService.RunLease> append = null;
         Future<?> takeoverFuture = null;
@@ -996,6 +997,7 @@ class ImportMetadataRealMySqlTest {
                     () -> pendingTakeover.get(10, TimeUnit.SECONDS));
             assertTrue(failure.getCause() instanceof BusinessException);
             assertEquals(409, ((BusinessException) failure.getCause()).getCode());
+            verifiedFailures.add(takeoverFuture);
             assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
                     Integer.class, tenantId, jobId, lease.runId()));
             assertEquals(1L, jdbc.queryForObject("SELECT lease_generation FROM t_import_job WHERE tenant_id=? AND id=?",
@@ -1005,8 +1007,8 @@ class ImportMetadataRealMySqlTest {
             throw failure;
         } finally {
             pause.release.countDown();
-            reportCleanupFailures("append/takeover lock wait fixture", awaitFutures(futures(append, takeoverFuture), pool, false),
-                    primaryFailure);
+            reportCleanupFailures("append/takeover lock wait fixture",
+                    awaitFutures(futures(append, takeoverFuture), pool, false, verifiedFailures), primaryFailure);
         }
     }
 
@@ -1017,6 +1019,7 @@ class ImportMetadataRealMySqlTest {
         GatePause pause = pauseRealWriteGateAt(3);
         ExecutorService pool = Executors.newFixedThreadPool(2);
         AtomicReference<Long> abortWorkerId = new AtomicReference<>();
+        Set<Future<?>> verifiedFailures = new java.util.HashSet<>();
         captureActualAuthorizationConnection();
         Future<ImportValidationLifecycleService.RunLease> append = null;
         Future<?> abortFuture = null;
@@ -1040,6 +1043,7 @@ class ImportMetadataRealMySqlTest {
                     () -> pendingAbort.get(10, TimeUnit.SECONDS));
             assertTrue(failure.getCause() instanceof BusinessException);
             assertEquals(409, ((BusinessException) failure.getCause()).getCode());
+            verifiedFailures.add(abortFuture);
             assertEquals("VALIDATING", leaseSnapshot().get("state"));
             assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
                     Integer.class, tenantId, jobId, lease.runId()));
@@ -1048,8 +1052,8 @@ class ImportMetadataRealMySqlTest {
             throw failure;
         } finally {
             pause.release.countDown();
-            reportCleanupFailures("append/abort lock wait fixture", awaitFutures(futures(append, abortFuture), pool, false),
-                    primaryFailure);
+            reportCleanupFailures("append/abort lock wait fixture",
+                    awaitFutures(futures(append, abortFuture), pool, false, verifiedFailures), primaryFailure);
         }
     }
 
