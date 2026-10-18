@@ -1,6 +1,38 @@
 # NF08 C2-B2 実usage provenance・費用証拠の技術計画
 
-**状態: PLAN REVIEW PENDING。実装承認・provider送信承認・本番料金承認ではない。**
+**状態: A wave PLAN REVIEW PENDING。実装承認・provider送信承認・本番料金承認ではない。B2 provenance設計は未解決であり、この文書では承認・実装対象にしない。**
+
+## 次wave A: B1の不足故障・tenant証拠だけを追加
+
+このwaveは `CopilotRunService.completeSummaryAttempt` のDB境界を検証する追加MySQL試験だけに限定する。実装変更は試験用fault injection / fixtureに限り、ACTUAL、provider transport、usage provenance、費用評価、DDL/schema変更、production flag、registry/key、credentialへ触れない。試験classは `CopilotRunServiceMySqlIntegrationTest`、`@Tag("mysql")`、shard 1回登録を維持する。
+
+### 固定する実装点と実transaction
+
+- 対象beanは `@SpringBootTest` が注入する `CopilotRunService`。各成功/失敗経路で `AopUtils.isAopProxy(runService)` を確認し、`@Transactional(rollbackFor = Exception.class)` のSpring proxyを呼ぶ。手動 `new CopilotRunService` は使わない。
+- transaction managerはcontextから注入する既定 `PlatformTransactionManager`（現構成のMySQL datasource transaction manager）。独立 `TransactionTemplate(transactionManager)` は外側transaction rollbackを作る場合だけ使用する。test method/classに `@Transactional` を付けない。
+- baseline rowは `createFixture("tenant-a")` で作り、`readIndependently` の `DataSource.getConnection()` から全列snapshot（tenant、trace、use_case、status/version、cost、error、JSON、hashを含む全DB列）を取得する。tenant B sentinelも別fixtureとしてcommitし、failure前後を独立connectionで全列比較する。
+
+### 故障注入・期待結果
+
+1. **二tenant sentinel**: tenant A対象行と同時にtenant Bの独立sentinel rowを用意し、各失敗とstale経路の前後で両行の全列を比較する。context tenant不一致は既存の `AccountingTenantContextHolder.runWithTenant` で起こす。workerを使う場合は `finally` で `AccountingTenantContextHolder.clear()` と `SecurityContextHolder.clearContext()` を必ず行う。
+2. **書込前JSON serialization failure**: `ObjectMapper.writeValueAsString` をspy/stubするtest-scoped beanで、対象completion metadata（`outcome` を故障fixture識別値にする場合など）に限定して例外を投げる。production `CopilotRunService` proxyを呼ぶため、`completeAttempt` 内の `toJson` がCAS SQLより前に失敗することを確認する。元のserialization exceptionが伝播し、対象A行・B sentinel両方が全列不変であることを独立readbackする。グローバルに全ObjectMapper呼出しを壊さない。
+3. **実MySQL SQL failure**: test-only MySQL `BEFORE UPDATE` triggerを対象run IDに限定して作成し、`SIGNAL SQLSTATE '45000'` で実UPDATEを失敗させる。trigger作成/削除は専用JDBC connectionで管理し、テスト終了時finallyでdropする。mapperをmockして早期throwする方法は使わない。Spring proxy呼出しのSQL exceptionが伝播し、A/B全列が不変であることを独立readbackする。
+4. **commit前failure / rollback**: `TransactionTemplate` で外側transactionを開始し、service proxyが `COMPLETED` を返した後、登録済み`TransactionSynchronization.beforeCommit` が専用marker exceptionを投げる。これはDB commit開始前の失敗を実発生させ、例外後にA/Bの全列がtransaction前snapshotへrollbackされたことを独立connectionで確認する。Springがtransactionをrollback-onlyにする挙動も記録する。
+5. **commit後ACK喪失の意味**: commit完了後に呼出側へ応答が届かなかった状態をrollbackと偽装しない。これはrollback試験ではなく結果不明 `UNKNOWN` の仕様境界である。現行service APIにdurable commit receiptがないのでA waveでは本番状態遷移を追加せず、テストで「commit済み行をrollback扱いしない」事実だけを明記する。後続設計でack/reconciliationを扱うまでは、呼出側再試行が新たな送信を意味しないよう勝手に推論しない。
+
+全fault caseで元exceptionをassertし、失敗を`STALE`や成功へ変換しない。Astra review後にこのA waveのみ実装する。
+
+## B2: 後続DESIGN_PENDING（A waveでは閉じない）
+
+次の課題は未承認・未実装であり、この文書・A waveのCODE PASSでも閉じない。`ACTUAL`/`UPPER_BOUND`のproduction生成、provider実送信、credentials、production registry、DDLはいずれも対象外。
+
+- **socket前の送信claimがCASより先**: 最終attempt completion CASは一回の送信保証にならない。dispatch前にdurableかつ原子的なSQL claimを行い、nonce/attemptを一度だけ消費する必要がある。プロセス内cacheは代替にならない。claim commit後・socket前のcrash、socket後・応答前のcrashは`UNKNOWN`にし、自動再送しない。現行schemaでこの状態を保存できるかは未確認。必要なら独立migration proposal/review/明示承認が先で、A waveにDDLを混ぜない。
+- **preflight/attempt/nonce順序**: preflightに使うpolicy/config snapshotを確定し、そのdigestを固定してからattemptのbinding/nonceを生成・永続化し、claim transactionをcommitしてから初めてsocket sendを許す。deny前に発行した未使用nonceを「未送信」と見なす条件、TTL、UTC `Instant` とmonotonic deadlineの役割、時計逆行/応答時刻逆転のfail-closed条件を設計する。attemptのcurrent fieldsとstatus/versionを同一SQLで検証する。
+- **transport発行能力**: private `BoundResponse` はbounded transportの実送受信点でのみissueし、request identity/nonce/config/model/tenant/trace/attemptへ結び付ける。parserはraw body単独を受け取らず、この能力を伴う応答だけをparseする。同一package内の任意constructorやpublic setterから能力を偽造できないpackage/class配置を設計する。
+- **署名主体の限界**: offline signing keyはimmutable rate cardと承認済みruntime usage policy/cardだけに署名する。provider応答にprovider自身の署名が無い限り、offline署名者が応答usageを「provider由来」と署名する構成は作らない。transport発行能力はアプリがTLS経由で受領した事実を表すだけで、provider非否認を表さない。
+- **費用能力の私有化**: 現行 `VerifiedCostEvaluation` / `SummaryCostEvidence` は公開DTO等から`ACTUAL`を構成できるため、将来はprivate-constructor capabilityとし、検証成功から `completeSummaryAttempt` まで同一transaction / immutable bindingで渡す。DB metadataや単純usage DTOから再構成できないことを確認する。
+- **current binding / temporal checks**: tenant/id/trace/use_case/provider/model revision/config/preflight/nonce/status/version/card version/evaluatedAtを一箇所で照合する。期限・key/card rotation・revocation・panic stop、UTC逆行、TTL expiry、unknown usage dimension、timeout/partial responseはfail-closedする。
+- **人手承認境界**: provider DPA/処理地域、公式usage semantics、model revision、billable fields、価格/FX/rounding、TLS受領をusage evidenceとして受け入れるか、offline key custody/rotation、送信flag有効化はそれぞれ別の証拠bundleとhuman sign-offを要する。合成署名receiptはこの承認の代替にならない。
 
 ## 目的と現在地
 
@@ -18,7 +50,7 @@ B1（commit `db25d2b7`）は、Spring service proxyを通るattempt完了、tena
 4. 検証不能、証拠欠落、期限外、未知dimension、binding不一致、registry/key/card不一致、timeout、例外はfail-closedする。失敗を0円や `NOT_SENT` へ置き換えない。
 5. production card registry、verification public-key ring、dispatch policyは固定deny-allのままにする。設定値、DB row、test artifact、環境変数で解除できる本番経路を作らない。
 
-## 目標データ経路
+## 将来検討用データ経路（DESIGN_PENDING。実装計画ではない）
 
 1. `CopilotRunService.beginSummaryAttempt` が作成したsummary attemptを実行のrootにする。bindingには `runId`（attempt id）、`tenantId`（`AccountingTenantContextHolder.requireTenantContext()` と照合）、`traceId`、`useCase=MANAGEMENT_COPILOT`、開始時 `status=PENDING` / `statusVersion=0`、artifact version、provider、model revision、config hash、preflight snapshot hashを含める。query attemptのtraceとsummary attemptのtraceを取り違えない。ここでCSPRNG由来の少なくとも128-bit `dispatchNonce` と別の `idempotencyKey` を発行し、初期PENDING metadataと `CopilotAttemptRecord` に保存する。preflightでdispatchが拒否されたnonceは未使用のまま残る。
 2. `CopilotQueryService.query` はsummary呼出し時に現在渡している `CopilotAttemptRecord` を `CopilotSummaryService.summarize` へ渡す。現状のtrace文字列だけの引数を置き換え、recordのtenant/run idと `CopilotExecutionContext` tenantが一致しない場合はdispatch前に拒否する。`CopilotInvocation` と `AiGatewayRequest` にこのimmutable attempt bindingを渡し、`AiExecutionGatewayImpl.assertCopilotBoundedRequest` が再確認する。同一attemptは1回だけdispatchする。物理retryを将来導入する場合はその前に設計を再レビューし、retryごとに独立attempt/trace/nonce/idempotencyKeyを発行する。
