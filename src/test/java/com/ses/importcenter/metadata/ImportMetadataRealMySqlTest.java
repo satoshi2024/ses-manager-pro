@@ -1427,9 +1427,17 @@ class ImportMetadataRealMySqlTest {
             blocker.setAutoCommit(false);
             executeQueryForUpdate(blocker, lockSql, lockParams);
             long blockerId = connectionId(blocker);
-            String lockData = permissionLockData(blockerId, table, "PRIMARY");
             Future<?> submitted = pool.submit(() -> withActorContext(serviceAction));
-            awaitExactLockWait(blockerId, table, "PRIMARY", lockData, submitted, table + " mutation-first service");
+            if ("t_import_source_system".equals(table)) {
+                var blockerHeld = new java.util.concurrent.CompletableFuture<Void>();
+                SourceLockWait observed = awaitSourceLockWaitFromBlocker(blockerId, submitted, blockerHeld,
+                        table + " mutation-first service");
+                logSourceLockWait("source mutation committed before service", observed);
+            } else {
+                String lockData = permissionLockData(blockerId, table, "PRIMARY");
+                awaitExactLockWait(blockerId, table, "PRIMARY", lockData, submitted,
+                        table + " mutation-first service");
+            }
             executeUpdate(blocker, mutationSql, mutationParams);
             blocker.commit();
             var failure = assertThrows(java.util.concurrent.ExecutionException.class,
