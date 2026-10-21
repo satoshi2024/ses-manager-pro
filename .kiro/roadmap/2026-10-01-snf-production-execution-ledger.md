@@ -1,5 +1,38 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## 限定3batchの統合と完全gate準備（2026-10-21 11:04 JST）
+
+- **全体NO-GO**。control `6ce313ceddd80bcf79437869d3465abfeb7c3fb0` にNF06 wave2、NF08 B2a、NF01基盤を統合した。
+  以下はsource固定SHAの限定試験であり、最新controlの全suite成功ではない。旧失敗証拠は保持する。
+- NF06 wave2: fast03固定 `3da738c2796584938f3d3474934438c9bc2881c2` は12 class **64/0/0/0**、
+  UTC01:29:05.4336628〜01:30:35.9872991、log `E9F435FF1D741886F48052027F52CF74E9C0E51720455CA1956758F10D5904DA`。
+  MySQL02固定 `a80d29c194d9137777dc1b22766684240be3f93b` は4 class **95/0/0/0**、
+  UTC01:41:22.8595733〜01:45:39.8776601、log `DDD1160B5EFCF0D5DA588F798EF8AAECFDE926606FBE9CFB5BDBECA074C76D54`。
+  Astraがreport hash、実MySQL/新規V184・V182からupgrade、実requester waitを限定受理。control `f932a888` に7 fileを統合した。
+  同期限renewはversion増加で区別し、旧grantのappendを拒否する。拒否前の独立renewや先行chunkは残り得るため、全DB無書込とは呼ばない。
+  fast02のH2 HEX error **64/0/1/0**、MySQL01のfixture/type/hash前提違反 **95/2/1/0** はFAILとして保存した。
+  seal/publish/apply/UIは未完。W3A計画のみ限定受理、実装は別sourceで進行し今回の固定controlには含めない。
+- NF08 B2a: fast01固定 `f17435ff31202d17c7857e64e0ed5f27633b833e` は20 class **109/0/0/0**、
+  UTC01:36:55.8066710〜01:38:43.6462465、log `8554956AFDDC2503B33D36EB5F8B06C86035796E8B0E50983972079935FCAC36`。
+  MySQL02固定 `fbe7f275c90bdcae9bf71ae0efee3d46781f4b8d` は1 class **12/0/0/0**、
+  UTC01:45:52.7871695〜01:47:30.8328148、log `AACBB6654ECC3028C3F2F10038612D6512066433D793A4BCE620959A9724EBF5`。
+  Astraがreport hash/実caseを限定受理。control `ad108fd3` に4 fileを統合した。
+  共通writerは明示値・cost evidence・継承metadataのACTUALをSQL前に拒否する。UPPER_BOUND時の旧費用消去とtenant B非変更を検証した。
+  MySQL01 **12/1/0/0** はDB JSON並べ替え後のbytesをhash基準にした試験不備であり、元writer JSON bytesに修正した。production hash契約は変更しない。
+  B2bは限定計画受理・別sourceで実装中。実usage authority、claim、provider/DPA/価格/鍵/production承認は未完である。
+- NF01基盤: fast03固定 `d38bb4b3980348e2adcca28daef6485599be626c` は10 class **59/0/0/0**、
+  UTC01:59:04.1772605〜02:00:59.6311261、log `9FF03B64870198A1ED65D103C4D3687840B5F5C44E64B26A896C0368ADB7A9D2`。
+  Astraが20 report hash・起止SHA/clean・実caseを限定受理。control `6ce313ce` の8 fileはsource blobと一致する。
+  不正UTF-16拒否、canonical bytes、依存lock集合の整列/再比較、通常complete経路のDUAL拒否を含む。
+  fast01 compile FAIL（XMLなし）、fast02 **58/1/0/0**（例外を構築するだけの無効assert）は履歴として保持した。
+  DB epoch schema/writer、実lock/current-read/retry、公開submission/CONFIRMは未接続であり、機能完成ではない。V185は未割当。
+- 上記PASS/FAILのraw packetをcontrolの `verification-evidence/20261021-*-source-*/` にhash一致で保存した。
+  fast/MySQLで異なるSHAを同一SHAの総合結果として合算しない。
+- 次gateは `scripts/verify-like-ci.ps1` の全4 Maven profileとbackup unit/integrationである。
+  ignored wrapperは各clean前にraw log/XMLを退避し、実呼出し成功・exit0・zero skipped・HEAD/cleanとbackup完了を全て要求する。
+  Astraはwrapperを静的受理したが実行結果は未確定。backup削除先は今回専用の未使用control配下に限定し、既存test containerがあれば開始しない。
+  合成credentialと隔離containerだけを使う。staging、実provider、実production data修復、各人間署名、remote操作は未実施。
+
 ## 全fast第7回の受理（2026-10-21）
 
 - 固定control `6b5415a6fd7311f6ff60e5571d8063f8b33e7b20` はselectorなし全fastで
