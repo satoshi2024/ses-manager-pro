@@ -22,17 +22,48 @@
 
 全fault caseで元exceptionをassertし、失敗を`STALE`や成功へ変換しない。Astra review後にこのA waveのみ実装する。
 
-## B2: 後続DESIGN_PENDING（A waveでは閉じない）
+## B2: 小分け実装計画（PLAN REVIEW PENDING）
 
-次の課題は未承認・未実装であり、この文書・A waveのCODE PASSでも閉じない。`ACTUAL`/`UPPER_BOUND`のproduction生成、provider実送信、credentials、production registry、DDLはいずれも対象外。
+B2はA waveのMySQL境界証拠が完了し、別のAstra PLAN reviewを通った後にだけ実装する。A waveまたはB2のCODE PASSはprovider契約、usage意味、production料金、provider送信、鍵配布、production flagの承認にならない。今回の計画はtransport provenance、dispatch claim、私有費用能力を順に実装可能な小さな変更へ分ける。production policy / adapter / key registryは各batch後もdeny-allとする。
 
-- **socket前の送信claimがCASより先**: 最終attempt completion CASは一回の送信保証にならない。dispatch前にdurableかつ原子的なSQL claimを行い、nonce/attemptを一度だけ消費する必要がある。プロセス内cacheは代替にならない。claim commit後・socket前のcrash、socket後・応答前のcrashは`UNKNOWN`にし、自動再送しない。現行schemaでこの状態を保存できるかは未確認。必要なら独立migration proposal/review/明示承認が先で、A waveにDDLを混ぜない。
-- **preflight/attempt/nonce順序**: preflightに使うpolicy/config snapshotを確定し、そのdigestを固定してからattemptのbinding/nonceを生成・永続化し、claim transactionをcommitしてから初めてsocket sendを許す。deny前に発行した未使用nonceを「未送信」と見なす条件、TTL、UTC `Instant` とmonotonic deadlineの役割、時計逆行/応答時刻逆転のfail-closed条件を設計する。attemptのcurrent fieldsとstatus/versionを同一SQLで検証する。
-- **transport発行能力**: private `BoundResponse` はbounded transportの実送受信点でのみissueし、request identity/nonce/config/model/tenant/trace/attemptへ結び付ける。parserはraw body単独を受け取らず、この能力を伴う応答だけをparseする。同一package内の任意constructorやpublic setterから能力を偽造できないpackage/class配置を設計する。
-- **署名主体の限界**: offline signing keyはimmutable rate cardと承認済みruntime usage policy/cardだけに署名する。provider応答にprovider自身の署名が無い限り、offline署名者が応答usageを「provider由来」と署名する構成は作らない。transport発行能力はアプリがTLS経由で受領した事実を表すだけで、provider非否認を表さない。
-- **費用能力の私有化**: 現行 `VerifiedCostEvaluation` / `SummaryCostEvidence` は公開DTO等から`ACTUAL`を構成できるため、将来はprivate-constructor capabilityとし、検証成功から `completeSummaryAttempt` まで同一transaction / immutable bindingで渡す。DB metadataや単純usage DTOから再構成できないことを確認する。
-- **current binding / temporal checks**: tenant/id/trace/use_case/provider/model revision/config/preflight/nonce/status/version/card version/evaluatedAtを一箇所で照合する。期限・key/card rotation・revocation・panic stop、UTC逆行、TTL expiry、unknown usage dimension、timeout/partial responseはfail-closedする。
-- **人手承認境界**: provider DPA/処理地域、公式usage semantics、model revision、billable fields、価格/FX/rounding、TLS受領をusage evidenceとして受け入れるか、offline key custody/rotation、送信flag有効化はそれぞれ別の証拠bundleとhuman sign-offを要する。合成署名receiptはこの承認の代替にならない。
+### 現行実装で確認した5つの阻断点
+
+| 阻断点 | 現在のコード/DB | B2で満たす契約 |
+|---|---|---|
+| transport応答のauthority | `CopilotBoundedHttpTransport.postGemini` は公開 `Response(statusCode, contentType, body)` recordを返し、`CopilotGeminiResponseParser.parseEnvelope(byte[])` は任意byte列を受け取る。`GeminiTextServiceImpl` はusageを公開 `CopilotProviderUsage` へ平坦化する。request attempt、nonce、config、tenant、trace、endpoint、TLS検証との結合が型に残らない。 | parser/issuerは実送信transportだけが発行できる不変 `TransportBoundResponse` capabilityを要求する。raw body、public DTO、DB JSONからprovenanceを作らない。test用synthetic issuerは別型・test sourceに閉じ、production issuerが受け付けない。 |
+| offline keyとprovider usageの混同 | `SignedUsageReceipt` は署名済みexecution inputを作るが、現状はtest-only verifier内で使われるsynthetic receiptである。Gemini自体はprovider応答usageへ署名しない。 | offline keyはimmutable `SignedRateCard` と承認済み `SignedUsagePolicy` だけを署名する。runtime usageはTLS hostname検証済みtransport受領とstrict parserに基づくアプリ内observationとし、provider署名/非否認を主張しない。synthetic receiptはproduction pathへ渡さない。 |
+| 送信重複 | `completeSummaryAttempt` の `PENDING/status_version=0` CASは完了行の競合を防ぐが、CAS前に外部送信する構造なので一回限りの送信を保証しない。`TrustedRateCardVerifier.completedAttempts` はprocess-local cacheで、再起動/複数nodeのfenceではない。`t_ai_recommendation_run` にdispatch claim/nonce/expiry列はない。 | socketより前にDB上のdurable one-shot claimをcommitする。claim commit後・socket前を含むclaim後のcrashは未送信と推測せず `UNKNOWN`、同じattemptを再claim/再送しない。現schemaにはnonce・binding・claim stateのauthority列がないため、別migration proposalを要する。version番号は未割当とし、このplanではDDLを追加しない。 |
+| 費用結果の偽造 | `SummaryCostEvidence` はpublic record/constructorで、`CopilotRunService.completeSummaryAttempt` は `SummaryResponse.costEvidence()` の `ACTUAL` をそのまま金額とmetadataへ保存できる。package-private `VerifiedCostEvaluation` の存在だけでは、この公開保存経路を閉じない。 | completion writerは公開DTO/`CopilotProviderUsage`をACTUAL authorityとして扱わない。検証器だけが作れるopaque capabilityを受け、同一transactionで現在attempt bindingを再読込・照合してからcost/status CASする。capabilityはDB JSONや通常DTOから復元不可。 |
+| 順序と有効時間 | `CopilotQueryService` はsummary attemptを作ってから `CopilotSummaryService` / gatewayへ進み、preflightは `AiExecutionGatewayImpl.assertCopilotBoundedRequest` で行われる。nonce/attempt TTL/card dispatch時刻は未実装。transportは `System.nanoTime()` deadlineを持つがUTCのcard時間とattemptの期限を束ねない。 | 下記の固定順でpreflight、nonce/attempt発行、card時間、TTL、現在DB fields、claim、socket、応答検証、completionを行う。UTC `Instant` はcard/発行/応答時刻、monotonic deadlineは経過時間だけに使い、相互変換しない。 |
+
+### authority型とtransaction境界
+
+- `CopilotBoundedHttpTransport` の公開response recordを削除し、constructorを持たない公開面またはpackage-private accessorの `TransportBoundResponse` capabilityへ置き換える。唯一のissuerはbounded transportの `client.execute` response consumerとし、capabilityは正規endpoint/host、hostname/TLS identity確認結果、attempt/trace/tenant/use-case、nonce hash、config/model/preflight binding hash、request/response digest、HTTP status/content type、dispatch-start / response-received UTC時刻を不変保持する。API key、authorization header、prompt、raw bodyはcapabilityや例外/logへ複製しない。raw response bytesへのaccessは `com.ses.service.ai.impl` 内のparserだけに限定する。
+- `CopilotGeminiResponseParser` のproduction入口は`byte[]`ではなく `TransportBoundResponse` を要求する。outer envelopeと全usage dimensionが有効な場合だけ、private constructorの `CopilotProviderUsageProvenance` をissueする。inner summary schema/claim検証が失敗しても有効envelopeのprovenanceはtyped failure内に保持する。outer envelope、usage、HTTP status/content type、期限のいずれかが不正ならprovenanceを発行しない。
+- `CopilotProviderResponse`、`CopilotExecutionFailure`、`AiGatewayResult`、`CopilotProviderUsage`、`SummaryCostEvidence` は表示/summary outcome用の通常値であり、どれもprovenanceまたは費用認証をmintしない。特にLombok `@Data` のsetterや `SummaryCostEvidence` public constructorをauthorityとして使わない。DB JSON/`input_hash`も能力issuerとして扱わない。
+- test sourceの `SyntheticBoundResponse` / synthetic issuer / synthetic rate verifierをproduction capabilityと型分離し、各結果に `SYNTHETIC_TEST_ONLY` を付ける。production verifierはsynthetic typeを受け取らず、production card/key registryは空、`ProductionDenyAllCopilotCostPolicy`とGemini production dispatch denyを維持する。
+- offline署名はcard価格と`SignedUsagePolicy`（採用API/model revision、許容dimension、subset/total式、最大値、billable分類、rounding policy version）に限る。実runtime usageはoffline keyで署名しない。`TransportBoundResponse`はアプリが検証TLS接続から受け取った事実を束ねるもので、Google等providerの電子署名ではない。
+
+### 事前順序: preflight → nonce/attempt → card time/TTL → current fields → claim → socket
+
+| 順 | 実行場所 | 要求と失敗時の扱い |
+|---|---|---|
+| 1. context / config | `CopilotQueryService`からsummary実行境界へ | authenticated tenant、query/use-case、scope、artifact snapshot、provider/model/config hash、feature flag、budget、既存monotonic deadlineを検査する。tenant/artifact/config不一致なら送信せず拒否。 |
+| 2. preflight | DB claim前、network外 | immutable approved policy/card snapshotからusage boundsとbudgetを評価し、preflight digestを確定する。deny、欠損bounds、未知usage semantics、budget超過、registry emptyならnonceもsummary dispatch attemptも作らず、送信しない。preflightのpublic recordは自身を証明しない。 |
+| 3. nonceとattempt | preflight許可後、`beginSummaryAttempt` transaction | CSPRNGで独立の128-bit以上nonceとidempotency keyを生成する。UTC `issuedAt` と `expiresAt=issuedAt+configured TTL` を付け、hashとimmutable execution-binding digestをDBへ保存する。summary attemptは `PENDING/status_version=0/dispatch_state=READY` で一度だけ作る。nonceはlogに出さず、providerがidempotencyを保証すると仮定しない。 |
+| 4. card time / TTL | claim直前とtransport直前 | `claimAt=Clock.instant()` をUTCで取得し、`effectiveFrom <= claimAt < effectiveUntil` を判定する。`claimAt >= issuedAt`、`claimAt < expiresAt`、monotonic deadline残量>0、host/config/policy/card digestがsnapshotと一致することを要求する。壁時計逆行、TTL expiry、card window境界はclaimせずfail-closed。response/evaluation UTC時刻が逆行またはattempt期限外ならusageを評価せず `UNKNOWN`。 |
+| 5. current fields | claim transaction内 | primary rowをtenant + attempt id + trace + use_caseでlock/readし、`PENDING/v0/READY`、artifact/provider/model/config hash、preflight digest、nonce/idempotency hash、binding hash、issued/expires、scope/input identityが発行snapshotと完全一致することを確認する。DB row/JSONからcapabilityを再構成せず、DB値は発行済snapshotとの一致検査にだけ使う。 |
+| 6. durable claim | 独立commit済み transaction、socketより前 | exact current fieldsをWHERE fenceに含む `READY → CLAIMED` one-row CASを実行し、claim ID/timeを保存する。更新件数が1でなければsocketへ進まない。commitが呼出側に不明ならclaim済みの可能性としてattemptを消費し、UNKNOWN/no retryとする。process cacheではclaimを代用しない。 |
+| 7. transport / parse | claim commitの正常応答後のみ | 同じopaque claim permitをtransportへ渡し、同attemptのsocket exchangeを最大1回だけ開始する。HTTP response/strict usage envelopeが返ればtransport capabilityを発行する。claim後のtimeout/reset/crash/partial bodyには自動retryをしない。 |
+| 8. verify / completion | provider I/O外の短い単一DB transaction | verifierがprivate cost capabilityを同じtransaction中に作り、attempt rowを再読込/lockしてclaim ID、nonce hash、binding hash、card/policy digest、status/version、expiry、dispatch observationを再照合する。summary result、verified cost metadata、`status=PENDING/v0 → SUCCEEDED|FAILED/v1`、dispatch terminal evidenceを原子的に保存する。CAS失敗はSTALE、SQL/JSON/commit errorはrollback/propagate。外部送信は既に一度消費済みであり再実行しない。 |
+
+`NOT_SENT` はdurable claimが一度もcommitされず、denyが送信前に確定した場合だけである。claim rowの`CLAIMED`で結果情報がないもの、claim commit後のsocket前crash、socket後/response前crash、timeout、partial response、response/usage検証失敗は `UNKNOWN`（独立に検証可能なboundsがある場合のみ `UPPER_BOUND`）として扱い、同じattemptをretryしない。HTTP/TLS接続に成功した事実をprovider usageへの署名や請求額の証明と呼ばない。
+
+### unallocated schema migration proposal
+
+現在の `t_ai_recommendation_run`（V108 + V161 + V173）はtenant/trace/use_case/artifact、`PENDING/status_version` CAS、scope/input metadataを持つが、durable dispatch state、nonce/idempotency hash、preflight/binding digest、claim/response timestampsを持たない。`redacted_summary_json`はJSON metadataであり、dispatch authority/current capabilityの格納先にはしない。よってstatus CASだけを使う既存schemaでは上記の一回送信条件を明示・検査できない。A waveにも本実装にもDDLを足さず、次の独立migration reviewへ次のshapeを提案する。version番号はrootが別途割り当てるまで未割当。
+
+提案は `t_ai_recommendation_run` へCopilot summary用nullable/legacy-safe列を追加する: `dispatch_state` (`NOT_APPLICABLE`/`READY`/`CLAIMED`/`UNKNOWN`)、`dispatch_nonce_hash BINARY(32)`、`dispatch_idempotency_hash BINARY(32)`、`dispatch_binding_hash BINARY(32)`、`preflight_snapshot_hash BINARY(32)`、`dispatch_request_sha256 BINARY(32)`、`dispatch_issued_at DATETIME(6)`、`dispatch_expires_at DATETIME(6)`、`dispatch_claimed_at DATETIME(6)`、`dispatch_started_at DATETIME(6)`、`response_received_at DATETIME(6)`、`response_sha256 BINARY(32)`。query/legacy rowsは`NOT_APPLICABLE`/NULLを保ち、summary rowはpreflight済みnonce/bindingを持つ`READY`で作る。tenant-scoped unique indexesをnonce/idempotency hashへ付け、同一summary attemptの `READY → CLAIMED` updateはtenant/id/trace/use_case/status/status_version/dispatch stateと全snapshot hashをWHERE条件に含める。claim commit後未完了の `CLAIMED` はread時にUNKNOWNとして表示し、reconcilerも再送claimを作らない。migration reviewでは既存version列、tenant nullability、index長、JSON consumers、H2 schema replay、migration backfill/default、並行claim時のaffected-rowを検証し、承認前に番号やDDLを確定しない。
 
 ## 目的と現在地
 
@@ -50,19 +81,6 @@ B1（commit `db25d2b7`）は、Spring service proxyを通るattempt完了、tena
 4. 検証不能、証拠欠落、期限外、未知dimension、binding不一致、registry/key/card不一致、timeout、例外はfail-closedする。失敗を0円や `NOT_SENT` へ置き換えない。
 5. production card registry、verification public-key ring、dispatch policyは固定deny-allのままにする。設定値、DB row、test artifact、環境変数で解除できる本番経路を作らない。
 
-## 将来検討用データ経路（DESIGN_PENDING。実装計画ではない）
-
-1. `CopilotRunService.beginSummaryAttempt` が作成したsummary attemptを実行のrootにする。bindingには `runId`（attempt id）、`tenantId`（`AccountingTenantContextHolder.requireTenantContext()` と照合）、`traceId`、`useCase=MANAGEMENT_COPILOT`、開始時 `status=PENDING` / `statusVersion=0`、artifact version、provider、model revision、config hash、preflight snapshot hashを含める。query attemptのtraceとsummary attemptのtraceを取り違えない。ここでCSPRNG由来の少なくとも128-bit `dispatchNonce` と別の `idempotencyKey` を発行し、初期PENDING metadataと `CopilotAttemptRecord` に保存する。preflightでdispatchが拒否されたnonceは未使用のまま残る。
-2. `CopilotQueryService.query` はsummary呼出し時に現在渡している `CopilotAttemptRecord` を `CopilotSummaryService.summarize` へ渡す。現状のtrace文字列だけの引数を置き換え、recordのtenant/run idと `CopilotExecutionContext` tenantが一致しない場合はdispatch前に拒否する。`CopilotInvocation` と `AiGatewayRequest` にこのimmutable attempt bindingを渡し、`AiExecutionGatewayImpl.assertCopilotBoundedRequest` が再確認する。同一attemptは1回だけdispatchする。物理retryを将来導入する場合はその前に設計を再レビューし、retryごとに独立attempt/trace/nonce/idempotencyKeyを発行する。
-3. nonce発行時刻・送信開始時刻・応答受領時刻・費用評価時刻をUTC `Instant` で結び、HTTP deadlineは既存monotonic `deadlineNanos` でも検査する。UTC時刻はcardのeffective window照合に使い、期限時計異常や順序逆転をfail-closedする。nonceは秘密credentialではないがraw requestやAPI keyと同様にログへ出さない。
-4. `CopilotBoundedHttpTransport.postGemini` は実際にsocket送信を開始した地点とresponse受領地点を一貫して記録する。許可hostのHTTPS、HTTP status、JSON content type、request/response digest、provider endpoint identity、model/config identityとdispatch状態を保持する。raw prompt、authorization header、API key、生response bodyはreceipt・例外・監査logへ保存しない。HTTP送信開始後のtimeout/reset/response parse failureを `NOT_SENT` としない。
-5. `CopilotGeminiResponseParser.parseEnvelope` は全billable usage dimensionをstrict integer・範囲・overflow・total/subset制約で検証し、検証済みenvelopeに対する短命な `CopilotProviderUsageProvenance` を発行する。提案するissuerは `CopilotUsageProvenanceIssuer.issueFromBoundResponse(...)` とし、呼出し可能範囲をbounded adapter/parser内部へ限定する。provenanceには上記attempt/nonce/time/context、HTTP/endpoint identity、validated usage全dimension、response digest、config hash、preflight digestを結合したcanonical digestを持たせ、raw bodyは持たせない。request DTO、`AiGatewayResult` の単純usage setter、DB JSON再読込からprovenanceを再構成できない型にする。
-6. `CopilotGeminiResponseParser.validateInnerSummary` または後段claim/numeric/deadline検証が失敗しても、envelopeで検証済みのprovenanceを `ValidatedEnvelopeFailure` → `CopilotExecutionFailure` → `CopilotSummaryService.summarize` へ保持する。outer envelope/usage自体が不正ならprovenanceとusageをnullにし、dispatch outcomeと独立preflight証拠だけを使って `UPPER_BOUND`/`UNKNOWN` を判定する。成功したsummaryの本文statusと費用stateは独立させ、summaryが `FAILED` でもusage provenance/cardが検証済みなら費用結果を保持できる。
-7. 新しい `CopilotProviderUsageEvidenceService.verifyAndEvaluate(...)` が、provenance capability、署名済みcard、現在のattempt binding、`TokenUsageBounds`、`PreflightCostEvidence` を検証する。ここで `CopilotRunService.loadCurrentSummaryBinding(attempt)` 相当のtenant/id/trace/use_case限定queryを追加し、DB行が `PENDING/v0` で、PENDING metadataのnonceがattempt nonceと一致することを確認して `CurrentAttemptBinding` を作る。DB行がない、tenant不一致、terminal、version不一致、nonce不一致は費用評価せずSTALE/UNKNOWNにする。カード計算後からcompletionまでに別workerが勝つraceは最終CASが遮断する。card検証は既存 `TrustedRateCardVerifier.evaluate` / `validateCardSignature` / `validateCardDomain` を拡張し、署名、immutable digest registry、provider/model revision/region/tier/currency/price unit/effective windowを全て照合する。usage bindingは `RateCardExecutionInput` と `CurrentAttemptBinding` の全項目を比較し、`attemptId + tenantId + traceId + useCase + status + statusVersion + dispatchNonce + idempotencyKey + provider/model/region/tier + configHash + preflightSnapshotHash + evaluatedAt + usage dimensions + response digest` を含む `VerifiedUsageBinding` を作る。rate cardとprovenance capabilityをDB値から復元しない。
-8. `CopilotProviderUsageEvidenceService` は検証に成功した場合だけ `VerifiedCostEvaluation` をsummary completion層へ渡す。`CopilotSummaryService` はsummary outcome（SUCCEEDED/FAILED）と費用証拠を組み合わせ、現在の `SummaryResponse` / `SummaryCostEvidence` 経路へ接続する。`CopilotRunService.completeSummaryAttempt` は既存CAS `id + tenant + trace + use_case + PENDING + status_version=0` を維持し、更新1件だけを `COMPLETED`、0件だけを `STALE` とする。`SQL`、JSON serialization、commit例外は伝播させてrollbackする。検証済みcard ID/version/digest、provenance class/source、execution binding digest、dispatch outcome、usage各dimension、計算basisをredacted metadataへ保存し、raw signed receipt/body/key materialは保存しない。`cost_jpy` は `ACTUAL` のみ実額整数、`UPPER_BOUND`/`UNKNOWN` はnull、`NOT_SENT` は0とする。
-
-`COMPLETED` はCAS更新がtransaction内で1件通った結果であり、外側transactionが後でrollbackする前でもdurable commitを意味しない。呼出し側はSpring proxyから戻った後の結果として扱い、例外時は最初のprovider/query/serialization/SQL/commit exceptionを保つ。既存のquery completion strict failureと、失敗時二回目の `FAILED` completion exceptionを元exceptionのsuppressedへ加える挙動を維持する。DB CASは最終的なduplicate/replay防止であり、process内 `TrustedRateCardVerifier.completedAttempts` cacheだけに重複防止を依存させない。
-
 ## Usage意味・不確実性
 
 `CopilotGeminiResponseParser.validateUsage` は現状 `promptTokenCount` / `candidatesTokenCount` / `totalTokenCount` を受け取り、`thoughtsTokenCount` と `cachedContentTokenCount` は欠落または0だけを許す。B2実装前に、採用するprovider・API version・model revisionについて公式仕様と契約資料でfieldの意味、subset関係、billable分類、最大値、cached/thinking処理、請求時の集計/丸めを確認する。資料がA2契約の包含仮定（cachedはpromptの部分集合、thinkingはcandidateの部分集合）を保証しないなら、そのdimensionを料金計算へ入れず、production費用は `UNKNOWN` にする。
@@ -78,16 +96,15 @@ B1（commit `db25d2b7`）は、Spring service proxyを通るattempt完了、tena
 
 ## ローカルで実装・検証できる範囲
 
-次は実credential、実provider、外部ネットワーク、実料金なしで実装・合成検証できる。test-only loopbackとsynthetic keys/ratesの証拠には全て `SYNTHETIC_TEST_ONLY` を付け、本番rate registry、production `CopilotProviderUsageProvenance` issuer、production artifact/cost stateを作らない。
+B2の合成検証は実credential/provider/network/実料金を使わず、synthetic fixtureには `SYNTHETIC_TEST_ONLY` を付ける。synthetic response/receiptをproduction provenance issuerやproduction ACTUALへ変換しない。次のcaseを各batchの必須証拠とする。
 
-1. parser/transportのbounded loopbackで、envelope valid + inner JSON malformed/schema/claim/numeric/deadline failureを通し、test-only provenance carrierにusage、dispatch state、attempt bindingが欠けずraw body/key/promptを含まないことを検証する。outer usage malformed、unknown billable dimension、transport timeout/reset、send前denyはprovenanceを発行しないことも検証する。
-2. test-source専用 `SignedUsageReceipt` / synthetic verifierで、署名改変、別attempt/tenant/trace/usecase/statusVersion/nonce/config/model/preflight/cardへのreplay、usage各dimensionの差し替え、card期間外、unknown/revoked key/card digest、duplicate idempotencyを拒否する。これはverifierの技術的binding試験であり、provider response authenticityの証拠ではない。
-3. synthetic loopback結果を実service proxy・MySQLへ通すintegrationで、summary SUCCEEDED/FAILEDと費用stateを独立に記録し、5 usage dimension・provenance/card/binding metadata・`cost_jpy`の組み合わせを独立connectionから確認する。synthetic ACTUAL値を使うテストがあれば、fixture/metadata/reportにsynthetic-onlyと明示し、実料金やprovider請求を示す結果として扱わない。本番policyは引き続きdeny-all。
-4. B1で未カバーのtwo-tenant sentinelを加える。tenant A attemptのtenant不一致/stale/duplicate completionを試し、別tenant B sentinel rowの全列も独立connectionから前後比較する。B1のquery failure original exception保持を維持し、service proxy付きMySQL試験でmetadata serialization failure、mapper/SQL failure、commit failureを注入し、元exception、rollback後の全列、別tenant sentinelが保たれることを確認する。commit failure fixtureはcommit前に失敗させ、成功後例外を模擬してdurabilityを誤認させない。
-5. 全integration test methodは自身に `@Transactional` を付けない。rollbackケースだけtest側 `TransactionTemplate` を使い、commit済みケースはproxy呼出し後の独立 `DataSource` connectionで全列を読む。workerは `finally` で `AccountingTenantContextHolder.clear()` と `SecurityContextHolder.clearContext()` を行う。全MySQL test classは `@Tag("mysql")`、shard一覧は一度だけ登録し、CIのMySQL gateをDocker必須・zero-skipで実行する。
+1. **preflight順序**: deny理由を個別に指定し、attempt/nonce insertが0件、claim SQLとtransportの呼出しが0回であることを確認する。allow caseでは保存したconfig/artifact/context/preflight digestが後段bindingと一致すること、tenant/artifact/config driftごとに具体的な拒否結果となりdispatch state/row snapshotが不変であることを確認する。
+2. **runtime observationとparser boundary**: production parserはraw `byte[]` / public DTOから呼べない型/APIであることをcompile-timeまたはreflection testで確認する。実request-bound loopback応答だけがtransport observationを作る。valid outer usage + invalid inner summaryではusage observationをfailure pathでも保持し、invalid outer usage、unknown dimension、HTTP/content-type不正、timeout/reset/partial bodyではusage capabilityを発行しない。raw body、prompt、authorization値がcapability、例外、redacted metadataに入らない。
+3. **one-shot dispatch claim**: MySQL二connectionで同一READY rowを競合claimし、成功は一方のみ（affected rows 1/0）とする。claim transaction commit後・socket開始前にfaultを注入するとstateはUNKNOWN相当で消費済みとなり、同attempt再実行でclaim再取得・socket再送がない。process restartを跨いでも同じDB状態となり、process-local cache無しで成立する。MySQL testは実mapper SQLと独立readbackを使う。
+4. **ACTUAL authorityとcompletion**: public `SummaryCostEvidence`/`SummaryResponse`/`AiGatewayResult` を直接構築・変更してACTUALを注入してもcompletionで拒否し、row全列不変とする。検証器が発行したprivate capabilityは同一completion transactionのclaim/current binding一致時のみ保存できる。tenant/id/trace/use-case/status/version/nonce/config/preflight/card/bindingの各driftを個別に作り、期待する409/STALE相当を具体的にassertし、対象rowと別tenant sentinelの全列前後比較を行う。
+5. **clock/TTL/card境界**: productionコードと同じ注入可能Clockを使い、fixed instantで `effectiveFrom` の包含・`effectiveUntil` の排他、`issuedAt <= claimAt < expiresAt`、response時刻の逆行、TTL満了、壁時計逆行を決定的に確認する。expired/clock-invalidはclaim/socket前に拒否し、response後の期限外/時刻逆行はACTUALを作らずUNKNOWNとする。monotonic deadlineはfake tickerで別途検査し、sleepや幅広assertで時刻競合を隠さない。
 
-serialization/SQL/commit failureの注入方法は実装PLAN reviewでテスト構成を先に固定する。`@SpyBean`やtest transaction managerを使っても、対象serviceは必ずSpring transaction proxy経由で呼び、別connectionによる全列比較と実rollbackを維持する。
-
+MySQL専用caseは`@Tag("mysql")`で一度だけshard登録し、test method自身へ`@Transactional`を付けない。commit済み状態は独立connectionで確認する。H2はpure decision/type mappingのfast feedbackに限り、SQL dialect、atomic claim、lock、affected-row、crash/restart永続性の証拠に数えない。必要なschema migration replay / legacy-row default / unique-index重複拒否もMySQL gateで検証する。Maven/Docker suiteの実行は実装taskのgateであり、このplan-only変更では実行しない。
 ## 人手・外部資料による別途承認
 
 以下はsynthetic fixture、local loopback、Astra PLAN/CODE PASSだけでは承認できない。資料・承認者・有効期間・保管先・撤回条件を別のhuman-reviewed evidence bundleへ記録する。
@@ -104,15 +121,12 @@ provider APIにusage応答署名がない場合、アプリ内issuerが作る署
 
 ## 実装順とレビューgate
 
-1. **PLAN review（未完了）** — Astraがdata carrier、provenance限界、DB failure injection、key/card lifecycleを独立確認する。PASSしても実装・本番承認にはならない。
-2. **P1 local provenance carrier** — `CopilotProviderResponse` / `CopilotExecutionFailure` / `AiGatewayResult` のcarrierとinner failure propagationを実装し、productionはdeny-all維持。synthetic loopbackのtyped error/usage testのみ。
-3. **P2 attempt runtime binding** — `CopilotAttemptRecord` を `CopilotSummaryService` / `CopilotInvocation` / bounded adapterへ接続し、tenant/attempt/trace/status/version/nonce/model/config/preflight/time bindingを実装。replay/2-tenant testsを先に通す。
-4. **P3 verifier integration behind fixed deny-all** — `CopilotProviderUsageEvidenceService` とtrusted verifierを接続し、test-only issuerでのみ署名/cardを使う。production keys/approved cardsが無い状態でUNKNOWN/deniedとなることを検証する。
-5. **P4 metadata + real DB transaction matrix** — verifier resultだけを `SummaryCostEvidence` / `completeSummaryAttempt` へ渡す経路を作り、inner validation failure後のsynthetic pipeline、two-tenant sentinel、serialization/SQL/commit rollback、原exception保持を`@Tag("mysql")`で検証する。migration/DDLは別PLAN reviewなしに追加しない。
-6. **P5 external evidence reviewは別タスク** — 公式provider/legal/price資料、offline signer、trust registry、human approvalを揃え、provider送信とproduction registry/flagsを有効化する作業は独立したplan、独立Astra review、明示human release approvalを必須とする。このB2作業に含めない。
+1. **Astra PLAN review（未完了）** — capability issuer、実装順、schema gap/migration proposal、claim後crashの扱い、private cost capabilityとtest evidenceをレビューする。PASSしてもコード・DDL・本番承認にはならない。
+2. **Migration proposal review（別gate）** — 列、unique/index設計、legacy backfill/default、H2 schema replay、MySQL locking/affected-row挙動をDB ownerが確認し、versionを割り当てるか判断する。承認前はschema依存のB2b以降を開始しない。
+3. **B2a → B2b → B2c → B2d → B2e** — 各batchを上記の対象と完了証拠に限定し、Astra CODE reviewと必要なfast/MySQL gateを通してから次へ進む。migration未承認中にprocess cacheやJSON列で代用しない。
+4. **外部資料・human releaseは別タスク** — provider API/DPA/法務、usage semantics、price、offline signer/key custody、production dispatch/registry/flag/artifact ACTIVEは個別承認する。承認まではproductionをdeny-allに保つ。
 
-各実装phaseは専用fast/MySQL gateとAstra CODE reviewを分離する。production policy、Gemini provider、external-send flags、artifact ACTIVE、DB schemaは本PLAN作成・PLAN review・synthetic testの結果では変更しない。
-
+今回の作業はplan文書のレビュー可能化だけであり、A wave実装、B2 code/DDL、Maven/Docker suite、provider送信、production enablementは含まない。各実装phaseは専用fast/MySQL gateとAstra CODE reviewを分離する。
 ## 明示的な非承認範囲
 
 この文書の存在またはPLAN review PASSは、provider contract/DPA/region、model token semantics、実料金、FX、usage authenticity acceptance、production key/card registry、実credential、Gemini実送信、Copilot/AI/external-send flag、artifact ACTIVE、database migration、production rolloutを承認しない。production gateway/adapterはdeny-all、現行flagsはOFFのままとする。実provider応答、実データ、外部network、実料金を使わない。
