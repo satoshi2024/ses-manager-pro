@@ -1,30 +1,15 @@
 # NF08 C2-B2 実usage provenance・費用証拠の技術計画
 
-**状態: A wave PLAN REVIEW PENDING。実装承認・provider送信承認・本番料金承認ではない。B2 provenance設計は未解決であり、この文書では承認・実装対象にしない。**
-
-## 次wave A: B1の不足故障・tenant証拠だけを追加
-
-このwaveは `CopilotRunService.completeSummaryAttempt` のDB境界を検証する追加MySQL試験だけに限定する。実装変更は試験用fault injection / fixtureに限り、ACTUAL、provider transport、usage provenance、費用評価、DDL/schema変更、production flag、registry/key、credentialへ触れない。試験classは `CopilotRunServiceMySqlIntegrationTest`、`@Tag("mysql")`、shard 1回登録を維持する。
-
-### 固定する実装点と実transaction
-
-- 対象beanは `@SpringBootTest` が注入する `CopilotRunService`。各成功/失敗経路で `AopUtils.isAopProxy(runService)` を確認し、`@Transactional(rollbackFor = Exception.class)` のSpring proxyを呼ぶ。手動 `new CopilotRunService` は使わない。
-- transaction managerはcontextから注入する既定 `PlatformTransactionManager`（現構成のMySQL datasource transaction manager）。独立 `TransactionTemplate(transactionManager)` は外側transaction rollbackを作る場合だけ使用する。test method/classに `@Transactional` を付けない。
-- baseline rowは `createFixture("tenant-a")` で作り、`readIndependently` の `DataSource.getConnection()` から全列snapshot（tenant、trace、use_case、status/version、cost、error、JSON、hashを含む全DB列）を取得する。tenant B sentinelも別fixtureとしてcommitし、failure前後を独立connectionで全列比較する。
-
-### 故障注入・期待結果
-
-1. **二tenant sentinel**: tenant A対象行と同時にtenant Bの独立sentinel rowを用意し、各失敗とstale経路の前後で両行の全列を比較する。context tenant不一致は既存の `AccountingTenantContextHolder.runWithTenant` で起こす。workerを使う場合は `finally` で `AccountingTenantContextHolder.clear()` と `SecurityContextHolder.clearContext()` を必ず行う。
-2. **書込前JSON serialization failure**: `ObjectMapper.writeValueAsString` をspy/stubするtest-scoped beanで、対象completion metadata（`outcome` を故障fixture識別値にする場合など）に限定して例外を投げる。production `CopilotRunService` proxyを呼ぶため、`completeAttempt` 内の `toJson` がCAS SQLより前に失敗することを確認する。元のserialization exceptionが伝播し、対象A行・B sentinel両方が全列不変であることを独立readbackする。グローバルに全ObjectMapper呼出しを壊さない。
-3. **実MySQL SQL failure**: test-only MySQL `BEFORE UPDATE` triggerを対象run IDに限定して作成し、`SIGNAL SQLSTATE '45000'` で実UPDATEを失敗させる。trigger作成/削除は専用JDBC connectionで管理し、テスト終了時finallyでdropする。mapperをmockして早期throwする方法は使わない。Spring proxy呼出しのSQL exceptionが伝播し、A/B全列が不変であることを独立readbackする。
-4. **commit前failure / rollback**: `TransactionTemplate` で外側transactionを開始し、service proxyが `COMPLETED` を返した後、登録済み`TransactionSynchronization.beforeCommit` が専用marker exceptionを投げる。これはDB commit開始前の失敗を実発生させ、例外後にA/Bの全列がtransaction前snapshotへrollbackされたことを独立connectionで確認する。Springがtransactionをrollback-onlyにする挙動も記録する。
-5. **commit後ACK喪失の意味**: commit完了後に呼出側へ応答が届かなかった状態をrollbackと偽装しない。これはrollback試験ではなく結果不明 `UNKNOWN` の仕様境界である。現行service APIにdurable commit receiptがないのでA waveでは本番状態遷移を追加せず、テストで「commit済み行をrollback扱いしない」事実だけを明記する。後続設計でack/reconciliationを扱うまでは、呼出側再試行が新たな送信を意味しないよう勝手に推論しない。
-
-全fault caseで元exceptionをassertし、失敗を`STALE`や成功へ変換しない。Astra review後にこのA waveのみ実装する。
+**状態: B1 Wave A PASS。B2a PLAN REVIEW PENDING。今回レビュー対象は独立して実装可能なB2a契約に限定する。B2aのPASSはB2b以降、provider送信、本番料金、DDLの承認ではない。**
 
 ## B2: 小分け実装計画（PLAN REVIEW PENDING）
 
-B2はA waveのMySQL境界証拠が完了し、別のAstra PLAN reviewを通った後にだけ実装する。A waveまたはB2のCODE PASSはprovider契約、usage意味、production料金、provider送信、鍵配布、production flagの承認にならない。今回の計画はtransport provenance、dispatch claim、私有費用能力を順に実装可能な小さな変更へ分ける。production policy / adapter / key registryは各batch後もdeny-allとする。
+B1 Wave AのMySQL境界証拠はPASS済み。B2aはこの文書の限定PLAN reviewがPASSした場合にだけ実装候補となる。B2b以降はそれぞれ独立reviewを要する。B1または各B2 batchのCODE PASSはprovider契約、usage意味、production料金、provider送信、鍵配布、production flagの承認にならない。今回の計画はpublic ACTUAL保存経路をdenyするB2aを先に独立した最小実装として定義し、transport provenance、dispatch claim、私有費用能力を後続batchとして分ける。production policy / adapter / key registryは各batch後もdeny-allとする。
+### B2a: 最小実装契約（今回の個別PLAN review対象）
+
+B2aは既存のpublic ACTUAL保存入口を閉じるだけの独立batchとする。`CopilotRunService.completeAttempt` の共通DB writer境界で、private verifier capabilityがまだ存在しないB2aでは、public `SummaryCostEvidence` / `SummaryResponse` / `AiGatewayResult` 等に含まれる `ACTUAL` を例外で拒否する。guardを個別controllerや一つのpublic overloadだけに置かず、既存 `complete(...)` と `completeSummaryAttempt(...)` の全永続化経路を覆う同writerに置く。拒否はmetadata構築/JSON化・UPDATEより前に起こし、attempt row全列を不変にする。B2aではprivate capability受入れ経路を作らず、ACTUALを例外的に通す互換pathも作らない。
+
+B2aの検証はsynthetic/public ACTUALを直接構築して共通writerへ渡し、期待する具体的拒否例外と独立DB readbackによる全列不変を確認するservice proxy testとする。`UPPER_BOUND` / `UNKNOWN` / `NOT_SENT` の既存許可経路が意図せず変わらないことも個別確認する。production dispatch/cost policyはdeny-allのまま、provider transport、provenance issuer、rate registry/key、DDL、migration、credential、外部送信は触れない。このcontractはB2aだけで実装可能で、B2b以降の完成を前提にしない。
 
 ### 現行実装で確認した5つの阻断点
 
@@ -38,33 +23,65 @@ B2はA waveのMySQL境界証拠が完了し、別のAstra PLAN reviewを通っ�
 
 ### authority型とtransaction境界
 
-- `CopilotBoundedHttpTransport` の公開response recordを削除し、constructorを持たない公開面またはpackage-private accessorの `TransportBoundResponse` capabilityへ置き換える。唯一のissuerはbounded transportの `client.execute` response consumerとし、capabilityは正規endpoint/host、hostname/TLS identity確認結果、attempt/trace/tenant/use-case、nonce hash、config/model/preflight binding hash、request/response digest、HTTP status/content type、dispatch-start / response-received UTC時刻を不変保持する。API key、authorization header、prompt、raw bodyはcapabilityや例外/logへ複製しない。raw response bytesへのaccessは `com.ses.service.ai.impl` 内のparserだけに限定する。
+- `CopilotBoundedHttpTransport` の公開 `Response` recordをauthority境界から除く。production capabilityはpublic interface（constructorが無いinterfaceを含む）やpublic DTOにせず、通常のsource codeから構築/実装/serialization/reconstructionできないprivate final/sealed型とする。唯一issuerはbounded transport実装のprivate issuer経路に限定し、同一クラス/強い閉包内でrequest送受信とparserを連続実行する形を優先する。constructorless public interface、package内factory、public setter、reflection fallbackをissuerにしない。capabilityはendpoint/検証済host identity、attempt/trace/tenant/use-case、nonce hash、config/model/preflight hash、request/response digest、HTTP status/content type、dispatch-start/response-received UTC時刻をimmutable保持する。API key、authorization header、prompt、raw bodyをcapability/例外/logへ複製しない。raw payloadは閉じたparser内部でのみ扱い、例外、log、DTO、DB JSONへ出さない。
 - `CopilotGeminiResponseParser` のproduction入口は`byte[]`ではなく `TransportBoundResponse` を要求する。outer envelopeと全usage dimensionが有効な場合だけ、private constructorの `CopilotProviderUsageProvenance` をissueする。inner summary schema/claim検証が失敗しても有効envelopeのprovenanceはtyped failure内に保持する。outer envelope、usage、HTTP status/content type、期限のいずれかが不正ならprovenanceを発行しない。
 - `CopilotProviderResponse`、`CopilotExecutionFailure`、`AiGatewayResult`、`CopilotProviderUsage`、`SummaryCostEvidence` は表示/summary outcome用の通常値であり、どれもprovenanceまたは費用認証をmintしない。特にLombok `@Data` のsetterや `SummaryCostEvidence` public constructorをauthorityとして使わない。DB JSON/`input_hash`も能力issuerとして扱わない。
 - test sourceの `SyntheticBoundResponse` / synthetic issuer / synthetic rate verifierをproduction capabilityと型分離し、各結果に `SYNTHETIC_TEST_ONLY` を付ける。production verifierはsynthetic typeを受け取らず、production card/key registryは空、`ProductionDenyAllCopilotCostPolicy`とGemini production dispatch denyを維持する。
 - offline署名はcard価格と`SignedUsagePolicy`（採用API/model revision、許容dimension、subset/total式、最大値、billable分類、rounding policy version）に限る。実runtime usageはoffline keyで署名しない。`TransportBoundResponse`はアプリが検証TLS接続から受け取った事実を束ねるもので、Google等providerの電子署名ではない。
 
-### 事前順序: preflight → nonce/attempt → card time/TTL → current fields → claim → socket
+### 事前順序: preflight → nonce/attempt → current fields lock → fresh clock/card TTL → claim CAS → final recheck → socket
 
 | 順 | 実行場所 | 要求と失敗時の扱い |
 |---|---|---|
 | 1. context / config | `CopilotQueryService`からsummary実行境界へ | authenticated tenant、query/use-case、scope、artifact snapshot、provider/model/config hash、feature flag、budget、既存monotonic deadlineを検査する。tenant/artifact/config不一致なら送信せず拒否。 |
-| 2. preflight | DB claim前、network外 | immutable approved policy/card snapshotからusage boundsとbudgetを評価し、preflight digestを確定する。deny、欠損bounds、未知usage semantics、budget超過、registry emptyならnonceもsummary dispatch attemptも作らず、送信しない。preflightのpublic recordは自身を証明しない。 |
-| 3. nonceとattempt | preflight許可後、`beginSummaryAttempt` transaction | CSPRNGで独立の128-bit以上nonceとidempotency keyを生成する。UTC `issuedAt` と `expiresAt=issuedAt+configured TTL` を付け、hashとimmutable execution-binding digestをDBへ保存する。summary attemptは `PENDING/status_version=0/dispatch_state=READY` で一度だけ作る。nonceはlogに出さず、providerがidempotencyを保証すると仮定しない。 |
-| 4. card time / TTL | claim直前とtransport直前 | `claimAt=Clock.instant()` をUTCで取得し、`effectiveFrom <= claimAt < effectiveUntil` を判定する。`claimAt >= issuedAt`、`claimAt < expiresAt`、monotonic deadline残量>0、host/config/policy/card digestがsnapshotと一致することを要求する。壁時計逆行、TTL expiry、card window境界はclaimせずfail-closed。response/evaluation UTC時刻が逆行またはattempt期限外ならusageを評価せず `UNKNOWN`。 |
-| 5. current fields | claim transaction内 | primary rowをtenant + attempt id + trace + use_caseでlock/readし、`PENDING/v0/READY`、artifact/provider/model/config hash、preflight digest、nonce/idempotency hash、binding hash、issued/expires、scope/input identityが発行snapshotと完全一致することを確認する。DB row/JSONからcapabilityを再構成せず、DB値は発行済snapshotとの一致検査にだけ使う。 |
-| 6. durable claim | 独立commit済み transaction、socketより前 | exact current fieldsをWHERE fenceに含む `READY → CLAIMED` one-row CASを実行し、claim ID/timeを保存する。更新件数が1でなければsocketへ進まない。commitが呼出側に不明ならclaim済みの可能性としてattemptを消費し、UNKNOWN/no retryとする。process cacheではclaimを代用しない。 |
-| 7. transport / parse | claim commitの正常応答後のみ | 同じopaque claim permitをtransportへ渡し、同attemptのsocket exchangeを最大1回だけ開始する。HTTP response/strict usage envelopeが返ればtransport capabilityを発行する。claim後のtimeout/reset/crash/partial bodyには自動retryをしない。 |
-| 8. verify / completion | provider I/O外の短い単一DB transaction | verifierがprivate cost capabilityを同じtransaction中に作り、attempt rowを再読込/lockしてclaim ID、nonce hash、binding hash、card/policy digest、status/version、expiry、dispatch observationを再照合する。summary result、verified cost metadata、`status=PENDING/v0 → SUCCEEDED|FAILED/v1`、dispatch terminal evidenceを原子的に保存する。CAS失敗はSTALE、SQL/JSON/commit errorはrollback/propagate。外部送信は既に一度消費済みであり再実行しない。 |
+| 2. preflight | DB claim前、network外 | immutable approved policy/card snapshotからusage boundsとbudgetを評価し、preflight digestを確定する。deny、欠損bounds、未知usage semantics、budget超過、registry emptyならnonceもsummary dispatch attemptも作らず、送信しない。public preflight recordはauthorityではない。 |
+| 3. nonceとattempt | preflight許可後、`beginSummaryAttempt` transaction | CSPRNGで独立の128-bit以上nonceとidempotency keyを生成する。UTC `issuedAt` と `expiresAt=issuedAt+configured TTL` を付け、nonce/idempotency hashとimmutable binding digestを保存する。summary dispatch attemptは `PENDING/status_version=0/dispatch_state=READY` で一度だけ作る。nonceはlogへ出さず、provider idempotencyを仮定しない。 |
+| 4. current fields lock/read | claim transaction開始後、row lock保持中 | tenant + attempt id + trace + use_caseで対象rowをlockし、`PENDING/v0/READY` と発行時snapshot（artifact/provider/model/region/tier/config/preflight hash、nonce/idempotency hash、binding hash、issued/expires、scope/input identity、card/policy id/version/digest）を全て照合する。どれか不一致ならclaim前に拒否し、rowを変更しない。DB/JSONからcapabilityを作らない。 |
+| 5. fresh clock/card TTL | **lock取得と全current-fields照合の後、CAS直前に新たに** `Clock.instant()` を読む | `effectiveFrom <= claimAt < effectiveUntil`、`issuedAt <= claimAt < expiresAt`、monotonic deadline残量>0を検査する。以前のpreflight/attempt時刻を使い回さない。逆行、期限切れ、card境界外ならclaimせず拒否する。 |
+| 6. durable claim CAS | 上記transaction内でCASし、provider I/O前にcommit完了を確認 | 全てのcurrent fieldsとstatus/version/stateをWHERE fenceに含む `READY → CLAIMED` exact one-row CASを行いclaim ID/timeとclaim binding snapshotを保存する。更新件数が1でない、commit結果が呼出側に不明、commit例外ならsocketへ進まない。claim済みの可能性がある場合は消費済み `UNKNOWN` とし、絶対に `READY` / `NOT_SENT` へ戻さず再claimしない。 |
+| 7. final recheck / one-shot permit consume | claim commit後、socket直前 | transport内のprivate permitをatomic compare-and-setで一回だけconsumeし、permitのrequest/card/policy/current-binding digest、fresh card/attempt TTL、monotonic deadlineを再検査する。同一permitの並行/順次再利用は拒否する。ここで不一致・期限切れ・DB再読込不整合があればsocketは0回。durable claimは解放せず `CLAIMED` を消費済みのまま維持し、意味上 `UNKNOWN` とする。 |
+| 8. socket / transport observation | permit consume成功後のみ | 同じclaim permitについてHTTP exchangeは最大1回。実request-bound responseだけがprivate transport observationを作る。claim後のtimeout/reset/crash/partial bodyではretryしない。response UTC時刻がdispatch/issued/expiryと矛盾すればACTUALを作らない。 |
+| 9. verify / completion | provider I/O外の単一completion transaction | verifierがprivate cost capabilityを作成し、rowを再読込/lockしてclaim ID、nonce hash、binding hash、card/policy digest、status/version、expiry、dispatch observationを再照合する。summary/status/cost/metadataを一度に保存し、更新条件不一致はSTALE、SQL/JSON/commit errorはrollback/propagateする。同じattemptの送信は再開しない。 |
 
-`NOT_SENT` はdurable claimが一度もcommitされず、denyが送信前に確定した場合だけである。claim rowの`CLAIMED`で結果情報がないもの、claim commit後のsocket前crash、socket後/response前crash、timeout、partial response、response/usage検証失敗は `UNKNOWN`（独立に検証可能なboundsがある場合のみ `UPPER_BOUND`）として扱い、同じattemptをretryしない。HTTP/TLS接続に成功した事実をprovider usageへの署名や請求額の証明と呼ばない。
-
+claim rowが`CLAIMED`のまま結果を確定できない状態、claim commit後socket前のcrash、socket後/response前のcrash、timeout、partial response、response/usage検証失敗はUNKNOWNである。`NOT_SENT`はclaimが一度もcommitされず、denyが送信前に確定した場合だけとする。独立に検証可能なpreflight上限がある場合だけ `UPPER_BOUND` を許す。HTTP/TLS接続はprovider署名や請求額証明ではない。
 ### unallocated schema migration proposal
 
-現在の `t_ai_recommendation_run`（V108 + V161 + V173）はtenant/trace/use_case/artifact、`PENDING/status_version` CAS、scope/input metadataを持つが、durable dispatch state、nonce/idempotency hash、preflight/binding digest、claim/response timestampsを持たない。`redacted_summary_json`はJSON metadataであり、dispatch authority/current capabilityの格納先にはしない。よってstatus CASだけを使う既存schemaでは上記の一回送信条件を明示・検査できない。A waveにも本実装にもDDLを足さず、次の独立migration reviewへ次のshapeを提案する。version番号はrootが別途割り当てるまで未割当。
+現行 `t_ai_recommendation_run`（V108 + V161 + V173）はtenant/trace/use_case/artifact、`PENDING/status_version` CAS、scope/input metadataを持つが、durable dispatch claim、claim ID、nonce/idempotency、card/policy snapshot、transport observation列を持たない。`redacted_summary_json`は監査metadataでありauthority/current bindingの格納先にしない。status CASまたはprocess-local cacheだけでは一回送信を保証できない。B2a/B2bはDDLを変更しない。次の別migration reviewへ以下の未割当version proposalを出し、DB owner承認とversion割当後にだけB2cで実装する。
 
-提案は `t_ai_recommendation_run` へCopilot summary用nullable/legacy-safe列を追加する: `dispatch_state` (`NOT_APPLICABLE`/`READY`/`CLAIMED`/`UNKNOWN`)、`dispatch_nonce_hash BINARY(32)`、`dispatch_idempotency_hash BINARY(32)`、`dispatch_binding_hash BINARY(32)`、`preflight_snapshot_hash BINARY(32)`、`dispatch_request_sha256 BINARY(32)`、`dispatch_issued_at DATETIME(6)`、`dispatch_expires_at DATETIME(6)`、`dispatch_claimed_at DATETIME(6)`、`dispatch_started_at DATETIME(6)`、`response_received_at DATETIME(6)`、`response_sha256 BINARY(32)`。query/legacy rowsは`NOT_APPLICABLE`/NULLを保ち、summary rowはpreflight済みnonce/bindingを持つ`READY`で作る。tenant-scoped unique indexesをnonce/idempotency hashへ付け、同一summary attemptの `READY → CLAIMED` updateはtenant/id/trace/use_case/status/status_version/dispatch stateと全snapshot hashをWHERE条件に含める。claim commit後未完了の `CLAIMED` はread時にUNKNOWNとして表示し、reconcilerも再送claimを作らない。migration reviewでは既存version列、tenant nullability、index長、JSON consumers、H2 schema replay、migration backfill/default、並行claim時のaffected-rowを検証し、承認前に番号やDDLを確定しない。
+`t_ai_recommendation_run`へsummary dispatch専用のnullable/legacy-safe列を提案する。全てのhashはcanonical encodingのSHA-256、secret nonce/idempotency値そのものは保存しない。
 
+- **one-shot状態/識別**: `dispatch_state` (`NOT_APPLICABLE`/`READY`/`CLAIMED`/`UNKNOWN`)、`dispatch_claim_id BINARY(16)`、`dispatch_nonce_hash BINARY(32)`、`dispatch_idempotency_hash BINARY(32)`、`dispatch_claimed_at DATETIME(6)`、`dispatch_started_at DATETIME(6)`。tenant-scoped unique indexをnonce hash、idempotency hash、claim IDへ置く。NULLのlegacy/query rowは複数許容されるindex仕様を実DBで検証する。
+- **attempt/current binding authority**: `dispatch_binding_hash BINARY(32)`、`preflight_snapshot_hash BINARY(32)`、`dispatch_request_sha256 BINARY(32)`、`dispatch_issued_at DATETIME(6)`、`dispatch_expires_at DATETIME(6)`、および現行rowに既存でない各値を比較可能にする`dispatch_provider`、`dispatch_model_revision`、`dispatch_region`、`dispatch_tier`、`dispatch_config_hash BINARY(32)`、`dispatch_artifact_version_id`、`dispatch_scope_hash BINARY(32)`、`dispatch_input_hash BINARY(32)`。既存tenant/id/trace/use_case/status/status_versionと併せ、発行時snapshotの完全なfield mapを作り、claim SQLのWHERE条件とcompletion transactionの再照合対象にする。aggregate binding hashはfield-by-field照合の代わりにしない。
+- **card/policy snapshot**: `dispatch_card_id`、`dispatch_card_version`、`dispatch_card_digest BINARY(32)`、`dispatch_policy_id`、`dispatch_policy_version`、`dispatch_policy_digest BINARY(32)`。これらは発行時固定値との照合用で、DB値から署名済card/policy capabilityを復元しない。
+- **transport observation**: `dispatch_endpoint_id`または正規host identity、`dispatch_tls_peer_hash BINARY(32)`、`dispatch_observed_at DATETIME(6)`、`response_received_at DATETIME(6)`、`response_http_status SMALLINT`、`response_content_type`、`response_sha256 BINARY(32)`。raw request/responseは保存しない。response observationだけでusage authenticityを主張しない。
+
+
+binding digestを計算するcanonical field mapとDB照合先を固定する。以下はcapability source snapshotとDB rowの比較表であり、DB値単独からcapabilityを再生成してはならない。
+
+| binding要素 | claim rowの永続field | 固定・照合条件 |
+|---|---|---|
+| tenant / attempt / trace / use-case | 既存 `tenant_id` / `id` / `trace_id` / `use_case` | tenant contextと発行済みattemptに完全一致。tenant-scoped fenceに含める。 |
+| status / version / dispatch state | 既存 `status` / `status_version` + `dispatch_state` | `PENDING/v0/READY` の完全一致。claim時のみ `READY → CLAIMED`。 |
+| artifact / scope / input | `dispatch_artifact_version_id` / `dispatch_scope_hash` / `dispatch_input_hash` | 呼出し時immutable snapshotと照合。hashはcanonical encoding。 |
+| provider / model / region / tier / config | `dispatch_provider` / `dispatch_model_revision` / `dispatch_region` / `dispatch_tier` / `dispatch_config_hash` | artifact/config snapshotと完全一致し、claim後変更を禁止する。 |
+| preflight / nonce / idempotency / attempt TTL | `preflight_snapshot_hash` / `dispatch_nonce_hash` / `dispatch_idempotency_hash` / `dispatch_issued_at` / `dispatch_expires_at` | 発行時に固定。raw nonce/keyは永続化しない。 |
+| card / policy | `dispatch_card_id` / `dispatch_card_version` / `dispatch_card_digest` / `dispatch_policy_id` / `dispatch_policy_version` / `dispatch_policy_digest` | 署名済みimmutable snapshotのidentity/digestと照合。JSONから復元しない。 |
+| request / claim | `dispatch_request_sha256` / `dispatch_claim_id` / `dispatch_claimed_at` | exact request digestと一意claim identityをCAS対象へ含める。 |
+| endpoint / TLS / response | `dispatch_endpoint_id` / `dispatch_tls_peer_hash` / `dispatch_started_at` / `dispatch_observed_at` / `response_received_at` / `response_http_status` / `response_content_type` / `response_sha256` | transportが観測後に記録。raw payloadは保持しない。 |
+legacy/query rowsは`NOT_APPLICABLE`/NULLを維持し、preflight許可後の新summary dispatch rowだけ`READY`で作る。claim transactionはrowをlockし全current-field mapを比較した後、fresh clockでcard/TTLを確認し、tenant/id/trace/use_case/status/status_version/dispatch_stateと上記current/card/policy/binding hashesを含むexact `READY → CLAIMED` CASを行い、claim IDと時刻を保存してcommitする。commit済み`CLAIMED`は再送可能状態へ戻さない。read/reconciliation時に完了記録の無いclaimは意味上UNKNOWNとし、別プロセスからも再claimを許さない。
+
+migration reviewではlegacy backfill/default、tenant nullability、index length/NULL semantics、column bounds/collation、H2 schema replay、MySQL concurrent claim affected-row、MyBatis entity update-strategy、legacy rowsと他use-caseへの影響を検証する。DDL本文もmigration version番号もこのplanでは確定しない。
+## B2後続batchのscopeと完了条件
+
+| batch | 実装境界 | 必須完了証拠 / 明示的な外 |
+|---|---|---|
+| **B2a（今回の候補）** | 共通completion writerでpublic `ACTUAL` を永続化前に拒否する。private verified capabilityのacceptance pathはまだ作らない。 | direct forged ACTUALをservice proxyへ渡し、具体的拒否とattempt全列不変を独立readbackで確認。deny-all維持。DDL、provider送信、transport変更なし。これだけで独立実装可能。 |
+| **B2b** | transport-bound response observationとstrict parser境界。実requestの送受信点からだけprivate observationを作り、synthetic loopback専用型はproduction authorityから分離する。 | parser public raw-body/DTO入口がないこと、valid outer + inner failure observation保持、不正outer/timeout/resetでprovenanceなし、sensitive payloadがlog/exception/DTOに出ないこと。schema/実providerなし。 |
+| **B2c** | DB ownerが別reviewでmigration proposalを承認しversion割当した後にschema/entity/mapperとdurable one-shot claimを実装する。DB claimは跨processの重複送信を防ぐ。transport内のprivate final `ClaimPermit` はprivate issuerだけが生成し、non-serializable/non-cloneableとする。`AtomicBoolean.compareAndSet(false, true)`で一度だけconsumeし、permit再利用・別process移送・DBからの再構築を拒否する。local permit CASはdurable DB claimの代替ではない。 | MySQL二connection claim raceで1/0、同じpermitの並行・順次reuseでsocket最大1回、process restart後もDB claimで再送0回。post-claim pre-socket mismatchはCLAIMED消費済み/UNKNOWNのまま。 |
+| **B2d** | verifierだけが作るprivate cost capabilityを同じcompletion transactionへ渡し、DB current field/card/policy/bindingを再確認してstatus/costを原子的に保存する。B2a guardをこのcapability-only pathで置換する。 | forged DTO拒否継続、capability有効時のみACTUAL、各binding/card/policy/tenant/status drift拒否、SQL/serialization/commit rollback。production registryとdispatch gateはdeny-all。 |
+| **B2e** | timeout/reset/partial response、clock/TTL/card境界、inner failure、multi-tenant、restart、response/completion crash matrixと運用観測を仕上げる。 | 各UNKNOWN/UPPER_BOUND/NOT_SENT分類と不再送をdeterministic/MySQLで立証。外部provider、契約、実価格、production rolloutは含めない。 |
+
+B2aをレビューする際の承認質問は「共通writerがpublic ACTUALを全経路で拒否し、その失敗がDB不変である最小差分を実装してよいか」に限る。B2b～B2eを含むB2全体の設計PASSや実装許可として解釈しない。後続batchは対象batchごとのPLAN/CODE reviewを行う。
 ## 目的と現在地
 
 B1（commit `db25d2b7`）は、Spring service proxyを通るattempt完了、tenant/CAS、`STALE`、transaction rollback、usage metadata保存の境界を実DBで検証する。B1のMySQL証拠はmetadata永続化と状態遷移を示すもので、provider由来usageの真正性や料金計算結果の本番有効性を示さない。
@@ -121,12 +138,12 @@ provider APIにusage応答署名がない場合、アプリ内issuerが作る署
 
 ## 実装順とレビューgate
 
-1. **Astra PLAN review（未完了）** — capability issuer、実装順、schema gap/migration proposal、claim後crashの扱い、private cost capabilityとtest evidenceをレビューする。PASSしてもコード・DDL・本番承認にはならない。
-2. **Migration proposal review（別gate）** — 列、unique/index設計、legacy backfill/default、H2 schema replay、MySQL locking/affected-row挙動をDB ownerが確認し、versionを割り当てるか判断する。承認前はschema依存のB2b以降を開始しない。
-3. **B2a → B2b → B2c → B2d → B2e** — 各batchを上記の対象と完了証拠に限定し、Astra CODE reviewと必要なfast/MySQL gateを通してから次へ進む。migration未承認中にprocess cacheやJSON列で代用しない。
+1. **B2a PLAN review（未完了・今回の対象）** — 共通completion writerのpublic ACTUAL拒否、拒否前のDB不変、deny-all維持、DDL/provider非接触という最小contractだけをreviewする。PASSした場合に限りB2a単独のcode changeを進める。PASSはB2全体、B2b以降、DDL、provider送信、本番承認を含まない。
+2. **B2a CODE review / fast gate** — public forged ACTUALの拒否とrow全列不変をservice proxyで検証する。B2aにはmigration/MySQL concurrency/provider fixtureを持ち込まない。
+3. **B2b～B2eは個別PLAN/CODE review** — observation/parser、migration/durable claim、同一completion transactionのcost capability、failure matrixを順に扱う。B2cはmigration proposalへのDB owner承認とversion割当の後に開始する。各batchに必要なfast/MySQL gateを通す。
 4. **外部資料・human releaseは別タスク** — provider API/DPA/法務、usage semantics、price、offline signer/key custody、production dispatch/registry/flag/artifact ACTIVEは個別承認する。承認まではproductionをdeny-allに保つ。
 
-今回の作業はplan文書のレビュー可能化だけであり、A wave実装、B2 code/DDL、Maven/Docker suite、provider送信、production enablementは含まない。各実装phaseは専用fast/MySQL gateとAstra CODE reviewを分離する。
+今回の作業はplan文書のレビュー可能化だけであり、A wave/B2のコード、DDL、Maven/Docker suite、provider送信、production enablementは含まない。各実装phaseは専用gateとAstra CODE reviewを分離する。
 ## 明示的な非承認範囲
 
 この文書の存在またはPLAN review PASSは、provider contract/DPA/region、model token semantics、実料金、FX、usage authenticity acceptance、production key/card registry、実credential、Gemini実送信、Copilot/AI/external-send flag、artifact ACTIVE、database migration、production rolloutを承認しない。production gateway/adapterはdeny-all、現行flagsはOFFのままとする。実provider応答、実データ、外部network、実料金を使わない。
