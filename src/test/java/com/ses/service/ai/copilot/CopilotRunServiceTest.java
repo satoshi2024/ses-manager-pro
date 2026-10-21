@@ -1,6 +1,7 @@
 package com.ses.service.ai.copilot;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.common.exception.BusinessException;
 import com.ses.entity.AiArtifactVersion;
 import com.ses.entity.AiRecommendationRun;
 import com.ses.mapper.AiArtifactVersionMapper;
@@ -45,6 +46,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 
 @ExtendWith(MockitoExtension.class)
 class CopilotRunServiceTest {
@@ -190,30 +193,29 @@ class CopilotRunServiceTest {
                     SummaryResponse.unavailable("COST_UNKNOWN", new SummaryCostEvidence(
                             CopilotCostState.NOT_SENT, null, null, DispatchOutcome.notStarted("DENIED"),
                             null, null, "DENIED")));
-            service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "actual"), 2,
-                    SummaryResponse.unavailable("FAILED", new SummaryCostEvidence(
-                            CopilotCostState.ACTUAL, 7, null,
-                            new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED, "RESPONSE_RECEIVED"),
-                            null, new CopilotProviderUsage(10, 2, 12, null, null), "USAGE_VALID")));
             CopilotProviderUsage rejectedUsage = new CopilotProviderUsage(12, 4, 16, 0, 0);
             service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "unknown"), 3,
                     SummaryResponse.unavailable("FAILED", SummaryCostEvidence.fromPreflight(null,
                             new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED,
                                     "PROVIDER_RESPONSE_RECEIVED"),
                             rejectedUsage, "COPILOT_RESPONSE_INVALID")));
+            service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "upper-bound"), 4,
+                    SummaryResponse.unavailable("COST_UPPER_BOUND", new SummaryCostEvidence(
+                            CopilotCostState.UPPER_BOUND, null, 123,
+                            new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED,
+                                    "PROVIDER_RESPONSE_RECEIVED"),
+                            null, null, "PRECHECK_BOUND")));
         });
 
         ArgumentCaptor<Wrapper<AiRecommendationRun>> captor = ArgumentCaptor.forClass(Wrapper.class);
         verify(runMapper, times(3)).update(org.mockito.ArgumentMatchers.<AiRecommendationRun>isNull(),
                 captor.capture());
         String notSentJson = updateMetadata(captor.getAllValues().get(0));
-        String actualJson = updateMetadata(captor.getAllValues().get(1));
-        String unknownJson = updateMetadata(captor.getAllValues().get(2));
+        String unknownJson = updateMetadata(captor.getAllValues().get(1));
+        String upperBoundJson = updateMetadata(captor.getAllValues().get(2));
         assertTrue(notSentJson.contains("\"costState\":\"NOT_SENT\""));
         assertTrue(notSentJson.contains("\"costJpy\":0"));
         assertFalse(notSentJson.contains("costUpperBoundYen"));
-        assertTrue(actualJson.contains("\"costState\":\"ACTUAL\""));
-        assertTrue(actualJson.contains("\"costJpy\":7"));
         assertTrue(unknownJson.contains("\"costState\":\"UNKNOWN\""));
         assertFalse(unknownJson.contains("costJpy"));
         assertFalse(unknownJson.contains("costUpperBoundYen"));
@@ -222,13 +224,62 @@ class CopilotRunServiceTest {
         assertTrue(unknownJson.contains("\"promptTokenCount\":12"));
         assertTrue(unknownJson.contains("\"candidateTokenCount\":4"));
         assertTrue(unknownJson.contains("\"totalTokenCount\":16"));
+        assertTrue(upperBoundJson.contains("\"costState\":\"UPPER_BOUND\""));
+        assertTrue(upperBoundJson.contains("\"costUpperBoundYen\":123"));
+        assertFalse(upperBoundJson.contains("\"costJpy\""));
+    }
+
+    @Test
+    void publicActualとmetadataのACTUALはJSON化とmapper更新前に拒否する() throws Exception {
+        ObjectMapper objectMapper = spy(new ObjectMapper());
+        CopilotRunService service = new CopilotRunService(versionMapper, runMapper, objectMapper);
+        CopilotRunService.CopilotArtifactSnapshot artifact = new CopilotRunService.CopilotArtifactSnapshot(
+                72L, "mock", "mock-management-copilot", "nf08-f1", "config-hash", "catalog-v1", 4);
+        SummaryCostEvidence forgedActual = new SummaryCostEvidence(CopilotCostState.ACTUAL, 7, null,
+                new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED, "RESPONSE_RECEIVED"),
+                null, new CopilotProviderUsage(10, 2, 12, null, null), "CALLER_FORGED");
+        SummaryResponse conflictingFields = new SummaryResponse(null, List.of(), "FAILED", null,
+                0L, null, 99, forgedActual);
+
+        AccountingTenantContextHolder.runWithTenant("tenant-a", () -> {
+            BusinessException evidenceFailure = assertThrows(BusinessException.class,
+                    () -> service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "forged-evidence"),
+                            1, conflictingFields));
+            assertEquals(409, evidenceFailure.getCode());
+            assertEquals("COPILOT_ACTUAL_COST_NOT_VERIFIED", evidenceFailure.getMessageKey());
+
+            CopilotRunService.CopilotAttemptRecord forgedMetadata = new CopilotRunService.CopilotAttemptRecord(
+                    89L, "forged-metadata", "query-trace", "SUMMARY", "tenant-a", artifact,
+                    Map.of("attemptKind", "SUMMARY", "outcome", "PENDING", "costState", "ACTUAL",
+                            "costJpy", 99));
+            SummaryResponse unknownWithForgedAmount = new SummaryResponse(null, List.of(), "FAILED", null,
+                    0L, null, 99, SummaryCostEvidence.unknown("UNVERIFIED"));
+            BusinessException metadataFailure = assertThrows(BusinessException.class,
+                    () -> service.completeSummaryAttempt(forgedMetadata, 2, unknownWithForgedAmount));
+            assertEquals(409, metadataFailure.getCode());
+            assertEquals("COPILOT_ACTUAL_COST_NOT_VERIFIED", metadataFailure.getMessageKey());
+
+            CopilotRunService.CopilotAttemptRecord forgedQueryMetadata =
+                    new CopilotRunService.CopilotAttemptRecord(90L, "forged-query-metadata", null,
+                            "QUERY", "tenant-a", artifact,
+                            Map.of("attemptKind", "QUERY", "outcome", "PENDING", "costState", "ACTUAL"));
+            BusinessException queryMetadataFailure = assertThrows(BusinessException.class,
+                    () -> service.completeQueryAttempt(forgedQueryMetadata, 2, true, 3));
+            assertEquals(409, queryMetadataFailure.getCode());
+            assertEquals("COPILOT_ACTUAL_COST_NOT_VERIFIED", queryMetadataFailure.getMessageKey());
+        });
+
+        verify(objectMapper, never()).writeValueAsString(any());
+        verify(runMapper, never()).update(org.mockito.ArgumentMatchers.<AiRecommendationRun>isNull(),
+                any(Wrapper.class));
+        verify(runMapper, never()).insert(any(AiRecommendationRun.class));
     }
 
     private CopilotRunService.CopilotAttemptRecord attemptWithStaleCosts(
             CopilotRunService.CopilotArtifactSnapshot artifact, String traceId) {
         return new CopilotRunService.CopilotAttemptRecord(88L, traceId, "query-trace", "SUMMARY", "tenant-a",
                 artifact, Map.of("attemptKind", "SUMMARY", "outcome", "PENDING", "costJpy", 99,
-                "costUpperBoundYen", 100, "costState", "ACTUAL"));
+                "costUpperBoundYen", 100, "costState", "UNKNOWN"));
     }
 
     private String updateMetadata(Wrapper<AiRecommendationRun> wrapper) {
