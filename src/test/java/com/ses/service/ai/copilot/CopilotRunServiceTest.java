@@ -199,13 +199,20 @@ class CopilotRunServiceTest {
                             new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED,
                                     "PROVIDER_RESPONSE_RECEIVED"),
                             rejectedUsage, "COPILOT_RESPONSE_INVALID")));
+            service.completeSummaryAttempt(attemptWithStaleCosts(artifact, "upper-bound"), 4,
+                    SummaryResponse.unavailable("COST_UPPER_BOUND", new SummaryCostEvidence(
+                            CopilotCostState.UPPER_BOUND, null, 123,
+                            new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED,
+                                    "PROVIDER_RESPONSE_RECEIVED"),
+                            null, null, "PRECHECK_BOUND")));
         });
 
         ArgumentCaptor<Wrapper<AiRecommendationRun>> captor = ArgumentCaptor.forClass(Wrapper.class);
-        verify(runMapper, times(2)).update(org.mockito.ArgumentMatchers.<AiRecommendationRun>isNull(),
+        verify(runMapper, times(3)).update(org.mockito.ArgumentMatchers.<AiRecommendationRun>isNull(),
                 captor.capture());
         String notSentJson = updateMetadata(captor.getAllValues().get(0));
         String unknownJson = updateMetadata(captor.getAllValues().get(1));
+        String upperBoundJson = updateMetadata(captor.getAllValues().get(2));
         assertTrue(notSentJson.contains("\"costState\":\"NOT_SENT\""));
         assertTrue(notSentJson.contains("\"costJpy\":0"));
         assertFalse(notSentJson.contains("costUpperBoundYen"));
@@ -217,10 +224,13 @@ class CopilotRunServiceTest {
         assertTrue(unknownJson.contains("\"promptTokenCount\":12"));
         assertTrue(unknownJson.contains("\"candidateTokenCount\":4"));
         assertTrue(unknownJson.contains("\"totalTokenCount\":16"));
+        assertTrue(upperBoundJson.contains("\"costState\":\"UPPER_BOUND\""));
+        assertTrue(upperBoundJson.contains("\"costUpperBoundYen\":123"));
+        assertFalse(upperBoundJson.contains("\"costJpy\""));
     }
 
     @Test
-    void publicActualとmetadataのACTUALはJSON化とmapper更新前に拒否する() {
+    void publicActualとmetadataのACTUALはJSON化とmapper更新前に拒否する() throws Exception {
         ObjectMapper objectMapper = spy(new ObjectMapper());
         CopilotRunService service = new CopilotRunService(versionMapper, runMapper, objectMapper);
         CopilotRunService.CopilotArtifactSnapshot artifact = new CopilotRunService.CopilotArtifactSnapshot(
@@ -248,6 +258,15 @@ class CopilotRunServiceTest {
                     () -> service.completeSummaryAttempt(forgedMetadata, 2, unknownWithForgedAmount));
             assertEquals(409, metadataFailure.getCode());
             assertEquals("COPILOT_ACTUAL_COST_NOT_VERIFIED", metadataFailure.getMessageKey());
+
+            CopilotRunService.CopilotAttemptRecord forgedQueryMetadata =
+                    new CopilotRunService.CopilotAttemptRecord(90L, "forged-query-metadata", null,
+                            "QUERY", "tenant-a", artifact,
+                            Map.of("attemptKind", "QUERY", "outcome", "PENDING", "costState", "ACTUAL"));
+            BusinessException queryMetadataFailure = assertThrows(BusinessException.class,
+                    () -> service.completeQueryAttempt(forgedQueryMetadata, 2, true, 3));
+            assertEquals(409, queryMetadataFailure.getCode());
+            assertEquals("COPILOT_ACTUAL_COST_NOT_VERIFIED", queryMetadataFailure.getMessageKey());
         });
 
         verify(objectMapper, never()).writeValueAsString(any());

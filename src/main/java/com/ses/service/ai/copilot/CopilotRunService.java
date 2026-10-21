@@ -212,7 +212,7 @@ public class CopilotRunService {
         if (!Objects.equals(activeTenant, attempt.tenantId())) {
             throw BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
         }
-        rejectUnverifiedActualCost(attempt, costJpy, costState, costEvidence);
+        rejectUnverifiedActualCost(attempt, costState, costEvidence);
         Map<String, Object> metadata = new LinkedHashMap<>(attempt.metadata());
         metadata.put("outcome", outcome);
         metadata.put("latencyMs", boundedLatency(latencyMs));
@@ -266,17 +266,13 @@ public class CopilotRunService {
         return runMapper.update(null, update);
     }
 
-    private void rejectUnverifiedActualCost(CopilotAttemptRecord attempt, Integer costJpy,
-                                           String costState, SummaryCostEvidence costEvidence) {
+    private void rejectUnverifiedActualCost(CopilotAttemptRecord attempt, String costState,
+                                           SummaryCostEvidence costEvidence) {
         boolean actualInAttemptMetadata = attempt.metadata() != null
                 && "ACTUAL".equals(attempt.metadata().get("costState"));
         boolean actualInEvidence = costEvidence != null && costEvidence.costState() == CopilotCostState.ACTUAL;
         if ("ACTUAL".equals(costState) || actualInEvidence || actualInAttemptMetadata) {
             throw BusinessException.of(409, "COPILOT_ACTUAL_COST_NOT_VERIFIED");
-        }
-        if (costJpy != null && !(costJpy == 0 && "NOT_SENT".equals(costState)
-                && costEvidence != null && costEvidence.costState() == CopilotCostState.NOT_SENT)) {
-            throw BusinessException.of(409, "COPILOT_COST_AMOUNT_NOT_VERIFIED");
         }
     }
 
