@@ -41,7 +41,7 @@ MAPPED jobの固定source/mapping/document snapshotをF2 parser/validatorで処�
 |---|---|---|---|
 | start validation | job `MAPPED`または再validationの`VALIDATED`、active runなし | run `BUILDING`、job `VALIDATING`、active pointer/slot設定 | 新generation leaseとrun作成、旧published slot/current pointer解除を同一txで実施。run_no採番も同一job lock下 |
 | resume/takeover | job `VALIDATING`、同一active runが`BUILDING`または`SEALED` | 状態維持、generationと`last_resumed_lease_generation`更新 | 未期限の別workerを奪わない。期限切れ後のみgenerationを増加。run input/prefixを再照合 |
-| renew | job `VALIDATING`、同一run/owner/generation | lease expiryのみ延長 | generation/run/pointer/input一致かつ未期限。旧job-only MAPPED grant APIは再利用しない |
+| renew | job `VALIDATING`、同一run/owner/generation | expiryを`GREATEST(現expiry, DB現在時刻+30秒)`で非減少更新し、versionを厳密に+1 | generation/run/pointer/input一致かつ未期限。commit応答喪失retryは現expiryが旧grant以上、versionが旧grantより大きい場合に既存grantを返す（expiry同値を許容）。通常CASはexact version/expiry。旧job-only MAPPED grant APIは再利用しない |
 | append chunk | run `BUILDING` | 最大250行分を追加または全一致retry | 同一run/current fence、source row number/hash/fingerprint/disposition/finding code完全一致だけ冪等。partial chunkは全rollback |
 | seal | run `BUILDING` | run `SEALED` | source全byte SHA/EOF、physical/nonempty/empty計数、行番号順の全row metadata集合が完全一致。後続append禁止 |
 | publish | run `SEALED` | run `COMPLETED`、job `VALIDATED`、current pointer/published slot設定 | sealed rows/sourceから確定集計・hash再計算済み、同一transactionでrun/job/pointers/counters/hash/lease解放 |

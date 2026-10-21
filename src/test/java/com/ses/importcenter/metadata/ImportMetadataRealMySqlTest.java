@@ -21,6 +21,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -110,6 +112,7 @@ class ImportMetadataRealMySqlTest {
     @Autowired private ImportIdentityCandidateService candidateService;
     @Autowired private ImportValidationLeaseService leaseService;
     @Autowired private ImportValidationLifecycleService lifecycleService;
+    @Autowired private ImportValidationAppendService validationAppendService;
     @Autowired private DocumentService documentService;
     @Autowired private DocumentMapper documentMapper;
     @Autowired private DocumentVersionMapper documentVersionMapper;
@@ -117,7 +120,8 @@ class ImportMetadataRealMySqlTest {
     @Autowired private TestDocumentStorage storage;
     @Autowired private javax.sql.DataSource dataSource;
     @SpyBean private ImportMetadataAuthorizationService metadataAuthorization;
-    private final ThreadLocal<AtomicReference<Long>> authorizationTransactionConnection = new ThreadLocal<>();
+    private final ThreadLocal<AtomicReference<Long>> actualAuthorizationConnection = new ThreadLocal<>();
+    private final ThreadLocal<AtomicReference<String>> actualAuthorizationIsolation = new ThreadLocal<>();
 
     private String tenantId;
     private long actorUserId;
@@ -134,6 +138,7 @@ class ImportMetadataRealMySqlTest {
 
     @BeforeEach
     void prepareAuthorizedFixture() {
+        storage.resetOpenCount();
         tenantId = TEST_TENANT;
         AccountingTenantContextHolder.setTenantId(tenantId);
         String testUsername = "nf06-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
@@ -354,6 +359,955 @@ class ImportMetadataRealMySqlTest {
         assertEquals("MAPPED", aborted.get("state"));
         assertEquals("ABORTED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
                 String.class, tenantId, jobId, initial.runId()));
+    }
+
+    @Test
+    void 実MySQL同tick相当renewは将来期限を維持し旧grantretryで再更新しない() throws Exception {
+        prepareBoundCustomerJob();
+        var initial = lifecycleService.start(lifecycleService.beginStart(jobId));
+        Timestamp futureExpiry = jdbc.queryForObject("SELECT TIMESTAMPADD(SECOND,60,CURRENT_TIMESTAMP(6))",
+                Timestamp.class);
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=? WHERE tenant_id=? AND id=?",
+                futureExpiry, tenantId, jobId);
+        var originalGrant = reflectedLease(initial, futureExpiry);
+        long beforeVersion = ((Number) leaseSnapshot().get("version_no")).longValue();
+
+        var renewed = lifecycleService.renew(originalGrant);
+        Map<String, Object> afterRenew = leaseSnapshot();
+        assertEquals(futureExpiry, jdbc.queryForObject(
+                        "SELECT lease_expires_at FROM t_import_job WHERE tenant_id=? AND id=?",
+                        Timestamp.class, tenantId, jobId),
+                "実MySQL GREATEST SQLは候補期限が古い場合に既存期限を維持します");
+        assertEquals(beforeVersion + 1, ((Number) afterRenew.get("version_no")).longValue());
+        assertEquals(futureExpiry, renewed.expiresAt());
+
+        var recovered = lifecycleService.renew(originalGrant);
+        assertEquals(futureExpiry, recovered.expiresAt(), "expiryが同値のcommitも旧grantで復旧できます");
+        assertEquals(afterRenew, leaseSnapshot(), "retryはversionも期限も再更新しません");
+        lifecycleService.abort(recovered);
+    }
+
+    @Test
+    void 実MySQLappendはBUILDING行を保存し同一source再検証でnoOp再送する() {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+
+        var appendedLease = validationAppendService.appendRemaining(lease);
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM t_import_validation_row
+                WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=1
+                """, Integer.class, tenantId, jobId, lease.runId()));
+        Map<String, Object> row = jdbc.queryForMap("""
+                SELECT source_row_sha256,canonical_fingerprint,disposition,finding_codes,row_commit_sha256
+                FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=1
+                """, tenantId, jobId, lease.runId());
+        assertArrayEquals(HexFormat.of().parseHex(candidateRowHash(List.of("customer-1", "Example"))),
+                (byte[]) row.get("source_row_sha256"));
+        assertEquals("ACCEPTED", row.get("disposition"));
+        assertTrue(((byte[]) row.get("finding_codes")).length <= 4096);
+        assertEquals(32, ((byte[]) row.get("canonical_fingerprint")).length);
+        assertEquals(32, ((byte[]) row.get("row_commit_sha256")).length);
+        assertEquals("BUILDING", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, tenantId, jobId, lease.runId()), "appendはseal/publishしません");
+        assertEquals("VALIDATING", leaseSnapshot().get("state"));
+
+        validationAppendService.appendRemaining(appendedLease);
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()), "一致するprefixの再検証は重複rowを追加しません");
+    }
+
+    @Test
+    void 実MySQLappendは250件batchとEOFtailを保持する() {
+        prepareBoundCustomerJob();
+        StringBuilder csv = new StringBuilder("externalKey,companyName\n");
+        for (int row = 1; row <= 251; row++) csv.append(row == 251 ? "customer-1" : "customer-" + row)
+                .append(",Example ").append(row).append('\n');
+        byte[] source = csv.toString().getBytes(StandardCharsets.UTF_8);
+        String sourceHash = sha256(source);
+        storage.put(storageKey, source, false);
+        jdbc.update("UPDATE t_document_version SET sha256=?,size_bytes=? WHERE tenant_id=? AND document_id=? AND id=?",
+                sourceHash, (long) source.length, tenantId, documentId, documentVersionId);
+        byte[] digest = HexFormat.of().parseHex(sourceHash);
+        jdbc.update("UPDATE t_import_job SET source_sha256=?,document_sha256=? WHERE tenant_id=? AND id=?",
+                digest, digest, tenantId, jobId);
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+
+        var appended = validationAppendService.appendRemaining(lease);
+        assertEquals(251, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()));
+        Map<String, Object> bounds = jdbc.queryForMap("SELECT MIN(source_row_number) AS first_row,MAX(source_row_number) AS last_row "
+                + "FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                tenantId, jobId, lease.runId());
+        assertEquals(1L, ((Number) bounds.get("first_row")).longValue());
+        assertEquals(251L, ((Number) bounds.get("last_row")).longValue());
+        assertEquals(250, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND disposition='ACCEPTED'",
+                Integer.class, tenantId, jobId, lease.runId()));
+        assertEquals("REJECTED", jdbc.queryForObject("SELECT disposition FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=251",
+                String.class, tenantId, jobId, lease.runId()), "duplicate stateはchunk境界をまたいで再構築します");
+        assertEquals("BUILDING", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, tenantId, jobId, lease.runId()));
+        validationAppendService.appendRemaining(appended);
+        assertEquals(251, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()), "250件を超えるprefixのno-op retryが全行一致する");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 249, 250, 251})
+    void 実MySQLappendは空とchunk境界の件数を正確に保存する(int rowCount) {
+        prepareBoundCustomerJob();
+        StringBuilder csv = new StringBuilder("externalKey,companyName\n");
+        for (int row = 1; row <= rowCount; row++) csv.append("edge-").append(row).append(",Example ").append(row).append('\n');
+        byte[] source = csv.toString().getBytes(StandardCharsets.UTF_8);
+        String sourceHash = sha256(source);
+        storage.put(storageKey, source, false);
+        jdbc.update("UPDATE t_document_version SET sha256=?,size_bytes=? WHERE tenant_id=? AND document_id=? AND id=?",
+                sourceHash, (long) source.length, tenantId, documentId, documentVersionId);
+        byte[] digest = HexFormat.of().parseHex(sourceHash);
+        jdbc.update("UPDATE t_import_job SET source_sha256=?,document_sha256=? WHERE tenant_id=? AND id=?",
+                digest, digest, tenantId, jobId);
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        validationAppendService.appendRemaining(lease);
+        assertEquals(rowCount, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()));
+        assertEquals("BUILDING", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, tenantId, jobId, lease.runId()));
+    }
+
+    @Test
+    void 実MySQLappendはblankPhysicalRowによるrowNumberGapを許可する() {
+        prepareBoundCustomerJob();
+        byte[] source = "externalKey,companyName\ncustomer-1,Example 1\n\ncustomer-2,Example 2\n"
+                .getBytes(StandardCharsets.UTF_8);
+        String sourceHash = sha256(source);
+        storage.put(storageKey, source, false);
+        jdbc.update("UPDATE t_document_version SET sha256=?,size_bytes=? WHERE tenant_id=? AND document_id=? AND id=?",
+                sourceHash, (long) source.length, tenantId, documentId, documentVersionId);
+        byte[] digest = HexFormat.of().parseHex(sourceHash);
+        jdbc.update("UPDATE t_import_job SET source_sha256=?,document_sha256=? WHERE tenant_id=? AND id=?",
+                digest, digest, tenantId, jobId);
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+
+        validationAppendService.appendRemaining(lease);
+        assertEquals(List.of(1L, 3L), jdbc.query("SELECT source_row_number FROM t_import_validation_row "
+                        + "WHERE tenant_id=? AND job_id=? AND validation_run_id=? ORDER BY source_row_number",
+                (rs, row) -> rs.getLong(1), tenantId, jobId, lease.runId()));
+        assertEquals("BUILDING", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, tenantId, jobId, lease.runId()));
+    }
+
+    @Test
+    void 実MySQLappendのexactSourceHash不一致はrowをwriteしない() {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        storage.put(storageKey, "externalKey,companyName\ncustomer-other,Example\n".getBytes(StandardCharsets.UTF_8), false);
+
+        assertThrows(BusinessException.class, () -> validationAppendService.appendRemaining(lease));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()));
+        assertEquals("BUILDING", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, tenantId, jobId, lease.runId()));
+    }
+
+    @Test
+    void append前sourceVersionDriftはvalidation行書込なし() {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        jdbc.update("UPDATE t_import_source_system SET version_no=version_no+1 WHERE tenant_id=? AND id=?", tenantId, sourceId);
+        assertAppendDriftRejected(lease);
+    }
+
+    @Test
+    void append前documentSnapshotDriftはvalidation行書込なし() {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        jdbc.update("UPDATE t_document_version SET sha256=? WHERE tenant_id=? AND document_id=? AND id=?",
+                new byte[32], tenantId, documentId, documentVersionId);
+        assertAppendDriftRejected(lease);
+    }
+
+    @Test
+    void append前documentLinkDriftはvalidation行書込なし() {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        jdbc.update("DELETE FROM t_document_link WHERE tenant_id=? AND document_id=? AND target_type='IMPORT_JOB' AND target_id=?",
+                tenantId, documentId, jobId);
+        assertAppendDriftRejected(lease);
+    }
+
+    @Test
+    void append前mappingFingerprintDriftはvalidation行書込なし() {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        jdbc.update("UPDATE t_import_mapping SET canonical_bytes=? WHERE tenant_id=? AND id=?",
+                "{}".getBytes(StandardCharsets.UTF_8), tenantId, mappingId);
+        assertAppendDriftRejected(lease);
+    }
+
+    @Test
+    void append前permissionPolicyDriftは403でvalidation行書込なし() {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        jdbc.update("UPDATE t_permission_group_action SET deny_flag=1 WHERE tenant_id=? AND group_id=? AND action_key=? AND deny_flag=0",
+                tenantId, groupId, ImportMetadataAuthorizationService.ACTION);
+        BusinessException denied = assertThrows(BusinessException.class, () -> validationAppendService.appendRemaining(lease));
+        assertEquals(403, denied.getCode());
+        assertNoAppendRows(lease);
+    }
+
+    private void assertAppendDriftRejected(ImportValidationLifecycleService.RunLease lease) {
+        assertThrows(BusinessException.class, () -> validationAppendService.appendRemaining(lease));
+        assertNoAppendRows(lease);
+    }
+
+    private void assertNoAppendRows(ImportValidationLifecycleService.RunLease lease) {
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()));
+        assertEquals("BUILDING", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, tenantId, jobId, lease.runId()));
+    }
+
+    @Test
+    void 実MySQLwrite再parse中のEOF前read失敗はcommit済prefixを保持しtailを書かない() {
+        prepareBoundCustomerJob();
+        StringBuilder csv = new StringBuilder("externalKey,companyName\n");
+        for (int row = 1; row <= 251; row++) csv.append("customer-").append(row)
+                .append(",Example ").append(row).append('\n');
+        byte[] source = csv.toString().getBytes(StandardCharsets.UTF_8);
+        String sourceHash = sha256(source);
+        storage.put(storageKey, source, false);
+        jdbc.update("UPDATE t_document_version SET sha256=?,size_bytes=? WHERE tenant_id=? AND document_id=? AND id=?",
+                sourceHash, (long) source.length, tenantId, documentId, documentVersionId);
+        byte[] digest = HexFormat.of().parseHex(sourceHash);
+        jdbc.update("UPDATE t_import_job SET source_sha256=?,document_sha256=? WHERE tenant_id=? AND id=?",
+                digest, digest, tenantId, jobId);
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        storage.resetOpenCount();
+        storage.failOpenAt(2, source.length - 1);
+
+        assertThrows(BusinessException.class, () -> validationAppendService.appendRemaining(lease));
+        assertEquals(250, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()), "失敗前にcommitした完全chunkだけを保持します");
+        assertEquals("BUILDING", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, tenantId, jobId, lease.runId()), "EOF未確認ではseal/publishしません");
+
+        validationAppendService.appendRemaining(lease);
+        assertEquals(251, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()), "再parse後はtailを一度だけappendします");
+        assertEquals("BUILDING", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, tenantId, jobId, lease.runId()));
+    }
+
+    @Test
+    void 実MySQLwrite再parseのEOF時SHA差分はfullChunkだけ残しtailをcommitしない() {
+        prepareBoundCustomerJob();
+        StringBuilder csv = new StringBuilder("externalKey,companyName\n");
+        for (int row = 1; row <= 251; row++) csv.append("tail-").append(row).append(",Example ").append(row).append('\n');
+        byte[] source = csv.toString().getBytes(StandardCharsets.UTF_8);
+        String sourceHash = sha256(source);
+        storage.put(storageKey, source, false);
+        jdbc.update("UPDATE t_document_version SET sha256=?,size_bytes=? WHERE tenant_id=? AND document_id=? AND id=?",
+                sourceHash, (long) source.length, tenantId, documentId, documentVersionId);
+        byte[] digest = HexFormat.of().parseHex(sourceHash);
+        jdbc.update("UPDATE t_import_job SET source_sha256=?,document_sha256=? WHERE tenant_id=? AND id=?",
+                digest, digest, tenantId, jobId);
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        storage.resetOpenCount();
+        storage.changeAtOpen(2, source.length - 2, (byte) '2');
+
+        assertThrows(BusinessException.class, () -> validationAppendService.appendRemaining(lease));
+        assertEquals(250, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()), "EOF SHA不一致でも先行commit済みfull chunkは保持します");
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=251",
+                Integer.class, tenantId, jobId, lease.runId()), "tail rowはSHA一致前に書きません");
+        assertEquals("BUILDING", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, tenantId, jobId, lease.runId()));
+    }
+
+    @Test
+    void 実MySQLchunk途中のSQL失敗はbatch全体をrollbackしBUILDINGを保持する() {
+        prepareBoundCustomerJob();
+        byte[] source = "externalKey,companyName\ncustomer-1,Example 1\ncustomer-2,Example 2\n"
+                .getBytes(StandardCharsets.UTF_8);
+        String sourceHash = sha256(source);
+        storage.put(storageKey, source, false);
+        jdbc.update("UPDATE t_document_version SET sha256=?,size_bytes=? WHERE tenant_id=? AND document_id=? AND id=?",
+                sourceHash, (long) source.length, tenantId, documentId, documentVersionId);
+        byte[] digest = HexFormat.of().parseHex(sourceHash);
+        jdbc.update("UPDATE t_import_job SET source_sha256=?,document_sha256=? WHERE tenant_id=? AND id=?",
+                digest, digest, tenantId, jobId);
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        String trigger = "trg_nf06_append_fail_" + UUID.randomUUID().toString().replace("-", "");
+        jdbc.execute("CREATE TRIGGER " + trigger + " BEFORE INSERT ON t_import_validation_row "
+                + "FOR EACH ROW BEGIN IF NEW.source_row_number=2 THEN "
+                + "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic append failure'; END IF; END");
+        try {
+            assertThrows(RuntimeException.class, () -> validationAppendService.appendRemaining(lease));
+        } finally {
+            jdbc.execute("DROP TRIGGER " + trigger);
+        }
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()), "chunk内SQL失敗は全rowをrollbackします");
+        assertEquals("BUILDING", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, tenantId, jobId, lease.runId()));
+        assertEquals("VALIDATING", leaseSnapshot().get("state"));
+    }
+
+    @Test
+    void 実MySQLrenew先行で旧grantappendを拒否し最新grant再送は同一metadataへ収束する() throws Exception {
+        prepareBoundCustomerJob();
+        var oldGrant = lifecycleService.start(lifecycleService.beginStart(jobId));
+        var appendedGrant = validationAppendService.appendRemaining(oldGrant);
+        Map<String, Object> row = jdbc.queryForMap("SELECT source_row_number,source_row_sha256,canonical_fingerprint,disposition,finding_codes,row_commit_sha256 "
+                + "FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                tenantId, jobId, oldGrant.runId());
+        var metadata = new ImportValidationAppendService.RowMetadata(((Number) row.get("source_row_number")).longValue(),
+                (byte[]) row.get("source_row_sha256"), (byte[]) row.get("canonical_fingerprint"),
+                (String) row.get("disposition"), (byte[]) row.get("finding_codes"), (byte[]) row.get("row_commit_sha256"));
+        Timestamp futureExpiry = jdbc.queryForObject("SELECT TIMESTAMPADD(SECOND,60,CURRENT_TIMESTAMP(6))", Timestamp.class);
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=? WHERE tenant_id=? AND id=?", futureExpiry, tenantId, jobId);
+        var matchingOldGrant = reflectedLease(appendedGrant, futureExpiry);
+        var chunk = reflectedChunk(matchingOldGrant, List.of(metadata));
+        long versionBeforeRenew = ((Number) leaseSnapshot().get("version_no")).longValue();
+        var latestGrant = lifecycleService.renew(matchingOldGrant);
+        assertEquals(futureExpiry, latestGrant.expiresAt(), "候補期限が古い場合も将来期限を維持します");
+        assertEquals(versionBeforeRenew + 1, ((Number) leaseSnapshot().get("version_no")).longValue(),
+                "renewはexpiry同値の場合もversionを厳密に+1します");
+        Map<String, Object> beforeStaleReplay = leaseSnapshot();
+        Map<String, Object> rowBeforeStaleReplay = jdbc.queryForMap("SELECT source_row_number,HEX(source_row_sha256) AS source_row_sha256,HEX(canonical_fingerprint) AS canonical_fingerprint,disposition,HEX(finding_codes) AS finding_codes,HEX(row_commit_sha256) AS row_commit_sha256 "
+                + "FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                tenantId, jobId, oldGrant.runId());
+        BusinessException stale = assertThrows(BusinessException.class,
+                () -> lifecycleService.appendChunk(matchingOldGrant, chunk));
+        assertEquals(409, stale.getCode());
+        assertEquals(beforeStaleReplay, leaseSnapshot());
+        assertEquals(rowBeforeStaleReplay, jdbc.queryForMap("SELECT source_row_number,HEX(source_row_sha256) AS source_row_sha256,HEX(canonical_fingerprint) AS canonical_fingerprint,disposition,HEX(finding_codes) AS finding_codes,HEX(row_commit_sha256) AS row_commit_sha256 "
+                + "FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                tenantId, jobId, oldGrant.runId()), "旧grant拒否後のrow metadataは不変です");
+        lifecycleService.appendChunk(latestGrant, reflectedChunk(latestGrant, List.of(metadata)));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, oldGrant.runId()));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(DISTINCT HEX(row_commit_sha256)) FROM t_import_validation_row "
+                + "WHERE tenant_id=? AND job_id=? AND validation_run_id=?", Integer.class, tenantId, jobId, oldGrant.runId()));
+    }
+
+    @Test
+    void 実MySQLappendは再検証時のprefix差分を拒否しrowを追加しない() {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        validationAppendService.appendRemaining(lease);
+        jdbc.update("UPDATE t_import_validation_row SET disposition='REJECTED' WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=1",
+                tenantId, jobId, lease.runId());
+        int before = jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId());
+        assertThrows(BusinessException.class, () -> validationAppendService.appendRemaining(lease));
+        assertEquals(before, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()));
+        assertEquals("BUILDING", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, tenantId, jobId, lease.runId()));
+    }
+
+    @Test
+    void 実MySQL同chunk再送は各metadata差分を409で拒否する() throws Exception {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        var appended = validationAppendService.appendRemaining(lease);
+        Map<String, Object> stored = jdbc.queryForMap("""
+                SELECT source_row_number,source_row_sha256,canonical_fingerprint,disposition,finding_codes,row_commit_sha256
+                FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?
+                """, tenantId, jobId, lease.runId());
+        long rowNumber = ((Number) stored.get("source_row_number")).longValue();
+        byte[] sourceHash = (byte[]) stored.get("source_row_sha256");
+        byte[] fingerprint = (byte[]) stored.get("canonical_fingerprint");
+        String disposition = (String) stored.get("disposition");
+        byte[] findings = (byte[]) stored.get("finding_codes");
+        byte[] commitment = (byte[]) stored.get("row_commit_sha256");
+        List<ImportValidationAppendService.RowMetadata> variants = List.of(
+                new ImportValidationAppendService.RowMetadata(rowNumber, changed(sourceHash), fingerprint,
+                        disposition, findings, commitment),
+                new ImportValidationAppendService.RowMetadata(rowNumber, sourceHash, changed(fingerprint),
+                        disposition, findings, commitment),
+                new ImportValidationAppendService.RowMetadata(rowNumber, sourceHash, fingerprint,
+                        "REJECTED", findings, commitment),
+                new ImportValidationAppendService.RowMetadata(rowNumber, sourceHash, fingerprint,
+                        disposition, changed(findings), commitment),
+                new ImportValidationAppendService.RowMetadata(rowNumber, sourceHash, fingerprint,
+                        disposition, findings, changed(commitment)));
+        Map<String, Object> beforeLease = leaseSnapshot();
+        for (var variant : variants) {
+            var chunk = reflectedChunk(appended, List.of(variant));
+            assertThrows(BusinessException.class, () -> lifecycleService.appendChunk(appended, chunk));
+        }
+        assertEquals(beforeLease, leaseSnapshot());
+        Map<String, Object> after = jdbc.queryForMap("""
+                SELECT source_row_number,source_row_sha256,canonical_fingerprint,disposition,finding_codes,row_commit_sha256
+                FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?
+                """, tenantId, jobId, lease.runId());
+        assertEquals(stored.get("source_row_number"), after.get("source_row_number"));
+        assertEquals(stored.get("disposition"), after.get("disposition"));
+        assertArrayEquals(sourceHash, (byte[]) after.get("source_row_sha256"));
+        assertArrayEquals(fingerprint, (byte[]) after.get("canonical_fingerprint"));
+        assertArrayEquals(findings, (byte[]) after.get("finding_codes"));
+        assertArrayEquals(commitment, (byte[]) after.get("row_commit_sha256"));
+    }
+
+    @Test
+    void appendChunkは空超過重複逆順と未知findingを拒否する() throws Exception {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        var sourceRow = new ImportValidationAppendService.RowMetadata(1, new byte[32], new byte[32],
+                "ACCEPTED", ImportValidationAppendService.encodeFindingCodes(Set.of()), new byte[32]);
+        assertThrows(BusinessException.class, () -> ImportValidationAppendService.encodeFindingCodes(Set.of("UNKNOWN")));
+        assertThrows(BusinessException.class, () -> lifecycleService.appendChunk(lease,
+                reflectedChunk(lease, List.of())));
+        assertThrows(BusinessException.class, () -> lifecycleService.appendChunk(lease,
+                reflectedChunk(lease, List.of(sourceRow, sourceRow))));
+        var second = new ImportValidationAppendService.RowMetadata(2, new byte[32], new byte[32],
+                "ACCEPTED", ImportValidationAppendService.encodeFindingCodes(Set.of()), new byte[32]);
+        assertThrows(BusinessException.class, () -> lifecycleService.appendChunk(lease,
+                reflectedChunk(lease, List.of(second, sourceRow))));
+        List<ImportValidationAppendService.RowMetadata> oversized = new java.util.ArrayList<>();
+        for (int row = 1; row <= 251; row++) oversized.add(new ImportValidationAppendService.RowMetadata(row,
+                new byte[32], new byte[32], "ACCEPTED", ImportValidationAppendService.encodeFindingCodes(Set.of()), new byte[32]));
+        assertThrows(BusinessException.class, () -> lifecycleService.appendChunk(lease,
+                reflectedChunk(lease, oversized)));
+        var goodSnapshot = lifecycleService.appendSnapshot(lease);
+        for (String field : List.of("sourceSha", "documentSha", "mappingSha", "validatorFingerprint")) {
+            var changedSnapshot = reflectedSnapshot(goodSnapshot, field);
+            assertThrows(BusinessException.class, () -> lifecycleService.appendChunk(lease,
+                    reflectedChunk(lease, changedSnapshot, List.of(sourceRow))));
+        }
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=?",
+                Integer.class, tenantId, jobId));
+    }
+
+    @Test
+    void 実MySQLrowLock待機が期限を越えるとfreshDB時刻で拒否しrow数を保つ() throws Exception {
+        prepareBoundCustomerJob();
+        var original = lifecycleService.start(lifecycleService.beginStart(jobId));
+        var currentGrant = validationAppendService.appendRemaining(original);
+        Map<String, Object> stored = jdbc.queryForMap("SELECT id,source_row_number,source_row_sha256,canonical_fingerprint,disposition,finding_codes,row_commit_sha256 "
+                + "FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                tenantId, jobId, original.runId());
+        var row = new ImportValidationAppendService.RowMetadata(((Number) stored.get("source_row_number")).longValue(),
+                (byte[]) stored.get("source_row_sha256"), (byte[]) stored.get("canonical_fingerprint"),
+                (String) stored.get("disposition"), (byte[]) stored.get("finding_codes"), (byte[]) stored.get("row_commit_sha256"));
+        long persistedRowId = ((Number) stored.get("id")).longValue();
+        Map<String, Object> beforeShorten = leaseSnapshot();
+        assertEquals(currentGrant.generation(), ((Number) beforeShorten.get("lease_generation")).longValue());
+        assertEquals(leaseLongField(currentGrant, "jobVersion"), ((Number) beforeShorten.get("version_no")).longValue());
+        assertEquals(currentGrant.runId(), ((Number) beforeShorten.get("active_validation_run_id")).longValue());
+        assertEquals(leaseStringField(currentGrant, "workerId"), beforeShorten.get("lease_owner"));
+        assertTrue(currentGrant.expiresAt().after(jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)", Timestamp.class)));
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,2,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
+                tenantId, jobId);
+        Timestamp shortExpiry = jdbc.queryForObject("SELECT lease_expires_at FROM t_import_job WHERE tenant_id=? AND id=?",
+                Timestamp.class, tenantId, jobId);
+        assertTrue(shortExpiry.after(jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)", Timestamp.class)));
+        var shortGrant = reflectedLease(currentGrant, shortExpiry);
+        var lockedReplay = reflectedChunk(shortGrant, List.of(row));
+        Connection blocker = dataSource.getConnection();
+        blocker.setAutoCommit(false);
+        AtomicReference<Long> blockerId = new AtomicReference<>();
+        AtomicReference<Long> requesterId = new AtomicReference<>();
+        AtomicReference<String> appendIsolation = new AtomicReference<>();
+        captureActualAuthorizationConnection();
+        AtomicReference<Map<String, Object>> stateAtRowWait = new AtomicReference<>();
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        Future<?> append = null;
+        AtomicBoolean expectedAppendDenial = new AtomicBoolean(false);
+        Throwable primaryFailure = null;
+        try {
+            try (var statement = blocker.prepareStatement("SELECT id FROM t_import_validation_row WHERE tenant_id=? AND validation_run_id=? AND source_row_number=? FOR UPDATE")) {
+                statement.setString(1, tenantId); statement.setLong(2, original.runId()); statement.setLong(3, row.sourceRowNumber());
+                try (ResultSet result = statement.executeQuery()) { assertTrue(result.next()); }
+            }
+            try (var statement = blocker.createStatement(); ResultSet result = statement.executeQuery("SELECT CONNECTION_ID()")) {
+                assertTrue(result.next()); blockerId.set(result.getLong(1));
+            }
+            append = pool.submit(() -> withCapturedAuthorizationConnection(requesterId, appendIsolation, () -> {
+                var tx = new org.springframework.transaction.support.TransactionTemplate(
+                        new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+                tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+                return tx.execute(status -> {
+                    assertEquals("READ-COMMITTED", jdbc.queryForObject("SELECT @@transaction_isolation", String.class));
+                    stateAtRowWait.set(jdbc.query("SELECT lease_owner,lease_generation,version_no,active_validation_run_id,"
+                                    + "lease_expires_at,lease_expires_at>CURRENT_TIMESTAMP(6) AS unexpired "
+                                    + "FROM t_import_job WHERE tenant_id=? AND id=?",
+                            rs -> {
+                                if (!rs.next()) return null;
+                                Map<String, Object> state = new java.util.HashMap<>();
+                                state.put("lease_owner", rs.getString("lease_owner"));
+                                state.put("lease_generation", rs.getObject("lease_generation"));
+                                state.put("version_no", rs.getObject("version_no"));
+                                state.put("active_validation_run_id", rs.getObject("active_validation_run_id"));
+                                state.put("lease_expires_at", rs.getTimestamp("lease_expires_at"));
+                                state.put("unexpired", rs.getObject("unexpired"));
+                                return state;
+                            }, tenantId, jobId));
+                    lifecycleService.appendChunk(shortGrant, lockedReplay);
+                    return null;
+                });
+            }));
+            awaitValidationRowWait(requesterId, blockerId, append, row.sourceRowNumber(), original.runId(), persistedRowId);
+            assertEquals("READ-COMMITTED", appendIsolation.get(), "REQUIRES_NEW append transaction isolation");
+            Map<String, Object> leaseAtWait = stateAtRowWait.get();
+            assertTrue(leaseAtWait != null);
+            assertEquals(leaseStringField(shortGrant, "workerId"), leaseAtWait.get("lease_owner"));
+            assertEquals(shortGrant.generation(), ((Number) leaseAtWait.get("lease_generation")).longValue());
+            assertEquals(leaseLongField(shortGrant, "jobVersion"), ((Number) leaseAtWait.get("version_no")).longValue());
+            assertEquals(shortGrant.runId(), ((Number) leaseAtWait.get("active_validation_run_id")).longValue());
+            assertEquals(shortExpiry, leaseAtWait.get("lease_expires_at"));
+            assertEquals(1, ((Number) leaseAtWait.get("unexpired")).intValue());
+            awaitLeaseExpiryByDatabaseClock();
+            blocker.commit();
+            Future<?> pendingAppend = append;
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> pendingAppend.get(10, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException);
+            assertEquals(409, ((BusinessException) failure.getCause()).getCode());
+            expectedAppendDenial.set(true);
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                    Integer.class, tenantId, jobId, original.runId()), "期限切れの再送は既存rowだけを保持します");
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            try { blocker.rollback(); } catch (Exception failure) { if (primaryFailure != null) primaryFailure.addSuppressed(failure); }
+            try { blocker.close(); } catch (Exception failure) { if (primaryFailure != null) primaryFailure.addSuppressed(failure); }
+            reportCleanupFailures("append row lock wait fixture", awaitFutures(futures(append), pool, false,
+                    expectedAppendDenial.get() ? Set.of(append) : Set.of()), primaryFailure);
+        }
+    }
+
+    private ImportValidationLifecycleService.RunLease reflectedLease(
+            ImportValidationLifecycleService.RunLease source, Timestamp expiry) throws Exception {
+        var constructor = ImportValidationLifecycleService.RunLease.class.getDeclaredConstructor(
+                String.class, source.getClass().getDeclaredField("input").getType(), long.class,
+                String.class, long.class, long.class, Timestamp.class);
+        constructor.setAccessible(true);
+        var inputField = source.getClass().getDeclaredField("input"); inputField.setAccessible(true);
+        var instanceField = source.getClass().getDeclaredField("instanceId"); instanceField.setAccessible(true);
+        var workerField = source.getClass().getDeclaredField("workerId"); workerField.setAccessible(true);
+        var generationField = source.getClass().getDeclaredField("generation"); generationField.setAccessible(true);
+        var versionField = source.getClass().getDeclaredField("jobVersion"); versionField.setAccessible(true);
+        return constructor.newInstance(instanceField.get(source), inputField.get(source), source.runId(),
+                workerField.get(source), generationField.getLong(source), versionField.getLong(source), expiry);
+    }
+
+    private long leaseLongField(ImportValidationLifecycleService.RunLease lease, String name) throws Exception {
+        var field = lease.getClass().getDeclaredField(name); field.setAccessible(true);
+        return field.getLong(lease);
+    }
+
+    private String leaseStringField(ImportValidationLifecycleService.RunLease lease, String name) throws Exception {
+        var field = lease.getClass().getDeclaredField(name); field.setAccessible(true);
+        return (String) field.get(lease);
+    }
+
+    private byte[] changed(byte[] value) {
+        byte[] changed = value.clone();
+        changed[0] ^= 1;
+        return changed;
+    }
+
+    private ImportValidationAppendService.ValidatedChunk reflectedChunk(
+            ImportValidationLifecycleService.RunLease lease,
+            List<ImportValidationAppendService.RowMetadata> rows) throws Exception {
+        return reflectedChunk(lease, lifecycleService.appendSnapshot(lease), rows);
+    }
+
+    private ImportValidationAppendService.ValidatedChunk reflectedChunk(
+            ImportValidationLifecycleService.RunLease lease,
+            ImportValidationLifecycleService.AppendSnapshot snapshot,
+            List<ImportValidationAppendService.RowMetadata> rows) throws Exception {
+        var constructor = ImportValidationAppendService.ValidatedChunk.class.getDeclaredConstructor(
+                ImportValidationLifecycleService.RunLease.class,
+                ImportValidationLifecycleService.AppendSnapshot.class, List.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(lease, snapshot, rows);
+    }
+
+    private ImportValidationLifecycleService.AppendSnapshot reflectedSnapshot(
+            ImportValidationLifecycleService.AppendSnapshot source, String changedField) throws Exception {
+        var type = ImportValidationLifecycleService.AppendSnapshot.class;
+        var components = type.getRecordComponents();
+        Class<?>[] parameterTypes = new Class<?>[components.length];
+        Object[] values = new Object[components.length];
+        for (int i = 0; i < components.length; i++) {
+            parameterTypes[i] = components[i].getType();
+            values[i] = components[i].getAccessor().invoke(source);
+            if (components[i].getName().equals(changedField)) ((byte[]) values[i])[0] ^= 1;
+        }
+        var constructor = type.getDeclaredConstructor(parameterTypes);
+        constructor.setAccessible(true);
+        return (ImportValidationLifecycleService.AppendSnapshot) constructor.newInstance(values);
+    }
+
+    @Test
+    void appendより先にactor変更がcommitすると403でzeroWrite() throws Exception {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        Map<String, Object> before = leaseSnapshot();
+        assertMutationWinsBeforeService("sys_user", "SELECT id FROM sys_user WHERE tenant_id=? AND id=? FOR UPDATE",
+                new Object[]{tenantId, actorUserId}, "UPDATE sys_user SET status=0 WHERE tenant_id=? AND id=?",
+                new Object[]{tenantId, actorUserId}, () -> validationAppendService.appendRemaining(lease), 403);
+        assertEquals(before, leaseSnapshot());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=?",
+                Integer.class, tenantId, jobId));
+    }
+
+    @Test
+    void appendより先にpermissionDenyがcommitすると403でzeroWrite() throws Exception {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        long actionId = jdbc.queryForObject("SELECT id FROM t_permission_group_action WHERE tenant_id=? AND group_id=? "
+                + "AND action_key=? AND deny_flag=0 AND deleted_flag=0", Long.class, tenantId, groupId,
+                ImportMetadataAuthorizationService.ACTION);
+        Map<String, Object> before = leaseSnapshot();
+        assertMutationWinsBeforeService("t_permission_group_action",
+                "SELECT id FROM t_permission_group_action WHERE tenant_id=? AND id=? FOR UPDATE",
+                new Object[]{tenantId, actionId}, "UPDATE t_permission_group_action SET deny_flag=1 WHERE tenant_id=? AND id=?",
+                new Object[]{tenantId, actionId}, () -> validationAppendService.appendRemaining(lease), 403);
+        assertEquals(before, leaseSnapshot());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=?",
+                Integer.class, tenantId, jobId));
+    }
+
+    @Test
+    void appendのwriteGateが先ならactor変更はchunkcommitまで待機する() throws Exception {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        GatePause pause = pauseRealWriteGateAt(3);
+        assertServiceCommitsBeforeMutation(pause, "sys_user",
+                "UPDATE sys_user SET status=0 WHERE tenant_id=? AND id=?",
+                new Object[]{tenantId, actorUserId}, () -> validationAppendService.appendRemaining(lease), true);
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()));
+        assertEquals(0, jdbc.queryForObject("SELECT status FROM sys_user WHERE tenant_id=? AND id=?", Integer.class, tenantId, actorUserId));
+        Map<String, Object> beforeDeniedRetry = leaseSnapshot();
+        BusinessException denied = assertThrows(BusinessException.class,
+                () -> validationAppendService.appendRemaining(lease));
+        assertEquals(403, denied.getCode());
+        assertEquals(beforeDeniedRetry, leaseSnapshot());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()));
+    }
+
+    @Test
+    void appendのwriteGateが先ならpermission変更はchunkcommitまで待機する() throws Exception {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        long actionId = jdbc.queryForObject("SELECT id FROM t_permission_group_action WHERE tenant_id=? AND group_id=? "
+                + "AND action_key=? AND deny_flag=0 AND deleted_flag=0", Long.class, tenantId, groupId,
+                ImportMetadataAuthorizationService.ACTION);
+        GatePause pause = pauseRealWriteGateAt(3);
+        assertServiceCommitsBeforeMutation(pause, "t_permission_group_action",
+                "UPDATE t_permission_group_action SET deny_flag=1 WHERE tenant_id=? AND id=?",
+                new Object[]{tenantId, actionId}, () -> validationAppendService.appendRemaining(lease),
+                "PRIMARY", Long.toString(actionId), true);
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()));
+        assertEquals(1, jdbc.queryForObject("SELECT deny_flag FROM t_permission_group_action WHERE tenant_id=? AND id=?",
+                Integer.class, tenantId, actionId));
+        Map<String, Object> beforeDeniedRetry = leaseSnapshot();
+        BusinessException denied = assertThrows(BusinessException.class,
+                () -> validationAppendService.appendRemaining(lease));
+        assertEquals(403, denied.getCode());
+        assertEquals(beforeDeniedRetry, leaseSnapshot());
+    }
+
+    @Test
+    void appendがsourceLockとwriteGateを保持中takeoverは待機しcommit後に拒否される() throws Exception {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        var takeover = lifecycleService.beginTakeover(jobId, lease.runId());
+        GatePause pause = pauseRealWriteGateAt(3);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        AtomicReference<Long> takeoverWorkerId = new AtomicReference<>();
+        Set<Future<?>> verifiedFailures = new java.util.HashSet<>();
+        captureActualAuthorizationConnection();
+        Future<ImportValidationLifecycleService.RunLease> append = null;
+        Future<?> takeoverFuture = null;
+        Throwable primaryFailure = null;
+        try {
+            append = pool.submit(() -> withActorContext(() -> validationAppendService.appendRemaining(lease)));
+            assertTrue(pause.entered.await(10, TimeUnit.SECONDS), "appendのchunk write gateに到達しませんでした");
+            assertGateRunsInReadCommittedTransaction(pause);
+            takeoverFuture = pool.submit(() -> withCapturedAuthorizationConnection(takeoverWorkerId,
+                    () -> lifecycleService.takeOver(takeover)));
+            SourceLockWait observed = awaitSourceLockWaitFromBlocker(pause.connectionId.get(), takeoverWorkerId,
+                    takeoverFuture, append, "takeover waiting on append");
+            logSourceLockWait("takeover waiting on append", observed);
+            assertTrue(!append.isDone(), "takeover待機中にappend transactionが完了してはいけません");
+            pause.release.countDown();
+            append.get(10, TimeUnit.SECONDS);
+            Future<?> pendingTakeover = takeoverFuture;
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> pendingTakeover.get(10, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException);
+            assertEquals(409, ((BusinessException) failure.getCause()).getCode());
+            verifiedFailures.add(takeoverFuture);
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                    Integer.class, tenantId, jobId, lease.runId()));
+            assertEquals(1L, jdbc.queryForObject("SELECT lease_generation FROM t_import_job WHERE tenant_id=? AND id=?",
+                    Long.class, tenantId, jobId));
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            pause.release.countDown();
+            reportCleanupFailures("append/takeover lock wait fixture",
+                    awaitFutures(futures(append, takeoverFuture), pool, false, verifiedFailures), primaryFailure);
+        }
+    }
+
+    @Test
+    void appendがsourceLockとwriteGateを保持中abortは待機しstaleGrantとして拒否される() throws Exception {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        GatePause pause = pauseRealWriteGateAt(3);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        AtomicReference<Long> abortWorkerId = new AtomicReference<>();
+        Set<Future<?>> verifiedFailures = new java.util.HashSet<>();
+        captureActualAuthorizationConnection();
+        Future<ImportValidationLifecycleService.RunLease> append = null;
+        Future<?> abortFuture = null;
+        Throwable primaryFailure = null;
+        try {
+            append = pool.submit(() -> withActorContext(() -> validationAppendService.appendRemaining(lease)));
+            assertTrue(pause.entered.await(10, TimeUnit.SECONDS), "appendのchunk write gateに到達しませんでした");
+            assertGateRunsInReadCommittedTransaction(pause);
+            abortFuture = pool.submit(() -> withCapturedAuthorizationConnection(abortWorkerId, () -> {
+                lifecycleService.abort(lease);
+                return null;
+            }));
+            SourceLockWait observed = awaitSourceLockWaitFromBlocker(pause.connectionId.get(), abortWorkerId,
+                    abortFuture, append, "abort waiting on append");
+            logSourceLockWait("abort waiting on append", observed);
+            assertTrue(!append.isDone(), "abort待機中にappend transactionが完了してはいけません");
+            pause.release.countDown();
+            append.get(10, TimeUnit.SECONDS);
+            Future<?> pendingAbort = abortFuture;
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> pendingAbort.get(10, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException);
+            assertEquals(409, ((BusinessException) failure.getCause()).getCode());
+            verifiedFailures.add(abortFuture);
+            assertEquals("VALIDATING", leaseSnapshot().get("state"));
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                    Integer.class, tenantId, jobId, lease.runId()));
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            pause.release.countDown();
+            reportCleanupFailures("append/abort lock wait fixture",
+                    awaitFutures(futures(append, abortFuture), pool, false, verifiedFailures), primaryFailure);
+        }
+    }
+
+    @Test
+    void takeoverが先行してsourceLockを保持するとappendは待機後409でzeroWrite() throws Exception {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
+                tenantId, jobId);
+        var takeover = lifecycleService.beginTakeover(jobId, lease.runId());
+        GatePause pause = pauseRealWriteGateAt(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        AtomicReference<Long> appendWorkerId = new AtomicReference<>();
+        captureActualAuthorizationConnection();
+        Future<?> takeoverFuture = null, appendFuture = null;
+        Set<Future<?>> verifiedFailures = new java.util.HashSet<>();
+        Throwable primaryFailure = null;
+        try {
+            takeoverFuture = pool.submit(() -> withActorContext(() -> lifecycleService.takeOver(takeover)));
+            assertTrue(pause.entered.await(10, TimeUnit.SECONDS), "takeoverの認可gateに到達しませんでした");
+            assertGateRunsInReadCommittedTransaction(pause);
+            appendFuture = pool.submit(() -> withCapturedAuthorizationConnection(appendWorkerId,
+                    () -> validationAppendService.appendRemaining(lease)));
+            SourceLockWait wait = awaitSourceLockWaitFromBlocker(pause.connectionId.get(), appendWorkerId, appendFuture,
+                    takeoverFuture, "append waiting behind takeover");
+            logSourceLockWait("append waiting behind takeover", wait);
+            pause.release.countDown();
+            takeoverFuture.get(10, TimeUnit.SECONDS);
+            Future<?> pendingAppend = appendFuture;
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> pendingAppend.get(10, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException);
+            assertEquals(409, ((BusinessException) failure.getCause()).getCode());
+            verifiedFailures.add(appendFuture);
+            assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=?",
+                    Integer.class, tenantId, jobId));
+            assertEquals(2L, jdbc.queryForObject("SELECT lease_generation FROM t_import_job WHERE tenant_id=? AND id=?",
+                    Long.class, tenantId, jobId));
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            pause.release.countDown();
+            reportCleanupFailures("takeover-first append wait fixture", awaitFutures(futures(takeoverFuture, appendFuture),
+                    pool, false, verifiedFailures), primaryFailure);
+        }
+    }
+
+    @Test
+    void abortが先行してsourceLockを保持するとappendは待機後409でzeroWrite() throws Exception {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        GatePause pause = pauseRealWriteGateAt(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        AtomicReference<Long> appendWorkerId = new AtomicReference<>();
+        captureActualAuthorizationConnection();
+        Future<?> abortFuture = null, appendFuture = null;
+        Set<Future<?>> verifiedFailures = new java.util.HashSet<>();
+        Throwable primaryFailure = null;
+        try {
+            abortFuture = pool.submit(() -> withActorContext(() -> { lifecycleService.abort(lease); return null; }));
+            assertTrue(pause.entered.await(10, TimeUnit.SECONDS), "abortの認可gateに到達しませんでした");
+            assertGateRunsInReadCommittedTransaction(pause);
+            appendFuture = pool.submit(() -> withCapturedAuthorizationConnection(appendWorkerId,
+                    () -> validationAppendService.appendRemaining(lease)));
+            SourceLockWait wait = awaitSourceLockWaitFromBlocker(pause.connectionId.get(), appendWorkerId, appendFuture,
+                    abortFuture, "append waiting behind abort");
+            logSourceLockWait("append waiting behind abort", wait);
+            pause.release.countDown();
+            abortFuture.get(10, TimeUnit.SECONDS);
+            Future<?> pendingAppend = appendFuture;
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> pendingAppend.get(10, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException);
+            assertEquals(409, ((BusinessException) failure.getCause()).getCode());
+            verifiedFailures.add(appendFuture);
+            assertEquals("MAPPED", leaseSnapshot().get("state"));
+            assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=?",
+                    Integer.class, tenantId, jobId));
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            pause.release.countDown();
+            reportCleanupFailures("abort-first append wait fixture", awaitFutures(futures(abortFuture, appendFuture),
+                    pool, false, verifiedFailures), primaryFailure);
+        }
+    }
+
+    @Test
+    void appendがjobFenceを保持するとjob更新はjob行waitGraphで待機する() throws Exception {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        GatePause pause = pauseRealWriteGateAt(3);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        AtomicReference<Long> writerId = new AtomicReference<>();
+        Future<?> append = null, mutation = null;
+        Throwable primaryFailure = null;
+        try {
+            append = pool.submit(() -> withActorContext(() -> validationAppendService.appendRemaining(lease)));
+            assertTrue(pause.entered.await(10, TimeUnit.SECONDS), "appendのchunk gateへ到達しませんでした");
+            assertGateRunsInReadCommittedTransaction(pause);
+            mutation = pool.submit(() -> updateAndCommit("UPDATE t_import_job SET version_no=version_no WHERE tenant_id=? AND id=?",
+                    new Object[]{tenantId, jobId}, writerId));
+            SourceLockWait wait = awaitAnyTableRecordXWait(writerId, pause.connectionId, append, mutation,
+                    "t_import_job", Long.toString(jobId), "job-fence update");
+            System.out.printf("NF06 job fence wait確認: requester=%d blocker=%d index=%s key=%s request=%s/%s blocker=%s/%s%n",
+                    wait.requesterConnectionId(), wait.blockerConnectionId(), wait.indexName(), wait.lockData(),
+                    wait.requestType(), wait.requestMode(), wait.blockerType(), wait.blockerMode());
+            pause.release.countDown();
+            append.get(10, TimeUnit.SECONDS);
+            mutation.get(10, TimeUnit.SECONDS);
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                    Integer.class, tenantId, jobId, lease.runId()));
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
+        } finally {
+            pause.release.countDown();
+            reportCleanupFailures("append job fence fixture", awaitFutures(futures(append, mutation), pool, false), primaryFailure);
+        }
+    }
+
+    private SourceLockWait awaitAnyTableRecordXWait(AtomicReference<Long> requester,
+                                                    AtomicReference<Long> blocker, Future<?> service,
+                                                    Future<?> mutation, String table, String expectedLockData,
+                                                    String label) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            assertFuturePending(service, "append holding " + table);
+            assertFuturePending(mutation, label);
+            if (requester.get() != null && blocker.get() != null) {
+                List<SourceLockWait> waits = jdbc.query("""
+                        SELECT wt.PROCESSLIST_ID,bt.PROCESSLIST_ID,req.INDEX_NAME,req.LOCK_DATA,
+                          req.LOCK_TYPE,req.LOCK_MODE,req.LOCK_STATUS,blk.LOCK_TYPE,blk.LOCK_MODE,blk.LOCK_STATUS
+                        FROM performance_schema.data_lock_waits w
+                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
+                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                        JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                        JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
+                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=?
+                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=?
+                          AND req.INDEX_NAME='PRIMARY' AND blk.INDEX_NAME='PRIMARY'
+                          AND req.LOCK_DATA=? AND blk.LOCK_DATA=?
+                          AND req.LOCK_TYPE='RECORD' AND req.LOCK_STATUS='WAITING'
+                          AND req.LOCK_MODE IN ('X','X,REC_NOT_GAP')
+                          AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_STATUS='GRANTED'
+                          AND blk.LOCK_MODE IN ('X','X,REC_NOT_GAP')
+                        """, (rs, row) -> new SourceLockWait(rs.getLong(1), rs.getLong(2), rs.getString(3),
+                        rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8),
+                        rs.getString(9), rs.getString(10)), requester.get(), blocker.get(), table, table,
+                        expectedLockData, expectedLockData);
+                if (!waits.isEmpty()) return waits.get(0);
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError(label + "の" + table + " record X wait graphを確認できませんでした: "
+                + "expected PRIMARY key=" + expectedLockData + "; "
+                + safeWaitDetails(requester.get(), blocker.get()));
+    }
+
+    @Test
+    void takeovercommit後の旧grantappendは拒否されrowを作らない() {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
+                tenantId, jobId);
+        lifecycleService.takeOver(lifecycleService.beginTakeover(jobId, lease.runId()));
+        Map<String, Object> before = leaseSnapshot();
+        BusinessException rejected = assertThrows(BusinessException.class,
+                () -> validationAppendService.appendRemaining(lease));
+        assertEquals(409, rejected.getCode());
+        assertEquals(before, leaseSnapshot());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=?",
+                Integer.class, tenantId, jobId));
+    }
+
+    @Test
+    void abortcommit後の旧grantappendは拒否されrowを作らない() {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        lifecycleService.abort(lease);
+        Map<String, Object> before = leaseSnapshot();
+        BusinessException rejected = assertThrows(BusinessException.class,
+                () -> validationAppendService.appendRemaining(lease));
+        assertEquals(409, rejected.getCode());
+        assertEquals(before, leaseSnapshot());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=?",
+                Integer.class, tenantId, jobId));
+    }
+
+    @Test
+    void 期限切れrunLeaseでappendは拒否されleaseもrowも変更しない() {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
+                tenantId, jobId);
+        Map<String, Object> before = leaseSnapshot();
+        BusinessException rejected = assertThrows(BusinessException.class,
+                () -> validationAppendService.appendRemaining(lease));
+        assertEquals(409, rejected.getCode());
+        assertEquals(before, leaseSnapshot());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=?",
+                Integer.class, tenantId, jobId));
     }
 
     @Test
@@ -899,26 +1853,25 @@ class ImportMetadataRealMySqlTest {
                                                 int expectedCode) throws Exception {
         Connection blocker = dataSource.getConnection();
         ExecutorService pool = Executors.newSingleThreadExecutor();
-        AtomicReference<Long> requesterId = new AtomicReference<>();
+        AtomicReference<Long> requesterConnectionId = new AtomicReference<>();
         Throwable primaryFailure = null;
         try {
             blocker.setAutoCommit(false);
             executeQueryForUpdate(blocker, lockSql, lockParams);
             long blockerId = connectionId(blocker);
-            org.mockito.Mockito.doAnswer(invocation -> {
-                Object authorized = invocation.callRealMethod();
-                AtomicReference<Long> captured = authorizationTransactionConnection.get();
-                if (captured != null && TransactionSynchronizationManager.isActualTransactionActive()) {
-                    captured.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
-                }
-                return authorized;
-            }).when(metadataAuthorization).requireCurrentAuthorization();
-            Future<?> submitted = pool.submit(() -> {
-                authorizationTransactionConnection.set(requesterId);
-                try { return withActorContext(serviceAction); }
-                finally { authorizationTransactionConnection.remove(); }
-            });
-            awaitMutationFirstSourceWait(requesterId, blockerId, submitted, table);
+            captureActualAuthorizationConnection();
+            Future<?> submitted = pool.submit(() -> withCapturedAuthorizationConnection(requesterConnectionId, serviceAction));
+            if ("t_import_source_system".equals(table)) {
+                var blockerHeld = new java.util.concurrent.CompletableFuture<Void>();
+                SourceLockWait observed = awaitSourceLockWaitFromBlocker(blockerId, requesterConnectionId,
+                        submitted, blockerHeld,
+                        table + " mutation-first service");
+                logSourceLockWait("source mutation committed before service", observed);
+            } else {
+                String lockData = permissionLockData(blockerId, table, "PRIMARY");
+                awaitExactLockWait(requesterConnectionId, blockerId, table, "PRIMARY", lockData, submitted,
+                        table + " mutation-first service");
+            }
             executeUpdate(blocker, mutationSql, mutationParams);
             blocker.commit();
             var failure = assertThrows(java.util.concurrent.ExecutionException.class,
@@ -944,71 +1897,45 @@ class ImportMetadataRealMySqlTest {
         }
     }
 
-    private void awaitMutationFirstSourceWait(AtomicReference<Long> requester, long blockerId,
-                                              Future<?> service, String table) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12);
-        while (System.nanoTime() < deadline) {
-            assertFuturePending(service, table + " mutation-first service");
-            Long requesterId = requester.get();
-            if (requesterId != null) {
-                List<SourceLockWait> waits = jdbc.query("""
-                        SELECT req.INDEX_NAME, req.LOCK_DATA, req.LOCK_TYPE, req.LOCK_MODE, req.LOCK_STATUS,
-                               blk.LOCK_TYPE, blk.LOCK_MODE, blk.LOCK_STATUS
-                        FROM performance_schema.data_lock_waits w
-                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
-                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
-                        JOIN performance_schema.data_locks req
-                          ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
-                        JOIN performance_schema.data_locks blk
-                          ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
-                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=?
-                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=?
-                          AND req.INDEX_NAME=blk.INDEX_NAME AND req.LOCK_DATA=blk.LOCK_DATA
-                          AND req.LOCK_TYPE='RECORD' AND req.LOCK_STATUS='WAITING'
-                          AND req.LOCK_MODE IN ('X','X,REC_NOT_GAP')
-                          AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_STATUS='GRANTED'
-                          AND blk.LOCK_MODE IN ('X','X,REC_NOT_GAP')
-                        """, (rs, row) -> new SourceLockWait(rs.getString(1), rs.getString(2),
-                        rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
-                        rs.getString(7), rs.getString(8)), requesterId, blockerId, table, table);
-                for (SourceLockWait wait : waits) {
-                    if ("t_import_source_system".equals(table) && isExpectedSourceLock(wait)) {
-                        System.out.printf("NF06 mutation-first実wait確認: requester=%d blocker=%d schema=DATABASE() table=%s index=%s keyShape=%s request=%s/%s blocker=%s/%s%n",
-                                requesterId, blockerId, table, wait.indexName(),
-                                "PRIMARY".equals(wait.indexName()) ? "sourceId" : "(tenantId,sourceId)",
-                                wait.requestType(), wait.requestMode(), wait.blockerType(), wait.blockerMode());
-                        return;
-                    }
-                    if (!"t_import_source_system".equals(table)
-                            && "PRIMARY".equals(wait.indexName())
-                            && wait.lockData() != null) {
-                        System.out.printf("NF06 mutation-first実wait確認: requester=%d blocker=%d schema=DATABASE() table=%s index=%s request=%s/%s blocker=%s/%s%n",
-                                requesterId, blockerId, table, wait.indexName(), wait.requestType(),
-                                wait.requestMode(), wait.blockerType(), wait.blockerMode());
-                        return;
-                    }
-                }
-            }
-            Thread.sleep(25);
-        }
-        throw new AssertionError(table + " mutation-first serviceの指定record lock waitを確認できませんでした: "
-                + "transaction-bound requester=" + requester.get() + ", blocker=" + blockerId
-                + "; source index candidates=PRIMARY(sourceId),uk_import_source_tenant_id(tenantId,sourceId)");
-    }
-
     private Object assertServiceCommitsBeforeMutation(GatePause pause, String table, String mutationSql,
                                                      Object[] mutationParams,
                                                      java.util.concurrent.Callable<?> serviceAction) throws Exception {
-        return assertServiceCommitsBeforeMutation(pause, table, mutationSql, mutationParams, serviceAction, "PRIMARY");
+        return assertServiceCommitsBeforeMutation(pause, table, mutationSql, mutationParams, serviceAction,
+                "PRIMARY", null, false);
     }
 
     private Object assertServiceCommitsBeforeMutation(GatePause pause, String table, String mutationSql,
                                                      Object[] mutationParams,
                                                      java.util.concurrent.Callable<?> serviceAction,
-                                                     String lockIndex) throws Exception {
+                                                     boolean expectPostCommitDenial) throws Exception {
+        return assertServiceCommitsBeforeMutation(pause, table, mutationSql, mutationParams, serviceAction,
+                "PRIMARY", null, expectPostCommitDenial);
+    }
+
+    private Object assertServiceCommitsBeforeMutation(GatePause pause, String table, String mutationSql,
+                                                     Object[] mutationParams,
+                                                     java.util.concurrent.Callable<?> serviceAction,
+                                                     String expectedLockData) throws Exception {
+        return assertServiceCommitsBeforeMutation(pause, table, mutationSql, mutationParams, serviceAction,
+                "PRIMARY", expectedLockData, false);
+    }
+
+    private Object assertServiceCommitsBeforeMutation(GatePause pause, String table, String mutationSql,
+                                                     Object[] mutationParams,
+                                                     java.util.concurrent.Callable<?> serviceAction,
+                                                     String lockIndex, String expectedLockData) throws Exception {
+        return assertServiceCommitsBeforeMutation(pause, table, mutationSql, mutationParams, serviceAction,
+                lockIndex, expectedLockData, false);
+    }
+
+    private Object assertServiceCommitsBeforeMutation(GatePause pause, String table, String mutationSql,
+                                                     Object[] mutationParams,
+                                                     java.util.concurrent.Callable<?> serviceAction,
+                                                     String lockIndex, String expectedLockData,
+                                                     boolean expectPostCommitDenial) throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(2);
         AtomicReference<Long> writerId = new AtomicReference<>();
+        Set<Future<?>> verifiedExpectedFailures = new java.util.HashSet<>();
         Future<?> service = null;
         Future<?> mutation = null;
         Throwable primaryFailure = null;
@@ -1016,12 +1943,21 @@ class ImportMetadataRealMySqlTest {
             service = pool.submit(() -> withActorContext(serviceAction));
             assertTrue(pause.entered.await(10, TimeUnit.SECONDS), "実serviceのwrite gateに到達しませんでした");
             assertGateRunsInReadCommittedTransaction(pause);
-            String lockData = permissionLockData(pause.connectionId.get(), table, lockIndex);
+            String lockData = expectedLockData == null
+                    ? permissionLockData(pause.connectionId.get(), table, lockIndex) : expectedLockData;
             mutation = pool.submit(() -> updateAndCommit(mutationSql, mutationParams, writerId));
             awaitTargetedWait(writerId, pause.connectionId, service, mutation,
                     table, lockIndex, "X,REC_NOT_GAP", lockData);
             pause.release.countDown();
-            Object result = service.get(10, TimeUnit.SECONDS);
+            Object result;
+            try {
+                result = service.get(10, TimeUnit.SECONDS);
+            } catch (java.util.concurrent.ExecutionException failure) {
+                if (!expectPostCommitDenial || !(failure.getCause() instanceof BusinessException denied)
+                        || denied.getCode() != 403) throw failure;
+                verifiedExpectedFailures.add(service);
+                result = null;
+            }
             mutation.get(10, TimeUnit.SECONDS);
             return result;
         } catch (Throwable failure) {
@@ -1029,10 +1965,12 @@ class ImportMetadataRealMySqlTest {
             throw failure;
         } finally {
             pause.release.countDown();
-            reportCleanupFailures("service-first resource fixture", awaitFutures(futures(service, mutation), pool, false),
+            reportCleanupFailures("service-first resource fixture", awaitFutures(futures(service, mutation), pool, false,
+                    verifiedExpectedFailures),
                     primaryFailure);
         }
     }
+
     private long assertSourceMutationWaitsForCandidate(GatePause pause, String mutationSql,
                                                        Object[] mutationParams,
                                                        java.util.concurrent.Callable<Long> serviceAction) throws Exception {
@@ -1047,9 +1985,7 @@ class ImportMetadataRealMySqlTest {
             assertGateRunsInReadCommittedTransaction(pause);
             mutation = pool.submit(() -> updateAndCommit(mutationSql, mutationParams, writerId));
             SourceLockWait observed = awaitSourceLockWait(writerId, pause.connectionId, service, mutation);
-            System.out.printf("NF06 source行lock wait確認: index=%s keyShape=%s request=%s/%s blocker=%s/%s%n",
-                    observed.indexName(), "PRIMARY".equals(observed.indexName()) ? "sourceId" : "(tenant_id,sourceId)",
-                    observed.requestType(), observed.requestMode(), observed.blockerType(), observed.blockerMode());
+            logSourceLockWait("source mutation waiting on candidate", observed);
             pause.release.countDown();
             long result = service.get(10, TimeUnit.SECONDS);
             mutation.get(10, TimeUnit.SECONDS);
@@ -1073,7 +2009,8 @@ class ImportMetadataRealMySqlTest {
             Long requesterId = requester.get(), blockerId = blocker.get();
             if (requesterId != null && blockerId != null) {
                 List<SourceLockWait> waits = jdbc.query("""
-                        SELECT req.INDEX_NAME, req.LOCK_DATA, req.LOCK_TYPE, req.LOCK_MODE, req.LOCK_STATUS,
+                        SELECT wt.PROCESSLIST_ID, bt.PROCESSLIST_ID, req.INDEX_NAME, req.LOCK_DATA,
+                               req.LOCK_TYPE, req.LOCK_MODE, req.LOCK_STATUS,
                                blk.LOCK_TYPE, blk.LOCK_MODE, blk.LOCK_STATUS
                         FROM performance_schema.data_lock_waits w
                         JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
@@ -1090,9 +2027,9 @@ class ImportMetadataRealMySqlTest {
                           AND req.LOCK_MODE IN ('X','X,REC_NOT_GAP')
                           AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_STATUS='GRANTED'
                           AND blk.LOCK_MODE IN ('X','X,REC_NOT_GAP')
-                        """, (rs, row) -> new SourceLockWait(rs.getString(1), rs.getString(2),
+                        """, (rs, row) -> new SourceLockWait(rs.getLong(1), rs.getLong(2),
                         rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
-                        rs.getString(7), rs.getString(8)), requesterId, blockerId);
+                        rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10)), requesterId, blockerId);
                 for (SourceLockWait wait : waits) {
                     if (isExpectedSourceLock(wait)) return wait;
                 }
@@ -1102,6 +2039,55 @@ class ImportMetadataRealMySqlTest {
         throw new AssertionError("candidate gate保持中のsource行ロック待機が確認できませんでした: "
                 + "requester/blocker=" + requester.get() + "/" + blocker.get()
                 + "; 許可index=PRIMARY(sourceId),uk_import_source_tenant_id(tenant_id,sourceId)");
+    }
+
+    private SourceLockWait awaitSourceLockWaitFromBlocker(long blockerId, AtomicReference<Long> requesterConnectionId,
+                                                          Future<?> requester,
+                                                          Future<?> blocker, String requesterLabel) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            assertFuturePending(blocker, "append service");
+            assertFuturePending(requester, requesterLabel);
+            List<SourceLockWait> waits = jdbc.query("""
+                    SELECT wt.PROCESSLIST_ID, bt.PROCESSLIST_ID, req.INDEX_NAME, req.LOCK_DATA,
+                           req.LOCK_TYPE, req.LOCK_MODE, req.LOCK_STATUS,
+                           blk.LOCK_TYPE, blk.LOCK_MODE, blk.LOCK_STATUS
+                    FROM performance_schema.data_lock_waits w
+                    JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
+                    JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                    JOIN performance_schema.data_locks req
+                      ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                    JOIN performance_schema.data_locks blk
+                      ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                    WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
+                      AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='t_import_source_system'
+                      AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='t_import_source_system'
+                      AND req.INDEX_NAME=blk.INDEX_NAME AND req.LOCK_DATA=blk.LOCK_DATA
+                      AND req.LOCK_TYPE='RECORD' AND req.LOCK_STATUS='WAITING'
+                      AND req.LOCK_MODE IN ('X','X,REC_NOT_GAP')
+                      AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_STATUS='GRANTED'
+                      AND blk.LOCK_MODE IN ('X','X,REC_NOT_GAP')
+                    """, (rs, row) -> new SourceLockWait(rs.getLong(1), rs.getLong(2),
+                    rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
+                    rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10)),
+                    requesterConnectionId.get(), blockerId);
+            for (SourceLockWait wait : waits) {
+                if (wait.requesterConnectionId() == requesterConnectionId.get() && isExpectedSourceLock(wait)) return wait;
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError(requesterLabel + "のsource行wait graphを確認できませんでした: requester="
+                + requesterConnectionId.get() + ", blocker=" + blockerId
+                + "; 許可index=PRIMARY(sourceId),uk_import_source_tenant_id(tenant_id,sourceId)");
+    }
+
+    private void logSourceLockWait(String label, SourceLockWait observed) {
+        String keyShape = "PRIMARY".equals(observed.indexName()) ? "sourceId" : "(tenant_id,sourceId)";
+        System.out.printf("NF06 source行lock wait確認: operation=%s requester=%d blocker=%d index=%s keyShape=%s "
+                        + "request=%s/%s/%s blockerLock=%s/%s/%s%n",
+                label, observed.requesterConnectionId(), observed.blockerConnectionId(), observed.indexName(), keyShape,
+                observed.requestType(), observed.requestMode(), observed.requestStatus(), observed.blockerType(),
+                observed.blockerMode(), observed.blockerStatus());
     }
 
     private boolean isExpectedSourceLock(SourceLockWait wait) {
@@ -1129,9 +2115,11 @@ class ImportMetadataRealMySqlTest {
         return value;
     }
 
-    private record SourceLockWait(String indexName, String lockData, String requestType, String requestMode,
+    private record SourceLockWait(long requesterConnectionId, long blockerConnectionId, String indexName,
+                                  String lockData, String requestType, String requestMode,
                                   String requestStatus, String blockerType, String blockerMode,
                                   String blockerStatus) { }
+
     private void updateAndCommit(String sql, Object[] params, AtomicReference<Long> connectionId) {
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
@@ -1275,11 +2263,15 @@ class ImportMetadataRealMySqlTest {
     private record BlockedLease(Connection blocker, ExecutorService pool, Future<?> service) { }
 
     private GatePause pauseRealWriteGate() {
+        return pauseRealWriteGateAt(1);
+    }
+
+    private GatePause pauseRealWriteGateAt(int invocationToPause) {
         GatePause pause = new GatePause();
-        AtomicBoolean first = new AtomicBoolean();
+        AtomicInteger invocationCount = new AtomicInteger();
         doAnswer(invocation -> {
             ImportAuthorizedContext authorized = (ImportAuthorizedContext) invocation.callRealMethod();
-            if (first.compareAndSet(false, true)) {
+            if (invocationCount.incrementAndGet() == invocationToPause) {
                 pause.connectionId.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
                 pause.transactionActive.set(TransactionSynchronizationManager.isActualTransactionActive());
                 pause.isolation.set(jdbc.queryForObject("SELECT @@transaction_isolation", String.class));
@@ -1407,6 +2399,56 @@ class ImportMetadataRealMySqlTest {
         }
         throw new AssertionError("実service gateに対する指定permission lock waitを確認できませんでした: "
                 + safeWaitDetails(requester.get(), blocker.get()));
+    }
+
+    private void awaitValidationRowWait(AtomicReference<Long> requester, AtomicReference<Long> blocker,
+                                       Future<?> append, long rowNumber, long runId, long rowId) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            assertFuturePending(append, "REQUIRES_NEW append row lock待機");
+            Long requesterId = requester.get(), blockerId = blocker.get();
+            if (requesterId != null && blockerId != null) {
+                List<String> keys = jdbc.query("""
+                        SELECT req.LOCK_DATA
+                        FROM performance_schema.data_lock_waits w
+                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
+                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                        JOIN performance_schema.data_locks req
+                          ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                        JOIN performance_schema.data_locks blk
+                          ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
+                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='t_import_validation_row'
+                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='t_import_validation_row'
+                          AND req.INDEX_NAME='uk_import_row_run_number' AND blk.INDEX_NAME=req.INDEX_NAME
+                          AND req.LOCK_DATA=blk.LOCK_DATA
+                          AND req.LOCK_TYPE='RECORD' AND req.LOCK_STATUS='WAITING'
+                          AND req.LOCK_MODE IN ('X','X,REC_NOT_GAP')
+                          AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_STATUS='GRANTED'
+                          AND blk.LOCK_MODE IN ('X','X,REC_NOT_GAP')
+                        """, (rs, row) -> rs.getString(1), requesterId, blockerId);
+                for (String key : keys) {
+                    if (isValidationRowLockData(key, runId, rowNumber, rowId)) {
+                        System.out.printf("NF06 row lock wait確認: requester=%d blocker=%d schema=DATABASE() table=t_import_validation_row index=uk_import_row_run_number keyShape=(tenantId,runId,rowNumber[,primaryId]) mode=record-X WAITING/GRANTED%n",
+                                requesterId, blockerId);
+                        return;
+                    }
+                }
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError("実REQUIRES_NEW transactionの指定validation row lock waitを確認できませんでした: "
+                + safeWaitDetails(requester.get(), blocker.get()));
+    }
+
+    private boolean isValidationRowLockData(String lockData, long runId, long rowNumber, long rowId) {
+        if (lockData == null) return false;
+        String[] parts = lockData.split(",", -1);
+        if (parts.length != 3 && parts.length != 4) return false;
+        if (!tenantId.equals(unquoteLockValue(parts[0].trim()))
+                || !Long.toString(runId).equals(unquoteLockValue(parts[1].trim()))
+                || !Long.toString(rowNumber).equals(unquoteLockValue(parts[2].trim()))) return false;
+        return parts.length == 3 || Long.toString(rowId).equals(unquoteLockValue(parts[3].trim()));
     }
 
     private List<Future<?>> futures(Future<?>... values) {
@@ -1541,24 +2583,32 @@ class ImportMetadataRealMySqlTest {
 
     private long awaitExactLockWait(long blockerId, String table, String index, String lockData,
                                    Future<?> operation, String label) throws Exception {
+        return awaitExactLockWait(null, blockerId, table, index, lockData, operation, label);
+    }
+
+    private long awaitExactLockWait(AtomicReference<Long> expectedRequesterId, long blockerId, String table,
+                                   String index, String lockData, Future<?> operation, String label) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12);
         while (System.nanoTime() < deadline) {
             assertFuturePending(operation, label);
-            List<Long> requesters = jdbc.query("""
+            Long capturedRequesterId = expectedRequesterId == null ? null : expectedRequesterId.get();
+            long requesterFilter = capturedRequesterId == null ? 0L : capturedRequesterId;
+            List<Long> requesters = capturedRequesterId == null && expectedRequesterId != null ? List.of() : jdbc.query("""
                     SELECT wt.PROCESSLIST_ID
                     FROM performance_schema.data_lock_waits w
                     JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
                     JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
                     JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
                     JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                    WHERE wt.PROCESSLIST_ID<>? AND bt.PROCESSLIST_ID=?
+                    WHERE (?=0 OR wt.PROCESSLIST_ID=?) AND wt.PROCESSLIST_ID<>? AND bt.PROCESSLIST_ID=?
                       AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=? AND req.INDEX_NAME=?
                       AND req.LOCK_TYPE='RECORD' AND req.LOCK_MODE='X,REC_NOT_GAP' AND req.LOCK_STATUS='WAITING'
                       AND req.LOCK_DATA=?
                       AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=? AND blk.INDEX_NAME=?
                       AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_MODE='X,REC_NOT_GAP' AND blk.LOCK_STATUS='GRANTED'
                       AND blk.LOCK_DATA=?
-                    """, (rs, row) -> rs.getLong(1), blockerId, blockerId, table, index, lockData,
+                    """, (rs, row) -> rs.getLong(1), requesterFilter, requesterFilter,
+                    blockerId, blockerId, table, index, lockData,
                     table, index, lockData);
             if (!requesters.isEmpty()) return requesters.get(0);
             Thread.sleep(25);
@@ -2008,6 +3058,12 @@ class ImportMetadataRealMySqlTest {
 
     private List<Throwable> awaitFutures(List<? extends Future<?>> futures, ExecutorService pool,
                                          boolean expectedRegistrationDenial) {
+        return awaitFutures(futures, pool, expectedRegistrationDenial, Set.of());
+    }
+
+    private List<Throwable> awaitFutures(List<? extends Future<?>> futures, ExecutorService pool,
+                                         boolean expectedRegistrationDenial,
+                                         Set<? extends Future<?>> verifiedExpectedFailures) {
         List<Throwable> failures = new java.util.ArrayList<>();
         java.util.Set<Future<?>> unobserved = new java.util.HashSet<>(futures);
         for (Future<?> future : futures) {
@@ -2017,7 +3073,8 @@ class ImportMetadataRealMySqlTest {
             } catch (java.util.concurrent.ExecutionException failure) {
                 unobserved.remove(future);
                 Throwable cause = failure.getCause() == null ? failure : failure.getCause();
-                if (!(expectedRegistrationDenial && cause instanceof BusinessException denied
+                if (!verifiedExpectedFailures.contains(future)
+                        && !(expectedRegistrationDenial && cause instanceof BusinessException denied
                         && denied.getCode() == 403)) failures.add(cause);
             } catch (Throwable failure) {
                 if (!(failure instanceof java.util.concurrent.TimeoutException)) unobserved.remove(future);
@@ -2040,7 +3097,8 @@ class ImportMetadataRealMySqlTest {
                 future.get(0, TimeUnit.NANOSECONDS);
             } catch (java.util.concurrent.ExecutionException failure) {
                 Throwable cause = failure.getCause() == null ? failure : failure.getCause();
-                if (!(expectedRegistrationDenial && cause instanceof BusinessException denied
+                if (!verifiedExpectedFailures.contains(future)
+                        && !(expectedRegistrationDenial && cause instanceof BusinessException denied
                         && denied.getCode() == 403)) failures.add(cause);
             } catch (Throwable failure) {
                 failures.add(failure);
@@ -2201,6 +3259,36 @@ class ImportMetadataRealMySqlTest {
                 Integer.class, documentId, documentVersionId, actorUserId);
     }
 
+    private void captureActualAuthorizationConnection() {
+        doAnswer(invocation -> {
+            Object result = invocation.callRealMethod();
+            AtomicReference<Long> captured = actualAuthorizationConnection.get();
+            if (captured != null && TransactionSynchronizationManager.isActualTransactionActive()) {
+                captured.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                AtomicReference<String> isolation = actualAuthorizationIsolation.get();
+                if (isolation != null) isolation.set(jdbc.queryForObject("SELECT @@transaction_isolation", String.class));
+            }
+            return result;
+        }).when(metadataAuthorization).requireCurrentAuthorization();
+    }
+
+    private <T> T withCapturedAuthorizationConnection(AtomicReference<Long> captured,
+                                                       java.util.concurrent.Callable<T> operation) {
+        return withCapturedAuthorizationConnection(captured, null, operation);
+    }
+
+    private <T> T withCapturedAuthorizationConnection(AtomicReference<Long> captured,
+                                                       AtomicReference<String> isolation,
+                                                       java.util.concurrent.Callable<T> operation) {
+        actualAuthorizationConnection.set(captured);
+        actualAuthorizationIsolation.set(isolation);
+        try { return withActorContext(operation); }
+        finally {
+            actualAuthorizationConnection.remove();
+            actualAuthorizationIsolation.remove();
+        }
+    }
+
     private void installPrincipal(String principalTenant, SimpleGrantedAuthority authority) {
         var principal = new LoginUser(actorUser, List.of(authority), principalTenant);
         SecurityContextHolder.getContext().setAuthentication(
@@ -2231,6 +3319,11 @@ class ImportMetadataRealMySqlTest {
     static class TestDocumentStorage implements DocumentStorage {
         private final Map<String, byte[]> objects = new ConcurrentHashMap<>();
         private final AtomicInteger opens = new AtomicInteger();
+        private final AtomicInteger failAtOpen = new AtomicInteger(-1);
+        private final AtomicInteger failAfterBytes = new AtomicInteger(-1);
+        private final AtomicInteger changeAtOpen = new AtomicInteger(-1);
+        private final AtomicInteger changeOffset = new AtomicInteger(-1);
+        private final AtomicInteger changeValue = new AtomicInteger(-1);
 
         @Override public void put(String key, InputStream content, boolean quarantine) {
             try { objects.put(key, content.readAllBytes()); }
@@ -2241,8 +3334,38 @@ class ImportMetadataRealMySqlTest {
         @Override public InputStream open(String key) {
             byte[] content = objects.get(key);
             if (content == null) throw new IllegalStateException("synthetic storage object is missing");
-            opens.incrementAndGet();
-            return new ByteArrayInputStream(content.clone());
+            int openNumber = opens.incrementAndGet();
+            byte[] openedContent = content.clone();
+            if (openNumber == changeAtOpen.get()) {
+                int offset = changeOffset.get();
+                if (offset < 0 || offset >= openedContent.length) throw new IllegalStateException("synthetic change offset is invalid");
+                openedContent[offset] = (byte) changeValue.get();
+                changeAtOpen.set(-1);
+            }
+            ByteArrayInputStream source = new ByteArrayInputStream(openedContent);
+            if (openNumber != failAtOpen.get()) return source;
+            int limit = failAfterBytes.get();
+            failAtOpen.set(-1);
+            failAfterBytes.set(-1);
+            return new InputStream() {
+                private int read;
+                private void failIfAtLimit() throws IOException {
+                    if (read >= limit) throw new IOException("synthetic source read failure");
+                }
+                @Override public int read() throws IOException {
+                    failIfAtLimit();
+                    int value = source.read();
+                    if (value >= 0) read++;
+                    return value;
+                }
+                @Override public int read(byte[] bytes, int offset, int length) throws IOException {
+                    failIfAtLimit();
+                    int count = source.read(bytes, offset, Math.min(length, limit - read));
+                    if (count > 0) read += count;
+                    return count;
+                }
+                @Override public void close() throws IOException { source.close(); }
+            };
         }
         @Override public byte[] readAll(String key) throws IOException {
             byte[] content = objects.get(key);
@@ -2251,6 +3374,13 @@ class ImportMetadataRealMySqlTest {
         }
         @Override public void delete(String key) { objects.remove(key); }
         int openCount() { return opens.get(); }
-        void resetOpenCount() { opens.set(0); }
+        void resetOpenCount() { opens.set(0); failAtOpen.set(-1); failAfterBytes.set(-1); changeAtOpen.set(-1); }
+        void failOpenAt(int openNumber, int afterBytes) {
+            failAtOpen.set(openNumber);
+            failAfterBytes.set(afterBytes);
+        }
+        void changeAtOpen(int openNumber, int offset, byte value) {
+            changeOffset.set(offset); changeValue.set(value); changeAtOpen.set(openNumber);
+        }
     }
 }

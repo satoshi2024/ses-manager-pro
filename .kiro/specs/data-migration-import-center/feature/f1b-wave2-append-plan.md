@@ -35,7 +35,7 @@
 - source parsing中にwrite lockを保持しない。各batchのcommit transactionは`READ_COMMITTED / REQUIRES_NEW`を使う。
 - lock順はwave1/F1b planと同じ`source system → document → document version → IMPORT_JOB link ID順 → job → mapping → run → row number順`。必要ないtableだけをskipする。
 - exact prefix readが終わり、chunkを構築した後、write transaction内でresource/snapshotを再lockし、job PRIMARY rowを最後までfenceとして保持する。row rangeをascendingでlock/readする。最後に待つACL row lockの後で現actor/tenant-bound exact permissionを解決し、最後にDB primaryの`CURRENT_TIMESTAMP(6)`を読みlease expiryを判断する。
-- ACL/snapshot checksはwave1と同じくsource ACTIVE/version、document exact tenant/legal entity/version/CLEAN/hash/hold/retention/FileScope、正確なIMPORT_JOB link、mapping canonical SHA、job state=`VALIDATING`/version/active pointer、run state=`BUILDING`/active slot/current fingerprint、run/job input equality、lease owner/generation/expiryを含む。どれかの変化は403/409としzero writeにする。
+- ACL/snapshot checksはwave1と同じくsource ACTIVE/version、document exact tenant/legal entity/version/CLEAN/hash/hold/retention/FileScope、正確なIMPORT_JOB link、mapping canonical SHA、job state=`VALIDATING`/version/active pointer、run state=`BUILDING`/active slot/current fingerprint、run/job input equality、lease owner/generation/expiryを含む。どれかの変化は403/409で拒否し、失敗したappend transactionではvalidation rowを書き込まない。`appendRemaining`の事前renewが別transactionですでにcommitしたlease/version更新や、先行chunkのrowは残り得る。
 - 同じchunk再送時も同じauth gate、resource revalidation、lease/fence検証を毎回実施する。期限切れownerは既存一致rowを読めても成功扱いしない。
 - 既存同run/row_numberがあればsource hash/fingerprint/disposition/finding bytes/row commitmentの全一致のみ再送一致として認める。一項目差異、chunk内重複/逆順、row key uniqueness競合は409。all-same existing retryはno-op。partial existing rowsは全rowが再検証済みprefixとの一致であり、新rowがその連続suffixである場合だけsuffix appendを許可する。それ以外の混在/穴は拒否する。
 - 新規rowは最大250件を1 transactionでbatch insert。どのrowでもinsert count/constraint/failureが不正なら全batch rollback。外部へSQL deadlock、lock wait timeout、connection failureを403/409へmapしない。
@@ -47,7 +47,7 @@
 1. 0/1/249/250/251境界、249+EOF tail、blank row gap、250ごとのchunk順序。
 2. 同一chunk再送は全一致でno-op、各field（number/hash/fingerprint/disposition/finding/commit）を独立に変えたretryは409/無変更。未知finding code、oversize finding bytes、row number非昇順/重複、251行は拒否。
 3. prefixをpage境界(1,249,250,251)で照合、duplicate-key stateをrow単位で復元、prefix確定前にはsuffix insertがないこと、prefix不足/余分/変更/順序違い/EOF不足を拒否。blank line由来のrow number gapだけは成功。
-4. batch中insert failureを注入し全行rollback、先に成功済みchunkは保持しBUILDINGのままで次回replay可能。非BUILDING、stale generation、expired lease、cross-tenant、snapshot/mapping/policy driftはzero write。
+4. batch中insert failureを注入し全行rollback、先に成功済みchunkは保持しBUILDINGのままで次回replay可能。非BUILDING、stale generation、expired lease、cross-tenant、snapshot/mapping/policy driftでは失敗したchunkのvalidation rowを追加しない。事前renewのlease/version更新と先行成功chunkは保持され得る。
 5. conversion failureは固定codeだけを保存、message/raw/canonical PII/external key/amountはSQL row/DTO/logに出ないこと。
 6. source SHA mismatch、decoder/parser/read exceptionはappend停止し、既commit prefixを編集/削除しない。empty sourceと0 row batchはcompletion扱いしない。
 

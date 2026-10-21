@@ -31,6 +31,7 @@ class ImportValidationLifecycleServiceTest {
     private final ImportAuthorizedContext context = new ImportAuthorizedContext(TENANT, 41, 77);
     private JdbcTemplate jdbc;
     private ImportValidationLifecycleService service;
+    private ImportMetadataAuthorizationService authorization;
 
     @BeforeEach
     void setUp() {
@@ -53,7 +54,8 @@ class ImportValidationLifecycleServiceTest {
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'MAPPED',1,0)
                 """, TENANT, JOB, 2L, 3L, "CUSTOMER", "ses-import-v1", "UTF8", SOURCE, "77", 3L, 4L, 1,
                 SOURCE, 5L, 1, MAPPING_HASH);
-        service = new ImportValidationLifecycleService(jdbc, mockAuthorization(), mock(DocumentService.class),
+        authorization = mockAuthorization();
+        service = new ImportValidationLifecycleService(jdbc, authorization, mock(DocumentService.class),
                 new DataSourceTransactionManager(ds));
     }
 
@@ -70,9 +72,11 @@ class ImportValidationLifecycleServiceTest {
         assertEquals(started, state());
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_run WHERE tenant_id=? AND job_id=?", Integer.class, TENANT, JOB));
 
+        State beforeRenew = state();
         var renewed = service.renew(lease);
         assertEquals(1L, renewed.generation());
-        assertTrue(renewed.expiresAt().after(lease.expiresAt()));
+        assertFalse(renewed.expiresAt().before(lease.expiresAt()), "期限は同tickを許容し非減少です");
+        assertEquals(beforeRenew.version + 1, state().version, "expiryが同値でもrenew versionは厳密に+1です");
         jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?", TENANT, JOB);
         var takeover = service.beginTakeover(JOB, lease.runId());
         var taken = service.takeOver(takeover);
@@ -94,6 +98,94 @@ class ImportValidationLifecycleServiceTest {
         var afterFirstAbort = state();
         service.abort(taken);
         assertEquals(afterFirstAbort, state(), "commit response-loss retryは状態を変えず成功する");
+    }
+
+    @Test
+    void 同じ期限でcommitされたrenewは応答喪失後の旧grant再送で回復する() throws Exception {
+        var manager = new LostCommitManager(jdbc.getDataSource());
+        var responseLostService = new ImportValidationLifecycleService(jdbc, mockAuthorization(),
+                mock(DocumentService.class), manager);
+        var initial = responseLostService.start(responseLostService.beginStart(JOB));
+        Timestamp futureExpiry = jdbc.queryForObject("SELECT TIMESTAMPADD(SECOND,60,CURRENT_TIMESTAMP(6))",
+                Timestamp.class);
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=? WHERE tenant_id=? AND id=?", futureExpiry, TENANT, JOB);
+        var originalGrant = reflectedLease(initial, futureExpiry);
+        manager.loseNextCommit();
+
+        assertThrows(TransactionSystemException.class, () -> responseLostService.renew(originalGrant));
+        State committed = state();
+        assertEquals(futureExpiry, committed.expiresAt, "SQL更新は既存の将来期限を縮めません");
+        assertEquals(originalJobVersion(originalGrant) + 1, committed.version,
+                "期限が同値でもcommitごとにversionは1増加します");
+
+        var recovered = responseLostService.renew(originalGrant);
+        assertEquals(futureExpiry, recovered.expiresAt());
+        assertEquals(committed, state(), "旧grant retryは既存commitを返し、期限/versionを再更新しません");
+        var current = recovered;
+        for (int renewal = 0; renewal < 3; renewal++) {
+            State beforeRenewal = state();
+            current = responseLostService.renew(current);
+            assertEquals(futureExpiry, current.expiresAt(), "将来期限がある場合にrenewを繰り返しても期限を累積延長しません");
+            assertEquals(beforeRenewal.version + 1, state().version, "成功renewごとにversionは厳密に+1です");
+        }
+        State beforeOldRetry = state();
+        var originalRetry = responseLostService.renew(originalGrant);
+        assertEquals(futureExpiry, originalRetry.expiresAt());
+        assertEquals(beforeOldRetry, state(), "最初のgrant retryは期限/versionを変更しません");
+        responseLostService.abort(current);
+    }
+
+    @Test
+    void 通常のforwardRenewはnowPlus30へ期限を厳密に延長する() throws Exception {
+        var initial = service.start(service.beginStart(JOB));
+        Timestamp shortExpiry = jdbc.queryForObject("SELECT TIMESTAMPADD(SECOND,10,CURRENT_TIMESTAMP(6))",
+                Timestamp.class);
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=? WHERE tenant_id=? AND id=?", shortExpiry, TENANT, JOB);
+        var grant = reflectedLease(initial, shortExpiry);
+        State before = state();
+
+        var renewed = service.renew(grant);
+        assertTrue(renewed.expiresAt().after(shortExpiry), "期限はDB現在時刻+30秒へ進みます");
+        assertEquals(before.version + 1, state().version);
+        service.abort(renewed);
+    }
+
+    @Test
+    void renewは期限owner世代run入力とACLのdriftを拒否する() throws Exception {
+        var lease = service.start(service.beginStart(JOB));
+        jdbc.update("UPDATE t_import_job SET lease_owner='other-worker' WHERE tenant_id=? AND id=?", TENANT, JOB);
+        assertRenewConflictWithoutWrites(lease, "owner drift");
+        jdbc.update("UPDATE t_import_job SET lease_owner=? WHERE tenant_id=? AND id=?", worker(lease), TENANT, JOB);
+
+        jdbc.update("UPDATE t_import_job SET lease_generation=lease_generation+1 WHERE tenant_id=? AND id=?", TENANT, JOB);
+        assertRenewConflictWithoutWrites(lease, "generation drift");
+        jdbc.update("UPDATE t_import_job SET lease_generation=? WHERE tenant_id=? AND id=?", lease.generation(), TENANT, JOB);
+
+        byte[] changedSha = hash("changed-source");
+        jdbc.update("UPDATE t_import_job SET source_sha256=? WHERE tenant_id=? AND id=?", changedSha, TENANT, JOB);
+        assertRenewConflictWithoutWrites(lease, "job input drift");
+        jdbc.update("UPDATE t_import_job SET source_sha256=? WHERE tenant_id=? AND id=?", SOURCE, TENANT, JOB);
+
+        byte[] originalFingerprint = jdbc.queryForObject("SELECT validation_fingerprint FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                byte[].class, TENANT, JOB, lease.runId());
+        jdbc.update("UPDATE t_import_validation_run SET validation_fingerprint=? WHERE tenant_id=? AND job_id=? AND id=?",
+                hash("changed-run-input"), TENANT, JOB, lease.runId());
+        assertRenewConflictWithoutWrites(lease, "run input drift");
+        jdbc.update("UPDATE t_import_validation_run SET validation_fingerprint=? WHERE tenant_id=? AND job_id=? AND id=?",
+                originalFingerprint, TENANT, JOB, lease.runId());
+
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
+                TENANT, JOB);
+        assertRenewConflictWithoutWrites(lease, "expired lease");
+
+        Timestamp validExpiry = jdbc.queryForObject("SELECT TIMESTAMPADD(SECOND,60,CURRENT_TIMESTAMP(6))", Timestamp.class);
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=? WHERE tenant_id=? AND id=?", validExpiry, TENANT, JOB);
+        var matchingAclLease = reflectedLease(lease, validExpiry);
+        org.mockito.Mockito.clearInvocations(authorization);
+        when(authorization.requireCurrentAuthorizationForWrite(any()))
+                .thenThrow(BusinessException.of(403, "error.forbidden"));
+        assertRenewRejectedWithoutWrites(matchingAclLease, 403, service, "current ACL denial");
+        org.mockito.Mockito.verify(authorization).requireCurrentAuthorizationForWrite(context);
     }
 
     @Test
@@ -129,6 +221,7 @@ class ImportValidationLifecycleServiceTest {
         var manager = new LostCommitManager(jdbc.getDataSource());
         var lostResponseService = new ImportValidationLifecycleService(jdbc, mockAuthorization(), mock(DocumentService.class), manager);
         var operation = lostResponseService.beginStart(JOB);
+        manager.loseNextCommit();
         assertThrows(TransactionSystemException.class, () -> lostResponseService.start(operation));
         var afterCommit = state();
         var retried = lostResponseService.start(operation);
@@ -189,6 +282,62 @@ class ImportValidationLifecycleServiceTest {
                         rs.getTimestamp(5), rs.getObject(6, Long.class), rs.getObject(7, Long.class)) : null, TENANT, JOB);
     }
 
+    private ImportValidationLifecycleService.RunLease reflectedLease(
+            ImportValidationLifecycleService.RunLease source, Timestamp expiry) throws Exception {
+        var inputField = source.getClass().getDeclaredField("input"); inputField.setAccessible(true);
+        var instanceField = source.getClass().getDeclaredField("instanceId"); instanceField.setAccessible(true);
+        var workerField = source.getClass().getDeclaredField("workerId"); workerField.setAccessible(true);
+        var generationField = source.getClass().getDeclaredField("generation"); generationField.setAccessible(true);
+        var versionField = source.getClass().getDeclaredField("jobVersion"); versionField.setAccessible(true);
+        var constructor = source.getClass().getDeclaredConstructor(String.class, inputField.getType(), long.class,
+                String.class, long.class, long.class, Timestamp.class);
+        constructor.setAccessible(true);
+        return (ImportValidationLifecycleService.RunLease) constructor.newInstance(instanceField.get(source),
+                inputField.get(source), source.runId(), workerField.get(source), generationField.getLong(source),
+                versionField.getLong(source), expiry);
+    }
+
+    private long originalJobVersion(ImportValidationLifecycleService.RunLease grant) throws Exception {
+        var field = grant.getClass().getDeclaredField("jobVersion"); field.setAccessible(true);
+        return field.getLong(grant);
+    }
+
+    private String worker(ImportValidationLifecycleService.RunLease grant) throws Exception {
+        var field = grant.getClass().getDeclaredField("workerId"); field.setAccessible(true);
+        return (String) field.get(grant);
+    }
+
+    private void assertRenewConflictWithoutWrites(ImportValidationLifecycleService.RunLease grant, String reason) {
+        assertRenewRejectedWithoutWrites(grant, 409, service, reason);
+    }
+
+    private void assertRenewRejectedWithoutWrites(ImportValidationLifecycleService.RunLease grant, int expectedCode,
+                                                   ImportValidationLifecycleService target, String reason) {
+        var before = renewalSnapshot(grant.runId());
+        BusinessException failure = assertThrows(BusinessException.class, () -> target.renew(grant), reason);
+        assertEquals(expectedCode, failure.getCode(), reason + " status");
+        assertEquals(before, renewalSnapshot(grant.runId()), reason + " state unchanged");
+    }
+
+    private RenewalSnapshot renewalSnapshot(long runId) {
+        return jdbc.query("""
+                SELECT j.state,j.version_no,j.lease_owner,j.lease_generation,j.lease_expires_at,
+                  j.active_validation_run_id,j.current_validation_run_id,j.source_sha256,
+                  r.state,r.active_slot,r.last_resumed_lease_generation,r.validation_fingerprint
+                FROM t_import_job j JOIN t_import_validation_run r
+                  ON r.tenant_id=j.tenant_id AND r.job_id=j.id AND r.id=?
+                WHERE j.tenant_id=? AND j.id=?
+                """, rs -> rs.next() ? new RenewalSnapshot(
+                rs.getString(1), rs.getLong(2), rs.getString(3), rs.getLong(4), rs.getTimestamp(5),
+                rs.getObject(6, Long.class), rs.getObject(7, Long.class), hex(rs.getBytes(8)),
+                rs.getString(9), rs.getObject(10, Integer.class), rs.getLong(11), hex(rs.getBytes(12))) : null,
+                runId, TENANT, JOB);
+    }
+
+    private static String hex(byte[] value) {
+        return value == null ? null : HexFormat.of().formatHex(value);
+    }
+
     private static void schema(JdbcTemplate j) {
         j.execute("CREATE TABLE t_import_source_system(tenant_id VARCHAR(100),id BIGINT,version_no BIGINT,source_code VARCHAR(64),status VARCHAR(16),PRIMARY KEY(tenant_id,id))");
         j.execute("CREATE TABLE t_document(tenant_id VARCHAR(100),id BIGINT,legal_entity_id VARCHAR(100),legal_hold_flag INT,retention_until DATE,deleted_flag INT,PRIMARY KEY(tenant_id,id))");
@@ -210,9 +359,14 @@ class ImportValidationLifecycleServiceTest {
     private record State(String state, long version, String owner, long generation, Timestamp expiresAt,
                          Long activeRun, Long currentRun) { }
 
+    private record RenewalSnapshot(String jobState, long jobVersion, String owner, long generation,
+                                   Timestamp expiresAt, Long activeRun, Long currentRun, String sourceHash,
+                                   String runState, Integer activeSlot, long resumedGeneration, String runFingerprint) { }
+
     private static final class LostCommitManager extends DataSourceTransactionManager {
-        private final AtomicBoolean lose = new AtomicBoolean(true);
+        private final AtomicBoolean lose = new AtomicBoolean(false);
         private LostCommitManager(DataSource source) { super(source); }
+        private void loseNextCommit() { lose.set(true); }
         @Override protected void doCommit(DefaultTransactionStatus status) {
             super.doCommit(status);
             if (lose.compareAndSet(true, false)) throw new TransactionSystemException("commit response lost (test)");

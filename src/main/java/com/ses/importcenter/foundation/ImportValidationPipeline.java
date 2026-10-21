@@ -18,9 +18,27 @@ public final class ImportValidationPipeline {
     public RunSummary validate(InputStream input, String fileName, ImportEntity entity,
                                ImportEncoding encoding, ValidationContext context,
                                Consumer<ValidatedRow> rowConsumer) throws IOException {
+        return validateInternal(input, fileName, entity, encoding, context, null, rowConsumer);
+    }
+
+    /** immutable mappingを明示適用し、同一のcanonical conversion/finding規則を使う。 */
+    public RunSummary validateMapped(InputStream input, String fileName, ImportEntity entity,
+                                     ImportEncoding encoding, java.util.Map<String, String> sourceToCanonical,
+                                     ValidationContext context, Consumer<ValidatedRow> rowConsumer) throws IOException {
+        if (sourceToCanonical == null || sourceToCanonical.isEmpty()) {
+            throw new IllegalArgumentException("明示header mappingが必要です");
+        }
+        return validateInternal(input, fileName, entity, encoding, context,
+                java.util.Map.copyOf(sourceToCanonical), rowConsumer);
+    }
+
+    private RunSummary validateInternal(InputStream input, String fileName, ImportEntity entity,
+                                        ImportEncoding encoding, ValidationContext context,
+                                        java.util.Map<String, String> sourceToCanonical,
+                                        Consumer<ValidatedRow> rowConsumer) throws IOException {
         ValidationCounterAccumulator counters = new ValidationCounterAccumulator();
         ImportValidationSession session = new ImportValidationSession();
-        SesCsvParser.ParseSummary parsed = parser.parse(input, fileName, entity, encoding, sourceRow -> {
+        java.util.function.Consumer<SourceRow> validateRow = sourceRow -> {
             CanonicalImportRow canonical;
             try { canonical = CanonicalRowFactory.create(entity, sourceRow); }
             catch (RuntimeException failure) {
@@ -34,7 +52,10 @@ public final class ImportValidationPipeline {
             ValidatedRow result = validator.validate(canonical, context, session);
             counters.record(result);
             rowConsumer.accept(result);
-        });
+        };
+        SesCsvParser.ParseSummary parsed = sourceToCanonical == null
+                ? parser.parse(input, fileName, entity, encoding, validateRow)
+                : parser.parseMapped(input, fileName, entity, encoding, sourceToCanonical, validateRow);
         return new RunSummary(parsed, counters.snapshot(parsed.emptySkipped()));
     }
 
