@@ -107,6 +107,10 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         Engineer engineer = findEngineerInTenant(lcCase, tenantId);
         scopeService.assertCanEditTask(user, task, lcCase, engineer);
 
+        if ("DUAL_CONFIRMATION".equals(task.getEvidenceType())) {
+            throw BusinessException.of(409, "error.lifecycle.invalidStateTransition");
+        }
+
         if ("COMPLETED".equals(task.getStatus())) {
             return; // 認証・tenant・担当scope確認後に限り冪等成功
         }
