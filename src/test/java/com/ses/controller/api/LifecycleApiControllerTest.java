@@ -1,5 +1,7 @@
 package com.ses.controller.api;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.dto.lifecycle.CompleteLifecycleTaskCommand;
 import com.ses.dto.lifecycle.CreateLifecycleCaseCommand;
@@ -407,6 +409,6 @@ class LifecycleApiControllerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(409));
 
-        org.junit.jupiter.api.Assertions.assertEquals("IN_PROGRESS", lifecycleTaskMapper.selectById(task.getId()).getStatus());
+        assertEquals("IN_PROGRESS", lifecycleTaskMapper.selectById(task.getId()).getStatus());
     }
 }
