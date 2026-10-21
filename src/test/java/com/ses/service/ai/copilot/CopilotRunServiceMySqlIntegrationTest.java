@@ -160,6 +160,38 @@ class CopilotRunServiceMySqlIntegrationTest {
     }
 
     @Test
+    void UPPER_BOUND完了は実UPDATEで古いcost_jpyを消しmetadataをcommitする() throws Exception {
+        assertTrue(AopUtils.isAopProxy(runService), "Spring transaction proxyを通す");
+        Fixture fixture = createFixture("tenant-a");
+        Fixture tenantBSentinel = createFixture("tenant-b");
+        jdbcTemplate.update("UPDATE t_ai_recommendation_run SET cost_jpy=99, redacted_summary_json=? WHERE id=?",
+                "{\"attemptKind\":\"SUMMARY\",\"traceId\":\"" + fixture.attempt().traceId()
+                        + "\",\"outcome\":\"PENDING\",\"costState\":\"UNKNOWN\",\"costJpy\":99,"
+                        + "\"costUpperBoundYen\":999,\"configHash\":\""
+                        + fixture.attempt().artifact().configHash() + "\"}", fixture.runId());
+        Snapshot sentinelBefore = readIndependently(tenantBSentinel.runId());
+
+        SummaryCostEvidence upperBound = new SummaryCostEvidence(CopilotCostState.UPPER_BOUND,
+                null, 123, new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED,
+                "PROVIDER_RESPONSE_RECEIVED"), null, null, "PRECHECK_BOUND");
+        CopilotRunService.SummaryCompletionResult result = AccountingTenantContextHolder.runWithTenant(
+                "tenant-a", () -> runService.completeSummaryAttempt(fixture.attempt(), 21,
+                        SummaryResponse.unavailable("COST_UPPER_BOUND", upperBound)));
+
+        assertEquals(CopilotRunService.SummaryCompletionResult.COMPLETED, result);
+        Snapshot committed = readIndependently(fixture.runId());
+        assertEquals("FAILED", committed.status());
+        assertEquals(1, committed.statusVersion());
+        assertNull(committed.costJpy(), "実UPDATE後は以前のcost_jpyが残らない");
+        JsonNode metadata = objectMapper.readTree(committed.redactedSummaryJson());
+        assertEquals("UPPER_BOUND", metadata.path("costState").asText());
+        assertEquals(123, metadata.path("costUpperBoundYen").asInt());
+        assertFalse(metadata.has("costJpy"));
+        assertEquals(sha256(committed.redactedSummaryJson()), committed.inputHash());
+        assertEquals(sentinelBefore, readIndependently(tenantBSentinel.runId()));
+    }
+
+    @Test
     void caller指定ACTUALはJSON化とmapper更新前に拒否され二tenant全列不変() throws Exception {
         assertTrue(AopUtils.isAopProxy(runService), "Spring transaction proxyを通す");
         Fixture fixture = createFixture("tenant-a");
