@@ -97,6 +97,20 @@ class LifecycleCanonicalizationTest {
     }
 
     @Test
+    @DisplayName("孤立surrogateを拒否し、正しいsurrogate pairはcanonical hashで扱えること")
+    void malformedSurrogatesAreRejectedAndEmojiRemainsValid() {
+        assertThrows(IllegalArgumentException.class, () -> new LifecycleCanonicalization.Request(
+                "tenant-a", 1, 0, LifecycleCanonicalization.Operation.SUBMIT, 7, "key-1", "\uD800", List.of()));
+        assertThrows(IllegalArgumentException.class, () -> new LifecycleCanonicalization.Request(
+                "tenant-a", 1, 0, LifecycleCanonicalization.Operation.SUBMIT, 7, "key-1", "\uD801", List.of()));
+
+        var emoji = new LifecycleCanonicalization.Request("tenant-a", 1, 0,
+                LifecycleCanonicalization.Operation.SUBMIT, 7, "key-1", "確認\uD83D\uDE00", List.of());
+        assertEquals(64, emoji.sha256().length());
+        assertTrue(emoji.canonicalJson().contains("確認\uD83D\uDE00"));
+    }
+
+    @Test
     @DisplayName("認可epoch tupleのいずれかが変わればfail-closedになること")
     void authorizationEpochTupleDetectsRevocation() {
         var submission = new LifecycleAuthorizationEpochs(2, 5, 3);

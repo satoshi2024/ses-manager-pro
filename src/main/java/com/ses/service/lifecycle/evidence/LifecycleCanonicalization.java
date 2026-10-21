@@ -5,6 +5,10 @@ import com.fasterxml.jackson.core.JsonGenerator;
 
 import java.io.IOException;
 import java.io.StringWriter;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -128,6 +132,7 @@ public final class LifecycleCanonicalization {
             Objects.requireNonNull(operation, "operation");
             requireText(idempotencyKey, "idempotencyKey");
             businessComment = businessComment == null ? "" : businessComment;
+            requireWellFormedUnicode(businessComment, "businessComment");
             Objects.requireNonNull(documentSelections, "documentSelections");
             List<DocumentSelection> sorted = documentSelections.stream()
                     .map(selection -> Objects.requireNonNull(selection, "documentSelection"))
@@ -199,14 +204,33 @@ public final class LifecycleCanonicalization {
     }
 
     private static void requireText(String value, String field) {
+        requireWellFormedUnicode(value, field);
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(field + "は必須です");
         }
     }
 
+    private static void requireWellFormedUnicode(String value, String field) {
+        if (value == null) {
+            return;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            char current = value.charAt(i);
+            if (Character.isHighSurrogate(current)) {
+                if (i + 1 >= value.length() || !Character.isLowSurrogate(value.charAt(i + 1))) {
+                    throw new IllegalArgumentException(field + "に不正なUnicode surrogateが含まれています");
+                }
+                i++;
+            } else if (Character.isLowSurrogate(current)) {
+                throw new IllegalArgumentException(field + "に不正なUnicode surrogateが含まれています");
+            }
+        }
+    }
+
     private static String hash(String canonicalJson) {
         try {
-            byte[] bytes = MessageDigest.getInstance("SHA-256").digest(canonicalJson.getBytes(StandardCharsets.UTF_8));
+            byte[] canonicalBytes = strictUtf8(canonicalJson);
+            byte[] bytes = MessageDigest.getInstance("SHA-256").digest(canonicalBytes);
             StringBuilder result = new StringBuilder(bytes.length * 2);
             for (byte value : bytes) {
                 result.append(Character.forDigit((value >>> 4) & 0x0f, 16));
@@ -215,6 +239,20 @@ public final class LifecycleCanonicalization {
             return result.toString();
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+    }
+
+    private static byte[] strictUtf8(String value) {
+        try {
+            ByteBuffer encoded = StandardCharsets.UTF_8.newEncoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .encode(CharBuffer.wrap(value));
+            byte[] bytes = new byte[encoded.remaining()];
+            encoded.get(bytes);
+            return bytes;
+        } catch (CharacterCodingException malformedUnicode) {
+            throw new IllegalArgumentException("canonical JSONに不正なUnicodeが含まれています", malformedUnicode);
         }
     }
 
