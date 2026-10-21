@@ -1,5 +1,33 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## 再開確認と追加受理（2026-10-21）
+
+- **NO-GO継続**。fetch後origin/mainは `1443fb68943849a3260d7ebe005259f3eb609d60`。
+  PR101の7checkはCOMPLETED/SUCCESS、head祖先判定exit0。merge後main最新run36858538460はFAILURE。
+  主checkoutの利用者変更3件を保持した。Docker停止を確認して通常起動し、server29.7.2を確認した。
+- control固定 `619d3e034b421c9c4bf0fa7c59b934442c000fe8` のNF06 joint-03は **61/0/0/0**。
+  UTC2026-10-18T12:43:10.5855958Z〜12:47:48.2288397Z、log
+  `DEB55D7E75835AC19068E17A7ACE65635EF0565989CE52160A4B1DBBF385FB69`。
+  Astraが8report hash、4class、actual source requester9/blocker11 PRIMARY/sourceId waitを受理。
+  同controlのNF07/NF08試験またはwave2成功へ拡張しない。
+- source NF06 wave2固定 `9d09b1525d8ee2d204b32553799bce73e00c665c` は限定CODE PASS後、
+  fast **12 class、61/1/0/0、FAIL**。UTC2026-10-18T12:47:55.1452276Z〜12:49:32.1402716Z、log
+  `B7617D64CEA230894385AA1EB50FAED9FF1507B72CB84E8626E7F3A219D0F7E9`。
+  Lifecycle unitのrenew expiry strict-afterが同DB clock tickで成立しなかった。
+  retryもversion進行・同expiryを扱えないため、期限非減少、version厳密増加、exact append fenceの
+  契約をAstraが選定した。修復実装・再Review/実測待ち。wave2はcontrol未統合。
+- NF08 Wave A固定 `86c42e990cf0efd579324eca3c7ad66923dc437e` のMySQLは **10/0/0/0**。
+  UTC2026-10-18T12:50:24.7572468Z〜12:52:22.1416730Z、log
+  `D121DEE3BBAEF394F32827730D68F68E0C58770FEBECBB3975CE5A118EFA43C1`。
+  Astraが起止SHA/clean、2report hash、実10caseを限定受理。4commitをcontrol `4402ac65` へ統合、
+  test file一致を確認。serialization、実SIGNAL SQL、beforeCommit rollback、tenant B sentinelを補強。
+  commit後caller例外はdurable行保持の例示であり、実ACK障害/UNKNOWN制御の証明ではない。
+  fast108PASSは旧db25固定の別証拠で、86の同SHA結果とは報告しない。B2 provenanceはDESIGN_PENDING。
+- NF01 R01bは6d3計画の未完修訂を保持して再開した。主体双方の現行認可・writer lock順・current submission・
+  immutable snapshot・全附文書resolverの実装契約を補完中。新migration番号は未割当。
+- controlの全fast第7回を新しい20261021証拠directoryで実行する。旧第6回FAILは保存し、結果を先取りしない。
+  実credential/provider、外部契約、Privacy/Legal/Operations/production署名、push/PR/deployは未実施。
+
 ## 限定batch統合（2026-10-18 21:43 JST）
 
 - **NO-GO継続**。NF08 B1固定 `db25d2b75b5eebbd9bf3d7b2d302878d441a30a2` は
