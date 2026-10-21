@@ -374,7 +374,9 @@ class ImportMetadataRealMySqlTest {
 
         var renewed = lifecycleService.renew(originalGrant);
         Map<String, Object> afterRenew = leaseSnapshot();
-        assertEquals(futureExpiry, afterRenew.get("lease_expires_at"),
+        assertEquals(futureExpiry, jdbc.queryForObject(
+                        "SELECT lease_expires_at FROM t_import_job WHERE tenant_id=? AND id=?",
+                        Timestamp.class, tenantId, jobId),
                 "実MySQL GREATEST SQLは候補期限が古い場合に既存期限を維持します");
         assertEquals(beforeVersion + 1, ((Number) afterRenew.get("version_no")).longValue());
         assertEquals(futureExpiry, renewed.expiresAt());
@@ -536,8 +538,8 @@ class ImportMetadataRealMySqlTest {
     void append前mappingFingerprintDriftはzeroWrite() {
         prepareBoundCustomerJob();
         var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
-        jdbc.update("UPDATE t_import_mapping SET mapping_sha256=? WHERE tenant_id=? AND id=?",
-                new byte[32], tenantId, mappingId);
+        jdbc.update("UPDATE t_import_mapping SET canonical_bytes=? WHERE tenant_id=? AND id=?",
+                "{}".getBytes(StandardCharsets.UTF_8), tenantId, mappingId);
         assertAppendDriftRejected(lease);
     }
 
@@ -828,9 +830,20 @@ class ImportMetadataRealMySqlTest {
                 tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
                 return tx.execute(status -> {
                     assertEquals("READ-COMMITTED", jdbc.queryForObject("SELECT @@transaction_isolation", String.class));
-                    stateAtRowWait.set(jdbc.queryForMap("SELECT lease_owner,lease_generation,version_no,active_validation_run_id,"
-                            + "lease_expires_at,lease_expires_at>CURRENT_TIMESTAMP(6) AS unexpired FROM t_import_job WHERE tenant_id=? AND id=?",
-                            tenantId, jobId));
+                    stateAtRowWait.set(jdbc.query("SELECT lease_owner,lease_generation,version_no,active_validation_run_id,"
+                                    + "lease_expires_at,lease_expires_at>CURRENT_TIMESTAMP(6) AS unexpired "
+                                    + "FROM t_import_job WHERE tenant_id=? AND id=?",
+                            rs -> {
+                                if (!rs.next()) return null;
+                                Map<String, Object> state = new java.util.HashMap<>();
+                                state.put("lease_owner", rs.getString("lease_owner"));
+                                state.put("lease_generation", rs.getObject("lease_generation"));
+                                state.put("version_no", rs.getObject("version_no"));
+                                state.put("active_validation_run_id", rs.getObject("active_validation_run_id"));
+                                state.put("lease_expires_at", rs.getTimestamp("lease_expires_at"));
+                                state.put("unexpired", rs.getObject("unexpired"));
+                                return state;
+                            }, tenantId, jobId));
                     lifecycleService.appendChunk(shortGrant, lockedReplay);
                     return null;
                 });
