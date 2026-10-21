@@ -71,7 +71,6 @@ import static org.mockito.Mockito.doAnswer;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -662,17 +661,26 @@ class ImportMetadataRealMySqlTest {
         var metadata = new ImportValidationAppendService.RowMetadata(((Number) row.get("source_row_number")).longValue(),
                 (byte[]) row.get("source_row_sha256"), (byte[]) row.get("canonical_fingerprint"),
                 (String) row.get("disposition"), (byte[]) row.get("finding_codes"), (byte[]) row.get("row_commit_sha256"));
-        var chunk = reflectedChunk(appendedGrant, List.of(metadata));
+        Timestamp futureExpiry = jdbc.queryForObject("SELECT TIMESTAMPADD(SECOND,60,CURRENT_TIMESTAMP(6))", Timestamp.class);
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=? WHERE tenant_id=? AND id=?", futureExpiry, tenantId, jobId);
+        var matchingOldGrant = reflectedLease(appendedGrant, futureExpiry);
+        var chunk = reflectedChunk(matchingOldGrant, List.of(metadata));
         long versionBeforeRenew = ((Number) leaseSnapshot().get("version_no")).longValue();
-        var latestGrant = lifecycleService.renew(appendedGrant);
-        assertFalse(latestGrant.expiresAt().before(appendedGrant.expiresAt()), "期限は非減少です");
+        var latestGrant = lifecycleService.renew(matchingOldGrant);
+        assertEquals(futureExpiry, latestGrant.expiresAt(), "候補期限が古い場合も将来期限を維持します");
         assertEquals(versionBeforeRenew + 1, ((Number) leaseSnapshot().get("version_no")).longValue(),
                 "renewはexpiry同値の場合もversionを厳密に+1します");
         Map<String, Object> beforeStaleReplay = leaseSnapshot();
+        Map<String, Object> rowBeforeStaleReplay = jdbc.queryForMap("SELECT source_row_number,HEX(source_row_sha256) AS source_row_sha256,HEX(canonical_fingerprint) AS canonical_fingerprint,disposition,HEX(finding_codes) AS finding_codes,HEX(row_commit_sha256) AS row_commit_sha256 "
+                + "FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                tenantId, jobId, oldGrant.runId());
         BusinessException stale = assertThrows(BusinessException.class,
-                () -> lifecycleService.appendChunk(appendedGrant, chunk));
+                () -> lifecycleService.appendChunk(matchingOldGrant, chunk));
         assertEquals(409, stale.getCode());
         assertEquals(beforeStaleReplay, leaseSnapshot());
+        assertEquals(rowBeforeStaleReplay, jdbc.queryForMap("SELECT source_row_number,HEX(source_row_sha256) AS source_row_sha256,HEX(canonical_fingerprint) AS canonical_fingerprint,disposition,HEX(finding_codes) AS finding_codes,HEX(row_commit_sha256) AS row_commit_sha256 "
+                + "FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                tenantId, jobId, oldGrant.runId()), "旧grant拒否後のrow metadataは不変です");
         lifecycleService.appendChunk(latestGrant, reflectedChunk(latestGrant, List.of(metadata)));
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
                 Integer.class, tenantId, jobId, oldGrant.runId()));
