@@ -1856,7 +1856,7 @@ class ImportMetadataRealMySqlTest {
                 logSourceLockWait("source mutation committed before service", observed);
             } else {
                 String lockData = permissionLockData(blockerId, table, "PRIMARY");
-                awaitExactLockWait(blockerId, table, "PRIMARY", lockData, submitted,
+                awaitExactLockWait(requesterConnectionId, blockerId, table, "PRIMARY", lockData, submitted,
                         table + " mutation-first service");
             }
             executeUpdate(blocker, mutationSql, mutationParams);
@@ -2570,24 +2570,32 @@ class ImportMetadataRealMySqlTest {
 
     private long awaitExactLockWait(long blockerId, String table, String index, String lockData,
                                    Future<?> operation, String label) throws Exception {
+        return awaitExactLockWait(null, blockerId, table, index, lockData, operation, label);
+    }
+
+    private long awaitExactLockWait(AtomicReference<Long> expectedRequesterId, long blockerId, String table,
+                                   String index, String lockData, Future<?> operation, String label) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12);
         while (System.nanoTime() < deadline) {
             assertFuturePending(operation, label);
-            List<Long> requesters = jdbc.query("""
+            Long capturedRequesterId = expectedRequesterId == null ? null : expectedRequesterId.get();
+            long requesterFilter = capturedRequesterId == null ? 0L : capturedRequesterId;
+            List<Long> requesters = capturedRequesterId == null && expectedRequesterId != null ? List.of() : jdbc.query("""
                     SELECT wt.PROCESSLIST_ID
                     FROM performance_schema.data_lock_waits w
                     JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
                     JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
                     JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
                     JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                    WHERE wt.PROCESSLIST_ID<>? AND bt.PROCESSLIST_ID=?
+                    WHERE (?=0 OR wt.PROCESSLIST_ID=?) AND wt.PROCESSLIST_ID<>? AND bt.PROCESSLIST_ID=?
                       AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=? AND req.INDEX_NAME=?
                       AND req.LOCK_TYPE='RECORD' AND req.LOCK_MODE='X,REC_NOT_GAP' AND req.LOCK_STATUS='WAITING'
                       AND req.LOCK_DATA=?
                       AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=? AND blk.INDEX_NAME=?
                       AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_MODE='X,REC_NOT_GAP' AND blk.LOCK_STATUS='GRANTED'
                       AND blk.LOCK_DATA=?
-                    """, (rs, row) -> rs.getLong(1), blockerId, blockerId, table, index, lockData,
+                    """, (rs, row) -> rs.getLong(1), requesterFilter, requesterFilter,
+                    blockerId, blockerId, table, index, lockData,
                     table, index, lockData);
             if (!requesters.isEmpty()) return requesters.get(0);
             Thread.sleep(25);
