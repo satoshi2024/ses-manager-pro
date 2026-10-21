@@ -71,6 +71,7 @@ import static org.mockito.Mockito.doAnswer;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -362,6 +363,30 @@ class ImportMetadataRealMySqlTest {
     }
 
     @Test
+    void 実MySQL同tick相当renewは将来期限を維持し旧grantretryで再更新しない() throws Exception {
+        prepareBoundCustomerJob();
+        var initial = lifecycleService.start(lifecycleService.beginStart(jobId));
+        Timestamp futureExpiry = jdbc.queryForObject("SELECT TIMESTAMPADD(SECOND,60,CURRENT_TIMESTAMP(6))",
+                Timestamp.class);
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=? WHERE tenant_id=? AND id=?",
+                futureExpiry, tenantId, jobId);
+        var originalGrant = reflectedLease(initial, futureExpiry);
+        long beforeVersion = ((Number) leaseSnapshot().get("version_no")).longValue();
+
+        var renewed = lifecycleService.renew(originalGrant);
+        Map<String, Object> afterRenew = leaseSnapshot();
+        assertEquals(futureExpiry, afterRenew.get("lease_expires_at"),
+                "実MySQL GREATEST SQLは候補期限が古い場合に既存期限を維持します");
+        assertEquals(beforeVersion + 1, ((Number) afterRenew.get("version_no")).longValue());
+        assertEquals(futureExpiry, renewed.expiresAt());
+
+        var recovered = lifecycleService.renew(originalGrant);
+        assertEquals(futureExpiry, recovered.expiresAt(), "expiryが同値のcommitも旧grantで復旧できます");
+        assertEquals(afterRenew, leaseSnapshot(), "retryはversionも期限も再更新しません");
+        lifecycleService.abort(recovered);
+    }
+
+    @Test
     void 実MySQLappendはBUILDING行を保存し同一source再検証でnoOp再送する() {
         prepareBoundCustomerJob();
         var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
@@ -638,8 +663,11 @@ class ImportMetadataRealMySqlTest {
                 (byte[]) row.get("source_row_sha256"), (byte[]) row.get("canonical_fingerprint"),
                 (String) row.get("disposition"), (byte[]) row.get("finding_codes"), (byte[]) row.get("row_commit_sha256"));
         var chunk = reflectedChunk(appendedGrant, List.of(metadata));
+        long versionBeforeRenew = ((Number) leaseSnapshot().get("version_no")).longValue();
         var latestGrant = lifecycleService.renew(appendedGrant);
-        assertTrue(latestGrant.expiresAt().after(appendedGrant.expiresAt()));
+        assertFalse(latestGrant.expiresAt().before(appendedGrant.expiresAt()), "期限は非減少です");
+        assertEquals(versionBeforeRenew + 1, ((Number) leaseSnapshot().get("version_no")).longValue(),
+                "renewはexpiry同値の場合もversionを厳密に+1します");
         Map<String, Object> beforeStaleReplay = leaseSnapshot();
         BusinessException stale = assertThrows(BusinessException.class,
                 () -> lifecycleService.appendChunk(appendedGrant, chunk));

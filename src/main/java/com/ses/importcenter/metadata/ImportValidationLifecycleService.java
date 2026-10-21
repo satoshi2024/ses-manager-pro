@@ -275,12 +275,13 @@ public class ImportValidationLifecycleService {
         Job job = locked.job;
         Run run = locked.run;
         if (!activeLease(job, run, grant) || job.expiresAt == null || !job.expiresAt.after(now)) conflict();
-        if (job.version > grant.jobVersion && job.expiresAt.after(grant.expiresAt)) {
+        if (job.version > grant.jobVersion && !job.expiresAt.before(grant.expiresAt)) {
             return lease(expected, grant.runId, grant.workerId, grant.generation, job.version, job.expiresAt);
         }
         if (job.version != grant.jobVersion || !job.expiresAt.equals(grant.expiresAt)) conflict();
         int updated = jdbc.update("""
-                UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,?,CURRENT_TIMESTAMP(6)),
+                UPDATE t_import_job SET lease_expires_at=GREATEST(
+                  lease_expires_at,TIMESTAMPADD(SECOND,?,CURRENT_TIMESTAMP(6))),
                   version_no=version_no+1,updated_at=CURRENT_TIMESTAMP(6)
                 WHERE tenant_id=? AND id=? AND version_no=? AND state='VALIDATING'
                   AND active_validation_run_id=? AND lease_owner=? AND lease_generation=?
