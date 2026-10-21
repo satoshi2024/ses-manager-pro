@@ -466,9 +466,28 @@ class ImportMetadataRealMySqlTest {
         jdbc.update("UPDATE t_import_job SET source_sha256=?,document_sha256=? WHERE tenant_id=? AND id=?",
                 digest, digest, tenantId, jobId);
         var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
-        validationAppendService.appendRemaining(lease);
+        var completion = validationAppendService.appendRemainingWithSealCapability(lease);
+        var capability = completion.capability();
+        assertEquals(rowCount, capability.counters().sourceRows());
+        assertEquals(0, capability.counters().emptySkipped());
+        assertEquals(completion.lease().expiresAt(), capability.expiresAt());
+        assertEquals(completion.lease().generation(), capability.generation());
+        assertEquals(completion.lease().jobVersion(), capability.jobVersion());
+        assertTrue(completion.lease() == capability.lease(), "capabilityは最終renewのleaseそのものに束縛されます");
+        Timestamp exposedExpiry = capability.expiresAt();
+        exposedExpiry.setTime(0);
+        assertTrue(!Timestamp.valueOf("1970-01-01 00:00:00").equals(capability.expiresAt()), "expiryは取得時に複製されます");
+        byte[] exposedDocumentSha = capability.documentSha();
+        exposedDocumentSha[0] ^= 1;
+        assertTrue(!java.util.Arrays.equals(exposedDocumentSha, capability.documentSha()), "証明のbyte列は取得時に複製されます");
+        assertTrue(java.lang.reflect.Modifier.isPrivate(ImportValidationAppendService.SealCapability.class
+                .getDeclaredConstructors()[0].getModifiers()), "seal capabilityはprivate constructorからのみ発行します");
         assertEquals(rowCount, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
                 Integer.class, tenantId, jobId, lease.runId()));
+        assertEquals(rowSetShaForStoredRows(lease.runId()), capability.rowSetSha256(), "stored prefix全体のordered commitmentを一致させます");
+        var retried = validationAppendService.appendRemainingWithSealCapability(completion.lease());
+        assertEquals(capability.rowSetSha256(), retried.capability().rowSetSha256(), "同じsource/prefixのretryはordered row-set証明へ収束します");
+        assertEquals(capability.counters(), retried.capability().counters());
         assertEquals("BUILDING", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
                 String.class, tenantId, jobId, lease.runId()));
     }
@@ -487,7 +506,10 @@ class ImportMetadataRealMySqlTest {
                 digest, digest, tenantId, jobId);
         var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
 
-        validationAppendService.appendRemaining(lease);
+        var capability = validationAppendService.appendRemainingWithSealCapability(lease).capability();
+        assertEquals(1, capability.counters().emptySkipped());
+        assertEquals(3, capability.counters().physicalRows());
+        assertEquals(2, capability.counters().sourceRows());
         assertEquals(List.of(1L, 3L), jdbc.query("SELECT source_row_number FROM t_import_validation_row "
                         + "WHERE tenant_id=? AND job_id=? AND validation_run_id=? ORDER BY source_row_number",
                 (rs, row) -> rs.getLong(1), tenantId, jobId, lease.runId()));
@@ -496,12 +518,51 @@ class ImportMetadataRealMySqlTest {
     }
 
     @Test
+    void 実MySQLappendはheader後blank行のみでもEOF証明を発行する() {
+        prepareBoundCustomerJob();
+        byte[] source = "externalKey,companyName\n\n\n".getBytes(StandardCharsets.UTF_8);
+        String sourceHash = sha256(source);
+        storage.put(storageKey, source, false);
+        jdbc.update("UPDATE t_document_version SET sha256=?,size_bytes=? WHERE tenant_id=? AND document_id=? AND id=?",
+                sourceHash, (long) source.length, tenantId, documentId, documentVersionId);
+        byte[] digest = HexFormat.of().parseHex(sourceHash);
+        jdbc.update("UPDATE t_import_job SET source_sha256=?,document_sha256=? WHERE tenant_id=? AND id=?",
+                digest, digest, tenantId, jobId);
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+
+        var capability = validationAppendService.appendRemainingWithSealCapability(lease).capability();
+        assertEquals(0, capability.counters().sourceRows());
+        assertEquals(2, capability.counters().physicalRows());
+        assertEquals(2, capability.counters().emptySkipped());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()));
+    }
+
+    @Test
+    void 実MySQLappendはheaderのない空sourceにEOF証明を発行しない() {
+        prepareBoundCustomerJob();
+        byte[] source = new byte[0];
+        String sourceHash = sha256(source);
+        storage.put(storageKey, source, false);
+        jdbc.update("UPDATE t_document_version SET sha256=?,size_bytes=? WHERE tenant_id=? AND document_id=? AND id=?",
+                sourceHash, 0L, tenantId, documentId, documentVersionId);
+        byte[] digest = HexFormat.of().parseHex(sourceHash);
+        jdbc.update("UPDATE t_import_job SET source_sha256=?,document_sha256=? WHERE tenant_id=? AND id=?",
+                digest, digest, tenantId, jobId);
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+
+        assertThrows(BusinessException.class, () -> validationAppendService.appendRemainingWithSealCapability(lease));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()));
+    }
+
+    @Test
     void 実MySQLappendのexactSourceHash不一致はrowをwriteしない() {
         prepareBoundCustomerJob();
         var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
         storage.put(storageKey, "externalKey,companyName\ncustomer-other,Example\n".getBytes(StandardCharsets.UTF_8), false);
 
-        assertThrows(BusinessException.class, () -> validationAppendService.appendRemaining(lease));
+        assertThrows(BusinessException.class, () -> validationAppendService.appendRemainingWithSealCapability(lease));
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
                 Integer.class, tenantId, jobId, lease.runId()));
         assertEquals("BUILDING", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
@@ -2157,6 +2218,23 @@ class ImportMetadataRealMySqlTest {
     private int jobVersion() {
         return jdbc.queryForObject("SELECT version_no FROM t_import_job WHERE tenant_id=? AND id=?",
                 Integer.class, tenantId, jobId);
+    }
+
+    private String rowSetShaForStoredRows(long runId) {
+        MessageDigest digest;
+        try { digest = MessageDigest.getInstance("SHA-256"); }
+        catch (Exception impossible) { throw new IllegalStateException(impossible); }
+        digest.update("SES-IMPORT-ROW-SET-V1".getBytes(StandardCharsets.US_ASCII));
+        digest.update(new byte[] {0, 0, 0, 1});
+        jdbc.query("SELECT source_row_number,row_commit_sha256 FROM t_import_validation_row "
+                        + "WHERE tenant_id=? AND job_id=? AND validation_run_id=? ORDER BY source_row_number",
+                rs -> {
+                    digest.update(java.nio.ByteBuffer.allocate(Long.BYTES).putLong(rs.getLong(1)).array());
+                    byte[] commitment = rs.getBytes(2);
+                    digest.update(java.nio.ByteBuffer.allocate(Integer.BYTES).putInt(commitment.length).array());
+                    digest.update(commitment);
+                }, tenantId, jobId, runId);
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     private void assertLeaseExpiryHasRemainingMargin(long minimumMicros) {

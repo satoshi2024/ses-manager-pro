@@ -20,6 +20,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
@@ -35,6 +36,7 @@ public class ImportValidationAppendService {
     private static final int CHUNK_ROWS = 250;
     private static final int PREFIX_PAGE_SIZE = 250;
     private static final String ROW_COMMIT_DOMAIN = "SES-IMPORT-VALIDATION-ROW-V1";
+    private static final String ROW_SET_DOMAIN = "SES-IMPORT-ROW-SET-V1";
     private static final String FINDING_DOMAIN = "SES-IMPORT-FINDING-CODES-V1";
     private static final TypeReference<Map<String, String>> MAPPING_TYPE = new TypeReference<>() { };
     private static final Set<String> FINDING_CODES = Set.of(
@@ -66,6 +68,11 @@ public class ImportValidationAppendService {
 
     /** callerはrow metadataを渡せない。run leaseからexact inputを導出してsource全体を再検証する。 */
     public ImportValidationLifecycleService.RunLease appendRemaining(ImportValidationLifecycleService.RunLease lease) {
+        return appendRemainingWithSealCapability(lease).lease();
+    }
+
+    /** EOFと全保存rowの照合完了後だけseal用証明を発行する。caller入力から証明は構築できない。 */
+    AppendCompletion appendRemainingWithSealCapability(ImportValidationLifecycleService.RunLease lease) {
         ImportValidationLifecycleService.RunLease authorizedLease = lifecycle.renew(lease);
         var snapshot = lifecycle.appendSnapshot(authorizedLease);
         Map<String, String> mapping = loadMapping(snapshot);
@@ -78,7 +85,14 @@ public class ImportValidationAppendService {
         ImportValidationLifecycleService.RunLease currentLease = lifecycle.renew(verified.lease());
         ScanResult appended = scan(snapshot, mapping, context, true, currentLease);
         if (!MessageDigest.isEqual(snapshot.sourceSha(), HexFormat.of().parseHex(appended.sourceSha256()))) conflict();
-        return lifecycle.renew(appended.lease());
+        ImportValidationLifecycleService.RunLease finalLease = lifecycle.renew(appended.lease());
+        var counters = appended.counters();
+        if (counters.sourceRows() != appended.rowCount()
+                || counters.sourceRows() != counters.validatedAcceptedTotal() + counters.rejected()
+                || counters.physicalRows() != counters.sourceRows() + counters.emptySkipped()) conflict();
+        SealCapability capability = new SealCapability(finalLease, snapshot, appended.sourceSha256(),
+                appended.rowSetSha256(), counters);
+        return new AppendCompletion(finalLease, capability);
     }
 
     private ScanResult scan(ImportValidationLifecycleService.AppendSnapshot snapshot, Map<String, String> mapping,
@@ -87,7 +101,11 @@ public class ImportValidationAppendService {
         List<RowMetadata> batch = new ArrayList<>(CHUNK_ROWS);
         ImportValidationLifecycleService.RunLease[] current = {initialLease};
         long[] processedRows = {0};
+        MessageDigest rowSetDigest = digest();
+        rowSetDigest.update(ROW_SET_DOMAIN.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        rowSetDigest.update(new byte[] {0, 0, 0, 1});
         String sourceSha;
+        com.ses.importcenter.foundation.ValidationCounterAccumulator.Snapshot counters;
         try (ImportSourceContent content = metadata.openSource(snapshot.jobId())) {
             verifyContent(snapshot, content);
             var result = pipeline.validateMapped(content.stream(), content.originalFileName(),
@@ -95,6 +113,7 @@ public class ImportValidationAppendService {
                     context, validated -> {
                         processedRows[0]++;
                         RowMetadata row = rowMetadata(validated);
+                        updateRowSet(rowSetDigest, row);
                         boolean existingPrefix = prefix.compare(row);
                         if (write && !existingPrefix) {
                             batch.add(row);
@@ -110,6 +129,7 @@ public class ImportValidationAppendService {
                     });
             prefix.requireExhausted();
             sourceSha = result.source().sourceSha256();
+            counters = result.counters();
             if (!MessageDigest.isEqual(snapshot.sourceSha(), HexFormat.of().parseHex(sourceSha))) conflict();
             if (write && !batch.isEmpty()) {
                 lifecycle.appendChunk(current[0], new ValidatedChunk(current[0],
@@ -119,7 +139,20 @@ public class ImportValidationAppendService {
         } catch (IOException | IllegalArgumentException failure) {
             throw BusinessException.of(409, "error.import.sourceReadFailed");
         }
-        return new ScanResult(sourceSha, current[0]);
+        return new ScanResult(sourceSha, current[0], counters, processedRows[0],
+                HexFormat.of().formatHex(rowSetDigest.digest()));
+    }
+
+    private static MessageDigest digest() {
+        try { return MessageDigest.getInstance("SHA-256"); }
+        catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+    }
+
+    private static void updateRowSet(MessageDigest digest, RowMetadata row) {
+        digest.update(java.nio.ByteBuffer.allocate(Long.BYTES).putLong(row.sourceRowNumber()).array());
+        byte[] commitment = row.rowCommitSha256();
+        digest.update(java.nio.ByteBuffer.allocate(Integer.BYTES).putInt(commitment.length).array());
+        digest.update(commitment);
     }
 
     private void verifyContent(ImportValidationLifecycleService.AppendSnapshot snapshot, ImportSourceContent content) {
@@ -220,7 +253,71 @@ public class ImportValidationAppendService {
     private void conflict() { throw BusinessException.of(409, "error.import.jobStateConflict"); }
 
     private record Mapping(byte[] bytes, byte[] sha) { }
-    private record ScanResult(String sourceSha256, ImportValidationLifecycleService.RunLease lease) { }
+    private record ScanResult(String sourceSha256, ImportValidationLifecycleService.RunLease lease,
+                              com.ses.importcenter.foundation.ValidationCounterAccumulator.Snapshot counters,
+                              long rowCount, String rowSetSha256) { }
+
+    record AppendCompletion(ImportValidationLifecycleService.RunLease lease, SealCapability capability) { }
+
+    static final class SealCapability {
+        private final ImportValidationLifecycleService.RunLease lease;
+        private final String tenantId, workerId, sourceCode, entity, schema, encoding, sourceSha256, rowSetSha256;
+        private final long jobId, runId, sourceId, sourceVersion, documentId, documentVersionId;
+        private final int documentVersionNo, mappingVersion;
+        private final Long mappingId;
+        private final long generation, jobVersion;
+        private final Timestamp expiresAt;
+        private final byte[] documentSha, mappingSha, validatorFingerprint;
+        private final com.ses.importcenter.foundation.ValidationCounterAccumulator.Snapshot counters;
+
+        private SealCapability(ImportValidationLifecycleService.RunLease lease,
+                               ImportValidationLifecycleService.AppendSnapshot snapshot,
+                               String sourceSha256, String rowSetSha256,
+                               com.ses.importcenter.foundation.ValidationCounterAccumulator.Snapshot counters) {
+            this.lease = lease; this.tenantId = snapshot.context().tenantId(); this.jobId = snapshot.jobId();
+            this.runId = snapshot.runId(); this.sourceId = snapshot.sourceId(); this.sourceVersion = snapshot.sourceVersion();
+            this.sourceCode = snapshot.sourceCode(); this.entity = snapshot.entity(); this.schema = snapshot.schema();
+            this.encoding = snapshot.encoding();
+            this.documentId = snapshot.documentId(); this.documentVersionId = snapshot.documentVersionId();
+            this.documentVersionNo = snapshot.documentVersionNo(); this.mappingId = snapshot.mappingId();
+            this.mappingVersion = snapshot.mappingVersion(); this.generation = lease.generation();
+            this.jobVersion = lease.jobVersion(); this.workerId = lease.workerId();
+            this.sourceSha256 = sourceSha256; this.rowSetSha256 = rowSetSha256;
+            this.documentSha = snapshot.documentSha(); this.mappingSha = snapshot.mappingSha();
+            this.validatorFingerprint = snapshot.validatorFingerprint(); this.expiresAt = lease.expiresAt();
+            this.counters = counters;
+            if (!lease.tenantId().equals(tenantId) || lease.jobId() != jobId || lease.runId() != runId
+                    || generation != snapshot.generation() || !workerId.equals(snapshot.workerId())) {
+                throw BusinessException.of(409, "error.import.jobStateConflict");
+            }
+        }
+
+        ImportValidationLifecycleService.RunLease lease() { return lease; }
+        String tenantId() { return tenantId; }
+        long jobId() { return jobId; }
+        long runId() { return runId; }
+        long generation() { return generation; }
+        long jobVersion() { return jobVersion; }
+        String workerId() { return workerId; }
+        long sourceId() { return sourceId; }
+        long sourceVersion() { return sourceVersion; }
+        String sourceCode() { return sourceCode; }
+        String entity() { return entity; }
+        String schema() { return schema; }
+        String encoding() { return encoding; }
+        long documentId() { return documentId; }
+        long documentVersionId() { return documentVersionId; }
+        int documentVersionNo() { return documentVersionNo; }
+        Long mappingId() { return mappingId; }
+        int mappingVersion() { return mappingVersion; }
+        Timestamp expiresAt() { return expiresAt == null ? null : (Timestamp) expiresAt.clone(); }
+        String sourceSha256() { return sourceSha256; }
+        String rowSetSha256() { return rowSetSha256; }
+        byte[] documentSha() { return documentSha.clone(); }
+        byte[] mappingSha() { return mappingSha.clone(); }
+        byte[] validatorFingerprint() { return validatorFingerprint.clone(); }
+        com.ses.importcenter.foundation.ValidationCounterAccumulator.Snapshot counters() { return counters; }
+    }
 
     private final class PrefixCursor {
         private final ImportValidationLifecycleService.AppendSnapshot snapshot;
