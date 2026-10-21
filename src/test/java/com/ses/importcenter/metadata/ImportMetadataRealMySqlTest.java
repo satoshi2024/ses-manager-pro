@@ -509,7 +509,7 @@ class ImportMetadataRealMySqlTest {
     }
 
     @Test
-    void append前sourceVersionDriftはzeroWrite() {
+    void append前sourceVersionDriftはvalidation行書込なし() {
         prepareBoundCustomerJob();
         var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
         jdbc.update("UPDATE t_import_source_system SET version_no=version_no+1 WHERE tenant_id=? AND id=?", tenantId, sourceId);
@@ -517,7 +517,7 @@ class ImportMetadataRealMySqlTest {
     }
 
     @Test
-    void append前documentSnapshotDriftはzeroWrite() {
+    void append前documentSnapshotDriftはvalidation行書込なし() {
         prepareBoundCustomerJob();
         var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
         jdbc.update("UPDATE t_document_version SET sha256=? WHERE tenant_id=? AND document_id=? AND id=?",
@@ -526,7 +526,7 @@ class ImportMetadataRealMySqlTest {
     }
 
     @Test
-    void append前documentLinkDriftはzeroWrite() {
+    void append前documentLinkDriftはvalidation行書込なし() {
         prepareBoundCustomerJob();
         var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
         jdbc.update("DELETE FROM t_document_link WHERE tenant_id=? AND document_id=? AND target_type='IMPORT_JOB' AND target_id=?",
@@ -535,7 +535,7 @@ class ImportMetadataRealMySqlTest {
     }
 
     @Test
-    void append前mappingFingerprintDriftはzeroWrite() {
+    void append前mappingFingerprintDriftはvalidation行書込なし() {
         prepareBoundCustomerJob();
         var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
         jdbc.update("UPDATE t_import_mapping SET canonical_bytes=? WHERE tenant_id=? AND id=?",
@@ -544,7 +544,7 @@ class ImportMetadataRealMySqlTest {
     }
 
     @Test
-    void append前permissionPolicyDriftは403でzeroWrite() {
+    void append前permissionPolicyDriftは403でvalidation行書込なし() {
         prepareBoundCustomerJob();
         var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
         jdbc.update("UPDATE t_permission_group_action SET deny_flag=1 WHERE tenant_id=? AND group_id=? AND action_key=? AND deny_flag=0",
