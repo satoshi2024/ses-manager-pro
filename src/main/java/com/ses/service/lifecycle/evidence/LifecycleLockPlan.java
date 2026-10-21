@@ -64,6 +64,14 @@ public record LifecycleLockPlan(List<LockKey> locks) {
         return new LifecycleLockPlan(List.copyOf(discoveredDependencies));
     }
 
+    /** 取得済みlock集合が再discovery結果と一致しない場合はtransaction全体を中止する。 */
+    public void requireSameDependencies(LifecycleLockPlan currentPlan) {
+        Objects.requireNonNull(currentPlan, "currentPlan");
+        if (!locks.equals(currentPlan.locks)) {
+            throw new DependencyChangedException();
+        }
+    }
+
     /** 依存差分はtransaction全体を中止し、新transactionで再discoveryする。transaction内で追加lock retryしない。 */
     public static final class DependencyChangedException extends RuntimeException {
         private static final long serialVersionUID = 1L;

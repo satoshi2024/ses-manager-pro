@@ -137,7 +137,26 @@ class LifecycleCanonicalizationTest {
                 new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.ASSET, "tenant-a", 2),
                 assetAssignment,
                 new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.DOCUMENT, "tenant-a", 12)), plan.locks());
+    }
+
+    @Test
+    @DisplayName("依存lock集合が同じなら順序と重複を許容し、追加・削除・tenant・ID変更を拒否すること")
+    void dependencyFenceComparesCanonicalLockSet() {
+        var engineer = new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.ENGINEER, "tenant-a", 4);
+        var document = new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.DOCUMENT, "tenant-a", 12);
+        var selected = LifecycleLockPlan.from(List.of(engineer, document));
+
+        selected.requireSameDependencies(LifecycleLockPlan.from(List.of(document, engineer, document)));
         assertThrows(LifecycleLockPlan.DependencyChangedException.class,
-                LifecycleLockPlan.DependencyChangedException::new);
+                () -> selected.requireSameDependencies(LifecycleLockPlan.from(List.of(engineer))));
+        assertThrows(LifecycleLockPlan.DependencyChangedException.class,
+                () -> selected.requireSameDependencies(LifecycleLockPlan.from(List.of(engineer, document,
+                        new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.CUSTOMER, "tenant-a", 8)))));
+        assertThrows(LifecycleLockPlan.DependencyChangedException.class,
+                () -> selected.requireSameDependencies(LifecycleLockPlan.from(List.of(engineer,
+                        new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.DOCUMENT, "tenant-b", 12)))));
+        assertThrows(LifecycleLockPlan.DependencyChangedException.class,
+                () -> selected.requireSameDependencies(LifecycleLockPlan.from(List.of(engineer,
+                        new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.DOCUMENT, "tenant-a", 13)))));
     }
 }
