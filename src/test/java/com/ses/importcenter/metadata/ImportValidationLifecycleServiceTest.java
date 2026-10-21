@@ -322,16 +322,20 @@ class ImportValidationLifecycleServiceTest {
     private RenewalSnapshot renewalSnapshot(long runId) {
         return jdbc.query("""
                 SELECT j.state,j.version_no,j.lease_owner,j.lease_generation,j.lease_expires_at,
-                  j.active_validation_run_id,j.current_validation_run_id,HEX(j.source_sha256),
-                  r.state,r.active_slot,r.last_resumed_lease_generation,HEX(r.validation_fingerprint)
+                  j.active_validation_run_id,j.current_validation_run_id,j.source_sha256,
+                  r.state,r.active_slot,r.last_resumed_lease_generation,r.validation_fingerprint
                 FROM t_import_job j JOIN t_import_validation_run r
                   ON r.tenant_id=j.tenant_id AND r.job_id=j.id AND r.id=?
                 WHERE j.tenant_id=? AND j.id=?
                 """, rs -> rs.next() ? new RenewalSnapshot(
                 rs.getString(1), rs.getLong(2), rs.getString(3), rs.getLong(4), rs.getTimestamp(5),
-                rs.getObject(6, Long.class), rs.getObject(7, Long.class), rs.getString(8),
-                rs.getString(9), rs.getObject(10, Integer.class), rs.getLong(11), rs.getString(12)) : null,
+                rs.getObject(6, Long.class), rs.getObject(7, Long.class), hex(rs.getBytes(8)),
+                rs.getString(9), rs.getObject(10, Integer.class), rs.getLong(11), hex(rs.getBytes(12))) : null,
                 runId, TENANT, JOB);
+    }
+
+    private static String hex(byte[] value) {
+        return value == null ? null : HexFormat.of().formatHex(value);
     }
 
     private static void schema(JdbcTemplate j) {
