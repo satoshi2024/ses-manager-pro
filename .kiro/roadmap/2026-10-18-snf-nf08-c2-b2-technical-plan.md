@@ -1,15 +1,15 @@
 # NF08 C2-B2 実usage provenance・費用証拠の技術計画
 
-**状態: B1 Wave A PASS。B2a PLAN REVIEW PENDING。今回レビュー対象は独立して実装可能なB2a契約に限定する。B2aのPASSはB2b以降、provider送信、本番料金、DDLの承認ではない。**
+**状態: B1 Wave A PASS。B2a PLAN REVIEW PASS。実装CODE reviewとfast gateは未完了。今回承認された範囲は独立して実装可能なB2a契約に限る。B2aのPASSはB2b以降、provider送信、本番料金、DDLの承認ではない。**
 
-## B2: 小分け実装計画（PLAN REVIEW PENDING）
+## B2: 小分け実装計画（B2a PLAN PASS / 後続batchは個別review）
 
-B1 Wave AのMySQL境界証拠はPASS済み。B2aはこの文書の限定PLAN reviewがPASSした場合にだけ実装候補となる。B2b以降はそれぞれ独立reviewを要する。B1または各B2 batchのCODE PASSはprovider契約、usage意味、production料金、provider送信、鍵配布、production flagの承認にならない。今回の計画はpublic ACTUAL保存経路をdenyするB2aを先に独立した最小実装として定義し、transport provenance、dispatch claim、私有費用能力を後続batchとして分ける。production policy / adapter / key registryは各batch後もdeny-allとする。
-### B2a: 最小実装契約（今回の個別PLAN review対象）
+B1 Wave AのMySQL境界証拠はPASS済み。B2aの限定PLAN reviewはPASS済みであり、この小batchだけが実装CODE review対象となる。B2b以降はそれぞれ独立reviewを要する。B1または各B2 batchのCODE PASSはprovider契約、usage意味、production料金、provider送信、鍵配布、production flagの承認にならない。今回の計画はpublic ACTUAL保存経路をdenyするB2aを先に独立した最小実装として定義し、transport provenance、dispatch claim、私有費用能力を後続batchとして分ける。production policy / adapter / key registryは各batch後もdeny-allとする。
+### B2a: 最小実装契約（PLAN PASS済）
 
-B2aは既存のpublic ACTUAL保存入口を閉じるだけの独立batchとする。`CopilotRunService.completeAttempt` の共通DB writer境界で、private verifier capabilityがまだ存在しないB2aでは、public `SummaryCostEvidence` / `SummaryResponse` / `AiGatewayResult` 等に含まれる `ACTUAL` を例外で拒否する。guardを個別controllerや一つのpublic overloadだけに置かず、既存 `complete(...)` と `completeSummaryAttempt(...)` の全永続化経路を覆う同writerに置く。拒否はmetadata構築/JSON化・UPDATEより前に起こし、attempt row全列を不変にする。B2aではprivate capability受入れ経路を作らず、ACTUALを例外的に通す互換pathも作らない。
+B2aは既存のpublic ACTUAL保存入口を閉じるだけの独立batchとする。`CopilotRunService.completeAttempt` の共通DB writer境界で、private verifier capabilityがまだ存在しないB2aでは、public `SummaryCostEvidence` / `SummaryResponse` / `AiGatewayResult` 等に含まれる `ACTUAL` を例外で拒否する。実際のpublic completion入口は費用付きsummaryの `completeSummaryAttempt(...)` とcost-freeの `completeQueryAttempt(...)` である。ACTUAL拒否は両方が通るprivate共通writer `completeAttempt(...)` に置き、authoritative costState、`costEvidence.costState()`、inherited attempt metadataを検査する。拒否はmetadata構築/JSON化・UPDATEより前に起こし、attempt row全列を不変にする。B2aではprivate capability受入れ経路を作らず、ACTUALを例外的に通す互換pathも作らない。
 
-B2aの検証はsynthetic/public ACTUALを直接構築して共通writerへ渡し、期待する具体的拒否例外と独立DB readbackによる全列不変を確認するservice proxy testとする。`UPPER_BOUND` / `UNKNOWN` / `NOT_SENT` の既存許可経路が意図せず変わらないことも個別確認する。production dispatch/cost policyはdeny-allのまま、provider transport、provenance issuer、rate registry/key、DDL、migration、credential、外部送信は触れない。このcontractはB2aだけで実装可能で、B2b以降の完成を前提にしない。
+B2aの検証はpublic `completeSummaryAttempt(...)` にsynthetic/public ACTUALを直接渡し、期待する具体的拒否例外と独立DB readbackによる全列不変を確認するservice proxy testとする。`UPPER_BOUND` / `UNKNOWN` / `NOT_SENT` の既存許可経路が意図せず変わらないことも個別確認する。production dispatch/cost policyはdeny-allのまま、provider transport、provenance issuer、rate registry/key、DDL、migration、credential、外部送信は触れない。このcontractはB2aだけで実装可能で、B2b以降の完成を前提にしない。
 
 ### 現行実装で確認した5つの阻断点
 
@@ -75,13 +75,13 @@ migration reviewではlegacy backfill/default、tenant nullability、index lengt
 
 | batch | 実装境界 | 必須完了証拠 / 明示的な外 |
 |---|---|---|
-| **B2a（今回の候補）** | 共通completion writerでpublic `ACTUAL` を永続化前に拒否する。private verified capabilityのacceptance pathはまだ作らない。 | direct forged ACTUALをservice proxyへ渡し、具体的拒否とattempt全列不変を独立readbackで確認。deny-all維持。DDL、provider送信、transport変更なし。これだけで独立実装可能。 |
+| **B2a（PLAN PASS対象）** | 共通completion writerでpublic `ACTUAL` を永続化前に拒否する。private verified capabilityのacceptance pathはまだ作らない。 | direct forged ACTUALをservice proxyへ渡し、具体的拒否とattempt全列不変を独立readbackで確認。deny-all維持。DDL、provider送信、transport変更なし。これだけで独立実装可能。 |
 | **B2b** | transport-bound response observationとstrict parser境界。実requestの送受信点からだけprivate observationを作り、synthetic loopback専用型はproduction authorityから分離する。 | parser public raw-body/DTO入口がないこと、valid outer + inner failure observation保持、不正outer/timeout/resetでprovenanceなし、sensitive payloadがlog/exception/DTOに出ないこと。schema/実providerなし。 |
 | **B2c** | DB ownerが別reviewでmigration proposalを承認しversion割当した後にschema/entity/mapperとdurable one-shot claimを実装する。DB claimは跨processの重複送信を防ぐ。transport内のprivate final `ClaimPermit` はprivate issuerだけが生成し、non-serializable/non-cloneableとする。`AtomicBoolean.compareAndSet(false, true)`で一度だけconsumeし、permit再利用・別process移送・DBからの再構築を拒否する。local permit CASはdurable DB claimの代替ではない。 | MySQL二connection claim raceで1/0、同じpermitの並行・順次reuseでsocket最大1回、process restart後もDB claimで再送0回。post-claim pre-socket mismatchはCLAIMED消費済み/UNKNOWNのまま。 |
 | **B2d** | verifierだけが作るprivate cost capabilityを同じcompletion transactionへ渡し、DB current field/card/policy/bindingを再確認してstatus/costを原子的に保存する。B2a guardをこのcapability-only pathで置換する。 | forged DTO拒否継続、capability有効時のみACTUAL、各binding/card/policy/tenant/status drift拒否、SQL/serialization/commit rollback。production registryとdispatch gateはdeny-all。 |
 | **B2e** | timeout/reset/partial response、clock/TTL/card境界、inner failure、multi-tenant、restart、response/completion crash matrixと運用観測を仕上げる。 | 各UNKNOWN/UPPER_BOUND/NOT_SENT分類と不再送をdeterministic/MySQLで立証。外部provider、契約、実価格、production rolloutは含めない。 |
 
-B2aをレビューする際の承認質問は「共通writerがpublic ACTUALを全経路で拒否し、その失敗がDB不変である最小差分を実装してよいか」に限る。B2b～B2eを含むB2全体の設計PASSや実装許可として解釈しない。後続batchは対象batchごとのPLAN/CODE reviewを行う。
+今回のB2a PLAN PASS対象は「private共通writer `completeAttempt(...)` がACTUAL state/evidenceを全経路で拒否し、拒否前のDB状態を不変にする最小差分」である。B2b～B2eを含むB2全体の設計PASSや実装許可ではない。後続batchは対象batchごとのPLAN/CODE reviewを行う。
 ## 目的と現在地
 
 B1（commit `db25d2b7`）は、Spring service proxyを通るattempt完了、tenant/CAS、`STALE`、transaction rollback、usage metadata保存の境界を実DBで検証する。B1のMySQL証拠はmetadata永続化と状態遷移を示すもので、provider由来usageの真正性や料金計算結果の本番有効性を示さない。
@@ -138,7 +138,7 @@ provider APIにusage応答署名がない場合、アプリ内issuerが作る署
 
 ## 実装順とレビューgate
 
-1. **B2a PLAN review（未完了・今回の対象）** — 共通completion writerのpublic ACTUAL拒否、拒否前のDB不変、deny-all維持、DDL/provider非接触という最小contractだけをreviewする。PASSした場合に限りB2a単独のcode changeを進める。PASSはB2全体、B2b以降、DDL、provider送信、本番承認を含まない。
+1. **B2a PLAN review（PASS）** — 共通completion writerのpublic ACTUAL拒否、拒否前のDB不変、deny-all維持、DDL/provider非接触という最小contractだけをreviewする。このPASSで許可された作業範囲はB2a単独のcode changeとそのCODE review/fast gateである。B2全体、B2b以降、DDL、provider送信、本番承認は含まない。
 2. **B2a CODE review / fast gate** — public forged ACTUALの拒否とrow全列不変をservice proxyで検証する。B2aにはmigration/MySQL concurrency/provider fixtureを持ち込まない。
 3. **B2b～B2eは個別PLAN/CODE review** — observation/parser、migration/durable claim、同一completion transactionのcost capability、failure matrixを順に扱う。B2cはmigration proposalへのDB owner承認とversion割当の後に開始する。各batchに必要なfast/MySQL gateを通す。
 4. **外部資料・human releaseは別タスク** — provider API/DPA/法務、usage semantics、price、offline signer/key custody、production dispatch/registry/flag/artifact ACTIVEは個別承認する。承認まではproductionをdeny-allに保つ。

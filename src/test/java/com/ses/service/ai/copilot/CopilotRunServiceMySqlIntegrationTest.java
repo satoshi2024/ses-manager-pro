@@ -3,6 +3,8 @@ package com.ses.service.ai.copilot;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.ai.CopilotProviderUsage;
 import com.ses.service.ai.copilot.summary.CopilotCostState;
@@ -58,8 +60,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verify;
 
 /** C2-B1: MySQL実transactionでsummary metadata、tenant境界、CASとrollbackを検証する。 */
 @SpringBootTest
@@ -88,6 +93,7 @@ class CopilotRunServiceMySqlIntegrationTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private DataSource dataSource;
     @SpyBean private ObjectMapper objectMapper;
+    @SpyBean private AiRecommendationRunMapper runMapper;
     @Autowired private PlatformTransactionManager transactionManager;
 
     @AfterEach
@@ -151,6 +157,34 @@ class CopilotRunServiceMySqlIntegrationTest {
                 "INNER_VALIDATION_FAILED", usage, null);
         assertEquals(objectMapper.readTree(expectedUnknownJson), unknownMetadata);
         assertEquals(sha256(expectedUnknownJson), unknownRow.inputHash());
+    }
+
+    @Test
+    void caller指定ACTUALはJSON化とmapper更新前に拒否され二tenant全列不変() throws Exception {
+        assertTrue(AopUtils.isAopProxy(runService), "Spring transaction proxyを通す");
+        Fixture fixture = createFixture("tenant-a");
+        Fixture tenantBSentinel = createFixture("tenant-b");
+        Snapshot before = readIndependently(fixture.runId());
+        Snapshot sentinelBefore = readIndependently(tenantBSentinel.runId());
+        clearInvocations(objectMapper, runMapper);
+
+        SummaryCostEvidence forgedActual = new SummaryCostEvidence(CopilotCostState.ACTUAL, 7, null,
+                new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED, "RESPONSE_RECEIVED"),
+                null, new CopilotProviderUsage(10, 2, 12, null, null), "CALLER_FORGED");
+        SummaryResponse conflictingFields = new SummaryResponse(null, List.of(), "FAILED", null,
+                0L, null, 99, forgedActual);
+        BusinessException thrown = assertThrows(BusinessException.class,
+                () -> AccountingTenantContextHolder.runWithTenant("tenant-a",
+                        () -> runService.completeSummaryAttempt(fixture.attempt(), 8, conflictingFields)));
+
+        assertEquals(409, thrown.getCode());
+        assertEquals("COPILOT_ACTUAL_COST_NOT_VERIFIED", thrown.getMessageKey());
+        verify(objectMapper, never()).writeValueAsString(any());
+        verify(runMapper, never()).update(org.mockito.ArgumentMatchers.<com.ses.entity.AiRecommendationRun>isNull(),
+                any(Wrapper.class));
+        verify(runMapper, never()).insert(any(com.ses.entity.AiRecommendationRun.class));
+        assertEquals(before, readIndependently(fixture.runId()));
+        assertEquals(sentinelBefore, readIndependently(tenantBSentinel.runId()));
     }
 
     @Test

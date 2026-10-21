@@ -12,6 +12,7 @@ import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
+import com.ses.service.ai.copilot.summary.CopilotCostState;
 import com.ses.service.ai.copilot.summary.SummaryResponse;
 import com.ses.service.ai.copilot.summary.SummaryCostEvidence;
 import lombok.RequiredArgsConstructor;
@@ -211,13 +212,14 @@ public class CopilotRunService {
         if (!Objects.equals(activeTenant, attempt.tenantId())) {
             throw BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
         }
+        rejectUnverifiedActualCost(attempt, costJpy, costState, costEvidence);
         Map<String, Object> metadata = new LinkedHashMap<>(attempt.metadata());
         metadata.put("outcome", outcome);
         metadata.put("latencyMs", boundedLatency(latencyMs));
         metadata.put("costState", costState);
+        metadata.remove("costJpy");
+        metadata.remove("costUpperBoundYen");
         if (costEvidence != null) {
-            metadata.remove("costJpy");
-            metadata.remove("costUpperBoundYen");
             metadata.put("dispatchOutcome", costEvidence.dispatchOutcome().state().name());
             putSafeCode(metadata, "dispatchReasonCode", costEvidence.dispatchOutcome().reasonCode());
             putSafeCode(metadata, "costReasonCode", costEvidence.reasonCode());
@@ -262,6 +264,20 @@ public class CopilotRunService {
                 .set(AiRecommendationRun::getRedactedSummaryJson, json)
                 .set(AiRecommendationRun::getInputHash, sha256(json));
         return runMapper.update(null, update);
+    }
+
+    private void rejectUnverifiedActualCost(CopilotAttemptRecord attempt, Integer costJpy,
+                                           String costState, SummaryCostEvidence costEvidence) {
+        boolean actualInAttemptMetadata = attempt.metadata() != null
+                && "ACTUAL".equals(attempt.metadata().get("costState"));
+        boolean actualInEvidence = costEvidence != null && costEvidence.costState() == CopilotCostState.ACTUAL;
+        if ("ACTUAL".equals(costState) || actualInEvidence || actualInAttemptMetadata) {
+            throw BusinessException.of(409, "COPILOT_ACTUAL_COST_NOT_VERIFIED");
+        }
+        if (costJpy != null && !(costJpy == 0 && "NOT_SENT".equals(costState)
+                && costEvidence != null && costEvidence.costState() == CopilotCostState.NOT_SENT)) {
+            throw BusinessException.of(409, "COPILOT_COST_AMOUNT_NOT_VERIFIED");
+        }
     }
 
     private void putSafeCode(Map<String, Object> metadata, String key, String value) {
