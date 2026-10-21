@@ -182,6 +182,28 @@ class LifecycleEvidenceAndCompensationTest {
     }
 
     @Test
+    @DisplayName("通常完了経路からDUAL_CONFIRMATIONタスクを完了できないこと")
+    void dualConfirmationIsRejectedByOrdinaryCompletion() {
+        LifecycleTask task = taskMapper.selectById(taskId);
+        task.setStatus("IN_PROGRESS");
+        task.setEvidenceType("DUAL_CONFIRMATION");
+        taskMapper.updateById(task);
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                taskService.completeTask(taskId, adminUser.getId(), CompleteLifecycleTaskCommand.builder()
+                        .completionComment("単独完了の試行")
+                        .documentId(validDocument.getId())
+                        .build()));
+
+        assertEquals(409, ex.getCode());
+        assertEquals("IN_PROGRESS", taskMapper.selectById(taskId).getStatus());
+        assertTrue(evidenceLinkMapper.selectByTaskId(taskId).isEmpty());
+        assertTrue(eventMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<LifecycleEvent>()
+                .eq(LifecycleEvent::getTaskId, taskId)
+                .eq(LifecycleEvent::getEventType, "TASK_COMPLETED")).isEmpty());
+    }
+
+    @Test
     @DisplayName("B2-3: 案件中止（cancelCase）時の補償処理と後続操作禁止の検証")
     void testCancelCaseCompensationAndGuard() {
         // 案件を中止
