@@ -1,6 +1,18 @@
 # 統合fast gateの実行記録
 
-## 最新: 第6回 FAIL（2026-10-16）
+## 最新: 第7回 PASS（2026-10-21）
+
+- 固定Head `6b5415a6fd7311f6ff60e5571d8063f8b33e7b20`、起止SHA一致・clean、exit0。
+- selectorなしの `mvn -B -Dsurefire.runOrder.random.seed=48992185070100 test`。
+- UTC `2026-10-21T01:07:46.4160930Z`〜`2026-10-21T01:24:11.1903463Z`。
+- **694 class、4232 tests / failures 0 / errors 0 / skipped 0**。
+- `verification-evidence/20261021-control-fast-07/` にraw log/XML/text、起止metadata、集計、manifestを保存。
+  log SHA-256 `799FC727FF31B730CEBDE2897C53DDFD713F5BCE64474BEEF6363DC357456CDA`。
+- Astraが694 XML、1388 report hash、起止SHA/clean、selectorなしを独立照合してfast証拠PASS。
+- NF06 wave2 append/renew修復はこのHeadに未統合であり、本runの対象ではない。
+  MySQL/performance/browser/backup、staging、production承認をこの結果で代替しない。全体NO-GOを維持する。
+
+## 履歴: 第6回 FAIL（2026-10-16）
 
 - 固定Head `e09595c883afe62518281ac9a85f2343cbf716cb`、開始終了clean・SHA一致。
 - selectorなしの `mvn -B -Dsurefire.runOrder.random.seed=48992185070100 test`。
