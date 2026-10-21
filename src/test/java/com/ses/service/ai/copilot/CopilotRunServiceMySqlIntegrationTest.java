@@ -187,7 +187,9 @@ class CopilotRunServiceMySqlIntegrationTest {
         assertEquals("UPPER_BOUND", metadata.path("costState").asText());
         assertEquals(123, metadata.path("costUpperBoundYen").asInt());
         assertFalse(metadata.has("costJpy"));
-        assertEquals(sha256(committed.redactedSummaryJson()), committed.inputHash());
+        String expectedUpperBoundJson = expectedUpperBoundJson(fixture.attempt());
+        assertEquals(objectMapper.readTree(expectedUpperBoundJson), metadata);
+        assertEquals(sha256(expectedUpperBoundJson), committed.inputHash());
         assertEquals(sentinelBefore, readIndependently(tenantBSentinel.runId()));
     }
 
@@ -575,6 +577,21 @@ class CopilotRunServiceMySqlIntegrationTest {
             metadata.put("providerUsage", usageMetadata);
         }
         if (costJpy != null) metadata.put("costJpy", costJpy);
+        return objectMapper.writeValueAsString(metadata);
+    }
+
+    private String expectedUpperBoundJson(CopilotRunService.CopilotAttemptRecord attempt) throws Exception {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("attemptKind", "SUMMARY");
+        metadata.put("traceId", attempt.traceId());
+        metadata.put("outcome", "COST_UPPER_BOUND");
+        metadata.put("costState", "UPPER_BOUND");
+        metadata.put("configHash", attempt.artifact().configHash());
+        metadata.put("latencyMs", 21);
+        metadata.put("dispatchOutcome", "RESPONSE_RECEIVED");
+        metadata.put("dispatchReasonCode", "PROVIDER_RESPONSE_RECEIVED");
+        metadata.put("costReasonCode", "PRECHECK_BOUND");
+        metadata.put("costUpperBoundYen", 123);
         return objectMapper.writeValueAsString(metadata);
     }
 
