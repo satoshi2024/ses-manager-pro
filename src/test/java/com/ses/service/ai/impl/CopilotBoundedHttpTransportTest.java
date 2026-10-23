@@ -229,6 +229,36 @@ class CopilotBoundedHttpTransportTest {
     }
 
     @Test
+    void request上限はclone前に判定し上限値ちょうどは送信できる() throws Exception {
+        AtomicInteger requestsReceived = new AtomicInteger();
+        AtomicReference<Integer> receivedLength = new AtomicReference<>();
+        server = HttpServer.create(loopbackAddress(), 0);
+        server.createContext("/", guarded(exchange -> {
+            requestsReceived.incrementAndGet();
+            receivedLength.set(exchange.getRequestBody().readAllBytes().length);
+            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        }));
+        startServer();
+        transport = newTransport(snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC());
+        transport.start();
+
+        BusinessException oversized = assertThrows(BusinessException.class,
+                () -> transport.post(uri(), new byte[64 * 1024 + 1],
+                        deadlineAfter(3, TimeUnit.SECONDS)));
+        assertEquals("COPILOT_REQUEST_TOO_LARGE", oversized.getMessage());
+        assertEquals(0, requestsReceived.get());
+
+        CopilotBoundedHttpTransport.Response atLimit = transport.post(uri(),
+                new byte[64 * 1024], deadlineAfter(3, TimeUnit.SECONDS));
+        assertEquals(200, atLimit.statusCode());
+        assertEquals(1, requestsReceived.get());
+        assertEquals(64 * 1024, receivedLength.get());
+    }
+
+    @Test
     void hostnameVerifierのfalse結果は安全な理由コードで拒否する() throws Exception {
         Method requireMatch = CopilotBoundedHttpTransport.class
                 .getDeclaredMethod("requireHostnameMatch", boolean.class);

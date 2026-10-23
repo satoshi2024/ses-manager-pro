@@ -196,14 +196,11 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
 
     private TransportExchange exchange(URI uri, byte[] requestBody, long deadlineNanos, String geminiApiKey) {
         Assert.state(started, "Copilot async transportは開始されていません");
-        if (requestBody == null) {
+        if (requestBody == null || requestBody.length > MAX_REQUEST_BYTES) {
             throw BusinessException.of(413, "COPILOT_REQUEST_TOO_LARGE");
         }
         byte[] requestSnapshot = requestBody.clone();
         validateDestination(uri);
-        if (requestSnapshot.length > MAX_REQUEST_BYTES) {
-            throw BusinessException.of(413, "COPILOT_REQUEST_TOO_LARGE");
-        }
         long remaining = remainingNanos(deadlineNanos);
         if (remaining <= 0) {
             throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
