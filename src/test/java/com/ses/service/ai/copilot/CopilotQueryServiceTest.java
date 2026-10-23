@@ -92,6 +92,7 @@ class CopilotQueryServiceTest {
         when(adapter.copilotModelId()).thenReturn("mock-management-copilot");
         when(adapter.copilotPromptVersion()).thenReturn(CopilotSummaryPromptTemplate.VERSION);
         when(adapter.copilotConfigHash()).thenReturn(configHash);
+        when(adapter.copilotCanonicalEndpoint()).thenReturn("");
         AiOutboundProbe probe = mock(AiOutboundProbe.class);
         AiExecutionGatewayImpl realGateway = new AiExecutionGatewayImpl(adapter, realAiConfig, probe,
                 new ObjectMapper(), mock(AiArtifactVersionMapper.class), mock(AiRecommendationRunMapper.class),
