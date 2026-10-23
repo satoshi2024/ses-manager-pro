@@ -214,13 +214,23 @@ class ImportMetadataRealMySqlTest {
         if (documentId > 0) {
             jdbc.update("DELETE FROM t_document_access_log WHERE document_id=?", documentId);
             jdbc.update("DELETE FROM t_document_link WHERE tenant_id=? AND document_id=?", tenantId, documentId);
-            jdbc.update("DELETE FROM t_import_identity_registry WHERE tenant_id=? AND first_job_id IN "
-                    + "(SELECT id FROM t_import_job WHERE tenant_id=? AND source_system_id=?)", tenantId, tenantId, sourceId);
-            jdbc.update("DELETE FROM t_import_validation_row WHERE tenant_id=? AND job_id=?", tenantId, jobId);
-            jdbc.update("UPDATE t_import_job SET active_validation_run_id=NULL,current_validation_run_id=NULL "
-                    + "WHERE tenant_id=? AND id=?", tenantId, jobId);
-            jdbc.update("DELETE FROM t_import_validation_run WHERE tenant_id=? AND job_id=?", tenantId, jobId);
-            jdbc.update("DELETE FROM t_import_job WHERE tenant_id=? AND id=?", tenantId, jobId);
+            if (sourceId > 0 && documentVersionId > 0) {
+                String fixtureJobs = "SELECT id FROM t_import_job WHERE tenant_id=? AND source_system_id=? "
+                        + "AND document_id=? AND document_version_id=?";
+                Object[] fixtureScope = {tenantId, sourceId, documentId, documentVersionId};
+                jdbc.update("DELETE FROM t_import_identity_registry WHERE tenant_id=? AND first_job_id IN (" + fixtureJobs + ")",
+                        tenantId, fixtureScope[0], fixtureScope[1], fixtureScope[2], fixtureScope[3]);
+                jdbc.update("DELETE FROM t_import_validation_row WHERE tenant_id=? AND job_id IN (" + fixtureJobs + ")",
+                        tenantId, fixtureScope[0], fixtureScope[1], fixtureScope[2], fixtureScope[3]);
+                jdbc.update("UPDATE t_import_job SET active_validation_run_id=NULL,current_validation_run_id=NULL "
+                                + "WHERE tenant_id=? AND source_system_id=? AND document_id=? AND document_version_id=?",
+                        fixtureScope);
+                jdbc.update("DELETE FROM t_import_validation_run WHERE tenant_id=? AND job_id IN (" + fixtureJobs + ")",
+                        tenantId, fixtureScope[0], fixtureScope[1], fixtureScope[2], fixtureScope[3]);
+                jdbc.update("DELETE FROM t_import_job WHERE tenant_id=? AND source_system_id=? "
+                                + "AND document_id=? AND document_version_id=?",
+                        fixtureScope);
+            }
             jdbc.update("DELETE FROM t_document_version WHERE tenant_id=? AND id=?", tenantId, documentVersionId);
             jdbc.update("DELETE FROM t_document WHERE tenant_id=? AND id=?", tenantId, documentId);
         }
@@ -1426,45 +1436,40 @@ class ImportMetadataRealMySqlTest {
     @Test
     void source行待機中に権限を撤回するとregisterJobはlinkも含めて拒否する() throws Exception {
         sourceId = metadataService.createSource(new ImportSourceRequest("SyntheticSource", "合成source"));
-        long blockerId;
-        Connection blocker = dataSource.getConnection();
-        blocker.setAutoCommit(false);
-        try (var statement = blocker.prepareStatement("SELECT id FROM t_import_source_system WHERE tenant_id=? AND id=? FOR UPDATE")) {
-            statement.setString(1, tenantId);
-            statement.setLong(2, sourceId);
-            try (ResultSet rows = statement.executeQuery()) { assertTrue(rows.next()); }
-        }
-        try (var statement = blocker.createStatement(); ResultSet rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
-            rows.next(); blockerId = rows.getLong(1);
-        }
-
-        var pool = Executors.newSingleThreadExecutor();
+        Connection blocker = null;
+        ExecutorService pool = null;
+        Future<Long> registration = null;
         var requesterId = new AtomicReference<Long>();
-        Future<Long> registration = pool.submit(() -> {
-            var authority = new SimpleGrantedAuthority("ROLE_管理者");
-            installPrincipal(tenantId, authority);
-            AccountingTenantContextHolder.setTenantId(tenantId);
-            try {
-                return new org.springframework.transaction.support.TransactionTemplate(
-                        new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource)).execute(status -> {
-                    requesterId.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
-                    return metadataService.registerJob(new ImportJobRegistrationRequest(sourceId, ImportEntity.CUSTOMER,
-                            "ses-import-v1", ImportEncoding.UTF8, SOURCE_HASH, documentId, documentVersionId, 1));
-                });
-            } finally {
-                SecurityContextHolder.clearContext();
-                AccountingTenantContextHolder.clear();
-            }
-        });
         Throwable primaryFailure = null;
         boolean expectedDenialObserved = false;
         try {
-            awaitSourcePrimaryWait(requesterId, blockerId, Long.toString(sourceId), registration);
+            blocker = dataSource.getConnection();
+            blocker.setAutoCommit(false);
+            SourcePrimaryRecordLock holderLock = lockExactSourcePrimaryRow(blocker, sourceId);
+            pool = Executors.newSingleThreadExecutor();
+            Future<Long> submittedRegistration = pool.submit(() -> {
+                var authority = new SimpleGrantedAuthority("ROLE_管理者");
+                installPrincipal(tenantId, authority);
+                AccountingTenantContextHolder.setTenantId(tenantId);
+                try {
+                    return new org.springframework.transaction.support.TransactionTemplate(
+                            new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource)).execute(status -> {
+                        requesterId.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                        return metadataService.registerJob(new ImportJobRegistrationRequest(sourceId, ImportEntity.CUSTOMER,
+                                "ses-import-v1", ImportEncoding.UTF8, SOURCE_HASH, documentId, documentVersionId, 1));
+                    });
+                } finally {
+                    SecurityContextHolder.clearContext();
+                    AccountingTenantContextHolder.clear();
+                }
+            });
+            registration = submittedRegistration;
+            awaitSourcePrimaryWait(requesterId, holderLock, sourceId, submittedRegistration);
             jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 WHERE tenant_id=? AND group_id=? AND action_key=? AND deny_flag=0",
                     tenantId, groupId, ImportMetadataAuthorizationService.ACTION);
             blocker.commit();
             var failure = org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class,
-                    () -> registration.get(10, TimeUnit.SECONDS));
+                    () -> submittedRegistration.get(10, TimeUnit.SECONDS));
             assertTrue(failure.getCause() instanceof BusinessException);
             assertEquals(403, ((BusinessException) failure.getCause()).getCode());
             expectedDenialObserved = true;
@@ -1480,11 +1485,50 @@ class ImportMetadataRealMySqlTest {
             throw failure;
         } finally {
             List<Throwable> cleanupFailures = new java.util.ArrayList<>();
-            try { blocker.rollback(); } catch (Exception failure) { cleanupFailures.add(failure); }
-            try { blocker.close(); } catch (Exception failure) { cleanupFailures.add(failure); }
-            cleanupFailures.addAll(awaitFutures(List.of(registration), pool, expectedDenialObserved));
+            if (!expectedDenialObserved) {
+                try {
+                    jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 "
+                                    + "WHERE tenant_id=? AND group_id=? AND action_key=? AND deny_flag=0",
+                            tenantId, groupId, ImportMetadataAuthorizationService.ACTION);
+                } catch (Exception failure) { cleanupFailures.add(failure); }
+            }
+            if (blocker != null) {
+                try { blocker.rollback(); } catch (Exception failure) { cleanupFailures.add(failure); }
+                try { blocker.close(); } catch (Exception failure) { cleanupFailures.add(failure); }
+            }
+            cleanupFailures.addAll(awaitSourceWorkers(registration == null ? List.of() : List.of(registration), pool, true));
             reportCleanupFailures("source lock競合fixture", cleanupFailures, primaryFailure);
         }
+    }
+
+    @Test
+    void sourcePrimaryWaitOracleは誤holderRequester対象と複数RECORDを拒否する() {
+        SourcePrimaryRecordLock holder = new SourcePrimaryRecordLock("INNODB", "holder-lock", "holder-trx",
+                71L, "nf06_import_metadata_real", "t_import_source_system", "PRIMARY", "RECORD",
+                "X,REC_NOT_GAP", "GRANTED", null, 301L);
+        SourcePrimaryWaitEdge edge = new SourcePrimaryWaitEdge("INNODB", 72L, "request-lock", "request-trx",
+                "nf06_import_metadata_real", "t_import_source_system", "PRIMARY", "RECORD", "X,REC_NOT_GAP",
+                "WAITING", null, 71L, "holder-lock", "holder-trx", "nf06_import_metadata_real",
+                "t_import_source_system", "PRIMARY", "RECORD", "X,REC_NOT_GAP", "GRANTED", null);
+
+        assertTrue(isExactSourcePrimaryWait(List.of(holder), List.of(edge), 72L, 71L, 301L));
+        assertTrue(!isExactSourcePrimaryWait(List.of(holder), List.of(edge), 73L, 71L, 301L), "誤ったrequesterを拒否");
+        assertTrue(!isExactSourcePrimaryWait(List.of(holder), List.of(edge), 72L, 74L, 301L), "誤ったholderを拒否");
+        assertTrue(!isExactSourcePrimaryWait(List.of(holder), List.of(edge), 72L, 71L, 302L), "誤った対象sourceを拒否");
+        SourcePrimaryRecordLock secondRecord = new SourcePrimaryRecordLock("INNODB", "holder-lock-2", "holder-trx",
+                71L, "nf06_import_metadata_real", "t_import_source_system", "PRIMARY", "RECORD",
+                "X,REC_NOT_GAP", "GRANTED", null, 301L);
+        assertTrue(!isExactSourcePrimaryWait(List.of(holder, secondRecord), List.of(edge), 72L, 71L, 301L),
+                "holderに対象PRIMARYのrecord lockが複数あれば拒否");
+        SourcePrimaryWaitEdge wrongTarget = new SourcePrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(),
+                edge.requesterIndex(), edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), "302",
+                edge.holderConnectionId(), edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(),
+                edge.holderTable(), edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), "302");
+        assertTrue(!isExactSourcePrimaryWait(List.of(holder), List.of(wrongTarget), 72L, 71L, 301L),
+                "非NULL lock keyが期待source IDと違えば拒否");
+        assertTrue(!isExactSourcePrimaryWait(List.of(holder), List.of(edge, edge), 72L, 71L, 301L),
+                "wait edgeが複数なら曖昧として拒否");
     }
 
     // 以下7件は認可競合coverage候補（未実行）。service transaction自体のsource行待機分岐を検証する。
@@ -2181,6 +2225,20 @@ class ImportMetadataRealMySqlTest {
                                   String requestStatus, String blockerType, String blockerMode,
                                   String blockerStatus) { }
 
+    private record SourcePrimaryRecordLock(String engine, String lockId, String transactionId,
+                                           long connectionId, String schema, String table, String index,
+                                           String type, String mode, String status, String lockData,
+                                           long sourceId) { }
+
+    private record SourcePrimaryWaitEdge(String engine, long requesterConnectionId, String requesterLockId,
+                                         String requesterTransactionId, String requesterSchema,
+                                         String requesterTable, String requesterIndex, String requesterType,
+                                         String requesterMode, String requesterStatus, String requesterData,
+                                         long holderConnectionId, String holderLockId, String holderTransactionId,
+                                         String holderSchema, String holderTable, String holderIndex,
+                                         String holderType, String holderMode, String holderStatus,
+                                         String holderData) { }
+
     private void updateAndCommit(String sql, Object[] params, AtomicReference<Long> connectionId) {
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
@@ -2719,18 +2777,7 @@ class ImportMetadataRealMySqlTest {
         try {
             blocker = dataSource.getConnection();
             blocker.setAutoCommit(false);
-            try (var statement = blocker.prepareStatement(
-                    "SELECT id FROM t_import_source_system WHERE tenant_id=? AND id=? FOR UPDATE")) {
-                statement.setString(1, tenantId);
-                statement.setLong(2, sourceId);
-                try (ResultSet rows = statement.executeQuery()) { assertTrue(rows.next()); }
-            }
-            long blockerId;
-            try (var statement = blocker.createStatement();
-                 ResultSet rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
-                rows.next();
-                blockerId = rows.getLong(1);
-            }
+            SourcePrimaryRecordLock holderLock = lockExactSourcePrimaryRow(blocker, sourceId);
 
             pool = Executors.newSingleThreadExecutor();
             Future<?> submittedOperation = pool.submit(() -> {
@@ -2749,7 +2796,7 @@ class ImportMetadataRealMySqlTest {
                 }
             });
             operationFuture = submittedOperation;
-            awaitSourcePrimaryWait(requesterId, blockerId, Long.toString(sourceId), submittedOperation);
+            awaitSourcePrimaryWait(requesterId, holderLock, sourceId, submittedOperation);
             assertEquals(1, jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 "
                             + "WHERE tenant_id=? AND group_id=? AND action_key=? AND deny_flag=0",
                     tenantId, groupId, ImportMetadataAuthorizationService.ACTION));
@@ -2764,13 +2811,20 @@ class ImportMetadataRealMySqlTest {
             throw failure;
         } finally {
             List<Throwable> cleanupFailures = new java.util.ArrayList<>();
+            if (!expectedDenialObserved && blocker != null) {
+                try {
+                    jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 "
+                                    + "WHERE tenant_id=? AND group_id=? AND action_key=? AND deny_flag=0",
+                            tenantId, groupId, ImportMetadataAuthorizationService.ACTION);
+                } catch (Exception failure) { cleanupFailures.add(failure); }
+            }
             if (blocker != null) {
                 try { blocker.rollback(); } catch (Exception failure) { cleanupFailures.add(failure); }
                 try { blocker.close(); } catch (Exception failure) { cleanupFailures.add(failure); }
             }
             if (pool != null) {
-                cleanupFailures.addAll(awaitFutures(operationFuture == null ? List.of() : List.of(operationFuture),
-                        pool, expectedDenialObserved));
+                cleanupFailures.addAll(awaitSourceWorkers(operationFuture == null ? List.of() : List.of(operationFuture),
+                        pool, true));
             }
             reportCleanupFailures("metadata service source lock競合fixture", cleanupFailures, primaryFailure);
         }
@@ -3064,31 +3118,154 @@ class ImportMetadataRealMySqlTest {
                 safeWaitDetails(requesterId.get(), blockerId.get()));
     }
 
-    private void awaitSourcePrimaryWait(AtomicReference<Long> requesterId, long blockerId,
-                                       String lockData, Future<?> sourceOperation) throws Exception {
+    private SourcePrimaryRecordLock lockExactSourcePrimaryRow(Connection holder, long expectedSourceId) throws Exception {
+        long holderConnectionId;
+        try (var statement = holder.createStatement(); ResultSet rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
+            assertTrue(rows.next());
+            holderConnectionId = rows.getLong(1);
+        }
+        try (var statement = holder.prepareStatement("SELECT id FROM t_import_source_system WHERE tenant_id=? AND id=? FOR UPDATE")) {
+            statement.setString(1, tenantId);
+            statement.setLong(2, expectedSourceId);
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next(), "holderがfixture sourceのPRIMARY行を取得します");
+                assertEquals(expectedSourceId, rows.getLong(1));
+                assertTrue(!rows.next(), "tenantとPK指定のholder lock queryは一行だけ返します");
+            }
+        }
+        List<SourcePrimaryRecordLock> records = sourcePrimaryRecordLocks(holderConnectionId);
+        if (records.size() != 1) {
+            throw new AssertionError("holderの対象schema/table/PRIMARYにあるRECORD lockは一件である必要があります: " + records);
+        }
+        SourcePrimaryRecordLock lock = records.get(0);
+        if (lock.engine() == null || lock.lockId() == null || lock.transactionId() == null
+                || lock.connectionId() != holderConnectionId || lock.sourceId() != expectedSourceId
+                || !isSourcePrimaryRecordLock(lock, expectedSourceId, "GRANTED")) {
+            throw new AssertionError("holderが対象source PRIMARYの非gap X lockを保持していません: " + lock);
+        }
+        return lock;
+    }
+
+    private List<SourcePrimaryRecordLock> sourcePrimaryRecordLocks(long connectionId) {
+        return jdbc.query("""
+                SELECT dl.ENGINE,dl.ENGINE_LOCK_ID,dl.ENGINE_TRANSACTION_ID,th.PROCESSLIST_ID,
+                       dl.OBJECT_SCHEMA,dl.OBJECT_NAME,dl.INDEX_NAME,dl.LOCK_TYPE,dl.LOCK_MODE,
+                       dl.LOCK_STATUS,dl.LOCK_DATA
+                FROM performance_schema.data_locks dl
+                JOIN performance_schema.threads th ON th.THREAD_ID=dl.THREAD_ID
+                WHERE th.PROCESSLIST_ID=? AND dl.OBJECT_SCHEMA=DATABASE()
+                  AND dl.OBJECT_NAME='t_import_source_system' AND dl.INDEX_NAME='PRIMARY'
+                  AND dl.LOCK_TYPE='RECORD'
+                """, (rs, row) -> new SourcePrimaryRecordLock(rs.getString(1), rs.getString(2),
+                rs.getString(3), rs.getLong(4), rs.getString(5), rs.getString(6), rs.getString(7),
+                rs.getString(8), rs.getString(9), rs.getString(10), rs.getString(11), sourceId), connectionId);
+    }
+
+    private boolean isSourcePrimaryRecordLock(SourcePrimaryRecordLock lock, long expectedSourceId, String status) {
+        return lock.schema().equals(jdbc.queryForObject("SELECT DATABASE()", String.class))
+                && lock.table().equals("t_import_source_system") && lock.index().equals("PRIMARY")
+                && lock.type().equals("RECORD") && isExclusiveRecordMode(lock.mode())
+                && lock.status().equals(status)
+                && (lock.lockData() == null || lock.lockData().equals(Long.toString(expectedSourceId)));
+    }
+
+    private boolean isExclusiveRecordMode(String mode) {
+        if (mode == null) return false;
+        Set<String> parts = Set.of(mode.split(","));
+        return parts.contains("X") && parts.contains("REC_NOT_GAP")
+                && !parts.contains("GAP") && !parts.contains("INSERT_INTENTION") && !parts.contains("SUPREMUM");
+    }
+
+    private List<SourcePrimaryWaitEdge> sourcePrimaryWaitEdges(long requesterId) {
+        return jdbc.query("""
+                SELECT w.ENGINE,wt.PROCESSLIST_ID AS req_connection_id,req.ENGINE_LOCK_ID AS req_lock_id,
+                       req.ENGINE_TRANSACTION_ID AS req_trx_id,req.OBJECT_SCHEMA AS req_schema,
+                       req.OBJECT_NAME AS req_table,req.INDEX_NAME AS req_index,req.LOCK_TYPE AS req_type,
+                       req.LOCK_MODE AS req_mode,req.LOCK_STATUS AS req_status,req.LOCK_DATA AS req_data,
+                       bt.PROCESSLIST_ID AS holder_connection_id,blk.ENGINE_LOCK_ID AS holder_lock_id,
+                       blk.ENGINE_TRANSACTION_ID AS holder_trx_id,blk.OBJECT_SCHEMA AS holder_schema,
+                       blk.OBJECT_NAME AS holder_table,blk.INDEX_NAME AS holder_index,blk.LOCK_TYPE AS holder_type,
+                       blk.LOCK_MODE AS holder_mode,blk.LOCK_STATUS AS holder_status,blk.LOCK_DATA AS holder_data
+                FROM performance_schema.data_lock_waits w
+                JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
+                JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                JOIN performance_schema.data_locks req
+                  ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                JOIN performance_schema.data_locks blk
+                  ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                WHERE wt.PROCESSLIST_ID=?
+                """, (rs, row) -> new SourcePrimaryWaitEdge(rs.getString("ENGINE"),
+                rs.getLong("req_connection_id"), rs.getString("req_lock_id"), rs.getString("req_trx_id"),
+                rs.getString("req_schema"), rs.getString("req_table"), rs.getString("req_index"),
+                rs.getString("req_type"), rs.getString("req_mode"), rs.getString("req_status"),
+                rs.getString("req_data"), rs.getLong("holder_connection_id"), rs.getString("holder_lock_id"),
+                rs.getString("holder_trx_id"), rs.getString("holder_schema"), rs.getString("holder_table"),
+                rs.getString("holder_index"), rs.getString("holder_type"), rs.getString("holder_mode"),
+                rs.getString("holder_status"), rs.getString("holder_data")), requesterId);
+    }
+
+    private boolean isExactSourcePrimaryWait(List<SourcePrimaryRecordLock> holderRecords,
+                                             List<SourcePrimaryWaitEdge> waits,
+                                             long requesterId, long holderId, long expectedSourceId) {
+        if (holderRecords == null || holderRecords.size() != 1 || waits == null || waits.size() != 1) return false;
+        SourcePrimaryRecordLock holder = holderRecords.get(0);
+        SourcePrimaryWaitEdge edge = waits.get(0);
+        if (holder.engine() == null || holder.lockId() == null || holder.transactionId() == null
+                || holder.connectionId() != holderId || holder.sourceId() != expectedSourceId
+                || !isSourcePrimaryRecordLock(holder, expectedSourceId, "GRANTED")) return false;
+        return edge.engine() != null && edge.requesterLockId() != null && edge.requesterTransactionId() != null
+                && edge.holderLockId() != null && edge.holderTransactionId() != null
+                && edge.engine().equals(holder.engine())
+                && edge.requesterConnectionId() == requesterId && edge.holderConnectionId() == holderId
+                && !edge.requesterTransactionId().equals(holder.transactionId())
+                && edge.holderTransactionId().equals(holder.transactionId())
+                && edge.holderLockId().equals(holder.lockId())
+                && isSourcePrimaryEdgeSide(edge.requesterSchema(), edge.requesterTable(), edge.requesterIndex(),
+                        edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), edge.requesterData(),
+                        expectedSourceId, "WAITING")
+                && isSourcePrimaryEdgeSide(edge.holderSchema(), edge.holderTable(), edge.holderIndex(),
+                        edge.holderType(), edge.holderMode(), edge.holderStatus(), edge.holderData(),
+                        expectedSourceId, "GRANTED");
+    }
+
+    private boolean isSourcePrimaryEdgeSide(String schema, String table, String index, String type,
+                                            String mode, String status, String lockData,
+                                            long expectedSourceId, String expectedStatus) {
+        return schema != null && schema.equals(jdbc.queryForObject("SELECT DATABASE()", String.class))
+                && "t_import_source_system".equals(table) && "PRIMARY".equals(index)
+                && "RECORD".equals(type) && isExclusiveRecordMode(mode) && expectedStatus.equals(status)
+                && (lockData == null || lockData.equals(Long.toString(expectedSourceId)));
+    }
+
+    private SourcePrimaryWaitEdge awaitSourcePrimaryWait(AtomicReference<Long> requesterId,
+                                                         SourcePrimaryRecordLock holderLock,
+                                                         long expectedSourceId, Future<?> sourceOperation) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
             assertFuturePending(sourceOperation, "metadata service");
             Long requester = requesterId.get();
             if (requester != null) {
-                Integer waits = jdbc.queryForObject("""
-                        SELECT COUNT(*) FROM performance_schema.data_lock_waits w
-                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
-                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
-                        JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
-                        JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
-                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='t_import_source_system' AND req.INDEX_NAME='PRIMARY'
-                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='t_import_source_system' AND blk.INDEX_NAME='PRIMARY'
-                          AND req.LOCK_DATA=? AND blk.LOCK_DATA=?
-                        """, Integer.class, requester, blockerId, lockData, lockData);
-                if (waits != null && waits > 0) return;
+                if (requester == holderLock.connectionId()) {
+                    throw new AssertionError("requesterとholderのconnection IDが同一です");
+                }
+                List<SourcePrimaryWaitEdge> waits = sourcePrimaryWaitEdges(requester);
+                if (!waits.isEmpty()) {
+                    List<SourcePrimaryRecordLock> holderRecords = sourcePrimaryRecordLocks(holderLock.connectionId());
+                    if (!isExactSourcePrimaryWait(holderRecords, waits, requester,
+                            holderLock.connectionId(), expectedSourceId)
+                            || !holderRecords.get(0).equals(holderLock)) {
+                        throw new AssertionError("source PRIMARY wait identityが曖昧または期待外です: waits="
+                                + waits + "; holderRecords=" + holderRecords);
+                    }
+                    assertFuturePending(sourceOperation, "metadata service");
+                    return waits.get(0);
+                }
             }
             Thread.sleep(25);
         }
         assertFuturePending(sourceOperation, "metadata service");
-        throw new AssertionError("対象source PRIMARY行のMySQL lock waitを確認できませんでした。" +
-                safeWaitDetails(requesterId.get(), blockerId));
+        throw new AssertionError("対象source PRIMARY行のMySQL lock waitを確認できませんでした。"
+                + safeWaitDetails(requesterId.get(), holderLock.connectionId()) + "; holder=" + holderLock);
     }
 
     private void assertContentionTasksPending(Future<?> gate, Future<?> denyInsert,
@@ -3108,6 +3285,50 @@ class ImportMetadataRealMySqlTest {
         } catch (java.util.concurrent.CancellationException cancelled) {
             throw new AssertionError(label + "が予期せずcancelされました", cancelled);
         }
+    }
+
+    private List<Throwable> awaitSourceWorkers(List<? extends Future<?>> futures, ExecutorService pool,
+                                               boolean expectedAuthorizationDenial) {
+        List<Throwable> failures = new java.util.ArrayList<>();
+        boolean interrupted = false;
+        for (Future<?> future : futures) {
+            if (future == null) continue;
+            while (true) {
+                try {
+                    future.get();
+                    if (expectedAuthorizationDenial) {
+                        failures.add(new AssertionError("source lock解放後にworkerが成功しました。認可拒否が必要です"));
+                    }
+                    break;
+                } catch (InterruptedException interruption) {
+                    interrupted = true;
+                } catch (java.util.concurrent.ExecutionException failure) {
+                    Throwable cause = failure.getCause() == null ? failure : failure.getCause();
+                    if (!(expectedAuthorizationDenial && cause instanceof BusinessException denied
+                            && denied.getCode() == 403)) failures.add(cause);
+                    break;
+                } catch (java.util.concurrent.CancellationException cancelled) {
+                    failures.add(cancelled);
+                    break;
+                }
+            }
+        }
+        if (pool != null) {
+            pool.shutdown();
+            try {
+                if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    failures.add(new AssertionError("source lock worker完了後もexecutorが停止しませんでした"));
+                }
+            } catch (InterruptedException interruption) {
+                interrupted = true;
+                while (!pool.isTerminated()) {
+                    try { pool.awaitTermination(1, TimeUnit.SECONDS); }
+                    catch (InterruptedException repeated) { interrupted = true; }
+                }
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt();
+        return failures;
     }
 
     private List<String> safeWaitDetails(Long requesterId, Long blockerId) {
