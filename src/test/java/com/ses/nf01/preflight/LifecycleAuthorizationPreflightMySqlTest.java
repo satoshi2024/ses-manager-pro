@@ -1,6 +1,8 @@
 package com.ses.nf01.preflight;
 
 import com.ses.test.MySQLContainer;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Container;
@@ -16,6 +18,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -34,7 +37,7 @@ class LifecycleAuthorizationPreflightMySqlTest {
 
     @Test
     void syntheticRowsAreCollectedWithoutChangingSchemaOrData() throws Exception {
-        createFixture();
+        createFixture(false);
         String schema = MYSQL.getDatabaseName();
         String url = MYSQL.getJdbcUrl();
         createReadOnlyReader();
@@ -45,13 +48,25 @@ class LifecycleAuthorizationPreflightMySqlTest {
             String after = snapshot(reader, schema);
 
             assertEquals("BLOCKED_MAPPING", report.status());
-            assertTrue(report.toJson().contains("ORG_UNIT_TENANT_MAPPING"));
-            assertTrue(report.toJson().contains("PROPOSAL_AUTHOR_DANGLING"));
-            assertTrue(report.toJson().contains("SALES_ACTIVITY_CUSTOMER_DANGLING"));
-            assertTrue(report.toJson().contains("DOCUMENT_VERSION_PARENT_MISMATCH"));
+            assertFinding(report, "ORG_UNIT_TENANT_MAPPING", "BLOCKED_MAPPING", 1);
             assertTrue(report.legacyDisposalTenantColumnAbsentForTest());
             assertEquals(before, after);
             assertFalse(report.toJson().contains(url));
+        }
+    }
+
+    @Test
+    void tenantAndParentAnomaliesAreReportedWithExactCounts() throws Exception {
+        createFixture(true);
+        createReadOnlyReader();
+        try (Connection reader = readerConnection()) {
+            LifecycleAuthorizationPreflight.PreflightReport report = LifecycleAuthorizationPreflight.run(
+                    reader, MYSQL.getDatabaseName(), "synthetic-head");
+            assertEquals("FAIL", report.status());
+            assertFinding(report, "DOCUMENT_VERSION_PARENT_MISMATCH", "FAIL", 3);
+            assertFinding(report, "PROPOSAL_AUTHOR_DANGLING", "FAIL", 1);
+            assertFinding(report, "SALES_ACTIVITY_CUSTOMER_DANGLING", "FAIL", 1);
+            assertFinding(report, "SALES_ACTIVITY_CREATOR_DANGLING", "PASS", 0);
         }
     }
 
@@ -86,11 +101,12 @@ class LifecycleAuthorizationPreflightMySqlTest {
 
     @Test
     void selectPrivilegeQueryFailureReturnsSanitizedFailure() throws Exception {
-        createFixture();
+        createFixture(false);
         createReadOnlyReader();
         AtomicBoolean rollbackObserved = new AtomicBoolean();
+        AtomicInteger queryAttempts = new AtomicInteger();
         try (Connection reader = readerConnection()) {
-            Connection failing = failSelectedTenantQuery(reader, rollbackObserved);
+            Connection failing = failSelectedTenantQuery(reader, rollbackObserved, queryAttempts);
             LifecycleAuthorizationPreflight.PreflightReport report = LifecycleAuthorizationPreflight.run(
                     failing, MYSQL.getDatabaseName(), "synthetic-head");
             assertEquals("FAIL", report.status());
@@ -98,10 +114,12 @@ class LifecycleAuthorizationPreflightMySqlTest {
             assertFalse(report.toJson().contains("jdbc:mysql://sensitive.example"));
             assertFalse(report.toJson().contains("sensitive-query-error"));
             assertTrue(rollbackObserved.get());
+            assertEquals(1, queryAttempts.get());
         }
     }
 
-    private Connection failSelectedTenantQuery(Connection delegate, AtomicBoolean rollbackObserved) {
+    private Connection failSelectedTenantQuery(Connection delegate, AtomicBoolean rollbackObserved,
+                                               AtomicInteger queryAttempts) {
         return (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(), new Class<?>[] {Connection.class},
                 (proxy, method, args) -> {
                     try {
@@ -115,6 +133,7 @@ class LifecycleAuthorizationPreflightMySqlTest {
                                             && statementArgs != null
                                             && statementArgs[0] instanceof String sql
                                             && sql.contains("FROM sys_user GROUP BY BINARY tenant_id")) {
+                                        queryAttempts.incrementAndGet();
                                         throw new SQLException("jdbc:mysql://sensitive.example/db sensitive-query-error");
                                     }
                                     try {
@@ -137,7 +156,7 @@ class LifecycleAuthorizationPreflightMySqlTest {
             statement.execute("CREATE TABLE IF NOT EXISTS " + schema + ".sys_user(id BIGINT PRIMARY KEY)");
         }
         String url = "jdbc:mysql://" + MYSQL.getHost() + ":" + MYSQL.getMappedPort(3306) + "/" + schema;
-        try (Connection root = DriverManager.getConnection(url, "root", "test")) {
+        try (Connection root = DriverManager.getConnection(url, "root", MYSQL.getPassword())) {
             LifecycleAuthorizationPreflight.PreflightReport report = LifecycleAuthorizationPreflight.run(root, schema, "synthetic-head");
             assertEquals("FAIL", report.status());
             assertTrue(report.toJson().contains("SCHEMA_COLUMN_MISSING"));
@@ -149,6 +168,7 @@ class LifecycleAuthorizationPreflightMySqlTest {
         createFixture();
         try (Connection connection = MYSQL.createConnection("")) {
             connection.setReadOnly(true);
+            connection.setAutoCommit(false);
             try (Statement statement = connection.createStatement()) {
                 statement.execute("START TRANSACTION READ ONLY");
                 SQLException rejected = assertThrows(SQLException.class,
@@ -169,7 +189,7 @@ class LifecycleAuthorizationPreflightMySqlTest {
 
     private Connection rootConnection() throws Exception {
         String url = "jdbc:mysql://" + MYSQL.getHost() + ":" + MYSQL.getMappedPort(3306) + "/" + MYSQL.getDatabaseName();
-        return DriverManager.getConnection(url, "root", "test");
+        return DriverManager.getConnection(url, "root", MYSQL.getPassword());
     }
 
     private Connection readerConnection() throws Exception {
@@ -207,7 +227,25 @@ class LifecycleAuthorizationPreflightMySqlTest {
             }
         }
     }
+    private void assertFinding(LifecycleAuthorizationPreflight.PreflightReport report, String id,
+                               String status, long count) throws Exception {
+        JsonNode findings = new ObjectMapper().readTree(report.toJson()).path("findings");
+        for (JsonNode finding : findings) {
+            if (id.equals(finding.path("checkId").asText())) {
+                assertEquals(status, finding.path("status").asText(), "finding " + id);
+                assertTrue(finding.path("rowCount").isIntegralNumber(), "rowCount must be numeric for " + id);
+                assertEquals(count, finding.path("rowCount").longValue(), "row count for " + id);
+                return;
+            }
+        }
+        assertTrue(false, "missing finding " + id);
+    }
+
     private void createFixture() throws Exception {
+        createFixture(true);
+    }
+
+    private void createFixture(boolean includeAnomalies) throws Exception {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             for (String ddl : List.of(
                     "CREATE TABLE IF NOT EXISTS flyway_schema_history(installed_rank INT PRIMARY KEY,version VARCHAR(50),success BOOLEAN NOT NULL)",
@@ -233,6 +271,12 @@ class LifecycleAuthorizationPreflightMySqlTest {
                     "CREATE TABLE IF NOT EXISTS t_asset_lost_incident(id BIGINT PRIMARY KEY,asset_id BIGINT)")) {
                 statement.execute(ddl);
             }
+            for (String table : List.of("t_asset_lost_incident", "t_asset_assignment", "m_asset", "t_engineer_sales",
+                    "t_sales_activity", "t_proposal", "t_project", "t_document_disposal_request", "t_document_link",
+                    "t_document_version", "t_document", "t_user_organization", "t_engineer_account_link", "t_contract",
+                    "m_customer", "t_engineer", "t_lifecycle_task", "t_lifecycle_case", "sys_user", "flyway_schema_history")) {
+                statement.executeUpdate("DELETE FROM " + table);
+            }
             statement.executeUpdate("INSERT IGNORE INTO flyway_schema_history VALUES(1,'1',TRUE)");
             statement.executeUpdate("INSERT IGNORE INTO sys_user VALUES(1,'tenant-A','営業')");
             statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_case VALUES(1,'tenant-A',1)");
@@ -245,23 +289,25 @@ class LifecycleAuthorizationPreflightMySqlTest {
             statement.executeUpdate("INSERT IGNORE INTO t_user_organization VALUES(1,'tenant-A',1,1)");
             statement.executeUpdate("INSERT IGNORE INTO t_document VALUES(1,'tenant-A')");
             statement.executeUpdate("INSERT IGNORE INTO t_document_version VALUES(1,'tenant-A',1)");
-            statement.executeUpdate("INSERT IGNORE INTO t_document VALUES(2,'TENANT-A')");
-            statement.executeUpdate("INSERT IGNORE INTO t_document_version VALUES(2,'tenant-A',2)");
-            statement.executeUpdate("INSERT IGNORE INTO t_document VALUES(3,'tenant-X ')");
-            statement.executeUpdate("INSERT IGNORE INTO t_document_version VALUES(3,'tenant-X',3)");
-            statement.executeUpdate("INSERT IGNORE INTO t_document VALUES(4,NULL)");
-            statement.executeUpdate("INSERT IGNORE INTO t_document_version VALUES(4,'tenant-A',4)");
             statement.executeUpdate("INSERT IGNORE INTO t_document_link VALUES(1,'tenant-A',1)");
             statement.executeUpdate("INSERT IGNORE INTO t_document_disposal_request VALUES(1,1)");
             statement.executeUpdate("INSERT IGNORE INTO t_project VALUES(1,1)");
             statement.executeUpdate("INSERT IGNORE INTO t_proposal VALUES(1,1,1,1)");
             statement.executeUpdate("INSERT IGNORE INTO t_sales_activity VALUES(1,1,1)");
-            statement.executeUpdate("INSERT IGNORE INTO t_sales_activity VALUES(2,999,1)");
-            statement.executeUpdate("INSERT IGNORE INTO t_proposal VALUES(2,1,1,999)");
             statement.executeUpdate("INSERT IGNORE INTO t_engineer_sales VALUES(1,1,1)");
             statement.executeUpdate("INSERT IGNORE INTO m_asset VALUES(1)");
             statement.executeUpdate("INSERT IGNORE INTO t_asset_assignment VALUES(1,1,'ENGINEER',1,NULL)");
             statement.executeUpdate("INSERT IGNORE INTO t_asset_lost_incident VALUES(1,1)");
+            if (includeAnomalies) {
+                statement.executeUpdate("INSERT IGNORE INTO t_document VALUES(2,'TENANT-A')");
+                statement.executeUpdate("INSERT IGNORE INTO t_document_version VALUES(2,'tenant-A',2)");
+                statement.executeUpdate("INSERT IGNORE INTO t_document VALUES(3,'tenant-X ')");
+                statement.executeUpdate("INSERT IGNORE INTO t_document_version VALUES(3,'tenant-X',3)");
+                statement.executeUpdate("INSERT IGNORE INTO t_document VALUES(4,NULL)");
+                statement.executeUpdate("INSERT IGNORE INTO t_document_version VALUES(4,'tenant-A',4)");
+                statement.executeUpdate("INSERT IGNORE INTO t_sales_activity VALUES(2,999,1)");
+                statement.executeUpdate("INSERT IGNORE INTO t_proposal VALUES(2,1,1,999)");
+            }
         }
     }
 

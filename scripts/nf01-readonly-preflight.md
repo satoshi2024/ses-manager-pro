@@ -12,4 +12,6 @@ Set these environment variables in the current PowerShell session before running
 - `NF01_PREFLIGHT_JDBC_URL`: an explicit `jdbc:mysql:` URL for that schema.
 - `NF01_PREFLIGHT_DB_USER` and `NF01_PREFLIGHT_DB_PASSWORD`: the read-only account credentials.
 
+The provenance fields are populated by the PowerShell entry script. Calling the Java class directly and supplying these environment labels does not prove the source or Git state; treat direct invocation provenance as untrusted. Sample identifiers are stable SHA-256-derived tokens over table name and primary key. They hide the literal key, but they are deterministic and enumerable, so they are pseudonyms rather than anonymization.
+
 Run `.scripts\nf01-readonly-preflight.ps1`. The script compiles the standalone Java checker with `javac` and uses the MySQL Connector/J already present in the local Maven cache; it does not invoke Maven or run migrations. Exit code 0 means the collected checks found no blocking anomaly. `BLOCKED_MAPPING` and `FAIL` return a nonzero exit code. A `PASS` requires a present, non-empty Flyway history with no failed entries and a complete read-only collection. It does not authorize a migration, tenant mapping, or production change. Tenant comparisons use binary, NULL-safe identity so case and trailing spaces are not folded by a case-insensitive collation.
