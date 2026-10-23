@@ -196,8 +196,12 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
 
     private TransportExchange exchange(URI uri, byte[] requestBody, long deadlineNanos, String geminiApiKey) {
         Assert.state(started, "Copilot async transportは開始されていません");
+        if (requestBody == null) {
+            throw BusinessException.of(413, "COPILOT_REQUEST_TOO_LARGE");
+        }
+        byte[] requestSnapshot = requestBody.clone();
         validateDestination(uri);
-        if (requestBody == null || requestBody.length > MAX_REQUEST_BYTES) {
+        if (requestSnapshot.length > MAX_REQUEST_BYTES) {
             throw BusinessException.of(413, "COPILOT_REQUEST_TOO_LARGE");
         }
         long remaining = remainingNanos(deadlineNanos);
@@ -256,7 +260,7 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
             SimpleRequestBuilder requestBuilder = SimpleRequestBuilder.post(uri)
                     .setVersion(HttpVersion.HTTP_1_1)
                     .setHeader("Content-Type", ContentType.APPLICATION_JSON.toString())
-                    .setBody(requestBody, ContentType.APPLICATION_JSON)
+                    .setBody(requestSnapshot, ContentType.APPLICATION_JSON)
                     .setRequestConfig(requestConfig);
             if (geminiApiKey != null) {
                 requestBuilder.setHeader("x-goog-api-key", geminiApiKey);
@@ -315,7 +319,7 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
             if (remainingNanos(deadlineNanos) <= 0) {
                 throw new CopilotTransportFailure("COPILOT_DEADLINE_EXCEEDED", dispatchState.get());
             }
-            return new TransportExchange(response, uri, sha256(requestBody), clientContext.getSSLSession(),
+            return new TransportExchange(response, uri, sha256(requestSnapshot), clientContext.getSSLSession(),
                     Instant.now());
         } catch (TimeoutException ex) {
             future.cancel(true);
@@ -420,8 +424,9 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
             throw BusinessException.of(502, "COPILOT_TRANSPORT_OBSERVATION_UNAVAILABLE");
         }
         try {
-            new org.apache.hc.client5.http.ssl.DefaultHostnameVerifier()
+            boolean hostnameMatches = new org.apache.hc.client5.http.ssl.DefaultHostnameVerifier()
                     .verify(uri.getHost(), sslSession);
+            requireHostnameMatch(hostnameMatches);
             Certificate[] peerCertificates = sslSession.getPeerCertificates();
             if (peerCertificates.length == 0 || !(peerCertificates[0] instanceof X509Certificate leaf)) {
                 throw BusinessException.of(502, "COPILOT_TLS_IDENTITY_REJECTED");
@@ -440,6 +445,12 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
 
     private static boolean requestHashMissing(String requestSha256) {
         return requestSha256 == null || !requestSha256.matches("[a-f0-9]{64}");
+    }
+
+    private static void requireHostnameMatch(boolean hostnameMatches) {
+        if (!hostnameMatches) {
+            throw BusinessException.of(502, "COPILOT_TLS_HOSTNAME_REJECTED");
+        }
     }
 
     private static boolean isJsonContentType(String contentType) {

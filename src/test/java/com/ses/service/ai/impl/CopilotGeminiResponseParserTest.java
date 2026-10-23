@@ -6,8 +6,11 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.io.Serializable;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Modifier;
+import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.HexFormat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -129,6 +132,71 @@ class CopilotGeminiResponseParserTest {
         assertThrows(NoSuchMethodException.class, () -> CopilotGeminiResponseParser.class.getDeclaredMethod(
                 "parseBounded", byte[].class, long.class, String.class));
         assertFalse(TransportBoundResponse.class.isAssignableFrom(SyntheticLoopbackObservation.class));
+    }
+
+    @Test
+    void 合成transport応答でinner失敗時の観測保持とdigest結合を実行確認する() throws Exception {
+        byte[] innerInvalidBody = envelope(
+                "{\"queryId\":\"other-query\",\"summaryText\":\"secret-summary\",\"claimKeys\":[]}", 1)
+                .getBytes(StandardCharsets.UTF_8);
+        CopilotBoundedHttpTransport.IssuedTransportBoundResponse synthetic = syntheticBoundResponse(innerInvalidBody);
+        CopilotGeminiResponseParser.BoundValidatedEnvelopeFailure failure = assertThrows(
+                CopilotGeminiResponseParser.BoundValidatedEnvelopeFailure.class,
+                () -> parser.parseBounded(synthetic, System.nanoTime() + 5_000_000_000L, "q-1"));
+
+        CopilotGeminiResponseParser.TransportUsageObservation observation = failure.observation();
+        assertEquals(2, observation.usage().promptTokenCount());
+        assertEquals(sha256(innerInvalidBody), observation.responseSha256());
+        assertFalse(failure.getMessage().contains("secret-summary"));
+        assertFalse(failure.getMessage().contains(new String(innerInvalidBody, StandardCharsets.UTF_8)));
+
+        byte[] validBody = envelope(
+                "{\"queryId\":\"q-1\",\"summaryText\":\"ok\",\"claimKeys\":[]}", 1)
+                .getBytes(StandardCharsets.UTF_8);
+        CopilotGeminiResponseParser.BoundParsedResponse parsed = parser.parseBounded(
+                syntheticBoundResponse(validBody), System.nanoTime() + 5_000_000_000L, "q-1");
+        assertEquals("{\"queryId\":\"q-1\",\"summaryText\":\"ok\",\"claimKeys\":[]}", parsed.summaryJson());
+        assertEquals(sha256(validBody), parsed.observation().responseSha256());
+
+        CopilotGeminiResponseParser.ValidatedEnvelope rawEnvelope = parser.parseEnvelope(
+                validBody, System.nanoTime() + 5_000_000_000L);
+        Constructor<?> envelopeConstructor = rawEnvelope.getClass().getDeclaredConstructor(
+                String.class, CopilotGeminiResponseParser.UsageMetadata.class, String.class);
+        envelopeConstructor.setAccessible(true);
+        Object mismatchedEnvelope = envelopeConstructor.newInstance(
+                rawEnvelope.summaryJson(), rawEnvelope.usage(), "0".repeat(64));
+        var completion = CopilotGeminiResponseParser.class.getDeclaredMethod("completeBoundResponse",
+                CopilotBoundedHttpTransport.IssuedTransportBoundResponse.class,
+                CopilotGeminiResponseParser.ValidatedEnvelope.class, long.class, String.class);
+        completion.setAccessible(true);
+        InvocationTargetException mismatch = assertThrows(InvocationTargetException.class,
+                () -> completion.invoke(parser, syntheticBoundResponse(validBody), mismatchedEnvelope,
+                        System.nanoTime() + 5_000_000_000L, "q-1"));
+        assertTrue(mismatch.getCause() instanceof BusinessException);
+        assertEquals("COPILOT_RESPONSE_BINDING_INVALID", mismatch.getCause().getMessage());
+    }
+
+    private static CopilotBoundedHttpTransport.IssuedTransportBoundResponse syntheticBoundResponse(byte[] body)
+            throws Exception {
+        CopilotBoundedHttpTransport.Response response = new CopilotBoundedHttpTransport.Response(
+                200, "application/json", body);
+        Class<?> tlsIdentityType = Class.forName(
+                "com.ses.service.ai.impl.CopilotBoundedHttpTransport$TlsSessionIdentity");
+        Constructor<?> tlsIdentityConstructor = tlsIdentityType.getDeclaredConstructor(
+                String.class, String.class, String.class, String.class);
+        tlsIdentityConstructor.setAccessible(true);
+        Object tlsIdentity = tlsIdentityConstructor.newInstance("a".repeat(64), "synthetic.test",
+                "TLSv1.3", "TLS_AES_128_GCM_SHA256");
+        Constructor<?> issuerConstructor = CopilotBoundedHttpTransport.IssuedTransportBoundResponse.class
+                .getDeclaredConstructor(CopilotBoundedHttpTransport.Response.class, String.class, String.class,
+                        tlsIdentityType, java.time.Instant.class);
+        issuerConstructor.setAccessible(true);
+        return (CopilotBoundedHttpTransport.IssuedTransportBoundResponse) issuerConstructor.newInstance(
+                response, "b".repeat(64), "synthetic.test", tlsIdentity, java.time.Instant.now());
+    }
+
+    private static String sha256(byte[] value) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
     }
 
     private static final class SyntheticLoopbackObservation {

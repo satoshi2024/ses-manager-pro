@@ -12,12 +12,19 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
+import java.lang.reflect.Method;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.HexFormat;
+import java.util.Arrays;
+import java.lang.reflect.Proxy;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -185,6 +192,82 @@ class CopilotBoundedHttpTransportTest {
         CopilotBoundedHttpTransport.Response recovered = transport.post(uri("/"), request(),
                 deadlineAfter(3, TimeUnit.SECONDS));
         assertEquals(200, recovered.statusCode());
+    }
+
+    @Test
+    void 送信hashは呼出元配列変更後も同じsnapshotを指す() throws Exception {
+        AtomicReference<String> receivedBody = new AtomicReference<>();
+        server = HttpServer.create(loopbackAddress(), 0);
+        server.createContext("/", guarded(exchange -> {
+            receivedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        }));
+        startServer();
+        byte[] callerBody = "{\"value\":1}".getBytes(StandardCharsets.UTF_8);
+        byte[] expectedSentBody = callerBody.clone();
+        transport = new CopilotBoundedHttpTransport(
+                new CopilotDnsSnapshotResolver(snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC()), true,
+                () -> { }, () -> { }, null, () -> { }, () -> Arrays.fill(callerBody, (byte) 'x'));
+        transport.start();
+
+        Method exchangeMethod = CopilotBoundedHttpTransport.class.getDeclaredMethod(
+                "exchange", URI.class, byte[].class, long.class, String.class);
+        exchangeMethod.setAccessible(true);
+        Object result = exchangeMethod.invoke(transport, uri(), callerBody,
+                deadlineAfter(3, TimeUnit.SECONDS), null);
+        Method requestHashAccessor = result.getClass().getDeclaredMethod("requestSha256");
+        requestHashAccessor.setAccessible(true);
+        String observedHash = (String) requestHashAccessor.invoke(result);
+
+        assertEquals(new String(expectedSentBody, StandardCharsets.UTF_8), receivedBody.get());
+        assertEquals(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(expectedSentBody)),
+                observedHash);
+    }
+
+    @Test
+    void hostnameVerifierのfalse結果は安全な理由コードで拒否する() throws Exception {
+        Method requireMatch = CopilotBoundedHttpTransport.class
+                .getDeclaredMethod("requireHostnameMatch", boolean.class);
+        requireMatch.setAccessible(true);
+        java.lang.reflect.InvocationTargetException rejected = assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> requireMatch.invoke(null, false));
+
+        assertTrue(rejected.getCause() instanceof BusinessException);
+        assertEquals("COPILOT_TLS_HOSTNAME_REJECTED", rejected.getCause().getMessage());
+    }
+
+    @Test
+    void loopback交換はtransport観測issuerから拒否され本文を漏らさない() throws Exception {
+        transport = newTransport(snapshot(Instant.now().plusSeconds(60)), Clock.systemUTC());
+        Class<?> exchangeType = Class.forName(
+                "com.ses.service.ai.impl.CopilotBoundedHttpTransport$TransportExchange");
+        Constructor<?> exchangeConstructor = exchangeType.getDeclaredConstructor(
+                CopilotBoundedHttpTransport.Response.class, URI.class, String.class,
+                javax.net.ssl.SSLSession.class, Instant.class);
+        exchangeConstructor.setAccessible(true);
+        String rawBody = "{\"apiKey\":\"synthetic-secret\"}";
+        javax.net.ssl.SSLSession syntheticSession = (javax.net.ssl.SSLSession) Proxy.newProxyInstance(
+                javax.net.ssl.SSLSession.class.getClassLoader(), new Class<?>[]{javax.net.ssl.SSLSession.class},
+                (proxy, method, arguments) -> null);
+        Object exchange = exchangeConstructor.newInstance(new CopilotBoundedHttpTransport.Response(
+                        200, "application/json", rawBody.getBytes(StandardCharsets.UTF_8)),
+                URI.create("https://generativelanguage.googleapis.com/"), "a".repeat(64),
+                syntheticSession, Instant.now());
+        Method issuer = CopilotBoundedHttpTransport.class.getDeclaredMethod("issueBoundResponse", exchangeType);
+        issuer.setAccessible(true);
+
+        InvocationTargetException rejected = assertThrows(InvocationTargetException.class,
+                () -> issuer.invoke(transport, exchange));
+
+        assertTrue(rejected.getCause() instanceof BusinessException);
+        assertEquals("COPILOT_TRANSPORT_OBSERVATION_UNAVAILABLE", rejected.getCause().getMessage());
+        assertTrue(!rejected.getCause().getMessage().contains(rawBody));
+        assertTrue(!rejected.getCause().getMessage().contains("synthetic-secret"));
     }
 
     @Test
