@@ -1,17 +1,17 @@
 # NF08 C2-B2 実usage provenance・費用証拠の技術計画
 
-**状態: B1 Wave A PASS。B2a CODE/MySQL gate PASS（証拠の最終照合中）。B2bはPLAN提案のみでコード実装未承認。B2aのPASSはB2b以降、provider送信、本番料金、DDLの承認ではない。**
+**状態: B1 Wave A PASS。B2a CODE/MySQL gate PASS（証拠の最終照合中）。B2bの限定PLANはAstra PASS、internal seamのCODE review/runtime確認は未完了。B2c～B2eは未承認。B2a/B2bの状態はprovider送信、本番料金、DDLの承認ではない。**
 
-## B2: 小分け実装計画（B2a実装gate PASS / B2b PLAN提案中）
+## B2: 小分け実装計画（B2a実装gate PASS / B2b限定PLAN PASS）
 
-B1 Wave AのMySQL境界証拠はPASS済み。B2aはpublic ACTUALの拒否、許可状態の互換性、実MySQL保存境界を検証する実装gateを通過し、Astraが証拠を照合している。B2bはこの文書でPLAN提案するだけで、PLAN review前にコード作業へ進まない。B2c以降も各batchの独立reviewを要する。各B2 batchのCODE PASSはprovider契約、usage意味、production料金、provider送信、鍵配布、production flagの承認にならない。production policy / adapter / key registryは引き続きdeny-allとする。
+B1 Wave AのMySQL境界証拠はPASS済み。B2aはpublic ACTUALの拒否、許可状態の互換性、実MySQL保存境界を検証する実装gateを通過し、Astraが証拠を照合している。B2bは定義済みのunwired transport observation/parser seamに限りAstra PLAN PASS済みで、CODE reviewとruntime確認が残る。B2c以降も各batchの独立reviewを要する。各B2 batchのCODE PASSはprovider契約、usage意味、production料金、provider送信、鍵配布、production flagの承認にならない。production policy / adapter / key registryは引き続きdeny-allとする。
 ### B2a: 最小実装契約（PLAN PASS済）
 
 B2aは既存のpublic ACTUAL保存入口を閉じるだけの独立batchとする。`CopilotRunService.completeAttempt` の共通DB writer境界で、private verifier capabilityがまだ存在しないB2aでは、public `SummaryCostEvidence` / `SummaryResponse` / `AiGatewayResult` 等に含まれる `ACTUAL` を例外で拒否する。実際のpublic completion入口は費用付きsummaryの `completeSummaryAttempt(...)` とcost-freeの `completeQueryAttempt(...)` である。ACTUAL拒否は両方が通るprivate共通writer `completeAttempt(...)` に置き、authoritative costState、`costEvidence.costState()`、inherited attempt metadataを検査する。拒否はmetadata構築/JSON化・UPDATEより前に起こし、attempt row全列を不変にする。B2aではprivate capability受入れ経路を作らず、ACTUALを例外的に通す互換pathも作らない。
 
 B2aの検証はpublic `completeSummaryAttempt(...)` にsynthetic/public ACTUALを直接渡すservice proxy testで具体的拒否、JSON/mapper write前拒否、H2境界の全列不変を確認する。MySQL testでは `UPPER_BOUND` 更新をproxy経由でcommitし、独立connectionから旧 `cost_jpy` のNULL化、新metadata、tenant-B sentinel不変を確認する。`UPPER_BOUND` / `UNKNOWN` / `NOT_SENT` の既存許可経路も個別確認する。production dispatch/cost policyはdeny-allのまま、provider transport、provenance issuer、rate registry/key、DDL、migration、credential、外部送信は触れない。このcontractはB2aだけで実装可能で、B2b以降の完成を前提にしない。
 
-### B2b: transport observation/parser境界（PLAN提案、コード未承認）
+### B2b: transport observation/parser境界（限定PLAN PASS、CODE/runtime review待ち）
 
 B2bは、bounded HTTP交換から作るrequest-bound observationとGemini envelope parserの型境界だけを対象にする独立batchである。B2bでは `GeminiTextServiceImpl.generateCopilotResponse(...)` からの新経路接続、summary dispatch可否変更、`ACTUAL` 保存例外、durable claim、DDL、外部送信を行わない。現行Gemini adapterとproduction policyはdeny-allのままにし、B2cのDB claimとB2dのcompletion bindingが揃うまでobservationをcost writerへ渡さない。
 
@@ -91,12 +91,12 @@ migration reviewではlegacy backfill/default、tenant nullability、index lengt
 | batch | 実装境界 | 必須完了証拠 / 明示的な外 |
 |---|---|---|
 | **B2a（PLAN PASS対象）** | 共通completion writerでpublic `ACTUAL` を永続化前に拒否する。private verified capabilityのacceptance pathはまだ作らない。 | direct forged ACTUALをservice proxyへ渡し、具体的拒否とattempt全列不変を独立readbackで確認。deny-all維持。DDL、provider送信、transport変更なし。これだけで独立実装可能。 |
-| **B2b（PLAN提案中）** | 上記「B2b: transport observation/parser境界」のinternal type/parser seamのみ。既存public `Response` compatibilityは保ち、production dispatcherへ接続しない。 | sealed issuerはtransport内の一箇所のみ、synthetic loopback型は別type、valid outer + inner failureでusage保持、invalid outer/status/content type/timeout/resetでprovenanceなし、secret非露出。schema/実provider/新しい送信経路なし。実装は個別PLAN review後に限る。 |
+| **B2b（限定PLAN PASS）** | 上記「B2b: transport observation/parser境界」のinternal type/parser seamのみ。既存public `Response` compatibilityは保ち、production dispatcherへ接続しない。 | sealed issuerはtransport内の一箇所のみ、synthetic loopback型は別type、valid outer + inner failureでusage保持、invalid outer/status/content type/timeout/resetでprovenanceなし、secret非露出。schema/実provider/新しい送信経路なし。CODE/runtime確認待ち。 |
 | **B2c** | DB ownerが別reviewでmigration proposalを承認しversion割当した後にschema/entity/mapperとdurable one-shot claimを実装する。DB claimは跨processの重複送信を防ぐ。transport内のprivate final `ClaimPermit` はprivate issuerだけが生成し、non-serializable/non-cloneableとする。`AtomicBoolean.compareAndSet(false, true)`で一度だけconsumeし、permit再利用・別process移送・DBからの再構築を拒否する。local permit CASはdurable DB claimの代替ではない。 | MySQL二connection claim raceで1/0、同じpermitの並行・順次reuseでsocket最大1回、process restart後もDB claimで再送0回。post-claim pre-socket mismatchはCLAIMED消費済み/UNKNOWNのまま。 |
 | **B2d** | verifierだけが作るprivate cost capabilityを同じcompletion transactionへ渡し、DB current field/card/policy/bindingを再確認してstatus/costを原子的に保存する。B2a guardをこのcapability-only pathで置換する。 | forged DTO拒否継続、capability有効時のみACTUAL、各binding/card/policy/tenant/status drift拒否、SQL/serialization/commit rollback。production registryとdispatch gateはdeny-all。 |
 | **B2e** | timeout/reset/partial response、clock/TTL/card境界、inner failure、multi-tenant、restart、response/completion crash matrixと運用観測を仕上げる。 | 各UNKNOWN/UPPER_BOUND/NOT_SENT分類と不再送をdeterministic/MySQLで立証。外部provider、契約、実価格、production rolloutは含めない。 |
 
-既存のB2a PLAN PASS対象は「private共通writer `completeAttempt(...)` がACTUAL state/evidenceを全経路で拒否し、拒否前のDB状態を不変にする最小差分」であり、実装gateも通過した。これはB2b～B2eの設計PASSや実装許可を意味しない。B2bはこのplan変更後にAstra PLAN reviewを受け、PASSした場合に限りその定義済みinternal seamの実装へ進む。後続batchは対象batchごとにPLAN/CODE reviewを行う。
+既存のB2a PLAN PASS対象は「private共通writer `completeAttempt(...)` がACTUAL state/evidenceを全経路で拒否し、拒否前のDB状態を不変にする最小差分」であり、実装gateも通過した。B2bのAstra PLAN PASSは上記のunwired internal seamだけを対象とし、B2b CODE/runtimeの合格やB2c～B2eの設計PASS/実装許可を意味しない。後続batchは対象batchごとにPLAN/CODE reviewを行う。
 ## 目的と現在地
 
 B1（commit `db25d2b7`）は、Spring service proxyを通るattempt完了、tenant/CAS、`STALE`、transaction rollback、usage metadata保存の境界を実DBで検証する。B1のMySQL証拠はmetadata永続化と状態遷移を示すもので、provider由来usageの真正性や料金計算結果の本番有効性を示さない。
@@ -136,7 +136,7 @@ B2の合成検証は実credential/provider/network/実料金を使わず、synth
 4. **ACTUAL authorityとcompletion**: public `SummaryCostEvidence`/`SummaryResponse`/`AiGatewayResult` を直接構築・変更してACTUALを注入してもcompletionで拒否し、row全列不変とする。検証器が発行したprivate capabilityは同一completion transactionのclaim/current binding一致時のみ保存できる。tenant/id/trace/use-case/status/version/nonce/config/preflight/card/bindingの各driftを個別に作り、期待する409/STALE相当を具体的にassertし、対象rowと別tenant sentinelの全列前後比較を行う。
 5. **clock/TTL/card境界**: productionコードと同じ注入可能Clockを使い、fixed instantで `effectiveFrom` の包含・`effectiveUntil` の排他、`issuedAt <= claimAt < expiresAt`、response時刻の逆行、TTL満了、壁時計逆行を決定的に確認する。expired/clock-invalidはclaim/socket前に拒否し、response後の期限外/時刻逆行はACTUALを作らずUNKNOWNとする。monotonic deadlineはfake tickerで別途検査し、sleepや幅広assertで時刻競合を隠さない。
 
-MySQL専用caseは`@Tag("mysql")`で一度だけshard登録し、test method自身へ`@Transactional`を付けない。commit済み状態は独立connectionで確認する。H2はpure decision/type mappingのfast feedbackに限り、SQL dialect、atomic claim、lock、affected-row、crash/restart永続性の証拠に数えない。必要なschema migration replay / legacy-row default / unique-index重複拒否もMySQL gateで検証する。Maven/Docker suiteの実行は実装taskのgateであり、このplan-only変更では実行しない。
+MySQL専用caseは`@Tag("mysql")`で一度だけshard登録し、test method自身へ`@Transactional`を付けない。commit済み状態は独立connectionで確認する。H2はpure decision/type mappingのfast feedbackに限り、SQL dialect、atomic claim、lock、affected-row、crash/restart永続性の証拠に数えない。必要なschema migration replay / legacy-row default / unique-index重複拒否もMySQL gateで検証する。Maven/Docker suiteはB2実装gateで実行し、今回の限定B2b作業では実行しない。
 ## 人手・外部資料による別途承認
 
 以下はsynthetic fixture、local loopback、Astra PLAN/CODE PASSだけでは承認できない。資料・承認者・有効期間・保管先・撤回条件を別のhuman-reviewed evidence bundleへ記録する。
@@ -155,11 +155,11 @@ provider APIにusage応答署名がない場合、アプリ内issuerが作る署
 
 1. **B2a PLAN review（PASS）** — 共通completion writerのpublic ACTUAL拒否、拒否前のDB不変、deny-all維持、DDL/provider非接触という最小contractだけをreviewする。このPASSで許可された作業範囲はB2a単独のcode changeとそのCODE review/fast gateである。B2全体、B2b以降、DDL、provider送信、本番承認は含まない。
 2. **B2a CODE/MySQL gate（PASS、証拠照合中）** — public forged ACTUAL拒否と許可状態の互換性、およびMySQL実UPDATE/独立readbackを検証済み。
-3. **B2b PLAN review（未実施）** — 上記transport observation/parser seam、既存Response compatibility、test/prod issuer分離、未接続/deny-allの範囲だけをAstraが審査する。PASS前にコード実装しない。
-4. **B2b～B2e CODE/後続PLAN review** — B2b実装後にCODE/fast reviewし、B2c migration/durable claimはDB owner承認とversion割当の後、B2d private completion binding、B2e failure matrixを順次個別審査する。
+3. **B2b限定PLAN review（PASS）** — 上記transport observation/parser seam、既存Response compatibility、test/prod issuer分離、未接続/deny-allの範囲を審査済み。今回の実装はこの範囲内に限り、CODE/runtime reviewは未完了。
+4. **B2b CODE / B2c～B2e後続review** — B2b CODE/runtime確認を行う。B2c migration/durable claimはDB owner承認とversion割当の後、B2d private completion binding、B2e failure matrixを順次個別審査する。B2c～B2eは未承認。
 5. **外部資料・human releaseは別タスク** — provider API/DPA/法務、usage semantics、price、offline signer/key custody、production dispatch/registry/flag/artifact ACTIVEは個別承認する。承認まではproductionをdeny-allに保つ。
 
-今回の作業はplan文書のレビュー可能化だけであり、A wave/B2のコード、DDL、Maven/Docker suite、provider送信、production enablementは含まない。各実装phaseは専用gateとAstra CODE reviewを分離する。
+今回のB2b作業はunwired internal type/parser seamと計画状態の最小修正に限る。dispatcher接続、DB claim/schema/DDL、Maven/Docker suite、provider送信、production enablementは含まない。CODE/runtime reviewを完了するまでB2bをPASSとせず、各後続実装phaseは専用gateとAstra CODE reviewを分離する。
 ## 明示的な非承認範囲
 
 この文書の存在またはPLAN review PASSは、provider contract/DPA/region、model token semantics、実料金、FX、usage authenticity acceptance、production key/card registry、実credential、Gemini実送信、Copilot/AI/external-send flag、artifact ACTIVE、database migration、production rolloutを承認しない。production gateway/adapterはdeny-all、現行flagsはOFFのままとする。実provider応答、実データ、外部network、実料金を使わない。

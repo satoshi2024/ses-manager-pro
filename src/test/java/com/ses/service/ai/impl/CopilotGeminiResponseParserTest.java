@@ -4,9 +4,15 @@ import com.ses.common.exception.BusinessException;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.io.Serializable;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Modifier;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CopilotGeminiResponseParserTest {
     private final CopilotGeminiResponseParser parser = new CopilotGeminiResponseParser();
@@ -69,6 +75,64 @@ class CopilotGeminiResponseParserTest {
                 () -> parser.validateInnerSummary(envelope, System.nanoTime() - 1, "q-1"));
         assertEquals("COPILOT_DEADLINE_EXCEEDED", deadline.getMessage());
         assertEquals(envelope.usage(), deadline.usage());
+    }
+
+    @Test
+    void outer候補失敗はusage値だけを保持しobservationを作らない() {
+        String invalidCandidate = envelope(
+                "{\"queryId\":\"q-1\",\"summaryText\":\"ok\",\"claimKeys\":[]}", 1)
+                .replace("\"finishReason\":\"STOP\"", "\"finishReason\":\"MAX_TOKENS\"");
+        CopilotGeminiResponseParser.ValidatedEnvelopeFailure failure = assertThrows(
+                CopilotGeminiResponseParser.ValidatedEnvelopeFailure.class,
+                () -> parser.parseEnvelope(invalidCandidate.getBytes(StandardCharsets.UTF_8),
+                        System.nanoTime() + 5_000_000_000L));
+
+        assertEquals(2, failure.usage().promptTokenCount());
+        assertFalse(Arrays.stream(failure.getClass().getDeclaredFields())
+                .anyMatch(field -> CopilotGeminiResponseParser.TransportUsageObservation.class
+                        .isAssignableFrom(field.getType())));
+        assertFalse(TransportBoundResponse.class.isAssignableFrom(failure.getClass()));
+    }
+
+    @Test
+    void sealedObservationはtransportの単一privateissuerだけが実装する() throws Exception {
+        assertTrue(TransportBoundResponse.class.isSealed());
+        assertEquals(1, TransportBoundResponse.class.getPermittedSubclasses().length);
+        Class<?> issuer = TransportBoundResponse.class.getPermittedSubclasses()[0];
+        assertEquals(CopilotBoundedHttpTransport.IssuedTransportBoundResponse.class, issuer);
+        assertTrue(Modifier.isFinal(issuer.getModifiers()));
+        Constructor<?>[] constructors = issuer.getDeclaredConstructors();
+        assertEquals(1, constructors.length);
+        assertTrue(Modifier.isPrivate(constructors[0].getModifiers()));
+        assertFalse(Serializable.class.isAssignableFrom(issuer));
+        assertFalse(CopilotBoundedHttpTransport.Response.class.isAssignableFrom(issuer));
+
+        var issuerMethod = Arrays.stream(CopilotBoundedHttpTransport.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("issueBoundResponse"))
+                .findFirst().orElseThrow();
+        assertTrue(Modifier.isPrivate(issuerMethod.getModifiers()));
+        assertEquals(1, issuerMethod.getParameterCount());
+        Class<?> privateExchange = issuerMethod.getParameterTypes()[0];
+        assertTrue(Modifier.isPrivate(privateExchange.getModifiers()));
+        assertTrue(Arrays.stream(privateExchange.getDeclaredFields())
+                .anyMatch(field -> javax.net.ssl.SSLSession.class.equals(field.getType())));
+        assertFalse(Arrays.stream(CopilotBoundedHttpTransport.class.getMethods())
+                .anyMatch(method -> TransportBoundResponse.class.isAssignableFrom(method.getReturnType())));
+
+        var boundParser = CopilotGeminiResponseParser.class.getDeclaredMethod("parseBounded",
+                TransportBoundResponse.class, long.class, String.class);
+        assertEquals(CopilotGeminiResponseParser.BoundParsedResponse.class, boundParser.getReturnType());
+        var rawParser = CopilotGeminiResponseParser.class.getDeclaredMethod(
+                "parseEnvelope", byte[].class, long.class);
+        assertEquals(CopilotGeminiResponseParser.ValidatedEnvelope.class, rawParser.getReturnType());
+        assertFalse(TransportBoundResponse.class.isAssignableFrom(rawParser.getReturnType()));
+        assertThrows(NoSuchMethodException.class, () -> CopilotGeminiResponseParser.class.getDeclaredMethod(
+                "parseBounded", byte[].class, long.class, String.class));
+        assertFalse(TransportBoundResponse.class.isAssignableFrom(SyntheticLoopbackObservation.class));
+    }
+
+    private static final class SyntheticLoopbackObservation {
+        private final String marker = "SYNTHETIC_TEST_ONLY";
     }
 
     private void parse(String body) {
