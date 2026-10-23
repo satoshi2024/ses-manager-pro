@@ -143,8 +143,10 @@ final class JdbcPrivacyPartitionFence {
 
     private State lockState(JournalPartition partition, RecoveryDeadline deadline) {
         JdbcTemplate boundedJdbc = deadline == null ? jdbc : jdbc(deadline);
-        boundedJdbc.update("INSERT IGNORE INTO sf_w2b_partition_fence(tenant_id, subject_ref, generation, state, owner_token) "
-                        + "VALUES(?, ?, 0, 'ACTIVE', NULL)", partition.tenantId(), partition.subjectRef());
+        // 重複行のINSERT IGNOREは共有duplicate-key lock後のFOR UPDATE昇格でdeadlockし得るため、upsertで先に排他ロックを取る。
+        boundedJdbc.update("INSERT INTO sf_w2b_partition_fence(tenant_id, subject_ref, generation, state, owner_token) "
+                        + "VALUES(?, ?, 0, 'ACTIVE', NULL) ON DUPLICATE KEY UPDATE tenant_id = VALUES(tenant_id)",
+                partition.tenantId(), partition.subjectRef());
         if (deadline != null) boundedJdbc.setQueryTimeout(deadline.requireJdbcSeconds());
         List<State> states = boundedJdbc.query("SELECT generation, state, owner_token FROM sf_w2b_partition_fence "
                         + "WHERE tenant_id=? AND subject_ref=? FOR UPDATE",

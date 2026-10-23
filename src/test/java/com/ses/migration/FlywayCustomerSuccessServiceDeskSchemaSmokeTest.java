@@ -40,7 +40,7 @@ class FlywayCustomerSuccessServiceDeskSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("183", latestVersion,
+            assertEquals("184", latestVersion,
                     "NF02境界・添付補償・通知tenant migrationを含む最新版まで適用されていること");
 
             for (String table : new String[]{

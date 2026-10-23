@@ -473,6 +473,164 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
     }
 
     @Test
+    void legacyInsertIgnore共有lockの昇格deadlockを実MySQLで再現する() throws Exception {
+        var partition = partition();
+        projectionAdmin.update("INSERT INTO sf_w2b_partition_fence(tenant_id, subject_ref, generation, state, owner_token) "
+                + "VALUES (?, ?, 7, 'ACTIVE', NULL)", tenantId, subjectRef);
+        var workers = new RecordingConnectionDataSource(appProjectionDataSource, 20_000, 20);
+        var pool = Executors.newFixedThreadPool(2);
+        Connection holder = null;
+        boolean holderReleased = false;
+        var insertsReturned = new CountDownLatch(2);
+        Future<LegacyFenceLockOutcome> workerA = null;
+        Future<LegacyFenceLockOutcome> workerB = null;
+        try {
+            holder = appAdminDataSource.getConnection();
+            holder.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+            holder.setAutoCommit(false);
+            long holderId = connectionId(holder);
+            lockFenceRow(holder, partition);
+
+            var start = new CountDownLatch(1);
+            workerA = pool.submit(() -> runLegacyFenceInsertAndUpgrade(workers, partition, start, insertsReturned));
+            workerB = pool.submit(() -> runLegacyFenceInsertAndUpgrade(workers, partition, start, insertsReturned));
+            start.countDown();
+            var waitEvidence = awaitFenceLockWaits(2, workers, holderId, APPLICATION.getDatabaseName());
+            assertTrue(waitEvidence.stream().allMatch(wait -> wait.requestedIndex().equals("PRIMARY")
+                            && wait.blockingIndex().equals("PRIMARY") && wait.requestedStatus().equals("WAITING")
+                            && wait.blockingStatus().equals("GRANTED") && wait.requestedMode().startsWith("S")
+                            && wait.blockingMode().startsWith("X")),
+                    "legacy duplicate insert waits on holder X with shared key locks");
+            System.out.printf("SF_W2B_FENCE_LEGACY_WAIT phase=insert-ignore schema=%s table=sf_w2b_partition_fence "
+                            + "workerIds=%s holderId=%d index=PRIMARY requestModes=%s blockerModes=%s statuses=WAITING/GRANTED%n",
+                    APPLICATION.getDatabaseName(), workers.connectionIds().stream().distinct().sorted().toList(), holderId,
+                    waitEvidence.stream().map(FenceLockWait::requestedMode).distinct().toList(),
+                    waitEvidence.stream().map(FenceLockWait::blockingMode).distinct().toList());
+
+            holder.commit();
+            holderReleased = true;
+            assertTrue(insertsReturned.await(10, TimeUnit.SECONDS), "両INSERTが戻って昇格barrierへ到達する");
+            var results = List.of(workerA.get(10, TimeUnit.SECONDS), workerB.get(10, TimeUnit.SECONDS));
+            assertEquals(1, results.stream().filter(LegacyFenceLockOutcome::isDeadlock).count(),
+                    "deadlockはSQLState 40001かつvendor code 1213で確認する: " + results);
+            assertEquals(1, results.stream().filter(LegacyFenceLockOutcome::acquired).count(),
+                    "victim以外は同じPRIMARY rowのX lockを取得する: " + results);
+            assertTrue(results.stream().allMatch(result -> result.acquired() || result.isDeadlock()),
+                    "timeoutはdeadlock再現として扱わない: " + results);
+            System.out.printf("SF_W2B_FENCE_LEGACY_UPGRADE outcomes=%s index=PRIMARY%n", results);
+            assertFenceState(partition, new FenceState(7, "ACTIVE", null));
+        } finally {
+            if (holder != null && !holderReleased) {
+                try { holder.rollback(); } catch (SQLException ignored) { }
+            }
+            if (holder != null) holder.close();
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "legacy lock worker termination timeout");
+        }
+    }
+
+    @Test
+    void serviceはholder待機後にupsert排他lockを取りACTIVE状態を保つ() throws Exception {
+        var partition = partition();
+        var ack = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-service-fence-wait");
+        FenceState expectedFence = new FenceState(7, "ACTIVE", null);
+        projectionAdmin.update("INSERT INTO sf_w2b_partition_fence(tenant_id, subject_ref, generation, state, owner_token) "
+                + "VALUES (?, ?, ?, ?, ?)", tenantId, subjectRef, expectedFence.generation(), expectedFence.state(), expectedFence.ownerToken());
+        var serviceDataSource = new RecordingConnectionDataSource(appProjectionDataSource, 20_000, 20);
+        var service = new JournalProjectionService(journalAdapter,
+                new JdbcPrivacyProjectionAdapter(serviceDataSource, context.getEnvironment()));
+        var pool = Executors.newFixedThreadPool(2);
+        Connection holder = null;
+        boolean holderReleased = false;
+        Future<PrivacyProjectionPort.ProjectionResult> workerA = null;
+        Future<PrivacyProjectionPort.ProjectionResult> workerB = null;
+        var journalBefore = journalState(partition);
+        try {
+            holder = appAdminDataSource.getConnection();
+            holder.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+            holder.setAutoCommit(false);
+            long holderId = connectionId(holder);
+            lockFenceRow(holder, partition);
+            var start = new CountDownLatch(1);
+            workerA = pool.submit(() -> { start.await(); return service.projectAcknowledged(partition, ack); });
+            workerB = pool.submit(() -> { start.await(); return service.projectAcknowledged(partition, ack); });
+            start.countDown();
+
+            var waitEvidence = awaitFenceLockWaits(2, serviceDataSource, holderId, APPLICATION.getDatabaseName());
+            var serviceConnectionIds = serviceDataSource.connectionIds().stream().distinct().sorted().toList();
+            var waitingConnectionIds = waitEvidence.stream().map(FenceLockWait::requesterId).distinct().sorted().toList();
+            assertEquals(2, serviceConnectionIds.size(), "2つの実service connectionを観測する");
+            assertEquals(serviceConnectionIds, waitingConnectionIds, "両実service接続がholder待ちgraphに現れる");
+            assertTrue(waitEvidence.stream().allMatch(wait -> wait.requestedIndex().equals("PRIMARY")
+                            && wait.blockingIndex().equals("PRIMARY") && wait.requestedMode().startsWith("X")
+                            && wait.blockingMode().startsWith("X") && wait.blockingStatus().equals("GRANTED")),
+                    "service upsertがfence PRIMARY rowの排他lockを待つ");
+            System.out.printf("SF_W2B_FENCE_SERVICE_WAIT schema=%s table=sf_w2b_partition_fence "
+                            + "connectionIds=%s holderId=%d index=PRIMARY requestModes=%s blockerModes=%s statuses=WAITING/GRANTED%n",
+                    APPLICATION.getDatabaseName(), serviceConnectionIds, holderId,
+                    waitEvidence.stream().map(FenceLockWait::requestedMode).distinct().toList(),
+                    waitEvidence.stream().map(FenceLockWait::blockingMode).distinct().toList());
+
+            holder.commit();
+            holderReleased = true;
+            var results = List.of(workerA.get(15, TimeUnit.SECONDS), workerB.get(15, TimeUnit.SECONDS));
+            assertTrue(results.stream().allMatch(result -> result.status() == PrivacyProjectionPort.Status.APPLIED
+                            || result.status() == PrivacyProjectionPort.Status.NO_OP),
+                    "両service workerが成功または合法NO_OPで完了する: " + results);
+            assertEquals(1, results.stream().filter(result -> result.status() == PrivacyProjectionPort.Status.APPLIED).count());
+            assertEquals(1, results.stream().filter(result -> result.status() == PrivacyProjectionPort.Status.NO_OP).count());
+            assertFenceState(partition, expectedFence);
+            assertProjection(partition, ack, journalBefore);
+        } finally {
+            if (holder != null && !holderReleased) {
+                try { holder.rollback(); } catch (SQLException ignored) { }
+            }
+            if (holder != null) holder.close();
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "service fence wait worker termination timeout");
+        }
+    }
+
+    @Test
+    void fence初期化upsertは新規行と既存ACTIVE及びQUARANTINED状態を保持する() {
+        var partition = partition();
+        var adapter = new JdbcPrivacyProjectionAdapter(appProjectionDataSource, context.getEnvironment());
+        var service = new JournalProjectionService(journalAdapter, adapter);
+
+        var newRowAck = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-fence-state-new");
+        var journalBeforeNew = journalState(partition);
+        var newRowResult = service.projectAcknowledged(partition, newRowAck);
+        assertEquals(PrivacyProjectionPort.Status.APPLIED, newRowResult.status(), "new fence result=" + newRowResult);
+        assertFenceState(partition, new FenceState(0, "ACTIVE", null));
+        assertProjection(partition, newRowAck, journalBeforeNew);
+
+        clearProjectionJournalPartition(partition);
+        var activeAck = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-fence-state-active");
+        FenceState active = new FenceState(7, "ACTIVE", null);
+        projectionAdmin.update("INSERT INTO sf_w2b_partition_fence(tenant_id, subject_ref, generation, state, owner_token) "
+                + "VALUES (?, ?, ?, ?, ?)", tenantId, subjectRef, active.generation(), active.state(), active.ownerToken());
+        var journalBeforeActive = journalState(partition);
+        var activeResult = service.projectAcknowledged(partition, activeAck);
+        assertEquals(PrivacyProjectionPort.Status.APPLIED, activeResult.status(), "existing ACTIVE result=" + activeResult);
+        assertFenceState(partition, active);
+        assertProjection(partition, activeAck, journalBeforeActive);
+
+        clearProjectionJournalPartition(partition);
+        var quarantineAck = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-fence-state-quarantine");
+        FenceState quarantined = new FenceState(9, "QUARANTINED", UUID.randomUUID().toString());
+        projectionAdmin.update("INSERT INTO sf_w2b_partition_fence(tenant_id, subject_ref, generation, state, owner_token) "
+                + "VALUES (?, ?, ?, ?, ?)", tenantId, subjectRef, quarantined.generation(), quarantined.state(), quarantined.ownerToken());
+        var journalBeforeQuarantine = journalState(partition);
+        var quarantineResult = service.projectAcknowledged(partition, quarantineAck);
+        assertEquals(PrivacyProjectionPort.Status.QUARANTINED, quarantineResult.status(), "quarantine result=" + quarantineResult);
+        assertEquals(PrivacyProjectionPort.QuarantineCode.PARTITION_FENCED, quarantineResult.reason());
+        assertFenceState(partition, quarantined);
+        assertEquals(0, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=?",
+                Integer.class, tenantId, subjectRef));
+        assertTrue(journalBeforeQuarantine.equals(journalState(partition)), "quarantine時もjournal全件が不変");
+    }
+
+    @Test
     void 初回fence取得のlocktimeoutは隔離済みと誤報せずreplayを開始しない() throws Exception {
         var partition = partition();
         var ack = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-acquire-timeout");
@@ -947,8 +1105,61 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             Future<PrivacyProjectionPort.ProjectionResult> a = pool.submit(() -> { start.await(); return projectionService.projectAcknowledged(partition, first); });
             Future<PrivacyProjectionPort.ProjectionResult> b = pool.submit(() -> { start.await(); return projectionService.projectAcknowledged(partition, second); });
             start.countDown();
-            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, a.get(10, TimeUnit.SECONDS).status());
-            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, b.get(10, TimeUnit.SECONDS).status());
+            var resultA = a.get(10, TimeUnit.SECONDS);
+            var resultB = b.get(10, TimeUnit.SECONDS);
+            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, resultA.status(), "worker A result=" + resultA);
+            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, resultB.status(), "worker B result=" + resultB);
+        } finally {
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "projection worker termination timeout");
+        }
+        var snapshot = new JdbcPrivacyProjectionAdapter(harness.application().createApplicationProjectionDataSource(), context.getEnvironment()).snapshot(partition);
+        assertEquals(2L, snapshot.revision());
+        assertEquals(second.eventHash(), snapshot.eventHash());
+    }
+
+    @Test
+    void 同一初期prefixでrevision1適用が競合してもprojectionが収束する() throws Exception {
+        var partition = partition();
+        var first = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-deterministic-c");
+        var second = append(partition, 1, PrivacyJournalPort.CommandType.LEASE_CLAIMED, "cmd-deterministic-d");
+        assertEquals(0, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ?",
+                Integer.class, tenantId, subjectRef));
+        var start = new CountDownLatch(1);
+        var initialSnapshots = new CountDownLatch(2);
+        var firstRevisionApplies = new CountDownLatch(2);
+        var initialSnapshotCalls = new AtomicInteger();
+        var projectionAdapter = projectionPort();
+        PrivacyProjectionPort contendedProjection = new PrivacyProjectionPort() {
+            @Override public ProjectionResult apply(JournalProjectionService.VerifiedJournalEvent event) {
+                if (event.event().revision() == 1) {
+                    firstRevisionApplies.countDown();
+                    awaitLatch(firstRevisionApplies);
+                }
+                return projectionAdapter.apply(event);
+            }
+            @Override public ProjectionSnapshot snapshot(PrivacyJournalPort.JournalPartition value) {
+                return projectionAdapter.snapshot(value);
+            }
+            @Override public ProjectionSnapshot snapshotForNormalProjection(PrivacyJournalPort.JournalPartition value) {
+                ProjectionSnapshot observed = projectionAdapter.snapshotForNormalProjection(value);
+                if (initialSnapshotCalls.incrementAndGet() <= 2) {
+                    initialSnapshots.countDown();
+                    awaitLatch(initialSnapshots);
+                }
+                return observed;
+            }
+        };
+        JournalProjectionService contendedService = new JournalProjectionService(journalAdapter, contendedProjection);
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<PrivacyProjectionPort.ProjectionResult> a = pool.submit(() -> { start.await(); return contendedService.projectAcknowledged(partition, first); });
+            Future<PrivacyProjectionPort.ProjectionResult> b = pool.submit(() -> { start.await(); return contendedService.projectAcknowledged(partition, second); });
+            start.countDown();
+            var resultA = a.get(10, TimeUnit.SECONDS);
+            var resultB = b.get(10, TimeUnit.SECONDS);
+            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, resultA.status(), "worker A result=" + resultA);
+            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, resultB.status(), "worker B result=" + resultB);
         } finally {
             pool.shutdownNow();
             assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "projection worker termination timeout");
@@ -1592,6 +1803,131 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
                         rs.getString("lock_data"), rs.getString("blocker_status")), schema, table);
     }
 
+    private List<FenceLockWait> awaitFenceLockWaits(int expected, RecordingConnectionDataSource workerDataSource,
+            long holderId, String schema) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        List<FenceLockWait> observed = List.of();
+        while (System.nanoTime() < deadline) {
+            Set<Long> workerIds = workerDataSource.connectionIds().stream().collect(java.util.stream.Collectors.toSet());
+            if (workerIds.size() >= expected) {
+                observed = fenceLockWaits(schema);
+                List<FenceLockWait> matching = observed.stream()
+                        .filter(wait -> workerIds.contains(wait.requesterId()) && wait.blockerId() == holderId)
+                        .toList();
+                if (matching.stream().map(FenceLockWait::requesterId).distinct().count() >= expected) return matching;
+            }
+            Thread.sleep(25);
+        }
+        fail("対象PRIMARY行で指定workerからholderへのwait graphを確認できません。expected=" + expected
+                + " workerConnectionIds=" + workerDataSource.connectionIds().stream().distinct().toList()
+                + " holderConnectionId=" + holderId + " observedEdges=" + observed);
+        return List.of();
+    }
+
+    private List<FenceLockWait> fenceLockWaits(String schema) {
+        return projectionAdmin.query("SELECT requester.PROCESSLIST_ID AS requester_id, blocker.PROCESSLIST_ID AS blocker_id, "
+                        + "requested.INDEX_NAME AS requested_index, requested.LOCK_MODE AS requested_mode, "
+                        + "requested.LOCK_STATUS AS requested_status, blocking.INDEX_NAME AS blocking_index, "
+                        + "blocking.LOCK_MODE AS blocking_mode, blocking.LOCK_STATUS AS blocking_status "
+                        + "FROM performance_schema.data_lock_waits waits "
+                        + "JOIN performance_schema.data_locks requested ON requested.ENGINE = waits.ENGINE "
+                        + "AND requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID "
+                        + "JOIN performance_schema.data_locks blocking ON blocking.ENGINE = waits.ENGINE "
+                        + "AND blocking.ENGINE_LOCK_ID = waits.BLOCKING_ENGINE_LOCK_ID "
+                        + "JOIN performance_schema.threads requester ON requester.THREAD_ID = requested.THREAD_ID "
+                        + "JOIN performance_schema.threads blocker ON blocker.THREAD_ID = blocking.THREAD_ID "
+                        + "WHERE requested.OBJECT_SCHEMA = ? AND requested.OBJECT_NAME = 'sf_w2b_partition_fence' "
+                        + "AND requested.INDEX_NAME = 'PRIMARY' AND requested.LOCK_TYPE = 'RECORD' "
+                        + "AND requested.LOCK_STATUS = 'WAITING' AND blocking.OBJECT_SCHEMA = requested.OBJECT_SCHEMA "
+                        + "AND blocking.OBJECT_NAME = requested.OBJECT_NAME AND blocking.INDEX_NAME = 'PRIMARY' "
+                        + "AND blocking.LOCK_TYPE = 'RECORD' AND blocking.LOCK_DATA = requested.LOCK_DATA",
+                (rs, row) -> new FenceLockWait(rs.getLong("requester_id"), rs.getLong("blocker_id"),
+                        rs.getString("requested_index"), rs.getString("requested_mode"), rs.getString("requested_status"),
+                        rs.getString("blocking_index"), rs.getString("blocking_mode"), rs.getString("blocking_status")), schema);
+    }
+
+    private LegacyFenceLockOutcome runLegacyFenceInsertAndUpgrade(RecordingConnectionDataSource dataSource,
+            PrivacyJournalPort.JournalPartition partition, CountDownLatch start, CountDownLatch insertsReturned)
+            throws SQLException, InterruptedException {
+        try (Connection connection = dataSource.getConnection()) {
+            connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+            connection.setAutoCommit(false);
+            try (var statement = connection.createStatement()) {
+                statement.execute("SET SESSION innodb_lock_wait_timeout = 20");
+            }
+            start.await();
+            try (var insert = connection.prepareStatement("INSERT IGNORE INTO sf_w2b_partition_fence "
+                    + "(tenant_id, subject_ref, generation, state, owner_token) VALUES (?, ?, 0, 'ACTIVE', NULL)")) {
+                insert.setString(1, partition.tenantId());
+                insert.setString(2, partition.subjectRef());
+                insert.executeUpdate();
+            } catch (SQLException failure) {
+                insertsReturned.countDown();
+                return LegacyFenceLockOutcome.failed("INSERT", failure.getSQLState(), failure.getErrorCode());
+            }
+            insertsReturned.countDown();
+            awaitLatch(insertsReturned);
+            try (var select = connection.prepareStatement("SELECT generation FROM sf_w2b_partition_fence "
+                    + "WHERE tenant_id=? AND subject_ref=? FOR UPDATE")) {
+                select.setString(1, partition.tenantId());
+                select.setString(2, partition.subjectRef());
+                try (var rows = select.executeQuery()) {
+                    if (!rows.next()) throw new SQLException("fence row disappeared", "HY000");
+                }
+                return LegacyFenceLockOutcome.locked();
+            } catch (SQLException failure) {
+                return LegacyFenceLockOutcome.failed("UPGRADE", failure.getSQLState(), failure.getErrorCode());
+            } finally {
+                connection.rollback();
+            }
+        }
+    }
+
+    private void lockFenceRow(Connection connection, PrivacyJournalPort.JournalPartition partition) throws SQLException {
+        try (var query = connection.prepareStatement("SELECT generation FROM sf_w2b_partition_fence "
+                + "WHERE tenant_id=? AND subject_ref=? FOR UPDATE")) {
+            query.setString(1, partition.tenantId());
+            query.setString(2, partition.subjectRef());
+            try (var rows = query.executeQuery()) { assertTrue(rows.next()); }
+        }
+    }
+
+    private void assertFenceState(PrivacyJournalPort.JournalPartition partition, FenceState expected) {
+        FenceState observed = projectionAdmin.queryForObject("SELECT generation, state, owner_token "
+                        + "FROM sf_w2b_partition_fence WHERE tenant_id=? AND subject_ref=?",
+                (rs, row) -> new FenceState(rs.getLong("generation"), rs.getString("state"), rs.getString("owner_token")),
+                partition.tenantId(), partition.subjectRef());
+        assertTrue(expected.equals(observed), "fence generation/state/owner remain unchanged");
+    }
+
+    private JournalState journalState(PrivacyJournalPort.JournalPartition partition) {
+        return new JournalState(journalAdapter.head(partition), List.copyOf(journalAdapter.events(partition)));
+    }
+
+    private void assertProjection(PrivacyJournalPort.JournalPartition partition, PrivacyJournalPort.JournalAck ack,
+            JournalState journalBefore) {
+        var snapshot = new JdbcPrivacyProjectionAdapter(harness.application().createApplicationProjectionDataSource(),
+                context.getEnvironment()).snapshot(partition);
+        assertEquals(ack.revision(), snapshot.revision());
+        assertEquals(ack.eventHash(), snapshot.eventHash());
+        assertTrue(snapshot.held(), "projection held state matches HOLD_STARTED");
+        assertNull(snapshot.lastActionId(), "projection last_action_id remains empty");
+        assertEquals("NONE", snapshot.lastActionState(), "projection last_action_state remains NONE");
+        assertEquals(1, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=?",
+                Integer.class, partition.tenantId(), partition.subjectRef()), "projection has exactly one row");
+        assertTrue(journalBefore.equals(journalState(partition)), "projection operation leaves journal head and all events unchanged");
+    }
+
+    private void clearProjectionJournalPartition(PrivacyJournalPort.JournalPartition partition) {
+        projectionAdmin.update("DELETE FROM sf_w2b_projection WHERE tenant_id=? AND subject_ref=?", partition.tenantId(), partition.subjectRef());
+        projectionAdmin.update("DELETE FROM sf_w2b_partition_fence WHERE tenant_id=? AND subject_ref=?", partition.tenantId(), partition.subjectRef());
+        journalAdmin.update("DELETE FROM sf_journal_action WHERE tenant_id=? AND subject_ref=?", partition.tenantId(), partition.subjectRef());
+        journalAdmin.update("DELETE FROM sf_journal_lease WHERE tenant_id=? AND subject_ref=?", partition.tenantId(), partition.subjectRef());
+        journalAdmin.update("DELETE FROM sf_journal_command WHERE tenant_id=? AND subject_ref=?", partition.tenantId(), partition.subjectRef());
+        journalAdmin.update("DELETE FROM sf_journal_event WHERE tenant_id=? AND subject_ref=?", partition.tenantId(), partition.subjectRef());
+        journalAdmin.update("DELETE FROM sf_journal_head WHERE tenant_id=? AND subject_ref=?", partition.tenantId(), partition.subjectRef());
+    }
+
     private boolean reachesHolder(List<LockWait> waits, long requesterId, long holderId) {
         var reached = new java.util.HashSet<Long>();
         var pending = new java.util.ArrayDeque<Long>();
@@ -1620,6 +1956,22 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
     }
 
     private record LockWait(long requesterId, long blockerId, String lockData, String blockerStatus) { }
+
+    private record FenceLockWait(long requesterId, long blockerId, String requestedIndex, String requestedMode,
+            String requestedStatus, String blockingIndex, String blockingMode, String blockingStatus) { }
+
+    private record LegacyFenceLockOutcome(String phase, boolean acquired, String sqlState, int vendorCode) {
+        private static LegacyFenceLockOutcome locked() { return new LegacyFenceLockOutcome("UPGRADE", true, null, 0); }
+        private static LegacyFenceLockOutcome failed(String phase, String sqlState, int vendorCode) {
+            return new LegacyFenceLockOutcome(phase, false, sqlState, vendorCode);
+        }
+        private boolean isDeadlock() {
+            return "UPGRADE".equals(phase) && "40001".equals(sqlState) && vendorCode == 1213;
+        }
+    }
+
+    private record FenceState(long generation, String state, String ownerToken) { }
+    private record JournalState(PrivacyJournalPort.JournalHead head, List<PrivacyJournalPort.JournalEvent> events) { }
 
     private static final class RecordingConnectionDataSource extends DelegatingDataSource {
         private final ConcurrentLinkedQueue<Long> ids = new ConcurrentLinkedQueue<>();
