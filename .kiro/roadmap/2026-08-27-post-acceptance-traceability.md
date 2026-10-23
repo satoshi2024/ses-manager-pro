@@ -20,7 +20,9 @@
 | 09 | fail-closed修復 `da850b97`限定CODE PASS、control統合済み。実providerの完成ではない | V182 PENDING=0/帰属不明0/親子一致、実撤権/session/token、production owner |
 | 10 | session共有reauth修復 `20cce0f7`限定CODE PASS、46/0/0/0、control統合済み | 全体独立Review、実browser/session環境、staging、正式release |
 
-2026-10-21の固定統合HEAD `6b5415a6fd7311f6ff60e5571d8063f8b33e7b20` の全fast第7回は **694 class、4232/0/0/0、PASS**。Astraが694 XML、1388 report hash、起止SHA/clean、selectorなしを独立照合した。raw evidenceは `verification-evidence/20261021-control-fast-07/`。旧第6回FAILは履歴に保持する。NF06 wave2/NF08 B2a/NF01基盤は後続control `6ce313ce` までに統合したが、本runの対象外。各sourceの限定証拠は実行台帳の最新節に記録した。最新全MySQL/performance/browser/backup/staging/production承認は未完。最新詳細は実行台帳冒頭を参照する。
+2026-10-23最新: fixed control `19bdbebc` の全fast第8回は695 class 4247/0/0/0（独立証拠PASS）。同verify-like-ciのMySQLは部分73class 249/4/0/0で中断、完全gateは未完。同SHAの別run performance 1/0/0/0・browser 17/0/0/0・backup 476 assertions/0 failure + PITR SUCCESSは個別受理済みであり、完全gateへ合成しない。最新sourceと未完範囲は実行台帳の2026-10-23節を参照。全体NO-GO。
+
+履歴: 2026-10-21の固定統合HEAD `6b5415a6fd7311f6ff60e5571d8063f8b33e7b20` の全fast第7回は **694 class、4232/0/0/0、PASS**。Astraが694 XML、1388 report hash、起止SHA/clean、selectorなしを独立照合した。raw evidenceは `verification-evidence/20261021-control-fast-07/`。旧第6回FAILは履歴に保持する。NF06 wave2/NF08 B2a/NF01基盤は後続control `6ce313ce` までに統合したが、本runの対象外。各sourceの限定証拠は実行台帳の最新節に記録した。最新全MySQL/performance/browser/backup/staging/production承認は未完。最新詳細は実行台帳冒頭を参照する。
 
 NF01の「退社確定時一括失効trigger」は現行コードでNF01呼出が確認できず、下記承認範囲の記述を
 実装済み証拠としない。NF06/NF07のflag OFFを全機能完成として扱わない。

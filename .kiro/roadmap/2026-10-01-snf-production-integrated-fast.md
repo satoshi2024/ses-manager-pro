@@ -1,6 +1,23 @@
 # 統合fast gateの実行記録
 
-## 最新: 第7回 PASS（2026-10-21）
+## 最新: 第8回 PASS、完全gateは未完かつMySQL既知失敗（2026-10-23照合）
+
+- fixed `19bdbebc63fbd39eb2e04f4950343e3c5c524e2a`、起止clean・exit0。
+  `scripts/verify-like-ci.ps1` 内の `mvn -B clean test -Dsurefire.runOrder.random.seed=48992185070100`、selectorなし。
+- UTC2026-10-21T02:03:06.7131186Z〜02:16:38.9148835Z、**695 class、4247/0/0/0**。
+  `verification-evidence/20261021-control-full-gate-01/fast/` にraw log/XML/text/manifestを保存。
+  log `EE15EB404A2780DC80ED958966CA7E909EA997F3C166B62664D7035CA4CB44AC`。
+  Astraが695 XML・1390 report hashを独立照合。NF01基盤/NF06 wave2/NF08 B2aを含む。
+- 同runのMySQLは終了記録なしで中断し、部分73 XMLは **249/4/0/0**。
+  Asset/SelfServiceの3 assertionはlatest183/actual184、Privacy concurrentCASの1 assertionはQUARANTINED。
+  partial reportを `mysql/interrupted-reports/` に保存した。performance/browser/backupは本runでは未開始。
+- 2026-10-23の同SHA個別診断はperformance **1/0/0/0、p95 47ms**、browser **11 class、17/0/0/0**、
+  backup **13 unit group、476 assertions/0 failures、実MySQL PITR SUCCESS**。各packetをAstraが独立受理した。
+  `20261023-control-remaining-01` / `20261023-control-backup-01` を参照する。
+  別runの成功を中断runの完全PASSへ合成しない。drill 9秒は合成fixture内部処理、checkpoint時間差60秒は実production RPOではない。
+- W3A/B2b/readonly preflight後続sourceは本Headに含まない。全体NO-GO。
+
+## 履歴: 第7回 PASS（2026-10-21）
 
 - 固定Head `6b5415a6fd7311f6ff60e5571d8063f8b33e7b20`、起止SHA一致・clean、exit0。
 - selectorなしの `mvn -B -Dsurefire.runOrder.random.seed=48992185070100 test`。

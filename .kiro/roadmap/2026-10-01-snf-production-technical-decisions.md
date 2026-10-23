@@ -58,5 +58,5 @@ Base: `1443fb68943849a3260d7ebe005259f3eb609d60`。
 
 - Astraは各決定の実装可能性、既存scopeとの整合、no-write/transaction/counter、provider確認、policy未承認時の拒否をReviewする。
 - FAIL findingを修正してからLunaへ各waveを渡す。CONDITIONALを無条件PASSへ変換しない。
-- 新migrationは総括が一括採番する。現在最大V182であり、この文書はV183をどのfeatureにも予約しない。
+- 新migrationは総括が一括採番する。作成時は最大V182、2026-10-23のcontrolでは最大V184である。V185は未割当であり、この文書は後続番号をどのfeatureにも予約しない。
 - 書換範囲を限定し、全Gate合格前にproduction-readyを宣言しない。

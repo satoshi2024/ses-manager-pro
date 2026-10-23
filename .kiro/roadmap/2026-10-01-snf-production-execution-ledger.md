@@ -1,5 +1,46 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## 再開・中断gate診断（2026-10-23）
+
+- **全体NO-GO継続**。fetch後origin/mainは `1443fb68943849a3260d7ebe005259f3eb609d60`。
+  PR101はMERGED、head `8ad0c34eacbb04a031667934f313a2b6965583f1` の祖先判定exit0、7check全てCOMPLETED/SUCCESS。
+  merge後main最新run `36858538460` はcompleted/failure。再確認packetは `verification-evidence/20261023-resume-facts/`。
+  main checkoutのCustomUserDetailsService/LoginUser/application-dev利用者変更3件は保持した。
+- 固定control `19bdbebc63fbd39eb2e04f4950343e3c5c524e2a` の全fast第8回 **695 class、4247/0/0/0** をAstraが独立受理。
+  UTC2026-10-21T02:03:06.7131186Z〜02:16:38.9148835Z、起止SHA一致・clean・exit0、selectorなし。
+  原log `EE15EB404A2780DC80ED958966CA7E909EA997F3C166B62664D7035CA4CB44AC`。
+- 完全gateのMySQLは途中で終了記録が途絶えた。再開時Java processなし・Docker daemon停止、原因は未確定。
+  ただし部分73 XMLには **249/4/0/0** の既知失敗があり、infra中断だけとは記録しない。
+  AssetMySqlIntegrationTest 617行、FlywaySelfServiceSchemaSmokeTest 61/307行はexpected183/actual184。
+  PrivacyWatermarkWitnessBoundaryMySqlTest 951行はconcurrentCASの予期しないQUARANTINEDである。
+  全partial reportを次clean前にhash付保存し、`INCOMPLETE_WITH_KNOWN_FAILURES`として扱う。
+- Docker通常起動を実施し29.7.2を確認。既存containerを停止せず、同19bdb固定で残りprofileを個別診断した。
+  performance UTC02:48:51.8645235〜02:50:05.7717605、**1/0/0/0、p95 47ms**、
+  log `C5AEADDF4C1F7A074BA6701986BB9ABD907CB2A703B8F69692A5E01118003F6D`。
+  browser UTC02:50:06.1190655〜02:52:38.7540009、**11 class、17/0/0/0**、
+  log `532DBA2AF9D2240108625773E2355C082F7BBE2B46158281DE2A6DF2B2BEF6A7`。
+  Astraが全24 report hash、両log、40 browser artifactを照合。小規模fixtureの性能値はproduction容量保証ではない。
+- 同SHAのbackup単独診断は13 unit group **476 assertions/0 failures**、実MySQL PITR integration SUCCESS、起止clean・exit0。
+  UTC02:53:47.1937009〜03:11:55.1732713。rawは `verification-evidence/20261023-control-backup-01/`。
+  unit log `8143D381C2A689FFD73327CB156B079608064513AD0E1C80123874D20F0EA909`、
+  integration log `D7E8B147B0C2B15326D5FD629EBAFDCB323D8AC9D764598C5F5A55D6869131DF`。
+  Astraが13組集計、両log、7 evidence hash、marker 1/1/0と1/0、secret scan 0を独立受理した。合成環境の成功を本番backup/PITR署名に拡張しない。drillの9秒は内部五区間だけ、rpo_seconds=60は要求target時刻とcheckpoint時刻の差であり、実production RPOではない。work配下の合成秘密情報は公開artifactへ含めない。
+- MySQL修復はclean既存tree `C:\work\ses-nf02-remediation` を再利用し、base19bdbから
+  `codex/snf-prod-mysql1023-remediation` を作成した。旧branch/target/user変更は削除しない。
+  `5bdc23e5` は4classのlatest184 assertion修復、`00d1383b/3dd2ea36` はPrivacy診断。
+  元の同時CAS時序を保ち、別の双barrier caseと安全reason表示を追加した。Astraが限定CODE受理、固定3ddの5class実測中。
+  INSERT IGNOREからFOR UPDATEへのS→X lock昇格は候補原因であり、この時点で元失敗の確定根因とは呼ばない。
+- NF08 source `bda9fa984d507b251cd0abc7ca214d73c70009aa` はB2b限定CODE PASS。
+  hostname false拒否、入力上限をclone前に検証、同じprivate request snapshotの送信/hash、outer/inner境界を補強した。
+  fresh javacのみ、root JUnit gateは未実施。反射fixtureは実TLS positive issuerやprovider真正性の証明ではない。
+- NF06 source `0f45c2a8ed64debcbc2ecfcda16153a0949b4493` はW3A限定CODE PASS、runtime待ち。
+  完全EOF/source hashとprefix/suffix後のprivate proof発行を追加。seal/publish/apply/UIは未実装。
+  V184 rowにraw金額は無く、後続sealはDBで行数/findingをrecountし、金額/空行は同row-setに結合したprivate source proofへ依存する。
+- NF01 source `07e1f0a7` のreadonly checkerはCODE CONDITIONAL。Flyway履歴欠落/失敗、tenant比較collation、
+  部分orphan、SELECT-only検証/全値digestを修復中。DDL/epoch writer/公開CONFIRMは未実装、V185未割当。
+- これらの別run・別SHA・限定結果を一つの完全gate PASSへ合成しない。実provider/credential/production data修復、
+  Privacy/Legal/Security/Operations/production署名は未完。push/PR/remote merge/deployは行っていない。
+
 ## 限定3batchの統合と完全gate準備（2026-10-21 11:04 JST）
 
 - **全体NO-GO**。control `6ce313ceddd80bcf79437869d3465abfeb7c3fb0` にNF06 wave2、NF08 B2a、NF01基盤を統合した。
