@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LifecycleAuthorizationPreflightUnitTest {
-
     @Test
     void incompleteOrFailingReportNeverPasses() {
         LifecycleAuthorizationPreflight.PreflightReport report =
@@ -19,6 +18,24 @@ class LifecycleAuthorizationPreflightUnitTest {
         report.finding("execution", "query", "FAIL", 1, List.of(), "incomplete");
         assertEquals("FAIL", report.status());
         assertFalse(report.toJson().contains("jdbc:mysql"));
+    }
+
+    @Test
+    void flywayHistoryMissingEmptyAndFailedNeverPass() {
+        LifecycleAuthorizationPreflight.PreflightReport missing = new LifecycleAuthorizationPreflight.PreflightReport("input", "schema");
+        missing.migrationHistory(false, List.of());
+        assertEquals("FAIL", missing.status());
+        assertTrue(missing.toJson().contains("FLYWAY_HISTORY_MISSING"));
+
+        LifecycleAuthorizationPreflight.PreflightReport empty = new LifecycleAuthorizationPreflight.PreflightReport("input", "schema");
+        empty.migrationHistory(true, List.of());
+        assertEquals("FAIL", empty.status());
+        assertTrue(empty.toJson().contains("FLYWAY_HISTORY_EMPTY"));
+
+        LifecycleAuthorizationPreflight.PreflightReport failed = new LifecycleAuthorizationPreflight.PreflightReport("input", "schema");
+        failed.migrationHistory(true, List.of("5:5:success=false"));
+        assertEquals("FAIL", failed.status());
+        assertTrue(failed.toJson().contains("FLYWAY_FAILED_MIGRATION"));
     }
 
     @Test

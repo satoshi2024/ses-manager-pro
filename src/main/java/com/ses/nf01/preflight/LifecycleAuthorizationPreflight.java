@@ -71,6 +71,8 @@ public final class LifecycleAuthorizationPreflight {
     public static void main(String[] args) {
         String schema = System.getenv("NF01_PREFLIGHT_SCHEMA");
         String baseline = System.getenv("NF01_PREFLIGHT_CODE_BASELINE");
+        String actualHead = System.getenv("NF01_PREFLIGHT_ACTUAL_HEAD");
+        String sourceSha256 = System.getenv("NF01_PREFLIGHT_SOURCE_SHA256");
         String outputValue = System.getenv("NF01_PREFLIGHT_OUTPUT_DIR");
         String url = System.getenv("NF01_PREFLIGHT_JDBC_URL");
         String user = System.getenv("NF01_PREFLIGHT_DB_USER");
@@ -85,6 +87,7 @@ public final class LifecycleAuthorizationPreflight {
         }
         try (Connection connection = java.sql.DriverManager.getConnection(url, user, password)) {
             PreflightReport report = run(connection, schema, baseline);
+            report.provenance(actualHead, sourceSha256);
             write(report, output);
             if (!report.status().equals("PASS")) {
                 System.exit(2);
@@ -190,14 +193,20 @@ public final class LifecycleAuthorizationPreflight {
         Map<String, ColumnInfo> flywayColumns = columns.get("flyway_schema_history");
         if (flywayColumns == null) {
             report.migrationHistory(false, List.of());
+
         } else if (flywayColumns.containsKey("version") && flywayColumns.containsKey("success")
                 && flywayColumns.containsKey("installed_rank")) {
             List<String> applied = new ArrayList<>();
             try (Statement statement = connection.createStatement(); ResultSet result = statement.executeQuery(
-                    "SELECT version,installed_rank FROM flyway_schema_history WHERE success=1 ORDER BY installed_rank")) {
-                while (result.next()) applied.add(result.getString("installed_rank") + ":" + safeToken(result.getString("version")));
+                    "SELECT version,installed_rank,success FROM flyway_schema_history ORDER BY installed_rank")) {
+                while (result.next()) {
+                    boolean success = result.getBoolean("success");
+                    applied.add(result.getString("installed_rank") + ":" + safeToken(result.getString("version")) + ":success=" + success);
+                    if (!success) report.fail("FLYWAY_FAILED_MIGRATION", "flyway_schema_history", "failed migration entry exists");
+                }
             }
             report.migrationHistory(true, applied);
+
         } else {
             report.fail("SCHEMA_FLYWAY_HISTORY_INCOMPLETE", "flyway_schema_history", "history table lacks required inventory columns");
         }
@@ -299,12 +308,12 @@ public final class LifecycleAuthorizationPreflight {
 
     private static void relationshipChecks(Connection connection, PreflightReport report) throws SQLException {
         checkCount(connection, report, "DOCUMENT_VERSION_PARENT_MISMATCH",
-                "SELECT COUNT(*) FROM t_document_version v LEFT JOIN t_document d ON d.id=v.document_id WHERE d.id IS NULL OR d.tenant_id<>v.tenant_id",
-                "SELECT v.id FROM t_document_version v LEFT JOIN t_document d ON d.id=v.document_id WHERE d.id IS NULL OR d.tenant_id<>v.tenant_id ORDER BY v.id LIMIT 20",
+                "SELECT COUNT(*) FROM t_document_version v LEFT JOIN t_document d ON d.id=v.document_id WHERE d.id IS NULL OR NOT (BINARY d.tenant_id <=> BINARY v.tenant_id)",
+                "SELECT v.id FROM t_document_version v LEFT JOIN t_document d ON d.id=v.document_id WHERE d.id IS NULL OR NOT (BINARY d.tenant_id <=> BINARY v.tenant_id) ORDER BY v.id LIMIT 20",
                 "t_document_version.document_id", "version parent missing or tenant differs");
         checkCount(connection, report, "DOCUMENT_LINK_PARENT_MISMATCH",
-                "SELECT COUNT(*) FROM t_document_link l LEFT JOIN t_document d ON d.id=l.document_id WHERE d.id IS NULL OR d.tenant_id<>l.tenant_id",
-                "SELECT l.id FROM t_document_link l LEFT JOIN t_document d ON d.id=l.document_id WHERE d.id IS NULL OR d.tenant_id<>l.tenant_id ORDER BY l.id LIMIT 20",
+                "SELECT COUNT(*) FROM t_document_link l LEFT JOIN t_document d ON d.id=l.document_id WHERE d.id IS NULL OR NOT (BINARY d.tenant_id <=> BINARY l.tenant_id)",
+                "SELECT l.id FROM t_document_link l LEFT JOIN t_document d ON d.id=l.document_id WHERE d.id IS NULL OR NOT (BINARY d.tenant_id <=> BINARY l.tenant_id) ORDER BY l.id LIMIT 20",
                 "t_document_link.document_id", "link parent missing or tenant differs");
         checkCount(connection, report, "DISPOSAL_PARENT_MISSING",
                 "SELECT COUNT(*) FROM t_document_disposal_request r LEFT JOIN t_document d ON d.id=r.document_id WHERE d.id IS NULL",
@@ -315,20 +324,20 @@ public final class LifecycleAuthorizationPreflight {
                 "SELECT t.id FROM t_lifecycle_task t LEFT JOIN t_lifecycle_case c ON c.id=t.case_id WHERE c.id IS NULL ORDER BY t.id LIMIT 20",
                 "t_lifecycle_task.case_id", "task case parent missing");
         checkCount(connection, report, "CASE_ENGINEER_TENANT_MISMATCH",
-                "SELECT COUNT(*) FROM t_lifecycle_case c LEFT JOIN t_engineer e ON e.id=c.engineer_id WHERE e.id IS NULL OR e.tenant_id<>c.tenant_id",
-                "SELECT c.id FROM t_lifecycle_case c LEFT JOIN t_engineer e ON e.id=c.engineer_id WHERE e.id IS NULL OR e.tenant_id<>c.tenant_id ORDER BY c.id LIMIT 20",
+                "SELECT COUNT(*) FROM t_lifecycle_case c LEFT JOIN t_engineer e ON e.id=c.engineer_id WHERE e.id IS NULL OR NOT (BINARY e.tenant_id <=> BINARY c.tenant_id)",
+                "SELECT c.id FROM t_lifecycle_case c LEFT JOIN t_engineer e ON e.id=c.engineer_id WHERE e.id IS NULL OR NOT (BINARY e.tenant_id <=> BINARY c.tenant_id) ORDER BY c.id LIMIT 20",
                 "t_lifecycle_case.engineer_id", "case engineer parent missing or tenant differs");
         checkCount(connection, report, "CONTRACT_CUSTOMER_TENANT_MISMATCH",
-                "SELECT COUNT(*) FROM t_contract c LEFT JOIN m_customer m ON m.id=c.customer_id WHERE m.id IS NULL OR (c.tenant_id IS NOT NULL AND m.tenant_id IS NOT NULL AND c.tenant_id<>m.tenant_id)",
-                "SELECT c.id FROM t_contract c LEFT JOIN m_customer m ON m.id=c.customer_id WHERE m.id IS NULL OR (c.tenant_id IS NOT NULL AND m.tenant_id IS NOT NULL AND c.tenant_id<>m.tenant_id) ORDER BY c.id LIMIT 20",
+                "SELECT COUNT(*) FROM t_contract c LEFT JOIN m_customer m ON m.id=c.customer_id WHERE m.id IS NULL OR (c.tenant_id IS NOT NULL AND m.tenant_id IS NOT NULL AND NOT (BINARY c.tenant_id <=> BINARY m.tenant_id))",
+                "SELECT c.id FROM t_contract c LEFT JOIN m_customer m ON m.id=c.customer_id WHERE m.id IS NULL OR (c.tenant_id IS NOT NULL AND m.tenant_id IS NOT NULL AND NOT (BINARY c.tenant_id <=> BINARY m.tenant_id)) ORDER BY c.id LIMIT 20",
                 "t_contract.customer_id", "contract customer parent missing or tenant differs");
         checkCount(connection, report, "ACCOUNT_LINK_PARENT_MISMATCH",
-                "SELECT COUNT(*) FROM t_engineer_account_link l LEFT JOIN t_engineer e ON e.id=l.engineer_id LEFT JOIN sys_user u ON u.id=l.sys_user_id WHERE e.id IS NULL OR u.id IS NULL OR e.tenant_id<>l.tenant_id OR u.tenant_id<>l.tenant_id",
-                "SELECT l.id FROM t_engineer_account_link l LEFT JOIN t_engineer e ON e.id=l.engineer_id LEFT JOIN sys_user u ON u.id=l.sys_user_id WHERE e.id IS NULL OR u.id IS NULL OR e.tenant_id<>l.tenant_id OR u.tenant_id<>l.tenant_id ORDER BY l.id LIMIT 20",
+                "SELECT COUNT(*) FROM t_engineer_account_link l LEFT JOIN t_engineer e ON e.id=l.engineer_id LEFT JOIN sys_user u ON u.id=l.sys_user_id WHERE e.id IS NULL OR u.id IS NULL OR NOT (BINARY e.tenant_id <=> BINARY l.tenant_id) OR NOT (BINARY u.tenant_id <=> BINARY l.tenant_id)",
+                "SELECT l.id FROM t_engineer_account_link l LEFT JOIN t_engineer e ON e.id=l.engineer_id LEFT JOIN sys_user u ON u.id=l.sys_user_id WHERE e.id IS NULL OR u.id IS NULL OR NOT (BINARY e.tenant_id <=> BINARY l.tenant_id) OR NOT (BINARY u.tenant_id <=> BINARY l.tenant_id) ORDER BY l.id LIMIT 20",
                 "t_engineer_account_link", "engineer/user parent missing or tenant differs");
         checkCount(connection, report, "USER_ORGANIZATION_PARENT_MISSING",
-                "SELECT COUNT(*) FROM t_user_organization x LEFT JOIN sys_user u ON u.id=x.user_id LEFT JOIN m_organization_unit o ON o.id=x.organization_id WHERE u.id IS NULL OR o.id IS NULL OR u.tenant_id<>x.tenant_id",
-                "SELECT x.id FROM t_user_organization x LEFT JOIN sys_user u ON u.id=x.user_id LEFT JOIN m_organization_unit o ON o.id=x.organization_id WHERE u.id IS NULL OR o.id IS NULL OR u.tenant_id<>x.tenant_id ORDER BY x.id LIMIT 20",
+                "SELECT COUNT(*) FROM t_user_organization x LEFT JOIN sys_user u ON u.id=x.user_id LEFT JOIN m_organization_unit o ON o.id=x.organization_id WHERE u.id IS NULL OR o.id IS NULL OR NOT (BINARY u.tenant_id <=> BINARY x.tenant_id)",
+                "SELECT x.id FROM t_user_organization x LEFT JOIN sys_user u ON u.id=x.user_id LEFT JOIN m_organization_unit o ON o.id=x.organization_id WHERE u.id IS NULL OR o.id IS NULL OR NOT (BINARY u.tenant_id <=> BINARY x.tenant_id) ORDER BY x.id LIMIT 20",
                 "t_user_organization", "user/organization parent missing or user tenant differs");
         checkCount(connection, report, "ASSET_ASSIGNMENT_ASSET_MISSING",
                 "SELECT COUNT(*) FROM t_asset_assignment x LEFT JOIN m_asset a ON a.id=x.asset_id WHERE a.id IS NULL",
@@ -338,6 +347,26 @@ public final class LifecycleAuthorizationPreflight {
                 "SELECT COUNT(*) FROM t_asset_lost_incident i LEFT JOIN m_asset a ON a.id=i.asset_id WHERE a.id IS NULL",
                 "SELECT i.id FROM t_asset_lost_incident i LEFT JOIN m_asset a ON a.id=i.asset_id WHERE a.id IS NULL ORDER BY i.id LIMIT 20",
                 "t_asset_lost_incident.asset_id", "asset parent missing");
+        checkCount(connection, report, "PROPOSAL_AUTHOR_DANGLING",
+                "SELECT COUNT(*) FROM t_proposal p LEFT JOIN sys_user u ON u.id=p.proposed_by WHERE p.proposed_by IS NOT NULL AND u.id IS NULL",
+                "SELECT p.id FROM t_proposal p LEFT JOIN sys_user u ON u.id=p.proposed_by WHERE p.proposed_by IS NOT NULL AND u.id IS NULL ORDER BY p.id LIMIT 20",
+                "t_proposal.proposed_by", "nonnull author must resolve; null author is permitted");
+        checkCount(connection, report, "PROJECT_CUSTOMER_MISSING",
+                "SELECT COUNT(*) FROM t_project p LEFT JOIN m_customer c ON c.id=p.customer_id WHERE p.customer_id IS NULL OR c.id IS NULL",
+                "SELECT p.id FROM t_project p LEFT JOIN m_customer c ON c.id=p.customer_id WHERE p.customer_id IS NULL OR c.id IS NULL ORDER BY p.id LIMIT 20",
+                "t_project.customer_id", "required customer must resolve");
+        checkCount(connection, report, "SALES_ACTIVITY_CUSTOMER_DANGLING",
+                "SELECT COUNT(*) FROM t_sales_activity a LEFT JOIN m_customer c ON c.id=a.customer_id WHERE a.customer_id IS NOT NULL AND c.id IS NULL",
+                "SELECT a.id FROM t_sales_activity a LEFT JOIN m_customer c ON c.id=a.customer_id WHERE a.customer_id IS NOT NULL AND c.id IS NULL ORDER BY a.id LIMIT 20",
+                "t_sales_activity.customer_id", "nonnull customer must resolve; null customer is permitted");
+        checkCount(connection, report, "SALES_ACTIVITY_CREATOR_DANGLING",
+                "SELECT COUNT(*) FROM t_sales_activity a LEFT JOIN sys_user u ON u.id=a.created_by WHERE a.created_by IS NOT NULL AND u.id IS NULL",
+                "SELECT a.id FROM t_sales_activity a LEFT JOIN sys_user u ON u.id=a.created_by WHERE a.created_by IS NOT NULL AND u.id IS NULL ORDER BY a.id LIMIT 20",
+                "t_sales_activity.created_by", "nonnull creator must resolve; null creator is permitted");
+        checkCount(connection, report, "ASSET_ASSIGNMENT_ASSIGNEE_DANGLING",
+                "SELECT COUNT(*) FROM t_asset_assignment x LEFT JOIN t_engineer e ON x.assignee_type='ENGINEER' AND e.id=x.assignee_id LEFT JOIN sys_user u ON x.assignee_type='USER' AND u.id=x.assignee_id WHERE x.assignee_id IS NULL OR (x.assignee_type='ENGINEER' AND e.id IS NULL) OR (x.assignee_type='USER' AND u.id IS NULL) OR x.assignee_type NOT IN ('ENGINEER','USER')",
+                "SELECT x.id FROM t_asset_assignment x LEFT JOIN t_engineer e ON x.assignee_type='ENGINEER' AND e.id=x.assignee_id LEFT JOIN sys_user u ON x.assignee_type='USER' AND u.id=x.assignee_id WHERE x.assignee_id IS NULL OR (x.assignee_type='ENGINEER' AND e.id IS NULL) OR (x.assignee_type='USER' AND u.id IS NULL) OR x.assignee_type NOT IN ('ENGINEER','USER') ORDER BY x.id LIMIT 20",
+                "t_asset_assignment.assignee", "assignee type and target must resolve");
         checkCount(connection, report, "PROPOSAL_PARENT_MISSING",
                 "SELECT COUNT(*) FROM t_proposal p LEFT JOIN t_engineer e ON e.id=p.engineer_id LEFT JOIN t_project pr ON pr.id=p.project_id WHERE e.id IS NULL OR pr.id IS NULL",
                 "SELECT p.id FROM t_proposal p LEFT JOIN t_engineer e ON e.id=p.engineer_id LEFT JOIN t_project pr ON pr.id=p.project_id WHERE e.id IS NULL OR pr.id IS NULL ORDER BY p.id LIMIT 20",
@@ -466,6 +495,8 @@ public final class LifecycleAuthorizationPreflight {
     public static final class PreflightReport {
         private final String codeBaseline;
         private final String schema;
+        private String actualHead = "unavailable";
+        private String sourceSha256 = "unavailable";
         private final String generatedAt = Instant.now().toString();
         private final List<Finding> findings = new ArrayList<>();
         private final List<String> columns = new ArrayList<>();
@@ -520,16 +551,22 @@ public final class LifecycleAuthorizationPreflight {
         private void tenantCandidates(Set<String> values) { tenantCandidates.addAll(values); }
         private void tenantCandidate(String value) { tenantCandidates.add(value); }
         private void legacyDisposalTenantColumnAbsent(boolean absent) { legacyDisposalTenantColumnAbsent = absent; }
-        private void migrationHistory(boolean present, List<String> versions) {
+        void provenance(String head, String hash) { actualHead = safeToken(head); sourceSha256 = safeToken(hash); }
+        void migrationHistory(boolean present, List<String> versions) {
             migrationHistoryPresent = present;
             appliedMigrations = List.copyOf(versions);
+            if (!present) fail("FLYWAY_HISTORY_MISSING", "flyway_schema_history", "required migration history table is missing");
+            else if (versions.isEmpty()) fail("FLYWAY_HISTORY_EMPTY", "flyway_schema_history", "migration history contains no entries");
+            else if (versions.stream().anyMatch(value -> value.endsWith("success=false"))) fail("FLYWAY_FAILED_MIGRATION", "flyway_schema_history", "failed migration entry exists");
         }
         boolean legacyDisposalTenantColumnAbsentForTest() { return legacyDisposalTenantColumnAbsent; }
 
         public String toJson() {
             StringBuilder json = new StringBuilder("{");
             field(json, "status", status()).append(',');
-            field(json, "codeBaseline", codeBaseline).append(',');
+            field(json, "codeBaselineInput", codeBaseline).append(',');
+            field(json, "actualHead", actualHead).append(',');
+            field(json, "sourceSha256", sourceSha256).append(',');
             field(json, "schema", schema).append(',');
             field(json, "generatedAt", generatedAt).append(',');
             json.append("\"legacyDisposalTenantColumnAbsent\":").append(legacyDisposalTenantColumnAbsent).append(',');
@@ -576,7 +613,7 @@ public final class LifecycleAuthorizationPreflight {
 
         public String toMarkdown() {
             StringBuilder out = new StringBuilder("# NF01 read-only preflight\n\n")
-                    .append("- Status: `").append(status()).append("`\n- Code baseline: `").append(md(codeBaseline))
+                    .append("- Status: `").append(status()).append("`\n- Code baseline input: `").append(md(codeBaseline)).append("`\n- Actual source HEAD: `").append(md(actualHead)).append("`\n- Checker source SHA-256: `").append(md(sourceSha256))
                     .append("`\n- Schema: `").append(md(schema)).append("`\n- Generated: `").append(generatedAt)
                     .append("`\n- Disposal tenant column absent in current schema: `").append(legacyDisposalTenantColumnAbsent).append("`\n\n")
                     .append("## Migration inventory\n\n");

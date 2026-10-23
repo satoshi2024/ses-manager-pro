@@ -10,6 +10,11 @@ foreach ($name in @('NF01_PREFLIGHT_SCHEMA', 'NF01_PREFLIGHT_CODE_BASELINE', 'NF
     }
 }
 
+$actualHead = (& git -C $repositoryRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($actualHead)) { throw 'Could not determine actual source HEAD.' }
+$sourceSha256 = (Get-FileHash -LiteralPath $sourceFile -Algorithm SHA256).Hash.ToLowerInvariant()
+$env:NF01_PREFLIGHT_ACTUAL_HEAD = $actualHead
+$env:NF01_PREFLIGHT_SOURCE_SHA256 = $sourceSha256
 $driver = Get-ChildItem -LiteralPath $driverRoot -Recurse -Filter 'mysql-connector-j-*.jar' -File -ErrorAction SilentlyContinue |
     Sort-Object { [version]$_.Directory.Name } -Descending |
     Select-Object -First 1
