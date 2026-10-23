@@ -9,14 +9,14 @@
 
 | NF | 現行実装/Reviewの再判定 | productionの未完条件 |
 |---|---|---|
-| 01 | R01a `ced64304` CODE PASS、採番/actor P2閉鎖。追加fixture `e3944774` CODE PASS。DUAL確認等は未完 | 文書ACL/version、二者確認、信頼できる退社撤権要求・確認、legacy scope、運用承認 |
+| 01 | R01a・canonical証跡/DUAL防御基盤をcontrol6ce313ceへ限定統合。基盤fast59/0/0/0受理。readonly preflight source c4045575は限定CODE PASS・正式runtime待ち、未統合。実epoch/current-read/CONFIRMは未実装 | 文書ACL/version、二者確認、信頼できる退社撤権要求・確認、legacy scope、運用承認 |
 | 02 | CANDIDATE維持。recipient現在scope/owner tenantの両P1は36dcfdfcでAstra限定CODE PASS、control統合済み | DG-02、正式Owner/最終Review、release |
 | 03 | 集約完了修復と実MySQL並行証拠 `89384928`は限定CODE PASS、control統合済み | 全体最終Review、NF07 policy、retention、staging/運用承認 |
 | 04 | G1限定CODE PASS、34/0/0/0とMySQL4/0/0/0。実servlet修復91dbca13は独立Review・3/0/0/0、control統合後40/0/0/0。Chrome06 fixed5b40590eの2/0/0/0はAstra限定証拠PASS。bootstrap撤回競合P1を修復しfull06 fixed38f684acは11 class17/0/0/0。G2をcontrol6980dff8へ統合、同SHA browser17/0/0/0と定向fast13 class85/0/0/0をAstra限定受理 | 実PWA/browser全体検証、非通知tab/分散session環境、正式release |
 | 05 | 開発scope CONDITIONAL。総deadline 2187b5f9限定CODE PASS、26/0/0/0、control統合。実transport未完 | provider/credential、許可先、正式production enablement |
-| 06 | F1a/V184・candidate/lease・F1b wave1をcontrolへ限定統合。修復後control619d3e03のjoint MySQLは4 class61/0/0/0、Astra証拠PASS。wave2旧9d09はfast61/1/0/0 FAIL、renew/fixture修復b3bc9647は限定CODE PASS・runtime再検証中、未統合。seal/publish/apply/UI未完 | 全synthetic実装/独立Review、実source/mapping/data owner、移行承認 |
-| 07 | SF-W1/W2a・W2b Slice A/B限定CODE PASS。Slice B三DB MySQL10/0/0/0、control61b0b979統合後も10/0/0/0。Slice Cは旧13/0/0/0後、main commit故障fixtureで16/1/0/0、次はcompile FAIL。修復97641ce9はMySQL16/0/0/0・Astra限定CODE/証拠PASS、control a0a05f7d再実行も16/0/0/0。D plan0fbd0515は限定PLAN PASS。D1 fixed8fd3bcb0はMySQL20/0/0/0・Astra限定CODE/証拠PASS、control a9e8c360の再試験20/0/0/0もAstra証拠PASS、pure5 class18/0/0/0。D2a d83266afはMySQL26/0/0/0・Astra限定受理、未統合。D2b1固定64db441dは三DB MySQL32/0/0/0、D2b2 ac894ac6は35/0/0/0、Astra限定CODE/証拠PASS、D2a以降10commitをcontrol9f8568bd統合。W3a計画5126952bは限定PLAN PASS、初回実装4ddb8ff6とdde57204はCODE FAIL、修復2d42ce4cは限定CODE PASS。追加test時刻逆行を92d91d58で修復し実MySQL26/0/0/0・Astra限定受理、controlb6e2992b統合。control D2b2 fixedca02は35/0/0/0、Astra限定受理。一般network停止・実dispatch/処分・coverage未完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
-| 08 | 開発scope CONDITIONAL。A/B/C1・C2-A1/A2・B1をcontrolへ限定統合。B1 db25はfast108/0/0/0・MySQL6/0/0/0、Wave A fixed86c42e99はMySQL10/0/0/0・Astra証拠PASS、control4402ac65へ統合。B2 plan7daa0e9eはCONDITIONALで修訂中。public費用DTOの信頼境界、durable dispatch claim、runtime provenance未完 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
+| 06 | F1a/V184・candidate/lease・wave2をcontrolf932a888へ限定統合。wave2 source fast64/0/0/0と別SHA MySQL95/0/0/0受理。W3A source0f45は限定CODE/fast64/0/0/0 PASS、joint MySQL97/1/56/0 FAIL、未統合。seal/publish/apply/UI未実装 | 全synthetic実装/独立Review、実source/mapping/data owner、移行承認 |
+| 07 | SF基盤・D2b2・W3a限定scope統合済み。全gateでPrivacy自由競合失敗、診断3ddは53/1/0/0。fence no-op upsert修復125eは限定CODE PASS、実MySQL再検証中。旧35件/26件成功を最新競合問題の解決としない。本人同定/交付/処分・実provider未完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
+| 08 | A/B/C1・C2-A1/A2・B1/B2aとB2b限定境界をcontrol703647aaへ統合。B2b source bdaは20class116/0/0/0、Astra限定CODE/証拠PASS。並行test違反とJaCoCo警告を記録しcoverage結論なし。実TLS issuer、durable claim、dispatch/usage authority未完 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
 | 09 | fail-closed修復 `da850b97`限定CODE PASS、control統合済み。実providerの完成ではない | V182 PENDING=0/帰属不明0/親子一致、実撤権/session/token、production owner |
 | 10 | session共有reauth修復 `20cce0f7`限定CODE PASS、46/0/0/0、control統合済み | 全体独立Review、実browser/session環境、staging、正式release |
 

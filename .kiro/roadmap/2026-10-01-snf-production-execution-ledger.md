@@ -1,5 +1,41 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## 限定修復の再検証（2026-10-23）
+
+- **全体NO-GO継続**。NF08 B2bの6 fileをsource `bda9fa984d507b251cd0abc7ca214d73c70009aa` から
+  control `703647aa1185a115890225eca9a32c20a7c9ab4a` へ同一Git blobで統合した。Astraが集成差分を独立確認した。
+  source限定fastは20 class **116/0/0/0**、UTC03:19:01.4794022〜03:21:07.0198905、exit0、起止SHA一致・clean。
+  log SHA-256 `F634A30E3C1733DC75FF2DCDFC484E89D9D89539DBF6AF3B880662EF0227C745`。
+  40 report hashを独立照合し、49 raw fileを `verification-evidence/20261023-nf08-b2b-source-01/` にhash一致で保存した。
+  実TLS positive issuer、provider真正性、claim以降の実dispatch/ACTUAL authorityは未証明である。
+- NF01担当agentが重いテストの直列指示に反し、上記NF08実行中に独自MySQLと次回compileを実行した。
+  自己sessionのみ停止し、最初の **7/0/1/0 FAIL** と次回compile中断（runtime結論なし）を保存した。
+  根拠は `verification-evidence/20261023-nf01-agent-overlap/` とNF08の `coordination-observation.json`。
+  第一失敗はautocommit有効時のrollbackである。概算重複時刻は03:19〜03:20 UTC、正確な開始終了logは未保存。
+  AstraはNF08 report混同・上書きの証拠なしとして限定Surefire結果を受理したが、厳密な直列実行とは呼ばない。
+  NF08のJaCoCo LoginUser mismatchも記録し、coverage結論は採用しない。重複との因果関係は未立証である。
+- NF01 preflight修復の固定source `c40455759f6b9bdd113de0c5ba4182fd56052693` はAstra限定CODE PASS。
+  fixture分離、実container password参照、readonly transaction、JSON数値の厳密assert、遮蔽の限界説明を修正した。
+  root管理のclean固定SHAによる正式runtimeは未実施であり、前述agent実行を代用しない。DDL/epoch/CONFIRMは未実装。
+- NF06 W3A固定source `0f45c2a8ed64debcbc2ecfcda16153a0949b4493` の限定fastは12 class **64/0/0/0**。
+  UTC03:26:40.0597164〜03:28:12.1952099、exit0、起止SHA一致・clean、24 report hashをAstraが独立照合した。
+  log `EAF1B95B0B46C1032726A3E245E60873A67141FA1165995395A05FBBF68CF819`。
+  JaCoCo stale execution-data warningのためcoverage証拠にはしない。joint MySQLは4 class **97/1/56/0 FAIL**、controlには未統合。
+  UTC03:28:51.5952557〜03:32:23.5898988、log `257966F82F55DA86741F39230EF2AD9B76AB89D7074CD30513FDD2EF83ABF83C`。
+  最初はregisterJob撤権caseのsource PRIMARY待機判定でLOCK_DATAがNULLとなり、続くcleanupがimport_job外部キーで失敗した。
+  後続fixture重複による連鎖errorを含む。NULLを対象行一致とみなさず、観測と終了時cleanupの両方を診断する。
+  fast32 fileとMySQL16 fileをcontrolの `verification-evidence/20261023-nf06-w3a-source-*-01/` にhash一致で保存した。
+- MySQL診断fixed `3dd2ea364f8aba4f01473552676dd5a82b0343ad` は5 class **53/1/0/0 FAIL**。
+  UTC03:12:16.7585290〜03:18:34.4870075、log `0365793899A4AAF14C56704F80E91FE83868FE227F22DE25450E392FF095D4FF`。
+  migration 17件は通過、Privacy 36件中、新しい同一prefix競合caseが `PROJECTION_UNAVAILABLE` で失敗した。
+  元の自由競合caseは今回通過したが、全gateの過去失敗を撤回しない。安全reasonだけではSQL1213を確定できない。
+  raw18 fileは `verification-evidence/20261023-mysql-remediation-source-01/` に保存済み。
+- 修復fixed `125e03a956909b2677e36b3149a21af71ecebd4e` はAstra限定CODE PASS。
+  fence初期化をno-op upsertへ限定変更。旧SQL実connectionのS→X競合で40001かつ1213を要求する試験、
+  二つの実service workerのPRIMARY待機・解放後APPLIED/NO_OP、projection全項目、journal head/events API snapshot不変、
+  generation/state/owner維持を追加した。20秒JDBC上限と既存CAS回帰を保持。root実MySQLは03:33:38 UTCに開始、結果待ちであり根因実証/修復PASSではない。
+
+
 ## 再開・中断gate診断（2026-10-23）
 
 - **全体NO-GO継続**。fetch後origin/mainは `1443fb68943849a3260d7ebe005259f3eb609d60`。
