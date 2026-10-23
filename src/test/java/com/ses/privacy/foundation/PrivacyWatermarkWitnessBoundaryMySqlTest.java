@@ -942,6 +942,32 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         assertEquals(0, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ?",
                 Integer.class, tenantId, subjectRef));
         var start = new CountDownLatch(1);
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<PrivacyProjectionPort.ProjectionResult> a = pool.submit(() -> { start.await(); return projectionService.projectAcknowledged(partition, first); });
+            Future<PrivacyProjectionPort.ProjectionResult> b = pool.submit(() -> { start.await(); return projectionService.projectAcknowledged(partition, second); });
+            start.countDown();
+            var resultA = a.get(10, TimeUnit.SECONDS);
+            var resultB = b.get(10, TimeUnit.SECONDS);
+            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, resultA.status(), "worker A result=" + resultA);
+            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, resultB.status(), "worker B result=" + resultB);
+        } finally {
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "projection worker termination timeout");
+        }
+        var snapshot = new JdbcPrivacyProjectionAdapter(harness.application().createApplicationProjectionDataSource(), context.getEnvironment()).snapshot(partition);
+        assertEquals(2L, snapshot.revision());
+        assertEquals(second.eventHash(), snapshot.eventHash());
+    }
+
+    @Test
+    void 同一初期prefixでrevision1適用が競合してもprojectionが収束する() throws Exception {
+        var partition = partition();
+        var first = append(partition, 0, PrivacyJournalPort.CommandType.HOLD_STARTED, "cmd-deterministic-c");
+        var second = append(partition, 1, PrivacyJournalPort.CommandType.LEASE_CLAIMED, "cmd-deterministic-d");
+        assertEquals(0, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ?",
+                Integer.class, tenantId, subjectRef));
+        var start = new CountDownLatch(1);
         var initialSnapshots = new CountDownLatch(2);
         var firstRevisionApplies = new CountDownLatch(2);
         var initialSnapshotCalls = new AtomicInteger();
