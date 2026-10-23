@@ -94,15 +94,9 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         // provider呼出し自体もtenant-bound requestだけに限定し、persist=false経路から
         // tenant未束縛の外部送信が発生しないようにする。
         com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
-        Map<String, Object> masked = AiPiiMasker.mask(request.getAllowlistedFields());
-        if (AiPiiMasker.containsCanary(masked)) {
-            throw new BusinessException(400, "PII canary を外部送信できません");
-        }
-        String untrusted = AiPiiMasker.sanitizeUntrusted(request.getUntrustedSourceText());
-        String prompt = buildPrompt(request, masked, untrusted);
-        if (prompt.contains(AiGatewayRequest.CANARY)) {
-            throw new BusinessException(400, "PII canary を外部送信できません");
-        }
+        PromptPreparation prepared = preparePrompt(request);
+        Map<String, Object> masked = prepared.maskedFields();
+        String prompt = prepared.prompt();
         CopilotInvocation invocation = null;
         if (AiGatewayRequest.USE_COPILOT.equals(request.getUseCase())) {
             invocation = assertCopilotBoundedRequest(request);
@@ -195,12 +189,28 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 || !currentTenant.equals(context.tenantId())) {
             throw BusinessException.of(403, "SCOPE_CONTEXT_REQUIRED");
         }
+        preparePrompt(request);
+        PreflightCostEvidence evidence = validateCopilotPreflight(request);
+        // Read-only preflight must exercise the same final provider/policy boundary as execute.
+        // execute deliberately repeats this check immediately before any probe or provider call.
+        assertFinalProviderBoundary(request);
+        return evidence;
+    }
+
+    private PromptPreparation preparePrompt(AiGatewayRequest request) {
         Map<String, Object> masked = AiPiiMasker.mask(request.getAllowlistedFields());
         if (AiPiiMasker.containsCanary(masked)) {
-            throw BusinessException.of(400, "COPILOT_PII_CANARY_REJECTED");
+            throw new BusinessException(400, "PII canary を外部送信できません");
         }
-        return validateCopilotPreflight(request);
+        String untrusted = AiPiiMasker.sanitizeUntrusted(request.getUntrustedSourceText());
+        String prompt = buildPrompt(request, masked, untrusted);
+        if (prompt.contains(AiGatewayRequest.CANARY)) {
+            throw new BusinessException(400, "PII canary を外部送信できません");
+        }
+        return new PromptPreparation(masked, prompt);
     }
+
+    private record PromptPreparation(Map<String, Object> maskedFields, String prompt) { }
 
     private String callProvider(String prompt) {
         return aiTextService.generate(prompt);
