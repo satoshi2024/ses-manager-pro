@@ -942,13 +942,40 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         assertEquals(0, projectionAdmin.queryForObject("SELECT COUNT(*) FROM sf_w2b_projection WHERE tenant_id = ? AND subject_ref = ?",
                 Integer.class, tenantId, subjectRef));
         var start = new CountDownLatch(1);
+        var initialSnapshots = new CountDownLatch(2);
+        var firstRevisionApplies = new CountDownLatch(2);
+        var initialSnapshotCalls = new AtomicInteger();
+        var projectionAdapter = projectionPort();
+        PrivacyProjectionPort contendedProjection = new PrivacyProjectionPort() {
+            @Override public ProjectionResult apply(JournalProjectionService.VerifiedJournalEvent event) {
+                if (event.event().revision() == 1) {
+                    firstRevisionApplies.countDown();
+                    awaitLatch(firstRevisionApplies);
+                }
+                return projectionAdapter.apply(event);
+            }
+            @Override public ProjectionSnapshot snapshot(PrivacyJournalPort.JournalPartition value) {
+                return projectionAdapter.snapshot(value);
+            }
+            @Override public ProjectionSnapshot snapshotForNormalProjection(PrivacyJournalPort.JournalPartition value) {
+                ProjectionSnapshot observed = projectionAdapter.snapshotForNormalProjection(value);
+                if (initialSnapshotCalls.incrementAndGet() <= 2) {
+                    initialSnapshots.countDown();
+                    awaitLatch(initialSnapshots);
+                }
+                return observed;
+            }
+        };
+        JournalProjectionService contendedService = new JournalProjectionService(journalAdapter, contendedProjection);
         var pool = Executors.newFixedThreadPool(2);
         try {
-            Future<PrivacyProjectionPort.ProjectionResult> a = pool.submit(() -> { start.await(); return projectionService.projectAcknowledged(partition, first); });
-            Future<PrivacyProjectionPort.ProjectionResult> b = pool.submit(() -> { start.await(); return projectionService.projectAcknowledged(partition, second); });
+            Future<PrivacyProjectionPort.ProjectionResult> a = pool.submit(() -> { start.await(); return contendedService.projectAcknowledged(partition, first); });
+            Future<PrivacyProjectionPort.ProjectionResult> b = pool.submit(() -> { start.await(); return contendedService.projectAcknowledged(partition, second); });
             start.countDown();
-            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, a.get(10, TimeUnit.SECONDS).status());
-            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, b.get(10, TimeUnit.SECONDS).status());
+            var resultA = a.get(10, TimeUnit.SECONDS);
+            var resultB = b.get(10, TimeUnit.SECONDS);
+            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, resultA.status(), "worker A result=" + resultA);
+            assertNotEquals(PrivacyProjectionPort.Status.QUARANTINED, resultB.status(), "worker B result=" + resultB);
         } finally {
             pool.shutdownNow();
             assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "projection worker termination timeout");
