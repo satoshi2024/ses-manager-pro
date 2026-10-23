@@ -30,6 +30,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -88,6 +89,11 @@ class ImportMetadataRealMySqlTest {
     private static final long LEGAL_ENTITY_ID = 7_601_234L;
     private static final String LOOKUP_KEY_VERSION = "nf06-test-key-v1";
     private static final byte[] LOOKUP_KEY = new byte[32];
+    private static final AtomicBoolean SOURCE_WAIT_FIXTURE_UNSAFE = new AtomicBoolean();
+    private static final int SOURCE_WAIT_LOCK_SECONDS = 10;
+    private static final int SOURCE_WAIT_NETWORK_MILLIS = 20_000;
+    private static final int SOURCE_WAIT_FUTURE_SECONDS = 25;
+    private static final int SOURCE_WAIT_TERMINATION_SECONDS = 5;
 
     @Container
     @SuppressWarnings("resource")
@@ -138,6 +144,9 @@ class ImportMetadataRealMySqlTest {
 
     @BeforeEach
     void prepareAuthorizedFixture() {
+        if (SOURCE_WAIT_FIXTURE_UNSAFE.get()) {
+            throw new AssertionError("source lock workerの終了を確認できなかったため、以降のfixtureを安全に開始できません");
+        }
         storage.resetOpenCount();
         tenantId = TEST_TENANT;
         AccountingTenantContextHolder.setTenantId(tenantId);
@@ -210,6 +219,7 @@ class ImportMetadataRealMySqlTest {
     void cleanupFixture() {
         SecurityContextHolder.clearContext();
         AccountingTenantContextHolder.clear();
+        if (SOURCE_WAIT_FIXTURE_UNSAFE.get()) return;
         if (tenantId == null) return;
         if (documentId > 0) {
             jdbc.update("DELETE FROM t_document_access_log WHERE document_id=?", documentId);
@@ -1452,12 +1462,10 @@ class ImportMetadataRealMySqlTest {
                 installPrincipal(tenantId, authority);
                 AccountingTenantContextHolder.setTenantId(tenantId);
                 try {
-                    return new org.springframework.transaction.support.TransactionTemplate(
-                            new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource)).execute(status -> {
-                        requesterId.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
-                        return metadataService.registerJob(new ImportJobRegistrationRequest(sourceId, ImportEntity.CUSTOMER,
-                                "ses-import-v1", ImportEncoding.UTF8, SOURCE_HASH, documentId, documentVersionId, 1));
-                    });
+                    return runSourceWaitWorker(requesterId, () -> metadataService.registerJob(
+                            new ImportJobRegistrationRequest(sourceId, ImportEntity.CUSTOMER,
+                                    "ses-import-v1", ImportEncoding.UTF8, SOURCE_HASH,
+                                    documentId, documentVersionId, 1)));
                 } finally {
                     SecurityContextHolder.clearContext();
                     AccountingTenantContextHolder.clear();
@@ -1469,7 +1477,7 @@ class ImportMetadataRealMySqlTest {
                     tenantId, groupId, ImportMetadataAuthorizationService.ACTION);
             blocker.commit();
             var failure = org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class,
-                    () -> submittedRegistration.get(10, TimeUnit.SECONDS));
+                    () -> submittedRegistration.get(SOURCE_WAIT_FUTURE_SECONDS, TimeUnit.SECONDS));
             assertTrue(failure.getCause() instanceof BusinessException);
             assertEquals(403, ((BusinessException) failure.getCause()).getCode());
             expectedDenialObserved = true;
@@ -1496,7 +1504,8 @@ class ImportMetadataRealMySqlTest {
                 try { blocker.rollback(); } catch (Exception failure) { cleanupFailures.add(failure); }
                 try { blocker.close(); } catch (Exception failure) { cleanupFailures.add(failure); }
             }
-            cleanupFailures.addAll(awaitSourceWorkers(registration == null ? List.of() : List.of(registration), pool, true));
+            cleanupFailures.addAll(awaitSourceWorkers(registration == null ? List.of() : List.of(registration),
+                    pool, requesterId, true));
             reportCleanupFailures("source lock競合fixture", cleanupFailures, primaryFailure);
         }
     }
@@ -1512,6 +1521,20 @@ class ImportMetadataRealMySqlTest {
                 "t_import_source_system", "PRIMARY", "RECORD", "X,REC_NOT_GAP", "GRANTED", null);
 
         assertTrue(isExactSourcePrimaryWait(List.of(holder), List.of(edge), 72L, 71L, 301L));
+        SourcePrimaryWaitEdge requesterKeyObserved = new SourcePrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(),
+                edge.requesterIndex(), edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), "301",
+                edge.holderConnectionId(), edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(),
+                edge.holderTable(), edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), null);
+        assertTrue(isExactSourcePrimaryWait(List.of(holder), List.of(requesterKeyObserved), 72L, 71L, 301L),
+                "requester keyのみ観測できてもexpected sourceなら許可");
+        SourcePrimaryWaitEdge holderKeyObserved = new SourcePrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(),
+                edge.requesterIndex(), edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), null,
+                edge.holderConnectionId(), edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(),
+                edge.holderTable(), edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), "301");
+        assertTrue(isExactSourcePrimaryWait(List.of(holder), List.of(holderKeyObserved), 72L, 71L, 301L),
+                "holder keyのみ観測できてもexpected sourceなら許可");
         assertTrue(!isExactSourcePrimaryWait(List.of(holder), List.of(edge), 73L, 71L, 301L), "誤ったrequesterを拒否");
         assertTrue(!isExactSourcePrimaryWait(List.of(holder), List.of(edge), 72L, 74L, 301L), "誤ったholderを拒否");
         assertTrue(!isExactSourcePrimaryWait(List.of(holder), List.of(edge), 72L, 71L, 302L), "誤った対象sourceを拒否");
@@ -1526,7 +1549,14 @@ class ImportMetadataRealMySqlTest {
                 edge.holderConnectionId(), edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(),
                 edge.holderTable(), edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), "302");
         assertTrue(!isExactSourcePrimaryWait(List.of(holder), List.of(wrongTarget), 72L, 71L, 301L),
-                "非NULL lock keyが期待source IDと違えば拒否");
+                "requesterの非NULL lock keyが期待source IDと違えば拒否");
+        SourcePrimaryWaitEdge wrongHolderKey = new SourcePrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(),
+                edge.requesterIndex(), edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), null,
+                edge.holderConnectionId(), edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(),
+                edge.holderTable(), edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), "302");
+        assertTrue(!isExactSourcePrimaryWait(List.of(holder), List.of(wrongHolderKey), 72L, 71L, 301L),
+                "holderの非NULL lock keyが期待source IDと違えば拒否");
         assertTrue(!isExactSourcePrimaryWait(List.of(holder), List.of(edge, edge), 72L, 71L, 301L),
                 "wait edgeが複数なら曖昧として拒否");
     }
@@ -2785,11 +2815,7 @@ class ImportMetadataRealMySqlTest {
                 installPrincipal(tenantId, authority);
                 AccountingTenantContextHolder.setTenantId(tenantId);
                 try {
-                    return new org.springframework.transaction.support.TransactionTemplate(
-                            new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource)).execute(status -> {
-                        requesterId.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
-                        return operation.get();
-                    });
+                    return runSourceWaitWorker(requesterId, operation);
                 } finally {
                     SecurityContextHolder.clearContext();
                     AccountingTenantContextHolder.clear();
@@ -2802,7 +2828,7 @@ class ImportMetadataRealMySqlTest {
                     tenantId, groupId, ImportMetadataAuthorizationService.ACTION));
             blocker.commit();
             var failure = org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class,
-                    () -> submittedOperation.get(10, TimeUnit.SECONDS));
+                    () -> submittedOperation.get(SOURCE_WAIT_FUTURE_SECONDS, TimeUnit.SECONDS));
             assertTrue(failure.getCause() instanceof BusinessException);
             assertEquals(403, ((BusinessException) failure.getCause()).getCode());
             expectedDenialObserved = true;
@@ -2824,7 +2850,7 @@ class ImportMetadataRealMySqlTest {
             }
             if (pool != null) {
                 cleanupFailures.addAll(awaitSourceWorkers(operationFuture == null ? List.of() : List.of(operationFuture),
-                        pool, true));
+                        pool, requesterId, true));
             }
             reportCleanupFailures("metadata service source lock競合fixture", cleanupFailures, primaryFailure);
         }
@@ -3147,7 +3173,7 @@ class ImportMetadataRealMySqlTest {
     }
 
     private List<SourcePrimaryRecordLock> sourcePrimaryRecordLocks(long connectionId) {
-        return jdbc.query("""
+        return withSourceWaitObserverBudget(() -> jdbc.query("""
                 SELECT dl.ENGINE,dl.ENGINE_LOCK_ID,dl.ENGINE_TRANSACTION_ID,th.PROCESSLIST_ID,
                        dl.OBJECT_SCHEMA,dl.OBJECT_NAME,dl.INDEX_NAME,dl.LOCK_TYPE,dl.LOCK_MODE,
                        dl.LOCK_STATUS,dl.LOCK_DATA
@@ -3158,14 +3184,14 @@ class ImportMetadataRealMySqlTest {
                   AND dl.LOCK_TYPE='RECORD'
                 """, (rs, row) -> new SourcePrimaryRecordLock(rs.getString(1), rs.getString(2),
                 rs.getString(3), rs.getLong(4), rs.getString(5), rs.getString(6), rs.getString(7),
-                rs.getString(8), rs.getString(9), rs.getString(10), rs.getString(11), sourceId), connectionId);
+                rs.getString(8), rs.getString(9), rs.getString(10), rs.getString(11), sourceId), connectionId));
     }
 
     private boolean isSourcePrimaryRecordLock(SourcePrimaryRecordLock lock, long expectedSourceId, String status) {
-        return lock.schema().equals(jdbc.queryForObject("SELECT DATABASE()", String.class))
-                && lock.table().equals("t_import_source_system") && lock.index().equals("PRIMARY")
-                && lock.type().equals("RECORD") && isExclusiveRecordMode(lock.mode())
-                && lock.status().equals(status)
+        return lock.schema() != null && lock.schema().equals(currentDatabaseWithinObserverBudget())
+                && "t_import_source_system".equals(lock.table()) && "PRIMARY".equals(lock.index())
+                && "RECORD".equals(lock.type()) && isExclusiveRecordMode(lock.mode())
+                && status.equals(lock.status())
                 && (lock.lockData() == null || lock.lockData().equals(Long.toString(expectedSourceId)));
     }
 
@@ -3177,7 +3203,7 @@ class ImportMetadataRealMySqlTest {
     }
 
     private List<SourcePrimaryWaitEdge> sourcePrimaryWaitEdges(long requesterId) {
-        return jdbc.query("""
+        return withSourceWaitObserverBudget(() -> jdbc.query("""
                 SELECT w.ENGINE,wt.PROCESSLIST_ID AS req_connection_id,req.ENGINE_LOCK_ID AS req_lock_id,
                        req.ENGINE_TRANSACTION_ID AS req_trx_id,req.OBJECT_SCHEMA AS req_schema,
                        req.OBJECT_NAME AS req_table,req.INDEX_NAME AS req_index,req.LOCK_TYPE AS req_type,
@@ -3201,7 +3227,7 @@ class ImportMetadataRealMySqlTest {
                 rs.getString("req_data"), rs.getLong("holder_connection_id"), rs.getString("holder_lock_id"),
                 rs.getString("holder_trx_id"), rs.getString("holder_schema"), rs.getString("holder_table"),
                 rs.getString("holder_index"), rs.getString("holder_type"), rs.getString("holder_mode"),
-                rs.getString("holder_status"), rs.getString("holder_data")), requesterId);
+                rs.getString("holder_status"), rs.getString("holder_data")), requesterId));
     }
 
     private boolean isExactSourcePrimaryWait(List<SourcePrimaryRecordLock> holderRecords,
@@ -3231,7 +3257,7 @@ class ImportMetadataRealMySqlTest {
     private boolean isSourcePrimaryEdgeSide(String schema, String table, String index, String type,
                                             String mode, String status, String lockData,
                                             long expectedSourceId, String expectedStatus) {
-        return schema != null && schema.equals(jdbc.queryForObject("SELECT DATABASE()", String.class))
+        return schema != null && schema.equals(currentDatabaseWithinObserverBudget())
                 && "t_import_source_system".equals(table) && "PRIMARY".equals(index)
                 && "RECORD".equals(type) && isExclusiveRecordMode(mode) && expectedStatus.equals(status)
                 && (lockData == null || lockData.equals(Long.toString(expectedSourceId)));
@@ -3253,7 +3279,7 @@ class ImportMetadataRealMySqlTest {
                     List<SourcePrimaryRecordLock> holderRecords = sourcePrimaryRecordLocks(holderLock.connectionId());
                     if (!isExactSourcePrimaryWait(holderRecords, waits, requester,
                             holderLock.connectionId(), expectedSourceId)
-                            || !holderRecords.get(0).equals(holderLock)) {
+                            || !sameSourcePrimaryLockIdentity(holderRecords.get(0), holderLock)) {
                         throw new AssertionError("source PRIMARY wait identityが曖昧または期待外です: waits="
                                 + waits + "; holderRecords=" + holderRecords);
                     }
@@ -3266,6 +3292,19 @@ class ImportMetadataRealMySqlTest {
         assertFuturePending(sourceOperation, "metadata service");
         throw new AssertionError("対象source PRIMARY行のMySQL lock waitを確認できませんでした。"
                 + safeWaitDetails(requesterId.get(), holderLock.connectionId()) + "; holder=" + holderLock);
+    }
+
+    private boolean sameSourcePrimaryLockIdentity(SourcePrimaryRecordLock observed, SourcePrimaryRecordLock captured) {
+        return java.util.Objects.equals(observed.engine(), captured.engine())
+                && java.util.Objects.equals(observed.lockId(), captured.lockId())
+                && java.util.Objects.equals(observed.transactionId(), captured.transactionId())
+                && observed.connectionId() == captured.connectionId()
+                && java.util.Objects.equals(observed.schema(), captured.schema())
+                && java.util.Objects.equals(observed.table(), captured.table())
+                && java.util.Objects.equals(observed.index(), captured.index())
+                && java.util.Objects.equals(observed.type(), captured.type())
+                && java.util.Objects.equals(observed.mode(), captured.mode())
+                && java.util.Objects.equals(observed.status(), captured.status());
     }
 
     private void assertContentionTasksPending(Future<?> gate, Future<?> denyInsert,
@@ -3287,53 +3326,163 @@ class ImportMetadataRealMySqlTest {
         }
     }
 
+    private <T> T runSourceWaitWorker(AtomicReference<Long> requesterId, Supplier<T> operation) {
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        transaction.setTimeout(SOURCE_WAIT_LOCK_SECONDS + 5);
+        return transaction.execute(status -> {
+            Connection connection = DataSourceUtils.getConnection(dataSource);
+            int originalNetworkTimeout;
+            int originalLockWaitSeconds;
+            try {
+                originalNetworkTimeout = connection.getNetworkTimeout();
+                connection.setNetworkTimeout(Runnable::run, SOURCE_WAIT_NETWORK_MILLIS);
+                try {
+                    originalLockWaitSeconds = jdbc.queryForObject("SELECT @@SESSION.innodb_lock_wait_timeout", Integer.class);
+                } catch (RuntimeException failure) {
+                    try { connection.setNetworkTimeout(Runnable::run, originalNetworkTimeout); }
+                    catch (java.sql.SQLException resetFailure) { failure.addSuppressed(resetFailure); }
+                    throw failure;
+                }
+            } catch (java.sql.SQLException failure) {
+                throw new IllegalStateException("source wait workerのconnection budgetを設定できません", failure);
+            }
+            try {
+                jdbc.execute("SET SESSION innodb_lock_wait_timeout=" + SOURCE_WAIT_LOCK_SECONDS);
+                requesterId.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                return operation.get();
+            } finally {
+                try { jdbc.execute("SET SESSION innodb_lock_wait_timeout=" + originalLockWaitSeconds); }
+                finally {
+                    try { connection.setNetworkTimeout(Runnable::run, originalNetworkTimeout); }
+                    catch (java.sql.SQLException failure) {
+                        throw new IllegalStateException("source wait workerのnetwork timeoutを復元できません", failure);
+                    }
+                }
+            }
+        });
+    }
+
+    private <T> T withSourceWaitObserverBudget(Supplier<T> observation) {
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        transaction.setTimeout(5);
+        return transaction.execute(status -> {
+            Connection connection = DataSourceUtils.getConnection(dataSource);
+            int originalNetworkTimeout;
+            try {
+                originalNetworkTimeout = connection.getNetworkTimeout();
+                connection.setNetworkTimeout(Runnable::run, 5_000);
+            } catch (java.sql.SQLException failure) {
+                throw new IllegalStateException("source wait observerのnetwork timeoutを設定できません", failure);
+            }
+            try { return observation.get(); }
+            finally {
+                try { connection.setNetworkTimeout(Runnable::run, originalNetworkTimeout); }
+                catch (java.sql.SQLException failure) {
+                    throw new IllegalStateException("source wait observerのnetwork timeoutを復元できません", failure);
+                }
+            }
+        });
+    }
+
+    private String currentDatabaseWithinObserverBudget() {
+        return withSourceWaitObserverBudget(() -> jdbc.queryForObject("SELECT DATABASE()", String.class));
+    }
+
     private List<Throwable> awaitSourceWorkers(List<? extends Future<?>> futures, ExecutorService pool,
+                                               AtomicReference<Long> requesterId,
                                                boolean expectedAuthorizationDenial) {
         List<Throwable> failures = new java.util.ArrayList<>();
-        boolean interrupted = false;
+        boolean timedOut = false;
         for (Future<?> future : futures) {
             if (future == null) continue;
-            while (true) {
-                try {
-                    future.get();
-                    if (expectedAuthorizationDenial) {
-                        failures.add(new AssertionError("source lock解放後にworkerが成功しました。認可拒否が必要です"));
-                    }
-                    break;
-                } catch (InterruptedException interruption) {
-                    interrupted = true;
-                } catch (java.util.concurrent.ExecutionException failure) {
-                    Throwable cause = failure.getCause() == null ? failure : failure.getCause();
-                    if (!(expectedAuthorizationDenial && cause instanceof BusinessException denied
-                            && denied.getCode() == 403)) failures.add(cause);
-                    break;
-                } catch (java.util.concurrent.CancellationException cancelled) {
-                    failures.add(cancelled);
-                    break;
+            try {
+                future.get(SOURCE_WAIT_FUTURE_SECONDS, TimeUnit.SECONDS);
+                if (expectedAuthorizationDenial) {
+                    failures.add(new AssertionError("source lock解放後にworkerが成功しました。認可拒否が必要です"));
                 }
+            } catch (java.util.concurrent.ExecutionException failure) {
+                Throwable cause = failure.getCause() == null ? failure : failure.getCause();
+                if (!(expectedAuthorizationDenial && cause instanceof BusinessException denied
+                        && denied.getCode() == 403)) failures.add(cause);
+            } catch (java.util.concurrent.TimeoutException timeout) {
+                timedOut = true;
+                failures.add(new AssertionError("source lock workerが有限時間内に完了しませんでした", timeout));
+            } catch (java.util.concurrent.CancellationException cancelled) {
+                timedOut = true;
+                failures.add(cancelled);
+            } catch (InterruptedException interruption) {
+                timedOut = true;
+                failures.add(interruption);
+                Thread.currentThread().interrupt();
             }
         }
         if (pool != null) {
-            pool.shutdown();
+            if (timedOut) {
+                Long connectionId = requesterId == null ? null : requesterId.get();
+                boolean workerStillRunning = futures.stream().anyMatch(future -> future != null && !future.isDone());
+                if (workerStillRunning) {
+                    try { killCapturedSourceWaitConnection(connectionId); }
+                    catch (Exception failure) { failures.add(failure); }
+                }
+                for (Future<?> future : futures) if (future != null) future.cancel(true);
+                pool.shutdownNow();
+            } else {
+                pool.shutdown();
+            }
             try {
-                if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
-                    failures.add(new AssertionError("source lock worker完了後もexecutorが停止しませんでした"));
+                if (!pool.awaitTermination(SOURCE_WAIT_TERMINATION_SECONDS, TimeUnit.SECONDS)) {
+                    SOURCE_WAIT_FIXTURE_UNSAFE.set(true);
+                    failures.add(new AssertionError("source lock workerのexecutor終了を確認できずfixtureをunsafeにしました"));
+                } else if (timedOut) {
+                    Long connectionId = requesterId == null ? null : requesterId.get();
+                    if (!awaitCapturedSourceConnectionEnd(connectionId)) {
+                        SOURCE_WAIT_FIXTURE_UNSAFE.set(true);
+                        failures.add(new AssertionError("timeout workerのcaptured MySQL connection終了を確認できずfixtureをunsafeにしました"));
+                    }
                 }
             } catch (InterruptedException interruption) {
-                interrupted = true;
-                while (!pool.isTerminated()) {
-                    try { pool.awaitTermination(1, TimeUnit.SECONDS); }
-                    catch (InterruptedException repeated) { interrupted = true; }
-                }
+                Thread.currentThread().interrupt();
+                SOURCE_WAIT_FIXTURE_UNSAFE.set(true);
+                failures.add(new AssertionError("source lock workerのexecutor終了確認が中断されfixtureをunsafeにしました", interruption));
             }
         }
-        if (interrupted) Thread.currentThread().interrupt();
         return failures;
+    }
+
+    private void killCapturedSourceWaitConnection(Long connectionId) throws Exception {
+        if (connectionId == null || connectionId <= 0) {
+            throw new AssertionError("workerの実connection ID未取得のため、限定KILLを実行できません");
+        }
+        try (Connection killer = dataSource.getConnection()) {
+            int originalNetworkTimeout = killer.getNetworkTimeout();
+            killer.setNetworkTimeout(Runnable::run, 5_000);
+            try (var statement = killer.createStatement()) {
+                statement.setQueryTimeout(5);
+                statement.execute("KILL CONNECTION " + connectionId);
+            } finally {
+                try { killer.setNetworkTimeout(Runnable::run, originalNetworkTimeout); }
+                catch (java.sql.SQLException ignored) { /* close the dedicated killer connection */ }
+            }
+        }
+    }
+
+    private boolean awaitCapturedSourceConnectionEnd(Long connectionId) throws InterruptedException {
+        if (connectionId == null || connectionId <= 0) return false;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(SOURCE_WAIT_TERMINATION_SECONDS);
+        while (System.nanoTime() < deadline) {
+            Integer active = withSourceWaitObserverBudget(() -> jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM performance_schema.threads WHERE PROCESSLIST_ID=?", Integer.class, connectionId));
+            if (active != null && active == 0) return true;
+            Thread.sleep(100);
+        }
+        return false;
     }
 
     private List<String> safeWaitDetails(Long requesterId, Long blockerId) {
         if (requesterId == null || blockerId == null) return List.of("waiter/blocker connection id未取得");
-        return jdbc.query("""
+        return withSourceWaitObserverBudget(() -> jdbc.query("""
                 SELECT req.OBJECT_NAME AS req_table, req.INDEX_NAME AS req_index,
                        req.LOCK_TYPE AS req_type, req.LOCK_MODE AS req_mode,
                        req.LOCK_STATUS AS req_status, req.LOCK_DATA AS req_key,
@@ -3352,7 +3501,7 @@ class ImportMetadataRealMySqlTest {
                 + "," + rs.getString("req_type") + "," + rs.getString("req_mode") + "," + rs.getString("req_status")
                 + ",key=" + rs.getString("req_key") + "; blocker=" + rs.getString("blk_table") + "/"
                 + rs.getString("blk_index") + "," + rs.getString("blk_type") + "," + rs.getString("blk_mode")
-                + "," + rs.getString("blk_status") + ",key=" + rs.getString("blk_key"), requesterId, blockerId);
+                + "," + rs.getString("blk_status") + ",key=" + rs.getString("blk_key"), requesterId, blockerId));
     }
 
     private List<Throwable> awaitFutures(List<? extends Future<?>> futures, ExecutorService pool,
