@@ -25,3 +25,4 @@ AssetMySqlIntegrationTest
 ImportIdentityCandidateMySqlTest
 ImportMetadataRealMySqlTest
 CopilotRunServiceMySqlIntegrationTest
+LifecycleAuthorizationPreflightMySqlTest
