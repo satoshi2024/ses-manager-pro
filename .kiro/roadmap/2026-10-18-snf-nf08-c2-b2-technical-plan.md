@@ -1,6 +1,6 @@
 # NF08 C2-B2 実usage provenance・費用証拠の技術計画
 
-**状態: B1 Wave A PASS。B2a CODE/MySQL gate PASS（証拠の最終照合中）。B2bはcontrol `703647aa1185a115890225eca9a32c20a7c9ab4a`へ統合済みで、source `bda9fa984d507b251cd0abc7ca214d73c70009aa` の20 class 116/0/0/0をAstraが限定CODE/証拠受理。並行test実行違反とJaCoCo警告がありcoverage結論はない。実TLS issuer、durable claim、dispatch/usage authorityは未完。B2cは本書の技術計画のみで、PLAN/CODE承認・DDL・version割当はない。B2d～B2eは未承認。**
+**状態: B1 Wave A PASS。B2a CODE/MySQL gate PASS（証拠の最終照合中）。B2bはcontrol `703647aa1185a115890225eca9a32c20a7c9ab4a`へ統合済みで、source `bda9fa984d507b251cd0abc7ca214d73c70009aa` の20 class 116/0/0/0をAstraが限定CODE/証拠受理。並行test実行違反とJaCoCo警告がありcoverage結論はない。実TLS issuer、durable claim、dispatch/usage authorityは未完。B2c-0はAstra限定PLAN PASS後、対象code/testを実装した。fresh javacは通過、runtime/CODE reviewとテスト実行は未完。B2c-1/2はCONDITIONALで未着手、DDL/version割当なし。B2d～B2eは未承認。**
 
 ## B2: 小分け実装計画（B2a実装gate PASS / B2b限定CODE証拠受理）
 
@@ -90,11 +90,13 @@ migration reviewではlegacy backfill/default、tenant nullability、index lengt
 
 B2cは一括実装せず、次の独立phaseへ分ける。いずれもNF07のfail-closed policy、既存production deny-all、B2aのpublic ACTUAL拒否を維持する。B2b observationは実TLS positive issuerが未確認であり、dispatch/cost writerへ接続しない。各phase開始前にAstraの個別PLAN/CODE gateを通し、DB ownerがmigration案を承認してversionを割り当てるまでDDL/schema変更を始めない。
 
-### B2c-0: preflight順序とopaque binding候補（DDLなし）
+### B2c-0: preflight順序とopaque binding候補（限定PLAN PASS、CODE/runtime review待ち）
 
 **対象範囲**は `CopilotQueryService` のsummary開始順序、preflight境界、内部immutable binding候補と対応unit testに限る。現在の `query()` は `beginSummaryAttempt()` 後に `summarize()` を呼び、その下流gatewayでpreflight拒否され得るため、preflight判定をattempt/nonce発行より先に完了する順序へ整理する。deny-all拒否時はattempt/nonce/claim rowを作らず、transportを呼ばない。allow相当のsynthetic fixtureでもopaque候補を組み立てるだけで、送信・READY化・ACTUAL保存はしない。
 
 binding候補はprivate/package-private immutable値とし、public DTO、`CopilotInvocation`、raw request、response、DB JSONからauthorityを復元しない。authenticated tenant context、run/attempt識別、trace/use-case、artifact version、provider/model/region/tier/config/prompt identity、scope/input hash、preflight decision/card/policy identityとdigest、canonical endpoint/verified host、request bytesのSHA-256、UTC issued/expiresを各々固定する。単一aggregate digestだけで済ませず、後段でfieldごとにcurrent sourceと照合できる形を保つ。raw nonceはCSPRNGで作る場合も候補段階で公開せず、永続化はhashのみとする。preflight拒否、tenant/artifact/config driftでattempt/nonce/claim/transportが0回であることをunit testで検証する。
+
+今回の限定実装では `CopilotSummaryService.preflightLocalSummary(...)` が `AiExecutionGateway.preflightCopilot(...)` を実行前に呼ぶ。candidateはtenant/legal entity/query/existing QUERY trace/artifact/provider/model/prompt/config/scope/parameter hashとpreflight evidenceだけを保持するpackage-private immutable値で、SUMMARY attempt ID、claim/nonce、TLS verified hostを作成または検証済みとして記録しない。candidate照合は各fieldごとに行う。dispatch許可があっても`local-no-egress-proof-v1`以外はSUMMARY attempt開始へ進めず、synthetic external allowはcandidate準備で止める。deny時は既存QUERY attempt/resultを保持したままunavailable summaryを返し、`beginSummaryAttempt`、completion writer、nonce/claim、transportを呼ばない。対象変更は `AiExecutionGateway` / `AiExecutionGatewayImpl`、`CopilotSummaryService` / `CopilotSummaryPreflightCandidate`、`CopilotQueryService` と該当unit tests。fresh javacを通過したが、runtime/JUnitは未実行でありCODE gate PASSではない。
 
 ### B2c-1: migration承認後のdurable CASとcommit後permit
 
@@ -117,7 +119,7 @@ private final・非serializable・非cloneable `ClaimPermit` はcommit完了を�
 |---|---|---|
 | **B2a（PLAN PASS対象）** | 共通completion writerでpublic `ACTUAL` を永続化前に拒否する。private verified capabilityのacceptance pathはまだ作らない。 | direct forged ACTUALをservice proxyへ渡し、具体的拒否とattempt全列不変を独立readbackで確認。deny-all維持。DDL、provider送信、transport変更なし。これだけで独立実装可能。 |
 | **B2b（限定CODE/証拠受理）** | 上記「B2b: transport observation/parser境界」のinternal type/parser seamのみ。既存public `Response` compatibilityは保ち、production dispatcherへ接続しない。 | source `bda9fa9`→control `703647aa`、20 class 116/0/0/0をAstraが限定受理。並行test違反・JaCoCo警告のためcoverage結論なし。実TLS/runtime未確認。 |
-| **B2c-0** | preflight/attempt順序とimmutable opaque binding候補。DDLなし。deny時にattempt/nonce/claim/transportを作らない。 | 固定Clockとsynthetic preflightで順序・0回を検証。外部送信なし。 |
+| **B2c-0（限定PLAN PASS、CODE review待ち）** | preflight/attempt順序とimmutable opaque binding候補。DDLなし。deny時にattempt/nonce/claim/transportを作らない。QUERY attempt/resultを維持する。 | 各binding field drift、deny時SUMMARY begin/completion/transport 0回、QUERY結果維持、local-only/mock/rule経路の回帰をテスト。sourceはfresh javacのみ完了、JUnit/runtime未実行。 |
 | **B2c-1** | DB owner承認・version割当後にのみschema/entity/mapperとdurable CASを実装。commit確認後にだけprivate one-shot permitを発行。 | MySQL二connection race 1/0、独立readback、commit不明/例外時permit/socketなし、UNKNOWN/no retry。 |
 | **B2c-2** | permit-only runtime接続。二時点のcurrent binding/Clock/policy check後に限りsocketへ進む。public raw post/gateway/DTO経路をauthorityとして拒否。 | 同一permit並行/順次consumeは一回だけ。pre-socket mismatch/crash後はCLAIMED/UNKNOWN維持、送信0・retry不可。 |
 
@@ -184,10 +186,10 @@ provider APIにusage応答署名がない場合、アプリ内issuerが作る署
 1. **B2a PLAN review（PASS）** — 共通completion writerのpublic ACTUAL拒否、拒否前のDB不変、deny-all維持、DDL/provider非接触という最小contractだけをreviewする。このPASSで許可された作業範囲はB2a単独のcode changeとそのCODE review/fast gateである。B2全体、B2b以降、DDL、provider送信、本番承認は含まない。
 2. **B2a CODE/MySQL gate（PASS、証拠照合中）** — public forged ACTUAL拒否と許可状態の互換性、およびMySQL実UPDATE/独立readbackを検証済み。
 3. **B2b限定PLAN review（PASS）** — 上記transport observation/parser seam、既存Response compatibility、test/prod issuer分離、未接続/deny-allの範囲を審査済み。今回の実装はこの範囲内に限り、CODE/runtime reviewは未完了。
-4. **B2b限定CODE証拠受理 / B2c-0 PLAN依頼** — control `703647aa`に統合済みのB2b source証拠は20 class 116/0/0/0として限定受理済み。ただし並行test実行違反とJaCoCo警告のためcoverage結論なし。実TLS/runtime positiveは未確認。B2c-0は本書の技術提案のみでAstra PLAN review待ち。B2c-1はmigration owner承認・version割当・別PLAN PASS、B2c-2はB2c-1 gate後の別CODE/人手gateが必要。B2d private completion binding、B2e failure matrixも未承認。
+4. **B2b限定CODE証拠受理 / B2c-0限定実装** — control `703647aa`に統合済みのB2b source証拠は20 class 116/0/0/0として限定受理済み。ただし並行test実行違反とJaCoCo警告のためcoverage結論なし。実TLS/runtime positiveは未確認。B2c-0のPLAN PASS範囲に限るsource差分とunit testsを追加し、fresh javacを通過した。runtime/JUnitおよびCODE reviewは未完了。B2c-1はmigration owner承認・version割当・別PLAN PASS、B2c-2はB2c-1 gate後の別CODE/人手gateが必要。B2d private completion binding、B2e failure matrixも未承認。
 5. **外部資料・human releaseは別タスク** — provider API/DPA/法務、usage semantics、price、offline signer/key custody、production dispatch/registry/flag/artifact ACTIVEは個別承認する。承認まではproductionをdeny-allに保つ。
 
-B2bはunwired internal type/parser seamのみcontrolへ限定統合済みである。並行test実行違反とJaCoCo警告のためcoverage結論はなく、実TLS issuer/runtime接続は未確認。B2cは本書で計画しただけで実装許可ではない。dispatcher接続、DB claim/schema/DDL、Maven/Docker suite、provider送信、production enablementは今回の作業範囲に含めない。各B2c phaseは専用PLAN/CODE reviewを分離する。
+B2bはunwired internal type/parser seamのみcontrolへ限定統合済みである。並行test実行違反とJaCoCo警告のためcoverage結論はなく、実TLS issuer/runtime接続は未確認。B2c-0は限定PLAN PASSに沿うpreflight/候補準備だけを実装したが、runtime/JUnitおよびCODE reviewは未完了。B2c-1/2のdurable claim・permit dispatchは未承認/未着手である。dispatcher接続、DB claim/schema/DDL、Maven/Docker suite、provider送信、production enablementは今回の作業範囲に含めない。各B2c phaseは専用PLAN/CODE reviewを分離する。
 ## 明示的な非承認範囲
 
 この文書の存在またはPLAN review PASSは、provider contract/DPA/region、model token semantics、実料金、FX、usage authenticity acceptance、production key/card registry、実credential、Gemini実送信、Copilot/AI/external-send flag、artifact ACTIVE、database migration、production rolloutを承認しない。production gateway/adapterはdeny-all、現行flagsはOFFのままとする。実provider応答、実データ、外部network、実料金を使わない。

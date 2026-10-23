@@ -47,6 +47,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
 class CopilotQueryServiceTest {
@@ -80,6 +82,8 @@ class CopilotQueryServiceTest {
                 aiConfig, intentParser, parameterBinder, scopeResolver, catalogQueryGateway,
                 copilotRunService, citationAuthorizationService, copilotSummaryService,
                 contextFactory, featureGate);
+        lenient().when(copilotSummaryService.preflightLocalSummary(
+                any(), any(), any(), anyString(), any(), anyString(), anyString())).thenReturn(true);
     }
 
     @Test
@@ -138,6 +142,7 @@ class CopilotQueryServiceTest {
                 11L, "query-trace", null, "QUERY", "tenant-a", artifact, java.util.Map.of());
         CopilotRunService.CopilotAttemptRecord summaryAttempt = new CopilotRunService.CopilotAttemptRecord(
                 12L, "summary-trace", "query-trace", "SUMMARY", "tenant-a", artifact, java.util.Map.of());
+        TypedResultEnvelope queryResult = envelopeFor(executionContext, queryId);
         Mockito.doNothing().when(featureGate).assertQueryAllowed();
         when(contextFactory.create()).thenReturn(executionContext);
         when(intentParser.parse("稼働率")).thenReturn(new IntentParser.ParsedIntent(queryId, "SUPPORTED"));
@@ -148,7 +153,7 @@ class CopilotQueryServiceTest {
         when(copilotRunService.pinActiveArtifact()).thenReturn(artifact);
         when(copilotRunService.beginQueryAttempt(any(), anyString(), any(), any())).thenReturn(queryAttempt);
         when(copilotRunService.beginSummaryAttempt(any(), anyString(), any(), any(), any())).thenReturn(summaryAttempt);
-        when(catalogQueryGateway.execute(any(), any(), any(), any())).thenReturn(envelopeFor(executionContext, queryId));
+        when(catalogQueryGateway.execute(any(), any(), any(), any())).thenReturn(queryResult);
         when(citationAuthorizationService.authorizeAll(any(), any(), any(), any(), anyString())).thenReturn(List.of());
         when(copilotSummaryService.summarize(any(), any(), any(), anyString(), any(), anyString()))
                 .thenReturn(new SummaryResponse("指標を確認しました。", List.of(),
@@ -163,6 +168,16 @@ class CopilotQueryServiceTest {
                     () -> copilotQueryService.query("稼働率"));
             assertSame(auditFailure, thrown);
             verify(copilotRunService).completeSummaryAttempt(eq(summaryAttempt), anyLong(), any());
+            org.mockito.InOrder order = Mockito.inOrder(copilotRunService, copilotSummaryService);
+            order.verify(copilotRunService).completeQueryAttempt(eq(queryAttempt), anyLong(), eq(true), eq(1));
+            order.verify(copilotSummaryService).preflightLocalSummary(eq(queryResult), eq(executionContext),
+                    eq(boundScope), eq(boundScope.scopeHash()), eq(artifact), eq(queryAttempt.traceId()),
+                    eq("parameter-hash"));
+            order.verify(copilotRunService).beginSummaryAttempt(eq(entry), eq("parameter-hash"),
+                    eq(executionContext), eq(artifact), eq(queryAttempt));
+            order.verify(copilotSummaryService).summarize(eq(queryResult), eq(executionContext), eq(boundScope),
+                    eq(boundScope.scopeHash()), eq(artifact), eq(summaryAttempt.traceId()));
+            order.verify(copilotRunService).completeSummaryAttempt(eq(summaryAttempt), anyLong(), any());
         }
     }
 
@@ -213,6 +228,52 @@ class CopilotQueryServiceTest {
             assertEquals("SUMMARY_ATTEMPT_STALE", unspecified.summary().providerStatus());
             verify(copilotRunService, org.mockito.Mockito.times(2))
                     .completeSummaryAttempt(eq(summaryAttempt), anyLong(), any());
+        }
+    }
+
+    @Test
+    void preflight拒否はQUERY結果を保ちSUMMARYのattemptとcompletionを作らない() {
+        String queryId = "dashboard.utilization-forecast";
+        SemanticCatalogEntry entry = new SemanticCatalogEntry(queryId,
+                SemanticCatalogRegistry.CATALOG_VERSION, SemanticCatalogRegistry.RESULT_SCHEMA_VERSION,
+                Set.of("管理者"), true, 200, List.of());
+        CopilotExecutionContext executionContext = context();
+        CopilotScopeContext boundScope = executionContext.scope();
+        CopilotRunService.CopilotArtifactSnapshot artifact = new CopilotRunService.CopilotArtifactSnapshot(
+                7L, "mock", "mock-management-copilot", CopilotSummaryPromptTemplate.VERSION,
+                CopilotSummaryPromptTemplate.localConfigHash("mock", "mock-management-copilot"),
+                "catalog-v1", 0);
+        CopilotRunService.CopilotAttemptRecord queryAttempt = new CopilotRunService.CopilotAttemptRecord(
+                11L, "query-trace", null, "QUERY", "tenant-a", artifact, java.util.Map.of());
+        TypedResultEnvelope queryResult = envelopeFor(executionContext, queryId);
+        Mockito.doNothing().when(featureGate).assertQueryAllowed();
+        when(contextFactory.create()).thenReturn(executionContext);
+        when(intentParser.parse("稼働率")).thenReturn(new IntentParser.ParsedIntent(queryId, "SUPPORTED"));
+        when(parameterBinder.bind(queryId, "稼働率", executionContext))
+                .thenReturn(com.ses.service.ai.copilot.parameter.CopilotQueryParameters.ofQuery(queryId));
+        when(parameterBinder.parameterHash(any(), any())).thenReturn("parameter-hash");
+        when(scopeResolver.resolve(entry, executionContext)).thenReturn(boundScope);
+        when(copilotRunService.pinActiveArtifact()).thenReturn(artifact);
+        when(copilotRunService.beginQueryAttempt(any(), anyString(), any(), any())).thenReturn(queryAttempt);
+        when(catalogQueryGateway.execute(any(), any(), any(), any())).thenReturn(queryResult);
+        when(citationAuthorizationService.authorizeAll(any(), any(), any(), any(), anyString())).thenReturn(List.of());
+        when(copilotSummaryService.preflightLocalSummary(any(), any(), any(), anyString(), any(), anyString(), anyString()))
+                .thenReturn(false);
+
+        try (org.mockito.MockedStatic<SemanticCatalogRegistry> registry = Mockito.mockStatic(SemanticCatalogRegistry.class)) {
+            registry.when(() -> SemanticCatalogRegistry.requireEnabled(queryId)).thenReturn(entry);
+            var result = copilotQueryService.query("稼働率");
+
+            assertEquals("SUCCEEDED", result.status());
+            assertEquals("query-trace", result.traceId());
+            assertEquals(11L, result.runId());
+            assertSame(queryResult, result.result());
+            assertFalse(result.summary().available());
+            assertEquals("COPILOT_COST_UNKNOWN", result.summary().providerStatus());
+            verify(copilotRunService).completeQueryAttempt(eq(queryAttempt), anyLong(), eq(true), eq(1));
+            verify(copilotRunService, never()).beginSummaryAttempt(any(), anyString(), any(), any(), any());
+            verify(copilotRunService, never()).completeSummaryAttempt(any(), anyLong(), any());
+            verify(copilotSummaryService, never()).summarize(any(), any(), any(), anyString(), any(), anyString());
         }
     }
 

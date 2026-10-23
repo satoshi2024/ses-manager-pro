@@ -39,6 +39,55 @@ public class CopilotSummaryService {
     private final ObjectMapper objectMapper;
     private final CopilotFeatureGate featureGate;
 
+    /**
+     * Summary attemptを作る前の読取専用preflight。合成外部許可でもlocal-only証拠でなければ
+     * attempt開始を許可しない。candidateはこの呼出し内だけで照合し、dispatch authorityにしない。
+     */
+    public boolean preflightLocalSummary(TypedResultEnvelope envelope, CopilotExecutionContext context,
+                                         CopilotScopeContext scope, String scopeHash,
+                                         CopilotRunService.CopilotArtifactSnapshot artifact,
+                                         String existingQueryTraceId, String parameterHash) {
+        if (!isBound(envelope, context, scope, scopeHash) || artifact == null
+                || existingQueryTraceId == null || existingQueryTraceId.isBlank()
+                || parameterHash == null || parameterHash.isBlank()
+                || envelope.values() == null || envelope.values().isEmpty()) {
+            return false;
+        }
+        try {
+            featureGate.assertQueryAllowed();
+        } catch (BusinessException ex) {
+            return false;
+        }
+        List<String> allowedClaimKeys = envelope.values().stream()
+                .map(MetricValue::key)
+                .filter(key -> key != null && !key.isBlank())
+                .distinct()
+                .toList();
+        if (allowedClaimKeys.isEmpty()) return false;
+
+        SummaryRequest request = new SummaryRequest(envelope.queryId(), envelope.catalogVersion(),
+                artifact.promptVersion(), OUTPUT_SCHEMA_VERSION, allowedClaimKeys, Duration.ofSeconds(15), 0);
+        long deadlineNanos = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+        AiGatewayRequest gatewayRequest;
+        PreflightCostEvidence evidence;
+        try {
+            gatewayRequest = buildGatewayRequest(request, context, scope, scopeHash,
+                    existingQueryTraceId, artifact, deadlineNanos);
+            evidence = aiExecutionGateway.preflightCopilot(gatewayRequest);
+        } catch (RuntimeException ex) {
+            return false;
+        }
+        CopilotSummaryPreflightCandidate candidate = new CopilotSummaryPreflightCandidate(
+                context.tenantId(), context.legalEntityId(), envelope.queryId(), existingQueryTraceId,
+                artifact.artifactVersionId(),
+                artifact.provider(), artifact.modelName(), artifact.promptVersion(), artifact.configHash(),
+                scopeHash, parameterHash, evidence);
+        return candidate.matches(context.tenantId(), context.legalEntityId(), context.queryId(), existingQueryTraceId,
+                artifact.artifactVersionId(), artifact.provider(), artifact.modelName(),
+                artifact.promptVersion(), artifact.configHash(), scopeHash, parameterHash, evidence)
+                && candidate.permitsLocalSummaryAttempt();
+    }
+
     public SummaryResponse summarize(TypedResultEnvelope envelope, CopilotExecutionContext context,
                                      CopilotScopeContext scope, String scopeHash,
                                      CopilotRunService.CopilotArtifactSnapshot artifact, String traceId) {

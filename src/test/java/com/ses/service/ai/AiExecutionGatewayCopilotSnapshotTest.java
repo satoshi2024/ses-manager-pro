@@ -45,6 +45,33 @@ import static org.mockito.Mockito.when;
 class AiExecutionGatewayCopilotSnapshotTest {
 
     @Test
+    void readOnlyPreflightはlocalNoEgressを確認しproviderとprobeを呼ばない() {
+        CopilotBoundedAiTextService adapter = mock(CopilotBoundedAiTextService.class);
+        when(adapter.providerId()).thenReturn("mock");
+        when(adapter.copilotModelId()).thenReturn("mock-management-copilot");
+        when(adapter.copilotPromptVersion()).thenReturn(CopilotSummaryPromptTemplate.VERSION);
+        String configHash = CopilotSummaryPromptTemplate.localConfigHash("mock", "mock-management-copilot");
+        when(adapter.copilotConfigHash()).thenReturn(configHash);
+        when(adapter.copilotCanonicalEndpoint()).thenReturn("");
+        AiConfig config = new AiConfig();
+        config.setProvider("mock");
+        AiOutboundProbe probe = mock(AiOutboundProbe.class);
+        AiExecutionGatewayImpl gateway = new AiExecutionGatewayImpl(adapter, config, probe, new ObjectMapper(),
+                mock(AiArtifactVersionMapper.class), mock(AiRecommendationRunMapper.class),
+                mock(PlatformTransactionManager.class), Clock.systemUTC(),
+                mock(AiProductionApprovalGate.class), mock(CopilotFeatureGate.class));
+        AiGatewayRequest request = request(CopilotSummaryPromptTemplate.VERSION, configHash);
+
+        var evidence = AccountingTenantContextHolder.runWithTenant("tenant-a", () -> gateway.preflightCopilot(request));
+
+        assertEquals(CopilotCostState.NOT_SENT, evidence.costState());
+        assertEquals("local-no-egress-proof-v1", evidence.proofIdentity());
+        verify(adapter, never()).generateCopilotSummary(any(), any(CopilotInvocation.class));
+        verify(adapter, never()).generate(any());
+        verify(probe, never()).record(any());
+    }
+
+    @Test
     void localCopilot成功時はstartupSnapshot付き新overloadと同じprobe経路を使う() throws Exception {
         AiConfig config = new AiConfig();
         config.setProvider("mock");
@@ -148,10 +175,15 @@ class AiExecutionGatewayCopilotSnapshotTest {
                 mock(AiRecommendationRunMapper.class), mock(PlatformTransactionManager.class), Clock.systemUTC(),
                 mock(AiProductionApprovalGate.class), mock(CopilotFeatureGate.class));
         config.setProvider("mock");
+        AiGatewayRequest remoteRequest = request("prompt-v1", "config-hash-v1", "gemini", Integer.MAX_VALUE);
+
+        var preflight = AccountingTenantContextHolder.runWithTenant("tenant-a", () ->
+                gateway.preflightCopilot(remoteRequest));
+        assertEquals(CopilotCostState.NOT_SENT, preflight.costState());
+        assertEquals("COPILOT_COST_UNKNOWN", preflight.reasonCode());
 
         CopilotExecutionFailure error = AccountingTenantContextHolder.runWithTenant("tenant-a", () ->
-                assertThrows(CopilotExecutionFailure.class, () -> gateway.execute(request(
-                        "prompt-v1", "config-hash-v1", "gemini", Integer.MAX_VALUE))));
+                assertThrows(CopilotExecutionFailure.class, () -> gateway.execute(remoteRequest)));
 
         assertEquals("COPILOT_COST_UNKNOWN", error.reasonCode());
         assertEquals(CopilotCostState.NOT_SENT, error.preflight().costState());
@@ -231,6 +263,7 @@ class AiExecutionGatewayCopilotSnapshotTest {
     }
 
     private AiGatewayRequest request(String promptVersion, String configHash, String provider, int budget) {
+        CopilotExecutionContext context = copilotContext();
         return AiGatewayRequest.builder()
                 .useCase(AiGatewayRequest.USE_COPILOT)
                 .taskMarker(CopilotSummaryPromptTemplate.TASK_MARKER)
@@ -244,6 +277,9 @@ class AiExecutionGatewayCopilotSnapshotTest {
                 .expectedModel(provider.equals("gemini") ? "gemini-synthetic" : "mock-management-copilot")
                 .expectedPromptVersion(promptVersion)
                 .expectedConfigHash(configHash)
+                .executionContext(context)
+                .scopeContext(context.scope())
+                .scopeHash(context.scopeHash())
                 .build();
     }
 
