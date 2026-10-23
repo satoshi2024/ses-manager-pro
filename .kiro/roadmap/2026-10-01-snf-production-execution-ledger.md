@@ -1,5 +1,37 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## Privacy修復とNF01 preflightの限定受理（2026-10-23）
+
+- **全体NO-GO継続**。Privacy/migration source `125e03a956909b2677e36b3149a21af71ecebd4e` は
+  5 class **56/0/0/0**、UTC03:33:38.3565349〜03:39:59.4504408、起止同SHA/clean・exit0。
+  log `3D09244DB4346B9BA9FF7FE5901F4B94B2B70884490558B80CD9C817D8C51961`。
+  Astraが10 report hash、旧SQL workers19/20→holder18のPRIMARY S→Xと40001/1213、
+  新service workers367/368→holder366のPRIMARY X待機とAPPLIED/NO_OP、全projection項目を独立受理した。
+  journal不変はhead/events API snapshot範囲である。直接SQL再現を過去失敗の唯一根因の遡及確定とは呼ばない。
+  JaCoCo mismatchはcoverage証拠不受理。旧53/1 FAILを保存し、新成功は所定5classの範囲に限定する。
+  六fileをcontrol `670b7b5ceaa66e6b5bbfdfe5a17005b322b23e03` へ同一blobで統合し、18証拠fileを
+  `verification-evidence/20261023-mysql-remediation-source-02/` にhash一致保存。Astraが集成も独立受理した。
+- NF01 readonly preflight source `c40455759f6b9bdd113de0c5ba4182fd56052693` はAstra限定CODE/runtime PASS。
+  fastはclean test、2 class **4/0/0/0**、UTC03:40:27.2714250〜03:41:22.5692716、
+  log `2AA00F784741856DE6214AAB20043953AF98808C8F3379EA845F55FC0A15203A`。
+  MySQLは1 class **7/0/0/0**、UTC03:41:45.2646252〜03:42:45.1054585、
+  log `5BCFAC6FFAC0783E4617D2EFBA2D02DA9ABDC7BAB9A4F66F47899595EF15DED7`。
+  起止同SHA/clean・exit0、全6 report hashを独立照合した。両runは直列である。
+  SELECT-onlyの合成readerでcheckerを実行し、21表の全fixtureデータと表/列/index/鍵制約digest不変を確認した。
+  書込拒否assertはdriverとserverの拒否層を区別しない。SQLException故障はproxy注入であり実server故障の証明ではない。
+  実業務DB、production credential、完全Flyway rehearsal、DDL/epoch/CONFIRMを検証したとは報告しない。
+- NF01をcontrol `5206ee4a3cd3af0f1d23289f389e985f1c3678f5` へ統合した。六fileのGit blob一致、
+  shard1はcontrol固有の既存六classを保持し新class一行のみ追加、全shardで重複なし。Astraが独立確認した。
+  source fast12/MySQL10 raw fileを `verification-evidence/20261023-nf01-preflight-source-*-01/` にhash一致保存した。
+  同controlのunit/inventory限定clean testは2 class **4/0/0/0**、UTC03:44:37.6317733〜03:45:35.4843613、
+  log `4EDD8CA7DE44B2158F395F5B207119C6152472CDBFFEEB006EB66FDD033183E8`。Astraが全report hashと実XMLを独立受理。全fast/全MySQLではない。
+- NF06 W3Aの97/1/56/0 FAILは未閉鎖。test-only修復75cccは、LOCK_DATA変動をrecord equalsへ含めた点と
+  finallyの無界待機をAstraが差し戻した。限定修復を継続し、未集成・未PASSを保持する。
+- NF08 B2c計画78f9a00dはpreflightをsummary attemptより前にするDDLなしのB2c-0だけ限定PLAN PASS。
+  QUERY結果を保持し、denyはsummary attempt/nonce/claim/transportを作らない。実装・runtimeは別gateである。
+  B2c-1/2はschema/版本未割当、commit確定後permit、公開transport迂回封鎖、socket前の競合境界を未決事項として保持する。
+
+
 ## 限定修復の再検証（2026-10-23）
 
 - **全体NO-GO継続**。NF08 B2bの6 fileをsource `bda9fa984d507b251cd0abc7ca214d73c70009aa` から
