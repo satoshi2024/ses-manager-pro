@@ -33,6 +33,12 @@ import java.nio.ByteBuffer;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLHandshakeException;
 import javax.net.ssl.SSLPeerUnverifiedException;
+import javax.net.ssl.SSLSession;
+import java.security.MessageDigest;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
+import java.time.Instant;
+import java.util.HexFormat;
 import java.util.Locale;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -177,7 +183,7 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
 
     /** 応答本文を上限付きで返し、本文とtransport例外文は記録しない。 */
     public Response post(URI uri, byte[] requestBody, long deadlineNanos) {
-        return post(uri, requestBody, deadlineNanos, null);
+        return exchange(uri, requestBody, deadlineNanos, null).response();
     }
 
     /** Gemini Copilot専用。API key以外の任意headerを受け付けない。 */
@@ -185,15 +191,16 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
         if (apiKey == null || apiKey.isBlank() || apiKey.indexOf('\r') >= 0 || apiKey.indexOf('\n') >= 0) {
             throw BusinessException.of(503, "COPILOT_API_KEY_UNAVAILABLE");
         }
-        return post(uri, requestBody, deadlineNanos, apiKey);
+        return exchange(uri, requestBody, deadlineNanos, apiKey).response();
     }
 
-    private Response post(URI uri, byte[] requestBody, long deadlineNanos, String geminiApiKey) {
+    private TransportExchange exchange(URI uri, byte[] requestBody, long deadlineNanos, String geminiApiKey) {
         Assert.state(started, "Copilot async transportは開始されていません");
-        validateDestination(uri);
         if (requestBody == null || requestBody.length > MAX_REQUEST_BYTES) {
             throw BusinessException.of(413, "COPILOT_REQUEST_TOO_LARGE");
         }
+        byte[] requestSnapshot = requestBody.clone();
+        validateDestination(uri);
         long remaining = remainingNanos(deadlineNanos);
         if (remaining <= 0) {
             throw BusinessException.of(504, "COPILOT_DEADLINE_EXCEEDED");
@@ -250,7 +257,7 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
             SimpleRequestBuilder requestBuilder = SimpleRequestBuilder.post(uri)
                     .setVersion(HttpVersion.HTTP_1_1)
                     .setHeader("Content-Type", ContentType.APPLICATION_JSON.toString())
-                    .setBody(requestBody, ContentType.APPLICATION_JSON)
+                    .setBody(requestSnapshot, ContentType.APPLICATION_JSON)
                     .setRequestConfig(requestConfig);
             if (geminiApiKey != null) {
                 requestBuilder.setHeader("x-goog-api-key", geminiApiKey);
@@ -309,7 +316,8 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
             if (remainingNanos(deadlineNanos) <= 0) {
                 throw new CopilotTransportFailure("COPILOT_DEADLINE_EXCEEDED", dispatchState.get());
             }
-            return response;
+            return new TransportExchange(response, uri, sha256(requestSnapshot), clientContext.getSSLSession(),
+                    Instant.now());
         } catch (TimeoutException ex) {
             future.cancel(true);
             throw new CopilotTransportFailure("COPILOT_DEADLINE_EXCEEDED", dispatchState.get());
@@ -391,6 +399,72 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
         }
     }
 
+    /**
+     * B2bの唯一のissuer経路。現行Gemini呼出しからは未接続であり、test loopbackやDTOからは発行しない。
+     * callerは実交換のHttpClientContext.getSSLSession()を渡し、session自体からpeer identityを導出する。
+     */
+    private IssuedTransportBoundResponse issueBoundResponse(TransportExchange exchange) {
+        if (testLoopbackMode || exchange == null || exchange.response() == null || exchange.uri() == null
+                || exchange.sslSession() == null
+                || exchange.response().body().length > MAX_RESPONSE_BYTES
+                || !"https".equalsIgnoreCase(exchange.uri().getScheme())
+                || !PROVIDER_HOST.equalsIgnoreCase(exchange.uri().getHost())
+                || (exchange.uri().getPort() != -1 && exchange.uri().getPort() != 443)
+                || exchange.response().statusCode() < 200 || exchange.response().statusCode() >= 300
+                || !isJsonContentType(exchange.response().contentType())) {
+            throw BusinessException.of(502, "COPILOT_TRANSPORT_OBSERVATION_UNAVAILABLE");
+        }
+        URI uri = exchange.uri();
+        SSLSession sslSession = exchange.sslSession();
+        Response response = exchange.response();
+        if (requestHashMissing(exchange.requestSha256())) {
+            throw BusinessException.of(502, "COPILOT_TRANSPORT_OBSERVATION_UNAVAILABLE");
+        }
+        try {
+            boolean hostnameMatches = new org.apache.hc.client5.http.ssl.DefaultHostnameVerifier()
+                    .verify(uri.getHost(), sslSession);
+            requireHostnameMatch(hostnameMatches);
+            Certificate[] peerCertificates = sslSession.getPeerCertificates();
+            if (peerCertificates.length == 0 || !(peerCertificates[0] instanceof X509Certificate leaf)) {
+                throw BusinessException.of(502, "COPILOT_TLS_IDENTITY_REJECTED");
+            }
+            TlsSessionIdentity identity = new TlsSessionIdentity(
+                    sha256(leaf.getEncoded()), sslSession.getPeerPrincipal().getName(),
+                    sslSession.getProtocol(), sslSession.getCipherSuite());
+            return new IssuedTransportBoundResponse(response, exchange.requestSha256(),
+                    uri.getHost().toLowerCase(Locale.ROOT), identity, exchange.responseReceivedAt());
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw BusinessException.of(502, "COPILOT_TLS_IDENTITY_REJECTED");
+        }
+    }
+
+    private static boolean requestHashMissing(String requestSha256) {
+        return requestSha256 == null || !requestSha256.matches("[a-f0-9]{64}");
+    }
+
+    private static void requireHostnameMatch(boolean hostnameMatches) {
+        if (!hostnameMatches) {
+            throw BusinessException.of(502, "COPILOT_TLS_HOSTNAME_REJECTED");
+        }
+    }
+
+    private static boolean isJsonContentType(String contentType) {
+        if (contentType == null) return false;
+        int separator = contentType.indexOf(';');
+        String mediaType = (separator < 0 ? contentType : contentType.substring(0, separator)).trim();
+        return "application/json".equalsIgnoreCase(mediaType);
+    }
+
+    private static String sha256(byte[] value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
+        } catch (java.security.NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is unavailable", ex);
+        }
+    }
+
     private static long remainingNanos(long deadlineNanos) {
         return deadlineNanos - System.nanoTime();
     }
@@ -445,6 +519,60 @@ public final class CopilotBoundedHttpTransport implements AutoCloseable {
             return body.clone();
         }
     }
+
+    /** permitsで公開名を参照する必要があるためpackage可視、通常コードからの生成はprivate ctorに閉じる。 */
+    static final class IssuedTransportBoundResponse implements TransportBoundResponse {
+        private final int statusCode;
+        private final String contentType;
+        private final byte[] boundedBody;
+        private final String requestSha256;
+        private final String responseSha256;
+        private final String endpointHost;
+        private final TlsSessionIdentity tlsIdentity;
+        private final Instant responseReceivedAt;
+
+        private IssuedTransportBoundResponse(Response response, String requestSha256, String endpointHost,
+                                             TlsSessionIdentity tlsIdentity, Instant responseReceivedAt) {
+            this.statusCode = response.statusCode();
+            this.contentType = response.contentType();
+            this.boundedBody = response.body();
+            this.requestSha256 = requestSha256;
+            this.responseSha256 = sha256(boundedBody);
+            this.endpointHost = endpointHost;
+            this.tlsIdentity = tlsIdentity;
+            this.responseReceivedAt = responseReceivedAt;
+        }
+
+        @Override
+        public CopilotGeminiResponseParser.BoundParsedResponse parse(
+                CopilotGeminiResponseParser parser, long deadlineNanos, String expectedQueryId) {
+            byte[] parserBytes = boundedBody.clone();
+            if (!responseSha256.equals(sha256(parserBytes))) {
+                throw BusinessException.of(502, "COPILOT_RESPONSE_DIGEST_MISMATCH");
+            }
+            CopilotGeminiResponseParser.ValidatedEnvelope envelope =
+                    parser.parseEnvelope(parserBytes, deadlineNanos);
+            return parser.completeBoundResponse(this, envelope, deadlineNanos, expectedQueryId);
+        }
+
+        int statusCode() { return statusCode; }
+        String contentType() { return contentType; }
+        String requestSha256() { return requestSha256; }
+        String responseSha256() { return responseSha256; }
+        String endpointHost() { return endpointHost; }
+        String peerCertificateSha256() { return tlsIdentity.peerCertificateSha256(); }
+        String peerPrincipal() { return tlsIdentity.peerPrincipal(); }
+        String tlsProtocol() { return tlsIdentity.protocol(); }
+        String tlsCipherSuite() { return tlsIdentity.cipherSuite(); }
+        Instant responseReceivedAt() { return responseReceivedAt; }
+    }
+
+    /** private exchange result: public Responseからissuerへ変換できない。 */
+    private record TransportExchange(Response response, URI uri, String requestSha256,
+                                     SSLSession sslSession, Instant responseReceivedAt) { }
+
+    private record TlsSessionIdentity(String peerCertificateSha256, String peerPrincipal,
+                                      String protocol, String cipherSuite) { }
 
     private static final class BoundedResponseConsumer extends AbstractBinResponseConsumer<Response> {
         private final long deadlineNanos;

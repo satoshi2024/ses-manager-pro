@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
@@ -63,7 +65,7 @@ final class CopilotGeminiResponseParser {
             if (part.has("thought") && (!part.get("thought").isBoolean() || part.get("thought").booleanValue())) fail();
             String summary = text(required(part, "text"));
             assertDeadline(deadlineNanos);
-            return new ValidatedEnvelope(summary, usageMetadata);
+            return new ValidatedEnvelope(summary, usageMetadata, sha256(response));
         } catch (BusinessException ex) {
             throw new ValidatedEnvelopeFailure(ex.getCode(), safeReasonCode(ex.getMessage()), usageMetadata);
         }
@@ -80,6 +82,50 @@ final class CopilotGeminiResponseParser {
 
     String extractSummaryJson(byte[] response, long deadlineNanos, String expectedQueryId) {
         return parse(response, deadlineNanos, expectedQueryId).summaryJson();
+    }
+
+    /** sealed transport capabilityだけを受け、任意bodyとの組み合わせを許さない内部入口。 */
+    BoundParsedResponse parseBounded(TransportBoundResponse response,
+                                     long deadlineNanos, String expectedQueryId) {
+        if (response == null) throw new IllegalArgumentException("transport-bound response is required");
+        return response.parse(this, deadlineNanos, expectedQueryId);
+    }
+
+    BoundParsedResponse completeBoundResponse(
+            CopilotBoundedHttpTransport.IssuedTransportBoundResponse response,
+            ValidatedEnvelope envelope, long deadlineNanos, String expectedQueryId) {
+        if (response == null || envelope == null
+                || response.statusCode() < 200 || response.statusCode() >= 300
+                || !isJsonContentType(response.contentType())
+                || !response.responseSha256().equals(envelope.responseSha256())) {
+            throw BusinessException.of(502, "COPILOT_RESPONSE_BINDING_INVALID");
+        }
+        TransportUsageObservation observation = new TransportUsageObservation(
+                response.requestSha256(), response.responseSha256(), response.endpointHost(),
+                response.peerCertificateSha256(), response.peerPrincipal(), response.tlsProtocol(),
+                response.tlsCipherSuite(), response.statusCode(), response.contentType(),
+                response.responseReceivedAt(), envelope.usage());
+        try {
+            validateInnerSummary(envelope, deadlineNanos, expectedQueryId);
+        } catch (ValidatedEnvelopeFailure ex) {
+            throw new BoundValidatedEnvelopeFailure(ex.getCode(), safeReasonCode(ex.getMessage()), observation);
+        }
+        return new BoundParsedResponse(envelope.summaryJson(), observation);
+    }
+
+    private static boolean isJsonContentType(String contentType) {
+        if (contentType == null) return false;
+        int separator = contentType.indexOf(';');
+        String mediaType = (separator < 0 ? contentType : contentType.substring(0, separator)).trim();
+        return "application/json".equalsIgnoreCase(mediaType);
+    }
+
+    private static String sha256(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (java.security.NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is unavailable", ex);
+        }
     }
 
     private void validateSummary(byte[] bytes, long deadline, String queryId) {
@@ -165,7 +211,90 @@ final class CopilotGeminiResponseParser {
         return message != null && message.matches("[A-Z0-9_]{1,64}") ? message : "COPILOT_RESPONSE_INVALID";
     }
 
-    record ValidatedEnvelope(String summaryJson, UsageMetadata usage) { }
+    static final class ValidatedEnvelope {
+        private final String summaryJson;
+        private final UsageMetadata usage;
+        private final String responseSha256;
+
+        private ValidatedEnvelope(String summaryJson, UsageMetadata usage, String responseSha256) {
+            this.summaryJson = summaryJson;
+            this.usage = usage;
+            this.responseSha256 = responseSha256;
+        }
+
+        String summaryJson() { return summaryJson; }
+        UsageMetadata usage() { return usage; }
+        String responseSha256() { return responseSha256; }
+    }
+
+    static final class BoundParsedResponse {
+        private final String summaryJson;
+        private final TransportUsageObservation observation;
+
+        private BoundParsedResponse(String summaryJson, TransportUsageObservation observation) {
+            this.summaryJson = summaryJson;
+            this.observation = observation;
+        }
+
+        String summaryJson() { return summaryJson; }
+        TransportUsageObservation observation() { return observation; }
+    }
+
+    /** private constructor付きの内部観測値。公開DTOや費用capabilityではない。 */
+    static final class TransportUsageObservation {
+        private final String requestSha256;
+        private final String responseSha256;
+        private final String endpointHost;
+        private final String peerCertificateSha256;
+        private final String peerPrincipal;
+        private final String tlsProtocol;
+        private final String tlsCipherSuite;
+        private final int statusCode;
+        private final String contentType;
+        private final java.time.Instant responseReceivedAt;
+        private final UsageMetadata usage;
+
+        private TransportUsageObservation(String requestSha256, String responseSha256,
+                String endpointHost, String peerCertificateSha256, String peerPrincipal,
+                String tlsProtocol, String tlsCipherSuite, int statusCode, String contentType,
+                java.time.Instant responseReceivedAt, UsageMetadata usage) {
+            this.requestSha256 = requestSha256;
+            this.responseSha256 = responseSha256;
+            this.endpointHost = endpointHost;
+            this.peerCertificateSha256 = peerCertificateSha256;
+            this.peerPrincipal = peerPrincipal;
+            this.tlsProtocol = tlsProtocol;
+            this.tlsCipherSuite = tlsCipherSuite;
+            this.statusCode = statusCode;
+            this.contentType = contentType;
+            this.responseReceivedAt = responseReceivedAt;
+            this.usage = usage;
+        }
+
+        String requestSha256() { return requestSha256; }
+        String responseSha256() { return responseSha256; }
+        String endpointHost() { return endpointHost; }
+        String peerCertificateSha256() { return peerCertificateSha256; }
+        String peerPrincipal() { return peerPrincipal; }
+        String tlsProtocol() { return tlsProtocol; }
+        String tlsCipherSuite() { return tlsCipherSuite; }
+        int statusCode() { return statusCode; }
+        String contentType() { return contentType; }
+        java.time.Instant responseReceivedAt() { return responseReceivedAt; }
+        UsageMetadata usage() { return usage; }
+    }
+
+    static final class BoundValidatedEnvelopeFailure extends BusinessException {
+        private final TransportUsageObservation observation;
+
+        private BoundValidatedEnvelopeFailure(int code, String reasonCode,
+                                              TransportUsageObservation observation) {
+            super(code, reasonCode);
+            this.observation = observation;
+        }
+
+        TransportUsageObservation observation() { return observation; }
+    }
 
     static final class ValidatedEnvelopeFailure extends BusinessException {
         private final UsageMetadata usage;
