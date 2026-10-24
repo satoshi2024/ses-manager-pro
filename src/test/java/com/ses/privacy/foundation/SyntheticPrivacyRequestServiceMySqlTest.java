@@ -56,7 +56,7 @@ class SyntheticPrivacyRequestServiceMySqlTest {
     @AfterAll static void stop(){if(context!=null)context.close();}
     @AfterEach void evidence(){
         Fixture f=ACTIVE_FIXTURE.get();
-        if(f!=null)System.out.printf("SF_W3A_EVIDENCE containerId=%s fixtureManifestHash=%s requestRef=%s providerRead=%d providerWrite=0 dispatch=0 disposition=0 crossScopeAccess=%d%n",
+        if(f!=null)System.out.printf("SF_W3A_EVIDENCE containerId=%s fixtureManifestHash=%s requestRef=%s measured.providerRead=%d measured.crossScopeAccess=%d structural.providerWriteCapability=ABSENT structural.dispatchCapability=ABSENT structural.dispositionCapability=ABSENT%n",
                 containerId,f.manifestHash,ApprovalEnvelopeCanonicalizer.digest(f.command.requestId().getBytes(java.nio.charset.StandardCharsets.UTF_8)),
                 f.provider.reads.get(),f.provider.crossScopeAttempts.get());
         ACTIVE_FIXTURE.remove();
@@ -473,8 +473,12 @@ class SyntheticPrivacyRequestServiceMySqlTest {
         assertFalse(java.util.Arrays.stream(SyntheticPrivacyRequestService.class.getDeclaredConstructors())
                 .flatMap(constructor->java.util.Arrays.stream(constructor.getParameterTypes()))
                 .anyMatch(type->javax.sql.DataSource.class.isAssignableFrom(type)));
-        assertEquals(0,java.util.Arrays.stream(SyntheticPreviewPort.class.getMethods())
-                .filter(method->method.getName().toLowerCase(java.util.Locale.ROOT).matches(".*(write|delete|dispatch|execute).*" )).count());
+        long mutatingPortMethods=java.util.Arrays.stream(SyntheticPreviewPort.class.getMethods())
+                .filter(method->method.getName().toLowerCase(java.util.Locale.ROOT).matches(".*(write|delete|dispatch|execute).*" )).count();
+        assertEquals(0,mutatingPortMethods,"SyntheticPreviewPortにwrite/dispatch/disposition能力がないこと");
+        assertEquals(List.of("audience", "describeCurrent", "providerId", "read"),
+                java.util.Arrays.stream(SyntheticPreviewPort.class.getDeclaredMethods()).map(java.lang.reflect.Method::getName).sorted().toList(),
+                "構造上の能力宣言とevidence出力を同期すること");
         assertTrue(java.util.Arrays.stream(JournalTestConnectionCapability.W3aSyntheticPreviewStore.class.getDeclaredConstructors())
                 .noneMatch(c->java.util.Arrays.stream(c.getParameterTypes()).anyMatch(javax.sql.DataSource.class::isAssignableFrom)));
         assertFalse(java.util.Arrays.stream(JournalTestConnectionCapability.W3aSyntheticPreviewStore.class.getDeclaredMethods())

@@ -8,6 +8,14 @@
 `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`を技術Plan PASSと判定した。
 これは実装Review、DG-07、法務/Privacy Owner、本番gateの承認ではない。
 
+## SF-W3a 限定証拠の履歴（ledger記録）
+
+NF07 W3aの固定Head `92d91d58172288406f6048e69ad38aa85880eb04` は、ledger記録上fresh compile後の26/0/0/0でAstra限定CODE PASSとなり、9 commitがcontrol `b6e2992b`へ統合された。対象はsynthetic preview persistence、as-of再検証、ACK_UNKNOWN、CASだけである。この文書更新は再実行や新しいReview結果を意味しない。
+
+当時の動的試験値はfixture単位の`providerRead`と`crossScopeAccess`。provider write、dispatch、dispositionのログ上の0は動的counterではなく、狭い`SyntheticPreviewPort`に変更系APIがなくserviceにもauthority依存がないことを構造assertionで確認した範囲に限る。これを全システムの外送不能性へ一般化しない。実本人同定、交付、処分、法務承認、全store原子性も受理されていない。
+
+このW3a sliceをSF-W3全体の完了とは扱わない。outbox worker、dispatchごとの再検証、receipt、lease/idempotency、UNKNOWN/partial/emergency stop、およびSF-W4 recovery/exportは未完了であり、DG-07/Full Feature/Production gateも未承認のままとする。
+
 SF-W1の実装はmain側のimmutable envelope、Ed25519 verifier、profile/provider拒否、純粋FSMに限定する。
 2026-10-01にAstra CONDITIONAL指摘を補正後、対象3 test classを再実行し18件成功、失敗/例外/skipは0。
 default `prod` profile、未知schema version、下流proof転用拒否、DISPATCH_AUTHORIZED後の取消拒否、

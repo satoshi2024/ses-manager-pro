@@ -15,6 +15,8 @@ Base: `1443fb68943849a3260d7ebe005259f3eb609d60`。計画固定Head `f007ef9aecc
 | [ ] SF-W4 | restore quarantine、journal replay、DSAR合成export/redaction、NF03/NF08拒否integration | old snapshotへ新hold/intentを再適用、gap/改竄/遅延で公開不可、第三者情報0、反復hash一致 |
 | [ ] SF-M | 全synthetic waveを固定RCで試験し独立Review | synthetic foundationの達成範囲と未完人工gateを記録。全NF07完成へ読み替えない |
 
+SF-W3a preview persistence sliceは別途履歴として記録する。ledgerによれば固定Head `92d91d58172288406f6048e69ad38aa85880eb04` の限定CODE PASS（26/0/0/0、Astra受理）後、9 commitがcontrol `b6e2992b`へ統合済みで、対象はsynthetic preview persistence/as-of再検証/ACK_UNKNOWN/CASのみ。これはSF-W3全体またはSF-Mの完了ではない。`providerRead`/`crossScopeAccess`は動的fixture counter、provider write/dispatch/dispositionは`SyntheticPreviewPort`/service依存の構造上の能力不在をassertする契約であり、runtime回数0や全システムの外送不能性を意味しない。本追記は新たなruntime結果ではない。
+
 W2以降のworker/処分/journal recoveryは追加protocolの技術Plan PASS前に開始しない。SF-W1 CODE PASSは独立journal、worker、restore recovery、NF07全featureの完成を意味しない。
 migration採番は総括が管理し、旧migrationとV1を変更しない。実adapter、正式policy、交付/処分は別人工gate。
 試験でDBを扱う場合もharness生成の隔離container/dataだけとし、既存DBやユーザーdataを再利用しない。
