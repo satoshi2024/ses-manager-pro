@@ -10,12 +10,12 @@ import com.ses.importcenter.foundation.ImportEntity;
 import com.ses.importcenter.foundation.ImportFinding;
 import com.ses.importcenter.foundation.CanonicalImportRowFingerprint;
 import com.ses.importcenter.foundation.CanonicalRowFactory;
-import com.ses.importcenter.foundation.ImportValidationPipeline;
 import com.ses.importcenter.foundation.ImportValidationService;
 import com.ses.importcenter.foundation.SesCsvParser;
 import com.ses.importcenter.foundation.SourceRow;
 import com.ses.importcenter.foundation.ImportValidationSession;
 import com.ses.importcenter.foundation.ValidationContext;
+import com.ses.importcenter.foundation.ImportValidationPipelineTestFactory;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.SysUserMapper;
@@ -456,7 +456,8 @@ class ImportMetadataRealMySqlTest {
             return new com.ses.importcenter.foundation.CustomerImportRow(canonical.metadata(), Map.of());
         };
         var varyingAppend = new ImportValidationAppendService(jdbc, metadataService, lifecycleService, objectMapper,
-                new ImportValidationPipeline(new SesCsvParser(), new ImportValidationService(), varyingConverter));
+                ImportValidationPipelineTestFactory.withConverter(
+                        new SesCsvParser(), new ImportValidationService(), varyingConverter));
 
         assertThrows(BusinessException.class, () -> varyingAppend.appendRemainingWithSealCapability(lease),
                 "read/write scanのcounterが異なる場合はcapabilityを発行しません");

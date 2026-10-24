@@ -16,8 +16,8 @@ public final class ImportValidationPipeline {
         this(parser, validator, CanonicalRowFactory::create);
     }
 
-    public ImportValidationPipeline(SesCsvParser parser, ImportValidationService validator,
-                                    BiFunction<ImportEntity, SourceRow, CanonicalImportRow> canonicalConverter) {
+    ImportValidationPipeline(SesCsvParser parser, ImportValidationService validator,
+                             BiFunction<ImportEntity, SourceRow, CanonicalImportRow> canonicalConverter) {
         this.parser = Objects.requireNonNull(parser);
         this.validator = Objects.requireNonNull(validator);
         this.canonicalConverter = Objects.requireNonNull(canonicalConverter);
