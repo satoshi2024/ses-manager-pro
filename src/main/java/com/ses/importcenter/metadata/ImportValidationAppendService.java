@@ -13,6 +13,7 @@ import com.ses.importcenter.foundation.ReadOnlyImportResolver;
 import com.ses.importcenter.foundation.ValidationContext;
 import com.ses.importcenter.foundation.ValidatedRow;
 import com.ses.importcenter.foundation.SesCsvParser;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -44,16 +45,24 @@ public class ImportValidationAppendService {
     private final ImportMetadataService metadata;
     private final ImportValidationLifecycleService lifecycle;
     private final ObjectMapper objectMapper;
-    private final ImportValidationPipeline pipeline = new ImportValidationPipeline(
-            new SesCsvParser(), new ImportValidationService());
+    private final ImportValidationPipeline pipeline;
     private final ReadOnlyImportResolver failClosedResolver;
 
+    @Autowired
     public ImportValidationAppendService(JdbcTemplate jdbc, ImportMetadataService metadata,
                                          ImportValidationLifecycleService lifecycle, ObjectMapper objectMapper) {
+        this(jdbc, metadata, lifecycle, objectMapper, new ImportValidationPipeline(
+                new SesCsvParser(), new ImportValidationService()));
+    }
+
+    ImportValidationAppendService(JdbcTemplate jdbc, ImportMetadataService metadata,
+                                  ImportValidationLifecycleService lifecycle, ObjectMapper objectMapper,
+                                  ImportValidationPipeline pipeline) {
         this.jdbc = jdbc;
         this.metadata = metadata;
         this.lifecycle = lifecycle;
         this.objectMapper = objectMapper;
+        this.pipeline = Objects.requireNonNull(pipeline);
         this.failClosedResolver = (type, tenant, legalEntity, key) -> null;
     }
 

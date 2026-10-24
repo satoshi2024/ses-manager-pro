@@ -5,6 +5,8 @@ import com.ses.importcenter.metadata.ImportValidationAppendService;
 import com.ses.importcenter.metadata.ImportValidationLifecycleService;
 
 import java.math.BigDecimal;
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
@@ -86,6 +88,38 @@ class ValidationCounterAccumulatorTest {
     }
 
     @Test
+    void snapshotsUseContentEqualityAndHashingForSummaryArrays() {
+        ValidationCounterAccumulator first = new ValidationCounterAccumulator();
+        ValidationCounterAccumulator second = new ValidationCounterAccumulator();
+        first.record(row(ImportEntity.CUSTOMER, List.of(finding("FIELD_REQUIRED")), Map.of(), Map.of()));
+        second.record(row(ImportEntity.CUSTOMER, List.of(finding("FIELD_REQUIRED")), Map.of(), Map.of()));
+        var original = first.snapshot(0);
+        var equal = second.snapshot(0);
+        assertEquals(original, equal);
+        assertEquals(original.hashCode(), equal.hashCode());
+
+        second.record(row(ImportEntity.CUSTOMER, List.of(finding("EMAIL_INVALID")), Map.of(), Map.of()));
+        assertFalse(original.equals(second.snapshot(0)));
+
+        byte[] findingBytes = original.findingSummaryBytes();
+        byte[] findingHash = original.findingSummarySha256();
+        byte[] reasonBytes = original.amountExcludedReasonCountsBytes();
+        byte[] reasonHash = original.amountExcludedReasonSha256();
+        var copied = new ValidationCounterAccumulator.Snapshot(original.physicalRows(), original.sourceRows(),
+                original.validatedAcceptedTotal(), original.rejected(), original.emptySkipped(),
+                original.validatedAcceptedAmount(), original.rejectedAmount(), original.amountExcluded(),
+                original.amountExcludedReasons(), original.validatedAcceptedAmountsByField(),
+                original.rejectedAmountsByField(), original.findingCodeCounts(), original.amountCountersByField(),
+                findingBytes, findingHash, reasonBytes, reasonHash);
+        findingBytes[0] ^= 1;
+        findingHash[0] ^= 1;
+        reasonBytes[0] ^= 1;
+        reasonHash[0] ^= 1;
+        assertEquals(original, copied, "constructor入力arrayはsnapshot内部へ漏れません");
+        assertEquals(original.hashCode(), copied.hashCode());
+    }
+
+    @Test
     void emitsZeroForInapplicableFieldsAndNullSumWhenNoKnownAmountExists() {
         ValidationCounterAccumulator counters = new ValidationCounterAccumulator();
         counters.record(row(ImportEntity.PROPOSAL, List.of(), Map.of(), Map.of()));
@@ -103,6 +137,30 @@ class ValidationCounterAccumulatorTest {
     }
 
     @Test
+    void pipelineConversionFailureCountsApplicableAmountAsUnknownAndRejected() throws Exception {
+        ImportValidationPipeline pipeline = new ImportValidationPipeline(new SesCsvParser(), new ImportValidationService(),
+                (entity, sourceRow) -> { throw new IllegalArgumentException("synthetic conversion failure"); });
+        List<ValidatedRow> rows = new java.util.ArrayList<>();
+        var result = pipeline.validate(new ByteArrayInputStream(
+                        "externalKey,expectedUnitPrice\nengineer-1,120\n".getBytes(StandardCharsets.UTF_8)),
+                "engineer.csv", ImportEntity.ENGINEER, ImportEncoding.UTF8, null, rows::add);
+
+        assertEquals(1, rows.size());
+        assertEquals("CANONICAL_CONVERSION_FAILED", rows.getFirst().findings().getFirst().code());
+        assertFalse(rows.getFirst().accepted());
+        assertEquals(Map.of(), rows.getFirst().knownAmounts());
+        assertEquals(Map.of("expectedUnitPrice", "AMOUNT_UNKNOWN_OR_EMPTY"), rows.getFirst().excludedAmountReasons());
+        var summary = result.counters();
+        assertEquals(0, summary.validatedAcceptedTotal());
+        assertEquals(1, summary.rejected());
+        var amount = summary.amountCountersByField().get("expectedUnitPrice");
+        assertEquals(0, amount.acceptedKnownCount());
+        assertNull(amount.acceptedSumYen());
+        assertEquals(1, amount.excludedCount());
+        assertEquals(Map.of("AMOUNT_UNKNOWN_OR_EMPTY", 1L), amount.excludedReasonCounts());
+    }
+
+    @Test
     void rejectsUnknownOrMissingApplicableAmountAndKnownExcludedOverlap() {
         ValidationCounterAccumulator counters = new ValidationCounterAccumulator();
         assertThrows(IllegalArgumentException.class, () -> counters.record(row(ImportEntity.ENGINEER,
@@ -111,6 +169,10 @@ class ValidationCounterAccumulatorTest {
                 List.of(), Map.of("expectedUnitPrice", BigDecimal.ONE), Map.of("expectedUnitPrice", "AMOUNT_UNKNOWN_OR_EMPTY"))));
         assertThrows(IllegalArgumentException.class, () -> counters.record(row(ImportEntity.ENGINEER,
                 List.of(), Map.of("expectedUnitPrice", new BigDecimal("1000000000000000000")), Map.of())));
+        assertThrows(IllegalArgumentException.class, () -> counters.record(row(ImportEntity.ENGINEER,
+                List.of(), Map.of("expectedUnitPrice", new BigDecimal("-1")), Map.of())));
+        assertThrows(IllegalArgumentException.class, () -> counters.record(row(ImportEntity.ENGINEER,
+                List.of(), Map.of("expectedUnitPrice", new BigDecimal("1.5")), Map.of())));
         assertThrows(IllegalArgumentException.class, () -> counters.record(row(ImportEntity.ENGINEER,
                 List.of(), Map.of(), Map.of("expectedUnitPrice", "NOT_A_CLOSED_REASON"))));
         assertThrows(IllegalArgumentException.class, () -> counters.record(row(ImportEntity.CUSTOMER,

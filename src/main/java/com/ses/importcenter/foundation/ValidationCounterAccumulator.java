@@ -12,6 +12,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -352,6 +353,20 @@ public final class ValidationCounterAccumulator {
         @Override public byte[] findingSummarySha256() { return findingSummarySha256.clone(); }
         @Override public byte[] amountExcludedReasonCountsBytes() { return amountExcludedReasonCountsBytes.clone(); }
         @Override public byte[] amountExcludedReasonSha256() { return amountExcludedReasonSha256.clone(); }
+
+        @Override public boolean equals(Object other) {
+            return other instanceof Snapshot snapshot && sameValues(snapshot);
+        }
+
+        @Override public int hashCode() {
+            int result = Objects.hash(physicalRows, sourceRows, validatedAcceptedTotal, rejected, emptySkipped,
+                    validatedAcceptedAmount, rejectedAmount, amountExcluded, amountExcludedReasons,
+                    validatedAcceptedAmountsByField, rejectedAmountsByField, findingCodeCounts, amountCountersByField);
+            result = 31 * result + java.util.Arrays.hashCode(findingSummaryBytes);
+            result = 31 * result + java.util.Arrays.hashCode(findingSummarySha256);
+            result = 31 * result + java.util.Arrays.hashCode(amountExcludedReasonCountsBytes);
+            return 31 * result + java.util.Arrays.hashCode(amountExcludedReasonSha256);
+        }
 
         public boolean sameValues(Snapshot other) {
             return other != null && physicalRows == other.physicalRows && sourceRows == other.sourceRows

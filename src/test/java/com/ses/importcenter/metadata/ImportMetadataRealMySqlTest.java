@@ -7,9 +7,15 @@ import com.ses.entity.DocumentVersion;
 import com.ses.entity.SysUser;
 import com.ses.importcenter.foundation.ImportEncoding;
 import com.ses.importcenter.foundation.ImportEntity;
+import com.ses.importcenter.foundation.ImportFinding;
 import com.ses.importcenter.foundation.CanonicalImportRowFingerprint;
 import com.ses.importcenter.foundation.CanonicalRowFactory;
+import com.ses.importcenter.foundation.ImportValidationPipeline;
+import com.ses.importcenter.foundation.ImportValidationService;
+import com.ses.importcenter.foundation.SesCsvParser;
 import com.ses.importcenter.foundation.SourceRow;
+import com.ses.importcenter.foundation.ImportValidationSession;
+import com.ses.importcenter.foundation.ValidationContext;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.SysUserMapper;
@@ -17,6 +23,7 @@ import com.ses.service.DocumentService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.storage.DocumentStorage;
 import com.ses.test.MySQLContainer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -119,6 +126,7 @@ class ImportMetadataRealMySqlTest {
     @Autowired private ImportValidationLeaseService leaseService;
     @Autowired private ImportValidationLifecycleService lifecycleService;
     @Autowired private ImportValidationAppendService validationAppendService;
+    @Autowired private ObjectMapper objectMapper;
     @Autowired private DocumentService documentService;
     @Autowired private DocumentMapper documentMapper;
     @Autowired private DocumentVersionMapper documentVersionMapper;
@@ -434,6 +442,90 @@ class ImportMetadataRealMySqlTest {
         validationAppendService.appendRemaining(appendedLease);
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
                 Integer.class, tenantId, jobId, lease.runId()), "一致するprefixの再検証は重複rowを追加しません");
+    }
+
+    @Test
+    void 実MySQLappendの二回scancounter不一致はcapability発行を拒否する() {
+        prepareBoundCustomerJob();
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+        AtomicInteger conversionCalls = new AtomicInteger();
+        var varyingConverter = (java.util.function.BiFunction<ImportEntity, SourceRow,
+                com.ses.importcenter.foundation.CanonicalImportRow>) (entity, sourceRow) -> {
+            var canonical = CanonicalRowFactory.create(entity, sourceRow);
+            if (conversionCalls.incrementAndGet() != 1) return canonical;
+            return new com.ses.importcenter.foundation.CustomerImportRow(canonical.metadata(), Map.of());
+        };
+        var varyingAppend = new ImportValidationAppendService(jdbc, metadataService, lifecycleService, objectMapper,
+                new ImportValidationPipeline(new SesCsvParser(), new ImportValidationService(), varyingConverter));
+
+        assertThrows(BusinessException.class, () -> varyingAppend.appendRemainingWithSealCapability(lease),
+                "read/write scanのcounterが異なる場合はcapabilityを発行しません");
+        assertEquals(2, conversionCalls.get(), "read scanとwrite scanをそれぞれ実行します");
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()), "append済みrowのrollbackは主張せず、証明だけを拒否します");
+        assertEquals("BUILDING", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, tenantId, jobId, lease.runId()));
+    }
+
+    @Test
+    void 実MySQLappendは既存prefixとsuffixのamountfindingcounterを一度ずつproofへ集約する() throws Exception {
+        byte[] source = ("externalKey,customerExternalKey,projectName,unitPriceMin,unitPriceMax\n"
+                + "project-1,missing-customer,Project 1,120,invalid\n"
+                + "project-2,missing-customer,Project 2,30,invalid\n").getBytes(StandardCharsets.UTF_8);
+        String sourceHash = sha256(source);
+        storage.put(storageKey, source, false);
+        jdbc.update("UPDATE t_document_version SET sha256=?,size_bytes=? WHERE tenant_id=? AND document_id=? AND id=?",
+                sourceHash, (long) source.length, tenantId, documentId, documentVersionId);
+        Map<String, String> mapping = Map.of("externalKey", "externalKey", "customerExternalKey", "customerExternalKey",
+                "projectName", "projectName", "unitPriceMin", "unitPriceMin", "unitPriceMax", "unitPriceMax");
+        sourceId = metadataService.createSource(new ImportSourceRequest("ProjectSource", "project source"));
+        mappingId = metadataService.createMapping(new ImportMappingRequest(sourceId, ImportEntity.PROJECT,
+                "ses-import-v1", mapping));
+        jobId = metadataService.registerJob(new ImportJobRegistrationRequest(sourceId, ImportEntity.PROJECT,
+                "ses-import-v1", ImportEncoding.UTF8, sourceHash, documentId, documentVersionId, 1));
+        metadataService.bindMapping(jobId, 1, mappingId);
+        var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
+
+        List<String> firstValues = List.of("project-1", "missing-customer", "Project 1", "120", "invalid");
+        SourceRow firstSourceRow = new SourceRow(1, candidateRowHash(firstValues), Map.of(
+                "externalKey", firstValues.get(0), "customerExternalKey", firstValues.get(1),
+                "projectName", firstValues.get(2), "unitPriceMin", firstValues.get(3), "unitPriceMax", firstValues.get(4)));
+        var canonical = CanonicalRowFactory.create(ImportEntity.PROJECT, firstSourceRow);
+        var firstValidated = new ImportValidationService().validate(canonical,
+                new ValidationContext(tenantId, Long.toString(LEGAL_ENTITY_ID), (type, tenant, legalEntity, key) -> null),
+                new ImportValidationSession());
+        byte[] findingBytes = ImportValidationAppendService.encodeFindingCodes(firstValidated.findings().stream()
+                .map(ImportFinding::code).collect(java.util.stream.Collectors.toSet()));
+        byte[] sourceRowSha = HexFormat.of().parseHex(firstSourceRow.sourceRowHash());
+        byte[] fingerprint = CanonicalImportRowFingerprint.sha256(canonical);
+        byte[] commitment = testRowCommit(1, sourceRowSha, fingerprint,
+                firstValidated.findings().isEmpty() ? "ACCEPTED" : "REJECTED", findingBytes);
+        jdbc.update("""
+                INSERT INTO t_import_validation_row(tenant_id,job_id,validation_run_id,source_row_number,
+                  source_row_sha256,canonical_fingerprint,disposition,finding_codes,row_commit_sha256)
+                VALUES(?,?,?,1,?,?,?,?,?)
+                """, tenantId, jobId, lease.runId(), sourceRowSha, fingerprint,
+                firstValidated.findings().isEmpty() ? "ACCEPTED" : "REJECTED", findingBytes, commitment);
+
+        var completion = validationAppendService.appendRemainingWithSealCapability(lease);
+        var counters = completion.capability().counters();
+        assertEquals(2, counters.sourceRows());
+        assertEquals(2, counters.rejected());
+        assertEquals(2L, counters.findingCodeCounts().get("REFERENCE_LOOKUP_UNKNOWN"));
+        assertEquals(2L, counters.findingCodeCounts().get("AMOUNT_INVALID_OR_FRACTIONAL_YEN"));
+        var minimum = counters.amountCountersByField().get("unitPriceMin");
+        assertEquals(2, minimum.rejectedKnownCount());
+        assertEquals(new java.math.BigDecimal("150"), minimum.rejectedSumYen());
+        var maximum = counters.amountCountersByField().get("unitPriceMax");
+        assertEquals(2, maximum.excludedCount());
+        assertEquals(Map.of("AMOUNT_INVALID_OR_FRACTIONAL_YEN", 2L), maximum.excludedReasonCounts());
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()), "prefix 1件を保持しsuffix 1件だけ追記します");
+
+        var retried = validationAppendService.appendRemainingWithSealCapability(completion.lease());
+        assertEquals(counters, retried.capability().counters(), "retryでもcontent-equal counter proofになります");
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Integer.class, tenantId, jobId, lease.runId()), "retryはprefix/suffix rowを重複させません");
     }
 
     @Test
@@ -2933,6 +3025,26 @@ class ImportMetadataRealMySqlTest {
         } catch (java.security.NoSuchAlgorithmException failure) {
             throw new IllegalStateException(failure);
         }
+    }
+
+    private static byte[] testRowCommit(long rowNumber, byte[] sourceHash, byte[] fingerprint,
+                                        String disposition, byte[] findingBytes) throws Exception {
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (java.io.DataOutputStream out = new java.io.DataOutputStream(bytes)) {
+            writeLengthBytes(out, "SES-IMPORT-VALIDATION-ROW-V1".getBytes(StandardCharsets.US_ASCII));
+            out.writeInt(1);
+            out.writeLong(rowNumber);
+            writeLengthBytes(out, sourceHash);
+            writeLengthBytes(out, fingerprint);
+            writeLengthBytes(out, disposition.getBytes(StandardCharsets.US_ASCII));
+            writeLengthBytes(out, findingBytes);
+        }
+        return MessageDigest.getInstance("SHA-256").digest(bytes.toByteArray());
+    }
+
+    private static void writeLengthBytes(java.io.DataOutputStream out, byte[] value) throws IOException {
+        out.writeInt(value.length);
+        out.write(value);
     }
 
     private Map<String, Object> leaseSnapshot() {
