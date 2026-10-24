@@ -44,9 +44,13 @@ public final class ImportValidationPipeline {
             catch (RuntimeException failure) {
                 ImportRowMetadata metadata = new ImportRowMetadata(sourceRow.sourceRowNumber(), sourceRow.sourceRowHash(), null);
                 canonical = emptyRow(entity, metadata);
+                java.util.Map<String, String> excludedAmounts = new java.util.LinkedHashMap<>();
+                for (String field : ImportValidationService.amountFields(entity)) {
+                    excludedAmounts.put(field, ImportValidationCodebook.AMOUNT_UNKNOWN_OR_EMPTY);
+                }
                 ValidatedRow rejected = new ValidatedRow(canonical, java.util.List.of(new ImportFinding(
                         metadata.sourceRowNumber(), metadata.sourceRowHash(), "CANONICAL_CONVERSION_FAILED", "canonical変換に失敗しました")),
-                        java.util.Map.of(), java.util.Map.of());
+                        java.util.Map.of(), excludedAmounts);
                 counters.record(rejected); rowConsumer.accept(rejected); return;
             }
             ValidatedRow result = validator.validate(canonical, context, session);

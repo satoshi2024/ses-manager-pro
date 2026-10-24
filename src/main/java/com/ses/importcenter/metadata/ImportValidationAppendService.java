@@ -6,6 +6,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.importcenter.foundation.ImportEntity;
 import com.ses.importcenter.foundation.ImportFinding;
 import com.ses.importcenter.foundation.ImportValidationPipeline;
+import com.ses.importcenter.foundation.ImportValidationCodebook;
 import com.ses.importcenter.foundation.ImportValidationService;
 import com.ses.importcenter.foundation.ImportEncoding;
 import com.ses.importcenter.foundation.ReadOnlyImportResolver;
@@ -39,16 +40,6 @@ public class ImportValidationAppendService {
     private static final String ROW_SET_DOMAIN = "SES-IMPORT-ROW-SET-V1";
     private static final String FINDING_DOMAIN = "SES-IMPORT-FINDING-CODES-V1";
     private static final TypeReference<Map<String, String>> MAPPING_TYPE = new TypeReference<>() { };
-    private static final Set<String> FINDING_CODES = Set.of(
-            "AMOUNT_UNKNOWN_OR_EMPTY", "AMOUNT_PRECISION_EXCEEDED", "AMOUNT_INVALID_OR_FRACTIONAL_YEN",
-            "AMOUNT_NEGATIVE_NOT_ALLOWED", "AMOUNT_RANGE_INVALID", "AMOUNT_REQUIRED", "CANONICAL_CONVERSION_FAILED",
-            "DATE_INVALID", "DATE_RANGE_INVALID", "DATETIME_INVALID", "DUPLICATE_SOURCE_KEY", "EMAIL_INVALID",
-            "EXTERNAL_KEY_INVALID", "EXTERNAL_KEY_REQUIRED", "FIELD_LENGTH_EXCEEDED", "FIELD_REQUIRED",
-            "INTEGER_INVALID", "REFERENCE_AMBIGUOUS", "REFERENCE_DELETED", "REFERENCE_IDENTITY_MISMATCH",
-            "REFERENCE_INVALID", "REFERENCE_KEY_INVALID", "REFERENCE_LOOKUP_UNKNOWN", "REFERENCE_NOT_FOUND",
-            "REFERENCE_OUT_OF_SCOPE", "REFERENCE_REQUIRED", "RELATIONSHIP_MISMATCH", "RELATIONSHIP_UNVERIFIABLE",
-            "STATE_OR_ENUM_NOT_ALLOWED");
-
     private final JdbcTemplate jdbc;
     private final ImportMetadataService metadata;
     private final ImportValidationLifecycleService lifecycle;
@@ -85,6 +76,7 @@ public class ImportValidationAppendService {
         ImportValidationLifecycleService.RunLease currentLease = lifecycle.renew(verified.lease());
         ScanResult appended = scan(snapshot, mapping, context, true, currentLease);
         if (!MessageDigest.isEqual(snapshot.sourceSha(), HexFormat.of().parseHex(appended.sourceSha256()))) conflict();
+        if (!verified.counters().sameValues(appended.counters())) conflict();
         ImportValidationLifecycleService.RunLease finalLease = lifecycle.renew(appended.lease());
         var counters = appended.counters();
         if (counters.sourceRows() != appended.rowCount()
@@ -186,7 +178,7 @@ public class ImportValidationAppendService {
     private RowMetadata rowMetadata(ValidatedRow validated) {
         TreeSet<String> codes = new TreeSet<>();
         for (ImportFinding finding : validated.findings()) {
-            if (finding.code() == null || !FINDING_CODES.contains(finding.code())) conflict();
+            if (!ImportValidationCodebook.isFindingCode(finding.code())) conflict();
             codes.add(finding.code());
         }
         byte[] findingBytes = encodeFindingCodes(codes);
@@ -212,7 +204,7 @@ public class ImportValidationAppendService {
             TreeSet<String> sorted = new TreeSet<>(codes);
             out.writeInt(sorted.size());
             for (String code : sorted) {
-                if (!FINDING_CODES.contains(code)) throw BusinessException.of(409, "error.import.jobStateConflict");
+                if (!ImportValidationCodebook.isFindingCode(code)) throw BusinessException.of(409, "error.import.jobStateConflict");
                 writeBytes(out, code.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
             }
             out.flush();
