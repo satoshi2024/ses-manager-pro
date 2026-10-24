@@ -126,20 +126,26 @@ public class CopilotQueryService {
                 .filter(ResolvedCitationDto::available)
                 .map(ResolvedCitationDto::key)
                 .toList();
-        CopilotRunService.CopilotAttemptRecord summaryAttempt = copilotRunService.beginSummaryAttempt(
-                entry, parameterHash, context, artifact, queryAttempt);
-        long summaryStarted = System.nanoTime();
         SummaryResponse summaryResponse;
-        try {
-            summaryResponse = copilotSummaryService.summarize(
-                    envelope, context, scope, scope.scopeHash(), artifact, summaryAttempt.traceId());
-        } catch (RuntimeException ex) {
-            summaryResponse = SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE);
-        }
-        CopilotRunService.SummaryCompletionResult completion = copilotRunService.completeSummaryAttempt(
-                summaryAttempt, elapsedMillis(summaryStarted), summaryResponse);
-        if (completion != CopilotRunService.SummaryCompletionResult.COMPLETED) {
-            summaryResponse = SummaryResponse.unavailable("SUMMARY_ATTEMPT_STALE");
+        if (!copilotSummaryService.preflightLocalSummary(envelope, context, scope, scope.scopeHash(), artifact,
+                queryAttempt.traceId(), parameterHash)) {
+            // QUERYの正本結果と監査は維持し、deny時はSUMMARY attempt/completionを作らない。
+            summaryResponse = SummaryResponse.unavailable("COPILOT_COST_UNKNOWN");
+        } else {
+            CopilotRunService.CopilotAttemptRecord summaryAttempt = copilotRunService.beginSummaryAttempt(
+                    entry, parameterHash, context, artifact, queryAttempt);
+            long summaryStarted = System.nanoTime();
+            try {
+                summaryResponse = copilotSummaryService.summarize(
+                        envelope, context, scope, scope.scopeHash(), artifact, summaryAttempt.traceId());
+            } catch (RuntimeException ex) {
+                summaryResponse = SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE);
+            }
+            CopilotRunService.SummaryCompletionResult completion = copilotRunService.completeSummaryAttempt(
+                    summaryAttempt, elapsedMillis(summaryStarted), summaryResponse);
+            if (completion != CopilotRunService.SummaryCompletionResult.COMPLETED) {
+                summaryResponse = SummaryResponse.unavailable("SUMMARY_ATTEMPT_STALE");
+            }
         }
         CopilotSummaryView summary = toSummaryView(summaryResponse);
 

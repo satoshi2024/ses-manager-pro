@@ -43,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
 class CopilotSummaryServiceTest {
@@ -65,6 +66,76 @@ class CopilotSummaryServiceTest {
                 EffectiveScopeSnapshotFactory.POLICY_VERSION, false, "ALL",
                 "6811db559741de8ebd33485d5982d4f8ca0f05a008231a12e22b1ee85dceea7e");
         boundScope = boundSnapshot.scope();
+    }
+
+    @Test
+    void readOnlyPreflightはlocalNoEgressだけ候補を返しexecuteしない() {
+        PreflightCostEvidence local = PreflightCostEvidence.localNoEgress(pinnedArtifact().configHash(), 0);
+        when(aiExecutionGateway.preflightCopilot(any())).thenReturn(local);
+
+        boolean allowed = service.preflightLocalSummary(sampleEnvelope(), sampleContext(), sampleScope(),
+                sampleScope().scopeHash(), pinnedArtifact(), "existing-query-trace", "parameter-hash");
+
+        assertTrue(allowed);
+        verify(aiExecutionGateway).preflightCopilot(any());
+        verify(aiExecutionGateway, never()).execute(any());
+    }
+
+    @Test
+    void denyまたはsynthetic外部allowは候補を返さずexecuteしない() {
+        PreflightCostEvidence denied = PreflightCostEvidence.denied(
+                "production-deny-all-v1", pinnedArtifact().configHash(), "deny-proof", null, 0,
+                "COPILOT_COST_UNKNOWN");
+        when(aiExecutionGateway.preflightCopilot(any())).thenReturn(denied);
+        assertFalse(service.preflightLocalSummary(sampleEnvelope(), sampleContext(), sampleScope(),
+                sampleScope().scopeHash(), pinnedArtifact(), "existing-query-trace", "parameter-hash"));
+
+        PreflightCostEvidence syntheticRemoteAllow = new PreflightCostEvidence(
+                "synthetic-remote-policy", pinnedArtifact().configHash(), "synthetic-allow-proof",
+                0, 0, true, CopilotCostState.UPPER_BOUND,
+                DispatchOutcome.notStarted("SYNTHETIC_ONLY"), "SYNTHETIC_ONLY");
+        when(aiExecutionGateway.preflightCopilot(any())).thenReturn(syntheticRemoteAllow);
+        assertFalse(service.preflightLocalSummary(sampleEnvelope(), sampleContext(), sampleScope(),
+                sampleScope().scopeHash(), pinnedArtifact(), "existing-query-trace", "parameter-hash"));
+        verify(aiExecutionGateway, never()).execute(any());
+    }
+
+    @Test
+    void immutableCandidateはbindingの各項目差異を拒否する() {
+        PreflightCostEvidence evidence = PreflightCostEvidence.localNoEgress("config-hash", 0);
+        CopilotSummaryPreflightCandidate candidate = new CopilotSummaryPreflightCandidate(
+                "tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "mock",
+                "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash", evidence);
+        assertTrue(candidate.matches("tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L,
+                "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash"));
+        assertFalse(candidate.matches("tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L,
+                "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash",
+                PreflightCostEvidence.denied("other-policy", "config-hash", "other-proof", null, 0,
+                        "COPILOT_COST_UNKNOWN")));
+
+        Object[][] drifted = {
+                {"tenant-b", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 11L, "dashboard.utilization-forecast", "query-trace", 7L, "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "other.query", "query-trace", 7L, "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "other-trace", 7L, "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 8L, "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "other-provider", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "mock", "other-model", "prompt-v1", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "mock", "mock-management-copilot", "other-prompt", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "mock", "mock-management-copilot", "prompt-v1", "other-config", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "mock", "mock-management-copilot", "prompt-v1", "config-hash", "other-scope", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "other-input"}
+        };
+        for (Object[] row : drifted) {
+            assertFalse(candidate.matches((String) row[0], (Long) row[1], (String) row[2], (String) row[3],
+                    (Long) row[4], (String) row[5], (String) row[6], (String) row[7],
+                    (String) row[8], (String) row[9], (String) row[10]));
+        }
+        assertFalse(java.util.Arrays.stream(CopilotSummaryPreflightCandidate.class.getDeclaredFields())
+                .map(java.lang.reflect.Field::getName)
+                .anyMatch(name -> name.toLowerCase(java.util.Locale.ROOT).contains("attemptid")
+                        || name.toLowerCase(java.util.Locale.ROOT).contains("nonce")
+                        || name.toLowerCase(java.util.Locale.ROOT).contains("tls")));
     }
 
     @Test

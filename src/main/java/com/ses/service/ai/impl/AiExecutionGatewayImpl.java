@@ -94,15 +94,9 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         // provider呼出し自体もtenant-bound requestだけに限定し、persist=false経路から
         // tenant未束縛の外部送信が発生しないようにする。
         com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
-        Map<String, Object> masked = AiPiiMasker.mask(request.getAllowlistedFields());
-        if (AiPiiMasker.containsCanary(masked)) {
-            throw new BusinessException(400, "PII canary を外部送信できません");
-        }
-        String untrusted = AiPiiMasker.sanitizeUntrusted(request.getUntrustedSourceText());
-        String prompt = buildPrompt(request, masked, untrusted);
-        if (prompt.contains(AiGatewayRequest.CANARY)) {
-            throw new BusinessException(400, "PII canary を外部送信できません");
-        }
+        PromptPreparation prepared = preparePrompt(request);
+        Map<String, Object> masked = prepared.maskedFields();
+        String prompt = prepared.prompt();
         CopilotInvocation invocation = null;
         if (AiGatewayRequest.USE_COPILOT.equals(request.getUseCase())) {
             invocation = assertCopilotBoundedRequest(request);
@@ -180,11 +174,66 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 invocation == null ? null : invocation.preflightCostEvidence(), dispatchOutcome);
     }
 
+    /** 実送信前の読取専用検査。ここではprobe、attempt、providerを呼び出さない。 */
+    @Override
+    public PreflightCostEvidence preflightCopilot(AiGatewayRequest request) {
+        if (request == null || !AiGatewayRequest.USE_COPILOT.equals(request.getUseCase())) {
+            throw BusinessException.of(503, "COPILOT_EXECUTION_SNAPSHOT_INVALID");
+        }
+        String currentTenant = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        CopilotExecutionContext context = request.getExecutionContext();
+        if (context == null || context.effectiveScopeSnapshot() == null || context.queryId() == null
+                || context.scope() == null || context.scope() != context.effectiveScopeSnapshot().scope()
+                || request.getScopeContext() != context.scope()
+                || !Objects.equals(request.getScopeHash(), context.scopeHash())
+                || !currentTenant.equals(context.tenantId())) {
+            throw BusinessException.of(403, "SCOPE_CONTEXT_REQUIRED");
+        }
+        preparePrompt(request);
+        PreflightCostEvidence evidence = validateCopilotPreflight(request);
+        // Read-only preflight must exercise the same final provider/policy boundary as execute.
+        // execute deliberately repeats this check immediately before any probe or provider call.
+        assertFinalProviderBoundary(request);
+        return evidence;
+    }
+
+    private PromptPreparation preparePrompt(AiGatewayRequest request) {
+        Map<String, Object> masked = AiPiiMasker.mask(request.getAllowlistedFields());
+        if (AiPiiMasker.containsCanary(masked)) {
+            throw new BusinessException(400, "PII canary を外部送信できません");
+        }
+        String untrusted = AiPiiMasker.sanitizeUntrusted(request.getUntrustedSourceText());
+        String prompt = buildPrompt(request, masked, untrusted);
+        if (prompt.contains(AiGatewayRequest.CANARY)) {
+            throw new BusinessException(400, "PII canary を外部送信できません");
+        }
+        return new PromptPreparation(masked, prompt);
+    }
+
+    private record PromptPreparation(Map<String, Object> maskedFields, String prompt) { }
+
     private String callProvider(String prompt) {
         return aiTextService.generate(prompt);
     }
 
     private CopilotInvocation assertCopilotBoundedRequest(AiGatewayRequest request) {
+        PreflightCostEvidence preflight = validateCopilotPreflight(request);
+        if (!preflight.dispatchAllowed()) {
+            throw new CopilotExecutionFailure("COPILOT_COST_UNKNOWN", preflight,
+                    com.ses.service.ai.copilot.summary.DispatchOutcome.notStarted("COPILOT_COST_UNKNOWN"));
+        }
+        CopilotInvocation invocation = new CopilotInvocation(startupCopilotConfigSnapshot,
+                request.getExpectedArtifactVersionId(), request.getExpectedProvider(), request.getExpectedModel(),
+                request.getExpectedPromptVersion(), request.getExpectedConfigHash(),
+                request.getExecutionContext().queryId(), request.getDeadlineNanos(), preflight);
+        if (!invocation.identityMatchesSnapshot()) {
+            throw BusinessException.of(503, "COPILOT_EXECUTION_SNAPSHOT_INVALID");
+        }
+        return invocation;
+    }
+
+    /** request identityとpolicyを検証するが、CopilotInvocationやdispatch authorityは生成しない。 */
+    private PreflightCostEvidence validateCopilotPreflight(AiGatewayRequest request) {
         if (request.getCostBudgetYen() == null || request.getCostBudgetYen() < 0) {
             throw BusinessException.of(503, "COPILOT_COST_BUDGET_REQUIRED");
         }
@@ -211,8 +260,7 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
             if (preflight.dispatchAllowed()) {
                 throw BusinessException.of(503, "COPILOT_COST_POLICY_INVALID");
             }
-            throw new CopilotExecutionFailure("COPILOT_COST_UNKNOWN", preflight,
-                    com.ses.service.ai.copilot.summary.DispatchOutcome.notStarted("COPILOT_COST_UNKNOWN"));
+            return preflight;
         }
         if (!startupCopilotConfigSnapshot.hasBoundedIdentity()
                 || !configured.name().equals(startupCopilotConfigSnapshot.adapterProvider())) {
@@ -234,15 +282,7 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         }
         preflight = PreflightCostEvidence.localNoEgress(startupCopilotConfigSnapshot.configHash(),
                 request.getCostBudgetYen());
-        CopilotInvocation invocation = new CopilotInvocation(startupCopilotConfigSnapshot,
-                request.getExpectedArtifactVersionId(), request.getExpectedProvider(), request.getExpectedModel(),
-                request.getExpectedPromptVersion(), request.getExpectedConfigHash(),
-                request.getExecutionContext().queryId(), request.getDeadlineNanos(),
-                preflight);
-        if (!invocation.identityMatchesSnapshot()) {
-            throw BusinessException.of(503, "COPILOT_EXECUTION_SNAPSHOT_INVALID");
-        }
-        return invocation;
+        return preflight;
     }
 
     private com.ses.service.ai.CopilotProviderResponse callCopilotProvider(String prompt, CopilotInvocation invocation) {
