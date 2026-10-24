@@ -25,19 +25,31 @@ final class BoundedLoopbackHttp {
     private static final int IO_BUFFER_BYTES = 8192;
     private final Semaphore permits = new Semaphore(2);
     private final ChannelWriter channelWriter;
+    private final Runnable afterResponseParsed;
+    private final NanoClock clock;
 
     BoundedLoopbackHttp() {
-        this(SocketChannel::write);
+        this(SocketChannel::write, () -> { }, System::nanoTime);
     }
 
     BoundedLoopbackHttp(ChannelWriter channelWriter) {
+        this(channelWriter, () -> { }, System::nanoTime);
+    }
+
+    BoundedLoopbackHttp(ChannelWriter channelWriter, Runnable afterResponseParsed) {
+        this(channelWriter, afterResponseParsed, System::nanoTime);
+    }
+
+    BoundedLoopbackHttp(ChannelWriter channelWriter, Runnable afterResponseParsed, NanoClock clock) {
         this.channelWriter = java.util.Objects.requireNonNull(channelWriter);
+        this.afterResponseParsed = java.util.Objects.requireNonNull(afterResponseParsed);
+        this.clock = java.util.Objects.requireNonNull(clock);
     }
 
     TransportResult execute(LocalKeycloakCandidateGuard.Target target, WireRequest request, long deadlineNanos) {
-        long started = System.nanoTime();
+        long started = clock.nanoTime();
         if (!permits.tryAcquire()) {
-            return result(LocalKeycloakCandidateResult.State.NOT_STARTED, "CAPACITY_REJECTED", null, 0, started);
+            return result(LocalKeycloakCandidateResult.State.NOT_STARTED, "CAPACITY_REJECTED", null, 0, started, clock);
         }
         boolean sendStarted = false;
         int bytes = 0;
@@ -49,7 +61,7 @@ final class BoundedLoopbackHttp {
 
             InetSocketAddress actualPeer = (InetSocketAddress) channel.getRemoteAddress();
             if (!target.matches(actualPeer)) {
-                return result(LocalKeycloakCandidateResult.State.NOT_STARTED, "PEER_MISMATCH", null, 0, started);
+                return result(LocalKeycloakCandidateResult.State.NOT_STARTED, "PEER_MISMATCH", null, 0, started, clock);
             }
 
             byte[] wire = serialize(target, request);
@@ -81,18 +93,28 @@ final class BoundedLoopbackHttp {
                 parser.feed(chunk, 0, chunk.length);
             }
             BoundedHttp1ResponseParser.Parsed parsed = parser.response();
-            return new TransportResult(LocalKeycloakCandidateResult.State.ACKNOWLEDGED,
-                    "HTTP_RESPONSE_RECEIVED", parsed, bytes, Duration.ofNanos(Math.max(0, System.nanoTime() - started)));
+            afterResponseParsed.run();
+            if (deadlineNanos - clock.nanoTime() <= 0) {
+                return result(LocalKeycloakCandidateResult.State.UNKNOWN, "TOTAL_DEADLINE_EXCEEDED",
+                        null, bytes, started, clock);
+            }
+            TransportResult complete = new TransportResult(LocalKeycloakCandidateResult.State.ACKNOWLEDGED,
+                    "HTTP_RESPONSE_RECEIVED", parsed, bytes, Duration.ofNanos(Math.max(0, clock.nanoTime() - started)));
+            if (deadlineNanos - clock.nanoTime() <= 0) {
+                return result(LocalKeycloakCandidateResult.State.UNKNOWN, "TOTAL_DEADLINE_EXCEEDED",
+                        null, bytes, started, clock);
+            }
+            return complete;
         } catch (DeadlineExceeded timeout) {
             return result(sendStarted ? LocalKeycloakCandidateResult.State.MAY_HAVE_BEEN_SENT
                             : LocalKeycloakCandidateResult.State.NOT_STARTED,
-                    "TOTAL_DEADLINE_EXCEEDED", null, bytes, started);
+                    "TOTAL_DEADLINE_EXCEEDED", null, bytes, started, clock);
         } catch (BoundedHttp1ResponseParser.ProtocolException malformed) {
-            return result(LocalKeycloakCandidateResult.State.UNKNOWN, "RESPONSE_FRAMING_UNKNOWN", null, bytes, started);
+            return result(LocalKeycloakCandidateResult.State.UNKNOWN, "RESPONSE_FRAMING_UNKNOWN", null, bytes, started, clock);
         } catch (IOException | RuntimeException failure) {
             return result(sendStarted ? LocalKeycloakCandidateResult.State.MAY_HAVE_BEEN_SENT
                             : LocalKeycloakCandidateResult.State.NOT_STARTED,
-                    sendStarted ? "TRANSPORT_OUTCOME_UNKNOWN" : "TRANSPORT_NOT_STARTED", null, bytes, started);
+                    sendStarted ? "TRANSPORT_OUTCOME_UNKNOWN" : "TRANSPORT_NOT_STARTED", null, bytes, started, clock);
         } finally {
             permits.release();
         }
@@ -140,10 +162,10 @@ final class BoundedLoopbackHttp {
         }
     }
 
-    static void awaitReady(Selector selector, SelectionKey key, int operation, long deadline) throws IOException {
+    void awaitReady(Selector selector, SelectionKey key, int operation, long deadline) throws IOException {
         key.interestOps(operation);
         while (true) {
-            long remaining = deadline - System.nanoTime();
+            long remaining = deadline - clock.nanoTime();
             if (remaining <= 0) throw new DeadlineExceeded();
             long millis = Math.max(1, Math.min(remaining / 1_000_000L, 1000));
             selector.select(millis);
@@ -152,14 +174,15 @@ final class BoundedLoopbackHttp {
         }
     }
 
-    private static void ensureBeforeDeadline(long deadline) {
-        if (deadline - System.nanoTime() <= 0) throw new DeadlineExceeded();
+    private void ensureBeforeDeadline(long deadline) {
+        if (deadline - clock.nanoTime() <= 0) throw new DeadlineExceeded();
     }
 
     private static TransportResult result(LocalKeycloakCandidateResult.State state, String code,
-                                          BoundedHttp1ResponseParser.Parsed response, int bytes, long started) {
+                                          BoundedHttp1ResponseParser.Parsed response, int bytes, long started,
+                                          NanoClock clock) {
         return new TransportResult(state, code, response, bytes,
-                Duration.ofNanos(Math.max(0, System.nanoTime() - started)));
+                Duration.ofNanos(Math.max(0, clock.nanoTime() - started)));
     }
 
     record WireRequest(String method, String path, Map<String, String> headers, byte[] body) {
@@ -228,8 +251,8 @@ final class BoundedLoopbackHttp {
         }
     }
 
-    static long deadline(Duration timeout) {
-        return System.nanoTime() + timeout.toNanos();
+    static long deadline(Duration timeout, NanoClock clock) {
+        return clock.nanoTime() + timeout.toNanos();
     }
 
     static final class DeadlineExceeded extends RuntimeException { }
@@ -237,5 +260,10 @@ final class BoundedLoopbackHttp {
     @FunctionalInterface
     interface ChannelWriter {
         int write(SocketChannel channel, ByteBuffer source) throws IOException;
+    }
+
+    @FunctionalInterface
+    interface NanoClock {
+        long nanoTime();
     }
 }

@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.net.URI;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -28,15 +29,29 @@ final class LocalKeycloakExternalAccountProviderCandidate {
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     private final LocalKeycloakCandidateRequest request;
     private final LocalKeycloakCandidateGuard.Target target;
-    private final BoundedLoopbackHttp transport = new BoundedLoopbackHttp();
+    private final BoundedLoopbackHttp transport;
+    private final Runnable afterJsonParsed;
+    private final BoundedLoopbackHttp.NanoClock clock;
 
     LocalKeycloakExternalAccountProviderCandidate(LocalKeycloakCandidateRequest request) {
+        this(request, () -> { }, System::nanoTime);
+    }
+
+    LocalKeycloakExternalAccountProviderCandidate(LocalKeycloakCandidateRequest request, Runnable afterJsonParsed) {
+        this(request, afterJsonParsed, System::nanoTime);
+    }
+
+    LocalKeycloakExternalAccountProviderCandidate(LocalKeycloakCandidateRequest request, Runnable afterJsonParsed,
+                                                   BoundedLoopbackHttp.NanoClock clock) {
         this.request = request;
+        this.afterJsonParsed = java.util.Objects.requireNonNull(afterJsonParsed);
+        this.clock = java.util.Objects.requireNonNull(clock);
+        this.transport = new BoundedLoopbackHttp(SocketChannel::write, () -> { }, clock);
         this.target = LocalKeycloakCandidateGuard.target(request.origin(), request.fixtureAllowlist());
     }
 
     CandidateRun runBoundedSequence() {
-        long deadline = BoundedLoopbackHttp.deadline(request.totalTimeout());
+        long deadline = BoundedLoopbackHttp.deadline(request.totalTimeout(), clock);
         LocalKeycloakCandidateResult disable = perform(LocalKeycloakCandidateResult.Operation.DISABLE,
                 "PUT", userPath(), "{\"enabled\":false}".getBytes(StandardCharsets.UTF_8), deadline);
         LocalKeycloakCandidateResult logout = perform(LocalKeycloakCandidateResult.Operation.LOGOUT,
@@ -50,7 +65,7 @@ final class LocalKeycloakExternalAccountProviderCandidate {
 
     private LocalKeycloakCandidateResult perform(LocalKeycloakCandidateResult.Operation operation,
                                                   String method, String path, byte[] body, long deadline) {
-        long started = System.nanoTime();
+        long started = clock.nanoTime();
         if (deadline - started <= 0) return outcome(operation, LocalKeycloakCandidateResult.State.NOT_STARTED,
                 "SERIES_DEADLINE_EXHAUSTED", null, null, null, 0, started);
         Map<String, String> headers = new LinkedHashMap<>();
@@ -61,15 +76,21 @@ final class LocalKeycloakExternalAccountProviderCandidate {
                 null, null, null, response.responseBytes(), started);
 
         BoundedHttp1ResponseParser.Parsed parsed = response.response();
-        if (deadline - System.nanoTime() <= 0) {
+        if (deadline - clock.nanoTime() <= 0) {
             return outcome(operation, LocalKeycloakCandidateResult.State.UNKNOWN,
                     "TOTAL_DEADLINE_EXCEEDED", parsed.status(), null, null, parsed.responseBytes(), started);
         }
         if ((operation == LocalKeycloakCandidateResult.Operation.DISABLE
                 || operation == LocalKeycloakCandidateResult.Operation.LOGOUT)
                 && parsed.status() == 204 && parsed.body().length == 0) {
-            return outcome(operation, LocalKeycloakCandidateResult.State.ACKNOWLEDGED,
+            LocalKeycloakCandidateResult result = outcome(operation, LocalKeycloakCandidateResult.State.ACKNOWLEDGED,
                     "EXPECTED_204_ACK", parsed.status(), null, null, parsed.responseBytes(), started);
+            if (deadline - clock.nanoTime() <= 0) {
+                return outcome(operation, LocalKeycloakCandidateResult.State.UNKNOWN,
+                        "TOTAL_DEADLINE_EXCEEDED", parsed.status(), null, null,
+                        parsed.responseBytes(), started);
+            }
+            return result;
         }
         if ((operation == LocalKeycloakCandidateResult.Operation.READ_USER
                 || operation == LocalKeycloakCandidateResult.Operation.READ_SESSIONS)
@@ -80,6 +101,7 @@ final class LocalKeycloakExternalAccountProviderCandidate {
                         .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
                         .decode(java.nio.ByteBuffer.wrap(parsed.body())).toString();
                 JsonNode root = JSON.readTree(jsonText);
+                afterJsonParsed.run();
                 if (operation == LocalKeycloakCandidateResult.Operation.READ_USER) {
                     JsonNode enabled = root == null ? null : root.get("enabled");
                     if (root == null || !root.isObject() || enabled == null || !enabled.isBoolean()) {
@@ -87,18 +109,42 @@ final class LocalKeycloakExternalAccountProviderCandidate {
                                 "USER_REPRESENTATION_UNCLASSIFIED", parsed.status(), null, null,
                                 parsed.responseBytes(), started);
                     }
-                    return outcome(operation, LocalKeycloakCandidateResult.State.ACKNOWLEDGED,
+                    validateJsonBounds(root, 0);
+                    if (deadline - clock.nanoTime() <= 0) {
+                        return outcome(operation, LocalKeycloakCandidateResult.State.UNKNOWN,
+                                "TOTAL_DEADLINE_EXCEEDED", parsed.status(), null, null,
+                                parsed.responseBytes(), started);
+                    }
+                    LocalKeycloakCandidateResult result = outcome(operation, LocalKeycloakCandidateResult.State.ACKNOWLEDGED,
                             "USER_STATE_OBSERVED", parsed.status(), enabled.booleanValue(), null,
                             parsed.responseBytes(), started);
+                    if (deadline - clock.nanoTime() <= 0) {
+                        return outcome(operation, LocalKeycloakCandidateResult.State.UNKNOWN,
+                                "TOTAL_DEADLINE_EXCEEDED", parsed.status(), null, null,
+                                parsed.responseBytes(), started);
+                    }
+                    return result;
                 }
                 if (root == null || !root.isArray()) {
                     return outcome(operation, LocalKeycloakCandidateResult.State.UNKNOWN,
                             "SESSION_REPRESENTATION_UNCLASSIFIED", parsed.status(), null, null,
                             parsed.responseBytes(), started);
                 }
-                return outcome(operation, LocalKeycloakCandidateResult.State.ACKNOWLEDGED,
+                validateJsonBounds(root, 0);
+                if (deadline - clock.nanoTime() <= 0) {
+                    return outcome(operation, LocalKeycloakCandidateResult.State.UNKNOWN,
+                            "TOTAL_DEADLINE_EXCEEDED", parsed.status(), null, null,
+                            parsed.responseBytes(), started);
+                }
+                LocalKeycloakCandidateResult result = outcome(operation, LocalKeycloakCandidateResult.State.ACKNOWLEDGED,
                         "ACTIVE_SESSIONS_OBSERVED", parsed.status(), null, root.size(),
                         parsed.responseBytes(), started);
+                if (deadline - clock.nanoTime() <= 0) {
+                    return outcome(operation, LocalKeycloakCandidateResult.State.UNKNOWN,
+                            "TOTAL_DEADLINE_EXCEEDED", parsed.status(), null, null,
+                            parsed.responseBytes(), started);
+                }
+                return result;
             } catch (Exception invalidJson) {
                 return outcome(operation, LocalKeycloakCandidateResult.State.UNKNOWN, "JSON_UNCLASSIFIED",
                         parsed.status(), null, null, parsed.responseBytes(), started);
@@ -124,12 +170,39 @@ final class LocalKeycloakExternalAccountProviderCandidate {
         return true;
     }
 
-    private static LocalKeycloakCandidateResult outcome(LocalKeycloakCandidateResult.Operation operation,
-                                                          LocalKeycloakCandidateResult.State state, String code,
-                                                          Integer status, Boolean enabled, Integer sessionCount,
-                                                          int responseBytes, long started) {
+    private static void validateJsonBounds(JsonNode node, int depth) {
+        if (depth > 8) throw new IllegalArgumentException("JSON nesting exceeded");
+        if (node.isTextual()) validateUtf8Length(node.textValue(), 4096);
+        if (node.isObject()) {
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                var field = fields.next();
+                validateUtf8Length(field.getKey(), 128);
+                validateJsonBounds(field.getValue(), depth + 1);
+            }
+        } else if (node.isArray()) {
+            for (JsonNode child : node) validateJsonBounds(child, depth + 1);
+        }
+    }
+
+    private static void validateUtf8Length(String value, int maxBytes) {
+        try {
+            int bytes = StandardCharsets.UTF_8.newEncoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .encode(java.nio.CharBuffer.wrap(value)).remaining();
+            if (bytes > maxBytes) throw new IllegalArgumentException("JSON UTF-8 string bound exceeded");
+        } catch (java.nio.charset.CharacterCodingException malformed) {
+            throw new IllegalArgumentException("JSON Unicode invalid", malformed);
+        }
+    }
+
+    private LocalKeycloakCandidateResult outcome(LocalKeycloakCandidateResult.Operation operation,
+                                                  LocalKeycloakCandidateResult.State state, String code,
+                                                  Integer status, Boolean enabled, Integer sessionCount,
+                                                  int responseBytes, long started) {
         return new LocalKeycloakCandidateResult(operation, state, code, status, enabled, sessionCount,
-                responseBytes, Duration.ofNanos(Math.max(0, System.nanoTime() - started)));
+                responseBytes, Duration.ofNanos(Math.max(0, clock.nanoTime() - started)));
     }
 
     static String safeCorrelationRef(String syntheticUserId) {

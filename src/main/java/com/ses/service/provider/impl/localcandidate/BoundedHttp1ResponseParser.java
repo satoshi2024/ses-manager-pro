@@ -92,11 +92,12 @@ final class BoundedHttp1ResponseParser {
             if (colon <= 0) throw new ProtocolException("invalid header");
             String name = line.substring(0, colon);
             if (!name.matches("[!#$%&'*+.^_`|~0-9A-Za-z-]+")) throw new ProtocolException("invalid header name");
-            String value = line.substring(colon + 1).trim();
-            for (int j = 0; j < value.length(); j++) {
-                char c = value.charAt(j);
-                if ((c < 0x20 && c != '\t') || c == 0x7f) throw new ProtocolException("invalid header value");
+            String rawValue = line.substring(colon + 1);
+            for (int j = 0; j < rawValue.length(); j++) {
+                char c = rawValue.charAt(j);
+                if ((c < 0x20 && c != '\t') || c > 0x7e) throw new ProtocolException("invalid header value");
             }
+            String value = stripOptionalWhitespace(rawValue);
             String key = name.toLowerCase(Locale.ROOT);
             if (headers.putIfAbsent(key, value) != null) throw new ProtocolException("duplicate header");
         }
@@ -130,6 +131,14 @@ final class BoundedHttp1ResponseParser {
         } catch (NumberFormatException invalid) {
             throw new ProtocolException("invalid content length");
         }
+    }
+
+    private static String stripOptionalWhitespace(String value) {
+        int start = 0;
+        int end = value.length();
+        while (start < end && (value.charAt(start) == ' ' || value.charAt(start) == '\t')) start++;
+        while (end > start && (value.charAt(end - 1) == ' ' || value.charAt(end - 1) == '\t')) end--;
+        return value.substring(start, end);
     }
 
     private static int headerDelimiter(byte[] bytes) {
