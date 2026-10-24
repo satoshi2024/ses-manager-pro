@@ -8,10 +8,12 @@ import java.net.InetSocketAddress;
 import java.nio.channels.Pipe;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -166,8 +168,9 @@ class LocalKeycloakExternalAccountProviderCandidateTest {
             source.configureBlocking(false);
             SelectionKey key = source.register(selector, SelectionKey.OP_READ);
             long started = System.nanoTime();
+            var helper = new BoundedLoopbackHttp();
             assertThrows(BoundedLoopbackHttp.DeadlineExceeded.class,
-                    () -> BoundedLoopbackHttp.awaitReady(selector, key, SelectionKey.OP_READ,
+                    () -> helper.awaitReady(selector, key, SelectionKey.OP_READ,
                             started + Duration.ofMillis(80).toNanos()));
             assertTrue(System.nanoTime() - started < Duration.ofSeconds(1).toNanos());
         }
@@ -181,13 +184,88 @@ class LocalKeycloakExternalAccountProviderCandidateTest {
             var request = new BoundedLoopbackHttp.WireRequest("GET",
                     "/admin/realms/synthetic-realm/users/subject-write-stall",
                     Map.of("Authorization", "Bearer synthetic-dummy-token"), new byte[0]);
-            long deadline = BoundedLoopbackHttp.deadline(Duration.ofMillis(80));
+            var clock = (BoundedLoopbackHttp.NanoClock) System::nanoTime;
+            long deadline = BoundedLoopbackHttp.deadline(Duration.ofMillis(80), clock);
             var helper = new BoundedLoopbackHttp((channel, source) -> 0);
             var result = helper.execute(target, request, deadline);
             assertEquals(LocalKeycloakCandidateResult.State.MAY_HAVE_BEEN_SENT, result.state());
             assertEquals("TOTAL_DEADLINE_EXCEEDED", result.safeCode());
             assertTrue(result.elapsed().compareTo(Duration.ofSeconds(1)) < 0);
             assertTrue(fixture.requests().isEmpty());
+        }
+    }
+
+    @Test
+    void frameAndJsonCompletionAfterTheSharedDeadlineCannotReturnSuccess() throws Exception {
+        try (LocalKeycloakLoopbackFixture fixture = new LocalKeycloakLoopbackFixture()) {
+            fixture.enqueue(LocalKeycloakLoopbackFixture.Response.noContent());
+            URI origin = URI.create("http://127.0.0.1:" + fixture.port());
+            AtomicLong offset = new AtomicLong();
+            BoundedLoopbackHttp.NanoClock clock = () -> System.nanoTime() + offset.get();
+            var helper = new BoundedLoopbackHttp(SocketChannel::write,
+                    () -> offset.set(Duration.ofSeconds(1).toNanos()), clock);
+            var wire = new BoundedLoopbackHttp.WireRequest("POST",
+                    "/admin/realms/synthetic-realm/users/subject-frame/logout",
+                    Map.of("Authorization", "Bearer synthetic-dummy-token"), new byte[0]);
+            var response = helper.execute(LocalKeycloakCandidateGuard.target(origin, fixtureAllowlist(fixture)),
+                    wire, BoundedLoopbackHttp.deadline(Duration.ofMillis(500), clock));
+            assertEquals(LocalKeycloakCandidateResult.State.UNKNOWN, response.state());
+            assertEquals("TOTAL_DEADLINE_EXCEEDED", response.safeCode());
+        }
+
+        try (LocalKeycloakLoopbackFixture fixture = new LocalKeycloakLoopbackFixture()) {
+            fixture.enqueue(LocalKeycloakLoopbackFixture.Response.noContent());
+            fixture.enqueue(LocalKeycloakLoopbackFixture.Response.noContent());
+            fixture.enqueue(LocalKeycloakLoopbackFixture.Response.json(200, "{\"enabled\":false}"));
+            fixture.enqueue(LocalKeycloakLoopbackFixture.Response.json(200, "[]"));
+            AtomicLong offset = new AtomicLong();
+            BoundedLoopbackHttp.NanoClock clock = () -> System.nanoTime() + offset.get();
+            var run = candidate(fixture, "subject-json-deadline", Duration.ofMillis(500),
+                    () -> offset.set(Duration.ofSeconds(1).toNanos()), clock)
+                    .runBoundedSequence();
+            assertEquals(LocalKeycloakCandidateResult.State.UNKNOWN, run.userObservation().state());
+            assertEquals("TOTAL_DEADLINE_EXCEEDED", run.userObservation().safeCode());
+            assertEquals(LocalKeycloakCandidateResult.State.NOT_STARTED, run.sessionObservation().state());
+        }
+    }
+
+    @Test
+    void rawNulInContentLengthIsRejectedBeforeOwsRemoval() throws Exception {
+        List<String> malformedValues = List.of(String.valueOf((char) 0) + "0",
+                "0" + (char) 0, String.valueOf((char) 1) + "0");
+        for (int i = 0; i < malformedValues.size(); i++) {
+            try (LocalKeycloakLoopbackFixture fixture = new LocalKeycloakLoopbackFixture()) {
+                fixture.enqueue(LocalKeycloakLoopbackFixture.Response.raw(204,
+                        Map.of("Content-Length", malformedValues.get(i)), new byte[0], 0, -1));
+                var run = candidate(fixture, "subject-nul-" + i, Duration.ofSeconds(2)).runBoundedSequence();
+                assertEquals(LocalKeycloakCandidateResult.State.UNKNOWN, run.disable().state());
+                assertEquals("RESPONSE_FRAMING_UNKNOWN", run.disable().safeCode());
+            }
+        }
+        assertThrows(BoundedHttp1ResponseParser.ProtocolException.class,
+                () -> parse("HTTP/1.1 204 No Content\r\nContent-Length: "
+                        + (char) 0 + "0\r\n\r\n"));
+    }
+
+    @Test
+    void jsonTextAndFieldNamesAreBoundedByUtf8Bytes() throws Exception {
+        try (LocalKeycloakLoopbackFixture fixture = new LocalKeycloakLoopbackFixture()) {
+            fixture.enqueue(LocalKeycloakLoopbackFixture.Response.noContent());
+            fixture.enqueue(LocalKeycloakLoopbackFixture.Response.noContent());
+            fixture.enqueue(LocalKeycloakLoopbackFixture.Response.json(200,
+                    "{\"enabled\":false,\"" + "項".repeat(50) + "\":1}"));
+            fixture.enqueue(LocalKeycloakLoopbackFixture.Response.json(200, "[]"));
+            var run = candidate(fixture, "subject-json-name", Duration.ofSeconds(3)).runBoundedSequence();
+            assertEquals(LocalKeycloakCandidateResult.State.UNKNOWN, run.userObservation().state());
+        }
+        try (LocalKeycloakLoopbackFixture fixture = new LocalKeycloakLoopbackFixture()) {
+            fixture.enqueue(LocalKeycloakLoopbackFixture.Response.noContent());
+            fixture.enqueue(LocalKeycloakLoopbackFixture.Response.noContent());
+            fixture.enqueue(LocalKeycloakLoopbackFixture.Response.json(200,
+                    "{\"enabled\":false,\"extra\":\"" + "漢".repeat(1400) + "\"}"));
+            fixture.enqueue(LocalKeycloakLoopbackFixture.Response.json(200, "[]"));
+            var run = candidate(fixture, "subject-json-string", Duration.ofSeconds(3)).runBoundedSequence();
+            assertEquals(LocalKeycloakCandidateResult.State.UNKNOWN, run.userObservation().state());
         }
     }
 
@@ -200,10 +278,23 @@ class LocalKeycloakExternalAccountProviderCandidateTest {
 
     private static LocalKeycloakExternalAccountProviderCandidate candidate(LocalKeycloakLoopbackFixture fixture,
                                                                              String userId, Duration timeout) {
+        return candidate(fixture, userId, timeout, () -> { });
+    }
+
+    private static LocalKeycloakExternalAccountProviderCandidate candidate(LocalKeycloakLoopbackFixture fixture,
+                                                                             String userId, Duration timeout,
+                                                                             Runnable afterJsonParsed) {
+        return candidate(fixture, userId, timeout, afterJsonParsed, System::nanoTime);
+    }
+
+    private static LocalKeycloakExternalAccountProviderCandidate candidate(LocalKeycloakLoopbackFixture fixture,
+                                                                             String userId, Duration timeout,
+                                                                             Runnable afterJsonParsed,
+                                                                             BoundedLoopbackHttp.NanoClock clock) {
         URI origin = URI.create("http://127.0.0.1:" + fixture.port());
         return new LocalKeycloakExternalAccountProviderCandidate(new LocalKeycloakCandidateRequest(
                 origin, fixtureAllowlist(fixture), "synthetic-realm", userId,
-                new SyntheticBearerToken("synthetic-dummy-token"), timeout));
+                new SyntheticBearerToken("synthetic-dummy-token"), timeout), afterJsonParsed, clock);
     }
 
     private static LocalKeycloakCandidateGuard.FixtureAllowlist fixtureAllowlist(LocalKeycloakLoopbackFixture fixture) {
@@ -214,4 +305,5 @@ class LocalKeycloakExternalAccountProviderCandidateTest {
             throw new IllegalStateException("loopback fixture address unavailable", impossible);
         }
     }
+
 }
