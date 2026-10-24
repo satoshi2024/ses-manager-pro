@@ -1,5 +1,40 @@
 # S-NF01〜10 Production Readiness 実行台帳
 
+## 再開確認とW3A統合（2026-10-24）
+
+- **全体NO-GO継続**。再fetch後origin/mainは `1443fb68943849a3260d7ebe005259f3eb609d60`。
+  PR101はMERGED、head祖先判定exit0、7check全てCOMPLETED/SUCCESS。main最新run36858538460はcompleted/failure。
+  Docker29.7.2を確認し、main checkoutの利用者変更3件を保持した。読取確認は `verification-evidence/20261024-resume-facts/`。
+- NF06 W3A修復fixed `8f9aaad02b3b2ff6460c0a973f0e05ada11563f5` は4 class **98/0/0/0**。
+  UTC2026-10-23T03:50:38.0254507Z〜03:55:07.6031110Z、exit0、起止同SHA/clean。
+  log `D97A932390C8CCF01AA097CF489610A3F1C0A59CE65CD4C995EDD91EBD456868`。
+  Astraが8 report hashと実XML（Metadata81/Candidate6/Lease9/V184 migration2）を照合し限定受理。
+  oracle正負例、8 source待機撤権分岐、batch/EOF tail、prefix/EOF SHA差分、読取失敗、空source境界を含む。
+  unsafe全例外分岐へのfault injectionを完了したとは呼ばない。旧97/1/56 FAILは保存する。
+  fast64/0/0/0は別SHA0f45の結果であり、このSHAのsame-head fastとは合算しない。
+- 四fileをcontrol `d8469ecb4f18468fc8eface6e69b65e36a52f41f` へ同一Git blobで統合した。
+  raw16 fileを `verification-evidence/20261024-nf06-w3a-source-mysql-02/` にhash一致保存し、Astraが統合も独立確認。
+  今回はappend/完全source走査proofまで。counter補完、seal/publish/apply/UIは未完で、W3A全体完成やproduction承認ではない。
+- NF08 B2c-0初回fixed `b5b0957f4076afceb6d30ccf87da7c760e4df3a3` は20 class **122/1/0/0 FAIL**。
+  UTC2026-10-23T03:55:55.9954181Z〜03:57:24.5285443Z、起止同SHA/clean・exit1。
+  log `1E0360F690A71136FF44C08825F07FE1D56D31AC1F08F6CFAB1826B9C3CB59DA`。
+  source sessionは再開時に存在しなかったが、終了記録と全XMLがあり、中断ではなく完了FAILとして扱う。
+  raw48 fileを `verification-evidence/20261024-nf08-b2c0-source-fast-01/` にhash一致保存。
+  原因はInOrderのparameter hash期待値が原文字列であり、実装のUTF-8 SHA-256と不一致だった。
+  test-only修復 `647b35c09e6828f03b7f0ae9b3d3bec0939d517a` はAstra限定CODE PASS。
+  QUERY completion→preflight→SUMMARY begin→summarize→completionの順序と監査例外伝播assertを保持した。
+  同修復SHAの再試験は20 class **122/0/0/0**、UTC2026-10-24T04:40:59.7840986Z〜04:42:40.1842154Z、
+  exit0・起止SHA一致/clean、log `EFD1EDC4EA44E9CFDCC07BBD1FD9A70C48999873F6611090EBE64D6471325291`。
+  Astraが40 report hash/XML、実gateway/summary/policy拒否、QUERY保持、SUMMARY零書込、順序/監査例外caseを独立受理。
+  9 fileをcontrol `a16ea908e89a815f0e0d657e9cf94c98c74f1170` へ同一blobで統合し、raw48 fileを
+  `verification-evidence/20261024-nf08-b2c0-source-fast-02/` にhash一致保存した。旧FAILを上書きしない。
+  既知policy拒否の前置処理、candidateのsnapshot比較はB2c-0の範囲。fresh current-source drift検査やdurable claimは未実装。
+- 次に統合候補を固定し、selectorなしの `scripts/verify-like-ci.ps1` を新規packetで再実行する。
+  full fast/MySQL/performance/browserとbackup unit/integrationを同一HEADで要求し、旧個別成功を新runへ転用しない。
+  runnerは各clean前のraw退避、zero skipped、起止SHA/clean、全profile・backup終了のAND判定を維持する。
+  この時点では新しい完全gateは未実施。NF06 counterは別source上の限定PLAN PASS・実装段階であり、統合候補へ含めない。
+
+
 ## Privacy修復とNF01 preflightの限定受理（2026-10-23）
 
 - **全体NO-GO継続**。Privacy/migration source `125e03a956909b2677e36b3149a21af71ecebd4e` は
