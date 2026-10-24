@@ -41,6 +41,9 @@ import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.Clock;
@@ -254,8 +257,8 @@ class CopilotQueryServiceTest {
             order.verify(copilotRunService).completeQueryAttempt(eq(queryAttempt), anyLong(), eq(true), eq(1));
             order.verify(copilotSummaryService).preflightLocalSummary(eq(queryResult), eq(executionContext),
                     eq(boundScope), eq(boundScope.scopeHash()), eq(artifact), eq(queryAttempt.traceId()),
-                    eq("parameter-hash"));
-            order.verify(copilotRunService).beginSummaryAttempt(eq(entry), eq("parameter-hash"),
+                    eq(expectedParameterHash()));
+            order.verify(copilotRunService).beginSummaryAttempt(eq(entry), eq(expectedParameterHash()),
                     eq(executionContext), eq(artifact), eq(queryAttempt));
             order.verify(copilotSummaryService).summarize(eq(queryResult), eq(executionContext), eq(boundScope),
                     eq(boundScope.scopeHash()), eq(artifact), eq(summaryAttempt.traceId()));
@@ -454,5 +457,15 @@ class CopilotQueryServiceTest {
     private CopilotScopeContext scope() {
         return new CopilotScopeContext("COMPANY_WIDE", CopilotScopeResolver.POLICY_VERSION,
                 "hash", false, "tenant-a", 1L, "ALL");
+    }
+
+    private static String expectedParameterHash() {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest("parameter-hash".getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException ex) {
+            throw new AssertionError(ex);
+        }
     }
 }
