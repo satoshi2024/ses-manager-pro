@@ -605,6 +605,10 @@ public class ImportValidationLifecycleService {
         public long runId() { return runId; }
         public long generation() { return generation; }
         public Timestamp expiresAt() { return expiresAt == null ? null : (Timestamp) expiresAt.clone(); }
+        long jobVersion() { return jobVersion; }
+        String workerId() { return workerId; }
+        String tenantId() { return input.context().tenantId(); }
+        long jobId() { return input.jobId(); }
     }
 
     record AppendSnapshot(ImportAuthorizedContext context, long jobId, long sourceId, long sourceVersion,
