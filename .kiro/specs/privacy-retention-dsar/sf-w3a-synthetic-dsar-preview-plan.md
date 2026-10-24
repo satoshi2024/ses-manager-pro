@@ -1,8 +1,8 @@
 # SF-W3a Synthetic identity-and-scope preview persistence
 
-状態: **実装済みsliceの履歴計画 / 2026-10-01固定Head `92d91d58172288406f6048e69ad38aa85880eb04` をAstraが限定CODE PASS、control `b6e2992b` へ統合。** ledger記録のMySQL acceptanceは26/0/0/0で、synthetic preview persistence/as-of再検証/ACK_UNKNOWN/CASに限る。ここは当時のplanであり、今回の修正は新runtime測定・再試験・新Reviewではない。実PII、実業務DB、実file/object、実provider、Spring production bean/controller、migration、export/delivery、外部dispatch、approval、delete/anonymize/restrict、retention処分は含めない。
+状態: **実装済みsliceの履歴計画 / 2026-10-18固定Head `92d91d58172288406f6048e69ad38aa85880eb04` をAstraが限定CODE PASS、control `b6e2992b` へ統合。** ledger記録のMySQL acceptanceは26/0/0/0（UTC 12:39:06.5468658〜12:40:50.7872174、JST 21:39:06.5468658〜21:40:50.7872174）で、synthetic preview persistence/as-of再検証/ACK_UNKNOWN/CASに限る。ここは当時のplanであり、今回の修正は新runtime測定・再試験・新Reviewではない。実PII、実業務DB、実file/object、実provider、Spring production bean/controller、migration、export/delivery、外部dispatch、approval、delete/anonymize/restrict、retention処分は含めない。
 
-証拠の読み方: `providerRead` と `crossScopeAccess` はfixture単位で動的計測する値。provider write、dispatch、dispositionは実行回数を測った値ではない。`SyntheticPreviewPort` のread-only API面とserviceの権限依存を構造assertionで検査し、出力では `structural.*Capability=ABSENT` と表す。これはこのsliceの狭いport/依存境界に関する証拠であり、全システムにwriteや外送能力がないとの主張ではない。
+証拠の読み方: `providerRead` と `crossScopeAccess` はfixture単位で動的計測する値。provider write、dispatch、dispositionは実行回数を測った値ではない。`SyntheticPreviewPort` のread-only API面とserviceの権限依存を構造assertionで検査し、出力では `structural.*Capability=ABSENT` と表す。構造ログは `verifiedCapabilitiesHavePrivateConstructorsAndServiceHasNoAuthorityDependencies` の対応する構造testcase結果と併せて読むこと。AfterEachのログ1行だけではassertion通過を証明しない。これはこのsliceの狭いport/依存境界に関する証拠であり、全システムにwriteや外送能力がないとの主張ではない。
 
 W2b recoveryの`RECOVERED_SYNTHETIC`は合成projectionの検証結果であり、本人確認、scope、policy、case approval、dispatchの証明ではない。D2b2の実MySQL試験結果は別のAstra固定Head確認に委ねる。この文書はD2b2またはNF07全体のPASSを主張しない。
 
