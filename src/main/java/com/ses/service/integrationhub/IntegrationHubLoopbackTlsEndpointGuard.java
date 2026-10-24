@@ -4,7 +4,10 @@ import com.ses.config.integrationhub.ExternalApiCidrMatcher;
 import com.ses.config.integrationhub.IntegrationHubExternalApiProperties;
 
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.SocketAddress;
+import javax.net.ssl.SSLSession;
 import java.util.List;
 
 /** 本機TLS fixture専用の宛先検査。Spring beanとして登録しない。 */
@@ -54,6 +57,22 @@ final class IntegrationHubLoopbackTlsEndpointGuard {
         Target peerTarget = validate(URI.create("https://" + bracketIfIpv6(host) + ":" + peerPort + "/"));
         validatePeer(peerTarget, peer, peerPort);
         return peerTarget;
+    }
+
+    void validateTlsSessionPeer(Target expected, SSLSession session) {
+        if (expected == null || session == null) {
+            throw new IllegalArgumentException("TLS session or expected endpoint is missing");
+        }
+        Target actual = validateTlsSessionPeer(session.getPeerHost(), session.getPeerPort());
+        validatePeer(expected, actual.address(), actual.port());
+    }
+
+    void validateConnectedPeer(Target expected, SocketAddress remoteAddress) {
+        if (!(remoteAddress instanceof InetSocketAddress actual) || actual.isUnresolved()
+                || actual.getAddress() == null) {
+            throw new IllegalArgumentException("connected peer address is missing or unresolved");
+        }
+        validatePeer(expected, actual.getAddress(), actual.getPort());
     }
 
     private static String stripBrackets(String host) {

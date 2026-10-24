@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.SSLServerSocket;
+import javax.net.ssl.SSLSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -17,6 +19,12 @@ import java.net.Socket;
 import java.net.URI;
 import java.io.IOException;
 import org.apache.hc.core5.http.message.BasicHttpResponse;
+import org.apache.hc.core5.http.HttpRequest;
+import org.apache.hc.core5.http.nio.RequestChannel;
+import org.apache.hc.core5.concurrent.FutureCallback;
+import org.apache.hc.core5.http.EntityDetails;
+import org.apache.hc.core5.http.nio.AsyncResponseConsumer;
+import org.apache.hc.core5.http.nio.AsyncRequestProducer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,6 +39,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -55,6 +65,7 @@ class IntegrationHubLoopbackTlsTransportCandidateTest {
     private volatile boolean slowBody;
     private IntegrationHubExternalApiProperties properties;
     private SSLContext trustedClientContext;
+    private SSLContext fixtureServerContext;
 
     @BeforeEach
     void startFixture() throws Exception {
@@ -69,8 +80,8 @@ class IntegrationHubLoopbackTlsTransportCandidateTest {
         try (var input = Files.newInputStream(keyStorePath)) { keys.load(input, PASSWORD); }
         KeyManagerFactory keyManagers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
         keyManagers.init(keys, PASSWORD);
-        SSLContext serverContext = SSLContext.getInstance("TLS");
-        serverContext.init(keyManagers.getKeyManagers(), null, null);
+        fixtureServerContext = SSLContext.getInstance("TLS");
+        fixtureServerContext.init(keyManagers.getKeyManagers(), null, null);
         KeyStore trust = KeyStore.getInstance("PKCS12");
         trust.load(null, PASSWORD);
         trust.setCertificateEntry("synthetic-test-ca", loadCaCertificate());
@@ -80,7 +91,7 @@ class IntegrationHubLoopbackTlsTransportCandidateTest {
         trustedClientContext.init(null, trustManagers.getTrustManagers(), null);
 
         server = HttpsServer.create(new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), 0), 0);
-        server.setHttpsConfigurator(new HttpsConfigurator(serverContext));
+        server.setHttpsConfigurator(new HttpsConfigurator(fixtureServerContext));
         server.createContext("/hook", exchange -> {
             received.incrementAndGet();
             capturedBody.set(exchange.getRequestBody().readAllBytes());
@@ -357,6 +368,73 @@ class IntegrationHubLoopbackTlsTransportCandidateTest {
     }
 
     @Test
+    void delayedCallbackAndSynchronousExecuteFailureReleasePermitsOnlyAtTerminalBoundary() throws Exception {
+        AtomicReference<FutureCallback<LoopbackTlsIntegrationHubWebhookTransportCandidate.HeaderOutcome>> callbackRef =
+                new AtomicReference<>();
+        CountDownLatch executeReturned = new CountDownLatch(1);
+        LoopbackTlsIntegrationHubWebhookTransportCandidate delayed =
+                new LoopbackTlsIntegrationHubWebhookTransportCandidate(properties, trustedClientContext,
+                        (producer, consumer, callback) -> {
+                            callbackRef.set(callback);
+                            executeReturned.countDown();
+                            return new ManualFuture(() -> { });
+                        });
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        try {
+            Future<IntegrationHubWebhookTransportResult> pending = caller.submit(() -> delayed.send(request(
+                    URI.create("https://127.0.0.1:" + server.getAddress().getPort() + "/hook"))));
+            assertTrue(executeReturned.await(1, TimeUnit.SECONDS));
+            assertEquals(11, delayed.availableAdmissionPermits());
+            assertEquals(7, delayed.availableExchangePermits());
+            assertEquals(1, delayed.inFlightCount());
+            callbackRef.get().cancelled();
+            assertFalse(pending.get(1, TimeUnit.SECONDS).success());
+            assertEquals(12, delayed.availableAdmissionPermits());
+            assertEquals(8, delayed.availableExchangePermits());
+            callbackRef.get().cancelled(); // Duplicate terminal callback must not release a second time.
+            assertEquals(12, delayed.availableAdmissionPermits());
+            assertEquals(8, delayed.availableExchangePermits());
+        } finally {
+            delayed.close();
+            caller.shutdownNow();
+            assertTrue(caller.awaitTermination(1, TimeUnit.SECONDS));
+        }
+
+        try (var failedSubmit = new LoopbackTlsIntegrationHubWebhookTransportCandidate(properties,
+                trustedClientContext, (producer, consumer, callback) -> {
+                    throw new IllegalStateException("synthetic synchronous execute failure");
+                })) {
+            IntegrationHubWebhookTransportResult result = failedSubmit.send(request(URI.create(
+                    "https://127.0.0.1:" + server.getAddress().getPort() + "/hook")));
+            assertFalse(result.success());
+            assertEquals(12, failedSubmit.availableAdmissionPermits());
+            assertEquals(8, failedSubmit.availableExchangePermits());
+            assertEquals(0, failedSubmit.inFlightCount());
+        }
+    }
+
+    @Test
+    void callbackFailureRacingAfterPublished2xxHeadersWinsOverSuccess() {
+        try (var racing = new LoopbackTlsIntegrationHubWebhookTransportCandidate(properties, trustedClientContext,
+                (producer, consumer, callback) -> {
+                    try {
+                        consumer.consumeResponse(new BasicHttpResponse(200), oneByteEntity(),
+                                org.apache.hc.core5.http.protocol.HttpCoreContext.create(), callback);
+                    } catch (IOException | org.apache.hc.core5.http.HttpException failure) {
+                        throw new IllegalStateException("synthetic response header setup failed");
+                    }
+                    return new ManualFuture(() -> callback.failed(new IOException("synthetic terminal failure")));
+                })) {
+            IntegrationHubWebhookTransportResult result = racing.send(request(URI.create(
+                    "https://127.0.0.1:" + server.getAddress().getPort() + "/hook")));
+            assertFalse(result.success(), "headerで見た2xxがterminal failureを覆わない");
+            assertEquals("NETWORK_ERROR", result.errorCode());
+            assertEquals(12, racing.availableAdmissionPermits());
+            assertEquals(8, racing.availableExchangePermits());
+        }
+    }
+
+    @Test
     void responseHeaderParserRejectsFramingConflictsAndCountOrByteOverflow() {
         BasicHttpResponse framingConflict = new BasicHttpResponse(200);
         framingConflict.addHeader("Content-Length", "0");
@@ -379,6 +457,82 @@ class IntegrationHubLoopbackTlsTransportCandidateTest {
         for (int i = 0; i < 17; i++) tooLarge.addHeader("X-" + i, "x".repeat(1024));
         assertThrows(IOException.class,
                 () -> LoopbackTlsIntegrationHubWebhookTransportCandidate.captureResponseHeaders(tooLarge));
+    }
+
+    @Test
+    void actualSocketPeerMustMatchOriginalTargetBeforeRequestChannelWrites() throws Exception {
+        IntegrationHubLoopbackTlsEndpointGuard guard = new IntegrationHubLoopbackTlsEndpointGuard(properties);
+        IntegrationHubLoopbackTlsEndpointGuard.Target target = guard.validate(URI.create(
+                "https://127.0.0.1:" + server.getAddress().getPort() + "/hook"));
+        guard.validateConnectedPeer(target,
+                new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), target.port()));
+        assertThrows(IllegalArgumentException.class, () -> guard.validateConnectedPeer(target,
+                new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 2}), target.port())));
+        assertThrows(IllegalArgumentException.class, () -> guard.validateConnectedPeer(target,
+                new InetSocketAddress(target.address(), target.port() + 1)));
+        assertThrows(IllegalArgumentException.class, () -> guard.validateConnectedPeer(target,
+                InetSocketAddress.createUnresolved("127.0.0.1", target.port())));
+
+        AtomicInteger requestChannelWrites = new AtomicInteger();
+        RequestChannel channel = (request, entity, context) -> requestChannelWrites.incrementAndGet();
+        HttpRequest request = new org.apache.hc.core5.http.message.BasicHttpRequest("POST", "/hook");
+        assertThrows(IOException.class, () -> LoopbackTlsIntegrationHubWebhookTransportCandidate.validateAndSendRequest(
+                guard, target, new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 2}), target.port()),
+                null, channel, request, null, org.apache.hc.core5.http.protocol.HttpCoreContext.create()));
+        assertEquals(0, requestChannelWrites.get(), "不一致な実socket peerではHTTP request bytesへ進まない");
+    }
+
+    @Test
+    void wireMalformedResponseFramingAndParserBoundsAreRejected() throws Exception {
+        assertRawResponseRejected("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nContent-Length: 1\r\n\r\n");
+        StringBuilder tooMany = new StringBuilder("HTTP/1.1 200 OK\r\n");
+        for (int i = 0; i < 33; i++) tooMany.append("X-Header-").append(i).append(": v\r\n");
+        tooMany.append("\r\n");
+        assertRawResponseRejected(tooMany.toString());
+        assertRawResponseRejected("HTTP/1.1 200 OK\r\nX-Large: " + "x".repeat(4100) + "\r\n\r\n");
+    }
+
+    private void assertRawResponseRejected(String rawResponse) throws Exception {
+        try (SSLServerSocket rawServer = (SSLServerSocket) fixtureServerContext.getServerSocketFactory().createServerSocket()) {
+            rawServer.bind(new InetSocketAddress(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}), 0));
+            rawServer.setSoTimeout(2500);
+            properties.getSecurity().setAllowedLoopbackPorts(
+                    List.of(server.getAddress().getPort(), rawServer.getLocalPort()));
+            AtomicBoolean requestHeadersSeen = new AtomicBoolean();
+            Thread responder = new Thread(() -> {
+                try (SSLSocket socket = (SSLSocket) rawServer.accept()) {
+                    socket.setSoTimeout(2500);
+                    socket.startHandshake();
+                    readRequestHeaders(socket.getInputStream());
+                    requestHeadersSeen.set(true);
+                    socket.getOutputStream().write(rawResponse.getBytes(StandardCharsets.ISO_8859_1));
+                    socket.getOutputStream().flush();
+                } catch (IOException ignored) { }
+            }, "nf05-malformed-wire-response-fixture");
+            responder.setDaemon(true);
+            responder.start();
+            try (var malformedTransport = new LoopbackTlsIntegrationHubWebhookTransportCandidate(
+                    properties, trustedClientContext)) {
+                IntegrationHubWebhookTransportResult result = malformedTransport.send(request(URI.create(
+                        "https://127.0.0.1:" + rawServer.getLocalPort() + "/hook")));
+                assertFalse(result.success());
+                assertTrue(requestHeadersSeen.get());
+            } finally {
+                rawServer.close();
+                responder.join(1000);
+                assertFalse(responder.isAlive());
+            }
+        }
+    }
+
+    private static void readRequestHeaders(java.io.InputStream input) throws IOException {
+        byte[] terminator = {'\r', '\n', '\r', '\n'};
+        int matched = 0;
+        while (matched < terminator.length) {
+            int value = input.read();
+            if (value < 0) throw new IOException("request ended before header terminator");
+            matched = value == terminator[matched] ? matched + 1 : value == terminator[0] ? 1 : 0;
+        }
     }
 
     private void assertTlsRejected(String san, String startDate, int validityDays, SSLContext clientContext)
@@ -424,6 +578,39 @@ class IntegrationHubLoopbackTlsTransportCandidateTest {
         @Override public void close() {
             transport.close();
             server.stop(0);
+        }
+    }
+
+    private static EntityDetails oneByteEntity() {
+        return new EntityDetails() {
+            @Override public long getContentLength() { return 1; }
+            @Override public String getContentType() { return "application/octet-stream"; }
+            @Override public String getContentEncoding() { return null; }
+            @Override public boolean isChunked() { return false; }
+            @Override public java.util.Set<String> getTrailerNames() { return java.util.Set.of(); }
+        };
+    }
+
+    private static final class ManualFuture implements Future<LoopbackTlsIntegrationHubWebhookTransportCandidate.HeaderOutcome> {
+        private final Runnable cancellation;
+        private volatile boolean cancelled;
+        private ManualFuture(Runnable cancellation) { this.cancellation = cancellation; }
+        @Override public boolean cancel(boolean mayInterruptIfRunning) {
+            if (cancelled) return false;
+            cancelled = true;
+            cancellation.run();
+            return true;
+        }
+        @Override public boolean isCancelled() { return cancelled; }
+        @Override public boolean isDone() { return cancelled; }
+        @Override public LoopbackTlsIntegrationHubWebhookTransportCandidate.HeaderOutcome get()
+                throws InterruptedException, ExecutionException {
+            if (cancelled) throw new CancellationException();
+            throw new IllegalStateException("manual future has no result");
+        }
+        @Override public LoopbackTlsIntegrationHubWebhookTransportCandidate.HeaderOutcome get(
+                long timeout, TimeUnit unit) throws InterruptedException, ExecutionException {
+            return get();
         }
     }
 

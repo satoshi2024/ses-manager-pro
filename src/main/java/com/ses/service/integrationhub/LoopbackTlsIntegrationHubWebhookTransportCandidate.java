@@ -16,8 +16,15 @@ import org.apache.hc.client5.http.ssl.DefaultHostnameVerifier;
 import org.apache.hc.core5.concurrent.FutureCallback;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.Header;
+import org.apache.hc.core5.http.EntityDetails;
+import org.apache.hc.core5.http.HttpException;
+import org.apache.hc.core5.http.HttpRequest;
 import org.apache.hc.core5.http.HttpResponse;
 import org.apache.hc.core5.http.config.Http1Config;
+import org.apache.hc.core5.http.nio.AsyncRequestProducer;
+import org.apache.hc.core5.http.nio.DataStreamChannel;
+import org.apache.hc.core5.http.nio.RequestChannel;
+import org.apache.hc.core5.http.protocol.HttpCoreContext;
 import org.apache.hc.core5.http.nio.AsyncResponseConsumer;
 import org.apache.hc.core5.http.nio.CapacityChannel;
 import org.apache.hc.core5.http.protocol.HttpContext;
@@ -28,7 +35,6 @@ import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
 
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLSession;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.Proxy;
@@ -71,11 +77,17 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
     private final AtomicBoolean closed = new AtomicBoolean();
     private final PoolingAsyncClientConnectionManager connectionManager;
     private final CloseableHttpAsyncClient client;
+    private final ExchangeExecutor exchangeExecutor;
     private volatile CloseEvidence closeEvidence;
 
     /** SSLContextはtest fixtureのprivate CAだけを含む。production truststoreの注入点には使わない。 */
     LoopbackTlsIntegrationHubWebhookTransportCandidate(IntegrationHubExternalApiProperties properties,
             SSLContext testOnlyTlsContext) {
+        this(properties, testOnlyTlsContext, null);
+    }
+
+    LoopbackTlsIntegrationHubWebhookTransportCandidate(IntegrationHubExternalApiProperties properties,
+            SSLContext testOnlyTlsContext, ExchangeExecutor testOnlyExchangeExecutor) {
         if (properties == null || properties.getExternalTransport() == null || testOnlyTlsContext == null) {
             throw new IllegalArgumentException("loopback TLS candidate requires explicit test properties and SSLContext");
         }
@@ -104,10 +116,9 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
                 return host;
             }
         };
-        var defaultHostnameVerifier = new DefaultHostnameVerifier();
         var tlsStrategy = ClientTlsStrategyBuilder.create()
                 .setSslContext(testOnlyTlsContext)
-                .setHostnameVerifier((peerHost, session) -> verifyTlsPeer(defaultHostnameVerifier, peerHost, session))
+                .setHostnameVerifier(new DefaultHostnameVerifier())
                 .build();
         this.connectionManager = PoolingAsyncClientConnectionManagerBuilder.create()
                 .setTlsStrategy(tlsStrategy)
@@ -150,6 +161,9 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
                 .disableCookieManagement()
                 .disableAuthCaching()
                 .build();
+        this.exchangeExecutor = testOnlyExchangeExecutor == null
+                ? (producer, consumer, callback) -> client.execute(producer, consumer, callback)
+                : testOnlyExchangeExecutor;
         this.client.start();
     }
 
@@ -218,8 +232,8 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
 
             HeaderOnlyResponseConsumer consumer = new HeaderOnlyResponseConsumer(deadline, headerOutcome, headersReceived);
             dispatchState.set(DispatchState.MAY_HAVE_BEEN_SENT);
-            exchange = client.execute(SimpleRequestProducer.create(httpRequest), consumer,
-                    new FutureCallback<>() {
+            AsyncRequestProducer producer = guardedProducer(SimpleRequestProducer.create(httpRequest), target);
+            exchange = exchangeExecutor.execute(producer, consumer, new FutureCallback<>() {
                         @Override public void completed(HeaderOutcome result) {
                             if (result != null) headerOutcome.compareAndSet(null, result);
                             terminalOutcome.compareAndSet(null, TerminalOutcome.COMPLETED);
@@ -365,13 +379,48 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
         return new HeaderOutcome(response.getCode(), providerRequestId);
     }
 
-    private boolean verifyTlsPeer(DefaultHostnameVerifier hostnameVerifier, String peerHost, SSLSession session) {
+    private AsyncRequestProducer guardedProducer(AsyncRequestProducer delegate,
+            IntegrationHubLoopbackTlsEndpointGuard.Target expectedTarget) {
+        return new AsyncRequestProducer() {
+            @Override
+            public void sendRequest(RequestChannel channel, org.apache.hc.core5.http.protocol.HttpContext context)
+                    throws HttpException, IOException {
+                delegate.sendRequest(new RequestChannel() {
+                    @Override
+                    public void sendRequest(HttpRequest request, EntityDetails entityDetails,
+                            org.apache.hc.core5.http.protocol.HttpContext requestContext)
+                            throws HttpException, IOException {
+                        // TLS接続後、HTTP request channelへ渡してwire化する直前の実socket endpointを確認する。
+                        HttpCoreContext coreContext = HttpCoreContext.adapt(requestContext);
+                        var endpointDetails = coreContext.getEndpointDetails();
+                        if (endpointDetails == null || coreContext.getSSLSession() == null) {
+                            throw new IOException("connected TLS endpoint details are missing");
+                        }
+                        validateAndSendRequest(endpointGuard, expectedTarget, endpointDetails.getRemoteAddress(),
+                                coreContext.getSSLSession(), channel, request, entityDetails, requestContext);
+                    }
+                }, context);
+            }
+
+            @Override public int available() { return delegate.available(); }
+            @Override public void produce(DataStreamChannel channel) throws IOException { delegate.produce(channel); }
+            @Override public boolean isRepeatable() { return delegate.isRepeatable(); }
+            @Override public void failed(Exception cause) { delegate.failed(cause); }
+            @Override public void releaseResources() { delegate.releaseResources(); }
+        };
+    }
+
+    static void validateAndSendRequest(IntegrationHubLoopbackTlsEndpointGuard guard,
+            IntegrationHubLoopbackTlsEndpointGuard.Target expectedTarget, java.net.SocketAddress remoteAddress,
+            javax.net.ssl.SSLSession session, RequestChannel channel, HttpRequest request, EntityDetails entityDetails,
+            org.apache.hc.core5.http.protocol.HttpContext context) throws HttpException, IOException {
         try {
-            endpointGuard.validateTlsSessionPeer(peerHost, session.getPeerPort());
-            return hostnameVerifier.verify(peerHost, session);
+            guard.validateConnectedPeer(expectedTarget, remoteAddress);
+            guard.validateTlsSessionPeer(expectedTarget, session);
         } catch (RuntimeException rejected) {
-            return false;
+            throw new IOException("connected TLS peer rejected before request write");
         }
+        channel.sendRequest(request, entityDetails, context);
     }
 
     private static String bracketIfIpv6(String host) {
@@ -411,6 +460,12 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
     enum TerminalOutcome { COMPLETED, FAILED, CANCELLED }
 
     record CloseEvidence(boolean reactorStopped, int leasedConnections, int pendingLeases, int availableConnections) { }
+
+    @FunctionalInterface
+    interface ExchangeExecutor {
+        Future<HeaderOutcome> execute(AsyncRequestProducer producer, AsyncResponseConsumer<HeaderOutcome> consumer,
+                FutureCallback<HeaderOutcome> callback);
+    }
 
     record HeaderOutcome(int status, String providerRequestId) { }
 
