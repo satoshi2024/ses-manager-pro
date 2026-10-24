@@ -45,9 +45,24 @@ final class IntegrationHubLoopbackTlsEndpointGuard {
         }
     }
 
+    Target validateTlsSessionPeer(String peerHost, int peerPort) {
+        if (peerHost == null || peerPort < 1 || peerPort > 65535) {
+            throw new IllegalArgumentException("loopback TLS peer metadata is invalid");
+        }
+        String host = stripBrackets(peerHost);
+        InetAddress peer = ExternalApiCidrMatcher.parseLiteral(host);
+        Target peerTarget = validate(URI.create("https://" + bracketIfIpv6(host) + ":" + peerPort + "/"));
+        validatePeer(peerTarget, peer, peerPort);
+        return peerTarget;
+    }
+
     private static String stripBrackets(String host) {
         return host != null && host.startsWith("[") && host.endsWith("]")
                 ? host.substring(1, host.length() - 1) : host;
+    }
+
+    private static String bracketIfIpv6(String host) {
+        return host.indexOf(':') >= 0 ? "[" + host + "]" : host;
     }
 
     private static boolean hasTraversal(String rawPath) {

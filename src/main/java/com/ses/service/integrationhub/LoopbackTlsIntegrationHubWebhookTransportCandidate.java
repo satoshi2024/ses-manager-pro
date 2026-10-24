@@ -28,6 +28,7 @@ import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
 
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.Proxy;
@@ -70,6 +71,7 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
     private final AtomicBoolean closed = new AtomicBoolean();
     private final PoolingAsyncClientConnectionManager connectionManager;
     private final CloseableHttpAsyncClient client;
+    private volatile CloseEvidence closeEvidence;
 
     /** SSLContextはtest fixtureのprivate CAだけを含む。production truststoreの注入点には使わない。 */
     LoopbackTlsIntegrationHubWebhookTransportCandidate(IntegrationHubExternalApiProperties properties,
@@ -102,9 +104,10 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
                 return host;
             }
         };
+        var defaultHostnameVerifier = new DefaultHostnameVerifier();
         var tlsStrategy = ClientTlsStrategyBuilder.create()
                 .setSslContext(testOnlyTlsContext)
-                .setHostnameVerifier(new DefaultHostnameVerifier())
+                .setHostnameVerifier((peerHost, session) -> verifyTlsPeer(defaultHostnameVerifier, peerHost, session))
                 .build();
         this.connectionManager = PoolingAsyncClientConnectionManagerBuilder.create()
                 .setTlsStrategy(tlsStrategy)
@@ -164,7 +167,7 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
         AtomicBoolean terminalReleased = new AtomicBoolean();
         AtomicBoolean exchangeAcquired = new AtomicBoolean();
         CountDownLatch exchangeEnded = new CountDownLatch(1);
-        AtomicReference<Throwable> exchangeFailure = new AtomicReference<>();
+        AtomicReference<TerminalOutcome> terminalOutcome = new AtomicReference<>();
         AtomicReference<HeaderOutcome> headerOutcome = new AtomicReference<>();
         CountDownLatch headersReceived = new CountDownLatch(1);
         Future<HeaderOutcome> exchange = null;
@@ -219,15 +222,17 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
                     new FutureCallback<>() {
                         @Override public void completed(HeaderOutcome result) {
                             if (result != null) headerOutcome.compareAndSet(null, result);
+                            terminalOutcome.compareAndSet(null, TerminalOutcome.COMPLETED);
                             headersReceived.countDown();
                             releaseTerminal.run();
                         }
                         @Override public void failed(Exception failure) {
-                            exchangeFailure.compareAndSet(null, failure);
+                            terminalOutcome.compareAndSet(null, TerminalOutcome.FAILED);
                             headersReceived.countDown();
                             releaseTerminal.run();
                         }
                         @Override public void cancelled() {
+                            terminalOutcome.compareAndSet(null, TerminalOutcome.CANCELLED);
                             headersReceived.countDown();
                             releaseTerminal.run();
                         }
@@ -236,7 +241,7 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
 
             if (!await(headersReceived, deadline)) {
                 exchange.cancel(true);
-                return exchangeEnded.getCount() == 0 && exchangeFailure.get() != null
+                return terminalOutcome.get() == TerminalOutcome.FAILED
                         ? networkFailure(dispatchState.get()) : timeout(dispatchState.get());
             }
             HeaderOutcome response = headerOutcome.get();
@@ -245,8 +250,12 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
                 return networkFailure(dispatchState.get());
             }
             dispatchState.set(DispatchState.RESPONSE_HEADERS_RECEIVED);
-            exchange.cancel(true); // Body is intentionally not consumed; cancellation is not proof of no provider side effect.
+            boolean ownCancelAccepted = exchange.cancel(true); // Cancellation is not proof of no provider side effect.
             if (!await(exchangeEnded, deadline)) return timeout(dispatchState.get());
+            TerminalOutcome terminal = terminalOutcome.get();
+            if (!responseTerminalAllowsSuccess(terminal, ownCancelAccepted)) {
+                return networkFailure(dispatchState.get());
+            }
             IntegrationHubWebhookTransportResult classified = classify(response);
             if (remainingNanos(deadline) <= 0) return timeout(dispatchState.get());
             return classified;
@@ -317,6 +326,54 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
 
     private static long remainingNanos(long deadline) { return deadline - System.nanoTime(); }
 
+    static boolean responseTerminalAllowsSuccess(TerminalOutcome outcome, boolean ownCancelAccepted) {
+        return outcome == TerminalOutcome.COMPLETED
+                || outcome == TerminalOutcome.CANCELLED && ownCancelAccepted;
+    }
+
+    static HeaderOutcome captureResponseHeaders(HttpResponse response) throws IOException {
+        List<Header> headers = List.of(response.getHeaders());
+        if (headers.size() > MAX_RESPONSE_HEADERS) throw new IOException("response header count exceeded");
+        long bytes = 0;
+        int contentLengthCount = 0;
+        int transferEncodingCount = 0;
+        String providerRequestId = null;
+        for (Header header : headers) {
+            byte[] name = header.getName().getBytes(StandardCharsets.ISO_8859_1);
+            byte[] value = header.getValue() == null ? new byte[0]
+                    : header.getValue().getBytes(StandardCharsets.ISO_8859_1);
+            long lineBytes = name.length + 2L + value.length + 2L;
+            bytes += lineBytes;
+            if (lineBytes > MAX_HEADER_LINE_BYTES || bytes > MAX_HEADER_BLOCK_BYTES) {
+                throw new IOException("response header length exceeded");
+            }
+            if ("content-length".equalsIgnoreCase(header.getName())) contentLengthCount++;
+            if ("transfer-encoding".equalsIgnoreCase(header.getName())) transferEncodingCount++;
+            if ("x-provider-request-id".equalsIgnoreCase(header.getName())
+                    && providerRequestId == null && value.length <= MAX_PROVIDER_REQUEST_ID_BYTES
+                    && header.getValue() != null && header.getValue().matches("[A-Za-z0-9._:-]{1,128}")) {
+                providerRequestId = header.getValue();
+            }
+        }
+        if (contentLengthCount > 1 || transferEncodingCount > 1
+                || contentLengthCount > 0 && transferEncodingCount > 0) {
+            throw new IOException("response framing headers conflict");
+        }
+        if (headers.stream().filter(h -> "x-provider-request-id".equalsIgnoreCase(h.getName())).count() > 1) {
+            providerRequestId = null;
+        }
+        return new HeaderOutcome(response.getCode(), providerRequestId);
+    }
+
+    private boolean verifyTlsPeer(DefaultHostnameVerifier hostnameVerifier, String peerHost, SSLSession session) {
+        try {
+            endpointGuard.validateTlsSessionPeer(peerHost, session.getPeerPort());
+            return hostnameVerifier.verify(peerHost, session);
+        } catch (RuntimeException rejected) {
+            return false;
+        }
+    }
+
     private static String bracketIfIpv6(String host) {
         return host != null && host.indexOf(':') >= 0 && !(host.startsWith("[") && host.endsWith("]"))
                 ? "[" + host + "]" : host;
@@ -332,15 +389,30 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
     int availableAdmissionPermits() { return admissionPermits.availablePermits(); }
     int availableExchangePermits() { return exchangePermits.availablePermits(); }
     int leasedConnectionCount() { return connectionManager.getTotalStats().getLeased(); }
+    CloseEvidence closeEvidence() { return closeEvidence; }
 
     @Override
     public void close() {
-        if (closed.compareAndSet(false, true)) client.close(CloseMode.IMMEDIATE);
+        if (closed.compareAndSet(false, true)) {
+            client.close(CloseMode.IMMEDIATE);
+            boolean reactorStopped = false;
+            try {
+                client.awaitShutdown(TimeValue.ofSeconds(2));
+                reactorStopped = client.getStatus() == org.apache.hc.core5.reactor.IOReactorStatus.SHUT_DOWN;
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            var pool = connectionManager.getTotalStats();
+            closeEvidence = new CloseEvidence(reactorStopped, pool.getLeased(), pool.getPending(), pool.getAvailable());
+        }
     }
 
     private enum DispatchState { NOT_STARTED, MAY_HAVE_BEEN_SENT, RESPONSE_HEADERS_RECEIVED }
+    enum TerminalOutcome { COMPLETED, FAILED, CANCELLED }
 
-    private record HeaderOutcome(int status, String providerRequestId) { }
+    record CloseEvidence(boolean reactorStopped, int leasedConnections, int pendingLeases, int availableConnections) { }
+
+    record HeaderOutcome(int status, String providerRequestId) { }
 
     private static final class HeaderOnlyResponseConsumer implements AsyncResponseConsumer<HeaderOutcome> {
         private final long deadline;
@@ -360,38 +432,8 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
         public void consumeResponse(HttpResponse response, org.apache.hc.core5.http.EntityDetails entityDetails,
                 HttpContext context, FutureCallback<HeaderOutcome> callback) throws IOException {
             if (remainingNanos(deadline) <= 0) throw new IOException("response deadline exceeded");
-            List<Header> headers = List.of(response.getHeaders());
-            if (headers.size() > MAX_RESPONSE_HEADERS) throw new IOException("response header count exceeded");
-            long bytes = 0;
-            int contentLengthCount = 0;
-            int transferEncodingCount = 0;
-            String providerRequestId = null;
-            for (Header header : headers) {
-                byte[] name = header.getName().getBytes(StandardCharsets.ISO_8859_1);
-                byte[] value = header.getValue() == null ? new byte[0]
-                        : header.getValue().getBytes(StandardCharsets.ISO_8859_1);
-                long lineBytes = name.length + 2L + value.length + 2L;
-                bytes += lineBytes;
-                if (lineBytes > MAX_HEADER_LINE_BYTES || bytes > MAX_HEADER_BLOCK_BYTES) {
-                    throw new IOException("response header length exceeded");
-                }
-                if ("content-length".equalsIgnoreCase(header.getName())) contentLengthCount++;
-                if ("transfer-encoding".equalsIgnoreCase(header.getName())) transferEncodingCount++;
-                if ("x-provider-request-id".equalsIgnoreCase(header.getName())
-                        && providerRequestId == null && value.length <= MAX_PROVIDER_REQUEST_ID_BYTES
-                        && header.getValue() != null && header.getValue().matches("[A-Za-z0-9._:-]{1,128}")) {
-                    providerRequestId = header.getValue();
-                }
-            }
-            if (contentLengthCount > 1 || transferEncodingCount > 1
-                    || contentLengthCount > 0 && transferEncodingCount > 0) {
-                throw new IOException("response framing headers conflict");
-            }
-            if (headers.stream().filter(h -> "x-provider-request-id".equalsIgnoreCase(h.getName())).count() > 1) {
-                providerRequestId = null;
-            }
             this.callback = callback;
-            this.captured = new HeaderOutcome(response.getCode(), providerRequestId);
+            this.captured = captureResponseHeaders(response);
             result.compareAndSet(null, captured);
             headersReceived.countDown();
             if (entityDetails == null) callback.completed(captured);
