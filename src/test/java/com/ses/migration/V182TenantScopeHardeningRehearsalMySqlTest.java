@@ -10,6 +10,13 @@ import org.junit.jupiter.api.function.Executable;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.IThrowableProxy;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -494,6 +501,11 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         assertEquals(EXPECTED_V182_SHA256, actualHash,
                 "本番V182スクリプトのSHA-256が固定値と一致し改変されていないこと");
 
+        // 1. 独立した証拠退避ディレクトリを事前作成 (断言失敗時も取得済み現場を実ディスクに保持可能とする)
+        Path evidenceDir = Path.of("target/v182-rehearsal-evidence/run-"
+                + System.currentTimeMillis() + "-" + UUID.randomUUID().toString().substring(0, 8));
+        Files.createDirectories(evidenceDir);
+
         String dbName = "ses_v182_fault_isolation";
         // 隔離テストロケーションから意図的な失敗マイグレーションを注入し、確定的中途失敗を再現
         // 対象バージョンを明示的に182.99に限定
@@ -501,11 +513,77 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 .locations("classpath:db/migration", "classpath:migration-test/v182-fault")
                 .target("182.99");
 
-        FlywayException flywayError = assertThrows(FlywayException.class, () -> faultConfig.load().migrate(),
-                "隔離マイグレーションリソースによる確定的中途失敗がFlywayで検知されること");
+        // 2. migrate開始前に既存ロギングフレームワークのテスト用コレクタを接続
+        Logger flywayLogger = (Logger) LoggerFactory.getLogger("org.flywaydb");
+        Level originalLevel = flywayLogger.getLevel();
+        flywayLogger.setLevel(Level.INFO);
+        ListAppender<ILoggingEvent> logAppender = new ListAppender<>();
+        logAppender.start();
+        flywayLogger.addAppender(logAppender);
 
-        // 確定的失敗の例外原因チェーンを厳格に検証
-        SQLException rootSqlEx = findSqlException(flywayError);
+        Throwable caughtMigrationError = null;
+        try {
+            faultConfig.load().migrate();
+        } catch (Throwable t) {
+            caughtMigrationError = t;
+        } finally {
+            try {
+                flywayLogger.detachAppender(logAppender);
+                logAppender.stop();
+            } finally {
+                flywayLogger.setLevel(originalLevel);
+            }
+        }
+        List<ILoggingEvent> capturedLogEvents = new ArrayList<>(logAppender.list);
+
+        // 3. 失敗検知後、まずリアルログ、元例外、取得可能なDB証拠を退避 (断言より先行実行)
+        List<String> collectionWarnings = new ArrayList<>();
+
+        // (a) 実Flyway実行ログの落盤 (手動メタデータサマリで冒称しない)
+        try {
+            dumpCapturedFlywayLogs(evidenceDir.resolve("flyway_execution.log"), capturedLogEvents);
+        } catch (Throwable t) {
+            collectionWarnings.add("flyway_execution.log dump failed: " + t.getMessage());
+        }
+
+        // (b) 取得可能なDB証拠の落盤 (一部テーブル不存在や早期失敗時も他の証拠収集を継続)
+        try (Connection conn = createConnection(dbName)) {
+            dumpHistoryToDisk(conn, evidenceDir.resolve("flyway_schema_history.csv"), collectionWarnings);
+            dumpDdlToDisk(conn, evidenceDir.resolve("tables_ddl.sql"), collectionWarnings);
+            dumpCountsToDisk(conn, evidenceDir.resolve("table_counts.json"), collectionWarnings);
+            dumpQueueToDisk(conn, evidenceDir.resolve("scope_repair_queue.csv"), collectionWarnings);
+        } catch (Throwable t) {
+            collectionWarnings.add("Database connection failed during evidence collection: " + t.getMessage());
+        }
+
+        // (c) 診断情報・例外原因チェーン・AI-1帰属通知・メタデータサマリの落盤
+        try {
+            dumpDiagnosticsToDisk(evidenceDir.resolve("execution_diagnostics.txt"),
+                    caughtMigrationError, collectionWarnings);
+        } catch (Throwable t) {
+            collectionWarnings.add("execution_diagnostics.txt dump failed: " + t.getMessage());
+        }
+
+        // (d) SHA-256マニフェスト作成
+        try {
+            createManifestFile(evidenceDir);
+        } catch (Throwable t) {
+            collectionWarnings.add("manifest-sha256.txt generation failed: " + t.getMessage());
+        }
+
+        // 4. 必需証拠ファイルが実ディスクにすべて揃い、読込可能であり、SHA-256マニフェストと一致することを検証
+        verifyPersistedEvidence(evidenceDir);
+
+        // 取証エラーが存在する場合はテストを失敗させ、欠損証拠を合格と見做さない
+        assertTrue(collectionWarnings.isEmpty(),
+                "証拠収集プロセスが例外なく完了していること (収集異常: " + collectionWarnings + ")");
+
+        // 5. 証拠落盤完了後に、マイグレーション失敗の型・エラーコード・制約名・DB状態を検証
+        assertNotNull(caughtMigrationError, "隔離マイグレーションリソースによる確定的中途失敗が検知されること");
+        assertTrue(caughtMigrationError instanceof FlywayException,
+                "発生した例外がFlywayExceptionであること: " + caughtMigrationError.getClass().getName());
+
+        SQLException rootSqlEx = findSqlException((Exception) caughtMigrationError);
         assertNotNull(rootSqlEx, "FlywayExceptionの原因チェーンにSQLExceptionが含まれること");
         assertEquals(3819, rootSqlEx.getErrorCode(), "予期したCHECK制約違反エラーコード(3819)であること");
         assertEquals("HY000", rootSqlEx.getSQLState(), "SQLStateはHY000であること");
@@ -525,25 +603,6 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                             + "AND table_name='t_digital_invoice' AND constraint_name='chk_v182_fault_sim'"),
                     "障害注入の前置DDL(ALTER TABLE)がMySQLの暗黙コミットにより永続化されていること");
         }
-
-        // 独立した証拠退避ディレクトリを作成 (旧証拠を上書きしない)
-        Path evidenceDir = Path.of("target/v182-rehearsal-evidence/run-"
-                + System.currentTimeMillis() + "-" + UUID.randomUUID().toString().substring(0, 8));
-        Files.createDirectories(evidenceDir);
-
-        // 5.2 証拠の完全退避シミュレーション: コンテナ破棄前に全アーティファクトを実ディスクへ落盤
-        try (Connection conn = createConnection(dbName)) {
-            dumpHistoryToDisk(conn, evidenceDir.resolve("flyway_schema_history.csv"));
-            dumpDdlToDisk(conn, evidenceDir.resolve("tables_ddl.sql"));
-            dumpCountsToDisk(conn, evidenceDir.resolve("table_counts.json"));
-            dumpQueueToDisk(conn, evidenceDir.resolve("scope_repair_queue.csv"));
-            dumpDiagnosticsToDisk(evidenceDir.resolve("execution_diagnostics.txt"), flywayError);
-            dumpFlywayLogToDisk(evidenceDir.resolve("flyway_execution.log"), flywayError);
-            createManifestFile(evidenceDir);
-        }
-
-        // 確証: 必需ファイル集合が実ディスクに存在し、読込可能であり、SHA-256マニフェストと完全一致することを検証
-        verifyPersistedEvidence(evidenceDir);
 
         // 重要注釈: 本演練はV182完了後の隔離故障注入による証拠保全の事前検証であり、
         // 本番環境における中途コミット破損状態からの部分マイグレーション回復やforward-fixを検証したと混称しない。
@@ -1127,7 +1186,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
     // 証拠ディスク落盤および検証ヘルパー (第5節)
     // =========================================================================
 
-    private void dumpHistoryToDisk(Connection conn, Path targetFile) throws Exception {
+    private void dumpHistoryToDisk(Connection conn, Path targetFile, List<String> collectionWarnings) throws Exception {
         StringBuilder sb = new StringBuilder();
         sb.append("installed_rank,version,description,type,script,checksum,installed_by,installed_on,execution_time,success\n");
         try (Statement s = conn.createStatement();
@@ -1138,12 +1197,17 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                         rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8),
                         rs.getInt(9), rs.getInt(10)));
             }
+        } catch (SQLException e) {
+            String warning = "flyway_schema_history query failed: " + e.getMessage();
+            collectionWarnings.add(warning);
+            sb.append(String.format("# ERROR: %s\n", warning));
         }
         Files.writeString(targetFile, sb.toString(), StandardCharsets.UTF_8);
     }
 
-    private void dumpDdlToDisk(Connection conn, Path targetFile) throws Exception {
+    private void dumpDdlToDisk(Connection conn, Path targetFile, List<String> collectionWarnings) throws Exception {
         StringBuilder sb = new StringBuilder();
+        sb.append("/* === TABLE DDL DUMP AT FAULT TEARDOWN === */\n\n");
         for (String table : List.of("t_digital_invoice", "t_digital_invoice_event", "t_peppol_participant",
                 "t_external_account_reference", "t_nf09_scope_repair_queue")) {
             try (Statement s = conn.createStatement();
@@ -1152,12 +1216,16 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                     sb.append("/* Table: ").append(table).append(" */\n");
                     sb.append(rs.getString(2)).append(";\n\n");
                 }
+            } catch (SQLException e) {
+                String warning = "DDL dump failed for table `" + table + "`: " + e.getMessage();
+                collectionWarnings.add(warning);
+                sb.append("/* Table `").append(table).append("` DDL unavailable: ").append(e.getMessage()).append(" */\n\n");
             }
         }
         Files.writeString(targetFile, sb.toString(), StandardCharsets.UTF_8);
     }
 
-    private void dumpCountsToDisk(Connection conn, Path targetFile) throws Exception {
+    private void dumpCountsToDisk(Connection conn, Path targetFile, List<String> collectionWarnings) throws Exception {
         StringBuilder sb = new StringBuilder();
         sb.append("{\n");
         List<String> tables = List.of("t_digital_invoice", "t_digital_invoice_event",
@@ -1165,22 +1233,33 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         try (Statement s = conn.createStatement()) {
             for (int i = 0; i < tables.size(); i++) {
                 String table = tables.get(i);
-                long total = scalar(s, "SELECT COUNT(*) FROM `" + table + "`");
-                long nullTenant = 0;
-                long nullLegal = 0;
-                if (!"t_nf09_scope_repair_queue".equals(table)) {
-                    nullTenant = scalar(s, "SELECT COUNT(*) FROM `" + table + "` WHERE tenant_id IS NULL");
-                    nullLegal = scalar(s, "SELECT COUNT(*) FROM `" + table + "` WHERE legal_entity_id IS NULL");
+                try {
+                    long total = scalar(s, "SELECT COUNT(*) FROM `" + table + "`");
+                    long nullTenant = 0;
+                    long nullLegal = 0;
+                    if (!"t_nf09_scope_repair_queue".equals(table)) {
+                        nullTenant = scalar(s, "SELECT COUNT(*) FROM `" + table + "` WHERE tenant_id IS NULL");
+                        nullLegal = scalar(s, "SELECT COUNT(*) FROM `" + table + "` WHERE legal_entity_id IS NULL");
+                    }
+                    sb.append(String.format("  \"%s\": { \"total\": %d, \"null_tenant\": %d, \"null_legal_entity\": %d }%s\n",
+                            table, total, nullTenant, nullLegal, i < tables.size() - 1 ? "," : ""));
+                } catch (SQLException e) {
+                    String warning = "Count query failed for table `" + table + "`: " + e.getMessage();
+                    collectionWarnings.add(warning);
+                    sb.append(String.format("  \"%s\": { \"error\": \"%s\" }%s\n",
+                            table, e.getMessage().replace("\"", "\\\"").replace("\n", " "), i < tables.size() - 1 ? "," : ""));
                 }
-                sb.append(String.format("  \"%s\": { \"total\": %d, \"null_tenant\": %d, \"null_legal_entity\": %d }%s\n",
-                        table, total, nullTenant, nullLegal, i < tables.size() - 1 ? "," : ""));
             }
+        } catch (SQLException e) {
+            String warning = "Statement creation failed for table counts: " + e.getMessage();
+            collectionWarnings.add(warning);
+            sb.append("  \"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"\n");
         }
         sb.append("}\n");
         Files.writeString(targetFile, sb.toString(), StandardCharsets.UTF_8);
     }
 
-    private void dumpQueueToDisk(Connection conn, Path targetFile) throws Exception {
+    private void dumpQueueToDisk(Connection conn, Path targetFile, List<String> collectionWarnings) throws Exception {
         StringBuilder sb = new StringBuilder();
         sb.append("id,entity_type,entity_id,reason,candidate_tenant_id,candidate_legal_entity_id,status,version,resolved_at,resolved_by,resolution_note,created_at\n");
         try (Statement s = conn.createStatement();
@@ -1191,26 +1270,51 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                         rs.getString(5), rs.getString(6), rs.getString(7), rs.getInt(8),
                         rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(12)));
             }
+        } catch (SQLException e) {
+            String warning = "Repair queue dump failed: " + e.getMessage();
+            collectionWarnings.add(warning);
+            sb.append(String.format("# ERROR: %s\n", warning));
         }
         Files.writeString(targetFile, sb.toString(), StandardCharsets.UTF_8);
     }
 
-    private void dumpDiagnosticsToDisk(Path targetFile, Exception ex) throws Exception {
+    private void dumpDiagnosticsToDisk(Path targetFile, Throwable ex, List<String> collectionWarnings) throws Exception {
         StringBuilder sb = new StringBuilder();
         sb.append("=== FAILURE DIAGNOSTICS ARCHIVE ===\n");
         sb.append("Timestamp: ").append(java.time.Instant.now()).append("\n");
-        sb.append("Exception Class: ").append(ex.getClass().getName()).append("\n");
-        sb.append("Message: ").append(ex.getMessage()).append("\n\n");
+        if (ex != null) {
+            sb.append("Exception Class: ").append(ex.getClass().getName()).append("\n");
+            sb.append("Message: ").append(ex.getMessage()).append("\n\n");
 
-        sb.append("--- EXCEPTION CAUSE CHAIN ---\n");
-        Throwable cur = ex;
-        int depth = 0;
-        while (cur != null) {
-            sb.append(String.format("[%d] %s: %s\n", depth++, cur.getClass().getName(), cur.getMessage()));
-            if (cur instanceof SQLException sqlEx) {
-                sb.append(String.format("    SQLState: %s, ErrorCode: %d\n", sqlEx.getSQLState(), sqlEx.getErrorCode()));
+            sb.append("--- EXCEPTION CAUSE CHAIN ---\n");
+            Throwable cur = ex;
+            int depth = 0;
+            while (cur != null) {
+                sb.append(String.format("[%d] %s: %s\n", depth++, cur.getClass().getName(), cur.getMessage()));
+                if (cur instanceof SQLException sqlEx) {
+                    sb.append(String.format("    SQLState: %s, ErrorCode: %d\n", sqlEx.getSQLState(), sqlEx.getErrorCode()));
+                }
+                cur = cur.getCause();
             }
-            cur = cur.getCause();
+        } else {
+            sb.append("Exception: NONE (Migration completed without throwing an exception!)\n");
+        }
+        sb.append("\n");
+
+        sb.append("--- REHEARSAL EXECUTION SUMMARY (METADATA) ---\n");
+        sb.append("Target: 182.99\n");
+        sb.append("Locations: classpath:db/migration, classpath:migration-test/v182-fault\n");
+        sb.append("Expected Status: FAILED (Expected deterministic fault injection)\n");
+        sb.append("Migration Error Summary: ").append(ex != null ? ex.getMessage() : "NO_ERROR").append("\n\n");
+
+        sb.append("--- FORENSIC COLLECTION WARNINGS / ERRORS ---\n");
+        if (collectionWarnings.isEmpty()) {
+            sb.append("None (All forensic evidence files collected successfully).\n");
+        } else {
+            sb.append("Forensic collection encountered ").append(collectionWarnings.size()).append(" issue(s):\n");
+            for (String w : collectionWarnings) {
+                sb.append("  - ").append(w).append("\n");
+            }
         }
         sb.append("\n");
 
@@ -1223,14 +1327,29 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         Files.writeString(targetFile, sb.toString(), StandardCharsets.UTF_8);
     }
 
-    private void dumpFlywayLogToDisk(Path targetFile, Exception ex) throws Exception {
+    private void dumpCapturedFlywayLogs(Path targetFile, List<ILoggingEvent> events) throws Exception {
         StringBuilder sb = new StringBuilder();
-        sb.append("=== FLYWAY EXECUTION LOG ARCHIVE ===\n");
-        sb.append("Execution Timestamp: ").append(java.time.Instant.now()).append("\n");
-        sb.append("Target: 182.99\n");
-        sb.append("Locations: classpath:db/migration, classpath:migration-test/v182-fault\n");
-        sb.append("Status: FAILED (Expected deterministic fault injection)\n");
-        sb.append("Flyway Error Summary: ").append(ex.getMessage()).append("\n");
+        sb.append("=== FLYWAY EXECUTION LOG (CAPTURED LOGBACK EVENTS) ===\n");
+        sb.append("Captured Log Events Count: ").append(events.size()).append("\n");
+        sb.append("Logger Name Filter: org.flywaydb\n");
+        sb.append("------------------------------------------------------------------------\n");
+        if (events.isEmpty()) {
+            sb.append("# WARNING: No log events captured for org.flywaydb during migration execution.\n");
+        } else {
+            for (ILoggingEvent event : events) {
+                sb.append(String.format("[%s] %-5s %s - %s\n",
+                        java.time.Instant.ofEpochMilli(event.getTimeStamp()),
+                        event.getLevel(),
+                        event.getLoggerName(),
+                        event.getFormattedMessage()));
+                IThrowableProxy tp = event.getThrowableProxy();
+                if (tp != null) {
+                    sb.append("    Exception: ").append(tp.getClassName()).append(": ").append(tp.getMessage()).append("\n");
+                }
+            }
+        }
+        sb.append("------------------------------------------------------------------------\n");
+        sb.append("Notice: Complete Maven build log and final Surefire XML test reports are archived separately by AI-1.\n");
         Files.writeString(targetFile, sb.toString(), StandardCharsets.UTF_8);
     }
 
