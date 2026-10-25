@@ -1,8 +1,8 @@
-# V182 マイグレーション・スコープ固定および修復演練验收契約書 (V182 Rehearsal Contract)
+# V182 マイグレーション・スコープ固定および修復演練検証契約書 (V182 Rehearsal Contract)
 
 ## 1. 目的と安全規範
 
-本契約書は、`V182__nf09_tenant_scope_hardening.sql` の安全な本番適用可能性を事前に実証するための、完全使い捨て（Disposable）実 MySQL 8 環境におけるリハーサル検証計画および验收基準を規定する。
+本契約書は、`V182__nf09_tenant_scope_hardening.sql` の安全な本番適用可能性を事前に実証するための、完全使い捨て（Disposable）実 MySQL 8 環境におけるリハーサル検証計画および検収基準を規定する。
 
 ### 1.1 安全絶対規範（レッドライン）
 1. **本番環境接続および本番データ直接操作の絶対禁止**: 本番データベース、ステージング永続 DB への直接接続・マイグレーション・修復実行は固く禁止する。
@@ -18,12 +18,12 @@
 | 項目 | 固定仕様 |
 |---|---|
 | 実装 Worktree | `C:\work\ses-nf09-system-actor-attribution` (branch: `codex/snf-prod-nf09-local-keycloak`) |
-| 固定 HEAD SHA | `7a9115414ea00f58c601beef5673461b601d6415` (ドキュメント追加後の新 SHA は AI-7 へ通知) |
+| 固定 HEAD SHA | `96be4e9f79f6bcd8638b6856f9b60c1684ce844a` (本ドキュメント改定後の新 SHA は AI-7 へ通知) |
 | DB エンジン | Docker Disposable `mysql:8.0` (tmpfs マウント、照合順序: `utf8mb4_unicode_ci`) |
 | Flyway 適用ツール | Flyway Community Edition (Maven `flyway-maven-plugin` または Spring Boot 組み込み Flyway) |
-| 対象ファイル | `src/main/resources/db/migration/V182__nf09_tenant_scope_hardening.sql` |
+| 対象マイグレーション | `src/main/resources/db/migration/V182__nf09_tenant_scope_hardening.sql` |
 | V182 スクリプト SHA-256 | `BB9EBDEABF3E1CE9DAD42525551E3F594D2DC4D10F103AF8AFA7BBBA159A0DA7` |
-| 最終ターゲットバージョン | `V184__create_import_metadata_foundation.sql` (本候補ブランチの最新マイグレーション) |
+| 最終ターゲットバージョン | **V184** (`V184__create_import_metadata_foundation.sql`)。NF10 専用の V185 は含めない。 |
 
 ---
 
@@ -69,7 +69,8 @@ flowchart TD
 
 ### 3.3 シナリオ 3: 本候補最新バージョンへの継続アップグレード (Upgrade to Latest Candidate V184)
 - **手順**:
-  1. シナリオ 2 の完了状態から、`target` の上限を撤廃し、現行候補ブランチの最新（V184）まで `flyway:migrate` を続行。
+  1. シナリオ 2 の完了状態から、`target` を `184` に設定し、`flyway:migrate` を続行。
+  2. **V185 の除外**: NF10 専用に予約されている V185 は本演練には一切導入しない。
 - **検証項目**:
   - `V183__lifecycle_case_sequence.sql` および `V184__create_import_metadata_foundation.sql` がエラーなく適用されること。
   - V182 で作成されたテーブル・列・制約が後続マイグレーションと衝突・破損しないこと。
@@ -127,32 +128,31 @@ V182 は一時テーブル `__ses_v182_digital_scope_candidates` を用いて、
 
 ---
 
-## 5. MySQL DDL 非トランザクション性と障害復旧・前向修正契約 (MySQL DDL Non-Atomicity & Forward-Fix Contract)
+## 5. MySQL DDL 非トランザクション性と障害復旧契約 (MySQL DDL Non-Atomicity)
 
 ### 5.1 暗黙のコミット（Implicit Commit）の技術的現実
 MySQL 8.0 の InnoDB ストレージエンジンにおいて、`ALTER TABLE`、`CREATE TABLE`、`DROP TABLE` などの DDL 文は実行直前に**暗黙のトランザクションコミット**をトリガーする。
 そのため、V182 のように複数の DDL と DML が混在するスクリプトは、**障害発生時に全体が自動で単一トランザクションとしてロールバックされない**。
 
-```
-[V182 実行途中の失敗モデル]
-ALTER TABLE t_digital_invoice ADD COLUMN ... (成功・暗黙コミット)
-  ↓
-UPDATE t_digital_invoice ... (実行完了)
-  ↓
-ALTER TABLE t_digital_invoice ADD CONSTRAINT ... (データ違反で失敗！)
-  ↓
-結果: 前段の列追加・データ更新はコミットされたまま残り、Flyway は success=0 で異常終了する。
-```
+### 5.2 失敗時の証拠保全とコンテナ破棄手順
+リハーサル中にマイグレーションエラーが発生した場合、直ちにコンテナを破棄してはならない。以下の順序を厳格に遵守する：
 
-### 5.2 障害時リカバリおよび前向修正（Forward-Fix）手順
-リハーサルおよび将来の本番適用において、マイグレーションが途中で失敗した場合の対応規約を以下のように固定する：
+1. **実行の即時停止**: 追加の更新や手動 SQL 投入を行わず、プロセスを停止する。
+2. **証拠の完全退避**:
+   - Flyway のコンソールログおよび Surefire 実行ログ
+   - `flyway_schema_history` テーブルの完全ダンプ (`SELECT * FROM flyway_schema_history`)
+   - 変更対象全テーブルの現在のスキーマ定義 (`SHOW CREATE TABLE`)
+   - 各テーブルの件数、NULL 件数、および `t_nf09_scope_repair_queue` のダンプ
+   - 上記ログ・ダンプファイルの SHA-256 チェックサムマニフェスト
+3. **コンテナの破棄**: 証拠が完全に隔離保存されたことを確認した後に限り、一時コンテナを破棄する。
 
-1. **使い捨てリハーサル環境での復旧**:
-   - 失敗が発生したコンテナは直ちに破棄（Drop / Kill）する。
-   - スクリプト内のデータ想定や DDL のバグを特定し、コード側で修正してから空 DB よりクリーンにリプレイ（Clean Replay）する。
-2. **本番前向修正（Forward-Fix）契約**:
-   - スキーマ変更が中途コミットされたデータベースに対し、手作業でアドホックにテーブル定義を削除（`DROP COLUMN` 等）することは禁止する。
-   - 失敗原因となったデータ（例: 予期せぬ外部キー不整合）を特定し、該当テーブルを安全な状態へ整流化した上で、Flyway の `repair` コマンドにより失敗履歴を整理し、未適用の DDL を前向修正（Roll-Forward）パッチとして適用する手順を事前に策定・承認する。
+### 5.3 クリーンリプレイと部分マイグレーション回復の分離
+- **クリーンリプレイ (Clean Replay)**: 空白 DB から修正版スクリプトを再実行して整合性を確認する検証。
+- **部分マイグレーション回復 (Partial Migration Recovery)**: 中途コミットされた破損状態から修復パッチを適用して回復する検証。
+両者は**全く異なる検証スコープであり、クリーンリプレイの成功をもって部分マイグレーション回復が確認されたと混称してはならない**。
+
+### 5.4 本番前向修正（Forward-Fix）のステータス
+本番環境での万が一のマイグレーション中断に対する「前向修正（Forward-Fix）パッチおよび手順」は、**現時点では未設計・未承認の課題として保持する**。本リハーサルバッチは Disposable コンテナでのクリーンアップ検証に限定され、本番 forward-fix 手順を検証済みと主張しない。
 
 ---
 
@@ -160,52 +160,66 @@ ALTER TABLE t_digital_invoice ADD CONSTRAINT ... (データ違反で失敗！)
 
 `t_nf09_scope_repair_queue` に隔離された未解決行を解消するプロセスを演練する。
 
-### 6.1 二段階修復の原則（業務データ先行）
-キューレコードの `status` を単独で `RESOLVED` に変更することは厳禁とする。必ず以下の順序で処理する：
+### 6.1 同一トランザクション内での二段階修復と CAS
+業務データ修復とキュー行の結案は、**同一のデータベーストランザクション（`@Transactional`）内で実行しなければならない**。
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Admin as 修復担当者 (HUMAN)
-    participant BizTable as 業務テーブル (例: t_digital_invoice)
-    participant Queue as t_nf09_scope_repair_queue
+```sql
+-- 同一トランザクション内:
+-- 1. 業務実体データの修復
+UPDATE t_digital_invoice
+   SET tenant_id = :resolvedTenantId,
+       legal_entity_id = :resolvedLegalEntityId,
+       version = version + 1
+ WHERE id = :invoiceId
+   AND tenant_id IS NULL
+   AND version = :expectedInvoiceVersion;
+-- (更新件数が 1 でなければ即座に例外をスローしてロールバック)
 
-    Admin->>BizTable: 1. 正しい tenant_id, legal_entity_id を更新
-    BizTable-->>Admin: 成功 (FK/一意制約を満たす)
-    Admin->>Queue: 2. CAS 排他結案 (status='PENDING', version=:v)
-    Note over Queue: status='RESOLVED', resolved_by=human_id, version++
-    Queue-->>Admin: 1行更新成功 (結案)
+-- 2. キュー行の CAS 結案
+UPDATE t_nf09_scope_repair_queue
+   SET status = 'RESOLVED',
+       resolved_at = NOW(),
+       resolved_by = :humanUserId,
+       resolution_note = :note,
+       version = version + 1
+ WHERE id = :queueId
+   AND status = 'PENDING'
+   AND version = :expectedQueueVersion;
+-- (更新件数が 1 でなければ即座に例外をスローしてロールバック)
 ```
 
-1. **ステップ 1: 業務実体データの修復**
-   管理者が正当な所属（テナント・法人）を特定し、まず業務テーブル（`t_digital_invoice`, `t_external_account_reference` 等）の `tenant_id` および `legal_entity_id` を正規の値に更新する。この際、親エンティティとの複合外部キー制約に違反しないことを確認する。
-2. **ステップ 2: キューレコードの CAS 結案**
-   業務実体データの更新がコミットされた同一（または直後）のトランザクションで、キュー行を排他更新する：
-   ```sql
-   UPDATE t_nf09_scope_repair_queue
-      SET status = 'RESOLVED',
-          resolved_at = NOW(),
-          resolved_by = :humanUserId,
-          resolution_note = :note,
-          version = version + 1
-    WHERE id = :queueId
-      AND status = 'PENDING'
-      AND version = :expectedVersion;
-   ```
+**競合テストにおける敗者アサーション**:
+2 スレッドが同一キュー行および同一業務データを競合修復した場合、勝者のみがコミットされ、**敗者のトランザクションは例外により全ロールバックされる。テストコードでは、敗者の業務エンティティ更新（tenant_id 等）が DB に一切残存していない（dirty な部分更新がない）ことを厳格にアサートする**。
 
-### 6.2 演練で必須とする異常系ケース
-1. **跨テナント（Cross-Tenant）修復の拒否**: テナント A の修復担当者がテナント B のキュー行を更新しようとした場合、認可層で拒否されること。
-2. **並行修復の排他競合 (CAS 競合)**: 2 人の担当者が同時に同一キュー行を更新した場合、片方が 1 行更新成功、他方は 0 行更新となり `409 CONFLICT` でロールバックされること。
-3. **実体データ更新失敗時のロールバック**: 業務テーブル側の更新が一意制約や外部キー違反で失敗した場合、キューの `status = 'RESOLVED'` への更新もロールバックされ、`PENDING` のまま残ること。
+### 6.2 CALLBACK_IDENTITY_CONFLICT 独立修復演練
+`t_peppol_participant` における `CALLBACK_IDENTITY_CONFLICT` は、スクリプトの `ON DUPLICATE KEY UPDATE` により、**元の `SCOPE_UNRESOLVED` を上書きして記録されている可能性がある**。したがって、「この理由は重複衝突だからスコープは既に解決している」と推測してはならない。
+
+修復結案時には、以下の **3重条件** をすべて検証しなければならない：
+
+1. **スコープ完全性検証**: 当該参加者レコードの `tenant_id` および `legal_entity_id` が NULL でなく、正当な顧客に紐づいていること。
+2. **重複アイデンティティの完全処置**: 同一 `(provider, scheme_id, participant_id)` を持つ競合レコード群に対し、**正当な 1 件のみを `status = 'VERIFIED'`（`callback_active_slot = 1`）とし、他の全重複行を明示的に `status = 'DUPLICATE_DEPRECATED'`, `deleted_flag = 1`, `callback_active_slot = NULL` に更新・無効化すること**。
+3. **アクティブコールバックの一意性実証**: 正当な 1 件を `VERIFIED` に更新した際、複合一意インデックス `uk_peppol_callback_active` がエラーなく成立すること。
+
+スコープが未確定、または重複レコードの無効化が不完全である場合、**キュー行は結案せず `PENDING` のまま維持しなければならない**。実外部 Provider への API 接続は一切行わない。
 
 ---
 
-## 7. 演練完了判定基準 (Acceptance Criteria)
+## 7. 検証・検収テストケースマトリクス
 
-以下のすべての条件が満たされた場合のみ、本リハーサルを `PASS` と判定する：
+| 用例 ID | カテゴリ | テスト条件 | 期待される動作・結果 |
+|---|---|---|---|
+| `TC-REP-01` | 正常系 | 孤立インボイスの正しいスコープを特定し同一Txで修復結案 | インボイスの `tenant_id` 更新成功、キュー行 `status='RESOLVED'`, `version` 加算。 |
+| `TC-REP-02` | 正常系 | 重複 Peppol のスコープ解決と 1 件のみ有効化（他方を論理削除） | 唯一の行が `VERIFIED`（slot=1）となり、一意制約成立。キュー行結案。 |
+| `TC-REP-03` | 負向系 | 他テナントの担当者が別テナントのキュー行の修復を試行 | 認可境界違反により更新拒否（`403 FORBIDDEN`）。 |
+| `TC-REP-04` | 負向系 | 重複 Peppol でスコープが未解決（NULL）のまま結案を試行 | スコープ完全性チェック違反により拒否。キューは `PENDING` を維持。 |
+| `TC-REP-05` | 負向系 | 業務テーブル更新後、キュー行の CAS がバージョン不一致で失敗（0件） | トランザクション全体がロールバックされ、業務テーブルの変更も取り消される。 |
+| `TC-REP-06` | 並行系 | 2 スレッドが同一キュー行および同一インボイスを同時に修復実行 | 先行スレッドのみ成功。敗者スレッドは例外終了し、インボイスに敗者の更新痕跡が残らない。 |
+| `TC-REP-07` | 異常系 | マイグレーション中に意図的な DDL エラーを注入 | 移行が直ちに停止し、ログ・スキーマ・history が退避され、検証証拠として固定される。 |
 
-1. **Zero Errors / Zero Warnings**: シナリオ 1, 2, 3 の全マイグレーション実行において、Flyway エラーが 0 であること。
-2. **完全データ整合**: 第 4 節の全テストデータ（正常、孤立、多親衝突、重複 Peppol、USER レガシー）が、仕様通りに正確に回填またはキュー隔離されていること。
-3. **制約有効性実証**: 意図的に挿入した跨スコープのイベント（親と異なる tenant_id を持つ行）が複合外部キー制約により `RESTRICT` されること。
-4. **二段階修復の完遂**: 隔離されたキュー行に対し、業務テーブル更新 -> キュー CAS 結案のフローが正常系・異常系ともに仕様通り動作すること。
-5. **固定証跡の保存**: 実行時のログ、`flyway_schema_history` の完全ダンプ、各テーブルのレコード件数・ハッシュ値が独立した検証証拠ディレクトリに保存されること。
+---
+
+## 8. 残余リスクと未完成事項
+
+1. **本番 Forward-Fix パッチ未設計**: 本番環境で障害が発生した際のロールフォワード手順は本バッチでは設計・検証しておらず、本番適用承認前に独立した運用承認を必要とする。
+2. **V185 マイグレーション非対象**: NF10 用に予約されている V185 の検証は本契約のスコープ外である。
+3. **合成 HUMAN サインオフの非代替性**: 本リハーサルで記録される監査 ID は、実際の業務部門・セキュリティ部門の承認を法的に代替しない。
