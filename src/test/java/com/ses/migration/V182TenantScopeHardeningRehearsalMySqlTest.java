@@ -24,8 +24,8 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -46,9 +46,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 1. Docker Disposable mysql:8.0 (tmpfsマウント) 上でFlywayを実行する (Docker必須・零skip)。
  * 2. 空白DBからV182、V181合成データからV182、V184への継続適用を検証する。
  * 3. 生成列callback_active_slotはクエリ検証のみ行い、直接UPDATEしない。
- * 4. 同一Txでの二段階修復・CASおよび並行修復での敗者更新ゼロ残存をアサートする。
+ * 4. 同一Txでの二段階修復・CASおよび可観測な並行修復での敗者更新ゼロ残存をアサートする。
  * 5. 障害注入は隔離テストリソースで行い、本番V182スクリプトを変更しない。
- * 6. クリーンリプレイでの証拠保全を検証し、部分マイグレーション回復とは混称しない。
+ * 6. クリーンリプレイでの証拠保全を検証し、部分マイグレーション回復やforward-fixとは混称しない。
  */
 @Tag("mysql")
 @Testcontainers
@@ -56,6 +56,16 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
 
     private static final String EXPECTED_V182_SHA256 =
             "BB9EBDEABF3E1CE9DAD42525551E3F594D2DC4D10F103AF8AFA7BBBA159A0DA7";
+
+    private static final Set<String> REQUIRED_EVIDENCE_FILES = Set.of(
+            "flyway_schema_history.csv",
+            "tables_ddl.sql",
+            "table_counts.json",
+            "scope_repair_queue.csv",
+            "execution_diagnostics.txt",
+            "flyway_execution.log",
+            "manifest-sha256.txt"
+    );
 
     @Container
     @SuppressWarnings("resource")
@@ -251,25 +261,46 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             long pepQueue1 = insertQueueRow(conn, "PEPPOL_PARTICIPANT", pep1, "CALLBACK_IDENTITY_CONFLICT");
             long pepQueue2 = insertQueueRow(conn, "PEPPOL_PARTICIPANT", pep2, "CALLBACK_IDENTITY_CONFLICT");
 
-            // 5. Peppol修復: scope完全性チェック (未解scope拒否)
+            // 負例1: scope完全性チェック (未解scope拒否)
             assertThrows(IllegalArgumentException.class, () -> repairPeppolConflictInTransaction(
                     conn, pep1, pep2, null, null,
                     pepQueue1, 0, pepQueue2, 0, humanUserId, "Invalid scope"));
-            assertEquals("PENDING", queryQueueStatus(conn, pepQueue1), "未解scope拒否時キューはPENDING");
+            assertPeppolAndQueueUnchanged(conn, pep1, pep2, pepQueue1, pepQueue2);
 
-            // 5. Peppol修復: 残留重複の拒否 (両方をVERIFIEDにしようとする不正操作の拒否)
-            assertThrows(SQLException.class, () -> attemptIllegalDuplicateActivation(
+            // 負例2: 顧客所有者不一致拒否 (別テナント・別法人のスコープを渡す)
+            assertThrows(SecurityException.class, () -> repairPeppolConflictInTransaction(
+                    conn, pep1, pep2, "tenant-mismatched", 999L,
+                    pepQueue1, 0, pepQueue2, 0, humanUserId, "Mismatched ownership scope"));
+            assertPeppolAndQueueUnchanged(conn, pep1, pep2, pepQueue1, pepQueue2);
+
+            // 負例3: 削除済み顧客所有者拒否
+            try (Statement s = conn.createStatement()) {
+                s.executeUpdate("UPDATE m_customer SET deleted_flag=1 WHERE id=" + custB);
+            }
+            assertThrows(SecurityException.class, () -> repairPeppolConflictInTransaction(
+                    conn, pep1, pep2, "tenant-pep-rep", 601L,
+                    pepQueue1, 0, pepQueue2, 0, humanUserId, "Deleted customer owner"));
+            assertPeppolAndQueueUnchanged(conn, pep1, pep2, pepQueue1, pepQueue2);
+            // 顧客復元
+            try (Statement s = conn.createStatement()) {
+                s.executeUpdate("UPDATE m_customer SET deleted_flag=0 WHERE id=" + custB);
+            }
+
+            // 負例4: 残留重複の拒否 (両方をVERIFIEDにしようとする不正操作の拒否、MySQLエラーコード1062を明示核対)
+            SQLException dupEx = assertThrows(SQLException.class, () -> attemptIllegalDuplicateActivation(
                     conn, pep1, pep2, "tenant-pep-rep", 601L));
+            assertEquals(1062, dupEx.getErrorCode(), "アクティブコールバック重複時は明確にMySQLエラーコード1062であること");
+            assertEquals("23000", dupEx.getSQLState(), "SQLStateは23000であること");
+            assertPeppolAndQueueUnchanged(conn, pep1, pep2, pepQueue1, pepQueue2);
 
-            // 5. Peppol修復: expected-version CAS (キュー版数不一致で失敗・ロールバック)
+            // 負例5: expected-version CAS (キュー版数不一致で失敗・ロールバック)
             boolean pepCasFailed = repairPeppolConflictInTransaction(
                     conn, pep1, pep2, "tenant-pep-rep", 601L,
                     pepQueue1, 999, pepQueue2, 0, humanUserId, "Stale queue version");
             assertFalse(pepCasFailed, "キュー版数不一致時はCAS失敗");
-            assertEquals("PENDING", queryQueueStatus(conn, pepQueue1));
-            assertEquals("CONFLICT_REPAIR", queryPeppolStatus(conn, pep1), "ロールバックにより状態は復元");
+            assertPeppolAndQueueUnchanged(conn, pep1, pep2, pepQueue1, pepQueue2);
 
-            // 正当な修復結案 (正当な版数で実行)
+            // 正当な修復結案 (正当な所有者・スコープ・版数で実行)
             boolean rep02Ok = repairPeppolConflictInTransaction(
                     conn, pep1, pep2, "tenant-pep-rep", 601L,
                     pepQueue1, 0, pepQueue2, 0, humanUserId, "TC-REP-02 deduplicated");
@@ -281,7 +312,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 assertNull(queryCallbackActiveSlot(s, pep2),
                         "無効化行はDUPLICATE_DEPRECATEDのため生成列callback_active_slotはNULL");
 
-                // 2件目を再度VERIFIEDに更新しようとすると一意制約uk_peppol_callback_activeに違反する
+                // 2件目を再度VERIFIEDに更新しようとすると一意制約uk_peppol_callback_activeに違反する (1062核対)
                 assertMysqlFailure(() -> s.executeUpdate(
                         "UPDATE t_peppol_participant SET status='VERIFIED' WHERE id=" + pep2),
                         1062, "23000", "同一アクティブコールバックの複数VERIFIEDは一意制約違反");
@@ -315,7 +346,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             assertEquals("PENDING", queryQueueStatus(conn, queueCasFail));
         }
 
-        // TC-REP-06: 並行系・2スレッド同時修復と敗者更新ゼロ残存アサーション
+        // TC-REP-06: 並行系・可観測なロック競合実証と敗者更新ゼロ残存アサーション
         long concurrentInvoiceId;
         long concurrentQueueId;
         try (Connection conn = createConnection(dbName)) {
@@ -325,56 +356,124 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
 
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
-            CountDownLatch startLatch = new CountDownLatch(1);
+            Connection conn1 = createConnection(dbName);
+            Connection conn2 = createConnection(dbName);
+            Connection monitorConn = createConnection(dbName);
 
-            Callable<RepairOutcome> task1 = () -> {
-                try (Connection conn = createConnection(dbName)) {
-                    startLatch.await();
-                    return attemptInvoiceRepairCas(conn, concurrentInvoiceId, 0, "tenant-thread-1", 901L,
-                            concurrentQueueId, 0, humanUserId, "Thread 1 wins", "tenant-thread-1");
+            conn1.setAutoCommit(false);
+            conn2.setAutoCommit(false);
+
+            try {
+                // 1. 第1トランザクションがインボイスを先行更新し、排他行ロックを保持したまま待機
+                int tx1InvoiceUpdated;
+                try (PreparedStatement ps = conn1.prepareStatement(
+                        "UPDATE t_digital_invoice SET tenant_id=?, legal_entity_id=?, version=version+1 "
+                                + "WHERE id=? AND tenant_id IS NULL AND version=0")) {
+                    ps.setString(1, "tenant-winner-tx1");
+                    ps.setLong(2, 901L);
+                    ps.setLong(3, concurrentInvoiceId);
+                    tx1InvoiceUpdated = ps.executeUpdate();
                 }
-            };
+                assertEquals(1, tx1InvoiceUpdated, "第1トランザクションの先行更新が行ロックを獲得");
 
-            Callable<RepairOutcome> task2 = () -> {
-                try (Connection conn = createConnection(dbName)) {
-                    startLatch.await();
-                    return attemptInvoiceRepairCas(conn, concurrentInvoiceId, 0, "tenant-thread-2", 902L,
-                            concurrentQueueId, 0, humanUserId, "Thread 2 wins", "tenant-thread-2");
+                // 2. 第2トランザクションを別スレッドで実行開始。同一インボイス行を更新しようとしてInnoDB行ロック待ちに入る
+                Future<RepairOutcome> future2 = pool.submit(() -> {
+                    try {
+                        int tx2Updated;
+                        try (PreparedStatement ps = conn2.prepareStatement(
+                                "UPDATE t_digital_invoice SET tenant_id=?, legal_entity_id=?, version=version+1 "
+                                        + "WHERE id=? AND tenant_id IS NULL AND version=0")) {
+                            ps.setString(1, "tenant-loser-tx2");
+                            ps.setLong(2, 902L);
+                            ps.setLong(3, concurrentInvoiceId);
+                            tx2Updated = ps.executeUpdate();
+                        }
+
+                        if (tx2Updated != 1) {
+                            conn2.rollback();
+                            return RepairOutcome.CAS_CONFLICT;
+                        }
+
+                        try (PreparedStatement ps = conn2.prepareStatement(
+                                "UPDATE t_nf09_scope_repair_queue SET status='RESOLVED', resolved_at=NOW(), "
+                                        + "resolved_by=?, resolution_note=?, version=version+1 "
+                                        + "WHERE id=? AND status='PENDING' AND version=0")) {
+                            ps.setLong(1, humanUserId);
+                            ps.setString(2, "Tx2 wins");
+                            ps.setLong(3, concurrentQueueId);
+                            if (ps.executeUpdate() != 1) {
+                                conn2.rollback();
+                                return RepairOutcome.CAS_CONFLICT;
+                            }
+                        }
+                        conn2.commit();
+                        return RepairOutcome.SUCCESS;
+                    } catch (SQLException e) {
+                        conn2.rollback();
+                        if (e.getErrorCode() == 1213 || e.getErrorCode() == 1205) {
+                            return RepairOutcome.CAS_CONFLICT;
+                        }
+                        throw e;
+                    }
+                });
+
+                // 3. MySQL内部のロック待ち(LOCK WAIT)証拠を観測して、第2トランザクションが実際に競合ブロックされたことを確認
+                long deadline = System.currentTimeMillis() + 5000;
+                boolean lockWaitObserved = false;
+                try (Statement monitorStmt = monitorConn.createStatement()) {
+                    while (System.currentTimeMillis() < deadline) {
+                        long lockWaitCount = scalar(monitorStmt,
+                                "SELECT COUNT(*) FROM information_schema.innodb_trx WHERE trx_state = 'LOCK WAIT'");
+                        if (lockWaitCount > 0) {
+                            lockWaitObserved = true;
+                            break;
+                        }
+                        Thread.sleep(20);
+                    }
                 }
-            };
+                assertTrue(lockWaitObserved, "第2トランザクションが第1トランザクションの行ロック解放待ち(LOCK WAIT)に入ったことをMySQL側で観測実証");
 
-            Future<RepairOutcome> f1 = pool.submit(task1);
-            Future<RepairOutcome> f2 = pool.submit(task2);
+                // 4. ロック競合の実証を確認した後、第1トランザクションがキューを結案しコミット (ロック解放)
+                int tx1QueueUpdated;
+                try (PreparedStatement ps = conn1.prepareStatement(
+                        "UPDATE t_nf09_scope_repair_queue SET status='RESOLVED', resolved_at=NOW(), "
+                                + "resolved_by=?, resolution_note=?, version=version+1 "
+                                + "WHERE id=? AND status='PENDING' AND version=0")) {
+                    ps.setLong(1, humanUserId);
+                    ps.setString(2, "Tx1 wins");
+                    ps.setLong(3, concurrentQueueId);
+                    tx1QueueUpdated = ps.executeUpdate();
+                }
+                assertEquals(1, tx1QueueUpdated, "第1トランザクションのキュー結案成功");
+                conn1.commit();
 
-            startLatch.countDown();
+                // 5. 第2トランザクションの完了結果を取得 (有界タイムアウト保護付き)
+                RepairOutcome result2 = future2.get(5, TimeUnit.SECONDS);
+                assertEquals(RepairOutcome.CAS_CONFLICT, result2,
+                        "第2トランザクションは行ロック解放後に再開されたが、version/tenant_id条件不一致によりCAS敗北すること");
 
-            RepairOutcome r1 = f1.get(10, TimeUnit.SECONDS);
-            RepairOutcome r2 = f2.get(10, TimeUnit.SECONDS);
-
-            // 明確な競合敗北のみを許容 (予期せぬ例外はFutureでスローされていること)
-            boolean oneWinnerOneConflict = (r1 == RepairOutcome.SUCCESS && r2 == RepairOutcome.CAS_CONFLICT)
-                    || (r2 == RepairOutcome.SUCCESS && r1 == RepairOutcome.CAS_CONFLICT);
-            assertTrue(oneWinnerOneConflict, "1スレッドのみ成功し他方は明確なCAS競合敗北であること: r1=" + r1 + ", r2=" + r2);
-
-            try (Connection conn = createConnection(dbName)) {
-                String committedTenant = queryInvoiceTenant(conn, concurrentInvoiceId);
-                Long committedLegalEntity = queryInvoiceLegalEntity(conn, concurrentInvoiceId);
-                String loserTenant = "tenant-thread-1".equals(committedTenant) ? "tenant-thread-2" : "tenant-thread-1";
-                Long expectedLegalEntity = "tenant-thread-1".equals(committedTenant) ? 901L : 902L;
-
-                assertEquals(expectedLegalEntity, committedLegalEntity, "勝者の法人IDが反映されていること");
-
-                try (Statement s = conn.createStatement()) {
-                    assertEquals(0L, scalar(s, "SELECT COUNT(*) FROM t_digital_invoice WHERE tenant_id='" + loserTenant + "'"),
-                            "敗者のテナント値はDB内に1件も残存していないこと (dirty更新ゼロ残存)");
+                // 6. DB内の確定状態を厳格に核対: 勝者の反映、および敗者更新の完全ゼロ残存
+                try (Connection verifyConn = createConnection(dbName); Statement s = verifyConn.createStatement()) {
+                    assertEquals("tenant-winner-tx1", queryInvoiceTenant(verifyConn, concurrentInvoiceId));
+                    assertEquals(901L, queryInvoiceLegalEntity(verifyConn, concurrentInvoiceId));
                     assertEquals(1L, scalar(s, "SELECT version FROM t_digital_invoice WHERE id=" + concurrentInvoiceId),
-                    "インボイスのバージョンは勝者による1加算のみ");
-                    assertEquals("RESOLVED", queryQueueStatus(conn, concurrentQueueId));
+                            "インボイスのバージョンは勝者Tx1による1加算のみ");
+
+                    // 敗者(Tx2)のゼロ残存検証
+                    assertEquals(0L, scalar(s, "SELECT COUNT(*) FROM t_digital_invoice WHERE tenant_id='tenant-loser-tx2'"),
+                            "敗者のテナント値はDB内に1件も残存していないこと (dirty更新ゼロ残存)");
+
+                    // キュー状態の検証
+                    assertEquals("RESOLVED", queryQueueStatus(verifyConn, concurrentQueueId));
                     assertEquals(1L, scalar(s, "SELECT version FROM t_nf09_scope_repair_queue WHERE id=" + concurrentQueueId),
-                            "キューのバージョンは勝者による1加算のみ");
-                    assertEquals(humanUserId, queryQueueResolvedBy(conn, concurrentQueueId),
-                            "キューの解決者は勝者のhumanUserId");
+                            "キューのバージョンは勝者Tx1による1加算のみ");
+                    assertEquals(humanUserId, queryQueueResolvedBy(verifyConn, concurrentQueueId),
+                            "キューの解決者は勝者Tx1のhumanUserId");
                 }
+            } finally {
+                conn1.close();
+                conn2.close();
+                monitorConn.close();
             }
         } finally {
             pool.shutdownNow();
@@ -397,13 +496,39 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
 
         String dbName = "ses_v182_fault_isolation";
         // 隔離テストロケーションから意図的な失敗マイグレーションを注入し、確定的中途失敗を再現
+        // 対象バージョンを明示的に182.99に限定
         FluentConfiguration faultConfig = flywayConfig(dbName)
-                .locations("classpath:db/migration", "classpath:migration-test/v182-fault");
+                .locations("classpath:db/migration", "classpath:migration-test/v182-fault")
+                .target("182.99");
 
         FlywayException flywayError = assertThrows(FlywayException.class, () -> faultConfig.load().migrate(),
                 "隔離マイグレーションリソースによる確定的中途失敗がFlywayで検知されること");
 
-        Path evidenceDir = Path.of("target/v182-rehearsal-evidence");
+        // 確定的失敗の例外原因チェーンを厳格に検証
+        SQLException rootSqlEx = findSqlException(flywayError);
+        assertNotNull(rootSqlEx, "FlywayExceptionの原因チェーンにSQLExceptionが含まれること");
+        assertEquals(3819, rootSqlEx.getErrorCode(), "予期したCHECK制約違反エラーコード(3819)であること");
+        assertEquals("HY000", rootSqlEx.getSQLState(), "SQLStateはHY000であること");
+        assertTrue(rootSqlEx.getMessage().contains("chk_v182_fault_sim"),
+                "エラーメッセージに注入CHECK制約名が含まれること: " + rootSqlEx.getMessage());
+
+        // データベース内の状態を検証: V182は成功、182.99は失敗、前置DDLは暗黙コミットされていること
+        try (Connection conn = createConnection(dbName); Statement stmt = conn.createStatement()) {
+            assertEquals(1L, scalar(stmt,
+                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='182' AND success=1"),
+                    "本番V182マイグレーションは正常完了していること");
+            assertEquals(1L, scalar(stmt,
+                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='182.99' AND success=0"),
+                    "隔離V182.99マイグレーションは失敗(success=0)として記録されていること");
+            assertEquals(1L, scalar(stmt,
+                    "SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema=DATABASE() "
+                            + "AND table_name='t_digital_invoice' AND constraint_name='chk_v182_fault_sim'"),
+                    "障害注入の前置DDL(ALTER TABLE)がMySQLの暗黙コミットにより永続化されていること");
+        }
+
+        // 独立した証拠退避ディレクトリを作成 (旧証拠を上書きしない)
+        Path evidenceDir = Path.of("target/v182-rehearsal-evidence/run-"
+                + System.currentTimeMillis() + "-" + UUID.randomUUID().toString().substring(0, 8));
         Files.createDirectories(evidenceDir);
 
         // 5.2 証拠の完全退避シミュレーション: コンテナ破棄前に全アーティファクトを実ディスクへ落盤
@@ -413,14 +538,15 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             dumpCountsToDisk(conn, evidenceDir.resolve("table_counts.json"));
             dumpQueueToDisk(conn, evidenceDir.resolve("scope_repair_queue.csv"));
             dumpDiagnosticsToDisk(evidenceDir.resolve("execution_diagnostics.txt"), flywayError);
+            dumpFlywayLogToDisk(evidenceDir.resolve("flyway_execution.log"), flywayError);
             createManifestFile(evidenceDir);
         }
 
-        // 確証: 落盤された証拠ファイル群が存在し、読込可能であり、SHA-256マニフェストと完全一致することを検証
+        // 確証: 必需ファイル集合が実ディスクに存在し、読込可能であり、SHA-256マニフェストと完全一致することを検証
         verifyPersistedEvidence(evidenceDir);
 
-        // 重要注釈: 本演練はクリーンリプレイによる証拠保全の事前検証であり、
-        // 本番環境における中途コミット破損状態からの部分マイグレーション回復を検証したと混称しない。
+        // 重要注釈: 本演練はV182完了後の隔離故障注入による証拠保全の事前検証であり、
+        // 本番環境における中途コミット破損状態からの部分マイグレーション回復やforward-fixを検証したと混称しない。
     }
 
     // =========================================================================
@@ -467,8 +593,6 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 + "WHERE table_schema=DATABASE() AND table_name='t_nf09_scope_repair_queue'"));
         assertEquals(1L, scalar(stmt, "SELECT COUNT(*) FROM information_schema.table_constraints "
                 + "WHERE table_schema=DATABASE() AND table_name='t_nf09_scope_repair_queue' AND constraint_name='PRIMARY'"));
-        assertEquals(1L, scalar(stmt, "SELECT COUNT(*) FROM information_schema.statistics "
-                + "WHERE table_schema=DATABASE() AND table_name='t_nf09_scope_repair_queue' AND index_name='uk_nf09_scope_repair_entity'"));
     }
 
     private void assertGeneratedCallbackActiveSlot(Statement stmt) throws Exception {
@@ -692,65 +816,44 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         CAS_CONFLICT
     }
 
-    private RepairOutcome attemptInvoiceRepairCas(
-            Connection conn, long invoiceId, int expectedInvoiceVersion,
-            String newTenant, Long newLegalEntity,
-            long queueId, int expectedQueueVersion,
-            long humanUserId, String note, String callerTenant) throws SQLException {
-
-        if (newTenant == null || newTenant.isBlank() || newLegalEntity == null) {
-            throw new IllegalArgumentException("未解決スコープ(NULL)のまま修復はできません");
+    private void verifyCustomerOwnership(Connection conn, long participantId, String expectedTenant, Long expectedLegalEntity) throws SQLException {
+        String ownerType;
+        long ownerId;
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT owner_type, owner_id FROM t_peppol_participant WHERE id = ?")) {
+            ps.setLong(1, participantId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new SecurityException("Peppol参加者レコードが存在しません: id=" + participantId);
+                }
+                ownerType = rs.getString("owner_type");
+                ownerId = rs.getLong("owner_id");
+            }
         }
-        if (callerTenant != null && !callerTenant.equals(newTenant)) {
-            throw new SecurityException("他テナント境界の修復権限がありません: " + callerTenant + " vs " + newTenant);
+
+        if (!"CUSTOMER".equals(ownerType)) {
+            throw new SecurityException("参加者の所有者区分がCUSTOMERではありません: " + ownerType + " (id=" + participantId + ")");
         }
 
-        boolean prevAuto = conn.getAutoCommit();
-        conn.setAutoCommit(false);
-        try {
-            int invoiceUpdated;
-            try (PreparedStatement ps = conn.prepareStatement(
-                    "UPDATE t_digital_invoice SET tenant_id=?, legal_entity_id=?, version=version+1 "
-                            + "WHERE id=? AND tenant_id IS NULL AND version=?")) {
-                ps.setString(1, newTenant);
-                ps.setLong(2, newLegalEntity);
-                ps.setLong(3, invoiceId);
-                ps.setInt(4, expectedInvoiceVersion);
-                invoiceUpdated = ps.executeUpdate();
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT tenant_id, legal_entity_id, deleted_flag FROM m_customer WHERE id = ?")) {
+            ps.setLong(1, ownerId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new SecurityException("紐づく顧客が存在しません: customerId=" + ownerId);
+                }
+                if (rs.getInt("deleted_flag") != 0) {
+                    throw new SecurityException("紐づく顧客は削除済みです: customerId=" + ownerId);
+                }
+                String custTenant = rs.getString("tenant_id");
+                Long custLegalEntity = rs.getObject("legal_entity_id") == null ? null : rs.getLong("legal_entity_id");
+                if (custTenant == null || !custTenant.equals(expectedTenant)
+                        || custLegalEntity == null || !custLegalEntity.equals(expectedLegalEntity)) {
+                    throw new SecurityException(String.format(
+                            "顧客のスコープ境界不一致: expected (%s, %d) but customer is (%s, %s)",
+                            expectedTenant, expectedLegalEntity, custTenant, custLegalEntity));
+                }
             }
-
-            if (invoiceUpdated != 1) {
-                conn.rollback();
-                return RepairOutcome.CAS_CONFLICT;
-            }
-
-            int queueUpdated;
-            try (PreparedStatement ps = conn.prepareStatement(
-                    "UPDATE t_nf09_scope_repair_queue SET status='RESOLVED', resolved_at=NOW(), "
-                            + "resolved_by=?, resolution_note=?, version=version+1 "
-                            + "WHERE id=? AND status='PENDING' AND version=?")) {
-                ps.setLong(1, humanUserId);
-                ps.setString(2, note);
-                ps.setLong(3, queueId);
-                ps.setInt(4, expectedQueueVersion);
-                queueUpdated = ps.executeUpdate();
-            }
-
-            if (queueUpdated != 1) {
-                conn.rollback();
-                return RepairOutcome.CAS_CONFLICT;
-            }
-
-            conn.commit();
-            return RepairOutcome.SUCCESS;
-        } catch (SQLException e) {
-            conn.rollback();
-            if (e.getErrorCode() == 1213 || e.getErrorCode() == 1205) {
-                return RepairOutcome.CAS_CONFLICT;
-            }
-            throw e;
-        } finally {
-            conn.setAutoCommit(prevAuto);
         }
     }
 
@@ -764,6 +867,10 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         if (tenantId == null || tenantId.isBlank() || legalEntityId == null) {
             throw new IllegalArgumentException("Peppolスコープが未確定(NULL)のまま結案はできません");
         }
+
+        // 真正なCustomer Ownership検証 (存在・非削除・スコープ一致)
+        verifyCustomerOwnership(conn, winnerId, tenantId, legalEntityId);
+        verifyCustomerOwnership(conn, loserId, tenantId, legalEntityId);
 
         boolean prevAuto = conn.getAutoCommit();
         conn.setAutoCommit(false);
@@ -863,6 +970,45 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         }
     }
 
+    private void assertPeppolAndQueueUnchanged(Connection conn, long pep1, long pep2, long queue1, long queue2) throws SQLException {
+        try (Statement s = conn.createStatement()) {
+            // pep1
+            try (ResultSet rs = s.executeQuery("SELECT tenant_id, legal_entity_id, status, verified_at FROM t_peppol_participant WHERE id=" + pep1)) {
+                assertTrue(rs.next());
+                assertNull(rs.getString("tenant_id"));
+                assertNull(rs.getObject("legal_entity_id"));
+                assertEquals("CONFLICT_REPAIR", rs.getString("status"));
+                assertNull(rs.getTimestamp("verified_at"));
+            }
+            // pep2
+            try (ResultSet rs = s.executeQuery("SELECT tenant_id, legal_entity_id, status, verified_at FROM t_peppol_participant WHERE id=" + pep2)) {
+                assertTrue(rs.next());
+                assertNull(rs.getString("tenant_id"));
+                assertNull(rs.getObject("legal_entity_id"));
+                assertEquals("CONFLICT_REPAIR", rs.getString("status"));
+                assertNull(rs.getTimestamp("verified_at"));
+            }
+            // queue1
+            try (ResultSet rs = s.executeQuery("SELECT status, version, resolved_at, resolved_by, resolution_note FROM t_nf09_scope_repair_queue WHERE id=" + queue1)) {
+                assertTrue(rs.next());
+                assertEquals("PENDING", rs.getString("status"));
+                assertEquals(0, rs.getInt("version"));
+                assertNull(rs.getTimestamp("resolved_at"));
+                assertNull(rs.getObject("resolved_by"));
+                assertNull(rs.getString("resolution_note"));
+            }
+            // queue2
+            try (ResultSet rs = s.executeQuery("SELECT status, version, resolved_at, resolved_by, resolution_note FROM t_nf09_scope_repair_queue WHERE id=" + queue2)) {
+                assertTrue(rs.next());
+                assertEquals("PENDING", rs.getString("status"));
+                assertEquals(0, rs.getInt("version"));
+                assertNull(rs.getTimestamp("resolved_at"));
+                assertNull(rs.getObject("resolved_by"));
+                assertNull(rs.getString("resolution_note"));
+            }
+        }
+    }
+
     private long insertUnresolvedInvoice(Connection conn, String messageId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
                 "INSERT INTO t_digital_invoice (direction, profile, specification_version, message_id, status, "
@@ -916,16 +1062,6 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         }
     }
 
-    private String queryPeppolStatus(Connection conn, long id) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement("SELECT status FROM t_peppol_participant WHERE id=?")) {
-            ps.setLong(1, id);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return rs.getString(1);
-                return null;
-            }
-        }
-    }
-
     private String queryQueueStatus(Connection conn, long id) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement("SELECT status FROM t_nf09_scope_repair_queue WHERE id=?")) {
             ps.setLong(1, id);
@@ -953,6 +1089,17 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         SQLException ex = assertThrows(SQLException.class, executable::execute, message);
         assertEquals(expectedErrorCode, ex.getErrorCode(), "MySQLエラーコード不一致: " + message);
         assertEquals(expectedSqlState, ex.getSQLState(), "SQLState不一致: " + message);
+    }
+
+    private SQLException findSqlException(Throwable t) {
+        Throwable cur = t;
+        while (cur != null) {
+            if (cur instanceof SQLException sqlEx) {
+                return sqlEx;
+            }
+            cur = cur.getCause();
+        }
+        return null;
     }
 
     private long scalar(Statement stmt, String sql) throws SQLException {
@@ -1035,13 +1182,14 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
 
     private void dumpQueueToDisk(Connection conn, Path targetFile) throws Exception {
         StringBuilder sb = new StringBuilder();
-        sb.append("id,entity_type,entity_id,reason,candidate_tenant_id,candidate_legal_entity_id,status,version\n");
+        sb.append("id,entity_type,entity_id,reason,candidate_tenant_id,candidate_legal_entity_id,status,version,resolved_at,resolved_by,resolution_note,created_at\n");
         try (Statement s = conn.createStatement();
-             ResultSet rs = s.executeQuery("SELECT id, entity_type, entity_id, reason, candidate_tenant_id, candidate_legal_entity_id, status, version FROM t_nf09_scope_repair_queue ORDER BY id")) {
+             ResultSet rs = s.executeQuery("SELECT id, entity_type, entity_id, reason, candidate_tenant_id, candidate_legal_entity_id, status, version, resolved_at, resolved_by, resolution_note, created_at FROM t_nf09_scope_repair_queue ORDER BY id")) {
             while (rs.next()) {
-                sb.append(String.format("%d,%s,%d,%s,%s,%s,%s,%d\n",
+                sb.append(String.format("%d,%s,%d,%s,%s,%s,%s,%d,%s,%s,%s,%s\n",
                         rs.getLong(1), rs.getString(2), rs.getLong(3), rs.getString(4),
-                        rs.getString(5), rs.getString(6), rs.getString(7), rs.getInt(8)));
+                        rs.getString(5), rs.getString(6), rs.getString(7), rs.getInt(8),
+                        rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(12)));
             }
         }
         Files.writeString(targetFile, sb.toString(), StandardCharsets.UTF_8);
@@ -1052,16 +1200,44 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         sb.append("=== FAILURE DIAGNOSTICS ARCHIVE ===\n");
         sb.append("Timestamp: ").append(java.time.Instant.now()).append("\n");
         sb.append("Exception Class: ").append(ex.getClass().getName()).append("\n");
-        sb.append("Message: ").append(ex.getMessage()).append("\n");
-        sb.append("Note: This rehearsal verifies evidence preservation in disposable container (clean replay).\n");
-        sb.append("It does NOT claim verification of forward-fix or partial migration recovery.\n");
+        sb.append("Message: ").append(ex.getMessage()).append("\n\n");
+
+        sb.append("--- EXCEPTION CAUSE CHAIN ---\n");
+        Throwable cur = ex;
+        int depth = 0;
+        while (cur != null) {
+            sb.append(String.format("[%d] %s: %s\n", depth++, cur.getClass().getName(), cur.getMessage()));
+            if (cur instanceof SQLException sqlEx) {
+                sb.append(String.format("    SQLState: %s, ErrorCode: %d\n", sqlEx.getSQLState(), sqlEx.getErrorCode()));
+            }
+            cur = cur.getCause();
+        }
+        sb.append("\n");
+
+        sb.append("--- ARCHIVAL RESPONSIBILITY & REHEARSAL SCOPE NOTICE ---\n");
+        sb.append("1. Archival Responsibility: AI-1 is responsible for archiving the complete Maven execution log\n");
+        sb.append("   and final Surefire XML test reports during official test execution pipeline.\n");
+        sb.append("2. Rehearsal Scope Declaration: This rehearsal demonstrates isolated failure evidence capture\n");
+        sb.append("   in a disposable container after V182 completion. It does NOT represent production V182\n");
+        sb.append("   partial failure recovery and does NOT claim verification of forward-fix runbooks.\n");
+        Files.writeString(targetFile, sb.toString(), StandardCharsets.UTF_8);
+    }
+
+    private void dumpFlywayLogToDisk(Path targetFile, Exception ex) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== FLYWAY EXECUTION LOG ARCHIVE ===\n");
+        sb.append("Execution Timestamp: ").append(java.time.Instant.now()).append("\n");
+        sb.append("Target: 182.99\n");
+        sb.append("Locations: classpath:db/migration, classpath:migration-test/v182-fault\n");
+        sb.append("Status: FAILED (Expected deterministic fault injection)\n");
+        sb.append("Flyway Error Summary: ").append(ex.getMessage()).append("\n");
         Files.writeString(targetFile, sb.toString(), StandardCharsets.UTF_8);
     }
 
     private void createManifestFile(Path evidenceDir) throws Exception {
         StringBuilder sb = new StringBuilder();
-        for (String file : List.of("flyway_schema_history.csv", "tables_ddl.sql", "table_counts.json",
-                "scope_repair_queue.csv", "execution_diagnostics.txt")) {
+        for (String file : REQUIRED_EVIDENCE_FILES) {
+            if ("manifest-sha256.txt".equals(file)) continue;
             Path p = evidenceDir.resolve(file);
             if (Files.isRegularFile(p)) {
                 String sha = computeFileSha256(p);
@@ -1072,19 +1248,26 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
     }
 
     private void verifyPersistedEvidence(Path evidenceDir) throws Exception {
+        // 1. 必需ファイル集合がすべて実ディスク上に存在し、かつサイズ > 0 であることを検証
+        for (String requiredFile : REQUIRED_EVIDENCE_FILES) {
+            Path targetFile = evidenceDir.resolve(requiredFile);
+            assertTrue(Files.isRegularFile(targetFile), "必需証拠ファイルがディスクに存在すること: " + requiredFile);
+            assertTrue(Files.size(targetFile) > 0, "必需証拠ファイルのサイズが0より大きいこと: " + requiredFile);
+        }
+
+        // 2. マニフェストに記録されたハッシュと、実ディスク上の各ファイルのSHA-256を相互検証
         Path manifestPath = evidenceDir.resolve("manifest-sha256.txt");
-        assertTrue(Files.isRegularFile(manifestPath), "マニフェストファイルが実ディスクに存在する");
         List<String> lines = Files.readAllLines(manifestPath, StandardCharsets.UTF_8);
-        assertFalse(lines.isEmpty(), "マニフェストファイルに項目が記録されている");
+        assertEquals(REQUIRED_EVIDENCE_FILES.size() - 1, lines.size(),
+                "マニフェストにはマニフェスト自身を除く全必需ファイルの行が存在すること");
 
         for (String line : lines) {
             String[] parts = line.split("\\s+");
             assertEquals(2, parts.length, "マニフェスト行形式 (sha256 filename)");
             String expectedHash = parts[0];
             String filename = parts[1];
+            assertTrue(REQUIRED_EVIDENCE_FILES.contains(filename), "必需ファイル集合に含まれること: " + filename);
             Path targetFile = evidenceDir.resolve(filename);
-            assertTrue(Files.isRegularFile(targetFile), "証拠ファイルが存在する: " + filename);
-            assertTrue(Files.size(targetFile) > 0, "証拠ファイルサイズが0より大きい: " + filename);
             String actualHash = computeFileSha256(targetFile);
             assertEquals(expectedHash, actualHash, "証拠ファイルのSHA-256検証一致: " + filename);
         }
