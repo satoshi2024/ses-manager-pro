@@ -26,3 +26,4 @@ ImportIdentityCandidateMySqlTest
 ImportMetadataRealMySqlTest
 CopilotRunServiceMySqlIntegrationTest
 LifecycleAuthorizationPreflightMySqlTest
+V182TenantScopeHardeningRehearsalMySqlTest
