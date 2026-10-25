@@ -33,9 +33,9 @@ public final class ApprovalEnvelopeVerifier {
         Objects.requireNonNull(approval, "case承認が必要です");
         environmentGuard.requireSyntheticAllowed(policy.metadata().audience());
         Instant now = clock.instant();
-        TrustedAuthority policyAuthority = verifyEnvelope("POLICY", policy.dataElementId(), policy.metadata(), policy.signature(), ApprovalEnvelopeCanonicalizer.canonicalBytes(policy),
+        TrustedAuthority policyAuthority = verifyEnvelopeTyped("POLICY", policy.dataElementId(), policy.metadata(), policy.signature(), ApprovalEnvelopeCanonicalizer.canonicalBytes(policy),
                 policy.action(), policy.providerId(), now);
-        TrustedAuthority caseAuthority = verifyEnvelope("CASE", null, approval.metadata(), approval.signature(), ApprovalEnvelopeCanonicalizer.canonicalBytes(approval),
+        TrustedAuthority caseAuthority = verifyEnvelopeTyped("CASE", null, approval.metadata(), approval.signature(), ApprovalEnvelopeCanonicalizer.canonicalBytes(approval),
                 approval.action(), approval.providerId(), now);
 
         String policyDigest = ApprovalEnvelopeCanonicalizer.digest(ApprovalEnvelopeCanonicalizer.canonicalBytes(policy));
@@ -65,37 +65,119 @@ public final class ApprovalEnvelopeVerifier {
                         min(policyAuthority.validUntil(), caseAuthority.validUntil())));
     }
 
-    private TrustedAuthority verifyEnvelope(String envelopeKind, String dataElementId, ApprovalEnvelopeMetadata metadata,
-                               byte[] signature, byte[] payload,
-                               String action, String provider, Instant now) {
+    /**
+     * Policy 単独の読み取り専用メタデータ検証。
+     * 同一の検証ロジックを一度だけ実行し、型付け例外または検証済みメタデータを返却する。
+     * 実行認可（VerifiedApproval）は生成しない。
+     */
+    VerifiedPolicyMetadata verifyPolicyOnly(PolicyApprovalEnvelope policy,
+                                            String expectedTenant,
+                                            String expectedScope,
+                                            String expectedDataElementId,
+                                            String expectedAction,
+                                            String expectedProvider,
+                                            Instant now) throws PolicySecurityException {
+        Objects.requireNonNull(policy, "policy envelope must not be null");
+        environmentGuard.requireSyntheticAllowed(policy.metadata().audience());
+
+        TrustedAuthority authority = verifyEnvelopeTyped("POLICY", policy.dataElementId(), policy.metadata(),
+                policy.signature(), ApprovalEnvelopeCanonicalizer.canonicalBytes(policy),
+                policy.action(), policy.providerId(), now);
+
+        if (policy.metadata().requesterId().equals(policy.metadata().approverId())) {
+            throw new PolicySecurityException(PolicyFailureReason.SOD_VIOLATION, "SoD violation: requester and approver must differ");
+        }
+
+        if (!policy.metadata().tenantId().equals(expectedTenant)) {
+            throw new PolicySecurityException(PolicyFailureReason.TENANT_MISMATCH, "tenant mismatch");
+        }
+        if (!policy.metadata().scope().equals(expectedScope)) {
+            throw new PolicySecurityException(PolicyFailureReason.SCOPE_MISMATCH, "scope mismatch");
+        }
+        if (!policy.dataElementId().equals(expectedDataElementId)) {
+            throw new PolicySecurityException(PolicyFailureReason.DATA_ELEMENT_MISMATCH, "dataElement mismatch");
+        }
+        if (!policy.action().equals(expectedAction)) {
+            throw new PolicySecurityException(PolicyFailureReason.ACTION_MISMATCH, "action mismatch");
+        }
+        if (!policy.providerId().equals(expectedProvider)) {
+            throw new PolicySecurityException(PolicyFailureReason.PROVIDER_MISMATCH, "provider mismatch");
+        }
+
+        String policyDigest = ApprovalEnvelopeCanonicalizer.digest(ApprovalEnvelopeCanonicalizer.canonicalBytes(policy));
+        Instant effectiveExpiry = min(policy.metadata().expiresAt(), authority.validUntil());
+
+        return new VerifiedPolicyMetadata(policy.metadata().tenantId(), policy.policyId(),
+                policy.policyVersion(), policyDigest, policy.dataElementId(), policy.action(),
+                policy.providerId(), policy.metadata().scope(), policy.metadata().effectiveAt(),
+                effectiveExpiry, policy.retentionRule(), policy.disposition());
+    }
+
+    /**
+     * 内部共通検証。失敗時は型付けされた PolicyFailureReason を持つ例外を送出する。
+     */
+    private TrustedAuthority verifyEnvelopeTyped(String envelopeKind, String dataElementId, ApprovalEnvelopeMetadata metadata,
+                                                 byte[] signature, byte[] payload,
+                                                 String action, String provider, Instant now) {
         if (!SUPPORTED_SCHEMA_VERSION.equals(metadata.schemaVersion())) {
-            deny("未対応の承認envelope schema versionです");
+            throw new PolicySecurityException(PolicyFailureReason.UNSUPPORTED_SCHEMA_VERSION, "未対応の承認envelope schema versionです");
         }
         String anchorKey = metadata.authorityId() + ":" + metadata.keyId();
         TrustedAuthority anchor = trustAnchors.get(anchorKey);
-        if (anchor == null) deny("未知の署名authorityです");
-        requireEqual(anchor.authorityId(), metadata.authorityId(), "authorityが一致しません");
-        requireEqual(anchor.keyId(), metadata.keyId(), "keyが一致しません");
+        if (anchor == null) {
+            throw new PolicySecurityException(PolicyFailureReason.UNKNOWN_TRUST_ANCHOR, "未知の署名authorityです");
+        }
+        if (!anchor.authorityId().equals(metadata.authorityId()) || !anchor.keyId().equals(metadata.keyId())) {
+            throw new PolicySecurityException(PolicyFailureReason.UNKNOWN_TRUST_ANCHOR, "authorityまたはkeyが一致しません");
+        }
         if (!anchor.tenants().contains(metadata.tenantId()) || !anchor.scopes().contains(metadata.scope())
                 || (dataElementId != null && !anchor.dataElements().contains(dataElementId))
                 || !anchor.envelopeKinds().contains(envelopeKind)
                 || !anchor.audiences().contains(metadata.audience()) || !anchor.actions().contains(action)
-                || !anchor.providers().contains(provider)) deny("authority scopeが一致しません");
-        if (now.isBefore(anchor.validFrom()) || !now.isBefore(anchor.validUntil())) deny("authorityが現在有効ではありません");
-        if (now.isBefore(metadata.issuedAt()) || now.isBefore(metadata.effectiveAt())
-                || !now.isBefore(metadata.expiresAt())) deny("envelopeが現在有効ではありません");
-        RevocationStatus keyStatus = revocations.statusOf(metadata.authorityId() + ":" + metadata.keyId());
-        RevocationStatus envelopeStatus = revocations.statusOf(metadata.revocationReference());
-        if (keyStatus != RevocationStatus.ACTIVE || envelopeStatus != RevocationStatus.ACTIVE) {
-            deny("keyまたはenvelopeの失効状態がACTIVEではありません");
+                || !anchor.providers().contains(provider)) {
+            throw new PolicySecurityException(PolicyFailureReason.AUTHORITY_SCOPE_MISMATCH, "authority scopeが一致しません");
         }
+        if (now.isBefore(anchor.validFrom()) || !now.isBefore(anchor.validUntil())) {
+            throw new PolicySecurityException(PolicyFailureReason.AUTHORITY_VALIDITY_EXPIRED, "authorityが現在有効ではありません");
+        }
+        if (now.isBefore(metadata.issuedAt())) {
+            throw new PolicySecurityException(PolicyFailureReason.NOT_YET_ISSUED, "envelope issuedAt is in future");
+        }
+        if (now.isBefore(metadata.effectiveAt())) {
+            throw new PolicySecurityException(PolicyFailureReason.NOT_YET_EFFECTIVE, "envelope not yet effective");
+        }
+        if (!now.isBefore(metadata.expiresAt())) {
+            throw new PolicySecurityException(PolicyFailureReason.EXPIRED_AT_OR_AFTER_DEADLINE, "envelope expired at or after deadline");
+        }
+
+        RevocationStatus keyStatus;
+        RevocationStatus envelopeStatus;
+        try {
+            keyStatus = revocations.statusOf(metadata.authorityId() + ":" + metadata.keyId());
+            envelopeStatus = revocations.statusOf(metadata.revocationReference());
+        } catch (RuntimeException re) {
+            throw new PolicySecurityException(PolicyFailureReason.REVOCATION_PROVIDER_ERROR, "revocation provider error", re);
+        }
+
+        if (keyStatus == RevocationStatus.REVOKED) {
+            throw new PolicySecurityException(PolicyFailureReason.KEY_REVOKED, "signing key is revoked");
+        }
+        if (envelopeStatus == RevocationStatus.REVOKED) {
+            throw new PolicySecurityException(PolicyFailureReason.ENVELOPE_REVOKED, "envelope is revoked");
+        }
+        if (keyStatus != RevocationStatus.ACTIVE || envelopeStatus != RevocationStatus.ACTIVE) {
+            throw new PolicySecurityException(PolicyFailureReason.REVOCATION_STATUS_UNKNOWN, "keyまたはenvelopeの失効状態がACTIVEではありません");
+        }
+
         try {
             Signature verifier = Signature.getInstance("Ed25519");
             verifier.initVerify(anchor.publicKey());
             verifier.update(payload);
-            if (!verifier.verify(signature)) deny("署名が正しくありません");
+            if (!verifier.verify(signature)) {
+                throw new PolicySecurityException(PolicyFailureReason.SIGNATURE_INVALID, "署名が正しくありません");
+            }
         } catch (GeneralSecurityException exception) {
-            throw new SecurityException("承認署名を検証できません", exception);
+            throw new PolicySecurityException(PolicyFailureReason.SIGNATURE_INVALID, "承認署名を検証できません", exception);
         }
         return anchor;
     }
