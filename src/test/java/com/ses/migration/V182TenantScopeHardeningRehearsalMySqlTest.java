@@ -33,6 +33,8 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -44,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * V182テナント・法人スコープ固定および修復演練の完全使い捨て実MySQL 8検証テスト。
@@ -370,6 +373,19 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             conn1.setAutoCommit(false);
             conn2.setAutoCommit(false);
 
+            long holderConnId;
+            try (Statement s = conn1.createStatement()) {
+                holderConnId = scalar(s, "SELECT CONNECTION_ID()");
+            }
+            long contenderConnId;
+            try (Statement s = conn2.createStatement()) {
+                contenderConnId = scalar(s, "SELECT CONNECTION_ID()");
+            }
+
+            CountDownLatch workerEnteringUpdate = new CountDownLatch(1);
+            Future<RepairOutcome> future2 = null;
+            boolean tx1Committed = false;
+
             try {
                 // 1. 第1トランザクションがインボイスを先行更新し、排他行ロックを保持したまま待機
                 int tx1InvoiceUpdated;
@@ -384,8 +400,9 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 assertEquals(1, tx1InvoiceUpdated, "第1トランザクションの先行更新が行ロックを獲得");
 
                 // 2. 第2トランザクションを別スレッドで実行開始。同一インボイス行を更新しようとしてInnoDB行ロック待ちに入る
-                Future<RepairOutcome> future2 = pool.submit(() -> {
+                future2 = pool.submit(() -> {
                     try {
+                        workerEnteringUpdate.countDown();
                         int tx2Updated;
                         try (PreparedStatement ps = conn2.prepareStatement(
                                 "UPDATE t_digital_invoice SET tenant_id=?, legal_entity_id=?, version=version+1 "
@@ -396,49 +413,69 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                             tx2Updated = ps.executeUpdate();
                         }
 
-                        if (tx2Updated != 1) {
+                        // 正常なCAS競合敗北: Tx1が先行コミット(version=1)したため、
+                        // 行ロック解除後のUPDATE条件(version=0かつtenant_id IS NULL)に合致せず更新行数0となる
+                        if (tx2Updated == 0) {
                             conn2.rollback();
                             return RepairOutcome.CAS_CONFLICT;
                         }
 
-                        try (PreparedStatement ps = conn2.prepareStatement(
-                                "UPDATE t_nf09_scope_repair_queue SET status='RESOLVED', resolved_at=NOW(), "
-                                        + "resolved_by=?, resolution_note=?, version=version+1 "
-                                        + "WHERE id=? AND status='PENDING' AND version=0")) {
-                            ps.setLong(1, humanUserId);
-                            ps.setString(2, "Tx2 wins");
-                            ps.setLong(3, concurrentQueueId);
-                            if (ps.executeUpdate() != 1) {
-                                conn2.rollback();
-                                return RepairOutcome.CAS_CONFLICT;
-                            }
+                        // 異常系: ロック競合したはずの状況でTx2が先行更新してしまった場合
+                        if (tx2Updated == 1) {
+                            conn2.rollback();
+                            throw new IllegalStateException("Tx2 unexpectedly updated invoice row despite Tx1 holding row lock first!");
                         }
-                        conn2.commit();
-                        return RepairOutcome.SUCCESS;
+
+                        conn2.rollback();
+                        throw new IllegalStateException("Tx2 returned unexpected affected rows: " + tx2Updated);
                     } catch (SQLException e) {
                         conn2.rollback();
-                        if (e.getErrorCode() == 1213 || e.getErrorCode() == 1205) {
-                            return RepairOutcome.CAS_CONFLICT;
-                        }
-                        throw e;
+                        // 1205 (Lock wait timeout) や 1213 (Deadlock) は本シナリオで要求する「正常なアンブロック後のUPDATE 0行」とは異なるため、
+                        // CAS_CONFLICTとして握り潰さず例外として再スローする
+                        throw new RuntimeException(String.format(
+                                "Contender worker failed with SQLException [errorCode=%d, sqlState=%s]: %s",
+                                e.getErrorCode(), e.getSQLState(), e.getMessage()), e);
                     }
                 });
 
-                // 3. MySQL内部のロック待ち(LOCK WAIT)証拠を観測して、第2トランザクションが実際に競合ブロックされたことを確認
+                // workerがUPDATE直前まで到達したことを有限待機(5秒)で確認
+                assertTrue(workerEnteringUpdate.await(5, TimeUnit.SECONDS),
+                        "Worker thread failed to signal before entering UPDATE within 5 seconds");
+
+                // 3. MySQL内部のrequester→blockerロック待ち関係を接続ID・対象テーブル・PRIMARYインデックス・ロックデータで確認
                 long deadline = System.currentTimeMillis() + 5000;
                 boolean lockWaitObserved = false;
-                try (Statement monitorStmt = monitorConn.createStatement()) {
-                    while (System.currentTimeMillis() < deadline) {
-                        long lockWaitCount = scalar(monitorStmt,
-                                "SELECT COUNT(*) FROM information_schema.innodb_trx WHERE trx_state = 'LOCK WAIT'");
-                        if (lockWaitCount > 0) {
+                while (System.currentTimeMillis() < deadline) {
+                    // (2) 観測ループでfuture.isDone()を検査: 早期終了時は即座に結果・例外を取得
+                    if (future2.isDone()) {
+                        try {
+                            RepairOutcome prematureResult = future2.get();
+                            fail(String.format("Contender worker completed prematurely with outcome %s before lock wait was observed! "
+                                    + "[Holder Conn ID: %d, Contender Conn ID: %d]", prematureResult, holderConnId, contenderConnId));
+                        } catch (ExecutionException ee) {
+                            Throwable cause = ee.getCause();
+                            fail(String.format("Contender worker failed prematurely before lock wait was observed! "
+                                    + "Exception: %s: %s [Holder Conn ID: %d, Contender Conn ID: %d]",
+                                    cause.getClass().getName(), cause.getMessage(), holderConnId, contenderConnId), cause);
+                        }
+                    }
+
+                    try {
+                        if (hasTargetInvoiceRecordLockWait(monitorConn, dbName, concurrentInvoiceId, contenderConnId, holderConnId)) {
                             lockWaitObserved = true;
                             break;
                         }
-                        Thread.sleep(20);
+                    } catch (SQLException ignored) {
                     }
+                    Thread.sleep(20);
                 }
-                assertTrue(lockWaitObserved, "第2トランザクションが第1トランザクションの行ロック解放待ち(LOCK WAIT)に入ったことをMySQL側で観測実証");
+
+                if (!lockWaitObserved) {
+                    String diagnostics = captureLockContentionDiagnostics(
+                            monitorConn, holderConnId, contenderConnId, concurrentInvoiceId, future2);
+                    fail("第2トランザクションが第1トランザクションの行ロック解放待ち(LOCK WAIT)に入ったことをMySQL側で観測実証できませんでした。\n"
+                            + diagnostics);
+                }
 
                 // 4. ロック競合の実証を確認した後、第1トランザクションがキューを結案しコミット (ロック解放)
                 int tx1QueueUpdated;
@@ -453,11 +490,12 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 }
                 assertEquals(1, tx1QueueUpdated, "第1トランザクションのキュー結案成功");
                 conn1.commit();
+                tx1Committed = true;
 
                 // 5. 第2トランザクションの完了結果を取得 (有界タイムアウト保護付き)
                 RepairOutcome result2 = future2.get(5, TimeUnit.SECONDS);
                 assertEquals(RepairOutcome.CAS_CONFLICT, result2,
-                        "第2トランザクションは行ロック解放後に再開されたが、version/tenant_id条件不一致によりCAS敗北すること");
+                        "第2トランザクションは行ロック解放後に再開されたが、version/tenant_id条件不一致によりCAS敗北(UPDATE 0行)すること");
 
                 // 6. DB内の確定状態を厳格に核対: 勝者の反映、および敗者更新の完全ゼロ残存
                 try (Connection verifyConn = createConnection(dbName); Statement s = verifyConn.createStatement()) {
@@ -478,9 +516,23 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                             "キューの解決者は勝者Tx1のhumanUserId");
                 }
             } finally {
-                conn1.close();
-                conn2.close();
-                monitorConn.close();
+                // 5. 失敗クリーンアップ時: 安全にholderを解放(未コミット時はロールバック)し、有界にworkerの最終結果を回収
+                if (!tx1Committed) {
+                    try {
+                        conn1.rollback();
+                    } catch (SQLException ignored) {
+                    }
+                }
+                if (future2 != null) {
+                    try {
+                        future2.get(2, TimeUnit.SECONDS);
+                    } catch (Throwable ignored) {
+                        // プライマリ例外を隠蔽しないため、クリーンアップ時の回収例外は抑制
+                    }
+                }
+                closeQuietly(conn1);
+                closeQuietly(conn2);
+                closeQuietly(monitorConn);
             }
         } finally {
             pool.shutdownNow();
@@ -876,6 +928,145 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
     private enum RepairOutcome {
         SUCCESS,
         CAS_CONFLICT
+    }
+
+    private boolean hasTargetInvoiceRecordLockWait(
+            Connection conn, String dbName, long invoiceId, long requestingConnId, long blockingConnId) throws SQLException {
+        String sql = "SELECT COUNT(*) FROM performance_schema.data_lock_waits w "
+                + "JOIN performance_schema.data_locks req ON req.ENGINE = w.ENGINE "
+                + "  AND req.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID "
+                + "JOIN performance_schema.data_locks blk ON blk.ENGINE = w.ENGINE "
+                + "  AND blk.ENGINE_LOCK_ID = w.BLOCKING_ENGINE_LOCK_ID "
+                + "JOIN performance_schema.threads rt ON rt.THREAD_ID = req.THREAD_ID "
+                + "JOIN performance_schema.threads bt ON bt.THREAD_ID = blk.THREAD_ID "
+                + "WHERE (req.OBJECT_SCHEMA = DATABASE() OR req.OBJECT_SCHEMA = ?) "
+                + "  AND req.OBJECT_NAME = 't_digital_invoice' "
+                + "  AND req.INDEX_NAME = 'PRIMARY' AND req.LOCK_TYPE = 'RECORD' "
+                + "  AND (blk.OBJECT_SCHEMA = DATABASE() OR blk.OBJECT_SCHEMA = ?) "
+                + "  AND blk.OBJECT_NAME = 't_digital_invoice' "
+                + "  AND blk.INDEX_NAME = 'PRIMARY' AND blk.LOCK_TYPE = 'RECORD' "
+                + "  AND (CAST(req.LOCK_DATA AS UNSIGNED) = ? OR req.LOCK_DATA = ?) "
+                + "  AND (CAST(blk.LOCK_DATA AS UNSIGNED) = ? OR blk.LOCK_DATA = ?) "
+                + "  AND rt.PROCESSLIST_ID = ? AND bt.PROCESSLIST_ID = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, dbName);
+            ps.setString(2, dbName);
+            ps.setLong(3, invoiceId);
+            ps.setString(4, String.valueOf(invoiceId));
+            ps.setLong(5, invoiceId);
+            ps.setString(6, String.valueOf(invoiceId));
+            ps.setLong(7, requestingConnId);
+            ps.setLong(8, blockingConnId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getLong(1) > 0;
+            }
+        }
+    }
+
+    private String captureLockContentionDiagnostics(
+            Connection conn, long holderConnId, long contenderConnId,
+            long invoiceId, Future<RepairOutcome> future2) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n=== LOCK CONTENTION DIAGNOSTICS ===\n");
+        sb.append(String.format("Target Invoice ID: %d\n", invoiceId));
+        sb.append(String.format("Holder Connection ID: %d, Contender Connection ID: %d\n", holderConnId, contenderConnId));
+        sb.append(String.format("Worker Future isDone: %b\n", future2 != null && future2.isDone()));
+
+        // 1. Transactions from information_schema.innodb_trx
+        sb.append("--- Active InnoDB Transactions (information_schema.innodb_trx) ---\n");
+        try (Statement s = conn.createStatement();
+             ResultSet rs = s.executeQuery(
+                     "SELECT trx_id, trx_state, trx_mysql_thread_id, trx_query, trx_wait_started, "
+                             + "trx_tables_in_use, trx_tables_locked, trx_rows_locked "
+                             + "FROM information_schema.innodb_trx")) {
+            boolean found = false;
+            while (rs.next()) {
+                found = true;
+                sb.append(String.format("  trx_id=%s, state=%s, conn_id=%d, query=%s, wait_started=%s, tables_locked=%s, rows_locked=%s\n",
+                        rs.getString(1), rs.getString(2), rs.getLong(3), rs.getString(4),
+                        rs.getString(5), rs.getString(7), rs.getString(8)));
+            }
+            if (!found) {
+                sb.append("  (No active transactions found in innodb_trx)\n");
+            }
+        } catch (SQLException e) {
+            sb.append("  (Failed to query innodb_trx: ").append(e.getMessage()).append(")\n");
+        }
+
+        // 2. Data locks from performance_schema.data_locks
+        sb.append("--- Data Locks (performance_schema.data_locks) ---\n");
+        try (Statement s = conn.createStatement();
+             ResultSet rs = s.executeQuery(
+                     "SELECT dl.OBJECT_SCHEMA, dl.OBJECT_NAME, dl.INDEX_NAME, dl.LOCK_TYPE, dl.LOCK_MODE, "
+                             + "dl.LOCK_STATUS, dl.LOCK_DATA, th.PROCESSLIST_ID "
+                             + "FROM performance_schema.data_locks dl "
+                             + "JOIN performance_schema.threads th ON th.THREAD_ID = dl.THREAD_ID "
+                             + "WHERE dl.OBJECT_NAME = 't_digital_invoice' OR th.PROCESSLIST_ID IN (" + holderConnId + ", " + contenderConnId + ")")) {
+            boolean found = false;
+            while (rs.next()) {
+                found = true;
+                sb.append(String.format("  schema=%s, table=%s, index=%s, type=%s, mode=%s, status=%s, data=%s, conn_id=%d\n",
+                        rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4),
+                        rs.getString(5), rs.getString(6), rs.getString(7), rs.getLong(8)));
+            }
+            if (!found) {
+                sb.append("  (No data locks found for target table/connections)\n");
+            }
+        } catch (SQLException e) {
+            sb.append("  (Failed to query data_locks: ").append(e.getMessage()).append(")\n");
+        }
+
+        // 3. Lock waits from performance_schema.data_lock_waits
+        sb.append("--- Data Lock Waits (performance_schema.data_lock_waits) ---\n");
+        try (Statement s = conn.createStatement();
+             ResultSet rs = s.executeQuery(
+                     "SELECT req_th.PROCESSLIST_ID AS req_conn, blk_th.PROCESSLIST_ID AS blk_conn, "
+                             + "req.OBJECT_NAME, req.INDEX_NAME, req.LOCK_TYPE, req.LOCK_DATA, "
+                             + "req.LOCK_MODE AS req_mode, blk.LOCK_MODE AS blk_mode "
+                             + "FROM performance_schema.data_lock_waits w "
+                             + "JOIN performance_schema.data_locks req ON req.ENGINE = w.ENGINE AND req.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID "
+                             + "JOIN performance_schema.data_locks blk ON blk.ENGINE = w.ENGINE AND blk.ENGINE_LOCK_ID = w.BLOCKING_ENGINE_LOCK_ID "
+                             + "JOIN performance_schema.threads req_th ON req_th.THREAD_ID = req.THREAD_ID "
+                             + "JOIN performance_schema.threads blk_th ON blk_th.THREAD_ID = blk.THREAD_ID")) {
+            boolean found = false;
+            while (rs.next()) {
+                found = true;
+                sb.append(String.format("  requester_conn=%d -> blocker_conn=%d, table=%s, index=%s, lock_data=%s, req_mode=%s, blk_mode=%s\n",
+                        rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4),
+                        rs.getString(6), rs.getString(7), rs.getString(8)));
+            }
+            if (!found) {
+                sb.append("  (No data lock waits found in data_lock_waits)\n");
+            }
+        } catch (SQLException e) {
+            sb.append("  (Failed to query data_lock_waits: ").append(e.getMessage()).append(")\n");
+        }
+
+        // 4. Processlist state
+        sb.append("--- Processlist States ---\n");
+        try (Statement s = conn.createStatement();
+             ResultSet rs = s.executeQuery(
+                     "SELECT ID, USER, HOST, DB, COMMAND, TIME, STATE, INFO "
+                             + "FROM information_schema.processlist "
+                             + "WHERE ID IN (" + holderConnId + ", " + contenderConnId + ")")) {
+            while (rs.next()) {
+                sb.append(String.format("  conn_id=%d, command=%s, time=%d, state=%s, info=%s\n",
+                        rs.getLong(1), rs.getString(5), rs.getInt(6), rs.getString(7), rs.getString(8)));
+            }
+        } catch (SQLException e) {
+            sb.append("  (Failed to query processlist: ").append(e.getMessage()).append(")\n");
+        }
+        sb.append("===================================\n");
+        return sb.toString();
+    }
+
+    private void closeQuietly(AutoCloseable closeable) {
+        if (closeable != null) {
+            try {
+                closeable.close();
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private void verifyCustomerOwnership(Connection conn, long participantId, String expectedTenant, Long expectedLegalEntity) throws SQLException {
