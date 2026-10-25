@@ -2,7 +2,8 @@ package com.ses.migration;
 
 import com.ses.test.MySQLContainer;
 import org.flywaydb.core.Flyway;
-import org.flywaydb.core.api.MigrationInfo;
+import org.flywaydb.core.api.FlywayException;
+import org.flywaydb.core.api.configuration.FluentConfiguration;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
@@ -21,15 +22,14 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -43,14 +43,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>契約書: .kiro/specs/asset-account-license-lifecycle/v182-rehearsal-contract.md
  * 規約:
- * 1. Docker Disposable mysql:8.0 (tmpfsマウント) 上でFlywayを実行する。
+ * 1. Docker Disposable mysql:8.0 (tmpfsマウント) 上でFlywayを実行する (Docker必須・零skip)。
  * 2. 空白DBからV182、V181合成データからV182、V184への継続適用を検証する。
  * 3. 生成列callback_active_slotはクエリ検証のみ行い、直接UPDATEしない。
  * 4. 同一Txでの二段階修復・CASおよび並行修復での敗者更新ゼロ残存をアサートする。
  * 5. 障害注入は隔離テストリソースで行い、本番V182スクリプトを変更しない。
+ * 6. クリーンリプレイでの証拠保全を検証し、部分マイグレーション回復とは混称しない。
  */
 @Tag("mysql")
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class V182TenantScopeHardeningRehearsalMySqlTest {
 
     private static final String EXPECTED_V182_SHA256 =
@@ -70,7 +71,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
     @Test
     void scenario1_freshInstallToTarget182_verifiesSchemaColumnsAndConstraints() throws Exception {
         String dbName = "ses_v182_fresh";
-        Flyway flyway = flyway(dbName).target("182").load();
+        Flyway flyway = flywayConfig(dbName).target("182").load();
         flyway.migrate();
 
         try (Connection conn = createConnection(dbName); Statement stmt = conn.createStatement()) {
@@ -78,6 +79,9 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             assertScopeColumnsAdded(stmt);
             assertRepairQueueSchema(stmt);
             assertGeneratedCallbackActiveSlot(stmt);
+
+            // 第3節: 複合インデックスを有序列集合・一意性・インデックス名で網羅検証
+            assertCompositeIndexes(conn);
 
             // CHECK制約: 不正なactor pairの挿入拒否 (MySQL error 3819)
             assertMysqlFailure(() -> stmt.executeUpdate(
@@ -109,7 +113,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
     @Test
     void scenario2_upgradeFromV181SyntheticData_verifiesBackfillIsolationAndConstraintEnforcement() throws Exception {
         String dbName = "ses_v182_upgrade";
-        Flyway baseline = flyway(dbName).target("181").load();
+        Flyway baseline = flywayConfig(dbName).target("181").load();
         baseline.migrate();
 
         SyntheticFixture fixture;
@@ -117,7 +121,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             fixture = seedV181SyntheticData(conn);
         }
 
-        Flyway toV182 = flyway(dbName).target("182").load();
+        Flyway toV182 = flywayConfig(dbName).target("182").load();
         toV182.migrate();
 
         try (Connection conn = createConnection(dbName); Statement stmt = conn.createStatement()) {
@@ -180,18 +184,18 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
     @Test
     void scenario3_continuousUpgradeToTarget184_verifiesForwardCompatibilityWithoutV185() throws Exception {
         String dbName = "ses_v182_upgrade_to_184";
-        Flyway baseline = flyway(dbName).target("181").load();
+        Flyway baseline = flywayConfig(dbName).target("181").load();
         baseline.migrate();
 
         try (Connection conn = createConnection(dbName)) {
             seedV181SyntheticData(conn);
         }
 
-        Flyway toV182 = flyway(dbName).target("182").load();
+        Flyway toV182 = flywayConfig(dbName).target("182").load();
         toV182.migrate();
 
         // V182から最新候補V184まで継続適用 (NF10専用のV185は除外)
-        Flyway toV184 = flyway(dbName).target("184").load();
+        Flyway toV184 = flywayConfig(dbName).target("184").load();
         toV184.migrate();
         toV184.validate();
 
@@ -220,7 +224,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
     @Test
     void scenario4_repairQueueTransactionalCas_verifiesAtomicRepairAndZeroResidualLoser() throws Exception {
         String dbName = "ses_v182_repair_rehearsal";
-        Flyway flyway = flyway(dbName).target("182").load();
+        Flyway flyway = flywayConfig(dbName).target("182").load();
         flyway.migrate();
 
         long humanUserId = 1001L;
@@ -238,14 +242,37 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             assertEquals("RESOLVED", queryQueueStatus(conn, queueId));
 
             // TC-REP-02: 正常系・重複Peppolの解決、1件のみVERIFIED有効化と生成列アサーション
-            long pep1 = insertPeppol(conn, "pep-rep", "iso6523", "0147:rep-02", "CONFLICT_REPAIR", null, 0);
-            long pep2 = insertPeppol(conn, "pep-rep", "iso6523", "0147:rep-02", "CONFLICT_REPAIR", null, 0);
+            // 合法かつ区別可能な顧客所有者を作成
+            long custA = insertCustomer(conn, "顧客Peppol-A", "tenant-pep-rep", 601L);
+            long custB = insertCustomer(conn, "顧客Peppol-B", "tenant-pep-rep", 601L);
+
+            long pep1 = insertPeppol(conn, "CUSTOMER", custA, "pep-rep", "iso6523", "0147:rep-02", "CONFLICT_REPAIR", null, 0);
+            long pep2 = insertPeppol(conn, "CUSTOMER", custB, "pep-rep", "iso6523", "0147:rep-02", "CONFLICT_REPAIR", null, 0);
             long pepQueue1 = insertQueueRow(conn, "PEPPOL_PARTICIPANT", pep1, "CALLBACK_IDENTITY_CONFLICT");
             long pepQueue2 = insertQueueRow(conn, "PEPPOL_PARTICIPANT", pep2, "CALLBACK_IDENTITY_CONFLICT");
 
+            // 5. Peppol修復: scope完全性チェック (未解scope拒否)
+            assertThrows(IllegalArgumentException.class, () -> repairPeppolConflictInTransaction(
+                    conn, pep1, pep2, null, null,
+                    pepQueue1, 0, pepQueue2, 0, humanUserId, "Invalid scope"));
+            assertEquals("PENDING", queryQueueStatus(conn, pepQueue1), "未解scope拒否時キューはPENDING");
+
+            // 5. Peppol修復: 残留重複の拒否 (両方をVERIFIEDにしようとする不正操作の拒否)
+            assertThrows(SQLException.class, () -> attemptIllegalDuplicateActivation(
+                    conn, pep1, pep2, "tenant-pep-rep", 601L));
+
+            // 5. Peppol修復: expected-version CAS (キュー版数不一致で失敗・ロールバック)
+            boolean pepCasFailed = repairPeppolConflictInTransaction(
+                    conn, pep1, pep2, "tenant-pep-rep", 601L,
+                    pepQueue1, 999, pepQueue2, 0, humanUserId, "Stale queue version");
+            assertFalse(pepCasFailed, "キュー版数不一致時はCAS失敗");
+            assertEquals("PENDING", queryQueueStatus(conn, pepQueue1));
+            assertEquals("CONFLICT_REPAIR", queryPeppolStatus(conn, pep1), "ロールバックにより状態は復元");
+
+            // 正当な修復結案 (正当な版数で実行)
             boolean rep02Ok = repairPeppolConflictInTransaction(
                     conn, pep1, pep2, "tenant-pep-rep", 601L,
-                    pepQueue1, pepQueue2, humanUserId, "TC-REP-02 deduplicated");
+                    pepQueue1, 0, pepQueue2, 0, humanUserId, "TC-REP-02 deduplicated");
             assertTrue(rep02Ok, "TC-REP-02 重複Peppolの解決・結案成功");
 
             try (Statement s = conn.createStatement()) {
@@ -297,56 +324,61 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         }
 
         ExecutorService pool = Executors.newFixedThreadPool(2);
-        CountDownLatch startLatch = new CountDownLatch(1);
-        AtomicInteger successCount = new AtomicInteger(0);
-        AtomicInteger failureCount = new AtomicInteger(0);
+        try {
+            CountDownLatch startLatch = new CountDownLatch(1);
 
-        Future<?> f1 = pool.submit(() -> {
+            Callable<RepairOutcome> task1 = () -> {
+                try (Connection conn = createConnection(dbName)) {
+                    startLatch.await();
+                    return attemptInvoiceRepairCas(conn, concurrentInvoiceId, 0, "tenant-thread-1", 901L,
+                            concurrentQueueId, 0, humanUserId, "Thread 1 wins", "tenant-thread-1");
+                }
+            };
+
+            Callable<RepairOutcome> task2 = () -> {
+                try (Connection conn = createConnection(dbName)) {
+                    startLatch.await();
+                    return attemptInvoiceRepairCas(conn, concurrentInvoiceId, 0, "tenant-thread-2", 902L,
+                            concurrentQueueId, 0, humanUserId, "Thread 2 wins", "tenant-thread-2");
+                }
+            };
+
+            Future<RepairOutcome> f1 = pool.submit(task1);
+            Future<RepairOutcome> f2 = pool.submit(task2);
+
+            startLatch.countDown();
+
+            RepairOutcome r1 = f1.get(10, TimeUnit.SECONDS);
+            RepairOutcome r2 = f2.get(10, TimeUnit.SECONDS);
+
+            // 明確な競合敗北のみを許容 (予期せぬ例外はFutureでスローされていること)
+            boolean oneWinnerOneConflict = (r1 == RepairOutcome.SUCCESS && r2 == RepairOutcome.CAS_CONFLICT)
+                    || (r2 == RepairOutcome.SUCCESS && r1 == RepairOutcome.CAS_CONFLICT);
+            assertTrue(oneWinnerOneConflict, "1スレッドのみ成功し他方は明確なCAS競合敗北であること: r1=" + r1 + ", r2=" + r2);
+
             try (Connection conn = createConnection(dbName)) {
-                startLatch.await();
-                boolean ok = repairInvoiceInTransaction(
-                        conn, concurrentInvoiceId, 0, "tenant-thread-1", 901L,
-                        concurrentQueueId, 0, humanUserId, "Thread 1 wins", "tenant-thread-1");
-                if (ok) successCount.incrementAndGet(); else failureCount.incrementAndGet();
-            } catch (Exception e) {
-                failureCount.incrementAndGet();
+                String committedTenant = queryInvoiceTenant(conn, concurrentInvoiceId);
+                Long committedLegalEntity = queryInvoiceLegalEntity(conn, concurrentInvoiceId);
+                String loserTenant = "tenant-thread-1".equals(committedTenant) ? "tenant-thread-2" : "tenant-thread-1";
+                Long expectedLegalEntity = "tenant-thread-1".equals(committedTenant) ? 901L : 902L;
+
+                assertEquals(expectedLegalEntity, committedLegalEntity, "勝者の法人IDが反映されていること");
+
+                try (Statement s = conn.createStatement()) {
+                    assertEquals(0L, scalar(s, "SELECT COUNT(*) FROM t_digital_invoice WHERE tenant_id='" + loserTenant + "'"),
+                            "敗者のテナント値はDB内に1件も残存していないこと (dirty更新ゼロ残存)");
+                    assertEquals(1L, scalar(s, "SELECT version FROM t_digital_invoice WHERE id=" + concurrentInvoiceId),
+                    "インボイスのバージョンは勝者による1加算のみ");
+                    assertEquals("RESOLVED", queryQueueStatus(conn, concurrentQueueId));
+                    assertEquals(1L, scalar(s, "SELECT version FROM t_nf09_scope_repair_queue WHERE id=" + concurrentQueueId),
+                            "キューのバージョンは勝者による1加算のみ");
+                    assertEquals(humanUserId, queryQueueResolvedBy(conn, concurrentQueueId),
+                            "キューの解決者は勝者のhumanUserId");
+                }
             }
-        });
-
-        Future<?> f2 = pool.submit(() -> {
-            try (Connection conn = createConnection(dbName)) {
-                startLatch.await();
-                boolean ok = repairInvoiceInTransaction(
-                        conn, concurrentInvoiceId, 0, "tenant-thread-2", 902L,
-                        concurrentQueueId, 0, humanUserId, "Thread 2 wins", "tenant-thread-2");
-                if (ok) successCount.incrementAndGet(); else failureCount.incrementAndGet();
-            } catch (Exception e) {
-                failureCount.incrementAndGet();
-            }
-        });
-
-        startLatch.countDown();
-        f1.get(10, TimeUnit.SECONDS);
-        f2.get(10, TimeUnit.SECONDS);
-        pool.shutdown();
-
-        assertEquals(1, successCount.get(), "並行修復では先行1スレッドのみがコミット成功する");
-        assertEquals(1, failureCount.get(), "敗者スレッドは更新失敗・ロールバックする");
-
-        try (Connection conn = createConnection(dbName)) {
-            String committedTenant = queryInvoiceTenant(conn, concurrentInvoiceId);
-            assertTrue("tenant-thread-1".equals(committedTenant) || "tenant-thread-2".equals(committedTenant),
-                    "勝者のテナントのみが反映されていること");
-
-            // 敗者の更新痕跡がDBに一切残っていない（dirty な部分更新がない）ことを厳格にアサート
-            String loserTenant = "tenant-thread-1".equals(committedTenant) ? "tenant-thread-2" : "tenant-thread-1";
-            try (Statement s = conn.createStatement()) {
-                assertEquals(0L, scalar(s, "SELECT COUNT(*) FROM t_digital_invoice WHERE tenant_id='" + loserTenant + "'"),
-                        "敗者のテナント値はDB内に1件も残存していないこと");
-                assertEquals("RESOLVED", queryQueueStatus(conn, concurrentQueueId));
-                assertEquals(1L, scalar(s, "SELECT version FROM t_nf09_scope_repair_queue WHERE id=" + concurrentQueueId),
-                        "キューのバージョンは勝者による1加算のみ");
-            }
+        } finally {
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS), "有界時間内にスレッドプールが安全終了すること");
         }
     }
 
@@ -364,54 +396,38 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 "本番V182スクリプトのSHA-256が固定値と一致し改変されていないこと");
 
         String dbName = "ses_v182_fault_isolation";
-        Flyway flyway = flyway(dbName).target("181").load();
-        flyway.migrate();
+        // 隔離テストロケーションから意図的な失敗マイグレーションを注入し、確定的中途失敗を再現
+        FluentConfiguration faultConfig = flywayConfig(dbName)
+                .locations("classpath:db/migration", "classpath:migration-test/v182-fault");
 
-        // 隔離環境で意図的なDDLエラーを注入 (本番スクリプトは一切変更しない)
-        StringBuilder evidenceLog = new StringBuilder();
-        try (Connection conn = createConnection(dbName); Statement stmt = conn.createStatement()) {
-            SQLException injectedError = assertThrows(SQLException.class, () -> stmt.execute(
-                    "ALTER TABLE t_digital_invoice ADD CONSTRAINT chk_fault_injection "
-                            + "CHECK (direction IN ('INVALID_DIRECTION_FORCED_FAIL'))"),
-                    "意図的なDDLエラー注入");
+        FlywayException flywayError = assertThrows(FlywayException.class, () -> faultConfig.load().migrate(),
+                "隔離マイグレーションリソースによる確定的中途失敗がFlywayで検知されること");
 
-            // 5.2 証拠の完全退避シミュレーション
-            evidenceLog.append("=== FAILURE EVIDENCE ARCHIVE ===\n");
-            evidenceLog.append("Error Message: ").append(injectedError.getMessage()).append("\n");
-            evidenceLog.append("ErrorCode: ").append(injectedError.getErrorCode()).append("\n");
+        Path evidenceDir = Path.of("target/v182-rehearsal-evidence");
+        Files.createDirectories(evidenceDir);
 
-            // flyway_schema_historyダンプ
-            try (ResultSet rs = stmt.executeQuery("SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank")) {
-                while (rs.next()) {
-                    evidenceLog.append(String.format("History: %s | %s | success=%d\n",
-                            rs.getString(1), rs.getString(2), rs.getInt(3)));
-                }
-            }
-
-            // SHOW CREATE TABLE ダンプ
-            try (ResultSet rs = stmt.executeQuery("SHOW CREATE TABLE t_digital_invoice")) {
-                if (rs.next()) {
-                    evidenceLog.append("Schema DDL: ").append(rs.getString(2)).append("\n");
-                }
-            }
-
-            // 件数ダンプ
-            long invoiceCount = scalar(stmt, "SELECT COUNT(*) FROM t_digital_invoice");
-            evidenceLog.append("Invoice count: ").append(invoiceCount).append("\n");
+        // 5.2 証拠の完全退避シミュレーション: コンテナ破棄前に全アーティファクトを実ディスクへ落盤
+        try (Connection conn = createConnection(dbName)) {
+            dumpHistoryToDisk(conn, evidenceDir.resolve("flyway_schema_history.csv"));
+            dumpDdlToDisk(conn, evidenceDir.resolve("tables_ddl.sql"));
+            dumpCountsToDisk(conn, evidenceDir.resolve("table_counts.json"));
+            dumpQueueToDisk(conn, evidenceDir.resolve("scope_repair_queue.csv"));
+            dumpDiagnosticsToDisk(evidenceDir.resolve("execution_diagnostics.txt"), flywayError);
+            createManifestFile(evidenceDir);
         }
 
-        // 証拠マニフェストのSHA-256生成
-        String manifestDigest = HexFormat.of().formatHex(
-                MessageDigest.getInstance("SHA-256").digest(evidenceLog.toString().getBytes(StandardCharsets.UTF_8)));
-        assertNotNull(manifestDigest, "証拠退避マニフェストのハッシュが生成される");
-        assertTrue(evidenceLog.length() > 0, "証拠ログが取得・隔離されていること");
+        // 確証: 落盤された証拠ファイル群が存在し、読込可能であり、SHA-256マニフェストと完全一致することを検証
+        verifyPersistedEvidence(evidenceDir);
+
+        // 重要注釈: 本演練はクリーンリプレイによる証拠保全の事前検証であり、
+        // 本番環境における中途コミット破損状態からの部分マイグレーション回復を検証したと混称しない。
     }
 
     // =========================================================================
     // ヘルパーメソッド群
     // =========================================================================
 
-    private Flyway flyway(String dbName) throws SQLException {
+    private FluentConfiguration flywayConfig(String dbName) throws SQLException {
         ensureDatabase(dbName);
         String url = MYSQL.getJdbcUrl().replaceFirst("/[^/?]+(\\?|$)", "/" + dbName + "$1");
         return Flyway.configure()
@@ -459,6 +475,72 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         assertEquals(1L, scalar(stmt, "SELECT COUNT(*) FROM information_schema.columns "
                 + "WHERE table_schema=DATABASE() AND table_name='t_peppol_participant' "
                 + "AND column_name='callback_active_slot' AND extra LIKE '%VIRTUAL GENERATED%'"));
+    }
+
+    private void assertCompositeIndexes(Connection conn) throws SQLException {
+        // t_digital_invoice
+        assertIndexDefinition(conn, "t_digital_invoice", "uk_digital_invoice_scope_message", true,
+                List.of("tenant_id", "legal_entity_id", "message_id"));
+        assertIndexDefinition(conn, "t_digital_invoice", "uk_digital_invoice_scope_send", true,
+                List.of("tenant_id", "legal_entity_id", "invoice_id", "direction", "profile", "specification_version", "send_active_slot"));
+        assertIndexDefinition(conn, "t_digital_invoice", "uk_digital_invoice_scope_id", true,
+                List.of("tenant_id", "legal_entity_id", "id"));
+        assertIndexDefinition(conn, "t_digital_invoice", "idx_digital_invoice_scope_status", false,
+                List.of("tenant_id", "legal_entity_id", "direction", "status", "id"));
+        assertIndexDefinition(conn, "t_digital_invoice", "idx_digital_invoice_scope_invoice", false,
+                List.of("tenant_id", "legal_entity_id", "invoice_id", "direction", "profile", "id"));
+
+        // t_digital_invoice_event
+        assertIndexDefinition(conn, "t_digital_invoice_event", "idx_digital_invoice_event_scope", false,
+                List.of("tenant_id", "legal_entity_id", "digital_invoice_id", "event_at", "id"));
+
+        // t_peppol_participant
+        assertIndexDefinition(conn, "t_peppol_participant", "uk_peppol_scope_owner", true,
+                List.of("tenant_id", "legal_entity_id", "owner_type", "owner_id"));
+        assertIndexDefinition(conn, "t_peppol_participant", "uk_peppol_callback_active", true,
+                List.of("provider", "scheme_id", "participant_id", "callback_active_slot"));
+        assertIndexDefinition(conn, "t_peppol_participant", "idx_peppol_scope_owner", false,
+                List.of("tenant_id", "legal_entity_id", "owner_type", "owner_id", "deleted_flag"));
+        assertIndexDefinition(conn, "t_peppol_participant", "idx_peppol_callback_identity", false,
+                List.of("provider", "scheme_id", "participant_id", "status", "deleted_flag"));
+
+        // t_external_account_reference
+        assertIndexDefinition(conn, "t_external_account_reference", "uq_ext_scope_idempotency", true,
+                List.of("tenant_id", "legal_entity_id", "idempotency_key"));
+        assertIndexDefinition(conn, "t_external_account_reference", "idx_external_account_scope_target", false,
+                List.of("tenant_id", "legal_entity_id", "assignee_type", "assignee_id", "status"));
+        assertIndexDefinition(conn, "t_external_account_reference", "idx_external_account_scope_retry", false,
+                List.of("tenant_id", "legal_entity_id", "status", "next_retry_at"));
+
+        // t_nf09_scope_repair_queue
+        assertIndexDefinition(conn, "t_nf09_scope_repair_queue", "uk_nf09_scope_repair_entity", true,
+                List.of("entity_type", "entity_id"));
+        assertIndexDefinition(conn, "t_nf09_scope_repair_queue", "idx_nf09_scope_repair_status", false,
+                List.of("status", "entity_type", "created_at"));
+    }
+
+    private void assertIndexDefinition(Connection conn, String table, String indexName, boolean unique, List<String> expectedColumns) throws SQLException {
+        String sql = "SELECT non_unique, column_name "
+                + "FROM information_schema.statistics "
+                + "WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? "
+                + "ORDER BY seq_in_index";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, table);
+            ps.setString(2, indexName);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<String> actualColumns = new ArrayList<>();
+                Boolean actualUnique = null;
+                while (rs.next()) {
+                    if (actualUnique == null) {
+                        actualUnique = rs.getInt("non_unique") == 0;
+                    }
+                    actualColumns.add(rs.getString("column_name"));
+                }
+                assertNotNull(actualUnique, "インデックスが存在すること: " + table + "." + indexName);
+                assertEquals(unique, actualUnique, "一意性フラグの一致: " + table + "." + indexName);
+                assertEquals(expectedColumns, actualColumns, "有序列集合の一致: " + table + "." + indexName);
+            }
+        }
     }
 
     private Integer queryCallbackActiveSlot(Statement stmt, long id) throws Exception {
@@ -550,7 +632,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             long queueId, int expectedQueueVersion,
             long humanUserId, String note, String callerTenant) throws SQLException {
 
-        if (newTenant == null || newLegalEntity == null) {
+        if (newTenant == null || newTenant.isBlank() || newLegalEntity == null) {
             throw new IllegalArgumentException("未解決スコープ(NULL)のまま修復はできません");
         }
         if (callerTenant != null && !callerTenant.equals(newTenant)) {
@@ -605,16 +687,88 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         }
     }
 
-    private boolean repairPeppolConflictInTransaction(
-            Connection conn, long winnerId, long loserId,
-            String tenantId, long legalEntityId,
-            long winnerQueueId, long loserQueueId,
-            long humanUserId, String note) throws SQLException {
+    private enum RepairOutcome {
+        SUCCESS,
+        CAS_CONFLICT
+    }
+
+    private RepairOutcome attemptInvoiceRepairCas(
+            Connection conn, long invoiceId, int expectedInvoiceVersion,
+            String newTenant, Long newLegalEntity,
+            long queueId, int expectedQueueVersion,
+            long humanUserId, String note, String callerTenant) throws SQLException {
+
+        if (newTenant == null || newTenant.isBlank() || newLegalEntity == null) {
+            throw new IllegalArgumentException("未解決スコープ(NULL)のまま修復はできません");
+        }
+        if (callerTenant != null && !callerTenant.equals(newTenant)) {
+            throw new SecurityException("他テナント境界の修復権限がありません: " + callerTenant + " vs " + newTenant);
+        }
 
         boolean prevAuto = conn.getAutoCommit();
         conn.setAutoCommit(false);
         try {
-            // 勝者をVERIFIED, deleted_flag=0 に更新 (callback_active_slot=1 が導出される)
+            int invoiceUpdated;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE t_digital_invoice SET tenant_id=?, legal_entity_id=?, version=version+1 "
+                            + "WHERE id=? AND tenant_id IS NULL AND version=?")) {
+                ps.setString(1, newTenant);
+                ps.setLong(2, newLegalEntity);
+                ps.setLong(3, invoiceId);
+                ps.setInt(4, expectedInvoiceVersion);
+                invoiceUpdated = ps.executeUpdate();
+            }
+
+            if (invoiceUpdated != 1) {
+                conn.rollback();
+                return RepairOutcome.CAS_CONFLICT;
+            }
+
+            int queueUpdated;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE t_nf09_scope_repair_queue SET status='RESOLVED', resolved_at=NOW(), "
+                            + "resolved_by=?, resolution_note=?, version=version+1 "
+                            + "WHERE id=? AND status='PENDING' AND version=?")) {
+                ps.setLong(1, humanUserId);
+                ps.setString(2, note);
+                ps.setLong(3, queueId);
+                ps.setInt(4, expectedQueueVersion);
+                queueUpdated = ps.executeUpdate();
+            }
+
+            if (queueUpdated != 1) {
+                conn.rollback();
+                return RepairOutcome.CAS_CONFLICT;
+            }
+
+            conn.commit();
+            return RepairOutcome.SUCCESS;
+        } catch (SQLException e) {
+            conn.rollback();
+            if (e.getErrorCode() == 1213 || e.getErrorCode() == 1205) {
+                return RepairOutcome.CAS_CONFLICT;
+            }
+            throw e;
+        } finally {
+            conn.setAutoCommit(prevAuto);
+        }
+    }
+
+    private boolean repairPeppolConflictInTransaction(
+            Connection conn, long winnerId, long loserId,
+            String tenantId, Long legalEntityId,
+            long winnerQueueId, int expectedWinnerQueueVersion,
+            long loserQueueId, int expectedLoserQueueVersion,
+            long humanUserId, String note) throws SQLException {
+
+        if (tenantId == null || tenantId.isBlank() || legalEntityId == null) {
+            throw new IllegalArgumentException("Peppolスコープが未確定(NULL)のまま結案はできません");
+        }
+
+        boolean prevAuto = conn.getAutoCommit();
+        conn.setAutoCommit(false);
+        try {
+            // 勝者をVERIFIED, deleted_flag=0 に更新 (callback_active_slot=1 が自動導出される)
             try (PreparedStatement ps = conn.prepareStatement(
                     "UPDATE t_peppol_participant SET tenant_id=?, legal_entity_id=?, status='VERIFIED', "
                             + "verified_at=NOW(), deleted_flag=0 WHERE id=?")) {
@@ -627,7 +781,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 }
             }
 
-            // 敗者をDUPLICATE_DEPRECATEDに無効化 (callback_active_slot=NULL が導出される)
+            // 敗者をDUPLICATE_DEPRECATEDに無効化 (callback_active_slot=NULL が自動導出される)
             try (PreparedStatement ps = conn.prepareStatement(
                     "UPDATE t_peppol_participant SET tenant_id=?, legal_entity_id=?, status='DUPLICATE_DEPRECATED', "
                             + "verified_at=NULL, deleted_flag=0 WHERE id=?")) {
@@ -640,20 +794,39 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 }
             }
 
-            // 両キュー行のCAS結案
-            for (long qId : List.of(winnerQueueId, loserQueueId)) {
-                try (PreparedStatement ps = conn.prepareStatement(
-                        "UPDATE t_nf09_scope_repair_queue SET status='RESOLVED', resolved_at=NOW(), "
-                                + "resolved_by=?, resolution_note=?, version=version+1 "
-                                + "WHERE id=? AND status='PENDING'")) {
-                    ps.setLong(1, humanUserId);
-                    ps.setString(2, note);
-                    ps.setLong(3, qId);
-                    if (ps.executeUpdate() != 1) {
-                        conn.rollback();
-                        return false;
-                    }
-                }
+            // 両キュー行のexpected-version CAS結案
+            int wUpdated;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE t_nf09_scope_repair_queue SET status='RESOLVED', resolved_at=NOW(), "
+                            + "resolved_by=?, resolution_note=?, version=version+1 "
+                            + "WHERE id=? AND status='PENDING' AND version=?")) {
+                ps.setLong(1, humanUserId);
+                ps.setString(2, note);
+                ps.setLong(3, winnerQueueId);
+                ps.setInt(4, expectedWinnerQueueVersion);
+                wUpdated = ps.executeUpdate();
+            }
+
+            if (wUpdated != 1) {
+                conn.rollback();
+                return false;
+            }
+
+            int lUpdated;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE t_nf09_scope_repair_queue SET status='RESOLVED', resolved_at=NOW(), "
+                            + "resolved_by=?, resolution_note=?, version=version+1 "
+                            + "WHERE id=? AND status='PENDING' AND version=?")) {
+                ps.setLong(1, humanUserId);
+                ps.setString(2, note);
+                ps.setLong(3, loserQueueId);
+                ps.setInt(4, expectedLoserQueueVersion);
+                lUpdated = ps.executeUpdate();
+            }
+
+            if (lUpdated != 1) {
+                conn.rollback();
+                return false;
             }
 
             conn.commit();
@@ -666,6 +839,30 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         }
     }
 
+    private void attemptIllegalDuplicateActivation(Connection conn, long id1, long id2, String tenantId, long legalEntityId) throws SQLException {
+        boolean prevAuto = conn.getAutoCommit();
+        conn.setAutoCommit(false);
+        try {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE t_peppol_participant SET tenant_id=?, legal_entity_id=?, status='VERIFIED', "
+                            + "deleted_flag=0 WHERE id=?")) {
+                ps.setString(1, tenantId);
+                ps.setLong(2, legalEntityId);
+                ps.setLong(3, id1);
+                ps.executeUpdate();
+
+                ps.setString(1, tenantId);
+                ps.setLong(2, legalEntityId);
+                ps.setLong(3, id2);
+                ps.executeUpdate(); // uk_peppol_callback_active 重複違反 (1062) が発生する
+            }
+            conn.commit();
+        } finally {
+            conn.rollback();
+            conn.setAutoCommit(prevAuto);
+        }
+    }
+
     private long insertUnresolvedInvoice(Connection conn, String messageId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
                 "INSERT INTO t_digital_invoice (direction, profile, specification_version, message_id, status, "
@@ -673,26 +870,6 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                         + "('SEND', 'Standard', '1.0', ?, 'QUEUED', 'SYSTEM', 'SCHEDULER_POLL', NULL, 0, 0)",
                 Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, messageId);
-            ps.executeUpdate();
-            try (ResultSet keys = ps.getGeneratedKeys()) {
-                keys.next();
-                return keys.getLong(1);
-            }
-        }
-    }
-
-    private long insertPeppol(Connection conn, String provider, String scheme, String participantId,
-                              String status, java.sql.Timestamp verifiedAt, int deletedFlag) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO t_peppol_participant (owner_type, owner_id, provider, scheme_id, participant_id, "
-                        + "status, verified_at, deleted_flag) VALUES ('CUSTOMER', 1, ?, ?, ?, ?, ?, ?)",
-                Statement.RETURN_GENERATED_KEYS)) {
-            ps.setString(1, provider);
-            ps.setString(2, scheme);
-            ps.setString(3, participantId);
-            ps.setString(4, status);
-            ps.setTimestamp(5, verifiedAt);
-            ps.setInt(6, deletedFlag);
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 keys.next();
@@ -726,11 +903,47 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         }
     }
 
+    private Long queryInvoiceLegalEntity(Connection conn, long id) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT legal_entity_id FROM t_digital_invoice WHERE id=?")) {
+            ps.setLong(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    long val = rs.getLong(1);
+                    return rs.wasNull() ? null : val;
+                }
+                return null;
+            }
+        }
+    }
+
+    private String queryPeppolStatus(Connection conn, long id) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT status FROM t_peppol_participant WHERE id=?")) {
+            ps.setLong(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return rs.getString(1);
+                return null;
+            }
+        }
+    }
+
     private String queryQueueStatus(Connection conn, long id) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement("SELECT status FROM t_nf09_scope_repair_queue WHERE id=?")) {
             ps.setLong(1, id);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) return rs.getString(1);
+                return null;
+            }
+        }
+    }
+
+    private Long queryQueueResolvedBy(Connection conn, long id) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT resolved_by FROM t_nf09_scope_repair_queue WHERE id=?")) {
+            ps.setLong(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    long val = rs.getLong(1);
+                    return rs.wasNull() ? null : val;
+                }
                 return null;
             }
         }
@@ -762,6 +975,124 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         }
         return HexFormat.of().formatHex(md.digest()).toUpperCase();
     }
+
+    // =========================================================================
+    // 証拠ディスク落盤および検証ヘルパー (第5節)
+    // =========================================================================
+
+    private void dumpHistoryToDisk(Connection conn, Path targetFile) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append("installed_rank,version,description,type,script,checksum,installed_by,installed_on,execution_time,success\n");
+        try (Statement s = conn.createStatement();
+             ResultSet rs = s.executeQuery("SELECT installed_rank, version, description, type, script, checksum, installed_by, installed_on, execution_time, success FROM flyway_schema_history ORDER BY installed_rank")) {
+            while (rs.next()) {
+                sb.append(String.format("%d,%s,%s,%s,%s,%s,%s,%s,%d,%d\n",
+                        rs.getInt(1), rs.getString(2), rs.getString(3), rs.getString(4),
+                        rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8),
+                        rs.getInt(9), rs.getInt(10)));
+            }
+        }
+        Files.writeString(targetFile, sb.toString(), StandardCharsets.UTF_8);
+    }
+
+    private void dumpDdlToDisk(Connection conn, Path targetFile) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        for (String table : List.of("t_digital_invoice", "t_digital_invoice_event", "t_peppol_participant",
+                "t_external_account_reference", "t_nf09_scope_repair_queue")) {
+            try (Statement s = conn.createStatement();
+                 ResultSet rs = s.executeQuery("SHOW CREATE TABLE `" + table + "`")) {
+                if (rs.next()) {
+                    sb.append("/* Table: ").append(table).append(" */\n");
+                    sb.append(rs.getString(2)).append(";\n\n");
+                }
+            }
+        }
+        Files.writeString(targetFile, sb.toString(), StandardCharsets.UTF_8);
+    }
+
+    private void dumpCountsToDisk(Connection conn, Path targetFile) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\n");
+        List<String> tables = List.of("t_digital_invoice", "t_digital_invoice_event",
+                "t_peppol_participant", "t_external_account_reference", "t_nf09_scope_repair_queue");
+        try (Statement s = conn.createStatement()) {
+            for (int i = 0; i < tables.size(); i++) {
+                String table = tables.get(i);
+                long total = scalar(s, "SELECT COUNT(*) FROM `" + table + "`");
+                long nullTenant = 0;
+                long nullLegal = 0;
+                if (!"t_nf09_scope_repair_queue".equals(table)) {
+                    nullTenant = scalar(s, "SELECT COUNT(*) FROM `" + table + "` WHERE tenant_id IS NULL");
+                    nullLegal = scalar(s, "SELECT COUNT(*) FROM `" + table + "` WHERE legal_entity_id IS NULL");
+                }
+                sb.append(String.format("  \"%s\": { \"total\": %d, \"null_tenant\": %d, \"null_legal_entity\": %d }%s\n",
+                        table, total, nullTenant, nullLegal, i < tables.size() - 1 ? "," : ""));
+            }
+        }
+        sb.append("}\n");
+        Files.writeString(targetFile, sb.toString(), StandardCharsets.UTF_8);
+    }
+
+    private void dumpQueueToDisk(Connection conn, Path targetFile) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append("id,entity_type,entity_id,reason,candidate_tenant_id,candidate_legal_entity_id,status,version\n");
+        try (Statement s = conn.createStatement();
+             ResultSet rs = s.executeQuery("SELECT id, entity_type, entity_id, reason, candidate_tenant_id, candidate_legal_entity_id, status, version FROM t_nf09_scope_repair_queue ORDER BY id")) {
+            while (rs.next()) {
+                sb.append(String.format("%d,%s,%d,%s,%s,%s,%s,%d\n",
+                        rs.getLong(1), rs.getString(2), rs.getLong(3), rs.getString(4),
+                        rs.getString(5), rs.getString(6), rs.getString(7), rs.getInt(8)));
+            }
+        }
+        Files.writeString(targetFile, sb.toString(), StandardCharsets.UTF_8);
+    }
+
+    private void dumpDiagnosticsToDisk(Path targetFile, Exception ex) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== FAILURE DIAGNOSTICS ARCHIVE ===\n");
+        sb.append("Timestamp: ").append(java.time.Instant.now()).append("\n");
+        sb.append("Exception Class: ").append(ex.getClass().getName()).append("\n");
+        sb.append("Message: ").append(ex.getMessage()).append("\n");
+        sb.append("Note: This rehearsal verifies evidence preservation in disposable container (clean replay).\n");
+        sb.append("It does NOT claim verification of forward-fix or partial migration recovery.\n");
+        Files.writeString(targetFile, sb.toString(), StandardCharsets.UTF_8);
+    }
+
+    private void createManifestFile(Path evidenceDir) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        for (String file : List.of("flyway_schema_history.csv", "tables_ddl.sql", "table_counts.json",
+                "scope_repair_queue.csv", "execution_diagnostics.txt")) {
+            Path p = evidenceDir.resolve(file);
+            if (Files.isRegularFile(p)) {
+                String sha = computeFileSha256(p);
+                sb.append(sha).append("  ").append(file).append("\n");
+            }
+        }
+        Files.writeString(evidenceDir.resolve("manifest-sha256.txt"), sb.toString(), StandardCharsets.UTF_8);
+    }
+
+    private void verifyPersistedEvidence(Path evidenceDir) throws Exception {
+        Path manifestPath = evidenceDir.resolve("manifest-sha256.txt");
+        assertTrue(Files.isRegularFile(manifestPath), "マニフェストファイルが実ディスクに存在する");
+        List<String> lines = Files.readAllLines(manifestPath, StandardCharsets.UTF_8);
+        assertFalse(lines.isEmpty(), "マニフェストファイルに項目が記録されている");
+
+        for (String line : lines) {
+            String[] parts = line.split("\\s+");
+            assertEquals(2, parts.length, "マニフェスト行形式 (sha256 filename)");
+            String expectedHash = parts[0];
+            String filename = parts[1];
+            Path targetFile = evidenceDir.resolve(filename);
+            assertTrue(Files.isRegularFile(targetFile), "証拠ファイルが存在する: " + filename);
+            assertTrue(Files.size(targetFile) > 0, "証拠ファイルサイズが0より大きい: " + filename);
+            String actualHash = computeFileSha256(targetFile);
+            assertEquals(expectedHash, actualHash, "証拠ファイルのSHA-256検証一致: " + filename);
+        }
+    }
+
+    // =========================================================================
+    // 合成テストフィクスチャ生成 (第4節)
+    // =========================================================================
 
     private record SyntheticFixture(
             long invSingleOkId,
@@ -803,15 +1134,15 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         long evtSingle = insertDigitalInvoiceEvent(conn, dinvSingle, "evt-v181-single", "QUEUED");
         long evtUnresolved = insertDigitalInvoiceEvent(conn, dinvUnresolved, "evt-v181-unresolved", "FAILED");
 
-        // t_peppol_participant
-        long pepCust = insertPeppol(conn, "CUSTOMER", cust1, "pep-p1", "iso6523", "0147:c1", "VERIFIED", new java.sql.Timestamp(System.currentTimeMillis()));
-        long pepOther = insertPeppol(conn, "USER", 999L, "pep-p1", "iso6523", "0147:u999", "PENDING", null);
-        long pepDup1 = insertPeppol(conn, "CUSTOMER", cust2, "pep-dup", "iso6523", "0147:dup", "VERIFIED", new java.sql.Timestamp(System.currentTimeMillis()));
-        long pepDup2 = insertPeppol(conn, "CUSTOMER", cust3, "pep-dup", "iso6523", "0147:dup", "VERIFIED", new java.sql.Timestamp(System.currentTimeMillis()));
+        // t_peppol_participant (合法かつ区別可能な所有者で一意制約を遵守)
+        long pepCust = insertPeppol(conn, "CUSTOMER", cust1, "pep-p1", "iso6523", "0147:c1", "VERIFIED", new java.sql.Timestamp(System.currentTimeMillis()), 0);
+        long pepOther = insertPeppol(conn, "USER", 999L, "pep-p1", "iso6523", "0147:u999", "PENDING", null, 0);
+        long pepDup1 = insertPeppol(conn, "CUSTOMER", cust2, "pep-dup", "iso6523", "0147:dup", "VERIFIED", new java.sql.Timestamp(System.currentTimeMillis()), 0);
+        long pepDup2 = insertPeppol(conn, "CUSTOMER", cust3, "pep-dup", "iso6523", "0147:dup", "VERIFIED", new java.sql.Timestamp(System.currentTimeMillis()), 0);
 
-        // t_external_account_reference
-        long accEng = insertExternalAccount(conn, "ENGINEER", eng1, "idem-eng-1");
-        long accUser = insertExternalAccount(conn, "USER", 1L, "idem-user-1");
+        // t_external_account_reference (account_typeを除去し、system_idを付与)
+        long accEng = insertExternalAccount(conn, 1L, "ENGINEER", eng1, "idem-eng-1");
+        long accUser = insertExternalAccount(conn, 1L, "USER", 1L, "idem-user-1");
 
         return new SyntheticFixture(
                 dinvSingle, dinvMultiSame, dinvConflict, dinvUnresolved,
@@ -820,11 +1151,11 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 accEng, accUser);
     }
 
-    private long insertCustomer(Connection conn, String name, String tenantId, Long legalEntityId) throws SQLException {
+    private long insertCustomer(Connection conn, String companyName, String tenantId, Long legalEntityId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO m_customer (name, tenant_id, legal_entity_id, deleted_flag) VALUES (?, ?, ?, 0)",
+                "INSERT INTO m_customer (company_name, tenant_id, legal_entity_id, deleted_flag) VALUES (?, ?, ?, 0)",
                 Statement.RETURN_GENERATED_KEYS)) {
-            ps.setString(1, name);
+            ps.setString(1, companyName);
             ps.setString(2, tenantId);
             ps.setObject(3, legalEntityId);
             ps.executeUpdate();
@@ -953,10 +1284,10 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
     }
 
     private long insertPeppol(Connection conn, String ownerType, long ownerId, String provider, String schemeId,
-                              String participantId, String status, java.sql.Timestamp verifiedAt) throws SQLException {
+                              String participantId, String status, java.sql.Timestamp verifiedAt, int deletedFlag) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
                 "INSERT INTO t_peppol_participant (owner_type, owner_id, provider, scheme_id, participant_id, "
-                        + "status, verified_at, deleted_flag) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+                        + "status, verified_at, deleted_flag) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, ownerType);
             ps.setLong(2, ownerId);
@@ -965,6 +1296,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             ps.setString(5, participantId);
             ps.setString(6, status);
             ps.setTimestamp(7, verifiedAt);
+            ps.setInt(8, deletedFlag);
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 keys.next();
@@ -973,14 +1305,15 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         }
     }
 
-    private long insertExternalAccount(Connection conn, String assigneeType, long assigneeId, String idempotencyKey) throws SQLException {
+    private long insertExternalAccount(Connection conn, long systemId, String assigneeType, long assigneeId, String idempotencyKey) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO t_external_account_reference (assignee_type, assignee_id, account_type, account_identifier, "
-                        + "idempotency_key, status, deleted_flag) VALUES (?, ?, 'KEYCLOAK', 'ext-user-1', ?, 'ACTIVE', 0)",
+                "INSERT INTO t_external_account_reference (system_id, account_identifier, assignee_type, assignee_id, "
+                        + "idempotency_key, status, deleted_flag) VALUES (?, 'ext-user-1', ?, ?, ?, 'ACTIVE', 0)",
                 Statement.RETURN_GENERATED_KEYS)) {
-            ps.setString(1, assigneeType);
-            ps.setLong(2, assigneeId);
-            ps.setString(3, idempotencyKey);
+            ps.setLong(1, systemId);
+            ps.setString(2, assigneeType);
+            ps.setLong(3, assigneeId);
+            ps.setString(4, idempotencyKey);
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 keys.next();
