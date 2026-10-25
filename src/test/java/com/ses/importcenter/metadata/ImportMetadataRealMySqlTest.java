@@ -2449,7 +2449,10 @@ class ImportMetadataRealMySqlTest {
         Throwable primaryFailure = null;
         try {
             service = pool.submit(() -> withActorContext(serviceAction));
-            assertTrue(pause.entered.await(10, TimeUnit.SECONDS), "実candidate serviceのwrite gateに到達しませんでした");
+            if (!pause.entered.await(10, TimeUnit.SECONDS)) {
+                SOURCE_WAIT_FIXTURE_UNSAFE.set(true);
+                throw new AssertionError("実candidate serviceのwrite gateに到達しませんでした");
+            }
             assertGateRunsInReadCommittedTransaction(pause);
             SourcePrimaryRecordLock initialLock = exactSourceRecordLock(pause.connectionId.get(),
                     pause.transactionId.get(), pause.schema.get(), sourceId, true);
@@ -2462,15 +2465,12 @@ class ImportMetadataRealMySqlTest {
             return result;
         } catch (Throwable failure) {
             primaryFailure = failure;
-            if (failure instanceof java.util.concurrent.TimeoutException
-                    || failure instanceof java.util.concurrent.CancellationException) {
-                SOURCE_WAIT_FIXTURE_UNSAFE.set(true);
-            }
+            SOURCE_WAIT_FIXTURE_UNSAFE.set(true);
             throw failure;
         } finally {
             pause.release.countDown();
             reportCleanupFailures("candidate/source lock wait fixture",
-                    awaitFutures(futures(service, mutation), pool, false), primaryFailure);
+                    awaitSourceWorkers(futures(service, mutation), pool, false), primaryFailure);
         }
     }
 
@@ -2478,6 +2478,7 @@ class ImportMetadataRealMySqlTest {
                                                      Future<?> service, Future<?> mutation,
                                                      SourcePrimaryRecordLock initialLock) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        List<String> lastDiagnosticSnapshot = List.of("wait未観測");
         while (System.nanoTime() < deadline) {
             assertFuturePending(service, "candidate service");
             assertFuturePending(mutation, "source mutation");
@@ -2487,29 +2488,36 @@ class ImportMetadataRealMySqlTest {
                     SOURCE_WAIT_FIXTURE_UNSAFE.set(true);
                     throw new AssertionError("source mutationとservice connectionが同一です");
                 }
-                List<SourcePrimaryWaitEdge> waits = sourcePrimaryWaitEdges(requesterId, blockerId);
-                if (!waits.isEmpty()) {
+                List<SourcePrimaryWaitEdge> requesterEdges = sourcePrimaryWaitEdges(requesterId);
+                if (!requesterEdges.isEmpty()) {
+                    lastDiagnosticSnapshot = requesterEdges.stream()
+                            .map(edge -> "req=" + edge.requesterIndex() + "/" + edge.requesterData()
+                                    + ",holder=" + edge.holderConnectionId() + "/" + edge.holderLockId())
+                            .toList();
                     List<SourcePrimaryRecordLock> holderRecords = sourceRecordLocks(blockerId);
-                    if (!isExactSourcePrimaryWait(holderRecords, waits, initialLock, requesterId, blockerId, sourceId)) {
+                    if (!isExactSourcePrimaryWait(holderRecords, requesterEdges, initialLock, requesterId, blockerId, sourceId)) {
+                        List<String> details = safeWaitDetails(requesterId, blockerId);
                         SOURCE_WAIT_FIXTURE_UNSAFE.set(true);
                         throw new AssertionError("source wait evidenceが曖昧または期待外です: "
-                                + "waitCount=" + waits.size() + ", holderRecordCount=" + holderRecords.size()
-                                + "; waits=" + waits + "; holderRecords=" + holderRecords);
+                                + "requesterTotalWaitCount=" + requesterEdges.size() + ", holderRecordCount=" + holderRecords.size()
+                                + "; requesterEdges=" + requesterEdges + "; holderRecords=" + holderRecords
+                                + "; safeWaitDetails=" + details);
                     }
                     assertFuturePending(service, "source lockを保持中のcandidate service");
                     assertFuturePending(mutation, "source row mutation wait");
-                    return waits.get(0);
+                    return requesterEdges.get(0);
                 }
             }
             Thread.sleep(25);
         }
         checkWorkerFailures(service, "candidate service", mutation, "source mutation");
+        List<String> waitDetails = safeWaitDetails(requester.get(), blocker.get());
         SOURCE_WAIT_FIXTURE_UNSAFE.set(true);
         throw new AssertionError("candidate gate保持中のsource行ロック待機が確認できませんでした: "
                 + "requester/blocker=" + requester.get() + "/" + blocker.get()
                 + "; 許可index=PRIMARY(sourceId),uk_import_source_tenant_id(tenant_id,sourceId)"
                 + "; initialLock=" + initialLock
-                + "; safeWaitDetails=" + safeWaitDetails(requester.get(), blocker.get()));
+                + "; safeWaitDetails=" + (waitDetails.isEmpty() ? lastDiagnosticSnapshot : waitDetails));
     }
 
     private SourceLockWait awaitSourceLockWaitFromBlocker(long blockerId, AtomicReference<Long> requesterConnectionId,
@@ -2532,7 +2540,7 @@ class ImportMetadataRealMySqlTest {
                           ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
                         JOIN performance_schema.data_locks blk
                           ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
+                        WHERE wt.PROCESSLIST_ID=?
                           AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='t_import_source_system'
                           AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='t_import_source_system'
                           AND req.INDEX_NAME IN ('PRIMARY', 'uk_import_source_tenant_id')
@@ -2544,19 +2552,24 @@ class ImportMetadataRealMySqlTest {
                         """, (rs, row) -> new SourceLockWait(rs.getLong(1), rs.getLong(2),
                         rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
                         rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10)),
-                        requesterId, blockerId));
-                for (SourceLockWait wait : waits) {
-                    if (wait.requesterConnectionId() == requesterId && isExpectedSourceLock(wait)) return wait;
+                        requesterId));
+                if (waits.size() == 1) {
+                    SourceLockWait wait = waits.get(0);
+                    if (wait.requesterConnectionId() == requesterId && wait.blockerConnectionId() == blockerId
+                            && isExpectedSourceLock(wait)) {
+                        return wait;
+                    }
                 }
             }
             Thread.sleep(25);
         }
         checkWorkerFailures(blocker, "blocker service", requester, requesterLabel);
+        List<String> waitDetails = safeWaitDetails(requesterConnectionId.get(), blockerId);
         SOURCE_WAIT_FIXTURE_UNSAFE.set(true);
         throw new AssertionError(requesterLabel + "のsource行wait graphを確認できませんでした: requester="
                 + requesterConnectionId.get() + ", blocker=" + blockerId
                 + "; 許可index=PRIMARY(sourceId),uk_import_source_tenant_id(tenant_id,sourceId)"
-                + "; safeWaitDetails=" + safeWaitDetails(requesterConnectionId.get(), blockerId));
+                + "; safeWaitDetails=" + waitDetails);
     }
 
     private void checkWorkerFailures(Future<?> f1, String label1, Future<?> f2, String label2) throws Exception {
@@ -4275,34 +4288,6 @@ class ImportMetadataRealMySqlTest {
                 && !parts.contains("GAP") && !parts.contains("INSERT_INTENTION") && !parts.contains("SUPREMUM");
     }
 
-    private List<SourcePrimaryWaitEdge> sourcePrimaryWaitEdges(long requesterId, long holderId) {
-        return withSourceWaitObserverBudget(() -> jdbc.query("""
-                SELECT w.ENGINE,wt.PROCESSLIST_ID AS req_connection_id,req.ENGINE_LOCK_ID AS req_lock_id,
-                       req.ENGINE_TRANSACTION_ID AS req_trx_id,req.OBJECT_SCHEMA AS req_schema,
-                       req.OBJECT_NAME AS req_table,req.INDEX_NAME AS req_index,req.LOCK_TYPE AS req_type,
-                       req.LOCK_MODE AS req_mode,req.LOCK_STATUS AS req_status,req.LOCK_DATA AS req_data,
-                       bt.PROCESSLIST_ID AS holder_connection_id,blk.ENGINE_LOCK_ID AS holder_lock_id,
-                       blk.ENGINE_TRANSACTION_ID AS holder_trx_id,blk.OBJECT_SCHEMA AS holder_schema,
-                       blk.OBJECT_NAME AS holder_table,blk.INDEX_NAME AS holder_index,blk.LOCK_TYPE AS holder_type,
-                       blk.LOCK_MODE AS holder_mode,blk.LOCK_STATUS AS holder_status,blk.LOCK_DATA AS holder_data
-                FROM performance_schema.data_lock_waits w
-                JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
-                JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
-                JOIN performance_schema.data_locks req
-                  ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
-                JOIN performance_schema.data_locks blk
-                  ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
-                """, (rs, row) -> new SourcePrimaryWaitEdge(rs.getString("ENGINE"),
-                rs.getLong("req_connection_id"), rs.getString("req_lock_id"), rs.getString("req_trx_id"),
-                rs.getString("req_schema"), rs.getString("req_table"), rs.getString("req_index"),
-                rs.getString("req_type"), rs.getString("req_mode"), rs.getString("req_status"),
-                rs.getString("req_data"), rs.getLong("holder_connection_id"), rs.getString("holder_lock_id"),
-                rs.getString("holder_trx_id"), rs.getString("holder_schema"), rs.getString("holder_table"),
-                rs.getString("holder_index"), rs.getString("holder_type"), rs.getString("holder_mode"),
-                rs.getString("holder_status"), rs.getString("holder_data")), requesterId, holderId));
-    }
-
     private List<SourcePrimaryWaitEdge> sourcePrimaryWaitEdges(long requesterId) {
         return withSourceWaitObserverBudget(() -> jdbc.query("""
                 SELECT w.ENGINE,wt.PROCESSLIST_ID AS req_connection_id,req.ENGINE_LOCK_ID AS req_lock_id,
@@ -4704,6 +4689,9 @@ class ImportMetadataRealMySqlTest {
     }
 
     private List<String> safeWaitDetails(Long requesterId, Long blockerId) {
+        if (SOURCE_WAIT_FIXTURE_UNSAFE.get()) {
+            return List.of("source wait fixtureがunsafe状態のためobserver接続の新規確立を拒否しました");
+        }
         if (requesterId == null || blockerId == null) return List.of("waiter/blocker connection id未取得");
         try {
             return withSourceWaitObserverBudget(() -> jdbc.query("""
