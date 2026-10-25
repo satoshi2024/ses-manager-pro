@@ -202,12 +202,12 @@ final class PolicySecurityException extends SecurityException {
 }
 ```
 
-### 4.2 既存検証器の内部再利用、ACTIVE 白名单規約、Policy-only 入口
+### 4.2 既存検証器の内部再利用、ACTIVE 許可リスト規約、Policy-only 入口
 既存の Policy+Case 完全検証メソッド `verify(...)` の契約・シグネチャ・拒絶セマンティクスは一切改変せず維持する。
 内部共通検証ロジックを型付け例外送出方式へ統一し、`ApprovalEnvelopeVerifier` に Policy 単独検証入口 `verifyPolicyOnly` を追加する。
 
-* **失効状態の ACTIVE 白名单規約**:
-  1. `keyStatus == REVOKED` または `envelopeStatus == REVOKED` は、明示的失効として正確な個別理由（`KEY_REVOKED` / `ENVELOPE_REVOKED`）を返す。
+* **失効状態の ACTIVE 許可リスト規約**:
+  1. 明確な `REVOKED` 優先: `keyStatus == REVOKED` または `envelopeStatus == REVOKED` は、明示的失効として正確な個別理由（`KEY_REVOKED` / `ENVELOPE_REVOKED`）を返す。
   2. これに該当しない場合であっても、**`keyStatus != RevocationStatus.ACTIVE` または `envelopeStatus != RevocationStatus.ACTIVE` の場合は例外なくすべて拒絶する**（`null` や `UNKNOWN` も含む）。すべて `REVOCATION_STATUS_UNKNOWN`（`POLICY_UNKNOWN`）にマッピングする。
   3. 原 Policy+Case 検証経路も `if (keyStatus != RevocationStatus.ACTIVE || envelopeStatus != RevocationStatus.ACTIVE) deny(...)` であり、本照会経路によって安全水準を一切弱化させない。
 
@@ -333,7 +333,7 @@ public final class ApprovalEnvelopeVerifier {
             throw new PolicySecurityException(PolicyFailureReason.ENVELOPE_REVOKED, "envelope is revoked");
         }
 
-        // 2. ACTIVE 白名单原則: null、UNKNOWN、未定義ステータスはすべて REVOCATION_STATUS_UNKNOWN
+        // 2. ACTIVE 許可リスト原則: 明確な REVOKED 優先の後、null、UNKNOWN、未定義ステータスはすべて REVOCATION_STATUS_UNKNOWN
         if (keyStatus != RevocationStatus.ACTIVE || envelopeStatus != RevocationStatus.ACTIVE) {
             throw new PolicySecurityException(PolicyFailureReason.REVOCATION_STATUS_UNKNOWN, "key or envelope revocation status is not ACTIVE (includes null/UNKNOWN)");
         }
@@ -554,7 +554,7 @@ public enum PolicyFailureReason {
 | Step 4: 検証 | `tenantId`, `scope`, `dataElement`, `action`, `provider` 不一致 | `POLICY_DRIFT` | `*_MISMATCH` 各種 |
 | Step 5: 全合格 | 上記すべての不合格事由が存在しない | `APPROVED_ACTIVE` | `NONE` |
 
-> **注記（RevocationStatus の実態と完全網羅）**: 既存コードベース（`RevocationStatus.java`）に定義されているステータスは `ACTIVE`, `REVOKED`, `UNKNOWN` の 3 種のみである。`null` や未定義状態を含め、`ACTIVE` 以外は白名单原則によりすべて `REVOCATION_STATUS_UNKNOWN` として安全に拒絶する。
+> **注記（RevocationStatus の実態と完全網羅）**: 既存コードベース（`RevocationStatus.java`）に定義されているステータスは `ACTIVE`, `REVOKED`, `UNKNOWN` の 3 種のみである。明確な `REVOKED` 優先で判定し、それ以外の非 `ACTIVE`（`null` や未定義状態を含む）は許可リスト原則によりすべて `REVOCATION_STATUS_UNKNOWN` へマッピングして安全に拒絶する。
 
 ---
 
@@ -682,7 +682,7 @@ src/test/java/com/ses/privacy/foundation/
 4. [ ] `PolicyEnvelopeSource` が不透明 `revision` 文字列を保持し、数値ソートを行わず `currentRevision` / `currentDigest` に基づいて現在版を特定すること。
 5. [ ] `CURRENT_CANDIDATE` 取得時に `policyId`、`currentRevision`、`currentDigest` の三点照合が漏れなく実施され、不一致時にフォールバックせず `POLICY_DRIFT` で fail-closed すること。
 6. [ ] `ApprovalEnvelopeVerifier` に `verifyPolicyOnly` が追加され、Case の捏造なしに既存ロジックを再利用して型付け例外 `PolicySecurityException`（cause 対応）を送出すること。
-7. [ ] 失効検証において明示的 `REVOKED` を除き、`null` や `UNKNOWN` を含む非 `ACTIVE` 状態が白名单原則によりすべて `REVOCATION_STATUS_UNKNOWN` として安全に拒絶されること。
+7. [ ] 失効検証において明確な `REVOKED` 優先で判定され、それ以外の非 `ACTIVE`（`null` や `UNKNOWN` 含む）が許可リスト原則によりすべて `REVOCATION_STATUS_UNKNOWN` として安全に拒絶されること。
 8. [ ] プロファイル防護（`SyntheticEnvironmentGuard`）による拒絶が通常 DTO に丸め込まれず、例外として直接中断されること。
 9. [ ] 返却 DTO `PolicyExplanationResult` から許可ブール値が完全に削除され、純粋な説明メタデータのみとなっていること。
 10. [ ] NF03 の通常業務が不当に停止されないこと、および NF08 において許可リスト（ホワイトリスト）が未承認送信の口実にならないことが明文化されていること。
