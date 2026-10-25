@@ -7,13 +7,16 @@ import org.springframework.mock.env.MockEnvironment;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.Signature;
+import java.lang.reflect.RecordComponent;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -200,6 +203,38 @@ class PolicyReadonlyQueryServiceTest {
         PolicyExplanationResult result = service.evaluate(defaultQuery);
         assertEquals(PolicyDecisionStatus.POLICY_UNKNOWN, result.status());
         assertEquals(PolicyFailureReason.STORE_UNAVAILABLE, result.failureReason());
+    }
+
+    @Test
+    void testSource_StatusNullWithValidEnvelope_RefusesApprovedActive() {
+        PolicyApprovalEnvelope validEnvelope = sourceStorage.get(TENANT + ":" + POLICY_ID_PURGE + ":" + ELEMENT_AI_LOG + ":" + ACTION_PURGE + ":" + PROVIDER_DB).currentEnvelope();
+        String digest = ApprovalEnvelopeCanonicalizer.digest(ApprovalEnvelopeCanonicalizer.canonicalBytes(validEnvelope));
+        // status が null だが envelope, revision, digest はすべて正常な値を設定
+        sourceStorage.put(TENANT + ":" + POLICY_ID_PURGE + ":" + ELEMENT_AI_LOG + ":" + ACTION_PURGE + ":" + PROVIDER_DB,
+                new PolicyLookupResult(null, validEnvelope, "rev-1", digest));
+        PolicyReadonlyQueryService service = createService();
+
+        PolicyExplanationResult result = service.evaluate(defaultQuery);
+        assertNotEquals(PolicyDecisionStatus.APPROVED_ACTIVE, result.status());
+        assertEquals(PolicyDecisionStatus.POLICY_UNKNOWN, result.status());
+        assertEquals(PolicyFailureReason.POLICY_NOT_FOUND, result.failureReason());
+    }
+
+    @Test
+    void testSource_ExceptionThrows_ReturnsFixedJapaneseExplanationWithoutMarkerString() {
+        String sensitiveMarker = "INTERNAL_DB_SECRET_TOKEN_XYZ_12345";
+        policySource = (tenantId, policyId, dataElementId, action, providerId) -> {
+            throw new RuntimeException("DB connection error with marker: " + sensitiveMarker);
+        };
+        PolicyReadonlyQueryService service = createService();
+
+        PolicyExplanationResult result = service.evaluate(defaultQuery);
+        assertEquals(PolicyDecisionStatus.POLICY_UNKNOWN, result.status());
+        assertEquals(PolicyFailureReason.STORE_UNAVAILABLE, result.failureReason());
+        assertNotNull(result.explanationReason());
+        assertEquals("ポリシーソースの照会中に例外が発生しました", result.explanationReason());
+        assertFalse(result.explanationReason().contains(sensitiveMarker));
+        assertFalse(result.explanationReason().contains("INTERNAL_DB_SECRET_TOKEN"));
     }
 
     @Test
@@ -490,7 +525,18 @@ class PolicyReadonlyQueryServiceTest {
         assertTrue(result.expiresAt().isPresent());
         assertNotNull(result.explanationReason());
 
-        // 実行 Capability や権限フラグが存在しないことを確認
-        assertFalse(result.getClass().toGenericString().contains("Permitted"));
+        // 実行 Capability や権限フラグが存在しないことを確認（Record Component の許可フィールド集合検証）
+        Set<String> allowedFieldNames = Set.of(
+                "status", "failureReason", "policyVersion", "policyDigest",
+                "dataElementId", "targetAction", "targetProvider", "scope",
+                "effectiveFrom", "expiresAt", "explanationReason"
+        );
+        RecordComponent[] components = PolicyExplanationResult.class.getRecordComponents();
+        assertNotNull(components);
+        Set<String> actualFieldNames = Arrays.stream(components)
+                .map(RecordComponent::getName)
+                .collect(Collectors.toSet());
+        assertEquals(allowedFieldNames, actualFieldNames);
+        assertTrue(actualFieldNames.stream().noneMatch(name -> name.toLowerCase().contains("permitted")));
     }
 }

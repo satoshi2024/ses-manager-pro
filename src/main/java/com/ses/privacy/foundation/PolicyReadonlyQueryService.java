@@ -41,26 +41,26 @@ final class PolicyReadonlyQueryService implements PolicyReadonlyQueryPort {
         // Step 1: 呼び出し元検証
         Optional<TrustedCallerContext> callerOpt = callerProvider.getCallerContext();
         if (callerOpt.isEmpty() || callerOpt.get().actorId().isBlank()) {
-            return failureResult(PolicyDecisionStatus.ACCESS_DENIED, PolicyFailureReason.MISSING_CALLER_IDENTITY, query, "missing caller identity");
+            return failureResult(PolicyDecisionStatus.ACCESS_DENIED, PolicyFailureReason.MISSING_CALLER_IDENTITY, query, "呼び出し元の身元情報が不足しています");
         }
         TrustedCallerContext caller = callerOpt.get();
         if (!caller.tenantId().equals(query.tenantId())) {
-            return failureResult(PolicyDecisionStatus.ACCESS_DENIED, PolicyFailureReason.CALLER_TENANT_MISMATCH, query, "caller tenant mismatch");
+            return failureResult(PolicyDecisionStatus.ACCESS_DENIED, PolicyFailureReason.CALLER_TENANT_MISMATCH, query, "呼び出し元テナントIDが照会パラメータと一致しません");
         }
         if (!caller.actorId().equals(query.actorId())) {
-            return failureResult(PolicyDecisionStatus.ACCESS_DENIED, PolicyFailureReason.CALLER_ACTOR_MISMATCH, query, "caller actor mismatch");
+            return failureResult(PolicyDecisionStatus.ACCESS_DENIED, PolicyFailureReason.CALLER_ACTOR_MISMATCH, query, "呼び出し元アクターIDが照会パラメータと一致しません");
         }
         if (caller.actorRole() != TrustedActorRole.ROLE_SYSTEM_SERVICE
                 && caller.actorRole() != TrustedActorRole.ROLE_PRIVACY_AUDITOR
                 && caller.actorRole() != TrustedActorRole.ROLE_ADMIN) {
-            return failureResult(PolicyDecisionStatus.ACCESS_DENIED, PolicyFailureReason.UNAUTHORIZED_ACTOR_ROLE, query, "unauthorized actor role");
+            return failureResult(PolicyDecisionStatus.ACCESS_DENIED, PolicyFailureReason.UNAUTHORIZED_ACTOR_ROLE, query, "呼び出し元ロールにはポリシー照会権限がありません");
         }
 
         // Step 2: カタログ検索
         Optional<SyntheticPolicyCatalog.CatalogEntry> catalogEntryOpt = catalog.resolve(
                 query.moduleCode(), query.dataElementId(), query.targetAction(), query.targetProvider());
         if (catalogEntryOpt.isEmpty()) {
-            return failureResult(PolicyDecisionStatus.POLICY_UNKNOWN, PolicyFailureReason.POLICY_NOT_FOUND, query, "entry not found in catalog");
+            return failureResult(PolicyDecisionStatus.POLICY_UNKNOWN, PolicyFailureReason.POLICY_NOT_FOUND, query, "カタログに該当するポリシー定義が存在しません");
         }
         SyntheticPolicyCatalog.CatalogEntry catalogEntry = catalogEntryOpt.get();
 
@@ -70,34 +70,40 @@ final class PolicyReadonlyQueryService implements PolicyReadonlyQueryPort {
             lookupResult = policySource.lookupCurrentPolicy(
                     query.tenantId(), catalogEntry.policyId(), query.dataElementId(), query.targetAction(), query.targetProvider());
         } catch (RuntimeException e) {
-            return failureResult(PolicyDecisionStatus.POLICY_UNKNOWN, PolicyFailureReason.STORE_UNAVAILABLE, query, "policy source lookup failed: " + e.getMessage());
+            return failureResult(PolicyDecisionStatus.POLICY_UNKNOWN, PolicyFailureReason.STORE_UNAVAILABLE, query, "ポリシーソースの照会中に例外が発生しました");
         }
 
-        if (lookupResult == null || lookupResult.status() == PolicyLookupResult.LookupStatus.NOT_FOUND) {
-            return failureResult(PolicyDecisionStatus.POLICY_UNKNOWN, PolicyFailureReason.POLICY_NOT_FOUND, query, "current policy not found in source");
+        if (lookupResult == null) {
+            return failureResult(PolicyDecisionStatus.POLICY_UNKNOWN, PolicyFailureReason.POLICY_NOT_FOUND, query, "ポリシーソースから結果を取得できませんでした");
+        }
+        if (lookupResult.status() == PolicyLookupResult.LookupStatus.NOT_FOUND) {
+            return failureResult(PolicyDecisionStatus.POLICY_UNKNOWN, PolicyFailureReason.POLICY_NOT_FOUND, query, "現在有効なポリシーがソースに存在しません");
         }
         if (lookupResult.status() == PolicyLookupResult.LookupStatus.UNAPPROVED) {
-            return failureResult(PolicyDecisionStatus.POLICY_UNKNOWN, PolicyFailureReason.POLICY_UNAPPROVED, query, "current policy is unapproved");
+            return failureResult(PolicyDecisionStatus.POLICY_UNKNOWN, PolicyFailureReason.POLICY_UNAPPROVED, query, "ポリシーは未承認です");
         }
         if (lookupResult.status() == PolicyLookupResult.LookupStatus.STORE_UNAVAILABLE) {
-            return failureResult(PolicyDecisionStatus.POLICY_UNKNOWN, PolicyFailureReason.STORE_UNAVAILABLE, query, "policy store is unavailable");
+            return failureResult(PolicyDecisionStatus.POLICY_UNKNOWN, PolicyFailureReason.STORE_UNAVAILABLE, query, "ポリシーストアが利用できません");
+        }
+        if (lookupResult.status() != PolicyLookupResult.LookupStatus.CURRENT_CANDIDATE) {
+            return failureResult(PolicyDecisionStatus.POLICY_UNKNOWN, PolicyFailureReason.POLICY_NOT_FOUND, query, "有効なポリシー候補ステータスではありません");
         }
 
         PolicyApprovalEnvelope candidate = lookupResult.currentEnvelope();
         if (candidate == null) {
-            return failureResult(PolicyDecisionStatus.POLICY_UNKNOWN, PolicyFailureReason.POLICY_NOT_FOUND, query, "current candidate envelope is null");
+            return failureResult(PolicyDecisionStatus.POLICY_UNKNOWN, PolicyFailureReason.POLICY_NOT_FOUND, query, "ポリシーエンベロープ候補がnullです");
         }
 
         // Step 3.1: 候補三点照合
         if (!candidate.policyId().equals(catalogEntry.policyId())) {
-            return failureResult(PolicyDecisionStatus.POLICY_DRIFT, PolicyFailureReason.POLICY_ID_MISMATCH, query, "candidate policyId does not match catalog");
+            return failureResult(PolicyDecisionStatus.POLICY_DRIFT, PolicyFailureReason.POLICY_ID_MISMATCH, query, "候補ポリシーIDがカタログ定義と一致しません");
         }
         if (!candidate.metadata().revision().equals(lookupResult.currentRevision())) {
-            return failureResult(PolicyDecisionStatus.POLICY_DRIFT, PolicyFailureReason.REVISION_MISMATCH, query, "candidate revision does not match source currentRevision");
+            return failureResult(PolicyDecisionStatus.POLICY_DRIFT, PolicyFailureReason.REVISION_MISMATCH, query, "候補リビジョンがソースの現在リビジョンと一致しません");
         }
         String canonicalDigest = ApprovalEnvelopeCanonicalizer.digest(ApprovalEnvelopeCanonicalizer.canonicalBytes(candidate));
         if (!canonicalDigest.equals(lookupResult.currentDigest())) {
-            return failureResult(PolicyDecisionStatus.POLICY_DRIFT, PolicyFailureReason.DIGEST_MISMATCH, query, "candidate digest does not match source currentDigest");
+            return failureResult(PolicyDecisionStatus.POLICY_DRIFT, PolicyFailureReason.DIGEST_MISMATCH, query, "候補ダイジェストがソースの現在ダイジェストと一致しません");
         }
 
         // Step 4: ポリシー単独検証
@@ -124,7 +130,7 @@ final class PolicyReadonlyQueryService implements PolicyReadonlyQueryPort {
                 verifiedMetadata.scope(),
                 Optional.of(verifiedMetadata.effectiveAt()),
                 Optional.of(verifiedMetadata.expiresAt()),
-                "policy is verified and active (explanation only, no execution capability granted)"
+                "ポリシーは有効に検証されました（説明情報のみ、実行認可は付与されません）"
         );
     }
 
