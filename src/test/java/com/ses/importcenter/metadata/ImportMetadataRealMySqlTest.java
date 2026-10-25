@@ -90,6 +90,7 @@ class ImportMetadataRealMySqlTest {
     private static final String LOOKUP_KEY_VERSION = "nf06-test-key-v1";
     private static final byte[] LOOKUP_KEY = new byte[32];
     private static final AtomicBoolean SOURCE_WAIT_FIXTURE_UNSAFE = new AtomicBoolean();
+    private static final AtomicBoolean ACTOR_WAIT_FIXTURE_UNSAFE = new AtomicBoolean();
     private static final int SOURCE_WAIT_LOCK_SECONDS = 10;
     private static final int SOURCE_WAIT_NETWORK_MILLIS = 20_000;
     private static final int SOURCE_WAIT_FUTURE_SECONDS = 25;
@@ -144,8 +145,8 @@ class ImportMetadataRealMySqlTest {
 
     @BeforeEach
     void prepareAuthorizedFixture() {
-        if (SOURCE_WAIT_FIXTURE_UNSAFE.get()) {
-            throw new AssertionError("source lock workerの終了を確認できなかったため、以降のfixtureを安全に開始できません");
+        if (SOURCE_WAIT_FIXTURE_UNSAFE.get() || ACTOR_WAIT_FIXTURE_UNSAFE.get()) {
+            throw new AssertionError("lock wait worker/observerの終了または状態を確認できなかったため、以降のfixtureを安全に開始できません");
         }
         storage.resetOpenCount();
         tenantId = TEST_TENANT;
@@ -219,7 +220,7 @@ class ImportMetadataRealMySqlTest {
     void cleanupFixture() {
         SecurityContextHolder.clearContext();
         AccountingTenantContextHolder.clear();
-        if (SOURCE_WAIT_FIXTURE_UNSAFE.get()) return;
+        if (SOURCE_WAIT_FIXTURE_UNSAFE.get() || ACTOR_WAIT_FIXTURE_UNSAFE.get()) return;
         if (tenantId == null) return;
         if (documentId > 0) {
             jdbc.update("DELETE FROM t_document_access_log WHERE document_id=?", documentId);
@@ -1058,10 +1059,47 @@ class ImportMetadataRealMySqlTest {
     void appendのwriteGateが先ならactor変更はchunkcommitまで待機する() throws Exception {
         prepareBoundCustomerJob();
         var lease = lifecycleService.start(lifecycleService.beginStart(jobId));
-        GatePause pause = pauseRealWriteGateAt(3);
-        assertServiceCommitsBeforeMutation(pause, "sys_user",
-                "UPDATE sys_user SET status=0 WHERE tenant_id=? AND id=?",
-                new Object[]{tenantId, actorUserId}, () -> validationAppendService.appendRemaining(lease), true);
+        ActorGatePause pause = pauseRealActorWriteGateAt(3);
+        ExecutorService pool = newActorWaitExecutor();
+        AtomicReference<Long> actorMutationConnectionId = new AtomicReference<>();
+        Future<?> append = null;
+        Future<?> mutation = null;
+        Throwable primaryFailure = null;
+        try {
+            append = pool.submit(() -> withActorContext(() -> validationAppendService.appendRemaining(lease)));
+            if (!pause.entered.await(10, TimeUnit.SECONDS)) {
+                ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                throw new AssertionError("appendのactor write gateに有限時間内に到達しませんでした");
+            }
+            ActorAuthorizationBinding binding = pause.binding.get();
+            assertTrue(binding != null, "実service transactionからactor identityを取得します");
+            assertEquals(tenantId, binding.tenantId());
+            assertEquals(actorUserId, binding.actorUserId());
+            ActorPrimaryRecordLock initialLock = exactActorPrimaryRecordLock(binding, actorUserId, true);
+            mutation = pool.submit(() -> runActorMutationWithBudget(actorMutationConnectionId,
+                    "UPDATE sys_user SET status=0 WHERE tenant_id=? AND id=?", tenantId, actorUserId));
+            ActorPrimaryWaitEdge observed = awaitExactActorPrimaryWait(binding, initialLock,
+                    actorMutationConnectionId, append, mutation, actorUserId);
+            System.out.printf("NF06 actor PRIMARY lock wait確認: requester=%d holder=%d actorId=%d engine=%s holderLock=%s holderTrx=%s index=%s%n",
+                    observed.requesterConnectionId(), observed.holderConnectionId(), actorUserId,
+                    observed.engine(), observed.holderLockId(), observed.holderTransactionId(), observed.holderIndex());
+            assertFuturePending(append, "actorを保持するappend service");
+            assertFuturePending(mutation, "actor status mutation");
+            pause.release.countDown();
+            append.get(12, TimeUnit.SECONDS);
+            mutation.get(12, TimeUnit.SECONDS);
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            if (failure instanceof java.util.concurrent.TimeoutException
+                    || failure instanceof java.util.concurrent.CancellationException) {
+                ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+            }
+            throw failure;
+        } finally {
+            pause.release.countDown();
+            reportCleanupFailures("actor write gate競合fixture", awaitActorWaitWorkers(futures(append, mutation), pool),
+                    primaryFailure);
+        }
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
                 Integer.class, tenantId, jobId, lease.runId()));
         assertEquals(0, jdbc.queryForObject("SELECT status FROM sys_user WHERE tenant_id=? AND id=?", Integer.class, tenantId, actorUserId));
@@ -1558,6 +1596,144 @@ class ImportMetadataRealMySqlTest {
                 "holderの非NULL lock keyが期待source IDと違えば拒否");
         assertTrue(!isExactSourcePrimaryWait(List.of(holder), List.of(edge, edge), 72L, 71L, 301L),
                 "wait edgeが複数なら曖昧として拒否");
+    }
+
+    @Test
+    void actorPrimaryWaitOracleはkey非表示後も同一actorlockだけを認め誤証拠を拒否する() {
+        ActorAuthorizationBinding binding = new ActorAuthorizationBinding("tenant-a", 301L, 71L,
+                "holder-trx", "nf06_import_metadata_real");
+        ActorPrimaryRecordLock captured = new ActorPrimaryRecordLock("INNODB", "actor-lock", "holder-trx",
+                71L, binding.schema(), "sys_user", "PRIMARY", "RECORD", "X,REC_NOT_GAP", "GRANTED", "301");
+        ActorPrimaryRecordLock hiddenKeyAfterWait = new ActorPrimaryRecordLock("INNODB", "actor-lock", "holder-trx",
+                71L, binding.schema(), "sys_user", "PRIMARY", "RECORD", "X,REC_NOT_GAP", "GRANTED", null);
+        ActorPrimaryWaitEdge edge = new ActorPrimaryWaitEdge("INNODB", 72L, "request-lock", "request-trx",
+                binding.schema(), "sys_user", "PRIMARY", "RECORD", "X,REC_NOT_GAP", "WAITING", null,
+                71L, "actor-lock", "holder-trx", binding.schema(), "sys_user", "PRIMARY", "RECORD",
+                "X,REC_NOT_GAP", "GRANTED", null);
+
+        assertTrue(isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(edge), captured, binding, 72L, "tenant-a", 301L),
+                "初回keyがactor IDと確認済みなら、wait中のNULL LOCK_DATAは不可視として扱いlock identityで照合する");
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(edge), captured,
+                binding, 72L, "tenant-b", 301L), "誤tenantを拒否");
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(edge),
+                new ActorPrimaryRecordLock("INNODB", "actor-lock", "holder-trx", 71L, binding.schema(),
+                        "sys_user", "PRIMARY", "RECORD", "X,REC_NOT_GAP", "GRANTED", "302"),
+                binding, 72L, "tenant-a", 301L), "初回に見える誤keyを拒否");
+        assertTrue(!isExactActorPrimaryWait(List.of(new ActorPrimaryRecordLock("INNODB", "actor-lock", "holder-trx",
+                73L, binding.schema(), "sys_user", "PRIMARY", "RECORD", "X,REC_NOT_GAP", "GRANTED", null)),
+                List.of(edge), captured, binding, 72L, "tenant-a", 301L), "誤connectionを拒否");
+        assertTrue(!isExactActorPrimaryWait(List.of(new ActorPrimaryRecordLock("INNODB", "actor-lock", "other-trx",
+                71L, binding.schema(), "sys_user", "PRIMARY", "RECORD", "X,REC_NOT_GAP", "GRANTED", null)),
+                List.of(edge), captured, binding, 72L, "tenant-a", 301L), "誤transactionを拒否");
+        assertTrue(!isExactActorPrimaryWait(List.of(new ActorPrimaryRecordLock("INNODB", "other-lock", "holder-trx",
+                71L, binding.schema(), "sys_user", "PRIMARY", "RECORD", "X,REC_NOT_GAP", "GRANTED", null)),
+                List.of(edge), captured, binding, 72L, "tenant-a", 301L), "誤lock IDを拒否");
+        ActorPrimaryWaitEdge wrongRequester = new ActorPrimaryWaitEdge(edge.engine(), 73L, edge.requesterLockId(),
+                edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(), edge.requesterIndex(),
+                edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), edge.requesterData(),
+                edge.holderConnectionId(), edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(),
+                edge.holderTable(), edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), edge.holderData());
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(wrongRequester), captured,
+                binding, 72L, "tenant-a", 301L), "wait edgeの誤requester connectionを拒否");
+        ActorPrimaryWaitEdge wrongHolderTrx = new ActorPrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(),
+                edge.requesterIndex(), edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), edge.requesterData(),
+                edge.holderConnectionId(), edge.holderLockId(), "other-trx", edge.holderSchema(), edge.holderTable(),
+                edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), edge.holderData());
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(wrongHolderTrx), captured,
+                binding, 72L, "tenant-a", 301L), "wait edgeの誤holder transactionを拒否");
+        ActorPrimaryWaitEdge wrongHolderLock = new ActorPrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(),
+                edge.requesterIndex(), edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), edge.requesterData(),
+                edge.holderConnectionId(), "other-lock", edge.holderTransactionId(), edge.holderSchema(), edge.holderTable(),
+                edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), edge.holderData());
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(wrongHolderLock), captured,
+                binding, 72L, "tenant-a", 301L), "wait edgeの誤holder lock IDを拒否");
+        ActorPrimaryWaitEdge sameTransaction = new ActorPrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), "holder-trx", edge.requesterSchema(), edge.requesterTable(), edge.requesterIndex(),
+                edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), edge.requesterData(),
+                edge.holderConnectionId(), edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(),
+                edge.holderTable(), edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), edge.holderData());
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(sameTransaction), captured,
+                binding, 72L, "tenant-a", 301L), "同一requester/holder transactionを拒否");
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait, hiddenKeyAfterWait), List.of(edge),
+                captured, binding, 72L, "tenant-a", 301L), "複数のsys_user PRIMARY RECORD lockを拒否");
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(edge, edge), captured,
+                binding, 72L, "tenant-a", 301L), "複数wait edgeを拒否");
+        assertTrue(!isExactActorPrimaryWait(List.of(new ActorPrimaryRecordLock("INNODB", "actor-lock", "holder-trx",
+                71L, binding.schema(), "sys_user", "PRIMARY", "RECORD", "X,GAP", "GRANTED", null)),
+                List.of(edge), captured, binding, 72L, "tenant-a", 301L), "gap lockを拒否");
+        assertTrue(!isExactActorPrimaryWait(List.of(new ActorPrimaryRecordLock("INNODB", "actor-lock", "holder-trx",
+                71L, binding.schema(), "sys_user", "PRIMARY", "RECORD", "S,REC_NOT_GAP", "GRANTED", null)),
+                List.of(edge), captured, binding, 72L, "tenant-a", 301L), "S lockを拒否");
+        assertTrue(!isExactActorPrimaryWait(List.of(new ActorPrimaryRecordLock("INNODB", "actor-lock", "holder-trx",
+                71L, binding.schema(), "t_import_job", "PRIMARY", "RECORD", "X,REC_NOT_GAP", "GRANTED", null)),
+                List.of(edge), captured, binding, 72L, "tenant-a", 301L), "別tableを拒否");
+        ActorPrimaryWaitEdge visibleWrongKey = new ActorPrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(),
+                edge.requesterIndex(), edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), "302",
+                edge.holderConnectionId(), edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(),
+                edge.holderTable(), edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), null);
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(visibleWrongKey), captured,
+                binding, 72L, "tenant-a", 301L), "wait edge上で可視の誤keyを拒否");
+        ActorPrimaryWaitEdge wrongWaitMode = new ActorPrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(),
+                edge.requesterIndex(), edge.requesterType(), "S,REC_NOT_GAP", edge.requesterStatus(), edge.requesterData(),
+                edge.holderConnectionId(), edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(),
+                edge.holderTable(), edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), edge.holderData());
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(wrongWaitMode), captured,
+                binding, 72L, "tenant-a", 301L), "wait edgeのS lockを拒否");
+        ActorPrimaryWaitEdge wrongWaitTable = new ActorPrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(),
+                edge.requesterIndex(), edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), edge.requesterData(),
+                edge.holderConnectionId(), edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(),
+                "t_import_job", edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), edge.holderData());
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(wrongWaitTable), captured,
+                binding, 72L, "tenant-a", 301L), "wait edgeの別tableを拒否");
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(edge), captured,
+                binding, 72L, "tenant-a", 302L), "誤actor IDを拒否");
+        ActorAuthorizationBinding wrongActorBinding = new ActorAuthorizationBinding("tenant-a", 302L, 71L,
+                "holder-trx", binding.schema());
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(edge), captured,
+                wrongActorBinding, 72L, "tenant-a", 301L), "bindingの誤actor IDを拒否");
+        ActorPrimaryWaitEdge wrongHolderConnection = new ActorPrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(),
+                edge.requesterIndex(), edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), edge.requesterData(),
+                73L, edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(), edge.holderTable(),
+                edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), edge.holderData());
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(wrongHolderConnection), captured,
+                binding, 72L, "tenant-a", 301L), "wait edgeの誤holder connectionを拒否");
+        ActorPrimaryWaitEdge visibleWrongHolderKey = new ActorPrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(),
+                edge.requesterIndex(), edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), null,
+                edge.holderConnectionId(), edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(),
+                edge.holderTable(), edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), "302");
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(visibleWrongHolderKey), captured,
+                binding, 72L, "tenant-a", 301L), "wait edge上で可視の誤holder keyを拒否");
+        ActorPrimaryWaitEdge wrongHolderMode = new ActorPrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(),
+                edge.requesterIndex(), edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), edge.requesterData(),
+                edge.holderConnectionId(), edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(),
+                edge.holderTable(), edge.holderIndex(), edge.holderType(), "S,REC_NOT_GAP", edge.holderStatus(), edge.holderData());
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(wrongHolderMode), captured,
+                binding, 72L, "tenant-a", 301L), "wait edgeのholder S lockを拒否");
+        ActorPrimaryWaitEdge wrongRequesterGap = new ActorPrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(),
+                edge.requesterIndex(), edge.requesterType(), "X,GAP", edge.requesterStatus(), edge.requesterData(),
+                edge.holderConnectionId(), edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(),
+                edge.holderTable(), edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), edge.holderData());
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(wrongRequesterGap), captured,
+                binding, 72L, "tenant-a", 301L), "wait edgeのgap lockを拒否");
+        assertTrue(!isExactActorPrimaryWait(List.of(new ActorPrimaryRecordLock("INNODB", "actor-lock", "holder-trx",
+                71L, binding.schema(), "sys_user", "PRIMARY", "TABLE", "X,REC_NOT_GAP", "GRANTED", null)),
+                List.of(edge), captured, binding, 72L, "tenant-a", 301L), "table lockを拒否");
+        ActorPrimaryWaitEdge tableLockEdge = new ActorPrimaryWaitEdge(edge.engine(), edge.requesterConnectionId(),
+                edge.requesterLockId(), edge.requesterTransactionId(), edge.requesterSchema(), edge.requesterTable(),
+                edge.requesterIndex(), "TABLE", edge.requesterMode(), edge.requesterStatus(), edge.requesterData(),
+                edge.holderConnectionId(), edge.holderLockId(), edge.holderTransactionId(), edge.holderSchema(),
+                edge.holderTable(), edge.holderIndex(), edge.holderType(), edge.holderMode(), edge.holderStatus(), edge.holderData());
+        assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(tableLockEdge), captured,
+                binding, 72L, "tenant-a", 301L), "wait edgeのtable lockを拒否");
     }
 
     // 以下7件は認可競合coverage候補（未実行）。service transaction自体のsource行待機分岐を検証する。
@@ -2268,6 +2444,22 @@ class ImportMetadataRealMySqlTest {
                                          String holderType, String holderMode, String holderStatus,
                                          String holderData) { }
 
+    private record ActorAuthorizationBinding(String tenantId, long actorUserId, long connectionId,
+                                              String transactionId, String schema) { }
+
+    private record ActorPrimaryRecordLock(String engine, String lockId, String transactionId,
+                                          long connectionId, String schema, String table, String index,
+                                          String type, String mode, String status, String lockData) { }
+
+    private record ActorPrimaryWaitEdge(String engine, long requesterConnectionId, String requesterLockId,
+                                        String requesterTransactionId, String requesterSchema,
+                                        String requesterTable, String requesterIndex, String requesterType,
+                                        String requesterMode, String requesterStatus, String requesterData,
+                                        long holderConnectionId, String holderLockId, String holderTransactionId,
+                                        String holderSchema, String holderTable, String holderIndex,
+                                        String holderType, String holderMode, String holderStatus,
+                                        String holderData) { }
+
     private void updateAndCommit(String sql, Object[] params, AtomicReference<Long> connectionId) {
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
@@ -2446,6 +2638,332 @@ class ImportMetadataRealMySqlTest {
             return authorized;
         }).when(metadataAuthorization).requireCurrentAuthorizationForWrite(any());
         return pause;
+    }
+
+    private ActorGatePause pauseRealActorWriteGateAt(int invocationToPause) {
+        ActorGatePause pause = new ActorGatePause();
+        AtomicInteger invocationCount = new AtomicInteger();
+        doAnswer(invocation -> {
+            ImportAuthorizedContext authorized = (ImportAuthorizedContext) invocation.callRealMethod();
+            if (invocationCount.incrementAndGet() == invocationToPause) {
+                try {
+                    if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+                        throw new AssertionError("actor lock gateは実service transaction内で呼び出します");
+                    }
+                    pause.binding.set(captureActorAuthorizationBinding(authorized));
+                    pause.entered.countDown();
+                    if (!pause.release.await(20, TimeUnit.SECONDS)) {
+                        ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                        throw new AssertionError("actor write gate barrier timeout");
+                    }
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                    throw new AssertionError("actor write gate barrierが中断されました", interrupted);
+                } catch (RuntimeException | Error observationFailure) {
+                    ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                    throw observationFailure;
+                }
+            }
+            return authorized;
+        }).when(metadataAuthorization).requireCurrentAuthorizationForWrite(any());
+        return pause;
+    }
+
+    private ActorAuthorizationBinding captureActorAuthorizationBinding(ImportAuthorizedContext expected) {
+        Map<String, Object> connection = jdbc.queryForMap(
+                "SELECT CONNECTION_ID() AS connection_id, DATABASE() AS schema_name");
+        long connectionId = ((Number) connection.get("connection_id")).longValue();
+        String schema = (String) connection.get("schema_name");
+        List<String> actorBindings = jdbc.query("SELECT tenant_id,id FROM sys_user WHERE tenant_id=? AND id=?",
+                (rs, row) -> rs.getString(1) + "/" + rs.getLong(2), expected.tenantId(), expected.actorUserId());
+        List<String> transactions = jdbc.query("SELECT trx_id FROM information_schema.innodb_trx "
+                        + "WHERE trx_mysql_thread_id=CONNECTION_ID()",
+                (rs, row) -> rs.getString(1));
+        String expectedBinding = expected.tenantId() + "/" + expected.actorUserId();
+        if (!expectedBinding.equals(tenantId + "/" + actorUserId) || actorBindings.size() != 1
+                || !expectedBinding.equals(actorBindings.get(0)) || transactions.size() != 1
+                || transactions.get(0) == null || schema == null || schema.isBlank()) {
+            throw new AssertionError("実service connection/transactionからexpected actorを一意に束縛できませんでした: "
+                    + "actorRows=" + actorBindings.size() + ", transactionCount=" + transactions.size());
+        }
+        return new ActorAuthorizationBinding(expected.tenantId(), expected.actorUserId(), connectionId,
+                transactions.get(0), schema);
+    }
+
+    private ActorPrimaryRecordLock exactActorPrimaryRecordLock(ActorAuthorizationBinding binding,
+                                                                long expectedActorId,
+                                                                boolean requireVisibleInitialKey) {
+        List<ActorPrimaryRecordLock> locks = actorPrimaryRecordLocks(binding);
+        if (locks.size() != 1) {
+            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+            throw new AssertionError("actor service connectionのsys_user PRIMARY RECORD lockは厳密に一件必要です: "
+                    + "count=" + locks.size());
+        }
+        ActorPrimaryRecordLock lock = locks.get(0);
+        if (!isActorPrimaryRecordLock(lock, binding, expectedActorId)
+                || requireVisibleInitialKey && !Long.toString(expectedActorId).equals(lock.lockData())) {
+            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+            throw new AssertionError("sys_user actor行の初期lockをconnection/transaction/keyで束縛できません: " + lock);
+        }
+        return lock;
+    }
+
+    private List<ActorPrimaryRecordLock> actorPrimaryRecordLocks(ActorAuthorizationBinding binding) {
+        return withActorWaitObserverBudget(() -> jdbc.query("""
+                SELECT dl.ENGINE,dl.ENGINE_LOCK_ID,dl.ENGINE_TRANSACTION_ID,th.PROCESSLIST_ID,
+                       dl.OBJECT_SCHEMA,dl.OBJECT_NAME,dl.INDEX_NAME,dl.LOCK_TYPE,dl.LOCK_MODE,
+                       dl.LOCK_STATUS,dl.LOCK_DATA
+                FROM performance_schema.data_locks dl
+                JOIN performance_schema.threads th ON th.THREAD_ID=dl.THREAD_ID
+                WHERE th.PROCESSLIST_ID=? AND dl.OBJECT_SCHEMA=? AND dl.OBJECT_NAME='sys_user'
+                  AND dl.INDEX_NAME='PRIMARY' AND dl.LOCK_TYPE='RECORD'
+                """, (rs, row) -> new ActorPrimaryRecordLock(rs.getString(1), rs.getString(2), rs.getString(3),
+                rs.getLong(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8),
+                rs.getString(9), rs.getString(10), rs.getString(11)), binding.connectionId(), binding.schema()));
+    }
+
+    private List<ActorPrimaryWaitEdge> actorPrimaryWaitEdges(long requesterConnectionId) {
+        return withActorWaitObserverBudget(() -> jdbc.query("""
+                SELECT w.ENGINE,wt.PROCESSLIST_ID AS req_connection_id,req.ENGINE_LOCK_ID AS req_lock_id,
+                       req.ENGINE_TRANSACTION_ID AS req_trx_id,req.OBJECT_SCHEMA AS req_schema,
+                       req.OBJECT_NAME AS req_table,req.INDEX_NAME AS req_index,req.LOCK_TYPE AS req_type,
+                       req.LOCK_MODE AS req_mode,req.LOCK_STATUS AS req_status,req.LOCK_DATA AS req_data,
+                       bt.PROCESSLIST_ID AS holder_connection_id,blk.ENGINE_LOCK_ID AS holder_lock_id,
+                       blk.ENGINE_TRANSACTION_ID AS holder_trx_id,blk.OBJECT_SCHEMA AS holder_schema,
+                       blk.OBJECT_NAME AS holder_table,blk.INDEX_NAME AS holder_index,blk.LOCK_TYPE AS holder_type,
+                       blk.LOCK_MODE AS holder_mode,blk.LOCK_STATUS AS holder_status,blk.LOCK_DATA AS holder_data
+                FROM performance_schema.data_lock_waits w
+                JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
+                JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                JOIN performance_schema.data_locks req
+                  ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                JOIN performance_schema.data_locks blk
+                  ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                WHERE wt.PROCESSLIST_ID=?
+                """, (rs, row) -> new ActorPrimaryWaitEdge(rs.getString("ENGINE"),
+                rs.getLong("req_connection_id"), rs.getString("req_lock_id"), rs.getString("req_trx_id"),
+                rs.getString("req_schema"), rs.getString("req_table"), rs.getString("req_index"),
+                rs.getString("req_type"), rs.getString("req_mode"), rs.getString("req_status"),
+                rs.getString("req_data"), rs.getLong("holder_connection_id"), rs.getString("holder_lock_id"),
+                rs.getString("holder_trx_id"), rs.getString("holder_schema"), rs.getString("holder_table"),
+                rs.getString("holder_index"), rs.getString("holder_type"), rs.getString("holder_mode"),
+                rs.getString("holder_status"), rs.getString("holder_data")), requesterConnectionId));
+    }
+
+    private boolean isActorPrimaryRecordLock(ActorPrimaryRecordLock lock, ActorAuthorizationBinding binding,
+                                             long expectedActorId) {
+        return lock != null && "INNODB".equals(lock.engine()) && lock.lockId() != null
+                && binding.transactionId().equals(lock.transactionId())
+                && lock.connectionId() == binding.connectionId()
+                && binding.schema().equals(lock.schema()) && "sys_user".equals(lock.table())
+                && "PRIMARY".equals(lock.index()) && "RECORD".equals(lock.type())
+                && isStrictNonGapExclusiveRecordMode(lock.mode()) && "GRANTED".equals(lock.status())
+                && (lock.lockData() == null || Long.toString(expectedActorId).equals(lock.lockData()));
+    }
+
+    private boolean isStrictNonGapExclusiveRecordMode(String mode) {
+        return "X".equals(mode) || "X,REC_NOT_GAP".equals(mode);
+    }
+
+    private boolean sameActorPrimaryLockIdentity(ActorPrimaryRecordLock observed,
+                                                 ActorPrimaryRecordLock captured) {
+        return java.util.Objects.equals(observed.engine(), captured.engine())
+                && java.util.Objects.equals(observed.lockId(), captured.lockId())
+                && java.util.Objects.equals(observed.transactionId(), captured.transactionId())
+                && observed.connectionId() == captured.connectionId()
+                && java.util.Objects.equals(observed.schema(), captured.schema())
+                && java.util.Objects.equals(observed.table(), captured.table())
+                && java.util.Objects.equals(observed.index(), captured.index())
+                && java.util.Objects.equals(observed.type(), captured.type())
+                && java.util.Objects.equals(observed.mode(), captured.mode())
+                && java.util.Objects.equals(observed.status(), captured.status());
+    }
+
+    private boolean isExactActorPrimaryWait(List<ActorPrimaryRecordLock> observedHolderLocks,
+                                            List<ActorPrimaryWaitEdge> waits,
+                                            ActorPrimaryRecordLock capturedLock,
+                                            ActorAuthorizationBinding binding,
+                                            long requesterConnectionId,
+                                            String expectedTenantId,
+                                            long expectedActorId) {
+        if (observedHolderLocks == null || observedHolderLocks.size() != 1 || waits == null || waits.size() != 1
+                || !binding.tenantId().equals(expectedTenantId) || binding.actorUserId() != expectedActorId
+                || capturedLock == null || !Long.toString(expectedActorId).equals(capturedLock.lockData())
+                || !isActorPrimaryRecordLock(capturedLock, binding, expectedActorId)) return false;
+        ActorPrimaryRecordLock holder = observedHolderLocks.get(0);
+        ActorPrimaryWaitEdge edge = waits.get(0);
+        if (!isActorPrimaryRecordLock(holder, binding, expectedActorId)
+                || !sameActorPrimaryLockIdentity(holder, capturedLock)
+                || edge.engine() == null || !edge.engine().equals(capturedLock.engine())
+                || edge.requesterLockId() == null || edge.requesterTransactionId() == null
+                || edge.holderLockId() == null || edge.holderTransactionId() == null
+                || edge.requesterConnectionId() != requesterConnectionId
+                || edge.holderConnectionId() != binding.connectionId()
+                || edge.requesterConnectionId() == edge.holderConnectionId()
+                || edge.requesterTransactionId().equals(capturedLock.transactionId())
+                || !edge.holderTransactionId().equals(capturedLock.transactionId())
+                || !edge.holderLockId().equals(capturedLock.lockId())) return false;
+        return isActorPrimaryWaitSide(edge.requesterSchema(), edge.requesterTable(), edge.requesterIndex(),
+                        edge.requesterType(), edge.requesterMode(), edge.requesterStatus(), edge.requesterData(),
+                        binding, expectedActorId, "WAITING")
+                && isActorPrimaryWaitSide(edge.holderSchema(), edge.holderTable(), edge.holderIndex(),
+                        edge.holderType(), edge.holderMode(), edge.holderStatus(), edge.holderData(),
+                        binding, expectedActorId, "GRANTED");
+    }
+
+    private boolean isActorPrimaryWaitSide(String schema, String table, String index, String type,
+                                           String mode, String status, String lockData,
+                                           ActorAuthorizationBinding binding, long expectedActorId,
+                                           String expectedStatus) {
+        return binding.schema().equals(schema) && "sys_user".equals(table) && "PRIMARY".equals(index)
+                && "RECORD".equals(type) && isStrictNonGapExclusiveRecordMode(mode)
+                && expectedStatus.equals(status)
+                && (lockData == null || Long.toString(expectedActorId).equals(lockData));
+    }
+
+    private ActorPrimaryWaitEdge awaitExactActorPrimaryWait(ActorAuthorizationBinding binding,
+                                                           ActorPrimaryRecordLock initialLock,
+                                                           AtomicReference<Long> requesterConnectionId,
+                                                           Future<?> append, Future<?> mutation,
+                                                           long expectedActorId) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            assertFuturePending(append, "actor write gateを保持中のappend service");
+            assertFuturePending(mutation, "sys_user actor mutation");
+            Long requester = requesterConnectionId.get();
+            if (requester != null) {
+                if (requester == binding.connectionId()) {
+                    ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                    throw new AssertionError("actor mutationとservice connectionが同一です");
+                }
+                List<ActorPrimaryWaitEdge> waits = actorPrimaryWaitEdges(requester);
+                if (!waits.isEmpty()) {
+                    List<ActorPrimaryRecordLock> holderLocks = actorPrimaryRecordLocks(binding);
+                    if (!isExactActorPrimaryWait(holderLocks, waits, initialLock, binding, requester,
+                            tenantId, expectedActorId)) {
+                        ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                        throw new AssertionError("actor PRIMARY wait evidenceが曖昧または期待外です: "
+                                + "waitCount=" + waits.size() + ", holderRecordCount=" + holderLocks.size());
+                    }
+                    assertFuturePending(append, "actor lockを保持中のappend service");
+                    assertFuturePending(mutation, "actor row mutation wait");
+                    return waits.get(0);
+                }
+            }
+            Thread.sleep(25);
+        }
+        ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+        throw new AssertionError("expected actor sys_user PRIMARY row waitを有限時間内に確認できませんでした: "
+                + "requester=" + requesterConnectionId.get() + ", holder=" + binding.connectionId());
+    }
+
+    private <T> T withActorWaitObserverBudget(Supplier<T> observation) {
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        transaction.setTimeout(5);
+        try {
+            return transaction.execute(status -> {
+                Connection connection = DataSourceUtils.getConnection(dataSource);
+                int originalNetworkTimeout;
+                try {
+                    originalNetworkTimeout = connection.getNetworkTimeout();
+                    connection.setNetworkTimeout(Runnable::run, 5_000);
+                } catch (java.sql.SQLException failure) {
+                    throw new IllegalStateException("actor wait observerのnetwork timeoutを設定できません", failure);
+                }
+                try { return observation.get(); }
+                finally {
+                    try { connection.setNetworkTimeout(Runnable::run, originalNetworkTimeout); }
+                    catch (java.sql.SQLException failure) {
+                        throw new IllegalStateException("actor wait observerのnetwork timeoutを復元できません", failure);
+                    }
+                }
+            });
+        } catch (RuntimeException | Error failure) {
+            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+            throw failure;
+        }
+    }
+
+    private ExecutorService newActorWaitExecutor() {
+        return Executors.newFixedThreadPool(2, task -> {
+            Thread worker = new Thread(task, "nf06-actor-lock-wait-worker");
+            worker.setDaemon(true);
+            return worker;
+        });
+    }
+
+    private int runActorMutationWithBudget(AtomicReference<Long> connectionId, String sql, Object... params) {
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        transaction.setTimeout(15);
+        try {
+            Integer updated = transaction.execute(status -> {
+                Connection connection = DataSourceUtils.getConnection(dataSource);
+                int originalNetworkTimeout;
+                int originalLockWaitSeconds;
+                try {
+                    originalNetworkTimeout = connection.getNetworkTimeout();
+                    connection.setNetworkTimeout(Runnable::run, 20_000);
+                    originalLockWaitSeconds = jdbc.queryForObject(
+                            "SELECT @@SESSION.innodb_lock_wait_timeout", Integer.class);
+                } catch (java.sql.SQLException failure) {
+                    throw new IllegalStateException("actor mutation workerのnetwork budgetを設定できません", failure);
+                }
+                try {
+                    jdbc.execute("SET SESSION innodb_lock_wait_timeout=10");
+                    connectionId.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                    return jdbc.update(sql, params);
+                } finally {
+                    try { jdbc.execute("SET SESSION innodb_lock_wait_timeout=" + originalLockWaitSeconds); }
+                    finally {
+                        try { connection.setNetworkTimeout(Runnable::run, originalNetworkTimeout); }
+                        catch (java.sql.SQLException failure) {
+                            throw new IllegalStateException("actor mutation workerのnetwork timeoutを復元できません", failure);
+                        }
+                    }
+                }
+            });
+            if (updated == null || updated != 1) throw new AssertionError("actor status mutationは一行だけ更新します");
+            return updated;
+        } catch (RuntimeException | Error failure) {
+            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+            throw failure;
+        }
+    }
+
+    private List<Throwable> awaitActorWaitWorkers(List<? extends Future<?>> futures, ExecutorService pool) {
+        List<Throwable> failures = new java.util.ArrayList<>();
+        boolean timedOut = false;
+        for (Future<?> future : futures) {
+            try {
+                future.get(15, TimeUnit.SECONDS);
+            } catch (java.util.concurrent.ExecutionException failure) {
+                failures.add(failure.getCause() == null ? failure : failure.getCause());
+            } catch (java.util.concurrent.TimeoutException | java.util.concurrent.CancellationException failure) {
+                timedOut = true;
+                ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                failures.add(failure);
+            } catch (InterruptedException interrupted) {
+                timedOut = true;
+                ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                failures.add(interrupted);
+                Thread.currentThread().interrupt();
+            }
+        }
+        if (timedOut) pool.shutdownNow(); else pool.shutdown();
+        try {
+            if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                failures.add(new AssertionError("actor lock wait workerの終了を有限時間で確認できずfixtureをunsafeにしました"));
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+            failures.add(new AssertionError("actor lock wait workerのexecutor終了確認が中断されfixtureをunsafeにしました", interrupted));
+        }
+        return failures;
     }
 
     private void assertGateRunsInReadCommittedTransaction(GatePause pause) {
@@ -2628,6 +3146,12 @@ class ImportMetadataRealMySqlTest {
         private final AtomicReference<Long> connectionId = new AtomicReference<>();
         private final AtomicReference<String> isolation = new AtomicReference<>();
         private final AtomicBoolean transactionActive = new AtomicBoolean();
+    }
+
+    private static final class ActorGatePause {
+        private final CountDownLatch entered = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+        private final AtomicReference<ActorAuthorizationBinding> binding = new AtomicReference<>();
     }
 
     private void assertRevokedWhileRegistryLockHeld(long validationRunId, byte[] lookupDigest) throws Exception {
