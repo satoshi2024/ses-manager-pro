@@ -372,6 +372,9 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         Connection conn1 = null;
         Connection conn2 = null;
         Connection monitorConn = null;
+        Future<RepairOutcome> future2 = null;
+        boolean tx1Committed = false;
+
         try {
             conn1 = createConnection(dbName);
             conn2 = createConnection(dbName);
@@ -379,6 +382,8 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
 
             conn1.setAutoCommit(false);
             conn2.setAutoCommit(false);
+
+            final Connection workerConn = conn2;
 
             long holderConnId;
             try (Statement s = conn1.createStatement()) {
@@ -390,194 +395,190 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             }
 
             CountDownLatch workerEnteringUpdate = new CountDownLatch(1);
-            Future<RepairOutcome> future2 = null;
-            boolean tx1Committed = false;
 
-            try {
-                // 1. 第1トランザクションがインボイスを先行更新し、排他行ロックを保持したまま待機
-                int tx1InvoiceUpdated;
-                try (PreparedStatement ps = conn1.prepareStatement(
-                        "UPDATE t_digital_invoice SET tenant_id=?, legal_entity_id=?, version=version+1 "
-                                + "WHERE id=? AND tenant_id IS NULL AND version=0")) {
-                    ps.setString(1, "tenant-winner-tx1");
-                    ps.setLong(2, 901L);
-                    ps.setLong(3, concurrentInvoiceId);
-                    tx1InvoiceUpdated = ps.executeUpdate();
+            // 1. 第1トランザクションがインボイスを先行更新し、排他行ロックを保持したまま待機
+            int tx1InvoiceUpdated;
+            try (PreparedStatement ps = conn1.prepareStatement(
+                    "UPDATE t_digital_invoice SET tenant_id=?, legal_entity_id=?, version=version+1 "
+                            + "WHERE id=? AND tenant_id IS NULL AND version=0")) {
+                ps.setString(1, "tenant-winner-tx1");
+                ps.setLong(2, 901L);
+                ps.setLong(3, concurrentInvoiceId);
+                tx1InvoiceUpdated = ps.executeUpdate();
+            }
+            assertEquals(1, tx1InvoiceUpdated, "第1トランザクションの先行更新が行ロックを獲得");
+
+            // 2. 第2トランザクションを別スレッドで実行開始。同一インボイス行を更新しようとしてInnoDB行ロック待ちに入る
+            future2 = pool.submit(() -> {
+                try {
+                    workerEnteringUpdate.countDown();
+                    int tx2Updated;
+                    try (PreparedStatement ps = workerConn.prepareStatement(
+                            "UPDATE t_digital_invoice SET tenant_id=?, legal_entity_id=?, version=version+1 "
+                                    + "WHERE id=? AND tenant_id IS NULL AND version=0")) {
+                        ps.setString(1, "tenant-loser-tx2");
+                        ps.setLong(2, 902L);
+                        ps.setLong(3, concurrentInvoiceId);
+                        tx2Updated = ps.executeUpdate();
+                    }
+
+                    // 正常なCAS競合敗北: Tx1が先行コミット(version=1)したため、
+                    // 行ロック解除後のUPDATE条件(version=0かつtenant_id IS NULL)に合致せず更新行数0となる
+                    if (tx2Updated == 0) {
+                        workerConn.rollback();
+                        return RepairOutcome.CAS_CONFLICT;
+                    }
+
+                    // 異常系: ロック競合したはずの状況でTx2が先行更新してしまった場合
+                    if (tx2Updated == 1) {
+                        workerConn.rollback();
+                        throw new IllegalStateException("Tx2 unexpectedly updated invoice row despite Tx1 holding row lock first!");
+                    }
+
+                    workerConn.rollback();
+                    throw new IllegalStateException("Tx2 returned unexpected affected rows: " + tx2Updated);
+                } catch (SQLException e) {
+                    workerConn.rollback();
+                    // 1205 (Lock wait timeout) や 1213 (Deadlock) は本シナリオで要求する「正常なアンブロック後のUPDATE 0行」とは異なるため、
+                    // CAS_CONFLICTとして握り潰さず例外として再スローする
+                    throw new RuntimeException(String.format(
+                            "Contender worker failed with SQLException [errorCode=%d, sqlState=%s]: %s",
+                            e.getErrorCode(), e.getSQLState(), e.getMessage()), e);
                 }
-                assertEquals(1, tx1InvoiceUpdated, "第1トランザクションの先行更新が行ロックを獲得");
+            });
 
-                // 2. 第2トランザクションを別スレッドで実行開始。同一インボイス行を更新しようとしてInnoDB行ロック待ちに入る
-                future2 = pool.submit(() -> {
+            // workerがUPDATE直前まで到達したことを有限待機(5秒)で確認
+            assertTrue(workerEnteringUpdate.await(5, TimeUnit.SECONDS),
+                    "Worker thread failed to signal before entering UPDATE within 5 seconds");
+
+            // 3. MySQL内部のrequester→blockerロック待ち関係を接続ID・対象テーブル・PRIMARYインデックス・ロックデータで確認
+            long deadline = System.currentTimeMillis() + 5000;
+            boolean lockWaitObserved = false;
+            while (System.currentTimeMillis() < deadline) {
+                // (2) 観測ループでfuture.isDone()を検査: 早期終了時は即座に結果・例外を取得
+                if (future2.isDone()) {
                     try {
-                        workerEnteringUpdate.countDown();
-                        int tx2Updated;
-                        try (PreparedStatement ps = conn2.prepareStatement(
-                                "UPDATE t_digital_invoice SET tenant_id=?, legal_entity_id=?, version=version+1 "
-                                        + "WHERE id=? AND tenant_id IS NULL AND version=0")) {
-                            ps.setString(1, "tenant-loser-tx2");
-                            ps.setLong(2, 902L);
-                            ps.setLong(3, concurrentInvoiceId);
-                            tx2Updated = ps.executeUpdate();
-                        }
-
-                        // 正常なCAS競合敗北: Tx1が先行コミット(version=1)したため、
-                        // 行ロック解除後のUPDATE条件(version=0かつtenant_id IS NULL)に合致せず更新行数0となる
-                        if (tx2Updated == 0) {
-                            conn2.rollback();
-                            return RepairOutcome.CAS_CONFLICT;
-                        }
-
-                        // 異常系: ロック競合したはずの状況でTx2が先行更新してしまった場合
-                        if (tx2Updated == 1) {
-                            conn2.rollback();
-                            throw new IllegalStateException("Tx2 unexpectedly updated invoice row despite Tx1 holding row lock first!");
-                        }
-
-                        conn2.rollback();
-                        throw new IllegalStateException("Tx2 returned unexpected affected rows: " + tx2Updated);
-                    } catch (SQLException e) {
-                        conn2.rollback();
-                        // 1205 (Lock wait timeout) や 1213 (Deadlock) は本シナリオで要求する「正常なアンブロック後のUPDATE 0行」とは異なるため、
-                        // CAS_CONFLICTとして握り潰さず例外として再スローする
-                        throw new RuntimeException(String.format(
-                                "Contender worker failed with SQLException [errorCode=%d, sqlState=%s]: %s",
-                                e.getErrorCode(), e.getSQLState(), e.getMessage()), e);
+                        RepairOutcome prematureResult = future2.get();
+                        fail(String.format("Contender worker completed prematurely with outcome %s before lock wait was observed! "
+                                + "[Holder Conn ID: %d, Contender Conn ID: %d]", prematureResult, holderConnId, contenderConnId));
+                    } catch (ExecutionException ee) {
+                        Throwable cause = ee.getCause() != null ? ee.getCause() : ee;
+                        fail(String.format("Contender worker failed prematurely before lock wait was observed! "
+                                + "Exception: %s: %s [Holder Conn ID: %d, Contender Conn ID: %d]",
+                                cause.getClass().getName(), cause.getMessage(), holderConnId, contenderConnId), cause);
                     }
-                });
-
-                // workerがUPDATE直前まで到達したことを有限待機(5秒)で確認
-                assertTrue(workerEnteringUpdate.await(5, TimeUnit.SECONDS),
-                        "Worker thread failed to signal before entering UPDATE within 5 seconds");
-
-                // 3. MySQL内部のrequester→blockerロック待ち関係を接続ID・対象テーブル・PRIMARYインデックス・ロックデータで確認
-                long deadline = System.currentTimeMillis() + 5000;
-                boolean lockWaitObserved = false;
-                while (System.currentTimeMillis() < deadline) {
-                    // (2) 観測ループでfuture.isDone()を検査: 早期終了時は即座に結果・例外を取得
-                    if (future2.isDone()) {
-                        try {
-                            RepairOutcome prematureResult = future2.get();
-                            fail(String.format("Contender worker completed prematurely with outcome %s before lock wait was observed! "
-                                    + "[Holder Conn ID: %d, Contender Conn ID: %d]", prematureResult, holderConnId, contenderConnId));
-                        } catch (ExecutionException ee) {
-                            Throwable cause = ee.getCause() != null ? ee.getCause() : ee;
-                            fail(String.format("Contender worker failed prematurely before lock wait was observed! "
-                                    + "Exception: %s: %s [Holder Conn ID: %d, Contender Conn ID: %d]",
-                                    cause.getClass().getName(), cause.getMessage(), holderConnId, contenderConnId), cause);
-                        }
-                    }
-
-                    try {
-                        if (hasTargetInvoiceRecordLockWait(monitorConn, dbName, concurrentInvoiceId, contenderConnId, holderConnId)) {
-                            lockWaitObserved = true;
-                            break;
-                        }
-                    } catch (SQLException sqlEx) {
-                        // 観測クエリ自体の失敗: 原例外(SQLState, errorCode)を保持し、即座にテストを失敗させる (診断失敗で上書きしない)
-                        String diagnostics = "";
-                        try {
-                            diagnostics = captureLockContentionDiagnostics(
-                                    monitorConn, holderConnId, contenderConnId, concurrentInvoiceId, future2);
-                        } catch (Throwable diagEx) {
-                            sqlEx.addSuppressed(diagEx);
-                        }
-                        String msg = String.format("ロック待ち観測クエリ実行中にSQLExceptionが発生しました [errorCode=%d, sqlState=%s]: %s\n%s",
-                                sqlEx.getErrorCode(), sqlEx.getSQLState(), sqlEx.getMessage(), diagnostics);
-                        throw new AssertionError(msg, sqlEx);
-                    }
-                    Thread.sleep(20);
                 }
 
-                if (!lockWaitObserved) {
+                try {
+                    if (hasTargetInvoiceRecordLockWait(monitorConn, dbName, concurrentInvoiceId, contenderConnId, holderConnId)) {
+                        lockWaitObserved = true;
+                        break;
+                    }
+                } catch (SQLException sqlEx) {
+                    // 観測クエリ自体の失敗: 原例外(SQLState, errorCode)を保持し、即座にテストを失敗させる (診断失敗で上書きしない)
                     String diagnostics = "";
                     try {
                         diagnostics = captureLockContentionDiagnostics(
                                 monitorConn, holderConnId, contenderConnId, concurrentInvoiceId, future2);
                     } catch (Throwable diagEx) {
-                        diagnostics = "\n(診断情報採取中に例外が発生しました: " + diagEx.getMessage() + ")";
+                        sqlEx.addSuppressed(diagEx);
                     }
-                    fail("第2トランザクションが第1トランザクションの行ロック解放待ち(LOCK WAIT)に入ったことをMySQL側で観測実証できませんでした。\n"
-                            + diagnostics);
+                    String msg = String.format("ロック待ち観測クエリ実行中にSQLExceptionが発生しました [errorCode=%d, sqlState=%s]: %s\n%s",
+                            sqlEx.getErrorCode(), sqlEx.getSQLState(), sqlEx.getMessage(), diagnostics);
+                    throw new AssertionError(msg, sqlEx);
                 }
+                Thread.sleep(20);
+            }
 
-                // 4. ロック競合の実証を確認した後、第1トランザクションがキューを結案しコミット (ロック解放)
-                int tx1QueueUpdated;
-                try (PreparedStatement ps = conn1.prepareStatement(
-                        "UPDATE t_nf09_scope_repair_queue SET status='RESOLVED', resolved_at=NOW(), "
-                                + "resolved_by=?, resolution_note=?, version=version+1 "
-                                + "WHERE id=? AND status='PENDING' AND version=0")) {
-                    ps.setLong(1, humanUserId);
-                    ps.setString(2, "Tx1 wins");
-                    ps.setLong(3, concurrentQueueId);
-                    tx1QueueUpdated = ps.executeUpdate();
+            if (!lockWaitObserved) {
+                String diagnostics = "";
+                try {
+                    diagnostics = captureLockContentionDiagnostics(
+                            monitorConn, holderConnId, contenderConnId, concurrentInvoiceId, future2);
+                } catch (Throwable diagEx) {
+                    diagnostics = "\n(診断情報採取中に例外が発生しました: " + diagEx.getMessage() + ")";
                 }
-                assertEquals(1, tx1QueueUpdated, "第1トランザクションのキュー結案成功");
-                conn1.commit();
-                tx1Committed = true;
+                fail("第2トランザクションが第1トランザクションの行ロック解放待ち(LOCK WAIT)に入ったことをMySQL側で観測実証できませんでした。\n"
+                        + diagnostics);
+            }
 
-                // 5. 第2トランザクションの完了結果を取得 (有界タイムアウト保護付き)
-                RepairOutcome result2 = future2.get(5, TimeUnit.SECONDS);
-                assertEquals(RepairOutcome.CAS_CONFLICT, result2,
-                        "第2トランザクションは行ロック解放後に再開されたが、version/tenant_id条件不一致によりCAS敗北(UPDATE 0行)すること");
+            // 4. ロック競合の実証を確認した後、第1トランザクションがキューを結案しコミット (ロック解放)
+            int tx1QueueUpdated;
+            try (PreparedStatement ps = conn1.prepareStatement(
+                    "UPDATE t_nf09_scope_repair_queue SET status='RESOLVED', resolved_at=NOW(), "
+                            + "resolved_by=?, resolution_note=?, version=version+1 "
+                            + "WHERE id=? AND status='PENDING' AND version=0")) {
+                ps.setLong(1, humanUserId);
+                ps.setString(2, "Tx1 wins");
+                ps.setLong(3, concurrentQueueId);
+                tx1QueueUpdated = ps.executeUpdate();
+            }
+            assertEquals(1, tx1QueueUpdated, "第1トランザクションのキュー結案成功");
+            conn1.commit();
+            tx1Committed = true;
 
-                // 6. DB内の確定状態を厳格に核対: 勝者の反映、および敗者更新の完全ゼロ残存
-                try (Connection verifyConn = createConnection(dbName); Statement s = verifyConn.createStatement()) {
-                    assertEquals("tenant-winner-tx1", queryInvoiceTenant(verifyConn, concurrentInvoiceId));
-                    assertEquals(901L, queryInvoiceLegalEntity(verifyConn, concurrentInvoiceId));
-                    assertEquals(1L, scalar(s, "SELECT version FROM t_digital_invoice WHERE id=" + concurrentInvoiceId),
-                            "インボイスのバージョンは勝者Tx1による1加算のみ");
+            // 5. 第2トランザクションの完了結果を取得 (有界タイムアウト保護付き)
+            RepairOutcome result2 = future2.get(5, TimeUnit.SECONDS);
+            assertEquals(RepairOutcome.CAS_CONFLICT, result2,
+                    "第2トランザクションは行ロック解放後に再開されたが、version/tenant_id条件不一致によりCAS敗北(UPDATE 0行)すること");
 
-                    // 敗者(Tx2)のゼロ残存検証
-                    assertEquals(0L, scalar(s, "SELECT COUNT(*) FROM t_digital_invoice WHERE tenant_id='tenant-loser-tx2'"),
-                            "敗者のテナント値はDB内に1件も残存していないこと (dirty更新ゼロ残存)");
+            // 6. DB内の確定状態を厳格に核対: 勝者の反映、および敗者更新の完全ゼロ残存
+            try (Connection verifyConn = createConnection(dbName); Statement s = verifyConn.createStatement()) {
+                assertEquals("tenant-winner-tx1", queryInvoiceTenant(verifyConn, concurrentInvoiceId));
+                assertEquals(901L, queryInvoiceLegalEntity(verifyConn, concurrentInvoiceId));
+                assertEquals(1L, scalar(s, "SELECT version FROM t_digital_invoice WHERE id=" + concurrentInvoiceId),
+                        "インボイスのバージョンは勝者Tx1による1加算のみ");
 
-                    // キュー状態の検証
-                    assertEquals("RESOLVED", queryQueueStatus(verifyConn, concurrentQueueId));
-                    assertEquals(1L, scalar(s, "SELECT version FROM t_nf09_scope_repair_queue WHERE id=" + concurrentQueueId),
-                            "キューのバージョンは勝者Tx1による1加算のみ");
-                    assertEquals(humanUserId, queryQueueResolvedBy(verifyConn, concurrentQueueId),
-                            "キューの解決者は勝者Tx1のhumanUserId");
-                }
-            } catch (Throwable t) {
-                primaryFailure = t;
-                throw t;
-            } finally {
-                // 5. 失敗クリーンアップ時: 安全にholderを解放(未コミット時はロールバック)し、有界にworkerの最終結果を回収
-                if (!tx1Committed && conn1 != null) {
-                    try {
-                        conn1.rollback();
-                    } catch (Throwable t) {
-                        recordCleanupFailure(primaryFailure, cleanupFailures, t);
-                    }
-                }
-                if (future2 != null) {
-                    try {
-                        RepairOutcome workerResult = future2.get(2, TimeUnit.SECONDS);
-                    } catch (ExecutionException ee) {
-                        Throwable cause = ee.getCause() != null ? ee.getCause() : ee;
-                        recordCleanupFailure(primaryFailure, cleanupFailures,
-                                new AssertionError("クリーンアップ中に検知されたWorker実行失敗: " + cause.getMessage(), cause));
-                    } catch (TimeoutException te) {
-                        recordCleanupFailure(primaryFailure, cleanupFailures,
-                                new AssertionError("クリーンアップ中のWorker終了待機(2秒)がタイムアウトしました", te));
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        recordCleanupFailure(primaryFailure, cleanupFailures,
-                                new AssertionError("クリーンアップ中のWorker待機が割り込まれました", ie));
-                    } catch (Throwable t) {
-                        recordCleanupFailure(primaryFailure, cleanupFailures, t);
-                    }
-                }
-                closeConnection(conn1, primaryFailure, cleanupFailures);
-                closeConnection(conn2, primaryFailure, cleanupFailures);
-                closeConnection(monitorConn, primaryFailure, cleanupFailures);
+                // 敗者(Tx2)のゼロ残存検証
+                assertEquals(0L, scalar(s, "SELECT COUNT(*) FROM t_digital_invoice WHERE tenant_id='tenant-loser-tx2'"),
+                        "敗者のテナント値はDB内に1件も残存していないこと (dirty更新ゼロ残存)");
+
+                // キュー状態の検証
+                assertEquals("RESOLVED", queryQueueStatus(verifyConn, concurrentQueueId));
+                assertEquals(1L, scalar(s, "SELECT version FROM t_nf09_scope_repair_queue WHERE id=" + concurrentQueueId),
+                        "キューのバージョンは勝者Tx1による1加算のみ");
+                assertEquals(humanUserId, queryQueueResolvedBy(verifyConn, concurrentQueueId),
+                        "キューの解決者は勝者Tx1のhumanUserId");
             }
         } catch (Throwable t) {
-            if (primaryFailure == null) {
-                primaryFailure = t;
-            }
+            primaryFailure = t;
             throw t;
         } finally {
+            // 接続ライフサイクル全域をカバーするクリーンアップ
+            // (1) 先にholderを安全解放 (未コミット時はロールバック)
+            if (!tx1Committed && conn1 != null) {
+                try {
+                    conn1.rollback();
+                } catch (Throwable t) {
+                    recordCleanupFailure(primaryFailure, cleanupFailures, t);
+                }
+            }
+            // (2) 有界にworkerの最終結果を回収し、診断記録
+            if (future2 != null) {
+                try {
+                    RepairOutcome workerResult = future2.get(2, TimeUnit.SECONDS);
+                    recordWorkerHarvestDiagnostics(workerResult, primaryFailure);
+                } catch (ExecutionException ee) {
+                    Throwable cause = ee.getCause() != null ? ee.getCause() : ee;
+                    recordCleanupFailure(primaryFailure, cleanupFailures,
+                            new AssertionError("クリーンアップ中に検知されたWorker実行失敗: " + cause.getMessage(), cause));
+                } catch (TimeoutException te) {
+                    recordCleanupFailure(primaryFailure, cleanupFailures,
+                            new AssertionError("クリーンアップ中のWorker終了待機(2秒)がタイムアウトしました", te));
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    recordCleanupFailure(primaryFailure, cleanupFailures,
+                            new AssertionError("クリーンアップ中のWorker待機が割り込まれました", ie));
+                } catch (Throwable t) {
+                    recordCleanupFailure(primaryFailure, cleanupFailures, t);
+                }
+            }
+            // (3) 初期化成否を問わず、成功作成された全接続をクローズ
+            closeConnection(conn1, primaryFailure, cleanupFailures);
+            closeConnection(conn2, primaryFailure, cleanupFailures);
+            closeConnection(monitorConn, primaryFailure, cleanupFailures);
+
+            // (4) スレッドプールの安全シャットダウン
             try {
                 pool.shutdownNow();
                 if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
@@ -1132,6 +1133,14 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         }
         sb.append("===================================\n");
         return sb.toString();
+    }
+
+    private void recordWorkerHarvestDiagnostics(RepairOutcome workerResult, Throwable primaryFailure) {
+        assertNotNull(workerResult, "クリーンアップで回収されたWorker結果がnullでないこと");
+        if (primaryFailure != null) {
+            primaryFailure.addSuppressed(new AssertionError(
+                    String.format("クリーンアップ時Worker最終正常結果診断: %s (非同期タスク正常終了確認済み)", workerResult)));
+        }
     }
 
     private void recordCleanupFailure(Throwable primaryFailure, List<Throwable> cleanupFailures, Throwable newError) {
