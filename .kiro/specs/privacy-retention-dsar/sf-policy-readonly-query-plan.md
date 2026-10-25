@@ -1,6 +1,6 @@
 # SF-Policy-Readonly-Query-Plan: NF03/NF08向け読み取り専用Policy照会・評価契約
 
-状態: **PLAN REVISION (R3) / 総括および Astra 独立レビュー待ち。未実装。**
+状態: **PLAN REVISION (R4) / 総括および Astra 独立レビュー待ち。未実装。**
 本仕様は、NF03（スキル資格情報）および NF08（AI要約・プロンプト・ログ）から参照される「読み取り専用のポリシー照会・評価契約」の限定設計である。実処分、外部送信、worker、IdP 連携、Flyway migration、本番配線、実データ操作は含めない。
 
 ---
@@ -138,13 +138,18 @@ interface SyntheticPolicyCatalog {
 * `(NF08_AI_SUMMARY, AI_PROMPT_LOG, EXTERNAL_DISPATCH, gemini-adapter)`
   $\rightarrow$ `policyId: "policy-nf08-log-dispatch-v1"`, `expectedScope: "AI_FEEDBACK"`
 
-### 3.2 ポリシーソース契約と不透明 Revision 規約
+### 3.2 ポリシーソース契約、現在版照合、不透明 Revision 規約
 * **不透明（opaque）Revision**:
   既存コードベースの設計に基づき、`revision` は不透明な文字列として扱う。**Revision に対する数値的な大小比較やグローバル数値ソートは厳格に禁止する**。
 * **明示的な現在版特定**:
   ソースは可信テナントおよび完全なポリシー識別子に基づき、現在指定されているエンベロープ、`currentRevision`、および `currentDigest` を返却する。
+* **CURRENT_CANDIDATE 成功経路の必須照合**:
+  ソースが `LookupStatus.CURRENT_CANDIDATE` を返却した場合、サービスは以下を**漏れなく三点照合**する：
+  1. `envelope.policyId().equals(catalogEntry.policyId())`（不一致なら `POLICY_ID_MISMATCH`）
+  2. `envelope.metadata().revision().equals(lookupResult.currentRevision())`（不一致なら `REVISION_MISMATCH`）
+  3. `ApprovalEnvelopeCanonicalizer.digest(canonicalBytes(envelope)).equals(lookupResult.currentDigest())`（不一致なら `DIGEST_MISMATCH`）
 * **フォールバック禁止（Fail-Closed）**:
-  現在エンベロープが欠落、未承認、不整合、または検証失敗となった場合、安全側に倒して直ちに拒絶し、**決して過去のリビジョンや古いエンベロープへフォールバックしてはならない**。
+  現在エンベロープが欠落、未承認、上記三点照合の不一致、または検証失敗となった場合、安全側に倒して直ちに拒絶し、**決して過去のリビジョンや古いエンベロープへフォールバックしてはならない**。
 
 ```java
 package com.ses.privacy.foundation;
@@ -173,7 +178,7 @@ record PolicyLookupResult(
 ## 4. 型付け検証結果と検証経路（Policy-only Verification）
 
 ### 4.1 型付け例外 `PolicySecurityException`
-例外メッセージ文字列（`e.getMessage()`）に依存した判定を排除し、検証失敗理由を型安全に伝達するため、`PolicyFailureReason` を保持する専用例外を導入する。
+例外メッセージ文字列（`e.getMessage()`）に依存した判定を排除し、検証失敗理由を型安全に伝達するため、`PolicyFailureReason` を保持する専用例外を導入する。Cause を受け取る 3 引数コンストラクタを完備する。
 
 ```java
 package com.ses.privacy.foundation;
@@ -188,14 +193,23 @@ final class PolicySecurityException extends SecurityException {
         this.reason = Objects.requireNonNull(reason, "reason must not be null");
     }
 
+    PolicySecurityException(PolicyFailureReason reason, String message, Throwable cause) {
+        super(message, cause);
+        this.reason = Objects.requireNonNull(reason, "reason must not be null");
+    }
+
     PolicyFailureReason reason() { return reason; }
 }
 ```
 
-### 4.2 既存検証器の内部再利用と Policy-only 入口
+### 4.2 既存検証器の内部再利用、ACTIVE 白名单規約、Policy-only 入口
 既存の Policy+Case 完全検証メソッド `verify(...)` の契約・シグネチャ・拒絶セマンティクスは一切改変せず維持する。
-その上で、内部共通検証ロジックを型付け例外送出方式へ統一し、`ApprovalEnvelopeVerifier` に Policy 単独検証入口 `verifyPolicyOnly` を追加する。
-Case エンベロープの捏造は行わず、失効状態プロバイダーの二重呼び出しも行わない。
+内部共通検証ロジックを型付け例外送出方式へ統一し、`ApprovalEnvelopeVerifier` に Policy 単独検証入口 `verifyPolicyOnly` を追加する。
+
+* **失効状態の ACTIVE 白名单規約**:
+  1. `keyStatus == REVOKED` または `envelopeStatus == REVOKED` は、明示的失効として正確な個別理由（`KEY_REVOKED` / `ENVELOPE_REVOKED`）を返す。
+  2. これに該当しない場合であっても、**`keyStatus != RevocationStatus.ACTIVE` または `envelopeStatus != RevocationStatus.ACTIVE` の場合は例外なくすべて拒絶する**（`null` や `UNKNOWN` も含む）。すべて `REVOCATION_STATUS_UNKNOWN`（`POLICY_UNKNOWN`）にマッピングする。
+  3. 原 Policy+Case 検証経路も `if (keyStatus != RevocationStatus.ACTIVE || envelopeStatus != RevocationStatus.ACTIVE) deny(...)` であり、本照会経路によって安全水準を一切弱化させない。
 
 ```java
 package com.ses.privacy.foundation;
@@ -311,14 +325,17 @@ public final class ApprovalEnvelopeVerifier {
             throw new PolicySecurityException(PolicyFailureReason.REVOCATION_PROVIDER_ERROR, "revocation provider error", re);
         }
 
+        // 1. REVOKED の個別特定
         if (keyStatus == RevocationStatus.REVOKED) {
             throw new PolicySecurityException(PolicyFailureReason.KEY_REVOKED, "signing key is revoked");
         }
         if (envelopeStatus == RevocationStatus.REVOKED) {
             throw new PolicySecurityException(PolicyFailureReason.ENVELOPE_REVOKED, "envelope is revoked");
         }
-        if (keyStatus == RevocationStatus.UNKNOWN || envelopeStatus == RevocationStatus.UNKNOWN) {
-            throw new PolicySecurityException(PolicyFailureReason.REVOCATION_STATUS_UNKNOWN, "revocation status unknown");
+
+        // 2. ACTIVE 白名单原則: null、UNKNOWN、未定義ステータスはすべて REVOCATION_STATUS_UNKNOWN
+        if (keyStatus != RevocationStatus.ACTIVE || envelopeStatus != RevocationStatus.ACTIVE) {
+            throw new PolicySecurityException(PolicyFailureReason.REVOCATION_STATUS_UNKNOWN, "key or envelope revocation status is not ACTIVE (includes null/UNKNOWN)");
         }
 
         try {
@@ -428,7 +445,7 @@ public enum PolicyDecisionStatus {
     POLICY_UNKNOWN,    // 未登録、未承認、失効状態不明、ストア障害
     POLICY_EXPIRED,    // 期限切れ、未発効、または未発行
     POLICY_REVOKED,    // キーまたはエンベロープが明示的に失効
-    POLICY_DRIFT,      // 署名改竄、スキーマ不正、Trust Anchor 未知、SoD 違反、バインディング不一致
+    POLICY_DRIFT,      // 署名改竄、スキーマ不正、Trust Anchor 未知、SoD 違反、照合不一致、バインディング不一致
     ACCESS_DENIED      // 呼び出し元の認証・権限・テナント不一致
 }
 ```
@@ -462,10 +479,13 @@ public enum PolicyFailureReason {
     KEY_REVOKED,
     ENVELOPE_REVOKED,
 
-    // POLICY_DRIFT (ポリシー自体の改竄・不整合)
+    // POLICY_DRIFT (ポリシー自体の改竄・不整合・照合失敗)
     UNSUPPORTED_SCHEMA_VERSION,
     UNKNOWN_TRUST_ANCHOR,
     AUTHORITY_SCOPE_MISMATCH,
+    POLICY_ID_MISMATCH,
+    REVISION_MISMATCH,
+    DIGEST_MISMATCH,
     SIGNATURE_INVALID,
     SOD_VIOLATION,
     TENANT_MISMATCH,
@@ -492,8 +512,9 @@ public enum PolicyFailureReason {
        ▼ (Step 2: カタログ検索)
 [SyntheticPolicyCatalog] ──▶ 未登録の組み合わせは POLICY_UNKNOWN (POLICY_NOT_FOUND)
        │
-       ▼ (Step 3: ポリシーソース取得)
+       ▼ (Step 3: ポリシーソース取得と現在版三点照合)
 [PolicyEnvelopeSource] ──▶ NOT_FOUND / UNAPPROVED / STORE_UNAVAILABLE に応じて POLICY_UNKNOWN
+                           CURRENT_CANDIDATE: policyId/revision/digest 不一致なら POLICY_DRIFT
        │
        ▼ (Step 4: ポリシー単独検証)
 [ApprovalEnvelopeVerifier.verifyPolicyOnly] ──▶ PolicySecurityException 発生時は型付け理由をそのままマッピング
@@ -513,6 +534,9 @@ public enum PolicyFailureReason {
 | Step 3: ソース | `LookupStatus.NOT_FOUND` | `POLICY_UNKNOWN` | `POLICY_NOT_FOUND` |
 | Step 3: ソース | `LookupStatus.UNAPPROVED` | `POLICY_UNKNOWN` | `POLICY_UNAPPROVED` |
 | Step 3: ソース | `LookupStatus.STORE_UNAVAILABLE` | `POLICY_UNKNOWN` | `STORE_UNAVAILABLE` |
+| Step 3: 候補照合 | `!envelope.policyId().equals(catalog.policyId())` | `POLICY_DRIFT` | `POLICY_ID_MISMATCH` |
+| Step 3: 候補照合 | `!envelope.metadata().revision().equals(source.currentRevision())` | `POLICY_DRIFT` | `REVISION_MISMATCH` |
+| Step 3: 候補照合 | `!canonicalDigest.equals(source.currentDigest())` | `POLICY_DRIFT` | `DIGEST_MISMATCH` |
 | Step 4: 検証 | `!schemaVersion.equals("1")` | `POLICY_DRIFT` | `UNSUPPORTED_SCHEMA_VERSION` |
 | Step 4: 検証 | 未知の `authorityId:keyId` | `POLICY_DRIFT` | `UNKNOWN_TRUST_ANCHOR` |
 | Step 4: 検証 | 機関の管轄範囲（テナント、スコープ等）不一致 | `POLICY_DRIFT` | `AUTHORITY_SCOPE_MISMATCH` |
@@ -523,13 +547,14 @@ public enum PolicyFailureReason {
 | Step 4: 検証 | 失効プロバイダーの例外発生 | `POLICY_UNKNOWN` | `REVOCATION_PROVIDER_ERROR` |
 | Step 4: 検証 | `keyStatus == REVOKED` | `POLICY_REVOKED` | `KEY_REVOKED` |
 | Step 4: 検証 | `envelopeStatus == REVOKED` | `POLICY_REVOKED` | `ENVELOPE_REVOKED` |
-| Step 4: 検証 | `keyStatus == UNKNOWN || envelopeStatus == UNKNOWN` | `POLICY_UNKNOWN` | `REVOCATION_STATUS_UNKNOWN` |
+| Step 4: 検証 | `keyStatus == null` または `envelopeStatus == null` | `POLICY_UNKNOWN` | `REVOCATION_STATUS_UNKNOWN` |
+| Step 4: 検証 | `keyStatus != ACTIVE || envelopeStatus != ACTIVE` (UNKNOWN含む) | `POLICY_UNKNOWN` | `REVOCATION_STATUS_UNKNOWN` |
 | Step 4: 検証 | Ed25519 署名不一致 | `POLICY_DRIFT` | `SIGNATURE_INVALID` |
 | Step 4: 検証 | 職務分離 (SoD) 違反 (`requesterId.equals(approverId)`) | `POLICY_DRIFT` | `SOD_VIOLATION` |
 | Step 4: 検証 | `tenantId`, `scope`, `dataElement`, `action`, `provider` 不一致 | `POLICY_DRIFT` | `*_MISMATCH` 各種 |
 | Step 5: 全合格 | 上記すべての不合格事由が存在しない | `APPROVED_ACTIVE` | `NONE` |
 
-> **注記（RevocationStatus の実態）**: 既存コードベース（`RevocationStatus.java`）に定義されているステータスは `ACTIVE`, `REVOKED`, `UNKNOWN` の 3 種のみである（`SUSPENDED` は存在しない）。本マッピング表はその実態に厳密に準拠している。
+> **注記（RevocationStatus の実態と完全網羅）**: 既存コードベース（`RevocationStatus.java`）に定義されているステータスは `ACTIVE`, `REVOKED`, `UNKNOWN` の 3 種のみである。`null` や未定義状態を含め、`ACTIVE` 以外は白名单原則によりすべて `REVOCATION_STATUS_UNKNOWN` として安全に拒絶する。
 
 ---
 
@@ -567,7 +592,7 @@ src/main/java/com/ses/privacy/foundation/
 ├── SyntheticPolicyCatalog.java        // 固定カタログインターフェース（package-private）
 ├── PolicyEnvelopeSource.java          // ポリシーソース取得インターフェース（package-private）
 ├── PolicyLookupResult.java            // ポリシーソース結果（package-private）
-├── PolicySecurityException.java       // 型付け例外（package-private）
+├── PolicySecurityException.java       // 型付け例外（cause 対応、package-private）
 ├── VerifiedPolicyMetadata.java        // ポリシー検証済み内部レコード（package-private）
 ├── ApprovalEnvelopeVerifier.java      // 既存検証器（verifyPolicyOnly メソッドを追加）
 └── PolicyReadonlyQueryService.java    // 照会サービス実装クラス（package-private）
@@ -592,44 +617,56 @@ src/test/java/com/ses/privacy/foundation/
 4. **身元欠落アクターの拒絶 (`testCallerContext_MissingIdentity_ReturnsAccessDenied`)**:
    * プロバイダーから空コンテキストまたは空白 `actorId` が返却された場合、`ACCESS_DENIED`（理由: `MISSING_CALLER_IDENTITY`）となること。
 
-### 9.2 カタログ・ソース・非干渉テスト
+### 9.2 カタログ・ソース・現在版照合・非干渉テスト
 5. **カタログ未登録要素の照会 (`testCatalog_UnregisteredEntry_ReturnsPolicyUnknown`)**:
    * カタログに定義されていない組み合わせを照会した場合、`POLICY_UNKNOWN`（理由: `POLICY_NOT_FOUND`）を返すこと。
 6. **未承認ポリシーの照会 (`testSource_UnapprovedPolicy_ReturnsPolicyUnknown`)**:
    * ソースが `LookupStatus.UNAPPROVED` を返却した場合、`POLICY_UNKNOWN`（理由: `POLICY_UNAPPROVED`）を返すこと。
 7. **ソースストア障害の処理 (`testSource_StoreUnavailable_ReturnsPolicyUnknown`)**:
    * ソースが `LookupStatus.STORE_UNAVAILABLE` を返却した場合、`POLICY_UNKNOWN`（理由: `STORE_UNAVAILABLE`）を返すこと。
-8. **同要素・異操作/異プロバイダー非干渉テスト (`testSameDataElement_DifferentActionAndProvider_IndependentEvaluation`)**:
-   * 同一要素 `AI_PROMPT_LOG` に対し、`(DISPOSITION_PURGE, local-db)` と `(EXTERNAL_DISPATCH, gemini-adapter)` の双方が登録されている場合、それぞれを照会した際に意図した個別ポリシーが干渉・上書きなく独立して正しく評価されること。
+8. **候補エンベロープ policyId 不一致 (`testSource_PolicyIdMismatch_ReturnsPolicyDrift`)**:
+   * CURRENT_CANDIDATE の `envelope.policyId` がカタログと一致しない場合、`POLICY_DRIFT`（理由: `POLICY_ID_MISMATCH`）となること。
+9. **候補エンベロープ revision 不一致 (`testSource_RevisionMismatch_ReturnsPolicyDrift`)**:
+   * CURRENT_CANDIDATE の `envelope.metadata.revision` が `source.currentRevision` と一致しない場合、`POLICY_DRIFT`（理由: `REVISION_MISMATCH`）となること。
+10. **候補エンベロープ digest 不一致 (`testSource_DigestMismatch_ReturnsPolicyDrift`)**:
+    * CURRENT_CANDIDATE の計算 digest が `source.currentDigest` と一致しない場合、`POLICY_DRIFT`（理由: `DIGEST_MISMATCH`）となること。
+11. **同要素・異操作/異プロバイダー非干渉テスト (`testSameDataElement_DifferentActionAndProvider_IndependentEvaluation`)**:
+    * 同一要素 `AI_PROMPT_LOG` に対し、`(DISPOSITION_PURGE, local-db)` と `(EXTERNAL_DISPATCH, gemini-adapter)` の双方が登録されている場合、それぞれを照会した際に意図した個別ポリシーが干渉・上書きなく独立して正しく評価されること。
 
 ### 9.3 ポリシー型付け検証テスト
-9. **未発行ポリシーの照会 (`testPolicy_NotYetIssued_ReturnsPolicyExpired`)**:
-   * `now.isBefore(issuedAt)` の場合、`POLICY_EXPIRED`（理由: `NOT_YET_ISSUED`）を返すこと。
-10. **未発効ポリシーの照会 (`testPolicy_NotYetEffective_ReturnsPolicyExpired`)**:
+12. **未発行ポリシーの照会 (`testPolicy_NotYetIssued_ReturnsPolicyExpired`)**:
+    * `now.isBefore(issuedAt)` の場合、`POLICY_EXPIRED`（理由: `NOT_YET_ISSUED`）を返すこと。
+13. **未発効ポリシーの照会 (`testPolicy_NotYetEffective_ReturnsPolicyExpired`)**:
     * `now.isBefore(effectiveAt)` の場合、`POLICY_EXPIRED`（理由: `NOT_YET_EFFECTIVE`）を返すこと。
-11. **満了時刻到達ポリシーの照会 (`testPolicy_ExpiredAtDeadline_ReturnsPolicyExpired`)**:
+14. **満了時刻到達ポリシーの照会 (`testPolicy_ExpiredAtDeadline_ReturnsPolicyExpired`)**:
     * `now.equals(expiresAt)`（半開区間の境界）の場合、`POLICY_EXPIRED`（理由: `EXPIRED_AT_OR_AFTER_DEADLINE`）を返すこと。
-12. **署名機関の有効期限切れ (`testPolicy_AuthorityExpired_ReturnsPolicyExpired`)**:
+15. **署名機関の有効期限切れ (`testPolicy_AuthorityExpired_ReturnsPolicyExpired`)**:
     * `now >= authority.validUntil()` の場合、`POLICY_EXPIRED`（理由: `AUTHORITY_VALIDITY_EXPIRED`）を返すこと。
-13. **署名機関の管轄範囲不一致 (`testPolicy_AuthorityScopeMismatch_ReturnsPolicyDrift`)**:
+16. **署名機関の管轄範囲不一致 (`testPolicy_AuthorityScopeMismatch_ReturnsPolicyDrift`)**:
     * テナントやスコープが署名機関の管轄外である場合、`POLICY_DRIFT`（理由: `AUTHORITY_SCOPE_MISMATCH`）を返すこと。
-14. **失効ポリシーの照会 (`testPolicy_Revoked_ReturnsPolicyRevoked`)**:
-    * キーまたはエンベロープが `REVOKED` の場合、`POLICY_REVOKED`（理由: `KEY_REVOKED` または `ENVELOPE_REVOKED`）を返すこと。
-15. **失効状態不明ポリシーの照会 (`testPolicy_RevocationStatusUnknown_ReturnsPolicyUnknown`)**:
+17. **キー明示的失効ポリシーの照会 (`testPolicy_KeyRevoked_ReturnsPolicyRevoked`)**:
+    * キーが `REVOKED` の場合、`POLICY_REVOKED`（理由: `KEY_REVOKED`）を返すこと。
+18. **エンベロープ明示的失効ポリシーの照会 (`testPolicy_EnvelopeRevoked_ReturnsPolicyRevoked`)**:
+    * エンベロープが `REVOKED` の場合、`POLICY_REVOKED`（理由: `ENVELOPE_REVOKED`）を返すこと。
+19. **失効状態不明ポリシーの照会 (`testPolicy_RevocationStatusUnknown_ReturnsPolicyUnknown`)**:
     * 失効状態が `UNKNOWN` の場合、`POLICY_UNKNOWN`（理由: `REVOCATION_STATUS_UNKNOWN`）を返すこと。
-16. **失効プロバイダー例外の照会 (`testPolicy_RevocationProviderError_ReturnsPolicyUnknown`)**:
+20. **キー失効状態 null の拒絶 (`testPolicy_RevocationKeyNull_ReturnsPolicyUnknown`)**:
+    * `revocations.statusOf` からキー状態として `null` が返却された場合、`POLICY_UNKNOWN`（理由: `REVOCATION_STATUS_UNKNOWN`）を返すこと。
+21. **エンベロープ失効状態 null の拒絶 (`testPolicy_RevocationEnvelopeNull_ReturnsPolicyUnknown`)**:
+    * `revocations.statusOf` からエンベロープ状態として `null` が返却された場合、`POLICY_UNKNOWN`（理由: `REVOCATION_STATUS_UNKNOWN`）を返すこと。
+22. **失効プロバイダー例外の照会 (`testPolicy_RevocationProviderError_ReturnsPolicyUnknown`)**:
     * 失効プロバイダー呼び出し時に例外が発生した場合、`POLICY_UNKNOWN`（理由: `REVOCATION_PROVIDER_ERROR`）を返すこと。
-17. **署名改竄の検知 (`testPolicy_TamperedSignature_ReturnsPolicyDrift`)**:
+23. **署名改竄の検知 (`testPolicy_TamperedSignature_ReturnsPolicyDrift`)**:
     * ペイロードが 1 バイトでも改竄されていた場合、`POLICY_DRIFT`（理由: `SIGNATURE_INVALID`）を返すこと。
-18. **職務分離（SoD）違反の拒絶 (`testPolicy_SodViolation_ReturnsPolicyDrift`)**:
+24. **職務分離（SoD）違反の拒絶 (`testPolicy_SodViolation_ReturnsPolicyDrift`)**:
     * `requesterId.equals(approverId)` のポリシーは、`POLICY_DRIFT`（理由: `SOD_VIOLATION`）となること。
-19. **バインディング不一致の拒絶 (`testPolicy_MismatchedBinding_ReturnsPolicyDrift`)**:
+25. **バインディング不一致の拒絶 (`testPolicy_MismatchedBinding_ReturnsPolicyDrift`)**:
     * 要求されたアクションやプロバイダーがポリシー署名値と異なる場合、`POLICY_DRIFT`（理由: `ACTION_MISMATCH` 等）を返すこと。
-20. **本番プロファイルでの実行拒絶 (`testEnvironment_ProdProfile_ThrowsSecurityException`)**:
+26. **本番プロファイルでの実行拒絶 (`testEnvironment_ProdProfile_ThrowsSecurityException`)**:
     * `Environment` に `prod` が含まれる場合、初期化または呼び出しが DTO を返さず未捕捉の `SecurityException` で fail-closed すること。
 
 ### 9.4 正向テスト（成功しても実行権限を与えないことの証明）
-21. **有効な合成ポリシーの評価 (`testValidSyntheticPolicy_ReturnsApprovedActiveWithoutExecutionCapability`)**:
+27. **有効な合成ポリシーの評価 (`testValidSyntheticPolicy_ReturnsApprovedActiveWithoutExecutionCapability`)**:
     * 有効な Ed25519 署名、現在有効期間内、SoD 適合の合成ポリシーを評価した場合：
       * `status` が `APPROVED_ACTIVE`、`failureReason` が `NONE` となること。
       * 返却された DTO に `Permitted` などの権限フラグが一切存在しないこと。
@@ -642,10 +679,11 @@ src/test/java/com/ses/privacy/foundation/
 1. [ ] `PolicyReadonlyQueryPort.evaluate` が `query` のみを受け取り、アクターロールや `asOf` の呼び出し時差し替えが構造上不可能であること。
 2. [ ] サービス内部に `SyntheticCallerContextProvider` がコンストラクタ注入され、身元欠落・跨テナント・冒名・非認可ロール（`ROLE_UNPRIVILEGED_USER`）が `ACCESS_DENIED` として確実に拒絶されること。
 3. [ ] 固定 `SyntheticPolicyCatalog` が要素・操作・プロバイダーを特定ポリシーおよび期待スコープへ決定論的にマッピングし、同要素・異操作が独立して評価されること。
-4. [ ] `PolicyEnvelopeSource` が不透明 `revision` 文字列を保持し、数値ソートを行わず `currentRevision` / `currentDigest` に基づいて現在版を特定し、不整合時にフォールバックせず fail-closed すること。
-5. [ ] `ApprovalEnvelopeVerifier` に `verifyPolicyOnly` が追加され、Case の捏造なしに既存ロジックを再利用して型付け例外 `PolicySecurityException` を送出すること。
-6. [ ] 判定理由が文字列照合ではなく型付けされた `PolicyFailureReason` に一意にマッピングされ、半開区間境界（`now == expiresAt`）、`RevocationStatus`（ACTIVE/REVOKED/UNKNOWN）、およびプロバイダー例外が厳密に処理されていること。
-7. [ ] プロファイル防護（`SyntheticEnvironmentGuard`）による拒絶が通常 DTO に丸め込まれず、例外として直接中断されること。
-8. [ ] 返却 DTO `PolicyExplanationResult` から許可ブール値が完全に削除され、純粋な説明メタデータのみとなっていること。
-9. [ ] NF03 の通常業務が不当に停止されないこと、および NF08 において許可リスト（ホワイトリスト）が未承認送信の口実にならないことが明文化されていること。
-10. [ ] 新規 DDL、実外部通信、実 IdP 連携、処分 Executor、復旧放行コードが一切含まれていないこと。
+4. [ ] `PolicyEnvelopeSource` が不透明 `revision` 文字列を保持し、数値ソートを行わず `currentRevision` / `currentDigest` に基づいて現在版を特定すること。
+5. [ ] `CURRENT_CANDIDATE` 取得時に `policyId`、`currentRevision`、`currentDigest` の三点照合が漏れなく実施され、不一致時にフォールバックせず `POLICY_DRIFT` で fail-closed すること。
+6. [ ] `ApprovalEnvelopeVerifier` に `verifyPolicyOnly` が追加され、Case の捏造なしに既存ロジックを再利用して型付け例外 `PolicySecurityException`（cause 対応）を送出すること。
+7. [ ] 失効検証において明示的 `REVOKED` を除き、`null` や `UNKNOWN` を含む非 `ACTIVE` 状態が白名单原則によりすべて `REVOCATION_STATUS_UNKNOWN` として安全に拒絶されること。
+8. [ ] プロファイル防護（`SyntheticEnvironmentGuard`）による拒絶が通常 DTO に丸め込まれず、例外として直接中断されること。
+9. [ ] 返却 DTO `PolicyExplanationResult` から許可ブール値が完全に削除され、純粋な説明メタデータのみとなっていること。
+10. [ ] NF03 の通常業務が不当に停止されないこと、および NF08 において許可リスト（ホワイトリスト）が未承認送信の口実にならないことが明文化されていること。
+11. [ ] 新規 DDL、実外部通信、実 IdP 連携、処分 Executor、復旧放行コードが一切含まれていないこと。
