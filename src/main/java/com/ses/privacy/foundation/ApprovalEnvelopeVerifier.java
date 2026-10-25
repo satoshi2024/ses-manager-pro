@@ -85,23 +85,23 @@ public final class ApprovalEnvelopeVerifier {
                 policy.action(), policy.providerId(), now);
 
         if (policy.metadata().requesterId().equals(policy.metadata().approverId())) {
-            throw new PolicySecurityException(PolicyFailureReason.SOD_VIOLATION, "SoD violation: requester and approver must differ");
+            throw new PolicySecurityException(PolicyFailureReason.SOD_VIOLATION, "職務分離違反: 申請者と承認者は異なる必要があります");
         }
 
         if (!policy.metadata().tenantId().equals(expectedTenant)) {
-            throw new PolicySecurityException(PolicyFailureReason.TENANT_MISMATCH, "tenant mismatch");
+            throw new PolicySecurityException(PolicyFailureReason.TENANT_MISMATCH, "テナントが一致しません");
         }
         if (!policy.metadata().scope().equals(expectedScope)) {
-            throw new PolicySecurityException(PolicyFailureReason.SCOPE_MISMATCH, "scope mismatch");
+            throw new PolicySecurityException(PolicyFailureReason.SCOPE_MISMATCH, "スコープが一致しません");
         }
         if (!policy.dataElementId().equals(expectedDataElementId)) {
-            throw new PolicySecurityException(PolicyFailureReason.DATA_ELEMENT_MISMATCH, "dataElement mismatch");
+            throw new PolicySecurityException(PolicyFailureReason.DATA_ELEMENT_MISMATCH, "データ要素が一致しません");
         }
         if (!policy.action().equals(expectedAction)) {
-            throw new PolicySecurityException(PolicyFailureReason.ACTION_MISMATCH, "action mismatch");
+            throw new PolicySecurityException(PolicyFailureReason.ACTION_MISMATCH, "アクションが一致しません");
         }
         if (!policy.providerId().equals(expectedProvider)) {
-            throw new PolicySecurityException(PolicyFailureReason.PROVIDER_MISMATCH, "provider mismatch");
+            throw new PolicySecurityException(PolicyFailureReason.PROVIDER_MISMATCH, "プロバイダーが一致しません");
         }
 
         String policyDigest = ApprovalEnvelopeCanonicalizer.digest(ApprovalEnvelopeCanonicalizer.canonicalBytes(policy));
@@ -141,13 +141,13 @@ public final class ApprovalEnvelopeVerifier {
             throw new PolicySecurityException(PolicyFailureReason.AUTHORITY_VALIDITY_EXPIRED, "authorityが現在有効ではありません");
         }
         if (now.isBefore(metadata.issuedAt())) {
-            throw new PolicySecurityException(PolicyFailureReason.NOT_YET_ISSUED, "envelope issuedAt is in future");
+            throw new PolicySecurityException(PolicyFailureReason.NOT_YET_ISSUED, "エンベロープ発行日時が未来です");
         }
         if (now.isBefore(metadata.effectiveAt())) {
-            throw new PolicySecurityException(PolicyFailureReason.NOT_YET_EFFECTIVE, "envelope not yet effective");
+            throw new PolicySecurityException(PolicyFailureReason.NOT_YET_EFFECTIVE, "エンベロープがまだ発効していません");
         }
         if (!now.isBefore(metadata.expiresAt())) {
-            throw new PolicySecurityException(PolicyFailureReason.EXPIRED_AT_OR_AFTER_DEADLINE, "envelope expired at or after deadline");
+            throw new PolicySecurityException(PolicyFailureReason.EXPIRED_AT_OR_AFTER_DEADLINE, "エンベロープの有効期限が切れています");
         }
 
         RevocationStatus keyStatus;
@@ -156,14 +156,14 @@ public final class ApprovalEnvelopeVerifier {
             keyStatus = revocations.statusOf(metadata.authorityId() + ":" + metadata.keyId());
             envelopeStatus = revocations.statusOf(metadata.revocationReference());
         } catch (RuntimeException re) {
-            throw new PolicySecurityException(PolicyFailureReason.REVOCATION_PROVIDER_ERROR, "revocation provider error", re);
+            throw new PolicySecurityException(PolicyFailureReason.REVOCATION_PROVIDER_ERROR, "失効確認プロバイダーでエラーが発生しました", re);
         }
 
         if (keyStatus == RevocationStatus.REVOKED) {
-            throw new PolicySecurityException(PolicyFailureReason.KEY_REVOKED, "signing key is revoked");
+            throw new PolicySecurityException(PolicyFailureReason.KEY_REVOKED, "署名鍵が失効しています");
         }
         if (envelopeStatus == RevocationStatus.REVOKED) {
-            throw new PolicySecurityException(PolicyFailureReason.ENVELOPE_REVOKED, "envelope is revoked");
+            throw new PolicySecurityException(PolicyFailureReason.ENVELOPE_REVOKED, "エンベロープが失効しています");
         }
         if (keyStatus != RevocationStatus.ACTIVE || envelopeStatus != RevocationStatus.ACTIVE) {
             throw new PolicySecurityException(PolicyFailureReason.REVOCATION_STATUS_UNKNOWN, "keyまたはenvelopeの失効状態がACTIVEではありません");

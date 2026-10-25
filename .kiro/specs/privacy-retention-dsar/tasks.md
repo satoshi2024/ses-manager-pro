@@ -10,7 +10,7 @@ Base: `1443fb68943849a3260d7ebe005259f3eb609d60`。計画固定Head `f007ef9aecc
 |---|---|---|
 | [x] SF-W0 | requirements/design/正本の整合、全source inventory差分、型/拒否/署名interfaceとfixture設計 | Astraが固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`の技術PlanをPASS。policy UNKNOWNは未解決のまま |
 | [x] SF-W1 | pure state machine、envelope verifier、test-only authority、隔離harness。active/default prod、未知schema、偽署名/失効/SoD/実URL注入拒否 | Astraは固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`を限定CODE PASS。generated fixtureのみ、実provider call=0、3 class 18/0/0/0。SF-W1のDemo/コード範囲だけ完了 |
-| [ ] SF-RO-QUERY | NF03/NF08向け只読Policy照会契約（evaluate/catalog/source/三点照合/Policy-only型付け検証/説明専用DTO）。コード実装完了、試験はAI-7による実行待ち（NOT RUN） | 27単体テスト整備。実行認可Capability不保持、本番配線/外部通信なし、Astra/総括独立CODE Review待ち |
+| [ ] SF-RO-QUERY | NF03/NF08向け只読Policy照会契約（evaluate/catalog/source/CURRENT_CANDIDATE必須照合・三点照合/Policy-only型付け検証/説明専用DTO）。コード修正完了、テスト実行担当者はAI-1、テスト状態はNOT RUN（作成済みテスト数29件であり、通過数ではない） | 29件の単体テスト作成済み（NOT RUN）。実行認可Capability不保持、本番配線/外部通信なし、Astra/総括独立CODE Review待ち |
 | [ ] SF-W2 | [`sf-w2-protocol.md`](sf-w2-protocol.md)のAstra追加Plan PASS後に、event単位1 revisionのjournal CAS/compound authorization event、独立projection、最新watermark witnessを実装 | MySQL実並行でholdと認可順序、transaction中断時event/intent=0、journal ACK前call=0、old valid watermark拒否、profile/capability境界を検証 |
 | [ ] SF-W3 | outbox worker、dispatchごとの期限/失効再検証、current/historical receipt verifier分離、lease/idempotency、UNKNOWN/partial/emergency stop | 認可commit〜HTTP間hold、送信前後crash、期限後result fact、rotation/compromise/backdate、authoritative query、wrong binding、二worker、stale fenceを検証。取消receiptなしでCANCELLEDにせず、in-flight/UNKNOWNを保持 |
 | [ ] SF-W4 | restore quarantine、journal replay、DSAR合成export/redaction、NF03/NF08拒否integration | old snapshotへ新hold/intentを再適用、gap/改竄/遅延で公開不可、第三者情報0、反復hash一致 |
