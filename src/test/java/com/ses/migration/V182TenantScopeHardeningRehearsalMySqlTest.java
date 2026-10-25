@@ -39,6 +39,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -364,11 +365,17 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             concurrentQueueId = insertQueueRow(conn, "DIGITAL_INVOICE", concurrentInvoiceId, "SCOPE_UNRESOLVED");
         }
 
+        Throwable primaryFailure = null;
+        List<Throwable> cleanupFailures = new ArrayList<>();
+
         ExecutorService pool = Executors.newFixedThreadPool(2);
+        Connection conn1 = null;
+        Connection conn2 = null;
+        Connection monitorConn = null;
         try {
-            Connection conn1 = createConnection(dbName);
-            Connection conn2 = createConnection(dbName);
-            Connection monitorConn = createConnection(dbName);
+            conn1 = createConnection(dbName);
+            conn2 = createConnection(dbName);
+            monitorConn = createConnection(dbName);
 
             conn1.setAutoCommit(false);
             conn2.setAutoCommit(false);
@@ -453,7 +460,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                             fail(String.format("Contender worker completed prematurely with outcome %s before lock wait was observed! "
                                     + "[Holder Conn ID: %d, Contender Conn ID: %d]", prematureResult, holderConnId, contenderConnId));
                         } catch (ExecutionException ee) {
-                            Throwable cause = ee.getCause();
+                            Throwable cause = ee.getCause() != null ? ee.getCause() : ee;
                             fail(String.format("Contender worker failed prematurely before lock wait was observed! "
                                     + "Exception: %s: %s [Holder Conn ID: %d, Contender Conn ID: %d]",
                                     cause.getClass().getName(), cause.getMessage(), holderConnId, contenderConnId), cause);
@@ -465,14 +472,30 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                             lockWaitObserved = true;
                             break;
                         }
-                    } catch (SQLException ignored) {
+                    } catch (SQLException sqlEx) {
+                        // 観測クエリ自体の失敗: 原例外(SQLState, errorCode)を保持し、即座にテストを失敗させる (診断失敗で上書きしない)
+                        String diagnostics = "";
+                        try {
+                            diagnostics = captureLockContentionDiagnostics(
+                                    monitorConn, holderConnId, contenderConnId, concurrentInvoiceId, future2);
+                        } catch (Throwable diagEx) {
+                            sqlEx.addSuppressed(diagEx);
+                        }
+                        String msg = String.format("ロック待ち観測クエリ実行中にSQLExceptionが発生しました [errorCode=%d, sqlState=%s]: %s\n%s",
+                                sqlEx.getErrorCode(), sqlEx.getSQLState(), sqlEx.getMessage(), diagnostics);
+                        throw new AssertionError(msg, sqlEx);
                     }
                     Thread.sleep(20);
                 }
 
                 if (!lockWaitObserved) {
-                    String diagnostics = captureLockContentionDiagnostics(
-                            monitorConn, holderConnId, contenderConnId, concurrentInvoiceId, future2);
+                    String diagnostics = "";
+                    try {
+                        diagnostics = captureLockContentionDiagnostics(
+                                monitorConn, holderConnId, contenderConnId, concurrentInvoiceId, future2);
+                    } catch (Throwable diagEx) {
+                        diagnostics = "\n(診断情報採取中に例外が発生しました: " + diagEx.getMessage() + ")";
+                    }
                     fail("第2トランザクションが第1トランザクションの行ロック解放待ち(LOCK WAIT)に入ったことをMySQL側で観測実証できませんでした。\n"
                             + diagnostics);
                 }
@@ -515,28 +538,63 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                     assertEquals(humanUserId, queryQueueResolvedBy(verifyConn, concurrentQueueId),
                             "キューの解決者は勝者Tx1のhumanUserId");
                 }
+            } catch (Throwable t) {
+                primaryFailure = t;
+                throw t;
             } finally {
                 // 5. 失敗クリーンアップ時: 安全にholderを解放(未コミット時はロールバック)し、有界にworkerの最終結果を回収
-                if (!tx1Committed) {
+                if (!tx1Committed && conn1 != null) {
                     try {
                         conn1.rollback();
-                    } catch (SQLException ignored) {
+                    } catch (Throwable t) {
+                        recordCleanupFailure(primaryFailure, cleanupFailures, t);
                     }
                 }
                 if (future2 != null) {
                     try {
-                        future2.get(2, TimeUnit.SECONDS);
-                    } catch (Throwable ignored) {
-                        // プライマリ例外を隠蔽しないため、クリーンアップ時の回収例外は抑制
+                        RepairOutcome workerResult = future2.get(2, TimeUnit.SECONDS);
+                    } catch (ExecutionException ee) {
+                        Throwable cause = ee.getCause() != null ? ee.getCause() : ee;
+                        recordCleanupFailure(primaryFailure, cleanupFailures,
+                                new AssertionError("クリーンアップ中に検知されたWorker実行失敗: " + cause.getMessage(), cause));
+                    } catch (TimeoutException te) {
+                        recordCleanupFailure(primaryFailure, cleanupFailures,
+                                new AssertionError("クリーンアップ中のWorker終了待機(2秒)がタイムアウトしました", te));
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        recordCleanupFailure(primaryFailure, cleanupFailures,
+                                new AssertionError("クリーンアップ中のWorker待機が割り込まれました", ie));
+                    } catch (Throwable t) {
+                        recordCleanupFailure(primaryFailure, cleanupFailures, t);
                     }
                 }
-                closeQuietly(conn1);
-                closeQuietly(conn2);
-                closeQuietly(monitorConn);
+                closeConnection(conn1, primaryFailure, cleanupFailures);
+                closeConnection(conn2, primaryFailure, cleanupFailures);
+                closeConnection(monitorConn, primaryFailure, cleanupFailures);
             }
+        } catch (Throwable t) {
+            if (primaryFailure == null) {
+                primaryFailure = t;
+            }
+            throw t;
         } finally {
-            pool.shutdownNow();
-            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS), "有界時間内にスレッドプールが安全終了すること");
+            try {
+                pool.shutdownNow();
+                if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    recordCleanupFailure(primaryFailure, cleanupFailures,
+                            new AssertionError("スレッドプールが有界時間(5秒)内に安全終了しませんでした"));
+                }
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                recordCleanupFailure(primaryFailure, cleanupFailures,
+                        new AssertionError("スレッドプール終了待機が割り込まれました", ie));
+            } catch (Throwable t) {
+                recordCleanupFailure(primaryFailure, cleanupFailures, t);
+            }
+
+            if (primaryFailure == null && !cleanupFailures.isEmpty()) {
+                throwCleanupFailures(cleanupFailures);
+            }
         }
     }
 
@@ -971,6 +1029,22 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         sb.append(String.format("Target Invoice ID: %d\n", invoiceId));
         sb.append(String.format("Holder Connection ID: %d, Contender Connection ID: %d\n", holderConnId, contenderConnId));
         sb.append(String.format("Worker Future isDone: %b\n", future2 != null && future2.isDone()));
+        if (future2 != null && future2.isDone()) {
+            try {
+                RepairOutcome outcome = future2.get(0, TimeUnit.MILLISECONDS);
+                sb.append(String.format("Worker Future Outcome: %s\n", outcome));
+            } catch (ExecutionException ee) {
+                Throwable cause = ee.getCause() != null ? ee.getCause() : ee;
+                sb.append(String.format("Worker Future Exception: %s: %s\n", cause.getClass().getName(), cause.getMessage()));
+            } catch (TimeoutException te) {
+                sb.append("Worker Future: Timeout checking completion status\n");
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                sb.append("Worker Future: Interrupted checking completion status\n");
+            } catch (Throwable t) {
+                sb.append(String.format("Worker Future Status: %s\n", t.getMessage()));
+            }
+        }
 
         // 1. Transactions from information_schema.innodb_trx
         sb.append("--- Active InnoDB Transactions (information_schema.innodb_trx) ---\n");
@@ -1060,12 +1134,41 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         return sb.toString();
     }
 
-    private void closeQuietly(AutoCloseable closeable) {
-        if (closeable != null) {
+    private void recordCleanupFailure(Throwable primaryFailure, List<Throwable> cleanupFailures, Throwable newError) {
+        if (newError == null) {
+            return;
+        }
+        if (primaryFailure != null) {
+            primaryFailure.addSuppressed(newError);
+        } else {
+            cleanupFailures.add(newError);
+        }
+    }
+
+    private void closeConnection(Connection conn, Throwable primaryFailure, List<Throwable> cleanupFailures) {
+        if (conn != null) {
             try {
-                closeable.close();
-            } catch (Exception ignored) {
+                conn.close();
+            } catch (Throwable t) {
+                recordCleanupFailure(primaryFailure, cleanupFailures, t);
             }
+        }
+    }
+
+    private void throwCleanupFailures(List<Throwable> failures) throws Exception {
+        if (failures == null || failures.isEmpty()) {
+            return;
+        }
+        Throwable first = failures.get(0);
+        for (int i = 1; i < failures.size(); i++) {
+            first.addSuppressed(failures.get(i));
+        }
+        if (first instanceof Exception ex) {
+            throw ex;
+        } else if (first instanceof Error err) {
+            throw err;
+        } else {
+            throw new RuntimeException("クリーンアップ中に例外が発生しました", first);
         }
     }
 
