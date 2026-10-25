@@ -8,8 +8,9 @@
 - 旧世代の要求（generation / claim）に基づく遅延応答や古いコールバックが、後から起票された新しい撤権試行の CAS を通過し、古い結果で新しい状態を誤認確定してしまう問題（ABA 問題・遅延確定競合）。
 - 外部 Provider からの「HTTP 204 ACK」「ユーザー無効化（enabled=false）」「アクティブセッション数 0」という個別観測結果を、全スコープ（オフラインセッション、既発行 JWT、下流 SaaS 等）の完全撤権（`REVOKED`）と短絡し、退社ブロッカーを不当に解除してしまう問題。
 - 技術的未解決（`UNKNOWN` / `FAILED`）と、業務上のリスク受容・例外承認（`Waiver`）が混同され、技術状態が虚偽に `REVOKED` へ改ざんされるリスク。
+- 退社プロセス進行中や退社完了後に、並行して外部アカウントが新規割り当てされ、退社ブロッカーから逃逸する問題。
 
-本契約はこれらを排除し、暗号論的検証・不変識別子・世代管理（Fence Token）・固定ロック順序・TOCTOU 漂移防止を備えた最小設計を規定する。
+本契約はこれらを排除し、安定した要員ルートロック・暗号論的検証・不変識別子・世代管理（Fence Token）・固定ロック順序・TOCTOU 漂移防止を備えた最小設計を規定する。
 
 ---
 
@@ -108,31 +109,42 @@ UPDATE t_external_account_reference
 
 ---
 
-## 5. 固定ロック順序と並行アカウント逃逸防止
+## 5. 固定ロック順序と要員ルートロック (Fixed Lock Order & Stable Root Lock)
 
-### 5.1 デッドロックを防止する固定ロック順序
-複数エンティティを跨ぐ退社完了・確認トランザクションでは、必ず以下の昇順で `SELECT ... FOR UPDATE` を取得する：
-1. `t_lifecycle_case` (主キー `id` 昇順)
-2. `t_lifecycle_task` (主キー `id` 昇順)
-3. `t_approval_request` / `t_asset_offboarding_waiver` (主キー `id` 昇順)
-4. `t_external_account_reference` (主キー `id` 昇順)
+### 5.1 安定した要員ルートロック（Stable Engineer Root Lock）の必須化
+単に「検索で見つかった ACTIVE な退職 Case」を行ロックするだけでは、以下の競合を防ぐことができない：
+- Case がまだ作成されていない（無 Case）、または `DRAFT` 状態である瞬間に、別トランザクションの `assignAccount` が「ACTIVE な退職 Case なし」と判断してアカウントを発行し、その直後に Case が `ACTIVE` 化される競合。
+- Case が `ON_HOLD`（保留中）の間に、アカウントが新規発行されてしまう競合。
+- Case が `COMPLETED`（退職完了後）となった後、Case が `ACTIVE` でなくなったことを口実に退職者へ誤ってアカウントが割り当てられる競合。
 
-### 5.2 並行新增アカウントのブロッカー逃逸防止 (Blocker Escape Prevention)
-退社手続き進行中に、並行して別管理者が対象エンジニアへ新規外部アカウントを紐づけてしまい、退社検査をすり抜ける問題を以下の 2 重防壁で遮断する：
+したがって、以下の 3 系統の操作は、**必ず共通して安定した要員行（`t_engineer WHERE id = :engineerId FOR UPDATE`）を最初にロックする**：
+1. アカウント新規割り当て (`assignAccount`)
+2. 退職案件の起票・アクティブ化 (`createCase` / `activateCase`)
+3. 退職タスク・案件の完了 (`completeLifecycleTask` / `completeCase`)
 
-1. **退社進行中の新規紐づけ遮断 (Case State Barrier)**:
-   `ExternalAccountService.assignAccount(...)` 実行時、対象エンジニアに紐づく進行中の退社案件（`status IN ('ACTIVE', 'IN_PROGRESS')`）が存在するかを `t_lifecycle_case` の行ロック下で確認する。退社中案件が存在する場合、新規アカウント割り当ては直ちに `409 CONFLICT`（`OFFBOARDING_IN_PROGRESS`）で拒否される。
-2. **完了トランザクション内の全量再走査 (Atomic Set Re-evaluation)**:
-   `completeLifecycleTask` 実行時、`t_lifecycle_case` の行ロックを保持したまま、当該エンジニアに紐づく全外部アカウントを再走査する：
-   ```sql
-   SELECT COUNT(*)
-     FROM t_external_account_reference
-    WHERE assignee_type = 'ENGINEER'
-      AND assignee_id = :engineerId
-      AND status NOT IN ('REVOKED')
-      AND deleted_flag = 0;
-   ```
-   有効な未失効アカウントが 1 件でも存在し、かつ正当な承認済み Waiver でカバーされていない場合、タスク完了はアトミックに阻害される。
+### 5.2 階層ロック順序
+デッドロックを防止するため、全トランザクションは以下の昇順でロックを取得する：
+1. `t_engineer` (`id = :engineerId` FOR UPDATE)
+2. `t_lifecycle_case` (`engineer_id = :engineerId`、主キー `id` 昇順 FOR UPDATE)
+3. `t_lifecycle_task` (`case_id = :caseId`、主キー `id` 昇順 FOR UPDATE)
+4. `t_approval_request` / `t_asset_offboarding_waiver` (主キー `id` 昇順 FOR UPDATE)
+5. `t_external_account_reference` (主キー `id` 昇順 FOR UPDATE)
+
+### 5.3 実 Case ステータス別の `assignAccount` 処理規則
+`t_engineer` の行ロック下において、退職案件（`t_lifecycle_case` where `lifecycle_type = 'RESIGNATION'`）の実ステータスおよび要員状態に基づき、以下のように厳格に制御する：
+
+| 案件ステータス (`t_lifecycle_case.status`) | 要員ステータス (`t_engineer.status`) | `assignAccount` 処理方針 | 理由・動作 |
+|---|---|---|---|
+| **無 Case** (退職案件なし) | `ACTIVE` (在職中) | **許可** | 通常業務のアカウント付与。ロック下で安全に実行。 |
+| **無 Case** (退職案件なし) | `RESIGNED` (退職済み) | **拒否 (`403 FORBIDDEN`)** | 退職済み要員へのアカウント発行は禁止。 |
+| **`DRAFT`** (退職案件下書き中) | `ACTIVE` | **拒否 (`409 CONFLICT`)** | 退職プロセスが開始されているため新規割り当て遮断 (`RESIGNATION_DRAFT_EXISTS`)。 |
+| **`ACTIVE`** (退職案件進行中) | `ACTIVE` | **拒否 (`409 CONFLICT`)** | 退社オフボーディング実行中のため新規割り当て遮断 (`OFFBOARDING_IN_PROGRESS`)。 |
+| **`ON_HOLD`** (退職案件一時保留中) | `ACTIVE` | **拒否 (`409 CONFLICT`)** | 保留中であっても退社対象要員であり、逃逸防止のため新規割り当て遮断 (`OFFBOARDING_ON_HOLD`)。 |
+| **`COMPLETED`** (退職案件完了済) | `RESIGNED` (退職済み) | **拒否 (`403 FORBIDDEN`)** | **案件が ACTIVE でなくなったからといって、退職者が自動的にアカウントを取得できる状態に戻してはならない**。退職完了状態のため永久拒否 (`ENGINEER_RESIGNED`)。 |
+| **`CANCELLED`** (退職案件正式取消) | `ACTIVE` | **許可** | 退職が正式に取り消され、在職勤務へ復帰したため通常割り当てを許可。 |
+
+> **再割り当ての必須前提条件**:
+> 退職完了した要員に再度アカウントを発行する唯一の正当な前提は、**正式な再雇用（返聘）または再委託案件（`lifecycle_type IN ('REINSTATEMENT', 'JOIN')`）が起票・承認され、`t_engineer.status` が正規に復職・再有効化されること**である。
 
 ---
 
@@ -141,21 +153,25 @@ UPDATE t_external_account_reference
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Case as NF01 Lifecycle Case
-    participant Task as NF01 Lifecycle Task
+    participant Eng as t_engineer (Root Lock)
+    participant Case as t_lifecycle_case
+    participant Task as t_lifecycle_task
     participant Bridge as Revocation Bridge
     participant Repo as ExternalAccount Repo
     participant IdP as External IdP (Keycloak)
 
-    Note over Case,Task: 退社タスク実行開始 (Lock順: Case -> Task -> Account)
-    Bridge->>Repo: issueRevocationClaim (Gen=2, Hash=H2, RequiredScope)
+    Note over Eng,Case: 退社タスク完了トランザクション開始
+    Bridge->>Eng: 1. SELECT ... FROM t_engineer WHERE id=:id FOR UPDATE
+    Bridge->>Case: 2. SELECT ... FROM t_lifecycle_case WHERE id=:id FOR UPDATE
+    Bridge->>Task: 3. SELECT ... FROM t_lifecycle_task WHERE id=:id FOR UPDATE
+    Bridge->>Repo: 4. issueRevocationClaim (Gen=2, Hash=H2, RequiredScope)
     Repo-->>Bridge: 永続化完了 (current_generation=2)
 
-    Bridge->>IdP: 1. PUT /users/{id} (enabled=false)
+    Bridge->>IdP: 5. PUT /users/{id} (enabled=false)
     IdP-->>Bridge: HTTP 204 No Content (ACK)
-    Bridge->>IdP: 2. POST /users/{id}/logout
+    Bridge->>IdP: 6. POST /users/{id}/logout
     IdP-->>Bridge: HTTP 204 No Content (ACK)
-    Bridge->>IdP: 3. GET /users/{id} & GET /users/{id}/sessions
+    Bridge->>IdP: 7. GET /users/{id} & GET /users/{id}/sessions
     IdP-->>Bridge: Readback結果 (enabled=false, sessions=0)
 
     alt 全必須スコープが affirmative に検証された場合 (Path A)
@@ -168,7 +184,8 @@ sequenceDiagram
         Bridge->>Repo: recordPartialResult (status='UNKNOWN' または 'ACKNOWLEDGED_PARTIAL')
         Repo-->>Bridge: 状態保存 (ブロッカー維持)
         Note over Case,Task: 業務例外ルート (LIFECYCLE_EXCEPTION 承認申請)
-        Case->>Task: 承認済み Waiver 確認 (t_approval_request approved)
+        Task->>Bridge: 承認済み Waiver 確認 (t_approval_request approved)
+        Note over Bridge: Waiver内容 (Scope, Task, 有効期限) を厳格検証
         Bridge-->>Task: ClearanceToken (CLEARED_BY_WAIVER, Status=WAIVED)
         Task->>Task: completeLifecycleTaskWithException (Status -> WAIVED)
     end
@@ -176,7 +193,7 @@ sequenceDiagram
 
 ---
 
-## 7. 統一 ClearanceToken 定義と既存例外経路の再利用
+## 7. 統一 ClearanceToken 定義と免除（Waiver）の不可変検証
 
 ### 7.1 ClearanceToken 定義
 ClearanceToken は単なるフラグではなく、検証時点のスナップショットを改ざん不能に固定する値オブジェクトである。
@@ -194,17 +211,22 @@ public record ClearanceToken(
         ClearanceType clearanceType, // TECHNICAL_REVOCATION または BUSINESS_EXCEPTION_WAIVER
         Long approvalRequestId,      // BUSINESS_EXCEPTION_WAIVER の場合必須
         Instant evaluatedAt,
-        Instant expiresAt,
+        Instant expiresAt,           // Waiver有効期限を超えてはならない
         String tokenSignature) { }
 ```
 
-### 7.2 既存 LIFECYCLE_EXCEPTION 承認経路の完全再利用
-業務例外（Path B）は勝手なパラメータで完了させるのではなく、既存の承認ワークフローテーブル `t_approval_request` および `t_asset_offboarding_waiver` を再利用する。
+### 7.2 免除（Waiver）の不可変承認根拠と持鎖検査
+業務例外（Path B）を成立させるための根拠は、クライアントからの任意引数ではなく、**正式に承認された `t_approval_request`（`request_type = 'LIFECYCLE_EXCEPTION'`, `LOWER(status) = 'approved'`）の不可変スナップショット JSON（`request_data_json`）および紐づく `t_asset_offboarding_waiver` から直接取得する**。
 
-- 承認申請種別: `request_type = 'LIFECYCLE_EXCEPTION'`
-- 承認状態: `LOWER(status) = 'approved'`
-- 対象タスク: `t_asset_offboarding_waiver.lifecycle_task_id` と一致
-- 完了時タスクステータス: 既存エンティティ `LifecycleTask.java` に定義済みの **`WAIVED`** を使用する（新奇ステータスを無断追加しない）。
+完了トランザクション内のロック下において、以下の **持鎖検査（Holding Lock Verification）** を必須とする：
+1. **存在確認**: 当該 Case / Task / Account に紐づく承認済み Waiver レコードが存在すること。欠落している場合は **`BLOCKED`**。
+2. **有効期限確認**: Waiver の承認有効期限 `validUntil` が現在時刻（`now`）以降であること。期限切れの場合は **`BLOCKED (WAIVER_EXPIRED)`**。
+3. **スコープ網羅確認**: Provider 側で技術的確証が得られなかった Required Scope の全項目が、Waiver の不可変スナップショットで承認された `targetScope` に漏れなく含まれていること。未カバーの未解決スコープが存在する場合は **`BLOCKED (SCOPE_UNCOVERED)`**。
+4. **Token 有効期限の厳格制約**:
+   ClearanceToken の有効期限 `expiresAt` は、**Waiver の承認有効期限 `validUntil` を超えてはならない**。
+   `expiresAt = min(evaluatedAt + TOKEN_TTL, waiverValidUntil)`
+5. **消費時（completeLifecycleTask）の再検証**:
+   Token を消費する瞬間にも、再度ロック下で Waiver の `deleted_flag = 0`、`status = 'approved'`、および未期限切れを再照合する。**単に DTO に HUMAN パラメータや文字列 "approved" を詰めただけでこれらの条件を代替することは一切禁止する**。
 
 ### 7.3 免除台帳（Waiver）の既存フィールドと擬拡張フィールドの明示
 既存の `t_asset_offboarding_waiver` スキーマと、将来外部アカウント連携専用に検討する擬拡張フィールドを明確に峻別する。**擬拡張フィールドは現行 DB に存在せず、本設計で実装済みと詐称してはならない**。
@@ -241,14 +263,20 @@ public record ClearanceToken(
 | 用例 ID | カテゴリ | テスト条件 | 期待される動作・結果 |
 |---|---|---|---|
 | `TC-BR-01` | 正常系 | 全必須スコープ（Disable, Logout, Readback 0）が完全充足 | `confirmRevocationWithClaimCas` 成功、アカウント `status='REVOKED'`、ClearanceToken `CLEARED_TECHNICAL`、タスク `COMPLETED`。 |
-| `TC-BR-02` | 正常系 | Provider タイムアウト・未カバー領域あり、承認済み Waiver 提示 | アカウント `status` は UNKNOWN のまま維持（REVOKED 偽装なし）、ClearanceToken `CLEARED_BY_WAIVER`、タスク `WAIVED`。 |
-| `TC-BR-03` | 負向系 | HTTP 204 ACK のみ受領し、未カバー領域がある状態で技術完了を試行 | アカウントの `REVOKED` 遷移を拒否。タスク完了をブロック。 |
-| `TC-BR-04` | 負向系 | 旧世代（Gen 1）の遅延応答が、新世代（Gen 2）発行後のアカウントに到達 | CAS 条件（`current_generation = 1`）不一致により 0 件更新。トランザクションロールバック。 |
-| `TC-BR-05` | 負向系 | 異なる要求ハッシュを持つ改ざん証跡を提示 | `expected_request_hash` 不一致により CAS 失敗。 |
-| `TC-BR-06` | 負向系 | 呼び出し元が `ActorAttribution.human(999L)` を偽造して提示（未認証ID） | サーバー認証コンテキスト（`currentUserId`）不一致により `403 FORBIDDEN`。 |
-| `TC-BR-07` | 負向系 | トークン発行後、タスク完了前にアカウントが別操作で更新されバージョン進展 (TOCTOU) | タスク完了時にバージョン不一致検知、`409 CONFLICT`（`CLEARANCE_TOKEN_STALE`）。 |
-| `TC-BR-08` | 並行系 | 2 スレッドが同一アカウントに対して同時に撤権 Claim を起票 | 先行が `current_generation = G1` で成功、後続は楽観ロック競合または `G2` へ直列化され、互いの証跡が混同されない。 |
-| `TC-BR-09` | 並行系 | 退社処理中のエンジニアに対して別トランザクションが新規外部アカウントを紐づけ試行 | Case 状態バリアにより `409 CONFLICT` で新規割り当て拒否。ブロッカー逃逸 0 件。 |
+| `TC-BR-02` | 正常系 | Provider 未カバー領域あり、有効期限内の承認済み Waiver 結合 | アカウント `status` は UNKNOWN のまま維持（REVOKED 偽装なし）、ClearanceToken `CLEARED_BY_WAIVER`、タスク `WAIVED`。 |
+| `TC-BR-03` | 负向系 | HTTP 204 ACK のみ受領し、未カバー領域がある状態で技術完了を試行 | アカウントの `REVOKED` 遷移を拒否。タスク完了をブロック。 |
+| `TC-BR-04` | 负向系 | 旧世代（Gen 1）の遅延応答が、新世代（Gen 2）発行後のアカウントに到達 | CAS 条件（`current_generation = 1`）不一致により 0 件更新。トランザクションロールバック。 |
+| `TC-BR-05` | 负向系 | 異なる要求ハッシュを持つ改ざん証跡を提示 | `expected_request_hash` 不一致により CAS 失敗。 |
+| `TC-BR-06` | 负向系 | 呼び出し元が `ActorAttribution.human(999L)` を偽造して提示（未認証ID） | サーバー認証コンテキスト（`currentUserId`）不一致により `403 FORBIDDEN`。 |
+| `TC-BR-07` | 负向系 | トークン発行後、タスク完了前にアカウントが別操作で更新されバージョン進展 (TOCTOU) | タスク完了時にバージョン不一致検知、`409 CONFLICT`（`CLEARANCE_TOKEN_STALE`）。 |
+| `TC-BR-08` | 负向系 | Waiver 承認有効期限切れ（`validUntil < now`）でタスク完了を試行 | 持鎖検査で検知され `BLOCKED (WAIVER_EXPIRED)`。タスク完了拒否。 |
+| `TC-BR-09` | 负向系 | Waiver がカバーしていない未解決必須スコープが残存した状態で完了試行 | スコープ網羅チェックで検知され `BLOCKED (SCOPE_UNCOVERED)`。 |
+| `TC-BR-10` | 负向系 | 退職案件が `COMPLETED` となった退職者要員に対し、通常のアカウント割り当てを試行 | `t_engineer` ロック下で退職状態（`RESIGNED`）を検知し `403 FORBIDDEN (ENGINEER_RESIGNED)`。 |
+| `TC-BR-11` | 並行系 | `assignAccount` と `createCase (DRAFT)` の並行競合 | `t_engineer` ロックにより直列化。DRAFT 作成後は `409 CONFLICT (RESIGNATION_DRAFT_EXISTS)` で割り当て拒否。 |
+| `TC-BR-12` | 並行系 | `assignAccount` と `activateCase (DRAFT -> ACTIVE)` の並行競合 | `t_engineer` ロックにより直列化。ACTIVE 化後は `409 CONFLICT (OFFBOARDING_IN_PROGRESS)` で割り当て拒否。 |
+| `TC-BR-13` | 並行系 | 退職案件が `ON_HOLD` 中の要員に対する `assignAccount` 試行 | `t_engineer` ロック下で保留状態を検知し `409 CONFLICT (OFFBOARDING_ON_HOLD)` で厳格拒否。逃逸 0 件。 |
+| `TC-BR-14` | 並行系 | `assignAccount` と `completeLifecycleTask` の並行競合 | `t_engineer` ロックにより直列化。退職完了後は要員ステータス退職により拒否。ブロッカーすり抜け 0 件。 |
+| `TC-BR-15` | 並行系 | 2 スレッドが同一アカウントに対して同時に撤権 Claim を起票 | 先行が `current_generation = G1` で成功、後続は楽観ロック競合または `G2` へ直列化され、互いの証跡が混同されない。 |
 
 ---
 
