@@ -578,7 +578,10 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         assertTrue(collectionWarnings.isEmpty(),
                 "証拠収集プロセスが例外なく完了していること (収集異常: " + collectionWarnings + ")");
 
-        // 5. 証拠落盤完了後に、マイグレーション失敗の型・エラーコード・制約名・DB状態を検証
+        // 5. 証拠落盤完了後に、マイグレーション失敗の型・エラーコード・制約名・DB状態・実ログ取得を検証
+        assertFalse(capturedLogEvents.isEmpty(),
+                "実際のFlywayログイベントが1件以上取得されていること");
+
         assertNotNull(caughtMigrationError, "隔離マイグレーションリソースによる確定的中途失敗が検知されること");
         assertTrue(caughtMigrationError instanceof FlywayException,
                 "発生した例外がFlywayExceptionであること: " + caughtMigrationError.getClass().getName());
