@@ -30,6 +30,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.ConnectionHolder;
 import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.boot.test.mock.mockito.SpyBean;
@@ -1062,6 +1063,7 @@ class ImportMetadataRealMySqlTest {
         ActorGatePause pause = pauseRealActorWriteGateAt(3);
         ExecutorService pool = newActorWaitExecutor();
         AtomicReference<Long> actorMutationConnectionId = new AtomicReference<>();
+        Set<Future<?>> verifiedExpectedFailures = new java.util.HashSet<>();
         Future<?> append = null;
         Future<?> mutation = null;
         Throwable primaryFailure = null;
@@ -1086,7 +1088,14 @@ class ImportMetadataRealMySqlTest {
             assertFuturePending(append, "actorを保持するappend service");
             assertFuturePending(mutation, "actor status mutation");
             pause.release.countDown();
-            append.get(12, TimeUnit.SECONDS);
+            try {
+                append.get(12, TimeUnit.SECONDS);
+            } catch (java.util.concurrent.ExecutionException failure) {
+                if (!(failure.getCause() instanceof BusinessException denied) || denied.getCode() != 403) {
+                    throw failure;
+                }
+                verifiedExpectedFailures.add(append);
+            }
             mutation.get(12, TimeUnit.SECONDS);
         } catch (Throwable failure) {
             primaryFailure = failure;
@@ -1097,7 +1106,8 @@ class ImportMetadataRealMySqlTest {
             throw failure;
         } finally {
             pause.release.countDown();
-            reportCleanupFailures("actor write gate競合fixture", awaitActorWaitWorkers(futures(append, mutation), pool),
+            reportCleanupFailures("actor write gate競合fixture",
+                    awaitActorWaitWorkers(futures(append, mutation), pool, verifiedExpectedFailures),
                     primaryFailure);
         }
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
@@ -2859,30 +2869,68 @@ class ImportMetadataRealMySqlTest {
     }
 
     private <T> T withActorWaitObserverBudget(Supplier<T> observation) {
-        var transaction = new org.springframework.transaction.support.TransactionTemplate(
-                new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
-        transaction.setTimeout(5);
+        if (ACTOR_WAIT_FIXTURE_UNSAFE.get()) {
+            throw new IllegalStateException("actor wait fixtureがunsafe状態のためobserverを実行できません");
+        }
+        if (TransactionSynchronizationManager.hasResource(dataSource)) {
+            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+            throw new IllegalStateException("actor wait observer実行前に既存のdatasourceリソースがバインドされています");
+        }
+        Connection connection = null;
+        ConnectionHolder holder = null;
+        int originalNetworkTimeout = -1;
+        boolean committed = false;
         try {
-            return transaction.execute(status -> {
-                Connection connection = DataSourceUtils.getConnection(dataSource);
-                int originalNetworkTimeout;
+            connection = dataSource.getConnection();
+            originalNetworkTimeout = connection.getNetworkTimeout();
+            connection.setNetworkTimeout(Runnable::run, 5_000);
+            connection.setAutoCommit(false);
+            holder = new ConnectionHolder(connection);
+            TransactionSynchronizationManager.bindResource(dataSource, holder);
+            T result = observation.get();
+            connection.commit();
+            committed = true;
+            return result;
+        } catch (Throwable failure) {
+            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+            if (connection != null && !committed) {
                 try {
-                    originalNetworkTimeout = connection.getNetworkTimeout();
-                    connection.setNetworkTimeout(Runnable::run, 5_000);
-                } catch (java.sql.SQLException failure) {
-                    throw new IllegalStateException("actor wait observerのnetwork timeoutを設定できません", failure);
+                    connection.rollback();
+                } catch (Throwable rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
                 }
-                try { return observation.get(); }
-                finally {
-                    try { connection.setNetworkTimeout(Runnable::run, originalNetworkTimeout); }
-                    catch (java.sql.SQLException failure) {
-                        throw new IllegalStateException("actor wait observerのnetwork timeoutを復元できません", failure);
+            }
+            if (failure instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            } else if (failure instanceof Error error) {
+                throw error;
+            } else {
+                throw new IllegalStateException("actor wait observer実行時例外", failure);
+            }
+        } finally {
+            if (holder != null) {
+                try {
+                    TransactionSynchronizationManager.unbindResource(dataSource);
+                } catch (Throwable unbindFailure) {
+                    ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                }
+            }
+            if (connection != null) {
+                try {
+                    if (originalNetworkTimeout >= 0) {
+                        connection.setNetworkTimeout(Runnable::run, originalNetworkTimeout);
+                    }
+                    connection.setAutoCommit(true);
+                } catch (Throwable resetFailure) {
+                    ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                } finally {
+                    try {
+                        connection.close();
+                    } catch (Throwable closeFailure) {
+                        ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
                     }
                 }
-            });
-        } catch (RuntimeException | Error failure) {
-            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
-            throw failure;
+            }
         }
     }
 
@@ -2895,52 +2943,101 @@ class ImportMetadataRealMySqlTest {
     }
 
     private int runActorMutationWithBudget(AtomicReference<Long> connectionId, String sql, Object... params) {
-        var transaction = new org.springframework.transaction.support.TransactionTemplate(
-                new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
-        transaction.setTimeout(15);
+        if (ACTOR_WAIT_FIXTURE_UNSAFE.get()) {
+            throw new IllegalStateException("actor wait fixtureがunsafe状態のためmutationを実行できません");
+        }
+        Connection connection = null;
+        int originalNetworkTimeout = -1;
+        int originalLockWaitSeconds = -1;
+        boolean committed = false;
         try {
-            Integer updated = transaction.execute(status -> {
-                Connection connection = DataSourceUtils.getConnection(dataSource);
-                int originalNetworkTimeout;
-                int originalLockWaitSeconds;
-                try {
-                    originalNetworkTimeout = connection.getNetworkTimeout();
-                    connection.setNetworkTimeout(Runnable::run, 20_000);
-                    originalLockWaitSeconds = jdbc.queryForObject(
-                            "SELECT @@SESSION.innodb_lock_wait_timeout", Integer.class);
-                } catch (java.sql.SQLException failure) {
-                    throw new IllegalStateException("actor mutation workerのnetwork budgetを設定できません", failure);
+            connection = dataSource.getConnection();
+            originalNetworkTimeout = connection.getNetworkTimeout();
+            connection.setNetworkTimeout(Runnable::run, 20_000);
+            connection.setAutoCommit(false);
+            try (var stmt = connection.createStatement()) {
+                try (var rs = stmt.executeQuery("SELECT @@SESSION.innodb_lock_wait_timeout")) {
+                    if (!rs.next()) {
+                        throw new IllegalStateException("innodb_lock_wait_timeoutを取得できませんでした");
+                    }
+                    originalLockWaitSeconds = rs.getInt(1);
                 }
+                stmt.execute("SET SESSION innodb_lock_wait_timeout=10");
+            }
+            connectionId.set(connectionId(connection));
+            int updated;
+            try (var ps = connection.prepareStatement(sql)) {
+                bind(ps, params);
+                updated = ps.executeUpdate();
+            }
+            if (updated != 1) {
+                throw new AssertionError("actor status mutationは一行だけ更新します: updated=" + updated);
+            }
+            connection.commit();
+            committed = true;
+            return updated;
+        } catch (Throwable failure) {
+            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+            if (connection != null && !committed) {
                 try {
-                    jdbc.execute("SET SESSION innodb_lock_wait_timeout=10");
-                    connectionId.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
-                    return jdbc.update(sql, params);
+                    connection.rollback();
+                } catch (Throwable rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                }
+            }
+            if (failure instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            } else if (failure instanceof Error error) {
+                throw error;
+            } else {
+                throw new IllegalStateException("actor mutation worker実行時例外", failure);
+            }
+        } finally {
+            if (connection != null) {
+                try {
+                    if (originalLockWaitSeconds >= 0) {
+                        try (var stmt = connection.createStatement()) {
+                            stmt.execute("SET SESSION innodb_lock_wait_timeout=" + originalLockWaitSeconds);
+                        }
+                    }
+                } catch (Throwable resetLockFailure) {
+                    ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
                 } finally {
-                    try { jdbc.execute("SET SESSION innodb_lock_wait_timeout=" + originalLockWaitSeconds); }
-                    finally {
-                        try { connection.setNetworkTimeout(Runnable::run, originalNetworkTimeout); }
-                        catch (java.sql.SQLException failure) {
-                            throw new IllegalStateException("actor mutation workerのnetwork timeoutを復元できません", failure);
+                    try {
+                        if (originalNetworkTimeout >= 0) {
+                            connection.setNetworkTimeout(Runnable::run, originalNetworkTimeout);
+                        }
+                        connection.setAutoCommit(true);
+                    } catch (Throwable resetNetworkFailure) {
+                        ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                    } finally {
+                        try {
+                            connection.close();
+                        } catch (Throwable closeFailure) {
+                            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
                         }
                     }
                 }
-            });
-            if (updated == null || updated != 1) throw new AssertionError("actor status mutationは一行だけ更新します");
-            return updated;
-        } catch (RuntimeException | Error failure) {
-            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
-            throw failure;
+            }
         }
     }
 
     private List<Throwable> awaitActorWaitWorkers(List<? extends Future<?>> futures, ExecutorService pool) {
+        return awaitActorWaitWorkers(futures, pool, Set.of());
+    }
+
+    private List<Throwable> awaitActorWaitWorkers(List<? extends Future<?>> futures, ExecutorService pool,
+                                                  Set<? extends Future<?>> verifiedExpectedFailures) {
         List<Throwable> failures = new java.util.ArrayList<>();
         boolean timedOut = false;
         for (Future<?> future : futures) {
             try {
                 future.get(15, TimeUnit.SECONDS);
             } catch (java.util.concurrent.ExecutionException failure) {
-                failures.add(failure.getCause() == null ? failure : failure.getCause());
+                Throwable cause = failure.getCause() == null ? failure : failure.getCause();
+                if (!verifiedExpectedFailures.contains(future)) {
+                    failures.add(cause);
+                }
             } catch (java.util.concurrent.TimeoutException | java.util.concurrent.CancellationException failure) {
                 timedOut = true;
                 ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
@@ -2952,16 +3049,37 @@ class ImportMetadataRealMySqlTest {
                 Thread.currentThread().interrupt();
             }
         }
-        if (timedOut) pool.shutdownNow(); else pool.shutdown();
-        try {
-            if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+        if (timedOut) {
+            pool.shutdownNow();
+            try {
+                if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                    failures.add(new AssertionError("actor lock wait workerの強制終了を有限時間内に確認できませんでした"));
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
                 ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
-                failures.add(new AssertionError("actor lock wait workerの終了を有限時間で確認できずfixtureをunsafeにしました"));
+                failures.add(new AssertionError("actor lock wait workerの強制終了待機が中断されました", interrupted));
             }
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
-            failures.add(new AssertionError("actor lock wait workerのexecutor終了確認が中断されfixtureをunsafeにしました", interrupted));
+        } else {
+            pool.shutdown();
+            try {
+                if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    pool.shutdownNow();
+                    if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                        ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                        failures.add(new AssertionError("actor lock wait workerのexecutor終了を有限時間内に確認できませんでした"));
+                    } else {
+                        ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                        failures.add(new AssertionError("actor lock wait workerが通常shutdownで終了せず強制終了したためfixtureをunsafeにしました"));
+                    }
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                pool.shutdownNow();
+                ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                failures.add(new AssertionError("actor lock wait workerのexecutor終了確認が中断されfixtureをunsafeにしました", interrupted));
+            }
         }
         return failures;
     }
