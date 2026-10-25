@@ -2872,40 +2872,86 @@ class ImportMetadataRealMySqlTest {
         if (ACTOR_WAIT_FIXTURE_UNSAFE.get()) {
             throw new IllegalStateException("actor wait fixtureがunsafe状態のためobserverを実行できません");
         }
+        ExecutorService observerPool = Executors.newSingleThreadExecutor(task -> {
+            Thread worker = new Thread(task, "nf06-actor-observer-worker");
+            worker.setDaemon(true);
+            return worker;
+        });
+        Future<T> future = observerPool.submit(() -> runObserverUnderConnectionBudget(observation));
+        Throwable primaryFailure = null;
+        T result = null;
+        try {
+            result = future.get(5, TimeUnit.SECONDS);
+        } catch (java.util.concurrent.ExecutionException failure) {
+            primaryFailure = failure.getCause() == null ? failure : failure.getCause();
+            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+        } catch (java.util.concurrent.TimeoutException | java.util.concurrent.CancellationException failure) {
+            primaryFailure = failure;
+            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+        } catch (InterruptedException interrupted) {
+            primaryFailure = interrupted;
+            ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+            Thread.currentThread().interrupt();
+        } finally {
+            observerPool.shutdownNow();
+            try {
+                if (!observerPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                    var termFailure = new AssertionError("actor wait observer workerの終了を有限時間内に確認できませんでした");
+                    if (primaryFailure != null) primaryFailure.addSuppressed(termFailure);
+                    else primaryFailure = termFailure;
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                var termFailure = new AssertionError("actor wait observer worker終了待機が中断されました", interrupted);
+                if (primaryFailure != null) primaryFailure.addSuppressed(termFailure);
+                else primaryFailure = termFailure;
+            }
+        }
+        if (primaryFailure != null) {
+            if (primaryFailure instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            } else if (primaryFailure instanceof Error error) {
+                throw error;
+            } else {
+                throw new IllegalStateException("actor wait observer実行またはcleanup失敗", primaryFailure);
+            }
+        }
+        return result;
+    }
+
+    private <T> T runObserverUnderConnectionBudget(Supplier<T> observation) throws Exception {
+        if (ACTOR_WAIT_FIXTURE_UNSAFE.get()) {
+            throw new IllegalStateException("actor wait fixtureがunsafe状態のためobserverを実行できません");
+        }
         if (TransactionSynchronizationManager.hasResource(dataSource)) {
             ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
             throw new IllegalStateException("actor wait observer実行前に既存のdatasourceリソースがバインドされています");
         }
         Connection connection = null;
         ConnectionHolder holder = null;
-        int originalNetworkTimeout = -1;
         boolean committed = false;
+        Throwable primaryFailure = null;
+        T result = null;
         try {
             connection = dataSource.getConnection();
-            originalNetworkTimeout = connection.getNetworkTimeout();
             connection.setNetworkTimeout(Runnable::run, 5_000);
             connection.setAutoCommit(false);
             holder = new ConnectionHolder(connection);
             TransactionSynchronizationManager.bindResource(dataSource, holder);
-            T result = observation.get();
+            result = observation.get();
             connection.commit();
             committed = true;
-            return result;
         } catch (Throwable failure) {
+            primaryFailure = failure;
             ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
             if (connection != null && !committed) {
                 try {
                     connection.rollback();
                 } catch (Throwable rollbackFailure) {
-                    failure.addSuppressed(rollbackFailure);
+                    primaryFailure.addSuppressed(rollbackFailure);
                 }
-            }
-            if (failure instanceof RuntimeException runtimeException) {
-                throw runtimeException;
-            } else if (failure instanceof Error error) {
-                throw error;
-            } else {
-                throw new IllegalStateException("actor wait observer実行時例外", failure);
             }
         } finally {
             if (holder != null) {
@@ -2913,25 +2959,38 @@ class ImportMetadataRealMySqlTest {
                     TransactionSynchronizationManager.unbindResource(dataSource);
                 } catch (Throwable unbindFailure) {
                     ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                    if (primaryFailure != null) primaryFailure.addSuppressed(unbindFailure);
+                    else primaryFailure = unbindFailure;
                 }
             }
             if (connection != null) {
                 try {
-                    if (originalNetworkTimeout >= 0) {
-                        connection.setNetworkTimeout(Runnable::run, originalNetworkTimeout);
-                    }
                     connection.setAutoCommit(true);
-                } catch (Throwable resetFailure) {
+                } catch (Throwable resetAutoCommitFailure) {
                     ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                    if (primaryFailure != null) primaryFailure.addSuppressed(resetAutoCommitFailure);
+                    else primaryFailure = resetAutoCommitFailure;
                 } finally {
                     try {
                         connection.close();
                     } catch (Throwable closeFailure) {
                         ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                        if (primaryFailure != null) primaryFailure.addSuppressed(closeFailure);
+                        else primaryFailure = closeFailure;
                     }
                 }
             }
         }
+        if (primaryFailure != null) {
+            if (primaryFailure instanceof Exception exception) {
+                throw exception;
+            } else if (primaryFailure instanceof Error error) {
+                throw error;
+            } else {
+                throw new IllegalStateException("actor wait observer実行またはcleanup失敗", primaryFailure);
+            }
+        }
+        return result;
     }
 
     private ExecutorService newActorWaitExecutor() {
@@ -2947,12 +3006,12 @@ class ImportMetadataRealMySqlTest {
             throw new IllegalStateException("actor wait fixtureがunsafe状態のためmutationを実行できません");
         }
         Connection connection = null;
-        int originalNetworkTimeout = -1;
         int originalLockWaitSeconds = -1;
         boolean committed = false;
+        Throwable primaryFailure = null;
+        int updated = -1;
         try {
             connection = dataSource.getConnection();
-            originalNetworkTimeout = connection.getNetworkTimeout();
             connection.setNetworkTimeout(Runnable::run, 20_000);
             connection.setAutoCommit(false);
             try (var stmt = connection.createStatement()) {
@@ -2965,7 +3024,6 @@ class ImportMetadataRealMySqlTest {
                 stmt.execute("SET SESSION innodb_lock_wait_timeout=10");
             }
             connectionId.set(connectionId(connection));
-            int updated;
             try (var ps = connection.prepareStatement(sql)) {
                 bind(ps, params);
                 updated = ps.executeUpdate();
@@ -2975,22 +3033,15 @@ class ImportMetadataRealMySqlTest {
             }
             connection.commit();
             committed = true;
-            return updated;
         } catch (Throwable failure) {
+            primaryFailure = failure;
             ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
             if (connection != null && !committed) {
                 try {
                     connection.rollback();
                 } catch (Throwable rollbackFailure) {
-                    failure.addSuppressed(rollbackFailure);
+                    primaryFailure.addSuppressed(rollbackFailure);
                 }
-            }
-            if (failure instanceof RuntimeException runtimeException) {
-                throw runtimeException;
-            } else if (failure instanceof Error error) {
-                throw error;
-            } else {
-                throw new IllegalStateException("actor mutation worker実行時例外", failure);
             }
         } finally {
             if (connection != null) {
@@ -3002,24 +3053,37 @@ class ImportMetadataRealMySqlTest {
                     }
                 } catch (Throwable resetLockFailure) {
                     ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                    if (primaryFailure != null) primaryFailure.addSuppressed(resetLockFailure);
+                    else primaryFailure = resetLockFailure;
                 } finally {
                     try {
-                        if (originalNetworkTimeout >= 0) {
-                            connection.setNetworkTimeout(Runnable::run, originalNetworkTimeout);
-                        }
                         connection.setAutoCommit(true);
-                    } catch (Throwable resetNetworkFailure) {
+                    } catch (Throwable resetAutoCommitFailure) {
                         ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                        if (primaryFailure != null) primaryFailure.addSuppressed(resetAutoCommitFailure);
+                        else primaryFailure = resetAutoCommitFailure;
                     } finally {
                         try {
                             connection.close();
                         } catch (Throwable closeFailure) {
                             ACTOR_WAIT_FIXTURE_UNSAFE.set(true);
+                            if (primaryFailure != null) primaryFailure.addSuppressed(closeFailure);
+                            else primaryFailure = closeFailure;
                         }
                     }
                 }
             }
         }
+        if (primaryFailure != null) {
+            if (primaryFailure instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            } else if (primaryFailure instanceof Error error) {
+                throw error;
+            } else {
+                throw new IllegalStateException("actor mutation worker実行またはcleanup失敗", primaryFailure);
+            }
+        }
+        return updated;
     }
 
     private List<Throwable> awaitActorWaitWorkers(List<? extends Future<?>> futures, ExecutorService pool) {
