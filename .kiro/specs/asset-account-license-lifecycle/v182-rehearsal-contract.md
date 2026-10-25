@@ -197,7 +197,7 @@ UPDATE t_nf09_scope_repair_queue
 修復結案時には、以下の **3重条件** をすべて検証しなければならない：
 
 1. **スコープ完全性検証**: 当該参加者レコードの `tenant_id` および `legal_entity_id` が NULL でなく、正当な顧客に紐づいていること。
-2. **重複アイデンティティの完全処置**: 同一 `(provider, scheme_id, participant_id)` を持つ競合レコード群に対し、**正当な 1 件のみを `status = 'VERIFIED'`（`callback_active_slot = 1`）とし、他の全重複行を明示的に `status = 'DUPLICATE_DEPRECATED'`, `deleted_flag = 1`, `callback_active_slot = NULL` に更新・無効化すること**。
+2. **重複アイデンティティの完全処置**: `callback_active_slot` は V182 で定義された VIRTUAL 生成列（`AS (CASE WHEN deleted_flag = 0 AND status = 'VERIFIED' THEN 1 ELSE NULL END)`）であるため、**アプリケーションから直接 `callback_active_slot` を UPDATE してはならない**。同一 `(provider, scheme_id, participant_id)` を持つ競合レコード群に対し、**正当な 1 件のみを `status = 'VERIFIED'`, `deleted_flag = 0` に更新し、他の全重複行を明示的に `status = 'DUPLICATE_DEPRECATED'` または `deleted_flag = 1` に更新して無効化すること**。正当な行で `callback_active_slot = 1` となり、無効化された重複行で `callback_active_slot IS NULL` となることは、**データベースの自動生成結果としてアサート（検証）する**。
 3. **アクティブコールバックの一意性実証**: 正当な 1 件を `VERIFIED` に更新した際、複合一意インデックス `uk_peppol_callback_active` がエラーなく成立すること。
 
 スコープが未確定、または重複レコードの無効化が不完全である場合、**キュー行は結案せず `PENDING` のまま維持しなければならない**。実外部 Provider への API 接続は一切行わない。
@@ -209,7 +209,7 @@ UPDATE t_nf09_scope_repair_queue
 | 用例 ID | カテゴリ | テスト条件 | 期待される動作・結果 |
 |---|---|---|---|
 | `TC-REP-01` | 正常系 | 孤立インボイスの正しいスコープを特定し同一Txで修復結案 | インボイスの `tenant_id` 更新成功、キュー行 `status='RESOLVED'`, `version` 加算。 |
-| `TC-REP-02` | 正常系 | 重複 Peppol のスコープ解決と 1 件のみ有効化（他方を論理削除） | 唯一の行が `VERIFIED`（slot=1）となり、一意制約成立。キュー行結案。 |
+| `TC-REP-02` | 正常系 | 重複 Peppol のスコープ解決と 1 件のみ有効化（他方を論理削除） | 唯一の行が `status='VERIFIED'`, `deleted_flag=0` となり、DB生成列 `callback_active_slot=1` が自動導出され一意制約成立。無効化行は `slot IS NULL` となる。キュー行結案。 |
 | `TC-REP-03` | 負向系 | 他テナントの担当者が別テナントのキュー行の修復を試行 | 認可境界違反により更新拒否（`403 FORBIDDEN`）。 |
 | `TC-REP-04` | 負向系 | 重複 Peppol でスコープが未解決（NULL）のまま結案を試行 | スコープ完全性チェック違反により拒否。キューは `PENDING` を維持。 |
 | `TC-REP-05` | 負向系 | 業務テーブル更新後、キュー行の CAS がバージョン不一致で失敗（0件） | トランザクション全体がロールバックされ、業務テーブルの変更も取り消される。 |
