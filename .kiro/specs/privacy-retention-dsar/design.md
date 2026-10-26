@@ -1,5 +1,10 @@
 # privacy-retention-dsar 設計（Discovery / Dry-run increment）
 
+## 2026-10-26 本番接線・意思決定契約の設計正本
+
+合成基盤から本番能力への接線（Wiring）および意思決定契約（Decision Contract）の設計正本は、[`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md) に定める。
+五維能力マトリクス、下流モジュール（NF03/NF08）向け只読Policy説明照会ブリッジ、日常業務非封鎖・外送絶対禁止の依存契約、人手意思決定チェックリスト（提議≠承認）、および最小実装順序を規定する。実処分・外送・本番書込・環境ガード解除は含まない。
+
 ## 2026-10-01 新incrementの設計正本
 
 下記Discovery/DEV-0/D0設計は歴史scopeとして保持する。新SYNTHETIC_FOUNDATIONは
