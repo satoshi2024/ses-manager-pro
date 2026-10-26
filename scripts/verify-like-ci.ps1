@@ -25,7 +25,14 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
-. (Join-Path $PSScriptRoot 'verify-ci-common.ps1')
+$commonScriptPath = Join-Path $PSScriptRoot 'verify-ci-common.ps1'
+if (-not (Test-Path -LiteralPath $commonScriptPath)) {
+    Write-Error "FATAL: verify-ci-common.ps1 が見つかりません: '$commonScriptPath'."
+    exit 1
+}
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+$commonContent = [System.IO.File]::ReadAllText($commonScriptPath, $utf8NoBom)
+. ([ScriptBlock]::Create($commonContent))
 
 $mvn = 'mvn'
 $bundled = Join-Path $repoRoot 'apache-maven-3.9.6\bin\mvn.cmd'
@@ -152,7 +159,14 @@ if ([string]::IsNullOrWhiteSpace($bashExec)) {
 # 2. 証跡ディレクトリ初期化と Git HEAD 検証.
 # ------------------------------------------------------------------------------
 $startHeadSha = Get-StrictGitHead -RepoRoot $repoRoot
-$startStatus = (& git -C $repoRoot status --porcelain 2>$null) -join "; "
+$prevEap = $ErrorActionPreference
+try {
+    $ErrorActionPreference = 'Continue'
+    $startStatusLines = @(& git -C $repoRoot status --porcelain 2>&1)
+    $startStatus = $startStatusLines -join "; "
+} finally {
+    $ErrorActionPreference = $prevEap
+}
 
 if ([string]::IsNullOrWhiteSpace($EvidenceDir)) {
     $timestamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
@@ -241,56 +255,47 @@ foreach ($suite in $suites) {
         $suiteArgs += ('-P' + $suite.Profile)
     }
 
+    $suiteProcessError = $null
     $suiteStatus = 0
     try {
         & $mvn @suiteArgs @MavenArgs 2>&1 | Tee-Object -FilePath $suiteLog
         $suiteStatus = $LASTEXITCODE
     } catch {
-        $suiteStatus = 1
-        Write-Error "Mavenプロセス実行中に例外が発生しました: $($_.Exception.Message)."
+        $suiteStatus = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
+        $suiteProcessError = $_.Exception.Message
     }
 
-    # 統一終結処理: 例外時も必ずアーカイブを試みる.
+    # 統一終結処理: プロセス異常時も必ず既存成果物のアーカイブを試みる.
     $suiteArtifactsDir = Join-Path $suiteDir 'artifacts'
+    $archiveError = $null
     try {
-        $archiveParams = @{
-            SourceDir      = (Join-Path $repoRoot 'target\surefire-reports')
-            DestinationDir = $suiteArtifactsDir
-            Extensions     = @('.xml', '.txt', '.dump', '.dumpstream')
-            FailOnEmpty    = $true
-        }
-        $archiveResult = Archive-DirectoryArtifacts @archiveParams
-
-        # JaCoCo レポートが存在する場合は保全.
-        $jacocoDir = Join-Path $repoRoot 'target\site\jacoco'
-        if (Test-Path -LiteralPath $jacocoDir) {
-            $jacocoDest = Join-Path $suiteArtifactsDir 'jacoco'
-            Copy-Item -LiteralPath $jacocoDir -Destination $jacocoDest -Recurse -Force -ErrorAction Stop
-        }
-
-        # browser-m-evidence の保全.
-        if ($suite.Id -eq 'browser-tests') {
-            $browserEvidence = Join-Path $repoRoot 'target\browser-m-evidence'
-            if (Test-Path -LiteralPath $browserEvidence) {
-                $browserDest = Join-Path $suiteArtifactsDir 'browser-m-evidence'
-                Copy-Item -LiteralPath $browserEvidence -Destination $browserDest -Recurse -Force -ErrorAction Stop
-            }
-        }
+        $archiveResult = Archive-SuiteArtifacts `
+            -RepoRoot $repoRoot `
+            -SuiteId $suite.Id `
+            -SuiteLogPath $suiteLog `
+            -DestinationDir $suiteArtifactsDir
     } catch {
+        $archiveError = $_.Exception.Message
+    }
+
+    if ($null -ne $archiveError) {
         $suiteState.state = 'FAIL'
         $suiteState.completed = $true
-        $suiteState['failureReasons'] = @("ARCHIVE_INTEGRITY_FAILURE: $($_.Exception.Message)")
-        $suiteState['exitCode'] = $suiteStatus
+        $suiteState['failureReasons'] = @("ARCHIVE_INTEGRITY_FAILURE: $archiveError")
+        if ($null -ne $suiteProcessError) {
+            $suiteState['processError'] = $suiteProcessError
+        }
+        $suiteState['exitCode'] = if ($suiteStatus -ne 0) { $suiteStatus } else { 2 }
         $suiteState['endTime'] = (Get-Date).ToString('o')
         Write-JsonStateFile -FilePath $suiteStateFile -Data $suiteState
 
         $sessionData.state = 'FAIL'
         $sessionData.completed = $true
-        $sessionData['failureReason'] = "ARCHIVE_INTEGRITY_FAILURE in $($suite.Id)"
+        $sessionData['failureReason'] = "ARCHIVE_INTEGRITY_FAILURE in $($suite.Id): $archiveError"
         $sessionData['endTime'] = (Get-Date).ToString('o')
         Write-JsonStateFile -FilePath $sessionStateFile -Data $sessionData
 
-        Write-Error "CRITICAL: アーカイブ処理が失敗しました ($($_.Exception.Message))。証跡保全のため後続 clean は厳格に禁止されます."
+        Write-Host "CRITICAL: アーカイブ処理が失敗しました ($archiveError)。証跡保全のため後続 clean は厳格に禁止されます."
         exit 2
     }
 
@@ -302,10 +307,18 @@ foreach ($suite in $suites) {
     }
     $eval = Evaluate-MavenSurefireArtifacts @evalParams
 
+    $failureReasons = @()
+    if ($null -ne $suiteProcessError) {
+        $failureReasons += "PROCESS_EXECUTION_EXCEPTION: $suiteProcessError"
+    }
     if (-not $eval.Pass) {
+        $failureReasons += $eval.Reasons
+    }
+
+    if ($failureReasons.Count -gt 0) {
         $suiteState.state = 'FAIL'
         $suiteState.completed = $true
-        $suiteState['failureReasons'] = $eval.Reasons
+        $suiteState['failureReasons'] = $failureReasons
         $suiteState['tests'] = $eval.Tests
         $suiteState['failures'] = $eval.Failures
         $suiteState['errors'] = $eval.Errors
@@ -322,7 +335,7 @@ foreach ($suite in $suites) {
         Write-JsonStateFile -FilePath $sessionStateFile -Data $sessionData
 
         Write-Host "Maven build/test failed or conjunctive pass criteria violated in $($suite.Name):."
-        $eval.Reasons | ForEach-Object { Write-Error "  - $_" }
+        $failureReasons | ForEach-Object { Write-Host "  - $_" }
         exit 1
     }
 
@@ -408,20 +421,10 @@ $intLog = Join-Path $intDir "$intSuiteId.log"
 $intStateFile = Join-Path $intDir 'state.json'
 
 # EvidenceDir 外の完全独立な私有作業ディレクトリを決定.
-$privateWork = ''
-if (-not [string]::IsNullOrWhiteSpace($CustomPitrWorkDir)) {
-    $privateWork = $CustomPitrWorkDir
-} else {
-    $rndSuffix = [System.Guid]::NewGuid().ToString('N').Substring(0, 8)
-    $privateWork = Join-Path ([System.IO.Path]::GetTempPath()) ("ses-pitr-work-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + "-$rndSuffix")
-}
-$privateWorkFull = [System.IO.Path]::GetFullPath($privateWork)
-$repoFull = [System.IO.Path]::GetFullPath($repoRoot)
-$evidenceFull = [System.IO.Path]::GetFullPath($EvidenceDir)
-
-if ($privateWorkFull.StartsWith($repoFull, [System.StringComparison]::OrdinalIgnoreCase) -or $privateWorkFull.StartsWith($evidenceFull, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "FATAL: PITR私有作業ディレクトリはリポジトリおよび EvidenceDir の外部でなければなりません: '$privateWorkFull'."
-}
+$privateWorkFull = New-ControlledPitrWorkDir `
+    -RepoRoot $repoRoot `
+    -EvidenceDir $EvidenceDir `
+    -CustomPitrWorkDir $CustomPitrWorkDir
 
 $env:INTEGRATION_WORK_DIR = $privateWorkFull
 
@@ -435,13 +438,14 @@ $intState = [ordered]@{
 }
 Write-JsonStateFile -FilePath $intStateFile -Data $intState
 
+$intProcessError = $null
 $integrationStatus = 0
 try {
     & $bashExec ops/backup/tests/run-integration.sh 2>&1 | Tee-Object -FilePath $intLog
     $integrationStatus = $LASTEXITCODE
 } catch {
-    $integrationStatus = 1
-    Write-Error "Backup integration suite 実行中に例外が発生しました: $($_.Exception.Message)."
+    $integrationStatus = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
+    $intProcessError = $_.Exception.Message
 }
 
 $intArtifactsDir = Join-Path $intDir 'artifacts'
@@ -449,9 +453,10 @@ if (-not (Test-Path -LiteralPath $intArtifactsDir)) {
     [System.IO.Directory]::CreateDirectory($intArtifactsDir) | Out-Null
 }
 
-$srcEvidenceDir = Join-Path $privateWorkFull 'evidence'
-if (Test-Path -LiteralPath $srcEvidenceDir) {
-    try {
+$archiveError = $null
+try {
+    $srcEvidenceDir = Join-Path $privateWorkFull 'evidence'
+    if (Test-Path -LiteralPath $srcEvidenceDir) {
         Get-ChildItem -LiteralPath $srcEvidenceDir -File -ErrorAction Stop | ForEach-Object {
             $destItem = Join-Path $intArtifactsDir $_.Name
             Copy-Item -LiteralPath $_.FullName -Destination $destItem -Force -ErrorAction Stop
@@ -461,46 +466,68 @@ if (Test-Path -LiteralPath $srcEvidenceDir) {
                 throw "FATAL: PITR証跡コピー時のハッシュ不一致: '$($_.Name)'."
             }
         }
-    } catch {
-        Write-Error "統合証跡コピー中に例外が発生しました: $($_.Exception.Message)."
     }
-}
 
-# runner ログを証跡ディレクトリへコピー (失敗時は例外スロー)
-if (Test-Path -LiteralPath $intLog) {
-    $runnerLogDest = Join-Path $intArtifactsDir 'runner-integration.log'
-    Copy-Item -LiteralPath $intLog -Destination $runnerLogDest -Force -ErrorAction Stop
-    $srcLogHash = Get-Sha256Hex -FilePath $intLog
-    $dstLogHash = Get-Sha256Hex -FilePath $runnerLogDest
-    if ($srcLogHash -ne $dstLogHash) {
-        throw "FATAL: runner-integration.log コピー時のハッシュ不一致."
+    # runner ログを証跡ディレクトリへコピー (存在時)
+    if (Test-Path -LiteralPath $intLog) {
+        $runnerLogDest = Join-Path $intArtifactsDir 'runner-integration.log'
+        Copy-Item -LiteralPath $intLog -Destination $runnerLogDest -Force -ErrorAction Stop
+        $srcLogHash = Get-Sha256Hex -FilePath $intLog
+        $dstLogHash = Get-Sha256Hex -FilePath $runnerLogDest
+        if ($srcLogHash -ne $dstLogHash) {
+            throw "FATAL: runner-integration.log コピー時のハッシュ不一致."
+        }
+    } else {
+        throw "FATAL: backup-integration の runner ログが存在しません: '$intLog'."
     }
-} else {
-    throw "FATAL: backup-integration の runner ログが存在しません: '$intLog'."
+
+    # 全アーカイブファイルの sha256sum.txt を追加作成.
+    $allIntFiles = @(Get-ChildItem -LiteralPath $intArtifactsDir -File -ErrorAction Stop | Where-Object { $_.Name -ne 'sha256sum.txt' })
+    $fullShaLines = @()
+    foreach ($f in ($allIntFiles | Sort-Object -Property Name)) {
+        $h = Get-Sha256Hex -FilePath $f.FullName
+        $fullShaLines += "$h  $($f.Name)"
+    }
+    [System.IO.File]::WriteAllLines((Join-Path $intArtifactsDir 'sha256sum.txt'), $fullShaLines, $script:Utf8NoBom)
+} catch {
+    $archiveError = $_.Exception.Message
 }
 
-# 全アーカイブファイルの sha256sum.txt を追加作成.
-$allIntFiles = @(Get-ChildItem -LiteralPath $intArtifactsDir -File -ErrorAction Stop | Where-Object { $_.Name -ne 'sha256sum.txt' })
-$fullShaLines = @()
-foreach ($f in ($allIntFiles | Sort-Object -Property Name)) {
-    $h = Get-Sha256Hex -FilePath $f.FullName
-    $fullShaLines += "$h  $($f.Name)"
-}
-[System.IO.File]::WriteAllLines((Join-Path $intArtifactsDir 'sha256sum.txt'), $fullShaLines, $script:Utf8NoBom)
-
-$intEval = Evaluate-BackupIntegrationEvidenceDir -ProcessExitCode $integrationStatus -EvidenceDir $intArtifactsDir
-if ($intEval.Pass) {
-    Write-Host 'integration suite: SUCCESS.'
-    $intState.state = 'PASS'
+if ($null -ne $archiveError) {
+    $intState.state = 'FAIL'
     $intState.completed = $true
-    $intState['exitCode'] = 0
+    $intState['failureReasons'] = @("ARCHIVE_INTEGRITY_FAILURE: $archiveError")
+    if ($null -ne $intProcessError) {
+        $intState['processError'] = $intProcessError
+    }
+    $intState['exitCode'] = if ($integrationStatus -ne 0) { $integrationStatus } else { 2 }
     $intState['endTime'] = (Get-Date).ToString('o')
     Write-JsonStateFile -FilePath $intStateFile -Data $intState
-} else {
+
+    $sessionData.state = 'FAIL'
+    $sessionData.completed = $true
+    $sessionData['failureReason'] = "ARCHIVE_INTEGRITY_FAILURE in backup-integration: $archiveError"
+    $sessionData['endTime'] = (Get-Date).ToString('o')
+    Write-JsonStateFile -FilePath $sessionStateFile -Data $sessionData
+
+    Write-Host "CRITICAL: PITRアーカイブ処理が失敗しました ($archiveError)."
+    exit 2
+}
+
+$intEval = Evaluate-BackupIntegrationEvidenceDir -ProcessExitCode $integrationStatus -EvidenceDir $intArtifactsDir
+$intFailureReasons = @()
+if ($null -ne $intProcessError) {
+    $intFailureReasons += "PROCESS_EXECUTION_EXCEPTION: $intProcessError"
+}
+if (-not $intEval.Pass) {
+    $intFailureReasons += $intEval.Reasons
+}
+
+if ($intFailureReasons.Count -gt 0) {
     Write-Host 'integration suite: FAIL.'
     $intState.state = 'FAIL'
     $intState.completed = $true
-    $intState['failureReasons'] = $intEval.Reasons
+    $intState['failureReasons'] = $intFailureReasons
     $intState['exitCode'] = $integrationStatus
     $intState['endTime'] = (Get-Date).ToString('o')
     Write-JsonStateFile -FilePath $intStateFile -Data $intState
@@ -511,9 +538,16 @@ if ($intEval.Pass) {
     $sessionData['endTime'] = (Get-Date).ToString('o')
     Write-JsonStateFile -FilePath $sessionStateFile -Data $sessionData
 
-    $intEval.Reasons | ForEach-Object { Write-Error "  - $_" }
+    $intFailureReasons | ForEach-Object { Write-Host "  - $_" }
     exit 1
 }
+
+Write-Host 'integration suite: SUCCESS.'
+$intState.state = 'PASS'
+$intState.completed = $true
+$intState['exitCode'] = 0
+$intState['endTime'] = (Get-Date).ToString('o')
+Write-JsonStateFile -FilePath $intStateFile -Data $intState
 
 # ------------------------------------------------------------------------------
 # 8. 交付ツリーの秘密情報スキャン.
