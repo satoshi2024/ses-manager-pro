@@ -22,7 +22,7 @@ MOCK/STUB/LOOPBACKの成功は、その実装・契約と合成fixtureを確認�
 
 Provider、サービス/製品、APIバージョン、event schema version、署名/auth方式、region、availability/SLO、障害責任分界、TLS要件、idempotency仕様、rate limit、契約主体、subprocessor、削除/retention、費用上限はすべて未決。特定製品・endpoint・versionを本書で選定しない。
 
-選定後、契約ownerは providerの公式API仕様と契約付属文書から、採用するAPI version、日付付き仕様snapshot/hash、deprecation期限、認証、TLS、idempotency、timeout/retry、429/5xx、データ所在・保持、サポート窓口を記録する。一般HTTPの参考規範は [RFC 9110 HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110) と [RFC 9333 Idempotency-Key HTTP Header Field](https://www.rfc-editor.org/rfc/rfc9333)。RFCは相手providerが実装している証拠ではなく、相手契約との照合が必要。
+選定後、契約ownerは providerの公式API仕様と契約付属文書から、採用するAPI version、日付付き仕様snapshot/hash、deprecation期限、認証、TLS、idempotency、timeout/retry、429/5xx、データ所在・保持、サポート窓口を記録する。一般HTTPの参考規範は [RFC 9110 HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110) と [IETF Internet-Draft draft-ietf-httpapi-idempotency-key-header-08](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header-08/)（2026-10-22時点。RFCではなくInternet-Draftであり、provider契約と実装を別途確認）。RFCは相手providerが実装している証拠ではなく、相手契約との照合が必要。
 
 ## 4. Credential計画（原文禁止）
 
