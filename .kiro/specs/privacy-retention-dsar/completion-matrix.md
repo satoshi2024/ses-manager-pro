@@ -1,10 +1,10 @@
 # completion mapping
 
-## 2026-10-26 NF07 本番接線・意思決定契約および純粋カーネル抽出計画（Base: aad2afee / 直前Base: b2886c47 / c8b78dc3 証拠継承）
+## 2026-10-26 NF07 本番接線・意思決定契約および純粋カーネル抽出計画（Base: 197386f8 / 直前Base: aad2afee / c8b78dc3 証拠継承）
 
 現行作業ブランチ: `codex/snf-prod-nf07-evidence-contract`
-本フェーズ基準（Base）: `aad2afeec71c2cb2eaa846bf02b2da0344990180`（Astra/総括 限定 PLAN PASS 承認コミット）
-直前基準（Previous Base）: `b2886c47a0c20716a37a08dffcfb847f5432a1f1`
+本フェーズ基準（Base）: `197386f866c834c7232590ec2f16fd13b8ac17d6`
+直前基準（Previous Base）: `aad2afeec71c2cb2eaa846bf02b2da0344990180`（Astra/総括 限定 PLAN PASS 承認コミット）
 固定テスト証拠コミット: `c8b78dc3c8c3906e8ba734a2aa81037bd3a77dfb`
 担当: AI-5（接線・意思決定契約および純粋カーネル抽出設計担当）
 設計正本:
@@ -60,11 +60,12 @@
 * **人手承認ギャップ**: DG-07 未承認、正式 Privacy Owner 未選任、法的留置（Hold）/SoD 権限未承認、DSAR 本人確認・第三者マスキング SOP 未承認、外部 AI ベンダー DPA 未確認。
 * **安全保護の根拠**: `privacy.retention.enabled` および `privacy.dsar.enabled` は導入予定・未実装であり、現行の保護根拠は「実際の `SyntheticEnvironmentGuard` による fail-closed 拒絶」および「破壊的実行能力の構造的不在」に立脚する。
 
-### 6. 純粋Policy検証カーネル抽出計画（新規策定）
+### 6. 純粋Policy検証カーネル抽出計画（分段階ヘルパー・承認証明生成境界の明確化）
 詳細設計は [`pure-policy-verification-kernel-plan.md`](pure-policy-verification-kernel-plan.md) を参照。
-* **抽出対象**: `ApprovalEnvelopeVerifier` から純粋計算（スキーマ検証、半開区間時間窓検査、TrustAnchorスコープ照合、ACTIVE失効判定、Ed25519署名検証、SoD検査、バインディング一致検査）を抽出。
-* **維持対象**: `SyntheticEnvironmentGuard`、システム時刻確定、TrustAnchor検索、失効プロバイダー例外ハンドリングは合成ラッパーに残存。
-* **非依存不変条件**: 純粋カーネル（`PurePolicyVerificationKernel`）は Spring、DB、ネットワーク、KMS、環境プロファイルへのアクセスを一切持たない。
+* **抽出対象**: `ApprovalEnvelopeVerifier` から純粋計算を分段階ヘルパー（スキーマ検証、Anchor ID比対、Scope照合、時間窓検査、ACTIVE失効判定、Ed25519署名検証、Policy SoD、Policyバインディング、Case/Policy相互バインディング）として抽出。
+* **オーケストレーション維持**: ラッパー（`ApprovalEnvelopeVerifier`）が評価順序（schema → anchor → scope → time → revocation → signature）をオーケストレーション。Policy 完備検証後に初めて Case を検証し、先行バッチ照会は行わない。
+* **承認証明（VerifiedApproval）の生成境界**: 純粋カーネルは `VerifiedApproval` を生成・返却せず（void または純計算値 effectiveExpiry のみ返却）、環境防護・Anchor解決・失効照会を完遂したラッパー末端においてのみ構築。
+* **可視性境界の明確化**: `package-private` はパッケージ外アクセスを制限するものであり、同パッケージ内バイパス防止は規約・レビュー・オーケストレーション契約で統制。
 * **安全原則**: カーネル検証結果 ≠ 実行認可。説明専用DTO（`VerifiedPolicyMetadata`）を維持し、実行認可は付与しない。
 * **状態**: **PLAN REVIEW PENDING**（Astra 独立技術審査待ち）。
 
