@@ -61,3 +61,13 @@
 - クレジットカード番号 / 銀行口座暗証番号
 
 ※ パスワード管理や認証情報配布は 1Password, Bitwarden 等の専用秘密情報管理ツールまたは SSO IdP のセルフサービスパスワードリセットに委ねる。
+
+---
+
+## 4. V182 マイグレーション・修復計画ドキュメント索引 (V182 Migration & Repair Plan Index)
+
+| ドキュメント名 | 概要・対象範囲 | ステータス |
+|---|---|---|
+| `v182-rehearsal-contract.md` | V182 演練検証契約書（リハーサル 5 シナリオの完了定義） | **COMPLETED（演練通過済）** |
+| `v182-production-runbook-draft.md` | V182 本番マイグレーションおよびデータ修復 実行運用手順書（Runbook Draft） | **PLAN PASS（本番手順確定）** |
+| `v182-repair-executor-boundary-a-plan.md` | V182 修復エグゼキュータ 境界 A（電子インボイス集約）最小実装計画書 | **PLAN REVIEW PENDING（審査待ち）** |
