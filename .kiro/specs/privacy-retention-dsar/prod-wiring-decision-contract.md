@@ -1,9 +1,10 @@
 # NF07 合成基盤から本番能力への接線・意思決定契約設計書
 （Production Wiring & Decision Contract）
 
-状態: **PLAN REVISION (R1) / Astra 技術 Plan Review 待ち。設計のみ、本番削除・外送・書込操作は含まない。**  
-基準コミット（Base）: `c8b78dc3c8c3906e8ba734a2aa81037bd3a77dfb`  
-担当: AI-5（接線・意思決定契約設計担当）  
+状態: **PLAN REVISION (R2) / Astra 技術 Plan Review 待ち。設計のみ、本番削除・外送・書込操作は含まない。**
+基準コミット（Base）: `9024f7b2e924f073ad135aa0d4420c8b39dcbcd3`
+直前検証実績固定コミット: `c8b78dc3c8c3906e8ba734a2aa81037bd3a77dfb`
+担当: AI-5（接線・意思決定契約設計担当）
 対象ブランチ: `codex/snf-prod-nf07-evidence-contract`
 
 ---
@@ -13,13 +14,15 @@
 ### 1.1 目的
 NF07（プライバシー・データ保持・DSAR）における既存の合成検証済み能力（Envelope/Verifier、Journal CAS、Hold/Fence、Watermark Witness/Projection、Recovery、Synthetic Preview、只読Policy照会）と、将来の本番運用能力との間にある「接線（Wiring）」および「意思決定契約（Decision Contract）」を明確化する。
 
-### 1.2 スコープ制限・禁止事項
+### 1.2 スコープ制限・安全原則
 本設計は第一弾（設計フェーズ）であり、以下を厳格に順守する：
 1. **本番変更操作の禁止**: 実データの削除、物理パージ、論理削除、匿名化、外部送信（Dispatch）、本番DBへの書込操作は一切実装しない。
-2. **安全ガードの維持**: `SyntheticEnvironmentGuard` による合成環境隔離・本番プロファイル拒絶機構を解除・改変しない。
+2. **合成環境守衛の厳格維持**: `SyntheticEnvironmentGuard` による合成環境隔離・本番プロファイル（`prod`）拒絶機構は、合成資産の安全を担保する中核的防護であり、これを解除・改変・弱化しない。また、本番プロファイル下で `SyntheticEnvironmentGuard` が稼働を拒絶することは「誤動作」ではなく「意図された正常なフェイルクローズ動作」である。
 3. **只読結果の権限転用禁止**: 只読 Policy 照会結果（`PolicyExplanationResult`）は説明メタデータに限定し、いかなる実行権限・認可 Capability としても扱わない。
 4. **既存能力の再実装禁止**: 既存の SF-W2（Journal/Hold）、SF-W2b（Recovery/Witness）、SF-W3a（Preview）の合成能力を白紙化または再作成しない。
 5. **架空承認の禁止**: 人手意思決定事項について、AIが勝手に承認日や署名を偽造・補完しない。
+6. **ゼロデータベース書込（Zero DB Mutation）**: 本接線設計スライスは完全な読み取り専用であり、データベースへの書込・更新・ログ永続化を一切行わない。
+7. **擬似フラグへの非依存**: `privacy.retention.enabled` および `privacy.dsar.enabled` は導入予定・未実装の設定項目であり、現行の保護根拠は「実際の `SyntheticEnvironmentGuard`」および「コード構造上の破壊的実行能力の完全欠落」に基づく。
 
 ---
 
@@ -27,21 +30,34 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
 
 現状の実装・検証事実と、本番移行に向けたギャップを5つの次元で整理する。
 
-| 機能領域 / コンポーネント | ① 現行コードベース実装 | ② 履歴固定SHA検証実績 | ③ 現行SHA未検証項目 (`c8b78dc3`) | ④ 本番接線ギャップ（技術） | ⑤ 人工承認ギャップ（ガバナンス） |
+| 機能領域 / コンポーネント | ① 現行コードベース実装 | ② 履歴固定SHA検証実績 | ③ 現行SHA未検証項目 (`9024f7b2`) | ④ 本番接線ギャップ（技術） | ⑤ 人工承認ギャップ（ガバナンス） |
 |---|---|---|---|---|---|
-| **純粋状態機械・エンベロープ検証** | `PrivacyCaseStateMachine`<br>`ApprovalEnvelopeVerifier`<br>`CaseApprovalEnvelope`<br>`PolicyApprovalEnvelope` | 固定Head `6ec4ca28`<br>Astra限定CODE PASS<br>3クラス 18/0/0/0 合格 | 現行SHAでの隔離単体テストは通過済（42件内） | 本番PKI/HSM/KMS連携なし<br>本番Trust Anchor動的配布なし | DG-07未承認<br>署名機関責任者未選任<br>スキーマv1以降の合意なし |
-| **環境隔離ガード** | `SyntheticEnvironmentGuard`<br>(active/default `prod` 拒否) | 固定Head `6ec4ca28`<br>prod混入時の即時fail-closed実証済 | 現行SHAでの隔離単体テスト通過済 | 本番環境用プロファイル識別・防護切替機構が未配線 | 本番環境運用ポリシー未承認 |
+| **純粋状態機械・エンベロープ検証** | `PrivacyCaseStateMachine`<br>`ApprovalEnvelopeVerifier`<br>`CaseApprovalEnvelope`<br>`PolicyApprovalEnvelope` | 固定Head `6ec4ca28`<br>Astra限定CODE PASS<br>3クラス 18/0/0/0 合格 | 現行SHAでの新規テスト実行なし（`c8b78dc3` での42件定向テスト合格を継承） | 本番PKI/HSM/KMS連携なし<br>本番Trust Anchor動的配布なし | DG-07未承認<br>署名機関責任者未選任<br>スキーマv1以降の合意なし |
+| **環境隔離ガード** | `SyntheticEnvironmentGuard`<br>(active/default `prod` 拒否) | 固定Head `6ec4ca28`<br>prod混入時の即時fail-closed実証済 | 現行SHAでの新規テスト実行なし | 本番用環境ガード及び本番専用Audience（`PRODUCTION`）未分離 | 本番環境運用ポリシー未承認 |
 | **独立Journal・CAS排他・留置** | `PrivacyJournalPort`<br>`JdbcPrivacyJournalAdapter`<br>`VerifiedDispatchFence`<br>`DispatchFenceVerifier` | 固定証拠 `nf07-w2a`<br>並行境界・MySQL分離確認済 | 現行SHA下での実MySQL並行・耐久性テスト未再実行（AI-1担当） | 本番独立Journal用MySQLインスタンス/クラスター不在<br>本番Flyway DDL未発行（V185未割当） | 留置（Legal Hold）権限規程未策定<br>職務分離（SoD）の法務承認なし |
 | **投影・署名Watermark・リカバリ** | `PrivacyProjectionPort`<br>`JdbcPrivacyProjectionAdapter`<br>`JournalProjectionService`<br>`SignedWatermarkVerifier`<br>`LatestWitnessPort`<br>`JdbcLatestWitnessAdapter`<br>`PrivacyRecoveryService` | 固定Head `ac894ac6`<br>W2b D2b2 35/0/0/0 合格<br>(Astra限定Review) | 現行SHA下での3-MySQL隔離リカバリテスト未再実行（AI-1担当） | 本番Witness独立ストア不在<br>アプリケーションDBへの本番投影バッチ不在<br>リカバリ隔離解除APIの本番配線なし | 復旧後隔離（`READ_ONLY_QUARANTINED`）解除権限者未指定<br>災害復旧SOP未承認 |
-| **合成DSARプレビュー** | `SyntheticPreviewPort`<br>`SyntheticPreviewStore`<br>`SyntheticPrivacyRequestService`<br>`SyntheticIdentityEvidenceVerifier` | 固定Head `92d91d58`<br>W3a 26/0/0/0 合格<br>(control `b6e2992b` 統合) | 現行SHA下での実MySQLプレビューテスト未再実行（AI-1担当） | 本番IdP（Keycloak/OAuth2）連携不在<br>実180テーブル/ファイル用Scope Provider不在<br>同姓同名・名寄せ解決SOP不在 | DSAR受付窓口規程未策定<br>第三者マスキング基準の法務合意なし |
-| **只読Policy照会・説明** | `PolicyReadonlyQueryPort`<br>`PolicyReadonlyQueryService`<br>`SyntheticPolicyCatalog`<br>`PolicyEnvelopeSource`<br>`SyntheticCallerContextProvider` | 現行Head `c8b78dc3`<br>定向42件合格 (`targeted-01`)<br>Fast全4,292件合格 (`fast-01`) | 全MySQLテストプロファイル（Docker依存）は未実行 | 本番Spring Securityコンテキスト接続不在<br>本番ポリシーカタログ（全要素網羅）不在<br>本番失効CRL/OCSPプロバイダー不在 | DG-07全データ保持期間未承認（78件UNKNOWN）<br>正式Privacy Owner未選任 |
-| **処分バッチ・外部送信** | なし（設計・合成インターフェースのみ） | 未実行（実装凍結） | 未実装 | 本番Outboxディスパッチャー不在<br>実外部AIアダプター配線不在<br>処分実行器（物理/論理/匿名化）不在 | 処分機能フラグ（OFF維持）<br>ベンダーDPA（Google Cloud等）未合意 |
+| **合成DSARプレビュー** | `SyntheticPreviewPort`<br>`SyntheticPreviewStore`<br>`SyntheticPrivacyRequestService`<br>`SyntheticIdentityEvidenceVerifier` | 固定Head `92d91d58`<br>W3a 26/0/0/0 合格<br>(control `b6e2992b` 統合) | 現行SHA下での実MySQLプレビューテスト未再実行（AI-1担当） | 本番IdP（Keycloak/OAuth2）連携不在<br>実テーブル/ファイル用Scope Provider不在<br>同姓同名・名寄せ解決SOP不在 | DSAR受付窓口規程未策定<br>第三者マスキング基準の法務合意なし |
+| **只読Policy照会・説明** | `PolicyReadonlyQueryPort`<br>`PolicyReadonlyQueryService`<br>`SyntheticPolicyCatalog`<br>`PolicyEnvelopeSource`<br>`SyntheticCallerContextProvider` | `c8b78dc3` 固定実績:<br>定向42件合格 (`targeted-01`)<br>Fast全4,292件合格 (`fast-01`) | 全MySQLテストプロファイル（Docker依存）は未実行（AI-1担当） | 本番Spring Security連携コンテキスト未配線<br>本番ポリシーカタログ未配線<br>本番失効CRL/OCSPプロバイダー未配線 | DG-07全データ保持期間未承認<br>正式Privacy Owner未選任 |
+| **処分バッチ・外部送信** | なし（設計・合成インターフェースのみ） | 未実行（実装凍结） | 未実装 | 本番Outboxディスパッチャー不在<br>実外部AIアダプター配線不在<br>処分実行器（物理/論理/匿名化）不在 | 処分機能フラグ（導入予定・未実装）<br>ベンダーDPA（Google Cloud等）未合意 |
+
+### 2.1 履歴スキャン統計の分離と現行HEADの閉環ゲート規約
+過去のインベントリおよびカバレッジ統計について、測定時点およびコミットSHAを明確に分離して記録する。これらを現行HEAD（`9024f7b2`）における新しいスキャン結果と混同してはならない。
+
+1. **歴史的ベースライン 1（2026-08-28、コミット `b678ce98`）**:
+   * 対象: マイグレーション 116 ファイル、180 テーブル、4,279 CREATE 列、153 ALTER 列、176 エンティティ、424 プロバイダー候補。
+   * 結果: 構造的未分類（unclassified）は 0 であるが、法的なポリシー承認が未完了のテーブルが 78 件存在（`COVERAGE_EXPLICIT_POLICY_UNKNOWN`）。
+2. **固定読取専用スキャン 2（2026-10-01、Control Head `cde61306`、証拠 `20261001-privacy-coverage-02`）**:
+   * 対象: マイグレーション 183 ファイル、254 テーブル、244 エンティティ、708 プロバイダー候補。
+   * 結果: プライバシーカタログ未分類 74 テーブル、インベントリ欠落 1,082 列、プロバイダー参照欠落 285 件、エンティティ未マップ 68 件で `BLOCKED`。
+3. **現行HEAD及び将来リリースの閉環ゲート規約**:
+   * 上記いずれの統計も現行HEADの直接スキャン結果ではない。
+   * Phase 4 の実装時および将来の本番公開（Production Enablement）時には、**対象となるリリース固定コミット SHA に対してインベントリ・カバレッジの閉環スキャンを再実行し、未分類 0・欠落 0 の証拠を固定すること**を必須のゲート条件とする。
 
 ---
 
 ## 3. 最小本番接線設計スライス: 只読Policy説明照会ブリッジ
 
-本インクリメントで選定する唯一の最小本番接線スライスは、下流業務・連携モジュール（NF03/NF08）へ向けた**「只読Policy説明照会ブリッジ（Read-only Policy Explanation Bridge）」**である。  
+本インクリメントで選定する唯一の最小本番接線スライスは、下流業務・連携モジュール（NF03/NF08）へ向けた**「只読Policy説明照会ブリッジ（Read-only Policy Explanation Bridge）」**である。
 本スライスは**完全只読（0 write, 0 delete, 0 dispatch）**であり、本番データへの副作用を一切持たず、業務機能に不可欠なポリシー状況の安全な可視化のみを提供する。
 
 ```text
@@ -50,59 +66,75 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
        ▼
 [PolicyReadonlyQueryPort]
        │
-[PolicyReadonlyQueryService] (Spring Bean 接線)
+[ProductionPolicyReadonlyQueryService] (独立本番入口 / Spring Bean)
        ├── 呼び出し元検証 ────▶ [SecurityContextCallerContextProvider] (Spring Security 連携)
        ├── カタログ特定   ────▶ [ProductionPolicyCatalog] (本番カタログ)
        ├── ソース現在版取得 ──▶ [ProductionPolicyEnvelopeSource] (署名済みポリシー正本)
-       └── ポリシー検証   ────▶ [ApprovalEnvelopeVerifier.verifyPolicyOnly]
-                                    ├── Trust Anchor 照合 (本番公開鍵)
+       └── ポリシー検証   ────▶ [ProductionApprovalEnvelopeVerifier]
+                                    │  (内部で独立審査済みの純粋検証カーネルを呼び出し)
+                                    ├── Trust Anchor 照合 (本番公開鍵, Audience: PRODUCTION)
                                     ├── 期間・SoD・バインディング検査
                                     └── 失効照合 ────▶ [ProductionRevocationStatusProvider]
        │
        ▼
-[PolicyExplanationResult] (説明メタデータのみ返却・権限フラグなし)
+[PolicyExplanationResult] (説明メタデータのみ返却・権限フラグなし・DB書込なし)
 ```
 
-### 3.1 インターフェース契約
-呼び出し側はクエリDTOのみを渡し、実行コンテキストの偽装を構造上防止する。
+### 3.1 本番入口と検証境界の明確化（Production Entrypoint & Verification Boundary）
+現行の `PolicyReadonlyQueryService` および `ApprovalEnvelopeVerifier` は、コンストラクタで `SyntheticEnvironmentGuard` を注入されており、内部で `environmentGuard.requireSyntheticAllowed(...)` を呼び出している。このガードは、`prod` プロファイルが有効な環境では例外なく `SecurityException` を送出する。
+この `prod` 拒絶は合成環境保護のための**意図された正常動作**であり、これを「誤動作」と呼んだり、無効化・バイパスしてはならない。また、単に Spring Bean の定義や署名鍵を差し替えるだけでは、合成ガードによって本番実行が正しく阻害されるため成立しない。
 
-```java
-package com.ses.privacy.foundation;
+本番配線における境界アーキテクチャとして、以下の「純粋検証カーネル分離と独立本番入口」を設計する：
 
-public interface PolicyReadonlyQueryPort {
-    /**
-     * 指定されたクエリに対するポリシー現状を評価・説明する。
-     * 呼び出し元がアクターロール、テナント、asOf 時刻を任意に上書きすることは不可。
-     * 返却値は純粋な説明メタデータであり、いかなる実行権限・Capability も含まない。
-     */
-    PolicyExplanationResult evaluate(PolicyEvaluationQuery query);
-}
-```
+1. **純粋検証カーネルの分離（要・独立審査）**:
+   * 環境ガードに依存しない、純粋な暗号学的検証ロジック（正規化バイナリ生成、Ed25519 署名照合、職務分離 SoD 判定、有効期間半開区間判定、各種バインディング突き合わせ）を、副作用を持たない純粋関数的コンポーネント `PurePolicyVerificationKernel` として抽出する。
+   * 本カーネルの抽出と分離は、Astra による独立した技術 PLAN/CODE Review を受けることを前提とする。
+2. **合成用ラッパー（既存維持・不変）**:
+   * 既存の `ApprovalEnvelopeVerifier` および `PolicyReadonlyQueryService` は、`SyntheticEnvironmentGuard` を保持したまま完全に維持する。
+   * `audience = "SYNTHETIC"` のみを許可し、`prod` プロファイル検出時は直ちにフェイルクローズする既存の安全性を 100% 担保する。
+3. **独立本番用ラッパー（新規設計）**:
+   * 本番用の独立した検証器 `ProductionApprovalEnvelopeVerifier` および照会サービス `ProductionPolicyReadonlyQueryService` を新設する。
+   * 本番ラッパーは `ProductionEnvironmentGuard`（`prod` プロファイル必須、`audience = "PRODUCTION"` 必須、テスト鍵混入の拒絶）を注入し、`PurePolicyVerificationKernel` へ検証を委任する。
+   * 本番用 Trust Anchor（KMS/HSM 管理の正規ルート鍵）のみをロードし、合成用テスト鍵の混入を物理的に排除する。
 
-* **入力 (`PolicyEvaluationQuery`)**: `tenantId`, `actorId`, `moduleCode`, `dataElementId`, `targetAction`, `targetProvider`（不変レコード）。
-* **出力 (`PolicyExplanationResult`)**: `status` (`PolicyDecisionStatus`), `failureReason` (`PolicyFailureReason`), `policyVersion`, `policyDigest`, `dataElementId`, `targetAction`, `targetProvider`, `scope`, `effectiveFrom`, `expiresAt`, `explanationReason`。
-* **出力不変性**: `isPermitted`、`canDispatch`、`canPurge` などのブール権限フィールドを一切持たない。
+### 3.2 呼び出し元身元・テナント・ロールの厳格マッピング（Caller Context Mapping）
+本番環境では、Spring Security の `SecurityContextHolder` から得られる認証情報（`Authentication`）に基づき、`TrustedCallerContext` を安全に構築する。
 
-### 3.2 信頼境界（Trust Boundary）
-1. **呼出元身元の注入分離**:
-   * 本番接線時は `SecurityContextCallerContextProvider` を提供し、`SecurityContextHolder.getContext().getAuthentication()` から検証済みのアクターID、テナントID、ロールを抽出する。
-   * クライアントリクエストパラメータやHTTPヘッダーによる身元自己申告は拒絶する。
-2. **テナント・ロール検査**:
-   * `caller.tenantId() != query.tenantId()` $\rightarrow$ 直ちに `ACCESS_DENIED` (`CALLER_TENANT_MISMATCH`)。
-   * `caller.actorId() != query.actorId()` $\rightarrow$ 直ちに `ACCESS_DENIED` (`CALLER_ACTOR_MISMATCH`)。
-   * `caller.actorRole()` が許可ロール (`ROLE_SYSTEM_SERVICE`, `ROLE_PRIVACY_AUDITOR`, `ROLE_ADMIN`) 以外（例: `ROLE_UNPRIVILEGED_USER`） $\rightarrow$ 直ちに `ACCESS_DENIED` (`UNAUTHORIZED_ACTOR_ROLE`)。
-3. **合成ガードの非無効化原則**:
-   * 既存の `SyntheticEnvironmentGuard` は合成用アセットへの `prod` 混入を防ぐ防護壁としてそのまま維持する。
-   * 本番プロファイル下での実行は、本番用に明示的に構成された Trust Anchor および本番用エンベロープソースを使用し、合成用テスト鍵を決して本番へロードさせない。
+#### 1. 認証主体ごとの詳細マッピング規則
+
+| 認証 Principal 型 | アクターID (`actorId`) 解決 | テナントID (`tenantId`) 解決 | アクターロール (`actorRole`) 解決 | 未知・不整合時の動作 |
+|---|---|---|---|---|
+| **`LoginUser`**<br>(内部フォーム認証) | `String.valueOf(user.getSysUser().getId())`<br>(ID欠落時は `user.getUsername()`) | `user.getTenantId()`<br>(未設定/空白時は拒絶) | 後述の「権限マッピング規則」に基づき解決。<br>一般業務ロールは `ROLE_UNPRIVILEGED_USER` | テナント空白、または未認可ロールは即座に `ACCESS_DENIED` |
+| **`OidcLoginUser`**<br>(IdP / OAuth2 連携) | `String.valueOf(user.getSysUser().getId())`<br>(または検証済み OIDC `sub` クレーム) | `SecurityUtils.currentTenantId()`<br>(クレーム `tenant_id` / `tenantId` / `tenant`) | 後述の「権限マッピング規則」に基づき解決 | テナント解決不能時は即座に `ACCESS_DENIED` |
+| **`ExternalApiPrincipal`**<br>(公開APIクライアント) | `external.clientId()` | `external.tenantId()` | 原則として `ROLE_UNPRIVILEGED_USER`。<br>内部ロールへの変換は不可 | 専用のスコープ認可トークンがない限り照会不可 (`ACCESS_DENIED`) |
+| **サービス内部認証**<br>(Daemon / Worker) | サービス固有識別子<br>(例: `service:privacy-outbox`) | 対象処理テナントID | 内部暗号トークンまたは mTLS で検証された場合のみ `ROLE_SYSTEM_SERVICE` | 一般ユーザーセッションからの昇格は厳格に拒絶 |
+| **`AnonymousAuthenticationToken`**<br>(未認証 / ゲスト) | なし (`null`) | なし (`null`) | 解決不可 | `MISSING_CALLER_IDENTITY` により即座に `ACCESS_DENIED` |
+| **未知の Principal 型** | なし (`null`) | なし (`null`) | 解決不可 | `UNAUTHORIZED_ACTOR_ROLE` により即座に `ACCESS_DENIED` |
+
+#### 2. 厳格なロール昇格防止と権限マッピング規約
+* **同名文字列による短絡マッピングの禁止**:
+  * データベース上の `sys_user.role = '管理者'` や Spring Security の `ROLE_管理者` は、**単なる同名文字列の突き合わせによって自動的に `ROLE_ADMIN` へ昇格させてはならない**。
+  * `ROLE_ADMIN` へのマッピングには、システム管理権限（`ROLE_ADMIN`）に加えてプライバシー管理権限（例: `PRIVACY_ADMIN_READ` 特権）が明示的に付与されていることを検証しなければならない。
+* **一般業務ロールのアクセス拒絶**:
+  * 業務ロール（`営業`, `HR`, `マネージャー`, `要員`）および特権を持たない管理者は、すべて一律に `ROLE_UNPRIVILEGED_USER` にマッピングされ、照会時に直ちに `ACCESS_DENIED` となる。
+* **サービスロールへの自動昇格の絶対禁止**:
+  * **いかなる認証済みユーザー（`LoginUser`, `OidcLoginUser`, `ExternalApiPrincipal`, `PortalLoginUser`）も、自動的に `ROLE_SYSTEM_SERVICE` へ昇格することは構造上不可能とする**。
+  * `ROLE_SYSTEM_SERVICE` は、内部マイクロサービスまたはデーモンが発行する検証済み内部サービス認証トークンを保持している場合にのみ割り当てられる。
+
+#### 3. 呼び出し元検証の受入条件（Acceptance Criteria）
+1. **跨テナント拒絶**: `caller.tenantId() != query.tenantId()` の場合、直ちに `ACCESS_DENIED` (`CALLER_TENANT_MISMATCH`) を返却すること。
+2. **冒名・身元不一致拒絶**: `caller.actorId() != query.actorId()` の場合、直ちに `ACCESS_DENIED` (`CALLER_ACTOR_MISMATCH`) を返却すること。
+3. **未認可ロール拒絶**: `caller.actorRole()` が `ROLE_UNPRIVILEGED_USER`（一般営業、HR、マネージャー、要員等）の場合、直ちに `ACCESS_DENIED` (`UNAUTHORIZED_ACTOR_ROLE`) を返却すること。
+4. **サービス身元の非昇格検証**: 通常ログインユーザーが `ROLE_SYSTEM_SERVICE` を名乗るクエリを発行した場合、コンテキスト検証で確実に拒絶されること。
 
 ### 3.3 データソース（Data Sources）
-1. **ポリシーカタログ (`PolicyCatalog`)**:
+1. **ポリシーカタログ (`ProductionPolicyCatalog`)**:
    * `(moduleCode, dataElementId, targetAction, targetProvider)` を決定論的に固定の `policyId` と `expectedScope` へ解決する。
    * カタログ未定義の組み合わせは即座に `POLICY_UNKNOWN` (`POLICY_NOT_FOUND`) とする。
-2. **ポリシーソース (`PolicyEnvelopeSource`)**:
+2. **ポリシーソース (`ProductionPolicyEnvelopeSource`)**:
    * バージョン管理・署名された `PolicyApprovalEnvelope` の正本ストアから現在指定エンベロープを取得する。
    * 不透明 `revision` と `digest` による三点照合（`policyId`, `revision`, `digest`）を必須とし、不整合時は `POLICY_DRIFT`。
-3. **失効プロバイダー (`RevocationStatusProvider`)**:
+3. **失効プロバイダー (`ProductionRevocationStatusProvider`)**:
    * 署名鍵およびエンベロープごとの失効状態を照会する。
 
 ### 3.4 撤回・失効・期限・未知状態のハンドリング
@@ -128,10 +160,15 @@ public interface PolicyReadonlyQueryPort {
 * 内部検証では型付け例外 `PolicySecurityException(reason, message, cause)` を使用する。
 * 外部（API/呼び出し元）へ返却する `PolicyExplanationResult` の `explanationReason` には、固定の日本語説明文言のみを設定し、内部スタックトレースや `e.getMessage()` に含まれる秘密マーカー・接続情報を一切漏洩させない。
 
-### 3.6 監査証跡（Audit）
-* すべてのポリシー評価要求は、`t_audit_log` に記録される：
-  * 監査項目: `timestamp`, `tenantId`, `actorId`, `actorRole`, `moduleCode`, `dataElementId`, `targetAction`, `targetProvider`, `decisionStatus`, `failureReason`。
-  * 機密保護: 生PIIやエンベロープのペイロード本文、暗号鍵バイナリは監査ログへ記録しない。
+### 3.6 ゼロデータベース書込と監査証跡の境界（Zero DB Writes & Audit Boundary）
+* **ゼロデータベース書込（Zero DB Mutation）**:
+  * 本接線スライスは**データベースへの永続化（INSERT/UPDATE/DELETE）を一切行わない（0 DB write）**。
+  * `t_audit_log` テーブルへの永続化は本スライスのスコープ外であり、後続のトランザクションおよび監査設計スライス（Phase 5）において独立して設計・審査・実装される。
+  * **制限事項**: データベースへの監査ログ永続化が未実装であるため、**本スライスをもって「本番監査証跡が完備された」と宣称することは厳格に禁止される**。
+* **本スライスで提供される非永続証跡（Unpersisted Evidence）**:
+  * 照会実行時、構造化セキュリティログ（SLF4J / INFO または WARN レベル）へ非永続の検証結果を出力する：
+    * ログ出力項目: `timestamp`, `tenantId`, `actorId`, `actorRole`, `moduleCode`, `dataElementId`, `targetAction`, `targetProvider`, `decisionStatus`, `failureReason`。
+    * 機密情報保護: 生PII、暗号鍵バイナリ、署名ペイロード本文はログへ出力しない。
 
 ---
 
@@ -171,14 +208,14 @@ public interface PolicyReadonlyQueryPort {
 | 番号 | 意思決定領域 | 必須決定事項 | 正式決定権限者 | 現在の状態 | 承認日 / 署名証跡 |
 |---|---|---|---|---|---|
 | **D-01** | **正式責任者選任** | システム全体の正式プライバシー・データ保持責任者（DPO/統括役員）の任命 | 経営会議 / 取締役会 | **未選任**<br>(`UNASSIGNED_UNTIL_PRE_PRODUCTION`) | *未承認（記入禁止）* |
-| **D-02** | **法務・ガバナンス (DG-07)** | 全180テーブル、ファイル、AIログに関する法定保持期間・起算日トリガー・法的根拠の正式承認 | 法務責任者 / コンプライアンス室長 | **未完了**<br>(全78件 UNKNOWN) | *未承認（記入禁止）* |
+| **D-02** | **法務・ガバナンス (DG-07)** | 全データテーブル、ファイル、AIログに関する法定保持期間・起算日トリガー・法的根拠の正式承認 | 法務責任者 / コンプライアンス室長 | **未完了**<br>(DG-07 未承認) | *未承認（記入禁止）* |
 | **D-03** | **暗号・鍵管理 (Security)** | 本番Ed25519 Trust Anchor（ルート公開鍵）の登録、HSM/KMS鍵管理規程、失効手順の承認 | CISO / 情報セキュリティ責任者 | **未策定**<br>(合成テスト鍵のみ存在) | *未承認（記入禁止）* |
 | **D-04** | **保持・処分規程** | データ要素ごとの具体的処分方式（物理削除、論理削除、匿名化、アクセス制限）の法的採否決定 | 法務責任者 / 個人情報保護委員会対応責任者 | **未決定** | *未承認（記入禁止）* |
 | **D-05** | **法的留置 (Hold)** | 法的留置（Legal Hold）の開始・解除権限者の指定、および解除時における職務分離（SoD: 申請者≠承認者）規則の承認 | 顧問弁護士 / 法務部門長 | **未承認** | *未承認（記入禁止）* |
 | **D-06** | **DSAR権利行使SOP** | 本人確認基準、同姓同名・名寄せ曖昧性発生時の人手裁定手順、第三者個人情報のマスキング基準の承認 | カスタマーサクセス統括 / プライバシーオフィサー | **未策定** | *未承認（記入禁止）* |
 | **D-07** | **リカバリ隔離解除** | 障害復旧・バックアップリストア後の永続隔離状態（`READ_ONLY_QUARANTINED`）を本番開放（Unquarantine）する判断基準および承認権限者 | システム運用統括 / CISO | **未承認** | *未承認（記入禁止）* |
 | **D-08** | **外部委託・DPA契約** | 外部AIサービス（Google Cloud / Gemini API）および電子契約ベンダーとのデータ処理契約（DPA）締結・ログ保持規約の確認 | 法務部門 / 調達責任者 | **未確認** | *未承認（記入禁止）* |
-| **D-09** | **本番機能フラグ開放** | `privacy.retention.enabled` および `privacy.dsar.enabled` の本番有効化承認（全Gate通過後） | 開発総括 / プロダクトオーナー / CISO | **BLOCKED**<br>(既定値 OFF 維持) | *未承認（記入禁止）* |
+| **D-09** | **本番機能フラグ開放** | `privacy.retention.enabled` および `privacy.dsar.enabled`（**導入予定・未実装**）の本番有効化承認（全Gate通過後） | 開発総括 / プロダクトオーナー / CISO | **BLOCKED**<br>(導入予定・未実装) | *未承認（記入禁止）* |
 
 ---
 
@@ -188,20 +225,20 @@ public interface PolicyReadonlyQueryPort {
 
 ```mermaid
 flowchart TD
-    P1["Phase 1: 只読Policy説明照会の本番接線 (Read-Only)"] --> P2["Phase 2: 人手ガバナンスと正式ポリシー・鍵登録"]
+    P1["Phase 1: 純粋検証カーネル分離と只読Policy本番接線 (Read-Only)"] --> P2["Phase 2: 人手ガバナンスと正式ポリシー・鍵登録"]
     P2 --> P3["Phase 3: 独立Journal・Witness本番インフラ構築"]
-    P3 --> P4["Phase 4: 本番プロバイダー実装とスコープ付き読取"]
-    P4 --> P5["Phase 5: 留置・外送直列化とトランザクショナルOutbox"]
+    P3 --> P4["Phase 4: 本番プロバイダー実装とカバレッジ閉環"]
+    P4 --> P5["Phase 5: 留置・外送直列化、DB監査、トランザクショナルOutbox"]
     P5 --> P6["Phase 6: 受控処分バッチと本番機能フラグ有効化"]
 ```
 
-### Phase 1: 只読Policy説明照会の本番接線（Read-Only Wiring）
+### Phase 1: 純粋検証カーネル分離と只読Policy本番接線（Read-Only Wiring）
 * **実装内容**:
-  * Spring Security 連携の `SecurityContextCallerContextProvider` 実装。
-  * `PolicyReadonlyQueryPort` の Spring `@Service` 化（読取専用 Bean）。
-  * 本番プロファイル下での合成ガード誤動作防止（本番Trust Anchor分離配線）。
+  * 純粋検証カーネル `PurePolicyVerificationKernel` の分離（Astra 独立技術レビュー必須）。
+  * 既存 `ApprovalEnvelopeVerifier` / `PolicyReadonlyQueryService` の合成環境守衛を完全維持。
+  * `ProductionPolicyReadonlyQueryService` および `SecurityContextCallerContextProvider` の実装。
 * **完了・検証条件**:
-  * 0 write, 0 delete, 0 dispatch であること。
+  * 0 write, 0 delete, 0 dispatch, 0 DB mutation であること。
   * 未認可ロールからのアクセスが直ちに `ACCESS_DENIED` となること。
   * NF03 の日常資格登録業務に一切の影響を与えないこと。
   * 42件の定向テストおよび Fast スイートの回帰がないこと。
@@ -218,36 +255,40 @@ flowchart TD
 ### Phase 3: 独立Journal・Witness本番インフラ構築（Production Journal & Witness）
 * **実装内容**:
   * 本番用独立 MySQL インスタンス（Journal用、Witness用）のプロビジョニング。
-  * 本番 Flyway マイグレーション（総括による番号管理）。
+  * 本番 Flyway マイグレーション（総括による番号管理、V185は占用しない）。
   * `JdbcPrivacyJournalAdapter` および `JdbcLatestWitnessAdapter` の本番データソース配線。
 * **完了・検証条件**:
   * アプリケーションDBとの物理的・論理的独立性の確認。
   * `innodb_flush_log_at_trx_commit=1` の耐久性検証。
   * リストア試験において古いスナップショットへのロールバックが検知・遮断（Quarantine）されること。
 
-### Phase 4: 本番プロバイダー実装とスコープ付き読取（Production Providers & Scoped Read）
+### Phase 4: 本番プロバイダー実装とカバレッジ閉環（Production Providers & Coverage Closure）
 * **実装内容**:
-  * 実180テーブル、ファイルストレージ、AIログに対する `PrivacyProvider` 実装。
+  * 実テーブル、ファイルストレージ、AIログに対する `PrivacyProvider` 実装。
   * `DataScopeService` との厳格な連携。
   * 第三者情報の自動マスキングエンジンの実装。
+  * **対象リリース SHA に対するインベントリ・カバレッジ閉環スキャンの実行**。
 * **完了・検証条件**:
+  * 対象リリース SHA での未分類（unclassified）0、欠落列 0 の閉環証明。
   * 検索スコープ外へのアクセスが一切発生しないこと（crossScopeAccess = 0）。
   * 同姓同名・名寄せ曖昧性のあるリクエストが自動マージされず人手待ちとなること。
 
-### Phase 5: 留置・外送直列化とトランザクショナルOutbox（Hold/Dispatch Linearization）
+### Phase 5: 留置・外送直列化、DB監査、トランザクショナルOutbox（Hold/Dispatch Linearization & DB Audit）
 * **実装内容**:
   * 独立Journalによる `HOLD_STARTED` / `HOLD_RELEASED` のアトミック記録。
   * `DISPATCH_AUTHORIZED` イベントと連携したトランザクショナルOutboxワーカー。
+  * `t_audit_log` への永続監査ログ書き込みの実装とトランザクション境界検証。
   * 履歴レシート検証器（`HistoricalActionReceiptVerifier`）の本番配線。
 * **完了・検証条件**:
   * 留置確定後の外部呼出が0であること。
   * 外部AI送信において、未承認ポリシーまたはホワイトリスト外項目の送信が遮断されること。
   * プロバイダー障害・タイムアウト時に状態が安全に `UNKNOWN` に保持されること。
+  * 監査ログの正確な記録と改竄防止の確認（本フェーズの検証をもって初めて生産監査完備とする）。
 
 ### Phase 6: 受控処分バッチと本番機能フラグ有効化（Controlled Disposition & Flag Enablement）
 * **実装内容**:
   * 二者承認（Four-Eyes Principle）を要求する処分バッチの実装。
-  * 処分機能フラグ（`privacy.retention.enabled` / `privacy.dsar.enabled`）の導入。
+  * 処分機能フラグ（`privacy.retention.enabled` / `privacy.dsar.enabled`）のコード導入。
 * **完了・検証条件**:
   * 機能フラグ既定値 OFF の確認。
   * 人手承認のないバッチ実行が拒絶されること。
