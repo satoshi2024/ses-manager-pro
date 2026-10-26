@@ -1,5 +1,47 @@
 # completion mapping
 
+## 2026-10-26 NF07 本番接線・意思決定契約および検証状況（Head: c8b78dc3）
+
+現行作業ブランチ: `codex/snf-prod-nf07-evidence-contract`  
+基準コミット（Base）: `c8b78dc3c8c3906e8ba734a2aa81037bd3a77dfb`  
+担当: AI-5（接線・意思決定契約設計担当）  
+設計正本: [`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md)
+
+### 1. 現行固定検証実績（c8b78dc3）
+* **只読Policy照会スライス定向テスト (`verification-evidence/20261025-nf07-targeted-01`)**:
+  * 実行コマンド: `mvn test -Dtest=PolicyReadonlyQueryServiceTest,ApprovalEnvelopeVerifierTest,PrivacyFoundationIsolationTest`
+  * 結果: **3クラス / 42テスト / 0 failure / 0 error / 0 skip（完全合格、ExitCode: 0）**
+  * 内訳:
+    * `PolicyReadonlyQueryServiceTest`: 29テスト合格
+    * `ApprovalEnvelopeVerifierTest`: 9テスト合格
+    * `PrivacyFoundationIsolationTest`: 4テスト合格
+* **Fast 回帰テストスイート (`verification-evidence/20261025-nf07-fast-01`)**:
+  * 実行コマンド: `mvn test` (Fast H2/Unit)
+  * 結果: **697クラス / 4,292テスト / 0 failure / 0 error / 0 skip（完全合格、ExitCode: 0）**
+
+### 2. 既存合成機能の実在状況と歴史的固定検証
+既存の Journal、Hold/Fence、署名検証/SoD、Recovery、Preview は既に合成隔離層として部分実装・検証が存在しており、未実装または白紙として扱ってはならない。
+* **SF-W0**: 計画固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`（Astra技術Plan PASS）
+* **SF-W1**: 固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`（Astra限定CODE PASS、対象3クラス 18/0/0/0）
+* **SF-W2a**: 固定証拠 `verification-evidence/nf07-w2a`（MySQL並行境界・線形化整合性確認）
+* **SF-W2b (Slice D2b2)**: 固定Head `ac894ac6ec9df2eada9e47c5f242f268270daec4`（1クラス 35/0/0/0 合格）
+* **SF-W3a (Preview)**: 固定Head `92d91d58172288406f6048e69ad38aa85880eb04`（Astra限定CODE PASS、26/0/0/0、control `b6e2992b` 統合）
+
+### 3. 現行SHA未検証項目（TEST NOT RUN）
+以下の項目は Docker/MySQL、パフォーマンステスト環境依存のため AI-1 担当としてキューされ、現行 SHA `c8b78dc3` においては未再実行（NOT RUN）である：
+* W2b Journal CAS / 独立 Witness / アプリケーション投影の実 MySQL 統合テスト
+* W2b Slice D リカバリ（3-MySQL 独立インスタンス）実 MySQL 統合テスト
+* W3a 合成 DSAR プレビュー（`SyntheticPrivacyRequestServiceMySQLTest`）実 MySQL 統合テスト
+* パフォーマンステストプロファイル（`-Pperformance-tests`）
+* PITR / バックアップリストア統合検証
+
+### 4. 本番配線ギャップおよび人手承認ギャップ
+詳細設計は [`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md) §2 を参照。
+* **技術配線ギャップ**: 本番 Trust Anchor / KMS 連携不在、本番独立 Journal/Witness インフラ不在、実180テーブル/ファイル/AI プロバイダー不在、Outbox ディスパッチャー不在、本番用 Spring Security Context 呼出元プロバイダー不在。
+* **人手承認ギャップ**: DG-07 未承認（78件 UNKNOWN）、正式 Privacy Owner 未選任、法的留置（Hold）/SoD 権限未承認、DSAR 本人確認・第三者マスキング SOP 未承認、外部 AI ベンダー DPA 未確認、本番機能フラグ（既定 OFF）未開放。
+
+---
+
 ## 2026-10-01 現行追加scope
 
 `SYNTHETIC_FOUNDATION`は新しい技術incrementであり、計画固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`はAstra技術Plan PASS。

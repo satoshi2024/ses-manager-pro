@@ -10,7 +10,8 @@ Base: `1443fb68943849a3260d7ebe005259f3eb609d60`。計画固定Head `f007ef9aecc
 |---|---|---|
 | [x] SF-W0 | requirements/design/正本の整合、全source inventory差分、型/拒否/署名interfaceとfixture設計 | Astraが固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`の技術PlanをPASS。policy UNKNOWNは未解決のまま |
 | [x] SF-W1 | pure state machine、envelope verifier、test-only authority、隔離harness。active/default prod、未知schema、偽署名/失効/SoD/実URL注入拒否 | Astraは固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`を限定CODE PASS。generated fixtureのみ、実provider call=0、3 class 18/0/0/0。SF-W1のDemo/コード範囲だけ完了 |
-| [ ] SF-RO-QUERY | NF03/NF08向け只読Policy照会契約（evaluate/catalog/source/CURRENT_CANDIDATE必須照合・三点照合/Policy-only型付け検証/説明専用DTO）。コード修正完了、テスト実行担当者はAI-1、テスト状態はNOT RUN（作成済みテスト数29件であり、通過数ではない） | 29件の単体テスト作成済み（NOT RUN）。実行認可Capability不保持、本番配線/外部通信なし、Astra/総括独立CODE Review待ち |
+| [ ] SF-RO-QUERY | NF03/NF08向け只読Policy照会契約（evaluate/catalog/source/CURRENT_CANDIDATE必須照合・三点照合/Policy-only型付け検証/説明専用DTO）。コード修正完了。AI-1による定向テスト42件（3クラス 42/0/0/0）およびFastスイート全4,292件の合格を確認済（`verification-evidence/20261025-nf07-targeted-01`, `fast-01`） | 42件の定向単体テスト合格（`PolicyReadonlyQueryServiceTest` 29件含む）。実行認可Capability不保持、本番配線/外部通信なし、Astra/総括独立CODE Review待ち |
+| [ ] SF-PROD-WIRING | NF07本番接線・意思決定契約設計（[`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md)）。五維能力マトリクス、最小只読説明配線スライス、NF03/NF08依存契約、人手意思決定チェックリスト、最小実装順序を策定 | 設計策定完了。本番削除・外送・書込なし、`SyntheticEnvironmentGuard`維持、説明専用DTO維持。Astra技術Plan Review待ち |
 | [ ] SF-W2 | [`sf-w2-protocol.md`](sf-w2-protocol.md)のAstra追加Plan PASS後に、event単位1 revisionのjournal CAS/compound authorization event、独立projection、最新watermark witnessを実装 | MySQL実並行でholdと認可順序、transaction中断時event/intent=0、journal ACK前call=0、old valid watermark拒否、profile/capability境界を検証 |
 | [ ] SF-W3 | outbox worker、dispatchごとの期限/失効再検証、current/historical receipt verifier分離、lease/idempotency、UNKNOWN/partial/emergency stop | 認可commit〜HTTP間hold、送信前後crash、期限後result fact、rotation/compromise/backdate、authoritative query、wrong binding、二worker、stale fenceを検証。取消receiptなしでCANCELLEDにせず、in-flight/UNKNOWNを保持 |
 | [ ] SF-W4 | restore quarantine、journal replay、DSAR合成export/redaction、NF03/NF08拒否integration | old snapshotへ新hold/intentを再適用、gap/改竄/遅延で公開不可、第三者情報0、反復hash一致 |
@@ -18,7 +19,7 @@ Base: `1443fb68943849a3260d7ebe005259f3eb609d60`。計画固定Head `f007ef9aecc
 
 SF-W3a preview persistence sliceは別途履歴として記録する。ledgerによれば固定Head `92d91d58172288406f6048e69ad38aa85880eb04` の限定CODE PASS（26/0/0/0、Astra受理）後、9 commitがcontrol `b6e2992b`へ統合済みで、対象はsynthetic preview persistence/as-of再検証/ACK_UNKNOWN/CASのみ。これはSF-W3全体またはSF-Mの完了ではない。`providerRead`/`crossScopeAccess`は動的fixture counter、provider write/dispatch/dispositionは`SyntheticPreviewPort`/service依存の構造上の能力不在をassertする契約であり、runtime回数0や全システムの外送不能性を意味しない。本追記は新たなruntime結果ではない。
 
-W2以降のworker/処分/journal recoveryは追加protocolの技術Plan PASS前に開始しない。SF-W1 CODE PASSは独立journal、worker、restore recovery、NF07全featureの完成を意味しない。
+W2以降のworker/処分/journal recoveryは追加protocolの技術Plan PASS前に開始しない。Journal、hold/fence、署名/SoD、recovery（SF-W2b Slice D）、preview（SF-W3a）は合成隔離層として部分実装・固定検証が存在しており、tasks旧記述を理由にこれら全体が未存在であると誤認してはならない。SF-W1 CODE PASSは独立journal、worker、restore recovery、NF07全featureの完成を意味しない。
 migration採番は総括が管理し、旧migrationとV1を変更しない。実adapter、正式policy、交付/処分は別人工gate。
 試験でDBを扱う場合もharness生成の隔離container/dataだけとし、既存DBやユーザーdataを再利用しない。
 
