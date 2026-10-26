@@ -126,10 +126,22 @@ sealトランザクション（`REQUIRES_NEW / READ_COMMITTED`）内では、以
   2. **最新DB時刻によるリース期限判定**:
      - 認可ゲート通過直後に `SELECT CURRENT_TIMESTAMP(6)` を発行。
      - `job.expiresAt == null || !job.expiresAt.after(dbNow)`（コミット後にリースが失効）の場合は `409 Conflict` で拒否する。有効なリースを持たないワーカーは確認応答を受領できない。
-  3. **世代一致と同世代 renew 互換性判定**:
+  3. **世代一致・バージョン・期限（lease_expires_at）互換性判定**:
      - `job.generation == capability.generation()` かつ `run.lastResumedGeneration == capability.generation()`（Takeover による新世代移行は 409 Conflict）。
      - `job.owner.equals(capability.workerId())`、`job.activeRunId == run.id`、`job.currentRunId == null`、`job.state.equals("VALIDATING")`。
-     - **同世代 renew 互換性**: seal コミット後に同世代・同一ワーカー内で renew が先行実行されていた場合、`job.version > capability.jobVersion()` かつ `job.expiresAt.after(capability.expiresAt())` となるが、これは正当な同世代再試行として許容する（`job.version >= capability.jobVersion()`）。
+     - **バージョンおよび期限（lease_expires_at）の判定条件**:
+       既存の `renew` 処理は `GREATEST(lease_expires_at, TIMESTAMPADD(SECOND, ?, CURRENT_TIMESTAMP(6)))` を使用するため、バージョン増加時に期限が厳密に増加するとは限らず、同値を維持する場合がある。そのため以下の厳格な3条件で判定する：
+       1. **同一バージョン（`job.version == capability.jobVersion()`）**:
+          - 期限は厳密に一致していなければならない（`job.expiresAt.equals(capability.expiresAt())`）。
+       2. **バージョン進行（`job.version > capability.jobVersion()`）**:
+          - 期限は capability の期限より前であってはならず（`!job.expiresAt.before(capability.expiresAt())`）、**期限相等（`job.expiresAt.equals(capability.expiresAt())`）も正当な同世代再試行として明示的に許容**する。
+       3. **バージョン逆行または期限回退**:
+          - `job.version < capability.jobVersion()` または `job.expiresAt.before(capability.expiresAt())`（期限回退）の場合は即座に `409 Conflict` で拒否する。
+     - **両許容条件（条件1および条件2）における共通必須前提**:
+       - 現在の認可が有効（`authorization.requireCurrentAuthorizationForWrite` 通過、撤権バイパス厳禁）。
+       - 現在のDB時刻において未期限（`job.expiresAt.after(dbNow)`）。
+       - owner / generation / run / input スナップショットおよび永続化証明（row_set_sha256, summary_sha256, 各カウンター）が完全一致。
+       - 零 UPDATE（`UPDATE` SQLを発行せず、`sealed_at` を再取得せず、`job.version_no` を増やさない）。
   4. **永続化証明の完全一致照合（Persisted Proof Comparison）**:
      - 保存済みの `run.row_set_sha256` と `capability.rowSetSha256()` を byte-for-byte で比較。
      - 正準形式で再構成した `summary_sha256` と保存済みの `run.summary_sha256` を byte-for-byte で比較。
@@ -260,22 +272,24 @@ WHERE tenant_id = ? AND job_id = ? AND id = ?
 | `t_import_job.active_validation_run_id` | `runId` | 一致 | `runId`（維持） | `runId`（維持） |
 | `t_import_job.current_validation_run_id` | `NULL` | 一致 | `NULL`（維持） | `NULL`（維持） |
 | `t_import_job.lease_generation` | `gen` | `capability.generation() = gen` | `gen`（維持） | `gen`（維持） |
-| `t_import_job.version_no` | `v` | `capability.jobVersion() = v`（SEALED再試行時は `v >= capability.jobVersion()`） | `v`（維持） | `v`（維持） |
+| `t_import_job.version_no` | `v` | `capability.jobVersion() = v`（SEALED再試行時: [v == v0 かつ expiry相等] または [v > v0 かつ !expiry.before(exp0)]） | `v`（維持） | `v`（維持） |
+| `t_import_job.lease_expires_at` | `exp` | `exp > dbNow`（SEALED再試行時: [v == v0 なら exp == exp0]、[v > v0 なら !exp.before(exp0)]） | `exp`（維持） | `exp`（維持） |
 | `t_import_validation_run.state` | `BUILDING` | `active_slot = 1`, `published_slot IS NULL`, `last_resumed_lease_generation = gen`, 全行セット照合一致 | `SEALED` | `BUILDING`（維持） |
 | `t_import_validation_run.sealed_at` | `NULL` | CAS成功 | `CURRENT_TIMESTAMP(6)` | `NULL`（維持） |
 | `t_import_validation_run.active_slot` | `1` | CAS成功 | `1`（維持） | `1`（維持） |
 | `t_import_validation_run.published_slot` | `NULL` | CAS成功 | `NULL`（維持） | `NULL`（維持） |
 | `t_import_validation_run` サマリー列・ハッシュ群 | `NULL` | 全制約（null/0, カウンター等式, 8192バイト）適合 | 確定値・正準ハッシュが保存 | `NULL`（維持、零部分書き込み） |
 | `t_import_validation_row` | N行 | 変更なし（読取・照合のみ） | N行（不変） | N行（不変） |
-| 【SEALED再試行】`t_import_validation_run.state` | `SEALED` | 権限有効、`lease_expires_at > dbNow`、同一世代、永続証明完全一致 | `SEALED`（不変、零重複書込み） | 権限失効時は `403`、期限切れ/ハッシュ差分は `409` |
+| 【SEALED再試行】`t_import_validation_run.state` | `SEALED` | 権限有効、`dbNow < expiresAt`、同一世代・owner・run、[(v == v0 かつ exp == exp0) または (v > v0 かつ !exp.before(exp0))]、永続証明完全一致 | `SEALED`（不変、零重複書込み、sealed_at不変） | 権限失効時は `403`、期限切れ/回退/ハッシュ差分は `409` |
 
 ### 4.10 テストマトリクス（正向・負向）
 
 | テスト分類 | テストケースID | 試験内容と注入障害 | 期待される判定と保護動作 |
 |---|---|---|---|
 | 正向用例 | **POS-SEAL-01** | `retention_until IS NULL`（無期限保持ドキュメント）での正常 seal | 正常成功（`state='SEALED'`、サマリー保存） |
-| 正向用例 | **POS-SEAL-02** | 同一ワーカーによる正常 seal コミット直後の同一トークン再試行（ACK loss 冪等回復） | 正常成功（二重更新なし、零重複書込み） |
-| 正向用例 | **POS-SEAL-03** | seal コミット後に同一世代で renew 実行後（`job.version` 増加後）の seal 冪等再試行 | 正常成功（同世代バージョン互換受け入れ、零重複書込み） |
+| 正向用例 | **POS-SEAL-02** | 同一ワーカー・同一バージョン・同一期限での正常 seal コミット直後の同一トークン再試行（ACK loss 冪等回復: `job.version == capability.jobVersion()` かつ `job.expiresAt.equals(capability.expiresAt())`） | 正常成功（二重更新なし、零重複書込み、`sealed_at` 不変） |
+| 正向用例 | **POS-SEAL-03** | seal コミット後に同一世代で renew 実行され期限が延長された状態（`job.version > capability.jobVersion()` かつ `job.expiresAt.after(capability.expiresAt())`）での seal 冪等再試行 | 正常成功（同世代バージョン進行受け入れ、二重更新なし、零重複書込み、`sealed_at` 不変） |
+| 正向用例 | **POS-SEAL-04** | **version 増加だが expiry 相等の正向用例**: seal コミット後に同一世代で renew 実行されたが `GREATEST` により期限同値を維持した状態（`job.version > capability.jobVersion()` かつ `job.expiresAt.equals(capability.expiresAt())`、かつ `job.expiresAt.after(dbNow)`）での seal 冪等再試行 | 正常成功（同世代・非減少期限受け入れ、二重更新なし、零重複書込み、`sealed_at` 不変） |
 | 不正トークン | NEG-SEAL-01 | 他テナントの `SealCapability` を提示 | 403 Forbidden（認可・テナント境界拒否） |
 | 不正トークン | NEG-SEAL-02 | 別job / 別run の `SealCapability` を提示 | 409 Conflict（job/run 不一致） |
 | 不正トークン | NEG-SEAL-03 | 旧世代（stale generation）の `SealCapability` を提示 | 409 Conflict（世代不一致） |
@@ -302,7 +316,9 @@ WHERE tenant_id = ? AND job_id = ? AND id = ?
 | 外部リソース | NEG-SEAL-24 | `retention_until < CURRENT_DATE`（保管期限切れドキュメント） | 409 Conflict（retention 期限切れ拒否） |
 | 外部リソース | NEG-SEAL-25 | ロック待機中に document に legal_hold が設定 | 409 Conflict（document hold 検知） |
 | 冪等・ACK loss | **NEG-SEAL-26** | SEALED 後の再試行時にアクター権限が revoke されている | **403 Forbidden**（認可ゲート厳格維持、撤権バイパス拒否） |
-| 冪等・ACK loss | **NEG-SEAL-27** | SEALED 後の再試行時にリース期限が切れている（`expiresAt <= dbNow`） | **409 Conflict**（期限切れ失効、確認不可） |
+| 冪等・ACK loss | **NEG-SEAL-27a** | SEALED 後の再試行時にリース期限が切れている（`expiresAt <= dbNow`） | **409 Conflict**（期限切れ失効、確認不可） |
+| 冪等・ACK loss | **NEG-SEAL-27b** | **expiry 回退の拒否用例**: SEALED 後の再試行時に、`job.expiresAt` が capability の期限より過去に回退している（`job.expiresAt.before(capability.expiresAt())`） | **409 Conflict**（期限回退検知拒否） |
+| 冪等・ACK loss | **NEG-SEAL-27c** | **job.version 逆行の拒否用例**: SEALED 後の再試行時に、`job.version < capability.jobVersion()` となっている | **409 Conflict**（バージョン逆行検知拒否） |
 | 冪等・ACK loss | **NEG-SEAL-28** | SEALED 完了済みの run に対し別ハッシュの SealCapability で再試行 | 409 Conflict（ハッシュ差分拒否） |
 | 冪等・ACK loss | **NEG-SEAL-29** | SEALED 完了後に Takeover が発生し新世代となった状態での旧世代再試行 | 409 Conflict（世代不一致拒否） |
 | 原子性検証 | NEG-SEAL-30 | CAS 途中で SQL エラー・障害注入 | 全ロールバック（run は BUILDING のまま、サマリー空） |
@@ -311,7 +327,7 @@ WHERE tenant_id = ? AND job_id = ? AND id = ?
 
 1. **`ImportValidationSealServiceTest.java`（Fast Suite / H2 / Mock）**:
    - Spring context または直接モック/H2 datasource を利用し、短時間で実行可能な単体テスト集。
-   - POS-SEAL-02, POS-SEAL-03, NEG-SEAL-01 〜 NEG-SEAL-15, NEG-SEAL-26 〜 NEG-SEAL-30 を中心に、バリデーションロジック、正準ハッシュ生成、BUILDING/SEALED状態分流、ゼロ部分書き込みを検証。
+   - POS-SEAL-02 〜 POS-SEAL-04, NEG-SEAL-01 〜 NEG-SEAL-15, NEG-SEAL-26 〜 NEG-SEAL-30 を中心に、バリデーションロジック、正準ハッシュ生成、BUILDING/SEALED状態分流、ゼロ部分書き込みを検証。
 2. **`ImportValidationSealRealMySqlTest.java`（Testcontainers MySQL / `@Tag("mysql")`）**:
    - 既存の肥大化した `ImportMetadataRealMySqlTest` には追加せず、完全に独立したテストクラスとして新設。
    - POS-SEAL-01, NEG-SEAL-16 〜 NEG-SEAL-25 を中心に、実MySQL上でのInnoDB行ロック順序、デッドロック不在、トランザクション分離（READ COMMITTED）、wait edge、`retention_until IS NULL` 正向用例、および `CURRENT_TIMESTAMP(6)` 境界を実環境で検証。
