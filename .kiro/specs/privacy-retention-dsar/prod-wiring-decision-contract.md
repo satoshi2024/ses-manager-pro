@@ -1,9 +1,10 @@
 # NF07 合成基盤から本番能力への接線・意思決定契約設計書
 （Production Wiring & Decision Contract）
 
-状態: **PLAN REVISION (R2) / Astra 技術 Plan Review 待ち。設計のみ、本番削除・外送・書込操作は含まない。**
-基準コミット（Base）: `9024f7b2e924f073ad135aa0d4420c8b39dcbcd3`
-直前検証実績固定コミット: `c8b78dc3c8c3906e8ba734a2aa81037bd3a77dfb`
+状態: **PLAN REVISION (R3) / Astra 技術 Plan Review 待ち。設計のみ、本番削除・外送・書込操作は含まない。**
+本輪基准（Base）: `b2886c47a0c20716a37a08dffcfb847f5432a1f1`
+直前基准（Previous Base）: `9024f7b2e924f073ad135aa0d4420c8b39dcbcd3`
+固定テスト証拠コミット: `c8b78dc3c8c3906e8ba734a2aa81037bd3a77dfb`
 担当: AI-5（接線・意思決定契約設計担当）
 対象ブランチ: `codex/snf-prod-nf07-evidence-contract`
 
@@ -30,18 +31,18 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
 
 現状の実装・検証事実と、本番移行に向けたギャップを5つの次元で整理する。
 
-| 機能領域 / コンポーネント | ① 現行コードベース実装 | ② 履歴固定SHA検証実績 | ③ 現行SHA未検証項目 (`9024f7b2`) | ④ 本番接線ギャップ（技術） | ⑤ 人工承認ギャップ（ガバナンス） |
+| 機能領域 / コンポーネント | ① 現行コードベース実装 | ② 履歴固定SHA検証実績 | ③ 基准SHA未検証項目 (Base: `b2886c47`) | ④ 本番接線ギャップ（技術） | ⑤ 人工承認ギャップ（ガバナンス） |
 |---|---|---|---|---|---|
-| **純粋状態機械・エンベロープ検証** | `PrivacyCaseStateMachine`<br>`ApprovalEnvelopeVerifier`<br>`CaseApprovalEnvelope`<br>`PolicyApprovalEnvelope` | 固定Head `6ec4ca28`<br>Astra限定CODE PASS<br>3クラス 18/0/0/0 合格 | 現行SHAでの新規テスト実行なし（`c8b78dc3` での42件定向テスト合格を継承） | 本番PKI/HSM/KMS連携なし<br>本番Trust Anchor動的配布なし | DG-07未承認<br>署名機関責任者未選任<br>スキーマv1以降の合意なし |
-| **環境隔離ガード** | `SyntheticEnvironmentGuard`<br>(active/default `prod` 拒否) | 固定Head `6ec4ca28`<br>prod混入時の即時fail-closed実証済 | 現行SHAでの新規テスト実行なし | 本番用環境ガード及び本番専用Audience（`PRODUCTION`）未分離 | 本番環境運用ポリシー未承認 |
-| **独立Journal・CAS排他・留置** | `PrivacyJournalPort`<br>`JdbcPrivacyJournalAdapter`<br>`VerifiedDispatchFence`<br>`DispatchFenceVerifier` | 固定証拠 `nf07-w2a`<br>並行境界・MySQL分離確認済 | 現行SHA下での実MySQL並行・耐久性テスト未再実行（AI-1担当） | 本番独立Journal用MySQLインスタンス/クラスター不在<br>本番Flyway DDL未発行（V185未割当） | 留置（Legal Hold）権限規程未策定<br>職務分離（SoD）の法務承認なし |
-| **投影・署名Watermark・リカバリ** | `PrivacyProjectionPort`<br>`JdbcPrivacyProjectionAdapter`<br>`JournalProjectionService`<br>`SignedWatermarkVerifier`<br>`LatestWitnessPort`<br>`JdbcLatestWitnessAdapter`<br>`PrivacyRecoveryService` | 固定Head `ac894ac6`<br>W2b D2b2 35/0/0/0 合格<br>(Astra限定Review) | 現行SHA下での3-MySQL隔離リカバリテスト未再実行（AI-1担当） | 本番Witness独立ストア不在<br>アプリケーションDBへの本番投影バッチ不在<br>リカバリ隔離解除APIの本番配線なし | 復旧後隔離（`READ_ONLY_QUARANTINED`）解除権限者未指定<br>災害復旧SOP未承認 |
-| **合成DSARプレビュー** | `SyntheticPreviewPort`<br>`SyntheticPreviewStore`<br>`SyntheticPrivacyRequestService`<br>`SyntheticIdentityEvidenceVerifier` | 固定Head `92d91d58`<br>W3a 26/0/0/0 合格<br>(control `b6e2992b` 統合) | 現行SHA下での実MySQLプレビューテスト未再実行（AI-1担当） | 本番IdP（Keycloak/OAuth2）連携不在<br>実テーブル/ファイル用Scope Provider不在<br>同姓同名・名寄せ解決SOP不在 | DSAR受付窓口規程未策定<br>第三者マスキング基準の法務合意なし |
+| **純粋状態機械・エンベロープ検証** | `PrivacyCaseStateMachine`<br>`ApprovalEnvelopeVerifier`<br>`CaseApprovalEnvelope`<br>`PolicyApprovalEnvelope` | 固定Head `6ec4ca28`<br>Astra限定CODE PASS<br>3クラス 18/0/0/0 合格 | 基准SHAでの新規テスト実行なし（`c8b78dc3` での42件定向テスト合格を継承） | 本番PKI/HSM/KMS連携なし<br>本番Trust Anchor動的配布なし | DG-07未承認<br>署名機関責任者未選任<br>スキーマv1以降の合意なし |
+| **環境隔離ガード** | `SyntheticEnvironmentGuard`<br>(active/default `prod` 拒否) | 固定Head `6ec4ca28`<br>prod混入時の即時fail-closed実証済 | 基准SHAでの新規テスト実行なし | 本番用環境ガード及び本番専用Audience（`PRODUCTION`）未分離 | 本番環境運用ポリシー未承認 |
+| **独立Journal・CAS排他・留置** | `PrivacyJournalPort`<br>`JdbcPrivacyJournalAdapter`<br>`VerifiedDispatchFence`<br>`DispatchFenceVerifier` | 固定証拠 `nf07-w2a`<br>並行境界・MySQL分離確認済 | 基准SHA下での実MySQL並行・耐久性テスト未再実行（AI-1担当） | 本番独立Journal用MySQLインスタンス/クラスター不在<br>本番Flyway DDL未発行（V185未割当） | 留置（Legal Hold）権限規程未策定<br>職務分離（SoD）の法務承認なし |
+| **投影・署名Watermark・リカバリ** | `PrivacyProjectionPort`<br>`JdbcPrivacyProjectionAdapter`<br>`JournalProjectionService`<br>`SignedWatermarkVerifier`<br>`LatestWitnessPort`<br>`JdbcLatestWitnessAdapter`<br>`PrivacyRecoveryService` | 固定Head `ac894ac6`<br>W2b D2b2 35/0/0/0 合格<br>(Astra限定Review) | 基准SHA下での3-MySQL隔離リカバリテスト未再実行（AI-1担当） | 本番Witness独立ストア不在<br>アプリケーションDBへの本番投影バッチ不在<br>リカバリ隔離解除APIの本番配線なし | 復旧後隔離（`READ_ONLY_QUARANTINED`）解除権限者未指定<br>災害復旧SOP未承認 |
+| **合成DSARプレビュー** | `SyntheticPreviewPort`<br>`SyntheticPreviewStore`<br>`SyntheticPrivacyRequestService`<br>`SyntheticIdentityEvidenceVerifier` | 固定Head `92d91d58`<br>W3a 26/0/0/0 合格<br>(control `b6e2992b` 統合) | 基准SHA下での実MySQLプレビューテスト未再実行（AI-1担当） | 本番IdP（Keycloak/OAuth2）連携不在<br>実テーブル/ファイル用Scope Provider不在<br>同姓同名・名寄せ解決SOP不在 | DSAR受付窓口規程未策定<br>第三者マスキング基準の法務合意なし |
 | **只読Policy照会・説明** | `PolicyReadonlyQueryPort`<br>`PolicyReadonlyQueryService`<br>`SyntheticPolicyCatalog`<br>`PolicyEnvelopeSource`<br>`SyntheticCallerContextProvider` | `c8b78dc3` 固定実績:<br>定向42件合格 (`targeted-01`)<br>Fast全4,292件合格 (`fast-01`) | 全MySQLテストプロファイル（Docker依存）は未実行（AI-1担当） | 本番Spring Security連携コンテキスト未配線<br>本番ポリシーカタログ未配線<br>本番失効CRL/OCSPプロバイダー未配線 | DG-07全データ保持期間未承認<br>正式Privacy Owner未選任 |
-| **処分バッチ・外部送信** | なし（設計・合成インターフェースのみ） | 未実行（実装凍结） | 未実装 | 本番Outboxディスパッチャー不在<br>実外部AIアダプター配線不在<br>処分実行器（物理/論理/匿名化）不在 | 処分機能フラグ（導入予定・未実装）<br>ベンダーDPA（Google Cloud等）未合意 |
+| **処分バッチ・外部送信** | なし（設計・合成インターフェースのみ） | 未実行（実装凍結） | 未実装 | 本番Outboxディスパッチャー不在<br>実外部AIアダプター配線不在<br>処分実行器（物理/論理/匿名化）不在 | 処分機能フラグ（導入予定・未実装）<br>ベンダーDPA（Google Cloud等）未合意 |
 
-### 2.1 履歴スキャン統計の分離と現行HEADの閉環ゲート規約
-過去のインベントリおよびカバレッジ統計について、測定時点およびコミットSHAを明確に分離して記録する。これらを現行HEAD（`9024f7b2`）における新しいスキャン結果と混同してはならない。
+### 2.1 履歴スキャン統計の分離と将来リリースの閉環ゲート規約
+過去のインベントリおよびカバレッジ統計について、測定時点およびコミットSHAを明確に分離して記録する。これらを直前基准（`9024f7b2`）や本輪基准（`b2886c47`）における新しいスキャン結果と混同してはならない。
 
 1. **歴史的ベースライン 1（2026-08-28、コミット `b678ce98`）**:
    * 対象: マイグレーション 116 ファイル、180 テーブル、4,279 CREATE 列、153 ALTER 列、176 エンティティ、424 プロバイダー候補。
@@ -49,8 +50,8 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
 2. **固定読取専用スキャン 2（2026-10-01、Control Head `cde61306`、証拠 `20261001-privacy-coverage-02`）**:
    * 対象: マイグレーション 183 ファイル、254 テーブル、244 エンティティ、708 プロバイダー候補。
    * 結果: プライバシーカタログ未分類 74 テーブル、インベントリ欠落 1,082 列、プロバイダー参照欠落 285 件、エンティティ未マップ 68 件で `BLOCKED`。
-3. **現行HEAD及び将来リリースの閉環ゲート規約**:
-   * 上記いずれの統計も現行HEADの直接スキャン結果ではない。
+3. **将来リリースの閉環ゲート規約**:
+   * 上記いずれの統計も本設計の基准コミットの直接スキャン結果ではない。
    * Phase 4 の実装時および将来の本番公開（Production Enablement）時には、**対象となるリリース固定コミット SHA に対してインベントリ・カバレッジの閉環スキャンを再実行し、未分類 0・欠落 0 の証拠を固定すること**を必須のゲート条件とする。
 
 ---
@@ -105,13 +106,32 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
 | 認証 Principal 型 | アクターID (`actorId`) 解決 | テナントID (`tenantId`) 解決 | アクターロール (`actorRole`) 解決 | 未知・不整合時の動作 |
 |---|---|---|---|---|
 | **`LoginUser`**<br>(内部フォーム認証) | `String.valueOf(user.getSysUser().getId())`<br>(ID欠落時は `user.getUsername()`) | `user.getTenantId()`<br>(未設定/空白時は拒絶) | 後述の「権限マッピング規則」に基づき解決。<br>一般業務ロールは `ROLE_UNPRIVILEGED_USER` | テナント空白、または未認可ロールは即座に `ACCESS_DENIED` |
-| **`OidcLoginUser`**<br>(IdP / OAuth2 連携) | `String.valueOf(user.getSysUser().getId())`<br>(または検証済み OIDC `sub` クレーム) | `SecurityUtils.currentTenantId()`<br>(クレーム `tenant_id` / `tenantId` / `tenant`) | 後述の「権限マッピング規則」に基づき解決 | テナント解決不能時は即座に `ACCESS_DENIED` |
+| **`OidcLoginUser`**<br>(IdP / OAuth2 連携) | `String.valueOf(user.getSysUser().getId())`<br>(または検証済み OIDC `sub` クレーム) | `oidc.getTenantId()`<br>(認証時に内部 `SysUser` へ固定束縛されたテナント。<br>トークンクレームは一致性検査のみに使用し、内部未設定時はフォールバックせず拒絶) | 後述の「権限マッピング規則」に基づき解決 | 内部テナント未設定、クレーム不一致、クレーム間衝突時は即座に `ACCESS_DENIED` |
 | **`ExternalApiPrincipal`**<br>(公開APIクライアント) | `external.clientId()` | `external.tenantId()` | 原則として `ROLE_UNPRIVILEGED_USER`。<br>内部ロールへの変換は不可 | 専用のスコープ認可トークンがない限り照会不可 (`ACCESS_DENIED`) |
 | **サービス内部認証**<br>(Daemon / Worker) | サービス固有識別子<br>(例: `service:privacy-outbox`) | 対象処理テナントID | 内部暗号トークンまたは mTLS で検証された場合のみ `ROLE_SYSTEM_SERVICE` | 一般ユーザーセッションからの昇格は厳格に拒絶 |
 | **`AnonymousAuthenticationToken`**<br>(未認証 / ゲスト) | なし (`null`) | なし (`null`) | 解決不可 | `MISSING_CALLER_IDENTITY` により即座に `ACCESS_DENIED` |
 | **未知の Principal 型** | なし (`null`) | なし (`null`) | 解決不可 | `UNAUTHORIZED_ACTOR_ROLE` により即座に `ACCESS_DENIED` |
 
-#### 2. 厳格なロール昇格防止と権限マッピング規約
+#### 2. OidcLoginUser のテナント解決とクレーム一致性検証規約（OIDC Tenant & Claim Verification Contract）
+* **可信データソースの単一性（認証バインディング優先）**:
+  * `OidcLoginUser` は内部 `LoginUser` を継承しており（`OidcLoginUser extends LoginUser`）、そのテナント解決は認証時に内部 `SysUser` へ固定された `oidc.getTenantId()`（即ち `super.getTenantId()`）を唯一の正本（Single Source of Truth）とする。
+  * `SecurityUtils.currentTenantId()` のような「クレーム優先（Claim-preferring）」または「クレームへのフォールバック」を行うロジックは、IdP トークン改竄や外部クレーム注入による跨テナント越境の脆弱性をもたらすため、可信テナントの導出元として使用することを厳格に禁止する。
+* **クレームの役割の限定（一致性検査のみ・フォールバック禁止）**:
+  * OIDC トークンに含まれる `tenant_id`、`tenantId`、`tenant` クレームは、内部バインディングの妥当性を二重確認する「整合性検査（Consistency Check）」の用途にのみ使用を許可する。
+  * クレームによって内部バインディング `oidc.getTenantId()` を上書き（Override）することは不可。
+  * 内部バインディングが `null` または空白の場合に、クレームの値へフォールバックしてテナントを確定することを厳格に禁止する。
+* **明確な拒絶条件（Rejection Conditions）**:
+  1. **不一致拒絶**: 内部バインディングがテナント A、OIDC クレームがテナント B の場合、照会クエリ（`query.tenantId()`）が B であっても A であっても、テナント不整合として直ちに `ACCESS_DENIED` (`CALLER_TENANT_MISMATCH`) を返却する。
+  2. **内部欠落拒絶**: 内部バインディング `oidc.getTenantId()` が未設定・空白の場合、OIDC クレームに有効な値が存在してもフォールバックせず、直ちに `ACCESS_DENIED` (`MISSING_CALLER_IDENTITY` または `CALLER_TENANT_MISMATCH`) を返却する。
+  3. **クレーム衝突拒絶**: OIDC トークン内に複数の有効なテナントクレーム（例: `tenant_id="X"` かつ `tenantId="Y"`）が存在し、それらが互いに不一致・衝突している場合、直ちに `ACCESS_DENIED` (`CALLER_TENANT_MISMATCH`) を返却する。
+* **正向通過条件（Positive Acceptance Condition）**:
+  * 内部バインディング `oidc.getTenantId()` が存在し、かつ
+  * トークン内の全テナントクレームが存在しないか、または存在するすべてのクレームが `oidc.getTenantId()` と完全一致し、かつ
+  * `query.tenantId()` が `oidc.getTenantId()` と一致し、他のアクター身元・ロール検査に合格する場合に限り、ポリシー評価処理の続行を許可する。
+* **型階層と評価順序の注意（Inheritance Order Constraint）**:
+  * `OidcLoginUser` は `LoginUser` のサブクラスであるため、将来の実装時（`CallerContextProvider` 等）において、`instanceof` 評価順序は必ず `OidcLoginUser` の分岐を先に評価し、その後に一般 `LoginUser` を評価しなければならない。
+
+#### 3. 厳格なロール昇格防止と権限マッピング規約
 * **同名文字列による短絡マッピングの禁止**:
   * データベース上の `sys_user.role = '管理者'` や Spring Security の `ROLE_管理者` は、**単なる同名文字列の突き合わせによって自動的に `ROLE_ADMIN` へ昇格させてはならない**。
   * `ROLE_ADMIN` へのマッピングには、システム管理権限（`ROLE_ADMIN`）に加えてプライバシー管理権限（例: `PRIVACY_ADMIN_READ` 特権）が明示的に付与されていることを検証しなければならない。
@@ -121,11 +141,15 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
   * **いかなる認証済みユーザー（`LoginUser`, `OidcLoginUser`, `ExternalApiPrincipal`, `PortalLoginUser`）も、自動的に `ROLE_SYSTEM_SERVICE` へ昇格することは構造上不可能とする**。
   * `ROLE_SYSTEM_SERVICE` は、内部マイクロサービスまたはデーモンが発行する検証済み内部サービス認証トークンを保持している場合にのみ割り当てられる。
 
-#### 3. 呼び出し元検証の受入条件（Acceptance Criteria）
+#### 4. 呼び出し元検証の受入条件（Acceptance Criteria）
 1. **跨テナント拒絶**: `caller.tenantId() != query.tenantId()` の場合、直ちに `ACCESS_DENIED` (`CALLER_TENANT_MISMATCH`) を返却すること。
-2. **冒名・身元不一致拒絶**: `caller.actorId() != query.actorId()` の場合、直ちに `ACCESS_DENIED` (`CALLER_ACTOR_MISMATCH`) を返却すること。
-3. **未認可ロール拒絶**: `caller.actorRole()` が `ROLE_UNPRIVILEGED_USER`（一般営業、HR、マネージャー、要員等）の場合、直ちに `ACCESS_DENIED` (`UNAUTHORIZED_ACTOR_ROLE`) を返却すること。
-4. **サービス身元の非昇格検証**: 通常ログインユーザーが `ROLE_SYSTEM_SERVICE` を名乗るクエリを発行した場合、コンテキスト検証で確実に拒絶されること。
+2. **OIDC テナント不整合・内部欠落・衝突拒絶**:
+   * 内部 A、クレーム B、クエリ B の場合に `ACCESS_DENIED` (`CALLER_TENANT_MISMATCH`) となること。
+   * 内部バインディング空白でクレーム有値の場合に `ACCESS_DENIED` となること（フォールバック拒絶）。
+   * 複数クレーム衝突時に `ACCESS_DENIED` となること。
+3. **冒名・身元不一致拒絶**: `caller.actorId() != query.actorId()` の場合、直ちに `ACCESS_DENIED` (`CALLER_ACTOR_MISMATCH`) を返却すること。
+4. **未認可ロール拒絶**: `caller.actorRole()` が `ROLE_UNPRIVILEGED_USER`（一般営業、HR、マネージャー、要員等）の場合、直ちに `ACCESS_DENIED` (`UNAUTHORIZED_ACTOR_ROLE`) を返却すること。
+5. **サービス身元の非昇格検証**: 通常ログインユーザーが `ROLE_SYSTEM_SERVICE` を名乗るクエリを発行した場合、コンテキスト検証で確実に拒絶されること。
 
 ### 3.3 データソース（Data Sources）
 1. **ポリシーカタログ (`ProductionPolicyCatalog`)**:
@@ -165,10 +189,12 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
   * 本接線スライスは**データベースへの永続化（INSERT/UPDATE/DELETE）を一切行わない（0 DB write）**。
   * `t_audit_log` テーブルへの永続化は本スライスのスコープ外であり、後続のトランザクションおよび監査設計スライス（Phase 5）において独立して設計・審査・実装される。
   * **制限事項**: データベースへの監査ログ永続化が未実装であるため、**本スライスをもって「本番監査証跡が完備された」と宣称することは厳格に禁止される**。
-* **本スライスで提供される非永続証跡（Unpersisted Evidence）**:
-  * 照会実行時、構造化セキュリティログ（SLF4J / INFO または WARN レベル）へ非永続の検証結果を出力する：
+* **本スライスにおけるログ証跡の扱い（本スライスはデータベース監査への書き込みを行わない）**:
+  * 本接線スライスは、アプリケーションデータベース（`t_audit_log`）への書き込みを一切行わない（0 DB write）。
+  * 照会実行時の証跡として、構造化セキュリティログ（SLF4J / INFO または WARN レベル）へ検証結果を出力する：
     * ログ出力項目: `timestamp`, `tenantId`, `actorId`, `actorRole`, `moduleCode`, `dataElementId`, `targetAction`, `targetProvider`, `decisionStatus`, `failureReason`。
     * 機密情報保護: 生PII、暗号鍵バイナリ、署名ペイロード本文はログへ出力しない。
+  * なお、このログがファイルやログ集約プラットフォーム等で永続化されるか否かについて本スライスとして非永続性を保証するものではなく、「本スライスとしてデータベース監査への永続化を行わない」ことのみを規約とする。
 
 ---
 
@@ -237,9 +263,11 @@ flowchart TD
   * 純粋検証カーネル `PurePolicyVerificationKernel` の分離（Astra 独立技術レビュー必須）。
   * 既存 `ApprovalEnvelopeVerifier` / `PolicyReadonlyQueryService` の合成環境守衛を完全維持。
   * `ProductionPolicyReadonlyQueryService` および `SecurityContextCallerContextProvider` の実装。
+  * `OidcLoginUser` における認証バインディング優先テナント解決およびクレーム一致性検査の実装。
 * **完了・検証条件**:
   * 0 write, 0 delete, 0 dispatch, 0 DB mutation であること。
   * 未認可ロールからのアクセスが直ちに `ACCESS_DENIED` となること。
+  * OIDC テナント不一致、内部欠落、クレーム衝突がすべて直ちに `ACCESS_DENIED` となること。
   * NF03 の日常資格登録業務に一切の影響を与えないこと。
   * 42件の定向テストおよび Fast スイートの回帰がないこと。
 
