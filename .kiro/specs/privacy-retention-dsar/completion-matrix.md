@@ -1,13 +1,15 @@
 # completion mapping
 
-## 2026-10-26 NF07 本番接線・意思決定契約および検証状況（Head: c8b78dc3）
+## 2026-10-26 NF07 本番接線・意思決定契約および検証状況（Head: 9024f7b2 / c8b78dc3 証拠継承）
 
-現行作業ブランチ: `codex/snf-prod-nf07-evidence-contract`  
-基準コミット（Base）: `c8b78dc3c8c3906e8ba734a2aa81037bd3a77dfb`  
-担当: AI-5（接線・意思決定契約設計担当）  
+現行作業ブランチ: `codex/snf-prod-nf07-evidence-contract`
+基準コミット（Base）: `9024f7b2e924f073ad135aa0d4420c8b39dcbcd3`
+直前検証実績固定コミット: `c8b78dc3c8c3906e8ba734a2aa81037bd3a77dfb`
+担当: AI-5（接線・意思決定契約設計担当）
 設計正本: [`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md)
 
-### 1. 現行固定検証実績（c8b78dc3）
+### 1. 直前固定検証実績（c8b78dc3 の歴史的証拠）
+本ラウンドにおいては新規のテスト実行は行っていない（NO NEW TESTS RUN IN THIS ROUND）。以下の実績は直前固定コミット `c8b78dc3` において完了・記録された歴史的証拠であり、全体の COMPLETE 状態を不当に引き上げるものではない。
 * **只読Policy照会スライス定向テスト (`verification-evidence/20261025-nf07-targeted-01`)**:
   * 実行コマンド: `mvn test -Dtest=PolicyReadonlyQueryServiceTest,ApprovalEnvelopeVerifierTest,PrivacyFoundationIsolationTest`
   * 結果: **3クラス / 42テスト / 0 failure / 0 error / 0 skip（完全合格、ExitCode: 0）**
@@ -19,7 +21,19 @@
   * 実行コマンド: `mvn test` (Fast H2/Unit)
   * 結果: **697クラス / 4,292テスト / 0 failure / 0 error / 0 skip（完全合格、ExitCode: 0）**
 
-### 2. 既存合成機能の実在状況と歴史的固定検証
+### 2. 履歴スキャン統計の分離と現行HEAD閉環ゲート規約
+過去のインベントリスキャン統計は計測時点のコミットSHAが異なっており、現行HEAD（`9024f7b2`）の直接スキャン結果と混同してはならない。
+* **歴史的ベースライン 1（2026-08-28、コミット `b678ce98`）**:
+  * 116 migration / 180 table / 4,279 CREATE column / 153 ALTER column / 176 entity / 424 provider候補。
+  * プライバシーカタログ構造的未分類は 0 であるが、法定保持ポリシーが未確定のテーブルが 78 件存在（`COVERAGE_EXPLICIT_POLICY_UNKNOWN`）。
+* **固定読取専用スキャン 2（2026-10-01、Control Head `cde61306`、証拠 `20261001-privacy-coverage-02`）**:
+  * 183 SQL / 254 table / 244 entity / 708 provider候補。
+  * プライバシーカタログ未分類 74、インベントリ欠落 1,082 列、プロバイダー参照欠落 285、エンティティ未マップ 68 で `BLOCKED`。
+* **現行HEADおよび将来リリースの閉環ゲート規約**:
+  * 上記の統計はいずれも現行コミットの再走査結果ではない。
+  * Phase 4 実装時および将来の本番公開（Production Enablement）時には、リリース対象コミット SHA に対するインベントリ・カバレッジの閉環スキャンを再実行し、未分類 0・欠落 0 の証拠を固定することを必須ゲートとする。
+
+### 3. 既存合成機能の実在状況と歴史的固定検証
 既存の Journal、Hold/Fence、署名検証/SoD、Recovery、Preview は既に合成隔離層として部分実装・検証が存在しており、未実装または白紙として扱ってはならない。
 * **SF-W0**: 計画固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`（Astra技術Plan PASS）
 * **SF-W1**: 固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`（Astra限定CODE PASS、対象3クラス 18/0/0/0）
@@ -27,18 +41,20 @@
 * **SF-W2b (Slice D2b2)**: 固定Head `ac894ac6ec9df2eada9e47c5f242f268270daec4`（1クラス 35/0/0/0 合格）
 * **SF-W3a (Preview)**: 固定Head `92d91d58172288406f6048e69ad38aa85880eb04`（Astra限定CODE PASS、26/0/0/0、control `b6e2992b` 統合）
 
-### 3. 現行SHA未検証項目（TEST NOT RUN）
-以下の項目は Docker/MySQL、パフォーマンステスト環境依存のため AI-1 担当としてキューされ、現行 SHA `c8b78dc3` においては未再実行（NOT RUN）である：
+### 4. 現行SHA未検証項目（TEST NOT RUN）
+以下の項目は Docker/MySQL、パフォーマンステスト環境依存のため AI-1 担当としてキューされ、現行 SHA においては未再実行（NOT RUN）である：
 * W2b Journal CAS / 独立 Witness / アプリケーション投影の実 MySQL 統合テスト
 * W2b Slice D リカバリ（3-MySQL 独立インスタンス）実 MySQL 統合テスト
 * W3a 合成 DSAR プレビュー（`SyntheticPrivacyRequestServiceMySQLTest`）実 MySQL 統合テスト
 * パフォーマンステストプロファイル（`-Pperformance-tests`）
 * PITR / バックアップリストア統合検証
 
-### 4. 本番配線ギャップおよび人手承認ギャップ
+### 5. 本番配線ギャップおよび人手承認ギャップ
 詳細設計は [`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md) §2 を参照。
-* **技術配線ギャップ**: 本番 Trust Anchor / KMS 連携不在、本番独立 Journal/Witness インフラ不在、実180テーブル/ファイル/AI プロバイダー不在、Outbox ディスパッチャー不在、本番用 Spring Security Context 呼出元プロバイダー不在。
-* **人手承認ギャップ**: DG-07 未承認（78件 UNKNOWN）、正式 Privacy Owner 未選任、法的留置（Hold）/SoD 権限未承認、DSAR 本人確認・第三者マスキング SOP 未承認、外部 AI ベンダー DPA 未確認、本番機能フラグ（既定 OFF）未開放。
+* **技術配線ギャップ**: 純粋検証カーネルの独立審査未完、本番用 Trust Anchor / KMS 連携不在、本番独立 Journal/Witness インフラ不在、実テーブル/ファイル/AI プロバイダー不在、Outbox ディスパッチャー不在、本番用 Spring Security Context 呼出元プロバイダー不在。
+* **データベース監査境界**: 現在のスライスは完全な 0 DB 書込であり、`t_audit_log` への永続化は Phase 5 へ延期。DB 監査未実装の現段階において生産監査完備を主張してはならない。
+* **人手承認ギャップ**: DG-07 未承認、正式 Privacy Owner 未選任、法的留置（Hold）/SoD 権限未承認、DSAR 本人確認・第三者マスキング SOP 未承認、外部 AI ベンダー DPA 未確認。
+* **安全保護の根拠**: `privacy.retention.enabled` および `privacy.dsar.enabled` は導入予定・未実装であり、現行の保護根拠は「実際の `SyntheticEnvironmentGuard` による fail-closed 拒絶」および「破壊的実行能力の構造的不在」に立脚する。
 
 ---
 
