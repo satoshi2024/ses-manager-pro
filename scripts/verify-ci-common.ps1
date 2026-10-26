@@ -26,11 +26,43 @@ function Get-Sha256Hex {
 
 function Get-StrictGitHead {
     param([string]$RepoRoot)
-    $head = (& git -C $RepoRoot rev-parse HEAD 2>$null)
+    $prevEap = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $headOutput = @(& git -C $RepoRoot rev-parse HEAD 2>&1)
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+    if ($LASTEXITCODE -ne 0 -or $headOutput.Count -eq 0) {
+        $errText = $headOutput -join "; "
+        throw "FATAL: Git HEAD SHA の取得に失敗しました (exit=$LASTEXITCODE): $errText."
+    }
+    $head = [string]$headOutput[0]
     if ([string]::IsNullOrWhiteSpace($head) -or ($head.Trim().Length -ne 40) -or ($head.Trim() -notmatch '^[0-9a-f]{40}$')) {
         throw "FATAL: 有効な40文字のGit HEAD SHAを取得できませんでした (取得値: '$head')."
     }
     return $head.Trim()
+}
+
+function Test-IsSubpathOrSame {
+    param(
+        [string]$ChildPath,
+        [string]$ParentPath
+    )
+    if ([string]::IsNullOrWhiteSpace($ChildPath) -or [string]::IsNullOrWhiteSpace($ParentPath)) {
+        return $false
+    }
+    $normChild = [System.IO.Path]::GetFullPath($ChildPath)
+    $normParent = [System.IO.Path]::GetFullPath($ParentPath)
+    if ($normChild.Equals($normParent, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+    $parentWithSlash = $normParent
+    if (-not $parentWithSlash.EndsWith([System.IO.Path]::DirectorySeparatorChar.ToString()) -and
+        -not $parentWithSlash.EndsWith([System.IO.Path]::AltDirectorySeparatorChar.ToString())) {
+        $parentWithSlash += [System.IO.Path]::DirectorySeparatorChar
+    }
+    return $normChild.StartsWith($parentWithSlash, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
 function Assert-CleanWorkingTree {
@@ -38,7 +70,17 @@ function Assert-CleanWorkingTree {
         [string]$RepoRoot,
         [string]$EvidenceDir = ''
     )
-    $statusOutput = @(& git -C $RepoRoot status --porcelain 2>$null)
+    $prevEap = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $statusOutput = @(& git -C $RepoRoot status --porcelain 2>&1)
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+    if ($LASTEXITCODE -ne 0) {
+        $errDetail = $statusOutput -join "; "
+        throw "FATAL: Git status の実行に失敗しました (exit=$LASTEXITCODE): $errDetail."
+    }
     if ($statusOutput.Count -eq 0) {
         return
     }
@@ -52,17 +94,27 @@ function Assert-CleanWorkingTree {
     $dirtyItems = @()
     foreach ($line in $statusOutput) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        $filePathRel = $line.Substring(3).Trim()
-        # カンマやクォートで囲まれている場合のトリム.
+        if ($line.Length -lt 3) {
+            $dirtyItems += $line
+            continue
+        }
+
+        $indexStatus = $line[0]
+        $workStatus = $line[1]
+        $isUntracked = ($indexStatus -eq '?' -and $workStatus -eq '?')
+
+        $filePathRel = $line.Substring(2).Trim()
         $filePathRel = $filePathRel.Trim('"')
         $itemFullPath = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $filePathRel))
 
-        if ($itemFullPath.StartsWith($targetFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        # 追跡済み (tracked) ファイルの変更は target や EvidenceDir 配下であっても絶対に除外しない.
+        if ($isUntracked -and (Test-IsSubpathOrSame -ChildPath $itemFullPath -ParentPath $targetFullPath)) {
             continue
         }
-        if (-not [string]::IsNullOrWhiteSpace($evidenceFullPath) -and $itemFullPath.StartsWith($evidenceFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        if ($isUntracked -and -not [string]::IsNullOrWhiteSpace($evidenceFullPath) -and (Test-IsSubpathOrSame -ChildPath $itemFullPath -ParentPath $evidenceFullPath)) {
             continue
         }
+
         $dirtyItems += $line
     }
 
@@ -77,22 +129,42 @@ function Assert-ValidMavenArgs {
     if ($null -eq $ArgsList -or $ArgsList.Count -eq 0) {
         return
     }
-    $forbiddenPatterns = @(
-        '-Dtest=',
-        '-Dtest',
-        '-Dgroups=',
-        '-Dexcluded-groups=',
-        '-DskipTests',
-        '-Dmaven.test.skip',
-        '-P',
-        '-pl',
-        '-rf'
+
+    $safeExactFlags = @(
+        '-B', '--batch-mode',
+        '-e', '--errors',
+        '-X', '--debug',
+        '-q', '--quiet',
+        '-U', '--update-snapshots',
+        '-C', '--strict-checksums',
+        '-c', '--lax-checksums',
+        '-V', '--show-version',
+        '-ntp', '--no-transfer-progress'
     )
+
+    $safePatterns = @(
+        '^-Djava\.awt\.headless=(true|false)$',
+        '^-Dfile\.encoding=[a-zA-Z0-9_\-]+$',
+        '^-Duser\.(language|country|timezone)=[a-zA-Z0-9_\/]+$',
+        '^-Dsurefire\.runOrder\.random\.seed=\d+$'
+    )
+
     foreach ($arg in $ArgsList) {
-        foreach ($pattern in $forbiddenPatterns) {
-            if ($arg.StartsWith($pattern, [System.StringComparison]::OrdinalIgnoreCase) -or ($arg -eq $pattern)) {
-                throw "FATAL: 門禁選択を縮減・変更するMaven引数は禁止されています: '$arg'."
+        if ([string]::IsNullOrWhiteSpace($arg)) { continue }
+        $t = $arg.Trim()
+        $isAllowed = $false
+        if ($safeExactFlags -contains $t) {
+            $isAllowed = $true
+        } else {
+            foreach ($pat in $safePatterns) {
+                if ($t -match $pat) {
+                    $isAllowed = $true
+                    break
+                }
             }
+        }
+        if (-not $isAllowed) {
+            throw "FATAL: 未許可または安全性が確認できないMaven引数は禁止されています: '$arg'."
         }
     }
 }
@@ -133,18 +205,134 @@ function Assert-ValidEvidenceDir {
     }
 
     $fullEvidencePath = [System.IO.Path]::GetFullPath($EvidenceDir)
+    $repoPath = [System.IO.Path]::GetFullPath($RepoRoot)
     $targetPath = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot 'target'))
 
-    if ($fullEvidencePath.StartsWith($targetPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "FATAL: EvidenceDir は target 配下に設定できません (指定値: $fullEvidencePath)."
+    if (Test-IsSubpathOrSame -ChildPath $fullEvidencePath -ParentPath $targetPath) {
+        throw "FATAL: EvidenceDir は target 配下に設定できません (指定値: '$fullEvidencePath')."
+    }
+
+    if ($fullEvidencePath.Equals($repoPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "FATAL: リポジトリルートを EvidenceDir として指定することは禁止されています: '$fullEvidencePath'."
+    }
+
+    $protectedSourceDirs = @('src', 'scripts', 'ops', 'sql', 'db', '.git', 'templates', 'static', 'config', 'apache-maven-3.9.6')
+    foreach ($sp in $protectedSourceDirs) {
+        $spFull = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $sp))
+        if (Test-IsSubpathOrSame -ChildPath $fullEvidencePath -ParentPath $spFull) {
+            throw "FATAL: ソース・管理ディレクトリ配下を EvidenceDir として使用することは禁止されています: '$fullEvidencePath'."
+        }
     }
 
     if (Test-Path -LiteralPath $fullEvidencePath) {
         $existingItems = @(Get-ChildItem -LiteralPath $fullEvidencePath -Force -ErrorAction SilentlyContinue)
         if ($existingItems.Count -gt 0) {
-            throw "FATAL: 既存の EvidenceDir の再利用は禁止されています (指定値: $fullEvidencePath)."
+            throw "FATAL: 既存の EvidenceDir の再利用は禁止されています (指定値: '$fullEvidencePath')."
         }
     }
+}
+
+function Assert-ValidPitrWorkDir {
+    param(
+        [string]$RepoRoot,
+        [string]$EvidenceDir,
+        [string]$PitrWorkDir
+    )
+    if ([string]::IsNullOrWhiteSpace($PitrWorkDir)) {
+        throw "FATAL: PITR私有作業ディレクトリが指定されていません."
+    }
+    $workFull = [System.IO.Path]::GetFullPath($PitrWorkDir)
+    $repoFull = [System.IO.Path]::GetFullPath($RepoRoot)
+    $evidenceFull = if (-not [string]::IsNullOrWhiteSpace($EvidenceDir)) {
+        [System.IO.Path]::GetFullPath($EvidenceDir)
+    } else { '' }
+
+    # 1. ルートディレクトリ (C:\, /, など) の拒絶.
+    $root = [System.IO.Path]::GetPathRoot($workFull)
+    if ($workFull.Equals($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "FATAL: ルートディレクトリをPITR作業ディレクトリとして指定することは禁止されています: '$workFull'."
+    }
+
+    # 2. システム保護領域 (Windows, ProgramFiles など) の拒絶.
+    $sysDirs = @(
+        $env:SystemRoot,
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)}
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    foreach ($sd in $sysDirs) {
+        $sdFull = [System.IO.Path]::GetFullPath($sd)
+        if (Test-IsSubpathOrSame -ChildPath $workFull -ParentPath $sdFull) {
+            throw "FATAL: システム保護ディレクトリ配下をPITR作業ディレクトリに指定することは禁止されています: '$workFull'."
+        }
+    }
+
+    # 3. リポジトリまたは証跡ディレクトリの祖先または配下の拒絶.
+    if (Test-IsSubpathOrSame -ChildPath $workFull -ParentPath $repoFull) {
+        throw "FATAL: PITR私有作業ディレクトリはリポジトリ配下に設定できません: '$workFull'."
+    }
+    if (Test-IsSubpathOrSame -ChildPath $repoFull -ParentPath $workFull) {
+        throw "FATAL: PITR私有作業ディレクトリはリポジトリの祖先ディレクトリであってはなりません: '$workFull'."
+    }
+    if (-not [string]::IsNullOrWhiteSpace($evidenceFull)) {
+        if (Test-IsSubpathOrSame -ChildPath $workFull -ParentPath $evidenceFull) {
+            throw "FATAL: PITR私有作業ディレクトリは証跡ディレクトリ配下に設定できません: '$workFull'."
+        }
+        if (Test-IsSubpathOrSame -ChildPath $evidenceFull -ParentPath $workFull) {
+            throw "FATAL: PITR私有作業ディレクトリは証跡ディレクトリの祖先ディレクトリであってはなりません: '$workFull'."
+        }
+    }
+
+    # 4. 既存ディレクトリの拒絶 (本実行が新規独占作成しなければならない).
+    if (Test-Path -LiteralPath $workFull) {
+        throw "FATAL: PITR作業ディレクトリとして既存ディレクトリを指定することは禁止されています: '$workFull'."
+    }
+
+    # 5. 親ディレクトリ階層の reparse point / junction 検証.
+    $curr = Split-Path -Parent $workFull
+    while (-not [string]::IsNullOrWhiteSpace($curr) -and -not ($curr.Equals([System.IO.Path]::GetPathRoot($curr), [System.StringComparison]::OrdinalIgnoreCase))) {
+        if (Test-Path -LiteralPath $curr) {
+            $item = Get-Item -LiteralPath $curr -Force -ErrorAction Stop
+            if ($item.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) {
+                throw "FATAL: PITR作業ディレクトリの祖先にReparsePoint/Junctionが検出されました: '$curr'."
+            }
+        }
+        $curr = Split-Path -Parent $curr
+    }
+}
+
+function New-ControlledPitrWorkDir {
+    param(
+        [string]$RepoRoot,
+        [string]$EvidenceDir,
+        [string]$CustomPitrWorkDir = ''
+    )
+    $controlledTempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+    $candidate = ''
+    if (-not [string]::IsNullOrWhiteSpace($CustomPitrWorkDir)) {
+        $candidate = $CustomPitrWorkDir
+    } else {
+        $rndSuffix = [System.Guid]::NewGuid().ToString('N').Substring(0, 8)
+        $candidate = Join-Path $controlledTempRoot ("ses-pitr-run-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + "-$rndSuffix")
+    }
+
+    Assert-ValidPitrWorkDir -RepoRoot $RepoRoot -EvidenceDir $EvidenceDir -PitrWorkDir $candidate
+
+    $workFull = [System.IO.Path]::GetFullPath($candidate)
+    [System.IO.Directory]::CreateDirectory($workFull) | Out-Null
+
+    # 作成直後の再検証 (ジャンクションでないこと、空であること).
+    $dirItem = Get-Item -LiteralPath $workFull -Force -ErrorAction Stop
+    if ($dirItem.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) {
+        Remove-Item -LiteralPath $workFull -Force -ErrorAction SilentlyContinue
+        throw "FATAL: 作成されたPITRディレクトリがReparsePoint/Junctionです: '$workFull'."
+    }
+    $contents = @(Get-ChildItem -LiteralPath $workFull -Force -ErrorAction Stop)
+    if ($contents.Count -gt 0) {
+        Remove-Item -LiteralPath $workFull -Recurse -Force -ErrorAction SilentlyContinue
+        throw "FATAL: 作成されたPITRディレクトリが空ではありません: '$workFull'."
+    }
+
+    return $workFull
 }
 
 function Write-JsonStateFile {
@@ -278,6 +466,128 @@ function Archive-DirectoryArtifacts {
     return @{
         ArchivedFiles = $archivedItems
         ManifestFile  = $manifestPath
+    }
+}
+
+function Archive-SuiteArtifacts {
+    param(
+        [string]$RepoRoot,
+        [string]$SuiteId,
+        [string]$SuiteLogPath,
+        [string]$DestinationDir
+    )
+    if (-not (Test-Path -LiteralPath $DestinationDir)) {
+        [System.IO.Directory]::CreateDirectory($DestinationDir) | Out-Null
+    }
+
+    $archivedItems = @()
+
+    # 1. Surefire reports (*.xml, *.txt, *.dump, *.dumpstream)
+    $surefireDir = Join-Path $RepoRoot 'target\surefire-reports'
+    if (Test-Path -LiteralPath $surefireDir) {
+        $surefireFiles = @(Get-ChildItem -LiteralPath $surefireDir -File -ErrorAction Stop |
+            Where-Object { $_.Extension.ToLowerInvariant() -in @('.xml', '.txt', '.dump', '.dumpstream') })
+        foreach ($f in $surefireFiles) {
+            $destFile = Join-Path $DestinationDir $f.Name
+            Copy-Item -LiteralPath $f.FullName -Destination $destFile -Force -ErrorAction Stop
+            $srcH = Get-Sha256Hex -FilePath $f.FullName
+            $dstH = Get-Sha256Hex -FilePath $destFile
+            if ($srcH -ne $dstH) {
+                throw "FATAL: Surefire 報告ファイルコピー時のハッシュ不一致: '$($f.Name)' (src=$srcH, dst=$dstH)."
+            }
+            $archivedItems += [PSCustomObject]@{ RelPath = $f.Name; Hash = $dstH }
+        }
+    }
+
+    # 2. jacoco.exec (存在する場合)
+    $jacocoExec = Join-Path $RepoRoot 'target\jacoco.exec'
+    if (Test-Path -LiteralPath $jacocoExec) {
+        $destExec = Join-Path $DestinationDir 'jacoco.exec'
+        Copy-Item -LiteralPath $jacocoExec -Destination $destExec -Force -ErrorAction Stop
+        $srcH = Get-Sha256Hex -FilePath $jacocoExec
+        $dstH = Get-Sha256Hex -FilePath $destExec
+        if ($srcH -ne $dstH) {
+            throw "FATAL: jacoco.exec コピー時のハッシュ不一致."
+        }
+        $archivedItems += [PSCustomObject]@{ RelPath = 'jacoco.exec'; Hash = $dstH }
+    }
+
+    # 3. JaCoCo site report directory (存在する場合、再帰コピーとハッシュ検証)
+    $jacocoSite = Join-Path $RepoRoot 'target\site\jacoco'
+    if (Test-Path -LiteralPath $jacocoSite) {
+        $destJacocoDir = Join-Path $DestinationDir 'jacoco'
+        if (-not (Test-Path -LiteralPath $destJacocoDir)) {
+            [System.IO.Directory]::CreateDirectory($destJacocoDir) | Out-Null
+        }
+        $jFiles = @(Get-ChildItem -LiteralPath $jacocoSite -File -Recurse -ErrorAction Stop)
+        foreach ($jf in $jFiles) {
+            $rel = $jf.FullName.Substring($jacocoSite.Length).TrimStart('\', '/')
+            $destP = Join-Path $destJacocoDir $rel
+            $pDir = Split-Path -Parent $destP
+            if (-not (Test-Path -LiteralPath $pDir)) {
+                [System.IO.Directory]::CreateDirectory($pDir) | Out-Null
+            }
+            Copy-Item -LiteralPath $jf.FullName -Destination $destP -Force -ErrorAction Stop
+            $srcH = Get-Sha256Hex -FilePath $jf.FullName
+            $dstH = Get-Sha256Hex -FilePath $destP
+            if ($srcH -ne $dstH) {
+                throw "FATAL: JaCoCoレポートファイルコピー時のハッシュ不一致: '$rel'."
+            }
+            $normRel = ('jacoco/' + ($rel -replace '\\', '/'))
+            $archivedItems += [PSCustomObject]@{ RelPath = $normRel; Hash = $dstH }
+        }
+    }
+
+    # 4. browser-m-evidence (存在する場合、再帰コピーとハッシュ検証)
+    $browserEvidence = Join-Path $RepoRoot 'target\browser-m-evidence'
+    if (Test-Path -LiteralPath $browserEvidence) {
+        $destBrowserDir = Join-Path $DestinationDir 'browser-m-evidence'
+        if (-not (Test-Path -LiteralPath $destBrowserDir)) {
+            [System.IO.Directory]::CreateDirectory($destBrowserDir) | Out-Null
+        }
+        $bFiles = @(Get-ChildItem -LiteralPath $browserEvidence -File -Recurse -ErrorAction Stop)
+        foreach ($bf in $bFiles) {
+            $rel = $bf.FullName.Substring($browserEvidence.Length).TrimStart('\', '/')
+            $destP = Join-Path $destBrowserDir $rel
+            $pDir = Split-Path -Parent $destP
+            if (-not (Test-Path -LiteralPath $pDir)) {
+                [System.IO.Directory]::CreateDirectory($pDir) | Out-Null
+            }
+            Copy-Item -LiteralPath $bf.FullName -Destination $destP -Force -ErrorAction Stop
+            $srcH = Get-Sha256Hex -FilePath $bf.FullName
+            $dstH = Get-Sha256Hex -FilePath $destP
+            if ($srcH -ne $dstH) {
+                throw "FATAL: browser-m-evidence ファイルコピー時のハッシュ不一致: '$rel'."
+            }
+            $normRel = ('browser-m-evidence/' + ($rel -replace '\\', '/'))
+            $archivedItems += [PSCustomObject]@{ RelPath = $normRel; Hash = $dstH }
+        }
+    }
+
+    # 5. suite 実行ログのコピーとハッシュ検証.
+    if (Test-Path -LiteralPath $SuiteLogPath) {
+        $destLog = Join-Path $DestinationDir (Split-Path -Leaf $SuiteLogPath)
+        Copy-Item -LiteralPath $SuiteLogPath -Destination $destLog -Force -ErrorAction Stop
+        $srcH = Get-Sha256Hex -FilePath $SuiteLogPath
+        $dstH = Get-Sha256Hex -FilePath $destLog
+        if ($srcH -ne $dstH) {
+            throw "FATAL: スイートログコピー時のハッシュ不一致: '$(Split-Path -Leaf $SuiteLogPath)'."
+        }
+        $archivedItems += [PSCustomObject]@{ RelPath = (Split-Path -Leaf $SuiteLogPath); Hash = $dstH }
+    }
+
+    # 6. sha256sum.txt マニフェストの生成と検証.
+    $shaLines = @()
+    foreach ($item in ($archivedItems | Sort-Object -Property RelPath)) {
+        $shaLines += "$($item.Hash)  $($item.RelPath)"
+    }
+    $manifestPath = Join-Path $DestinationDir 'sha256sum.txt'
+    [System.IO.File]::WriteAllLines($manifestPath, $shaLines, $script:Utf8NoBom)
+
+    return @{
+        ArchivedCount = $archivedItems.Count
+        ManifestPath  = $manifestPath
+        Items         = $archivedItems
     }
 }
 
