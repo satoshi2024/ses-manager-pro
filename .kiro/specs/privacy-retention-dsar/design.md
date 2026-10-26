@@ -1,9 +1,9 @@
 # privacy-retention-dsar 設計（Discovery / Dry-run increment）
 
-## 2026-10-26 本番接線・意思決定契約の設計正本
+## 2026-10-26 本番接線・意思決定契約および純粋カーネル抽出の設計正本
 
-合成基盤から本番能力への接線（Wiring）および意思決定契約（Decision Contract）の設計正本は、[`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md) に定める。
-Astra/総括によるP1指摘を受け、OidcLoginUser認証バインディング優先テナント解決・クレーム一致性検査・拒絶条件の厳格化、ログ証跡表現是正（アプリDB書き込みなし）、純粋検証カーネル分離と独立本番入口（合成環境守衛の完全維持と正常prod拒絶の尊重）、完全0 DB書込（DB監査永続化はPhase 5延期）、LoginUser/OidcLoginUser/ExternalApiPrincipal/サービス身元の厳格マッピング（同名短絡マッピング禁止・昇格禁止・各種拒絶受入条件）、歴史スキャン統計分離（180表/254表、対象SHA閉環ゲート必須化）、機能フラグ未実装明記（実ガード及び破壊的能力欠落に依拠）、下流モジュール（NF03/NF08）依存契約（日常業務非封鎖・外送絶対禁止）、人手意思決定チェックリスト（提議≠承認）、および最小実装順序を規定する。実処分・外送・本番書込・環境ガード解除は含まない。
+合成基盤から本番能力への接線（Wiring）および意思決定契約（Decision Contract）の設計正本は、[`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md) に定める。また、その第一弾となる純粋検証カーネル抽出の具体的実施設計は [`pure-policy-verification-kernel-plan.md`](pure-policy-verification-kernel-plan.md) に定める。
+Astra/総括によるP1指摘を受け、OidcLoginUser認証バインディング優先テナント解決・クレーム一致性検査・拒絶条件の厳格化、ログ証跡表現是正（アプリDB書き込みなし）、純粋検証カーネル分離（`PurePolicyVerificationKernel`）と独立本番入口（合成環境守衛 `SyntheticEnvironmentGuard` の完全維持と正常prod拒絶の尊重）、完全0 DB書込（DB監査永続化はPhase 5延期）、LoginUser/OidcLoginUser/ExternalApiPrincipal/サービス身元の厳格マッピング（同名短絡マッピング禁止・昇格禁止・各種拒絶受入条件）、歴史スキャン統計分離（180表/254表、対象SHA閉環ゲート必須化）、機能フラグ未実装明記（実ガード及び破壊的能力欠落に依拠）、下流モジュール（NF03/NF08）依存契約（日常業務非封鎖・外送絶対禁止）、人手意思決定チェックリスト（提議≠承認）、および最小実装順序を規定する。実処分・外送・本番書込・環境ガード解除は含まない。
 
 ## 2026-10-01 新incrementの設計正本
 

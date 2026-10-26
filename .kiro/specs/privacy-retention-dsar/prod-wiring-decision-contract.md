@@ -1,9 +1,9 @@
 # NF07 合成基盤から本番能力への接線・意思決定契約設計書
 （Production Wiring & Decision Contract）
 
-状態: **PLAN REVISION (R3) / Astra 技術 Plan Review 待ち。設計のみ、本番削除・外送・書込操作は含まない。**
-本輪基准（Base）: `b2886c47a0c20716a37a08dffcfb847f5432a1f1`
-直前基准（Previous Base）: `9024f7b2e924f073ad135aa0d4420c8b39dcbcd3`
+状態: **PLAN PASS (R3 限定) / 本番接線路線確定、純粋カーネル抽出計画 ([pure-policy-verification-kernel-plan.md](pure-policy-verification-kernel-plan.md)) へ接続**
+本フェーズ基準（Base）: `aad2afeec71c2cb2eaa846bf02b2da0344990180`（Astra/総括 限定 PLAN PASS 承認コミット）
+直前基準（Previous Base）: `b2886c47a0c20716a37a08dffcfb847f5432a1f1`
 固定テスト証拠コミット: `c8b78dc3c8c3906e8ba734a2aa81037bd3a77dfb`
 担当: AI-5（接線・意思決定契約設計担当）
 対象ブランチ: `codex/snf-prod-nf07-evidence-contract`
@@ -31,18 +31,18 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
 
 現状の実装・検証事実と、本番移行に向けたギャップを5つの次元で整理する。
 
-| 機能領域 / コンポーネント | ① 現行コードベース実装 | ② 履歴固定SHA検証実績 | ③ 基准SHA未検証項目 (Base: `b2886c47`) | ④ 本番接線ギャップ（技術） | ⑤ 人工承認ギャップ（ガバナンス） |
+| 機能領域 / コンポーネント | ① 現行コードベース実装 | ② 履歴固定SHA検証実績 | ③ 基準SHA未検証項目 (Base: `aad2afee`) | ④ 本番接線ギャップ（技術） | ⑤ 人工承認ギャップ（ガバナンス） |
 |---|---|---|---|---|---|
-| **純粋状態機械・エンベロープ検証** | `PrivacyCaseStateMachine`<br>`ApprovalEnvelopeVerifier`<br>`CaseApprovalEnvelope`<br>`PolicyApprovalEnvelope` | 固定Head `6ec4ca28`<br>Astra限定CODE PASS<br>3クラス 18/0/0/0 合格 | 基准SHAでの新規テスト実行なし（`c8b78dc3` での42件定向テスト合格を継承） | 本番PKI/HSM/KMS連携なし<br>本番Trust Anchor動的配布なし | DG-07未承認<br>署名機関責任者未選任<br>スキーマv1以降の合意なし |
-| **環境隔離ガード** | `SyntheticEnvironmentGuard`<br>(active/default `prod` 拒否) | 固定Head `6ec4ca28`<br>prod混入時の即時fail-closed実証済 | 基准SHAでの新規テスト実行なし | 本番用環境ガード及び本番専用Audience（`PRODUCTION`）未分離 | 本番環境運用ポリシー未承認 |
-| **独立Journal・CAS排他・留置** | `PrivacyJournalPort`<br>`JdbcPrivacyJournalAdapter`<br>`VerifiedDispatchFence`<br>`DispatchFenceVerifier` | 固定証拠 `nf07-w2a`<br>並行境界・MySQL分離確認済 | 基准SHA下での実MySQL並行・耐久性テスト未再実行（AI-1担当） | 本番独立Journal用MySQLインスタンス/クラスター不在<br>本番Flyway DDL未発行（V185未割当） | 留置（Legal Hold）権限規程未策定<br>職務分離（SoD）の法務承認なし |
-| **投影・署名Watermark・リカバリ** | `PrivacyProjectionPort`<br>`JdbcPrivacyProjectionAdapter`<br>`JournalProjectionService`<br>`SignedWatermarkVerifier`<br>`LatestWitnessPort`<br>`JdbcLatestWitnessAdapter`<br>`PrivacyRecoveryService` | 固定Head `ac894ac6`<br>W2b D2b2 35/0/0/0 合格<br>(Astra限定Review) | 基准SHA下での3-MySQL隔離リカバリテスト未再実行（AI-1担当） | 本番Witness独立ストア不在<br>アプリケーションDBへの本番投影バッチ不在<br>リカバリ隔離解除APIの本番配線なし | 復旧後隔離（`READ_ONLY_QUARANTINED`）解除権限者未指定<br>災害復旧SOP未承認 |
-| **合成DSARプレビュー** | `SyntheticPreviewPort`<br>`SyntheticPreviewStore`<br>`SyntheticPrivacyRequestService`<br>`SyntheticIdentityEvidenceVerifier` | 固定Head `92d91d58`<br>W3a 26/0/0/0 合格<br>(control `b6e2992b` 統合) | 基准SHA下での実MySQLプレビューテスト未再実行（AI-1担当） | 本番IdP（Keycloak/OAuth2）連携不在<br>実テーブル/ファイル用Scope Provider不在<br>同姓同名・名寄せ解決SOP不在 | DSAR受付窓口規程未策定<br>第三者マスキング基準の法務合意なし |
+| **純粋状態機械・エンベロープ検証** | `PrivacyCaseStateMachine`<br>`ApprovalEnvelopeVerifier`<br>`CaseApprovalEnvelope`<br>`PolicyApprovalEnvelope` | 固定Head `6ec4ca28`<br>Astra限定CODE PASS<br>3クラス 18/0/0/0 合格 | 基準SHAでの新規テスト実行なし（`c8b78dc3` での42件定向テスト合格を継承） | 本番PKI/HSM/KMS連携なし<br>本番Trust Anchor動的配布なし | DG-07未承認<br>署名機関責任者未選任<br>スキーマv1以降の合意なし |
+| **環境隔離ガード** | `SyntheticEnvironmentGuard`<br>(active/default `prod` 拒否) | 固定Head `6ec4ca28`<br>prod混入時の即時fail-closed実証済 | 基準SHAでの新規テスト実行なし | 本番用環境ガード及び本番専用Audience（`PRODUCTION`）未分離 | 本番環境運用ポリシー未承認 |
+| **独立Journal・CAS排他・留置** | `PrivacyJournalPort`<br>`JdbcPrivacyJournalAdapter`<br>`VerifiedDispatchFence`<br>`DispatchFenceVerifier` | 固定証拠 `nf07-w2a`<br>並行境界・MySQL分離確認済 | 基準SHA下での実MySQL並行・耐久性テスト未再実行（AI-1担当） | 本番独立Journal用MySQLインスタンス/クラスター不在<br>本番Flyway DDL未発行（V185未割当） | 留置（Legal Hold）権限規程未策定<br>職務分離（SoD）の法務承認なし |
+| **投影・署名Watermark・リカバリ** | `PrivacyProjectionPort`<br>`JdbcPrivacyProjectionAdapter`<br>`JournalProjectionService`<br>`SignedWatermarkVerifier`<br>`LatestWitnessPort`<br>`JdbcLatestWitnessAdapter`<br>`PrivacyRecoveryService` | 固定Head `ac894ac6`<br>W2b D2b2 35/0/0/0 合格<br>(Astra限定Review) | 基準SHA下での3-MySQL隔離リカバリテスト未再実行（AI-1担当） | 本番Witness独立ストア不在<br>アプリケーションDBへの本番投影バッチ不在<br>リカバリ隔離解除APIの本番配線なし | 復旧後隔離（`READ_ONLY_QUARANTINED`）解除権限者未指定<br>災害復旧SOP未承認 |
+| **合成DSARプレビュー** | `SyntheticPreviewPort`<br>`SyntheticPreviewStore`<br>`SyntheticPrivacyRequestService`<br>`SyntheticIdentityEvidenceVerifier` | 固定Head `92d91d58`<br>W3a 26/0/0/0 合格<br>(control `b6e2992b` 統合) | 基準SHA下での実MySQLプレビューテスト未再実行（AI-1担当） | 本番IdP（Keycloak/OAuth2）連携不在<br>実テーブル/ファイル用Scope Provider不在<br>同姓同名・名寄せ解決SOP不在 | DSAR受付窓口規程未策定<br>第三者マスキング基準の法務合意なし |
 | **只読Policy照会・説明** | `PolicyReadonlyQueryPort`<br>`PolicyReadonlyQueryService`<br>`SyntheticPolicyCatalog`<br>`PolicyEnvelopeSource`<br>`SyntheticCallerContextProvider` | `c8b78dc3` 固定実績:<br>定向42件合格 (`targeted-01`)<br>Fast全4,292件合格 (`fast-01`) | 全MySQLテストプロファイル（Docker依存）は未実行（AI-1担当） | 本番Spring Security連携コンテキスト未配線<br>本番ポリシーカタログ未配線<br>本番失効CRL/OCSPプロバイダー未配線 | DG-07全データ保持期間未承認<br>正式Privacy Owner未選任 |
 | **処分バッチ・外部送信** | なし（設計・合成インターフェースのみ） | 未実行（実装凍結） | 未実装 | 本番Outboxディスパッチャー不在<br>実外部AIアダプター配線不在<br>処分実行器（物理/論理/匿名化）不在 | 処分機能フラグ（導入予定・未実装）<br>ベンダーDPA（Google Cloud等）未合意 |
 
 ### 2.1 履歴スキャン統計の分離と将来リリースの閉環ゲート規約
-過去のインベントリおよびカバレッジ統計について、測定時点およびコミットSHAを明確に分離して記録する。これらを直前基准（`9024f7b2`）や本輪基准（`b2886c47`）における新しいスキャン結果と混同してはならない。
+過去のインベントリおよびカバレッジ統計について、測定時点およびコミットSHAを明確に分離して記録する。これらを直前基準（`9024f7b2` / `b2886c47`）や本フェーズ基準（`aad2afee`）における新しいスキャン結果と混同してはならない。
 
 1. **歴史的ベースライン 1（2026-08-28、コミット `b678ce98`）**:
    * 対象: マイグレーション 116 ファイル、180 テーブル、4,279 CREATE 列、153 ALTER 列、176 エンティティ、424 プロバイダー候補。
@@ -51,7 +51,7 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
    * 対象: マイグレーション 183 ファイル、254 テーブル、244 エンティティ、708 プロバイダー候補。
    * 結果: プライバシーカタログ未分類 74 テーブル、インベントリ欠落 1,082 列、プロバイダー参照欠落 285 件、エンティティ未マップ 68 件で `BLOCKED`。
 3. **将来リリースの閉環ゲート規約**:
-   * 上記いずれの統計も本設計の基准コミットの直接スキャン結果ではない。
+   * 上記いずれの統計も本設計の基準コミットの直接スキャン結果ではない。
    * Phase 4 の実装時および将来の本番公開（Production Enablement）時には、**対象となるリリース固定コミット SHA に対してインベントリ・カバレッジの閉環スキャンを再実行し、未分類 0・欠落 0 の証拠を固定すること**を必須のゲート条件とする。
 
 ---
