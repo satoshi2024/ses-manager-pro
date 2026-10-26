@@ -7,12 +7,14 @@
 
 ### 1.2 安全絶対規範（Red Lines）
 1. **本番 DB への直接 Ad-hoc 更新の絶対禁止**:
-   GUI ツールや手動の単発 `UPDATE` 文を本番 DB に直接発行することを固く禁ずる。すべてのデータ修復は、本書に規定されたトランザクション境界、CAS（Compare-And-Swap）、ロック順序、および監査ログ記録に準拠したスクリプト／API 経由でのみ実行する。
+   GUI ツールや手動の単発 `UPDATE` 文を本番 DB に直接発行することを固く禁ずる。すべてのデータ修復は、本書に規定されたトランザクション境界、CAS（Compare-And-Swap）、ロック順序、および監査ログ記録に準拠した正式なツール／スクリプト経由でのみ実行する。
 2. **未知行の任意・デフォルトテナント割当の絶対禁止**:
    所属テナントや法人が判定できないレコード（孤立インボイス、所有者未確定アカウント等）に対し、**便宜上適当なデフォルトテナントや管理用テナントを推測で割り当てて解決とすることは固く禁止する**。必ず第 7 節に規定する正当な証憑調査および業務 Owner の確認・決裁を得て解決する。
 3. **合成 HUMAN サインオフの非代替性**:
    リハーサル演練で用いられた `resolved_by = 1001L` 等の合成値は、技術的 CAS 検証のためのダミー値に過ぎず、**業務 Owner、財務統括責任者、法務・コンプライアンス責任者の実サインオフを法的に代替するものでは決してない**。
-4. **本番 Owner 承認ステータス**:
+4. **本番修復実行プログラム（Repair Executor）の未実装・未承認ステータス**:
+   本番環境用のデータ修復自動実行プログラム（Production Repair Executor）は現時点で**未実装・未承認**である。テストコード `V182TenantScopeHardeningRehearsalMySqlTest` 内のヘルパーメソッド群（`repairInvoiceInTransaction`, `repairPeppolConflictInTransaction` 等）は、Disposable コンテナでのリハーサル検証用に作られたテスト専用ヘルパーに過ぎず、**本番運用の実行エントリポイントでは決してない**。
+5. **本番 Owner 承認ステータス**:
    本書の作成時点において、本番適用および実データ修復に関する各業務 Owner（財務、営業、EDI、人事、インフラ）の正式サインオフは **PENDING（未承認）** として保持する。独立 Plan Review（Astra）および関連統括責任者の承認完了後に本番運用承認へ移行する。
 
 ---
@@ -21,16 +23,28 @@
 
 本番マイグレーション実行前に、以下の前置条件がすべて満たされていることを確認しなければならない。
 
-### 2.1 フルバックアップとポイントインタイムリカバリ（PITR）要件
+### 2.1 前提諸元の区分定義（「確認済みの事実」と「推奨値・計画目標」）
+運用計画における重大な誤認を排除するため、本番前提諸元を以下のように厳格に区分する：
+
+| 項目 | 確認済みの事実 (Confirmed Facts) | 推奨値・計画目標 (Suggested / Target SLA) | 判定ステータス |
+|---|---|---|---|
+| **本番 DB アーキテクチャ** | リハーサルは Docker Disposable `mysql:8.0`（tmpfs マウント、単一ノード）で実施・通過済み。 | 本番は Multi-AZ マネージド MySQL 8 / Amazon Aurora クラスタ、Read Replica 構成を推奨。 | **要インフラ確認 (PENDING)** |
+| **データ規模・容量** | 合成テストデータ（数十〜数百件）によるスキーマ遷移・キュー隔離ロジックの成立を確認済み。 | 本番対象テーブルは数万〜数百万円規模の実ビジネスレコードを想定。実データ件数は Preflight で測定。 | **Preflight で確定 (PENDING)** |
+| **DDL 実行所要時間** | Disposable コンテナ上で全 DDL/DML が数秒で完了することを確認済み。 | 本番テーブルサイズおよび I/O 負荷に応じ、数分〜数十分の保守ウィンドウ枠を確保。 | **保守計画値 (PENDING)** |
+| **Binlog 保持期間** | テスト環境では Binlog 永続保持なし（コンテナ破棄で破棄）。 | `binlog_format = ROW`、保持期間最低 7 日間以上を必須要件として推奨。 | **要 DBA 確認 (PENDING)** |
+| **演練結果の有効期限** | Commit `27a000f2225f272fe2c3b5094de6325c7714dd41` にて 5 シナリオ完全合格を確認済み。 | スキーマおよびデータ構造にドリフトがない限り、演練完了後 30 日以内を作業有効枠として推奨。 | **計画基準日設定 (PENDING)** |
+| **RTO / RPO** | コンテナ障害時のプロセス中断およびログ退避が即時実行可能であることを確認済み。 | 本番 PITR 復旧目標時間: RTO ≤ 60 分以内、目標復旧時点: RPO = 0 秒（データ欠損ゼロ）。 | **SLA 目標値 (PENDING)** |
+
+### 2.2 フルバックアップとポイントインタイムリカバリ（PITR）要件
 1. **直前フルスナップショットの取得**:
    - マイグレーション作業ウィンドウ開始直前に、RDS/Aurora の物理クラスタスナップショット、または整合性のある論理バックアップ（mysqldump / Percona XtraBackup）を取得し、ステータスが `available` であることを確認する。
 2. **Binlog（バイナリログ）保持と PITR 境界点の記録**:
    - MySQL のバイナリログが有効（`log_bin = ON`, `binlog_format = ROW`）であり、最低 7 日間以上の保持期間が設定されていること。
    - マイグレーション直前のバイナリログファイル名およびポジション（`SHOW MASTER STATUS` または `SHOW BINARY LOG STATUS`）、および正確な JST タイムスタンプ（秒単位）を記録・固定する。
 3. **リストア演練実績の確認**:
-   - 直近 30 日以内に、同一構成の別インスタンスに対しスナップショットからのリストアおよび PITR ロールフォワード演練が成功していること（RTO: 60分以内、RPO: 0秒）。
+   - 直近 30 日以内に、同一構成の別インスタンスに対しスナップショットからのリストアおよび PITR ロールフォワード演練が成功していること（RTO: 60分以内、RPO: 0秒を目標）。
 
-### 2.2 アプリケーション保守モードとトラフィック遮断
+### 2.3 アプリケーション保守モードとトラフィック遮断
 - V182 は複数のテーブル定義変更（`ALTER TABLE`）とインデックス再構築を伴うため、実行中にメタデータロック（MDL）競合が発生するリスクがある。
 - マイグレーション実施中は、SES Manager Pro の全バックエンドインスタンスを**保守モード（Maintenance Mode: 書込 API 遮断、スケジューラジョブ完全停止、Web 画面は 503 保守案内）**に移行させ、アクティブな DB コネクションを完全にドレイン（排水）する。
 
@@ -171,23 +185,57 @@ SELECT table_name, column_name, data_type, extra, generation_expression
 ```
 - **期待結果**: 1 行返却。`extra` に `VIRTUAL GENERATED` が含まれ、`generation_expression` が `case when ((deleted_flag = 0) and (status = 'VERIFIED')) then 1 else NULL end` と一致すること。
 
-### Postflight SQL-04: 制約（CHECK・外部キー・一意インデックス）の検証
-- **目的**: V182 で追加された複合 FK、CHECK 制約、複合一意インデックスがすべて有効化されていることを確認する。
+### Postflight SQL-04: 制約（CHECK・外部キー・一意インデックス）の厳格検証
+- **目的**: V182 で追加された CHECK 制約（ENFORCED 状態含む）、3列複合外部キー（列順・参照列・RESTRICT 規則）、および 7 つの複合一意インデックス（列順・一意性）が完全に成立していることを検証する。
+
+#### (a) CHECK 制約および ENFORCED 検証（正しい JOIN 構文）
 ```sql
--- CHECK 制約の検証
-SELECT constraint_name, table_name, check_clause
-  FROM information_schema.check_constraints
- WHERE constraint_schema = DATABASE()
-   AND constraint_name IN ('ck_digital_invoice_actor_pair', 'ck_digital_invoice_event_actor_pair');
+SELECT tc.table_name,
+       tc.constraint_name,
+       cc.check_clause,
+       tc.enforced
+  FROM information_schema.table_constraints tc
+  JOIN information_schema.check_constraints cc
+    ON cc.constraint_schema = tc.constraint_schema
+   AND cc.constraint_name = tc.constraint_name
+ WHERE tc.constraint_schema = DATABASE()
+   AND tc.constraint_name IN ('ck_digital_invoice_actor_pair', 'ck_digital_invoice_event_actor_pair')
+ ORDER BY tc.table_name;
+```
+- **期待結果**: 正確に 2 行。
+  1. `t_digital_invoice`: `ck_digital_invoice_actor_pair`, `enforced = 'YES'`
+  2. `t_digital_invoice_event`: `ck_digital_invoice_event_actor_pair`, `enforced = 'YES'`
 
--- 3列複合外部キーの検証
-SELECT constraint_name, table_name, referenced_table_name
-  FROM information_schema.referential_constraints
- WHERE constraint_schema = DATABASE()
-   AND constraint_name = 'fk_digital_invoice_event_scope';
+#### (b) 3列複合外部キー（列順・参照先列順・RESTRICT 規則）の検証
+```sql
+SELECT rc.constraint_name,
+       rc.table_name,
+       kcu.column_name,
+       rc.referenced_table_name,
+       kcu.referenced_column_name,
+       kcu.ordinal_position,
+       rc.update_rule,
+       rc.delete_rule
+  FROM information_schema.referential_constraints rc
+  JOIN information_schema.key_column_usage kcu
+    ON kcu.constraint_schema = rc.constraint_schema
+   AND kcu.constraint_name = rc.constraint_name
+ WHERE rc.constraint_schema = DATABASE()
+   AND rc.constraint_name = 'fk_digital_invoice_event_scope'
+ ORDER BY kcu.ordinal_position;
+```
+- **期待結果**: 正確に 3 行。
+  - 行 1 (`ordinal_position = 1`): `tenant_id` → 参照先 `tenant_id`
+  - 行 2 (`ordinal_position = 2`): `legal_entity_id` → 参照先 `legal_entity_id`
+  - 行 3 (`ordinal_position = 3`): `digital_invoice_id` → 参照先 `id`
+  - すべての行で `update_rule = 'RESTRICT'` かつ `delete_rule = 'RESTRICT'`。
 
--- 複合一意インデックスの検証
-SELECT table_name, index_name, non_unique, GROUP_CONCAT(column_name ORDER BY seq_in_index) AS indexed_columns
+#### (c) 7 つの複合一意インデックス（列順・一意性）の検証
+```sql
+SELECT table_name,
+       index_name,
+       non_unique,
+       GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ', ') AS indexed_columns_in_order
   FROM information_schema.statistics
  WHERE table_schema = DATABASE()
    AND index_name IN (
@@ -199,9 +247,17 @@ SELECT table_name, index_name, non_unique, GROUP_CONCAT(column_name ORDER BY seq
        'uq_ext_scope_idempotency',
        'uk_nf09_scope_repair_entity'
    )
- GROUP BY table_name, index_name, non_unique;
+ GROUP BY table_name, index_name, non_unique
+ ORDER BY table_name, index_name;
 ```
-- **期待結果**: すべての制約・インデックスが存在し、`non_unique = 0` であること。
+- **期待結果**: 正確に 7 行返却され、すべての行で **`non_unique = 0`（一意）** であり、列順序が以下と完全一致すること：
+  1. `t_digital_invoice`: `uk_digital_invoice_scope_id` → `tenant_id, legal_entity_id, id`
+  2. `t_digital_invoice`: `uk_digital_invoice_scope_message` → `tenant_id, legal_entity_id, message_id`
+  3. `t_digital_invoice`: `uk_digital_invoice_scope_send` → `tenant_id, legal_entity_id, invoice_id, direction, profile, specification_version, send_active_slot`
+  4. `t_external_account_reference`: `uq_ext_scope_idempotency` → `tenant_id, legal_entity_id, idempotency_key`
+  5. `t_nf09_scope_repair_queue`: `uk_nf09_scope_repair_entity` → `entity_type, entity_id`
+  6. `t_peppol_participant`: `uk_peppol_callback_active` → `provider, scheme_id, participant_id, callback_active_slot`
+  7. `t_peppol_participant`: `uk_peppol_scope_owner` → `tenant_id, legal_entity_id, owner_type, owner_id`
 
 ### Postflight SQL-05: 修復キュー初期隔離件数の内訳確認
 - **目的**: V182 の実行によって `t_nf09_scope_repair_queue` に投入された未解決行の内訳を把握する。
@@ -305,18 +361,51 @@ SELECT COUNT(*) FROM t_external_account_reference WHERE tenant_id IS NULL OR leg
 
 ## 8. 修復トランザクション・CAS・ロック順序・障害保全 (Transaction, CAS, Locking & Fail-Stop)
 
-データ修復処理は、1 件ずつ独立したトランザクション（`@Transactional`）内で実行し、データの整合性と並行安全性を担保する。
+### 8.1 構造的トランザクション境界（Transaction Boundaries）の厳格定義
+「1レコードごとの単純な逐件トランザクション」では、外部キー制約違反や重複コールバックの整合性破壊を招く。したがって、以下の**3つの集約トランザクション境界**を厳格に適用する：
 
-### 8.1 デッドロック防止のための厳格なロック獲得順序
-競合トランザクションによるデッドロック（MySQL 1213）を回避するため、リソースのロック順序は常に以下に固定する：
-1. **親マスタ行の参照・ロック**: 必要に応じて `m_customer` 等を主キーで確認。
-2. **被修復業務データ行のロック**: `t_digital_invoice` 等を `WHERE id = :id FOR UPDATE` でロック。複数の競合行を扱う場合（Peppol 等）は、必ず **`id` の昇順（ASC）** でロックを獲得する。
-3. **修復キュー行のロック**: `t_nf09_scope_repair_queue` を **`id` の昇順（ASC）** でロック。
+```mermaid
+flowchart TD
+    subgraph BoundaryA [境界 A: 電子インボイス集約境界 (Invoice Aggregate)]
+        LockInv[1. 親インボイス行 FOR UPDATE] --> LockEvts[2. 子イベント全行 FOR UPDATE]
+        LockEvts --> LockInvQ[3. 親キュー行 FOR UPDATE]
+        LockInvQ --> LockEvtQs[4. 子イベントキュー全行 FOR UPDATE]
+        LockEvtQs --> UpdInv[5. 親インボイス更新 version CAS]
+        UpdInv --> UpdEvts[6. 子イベント全行に親スコープを連動回填]
+        UpdEvts --> ResInvQ[7. 親キュー結案 version CAS]
+        ResInvQ --> ResEvtQs[8. 子イベントキュー全結案 version CAS]
+    end
 
-### 8.2 楽観的排他制御（CAS: Compare-And-Swap）
-二重更新および競合更新を防止するため、業務テーブルおよびキューテーブルの双方で `version` 列を用いた CAS を実施する。
+    subgraph BoundaryB [境界 B: Peppol コールバック衝突グループ集約境界 (Peppol Conflict Group)]
+        LockPep[1. 衝突 Peppol レコード全行を id ASC で FOR UPDATE] --> LockPepQs[2. 対象キュー全行を id ASC で FOR UPDATE]
+        LockPepQs --> UpdWinner[3. 正当行 1 件を VERIFIED に更新]
+        UpdWinner --> UpdLosers[4. 重複行全件を DUPLICATE_DEPRECATED に更新]
+        UpdLosers --> ResPepQs[5. 対象キュー全行を結案 version CAS]
+    end
+
+    subgraph BoundaryC [境界 C: 外部アカウント単一境界 (External Account Aggregate)]
+        LockAcc[1. 外部アカウント行 FOR UPDATE] --> LockAccQ[2. キュー行 FOR UPDATE]
+        LockAccQ --> UpdAcc[3. 外部アカウント更新 version CAS]
+        UpdAcc --> ResAccQ[4. キュー結案 version CAS]
+    end
+```
+
+1. **境界 A: 電子インボイス集約境界（Digital Invoice + Child Events + Queues）**:
+   - **理由**: 3列複合外部キー `fk_digital_invoice_event_scope` により、親 `t_digital_invoice` と子 `t_digital_invoice_event` は `(tenant_id, legal_entity_id, digital_invoice_id)` が完全に一致していなければならない。親と子を別トランザクションで修復すると中間状態で外部キー違反が発生し、またイベントが親と異なるスコープへ誤分離されるリスクがある。
+   - **境界範囲**: 対象の親インボイス、紐づく全子イベント、親のキュー行、および全子イベントのキュー行を**単一の `@Transactional` 内でアトミックに修復・結案**する。
+2. **境界 B: Peppol コールバック衝突グループ集約境界（Peppol Identity Group Aggregate）**:
+   - **理由**: 同一 `(provider, scheme_id, participant_id)` を共有する複数行は、1 件を `VERIFIED`（`callback_active_slot=1`）とし、残りを `DUPLICATE_DEPRECATED`（`callback_active_slot IS NULL`）とする処置が不可分である。1件ずつ別トランザクションで処理すると、一意制約 `uk_peppol_callback_active` 違反や中間状態でのアクティブ二重化を招く。
+   - **境界範囲**: 同一識別子を持つすべての重複 Peppol レコードおよびその全キュー行を**単一の `@Transactional` 内でアトミックに修復・結案**する。
+3. **境界 C: 外部アカウント集約境界（External Account Aggregate）**:
+   - 対象の `t_external_account_reference` 1 件と、その `t_nf09_scope_repair_queue` 1 件を単一の `@Transactional` 内で修復・結案する。
+
+### 8.2 実スキーマに基づくエンティティ別並行制御（Concurrency Control per Actual Schema）
+文書の都合で実 DB に存在しない列を追加する migration を作成することは禁止されている。実際のスキーマに基づき、エンティティ別に以下の通り並行制御を実装する：
+
+#### (a) 実際の `version` 列を持つエンティティ（`t_digital_invoice`, `t_external_account_reference`, `t_nf09_scope_repair_queue`）
+- `t_digital_invoice`（BIGINT `version`）、`t_external_account_reference`（INT `version`）、`t_nf09_scope_repair_queue`（INT `version`）は、明示的な version CAS を用いる。
 ```sql
--- Step 1: 業務データの修復 (version 条件付き)
+-- 例: t_digital_invoice の更新
 UPDATE t_digital_invoice
    SET tenant_id = :resolvedTenantId,
        legal_entity_id = :resolvedLegalEntityId,
@@ -326,7 +415,7 @@ UPDATE t_digital_invoice
    AND version = :expectedInvoiceVersion;
 -- 更新行数 == 1 を検証。0 件の場合は即座に例外をスローしてロールバック。
 
--- Step 2: キュー行の結案 (version 条件付き)
+-- 例: t_nf09_scope_repair_queue の結案
 UPDATE t_nf09_scope_repair_queue
    SET status = 'RESOLVED',
        resolved_at = NOW(),
@@ -339,13 +428,59 @@ UPDATE t_nf09_scope_repair_queue
 -- 更新行数 == 1 を検証。0 件の場合は即座に例外をスローしてロールバック。
 ```
 
-### 8.3 失敗時のフェイルストップ（Fail-Stop）と現場証拠保全
+#### (b) `version` 列を持たないエンティティ（`t_peppol_participant`, `t_digital_invoice_event`）
+- `t_peppol_participant` および `t_digital_invoice_event` には `version` 列が存在しない。したがって、以下の二重保護で並行制御を担保する：
+  1. **行ロック（Pessimistic Row Lock）**: 更新前に必ず `SELECT ... FOR UPDATE` を発行（Peppol 競合時は必ず `ORDER BY id ASC` で全競合行をロック）。
+  2. **述語・原値比較条件付き UPDATE（Predicate-based Conditional Update）**:
+     - Peppol 正当行:
+       ```sql
+       UPDATE t_peppol_participant
+          SET tenant_id = :resolvedTenantId,
+              legal_entity_id = :resolvedLegalEntityId,
+              status = 'VERIFIED',
+              verified_at = NOW()
+        WHERE id = :winnerId
+          AND status = 'CONFLICT_REPAIR'
+          AND deleted_flag = 0;
+       ```
+     - Peppol 重複無効化行:
+       ```sql
+       UPDATE t_peppol_participant
+          SET status = 'DUPLICATE_DEPRECATED'
+        WHERE id = :loserId
+          AND status = 'CONFLICT_REPAIR'
+          AND deleted_flag = 0;
+       ```
+     - イベント行（親スコープ連動回填）:
+       ```sql
+       UPDATE t_digital_invoice_event
+          SET tenant_id = :parentTenantId,
+              legal_entity_id = :parentLegalEntityId
+        WHERE digital_invoice_id = :parentInvoiceId
+          AND (tenant_id IS NULL OR tenant_id <> :parentTenantId);
+       ```
+  3. **キュー側の version CAS 連動**:
+     被修復テーブル自体に version がなくとも、紐づく `t_nf09_scope_repair_queue` 行は `version` 列を有している。同一トランザクション内でキュー行の `WHERE id = :queueId AND version = :expectedQueueVersion AND status = 'PENDING'` を更新し、1 行更新を確認することで、並行実行時の二重結案を完全に遮断する。
+  4. **影響行数の厳格検証と全体ロールバック**:
+     更新行数が期待値（正当行は 1、無効化行は 1、キュー行は 1）と合致しない場合、**トランザクション全体を即座に ROLLBACK** する。
+
+### 8.3 本番修復実行プログラム（Repair Executor）の実装要件と Staging 承認ゲート
+本番適用に先立ち、以下の実行プログラム要件と Staging 検証ゲートを通過しなければならない：
+1. **実装要件**:
+   - テスト用ヘルパーから独立した本番専用 CLI／バッチツールとして実装すること。
+   - 事前ドライラン機能（`--dry-run`: トランザクションをコミットせず計画される更新差分・影響行数・キュー結案内容を標準出力へ JSON 出力）を必須具備すること。
+   - バッチレートリミット（例: 1 秒あたり最大 5 トランザクション）を設け、本番 DB の I/O およびレプリケーション遅延（Replication Lag）を監視しながら進行できること。
+2. **Staging 検証ゲート（本番前必須実行）**:
+   - 本番相当のデータ規模・分布を持つ Staging 環境において、本ツールを用いて未解決行の全量修復演練を実施すること。
+   - 実行後に Postflight SQL-06（野良 NULL ゼロ件検証）およびキュー `status = 'PENDING'` ゼロ件検証が完全に PASS することを実証し、ログおよび証跡を添えて本番運用承認申請を行うこと。
+
+### 8.4 失敗時のフェイルストップ（Fail-Stop）と現場証拠保全
 - 処理中に以下のいずれかが発生した場合、トランザクションは直ちに**完全ロールバック（ROLLBACK）**する：
   1. 業務データまたはキューの CAS 更新行数が 0 行（他トランザクションによる更新競合）。
   2. ロック待ちタイムアウト（MySQL エラー 1205）またはデッドロック（MySQL エラー 1213）。
   3. 複合外部キーや一意インデックス違反（MySQL エラー 1062 等）。
 - **処置**:
-  - 当該レコードの修復を中断し、キュー行を `PENDING` に維持する。
+  - 当該レコード／集約グループの修復を中断し、キュー行を `PENDING` に維持する。
   - エラーコード、SQLState、対象 ID、スタックトレース、および直前の `information_schema.innodb_trx` / `performance_schema.data_lock_waits` 診断ログを保全ファイルに退避する。
 
 ---
@@ -368,26 +503,45 @@ flowchart TD
     DdlFault -->|原因不明 / スキーマ汚染大 / 保守窓内| DecisionPITR[【原則】PITR 全面復元<br/>直前スナップショット+Binlog再生]
     DdlFault -->|原因が100%特定可能かつ局所的<br/>（例: 単一インデックス名衝突）| ForwardFixGate{Forward-Fix 承認ゲート<br/>リードアーキテクト + DBA + 法務}
 
-    ForwardFixGate -->|全会一致で承認| ApplyForwardFix[限定的前向修正パッチ適用]
+    ForwardFixGate -->|全会一致で承認| ApplyForwardFix[限定的前向修正パッチ適用 (PENDING)]
     ForwardFixGate -->|1名でも懸念あり| DecisionPITR
 
-    PhaseCheck -->|事後データ修復中のエラー| RepairFault[当該アイテム単体のTxロールバック<br/>キューはPENDING維持・DB全体復元は不要]
+    PhaseCheck -->|事後データ修復中のエラー| RepairFault[当該集約グループのTxロールバック<br/>キューはPENDING維持・DB全体復元は不要]
 ```
 
-### 9.3 PITR 全面復元（Point-In-Time Recovery）の発動基準
-以下のいずれかに該当する場合、**直ちに PITR 全面復元を発動**する：
-1. V182 の DDL 適用途中で予期せぬ構文エラー、ディスク満杯、またはクラッシュが発生し、中途停止した場合。
-2. スキーマ変更後の整合性検証（Postflight）において、予期しないデータ欠損や野良 NULL レコード（未収容行）が検知された場合。
-3. 保守時間枠内に原因究明が完了しない場合。
+### 9.3 PITR（ポイントインタイムリカバリ）実行契約 (PITR Execution Contract)
+V182 DDL の中途失敗等によりロールバックが必要となった場合、以下の実行契約に従って PITR を発動する：
 
-### 9.4 前向修正（Forward-Fix）の限定要件と承認ゲート
-前向修正（Flyway の修正版再実行や中途状態に対する差分パッチ適用）は原則禁止とし、以下の全条件を満たす極めて例外的な場合に限り、事前承認を経て適用できる：
-1. **原因の完全確定**: 既存データの一意性違反や予期せぬ制約名重複など、失敗原因が完全に特定され、かつデータの物理的破損・消失が一切ないこと。
-2. **ステージング環境での再現・修正検証**: 本番適用前に、同一エラーを再現させたステージング検証環境で差分パッチの安全性が 100% 実証されていること。
-3. **承認ゲート（3者全会一致）**:
-   - リードアーキテクト（技術責任者）
-   - データベース管理者（DBA）
-   - 法務・コンプライアンス統括責任者
+1. **復旧目標（Recovery Target）**:
+   - V182 マイグレーション開始直前の確定 JST タイムスタンプ（秒単位）。
+2. **カットオフ位置（Cut-off Position / Binlog Coordinates）**:
+   - Preflight SQL 完了直後に記録したバイナリログファイル名（例: `mysql-bin.000142`）およびポジション（例: `1048576`）。
+   - リカバリ処理は、V182 の最初の DDL 文が発行される直前のトランザクション終了位置をカットオフ境界点として厳格に指定する。
+3. **障害現場保全（On-site Evidence Preservation）**:
+   - 破損したインスタンスを直ちに停止・削除してはならない。以下の現場証拠を退避ストレージへ隔離保存する：
+     - `flyway_schema_history` の完全ダンプ
+     - 対象 4 テーブルおよびキューテーブルの現在の `SHOW CREATE TABLE` スキーマ定義
+     - 直前の MySQL エラーログおよび直近 1 時間の Binlog ファイル
+     - 上記ファイルの SHA-256 チェックサムマニフェスト
+4. **切替前核検（Pre-Switch Verification）**:
+   - リストアされた新 DB インスタンスにおいて、以下の 3 点を確認する：
+     1. `flyway_schema_history` の最新行が V181 (`success=1`) であり、V182 の痕跡がないこと。
+     2. Preflight SQL-02, 03 を再実行し、追加予定列（`tenant_id` 等）が存在しないこと。
+     3. 業務テーブルのレコード件数が Preflight 時点と完全一致すること。
+5. **切替後核検と人工放行（Post-Switch Verification & Human Go-Live Gate）**:
+   - アプリケーションの接続先をリストア済み DB に切り替え、保守モード（読取専用）下で基本ヘルスチェックを実施。
+   - **インシデントコマンダー（運用統括責任者）およびリード DBA の両名が書面／チャット記録にて「人工放行（Go-Live Approval）」を発行**した後に限り、保守モードを解除して一般トラフィックを再開する。
+
+### 9.4 前向修正（Forward-Fix）の取扱境界と PENDING 表明
+1. **原マイグレーションファイルと SHA-256 チェックサムの絶対維持**:
+   - 本番障害時であっても、リポジトリにコミット済みの `V182__nf09_tenant_scope_hardening.sql` の内容や SHA-256 チェックサム（`BB9EBDEABF3E1CE9DAD42525551E3F594D2DC4D10F103AF8AFA7BBBA159A0DA7`）を本番環境上で直接改ざん・編集してはならない。
+2. **既コミット DDL と Flyway 失敗履歴（`success = 0`）の取扱境界**:
+   - MySQL において DDL が中途コミットされた場合、Flyway は当該バージョンを `success = 0` として記録する。
+   - `flyway repair` を実行しても、**既に実行された `ALTER TABLE`（列追加やインデックス作成）は DB 側で元に戻らない**。単に Flyway 履歴テーブルから失敗レコードが削除または修復されるだけである。
+   - MySQL 8 は `ADD COLUMN IF NOT EXISTS` 構文をサポートしていないため、修正パッチを用意せずに V182 を再実行すると、既に適用された列に対して `1060 (Duplicate column name)` エラーが発生し二次災害を引き起こす。
+3. **明確な PENDING 表明（未設計・未承認の厳格保持）**:
+   - **本番環境における V182 中途失敗に対する Forward-Fix スクリプト、自動修復ツール、および具体的適用手順は未設計・未検証であり、ステータスは PENDING（未承認・要検討）として保持する。未実証の修復コマンドや成功証跡を捏造・仮定してはならない**。
+   - 原則は PITR による全量復元とし、Forward-Fix はリードアーキテクト、DBA、法務コンプライアンス責任者の 3 者全会一致による例外承認かつ Staging 再現検証成功時のみ検討対象とする。
 
 ---
 
@@ -395,39 +549,51 @@ flowchart TD
 
 リハーサル演練で実証された前提と、本番環境における固有の制約・差異を正しく理解し、過信を排除する。
 
-| 比較項目 | 使い捨て検証演練（Disposable Rehearsal） | 本番環境実行（Production Execution） |
-|---|---|---|
-| **DB 環境** | Docker コンテナ内使い捨て `mysql:8.0`（tmpfs マウント） | Multi-AZ マネージド MySQL 8 / Amazon Aurora クラスタ（EBS/共有ストレージ） |
-| **データ規模** | 合成テストデータ数十〜数百件 | 数万〜数百万円規模の実ビジネスレコード、数年分の履歴データ |
-| **実行所要時間** | DDL・DML ともに数秒で完了 | 数分〜数十分の所要時間（テーブルサイズに応じた I/O およびバッファ負荷） |
-| **排他・MDL** | 競合プロセス皆無（メタデータロック待ちなし） | 保守モード下でも残存コネクションやバックグラウンドタスクによる MDL 競合リスクあり |
-| **監査主体** | 合成ダミー値（`resolved_by = 1001L`、固定メモ） | 本人確認済みの実オペレータ SSO ユーザー ID、正式承認決裁番号・証憑引用 |
-| **障害発生時** | コンテナ即時破棄・ローカルディスクへのログ退避 | インシデントコール招集、P1 障害宣言、PITR 発動、事業影響報告・再発防止策 |
-| **外部通信** | Provider 通信なし（モック / 無効化） | 外部 Peppol サービスプロバイダや IdP とのネットワーク接続（本マイグレーション時は未接続を維持） |
+| 比較項目 | 使い捨て検証演練 (Confirmed Facts) | 本番環境実行 (Suggested / Target) | 差異の性質と留意事項 |
+|---|---|---|---|
+| **DB 環境** | Docker コンテナ内使い捨て `mysql:8.0`（tmpfs マウント） | Multi-AZ マネージド MySQL 8 / Amazon Aurora クラスタ | ストレージ遅延、ネットワークレイテンシ、AZ 間同期負荷が存在。 |
+| **データ規模** | 合成テストデータ数十〜数百件 | 数万〜数百万円規模の実ビジネスレコード（想定） | DDL の実行時間、インデックス作成時の I/O バッファ負荷が大幅に増大。 |
+| **実行所要時間** | DDL・DML ともに数秒で完了 | 数分〜数十分の保守ウィンドウ（計画枠） | 長時間 DDL によるレプリケーション遅延の発生に注意。 |
+| **排他・MDL** | 競合プロセス皆無（メタデータロック待ちなし） | 保守モード下でも残存コネクションによる MDL 競合リスクあり | マイグレーション前に接続プロセスの完全切断が必須。 |
+| **監査主体** | 合成ダミー値（`resolved_by = 1001L`、固定メモ） | 本人確認済みの実オペレータ SSO ユーザー ID、正式承認決裁番号 | ダミー値の使用は固く禁止。実承認チケット番号を引用。 |
+| **障害発生時** | コンテナ即時破棄・ローカルディスクへのログ退避 | インシデントコール招集、P1 障害宣言、PITR 発動判断 | 現場保全を行った上で、PITR 実行契約に基づく厳密な復旧を実施。 |
+| **外部通信** | Provider 通信なし（モック / 無効化） | 外部 Peppol サービスプロバイダ等（本作業中は未接続維持） | 本マイグレーションおよび修復中は外部同期ジョブを完全停止。 |
 
 ---
 
 ## 11. シナリオ 5 の正確な位置づけと限定表明 (Scenario 5 Scoping & Explicit Disclaimer)
 
 ### 11.1 シナリオ 5 の実態
-`V182TenantScopeHardeningRehearsalMySqlTest` の第 5 節（`scenario5_faultEvidencePreservation_verifiesErrorCapturedBeforeTeardown`）は、**「マイグレーション失敗時にコンテナが破棄される前に、実行ログ・スキーマ定義・履歴テーブル・修復キュー・SHA-256 マニフェストをディスクに確実に落盤・保全できること」を検証した証拠保全演練（Evidence Preservation Rehearsal）**である。
+`V182TenantScopeHardeningRehearsalMySqlTest` の第 5 節（`scenario5_faultEvidencePreservation_verifiesErrorCapturedBeforeTeardown`）は、**「本番 V182 マイグレーション自体は正常完了（version='182', success=1）した状態から、隔離テストリソースよりテスト専用の V182.99 を意図的に故障注入（CHECK 制約違反エラー 3819）して中途失敗させた環境において、コンテナが破棄される前に実行ログ・スキーマ定義・履歴テーブル・修復キュー・SHA-256 マニフェストをディスクに確実に落盤・保全できること」を検証した証拠保全演練（Evidence Preservation Rehearsal）**である。
 
 ### 11.2 限定表明（明確な非対象事項）
-1. **部分失敗からの自動回復の非検証**:
+1. **V182 本番スクリプト自体の途上クラッシュ非検証**:
+   シナリオ 5 は、V182 自体の中途停止ではなく、V182 適用済みの状態に対して後続のテスト用スクリプト（182.99）を失敗させた演練である。V182 自体が実行途中でクラッシュした場合の中途状態をシミュレーションしたものではない。
+2. **部分失敗からの自動回復・ロールバックの非検証**:
    シナリオ 5 は、障害注入によって `ALTER TABLE` が MySQL の暗黙コミットにより永続化された現場を保全・確認したものであり、**「本番 V182 が部分的に失敗した後に、自動的または安全に旧スキーマへロールバックできること」を実証したものでは決してない**。
-2. **本番自動修復の否定**:
-   MySQL のアーキテクチャ上、部分マイグレーション失敗の自動ロールバックは不可能であり、本番環境での安全担保は、本書第 2 節に定めた **「直前フルバックアップと Binlog による PITR 全面復元体制」**、および第 9 節の **「ロールバック／前向修正の厳格な意思決定規程」** にのみ依拠する。
+3. **本番自動修復の完全否定**:
+   MySQL のアーキテクチャ上、部分マイグレーション失敗の自動ロールバックは不可能であり、本番環境での安全担保は、本書第 2 節および第 9 節に定めた **「直前フルバックアップと Binlog による PITR 全面復元体制」** にのみ依拠する。
 
 ---
 
 ## 12. 署名・承認記録（Sign-Off Register）
 
-本運用手順書案は、以下の関係責任者による内容合意および正式サインオフをもって発効する。現時点ではすべての署名は **PENDING（保留）** である。
+本書は、技術的仕様妥当性のレビュー（Technical PLAN Review）と、本番環境への実適用を承認する運用決裁（Production Operation Approval）を明確に分離して管理する。
+
+### 12.1 技術仕様承認（Technical PLAN Review Register）
+本手順書に記載された技術仕様、SQL、トランザクション境界、および制約整合性の妥当性を審査・承認する。
+
+| レビュー役職 | 氏名 | 承認ステータス | 承認日 | 承認コメント / 判定 |
+|---|---|---|---|---|
+| **独立 Reviewer** | Astra | **PLAN REVIEW PENDING** | - | 本改定ドキュメントの独立 Plan Review 待ち |
+| **技術仕様担当 / 執筆者** | AI-3 (gpt-6-luna) | **SUBMITTED** | 2026-10-26 | 5つの要求事項を反映し再提出完了 |
+
+### 12.2 本番運用決裁（Production Operation Approval Register）
+本番環境での実際のマイグレーション実行、保守枠確保、PITR 発動権限、およびデータ修復承認規程を発効する実責任者のサインオフ。現時点ではすべての本番決裁は **PENDING（未承認）** である。
 
 | 承認役職 | 氏名 | 承認ステータス | 承認日 | 承認コメント / 決裁番号 |
 |---|---|---|---|---|
-| **技術統括責任者 / リードアーキテクト** | (未定) | **PENDING** | - | 本番 Runbook 技術妥当性確認中 |
-| **データベース管理者 (DBA)** | (未定) | **PENDING** | - | PITR 手順およびロック・実行計画検証中 |
-| **財務管理責任者 (Finance Manager)** | (未定) | **PENDING** | - | インボイス帰属判定基準合意確認中 |
-| **法務・コンプライアンス統括責任者** | (未定) | **PENDING** | - | テナント分離・監査証跡要件確認中 |
-| **独立 Reviewer (Astra)** | Astra | **PLAN REVIEW PENDING** | - | 本文書提出後の独立 Plan Review 待ち |
+| **運用統括責任者 (Operations Director)** | (未定) | **PENDING** | - | 保守時間枠・トラフィック遮断計画確認中 |
+| **データベース管理者 (DBA Lead)** | (未定) | **PENDING** | - | PITR 手順・Binlog 保持期間・MDL 監視確認中 |
+| **財務統括責任者 (Finance Director)** | (未定) | **PENDING** | - | インボイス帰属判定基準および承認ルート確認中 |
+| **法務・コンプライアンス統括責任者** | (未定) | **PENDING** | - | テナント分離性・監査証跡・契約整合性確認中 |
