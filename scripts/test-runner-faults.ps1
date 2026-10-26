@@ -1,12 +1,13 @@
-﻿<#
+<#
 .SYNOPSIS
-  verify-like-ci.ps1 の合取判定・状態管理・証跡保全・異常系ハンドリングの自動検証ハーネス (UTF-8)
+  verify-like-ci.ps1 の合取判定・状態管理・証跡保全・異常系ハンドリングの自動検証ハーネス (UTF-8 without BOM).
 
 .DESCRIPTION
-  実Maven・Docker・MySQL・Chrome・PITRバックアップを一切起動せず、
-  モック環境を用いて全12+の異常系および正常系シナリオを高速・決定論的に検証する。
-  断言内容: 終了コード、JSON状態、証跡保全、後続 clean 呼び出し抑止。
-  失敗時は現場（テンポラリディレクトリ）を保全して終了する。
+  実Maven・Docker・MySQL・Chrome・PITRバックアップを一切起動せず、.
+  モック環境を用いて runner (verify-like-ci.ps1) を実際に呼び出し、.
+  全異常系および正常系シナリオを高速・決定論的に検証する.
+  断言内容: 終了コード、JSON状態、証跡保全、後続 clean 呼び出し抑止.
+  失敗時は現場（テンポラリディレクトリ）を保全して終了する.
 #>
 
 Set-StrictMode -Version Latest
@@ -18,14 +19,15 @@ $commonScript = Join-Path $scriptDir 'verify-ci-common.ps1'
 $runnerScript = Join-Path $scriptDir 'verify-like-ci.ps1'
 
 if (-not (Test-Path -LiteralPath $commonScript)) {
-    throw "FATAL: verify-ci-common.ps1 が見つかりません ($commonScript)"
+    throw "FATAL: verify-ci-common.ps1 が見つかりません: '$commonScript'."
 }
 if (-not (Test-Path -LiteralPath $runnerScript)) {
-    throw "FATAL: verify-like-ci.ps1 が見つかりません ($runnerScript)"
+    throw "FATAL: verify-like-ci.ps1 が見つかりません: '$runnerScript'."
 }
 
 . $commonScript
 
+$currentPsExe = (Get-Process -Id $PID).Path
 $testBaseDir = Join-Path ([System.IO.Path]::GetTempPath()) ("runner-fault-tests-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [System.Guid]::NewGuid().ToString('N').Substring(0, 8))
 [System.IO.Directory]::CreateDirectory($testBaseDir) | Out-Null
 
@@ -39,258 +41,525 @@ function Assert-Test([bool]$Condition, [string]$TestName, [string]$FailureDetail
         Write-Error $script:failureReason
         throw $script:failureReason
     }
-    Write-Host "  [PASS] $TestName"
+    Write-Host "  [PASS] $TestName."
 }
 
-Write-Host "=============================================================================="
-Write-Host "verify-like-ci.ps1 軽快故障・合取判定検証ハーネス開始"
-Write-Host "テスト作業領域: $testBaseDir"
-Write-Host "=============================================================================="
+Write-Host "==============================================================================."
+Write-Host "verify-like-ci.ps1 軽快故障・合取判定検証ハーネス開始."
+Write-Host "テスト作業領域: $testBaseDir."
+Write-Host "==============================================================================."
 
-try {
-    # --------------------------------------------------------------------------
-    # 1. 正常完成且無dump (Normal complete with 0 dumps)
-    # --------------------------------------------------------------------------
-    $case01Dir = Join-Path $testBaseDir 'case01-normal'
-    [System.IO.Directory]::CreateDirectory($case01Dir) | Out-Null
-    $xmlNormal = '<?xml version="1.0" encoding="UTF-8"?><testsuite name="com.ses.SampleTest" tests="5" failures="0" errors="0" skipped="0"></testsuite>'
-    [System.IO.File]::WriteAllText((Join-Path $case01Dir 'TEST-com.ses.SampleTest.xml'), $xmlNormal, $script:Utf8NoBom)
+# ------------------------------------------------------------------------------
+# モック Maven / Bash 用のスクリプト生成.
+# ------------------------------------------------------------------------------
+$mockBinDir = Join-Path $testBaseDir 'mock-bin'
+[System.IO.Directory]::CreateDirectory($mockBinDir) | Out-Null
 
-    $res01 = Evaluate-MavenSurefireArtifacts -SuiteId 'test-suite' -ProcessExitCode 0 -ArtifactsDir $case01Dir
-    Assert-Test ($res01.Pass -eq $true) "01.正常完了（dumpなし）-判定結果" "Pass が `$true であること"
-    Assert-Test ($res01.Tests -eq 5 -and $res01.DumpsCount -eq 0) "01.正常完了（dumpなし）-集計値" "Tests=5, DumpsCount=0 であること"
+$mockMvnBat = Join-Path $mockBinDir 'mvn.bat'
+$mockBashBat = Join-Path $mockBinDir 'bash.bat'
+$mockCallsLog = Join-Path $testBaseDir 'mock_calls.log'
 
-    # --------------------------------------------------------------------------
-    # 2. 非ゼロ終了コード (Non-zero exit)
-    # --------------------------------------------------------------------------
-    $case02Dir = Join-Path $testBaseDir 'case02-nonzero'
-    [System.IO.Directory]::CreateDirectory($case02Dir) | Out-Null
-    [System.IO.File]::WriteAllText((Join-Path $case02Dir 'TEST-com.ses.SampleTest.xml'), $xmlNormal, $script:Utf8NoBom)
+$mockMvnPs1 = Join-Path $mockBinDir 'mock-mvn-handler.ps1'
+$mockBashPs1 = Join-Path $mockBinDir 'mock-bash-handler.ps1'
 
-    $res02 = Evaluate-MavenSurefireArtifacts -SuiteId 'test-suite' -ProcessExitCode 1 -ArtifactsDir $case02Dir
-    Assert-Test ($res02.Pass -eq $false) "02.非ゼロ終了コード-判定結果" "Pass が `$false であること"
-    Assert-Test ($res02.Reasons -contains "PROCESS_NON_ZERO_EXIT (exit=1)") "02.非ゼロ終了コード-理由検知" "PROCESS_NON_ZERO_EXIT が検知されること"
+# mock-mvn-handler.ps1 の実装.
+$mockMvnPs1Content = @'
+param(
+    [string]$ConfigDir,
+    [string]$RepoRoot
+)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
-    # --------------------------------------------------------------------------
-    # 3. ゼロテスト実行 (Zero tests executed)
-    # --------------------------------------------------------------------------
-    $case03Dir = Join-Path $testBaseDir 'case03-zerotests'
-    [System.IO.Directory]::CreateDirectory($case03Dir) | Out-Null
-    $xmlZero = '<?xml version="1.0" encoding="UTF-8"?><testsuite name="com.ses.EmptyTest" tests="0" failures="0" errors="0" skipped="0"></testsuite>'
-    [System.IO.File]::WriteAllText((Join-Path $case03Dir 'TEST-com.ses.EmptyTest.xml'), $xmlZero, $script:Utf8NoBom)
+$ArgsList = @($args)
+$configMode = 'pass'
+$configFile = Join-Path $ConfigDir 'mvn-mode.txt'
+if (Test-Path -LiteralPath $configFile) {
+    $configMode = (Get-Content -LiteralPath $configFile -Raw).Trim()
+}
 
-    $res03 = Evaluate-MavenSurefireArtifacts -SuiteId 'test-suite' -ProcessExitCode 0 -ArtifactsDir $case03Dir
-    Assert-Test ($res03.Pass -eq $false) "03.ゼロテスト実行-判定結果" "Pass が `$false であること"
-    Assert-Test ($res03.Reasons -contains "ZERO_TESTS_EXECUTED") "03.ゼロテスト実行-理由検知" "ZERO_TESTS_EXECUTED が検知されること"
+$tracker = Join-Path $ConfigDir 'mock_calls.log'
+[System.IO.File]::AppendAllText($tracker, "mvn: $($ArgsList -join ' ')`r`n")
 
-    # --------------------------------------------------------------------------
-    # 4. XML欠落および破損 (Missing or Corrupted XML)
-    # --------------------------------------------------------------------------
-    $case04ADir = Join-Path $testBaseDir 'case04a-missing-xml'
-    [System.IO.Directory]::CreateDirectory($case04ADir) | Out-Null
-    $res04A = Evaluate-MavenSurefireArtifacts -SuiteId 'test-suite' -ProcessExitCode 0 -ArtifactsDir $case04ADir
-    Assert-Test ($res04A.Pass -eq $false -and $res04A.Reasons -contains "MISSING_SUREFIRE_XML_REPORTS") "04A.XML欠落検知" "MISSING_SUREFIRE_XML_REPORTS が検知されること"
-
-    $case04BDir = Join-Path $testBaseDir 'case04b-corrupt-xml'
-    [System.IO.Directory]::CreateDirectory($case04BDir) | Out-Null
-    [System.IO.File]::WriteAllText((Join-Path $case04BDir 'TEST-corrupt.xml'), '<?xml version="1.0"?><testsuite name="bad" <unclosed>', $script:Utf8NoBom)
-    $res04B = Evaluate-MavenSurefireArtifacts -SuiteId 'test-suite' -ProcessExitCode 0 -ArtifactsDir $case04BDir
-    Assert-Test ($res04B.Pass -eq $false) "04B.破損XML判定結果" "Pass が `$false であること"
-    $hasCorruptReason = @($res04B.Reasons | Where-Object { $_ -like "CORRUPTED_XML_REPORT*" }).Count -gt 0
-    Assert-Test $hasCorruptReason "04B.破損XML理由検知" "CORRUPTED_XML_REPORT が検知されること"
-
-    # --------------------------------------------------------------------------
-    # 5. skip テスト検知 (Skipped tests)
-    # --------------------------------------------------------------------------
-    $case05Dir = Join-Path $testBaseDir 'case05-skipped'
-    [System.IO.Directory]::CreateDirectory($case05Dir) | Out-Null
-    $xmlSkipped = '<?xml version="1.0" encoding="UTF-8"?><testsuite name="com.ses.SkippedTest" tests="10" failures="0" errors="0" skipped="2"></testsuite>'
-    [System.IO.File]::WriteAllText((Join-Path $case05Dir 'TEST-com.ses.SkippedTest.xml'), $xmlSkipped, $script:Utf8NoBom)
-
-    $res05 = Evaluate-MavenSurefireArtifacts -SuiteId 'test-suite' -ProcessExitCode 0 -ArtifactsDir $case05Dir
-    Assert-Test ($res05.Pass -eq $false) "05.skipテスト判定結果" "Pass が `$false であること"
-    Assert-Test ($res05.Reasons -contains "SKIPPED_TESTS_DETECTED (count=2)") "05.skipテスト理由検知" "SKIPPED_TESTS_DETECTED が検知されること"
-
-    # --------------------------------------------------------------------------
-    # 6. 実行集合欠落検知 (Execution set missing classes)
-    # --------------------------------------------------------------------------
-    $case06Dir = Join-Path $testBaseDir 'case06-exec-set'
-    [System.IO.Directory]::CreateDirectory($case06Dir) | Out-Null
-    [System.IO.File]::WriteAllText((Join-Path $case06Dir 'TEST-com.ses.ClassA.xml'), $xmlNormal, $script:Utf8NoBom)
-
-    # 6A: fast-tests で MySqlTestShardInventoryTest が欠落
-    $res06A = Evaluate-MavenSurefireArtifacts -SuiteId 'fast-tests' -ProcessExitCode 0 -ArtifactsDir $case06Dir
-    Assert-Test ($res06A.Pass -eq $false) "06A.Fast-inventory欠落判定結果" "Pass が `$false であること"
-    $hasInvReason = @($res06A.Reasons | Where-Object { $_ -like "*MISSING_REQUIRED_FAST_INVENTORY_REPORT*" }).Count -gt 0
-    Assert-Test $hasInvReason "06A.Fast-inventory欠落理由検知" "MISSING_REQUIRED_FAST_INVENTORY_REPORT が検知されること"
-
-    # 6B: 指定された実行集合クラス ClassB が欠落
-    $res06B = Evaluate-MavenSurefireArtifacts -SuiteId 'mysql-tests' -ProcessExitCode 0 -ArtifactsDir $case06Dir -ExpectedClasses @('ClassA', 'ClassB')
-    Assert-Test ($res06B.Pass -eq $false) "06B.実行集合欠落判定結果" "Pass が `$false であること"
-    Assert-Test ($res06B.Reasons -contains "MISSING_REQUIRED_TEST_CLASS (ClassB)") "06B.実行集合欠落理由検知" "MISSING_REQUIRED_TEST_CLASS (ClassB) が検知されること"
-
-    # --------------------------------------------------------------------------
-    # 7. 帰檔部分失敗検知 (Archive partial failure / hash mismatch)
-    # --------------------------------------------------------------------------
-    $case07Src = Join-Path $testBaseDir 'case07-src'
-    $case07Dest = Join-Path $testBaseDir 'case07-dest'
-    [System.IO.Directory]::CreateDirectory($case07Src) | Out-Null
-    [System.IO.Directory]::CreateDirectory($case07Dest) | Out-Null
-    [System.IO.File]::WriteAllText((Join-Path $case07Src 'file1.xml'), '<content1/>', $script:Utf8NoBom)
-
-    # 正常アーカイブ検証
-    $arch07 = Archive-DirectoryArtifacts -SourceDir $case07Src -DestinationDir $case07Dest -Extensions @('.xml') -FailOnEmpty $true
-    Assert-Test ($arch07.ArchivedFiles.Count -eq 1) "07A.正常アーカイブ件数" "1件正常にアーカイブされること"
-    Assert-Test (Test-Path -LiteralPath (Join-Path $case07Dest 'sha256sum.txt')) "07A.正常アーカイブmanifest" "sha256sum.txt が生成されること"
-
-    # ソース空時の拒絶検証
-    $case07Empty = Join-Path $testBaseDir 'case07-empty'
-    [System.IO.Directory]::CreateDirectory($case07Empty) | Out-Null
-    $emptyRejected = $false
-    try {
-        Archive-DirectoryArtifacts -SourceDir $case07Empty -DestinationDir (Join-Path $testBaseDir 'dest-empty') -FailOnEmpty $true
-    } catch {
-        if ($_.Exception.Message -like "*アーカイブ対象のファイルが存在しません*") {
-            $emptyRejected = $true
-        }
-    }
-    Assert-Test $emptyRejected "07B.空ソースアーカイブ拒絶" "空ディレクトリアーカイブが例外で拒絶されること"
-
-    # --------------------------------------------------------------------------
-    # 8. 証跡ディレクトリ再利用の拒絶 (EvidenceDir reuse rejected)
-    # --------------------------------------------------------------------------
-    $case08Dir = Join-Path $testBaseDir 'case08-reuse'
-    [System.IO.Directory]::CreateDirectory($case08Dir) | Out-Null
-    [System.IO.File]::WriteAllText((Join-Path $case08Dir 'existing.txt'), 'old-evidence', $script:Utf8NoBom)
-
-    $reuseRejected = $false
-    try {
-        Assert-ValidEvidenceDir -RepoRoot $repoRoot -EvidenceDir $case08Dir
-    } catch {
-        if ($_.Exception.Message -like "*既存の EvidenceDir の再利用は禁止されています*") {
-            $reuseRejected = $true
-        }
-    }
-    Assert-Test $reuseRejected "08.旧証跡ディレクトリ再利用拒絶" "既存非空ディレクトリの再利用がFATAL例外で拒絶されること"
-
-    # --------------------------------------------------------------------------
-    # 9. target配下へのEvidenceDir設定拒絶
-    # --------------------------------------------------------------------------
-    $case09Dir = Join-Path $repoRoot 'target\some-evidence'
-    $targetDirRejected = $false
-    try {
-        Assert-ValidEvidenceDir -RepoRoot $repoRoot -EvidenceDir $case09Dir
-    } catch {
-        if ($_.Exception.Message -like "*target ディレクトリの配下に設定できません*") {
-            $targetDirRejected = $true
-        }
-    }
-    Assert-Test $targetDirRejected "09.target配下証跡設定拒絶" "target配下へのEvidenceDir設定がFATAL例外で拒絶されること"
-
-    # --------------------------------------------------------------------------
-    # 10. 残留 RUNNING 状態の検出 (Residual RUNNING state)
-    # --------------------------------------------------------------------------
-    $case10StateFile = Join-Path $testBaseDir 'case10-running-state.json'
-    Write-JsonStateFile -FilePath $case10StateFile -Data @{
-        state     = 'RUNNING'
-        completed = $false
-        pid       = 12345
-    }
-    $stateJson = [System.IO.File]::ReadAllText($case10StateFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-    Assert-Test ($stateJson.state -eq 'RUNNING' -and $stateJson.completed -eq $false) "10.残留RUNNING状態検知" "異常終了時の状態が completed=false の RUNNING であること"
-
-    # --------------------------------------------------------------------------
-    # 11. dump ファイル検知による一票否決 (JVM dump detected)
-    # --------------------------------------------------------------------------
-    $case11Dir = Join-Path $testBaseDir 'case11-dump'
-    [System.IO.Directory]::CreateDirectory($case11Dir) | Out-Null
-    [System.IO.File]::WriteAllText((Join-Path $case11Dir 'TEST-com.ses.SampleTest.xml'), $xmlNormal, $script:Utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $case11Dir '2026-10-26T16-00-00.dumpstream'), 'JVM crash dump', $script:Utf8NoBom)
-
-    $res11 = Evaluate-MavenSurefireArtifacts -SuiteId 'test-suite' -ProcessExitCode 0 -ArtifactsDir $case11Dir
-    Assert-Test ($res11.Pass -eq $false) "11.dump検知判定結果" "Pass が `$false であること"
-    Assert-Test ($res11.Reasons -contains "SUREFIRE_JVM_DUMP_DETECTED (count=1)") "11.dump検知理由" "SUREFIRE_JVM_DUMP_DETECTED が検知されること"
-
-    # --------------------------------------------------------------------------
-    # 12. 誤った manifest (evidence-sha 不整合検知)
-    # --------------------------------------------------------------------------
-    $case12Dir = Join-Path $testBaseDir 'case12-bad-manifest'
-    [System.IO.Directory]::CreateDirectory($case12Dir) | Out-Null
-    [System.IO.File]::WriteAllText((Join-Path $case12Dir 'drill-report.json'), '{"rto_ok": true, "rpo_ok": true}', $script:Utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $case12Dir 'integration-summary.json'), '{"state": "SUCCESS", "target_db": {"before_marker": 1, "mid_dml_replayed": 1, "after_marker": 0}, "uploads_staging": {"before_marker": 1, "after_marker": 0}}', $script:Utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $case12Dir 'evidence-sha.txt'), 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff  drill-report.json', $script:Utf8NoBom)
-
-    $res12 = Evaluate-BackupIntegrationEvidenceDir -ProcessExitCode 0 -EvidenceDir $case12Dir
-    Assert-Test ($res12.Pass -eq $false) "12.不正manifest判定結果" "Pass が `$false であること"
-    $hasShaMismatch = @($res12.Reasons | Where-Object { $_ -like "*EVIDENCE_SHA_MISMATCH*" }).Count -gt 0
-    Assert-Test $hasShaMismatch "12.不正manifest理由検知" "EVIDENCE_SHA_MISMATCH が検知されること"
-
-    # --------------------------------------------------------------------------
-    # 13. uploads marker 不一致検知 (Uploads marker mismatch)
-    # --------------------------------------------------------------------------
-    $case13Dir = Join-Path $testBaseDir 'case13-bad-marker'
-    [System.IO.Directory]::CreateDirectory($case13Dir) | Out-Null
-    [System.IO.File]::WriteAllText((Join-Path $case13Dir 'drill-report.json'), '{"rto_ok": true, "rpo_ok": true}', $script:Utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $case13Dir 'integration-summary.json'), '{"state": "SUCCESS", "target_db": {"before_marker": 1, "mid_dml_replayed": 1, "after_marker": 0}, "uploads_staging": {"before_marker": 0, "after_marker": 0}}', $script:Utf8NoBom)
-    $drillHash = (Get-FileHash -LiteralPath (Join-Path $case13Dir 'drill-report.json') -Algorithm SHA256).Hash.ToLowerInvariant()
-    $sumHash = (Get-FileHash -LiteralPath (Join-Path $case13Dir 'integration-summary.json') -Algorithm SHA256).Hash.ToLowerInvariant()
-    [System.IO.File]::WriteAllText((Join-Path $case13Dir 'evidence-sha.txt'), "$drillHash  drill-report.json`n$sumHash  integration-summary.json", $script:Utf8NoBom)
-
-    $res13 = Evaluate-BackupIntegrationEvidenceDir -ProcessExitCode 0 -EvidenceDir $case13Dir
-    Assert-Test ($res13.Pass -eq $false) "13.uploads marker不一致判定結果" "Pass が `$false であること"
-    $hasMarkerMismatch = @($res13.Reasons | Where-Object { $_ -like "*MARKER_MISMATCH (uploads_staging.before_marker=0)*" }).Count -gt 0
-    Assert-Test $hasMarkerMismatch "13.uploads marker不一致理由検知" "MARKER_MISMATCH が検知されること"
-
-    # --------------------------------------------------------------------------
-    # 14. Bash テスト失敗検知 (Bash failure)
-    # --------------------------------------------------------------------------
-    $case14Log = Join-Path $testBaseDir 'case14-bash.log'
-    [System.IO.File]::WriteAllText($case14Log, "Executing unit tests...`nBLOCKED: Docker is not available.`nFAIL: suite aborted.", $script:Utf8NoBom)
-    $res14 = Evaluate-BashUnitOutput -ProcessExitCode 1 -LogPath $case14Log
-    Assert-Test ($res14.Pass -eq $false) "14.Bash失敗判定結果" "Pass が `$false であること"
-    Assert-Test ($res14.Reasons -contains "BASH_UNIT_EXIT_NON_ZERO (exit=1)") "14.Bash非ゼロ終了コード検知" "BASH_UNIT_EXIT_NON_ZERO が検知されること"
-    Assert-Test ($res14.Reasons -contains "BASH_UNIT_BLOCKED_DETECTED") "14.Bash BLOCKED検知" "BASH_UNIT_BLOCKED_DETECTED が検知されること"
-    Assert-Test ($res14.Reasons -contains "BASH_UNIT_FAIL_DETECTED") "14.Bash FAIL検知" "BASH_UNIT_FAIL_DETECTED が検知されること"
-
-    # --------------------------------------------------------------------------
-    # 15. 後続 clean 呼び出し抑止の厳格断言 (Clean call count assertion)
-    # --------------------------------------------------------------------------
-    $case15Dir = Join-Path $testBaseDir 'case15-clean-assertion'
-    [System.IO.Directory]::CreateDirectory($case15Dir) | Out-Null
-    $trackerLog = Join-Path $case15Dir 'clean-invocations.log'
-
-    # 4スイートを模擬するループにおいて、第1スイートでアーカイブが失敗した場合の動作を検証
-    $cleanCallCount = 0
-    $mockSuites = @('suite1', 'suite2', 'suite3', 'suite4')
-    $aborted = $false
-
-    foreach ($s in $mockSuites) {
-        # 各スイート実行開始時に clean を呼ぶ規約
-        $cleanCallCount++
-        [System.IO.File]::AppendAllText($trackerLog, "clean called for $s`n", [System.Text.Encoding]::ASCII)
-
-        if ($s -eq 'suite1') {
-            # 第1スイートでアーカイブ失敗例外を発生させ、即座に中断
-            $aborted = $true
-            break
-        }
-    }
-
-    Assert-Test ($aborted -eq $true) "15.異常時即時ループ脱出" "第1スイート失敗時に後続ループが脱出されること"
-    Assert-Test ($cleanCallCount -eq 1) "15.後続clean呼び出し抑止" "clean の呼び出し回数が1回（後続3回は抑止）であること"
-
-    $logLines = @(Get-Content -LiteralPath $trackerLog)
-    Assert-Test ($logLines.Count -eq 1 -and $logLines[0] -eq 'clean called for suite1') "15.cleanログ記録検証" "suite1のみcleanが記録されていること"
-
-    Write-Host "=============================================================================="
-    Write-Host "全15項目の軽快故障・合取判定テストがすべて PASS しました (0 FAILURES)"
-    Write-Host "=============================================================================="
-} catch {
-    Write-Error "テストハーネス実行中に致命的エラーが発生しました: $($_.Exception.Message)"
-    Write-Host "検証失敗のため作業領域を保全します: $testBaseDir"
+if ($configMode -eq 'fail-exit') {
     exit 1
 }
 
-# 全断言通過時のみ一時ディレクトリをクリーンアップ
+# clean test の処理.
+$targetReports = Join-Path $RepoRoot 'target\surefire-reports'
+$targetBrowserEvidence = Join-Path $RepoRoot 'target\browser-m-evidence'
+if ($ArgsList -contains 'clean') {
+    if (Test-Path -LiteralPath $targetReports) {
+        Get-ChildItem -LiteralPath $targetReports -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path -LiteralPath $targetBrowserEvidence) {
+        Remove-Item -LiteralPath $targetBrowserEvidence -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+if (-not (Test-Path -LiteralPath $targetReports)) {
+    [System.IO.Directory]::CreateDirectory($targetReports) | Out-Null
+}
+
+$isMysql = $ArgsList -contains '-Pmysql-tests'
+$isPerformance = $ArgsList -contains '-Pperformance-tests'
+$isBrowser = $ArgsList -contains '-Pbrowser-tests'
+
+if ($configMode -eq 'zero-tests') {
+    $xml = '<?xml version="1.0" encoding="UTF-8"?><testsuite name="com.ses.EmptyTest" tests="0" failures="0" errors="0" skipped="0"></testsuite>'
+    [System.IO.File]::WriteAllText((Join-Path $targetReports 'TEST-com.ses.EmptyTest.xml'), $xml)
+    exit 0
+}
+
+if ($configMode -eq 'missing-xml') {
+    # XMLを生成しない.
+    exit 0
+}
+
+if ($configMode -eq 'corrupt-xml') {
+    $xml = '<?xml version="1.0"?><testsuite name="bad" <unclosed>'
+    [System.IO.File]::WriteAllText((Join-Path $targetReports 'TEST-corrupt.xml'), $xml)
+    exit 0
+}
+
+if ($configMode -eq 'skipped-tests') {
+    $xml = '<?xml version="1.0" encoding="UTF-8"?><testsuite name="com.ses.SkippedTest" tests="5" failures="0" errors="0" skipped="1"></testsuite>'
+    [System.IO.File]::WriteAllText((Join-Path $targetReports 'TEST-com.ses.SkippedTest.xml'), $xml)
+    exit 0
+}
+
+if ($configMode -eq 'dump-file') {
+    $xml = '<?xml version="1.0" encoding="UTF-8"?><testsuite name="com.ses.SampleTest" tests="5" failures="0" errors="0" skipped="0"></testsuite>'
+    [System.IO.File]::WriteAllText((Join-Path $targetReports 'TEST-com.ses.SampleTest.xml'), $xml)
+    [System.IO.File]::WriteAllText((Join-Path $targetReports '2026-10-26T16-00-00.dumpstream'), 'JVM dump content')
+    exit 0
+}
+
+# 通常 pass モード.
+if ($isMysql) {
+    # 87クラスのXMLを生成.
+    . (Join-Path $RepoRoot 'scripts\verify-ci-common.ps1')
+    $classes = Get-RequiredMysqlClasses -RepoRoot $RepoRoot
+    if ($configMode -eq 'missing-shard-class') {
+        # 1クラス削る.
+        $classes = $classes | Where-Object { $_ -ne $classes[0] }
+    }
+    foreach ($cls in $classes) {
+        $xml = "<?xml version=""1.0"" encoding=""UTF-8""?><testsuite name=""com.ses.$cls"" tests=""3"" failures=""0"" errors=""0"" skipped=""0""></testsuite>"
+        [System.IO.File]::WriteAllText((Join-Path $targetReports "TEST-com.ses.$cls.xml"), $xml)
+    }
+} elseif ($isBrowser) {
+    $xml = '<?xml version="1.0" encoding="UTF-8"?><testsuite name="com.ses.web.SampleBrowserTest" tests="2" failures="0" errors="0" skipped="0"></testsuite>'
+    [System.IO.File]::WriteAllText((Join-Path $targetReports 'TEST-com.ses.web.SampleBrowserTest.xml'), $xml)
+    $bDir = Join-Path $RepoRoot 'target\browser-m-evidence'
+    [System.IO.Directory]::CreateDirectory($bDir) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $bDir 'screenshot.png'), 'fake-png')
+} elseif ($isPerformance) {
+    $xmlPerf = '<?xml version="1.0" encoding="UTF-8"?><testsuite name="com.ses.PerformanceSampleTest" tests="5" failures="0" errors="0" skipped="0"></testsuite>'
+    [System.IO.File]::WriteAllText((Join-Path $targetReports 'TEST-com.ses.PerformanceSampleTest.xml'), $xmlPerf)
+} else {
+    # fast-tests: MySqlTestShardInventoryTest を必ず含む.
+    $xmlInv = '<?xml version="1.0" encoding="UTF-8"?><testsuite name="com.ses.migration.MySqlTestShardInventoryTest" tests="1" failures="0" errors="0" skipped="0"></testsuite>'
+    [System.IO.File]::WriteAllText((Join-Path $targetReports 'TEST-com.ses.migration.MySqlTestShardInventoryTest.xml'), $xmlInv)
+    $xmlFast = '<?xml version="1.0" encoding="UTF-8"?><testsuite name="com.ses.FastSampleTest" tests="10" failures="0" errors="0" skipped="0"></testsuite>'
+    [System.IO.File]::WriteAllText((Join-Path $targetReports 'TEST-com.ses.FastSampleTest.xml'), $xmlFast)
+}
+
+exit 0
+'@
+
+[System.IO.File]::WriteAllText($mockMvnPs1, $mockMvnPs1Content, $script:Utf8NoBom)
+
+# mock-bash-handler.ps1 の実装.
+$mockBashPs1Content = @'
+param(
+    [string]$ConfigDir,
+    [string]$RepoRoot
+)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$ArgsList = @($args)
+$configMode = 'pass'
+$configFile = Join-Path $ConfigDir 'bash-mode.txt'
+if (Test-Path -LiteralPath $configFile) {
+    $configMode = (Get-Content -LiteralPath $configFile -Raw).Trim()
+}
+
+$tracker = Join-Path $ConfigDir 'mock_calls.log'
+[System.IO.File]::AppendAllText($tracker, "bash: $($ArgsList -join ' ')`r`n")
+
+if ($configMode -eq 'fail-exit') {
+    exit 1
+}
+
+$scriptArg = if ($ArgsList.Count -gt 0) { $ArgsList[0] } else { '' }
+if ($scriptArg -like '*run-unit-tests.sh') {
+    Write-Host 'backup unit suite: SUCCESS'
+    exit 0
+}
+
+if ($scriptArg -like '*run-integration.sh') {
+    $workDir = $env:INTEGRATION_WORK_DIR
+    if ([string]::IsNullOrWhiteSpace($workDir)) {
+        throw "INTEGRATION_WORK_DIR not set"
+    }
+    $evDir = Join-Path $workDir 'evidence'
+    [System.IO.Directory]::CreateDirectory($evDir) | Out-Null
+
+    # 7つの必須ファイル.
+    $reqFiles = @(
+        'integration-summary.json',
+        'validate.json',
+        'restore.log',
+        'target-markers.txt',
+        'uploads-markers.txt',
+        'source-state.txt',
+        'report-restore-contract.txt'
+    )
+    foreach ($rf in $reqFiles) {
+        $p = Join-Path $evDir $rf
+        [System.IO.File]::WriteAllText($p, "dummy-$rf-content")
+    }
+
+    # drill-report.json
+    $drillJson = '{"rto_ok": true, "rpo_ok": true}'
+    [System.IO.File]::WriteAllText((Join-Path $evDir 'drill-report.json'), $drillJson)
+
+    # integration-summary.json のマーカー設定.
+    $beforeMarker = 1
+    if ($configMode -eq 'bad-marker') {
+        $beforeMarker = 0
+    }
+    $summaryJson = "{""state"": ""SUCCESS"", ""target_db"": {""before_marker"": 1, ""mid_dml_replayed"": 1, ""after_marker"": 0}, ""uploads_staging"": {""before_marker"": $beforeMarker, ""after_marker"": 0}}"
+    [System.IO.File]::WriteAllText((Join-Path $evDir 'integration-summary.json'), $summaryJson)
+
+    # evidence-sha.txt の生成.
+    $shaLines = @()
+    foreach ($rf in $reqFiles) {
+        $fp = Join-Path $evDir $rf
+        $stream = [System.IO.File]::OpenRead($fp)
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $h = [System.BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+        $sha.Dispose()
+        $stream.Dispose()
+        $shaLines += "$h  $rf"
+    }
+    if ($configMode -eq 'bad-manifest') {
+        # 不正行と重複を追加.
+        $shaLines += 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff  non-existent.txt'
+    }
+    [System.IO.File]::WriteAllLines((Join-Path $evDir 'evidence-sha.txt'), $shaLines)
+
+    Write-Host 'backup integration suite: SUCCESS'
+    exit 0
+}
+
+exit 0
+'@
+
+[System.IO.File]::WriteAllText($mockBashPs1, $mockBashPs1Content, $script:Utf8NoBom)
+
+# .bat ラッパー作成.
+$mvnBatContent = "@echo off`r`n`"$currentPsExe`" -ExecutionPolicy Bypass -File `"$mockMvnPs1`" -ConfigDir `"$testBaseDir`" -RepoRoot `"$repoRoot`" %*`r`nexit /b %ERRORLEVEL%`r`n"
+[System.IO.File]::WriteAllText($mockMvnBat, $mvnBatContent, [System.Text.Encoding]::ASCII)
+
+$bashBatContent = "@echo off`r`n`"$currentPsExe`" -ExecutionPolicy Bypass -File `"$mockBashPs1`" -ConfigDir `"$testBaseDir`" -RepoRoot `"$repoRoot`" %*`r`nexit /b %ERRORLEVEL%`r`n"
+[System.IO.File]::WriteAllText($mockBashBat, $bashBatContent, [System.Text.Encoding]::ASCII)
+
+try {
+    # --------------------------------------------------------------------------
+    # 1. 門禁縮減パラメータの拒絶 (-Dtest, -DskipTests, -P)
+    # --------------------------------------------------------------------------
+    Write-Host "Test 01: 縮減Mavenパラメータの拒絶検証..."
+    $forbiddenTests = @(
+        @('-Dtest=SampleTest'),
+        @('-DskipTests'),
+        @('-Pmysql-tests')
+    )
+    foreach ($fArg in $forbiddenTests) {
+        $ev01 = Join-Path $testBaseDir ("ev-forbidden-" + [System.Guid]::NewGuid().ToString('N').Substring(0, 6))
+        $proc01 = Start-Process -FilePath $currentPsExe `
+            -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev01`"", "-MavenArgs", ($fArg -join ' ')) `
+            -NoNewWindow -Wait -PassThru
+
+        Assert-Test ($proc01.ExitCode -eq 1) "01.パラメータ拒絶 ($($fArg -join ' ')) - 終了コード." "ExitCode が 1 であること."
+        Assert-Test (-not (Test-Path -LiteralPath $ev01)) "01.パラメータ拒絶 - 証跡作成前中止." "EvidenceDir が作成される前に中止されること."
+    }
+
+    # --------------------------------------------------------------------------
+    # 2. TargetedRun 区分 (非 FULL_GATE 判定)
+    # --------------------------------------------------------------------------
+    Write-Host "Test 02: TargetedRun モードの非FULL_GATE判定検証..."
+    $ev02 = Join-Path $testBaseDir 'ev-targeted'
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'pass')
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'bash-mode.txt'), 'pass')
+
+    $proc02 = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev02`"", "-TargetedRun", "-MavenArgs", "-Dtest=SampleTest") `
+        -NoNewWindow -Wait -PassThru
+
+    Assert-Test ($proc02.ExitCode -eq 0) "02.TargetedRun - 終了コード." "ExitCode が 0 であること."
+    $sess02 = [System.IO.File]::ReadAllText((Join-Path $ev02 'session-state.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    Assert-Test ($sess02.gateType -eq 'TARGETED_NON_FULL_GATE') "02.TargetedRun - gateType判定." "gateType が TARGETED_NON_FULL_GATE であること."
+    Assert-Test ($sess02.state -eq 'TARGETED_PASS_NOT_FULL_GATE') "02.TargetedRun - state判定." "state が TARGETED_PASS_NOT_FULL_GATE (非PASS) であること."
+
+    # --------------------------------------------------------------------------
+    # 3. dirty 作業ツリーの拒絶.
+    # --------------------------------------------------------------------------
+    Write-Host "Test 03: 未コミット・未追跡ソース変更の拒絶検証..."
+    $dirtyFile = Join-Path $repoRoot 'src\dirty-test-marker.txt'
+    [System.IO.File]::WriteAllText($dirtyFile, 'dirty content')
+    try {
+        $ev03 = Join-Path $testBaseDir 'ev-dirty'
+        $proc03 = Start-Process -FilePath $currentPsExe `
+            -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev03`"") `
+            -NoNewWindow -Wait -PassThru
+        Assert-Test ($proc03.ExitCode -eq 1) "03.dirty検知 - 終了コード." "未追跡ファイル存在時に ExitCode 1 で拒絶されること."
+    } finally {
+        Remove-Item -LiteralPath $dirtyFile -Force -ErrorAction SilentlyContinue
+    }
+
+    # --------------------------------------------------------------------------
+    # 4. 初回 clean 前の旧 target 保全検証.
+    # --------------------------------------------------------------------------
+    Write-Host "Test 04: 初回 clean 前の旧 target 保全検証..."
+    $targetDir = Join-Path $repoRoot 'target'
+    [System.IO.Directory]::CreateDirectory($targetDir) | Out-Null
+    $oldTargetFile = Join-Path $targetDir 'old-build-artifact.txt'
+    [System.IO.File]::WriteAllText($oldTargetFile, 'original target data')
+
+    $ev04 = Join-Path $testBaseDir 'ev-target-preservation'
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'pass')
+
+    $proc04 = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev04`"") `
+        -NoNewWindow -Wait -PassThru
+
+    Assert-Test ($proc04.ExitCode -eq 0) "04.target保全 - 終了コード." "ExitCode が 0 であること."
+    $preservedOld = Join-Path $ev04 'pre-run-target-preservation\old-build-artifact.txt'
+    Assert-Test (Test-Path -LiteralPath $preservedOld) "04.target保全 - ファイル存在." "旧ファイルが pre-run-target-preservation に保全されること."
+    $presShaManifest = Join-Path $ev04 'pre-run-target-preservation\sha256sum.txt'
+    Assert-Test (Test-Path -LiteralPath $presShaManifest) "04.target保全 - ハッシュ一覧存在." "保全ディレクトリに sha256sum.txt が存在すること."
+
+    # --------------------------------------------------------------------------
+    # 5. 非ゼロ終了コードによる中断 & 後続 clean 抑止検証.
+    # --------------------------------------------------------------------------
+    Write-Host "Test 05: 非ゼロ終了コードと後続 clean 抑止検証..."
+    [System.IO.File]::WriteAllText($mockCallsLog, '') # ログ初期化.
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'fail-exit')
+
+    $ev05 = Join-Path $testBaseDir 'ev-fail-exit'
+    $proc05 = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev05`"") `
+        -NoNewWindow -Wait -PassThru
+
+    Assert-Test ($proc05.ExitCode -eq 1) "05.非ゼロ終了 - 終了コード." "ExitCode が 1 であること."
+    $calls05 = @(Get-Content -LiteralPath $mockCallsLog)
+    $cleanCalls05 = @($calls05 | Where-Object { $_ -like '*clean*' })
+    Assert-Test ($cleanCalls05.Count -eq 1) "05.非ゼロ終了 - clean呼び出し抑止." "clean の実行回数が1回（第1スイートのみ）で後続が抑止されること."
+
+    $sess05 = [System.IO.File]::ReadAllText((Join-Path $ev05 'session-state.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    Assert-Test ($sess05.state -eq 'FAIL') "05.非ゼロ終了 - セッション状態." "セッション状態が FAIL であること."
+
+    # --------------------------------------------------------------------------
+    # 6. ゼロテスト実行の拒絶.
+    # --------------------------------------------------------------------------
+    Write-Host "Test 06: ゼロテスト実行の拒絶検証..."
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'zero-tests')
+    $ev06 = Join-Path $testBaseDir 'ev-zero-tests'
+    $proc06 = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev06`"") `
+        -NoNewWindow -Wait -PassThru
+
+    Assert-Test ($proc06.ExitCode -eq 1) "06.ゼロテスト - 終了コード." "ExitCode が 1 であること."
+    $sess06 = [System.IO.File]::ReadAllText((Join-Path $ev06 'session-state.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    Assert-Test ($sess06.state -eq 'FAIL') "06.ゼロテスト - セッション状態." "セッション状態が FAIL であること."
+
+    # --------------------------------------------------------------------------
+    # 7. XML欠落の拒絶.
+    # --------------------------------------------------------------------------
+    Write-Host "Test 07: XML欠落の拒絶検証..."
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'missing-xml')
+    $ev07 = Join-Path $testBaseDir 'ev-missing-xml'
+    $proc07 = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev07`"") `
+        -NoNewWindow -Wait -PassThru
+
+    Assert-Test ($proc07.ExitCode -eq 1) "07.XML欠落 - 終了コード." "ExitCode が 1 であること."
+
+    # --------------------------------------------------------------------------
+    # 8. 破損XMLの拒絶.
+    # --------------------------------------------------------------------------
+    Write-Host "Test 08: 破損XMLの拒絶検証..."
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'corrupt-xml')
+    $ev08 = Join-Path $testBaseDir 'ev-corrupt-xml'
+    $proc08 = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev08`"") `
+        -NoNewWindow -Wait -PassThru
+
+    Assert-Test ($proc08.ExitCode -eq 1) "08.破損XML - 終了コード." "ExitCode が 1 であること."
+
+    # --------------------------------------------------------------------------
+    # 9. skipテストの拒絶.
+    # --------------------------------------------------------------------------
+    Write-Host "Test 09: skipテストの拒絶検証..."
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'skipped-tests')
+    $ev09 = Join-Path $testBaseDir 'ev-skipped'
+    $proc09 = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev09`"") `
+        -NoNewWindow -Wait -PassThru
+
+    Assert-Test ($proc09.ExitCode -eq 1) "09.skip検知 - 終了コード." "ExitCode が 1 であること."
+
+    # --------------------------------------------------------------------------
+    # 10. Shardクラス欠落検知 (mysql-tests 必須実行集合照合)
+    # --------------------------------------------------------------------------
+    Write-Host "Test 10: Shardクラス欠落検知検証..."
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'missing-shard-class')
+    $ev10 = Join-Path $testBaseDir 'ev-missing-shard'
+    $proc10 = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev10`"") `
+        -NoNewWindow -Wait -PassThru
+
+    Assert-Test ($proc10.ExitCode -eq 1) "10.Shard欠落 - 終了コード." "ExitCode が 1 であること."
+
+    # --------------------------------------------------------------------------
+    # 11. dumpファイル存在時の一票否決.
+    # --------------------------------------------------------------------------
+    Write-Host "Test 11: dumpファイル存在時の一票否決検証..."
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'dump-file')
+    $ev11 = Join-Path $testBaseDir 'ev-dump'
+    $proc11 = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev11`"") `
+        -NoNewWindow -Wait -PassThru
+
+    Assert-Test ($proc11.ExitCode -eq 1) "11.dump検知 - 終了コード." "ExitCode が 1 であること."
+
+    # --------------------------------------------------------------------------
+    # 12. 不正manifest検知 (PITR)
+    # --------------------------------------------------------------------------
+    Write-Host "Test 12: PITR不正manifest検知検証..."
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'pass')
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'bash-mode.txt'), 'bad-manifest')
+    $ev12 = Join-Path $testBaseDir 'ev-bad-manifest'
+    $proc12 = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev12`"") `
+        -NoNewWindow -Wait -PassThru
+
+    Assert-Test ($proc12.ExitCode -eq 1) "12.不正manifest - 終了コード." "ExitCode が 1 であること."
+
+    # --------------------------------------------------------------------------
+    # 13. 不正marker検知 (PITR)
+    # --------------------------------------------------------------------------
+    Write-Host "Test 13: PITR不正marker検知検証..."
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'pass')
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'bash-mode.txt'), 'bad-marker')
+    $ev13 = Join-Path $testBaseDir 'ev-bad-marker'
+    $proc13 = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev13`"") `
+        -NoNewWindow -Wait -PassThru
+
+    Assert-Test ($proc13.ExitCode -eq 1) "13.不正marker - 終了コード." "ExitCode が 1 であること."
+
+    # --------------------------------------------------------------------------
+    # 14. 残留 RUNNING 状態の INCOMPLETE 判定.
+    # --------------------------------------------------------------------------
+    Write-Host "Test 14: 残留 RUNNING 状態の INCOMPLETE 判定検証..."
+    $ev14 = Join-Path $testBaseDir 'ev-incomplete'
+    [System.IO.Directory]::CreateDirectory($ev14) | Out-Null
+    Write-JsonStateFile -FilePath (Join-Path $ev14 'session-state.json') -Data @{
+        state     = 'RUNNING'
+        completed = $false
+    }
+    $state14 = Get-GateExecutionState -EvidenceDir $ev14
+    Assert-Test ($state14 -eq 'INCOMPLETE') "14.RUNNING残留 - 状態判定." "Get-GateExecutionState が INCOMPLETE を返すこと."
+
+    # --------------------------------------------------------------------------
+    # 15. 旧証跡ディレクトリ再利用の拒絶.
+    # --------------------------------------------------------------------------
+    Write-Host "Test 15: 既存証跡ディレクトリ再利用拒絶検証..."
+    $ev15 = Join-Path $testBaseDir 'ev-existing'
+    [System.IO.Directory]::CreateDirectory($ev15) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $ev15 'old.txt'), 'data')
+
+    $proc15 = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev15`"") `
+        -NoNewWindow -Wait -PassThru
+
+    Assert-Test ($proc15.ExitCode -eq 1) "15.ディレクトリ再利用拒絶 - 終了コード." "ExitCode が 1 であること."
+
+    # --------------------------------------------------------------------------
+    # 16. 空白を含む証跡パスの処理.
+    # --------------------------------------------------------------------------
+    Write-Host "Test 16: 空白を含む証跡パス検証..."
+    $ev16 = Join-Path $testBaseDir 'evidence with spaces'
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'pass')
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'bash-mode.txt'), 'pass')
+
+    $proc16 = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev16`"") `
+        -NoNewWindow -Wait -PassThru
+
+    Assert-Test ($proc16.ExitCode -eq 0) "16.空白パス - 終了コード." "ExitCode が 0 であること."
+    Assert-Test (Test-Path -LiteralPath (Join-Path $ev16 'session-state.json')) "16.空白パス - session-state存在." "空白パス配下に証跡が生成されること."
+
+    # --------------------------------------------------------------------------
+    # 17. 秘密情報漏洩スキャン検知.
+    # --------------------------------------------------------------------------
+    Write-Host "Test 17: 秘密情報漏洩スキャン検知検証..."
+    $ev17 = Join-Path $testBaseDir 'ev-secret'
+    [System.IO.Directory]::CreateDirectory($ev17) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $ev17 'leaked.txt'), 'contains src-password inside')
+    $leakDetected = $false
+    try {
+        Scan-EvidenceDirectoryForSecrets -EvidenceDir $ev17
+    } catch {
+        if ($_.Exception.Message -like "*秘密情報が検出されました*") {
+            $leakDetected = $true
+        }
+    }
+    Assert-Test $leakDetected "17.秘密情報スキャン - 検知." "src-password の混入が検知されること."
+
+    # --------------------------------------------------------------------------
+    # 18. 正常無dump全通過 (Full Pass)
+    # --------------------------------------------------------------------------
+    Write-Host "Test 18: 正常全通過 (Full Pass) 検証..."
+    [System.IO.File]::WriteAllText($mockCallsLog, '') # ログ初期化.
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'pass')
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'bash-mode.txt'), 'pass')
+
+    $ev18 = Join-Path $testBaseDir 'ev-full-pass'
+    $proc18 = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$runnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev18`"") `
+        -NoNewWindow -Wait -PassThru
+
+    Assert-Test ($proc18.ExitCode -eq 0) "18.全通過 - 終了コード." "ExitCode が 0 であること."
+    $sess18 = [System.IO.File]::ReadAllText((Join-Path $ev18 'session-state.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    Assert-Test ($sess18.state -eq 'PASS') "18.全通過 - state判定." "state が PASS であること."
+    Assert-Test ($sess18.completed -eq $true) "18.全通過 - completed判定." "completed が true であること."
+
+    $calls18 = @(Get-Content -LiteralPath $mockCallsLog)
+    $cleanCalls18 = @($calls18 | Where-Object { $_ -like '*clean*' })
+    Assert-Test ($cleanCalls18.Count -eq 4) "18.全通過 - clean呼び出し回数." "全4スイート分 (4回) clean が呼び出されること."
+
+    # 交付ツリー内に秘密情報が無いこと.
+    $noSecrets = $true
+    try {
+        Scan-EvidenceDirectoryForSecrets -EvidenceDir $ev18
+    } catch {
+        $noSecrets = $false
+    }
+    Assert-Test $noSecrets "18.全通過 - 交付ツリー無秘密." "最終交付ツリーに秘密情報が存在しないこと."
+
+    Write-Host "==============================================================================."
+    Write-Host "全18項目の軽快故障・合取判定テストがすべて PASS しました (0 FAILURES)."
+    Write-Host "==============================================================================."
+} catch {
+    Write-Error "テストハーネス実行中に致命的エラーが発生しました: $($_.Exception.Message)."
+    Write-Host "検証失敗のため作業領域を保全します: $testBaseDir."
+    exit 1
+}
+
+# 全断言通過時のみ一時ディレクトリをクリーンアップ.
 Remove-Item -LiteralPath $testBaseDir -Recurse -Force -ErrorAction SilentlyContinue
 exit 0
