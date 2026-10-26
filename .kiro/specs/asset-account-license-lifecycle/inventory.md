@@ -68,6 +68,6 @@
 
 | ドキュメント名 | 概要・対象範囲 | ステータス |
 |---|---|---|
-| `v182-rehearsal-contract.md` | V182 演練検証契約書（リハーサル 5 シナリオの完了定義） | **COMPLETED（演練通過済）** |
-| `v182-production-runbook-draft.md` | V182 本番マイグレーションおよびデータ修復 実行運用手順書（Runbook Draft） | **PLAN PASS（本番手順確定）** |
-| `v182-repair-executor-boundary-a-plan.md` | V182 修復エグゼキュータ 境界 A（電子インボイス集約）最小実装計画書 | **PLAN REVIEW PENDING（審査待ち）** |
+| `v182-rehearsal-contract.md` | V182 演練検証契約書（特定コミット `27a000f2225f272fe2c3b5094de6325c7714dd41`、使い捨て tmpfs MySQL 上の 5 演練シナリオ、証跡 `.kiro/evidence/20261026-v182-rehearsal/`。現 HEAD への昇格や本番承認ではない限定合格事実） | **REHEARSAL FACT PASS（特定コミット演練合格・現HEAD/本番未承認）** |
+| `v182-production-runbook-draft.md` | V182 本番マイグレーションおよびデータ修復 実行運用手順書（Runbook Draft、境界 A/B/C 手順草案） | **PLAN PASS（限定文書レビュー通過・本番運用決裁PENDING）** |
+| `v182-repair-executor-boundary-a-plan.md` | V182 修復エグゼキュータ 境界 A（電子インボイス集約）最小実装計画書（コード未着手・技術設計） | **PLAN REVIEW PENDING（独立計画レビュー待ち）** |
