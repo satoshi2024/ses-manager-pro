@@ -29,10 +29,11 @@
 |---|---|---|
 | **実装位置** | `src/test/java/.../V182TenantScopeHardeningRehearsalMySqlTest.java` (private) | `src/main/java/com/ses/service/repair/` (正式プロダクション層) |
 | **子イベント (`t_digital_invoice_event`)** | **未実装（完全無視）**。親行のみ更新し、子イベントの外鍵検査を回避。 | **完全集約実装**。親と全子イベントを同一 Tx 内でアトミックにロック・3分類・更新。 |
-| **親インボイス状態判定** | 単純な NULL 更新のみ。 | 親インボイス自身の 3 分類判定（既一致・欠落回填・衝突拒絶）と精密原値比較。 |
+| **親インボイス状態判定** | 単純な NULL 更新のみ。 | 親行ロック直後の無条件バージョン検証、親インボイス 3 分類判定、および已完成冪等重試の独立判定。 |
 | **外鍵整合性 (`RESTRICT`)** | 子イベントが存在しない合成データでのみ成立。 | MySQL 8 の即時文単位 RESTRICT 検査を充足する精密な原値比較 UPDATE を実装。 |
-| **承認検証** | 呼出引数 `callerTenant` の単純な文字列一致のみ。 | `t_approval_request` 正本照合（Ticket ID、役職、版、日時、権限ロール）の実照合。 |
-| **障害現場保全** | ロールバック時にエラーログをコンソール出力するのみ。 | ロールバックに巻き込まれない独立 Tx / 外部ファイルへの完全診断保全（原例外保持）。 |
+| **承認検証** | 呼出引数 `callerTenant` の単純な文字列一致のみ。 | `t_approval_request` および `t_approval_action` 正本照合（用途・テナント・現在輪次・2名承認者・実ロール）の実照合。 |
+| **操作者と承認者の分離** | 呼出引数をそのまま更新者として使用。 | 実行操作者（`executorUserId`）を認証コンテキストから取得して `resolved_by` に記録し、承認責任者・決裁票番号と明確に分離。 |
+| **障害現場保全** | ロールバック時にエラーログをコンソール出力するのみ。 | ロールバックに巻き込まれない独立 Tx / 外部ファイルへの完全診断保全（原例外保持・suppressed 付加）。 |
 | **ステータス** | テスト検証完了済 (Rehearsal Fact) | **新規最小実装計画中 (PLAN REVIEW PENDING)** |
 
 ---
@@ -46,31 +47,40 @@
 flowchart TD
     CLI[DigitalInvoiceScopeRepairCli / Ingress] --> GateCheck{前置安全防護検査<br/>ses.repair.invoice.enabled == true}
     GateCheck -->|false: 無効| AbortDisabled[終了コード 1 即時中断]
-    GateCheck -->|true: 有効| AuthVerify[正本承認レコード実検証<br/>t_approval_request & sys_user 照合]
+    GateCheck -->|true: 有効| AuthContext[認証コンテキスト検証<br/>SecurityUtils.currentUserId 取得]
 
-    AuthVerify -->|未承認・不整合・期限切| AbortAppr[SecurityException 拒絶]
+    AuthContext -->|未認証・不正コンテキスト| AbortAuth[SecurityException 拒絶]
+    AuthContext --> AuthVerify[正本承認レコード実検証<br/>t_approval_request & sys_user 照合]
+
+    AuthVerify -->|未承認・旧輪次・ロール相違・期限切| AbortAppr[ApprovalRequiredException / SecurityException 拒絶]
     AuthVerify -->|承認確認完了| TxExec[Transaction Executor 開始<br/>@Transactional READ_COMMITTED]
 
     subgraph TxBoundary [単一不可分トランザクション境界]
         Lock1[1. 親インボイス FOR UPDATE] --> Lock2[2. 子イベント全行 id ASC で FOR UPDATE]
         Lock2 --> Lock3[3. 親キュー FOR UPDATE]
         Lock3 --> Lock4[4. 子イベントキュー全行 entity_id ASC で FOR UPDATE]
-        Lock4 --> ParentClassify[5. 親インボイス 3 分類判定]
+        Lock4 --> CheckCompleted{已完成冪等重試判定<br/>全スコープ一致 & キューRESOLVED<br/>& 同一チケット結案証跡 & ver+1 ?}
+        CheckCompleted -->|YES: 既に結案済| SkipCompleted[DML発行ゼロで即時スキップ返却]
+        CheckCompleted -->|NO: 通常実行経路| VerVerify[5. 親行バージョン無条件検証<br/>lockedParentVersion == expectedVersion == targetVersion]
+        VerVerify -->|バージョン不一致| TxRollbackVer[即時中止 ROLLBACK<br/>OptimisticLockingFailureException]
+        VerVerify -->|バージョン合致| ParentClassify[6. 親インボイス 3 分類判定]
         ParentClassify -->|P-3: 親衝突| TxRollback[即時中止 ROLLBACK]
-        ParentClassify -->|P-1 / P-2| EvtClassify[6. 子イベント 3 分類判定]
+        ParentClassify -->|P-1 / P-2| EvtClassify[7. 子イベント 3 分類判定]
         EvtClassify -->|E-3: 子衝突| TxRollback
-        EvtClassify -->|E-1 / E-2| StateMatrix[7. 業務行×キュー状態マトリクス検証]
+        EvtClassify -->|E-1 / E-2| StateMatrix[8. 業務行×キュー状態マトリクス検証]
         StateMatrix -->|整合性異常検知| TxRollback
         StateMatrix --> DryRunCheck{dryRun == true ?}
         DryRunCheck -->|true| SetRbOnly[トランザクション内明示的ロールバック<br/>status.setRollbackOnly]
-        DryRunCheck -->|false| DmlExec[8. 親・子・キュー CAS DML 発行 & 逐行影響数検証]
-        DmlExec --> TxCommit[9. トランザクションコミット]
+        DryRunCheck -->|false| DmlExec[9. 親・子・キュー CAS DML 発行 & 逐行影響数検証<br/>resolved_by に executorUserId 記録]
+        DmlExec --> TxCommit[10. トランザクションコミット]
     end
 
     TxExec --> TxBoundary
     TxCommit --> SuccessResult[正常完了結果返却 & 監査ログ]
     SetRbOnly --> DryRunResult[Dry-Run 計画差分返却]
-    TxRollback --> OutOfBandForensics[主 Tx 外独立取証保全<br/>0600 JSON ダンプ & REQUIRES_NEW]
+    SkipCompleted --> IdempotentResult[冪等再実行スキップ結果返却]
+    TxRollbackVer --> OutOfBandForensics[主 Tx 外独立取証保全<br/>0600 JSON ダンプ & REQUIRES_NEW]
+    TxRollback --> OutOfBandForensics
     OutOfBandForensics --> ThrowOriginal[原例外・根本原因再送出]
 ```
 
@@ -101,7 +111,7 @@ if (command.dryRun()) {
 これにより、データベース接続レベルで確実に `ROLLBACK` が発行され、データ不変性が物理的に保証される。
 
 ### 2.4 Service 直呼出に対する同一防護の強制
-CLI 経由のみならず、将来的な内部ジョブや管理 API から `DigitalInvoiceScopeRepairService` が直接呼び出された場合でも、同一の承認検証および有効化前置検査を強制する。
+CLI 経由のみならず、将来的な内部ジョブや管理 API から `DigitalInvoiceScopeRepairService` が直接呼び出された場合でも、同一の認証コンテキスト検証、承認検証、および有効化前置検査を強制する。
 Service 実装の先頭で必ず承認検証ゲートウェイを呼び出し、未承認呼出に対する抜け道（Backdoor）を一切設けない。
 
 ### 2.5 保守ウィンドウと書込排空（Write-Drain）の必須前提
@@ -115,21 +125,30 @@ Service 実装の先頭で必ず承認検証ゲートウェイを呼び出し、
 
 ## 3. 厳格な人工承認検証と信頼できる検証起原 (Strict Approval Verification & Authoritative Source)
 
-### 3.1 単純な真偽値（`approved = true`）やバイパスフラグの物理的排除
-呼出元が `approved = true` や `bypassApproval = true` などの安易なフラグを渡すことによる修復実行は**アーキテクチャレベルで物理的に拒絶（Compile / Validation Error）**する。修復コマンドには、改ざん不能な構造化承認証跡オブジェクト `ScopeRepairApprovalEvidence` の同封を必須とする。
+### 3.1 単純な真偽値（`approved = true`）や呼出元自称ロールの物理的排除
+呼出元が `approved = true` や `bypassApproval = true` などの安易なフラグを渡すことによる修復実行は**アーキテクチャレベルで物理的に拒絶（Compile / Validation Error）**する。
+また、呼出元が DTO 等で自称する「役職名（`approverRole`）」や「実行操作者 ID（`executorUserId`）」は一切信用せず、認証コンテキストおよび正本データベースから直接判定する。
 
-### 3.2 構造化承認証跡（`ScopeRepairApprovalEvidence`）仕様
-未実装の HMAC フィールド（`digitalSignatureDigest`）は削除し、リポジトリ正本データベース（`t_approval_request`, `t_approval_action`, `sys_user`）の実在行と直接突き合わせる実体照合設計を採用する。
+### 3.2 コマンド DTO および構造化承認証跡（DTO 仕様）
+呼出元引数から改変可能な操作者 ID や役職自称を排除した DTO 構成とする：
 
 ```java
+public record RepairInvoiceAggregateCommand(
+    Long invoiceId,
+    String targetTenantId,
+    Long targetLegalEntityId,
+    Long expectedInvoiceVersion,
+    boolean dryRun,
+    ScopeRepairApprovalEvidence approvalEvidence
+) {}
+
 public record ScopeRepairApprovalEvidence(
     String approvalTicketId,       // 正式起票決裁番号（例: "APPR-20261026-INV-0089"、t_approval_request.request_no と照合）
-    Long operatorUserId,           // 実行操作者 sys_user.id（正の整数値、監査実行主体）
-    Long approverUserId,           // 承認責任者 sys_user.id（正の整数値、決裁主体）
-    String approverRole,           // 承認時ロール（"管理者"、"財務統括責任者" 等）
-    String approvedTenantId,       // 承認対象テナント ID（command.targetTenantId と完全一致必須）
-    Long approvedLegalEntityId,    // 承認対象法人 ID（command.targetLegalEntityId と完全一致必須）
-    Long approvedInvoiceVersion,   // 申請時点の親インボイス version（command.expectedInvoiceVersion と完全一致必須）
+    Long approverUserId1,          // 承認責任者 1（sys_user.id、正の整数値、決裁主体 1）
+    Long approverUserId2,          // 承認責任者 2（sys_user.id、正の整数値、決裁主体 2、approverUserId1 と異なること）
+    String targetTenantId,         // 承認対象テナント ID（command.targetTenantId と完全一致必須）
+    Long targetLegalEntityId,      // 承認対象法人 ID（command.targetLegalEntityId と完全一致必須）
+    Long targetInvoiceVersion,     // 申請時点の親インボイス version（command.expectedInvoiceVersion と完全一致必須）
     Instant approvalTimestamp,     // 承認確定日時（t_approval_request.finalized_at と照合）
     String justificationSummary    // 帰属決定の証拠原本（例: "基本契約書CNT-2026-089および課税事業者番号照合済"）
 ) {}
@@ -138,26 +157,45 @@ public record ScopeRepairApprovalEvidence(
 ### 3.3 信頼できる正本データベース照合（Authoritative DB Verification）
 「連携時」「存在する場合」といった曖昧な仮定表現を全廃し、修復実行前に以下の厳格な正本クエリを発行して照合する。いずれか 1 項目でも不整合または照合不能である場合は、直ちに `SecurityException` または `ApprovalRequiredException` をスローして実行を拒絶する。
 
-1. **決裁申請レコードの存在・終端ステータス検証**:
-   - `ApprovalRequestMapper` により `t_approval_request WHERE request_no = :approvalTicketId` を照合。
-   - `status` が厳密に `'approved'`（小文字固定）であること。未決裁（`requested`, `in_review`）や却下（`rejected`）、差戻し（`returned`）行は即座に拒絶。
-2. **対象インボイス ID およびバージョンの拘束検証（Replay 防護）**:
+1. **申請レコードの用途・テナント・対象・版・終端ステータス検証 (`t_approval_request`)**:
+   - `ApprovalRequestMapper` により `t_approval_request WHERE request_no = :evidence.approvalTicketId` を照合。
+   - `request_type` が厳密に `'DIGITAL_INVOICE_SCOPE_REPAIR'` であること（修復用途への厳格バインド）。
+   - `tenant_id` がコマンドの `targetTenantId` と完全一致すること（テナント境界への厳格バインド）。
    - `target_type` が厳密に `'DIGITAL_INVOICE'` であること。
    - `target_id` がコマンドの `invoiceId` と完全一致すること（**別インボイスの承認流用・クロスリプレイの絶対禁止**）。
    - `target_version` がコマンドの `expectedInvoiceVersion` と完全一致すること（**申請後にインボイスが更新された場合の無効化・データ変更後リプレイの絶対禁止**）。
-3. **承認先スコープの完全一致検証**:
-   - `payload_json` をパースし、承認された `targetTenantId` および `targetLegalEntityId` が、コマンドで指定された修復先スコープと**1 文字の狂いもなく完全一致**すること。
+   - `status` が厳密に `'approved'`（小文字固定）であること。未決裁（`requested`, `in_review`）や却下（`rejected`）、差戻し（`returned`）行は即座に拒絶。
+   - `round_no` を記録（現在の申請有効輪次 `currentRoundNo` として確定）。
+   - `payload_json` をパースし、承認された `targetTenantId` および `targetLegalEntityId` が、コマンド指定スコープと**1 文字の狂いもなく完全一致**すること。
+2. **現在輪次の厳格検証と旧輪次承認アクション混用の絶対排除 (`t_approval_action`)**:
+   - `ApprovalActionMapper` により `t_approval_action WHERE request_id = :req.id AND action = 'APPROVE'` を検索。
+   - **輪次合致拘束**: 承認アクションの全件が、申請レコードの現在輪次と厳密に一致していること（`action.round_no == req.round_no`）。
+   - 差戻し前の過去輪次（`action.round_no < req.round_no`）のアクションを流用・混用して承認枠を満たす行為は**厳格に禁止・拒絶**する（過去輪次の承認アクションはいかなる場合も無効）。
+   - 申請レコードの承認ルートスナップショット（`route_snapshot_json`）に定義された全必要ステップ・スロットが、現輪次の承認アクションにより満たされていることを検証。
+3. **2 名の異なる承認者および権限ロールの正本検証 (`sys_user`)**:
+   - 承認証跡の 2 名（`approverUserId1` および `approverUserId2`）が互いに異なるユーザーであること（`approverUserId1 != approverUserId2`、同一人物による二重承認の排除）。
+   - 現輪次の有効な `t_approval_action` において、`approverUserId1` および `approverUserId2` が実際に承認アクションを発行していること。
+   - 呼出元から渡された自称ロール文字列は一切信用せず、`SysUserMapper` により各承認者の `sys_user WHERE id = :userId AND status = 1 AND deleted_flag = 0` を直接照合：
+     - システムにおける実ロール（`sys_user.role`）が、`v182-production-runbook-draft.md` に規定された必要役職資格を満たすことを検証：
+       - **実在ロールの定義**: SES Manager Pro における `sys_user.role` の実在値は `管理者`（Spring Security では `ROLE_管理者`）、`マネージャー`、`営業`、`HR`、`要員` の 5 種である。
+       - **未解決回填（`SCOPE_UNRESOLVED`）**:
+         - 承認者 1: 財務統括責任者（Finance Director）— `管理者`（`ROLE_管理者`）であり財務決裁権限を持つ者、または財務部門責任者（`マネージャー`）。
+         - 承認者 2: システム管理者 — `管理者`（`ROLE_管理者`）。
+       - **衝突再判定（`SCOPE_CONFLICT`）**:
+         - 承認者 1: 財務統括責任者（Finance Director）。
+         - 承認者 2: 営業主管（Sales Rep Lead）— `管理者`、または担当営業部門を所掌する `マネージャー`。
+     - 資格を持たないユーザー（例: `要員`, `HR` 等）が承認者として含まれる場合は直ちに `SecurityException` で拒絶。
 4. **承認有効期限の検証（提案値 / PENDING）**:
    - `approvalTimestamp` および DB の `finalized_at` からの経過時間を検証。
    - 提案有効期限: **承認確定後 7 日以内（168 時間: `PT168H`）**。未来日時または期限切れの承認は拒絶。
    > [!NOTE]
    > 有効期限「7 日間」は現時点の設計提案値であり、本番運用決裁（PENDING）において正式な SLA として確定される。
-5. **承認者アカウントおよび権限ロールの正本検証**:
-   - `SysUserMapper` により `sys_user WHERE id = :approverUserId AND status = 1 AND deleted_flag = 0` を照合。
-   - `t_approval_action` において、該当チケットに対する `action = 'APPROVE'` を発行した実際の操作者が `approverUserId` と一致すること。
-   - `v182-production-runbook-draft.md` に規定された修復理由に応じた**必須承認者組合せ**を検証：
-     - **未解決回填（`SCOPE_UNRESOLVED`）**: 財務統括責任者（Finance Director）＋ システム管理者（`管理者` / `ROLE_ADMIN`）。
-     - **衝突再判定（`SCOPE_CONFLICT`）**: 財務統括責任者（Finance Director）＋ 営業主管（Sales Rep Lead）。
+5. **実行操作者（Executor）の認証コンテキストからの取得**:
+   - コマンド引数による操作者指定を廃止し、`SecurityContextHolder.getContext().getAuthentication()`（`SecurityUtils.currentUserId()`）から認証済みユーザー ID を直接取得する。
+   - 認証コンテキストが存在しない、または無効な場合は直ちに `AuthenticationCredentialsNotFoundException` で拒絶。
+6. **キュー結案時の `resolved_by` への操作者記録と証跡分離**:
+   - `t_nf09_scope_repair_queue` の更新時、`resolved_by` には**実際にコマンドを実行した操作者（`executorUserId`）**を記録する。
+   - 承認責任者（`approverUserId1`, `approverUserId2`）および承認チケット番号（`approvalTicketId`）は `resolution_note`（例: `"[REPAIR] ticket=APPR-20261026-INV-0089 round=1 approvers=42,43 executor=1"`）および独立現場証跡に保存し、実行者と承認者を混同しない。
 
 ### 3.4 テスト用フィクスチャの本番バックドア化防止
 テスト実行で使用される合成承認フィクスチャ（例: `ticketId = "TEST-MOCK-APPR-001"`）は、Spring プロファイルが `@Profile("test")` である環境においてのみ有効なモック検証器として分離する。
@@ -180,8 +218,39 @@ public record ScopeRepairApprovalEvidence(
 階層 4: t_nf09_scope_repair_queue (子イベントキュー全行、必ず entity_id ASC で FOR UPDATE)
 ```
 
-### 4.2 親インボイスの 3 分類（Parent Invoice 3-Way Classification）
-ロック取得した `t_digital_invoice`（取得原値: `lockedParentTenantId`, `lockedParentLegalEntityId`, `lockedParentVersion`）に対し、承認済親スコープ `(:targetTenantId, :targetLegalEntityId)` に照らして 3 分類を実施する：
+### 4.2 親インボイスのバージョン無条件検証・状態判定・3分類
+
+ロック取得直後の `t_digital_invoice`（取得原値: `lockedParentTenantId`, `lockedParentLegalEntityId`, `lockedParentVersion`）に対し、以下の手順で厳格に判定する：
+
+#### (1) 独立判定: 已完成冪等重試（Idempotent Retry of Already Completed Repair）
+本呼び出しが「同一決裁チケットにより既に過去に完了した修復の安全な冪等再実行」であるか否かを独立判定する：
+- **判定条件（以下をすべて満たすこと）**:
+  1. 親インボイスのスコープが既にターゲットと完全一致: `lockedParentTenantId.equals(targetTenantId) && lockedParentLegalEntityId.equals(targetLegalEntityId)`
+  2. 全子イベントのスコープが既にターゲットと完全一致
+  3. 親キューのステータスが既に `status = 'RESOLVED'`
+  4. 全子イベントキューのステータスが既に `status = 'RESOLVED'`
+  5. 親キューの `resolution_note` に、今回の承認チケット番号（`approval.requestNo`）が明記されていること（同一決裁による結案証跡の合致）
+  6. 親インボイスの DB 実バージョンが、承認申請版より厳密に 1 だけ大きいこと: `lockedParentVersion == approval.targetVersion + 1`（前回の本修復実行によってバージョンが 1 上がった状態）
+- **処置**:
+  - 本条件を満たす場合、`ALREADY_COMPLETED_IDEMPOTENT_RETRY` と認定する。
+  - **DML は一切発行せず（0 発行）**、親・子・キュー・バージョンのいずれも変更しない。
+  - `RepairResult.skippedAlreadyResolved(invoiceId, lockedParentVersion, "本決裁チケットによる修復は既に完了しています")` を返却して正常終了する。
+
+#### (2) 通常実行経路（P-1, P-2, Dry-Run）における無条件バージョン合致検証
+上記 (1) の已完成冪等重試に該当しない場合、親インボイスの 3 分類判定へ進む前に、以下のバージョン合致を**無条件に検証**する：
+
+$$\text{lockedParentVersion} == \text{command.expectedInvoiceVersion} == \text{approval.targetVersion}$$
+
+- **検証ルール**:
+  - `lockedParentVersion != command.expectedInvoiceVersion` または `lockedParentVersion != approval.targetVersion` の場合、いかなる場合も例外なく**直ちに `OptimisticLockingFailureException`（または `StaleVersionException`）を送出して全量ロールバック**する。
+- **保護の対象と意義**:
+  - **P-2（欠落回填）**: 申請後に他処理によってデータが更新された場合の Lost Update を防止。
+  - **P-1（スコープ既一致・初回結案）**:
+    たとえスコープ値がターゲットと一致している場合であっても、DB 実バージョンが申請版や期待版と異なる場合（何者かによってインボイスが更新されている場合）は**陳旧バージョンとして確実に拒絶**する（P-1 陳旧バージョン負例の担保）。
+  - **Dry-Run**: ドライラン時も同一の無条件バージョン検査を通過させることで、実版不一致時の擬似成功報告を物理的に排除。
+
+#### (3) 親インボイスの 3 分類（Parent Invoice 3-Way Classification）
+上記 (2) のバージョン合致をパスしたレコードに対し、承認済親スコープ `(:targetTenantId, :targetLegalEntityId)` に照らして 3 分類を実施する：
 
 1. **分類 P-1（完全一致・検証済 / Fully Consistent）**:
    - 条件: `lockedParentTenantId == targetTenantId && lockedParentLegalEntityId == targetLegalEntityId`
@@ -246,7 +315,7 @@ UPDATE t_digital_invoice_event
 UPDATE t_nf09_scope_repair_queue
    SET status = 'RESOLVED',
        resolved_at = NOW(),
-       resolved_by = :approverUserId,
+       resolved_by = :executorUserId,
        resolution_note = :resolutionNote,
        version = version + 1
  WHERE id = :parentQueueId
@@ -254,6 +323,8 @@ UPDATE t_nf09_scope_repair_queue
    AND version = :expectedParentQueueVersion;
 ```
 - **検証**: 更新行数 == 1。
+- `resolved_by` には認証コンテキストから取得した実行操作者（`executorUserId`）を格納。
+- `resolution_note` には決裁チケット番号、現在輪次、および承認責任者 ID 群を記録。
 
 #### (4) 子イベントキュー全行の version CAS 結案（PENDING の場合）
 各子イベントキュー行に対し：
@@ -261,7 +332,7 @@ UPDATE t_nf09_scope_repair_queue
 UPDATE t_nf09_scope_repair_queue
    SET status = 'RESOLVED',
        resolved_at = NOW(),
-       resolved_by = :approverUserId,
+       resolved_by = :executorUserId,
        resolution_note = :resolutionNote,
        version = version + 1
  WHERE id = :eventQueueId
@@ -282,11 +353,11 @@ UPDATE t_nf09_scope_repair_queue
 | 業務行スコープ状態 | キュー状態 (`t_nf09_scope_repair_queue`) | エグゼキュータの確定動作 | 整合性保護理由 |
 |---|---|---|---|
 | **MISSING_SCOPE** (欠落あり) | **NO_QUEUE** (キュー不在) | **即時 REJECT (`IllegalStateException`)** | V182 初期隔離から漏れた異常孤立行。データ整合性障害として手動調査を強制。 |
-| **MISSING_SCOPE** (欠落あり) | **PENDING** | **CAS UPDATE 実行** | 正当な修復対象。前提条件（承認・分類）成立後に親・子・キューを更新。 |
+| **MISSING_SCOPE** (欠落あり) | **PENDING** | **CAS UPDATE 実行** | 正当な修復対象。前提条件（承認・バージョン・分類）成立後に親・子・キューを更新。 |
 | **MISSING_SCOPE** (欠落あり) | **RESOLVED** | **即時 REJECT (`IllegalStateException`)** | キューは解決済みなのに実データが未解決という矛盾。障害として即時中断。 |
 | **CONSISTENT_SCOPE** (完全一致) | **NO_QUEUE** (キュー不在) | **LEGAL SKIP (正当スキップ)** | 健全レコード。元々修復不要でありキューが存在しないことが正常。DML なし。 |
-| **CONSISTENT_SCOPE** (完全一致) | **PENDING** | **キューのみ CAS 結案 (`[IDEMPOTENT_CLOSE]`)** | データは既に整合。親/子 DML をスキップし、キューのみ PENDING $\to$ RESOLVED へ進める。 |
-| **CONSISTENT_SCOPE** (完全一致) | **RESOLVED** | **結案内容検証後スキップ** | 解決済み内容がターゲットと一致していれば `SKIPPED_ALREADY_RESOLVED`。相違時は REJECT。 |
+| **CONSISTENT_SCOPE** (完全一致) | **PENDING** | **キューのみ CAS 結案 (`[IDEMPOTENT_CLOSE]`)** | バージョン合致前提。親/子 DML をスキップし、キューのみ PENDING $\to$ RESOLVED へ進める。※版不一致時は即 REJECT。 |
+| **CONSISTENT_SCOPE** (完全一致) | **RESOLVED** | **已完成冪等重試または REJECT** | 同一チケット・版 `ver == targetVersion + 1` の場合は合法スキップ。それ以外（不整合・別チケット）は REJECT。 |
 | **CONFLICT_SCOPE** (非空衝突) | 任意 (NO_QUEUE / PENDING / RESOLVED) | **即時 REJECT (`ConflictException`)** | 非 NULL スコープの再帰属は本境界で禁止。Fail-Stop し全量ロールバック。 |
 | 任意 | **UNKNOWN_STATUS** (PENDING/RESOLVED 以外) | **即時 REJECT (`IllegalStateException`)** | 不正なキュー状態。予期せぬデータ破壊を防ぐため即時停止。 |
 
@@ -297,14 +368,14 @@ UPDATE t_nf09_scope_repair_queue
 2. **バインディング誤り（Mismatched Binding）**:
    - キューの `entity_type` と `entity_id` が対象テーブルのレコードと結合できない場合、直ちに `IllegalStateException` で拒絶。
 3. **過期バージョン（Stale Version）**:
-   - コマンドで指定された `expectedVersion` と DB の現在 `version` が異なる場合、CAS UPDATE の影響行数が 0 件となり `OptimisticLockingFailureException` を送出してロールバック。
+   - コマンドで指定された `expectedVersion` または `approval.targetVersion` と DB の現在 `version` が異なる場合、親行ロック直後の無条件検証または CAS UPDATE で検知され `OptimisticLockingFailureException` を送出してロールバック。
 
 ---
 
 ## 6. トランザクション全量ロールバックと現場取証設計 (Atomic Rollback & Forensic Evidence Design)
 
 ### 6.1 トランザクション全量ロールバック（All-or-Nothing）
-処理途中でいかなる例外（ロック待ちタイムアウト 1205、デッドロック 1213、CAS 更新行数 0 件、分類 P-3/E-3 衝突、外部キー違反 1452）が発生した場合も、Spring の `@Transactional` によりデータベース接続は即座に `ROLLBACK` される。
+処理途中でいかなる例外（ロック待ちタイムアウト 1205、デッドロック 1213、CAS 更新行数 0 件、分類 P-3/E-3 衝突、外部キー違反 1452、無条件バージョン不一致）が発生した場合も、Spring の `@Transactional` によりデータベース接続は即座に `ROLLBACK` される。
 親インボイス、全子イベント、および親・子キューテーブルの状態は、処理開始前の状態へと完全に復元される（部分結案ゼロの物理的保証）。
 
 ### 6.2 既有機能と新規設計機能の厳格な区分
@@ -312,8 +383,9 @@ UPDATE t_nf09_scope_repair_queue
 
 | 区分 | コンポーネント・メソッド | 状態 | 責務・トランザクション境界 |
 |---|---|---|---|
-| **既有** | `SysUserMapper.selectById(...)` | 既存 | 承認者・操作者アカウントの検索 |
+| **既有** | `SysUserMapper.selectById(...)` | 既存 | 承認者・操作者アカウントの検索・実ロール確認 |
 | **既有** | `ApprovalRequestMapper.selectOne(...)` | 既存 | 正本承認レコード（`t_approval_request`）の検索 |
+| **既有** | `ApprovalActionMapper.selectList(...)` | 既存 | 承認アクション（`t_approval_action`）の現在輪次照合 |
 | **既有** | `AuditLogService.record(...)` | 既存 | API 監査ログのベストエフォート記録（例外握りつぶし型） |
 | **新規** | `DigitalInvoiceScopeRepairForensicsService` | **新設** | **主 Tx 外で動作する障害現場証拠保全サービス** |
 | **新規** | `recordFailureEvidence(...)` | **新設** | 0600 JSON 出力および `Propagation.REQUIRES_NEW` 監査記録 |
@@ -327,10 +399,11 @@ UPDATE t_nf09_scope_repair_queue
    - 呼出元に対して成功ステータス（`200 OK` 等）を偽装して返却することは厳格に禁止する。
 
 ### 6.4 実行主体・承認責任者・承認単据の明確な分離記録
-現場証跡には、以下の 3 つの異なる主体を混同せずに明確に記録する：
-- `executorUserId`: 実際に CLI や API を操作して修復コマンドを発行した操作者（`sys_user.id`）。
-- `approverUserId`: 決裁申請を承認した責任者（`sys_user.id`）。
+現場証跡には、以下の主体を混同せずに明確に分離して記録する：
+- `executorUserId`: 認証コンテキストから取得された実際のコマンド実行操作者（`sys_user.id`）。
+- `approverUserIds`: 決裁申請を現輪次で正式承認した責任者一覧（`List<Long>`、例: `[42, 43]`）。
 - `approvalTicketId`: 承認の根拠となった正本決裁番号（`t_approval_request.request_no`）。
+- `approvalRoundNo`: 承認が成立した現在有効輪次番号（`t_approval_request.round_no`）。
 
 ### 6.5 現場証跡ファイル仕様・ファイル権限・機微情報脱敏
 1. **出力ファイル仕様**:
@@ -340,11 +413,12 @@ UPDATE t_nf09_scope_repair_queue
    ```json
    {
      "evidenceId": "550e8400-e29b-41d4-a716-446655440000",
-     "timestamp": "2026-10-26T17:30:00Z",
+     "timestamp": "2026-10-28T16:30:00Z",
      "invoiceId": 10089,
      "executorUserId": 1,
-     "approverUserId": 42,
+     "approverUserIds": [42, 43],
      "approvalTicketId": "APPR-20261026-INV-0089",
+     "approvalRoundNo": 1,
      "commandExpectedVersion": 0,
      "dbCurrentVersion": 0,
      "lockedParentScope": { "tenantId": null, "legalEntityId": null },
@@ -368,16 +442,16 @@ UPDATE t_nf09_scope_repair_queue
 
 ## 7. 検証テストマトリクス・MySQL 割当・AI-1 引渡規約 (Test Matrix, MySQL Shard Allocation & AI-1 Queue)
 
-### 7.1 包括的テストマトリクス（全 20 シナリオ）
+### 7.1 包括的テストマトリクス（全 24 シナリオ）
 
 | テスト ID | シナリオ概要 | 入力・対象データ条件 | 期待結果・検証アサーション | 実行環境・担当区分 |
 |---|---|---|---|---|
-| **TC-REP-BND-01** | 正常系・完全回填 | 親 NULL (ver=0) + 子 2 件 NULL + キュー 3 件 PENDING | 親・子ともに回填完了、親 ver=1、全キュー RESOLVED、影響行数合致 | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-01** | 正常系・完全回填 | 親 NULL (ver=0) + 子 2 件 NULL + キュー 3 件 PENDING | 親・子ともに回填完了、親 ver=1、全キュー RESOLVED、`resolved_by = executor` | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-02** | 正常系・親 legal_entity 単独欠落回填 | 親: `tenant-1`, `null`。子: `tenant-1`, `null` | 分類 P-2 / E-2。`legal_entity=100` のみ回填、親 ver=1、全キュー RESOLVED | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-03** | 正常系・親 tenant_id 単独欠落回填 | 親: `null`, `100`。子: `null`, `100` | 分類 P-2 / E-2。`tenant-1` のみ回填、親 ver=1、全キュー RESOLVED | Fast H2 & MySQL (両方) |
-| **TC-REP-BND-04** | 正常系・親既一致かつ子回填要 | 親: `tenant-1`, `100`。子 1: 一致。子 2: NULL | 分類 P-1（親 UPDATE なし、ver=0 維持）。子 2 のみ回填、キュー適切結案 | Fast H2 & MySQL (両方) |
-| **TC-REP-BND-05** | 正常系・重複実行の冪等スキップ | TC-REP-BND-01 完了済みインボイスに同一スコープ再実行 | `SKIPPED_ALREADY_RESOLVED` 返却。DML 発行ゼロ、バージョン不変 | Fast H2 & MySQL (両方) |
-| **TC-REP-BND-06** | 正常系・無需修復行のキュー単独結案 | 親・子ともに既一致だがキューが PENDING 残存 | 親・子 DML ゼロ件。キューのみ CAS で結案（`[IDEMPOTENT_CLOSE]`） | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-04** | 正常系・親既一致かつ子回填要 | 親: `tenant-1`, `100` (ver=0)。子 1: 一致。子 2: NULL | 分類 P-1（親 UPDATE なし、ver=0 維持）。子 2 のみ回填、キュー適切結案 | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-05** | 正常系・已完成冪等重試の独立認定 | TC-REP-BND-01 完了済、同一 ticket、親 ver=1 (=targetVersion+1) | `ALREADY_COMPLETED_IDEMPOTENT_RETRY` 認定。DML ゼロ件、`SKIPPED_ALREADY_RESOLVED` 返却 | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-06** | 正常系・無需修復行のキュー単独結案 | 親・子既一致 (ver=0) だがキュー PENDING | バージョン合致。親・子 DML ゼロ件、キューのみ CAS 結案 (`[IDEMPOTENT_CLOSE]`) | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-07** | 正常系・ドライラン不変性検証 | `dryRun = true` で実行 | トランザクション内ロールバック実行。DB 変更ゼロ件、計画差分返却 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-08** | 異常系・親インボイス非空衝突拒絶 | 親 `tenant_id = 'tenant-2'`（ターゲットと相違） | 分類 P-3 検知。即時 Fail-Stop、Tx ロールバック、キュー PENDING 維持 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-09** | 異常系・子イベント非空衝突拒絶 | 親 NULL。子 1 は NULL。子 2 は `tenant-2` | 分類 E-3 検知。即時 Fail-Stop、Tx ロールバック、現場証拠出力 | Fast H2 & MySQL (両方) |
@@ -385,18 +459,22 @@ UPDATE t_nf09_scope_repair_queue
 | **TC-REP-BND-11** | 異常系・承認スコープ相違拒絶 | チケットの承認先が `(tenant-9, entity-900)` | `SecurityException` 送出。ターゲット相違を検知して即時拒絶 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-12** | 異常系・期限切れ承認拒絶 | チケットの `finalized_at` が 8 日前（7 日超過） | `ApprovalExpiredException` 送出。有効期限切れを検知して拒絶 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-13** | 異常系・跨発注 / 異インボイス重放拒絶 | 別インボイス番号 `target_id = 9999` の承認チケットを使用 | `target_id` 不一致を検知して即時拒絶 | Fast H2 & MySQL (両方) |
-| **TC-REP-BND-14** | 異常系・データ変更後重放拒絶 | 申請後に対象インボイスの `version` が更新された | `target_version` 不一致を検知して即時拒絶 | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-14** | 异常系・データ変更後重放拒絶 | 申請後に対象インボイスの `version` が更新された | `target_version` 不一致を検知して即時拒絶 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-15** | 異常系・キュー欠落（野良 NULL 孤立行）拒絶 | 親スコープ NULL であるにもかかわらずキュー不在 | `MISSING_SCOPE_NO_QUEUE` を検知、`IllegalStateException` で停止 | Fast H2 & MySQL (両方) |
-| **TC-REP-BND-16** | 異常系・親インボイス CAS バージョン競合 | `expectedInvoiceVersion = 0` に対し実値 `version = 1` | 更新行数 0 件、`OptimisticLockingFailureException`、全量ロールバック | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-16** | 異常系・親インボイス CAS バージョン競合 | `expectedInvoiceVersion = 0` に対し実値 `version = 1` | 無条件バージョン検証失敗。`OptimisticLockingFailureException`、全量ロールバック | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-17** | 異常系・MySQL 外部キー RESTRICT 拒絶 | 子イベントを親と異なるスコープで更新試行 | MySQL エラー 1452 発生。即時ロールバック、現場証跡保全 | **Real MySQL 必須（Docker / AI-1 排隊）** |
 | **TC-REP-BND-18** | 異常系・行ロック競合タイムアウト | 別接続が親インボイスをロック保持 | MySQL 1205 タイムアウト検知。即時ロールバック、現場証跡保全 | **Real MySQL 必須（Docker / AI-1 排隊）** |
 | **TC-REP-BND-19** | 異常系・整組不可分ロールバック検証 | 子イベントキュー結案時のみ意図的例外発生 | 親・全子・全キューの全更新が取り消され、完全ロールバック確認 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-20** | 異常系・取証書き込み失敗時の原例外保全 | 取証ファイル書き込み時に意図的に IOException 発生 | 元の業務例外を root cause、取証失敗を suppressed で送出 | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-21** | 異常系・P-1 スコープ既一致時の陳旧バージョン拒絶 | 親スコープ既一致だが DB 実バージョン `version = 2` (expected=0) | 親行ロック直後の無条件バージョン検査で即時拒絶。P-1 スキップ不可 | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-22** | 異常系・旧輪次承認混用拒絶 | 申請は round_no=2 だが、t_approval_action に round_no=1 の APPROVE 混在 | 現在輪次不一致を検知。`ApprovalInvalidException` で即時拒絶 | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-23** | 異常系・呼出元自称ロール偽造拒絶 | 呼出元が承認者役職を自称するが、sys_user.role 実値が資格不足 | `sys_user.role` の実体不一致を検知。`SecurityException` で即時拒絶 | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-24** | 異常系・実行操作者冒用拒絶 | 認証コンテキストと異なるユーザー ID を実行者として詐称試行 | 認証コンテキストからの直接取得により冒用を無効化／未認証時即時拒絶 | Fast H2 & MySQL (両方) |
 
 ### 7.2 テストクラス設計と環境責務
 - **Fast Feedback 単体テスト**:
   - クラス名: `DigitalInvoiceScopeRepairServiceTest`
-  - 対象: Spring H2 テスト環境において、TC-REP-BND-01〜04, 07〜16, 19〜20 を高速回帰テストとして実行。
+  - 対象: Spring H2 テスト環境において、TC-REP-BND-01〜04, 07〜16, 19〜24 を高速回帰テストとして実行。
 - **Real MySQL 統合テスト**:
   - クラス名: `DigitalInvoiceScopeRepairMySqlTest`
   - 配置先: `src/test/java/com/ses/repair/DigitalInvoiceScopeRepairMySqlTest.java`
@@ -432,7 +510,7 @@ UPDATE t_nf09_scope_repair_queue
 
 ```mermaid
 flowchart LR
-    G1[Gate 1: 独立 CODE Review PASS<br/>Astra によるコード品質審査] --> G2[Gate 2: Staging 演練検証 PASS<br/>実規模合成データ・20テスト完勝]
+    G1[Gate 1: 独立 CODE Review PASS<br/>Astra によるコード品質審査] --> G2[Gate 2: Staging 演練検証 PASS<br/>実規模合成データ・24テスト完勝]
     G2 --> G3[Gate 3: 本番人工決裁 Sign-Off<br/>財務統括 + 運用統括 + リードDBA]
     G3 --> ProdEnable[本番実行許可<br/>ses.repair.invoice.enabled=true]
 ```
@@ -440,7 +518,7 @@ flowchart LR
 1. **Gate 1: 独立 CODE Review PASS（Astra）**:
    - 本計画に基づく Java 実装・Mapper・CLI・テストコードが、Astra による独立コードレビューにおいて `CODE REVIEW PASS` を獲得すること。
 2. **Gate 2: Staging 演練検証 PASS**:
-   - Staging 環境において、合成データを用いた TC-REP-BND-01〜20 がすべて PASS し、Postflight SQL-06（野良 NULL ゼロ件）が実証されること。
+   - Staging 環境において、合成データを用いた TC-REP-BND-01〜24 がすべて PASS し、Postflight SQL-06（野良 NULL ゼロ件）が実証されること。
 3. **Gate 3: 本番人工決裁サインオフ（実決裁完了）**:
    - 財務統括責任者（インボイス帰属の業務承認）
    - 運用統括責任者（保守ウィンドウ確保およびトラフィック遮断承認）
@@ -453,5 +531,5 @@ flowchart LR
 
 | レビュー役職 | 氏名 | 承認ステータス | 承認日 | 承認コメント / 判定 |
 |---|---|---|---|---|
-| **独立 Reviewer** | Astra | **PLAN REVIEW PENDING** | - | 境界 A 最小実装計画書の独立審査待ち |
-| **技術仕様担当 / 執筆者** | AI-3 (gpt-6-luna) | **SUBMITTED** | 2026-10-26 | 境界 A 最小実装計画書（厳格承認・親3分類・状態行列・取証設計反映版）を策定・提出 |
+| **独立 Reviewer** | Astra | **PLAN REVIEW PENDING** | - | 境界 A 最小実装計画書の独立審査待ち（Astra P1 修正反映版） |
+| **技術仕様担当 / 執筆者** | AI-3 (gpt-6-luna) | **SUBMITTED** | 2026-10-28 | Astra P1 指摘事項（親バージョン無条件検証・已完成冪等重試独立判定・現在輪次拘束・実ロール検証・操作者認証取得）を反映し再提出 |
