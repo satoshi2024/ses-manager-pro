@@ -124,6 +124,22 @@ function Assert-CleanWorkingTree {
     }
 }
 
+function Get-RedactedText {
+    param([string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
+    $redacted = $Text
+    $patterns = @(
+        '(?i)(password|passwd|secret|token|apikey|credential|key)[=\s:]+[^\s;]+',
+        'src-password',
+        'tgt-password',
+        'repo-password'
+    )
+    foreach ($p in $patterns) {
+        $redacted = [regex]::Replace($redacted, $p, '$1=[REDACTED]')
+    }
+    return $redacted
+}
+
 function Assert-ValidMavenArgs {
     param([string[]]$ArgsList)
     if ($null -eq $ArgsList -or $ArgsList.Count -eq 0) {
@@ -164,7 +180,61 @@ function Assert-ValidMavenArgs {
             }
         }
         if (-not $isAllowed) {
-            throw "FATAL: 未許可または安全性が確認できないMaven引数は禁止されています: '$arg'."
+            $redactedArg = Get-RedactedText -Text $arg
+            throw "FATAL: 未許可または安全性が確認できないMaven引数は禁止されています: '$redactedArg'."
+        }
+    }
+}
+
+function Assert-ControlledMavenJvmEnvironment {
+    param([bool]$IsTargetedRun = $false)
+
+    if ($IsTargetedRun) {
+        return
+    }
+
+    # 1. MAVEN_ARGS 環境変数の検証 (FULL_GATE でのパラメータ迂回禁止)
+    if (Test-Path env:MAVEN_ARGS) {
+        $rawMavenArgs = $env:MAVEN_ARGS
+        if (-not [string]::IsNullOrWhiteSpace($rawMavenArgs)) {
+            $parsedArgs = [regex]::Matches($rawMavenArgs, '(?:"([^"]*)"|''([^'']*)''|(\S+))') | ForEach-Object {
+                if ($_.Groups[1].Success) { $_.Groups[1].Value }
+                elseif ($_.Groups[2].Success) { $_.Groups[2].Value }
+                else { $_.Groups[3].Value }
+            }
+            try {
+                Assert-ValidMavenArgs -ArgsList $parsedArgs
+            } catch {
+                $redacted = Get-RedactedText -Text $rawMavenArgs
+                throw "FATAL: MAVEN_ARGS に未許可または門禁を迂回する引数が検出されました: '$redacted'."
+            }
+        }
+    }
+
+    # 2. JVMオプション (MAVEN_OPTS, JAVA_TOOL_OPTIONS, _JAVA_OPTIONS, MAVEN_CONFIG) の検証.
+    $jvmVars = @('MAVEN_OPTS', 'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'MAVEN_CONFIG')
+    $forbiddenJvmPatterns = @(
+        '-Dtest=',
+        '-DskipTests',
+        '-Dmaven\.test\.skip',
+        '-Dgroups=',
+        '-DexcludedGroups=',
+        '-Dsurefire\.',
+        '-P[a-zA-Z0-9_\-]+',
+        '-f\s+',
+        '--file'
+    )
+    foreach ($varName in $jvmVars) {
+        if (Test-Path "env:$varName") {
+            $val = (Get-Item "env:$varName").Value
+            if (-not [string]::IsNullOrWhiteSpace($val)) {
+                foreach ($pat in $forbiddenJvmPatterns) {
+                    if ($val -match $pat) {
+                        $redactedVal = Get-RedactedText -Text $val
+                        throw "FATAL: $varName に門禁制限を迂回する未許可のパラメータが検出されました: '$redactedVal'."
+                    }
+                }
+            }
         }
     }
 }
@@ -323,22 +393,72 @@ function New-ControlledPitrWorkDir {
     # 作成直後の再検証 (ジャンクションでないこと、空であること).
     $dirItem = Get-Item -LiteralPath $workFull -Force -ErrorAction Stop
     if ($dirItem.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) {
-        Remove-Item -LiteralPath $workFull -Force -ErrorAction SilentlyContinue
-        throw "FATAL: 作成されたPITRディレクトリがReparsePoint/Junctionです: '$workFull'."
+        throw "FATAL: 作成されたPITR作業ディレクトリがReparsePoint/Junctionです（現場を保全し削除しません）: '$workFull'."
     }
     $contents = @(Get-ChildItem -LiteralPath $workFull -Force -ErrorAction Stop)
     if ($contents.Count -gt 0) {
-        Remove-Item -LiteralPath $workFull -Recurse -Force -ErrorAction SilentlyContinue
-        throw "FATAL: 作成されたPITRディレクトリが空ではありません: '$workFull'."
+        throw "FATAL: 作成されたPITR作業ディレクトリが空ではありません（現場を保全し削除しません）: '$workFull' (既存項目数: $($contents.Count))."
     }
 
+    # 独占所有・帰属ファイルの作成.
+    $ownerFile = Join-Path $workFull '.ses-pitr-owner.json'
+    $runToken = [System.Guid]::NewGuid().ToString('N')
+    $ownerObj = [ordered]@{
+        pid       = $PID
+        createdAt = (Get-Date).ToString('o')
+        runToken  = $runToken
+        repoRoot  = $RepoRoot
+    }
+    Write-JsonStateFile -FilePath $ownerFile -Data $ownerObj
+
     return $workFull
+}
+
+function Assert-PitrWorkDirAttribution {
+    param(
+        [string]$PitrWorkDir,
+        [string]$RepoRoot,
+        [string]$ExpectedRunToken = ''
+    )
+    if ([string]::IsNullOrWhiteSpace($PitrWorkDir) -or -not (Test-Path -LiteralPath $PitrWorkDir)) {
+        throw "FATAL: PITR作業ディレクトリが存在しません（帰属確認不能）: '$PitrWorkDir'."
+    }
+    $dirItem = Get-Item -LiteralPath $PitrWorkDir -Force -ErrorAction Stop
+    if ($dirItem.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) {
+        throw "FATAL: PITR作業ディレクトリがReparsePoint/Junctionに変更されています（現場を保全し削除しません）: '$PitrWorkDir'."
+    }
+    $ownerFile = Join-Path $PitrWorkDir '.ses-pitr-owner.json'
+    if (-not (Test-Path -LiteralPath $ownerFile)) {
+        throw "FATAL: PITR作業ディレクトリの帰属ファイルが存在しません（他プロセスによる衝突または改変の恐れ・現場保全）: '$ownerFile'."
+    }
+    $ownerData = $null
+    try {
+        $ownerData = [System.IO.File]::ReadAllText($ownerFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    } catch {
+        throw "FATAL: PITR作業ディレクトリの帰属ファイル解析に失敗しました（現場保全）: $($_.Exception.Message)."
+    }
+    if ($null -eq $ownerData -or $null -eq $ownerData.pid) {
+        throw "FATAL: PITR作業ディレクトリの帰属ファイルが不正です（現場保全）: '$ownerFile'."
+    }
+    if ($ownerData.pid -ne $PID) {
+        throw "FATAL: PITR作業ディレクトリの所有者PIDが一致しません（他プロセス占有・現場保全）: 期待=$PID, 実際=$($ownerData.pid)."
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedRunToken) -and $ownerData.runToken -ne $ExpectedRunToken) {
+        throw "FATAL: PITR作業ディレクトリのrunTokenが一致しません（現場保全）: 期待=$ExpectedRunToken, 実際=$($ownerData.runToken)."
+    }
+    if (-not [string]::IsNullOrWhiteSpace($RepoRoot) -and -not [string]::IsNullOrWhiteSpace($ownerData.repoRoot)) {
+        $ownerRepoFull = [System.IO.Path]::GetFullPath($ownerData.repoRoot)
+        $expectedRepoFull = [System.IO.Path]::GetFullPath($RepoRoot)
+        if (-not $ownerRepoFull.Equals($expectedRepoFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "FATAL: PITR作業ディレクトリのリポジトリ帰属が一致しません（現場保全）: 期待='$expectedRepoFull', 実際='$ownerRepoFull'."
+        }
+    }
 }
 
 function Write-JsonStateFile {
     param(
         [string]$FilePath,
-        [hashtable]$Data
+        [System.Collections.IDictionary]$Data
     )
     $parentDir = Split-Path -Parent $FilePath
     if (-not (Test-Path -LiteralPath $parentDir)) {
@@ -691,26 +811,108 @@ function Evaluate-MavenSurefireArtifacts {
     }
 }
 
+function Get-ExpectedBackupUnitGroups {
+    param([string]$RepoRoot)
+    $testsDir = Join-Path $RepoRoot 'ops\backup\tests'
+    if (Test-Path -LiteralPath $testsDir) {
+        $files = @(Get-ChildItem -LiteralPath $testsDir -Filter '*-test.sh' -File -ErrorAction SilentlyContinue | Sort-Object Name)
+        if ($files.Count -gt 0) {
+            return @($files | ForEach-Object { $_.Name })
+        }
+    }
+    return @(
+        'binlog-checkpoint-test.sh',
+        'cutover-test.sh',
+        'drill-test.sh',
+        'full-backup-test.sh',
+        'harness-selftest-test.sh',
+        'health-test.sh',
+        'preflight-test.sh',
+        'quiesce-lock-test.sh',
+        'restore-flow-test.sh',
+        'restore-plan-test.sh',
+        'restore-validation-test.sh',
+        'retention-test.sh',
+        'target-guard-test.sh'
+    )
+}
+
 function Evaluate-BashUnitOutput {
     param(
         [int]$ProcessExitCode,
-        [string]$LogPath
+        [string]$LogPath,
+        [string[]]$ExpectedGroups = @(),
+        [string]$ProcessError = ''
     )
     $reasons = @()
+    if (-not [string]::IsNullOrWhiteSpace($ProcessError)) {
+        $reasons += "PROCESS_EXECUTION_EXCEPTION: $ProcessError."
+    }
     if ($ProcessExitCode -ne 0) {
         $reasons += "BASH_UNIT_EXIT_NON_ZERO (exit=$ProcessExitCode)."
     }
     if (-not (Test-Path -LiteralPath $LogPath)) {
         $reasons += "MISSING_BASH_UNIT_LOG ($LogPath)."
-    } else {
-        $logContent = [System.IO.File]::ReadAllText($LogPath, [System.Text.Encoding]::UTF8)
-        if ($logContent -match 'BLOCKED:') {
-            $reasons += "BASH_UNIT_BLOCKED_DETECTED."
-        }
-        if ($logContent -match 'FAIL:') {
-            $reasons += "BASH_UNIT_FAIL_DETECTED."
+        return @{
+            Pass    = ($reasons.Count -eq 0)
+            Reasons = $reasons
         }
     }
+
+    $logContent = [System.IO.File]::ReadAllText($LogPath, [System.Text.Encoding]::UTF8)
+    if ([string]::IsNullOrWhiteSpace($logContent)) {
+        $reasons += "EMPTY_BASH_UNIT_LOG ($LogPath)."
+        return @{
+            Pass    = ($reasons.Count -eq 0)
+            Reasons = $reasons
+        }
+    }
+
+    if ($logContent -match 'BLOCKED:') {
+        $reasons += "BASH_UNIT_BLOCKED_DETECTED."
+    }
+    if ($logContent -match 'FAIL:' -or $logContent -match 'FAILED:') {
+        $reasons += "BASH_UNIT_FAIL_DETECTED."
+    }
+
+    if ($ExpectedGroups.Count -gt 0) {
+        foreach ($grp in $ExpectedGroups) {
+            $patternHeader = "==\s*" + [regex]::Escape($grp) + "\s*=="
+            if ($logContent -notmatch $patternHeader) {
+                $reasons += "MISSING_UNIT_GROUP ($grp)."
+                continue
+            }
+            $idx = $logContent.IndexOf("== $grp ==")
+            if ($idx -lt 0) {
+                $mHeader = [regex]::Match($logContent, $patternHeader)
+                if ($mHeader.Success) {
+                    $idx = $mHeader.Index
+                }
+            }
+            $subText = if ($idx -ge 0) { $logContent.Substring($idx) } else { "" }
+            $nextHeaderMatch = [regex]::Match($subText.Substring(1), "==\s*[\w\.\-]+\.sh\s*==")
+            $grpText = if ($nextHeaderMatch.Success) {
+                $subText.Substring(0, $nextHeaderMatch.Index + 1)
+            } else {
+                $subText
+            }
+
+            $mSummary = [regex]::Match($grpText, "tests=(\d+)\s+failures=(\d+)")
+            if ($mSummary.Success) {
+                $tCount = [int]$mSummary.Groups[1].Value
+                $fCount = [int]$mSummary.Groups[2].Value
+                if ($tCount -le 0) {
+                    $reasons += "ZERO_TESTS_IN_UNIT_GROUP (${grp}: tests=$tCount)."
+                }
+                if ($fCount -gt 0) {
+                    $reasons += "FAILURES_IN_UNIT_GROUP (${grp}: failures=$fCount)."
+                }
+            } else {
+                $reasons += "MISSING_SUMMARY_IN_UNIT_GROUP ($grp)."
+            }
+        }
+    }
+
     return @{
         Pass    = ($reasons.Count -eq 0)
         Reasons = $reasons

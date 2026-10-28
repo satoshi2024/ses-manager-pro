@@ -115,6 +115,10 @@ $fixtureOps = Join-Path $fixtureRepo 'ops\backup\tests'
 [System.IO.Directory]::CreateDirectory($fixtureOps) | Out-Null
 [System.IO.File]::WriteAllText((Join-Path $fixtureOps 'run-unit-tests.sh'), "#!/bin/bash`nexit 0`n", $script:Utf8NoBom)
 [System.IO.File]::WriteAllText((Join-Path $fixtureOps 'run-integration.sh'), "#!/bin/bash`nexit 0`n", $script:Utf8NoBom)
+$realOps = Join-Path $realRepoRoot 'ops\backup\tests'
+if (Test-Path -LiteralPath $realOps) {
+    Get-ChildItem -LiteralPath $realOps -Filter '*-test.sh' | Copy-Item -Destination $fixtureOps -Force
+}
 
 $fixtureSrc = Join-Path $fixtureRepo 'src\main\java\com\ses'
 [System.IO.Directory]::CreateDirectory($fixtureSrc) | Out-Null
@@ -312,6 +316,48 @@ if ($configMode -eq 'fail-exit') {
 
 $scriptArg = if ($ArgsList.Count -gt 0) { $ArgsList[0] } else { '' }
 if ($scriptArg -like '*run-unit-tests.sh') {
+    if ($configMode -eq 'unit-throw') {
+        Write-Error "CRASH: Mock bash unit invocation exception."
+        throw "CRASH: Mock bash unit invocation exception."
+    }
+    if ($configMode -eq 'unit-empty-log') {
+        exit 0
+    }
+    $allGroups = @(
+        'binlog-checkpoint-test.sh',
+        'cutover-test.sh',
+        'drill-test.sh',
+        'full-backup-test.sh',
+        'harness-selftest-test.sh',
+        'health-test.sh',
+        'preflight-test.sh',
+        'quiesce-lock-test.sh',
+        'restore-flow-test.sh',
+        'restore-plan-test.sh',
+        'restore-validation-test.sh',
+        'retention-test.sh',
+        'target-guard-test.sh'
+    )
+    if ($configMode -eq 'unit-filtered') {
+        foreach ($g in $allGroups) {
+            Write-Host "== $g =="
+            Write-Host "tests=0 failures=0"
+        }
+        exit 0
+    }
+    if ($configMode -eq 'unit-missing-group') {
+        foreach ($g in ($allGroups | Select-Object -First 12)) {
+            Write-Host "== $g =="
+            Write-Host "tests=5 failures=0"
+        }
+        exit 0
+    }
+
+    # 通常 pass モード: 全13グループで tests > 0, failures = 0
+    foreach ($g in $allGroups) {
+        Write-Host "== $g =="
+        Write-Host "tests=5 failures=0"
+    }
     Write-Host 'backup unit suite: SUCCESS.'
     exit 0
 }
@@ -416,6 +462,66 @@ try {
         -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$fixtureRunnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev01Safe`"", "-MavenArgs", $safeArg) `
         -NoNewWindow -Wait -PassThru
     Assert-Test ($proc01Safe.ExitCode -eq 0) "01.安全引数許可 ($safeArg) - 終了コード." "安全パラメータが正常に受容されること."
+
+    # --------------------------------------------------------------------------
+    # 1B. MAVEN_ARGS / JVM 環境変数注入拒絶 & シークレット秘匿検証 (Requirement 1)
+    # --------------------------------------------------------------------------
+    Write-Host "Test 01B: MAVEN_ARGS / JVM 環境変数注入拒絶 & シークレット秘匿検証..."
+    $envInjectionCases = @(
+        @{ Var = 'MAVEN_ARGS'; Val = '-Dtest=SampleTest' },
+        @{ Var = 'MAVEN_ARGS'; Val = '-DskipTests' },
+        @{ Var = 'MAVEN_ARGS'; Val = '-Pmysql-tests' },
+        @{ Var = 'MAVEN_OPTS'; Val = '-Dtest=SampleTest' },
+        @{ Var = 'JAVA_TOOL_OPTIONS'; Val = '-DskipTests' },
+        @{ Var = 'MAVEN_CONFIG'; Val = '--file=other.xml' }
+    )
+    foreach ($cCase in $envInjectionCases) {
+        $vName = $cCase.Var
+        $vVal = $cCase.Val
+        [System.Environment]::SetEnvironmentVariable($vName, $vVal)
+        try {
+            $evEnv = Join-Path $testBaseDir ("ev-env-" + [System.Guid]::NewGuid().ToString('N').Substring(0, 6))
+            $procEnv = Start-Process -FilePath $currentPsExe `
+                -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$fixtureRunnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$evEnv`"") `
+                -NoNewWindow -Wait -PassThru
+            Assert-Test ($procEnv.ExitCode -eq 1) "01B.環境注入拒絶 ($vName=$vVal) - 終了コード." "未許可の環境変数パラメータが ExitCode 1 で拒絶されること."
+            Assert-Test (-not (Test-Path -LiteralPath $evEnv)) "01B.環境注入拒絶 - 証跡作成前中止." "EvidenceDir が作成される前に中止されること."
+        } finally {
+            [System.Environment]::SetEnvironmentVariable($vName, $null)
+        }
+    }
+
+    # シークレット含有環境注入時の秘匿検証 (エラーログに生シークレットが出力されないこと).
+    $secretTokenVal = "SuperSecretPasswordToken98765"
+    [System.Environment]::SetEnvironmentVariable('MAVEN_ARGS', "-Dtest=SampleTest -DsecretToken=$secretTokenVal")
+    try {
+        $evSec = Join-Path $testBaseDir 'ev-env-secret'
+        $errOutLog = Join-Path $testBaseDir 'env-secret-stderr.log'
+        $procSec = Start-Process -FilePath $currentPsExe `
+            -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$fixtureRunnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$evSec`"") `
+            -RedirectStandardError $errOutLog -NoNewWindow -Wait -PassThru
+        Assert-Test ($procSec.ExitCode -eq 1) "01B.シークレット含有環境注入 - 終了コード." "シークレット含む不正環境注入が ExitCode 1 で拒絶されること."
+        $errLogText = if (Test-Path -LiteralPath $errOutLog) { [System.IO.File]::ReadAllText($errOutLog, [System.Text.Encoding]::UTF8) } else { "" }
+        Assert-Test (-not $errLogText.Contains($secretTokenVal)) "01B.シークレット非出力検証." "エラー出力にシークレットが生で出力されないこと."
+    } finally {
+        [System.Environment]::SetEnvironmentVariable('MAVEN_ARGS', $null)
+    }
+
+    # FULL_GATE での TEST_FILTER クリア検証.
+    [System.Environment]::SetEnvironmentVariable('TEST_FILTER', 'nonexistent_filter_to_clear')
+    try {
+        $evClearFilter = Join-Path $testBaseDir 'ev-clear-filter'
+        [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'pass')
+        [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'bash-mode.txt'), 'pass')
+        $procClear = Start-Process -FilePath $currentPsExe `
+            -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$fixtureRunnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$evClearFilter`"") `
+            -NoNewWindow -Wait -PassThru
+        Assert-Test ($procClear.ExitCode -eq 0) "01B.FULL_GATE TEST_FILTER クリア - 終了コード." "FULL_GATE で TEST_FILTER がクリアされ全テストが実行されること."
+        $sessClear = [System.IO.File]::ReadAllText((Join-Path $evClearFilter 'session-state.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        Assert-Test ($sessClear.state -eq 'PASS') "01B.FULL_GATE TEST_FILTER クリア - セッションPASS." "セッション状態が PASS であること."
+    } finally {
+        [System.Environment]::SetEnvironmentVariable('TEST_FILTER', $null)
+    }
 
     # --------------------------------------------------------------------------
     # 2. TargetedRun 区分 (非 FULL_GATE 判定) (Group 1)
@@ -662,6 +768,64 @@ try {
     Assert-Test ($proc13.ExitCode -eq 1) "13.不正marker - 終了コード." "ExitCode が 1 であること."
 
     # --------------------------------------------------------------------------
+    # 13B. backup unit 異常系判定検証（空ログ・フィルタ0件・グループ欠損）(Requirement 2)
+    # --------------------------------------------------------------------------
+    Write-Host "Test 13B: backup unit 異常系判定検証（空ログ・フィルタ0件・グループ欠損）..."
+    # (1) 空ログ.
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'pass')
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'bash-mode.txt'), 'unit-empty-log')
+    $ev13B_Empty = Join-Path $testBaseDir 'ev-unit-empty'
+    $proc13B_Empty = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$fixtureRunnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev13B_Empty`"") `
+        -NoNewWindow -Wait -PassThru
+    Assert-Test ($proc13B_Empty.ExitCode -eq 1) "13B.backup unit 空ログ - 終了コード." "空ログ時に ExitCode 1 で拒絶されること."
+    $sess13B_Empty = [System.IO.File]::ReadAllText((Join-Path $ev13B_Empty 'session-state.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    Assert-Test ($sess13B_Empty.state -eq 'FAIL') "13B.backup unit 空ログ - セッションFAIL." "セッション状態が FAIL であること."
+    $unitState13B_Empty = [System.IO.File]::ReadAllText((Join-Path $ev13B_Empty 'backup-unit\state.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    $hasEmptyReason = @($unitState13B_Empty.failureReasons | Where-Object { $_ -like '*EMPTY_BASH_UNIT_LOG*' -or $_ -like '*MISSING_BASH_UNIT_LOG*' }).Count -gt 0
+    Assert-Test $hasEmptyReason "13B.backup unit 空ログ - 理由記録." "failureReasons に EMPTY_BASH_UNIT_LOG または MISSING_BASH_UNIT_LOG が記録されること."
+
+    # (2) フィルタによる0テスト.
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'bash-mode.txt'), 'unit-filtered')
+    $ev13B_Filt = Join-Path $testBaseDir 'ev-unit-filtered'
+    $proc13B_Filt = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$fixtureRunnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev13B_Filt`"") `
+        -NoNewWindow -Wait -PassThru
+    Assert-Test ($proc13B_Filt.ExitCode -eq 1) "13B.backup unit フィルタ0件 - 終了コード." "テスト件数0で ExitCode 1 で拒絶されること."
+    $unitState13B_Filt = [System.IO.File]::ReadAllText((Join-Path $ev13B_Filt 'backup-unit\state.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    $hasZeroReason = @($unitState13B_Filt.failureReasons | Where-Object { $_ -like '*ZERO_TESTS_IN_UNIT_GROUP*' }).Count -gt 0
+    Assert-Test $hasZeroReason "13B.backup unit フィルタ0件 - 理由記録." "failureReasons に ZERO_TESTS_IN_UNIT_GROUP が記録されること."
+
+    # (3) グループ欠損.
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'bash-mode.txt'), 'unit-missing-group')
+    $ev13B_Miss = Join-Path $testBaseDir 'ev-unit-missing'
+    $proc13B_Miss = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$fixtureRunnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev13B_Miss`"") `
+        -NoNewWindow -Wait -PassThru
+    Assert-Test ($proc13B_Miss.ExitCode -eq 1) "13B.backup unit グループ欠損 - 終了コード." "必須グループ欠損時に ExitCode 1 で拒絶されること."
+    $unitState13B_Miss = [System.IO.File]::ReadAllText((Join-Path $ev13B_Miss 'backup-unit\state.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    $hasMissReason = @($unitState13B_Miss.failureReasons | Where-Object { $_ -like '*MISSING_UNIT_GROUP*' }).Count -gt 0
+    Assert-Test $hasMissReason "13B.backup unit グループ欠損 - 理由記録." "failureReasons に MISSING_UNIT_GROUP が記録されること."
+
+    # --------------------------------------------------------------------------
+    # 13C. backup unit プロセス呼び出し例外（真正スロー）の統一収尾検証 (Requirement 3)
+    # --------------------------------------------------------------------------
+    Write-Host "Test 13C: backup unit プロセス呼び出し例外（真正スロー）の統一収尾検証..."
+    [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'bash-mode.txt'), 'unit-throw')
+    $ev13C = Join-Path $testBaseDir 'ev-unit-throw'
+    $proc13C = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$fixtureRunnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev13C`"") `
+        -NoNewWindow -Wait -PassThru
+    Assert-Test ($proc13C.ExitCode -eq 1) "13C.backup unit プロセス例外 - 終了コード." "真正スロー時に ExitCode 1 で終了すること."
+    $sess13C = [System.IO.File]::ReadAllText((Join-Path $ev13C 'session-state.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    Assert-Test ($sess13C.state -eq 'FAIL') "13C.backup unit プロセス例外 - セッションFAIL." "セッション状態が FAIL であること."
+    Assert-Test ($sess13C.completed -eq $true) "13C.backup unit プロセス例外 - セッション完了." "completed が true であること."
+    $unitState13C = [System.IO.File]::ReadAllText((Join-Path $ev13C 'backup-unit\state.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    Assert-Test ($unitState13C.state -eq 'FAIL') "13C.backup unit プロセス例外 - スイートFAIL." "スイート状態が FAIL であること."
+    $hasProcessEx = (@($unitState13C.failureReasons | Where-Object { $_ -like '*PROCESS_EXECUTION_EXCEPTION*' -or $_ -like '*CRASH*' }).Count -gt 0) -or (-not [string]::IsNullOrWhiteSpace($unitState13C.processError))
+    Assert-Test $hasProcessEx "13C.backup unit プロセス例外 - 原例外保全." "failureReasons または processError に原例外が保全されること."
+
+    # --------------------------------------------------------------------------
     # 14. 残留 RUNNING 状態の INCOMPLETE 判定 (Group 4/5)
     # --------------------------------------------------------------------------
     Write-Host "Test 14: 残留 RUNNING 状態の INCOMPLETE 判定検証..."
@@ -790,6 +954,115 @@ try {
         }
     }
     Assert-Test $existingRejected "20.PITR境界 - 既存ディレクトリ拒絶." "既知の既存ディレクトリが拒絶されること."
+
+    # --------------------------------------------------------------------------
+    # 20B. PITR 非空・パス衝突時の現場保全反例 (Requirement 4)
+    # --------------------------------------------------------------------------
+    Write-Host "Test 20B: PITR 非空・パス衝突時の現場保全反例検証..."
+    $victimPitrDir = Join-Path $testBaseDir 'victim-pitr-preexisting'
+    [System.IO.Directory]::CreateDirectory($victimPitrDir) | Out-Null
+    $victimFile = Join-Path $victimPitrDir 'important-external-data.txt'
+    $victimContent = "CRITICAL_EXTERNAL_PROCESS_STATE_DATA_DO_NOT_DELETE"
+    [System.IO.File]::WriteAllText($victimFile, $victimContent, [System.Text.Encoding]::UTF8)
+    $victimHashBefore = Get-Sha256Hex -FilePath $victimFile
+
+    # (1) 関数直接呼出での検証: 既存ディレクトリ指定時に即時例外となり、ディレクトリおよびファイルが一切削除・変更されないこと.
+    $directCollisionRejected = $false
+    try {
+        New-ControlledPitrWorkDir -RepoRoot $fixtureRepo -EvidenceDir $ev04 -CustomPitrWorkDir $victimPitrDir
+    } catch {
+        if ($_.Exception.Message -like "*FATAL:*" -or $_.Exception.Message -like "*既存*") {
+            $directCollisionRejected = $true
+        }
+    }
+    Assert-Test $directCollisionRejected "20B.PITR直接衝突 - 例外発生." "既存ディレクトリ指定時に即座に例外が送出されること."
+    Assert-Test (Test-Path -LiteralPath $victimPitrDir) "20B.PITR直接衝突 - ディレクトリ保全." "衝突ディレクトリが削除されず保全されること."
+    Assert-Test (Test-Path -LiteralPath $victimFile) "20B.PITR直接衝突 - ファイル保全." "衝突ディレクトリ内のファイルが削除されず保全されること."
+    Assert-Test ((Get-Sha256Hex -FilePath $victimFile) -eq $victimHashBefore) "20B.PITR直接衝突 - ハッシュ不変." "衝突ファイルの内容およびハッシュが一切変更されないこと."
+
+    # (2) runner 引数経由での検証: -CustomPitrWorkDir に既存非空ディレクトリを指定した場合の終了コードと現場保全.
+    $ev20B = Join-Path $testBaseDir 'ev-pitr-collision-runner'
+    $proc20B = Start-Process -FilePath $currentPsExe `
+        -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$fixtureRunnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$ev20B`"", "-CustomPitrWorkDir", "`"$victimPitrDir`"") `
+        -NoNewWindow -Wait -PassThru
+    Assert-Test ($proc20B.ExitCode -eq 1) "20B.PITRランナー衝突 - 終了コード." "衝突時にランナーが ExitCode 1 で拒絶すること."
+    Assert-Test (Test-Path -LiteralPath $victimPitrDir) "20B.PITRランナー衝突 - ディレクトリ保全." "ランナー実行後もディレクトリが削除されず保全されること."
+    Assert-Test (Test-Path -LiteralPath $victimFile) "20B.PITRランナー衝突 - ファイル保全." "ランナー実行後もファイルが削除されず保全されること."
+    Assert-Test ((Get-Sha256Hex -FilePath $victimFile) -eq $victimHashBefore) "20B.PITRランナー衝突 - ハッシュ不変." "ランナー実行後もファイル内容・ハッシュが完全に一致すること."
+
+    # --------------------------------------------------------------------------
+    # 20C. PITR 作成後他プロセス占有・帰属不明反例と現場保全 (Requirement 4)
+    # --------------------------------------------------------------------------
+    Write-Host "Test 20C: PITR 作成後他プロセス占有・帰属不明反例と現場保全検証..."
+    # 正常に独占ディレクトリを作成.
+    $alienWorkDir = New-ControlledPitrWorkDir -RepoRoot $fixtureRepo -EvidenceDir $ev04
+    Assert-Test (Test-Path -LiteralPath $alienWorkDir) "20C.独占作成 - ディレクトリ存在." "初回作成時にディレクトリが存在すること."
+    $ownerJsonPath = Join-Path $alienWorkDir '.ses-pitr-owner.json'
+    Assert-Test (Test-Path -LiteralPath $ownerJsonPath) "20C.独占作成 - 帰属ファイル存在." "帰属管理ファイル .ses-pitr-owner.json が生成されていること."
+
+    # 他プロセス占有ファイルの配置 (外部プロセスの作業成果物を模倣).
+    $alienDataFile = Join-Path $alienWorkDir 'alien-process-work.log'
+    $alienContent = "ALIEN_PROCESS_DATA_KEEP_INTACT"
+    [System.IO.File]::WriteAllText($alienDataFile, $alienContent, [System.Text.Encoding]::UTF8)
+    $alienDataHash = Get-Sha256Hex -FilePath $alienDataFile
+
+    # (1) 他プロセスPIDへの改変（PID不一致）の検出と現場保全.
+    $legitOwnerData = [System.IO.File]::ReadAllText($ownerJsonPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    $tamperedPidData = [ordered]@{
+        pid       = 999999
+        createdAt = $legitOwnerData.createdAt
+        runToken  = $legitOwnerData.runToken
+        repoRoot  = $legitOwnerData.repoRoot
+    }
+    Write-JsonStateFile -FilePath $ownerJsonPath -Data $tamperedPidData
+
+    $pidMismatchRejected = $false
+    try {
+        Assert-PitrWorkDirAttribution -PitrWorkDir $alienWorkDir -RepoRoot $fixtureRepo
+    } catch {
+        if ($_.Exception.Message -like "*FATAL:*" -or $_.Exception.Message -like "*PID*") {
+            $pidMismatchRejected = $true
+        }
+    }
+    Assert-Test $pidMismatchRejected "20C.他プロセス占有 - PID不一致拒絶." "PIDが一致しない場合にFATAL拒絶されること."
+    Assert-Test (Test-Path -LiteralPath $alienWorkDir) "20C.他プロセス占有 - ディレクトリ保全." "例外発生後もディレクトリが削除されず保全されること."
+    Assert-Test (Test-Path -LiteralPath $alienDataFile) "20C.他プロセス占有 - ファイル保全." "他プロセスの成果物ファイルが削除されず保全されること."
+    Assert-Test ((Get-Sha256Hex -FilePath $alienDataFile) -eq $alienDataHash) "20C.他プロセス占有 - ハッシュ不変." "他プロセスのファイル内容が一切変更されないこと."
+
+    # (2) リポジトリ帰属不一致の検出と現場保全.
+    $tamperedRepoData = [ordered]@{
+        pid       = $PID
+        createdAt = $legitOwnerData.createdAt
+        runToken  = $legitOwnerData.runToken
+        repoRoot  = 'C:\ses-alien-foreign-repo'
+    }
+    Write-JsonStateFile -FilePath $ownerJsonPath -Data $tamperedRepoData
+
+    $repoMismatchRejected = $false
+    try {
+        Assert-PitrWorkDirAttribution -PitrWorkDir $alienWorkDir -RepoRoot $fixtureRepo
+    } catch {
+        if ($_.Exception.Message -like "*FATAL:*" -or $_.Exception.Message -like "*リポジトリ帰属*") {
+            $repoMismatchRejected = $true
+        }
+    }
+    Assert-Test $repoMismatchRejected "20C.帰属不一致 - リポジトリ拒絶." "リポジトリ帰属が不一致の場合にFATAL拒絶されること."
+    Assert-Test (Test-Path -LiteralPath $alienDataFile) "20C.帰属不一致 - ファイル保全." "ファイルが保全されること."
+
+    # (3) 帰属ファイル消失・未帰属状態の検出と現場保全.
+    [System.IO.File]::Delete($ownerJsonPath)
+    $missingOwnerRejected = $false
+    try {
+        Assert-PitrWorkDirAttribution -PitrWorkDir $alienWorkDir -RepoRoot $fixtureRepo
+    } catch {
+        if ($_.Exception.Message -like "*FATAL:*" -or $_.Exception.Message -like "*帰属ファイル*") {
+            $missingOwnerRejected = $true
+        }
+    }
+    Assert-Test $missingOwnerRejected "20C.帰属不明 - ファイル欠損拒絶." "帰属ファイル欠損時にFATAL拒絶されること."
+    Assert-Test (Test-Path -LiteralPath $alienWorkDir) "20C.帰属不明 - ディレクトリ保全." "帰属不明時もディレクトリが保全されること."
+    Assert-Test (Test-Path -LiteralPath $alienDataFile) "20C.帰属不明 - ファイル保全." "他プロセスファイルが完全保全されること."
+    Assert-Test ((Get-Sha256Hex -FilePath $alienDataFile) -eq $alienDataHash) "20C.帰属不明 - ハッシュ不変." "ハッシュが一致すること."
 
     # --------------------------------------------------------------------------
     # 21. 正常全通過 (Full Pass) 検証 (Group 6)

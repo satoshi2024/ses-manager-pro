@@ -132,8 +132,10 @@ if ($PreflightOnly) {
 # ------------------------------------------------------------------------------
 if (-not $TargetedRun) {
     Assert-ValidMavenArgs -ArgsList $MavenArgs
+    Assert-ControlledMavenJvmEnvironment -IsTargetedRun $false
 } else {
     Write-Host '[WARN] TargetedRun が有効化されています。この実行は FULL_GATE として扱われません.'
+    Assert-ControlledMavenJvmEnvironment -IsTargetedRun $true
 }
 
 Assert-CleanWorkingTree -RepoRoot $repoRoot -EvidenceDir $EvidenceDir
@@ -178,20 +180,45 @@ Assert-ValidEvidenceDir -RepoRoot $repoRoot -EvidenceDir $EvidenceDir
 
 [System.IO.Directory]::CreateDirectory($EvidenceDir) | Out-Null
 
+# 有効なMaven引数の決定と環境パラメータの受控管理.
+$effectiveMavenArgs = @($MavenArgs)
+if (-not $TargetedRun) {
+    if (Test-Path env:MAVEN_ARGS) {
+        $rawMArgs = $env:MAVEN_ARGS
+        if (-not [string]::IsNullOrWhiteSpace($rawMArgs)) {
+            $pArgs = [regex]::Matches($rawMArgs, '(?:"([^"]*)"|''([^'']*)''|(\S+))') | ForEach-Object {
+                if ($_.Groups[1].Success) { $_.Groups[1].Value }
+                elseif ($_.Groups[2].Success) { $_.Groups[2].Value }
+                else { $_.Groups[3].Value }
+            }
+            foreach ($pa in $pArgs) {
+                if ($effectiveMavenArgs -notcontains $pa) {
+                    $effectiveMavenArgs += $pa
+                }
+            }
+        }
+        # 子プロセスへの二重適用・非制御注入を防ぐため環境変数をクリーン.
+        Remove-Item env:MAVEN_ARGS -ErrorAction SilentlyContinue
+    }
+}
+$redactedEffectiveMavenArgs = @($effectiveMavenArgs | ForEach-Object { Get-RedactedText $_ })
+Write-Host ("有効なMaven引数: " + ($redactedEffectiveMavenArgs -join ' '))
+
 $sessionStateFile = Join-Path $EvidenceDir 'session-state.json'
 $sessionData = [ordered]@{
-    sessionId       = Split-Path -Leaf $EvidenceDir
-    gateType        = if ($TargetedRun) { 'TARGETED_NON_FULL_GATE' } else { 'FULL_GATE' }
-    startHeadSha    = $startHeadSha
-    startStatus     = $startStatus
-    startTime       = (Get-Date).ToString('o')
-    state           = 'RUNNING'
-    completed       = $false
-    commandArgs     = $MavenArgs
-    mavenExecutable = $mvn
-    bashExecutable  = $bashExec
-    pid             = $PID
-    suites          = @()
+    sessionId          = Split-Path -Leaf $EvidenceDir
+    gateType           = if ($TargetedRun) { 'TARGETED_NON_FULL_GATE' } else { 'FULL_GATE' }
+    startHeadSha       = $startHeadSha
+    startStatus        = $startStatus
+    startTime          = (Get-Date).ToString('o')
+    state              = 'RUNNING'
+    completed          = $false
+    commandArgs        = $MavenArgs
+    effectiveMavenArgs = $redactedEffectiveMavenArgs
+    mavenExecutable    = $mvn
+    bashExecutable     = $bashExec
+    pid                = $PID
+    suites             = @()
 }
 Write-JsonStateFile -FilePath $sessionStateFile -Data $sessionData
 
@@ -258,7 +285,7 @@ foreach ($suite in $suites) {
     $suiteProcessError = $null
     $suiteStatus = 0
     try {
-        & $mvn @suiteArgs @MavenArgs 2>&1 | Tee-Object -FilePath $suiteLog
+        & $mvn @suiteArgs @effectiveMavenArgs 2>&1 | Tee-Object -FilePath $suiteLog
         $suiteStatus = $LASTEXITCODE
     } catch {
         $suiteStatus = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
@@ -362,6 +389,7 @@ $unitSuiteId = 'backup-unit'
 $unitDir = Join-Path $EvidenceDir $unitSuiteId
 if (-not (Test-Path -LiteralPath $unitDir)) { [System.IO.Directory]::CreateDirectory($unitDir) | Out-Null }
 $unitLog = Join-Path $unitDir "$unitSuiteId.log"
+[System.IO.File]::WriteAllText($unitLog, '', [System.Text.Encoding]::UTF8)
 $unitStateFile = Join-Path $unitDir 'state.json'
 
 $unitState = [ordered]@{
@@ -373,21 +401,39 @@ $unitState = [ordered]@{
 }
 Write-JsonStateFile -FilePath $unitStateFile -Data $unitState
 
+# FULL_GATE の場合、TEST_FILTER 環境変数を厳格にクリア.
+if (-not $TargetedRun) {
+    if (Test-Path env:TEST_FILTER) {
+        Remove-Item env:TEST_FILTER -ErrorAction SilentlyContinue
+    }
+    $env:TEST_FILTER = ''
+}
+
+$expectedUnitGroups = Get-ExpectedBackupUnitGroups -RepoRoot $repoRoot
+$unitProcessError = $null
 $unitStatus = 0
 try {
     & $bashExec ops/backup/tests/run-unit-tests.sh 2>&1 | Tee-Object -FilePath $unitLog
     $unitStatus = $LASTEXITCODE
+    if ($unitStatus -ne 0 -and $null -eq $unitProcessError -and (Test-Path -LiteralPath $unitLog)) {
+        $logLines = [System.IO.File]::ReadAllLines($unitLog, [System.Text.Encoding]::UTF8)
+        $crashLine = ($logLines | Where-Object { $_ -match '(?i)CRASH|FATAL|EXCEPTION' } | Select-Object -First 1)
+        if (-not [string]::IsNullOrWhiteSpace($crashLine)) {
+            $unitProcessError = $crashLine.Trim()
+        }
+    }
 } catch {
-    $unitStatus = 1
-    Write-Error "Bash unit suite 実行中に例外が発生しました: $($_.Exception.Message)."
+    $unitStatus = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
+    $unitProcessError = $_.Exception.Message
 }
 
-$unitEval = Evaluate-BashUnitOutput -ProcessExitCode $unitStatus -LogPath $unitLog
+$unitEval = Evaluate-BashUnitOutput -ProcessExitCode $unitStatus -LogPath $unitLog -ExpectedGroups $expectedUnitGroups -ProcessError $unitProcessError
 if ($unitEval.Pass) {
     Write-Host 'backup unit suite: SUCCESS.'
     $unitState.state = 'PASS'
     $unitState.completed = $true
     $unitState['exitCode'] = 0
+    $unitState['groupsCount'] = $expectedUnitGroups.Count
     $unitState['endTime'] = (Get-Date).ToString('o')
     Write-JsonStateFile -FilePath $unitStateFile -Data $unitState
 } else {
@@ -395,13 +441,20 @@ if ($unitEval.Pass) {
     $unitState.state = 'FAIL'
     $unitState.completed = $true
     $unitState['failureReasons'] = $unitEval.Reasons
+    if (-not [string]::IsNullOrWhiteSpace($unitProcessError)) {
+        $unitState['processError'] = $unitProcessError
+    }
     $unitState['exitCode'] = $unitStatus
     $unitState['endTime'] = (Get-Date).ToString('o')
     Write-JsonStateFile -FilePath $unitStateFile -Data $unitState
 
     $sessionData.state = 'FAIL'
     $sessionData.completed = $true
-    $sessionData['failureReason'] = 'backup unit suite failed'
+    $sessionData['failureReason'] = if (-not [string]::IsNullOrWhiteSpace($unitProcessError)) {
+        "backup unit suite execution error: $unitProcessError"
+    } else {
+        'backup unit suite failed'
+    }
     $sessionData['endTime'] = (Get-Date).ToString('o')
     Write-JsonStateFile -FilePath $sessionStateFile -Data $sessionData
 
@@ -427,6 +480,9 @@ $privateWorkFull = New-ControlledPitrWorkDir `
     -CustomPitrWorkDir $CustomPitrWorkDir
 
 $env:INTEGRATION_WORK_DIR = $privateWorkFull
+
+# 実行直前に帰属および非ReparsePointを再検証 (衝突・他プロセス占有検知)
+Assert-PitrWorkDirAttribution -PitrWorkDir $privateWorkFull -RepoRoot $repoRoot
 
 $intState = [ordered]@{
     suiteId            = $intSuiteId
@@ -455,6 +511,9 @@ if (-not (Test-Path -LiteralPath $intArtifactsDir)) {
 
 $archiveError = $null
 try {
+    # 成果物アーカイブ直前にも所有権・帰属を検証（現場保全）.
+    Assert-PitrWorkDirAttribution -PitrWorkDir $privateWorkFull -RepoRoot $repoRoot
+
     $srcEvidenceDir = Join-Path $privateWorkFull 'evidence'
     if (Test-Path -LiteralPath $srcEvidenceDir) {
         Get-ChildItem -LiteralPath $srcEvidenceDir -File -ErrorAction Stop | ForEach-Object {
