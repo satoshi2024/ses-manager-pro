@@ -214,4 +214,201 @@ class ApprovalEnvelopeVerifierTest {
         assertDoesNotThrow(fixture::verify);
         assertNotEquals(signature[0], fixture.approval.signature()[0]);
     }
+
+    @Test
+    void rejectsUnknownSchemaBeforeAnchorLookupWithoutQueryingAnchor() throws Exception {
+        SyntheticAuthorityFixture fixture = new SyntheticAuthorityFixture();
+        ApprovalEnvelopeMetadata unknownSchemaMeta = new ApprovalEnvelopeMetadata("99", "unknown-auth", "unknown-key",
+                SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.SCOPE,
+                SyntheticEnvironmentGuard.SYNTHETIC_AUDIENCE, "rev-unknown", "req-1", "app-2", "ref-1",
+                SyntheticAuthorityFixture.NOW.minusSeconds(60), SyntheticAuthorityFixture.NOW.minusSeconds(60),
+                SyntheticAuthorityFixture.NOW.plusSeconds(300));
+        PolicyApprovalEnvelope unknownSchemaPolicy = fixture.signedPolicy(unknownSchemaMeta,
+                SyntheticAuthorityFixture.ACTION, SyntheticAuthorityFixture.PROVIDER);
+
+        PolicySecurityException pse = assertThrows(PolicySecurityException.class,
+                () -> fixture.verifier.verifyPolicyOnly(unknownSchemaPolicy, SyntheticAuthorityFixture.TENANT,
+                        SyntheticAuthorityFixture.SCOPE, "synthetic-contact",
+                        SyntheticAuthorityFixture.ACTION, SyntheticAuthorityFixture.PROVIDER, SyntheticAuthorityFixture.NOW));
+        assertEquals(PolicyFailureReason.UNSUPPORTED_SCHEMA_VERSION, pse.reason());
+        assertEquals("未対応の承認envelope schema versionです", pse.getMessage());
+    }
+
+    @Test
+    void rejectsExpiredEnvelopeBeforeRevocationProviderLookupWithZeroCalls() throws Exception {
+        SyntheticAuthorityFixture fixture = new SyntheticAuthorityFixture();
+        java.util.concurrent.atomic.AtomicInteger callCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        RevocationStatusProvider throwingProvider = ref -> {
+            callCount.incrementAndGet();
+            throw new RuntimeException("revocation service unavailable");
+        };
+        ApprovalEnvelopeVerifier verifier = new ApprovalEnvelopeVerifier(
+                Map.of("synthetic-authority:key-ephemeral", fixture.anchor),
+                throwingProvider,
+                java.time.Clock.fixed(SyntheticAuthorityFixture.NOW, java.time.ZoneOffset.UTC),
+                new SyntheticEnvironmentGuard(new MockEnvironment()));
+
+        ApprovalEnvelopeMetadata expiredMeta = fixture.metadata("expired-rev",
+                SyntheticAuthorityFixture.NOW.minusSeconds(300), SyntheticAuthorityFixture.NOW.minusSeconds(1));
+        PolicyApprovalEnvelope expiredPolicy = fixture.signedPolicy(expiredMeta,
+                SyntheticAuthorityFixture.ACTION, SyntheticAuthorityFixture.PROVIDER);
+
+        PolicySecurityException pse = assertThrows(PolicySecurityException.class,
+                () -> verifier.verifyPolicyOnly(expiredPolicy, SyntheticAuthorityFixture.TENANT,
+                        SyntheticAuthorityFixture.SCOPE, "synthetic-contact",
+                        SyntheticAuthorityFixture.ACTION, SyntheticAuthorityFixture.PROVIDER, SyntheticAuthorityFixture.NOW));
+        assertEquals(PolicyFailureReason.EXPIRED_AT_OR_AFTER_DEADLINE, pse.reason());
+        assertEquals(0, callCount.get());
+    }
+
+    @Test
+    void whenPolicyFailsCaseRevocationProviderIsNotCalled() throws Exception {
+        SyntheticAuthorityFixture fixture = new SyntheticAuthorityFixture();
+        java.util.concurrent.atomic.AtomicInteger caseProviderCalls = new java.util.concurrent.atomic.AtomicInteger(0);
+        RevocationStatusProvider trackedProvider = ref -> {
+            if (ref.contains("case") || ref.contains("case-r2")) {
+                caseProviderCalls.incrementAndGet();
+            }
+            return RevocationStatus.ACTIVE;
+        };
+        ApprovalEnvelopeVerifier verifier = new ApprovalEnvelopeVerifier(
+                Map.of("synthetic-authority:key-ephemeral", fixture.anchor),
+                trackedProvider,
+                java.time.Clock.fixed(SyntheticAuthorityFixture.NOW, java.time.ZoneOffset.UTC),
+                new SyntheticEnvironmentGuard(new MockEnvironment()));
+
+        PolicyApprovalEnvelope alteredPolicy = new PolicyApprovalEnvelope(fixture.policy.metadata(),
+                fixture.policy.policyId(), fixture.policy.policyVersion(), fixture.policy.dataElementId(),
+                "DELETE", fixture.policy.providerId(), fixture.policy.purpose(), fixture.policy.trigger(),
+                fixture.policy.retentionRule(), fixture.policy.disposition(), fixture.policy.signature());
+
+        assertThrows(SecurityException.class, () -> verifier.verify(alteredPolicy, fixture.approval,
+                SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.TARGET_VERSION,
+                SyntheticAuthorityFixture.TARGET_HASH, SyntheticAuthorityFixture.ACTION, SyntheticAuthorityFixture.PROVIDER));
+
+        assertEquals(0, caseProviderCalls.get());
+    }
+
+    @Test
+    void revocationProviderCalledInOrderKeyThenEnvelopeAndShortCircuitsOnException() throws Exception {
+        SyntheticAuthorityFixture fixture = new SyntheticAuthorityFixture();
+        java.util.List<String> queryOrder = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        RevocationStatusProvider normalProvider = ref -> {
+            queryOrder.add(ref);
+            return RevocationStatus.ACTIVE;
+        };
+        ApprovalEnvelopeVerifier normalVerifier = new ApprovalEnvelopeVerifier(
+                Map.of("synthetic-authority:key-ephemeral", fixture.anchor),
+                normalProvider,
+                java.time.Clock.fixed(SyntheticAuthorityFixture.NOW, java.time.ZoneOffset.UTC),
+                new SyntheticEnvironmentGuard(new MockEnvironment()));
+        assertDoesNotThrow(() -> normalVerifier.verifyPolicyOnly(fixture.policy,
+                SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.SCOPE,
+                "synthetic-contact", SyntheticAuthorityFixture.ACTION, SyntheticAuthorityFixture.PROVIDER,
+                SyntheticAuthorityFixture.NOW));
+        assertEquals(2, queryOrder.size());
+        assertEquals("synthetic-authority:key-ephemeral", queryOrder.get(0));
+        assertEquals(fixture.policy.metadata().revocationReference(), queryOrder.get(1));
+
+        java.util.List<String> errorOrder = new java.util.concurrent.CopyOnWriteArrayList<>();
+        RevocationStatusProvider errorProvider = ref -> {
+            errorOrder.add(ref);
+            throw new RuntimeException("connection timeout");
+        };
+        ApprovalEnvelopeVerifier errorVerifier = new ApprovalEnvelopeVerifier(
+                Map.of("synthetic-authority:key-ephemeral", fixture.anchor),
+                errorProvider,
+                java.time.Clock.fixed(SyntheticAuthorityFixture.NOW, java.time.ZoneOffset.UTC),
+                new SyntheticEnvironmentGuard(new MockEnvironment()));
+        PolicySecurityException pse = assertThrows(PolicySecurityException.class,
+                () -> errorVerifier.verifyPolicyOnly(fixture.policy,
+                        SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.SCOPE,
+                        "synthetic-contact", SyntheticAuthorityFixture.ACTION, SyntheticAuthorityFixture.PROVIDER,
+                        SyntheticAuthorityFixture.NOW));
+        assertEquals(PolicyFailureReason.REVOCATION_PROVIDER_ERROR, pse.reason());
+        assertEquals("失効確認プロバイダーでエラーが発生しました", pse.getMessage());
+        assertEquals(1, errorOrder.size());
+        assertEquals("synthetic-authority:key-ephemeral", errorOrder.get(0));
+    }
+
+    @Test
+    void verifyPolicyOnlyUsesPassedNowAndDoesNotQueryWrapperClock() throws Exception {
+        SyntheticAuthorityFixture fixture = new SyntheticAuthorityFixture();
+        java.util.concurrent.atomic.AtomicInteger clockCalls = new java.util.concurrent.atomic.AtomicInteger(0);
+        java.time.Clock trackingClock = new java.time.Clock() {
+            @Override
+            public java.time.ZoneId getZone() {
+                return java.time.ZoneOffset.UTC;
+            }
+
+            @Override
+            public java.time.Clock withZone(java.time.ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                clockCalls.incrementAndGet();
+                return SyntheticAuthorityFixture.NOW;
+            }
+        };
+        ApprovalEnvelopeVerifier verifier = new ApprovalEnvelopeVerifier(
+                Map.of("synthetic-authority:key-ephemeral", fixture.anchor),
+                ignored -> RevocationStatus.ACTIVE,
+                trackingClock,
+                new SyntheticEnvironmentGuard(new MockEnvironment()));
+
+        VerifiedPolicyMetadata result = verifier.verifyPolicyOnly(fixture.policy,
+                SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.SCOPE,
+                "synthetic-contact", SyntheticAuthorityFixture.ACTION, SyntheticAuthorityFixture.PROVIDER,
+                SyntheticAuthorityFixture.NOW);
+        assertNotNull(result);
+        assertEquals(0, clockCalls.get());
+    }
+
+    @Test
+    void sodExceptionDifferentiatedBetweenPolicyOnlyAndCaseVerify() throws Exception {
+        SyntheticAuthorityFixture fixture = new SyntheticAuthorityFixture();
+        ApprovalEnvelopeMetadata sameActor = new ApprovalEnvelopeMetadata("1", "synthetic-authority", "key-ephemeral",
+                SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.SCOPE,
+                SyntheticEnvironmentGuard.SYNTHETIC_AUDIENCE, "r-sod", "same-user", "same-user", "rev-sod",
+                SyntheticAuthorityFixture.NOW.minusSeconds(60), SyntheticAuthorityFixture.NOW.minusSeconds(60),
+                SyntheticAuthorityFixture.NOW.plusSeconds(300));
+        PolicyApprovalEnvelope sodPolicy = fixture.signedPolicy(sameActor,
+                SyntheticAuthorityFixture.ACTION, SyntheticAuthorityFixture.PROVIDER);
+
+        PolicySecurityException pse = assertThrows(PolicySecurityException.class,
+                () -> fixture.verifier.verifyPolicyOnly(sodPolicy, SyntheticAuthorityFixture.TENANT,
+                        SyntheticAuthorityFixture.SCOPE, "synthetic-contact",
+                        SyntheticAuthorityFixture.ACTION, SyntheticAuthorityFixture.PROVIDER,
+                        SyntheticAuthorityFixture.NOW));
+        assertEquals(PolicyFailureReason.SOD_VIOLATION, pse.reason());
+        assertEquals("職務分離違反: 申請者と承認者は異なる必要があります", pse.getMessage());
+
+        SecurityException se = assertThrows(SecurityException.class,
+                () -> fixture.verifier.verify(sodPolicy, fixture.approval,
+                        SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.TARGET_VERSION,
+                        SyntheticAuthorityFixture.TARGET_HASH, SyntheticAuthorityFixture.ACTION,
+                        SyntheticAuthorityFixture.PROVIDER));
+        assertEquals("職務分離条件に違反しています", se.getMessage());
+    }
+
+    @Test
+    void nullRevocationStatusTreatedAsUnknownUnderExistingRule() throws Exception {
+        SyntheticAuthorityFixture fixture = new SyntheticAuthorityFixture();
+        ApprovalEnvelopeVerifier nullVerifier = new ApprovalEnvelopeVerifier(
+                Map.of("synthetic-authority:key-ephemeral", fixture.anchor),
+                ignored -> null,
+                java.time.Clock.fixed(SyntheticAuthorityFixture.NOW, java.time.ZoneOffset.UTC),
+                new SyntheticEnvironmentGuard(new MockEnvironment()));
+
+        PolicySecurityException pse = assertThrows(PolicySecurityException.class,
+                () -> nullVerifier.verifyPolicyOnly(fixture.policy,
+                        SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.SCOPE,
+                        "synthetic-contact", SyntheticAuthorityFixture.ACTION, SyntheticAuthorityFixture.PROVIDER,
+                        SyntheticAuthorityFixture.NOW));
+        assertEquals(PolicyFailureReason.REVOCATION_STATUS_UNKNOWN, pse.reason());
+        assertEquals("keyまたはenvelopeの失効状態がACTIVEではありません", pse.getMessage());
+    }
 }

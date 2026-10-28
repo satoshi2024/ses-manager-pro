@@ -1,10 +1,10 @@
 # NF07 純粋 Policy 検証カーネル抽出・実施設計書
 （Pure Policy Verification Kernel Extraction Plan）
 
-状態: **PLAN REVIEW PENDING / Astra 技術 Plan Review 待ち**<br>
+状態: **PLAN PASS（Astra 限定 PLAN PASS 受理、コミット `93b40985`）/ Batch 2 実装完了、CODE REVIEW PENDING**<br>
 対象ブランチ: `codex/snf-prod-nf07-evidence-contract`<br>
-本フェーズ基準（Base）: `197386f866c834c7232590ec2f16fd13b8ac17d6`<br>
-直前基準（Previous Base）: `aad2afeec71c2cb2eaa846bf02b2da0344990180`（Astra/総括 限定 PLAN PASS 承認コミット）<br>
+本フェーズ基準（Base）: `93b40985e45e29c1531cec93ea41648cb7c8ad38`<br>
+直前基準（Previous Base）: `197386f866c834c7232590ec2f16fd13b8ac17d6`<br>
 固定テスト証拠コミット: `c8b78dc3c8c3906e8ba734a2aa81037bd3a77dfb`（42件定向 / 4,292件 Fast 合格の歴史的証拠）<br>
 担当: AI-5（接線・意思決定契約および純粋カーネル抽出設計担当）
 

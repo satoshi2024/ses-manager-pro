@@ -1,7 +1,5 @@
 package com.ses.privacy.foundation;
 
-import java.security.GeneralSecurityException;
-import java.security.Signature;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Map;
@@ -10,7 +8,7 @@ import java.util.Objects;
 /** Policy/case envelopeを厳格に検証する。synthetic/production fallbackは持たない。 */
 public final class ApprovalEnvelopeVerifier {
     /** SF-W1で解釈する署名スキーマの固定許可リスト。 */
-    public static final String SUPPORTED_SCHEMA_VERSION = "1";
+    public static final String SUPPORTED_SCHEMA_VERSION = PurePolicyVerificationKernel.SUPPORTED_SCHEMA_VERSION;
     private final Map<String, TrustedAuthority> trustAnchors;
     private final RevocationStatusProvider revocations;
     private final Clock clock;
@@ -33,36 +31,29 @@ public final class ApprovalEnvelopeVerifier {
         Objects.requireNonNull(approval, "case承認が必要です");
         environmentGuard.requireSyntheticAllowed(policy.metadata().audience());
         Instant now = clock.instant();
-        TrustedAuthority policyAuthority = verifyEnvelopeTyped("POLICY", policy.dataElementId(), policy.metadata(), policy.signature(), ApprovalEnvelopeCanonicalizer.canonicalBytes(policy),
+
+        // Step 1: Policy 先行完備検証（失敗時は Case 失効照会を行わず直ちに中断）
+        TrustedAuthority policyAuthority = verifyEnvelopeTyped("POLICY", policy.dataElementId(), policy.metadata(),
+                policy.signature(), ApprovalEnvelopeCanonicalizer.canonicalBytes(policy),
                 policy.action(), policy.providerId(), now);
-        TrustedAuthority caseAuthority = verifyEnvelopeTyped("CASE", null, approval.metadata(), approval.signature(), ApprovalEnvelopeCanonicalizer.canonicalBytes(approval),
+
+        // Step 2: Policy 成功後にはじめて Case 検証を開始（先行バッチ照会禁止）
+        TrustedAuthority caseAuthority = verifyEnvelopeTyped("CASE", null, approval.metadata(),
+                approval.signature(), ApprovalEnvelopeCanonicalizer.canonicalBytes(approval),
                 approval.action(), approval.providerId(), now);
 
+        // Step 3: クロスバインディング・SoD 検査（計算値 effectiveExpiry を取得）
+        Instant effectiveExpiry = PurePolicyVerificationKernel.verifyCaseAndPolicyBindings(
+                policy, approval, policyAuthority, caseAuthority, currentTenant,
+                actualTargetVersion, actualTargetHash, expectedAction, expectedProvider, now);
+
         String policyDigest = ApprovalEnvelopeCanonicalizer.digest(ApprovalEnvelopeCanonicalizer.canonicalBytes(policy));
-        requireEqual(policyDigest, approval.policyDigest(), "caseがこのpolicy revisionに紐付いていません");
-        requireEqual(policy.metadata().tenantId(), approval.metadata().tenantId(), "tenantが一致しません");
-        requireEqual(currentTenant, approval.metadata().tenantId(), "実行tenantが一致しません");
-        requireEqual(policy.action(), approval.action(), "case actionがpolicyと異なります");
-        requireEqual(policy.providerId(), approval.providerId(), "case providerがpolicyと異なります");
-        requireEqual(expectedAction, policy.action(), "actionが一致しません");
-        requireEqual(expectedProvider, policy.providerId(), "providerが一致しません");
-        requireEqual(actualTargetVersion, approval.targetVersion(), "target versionが変化しています");
-        requireEqual(actualTargetHash, approval.targetHash(), "target hashが変化しています");
-        if (approval.identityVerifiedAt().isAfter(now)
-                || approval.identityVerifiedAt().isBefore(approval.metadata().effectiveAt())) {
-            deny("本人確認時刻がcaseの有効期間外です");
-        }
-        if (policy.metadata().requesterId().equals(policy.metadata().approverId())
-                || approval.metadata().requesterId().equals(approval.metadata().approverId())) {
-            deny("職務分離条件に違反しています");
-        }
-        if (!policy.metadata().scope().equals(approval.metadata().scope())) deny("scopeが一致しません");
-        if (!policy.metadata().audience().equals(approval.metadata().audience())) deny("audienceが一致しません");
+
+        // Step 4: 承認証明（VerifiedApproval）はラッパー末端でのみ構築
         return new VerifiedApproval(currentTenant, approval.caseId(), policyDigest, expectedAction, expectedProvider,
                 approval.targetId(), approval.targetVersion(), approval.targetHash(),
                 approval.metadata().revision(), policy.metadata().revision(),
-                min(min(policy.metadata().expiresAt(), approval.metadata().expiresAt()),
-                        min(policyAuthority.validUntil(), caseAuthority.validUntil())));
+                effectiveExpiry);
     }
 
     /**
@@ -80,33 +71,22 @@ public final class ApprovalEnvelopeVerifier {
         Objects.requireNonNull(policy, "policy envelope must not be null");
         environmentGuard.requireSyntheticAllowed(policy.metadata().audience());
 
+        // 引数の now をそのまま使用（clock.instant() は呼ばない）
         TrustedAuthority authority = verifyEnvelopeTyped("POLICY", policy.dataElementId(), policy.metadata(),
                 policy.signature(), ApprovalEnvelopeCanonicalizer.canonicalBytes(policy),
                 policy.action(), policy.providerId(), now);
 
-        if (policy.metadata().requesterId().equals(policy.metadata().approverId())) {
-            throw new PolicySecurityException(PolicyFailureReason.SOD_VIOLATION, "職務分離違反: 申請者と承認者は異なる必要があります");
-        }
+        // SoD 検査（PolicySecurityException を送出）
+        PurePolicyVerificationKernel.verifyPolicySoD(policy.metadata());
 
-        if (!policy.metadata().tenantId().equals(expectedTenant)) {
-            throw new PolicySecurityException(PolicyFailureReason.TENANT_MISMATCH, "テナントが一致しません");
-        }
-        if (!policy.metadata().scope().equals(expectedScope)) {
-            throw new PolicySecurityException(PolicyFailureReason.SCOPE_MISMATCH, "スコープが一致しません");
-        }
-        if (!policy.dataElementId().equals(expectedDataElementId)) {
-            throw new PolicySecurityException(PolicyFailureReason.DATA_ELEMENT_MISMATCH, "データ要素が一致しません");
-        }
-        if (!policy.action().equals(expectedAction)) {
-            throw new PolicySecurityException(PolicyFailureReason.ACTION_MISMATCH, "アクションが一致しません");
-        }
-        if (!policy.providerId().equals(expectedProvider)) {
-            throw new PolicySecurityException(PolicyFailureReason.PROVIDER_MISMATCH, "プロバイダーが一致しません");
-        }
+        // バインディング検査（PolicySecurityException を送出）
+        PurePolicyVerificationKernel.verifyPolicyBindings(policy, expectedTenant, expectedScope,
+                expectedDataElementId, expectedAction, expectedProvider);
 
         String policyDigest = ApprovalEnvelopeCanonicalizer.digest(ApprovalEnvelopeCanonicalizer.canonicalBytes(policy));
-        Instant effectiveExpiry = min(policy.metadata().expiresAt(), authority.validUntil());
+        Instant effectiveExpiry = PurePolicyVerificationKernel.calculateEffectiveExpiry(policy.metadata().expiresAt(), authority.validUntil());
 
+        // 説明専用 DTO を生成して返却（VerifiedApproval は構築しない）
         return new VerifiedPolicyMetadata(policy.metadata().tenantId(), policy.policyId(),
                 policy.policyVersion(), policyDigest, policy.dataElementId(), policy.action(),
                 policy.providerId(), policy.metadata().scope(), policy.metadata().effectiveAt(),
@@ -119,37 +99,24 @@ public final class ApprovalEnvelopeVerifier {
     private TrustedAuthority verifyEnvelopeTyped(String envelopeKind, String dataElementId, ApprovalEnvelopeMetadata metadata,
                                                  byte[] signature, byte[] payload,
                                                  String action, String provider, Instant now) {
-        if (!SUPPORTED_SCHEMA_VERSION.equals(metadata.schemaVersion())) {
-            throw new PolicySecurityException(PolicyFailureReason.UNSUPPORTED_SCHEMA_VERSION, "未対応の承認envelope schema versionです");
-        }
+        // Step 1: スキーマ検査 (Kernel)
+        PurePolicyVerificationKernel.verifySchemaVersion(metadata);
+
+        // Step 2: TrustAnchor 検索と ID 一致検査 (Wrapper)
         String anchorKey = metadata.authorityId() + ":" + metadata.keyId();
         TrustedAuthority anchor = trustAnchors.get(anchorKey);
         if (anchor == null) {
             throw new PolicySecurityException(PolicyFailureReason.UNKNOWN_TRUST_ANCHOR, "未知の署名authorityです");
         }
-        if (!anchor.authorityId().equals(metadata.authorityId()) || !anchor.keyId().equals(metadata.keyId())) {
-            throw new PolicySecurityException(PolicyFailureReason.UNKNOWN_TRUST_ANCHOR, "authorityまたはkeyが一致しません");
-        }
-        if (!anchor.tenants().contains(metadata.tenantId()) || !anchor.scopes().contains(metadata.scope())
-                || (dataElementId != null && !anchor.dataElements().contains(dataElementId))
-                || !anchor.envelopeKinds().contains(envelopeKind)
-                || !anchor.audiences().contains(metadata.audience()) || !anchor.actions().contains(action)
-                || !anchor.providers().contains(provider)) {
-            throw new PolicySecurityException(PolicyFailureReason.AUTHORITY_SCOPE_MISMATCH, "authority scopeが一致しません");
-        }
-        if (now.isBefore(anchor.validFrom()) || !now.isBefore(anchor.validUntil())) {
-            throw new PolicySecurityException(PolicyFailureReason.AUTHORITY_VALIDITY_EXPIRED, "authorityが現在有効ではありません");
-        }
-        if (now.isBefore(metadata.issuedAt())) {
-            throw new PolicySecurityException(PolicyFailureReason.NOT_YET_ISSUED, "エンベロープ発行日時が未来です");
-        }
-        if (now.isBefore(metadata.effectiveAt())) {
-            throw new PolicySecurityException(PolicyFailureReason.NOT_YET_EFFECTIVE, "エンベロープがまだ発効していません");
-        }
-        if (!now.isBefore(metadata.expiresAt())) {
-            throw new PolicySecurityException(PolicyFailureReason.EXPIRED_AT_OR_AFTER_DEADLINE, "エンベロープの有効期限が切れています");
-        }
+        PurePolicyVerificationKernel.verifyAnchorIdentity(metadata, anchor);
 
+        // Step 3: Scope 照合 (Kernel)
+        PurePolicyVerificationKernel.verifyAuthorityScope(envelopeKind, dataElementId, metadata, action, provider, anchor);
+
+        // Step 4: 時間窓検査 (Kernel)
+        PurePolicyVerificationKernel.verifyTimeWindow(now, anchor, metadata);
+
+        // Step 5: 失効プロバイダー照会 (Wrapper: 鍵→Envelope順、例外ハンドリング)
         RevocationStatus keyStatus;
         RevocationStatus envelopeStatus;
         try {
@@ -159,38 +126,12 @@ public final class ApprovalEnvelopeVerifier {
             throw new PolicySecurityException(PolicyFailureReason.REVOCATION_PROVIDER_ERROR, "失効確認プロバイダーでエラーが発生しました", re);
         }
 
-        if (keyStatus == RevocationStatus.REVOKED) {
-            throw new PolicySecurityException(PolicyFailureReason.KEY_REVOKED, "署名鍵が失効しています");
-        }
-        if (envelopeStatus == RevocationStatus.REVOKED) {
-            throw new PolicySecurityException(PolicyFailureReason.ENVELOPE_REVOKED, "エンベロープが失効しています");
-        }
-        if (keyStatus != RevocationStatus.ACTIVE || envelopeStatus != RevocationStatus.ACTIVE) {
-            throw new PolicySecurityException(PolicyFailureReason.REVOCATION_STATUS_UNKNOWN, "keyまたはenvelopeの失効状態がACTIVEではありません");
-        }
+        // Step 6: 失効判定 (Kernel)
+        PurePolicyVerificationKernel.verifyRevocationStatus(keyStatus, envelopeStatus);
 
-        try {
-            Signature verifier = Signature.getInstance("Ed25519");
-            verifier.initVerify(anchor.publicKey());
-            verifier.update(payload);
-            if (!verifier.verify(signature)) {
-                throw new PolicySecurityException(PolicyFailureReason.SIGNATURE_INVALID, "署名が正しくありません");
-            }
-        } catch (GeneralSecurityException exception) {
-            throw new PolicySecurityException(PolicyFailureReason.SIGNATURE_INVALID, "承認署名を検証できません", exception);
-        }
+        // Step 7: 署名検証 (Kernel)
+        PurePolicyVerificationKernel.verifySignature(anchor, payload, signature);
+
         return anchor;
-    }
-
-    private static void requireEqual(String expected, String actual, String reason) {
-        if (expected == null || actual == null || !expected.equals(actual)) deny(reason);
-    }
-
-    private static void deny(String reason) {
-        throw new SecurityException(reason);
-    }
-
-    private static Instant min(Instant left, Instant right) {
-        return left.isBefore(right) ? left : right;
     }
 }
