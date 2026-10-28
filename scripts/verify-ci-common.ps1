@@ -227,15 +227,34 @@ function Test-IsWhitelistedJvmOption {
     if ($opt -match '^(?i)-Djava\.io\.tmpdir=[a-zA-Z0-9_\\\-:\./]+$') {
         return $true
     }
-    # 7. メモリおよびGCオプション.
+    # 7. メモリ指定 (-Xmx, -Xms, -Xss).
     if ($opt -match '^-(Xmx|Xms|Xss)[0-9]+[kKmMgG]?$') {
-        return $true
-    }
-    if ($opt -match '^-XX:\+?[a-zA-Z0-9_\-]+(=[a-zA-Z0-9_\-\.]+)?$') {
         return $true
     }
     # 8. 一般JVMフラグ.
     if ($opt -match '^-(server|client|ea|enableassertions|da|disableassertions)$') {
+        return $true
+    }
+    # 9. 明示承認済み具体的 -XX オプション (個別厳格指定・通配禁止).
+    if ($opt -match '^-XX:\+(UseG1GC|UseParallelGC|UseSerialGC|UseZGC|UseShenandoahGC)$') {
+        return $true
+    }
+    if ($opt -match '^-XX:[+-]UseContainerSupport$') {
+        return $true
+    }
+    if ($opt -match '^-XX:(Max|Min|Initial)RAMPercentage=[0-9]+(\.[0-9]+)?$') {
+        return $true
+    }
+    if ($opt -match '^-XX:(MetaspaceSize|MaxMetaspaceSize)=[0-9]+[kKmMgG]?$') {
+        return $true
+    }
+    if ($opt -match '^-XX:\+EnableDynamicAgentLoading$') {
+        return $true
+    }
+    if ($opt -match '^-XX:[+-]UseStringDeduplication$') {
+        return $true
+    }
+    if ($opt -match '^-XX:[+-]TieredCompilation$') {
         return $true
     }
 

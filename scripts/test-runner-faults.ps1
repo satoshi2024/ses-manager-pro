@@ -160,14 +160,14 @@ if (Test-Path -LiteralPath $configFile) {
     $configMode = (Get-Content -LiteralPath $configFile -Raw).Trim()
 }
 
-$tracker = Join-Path $ConfigDir 'mock_calls.log'
-[System.IO.File]::AppendAllText($tracker, "mvn: $($ArgsList -join ' ')`r`n")
-
-# -v オプション時はバージョン文字列のみ出力し、生成物は一切作らない.
+# -v オプション時はバージョン文字列のみ出力し、生成物は一切作らない (ツール確認呼び出し).
 if ($ArgsList -contains '-v' -or $ArgsList -contains '--version') {
     Write-Host 'Apache Maven 3.9.6 (mock).'
     exit 0
 }
+
+$tracker = Join-Path $ConfigDir 'mock_calls.log'
+[System.IO.File]::AppendAllText($tracker, "mvn: $($ArgsList -join ' ')`r`n")
 
 if ($configMode -eq 'crash-start') {
     Write-Error "CRASH: Mavenプロセス起動時例外."
@@ -472,6 +472,30 @@ try {
     # 1B. MAVEN_ARGS / JVM 環境変数注入拒絶 & シークレット秘匿検証 (Requirement 1 & 2)
     # --------------------------------------------------------------------------
     Write-Host "Test 01B: MAVEN_ARGS / JVM 環境変数注入拒絶 & シークレット秘匿検証..."
+
+    # Test-IsWhitelistedJvmOption の個別単体断言 (通配禁止・個別承認済み具体的オプションのみ許可).
+    Assert-Test (Test-IsWhitelistedJvmOption '-Dfile.encoding=UTF-8') "01B.単体白名単 - UTF-8許可." "file.encoding=UTF-8 が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-Duser.timezone=Asia/Tokyo') "01B.単体白名単 - タイムゾーン許可." "user.timezone=Asia/Tokyo が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-Djava.awt.headless=true') "01B.単体白名単 - ヘッドレス許可." "headless=true が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-Djava.net.preferIPv4Stack=true') "01B.単体白名単 - IPv4優先許可." "preferIPv4Stack=true が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-Xmx2048m') "01B.単体白名単 - Xmxメモリ許可." "Xmx2048m が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-Xms512m') "01B.単体白名単 - Xmsメモリ許可." "Xms512m が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-Xss1m') "01B.単体白名単 - Xssスタック許可." "Xss1m が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-XX:+UseContainerSupport') "01B.単体白名単 - UseContainerSupport許可." "-XX:+UseContainerSupport が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-XX:MaxRAMPercentage=75.0') "01B.単体白名単 - MaxRAMPercentage許可." "-XX:MaxRAMPercentage=75.0 が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-XX:+UseG1GC') "01B.単体白名単 - UseG1GC許可." "-XX:+UseG1GC が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-XX:+EnableDynamicAgentLoading') "01B.単体白名単 - EnableDynamicAgentLoading許可." "-XX:+EnableDynamicAgentLoading が許可されること."
+    Assert-Test (Test-IsWhitelistedJvmOption '-XX:MaxMetaspaceSize=512m') "01B.単体白名単 - MaxMetaspaceSize許可." "-XX:MaxMetaspaceSize=512m が許可されること."
+
+    # 拒絶対象反例 (未知 -XX, VMOptionsFile, Flags, 診断フラグ・任意コマンド).
+    Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:VMOptionsFile=/tmp/evil.vmoptions')) "01B.単体拒絶 - VMOptionsFile拒絶." "-XX:VMOptionsFile が拒絶されること."
+    Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:Flags=/tmp/flags')) "01B.単体拒絶 - Flags拒絶." "-XX:Flags が拒絶されること."
+    Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:+UnlockDiagnosticVMOptions')) "01B.単体拒絶 - UnlockDiagnosticVMOptions拒絶." "診断フラグが拒絶されること."
+    Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:+UnlockExperimentalVMOptions')) "01B.単体拒絶 - UnlockExperimentalVMOptions拒絶." "実験的フラグが拒絶されること."
+    Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:OnError=calc.exe')) "01B.単体拒絶 - OnError拒絶." "任意コマンド実行フラグが拒絶されること."
+    Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:OnOutOfMemoryError=reboot')) "01B.単体拒絶 - OnOutOfMemoryError拒絶." "OOM時任意実行フラグが拒絶されること."
+    Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:+HeapDumpOnOutOfMemoryError')) "01B.単体拒絶 - 未承認XX拒絶." "未承認-XXオプションが拒絶されること."
+
     $envInjectionCases = @(
         @{ Var = 'MAVEN_ARGS'; Val = '-Dtest=SampleTest' },
         @{ Var = 'MAVEN_ARGS'; Val = '-DskipTests' },
@@ -482,11 +506,18 @@ try {
         @{ Var = 'JAVA_TOOL_OPTIONS'; Val = '-Dtest.excluded-groups=integration' },
         @{ Var = 'JDK_JAVA_OPTIONS'; Val = '-Dtest=SampleTest' },
         @{ Var = '_JAVA_OPTIONS'; Val = '-Dgroups=smoke' },
-        @{ Var = 'MAVEN_CONFIG'; Val = '--file=other.xml' }
+        @{ Var = 'MAVEN_CONFIG'; Val = '--file=other.xml' },
+        @{ Var = 'JAVA_TOOL_OPTIONS'; Val = '-XX:VMOptionsFile=/tmp/evil.vmoptions' },
+        @{ Var = 'JDK_JAVA_OPTIONS'; Val = '-XX:Flags=/tmp/evil.flags' },
+        @{ Var = 'MAVEN_OPTS'; Val = '-XX:+UnlockDiagnosticVMOptions' },
+        @{ Var = 'MAVEN_OPTS'; Val = '-XX:+UnlockExperimentalVMOptions' },
+        @{ Var = '_JAVA_OPTIONS'; Val = '-XX:OnError=calc.exe' },
+        @{ Var = 'JAVA_TOOL_OPTIONS'; Val = '-XX:OnOutOfMemoryError=reboot' }
     )
     foreach ($cCase in $envInjectionCases) {
         $vName = $cCase.Var
         $vVal = $cCase.Val
+        [System.IO.File]::WriteAllText($mockCallsLog, '')
         [System.Environment]::SetEnvironmentVariable($vName, $vVal)
         try {
             $evEnv = Join-Path $testBaseDir ("ev-env-" + [System.Guid]::NewGuid().ToString('N').Substring(0, 6))
@@ -494,7 +525,9 @@ try {
                 -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$fixtureRunnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$evEnv`"") `
                 -NoNewWindow -Wait -PassThru
             Assert-Test ($procEnv.ExitCode -eq 1) "01B.環境注入拒絶 ($vName=$vVal) - 終了コード." "未許可の環境変数パラメータが ExitCode 1 で拒絶されること."
-            Assert-Test (-not (Test-Path -LiteralPath $evEnv)) "01B.環境注入拒絶 - 証跡作成前中止." "EvidenceDir が作成される前に中止されること."
+            Assert-Test (-not (Test-Path -LiteralPath $evEnv)) "01B.環境注入拒絶 ($vName=$vVal) - 証跡作成前中止." "EvidenceDir が作成される前に中止されること."
+            $callsCount = if (Test-Path -LiteralPath $mockCallsLog) { @(Get-Content -LiteralPath $mockCallsLog | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count } else { 0 }
+            Assert-Test ($callsCount -eq 0) "01B.環境注入拒絶 ($vName=$vVal) - Maven未起動." "Mavenが実行される前に中止されること."
         } finally {
             [System.Environment]::SetEnvironmentVariable($vName, $null)
         }
@@ -516,8 +549,8 @@ try {
         [System.Environment]::SetEnvironmentVariable('JDK_JAVA_OPTIONS', $null)
     }
 
-    # 白名単準拠の安全な環境変数設定時の通過検証.
-    [System.Environment]::SetEnvironmentVariable('JAVA_TOOL_OPTIONS', '-Dfile.encoding=UTF-8 -Duser.timezone=Asia/Tokyo -Djava.awt.headless=true -Xmx1024m')
+    # 白名単準拠の安全な環境変数設定時の通過検証 (メモリ、エンコーディング、タイムゾーン、個別承認済み -XX).
+    [System.Environment]::SetEnvironmentVariable('JAVA_TOOL_OPTIONS', '-Dfile.encoding=UTF-8 -Duser.timezone=Asia/Tokyo -Djava.awt.headless=true -Xmx1024m -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:+EnableDynamicAgentLoading')
     try {
         $evSafeEnv = Join-Path $testBaseDir 'ev-env-safe'
         [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'pass')
