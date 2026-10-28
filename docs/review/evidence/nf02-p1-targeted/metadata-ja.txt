@@ -1,0 +1,17 @@
+基準commit=1443fb68943849a3260d7ebe005259f3eb609d60
+branch=codex/snf-prod-nf02-scope
+最終scope実行source manifest SHA-256=E53FE7D00CCBE48CC66ADD9591C8EC6F69A4D961F877B63A00F7E5C16DE4B644
+最終scope実行開始 JST=2026-10-02T01:02:24.1469832+09:00
+最終scope実行終了 JST=2026-10-02T01:03:41.7801121+09:00
+最終scope実行コマンド=./apache-maven-3.9.6/bin/mvn.cmd test -Dtest=ServiceSlaRecipientScopeIntegrationTest
+JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:\work\jdk-uds
+最終scope件数=1/0/0/0 (run/fail/error/skip)
+最終scope exit code=0
+最終scope raw console SHA-256=4B87377C80818D17573EFF0A2F9CE424F84D8368BCE9F265E42936C755FF982D
+最終scope Surefire text SHA-256=609ACF45958D047765AC21C15FAA1C752BE84C9AC8620F473C5F0E332D6B2E55
+最終scope Surefire XML SHA-256=F62A996F9C70F7A873C29496A26909F0E14D2B320631598FA71C1A5A5238CF19
+その他4 classのtargeted run開始 JST=2026-10-02T00:43:26.1438963+09:00
+その他4 classのtargeted run終了 JST=2026-10-02T00:45:06.6318238+09:00
+その他4 classの結果=ServiceRequestServiceImplTest 15/0/0/0、ServiceSlaSchedulerTest 7/0/0/0、ServiceSlaRecipientScopeTest 3/0/0/0、TestIsolationAuditTest 6/0/0/0。合計32件の最初の5-class runではscope integration 1件がusername 51文字でerror。件数はrunをまたいで合算しない。
+raw証跡絶対path=C:\work\ses-manager-pro-nf02-nf03-review-v2\verification-evidence\nf02-p1-targeted\raw
+raw hash manifest=docs/review/evidence/nf02-p1-targeted/raw-hashes.txt
