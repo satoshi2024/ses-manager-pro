@@ -226,7 +226,7 @@ public record ScopeRepairApprovalEvidence(
    - 認証コンテキストが存在しない、または無効な場合は直ちに `AuthenticationCredentialsNotFoundException` で拒絶。
 6. **キュー結案時の `resolved_by` と構造化証跡の記録**:
    - `t_nf09_scope_repair_queue` の更新時、`resolved_by` には**実際にコマンドを実行した操作者（`executorUserId`）**を記録する。
-   - 代表載体キューの `resolution_note` には後述 4.2 節に規定する定長コンパクトな構造化受信完了証跡 JSON（`REP_COMPL`）を格納し、その他の参加キューには構造化部材参照 JSON（`REP_MEMBER`）を格納する。
+   - 代表載体キューの `resolution_note` には後述 4.2 節に規定する固定プロトコル標識付き定長コンパクト構造化完了証跡（`SES_NF09_COMPL:...`）を格納し、その他の参加キューには固定標識構造化部材参照（`SES_NF09_MEMBER:...`）を格納する。
 
 ### 3.4 テスト用フィクスチャの本番バックドア化防止
 テスト実行で使用される合成承認フィクスチャ（例: `ticketId = "TEST-MOCK-APPR-001"`）およびモック資格プロバイダは、Spring プロファイルが `@Profile("test")` である環境においてのみ有効なモック検証器として分離する。
@@ -251,14 +251,26 @@ public record ScopeRepairApprovalEvidence(
 
 ### 4.2 完成証跡ストレージ・初回載体選定・重試発見および集合再構成アルゴリズム
 
-#### 4.2.1 完成証跡ストレージの課題と定長シリアライズフォーマット
-`t_nf09_scope_repair_queue.resolution_note` は `VARCHAR(500) NULL` である。
+#### 4.2.1 完成証跡ストレージの課題・容量定義および固定プロトコル標識
+`t_nf09_scope_repair_queue.resolution_note` は MySQL 8 スキーマ上 `VARCHAR(500) NULL`（`CHARACTER SET utf8mb4`）である。
 無界なキュー ID 配列の平文格納を廃止し、参加キュー件数 `qc` と、ソート済み参加キュー ID 列の SHA-256 ダイジェスト `qh`（厳密に 64 文字の小文字 16 進数）による定長暗号学的要約を採用する。
 
-- **実フィールド制約と容量管理**:
+- **容量定義の明確化（アプリケーション層の防御的バイト上限）**:
+  - MySQL 8 の `VARCHAR(500) CHARACTER SET utf8mb4` は最大 500 文字（コードポイント）を格納可能である。
+  - しかし本プロトコルにおける「500 制限」は、**MySQL の文字数上限定義そのものではなく、マルチバイト文字展開（1 文字最大 4 バイト）に伴う予期せぬ切り捨てリスクや照合順序依存を物理的に排除するためのアプリケーション層の防御的バイト境界（UTF-8 実バイト長 $\le 500$ バイト）**である。
   - `V182` スキーマにおいて `tenant_id` は `VARCHAR(100)`、`t_approval_request.request_no` は最大 50 文字程度を許容する。
-  - 「常に 280 文字以内に収まる」といった無検証の固定長保証は行わず、**実行時のシリアライズ後実バイト長検査（`length <= 500`）を絶対のガード**とする。
-  - 更新発行前に Java 側で `serializedNote.getBytes(StandardCharsets.UTF_8).length <= 500` を厳格検証。万一 500 文字（バイト）を超過した場合は**決して截断（Truncation）せず、直ちに `IllegalStateException` を送出して全量ロールバック**する。
+  - 「常に 280 文字以内に収まる」といった無検証の固定長保証は行わず、更新発行前に Java 側で `serializedNote.getBytes(StandardCharsets.UTF_8).length <= 500` を絶対のガードとして検証する。
+  - 万一 500 バイトを超過した場合は**決して截断（Truncation）せず、直ちに `IllegalStateException` を送出して全量ロールバック**する。
+
+- **固定プロトコル標識による歴史的自由文との分離**:
+  - 新たに書き込まれる完了証跡および部材参照には、先頭に固定かつ識別可能なプロトコル標識プレフィックスを付与する：
+    - 代表載体証跡: `SES_NF09_COMPL:`
+    - 参加部材参照: `SES_NF09_MEMBER:`
+  - エンコーディング、発見スキャン、パース、および実バイト長検査（$\le 500$ バイト）はすべてこの形式に従う。
+  - **歴史的普通備考の完全分離**:
+    `resolution_note` が `null` であるか、または上記プロトコル標識で始まらない行（例: 過去のマイグレーションや旧チケットで格納された `[IDEMPOTENT_CLOSE]` や手動メンテナンスのメモ）は**歴史的普通備考として完全無視・現状維持**し、本プロトコルの修復証跡としては一切扱わない。
+  - **プロトコル標識行の厳格性**:
+    `SES_NF09_COMPL:` または `SES_NF09_MEMBER:` で始まる行において、JSON パースエラー、プロトコルバージョン不一致（`v != 1`）、または必須フィールドの欠落を検知した場合は、互換例外を一切設けず直ちに `CorruptedEvidenceException` を送出して全量ロールバックする。
 
 #### 4.2.2 初回実行時における確定載体選定アルゴリズム (Carrier Selection on Initial Execution)
 親インボイス集約のロック取得後、本トランザクションで修復対象となる**参加キュー集合 $Q_{\text{participating}}$（現在 `status = 'PENDING'` であるキュー群）**を確定する。
@@ -274,83 +286,119 @@ q_{\text{parent}} & \text{if } q_{\text{parent}} \in Q_{\text{participating}} \t
 > 後述の重試（Retry）時には全キューが既に `RESOLVED` に遷移しているため、この選定規則を重試時に再評価してはならない（再評価すると親が RESOLVED であるため親載体を見失う等の不整合を引き起こす）。
 
 #### 4.2.3 完了記録および部材構造化参照のシリアライズ仕様
-本トランザクション内で結案される全キュー行に対し、以下の厳格な構造化 JSON を `resolution_note` に格納する：
+本トランザクション内で結案される全キュー行に対し、以下の固定プロトコル標識付き厳格構造化 JSON を `resolution_note` に格納する：
 
-1. **代表載体レコード (`type = "REP_COMPL"`)**:
-   選定された `carrierQueue` に格納する：
-   ```json
-   {
-     "v": 1,
-     "type": "REP_COMPL",
-     "ticket": "APPR-20261026-INV-0089",
-     "round": 1,
-     "invId": 10089,
-     "tenant": "tenant-1",
-     "legalEntity": 100,
-     "pCls": "P2",
-     "vBf": 0,
-     "vAf": 1,
-     "qc": 3,
-     "qh": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-     "by": 1,
-     "at": "2026-10-28T16:30:00Z"
-   }
+1. **代表載体レコード (固定標識 `SES_NF09_COMPL:`)**:
+   選定された `carrierQueue` に格納する（プレフィックス `SES_NF09_COMPL:` に続けてコンパクト JSON を連結）：
+   ```text
+   SES_NF09_COMPL:{"v":1,"ticket":"APPR-20261026-INV-0089","round":1,"invId":10089,"tenant":"tenant-1","legalEntity":100,"pCls":"P2","vBf":0,"vAf":1,"qc":3,"qh":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","by":1,"at":"2026-10-28T16:30:00Z"}
    ```
-2. **非載体参加部材レコード (`type = "REP_MEMBER"`)**:
-   代表載体以外の参加キュー全行（$q \in Q_{\text{participating}} \setminus \{\text{carrierQueue}\}$）に格納する：
-   ```json
-   {
-     "v": 1,
-     "type": "REP_MEMBER",
-     "carrierId": 101,
-     "ticket": "APPR-20261026-INV-0089",
-     "round": 1
-   }
-   ```
-   - 単なる `contains(ticket)` のような自由テキストを完全排除し、`carrierId`、`ticket`、`round` を厳格にバインドした構造化 JSON とする。
+   - 各フィールド定義:
+     - `v`: プロトコルバージョン（整数値 `1` に固定）
+     - `ticket`: 決裁チケット番号（`t_approval_request.request_no`、文字列）
+     - `round`: 決裁有効輪次（`t_approval_request.round_no`、正の整数）
+     - `invId`: 対象インボイス主キー（`t_digital_invoice.id`、正の整数）
+     - `tenant`: 修復ターゲットテナント ID（文字列）
+     - `legalEntity`: 修復ターゲット法人 ID（正の整数）
+     - `pCls`: 親インボイス修復分類（`"P1"` または `"P2"` の 2 値に限定）
+     - `vBf`: 修復前親バージョン（`versionBefore`、整数）
+     - `vAf`: 修復後親バージョン（`versionAfter`、整数。P1時は `vBf`、P2時は `vBf + 1`）
+     - `qc`: 本修復で結案された参加キュー総件数（`carrier` を含む、整数 $\ge 1$）
+     - `qh`: 昇順ソートした全参加キュー ID カンマ区切り列の小文字 SHA-256 16進ダイジェスト（厳密に 64 文字）
+     - `by`: コマンドを実行した認証操作者 ID（`sys_user.id`、正の整数）
+     - `at`: 結案確定 ISO 8601 UTC タイムスタンプ（文字列）
 
-#### 4.2.4 重試発見アルゴリズム（精確フィールド一致による唯一載体特定）
+2. **非載体参加部材レコード (固定標識 `SES_NF09_MEMBER:`)**:
+   代表載体以外の参加キュー全行（$q \in Q_{\text{participating}} \setminus \{\text{carrierQueue}\}$）に格納する（プレフィックス `SES_NF09_MEMBER:` に続けてコンパクト JSON を連結）：
+   ```text
+   SES_NF09_MEMBER:{"v":1,"carrierId":101,"ticket":"APPR-20261026-INV-0089","round":1}
+   ```
+   - 各フィールド定義:
+     - `v`: プロトコルバージョン（整数値 `1` に固定）
+     - `carrierId`: 本集約の代表載体キュー主キー（`carrierQueue.id`、正の整数）
+     - `ticket`: 決裁チケット番号（文字列）
+     - `round`: 決裁有効輪次（正の整数）
+   - 単なる `contains(ticket)` のような自由テキストを完全排除し、固定プロトコル標識および `carrierId`、`ticket`、`round` を厳格にバインドした構造化レコードとする。
+
+#### 4.2.4 重試発見アルゴリズム（精確フィールド一致による唯一載体特定と歴史的自由文の分離）
 再実行（Retry）時、ロック取得済みの集約内全キュー（親キューが存在すれば親キュー＋全子イベントキュー）の中から、以下の**精確フィールド一致**により本決裁の完了証跡載体を探索する：
 
-- **探索条件**:
+- **歴史的自由テキスト備考の完全分離・保護**:
+  - キューの `resolution_note` が `null` であるか、または本プロトコルの固定標識（`SES_NF09_COMPL:` または `SES_NF09_MEMBER:`）で始まらない行（例: 過去の移行や旧チケットで書き込まれた `[IDEMPOTENT_CLOSE]` や手動メンテナンスメモ）：
+    **非プロトコル行として完全無視（Ignored / Untouched）**し、本プロトコルの修復完了証跡としては一切扱わない。旧自由テキストの改変や削除も行わない。
+- **本プロトコル標識行の厳格性（破損・未知バージョン・欠落の即時拒絶）**:
+  - `resolution_note` が `SES_NF09_COMPL:` または `SES_NF09_MEMBER:` で始まる行において、以下のいずれかが検知された場合：
+    1. JSON パースエラー（文法破損）
+    2. プロトコルバージョン不一致（`v != 1`）
+    3. 必須フィールドの欠落または NULL（`ticket`, `round`, `invId`, `tenant`, `legalEntity`, `pCls`, `vBf`, `vAf`, `qc`, `qh`, `by`, `at` 等）
+    **旧自由文との互換を理由にした緩和は一切行わず、直ちに `CorruptedEvidenceException` を送出して全量ロールバック**する。
+- **代表載体の精確探索条件**:
   - `status == 'RESOLVED'`
-  - `resolution_note` がパース可能であり、`type == "REP_COMPL"`
+  - `resolution_note` がプレフィックス `SES_NF09_COMPL:` で始まる
+  - プレフィックス除去後の JSON パースが成功し、`v == 1` かつ必須全フィールドが存在する
   - `record.ticket == approval.requestNo`
   - `record.round == approval.roundNo`
   - `record.invId == command.invoiceId`
 - **載体整合性の検証**:
   1. **載体不在時（合致件数 == 0）**: 本チケット・輪次による完了証跡は存在しない。通常実行経路（初回実行または版不一致判定）へ進む。
   2. **複数載体衝突時（合致件数 > 1）**: 同一集約内に同一チケット・輪次の完了証跡載体が複数存在する。直ちに `IllegalStateException("同一決裁チケットの完了証跡載体が複数検知されました")` を送出し、Tx 全量ロールバック。
-  3. **証跡破損時**: JSON パースエラーまたは必須フィールド欠落を検知した場合は直ちに `CorruptedEvidenceException` で拒絶。
+  3. **証跡破損時**: 上述のとおり直ちに `CorruptedEvidenceException` で即時拒絶。
 
 > [!NOTE]
 > **状態再評価の完全排除**:
 > 重試発見において、現在のキューの PENDING / RESOLVED 状態を基に載体を再計算したり、集約内の全子キューの最小 ID を安易に推測したりしてはならない。必ず上記「精確フィールド一致」により唯一の載体行 `carrierQueue` を特定する。
 
-#### 4.2.5 参加集合の再構成と暗号学的検証アルゴリズム
-特定された唯一の載体行 $q_{\text{carrier}}$（ID: `carrierId`）に基づき、集約内キューから本チケットで結案された参加集合を厳密に再構成する：
+#### 4.2.5 参加集合の再構成・暗号学的検証および重試時全不変条件検証アルゴリズム
+特定された唯一の載体行 $q_{\text{carrier}}$（ID: `carrierId`）に基づき、集約内キューから本チケットで結案された参加集合を厳密に再構成し、全不変条件を検証する：
 
 1. **部材キューの収集**:
-   集約内キューのうち、`status == 'RESOLVED'` かつ `resolution_note` がパース可能な `"REP_MEMBER"` であり、以下をすべて満たすキューを収集する：
+   集約内キューのうち、`status == 'RESOLVED'` かつ `resolution_note` が `SES_NF09_MEMBER:` で始まり、プレフィックス除去後の JSON パースが成功し、`v == 1` で以下をすべて満たすキューを収集する：
    - `member.carrierId == carrierId`
    - `member.ticket == approval.requestNo`
    - `member.round == approval.roundNo`
+   ※ `SES_NF09_MEMBER:` で始まりながら JSON パースエラー、`v != 1`、または必須項目欠落のキューを検知した場合は直ちに `CorruptedEvidenceException` で即時拒絶。
 2. **再構成集合の確定**:
    $$Q_{\text{reconstructed}} = \{ q_{\text{carrier}} \} \cup Q_{\text{members}}$$
-3. **厳格検証アサーション**:
+3. **暗号学的検証および参加整合性アサーション**:
    - **所属検証**: $Q_{\text{reconstructed}}$ の全キューが本インボイス集約（親または紐づく子イベント）に正当に属していること。
    - **件数検証**: `Q_reconstructed.size() == carrier.qc` であること。
    - **SHA-256 ダイジェスト検証**:
      $Q_{\text{reconstructed}}$ に含まれる全キュー ID を昇順ソートしてカンマ連結した文字列に対し、SHA-256 ハッシュを計算し、`carrier.qh` と完全一致すること。
    - **関連矛盾の排除**:
      集約内のキューで、本チケット・輪次を名乗りながら `carrierId` が異なるもの、または部材が欠落しているものが存在する場合は直ちに `LinkageConflictException` で拒絶。
-   - **他決裁履歴の独立保護**:
-     過去の別チケットで結案されたキュー（例: 旧チケットで結案された子キュー 10）は、異なる `ticket` / `round` を保持しているため本再構成集合には混入せず、正当に現状維持される。
-4. **バージョンおよびスコープ検証**:
-   - 親行 DB 実バージョンが載体の記録と厳格一致: `lockedParentVersion == carrier.vAf`
-   - 親・全子のスコープがターゲットと一致
+   - **他決裁履歴および歴史的自由文の独立保護**:
+     過去の別チケットで結案されたキューや、歴史的自由テキスト（`[IDEMPOTENT_CLOSE]` 等）を持つキューは、プレフィックスまたは `ticket` / `round` が異なるため本再構成集合には混入せず、正当に現状維持される。
+   > [!IMPORTANT]
+   > **旧自由テキスト存在下でも緩和されない完全性検証**:
+   > 集約内に旧キューの自由テキストが存在する場合でも、本チケットの修復に関与した全参加キューは必ず `SES_NF09_COMPL:` または `SES_NF09_MEMBER:` を保持していなければならない。参加キューが 1 件でも欠落・未更新・破損している場合は、件数検証（`qc`）または SHA-256 ダイジェスト検証（`qh`）によって例外なく Fail-Stop 拒絶される。
+4. **全不変条件の完全復帰検証（重試成功認定の絶対必須条件）**:
+   再実行を成功と認定して `SKIPPED_ALREADY_RESOLVED` を返却する前に、以下の不変条件チェックを**例外なく全項目検証**する：
+   1. **テナントスコープ一致検証**:
+      `carrier.tenant.equals(command.targetTenantId)` であること。
+      不一致時は直ちに `SecurityException("載体に記録されたテナントスコープがコマンド対象と一致しません: expected=" + command.targetTenantId + ", actual=" + carrier.tenant)` を送出して全量ロールバック。
+   2. **法人スコープ一致検証**:
+      `carrier.legalEntity.equals(command.targetLegalEntityId)` であること。
+      不一致時は直ちに `SecurityException("載体に記録された法人スコープがコマンド対象と一致しません: expected=" + command.targetLegalEntityId + ", actual=" + carrier.legalEntity)` を送出して全量ロールバック。
+   3. **承認正本バージョン合致検証**:
+      `carrier.vBf == approval.targetVersion` であること。
+      載体に記録された修復前版（vBf）が、正本決裁承認の対象バージョンと一致していることを検証。不一致時は直ちに `OptimisticLockingFailureException("載体の修復前版が決裁承認対象バージョンと一致しません: approval=" + approval.targetVersion + ", carrier=" + carrier.vBf)` を送出して全量ロールバック。
+   4. **分類別バージョン整合性検証 (vAf vs vBf)**:
+      - `carrier.pCls.equals("P1")` の場合:
+        親更新なし（+0）であるため、厳格に `carrier.vAf == carrier.vBf` であること。不一致時は直ちに `IllegalStateException("P1 載体の修復後バージョンが修復前バージョンと一致しません: vAf=" + carrier.vAf + ", vBf=" + carrier.vBf)` を送出して全量ロールバック。
+      - `carrier.pCls.equals("P2")` の場合:
+        親 CAS 更新（+1）であるため、厳格に `carrier.vAf == carrier.vBf + 1` であること。不一致時は直ちに `IllegalStateException("P2 載体の修復後バージョンが修復前バージョン+1と一致しません: vAf=" + carrier.vAf + ", vBf=" + carrier.vBf)` を送出して全量ロールバック。
+      - **未知分類の即時拒絶**:
+        `carrier.pCls` が `"P1"` または `"P2"` 以外の値（例: `"P3"`, `"P9"`, 不正文字列等）である場合、直ちに `IllegalStateException("未知の修復分類です: " + carrier.pCls)` を送出して全量ロールバック。
+   5. **親行 DB 現バージョン一致検証**:
+      ロックされた親インボイスの DB 実バージョンが載体の修復後記録と厳格一致:
+      `lockedParentVersion == carrier.vAf`
+      不一致（外部改変）時は直ちに `OptimisticLockingFailureException` を送出して全量ロールバック。
+   6. **DB 現行スコープ一致検証**:
+      親インボイスおよび全子イベント行の DB 上の現在スコープが、コマンドのターゲットスコープ `(targetTenantId, targetLegalEntityId)` と完全一致していること。
+   7. **決裁識別子および暗号ハッシュ合致**:
+      `carrier.ticket == approval.requestNo && carrier.round == approval.roundNo && carrier.invId == command.invoiceId` かつ `Q_reconstructed.size() == carrier.qc && sha256(Q_reconstructed) == carrier.qh`。
 5. **正常終了**:
-   上記をすべて満たす場合、`ALREADY_COMPLETED_IDEMPOTENT_RETRY` と認定し、**DML ゼロ件（0 発行）**で `RepairResult.skippedAlreadyResolved(...)` を返却する。
+   上記 1〜7 の全検証に完全合格した場合に限り、`ALREADY_COMPLETED_IDEMPOTENT_RETRY` と認定し、**DML ゼロ件（0 発行）**で `RepairResult.skippedAlreadyResolved(...)` を返却する。
 
 ---
 
@@ -377,8 +425,8 @@ $$\text{lockedParentVersion} == \text{command.expectedInvoiceVersion} == \text{a
 
 ### 4.4 トランザクション原子性と完了証跡の不可分コミット規約
 1. **業務 DML と完了証跡の不可分性**:
-   - 親インボイスの更新（P-2 時）、分類 E-2 子イベントの更新、および代表載体キュー（`REP_COMPL`）・参加部材キュー（`REP_MEMBER`）への証跡書き込みは、**単一のデータベーストランザクション内で不可分にコミット**される。
-   - 完了証跡の JSON 生成失敗、文字列長 500 超過、キュー CAS 更新行数 0 件、DB 障害等のいかなる異常においても、トランザクション全体がロールバックされ、データ・キュー共に処理開始前の状態へ完全復元される。
+   - 親インボイスの更新（P-2 時）、分類 E-2 子イベントの更新、および代表載体キュー（`SES_NF09_COMPL:`）・参加部材キュー（`SES_NF09_MEMBER:`）への証跡書き込みは、**単一のデータベーストランザクション内で不可分にコミット**される。
+   - 完了証跡の JSON 生成失敗、実バイト長 500 バイト超過、キュー CAS 更新行数 0 件、DB 障害等のいかなる異常においても、トランザクション全体がロールバックされ、データ・キュー共に処理開始前の状態へ完全復元される。
 2. **外部ファイルによる代替の禁止**:
    - データベース外のログファイルや JSON ダンプは障害時の事後診断用であり、**トランザクション内完了証跡の代替として使用することは厳格に禁止**する。
 
@@ -411,35 +459,35 @@ UPDATE t_digital_invoice_event
 ```
 - **検証**: 各文の更新行数 == 1。全 $N_2$ 件で計 $N_2$ 行。
 
-#### (3) 代表載体キューの CAS 結案および定長完了証跡（REP_COMPL）格納
+#### (3) 代表載体キューの CAS 結案および固定標識定長完了証跡（SES_NF09_COMPL:）格納
 前述 4.2.2 項で選定された代表載体キューに対し：
 ```sql
 UPDATE t_nf09_scope_repair_queue
    SET status = 'RESOLVED',
        resolved_at = NOW(),
        resolved_by = :executorUserId,
-       resolution_note = :carrierCompactJson,
+       resolution_note = :carrierProtocolText,
        version = version + 1
  WHERE id = :carrierQueueId
    AND status = 'PENDING'
    AND version = :expectedCarrierQueueVersion;
 ```
-- **検証**: 更新行数 == 1。`:carrierCompactJson` の実バイト長 $\le 500$ を事前検証。
+- **検証**: 更新行数 == 1。`:carrierProtocolText`（`SES_NF09_COMPL:` + コンパクト JSON）の実バイト長 $\le 500$ バイト（UTF-8）を事前検証。
 
-#### (4) 参加部材キュー全行の CAS 結案および構造化参照（REP_MEMBER）格納
+#### (4) 参加部材キュー全行の CAS 結案および固定標識構造化参照（SES_NF09_MEMBER:）格納
 代表載体以外の参加キュー全行に対し：
 ```sql
 UPDATE t_nf09_scope_repair_queue
    SET status = 'RESOLVED',
        resolved_at = NOW(),
        resolved_by = :executorUserId,
-       resolution_note = :memberStructuredJson,
+       resolution_note = :memberProtocolText,
        version = version + 1
  WHERE id = :memberQueueId
    AND status = 'PENDING'
    AND version = :expectedMemberQueueVersion;
 ```
-- **検証**: 各行更新行数 == 1。`:memberStructuredJson` の実バイト長 $\le 500$ を事前検証。
+- **検証**: 各行更新行数 == 1。`:memberProtocolText`（`SES_NF09_MEMBER:` + コンパクト JSON）の実バイト長 $\le 500$ バイト（UTF-8）を事前検証。
 
 ---
 
@@ -453,8 +501,8 @@ UPDATE t_nf09_scope_repair_queue
 | **MISSING_SCOPE** (欠落あり) | **PENDING** | **CAS UPDATE 実行** | 正当な修復対象。前提条件（承認・資格・バージョン・分類）成立後に親・子・キューを更新。 |
 | **MISSING_SCOPE** (欠落あり) | **RESOLVED** | **即時 REJECT (`IllegalStateException`)** | キューは解決済みなのに実データが未解決という矛盾。障害として即時中断。 |
 | **CONSISTENT_SCOPE** (完全一致) | **NO_QUEUE** (キュー不在) | **LEGAL SKIP (正当スキップ)** | 健全レコード。元々修復不要でありキューが存在しないことが正常。DML なし。 |
-| **CONSISTENT_SCOPE** (完全一致) | **PENDING** | **キューのみ CAS 結案 (`[IDEMPOTENT_CLOSE]`)** | バージョン合致前提。親/子 DML をスキップし、キューのみ PENDING $\to$ RESOLVED へ進める。※版不一致時は即 REJECT。 |
-| **CONSISTENT_SCOPE** (完全一致) | **RESOLVED** | **已完成冪等重試または REJECT** | 精確フィールド一致による唯一載体特定、部材照合による $Q$ 再構成、qc/qh 合致、および版合致時は合法スキップ（DML=0）。それ以外は REJECT。 |
+| **CONSISTENT_SCOPE** (完全一致) | **PENDING** | **キューのみ CAS 結案 (P-1 載体・部材証跡格納)** | バージョン合致前提。親/子 DML をスキップ（親バージョン変化量 +0）し、キューのみ P-1 プロトコル証跡（pCls="P1", vAf=vBf）を格納して PENDING $\to$ RESOLVED へ進める。※版不一致時は即 REJECT。 |
+| **CONSISTENT_SCOPE** (完全一致) | **RESOLVED** | **已完成冪等重試または REJECT** | 精確フィールド一致による唯一載体特定、部材照合による $Q$ 再構成、qc/qh 合致、および全不変条件検証合格時は合法スキップ（DML=0）。それ以外は REJECT。 |
 | **CONFLICT_SCOPE** (非空衝突) | 任意 (NO_QUEUE / PENDING / RESOLVED) | **即時 REJECT (`ConflictException`)** | 非 NULL スコープの再帰属は本境界で禁止。Fail-Stop し全量ロールバック。 |
 | 任意 | **UNKNOWN_STATUS** (PENDING/RESOLVED 以外) | **即時 REJECT (`IllegalStateException`)** | 不正なキュー状態。予期せぬデータ破壊を防ぐため即時停止。 |
 
@@ -462,11 +510,11 @@ UPDATE t_nf09_scope_repair_queue
 1. **父 NO_QUEUE ＋ 子 PENDING**:
    - 親インボイスは元々健全（スコープ完備）のためキュー不在。
    - 子イベントのみが修復対象。親行 UPDATE は発行せず（親バージョン変化量 +0）、分類 E-2 子イベントを更新。
-   - 初回選定規約に基づき `min(participating_child_queue.id)` が代表載体（`REP_COMPL`）となり、他子キューは `REP_MEMBER` を格納。
+   - 初回選定規約に基づき `min(participating_child_queue.id)` が代表載体（`SES_NF09_COMPL:`）となり、他子キューは `SES_NF09_MEMBER:` を格納。
 2. **父 RESOLVED ＋ 子 PENDING**:
    - 親インボイスは過去の修復等で既に `RESOLVED` であり、その監査証跡が親キューに格納済。
    - 親キューの既存証跡を保護するため、親キューには一切上書きしない。
-   - 子イベントのみを更新し、初回選定規約に基づき `min(participating_child_queue.id)` が代表載体（`REP_COMPL`）となる。
+   - 子イベントのみを更新し、初回選定規約に基づき `min(participating_child_queue.id)` が代表載体（`SES_NF09_COMPL:`）となる。
    - 重試時は精確フィールド一致により `min(participating_child_queue.id)` が唯一載体として正しく発見され、親の旧証跡は完全に保護される。
 
 ---
@@ -509,7 +557,7 @@ UPDATE t_nf09_scope_repair_queue
 
 ## 7. 検証テストマトリクス・MySQL 割当・AI-1 引渡規約 (Test Matrix, MySQL Shard Allocation & AI-1 Queue)
 
-### 7.1 包括的テストマトリクス（全 44 シナリオ）
+### 7.1 包括的テストマトリクス（全 49 シナリオ）
 
 | テスト ID | シナリオ概要 | 入力・対象データ条件 | 期待結果・検証アサーション | 実行環境・担当区分 |
 |---|---|---|---|---|
@@ -556,12 +604,17 @@ UPDATE t_nf09_scope_repair_queue
 | **TC-REP-BND-28b** | 正常系・父 PENDING 載体結案後の重試・正確親載体発見 | 初回実行時に親 PENDING が載体として結案。重試時に親は RESOLVED | 親が RESOLVED でも精確一致により親行を唯一載体として特定し DML=0 重試成功 | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-28c** | 異常系・部材レコードの輪次相違・関連不整合拒絶 | 部材キューの round がチケットと不一致、または carrierId が別載体を指定 | 関連不整合を検知。`LinkageConflictException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
 | **TC-REP-BND-28d** | 異常系・重試時の部材欠落・ハッシュ不一致拒絶 | 参加部材キューが欠落または改変され、再構成集合の件数/ハッシュ不一致 | 集合破損を検知。`CorruptedEvidenceException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
-| **TC-REP-BND-28e** | 異常系・同一集約内複数載体衝突拒絶 | 同一集約内に同一 ticket/round/invId の REP_COMPL 載体が複数存在 | 証跡多重破損を検知。`IllegalStateException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-28e** | 異常系・同一集約内複数載体衝突拒絶 | 同一集約内に同一 ticket/round/invId の SES_NF09_COMPL: 載体が複数存在 | 証跡多重破損を検知。`IllegalStateException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-29a** | 正常系・旧キュー自由テキスト存在下での新チケット載体・部材正常判定 | 集約内旧キューに `[IDEMPOTENT_CLOSE]` や自由テキストが存在、新チケットの親・子は固定標識付きで結案済 | 旧自由テキストを非プロトコル行として無視。新プロトコル標識を持つ載体・部材のみで正しく再構成・ハッシュ検証に成功し、DML=0 で `SKIPPED_ALREADY_RESOLVED` 返却 | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-29b** | 異常系・プロトコル証跡破損 / 未知バージョン / 必須フィールド欠落拒絶 | キューに `SES_NF09_COMPL:` または `SES_NF09_MEMBER:` で始まる証跡が存在するが、JSON 文法破損、`v=2`、または `vBf`/`qc` 等が欠落 | プロトコル標識行の不正を看過せず、直ちに `CorruptedEvidenceException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-29c** | 異常系・重試時テナント / 法人スコープ不一致拒絶 | 重試実行時、特定された載体の `carrier.tenant != command.targetTenantId` または `carrier.legalEntity != command.targetLegalEntityId` | スコープ不一致を検知。`SecurityException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-29d** | 異常系・重試時 vBf 承認版不一致拒絶 | 重試実行時、特定された載体の `carrier.vBf != approval.targetVersion` | 承認対象バージョン不整合を検知。`OptimisticLockingFailureException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
+| **TC-REP-BND-29e** | 異常系・分類別 vAf/vBf 整合不一致および未知分類拒絶 | 重試時載体の関係不正（(1) P1 で `vAf != vBf`、(2) P2 で `vAf != vBf + 1`、(3) 未知分類 `pCls="P9"`） | 載体内部の論理不整合または未知分類を検知。`IllegalStateException` で即時拒絶・全量ロールバック | Fast H2 & MySQL (両方) |
 
 ### 7.2 テストクラス設計と環境責務
 - **Fast Feedback 単体テスト**:
   - クラス名: `DigitalInvoiceScopeRepairServiceTest`
-  - 対象: Spring H2 テスト環境において、TC-REP-BND-01〜04, 05a〜05e, 06〜16, 19〜28e を高速回帰テストとして実行。
+  - 対象: Spring H2 テスト環境において、TC-REP-BND-01〜04, 05a〜05e, 06〜16, 19〜29e を高速回帰テストとして実行。
 - **Real MySQL 統合テスト**:
   - クラス名: `DigitalInvoiceScopeRepairMySqlTest`
   - 配置先: `src/test/java/com/ses/repair/DigitalInvoiceScopeRepairMySqlTest.java`
@@ -597,7 +650,7 @@ UPDATE t_nf09_scope_repair_queue
 
 ```mermaid
 flowchart LR
-    G1[Gate 1: 独立 CODE Review PASS<br/>Astra によるコード品質審査] --> G2[Gate 2: Staging 演練検証 PASS<br/>実規模合成データ・44テスト完勝]
+    G1[Gate 1: 独立 CODE Review PASS<br/>Astra によるコード品質審査] --> G2[Gate 2: Staging 演練検証 PASS<br/>実規模合成データ・49テスト完勝]
     G2 --> G3[Gate 3: 本番人工決裁 Sign-Off<br/>財務統括 + 運用統括 + リードDBA]
     G3 --> ProdEnable[本番実行許可<br/>ses.repair.invoice.enabled=true]
 ```
@@ -605,7 +658,7 @@ flowchart LR
 1. **Gate 1: 独立 CODE Review PASS（Astra）**:
    - 本計画に基づく Java 実装・Mapper・CLI・テストコードが、Astra による独立コードレビューにおいて `CODE REVIEW PASS` を獲得すること。
 2. **Gate 2: Staging 演練検証 PASS**:
-   - Staging 環境において、合成データを用いた TC-REP-BND-01〜28e（全 44 パターン）がすべて PASS し、Postflight SQL-06（野良 NULL ゼロ件）が実証されること。
+   - Staging 環境において、合成データを用いた TC-REP-BND-01〜29e（全 49 パターン）がすべて PASS し、Postflight SQL-06（野良 NULL ゼロ件）が実証されること。
 3. **Gate 3: 本番人工決裁サインオフ（実決裁完了）**:
    - 財務統括責任者（インボイス帰属の業務承認）
    - 運用統括責任者（保守ウィンドウ確保およびトラフィック遮断承認）
@@ -618,5 +671,5 @@ flowchart LR
 
 | レビュー役職 | 氏名 | 承認ステータス | 承認日 | 承認コメント / 判定 |
 |---|---|---|---|---|
-| **独立 Reviewer** | Astra | **PLAN REVIEW PENDING** | - | 境界 A 最小実装計画書の独立審査待ち（初回選定・重試発見・集合再構成閉環反映版） |
-| **技術仕様担当 / 執筆者** | AI-3 (gpt-6-luna) | **SUBMITTED** | 2026-10-28 | Astra P2 指摘事項（初回載体選定と重試発見の分離、REP_MEMBER 構造化バインド、精確フィールド探索、集合再構成、全44テスト）を反映し再提出 |
+| **独立 Reviewer** | Astra | **PLAN REVIEW PENDING** | - | 境界 A 最小実装計画書の独立審査待ち（全不変条件検証・固定プロトコル標識・旧自由文分離閉環反映版） |
+| **技術仕様担当 / 執筆者** | AI-3 (gpt-6-luna) | **SUBMITTED** | 2026-10-28 | Astra P2 指摘事項（重試時全不変条件復帰検証、固定プロトコル標識 SES_NF09_、旧自由文分離保護、破損時即時拒絶、全49テスト）を反映し再提出 |
