@@ -1,5 +1,6 @@
 package com.ses.service.repair;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -12,7 +13,10 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
- * 境界A 修復証跡（SES_NF09_COMPL / SES_NF09_MEMBER）のエンコード・デコードおよび暗号学的ダイジェスト算出コンポーネント。
+ * 境界A 修復証跡（SES_NF09_COMPL / SES_NF09_MEMBER）の厳格エンコード・デコードおよび暗号学的ダイジェスト算出コンポーネント。
+ * <p>
+ * 共有 ObjectMapper を改変せず、コンポーネント独立の厳格設定（重複キー禁止・末尾余剰トークン禁止・数値型厳格検証）を保持する。
+ * </p>
  */
 public class RepairEvidenceCodec {
 
@@ -22,8 +26,11 @@ public class RepairEvidenceCodec {
 
     private final ObjectMapper objectMapper;
 
-    public RepairEvidenceCodec(ObjectMapper objectMapper) {
-        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+    public RepairEvidenceCodec(ObjectMapper mapper) {
+        Objects.requireNonNull(mapper, "objectMapper must not be null");
+        // 共有 ObjectMapper を直接変更せず、コンポーネント独立の厳格設定を持つコピーを生成
+        this.objectMapper = mapper.copy();
+        this.objectMapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     }
 
     public RepairEvidenceCodec() {
@@ -79,7 +86,7 @@ public class RepairEvidenceCodec {
     }
 
     /**
-     * 文字列から代表載体証跡レコードをパースする。
+     * 文字列から代表載体証跡レコードを厳格にパースする。
      * <p>
      * 固定標識プレフィックスを持たない歴史的普通備考の場合は null を返却して安全に無視する。
      * 固定標識プレフィックスを持つが構文やスキーマが破損している場合は CorruptedEvidenceException を送出する。
@@ -94,38 +101,29 @@ public class RepairEvidenceCodec {
             return null;
         }
         String json = note.substring(CARRIER_PREFIX.length());
-        try {
-            JsonNode node = objectMapper.readTree(json);
+        try (JsonParser parser = objectMapper.createParser(json)) {
+            JsonNode node = objectMapper.readTree(parser);
             if (node == null || !node.isObject()) {
                 throw new CorruptedEvidenceException("代表載体証跡がJSONオブジェクトではありません");
             }
-            checkRequiredField(node, "v");
-            checkRequiredField(node, "ticket");
-            checkRequiredField(node, "round");
-            checkRequiredField(node, "invId");
-            checkRequiredField(node, "tenant");
-            checkRequiredField(node, "legalEntity");
-            checkRequiredField(node, "pCls");
-            checkRequiredField(node, "vBf");
-            checkRequiredField(node, "vAf");
-            checkRequiredField(node, "qc");
-            checkRequiredField(node, "qh");
-            checkRequiredField(node, "by");
-            checkRequiredField(node, "at");
+            // 末尾に余剰トークンや第2のJSONが存在しないことを厳格検証
+            if (parser.nextToken() != null) {
+                throw new CorruptedEvidenceException("JSON末尾に余分なトークンまたは第2のJSONが存在します: " + parser.currentToken());
+            }
 
-            int v = node.get("v").asInt();
-            String ticket = node.get("ticket").asText();
-            int round = node.get("round").asInt();
-            long invId = node.get("invId").asLong();
-            String tenant = node.get("tenant").asText();
-            long legalEntity = node.get("legalEntity").asLong();
-            String pCls = node.get("pCls").asText();
-            long vBf = node.get("vBf").asLong();
-            long vAf = node.get("vAf").asLong();
-            int qc = node.get("qc").asInt();
-            String qh = node.get("qh").asText();
-            long by = node.get("by").asLong();
-            String at = node.get("at").asText();
+            int v = getRequiredInt(node, "v");
+            String ticket = getRequiredString(node, "ticket");
+            int round = getRequiredInt(node, "round");
+            long invId = getRequiredLong(node, "invId");
+            String tenant = getRequiredString(node, "tenant");
+            long legalEntity = getRequiredLong(node, "legalEntity");
+            String pCls = getRequiredString(node, "pCls");
+            long vBf = getRequiredLong(node, "vBf");
+            long vAf = getRequiredLong(node, "vAf");
+            int qc = getRequiredInt(node, "qc");
+            String qh = getRequiredString(node, "qh");
+            long by = getRequiredLong(node, "by");
+            String at = getRequiredString(node, "at");
 
             return new CarrierEvidence(v, ticket, round, invId, tenant, legalEntity, pCls, vBf, vAf, qc, qh, by, at);
         } catch (CorruptedEvidenceException e) {
@@ -136,7 +134,7 @@ public class RepairEvidenceCodec {
     }
 
     /**
-     * 文字列から参加部材参照レコードをパースする。
+     * 文字列から参加部材参照レコードを厳格にパースする。
      * <p>
      * 固定標識プレフィックスを持たない歴史的普通備考の場合は null を返却して安全に無視する。
      * 固定標識プレフィックスを持つが構文やスキーマが破損している場合は CorruptedEvidenceException を送出する。
@@ -151,20 +149,20 @@ public class RepairEvidenceCodec {
             return null;
         }
         String json = note.substring(MEMBER_PREFIX.length());
-        try {
-            JsonNode node = objectMapper.readTree(json);
+        try (JsonParser parser = objectMapper.createParser(json)) {
+            JsonNode node = objectMapper.readTree(parser);
             if (node == null || !node.isObject()) {
                 throw new CorruptedEvidenceException("参加部材参照がJSONオブジェクトではありません");
             }
-            checkRequiredField(node, "v");
-            checkRequiredField(node, "carrierId");
-            checkRequiredField(node, "ticket");
-            checkRequiredField(node, "round");
+            // 末尾に余剰トークンや第2のJSONが存在しないことを厳格検証
+            if (parser.nextToken() != null) {
+                throw new CorruptedEvidenceException("JSON末尾に余分なトークンまたは第2のJSONが存在します: " + parser.currentToken());
+            }
 
-            int v = node.get("v").asInt();
-            long carrierId = node.get("carrierId").asLong();
-            String ticket = node.get("ticket").asText();
-            int round = node.get("round").asInt();
+            int v = getRequiredInt(node, "v");
+            long carrierId = getRequiredLong(node, "carrierId");
+            String ticket = getRequiredString(node, "ticket");
+            int round = getRequiredInt(node, "round");
 
             return new MemberEvidence(v, carrierId, ticket, round);
         } catch (CorruptedEvidenceException e) {
@@ -199,10 +197,47 @@ public class RepairEvidenceCodec {
         }
     }
 
-    private void checkRequiredField(JsonNode node, String fieldName) {
+    private JsonNode getRequiredField(JsonNode node, String fieldName) {
         JsonNode f = node.get(fieldName);
         if (f == null || f.isNull()) {
             throw new CorruptedEvidenceException("必須フィールドが欠落またはNULLです: " + fieldName);
         }
+        return f;
+    }
+
+    private int getRequiredInt(JsonNode node, String fieldName) {
+        JsonNode f = getRequiredField(node, fieldName);
+        if (f.isTextual()) {
+            throw new CorruptedEvidenceException("数値フィールドが文字列形式で指定されています: " + fieldName);
+        }
+        if (f.isFloatingPointNumber()) {
+            throw new CorruptedEvidenceException("整数フィールドに小数または浮動小数点数が指定されています: " + fieldName);
+        }
+        if (!f.isIntegralNumber() || !f.canConvertToInt()) {
+            throw new CorruptedEvidenceException("整数値がint型の表現範囲外です: " + fieldName);
+        }
+        return f.asInt();
+    }
+
+    private long getRequiredLong(JsonNode node, String fieldName) {
+        JsonNode f = getRequiredField(node, fieldName);
+        if (f.isTextual()) {
+            throw new CorruptedEvidenceException("数値フィールドが文字列形式で指定されています: " + fieldName);
+        }
+        if (f.isFloatingPointNumber()) {
+            throw new CorruptedEvidenceException("整数フィールドに小数または浮動小数点数が指定されています: " + fieldName);
+        }
+        if (!f.isIntegralNumber() || !f.canConvertToLong()) {
+            throw new CorruptedEvidenceException("整数値がlong型の表現範囲外です: " + fieldName);
+        }
+        return f.asLong();
+    }
+
+    private String getRequiredString(JsonNode node, String fieldName) {
+        JsonNode f = getRequiredField(node, fieldName);
+        if (!f.isTextual()) {
+            throw new CorruptedEvidenceException("文字列フィールドが非テキスト形式で指定されています: " + fieldName);
+        }
+        return f.asText();
     }
 }

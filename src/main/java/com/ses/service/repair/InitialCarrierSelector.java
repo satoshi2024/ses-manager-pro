@@ -2,7 +2,9 @@ package com.ses.service.repair;
 
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 初回実行時における確定載体選定コンポーネント (Initial Carrier Selector)
@@ -30,7 +32,12 @@ public final class InitialCarrierSelector {
         if (participatingQueues.isEmpty()) {
             throw new IllegalArgumentException("参加キュー集合が空です");
         }
+        Set<Long> seenIds = new HashSet<>();
         for (ScopeRepairQueueSnapshot q : participatingQueues) {
+            Objects.requireNonNull(q, "queue in participatingQueues must not be null");
+            if (!seenIds.add(q.id())) {
+                throw new IllegalArgumentException("参加キュー集合に重複するキューIDが存在します: id=" + q.id());
+            }
             if (!"PENDING".equals(q.status())) {
                 throw new IllegalArgumentException("参加キュー集合にPENDING以外のキューが含まれています: id="
                     + q.id() + ", status=" + q.status());

@@ -1,5 +1,8 @@
 package com.ses.service.repair;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
+
 /**
  * 代表載体完了証跡レコード (SES_NF09_COMPL)
  */
@@ -57,6 +60,14 @@ public record CarrierEvidence(
         }
         if (at == null || at.isBlank()) {
             throw new CorruptedEvidenceException("結案日時が空です");
+        }
+        if (!at.endsWith("Z")) {
+            throw new CorruptedEvidenceException("結案日時がUTC形式 (末尾Z) ではありません: " + at);
+        }
+        try {
+            Instant.parse(at);
+        } catch (DateTimeParseException e) {
+            throw new CorruptedEvidenceException("結案日時のISO-8601 UTC形式が不正です: " + at, e);
         }
     }
 }

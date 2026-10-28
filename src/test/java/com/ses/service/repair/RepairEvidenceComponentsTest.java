@@ -28,7 +28,7 @@ class RepairEvidenceComponentsTest {
     }
 
     // =========================================================================
-    // 1. 正常系・エンコード/デコード
+    // 1. コーデック正常系 (Codec Valid Encoding / Decoding)
     // =========================================================================
 
     @Test
@@ -100,7 +100,6 @@ class RepairEvidenceComponentsTest {
     @DisplayName("容量境界: 500バイト以内のシリアライズは正常通過すること")
     void testCapacityBoundary_within500BytesPasses() {
         String digest = codec.calculateQueueDigest(List.of(100L));
-        // tenant 長を約 80 文字に設定して適正範囲内であることを検証
         String tenant80 = "t".repeat(80);
         CarrierEvidence evidence = new CarrierEvidence(
             1, "APPR-001", 1, 100L, tenant80, 100L, "P1", 0L, 0L, 1, digest, 1L, "2026-10-28T16:30:00Z"
@@ -115,7 +114,6 @@ class RepairEvidenceComponentsTest {
     @DisplayName("容量境界: 500バイト超過時は截断せず直ちに IllegalStateException を送出すること")
     void testCapacityBoundary_over500BytesThrows() {
         String digest = codec.calculateQueueDigest(List.of(100L));
-        // tenant 長を 350 文字にして 500 バイトを超過させる
         String hugeTenant = "t".repeat(350);
         CarrierEvidence evidence = new CarrierEvidence(
             1, "APPR-001", 1, 100L, hugeTenant, 100L, "P1", 0L, 0L, 1, digest, 1L, "2026-10-28T16:30:00Z"
@@ -145,11 +143,11 @@ class RepairEvidenceComponentsTest {
     }
 
     // =========================================================================
-    // 4. プロトコル標識行の破損・未知バージョン・欠落拒絶 (Corrupted Evidence Rejection)
+    // 4. コーデック厳格検証 (Strict Parsing & Type Verification)
     // =========================================================================
 
     @Test
-    @DisplayName("異常系: プロトコル標識行がJSON不正の場合は CorruptedEvidenceException を送出すること")
+    @DisplayName("厳格構文: プロトコル標識行がJSON不正の場合は CorruptedEvidenceException を送出すること")
     void testParse_corruptedProtocolRecords_syntaxErrorThrows() {
         assertThatThrownBy(() -> codec.parseCarrier("SES_NF09_COMPL:{malformed_json}"))
             .isInstanceOf(CorruptedEvidenceException.class);
@@ -159,7 +157,7 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("異常系: プロトコルバージョン不一致 (v != 1) の場合は CorruptedEvidenceException を送出すること")
+    @DisplayName("厳格構文: プロトコルバージョン不一致 (v != 1) の場合は CorruptedEvidenceException を送出すること")
     void testParse_corruptedProtocolRecords_versionMismatchThrows() {
         String digest = codec.calculateQueueDigest(List.of(100L));
         String jsonV2 = "SES_NF09_COMPL:{\"v\":2,\"ticket\":\"T1\",\"round\":1,\"invId\":100,\"tenant\":\"t1\",\"legalEntity\":100,\"pCls\":\"P1\",\"vBf\":0,\"vAf\":0,\"qc\":1,\"qh\":\""
@@ -176,19 +174,99 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
-    @DisplayName("異常系: 必須フィールド欠落時は CorruptedEvidenceException を送出すること")
+    @DisplayName("厳格構文: 必須フィールド欠落時は CorruptedEvidenceException を送出すること")
     void testParse_corruptedProtocolRecords_missingFieldThrows() {
-        // vBf が欠落した carrier JSON
         String missingVbf = "SES_NF09_COMPL:{\"v\":1,\"ticket\":\"T1\",\"round\":1,\"invId\":100,\"tenant\":\"t1\",\"legalEntity\":100,\"pCls\":\"P1\",\"vAf\":0,\"qc\":1,\"qh\":\"...\",\"by\":1,\"at\":\"...\"}";
         assertThatThrownBy(() -> codec.parseCarrier(missingVbf))
             .isInstanceOf(CorruptedEvidenceException.class)
             .hasMessageContaining("必須フィールドが欠落またはNULL");
 
-        // carrierId が欠落した member JSON
         String missingCarrierId = "SES_NF09_MEMBER:{\"v\":1,\"ticket\":\"T1\",\"round\":1}";
         assertThatThrownBy(() -> codec.parseMember(missingCarrierId))
             .isInstanceOf(CorruptedEvidenceException.class)
             .hasMessageContaining("必須フィールドが欠落またはNULL");
+    }
+
+    @Test
+    @DisplayName("厳格構文: 重複キーを含むJSONは CorruptedEvidenceException を送出すること")
+    void testParse_duplicateKeysThrows() {
+        String digest = codec.calculateQueueDigest(List.of(100L));
+        // ticket キーが重複
+        String dupKeyJson = "SES_NF09_COMPL:{\"v\":1,\"ticket\":\"T1\",\"ticket\":\"T2\",\"round\":1,\"invId\":100,\"tenant\":\"t1\",\"legalEntity\":100,\"pCls\":\"P1\",\"vBf\":0,\"vAf\":0,\"qc\":1,\"qh\":\""
+            + digest + "\",\"by\":1,\"at\":\"2026-10-28T16:30:00Z\"}";
+
+        assertThatThrownBy(() -> codec.parseCarrier(dupKeyJson))
+            .isInstanceOf(CorruptedEvidenceException.class);
+    }
+
+    @Test
+    @DisplayName("厳格構文: JSON末尾に第2のJSONまたは余剰トークンが存在する場合は CorruptedEvidenceException を送出すること")
+    void testParse_trailingExtraTokensThrows() {
+        String digest = codec.calculateQueueDigest(List.of(100L));
+        String trailingJson = "SES_NF09_COMPL:{\"v\":1,\"ticket\":\"T1\",\"round\":1,\"invId\":100,\"tenant\":\"t1\",\"legalEntity\":100,\"pCls\":\"P1\",\"vBf\":0,\"vAf\":0,\"qc\":1,\"qh\":\""
+            + digest + "\",\"by\":1,\"at\":\"2026-10-28T16:30:00Z\"} {\"extra\":1}";
+
+        assertThatThrownBy(() -> codec.parseCarrier(trailingJson))
+            .isInstanceOf(CorruptedEvidenceException.class)
+            .hasMessageContaining("余分なトークンまたは第2のJSONが存在します");
+    }
+
+    @Test
+    @DisplayName("厳格構文: 数値フィールドが文字列形式で指定された場合は CorruptedEvidenceException を送出すること")
+    void testParse_numericStringThrows() {
+        String digest = codec.calculateQueueDigest(List.of(100L));
+        // round が文字列 "1"
+        String numStringJson = "SES_NF09_COMPL:{\"v\":1,\"ticket\":\"T1\",\"round\":\"1\",\"invId\":100,\"tenant\":\"t1\",\"legalEntity\":100,\"pCls\":\"P1\",\"vBf\":0,\"vAf\":0,\"qc\":1,\"qh\":\""
+            + digest + "\",\"by\":1,\"at\":\"2026-10-28T16:30:00Z\"}";
+
+        assertThatThrownBy(() -> codec.parseCarrier(numStringJson))
+            .isInstanceOf(CorruptedEvidenceException.class)
+            .hasMessageContaining("数値フィールドが文字列形式");
+    }
+
+    @Test
+    @DisplayName("厳格構文: 整数フィールドに小数が指定された場合は CorruptedEvidenceException を送出すること")
+    void testParse_floatingPointNumberThrows() {
+        String digest = codec.calculateQueueDigest(List.of(100L));
+        // round が小数 1.5
+        String floatJson = "SES_NF09_COMPL:{\"v\":1,\"ticket\":\"T1\",\"round\":1.5,\"invId\":100,\"tenant\":\"t1\",\"legalEntity\":100,\"pCls\":\"P1\",\"vBf\":0,\"vAf\":0,\"qc\":1,\"qh\":\""
+            + digest + "\",\"by\":1,\"at\":\"2026-10-28T16:30:00Z\"}";
+
+        assertThatThrownBy(() -> codec.parseCarrier(floatJson))
+            .isInstanceOf(CorruptedEvidenceException.class)
+            .hasMessageContaining("小数または浮動小数点数");
+    }
+
+    @Test
+    @DisplayName("厳格構文: 整数値が型表現範囲外 (オーバーフロー) の場合は CorruptedEvidenceException を送出すること")
+    void testParse_overflowIntegerThrows() {
+        String digest = codec.calculateQueueDigest(List.of(100L));
+        // round (int) に Long.MAX_VALUE 相当の巨大値を指定
+        String overflowJson = "SES_NF09_COMPL:{\"v\":1,\"ticket\":\"T1\",\"round\":999999999999999999,\"invId\":100,\"tenant\":\"t1\",\"legalEntity\":100,\"pCls\":\"P1\",\"vBf\":0,\"vAf\":0,\"qc\":1,\"qh\":\""
+            + digest + "\",\"by\":1,\"at\":\"2026-10-28T16:30:00Z\"}";
+
+        assertThatThrownBy(() -> codec.parseCarrier(overflowJson))
+            .isInstanceOf(CorruptedEvidenceException.class)
+            .hasMessageContaining("表現範囲外");
+    }
+
+    @Test
+    @DisplayName("厳格構文: 結案日時のUTC形式 (Z末尾) が不正な場合は CorruptedEvidenceException を送出すること")
+    void testParse_invalidUtcTimestampThrows() {
+        String digest = codec.calculateQueueDigest(List.of(100L));
+        // Z なしローカル日時
+        String noZ = "SES_NF09_COMPL:{\"v\":1,\"ticket\":\"T1\",\"round\":1,\"invId\":100,\"tenant\":\"t1\",\"legalEntity\":100,\"pCls\":\"P1\",\"vBf\":0,\"vAf\":0,\"qc\":1,\"qh\":\""
+            + digest + "\",\"by\":1,\"at\":\"2026-10-28 16:30:00\"}";
+        assertThatThrownBy(() -> codec.parseCarrier(noZ))
+            .isInstanceOf(CorruptedEvidenceException.class)
+            .hasMessageContaining("UTC形式 (末尾Z) ではありません");
+
+        // +09:00 表記
+        String withTz = "SES_NF09_COMPL:{\"v\":1,\"ticket\":\"T1\",\"round\":1,\"invId\":100,\"tenant\":\"t1\",\"legalEntity\":100,\"pCls\":\"P1\",\"vBf\":0,\"vAf\":0,\"qc\":1,\"qh\":\""
+            + digest + "\",\"by\":1,\"at\":\"2026-10-28T16:30:00+09:00\"}";
+        assertThatThrownBy(() -> codec.parseCarrier(withTz))
+            .isInstanceOf(CorruptedEvidenceException.class)
+            .hasMessageContaining("UTC形式 (末尾Z) ではありません");
     }
 
     // =========================================================================
@@ -225,7 +303,6 @@ class RepairEvidenceComponentsTest {
     @Test
     @DisplayName("初回選定: 集約内に旧チケットのより小さいIDの既結案キューが存在しても参加PENDING群の最小が選ばれること")
     void testInitialCarrierSelection_ignoresOldResolvedQueueWithSmallerId() {
-        // 旧キュー id=5 は RESOLVED であり、今回の参加キュー (PENDING) には含まれない
         ScopeRepairQueueSnapshot child20 = new ScopeRepairQueueSnapshot(20L, "DIGITAL_INVOICE_EVENT", 2001L, "PENDING", null, 0L);
         ScopeRepairQueueSnapshot child30 = new ScopeRepairQueueSnapshot(30L, "DIGITAL_INVOICE_EVENT", 2002L, "PENDING", null, 0L);
 
@@ -234,7 +311,241 @@ class RepairEvidenceComponentsTest {
     }
 
     // =========================================================================
-    // 6. 重試発見・再構成・全不変条件検証 (Retry Discovery & Invariants Verification)
+    // 6. 入力および集約バインディング検証 (Input & Aggregate Binding)
+    // =========================================================================
+
+    @Test
+    @DisplayName("入力バインディング: 親インボイスIDが修復ターゲットと不一致の場合は IllegalArgumentException を送出すること")
+    void testInputBinding_parentInvoiceIdMismatch_throws() {
+        ParentInvoiceSnapshot wrongParent = new ParentInvoiceSnapshot(9999L, "tenant-1", 100L, 0L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot approval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 100L, 0L);
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(), wrongParent, List.of(), targetScope, approval
+        )).isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("親インボイスIDが修復ターゲットと一致しません");
+    }
+
+    @Test
+    @DisplayName("入力バインディング: 承認証跡のインボイスIDが修復ターゲットと不一致の場合は IllegalArgumentException を送出すること")
+    void testInputBinding_approvalInvoiceIdMismatch_throws() {
+        ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot wrongApproval = new ApprovalEvidenceSnapshot("APPR-001", 1, 9999L, "tenant-1", 100L, 0L);
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(), parent, List.of(), targetScope, wrongApproval
+        )).isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("決裁承認証跡のインボイスIDが修復ターゲットと一致しません");
+    }
+
+    @Test
+    @DisplayName("入力バインディング: 承認証跡のテナントスコープ不一致は SecurityException を送出すること")
+    void testInputBinding_approvalTenantMismatch_throws() {
+        ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot wrongTenantApproval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-9", 100L, 0L);
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(), parent, List.of(), targetScope, wrongTenantApproval
+        )).isInstanceOf(SecurityException.class)
+          .hasMessageContaining("決裁承認証跡のテナントスコープが修復ターゲットと一致しません");
+    }
+
+    @Test
+    @DisplayName("入力バインディング: 承認証跡の法人スコープ不一致は SecurityException を送出すること")
+    void testInputBinding_approvalLegalEntityMismatch_throws() {
+        ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot wrongEntityApproval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 999L, 0L);
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(), parent, List.of(), targetScope, wrongEntityApproval
+        )).isInstanceOf(SecurityException.class)
+          .hasMessageContaining("決裁承認証跡の法人スコープが修復ターゲットと一致しません");
+    }
+
+    @Test
+    @DisplayName("入力バインディング: childEvents が null の場合は NullPointerException を送出すること")
+    void testInputBinding_childEventsNull_throws() {
+        ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot approval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 100L, 0L);
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(), parent, null, targetScope, approval
+        )).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    @DisplayName("入力バインディング: 子イベントが親インボイスに属していない場合は IllegalArgumentException を送出すること")
+    void testInputBinding_childEventWrongParentInvoice_throws() {
+        ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
+        ChildInvoiceEventSnapshot wrongChild = new ChildInvoiceEventSnapshot(2001L, 9999L, "tenant-1", 100L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot approval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 100L, 0L);
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(), parent, List.of(wrongChild), targetScope, approval
+        )).isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("子イベントが親インボイスに属していません");
+    }
+
+    @Test
+    @DisplayName("入力バインディング: 親キューのエンティティIDが対象インボイスと一致しない場合は IllegalArgumentException を送出すること")
+    void testInputBinding_parentQueueWrongEntityId_throws() {
+        ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot approval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 100L, 0L);
+        // 親キューなのに entityId=9999
+        ScopeRepairQueueSnapshot wrongParentQueue = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", 9999L, "PENDING", null, 0L);
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(wrongParentQueue), parent, List.of(), targetScope, approval
+        )).isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("親キューのエンティティIDが対象インボイスIDと一致しません");
+    }
+
+    @Test
+    @DisplayName("入力バインディング: 子キューのエンティティIDが入力子イベント一覧に不在の場合は IllegalArgumentException を送出すること")
+    void testInputBinding_childQueueMissingInChildEvents_throws() {
+        ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
+        ChildInvoiceEventSnapshot child = new ChildInvoiceEventSnapshot(2001L, 10089L, "tenant-1", 100L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot approval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 100L, 0L);
+        // 子キューの entityId=8888 が childEvents に存在しない
+        ScopeRepairQueueSnapshot orphanChildQueue = new ScopeRepairQueueSnapshot(101L, "DIGITAL_INVOICE_EVENT", 8888L, "PENDING", null, 0L);
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(orphanChildQueue), parent, List.of(child), targetScope, approval
+        )).isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("子キューのエンティティIDが入力子イベント一覧に存在しません");
+    }
+
+    @Test
+    @DisplayName("入力バインディング: キューのエンティティ種別が不正な場合は IllegalArgumentException を送出すること")
+    void testInputBinding_queueUnknownEntityType_throws() {
+        ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot approval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 100L, 0L);
+        ScopeRepairQueueSnapshot unknownTypeQueue = new ScopeRepairQueueSnapshot(100L, "UNKNOWN_ENTITY", 10089L, "PENDING", null, 0L);
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(unknownTypeQueue), parent, List.of(), targetScope, approval
+        )).isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("修復キューのエンティティ種別が不正です");
+    }
+
+    @Test
+    @DisplayName("入力バインディング: 重複する修復キューIDが存在する場合は IllegalArgumentException を送出すること")
+    void testInputBinding_duplicateQueueId_throws() {
+        ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
+        ChildInvoiceEventSnapshot child = new ChildInvoiceEventSnapshot(2001L, 10089L, "tenant-1", 100L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot approval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 100L, 0L);
+
+        // 共に id=100L
+        ScopeRepairQueueSnapshot q1 = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", 10089L, "PENDING", null, 0L);
+        ScopeRepairQueueSnapshot q2 = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE_EVENT", 2001L, "PENDING", null, 0L);
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(q1, q2), parent, List.of(child), targetScope, approval
+        )).isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("重複する修復キューIDが検知されました");
+    }
+
+    @Test
+    @DisplayName("入力バインディング: 重複する子イベントIDが存在する場合は IllegalArgumentException を送出すること")
+    void testInputBinding_duplicateChildEventId_throws() {
+        ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
+        ChildInvoiceEventSnapshot child1 = new ChildInvoiceEventSnapshot(2001L, 10089L, "tenant-1", 100L);
+        ChildInvoiceEventSnapshot child2 = new ChildInvoiceEventSnapshot(2001L, 10089L, "tenant-1", 100L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot approval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 100L, 0L);
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(), parent, List.of(child1, child2), targetScope, approval
+        )).isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("重複する子イベントIDが検知されました");
+    }
+
+    @Test
+    @DisplayName("入力バインディング: 同一エンティティに対して重複するキュー行が存在する場合は IllegalArgumentException を送出すること")
+    void testInputBinding_conflictingEntityQueueMapping_throws() {
+        ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
+        ChildInvoiceEventSnapshot child = new ChildInvoiceEventSnapshot(2001L, 10089L, "tenant-1", 100L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot approval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 100L, 0L);
+
+        // 同じ childEvent (2001L) に対しキューが 2 行存在する
+        ScopeRepairQueueSnapshot q1 = new ScopeRepairQueueSnapshot(101L, "DIGITAL_INVOICE_EVENT", 2001L, "PENDING", null, 0L);
+        ScopeRepairQueueSnapshot q2 = new ScopeRepairQueueSnapshot(102L, "DIGITAL_INVOICE_EVENT", 2001L, "PENDING", null, 0L);
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(q1, q2), parent, List.of(child), targetScope, approval
+        )).isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("同一エンティティに対する重複キュー行が検知されました");
+    }
+
+    // =========================================================================
+    // 7. 事前スキャン・走査順序検証 (Pre-scan Validation)
+    // =========================================================================
+
+    @Test
+    @DisplayName("走査順序: 載体不在時であっても孤立した破損部材レコードが存在すれば事前に CorruptedEvidenceException で拒絶されること")
+    void testPreScan_isolatedCorruptedMemberThrows() {
+        ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
+        ChildInvoiceEventSnapshot child = new ChildInvoiceEventSnapshot(2001L, 10089L, "tenant-1", 100L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot approval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 100L, 0L);
+
+        // 載体は存在しないが、部材キューに破損JSON（SES_NF09_MEMBER:{broken）が存在
+        ScopeRepairQueueSnapshot corruptedMemberQueue = new ScopeRepairQueueSnapshot(
+            101L, "DIGITAL_INVOICE_EVENT", 2001L, "RESOLVED", "SES_NF09_MEMBER:{broken_json}", 1L
+        );
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(corruptedMemberQueue), parent, List.of(child), targetScope, approval
+        )).isInstanceOf(CorruptedEvidenceException.class);
+    }
+
+    @Test
+    @DisplayName("走査順序: PENDING キュー上に破損プロトコル証跡が存在する場合は carrier 探索前に即時拒絶されること")
+    void testPreScan_corruptedProtocolOnPendingQueueThrows() {
+        ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot approval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 100L, 0L);
+
+        // PENDING なのに破損プロトコル標識行を保持
+        ScopeRepairQueueSnapshot pendingCorrupted = new ScopeRepairQueueSnapshot(
+            100L, "DIGITAL_INVOICE", 10089L, "PENDING", "SES_NF09_COMPL:{broken_json}", 0L
+        );
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(pendingCorrupted), parent, List.of(), targetScope, approval
+        )).isInstanceOf(CorruptedEvidenceException.class);
+    }
+
+    @Test
+    @DisplayName("走査順序: キューが PENDING/RESOLVED 以外の未知状態の場合は IllegalStateException で即時拒絶されること")
+    void testPreScan_unknownQueueStatusThrows() {
+        ParentInvoiceSnapshot parent = new ParentInvoiceSnapshot(10089L, "tenant-1", 100L, 0L);
+        RepairTargetScope targetScope = new RepairTargetScope(10089L, "tenant-1", 100L, 0L);
+        ApprovalEvidenceSnapshot approval = new ApprovalEvidenceSnapshot("APPR-001", 1, 10089L, "tenant-1", 100L, 0L);
+
+        ScopeRepairQueueSnapshot invalidStatusQueue = new ScopeRepairQueueSnapshot(
+            100L, "DIGITAL_INVOICE", 10089L, "UNKNOWN_STATUS", null, 0L
+        );
+
+        assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
+            List.of(invalidStatusQueue), parent, List.of(), targetScope, approval
+        )).isInstanceOf(IllegalStateException.class)
+          .hasMessageContaining("修復キューのステータスが不正です");
+    }
+
+    // =========================================================================
+    // 8. 重試発見・再構成・全不変条件検証 (Retry Invariants & Reconstitution)
     // =========================================================================
 
     @Test
@@ -332,6 +643,7 @@ class RepairEvidenceComponentsTest {
         String digest = codec.calculateQueueDigest(List.of(100L));
         CarrierEvidence carrierEv = new CarrierEvidence(1, ticket, round, invId, "tenant-1", 100L, "P1", 0L, 0L, 1, digest, 1L, "2026-10-28T16:30:00Z");
 
+        ChildInvoiceEventSnapshot child = new ChildInvoiceEventSnapshot(2001L, invId, "tenant-1", 100L);
         ScopeRepairQueueSnapshot qCarrier1 = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", invId, "RESOLVED", codec.encodeCarrier(carrierEv), 1L);
         ScopeRepairQueueSnapshot qCarrier2 = new ScopeRepairQueueSnapshot(101L, "DIGITAL_INVOICE_EVENT", 2001L, "RESOLVED", codec.encodeCarrier(carrierEv), 1L);
 
@@ -340,7 +652,7 @@ class RepairEvidenceComponentsTest {
         ApprovalEvidenceSnapshot approvalEvidence = new ApprovalEvidenceSnapshot(ticket, round, invId, "tenant-1", 100L, 0L);
 
         assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
-            List.of(qCarrier1, qCarrier2), parentInvoice, List.of(), targetScope, approvalEvidence
+            List.of(qCarrier1, qCarrier2), parentInvoice, List.of(child), targetScope, approvalEvidence
         )).isInstanceOf(IllegalStateException.class)
           .hasMessageContaining("同一決裁チケットの完了証跡載体が複数検知されました");
     }
@@ -353,9 +665,9 @@ class RepairEvidenceComponentsTest {
         int round = 1;
         String digest = codec.calculateQueueDigest(List.of(100L, 101L));
         CarrierEvidence carrierEv = new CarrierEvidence(1, ticket, round, invId, "tenant-1", 100L, "P1", 0L, 0L, 2, digest, 1L, "2026-10-28T16:30:00Z");
-        // 部材が carrierId=999 を指定（本来は 100L）
         MemberEvidence conflictMember = new MemberEvidence(1, 999L, ticket, round);
 
+        ChildInvoiceEventSnapshot child = new ChildInvoiceEventSnapshot(2001L, invId, "tenant-1", 100L);
         ScopeRepairQueueSnapshot qCarrier = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", invId, "RESOLVED", codec.encodeCarrier(carrierEv), 1L);
         ScopeRepairQueueSnapshot qMember = new ScopeRepairQueueSnapshot(101L, "DIGITAL_INVOICE_EVENT", 2001L, "RESOLVED", codec.encodeMember(conflictMember), 1L);
 
@@ -364,7 +676,7 @@ class RepairEvidenceComponentsTest {
         ApprovalEvidenceSnapshot approvalEvidence = new ApprovalEvidenceSnapshot(ticket, round, invId, "tenant-1", 100L, 0L);
 
         assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
-            List.of(qCarrier, qMember), parentInvoice, List.of(), targetScope, approvalEvidence
+            List.of(qCarrier, qMember), parentInvoice, List.of(child), targetScope, approvalEvidence
         )).isInstanceOf(LinkageConflictException.class)
           .hasMessageContaining("異なる載体IDを指定しています");
     }
@@ -376,10 +688,10 @@ class RepairEvidenceComponentsTest {
         String ticket = "APPR-001";
         int round = 1;
         String digest = codec.calculateQueueDigest(List.of(100L, 101L, 102L));
-        // carrier は qc=3 を主張しているが部材が 1 件欠落して再構成が 2 件しかない
         CarrierEvidence carrierEv = new CarrierEvidence(1, ticket, round, invId, "tenant-1", 100L, "P1", 0L, 0L, 3, digest, 1L, "2026-10-28T16:30:00Z");
         MemberEvidence memberEv = new MemberEvidence(1, 100L, ticket, round);
 
+        ChildInvoiceEventSnapshot child = new ChildInvoiceEventSnapshot(2001L, invId, "tenant-1", 100L);
         ScopeRepairQueueSnapshot qCarrier = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", invId, "RESOLVED", codec.encodeCarrier(carrierEv), 1L);
         ScopeRepairQueueSnapshot qMember = new ScopeRepairQueueSnapshot(101L, "DIGITAL_INVOICE_EVENT", 2001L, "RESOLVED", codec.encodeMember(memberEv), 1L);
 
@@ -388,7 +700,7 @@ class RepairEvidenceComponentsTest {
         ApprovalEvidenceSnapshot approvalEvidence = new ApprovalEvidenceSnapshot(ticket, round, invId, "tenant-1", 100L, 0L);
 
         assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
-            List.of(qCarrier, qMember), parentInvoice, List.of(), targetScope, approvalEvidence
+            List.of(qCarrier, qMember), parentInvoice, List.of(child), targetScope, approvalEvidence
         )).isInstanceOf(CorruptedEvidenceException.class)
           .hasMessageContaining("件数が載体の記録と不一致");
     }
@@ -399,12 +711,10 @@ class RepairEvidenceComponentsTest {
         long invId = 10089L;
         String ticket = "APPR-001";
         int round = 1;
-        // 意図的に別のキューID集合のダイジェストを指定
         String wrongDigest = codec.calculateQueueDigest(List.of(999L));
         CarrierEvidence carrierEv = new CarrierEvidence(1, ticket, round, invId, "tenant-1", 100L, "P1", 0L, 0L, 1, wrongDigest, 1L, "2026-10-28T16:30:00Z");
 
         ScopeRepairQueueSnapshot qCarrier = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", invId, "RESOLVED", codec.encodeCarrier(carrierEv), 1L);
-
         ParentInvoiceSnapshot parentInvoice = new ParentInvoiceSnapshot(invId, "tenant-1", 100L, 0L);
         RepairTargetScope targetScope = new RepairTargetScope(invId, "tenant-1", 100L, 0L);
         ApprovalEvidenceSnapshot approvalEvidence = new ApprovalEvidenceSnapshot(ticket, round, invId, "tenant-1", 100L, 0L);
@@ -467,7 +777,6 @@ class RepairEvidenceComponentsTest {
         ScopeRepairQueueSnapshot qCarrier = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", invId, "RESOLVED", codec.encodeCarrier(carrierEv), 1L);
         ParentInvoiceSnapshot parentInvoice = new ParentInvoiceSnapshot(invId, "tenant-1", 100L, 0L);
         RepairTargetScope targetScope = new RepairTargetScope(invId, "tenant-1", 100L, 0L);
-        // 承認正本の targetVersion が 2 (vBf=0 と不一致)
         ApprovalEvidenceSnapshot approvalEvidence = new ApprovalEvidenceSnapshot(ticket, round, invId, "tenant-1", 100L, 2L);
 
         assertThatThrownBy(() -> discoveryService.discoverAndVerifyRetry(
@@ -483,7 +792,6 @@ class RepairEvidenceComponentsTest {
         String ticket = "APPR-001";
         int round = 1;
         String digest = codec.calculateQueueDigest(List.of(100L));
-        // P1 なのに vBf=0, vAf=1 となっている矛盾
         CarrierEvidence carrierEv = new CarrierEvidence(1, ticket, round, invId, "tenant-1", 100L, "P1", 0L, 1L, 1, digest, 1L, "2026-10-28T16:30:00Z");
 
         ScopeRepairQueueSnapshot qCarrier = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", invId, "RESOLVED", codec.encodeCarrier(carrierEv), 1L);
@@ -504,7 +812,6 @@ class RepairEvidenceComponentsTest {
         String ticket = "APPR-001";
         int round = 1;
         String digest = codec.calculateQueueDigest(List.of(100L));
-        // P2 なのに vBf=0, vAf=0 (+0) となっている矛盾
         CarrierEvidence carrierEv = new CarrierEvidence(1, ticket, round, invId, "tenant-1", 100L, "P2", 0L, 0L, 1, digest, 1L, "2026-10-28T16:30:00Z");
 
         ScopeRepairQueueSnapshot qCarrier = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", invId, "RESOLVED", codec.encodeCarrier(carrierEv), 1L);
@@ -519,6 +826,18 @@ class RepairEvidenceComponentsTest {
     }
 
     @Test
+    @DisplayName("重試異常系: 未知修復分類 pCls は CorruptedEvidenceException を送出すること")
+    void testRetryDiscovery_unknownPClsRejection() {
+        String digest = codec.calculateQueueDigest(List.of(100L));
+        String unknownPClsJson = "SES_NF09_COMPL:{\"v\":1,\"ticket\":\"T1\",\"round\":1,\"invId\":100,\"tenant\":\"t1\",\"legalEntity\":100,\"pCls\":\"P9\",\"vBf\":0,\"vAf\":0,\"qc\":1,\"qh\":\""
+            + digest + "\",\"by\":1,\"at\":\"2026-10-28T16:30:00Z\"}";
+
+        assertThatThrownBy(() -> codec.parseCarrier(unknownPClsJson))
+            .isInstanceOf(CorruptedEvidenceException.class)
+            .hasMessageContaining("不正な修復分類");
+    }
+
+    @Test
     @DisplayName("重試異常系: 親インボイスDB実バージョン不一致 (vAf 不一致) は OptimisticLockingFailureException を送出すること")
     void testRetryDiscovery_parentDbVersionMismatchRejection() {
         long invId = 10089L;
@@ -528,7 +847,6 @@ class RepairEvidenceComponentsTest {
         CarrierEvidence carrierEv = new CarrierEvidence(1, ticket, round, invId, "tenant-1", 100L, "P1", 0L, 0L, 1, digest, 1L, "2026-10-28T16:30:00Z");
 
         ScopeRepairQueueSnapshot qCarrier = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", invId, "RESOLVED", codec.encodeCarrier(carrierEv), 1L);
-        // DB 実バージョンが 2（外部変更検知）
         ParentInvoiceSnapshot parentInvoice = new ParentInvoiceSnapshot(invId, "tenant-1", 100L, 2L);
         RepairTargetScope targetScope = new RepairTargetScope(invId, "tenant-1", 100L, 0L);
         ApprovalEvidenceSnapshot approvalEvidence = new ApprovalEvidenceSnapshot(ticket, round, invId, "tenant-1", 100L, 0L);
@@ -549,7 +867,6 @@ class RepairEvidenceComponentsTest {
         CarrierEvidence carrierEv = new CarrierEvidence(1, ticket, round, invId, "tenant-1", 100L, "P1", 0L, 0L, 1, digest, 1L, "2026-10-28T16:30:00Z");
 
         ScopeRepairQueueSnapshot qCarrier = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", invId, "RESOLVED", codec.encodeCarrier(carrierEv), 1L);
-        // DB 実スコープが別テナント
         ParentInvoiceSnapshot parentInvoice = new ParentInvoiceSnapshot(invId, "tenant-other", 100L, 0L);
         RepairTargetScope targetScope = new RepairTargetScope(invId, "tenant-1", 100L, 0L);
         ApprovalEvidenceSnapshot approvalEvidence = new ApprovalEvidenceSnapshot(ticket, round, invId, "tenant-1", 100L, 0L);
@@ -571,7 +888,6 @@ class RepairEvidenceComponentsTest {
 
         ScopeRepairQueueSnapshot qCarrier = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", invId, "RESOLVED", codec.encodeCarrier(carrierEv), 1L);
         ParentInvoiceSnapshot parentInvoice = new ParentInvoiceSnapshot(invId, "tenant-1", 100L, 0L);
-        // 子イベントの法人スコープがターゲットと相違
         ChildInvoiceEventSnapshot child = new ChildInvoiceEventSnapshot(2001L, invId, "tenant-1", 999L);
         RepairTargetScope targetScope = new RepairTargetScope(invId, "tenant-1", 100L, 0L);
         ApprovalEvidenceSnapshot approvalEvidence = new ApprovalEvidenceSnapshot(ticket, round, invId, "tenant-1", 100L, 0L);
@@ -592,23 +908,23 @@ class RepairEvidenceComponentsTest {
         CarrierEvidence carrierEv = new CarrierEvidence(1, ticket, round, invId, "tenant-1", 100L, "P1", 0L, 0L, 2, digest, 1L, "2026-10-28T16:30:00Z");
         MemberEvidence memberEv = new MemberEvidence(1, 100L, ticket, round);
 
-        // 歴史的旧キュー (自由テキストメモ保持)
+        ChildInvoiceEventSnapshot child2000 = new ChildInvoiceEventSnapshot(2000L, invId, "tenant-1", 100L);
+        ChildInvoiceEventSnapshot child2001 = new ChildInvoiceEventSnapshot(2001L, invId, "tenant-1", 100L);
+        ChildInvoiceEventSnapshot child2002 = new ChildInvoiceEventSnapshot(2002L, invId, "tenant-1", 100L);
+
         ScopeRepairQueueSnapshot qOld1 = new ScopeRepairQueueSnapshot(10L, "DIGITAL_INVOICE_EVENT", 2000L, "RESOLVED", "[IDEMPOTENT_CLOSE]", 1L);
         ScopeRepairQueueSnapshot qOld2 = new ScopeRepairQueueSnapshot(11L, "DIGITAL_INVOICE_EVENT", 2001L, "RESOLVED", "Migration patch free text", 1L);
-
-        // 今回チケットの載体および部材
         ScopeRepairQueueSnapshot qCarrier = new ScopeRepairQueueSnapshot(100L, "DIGITAL_INVOICE", invId, "RESOLVED", codec.encodeCarrier(carrierEv), 1L);
         ScopeRepairQueueSnapshot qMember = new ScopeRepairQueueSnapshot(101L, "DIGITAL_INVOICE_EVENT", 2002L, "RESOLVED", codec.encodeMember(memberEv), 1L);
 
         ParentInvoiceSnapshot parentInvoice = new ParentInvoiceSnapshot(invId, "tenant-1", 100L, 0L);
-        ChildInvoiceEventSnapshot child = new ChildInvoiceEventSnapshot(2002L, invId, "tenant-1", 100L);
         RepairTargetScope targetScope = new RepairTargetScope(invId, "tenant-1", 100L, 0L);
         ApprovalEvidenceSnapshot approvalEvidence = new ApprovalEvidenceSnapshot(ticket, round, invId, "tenant-1", 100L, 0L);
 
         RetryDiscoveryResult result = discoveryService.discoverAndVerifyRetry(
             List.of(qOld1, qOld2, qCarrier, qMember),
             parentInvoice,
-            List.of(child),
+            List.of(child2000, child2001, child2002),
             targetScope,
             approvalEvidence
         );
@@ -626,6 +942,9 @@ class RepairEvidenceComponentsTest {
         String ticketNew = "APPR-NEW-002";
         int round = 1;
 
+        ChildInvoiceEventSnapshot child2000 = new ChildInvoiceEventSnapshot(2000L, invId, "tenant-1", 100L);
+        ChildInvoiceEventSnapshot child2001 = new ChildInvoiceEventSnapshot(2001L, invId, "tenant-1", 100L);
+
         // 旧チケットの載体 id=5
         String digestOld = codec.calculateQueueDigest(List.of(5L));
         CarrierEvidence carrierOld = new CarrierEvidence(1, ticketOld, round, invId, "tenant-1", 100L, "P1", 0L, 0L, 1, digestOld, 1L, "2026-10-01T10:00:00Z");
@@ -639,14 +958,13 @@ class RepairEvidenceComponentsTest {
         ScopeRepairQueueSnapshot qNewMember = new ScopeRepairQueueSnapshot(30L, "DIGITAL_INVOICE_EVENT", 2001L, "RESOLVED", codec.encodeMember(memberNew), 1L);
 
         ParentInvoiceSnapshot parentInvoice = new ParentInvoiceSnapshot(invId, "tenant-1", 100L, 0L);
-        ChildInvoiceEventSnapshot child = new ChildInvoiceEventSnapshot(2001L, invId, "tenant-1", 100L);
         RepairTargetScope targetScope = new RepairTargetScope(invId, "tenant-1", 100L, 0L);
         ApprovalEvidenceSnapshot approvalEvidence = new ApprovalEvidenceSnapshot(ticketNew, round, invId, "tenant-1", 100L, 0L);
 
         RetryDiscoveryResult result = discoveryService.discoverAndVerifyRetry(
             List.of(qOldCarrier, qNewCarrier, qNewMember),
             parentInvoice,
-            List.of(child),
+            List.of(child2000, child2001),
             targetScope,
             approvalEvidence
         );
