@@ -473,24 +473,29 @@ if (-not (Test-Path -LiteralPath $intDir)) { [System.IO.Directory]::CreateDirect
 $intLog = Join-Path $intDir "$intSuiteId.log"
 $intStateFile = Join-Path $intDir 'state.json'
 
-# EvidenceDir 外の完全独立な私有作業ディレクトリを決定.
-$privateWorkFull = New-ControlledPitrWorkDir `
+# EvidenceDir 外の完全独立な私有作業親ディレクトリ・子作業ディレクトリを決定.
+$pitrContext = New-ControlledPitrWorkDir `
     -RepoRoot $repoRoot `
     -EvidenceDir $EvidenceDir `
     -CustomPitrWorkDir $CustomPitrWorkDir
 
-$env:INTEGRATION_WORK_DIR = $privateWorkFull
+$pitrParentDir = $pitrContext.ParentDir
+$pitrWorkDir   = $pitrContext.WorkDir
+$pitrRunToken  = $pitrContext.RunToken
 
-# 実行直前に帰属および非ReparsePointを再検証 (衝突・他プロセス占有検知)
-Assert-PitrWorkDirAttribution -PitrWorkDir $privateWorkFull -RepoRoot $repoRoot
+$env:INTEGRATION_WORK_DIR = $pitrWorkDir
+
+# 実行直前に親ディレクトリ帰属・runToken一致および非ReparsePointを再検証 (衝突・他プロセス占有検知).
+Assert-PitrWorkDirAttribution -ParentDir $pitrParentDir -WorkDir $pitrWorkDir -RepoRoot $repoRoot -ExpectedRunToken $pitrRunToken
 
 $intState = [ordered]@{
-    suiteId            = $intSuiteId
-    state              = 'RUNNING'
-    completed          = $false
-    startTime          = (Get-Date).ToString('o')
-    integrationWorkDir = $privateWorkFull
-    pid                = $PID
+    suiteId              = $intSuiteId
+    state                = 'RUNNING'
+    completed            = $false
+    startTime            = (Get-Date).ToString('o')
+    integrationParentDir = $pitrParentDir
+    integrationWorkDir   = $pitrWorkDir
+    pid                  = $PID
 }
 Write-JsonStateFile -FilePath $intStateFile -Data $intState
 
@@ -511,10 +516,10 @@ if (-not (Test-Path -LiteralPath $intArtifactsDir)) {
 
 $archiveError = $null
 try {
-    # 成果物アーカイブ直前にも所有権・帰属を検証（現場保全）.
-    Assert-PitrWorkDirAttribution -PitrWorkDir $privateWorkFull -RepoRoot $repoRoot
+    # 成果物アーカイブ直前にも親ディレクトリの所有権・帰属・runTokenを厳格に再検証（現場保全）.
+    Assert-PitrWorkDirAttribution -ParentDir $pitrParentDir -WorkDir $pitrWorkDir -RepoRoot $repoRoot -ExpectedRunToken $pitrRunToken
 
-    $srcEvidenceDir = Join-Path $privateWorkFull 'evidence'
+    $srcEvidenceDir = Join-Path $pitrWorkDir 'evidence'
     if (Test-Path -LiteralPath $srcEvidenceDir) {
         Get-ChildItem -LiteralPath $srcEvidenceDir -File -ErrorAction Stop | ForEach-Object {
             $destItem = Join-Path $intArtifactsDir $_.Name

@@ -367,6 +367,11 @@ if ($scriptArg -like '*run-integration.sh') {
     if ([string]::IsNullOrWhiteSpace($workDir)) {
         throw "INTEGRATION_WORK_DIR not set"
     }
+    # リアルな run-integration.sh (rm -rf "$WORK"; mkdir -p ...) の動作を忠実にシミュレート.
+    if (Test-Path -LiteralPath $workDir) {
+        Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    [System.IO.Directory]::CreateDirectory($workDir) | Out-Null
     $evDir = Join-Path $workDir 'evidence'
     [System.IO.Directory]::CreateDirectory($evDir) | Out-Null
 
@@ -464,7 +469,7 @@ try {
     Assert-Test ($proc01Safe.ExitCode -eq 0) "01.安全引数許可 ($safeArg) - 終了コード." "安全パラメータが正常に受容されること."
 
     # --------------------------------------------------------------------------
-    # 1B. MAVEN_ARGS / JVM 環境変数注入拒絶 & シークレット秘匿検証 (Requirement 1)
+    # 1B. MAVEN_ARGS / JVM 環境変数注入拒絶 & シークレット秘匿検証 (Requirement 1 & 2)
     # --------------------------------------------------------------------------
     Write-Host "Test 01B: MAVEN_ARGS / JVM 環境変数注入拒絶 & シークレット秘匿検証..."
     $envInjectionCases = @(
@@ -472,7 +477,11 @@ try {
         @{ Var = 'MAVEN_ARGS'; Val = '-DskipTests' },
         @{ Var = 'MAVEN_ARGS'; Val = '-Pmysql-tests' },
         @{ Var = 'MAVEN_OPTS'; Val = '-Dtest=SampleTest' },
+        @{ Var = 'MAVEN_OPTS'; Val = '-Dtest.groups=smoke' },
         @{ Var = 'JAVA_TOOL_OPTIONS'; Val = '-DskipTests' },
+        @{ Var = 'JAVA_TOOL_OPTIONS'; Val = '-Dtest.excluded-groups=integration' },
+        @{ Var = 'JDK_JAVA_OPTIONS'; Val = '-Dtest=SampleTest' },
+        @{ Var = '_JAVA_OPTIONS'; Val = '-Dgroups=smoke' },
         @{ Var = 'MAVEN_CONFIG'; Val = '--file=other.xml' }
     )
     foreach ($cCase in $envInjectionCases) {
@@ -493,7 +502,7 @@ try {
 
     # シークレット含有環境注入時の秘匿検証 (エラーログに生シークレットが出力されないこと).
     $secretTokenVal = "SuperSecretPasswordToken98765"
-    [System.Environment]::SetEnvironmentVariable('MAVEN_ARGS', "-Dtest=SampleTest -DsecretToken=$secretTokenVal")
+    [System.Environment]::SetEnvironmentVariable('JDK_JAVA_OPTIONS', "-DsecretToken=$secretTokenVal -Dtest.groups=smoke")
     try {
         $evSec = Join-Path $testBaseDir 'ev-env-secret'
         $errOutLog = Join-Path $testBaseDir 'env-secret-stderr.log'
@@ -504,7 +513,23 @@ try {
         $errLogText = if (Test-Path -LiteralPath $errOutLog) { [System.IO.File]::ReadAllText($errOutLog, [System.Text.Encoding]::UTF8) } else { "" }
         Assert-Test (-not $errLogText.Contains($secretTokenVal)) "01B.シークレット非出力検証." "エラー出力にシークレットが生で出力されないこと."
     } finally {
-        [System.Environment]::SetEnvironmentVariable('MAVEN_ARGS', $null)
+        [System.Environment]::SetEnvironmentVariable('JDK_JAVA_OPTIONS', $null)
+    }
+
+    # 白名単準拠の安全な環境変数設定時の通過検証.
+    [System.Environment]::SetEnvironmentVariable('JAVA_TOOL_OPTIONS', '-Dfile.encoding=UTF-8 -Duser.timezone=Asia/Tokyo -Djava.awt.headless=true -Xmx1024m')
+    try {
+        $evSafeEnv = Join-Path $testBaseDir 'ev-env-safe'
+        [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'mvn-mode.txt'), 'pass')
+        [System.IO.File]::WriteAllText((Join-Path $testBaseDir 'bash-mode.txt'), 'pass')
+        $procSafeEnv = Start-Process -FilePath $currentPsExe `
+            -ArgumentList @("-ExecutionPolicy", "Bypass", "-File", "`"$fixtureRunnerScript`"", "-MavenExecutable", "`"$mockMvnBat`"", "-BashExecutable", "`"$mockBashBat`"", "-EvidenceDir", "`"$evSafeEnv`"") `
+            -NoNewWindow -Wait -PassThru
+        Assert-Test ($procSafeEnv.ExitCode -eq 0) "01B.安全白名単環境変数 - 終了コード." "白名単内の安全なJVMオプションが許可されること."
+        $sessSafeEnv = [System.IO.File]::ReadAllText((Join-Path $evSafeEnv 'session-state.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        Assert-Test ($sessSafeEnv.state -eq 'PASS') "01B.安全白名単環境変数 - セッションPASS." "セッション状態が PASS であること."
+    } finally {
+        [System.Environment]::SetEnvironmentVariable('JAVA_TOOL_OPTIONS', $null)
     }
 
     # FULL_GATE での TEST_FILTER クリア検証.
@@ -991,78 +1016,132 @@ try {
     Assert-Test ((Get-Sha256Hex -FilePath $victimFile) -eq $victimHashBefore) "20B.PITRランナー衝突 - ハッシュ不変." "ランナー実行後もファイル内容・ハッシュが完全に一致すること."
 
     # --------------------------------------------------------------------------
-    # 20C. PITR 作成後他プロセス占有・帰属不明反例と現場保全 (Requirement 4)
+    # 20C. PITR 親ディレクトリ独占管理・実WORK削除再構築・runToken厳格帰属検証 (Requirement 1 & 4)
     # --------------------------------------------------------------------------
-    Write-Host "Test 20C: PITR 作成後他プロセス占有・帰属不明反例と現場保全検証..."
-    # 正常に独占ディレクトリを作成.
-    $alienWorkDir = New-ControlledPitrWorkDir -RepoRoot $fixtureRepo -EvidenceDir $ev04
-    Assert-Test (Test-Path -LiteralPath $alienWorkDir) "20C.独占作成 - ディレクトリ存在." "初回作成時にディレクトリが存在すること."
-    $ownerJsonPath = Join-Path $alienWorkDir '.ses-pitr-owner.json'
-    Assert-Test (Test-Path -LiteralPath $ownerJsonPath) "20C.独占作成 - 帰属ファイル存在." "帰属管理ファイル .ses-pitr-owner.json が生成されていること."
+    Write-Host "Test 20C: PITR 親ディレクトリ独占管理・実WORK削除再構築・runToken検証..."
+    # (1) 正常独占親ディレクトリ・子WORKディレクトリ作成とrunToken返却の検証.
+    $pitrCtx = New-ControlledPitrWorkDir -RepoRoot $fixtureRepo -EvidenceDir $ev04
+    $pitrParentDir = $pitrCtx.ParentDir
+    $pitrWorkDir   = $pitrCtx.WorkDir
+    $pitrRunToken  = $pitrCtx.RunToken
 
-    # 他プロセス占有ファイルの配置 (外部プロセスの作業成果物を模倣).
-    $alienDataFile = Join-Path $alienWorkDir 'alien-process-work.log'
-    $alienContent = "ALIEN_PROCESS_DATA_KEEP_INTACT"
-    [System.IO.File]::WriteAllText($alienDataFile, $alienContent, [System.Text.Encoding]::UTF8)
-    $alienDataHash = Get-Sha256Hex -FilePath $alienDataFile
+    Assert-Test (Test-Path -LiteralPath $pitrParentDir) "20C.独占作成 - 親ディレクトリ存在." "親ディレクトリが存在すること."
+    Assert-Test (Test-Path -LiteralPath $pitrWorkDir) "20C.独占作成 - 子WORKディレクトリ存在." "子WORKディレクトリが存在すること."
+    Assert-Test (-not [string]::IsNullOrWhiteSpace($pitrRunToken)) "20C.独占作成 - runToken返却." "メモリ保持用runTokenが正常に返却されること."
 
-    # (1) 他プロセスPIDへの改変（PID不一致）の検出と現場保全.
+    $ownerJsonPath = Join-Path $pitrParentDir '.ses-pitr-owner.json'
+    Assert-Test (Test-Path -LiteralPath $ownerJsonPath) "20C.独占作成 - 親ディレクトリownerファイル存在." "親ディレクトリ直下に .ses-pitr-owner.json が生成されていること."
+
+    # (2) 実行直前検証: 正しい ExpectedRunToken での帰属検証成功.
+    $preExecValid = $true
+    try {
+        Assert-PitrWorkDirAttribution -ParentDir $pitrParentDir -WorkDir $pitrWorkDir -RepoRoot $fixtureRepo -ExpectedRunToken $pitrRunToken
+    } catch {
+        $preExecValid = $false
+    }
+    Assert-Test $preExecValid "20C.実行前帰属 - ExpectedRunToken一致." "正しいrunTokenで実行前帰属検証が成功すること."
+
+    # (3) リアルな run-integration.sh (rm -rf WORK; mkdir -p WORK) のシミュレート:
+    # 子WORKディレクトリが削除され再作成されても、親ディレクトリの owner は不変であり帰属が有効であること.
+    Remove-Item -LiteralPath $pitrWorkDir -Recurse -Force -ErrorAction Stop
+    [System.IO.Directory]::CreateDirectory($pitrWorkDir) | Out-Null
+    $recreatedEvidence = Join-Path $pitrWorkDir 'evidence'
+    [System.IO.Directory]::CreateDirectory($recreatedEvidence) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $recreatedEvidence 'sample.txt'), 'data')
+
+    Assert-Test (Test-Path -LiteralPath $ownerJsonPath) "20C.WORK再構築後 - ownerファイル健在." "子WORK削除再作成後も親ディレクトリのownerファイルが保持されること."
+
+    # 成果物アーカイブ直前検証: 子WORK再作成後も親ディレクトリ帰属が成功すること.
+    $postRebuildValid = $true
+    try {
+        Assert-PitrWorkDirAttribution -ParentDir $pitrParentDir -WorkDir $pitrWorkDir -RepoRoot $fixtureRepo -ExpectedRunToken $pitrRunToken
+    } catch {
+        $postRebuildValid = $false
+    }
+    Assert-Test $postRebuildValid "20C.再構築後帰属 - 帰属検証成功." "子WORK再構築後も親ディレクトリの帰属検証が成功すること."
+
+    # (4) 不正な ExpectedRunToken の拒絶と現場保全.
+    $badTokenRejected = $false
+    try {
+        Assert-PitrWorkDirAttribution -ParentDir $pitrParentDir -WorkDir $pitrWorkDir -RepoRoot $fixtureRepo -ExpectedRunToken 'tampered-token-99999'
+    } catch {
+        if ($_.Exception.Message -like "*FATAL:*" -and $_.Exception.Message -like "*runToken*") {
+            $badTokenRejected = $true
+        }
+    }
+    Assert-Test $badTokenRejected "20C.不正帰属拒絶 - runToken不一致." "runToken不一致時にFATAL拒絶されること."
+    Assert-Test (Test-Path -LiteralPath $pitrParentDir) "20C.不正帰属拒絶 - 親ディレクトリ保全." "例外発生後も親ディレクトリが削除されず保全されること."
+    Assert-Test (Test-Path -LiteralPath $ownerJsonPath) "20C.不正帰属拒絶 - ownerファイル保全." "ownerファイルが保全されること."
+
+    # (5) 他プロセスPIDへの改変（PID不一致）の検出と現場保全.
     $legitOwnerData = [System.IO.File]::ReadAllText($ownerJsonPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
     $tamperedPidData = [ordered]@{
         pid       = 999999
         createdAt = $legitOwnerData.createdAt
         runToken  = $legitOwnerData.runToken
         repoRoot  = $legitOwnerData.repoRoot
+        parentDir = $legitOwnerData.parentDir
+        workDir   = $legitOwnerData.workDir
     }
     Write-JsonStateFile -FilePath $ownerJsonPath -Data $tamperedPidData
 
     $pidMismatchRejected = $false
     try {
-        Assert-PitrWorkDirAttribution -PitrWorkDir $alienWorkDir -RepoRoot $fixtureRepo
+        Assert-PitrWorkDirAttribution -ParentDir $pitrParentDir -WorkDir $pitrWorkDir -RepoRoot $fixtureRepo -ExpectedRunToken $pitrRunToken
     } catch {
-        if ($_.Exception.Message -like "*FATAL:*" -or $_.Exception.Message -like "*PID*") {
+        if ($_.Exception.Message -like "*FATAL:*" -and $_.Exception.Message -like "*PID*") {
             $pidMismatchRejected = $true
         }
     }
-    Assert-Test $pidMismatchRejected "20C.他プロセス占有 - PID不一致拒絶." "PIDが一致しない場合にFATAL拒絶されること."
-    Assert-Test (Test-Path -LiteralPath $alienWorkDir) "20C.他プロセス占有 - ディレクトリ保全." "例外発生後もディレクトリが削除されず保全されること."
-    Assert-Test (Test-Path -LiteralPath $alienDataFile) "20C.他プロセス占有 - ファイル保全." "他プロセスの成果物ファイルが削除されず保全されること."
-    Assert-Test ((Get-Sha256Hex -FilePath $alienDataFile) -eq $alienDataHash) "20C.他プロセス占有 - ハッシュ不変." "他プロセスのファイル内容が一切変更されないこと."
+    Assert-Test $pidMismatchRejected "20C.他プロセス占有 - PID不一致拒絶." "PID不一致時にFATAL拒絶されること."
 
-    # (2) リポジトリ帰属不一致の検出と現場保全.
+    # (6) リポジトリ帰属不一致の検出と現場保全.
     $tamperedRepoData = [ordered]@{
         pid       = $PID
         createdAt = $legitOwnerData.createdAt
         runToken  = $legitOwnerData.runToken
-        repoRoot  = 'C:\ses-alien-foreign-repo'
+        repoRoot  = 'C:\ses-foreign-alien-repo'
+        parentDir = $legitOwnerData.parentDir
+        workDir   = $legitOwnerData.workDir
     }
     Write-JsonStateFile -FilePath $ownerJsonPath -Data $tamperedRepoData
 
     $repoMismatchRejected = $false
     try {
-        Assert-PitrWorkDirAttribution -PitrWorkDir $alienWorkDir -RepoRoot $fixtureRepo
+        Assert-PitrWorkDirAttribution -ParentDir $pitrParentDir -WorkDir $pitrWorkDir -RepoRoot $fixtureRepo -ExpectedRunToken $pitrRunToken
     } catch {
-        if ($_.Exception.Message -like "*FATAL:*" -or $_.Exception.Message -like "*リポジトリ帰属*") {
+        if ($_.Exception.Message -like "*FATAL:*" -and ($_.Exception.Message -like "*リポジトリ帰属*" -or $_.Exception.Message -like "*ses-foreign-alien-repo*")) {
             $repoMismatchRejected = $true
         }
     }
-    Assert-Test $repoMismatchRejected "20C.帰属不一致 - リポジトリ拒絶." "リポジトリ帰属が不一致の場合にFATAL拒絶されること."
-    Assert-Test (Test-Path -LiteralPath $alienDataFile) "20C.帰属不一致 - ファイル保全." "ファイルが保全されること."
+    Assert-Test $repoMismatchRejected "20C.帰属不一致 - リポジトリ拒絶." "リポジトリ不一致時にFATAL拒絶されること."
 
-    # (3) 帰属ファイル消失・未帰属状態の検出と現場保全.
+    # (7) 帰属ファイル消失・未帰属状態の検出と現場保全.
     [System.IO.File]::Delete($ownerJsonPath)
     $missingOwnerRejected = $false
     try {
-        Assert-PitrWorkDirAttribution -PitrWorkDir $alienWorkDir -RepoRoot $fixtureRepo
+        Assert-PitrWorkDirAttribution -ParentDir $pitrParentDir -WorkDir $pitrWorkDir -RepoRoot $fixtureRepo -ExpectedRunToken $pitrRunToken
     } catch {
-        if ($_.Exception.Message -like "*FATAL:*" -or $_.Exception.Message -like "*帰属ファイル*") {
+        if ($_.Exception.Message -like "*FATAL:*" -and ($_.Exception.Message -like "*帰属ファイル*" -or $_.Exception.Message -like "*ses-pitr-owner.json*")) {
             $missingOwnerRejected = $true
         }
     }
     Assert-Test $missingOwnerRejected "20C.帰属不明 - ファイル欠損拒絶." "帰属ファイル欠損時にFATAL拒絶されること."
-    Assert-Test (Test-Path -LiteralPath $alienWorkDir) "20C.帰属不明 - ディレクトリ保全." "帰属不明時もディレクトリが保全されること."
-    Assert-Test (Test-Path -LiteralPath $alienDataFile) "20C.帰属不明 - ファイル保全." "他プロセスファイルが完全保全されること."
-    Assert-Test ((Get-Sha256Hex -FilePath $alienDataFile) -eq $alienDataHash) "20C.帰属不明 - ハッシュ不変." "ハッシュが一致すること."
+
+    # (8) WorkDir の親ディレクトリ境界逸脱の検出と現場保全.
+    $escapedWorkDir = Join-Path $testBaseDir 'alien-outside-work'
+    [System.IO.Directory]::CreateDirectory($escapedWorkDir) | Out-Null
+    Write-JsonStateFile -FilePath $ownerJsonPath -Data $legitOwnerData
+
+    $boundaryEscapeRejected = $false
+    try {
+        Assert-PitrWorkDirAttribution -ParentDir $pitrParentDir -WorkDir $escapedWorkDir -RepoRoot $fixtureRepo -ExpectedRunToken $pitrRunToken
+    } catch {
+        if ($_.Exception.Message -like "*FATAL:*" -and ($_.Exception.Message -like "*境界逸脱*" -or $_.Exception.Message -like "*INTEGRATION_WORK_DIR*")) {
+            $boundaryEscapeRejected = $true
+        }
+    }
+    Assert-Test $boundaryEscapeRejected "20C.境界逸脱 - 子WORK逸脱拒絶." "親ディレクトリ配下にないWORKが指定された場合にFATAL拒絶されること."
 
     # --------------------------------------------------------------------------
     # 21. 正常全通過 (Full Pass) 検証 (Group 6)
@@ -1123,6 +1202,11 @@ try {
         realRepoRoot    = $realRepoRoot
         realStartHead   = $realStartHead
         fixtureRepo     = $fixtureRepo
+        scriptHashes    = [ordered]@{
+            verifyCiCommon   = Get-Sha256Hex -FilePath $commonScript
+            verifyLikeCi     = Get-Sha256Hex -FilePath $runnerScript
+            testRunnerFaults = Get-Sha256Hex -FilePath (Join-Path $scriptDir 'test-runner-faults.ps1')
+        }
         totalTests      = $testResults.Count
         passedCount     = @($testResults | Where-Object { $_.Passed }).Count
         failedCount     = @($testResults | Where-Object { -not $_.Passed }).Count

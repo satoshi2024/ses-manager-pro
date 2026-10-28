@@ -186,6 +186,62 @@ function Assert-ValidMavenArgs {
     }
 }
 
+function Test-IsWhitelistedJvmOption {
+    param([string]$Option)
+
+    if ([string]::IsNullOrWhiteSpace($Option)) {
+        return $false
+    }
+    $opt = $Option.Trim().Trim('"', "'")
+
+    # 1. 監査済みエンコーディング (UTF-8).
+    if ($opt -match '^(?i)-D(file|sun\.jnu|stdout|stderr)\.encoding=(UTF-8|UTF8)$') {
+        return $true
+    }
+    # 2. 監査済みタイムゾーンおよびロケール (Asia/Tokyo, ja_JP).
+    if ($opt -match '^(?i)-Duser\.timezone=Asia/Tokyo$') {
+        return $true
+    }
+    if ($opt -match '^(?i)-Duser\.language=ja$') {
+        return $true
+    }
+    if ($opt -match '^(?i)-Duser\.country=JP$') {
+        return $true
+    }
+    # 3. 監査済みGUI・ヘッドレス.
+    if ($opt -match '^(?i)-Djava\.awt\.headless=(true|false)$') {
+        return $true
+    }
+    # 4. 監査済みネットワーク・ソケット (IPv4優先).
+    if ($opt -match '^(?i)-Djava\.net\.preferIPv4Stack=(true|false)$') {
+        return $true
+    }
+    if ($opt -match '^(?i)-Djava\.net\.preferIPv6Addresses=(true|false)$') {
+        return $true
+    }
+    # 5. セキュリティ乱数ソース.
+    if ($opt -match '^(?i)-Djava\.security\.egd=file:/dev/\./urandom$') {
+        return $true
+    }
+    # 6. 一時ディレクトリ.
+    if ($opt -match '^(?i)-Djava\.io\.tmpdir=[a-zA-Z0-9_\\\-:\./]+$') {
+        return $true
+    }
+    # 7. メモリおよびGCオプション.
+    if ($opt -match '^-(Xmx|Xms|Xss)[0-9]+[kKmMgG]?$') {
+        return $true
+    }
+    if ($opt -match '^-XX:\+?[a-zA-Z0-9_\-]+(=[a-zA-Z0-9_\-\.]+)?$') {
+        return $true
+    }
+    # 8. 一般JVMフラグ.
+    if ($opt -match '^-(server|client|ea|enableassertions|da|disableassertions)$') {
+        return $true
+    }
+
+    return $false
+}
+
 function Assert-ControlledMavenJvmEnvironment {
     param([bool]$IsTargetedRun = $false)
 
@@ -193,7 +249,7 @@ function Assert-ControlledMavenJvmEnvironment {
         return
     }
 
-    # 1. MAVEN_ARGS 環境変数の検証 (FULL_GATE でのパラメータ迂回禁止)
+    # 1. MAVEN_ARGS 環境変数の検証 (FULL_GATE でのパラメータ迂回禁止).
     if (Test-Path env:MAVEN_ARGS) {
         $rawMavenArgs = $env:MAVEN_ARGS
         if (-not [string]::IsNullOrWhiteSpace($rawMavenArgs)) {
@@ -211,27 +267,21 @@ function Assert-ControlledMavenJvmEnvironment {
         }
     }
 
-    # 2. JVMオプション (MAVEN_OPTS, JAVA_TOOL_OPTIONS, _JAVA_OPTIONS, MAVEN_CONFIG) の検証.
-    $jvmVars = @('MAVEN_OPTS', 'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'MAVEN_CONFIG')
-    $forbiddenJvmPatterns = @(
-        '-Dtest=',
-        '-DskipTests',
-        '-Dmaven\.test\.skip',
-        '-Dgroups=',
-        '-DexcludedGroups=',
-        '-Dsurefire\.',
-        '-P[a-zA-Z0-9_\-]+',
-        '-f\s+',
-        '--file'
-    )
+    # 2. JVMオプション環境変数の厳格白名単検証 (MAVEN_OPTS, JAVA_TOOL_OPTIONS, _JAVA_OPTIONS, JDK_JAVA_OPTIONS, MAVEN_CONFIG).
+    $jvmVars = @('MAVEN_OPTS', 'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS', 'MAVEN_CONFIG')
     foreach ($varName in $jvmVars) {
         if (Test-Path "env:$varName") {
-            $val = (Get-Item "env:$varName").Value
-            if (-not [string]::IsNullOrWhiteSpace($val)) {
-                foreach ($pat in $forbiddenJvmPatterns) {
-                    if ($val -match $pat) {
-                        $redactedVal = Get-RedactedText -Text $val
-                        throw "FATAL: $varName に門禁制限を迂回する未許可のパラメータが検出されました: '$redactedVal'."
+            $rawVal = (Get-Item "env:$varName").Value
+            if (-not [string]::IsNullOrWhiteSpace($rawVal)) {
+                $tokens = [regex]::Matches($rawVal, '(?:"([^"]*)"|''([^'']*)''|(\S+))') | ForEach-Object {
+                    if ($_.Groups[1].Success) { $_.Groups[1].Value }
+                    elseif ($_.Groups[2].Success) { $_.Groups[2].Value }
+                    else { $_.Groups[3].Value }
+                }
+                foreach ($tok in $tokens) {
+                    if (-not (Test-IsWhitelistedJvmOption -Option $tok)) {
+                        $redactedTok = Get-RedactedText -Text $tok
+                        throw "FATAL: $varName に未許可または未知のJVMパラメータが検出されました（白名単外拒絶）: '$redactedTok'."
                     }
                 }
             }
@@ -377,80 +427,127 @@ function New-ControlledPitrWorkDir {
         [string]$CustomPitrWorkDir = ''
     )
     $controlledTempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
-    $candidate = ''
+    $candidateParent = ''
     if (-not [string]::IsNullOrWhiteSpace($CustomPitrWorkDir)) {
-        $candidate = $CustomPitrWorkDir
+        $candidateParent = $CustomPitrWorkDir
     } else {
         $rndSuffix = [System.Guid]::NewGuid().ToString('N').Substring(0, 8)
-        $candidate = Join-Path $controlledTempRoot ("ses-pitr-run-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + "-$rndSuffix")
+        $candidateParent = Join-Path $controlledTempRoot ("ses-pitr-run-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + "-$rndSuffix")
     }
 
-    Assert-ValidPitrWorkDir -RepoRoot $RepoRoot -EvidenceDir $EvidenceDir -PitrWorkDir $candidate
+    # 1. 独占親ディレクトリの境界・祖先・既存検証 (衝突時は即時例外・現場保全).
+    Assert-ValidPitrWorkDir -RepoRoot $RepoRoot -EvidenceDir $EvidenceDir -PitrWorkDir $candidateParent
 
-    $workFull = [System.IO.Path]::GetFullPath($candidate)
-    [System.IO.Directory]::CreateDirectory($workFull) | Out-Null
+    $parentFull = [System.IO.Path]::GetFullPath($candidateParent)
+    [System.IO.Directory]::CreateDirectory($parentFull) | Out-Null
 
     # 作成直後の再検証 (ジャンクションでないこと、空であること).
-    $dirItem = Get-Item -LiteralPath $workFull -Force -ErrorAction Stop
+    $dirItem = Get-Item -LiteralPath $parentFull -Force -ErrorAction Stop
     if ($dirItem.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) {
-        throw "FATAL: 作成されたPITR作業ディレクトリがReparsePoint/Junctionです（現場を保全し削除しません）: '$workFull'."
+        throw "FATAL: 作成されたPITR親ディレクトリがReparsePoint/Junctionです（現場を保全し削除しません）: '$parentFull'."
     }
-    $contents = @(Get-ChildItem -LiteralPath $workFull -Force -ErrorAction Stop)
+    $contents = @(Get-ChildItem -LiteralPath $parentFull -Force -ErrorAction Stop)
     if ($contents.Count -gt 0) {
-        throw "FATAL: 作成されたPITR作業ディレクトリが空ではありません（現場を保全し削除しません）: '$workFull' (既存項目数: $($contents.Count))."
+        throw "FATAL: 作成されたPITR親ディレクトリが空ではありません（現場を保全し削除しません）: '$parentFull' (既存項目数: $($contents.Count))."
     }
 
-    # 独占所有・帰属ファイルの作成.
-    $ownerFile = Join-Path $workFull '.ses-pitr-owner.json'
+    # 2. 親ディレクトリ直下に独占帰属ファイルを作成 (runToken はメモリ保持用にも返却).
     $runToken = [System.Guid]::NewGuid().ToString('N')
+    $childWorkDir = Join-Path $parentFull 'integration-work'
+    $childWorkFull = [System.IO.Path]::GetFullPath($childWorkDir)
+    [System.IO.Directory]::CreateDirectory($childWorkFull) | Out-Null
+
+    $ownerFile = Join-Path $parentFull '.ses-pitr-owner.json'
     $ownerObj = [ordered]@{
         pid       = $PID
         createdAt = (Get-Date).ToString('o')
         runToken  = $runToken
-        repoRoot  = $RepoRoot
+        repoRoot  = [System.IO.Path]::GetFullPath($RepoRoot)
+        parentDir = $parentFull
+        workDir   = $childWorkFull
     }
     Write-JsonStateFile -FilePath $ownerFile -Data $ownerObj
 
-    return $workFull
+    return [ordered]@{
+        ParentDir = $parentFull
+        WorkDir   = $childWorkFull
+        RunToken  = $runToken
+    }
 }
 
 function Assert-PitrWorkDirAttribution {
     param(
-        [string]$PitrWorkDir,
-        [string]$RepoRoot,
+        [string]$ParentDir = '',
+        [string]$WorkDir = '',
+        [string]$PitrWorkDir = '',
+        [string]$RepoRoot = '',
         [string]$ExpectedRunToken = ''
     )
-    if ([string]::IsNullOrWhiteSpace($PitrWorkDir) -or -not (Test-Path -LiteralPath $PitrWorkDir)) {
-        throw "FATAL: PITR作業ディレクトリが存在しません（帰属確認不能）: '$PitrWorkDir'."
+    # 互換性のため PitrWorkDir も受け付け可能とする.
+    $parentPath = ''
+    if (-not [string]::IsNullOrWhiteSpace($ParentDir)) {
+        $parentPath = [System.IO.Path]::GetFullPath($ParentDir)
+    } elseif (-not [string]::IsNullOrWhiteSpace($PitrWorkDir)) {
+        $pCand = [System.IO.Path]::GetFullPath($PitrWorkDir)
+        if (Test-Path -LiteralPath (Join-Path $pCand '.ses-pitr-owner.json')) {
+            $parentPath = $pCand
+        } else {
+            $parentPath = [System.IO.Path]::GetFullPath((Split-Path -Parent $pCand))
+        }
+    } elseif (-not [string]::IsNullOrWhiteSpace($WorkDir)) {
+        $parentPath = [System.IO.Path]::GetFullPath((Split-Path -Parent $WorkDir))
+    } else {
+        throw "FATAL: PITR作業ディレクトリまたは親ディレクトリが指定されていません（現場保全）."
     }
-    $dirItem = Get-Item -LiteralPath $PitrWorkDir -Force -ErrorAction Stop
+
+    if (-not (Test-Path -LiteralPath $parentPath)) {
+        throw "FATAL: PITR親ディレクトリが存在しません（帰属確認不能・現場保全）: '$parentPath'."
+    }
+    $dirItem = Get-Item -LiteralPath $parentPath -Force -ErrorAction Stop
     if ($dirItem.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) {
-        throw "FATAL: PITR作業ディレクトリがReparsePoint/Junctionに変更されています（現場を保全し削除しません）: '$PitrWorkDir'."
+        throw "FATAL: PITR親ディレクトリがReparsePoint/Junctionに変更されています（現場を保全し削除しません）: '$parentPath'."
     }
-    $ownerFile = Join-Path $PitrWorkDir '.ses-pitr-owner.json'
+    $ownerFile = Join-Path $parentPath '.ses-pitr-owner.json'
     if (-not (Test-Path -LiteralPath $ownerFile)) {
-        throw "FATAL: PITR作業ディレクトリの帰属ファイルが存在しません（他プロセスによる衝突または改変の恐れ・現場保全）: '$ownerFile'."
+        throw "FATAL: PITR親ディレクトリの帰属ファイルが存在しません（他プロセスによる衝突または改変の恐れ・現場保全）: '$ownerFile'."
     }
     $ownerData = $null
     try {
         $ownerData = [System.IO.File]::ReadAllText($ownerFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
     } catch {
-        throw "FATAL: PITR作業ディレクトリの帰属ファイル解析に失敗しました（現場保全）: $($_.Exception.Message)."
+        throw "FATAL: PITR親ディレクトリの帰属ファイル解析に失敗しました（現場保全）: $($_.Exception.Message)."
     }
     if ($null -eq $ownerData -or $null -eq $ownerData.pid) {
-        throw "FATAL: PITR作業ディレクトリの帰属ファイルが不正です（現場保全）: '$ownerFile'."
+        throw "FATAL: PITR親ディレクトリの帰属ファイルが不正です（現場保全）: '$ownerFile'."
     }
     if ($ownerData.pid -ne $PID) {
-        throw "FATAL: PITR作業ディレクトリの所有者PIDが一致しません（他プロセス占有・現場保全）: 期待=$PID, 実際=$($ownerData.pid)."
+        throw "FATAL: PITR親ディレクトリの所有者PIDが一致しません（他プロセス占有・現場保全）: 期待=$PID, 実際=$($ownerData.pid)."
     }
-    if (-not [string]::IsNullOrWhiteSpace($ExpectedRunToken) -and $ownerData.runToken -ne $ExpectedRunToken) {
-        throw "FATAL: PITR作業ディレクトリのrunTokenが一致しません（現場保全）: 期待=$ExpectedRunToken, 実際=$($ownerData.runToken)."
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedRunToken)) {
+        if ($ownerData.runToken -ne $ExpectedRunToken) {
+            throw "FATAL: PITR親ディレクトリのrunTokenが一致しません（現場保全）: 期待=$ExpectedRunToken, 実際=$($ownerData.runToken)."
+        }
     }
     if (-not [string]::IsNullOrWhiteSpace($RepoRoot) -and -not [string]::IsNullOrWhiteSpace($ownerData.repoRoot)) {
         $ownerRepoFull = [System.IO.Path]::GetFullPath($ownerData.repoRoot)
         $expectedRepoFull = [System.IO.Path]::GetFullPath($RepoRoot)
         if (-not $ownerRepoFull.Equals($expectedRepoFull, [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw "FATAL: PITR作業ディレクトリのリポジトリ帰属が一致しません（現場保全）: 期待='$expectedRepoFull', 実際='$ownerRepoFull'."
+            throw "FATAL: PITR親ディレクトリのリポジトリ帰属が一致しません（現場保全）: 期待='$expectedRepoFull', 実際='$ownerRepoFull'."
+        }
+    }
+
+    # WorkDir または PitrWorkDir が指定されている場合、親ディレクトリ配下にあることを検証.
+    $checkWorkDir = if (-not [string]::IsNullOrWhiteSpace($WorkDir)) { $WorkDir } elseif (-not [string]::IsNullOrWhiteSpace($PitrWorkDir) -and -not $parentPath.Equals([System.IO.Path]::GetFullPath($PitrWorkDir), [System.StringComparison]::OrdinalIgnoreCase)) { $PitrWorkDir } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($checkWorkDir)) {
+        $normWork = [System.IO.Path]::GetFullPath($checkWorkDir)
+        if (-not (Test-IsSubpathOrSame -ChildPath $normWork -ParentPath $parentPath)) {
+            throw "FATAL: INTEGRATION_WORK_DIR がPITR親ディレクトリ配下にありません（境界逸脱・現場保全）: '$normWork' (親='$parentPath')."
+        }
+        if (Test-Path -LiteralPath $normWork) {
+            $workDirItem = Get-Item -LiteralPath $normWork -Force -ErrorAction Stop
+            if ($workDirItem.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) {
+                throw "FATAL: INTEGRATION_WORK_DIR がReparsePoint/Junctionに変更されています（現場を保全し削除しません）: '$normWork'."
+            }
         }
     }
 }
@@ -458,7 +555,7 @@ function Assert-PitrWorkDirAttribution {
 function Write-JsonStateFile {
     param(
         [string]$FilePath,
-        [System.Collections.IDictionary]$Data
+        $Data
     )
     $parentDir = Split-Path -Parent $FilePath
     if (-not (Test-Path -LiteralPath $parentDir)) {
