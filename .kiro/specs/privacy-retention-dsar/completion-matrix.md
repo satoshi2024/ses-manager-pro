@@ -1,5 +1,76 @@
 # completion mapping
 
+## 2026-10-26 NF07 本番接線・意思決定契約および純粋カーネル抽出計画（Base: 197386f8 / 直前Base: aad2afee / c8b78dc3 証拠継承）
+
+現行作業ブランチ: `codex/snf-prod-nf07-evidence-contract`
+本フェーズ基準（Base）: `197386f866c834c7232590ec2f16fd13b8ac17d6`
+直前基準（Previous Base）: `aad2afeec71c2cb2eaa846bf02b2da0344990180`（Astra/総括 限定 PLAN PASS 承認コミット）
+固定テスト証拠コミット: `c8b78dc3c8c3906e8ba734a2aa81037bd3a77dfb`
+担当: AI-5（接線・意思決定契約および純粋カーネル抽出設計担当）
+設計正本:
+* 本番接線・意思決定契約: [`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md)
+* 純粋Policy検証カーネル抽出・実施設計: [`pure-policy-verification-kernel-plan.md`](pure-policy-verification-kernel-plan.md)
+
+### 1. 直前固定検証実績（c8b78dc3 の歴史的証拠）
+本ラウンドにおいては新規のテスト実行は行っていない（NO NEW TESTS RUN IN THIS ROUND）。以下の実績は直前固定コミット `c8b78dc3` において完了・記録された歴史的証拠であり、全体の COMPLETE 状態を不当に引き上げるものではない。
+* **只読Policy照会スライス定向テスト (`verification-evidence/20261025-nf07-targeted-01`)**:
+  * 実行コマンド: `mvn test -Dtest=PolicyReadonlyQueryServiceTest,ApprovalEnvelopeVerifierTest,PrivacyFoundationIsolationTest`
+  * 結果: **3クラス / 42テスト / 0 failure / 0 error / 0 skip（完全合格、ExitCode: 0）**
+  * 内訳:
+    * `PolicyReadonlyQueryServiceTest`: 29テスト合格
+    * `ApprovalEnvelopeVerifierTest`: 9テスト合格
+    * `PrivacyFoundationIsolationTest`: 4テスト合格
+* **Fast 回帰テストスイート (`verification-evidence/20261025-nf07-fast-01`)**:
+  * 実行コマンド: `mvn test` (Fast H2/Unit)
+  * 結果: **697クラス / 4,292テスト / 0 failure / 0 error / 0 skip（完全合格、ExitCode: 0）**
+
+### 2. 履歴スキャン統計の分離と将来リリースの閉環ゲート規約
+過去のインベントリスキャン統計は計測時点のコミットSHAが異なっており、直前基準（`9024f7b2` / `b2886c47`）や本フェーズ基準（`aad2afee`）の直接スキャン結果と混同してはならない。
+* **歴史的ベースライン 1（2026-08-28、コミット `b678ce98`）**:
+  * 116 migration / 180 table / 4,279 CREATE column / 153 ALTER column / 176 entity / 424 provider候補。
+  * プライバシーカタログ構造的未分類は 0 であるが、法定保持ポリシーが未確定のテーブルが 78 件存在（`COVERAGE_EXPLICIT_POLICY_UNKNOWN`）。
+* **固定読取専用スキャン 2（2026-10-01、Control Head `cde61306`、証拠 `20261001-privacy-coverage-02`）**:
+  * 183 SQL / 254 table / 244 entity / 708 provider候補。
+  * プライバシーカタログ未分類 74、インベントリ欠落 1,082 列、プロバイダー参照欠落 285、エンティティ未マップ 68 で `BLOCKED`。
+* **将来リリースの閉環ゲート規約**:
+  * 上記の統計はいずれも本設計の基準コミットの直接再走査結果ではない。
+  * Phase 4 実装時および将来の本番公開（Production Enablement）時には、リリース対象コミット SHA に対するインベントリ・カバレッジの閉環スキャンを再実行し、未分類 0・欠落 0 の証拠を固定することを必須ゲートとする。
+
+### 3. 既存合成機能の実在状況と歴史的固定検証
+既存の Journal、Hold/Fence、署名検証/SoD、Recovery、Preview は既に合成隔離層として部分実装・検証が存在しており、未実装または白紙として扱ってはならない。
+* **SF-W0**: 計画固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`（Astra技術Plan PASS）
+* **SF-W1**: 固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`（Astra限定CODE PASS、対象3クラス 18/0/0/0）
+* **SF-W2a**: 固定証拠 `verification-evidence/nf07-w2a`（MySQL並行境界・線形化整合性確認）
+* **SF-W2b (Slice D2b2)**: 固定Head `ac894ac6ec9df2eada9e47c5f242f268270daec4`（1クラス 35/0/0/0 合格）
+* **SF-W3a (Preview)**: 固定Head `92d91d58172288406f6048e69ad38aa85880eb04`（Astra限定CODE PASS、26/0/0/0、control `b6e2992b` 統合）
+
+### 4. 基準SHA未検証項目（TEST NOT RUN）
+以下の項目は Docker/MySQL、パフォーマンステスト環境依存のため AI-1 担当としてキューされ、基準 SHA においては未再実行（NOT RUN）である：
+* W2b Journal CAS / 独立 Witness / アプリケーション投影の実 MySQL 統合テスト
+* W2b Slice D リカバリ（3-MySQL 独立インスタンス）実 MySQL 統合テスト
+* W3a 合成 DSAR プレビュー（`SyntheticPrivacyRequestServiceMySQLTest`）実 MySQL 統合テスト
+* パフォーマンステストプロファイル（`-Pperformance-tests`）
+* PITR / バックアップリストア統合検証
+
+### 5. 本番接線ギャップおよび人手承認ギャップ
+詳細設計は [`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md) §2 を参照。
+* **技術配線ギャップ**: 純粋検証カーネルの独立審査未完、本番用 Trust Anchor / KMS 連携不在、本番独立 Journal/Witness インフラ不在、実テーブル/ファイル/AI プロバイダー不在、Outbox ディスパッチャー不在、本番用 Spring Security Context 呼出元プロバイダー不在。
+* **OIDC テナント解決（P1解消）**: `OidcLoginUser` のテナントは内部認証バインディング `oidc.getTenantId()` のみを唯一の根拠とし、トークンクレーム（`tenant_id` 等）は一致性検査のみに使用（上書き・フォールバック禁止）。不一致・内部欠落・クレーム衝突はすべて `ACCESS_DENIED`。
+* **ログ証跡の扱い**: 本スライスはデータベース監査（`t_audit_log`）への書き込みを行わない（0 DB write）。ログがファイルや外部基盤で永続化されるかを保証するものではなく、アプリDBへの永続化を行わない規約とする。DB 監査未実装の現段階において生産監査完備を主張してはならない。
+* **人手承認ギャップ**: DG-07 未承認、正式 Privacy Owner 未選任、法的留置（Hold）/SoD 権限未承認、DSAR 本人確認・第三者マスキング SOP 未承認、外部 AI ベンダー DPA 未確認。
+* **安全保護の根拠**: `privacy.retention.enabled` および `privacy.dsar.enabled` は導入予定・未実装であり、現行の保護根拠は「実際の `SyntheticEnvironmentGuard` による fail-closed 拒絶」および「破壊的実行能力の構造的不在」に立脚する。
+
+### 6. 純粋Policy検証カーネル抽出計画（分段階ヘルパー・承認証明生成境界の明確化）
+詳細設計は [`pure-policy-verification-kernel-plan.md`](pure-policy-verification-kernel-plan.md) を参照。
+* **抽出対象**: `ApprovalEnvelopeVerifier` から純粋計算を分段階ヘルパー（スキーマ検証、Anchor ID比対、Scope照合、時間窓検査、ACTIVE失効判定、Ed25519署名検証、Policy SoD、Policyバインディング、Case/Policy相互バインディング）として抽出。
+* **オーケストレーション維持**: ラッパー（`ApprovalEnvelopeVerifier`）が評価順序（schema → anchor → scope → time → revocation → signature）をオーケストレーション。Policy 完備検証後に初めて Case を検証し、先行バッチ照会は行わない。
+* **承認証明（VerifiedApproval）の生成境界**: 純粋カーネルは `VerifiedApproval` を生成・返却せず（void または純計算値 effectiveExpiry のみ返却）、環境防護・Anchor解決・失効照会を完遂したラッパー末端においてのみ構築。
+* **可視性境界の明確化**: `package-private` はパッケージ外アクセスを制限するものであり、同パッケージ内バイパス防止は規約・レビュー・オーケストレーション契約で統制。
+* **安全原則**: カーネル検証結果 ≠ 実行認可。説明専用DTO（`VerifiedPolicyMetadata`）を維持し、実行認可は付与しない。
+* **状態**: **PLAN REVIEW PENDING**（Astra 独立技術審査待ち）。
+
+---
+
 ## 2026-10-01 現行追加scope
 
 `SYNTHETIC_FOUNDATION`は新しい技術incrementであり、計画固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`はAstra技術Plan PASS。

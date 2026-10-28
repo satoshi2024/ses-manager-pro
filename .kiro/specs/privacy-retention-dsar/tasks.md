@@ -10,12 +10,17 @@ Base: `1443fb68943849a3260d7ebe005259f3eb609d60`。計画固定Head `f007ef9aecc
 |---|---|---|
 | [x] SF-W0 | requirements/design/正本の整合、全source inventory差分、型/拒否/署名interfaceとfixture設計 | Astraが固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`の技術PlanをPASS。policy UNKNOWNは未解決のまま |
 | [x] SF-W1 | pure state machine、envelope verifier、test-only authority、隔離harness。active/default prod、未知schema、偽署名/失効/SoD/実URL注入拒否 | Astraは固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`を限定CODE PASS。generated fixtureのみ、実provider call=0、3 class 18/0/0/0。SF-W1のDemo/コード範囲だけ完了 |
+| [ ] SF-RO-QUERY | NF03/NF08向け只読Policy照会契約（evaluate/catalog/source/CURRENT_CANDIDATE必須照合・三点照合/Policy-only型付け検証/説明専用DTO）。コード修正完了。AI-1による定向テスト42件（3クラス 42/0/0/0）およびFastスイート全4,292件の合格はコミット `c8b78dc3` における歴史的固定証拠であり（`verification-evidence/20261025-nf07-targeted-01`, `fast-01`）、本ラウンドでの新規テスト実行はなく全体のCOMPLETE状態は引き上げない | 42件の定向単体テスト合格（`PolicyReadonlyQueryServiceTest` 29件含む、c8b78dc3実績）。実行認可Capability不保持、本番配線/外部通信なし、Astra/総括独立CODE Review待ち |
+| [x] SF-PROD-WIRING | NF07本番接線・意思決定契約設計（[`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md)）。Astra/総括P1指摘を受けR3改定。OidcLoginUser認証バインディング優先テナント解決・クレーム一致性検査・拒絶条件の厳格化、ログ証跡表現是正（アプリDB書き込みなし）、純粋検証カーネル分離と独立本番入口、完全0 DB書込、厳格呼び出し元マッピング、歴史スキャン分離、機能フラグ未実装明記を策定 | 設計策定完了。Astraおよび総括より限定 PLAN PASS 受理（コミット `aad2afeec71c2cb2eaa846bf02b2da0344990180`）。本番削除・外送・書込なし、`SyntheticEnvironmentGuard`維持、説明専用DTO維持 |
+| [ ] SF-KERNEL-EXTRACT-PLAN | 純粋Policy検証カーネル抽出・実施設計（[`pure-policy-verification-kernel-plan.md`](pure-policy-verification-kernel-plan.md)）。ApprovalEnvelopeVerifierから純粋計算を分段階ヘルパー群（Schema/Anchor比対/Scope照合/時間窓/失効判定/Ed25519/SoD/バインディング一致）として抽出。合成ラッパーによる順序オーケストレーション（Policy完備検証後にCase実行、先行バッチ照会禁止）、ラッパー末端でのみVerifiedApproval構築（カーネルは構築・返却しない）、入口ごとの時刻・例外契約（Policy-only SoDはPolicySecurityException、Case SoDはSecurityException）、および受け入れテストを定義 | 実施設計改定完了。Java改修なし、DB書込なし、Astra独立技術 PLAN Review 待ち |
 | [ ] SF-W2 | [`sf-w2-protocol.md`](sf-w2-protocol.md)のAstra追加Plan PASS後に、event単位1 revisionのjournal CAS/compound authorization event、独立projection、最新watermark witnessを実装 | MySQL実並行でholdと認可順序、transaction中断時event/intent=0、journal ACK前call=0、old valid watermark拒否、profile/capability境界を検証 |
 | [ ] SF-W3 | outbox worker、dispatchごとの期限/失効再検証、current/historical receipt verifier分離、lease/idempotency、UNKNOWN/partial/emergency stop | 認可commit〜HTTP間hold、送信前後crash、期限後result fact、rotation/compromise/backdate、authoritative query、wrong binding、二worker、stale fenceを検証。取消receiptなしでCANCELLEDにせず、in-flight/UNKNOWNを保持 |
 | [ ] SF-W4 | restore quarantine、journal replay、DSAR合成export/redaction、NF03/NF08拒否integration | old snapshotへ新hold/intentを再適用、gap/改竄/遅延で公開不可、第三者情報0、反復hash一致 |
 | [ ] SF-M | 全synthetic waveを固定RCで試験し独立Review | synthetic foundationの達成範囲と未完人工gateを記録。全NF07完成へ読み替えない |
 
-W2以降のworker/処分/journal recoveryは追加protocolの技術Plan PASS前に開始しない。SF-W1 CODE PASSは独立journal、worker、restore recovery、NF07全featureの完成を意味しない。
+SF-W3a preview persistence sliceは別途履歴として記録する。ledgerによれば固定Head `92d91d58172288406f6048e69ad38aa85880eb04` の限定CODE PASS（26/0/0/0、Astra受理）後、9 commitがcontrol `b6e2992b`へ統合済みで、対象はsynthetic preview persistence/as-of再検証/ACK_UNKNOWN/CASのみ。これはSF-W3全体またはSF-Mの完了ではない。`providerRead`/`crossScopeAccess`は動的fixture counter、provider write/dispatch/dispositionは`SyntheticPreviewPort`/service依存の構造上の能力不在をassertする契約であり、runtime回数0や全システムの外送不能性を意味しない。本追記は新たなruntime結果ではない。
+
+W2以降のworker/処分/journal recoveryは追加protocolの技術Plan PASS前に開始しない。Journal、hold/fence、署名/SoD、recovery（SF-W2b Slice D）、preview（SF-W3a）は合成隔離層として部分実装・固定検証が存在しており、tasks旧記述を理由にこれら全体が未存在であると誤認してはならない。SF-W1 CODE PASSは独立journal、worker、restore recovery、NF07全featureの完成を意味しない。
 migration採番は総括が管理し、旧migrationとV1を変更しない。実adapter、正式policy、交付/処分は別人工gate。
 試験でDBを扱う場合もharness生成の隔離container/dataだけとし、既存DBやユーザーdataを再利用しない。
 
