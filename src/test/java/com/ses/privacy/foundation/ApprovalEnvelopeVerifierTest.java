@@ -264,11 +264,9 @@ class ApprovalEnvelopeVerifierTest {
     @Test
     void whenPolicyFailsCaseRevocationProviderIsNotCalled() throws Exception {
         SyntheticAuthorityFixture fixture = new SyntheticAuthorityFixture();
-        java.util.concurrent.atomic.AtomicInteger caseProviderCalls = new java.util.concurrent.atomic.AtomicInteger(0);
+        java.util.List<String> recordedProviderCalls = new java.util.concurrent.CopyOnWriteArrayList<>();
         RevocationStatusProvider trackedProvider = ref -> {
-            if (ref.contains("case") || ref.contains("case-r2")) {
-                caseProviderCalls.incrementAndGet();
-            }
+            recordedProviderCalls.add(ref);
             return RevocationStatus.ACTIVE;
         };
         ApprovalEnvelopeVerifier verifier = new ApprovalEnvelopeVerifier(
@@ -277,16 +275,26 @@ class ApprovalEnvelopeVerifierTest {
                 java.time.Clock.fixed(SyntheticAuthorityFixture.NOW, java.time.ZoneOffset.UTC),
                 new SyntheticEnvironmentGuard(new MockEnvironment()));
 
-        PolicyApprovalEnvelope alteredPolicy = new PolicyApprovalEnvelope(fixture.policy.metadata(),
+        // action/scope を保持したまま、署名バイトのみを改竄
+        byte[] tamperedSignature = fixture.policy.signature().clone();
+        tamperedSignature[0] ^= 0x7f;
+        PolicyApprovalEnvelope tamperedPolicy = new PolicyApprovalEnvelope(fixture.policy.metadata(),
                 fixture.policy.policyId(), fixture.policy.policyVersion(), fixture.policy.dataElementId(),
-                "DELETE", fixture.policy.providerId(), fixture.policy.purpose(), fixture.policy.trigger(),
-                fixture.policy.retentionRule(), fixture.policy.disposition(), fixture.policy.signature());
+                fixture.policy.action(), fixture.policy.providerId(), fixture.policy.purpose(), fixture.policy.trigger(),
+                fixture.policy.retentionRule(), fixture.policy.disposition(), tamperedSignature);
 
-        assertThrows(SecurityException.class, () -> verifier.verify(alteredPolicy, fixture.approval,
-                SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.TARGET_VERSION,
-                SyntheticAuthorityFixture.TARGET_HASH, SyntheticAuthorityFixture.ACTION, SyntheticAuthorityFixture.PROVIDER));
+        // Policy の署名検証失敗（SIGNATURE_INVALID）を精密に断言
+        PolicySecurityException pse = assertThrows(PolicySecurityException.class,
+                () -> verifier.verify(tamperedPolicy, fixture.approval,
+                        SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.TARGET_VERSION,
+                        SyntheticAuthorityFixture.TARGET_HASH, SyntheticAuthorityFixture.ACTION,
+                        SyntheticAuthorityFixture.PROVIDER));
+        assertEquals(PolicyFailureReason.SIGNATURE_INVALID, pse.reason());
+        assertEquals("署名が正しくありません", pse.getMessage());
 
-        assertEquals(0, caseProviderCalls.get());
+        // 記録された呼び出しシーケンスは Policy key と Policy envelope のみであり、Case の照会は一切含まれない
+        assertEquals(java.util.List.of("synthetic-authority:key-ephemeral", fixture.policy.metadata().revocationReference()),
+                recordedProviderCalls);
     }
 
     @Test
@@ -370,12 +378,14 @@ class ApprovalEnvelopeVerifierTest {
     @Test
     void sodExceptionDifferentiatedBetweenPolicyOnlyAndCaseVerify() throws Exception {
         SyntheticAuthorityFixture fixture = new SyntheticAuthorityFixture();
-        ApprovalEnvelopeMetadata sameActor = new ApprovalEnvelopeMetadata("1", "synthetic-authority", "key-ephemeral",
+
+        // 1. Policy SoD: verifyPolicyOnly は型付けされた PolicySecurityException(SOD_VIOLATION) を送出する
+        ApprovalEnvelopeMetadata samePolicyActor = new ApprovalEnvelopeMetadata("1", "synthetic-authority", "key-ephemeral",
                 SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.SCOPE,
-                SyntheticEnvironmentGuard.SYNTHETIC_AUDIENCE, "r-sod", "same-user", "same-user", "rev-sod",
+                SyntheticEnvironmentGuard.SYNTHETIC_AUDIENCE, "r-policy-sod", "same-user", "same-user", "rev-policy-sod",
                 SyntheticAuthorityFixture.NOW.minusSeconds(60), SyntheticAuthorityFixture.NOW.minusSeconds(60),
                 SyntheticAuthorityFixture.NOW.plusSeconds(300));
-        PolicyApprovalEnvelope sodPolicy = fixture.signedPolicy(sameActor,
+        PolicyApprovalEnvelope sodPolicy = fixture.signedPolicy(samePolicyActor,
                 SyntheticAuthorityFixture.ACTION, SyntheticAuthorityFixture.PROVIDER);
 
         PolicySecurityException pse = assertThrows(PolicySecurityException.class,
@@ -386,12 +396,44 @@ class ApprovalEnvelopeVerifierTest {
         assertEquals(PolicyFailureReason.SOD_VIOLATION, pse.reason());
         assertEquals("職務分離違反: 申請者と承認者は異なる必要があります", pse.getMessage());
 
-        SecurityException se = assertThrows(SecurityException.class,
-                () -> fixture.verifier.verify(sodPolicy, fixture.approval,
+        // 2. Policy SoD under verify: sodPolicy に正しく紐付けられた Case を生成し、
+        // digest・時間・scope 等の前置条件を通過させて確実に SoD 判定へ到達させる
+        CaseApprovalEnvelope validCaseForSodPolicy = fixture.signedCase(
+                fixture.metadata("case-for-sod-policy", SyntheticAuthorityFixture.NOW.minusSeconds(30), SyntheticAuthorityFixture.NOW.plusSeconds(300)),
+                sodPolicy,
+                SyntheticAuthorityFixture.CASE_ID,
+                SyntheticAuthorityFixture.TARGET_VERSION,
+                SyntheticAuthorityFixture.TARGET_HASH,
+                SyntheticAuthorityFixture.ACTION,
+                SyntheticAuthorityFixture.PROVIDER,
+                SyntheticAuthorityFixture.NOW.minusSeconds(10));
+
+        SecurityException sePolicySod = assertThrows(SecurityException.class,
+                () -> fixture.verifier.verify(sodPolicy, validCaseForSodPolicy,
                         SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.TARGET_VERSION,
                         SyntheticAuthorityFixture.TARGET_HASH, SyntheticAuthorityFixture.ACTION,
                         SyntheticAuthorityFixture.PROVIDER));
-        assertEquals("職務分離条件に違反しています", se.getMessage());
+        assertEquals(SecurityException.class, sePolicySod.getClass());
+        assertEquals("職務分離条件に違反しています", sePolicySod.getMessage());
+
+        // 3. Case SoD under verify: Policy は通常、Case の requester == approver の場合
+        ApprovalEnvelopeMetadata sameCaseActor = new ApprovalEnvelopeMetadata("1", "synthetic-authority", "key-ephemeral",
+                SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.SCOPE,
+                SyntheticEnvironmentGuard.SYNTHETIC_AUDIENCE, "case-sod-r1", "same-case-user", "same-case-user", "rev-case-sod",
+                SyntheticAuthorityFixture.NOW.minusSeconds(30), SyntheticAuthorityFixture.NOW.minusSeconds(30),
+                SyntheticAuthorityFixture.NOW.plusSeconds(300));
+        CaseApprovalEnvelope sodCase = fixture.signedCase(sameCaseActor, fixture.policy,
+                SyntheticAuthorityFixture.CASE_ID, SyntheticAuthorityFixture.TARGET_VERSION,
+                SyntheticAuthorityFixture.TARGET_HASH, SyntheticAuthorityFixture.ACTION,
+                SyntheticAuthorityFixture.PROVIDER, SyntheticAuthorityFixture.NOW.minusSeconds(10));
+
+        SecurityException seCaseSod = assertThrows(SecurityException.class,
+                () -> fixture.verifier.verify(fixture.policy, sodCase,
+                        SyntheticAuthorityFixture.TENANT, SyntheticAuthorityFixture.TARGET_VERSION,
+                        SyntheticAuthorityFixture.TARGET_HASH, SyntheticAuthorityFixture.ACTION,
+                        SyntheticAuthorityFixture.PROVIDER));
+        assertEquals(SecurityException.class, seCaseSod.getClass());
+        assertEquals("職務分離条件に違反しています", seCaseSod.getMessage());
     }
 
     @Test

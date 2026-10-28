@@ -99,8 +99,11 @@ class PurePolicyVerificationKernelTest {
 
         assertDoesNotThrow(() -> PurePolicyVerificationKernel.verifyTimeWindow(NOW, anchor, normal));
 
-        // 境界値テスト: now == validFrom (有効)
-        assertDoesNotThrow(() -> PurePolicyVerificationKernel.verifyTimeWindow(validFrom, anchor, normal));
+        // 境界値テスト: now == validFrom (有効: issuedAt/effectiveAt <= validFrom < expiresAt を満たす独立 envelope を使用)
+        ApprovalEnvelopeMetadata atValidFromMeta = new ApprovalEnvelopeMetadata("1", "authority-1", "key-1",
+                TENANT, SCOPE, SyntheticEnvironmentGuard.SYNTHETIC_AUDIENCE, "r-valid-from", "req-1", "app-2", "rev-valid-from",
+                validFrom.minusSeconds(60), validFrom.minusSeconds(60), validFrom.plusSeconds(600));
+        assertDoesNotThrow(() -> PurePolicyVerificationKernel.verifyTimeWindow(validFrom, anchor, atValidFromMeta));
 
         // 境界値テスト: now == validUntil (失効: AUTHORITY_VALIDITY_EXPIRED)
         PolicySecurityException pseUntil = assertThrows(PolicySecurityException.class,
