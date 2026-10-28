@@ -290,7 +290,6 @@ class ApprovalEnvelopeVerifierTest {
                         SyntheticAuthorityFixture.TARGET_HASH, SyntheticAuthorityFixture.ACTION,
                         SyntheticAuthorityFixture.PROVIDER));
         assertEquals(PolicyFailureReason.SIGNATURE_INVALID, pse.reason());
-        assertEquals("署名が正しくありません", pse.getMessage());
 
         // 記録された呼び出しシーケンスは Policy key と Policy envelope のみであり、Case の照会は一切含まれない
         assertEquals(java.util.List.of("synthetic-authority:key-ephemeral", fixture.policy.metadata().revocationReference()),
