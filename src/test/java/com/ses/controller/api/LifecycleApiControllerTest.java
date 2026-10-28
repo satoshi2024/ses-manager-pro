@@ -1,15 +1,19 @@
 package com.ses.controller.api;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.dto.lifecycle.CompleteLifecycleTaskCommand;
 import com.ses.dto.lifecycle.CreateLifecycleCaseCommand;
 import com.ses.dto.lifecycle.LifecycleTemplateDto;
 import com.ses.dto.lifecycle.LifecycleTemplateTaskDto;
 import com.ses.entity.Engineer;
+import com.ses.entity.LifecycleTask;
 import com.ses.entity.OrganizationUnit;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.LifecycleTaskMapper;
 import com.ses.mapper.OrganizationUnitMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
@@ -67,6 +71,9 @@ class LifecycleApiControllerTest {
     private UserOrganizationMapper userOrganizationMapper;
 
     @Autowired
+    private LifecycleTaskMapper lifecycleTaskMapper;
+
+    @Autowired
     private com.ses.mapper.ApprovalRequestMapper approvalRequestMapper;
 
     private SysUser adminUser;
@@ -77,6 +84,7 @@ class LifecycleApiControllerTest {
     @BeforeEach
     void setUp() {
         adminUser = SysUser.builder()
+                .tenantId("default")
                 .username("admin_api_test")
                 .password("pass")
                 .realName("管理者テスト")
@@ -86,6 +94,7 @@ class LifecycleApiControllerTest {
         sysUserMapper.insert(adminUser);
 
         SysUser hrUser = SysUser.builder()
+                .tenantId("default")
                 .username("hr_api_test")
                 .password("pass")
                 .realName("人事テスト")
@@ -113,6 +122,7 @@ class LifecycleApiControllerTest {
         userOrganizationMapper.insert(uo);
 
         engineer = Engineer.builder()
+                .tenantId("default")
                 .fullName("要員APIテスト")
                 .status("稼動中")
                 .employmentType("正社員")
@@ -358,5 +368,47 @@ class LifecycleApiControllerTest {
         mockMvc.perform(get("/api/lifecycle/templates/" + template.getId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("INACTIVE"));
+    }
+
+    @Test
+    @DisplayName("通常のタスク完了APIはDUAL_CONFIRMATIONを拒否すること")
+    @WithMockUser(username = "admin_api_test", roles = {"管理者"})
+    void testOrdinaryCompletionApiRejectsDualConfirmation() throws Exception {
+        LifecycleTemplateDto dualTemplate = templateService.createTemplate(LifecycleTemplateDto.builder()
+                .templateType("JOIN")
+                .name("二者確認API拒否テスト")
+                .validFrom(LocalDate.now().minusDays(1))
+                .tasks(List.of(LifecycleTemplateTaskDto.builder()
+                        .taskCode("DUAL_CONFIRM_API")
+                        .taskName("二者確認が必要なタスク")
+                        .assigneeRule("ROLE")
+                        .assigneeRuleValue("管理者")
+                        .sortOrder(1)
+                        .isMandatory(1)
+                        .isBlocking(1)
+                        .evidenceType("DUAL_CONFIRMATION")
+                        .build()))
+                .build(), adminUser.getId());
+        var lifecycleCase = caseService.createCase(adminUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(engineer.getId())
+                .lifecycleType("JOIN")
+                .templateId(dualTemplate.getId())
+                .anchorDate(LocalDate.now())
+                .title("二者確認拒否")
+                .build());
+        LifecycleTask task = lifecycleTaskMapper.selectById(lifecycleCase.getTasks().get(0).getId());
+        task.setStatus("IN_PROGRESS");
+        lifecycleTaskMapper.updateById(task);
+
+        mockMvc.perform(post("/api/lifecycle/tasks/" + task.getId() + "/complete")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(CompleteLifecycleTaskCommand.builder()
+                                .completionComment("単独完了の試行")
+                                .build())))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409));
+
+        assertEquals("IN_PROGRESS", lifecycleTaskMapper.selectById(task.getId()).getStatus());
     }
 }

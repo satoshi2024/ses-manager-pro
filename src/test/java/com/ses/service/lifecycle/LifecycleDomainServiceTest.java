@@ -8,6 +8,7 @@ import com.ses.mapper.*;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.test.TenantTestSecurity;
 import com.ses.service.lifecycle.impl.LifecycleExceptionApprovalAdapter;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -63,6 +64,9 @@ class LifecycleDomainServiceTest {
     private LifecycleCaseMapper caseMapper;
 
     @Autowired
+    private LifecycleCaseSequenceMapper caseSequenceMapper;
+
+    @Autowired
     private LifecycleTaskMapper taskMapper;
 
     @Autowired
@@ -82,6 +86,12 @@ class LifecycleDomainServiceTest {
 
     @Autowired
     private LifecycleExceptionApprovalAdapter approvalAdapter;
+
+    @Autowired
+    private LifecycleScopeService scopeService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     private Engineer testEngineer;
     private SysUser adminUser;
@@ -439,9 +449,9 @@ class LifecycleDomainServiceTest {
         LifecycleTaskDto assetTask = tasks.stream().filter(t -> "RESIGN_ASSET_RETURN".equals(t.getTaskCode())).findFirst().orElseThrow();
         LifecycleTaskDto docTask = tasks.stream().filter(t -> "RESIGN_DOC_RETENTION".equals(t.getTaskCode())).findFirst().orElseThrow();
 
-        // 営業割当を解除
-        engineerSalesMapper.delete(new LambdaQueryWrapper<EngineerSales>().eq(EngineerSales::getEngineerId, testEngineer.getId()));
+        // 現担当の権限内で営業タスクを完了してから割当を解除する。
         taskService.completeTask(salesTask.getId(), salesUser.getId(), CompleteLifecycleTaskCommand.builder().completionComment("引継ぎ完了").build());
+        engineerSalesMapper.delete(new LambdaQueryWrapper<EngineerSales>().eq(EngineerSales::getEngineerId, testEngineer.getId()));
 
         // 貸与PC返却タスクを完了
         taskService.completeTask(assetTask.getId(), hrUser.getId(), CompleteLifecycleTaskCommand.builder().completionComment("PC・カード回収完了").build());
@@ -659,5 +669,199 @@ class LifecycleDomainServiceTest {
         assertEquals("MANUAL_API", legacyEvent.getConfirmationSource());
         assertEquals(hrUser.getId(), legacyEvent.getActorUserId());
         assertEquals("人事花子", legacyEvent.getActorName());
+    }
+
+    @Test
+    @DisplayName("R01a: tenant外の要員・案件を検索・起票できず完了済みタスク冪等応答も越境しない")
+    void tenantBoundaryAppliesBeforeCaseTaskReadsAndIdempotentReturn() {
+        LifecycleTemplateDto tpl = templateService.createTemplate(LifecycleTemplateDto.builder()
+                .templateType("JOIN").name("tenant境界確認").validFrom(LocalDate.now().minusDays(1))
+                .tasks(List.of(LifecycleTemplateTaskDto.builder().taskCode("TENANT_TASK").taskName("tenant task")
+                        .assigneeRule("ROLE").assigneeRuleValue("HR").isEngineerVisible(1).build()))
+                .build(), adminUser.getId());
+        LifecycleCaseDto tenantACase = caseService.createCase(hrUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(testEngineer.getId()).lifecycleType("JOIN").templateId(tpl.getId()).anchorDate(LocalDate.now()).build());
+
+        SysUser hrB = SysUser.builder().tenantId("tenant-b").username("hr_tenant_b_" + System.nanoTime())
+                .password("pass").realName("tenant B HR").role("HR").status(1).build();
+        sysUserMapper.insert(hrB);
+        Engineer engineerB = Engineer.builder().tenantId("tenant-b").fullName("tenant B engineer")
+                .employmentType("正社員").status("稼動中").build();
+        engineerMapper.insert(engineerB);
+
+        assertThrows(BusinessException.class, () -> caseService.createCase(hrUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(engineerB.getId()).lifecycleType("JOIN").templateId(tpl.getId()).anchorDate(LocalDate.now()).build()));
+
+        TenantTestSecurity.bindAs(hrB.getId(), hrB.getUsername(), "tenant-b", "HR");
+        try {
+            assertTrue(caseService.listCases(null, null, null, null, null, hrB).isEmpty());
+            assertThrows(BusinessException.class, () -> caseService.getCaseDetail(tenantACase.getId(), hrB));
+            LifecycleCaseDto tenantBCase = caseService.createCase(hrB.getId(), CreateLifecycleCaseCommand.builder()
+                    .engineerId(engineerB.getId()).lifecycleType("JOIN").templateId(tpl.getId()).anchorDate(LocalDate.now()).build());
+            assertEquals("tenant-b", caseMapper.selectByIdAndTenant(tenantBCase.getId(), "tenant-b").getTenantId());
+
+            Long taskId = tenantACase.getTasks().get(0).getId();
+            assertThrows(BusinessException.class, () -> taskService.completeTask(taskId, hrB.getId(), null));
+        } finally {
+            TenantTestSecurity.bindAs(hrUser.getId(), hrUser.getUsername(), "default", "HR");
+        }
+    }
+
+    @Test
+    @DisplayName("R01a-R02: terminal taskの開始拒否は状態とイベントを変更しない")
+    void terminalTasksCannotBeStarted() {
+        LifecycleTemplateDto tpl = templateService.createTemplate(LifecycleTemplateDto.builder()
+                .templateType("JOIN").name("terminal開始拒否").validFrom(LocalDate.now().minusDays(1))
+                .tasks(List.of(LifecycleTemplateTaskDto.builder().taskCode("TERMINAL_TASK").taskName("terminal task")
+                        .assigneeRule("ROLE").assigneeRuleValue("HR").isEngineerVisible(1).build()))
+                .build(), adminUser.getId());
+        LifecycleCaseDto lcCase = caseService.createCase(hrUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(testEngineer.getId()).lifecycleType("JOIN").templateId(tpl.getId()).anchorDate(LocalDate.now()).build());
+        LifecycleTask task = taskMapper.selectById(lcCase.getTasks().get(0).getId());
+        for (String terminal : List.of("COMPLETED", "WAIVED", "CANCELLED")) {
+            task.setStatus(terminal);
+            taskMapper.updateById(task);
+            int eventCount = eventMapper.selectByCaseId(lcCase.getId()).size();
+            assertThrows(BusinessException.class, () -> taskService.startTask(task.getId(), hrUser.getId()));
+            assertEquals(terminal, taskMapper.selectById(task.getId()).getStatus());
+            assertEquals(eventCount, eventMapper.selectByCaseId(lcCase.getId()).size());
+        }
+    }
+
+    @Test
+    @DisplayName("R01a-P2: DBで無効化されたactorは詳細・開始・完了冪等・免除・案件変更を拒否する")
+    void disabledActorCannotReadOrMutateLifecycleState() {
+        LifecycleTemplateDto tpl = templateService.createTemplate(LifecycleTemplateDto.builder()
+                .templateType("JOIN").name("無効actor境界").validFrom(LocalDate.now().minusDays(1))
+                .tasks(List.of(LifecycleTemplateTaskDto.builder().taskCode("DISABLED_ACTOR_TASK")
+                        .taskName("actor無効化確認").assigneeRule("ROLE").assigneeRuleValue("HR")
+                        .isEngineerVisible(1).build()))
+                .build(), adminUser.getId());
+        LifecycleCaseDto created = caseService.createCase(hrUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(testEngineer.getId()).lifecycleType("JOIN").templateId(tpl.getId())
+                .anchorDate(LocalDate.now()).build());
+        LifecycleTask task = taskMapper.selectById(created.getTasks().get(0).getId());
+        task.setStatus("COMPLETED");
+        taskMapper.updateById(task);
+        int eventCount = eventMapper.selectByCaseId(created.getId()).size();
+        hrUser.setStatus(0);
+        sysUserMapper.updateById(hrUser);
+
+        assertThrows(BusinessException.class, () -> caseService.getCaseDetail(created.getId(), hrUser));
+        assertThrows(BusinessException.class, () -> taskService.startTask(task.getId(), hrUser.getId()));
+        assertThrows(BusinessException.class, () -> taskService.completeTask(task.getId(), hrUser.getId(), null));
+        assertThrows(BusinessException.class, () -> taskService.waiveTask(task.getId(), hrUser.getId(), null, "再生防止"));
+        assertThrows(BusinessException.class, () -> caseService.holdCase(created.getId(), hrUser.getId(), "再生防止"));
+        assertThrows(BusinessException.class, () -> caseService.getCaseDetail(created.getId(), null));
+        assertEquals("COMPLETED", taskMapper.selectById(task.getId()).getStatus());
+        assertEquals("ACTIVE", caseMapper.selectById(created.getId()).getStatus());
+        assertEquals(eventCount, eventMapper.selectByCaseId(created.getId()).size());
+    }
+
+    @Test
+    @DisplayName("R01a-P2: 既存番号の最大値から初期化し9999から10000・10001へ進む")
+    void caseSequenceContinuesPastFourDigitsFromExistingCases() {
+        String month = "207703";
+        LifecycleTemplateDto tpl = templateService.createTemplate(LifecycleTemplateDto.builder()
+                .templateType("JOIN").name("採番引継ぎ").validFrom(LocalDate.of(2077, 3, 1))
+                .tasks(List.of(LifecycleTemplateTaskDto.builder().taskCode("SEQUENCE_TASK")
+                        .taskName("採番確認").assigneeRule("ROLE").assigneeRuleValue("HR").build()))
+                .build(), adminUser.getId());
+        LifecycleCase existing = LifecycleCase.builder().tenantId("default").caseNo("LC-" + month + "-9999")
+                .lifecycleType("JOIN").engineerId(testEngineer.getId()).templateId(tpl.getId())
+                .templateVersion(1).anchorDate(LocalDate.of(2077, 3, 4)).status("COMPLETED")
+                .title("既存番号").applicantUserId(hrUser.getId()).engineerSnapshotJson("{}")
+                .version(0).build();
+        caseMapper.insert(existing);
+
+        LifecycleCaseDto first = caseService.createCase(hrUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(testEngineer.getId()).lifecycleType("JOIN").templateId(tpl.getId())
+                .anchorDate(LocalDate.of(2077, 3, 5)).build());
+        LifecycleCaseDto second = caseService.createCase(hrUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(testEngineer.getId()).lifecycleType("JOIN").templateId(tpl.getId())
+                .anchorDate(LocalDate.of(2077, 3, 6)).build());
+
+        assertTrue(first.getCaseNo().endsWith("-10000"), first.getCaseNo());
+        assertTrue(second.getCaseNo().endsWith("-10001"), second.getCaseNo());
+        assertNotEquals(first.getCaseNo(), second.getCaseNo());
+        assertEquals(10001L, caseSequenceMapper.selectLastNumber("default", month));
+    }
+
+    @Test
+    @DisplayName("R01a-P2: 案件番号容量上限で失敗しカウンタを折り返さない")
+    void caseSequenceFailsClosedAtVarcharCapacity() {
+        String month = "207704";
+        long maximum = 999_999_999_999_999L;
+        caseSequenceMapper.ensureRow("default", month, maximum);
+        LifecycleTemplateDto tpl = templateService.createTemplate(LifecycleTemplateDto.builder()
+                .templateType("JOIN").name("採番上限").validFrom(LocalDate.of(2077, 4, 1))
+                .tasks(List.of(LifecycleTemplateTaskDto.builder().taskCode("CAPACITY_TASK")
+                        .taskName("上限確認").assigneeRule("ROLE").assigneeRuleValue("HR").build()))
+                .build(), adminUser.getId());
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> caseService.createCase(hrUser.getId(),
+                CreateLifecycleCaseCommand.builder().engineerId(testEngineer.getId()).lifecycleType("JOIN")
+                        .templateId(tpl.getId()).anchorDate(LocalDate.of(2077, 4, 2)).build()));
+
+        assertEquals("error.lifecycle.caseNumberCapacityExceeded", ex.getMessageKey());
+        assertEquals(maximum, caseSequenceMapper.selectLastNumber("default", month));
+    }
+
+    @Test
+    @DisplayName("R01a-R04: 営業には非公開タスク名・依存コード・イベントが投影されない")
+    void salesProjectionOmitsHiddenTaskAndPrerequisiteIdentity() throws Exception {
+        LifecycleTemplateDto tpl = templateService.createTemplate(LifecycleTemplateDto.builder()
+                .templateType("JOIN").name("営業投影境界").validFrom(LocalDate.now().minusDays(1))
+                .tasks(List.of(
+                        LifecycleTemplateTaskDto.builder().taskCode("SECRET_HR_CODE").taskName("秘密の人事タスク")
+                                .assigneeRule("ROLE").assigneeRuleValue("HR").isEngineerVisible(0).build(),
+                        LifecycleTemplateTaskDto.builder().taskCode("PUBLIC_TASK").taskName("公開タスク")
+                                .assigneeRule("ROLE").assigneeRuleValue("営業").isEngineerVisible(1)
+                                .predecessorTaskCodes(List.of("SECRET_HR_CODE")).build()))
+                .build(), adminUser.getId());
+        LifecycleCaseDto created = caseService.createCase(hrUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(testEngineer.getId()).lifecycleType("JOIN").templateId(tpl.getId()).anchorDate(LocalDate.now()).build());
+
+        LifecycleCaseDto salesView = caseService.getCaseDetail(created.getId(), salesUser);
+        assertEquals(1, salesView.getTotalTasks());
+        assertEquals(1, salesView.getTasks().size());
+        assertEquals(List.of(), salesView.getTasks().get(0).getPredecessorTaskCodes());
+        assertTrue(salesView.getEvents().stream().noneMatch(event -> created.getTasks().get(0).getId().equals(event.getTaskId())));
+        String response = objectMapper.writeValueAsString(salesView);
+        assertFalse(response.contains("SECRET_HR_CODE"));
+        assertFalse(response.contains("秘密の人事タスク"));
+    }
+
+    @Test
+    @DisplayName("R01a-R05/R06: 営業はテンプレートを変更できず、起票者でも担当解除後に案件へアクセスできない")
+    void templateMutationDeniedAndFormerApplicantLosesCurrentScope() {
+        LifecycleTemplateDto tpl = LifecycleTemplateDto.builder().templateType("JOIN").name("sales deny")
+                .validFrom(LocalDate.now().minusDays(1)).tasks(List.of(
+                        LifecycleTemplateTaskDto.builder().taskCode("SALES_DENY").taskName("deny")
+                                .assigneeRule("ROLE").assigneeRuleValue("営業").build())).build();
+        assertThrows(BusinessException.class, () -> templateService.createTemplate(tpl, salesUser.getId()));
+        assertEquals(List.of(), templateService.listTemplates("JOIN", null).stream()
+                .filter(item -> "sales deny".equals(item.getName())).toList());
+
+        SysUser unknownRole = SysUser.builder().tenantId("default").username("unknown_role")
+                .password("pass").realName("unknown").role("UNKNOWN").status(1).build();
+        unknownRole.setId(-1L);
+        assertThrows(BusinessException.class, () -> scopeService.requireTenant(unknownRole));
+
+        LifecycleTemplateDto allowed = templateService.createTemplate(LifecycleTemplateDto.builder()
+                .templateType("JOIN").name("担当解除").validFrom(LocalDate.now().minusDays(1))
+                .tasks(List.of(LifecycleTemplateTaskDto.builder().taskCode("UNASSIGN").taskName("unassign")
+                        .assigneeRule("ROLE").assigneeRuleValue("HR").build())).build(), hrUser.getId());
+        LifecycleCaseDto created = caseService.createCase(salesUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(testEngineer.getId()).lifecycleType("JOIN").templateId(allowed.getId()).anchorDate(LocalDate.now()).build());
+        EngineerSales assigned = engineerSalesMapper.selectOne(new LambdaQueryWrapper<EngineerSales>()
+                .eq(EngineerSales::getEngineerId, testEngineer.getId()).eq(EngineerSales::getSalesUserId, salesUser.getId()));
+        assigned.setReleasedAt(LocalDate.now());
+        engineerSalesMapper.updateById(assigned);
+
+        LifecycleCase entity = caseMapper.selectByIdAndTenant(created.getId(), "default");
+        assertFalse(scopeService.canViewCase(salesUser, entity, testEngineer));
+        assertThrows(BusinessException.class, () -> caseService.getCaseDetail(created.getId(), salesUser));
+        assertThrows(BusinessException.class, () -> caseService.holdCase(created.getId(), salesUser.getId(), "old applicant"));
     }
 }
