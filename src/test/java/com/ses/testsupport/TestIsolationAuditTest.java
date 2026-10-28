@@ -42,8 +42,8 @@ class TestIsolationAuditTest {
 
     /**
      * 非 {@code @Transactional} を許容する {@code @SpringBootTest} の極小 allowlist。
-     * 原則空（真に read-only / no-datasource スライスのみ）。
-     * 例外: クラスTXだと潰れる並行commit可視性検証（H2上・明示クリーンアップ前提）。
+     * 原則空（真にread-only / no-datasourceスライスのみ）。
+     * 例外: クラスTXで意味が変わる実TX・Servlet境界の検証（専用DBまたは明示cleanup前提）。
      */
     private static final Map<String, IsolationExceptionMetadata> NON_TRANSACTIONAL_SPRING_BOOT_ALLOWLIST = Map.ofEntries(
             entry("com.ses.service.impl.SystemConfigCommitOrderingTest", "並行afterCommitの可視性", true, "テスト固有fixtureをdelete", "system-config-commit"),
@@ -63,8 +63,11 @@ class TestIsolationAuditTest {
             entry("com.ses.changerequest.EngineerChangeRequestAttachmentApiTest", "添付公開metadataの可視性", true, "テスト固有attachmentをdelete", "change-request-attachment"),
             entry("com.ses.mapper.IntegrationHubWebhookResourceScopeMapperIntegrationTest", "jdbcTemplate更新後の再読込", true, "テスト固有resource scopeをdelete", "integration-hub-resource-scope"),
             entry("com.ses.report.ReportDeliveryTransactionIntegrationTest", "ReportDeliveryIssueService実Spring proxy TX rollback検証", true, "テスト専用行を@AfterEachで明示削除", "report-delivery-tx"),
+            entry("com.ses.report.ReportReauthenticationSessionIntegrationTest", "afterCommit grantとsession間境界の実service検証", true, "一意なテストuser/delivery/runをIDで削除", "report-reauth-session"),
             entry("com.ses.service.ai.AiExecutionGatewayPersistMetadataTest", "gateway永続化metadataの実DB再読込", true, "trace_id固定prefixを@AfterEachでdelete", "ai-gateway-persist-metadata"),
-            entry("com.ses.service.ai.AiRecommendationRetentionTenantIsolationH2Test", "tenant別retentionのcommit可視性", true, "trace_id固定prefixを@AfterEachでdelete", "ai-retention-tenant-isolation")
+            entry("com.ses.service.ai.AiRecommendationRetentionTenantIsolationH2Test", "tenant別retentionのcommit可視性", true, "trace_id固定prefixを@AfterEachでdelete", "ai-retention-tenant-isolation"),
+            entry("com.ses.service.pwa.PwaRestoreTransactionIntegrationTest", "REQUIRES_NEWとcommit失敗の実TX境界", true, "専用H2 DBとテスト固有user/linkを@AfterEachでdelete", "pwa-restore-transaction"),
+            entry("com.ses.web.PwaRestoreServletBoundaryIntegrationTest", "実Servlet thread/session/listener境界", true, "専用H2 DBとテスト固有user/linkを@AfterEachでdelete", "pwa-restore-servlet")
     );
 
     private static Map.Entry<String, IsolationExceptionMetadata> entry(String className, String reason,

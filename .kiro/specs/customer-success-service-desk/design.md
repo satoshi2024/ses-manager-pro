@@ -170,6 +170,12 @@ RenewalCalendarは読取。`updateRenewalDecision` を呼ばないcontract test�
 - 宛先: owner_user_id。未設定時は顧客の主担当営業（`EngineerSales`ではなく契約 `sales_user_id` または顧客DataScopeの営業）。宛先0または一部配信失敗でもescalation台帳へ永続化し、再試行で黙って捨てない。
 - `NotificationLinks.SERVICE_DESK_REQUEST` を追加し `NotificationLinkRouteTest` 対象にする
 
+### 6.1 本番baseline P1 recipient資格の再確認
+
+SLA schedulerの実行主体権限を通知先へ流用しない。各候補`sys_user`についてtenant一致・有効・未削除を確認し、`service-desk` menuを持つ内部role（営業/マネージャー）だけを候補にする。候補本人を明示した一時的な`SecurityContext`で既存`CustomerScopeResolver`を実行し、当該customerが候補本人の現行scopeに含まれる場合だけ通知する。tenantは候補rowを取得したtenantに固定し、候補評価中は`ReportScopeContext`を一時解除し、request-scoped scope cacheを外して再解決する。終了時はsecurity context、request attributes、report scopeを例外経路も含め元へ戻す。HR/要員/未知role、scope不一致、menu未付与は候補から除外し、通知先0件なら既存escalation retry台帳にrecipientCount=0を残すだけで、`NotificationService`/outboxへrequest subjectを渡さない。最終admin fallbackは既存の全件管理者境界に従う。
+
+担当者入力は`SysUserMapper.selectByIdAndTenant`を使い、存在しない/tenant不一致/無効/削除済み/非対象roleを同じgeneric errorにまとめる。別tenantのreal nameやroleを例外へ含めない。create/updateとも検証を保存前に行う。
+
 ---
 
 ## 7. ファイル

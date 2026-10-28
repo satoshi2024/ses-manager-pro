@@ -8,17 +8,21 @@ import com.ses.config.integrationhub.IntegrationHubExternalApiProperties;
 import com.ses.dto.integrationhub.ExternalApiReadRow;
 import com.ses.mapper.ExternalApiReadMapper;
 import com.ses.service.integrationhub.ExternalApiReadService;
+import com.ses.service.security.LegalEntityReadinessService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -29,6 +33,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @ActiveProfiles("test")
 @Transactional
 class IntegrationHubMPenetrationTest {
+    private static final String ISOLATED_DATABASE = "jdbc:h2:mem:ih-penetration-"
+            + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL";
     private static final long CUSTOMER_A = 9910001L;
     private static final long CUSTOMER_B = 9910002L;
     private static final long PROJECT_A = 9910011L;
@@ -40,6 +46,13 @@ class IntegrationHubMPenetrationTest {
     private ExternalApiReadService readService;
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private LegalEntityReadinessService readinessService;
+
+    @DynamicPropertySource
+    static void isolateDatabase(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", () -> ISOLATED_DATABASE);
+    }
 
     @Test
     void clientAはclientBのprojectをcountにもlistにも観測できない() {
@@ -54,6 +67,7 @@ class IntegrationHubMPenetrationTest {
     @Test
     void outOfScopeOpaqueIdはinScopeと同じnull応答で存在を推測できない() {
         insertCustomersAndProjects();
+        readinessService.assertReady();
         ExternalApiPrincipal clientA = principal("client-a", "tenant-a", 71L,
                 "{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"71\"],"
                         + "\"projectIds\":[\"" + PROJECT_A + "\"],\"customerIds\":[\"" + CUSTOMER_A + "\"]}");
@@ -80,6 +94,8 @@ class IntegrationHubMPenetrationTest {
 
     @Test
     void malformedScopeはquery前にfailClosedし他clientのrow数を漏らさない() {
+        insertCustomersAndProjects();
+        readinessService.assertReady();
         ExternalApiPrincipal clientA = principal("client-a", "tenant-a", 71L,
                 "{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"71\"],"
                         + "\"projectIds\":[\"not-an-internal-id\"]}");

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.ses.common.exception.BusinessException;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.EngineerSales;
@@ -16,6 +17,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.survey.SurveyService;
 import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +26,11 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.web.servlet.HandlerExceptionResolver;
+import org.springframework.web.servlet.ModelAndView;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -35,8 +42,16 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+import org.junit.jupiter.api.AfterEach;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -49,9 +64,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Chrome依存のため既定のfast suiteへ無条件追加しない。専用profile（-Pbrowser-tests）とCI gateで実行する。
  */
 @Tag("browser")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "spring.datasource.url=jdbc:h2:mem:engineer-self-service-browser;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL")
 @ActiveProfiles("test")
+@Import(EngineerSelfServiceBrowserMTest.BusinessExceptionDiagnosticConfiguration.class)
 class EngineerSelfServiceBrowserMTest {
+
+    // 実HTTP browser testは共有mem:testdbのcontext再初期化に依存しないよう、専用DBへsql.initを適用する。
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -70,14 +89,35 @@ class EngineerSelfServiceBrowserMTest {
     private EngineerSalesMapper engineerSalesMapper;
     @Autowired
     private SurveyService surveyService;
+    @Autowired
+    private TestBusinessExceptionDiagnosticResolver businessExceptionDiagnostic;
 
     private static final String DEMO_USERNAME = "portal_engineer_demo";
     private static final String DEMO_PASSWORD = "demoPassword123";
     private static final String DEMO_REAL_NAME = "要員ポータル デモ太郎";
 
+    private Long fixtureEngineerId;
+    private Long fixtureSalesUserId;
+    private Long fixtureEngineerSalesId;
+
     /** 本人BのPII（DOM/APIへ一切現れてはならない。R5）。 */
     private static final String B_PII_NAME = "非表示要員B-ブラウザ検証";
     private static final String B_PII_PHONE = "090-5555-0000";
+
+    /** この実行で作成した本人紐付けだけをテスト終了時に解放する。 */
+    private final List<AccountLinkFixture> createdAccountLinks = new java.util.ArrayList<>();
+
+    private record AccountLinkFixture(long engineerId, long userId) {
+    }
+
+    @AfterEach
+    void cleanupCreatedAccountLinks() {
+        for (AccountLinkFixture link : createdAccountLinks) {
+            jdbcTemplate.update("DELETE FROM t_engineer_account_link WHERE engineer_id = ? AND sys_user_id = ?",
+                    link.engineerId(), link.userId());
+        }
+        createdAccountLinks.clear();
+    }
 
     /** 画面ごとのページ固有DOM（表示待ち・エラーページ判定の境界）。表示順もこの順に固定する。 */
     private static final List<Map.Entry<String, String>> SCREENS = List.of(
@@ -127,6 +167,21 @@ class EngineerSelfServiceBrowserMTest {
     // ============================================================
 
     private record Seed(long userId, long engineerId, long salesUserId, long surveyCampaignId) {
+    }
+
+    @AfterEach
+    void cleanupOneOnOneSalesFixture() {
+        SecurityContextHolder.clearContext();
+        if (fixtureEngineerId != null && fixtureSalesUserId != null) {
+            jdbcTemplate.update("DELETE FROM t_one_on_one_request WHERE engineer_id=? AND counterpart_user_id=?",
+                    fixtureEngineerId, fixtureSalesUserId);
+        }
+        if (fixtureEngineerSalesId != null) {
+            engineerSalesMapper.deleteById(fixtureEngineerSalesId);
+        }
+        if (fixtureSalesUserId != null) {
+            sysUserMapper.deleteById(fixtureSalesUserId);
+        }
     }
 
     private Seed seedPortalData() {
@@ -193,6 +248,7 @@ class EngineerSelfServiceBrowserMTest {
             link.setEngineerId(engineerId);
             link.setSysUserId(userId);
             accountLinkMapper.insert(link);
+            createdAccountLinks.add(new AccountLinkFixture(engineerId, userId));
         } else if (!"default".equals(link.getTenantId())) {
             link.setTenantId("default");
             accountLinkMapper.updateById(link);
@@ -247,44 +303,45 @@ class EngineerSelfServiceBrowserMTest {
             linkB.setEngineerId(engineerBId);
             linkB.setSysUserId(userBId);
             accountLinkMapper.insert(linkB);
+            createdAccountLinks.add(new AccountLinkFixture(engineerBId, userBId));
         } else if (!"default".equals(linkB.getTenantId())) {
             linkB.setTenantId("default");
             accountLinkMapper.updateById(linkB);
         }
 
         // ---- 担当営業（1on1相手） ----
-        SysUser salesUser = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getUsername, "portal_demo_sales"));
-        Long salesUserId;
-        if (salesUser == null) {
-            salesUser = SysUser.builder()
-                    .username("portal_demo_sales")
-                    .password("x")
-                    .realName("ポータルデモ営業")
-                    .role("営業")
-                    .status(1)
-                    .tenantId("default")
-                    .build();
-            sysUserMapper.insert(salesUser);
-            salesUserId = salesUser.getId();
-        } else {
-            salesUser.setTenantId("default");
-            sysUserMapper.updateById(salesUser);
-            salesUserId = salesUser.getId();
-        }
-        EngineerSales existingPrimary = engineerSalesMapper.selectOne(new LambdaQueryWrapper<EngineerSales>()
-                .eq(EngineerSales::getEngineerId, engineerId)
-                .isNull(EngineerSales::getReleasedAt)
-                .last("LIMIT 1"));
-        if (existingPrimary == null) {
-            EngineerSales es = EngineerSales.builder()
-                    .engineerId(engineerId)
-                    .salesUserId(salesUserId)
-                    .primaryFlag(1)
-                    .assignedAt(LocalDate.now())
-                    .build();
-            engineerSalesMapper.insert(es);
-        }
+        SysUser salesUser = SysUser.builder()
+                .username("portal-oneonone-" + UUID.randomUUID().toString().replace("-", ""))
+                .password("x")
+                .realName("ポータルテスト営業")
+                .role("営業")
+                .status(1)
+                .tenantId("default")
+                .build();
+        sysUserMapper.insert(salesUser);
+        Long salesUserId = salesUser.getId();
+        fixtureEngineerId = engineerId;
+        fixtureSalesUserId = salesUserId;
+
+        EngineerSales exactAssignment = EngineerSales.builder()
+                .engineerId(engineerId)
+                .salesUserId(salesUserId)
+                // 既存の主担当を保持しつつ、1on1が要求する有効担当営業だけを追加する。
+                .primaryFlag(0)
+                .assignedAt(LocalDate.now())
+                .build();
+        engineerSalesMapper.insert(exactAssignment);
+        fixtureEngineerSalesId = exactAssignment.getId();
+        assertEquals(1L, engineerSalesMapper.selectCount(new LambdaQueryWrapper<EngineerSales>()
+                        .eq(EngineerSales::getEngineerId, engineerId)
+                        .eq(EngineerSales::getSalesUserId, salesUserId)
+                        .isNull(EngineerSales::getReleasedAt)),
+                "指定した担当営業が対象要員へ有効割当済み");
+        assertEquals(1L, sysUserMapper.selectCount(new LambdaQueryWrapper<SysUser>()
+                        .eq(SysUser::getId, salesUserId)
+                        .eq(SysUser::getRole, "営業")
+                        .eq(SysUser::getStatus, 1)),
+                "指定した担当営業ユーザーが営業ロールかつ有効");
 
         // ---- 回答対象サーベイキャンペーン（HRとしてJVM側で作成・配信） ----
         Long campaignId = seedSurveyCampaign();
@@ -469,13 +526,19 @@ class EngineerSelfServiceBrowserMTest {
         // ---- 3.4 1on1申請（明日以降の候補日。decision table §6.1） ----
         String tomorrow = LocalDate.now().plusDays(1).toString();
         String dayAfter = LocalDate.now().plusDays(2).toString();
+        String diagnosticId = UUID.randomUUID().toString();
         JsonNode oneOnOne = browser.evaluate("(async function(){const t='" + csrf + "';" +
                 "const r=await fetch('/api/my/one-on-ones',{method:'POST'," +
-                "headers:{'Content-Type':'application/json','X-XSRF-TOKEN':t}," +
+                "headers:{'Content-Type':'application/json','X-XSRF-TOKEN':t,'X-NF04-Diagnostic-Id':'" + diagnosticId + "'}," +
                 "body:JSON.stringify({counterpartUserId:" + seed.salesUserId() + ",candidateDates:['" + tomorrow + "','" + dayAfter + "']})});" +
                 "return await r.text();})()");
-        assertTrue(oneOnOne.asText("").contains("\"code\":200"),
-                "1on1申請が200でない: " + truncate(oneOnOne.asText("")));
+        int oneOnOneCode = MAPPER.readTree(oneOnOne.asText("{}")).path("code").asInt(-1);
+        TestBusinessExceptionDiagnostic rejection = oneOnOneCode == 200
+                ? null : businessExceptionDiagnostic.consume(diagnosticId);
+        assertEquals(200, oneOnOneCode, "1on1申請が200でない: requestUri="
+                + (rejection == null ? "/api/my/one-on-ones" : rejection.requestUri())
+                + " businessStatus=" + (rejection == null ? "未捕捉" : rejection.status())
+                + " messageKey=" + (rejection == null ? "未捕捉" : rejection.messageKey()));
         String oneOnOneList = browser.evaluate("(async function(){" +
                 "const r=await fetch('/api/my/one-on-ones?current=1&size=50');return await r.text();})()").asText("");
         assertTrue(oneOnOneList.contains(tomorrow), "1on1一覧に申請した候補日が反映される");
@@ -560,6 +623,53 @@ class EngineerSelfServiceBrowserMTest {
                 }
             });
         } catch (Exception ignored) {
+        }
+    }
+
+    record TestBusinessExceptionDiagnostic(int status, String messageKey, String requestUri) { }
+
+    static final class TestBusinessExceptionDiagnosticResolver implements HandlerExceptionResolver {
+        private final ConcurrentMap<String, TestBusinessExceptionDiagnostic> diagnostics = new ConcurrentHashMap<>();
+
+        @Override
+        public ModelAndView resolveException(HttpServletRequest request, HttpServletResponse response,
+                Object handler, Exception exception) {
+            if (!"/api/my/one-on-ones".equals(request.getRequestURI())) return null;
+            String diagnosticId = request.getHeader("X-NF04-Diagnostic-Id");
+            if (diagnosticId == null || !diagnosticId.matches("[0-9a-f-]{36}")) return null;
+            Throwable cursor = exception;
+            for (int depth = 0; cursor != null && depth < 16; depth++, cursor = cursor.getCause()) {
+                if (cursor instanceof BusinessException business) {
+                    String key = business.getMessageKey();
+                    if (key == null || !key.matches("error\\.[A-Za-z0-9_.-]{1,120}")) key = "<no-safe-key>";
+                    diagnostics.put(diagnosticId, new TestBusinessExceptionDiagnostic(
+                            business.getCode(), key, "/api/my/one-on-ones"));
+                    break;
+                }
+            }
+            return null; // 診断だけを記録し、通常のGlobalExceptionHandler処理へ委ねる。
+        }
+
+        TestBusinessExceptionDiagnostic consume(String diagnosticId) {
+            return diagnostics.remove(diagnosticId);
+        }
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class BusinessExceptionDiagnosticConfiguration {
+        @Bean
+        TestBusinessExceptionDiagnosticResolver testBusinessExceptionDiagnosticResolver() {
+            return new TestBusinessExceptionDiagnosticResolver();
+        }
+
+        @Bean
+        WebMvcConfigurer testBusinessExceptionDiagnosticOrder(TestBusinessExceptionDiagnosticResolver resolver) {
+            return new WebMvcConfigurer() {
+                @Override
+                public void extendHandlerExceptionResolvers(List<HandlerExceptionResolver> resolvers) {
+                    resolvers.add(0, resolver);
+                }
+            };
         }
     }
 }

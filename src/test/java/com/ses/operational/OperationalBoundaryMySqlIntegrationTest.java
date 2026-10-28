@@ -66,6 +66,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -138,34 +141,52 @@ class OperationalBoundaryMySqlIntegrationTest {
     @Test
     void 独立JVM二つが共有MySQLのShedLockを競合させ解放後に再取得できる() throws Exception {
         String lockName = "multi-jvm-shedlock-" + System.nanoTime();
-        Process holder = startChild("lock-holder", lockName, null, 0L);
-        try (BufferedReader holderOutput = output(holder)) {
-            String holderAcquired = holderOutput.readLine();
-            assertTrue(holderAcquired != null && holderAcquired.startsWith("LOCK_ACQUIRED"),
-                    "先行JVMがShedLockを取得すること: " + holderAcquired);
+        ChildOutput holder = startChild("lock-holder", lockName, null, 0L);
+        try {
+            String holderAcquired = readLine(holder, 15);
+            assertTrue(holderAcquired != null
+                            && holderAcquired.matches("LOCK_ACQUIRED pid=" + holder.process.pid()),
+                    "先行JVMがShedLockを取得し、pidがProcess.pidと一致すること: "
+                            + childEvidence(holder, List.of(String.valueOf(holderAcquired))));
 
-            Process contender = startChild("lock-contender", lockName, null,
+            ChildOutput contender = startChild("lock-contender", lockName, null,
                     System.currentTimeMillis() + 250L);
-            List<String> contenderLines = readRemaining(contender, 15);
-            assertProcessSucceeded(contender, contenderLines);
-            assertTrue(contenderLines.stream().anyMatch(line -> line.startsWith("LOCK_NOT_ACQUIRED")),
-                    "保持中の同一ShedLockを後発JVMが取得しないこと: " + contenderLines);
-            assertTrue(contenderLines.stream().anyMatch(line -> line.contains("pid=")),
-                    "競合結果に子JVMのpidを記録すること: " + contenderLines);
+            try {
+                List<String> contenderLines = finishChild(contender, 15);
+                assertTrue(contenderLines.stream().anyMatch(line -> line.startsWith("LOCK_NOT_ACQUIRED")),
+                        "保持中の同一ShedLockを後発JVMが取得しないこと: " + childEvidence(contender, contenderLines));
+                assertEquals(1, contenderLines.size(),
+                        "競合childがプロトコル結果を1行だけ出力すること: " + childEvidence(contender, contenderLines));
+                assertTrue(contenderLines.get(0).matches("LOCK_NOT_ACQUIRED pid=" + contender.process.pid()),
+                        "競合childのpidが実際のProcess.pidと一致すること: " + childEvidence(contender, contenderLines));
+            } finally {
+                terminateChild(contender);
+            }
 
-            List<String> holderLines = readRemaining(holderOutput, holder, 15);
-            assertProcessSucceeded(holder, holderLines);
-            assertTrue(holderLines.stream().anyMatch(line -> line.equals("LOCK_RELEASED")),
-                    "先行JVMがShedLockを解放すること: " + holderLines);
+            List<String> holderLines = finishChild(holder, 15);
+            holderLines.add(0, holderAcquired);
+            assertEquals(2, holderLines.size(), "先行childが取得・解放の2行だけを出力すること: "
+                    + childEvidence(holder, holderLines));
+            assertEquals("LOCK_RELEASED", holderLines.get(1), "先行JVMがShedLockを解放すること: "
+                    + childEvidence(holder, holderLines));
+        } finally {
+            terminateChild(holder);
         }
 
-        Process afterRelease = startChild("lock-after-release", lockName, null, 0L);
-        List<String> afterLines = readRemaining(afterRelease, 15);
-        assertProcessSucceeded(afterRelease, afterLines);
-        assertTrue(afterLines.stream().anyMatch(line -> line.startsWith("LOCK_ACQUIRED")),
-                "解放後に後続JVMがShedLockを再取得すること: " + afterLines);
-        assertTrue(afterLines.stream().anyMatch(line -> line.equals("LOCK_RELEASED")),
-                "再取得したJVMがShedLockを解放すること: " + afterLines);
+        ChildOutput afterRelease = startChild("lock-after-release", lockName, null, 0L);
+        List<String> afterLines;
+        try {
+            afterLines = finishChild(afterRelease, 15);
+        } finally {
+            terminateChild(afterRelease);
+        }
+        assertEquals(2, afterLines.size(), "再取得childが取得・解放の2行だけを出力すること: "
+                + childEvidence(afterRelease, afterLines));
+        assertTrue(afterLines.get(0).matches("LOCK_ACQUIRED pid=" + afterRelease.process.pid()),
+                "解放後に後続JVMがShedLockを再取得し、pidがProcess.pidと一致すること: "
+                        + childEvidence(afterRelease, afterLines));
+        assertEquals("LOCK_RELEASED", afterLines.get(1), "再取得したJVMがShedLockを解放すること: "
+                + childEvidence(afterRelease, afterLines));
     }
 
     @Test
@@ -199,22 +220,37 @@ class OperationalBoundaryMySqlIntegrationTest {
         assertNotNull(outbox.getId());
 
         long startAt = System.currentTimeMillis() + 1500L;
-        Process first = startChild("claim", "-", outbox.getId(), startAt);
-        Process second = startChild("claim", "-", outbox.getId(), startAt);
-        List<String> firstLines = readRemaining(first, 15);
-        List<String> secondLines = readRemaining(second, 15);
-        assertProcessSucceeded(first, firstLines);
-        assertProcessSucceeded(second, secondLines);
+        ChildOutput first = startChild("claim", "-", outbox.getId(), startAt);
+        ChildOutput second = null;
+        List<String> firstLines;
+        List<String> secondLines;
+        try {
+            second = startChild("claim", "-", outbox.getId(), startAt);
+            firstLines = finishChild(first, 15);
+            secondLines = finishChild(second, 15);
+        } finally {
+            terminateChild(first);
+            terminateChild(second);
+        }
 
         List<String> all = new ArrayList<>();
         all.addAll(firstLines);
         all.addAll(secondLines);
         long claimed = all.stream().filter(line -> line.startsWith("CLAIM_RESULT=1")).count();
         long rejected = all.stream().filter(line -> line.startsWith("CLAIM_RESULT=0")).count();
-        assertEquals(1L, claimed, "独立JVMのclaim成功は1件だけであること: " + all);
-        assertEquals(1L, rejected, "独立JVMのclaim競合は0件更新になること: " + all);
-        assertTrue(all.stream().map(this::pidFrom).distinct().count() == 2,
-                "2つの異なる子JVMが実行されたこと: " + all);
+        assertEquals(1L, claimed, "独立JVMのclaim成功は1件だけであること: " + all + " / "
+                + childEvidence(first, firstLines) + " / " + childEvidence(second, secondLines));
+        assertEquals(1L, rejected, "独立JVMのclaim競合は0件更新になること: " + all + " / "
+                + childEvidence(first, firstLines) + " / " + childEvidence(second, secondLines));
+        assertEquals(1, firstLines.size(), "先行子JVMがプロトコル結果を1行だけ出力すること: " + childEvidence(first, firstLines));
+        assertEquals(1, secondLines.size(), "後続子JVMがプロトコル結果を1行だけ出力すること: " + childEvidence(second, secondLines));
+        assertTrue(firstLines.get(0).matches("CLAIM_RESULT=[01] pid=" + first.process.pid()),
+                "先行childのpidが実際のProcess.pidと一致すること: " + childEvidence(first, firstLines));
+        assertTrue(secondLines.get(0).matches("CLAIM_RESULT=[01] pid=" + second.process.pid()),
+                "後続childのpidが実際のProcess.pidと一致すること: " + childEvidence(second, secondLines));
+        assertTrue(first.process.pid() != second.process.pid(),
+                "2つの異なる子JVMが実行されたこと: " + childEvidence(first, firstLines) + " / "
+                        + childEvidence(second, secondLines));
 
         NotificationOutbox stored = outboxMapper.selectById(outbox.getId());
         assertEquals("PROCESSING", stored.getStatus());
@@ -315,7 +351,7 @@ class OperationalBoundaryMySqlIntegrationTest {
         return user.getId();
     }
 
-    private Process startChild(String mode, String lockName, Long outboxId, long startAt)
+    private ChildOutput startChild(String mode, String lockName, Long outboxId, long startAt)
             throws IOException {
         String javaExecutable = javaExecutable();
         List<String> command = new ArrayList<>(List.of(
@@ -330,7 +366,8 @@ class OperationalBoundaryMySqlIntegrationTest {
                 lockName,
                 outboxId == null ? "-" : String.valueOf(outboxId),
                 String.valueOf(startAt)));
-        return new ProcessBuilder(command).redirectErrorStream(true).start();
+        Process process = new ProcessBuilder(command).redirectErrorStream(false).start();
+        return new ChildOutput(process);
     }
 
     private String javaExecutable() {
@@ -343,41 +380,97 @@ class OperationalBoundaryMySqlIntegrationTest {
         return System.getProperty("os.name", "").toLowerCase().contains("win");
     }
 
-    private BufferedReader output(Process process) {
-        return new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
-    }
-
-    private List<String> readRemaining(BufferedReader reader, Process process, int timeoutSeconds)
-            throws IOException, InterruptedException {
-        List<String> lines = readRemaining(reader, timeoutSeconds);
-        assertTrue(process.waitFor(timeoutSeconds, TimeUnit.SECONDS),
-                "子JVMが時間内に終了すること: " + lines);
-        return lines;
-    }
-
-    private List<String> readRemaining(Process process, int timeoutSeconds)
-            throws IOException, InterruptedException {
-        try (BufferedReader reader = output(process)) {
-            return readRemaining(reader, process, timeoutSeconds);
+    private String readLine(ChildOutput child, int timeoutSeconds) throws Exception {
+        Object event = child.stdout.poll(timeoutSeconds, TimeUnit.SECONDS);
+        if (event == null) {
+            throw new AssertionError("子JVMの標準出力が時間内に届かないこと: " + childEvidence(child, List.of()));
         }
+        if (ChildOutput.EOF == event) {
+            return null;
+        }
+        return (String) event;
     }
 
-    private List<String> readRemaining(BufferedReader reader, int timeoutSeconds) throws IOException {
+    private List<String> finishChild(ChildOutput child, int timeoutSeconds) throws Exception {
         List<String> lines = new ArrayList<>();
-        String line;
-        while ((line = reader.readLine()) != null) {
-            lines.add(line);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+        while (true) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) {
+                throw new AssertionError("子JVMの標準出力が時間内に終了しないこと: " + childEvidence(child, lines));
+            }
+            Object event = child.stdout.poll(remaining, TimeUnit.NANOSECONDS);
+            if (event == null) {
+                throw new AssertionError("子JVMの標準出力が時間内に終了しないこと: " + childEvidence(child, lines));
+            }
+            if (ChildOutput.EOF == event) {
+                break;
+            }
+            lines.add((String) event);
         }
+        if (!child.process.waitFor(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)) {
+            throw new AssertionError("子JVMが時間内に終了すること: " + childEvidence(child, lines));
+        }
+        assertEquals(0, child.process.exitValue(), "子JVMが成功終了すること: " + childEvidence(child, lines));
         return lines;
     }
 
-    private void assertProcessSucceeded(Process process, List<String> lines) {
-        assertEquals(0, process.exitValue(), "子JVMが成功終了すること: " + lines);
+    private void terminateChild(ChildOutput child) {
+        if (child != null && child.process.isAlive()) {
+            child.process.destroyForcibly();
+            try {
+                child.process.waitFor(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
-    private String pidFrom(String line) {
-        int index = line.indexOf("pid=");
-        return index < 0 ? line : line.substring(index + 4).trim();
+    private String childEvidence(ChildOutput child, List<String> lines) {
+        List<String> diagnostics;
+        try {
+            diagnostics = child.stderr.get(200, TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            diagnostics = List.of("stderr未完了: " + e.getClass().getSimpleName());
+        }
+        return "pid=" + child.process.pid() + ", protocol=" + lines + ", stderr=" + diagnostics;
+    }
+
+    private static final class ChildOutput {
+        private static final Object EOF = new Object();
+        private final Process process;
+        private final BlockingQueue<Object> stdout = new LinkedBlockingQueue<>();
+        private final CompletableFuture<List<String>> stderr;
+
+        private ChildOutput(Process process) {
+            this.process = process;
+            CompletableFuture.runAsync(() -> {
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        stdout.put(line);
+                    }
+                } catch (Exception e) {
+                    stdout.offer("STDOUT_READER_ERROR=" + e);
+                } finally {
+                    stdout.offer(EOF);
+                }
+            });
+            stderr = CompletableFuture.supplyAsync(() -> {
+                List<String> lines = new ArrayList<>();
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        lines.add(line);
+                    }
+                } catch (IOException e) {
+                    lines.add("STDERR_READER_ERROR=" + e);
+                }
+                return lines;
+            });
+        }
     }
 
     /** 独立JVMでShedLock providerまたはclaim SQLを実行するchild entrypoint。 */

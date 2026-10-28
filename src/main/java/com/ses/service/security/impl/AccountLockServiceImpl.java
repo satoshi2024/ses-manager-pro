@@ -5,6 +5,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.security.AccountLockService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -26,30 +27,34 @@ public class AccountLockServiceImpl implements AccountLockService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void onLoginFailure(String username) {
-        SysUser user = sysUserMapper.selectByUsername(username);
+        recordFailure(sysUserMapper.selectByUsernameForUpdate(username));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void onLoginFailure(Long userId, String tenantId) {
+        recordFailure(sysUserMapper.selectByIdAndTenantForUpdate(userId, tenantId));
+    }
+
+    private void recordFailure(SysUser user) {
         if (user == null) {
             return; // 存在しないユーザーは無視（ユーザー列挙対策）
         }
         LocalDateTime now = LocalDateTime.now(clock);
-        // DB側の条件付き更新で加算することで、同時ログイン失敗によるlost updateを防止する。
-        // モックや旧スキーマでは未実装の場合があるため、更新件数0のときのみ従来処理へフォールバックする。
-        int updated = sysUserMapper.incrementLoginFailure(user.getId(), now, MAX_FAILED, LOCK_MINUTES);
-        if (updated > 0) {
+        boolean lockExpired = user.getLockedUntil() != null && !user.getLockedUntil().isAfter(now);
+        if (user.getLockedUntil() != null && !lockExpired) {
             return;
         }
-        // ロック期間が終了した後は新しい失敗カウント周期を開始する。
-        // failed_count=0 のまま残るロック方式と整合させ、期限直後の1回の失敗で
-        // 即時再ロックされることを防ぐ。
-        boolean lockExpired = user.getLockedUntil() != null && !user.getLockedUntil().isAfter(now);
         int current = lockExpired ? 0 : (user.getFailedCount() != null ? user.getFailedCount() : 0);
         int next = current + 1;
         if (next >= MAX_FAILED) {
             LocalDateTime lockedUntil = now.plusMinutes(LOCK_MINUTES);
             sysUserMapper.updateLockState(user.getId(), 0, lockedUntil);
-            log.warn("アカウントをロックしました: username={} 解除予定={}", username, lockedUntil);
+            log.warn("アカウントをロックしました: userId={} 解除予定={}", user.getId(), lockedUntil);
         } else {
-            sysUserMapper.updateLockState(user.getId(), next, user.getLockedUntil());
+            sysUserMapper.updateLockState(user.getId(), next, null);
         }
     }
 

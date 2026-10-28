@@ -11,6 +11,7 @@ spring:
       mode: always
       encoding: UTF-8
       schema-locations:
+        - classpath:sql/test-schema-import-precleanup-h2.sql
         - classpath:db/migration/V1__create_tables.sql
         - classpath:db/migration/V2__init_master_data.sql
         - classpath:db/migration/V4__create_notification.sql
@@ -59,6 +60,7 @@ spring:
         - classpath:sql/schema-optimistic-lock-core-h2.sql
         - classpath:sql/schema-pwa-selfservice-h2.sql
         - classpath:sql/schema-lifecycle-workflow-h2.sql
+        - classpath:sql/schema-lifecycle-case-sequence-h2.sql
         - classpath:sql/schema-scheduled-management-reporting-h2.sql
         - classpath:sql/schema-certification-learning-skill-gap-h2.sql
         # NF-09のactor_type/confirmation_sourceと相互制約はV1およびH2統合schemaで同期する。
@@ -69,6 +71,7 @@ spring:
         - classpath:sql/schema-integration-hub-b2-h2.sql
         - classpath:sql/schema-service-desk-h2.sql
         - classpath:sql/schema-nf02-nf03-tenant-ownership-h2.sql
+        - classpath:sql/schema-import-center-f1a-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

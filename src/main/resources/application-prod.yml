@@ -17,6 +17,10 @@ spring:
   flyway:
     locations: classpath:db/migration,classpath:db/migration-prod
 
+# 実プロバイダ実装は未配線のため、prod は明示設定なしで fail-closed provider を使う。
+external-account:
+  provider: ${EXTERNAL_ACCOUNT_PROVIDER:none}
+
 integration:
   hub:
     # production enablementは本Decisionで禁止。validatorもtrue/非MOCKを拒否する。

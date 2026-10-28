@@ -1,5 +1,27 @@
 # privacy-retention-dsar 設計（Discovery / Dry-run increment）
 
+## 2026-10-01 新incrementの設計正本
+
+下記Discovery/DEV-0/D0設計は歴史scopeとして保持する。新SYNTHETIC_FOUNDATIONは
+`synthetic-foundation.md` SF-01〜05、SF-03a、SF-04aを正本とする。Astraは計画固定Head
+`f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`を技術Plan PASSと判定した。実装Reviewと全人手gateは別途必要である。
+実処分/実PII/外部provider/正式Legal承認をこの変更で許可しない。
+
+| 資源 | 状態遷移 | 原子性・失敗時動作 |
+|---|---|---|
+| case | REQUESTED→RESOLVED→PREVIEWED→APPROVAL_PENDING→APPROVED | 版付きsubject/対象hash/policyを固定。変更で承認失効 |
+| local action | APPROVED→CLAIMED→AUTHORIZATION_PENDING | DB lease generation/CAS。外部I/OをDB lock保持中に実行しない |
+| journal action | NONE→DISPATCH_AUTHORIZED | hold/期限/署名/対象revisionと同subject sequenceを検証しintentをatomic append。ACK前呼出禁止 |
+| external action | DISPATCH_AUTHORIZED→EXECUTING→CONFIRMED/UNKNOWN/PARTIAL_FAILED | 認可receiptを検証し、安定keyで実行・照会。未知結果を成功/未実行としない |
+| hold | NONE/RELEASED→ACTIVE→RELEASED | 独立journalのdurable appendが正本。DBはprojection。解除は権限/SoD/expected revisionが必要 |
+| restore | QUARANTINED→REPLAYING→VERIFIED | 独立watermark、intent/receipt、holdを照合。欠落/gap/未知結果はQUARANTINED維持 |
+
+dispatch認可commitが外部操作とholdの線形化点である。認可後のholdでは既認可操作をin-flightとして扱う。
+取消receiptがない操作を取消済みにしない。必要なpolicy整合モデルを実providerが満たさなければ有効化不可。
+独立journalは旧DB/object snapshotと別の保護領域で、単なる非同期audit logではない。
+provider成功〜receipt前crashは先行intentで検出する。holdはjournal ACK先行、local projection後追いとする。
+不明ACK・不一致・journal障害時はdefault deny。詳細な拒否・再適用・署名境界は正本文書に従う。
+
 ## 1. 設計方針
 
 この設計はNF-07の候補要求を、DG-07未完了の安全境界内で観測可能にするためのものだ。今回の成果物は `pii-inventory.md` と offline dry-run のみで、Spring bean、controller、mapper、migration、scheduler、storage writer、外部HTTP clientを追加しない。

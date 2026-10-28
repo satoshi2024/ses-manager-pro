@@ -1,5 +1,21 @@
 # completion mapping
 
+## 2026-10-01 現行追加scope
+
+`SYNTHETIC_FOUNDATION`は新しい技術incrementであり、計画固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`はAstra技術Plan PASS。
+SF-W0完了。SF-W1固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`は対象3 class 18/0/0/0、Astra限定CODE PASS。worker/処分/recoveryは未実装、production BLOCKED。
+初期baseは`1443fb68943849a3260d7ebe005259f3eb609d60`、branchは`codex/snf-prod-nf07-foundation-plan`。
+以下のDEV-0/D0行、旧base、旧coverage件数は過去の証跡として保持し、現行HeadのPASSへ転用しない。
+
+### SF-W1限定Reviewと現行coverage gap
+
+| scope | fixed evidence | 結果 | 境界 |
+|---|---|---|---|
+| SF-W1 foundation | `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`、`synthetic-foundation.md`の3 XML SHA-256、対象3 class | Astra CODE PASS、18/0/0/0 | pure envelope/verifier/FSM/test harnessのみ。worker/journal/restore、Full Feature/Production PASSではない |
+| 最新read-only source scan | control Head `cde61306`、`verification-evidence/20261001-privacy-coverage-02` | 183 SQL / 254 table / 244 entity / 708 provider候補。unclassified 74、missing columns 1,082、provider 285、entity 68でBLOCKED | source structure gapとpolicy UNKNOWNを別管理。0.4 coverage closure、DG-07、正式Owner/法的判断を満たさない |
+
+上記scanはcontrolで固定されたread-only inventory証拠であり、SF-W1のworktree HEADに対する実行結果とは称さない。旧coverage行の180 tables/unclassified 0/provider 424等はその当時の履歴として保持し、現状gapの解消証拠に転用しない。
+
 開始時base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`
 fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（base drift。`<BASE_COMMIT>`未確定のためrebaseなし）
 DEV decision: `NF07-DEV-GATE-20260828` / `APPROVED_DEV_ONLY` / Owner role `Project Maintainer（development-only）` / formal Privacy Owner `UNASSIGNED_UNTIL_PRE_PRODUCTION`。Full Feature/Productionのapproved policy/scope、正式owner、approved Base branch/SHAは未提供でBLOCKED。上記origin/mainは技術比較境界であり承認済みBaseではない。

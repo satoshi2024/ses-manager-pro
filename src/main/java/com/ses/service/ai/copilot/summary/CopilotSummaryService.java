@@ -3,18 +3,17 @@ package com.ses.service.ai.copilot.summary;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
-import com.ses.entity.AiArtifactVersion;
-import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.ai.AiPiiMasker;
+import com.ses.service.ai.CopilotExecutionFailure;
+import com.ses.service.ai.copilot.CopilotRunService;
 import com.ses.service.ai.copilot.result.MetricValue;
 import com.ses.service.ai.copilot.result.TypedResultEnvelope;
 import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import com.ses.service.ai.copilot.CopilotFeatureGate;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -33,16 +32,67 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class CopilotSummaryService {
 
-    public static final String TASK_MARKER = "[TASK:MANAGEMENT_COPILOT]";
-    public static final String OUTPUT_SCHEMA_VERSION = "nf08-summary-1";
+    public static final String TASK_MARKER = CopilotSummaryPromptTemplate.TASK_MARKER;
+    public static final String OUTPUT_SCHEMA_VERSION = CopilotSummaryPromptTemplate.OUTPUT_SCHEMA_VERSION;
 
     private final AiExecutionGateway aiExecutionGateway;
-    private final AiArtifactVersionMapper artifactVersionMapper;
     private final ObjectMapper objectMapper;
     private final CopilotFeatureGate featureGate;
 
+    /**
+     * Summary attemptを作る前の読取専用preflight。合成外部許可でもlocal-only証拠でなければ
+     * attempt開始を許可しない。candidateはこの呼出し内だけで照合し、dispatch authorityにしない。
+     */
+    public boolean preflightLocalSummary(TypedResultEnvelope envelope, CopilotExecutionContext context,
+                                         CopilotScopeContext scope, String scopeHash,
+                                         CopilotRunService.CopilotArtifactSnapshot artifact,
+                                         String existingQueryTraceId, String parameterHash) {
+        if (!isBound(envelope, context, scope, scopeHash) || artifact == null
+                || existingQueryTraceId == null || existingQueryTraceId.isBlank()
+                || parameterHash == null || parameterHash.isBlank()
+                || envelope.values() == null || envelope.values().isEmpty()) {
+            return false;
+        }
+        try {
+            featureGate.assertQueryAllowed();
+        } catch (BusinessException ex) {
+            return false;
+        }
+        List<String> allowedClaimKeys = envelope.values().stream()
+                .map(MetricValue::key)
+                .filter(key -> key != null && !key.isBlank())
+                .distinct()
+                .toList();
+        if (allowedClaimKeys.isEmpty()) return false;
+
+        SummaryRequest request = new SummaryRequest(envelope.queryId(), envelope.catalogVersion(),
+                artifact.promptVersion(), OUTPUT_SCHEMA_VERSION, allowedClaimKeys, Duration.ofSeconds(15), 0);
+        long deadlineNanos = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+        AiGatewayRequest gatewayRequest;
+        PreflightCostEvidence evidence;
+        try {
+            gatewayRequest = buildGatewayRequest(request, context, scope, scopeHash,
+                    existingQueryTraceId, artifact, deadlineNanos);
+            evidence = aiExecutionGateway.preflightCopilot(gatewayRequest);
+        } catch (RuntimeException ex) {
+            return false;
+        }
+        CopilotSummaryPreflightCandidate candidate = new CopilotSummaryPreflightCandidate(
+                context.tenantId(), context.legalEntityId(), envelope.queryId(), existingQueryTraceId,
+                artifact.artifactVersionId(),
+                artifact.provider(), artifact.modelName(), artifact.promptVersion(), artifact.configHash(),
+                scopeHash, parameterHash, evidence);
+        return candidate.matches(context.tenantId(), context.legalEntityId(), context.queryId(), existingQueryTraceId,
+                artifact.artifactVersionId(), artifact.provider(), artifact.modelName(),
+                artifact.promptVersion(), artifact.configHash(), scopeHash, parameterHash, evidence)
+                && candidate.permitsLocalSummaryAttempt();
+    }
+
     public SummaryResponse summarize(TypedResultEnvelope envelope, CopilotExecutionContext context,
-                                     CopilotScopeContext scope, String scopeHash, String traceId) {
+                                     CopilotScopeContext scope, String scopeHash,
+                                     CopilotRunService.CopilotArtifactSnapshot artifact, String traceId) {
+        long started = System.nanoTime();
+        long deadlineNanos = started + Duration.ofSeconds(15).toNanos();
         if (!isBound(envelope, context, scope, scopeHash)) {
             return SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE);
         }
@@ -63,10 +113,6 @@ public class CopilotSummaryService {
             return SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE);
         }
 
-        AiArtifactVersion artifact = artifactVersionMapper.selectOne(new LambdaQueryWrapper<AiArtifactVersion>()
-                .eq(AiArtifactVersion::getUseCase, AiGatewayRequest.USE_COPILOT)
-                .eq(AiArtifactVersion::getStatus, "ACTIVE")
-                .last("LIMIT 1"));
         if (artifact == null) {
             return SummaryResponse.unavailable("ARTIFACT_MISSING");
         }
@@ -74,40 +120,74 @@ public class CopilotSummaryService {
         SummaryRequest request = new SummaryRequest(
                 envelope.queryId(),
                 envelope.catalogVersion(),
-                artifact.getPromptVersion(),
+                artifact.promptVersion(),
                 OUTPUT_SCHEMA_VERSION,
                 allowedClaimKeys,
                 Duration.ofSeconds(15),
                 0);
 
-        long started = System.nanoTime();
+        AiGatewayResult gatewayResult = null;
         try {
-            AiGatewayResult gatewayResult = aiExecutionGateway.execute(
-                    buildGatewayRequest(request, context, scope, scopeHash, traceId));
+            gatewayResult = aiExecutionGateway.execute(
+                    buildGatewayRequest(request, context, scope, scopeHash, traceId, artifact, deadlineNanos));
             SummaryResponse parsed = parseProviderJson(gatewayResult.getText(), allowedClaimKeys);
+            if (System.nanoTime() >= deadlineNanos) {
+                return SummaryResponse.unavailable("COPILOT_DEADLINE_EXCEEDED",
+                        costEvidence(gatewayResult, "COPILOT_DEADLINE_EXCEEDED"));
+            }
             long latencyMs = (System.nanoTime() - started) / 1_000_000L;
+            SummaryCostEvidence costEvidence = costEvidence(gatewayResult, "SUMMARY_SUCCEEDED");
             return new SummaryResponse(
                     parsed.summaryText(),
                     parsed.claimKeys(),
                     SummaryResponse.STATUS_SUCCEEDED,
-                    artifact.getModelName(),
+                    artifact.modelName(),
                     latencyMs,
                     null,
-                    0);
+                    costEvidence.actualCostYen(),
+                    costEvidence);
         } catch (CopilotSummaryValidationException ex) {
             log.debug("copilot summary rejected: {}", ex.reasonCode());
-            return SummaryResponse.unavailable(SummaryResponse.STATUS_REJECTED);
+            return SummaryResponse.unavailable(SummaryResponse.STATUS_REJECTED,
+                    gatewayResult == null ? SummaryCostEvidence.unknown(ex.reasonCode())
+                            : costEvidence(gatewayResult, ex.reasonCode()));
+        } catch (CopilotExecutionFailure ex) {
+            return SummaryResponse.unavailable(mapFailureStatus(ex.reasonCode()),
+                    SummaryCostEvidence.fromPreflight(ex.preflight(), ex.dispatchOutcome(), ex.usage(), ex.reasonCode()));
         } catch (BusinessException ex) {
             log.debug("copilot summary provider error: code={}", ex.getCode());
-            return mapProviderError(ex);
+            SummaryResponse mapped = mapProviderError(ex);
+            return SummaryResponse.unavailable(mapped.providerStatus(),
+                    gatewayResult == null ? mapped.costEvidence() : costEvidence(gatewayResult, mapped.providerStatus()));
         } catch (RuntimeException ex) {
             log.debug("copilot summary provider failure", ex);
-            return SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE);
+            return SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE,
+                    gatewayResult == null ? SummaryCostEvidence.unknown("SUMMARY_FAILURE")
+                            : costEvidence(gatewayResult, "SUMMARY_FAILURE"));
         }
     }
 
+    private SummaryCostEvidence costEvidence(AiGatewayResult result, String reasonCode) {
+        if (result == null) return SummaryCostEvidence.unknown(reasonCode);
+        return SummaryCostEvidence.fromPreflight(result.getCopilotPreflight(),
+                result.getCopilotDispatchOutcome(), result.getProviderUsage(), reasonCode);
+    }
+
+    private String mapFailureStatus(String reasonCode) {
+        return switch (reasonCode) {
+            case "COPILOT_COST_UNKNOWN" -> "COST_UNKNOWN";
+            case "COPILOT_DEADLINE_EXCEEDED" -> "DEADLINE_EXCEEDED";
+            case "COPILOT_PROVIDER_429" -> "PROVIDER_429";
+            case "COPILOT_RESPONSE_INVALID" -> "PROVIDER_INVALID_JSON";
+            case "PROVIDER_INVALID_JSON" -> "PROVIDER_INVALID_JSON";
+            default -> SummaryResponse.STATUS_UNAVAILABLE;
+        };
+    }
+
     private AiGatewayRequest buildGatewayRequest(SummaryRequest request, CopilotExecutionContext context,
-                                                  CopilotScopeContext scope, String scopeHash, String traceId) {
+                                                  CopilotScopeContext scope, String scopeHash, String traceId,
+                                                  CopilotRunService.CopilotArtifactSnapshot artifact,
+                                                  long deadlineNanos) {
         Map<String, Object> allowlisted = new LinkedHashMap<>();
         allowlisted.put("catalog.queryId", request.queryId());
         allowlisted.put("catalog.catalogVersion", request.catalogVersion());
@@ -121,11 +201,7 @@ public class CopilotSummaryService {
                 .useCase(AiGatewayRequest.USE_COPILOT)
                 .traceId(traceId)
                 .taskMarker(TASK_MARKER)
-                .trustedInstruction("""
-                        Return JSON only: {"summaryText":"...","claimKeys":["..."]}.
-                        summaryText must not contain HTML, numbers, currency symbols, or recalculated metrics.
-                        claimKeys must be chosen only from summary.claimKeys in ALLOWLIST_CONTEXT.
-                        """)
+                .trustedInstruction(CopilotSummaryPromptTemplate.TRUSTED_INSTRUCTION)
                 .allowlistedFields(masked)
                 .untrustedSourceText(null)
                 .persistRun(false)
@@ -133,6 +209,13 @@ public class CopilotSummaryService {
                 .executionContext(context)
                 .scopeContext(scope)
                 .scopeHash(scopeHash)
+                .deadlineNanos(deadlineNanos)
+                .costBudgetYen(request.costBudgetYen())
+                .expectedArtifactVersionId(artifact.artifactVersionId())
+                .expectedProvider(artifact.provider())
+                .expectedModel(artifact.modelName())
+                .expectedPromptVersion(artifact.promptVersion())
+                .expectedConfigHash(artifact.configHash())
                 .build();
     }
 
@@ -191,6 +274,27 @@ public class CopilotSummaryService {
 
     private SummaryResponse mapProviderError(BusinessException ex) {
         int code = ex.getCode();
+        if ("COPILOT_COST_UNKNOWN".equals(ex.getMessage())) {
+            return SummaryResponse.unavailable("COST_UNKNOWN");
+        }
+        if ("COPILOT_DEADLINE_EXCEEDED".equals(ex.getMessage())) {
+            return SummaryResponse.unavailable("DEADLINE_EXCEEDED");
+        }
+        if ("COPILOT_PROMPT_VERSION_MISMATCH".equals(ex.getMessage())) {
+            return SummaryResponse.unavailable("PROMPT_VERSION_MISMATCH");
+        }
+        if ("COPILOT_CONFIG_HASH_MISMATCH".equals(ex.getMessage())) {
+            return SummaryResponse.unavailable("CONFIG_HASH_MISMATCH");
+        }
+        if ("COPILOT_ARTIFACT_PROVIDER_MISMATCH".equals(ex.getMessage())) {
+            return SummaryResponse.unavailable("ARTIFACT_PROVIDER_MISMATCH");
+        }
+        if ("COPILOT_BOUNDED_PROVIDER_MISMATCH".equals(ex.getMessage())) {
+            return SummaryResponse.unavailable("BOUNDED_PROVIDER_MISMATCH");
+        }
+        if ("COPILOT_EXECUTION_SNAPSHOT_INVALID".equals(ex.getMessage())) {
+            return SummaryResponse.unavailable("ARTIFACT_SNAPSHOT_INVALID");
+        }
         if (code == 429) {
             return SummaryResponse.unavailable("PROVIDER_429");
         }
