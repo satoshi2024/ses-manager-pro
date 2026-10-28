@@ -1,9 +1,13 @@
 package com.ses.service.ai.impl;
 
+import com.ses.service.ai.copilot.summary.CopilotSummaryPromptTemplate;
+
 /**
  * mock/rule 時および gemini+外部送信禁止時の決定的応答。
  */
 public final class MockAiResponses {
+
+    public static final String COPILOT_RESPONSE_VERSION = CopilotSummaryPromptTemplate.MOCK_RESPONSE_VERSION;
 
     private MockAiResponses() {
     }
