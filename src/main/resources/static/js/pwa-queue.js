@@ -3,11 +3,13 @@
 
 (() => {
     const DB_NAME = 'ses-pwa-self-service';
-    const DB_VERSION = 1;
+    const DB_VERSION = 2;
     const STORE = 'queue';
+    const META_STORE = 'meta';
     const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
     const MAX_PAYLOAD_BYTES = 32 * 1024;
     const MAX_PAYLOAD_DEPTH = 8;
+    const CLAIM_LEASE_MS = 30000;
     const FORBIDDEN_KEY = /(password|token|secret|payroll|salary|bank|mynumber|receipt|attachment|binary|blob|file|document)/i;
     const ALLOWED_PATHS = [
         /^\/api\/my\/pwa\/attendance\/daily$/,
@@ -21,20 +23,241 @@
         flushing: false,
         initialized: false,
         ready: null,
-        inFlight: new Map()
+        inFlight: new Map(),
+        resourceLocks: new Map(),
+        revocationEpoch: null,
+        quarantined: false,
+        documentNonce: newDocumentNonce(),
+        documentGeneration: 0,
+        candidateRestoreScope: null,
+        lockedDraftCount: 0,
+        newRequestIds: new Set(),
+        restoredRequestIds: new Set(),
+        restoreProof: null,
+        restoreScope: null,
+        permitDeadline: null,
+        permitServerTime: null,
+        permitWallTime: null,
+        permitMonotonicTime: null
     };
+
+    const REVOCATION_KEY = 'ses_pwa_revocation_epoch';
+    const SCOPE_EPOCH_KEY = 'ses_pwa_scope_epoch';
+    const TAB_ID = newRequestId();
+
+    function newDocumentNonce() {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
+    function clearRestorePermit() {
+        state.restoreProof = null;
+        state.restoreScope = null;
+        state.restoredRequestIds.clear();
+        state.permitDeadline = null;
+        state.permitServerTime = null;
+        state.permitWallTime = null;
+        state.permitMonotonicTime = null;
+    }
+
+    function clearDraftDom() {
+        const conflictBox = document.getElementById('pwa-conflicts');
+        if (conflictBox) conflictBox.replaceChildren();
+        const panel = document.getElementById('pwa-queue-panel');
+        if (panel) panel.hidden = true;
+    }
+
+    function restorePermitIsCurrent() {
+        if (!state.permitDeadline || !state.restoreScope) return false;
+        const elapsed = performance.now() - state.permitMonotonicTime;
+        const wallElapsed = Date.now() - state.permitWallTime;
+        if (elapsed < 0 || wallElapsed < 0 || Math.abs(elapsed - wallElapsed) > 5000) {
+            state.quarantined = true;
+            state.paused = true;
+            clearRestorePermit();
+            clearDraftDom();
+            window.dispatchEvent(new CustomEvent('ses:pwa-revoked'));
+            return false;
+        }
+        if (performance.now() >= state.permitDeadline) {
+            const scope = state.scope;
+            clearRestorePermit();
+            state.candidateRestoreScope = scope;
+            countLockedScope(scope).then(count => {
+                if (scope === state.scope) {
+                    state.lockedDraftCount = count;
+                    render();
+                }
+            }).catch(() => undefined);
+            clearDraftDom();
+            window.dispatchEvent(new CustomEvent('ses:pwa-revoked'));
+            return false;
+        }
+        return true;
+    }
+
+    function csrfHeader() {
+        const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
+        let token = '';
+        try { token = match ? decodeURIComponent(match[1]) : ''; }
+        catch (_) { /* 不正なcookieはCSRF tokenとして使わない */ }
+        if (!token) throw new Error('CSRFトークンを確認できません。オンラインで再読み込みしてください');
+        return { 'X-XSRF-TOKEN': token };
+    }
+
+    function hasCurrentSendAuthorization(record, ticket) {
+        if (!record || !ticketIsCurrent(ticket) || record.userScope !== ticket.scope
+                || record.revocationEpoch !== ticket.epoch) return false;
+        if (state.newRequestIds.has(record.clientRequestId)) return true;
+        return state.restoredRequestIds.has(record.clientRequestId) && restorePermitIsCurrent();
+    }
+
+    function restoreOperationIsCurrent(generation, epoch) {
+        return generation === state.documentGeneration && !state.quarantined
+            && restorePermitIsCurrent() && state.revocationEpoch === epoch
+            && readRevocationEpoch() === epoch;
+    }
+
+    function readRevocationEpoch() {
+        let localEpoch = null;
+        try {
+            localEpoch = localStorage.getItem(REVOCATION_KEY);
+        } catch (_) { /* cookieの撤回記録も照合する */ }
+        try {
+            const match = document.cookie.match(/(?:^|;\s*)ses_pwa_revocation_epoch=([^;]+)/);
+            const cookieEpoch = match ? decodeURIComponent(match[1]) : null;
+            if (!localEpoch && !cookieEpoch) return 'uninitialized';
+            if (!localEpoch || !cookieEpoch || localEpoch !== cookieEpoch) return 'unverified';
+            return localEpoch;
+        } catch (_) { /* 保存状態を検証できない場合はfail closedにする */ }
+        return 'unverified';
+    }
+
+    function newRevocationEpoch() {
+        try { return crypto.randomUUID(); }
+        catch (_) { return `${newRequestId()}-${Math.random().toString(36).slice(2)}`; }
+    }
+
+    function persistRevocationEpoch(epoch) {
+        try { localStorage.setItem(REVOCATION_KEY, epoch); } catch (_) { /* cookie側の記録を照合する */ }
+        try { document.cookie = `ses_pwa_revocation_epoch=${encodeURIComponent(epoch)}; Max-Age=31536000; Path=/; SameSite=Strict`; }
+        catch (_) { /* localStorage側の記録を照合する */ }
+        return readRevocationEpoch() === epoch;
+    }
+
+    function scopeTicket() {
+        return { scope: state.scope, epoch: readRevocationEpoch() };
+    }
+
+    function ticketIsCurrent(ticket) {
+        return Boolean(ticket && !state.quarantined && !state.paused
+            && ticket.scope && ticket.scope === state.scope
+            && ticket.epoch === readRevocationEpoch());
+    }
+
+    function acceptRevocation(epoch) {
+        state.documentGeneration++;
+        state.newRequestIds.clear();
+        state.candidateRestoreScope = null;
+        state.lockedDraftCount = 0;
+        clearRestorePermit();
+        clearDraftDom();
+        window.dispatchEvent(new CustomEvent('ses:pwa-revoked'));
+        state.revocationEpoch = epoch || newRevocationEpoch();
+        state.scope = null;
+        state.paused = true;
+        state.quarantined = true;
+        deleteAll().catch(() => undefined);
+        render();
+    }
+
+    function quarantineDocument() {
+        state.documentGeneration++;
+        state.newRequestIds.clear();
+        state.candidateRestoreScope = null;
+        state.lockedDraftCount = 0;
+        clearRestorePermit();
+        state.scope = null;
+        state.paused = true;
+        state.quarantined = true;
+        clearDraftDom();
+        window.dispatchEvent(new CustomEvent('ses:pwa-revoked'));
+        render();
+    }
+
+    function broadcastRevocation(epoch) {
+        try {
+            if ('BroadcastChannel' in window) {
+                const channel = new BroadcastChannel('ses-pwa-revocation');
+                channel.postMessage({ type: 'REVOKE', epoch });
+                channel.close();
+            }
+        } catch (_) { /* storage eventを他tabへの通知手段として維持する */ }
+    }
+
+    async function revokeScope() {
+        state.documentGeneration++;
+        state.newRequestIds.clear();
+        state.candidateRestoreScope = null;
+        state.lockedDraftCount = 0;
+        clearRestorePermit();
+        clearDraftDom();
+        window.dispatchEvent(new CustomEvent('ses:pwa-revoked'));
+        const epoch = newRevocationEpoch();
+        state.revocationEpoch = epoch;
+        state.scope = null;
+        state.paused = true;
+        state.quarantined = true;
+        const durableEpoch = persistRevocationEpoch(epoch);
+        try { localStorage.removeItem('ses_pwa_user_scope'); } catch (_) { /* 現在tabは引き続き隔離する */ }
+        try { localStorage.removeItem(SCOPE_EPOCH_KEY); } catch (_) { /* epoch不一致で隔離する */ }
+        broadcastRevocation(epoch);
+        try {
+            await withStore('readwrite', store => store.clear());
+            await withStore('readwrite', store => store.put({ key: 'revocationEpoch', value: epoch }), META_STORE);
+            return { cleared: durableEpoch, epoch };
+        } catch (_) {
+            // queue DBのclearに失敗しても、DB外の撤回記録で旧scopeを隔離する。
+            return { cleared: false, epoch };
+        }
+    }
 
     function openDb() {
         return new Promise((resolve, reject) => {
             if (!window.indexedDB) return reject(new Error('このブラウザではoffline保存を利用できません'));
             const request = indexedDB.open(DB_NAME, DB_VERSION);
-            request.onupgradeneeded = () => {
+            request.onupgradeneeded = event => {
                 const db = request.result;
+                const tx = request.transaction;
                 if (!db.objectStoreNames.contains(STORE)) {
                     const store = db.createObjectStore(STORE, { keyPath: 'clientRequestId' });
                     store.createIndex('userScope', 'userScope', { unique: false });
                     store.createIndex('status', 'status', { unique: false });
                     store.createIndex('createdAt', 'createdAt', { unique: false });
+                }
+                if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE, { keyPath: 'key' });
+                if (event.oldVersion < 2 && db.objectStoreNames.contains(STORE)) {
+                    const cursorRequest = tx.objectStore(STORE).openCursor();
+                    cursorRequest.onsuccess = () => {
+                        const cursor = cursorRequest.result;
+                        if (!cursor) return;
+                        const record = cursor.value;
+                        if (!record.revocationEpoch) {
+                            const migrationEpoch = readRevocationEpoch();
+                            // epoch契約導入前のrecordは未撤回初期値(0)のときだけ引き継ぐ。
+                            record.revocationEpoch = migrationEpoch === '0' ? '0' : 'legacy-revoked';
+                        }
+                        if (record.conflict || JSON.stringify(record).length > MAX_PAYLOAD_BYTES) {
+                            record.status = 'ERROR';
+                            record.error = '安全な競合情報へ更新できないため、この下書きは破棄して再入力してください。';
+                            record.payload = null;
+                            record.payloadHash = null;
+                            delete record.conflict;
+                            cursor.update(record);
+                        }
+                        cursor.continue();
+                    };
                 }
             };
             request.onsuccess = () => resolve(request.result);
@@ -42,14 +265,14 @@
         });
     }
 
-    function withStore(mode, operation) {
+    function withStore(mode, operation, storeName = STORE) {
         return openDb().then(db => new Promise((resolve, reject) => {
             let result;
             let failed = false;
             let tx;
             try {
-                tx = db.transaction(STORE, mode);
-                result = operation(tx.objectStore(STORE));
+                tx = db.transaction(storeName, mode);
+                result = operation(tx.objectStore(storeName));
             } catch (error) {
                 failed = true;
                 db.close();
@@ -62,20 +285,113 @@
         }));
     }
 
-    function put(record) {
-        return withStore('readwrite', store => { store.put(record); return record; });
+    function put(record, ticket) {
+        if (ticket && (!ticketIsCurrent(ticket) || record.userScope !== ticket.scope
+                || record.revocationEpoch !== ticket.epoch)) {
+            return Promise.resolve(false);
+        }
+        return withStore('readwrite', store => {
+            if (ticket && (!ticketIsCurrent(ticket) || record.userScope !== ticket.scope
+                    || record.revocationEpoch !== ticket.epoch)) return false;
+            store.put(record);
+            return record;
+        });
     }
 
     function remove(clientRequestId) {
         return withStore('readwrite', store => { store.delete(clientRequestId); });
     }
 
-    function readAll() {
+    async function putClaimed(record, ticket, claim) {
+        if (!ticketIsCurrent(ticket) || record.userScope !== ticket.scope
+                || record.revocationEpoch !== ticket.epoch) return false;
+        const db = await openDb();
+        try {
+            return await new Promise((resolve, reject) => {
+                const tx = db.transaction([STORE, META_STORE], 'readwrite');
+                const leaseRequest = tx.objectStore(META_STORE).get(claim.key);
+                let wrote = false;
+                leaseRequest.onsuccess = () => {
+                    const lease = leaseRequest.result;
+                    if (ticketIsCurrent(ticket) && lease && lease.ownerToken === claim.token
+                            && lease.epoch === ticket.epoch && lease.expiresAt >= now()) {
+                        tx.objectStore(STORE).put(record);
+                        wrote = true;
+                    }
+                };
+                tx.oncomplete = () => resolve(wrote);
+                tx.onerror = tx.onabort = () => reject(tx.error || new Error('offline保存に失敗しました'));
+            });
+        } finally { db.close(); }
+    }
+
+    async function removeClaimed(clientRequestId, ticket, claim) {
+        if (!ticketIsCurrent(ticket)) return false;
+        const db = await openDb();
+        try {
+            return await new Promise((resolve, reject) => {
+                const tx = db.transaction([STORE, META_STORE], 'readwrite');
+                const leaseRequest = tx.objectStore(META_STORE).get(claim.key);
+                let removed = false;
+                leaseRequest.onsuccess = () => {
+                    const lease = leaseRequest.result;
+                    if (ticketIsCurrent(ticket) && lease && lease.ownerToken === claim.token
+                            && lease.epoch === ticket.epoch && lease.expiresAt >= now()) {
+                        tx.objectStore(STORE).delete(clientRequestId);
+                        removed = true;
+                    }
+                };
+                tx.oncomplete = () => resolve(removed);
+                tx.onerror = tx.onabort = () => reject(tx.error || new Error('offline削除に失敗しました'));
+            });
+        } finally { db.close(); }
+    }
+
+    function readRestoreScope(scope) {
         return withStore('readonly', store => {
-            const request = store.getAll();
+            const request = store.index('userScope').getAll(scope);
             request.onsuccess = () => { request._pwaResult = request.result || []; };
             return request;
         }).then(request => request._pwaResult || []);
+    }
+
+    function readById(clientRequestId) {
+        return withStore('readonly', store => {
+            const request = store.get(clientRequestId);
+            request.onsuccess = () => { request._pwaResult = request.result || null; };
+            return request;
+        }).then(request => request._pwaResult || null);
+    }
+
+    async function readAllowedRecords() {
+        const allowedIds = new Set([...state.newRequestIds, ...state.restoredRequestIds]);
+        const records = await Promise.all([...allowedIds].map(readById));
+        return scopeRecords(records.filter(Boolean));
+    }
+
+    function countScope(scope) {
+        if (!scope) return Promise.resolve(0);
+        return withStore('readonly', store => {
+            const request = store.index('userScope').count(IDBKeyRange.only(scope));
+            request.onsuccess = () => { request._pwaResult = request.result || 0; };
+            return request;
+        }).then(request => request._pwaResult || 0);
+    }
+
+    function countLockedScope(scope) {
+        if (!scope) return Promise.resolve(0);
+        const allowedIds = new Set([...state.newRequestIds, ...state.restoredRequestIds]);
+        return withStore('readonly', store => {
+            const request = store.index('userScope').openKeyCursor(IDBKeyRange.only(scope));
+            let count = 0;
+            request.onsuccess = () => {
+                const cursor = request.result;
+                if (!cursor) { request._pwaResult = count; return; }
+                if (!allowedIds.has(cursor.primaryKey)) count++;
+                cursor.continue();
+            };
+            return request;
+        }).then(request => request._pwaResult || 0);
     }
 
     function deleteAll() {
@@ -83,25 +399,41 @@
     }
 
     async function deleteScope(scope) {
-        const records = await readAll();
-        await Promise.all(records.filter(record => record.userScope === scope)
-            .map(record => remove(record.clientRequestId)));
-    }
-
-    async function rebindScope(oldScope, newScope) {
+        if (!scope) return;
         return withStore('readwrite', store => {
-            const request = store.openCursor();
+            const request = store.index('userScope').openKeyCursor(IDBKeyRange.only(scope));
             request.onsuccess = () => {
                 const cursor = request.result;
                 if (!cursor) return;
-                if (cursor.value.userScope === oldScope) {
-                    const record = cursor.value;
-                    record.userScope = newScope;
-                    cursor.update(record);
-                }
+                // key-only cursorにdelete()は使えないため、主キーをobjectStoreから削除する。
+                store.delete(cursor.primaryKey);
                 cursor.continue();
             };
             return request;
+        });
+    }
+
+    function bootstrapOperationIsCurrent(generation, epoch) {
+        return generation === state.documentGeneration && !state.quarantined
+            && epoch === readRevocationEpoch();
+    }
+
+    async function rebindScope(oldScope, newScope, allowedRequestIds = null, guard = () => true) {
+        return withStore('readwrite', store => {
+            const ids = allowedRequestIds ? [...allowedRequestIds] : [];
+            if (!guard()) { store.transaction.abort(); return null; }
+            ids.forEach(id => {
+                const request = store.get(id);
+                request.onsuccess = () => {
+                    if (!guard()) { store.transaction.abort(); return; }
+                    const record = request.result;
+                    if (record && record.userScope === oldScope) {
+                        record.userScope = newScope;
+                        store.put(record);
+                    }
+                };
+            });
+            return null;
         });
     }
 
@@ -276,10 +608,93 @@
         } catch (_) { /* private browsingではメモリ上だけで扱う */ }
     }
 
+    function sanitizeConflict(record, data) {
+        const source = data && typeof data === 'object' ? data : {};
+        const changeRequest = record.screen === 'change-request';
+        const allowed = changeRequest ? ((record.payload || {}).payload || {}) : (record.payload || {});
+        const fieldNames = new Set(Object.keys(allowed));
+        Object.values(allowed).forEach(value => {
+            if (Array.isArray(value)) Object.keys(value[0] || {}).forEach(key => fieldNames.add(key));
+            else if (value && typeof value === 'object') Object.keys(value).forEach(key => fieldNames.add(key));
+        });
+        const safeValue = (value, depth = 0) => {
+            if (depth > MAX_PAYLOAD_DEPTH) return null;
+            if (typeof value === 'string') return value.slice(0, 8192);
+            if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
+            if (Array.isArray(value)) return value.slice(0, 100).map(item => safeValue(item, depth + 1));
+            if (!value || typeof value !== 'object') return null;
+            const result = {};
+            Object.keys(value).filter(key => fieldNames.has(key) && !FORBIDDEN_KEY.test(key))
+                .forEach(key => { result[key] = safeValue(value[key], depth + 1); });
+            return result;
+        };
+        const project = value => {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+            const result = {};
+            Object.keys(allowed).forEach(key => {
+                if (!Object.prototype.hasOwnProperty.call(value, key)) return;
+                const allowedValue = allowed[key];
+                if (Array.isArray(allowedValue)) {
+                    const nestedKeys = Object.keys(allowedValue[0] || {});
+                    result[key] = Array.isArray(value[key]) ? value[key].slice(0, 100).map(item => {
+                        if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+                        const projected = {};
+                        nestedKeys.forEach(nestedKey => {
+                            if (Object.prototype.hasOwnProperty.call(item, nestedKey)) projected[nestedKey] = safeValue(item[nestedKey]);
+                        });
+                        return projected;
+                    }).filter(Boolean) : [];
+                } else if (allowedValue && typeof allowedValue === 'object') {
+                    const nested = {};
+                    Object.keys(allowedValue).forEach(nestedKey => {
+                        if (Object.prototype.hasOwnProperty.call(value[key] || {}, nestedKey)) nested[nestedKey] = safeValue(value[key][nestedKey]);
+                    });
+                    result[key] = nested;
+                } else result[key] = safeValue(value[key]);
+            });
+            return result;
+        };
+        const fields = Array.isArray(source.fields) ? source.fields.filter(item => item && fieldNames.has(item.name))
+            .map(item => ({ name: item.name, serverValue: safeValue(item.serverValue), clientValue: safeValue(item.clientValue) })) : [];
+        const sanitized = {
+            type: typeof source.type === 'string' ? source.type.slice(0, 40) : 'CONFLICT',
+            resource: record.screen,
+            resourceId: Number.isFinite(Number(source.resourceId)) ? Number(source.resourceId) : null,
+            serverVersion: Number.isFinite(Number(source.serverVersion)) ? Number(source.serverVersion) : undefined,
+            clientBaseVersion: record.baseVersion,
+            serverRefreshAt: typeof source.serverRefreshAt === 'string' ? source.serverRefreshAt.slice(0, 40) : undefined,
+            server: project(source.server),
+            client: project(source.client) || project(allowed),
+            fields
+        };
+        if (new TextEncoder().encode(JSON.stringify(sanitized)).byteLength > MAX_PAYLOAD_BYTES) {
+            return { type: sanitized.type, resource: sanitized.resource, serverVersion: sanitized.serverVersion,
+                clientBaseVersion: sanitized.clientBaseVersion };
+        }
+        return sanitized;
+    }
+
     async function bootstrapScope() {
+        const bootstrapGeneration = state.documentGeneration;
+        let bootstrapEpoch = readRevocationEpoch();
         const oldScope = state.scope || persistedScope();
         if (!navigator.onLine) {
+            if (!oldScope || bootstrapEpoch === 'uninitialized' || bootstrapEpoch === 'unverified'
+                    || localStorage.getItem(SCOPE_EPOCH_KEY) !== bootstrapEpoch) {
+                state.quarantined = true;
+                throw new Error('logout後の下書きは復元できません');
+            }
+            if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
+                throw new Error('logout後のscope再確認が必要です');
+            }
+            state.candidateRestoreScope = oldScope;
             state.scope = oldScope;
+            state.revocationEpoch = bootstrapEpoch;
+            const lockedDraftCount = await countLockedScope(state.candidateRestoreScope);
+            if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
+                throw new Error('logout後のscope再確認が必要です');
+            }
+            state.lockedDraftCount = lockedDraftCount;
             if (!state.scope) throw new Error('offlineで利用するには一度オンラインでログインしてください');
             return state.scope;
         }
@@ -290,23 +705,47 @@
                 method: 'GET', cache: 'no-store', credentials: 'same-origin',
                 headers: contextHeaders
             });
+            if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
+                throw new Error('logout後のscope再確認が必要です');
+            }
             if (response.status === 401) throw Object.assign(new Error('Session timeout'), { sessionExpired: true });
             if (!response.ok) throw new Error('ユーザーscopeを確認できません');
             const result = await response.json();
+            if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
+                throw new Error('logout後のscope再確認が必要です');
+            }
             const scope = result && result.data && result.data.userScope;
             if (!scope || typeof scope !== 'string') throw new Error('ユーザーscopeが不正です');
+            if (bootstrapEpoch === 'uninitialized' || bootstrapEpoch === 'unverified') {
+                bootstrapEpoch = newRevocationEpoch();
+                if (!persistRevocationEpoch(bootstrapEpoch)) throw new Error('撤回状態を永続化できません');
+            }
             const preserveQueue = Boolean(result && result.data && result.data.preserveQueue);
+            if (!preserveQueue) state.candidateRestoreScope = null;
+            else if (oldScope !== scope || !state.candidateRestoreScope) state.candidateRestoreScope = oldScope;
             if (oldScope && oldScope !== scope) {
-                // scope切替中に削除/再束縛が失敗しても、旧userのrecordを一瞬も表示しない。
+                // 通常のcontext GETでは旧draftを再束縛・読取対象へ移さない。
                 state.scope = null;
-                if (preserveQueue) await rebindScope(oldScope, scope);
-                else await deleteScope(oldScope);
+                if (!preserveQueue) await deleteScope(oldScope);
+            }
+            if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) {
+                throw new Error('logout後のscope再確認が必要です');
             }
             state.scope = scope;
+            state.revocationEpoch = bootstrapEpoch;
             persistScope(scope);
+            try { localStorage.setItem(SCOPE_EPOCH_KEY, bootstrapEpoch); } catch (_) {}
+            state.quarantined = false;
             state.paused = false;
+            const lockedDraftCount = await countLockedScope(state.candidateRestoreScope);
+            if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)
+                    || state.scope !== scope || state.revocationEpoch !== bootstrapEpoch) {
+                throw new Error('logout後のscope再確認が必要です');
+            }
+            state.lockedDraftCount = lockedDraftCount;
             return scope;
         } catch (error) {
+            if (!bootstrapOperationIsCurrent(bootstrapGeneration, bootstrapEpoch)) throw error;
             if (error.sessionExpired) {
                 state.paused = true;
                 if (window.SES && SES.pwa) SES.pwa.sessionExpired();
@@ -320,24 +759,25 @@
 
     async function cleanupExpired() {
         const threshold = now() - MAX_AGE_MS;
-        const records = await readAll();
-        await Promise.all(records.filter(record => !record.createdAt || record.createdAt < threshold)
-            .map(record => {
-                const alreadyError = record.status === 'ERROR';
-                record.status = 'ERROR';
-                if (!alreadyError || !record.error) {
-                    record.error = '保持期間（30日）を過ぎたため送信できません。破棄して再入力してください。';
-                }
-                // 期限後は入力payloadを残さず、画面には破棄を促す最小metadataだけを残す。
-                record.payload = null;
-                record.payloadHash = null;
-                delete record.conflict;
-                return put(record);
-            }));
+        await withStore('readwrite', store => {
+            const request = store.index('createdAt').openKeyCursor(IDBKeyRange.upperBound(threshold, true));
+            request.onsuccess = () => {
+                const cursor = request.result;
+                if (!cursor) return;
+                // key-only cursorにdelete()は使えないため、主キーをobjectStoreから削除する。
+                store.delete(cursor.primaryKey);
+                cursor.continue();
+            };
+            return request;
+        });
     }
 
     function scopeRecords(records) {
-        return records.filter(record => record.userScope === state.scope);
+        const epoch = readRevocationEpoch();
+        const permit = restorePermitIsCurrent();
+        return records.filter(record => record.userScope === state.scope && record.revocationEpoch === epoch
+            && (state.newRequestIds.has(record.clientRequestId)
+                || (permit && state.restoredRequestIds.has(record.clientRequestId))));
     }
 
     function safeJson(value) {
@@ -350,16 +790,21 @@
 
     async function render() {
         let records = [];
-        try { records = scopeRecords(await readAll()); } catch (_) { return; }
+        try { records = await readAllowedRecords(); } catch (_) { return; }
         const pending = records.filter(record => record.status === 'PENDING');
         const conflicts = records.filter(record => record.status === 'CONFLICT');
         const errors = records.filter(record => record.status === 'ERROR');
         const panel = document.getElementById('pwa-queue-panel');
         const status = document.getElementById('pwa-queue-status');
         const conflictBox = document.getElementById('pwa-conflicts');
+        const restoreLink = document.getElementById('pwa-restore-link');
         if (panel && status && conflictBox) {
-            panel.hidden = pending.length === 0 && conflicts.length === 0 && errors.length === 0;
-            if (state.paused) status.textContent = 'セッション期限切れ。再認証後に同じユーザーで同期を再開します。';
+            panel.hidden = pending.length === 0 && conflicts.length === 0 && errors.length === 0
+                && state.lockedDraftCount === 0;
+            if (restoreLink) restoreLink.hidden = state.lockedDraftCount === 0;
+            if (state.quarantined) status.textContent = '下書きはロックされています。オンラインで再認証し、明示的に復元してください。';
+            else if (state.paused) status.textContent = 'セッション期限切れ。再認証後に同じユーザーで同期を再開します。';
+            else if (state.lockedDraftCount) status.textContent = `ロック中の下書き ${state.lockedDraftCount} 件。再認証後に明示的に復元できます。`;
             else if (!navigator.onLine && pending.length) status.textContent = `オフライン: 未送信 ${pending.length} 件`;
             else if (state.flushing) status.textContent = `同期中: ${pending.length} 件`;
             else if (pending.length) status.textContent = `未送信 ${pending.length} 件`;
@@ -413,27 +858,72 @@
 
     function setPendingStatus() { render(); }
 
-    async function updateFollowingVersions(record, responseData) {
+    async function updateFollowingVersions(record, responseData, ticket, claim) {
+        if (ticket && !ticketIsCurrent(ticket)) return;
         const version = responseData && Number.isInteger(Number(responseData.version))
             ? Number(responseData.version) : null;
         if (version === null) return;
-        const records = scopeRecords(await readAll());
+        const records = await readAllowedRecords();
         await Promise.all(records
             .filter(candidate => candidate.status === 'PENDING'
                 && candidate.resourceKey === record.resourceKey
+                && (!ticket || candidate.revocationEpoch === ticket.epoch)
                 && candidate.createdAt >= record.createdAt
                 && candidate.baseVersion === record.baseVersion)
             .map(async candidate => {
                 candidate.baseVersion = version;
                 candidate.payloadHash = await commandHash(candidate);
-                return put(candidate);
+                if (ticket && !ticketIsCurrent(ticket)) return false;
+                return claim ? putClaimed(candidate, ticket, claim) : put(candidate, ticket);
             }));
     }
 
-    async function markConflict(record, data) {
+    async function claimAggregate(resourceKey, ticket) {
+        const key = `aggregate:${resourceKey}`;
+        const expiresAt = now() + CLAIM_LEASE_MS;
+        const token = newRequestId();
+        const db = await openDb();
+        try {
+            return await new Promise((resolve, reject) => {
+                const tx = db.transaction(META_STORE, 'readwrite');
+                const store = tx.objectStore(META_STORE);
+                let claimed = false;
+                const request = store.get(key);
+                request.onsuccess = () => {
+                    if (!ticketIsCurrent(ticket)) return;
+                    const current = request.result;
+                    if (!current || current.epoch !== ticket.epoch || current.expiresAt < now()) {
+                        store.put({ key, owner: TAB_ID, ownerToken: token, epoch: ticket.epoch, expiresAt });
+                        claimed = { key, token, resourceKey };
+                    }
+                };
+                tx.oncomplete = () => resolve(claimed);
+                tx.onerror = tx.onabort = () => reject(tx.error || new Error('同期claimを取得できません'));
+            });
+        } finally { db.close(); }
+    }
+
+    async function releaseAggregate(claim) {
+        try {
+            const db = await openDb();
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction(META_STORE, 'readwrite');
+                const store = tx.objectStore(META_STORE);
+                const request = store.get(claim.key);
+                request.onsuccess = () => {
+                    if (request.result && request.result.ownerToken === claim.token) store.delete(claim.key);
+                };
+                tx.oncomplete = resolve;
+                tx.onerror = tx.onabort = () => reject(tx.error);
+            });
+            db.close();
+        } catch (_) { /* lease失効後はserverのidempotency/CASを最終境界とする */ }
+    }
+
+    async function markConflict(record, data, ticket, claim) {
         record.status = 'CONFLICT';
-        record.conflict = data || { type: 'CONFLICT' };
-        await put(record);
+        record.conflict = sanitizeConflict(record, data);
+        if (await putClaimed(record, ticket, claim) === false) return { skipped: true };
         await render();
         return { conflict: true, data: record.conflict, clientRequestId: record.clientRequestId };
     }
@@ -506,14 +996,16 @@
     }
 
     async function refreshConflict(clientRequestId) {
-        const record = (await readAll()).find(candidate => candidate.clientRequestId === clientRequestId);
-        if (!record || record.userScope !== state.scope || record.status !== 'CONFLICT') return;
+        const ticket = scopeTicket();
+        const record = (await readAllowedRecords()).find(candidate => candidate.clientRequestId === clientRequestId);
+        if (!ticketIsCurrent(ticket) || !record || record.userScope !== state.scope || record.status !== 'CONFLICT') return;
         if (!navigator.onLine) { await render(); return; }
         const path = conflictRefreshPath(record);
         if (!path) return;
         try {
             const response = await fetch(path, { method: 'GET', cache: 'no-store', credentials: 'same-origin',
                 headers: { 'Accept': 'application/json' } });
+            if (!ticketIsCurrent(ticket)) return;
             if (response.status === 401 || (response.redirected && /\/login(?:[/?#]|$)/.test(response.url))) {
                 state.paused = true;
                 if (window.SES && SES.pwa) SES.pwa.sessionExpired();
@@ -521,65 +1013,101 @@
                 return;
             }
             const result = await response.json();
+            if (!ticketIsCurrent(ticket)) return;
             if (!response.ok || !result || result.code !== 200) throw new Error('server版を再取得できません');
             const server = refreshedSnapshot(result, record);
             const version = server && Number.isInteger(Number(server.version))
                 ? Number(server.version) : refreshedVersion(result, record);
             if (version === null) throw new Error('server versionを再取得できません');
-            record.conflict = Object.assign({}, record.conflict, {
+            record.conflict = sanitizeConflict(record, Object.assign({}, record.conflict, {
                 server: server || record.conflict.server,
                 serverVersion: version,
                 fields: refreshedFields(server || record.conflict.server, record.payload,
                     record.baseVersion),
                 serverRefreshAt: new Date().toISOString()
-            });
-            await put(record);
+            }));
+            await put(record, ticket);
         } catch (error) {
+            if (!ticketIsCurrent(ticket)) return;
             record.error = error.message || 'server版を再取得できません';
-            await put(record);
+            await put(record, ticket);
         }
         await render();
     }
 
     async function reapplyConflict(clientRequestId) {
-        const record = (await readAll()).find(candidate => candidate.clientRequestId === clientRequestId);
-        if (!record || record.userScope !== state.scope || record.status !== 'CONFLICT') return;
+        const ticket = scopeTicket();
+        const record = (await readAllowedRecords()).find(candidate => candidate.clientRequestId === clientRequestId);
+        if (!ticketIsCurrent(ticket) || !record || record.userScope !== state.scope || record.status !== 'CONFLICT') return;
         const serverVersion = Number(record.conflict && record.conflict.serverVersion);
         if (!Number.isInteger(serverVersion) || serverVersion < 0) return;
         if (!window.confirm('server版との差分を確認しました。端末版を新しいbase versionで再適用しますか？')) return;
         record.baseVersion = serverVersion;
         record.payloadHash = await commandHash(record);
+        if (!ticketIsCurrent(ticket)) return;
         record.status = 'PENDING';
         delete record.conflict;
         delete record.error;
-        await put(record);
+        if (await put(record, ticket) === false) return;
         await render();
         await flush();
     }
 
-    async function markError(record, message) {
+    async function markError(record, message, ticket, claim) {
         record.status = 'ERROR';
         record.error = message || '同期できません';
-        await put(record);
+        if (await putClaimed(record, ticket, claim) === false) return;
         await render();
     }
 
-    async function markExpired(record, message) {
+    async function markExpired(record, message, ticket, claim) {
         record.status = 'ERROR';
         record.error = message || '保持期間（30日）を過ぎたため送信できません。破棄して再入力してください。';
         record.payload = null;
         record.payloadHash = null;
-        await put(record);
+        if (await putClaimed(record, ticket, claim) === false) return { skipped: true };
         await render();
         return { expired: true, clientRequestId: record.clientRequestId };
     }
 
-    async function sendRecord(record) {
-        if (record.userScope !== state.scope) return { skipped: true };
-        if (!record.createdAt || record.createdAt < now() - MAX_AGE_MS) {
-            return markExpired(record);
+    function sendRecord(record) {
+        const key = record.resourceKey;
+        const previous = state.resourceLocks.get(key) || Promise.resolve();
+        const current = previous.catch(() => undefined).then(() => sendRecordAcrossTabs(record));
+        state.resourceLocks.set(key, current);
+        current.finally(() => {
+            if (state.resourceLocks.get(key) === current) state.resourceLocks.delete(key);
+        });
+        return current;
+    }
+
+    async function sendRecordAcrossTabs(record) {
+        const ticket = scopeTicket();
+        if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
+        let claim = await claimAggregate(record.resourceKey, ticket);
+        while (!claim && hasCurrentSendAuthorization(record, ticket) && navigator.onLine) {
+            await new Promise(resolve => setTimeout(resolve, 40));
+            if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
+            claim = await claimAggregate(record.resourceKey, ticket);
         }
-        if (!navigator.onLine || state.paused) return { queued: true, clientRequestId: record.clientRequestId };
+        if (!claim) return { skipped: true };
+        try {
+            if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
+            const latest = await readById(record.clientRequestId);
+            if (!hasCurrentSendAuthorization(latest, ticket) || !latest || latest.status !== 'PENDING'
+                    || latest.revocationEpoch !== ticket.epoch
+                    || latest.userScope !== ticket.scope) return { skipped: true };
+            record = latest;
+            return await sendClaimedRecord(record, ticket, claim);
+        } finally { await releaseAggregate(claim); }
+    }
+
+    async function sendClaimedRecord(record, ticket, claim) {
+        if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
+        if (!record.createdAt || record.createdAt < now() - MAX_AGE_MS) {
+            return markExpired(record, undefined, ticket, claim);
+        }
+        if (!navigator.onLine) return { queued: true, clientRequestId: record.clientRequestId };
         const headers = Object.assign({
             'Accept': 'application/json',
             'Content-Type': 'application/json',
@@ -588,12 +1116,14 @@
             'X-Client-Base-Version': String(record.baseVersion),
             'X-Client-Created-At': String(record.createdAt),
             'X-User-Scope': record.userScope
-        }, SES.csrf.header());
+        }, csrfHeader());
         try {
+            if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
             const response = await fetch(record.path, {
                 method: record.method, cache: 'no-store', credentials: 'same-origin',
                 headers, body: JSON.stringify({ screen: record.screen, month: record.month, payload: record.payload })
             });
+            if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
             const contentType = response.headers.get('content-type') || '';
             const sessionRedirect = (response.redirected && /\/login(?:[/?#]|$)/.test(response.url))
                 || contentType.toLowerCase().includes('text/html');
@@ -606,14 +1136,15 @@
             }
             let result = null;
             try { result = await response.json(); } catch (_) { /* 非JSONは下記で処理 */ }
+            if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
             if (response.status === 409 || (result && result.code === 409)) {
                 if (result && result.data && result.data.type === 'QUEUE_EXPIRED') {
                     const fallback = '保持期間（30日）を過ぎたため送信できません。破棄して再入力してください。';
                     const message = window.SES && SES.i18n
                         ? SES.i18n.t('error.pwa.queueExpired', fallback) : fallback;
-                    return markExpired(record, message);
+                    return markExpired(record, message, ticket, claim);
                 }
-                return markConflict(record, result && result.data);
+                return markConflict(record, result && result.data, ticket, claim);
             }
             if (!response.ok || !result || result.code !== 200) {
                 const message = (result && result.message) || `HTTP ${response.status}`;
@@ -621,16 +1152,18 @@
                     await render();
                     return { queued: true, clientRequestId: record.clientRequestId };
                 }
-                await markError(record, message);
+                await markError(record, message, ticket, claim);
                 throw new Error(message);
             }
-            await remove(record.clientRequestId);
-            await updateFollowingVersions(record, result.data);
+            if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
+            if (!await removeClaimed(record.clientRequestId, ticket, claim)) return { skipped: true };
+            if (!hasCurrentSendAuthorization(record, ticket)) return { skipped: true };
+            await updateFollowingVersions(record, result.data, ticket, claim);
             await render();
             return { queued: false, data: result.data, clientRequestId: record.clientRequestId };
         } catch (error) {
             if (error && (error.name === 'TypeError' || error.name === 'NetworkError')) {
-                await put(record);
+                if (hasCurrentSendAuthorization(record, ticket)) await putClaimed(record, ticket, claim);
                 await render();
                 return { queued: true, clientRequestId: record.clientRequestId };
             }
@@ -654,17 +1187,19 @@
         if (state.inFlight.has(dedupeKey)) return state.inFlight.get(dedupeKey);
         const operation = (async () => {
             await state.ready;
-            if (state.paused) throw new Error('セッションを再認証してください');
+            if (state.paused || state.quarantined || !state.scope) throw new Error('オンラインでユーザーを確認してください');
             if (!state.scope) throw new Error('ユーザーscopeを確認できません');
+            const ticket = scopeTicket();
             const record = {
                 clientRequestId: spec.clientRequestId || newRequestId(),
-                payloadHash: '', baseVersion, userScope: state.scope,
+                payloadHash: '', baseVersion, userScope: state.scope, revocationEpoch: ticket.epoch,
                 screen: spec.screen, month: spec.month || null, method,
                 path: spec.path, payload, resourceKey: spec.resourceKey || `${spec.screen}:${spec.month || ''}`,
                 createdAt: now(), expiresAt: now() + MAX_AGE_MS, status: 'PENDING'
             };
             record.payloadHash = await commandHash(record);
-            await put(record);
+            if (!ticketIsCurrent(ticket) || await put(record, ticket) === false) return { skipped: true };
+            state.newRequestIds.add(record.clientRequestId);
             if (!navigator.onLine) {
                 await render();
                 return { queued: true, clientRequestId: record.clientRequestId };
@@ -681,7 +1216,7 @@
         state.flushing = true;
         try {
             await bootstrapScope();
-            let records = scopeRecords(await readAll())
+            let records = (await readAllowedRecords())
                 .filter(record => record.status === 'PENDING')
                 .sort((a, b) => a.createdAt - b.createdAt);
             await render();
@@ -710,7 +1245,10 @@
     function bind() {
         window.addEventListener('offline', () => { render(); });
         window.addEventListener('online', () => { if (!state.paused) flush(); else render(); });
-        window.addEventListener('ses:session-expired', () => { state.paused = true; render(); });
+        window.addEventListener('ses:session-expired', quarantineDocument);
+        window.addEventListener('pageshow', event => {
+            if (event.persisted) quarantineDocument();
+        });
         document.addEventListener('click', event => {
             const toggle = event.target.closest('#pwa-panel-toggle');
             if (toggle) {
@@ -748,15 +1286,165 @@
 
     const targetSes = (typeof SES !== 'undefined' && SES) ? SES : (window.SES = window.SES || {});
     window.SES = targetSes;
+    window.addEventListener('ses:pwa-revoked', () => render());
+    window.addEventListener('storage', event => {
+        if (event.key === REVOCATION_KEY && event.newValue && event.newValue !== state.revocationEpoch) {
+            acceptRevocation(event.newValue);
+        }
+    });
+    try {
+        if ('BroadcastChannel' in window) {
+            const channel = new BroadcastChannel('ses-pwa-revocation');
+            channel.onmessage = event => {
+                if (event.data && event.data.type === 'REVOKE' && event.data.epoch !== state.revocationEpoch) {
+                    acceptRevocation(event.data.epoch);
+                }
+            };
+        }
+    } catch (_) { /* BroadcastChannelが使えない場合はstorage eventを使う */ }
+
+    window.setInterval(() => {
+        if (state.permitDeadline) restorePermitIsCurrent();
+    }, 1000);
+
     targetSes.pwaQueue = {
         init,
+        whenReady: () => state.ready,
         request,
         flush,
         resume,
         render,
         clear: deleteAll,
-        reset: () => { state.scope = null; state.paused = false; },
+        reset: revokeScope,
         getScope: () => state.scope,
+        getOfflineDrafts: async () => {
+            await state.ready;
+            if (!restorePermitIsCurrent()) return [];
+            const records = await readAllowedRecords();
+            if (!restorePermitIsCurrent()) return [];
+            return records.filter(record => ['PENDING', 'CONFLICT'].includes(record.status))
+                .map(record => ({ screen: record.screen, month: record.month, status: record.status,
+                    createdAt: record.createdAt, payload: record.payload }));
+        },
+        prepareRestore: async password => {
+            await state.ready;
+            if (!navigator.onLine || !password || state.quarantined) throw new Error('オンラインでログインし直してください');
+            const generation = state.documentGeneration;
+            const oldScope = state.candidateRestoreScope;
+            if (generation !== state.documentGeneration || !oldScope
+                    || await countScope(oldScope) === 0) throw new Error('復元対象を一意に確認できません');
+            if (generation !== state.documentGeneration || state.quarantined || oldScope !== state.candidateRestoreScope) {
+                throw new Error('復元が取り消されました。最初からやり直してください');
+            }
+            const response = await fetch('/api/my/pwa/restore/reauthenticate', {
+                method: 'POST', cache: 'no-store', credentials: 'same-origin',
+                headers: Object.assign({ 'Accept': 'application/json', 'Content-Type': 'application/json' }, csrfHeader()),
+                body: JSON.stringify({ password, documentNonce: state.documentNonce, userScope: oldScope })
+            });
+            if (generation !== state.documentGeneration) throw new Error('復元が取り消されました。最初からやり直してください');
+            const result = await response.json().catch(() => null);
+            if (!response.ok || !result || result.code !== 200 || !result.data || !result.data.proof) {
+                throw new Error('再認証できませんでした。入力を確認してください');
+            }
+            state.restoreProof = result.data.proof;
+            state.restoreScope = oldScope;
+            return true;
+        },
+        confirmRestore: async () => {
+            await state.ready;
+            const generation = state.documentGeneration;
+            const operationEpoch = state.revocationEpoch;
+            if (!state.restoreProof || !state.restoreScope || !navigator.onLine) throw new Error('再認証からやり直してください');
+            const response = await fetch('/api/my/pwa/restore/confirm', {
+                method: 'POST', cache: 'no-store', credentials: 'same-origin',
+                headers: Object.assign({ 'Accept': 'application/json', 'Content-Type': 'application/json' }, csrfHeader()),
+                body: JSON.stringify({ proof: state.restoreProof, documentNonce: state.documentNonce, userScope: state.restoreScope })
+            });
+            const result = await response.json().catch(() => null);
+            const oldScope = state.restoreScope;
+            state.restoreProof = null;
+            if (generation !== state.documentGeneration || !response.ok || !result || result.code !== 200
+                    || !result.data || result.data.documentNonce !== state.documentNonce
+                    || result.data.userScope !== oldScope || !result.data.serverTime || !result.data.permitExpiresAt) {
+                clearRestorePermit();
+                throw new Error('復元を確認できませんでした。再認証からやり直してください');
+            }
+            const serverTime = Date.parse(result.data.serverTime);
+            const expiresAt = Date.parse(result.data.permitExpiresAt);
+            const wallTime = Date.now();
+            const monotonicTime = performance.now();
+            if (!Number.isFinite(serverTime) || !Number.isFinite(expiresAt) || expiresAt <= serverTime
+                    || expiresAt - serverTime > 15 * 60 * 1000 || Math.abs(wallTime - serverTime) > 5000) {
+                clearRestorePermit();
+                throw new Error('時刻を安全に確認できません。再認証からやり直してください');
+            }
+            state.restoreProof = null;
+            state.restoreScope = oldScope;
+            state.permitServerTime = serverTime;
+            state.permitWallTime = wallTime;
+            state.permitMonotonicTime = monotonicTime;
+            state.permitDeadline = monotonicTime + Math.min(expiresAt - serverTime, 15 * 60 * 1000);
+            const context = await fetch('/api/my/session-context', {
+                method: 'GET', cache: 'no-store', credentials: 'same-origin',
+                headers: { 'Accept': 'application/json', 'X-User-Scope': oldScope }
+            });
+            const contextResult = await context.json().catch(() => null);
+            if (generation !== state.documentGeneration || !restorePermitIsCurrent() || !context.ok
+                    || !contextResult || !contextResult.data || !contextResult.data.userScope
+                    || !contextResult.data.preserveQueue) {
+                clearRestorePermit();
+                throw new Error('保存した下書きのユーザーを確認できませんでした');
+            }
+            const newScope = contextResult.data.userScope;
+            const records = await readRestoreScope(oldScope);
+            const restorable = [];
+            for (const record of records) {
+                if (record.userScope !== oldScope || record.revocationEpoch !== readRevocationEpoch()
+                        || !['PENDING', 'CONFLICT'].includes(record.status) || !record.payload
+                        || !record.createdAt || record.createdAt > Date.now() + 5 * 60 * 1000
+                        || record.createdAt < Date.now() - MAX_AGE_MS) continue;
+                try {
+                    validatePayload(record, String(record.method).toUpperCase(), record.payload);
+                    if (await commandHash(record) !== record.payloadHash) continue;
+                    restorable.push(record.clientRequestId);
+                } catch (_) { /* 不正recordは復元候補に含めない */ }
+            }
+            if (!restoreOperationIsCurrent(generation, operationEpoch)) {
+                clearRestorePermit();
+                throw new Error('復元が取り消されました。最初からやり直してください');
+            }
+            try {
+                await rebindScope(oldScope, newScope, new Set(restorable),
+                    () => restoreOperationIsCurrent(generation, operationEpoch));
+            } catch (_) {
+                clearRestorePermit();
+                throw new Error('復元が取り消されました。最初からやり直してください');
+            }
+            if (!restoreOperationIsCurrent(generation, operationEpoch)) {
+                clearRestorePermit();
+                throw new Error('復元が取り消されました。最初からやり直してください');
+            }
+            if (oldScope !== newScope) await deleteScope(oldScope);
+            if (!restoreOperationIsCurrent(generation, operationEpoch)) {
+                clearRestorePermit();
+                throw new Error('復元が取り消されました。最初からやり直してください');
+            }
+            state.scope = newScope;
+            state.candidateRestoreScope = newScope;
+            state.lockedDraftCount = 0;
+            state.restoredRequestIds = new Set(restorable);
+            state.quarantined = false;
+            state.paused = false;
+            persistScope(newScope);
+            await render();
+            if (!restoreOperationIsCurrent(generation, operationEpoch)) {
+                clearRestorePermit();
+                clearDraftDom();
+                throw new Error('復元が取り消されました。最初からやり直してください');
+            }
+            await flush();
+            return true;
+        },
         canonicalHash: record => commandHash(record)
     };
 
