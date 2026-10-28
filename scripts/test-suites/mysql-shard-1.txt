@@ -19,3 +19,5 @@ SalesOrderConcurrentCreateTest
 AiFeedbackLearningSchemaTest
 LifecycleMySqlIntegrationTest
 AssetMySqlIntegrationTest
+ImportIdentityCandidateMySqlTest
+ImportMetadataRealMySqlTest
