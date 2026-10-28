@@ -160,14 +160,16 @@ if (Test-Path -LiteralPath $configFile) {
     $configMode = (Get-Content -LiteralPath $configFile -Raw).Trim()
 }
 
-# -v オプション時はバージョン文字列のみ出力し、生成物は一切作らない (ツール確認呼び出し).
+$tracker = Join-Path $ConfigDir 'mock_calls.log'
+
+# -v オプション時はバージョン探索として記録し、生成物は一切作らない (ツール確認呼び出し).
 if ($ArgsList -contains '-v' -or $ArgsList -contains '--version') {
+    [System.IO.File]::AppendAllText($tracker, "mvn: [VERSION_PROBE] $($ArgsList -join ' ')`r`n")
     Write-Host 'Apache Maven 3.9.6 (mock).'
     exit 0
 }
 
-$tracker = Join-Path $ConfigDir 'mock_calls.log'
-[System.IO.File]::AppendAllText($tracker, "mvn: $($ArgsList -join ' ')`r`n")
+[System.IO.File]::AppendAllText($tracker, "mvn: [BUILD_TEST] $($ArgsList -join ' ')`r`n")
 
 if ($configMode -eq 'crash-start') {
     Write-Error "CRASH: Mavenプロセス起動時例外."
@@ -488,8 +490,10 @@ try {
     Assert-Test (Test-IsWhitelistedJvmOption '-XX:MaxMetaspaceSize=512m') "01B.単体白名単 - MaxMetaspaceSize許可." "-XX:MaxMetaspaceSize=512m が許可されること."
 
     # 拒絶対象反例 (未知 -XX, VMOptionsFile, Flags, 診断フラグ・任意コマンド).
-    Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:VMOptionsFile=/tmp/evil.vmoptions')) "01B.単体拒絶 - VMOptionsFile拒絶." "-XX:VMOptionsFile が拒絶されること."
-    Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:Flags=/tmp/flags')) "01B.単体拒絶 - Flags拒絶." "-XX:Flags が拒絶されること."
+    Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:VMOptionsFile=options.txt')) "01B.単体拒絶 - VMOptionsFile拒絶 (options.txt)." "-XX:VMOptionsFile=options.txt が拒絶されること."
+    Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:VMOptionsFile=/tmp/evil.vmoptions')) "01B.単体拒絶 - VMOptionsFile拒絶 (/tmp/evil)." "-XX:VMOptionsFile が拒絶されること."
+    Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:Flags=options.txt')) "01B.単体拒絶 - Flags拒絶 (options.txt)." "-XX:Flags=options.txt が拒絶されること."
+    Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:Flags=/tmp/flags')) "01B.単体拒絶 - Flags拒絶 (/tmp/flags)." "-XX:Flags が拒絶されること."
     Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:+UnlockDiagnosticVMOptions')) "01B.単体拒絶 - UnlockDiagnosticVMOptions拒絶." "診断フラグが拒絶されること."
     Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:+UnlockExperimentalVMOptions')) "01B.単体拒絶 - UnlockExperimentalVMOptions拒絶." "実験的フラグが拒絶されること."
     Assert-Test (-not (Test-IsWhitelistedJvmOption '-XX:OnError=calc.exe')) "01B.単体拒絶 - OnError拒絶." "任意コマンド実行フラグが拒絶されること."
@@ -507,6 +511,8 @@ try {
         @{ Var = 'JDK_JAVA_OPTIONS'; Val = '-Dtest=SampleTest' },
         @{ Var = '_JAVA_OPTIONS'; Val = '-Dgroups=smoke' },
         @{ Var = 'MAVEN_CONFIG'; Val = '--file=other.xml' },
+        @{ Var = 'JAVA_TOOL_OPTIONS'; Val = '-XX:VMOptionsFile=options.txt' },
+        @{ Var = 'JDK_JAVA_OPTIONS'; Val = '-XX:Flags=options.txt' },
         @{ Var = 'JAVA_TOOL_OPTIONS'; Val = '-XX:VMOptionsFile=/tmp/evil.vmoptions' },
         @{ Var = 'JDK_JAVA_OPTIONS'; Val = '-XX:Flags=/tmp/evil.flags' },
         @{ Var = 'MAVEN_OPTS'; Val = '-XX:+UnlockDiagnosticVMOptions' },
@@ -526,8 +532,11 @@ try {
                 -NoNewWindow -Wait -PassThru
             Assert-Test ($procEnv.ExitCode -eq 1) "01B.環境注入拒絶 ($vName=$vVal) - 終了コード." "未許可の環境変数パラメータが ExitCode 1 で拒絶されること."
             Assert-Test (-not (Test-Path -LiteralPath $evEnv)) "01B.環境注入拒絶 ($vName=$vVal) - 証跡作成前中止." "EvidenceDir が作成される前に中止されること."
-            $callsCount = if (Test-Path -LiteralPath $mockCallsLog) { @(Get-Content -LiteralPath $mockCallsLog | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count } else { 0 }
-            Assert-Test ($callsCount -eq 0) "01B.環境注入拒絶 ($vName=$vVal) - Maven未起動." "Mavenが実行される前に中止されること."
+            $allCalls = if (Test-Path -LiteralPath $mockCallsLog) { [System.IO.File]::ReadAllLines($mockCallsLog) } else { [string[]]@() }
+            $buildTestCalls = @($allCalls | Where-Object { $_.Contains('[BUILD_TEST]') })
+            Assert-Test ($buildTestCalls.Count -eq 0) "01B.環境注入拒絶 ($vName=$vVal) - ビルド/テスト未起動." "Mavenビルド/テストが実行される前に中止されること (BUILD/TEST呼び出し数=0)."
+            $probeCalls = @($allCalls | Where-Object { $_.Contains('[VERSION_PROBE]') })
+            Assert-Test ($probeCalls.Count -gt 0) "01B.環境注入拒絶 ($vName=$vVal) - バージョン確認記録." "前提ツール確認のバージョン探索が記録されていること (VERSION_PROBE)."
         } finally {
             [System.Environment]::SetEnvironmentVariable($vName, $null)
         }
