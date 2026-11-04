@@ -375,10 +375,11 @@ WHERE tenant_id = ? AND job_id = ? AND id = ?
 
 ### Transaction契約
 
-- publishはrecount済み`PublishCapability`を受け、source IOをしない短transactionで行う。resource lock、job/run pointer、mapping snapshot、actor/ACL/FileScopeを再確認し、capabilityのsummary/row-set hashとSEALED保存値を照合する。
-- lock順と最後の判定順は3Bと同じ。最後のresource/row lockとACL gateの後で`CURRENT_TIMESTAMP(6)`をfreshに取得し、job lease期限を判定する。expiryは処理開始時やcapability生成時の時刻を使わない。
-- CAS前提はjob `VALIDATING`、active pointerが対象run、current pointer NULL、current owner/generation/version/expiryがleaseと一致し未期限、run `SEALED`/active slot 1/published slot NULL、`last_resumed_lease_generation`とinput/hash一致、全COMPLETED summary列がNULL/0規約を含めて整合すること。
-- 同一transaction内でrunを`COMPLETED`、`active_slot=NULL`、`published_slot=1`、`completed_at=CURRENT_TIMESTAMP(6)`へCASし、jobを`VALIDATED`、`active_validation_run_id=NULL`、`current_validation_run_id=runId`、lease owner/expiry NULL、version+1へCASする。FKとunique slot、`chk_import_run_completed_summary`を満たす順に更新し、commit前のどちらか片方の状態は外部readerに見せない。
+- publish入口は`ImportValidationAppendService.PublishCapability`だけとし、そのprivate constructorと同一JVM内のrecount発行経路を維持する。callerからproof/hash/counterを組み立てて渡す入口を追加しない。短いpublish transaction内でresource、job/run pointer、mapping snapshot、actor/ACL/FileScope、capabilityのinput・source hash・generation/worker/version/expiryを再確認する。source IOは行わない。
+- capability mint後にDB rowが変更される脅威を、sealed rowがservice経由ではimmutableという前提だけで除外しない。publish transaction内でV184 ordered row keyに沿って実row metadataを`FOR UPDATE`し、既存のbounded row-set verifierとrow-commit validatorを再利用して実データからrow-set hashを再計算する。capabilityのrow-set hash/countと一致しない場合は拒否する。persisted summaryも再読込し、capability countersとの全列比較、NULL/0の意味確認、summary hash再計算を行う。transaction/row scanは10秒以内の専用有界実行予算とし、行間でwall-clock budgetを確認する。source I/Oやglobal JDBC timeout変更は行わない。この10秒は本batchの派生受入値であり既存SLOではない。
+- lock順は既存resource lock順（source、document、document version、link、job、mapping、run）を維持し、その後にrow page lock/summary確認を行う。最後のrow/resource lockとACL gateを終えた後に`CURRENT_TIMESTAMP(6)`をfreshに取得し、未期限（`dbNow < exact lease expiry`）を判定する。expiryを処理開始時やcapability生成時の時刻で代用しない。
+- CAS前提はjob `VALIDATING`、active pointerが対象run、current pointer NULL、current owner/generation/version/expiryがcapability leaseと完全一致し未期限、run `SEALED`/active slot 1/published slot NULL、`last_resumed_lease_generation`とcurrent input/hash一致、全COMPLETED summary列がNULL/0規約を含めて整合すること。
+- 同一transaction内でrunを`COMPLETED`、`active_slot=NULL`、`published_slot=1`、`completed_at=CURRENT_TIMESTAMP(6)`へCASし、jobを`VALIDATED`、`active_validation_run_id=NULL`、`current_validation_run_id=runId`、lease owner/expiry NULL、version+1へCASする。runを先に更新し、job CASではcapabilityのversion/owner/generation/expiryに加えて`lease_expires_at > CURRENT_TIMESTAMP(6)`をDB側でも要求する。FKとunique slot、`chk_import_run_completed_summary`を満たす順に更新し、どちらかのCAS失敗、timeout、SQL障害では必ずtransaction全体をrollbackする。commit前の片側状態を外部readerへ見せない。
 - 再validation開始時に旧current pointer/`published_slot`が解除済みという既存F1b-1契約を維持する。新runのpublish commitまでcurrent validation resultはない。publish failure/rollback時も新runのcurrent pointer、published slot、VALIDATED stateを一部だけ残さない。
 - publish成功後のread pathは`ImportIdentityCandidateService`の現行条件（job VALIDATED/current pointer一致/active pointerなし、run COMPLETED/`published_slot=1`、source/document/mapping snapshot一致）を維持する。read pathはBUILDING/SEALED/ABORTEDやpointer不一致を公開しない。validation/publishからidentity registry writeを呼ばない。
 
@@ -387,25 +388,39 @@ WHERE tenant_id = ? AND job_id = ? AND id = ?
 - append対seal: appendがjob lockを先に取ればappend commit後にseal capability/hash照合が成立した場合だけseal。sealが先ならstate SEALEDとなり後続appendは拒否。
 - renew対seal/publish: renewが先にversion/expiryを変えたら古いexact lease CASは拒否する。current ownerは新しいleaseでcapabilityを再束縛できるのは同一run/input/generationのままの場合だけとし、必要に応じEOF verification/recountを再実行する。expiryを跨いだtokenは使わない。
 - takeover対stale worker: takeoverがgenerationを増やした後は旧generationのappend/seal/publishを拒否する。active unexpired workerはtakeoverできない。新workerはsame BUILDING prefixまたはSEALED runだけを継続し、新runを暗黙作成しない。
-- abort対seal/publish: job row lockを先に得た操作を直列化点とする。abort成功後はABORTED/pointers releasedとなりseal/publishは不可。seal成功後のabortは現generation/未期限の明示操作に限る。COMPLETEDはabort不可。
-- commit ACK loss: seal retryは同run・same proof hash・same current generationが既にSEALEDならread-onlyで同じsealed stateを返す。異なるproofは拒否。process restart後はSEALED takeover + recountで新capabilityを作る。publish retryで既にjob pointer/run state/hashが完全一致するCOMPLETED resultがあれば現在権限のread-only確認結果を返し、row、counter、timestamp、versionを再writeしない。pointer/hash不一致や別generationによる未完了publishは409。
+- abort対seal/publish: job row lockを先に得た操作を直列化点とする。abortが先に成功した場合はABORTED/pointers releasedとなりpublishは409。publishが先に成功した場合はCOMPLETEDとなりabortは409。双方の敗者はstate/pointers/lease/versionを二次変更しない。seal成功後のabortは現generation/未期限の明示操作に限る。COMPLETEDはabort不可。
+- commit ACK loss: seal retryは同run・same proof hash・same current generationが既にSEALEDならread-onlyで同じsealed stateを返す。異なるproofは拒否。process restart後はSEALED takeover + recountで新capabilityを作る。publish後のACK lossだけは独立したread-only回復分岐とする。現在のactor/ACLを再確認し、jobが`VALIDATED`、active pointer/leaseがNULL、current pointerが対象run、job versionがcapability version+1、generationとinputが一致し、runが`COMPLETED`/published slot 1で`completed_at IS NOT NULL`、source/row-set/summary hash・全summaryがcapabilityと完全一致する場合だけ保存済み結果を返す。`completed_at`はpublish transactionが保存した値をそのまま返し、capability生成時刻との比較はしない。commit済みACK lossではDB leaseがclearされcapabilityの旧expiryを過ぎていても、この完全一致したread-only分岐だけを許可する。撤権は403。row、counter、timestamp、pointer、versionを再writeしない。未完了状態、同世代renew後のversion差、takeover後のgeneration差、pointer/hash/input不一致はACK loss扱いせず拒否する。通常publish pathはfresh DB時刻でexpiryを判定し、期限切れは409とする。
 - renew/takeover/abort/publishの勝敗をSQL error/timeoutで判定しない。期待するdomain拒否だけを409/403にし、deadlock/lock wait timeout/connection failureはinfra failureとして保持する。
 
 ### Test requirements
 
-- publish worker 2件の同時実行ではcurrent pointer/run slotを持つCOMPLETED resultが1件だけになる。二重commit、二重version increment、二つのpublished slotを作らない。
-- writer/takeover/abort/renew/publishの各投入順でMySQL実lock wait edge（actual requester/blocker `CONNECTION_ID()`、`DATABASE()`、index/key、record lock mode/status）を確認し、結果state/version/generation/expiry/pointers/counter/hashesを比較する。
-- publish直前にexpiryを跨ぐ、permission revoke、source disable、document hold/retention/link change、mapping bytes/hash差分を競合させ、last-lock/last-gate後のfresh DB timeと再認可が拒否することを確認する。
-- transaction更新途中のfailure/connection ACK lossを分け、failureでは両側rollback、commit済みACK lossではretryがstored COMPLETED valueを返して再writeしない。
-- `ImportIdentityCandidateService`でBUILDING/SEALED/ABORTED/pointer driftが見えず、publish後のCOMPLETED/current resultだけを読めることを確認する。
+- **W3D-POS-01** 正常publish後にjob/runのpointer、slot、state、lease releaseが全て原子的に確定し、candidate readerはcommit後のみ結果を読む。
+- **W3D-NEG-01** capability発行後にrow metadataを実際に変更（row commitも再計算した内部整合データを含む）し、SEALEDの保存hashを据え置く。publish内の実rowset再走査がcapability hash不一致を検出し、run/job双方を未変更でrollbackする。
+- **W3D-NEG-02** capability発行後にrow-setまたはsummary/counter/finding/amount列を個別に改ざんし、実rowset、全summary列、NULL/0、再計算summary hashのいずれの不一致もpublishを拒否する。
+- **W3D-NEG-03** recount済みtokenでpublish前に同generation renewを完了する。version/expiryが変わった古いcapabilityを409で拒否し、新leaseでの再recountが必要であることを確認する。
+- **W3D-NEG-04** takeover後に旧generation capabilityが409となり、新generationのrecount/publishのみ成功する。active lease中のtakeoverは成立しない。
+- **W3D-NEG-05** ACL revokeをpublish gateまで競合させ403を確認する。source disable、document hold/retention/version/link変更、mapping bytes/hash変更は拒否し、状態を部分更新しない。
+- **W3D-NEG-06** 真のMySQL lock waitでpublish中にfresh DB expiryを跨がせる。last ACL/row lock後のDB時刻とCASの`lease_expires_at > CURRENT_TIMESTAMP(6)`が期限切れを409にし、双方rollbackする。
+- **W3D-NEG-07** run CAS成功後にjob CASを制御失敗させ、transaction rollbackによりrun slot/state/timestampとjob state/pointers/lease/versionが全て元に戻ることを確認する。timeout/deadlock/connection障害はinfra failureとして保持する。
+- **W3D-POS-08 / W3D-NEG-08** 同一capabilityのpublish後ACK loss retryは現在権限があれば完全一致したCOMPLETED結果をread-onlyで返し、権限撤回時は403とする。capabilityの旧expiry経過後にも、DB leaseがclearされCOMPLETED/current pointer/hash/input/version等が完全一致するretryが成功することを確認する。retry前後でstate、pointer、counter、hash、保存済み`completed_at`、versionが同一であることを確認する。不完全なcommit形状、違うversion/generation/input/hash、未完了のexpiry pathをACK回復として受理しない。
+- **W3D-NEG-09** 2 workerが同時publishし、実MySQL lock wait edge（requester/blocker `CONNECTION_ID()`、`DATABASE()`、index/key、record lock mode/status）と最終状態を確認する。current pointer/run slotを持つCOMPLETED resultは1件だけで、versionは一度だけ増える。
+- **W3D-MYSQL-10** 最大100,000行で実rowset走査、10秒transaction予算、entry/final DB時刻、expiry余裕、wall time、row lock release、同source別jobの実待機を計測する。制限内で完了しない場合はW3D受入FAILとし、予算を越えてCASするfallbackを設けない。
+- **W3D-POS-11** `ImportIdentityCandidateService`でBUILDING/SEALED/ABORTED/pointer driftは不可視、publish後のCOMPLETED/current resultのみ可視であることを確認する。publishからidentity registry write/domain applyが呼ばれないことも確認する。
+- **W3D-RACE-12 / W3D-RACE-13** 真のMySQL row lock waitで両順序を確認する: abort先行はpublishを409にし、publish先行はabortを409にする。各敗者処理の前後でjob/run state、active/current pointer、slot、lease、versionが二次変更されないことを比較する。
 
 ## 7. 小分けの実装・review gate
 
 1. **W3A capability + EOF/reconciliation** — `ImportValidationAppendService`のappend completionにprivate-ctor tokenを追加。全parser/source/row proofとcounterを作る。固定基線 `d6577342` にて Astra CODE PASS および 73 Fast / 100 MySQL テスト全件通過の実行証拠を取得し閉環完了。
 2. **W3B seal transaction** — Astra 限定 PLAN PASS 承認に基づき実装および REQUEST CHANGES 対応完了。`ImportValidationLifecycleService` へ seal CAS を追加。resource/ACL/time lock order、BUILDING/SEALED状態分流、source_row_number 単調増加と空行スキップ対応、row-set recheck、summary persistence、ACK-loss retry を実装。SealCapability 生成境界を完全維持（テスト用ファクトリ削除、実 append パス検証およびテスト内限定リフレクション）。独立した H2 state tests（`ImportValidationSealServiceTest`）と MySQL lock tests（`ImportValidationSealRealMySqlTest`）において、Snapshot 不変条件境界、真正な行ロック競合待機（LOCK WAIT）、V184 DISABLED 準拠、自然な時間経過による期限切れ、および CAS commit 失敗時の完全ロールバック（零部分書き込み）を網羅。新 MySQL テストは `scripts/test-suites/mysql-shard-3.txt` に登録済み。
 3. **W3C SEALED recount + publish capability** — SEALED source/row proofとsummary再構成を実装。takeover recovery、old generation token、empty/blank/amount/finding testsを行う。
-4. **W3D atomic publish + candidate visibility** — run/job current pointer/slot/leaseを同tx CASし、candidate readerの既存published-only条件を回帰確認する。parallel publish、renew/takeover/abort、ACK-lossをMySQLで試験する。
+4. **W3D atomic publish + candidate visibility（PLAN PASS済み、CODE REVIEW待ち）** — `PublishCapability`のみを受け、current input/actor/ACL/FileScope/source/document/mappingとexact leaseを再確認する。既存bounded row-set verifierで実DB rowを同一10秒上限transaction内に再検算し、summaryもcapabilityと照合した後、fresh DB expiry判定とDB側expiry CAS条件を通してrun/jobをatomic publishする。W3D-POS/NEG-01..11とW3D-RACE-12/13を含む実MySQL試験でrow改ざん後のpublish拒否、parallel publish、renew/takeover/abort両順序、expiry、撤権、全rollback、旧expiry経過後のstrict ACK-loss read-only回復、candidate visibilityを確認する。PLAN PASS後のコードレビュー・実行証拠は別gateである。V185/migration、API/UI、domain applyは対象外。
 5. **Review freeze** — 各waveの対象SHA、H2/MySQL evidence、zero skip、schema audit、未完了境界をAstra CODE reviewへ渡す。合格はNF-06全体、A1/B1/B2/M、real source、production enablementの完了を意味しない。
+
+### W3D 実装進捗（2026-11-04）
+
+- `73d63131b3677f39e9d633264edab3153805d9d9` をbaseに、保存済み `ImportValidationLifecycleService` の未完了差分を引き継いだ。publish transactionとrow-set/summary再検証、exact lease CAS、completed後のACL付きACK-loss回復を実装し、H2/MySQLテストにatomic publish、再試行、post-recount row変更拒否、renew/abort順序、transaction rollback、並行publish、candidate visibilityおよび100k publish計測を追加した。
+- これはコード・テスト作成の進捗であり、未review・未実行である。H2、MySQL、Inventoryとテストのruntime結果はLuna-Tの対象SHAで確認する。`mvn`/Dockerはこの作業窓では実行しない。
+- 100,000行テストではW3C recount final gateとW3D atomic publish transactionを個別に計時・上限判定する。テスト全体の経過時間をfinal gate時間として扱わない。
 
 ## 8. Wave 3総合受入条件
 

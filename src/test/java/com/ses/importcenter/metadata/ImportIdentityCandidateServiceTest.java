@@ -22,6 +22,7 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import javax.sql.DataSource;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -204,6 +205,31 @@ class ImportIdentityCandidateServiceTest {
         afterSourceRead = () -> jdbc.update("UPDATE t_import_validation_run SET published_slot=NULL WHERE tenant_id=? AND job_id=? AND id=?",
                 TENANT, JOB, RUN);
         assertNoCandidateAfterReadBarrier();
+    }
+
+    @Test
+    void rejectsBuildingSealedAbortedAndPointerDriftAsInvisibleCandidateSources() {
+        for (String runState : List.of("BUILDING", "SEALED", "ABORTED")) {
+            // job側は正しいVALIDATED/current pointerのままにし、拒否対象run状態へ到達させる。
+            jdbc.update("UPDATE t_import_validation_run SET state=?,published_slot=NULL WHERE tenant_id=? AND job_id=? AND id=?",
+                    runState, TENANT, JOB, RUN);
+            BusinessException rejected = assertThrows(BusinessException.class,
+                    () -> service.registerCandidate(JOB, RUN, 1L), runState);
+            assertEquals(409, rejected.getCode(), runState);
+            assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_identity_registry", Integer.class));
+        }
+
+        verify(documentService, org.mockito.Mockito.times(3)).authorizeImportJobDownload(anyLong(), anyLong(), anyLong(), any(), any());
+
+        jdbc.update("UPDATE t_import_validation_run SET state='COMPLETED',published_slot=1 WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, JOB, RUN);
+        jdbc.update("UPDATE t_import_job SET current_validation_run_id=NULL WHERE tenant_id=? AND id=?", TENANT, JOB);
+        org.mockito.Mockito.clearInvocations(documentService);
+        BusinessException drift = assertThrows(BusinessException.class,
+                () -> service.registerCandidate(JOB, RUN, 1L), "current pointer drift");
+        assertEquals(409, drift.getCode());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_identity_registry", Integer.class));
+        verify(documentService, never()).authorizeImportJobDownload(anyLong(), anyLong(), anyLong(), any(), any());
     }
 
     @Test

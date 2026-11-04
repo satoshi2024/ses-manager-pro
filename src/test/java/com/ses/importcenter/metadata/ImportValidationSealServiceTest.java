@@ -198,6 +198,321 @@ class ImportValidationSealServiceTest {
     }
 
     @Test
+    void posW3d_atomicPublishAndAckRetryReturnPersistedCompletionWithoutRewrite() {
+        var fixture = setupFixture("externalKey,companyName\ncust-w3d,株式会社W3D\n");
+        var sealed = service.seal(fixture.capability);
+        var capability = appendService.recountSealed(sealed);
+
+        Timestamp completedAt = service.publish(capability);
+        Map<String, Object> job = jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?",
+                TENANT, fixture.jobId);
+        Map<String, Object> run = jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, fixture.jobId, fixture.runId);
+        assertEquals("VALIDATED", job.get("state"));
+        assertEquals(capability.lease().jobVersion() + 1, ((Number) job.get("version_no")).longValue());
+        assertNull(job.get("active_validation_run_id"));
+        assertEquals(fixture.runId, ((Number) job.get("current_validation_run_id")).longValue());
+        assertNull(job.get("lease_owner"));
+        assertNull(job.get("lease_expires_at"));
+        assertEquals("COMPLETED", run.get("state"));
+        assertNull(run.get("active_slot"));
+        assertEquals(1, ((Number) run.get("published_slot")).intValue());
+        assertEquals(completedAt, run.get("completed_at"));
+
+        long publishedVersion = ((Number) job.get("version_no")).longValue();
+        rejectAckMutationWithoutRewrite(fixture.jobId, fixture.runId,
+                () -> jdbc.update("UPDATE t_import_job SET version_no=version_no+1 WHERE tenant_id=? AND id=?", TENANT, fixture.jobId),
+                () -> jdbc.update("UPDATE t_import_job SET version_no=? WHERE tenant_id=? AND id=?", publishedVersion, TENANT, fixture.jobId),
+                capability);
+        long publishedGeneration = jdbc.queryForObject("SELECT lease_generation FROM t_import_job WHERE tenant_id=? AND id=?",
+                Long.class, TENANT, fixture.jobId);
+        rejectAckMutationWithoutRewrite(fixture.jobId, fixture.runId,
+                () -> jdbc.update("UPDATE t_import_job SET lease_generation=lease_generation+1 WHERE tenant_id=? AND id=?", TENANT, fixture.jobId),
+                () -> jdbc.update("UPDATE t_import_job SET lease_generation=? WHERE tenant_id=? AND id=?", publishedGeneration, TENANT, fixture.jobId),
+                capability);
+        byte[] publishedSummarySha = (byte[]) run.get("summary_sha256");
+        rejectAckMutationWithoutRewrite(fixture.jobId, fixture.runId,
+                () -> jdbc.update("UPDATE t_import_validation_run SET summary_sha256=? WHERE tenant_id=? AND job_id=? AND id=?",
+                        hash("wrong ack summary"), TENANT, fixture.jobId, fixture.runId),
+                () -> jdbc.update("UPDATE t_import_validation_run SET summary_sha256=? WHERE tenant_id=? AND job_id=? AND id=?",
+                        publishedSummarySha, TENANT, fixture.jobId, fixture.runId), capability);
+        byte[] publishedSourceSha = (byte[]) run.get("source_sha256");
+        rejectAckMutationWithoutRewrite(fixture.jobId, fixture.runId,
+                () -> jdbc.update("UPDATE t_import_validation_run SET source_sha256=? WHERE tenant_id=? AND job_id=? AND id=?",
+                        hash("wrong ack source"), TENANT, fixture.jobId, fixture.runId),
+                () -> jdbc.update("UPDATE t_import_validation_run SET source_sha256=? WHERE tenant_id=? AND job_id=? AND id=?",
+                        publishedSourceSha, TENANT, fixture.jobId, fixture.runId), capability);
+        byte[] publishedRowSetSha = (byte[]) run.get("row_set_sha256");
+        rejectAckMutationWithoutRewrite(fixture.jobId, fixture.runId,
+                () -> jdbc.update("UPDATE t_import_validation_run SET row_set_sha256=? WHERE tenant_id=? AND job_id=? AND id=?",
+                        hash("wrong ack rowset"), TENANT, fixture.jobId, fixture.runId),
+                () -> jdbc.update("UPDATE t_import_validation_run SET row_set_sha256=? WHERE tenant_id=? AND job_id=? AND id=?",
+                        publishedRowSetSha, TENANT, fixture.jobId, fixture.runId), capability);
+        rejectAckMutationWithoutRewrite(fixture.jobId, fixture.runId,
+                () -> jdbc.update("UPDATE t_import_validation_run SET completed_at=NULL WHERE tenant_id=? AND job_id=? AND id=?",
+                        TENANT, fixture.jobId, fixture.runId),
+                () -> jdbc.update("UPDATE t_import_validation_run SET completed_at=? WHERE tenant_id=? AND job_id=? AND id=?",
+                        completedAt, TENANT, fixture.jobId, fixture.runId), capability);
+
+        Timestamp expiredBeforeRetry = jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)", Timestamp.class);
+        expireCapabilityLeaseForAckRetry(capability, new Timestamp(expiredBeforeRetry.getTime() - 1_000));
+        assertTrue(capability.lease().expiresAt().before(expiredBeforeRetry), "ACK retry時点でcapabilityの旧expiryが経過済みであること");
+        Timestamp retriedAt = service.publish(capability);
+        assertEquals(completedAt, retriedAt);
+        assertDatabaseMapEquals(job, jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?",
+                TENANT, fixture.jobId));
+        assertDatabaseMapEquals(run, jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, fixture.jobId, fixture.runId));
+    }
+
+    @Test
+    void negW3d_publishRechecksPersistedRowsAndRollsBackBothPointers() {
+        var fixture = setupFixture("externalKey,companyName\ncust-w3d,株式会社W3D\n");
+        var sealed = service.seal(fixture.capability);
+        var capability = appendService.recountSealed(sealed);
+        byte[] beforeRun = jdbc.queryForObject("SELECT summary_sha256 FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                byte[].class, TENANT, fixture.jobId, fixture.runId);
+
+        Map<String, Object> storedRow = jdbc.queryForMap("SELECT source_row_number,canonical_fingerprint,disposition,finding_codes FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=1",
+                TENANT, fixture.jobId, fixture.runId);
+        byte[] changedSourceHash = hash("post-recount row mutation");
+        byte[] changedCommit = calculateRowCommit(((Number) storedRow.get("source_row_number")).longValue(),
+                changedSourceHash, (byte[]) storedRow.get("canonical_fingerprint"), (String) storedRow.get("disposition"),
+                (byte[]) storedRow.get("finding_codes"));
+        jdbc.update("UPDATE t_import_validation_row SET source_row_sha256=?,row_commit_sha256=? WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=1",
+                changedSourceHash, changedCommit, TENANT, fixture.jobId, fixture.runId);
+        assertThrows(BusinessException.class, () -> service.publish(capability));
+        assertEquals("VALIDATING", jdbc.queryForObject("SELECT state FROM t_import_job WHERE tenant_id=? AND id=?",
+                String.class, TENANT, fixture.jobId));
+        assertEquals("SEALED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, TENANT, fixture.jobId, fixture.runId));
+        assertNull(jdbc.queryForObject("SELECT current_validation_run_id FROM t_import_job WHERE tenant_id=? AND id=?",
+                Long.class, TENANT, fixture.jobId));
+        assertNull(jdbc.queryForObject("SELECT completed_at FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                Timestamp.class, TENANT, fixture.jobId, fixture.runId));
+        assertArrayEquals(beforeRun, jdbc.queryForObject("SELECT summary_sha256 FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                byte[].class, TENANT, fixture.jobId, fixture.runId));
+    }
+
+    @Test
+    void negW3d_publishRejectsPostCapabilityFindingAndAmountCounterTamper() {
+        var finding = setupFixture("externalKey,companyName\nfinding,会社\n");
+        var findingLease = service.seal(finding.capability);
+        var findingCapability = appendService.recountSealed(findingLease);
+        jdbc.update("UPDATE t_import_validation_run SET finding_summary_bytes=? WHERE tenant_id=? AND job_id=? AND id=?",
+                new byte[]{1, 2, 3}, TENANT, finding.jobId, finding.runId);
+        Map<String, Object> findingJob = jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, finding.jobId);
+        Map<String, Object> findingRun = jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, finding.jobId, finding.runId);
+        assertThrows(BusinessException.class, () -> service.publish(findingCapability));
+        assertDatabaseMapEquals(findingJob, jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, finding.jobId));
+        assertDatabaseMapEquals(findingRun, jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, finding.jobId, finding.runId));
+
+        var amount = setupFixture("externalKey,companyName\namount,会社\n");
+        var amountLease = service.seal(amount.capability);
+        var amountCapability = appendService.recountSealed(amountLease);
+        jdbc.update("UPDATE t_import_validation_run SET cost_price_accepted_known_count=1,cost_price_accepted_sum_yen=0 WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, amount.jobId, amount.runId);
+        Map<String, Object> amountJob = jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, amount.jobId);
+        Map<String, Object> amountRun = jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, amount.jobId, amount.runId);
+        assertThrows(BusinessException.class, () -> service.publish(amountCapability));
+        assertDatabaseMapEquals(amountJob, jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, amount.jobId));
+        assertDatabaseMapEquals(amountRun, jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, amount.jobId, amount.runId));
+    }
+
+    @Test
+    void negW3d_publishRejectsTakeoverAfterCapabilityMint() {
+        var fixture = setupFixture("externalKey,companyName\ntakeover,会社\n");
+        var sealed = service.seal(fixture.capability);
+        var capability = appendService.recountSealed(sealed);
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
+                TENANT, fixture.jobId);
+        var takeover = service.takeOver(service.beginTakeover(fixture.jobId, fixture.runId));
+        assertTrue(takeover.generation() > capability.lease().generation());
+        Map<String, Object> beforeJob = jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, fixture.jobId);
+        Map<String, Object> beforeRun = jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, fixture.jobId, fixture.runId);
+
+        BusinessException rejected = assertThrows(BusinessException.class, () -> service.publish(capability));
+        assertEquals(409, rejected.getCode());
+        assertDatabaseMapEquals(beforeJob, jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, fixture.jobId));
+        assertDatabaseMapEquals(beforeRun, jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, fixture.jobId, fixture.runId));
+    }
+
+    @Test
+    void negW3d_publishRequiresCurrentAclAndLockedResourceSnapshot() {
+        var denied = setupFixture("externalKey,companyName\nacl-before-publish,会社\n");
+        var deniedLease = service.seal(denied.capability);
+        var deniedCapability = appendService.recountSealed(deniedLease);
+        Map<String, Object> deniedJob = jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, denied.jobId);
+        Map<String, Object> deniedRun = jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, denied.jobId, denied.runId);
+        org.mockito.Mockito.doThrow(BusinessException.of(403, "error.forbidden"))
+                .when(authorization).requireCurrentAuthorizationForWrite(context);
+        BusinessException forbidden = assertThrows(BusinessException.class, () -> service.publish(deniedCapability));
+        assertEquals(403, forbidden.getCode());
+        assertDatabaseMapEquals(deniedJob, jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, denied.jobId));
+        assertDatabaseMapEquals(deniedRun, jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, denied.jobId, denied.runId));
+
+        org.mockito.Mockito.reset(authorization);
+        when(authorization.requireCurrentAuthorization()).thenReturn(context);
+        when(authorization.requireCurrentAuthorizationForWrite(context)).thenReturn(context);
+        var drift = setupFixture("externalKey,companyName\nsource-drift,会社\n");
+        var driftLease = service.seal(drift.capability);
+        var driftCapability = appendService.recountSealed(driftLease);
+        Long sourceId = jdbc.queryForObject("SELECT source_system_id FROM t_import_job WHERE tenant_id=? AND id=?",
+                Long.class, TENANT, drift.jobId);
+        jdbc.update("UPDATE t_import_source_system SET status='DISABLED',version_no=version_no+1 WHERE tenant_id=? AND id=?",
+                TENANT, sourceId);
+        Map<String, Object> driftJob = jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, drift.jobId);
+        Map<String, Object> driftRun = jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, drift.jobId, drift.runId);
+        BusinessException conflict = assertThrows(BusinessException.class, () -> service.publish(driftCapability));
+        assertEquals(409, conflict.getCode());
+        assertDatabaseMapEquals(driftJob, jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, drift.jobId));
+        assertDatabaseMapEquals(driftRun, jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, drift.jobId, drift.runId));
+
+        var mappingDrift = setupFixture("externalKey,companyName\nmapping-drift,会社\n");
+        var mappingLease = service.seal(mappingDrift.capability);
+        var mappingCapability = appendService.recountSealed(mappingLease);
+        Long mappingId = jdbc.queryForObject("SELECT mapping_id FROM t_import_job WHERE tenant_id=? AND id=?",
+                Long.class, TENANT, mappingDrift.jobId);
+        jdbc.update("UPDATE t_import_mapping SET canonical_bytes=? WHERE tenant_id=? AND id=?",
+                "{}".getBytes(StandardCharsets.UTF_8), TENANT, mappingId);
+        Map<String, Object> mappingJob = jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, mappingDrift.jobId);
+        Map<String, Object> mappingRun = jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, mappingDrift.jobId, mappingDrift.runId);
+        BusinessException mappingConflict = assertThrows(BusinessException.class, () -> service.publish(mappingCapability));
+        assertEquals(409, mappingConflict.getCode());
+        assertDatabaseMapEquals(mappingJob, jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, mappingDrift.jobId));
+        assertDatabaseMapEquals(mappingRun, jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, mappingDrift.jobId, mappingDrift.runId));
+    }
+
+    @Test
+    void negW3d_publishRejectsRenewedLeaseAndAbortPublishBothOrders() {
+        var renewed = setupFixture("externalKey,companyName\nrenewed,会社\n");
+        var renewedLease = service.seal(renewed.capability);
+        var staleCapability = appendService.recountSealed(renewedLease);
+        service.renew(staleCapability.lease());
+        assertThrows(BusinessException.class, () -> service.publish(staleCapability));
+
+        var abortFirst = setupFixture("externalKey,companyName\nabort-first,会社\n");
+        var abortFirstLease = service.seal(abortFirst.capability);
+        var abortFirstCapability = appendService.recountSealed(abortFirstLease);
+        service.abort(abortFirstCapability.lease());
+        assertThrows(BusinessException.class, () -> service.publish(abortFirstCapability));
+        assertEquals("ABORTED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, TENANT, abortFirst.jobId, abortFirst.runId));
+        assertNull(jdbc.queryForObject("SELECT active_validation_run_id FROM t_import_job WHERE tenant_id=? AND id=?",
+                Long.class, TENANT, abortFirst.jobId));
+
+        var publishFirst = setupFixture("externalKey,companyName\npublish-first,会社\n");
+        var publishFirstLease = service.seal(publishFirst.capability);
+        var publishFirstCapability = appendService.recountSealed(publishFirstLease);
+        service.publish(publishFirstCapability);
+        assertThrows(BusinessException.class, () -> service.abort(publishFirstCapability.lease()));
+        assertEquals("COMPLETED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, TENANT, publishFirst.jobId, publishFirst.runId));
+        assertEquals("VALIDATED", jdbc.queryForObject("SELECT state FROM t_import_job WHERE tenant_id=? AND id=?",
+                String.class, TENANT, publishFirst.jobId));
+    }
+
+    @Test
+    void negW3d_ackRetryStillRequiresCurrentWriteAuthorization() {
+        var fixture = setupFixture("externalKey,companyName\nacl,会社\n");
+        var sealed = service.seal(fixture.capability);
+        var capability = appendService.recountSealed(sealed);
+        service.publish(capability);
+
+        org.mockito.Mockito.doThrow(BusinessException.of(403, "error.forbidden"))
+                .when(authorization).requireCurrentAuthorizationForWrite(context);
+        BusinessException denied = assertThrows(BusinessException.class, () -> service.publish(capability));
+        assertEquals(403, denied.getCode());
+        assertEquals("VALIDATED", jdbc.queryForObject("SELECT state FROM t_import_job WHERE tenant_id=? AND id=?",
+                String.class, TENANT, fixture.jobId));
+    }
+
+    @Test
+    void negW3d_publishCommitFailureRollsBackRunAndJobCasTogether() {
+        var injectingManager = new RollbackInjectingTransactionManager(dataSource);
+        var faultService = new ImportValidationLifecycleService(
+                jdbc, authorization, mock(DocumentService.class), injectingManager);
+        var faultAppendService = new ImportValidationAppendService(
+                jdbc, metadataService, faultService, new ObjectMapper());
+        var fixture = setupFixtureWithService(faultService, faultAppendService,
+                "externalKey,companyName\nrollback,会社\n");
+        var sealed = faultService.seal(fixture.capability);
+        var capability = faultAppendService.recountSealed(sealed);
+        injectingManager.injectFailureOnCommit(fixture.runId, "COMPLETED");
+
+        assertThrows(TransactionSystemException.class, () -> faultService.publish(capability));
+        assertTrue(injectingManager.hasFailureTriggered());
+        assertTrue(injectingManager.hasRollbackExecuted());
+        assertEquals("SEALED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, TENANT, fixture.jobId, fixture.runId));
+        assertEquals(1, jdbc.queryForObject("SELECT active_slot FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                Integer.class, TENANT, fixture.jobId, fixture.runId));
+        assertNull(jdbc.queryForObject("SELECT published_slot FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                Integer.class, TENANT, fixture.jobId, fixture.runId));
+        assertNull(jdbc.queryForObject("SELECT completed_at FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                Timestamp.class, TENANT, fixture.jobId, fixture.runId));
+        assertEquals("VALIDATING", jdbc.queryForObject("SELECT state FROM t_import_job WHERE tenant_id=? AND id=?",
+                String.class, TENANT, fixture.jobId));
+        assertEquals(capability.lease().jobVersion(), jdbc.queryForObject("SELECT version_no FROM t_import_job WHERE tenant_id=? AND id=?",
+                Long.class, TENANT, fixture.jobId));
+        assertNull(jdbc.queryForObject("SELECT current_validation_run_id FROM t_import_job WHERE tenant_id=? AND id=?",
+                Long.class, TENANT, fixture.jobId));
+    }
+
+    @Test
+    void negW3d_jobCasZeroAfterRunCasRollsBackFullSnapshot() {
+        JdbcTemplate failingJdbc = org.mockito.Mockito.spy(jdbc);
+        AtomicBoolean jobCasSuppressed = new AtomicBoolean();
+        AtomicBoolean runCasVisibleBeforeSuppression = new AtomicBoolean();
+        org.mockito.Mockito.doAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            if (sql.startsWith("UPDATE t_import_job SET state='VALIDATED'")) {
+                Object[] args = (Object[]) invocation.getRawArguments()[1];
+                String uncommittedRunState = jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                        String.class, args[1], args[2], args[0]);
+                runCasVisibleBeforeSuppression.set("COMPLETED".equals(uncommittedRunState));
+                jobCasSuppressed.set(true);
+                return 0;
+            }
+            return invocation.callRealMethod();
+        }).when(failingJdbc).update(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(Object[].class));
+        var faultService = new ImportValidationLifecycleService(
+                failingJdbc, authorization, mock(DocumentService.class), new DataSourceTransactionManager(dataSource));
+        var faultAppendService = new ImportValidationAppendService(
+                jdbc, metadataService, faultService, new ObjectMapper());
+        var fixture = setupFixtureWithService(faultService, faultAppendService,
+                "externalKey,companyName\ncas-zero,会社\n");
+        var sealed = faultService.seal(fixture.capability);
+        var capability = faultAppendService.recountSealed(sealed);
+        Map<String, Object> beforeJob = jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?",
+                TENANT, fixture.jobId);
+        Map<String, Object> beforeRun = jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, fixture.jobId, fixture.runId);
+
+        BusinessException rejected = assertThrows(BusinessException.class, () -> faultService.publish(capability));
+        assertEquals(409, rejected.getCode());
+        assertTrue(jobCasSuppressed.get(), "run CAS成功後にjob CASを制御して0件にしたこと");
+        assertTrue(runCasVisibleBeforeSuppression.get(), "job CASを0件にする直前に同一transactionのrun CAS結果がCOMPLETEDであること");
+        assertDatabaseMapEquals(beforeJob, jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?",
+                TENANT, fixture.jobId));
+        assertDatabaseMapEquals(beforeRun, jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, fixture.jobId, fixture.runId));
+    }
+
+    @Test
     void negW3c_rejectsMissingTailZeroRowsExtraRowsAndEachStoredRowFieldTamper() {
         String csv = "externalKey,companyName\ncust-1,株式会社A\ncust-2,株式会社B\n";
         var missingTail = setupFixture(csv);
@@ -634,6 +949,7 @@ class ImportValidationSealServiceTest {
         private final AtomicBoolean failureTriggered = new AtomicBoolean(false);
         private final AtomicBoolean rollbackExecuted = new AtomicBoolean(false);
         private Long targetRunId;
+        private String expectedState = "SEALED";
 
         private RollbackInjectingTransactionManager(javax.sql.DataSource ds) {
             super(ds);
@@ -642,7 +958,12 @@ class ImportValidationSealServiceTest {
         }
 
         void injectFailureOnCommit(long runId) {
+            injectFailureOnCommit(runId, "SEALED");
+        }
+
+        void injectFailureOnCommit(long runId, String state) {
             this.targetRunId = runId;
+            this.expectedState = state;
             this.inject.set(true);
         }
 
@@ -665,7 +986,7 @@ class ImportValidationSealServiceTest {
                 if (targetRunId == null) {
                     throw new IllegalStateException("targetRunId is not set in RollbackInjectingTransactionManager");
                 }
-                // トランザクション内で CAS UPDATE が実行され SEALED 状態へ到達していることを同一接続で事前確認
+                // トランザクション内で対象CAS後の状態へ到達したことを同一接続で事前確認
                 try (PreparedStatement ps = holder.getConnection().prepareStatement(
                         "SELECT state FROM t_import_validation_run WHERE id = ?")) {
                     ps.setLong(1, targetRunId);
@@ -674,16 +995,16 @@ class ImportValidationSealServiceTest {
                             throw new IllegalStateException("Target run row not found in uncommitted transaction: id=" + targetRunId);
                         }
                         String uncommittedState = rs.getString(1);
-                        if (!"SEALED".equals(uncommittedState)) {
-                            throw new IllegalStateException("Expected uncommitted state to be SEALED before commit, but got: " + uncommittedState);
+                        if (!expectedState.equals(uncommittedState)) {
+                            throw new IllegalStateException("Expected uncommitted state to be " + expectedState + " before commit, but got: " + uncommittedState);
                         }
                     }
                 } catch (SQLException e) {
-                    throw new RuntimeException("Failed to verify uncommitted SEALED state in doCommit", e);
+                    throw new RuntimeException("Failed to verify uncommitted target state in doCommit", e);
                 }
                 // 同一接続で未コミット SEALED 到達が確認できた場合のみ注入成功を記録
                 failureTriggered.set(true);
-                throw new TransactionSystemException("simulated commit failure after CAS update to SEALED");
+                throw new TransactionSystemException("simulated commit failure after CAS update to " + expectedState);
             }
             super.doCommit(status);
         }
@@ -808,6 +1129,56 @@ class ImportValidationSealServiceTest {
                     getField(base, "instanceId"), getField(base, "input"), base.runId(), base.workerId(),
                     base.generation(), base.jobVersion(), newExpiry);
         } catch (Exception e) { throw new RuntimeException(e); }
+    }
+
+    private void expireCapabilityLeaseForAckRetry(ImportValidationAppendService.PublishCapability capability,
+                                                   Timestamp expiredAt) {
+        try {
+            var expiry = capability.lease().getClass().getDeclaredField("expiresAt");
+            expiry.setAccessible(true);
+            expiry.set(capability.lease(), expiredAt);
+        } catch (ReflectiveOperationException failure) {
+            throw new RuntimeException("ACK-loss expiry fixtureの設定に失敗しました", failure);
+        }
+    }
+
+    private static byte[] calculateRowCommit(long rowNumber, byte[] sourceHash, byte[] canonicalFingerprint,
+                                             String disposition, byte[] findingCodes) {
+        try {
+            var method = ImportValidationAppendService.class.getDeclaredMethod("rowCommit", long.class,
+                    byte[].class, byte[].class, String.class, byte[].class);
+            method.setAccessible(true);
+            return (byte[]) method.invoke(null, rowNumber, sourceHash, canonicalFingerprint, disposition, findingCodes);
+        } catch (ReflectiveOperationException failure) {
+            throw new RuntimeException("有効なrow commitmentのテストfixtureを生成できません", failure);
+        }
+    }
+
+    private static void assertDatabaseMapEquals(Map<String, Object> expected, Map<String, Object> actual) {
+        assertEquals(expected.keySet(), actual.keySet());
+        for (String column : expected.keySet()) {
+            Object left = expected.get(column);
+            Object right = actual.get(column);
+            if (left instanceof byte[] leftBytes && right instanceof byte[] rightBytes) {
+                assertArrayEquals(leftBytes, rightBytes, column);
+            } else {
+                assertEquals(left, right, column);
+            }
+        }
+    }
+
+    private void rejectAckMutationWithoutRewrite(long jobId, long runId, Runnable mutate, Runnable restore,
+                                                 ImportValidationAppendService.PublishCapability capability) {
+        mutate.run();
+        Map<String, Object> tamperedJob = jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, jobId);
+        Map<String, Object> tamperedRun = jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, jobId, runId);
+        BusinessException rejected = assertThrows(BusinessException.class, () -> service.publish(capability));
+        assertEquals(409, rejected.getCode());
+        assertDatabaseMapEquals(tamperedJob, jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, jobId));
+        assertDatabaseMapEquals(tamperedRun, jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, jobId, runId));
+        restore.run();
     }
 
     private static Object getField(Object target, String fieldName) throws Exception {

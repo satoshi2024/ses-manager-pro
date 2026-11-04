@@ -39,6 +39,7 @@ import java.util.UUID;
 public class ImportValidationLifecycleService {
     private static final int LEASE_SECONDS = 30;
     private static final int W3C_FINAL_GATE_TIMEOUT_SECONDS = 10;
+    private static final int W3D_PUBLISH_TIMEOUT_SECONDS = 10;
     private static final String PARSER_CONTRACT = "ses-csv-v1-stream-limits-64m-100k-64-65536";
     private static final String CANONICAL_CONTRACT = "ses-import-canonical-row-v1";
     private static final String VALIDATOR_CONTRACT = "ses-import-v1-readonly-validator-v1";
@@ -49,6 +50,7 @@ public class ImportValidationLifecycleService {
     private final DocumentService documents;
     private final TransactionTemplate transaction;
     private final TransactionTemplate w3cFinalGateTransaction;
+    private final TransactionTemplate w3dPublishTransaction;
     private final String instanceId = UUID.randomUUID().toString();
 
     public ImportValidationLifecycleService(JdbcTemplate jdbc, ImportMetadataAuthorizationService authorization,
@@ -64,6 +66,11 @@ public class ImportValidationLifecycleService {
         this.w3cFinalGateTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
         this.w3cFinalGateTransaction.setTimeout(W3C_FINAL_GATE_TIMEOUT_SECONDS);
         this.w3cFinalGateTransaction.setName("NF06-W3C-final-gate");
+        this.w3dPublishTransaction = new TransactionTemplate(manager);
+        this.w3dPublishTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.w3dPublishTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        this.w3dPublishTransaction.setTimeout(W3D_PUBLISH_TIMEOUT_SECONDS);
+        this.w3dPublishTransaction.setName("NF06-W3D-atomic-publish");
     }
 
     /** operation/worker identityはserver発行の不透明値。呼出元はgenerationやactorを指定できない。 */
@@ -176,6 +183,148 @@ public class ImportValidationLifecycleService {
             requireExactSealedLease(grant, locked, now);
             return grant;
         });
+    }
+
+    /** W3D atomic publish。recount済みprivate capabilityだけを受け、source I/Oは行わない。 */
+    Timestamp publish(ImportValidationAppendService.PublishCapability capability) {
+        if (capability == null || capability.lease() == null) conflict();
+        RunLease grant = capability.lease();
+        requireInstance(grant.instanceId);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(W3D_PUBLISH_TIMEOUT_SECONDS);
+        return w3dPublishTransaction.execute(status -> publishInTransaction(capability, deadline));
+    }
+
+    private Timestamp publishInTransaction(ImportValidationAppendService.PublishCapability capability,
+                                           long deadline) {
+        RunLease grant = capability.lease();
+        Input expected = grant.input;
+        current(expected.context);
+        Locked locked = lockResources(expected, grant.runId);
+        requirePublishBudget(deadline);
+
+        // commit ACK lossはactive lease検証より先に識別する。完了済み結果だけをread-onlyで返す。
+        if (isExactPublishedAck(capability, locked, deadline)) {
+            return completedAt(expected.context.tenantId(), expected.jobId, grant.runId);
+        }
+
+        Job job = locked.job;
+        Run run = locked.run;
+        requirePublishCapabilityInput(capability, job, run);
+        Long rowCount = jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Long.class, expected.context.tenantId(), expected.jobId, grant.runId);
+        if (rowCount == null || rowCount.longValue() != capability.counters().sourceRows()) conflict();
+        requirePersistedRowSetMatches(expected.context.tenantId(), expected.jobId, grant.runId,
+                rowCount, capability.rowSetSha256(), deadline);
+        requirePublishSummaryMatches(capability, run);
+        requirePublishBudget(deadline);
+
+        ImportAuthorizedContext gate = authorization.requireCurrentAuthorizationForWrite(expected.context);
+        requireSameActor(expected.context, gate);
+        requirePublishBudget(deadline);
+        Timestamp now = dbNow();
+        requirePublishBudget(deadline);
+        requireExactSealedLease(grant, locked, now);
+        if (!Objects.equals(job.expiresAt, grant.expiresAt)) conflict();
+
+        byte[] rowSetSha = HexFormat.of().parseHex(capability.rowSetSha256());
+        byte[] summarySha = HexFormat.of().parseHex(capability.summarySha256());
+        requirePublishBudget(deadline);
+        int completedRun = jdbc.update("""
+                UPDATE t_import_validation_run SET state='COMPLETED',active_slot=NULL,published_slot=1,
+                  completed_at=CURRENT_TIMESTAMP(6)
+                WHERE tenant_id=? AND job_id=? AND id=? AND state='SEALED' AND active_slot=1
+                  AND published_slot IS NULL AND last_resumed_lease_generation=?
+                  AND source_sha256=? AND validation_fingerprint=? AND row_set_sha256=? AND summary_sha256=?
+                """, expected.context.tenantId(), expected.jobId, grant.runId, grant.generation,
+                expected.sourceSha, run.fingerprint, rowSetSha, summarySha);
+        if (completedRun != 1) conflict();
+        requirePublishBudget(deadline);
+
+        int publishedJob = jdbc.update("""
+                UPDATE t_import_job SET state='VALIDATED',active_validation_run_id=NULL,
+                  current_validation_run_id=?,lease_owner=NULL,lease_expires_at=NULL,
+                  version_no=version_no+1,updated_at=CURRENT_TIMESTAMP(6)
+                WHERE tenant_id=? AND id=? AND state='VALIDATING' AND version_no=?
+                  AND active_validation_run_id=? AND current_validation_run_id IS NULL
+                  AND lease_owner=? AND lease_generation=? AND lease_expires_at=?
+                  AND lease_expires_at>CURRENT_TIMESTAMP(6)
+                """, grant.runId, expected.context.tenantId(), expected.jobId, grant.jobVersion,
+                grant.runId, grant.workerId, grant.generation, grant.expiresAt);
+        if (publishedJob != 1) conflict();
+        requirePublishBudget(deadline);
+        return completedAt(expected.context.tenantId(), expected.jobId, grant.runId);
+    }
+
+    private boolean isExactPublishedAck(ImportValidationAppendService.PublishCapability capability,
+                                        Locked locked, long deadline) {
+        RunLease grant = capability.lease();
+        Input expected = grant.input;
+        Job job = locked.job;
+        Run run = locked.run;
+        if (job == null || run == null || !"VALIDATED".equals(job.state)
+                || job.activeRunId != null || !Objects.equals(job.currentRunId, grant.runId)
+                || job.owner != null || job.expiresAt != null
+                || job.version != grant.jobVersion + 1 || job.generation != grant.generation
+                || !"COMPLETED".equals(run.state) || run.activeSlot != null
+                || !Integer.valueOf(1).equals(run.publishedSlot)
+                || run.lastResumedGeneration != grant.generation
+                || run.actorId != expected.context.actorUserId()
+                || !sameRunInput(expected, run)
+                || !HexFormat.of().formatHex(run.sourceSha).equalsIgnoreCase(capability.sourceSha256())) {
+            return false;
+        }
+        requirePublishSummaryMatches(capability, run);
+        RunSummary persisted = loadRunSummary(expected.context.tenantId(), expected.jobId, grant.runId);
+        if (persisted == null || persisted.sealedAt == null) conflict();
+        requirePersistedRowSetMatches(expected.context.tenantId(), expected.jobId, grant.runId,
+                capability.counters().sourceRows(), capability.rowSetSha256(), deadline);
+        requirePublishBudget(deadline);
+        ImportAuthorizedContext gate = authorization.requireCurrentAuthorizationForWrite(expected.context);
+        requireSameActor(expected.context, gate);
+        requirePublishBudget(deadline);
+        if (completedAt(expected.context.tenantId(), expected.jobId, grant.runId) == null) conflict();
+        return true;
+    }
+
+    private void requirePublishCapabilityInput(ImportValidationAppendService.PublishCapability capability,
+                                               Job job, Run run) {
+        RunLease grant = capability.lease();
+        Input expected = grant.input;
+        if (job == null || run == null || !"VALIDATING".equals(job.state)
+                || !Objects.equals(job.activeRunId, grant.runId) || job.currentRunId != null
+                || !"SEALED".equals(run.state) || !Integer.valueOf(1).equals(run.activeSlot)
+                || run.publishedSlot != null || run.lastResumedGeneration != grant.generation
+                || run.actorId != expected.context.actorUserId() || !sameRunInput(expected, run)
+                || !HexFormat.of().formatHex(run.sourceSha).equalsIgnoreCase(capability.sourceSha256())) conflict();
+        if (capability.counters() == null || capability.rowSetSha256() == null
+                || capability.summarySha256() == null) conflict();
+    }
+
+    private void requirePublishSummaryMatches(ImportValidationAppendService.PublishCapability capability,
+                                              Run run) {
+        RunLease grant = capability.lease();
+        RunSummary persisted = loadRunSummary(grant.tenantId(), grant.jobId(), grant.runId());
+        if (persisted == null || persisted.sealedAt == null) conflict();
+        byte[] rowSetSha = HexFormat.of().parseHex(capability.rowSetSha256());
+        byte[] summarySha = calculateSummarySha256(grant.tenantId(), grant.jobId(), grant.runId(),
+                run.sourceSha, run.fingerprint, rowSetSha, capability.counters());
+        if (!MessageDigest.isEqual(persisted.rowSetSha256, rowSetSha)
+                || !MessageDigest.isEqual(persisted.summarySha256, summarySha)
+                || !MessageDigest.isEqual(summarySha, HexFormat.of().parseHex(capability.summarySha256()))) conflict();
+        requireSummaryMatches(persisted, capability.counters());
+    }
+
+    private Timestamp completedAt(String tenant, long jobId, long runId) {
+        Timestamp completed = jdbc.query("SELECT completed_at FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                rs -> rs.next() ? rs.getTimestamp(1) : null, tenant, jobId, runId);
+        if (completed == null) conflict();
+        return completed;
+    }
+
+    private void requirePublishBudget(long deadline) {
+        if (System.nanoTime() >= deadline) {
+            throw new TransactionTimedOutException("W3D atomic publishが10秒の実行予算を超過しました");
+        }
     }
 
     private void requirePersistedRowSetMatches(String tenant, long jobId, long runId, long expectedCount,

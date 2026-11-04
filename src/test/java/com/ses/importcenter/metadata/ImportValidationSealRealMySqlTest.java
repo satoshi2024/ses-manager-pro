@@ -37,6 +37,7 @@ import java.time.LocalDate;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -74,6 +75,7 @@ class ImportValidationSealRealMySqlTest {
     private ImportValidationAppendService appendService;
     private ImportMetadataAuthorizationService authorization;
     private ImportMetadataService metadataService;
+    private DocumentService documentService;
     private TrackingTransactionManager trackingManager;
     private final ImportAuthorizedContext context = new ImportAuthorizedContext(TENANT, 41L, 77L);
 
@@ -129,7 +131,8 @@ class ImportValidationSealRealMySqlTest {
         when(authorization.requireCurrentAuthorizationForWrite(context)).thenReturn(context);
 
         trackingManager = new TrackingTransactionManager(ds);
-        service = new ImportValidationLifecycleService(jdbc, authorization, mock(DocumentService.class), trackingManager);
+        documentService = mock(DocumentService.class);
+        service = new ImportValidationLifecycleService(jdbc, authorization, documentService, trackingManager);
         metadataService = mock(ImportMetadataService.class);
         appendService = new ImportValidationAppendService(jdbc, metadataService, service, new ObjectMapper());
     }
@@ -237,6 +240,343 @@ class ImportValidationSealRealMySqlTest {
         jdbc.update("UPDATE t_import_validation_row SET finding_codes=X'00' WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=1",
                 TENANT, changed.jobId, changed.runId);
         assertThrows(BusinessException.class, () -> appendService.recountSealed(changedLease));
+    }
+
+    @Test
+    void posW3d_twoWorkersPublishingSameCapabilitySerializeOnJobAndExposeOneCommit() throws Exception {
+        var fixture = setupFixture("externalKey,companyName\nw3d-race,会社\n");
+        var sealed = service.seal(fixture.capability);
+        var capability = appendService.recountSealed(sealed);
+        AtomicReference<Long> firstThreadId = new AtomicReference<>();
+        AtomicReference<Long> secondThreadId = new AtomicReference<>();
+        CountDownLatch publishGateEntered = new CountDownLatch(1);
+        CountDownLatch releasePublishGate = new CountDownLatch(1);
+        CountDownLatch secondWorkerStarted = new CountDownLatch(1);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            if (Thread.currentThread().getId() == firstThreadId.get()) {
+                publishGateEntered.countDown();
+                if (!releasePublishGate.await(15, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("先行publish ACL gate待機がタイムアウトしました");
+                }
+            }
+            return context;
+        }).when(authorization).requireCurrentAuthorizationForWrite(context);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        Throwable primary = null;
+        try {
+            Future<Timestamp> first = pool.submit(() -> {
+                firstThreadId.set(Thread.currentThread().getId());
+                return service.publish(capability);
+            });
+            assertTrue(publishGateEntered.await(5, TimeUnit.SECONDS), "先行publishがwrite ACL gateで停止すること");
+            Long blockerPid = trackingManager.getConnectionIdForThread(firstThreadId.get());
+            assertNotNull(blockerPid);
+            Future<Timestamp> second = pool.submit(() -> {
+                secondThreadId.set(Thread.currentThread().getId());
+                secondWorkerStarted.countDown();
+                return service.publish(capability);
+            });
+            assertTrue(secondWorkerStarted.await(2, TimeUnit.SECONDS));
+            awaitLockWait(trackingManager, blockerPid, secondThreadId.get(), second);
+            releasePublishGate.countDown();
+            Timestamp firstAt = first.get(10, TimeUnit.SECONDS);
+            Timestamp secondAt = second.get(10, TimeUnit.SECONDS);
+            assertEquals(firstAt, secondAt, "同一COMPLETED結果のread-only ACK回復で同じ保存時刻を返すこと");
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND state='COMPLETED' AND published_slot=1",
+                    Integer.class, TENANT, fixture.jobId));
+            Map<String, Object> job = jdbc.queryForMap("SELECT state,version_no,active_validation_run_id,current_validation_run_id,lease_owner,lease_expires_at FROM t_import_job WHERE tenant_id=? AND id=?",
+                    TENANT, fixture.jobId);
+            assertEquals("VALIDATED", job.get("state"));
+            assertEquals(capability.lease().jobVersion() + 1, ((Number) job.get("version_no")).longValue());
+            assertNull(job.get("active_validation_run_id"));
+            assertEquals(fixture.runId, ((Number) job.get("current_validation_run_id")).longValue());
+            assertNull(job.get("lease_owner"));
+            assertNull(job.get("lease_expires_at"));
+        } catch (Exception | Error failure) {
+            primary = failure;
+            throw failure;
+        } finally {
+            releasePublishGate.countDown();
+            finishPool(pool, 15, primary);
+            org.mockito.Mockito.reset(authorization);
+            when(authorization.requireCurrentAuthorization()).thenReturn(context);
+            when(authorization.requireCurrentAuthorizationForWrite(context)).thenReturn(context);
+        }
+    }
+
+    @Test
+    void negW3d_realMysqlPublishRejectsPostRecountRowMutationWithoutPartialState() {
+        var fixture = setupFixture("externalKey,companyName\nw3d-tamper,会社\n");
+        var sealed = service.seal(fixture.capability);
+        var capability = appendService.recountSealed(sealed);
+        Map<String, Object> storedRow = jdbc.queryForMap("SELECT source_row_number,canonical_fingerprint,disposition,finding_codes FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=1",
+                TENANT, fixture.jobId, fixture.runId);
+        byte[] changedSourceHash = hash("post-recount");
+        byte[] changedCommit = calculateRowCommit(((Number) storedRow.get("source_row_number")).longValue(),
+                changedSourceHash, (byte[]) storedRow.get("canonical_fingerprint"), (String) storedRow.get("disposition"),
+                (byte[]) storedRow.get("finding_codes"));
+        jdbc.update("UPDATE t_import_validation_row SET source_row_sha256=?,row_commit_sha256=? WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=1",
+                changedSourceHash, changedCommit, TENANT, fixture.jobId, fixture.runId);
+
+        BusinessException rejected = assertThrows(BusinessException.class, () -> service.publish(capability));
+        assertEquals(409, rejected.getCode());
+        Map<String, Object> job = jdbc.queryForMap("SELECT state,version_no,active_validation_run_id,current_validation_run_id,lease_owner,lease_expires_at FROM t_import_job WHERE tenant_id=? AND id=?",
+                TENANT, fixture.jobId);
+        assertEquals("VALIDATING", job.get("state"));
+        assertEquals(capability.lease().jobVersion(), ((Number) job.get("version_no")).longValue());
+        assertEquals(fixture.runId, ((Number) job.get("active_validation_run_id")).longValue());
+        assertNull(job.get("current_validation_run_id"));
+        assertEquals("SEALED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, TENANT, fixture.jobId, fixture.runId));
+        assertEquals(1, jdbc.queryForObject("SELECT active_slot FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                Integer.class, TENANT, fixture.jobId, fixture.runId));
+        assertNull(jdbc.queryForObject("SELECT published_slot FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                Integer.class, TENANT, fixture.jobId, fixture.runId));
+    }
+
+    @Test
+    void negW3d_realMysqlPublishWaitingAcrossExpiryRejectsAndRollsBack() throws Exception {
+        var fixture = setupFixture("externalKey,companyName\nw3d-expiry,会社\n");
+        var sealed = service.seal(fixture.capability);
+        var capability = appendService.recountSealed(sealed);
+        Timestamp shortExpiry = jdbc.queryForObject("SELECT TIMESTAMPADD(SECOND,1,CURRENT_TIMESTAMP(6))",
+                Timestamp.class);
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=? WHERE tenant_id=? AND id=?",
+                shortExpiry, TENANT, fixture.jobId);
+        setLeaseExpiryForTest(capability.lease(), shortExpiry);
+        Map<String, Object> beforeJob = jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, fixture.jobId);
+        Map<String, Object> beforeRun = jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, fixture.jobId, fixture.runId);
+
+        Connection blocker = dataSource.getConnection();
+        long blockerPid;
+        try {
+            blocker.setAutoCommit(false);
+            try (Statement statement = blocker.createStatement(); ResultSet rs = statement.executeQuery("SELECT CONNECTION_ID()")) {
+                assertTrue(rs.next());
+                blockerPid = rs.getLong(1);
+            }
+            try (PreparedStatement statement = blocker.prepareStatement("SELECT id FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=? FOR UPDATE")) {
+                statement.setString(1, TENANT);
+                statement.setLong(2, fixture.jobId);
+                statement.setLong(3, fixture.runId);
+                try (ResultSet rs = statement.executeQuery()) { assertTrue(rs.next()); }
+            }
+        } catch (Exception | Error failure) {
+            try { blocker.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
+            try { blocker.close(); } catch (SQLException closeFailure) { failure.addSuppressed(closeFailure); }
+            throw failure;
+        }
+
+        trackingManager.reset();
+        AtomicReference<Long> workerThreadId = new AtomicReference<>();
+        CountDownLatch workerStarted = new CountDownLatch(1);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        Throwable primary = null;
+        try {
+            Future<Timestamp> publish = pool.submit(() -> {
+                workerThreadId.set(Thread.currentThread().getId());
+                trackingManager.clearConnectionIdForThread(workerThreadId.get());
+                workerStarted.countDown();
+                return service.publish(capability);
+            });
+            assertTrue(workerStarted.await(2, TimeUnit.SECONDS));
+            var wait = awaitW3dRecordLockWait(blockerPid, workerThreadId.get(), publish);
+            assertEquals("t_import_validation_run", wait.requesterTable);
+            Thread.sleep(1_300);
+            blocker.commit();
+
+            ExecutionException rejected = assertThrows(ExecutionException.class, () -> publish.get(8, TimeUnit.SECONDS));
+            assertTrue(rejected.getCause() instanceof BusinessException, "expiry後の業務409を保持すること: " + rejected.getCause());
+            assertEquals(409, ((BusinessException) rejected.getCause()).getCode());
+            assertDatabaseMapEquals(beforeJob, jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, fixture.jobId));
+            assertDatabaseMapEquals(beforeRun, jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                    TENANT, fixture.jobId, fixture.runId));
+        } catch (Exception | Error failure) {
+            primary = failure;
+            throw failure;
+        } finally {
+            try { blocker.rollback(); } catch (SQLException rollbackFailure) {
+                if (primary != null) primary.addSuppressed(rollbackFailure);
+            }
+            try { blocker.close(); } catch (SQLException closeFailure) {
+                if (primary != null) primary.addSuppressed(closeFailure);
+            }
+            finishPool(pool, 10, primary);
+        }
+    }
+
+    @Test
+    void negW3d_realMysqlPublishRowLockTimeoutRemainsInfrastructureFailure() throws Exception {
+        var fixture = setupFixture("externalKey,companyName\nw3d-timeout,会社\n");
+        var sealed = service.seal(fixture.capability);
+        var capability = appendService.recountSealed(sealed);
+        Map<String, Object> beforeJob = jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, fixture.jobId);
+        Map<String, Object> beforeRun = jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, fixture.jobId, fixture.runId);
+        Connection blocker = dataSource.getConnection();
+        long blockerPid;
+        try {
+            blocker.setAutoCommit(false);
+            try (Statement statement = blocker.createStatement(); ResultSet rs = statement.executeQuery("SELECT CONNECTION_ID()")) {
+                assertTrue(rs.next());
+                blockerPid = rs.getLong(1);
+            }
+            try (PreparedStatement statement = blocker.prepareStatement("SELECT source_row_number FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=1 FOR UPDATE")) {
+                statement.setString(1, TENANT);
+                statement.setLong(2, fixture.jobId);
+                statement.setLong(3, fixture.runId);
+                try (ResultSet rs = statement.executeQuery()) { assertTrue(rs.next()); }
+            }
+        } catch (Exception | Error failure) {
+            try { blocker.rollback(); } catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
+            try { blocker.close(); } catch (SQLException closeFailure) { failure.addSuppressed(closeFailure); }
+            throw failure;
+        }
+
+        trackingManager.reset();
+        AtomicReference<Long> workerThreadId = new AtomicReference<>();
+        CountDownLatch workerStarted = new CountDownLatch(1);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        Throwable primary = null;
+        try {
+            Future<Timestamp> publish = pool.submit(() -> {
+                workerThreadId.set(Thread.currentThread().getId());
+                trackingManager.clearConnectionIdForThread(workerThreadId.get());
+                workerStarted.countDown();
+                return service.publish(capability);
+            });
+            assertTrue(workerStarted.await(2, TimeUnit.SECONDS));
+            W3dLockWait wait = awaitW3dRecordLockWait(blockerPid, workerThreadId.get(), publish);
+            assertEquals("t_import_validation_row", wait.requesterTable);
+            assertEquals(wait.requesterPid, trackingManager.getConnectionIdForThread(workerThreadId.get()));
+            Thread.sleep(10_300);
+
+            ExecutionException timeout = assertThrows(ExecutionException.class, () -> publish.get(2, TimeUnit.SECONDS));
+            assertFalse(timeout.getCause() instanceof BusinessException,
+                    "lock wait/transaction timeoutは業務409へ変換しないこと: " + timeout.getCause());
+            assertTrue(hasCause(timeout.getCause(), TransactionTimedOutException.class)
+                            || hasCause(timeout.getCause(), QueryTimeoutException.class),
+                    "timeoutをinfra failureとして保持すること: " + timeout.getCause());
+            assertDatabaseMapEquals(beforeJob, jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, fixture.jobId));
+            assertDatabaseMapEquals(beforeRun, jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                    TENANT, fixture.jobId, fixture.runId));
+        } catch (Exception | Error failure) {
+            primary = failure;
+            throw failure;
+        } finally {
+            try { blocker.rollback(); } catch (SQLException rollbackFailure) {
+                if (primary != null) primary.addSuppressed(rollbackFailure);
+            }
+            try { blocker.close(); } catch (SQLException closeFailure) {
+                if (primary != null) primary.addSuppressed(closeFailure);
+            }
+            finishPool(pool, 10, primary);
+        }
+    }
+
+    @Test
+    void negW3d_realMysqlAbortAndPublishSerializeInBothLockOrders() throws Exception {
+        runW3dAbortPublishLockOrder(true);
+        runW3dAbortPublishLockOrder(false);
+    }
+
+    private void runW3dAbortPublishLockOrder(boolean abortFirst) throws Exception {
+        var fixture = setupFixture("externalKey,companyName\nw3d-order-" + abortFirst + ",会社\n");
+        var sealed = service.seal(fixture.capability);
+        var capability = appendService.recountSealed(sealed);
+        AtomicReference<Long> pausedThreadId = new AtomicReference<>();
+        AtomicReference<Long> waitingThreadId = new AtomicReference<>();
+        CountDownLatch gateEntered = new CountDownLatch(1);
+        CountDownLatch loserGateEntered = new CountDownLatch(1);
+        CountDownLatch releaseGate = new CountDownLatch(1);
+        CountDownLatch releaseLoserGate = new CountDownLatch(1);
+        AtomicReference<Long> loserThreadId = new AtomicReference<>();
+        CountDownLatch waitingWorkerStarted = new CountDownLatch(1);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            if (Thread.currentThread().getId() == pausedThreadId.get()) {
+                gateEntered.countDown();
+                if (!releaseGate.await(15, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("W3D write ACL gate待機がタイムアウトしました");
+                }
+            }
+            return context;
+        }).when(authorization).requireCurrentAuthorizationForWrite(context);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            if (java.util.Objects.equals(loserThreadId.get(), Thread.currentThread().getId())) {
+                loserGateEntered.countDown();
+                if (!releaseLoserGate.await(15, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("W3D 敗者resource gate待機がタイムアウトしました");
+                }
+            }
+            return null;
+        }).when(documentService).authorizeImportJobDownload(
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyString());
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        Throwable primary = null;
+        try {
+            Future<?> winner = pool.submit(() -> {
+                pausedThreadId.set(Thread.currentThread().getId());
+                if (abortFirst) service.abort(capability.lease());
+                else service.publish(capability);
+                return null;
+            });
+            assertTrue(gateEntered.await(5, TimeUnit.SECONDS), "先行操作がjob lock後のwrite ACL gateで停止すること");
+            Long blockerPid = trackingManager.getConnectionIdForThread(pausedThreadId.get());
+            assertNotNull(blockerPid, "先行transactionのCONNECTION_IDを捕捉すること");
+
+            Future<?> loser = pool.submit(() -> {
+                waitingThreadId.set(Thread.currentThread().getId());
+                loserThreadId.set(Thread.currentThread().getId());
+                waitingWorkerStarted.countDown();
+                if (abortFirst) service.publish(capability);
+                else service.abort(capability.lease());
+                return null;
+            });
+            assertTrue(waitingWorkerStarted.await(2, TimeUnit.SECONDS));
+            awaitLockWait(trackingManager, blockerPid, waitingThreadId.get(), loser);
+            releaseGate.countDown();
+            winner.get(10, TimeUnit.SECONDS);
+            assertTrue(loserGateEntered.await(10, TimeUnit.SECONDS), "勝者commit後に敗者もlockを取得してresource gateへ到達すること");
+            Map<String, Object> committedJob = jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?",
+                    TENANT, fixture.jobId);
+            Map<String, Object> committedRun = jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                    TENANT, fixture.jobId, fixture.runId);
+            releaseLoserGate.countDown();
+            var rejected = assertThrows(ExecutionException.class, () -> loser.get(10, TimeUnit.SECONDS));
+            assertTrue(rejected.getCause() instanceof BusinessException, "敗者はdomain 409として拒否されること: " + rejected.getCause());
+            assertEquals(409, ((BusinessException) rejected.getCause()).getCode());
+
+            if (abortFirst) {
+                assertEquals("ABORTED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                        String.class, TENANT, fixture.jobId, fixture.runId));
+                assertEquals("MAPPED", jdbc.queryForObject("SELECT state FROM t_import_job WHERE tenant_id=? AND id=?",
+                        String.class, TENANT, fixture.jobId));
+            } else {
+                assertEquals("COMPLETED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                        String.class, TENANT, fixture.jobId, fixture.runId));
+                assertEquals("VALIDATED", jdbc.queryForObject("SELECT state FROM t_import_job WHERE tenant_id=? AND id=?",
+                        String.class, TENANT, fixture.jobId));
+            }
+            assertDatabaseMapEquals(committedJob, jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?",
+                    TENANT, fixture.jobId));
+            assertDatabaseMapEquals(committedRun, jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                    TENANT, fixture.jobId, fixture.runId));
+        } catch (Exception | Error failure) {
+            primary = failure;
+            throw failure;
+        } finally {
+            releaseGate.countDown();
+            releaseLoserGate.countDown();
+            finishPool(pool, 15, primary);
+            org.mockito.Mockito.reset(authorization);
+            org.mockito.Mockito.reset(documentService);
+            when(authorization.requireCurrentAuthorization()).thenReturn(context);
+            when(authorization.requireCurrentAuthorizationForWrite(context)).thenReturn(context);
+        }
     }
 
     @Test
@@ -435,7 +775,8 @@ class ImportValidationSealRealMySqlTest {
     }
 
     @Test
-    void posW3c_mysql100kGateWithinDerivedBudgetAndSerializesSameSourceJob() throws Exception {
+    void posW3d_mysql100kRechecksAndPublishesWithinDerivedBudgetAndSerializesSameSourceJob() throws Exception {
+        long useCaseStartedNanos = System.nanoTime();
         StringBuilder csv = new StringBuilder("externalKey,companyName\n");
         for (int i = 0; i < 100_000; i++) csv.append("max-").append(i).append(",会社").append(i).append('\n');
         String contents = csv.toString();
@@ -489,6 +830,7 @@ class ImportValidationSealRealMySqlTest {
 
         trackingManager.reset();
         ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch releaseW3dGate = new CountDownLatch(1);
         Throwable primary = null;
         try {
             Future<ImportValidationAppendService.PublishCapability> recount =
@@ -520,12 +862,93 @@ class ImportValidationSealRealMySqlTest {
             assertNotNull(trackingManager.getLastW3cDurationMillis());
             assertTrue(trackingManager.getLastW3cDurationMillis() <= 10_000L,
                     "10万件の最終transactionが派生10秒予算以内に終了すること");
+            Long w3cFinalGateMillis = trackingManager.getLastW3cDurationMillis();
             assertNotNull(otherStartFuture.get(15, TimeUnit.SECONDS), "最終gate完了後に同source別jobが進めること");
+
+            // W3C final gateとW3D publishは別transaction。W3Dではrow scan後のgateを止め、同source別jobの実waitを採取する。
+            long publishCompetitorId = createMappedJobForSameSource(contents);
+            var publishCompetitorStart = service.beginStart(publishCompetitorId);
+            org.mockito.Mockito.reset(authorization);
+            when(authorization.requireCurrentAuthorization()).thenReturn(context);
+            when(authorization.requireCurrentAuthorizationForWrite(context)).thenReturn(context);
+            AtomicReference<Long> publishThreadId = new AtomicReference<>();
+            AtomicReference<Long> competitorThreadId = new AtomicReference<>();
+            CountDownLatch publishGateEntered = new CountDownLatch(1);
+            CountDownLatch competitorStarted = new CountDownLatch(1);
+            org.mockito.Mockito.doAnswer(invocation -> {
+                if (isW3dPublishTransaction()) {
+                    publishGateEntered.countDown();
+                    if (!releaseW3dGate.await(8, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("W3D publish gate待機がタイムアウトしました");
+                    }
+                }
+                return context;
+            }).when(authorization).requireCurrentAuthorizationForWrite(context);
+            trackingManager.reset();
+            long publishStartedNanos = System.nanoTime();
+            Future<Timestamp> publish = pool.submit(() -> {
+                publishThreadId.set(Thread.currentThread().getId());
+                trackingManager.clearConnectionIdForThread(publishThreadId.get());
+                return service.publish(capability);
+            });
+            assertTrue(publishGateEntered.await(90, TimeUnit.SECONDS), "10万row publish scan後のwrite gateに到達すること");
+            Long publishBlockerPid = trackingManager.getLastW3dConnectionId();
+            assertNotNull(publishBlockerPid);
+            Future<ImportValidationLifecycleService.RunLease> publishCompetitor = pool.submit(() -> {
+                competitorThreadId.set(Thread.currentThread().getId());
+                trackingManager.clearConnectionIdForThread(competitorThreadId.get());
+                competitorStarted.countDown();
+                return service.start(publishCompetitorStart);
+            });
+            assertTrue(competitorStarted.await(2, TimeUnit.SECONDS));
+            W3dLockWait wait = awaitW3dRecordLockWait(publishBlockerPid, competitorThreadId.get(), publishCompetitor);
+            assertEquals(wait.requesterPid, trackingManager.getConnectionIdForThread(competitorThreadId.get()));
+            assertEquals(wait.blockerPid, publishBlockerPid);
+            assertEquals(jdbc.queryForObject("SELECT DATABASE()", String.class), wait.requesterSchema);
+            assertEquals(wait.requesterSchema, wait.blockerSchema);
+            assertEquals("t_import_source_system", wait.requesterTable);
+            assertEquals(wait.requesterTable, wait.blockerTable);
+            assertEquals("PRIMARY", wait.requesterIndex);
+            assertEquals(wait.requesterIndex, wait.blockerIndex);
+            assertEquals("RECORD", wait.requesterType);
+            assertEquals("WAITING", wait.requesterStatus);
+            assertTrue(Set.of("X", "X,REC_NOT_GAP").contains(wait.requesterMode));
+            assertEquals("RECORD", wait.blockerType);
+            assertEquals("GRANTED", wait.blockerStatus);
+            assertTrue(Set.of("X", "X,REC_NOT_GAP").contains(wait.blockerMode));
+            assertEquals(wait.requesterKey, wait.blockerKey);
+            System.out.println("W3D-MYSQL-10 lock wait requester=" + wait.requesterPid + " blocker=" + wait.blockerPid
+                    + " schema=" + wait.requesterSchema + " table=" + wait.requesterTable + " index=" + wait.requesterIndex
+                    + " key=" + wait.requesterKey + " requester=" + wait.requesterType + "/" + wait.requesterMode + "/" + wait.requesterStatus
+                    + " blocker=" + wait.blockerType + "/" + wait.blockerMode + "/" + wait.blockerStatus);
+            releaseW3dGate.countDown();
+            Timestamp publishedAt = publish.get(15, TimeUnit.SECONDS);
+            Timestamp publishFinalDbTime = jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)", Timestamp.class);
+            assertNotNull(publishedAt);
+            assertNotNull(trackingManager.getLastW3dEntryDbTime());
+            assertNotNull(trackingManager.getLastW3dDurationMillis());
+            assertTrue(trackingManager.getLastW3dDurationMillis() <= 10_000L,
+                    "10万件のatomic publish transaction単体が派生10秒予算以内に終了すること");
+            assertTrue(trackingManager.getLastW3dEntryDbTime().before(capability.lease().expiresAt()),
+                    "publish transaction開始DB時刻がexact lease expiry前であること");
+            assertTrue(publishFinalDbTime.before(capability.lease().expiresAt()),
+                    "publish終了後のDB時刻もexact lease expiry前であること");
+            assertTrue(publishCompetitor.get(15, TimeUnit.SECONDS).runId() > 0,
+                    "publish transaction解放後に同source別jobが進めること");
+            assertEquals("COMPLETED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                    String.class, TENANT, fixture.jobId, fixture.runId));
+            long w3dPublishMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - publishStartedNanos);
+            long wholeUseCaseMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - useCaseStartedNanos);
+            System.out.println("W3D-MYSQL-10 w3dPublishWallMs=" + w3dPublishMillis
+                    + " w3dTransactionMs=" + trackingManager.getLastW3dDurationMillis()
+                    + " whole100kUseCaseMs=" + wholeUseCaseMillis
+                    + " w3cFinalGateMs=" + w3cFinalGateMillis);
         } catch (Exception | Error failure) {
             primary = failure;
             throw failure;
         } finally {
             releaseFinalAcl.countDown();
+            releaseW3dGate.countDown();
             finishPool(pool, 15, primary);
         }
     }
@@ -998,9 +1421,13 @@ class ImportValidationSealRealMySqlTest {
         private final AtomicReference<Long> lastConnectionId = new AtomicReference<>();
         private final ConcurrentHashMap<Long, Long> connectionIdsByThread = new ConcurrentHashMap<>();
         private final ThreadLocal<Long> w3cStartNanos = new ThreadLocal<>();
+        private final ThreadLocal<Long> w3dStartNanos = new ThreadLocal<>();
         private final AtomicReference<Long> lastW3cDurationMillis = new AtomicReference<>();
         private final AtomicReference<Timestamp> lastW3cEntryDbTime = new AtomicReference<>();
         private final AtomicReference<Long> lastW3cConnectionId = new AtomicReference<>();
+        private final AtomicReference<Long> lastW3dDurationMillis = new AtomicReference<>();
+        private final AtomicReference<Timestamp> lastW3dEntryDbTime = new AtomicReference<>();
+        private final AtomicReference<Long> lastW3dConnectionId = new AtomicReference<>();
 
         TrackingTransactionManager(DataSource ds) {
             super(ds);
@@ -1037,6 +1464,17 @@ class ImportValidationSealRealMySqlTest {
                     } catch (SQLException e) {
                         throw new RuntimeException("W3C最終gate開始DB時刻の取得に失敗しました", e);
                     }
+                } else if ("NF06-W3D-atomic-publish".equals(definition.getName())) {
+                    w3dStartNanos.set(System.nanoTime());
+                    try (Statement s = holder.getConnection().createStatement();
+                         ResultSet rs = s.executeQuery("SELECT CONNECTION_ID(),CURRENT_TIMESTAMP(6)")) {
+                        if (rs.next()) {
+                            lastW3dConnectionId.set(rs.getLong(1));
+                            lastW3dEntryDbTime.set(rs.getTimestamp(2));
+                        }
+                    } catch (SQLException e) {
+                        throw new RuntimeException("W3D atomic publish開始DB時刻の取得に失敗しました", e);
+                    }
                 }
             }
         }
@@ -1044,21 +1482,29 @@ class ImportValidationSealRealMySqlTest {
         @Override
         protected void doCommit(DefaultTransactionStatus status) {
             Long started = w3cStartNanos.get();
+            Long publishStarted = w3dStartNanos.get();
             try { super.doCommit(status); }
-            finally { recordW3cDuration(started); }
+            finally { recordW3cDuration(started); recordW3dDuration(publishStarted); }
         }
 
         @Override
         protected void doRollback(DefaultTransactionStatus status) {
             Long started = w3cStartNanos.get();
+            Long publishStarted = w3dStartNanos.get();
             try { super.doRollback(status); }
-            finally { recordW3cDuration(started); }
+            finally { recordW3cDuration(started); recordW3dDuration(publishStarted); }
         }
 
         private void recordW3cDuration(Long started) {
             if (started == null) return;
             lastW3cDurationMillis.set(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
             w3cStartNanos.remove();
+        }
+
+        private void recordW3dDuration(Long started) {
+            if (started == null) return;
+            lastW3dDurationMillis.set(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+            w3dStartNanos.remove();
         }
 
         Long getLastConnectionId() {
@@ -1078,11 +1524,17 @@ class ImportValidationSealRealMySqlTest {
             lastW3cDurationMillis.set(null);
             lastW3cEntryDbTime.set(null);
             lastW3cConnectionId.set(null);
+            lastW3dDurationMillis.set(null);
+            lastW3dEntryDbTime.set(null);
+            lastW3dConnectionId.set(null);
         }
 
         Long getLastW3cDurationMillis() { return lastW3cDurationMillis.get(); }
         Timestamp getLastW3cEntryDbTime() { return lastW3cEntryDbTime.get(); }
         Long getLastW3cConnectionId() { return lastW3cConnectionId.get(); }
+        Long getLastW3dDurationMillis() { return lastW3dDurationMillis.get(); }
+        Timestamp getLastW3dEntryDbTime() { return lastW3dEntryDbTime.get(); }
+        Long getLastW3dConnectionId() { return lastW3dConnectionId.get(); }
     }
 
     private void awaitLockWait(TrackingTransactionManager trackingManager, long blockerPid, Future<?> workerFuture) throws Exception {
@@ -1094,6 +1546,54 @@ class ImportValidationSealRealMySqlTest {
         awaitLockWait(trackingManager, blockerPid, workerFuture,
                 () -> trackingManager.getConnectionIdForThread(workerThreadId));
     }
+
+    private W3dLockWait awaitW3dRecordLockWait(long blockerPid, long workerThreadId,
+                                               Future<?> workerFuture) throws Exception {
+        long deadline = System.currentTimeMillis() + 8_000;
+        Long requesterPid = null;
+        Exception lastFailure = null;
+        while (System.currentTimeMillis() < deadline) {
+            if (workerFuture.isDone()) fail("publish workerが実MySQL row lock waitに入る前に終了しました");
+            requesterPid = trackingManager.getConnectionIdForThread(workerThreadId);
+            if (requesterPid != null) {
+                try {
+                    List<W3dLockWait> waits = jdbc.query("""
+                            SELECT rt.PROCESSLIST_ID,bt.PROCESSLIST_ID,req.OBJECT_SCHEMA,req.OBJECT_NAME,req.INDEX_NAME,
+                              req.LOCK_TYPE,req.LOCK_MODE,req.LOCK_STATUS,req.LOCK_DATA,
+                              blk.OBJECT_SCHEMA,blk.OBJECT_NAME,blk.INDEX_NAME,blk.LOCK_TYPE,blk.LOCK_MODE,blk.LOCK_STATUS,blk.LOCK_DATA
+                            FROM performance_schema.data_lock_waits w
+                            JOIN performance_schema.threads rt ON rt.THREAD_ID=w.REQUESTING_THREAD_ID
+                            JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                            JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE
+                              AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                            JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE
+                              AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                            WHERE rt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
+                              AND req.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_SCHEMA=DATABASE()
+                              AND req.LOCK_TYPE='RECORD' AND req.LOCK_STATUS='WAITING'
+                              AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_STATUS='GRANTED'
+                            """, (rs, row) -> new W3dLockWait(rs.getLong(1), rs.getLong(2),
+                            rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
+                            rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10),
+                            rs.getString(11), rs.getString(12), rs.getString(13), rs.getString(14),
+                            rs.getString(15), rs.getString(16)), requesterPid, blockerPid);
+                    if (!waits.isEmpty()) return waits.get(0);
+                } catch (Exception failure) {
+                    lastFailure = failure;
+                }
+            }
+            Thread.sleep(30);
+        }
+        fail("双端MySQL row lock wait未确认 requester=" + requesterPid + " blocker=" + blockerPid
+                + (lastFailure == null ? "" : " cause=" + lastFailure));
+        throw new AssertionError("unreachable");
+    }
+
+    private record W3dLockWait(long requesterPid, long blockerPid, String requesterSchema,
+                               String requesterTable, String requesterIndex, String requesterType,
+                               String requesterMode, String requesterStatus, String requesterKey,
+                               String blockerSchema, String blockerTable, String blockerIndex,
+                               String blockerType, String blockerMode, String blockerStatus, String blockerKey) { }
 
     private void awaitLockWait(TrackingTransactionManager trackingManager, long blockerPid,
                                Future<?> workerFuture, Supplier<Long> requesterConnection) throws Exception {
@@ -1153,6 +1653,10 @@ class ImportValidationSealRealMySqlTest {
 
     private static boolean isW3cFinalGateTransaction() {
         return "NF06-W3C-final-gate".equals(TransactionSynchronizationManager.getCurrentTransactionName());
+    }
+
+    private static boolean isW3dPublishTransaction() {
+        return "NF06-W3D-atomic-publish".equals(TransactionSynchronizationManager.getCurrentTransactionName());
     }
 
     private static boolean hasCause(Throwable failure, Class<? extends Throwable> expectedType) {
@@ -1344,6 +1848,41 @@ class ImportValidationSealRealMySqlTest {
     }
 
     private static byte[] hash(String value) { return hash(value.getBytes(StandardCharsets.UTF_8)); }
+    private static void assertDatabaseMapEquals(Map<String, Object> expected, Map<String, Object> actual) {
+        assertEquals(expected.keySet(), actual.keySet());
+        for (String column : expected.keySet()) {
+            Object left = expected.get(column);
+            Object right = actual.get(column);
+            if (left instanceof byte[] leftBytes && right instanceof byte[] rightBytes) {
+                assertArrayEquals(leftBytes, rightBytes, column);
+            } else {
+                assertEquals(left, right, column);
+            }
+        }
+    }
+
+    private static byte[] calculateRowCommit(long rowNumber, byte[] sourceHash, byte[] canonicalFingerprint,
+                                             String disposition, byte[] findingCodes) {
+        try {
+            var method = ImportValidationAppendService.class.getDeclaredMethod("rowCommit", long.class,
+                    byte[].class, byte[].class, String.class, byte[].class);
+            method.setAccessible(true);
+            return (byte[]) method.invoke(null, rowNumber, sourceHash, canonicalFingerprint, disposition, findingCodes);
+        } catch (ReflectiveOperationException failure) {
+            throw new RuntimeException("有効なrow commitmentのテストfixtureを生成できません", failure);
+        }
+    }
+
+    private static void setLeaseExpiryForTest(ImportValidationLifecycleService.RunLease lease, Timestamp expiry) {
+        try {
+            var field = lease.getClass().getDeclaredField("expiresAt");
+            field.setAccessible(true);
+            field.set(lease, expiry);
+        } catch (ReflectiveOperationException failure) {
+            throw new RuntimeException("publish expiry境界fixtureを設定できません", failure);
+        }
+    }
+
     private static byte[] hash(byte[] value) {
         return digest().digest(value);
     }
