@@ -54,7 +54,7 @@ class VerifyLikeCiPowerShellCompatibilityTest {
             for (String executable : executables) {
                 ProcessResult result = run(powerShellCommand(executable, fixture, mockMaven, true));
                 assertEquals(0, result.exitCode(), executable + "\n" + result.output());
-                assertTrue(result.output().contains("PreflightOnly"), result.output());
+                assertTrue(result.output().contains("PreflightOnly: 前提ツール確認まで正常に完了しました."), result.output());
                 assertTrue(result.output().contains("Apache Maven 3.9.6"), result.output());
                 assertTrue(result.output().contains("Picked up JAVA_TOOL_OPTIONS: " + JAVA_TOOL_OPTIONS), result.output());
             }
@@ -143,7 +143,7 @@ class VerifyLikeCiPowerShellCompatibilityTest {
     }
 
     private Path createFixtureRepository() throws Exception {
-        Path parent = Files.createTempDirectory("verify-like-ci-fixture-");
+        Path parent = Files.createTempDirectory("verify like-ci fixture ");
         Path fixture = parent.resolve("repository");
         Files.createDirectories(fixture.resolve("scripts/test-suites"));
         Files.createDirectories(fixture.resolve("tools"));
@@ -266,6 +266,7 @@ class VerifyLikeCiPowerShellCompatibilityTest {
         assertTrue(script.contains("Maven build/test failed"));
         assertTrue(script.contains("RedirectStandardError"));
         assertTrue(script.contains("Console]::OutputEncoding"));
+        assertTrue(script.contains("UTF8_BODY_START"));
     }
 
     private String readUtf8Strict(Path path) throws IOException {

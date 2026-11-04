@@ -20,15 +20,32 @@ param(
     [switch]$TargetedRun
 )
 
+$RunnerScriptPath = $PSCommandPath
+$RunnerScriptRoot = $PSScriptRoot
+$RunnerBoundParameters = $PSBoundParameters
+if ($PSVersionTable.PSVersion.Major -le 5) {
+    $utf8Strict = New-Object System.Text.UTF8Encoding -ArgumentList @($false, $true)
+    $utf8Source = [System.IO.File]::ReadAllText($RunnerScriptPath, $utf8Strict)
+    $bodyMarkerMatches = [System.Text.RegularExpressions.Regex]::Matches($utf8Source, '(?m)^# UTF8_BODY_START\r?$')
+    if ($bodyMarkerMatches.Count -ne 1) {
+        throw 'UTF-8 script body marker must occur exactly once.'
+    }
+    $bodyMarker = $bodyMarkerMatches[0]
+    $utf8Body = [System.Management.Automation.ScriptBlock]::Create($utf8Source.Substring($bodyMarker.Index + $bodyMarker.Length))
+    & $utf8Body
+    return
+}
+
+# UTF8_BODY_START
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $utf8Console = New-Object System.Text.UTF8Encoding $false
 [Console]::OutputEncoding = $utf8Console
 $OutputEncoding = $utf8Console
-$repoRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = Split-Path -Parent $RunnerScriptRoot
 Set-Location $repoRoot
 
-$commonScriptPath = Join-Path $PSScriptRoot 'verify-ci-common.ps1'
+$commonScriptPath = Join-Path $RunnerScriptRoot 'verify-ci-common.ps1'
 if (-not (Test-Path -LiteralPath $commonScriptPath)) {
     Write-Error "FATAL: verify-ci-common.ps1 が見つかりません: '$commonScriptPath'."
     exit 1
