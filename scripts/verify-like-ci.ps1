@@ -22,6 +22,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$utf8Console = New-Object System.Text.UTF8Encoding $false
+[Console]::OutputEncoding = $utf8Console
+$OutputEncoding = $utf8Console
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
@@ -74,6 +77,9 @@ try {
     }
     # JAVA_TOOL_OPTIONS等の正当なJVM診断は、native stderrをPowerShellのエラーstreamへ流さず表示する。
     Get-Content -LiteralPath $mavenVersionErr | ForEach-Object { Write-Host $_ }
+    if ($mavenVersionProcess.ExitCode -ne 0) {
+        throw "Mavenのバージョン確認に失敗しました (exit=$($mavenVersionProcess.ExitCode))."
+    }
 } finally {
     Remove-Item -LiteralPath $mavenVersionOut, $mavenVersionErr -Force -ErrorAction SilentlyContinue
 }
@@ -297,12 +303,19 @@ foreach ($suite in $suites) {
 
     $suiteProcessError = $null
     $suiteStatus = 0
+    $previousMavenErrorPreference = $ErrorActionPreference
     try {
-        & $mvn @suiteArgs @effectiveMavenArgs 2>&1 | Tee-Object -FilePath $suiteLog
+        # PowerShell 5.1はnative stderrをErrorRecordにするため、この呼出し中だけContinueにして
+        # stderrをTee-Objectへ流しつつ、native processのLASTEXITCODEとログを保持する。
+        $ErrorActionPreference = 'Continue'
+        $LASTEXITCODE = 0
+        & $mvn @suiteArgs @effectiveMavenArgs 2>&1 | Tee-Object -FilePath $suiteLog -ErrorAction Stop
         $suiteStatus = $LASTEXITCODE
     } catch {
         $suiteStatus = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
         $suiteProcessError = $_.Exception.Message
+    } finally {
+        $ErrorActionPreference = $previousMavenErrorPreference
     }
 
     # 統一終結処理: プロセス異常時も必ず既存成果物のアーカイブを試みる.

@@ -1,8 +1,10 @@
 package com.ses.scripts;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -86,8 +88,37 @@ class VerifyLikeCiPowerShellCompatibilityTest {
                 assertTrue(buildFailure >= 0, result.output());
                 assertTrue(skipDiagnosis < 0 || buildFailure < skipDiagnosis, result.output());
                 assertTrue(result.output().contains("Picked up JAVA_TOOL_OPTIONS: " + JAVA_TOOL_OPTIONS), result.output());
-                String suiteState = Files.readString(evidence.resolve("fast-tests/state.json"), StandardCharsets.UTF_8);
-                assertTrue(suiteState.contains("\"exitCode\": 7"), suiteState);
+                assertTrue(result.output().contains("Mock Maven build stderr diagnostic"), result.output());
+                String suiteState = readUtf8Strict(evidence.resolve("fast-tests/state.json"));
+                assertEquals(7, new ObjectMapper().readTree(suiteState).path("exitCode").asInt(-1), suiteState);
+                String suiteLog = readTextWithEncodingBom(evidence.resolve("fast-tests/fast-tests.log"));
+                assertTrue(suiteLog.contains("Mock Maven build stderr diagnostic"), suiteLog);
+            }
+        } finally {
+            deleteTree(fixture.getParent());
+        }
+    }
+
+    @Test
+    void Mavenバージョン取得失敗ではsuiteを開始しない() throws Exception {
+        List<String> executables = availablePowerShellExecutables();
+        if (executables.isEmpty()) {
+            assertStaticCompatibilityContract();
+            return;
+        }
+
+        Path fixture = createFixtureRepository();
+        try {
+            Path failingMaven = createMockMaven(fixture, 9);
+            commitFixtureTools(fixture);
+            for (String executable : executables) {
+                Files.deleteIfExists(fixture.resolve("maven-build-invoked.txt"));
+                Path evidence = fixture.getParent().resolve("version-failure-evidence-" + executable.replaceAll("[^A-Za-z0-9]", ""));
+                ProcessResult result = run(powerShellCommand(executable, fixture, failingMaven, false, evidence));
+                assertTrue(result.exitCode() != 0, result.output());
+                assertTrue(result.output().contains("Mavenのバージョン確認に失敗しました (exit=9)"), result.output());
+                assertFalse(Files.exists(fixture.resolve("maven-build-invoked.txt")), result.output());
+                assertFalse(Files.exists(evidence));
             }
         } finally {
             deleteTree(fixture.getParent());
@@ -127,24 +158,29 @@ class VerifyLikeCiPowerShellCompatibilityTest {
         git(fixture, "config", "user.name", "SES Compatibility Test");
         git(fixture, "config", "user.email", "compatibility-test@example.invalid");
         git(fixture, "add", "scripts");
-        git(fixture, "commit", "-m", "fixture");
+        git(fixture, "commit", "-m", "互換テスト用リポジトリを初期化");
         return fixture;
     }
 
     private void commitFixtureTools(Path fixture) throws Exception {
         git(fixture, "add", "tools");
-        git(fixture, "commit", "-m", "fixture tool stubs");
+        git(fixture, "commit", "-m", "互換テスト用ツールを追加");
     }
 
     private Path createMockMaven(Path fixture) throws IOException {
+        return createMockMaven(fixture, 0);
+    }
+
+    private Path createMockMaven(Path fixture, int versionExitCode) throws IOException {
         Path mock = fixture.resolve("tools/mock-maven.cmd");
         Files.writeString(mock, "@echo off\r\n" +
                 "if /I \"%~1\"==\"-v\" (\r\n" +
                 "  echo Apache Maven 3.9.6\r\n" +
                 "  >&2 echo Picked up JAVA_TOOL_OPTIONS: %JAVA_TOOL_OPTIONS%\r\n" +
-                "  exit /b 0\r\n" +
+                "  exit /b " + versionExitCode + "\r\n" +
                 ")\r\n" +
                 "echo BUILD_TEST_STARTED>\"%~dp0..\\maven-build-invoked.txt\"\r\n" +
+                ">&2 echo Mock Maven build stderr diagnostic\r\n" +
                 "exit /b 7\r\n", StandardCharsets.US_ASCII);
         return mock;
     }
@@ -210,10 +246,10 @@ class VerifyLikeCiPowerShellCompatibilityTest {
                 process.toHandle().descendants().forEach(handle -> handle.destroyForcibly());
                 process.destroyForcibly();
                 process.waitFor(5, TimeUnit.SECONDS);
-                String output = Files.readString(outputFile, StandardCharsets.UTF_8);
+                String output = readUtf8Strict(outputFile);
                 throw new AssertionError("Process timed out: " + String.join(" ", command) + "\n" + output);
             }
-            return new ProcessResult(process.exitValue(), Files.readString(outputFile, StandardCharsets.UTF_8));
+            return new ProcessResult(process.exitValue(), readUtf8Strict(outputFile));
         } finally {
             if (process != null && process.isAlive()) {
                 process.toHandle().descendants().forEach(handle -> handle.destroyForcibly());
@@ -229,6 +265,19 @@ class VerifyLikeCiPowerShellCompatibilityTest {
         assertTrue(script.contains("MavenExecutable"));
         assertTrue(script.contains("Maven build/test failed"));
         assertTrue(script.contains("RedirectStandardError"));
+        assertTrue(script.contains("Console]::OutputEncoding"));
+    }
+
+    private String readUtf8Strict(Path path) throws IOException {
+        return StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(Files.readAllBytes(path))).toString();
+    }
+
+    private String readTextWithEncodingBom(Path path) throws IOException {
+        byte[] bytes = Files.readAllBytes(path);
+        if (bytes.length >= 2 && bytes[0] == (byte) 0xFF && bytes[1] == (byte) 0xFE) {
+            return StandardCharsets.UTF_16LE.decode(ByteBuffer.wrap(bytes, 2, bytes.length - 2)).toString();
+        }
+        return readUtf8Strict(path);
     }
 
     private void deleteTree(Path root) throws IOException {
