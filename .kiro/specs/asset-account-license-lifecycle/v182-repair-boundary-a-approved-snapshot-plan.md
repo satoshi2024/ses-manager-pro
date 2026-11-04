@@ -30,47 +30,54 @@ Production Owner、帰属判定の業務責任者、承認の正本システム/
 ### 3.2 契約（提案シグネチャ）
 
 ```java
-public interface RepairApprovalAuthority {
-    VerifiedRepairApproval resolveCurrent(RepairApprovalQuery query, AuthenticatedActor actor, Instant now);
+public final class RepairApprovalAuthority {
+    public VerifiedRepairApproval resolveCurrent(RepairApprovalQuery query, AuthenticatedActor actor, Instant now);
+    public void assertCurrent(VerifiedRepairApproval approval, AuthenticatedActor actor, Instant now);
+    public static final class VerifiedRepairApproval { /* private constructor; immutable claims */ }
 }
 
 public record RepairApprovalQuery(String ticketId, RepairTargetScope target) {}
-public record VerifiedRepairApproval(
-    String ticketId, long round, long invoiceId, String tenantId, long legalEntityId,
-    long expectedInvoiceVersion, String approvedAggregateHash,
-    String approvalRecordDigest, Instant approvedAt, Instant expiresAt,
-    List<QualifiedApprover> approvers
-) {}
 public record QualifiedApprover(String stableSubject, String qualificationRef, String signatureDigest) {}
 ```
 
 `AuthenticatedActor` は確立済みサーバー認証/IdP principal からのみ生成し、呼出者指定IDを受け付けない。実装は authority から署名済み/改ざん検出可能な ticket 状態を取得し、現在 round のみを評価する。ticket、用途、invoice、tenant、legal entity、承認時 invoice version、完全な承認対象 aggregate hash が照会対象と完全一致すること、ticket が承認済み・未失効・期限内であることを検証する。全必須承認者が同一の現在 round で実際に承認し、各承認者の当時および現在有効な業務資格・tenant管轄を確認する。承認者重複、実行者との SoD 違反、旧round流用、取消/期限/署名/IdP照会不明は拒絶する。承認済み資格ルールと SoD の具体値は Owner の承認事項で、ここでは人数・役職を発明しない。
 
-`VerifiedRepairApproval` は authority adapter 内でのみ生成可能な検証済み値とする。検証失敗、取得不能、曖昧応答、鍵/資格/IdP不在は例外で停止し、空値・cache・booleanへのfallbackをしない。Snapshot取得開始時に再照会して取消/期限/round変更を検知し、DB snapshot のscope/version/hashと再比較する。authority と DB を跨ぐ原子性が得られないため、取消との競合をどう直列化するか（署名付き短命承認 lease、または同等のOwner承認済み契約）は実装前Gateとする。
+`VerifiedRepairApproval` は通常のconstructor/factoryを公開しない opaque immutable class とし、`RepairApprovalAuthority` の検証経路だけが生成する。source adapterは未検証値をauthorityへ返すだけで、型を直接発行できない。`assertCurrent` はticket署名、同一round、資格/失効、期限、scopeとhashを再照会する。Loaderはopaque値の出所をauthorityへ再検証し、active write-drain leaseおよび単一DB transaction内で対象invoice/round/hashに結び直す。検証失敗、取得不能、曖昧応答、鍵/資格/IdP不在は例外で停止し、空値・cache・booleanへのfallbackをしない。authority と DB を跨ぐ原子性が得られないため、取消との競合をどう直列化するか（署名付き短命承認 lease、または同等のOwner承認済み契約）は実装前Gateとする。
 
 ## 4. ロック済み完全 snapshot 契約
 
 ### 4.1 API と不変値
 
 ```java
-public interface LockedInvoiceAggregateLoader {
-    LockedInvoiceAggregateSnapshot loadForUpdate(RepairTargetScope target, VerifiedRepairApproval approval);
+public final class LockedInvoiceAggregateLoader {
+    public LockedInvoiceAggregateSnapshot loadForUpdate(RepairTargetScope target, VerifiedRepairApproval approval);
+    public static final class SnapshotAssemblyToken { /* private constructor; transaction-bound */ }
 }
 
-public record LockedInvoiceAggregateSnapshot(
-    ParentInvoiceSnapshot invoice,
-    List<ChildInvoiceEventSnapshot> events,
-    List<ScopeRepairQueueSnapshot> queues,
-    InvoiceOwnershipEvidence ownership,
-    String aggregateHash
-) {}
+public final class RepairWriteDrainGate {
+    public VerifiedWriteDrainLease requireActiveLease(RepairTargetScope target, Instant transactionDeadline);
+    public static final class VerifiedWriteDrainLease { /* private constructor; active writer fence */ }
+}
+
+public final class LockedInvoiceAggregateSnapshot {
+    private LockedInvoiceAggregateSnapshot(/* complete locked rows and binding token */) {}
+    public ParentInvoiceSnapshot invoice();
+    public List<ChildInvoiceEventSnapshot> events();
+    public List<ScopeRepairQueueSnapshot> queues();
+    public InvoiceOwnershipEvidence ownership();
+    public String aggregateHash();
+}
 ```
 
-これは後続設計用の契約で、現時点で既存クラスと統合/実装しない。snapshot は防御的コピーを持つ完全・読取専用の値とし、呼出者がイベント/queueを省略して生成するconstructorを公開しない。各行の主キー、親子関連、scope両列、削除状態、現行schemaにある全CAS対象version（親とqueue）、queue status/reason、帰属元の参照IDと実在する版/更新識別子を保持する。NULLと空文字を同一扱いせず記録する。
+これは後続設計用の契約で、現時点で既存クラスと統合/実装しない。snapshotのconstructorはprivateとし、loaderが保持するtransaction-bound `SnapshotAssemblyToken` を要する制御factoryだけを同一package内に置く。Tokenはprivate constructorで外部発行不可、当該transaction・approval round・invoice/hashに束縛する。factoryは親・全event・全対象queue・帰属根拠の完全性を検証した後だけsnapshotを生成する。public APIは防御的コピー/immutable listだけを返す。行の主キー、親子関連、scope両列、削除状態、現行schemaにある全CAS対象version（親とqueue）、queue status/reason、帰属元の参照IDと実在する版/更新識別子を保持する。NULLと空文字を同一扱いせず記録する。型名だけでは信頼済みと見なさず、loaderと後続CAS側はauthority発行のopaque approvalと同一transaction内で発行したsnapshot binding tokenの出所・invoice・round・aggregate hashを検証する。
 
 ### 4.2 DB transaction と決定的取得順
 
-一つの `@Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)` read transaction が全取得を包含する。最初に対象 `t_digital_invoice` を `FOR UPDATE`。次に、V182 が実際に参照した `t_invoice`/`t_sales_order`/`t_contract` と `m_customer` の存在する帰属根拠をテーブル順 `t_invoice → t_sales_order → t_contract → m_customer`、各表内主キー昇順に locking read し、soft-delete とID結合を再検証する。その後、既定契約どおり全イベントを `digital_invoice_id` 指定・`id ASC FOR UPDATE`、親queue、子queueを `entity_id ASC FOR UPDATE` の順で取得する。欠落を空listとみなさず、対象集合の完全性を別途照合する。
+V182 boundary-A 計画 §2.5 の保守window/write-drainを、loader開始前の必須条件かつtransaction終了まで維持する条件とする。既存行の `FOR UPDATE` は未存在event/queueの挿入を防がず、eventの複合FKもNULL-scope行のphantomを防止しないため、行ロック/hashだけで完全snapshotを主張しない。信頼できるwrite-drain gateが、全event/queue書込経路（API、job、migration/operatorを含む）を遮断して継続中であることを証明するopaque leaseを提示しなければ拒否する。lease失効・確認不能・coverage不明ならtransactionを開始しないか直ちにrollbackする。通常のreadonly boolean、呼出者フラグ、テストhelperはdrain証明に使わない。
+
+実際の承認済みdrain機構/証明sourceは未確定であり人工Gateである。`RepairWriteDrainGate.requireActiveLease(...)` とopaque `VerifiedWriteDrainLease` は候補契約に留め、Leaseを発行するDB fence/maintenance controlを捏造しない。transaction中の継続保証、writer集合の網羅性、解除の直列化をOwner/Operations/DBAが確定するまでloaderはfail-closedとする。
+
+drain leaseが有効な状態で、一つの `@Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)` read transaction が全取得を包含する。最初に対象 `t_digital_invoice` を `FOR UPDATE`。次に、V182 が実際に参照した `t_invoice`/`t_sales_order`/`t_contract` と `m_customer` の存在する帰属根拠をテーブル順 `t_invoice → t_sales_order → t_contract → m_customer`、各表内主キー昇順に locking read し、soft-delete とID結合を再検証する。その後、既定契約どおり全イベントを `digital_invoice_id` 指定・`id ASC FOR UPDATE`、親queue、子queueを `entity_id ASC FOR UPDATE` の順で取得する。欠落を空listとみなさず、対象集合の完全性を別途照合する。queueのparent FKがないため、正確な親/子queue集合の存在確認も必須。
 
 読み取る queue の entity type は `DIGITAL_INVOICE` と `DIGITAL_INVOICE_EVENT` のみ。event/queueの一部ページング、先頭N件、MyBatis logic-delete で除外された行の見落とし、並行する第二接続での補完は禁止。query失敗・重複ID・親子不一致・未知entity type/status・soft-delete・tenant/legal entity部分一致・同じ根拠から複数scope候補・相互矛盾・active Peppol callback identity conflictの未解決をいずれも transaction abort とする。
 
@@ -85,7 +92,7 @@ public record LockedInvoiceAggregateSnapshot(
 この計画PR/commitで変更可能なのは本ファイルのみ。承認後の実装は別レビューで、少なくとも以下に限定して着手可否を再確認する：
 
 - 新規 `src/main/java/com/ses/service/repair/RepairApprovalAuthority.java` と verified query/value/principal 型（実Authority adapter は Owner/IdP 合意後）。
-- 新規 `src/main/java/com/ses/service/repair/LockedInvoiceAggregateLoader.java`、`LockedInvoiceAggregateSnapshot.java`、帰属根拠 snapshot 型。
+- 新規 `src/main/java/com/ses/service/repair/RepairWriteDrainGate.java`（信頼source確定後）、`LockedInvoiceAggregateLoader.java`、`LockedInvoiceAggregateSnapshot.java`、帰属根拠 snapshot 型。
 - Mapperは必要な最小限の `src/main/java/com/ses/mapper/repair/` 配下に追加し、queryを `FOR UPDATE`/完全集合/決定順で定義する。Entityやmigrationは現行列で不足と証明され、別承認されるまで追加しない。
 - 後続契約テストは `src/test/java/com/ses/service/repair/`。実DBロック契約は MySQL Testcontainers の専用テストにし、テスト用approval sourceは本番beanから隔離する。
 
@@ -96,12 +103,12 @@ public record LockedInvoiceAggregateSnapshot(
 - 正例: 現round・署名検証済・期限内・資格有効の実合意fixtureと一意なV182根拠から完全snapshotを作り、承認scope/hashと一致。全eventと両種queueを同じtransaction/connectionで網羅し、ID順・行versionを記録する。
 - 承認負例: 旧roundのみ/現round不足、署名偽造または欠落、ticket用途・invoice・tenant・legalEntity・version/hashの各不一致、承認者重複、actor/approver SoD違反、資格失効/管轄外、ticket取消/期限切れ、IdP/authority timeout・unknown key・応答曖昧。すべてsnapshot/DML開始前に拒否。
 - 根拠負例: `t_invoice`/customer/order/contractのいずれか論理削除または欠落、legal entity不一致、複数tenant候補、契約元間のscope衝突、空tenant、queue/event欠落や余剰、他invoiceのevent混入、unknown status、未解決Peppol conflict。全てfail-closed、DB変更0。
-- 完全性/競合: lock順序をconnection traceで検証し、イベント/queue追加・scope変更・version変更を別connectionで競合させる。承認hashとsnapshotが一つでもずれれば全transaction rollback。snapshotのリスト改変不可、後続CASが再query/別instanceを受け付けない。
+- 完全性/競合: lock順序をconnection traceで検証し、イベント/queue追加・scope変更・version変更を別connectionで競合させる。特にsnapshot読取後にNULL-scope child event、または事前照会で不在だったqueueを別connectionから追加する負例を置く。書込は実際のtrusted drain制御によりblockされるか、snapshot整合性検査で検知して拒絶されなければならない。仮のreadonly boolean/Mock leaseでは合格にしない。承認hashとsnapshotが一つでもずれれば全transaction rollback。snapshotのリスト改変不可、後続CASが再query/別instanceを受け付けない。
 - H2のmock testだけでロック証明としない。`@Tag("mysql")` のMySQL 8 Testcontainersで `FOR UPDATE`、集合完全性、lock order、rollback、競合を実証し、専用shard inventoryに一度だけ登録。実施は唯一のテストexecutorが許可状態になった後。
 
 ## 7. 人工ゲートと完了条件
 
-**人工Gate:** (1) Production Ownerと業務帰属Ownerの実名/責任範囲、(2)承認authority・署名/失効・資格registry・IdPの正本と可用性SLA、(3)承認者人数/資格/管轄/SoD、(4)invoice所有根拠と複数ソース優先/衝突裁定規程、(5)正規aggregate hashとversionの定義、(6)承認取消とsnapshotの競合直列化、(7)業務queue保全・監査保存責任者、を人間が文書で確定する。未決項目が一つでもあればfail-closedで実装開始不可。
+**人工Gate:** (1) Production Ownerと業務帰属Ownerの実名/責任範囲、(2)承認authority・署名/失効・資格registry・IdPの正本と可用性SLA、(3)承認者人数/資格/管轄/SoD、(4)invoice所有根拠と複数ソース優先/衝突裁定規程、(5)正規aggregate hashとversionの定義、(6)承認取消とsnapshotの競合直列化、(7)全event/queue writerを含むwrite-drainの信頼source、coverage、transaction中の継続/解除制御、(8)業務queue保全・監査保存責任者、を人間が文書で確定する。未決項目が一つでもあればfail-closedで実装開始不可。
 
 本計画の完了条件は、固定SHA上の単一文書diff、UTF-8 BOMなし、200行以内、diff check pass、日語commit、固定SHA・source差分・未実行試験を記録し、責任者ReviewとAstra PLAN Reviewへ提出すること。Review結果が出るまで実装、DML、SQL、Maven、Docker、Chrome、本番操作、push/PR/merge/deployはしない。
 
