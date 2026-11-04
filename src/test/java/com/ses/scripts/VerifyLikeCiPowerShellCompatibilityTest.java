@@ -79,7 +79,7 @@ class VerifyLikeCiPowerShellCompatibilityTest {
             commitFixtureTools(repository);
             for (String executable : executables) {
                 Files.deleteIfExists(repository.resolve("maven-build-invoked.txt"));
-                Path evidence = fixture.root().resolveSibling("private-evidence-" + executable.replaceAll("[^A-Za-z0-9]", ""));
+                Path evidence = fixture.root().resolve("private-evidence-" + executable.replaceAll("[^A-Za-z0-9]", ""));
                 ProcessResult result = run(powerShellCommand(executable, repository, mockMaven, false, evidence));
                 assertEquals(7, result.exitCode(), result.output());
                 assertTrue(Files.exists(repository.resolve("maven-build-invoked.txt")),
@@ -112,7 +112,7 @@ class VerifyLikeCiPowerShellCompatibilityTest {
             commitFixtureTools(repository);
             for (String executable : executables) {
                 Files.deleteIfExists(repository.resolve("maven-build-invoked.txt"));
-                Path evidence = fixture.root().resolveSibling("version-failure-evidence-" + executable.replaceAll("[^A-Za-z0-9]", ""));
+                Path evidence = fixture.root().resolve("version-failure-evidence-" + executable.replaceAll("[^A-Za-z0-9]", ""));
                 ProcessResult result = run(powerShellCommand(executable, repository, failingMaven, false, evidence));
                 assertTrue(result.exitCode() != 0, result.output());
                 assertTrue(result.output().contains("Mavenのバージョン確認に失敗しました (exit=9)"), result.output());
