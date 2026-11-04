@@ -26,6 +26,15 @@ class ProductionEnvironmentGuardTest {
     }
 
     @Test
+    void rejectsProdDefaultProfileWhenNoActiveProfileExists() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setDefaultProfiles("prod");
+        ProductionEnvironmentGuard guard = new ProductionEnvironmentGuard(environment);
+
+        assertThrows(SecurityException.class, guard::requireProductionProfile);
+    }
+
+    @Test
     void rejectsSyntheticAndUnknownAudiences() {
         ProductionEnvironmentGuard guard = new ProductionEnvironmentGuard(prodEnvironment());
 

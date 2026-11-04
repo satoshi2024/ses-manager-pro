@@ -1,8 +1,8 @@
 package com.ses.privacy.foundation;
 
 import org.springframework.core.env.Environment;
-import org.springframework.core.env.Profiles;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /** trustedな起動環境だけでproduction policy検証を許可するpackage内guard。 */
@@ -16,7 +16,8 @@ final class ProductionEnvironmentGuard {
     }
 
     void requireProductionProfile() {
-        if (!environment.acceptsProfiles(Profiles.of("prod"))) {
+        boolean activeProd = Arrays.stream(environment.getActiveProfiles()).anyMatch("prod"::equals);
+        if (!activeProd) {
             throw new SecurityException("prod profileが有効ではありません");
         }
     }

@@ -1,6 +1,6 @@
 # NF07 本番只読境界スライス Batch 4a 設計書
 
-状態: **Astra限定 PLAN PASS（plan SHA `7ad5d9ab5670b70d454e91335c880f38665a8add`）/ 実装中 / CODE REVIEW PENDING**
+状態: **Astra限定 PLAN PASS（plan SHA `7ad5d9ab5670b70d454e91335c880f38665a8add`）/ CODE REVIEW PENDING（直近REQUEST CHANGESへの修正後、再審査待ち）**
 
 対象worktree基準: `7e1a9cdfa78d914e55e031c37762d245f12571d0`
 
@@ -47,7 +47,7 @@
 ### 3.1 ProductionEnvironmentGuard
 
 * 実行環境は注入されたtrusted `Environment`のactive profileで判定し、呼出し元・query・envelopeがprofileを選ばない。
-* active `prod` profileであることと、検証対象metadataの`audience`が固定値`PRODUCTION`であることの両方を要求する。
+* `Environment.getActiveProfiles()`に明示的な`prod`が含まれることと、検証対象metadataの`audience`が固定値`PRODUCTION`であることの両方を要求する。default profileのみが`prod`でも受け付けない。
 * `prod`でない、audienceが欠落・`SYNTHETIC`・その他の値、または環境情報を確定できない場合は拒否する。
 * 既存`SyntheticEnvironmentGuard`を変更・無効化・迂回しない。
 
@@ -115,7 +115,7 @@ Providerと`ProductionApprovalEnvelopeVerifier`は注入されたtrusted `Clock`
 9. `ROLE_ADMIN`があるが`PRIVACY_ADMIN_READ`がないprincipalを拒否する。
 10. `PRIVACY_ADMIN_READ`だけで`ROLE_ADMIN`がないprincipal、および`ROLE_SYSTEM_SERVICE`を自称するLoginUserを拒否する。
 11. External/Portal/service principalを拒否し、下流検証・catalog相当処理を呼ばない。
-12. 非prod/不確定profile、audience不一致、空Trust Anchor集合、current candidate欠落/三点不一致、revocation null/UNKNOWN/REVOKED/provider例外を個別にfail-closedで検証し、いずれもsuccess metadataを返さない。
+12. active `prod`欠落（default profileのみ`prod`を含む場合も含む）、audience不一致、空Trust Anchor集合、current candidate欠落/三点不一致、key/ envelope別の失効状態、revocation第2照会例外、署名改竄、署名済みSoD違反、trusted Clockの期限境界、scope/data/action/provider各expected binding mismatchを個別にfail-closedで検証し、いずれも対象外理由のsuccess metadataを返さない。
 
 ### 5.2 Positive fixtures and interpretation
 
