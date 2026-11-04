@@ -164,6 +164,47 @@ class ImportValidationSealRealMySqlTest {
     }
 
     @Test
+    void posW3c_realMysqlSealedRecountAndStrictRowTamperGate() {
+        var valid = setupFixture("externalKey,companyName\ncust-1,株式会社A\ncust-2,株式会社B\n");
+        var validLease = service.seal(valid.capability);
+        var capability = appendService.recountSealed(validLease);
+        assertNotNull(capability);
+        assertNotNull(capability.summarySha256());
+
+        var changed = setupFixture("externalKey,companyName\ncust-3,株式会社C\n");
+        var changedLease = service.seal(changed.capability);
+        jdbc.update("UPDATE t_import_validation_row SET finding_codes=X'00' WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=1",
+                TENANT, changed.jobId, changed.runId);
+        assertThrows(BusinessException.class, () -> appendService.recountSealed(changedLease));
+    }
+
+    @Test
+    void negW3c_realMysqlFinalGateRejectsLeaseRenewAndTakeoverDuringSourceRead() {
+        var renewed = setupFixture("externalKey,companyName\ncust-1,株式会社A\n");
+        var renewedLease = service.seal(renewed.capability);
+        byte[] renewedCsv = "externalKey,companyName\ncust-1,株式会社A\n".getBytes(StandardCharsets.UTF_8);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            jdbc.update("UPDATE t_import_job SET version_no=version_no+1 WHERE tenant_id=? AND id=?", TENANT, renewed.jobId);
+            return new ImportSourceContent(new ByteArrayInputStream(renewedCsv), "customer.csv", ImportEncoding.UTF8,
+                    ImportEntity.CUSTOMER, HexFormat.of().formatHex(digest().digest(renewedCsv)));
+        }).when(metadataService).openSource(renewed.jobId);
+        assertThrows(BusinessException.class, () -> appendService.recountSealed(renewedLease));
+
+        var takeover = setupFixture("externalKey,companyName\ncust-2,株式会社B\n");
+        var takeoverLease = service.seal(takeover.capability);
+        byte[] takeoverCsv = "externalKey,companyName\ncust-2,株式会社B\n".getBytes(StandardCharsets.UTF_8);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            jdbc.update("UPDATE t_import_job SET lease_generation=lease_generation+1,version_no=version_no+1 WHERE tenant_id=? AND id=?",
+                    TENANT, takeover.jobId);
+            jdbc.update("UPDATE t_import_validation_run SET last_resumed_lease_generation=last_resumed_lease_generation+1 WHERE tenant_id=? AND job_id=? AND id=?",
+                    TENANT, takeover.jobId, takeover.runId);
+            return new ImportSourceContent(new ByteArrayInputStream(takeoverCsv), "customer.csv", ImportEncoding.UTF8,
+                    ImportEntity.CUSTOMER, HexFormat.of().formatHex(digest().digest(takeoverCsv)));
+        }).when(metadataService).openSource(takeover.jobId);
+        assertThrows(BusinessException.class, () -> appendService.recountSealed(takeoverLease));
+    }
+
+    @Test
     void negSeal16_concurrentAppendCommitsBeforeSealCausesDiscrepancy() throws Exception {
         // NEG-SEAL-16: seal 待機中に並行 append が先にコミット -> 行セット不一致により 409
         String csv = "externalKey,companyName\ncust-1,株式会社A\n";

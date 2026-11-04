@@ -88,6 +88,108 @@ public class ImportValidationLifecycleService {
         return transaction.execute(status -> renewInTransaction(lease));
     }
 
+    /** W3C開始時の短いread gate。SEALEDかつlease全項目が現行値と完全一致することを要求する。 */
+    RunLease beginSealedRecount(RunLease grant) {
+        requireInstance(grant == null ? null : grant.instanceId);
+        return transaction.execute(status -> {
+            current(grant.input.context);
+            Locked locked = lockResources(grant.input, grant.runId);
+            ImportAuthorizedContext gate = authorization.requireCurrentAuthorizationForWrite(grant.input.context);
+            requireSameActor(grant.input.context, gate);
+            Timestamp now = dbNow();
+            requireExactSealedLease(grant, locked, now);
+            return grant;
+        });
+    }
+
+    /** W3C final gate。source I/O後にACL、DB時刻、exact lease、row setと全summary列を再確認する。 */
+    RunLease confirmSealedRecount(ImportValidationAppendService.RecountProof proof) {
+        if (proof == null || proof.lease() == null || proof.snapshot() == null) conflict();
+        RunLease grant = proof.lease();
+        requireInstance(grant.instanceId);
+        return transaction.execute(status -> {
+            Input expected = grant.input;
+            current(expected.context);
+            Locked locked = lockResources(expected, grant.runId);
+            AppendSnapshot snapshot = appendSnapshot(grant);
+            if (!sameAppendSnapshot(snapshot, proof.snapshot())
+                    || !HexFormat.of().formatHex(expected.sourceSha).equalsIgnoreCase(proof.sourceSha256())) conflict();
+            Run run = locked.run;
+            Long rowCount = jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                    Long.class, expected.context.tenantId(), expected.jobId, run.id);
+            if (rowCount == null || rowCount.longValue() != proof.counters().sourceRows()) conflict();
+            requirePersistedRowSetMatches(expected.context.tenantId(), expected.jobId, run.id, rowCount, proof.rowSetSha256());
+            RunSummary persisted = loadRunSummary(expected.context.tenantId(), expected.jobId, run.id);
+            if (persisted == null || persisted.sealedAt == null) conflict();
+            byte[] rowSetSha = HexFormat.of().parseHex(proof.rowSetSha256());
+            byte[] summarySha = HexFormat.of().parseHex(proof.summarySha256());
+            if (!Arrays.equals(persisted.rowSetSha256, rowSetSha)
+                    || !Arrays.equals(persisted.summarySha256, summarySha)) conflict();
+            requireSummaryMatches(persisted, proof.counters());
+            ImportAuthorizedContext gate = authorization.requireCurrentAuthorizationForWrite(expected.context);
+            requireSameActor(expected.context, gate);
+            Timestamp now = dbNow();
+            requireExactSealedLease(grant, locked, now);
+            return grant;
+        });
+    }
+
+    private void requirePersistedRowSetMatches(String tenant, long jobId, long runId, long expectedCount,
+                                               String expectedSha256) {
+        MessageDigest digest = sha256Digest();
+        digest.update("SES-IMPORT-ROW-SET-V1".getBytes(StandardCharsets.US_ASCII));
+        digest.update(new byte[]{0, 0, 0, 1});
+        long after = 0;
+        long count = 0;
+        while (true) {
+            List<ImportValidationAppendService.RowMetadata> rows = jdbc.query("""
+                    SELECT source_row_number,source_row_sha256,canonical_fingerprint,disposition,finding_codes,row_commit_sha256
+                    FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?
+                      AND source_row_number>? ORDER BY source_row_number LIMIT 250 FOR UPDATE
+                    """, (rs, n) -> new ImportValidationAppendService.RowMetadata(rs.getLong(1), rs.getBytes(2),
+                    rs.getBytes(3), rs.getString(4), rs.getBytes(5), rs.getBytes(6)), tenant, jobId, runId, after);
+            if (rows.isEmpty()) break;
+            for (ImportValidationAppendService.RowMetadata row : rows) {
+                if (row.sourceRowNumber() <= after || !ImportValidationAppendService.hasValidRowCommit(row)) conflict();
+                after = row.sourceRowNumber();
+                count++;
+                digest.update(ByteBuffer.allocate(Long.BYTES).putLong(after).array());
+                byte[] commitment = row.rowCommitSha256();
+                digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(commitment.length).array());
+                digest.update(commitment);
+            }
+        }
+        if (count != expectedCount || !MessageDigest.isEqual(digest.digest(), HexFormat.of().parseHex(expectedSha256))) conflict();
+    }
+
+    private void requireExactSealedLease(RunLease grant, Locked locked, Timestamp now) {
+        Job job = locked.job;
+        Run run = locked.run;
+        if (job == null || run == null || !"VALIDATING".equals(job.state)
+                || !Objects.equals(job.activeRunId, grant.runId) || job.currentRunId != null
+                || !grant.workerId.equals(job.owner) || job.generation != grant.generation
+                || job.version != grant.jobVersion || job.expiresAt == null
+                || !job.expiresAt.equals(grant.expiresAt) || !job.expiresAt.after(now)
+                || !"SEALED".equals(run.state) || !Integer.valueOf(1).equals(run.activeSlot)
+                || run.publishedSlot != null || run.lastResumedGeneration != grant.generation
+                || !sameRunInput(grant.input, run)) conflict();
+    }
+
+    private boolean sameAppendSnapshot(AppendSnapshot a, AppendSnapshot b) {
+        return a.context().equals(b.context()) && a.jobId() == b.jobId() && a.sourceId() == b.sourceId()
+                && a.sourceVersion() == b.sourceVersion() && a.sourceCode().equals(b.sourceCode())
+                && a.entity().equals(b.entity()) && a.schema().equals(b.schema()) && a.encoding().equals(b.encoding())
+                && a.documentId() == b.documentId() && a.documentVersionId() == b.documentVersionId()
+                && a.documentVersionNo() == b.documentVersionNo() && Objects.equals(a.mappingId(), b.mappingId())
+                && a.mappingVersion() == b.mappingVersion() && a.runId() == b.runId()
+                && a.workerId().equals(b.workerId()) && a.generation() == b.generation()
+                && a.jobVersion() == b.jobVersion() && Objects.equals(a.expiresAt(), b.expiresAt())
+                && MessageDigest.isEqual(a.sourceSha(), b.sourceSha())
+                && MessageDigest.isEqual(a.documentSha(), b.documentSha())
+                && MessageDigest.isEqual(a.mappingSha(), b.mappingSha())
+                && MessageDigest.isEqual(a.validatorFingerprint(), b.validatorFingerprint());
+    }
+
     public void abort(RunLease lease) {
         requireInstance(lease == null ? null : lease.instanceId);
         transaction.executeWithoutResult(status -> abortInTransaction(lease));
@@ -584,7 +686,7 @@ public class ImportValidationLifecycleService {
         }
 
         byte[] expectedRowSetSha = HexFormat.of().parseHex(capability.rowSetSha256());
-        if (!MessageDigest.isEqual(persisted.rowSetSha256, expectedRowSetSha)) {
+        if (!Arrays.equals(persisted.rowSetSha256, expectedRowSetSha)) {
             conflict();
         }
 
@@ -594,32 +696,27 @@ public class ImportValidationLifecycleService {
             conflict();
         }
 
-        var counters = capability.counters();
+        requireSummaryMatches(persisted, capability.counters());
+
+        return lease(expected, run.id, capability.workerId(), capability.generation(), job.version, job.expiresAt);
+    }
+
+    private void requireSummaryMatches(RunSummary persisted, ValidationCounterAccumulator.Snapshot counters) {
         if (persisted.sourceRowCount != counters.sourceRows()
                 || persisted.physicalRowCount != counters.physicalRows()
                 || persisted.emptyRowCount != counters.emptySkipped()
                 || persisted.acceptedRowCount != counters.validatedAcceptedTotal()
-                || persisted.rejectedRowCount != counters.rejected()) {
-            conflict();
-        }
-
-        if (!MessageDigest.isEqual(persisted.findingSummarySha256, counters.findingSummarySha256())
-                || !MessageDigest.isEqual(persisted.amountExcludedReasonSha256, counters.amountExcludedReasonSha256())
+                || persisted.rejectedRowCount != counters.rejected()
+                || !Arrays.equals(persisted.findingSummarySha256, counters.findingSummarySha256())
+                || !Arrays.equals(persisted.amountExcludedReasonSha256, counters.amountExcludedReasonSha256())
                 || !Arrays.equals(persisted.findingSummaryBytes, counters.findingSummaryBytes())
-                || !Arrays.equals(persisted.amountExcludedReasonCounts, counters.amountExcludedReasonCountsBytes())) {
-            conflict();
-        }
-
+                || !Arrays.equals(persisted.amountExcludedReasonCounts, counters.amountExcludedReasonCountsBytes())) conflict();
         var amounts = counters.amountCountersByField();
         if (!persisted.matchesAmount("expectedUnitPrice", amounts.get("expectedUnitPrice"))
                 || !persisted.matchesAmount("unitPriceMin", amounts.get("unitPriceMin"))
                 || !persisted.matchesAmount("unitPriceMax", amounts.get("unitPriceMax"))
                 || !persisted.matchesAmount("sellingPrice", amounts.get("sellingPrice"))
-                || !persisted.matchesAmount("costPrice", amounts.get("costPrice"))) {
-            conflict();
-        }
-
-        return lease(expected, run.id, capability.workerId(), capability.generation(), job.version, job.expiresAt);
+                || !persisted.matchesAmount("costPrice", amounts.get("costPrice"))) conflict();
     }
 
     private RunSummary loadRunSummary(String tenant, long jobId, long runId) {

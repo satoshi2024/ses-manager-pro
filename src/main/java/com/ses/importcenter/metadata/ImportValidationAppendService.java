@@ -96,9 +96,38 @@ public class ImportValidationAppendService {
         return new AppendCompletion(finalLease, capability);
     }
 
+    /** SEALED snapshotをsource先頭から再検証し、final exact gate通過後だけprivate capabilityを発行する。 */
+    PublishCapability recountSealed(ImportValidationLifecycleService.RunLease lease) {
+        ImportValidationLifecycleService.RunLease started = lifecycle.beginSealedRecount(lease);
+        ImportValidationLifecycleService.AppendSnapshot snapshot = lifecycle.appendSnapshot(started);
+        Map<String, String> mapping = loadMapping(snapshot);
+        ValidationContext context = new ValidationContext(snapshot.context().tenantId(),
+                Long.toString(snapshot.context().legalEntityId()), failClosedResolver);
+        ScanResult result = scan(snapshot, mapping, context, false, started, true);
+        if (!MessageDigest.isEqual(snapshot.sourceSha(), HexFormat.of().parseHex(result.sourceSha256()))) conflict();
+        var counters = result.counters();
+        if (counters.sourceRows() != result.rowCount()
+                || counters.sourceRows() != counters.validatedAcceptedTotal() + counters.rejected()
+                || counters.physicalRows() != counters.sourceRows() + counters.emptySkipped()) conflict();
+        byte[] rowSetSha = HexFormat.of().parseHex(result.rowSetSha256());
+        byte[] summarySha = ImportValidationLifecycleService.calculateSummarySha256(snapshot.context().tenantId(),
+                snapshot.jobId(), snapshot.runId(), snapshot.sourceSha(), snapshot.validatorFingerprint(), rowSetSha, counters);
+        RecountProof proof = new RecountProof(result.lease(), lifecycle.appendSnapshot(result.lease()), result.sourceSha256(), result.rowSetSha256(),
+                HexFormat.of().formatHex(summarySha), counters);
+        ImportValidationLifecycleService.RunLease confirmed = lifecycle.confirmSealedRecount(proof);
+        return new PublishCapability(confirmed, lifecycle.appendSnapshot(confirmed), result.sourceSha256(), result.rowSetSha256(),
+                HexFormat.of().formatHex(summarySha), counters);
+    }
+
     private ScanResult scan(ImportValidationLifecycleService.AppendSnapshot snapshot, Map<String, String> mapping,
                             ValidationContext context, boolean write, ImportValidationLifecycleService.RunLease initialLease) {
-        PrefixCursor prefix = new PrefixCursor(snapshot);
+        return scan(snapshot, mapping, context, write, initialLease, false);
+    }
+
+    private ScanResult scan(ImportValidationLifecycleService.AppendSnapshot snapshot, Map<String, String> mapping,
+                            ValidationContext context, boolean write, ImportValidationLifecycleService.RunLease initialLease,
+                            boolean strictSealed) {
+        PrefixCursor prefix = new PrefixCursor(snapshot, strictSealed);
         List<RowMetadata> batch = new ArrayList<>(CHUNK_ROWS);
         ImportValidationLifecycleService.RunLease[] current = {initialLease};
         long[] processedRows = {0};
@@ -225,6 +254,12 @@ public class ImportValidationAppendService {
         }
     }
 
+    static boolean hasValidRowCommit(RowMetadata row) {
+        return row != null && MessageDigest.isEqual(row.rowCommitSha256,
+                rowCommit(row.sourceRowNumber, row.sourceRowSha256, row.canonicalFingerprint,
+                        row.disposition, row.findingCodes));
+    }
+
     private static byte[] rowCommit(long rowNumber, byte[] sourceHash, byte[] canonicalFingerprint,
                                     String disposition, byte[] findingBytes) {
         try {
@@ -259,6 +294,48 @@ public class ImportValidationAppendService {
                               long rowCount, String rowSetSha256) { }
 
     record AppendCompletion(ImportValidationLifecycleService.RunLease lease, SealCapability capability) { }
+
+    static final class RecountProof {
+        private final ImportValidationLifecycleService.RunLease lease;
+        private final ImportValidationLifecycleService.AppendSnapshot snapshot;
+        private final String sourceSha256, rowSetSha256, summarySha256;
+        private final com.ses.importcenter.foundation.ValidationCounterAccumulator.Snapshot counters;
+        private RecountProof(ImportValidationLifecycleService.RunLease lease,
+                             ImportValidationLifecycleService.AppendSnapshot snapshot, String sourceSha256,
+                             String rowSetSha256, String summarySha256,
+                             com.ses.importcenter.foundation.ValidationCounterAccumulator.Snapshot counters) {
+            this.lease = lease; this.snapshot = snapshot; this.sourceSha256 = sourceSha256;
+            this.rowSetSha256 = rowSetSha256; this.summarySha256 = summarySha256; this.counters = counters;
+        }
+        ImportValidationLifecycleService.RunLease lease() { return lease; }
+        ImportValidationLifecycleService.AppendSnapshot snapshot() { return snapshot; }
+        String sourceSha256() { return sourceSha256; }
+        String rowSetSha256() { return rowSetSha256; }
+        String summarySha256() { return summarySha256; }
+        com.ses.importcenter.foundation.ValidationCounterAccumulator.Snapshot counters() { return counters; }
+    }
+
+    static final class PublishCapability {
+        private final ImportValidationLifecycleService.RunLease lease;
+        private final String sourceSha256, rowSetSha256, summarySha256;
+        private final com.ses.importcenter.foundation.ValidationCounterAccumulator.Snapshot counters;
+        private PublishCapability(ImportValidationLifecycleService.RunLease lease,
+                                  ImportValidationLifecycleService.AppendSnapshot snapshot, String sourceSha256,
+                                  String rowSetSha256, String summarySha256,
+                                  com.ses.importcenter.foundation.ValidationCounterAccumulator.Snapshot counters) {
+            if (lease == null || snapshot == null || lease.runId() != snapshot.runId()
+                    || lease.generation() != snapshot.generation() || lease.jobVersion() != snapshot.jobVersion()
+                    || !lease.workerId().equals(snapshot.workerId()) || !lease.tenantId().equals(snapshot.context().tenantId())
+                    || lease.jobId() != snapshot.jobId() || !Objects.equals(lease.expiresAt(), snapshot.expiresAt())) conflict();
+            this.lease = lease; this.sourceSha256 = sourceSha256; this.rowSetSha256 = rowSetSha256;
+            this.summarySha256 = summarySha256; this.counters = counters;
+        }
+        ImportValidationLifecycleService.RunLease lease() { return lease; }
+        String sourceSha256() { return sourceSha256; }
+        String rowSetSha256() { return rowSetSha256; }
+        String summarySha256() { return summarySha256; }
+        com.ses.importcenter.foundation.ValidationCounterAccumulator.Snapshot counters() { return counters; }
+    }
 
     static final class SealCapability {
         private final ImportValidationLifecycleService.RunLease lease;
@@ -328,15 +405,21 @@ public class ImportValidationAppendService {
         private List<RowMetadata> page = List.of();
         private int index;
 
-        private PrefixCursor(ImportValidationLifecycleService.AppendSnapshot snapshot) {
+        private final boolean strictSealed;
+
+        private PrefixCursor(ImportValidationLifecycleService.AppendSnapshot snapshot, boolean strictSealed) {
             this.snapshot = snapshot;
+            this.strictSealed = strictSealed;
             Long count = jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
                     Long.class, snapshot.context().tenantId(), snapshot.jobId(), snapshot.runId());
             this.total = count == null ? 0 : count;
         }
 
         private boolean compare(RowMetadata actual) {
-            if (consumed >= total) return false;
+            if (consumed >= total) {
+                if (strictSealed) conflict();
+                return false;
+            }
             if (index >= page.size()) loadPage();
             if (page.isEmpty()) conflict();
             RowMetadata expected = page.get(index++);

@@ -173,6 +173,106 @@ class ImportValidationSealServiceTest {
     }
 
     @Test
+    void posW3c_recountsExactSealedSourceAndMintsRepeatablePrivateCapability() {
+        var fixture = setupFixture("externalKey,companyName\ncust-1,株式会社A\ncust-2,株式会社B\n");
+        var sealedLease = service.seal(fixture.capability);
+        var first = appendService.recountSealed(sealedLease);
+        var second = appendService.recountSealed(sealedLease);
+        assertNotNull(first);
+        assertNotNull(second);
+        assertEquals(first.rowSetSha256(), second.rowSetSha256());
+        assertEquals(first.summarySha256(), second.summarySha256());
+        assertEquals("SEALED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, TENANT, fixture.jobId, fixture.runId));
+    }
+
+    @Test
+    void negW3c_rejectsMissingTailZeroRowsExtraRowsAndEachStoredRowFieldTamper() {
+        String csv = "externalKey,companyName\ncust-1,株式会社A\ncust-2,株式会社B\n";
+        var missingTail = setupFixture(csv);
+        var missingTailLease = service.seal(missingTail.capability);
+        jdbc.update("DELETE FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=2",
+                TENANT, missingTail.jobId, missingTail.runId);
+        assertThrows(BusinessException.class, () -> appendService.recountSealed(missingTailLease));
+
+        var noRows = setupFixture(csv);
+        var noRowsLease = service.seal(noRows.capability);
+        jdbc.update("DELETE FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                TENANT, noRows.jobId, noRows.runId);
+        assertThrows(BusinessException.class, () -> appendService.recountSealed(noRowsLease));
+
+        var extra = setupFixture(csv);
+        var extraLease = service.seal(extra.capability);
+        insertRow(extra.jobId, extra.runId, 99);
+        assertThrows(BusinessException.class, () -> appendService.recountSealed(extraLease));
+
+        for (String column : List.of("source_row_sha256", "canonical_fingerprint", "disposition",
+                "finding_codes", "row_commit_sha256")) {
+            var changed = setupFixture(csv);
+            var changedLease = service.seal(changed.capability);
+            jdbc.update("UPDATE t_import_validation_row SET " + column + "=? WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=1",
+                    column.equals("disposition") ? "REJECTED" : hash("tampered"), TENANT, changed.jobId, changed.runId);
+            assertThrows(BusinessException.class, () -> appendService.recountSealed(changedLease), column);
+        }
+        var rowNumber = setupFixture(csv);
+        var rowNumberLease = service.seal(rowNumber.capability);
+        jdbc.update("UPDATE t_import_validation_row SET source_row_number=10 WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=2",
+                TENANT, rowNumber.jobId, rowNumber.runId);
+        assertThrows(BusinessException.class, () -> appendService.recountSealed(rowNumberLease));
+    }
+
+    @Test
+    void negW3c_rejectsSummaryTamperAndRevokedWriteAuthorization() {
+        var summary = setupFixture("externalKey,companyName\ncust-1,株式会社A\n");
+        var summaryLease = service.seal(summary.capability);
+        jdbc.update("UPDATE t_import_validation_run SET accepted_row_count=0 WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, summary.jobId, summary.runId);
+        assertThrows(BusinessException.class, () -> appendService.recountSealed(summaryLease));
+
+        var denied = setupFixture("externalKey,companyName\ncust-1,株式会社A\n");
+        var deniedLease = service.seal(denied.capability);
+        org.mockito.Mockito.doThrow(BusinessException.of(403, "error.forbidden"))
+                .when(authorization).requireCurrentAuthorizationForWrite(context);
+        assertThrows(BusinessException.class, () -> appendService.recountSealed(deniedLease));
+    }
+
+    @Test
+    void negW3c_rejectsNullVersusZeroAmountSummaryTamper() {
+        var fixture = setupFixture("externalKey,companyName\ncust-1,株式会社A\n");
+        var lease = service.seal(fixture.capability);
+        jdbc.update("UPDATE t_import_validation_run SET cost_price_accepted_sum_yen=0 WHERE tenant_id=? AND job_id=? AND id=?",
+                TENANT, fixture.jobId, fixture.runId);
+        assertThrows(BusinessException.class, () -> appendService.recountSealed(lease));
+    }
+
+    @Test
+    void negW3c_finalGateRejectsRenewOrTakeoverAfterRecountStarted() {
+        var renewed = setupFixture("externalKey,companyName\ncust-1,株式会社A\n");
+        var renewedLease = service.seal(renewed.capability);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            jdbc.update("UPDATE t_import_job SET version_no=version_no+1 WHERE tenant_id=? AND id=?",
+                    TENANT, renewed.jobId);
+            return new ImportSourceContent(new ByteArrayInputStream("externalKey,companyName\ncust-1,株式会社A\n".getBytes(StandardCharsets.UTF_8)),
+                    "customer.csv", ImportEncoding.UTF8, ImportEntity.CUSTOMER,
+                    HexFormat.of().formatHex(digest().digest("externalKey,companyName\ncust-1,株式会社A\n".getBytes(StandardCharsets.UTF_8))));
+        }).when(metadataService).openSource(renewed.jobId);
+        assertThrows(BusinessException.class, () -> appendService.recountSealed(renewedLease));
+
+        var takeover = setupFixture("externalKey,companyName\ncust-2,株式会社B\n");
+        var takeoverLease = service.seal(takeover.capability);
+        byte[] takeoverCsv = "externalKey,companyName\ncust-2,株式会社B\n".getBytes(StandardCharsets.UTF_8);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            jdbc.update("UPDATE t_import_job SET lease_generation=lease_generation+1,version_no=version_no+1 WHERE tenant_id=? AND id=?",
+                    TENANT, takeover.jobId);
+            jdbc.update("UPDATE t_import_validation_run SET last_resumed_lease_generation=last_resumed_lease_generation+1 WHERE tenant_id=? AND job_id=? AND id=?",
+                    TENANT, takeover.jobId, takeover.runId);
+            return new ImportSourceContent(new ByteArrayInputStream(takeoverCsv), "customer.csv", ImportEncoding.UTF8,
+                    ImportEntity.CUSTOMER, HexFormat.of().formatHex(digest().digest(takeoverCsv)));
+        }).when(metadataService).openSource(takeover.jobId);
+        assertThrows(BusinessException.class, () -> appendService.recountSealed(takeoverLease));
+    }
+
+    @Test
     void posSeal_leadingAndMiddleEmptyRows_successWithNonContiguousSourceRowNumbers() {
         // 先頭空行（2行目）および中間空行（4行目）を含むCSV。
         // ヘッダー読み取り後に physicalRows=0 からカウントするため、
