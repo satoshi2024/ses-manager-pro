@@ -34,6 +34,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.test.context.transaction.AfterTransaction;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -42,6 +44,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @DisplayName("Asset Comprehensive Boundary & Integration Tests (境界・並行性・Recovery・スコープ検証)")
 class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
+
+    private List<Long> salesManagerScopeFixtureOrganizationIds = List.of();
 
     @BeforeEach
     void bindTenantContext() {
@@ -72,6 +76,13 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     void clearTenantContext() {
         AccountingTenantContextHolder.clear();
         org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
+
+    @AfterTransaction
+    void assertSalesManagerScopeFixtureWasRolledBack() {
+        if (!salesManagerScopeFixtureOrganizationIds.isEmpty()) {
+            assertThat(organizationUnitMapper.selectBatchIds(salesManagerScopeFixtureOrganizationIds)).isEmpty();
+        }
     }
 
     @Autowired
@@ -890,9 +901,12 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class)
     @DisplayName("Boundary 6-B: 営業/マネージャーの貸与・法人scopeをfail-closedで分離")
     void testSalesAndManagerScopeUsesAssignmentAndManagedOrganization() throws Exception {
+        assertThat(TransactionSynchronizationManager.isActualTransactionActive())
+                .as("共有H2の法人scope fixtureは結合テストのrollback transaction内で実行する")
+                .isTrue();
         String suffix = Long.toString(System.nanoTime());
         long legalA = 91001L;
         long legalB = 91002L;
@@ -905,6 +919,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .type("DEPARTMENT").validFrom(LocalDate.of(2026, 1, 1)).status("有効").build();
         organizationUnitMapper.insert(orgA);
         organizationUnitMapper.insert(orgB);
+        salesManagerScopeFixtureOrganizationIds = List.of(orgA.getId(), orgB.getId());
 
         Engineer engineerA = Engineer.builder().fullName("資産Scope要員A-" + suffix)
                 .employmentType("正社員").status("稼動中").organizationId(orgA.getId())

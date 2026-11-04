@@ -26,14 +26,19 @@ import java.lang.reflect.InvocationTargetException;
 import java.time.Instant;
 import java.time.Clock;
 import java.time.ZoneId;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.ses.privacy.foundation.PrivacyJournalPort.CommandType.*;
@@ -43,6 +48,13 @@ import static org.junit.jupiter.api.Assertions.*;
 @Tag("mysql")
 @Testcontainers
 class PrivacyJournalLinearizationMySqlTest {
+    private static final long STARTUP_BUDGET_SECONDS = 20;
+    private static final long OBSERVATION_BUDGET_SECONDS = 20;
+    private static final long COMPLETION_BUDGET_SECONDS = 20;
+    private static final long GATE_HOLD_BUDGET_SECONDS = 90;
+    private static final long CLEANUP_JOIN_BUDGET_SECONDS = 10;
+    private static final long OBSERVATION_POLL_MILLIS = 50;
+    private static final int LOCK_QUERY_TIMEOUT_SECONDS = 5;
     private static final MutableClock CLOCK = new MutableClock(Instant.parse("2026-10-02T00:00:00Z"));
     private static final String PASS = UUID.randomUUID().toString();
     @Container
@@ -54,6 +66,7 @@ class PrivacyJournalLinearizationMySqlTest {
 
     private static AnnotationConfigApplicationContext context;
     private static JdbcTemplate admin;
+    private static JdbcTemplate lockObserver;
     private static JdbcTemplate writer;
     private static DataSource adminDataSource;
     private static DataSource writerDataSource;
@@ -76,6 +89,8 @@ class PrivacyJournalLinearizationMySqlTest {
                 capability.schemaHash(), capability.manifestHash());
         adminDataSource = capability.adminDataSource();
         admin = new JdbcTemplate(adminDataSource);
+        lockObserver = new JdbcTemplate(adminDataSource);
+        lockObserver.setQueryTimeout(LOCK_QUERY_TIMEOUT_SECONDS);
         new ResourceDatabasePopulator(new ClassPathResource("privacy-journal/schema-test.sql")).execute(adminDataSource);
         writerDataSource = capability.createJournalWriterDataSource();
         writer = new JdbcTemplate(writerDataSource);
@@ -134,38 +149,216 @@ class PrivacyJournalLinearizationMySqlTest {
     private void assertOrderedP1Race(CommandType firstType, CommandType secondType, long secondExpectedRevision,
                                      List<CommandType> expectedEvents) throws Exception {
         JournalAck lease = claimLease("lease-ordered-" + firstType.name().toLowerCase(), CLOCK.instant());
-        HeadUpsertGate gate = new HeadUpsertGate(writerDataSource);
-        JdbcPrivacyJournalAdapter orderedJournal = new JdbcPrivacyJournalAdapter(gate.dataSource(), context.getEnvironment(), CLOCK);
         JournalCommand firstCommand = command("ordered-first-" + firstType.name().toLowerCase(), firstType, lease.revision());
         JournalCommand secondCommand = command("ordered-second-" + secondType.name().toLowerCase(), secondType, secondExpectedRevision);
+        LockedPairResult result = appendPairWithObservedHeadWait(firstCommand, secondCommand);
+        assertEquals(2, result.first().ack().revision());
+        if (secondType == DISPATCH_AUTHORIZED) {
+            assertInstanceOf(JournalConflictException.class, result.second().failure());
+        } else {
+            assertNull(result.second().failure());
+            assertEquals(3, result.second().ack().revision());
+        }
+        assertEquals(expectedEvents, journal.events(partition).stream().map(JournalEvent::type).toList());
+        System.out.printf("SF_W2A_ORDERED_P1 first=%s second=%s firstConnectionId=%d secondConnectionId=%d schema=%s key=%s object=sf_journal_head index=PRIMARY result=%s%n",
+                firstType, secondType, result.firstConnection().connectionId(), result.secondConnection().connectionId(),
+                result.firstConnection().schema(), result.lockData(), expectedEvents);
+    }
+
+    private LockedPairResult appendPairWithObservedHeadWait(JournalCommand firstCommand, JournalCommand secondCommand)
+            throws Exception {
+        HeadUpsertGate gate = new HeadUpsertGate(writerDataSource);
+        JdbcPrivacyJournalAdapter gatedJournal = new JdbcPrivacyJournalAdapter(gate.dataSource(), context.getEnvironment(), CLOCK);
         var pool = Executors.newFixedThreadPool(2);
+        Future<AppendOutcome> firstFuture = null;
+        Future<AppendOutcome> secondFuture = null;
+        AppendOutcome firstOutcome = null;
+        AppendOutcome secondOutcome = null;
+        LockedPairResult result = null;
+        Throwable failure = null;
+        LockWaitEdge observedEdge = null;
+        Set<Throwable> handledWriterFailures = Collections.newSetFromMap(new IdentityHashMap<>());
         try {
-            var first = pool.submit(() -> orderedJournal.append(firstCommand));
-            assertTrue(gate.firstHeadLockAcquired.await(10, TimeUnit.SECONDS), "先行writerがhead PRIMARYをlockする必要があります");
-            var second = pool.submit(() -> orderedJournal.append(secondCommand));
-            assertTrue(gate.statementAttempts.await(10, TimeUnit.SECONDS), "後続writerが同じhead upsertを開始する必要があります");
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-            boolean observed = false;
-            while (System.nanoTime() < deadline && !observed) {
-                observed = primaryHeadWait(gate.connectionIds.get(1), gate.connectionIds.get(0));
-                if (!observed && second.isDone()) second.get(1, TimeUnit.SECONDS);
-                if (!observed) Thread.sleep(50);
+            firstFuture = pool.submit(() -> appendOutcome(gatedJournal, firstCommand));
+            awaitGateSignal(gate.firstHeadLockAcquired, firstFuture, null, "先行writerがhead upsertの実行後にPRIMARY lockを保持する", gate);
+            secondFuture = pool.submit(() -> appendOutcome(gatedJournal, secondCommand));
+            awaitGateSignal(gate.secondHeadExecuteStarted, firstFuture, secondFuture,
+                    "後続writerが同一partitionのhead upsertを実行する直前まで到達する", gate);
+
+            WriterConnection first = gate.firstConnection.get();
+            WriterConnection second = gate.secondConnection.get();
+            if (first == null || second == null) {
+                throw asTestFailure("両writer接続のrole/stageを記録する必要があります", null, gate, null);
             }
-            assertTrue(observed, "後続business writerが先行business writerのpartition PRIMARY lockを待つ必要があります");
+            if (first.connectionId() == second.connectionId()) {
+                throw asTestFailure("両writerは別接続である必要があります", null, gate, null);
+            }
+            if (!first.schema().equals(second.schema())) {
+                throw asTestFailure("両writerは同じ実schemaを使う必要があります", null, gate, null);
+            }
+            if (!"FIRST_HEAD_UPSERT_LOCKED".equals(first.phase())
+                    || !"SECOND_HEAD_UPSERT_EXECUTE_READY".equals(second.phase())) {
+                throw asTestFailure("接続role/stageの記録順序が不正です", null, gate, null);
+            }
+
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(OBSERVATION_BUDGET_SECONDS);
+            while (System.nanoTime() < deadline && observedEdge == null) {
+                firstOutcome = completedOutcome(firstFuture, "先行writer");
+                secondOutcome = completedOutcome(secondFuture, "後続writer");
+                if (firstOutcome != null && firstOutcome.failure() != null) {
+                    throw asTestFailure("先行writerがlock観測前に失敗しました", firstOutcome.failure(), gate, observedEdge);
+                }
+                if (secondOutcome != null) {
+                    if (secondOutcome.failure() != null) {
+                        throw asTestFailure("後続writerがlock観測前に終了しました", secondOutcome.failure(), gate, observedEdge);
+                    }
+                    throw asTestFailure("後続writerがlock観測前に成功しました", null, gate, observedEdge);
+                }
+                try {
+                    observedEdge = primaryHeadWait(first.schema(), first, second, partition);
+                } catch (Throwable probeFailure) {
+                    throw asTestFailure("InnoDB lock wait edgeの観測に失敗しました", probeFailure, gate, null);
+                }
+                if (observedEdge == null) Thread.sleep(OBSERVATION_POLL_MILLIS);
+            }
+            if (observedEdge == null) {
+                throw asTestFailure("後続business writerが同一partition/keyのPRIMARY record lockを待つ必要があります",
+                        null, gate, null);
+            }
+
             gate.releaseFirstHeadLock.countDown();
-            assertEquals(2, first.get(10, TimeUnit.SECONDS).revision());
-            if (secondType == DISPATCH_AUTHORIZED) {
-                var failure = assertThrows(java.util.concurrent.ExecutionException.class, () -> second.get(10, TimeUnit.SECONDS));
-                assertInstanceOf(JournalConflictException.class, failure.getCause());
+            firstOutcome = awaitOutcome(firstFuture, "先行writer", COMPLETION_BUDGET_SECONDS, gate);
+            secondOutcome = awaitOutcome(secondFuture, "後続writer", COMPLETION_BUDGET_SECONDS, gate);
+            if (firstOutcome.failure() != null) {
+                throw asTestFailure("先行writerがgate解放後に失敗しました", firstOutcome.failure(), gate, observedEdge);
             }
-            else assertEquals(3, second.get(10, TimeUnit.SECONDS).revision());
-            assertEquals(expectedEvents, journal.events(partition).stream().map(JournalEvent::type).toList());
-            System.out.printf("SF_W2A_ORDERED_P1 first=%s second=%s firstConnectionId=%d secondConnectionId=%d object=sf_journal_head index=PRIMARY result=%s%n",
-                    firstType, secondType, gate.connectionIds.get(0), gate.connectionIds.get(1), expectedEvents);
+            result = new LockedPairResult(firstOutcome, secondOutcome, first, second, observedEdge.lockData());
+            if (isExpectedRejection(secondCommand.type(), secondOutcome.failure())) {
+                handledWriterFailures.add(secondOutcome.failure());
+            }
+        } catch (Throwable caught) {
+            failure = caught;
         } finally {
             gate.releaseFirstHeadLock.countDown();
-            pool.shutdownNow();
+            Throwable cleanupFailure = cleanupPair(pool, firstFuture, secondFuture, failure, handledWriterFailures);
+            if (cleanupFailure != null) {
+                failure = appendFailure(failure, cleanupFailure);
+            }
         }
+        if (failure != null) rethrow(failure);
+        return result;
+    }
+
+    private static AppendOutcome appendOutcome(JdbcPrivacyJournalAdapter adapter, JournalCommand command) {
+        try {
+            return new AppendOutcome(adapter.append(command), null);
+        } catch (Throwable failure) {
+            return new AppendOutcome(null, failure);
+        }
+    }
+
+    private static boolean isExpectedRejection(CommandType commandType, Throwable failure) {
+        return commandType == DISPATCH_AUTHORIZED && failure instanceof JournalConflictException;
+    }
+
+    private void awaitGateSignal(CountDownLatch signal, Future<AppendOutcome> firstFuture,
+                                 Future<AppendOutcome> secondFuture, String description, HeadUpsertGate gate)
+            throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(STARTUP_BUDGET_SECONDS);
+        while (System.nanoTime() < deadline) {
+            AppendOutcome first = completedOutcome(firstFuture, "先行writer");
+            AppendOutcome second = completedOutcome(secondFuture, "後続writer");
+            if (first != null && first.failure() != null) {
+                throw asTestFailure("先行writerがgate到達前に失敗しました", first.failure(), gate, null);
+            }
+            if (first != null) {
+                throw asTestFailure("先行writerがgate signal前に完了しました", null, gate, null);
+            }
+            if (second != null) {
+                throw asTestFailure("後続writerがgate到達前に終了しました", second.failure(), gate, null);
+            }
+            if (signal.await(OBSERVATION_POLL_MILLIS, TimeUnit.MILLISECONDS)) return;
+        }
+        throw asTestFailure(description + "（起動budget超過）", null, gate, null);
+    }
+
+    private AppendOutcome completedOutcome(Future<AppendOutcome> future, String role) throws Exception {
+        if (future == null || !future.isDone()) return null;
+        return readOutcome(future, role);
+    }
+
+    private AppendOutcome awaitOutcome(Future<AppendOutcome> future, String role, long budgetSeconds,
+                                       HeadUpsertGate gate) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(budgetSeconds);
+        while (System.nanoTime() < deadline) {
+            AppendOutcome outcome = completedOutcome(future, role);
+            if (outcome != null) return outcome;
+            Thread.sleep(OBSERVATION_POLL_MILLIS);
+        }
+        throw asTestFailure(role + "がgate解放後の実行budget内に完了しませんでした", null, gate, null);
+    }
+
+    private AppendOutcome readOutcome(Future<AppendOutcome> future, String role) throws Exception {
+        try {
+            return future.get(0, TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw asTestFailure(role + "futureが予期せず失敗しました", e.getCause(), null, null);
+        }
+    }
+
+    private AssertionError asTestFailure(String message, Throwable cause, HeadUpsertGate gate, LockWaitEdge edge) {
+        String diagnostics = gate == null ? "" : gateDiagnostics(gate, edge);
+        AssertionError failure = new AssertionError(message + diagnostics);
+        if (cause != null) failure.initCause(cause);
+        return failure;
+    }
+
+    private String gateDiagnostics(HeadUpsertGate gate, LockWaitEdge edge) {
+        StringBuilder out = new StringBuilder("; gate=").append(gate.connectionStages())
+                .append("; lockEdge=").append(edge);
+        try { out.append("; relevantLocks=").append(relevantLocks(gate)); }
+        catch (Throwable diagnosticFailure) { out.append("; relevantLocksReadFailure=").append(diagnosticFailure); }
+        try { out.append("; relevantWaits=").append(relevantWaits(gate)); }
+        catch (Throwable diagnosticFailure) { out.append("; relevantWaitsReadFailure=").append(diagnosticFailure); }
+        return out.toString();
+    }
+
+    private LockWaitEdge primaryHeadWait(String schema, WriterConnection blocker, WriterConnection requester,
+                                        JournalPartition expectedPartition) {
+        String expectedKey = expectedPartition.tenantId() + ", " + expectedPartition.subjectRef();
+        List<Map<String, Object>> edges = lockObserver.queryForList(
+                "SELECT w.ENGINE, w.REQUESTING_ENGINE_LOCK_ID, w.BLOCKING_ENGINE_LOCK_ID, " +
+                        "req.LOCK_DATA, req.LOCK_STATUS AS REQUEST_STATUS, req.LOCK_TYPE AS REQUEST_TYPE, " +
+                        "req.OBJECT_SCHEMA AS REQUEST_SCHEMA, req.OBJECT_NAME AS REQUEST_OBJECT, req.INDEX_NAME AS REQUEST_INDEX, " +
+                        "blk.LOCK_DATA AS BLOCK_KEY, blk.LOCK_STATUS AS BLOCK_STATUS, blk.LOCK_TYPE AS BLOCK_TYPE, " +
+                        "blk.OBJECT_SCHEMA AS BLOCK_SCHEMA, blk.OBJECT_NAME AS BLOCK_OBJECT, blk.INDEX_NAME AS BLOCK_INDEX, " +
+                        "requester.PROCESSLIST_ID AS REQUESTER_ID, blocker.PROCESSLIST_ID AS BLOCKER_ID " +
+                        "FROM performance_schema.data_lock_waits w " +
+                        "JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE " +
+                        "AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID " +
+                        "JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE " +
+                        "AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID " +
+                        "JOIN performance_schema.threads requester ON requester.THREAD_ID=req.THREAD_ID " +
+                        "JOIN performance_schema.threads blocker ON blocker.THREAD_ID=blk.THREAD_ID " +
+                        "WHERE w.ENGINE='INNODB' AND requester.PROCESSLIST_ID=? AND blocker.PROCESSLIST_ID=? " +
+                        "AND req.OBJECT_SCHEMA=? AND blk.OBJECT_SCHEMA=? " +
+                        "AND req.OBJECT_NAME='sf_journal_head' AND blk.OBJECT_NAME='sf_journal_head' " +
+                        "AND req.INDEX_NAME='PRIMARY' AND blk.INDEX_NAME='PRIMARY' " +
+                        "AND req.LOCK_TYPE='RECORD' AND blk.LOCK_TYPE='RECORD' " +
+                        "AND req.LOCK_STATUS='WAITING' AND blk.LOCK_STATUS='GRANTED' " +
+                        "AND req.LOCK_DATA=? AND blk.LOCK_DATA=?",
+                requester.connectionId(), blocker.connectionId(), schema, schema, expectedKey, expectedKey);
+        if (edges.isEmpty()) return null;
+        Map<String, Object> edge = edges.get(0);
+        return new LockWaitEdge(String.valueOf(edge.get("ENGINE")),
+                String.valueOf(edge.get("REQUEST_SCHEMA")), String.valueOf(edge.get("REQUEST_OBJECT")),
+                String.valueOf(edge.get("REQUEST_INDEX")),
+                String.valueOf(edge.get("BLOCK_SCHEMA")), String.valueOf(edge.get("BLOCK_OBJECT")),
+                String.valueOf(edge.get("BLOCK_INDEX")), expectedKey, String.valueOf(edge.get("BLOCK_KEY")),
+                String.valueOf(edge.get("REQUESTING_ENGINE_LOCK_ID")),
+                String.valueOf(edge.get("BLOCKING_ENGINE_LOCK_ID")), String.valueOf(edge.get("REQUEST_STATUS")),
+                String.valueOf(edge.get("BLOCK_STATUS")), String.valueOf(edge.get("REQUEST_TYPE")),
+                String.valueOf(edge.get("BLOCK_TYPE")));
     }
 
     private boolean primaryHeadWait(long requesterConnectionId, long blockerConnectionId) {
@@ -176,9 +369,169 @@ class PrivacyJournalLinearizationMySqlTest {
                         "AND rl.lock_status = 'WAITING' AND rl.object_name = 'sf_journal_head' AND rl.index_name = 'PRIMARY' " +
                         "JOIN performance_schema.data_locks bl ON bl.engine_transaction_id = w.blocking_engine_transaction_id " +
                         "AND bl.object_name = 'sf_journal_head' AND bl.index_name = 'PRIMARY' AND bl.lock_data = rl.lock_data " +
-                        "WHERE req.trx_mysql_thread_id = ? AND blk.trx_mysql_thread_id = ? AND rl.lock_type = 'RECORD' AND bl.lock_type = 'RECORD'",
+                        "WHERE req.trx_mysql_thread_id = ? AND blk.trx_mysql_thread_id = ? " +
+                        "AND rl.lock_type = 'RECORD' AND bl.lock_type = 'RECORD'",
                 Integer.class, requesterConnectionId, blockerConnectionId);
         return waits != null && waits > 0;
+    }
+
+    private List<Map<String, Object>> relevantLocks(HeadUpsertGate gate) {
+        WriterConnection first = gate.firstConnection.get();
+        WriterConnection second = gate.secondConnection.get();
+        if (first == null || second == null) return List.of();
+        return lockObserver.queryForList("SELECT l.ENGINE, l.ENGINE_LOCK_ID, t.PROCESSLIST_ID, l.OBJECT_SCHEMA, " +
+                        "l.OBJECT_NAME, l.INDEX_NAME, l.LOCK_TYPE, l.LOCK_MODE, l.LOCK_STATUS, l.LOCK_DATA " +
+                        "FROM performance_schema.data_locks l " +
+                        "JOIN performance_schema.threads t ON t.THREAD_ID=l.THREAD_ID " +
+                        "WHERE l.ENGINE='INNODB' AND t.PROCESSLIST_ID IN (?, ?) " +
+                        "AND l.OBJECT_NAME='sf_journal_head' ORDER BY t.PROCESSLIST_ID, l.ENGINE_LOCK_ID",
+                first.connectionId(), second.connectionId());
+    }
+
+    private List<Map<String, Object>> relevantWaits(HeadUpsertGate gate) {
+        WriterConnection first = gate.firstConnection.get();
+        WriterConnection second = gate.secondConnection.get();
+        if (first == null || second == null) return List.of();
+        return lockObserver.queryForList("SELECT w.ENGINE, w.REQUESTING_ENGINE_LOCK_ID, w.BLOCKING_ENGINE_LOCK_ID, " +
+                        "reqt.PROCESSLIST_ID AS REQUESTER_ID, blkt.PROCESSLIST_ID AS BLOCKER_ID, " +
+                        "req.OBJECT_SCHEMA AS REQUEST_SCHEMA, req.OBJECT_NAME AS REQUEST_OBJECT, " +
+                        "req.INDEX_NAME AS REQUEST_INDEX, req.LOCK_TYPE AS REQUEST_TYPE, " +
+                        "req.LOCK_STATUS AS REQUEST_STATUS, req.LOCK_DATA AS REQUEST_KEY, " +
+                        "blk.OBJECT_SCHEMA AS BLOCK_SCHEMA, blk.OBJECT_NAME AS BLOCK_OBJECT, " +
+                        "blk.INDEX_NAME AS BLOCK_INDEX, blk.LOCK_TYPE AS BLOCK_TYPE, " +
+                        "blk.LOCK_STATUS AS BLOCK_STATUS, blk.LOCK_DATA AS BLOCK_KEY " +
+                        "FROM performance_schema.data_lock_waits w " +
+                        "JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE " +
+                        "AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID " +
+                        "JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE " +
+                        "AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID " +
+                        "JOIN performance_schema.threads reqt ON reqt.THREAD_ID=req.THREAD_ID " +
+                        "JOIN performance_schema.threads blkt ON blkt.THREAD_ID=blk.THREAD_ID " +
+                        "WHERE w.ENGINE='INNODB' AND (reqt.PROCESSLIST_ID IN (?, ?) OR blkt.PROCESSLIST_ID IN (?, ?))",
+                first.connectionId(), second.connectionId(), first.connectionId(), second.connectionId());
+    }
+
+    private Throwable cleanupPair(java.util.concurrent.ExecutorService pool, Future<AppendOutcome> first,
+                                  Future<AppendOutcome> second, Throwable mainFailure,
+                                  Set<Throwable> handledWriterFailures) {
+        Throwable cleanupFailure = null;
+        try {
+            cleanupFailure = appendFailure(cleanupFailure,
+                    joinForCleanup(first, "先行writer", mainFailure, handledWriterFailures));
+            cleanupFailure = appendFailure(cleanupFailure,
+                    joinForCleanup(second, "後続writer", mainFailure, handledWriterFailures));
+        } catch (Throwable aggregationFailure) {
+            cleanupFailure = appendFailure(cleanupFailure, aggregationFailure);
+        } finally {
+            try {
+                pool.shutdown();
+                if (!pool.awaitTermination(CLEANUP_JOIN_BUDGET_SECONDS, TimeUnit.SECONDS)) {
+                    pool.shutdownNow();
+                    if (!pool.awaitTermination(CLEANUP_JOIN_BUDGET_SECONDS, TimeUnit.SECONDS)) {
+                        cleanupFailure = appendFailure(cleanupFailure,
+                                new java.util.concurrent.TimeoutException("writer executor cleanup budget超過"));
+                    }
+                }
+            } catch (InterruptedException interrupted) {
+                pool.shutdownNow();
+                Thread.currentThread().interrupt();
+                cleanupFailure = appendFailure(cleanupFailure, interrupted);
+            } catch (Throwable shutdownFailure) {
+                cleanupFailure = appendFailure(cleanupFailure, shutdownFailure);
+            }
+        }
+        return cleanupFailure;
+    }
+
+    private Throwable joinForCleanup(Future<AppendOutcome> future, String role, Throwable mainFailure,
+                                     Set<Throwable> handledWriterFailures) {
+        if (future == null) return null;
+        try {
+            AppendOutcome outcome = future.get(CLEANUP_JOIN_BUDGET_SECONDS, TimeUnit.SECONDS);
+            if (outcome != null && outcome.failure() != null
+                    && !handledWriterFailures.contains(outcome.failure())
+                    && !failureGraphContains(mainFailure, outcome.failure())) {
+                return outcome.failure();
+            }
+            return null;
+        } catch (Throwable failure) {
+            Throwable unwrapped = failure instanceof java.util.concurrent.ExecutionException && failure.getCause() != null
+                    ? failure.getCause() : failure;
+            future.cancel(true);
+            if (handledWriterFailures.contains(unwrapped) || failureGraphContains(mainFailure, unwrapped)) return null;
+            if (unwrapped instanceof java.util.concurrent.TimeoutException) {
+                java.util.concurrent.TimeoutException roleTimeout = new java.util.concurrent.TimeoutException(
+                        role + " cleanup join budget超過");
+                roleTimeout.initCause(unwrapped);
+                unwrapped = roleTimeout;
+            }
+            return unwrapped;
+        }
+    }
+
+    private static Throwable appendFailure(Throwable primary, Throwable additional) {
+        if (additional == null) return primary;
+        if (primary == null) return additional;
+        if (failureGraphContains(primary, additional) || failureGraphContains(additional, primary)) return primary;
+        primary.addSuppressed(additional);
+        return primary;
+    }
+
+    private static boolean failureGraphContains(Throwable root, Throwable sought) {
+        return failureGraphContains(root, sought, Collections.newSetFromMap(new IdentityHashMap<>()));
+    }
+
+    private static boolean failureGraphContains(Throwable root, Throwable sought, Set<Throwable> visited) {
+        if (root == null || sought == null) return false;
+        if (root == sought) return true;
+        if (!visited.add(root)) return false;
+        if (failureGraphContains(root.getCause(), sought, visited)) return true;
+        for (Throwable suppressed : root.getSuppressed()) {
+            if (failureGraphContains(suppressed, sought, visited)) return true;
+        }
+        return false;
+    }
+
+    @Test
+    void cleanup集約はnullと同一例外を安全に扱いwriter失敗を回収する() {
+        Throwable primary = new IllegalStateException("primary failure");
+        Throwable writerFailure = new IllegalStateException("writer SQL failure");
+        assertNull(appendFailure(null, null));
+        assertSame(primary, appendFailure(primary, null));
+        assertSame(primary, appendFailure(primary, primary));
+        assertSame(writerFailure, joinForCleanup(CompletableFuture.completedFuture(
+                new AppendOutcome(null, writerFailure)), "synthetic writer", null, Set.of()));
+
+        JournalConflictException expectedRejection = new JournalConflictException("stale expected rejection");
+        assertTrue(isExpectedRejection(DISPATCH_AUTHORIZED, expectedRejection));
+        assertFalse(isExpectedRejection(HOLD_STARTED, expectedRejection));
+        assertFalse(isExpectedRejection(DISPATCH_AUTHORIZED, writerFailure));
+        assertNull(joinForCleanup(CompletableFuture.completedFuture(
+                new AppendOutcome(null, expectedRejection)), "expected rejection", null, Set.of(expectedRejection)));
+        Throwable handledCarrier = new IllegalStateException("main path already handled writer failure", writerFailure);
+        assertNull(joinForCleanup(CompletableFuture.completedFuture(
+                new AppendOutcome(null, writerFailure)), "already handled writer", handledCarrier, Set.of()));
+
+        assertSame(primary, appendFailure(primary, writerFailure));
+        assertArrayEquals(new Throwable[]{writerFailure}, primary.getSuppressed());
+        assertSame(primary, appendFailure(primary, writerFailure));
+        assertArrayEquals(new Throwable[]{writerFailure}, primary.getSuppressed());
+
+        var cleanupPool = Executors.newSingleThreadExecutor();
+        assertNull(cleanupPair(cleanupPool, null, null, null, Set.of()));
+        assertTrue(cleanupPool.isTerminated(), "writer cleanupはnull outcomeでもexecutorを終了する");
+
+        Throwable cycleOwner = new IllegalStateException("owner");
+        Throwable cycleChild = new IllegalArgumentException("child");
+        assertSame(cycleOwner, appendFailure(cycleOwner, cycleChild));
+        assertSame(cycleChild, appendFailure(cycleChild, cycleOwner));
+        assertEquals(0, cycleChild.getSuppressed().length);
+    }
+
+    private static void rethrow(Throwable failure) throws Exception {
+        if (failure instanceof Exception exception) throw exception;
+        if (failure instanceof Error error) throw error;
+        throw new AssertionError("writer pair failed", failure);
     }
 
     @Test
@@ -251,44 +604,71 @@ class PrivacyJournalLinearizationMySqlTest {
     private static final class HeadUpsertGate {
         private final DataSource delegate;
         private final CountDownLatch firstHeadLockAcquired = new CountDownLatch(1);
+        private final CountDownLatch secondHeadExecuteStarted = new CountDownLatch(1);
         private final CountDownLatch releaseFirstHeadLock = new CountDownLatch(1);
-        private final CountDownLatch statementAttempts = new CountDownLatch(2);
-        private final CopyOnWriteArrayList<Long> connectionIds = new CopyOnWriteArrayList<>();
+        private final AtomicReference<WriterConnection> firstConnection = new AtomicReference<>();
+        private final AtomicReference<WriterConnection> secondConnection = new AtomicReference<>();
         private final AtomicBoolean gateFirst = new AtomicBoolean(true);
 
         private HeadUpsertGate(DataSource delegate) { this.delegate = delegate; }
+
+        private String connectionStages() {
+            return "first=" + firstConnection.get() + ",second=" + secondConnection.get()
+                    + ",released=" + (releaseFirstHeadLock.getCount() == 0);
+        }
+
+        private static WriterConnection snapshot(java.sql.Connection connection, String phase) throws Exception {
+            try (var statement = connection.createStatement();
+                 var rows = statement.executeQuery("SELECT CONNECTION_ID(), DATABASE()")) {
+                if (!rows.next()) throw new java.sql.SQLException("writer connection snapshot returned no row");
+                return new WriterConnection(rows.getLong(1), rows.getString(2), phase);
+            }
+        }
 
         private DataSource dataSource() {
             return (DataSource) Proxy.newProxyInstance(getClass().getClassLoader(), new Class[]{DataSource.class},
                     (proxy, method, args) -> {
                         if (!method.getName().equals("getConnection")) return invoke(method, delegate, args);
                         java.sql.Connection connection = (java.sql.Connection) invoke(method, delegate, args);
-                        try (var statement = connection.createStatement(); var rows = statement.executeQuery("SELECT CONNECTION_ID()")) {
-                            rows.next();
-                            connectionIds.add(rows.getLong(1));
-                        }
                         return Proxy.newProxyInstance(getClass().getClassLoader(), new Class[]{java.sql.Connection.class},
                                 (connectionProxy, connectionMethod, connectionArgs) -> {
                                     Object prepared = invoke(connectionMethod, connection, connectionArgs);
                                     if (!connectionMethod.getName().equals("prepareStatement") || connectionArgs == null
                                             || connectionArgs.length == 0 || !(connectionArgs[0] instanceof String sql)
                                             || !sql.startsWith("INSERT INTO sf_journal_head")) return prepared;
-                                    statementAttempts.countDown();
                                     if (!(prepared instanceof java.sql.PreparedStatement statement)) return prepared;
                                     return Proxy.newProxyInstance(getClass().getClassLoader(), new Class[]{java.sql.PreparedStatement.class},
                                             (statementProxy, statementMethod, statementArgs) -> {
-                                                Object result = invoke(statementMethod, statement, statementArgs);
-                                                if (statementMethod.getName().equals("executeUpdate") && gateFirst.compareAndSet(true, false)) {
-                                                    firstHeadLockAcquired.countDown();
-                                                    if (!releaseFirstHeadLock.await(10, TimeUnit.SECONDS))
-                                                        throw new java.sql.SQLException("test-only head lock gate timed out");
+                                                if (!statementMethod.getName().equals("executeUpdate")) {
+                                                    return invoke(statementMethod, statement, statementArgs);
                                                 }
-                                                return result;
+                                                if (gateFirst.compareAndSet(true, false)) {
+                                                    Object result = invoke(statementMethod, statement, statementArgs);
+                                                    firstConnection.set(snapshot(connection, "FIRST_HEAD_UPSERT_LOCKED"));
+                                                    firstHeadLockAcquired.countDown();
+                                                    if (!releaseFirstHeadLock.await(GATE_HOLD_BUDGET_SECONDS, TimeUnit.SECONDS)) {
+                                                        throw new java.sql.SQLException("test-only first writer gate hold budget超過");
+                                                    }
+                                                    return result;
+                                                }
+                                                secondConnection.set(snapshot(connection, "SECOND_HEAD_UPSERT_EXECUTE_READY"));
+                                                secondHeadExecuteStarted.countDown();
+                                                return invoke(statementMethod, statement, statementArgs);
                                             });
                                 });
                     });
         }
     }
+
+    private record WriterConnection(long connectionId, String schema, String phase) { }
+    private record AppendOutcome(JournalAck ack, Throwable failure) { }
+    private record LockedPairResult(AppendOutcome first, AppendOutcome second, WriterConnection firstConnection,
+                                    WriterConnection secondConnection, String lockData) { }
+    private record LockWaitEdge(String engine, String schema, String object, String index,
+                                String blockingSchema, String blockingObject, String blockingIndex,
+                                String lockData, String blockingLockData, String requestingLockId, String blockingLockId,
+                                String requestingStatus, String blockingStatus, String requestingType,
+                                String blockingType) { }
 
     @Test
     void P1_hold先行時は同じheadからの認可を拒否する() {
@@ -398,42 +778,22 @@ class PrivacyJournalLinearizationMySqlTest {
         JournalAck claimed = journal.append(JournalCommand.create("lease-fenced-wait-old", partition, 0, LEASE_CLAIMED,
                 null, null, null, "worker-old", 0, now.plusSeconds(1)));
         CLOCK.set(now.plusSeconds(2));
-        HeadUpsertGate gate = new HeadUpsertGate(writerDataSource);
-        JdbcPrivacyJournalAdapter fencedJournal = new JdbcPrivacyJournalAdapter(gate.dataSource(), context.getEnvironment(), CLOCK);
         JournalCommand takeover = JournalCommand.create("lease-fenced-wait-new", partition, claimed.revision(),
                 LEASE_TAKEN_OVER, null, null, null, "worker-new", 1, now.plusSeconds(60));
         JournalCommand staleAuthorization = JournalCommand.create("auth-fenced-wait-stale", partition, claimed.revision() + 1,
                 DISPATCH_AUTHORIZED, "case-1", "action-fenced-wait-stale", hash('d'), "worker-old", 1, null);
-        var pool = Executors.newFixedThreadPool(2);
-        try {
-            var takeoverResult = pool.submit(() -> fencedJournal.append(takeover));
-            assertTrue(gate.firstHeadLockAcquired.await(10, TimeUnit.SECONDS), "takeoverがhead PRIMARY lockを取得する必要があります");
-            var staleResult = pool.submit(() -> fencedJournal.append(staleAuthorization));
-            assertTrue(gate.statementAttempts.await(10, TimeUnit.SECONDS), "旧generation要求が同じheadへのappendを開始する必要があります");
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-            boolean observed = false;
-            while (System.nanoTime() < deadline && !observed) {
-                observed = primaryHeadWait(gate.connectionIds.get(1), gate.connectionIds.get(0));
-                if (!observed && staleResult.isDone()) staleResult.get(1, TimeUnit.SECONDS);
-                if (!observed) Thread.sleep(50);
-            }
-            assertTrue(observed, "post-takeover expectedRevisionを持つ旧generation writerのPRIMARY待機が必要です");
-            gate.releaseFirstHeadLock.countDown();
-            assertEquals(2, takeoverResult.get(10, TimeUnit.SECONDS).revision());
-            var failure = assertThrows(java.util.concurrent.ExecutionException.class, () -> staleResult.get(10, TimeUnit.SECONDS));
-            assertInstanceOf(JournalConflictException.class, failure.getCause());
-            assertTrue(failure.getCause().getMessage().contains("stale"), "旧lease generation/ownerで拒否する必要があります");
-            assertEquals(2, journal.head(partition).revision());
-            assertEquals(2, journal.head(partition).leaseGeneration());
-            assertEquals("worker-new", journal.head(partition).leaseOwner());
-            assertEquals(0, admin.queryForObject("SELECT COUNT(*) FROM sf_journal_action", Integer.class));
-            assertEquals(List.of(LEASE_CLAIMED, LEASE_TAKEN_OVER), journal.events(partition).stream().map(JournalEvent::type).toList());
-            System.out.printf("SF_W2A_P5_FENCED_WAIT takeoverConnectionId=%d staleConnectionId=%d expectedRevision=%d expectedGeneration=1 currentGeneration=2 object=sf_journal_head index=PRIMARY result=REJECTED%n",
-                    gate.connectionIds.get(0), gate.connectionIds.get(1), staleAuthorization.expectedRevision());
-        } finally {
-            gate.releaseFirstHeadLock.countDown();
-            pool.shutdownNow();
-        }
+        LockedPairResult result = appendPairWithObservedHeadWait(takeover, staleAuthorization);
+        assertEquals(2, result.first().ack().revision());
+        assertInstanceOf(JournalConflictException.class, result.second().failure());
+        assertTrue(result.second().failure().getMessage().contains("stale"), "旧lease generation/ownerで拒否する必要があります");
+        assertEquals(2, journal.head(partition).revision());
+        assertEquals(2, journal.head(partition).leaseGeneration());
+        assertEquals("worker-new", journal.head(partition).leaseOwner());
+        assertEquals(0, admin.queryForObject("SELECT COUNT(*) FROM sf_journal_action", Integer.class));
+        assertEquals(List.of(LEASE_CLAIMED, LEASE_TAKEN_OVER), journal.events(partition).stream().map(JournalEvent::type).toList());
+        System.out.printf("SF_W2A_P5_FENCED_WAIT takeoverConnectionId=%d staleConnectionId=%d schema=%s key=%s expectedRevision=%d expectedGeneration=1 currentGeneration=2 object=sf_journal_head index=PRIMARY result=REJECTED%n",
+                result.firstConnection().connectionId(), result.secondConnection().connectionId(),
+                result.firstConnection().schema(), result.lockData(), staleAuthorization.expectedRevision());
     }
 
     @Test
