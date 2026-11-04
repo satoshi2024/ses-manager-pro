@@ -14,12 +14,15 @@ import org.springframework.jdbc.datasource.ConnectionHolder;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.DefaultTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import javax.sql.DataSource;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.sql.Connection;
@@ -77,6 +80,33 @@ class ImportValidationSealRealMySqlTest {
             ImportValidationAppendService.SealCapability capability
     ) {}
 
+    private static final class BlockingInputStream extends ByteArrayInputStream {
+        private final CountDownLatch entered;
+        private final CountDownLatch release;
+        private final java.util.concurrent.atomic.AtomicBoolean firstRead = new java.util.concurrent.atomic.AtomicBoolean();
+        private BlockingInputStream(byte[] bytes, CountDownLatch entered, CountDownLatch release) {
+            super(bytes); this.entered = entered; this.release = release;
+        }
+        private void pauseOnce() throws IOException {
+            if (!firstRead.compareAndSet(false, true)) return;
+            entered.countDown();
+            try {
+                if (!release.await(15, TimeUnit.SECONDS)) throw new IOException("source読込待機がタイムアウトしました");
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IOException("source読込待機が中断されました", interrupted);
+            }
+        }
+        @Override public synchronized int read(byte[] buffer, int offset, int length) {
+            try { pauseOnce(); } catch (IOException failure) { throw new java.io.UncheckedIOException(failure); }
+            return super.read(buffer, offset, length);
+        }
+        @Override public synchronized int read() {
+            try { pauseOnce(); } catch (IOException failure) { throw new java.io.UncheckedIOException(failure); }
+            return super.read();
+        }
+    }
+
     @BeforeEach
     void setUp() throws Exception {
         DriverManagerDataSource ds = new DriverManagerDataSource();
@@ -101,6 +131,10 @@ class ImportValidationSealRealMySqlTest {
     }
 
     private Fixture setupFixture(String csvContent) {
+        return setupFixture(csvContent, "CUSTOMER", Map.of("externalKey", "externalKey", "companyName", "companyName"));
+    }
+
+    private Fixture setupFixture(String csvContent, String entity, Map<String, String> mapping) {
         long targetJobId = Math.abs(UUID.randomUUID().getMostSignificantBits());
         if (targetJobId < 1) targetJobId = 100L;
 
@@ -108,7 +142,6 @@ class ImportValidationSealRealMySqlTest {
         byte[] sourceSha = digest().digest(csvBytes);
 
         // 正準な mapping JSON を ImportMetadataService.canonicalMapping から生成し、キー順序（TreeMap）とハッシュを確定
-        Map<String, String> mapping = Map.of("externalKey", "externalKey", "companyName", "companyName");
         byte[] mappingBytes = ImportMetadataService.canonicalMapping(mapping);
         byte[] mappingHash = hash(mappingBytes);
 
@@ -127,23 +160,47 @@ class ImportValidationSealRealMySqlTest {
         jdbc.update("INSERT INTO t_document_link(tenant_id,document_id,target_type,target_id,deleted_flag) VALUES(?,?,?,?,0)",
                 TENANT, documentId, "IMPORT_JOB", targetJobId);
         jdbc.update("INSERT INTO t_import_mapping VALUES(?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE canonical_bytes=VALUES(canonical_bytes), mapping_sha256=VALUES(mapping_sha256)",
-                TENANT, mappingId, sourceId, "CUSTOMER", "ses-import-v1", 1, mappingHash, mappingBytes);
+                TENANT, mappingId, sourceId, entity, "ses-import-v1", 1, mappingHash, mappingBytes);
         jdbc.update("""
                 INSERT INTO t_import_job(tenant_id,id,source_system_id,source_version,entity_type,schema_version,
                   source_encoding,source_sha256,legal_entity_id,document_id,document_version_id,document_version_no,
                   document_sha256,mapping_id,mapping_version,mapping_sha256,state,version_no,lease_generation)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'MAPPED',1,0)
-                """, TENANT, targetJobId, sourceId, 8L, "CUSTOMER", "ses-import-v1", "UTF8", sourceSha,
+                """, TENANT, targetJobId, sourceId, 8L, entity, "ses-import-v1", "UTF8", sourceSha,
                 "77", documentId, versionId, 1, sourceSha, mappingId, 1, mappingHash);
 
         when(metadataService.openSource(targetJobId)).thenAnswer(inv ->
                 new ImportSourceContent(new ByteArrayInputStream(csvBytes), "customer.csv",
-                        ImportEncoding.UTF8, ImportEntity.CUSTOMER, HexFormat.of().formatHex(sourceSha)));
+                        ImportEncoding.UTF8, ImportEntity.valueOf(entity), HexFormat.of().formatHex(sourceSha)));
 
         var startOp = service.beginStart(targetJobId);
         var startLease = service.start(startOp);
         var completion = appendService.appendRemainingWithSealCapability(startLease);
         return new Fixture(targetJobId, startLease.runId(), completion.lease(), completion.capability());
+    }
+
+    private long createMappedJobForSameSource(String csvContent) {
+        long jobId = Math.floorMod(UUID.randomUUID().getMostSignificantBits(), 1_000_000_000L) + 10_000;
+        byte[] sourceSha = digest().digest(csvContent.getBytes(StandardCharsets.UTF_8));
+        long sourceId = 2L, documentId = jobId * 10 + 1, versionId = documentId + 1, mappingId = documentId + 2;
+        Map<String, String> mapping = Map.of("externalKey", "externalKey", "companyName", "companyName");
+        byte[] mappingBytes = ImportMetadataService.canonicalMapping(mapping);
+        byte[] mappingHash = hash(mappingBytes);
+        jdbc.update("INSERT INTO t_document VALUES(?,?,?,?,?,?)", TENANT, documentId, "77", 0, null, 0);
+        jdbc.update("INSERT INTO t_document_version VALUES(?,?,?,?,?,?,?)", TENANT, documentId, versionId, 1,
+                HexFormat.of().formatHex(sourceSha), "CLEAN", 0);
+        jdbc.update("INSERT INTO t_document_link(tenant_id,document_id,target_type,target_id,deleted_flag) VALUES(?,?,?,?,0)",
+                TENANT, documentId, "IMPORT_JOB", jobId);
+        jdbc.update("INSERT INTO t_import_mapping VALUES(?,?,?,?,?,?,?,?)", TENANT, mappingId, sourceId,
+                "CUSTOMER", "ses-import-v1", 1, mappingHash, mappingBytes);
+        jdbc.update("""
+                INSERT INTO t_import_job(tenant_id,id,source_system_id,source_version,entity_type,schema_version,
+                  source_encoding,source_sha256,legal_entity_id,document_id,document_version_id,document_version_no,
+                  document_sha256,mapping_id,mapping_version,mapping_sha256,state,version_no,lease_generation)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'MAPPED',1,0)
+                """, TENANT, jobId, sourceId, 8L, "CUSTOMER", "ses-import-v1", "UTF8", sourceSha, "77",
+                documentId, versionId, 1, sourceSha, mappingId, 1, mappingHash);
+        return jobId;
     }
 
     @Test
@@ -179,29 +236,241 @@ class ImportValidationSealRealMySqlTest {
     }
 
     @Test
-    void negW3c_realMysqlFinalGateRejectsLeaseRenewAndTakeoverDuringSourceRead() {
-        var renewed = setupFixture("externalKey,companyName\ncust-1,株式会社A\n");
-        var renewedLease = service.seal(renewed.capability);
-        byte[] renewedCsv = "externalKey,companyName\ncust-1,株式会社A\n".getBytes(StandardCharsets.UTF_8);
-        org.mockito.Mockito.doAnswer(invocation -> {
-            jdbc.update("UPDATE t_import_job SET version_no=version_no+1 WHERE tenant_id=? AND id=?", TENANT, renewed.jobId);
-            return new ImportSourceContent(new ByteArrayInputStream(renewedCsv), "customer.csv", ImportEncoding.UTF8,
-                    ImportEntity.CUSTOMER, HexFormat.of().formatHex(digest().digest(renewedCsv)));
-        }).when(metadataService).openSource(renewed.jobId);
-        assertThrows(BusinessException.class, () -> appendService.recountSealed(renewedLease));
+    void posW3c_realMysqlOwnExactHeartbeatAt250Rows() {
+        StringBuilder csv = new StringBuilder("externalKey,companyName\n");
+        for (int i = 0; i < 251; i++) csv.append("hb-").append(i).append(",会社").append(i).append('\n');
+        var fixture = setupFixture(csv.toString());
+        var sealedLease = service.seal(fixture.capability);
+        var capability = appendService.recountSealed(sealedLease);
+        assertNotNull(capability);
+        assertTrue(capability.lease().jobVersion() > sealedLease.jobVersion());
+    }
 
-        var takeover = setupFixture("externalKey,companyName\ncust-2,株式会社B\n");
-        var takeoverLease = service.seal(takeover.capability);
-        byte[] takeoverCsv = "externalKey,companyName\ncust-2,株式会社B\n".getBytes(StandardCharsets.UTF_8);
+    @Test
+    void posW3c_realMysqlKnownZeroYenIsRecountedAsZeroNotNull() {
+        var fixture = setupFixture("externalKey,fullName,expectedUnitPrice\nzero-1,社員零,0\n", "ENGINEER",
+                Map.of("externalKey", "externalKey", "fullName", "fullName", "expectedUnitPrice", "expectedUnitPrice"));
+        var sealedLease = service.seal(fixture.capability);
+        assertNotNull(appendService.recountSealed(sealedLease));
+        assertEquals(1L, jdbc.queryForObject("SELECT expected_unit_price_accepted_known_count FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                Long.class, TENANT, fixture.jobId, fixture.runId));
+        BigDecimal sum = jdbc.queryForObject("SELECT expected_unit_price_accepted_sum_yen FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                BigDecimal.class, TENANT, fixture.jobId, fixture.runId);
+        assertNotNull(sum);
+        assertEquals(0, sum.compareTo(BigDecimal.ZERO));
+    }
+
+    @Test
+    void negW3c_realMysqlRejectsNullForEveryPersistedCounter() {
+        var fixture = setupFixture("externalKey,companyName\nnull-count,会社NULL\n");
+        var sealedLease = service.seal(fixture.capability);
+        for (String column : List.of("source_row_count", "physical_row_count", "empty_row_count", "accepted_row_count",
+                "rejected_row_count", "expected_unit_price_accepted_known_count", "expected_unit_price_rejected_known_count",
+                "expected_unit_price_excluded_count", "unit_price_min_accepted_known_count", "unit_price_min_rejected_known_count",
+                "unit_price_min_excluded_count", "unit_price_max_accepted_known_count", "unit_price_max_rejected_known_count",
+                "unit_price_max_excluded_count", "selling_price_accepted_known_count", "selling_price_rejected_known_count",
+                "selling_price_excluded_count", "cost_price_accepted_known_count", "cost_price_rejected_known_count",
+                "cost_price_excluded_count")) {
+            Long original = jdbc.queryForObject("SELECT " + column + " FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                    Long.class, TENANT, fixture.jobId, fixture.runId);
+            jdbc.update("UPDATE t_import_validation_run SET " + column + "=NULL WHERE tenant_id=? AND job_id=? AND id=?",
+                    TENANT, fixture.jobId, fixture.runId);
+            assertThrows(BusinessException.class, () -> appendService.recountSealed(sealedLease), column);
+            jdbc.update("UPDATE t_import_validation_run SET " + column + "=? WHERE tenant_id=? AND job_id=? AND id=?",
+                    original, TENANT, fixture.jobId, fixture.runId);
+        }
+    }
+
+    @Test
+    void negW3c_realMysqlConcurrentRenewDuringSourceIoIsNotAbsorbedByHeartbeat() throws Exception {
+        StringBuilder csv = new StringBuilder("externalKey,companyName\n");
+        for (int i = 0; i < 251; i++) csv.append("race-").append(i).append(",会社").append(i).append('\n');
+        String contents = csv.toString();
+        byte[] bytes = contents.getBytes(StandardCharsets.UTF_8);
+        var fixture = setupFixture(contents);
+        var sealedLease = service.seal(fixture.capability);
+        CountDownLatch sourceRead = new CountDownLatch(1);
+        CountDownLatch continueRead = new CountDownLatch(1);
+        metadataService = mock(ImportMetadataService.class);
+        when(metadataService.openSource(fixture.jobId)).thenReturn(new ImportSourceContent(
+                new BlockingInputStream(bytes, sourceRead, continueRead), "customer.csv", ImportEncoding.UTF8,
+                ImportEntity.CUSTOMER, HexFormat.of().formatHex(digest().digest(bytes))));
+        appendService = new ImportValidationAppendService(jdbc, metadataService, service, new ObjectMapper());
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        Throwable primary = null;
+        try {
+            Future<?> recount = pool.submit(() -> appendService.recountSealed(sealedLease));
+            assertTrue(sourceRead.await(10, TimeUnit.SECONDS), "DB lockなしでsource読込に入ること");
+            var renewFuture = pool.submit(() -> service.renew(sealedLease));
+            var renewed = renewFuture.get(5, TimeUnit.SECONDS);
+            assertTrue(renewed.jobVersion() > sealedLease.jobVersion());
+            continueRead.countDown();
+            ExecutionException failure = assertThrows(ExecutionException.class, () -> recount.get(15, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException);
+        } catch (Exception | Error failure) {
+            primary = failure;
+            throw failure;
+        } finally {
+            continueRead.countDown();
+            finishPool(pool, 5, primary);
+        }
+    }
+
+    @Test
+    void negW3c_realMysqlTakeoverDuringSourceIoInvalidatesExactHeartbeat() throws Exception {
+        StringBuilder csv = new StringBuilder("externalKey,companyName\n");
+        for (int i = 0; i < 251; i++) csv.append("takeover-").append(i).append(",会社").append(i).append('\n');
+        byte[] bytes = csv.toString().getBytes(StandardCharsets.UTF_8);
+        var fixture = setupFixture(csv.toString());
+        var sealedLease = service.seal(fixture.capability);
+        CountDownLatch sourceRead = new CountDownLatch(1);
+        CountDownLatch continueRead = new CountDownLatch(1);
+        metadataService = mock(ImportMetadataService.class);
+        when(metadataService.openSource(fixture.jobId)).thenReturn(new ImportSourceContent(
+                new BlockingInputStream(bytes, sourceRead, continueRead), "customer.csv", ImportEncoding.UTF8,
+                ImportEntity.CUSTOMER, HexFormat.of().formatHex(digest().digest(bytes))));
+        appendService = new ImportValidationAppendService(jdbc, metadataService, service, new ObjectMapper());
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        Throwable primary = null;
+        try {
+            Future<?> recount = pool.submit(() -> appendService.recountSealed(sealedLease));
+            assertTrue(sourceRead.await(10, TimeUnit.SECONDS));
+            jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,-1,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
+                    TENANT, fixture.jobId);
+            var takeoverOperation = service.beginTakeover(fixture.jobId, fixture.runId);
+            var takeoverFuture = pool.submit(() -> service.takeOver(takeoverOperation));
+            var takeoverLease = takeoverFuture.get(5, TimeUnit.SECONDS);
+            assertTrue(takeoverLease.generation() > sealedLease.generation());
+            continueRead.countDown();
+            ExecutionException failure = assertThrows(ExecutionException.class, () -> recount.get(15, TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof BusinessException);
+        } catch (Exception | Error failure) {
+            primary = failure;
+            throw failure;
+        } finally {
+            continueRead.countDown();
+            finishPool(pool, 5, primary);
+        }
+    }
+
+    @Test
+    void negW3c_finalGateAclWaitCrossesLeaseExpiryAndReleasesSameSourceLock() throws Exception {
+        String csv = "externalKey,companyName\nexpiry-1,会社期限\n";
+        var fixture = setupFixture(csv);
+        var sealedLease = service.seal(fixture.capability);
+        long otherJobId = createMappedJobForSameSource(csv);
+        var otherStart = service.beginStart(otherJobId);
+
+        CountDownLatch finalAclEntered = new CountDownLatch(1);
+        CountDownLatch releaseFinalAcl = new CountDownLatch(1);
         org.mockito.Mockito.doAnswer(invocation -> {
-            jdbc.update("UPDATE t_import_job SET lease_generation=lease_generation+1,version_no=version_no+1 WHERE tenant_id=? AND id=?",
-                    TENANT, takeover.jobId);
-            jdbc.update("UPDATE t_import_validation_run SET last_resumed_lease_generation=last_resumed_lease_generation+1 WHERE tenant_id=? AND job_id=? AND id=?",
-                    TENANT, takeover.jobId, takeover.runId);
-            return new ImportSourceContent(new ByteArrayInputStream(takeoverCsv), "customer.csv", ImportEncoding.UTF8,
-                    ImportEntity.CUSTOMER, HexFormat.of().formatHex(digest().digest(takeoverCsv)));
-        }).when(metadataService).openSource(takeover.jobId);
-        assertThrows(BusinessException.class, () -> appendService.recountSealed(takeoverLease));
+            if (isW3cFinalGateTransaction()) {
+                finalAclEntered.countDown();
+                if (!releaseFinalAcl.await(8, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("最終ACL待機がタイムアウトしました");
+                }
+            }
+            return context;
+        }).when(authorization).requireCurrentAuthorizationForWrite(context);
+
+        Thread.sleep(26_000);
+        trackingManager.reset();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        Throwable primary = null;
+        try {
+            Future<?> recount = pool.submit(() -> appendService.recountSealed(sealedLease));
+            assertTrue(finalAclEntered.await(8, TimeUnit.SECONDS), "最終ACL gateへの到達を確認");
+            Timestamp entryDbTime = trackingManager.getLastW3cEntryDbTime();
+            Long remainingMicros = jdbc.queryForObject("""
+                    SELECT GREATEST(0,TIMESTAMPDIFF(MICROSECOND,CURRENT_TIMESTAMP(6),lease_expires_at))
+                    FROM t_import_job WHERE tenant_id=? AND id=?
+                    """, Long.class, TENANT, fixture.jobId);
+            assertNotNull(entryDbTime);
+            assertNotNull(remainingMicros);
+            assertTrue(remainingMicros > 0 && remainingMicros < 6_000_000L,
+                    "期限前に最終gateへ入り、残時間が10秒予算内であること");
+
+            Future<ImportValidationLifecycleService.RunLease> otherStartFuture = pool.submit(() -> service.start(otherStart));
+            assertThrows(java.util.concurrent.TimeoutException.class,
+                    () -> otherStartFuture.get(500, TimeUnit.MILLISECONDS),
+                    "最終gate中は同一source rowのロック待ちになること");
+            TimeUnit.MICROSECONDS.sleep(remainingMicros + 150_000L);
+            Timestamp finalDbTime = jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)", Timestamp.class);
+            assertNotNull(finalDbTime);
+            assertTrue(finalDbTime.after(sealedLease.expiresAt()), "fresh DB timeがlease expiryを越えていること");
+            releaseFinalAcl.countDown();
+
+            ExecutionException gateFailure = assertThrows(ExecutionException.class,
+                    () -> recount.get(8, TimeUnit.SECONDS));
+            assertTrue(gateFailure.getCause() instanceof BusinessException,
+                    "期限切れを業務409で拒絶し、時間予算超過と区別すること");
+            assertTrue(trackingManager.getLastW3cDurationMillis() <= 10_000L,
+                    "最終gate transactionが導出10秒予算内に終了すること");
+            assertNotNull(otherStartFuture.get(8, TimeUnit.SECONDS), "失敗transaction後に同source別jobのlockが解放されること");
+            assertEquals("SEALED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                    String.class, TENANT, fixture.jobId, fixture.runId));
+        } catch (Exception | Error failure) {
+            primary = failure;
+            throw failure;
+        } finally {
+            releaseFinalAcl.countDown();
+            finishPool(pool, 10, primary);
+        }
+    }
+
+    @Test
+    void posW3c_mysql100kGateWithinDerivedBudgetAndSerializesSameSourceJob() throws Exception {
+        StringBuilder csv = new StringBuilder("externalKey,companyName\n");
+        for (int i = 0; i < 100_000; i++) csv.append("max-").append(i).append(",会社").append(i).append('\n');
+        String contents = csv.toString();
+        var fixture = setupFixture(contents);
+        var sealedLease = service.seal(fixture.capability);
+        long otherJobId = createMappedJobForSameSource(contents);
+        var otherStart = service.beginStart(otherJobId);
+        CountDownLatch finalAclEntered = new CountDownLatch(1);
+        CountDownLatch releaseFinalAcl = new CountDownLatch(1);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            if (isW3cFinalGateTransaction()) {
+                finalAclEntered.countDown();
+                if (!releaseFinalAcl.await(3, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("最終ACL待機がタイムアウトしました");
+                }
+            }
+            return context;
+        }).when(authorization).requireCurrentAuthorizationForWrite(context);
+
+        trackingManager.reset();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        Throwable primary = null;
+        try {
+            Future<ImportValidationAppendService.PublishCapability> recount =
+                    pool.submit(() -> appendService.recountSealed(sealedLease));
+            assertTrue(finalAclEntered.await(90, TimeUnit.SECONDS), "10万件検証の最終gate到達を確認");
+            Long blockerPid = trackingManager.getLastW3cConnectionId();
+            assertNotNull(blockerPid);
+            Future<ImportValidationLifecycleService.RunLease> otherStartFuture = pool.submit(() -> service.start(otherStart));
+            awaitLockWait(trackingManager, blockerPid, otherStartFuture);
+            releaseFinalAcl.countDown();
+
+            var capability = recount.get(120, TimeUnit.SECONDS);
+            Timestamp finalDbTime = jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)", Timestamp.class);
+            assertNotNull(capability);
+            assertNotNull(trackingManager.getLastW3cEntryDbTime());
+            assertNotNull(finalDbTime);
+            assertTrue(trackingManager.getLastW3cEntryDbTime().before(capability.lease().expiresAt()),
+                    "最終gate開始DB時刻がexact lease期限より前であること");
+            assertTrue(finalDbTime.before(capability.lease().expiresAt()), "最終DB時刻がexact lease期限より前であること");
+            assertNotNull(trackingManager.getLastW3cDurationMillis());
+            assertTrue(trackingManager.getLastW3cDurationMillis() <= 10_000L,
+                    "10万件の最終transactionが派生10秒予算以内に終了すること");
+            assertNotNull(otherStartFuture.get(15, TimeUnit.SECONDS), "最終gate完了後に同source別jobが進めること");
+        } catch (Exception | Error failure) {
+            primary = failure;
+            throw failure;
+        } finally {
+            releaseFinalAcl.countDown();
+            finishPool(pool, 15, primary);
+        }
     }
 
     @Test
@@ -570,6 +839,10 @@ class ImportValidationSealRealMySqlTest {
 
     static final class TrackingTransactionManager extends DataSourceTransactionManager {
         private final AtomicReference<Long> lastConnectionId = new AtomicReference<>();
+        private final ThreadLocal<Long> w3cStartNanos = new ThreadLocal<>();
+        private final AtomicReference<Long> lastW3cDurationMillis = new AtomicReference<>();
+        private final AtomicReference<Timestamp> lastW3cEntryDbTime = new AtomicReference<>();
+        private final AtomicReference<Long> lastW3cConnectionId = new AtomicReference<>();
 
         TrackingTransactionManager(DataSource ds) {
             super(ds);
@@ -590,7 +863,42 @@ class ImportValidationSealRealMySqlTest {
                 } catch (SQLException e) {
                     throw new RuntimeException("Failed to capture transaction connection ID", e);
                 }
+                if ("NF06-W3C-final-gate".equals(definition.getName())) {
+                    w3cStartNanos.set(System.nanoTime());
+                    try (Statement s = holder.getConnection().createStatement();
+                         ResultSet rs = s.executeQuery("SELECT CONNECTION_ID()")) {
+                        if (rs.next()) lastW3cConnectionId.set(rs.getLong(1));
+                    } catch (SQLException e) {
+                        throw new RuntimeException("W3C最終gateのCONNECTION_ID取得に失敗しました", e);
+                    }
+                    try (Statement s = holder.getConnection().createStatement();
+                         ResultSet rs = s.executeQuery("SELECT CURRENT_TIMESTAMP(6)")) {
+                        if (rs.next()) lastW3cEntryDbTime.set(rs.getTimestamp(1));
+                    } catch (SQLException e) {
+                        throw new RuntimeException("W3C最終gate開始DB時刻の取得に失敗しました", e);
+                    }
+                }
             }
+        }
+
+        @Override
+        protected void doCommit(DefaultTransactionStatus status) {
+            Long started = w3cStartNanos.get();
+            try { super.doCommit(status); }
+            finally { recordW3cDuration(started); }
+        }
+
+        @Override
+        protected void doRollback(DefaultTransactionStatus status) {
+            Long started = w3cStartNanos.get();
+            try { super.doRollback(status); }
+            finally { recordW3cDuration(started); }
+        }
+
+        private void recordW3cDuration(Long started) {
+            if (started == null) return;
+            lastW3cDurationMillis.set(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+            w3cStartNanos.remove();
         }
 
         Long getLastConnectionId() {
@@ -599,7 +907,14 @@ class ImportValidationSealRealMySqlTest {
 
         void reset() {
             lastConnectionId.set(null);
+            lastW3cDurationMillis.set(null);
+            lastW3cEntryDbTime.set(null);
+            lastW3cConnectionId.set(null);
         }
+
+        Long getLastW3cDurationMillis() { return lastW3cDurationMillis.get(); }
+        Timestamp getLastW3cEntryDbTime() { return lastW3cEntryDbTime.get(); }
+        Long getLastW3cConnectionId() { return lastW3cConnectionId.get(); }
     }
 
     private void awaitLockWait(TrackingTransactionManager trackingManager, long blockerPid, Future<?> workerFuture) throws Exception {
@@ -657,6 +972,26 @@ class ImportValidationSealRealMySqlTest {
             }
         }
         return false;
+    }
+
+    private static boolean isW3cFinalGateTransaction() {
+        return "NF06-W3C-final-gate".equals(TransactionSynchronizationManager.getCurrentTransactionName());
+    }
+
+    private static void finishPool(ExecutorService pool, long timeoutSeconds, Throwable primary) {
+        pool.shutdownNow();
+        try {
+            if (!pool.awaitTermination(timeoutSeconds, TimeUnit.SECONDS)) {
+                AssertionError cleanup = new AssertionError("非同期workerが制限時間内に終了しませんでした");
+                if (primary != null) primary.addSuppressed(cleanup);
+                else throw cleanup;
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            AssertionError cleanup = new AssertionError("非同期worker終了待機が中断されました", interrupted);
+            if (primary != null) primary.addSuppressed(cleanup);
+            else throw cleanup;
+        }
     }
 
     private ImportValidationAppendService.SealCapability reflectedCapabilityWithExpiry(

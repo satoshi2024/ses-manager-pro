@@ -10,6 +10,7 @@ import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionTimedOutException;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.ByteArrayOutputStream;
@@ -21,6 +22,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDate;
@@ -28,12 +31,14 @@ import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import java.util.UUID;
 
 /** F1b-1: run開始、run-aware lease、abortのtransaction境界。row append以降は扱わない。 */
 @Service
 public class ImportValidationLifecycleService {
     private static final int LEASE_SECONDS = 30;
+    private static final int W3C_FINAL_GATE_TIMEOUT_SECONDS = 10;
     private static final String PARSER_CONTRACT = "ses-csv-v1-stream-limits-64m-100k-64-65536";
     private static final String CANONICAL_CONTRACT = "ses-import-canonical-row-v1";
     private static final String VALIDATOR_CONTRACT = "ses-import-v1-readonly-validator-v1";
@@ -43,6 +48,7 @@ public class ImportValidationLifecycleService {
     private final ImportMetadataAuthorizationService authorization;
     private final DocumentService documents;
     private final TransactionTemplate transaction;
+    private final TransactionTemplate w3cFinalGateTransaction;
     private final String instanceId = UUID.randomUUID().toString();
 
     public ImportValidationLifecycleService(JdbcTemplate jdbc, ImportMetadataAuthorizationService authorization,
@@ -53,6 +59,11 @@ public class ImportValidationLifecycleService {
         this.transaction = new TransactionTemplate(manager);
         this.transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        this.w3cFinalGateTransaction = new TransactionTemplate(manager);
+        this.w3cFinalGateTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.w3cFinalGateTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        this.w3cFinalGateTransaction.setTimeout(W3C_FINAL_GATE_TIMEOUT_SECONDS);
+        this.w3cFinalGateTransaction.setName("NF06-W3C-final-gate");
     }
 
     /** operation/worker identityはserver発行の不透明値。呼出元はgenerationやactorを指定できない。 */
@@ -88,6 +99,34 @@ public class ImportValidationLifecycleService {
         return transaction.execute(status -> renewInTransaction(lease));
     }
 
+    /** W3C専用heartbeat。ACK-lossの同世代renew再取得を許さず、入力leaseとの完全一致でCASする。 */
+    RunLease renewSealedRecountExact(RunLease grant) {
+        requireInstance(grant == null ? null : grant.instanceId);
+        return transaction.execute(status -> {
+            current(grant.input.context);
+            Locked locked = lockResources(grant.input, grant.runId);
+            ImportAuthorizedContext gate = authorization.requireCurrentAuthorizationForWrite(grant.input.context);
+            requireSameActor(grant.input.context, gate);
+            Timestamp now = dbNow();
+            requireExactSealedLease(grant, locked, now);
+            int updated = jdbc.update("""
+                    UPDATE t_import_job SET lease_expires_at=GREATEST(
+                      lease_expires_at,TIMESTAMPADD(SECOND,?,CURRENT_TIMESTAMP(6))),
+                      version_no=version_no+1,updated_at=CURRENT_TIMESTAMP(6)
+                    WHERE tenant_id=? AND id=? AND version_no=? AND state='VALIDATING'
+                      AND active_validation_run_id=? AND current_validation_run_id IS NULL
+                      AND lease_owner=? AND lease_generation=? AND lease_expires_at=?
+                      AND lease_expires_at>CURRENT_TIMESTAMP(6)
+                    """, LEASE_SECONDS, grant.input.context.tenantId(), grant.input.jobId, grant.jobVersion,
+                    grant.runId, grant.workerId, grant.generation, grant.expiresAt);
+            if (updated != 1) conflict();
+            Timestamp expiry = jdbc.queryForObject("SELECT lease_expires_at FROM t_import_job WHERE tenant_id=? AND id=?",
+                    Timestamp.class, grant.input.context.tenantId(), grant.input.jobId);
+            if (expiry == null) conflict();
+            return lease(grant.input, grant.runId, grant.workerId, grant.generation, grant.jobVersion + 1, expiry);
+        });
+    }
+
     /** W3C開始時の短いread gate。SEALEDかつlease全項目が現行値と完全一致することを要求する。 */
     RunLease beginSealedRecount(RunLease grant) {
         requireInstance(grant == null ? null : grant.instanceId);
@@ -107,7 +146,8 @@ public class ImportValidationLifecycleService {
         if (proof == null || proof.lease() == null || proof.snapshot() == null) conflict();
         RunLease grant = proof.lease();
         requireInstance(grant.instanceId);
-        return transaction.execute(status -> {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(W3C_FINAL_GATE_TIMEOUT_SECONDS);
+        return w3cFinalGateTransaction.execute(status -> {
             Input expected = grant.input;
             current(expected.context);
             Locked locked = lockResources(expected, grant.runId);
@@ -118,7 +158,8 @@ public class ImportValidationLifecycleService {
             Long rowCount = jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
                     Long.class, expected.context.tenantId(), expected.jobId, run.id);
             if (rowCount == null || rowCount.longValue() != proof.counters().sourceRows()) conflict();
-            requirePersistedRowSetMatches(expected.context.tenantId(), expected.jobId, run.id, rowCount, proof.rowSetSha256());
+            requirePersistedRowSetMatches(expected.context.tenantId(), expected.jobId, run.id, rowCount,
+                    proof.rowSetSha256(), deadline);
             RunSummary persisted = loadRunSummary(expected.context.tenantId(), expected.jobId, run.id);
             if (persisted == null || persisted.sealedAt == null) conflict();
             byte[] rowSetSha = HexFormat.of().parseHex(proof.rowSetSha256());
@@ -126,22 +167,26 @@ public class ImportValidationLifecycleService {
             if (!Arrays.equals(persisted.rowSetSha256, rowSetSha)
                     || !Arrays.equals(persisted.summarySha256, summarySha)) conflict();
             requireSummaryMatches(persisted, proof.counters());
+            requireGateBudget(deadline);
             ImportAuthorizedContext gate = authorization.requireCurrentAuthorizationForWrite(expected.context);
             requireSameActor(expected.context, gate);
+            requireGateBudget(deadline);
             Timestamp now = dbNow();
+            requireGateBudget(deadline);
             requireExactSealedLease(grant, locked, now);
             return grant;
         });
     }
 
     private void requirePersistedRowSetMatches(String tenant, long jobId, long runId, long expectedCount,
-                                               String expectedSha256) {
+                                               String expectedSha256, long deadline) {
         MessageDigest digest = sha256Digest();
         digest.update("SES-IMPORT-ROW-SET-V1".getBytes(StandardCharsets.US_ASCII));
         digest.update(new byte[]{0, 0, 0, 1});
         long after = 0;
         long count = 0;
         while (true) {
+            requireGateBudget(deadline);
             List<ImportValidationAppendService.RowMetadata> rows = jdbc.query("""
                     SELECT source_row_number,source_row_sha256,canonical_fingerprint,disposition,finding_codes,row_commit_sha256
                     FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?
@@ -160,6 +205,13 @@ public class ImportValidationLifecycleService {
             }
         }
         if (count != expectedCount || !MessageDigest.isEqual(digest.digest(), HexFormat.of().parseHex(expectedSha256))) conflict();
+        requireGateBudget(deadline);
+    }
+
+    private void requireGateBudget(long deadline) {
+        if (System.nanoTime() >= deadline) {
+            throw new TransactionTimedOutException("W3C最終確認が10秒の実行予算を超過しました");
+        }
     }
 
     private void requireExactSealedLease(RunLease grant, Locked locked, Timestamp now) {
@@ -746,18 +798,24 @@ public class ImportValidationLifecycleService {
         return jdbc.query(sql, rs -> {
             if (!rs.next()) return null;
             return new RunSummary(
-                    rs.getTimestamp(1), rs.getLong(2), rs.getLong(3), rs.getLong(4),
-                    rs.getLong(5), rs.getLong(6), rs.getBytes(7), rs.getBytes(8),
-                    rs.getLong(9), rs.getBigDecimal(10), rs.getLong(11), rs.getBigDecimal(12),
-                    rs.getLong(13), rs.getLong(14), rs.getBigDecimal(15), rs.getLong(16),
-                    rs.getBigDecimal(17), rs.getLong(18), rs.getLong(19), rs.getBigDecimal(20),
-                    rs.getLong(21), rs.getBigDecimal(22), rs.getLong(23), rs.getLong(24),
-                    rs.getBigDecimal(25), rs.getLong(26), rs.getBigDecimal(27), rs.getLong(28),
-                    rs.getLong(29), rs.getBigDecimal(30), rs.getLong(31), rs.getBigDecimal(32),
-                    rs.getLong(33), rs.getBytes(34), rs.getBytes(35), rs.getBytes(36),
+                    rs.getTimestamp(1), requiredLong(rs, 2), requiredLong(rs, 3), requiredLong(rs, 4),
+                    requiredLong(rs, 5), requiredLong(rs, 6), rs.getBytes(7), rs.getBytes(8),
+                    requiredLong(rs, 9), rs.getBigDecimal(10), requiredLong(rs, 11), rs.getBigDecimal(12),
+                    requiredLong(rs, 13), requiredLong(rs, 14), rs.getBigDecimal(15), requiredLong(rs, 16),
+                    rs.getBigDecimal(17), requiredLong(rs, 18), requiredLong(rs, 19), rs.getBigDecimal(20),
+                    requiredLong(rs, 21), rs.getBigDecimal(22), requiredLong(rs, 23), requiredLong(rs, 24),
+                    rs.getBigDecimal(25), requiredLong(rs, 26), rs.getBigDecimal(27), requiredLong(rs, 28),
+                    requiredLong(rs, 29), rs.getBigDecimal(30), requiredLong(rs, 31), rs.getBigDecimal(32),
+                    requiredLong(rs, 33), rs.getBytes(34), rs.getBytes(35), rs.getBytes(36),
                     rs.getBytes(37)
             );
         }, tenant, jobId, runId);
+    }
+
+    private long requiredLong(ResultSet rs, int column) throws SQLException {
+        long value = rs.getLong(column);
+        if (rs.wasNull()) conflict();
+        return value;
     }
 
     static byte[] calculateSummarySha256(String tenantId, long jobId, long runId, byte[] sourceSha,

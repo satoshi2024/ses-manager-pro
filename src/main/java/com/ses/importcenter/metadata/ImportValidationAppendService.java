@@ -151,10 +151,12 @@ public class ImportValidationAppendService {
                                 lifecycle.appendChunk(current[0], new ValidatedChunk(current[0],
                                         lifecycle.appendSnapshot(current[0]), batch));
                                 batch.clear();
-                                current[0] = lifecycle.renew(current[0]);
+                                current[0] = strictSealed
+                                        ? lifecycle.renewSealedRecountExact(current[0]) : lifecycle.renew(current[0]);
                             }
                         } else if (processedRows[0] % CHUNK_ROWS == 0) {
-                            current[0] = lifecycle.renew(current[0]);
+                            current[0] = strictSealed
+                                    ? lifecycle.renewSealedRecountExact(current[0]) : lifecycle.renew(current[0]);
                         }
                     });
             prefix.requireExhausted();
@@ -326,7 +328,9 @@ public class ImportValidationAppendService {
             if (lease == null || snapshot == null || lease.runId() != snapshot.runId()
                     || lease.generation() != snapshot.generation() || lease.jobVersion() != snapshot.jobVersion()
                     || !lease.workerId().equals(snapshot.workerId()) || !lease.tenantId().equals(snapshot.context().tenantId())
-                    || lease.jobId() != snapshot.jobId() || !Objects.equals(lease.expiresAt(), snapshot.expiresAt())) conflict();
+                    || lease.jobId() != snapshot.jobId() || !Objects.equals(lease.expiresAt(), snapshot.expiresAt())) {
+                throw BusinessException.of(409, "error.import.jobStateConflict");
+            }
             this.lease = lease; this.sourceSha256 = sourceSha256; this.rowSetSha256 = rowSetSha256;
             this.summarySha256 = summarySha256; this.counters = counters;
         }

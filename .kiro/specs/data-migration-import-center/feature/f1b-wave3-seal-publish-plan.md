@@ -356,6 +356,7 @@ WHERE tenant_id = ? AND job_id = ? AND id = ?
 - source/DB row照合はSEALED strict modeで行う。sourceに行があり保存rowが0件、末尾欠落、余分な保存row、row metadata各列の差分はいずれも拒否する。BUILDING appendのprefix exhausted後に新rowを許す既存動作は維持する。
 - recount開始とfinal gateは短いtransactionで別々に実行し、双方でSEALED、同一owner/generation/version/expiry、active/current pointer、input/fingerprint、fresh DB時刻とwrite ACLを確認する。同generationのrenew/takeover ACK-loss許容をこのgateへ流用しない。final gateはrow commitからrow-setを再計算し、persisted summaryのcounter/finding/amount全列をNULL/0を含めて比較する。
 - proofは内部recountからのみ生成し、final gateがexact確認を完了した後に限りprivate `PublishCapability`をmintする。再確認失敗時はcapabilityなし。recount中のrenewはjob lease/version/updated_at heartbeatのみ許可し、row/summary/run state/pointerを書き換えない。token発行後のrenew/takeoverはtokenを失効させ、W3Dで再度exact確認する。
+- 本batchの派生受入値としてfinal gate transactionは10秒以内、終了直前のfresh DB時刻はexact lease expiry未満とする（既存SLOではない）。final gate専用transaction/query timeoutとrow page間のwall-clock deadlineで制限し、timeoutはinfra timeoutとして業務409と区別する。global JDBC timeoutは変更しない。
 - exact sourceを再parseして得た各`ValidatedRow`をSEALEDのordered DB row metadataと一対一比較し、prefix不足/余分/不一致、source hash差分、validator fingerprint差分があればpublish capabilityを発行しない。row/physical/empty counts、accepted/rejected、finding counts、amount fields/reason countsはsource validation streamから再計算する。DB rowにはraw amountがないため、amountをDB rowから復元したとは扱わない。row-set SHAおよびsummary SHAも再構成し、SEALED列とbyte/value単位で一致させる。
 - finding summaryはclosed finding-codeごとのcountをcode順にdomain/version/length-prefixでcanonicalizeする。row/summaryへfinding message、raw row、PII、external keyを保存しない。
 - 金額は各schema fieldについてaccepted/rejected known countと円sum、全sourceに対するexcluded count、`field:closedReason` countを再計算する。count=0のsumはNULL、known rowがあり算定sumが0円なら0を保持する。DECIMAL(38,0)範囲外、unknown reason、schemaにないfieldはpublish拒否。
@@ -367,6 +368,7 @@ WHERE tenant_id = ? AND job_id = ? AND id = ?
 - SEALED summaryを元row/sourceからrecountした結果が一致し、same run repeatで同じhashを得る。
 - source byte差分、EOFなし、mapping/parser/fingerprint drift、ordered row metadata各列の差分、counter/finding/amount byte差分、NULLと0の取り違えはpublish capabilityを発行しない。
 - SEALED source tail欠落、DB row 0件、追加row、開始後のrenew/takeover、ACL revoke/lease expiry、summaryの各counter/finding/amount列改ざんはcapabilityなしで終了し、同一SEALEDの再recountは同じhashを返す。
+- MySQL最大100,000 rowではfinal gate entry DB時刻、exact expiry、終了DB時刻、transaction wall time、同source別jobの実待機/lock解放を測定する。source I/O中の実renew/takeoverはresource lockを待たずに完了し、旧leaseのexact heartbeatが拒否することをfuture/latchで確認する。これらは未実行時点では受入済みに昇格しない。
 - restart後のSEALED takeoverでは同じrunを継続する。old generation capabilityは拒否し、新generation recountの一致だけをpublishへ渡す。
 
 ## 6. Wave 3D: SEALEDからCOMPLETEDへのatomic publish

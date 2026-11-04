@@ -88,16 +88,27 @@ class ImportValidationSealServiceTest {
         return setupFixtureWithService(service, appendService, csvContent);
     }
 
+    private TestFixture setupFixture(String csvContent, String entity, Map<String, String> mapping) {
+        return setupFixtureWithMapping(service, appendService, csvContent, entity, mapping);
+    }
+
     private TestFixture setupFixtureWithService(
             ImportValidationLifecycleService targetService,
             ImportValidationAppendService targetAppendService,
             String csvContent) {
+        return setupFixtureWithMapping(targetService, targetAppendService, csvContent, "CUSTOMER",
+                Map.of("externalKey", "externalKey", "companyName", "companyName"));
+    }
+
+    private TestFixture setupFixtureWithMapping(
+            ImportValidationLifecycleService targetService,
+            ImportValidationAppendService targetAppendService,
+            String csvContent, String entity, Map<String, String> mapping) {
         long jobId = nextJobId();
         byte[] csvBytes = csvContent.getBytes(StandardCharsets.UTF_8);
         byte[] sourceSha = digest().digest(csvBytes);
 
         // 正準な mapping JSON を ImportMetadataService.canonicalMapping から生成し、キー順序（TreeMap）とハッシュを確定
-        Map<String, String> mapping = Map.of("externalKey", "externalKey", "companyName", "companyName");
         byte[] mappingBytes = ImportMetadataService.canonicalMapping(mapping);
         byte[] mappingHash = hash(mappingBytes);
 
@@ -112,19 +123,19 @@ class ImportValidationSealServiceTest {
                 HexFormat.of().formatHex(sourceSha), "CLEAN", 0);
         jdbc.update("INSERT INTO t_document_link(tenant_id,document_id,target_type,target_id,deleted_flag) VALUES(?,?,?,?,0)",
                 TENANT, documentId, "IMPORT_JOB", jobId);
-        jdbc.update("INSERT INTO t_import_mapping VALUES(?,?,?,?,?,?,?,?)", TENANT, mappingId, sourceId, "CUSTOMER",
+        jdbc.update("INSERT INTO t_import_mapping VALUES(?,?,?,?,?,?,?,?)", TENANT, mappingId, sourceId, entity,
                 "ses-import-v1", 1, mappingHash, mappingBytes);
         jdbc.update("""
                 INSERT INTO t_import_job(tenant_id,id,source_system_id,source_version,entity_type,schema_version,
                   source_encoding,source_sha256,legal_entity_id,document_id,document_version_id,document_version_no,
                   document_sha256,mapping_id,mapping_version,mapping_sha256,state,version_no,lease_generation)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'MAPPED',1,0)
-                """, TENANT, jobId, sourceId, 3L, "CUSTOMER", "ses-import-v1", "UTF8", sourceSha, "77",
+                """, TENANT, jobId, sourceId, 3L, entity, "ses-import-v1", "UTF8", sourceSha, "77",
                 documentId, versionId, 1, sourceSha, mappingId, 1, mappingHash);
 
         when(metadataService.openSource(jobId)).thenAnswer(inv ->
                 new ImportSourceContent(new ByteArrayInputStream(csvBytes), "customer.csv",
-                        ImportEncoding.UTF8, ImportEntity.CUSTOMER, HexFormat.of().formatHex(sourceSha)));
+                        ImportEncoding.UTF8, ImportEntity.valueOf(entity), HexFormat.of().formatHex(sourceSha)));
 
         var startOp = targetService.beginStart(jobId);
         var startLease = targetService.start(startOp);
@@ -243,6 +254,50 @@ class ImportValidationSealServiceTest {
         jdbc.update("UPDATE t_import_validation_run SET cost_price_accepted_sum_yen=0 WHERE tenant_id=? AND job_id=? AND id=?",
                 TENANT, fixture.jobId, fixture.runId);
         assertThrows(BusinessException.class, () -> appendService.recountSealed(lease));
+    }
+
+    @Test
+    void negW3c_rejectsNullInEveryPersistedCounterAndAcceptsKnownZeroYen() {
+        var fixture = setupFixture("externalKey,companyName\ncust-1,株式会社A\n");
+        var lease = service.seal(fixture.capability);
+        for (String column : List.of("source_row_count", "physical_row_count", "empty_row_count", "accepted_row_count",
+                "rejected_row_count", "expected_unit_price_accepted_known_count", "expected_unit_price_rejected_known_count",
+                "expected_unit_price_excluded_count", "unit_price_min_accepted_known_count", "unit_price_min_rejected_known_count",
+                "unit_price_min_excluded_count", "unit_price_max_accepted_known_count", "unit_price_max_rejected_known_count",
+                "unit_price_max_excluded_count", "selling_price_accepted_known_count", "selling_price_rejected_known_count",
+                "selling_price_excluded_count", "cost_price_accepted_known_count", "cost_price_rejected_known_count",
+                "cost_price_excluded_count")) {
+            Long original = jdbc.queryForObject("SELECT " + column + " FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                    Long.class, TENANT, fixture.jobId, fixture.runId);
+            jdbc.update("UPDATE t_import_validation_run SET " + column + "=NULL WHERE tenant_id=? AND job_id=? AND id=?",
+                    TENANT, fixture.jobId, fixture.runId);
+            assertThrows(BusinessException.class, () -> appendService.recountSealed(lease), column);
+            jdbc.update("UPDATE t_import_validation_run SET " + column + "=? WHERE tenant_id=? AND job_id=? AND id=?",
+                    original, TENANT, fixture.jobId, fixture.runId);
+        }
+
+        var zero = setupFixture("externalKey,fullName,expectedUnitPrice\neng-zero,社員零,0\n", "ENGINEER",
+                Map.of("externalKey", "externalKey", "fullName", "fullName", "expectedUnitPrice", "expectedUnitPrice"));
+        var zeroLease = service.seal(zero.capability);
+        var zeroCapability = appendService.recountSealed(zeroLease);
+        assertNotNull(zeroCapability);
+        assertEquals(1L, jdbc.queryForObject("SELECT expected_unit_price_accepted_known_count FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                Long.class, TENANT, zero.jobId, zero.runId));
+        assertEquals(0, jdbc.queryForObject("SELECT expected_unit_price_accepted_sum_yen FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                BigDecimal.class, TENANT, zero.jobId, zero.runId).compareTo(BigDecimal.ZERO));
+    }
+
+    @Test
+    void posW3c_exactHeartbeatRenewsAt250RowsWithoutAdoptingExternalRenew() {
+        StringBuilder csv = new StringBuilder("externalKey,companyName\n");
+        for (int i = 0; i < 251; i++) csv.append("cust-").append(i).append(",会社").append(i).append('\n');
+        var fixture = setupFixture(csv.toString());
+        var sealedLease = service.seal(fixture.capability);
+        var capability = appendService.recountSealed(sealedLease);
+        assertNotNull(capability);
+        assertTrue(capability.lease().jobVersion() > sealedLease.jobVersion());
+        assertEquals("SEALED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
+                String.class, TENANT, fixture.jobId, fixture.runId));
     }
 
     @Test
