@@ -60,8 +60,10 @@
 ## 遠隔保全と再開点
 
 - ユーザーの保全PR作成指示に基づき、候補branch `codex/snf-unified-candidate-20261104` の固定 `8aabe1d80834978e07bac4704adec22bf055b0dd` を通常pushし、Draft PR [#116](https://github.com/satoshi2024/ses-manager-pro/pull/116) を作成した。既存PR #102〜#115は維持する。既知Fast失敗・後続NOT RUN・NO-GOをPR本文に明記し、merge/auto-merge/deployは実施していない。NF07 Batch4aとW3Dの後続ローカル変更はこのPRに含めない。
-- 3つのLuna agentがusage limitを返したため、指定実装モデルでの作業は中断中。モデルを無断変更せず、ユーザーへ代替実装モデルの選択を問い合わせた。AstraのNF07 runtime独立確認は実行できた。
-- 再開優先順: (1) 8aのFast法人context失敗を隔離worktreeで原因調査・最小修復しAstra review、(2) 同一候補で完全Gate再実行、(3) W3Dの保全済み未完成実装・testsを続行、(4) NF07 Batch4aの後続trusted source接線とNF09承認/loader境界を具体化する。人手承認をAIが代行しない。
+- 3つのLuna agentがusage limitを返したため、指定実装モデルでの作業は中断中。ユーザーは **gpt-6-lunaを維持して利用枠回復を待つ** と明示選択した。代替モデルでの実装は開始しない。AstraのNF07 runtime独立確認は完了できた。
+- CRM診断用に `C:\work\ses-snf-crm-fixture-20261104` / `codex/snf-crm-fixture-20261104` を固定8aから作成した。コード未変更・clean。`C:\work\ses-crm-fixture-evidence\8aabe1d8-isolated-01` はOpportunity単独2/0/0/0。Astraが共有H2汚染源候補として、`AssetBoundaryAndLifecycleIntegrationTest`のNOT_SUPPORTED scope方法による法人91001/91002の未清理commitを特定した。続くcohort-01は3/0/0/0だが、POMのrandom設定が指定順序より優先されOpportunityが先行したため、汚染元先行の再現証拠ではない。この限界をrun.jsonに明記した。productionの法人校正は変更していない。修正候補は非並行scope方法だけのテストtransaction復帰であり、実行証拠と独立reviewは未取得。
+- PR #116のCI run `41807898296` は18:39 JST観測時点でIN_PROGRESS。performanceはSUCCESS、real Chromeは17 tests / 1 failure / 0 errors / 0 skippedのFAIL。他5jobはIN_PROGRESSでPASS扱いしない。失敗は`PwaQueueChromeIsolationBrowserTest.java:189`。Astraが、navigation後の旧document controllerによる誤ったready判定と、CDP例外をnullへ隠すテスト欠陥を確認したが、今回の唯一の原因は未確定。修正候補はdocument marker・queue ready/scope/controllerの明示同期、strict evaluation、失敗時診断保存とCI artifact収集範囲の補完。ログとCI snapshotは `C:\work\ses-pr-publication-20261104` に保全し、PR本文にも未解決事項を追記した。
+- 再開優先順: (1) Fast法人contextとChrome同期/診断の失敗を隔離worktreeで最小修復しAstra review、(2) 同一候補で完全Gate再実行とPR #116のCI最終確認、(3) W3Dの保全済み未完成実装・testsを続行、(4) NF07 Batch4aの後続trusted source接線とNF09承認/loader境界を具体化する。人手承認をAIが代行しない。
 
 ## 総合判定
 
