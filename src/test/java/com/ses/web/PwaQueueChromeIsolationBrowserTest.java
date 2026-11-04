@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -159,17 +160,40 @@ class PwaQueueChromeIsolationBrowserTest {
         Path evidence = Path.of("target", "nf04-browser-evidence");
         Files.createDirectories(evidence);
         CdpBrowser browser = null;
+        List<String> navigationUrls = new CopyOnWriteArrayList<>();
+        String phase = "Chrome起動前";
         try {
+            phase = "Chrome起動";
             browser = launchChrome(profile);
             String base = "http://127.0.0.1:" + server.getAddress().getPort();
-            browser.navigate(base + "/test.html?user=A");
-            assertTrue(browser.waitForStrict("!!(window.SES && SES.pwaQueue && SES.pwaQueue.getScope() === 'scope-A')", Duration.ofSeconds(20)),
+            String firstDocument = java.util.UUID.randomUUID().toString();
+            String firstUrl = base + "/test.html?user=A&__document=" + firstDocument;
+            navigationUrls.add(firstUrl);
+            phase = "初回documentとqueue初期化";
+            browser.navigate(firstUrl);
+            assertTrue(browser.waitForStrict("location.search.includes('__document=" + firstDocument
+                            + "')&&document.readyState==='complete'&&!!(window.SES&&SES.pwaQueue&&SES.pwaQueue.getScope()==='scope-A')",
+                    Duration.ofSeconds(20)),
                     "初期scope確認: " + browser.evaluateStrict("JSON.stringify({href:location.href,scope:window.SES&&SES.pwaQueue&&SES.pwaQueue.getScope(),epochPresent:!!localStorage.getItem('ses_pwa_revocation_epoch'),scopeEpochPresent:!!localStorage.getItem('ses_pwa_scope_epoch'),csrfCookiePresent:document.cookie.split(';').some(x=>x.trim().startsWith('XSRF-TOKEN=')),online:navigator.onLine})").asText()
                             + " / consoleEventCount=" + browser.consoleEvents().size());
             assertTrue(browser.waitForStrict("navigator.serviceWorker.getRegistration().then(r=>!!(r&&r.active))", Duration.ofSeconds(20)));
             // 初回installは現在documentをcontroller化しないため、activation後に再navigationする。
-            browser.navigate(base + "/test.html?user=A");
-            assertTrue(browser.waitForStrict("!!(navigator.serviceWorker && navigator.serviceWorker.controller)", Duration.ofSeconds(20)));
+            String controlledDocument = java.util.UUID.randomUUID().toString();
+            String controlledUrl = base + "/test.html?user=A&__document=" + controlledDocument;
+            navigationUrls.add(controlledUrl);
+            phase = "制御された新documentとqueue ready";
+            browser.navigate(controlledUrl);
+            String controlledReady = "(()=>{if(!location.search.includes('__document=" + controlledDocument
+                    + "')||document.readyState!=='complete'||!window.SES||!SES.pwaQueue"
+                    + "||typeof SES.pwaQueue.whenReady!=='function')return false;"
+                    + "const ready=SES.pwaQueue.whenReady();if(!ready||typeof ready.then!=='function')return false;"
+                    + "return ready.then(()=>navigator.serviceWorker.getRegistration().then(r=>!!(r"
+                    + "&&r.scope===location.origin+'/'&&r.active&&r.active.state==='activated'"
+                    + "&&navigator.serviceWorker.controller"
+                    + "&&navigator.serviceWorker.controller.scriptURL===location.origin+'/service-worker.js'"
+                    + "&&SES.pwaQueue.getScope()==='scope-A')))})()";
+            assertTrue(browser.waitForStrict(controlledReady, Duration.ofSeconds(20)),
+                    "一意な新documentのqueue ready、正しいSW scope、active worker、controllerを確認する");
             browser.evaluate("window.__setOnline(false)");
 
             JsonNode chromeVersion = browser.send("Browser.getVersion", Map.of());
@@ -181,12 +205,15 @@ class PwaQueueChromeIsolationBrowserTest {
                 assertFalse(path.startsWith("/api/") || path.startsWith("/my/") || path.startsWith("/portal/"), path);
             }
 
-            JsonNode queued = browser.evaluate("(async()=>{await SES.pwaQueue.whenReady();"
+            phase = "offline queueへの3件登録";
+            JsonNode queued = browser.evaluateStrict("(async()=>{const ready=SES.pwaQueue.whenReady();"
+                    + "if(!ready||typeof ready.then!=='function')throw new Error('queue whenReadyがthenableではありません');await ready;"
                     + "for(let d=1;d<=3;d++)await SES.pwaQueue.request({screen:'attendance',month:'2026-10',"
                     + "method:'POST',path:'/api/my/pwa/attendance/daily',baseVersion:0,resourceKey:'attendance:2026-10',"
                     + "payload:{workDate:'2026-10-0'+d,clockIn:'09:00',clockOut:'18:00',breaks:[],"
                     + "breakMinutes:60,workType:'出勤',workplaceType:'客先',remarks:'demo'}});return true})()");
-            assertTrue(queued.asBoolean());
+            assertTrue(queued.isBoolean() && queued.asBoolean(), "3件のoffline queue登録がboolean trueで完了する");
+            phase = "3件のonline送信";
             browser.evaluate("window.__setOnline(true); SES.pwaQueue.flush()");
             assertTrue(browser.waitForStrict("(async()=>{const r=await indexedDB.open('ses-pwa-self-service');return await new Promise(ok=>{r.onsuccess=()=>{const tx=r.result.transaction('queue');const q=tx.objectStore('queue').getAll();q.onsuccess=()=>ok(q.result.length===0)}})})()", Duration.ofSeconds(20)));
             assertEquals(List.of(0, 1, 2), new ArrayList<>(sentVersions), "同月の連続commandは直前のversionを使う");
@@ -514,6 +541,14 @@ class PwaQueueChromeIsolationBrowserTest {
                     Map.entry("oldScopeDraftsAfterRevoke", 0), Map.entry("clearFailureQuarantined", true),
                     Map.entry("offlineRestartDraftLockedUntilConfirmed", true), Map.entry("expiredPermitFetchCount", 1),
                     Map.entry("deleteScopeRaceFetchCount", 0))), StandardCharsets.UTF_8);
+        } catch (Exception | AssertionError failure) {
+            try {
+                saveFailureDiagnostics(evidence, browser, phase, navigationUrls, failure);
+            } catch (Exception diagnosticFailure) {
+                failure.addSuppressed(diagnosticFailure);
+            }
+            if (failure instanceof Exception exception) throw exception;
+            throw (AssertionError) failure;
         } finally {
             releaseLeaseFirst.countDown();
             releaseBrowserBarriers(browser);
@@ -536,6 +571,79 @@ class PwaQueueChromeIsolationBrowserTest {
             if (stream == null) throw new IllegalStateException("IndexedDB完了barrier helperを取得できません");
             return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
         }
+    }
+
+    private static void saveFailureDiagnostics(Path evidence, CdpBrowser browser, String phase,
+                                               List<String> navigationUrls, Throwable failure) throws Exception {
+        Files.createDirectories(evidence);
+        Map<String, Object> diagnostics = new java.util.LinkedHashMap<>();
+        diagnostics.put("test", "chromeでqueue更新競合撤回offline再起動とcache境界を実測する");
+        diagnostics.put("phase", phase);
+        diagnostics.put("failure", Map.of("type", failure.getClass().getName(),
+                "message", String.valueOf(failure.getMessage())));
+        diagnostics.put("navigationUrls", List.copyOf(navigationUrls));
+        Path diagnosticFile = evidence.resolve("failure-"
+                + java.time.Instant.now().toString().replace(':', '-') + ".json");
+        writeFailureDiagnostics(diagnosticFile, diagnostics);
+
+        if (browser != null) {
+            try {
+                diagnostics.put("consoleEvents", browser.consoleEvents());
+                diagnostics.put("networkRequests", browser.networkRequests());
+                diagnostics.put("networkResponses", browser.networkResponses());
+                diagnostics.put("networkFailures", browser.networkFailures());
+                diagnostics.put("protocolEvents", browser.protocolEvents());
+            } catch (RuntimeException eventFailure) {
+                diagnostics.put("eventCaptureFailure", eventFailure.toString());
+            }
+            writeFailureDiagnostics(diagnosticFile, diagnostics);
+
+            CompletableFuture<JsonNode> probe = new CompletableFuture<>();
+            Thread probeThread = new Thread(() -> {
+                try {
+                    JsonNode pageState = browser.send("Runtime.evaluate", Map.of(
+                            "expression", "(async()=>{const registration=navigator.serviceWorker"
+                                    + "?await navigator.serviceWorker.getRegistration():null;let queueRows=null;"
+                                    + "if(window.SES&&SES.pwaQueue){const db=await new Promise((ok,no)=>{const r=indexedDB.open('ses-pwa-self-service');"
+                                    + "r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});queueRows=await new Promise((ok,no)=>{"
+                                    + "const r=db.transaction('queue').objectStore('queue').getAll();r.onsuccess=()=>ok(r.result);"
+                                    + "r.onerror=()=>no(r.error)});db.close()}return JSON.stringify({href:location.href,readyState:document.readyState,"
+                                    + "documentMarker:new URL(location.href).searchParams.get('__document'),queueApi:!!(window.SES&&SES.pwaQueue),"
+                                    + "queueScope:window.SES&&SES.pwaQueue&&SES.pwaQueue.getScope(),queueReadyType:window.SES&&SES.pwaQueue"
+                                    + "&&SES.pwaQueue.whenReady?typeof SES.pwaQueue.whenReady():null,online:navigator.onLine,"
+                                    + "registration:registration?{scope:registration.scope,active:registration.active&&registration.active.state,"
+                                    + "controller:!!navigator.serviceWorker.controller,controllerScript:navigator.serviceWorker.controller"
+                                    + "&&navigator.serviceWorker.controller.scriptURL}:null,queue:queueRows?{count:queueRows.length,"
+                                    + "statuses:queueRows.map(x=>x.status),scopes:[...new Set(queueRows.map(x=>x.userScope))]}:null})})()",
+                            "returnByValue", true, "awaitPromise", true));
+                    probe.complete(pageState);
+                } catch (Exception probeFailure) {
+                    probe.completeExceptionally(probeFailure);
+                }
+            }, "pwa-failure-runtime-diagnostic");
+            probeThread.setDaemon(true);
+            probeThread.start();
+            try {
+                diagnostics.put("runtimeEvaluate", probe.get(3, TimeUnit.SECONDS));
+            } catch (java.util.concurrent.TimeoutException timeout) {
+                probeThread.interrupt();
+                diagnostics.put("runtimeProbeFailure", "timeout after 3 seconds");
+            } catch (java.util.concurrent.ExecutionException probeFailure) {
+                Throwable cause = probeFailure.getCause();
+                diagnostics.put("runtimeProbeFailure", Map.of("type", cause.getClass().getName(),
+                        "message", String.valueOf(cause.getMessage())));
+            } catch (InterruptedException interrupted) {
+                probeThread.interrupt();
+                diagnostics.put("runtimeProbeFailure", "diagnostic caller interrupted");
+            }
+            writeFailureDiagnostics(diagnosticFile, diagnostics);
+        }
+    }
+
+    private static void writeFailureDiagnostics(Path diagnosticFile, Map<String, Object> diagnostics)
+            throws java.io.IOException {
+        Files.writeString(diagnosticFile, JSON.writerWithDefaultPrettyPrinter()
+                .writeValueAsString(diagnostics), StandardCharsets.UTF_8);
     }
 
     private static void releaseBrowserBarriers(CdpBrowser browser) {

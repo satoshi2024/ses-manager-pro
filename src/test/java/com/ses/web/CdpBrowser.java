@@ -367,11 +367,12 @@ public final class CdpBrowser implements AutoCloseable {
                     + details.path("exception").path("description").asText("");
             if (text.contains("Execution context was destroyed")
                     || text.contains("Cannot find context with specified id")) throw new TransientEvaluationException();
-            throw new IllegalStateException("ChromeのJavaScript評価が例外で終了しました");
+            throw new IllegalStateException("ChromeのJavaScript評価が例外で終了しました: " + text.trim());
         }
         JsonNode remote = response.path("result");
         if ("error".equals(remote.path("subtype").asText()) || !remote.has("value")) {
-            throw new IllegalStateException("ChromeのJavaScript評価で値を取得できませんでした");
+            throw new IllegalStateException("ChromeのJavaScript評価で値を取得できませんでした: "
+                    + remote.path("description").asText(remote.path("type").asText("unknown")));
         }
         return remote.path("value");
     }
