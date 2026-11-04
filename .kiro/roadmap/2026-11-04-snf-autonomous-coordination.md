@@ -2,7 +2,7 @@
 
 ## 状態と権限境界
 
-- 全体状態は **NO-GO**。unified candidate の FULL_GATE は **RUNNING** で、最終結果は未確定。部分実行の件数を最終gate結果として記録せず、PASSを先取りしない。
+- 全体状態は **NO-GO**。unified candidate `8aabe1d8` の FULL_GATE は **FAIL** で終了した。Fastは4396 tests / 0 failures / 2 errors / 0 skipped。後続gateはNOT RUN。限定試験の結果から全体PASSを推定しない。
 - ユーザーは総責任者に自律的に進める権限を付与した。総責任者は Luna に実装を直接割り当て、Astra に独立レビューを直接割り当てる。ユーザーによる指示中継は不要。
 - 重いテスト実行者は一人に限定する。FULL_GATEの実行担当と証拠packetを総責任者が管理する。
 - 自律的な実装・レビュー・テストは本番投入承認ではない。Privacy、Legal、Security、Operations、Productionおよびprovider関連の人手確認・承認は引き続き必要である。
@@ -27,6 +27,7 @@
 - NF06 W3C recountは別worktree `C:\Users\Peter_pack\.codex\worktrees\snf-recount-20261104\ses-manager-pro` でbase `fd3d14cfdaddba8c047e1082367c0ca21da204c1` から実装した。固定HEAD `2eda9d69bfdd1e33a01aa50881f92bffa11f3025` はAstraの限定CODE PASSおよび定向runtime PASS。H2はSeal 16 + Inventory 1 = **17/0/0/0**、実MySQLは **20/0/0/0**、Maven exit 0。証拠は `C:\work\ses-runner-evidence\w3c-2eda9d69-h2-20261104` と `C:\work\ses-runner-evidence\w3c-2eda9d69-mysql-20261104`。6つの帰属済みreportのhash/lengthをAstraが照合した。100kの177.921秒は準備を含む用例全体で、final gateは10秒以下という断言の成立のみ確認できる。具体的なfinal gateミリ秒やp95は測定報告していない。
 - W3Cの3コミットは候補へ `85e633f9`、`d9b17be4`、`8aabe1d8` として順に取り込んだ。5つのW3Cファイルがsourceと完全一致し、runner・resourcesが先行候補と一致することを総責任者とAstraが独立確認した。W3D atomic publishとproduction bridgeは未完了。W3C定向合格をNF06全体COMPLETEへ読み替えない。
 - W3D計画は独立worktree `C:\work\ses-snf-nf06-publish-20261104`、branch `codex/snf-nf06-publish-20261104`、base `8aabe1d80834978e07bac4704adec22bf055b0dd` で改訂した。文書commit `a2d31720bca015f39f777c819793b962801617ac` に対するAstra判定は **PLAN REQUEST CHANGES**（P1: ACK回復時のcompleted timestampとcapabilityの不可能な比較、P2: abort/publish両順序の明示テスト不足）。Lunaへ限定文書修正を割り当て済み。凍結候補は変更せず、実装・テストはまだ開始していない。
+- 後続計画修正 `73d63131b3677f39e9d633264edab3153805d9d9` により上記2件は閉鎖し、Astra限定 **PLAN PASS**。実装を開始したがLunaのusage limitにより中断した。`ImportValidationLifecycleService.java` の149行追加のみが未commitで残り、未完成・未review・未testである。原worktreeは維持し、`C:\work\ses-takeover-checkpoint-20261104-1821` にsnapshot/patch/HEAD/statusを保存した。snapshotと原ファイルのSHA-256は `5937AB3C40AC1BA2511DD50E3A19DD4F6775B02E26FF6146477D995C6A08FDC5` で一致した。
 
 ## 他の受理済み証拠
 
@@ -36,11 +37,14 @@
 - Astraが候補`fd3d14`のBatch3 SF-RO-QUERYを独立審査し、限定CODE PASS。foundation主コード・testsは91aと同一であり、57件は当時の履歴証拠として受理した。旧文書のREVIEW PENDING記載は状態矛盾として次回文書整理対象。Batch4aの未登録production境界3コンポーネント設計`7ad5d9ab`は限定PLAN PASS。Bean/API/DB書込/外送は含めず、D-01〜D-09の人手承認は未取得のまま。
 - Batch4a実装は `C:\work\ses-snf-nf07-prod-boundary-20261104` の `120515d00f95bd22eddc0e9f4a1f19fe40b1abfb`。Astra判定は **CODE REQUEST CHANGES**（P0/P1=0、P2=2）。active prodとdefault prodの区別、およびenvelope固有失効・署名・SoD・時刻・bindingの到達可能な負例をLunaが修正中。production current policy source/catalogは未接続であり、wrapperの内部expectedPolicyId引数だけではcurrentnessを証明しない。法人context確認もpolicy署名の法人bindingを証明しない。
 - 実行規約逸脱: Batch4a担当が統一実行キューを経由せず、独立worktreeで `mvn -q -DskipTests test-compile` を2回実行した（2回目成功、テスト実行なし）。総責任者は以後の自行Maven実行を停止し、時刻・取得可能なログの報告を要求した。候補HEAD/ファイル変更はなく、executorのプロセス確認では候補MavenとSurefire以外のJava実行は残っていない。Fastへの影響の有無を推測せず記録し、performance前にも他の重い処理がないことを確認する。
+- Batch4a修正 `498f04ba459557d93d180b9f1a910bf3dff3c71f` はAstra限定 **CODE PASS**。FULL_GATE終了と重いプロセス不在を確認後、Luna停止のため総責任者が唯一のexecutorを引き継いだ。旧target 4422ファイルをhash照合して保全し、fresh clean compile後に7指定クラスを実行した。結果は **76 / 0 failures / 0 errors / 0 skipped、exit 0、dump 0**（既存4クラス57件、新規3クラス19件）。証拠packet `C:\work\ses-nf07-boundary-evidence\batch4a-498f04ba-20261104` はAstraも7 XML帰属と4440ファイルのhash/lengthを独立照合し、限定runtime evidence PASS。FULL_GATE合格ではなく、current-policy接線・人手承認の制約は継続する。
+- 未調整compileの正確な開始終了時刻と独立Maven logは存在せず、再構成しない。second compileのtarget更新時刻だけはUTC `09:10:10.889`〜`09:10:27.405` に確認した。候補packet隣の `candidate-8aabe1d8-20261104.coordination-observation.json` に証拠と限界を記録した。
 
 ### NF09
 
 - `codex/snf-prod-nf09-local-keycloak` HEAD `72cf4a59f9ecf6f360200fddd2c10347084e21b1` について全Fast 698 classes / 4326 tests / 0 failures / 0 errors / 0 skippedとRepair50が報告・受理済み。
 - stepB manifest `C:\work\ses-nf09-system-actor-attribution\verification-evidence\20261028-72cf4a59-stepB-fast-01\manifest-sha256-full.json` の1406項目すべてhash一致。実Surefire XMLは698クラス分であり、manifest項目数とは区別する。
+- 現コードの`service/repair`は13個の純粋Javaコンポーネントで、50件の証跡テストもDB修復executorの検証ではない。`RepairRetryDiscoveryService` 自体が正本承認・DB lock・完全snapshotの取得を後続boundaryの責務と明記する。production executor、承認資格の正本照会、境界B/Cの実修復は未完成であり、テストhelperや純粋計算を本番修復手順として使わない。
 
 ### runner / FULL_GATE
 
@@ -51,10 +55,17 @@
 - runner互換修正は別worktree `C:\work\ses-snf-runner-compat-20261104`、固定HEAD `7e1a9cdfa78d914e55e031c37762d245f12571d0`。Astra限定CODE PASS後の定向JUnitは **4 / 0 failures / 0 errors / 0 skipped**、BUILD SUCCESS。総責任者が4メソッドのXMLとclean HEADを独立照合した。PS5.1およびPowerShell 7.6.5故障suiteは各 **200 assertions / 0 failures、exit 0**。両方の3510ファイルについて総責任者がhash/lengthの全件一致と3スクリプトの現物hash一致を確認した。packetは `C:\work\ses-runner-evidence\runner-7e1a9cdf-20261104`。故障suite内部のmock gate成功は実MySQL・browser・PITRの受入証拠ではない。
 - 途中の定向失敗は保持する。`runner-7beb623-20261104` は4 tests / 3 errors（fixture内Git readonly objectの清理）、`runner-4517331e-20261104` は4 tests / 1 failure（局所LASTEXITCODEがnative全局値を遮蔽）。後続7e1aの4件成功で該当修正を確認したが、FULL_GATE再実行は別途必要。
 - 新FULL_GATE packetは `C:\work\ses-unified-fullgate-evidence\candidate-8aabe1d8-20261104`、固定HEAD `8aabe1d80834978e07bac4704adec22bf055b0dd`。Astra統合核検PASS後、pwsh 7 runner PID 16152で **FULL_GATE / RUNNING** として開始した。Maven追加引数は空でTargetedRunなし。旧target 5893ファイルの保全とcompileを終えFast実行中。総責任者が途中411 XML / 2572 tests / 0 failures / 0 errors / 0 skippedと候補clean HEADを独立確認したが、これは途中snapshotであり最終gate結果ではない。
+- 同runは2026-11-04 18:21:16 JSTに **FAIL / completed=true** として自然終了した。最終Fastは702 classes / **4396 tests / 0 failures / 2 errors / 0 skipped**、exit 1、dump 0。総責任者がarchive 1406ファイルを再hashし全件一致、実XMLを独立集計して同結果を確認した。2 errorsは`OpportunityServiceIntegrationTest`の2メソッドで、`LegalEntityContextService.requireUniqueLegalEntity`が法人IDの一意性を拒否した。shared H2 fixtureと実行順序の関係は調査中で原因確定ではない。再現seedは `8600826700400`。候補HEAD/cleanを維持し、MySQL/performance/browser/backup unit/backup integrationはすべてNOT RUN。
+
+## 遠隔保全と再開点
+
+- ユーザーの保全PR作成指示に基づき、候補branch `codex/snf-unified-candidate-20261104` の固定 `8aabe1d80834978e07bac4704adec22bf055b0dd` を通常pushし、Draft PR [#116](https://github.com/satoshi2024/ses-manager-pro/pull/116) を作成した。既存PR #102〜#115は維持する。既知Fast失敗・後続NOT RUN・NO-GOをPR本文に明記し、merge/auto-merge/deployは実施していない。NF07 Batch4aとW3Dの後続ローカル変更はこのPRに含めない。
+- 3つのLuna agentがusage limitを返したため、指定実装モデルでの作業は中断中。モデルを無断変更せず、ユーザーへ代替実装モデルの選択を問い合わせた。AstraのNF07 runtime独立確認は実行できた。
+- 再開優先順: (1) 8aのFast法人context失敗を隔離worktreeで原因調査・最小修復しAstra review、(2) 同一候補で完全Gate再実行、(3) W3Dの保全済み未完成実装・testsを続行、(4) NF07 Batch4aの後続trusted source接線とNF09承認/loader境界を具体化する。人手承認をAIが代行しない。
 
 ## 総合判定
 
-**NO-GOを維持する。** 初回FULL_GATE失敗の修正とW3C定向検証を終え、新候補のFULL_GATEを実行中である。NF06 W3D、NF07 production bridge等の未完了範囲が残る。Privacy、Legal、Security、Operations、provider、Productionの人手確認・署名と正式な受入れ判断が必要で、限定CODE PASSや先行テスト結果から本番準備完了・リリース承認を推定しない。
+**NO-GOを維持する。** runner/W3Cの先行失敗は修復・限定検証済みだが、新FULL_GATEで別のFast法人context失敗が確定した。NF07 Batch4aの76件は限定受理済み。NF06 W3D、NF07 production bridge等の未完了範囲とLuna実装の停止が残る。Privacy、Legal、Security、Operations、provider、Productionの人手確認・署名と正式な受入れ判断が必要で、限定CODE PASSや先行テスト結果から本番準備完了・リリース承認を推定しない。
 
 ## 記録の更新規則
 
