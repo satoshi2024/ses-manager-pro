@@ -17,20 +17,22 @@
 
 ### NF06
 
-- `codex/snf-prod-nf06-metadata` HEAD `b007e7a24c6e8abae030c86119ac65218661fb97` の静的レビュー状態は **CODE PASS**。
-- 検証記録 `verification-evidence/luna-20261104-seal-h2-03` のH2定向実行は **10 tests / 0 failures / 1 error / 0 skipped**。原因はテストのmock復元後に既存 `thenThrow` が再発火したこと。productionコードは変更されておらず、Lunaがテスト側の修正中。MySQLは **NOT RUN**。
-- `verification-evidence/luna-20261104-seal-h2-01` はcwd HARNESS FAILで **0 tests**、`verification-evidence/luna-20261104-seal-h2-02` は準備段階で実行されていない。これらをテスト結果として扱わない。H2修正後の再実行とMySQL検証を含むruntime状態は **PENDING**。CODE PASSを実行時PASSや統合済み状態へ読み替えない。
+- 静的レビュー: `codex/snf-prod-nf06-metadata` の基点は `b007e7a24c6e8abae030c86119ac65218661fb97`。修正 `837a`（Mockito `doReturn`）および `1715746d0bdcc54c643b0bada015e40c1545b8f5`（H2 CAST）の両方について、Astraの限定レビューは **CODE PASS**。
+- H2: `C:\work\ses-review-snf-r3-b\verification-evidence\luna-20261104-seal-h2-05` において、`1715746d0bdcc54c643b0bada015e40c1545b8f5` の2クラス合計 **10 tests**（Seal 9 + inventory 1、0 failures / 0 errors / 0 skipped）、Exit 0。Astraの独立XML確認と4 report + log hash確認もPASS。これは記載範囲内のH2証拠であり、MySQLまたは全体gateのPASSではない。
+- MySQL: `C:\work\ses-review-snf-r3-b\verification-evidence\luna-20261104-seal-mysql-01` はDocker利用不可によるクラス初期化時の **1 error**。11件の実テストケースは実行されておらず、業務テスト成功として数えない。状態は **BLOCKED（MySQLのみ）**。
+- Docker復旧診断: Docker Desktopを非表示で起動したが、backendは `C:\Users\Peter_pack\AppData\Local\Docker\run\sailor-ingest.sock` の Win32 error 1920 で停止。ゼロbyteの該当entryをrenameする試行は失敗し、sourceは未変更。削除・resetは行っていない。診断は `C:\work\ses-review-snf-r3-b\verification-evidence\luna-20261104-docker-socket-recovery.json` に記録。
+- 次の順序: (1) ローカルDocker環境を復旧、(2) 同じ `1715746d0bdcc54c643b0bada015e40c1545b8f5` でMySQL 11ケースを実行、(3) Astraがソース証拠をレビュー、(4) 全統合候補を再マッピングして固定control基線へ統合、(5) 完全gateを実行する。Docker環境の現在状態以外へ復旧操作を拡大しない。
+- 未実装のNF06 W3C/D、NF07 production bridge、未完了のprovider関連文書、provider・Privacy等の人手による確認/承認が残る。これらを自動的に完了扱いしない。全体状態は **NO-GO**。
 - 既存controlには `d8469ecb`（走査証明・実MySQL待機検証）と `f932a888`（validation append・renew修復）の統合がある。NF06の統合はW3A counterとW3B sealの最終差分に限定し、controlの他機能や基盤修復を巻き戻さない。
 - V184 `src/main/resources/db/migration/V184__create_import_metadata_foundation.sql` はcontrolとNF06 headで同一blob `31f41931f45425717b02d9832e5839012d637187`。変更対象外。
-- 最小差分候補（実行時検証・独立レビュー後に再確認する）:
+- 最小差分候補（統合時にファイル/hunk単位で再確認する）:
   - W3A: `ImportAmountParser.java`、追加 `ImportValidationCodebook.java`、`ImportValidationPipeline.java`、`ImportValidationService.java`、`ValidationCounterAccumulator.java`。テストは追加 `ImportValidationPipelineTestFactory.java` と `ValidationCounterAccumulatorTest.java`。
   - W3B: `ImportValidationAppendService.java` の必要な最終差分、追加 `ImportValidationLifecycleService.java`。テストは `ImportMetadataRealMySqlTest.java` の必要差分、追加 `ImportValidationSealRealMySqlTest.java` と `ImportValidationSealServiceTest.java`。加えて `src/test/resources/sql/schema-import-center-f1a-h2.sql` の必要差分。
   - `scripts/test-suites/mysql-shard-3.txt` に `ImportValidationSealRealMySqlTest` を追加する。NF06側のshard 1/2から既存項目を削除しない。後続のmysql1024修復との統合時にshard集合全体を再照合する。
   - control版 `ImportIdentityCandidateContextTest.java` は維持する。NF06側の削除差分を取り込まない。
 - 統合時の高リスク箇所は、counter契約とamount parsing、validation append／sealのtransaction・CAS・ACK-loss回復、MySQLロック競合fixture、H2 schema、shard登録である。特に `ImportValidationAppendService.java`、`ImportValidationLifecycleService.java`、`ImportMetadataRealMySqlTest.java` はcontrol側の既存実装とテストを保った上でhunk単位で統合する。
 - 全体の統合順序: **NF06 → mysql1024修復（`2cc4071f`、6 commits）→ NF07 → NF09 → provider関連文書 → runner**。各段階の後に差分・shard集合・証拠を再照合し、全候補を統合した後に新しいFULL_GATEを実行する。旧runnerの検査PASSを新しいFULL_GATEの代替にしない。
-- NF06内の順序: (1) runtime検証とAstraレビュー結果を記録、(2) 固定control基線との差分をファイル単位・hunk単位で再確認、(3) counter実装とテスト、(4) sealサービス・append差分とH2/テスト、(5) shardを集合マージ、(6) 必要なゲートを唯一の重型テスト実行者が順番に実行、(7)結果を記録し、統合判定を更新する。手順の各段階は別々に記録し、未実施のゲートを完了扱いしない。
-
+- NF06内の統合順序: W3A counter実装とテスト、W3B sealサービス・append差分とschema/テスト、shard集合マージの順に差分を確認し、必要なゲートは唯一の重型テスト実行者が順番に実行する。MySQL証拠と独立レビュー完了前にNF06の統合状態をPASSへ更新しない。
 ### NF09
 
 - `codex/snf-prod-nf09-local-keycloak` HEAD `72cf4a59` について、全Fastの **698 classes / 4326 tests / 0 failures / 0 errors / 0 skipped** と Repair50 の結果が報告済み。
@@ -49,7 +51,7 @@
 
 ## 総合判定
 
-**NO-GOを維持する。** NF06の実行時検証、実FULL_GATE、必要な独立レビュー、各人手署名が未完了または別途必要である。Privacy / Legal / Security / Operations / Production の署名が揃い、正式な受入れ判断が記録されるまで、本番準備完了やリリース承認と表現しない。
+**NO-GOを維持する。** NF06のMySQL検証はDocker障害でblocked、実FULL_GATE、残る独立レビュー、各人手署名が未完了または別途必要である。Privacy / Legal / Security / Operations / Production の署名が揃い、正式な受入れ判断が記録されるまで、本番準備完了やリリース承認と表現しない。
 
 ## 記録の更新規則
 
