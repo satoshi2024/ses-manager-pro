@@ -325,11 +325,11 @@ foreach ($suite in $suites) {
         # PowerShell 5.1はnative stderrをErrorRecordにするため、この呼出し中だけContinueにして
         # stderrをTee-Objectへ流しつつ、native processのLASTEXITCODEとログを保持する。
         $ErrorActionPreference = 'Continue'
-        $LASTEXITCODE = 0
+        $global:LASTEXITCODE = 0
         & $mvn @suiteArgs @effectiveMavenArgs 2>&1 | Tee-Object -FilePath $suiteLog -ErrorAction Stop
-        $suiteStatus = $LASTEXITCODE
+        $suiteStatus = $global:LASTEXITCODE
     } catch {
-        $suiteStatus = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
+        $suiteStatus = if ($global:LASTEXITCODE -ne 0) { $global:LASTEXITCODE } else { 1 }
         $suiteProcessError = $_.Exception.Message
     } finally {
         $ErrorActionPreference = $previousMavenErrorPreference
