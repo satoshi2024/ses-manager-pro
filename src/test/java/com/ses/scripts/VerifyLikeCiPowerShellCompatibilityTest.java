@@ -7,11 +7,14 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.DosFileAttributeView;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.Comparator;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -47,19 +50,17 @@ class VerifyLikeCiPowerShellCompatibilityTest {
             return;
         }
 
-        Path fixture = createFixtureRepository();
-        try {
-            Path mockMaven = createMockMaven(fixture);
-            commitFixtureTools(fixture);
+        try (FixtureRepository fixture = createFixtureRepository()) {
+            Path repository = fixture.repository();
+            Path mockMaven = createMockMaven(repository);
+            commitFixtureTools(repository);
             for (String executable : executables) {
-                ProcessResult result = run(powerShellCommand(executable, fixture, mockMaven, true));
+                ProcessResult result = run(powerShellCommand(executable, repository, mockMaven, true));
                 assertEquals(0, result.exitCode(), executable + "\n" + result.output());
                 assertTrue(result.output().contains("PreflightOnly: 前提ツール確認まで正常に完了しました."), result.output());
                 assertTrue(result.output().contains("Apache Maven 3.9.6"), result.output());
                 assertTrue(result.output().contains("Picked up JAVA_TOOL_OPTIONS: " + JAVA_TOOL_OPTIONS), result.output());
             }
-        } finally {
-            deleteTree(fixture.getParent());
         }
     }
 
@@ -71,17 +72,17 @@ class VerifyLikeCiPowerShellCompatibilityTest {
             return;
         }
 
-        Path fixture = createFixtureRepository();
-        try {
-            Path mockMaven = createMockMaven(fixture);
-            createToolMocks(fixture);
-            commitFixtureTools(fixture);
+        try (FixtureRepository fixture = createFixtureRepository()) {
+            Path repository = fixture.repository();
+            Path mockMaven = createMockMaven(repository);
+            createToolMocks(repository);
+            commitFixtureTools(repository);
             for (String executable : executables) {
-                Files.deleteIfExists(fixture.resolve("maven-build-invoked.txt"));
-                Path evidence = fixture.getParent().resolve("private-evidence-" + executable.replaceAll("[^A-Za-z0-9]", ""));
-                ProcessResult result = run(powerShellCommand(executable, fixture, mockMaven, false, evidence));
+                Files.deleteIfExists(repository.resolve("maven-build-invoked.txt"));
+                Path evidence = fixture.root().resolveSibling("private-evidence-" + executable.replaceAll("[^A-Za-z0-9]", ""));
+                ProcessResult result = run(powerShellCommand(executable, repository, mockMaven, false, evidence));
                 assertEquals(7, result.exitCode(), result.output());
-                assertTrue(Files.exists(fixture.resolve("maven-build-invoked.txt")),
+                assertTrue(Files.exists(repository.resolve("maven-build-invoked.txt")),
                         "mock Mavenの-version呼出しでなくbuild/testまで到達すること\n" + result.output());
                 int buildFailure = result.output().indexOf("Maven build/test failed");
                 int skipDiagnosis = result.output().indexOf("skipされたテストの確認");
@@ -94,8 +95,6 @@ class VerifyLikeCiPowerShellCompatibilityTest {
                 String suiteLog = readTextWithEncodingBom(evidence.resolve("fast-tests/fast-tests.log"));
                 assertTrue(suiteLog.contains("Mock Maven build stderr diagnostic"), suiteLog);
             }
-        } finally {
-            deleteTree(fixture.getParent());
         }
     }
 
@@ -107,21 +106,19 @@ class VerifyLikeCiPowerShellCompatibilityTest {
             return;
         }
 
-        Path fixture = createFixtureRepository();
-        try {
-            Path failingMaven = createMockMaven(fixture, 9);
-            commitFixtureTools(fixture);
+        try (FixtureRepository fixture = createFixtureRepository()) {
+            Path repository = fixture.repository();
+            Path failingMaven = createMockMaven(repository, 9);
+            commitFixtureTools(repository);
             for (String executable : executables) {
-                Files.deleteIfExists(fixture.resolve("maven-build-invoked.txt"));
-                Path evidence = fixture.getParent().resolve("version-failure-evidence-" + executable.replaceAll("[^A-Za-z0-9]", ""));
-                ProcessResult result = run(powerShellCommand(executable, fixture, failingMaven, false, evidence));
+                Files.deleteIfExists(repository.resolve("maven-build-invoked.txt"));
+                Path evidence = fixture.root().resolveSibling("version-failure-evidence-" + executable.replaceAll("[^A-Za-z0-9]", ""));
+                ProcessResult result = run(powerShellCommand(executable, repository, failingMaven, false, evidence));
                 assertTrue(result.exitCode() != 0, result.output());
                 assertTrue(result.output().contains("Mavenのバージョン確認に失敗しました (exit=9)"), result.output());
-                assertFalse(Files.exists(fixture.resolve("maven-build-invoked.txt")), result.output());
+                assertFalse(Files.exists(repository.resolve("maven-build-invoked.txt")), result.output());
                 assertFalse(Files.exists(evidence));
             }
-        } finally {
-            deleteTree(fixture.getParent());
         }
     }
 
@@ -142,24 +139,33 @@ class VerifyLikeCiPowerShellCompatibilityTest {
         return command;
     }
 
-    private Path createFixtureRepository() throws Exception {
+    private FixtureRepository createFixtureRepository() throws Exception {
         Path parent = Files.createTempDirectory("verify like-ci fixture ");
         Path fixture = parent.resolve("repository");
-        Files.createDirectories(fixture.resolve("scripts/test-suites"));
-        Files.createDirectories(fixture.resolve("tools"));
-        Files.copy(REPO.resolve("scripts/verify-like-ci.ps1"), fixture.resolve("scripts/verify-like-ci.ps1"));
-        Files.copy(REPO.resolve("scripts/verify-ci-common.ps1"), fixture.resolve("scripts/verify-ci-common.ps1"));
-        for (int shard = 1; shard <= 3; shard++) {
-            Files.copy(REPO.resolve("scripts/test-suites/mysql-shard-" + shard + ".txt"),
-                    fixture.resolve("scripts/test-suites/mysql-shard-" + shard + ".txt"));
+        try {
+            Files.createDirectories(fixture.resolve("scripts/test-suites"));
+            Files.createDirectories(fixture.resolve("tools"));
+            Files.copy(REPO.resolve("scripts/verify-like-ci.ps1"), fixture.resolve("scripts/verify-like-ci.ps1"));
+            Files.copy(REPO.resolve("scripts/verify-ci-common.ps1"), fixture.resolve("scripts/verify-ci-common.ps1"));
+            for (int shard = 1; shard <= 3; shard++) {
+                Files.copy(REPO.resolve("scripts/test-suites/mysql-shard-" + shard + ".txt"),
+                        fixture.resolve("scripts/test-suites/mysql-shard-" + shard + ".txt"));
+            }
+            createToolMocks(fixture);
+            git(fixture, "init");
+            git(fixture, "config", "user.name", "SES Compatibility Test");
+            git(fixture, "config", "user.email", "compatibility-test@example.invalid");
+            git(fixture, "add", "scripts");
+            git(fixture, "commit", "-m", "互換テスト用リポジトリを初期化");
+            return new FixtureRepository(parent, fixture);
+        } catch (Exception | Error failure) {
+            try {
+                deleteTree(parent);
+            } catch (IOException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
         }
-        createToolMocks(fixture);
-        git(fixture, "init");
-        git(fixture, "config", "user.name", "SES Compatibility Test");
-        git(fixture, "config", "user.email", "compatibility-test@example.invalid");
-        git(fixture, "add", "scripts");
-        git(fixture, "commit", "-m", "互換テスト用リポジトリを初期化");
-        return fixture;
     }
 
     private void commitFixtureTools(Path fixture) throws Exception {
@@ -281,14 +287,45 @@ class VerifyLikeCiPowerShellCompatibilityTest {
         return readUtf8Strict(path);
     }
 
-    private void deleteTree(Path root) throws IOException {
-        if (!Files.exists(root)) {
+    private static void deleteTree(Path root) throws IOException {
+        Path absoluteRoot = root.toAbsolutePath().normalize();
+        Path rootName = absoluteRoot.getFileName();
+        if (rootName == null || !rootName.toString().startsWith("verify like-ci fixture ")) {
+            throw new IOException("fixture所有の一時ディレクトリ外の削除を拒否しました: " + absoluteRoot);
+        }
+        Path expectedParent = Path.of(System.getProperty("java.io.tmpdir")).toAbsolutePath().normalize();
+        if (!expectedParent.equals(absoluteRoot.getParent())) {
+            throw new IOException("fixture一時ディレクトリの親境界が一致しません: " + absoluteRoot);
+        }
+        if (Files.isSymbolicLink(absoluteRoot)) {
+            throw new IOException("fixture削除でシンボリックリンクrootを拒否しました: " + absoluteRoot);
+        }
+        if (!Files.exists(absoluteRoot, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
-        try (Stream<Path> paths = Files.walk(root)) {
-            for (Path path : paths.sorted((left, right) -> right.compareTo(left)).toList()) {
-                Files.deleteIfExists(path);
+        // FOLLOW_LINKSを指定せず、所有fixture配下のエントリだけを列挙する。
+        try (Stream<Path> paths = Files.walk(absoluteRoot)) {
+            for (Path path : paths.sorted(Comparator.comparingInt(Path::getNameCount).reversed()).toList()) {
+                Path absolutePath = path.toAbsolutePath().normalize();
+                if (!absolutePath.startsWith(absoluteRoot)) {
+                    throw new IOException("fixture削除対象が所有root外です: " + absolutePath);
+                }
+                if (!Files.isSymbolicLink(absolutePath)) {
+                    DosFileAttributeView dos = Files.getFileAttributeView(
+                            absolutePath, DosFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+                    if (dos != null && dos.readAttributes().isReadOnly()) {
+                        dos.setReadOnly(false);
+                    }
+                }
+                Files.deleteIfExists(absolutePath);
             }
+        }
+    }
+
+    private record FixtureRepository(Path root, Path repository) implements AutoCloseable {
+        @Override
+        public void close() throws IOException {
+            deleteTree(root);
         }
     }
 
