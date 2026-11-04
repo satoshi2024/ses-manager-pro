@@ -1,6 +1,6 @@
 # NF07 本番只読境界スライス Batch 4a 設計書
 
-状態: **設計案 / Astra PLAN REVIEW PENDING**
+状態: **Astra限定 PLAN PASS（plan SHA `7ad5d9ab5670b70d454e91335c880f38665a8add`）/ 実装中 / CODE REVIEW PENDING**
 
 対象worktree基準: `7e1a9cdfa78d914e55e031c37762d245f12571d0`
 
@@ -53,7 +53,7 @@
 
 ### 3.2 ProductionApprovalEnvelopeVerifier
 
-入力には現在版として取得された`PolicyLookupResult`を受け取り、`CURRENT_CANDIDATE`、非null候補、`policyId`・`revision`・`digest`の一致を必須にする。未設定、`NOT_FOUND`、`UNAPPROVED`、`STORE_UNAVAILABLE`、未知status、欠落revision/digest、三点不一致はすべて拒否する。過去revisionへのfallbackは行わない。
+入力には現在版として取得された`PolicyLookupResult`を受け取り、`CURRENT_CANDIDATE`、非null候補、expected `policyId`・`revision`・`digest`の一致を必須にする。既存`PolicyLookupResult`にはpolicyId fieldがないため、expected IDは将来のtrusted internal catalogが解決する値として明示引数で受け取り、queryから直接採用しない。Batch 4aにはそのcatalogとcurrent sourceがないため、production経路は登録せず、currentness/IDを運用環境で保証しない。未設定、`NOT_FOUND`、`UNAPPROVED`、`STORE_UNAVAILABLE`、未知status、欠落revision/digest、三点不一致はすべて拒否する。過去revisionへのfallbackは行わない。
 
 署名検証は固定順で行う: schema allow-list → production Trust Anchor有無とID → Authority audience/tenant/scope/data/action/provider適合 → 有効期間 → keyおよびenvelope両方のrevocation → Ed25519署名 → Policy SoD → expected binding。暗号・時刻・失効・binding計算は`PurePolicyVerificationKernel`へ委任する。供給providerが未設定/例外/`null`を返す、anchorが未登録、key statusまたはenvelope statusのいずれかが`ACTIVE`以外なら検証成功を返さない。
 
@@ -66,6 +66,10 @@
 ## 4. SecurityContext identity mapping
 
 `SecurityContextCallerContextProvider`は認証済み`Authentication`だけを見る。anonymous、null、unauthenticated、未知principalは拒否する。principalの判定順序は`OidcLoginUser`を先にし、その後に一般`LoginUser`とする（OIDC principalはLoginUserのsubclass）。
+
+`Authentication.isAuthenticated()`だけではアカウント有効性の根拠にしない。`LoginUser`/`OidcLoginUser`の内部`SysUser`が存在し、内部IDがあり、`status == 1`、`deletedFlag == 0`、`lockedUntil == null || lockedUntil <= identityObservationClock`のすべてをprincipal内snapshotと現在DB行の両方で満たさなければ拒否する。`SysUserMapper.selectByIdAndTenant(id, boundTenant)`をread-onlyで使い、row欠落、tenant mismatch、mapper障害も拒否する。DB書込は行わない。
+
+Providerと`ProductionApprovalEnvelopeVerifier`は注入されたtrusted `Clock`を使う。queryに`asOf`を追加しない。既存`TrustedCallerContext.authenticatedAt` fieldへはproviderがcontextを観察・構築した時刻を記録するだけで、実際のlogin/authentication時刻やsession freshnessを示すとは主張しない。
 
 ### 4.1 OIDC tenant
 
@@ -105,8 +109,8 @@
 3. OIDC内部tenant binding欠落時、tenant claimが存在してもfallbackしない。
 4. OIDC内部tenant Aとclaim tenant Bの不一致を拒否する。
 5. 複数tenant claim間の衝突、内部bindingとの衝突を拒否する。
-6. trusted tenantとquery tenantの不一致を拒否する。
-7. 内部actor IDとquery actor IDの不一致、内部ID欠落を拒否する。
+6. trusted caller tenantとpolicy candidate tenantの不一致を拒否する。
+7. 内部SysUser ID欠落を拒否し、actor IDはpersisted rowの内部IDから構築する。
 8. `ROLE_管理者`/一般業務roleだけのprincipalをadmin/auditorへ昇格させない。
 9. `ROLE_ADMIN`があるが`PRIVACY_ADMIN_READ`がないprincipalを拒否する。
 10. `PRIVACY_ADMIN_READ`だけで`ROLE_ADMIN`がないprincipal、および`ROLE_SYSTEM_SERVICE`を自称するLoginUserを拒否する。
