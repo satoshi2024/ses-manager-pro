@@ -26,13 +26,16 @@
 - 候補統合は固定controlを保った限定差分である。W3A/W3B実装とNF06 MySQL修正のsource patch/blobを照合した。`ImportValidationLifecycleService`は既存ファイルの**変更**であり、新規ファイルではない。今回のNF06統合でH2 schemaやmigrationに増分変更はない。V184 `src/main/resources/db/migration/V184__create_import_metadata_foundation.sql` は同一blobのまま。
 - NF06 W3C recountは別worktree `C:\Users\Peter_pack\.codex\worktrees\snf-recount-20261104\ses-manager-pro` でbase `fd3d14cfdaddba8c047e1082367c0ca21da204c1` から実装した。固定HEAD `2eda9d69bfdd1e33a01aa50881f92bffa11f3025` はAstraの限定CODE PASSおよび定向runtime PASS。H2はSeal 16 + Inventory 1 = **17/0/0/0**、実MySQLは **20/0/0/0**、Maven exit 0。証拠は `C:\work\ses-runner-evidence\w3c-2eda9d69-h2-20261104` と `C:\work\ses-runner-evidence\w3c-2eda9d69-mysql-20261104`。6つの帰属済みreportのhash/lengthをAstraが照合した。100kの177.921秒は準備を含む用例全体で、final gateは10秒以下という断言の成立のみ確認できる。具体的なfinal gateミリ秒やp95は測定報告していない。
 - W3Cの3コミットは候補へ `85e633f9`、`d9b17be4`、`8aabe1d8` として順に取り込んだ。5つのW3Cファイルがsourceと完全一致し、runner・resourcesが先行候補と一致することを総責任者とAstraが独立確認した。W3D atomic publishとproduction bridgeは未完了。W3C定向合格をNF06全体COMPLETEへ読み替えない。
+- W3D計画は独立worktree `C:\work\ses-snf-nf06-publish-20261104`、branch `codex/snf-nf06-publish-20261104`、base `8aabe1d80834978e07bac4704adec22bf055b0dd` で改訂した。文書commit `a2d31720bca015f39f777c819793b962801617ac` に対するAstra判定は **PLAN REQUEST CHANGES**（P1: ACK回復時のcompleted timestampとcapabilityの不可能な比較、P2: abort/publish両順序の明示テスト不足）。Lunaへ限定文書修正を割り当て済み。凍結候補は変更せず、実装・テストはまだ開始していない。
 
 ## 他の受理済み証拠
 
 ### NF07
 
 - `codex/snf-prod-nf07-evidence-contract` HEAD `91a67611b8320d20ae3a9d1040a9109c4464899b` の57件の対象検証と4307件の全Fast履歴は受理済み。これはNF07の記録範囲に限る。
-- Astraが候補`fd3d14`のBatch3 SF-RO-QUERYを独立審査し、限定CODE PASS。foundation主コード・testsは91aと同一であり、57件は当時の履歴証拠として受理した。旧文書のREVIEW PENDING記載は状態矛盾として次回文書整理対象。Batch4aの未登録production境界3コンポーネント設計`7ad5d9ab`は限定PLAN PASSで、別worktreeにて実装中。Bean/API/DB書込/外送は含めず、D-01〜D-09の人工承認は未取得のまま。
+- Astraが候補`fd3d14`のBatch3 SF-RO-QUERYを独立審査し、限定CODE PASS。foundation主コード・testsは91aと同一であり、57件は当時の履歴証拠として受理した。旧文書のREVIEW PENDING記載は状態矛盾として次回文書整理対象。Batch4aの未登録production境界3コンポーネント設計`7ad5d9ab`は限定PLAN PASS。Bean/API/DB書込/外送は含めず、D-01〜D-09の人手承認は未取得のまま。
+- Batch4a実装は `C:\work\ses-snf-nf07-prod-boundary-20261104` の `120515d00f95bd22eddc0e9f4a1f19fe40b1abfb`。Astra判定は **CODE REQUEST CHANGES**（P0/P1=0、P2=2）。active prodとdefault prodの区別、およびenvelope固有失効・署名・SoD・時刻・bindingの到達可能な負例をLunaが修正中。production current policy source/catalogは未接続であり、wrapperの内部expectedPolicyId引数だけではcurrentnessを証明しない。法人context確認もpolicy署名の法人bindingを証明しない。
+- 実行規約逸脱: Batch4a担当が統一実行キューを経由せず、独立worktreeで `mvn -q -DskipTests test-compile` を2回実行した（2回目成功、テスト実行なし）。総責任者は以後の自行Maven実行を停止し、時刻・取得可能なログの報告を要求した。候補HEAD/ファイル変更はなく、executorのプロセス確認では候補MavenとSurefire以外のJava実行は残っていない。Fastへの影響の有無を推測せず記録し、performance前にも他の重い処理がないことを確認する。
 
 ### NF09
 
@@ -47,7 +50,7 @@
 - MySQL、performance、browser、backup unit、backup integrationは本FULL_GATEではすべて **NOT RUN**。先行sourceテストPASSをこの候補の未実行gateに流用しない。
 - runner互換修正は別worktree `C:\work\ses-snf-runner-compat-20261104`、固定HEAD `7e1a9cdfa78d914e55e031c37762d245f12571d0`。Astra限定CODE PASS後の定向JUnitは **4 / 0 failures / 0 errors / 0 skipped**、BUILD SUCCESS。総責任者が4メソッドのXMLとclean HEADを独立照合した。PS5.1およびPowerShell 7.6.5故障suiteは各 **200 assertions / 0 failures、exit 0**。両方の3510ファイルについて総責任者がhash/lengthの全件一致と3スクリプトの現物hash一致を確認した。packetは `C:\work\ses-runner-evidence\runner-7e1a9cdf-20261104`。故障suite内部のmock gate成功は実MySQL・browser・PITRの受入証拠ではない。
 - 途中の定向失敗は保持する。`runner-7beb623-20261104` は4 tests / 3 errors（fixture内Git readonly objectの清理）、`runner-4517331e-20261104` は4 tests / 1 failure（局所LASTEXITCODEがnative全局値を遮蔽）。後続7e1aの4件成功で該当修正を確認したが、FULL_GATE再実行は別途必要。
-- 新FULL_GATE packetは `C:\work\ses-unified-fullgate-evidence\candidate-8aabe1d8-20261104`、固定HEAD `8aabe1d80834978e07bac4704adec22bf055b0dd`。Astra統合核検PASS後、pwsh 7 runner PID 16152で **FULL_GATE / RUNNING** として開始した。Maven追加引数は空でTargetedRunなし。記録時点では初回clean前の旧target保全中であり、各suiteの最終PASSはまだ取得していない。
+- 新FULL_GATE packetは `C:\work\ses-unified-fullgate-evidence\candidate-8aabe1d8-20261104`、固定HEAD `8aabe1d80834978e07bac4704adec22bf055b0dd`。Astra統合核検PASS後、pwsh 7 runner PID 16152で **FULL_GATE / RUNNING** として開始した。Maven追加引数は空でTargetedRunなし。旧target 5893ファイルの保全とcompileを終えFast実行中。総責任者が途中411 XML / 2572 tests / 0 failures / 0 errors / 0 skippedと候補clean HEADを独立確認したが、これは途中snapshotであり最終gate結果ではない。
 
 ## 総合判定
 
