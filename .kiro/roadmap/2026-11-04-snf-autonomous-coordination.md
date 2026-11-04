@@ -40,11 +40,13 @@
 ### runner / FULL_GATE
 
 - runner `codex/snf-final-consolidation-gate` HEAD `5d596ecba5d8d151e701c244a187208485b499cf` で、2つのPowerShell検査は各200 assertionsを通過し、レポート内容hash一致が報告済み。実行起点は `84cf2fb1`。
-- unified candidateのFULL_GATE packetは `C:\work\ses-unified-fullgate-evidence\candidate-fd3d14-20261104`。FULL_GATEは **RUNNING / 未授PASS**。部分実行結果を最終集計として書かず、完了後の正式証拠を待つ。
+- unified candidateのFULL_GATE packetは `C:\work\ses-unified-fullgate-evidence\candidate-fd3d14-20261104`。2026-11-04 16:55 JSTに **FAIL / completed=true** で終了した。Fastは702 classes / 4388 tests / 3 failures / 0 errors / 0 skipped、exit 1。総責任者がアーカイブXMLを独立集計し、`fast-tests/artifacts/sha256sum.txt` の1406項目を再ハッシュして全件一致を確認した。候補HEADは不変、tracked worktreeはclean。
+- 3 failuresは `VerifyLikeCiPowerShellCompatibilityTest` に限定される。PowerShell 5.1のnative stderr処理、実repoを使う子runnerのtarget保全時の長いパス、古いUTF-8 BOM契約が原因。子runnerは部分コピー221ファイルを残したが、実targetの移動・削除はしていない。原証拠は凍結し、別worktree `C:\work\ses-snf-runner-compat-20261104` で限定修正する。
+- MySQL、performance、browser、backup unit、backup integrationは本FULL_GATEではすべて **NOT RUN**。先行sourceテストPASSをこの候補の未実行gateに流用しない。
 
 ## 総合判定
 
-**NO-GOを維持する。** unified candidateのFULL_GATEは実行中であり、NF06 W3C/W3Dとproduction bridgeは未完了である。Privacy、Legal、Security、Operations、provider、Productionの人手確認・署名と正式な受入れ判断が必要で、限定CODE PASSや先行テスト結果から本番準備完了・リリース承認を推定しない。
+**NO-GOを維持する。** unified candidateのFULL_GATEはFastの3 failuresで停止し、NF06 W3C/W3Dとproduction bridgeも未完了である。Privacy、Legal、Security、Operations、provider、Productionの人手確認・署名と正式な受入れ判断が必要で、限定CODE PASSや先行テスト結果から本番準備完了・リリース承認を推定しない。
 
 ## 記録の更新規則
 
