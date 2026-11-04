@@ -249,9 +249,7 @@ public final class ImportValidationService {
         if (min.known() && max.known() && min.value().compareTo(max.value()) > 0) add(findings, row.metadata(), "AMOUNT_RANGE_INVALID", "単価上限は下限以上で指定してください");
     }
     private static FieldValue<String> field(CanonicalImportRow row, String name) { return row.fields().getOrDefault(name, FieldValue.missing()); }
-    private static List<String> amountFields(ImportEntity entity) {
-        return switch (entity) { case ENGINEER -> List.of("expectedUnitPrice"); case PROJECT -> List.of("unitPriceMin", "unitPriceMax"); case CONTRACT -> List.of("sellingPrice", "costPrice"); default -> List.of(); };
-    }
+    static List<String> amountFields(ImportEntity entity) { return ImportValidationCodebook.amountFields(entity); }
     private static boolean requiredAmount(ImportEntity entity, String name) { return entity == ImportEntity.CONTRACT; }
     private static void add(List<ImportFinding> findings, ImportRowMetadata metadata, String code, String message) {
         findings.add(new ImportFinding(metadata.sourceRowNumber(), metadata.sourceRowHash(), code, message));

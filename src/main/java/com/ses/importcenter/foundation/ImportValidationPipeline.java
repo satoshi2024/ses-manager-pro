@@ -3,16 +3,24 @@ package com.ses.importcenter.foundation;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Objects;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
 /** parserからread-only検証までを連結する。DB/HTTP/domain service dependencyを持たない。 */
 public final class ImportValidationPipeline {
     private final SesCsvParser parser;
     private final ImportValidationService validator;
+    private final BiFunction<ImportEntity, SourceRow, CanonicalImportRow> canonicalConverter;
 
     public ImportValidationPipeline(SesCsvParser parser, ImportValidationService validator) {
+        this(parser, validator, CanonicalRowFactory::create);
+    }
+
+    ImportValidationPipeline(SesCsvParser parser, ImportValidationService validator,
+                             BiFunction<ImportEntity, SourceRow, CanonicalImportRow> canonicalConverter) {
         this.parser = Objects.requireNonNull(parser);
         this.validator = Objects.requireNonNull(validator);
+        this.canonicalConverter = Objects.requireNonNull(canonicalConverter);
     }
 
     public RunSummary validate(InputStream input, String fileName, ImportEntity entity,
@@ -40,13 +48,17 @@ public final class ImportValidationPipeline {
         ImportValidationSession session = new ImportValidationSession();
         java.util.function.Consumer<SourceRow> validateRow = sourceRow -> {
             CanonicalImportRow canonical;
-            try { canonical = CanonicalRowFactory.create(entity, sourceRow); }
+            try { canonical = canonicalConverter.apply(entity, sourceRow); }
             catch (RuntimeException failure) {
                 ImportRowMetadata metadata = new ImportRowMetadata(sourceRow.sourceRowNumber(), sourceRow.sourceRowHash(), null);
                 canonical = emptyRow(entity, metadata);
+                java.util.Map<String, String> excludedAmounts = new java.util.LinkedHashMap<>();
+                for (String field : ImportValidationService.amountFields(entity)) {
+                    excludedAmounts.put(field, ImportValidationCodebook.AMOUNT_UNKNOWN_OR_EMPTY);
+                }
                 ValidatedRow rejected = new ValidatedRow(canonical, java.util.List.of(new ImportFinding(
                         metadata.sourceRowNumber(), metadata.sourceRowHash(), "CANONICAL_CONVERSION_FAILED", "canonical変換に失敗しました")),
-                        java.util.Map.of(), java.util.Map.of());
+                        java.util.Map.of(), excludedAmounts);
                 counters.record(rejected); rowConsumer.accept(rejected); return;
             }
             ValidatedRow result = validator.validate(canonical, context, session);

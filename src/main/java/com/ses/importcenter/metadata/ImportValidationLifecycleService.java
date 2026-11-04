@@ -1,6 +1,7 @@
 package com.ses.importcenter.metadata;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.importcenter.foundation.ValidationCounterAccumulator;
 import com.ses.service.DocumentService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -11,12 +12,21 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -81,6 +91,39 @@ public class ImportValidationLifecycleService {
     public void abort(RunLease lease) {
         requireInstance(lease == null ? null : lease.instanceId);
         transaction.executeWithoutResult(status -> abortInTransaction(lease));
+    }
+
+    public RunLease seal(ImportValidationAppendService.SealCapability capability) {
+        if (capability == null || capability.lease() == null) conflict();
+        requireInstance(capability.lease().instanceId);
+        if (!capability.lease().tenantId().equals(capability.tenantId())
+                || capability.lease().jobId() != capability.jobId()
+                || capability.lease().runId() != capability.runId()
+                || capability.lease().generation() != capability.generation()
+                || !capability.lease().workerId().equals(capability.workerId())
+                || capability.lease().jobVersion() != capability.jobVersion()) {
+            conflict();
+        }
+        var counters = capability.counters();
+        if (counters == null) conflict();
+        if (counters.sourceRows() != counters.validatedAcceptedTotal() + counters.rejected()) conflict();
+        if (counters.physicalRows() != counters.sourceRows() + counters.emptySkipped()) conflict();
+        var amountCounters = counters.amountCountersByField();
+        if (amountCounters == null || amountCounters.size() != 5) conflict();
+        for (String field : java.util.List.of("costPrice", "expectedUnitPrice", "sellingPrice", "unitPriceMax", "unitPriceMin")) {
+            var ac = amountCounters.get(field);
+            if (ac == null) conflict();
+            if (ac.acceptedKnownCount() == 0 && ac.acceptedSumYen() != null) conflict();
+            if (ac.acceptedKnownCount() > 0 && ac.acceptedSumYen() == null) conflict();
+            if (ac.rejectedKnownCount() == 0 && ac.rejectedSumYen() != null) conflict();
+            if (ac.rejectedKnownCount() > 0 && ac.rejectedSumYen() == null) conflict();
+            if (ac.acceptedSumYen() != null && ac.acceptedSumYen().precision() > 38) conflict();
+            if (ac.rejectedSumYen() != null && ac.rejectedSumYen().precision() > 38) conflict();
+        }
+        if (counters.findingSummaryBytes() == null || counters.findingSummaryBytes().length > 8192) conflict();
+        if (counters.amountExcludedReasonCountsBytes() == null || counters.amountExcludedReasonCountsBytes().length > 8192) conflict();
+
+        return transaction.execute(status -> sealInTransaction(capability));
     }
 
     AppendSnapshot appendSnapshot(RunLease lease) {
@@ -321,6 +364,426 @@ public class ImportValidationLifecycleService {
                 """, expected.context.tenantId(), job.id, job.version, grant.runId,
                 grant.workerId, grant.generation, grant.expiresAt);
         if (changedRun != 1 || changedJob != 1) conflict();
+    }
+
+    private RunLease sealInTransaction(ImportValidationAppendService.SealCapability capability) {
+        Input expected = capability.lease().input;
+        current(expected.context);
+        Locked locked = lockResources(expected, capability.runId());
+        Run run = locked.run;
+        if (run == null || !Integer.valueOf(1).equals(run.activeSlot) || run.publishedSlot != null) {
+            conflict();
+        }
+        if ("BUILDING".equals(run.state)) {
+            return sealBuildingInTransaction(capability, locked);
+        } else if ("SEALED".equals(run.state)) {
+            return recoverSealedInTransaction(capability, locked);
+        } else {
+            conflict();
+            return null;
+        }
+    }
+
+    private RunLease sealBuildingInTransaction(ImportValidationAppendService.SealCapability capability, Locked locked) {
+        Input expected = capability.lease().input;
+        Job job = locked.job;
+        Run run = locked.run;
+
+        if (!MessageDigest.isEqual(run.fingerprint, capability.validatorFingerprint())
+                || !sameRunInput(expected, run)) {
+            conflict();
+        }
+
+        Long rowCount = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=?",
+                Long.class, expected.context.tenantId(), job.id, run.id);
+        if (rowCount == null || rowCount != capability.counters().sourceRows()) {
+            conflict();
+        }
+
+        MessageDigest rowSetDigest = sha256Digest();
+        rowSetDigest.update("SES-IMPORT-ROW-SET-V1".getBytes(StandardCharsets.US_ASCII));
+        rowSetDigest.update(new byte[]{0, 0, 0, 1});
+
+        long afterRow = 0;
+        long previousRowNumber = 0;
+        long totalScanned = 0;
+        while (true) {
+            List<Object[]> rows = jdbc.query(
+                    "SELECT source_row_number, row_commit_sha256 FROM t_import_validation_row " +
+                    "WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number>? " +
+                    "ORDER BY source_row_number LIMIT 250",
+                    (rs, rowNum) -> new Object[]{rs.getLong(1), rs.getBytes(2)},
+                    expected.context.tenantId(), job.id, run.id, afterRow);
+            if (rows.isEmpty()) break;
+            for (Object[] row : rows) {
+                long rowNumber = (Long) row[0];
+                byte[] commitSha = (byte[]) row[1];
+                if (rowNumber <= previousRowNumber || commitSha == null || commitSha.length != 32) {
+                    conflict();
+                }
+                previousRowNumber = rowNumber;
+                totalScanned++;
+                afterRow = rowNumber;
+
+                rowSetDigest.update(ByteBuffer.allocate(Long.BYTES).putLong(rowNumber).array());
+                rowSetDigest.update(ByteBuffer.allocate(Integer.BYTES).putInt(commitSha.length).array());
+                rowSetDigest.update(commitSha);
+            }
+        }
+        if (totalScanned != rowCount) {
+            conflict();
+        }
+        String calculatedRowSetSha = HexFormat.of().formatHex(rowSetDigest.digest());
+        if (!calculatedRowSetSha.equalsIgnoreCase(capability.rowSetSha256())) {
+            conflict();
+        }
+
+        ImportAuthorizedContext gate = authorization.requireCurrentAuthorizationForWrite(expected.context);
+        requireSameActor(expected.context, gate);
+        Timestamp now = dbNow();
+
+        if (!"VALIDATING".equals(job.state)
+                || !Objects.equals(job.activeRunId, run.id)
+                || job.currentRunId != null
+                || !capability.workerId().equals(job.owner)
+                || job.generation != capability.generation()
+                || job.version != capability.jobVersion()
+                || job.expiresAt == null
+                || !job.expiresAt.equals(capability.expiresAt())
+                || !job.expiresAt.after(now)
+                || run.lastResumedGeneration != capability.generation()) {
+            conflict();
+        }
+
+        byte[] rowSetShaBytes = HexFormat.of().parseHex(capability.rowSetSha256());
+        byte[] summaryShaBytes = calculateSummarySha256(expected.context.tenantId(), job.id, run.id,
+                run.sourceSha, capability.validatorFingerprint(), rowSetShaBytes, capability.counters());
+
+        var counters = capability.counters();
+        var amounts = counters.amountCountersByField();
+        var cost = amounts.get("costPrice");
+        var expectedUnitPrice = amounts.get("expectedUnitPrice");
+        var selling = amounts.get("sellingPrice");
+        var maxPrice = amounts.get("unitPriceMax");
+        var minPrice = amounts.get("unitPriceMin");
+
+        String updateSql = """
+                UPDATE t_import_validation_run SET
+                    state = 'SEALED',
+                    sealed_at = CURRENT_TIMESTAMP(6),
+                    source_row_count = ?,
+                    physical_row_count = ?,
+                    empty_row_count = ?,
+                    accepted_row_count = ?,
+                    rejected_row_count = ?,
+                    finding_summary_bytes = ?,
+                    finding_summary_sha256 = ?,
+                    expected_unit_price_accepted_known_count = ?,
+                    expected_unit_price_accepted_sum_yen = ?,
+                    expected_unit_price_rejected_known_count = ?,
+                    expected_unit_price_rejected_sum_yen = ?,
+                    expected_unit_price_excluded_count = ?,
+                    unit_price_min_accepted_known_count = ?,
+                    unit_price_min_accepted_sum_yen = ?,
+                    unit_price_min_rejected_known_count = ?,
+                    unit_price_min_rejected_sum_yen = ?,
+                    unit_price_min_excluded_count = ?,
+                    unit_price_max_accepted_known_count = ?,
+                    unit_price_max_accepted_sum_yen = ?,
+                    unit_price_max_rejected_known_count = ?,
+                    unit_price_max_rejected_sum_yen = ?,
+                    unit_price_max_excluded_count = ?,
+                    selling_price_accepted_known_count = ?,
+                    selling_price_accepted_sum_yen = ?,
+                    selling_price_rejected_known_count = ?,
+                    selling_price_rejected_sum_yen = ?,
+                    selling_price_excluded_count = ?,
+                    cost_price_accepted_known_count = ?,
+                    cost_price_accepted_sum_yen = ?,
+                    cost_price_rejected_known_count = ?,
+                    cost_price_rejected_sum_yen = ?,
+                    cost_price_excluded_count = ?,
+                    amount_excluded_reason_counts = ?,
+                    amount_excluded_reason_sha256 = ?,
+                    row_set_sha256 = ?,
+                    summary_sha256 = ?
+                WHERE tenant_id = ? AND job_id = ? AND id = ?
+                  AND state = 'BUILDING'
+                  AND active_slot = 1
+                  AND published_slot IS NULL
+                  AND last_resumed_lease_generation = ?
+                """;
+
+        int updated = jdbc.update(updateSql,
+                counters.sourceRows(), counters.physicalRows(), counters.emptySkipped(),
+                counters.validatedAcceptedTotal(), counters.rejected(),
+                counters.findingSummaryBytes(), counters.findingSummarySha256(),
+                expectedUnitPrice.acceptedKnownCount(), expectedUnitPrice.acceptedSumYen(),
+                expectedUnitPrice.rejectedKnownCount(), expectedUnitPrice.rejectedSumYen(),
+                expectedUnitPrice.excludedCount(),
+                minPrice.acceptedKnownCount(), minPrice.acceptedSumYen(),
+                minPrice.rejectedKnownCount(), minPrice.rejectedSumYen(),
+                minPrice.excludedCount(),
+                maxPrice.acceptedKnownCount(), maxPrice.acceptedSumYen(),
+                maxPrice.rejectedKnownCount(), maxPrice.rejectedSumYen(),
+                maxPrice.excludedCount(),
+                selling.acceptedKnownCount(), selling.acceptedSumYen(),
+                selling.rejectedKnownCount(), selling.rejectedSumYen(),
+                selling.excludedCount(),
+                cost.acceptedKnownCount(), cost.acceptedSumYen(),
+                cost.rejectedKnownCount(), cost.rejectedSumYen(),
+                cost.excludedCount(),
+                counters.amountExcludedReasonCountsBytes(), counters.amountExcludedReasonSha256(),
+                rowSetShaBytes, summaryShaBytes,
+                expected.context.tenantId(), job.id, run.id,
+                capability.generation());
+
+        if (updated != 1) {
+            conflict();
+        }
+
+        return lease(expected, run.id, capability.workerId(), capability.generation(), job.version, job.expiresAt);
+    }
+
+    private RunLease recoverSealedInTransaction(ImportValidationAppendService.SealCapability capability, Locked locked) {
+        Input expected = capability.lease().input;
+        Job job = locked.job;
+        Run run = locked.run;
+
+        ImportAuthorizedContext gate = authorization.requireCurrentAuthorizationForWrite(expected.context);
+        requireSameActor(expected.context, gate);
+
+        Timestamp now = dbNow();
+        if (job.expiresAt == null || !job.expiresAt.after(now)) {
+            conflict();
+        }
+
+        if (job.generation != capability.generation()
+                || run.lastResumedGeneration != capability.generation()
+                || !capability.workerId().equals(job.owner)
+                || !Objects.equals(job.activeRunId, run.id)
+                || job.currentRunId != null
+                || !"VALIDATING".equals(job.state)
+                || !sameRunInput(expected, run)) {
+            conflict();
+        }
+
+        if (job.version < capability.jobVersion() || job.expiresAt.before(capability.expiresAt())) {
+            conflict();
+        }
+        if (job.version == capability.jobVersion()) {
+            if (!job.expiresAt.equals(capability.expiresAt())) {
+                conflict();
+            }
+        }
+
+        RunSummary persisted = loadRunSummary(expected.context.tenantId(), job.id, run.id);
+        if (persisted == null || persisted.sealedAt == null) {
+            conflict();
+        }
+
+        byte[] expectedRowSetSha = HexFormat.of().parseHex(capability.rowSetSha256());
+        if (!MessageDigest.isEqual(persisted.rowSetSha256, expectedRowSetSha)) {
+            conflict();
+        }
+
+        byte[] expectedSummarySha = calculateSummarySha256(expected.context.tenantId(), job.id, run.id,
+                run.sourceSha, capability.validatorFingerprint(), expectedRowSetSha, capability.counters());
+        if (!MessageDigest.isEqual(persisted.summarySha256, expectedSummarySha)) {
+            conflict();
+        }
+
+        var counters = capability.counters();
+        if (persisted.sourceRowCount != counters.sourceRows()
+                || persisted.physicalRowCount != counters.physicalRows()
+                || persisted.emptyRowCount != counters.emptySkipped()
+                || persisted.acceptedRowCount != counters.validatedAcceptedTotal()
+                || persisted.rejectedRowCount != counters.rejected()) {
+            conflict();
+        }
+
+        if (!MessageDigest.isEqual(persisted.findingSummarySha256, counters.findingSummarySha256())
+                || !MessageDigest.isEqual(persisted.amountExcludedReasonSha256, counters.amountExcludedReasonSha256())
+                || !Arrays.equals(persisted.findingSummaryBytes, counters.findingSummaryBytes())
+                || !Arrays.equals(persisted.amountExcludedReasonCounts, counters.amountExcludedReasonCountsBytes())) {
+            conflict();
+        }
+
+        var amounts = counters.amountCountersByField();
+        if (!persisted.matchesAmount("expectedUnitPrice", amounts.get("expectedUnitPrice"))
+                || !persisted.matchesAmount("unitPriceMin", amounts.get("unitPriceMin"))
+                || !persisted.matchesAmount("unitPriceMax", amounts.get("unitPriceMax"))
+                || !persisted.matchesAmount("sellingPrice", amounts.get("sellingPrice"))
+                || !persisted.matchesAmount("costPrice", amounts.get("costPrice"))) {
+            conflict();
+        }
+
+        return lease(expected, run.id, capability.workerId(), capability.generation(), job.version, job.expiresAt);
+    }
+
+    private RunSummary loadRunSummary(String tenant, long jobId, long runId) {
+        String sql = """
+                SELECT sealed_at, source_row_count, physical_row_count, empty_row_count,
+                  accepted_row_count, rejected_row_count, finding_summary_bytes, finding_summary_sha256,
+                  expected_unit_price_accepted_known_count, expected_unit_price_accepted_sum_yen,
+                  expected_unit_price_rejected_known_count, expected_unit_price_rejected_sum_yen,
+                  expected_unit_price_excluded_count,
+                  unit_price_min_accepted_known_count, unit_price_min_accepted_sum_yen,
+                  unit_price_min_rejected_known_count, unit_price_min_rejected_sum_yen,
+                  unit_price_min_excluded_count,
+                  unit_price_max_accepted_known_count, unit_price_max_accepted_sum_yen,
+                  unit_price_max_rejected_known_count, unit_price_max_rejected_sum_yen,
+                  unit_price_max_excluded_count,
+                  selling_price_accepted_known_count, selling_price_accepted_sum_yen,
+                  selling_price_rejected_known_count, selling_price_rejected_sum_yen,
+                  selling_price_excluded_count,
+                  cost_price_accepted_known_count, cost_price_accepted_sum_yen,
+                  cost_price_rejected_known_count, cost_price_rejected_sum_yen,
+                  cost_price_excluded_count,
+                  amount_excluded_reason_counts, amount_excluded_reason_sha256,
+                  row_set_sha256, summary_sha256
+                FROM t_import_validation_run
+                WHERE tenant_id=? AND job_id=? AND id=?
+                """;
+        return jdbc.query(sql, rs -> {
+            if (!rs.next()) return null;
+            return new RunSummary(
+                    rs.getTimestamp(1), rs.getLong(2), rs.getLong(3), rs.getLong(4),
+                    rs.getLong(5), rs.getLong(6), rs.getBytes(7), rs.getBytes(8),
+                    rs.getLong(9), rs.getBigDecimal(10), rs.getLong(11), rs.getBigDecimal(12),
+                    rs.getLong(13), rs.getLong(14), rs.getBigDecimal(15), rs.getLong(16),
+                    rs.getBigDecimal(17), rs.getLong(18), rs.getLong(19), rs.getBigDecimal(20),
+                    rs.getLong(21), rs.getBigDecimal(22), rs.getLong(23), rs.getLong(24),
+                    rs.getBigDecimal(25), rs.getLong(26), rs.getBigDecimal(27), rs.getLong(28),
+                    rs.getLong(29), rs.getBigDecimal(30), rs.getLong(31), rs.getBigDecimal(32),
+                    rs.getLong(33), rs.getBytes(34), rs.getBytes(35), rs.getBytes(36),
+                    rs.getBytes(37)
+            );
+        }, tenant, jobId, runId);
+    }
+
+    static byte[] calculateSummarySha256(String tenantId, long jobId, long runId, byte[] sourceSha,
+                                         byte[] validatorFingerprint, byte[] rowSetSha,
+                                         ValidationCounterAccumulator.Snapshot counters) {
+        try {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            DataOutputStream out = new DataOutputStream(bytes);
+            writeLengthPrefixedBytes(out, "SES-IMPORT-VALIDATION-SUMMARY-V1".getBytes(StandardCharsets.US_ASCII));
+            out.writeInt(1);
+            writeLengthPrefixedBytes(out, tenantId.getBytes(StandardCharsets.UTF_8));
+            out.writeLong(jobId);
+            out.writeLong(runId);
+            out.write(sourceSha);
+            out.write(validatorFingerprint);
+            out.write(rowSetSha);
+            out.writeLong(counters.sourceRows());
+            out.writeLong(counters.physicalRows());
+            out.writeLong(counters.emptySkipped());
+            out.writeLong(counters.validatedAcceptedTotal());
+            out.writeLong(counters.rejected());
+            out.write(counters.findingSummarySha256());
+
+            List<String> sortedFields = List.of("costPrice", "expectedUnitPrice", "sellingPrice", "unitPriceMax", "unitPriceMin");
+            for (String field : sortedFields) {
+                var amountCounter = counters.amountCountersByField().get(field);
+                writeLengthPrefixedBytes(out, field.getBytes(StandardCharsets.US_ASCII));
+                out.writeLong(amountCounter.acceptedKnownCount());
+                if (amountCounter.acceptedKnownCount() > 0 && amountCounter.acceptedSumYen() != null) {
+                    writeLengthPrefixedBytes(out, amountCounter.acceptedSumYen().toPlainString().getBytes(StandardCharsets.UTF_8));
+                } else {
+                    out.writeInt(0);
+                }
+                out.writeLong(amountCounter.rejectedKnownCount());
+                if (amountCounter.rejectedKnownCount() > 0 && amountCounter.rejectedSumYen() != null) {
+                    writeLengthPrefixedBytes(out, amountCounter.rejectedSumYen().toPlainString().getBytes(StandardCharsets.UTF_8));
+                } else {
+                    out.writeInt(0);
+                }
+                out.writeLong(amountCounter.excludedCount());
+            }
+
+            out.write(counters.amountExcludedReasonSha256());
+            out.flush();
+            return MessageDigest.getInstance("SHA-256").digest(bytes.toByteArray());
+        } catch (IOException | NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    private static void writeLengthPrefixedBytes(DataOutputStream out, byte[] value) throws IOException {
+        out.writeInt(value.length);
+        out.write(value);
+    }
+
+    private static MessageDigest sha256Digest() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    private record RunSummary(
+            Timestamp sealedAt,
+            long sourceRowCount, long physicalRowCount, long emptyRowCount,
+            long acceptedRowCount, long rejectedRowCount,
+            byte[] findingSummaryBytes, byte[] findingSummarySha256,
+            long expectedUnitPriceAcceptedKnownCount, BigDecimal expectedUnitPriceAcceptedSumYen,
+            long expectedUnitPriceRejectedKnownCount, BigDecimal expectedUnitPriceRejectedSumYen,
+            long expectedUnitPriceExcludedCount,
+            long unitPriceMinAcceptedKnownCount, BigDecimal unitPriceMinAcceptedSumYen,
+            long unitPriceMinRejectedKnownCount, BigDecimal unitPriceMinRejectedSumYen,
+            long unitPriceMinExcludedCount,
+            long unitPriceMaxAcceptedKnownCount, BigDecimal unitPriceMaxAcceptedSumYen,
+            long unitPriceMaxRejectedKnownCount, BigDecimal unitPriceMaxRejectedSumYen,
+            long unitPriceMaxExcludedCount,
+            long sellingPriceAcceptedKnownCount, BigDecimal sellingPriceAcceptedSumYen,
+            long sellingPriceRejectedKnownCount, BigDecimal sellingPriceRejectedSumYen,
+            long sellingPriceExcludedCount,
+            long costPriceAcceptedKnownCount, BigDecimal costPriceAcceptedSumYen,
+            long costPriceRejectedKnownCount, BigDecimal costPriceRejectedSumYen,
+            long costPriceExcludedCount,
+            byte[] amountExcludedReasonCounts, byte[] amountExcludedReasonSha256,
+            byte[] rowSetSha256, byte[] summarySha256
+    ) {
+        boolean matchesAmount(String field, ValidationCounterAccumulator.AmountCounter expected) {
+            if (expected == null) return false;
+            return switch (field) {
+                case "expectedUnitPrice" -> expectedUnitPriceAcceptedKnownCount == expected.acceptedKnownCount()
+                        && amountEquals(expectedUnitPriceAcceptedSumYen, expected.acceptedSumYen())
+                        && expectedUnitPriceRejectedKnownCount == expected.rejectedKnownCount()
+                        && amountEquals(expectedUnitPriceRejectedSumYen, expected.rejectedSumYen())
+                        && expectedUnitPriceExcludedCount == expected.excludedCount();
+                case "unitPriceMin" -> unitPriceMinAcceptedKnownCount == expected.acceptedKnownCount()
+                        && amountEquals(unitPriceMinAcceptedSumYen, expected.acceptedSumYen())
+                        && unitPriceMinRejectedKnownCount == expected.rejectedKnownCount()
+                        && amountEquals(unitPriceMinRejectedSumYen, expected.rejectedSumYen())
+                        && unitPriceMinExcludedCount == expected.excludedCount();
+                case "unitPriceMax" -> unitPriceMaxAcceptedKnownCount == expected.acceptedKnownCount()
+                        && amountEquals(unitPriceMaxAcceptedSumYen, expected.acceptedSumYen())
+                        && unitPriceMaxRejectedKnownCount == expected.rejectedKnownCount()
+                        && amountEquals(unitPriceMaxRejectedSumYen, expected.rejectedSumYen())
+                        && unitPriceMaxExcludedCount == expected.excludedCount();
+                case "sellingPrice" -> sellingPriceAcceptedKnownCount == expected.acceptedKnownCount()
+                        && amountEquals(sellingPriceAcceptedSumYen, expected.acceptedSumYen())
+                        && sellingPriceRejectedKnownCount == expected.rejectedKnownCount()
+                        && amountEquals(sellingPriceRejectedSumYen, expected.rejectedSumYen())
+                        && sellingPriceExcludedCount == expected.excludedCount();
+                case "costPrice" -> costPriceAcceptedKnownCount == expected.acceptedKnownCount()
+                        && amountEquals(costPriceAcceptedSumYen, expected.acceptedSumYen())
+                        && costPriceRejectedKnownCount == expected.rejectedKnownCount()
+                        && amountEquals(costPriceRejectedSumYen, expected.rejectedSumYen())
+                        && costPriceExcludedCount == expected.excludedCount();
+                default -> false;
+            };
+        }
+
+        private static boolean amountEquals(BigDecimal a, BigDecimal b) {
+            if (a == null && b == null) return true;
+            if (a == null || b == null) return false;
+            return a.compareTo(b) == 0;
+        }
     }
 
     private Locked lockResources(Input expected, Long runId) {
