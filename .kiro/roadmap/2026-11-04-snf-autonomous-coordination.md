@@ -25,6 +25,7 @@
 - Dockerの旧runtime socket障害では、当初のゼロbyte entryのrename試行が失敗しsourceは未変更だった（履歴診断 `C:\work\ses-review-snf-r3-b\verification-evidence\luna-20261104-docker-socket-recovery.json`）。その後、通常の親directory隔離先を `C:\Users\Peter_pack\AppData\Local\Docker\run-stale-20261104-a21b3b8516cc4f0eb3791994c276c312` として新しいrun directoryを作成し、Docker 29.7.2の`info`と`ps`がExit 0で復旧を確認した。secrets、データ、volumesには触れていない。
 - 候補統合は固定controlを保った限定差分である。W3A/W3B実装とNF06 MySQL修正のsource patch/blobを照合した。`ImportValidationLifecycleService`は既存ファイルの**変更**であり、新規ファイルではない。今回のNF06統合でH2 schemaやmigrationに増分変更はない。V184 `src/main/resources/db/migration/V184__create_import_metadata_foundation.sql` は同一blobのまま。
 - NF06 W3C recountは別worktree `C:\Users\Peter_pack\.codex\worktrees\snf-recount-20261104\ses-manager-pro` でbase `fd3d14cfdaddba8c047e1082367c0ca21da204c1` から実装中。Astraの限定PLAN PASSを得ているが、コードは未完了、TEST **NOT RUN**。W3D atomic publishとproduction bridgeも未完了で、自動的にcompleteへ進めない。
+- W3Cの後続固定HEADは `2eda9d69bfdd1e33a01aa50881f92bffa11f3025`。Astraの限定CODE PASSを取得した。static constructor、nullable counter、exact heartbeatの指摘を修正し、worker別接続IDの競合観測、V184相当のrow索引/FK、10秒の派生final gate予算、100k行・実SQL待機のテストを追加した。これらのH2/MySQLテストは実行待ちであり、性能・並行性の実証PASSではない。統合候補にはまだ取り込んでいない。
 
 ## 他の受理済み証拠
 
@@ -43,6 +44,8 @@
 - unified candidateのFULL_GATE packetは `C:\work\ses-unified-fullgate-evidence\candidate-fd3d14-20261104`。2026-11-04 16:55 JSTに **FAIL / completed=true** で終了した。Fastは702 classes / 4388 tests / 3 failures / 0 errors / 0 skipped、exit 1。総責任者がアーカイブXMLを独立集計し、`fast-tests/artifacts/sha256sum.txt` の1406項目を再ハッシュして全件一致を確認した。候補HEADは不変、tracked worktreeはclean。
 - 3 failuresは `VerifyLikeCiPowerShellCompatibilityTest` に限定される。PowerShell 5.1のnative stderr処理、実repoを使う子runnerのtarget保全時の長いパス、古いUTF-8 BOM契約が原因。子runnerは部分コピー221ファイルを残したが、実targetの移動・削除はしていない。原証拠は凍結し、別worktree `C:\work\ses-snf-runner-compat-20261104` で限定修正する。
 - MySQL、performance、browser、backup unit、backup integrationは本FULL_GATEではすべて **NOT RUN**。先行sourceテストPASSをこの候補の未実行gateに流用しない。
+- runner互換修正は別worktree `C:\work\ses-snf-runner-compat-20261104`、固定HEAD `7e1a9cdfa78d914e55e031c37762d245f12571d0`。Astra限定CODE PASS後の定向JUnitは **4 / 0 failures / 0 errors / 0 skipped**、BUILD SUCCESS。総責任者が4メソッドのXMLとclean HEADを独立照合した。PS5.1故障suiteは **200 assertions / 0 failures、exit 0**、PowerShell 7故障suiteは実行中。packetは `C:\work\ses-runner-evidence\runner-7e1a9cdf-20261104`。故障suite内部のmock gate成功は実MySQL・browser・PITRの受入証拠ではない。
+- 途中の定向失敗は保持する。`runner-7beb623-20261104` は4 tests / 3 errors（fixture内Git readonly objectの清理）、`runner-4517331e-20261104` は4 tests / 1 failure（局所LASTEXITCODEがnative全局値を遮蔽）。後続7e1aの4件成功で該当修正を確認したが、FULL_GATE再実行は別途必要。
 
 ## 総合判定
 
