@@ -63,7 +63,20 @@ if (-not [string]::IsNullOrWhiteSpace($BashExecutable)) {
 }
 
 Write-Host '=== 前提ツールの確認（CIとの差分） ===.'
-& $mvn -v 2>$null | Select-Object -First 1
+$mavenVersionOut = [System.IO.Path]::GetTempFileName()
+$mavenVersionErr = [System.IO.Path]::GetTempFileName()
+try {
+    $mavenVersionProcess = Start-Process -FilePath $mvn -ArgumentList '-v' -NoNewWindow -Wait -PassThru `
+        -RedirectStandardOutput $mavenVersionOut -RedirectStandardError $mavenVersionErr
+    $mavenVersionLine = Get-Content -LiteralPath $mavenVersionOut | Select-Object -First 1
+    if (-not [string]::IsNullOrWhiteSpace($mavenVersionLine)) {
+        Write-Host $mavenVersionLine
+    }
+    # JAVA_TOOL_OPTIONS等の正当なJVM診断は、native stderrをPowerShellのエラーstreamへ流さず表示する。
+    Get-Content -LiteralPath $mavenVersionErr | ForEach-Object { Write-Host $_ }
+} finally {
+    Remove-Item -LiteralPath $mavenVersionOut, $mavenVersionErr -Force -ErrorAction SilentlyContinue
+}
 if (Get-Command java -ErrorAction SilentlyContinue) {
     $tempJavaFile = [System.IO.Path]::GetTempFileName()
     try {
@@ -363,6 +376,9 @@ foreach ($suite in $suites) {
 
         Write-Host "Maven build/test failed or conjunctive pass criteria violated in $($suite.Name):."
         $failureReasons | ForEach-Object { Write-Host "  - $_" }
+        if ($suiteStatus -ne 0) {
+            exit $suiteStatus
+        }
         exit 1
     }
 
