@@ -1,14 +1,14 @@
 # F1b wave3: EOF seal・recount・publish計画
 
-状態: Astra PLAN Review依頼前。wave2のappend/recoveryとV184の実schemaを基にしたdocs-only実装計画であり、実装承認、実source適合、NF-06完了、production enablementを意味しない。
+状態: W3A counterおよびW3B sealの候補コードを固定control基線へ限定統合済み（候補commit `84a587153fae68a01f5e043ac317528fbb3ffc47`）。統合元の比較基線は `521b0f58c735c317b0584800e92cb42cd947e3ea`、source treeは `1715746d0bdcc54c643b0bada015e40c1545b8f5`。Astraの計画承認と限定CODE PASSはコード統合判断に関するもので、候補commitの実行時PASS、MySQL検証完了、実source適合、NF-06全体完了、production enablementを意味しない。
 
 ## 1. 対象と現状
 
 - 計画対象は合成sourceに対する`BUILDING → SEALED → COMPLETED`と、保存済みvalidation resultを`VALIDATED`として公開するlifecycleに限る。業務apply、target binding、HTTP/API/UI、実legacy source、production data、外部provider/keyは扱わない。
-- source基線は`a80d29c194d9137777dc1b22766684240be3f93b`。この文書を追加するdocs-only差分とし、control/NF-08/NF-01は変更しない。
+- 設計初版のsource基線は`a80d29c194d9137777dc1b22766684240be3f93b`。現在の候補コード統合では固定control基線`521b0f58c735c317b0584800e92cb42cd947e3ea`とsource tree`1715746d0bdcc54c643b0bada015e40c1545b8f5`の指定Java差分を比較した。
 - 参照する正本は`f1b-validation-lifecycle-plan.md`、wave2の範囲は`f1b-wave2-append-plan.md`、schema列・契約は`f1a-schema-draft.md`と`V184__create_import_metadata_foundation.sql`である。wave3は既存F1b-3のseal/recount/publishを実装可能な単位へ分ける。
-- 現行`ImportValidationAppendService.appendRemaining`は、sourceの全検証scan、row metadataのappend、EOF/source SHAの再確認を行い、最後にleaseをrenewして`RunLease`を返す。EOF証明を外へ返す型はまだない。
-- `ImportValidationLifecycleService.appendChunkInTransaction`はjob rowをfenceとしてresourceをlockし、現在のACLとDB時刻を確認してから`BUILDING`へ最大250 rowをappendする。seal/publish serviceはまだない。
+- 候補コードでは`ImportValidationAppendService.appendRemainingWithSealCapability`がsourceの再検証scan、既存prefixとの比較、row metadata追記、EOF/source SHA再確認、counter一致確認を行い、private生成の`SealCapability`を伴う完了値を返す。互換API `appendRemaining`は既存lease返却を保つ。
+- 候補コードでは`ImportValidationLifecycleService`に`BUILDING → SEALED`のseal CASと既存SEALED状態のACK-loss回復検証を追加した。W3C recount/publishおよびW3D atomic publishは未実装であり、candidate visibilityは従来のpublished-only条件のままとする。
 - `ImportIdentityCandidateService`の`loadSnapshot`、`requireJobSnapshot`、`requirePublishedRun`はjob `VALIDATED`、active pointerなし、job current pointer一致、run `COMPLETED`、`published_slot=1`を要求する。BUILDING/SEALEDは読取候補にならない。
 
 ## 2. V184 schema充足性
@@ -115,11 +115,14 @@ exact sourceをEOFまで処理し、保存row全体との一致を確認したap
 
 ## 7. 小分けの実装・review gate
 
-1. **W3A capability + EOF/reconciliation** — `ImportValidationAppendService`のappend completionにprivate-ctor tokenを追加。全parser/source/row proofとcounterを作る。H2境界testを先に通し、V184 row schemaは変更しない。
-2. **W3B seal transaction** — `ImportValidationLifecycleService`へseal CASを追加。resource/ACL/time lock order、row-set recheck、summary persistence、ACK-loss retryを実装してH2 state testsとMySQL job-row lock testsを行う。
-3. **W3C SEALED recount + publish capability** — SEALED source/row proofとsummary再構成を実装。takeover recovery、old generation token、empty/blank/amount/finding testsを行う。
-4. **W3D atomic publish + candidate visibility** — run/job current pointer/slot/leaseを同tx CASし、candidate readerの既存published-only条件を回帰確認する。parallel publish、renew/takeover/abort、ACK-lossをMySQLで試験する。
-5. **Review freeze** — 各waveの対象SHA、H2/MySQL evidence、zero skip、schema audit、未完了境界をAstra CODE reviewへ渡す。合格はNF-06全体、A1/B1/B2/M、real source、production enablementの完了を意味しない。
+1. **W3A capability + EOF/reconciliation** — 候補コードへ統合済み。`ImportValidationAppendService`の完了値にprivate constructorのcapabilityを束縛し、parser/source/row proof、finding counter、JPY amount counterを集約する。H2 schemaやV184は変更していない。
+2. **W3B seal transaction** — 候補コードへ統合済み。`ImportValidationLifecycleService`にseal CAS、resource/ACL/時刻lock順、row-set再照合、summary保存、ACK-loss retryを実装した。
+
+### 候補コード検証状態（2026-11-04）
+
+- source tree `1715746d0bdcc54c643b0bada015e40c1545b8f5` のH2定向実行 `C:\work\ses-review-snf-r3-b\verification-evidence\luna-20261104-seal-h2-05` は、対象2クラス合計10 tests（Seal 9 + inventory 1）、0 failures / 0 errors / 0 skipped、Exit 0。Astraの限定CODE PASSと独立XML・4 report・log hash確認はこのsource treeの対象範囲に限る。候補統合commit `84a587153fae68a01f5e043ac317528fbb3ffc47` 自体は未実行。
+- MySQL `C:\work\ses-review-snf-r3-b\verification-evidence\luna-20261104-seal-mysql-01` はDocker利用不可によるクラス初期化時の1 errorであり、11実テストケースは実行されていない。MySQL証拠は未完了。候補統合、W3A/W3B、NF-06全体をPASSとしない。
+- 次gateはDocker復旧後に同一source treeで11 MySQLケースを実行し、独立レビューを受けること。V184変更、schema変更、W3C/Dの実装はこの候補統合に含まれない。
 
 ## 8. Wave 3総合受入条件
 
