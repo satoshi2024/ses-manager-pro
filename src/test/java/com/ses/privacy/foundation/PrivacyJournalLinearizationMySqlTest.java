@@ -27,6 +27,7 @@ import java.time.Instant;
 import java.time.Clock;
 import java.time.ZoneId;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -160,14 +161,37 @@ class PrivacyJournalLinearizationMySqlTest {
             assertEquals(3, result.second().ack().revision());
         }
         assertEquals(expectedEvents, journal.events(partition).stream().map(JournalEvent::type).toList());
-        System.out.printf("SF_W2A_ORDERED_P1 first=%s second=%s firstConnectionId=%d secondConnectionId=%d schema=%s key=%s object=sf_journal_head index=PRIMARY result=%s%n",
+        System.out.printf("SF_W2A_ORDERED_P1 first=%s second=%s firstConnectionId=%d secondConnectionId=%d schema=%s requestLockData=%s blockerLockData=%s object=sf_journal_head index=PRIMARY result=%s%n",
                 firstType, secondType, result.firstConnection().connectionId(), result.secondConnection().connectionId(),
-                result.firstConnection().schema(), result.lockData(), expectedEvents);
+                result.firstConnection().schema(), result.edge().requestLockData(), result.edge().blockerLockData(), expectedEvents);
+    }
+
+    private void assertHeadFixture(JournalPartition expectedPartition) {
+        List<String> primaryKeyColumns = admin.query(
+                "SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE " +
+                        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sf_journal_head' " +
+                        "AND CONSTRAINT_NAME='PRIMARY' ORDER BY ORDINAL_POSITION",
+                (rows, rowNumber) -> rows.getString(1));
+        assertEquals(List.of("tenant_id", "subject_ref"), primaryKeyColumns,
+                "head fixtureのPRIMARY keyはtenant/subject partitionと一致する必要があります");
+        assertEquals(1, admin.queryForObject("SELECT COUNT(*) FROM sf_journal_head", Integer.class),
+                "競合観測中のhead fixtureは1行だけである必要があります");
+        assertEquals(1, admin.queryForObject(
+                "SELECT COUNT(*) FROM sf_journal_head WHERE tenant_id=? AND subject_ref=?", Integer.class,
+                expectedPartition.tenantId(), expectedPartition.subjectRef()),
+                "実head fixtureの唯一行はpair partitionである必要があります");
+        // 既存の実PRIMARY行と両writerのJDBC bindingで行を確定するため、LOCK_DATA表示値に依存しません。
     }
 
     private LockedPairResult appendPairWithObservedHeadWait(JournalCommand firstCommand, JournalCommand secondCommand)
             throws Exception {
-        HeadUpsertGate gate = new HeadUpsertGate(writerDataSource);
+        if (!firstCommand.partition().equals(secondCommand.partition())) {
+            throw new AssertionError("先行/後続commandのpartitionが一致する必要があります");
+        }
+        JournalPartition pairPartition = firstCommand.partition();
+        if (!partition.equals(pairPartition)) throw new AssertionError("pairはfixture partitionを使う必要があります");
+        assertHeadFixture(pairPartition);
+        HeadUpsertGate gate = new HeadUpsertGate(writerDataSource, pairPartition);
         JdbcPrivacyJournalAdapter gatedJournal = new JdbcPrivacyJournalAdapter(gate.dataSource(), context.getEnvironment(), CLOCK);
         var pool = Executors.newFixedThreadPool(2);
         Future<AppendOutcome> firstFuture = null;
@@ -200,6 +224,11 @@ class PrivacyJournalLinearizationMySqlTest {
                     || !"SECOND_HEAD_UPSERT_EXECUTE_READY".equals(second.phase())) {
                 throw asTestFailure("接続role/stageの記録順序が不正です", null, gate, null);
             }
+            if (!pairPartition.equals(first.headBinding().partition())
+                    || !pairPartition.equals(second.headBinding().partition())) {
+                throw asTestFailure("両writerの実head upsert JDBC bindingがpair partitionと一致する必要があります",
+                        null, gate, null);
+            }
 
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(OBSERVATION_BUDGET_SECONDS);
             while (System.nanoTime() < deadline && observedEdge == null) {
@@ -215,7 +244,7 @@ class PrivacyJournalLinearizationMySqlTest {
                     throw asTestFailure("後続writerがlock観測前に成功しました", null, gate, observedEdge);
                 }
                 try {
-                    observedEdge = primaryHeadWait(first.schema(), first, second, partition);
+                    observedEdge = primaryHeadWait(first.schema(), first, second, pairPartition);
                 } catch (Throwable probeFailure) {
                     throw asTestFailure("InnoDB lock wait edgeの観測に失敗しました", probeFailure, gate, null);
                 }
@@ -232,7 +261,7 @@ class PrivacyJournalLinearizationMySqlTest {
             if (firstOutcome.failure() != null) {
                 throw asTestFailure("先行writerがgate解放後に失敗しました", firstOutcome.failure(), gate, observedEdge);
             }
-            result = new LockedPairResult(firstOutcome, secondOutcome, first, second, observedEdge.lockData());
+            result = new LockedPairResult(firstOutcome, secondOutcome, first, second, observedEdge);
             if (isExpectedRejection(secondCommand.type(), secondOutcome.failure())) {
                 handledWriterFailures.add(secondOutcome.failure());
             }
@@ -325,12 +354,14 @@ class PrivacyJournalLinearizationMySqlTest {
 
     private LockWaitEdge primaryHeadWait(String schema, WriterConnection blocker, WriterConnection requester,
                                         JournalPartition expectedPartition) {
-        String expectedKey = expectedPartition.tenantId() + ", " + expectedPartition.subjectRef();
+        // LOCK_DATAはNULLを含めて観測値のまま診断保存し、partition照合には使いません。
         List<Map<String, Object>> edges = lockObserver.queryForList(
                 "SELECT w.ENGINE, w.REQUESTING_ENGINE_LOCK_ID, w.BLOCKING_ENGINE_LOCK_ID, " +
-                        "req.LOCK_DATA, req.LOCK_STATUS AS REQUEST_STATUS, req.LOCK_TYPE AS REQUEST_TYPE, " +
+                        "req.LOCK_DATA AS REQUEST_LOCK_DATA, req.LOCK_MODE AS REQUEST_MODE, " +
+                        "req.LOCK_STATUS AS REQUEST_STATUS, req.LOCK_TYPE AS REQUEST_TYPE, " +
                         "req.OBJECT_SCHEMA AS REQUEST_SCHEMA, req.OBJECT_NAME AS REQUEST_OBJECT, req.INDEX_NAME AS REQUEST_INDEX, " +
-                        "blk.LOCK_DATA AS BLOCK_KEY, blk.LOCK_STATUS AS BLOCK_STATUS, blk.LOCK_TYPE AS BLOCK_TYPE, " +
+                        "blk.LOCK_DATA AS BLOCK_LOCK_DATA, blk.LOCK_MODE AS BLOCK_MODE, " +
+                        "blk.LOCK_STATUS AS BLOCK_STATUS, blk.LOCK_TYPE AS BLOCK_TYPE, " +
                         "blk.OBJECT_SCHEMA AS BLOCK_SCHEMA, blk.OBJECT_NAME AS BLOCK_OBJECT, blk.INDEX_NAME AS BLOCK_INDEX, " +
                         "requester.PROCESSLIST_ID AS REQUESTER_ID, blocker.PROCESSLIST_ID AS BLOCKER_ID " +
                         "FROM performance_schema.data_lock_waits w " +
@@ -346,31 +377,73 @@ class PrivacyJournalLinearizationMySqlTest {
                         "AND req.INDEX_NAME='PRIMARY' AND blk.INDEX_NAME='PRIMARY' " +
                         "AND req.LOCK_TYPE='RECORD' AND blk.LOCK_TYPE='RECORD' " +
                         "AND req.LOCK_STATUS='WAITING' AND blk.LOCK_STATUS='GRANTED' " +
-                        "AND req.LOCK_DATA=? AND blk.LOCK_DATA=?",
-                requester.connectionId(), blocker.connectionId(), schema, schema, expectedKey, expectedKey);
-        if (edges.isEmpty()) return null;
-        Map<String, Object> edge = edges.get(0);
-        return new LockWaitEdge(String.valueOf(edge.get("ENGINE")),
-                String.valueOf(edge.get("REQUEST_SCHEMA")), String.valueOf(edge.get("REQUEST_OBJECT")),
-                String.valueOf(edge.get("REQUEST_INDEX")),
-                String.valueOf(edge.get("BLOCK_SCHEMA")), String.valueOf(edge.get("BLOCK_OBJECT")),
-                String.valueOf(edge.get("BLOCK_INDEX")), expectedKey, String.valueOf(edge.get("BLOCK_KEY")),
-                String.valueOf(edge.get("REQUESTING_ENGINE_LOCK_ID")),
-                String.valueOf(edge.get("BLOCKING_ENGINE_LOCK_ID")), String.valueOf(edge.get("REQUEST_STATUS")),
-                String.valueOf(edge.get("BLOCK_STATUS")), String.valueOf(edge.get("REQUEST_TYPE")),
-                String.valueOf(edge.get("BLOCK_TYPE")));
+                        "AND req.LOCK_MODE IN ('X','X,REC_NOT_GAP') " +
+                        "AND blk.LOCK_MODE IN ('X','X,REC_NOT_GAP')",
+                requester.connectionId(), blocker.connectionId(), schema, schema);
+        for (Map<String, Object> edge : edges) {
+            LockWaitEdge candidate = new LockWaitEdge(String.valueOf(edge.get("ENGINE")),
+                    numberValue(edge, "REQUESTER_ID"), numberValue(edge, "BLOCKER_ID"),
+                    String.valueOf(edge.get("REQUEST_SCHEMA")), String.valueOf(edge.get("REQUEST_OBJECT")),
+                    String.valueOf(edge.get("REQUEST_INDEX")), String.valueOf(edge.get("REQUEST_TYPE")),
+                    String.valueOf(edge.get("REQUEST_MODE")), String.valueOf(edge.get("REQUEST_STATUS")),
+                    (String) edge.get("REQUEST_LOCK_DATA"), String.valueOf(edge.get("BLOCK_SCHEMA")),
+                    String.valueOf(edge.get("BLOCK_OBJECT")), String.valueOf(edge.get("BLOCK_INDEX")),
+                    String.valueOf(edge.get("BLOCK_TYPE")), String.valueOf(edge.get("BLOCK_MODE")),
+                    String.valueOf(edge.get("BLOCK_STATUS")), (String) edge.get("BLOCK_LOCK_DATA"),
+                    String.valueOf(edge.get("REQUESTING_ENGINE_LOCK_ID")),
+                    String.valueOf(edge.get("BLOCKING_ENGINE_LOCK_ID")));
+            if (isValidPrimaryHeadWait(candidate, blocker, requester, expectedPartition)) return candidate;
+        }
+        return null;
     }
 
-    private boolean primaryHeadWait(long requesterConnectionId, long blockerConnectionId) {
+    private static long numberValue(Map<String, Object> values, String key) {
+        Object value = values.get(key);
+        if (!(value instanceof Number number)) throw new IllegalStateException("lock edge missing numeric field: " + key);
+        return number.longValue();
+    }
+
+    private static boolean isValidPrimaryHeadWait(LockWaitEdge edge, WriterConnection blocker,
+                                                  WriterConnection requester, JournalPartition expectedPartition) {
+        if (edge == null || blocker == null || requester == null || expectedPartition == null) return false;
+        if (blocker.connectionId() == requester.connectionId()
+                || !blocker.schema().equals(requester.schema())
+                || !"FIRST_HEAD_UPSERT_LOCKED".equals(blocker.phase())
+                || !"SECOND_HEAD_UPSERT_EXECUTE_READY".equals(requester.phase())
+                || !expectedPartition.equals(blocker.headBinding().partition())
+                || !expectedPartition.equals(requester.headBinding().partition())) return false;
+        return "INNODB".equals(edge.engine())
+                && edge.requesterId() == requester.connectionId() && edge.blockerId() == blocker.connectionId()
+                && blocker.schema().equals(edge.requestSchema()) && blocker.schema().equals(edge.blockerSchema())
+                && "sf_journal_head".equals(edge.requestObject()) && "sf_journal_head".equals(edge.blockerObject())
+                && "PRIMARY".equals(edge.requestIndex()) && "PRIMARY".equals(edge.blockerIndex())
+                && "RECORD".equals(edge.requestType()) && "RECORD".equals(edge.blockerType())
+                && "WAITING".equals(edge.requestStatus()) && "GRANTED".equals(edge.blockerStatus())
+                && isEffectiveRecordX(edge.requestMode()) && isEffectiveRecordX(edge.blockerMode())
+                && edge.requestingLockId() != null && !edge.requestingLockId().isBlank()
+                && edge.blockingLockId() != null && !edge.blockingLockId().isBlank();
+    }
+
+    private static boolean isEffectiveRecordX(String lockMode) {
+        return "X".equals(lockMode) || "X,REC_NOT_GAP".equals(lockMode);
+    }
+
+    private boolean primaryHeadRecordWait(long requesterConnectionId, long blockerConnectionId) {
         Integer waits = admin.queryForObject("SELECT COUNT(*) FROM performance_schema.data_lock_waits w " +
-                        "JOIN information_schema.innodb_trx req ON req.trx_id = w.requesting_engine_transaction_id " +
-                        "JOIN information_schema.innodb_trx blk ON blk.trx_id = w.blocking_engine_transaction_id " +
-                        "JOIN performance_schema.data_locks rl ON rl.engine_transaction_id = w.requesting_engine_transaction_id " +
-                        "AND rl.lock_status = 'WAITING' AND rl.object_name = 'sf_journal_head' AND rl.index_name = 'PRIMARY' " +
-                        "JOIN performance_schema.data_locks bl ON bl.engine_transaction_id = w.blocking_engine_transaction_id " +
-                        "AND bl.object_name = 'sf_journal_head' AND bl.index_name = 'PRIMARY' AND bl.lock_data = rl.lock_data " +
-                        "WHERE req.trx_mysql_thread_id = ? AND blk.trx_mysql_thread_id = ? " +
-                        "AND rl.lock_type = 'RECORD' AND bl.lock_type = 'RECORD'",
+                        "JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE " +
+                        "AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID " +
+                        "JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE " +
+                        "AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID " +
+                        "JOIN performance_schema.threads requester ON requester.THREAD_ID=req.THREAD_ID " +
+                        "JOIN performance_schema.threads blocker ON blocker.THREAD_ID=blk.THREAD_ID " +
+                        "WHERE w.ENGINE='INNODB' AND requester.PROCESSLIST_ID=? AND blocker.PROCESSLIST_ID=? " +
+                        "AND req.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_SCHEMA=DATABASE() " +
+                        "AND req.OBJECT_NAME='sf_journal_head' AND blk.OBJECT_NAME='sf_journal_head' " +
+                        "AND req.INDEX_NAME='PRIMARY' AND blk.INDEX_NAME='PRIMARY' " +
+                        "AND req.LOCK_TYPE='RECORD' AND blk.LOCK_TYPE='RECORD' " +
+                        "AND req.LOCK_STATUS='WAITING' AND blk.LOCK_STATUS='GRANTED' " +
+                        "AND req.LOCK_MODE IN ('X','X,REC_NOT_GAP') " +
+                        "AND blk.LOCK_MODE IN ('X','X,REC_NOT_GAP')",
                 Integer.class, requesterConnectionId, blockerConnectionId);
         return waits != null && waits > 0;
     }
@@ -492,6 +565,76 @@ class PrivacyJournalLinearizationMySqlTest {
         return false;
     }
 
+    private static LockWaitEdge lockWaitEdge(long requesterId, long blockerId,
+                                             String requestSchema, String blockerSchema,
+                                             String requestIndex, String blockerIndex,
+                                             String requestMode, String blockerMode) {
+        return new LockWaitEdge("INNODB", requesterId, blockerId,
+                requestSchema, "sf_journal_head", requestIndex, "RECORD", requestMode, "WAITING", null,
+                blockerSchema, "sf_journal_head", blockerIndex, "RECORD", blockerMode, "GRANTED", null,
+                "request-lock-id", "blocking-lock-id");
+    }
+
+    @Test
+    void headUpsertBindingは成功したsetStringとsetObjectだけを凍結し欠落誤結合を拒否する() {
+        HeadKeyBindingRecorder missing = new HeadKeyBindingRecorder();
+        assertThrows(IllegalStateException.class, missing::freeze);
+
+        HeadKeyBindingRecorder unsupported = new HeadKeyBindingRecorder();
+        unsupported.recordSuccessfulCall("setInt", new Object[]{1, 1});
+        unsupported.recordSuccessfulCall("setObject", new Object[]{2, partition.subjectRef()});
+        assertThrows(IllegalStateException.class, unsupported::freeze);
+
+        HeadKeyBindingRecorder wrongType = new HeadKeyBindingRecorder();
+        wrongType.recordSuccessfulCall("setObject", new Object[]{1, 7});
+        wrongType.recordSuccessfulCall("setString", new Object[]{2, partition.subjectRef()});
+        assertThrows(IllegalStateException.class, wrongType::freeze);
+
+        HeadKeyBindingRecorder cleared = new HeadKeyBindingRecorder();
+        cleared.recordSuccessfulCall("setString", new Object[]{1, partition.tenantId()});
+        cleared.recordSuccessfulCall("setObject", new Object[]{2, partition.subjectRef()});
+        cleared.recordSuccessfulCall("clearParameters", null);
+        assertThrows(IllegalStateException.class, cleared::freeze);
+
+        HeadKeyBindingRecorder valid = new HeadKeyBindingRecorder();
+        valid.recordSuccessfulCall("setString", new Object[]{1, partition.tenantId()});
+        valid.recordSuccessfulCall("setObject", new Object[]{2, partition.subjectRef(), java.sql.Types.VARCHAR});
+        assertEquals(new HeadKeyBinding(partition.tenantId(), partition.subjectRef()), valid.freeze());
+        assertThrows(IllegalArgumentException.class,
+                () -> new HeadKeyBinding(partition.tenantId(), "wrong-subject").requireMatches(partition));
+    }
+
+    @Test
+    void primaryHeadWaitはwriter識別子とPRIMARYrecordXedgeだけを受け入れる() {
+        HeadKeyBinding binding = new HeadKeyBinding(partition.tenantId(), partition.subjectRef());
+        WriterConnection blocker = new WriterConnection(11, "sfj_test", "FIRST_HEAD_UPSERT_LOCKED", binding);
+        WriterConnection requester = new WriterConnection(22, "sfj_test", "SECOND_HEAD_UPSERT_EXECUTE_READY", binding);
+        LockWaitEdge valid = lockWaitEdge(22, 11, "sfj_test", "sfj_test", "PRIMARY", "PRIMARY", "X", "X,REC_NOT_GAP");
+
+        assertTrue(isValidPrimaryHeadWait(valid, blocker, requester, partition),
+                "LOCK_DATAがNULLでも実bindingと完全なPRIMARY record X edgeを受け入れます");
+        assertFalse(isValidPrimaryHeadWait(null, blocker, requester, partition), "edgeなしを拒否します");
+        assertFalse(isValidPrimaryHeadWait(lockWaitEdge(23, 11, "sfj_test", "sfj_test", "PRIMARY", "PRIMARY", "X", "X"),
+                blocker, requester, partition), "誤requester PIDを拒否します");
+        assertFalse(isValidPrimaryHeadWait(lockWaitEdge(22, 12, "sfj_test", "sfj_test", "PRIMARY", "PRIMARY", "X", "X"),
+                blocker, requester, partition), "誤blocker PIDを拒否します");
+        assertFalse(isValidPrimaryHeadWait(lockWaitEdge(22, 11, "other_schema", "sfj_test", "PRIMARY", "PRIMARY", "X", "X"),
+                blocker, requester, partition), "誤request schemaを拒否します");
+        assertFalse(isValidPrimaryHeadWait(lockWaitEdge(22, 11, "sfj_test", "other_schema", "PRIMARY", "PRIMARY", "X", "X"),
+                blocker, requester, partition), "誤blocker schemaを拒否します");
+        assertFalse(isValidPrimaryHeadWait(lockWaitEdge(22, 11, "sfj_test", "sfj_test", "wrong_index", "PRIMARY", "X", "X"),
+                blocker, requester, partition), "誤request indexを拒否します");
+        assertFalse(isValidPrimaryHeadWait(lockWaitEdge(22, 11, "sfj_test", "sfj_test", "PRIMARY", "wrong_index", "X", "X"),
+                blocker, requester, partition), "誤blocker indexを拒否します");
+        assertFalse(isValidPrimaryHeadWait(lockWaitEdge(22, 11, "sfj_test", "sfj_test", "PRIMARY", "PRIMARY", "X,GAP", "X"),
+                blocker, requester, partition), "GAP-only lock modeを拒否します");
+        assertFalse(isValidPrimaryHeadWait(lockWaitEdge(22, 11, "sfj_test", "sfj_test", "PRIMARY", "PRIMARY", "X", "X,GAP"),
+                blocker, requester, partition), "blocker側のGAP-only lock modeも拒否します");
+        WriterConnection wrongBinding = new WriterConnection(22, "sfj_test", "SECOND_HEAD_UPSERT_EXECUTE_READY",
+                new HeadKeyBinding(partition.tenantId(), "different-subject"));
+        assertFalse(isValidPrimaryHeadWait(valid, blocker, wrongBinding, partition), "誤partitionの実JDBC bindingを拒否します");
+    }
+
     @Test
     void cleanup集約はnullと同一例外を安全に扱いwriter失敗を回収する() {
         Throwable primary = new IllegalStateException("primary failure");
@@ -560,7 +703,7 @@ class PrivacyJournalLinearizationMySqlTest {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
                 boolean observed = false;
                 while (System.nanoTime() < deadline && !observed) {
-                    observed = primaryHeadWait(writerConnectionId.get(), blockerConnectionId);
+                    observed = primaryHeadRecordWait(writerConnectionId.get(), blockerConnectionId);
                     if (observed) {
                         System.out.printf("SF_W2A_LOCK_WAIT tenant=%s subject=%s writerConnectionId=%d blockerConnectionId=%d object=sf_journal_head index=PRIMARY lockType=RECORD waitCount=%d%n",
                                 partition.tenantId(), partition.subjectRef(), writerConnectionId.get(), blockerConnectionId, 1);
@@ -603,6 +746,7 @@ class PrivacyJournalLinearizationMySqlTest {
 
     private static final class HeadUpsertGate {
         private final DataSource delegate;
+        private final JournalPartition expectedPartition;
         private final CountDownLatch firstHeadLockAcquired = new CountDownLatch(1);
         private final CountDownLatch secondHeadExecuteStarted = new CountDownLatch(1);
         private final CountDownLatch releaseFirstHeadLock = new CountDownLatch(1);
@@ -610,18 +754,32 @@ class PrivacyJournalLinearizationMySqlTest {
         private final AtomicReference<WriterConnection> secondConnection = new AtomicReference<>();
         private final AtomicBoolean gateFirst = new AtomicBoolean(true);
 
-        private HeadUpsertGate(DataSource delegate) { this.delegate = delegate; }
+        private HeadUpsertGate(DataSource delegate, JournalPartition expectedPartition) {
+            this.delegate = delegate;
+            this.expectedPartition = expectedPartition;
+        }
 
         private String connectionStages() {
             return "first=" + firstConnection.get() + ",second=" + secondConnection.get()
                     + ",released=" + (releaseFirstHeadLock.getCount() == 0);
         }
 
-        private static WriterConnection snapshot(java.sql.Connection connection, String phase) throws Exception {
+        private static WriterConnection snapshot(java.sql.Connection connection, String phase,
+                                                 HeadKeyBinding headBinding) throws Exception {
             try (var statement = connection.createStatement();
                  var rows = statement.executeQuery("SELECT CONNECTION_ID(), DATABASE()")) {
                 if (!rows.next()) throw new java.sql.SQLException("writer connection snapshot returned no row");
-                return new WriterConnection(rows.getLong(1), rows.getString(2), phase);
+                return new WriterConnection(rows.getLong(1), rows.getString(2), phase, headBinding);
+            }
+        }
+
+        private HeadKeyBinding validatedBinding(HeadKeyBindingRecorder recorder) throws java.sql.SQLException {
+            try {
+                HeadKeyBinding binding = recorder.freeze();
+                binding.requireMatches(expectedPartition);
+                return binding;
+            } catch (RuntimeException bindingFailure) {
+                throw new java.sql.SQLException("head upsert JDBC bindingが欠落またはpartition不一致です", bindingFailure);
             }
         }
 
@@ -637,38 +795,89 @@ class PrivacyJournalLinearizationMySqlTest {
                                             || connectionArgs.length == 0 || !(connectionArgs[0] instanceof String sql)
                                             || !sql.startsWith("INSERT INTO sf_journal_head")) return prepared;
                                     if (!(prepared instanceof java.sql.PreparedStatement statement)) return prepared;
+                                    HeadKeyBindingRecorder bindingRecorder = new HeadKeyBindingRecorder();
                                     return Proxy.newProxyInstance(getClass().getClassLoader(), new Class[]{java.sql.PreparedStatement.class},
                                             (statementProxy, statementMethod, statementArgs) -> {
-                                                if (!statementMethod.getName().equals("executeUpdate")) {
+                                                String methodName = statementMethod.getName();
+                                                if ("executeUpdate".equals(methodName)) {
+                                                    HeadKeyBinding binding = validatedBinding(bindingRecorder);
+                                                    if (gateFirst.compareAndSet(true, false)) {
+                                                        Object result = invoke(statementMethod, statement, statementArgs);
+                                                        firstConnection.set(snapshot(connection, "FIRST_HEAD_UPSERT_LOCKED", binding));
+                                                        firstHeadLockAcquired.countDown();
+                                                        if (!releaseFirstHeadLock.await(GATE_HOLD_BUDGET_SECONDS, TimeUnit.SECONDS)) {
+                                                            throw new java.sql.SQLException("test-only first writer gate hold budget超過");
+                                                        }
+                                                        return result;
+                                                    }
+                                                    secondConnection.set(snapshot(connection, "SECOND_HEAD_UPSERT_EXECUTE_READY", binding));
+                                                    secondHeadExecuteStarted.countDown();
                                                     return invoke(statementMethod, statement, statementArgs);
                                                 }
-                                                if (gateFirst.compareAndSet(true, false)) {
-                                                    Object result = invoke(statementMethod, statement, statementArgs);
-                                                    firstConnection.set(snapshot(connection, "FIRST_HEAD_UPSERT_LOCKED"));
-                                                    firstHeadLockAcquired.countDown();
-                                                    if (!releaseFirstHeadLock.await(GATE_HOLD_BUDGET_SECONDS, TimeUnit.SECONDS)) {
-                                                        throw new java.sql.SQLException("test-only first writer gate hold budget超過");
-                                                    }
-                                                    return result;
+                                                Object result = invoke(statementMethod, statement, statementArgs);
+                                                if ("clearParameters".equals(methodName) || isParameterSetter(methodName)) {
+                                                    bindingRecorder.recordSuccessfulCall(methodName, statementArgs);
                                                 }
-                                                secondConnection.set(snapshot(connection, "SECOND_HEAD_UPSERT_EXECUTE_READY"));
-                                                secondHeadExecuteStarted.countDown();
-                                                return invoke(statementMethod, statement, statementArgs);
+                                                return result;
                                             });
                                 });
                     });
         }
     }
 
-    private record WriterConnection(long connectionId, String schema, String phase) { }
+    private static boolean isParameterSetter(String methodName) {
+        return methodName.startsWith("set") && !Set.of("setFetchDirection", "setFetchSize", "setMaxFieldSize",
+                "setMaxRows", "setQueryTimeout", "setEscapeProcessing", "setCursorName", "setPoolable",
+                "setLargeMaxRows").contains(methodName);
+    }
+
+    private static final class HeadKeyBindingRecorder {
+        private static final Object UNSUPPORTED_BINDING = new Object();
+        private final Map<Integer, Object> bindings = new HashMap<>();
+
+        private void recordSuccessfulCall(String methodName, Object[] arguments) {
+            if ("clearParameters".equals(methodName)) {
+                bindings.clear();
+                return;
+            }
+            if (arguments == null || arguments.length < 2 || !(arguments[0] instanceof Integer index)
+                    || index < 1 || index > 2) return;
+            if ("setString".equals(methodName) || "setObject".equals(methodName)) {
+                bindings.put(index, arguments[1]);
+            } else {
+                bindings.put(index, UNSUPPORTED_BINDING);
+            }
+        }
+
+        private HeadKeyBinding freeze() {
+            Object tenantId = bindings.get(1);
+            Object subjectRef = bindings.get(2);
+            if (!(tenantId instanceof String tenant) || tenant.isBlank()
+                    || !(subjectRef instanceof String subject) || subject.isBlank()) {
+                throw new IllegalStateException("head upsert parameter 1/2 must be successfully bound strings");
+            }
+            return new HeadKeyBinding(tenant, subject);
+        }
+    }
+
+    private record HeadKeyBinding(String tenantId, String subjectRef) {
+        private JournalPartition partition() { return new JournalPartition(tenantId, subjectRef); }
+
+        private void requireMatches(JournalPartition expected) {
+            if (!partition().equals(expected)) throw new IllegalArgumentException("head binding does not match expected partition");
+        }
+    }
+
+    private record WriterConnection(long connectionId, String schema, String phase, HeadKeyBinding headBinding) { }
     private record AppendOutcome(JournalAck ack, Throwable failure) { }
     private record LockedPairResult(AppendOutcome first, AppendOutcome second, WriterConnection firstConnection,
-                                    WriterConnection secondConnection, String lockData) { }
-    private record LockWaitEdge(String engine, String schema, String object, String index,
-                                String blockingSchema, String blockingObject, String blockingIndex,
-                                String lockData, String blockingLockData, String requestingLockId, String blockingLockId,
-                                String requestingStatus, String blockingStatus, String requestingType,
-                                String blockingType) { }
+                                    WriterConnection secondConnection, LockWaitEdge edge) { }
+    private record LockWaitEdge(String engine, long requesterId, long blockerId,
+                                String requestSchema, String requestObject, String requestIndex,
+                                String requestType, String requestMode, String requestStatus, String requestLockData,
+                                String blockerSchema, String blockerObject, String blockerIndex,
+                                String blockerType, String blockerMode, String blockerStatus, String blockerLockData,
+                                String requestingLockId, String blockingLockId) { }
 
     @Test
     void P1_hold先行時は同じheadからの認可を拒否する() {
@@ -791,9 +1000,10 @@ class PrivacyJournalLinearizationMySqlTest {
         assertEquals("worker-new", journal.head(partition).leaseOwner());
         assertEquals(0, admin.queryForObject("SELECT COUNT(*) FROM sf_journal_action", Integer.class));
         assertEquals(List.of(LEASE_CLAIMED, LEASE_TAKEN_OVER), journal.events(partition).stream().map(JournalEvent::type).toList());
-        System.out.printf("SF_W2A_P5_FENCED_WAIT takeoverConnectionId=%d staleConnectionId=%d schema=%s key=%s expectedRevision=%d expectedGeneration=1 currentGeneration=2 object=sf_journal_head index=PRIMARY result=REJECTED%n",
+        System.out.printf("SF_W2A_P5_FENCED_WAIT takeoverConnectionId=%d staleConnectionId=%d schema=%s requestLockData=%s blockerLockData=%s expectedRevision=%d expectedGeneration=1 currentGeneration=2 object=sf_journal_head index=PRIMARY result=REJECTED%n",
                 result.firstConnection().connectionId(), result.secondConnection().connectionId(),
-                result.firstConnection().schema(), result.lockData(), staleAuthorization.expectedRevision());
+                result.firstConnection().schema(), result.edge().requestLockData(), result.edge().blockerLockData(),
+                staleAuthorization.expectedRevision());
     }
 
     @Test
