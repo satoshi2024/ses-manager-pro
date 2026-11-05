@@ -972,14 +972,8 @@ class ImportValidationSealRealMySqlTest {
             long publishSourceSystemId = jdbc.queryForObject(
                     "SELECT source_system_id FROM t_import_job WHERE tenant_id=? AND id=?",
                     Long.class, TENANT, fixture.jobId);
-            String publishSourceCode = jdbc.queryForObject(
-                    "SELECT source_code FROM t_import_source_system WHERE tenant_id=? AND id=?",
-                    String.class, TENANT, publishSourceSystemId);
             List<W3dTargetIndex> sourceSystemIndexes = List.of(
-                    new W3dTargetIndex("PRIMARY", List.of("id"), List.of(Long.toString(publishSourceSystemId))),
-                    new W3dTargetIndex("uk_import_source_tenant_code", List.of("tenant_id", "source_code", "id"),
-                            List.of(TENANT, publishSourceCode, Long.toString(publishSourceSystemId))),
-                    new W3dTargetIndex("uk_import_source_tenant_id", List.of("tenant_id", "id"),
+                    new W3dTargetIndex("PRIMARY", List.of("tenant_id", "id"),
                             List.of(TENANT, Long.toString(publishSourceSystemId))));
             String targetSchema = jdbc.queryForObject("SELECT DATABASE()", String.class);
             W3dSessionSettings publishSessionSettings = trackingManager.getW3dSessionSettingsForThread(publishThreadId.get());
