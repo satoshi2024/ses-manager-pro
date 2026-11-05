@@ -90,9 +90,9 @@ class ImportValidationResolverRealMySqlTest {
         jdbc.update("INSERT INTO t_project_position(id,project_id,role_name,version,deleted_flag) VALUES(1,1,'SYNTH-POSITION-1',3,0)");
         jdbc.update("INSERT INTO t_project(id,legal_entity_id,project_name,customer_id,deleted_flag) VALUES(3,77,'SYNTH-PROJECT-2',1,0)");
         jdbc.update("INSERT INTO t_project_position(id,project_id,role_name,version,deleted_flag) VALUES(2,3,'SYNTH-POSITION-OTHER',1,0)");
-        jdbc.update("INSERT INTO m_organization_unit(id,tenant_id,legal_entity_id,code,name,type,valid_from,status,version,deleted_flag) VALUES(1,NULL,77,'SYNTH-ORG-1','Org','部','2020-01-01','有効',2,0),(2,NULL,77,'SYNTH-ORG-EXPIRED','Expired','部','2020-01-01','有効',1,0),(3,NULL,NULL,'SYNTH-ORG-NULL-SCOPE','Null','部','2020-01-01','有効',1,0)");
+        jdbc.update("INSERT INTO m_organization_unit(id,tenant_id,legal_entity_id,code,name,type,valid_from,status,version,deleted_flag) VALUES(1,NULL,77,'SYNTH-ORG-1','Org','部','2020-01-01','有効',2,0),(2,NULL,77,'SYNTH-ORG-EXPIRED','Expired','部','2020-01-01','有効',1,0),(3,NULL,NULL,'SYNTH-ORG-NULL-SCOPE','Null','部','2020-01-01','有効',1,0),(4,NULL,77,'SYNTH-ORG-DISABLED','Disabled','部','2020-01-01','無効',1,0)");
         jdbc.update("UPDATE m_organization_unit SET valid_to='2020-12-31' WHERE id=2");
-        jdbc.update("INSERT INTO m_cost_center(id,legal_entity_id,code,name,valid_from,status,version,deleted_flag) VALUES(1,77,'SYNTH-COST-1','Cost','2020-01-01','有効',4,0),(2,77,'SYNTH-COST-DEL','Deleted','2020-01-01','有効',1,1),(3,NULL,'SYNTH-COST-NULL-SCOPE','Null','2020-01-01','有効',1,0),(4,77,'SYNTH-COST-DUP','Dup 1','2020-01-01','有効',1,0),(5,77,'SYNTH-COST-DUP','Dup 2','2020-01-01','有効',1,0),(6,77,'SYNTH-COST-EXPIRED','Expired','2020-01-01','有効',1,0)");
+        jdbc.update("INSERT INTO m_cost_center(id,legal_entity_id,code,name,valid_from,status,version,deleted_flag) VALUES(1,77,'SYNTH-COST-1','Cost','2020-01-01','有効',4,0),(2,77,'SYNTH-COST-DEL','Deleted','2020-01-01','有効',1,1),(3,NULL,'SYNTH-COST-NULL-SCOPE','Null','2020-01-01','有効',1,0),(4,77,'SYNTH-COST-DUP','Dup 1','2020-01-01','有効',1,0),(5,77,'SYNTH-COST-DUP','Dup 2','2020-01-01','有効',1,0),(6,77,'SYNTH-COST-EXPIRED','Expired','2020-01-01','有効',1,0),(7,77,'SYNTH-COST-DISABLED','Disabled','2020-01-01','無効',1,0)");
         jdbc.update("UPDATE m_cost_center SET valid_to='2020-12-31' WHERE id=6");
         ImportMetadataAuthorizationService auth = mock(ImportMetadataAuthorizationService.class);
         when(auth.requireCurrentAuthorization()).thenReturn(context);
@@ -122,6 +122,8 @@ class ImportValidationResolverRealMySqlTest {
         assertEquals(com.ses.importcenter.foundation.LookupStatus.OUT_OF_SCOPE,
                 resolver.resolve(com.ses.importcenter.foundation.ReferenceType.ORGANIZATION, TENANT, LEGAL_ENTITY, "SYNTH-ORG-EXPIRED").status());
         assertEquals(com.ses.importcenter.foundation.LookupStatus.OUT_OF_SCOPE,
+                resolver.resolve(com.ses.importcenter.foundation.ReferenceType.ORGANIZATION, TENANT, LEGAL_ENTITY, "SYNTH-ORG-DISABLED").status());
+        assertEquals(com.ses.importcenter.foundation.LookupStatus.OUT_OF_SCOPE,
                 resolver.resolve(com.ses.importcenter.foundation.ReferenceType.ORGANIZATION, TENANT, LEGAL_ENTITY, "SYNTH-ORG-NULL-SCOPE").status());
         assertEquals("SYNTH-CUSTOMER-1", resolver.resolve(com.ses.importcenter.foundation.ReferenceType.PROJECT,
                 TENANT, LEGAL_ENTITY, "SYNTH-PROJECT-1").candidates().get(0).relationKeys().get("customerExternalKey"));
@@ -139,6 +141,8 @@ class ImportValidationResolverRealMySqlTest {
                 resolver.resolve(com.ses.importcenter.foundation.ReferenceType.COST_CENTER, TENANT, LEGAL_ENTITY, "SYNTH-COST-NULL-SCOPE").status());
         assertEquals(com.ses.importcenter.foundation.LookupStatus.OUT_OF_SCOPE,
                 resolver.resolve(com.ses.importcenter.foundation.ReferenceType.COST_CENTER, TENANT, LEGAL_ENTITY, "SYNTH-COST-EXPIRED").status());
+        assertEquals(com.ses.importcenter.foundation.LookupStatus.OUT_OF_SCOPE,
+                resolver.resolve(com.ses.importcenter.foundation.ReferenceType.COST_CENTER, TENANT, LEGAL_ENTITY, "SYNTH-COST-DISABLED").status());
         assertEquals(com.ses.importcenter.foundation.LookupStatus.NOT_FOUND,
                 resolver.resolve(com.ses.importcenter.foundation.ReferenceType.COST_CENTER, TENANT, LEGAL_ENTITY, "SYNTH-COST-MISSING").status());
         assertEquals(com.ses.importcenter.foundation.LookupStatus.OUT_OF_SCOPE,
@@ -159,6 +163,20 @@ class ImportValidationResolverRealMySqlTest {
         assertTrue(observed.stream().filter(e -> e.method().startsWith("execute"))
                 .allMatch(e -> e.sql().stripLeading().regionMatches(true, 0, "SELECT", 0, 6)));
         assertEachResolverSelectWasExecuted(resolver.statements(), observed);
+    }
+
+    @Test
+    void writeSqlAllowlistFailsClosedForQuotedAndUnrecognizedStatements() {
+        assertTrue(isAllowedValidationSql("UPDATE t_import_job SET lease_generation=lease_generation+1 WHERE id=?"));
+        assertTrue(isAllowedValidationSql("INSERT INTO t_import_validation_run(id) VALUES(?)"));
+        assertTrue(isAllowedValidationSql("INSERT INTO t_import_validation_row(id) VALUES(?)"));
+        assertTrue(isAllowedValidationSql("SELECT id FROM m_customer WHERE id=?"));
+        assertFalse(isAllowedValidationSql("UPDATE `t_audit_log` SET action='x' WHERE id=?"));
+        assertFalse(isAllowedValidationSql("INSERT IGNORE INTO t_import_job(id) VALUES(?)"));
+        assertFalse(isAllowedValidationSql("DELETE FROM t_import_job WHERE id=?"));
+        assertFalse(isAllowedValidationSql("WITH candidate AS (SELECT 1) UPDATE t_import_job SET version_no=2"));
+        assertFalse(isAllowedValidationSql("DELETE FROM t_import_identity_registry WHERE id=?"));
+        assertFalse(isAllowedValidationSql("SELECT * FROM t_customer INTO OUTFILE 'x'"));
     }
 
     @Test
@@ -285,7 +303,7 @@ class ImportValidationResolverRealMySqlTest {
     }
 
     private static void assertValidationOnlyWrites(List<JdbcExecution> executions) {
-        Pattern mutation = Pattern.compile("(?i)\\b(?:INSERT\\s+INTO|UPDATE|DELETE\\s+FROM|REPLACE\\s+INTO|MERGE\\s+INTO|TRUNCATE\\s+TABLE|CREATE\\s+TABLE|ALTER\\s+TABLE|DROP\\s+TABLE|CALL)\\s+([a-z0-9_]+)");
+        Pattern allowedWrite = Pattern.compile("(?is)^\\s*(?:INSERT\\s+INTO|UPDATE)\\s+(t_import_job|t_import_validation_run|t_import_validation_row)\\b.*$");
         List<String> writeTables = new ArrayList<>();
         for (JdbcExecution execution : executions) {
             String sql = execution.sql();
@@ -293,17 +311,26 @@ class ImportValidationResolverRealMySqlTest {
             assertFalse(lower.contains("t_import_identity_registry") || lower.contains("id_map")
                             || lower.contains("checkpoint") || lower.contains("business_sequence"),
                     "binding/identity/checkpoint SQLはvalidation経路から発行しない: " + sql);
-            Matcher matcher = mutation.matcher(sql);
-            if (matcher.find()) {
-                String table = matcher.group(1).toLowerCase(java.util.Locale.ROOT);
-                writeTables.add(table);
-                assertTrue(List.of("t_import_job", "t_import_validation_run", "t_import_validation_row").contains(table),
-                        "validation metadata以外へのJDBC writeを拒否: " + execution);
+            assertTrue(isAllowedValidationSql(sql), "未知または許可外のJDBC SQLをfail-closedで拒否: " + execution);
+            Matcher matcher = allowedWrite.matcher(sql);
+            if (matcher.matches()) {
+                writeTables.add(matcher.group(1).toLowerCase(java.util.Locale.ROOT));
             }
         }
         assertTrue(writeTables.contains("t_import_job"), "job lease/version metadata writeを記録する");
         assertTrue(writeTables.contains("t_import_validation_run"), "run/counter metadata writeを記録する");
         assertTrue(writeTables.contains("t_import_validation_row"), "validation row metadata writeを記録する");
+    }
+
+    private static boolean isAllowedValidationSql(String sql) {
+        if (sql == null || sql.indexOf(';') >= 0) return false;
+        if (Pattern.compile("(?is)^\\s*SELECT\\b.*$").matcher(sql).matches()) {
+            String lower = sql.toLowerCase(java.util.Locale.ROOT);
+            return !lower.contains(" into outfile ") && !lower.contains(" into dumpfile ");
+        }
+        return Pattern.compile("(?is)^\\s*(?:INSERT\\s+INTO|UPDATE)\\s+"
+                + "(?:t_import_job|t_import_validation_run|t_import_validation_row)\\b.*$")
+                .matcher(sql).matches();
     }
 
     private static void assertEachResolverSelectWasExecuted(List<String> resolverSql, List<JdbcExecution> executions) {
