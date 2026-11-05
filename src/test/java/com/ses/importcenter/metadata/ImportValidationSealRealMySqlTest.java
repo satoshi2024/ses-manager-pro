@@ -34,17 +34,21 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -347,15 +351,15 @@ class ImportValidationSealRealMySqlTest {
         Map<String, Object> beforeJob = jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, fixture.jobId);
         Map<String, Object> beforeRun = jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
                 TENANT, fixture.jobId, fixture.runId);
+        String targetSchema = jdbc.queryForObject("SELECT DATABASE()", String.class);
 
         Connection blocker = dataSource.getConnection();
         long blockerPid;
+        W3dSessionSettings blockerSettings;
         try {
             blocker.setAutoCommit(false);
-            try (Statement statement = blocker.createStatement(); ResultSet rs = statement.executeQuery("SELECT CONNECTION_ID()")) {
-                assertTrue(rs.next());
-                blockerPid = rs.getLong(1);
-            }
+            blockerSettings = readW3dSessionSettings(blocker);
+            blockerPid = blockerSettings.connectionId;
             try (PreparedStatement statement = blocker.prepareStatement("SELECT id FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=? FOR UPDATE")) {
                 statement.setString(1, TENANT);
                 statement.setLong(2, fixture.jobId);
@@ -370,6 +374,7 @@ class ImportValidationSealRealMySqlTest {
 
         trackingManager.reset();
         AtomicReference<Long> workerThreadId = new AtomicReference<>();
+        AtomicReference<Boolean> workerOutcomeObserved = new AtomicReference<>(false);
         CountDownLatch workerStarted = new CountDownLatch(1);
         ExecutorService pool = Executors.newSingleThreadExecutor();
         Throwable primary = null;
@@ -381,8 +386,10 @@ class ImportValidationSealRealMySqlTest {
                 return service.publish(capability);
             });
             assertTrue(workerStarted.await(2, TimeUnit.SECONDS));
-            var wait = awaitW3dRecordLockWait(blockerPid, workerThreadId.get(), publish);
-            assertEquals("t_import_validation_run", wait.requesterTable);
+            var wait = awaitW3dRecordLockWait(blockerPid, workerThreadId.get(), publish, workerOutcomeObserved,
+                    targetSchema, "t_import_validation_run", "PRIMARY", List.of("id"),
+                    List.of(Long.toString(fixture.runId)), "id", Long.toString(fixture.runId), blockerSettings);
+            assertEquals("t_import_validation_run", wait.requester.table);
             Thread.sleep(1_300);
             blocker.commit();
 
@@ -411,17 +418,19 @@ class ImportValidationSealRealMySqlTest {
         var fixture = setupFixture("externalKey,companyName\nw3d-timeout,会社\n");
         var sealed = service.seal(fixture.capability);
         var capability = appendService.recountSealed(sealed);
+        long blockedRowId = jdbc.queryForObject("SELECT id FROM t_import_validation_row WHERE tenant_id=? AND job_id=? "
+                + "AND validation_run_id=? AND source_row_number=1", Long.class, TENANT, fixture.jobId, fixture.runId);
+        String targetSchema = jdbc.queryForObject("SELECT DATABASE()", String.class);
         Map<String, Object> beforeJob = jdbc.queryForMap("SELECT * FROM t_import_job WHERE tenant_id=? AND id=?", TENANT, fixture.jobId);
         Map<String, Object> beforeRun = jdbc.queryForMap("SELECT * FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
                 TENANT, fixture.jobId, fixture.runId);
         Connection blocker = dataSource.getConnection();
         long blockerPid;
+        W3dSessionSettings blockerSettings;
         try {
             blocker.setAutoCommit(false);
-            try (Statement statement = blocker.createStatement(); ResultSet rs = statement.executeQuery("SELECT CONNECTION_ID()")) {
-                assertTrue(rs.next());
-                blockerPid = rs.getLong(1);
-            }
+            blockerSettings = readW3dSessionSettings(blocker);
+            blockerPid = blockerSettings.connectionId;
             try (PreparedStatement statement = blocker.prepareStatement("SELECT source_row_number FROM t_import_validation_row WHERE tenant_id=? AND job_id=? AND validation_run_id=? AND source_row_number=1 FOR UPDATE")) {
                 statement.setString(1, TENANT);
                 statement.setLong(2, fixture.jobId);
@@ -436,23 +445,33 @@ class ImportValidationSealRealMySqlTest {
 
         trackingManager.reset();
         AtomicReference<Long> workerThreadId = new AtomicReference<>();
+        AtomicReference<Boolean> workerOutcomeObserved = new AtomicReference<>(false);
         CountDownLatch workerStarted = new CountDownLatch(1);
         ExecutorService pool = Executors.newSingleThreadExecutor();
         Throwable primary = null;
+        Future<Timestamp> publish = null;
         try {
-            Future<Timestamp> publish = pool.submit(() -> {
+            Future<Timestamp> publishFuture = pool.submit(() -> {
                 workerThreadId.set(Thread.currentThread().getId());
                 trackingManager.clearConnectionIdForThread(workerThreadId.get());
                 workerStarted.countDown();
                 return service.publish(capability);
             });
+            publish = publishFuture;
             assertTrue(workerStarted.await(2, TimeUnit.SECONDS));
-            W3dLockWait wait = awaitW3dRecordLockWait(blockerPid, workerThreadId.get(), publish);
-            assertEquals("t_import_validation_row", wait.requesterTable);
+            W3dLockWait wait = awaitW3dRecordLockWait(blockerPid, workerThreadId.get(), publishFuture,
+                    workerOutcomeObserved, targetSchema, "t_import_validation_row", "PRIMARY",
+                    List.of("id"), List.of(Long.toString(blockedRowId)), "id", Long.toString(blockedRowId), blockerSettings);
             assertEquals(wait.requesterPid, trackingManager.getConnectionIdForThread(workerThreadId.get()));
             Thread.sleep(10_300);
 
-            ExecutionException timeout = assertThrows(ExecutionException.class, () -> publish.get(2, TimeUnit.SECONDS));
+            ExecutionException timeout = assertThrows(ExecutionException.class, () -> {
+                try {
+                    publishFuture.get(2, TimeUnit.SECONDS);
+                } finally {
+                    if (publishFuture.isDone()) workerOutcomeObserved.set(true);
+                }
+            });
             assertFalse(timeout.getCause() instanceof BusinessException,
                     "lock wait/transaction timeoutは業務409へ変換しないこと: " + timeout.getCause());
             assertTrue(hasCause(timeout.getCause(), TransactionTimedOutException.class)
@@ -465,13 +484,29 @@ class ImportValidationSealRealMySqlTest {
             primary = failure;
             throw failure;
         } finally {
+            Throwable cleanupFailure = null;
+            boolean blockerClosed = false;
             try { blocker.rollback(); } catch (SQLException rollbackFailure) {
-                if (primary != null) primary.addSuppressed(rollbackFailure);
+                cleanupFailure = collectW3dCleanupFailure(cleanupFailure, rollbackFailure);
+                try {
+                    blocker.close();
+                    blockerClosed = true;
+                } catch (SQLException closeFailure) {
+                    cleanupFailure = collectW3dCleanupFailure(cleanupFailure, closeFailure);
+                }
             }
-            try { blocker.close(); } catch (SQLException closeFailure) {
-                if (primary != null) primary.addSuppressed(closeFailure);
+            cleanupFailure = harvestW3dWorker("row-lock timeout publish", publish,
+                    workerOutcomeObserved.get(), 15, cleanupFailure);
+            if (!blockerClosed) {
+                try { blocker.close(); } catch (SQLException closeFailure) {
+                    cleanupFailure = collectW3dCleanupFailure(cleanupFailure, closeFailure);
+                }
             }
-            finishPool(pool, 10, primary);
+            cleanupFailure = shutdownW3dPool(pool, 10, cleanupFailure);
+            if (cleanupFailure != null) {
+                if (primary != null) primary.addSuppressed(cleanupFailure);
+                else throw new AssertionError("W3D timeout test cleanupが失敗しました", cleanupFailure);
+            }
         }
     }
 
@@ -831,15 +866,19 @@ class ImportValidationSealRealMySqlTest {
         trackingManager.reset();
         ExecutorService pool = Executors.newFixedThreadPool(2);
         CountDownLatch releaseW3dGate = new CountDownLatch(1);
+        List<W3dWorker> w3dWorkers = new ArrayList<>();
         Throwable primary = null;
         try {
+            AtomicReference<Boolean> recountOutcomeObserved = new AtomicReference<>(false);
             Future<ImportValidationAppendService.PublishCapability> recount =
                     pool.submit(() -> appendService.recountSealed(sealedLease));
+            w3dWorkers.add(new W3dWorker("W3C recount", recount, recountOutcomeObserved));
             assertTrue(finalAclEntered.await(90, TimeUnit.SECONDS), "10万件検証の最終gate到達を確認");
             Long blockerPid = trackingManager.getLastW3cConnectionId();
             assertNotNull(blockerPid);
             CountDownLatch otherWorkerStarted = new CountDownLatch(1);
             AtomicReference<Long> otherWorkerThreadId = new AtomicReference<>();
+            AtomicReference<Boolean> otherStartOutcomeObserved = new AtomicReference<>(false);
             Future<ImportValidationLifecycleService.RunLease> otherStartFuture = pool.submit(() -> {
                 long threadId = Thread.currentThread().getId();
                 trackingManager.clearConnectionIdForThread(threadId);
@@ -847,11 +886,12 @@ class ImportValidationSealRealMySqlTest {
                 otherWorkerStarted.countDown();
                 return service.start(otherStart);
             });
+            w3dWorkers.add(new W3dWorker("W3C other start", otherStartFuture, otherStartOutcomeObserved));
             assertTrue(otherWorkerStarted.await(2, TimeUnit.SECONDS));
             awaitLockWait(trackingManager, blockerPid, otherWorkerThreadId.get(), otherStartFuture);
             releaseFinalAcl.countDown();
 
-            var capability = recount.get(120, TimeUnit.SECONDS);
+            var capability = awaitW3dWorkerResult(recount, recountOutcomeObserved, 120);
             Timestamp finalDbTime = jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)", Timestamp.class);
             assertNotNull(capability);
             assertNotNull(trackingManager.getLastW3cEntryDbTime());
@@ -863,7 +903,8 @@ class ImportValidationSealRealMySqlTest {
             assertTrue(trackingManager.getLastW3cDurationMillis() <= 10_000L,
                     "10万件の最終transactionが派生10秒予算以内に終了すること");
             Long w3cFinalGateMillis = trackingManager.getLastW3cDurationMillis();
-            assertNotNull(otherStartFuture.get(15, TimeUnit.SECONDS), "最終gate完了後に同source別jobが進めること");
+            assertNotNull(awaitW3dWorkerResult(otherStartFuture, otherStartOutcomeObserved, 15),
+                    "最終gate完了後に同source別jobが進めること");
 
             // W3C final gateとW3D publishは別transaction。W3Dではrow scan後のgateを止め、同source別jobの実waitを採取する。
             long publishCompetitorId = createMappedJobForSameSource(contents);
@@ -873,6 +914,8 @@ class ImportValidationSealRealMySqlTest {
             when(authorization.requireCurrentAuthorizationForWrite(context)).thenReturn(context);
             AtomicReference<Long> publishThreadId = new AtomicReference<>();
             AtomicReference<Long> competitorThreadId = new AtomicReference<>();
+            AtomicReference<Boolean> competitorOutcomeObserved = new AtomicReference<>(false);
+            AtomicReference<Boolean> publishOutcomeObserved = new AtomicReference<>(false);
             CountDownLatch publishGateEntered = new CountDownLatch(1);
             CountDownLatch competitorStarted = new CountDownLatch(1);
             org.mockito.Mockito.doAnswer(invocation -> {
@@ -891,6 +934,7 @@ class ImportValidationSealRealMySqlTest {
                 trackingManager.clearConnectionIdForThread(publishThreadId.get());
                 return service.publish(capability);
             });
+            w3dWorkers.add(new W3dWorker("W3D publish", publish, publishOutcomeObserved));
             assertTrue(publishGateEntered.await(90, TimeUnit.SECONDS), "10万row publish scan後のwrite gateに到達すること");
             Long publishBlockerPid = trackingManager.getLastW3dConnectionId();
             assertNotNull(publishBlockerPid);
@@ -900,29 +944,31 @@ class ImportValidationSealRealMySqlTest {
                 competitorStarted.countDown();
                 return service.start(publishCompetitorStart);
             });
+            w3dWorkers.add(new W3dWorker("W3D competitor", publishCompetitor, competitorOutcomeObserved));
             assertTrue(competitorStarted.await(2, TimeUnit.SECONDS));
-            W3dLockWait wait = awaitW3dRecordLockWait(publishBlockerPid, competitorThreadId.get(), publishCompetitor);
+            long publishSourceSystemId = jdbc.queryForObject(
+                    "SELECT source_system_id FROM t_import_job WHERE tenant_id=? AND id=?",
+                    Long.class, TENANT, fixture.jobId);
+            String targetSchema = jdbc.queryForObject("SELECT DATABASE()", String.class);
+            W3dSessionSettings publishSessionSettings = trackingManager.getW3dSessionSettingsForThread(publishThreadId.get());
+            assertNotNull(publishSessionSettings, "W3D blocker session variables are captured on its own connection");
+            W3dLockWait wait = awaitW3dRecordLockWait(publishBlockerPid, competitorThreadId.get(), publishCompetitor,
+                    competitorOutcomeObserved, targetSchema, "t_import_source_system", "PRIMARY",
+                    List.of("tenant_id", "id"), List.of(TENANT, Long.toString(publishSourceSystemId)),
+                    "id", Long.toString(publishSourceSystemId), publishSessionSettings);
+            W3dLockTarget target = new W3dLockTarget(targetSchema, "t_import_source_system",
+                    "PRIMARY", List.of("tenant_id", "id"),
+                    List.of(TENANT, Long.toString(publishSourceSystemId)), "id", Long.toString(publishSourceSystemId));
             assertEquals(wait.requesterPid, trackingManager.getConnectionIdForThread(competitorThreadId.get()));
             assertEquals(wait.blockerPid, publishBlockerPid);
-            assertEquals(jdbc.queryForObject("SELECT DATABASE()", String.class), wait.requesterSchema);
-            assertEquals(wait.requesterSchema, wait.blockerSchema);
-            assertEquals("t_import_source_system", wait.requesterTable);
-            assertEquals(wait.requesterTable, wait.blockerTable);
-            assertEquals("PRIMARY", wait.requesterIndex);
-            assertEquals(wait.requesterIndex, wait.blockerIndex);
-            assertEquals("RECORD", wait.requesterType);
-            assertEquals("WAITING", wait.requesterStatus);
-            assertTrue(Set.of("X", "X,REC_NOT_GAP").contains(wait.requesterMode));
-            assertEquals("RECORD", wait.blockerType);
-            assertEquals("GRANTED", wait.blockerStatus);
-            assertTrue(Set.of("X", "X,REC_NOT_GAP").contains(wait.blockerMode));
-            assertEquals(wait.requesterKey, wait.blockerKey);
             System.out.println("W3D-MYSQL-10 lock wait requester=" + wait.requesterPid + " blocker=" + wait.blockerPid
-                    + " schema=" + wait.requesterSchema + " table=" + wait.requesterTable + " index=" + wait.requesterIndex
-                    + " key=" + wait.requesterKey + " requester=" + wait.requesterType + "/" + wait.requesterMode + "/" + wait.requesterStatus
-                    + " blocker=" + wait.blockerType + "/" + wait.blockerMode + "/" + wait.blockerStatus);
+                    + " engine=" + wait.engine + " requesterEngineLock=" + wait.requesterEngineLockId
+                    + " blockerEngineLock=" + wait.blockerEngineLockId + " target=" + target
+                    + " requester=" + wait.requester.lockType + "/" + wait.requester.lockMode + "/" + wait.requester.lockStatus
+                    + "/" + wait.requester.lockData + " blocker=" + wait.blocker.lockType + "/" + wait.blocker.lockMode
+                    + "/" + wait.blocker.lockStatus + "/" + wait.blocker.lockData);
             releaseW3dGate.countDown();
-            Timestamp publishedAt = publish.get(15, TimeUnit.SECONDS);
+            Timestamp publishedAt = awaitW3dWorkerResult(publish, publishOutcomeObserved, 15);
             Timestamp publishFinalDbTime = jdbc.queryForObject("SELECT CURRENT_TIMESTAMP(6)", Timestamp.class);
             assertNotNull(publishedAt);
             assertNotNull(trackingManager.getLastW3dEntryDbTime());
@@ -933,7 +979,7 @@ class ImportValidationSealRealMySqlTest {
                     "publish transaction開始DB時刻がexact lease expiry前であること");
             assertTrue(publishFinalDbTime.before(capability.lease().expiresAt()),
                     "publish終了後のDB時刻もexact lease expiry前であること");
-            assertTrue(publishCompetitor.get(15, TimeUnit.SECONDS).runId() > 0,
+            assertTrue(awaitW3dWorkerResult(publishCompetitor, competitorOutcomeObserved, 15).runId() > 0,
                     "publish transaction解放後に同source別jobが進めること");
             assertEquals("COMPLETED", jdbc.queryForObject("SELECT state FROM t_import_validation_run WHERE tenant_id=? AND job_id=? AND id=?",
                     String.class, TENANT, fixture.jobId, fixture.runId));
@@ -949,7 +995,11 @@ class ImportValidationSealRealMySqlTest {
         } finally {
             releaseFinalAcl.countDown();
             releaseW3dGate.countDown();
-            finishPool(pool, 15, primary);
+            Throwable cleanupFailure = finishW3dWorkers(w3dWorkers, pool, 15);
+            if (cleanupFailure != null) {
+                if (primary != null) primary.addSuppressed(cleanupFailure);
+                else throw new AssertionError("W3D 100k worker cleanupが失敗しました", cleanupFailure);
+            }
         }
     }
 
@@ -1420,6 +1470,7 @@ class ImportValidationSealRealMySqlTest {
     static final class TrackingTransactionManager extends DataSourceTransactionManager {
         private final AtomicReference<Long> lastConnectionId = new AtomicReference<>();
         private final ConcurrentHashMap<Long, Long> connectionIdsByThread = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<Long, W3dSessionSettings> w3dSessionSettingsByThread = new ConcurrentHashMap<>();
         private final ThreadLocal<Long> w3cStartNanos = new ThreadLocal<>();
         private final ThreadLocal<Long> w3dStartNanos = new ThreadLocal<>();
         private final AtomicReference<Long> lastW3cDurationMillis = new AtomicReference<>();
@@ -1467,10 +1518,14 @@ class ImportValidationSealRealMySqlTest {
                 } else if ("NF06-W3D-atomic-publish".equals(definition.getName())) {
                     w3dStartNanos.set(System.nanoTime());
                     try (Statement s = holder.getConnection().createStatement();
-                         ResultSet rs = s.executeQuery("SELECT CONNECTION_ID(),CURRENT_TIMESTAMP(6)")) {
+                         ResultSet rs = s.executeQuery("SELECT CONNECTION_ID(),CURRENT_TIMESTAMP(6),"
+                                 + "@@SESSION.lock_wait_timeout,@@SESSION.innodb_lock_wait_timeout,"
+                                 + "@@SESSION.transaction_isolation")) {
                         if (rs.next()) {
                             lastW3dConnectionId.set(rs.getLong(1));
                             lastW3dEntryDbTime.set(rs.getTimestamp(2));
+                            w3dSessionSettingsByThread.put(Thread.currentThread().getId(),
+                                    new W3dSessionSettings(rs.getLong(1), rs.getString(3), rs.getString(4), rs.getString(5)));
                         }
                     } catch (SQLException e) {
                         throw new RuntimeException("W3D atomic publish開始DB時刻の取得に失敗しました", e);
@@ -1517,6 +1572,11 @@ class ImportValidationSealRealMySqlTest {
 
         void clearConnectionIdForThread(long threadId) {
             connectionIdsByThread.remove(threadId);
+            w3dSessionSettingsByThread.remove(threadId);
+        }
+
+        W3dSessionSettings getW3dSessionSettingsForThread(long threadId) {
+            return w3dSessionSettingsByThread.get(threadId);
         }
 
         void reset() {
@@ -1527,6 +1587,7 @@ class ImportValidationSealRealMySqlTest {
             lastW3dDurationMillis.set(null);
             lastW3dEntryDbTime.set(null);
             lastW3dConnectionId.set(null);
+            w3dSessionSettingsByThread.clear();
         }
 
         Long getLastW3cDurationMillis() { return lastW3cDurationMillis.get(); }
@@ -1536,6 +1597,9 @@ class ImportValidationSealRealMySqlTest {
         Timestamp getLastW3dEntryDbTime() { return lastW3dEntryDbTime.get(); }
         Long getLastW3dConnectionId() { return lastW3dConnectionId.get(); }
     }
+
+    private record W3dSessionSettings(long connectionId, String lockWaitTimeout,
+                                      String innodbLockWaitTimeout, String transactionIsolation) { }
 
     private void awaitLockWait(TrackingTransactionManager trackingManager, long blockerPid, Future<?> workerFuture) throws Exception {
         awaitLockWait(trackingManager, blockerPid, workerFuture, trackingManager::getLastConnectionId);
@@ -1548,52 +1612,333 @@ class ImportValidationSealRealMySqlTest {
     }
 
     private W3dLockWait awaitW3dRecordLockWait(long blockerPid, long workerThreadId,
-                                               Future<?> workerFuture) throws Exception {
+                                               Future<?> workerFuture, AtomicReference<Boolean> outcomeObserved,
+                                               String targetSchema, String targetTable, String targetIndex,
+                                               List<String> lockKeyColumns, List<String> lockKeyValues,
+                                               String fixturePrimaryKeyColumn, String fixturePrimaryKeyValue,
+                                               W3dSessionSettings blockerSettings) throws Exception {
+        W3dLockTarget target = new W3dLockTarget(targetSchema, targetTable, targetIndex,
+                lockKeyColumns, lockKeyValues, fixturePrimaryKeyColumn, fixturePrimaryKeyValue);
         long deadline = System.currentTimeMillis() + 8_000;
         Long requesterPid = null;
-        Exception lastFailure = null;
         while (System.currentTimeMillis() < deadline) {
-            if (workerFuture.isDone()) fail("publish workerが実MySQL row lock waitに入る前に終了しました");
+            failIfW3dWorkerFinishedBeforeLockWait(workerFuture, outcomeObserved, target,
+                    requesterPid, blockerPid, workerThreadId, blockerSettings);
             requesterPid = trackingManager.getConnectionIdForThread(workerThreadId);
             if (requesterPid != null) {
+                List<W3dLockWait> waits;
                 try {
-                    List<W3dLockWait> waits = jdbc.query("""
-                            SELECT rt.PROCESSLIST_ID,bt.PROCESSLIST_ID,req.OBJECT_SCHEMA,req.OBJECT_NAME,req.INDEX_NAME,
-                              req.LOCK_TYPE,req.LOCK_MODE,req.LOCK_STATUS,req.LOCK_DATA,
-                              blk.OBJECT_SCHEMA,blk.OBJECT_NAME,blk.INDEX_NAME,blk.LOCK_TYPE,blk.LOCK_MODE,blk.LOCK_STATUS,blk.LOCK_DATA
-                            FROM performance_schema.data_lock_waits w
-                            JOIN performance_schema.threads rt ON rt.THREAD_ID=w.REQUESTING_THREAD_ID
-                            JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
-                            JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE
-                              AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
-                            JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE
-                              AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                            WHERE rt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
-                              AND req.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_SCHEMA=DATABASE()
-                              AND req.LOCK_TYPE='RECORD' AND req.LOCK_STATUS='WAITING'
-                              AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_STATUS='GRANTED'
-                            """, (rs, row) -> new W3dLockWait(rs.getLong(1), rs.getLong(2),
-                            rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6),
-                            rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10),
-                            rs.getString(11), rs.getString(12), rs.getString(13), rs.getString(14),
-                            rs.getString(15), rs.getString(16)), requesterPid, blockerPid);
-                    if (!waits.isEmpty()) return waits.get(0);
-                } catch (Exception failure) {
-                    lastFailure = failure;
+                    waits = queryW3dLockWaits(requesterPid, blockerPid);
+                } catch (RuntimeException sqlFailure) {
+                    attachW3dDiagnostics(sqlFailure, target, requesterPid, blockerPid,
+                            workerThreadId, blockerSettings);
+                    throw sqlFailure;
+                }
+                W3dLockWait matchingWait = waits.stream().filter(wait -> wait.matches(target)).findFirst().orElse(null);
+                if (matchingWait != null) {
+                    if (matchingWait.requester.lockData == null && matchingWait.blocker.lockData == null) {
+                        try {
+                            prewarmW3dFixtureRow(target);
+                            W3dLockWait resampled = queryW3dLockWaits(requesterPid, blockerPid).stream()
+                                    .filter(wait -> wait.matches(target)).findFirst().orElse(null);
+                            if (resampled == null) {
+                                AssertionError vanished = new AssertionError(
+                                        "fixture行prewarm後にW3D target wait edgeが消失しました: " + target);
+                                attachW3dDiagnostics(vanished, target, requesterPid, blockerPid,
+                                        workerThreadId, blockerSettings);
+                                throw vanished;
+                            }
+                            matchingWait = resampled;
+                        } catch (RuntimeException sqlFailure) {
+                            attachW3dDiagnostics(sqlFailure, target, requesterPid, blockerPid,
+                                    workerThreadId, blockerSettings);
+                            throw sqlFailure;
+                        }
+                    }
+                    try {
+                        assertW3dTargetLockWait(matchingWait, target);
+                    } catch (AssertionError identityFailure) {
+                        attachW3dDiagnostics(identityFailure, target, requesterPid, blockerPid,
+                                workerThreadId, blockerSettings);
+                        throw identityFailure;
+                    }
+                    return matchingWait;
                 }
             }
             Thread.sleep(30);
         }
-        fail("双端MySQL row lock wait未确认 requester=" + requesterPid + " blocker=" + blockerPid
-                + (lastFailure == null ? "" : " cause=" + lastFailure));
-        throw new AssertionError("unreachable");
+        AssertionError timeout = new AssertionError("8秒以内にW3D対象row lock waitを確認できませんでした requester="
+                + requesterPid + " blocker=" + blockerPid + " target=" + target);
+        attachW3dDiagnostics(timeout, target, requesterPid, blockerPid, workerThreadId, blockerSettings);
+        throw timeout;
     }
 
-    private record W3dLockWait(long requesterPid, long blockerPid, String requesterSchema,
-                               String requesterTable, String requesterIndex, String requesterType,
-                               String requesterMode, String requesterStatus, String requesterKey,
-                               String blockerSchema, String blockerTable, String blockerIndex,
-                               String blockerType, String blockerMode, String blockerStatus, String blockerKey) { }
+    private List<W3dLockWait> queryW3dLockWaits(long requesterPid, long blockerPid) {
+        return jdbc.query("""
+                SELECT w.ENGINE,w.REQUESTING_ENGINE_LOCK_ID,w.REQUESTING_ENGINE_TRANSACTION_ID,
+                  w.REQUESTING_THREAD_ID,rt.PROCESSLIST_ID,w.BLOCKING_ENGINE_LOCK_ID,
+                  w.BLOCKING_ENGINE_TRANSACTION_ID,w.BLOCKING_THREAD_ID,bt.PROCESSLIST_ID,
+                  req.ENGINE,req.ENGINE_LOCK_ID,req.ENGINE_TRANSACTION_ID,req.THREAD_ID,
+                  req.OBJECT_SCHEMA,req.OBJECT_NAME,req.INDEX_NAME,req.LOCK_TYPE,req.LOCK_MODE,req.LOCK_STATUS,req.LOCK_DATA,
+                  blk.ENGINE,blk.ENGINE_LOCK_ID,blk.ENGINE_TRANSACTION_ID,blk.THREAD_ID,
+                  blk.OBJECT_SCHEMA,blk.OBJECT_NAME,blk.INDEX_NAME,blk.LOCK_TYPE,blk.LOCK_MODE,blk.LOCK_STATUS,blk.LOCK_DATA
+                FROM performance_schema.data_lock_waits w
+                LEFT JOIN performance_schema.threads rt ON rt.THREAD_ID=w.REQUESTING_THREAD_ID
+                LEFT JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                LEFT JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE
+                  AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                LEFT JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE
+                  AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                WHERE rt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
+                """, (rs, row) -> new W3dLockWait(rs.getString(1), rs.getString(2), rs.getString(3),
+                rs.getLong(4), rs.getLong(5), rs.getString(6), rs.getString(7), rs.getLong(8), rs.getLong(9),
+                readW3dLockEndpoint(rs, 10), readW3dLockEndpoint(rs, 21)), requesterPid, blockerPid);
+    }
+
+    private static W3dLockEndpoint readW3dLockEndpoint(ResultSet rs, int offset) throws SQLException {
+        return new W3dLockEndpoint(rs.getString(offset), rs.getString(offset + 1), rs.getString(offset + 2),
+                rs.getLong(offset + 3), rs.getString(offset + 4), rs.getString(offset + 5),
+                rs.getString(offset + 6), rs.getString(offset + 7), rs.getString(offset + 8),
+                rs.getString(offset + 9), rs.getString(offset + 10));
+    }
+
+    private static W3dSessionSettings readW3dSessionSettings(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement(); ResultSet rs = statement.executeQuery("""
+                SELECT CONNECTION_ID(),@@SESSION.lock_wait_timeout,@@SESSION.innodb_lock_wait_timeout,
+                  @@SESSION.transaction_isolation
+                """)) {
+            if (!rs.next()) throw new SQLException("W3D blocker session settingsを取得できませんでした");
+            return new W3dSessionSettings(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4));
+        }
+    }
+
+    private void prewarmW3dFixtureRow(W3dLockTarget target) {
+        String sql = "SELECT 1 FROM `" + target.schema + "`.`" + target.table + "` WHERE `"
+                + target.fixturePrimaryKeyColumn + "`=?";
+        Integer found = jdbc.queryForObject(sql, Integer.class, target.fixturePrimaryKeyValue);
+        if (!Objects.equals(found, 1)) {
+            throw new IllegalStateException("W3D lock key再採取前にfixture主キー行が見つかりません: " + target);
+        }
+    }
+
+    private static void assertW3dTargetLockWait(W3dLockWait wait, W3dLockTarget target) {
+        assertTrue(wait.requesterPid > 0 && wait.blockerPid > 0, "wait edge両端のMySQL connection IDを特定する");
+        assertNotNull(wait.requesterEngineLockId);
+        assertNotNull(wait.blockerEngineLockId);
+        assertTrue(wait.requesterThreadId > 0 && wait.blockerThreadId > 0, "wait edge両端のP_S THREAD_IDを特定する");
+        assertNotNull(wait.requesterTransactionId);
+        assertNotNull(wait.blockerTransactionId);
+        assertEquals(wait.engine, wait.requester.engine);
+        assertEquals(wait.engine, wait.blocker.engine);
+        assertEquals(wait.requesterEngineLockId, wait.requester.engineLockId);
+        assertEquals(wait.blockerEngineLockId, wait.blocker.engineLockId);
+        assertEquals(wait.requesterTransactionId, wait.requester.engineTransactionId);
+        assertEquals(wait.blockerTransactionId, wait.blocker.engineTransactionId);
+        assertEquals(wait.requesterThreadId, wait.requester.threadId);
+        assertEquals(wait.blockerThreadId, wait.blocker.threadId);
+        assertEquals(target.schema, wait.requester.schema);
+        assertEquals(target.schema, wait.blocker.schema);
+        assertEquals(target.table, wait.requester.table);
+        assertEquals(target.table, wait.blocker.table);
+        assertEquals(target.index, wait.requester.index);
+        assertEquals(target.index, wait.blocker.index);
+        assertEquals("RECORD", wait.requester.lockType);
+        assertEquals("WAITING", wait.requester.lockStatus);
+        assertTrue(Set.of("X", "X,REC_NOT_GAP").contains(wait.requester.lockMode),
+                "requesterはgap-only/insert-intentionでないX record lockであること: " + wait.requester);
+        assertEquals("RECORD", wait.blocker.lockType);
+        assertEquals("GRANTED", wait.blocker.lockStatus);
+        assertTrue(Set.of("X", "X,REC_NOT_GAP").contains(wait.blocker.lockMode),
+                "blockerはgap-only/insert-intentionでないX record lockであること: " + wait.blocker);
+        String fixtureLockData = java.util.stream.IntStream.range(0, target.lockKeyColumns.size())
+                .mapToObj(index -> formatW3dLockDataValue(target.lockKeyColumns.get(index),
+                        target.lockKeyValues.get(index)))
+                .collect(java.util.stream.Collectors.joining(", "));
+        if (wait.requester.lockData != null) {
+            assertEquals(fixtureLockData, wait.requester.lockData, "requester LOCK_DATAはfixture primary keyと一致");
+        }
+        if (wait.blocker.lockData != null) {
+            assertEquals(fixtureLockData, wait.blocker.lockData, "blocker LOCK_DATAはfixture primary keyと一致");
+        }
+        assertTrue(wait.requester.lockData != null || wait.blocker.lockData != null,
+                "LOCK_DATA両端NULLはfixture行prewarmと再採取後も許容しない");
+    }
+
+    private static String formatW3dLockDataValue(String column, String value) {
+        if ("id".equals(column) || value.matches("-?[0-9]+")) return value;
+        return "'" + value.replace("'", "''") + "'";
+    }
+
+    private void failIfW3dWorkerFinishedBeforeLockWait(Future<?> workerFuture,
+                                                        AtomicReference<Boolean> outcomeObserved,
+                                                        W3dLockTarget target, Long requesterPid, long blockerPid,
+                                                        long workerThreadId, W3dSessionSettings blockerSettings) throws Exception {
+        if (!workerFuture.isDone()) return;
+        outcomeObserved.set(true);
+        AssertionError failure;
+        try {
+            Object result = workerFuture.get();
+            failure = new AssertionError("W3D workerはtarget lock wait観測前に正常終了しました result=" + result);
+        } catch (ExecutionException workerFailure) {
+            failure = new AssertionError("W3D workerはtarget lock wait観測前に例外終了しました",
+                    workerFailure.getCause());
+        } catch (CancellationException cancelled) {
+            failure = new AssertionError("W3D workerはtarget lock wait観測前にcancelされました", cancelled);
+        }
+        attachW3dDiagnostics(failure, target, requesterPid, blockerPid, workerThreadId, blockerSettings);
+        throw failure;
+    }
+
+    private void attachW3dDiagnostics(Throwable primary, W3dLockTarget target, Long requesterPid,
+                                      long blockerPid, long workerThreadId,
+                                      W3dSessionSettings blockerSettings) {
+        Long observedRequesterPid = requesterPid != null ? requesterPid
+                : trackingManager.getConnectionIdForThread(workerThreadId);
+        List<W3dLockWait> edges = List.of();
+        StringBuilder diagnostics = new StringBuilder("W3D lock observation\n")
+                .append("target=").append(target)
+                .append(" requesterJvmThread=").append(workerThreadId)
+                .append(" requesterConnectionId=").append(observedRequesterPid)
+                .append(" blockerConnectionId=").append(blockerPid)
+                .append(" requesterSession=").append(trackingManager.getW3dSessionSettingsForThread(workerThreadId))
+                .append(" blockerSession=").append(blockerSettings).append('\n');
+        if (observedRequesterPid == null) {
+            diagnostics.append("classification=worker DB connection未確認（target操作到達前の可能性）\n");
+        } else {
+            try {
+                edges = queryW3dLockWaits(observedRequesterPid, blockerPid);
+            } catch (Throwable diagnosticFailure) {
+                primary.addSuppressed(new AssertionError("data_lock_waits edge diagnostics取得失敗", diagnosticFailure));
+            }
+            if (!edges.isEmpty() && edges.stream().anyMatch(wait -> wait.requester.schema == null || wait.blocker.schema == null)) {
+                    diagnostics.append("classification=wait edgeあり、data_locks endpoint取得欠落\n");
+            } else if (!edges.isEmpty() && edges.stream().noneMatch(wait -> wait.matches(target))) {
+                diagnostics.append("classification=wait edgeあり、endpointが期待target schema/table/indexと不一致\n");
+            } else if (!edges.isEmpty()) {
+                diagnostics.append("classification=target edgeあり、lock status/mode/identityの詳細を確認\n");
+            } else {
+                try {
+                    Map<String, Object> requesterProcess = jdbc.queryForMap("""
+                            SELECT PROCESSLIST_STATE,PROCESSLIST_INFO FROM performance_schema.threads
+                            WHERE PROCESSLIST_ID=?
+                            """, observedRequesterPid);
+                    String currentSql = Objects.toString(requesterProcess.get("PROCESSLIST_INFO"), "");
+                    boolean targetSqlActive = currentSql.toLowerCase(java.util.Locale.ROOT)
+                            .contains(target.table.toLowerCase(java.util.Locale.ROOT));
+                    diagnostics.append("requesterCurrentProcess=").append(requesterProcess)
+                            .append(" targetSqlActive=").append(targetSqlActive).append('\n')
+                            .append(targetSqlActive
+                                    ? "classification=対象table SQLは実行中だが両端connection間のwait edgeなし\n"
+                                    : "classification=worker connection確認済み、target table SQLは未観測（先行lock/check中の可能性）かつwait edgeなし\n");
+                } catch (Throwable diagnosticFailure) {
+                    primary.addSuppressed(new AssertionError("requester processlist diagnostics取得失敗", diagnosticFailure));
+                    diagnostics.append("classification=worker connection確認済み、data_lock_waits edgeなし、現在SQL不明\n");
+                }
+            }
+            diagnostics.append("requesterToBlockerEdges=").append(edges).append('\n');
+        }
+        appendW3dDiagnosticQuery(primary, diagnostics, "targetDataLocks", () -> jdbc.queryForList("""
+                SELECT l.ENGINE,l.ENGINE_LOCK_ID,l.ENGINE_TRANSACTION_ID,l.THREAD_ID,l.EVENT_ID,
+                  l.OBJECT_SCHEMA,l.OBJECT_NAME,l.INDEX_NAME,l.LOCK_TYPE,l.LOCK_MODE,l.LOCK_STATUS,l.LOCK_DATA
+                FROM performance_schema.data_locks l
+                WHERE l.OBJECT_SCHEMA=? AND l.OBJECT_NAME=? AND l.INDEX_NAME=?
+                  AND l.THREAD_ID IN (SELECT t.THREAD_ID FROM performance_schema.threads t
+                                      WHERE t.PROCESSLIST_ID IN (?,?))
+                ORDER BY l.THREAD_ID,l.INDEX_NAME,l.ENGINE_LOCK_ID
+                """, target.schema, target.table, target.index, observedRequesterPid, blockerPid));
+        appendW3dDiagnosticQuery(primary, diagnostics, "relatedDataLockWaits", () -> jdbc.queryForList("""
+                SELECT w.ENGINE,w.REQUESTING_ENGINE_LOCK_ID,w.REQUESTING_ENGINE_TRANSACTION_ID,
+                  w.REQUESTING_THREAD_ID,rt.PROCESSLIST_ID AS REQUESTER_PID,
+                  w.BLOCKING_ENGINE_LOCK_ID,w.BLOCKING_ENGINE_TRANSACTION_ID,w.BLOCKING_THREAD_ID,
+                  bt.PROCESSLIST_ID AS BLOCKER_PID,
+                  req.OBJECT_SCHEMA AS REQUESTER_SCHEMA,req.OBJECT_NAME AS REQUESTER_TABLE,
+                  req.INDEX_NAME AS REQUESTER_INDEX,req.LOCK_TYPE AS REQUESTER_TYPE,
+                  req.LOCK_MODE AS REQUESTER_MODE,req.LOCK_STATUS AS REQUESTER_STATUS,req.LOCK_DATA AS REQUESTER_DATA,
+                  blk.OBJECT_SCHEMA AS BLOCKER_SCHEMA,blk.OBJECT_NAME AS BLOCKER_TABLE,
+                  blk.INDEX_NAME AS BLOCKER_INDEX,blk.LOCK_TYPE AS BLOCKER_TYPE,
+                  blk.LOCK_MODE AS BLOCKER_MODE,blk.LOCK_STATUS AS BLOCKER_STATUS,blk.LOCK_DATA AS BLOCKER_DATA
+                FROM performance_schema.data_lock_waits w
+                LEFT JOIN performance_schema.threads rt ON rt.THREAD_ID=w.REQUESTING_THREAD_ID
+                LEFT JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                LEFT JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE
+                  AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                LEFT JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE
+                  AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                WHERE rt.PROCESSLIST_ID IN (?,?) OR bt.PROCESSLIST_ID IN (?,?)
+                ORDER BY w.REQUESTING_THREAD_ID,w.BLOCKING_THREAD_ID
+                """, observedRequesterPid, blockerPid, observedRequesterPid, blockerPid));
+        appendW3dDiagnosticQuery(primary, diagnostics, "targetFilteredDataLockWaits", () -> jdbc.queryForList("""
+                SELECT w.ENGINE,w.REQUESTING_ENGINE_LOCK_ID,w.REQUESTING_ENGINE_TRANSACTION_ID,
+                  w.REQUESTING_THREAD_ID,rt.PROCESSLIST_ID AS REQUESTER_PID,
+                  w.BLOCKING_ENGINE_LOCK_ID,w.BLOCKING_ENGINE_TRANSACTION_ID,w.BLOCKING_THREAD_ID,
+                  bt.PROCESSLIST_ID AS BLOCKER_PID,
+                  req.OBJECT_SCHEMA AS REQUESTER_SCHEMA,req.OBJECT_NAME AS REQUESTER_TABLE,
+                  req.INDEX_NAME AS REQUESTER_INDEX,req.LOCK_TYPE AS REQUESTER_TYPE,
+                  req.LOCK_MODE AS REQUESTER_MODE,req.LOCK_STATUS AS REQUESTER_STATUS,req.LOCK_DATA AS REQUESTER_DATA,
+                  blk.OBJECT_SCHEMA AS BLOCKER_SCHEMA,blk.OBJECT_NAME AS BLOCKER_TABLE,
+                  blk.INDEX_NAME AS BLOCKER_INDEX,blk.LOCK_TYPE AS BLOCKER_TYPE,
+                  blk.LOCK_MODE AS BLOCKER_MODE,blk.LOCK_STATUS AS BLOCKER_STATUS,blk.LOCK_DATA AS BLOCKER_DATA
+                FROM performance_schema.data_lock_waits w
+                LEFT JOIN performance_schema.threads rt ON rt.THREAD_ID=w.REQUESTING_THREAD_ID
+                LEFT JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                LEFT JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE
+                  AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                LEFT JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE
+                  AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                WHERE (rt.PROCESSLIST_ID IN (?,?) OR bt.PROCESSLIST_ID IN (?,?))
+                  AND ((req.OBJECT_SCHEMA=? AND req.OBJECT_NAME=? AND req.INDEX_NAME=?)
+                    OR (blk.OBJECT_SCHEMA=? AND blk.OBJECT_NAME=? AND blk.INDEX_NAME=?))
+                ORDER BY w.REQUESTING_THREAD_ID,w.BLOCKING_THREAD_ID
+                """, observedRequesterPid, blockerPid, observedRequesterPid, blockerPid,
+                target.schema, target.table, target.index, target.schema, target.table, target.index));
+        appendW3dDiagnosticQuery(primary, diagnostics, "innodbTrx", () -> jdbc.queryForList("""
+                SELECT trx_id,trx_state,trx_started,trx_wait_started,trx_mysql_thread_id,
+                  trx_query,trx_operation_state,trx_rows_locked,trx_rows_modified
+                FROM information_schema.innodb_trx WHERE trx_mysql_thread_id IN (?,?)
+                """, observedRequesterPid, blockerPid));
+        appendW3dDiagnosticQuery(primary, diagnostics, "processlist", () -> jdbc.queryForList("""
+                SELECT THREAD_ID,PROCESSLIST_ID,PROCESSLIST_USER,PROCESSLIST_HOST,PROCESSLIST_DB,
+                  PROCESSLIST_COMMAND,PROCESSLIST_TIME,PROCESSLIST_STATE,PROCESSLIST_INFO
+                FROM performance_schema.threads WHERE PROCESSLIST_ID IN (?,?)
+                """, observedRequesterPid, blockerPid));
+        appendW3dDiagnosticQuery(primary, diagnostics, "performanceSchema", () -> jdbc.queryForList(
+                "SHOW VARIABLES LIKE 'performance_schema'"));
+        appendW3dDiagnosticQuery(primary, diagnostics, "performanceSchemaConsumers", () -> jdbc.queryForList(
+                "SELECT NAME,ENABLED FROM performance_schema.setup_consumers WHERE NAME LIKE '%wait%'"));
+        appendW3dDiagnosticQuery(primary, diagnostics, "performanceSchemaLockInstruments", () -> jdbc.queryForList(
+                "SELECT NAME,ENABLED,TIMED FROM performance_schema.setup_instruments "
+                        + "WHERE NAME LIKE 'wait/lock/%' OR NAME LIKE 'wait/synch/%' LIMIT 40"));
+        primary.addSuppressed(new AssertionError(diagnostics.toString()));
+    }
+
+    private static void appendW3dDiagnosticQuery(Throwable primary, StringBuilder diagnostics,
+                                                 String label, Supplier<List<Map<String, Object>>> query) {
+        try {
+            diagnostics.append(label).append('=').append(query.get()).append('\n');
+        } catch (Throwable diagnosticFailure) {
+            primary.addSuppressed(new AssertionError(label + "診断取得失敗", diagnosticFailure));
+        }
+    }
+
+    private record W3dLockTarget(String schema, String table, String index,
+                                 List<String> lockKeyColumns, List<String> lockKeyValues,
+                                 String fixturePrimaryKeyColumn, String fixturePrimaryKeyValue) { }
+
+    private record W3dLockEndpoint(String engine, String engineLockId, String engineTransactionId,
+                                   long threadId, String schema, String table, String index,
+                                   String lockType, String lockMode, String lockStatus, String lockData) { }
+
+    private record W3dLockWait(String engine, String requesterEngineLockId, String requesterTransactionId,
+                               long requesterThreadId, long requesterPid, String blockerEngineLockId,
+                               String blockerTransactionId, long blockerThreadId, long blockerPid,
+                               W3dLockEndpoint requester, W3dLockEndpoint blocker) {
+        private boolean matches(W3dLockTarget target) {
+            return Objects.equals(engine, requester.engine) && Objects.equals(engine, blocker.engine)
+                    && Objects.equals(target.schema, requester.schema) && Objects.equals(target.schema, blocker.schema)
+                    && Objects.equals(target.table, requester.table) && Objects.equals(target.table, blocker.table)
+                    && Objects.equals(target.index, requester.index) && Objects.equals(target.index, blocker.index);
+        }
+    }
 
     private void awaitLockWait(TrackingTransactionManager trackingManager, long blockerPid,
                                Future<?> workerFuture, Supplier<Long> requesterConnection) throws Exception {
@@ -1681,6 +2026,76 @@ class ImportValidationSealRealMySqlTest {
             else throw cleanup;
         }
     }
+
+    private static Throwable harvestW3dWorker(String label, Future<?> worker, boolean outcomeObserved,
+                                              long timeoutSeconds, Throwable cleanupFailure) {
+        if (worker == null || outcomeObserved) return cleanupFailure;
+        try {
+            worker.get(timeoutSeconds, TimeUnit.SECONDS);
+        } catch (ExecutionException workerFailure) {
+            cleanupFailure = collectW3dCleanupFailure(cleanupFailure,
+                    new AssertionError("W3D worker cleanup harvestで例外終了しました: " + label, workerFailure.getCause()));
+        } catch (TimeoutException timedOut) {
+            cleanupFailure = collectW3dCleanupFailure(cleanupFailure,
+                    new AssertionError("holder解放後もW3D workerがcleanup期限内に終了しませんでした: " + label, timedOut));
+        } catch (CancellationException cancelled) {
+            cleanupFailure = collectW3dCleanupFailure(cleanupFailure,
+                    new AssertionError("W3D workerがcleanup前にcancelされました: " + label, cancelled));
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            cleanupFailure = collectW3dCleanupFailure(cleanupFailure,
+                    new AssertionError("W3D worker harvestが中断されました: " + label, interrupted));
+        }
+        return cleanupFailure;
+    }
+
+    private static <T> T awaitW3dWorkerResult(Future<T> worker, AtomicReference<Boolean> outcomeObserved,
+                                              long timeoutSeconds)
+            throws InterruptedException, ExecutionException, TimeoutException {
+        try {
+            return worker.get(timeoutSeconds, TimeUnit.SECONDS);
+        } finally {
+            if (worker.isDone()) outcomeObserved.set(true);
+        }
+    }
+
+    private static Throwable finishW3dWorkers(List<W3dWorker> workers, ExecutorService pool,
+                                              long timeoutSeconds) {
+        Throwable cleanupFailure = null;
+        for (W3dWorker worker : workers) {
+            cleanupFailure = harvestW3dWorker(worker.label, worker.future, worker.outcomeObserved.get(),
+                    timeoutSeconds, cleanupFailure);
+        }
+        return shutdownW3dPool(pool, timeoutSeconds, cleanupFailure);
+    }
+
+    private static Throwable shutdownW3dPool(ExecutorService pool, long timeoutSeconds,
+                                              Throwable cleanupFailure) {
+        pool.shutdown();
+        try {
+            if (!pool.awaitTermination(timeoutSeconds, TimeUnit.SECONDS)) {
+                pool.shutdownNow();
+                if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    cleanupFailure = collectW3dCleanupFailure(cleanupFailure,
+                            new AssertionError("W3D executorが制限時間内に停止しませんでした"));
+                }
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            pool.shutdownNow();
+            cleanupFailure = collectW3dCleanupFailure(cleanupFailure,
+                    new AssertionError("W3D executor停止待機が中断されました", interrupted));
+        }
+        return cleanupFailure;
+    }
+
+    private static Throwable collectW3dCleanupFailure(Throwable current, Throwable next) {
+        if (current == null) return next;
+        current.addSuppressed(next);
+        return current;
+    }
+
+    private record W3dWorker(String label, Future<?> future, AtomicReference<Boolean> outcomeObserved) { }
 
     private ImportValidationAppendService.SealCapability reflectedCapabilityWithExpiry(
             ImportValidationAppendService.SealCapability base, Timestamp newExpiry) {
