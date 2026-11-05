@@ -54,12 +54,12 @@ class ImportValidationResolverRealMySqlTest {
         jdbc.update("DELETE FROM t_document_version");
         jdbc.update("DELETE FROM t_document");
         jdbc.update("DELETE FROM t_import_source_system");
-        jdbc.update("DELETE FROM m_customer");
-        jdbc.update("DELETE FROM t_engineer");
         jdbc.update("DELETE FROM t_project_position");
         jdbc.update("DELETE FROM t_project");
-        jdbc.update("DELETE FROM m_organization_unit");
+        jdbc.update("DELETE FROM t_engineer");
         jdbc.update("DELETE FROM m_cost_center");
+        jdbc.update("DELETE FROM m_organization_unit");
+        jdbc.update("DELETE FROM m_customer");
         jdbc.update("INSERT INTO m_customer(id,legal_entity_id,company_name,deleted_flag) VALUES(1,77,'SYNTH-CUSTOMER-1',0),(2,77,'SYNTH-CUSTOMER-DEL',1),(3,88,'SYNTH-CUSTOMER-OTHER',0),(4,77,'SYNTH-CUSTOMER-DUP',0),(5,77,'SYNTH-CUSTOMER-DUP',0)");
         jdbc.update("INSERT INTO t_engineer(id,legal_entity_id,full_name,deleted_flag) VALUES(1,77,'SYNTH-ENGINEER-1',0)");
         jdbc.update("INSERT INTO t_project(id,legal_entity_id,project_name,customer_id,deleted_flag) VALUES(1,77,'SYNTH-PROJECT-1',1,0),(2,88,'SYNTH-PROJECT-OTHER',1,0)");
@@ -203,9 +203,10 @@ class ImportValidationResolverRealMySqlTest {
         } catch (Exception failure) { throw new IllegalStateException("synthetic row snapshot failed", failure); }
     }
 
+    /** V1/V60で使うlookup列だけを切り出した破棄可能なMySQL fixture。Flyway互換性gateではない。 */
     private static void createSyntheticTargetSchema(JdbcTemplate j) {
         j.execute("CREATE TABLE IF NOT EXISTS m_customer(id BIGINT PRIMARY KEY,legal_entity_id BIGINT,company_name VARCHAR(200),deleted_flag TINYINT DEFAULT 0)");
-        j.execute("CREATE TABLE IF NOT EXISTS t_engineer(id BIGINT PRIMARY KEY,legal_entity_id BIGINT,full_name VARCHAR(100),deleted_flag TINYINT DEFAULT 0)");
+        j.execute("CREATE TABLE IF NOT EXISTS t_engineer(id BIGINT PRIMARY KEY,legal_entity_id BIGINT,full_name VARCHAR(100),employment_type VARCHAR(20),status VARCHAR(20),deleted_flag TINYINT DEFAULT 0)");
         j.execute("CREATE TABLE IF NOT EXISTS t_project(id BIGINT PRIMARY KEY,legal_entity_id BIGINT,project_name VARCHAR(200),customer_id BIGINT,deleted_flag TINYINT DEFAULT 0)");
         j.execute("CREATE TABLE IF NOT EXISTS t_project_position(id BIGINT PRIMARY KEY,project_id BIGINT,role_name VARCHAR(200),version INT,deleted_flag TINYINT DEFAULT 0)");
         j.execute("CREATE TABLE IF NOT EXISTS m_organization_unit(id BIGINT PRIMARY KEY,tenant_id BIGINT NULL,legal_entity_id BIGINT,code VARCHAR(50),name VARCHAR(200),type VARCHAR(20),valid_from DATE,valid_to DATE,status VARCHAR(20),version INT,deleted_flag TINYINT DEFAULT 0)");
