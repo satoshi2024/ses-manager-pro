@@ -25,8 +25,8 @@
 ### 3.1 Resolver seam
 
 - 変更: `metadata/ImportValidationAppendService.java`。
-- package-private constructorを追加し、既存pipelineと`ReadOnlyImportResolver`を受け取る。test seamから`ValidationContext`へ渡す。
-- `@Autowired` constructorは既存fail-closed resolverを維持する。production profile、API、UIからresolver選択やalias catalogを渡せるbean/entrypointを作らない。
+- field `validationResolver`を追加し、package-private constructorで既存pipelineと`ReadOnlyImportResolver`を同一instanceとして受け取る。`appendRemainingWithSealCapability(...)`と`recountSealed(...)`の両方で、この同じfieldからそれぞれの`ValidationContext`を構築する。
+- test constructor以外の`@Autowired` constructorは既存fail-closed resolverを設定する。両context構築箇所の一方だけを差替える実装は禁止し、production profile、API、UIからresolver選択やalias catalogを渡せるbean/entrypointを作らない。
 - scopeはappend snapshotの`ImportAuthorizedContext`から導出する。resolverはtenant/legalEntityを固定し、呼出引数のscopeが異なればOUT_OF_SCOPEでfail-closed。
 
 ### 3.2 Test-only synthetic resolver
@@ -76,15 +76,19 @@ keyはbinary exact matchとし、同名複数はAMBIGUOUSにする。nullable le
 - test更新: `src/test/java/com/ses/importcenter/foundation/ImportValidationServiceTest.java` と既存pipeline/counter testsは既存pure contractを維持。必要なcontext-construction helperのみ追加する。
 - MySQL test classは`@Tag("mysql")`を付け、`scripts/test-suites/mysql-shard-3.txt`とinventoryへ一度だけ登録する。H2のテストは既存fast gate内に置く。
 - H2/service: 5 entity positive/negative、optional/required reference、tenant/legalEntity mismatch、missing/deleted/multiple、project-customer・position-project mismatch、catalog/target矛盾、unmapped/unknown fail-closed。
-- MySQL: 実V1/V157 schemaでSELECT結果のid/deleted/legalEntity/relationKeysを検証。resolver SQL recorderでSELECT-onlyを確認する。
-- no-write証拠: validation前後のCUSTOMER/ENGINEER/PROJECT/PROPOSAL/CONTRACTとOrganization/CostCenter/Position参照行の全行snapshot hashを比較し不変を確認。`t_import_identity_registry`を含むmetadata binding表も不変、sequence state/最大ID不変、write mapper/service spyは0回を確認する。
+- 実service経路: required referenceを持つsynthetic positiveを`appendRemainingWithSealCapability` → `lifecycle.seal` → `recountSealed`まで実行する。append後とrecount後のresolver callを同一instanceで記録し、recountがUNKNOWNにならないことを確認する。保存rowのfinding codes/counters/row commitmentはseal前後・recount前後で一致させる。`@Autowired` default constructorのfail-closed回帰も別caseで確認する。
+- MySQL: 実V1/V157 schemaでSELECT結果のid/deleted/legalEntity/relationKeysを検証。SELECT-only recorderはresolver発行SQLだけを対象にし、append/seal/recount全体のmetadata SQLをread-onlyと誤認しない。
+- no-write境界は`execution-contract.md` §4（`validate` metadata allowlist）に従う。許可されるmetadata writeは`t_import_job`のstate/source hash/actor/time/lease/version、`t_import_validation_run`のrun metadata/hash/counters、`t_import_validation_row`のrow番号/hash/fingerprint/finding codes。`t_import_mapping`は本sliceではread-only。
+- 禁止writeの証拠: CUSTOMER/ENGINEER/PROJECT/PROPOSAL/CONTRACTおよび参照するOrganization/CostCenter/Positionのrow snapshot hash、業務sequence状態とbusiness-table max ID、`t_import_identity_registry`/binding、id-map/checkpoint、domain history/audit、document linkageは不変。id-map/checkpoint schemaが未導入ならその不在と該当SQL/write callが0であることを確認する。domain write mapper/service spyは0回。
+- lifecycleが許可metadata row/runをinsertし、job lease/versionを更新すること、およびそのmetadata auto-increment IDが増えることはno-write違反に数えない。resolver SQL recorderはresolver自身のSELECT-onlyだけを判定する。
 - test dataは専用MySQL fixture内で生成・cleanupし、既存本番/共有データを参照しない。H2をMySQL dialect/ACL proofとして扱わない。
 
 ## 6. Demoと受入
 
 - 合成CSVを既存pipelineへ渡し、5 entity別のcanonical row、source row hash、finding code、counterを表示する。
 - missing/deleted/ambiguous/out-of-scopeとrelation mismatchを一件ずつ再現し、未知aliasはclosed findingになることを示す。
-- Domain/sequence/registry/id-mapのbefore/after hashが全一致、write spy 0回、resolver SQLがSELECT-onlyである証拠をReview packetへ添付する。
+- `appendRemainingWithSealCapability` → `lifecycle.seal` → `recountSealed`のsynthetic positiveでresolverが両scan段階に同じinstanceとして使われ、finding/counter/row commitmentが一致する証拠を示す。
+- 許可metadata allowlistの書込みを別掲し、それ以外のbusiness table/sequence/registry/id-map/history/audit/document linkageのbefore/after hash・max ID不変、domain write spy 0回を示す。resolver SQLのみSELECT-onlyである証拠を添付する。
 - H2/MySQL対象のreport、固定開始/終了SHA、clean status、shard inventory差分、Demo artifactをAstraへ渡す。未実行・skipありはPASSとしない。
 
 ## 7. 明示的対象外・前提差
