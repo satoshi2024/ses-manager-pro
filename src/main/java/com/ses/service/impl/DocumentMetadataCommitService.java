@@ -11,10 +11,13 @@ import com.ses.mapper.DocumentHashClaimMapper;
 import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
+import com.ses.service.storage.DocumentStorage;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 
@@ -30,17 +33,20 @@ public class DocumentMetadataCommitService {
     private final DocumentLinkMapper documentLinkMapper;
     private final DocumentAccessLogMapper documentAccessLogMapper;
     private final DocumentHashClaimMapper documentHashClaimMapper;
+    private final DocumentStorage documentStorage;
 
     public DocumentMetadataCommitService(DocumentMapper documentMapper,
                                          DocumentVersionMapper documentVersionMapper,
                                          DocumentLinkMapper documentLinkMapper,
                                          DocumentAccessLogMapper documentAccessLogMapper,
-                                         DocumentHashClaimMapper documentHashClaimMapper) {
+                                         DocumentHashClaimMapper documentHashClaimMapper,
+                                         DocumentStorage documentStorage) {
         this.documentMapper = documentMapper;
         this.documentVersionMapper = documentVersionMapper;
         this.documentLinkMapper = documentLinkMapper;
         this.documentAccessLogMapper = documentAccessLogMapper;
         this.documentHashClaimMapper = documentHashClaimMapper;
+        this.documentStorage = documentStorage;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
@@ -58,6 +64,46 @@ public class DocumentMetadataCommitService {
         link(document.getTenantId(), document.getId(), targetType, targetId);
         recordAccess(document.getId(), version.getId(), "REGISTER");
         return document;
+    }
+
+    /** raw importだけに使用するsame-transaction metadata insert。一般文書登録経路は変更しない。 */
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
+    public Document commitImportDocument(StagedImportDocument staged) {
+        if (staged == null || staged.document() == null || staged.version() == null
+                || staged.storageKey() == null || !staged.storageKey().equals(staged.version().getStorageKey())
+                || !"IMPORT".equals(staged.document().getDocumentType())
+                || !"CLEAN".equals(staged.version().getScanStatus())
+                || staged.document().getId() != null || staged.version().getId() != null
+                || staged.version().getSizeBytes() == null || staged.version().getSizeBytes() > 64L * 1024 * 1024
+                || staged.version().getSha256() == null || !staged.version().getSha256().matches("[0-9a-f]{64}")) {
+            throw BusinessException.of(400, "error.import.invalidStagedDocument");
+        }
+        registerImportStorageRollback(staged.storageKey());
+        documentMapper.insert(staged.document());
+        staged.version().setDocumentId(staged.document().getId());
+        documentVersionMapper.insert(staged.version());
+        recordAccess(staged.document().getId(), staged.version().getId(), "REGISTER");
+        return staged.document();
+    }
+
+    private void registerImportStorageRollback(String storageKey) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException("import metadata commit requires transaction synchronization");
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                    try {
+                        documentStorage.delete(storageKey);
+                    } catch (Exception failure) {
+                        org.slf4j.LoggerFactory.getLogger(DocumentMetadataCommitService.class)
+                                .error("[文書台帳] import rollback補償削除失敗: storageKey={} exceptionClass={}",
+                                        storageKey, failure.getClass().getSimpleName());
+                    }
+                }
+            }
+        });
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)

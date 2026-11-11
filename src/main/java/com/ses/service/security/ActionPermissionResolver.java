@@ -151,6 +151,15 @@ public final class ActionPermissionResolver {
         if (root.isBlank()) {
             return null;
         }
+        if ("import-center".equals(root)) {
+            if ("POST".equals(method) && "/api/import-center/uploads".equals(uri)) {
+                return "import.metadata.manage";
+            }
+            if ("GET".equals(method) && uri.matches("/api/import-center/jobs/[0-9]+")) {
+                return "import.metadata.manage";
+            }
+            return null;
+        }
         String resource = RESOURCE_NAMES.get(root);
         if (resource == null) {
             return null;

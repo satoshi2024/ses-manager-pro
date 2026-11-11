@@ -111,6 +111,90 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         return doRegister(request, content);
     }
 
+    @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
+    public StagedImportDocument stageReceivedForImport(DocumentRegisterRequest request, Path boundedTempFile,
+                                                       long expectedSizeBytes, String expectedSha256) {
+        if (request == null || boundedTempFile == null || expectedSizeBytes < 1
+                || expectedSizeBytes > 64L * 1024 * 1024 || expectedSha256 == null
+                || !expectedSha256.matches("[0-9a-f]{64}")) {
+            throw BusinessException.of(400, "error.document.invalidRequest");
+        }
+        if (!"IMPORT".equals(request.getDocumentType()) || !"text/csv".equals(request.getContentType())
+                || !"RECEIVED".equals(request.getSourceType())) {
+            throw BusinessException.of(400, "error.document.invalidType");
+        }
+        String tenantId = currentTenant(request);
+        Long legalEntityId = request.getLegalEntityId();
+        if (legalEntityId == null || legalEntityContextService == null
+                || legalEntityContextService.requireCurrentLegalEntityId() != legalEntityId) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        validateDocumentType(request.getDocumentType(), "INCOMING");
+        try {
+            if (Files.size(boundedTempFile) != expectedSizeBytes
+                    || !expectedSha256.equals(sha256File(boundedTempFile))) {
+                throw BusinessException.of(409, "error.import.sourceHashMismatch");
+            }
+        } catch (java.io.IOException failure) {
+            throw BusinessException.of(400, "error.file.scanRejected");
+        }
+        FileScanner scanner = fileScannerProvider.getIfAvailable();
+        FileScanResult scan;
+        try {
+            scan = scanner == null ? FileScanResult.unavailable("scanner is not configured")
+                    : scanner.scan(boundedTempFile, com.ses.common.enums.FileKind.IMPORT);
+        } catch (Exception failure) {
+            scan = FileScanResult.unavailable("scanner failed");
+        }
+        if (scan == null || scan.status() != FileScanResult.Status.CLEAN) {
+            throw BusinessException.of(400, "error.file.scanRejected");
+        }
+
+        String storageKey = generateStorageKey();
+        try {
+            try (InputStream input = Files.newInputStream(boundedTempFile)) {
+                documentStorage.put(storageKey, input, true);
+            }
+            documentStorage.promote(storageKey);
+            ActorAttribution actor = resolveActor(request);
+            Document document = buildDocument(request, tenantId, legalEntityId, actor);
+            DocumentVersion version = buildVersion(request, tenantId, null, storageKey,
+                    expectedSizeBytes, expectedSha256, actor);
+            version.setBusinessKey("IMPORT_UPLOAD:" + UUID.randomUUID());
+            version.setVersionDiscriminator("v1");
+            version.setScanStatus("CLEAN");
+            return new StagedImportDocument(document, version, storageKey);
+        } catch (Exception failure) {
+            cleanupStorageAfterFailure(storageKey);
+            if (failure instanceof RuntimeException runtime) throw runtime;
+            throw new RuntimeException("CSV import storage stage failed", failure);
+        }
+    }
+
+    @Override
+    public void discardImportStage(StagedImportDocument staged) {
+        if (staged == null || staged.storageKey() == null || staged.version() == null
+                || !staged.storageKey().equals(staged.version().getStorageKey())
+                || staged.document() == null || !"IMPORT".equals(staged.document().getDocumentType())) {
+            return;
+        }
+        cleanupStorageAfterFailure(staged.storageKey());
+    }
+
+    private static String sha256File(Path path) throws java.io.IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream input = Files.newInputStream(path)) {
+                byte[] buffer = new byte[8192];
+                for (int read; (read = input.read(buffer)) != -1;) digest.update(buffer, 0, read);
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+    }
+
     private Document doRegister(DocumentRegisterRequest request, InputStream content) {
         if (request == null || content == null) {
             throw BusinessException.of(400, "error.document.invalidRequest");

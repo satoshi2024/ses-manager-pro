@@ -42,6 +42,13 @@ public interface DocumentService {
      */
     Document registerReceived(DocumentRegisterRequest request, InputStream content);
 
+    /** bounded raw CSVをCLEAN scanしStorageへstageする。Document metadataは作らない。 */
+    com.ses.service.impl.StagedImportDocument stageReceivedForImport(DocumentRegisterRequest request,
+            java.nio.file.Path boundedTempFile, long expectedSizeBytes, String expectedSha256);
+
+    /** commit失敗時に、当該requestが所有するstaging objectだけを削除する。 */
+    void discardImportStage(com.ses.service.impl.StagedImportDocument staged);
+
     /**
      * 既存文書に新しい版を追加する（差替・訂正）。
      * 旧版は削除しない。CONFIRMED状態の文書に対して差替を行うと状態がAMENDEDに遷移する。
