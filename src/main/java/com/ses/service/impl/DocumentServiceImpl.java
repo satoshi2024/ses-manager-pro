@@ -203,6 +203,8 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         } catch (BusinessException failure) {
             throw failure;
         } catch (Exception failure) {
+            log.error("[文書台帳] import storage bytes検証失敗: operationId={} exceptionClass={}",
+                    operationId, failure.getClass().getSimpleName());
             throw BusinessException.of(500, "error.import.storageVerificationFailed");
         }
     }

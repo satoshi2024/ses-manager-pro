@@ -107,6 +107,7 @@ public class ImportCsvIngestionService {
                 }
                 ImportUploadJobDetail winner = metadata.findOrReuseExistingUpload(source, headers.encoding(), raw.sha256());
                 if (winner == null) throw conflict;
+                if (metadata.isUploadJobForStage(winner.jobId(), source, raw.sha256(), staged)) committed = true;
                 return winner;
             } catch (RuntimeException uncertainCommit) {
                 try {
@@ -118,7 +119,10 @@ public class ImportCsvIngestionService {
                     }
                     ImportUploadJobDetail winner = metadata.findOrReuseExistingUpload(source, headers.encoding(),
                             raw.sha256());
-                    if (winner != null) return winner;
+                    if (winner != null) {
+                        if (metadata.isUploadJobForStage(winner.jobId(), source, raw.sha256(), staged)) committed = true;
+                        return winner;
+                    }
                 } catch (RuntimeException readbackFailure) {
                     preserveStagedForOutcomeCheck = true;
                     log.error("Import metadata commit outcome is uncertain; retain staged object for reconciliation: operationId={} storageKey={} failureClass={}",

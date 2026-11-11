@@ -244,6 +244,25 @@ public class ImportMetadataService {
                 sha.substring(0, 12), existing.versionNo(), existing.encoding());
     }
 
+    /** reuse readとcommit ACK-loss readbackの間に現れたjobが当該stage自身かを識別する。 */
+    public boolean isUploadJobForStage(long jobId, ImportUploadSource source, String sourceSha256,
+                                       com.ses.service.impl.StagedImportDocument staged) {
+        ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
+        if (source == null || staged == null || staged.document() == null || staged.version() == null
+                || staged.document().getId() == null || staged.version().getId() == null) return false;
+        Integer matches = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM t_import_job
+                WHERE tenant_id=? AND id=? AND source_system_id=? AND source_version=?
+                  AND entity_type='CUSTOMER' AND schema_version=? AND source_sha256=?
+                  AND legal_entity_id=? AND document_id=? AND document_version_id=?
+                  AND document_version_no=? AND document_sha256=?
+                """, Integer.class, context.tenantId(), jobId, source.id(), source.version(),
+                SesImportV1Schema.VERSION, HexFormat.of().parseHex(sourceSha256),
+                Long.toString(context.legalEntityId()), staged.document().getId(), staged.version().getId(),
+                staged.version().getVersionNo(), HexFormat.of().parseHex(sourceSha256));
+        return matches != null && matches == 1;
+    }
+
     @Transactional(readOnly = true)
     public ImportUploadJobDetail getUploadedJobDetail(long jobId) {
         ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
@@ -271,7 +290,8 @@ public class ImportMetadataService {
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRED,
             rollbackFor = Exception.class)
     public long registerImportJobFromStaged(ImportJobRegistrationRequest request, long expectedSourceVersion,
-                                            ImportAdmissionManifest manifest) {
+                                            ImportAdmissionManifest manifest,
+                                            com.ses.service.impl.StagedImportDocument staged) {
         ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
         validateJobRequest(request);
         if (request.entity() != ImportEntity.CUSTOMER || !SesImportV1Schema.VERSION.equals(request.schemaVersion())) {
@@ -289,7 +309,13 @@ public class ImportMetadataService {
                 || !java.util.Objects.equals(manifest.documentId(), request.documentId())
                 || !java.util.Objects.equals(manifest.documentVersionId(), request.documentVersionId())
                 || !java.util.Objects.equals(manifest.documentVersionNo(), request.documentVersionNo())
-                || !request.sourceSha256Hex().equals(manifest.documentSha256())) {
+                || !request.sourceSha256Hex().equals(manifest.documentSha256())
+                || staged == null || staged.document() == null || staged.version() == null
+                || !java.util.Objects.equals(manifest.documentId(), staged.document().getId())
+                || !java.util.Objects.equals(manifest.documentVersionId(), staged.version().getId())
+                || !java.util.Objects.equals(manifest.documentVersionNo(), staged.version().getVersionNo())
+                || !java.util.Objects.equals(manifest.documentSha256(), staged.version().getSha256())
+                || !java.util.Objects.equals(staged.storageKey(), staged.version().getStorageKey())) {
             throw BusinessException.of(403, "error.import.admissionMismatch");
         }
         SourceSnapshot source = lockSource(context.tenantId(), request.sourceSystemId());
@@ -298,18 +324,22 @@ public class ImportMetadataService {
             throw BusinessException.of(409, "error.import.sourceVersionChanged");
         }
         byte[] hash = HexFormat.of().parseHex(request.sourceSha256Hex());
-        byte[] documentHash = jdbc.query("""
-                SELECT UNHEX(v.sha256) FROM t_document d JOIN t_document_version v
+        StagedVersionSnapshot stored = jdbc.query("""
+                SELECT UNHEX(v.sha256), v.storage_key, v.size_bytes FROM t_document d JOIN t_document_version v
                   ON v.tenant_id=d.tenant_id AND v.document_id=d.id
                 WHERE d.tenant_id=? AND d.id=? AND d.deleted_flag=0 AND d.document_type='IMPORT'
                   AND d.legal_entity_id=? AND d.legal_hold_flag=0
                   AND v.id=? AND v.version_no=? AND v.scan_status='CLEAN'
                 FOR UPDATE
-                """, rs -> rs.next() ? rs.getBytes(1) : null, context.tenantId(), request.documentId(),
+                """, rs -> rs.next() ? new StagedVersionSnapshot(rs.getBytes(1), rs.getString(2), rs.getLong(3)) : null,
+                context.tenantId(), request.documentId(),
                 Long.toString(context.legalEntityId()), request.documentVersionId(), request.documentVersionNo());
-        if (documentHash == null || !MessageDigest.isEqual(hash, documentHash)) {
+        if (stored == null || !MessageDigest.isEqual(hash, stored.sha256())
+                || !staged.storageKey().equals(stored.storageKey())
+                || staged.version().getSizeBytes() == null || staged.version().getSizeBytes() != stored.sizeBytes()) {
             throw BusinessException.of(403, "error.import.documentSnapshotMismatch");
         }
+        byte[] documentHash = stored.sha256();
         if (findIdempotentJob(context.tenantId(), source.id(), request, hash, documentHash,
                 context.legalEntityId(), source.version()) != null) {
             throw BusinessException.of(409, "error.import.jobIdentityConflict");
@@ -345,6 +375,8 @@ public class ImportMetadataService {
     private record ExistingUploadDetail(long id, long sourceVersion, String encoding, String legalEntityId,
                                         long documentId, long versionId, int versionNo,
                                         byte[] documentSha256, String state) { }
+
+    private record StagedVersionSnapshot(byte[] sha256, String storageKey, long sizeBytes) { }
 
     private void ensureJobLink(String tenantId, long documentId, long jobId) {
         documentService.link(documentId, "IMPORT_JOB", jobId);

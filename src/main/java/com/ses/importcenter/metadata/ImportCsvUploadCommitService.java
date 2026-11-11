@@ -42,7 +42,7 @@ public class ImportCsvUploadCommitService {
         ImportJobRegistrationRequest request = new ImportJobRegistrationRequest(token.sourceSystemId(),
                 ImportEntity.CUSTOMER, SesImportV1Schema.VERSION, token.encoding(), contentManifest.sourceSha256(),
                 document.getId(), version.getId(), version.getVersionNo());
-        long jobId = metadata.registerImportJobFromStaged(request, token.sourceVersion(), committedManifest);
+        long jobId = metadata.registerImportJobFromStaged(request, token.sourceVersion(), committedManifest, staged);
         return new ImportUploadJobDetail(jobId, "UPLOADED", ImportEntity.CUSTOMER.name(),
                 contentManifest.sourceSha256().substring(0, 12), version.getVersionNo(), token.encoding().name());
     }
