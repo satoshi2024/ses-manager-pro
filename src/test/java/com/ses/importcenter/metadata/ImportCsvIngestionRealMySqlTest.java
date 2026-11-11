@@ -3,6 +3,7 @@ package com.ses.importcenter.metadata;
 import com.ses.common.exception.BusinessException;
 import com.ses.config.LoginUser;
 import com.ses.entity.SysUser;
+import com.ses.entity.DocumentVersion;
 import com.ses.importcenter.foundation.ImportEncoding;
 import com.ses.importcenter.foundation.ImportEntity;
 import com.ses.importcenter.foundation.SesImportV1Schema;
@@ -12,6 +13,7 @@ import com.ses.service.security.FileScanner;
 import com.ses.service.storage.DocumentStorage;
 import com.ses.service.impl.DocumentMetadataCommitService;
 import com.ses.service.impl.StagedImportDocument;
+import com.ses.mapper.DocumentVersionMapper;
 import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,7 +61,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 
 /** test専用固定manifestで実MySQLのraw upload、冪等再利用、rollback/競合補償を確認する。 */
 @SpringBootTest
@@ -97,6 +101,7 @@ class ImportCsvIngestionRealMySqlTest {
     @Autowired private com.ses.mapper.SysUserMapper users;
     @SpyBean private DocumentMetadataCommitService documentMetadataCommit;
     @SpyBean private com.ses.service.DocumentService documentService;
+    @SpyBean private DocumentVersionMapper documentVersionMapper;
     @Autowired private SyntheticFixtureAdmission admission;
     @Autowired private InMemoryDocumentStorage storage;
     private SysUser actorUser;
@@ -174,7 +179,7 @@ class ImportCsvIngestionRealMySqlTest {
     @Test
     void realMySqlUploadCommitsExactCleanDocumentVersionJobAndLinkAndIsIdempotent() {
         AtomicBoolean bodyOpened = new AtomicBoolean();
-        Map<String, Integer> domainBefore = snapshotNoDomainWrites();
+        Map<String, String> domainBefore = snapshotNoDomainWrites();
 
         ImportRawUploadHeaders headers = new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8);
         ImportUploadJobDetail created = ingestion.upload(headers, () -> {
@@ -211,6 +216,17 @@ class ImportCsvIngestionRealMySqlTest {
     }
 
     @Test
+    void failureAtVersionInsertRollsBackTheEarlierDocumentInsert() {
+        doThrow(BusinessException.of(500, "error.test.injectedVersionInsertFailure"))
+                .when(documentVersionMapper).insert(any(DocumentVersion.class));
+
+        assertThrows(BusinessException.class, () -> ingestion.upload(
+                new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8), () -> new ByteArrayInputStream(CSV)));
+
+        assertNoCommittedRows();
+    }
+
+    @Test
     void failureAfterDocumentAndVersionInsertRollsBackAndCompensatesOwnedStage() {
         doAnswer(invocation -> {
             invocation.callRealMethod();
@@ -224,11 +240,22 @@ class ImportCsvIngestionRealMySqlTest {
     }
 
     @Test
-    void failureAfterJobAndLinkInsertRollsBackAllMetadataAndCompensatesOwnedStage() {
+    void failureAfterJobInsertBeforeLinkRollsBackAllMetadataAndCompensatesOwnedStage() {
+        doThrow(BusinessException.of(500, "error.test.injectedJobInsertFailure"))
+                .when(documentService).link(anyLong(), eq("IMPORT_JOB"), anyLong());
+
+        assertThrows(BusinessException.class, () -> ingestion.upload(
+                new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8), () -> new ByteArrayInputStream(CSV)));
+
+        assertNoCommittedRows();
+    }
+
+    @Test
+    void failureAfterLinkInsertRollsBackAllMetadataAndCompensatesOwnedStage() {
         doAnswer(invocation -> {
             invocation.callRealMethod();
-            throw BusinessException.of(500, "error.test.injectedJobLinkFailure");
-        }).when(metadata).registerImportJobFromStaged(any(), anyLong(), any(), any());
+            throw BusinessException.of(500, "error.test.injectedLinkInsertFailure");
+        }).when(documentService).link(anyLong(), eq("IMPORT_JOB"), anyLong());
 
         assertThrows(BusinessException.class, () -> ingestion.upload(
                 new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8), () -> new ByteArrayInputStream(CSV)));
@@ -248,13 +275,35 @@ class ImportCsvIngestionRealMySqlTest {
         assertEquals(0, storage.objectCount());
     }
 
-    private Map<String, Integer> snapshotNoDomainWrites() {
-        Map<String, Integer> result = new java.util.LinkedHashMap<>();
+    private Map<String, String> snapshotNoDomainWrites() {
+        Map<String, String> result = new java.util.LinkedHashMap<>();
         for (String table : List.of("m_customer", "t_engineer", "t_project", "t_project_position",
                 "t_proposal", "t_contract", "t_engineer_sales", "m_cost_center",
                 "t_organization_relation_history", "t_engineer_accounting_history",
-                "t_import_identity_registry")) {
-            result.put(table, jdbc.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class));
+                "t_service_request_sequence", "t_lifecycle_case_sequence", "t_import_identity_registry")) {
+            MessageDigest digest;
+            try { digest = MessageDigest.getInstance("SHA-256"); }
+            catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+            String fingerprint = jdbc.query("SELECT * FROM " + table + " ORDER BY 1", rows -> {
+                java.sql.ResultSetMetaData columns = rows.getMetaData();
+                while (rows.next()) {
+                    for (int column = 1; column <= columns.getColumnCount(); column++) {
+                        Object value = rows.getObject(column);
+                        if (value == null) {
+                            digest.update((byte) 0);
+                        } else {
+                            digest.update((byte) 1);
+                            byte[] bytes = value instanceof byte[] binary ? binary
+                                    : value.toString().getBytes(StandardCharsets.UTF_8);
+                            digest.update(java.nio.ByteBuffer.allocate(Integer.BYTES).putInt(bytes.length).array());
+                            digest.update(bytes);
+                        }
+                    }
+                    digest.update((byte) '\n');
+                }
+                return HexFormat.of().formatHex(digest.digest());
+            });
+            result.put(table, fingerprint);
         }
         return Map.copyOf(result);
     }
