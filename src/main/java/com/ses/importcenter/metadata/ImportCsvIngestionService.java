@@ -43,9 +43,11 @@ public class ImportCsvIngestionService {
         }
         ImportAuthorizedContext before = authorization.requireCurrentAuthorization();
         ImportUploadSource source = metadata.resolveActiveUploadSource(headers.sourceCode());
+        requireSameContext(before, authorization.requireCurrentAuthorization());
         ImportAdmissionToken token = admission.admitBeforeBody(before, source, ImportEntity.CUSTOMER,
                 SesImportV1Schema.VERSION, headers.encoding());
         requirePreAdmissionMatch(token, before, source, headers);
+        requireSameContext(before, authorization.requireCurrentAuthorization());
 
         Path temp = null;
         StagedImportDocument staged = null;
