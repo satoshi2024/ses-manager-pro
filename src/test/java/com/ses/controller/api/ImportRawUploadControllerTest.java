@@ -65,7 +65,7 @@ class ImportRawUploadControllerTest {
         private final AtomicBoolean bodyOpened = new AtomicBoolean();
         private byte[] body = new byte[0];
 
-        @Override public ServletInputStream getInputStream() throws IOException {
+        @Override public ServletInputStream getInputStream() {
             bodyOpened.set(true);
             ByteArrayInputStream input = new ByteArrayInputStream(body);
             return new ServletInputStream() {

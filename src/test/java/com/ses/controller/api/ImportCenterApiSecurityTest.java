@@ -1,55 +1,177 @@
 package com.ses.controller.api;
 
+import com.ses.importcenter.metadata.ImportCsvIngestionService;
+import com.ses.importcenter.metadata.ImportMetadataAuthorizationService;
+import com.ses.importcenter.metadata.ImportUploadJobDetail;
+import com.ses.config.LoginUser;
+import com.ses.entity.SysUser;
+import com.ses.service.AuditLogService;
+import com.ses.config.OidcSecurityProperties;
+import com.ses.service.security.AuthorizationService;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ReadListener;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequestWrapper;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.Part;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.core.Ordered;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.filter.OncePerRequestFilter;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.util.Collection;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** raw upload guardの後段にあるCookieCsrfTokenRepository検証も無効化されていないことを確認する。 */
+/** real security chainのCsrfFilterが拒否し、その間raw requestを未読に保つことを確認する。 */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@Import(ImportCenterApiSecurityTest.TrackingFilterConfiguration.class)
 class ImportCenterApiSecurityTest {
     @Autowired private MockMvc mockMvc;
+    @Autowired private BodyTrackingFilter bodyTrackingFilter;
+    @Autowired private OidcSecurityProperties oidcSecurityProperties;
+    @MockBean private AuthorizationService authorizationService;
+    @MockBean private ImportCsvIngestionService ingestion;
+    @MockBean private AuditLogService auditLogService;
+    private UserDetails testPrincipal;
+
+    @BeforeEach
+    void prepareReachableController() {
+        bodyTrackingFilter.reset();
+        String tenantId = oidcSecurityProperties.getTenantId();
+        if (tenantId == null || tenantId.isBlank()) tenantId = "nf06-csrf-test";
+        var authorities = java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者"));
+        SysUser user = SysUser.builder().username("nf06-csrf-test").password("test-only")
+                .realName("CSRFテスト").role("管理者").status(1).tenantId(tenantId).build();
+        testPrincipal = new LoginUser(user, authorities, tenantId);
+        when(authorizationService.isAllowed(any(Authentication.class),
+                eq(ImportMetadataAuthorizationService.ACTION))).thenReturn(true);
+        when(ingestion.upload(any(), any())).thenReturn(
+                new ImportUploadJobDetail(1L, "UPLOADED", "CUSTOMER", "0123456789ab", 1, "UTF8"));
+    }
 
     @Test
-    @WithMockUser(roles = "管理者")
-    void missingCsrfCookieIsRejectedEvenWhenHeaderIsNonEmpty() throws Exception {
+    void missingCsrfCookieIsRejectedBeforeControllerAndBodyRead() throws Exception {
         mockMvc.perform(validRawUpload().header("X-XSRF-TOKEN", "present-but-no-cookie"))
                 .andExpect(status().isForbidden());
+
+        verify(ingestion, never()).upload(any(), any());
+        assertFalse(bodyTrackingFilter.bodyTouched());
     }
 
     @Test
-    @WithMockUser(roles = "管理者")
-    void invalidCsrfTokenIsRejectedAfterTransportGuardPasses() throws Exception {
-        mockMvc.perform(validRawUpload()
-                        .cookie(new Cookie("XSRF-TOKEN", "cookie-token"))
-                        .header("X-XSRF-TOKEN", "not-the-cookie-token"))
+    void invalidAndMismatchedCookieTokensAreRejectedBeforeBodyRead() throws Exception {
+        mockMvc.perform(validRawUpload().cookie(new Cookie("XSRF-TOKEN", "cookie-token"))
+                        .header("X-XSRF-TOKEN", "invalid-token"))
                 .andExpect(status().isForbidden());
-    }
+        assertFalse(bodyTrackingFilter.bodyTouched());
 
-    @Test
-    @WithMockUser(roles = "管理者")
-    void cookieHeaderMismatchIsRejected() throws Exception {
-        mockMvc.perform(validRawUpload()
-                        .cookie(new Cookie("XSRF-TOKEN", "token-a"))
+        bodyTrackingFilter.reset();
+        mockMvc.perform(validRawUpload().cookie(new Cookie("XSRF-TOKEN", "token-a"))
                         .header("X-XSRF-TOKEN", "token-b"))
                 .andExpect(status().isForbidden());
+        verify(ingestion, never()).upload(any(), any());
+        assertFalse(bodyTrackingFilter.bodyTouched());
     }
 
-    private static org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder validRawUpload() {
+    @Test
+    void matchingCookieAndHeaderPassCsrfAndReachControllerWithoutOpeningLazyBody() throws Exception {
+        mockMvc.perform(validRawUpload().cookie(new Cookie("XSRF-TOKEN", "matching-token"))
+                        .header("X-XSRF-TOKEN", "matching-token"))
+                .andExpect(status().isOk());
+
+        verify(ingestion).upload(any(), any());
+        assertFalse(bodyTrackingFilter.bodyTouched());
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder validRawUpload() {
         return post("/api/import-center/uploads")
+                .with(user(testPrincipal))
                 .contentType(MediaType.valueOf("text/csv"))
                 .header("X-Import-Source-Code", "synthetic-a")
                 .header("X-Import-Encoding", "UTF8")
                 .content("externalKey,companyName\nC-SYN-1,Example\n");
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class TrackingFilterConfiguration {
+        @Bean BodyTrackingFilter bodyTrackingFilter() { return new BodyTrackingFilter(); }
+
+        @Bean FilterRegistrationBean<BodyTrackingFilter> bodyTrackingRegistration(BodyTrackingFilter filter) {
+            FilterRegistrationBean<BodyTrackingFilter> registration = new FilterRegistrationBean<>(filter);
+            registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
+            return registration;
+        }
+    }
+
+    static class BodyTrackingFilter extends OncePerRequestFilter {
+        private final AtomicBoolean touched = new AtomicBoolean();
+        void reset() { touched.set(false); }
+        boolean bodyTouched() { return touched.get(); }
+
+        @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+                                                   FilterChain chain) throws ServletException, IOException {
+            chain.doFilter(new HttpServletRequestWrapper(request) {
+                @Override public ServletInputStream getInputStream() throws IOException {
+                    touched.set(true);
+                    return super.getInputStream();
+                }
+                @Override public BufferedReader getReader() throws IOException {
+                    touched.set(true);
+                    return super.getReader();
+                }
+                @Override public Collection<Part> getParts() throws IOException, ServletException {
+                    touched.set(true);
+                    return super.getParts();
+                }
+                @Override public String getParameter(String name) {
+                    touched.set(true);
+                    return super.getParameter(name);
+                }
+                @Override public Map<String, String[]> getParameterMap() {
+                    touched.set(true);
+                    return super.getParameterMap();
+                }
+                @Override public java.util.Enumeration<String> getParameterNames() {
+                    touched.set(true);
+                    return super.getParameterNames();
+                }
+                @Override public String[] getParameterValues(String name) {
+                    touched.set(true);
+                    return super.getParameterValues(name);
+                }
+            }, response);
+        }
     }
 }

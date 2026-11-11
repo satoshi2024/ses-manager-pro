@@ -39,7 +39,7 @@ class ImportRawBodyTransportGuardFilterTest {
         assertFalse(missingCsrf.bodyTouched());
 
         TrackingRequest tooLarge = validRequest();
-        tooLarge.setContentLength((int) (ImportRawBodyTransportGuardFilter.MAX_RAW_BYTES + 1));
+        tooLarge.declareContentLength(ImportRawBodyTransportGuardFilter.MAX_RAW_BYTES + 1);
         MockHttpServletResponse sizeResponse = new MockHttpServletResponse();
         filter.doFilter(tooLarge, sizeResponse, (req, res) -> { throw new AssertionError("must reject"); });
         assertEquals(413, sizeResponse.getStatus());
@@ -76,6 +76,13 @@ class ImportRawBodyTransportGuardFilterTest {
 
     private static final class TrackingRequest extends MockHttpServletRequest {
         private boolean touched;
+        private long declaredContentLength = -1;
+
+        void declareContentLength(long contentLength) { declaredContentLength = contentLength; }
+
+        @Override public long getContentLengthLong() {
+            return declaredContentLength >= 0 ? declaredContentLength : super.getContentLengthLong();
+        }
 
         @Override public ServletInputStream getInputStream() {
             touched = true;
