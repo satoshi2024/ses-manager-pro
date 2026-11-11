@@ -246,21 +246,37 @@ public class ImportMetadataService {
 
     /** reuse readとcommit ACK-loss readbackの間に現れたjobが当該stage自身かを識別する。 */
     public boolean isUploadJobForStage(long jobId, ImportUploadSource source, String sourceSha256,
-                                       com.ses.service.impl.StagedImportDocument staged) {
+                                       com.ses.service.impl.StagedImportDocument staged,
+                                       ImportAuthorizedContext expectedContext) {
         ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
+        if (expectedContext == null || !expectedContext.equals(context)) {
+            throw BusinessException.of(403, "error.import.readbackContextChanged");
+        }
         if (source == null || staged == null || staged.document() == null || staged.version() == null
-                || staged.document().getId() == null || staged.version().getId() == null) return false;
-        Integer matches = jdbc.queryForObject("""
-                SELECT COUNT(*) FROM t_import_job
-                WHERE tenant_id=? AND id=? AND source_system_id=? AND source_version=?
-                  AND entity_type='CUSTOMER' AND schema_version=? AND source_sha256=?
-                  AND legal_entity_id=? AND document_id=? AND document_version_id=?
-                  AND document_version_no=? AND document_sha256=?
-                """, Integer.class, context.tenantId(), jobId, source.id(), source.version(),
-                SesImportV1Schema.VERSION, HexFormat.of().parseHex(sourceSha256),
-                Long.toString(context.legalEntityId()), staged.document().getId(), staged.version().getId(),
-                staged.version().getVersionNo(), HexFormat.of().parseHex(sourceSha256));
-        return matches != null && matches == 1;
+                || staged.document().getId() == null || staged.version().getId() == null) {
+            throw BusinessException.of(500, "error.import.jobReadbackUnknown");
+        }
+        ExistingUploadIdentity actual = jdbc.query("""
+                SELECT source_system_id, source_version, entity_type, schema_version, source_sha256,
+                       legal_entity_id, document_id, document_version_id, document_version_no, document_sha256
+                FROM t_import_job WHERE tenant_id=? AND id=?
+                """, rs -> rs.next() ? new ExistingUploadIdentity(rs.getLong("source_system_id"),
+                rs.getLong("source_version"), rs.getString("entity_type"), rs.getString("schema_version"),
+                rs.getBytes("source_sha256"), rs.getString("legal_entity_id"), rs.getLong("document_id"),
+                rs.getLong("document_version_id"), rs.getInt("document_version_no"),
+                rs.getBytes("document_sha256")) : null, context.tenantId(), jobId);
+        byte[] expectedHash = HexFormat.of().parseHex(sourceSha256);
+        if (actual == null || actual.sourceSystemId() != source.id() || actual.sourceVersion() != source.version()
+                || !ImportEntity.CUSTOMER.name().equals(actual.entity())
+                || !SesImportV1Schema.VERSION.equals(actual.schemaVersion())
+                || !Long.toString(context.legalEntityId()).equals(actual.legalEntityId())
+                || actual.documentVersionNo() != staged.version().getVersionNo()
+                || !MessageDigest.isEqual(expectedHash, actual.sourceSha256())
+                || !MessageDigest.isEqual(expectedHash, actual.documentSha256())) {
+            throw BusinessException.of(500, "error.import.jobReadbackUnknown");
+        }
+        return actual.documentId() == staged.document().getId()
+                && actual.documentVersionId() == staged.version().getId();
     }
 
     @Transactional(readOnly = true)
@@ -377,6 +393,11 @@ public class ImportMetadataService {
                                         byte[] documentSha256, String state) { }
 
     private record StagedVersionSnapshot(byte[] sha256, String storageKey, long sizeBytes) { }
+
+    private record ExistingUploadIdentity(long sourceSystemId, long sourceVersion, String entity,
+                                          String schemaVersion, byte[] sourceSha256, String legalEntityId,
+                                          long documentId, long documentVersionId, int documentVersionNo,
+                                          byte[] documentSha256) { }
 
     private void ensureJobLink(String tenantId, long documentId, long jobId) {
         documentService.link(documentId, "IMPORT_JOB", jobId);

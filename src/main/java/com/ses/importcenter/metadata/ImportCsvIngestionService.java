@@ -105,9 +105,26 @@ public class ImportCsvIngestionService {
                             staged.operationId(), staged.storageKey(), readbackFailure.getClass().getSimpleName());
                     throw conflict;
                 }
-                ImportUploadJobDetail winner = metadata.findOrReuseExistingUpload(source, headers.encoding(), raw.sha256());
+                ImportUploadJobDetail winner;
+                try {
+                    winner = metadata.findOrReuseExistingUpload(source, headers.encoding(), raw.sha256());
+                } catch (RuntimeException readbackFailure) {
+                    preserveStagedForOutcomeCheck = true;
+                    log.error("Import conflict winner lookup is uncertain; retain staged object for reconciliation: operationId={} storageKey={} failureClass={}",
+                            staged.operationId(), staged.storageKey(), readbackFailure.getClass().getSimpleName());
+                    throw conflict;
+                }
                 if (winner == null) throw conflict;
-                if (metadata.isUploadJobForStage(winner.jobId(), source, raw.sha256(), staged)) committed = true;
+                try {
+                    if (metadata.isUploadJobForStage(winner.jobId(), source, raw.sha256(), staged, before)) {
+                        committed = true;
+                    }
+                } catch (RuntimeException identityFailure) {
+                    preserveStagedForOutcomeCheck = true;
+                    log.error("Import conflict identity readback is uncertain; retain staged object for reconciliation: operationId={} storageKey={} failureClass={}",
+                            staged.operationId(), staged.storageKey(), identityFailure.getClass().getSimpleName());
+                    throw conflict;
+                }
                 return winner;
             } catch (RuntimeException uncertainCommit) {
                 try {
@@ -120,7 +137,9 @@ public class ImportCsvIngestionService {
                     ImportUploadJobDetail winner = metadata.findOrReuseExistingUpload(source, headers.encoding(),
                             raw.sha256());
                     if (winner != null) {
-                        if (metadata.isUploadJobForStage(winner.jobId(), source, raw.sha256(), staged)) committed = true;
+                        if (metadata.isUploadJobForStage(winner.jobId(), source, raw.sha256(), staged, before)) {
+                            committed = true;
+                        }
                         return winner;
                     }
                 } catch (RuntimeException readbackFailure) {
