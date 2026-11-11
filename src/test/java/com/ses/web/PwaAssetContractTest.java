@@ -27,7 +27,7 @@ class PwaAssetContractTest {
         String worker = read("service-worker.js");
 
         assertThat(worker).contains("const SHELL_ASSETS = [");
-        assertThat(worker).contains("const CACHE_NAME = CACHE_PREFIX + 'v2'");
+        assertThat(worker).contains("const CACHE_NAME = CACHE_PREFIX + 'v3'");
         assertThat(worker).contains("path === '/js/i18n.js'");
         assertThat(worker).contains("request.method === 'GET'");
         assertThat(worker).contains("cache.put(request, response.clone())");
@@ -45,7 +45,22 @@ class PwaAssetContractTest {
         assertThat(layout).contains("rel=\"manifest\"");
         assertThat(layout).contains(
                 "<div sec:authorize=\"hasRole('要員')\" id=\"pwa-queue-panel\"",
+                "id=\"pwa-restore-link\" href=\"/offline.html\"",
                 "<script sec:authorize=\"hasRole('要員')\" th:src=\"@{/js/pwa-queue.js}\"></script>");
+    }
+
+    @Test
+    void offline下書きは日本語labelと表示許可項目だけを使う() throws Exception {
+        String offline = read("offline.html");
+
+        assertThat(offline).contains("下書きはロックされています", "再認証", "下書きを復元する",
+                "勤怠", "作業報告", "未送信", "競合確認が必要",
+                "workDate: '日付'", "clockIn: '出勤'", "expenseDate: '日付'");
+        assertThat(offline).contains("ses:pwa-revoked", "prepareRestore", "confirmRestore")
+                .doesNotContain("getOfflineDrafts();\n            if (!drafts.length) return");
+        assertThat(offline.indexOf("confirmRestore.addEventListener('click'"))
+                .isLessThan(offline.indexOf("getOfflineDrafts();"));
+        assertThat(offline).doesNotContain("JSON.stringify(draft.payload", "<pre>", "draft.screen} /", "draft.status}`");
     }
 
     @Test
@@ -68,11 +83,21 @@ class PwaAssetContractTest {
         assertThat(queue).contains("X-Client-Request-Id", "X-Client-Payload-Hash", "X-Client-Base-Version",
                 "X-Client-Created-At", "X-User-Scope", "cache: 'no-store'");
         assertThat(queue).contains("const contextHeaders", "contextHeaders['X-User-Scope'] = oldScope");
-        assertThat(queue).contains("preserveQueue", "rebindScope(oldScope, scope)", "deleteScope(oldScope)",
+        assertThat(queue).contains("prepareRestore", "confirmRestore", "documentNonce: newDocumentNonce()",
+                "newRequestIds", "restoredRequestIds", "rebindScope(oldScope, newScope", "deleteScope(oldScope)",
                 "record.status === 'ERROR'", "refreshedFields", "serverRefreshAt");
+        int bootstrapStart = queue.indexOf("async function bootstrapScope()");
+        int bootstrapEnd = queue.indexOf("async function cleanupExpired()", bootstrapStart);
+        assertThat(queue.substring(bootstrapStart, bootstrapEnd)).doesNotContain("rebindScope")
+                .doesNotContain("readAll(")
+                .contains("preserveQueue", "deleteScope(oldScope)");
         assertThat(queue).contains("function validMethod", "path === '/api/my/pwa/expenses/drafts'",
                 "return method === 'PUT'", "URL IDとpayload.idが一致しません", "row.days", "row.dailies");
         assertThat(queue).contains("QUEUE_EXPIRED", "error.pwa.queueExpired");
+        assertThat(queue).contains("sanitizeConflict", "REVOCATION_KEY", "SCOPE_EPOCH_KEY",
+                "BroadcastChannel", "claimAggregate", "revocationEpoch", "getOfflineDrafts", "clearDraftDom");
+        assertThat(queue).contains("const DB_VERSION = 2", "const META_STORE = 'meta'",
+                "DB_VERSION", "record.conflict", "record.payload = null");
         assertThat(queue).contains("state.paused = true", "response.redirected", "text/html");
         assertThat(queue).contains("status === 'CONFLICT'", "サーバー版", "端末版", "端末版を破棄");
         assertThat(queue).contains("FORBIDDEN_KEY", "MAX_PAYLOAD_BYTES", "validatePayload", "ArrayBuffer.isView");

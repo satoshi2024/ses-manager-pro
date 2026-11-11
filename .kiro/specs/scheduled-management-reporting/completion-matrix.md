@@ -62,3 +62,9 @@ Review remediation（`codex/nf10-review-remediation`）: delivery TX/outbox/prev
 ## Rollback
 
 追加migrationはreport専用の新規table/menu/document typeのみで、scheduleは初期無効。rollback時はscheduleを無効化し、outboxを停止・手動replay対象として保全し、document/snapshotは削除せずbackup restoreとcutover rollbackで復旧する。
+
+## PRD-NF10-001（2026-10-01）
+
+状態: 実装修正・定向検証完了、独立Review待ち。共有deliveryの`reauthenticated_at`をdownload認可根拠から外し、server-side session / Authentication instance / tenant / user / delivery / current scope / 10分TTLに束縛したgrantを追加した。token/delivery/link expiry/recipient/current scope/snapshotの既存service検証は維持。session rotation/logout、期限、tenant/user/delivery/scope境界、role authority差異、anonymous経路と実controller→serviceの二session経路を回帰へ追加した。証拠は`docs/review/NF10-reauth-session-boundary-evidence.md`。Head=`1443fb68943849a3260d7ebe005259f3eb609d60`＋未commit実装（固定commit hash追記待ち）。
+
+初回有効targeted実行は37/0/0/0、zero skip。その後変更したgrant helper classは4/0/0/0、zero skipで単独再実行。合わせた対象範囲は38 checksでfailures/errors/skipsなし。四つの初回Surefire text reportと最終helper `.txt/.xml` は証拠ディレクトリに保存した。独立Review後もfull fast gateはrootの統合スケジュールで実施する。

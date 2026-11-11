@@ -12,6 +12,8 @@ import com.ses.entity.SysUser;
 import com.ses.mapper.LifecycleCaseMapper;
 import com.ses.mapper.LifecycleTaskMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.EngineerMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.lifecycle.LifecycleCaseService;
 import com.ses.service.lifecycle.LifecycleTaskService;
@@ -35,6 +37,7 @@ public class MyLifecycleApiController {
     private final LifecycleTaskMapper taskMapper;
     private final EngineerAccountLinkService linkService;
     private final SysUserMapper sysUserMapper;
+    private final EngineerMapper engineerMapper;
 
     private SysUser getCurrentUser() {
         Long userId = SecurityUtils.currentUserId();
@@ -58,15 +61,32 @@ public class MyLifecycleApiController {
     }
 
     private Long currentEngineerId() {
-        Long userId = getCurrentUserId();
-        if (userId == null) {
+        SysUser user = getCurrentUser();
+        if (user == null || user.getId() == null) {
             throw BusinessException.of(401, "error.unauthorized", "ログインが必要です");
         }
-        Long engineerId = linkService.findEngineerIdByUserId(userId);
+        String tenantId = currentTenantId(user);
+        Long engineerId = linkService.findEngineerIdByUserId(user.getId());
         if (engineerId == null) {
             throw BusinessException.of(403, "error.my.notLinked", "要員アカウントが紐付けられていません");
         }
+        if (engineerMapper.selectOne(new LambdaQueryWrapper<com.ses.entity.Engineer>()
+                .eq(com.ses.entity.Engineer::getId, engineerId)
+                .eq(com.ses.entity.Engineer::getTenantId, tenantId)) == null) {
+            throw BusinessException.of(403, "error.lifecycle.accessDenied");
+        }
         return engineerId;
+    }
+
+    private String currentTenantId(SysUser user) {
+        String tenantId = user == null || user.getTenantId() == null || user.getTenantId().isBlank()
+                ? null : user.getTenantId().trim();
+        String requestTenant = SecurityUtils.currentTenantId();
+        if (tenantId == null || (requestTenant != null && !requestTenant.isBlank()
+                && !tenantId.equals(requestTenant.trim()))) {
+            throw BusinessException.of(403, "error.lifecycle.accessDenied");
+        }
+        return tenantId;
     }
 
     /**
@@ -86,12 +106,11 @@ public class MyLifecycleApiController {
     @GetMapping("/cases/{id}")
     public ApiResult<LifecycleCaseDto> getMyCaseDetail(@PathVariable("id") Long id) {
         Long engineerId = currentEngineerId();
-        LifecycleCase lcCase = caseMapper.selectById(id);
-        if (lcCase == null || !engineerId.equals(lcCase.getEngineerId())) {
-            throw BusinessException.of(404, "error.lifecycle.caseNotFound", "案件が見つかりません");
-        }
         SysUser user = getCurrentUser();
         LifecycleCaseDto detail = caseService.getCaseDetail(id, user);
+        if (!engineerId.equals(detail.getEngineerId())) {
+            throw BusinessException.of(404, "error.lifecycle.caseNotFound", "案件が見つかりません");
+        }
         return ApiResult.success(detail);
     }
 
@@ -102,9 +121,10 @@ public class MyLifecycleApiController {
     public ApiResult<List<LifecycleTaskDto>> getMyPendingTasks() {
         Long engineerId = currentEngineerId();
         SysUser user = getCurrentUser();
+        String tenantId = currentTenantId(user);
         List<LifecycleTaskDto> tasks = taskService.getMyPendingTasks(user).stream()
                 .filter(t -> {
-                    LifecycleCase c = caseMapper.selectById(t.getCaseId());
+                    LifecycleCase c = caseMapper.selectByIdAndTenant(t.getCaseId(), tenantId);
                     return c != null && engineerId.equals(c.getEngineerId());
                 })
                 .collect(Collectors.toList());
@@ -119,8 +139,10 @@ public class MyLifecycleApiController {
                                           @RequestBody(required = false) CompleteLifecycleTaskCommand cmd) {
         Long engineerId = currentEngineerId();
         Long userId = getCurrentUserId();
+        SysUser user = getCurrentUser();
+        String tenantId = currentTenantId(user);
 
-        LifecycleTask task = taskMapper.selectById(taskId);
+        LifecycleTask task = taskMapper.selectByIdAndTenant(taskId, tenantId);
         if (task == null) {
             throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
         }
@@ -130,7 +152,7 @@ public class MyLifecycleApiController {
             throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
         }
 
-        LifecycleCase lcCase = caseMapper.selectById(task.getCaseId());
+        LifecycleCase lcCase = caseMapper.selectByIdAndTenant(task.getCaseId(), tenantId);
         if (lcCase == null || !engineerId.equals(lcCase.getEngineerId())) {
             throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
         }

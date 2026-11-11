@@ -45,6 +45,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -67,12 +68,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@TestPropertySource(properties = "spring.datasource.url=jdbc:h2:mem:expense-request-flow-test;DB_CLOSE_DELAY=0;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class ExpenseRequestFlowIntegrationTest {
 
     private static final String EICAR = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
 
-    /** route version_no採番（共有H2で他expense.request routeが残っても最新を採用させる）。 */
+    /** route version_no採番。 */
     static final java.util.concurrent.atomic.AtomicInteger ROUTE_SEQ = new java.util.concurrent.atomic.AtomicInteger(1000);
 
     @Autowired
@@ -460,7 +462,7 @@ class ExpenseRequestFlowIntegrationTest {
     }
 
     void link(Long engineerId, Long sysUserId) {
-        // 共有H2には他classが残したlink行がありうるため、該当engineer/userの既存linkを先に削除する
+        // 同一テスト内の再実行でも一意になるよう、該当engineer/userの既存linkを先に削除する
         engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
                 .eq(EngineerAccountLink::getEngineerId, engineerId));
         engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
@@ -490,8 +492,7 @@ class ExpenseRequestFlowIntegrationTest {
     }
 
     void insertRoute(List<List<Long>> steps) {
-        // 共有H2には他のexpense.request routeも残るため、このrouteが最新になるよう
-        // version_noを単調増加の一意値にする（RouteResolverはversion_no降順で採用）。
+        // RouteResolverがversion_no降順で採用するため、routeごとに一意の値を採番する。
         ApprovalRoute route = ApprovalRoute.builder()
                 .tenantId("default")
                 .requestType("expense.request")

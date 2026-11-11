@@ -22,6 +22,8 @@ HRはcourse/provider、費用（JPY）、期間、capacity、対象canonical ski
 受入条件:
 
 - planとenrollmentの変更履歴を保持し、cancelとcorrectを上書きで消さない。
+- planは非取消enrollmentが1件以上あり、その全件がCOMPLETEDになった場合だけCOMPLETEDへ遷移する。途中のcourse完了後は他courseを開始・完了できるようIN_PROGRESSを維持する。空planまたは全enrollment取消では自動完了しない。取消時も残る有効enrollmentを再判定し、取消単独では完了にしない。
+- plan行lock内で全enrollment状態を評価し、completion CASとenrollment eventは同じ操作の再送・競合で重複させない。
 - 費用が`m_approval_route.min_amount`以上（等値を含む）なら既存approval engineへ申請し、申請者自身は承認できない。別の費用threshold masterは作らない。
 - approvalが未完了ならmasterの確定状態やcompletionを先取りしない。route/candidateが解決できない場合はfail closed。
 - training history（契約・法定dispatch）とlearning enrollmentを混在させない。

@@ -25,6 +25,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -43,7 +44,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 @SpringBootTest
 @ActiveProfiles("test")
-@DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_CLASS)
+@TestPropertySource(properties = "spring.datasource.url=jdbc:h2:mem:oneonone-survey-flow-test;DB_CLOSE_DELAY=0;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL")
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class OneOnOneSurveyFlowIntegrationTest {
 
     @Autowired

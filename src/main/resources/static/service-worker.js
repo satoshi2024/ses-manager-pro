@@ -2,7 +2,7 @@
 'use strict';
 
 const CACHE_PREFIX = 'ses-pwa-shell-';
-const CACHE_NAME = CACHE_PREFIX + 'v2';
+const CACHE_NAME = CACHE_PREFIX + 'v3';
 const SHELL_ASSETS = [
     '/manifest.webmanifest',
     '/offline.html',
@@ -85,8 +85,7 @@ self.addEventListener('fetch', event => {
 
     // API、portal、document、給与、銀行、添付、PDF、その他PIIはnetwork-only。
     // ナビゲーションもHTMLをcacheせず、オフライン時だけ汎用ページを返す。
-    if (request.method === 'GET' && isSameOrigin(request) && !isDynamicOrSensitive(request)
-            && request.mode === 'navigate') {
+    if (request.method === 'GET' && isSameOrigin(request) && request.mode === 'navigate') {
         event.respondWith(fetch(request).catch(() => caches.match('/offline.html')));
         return;
     }

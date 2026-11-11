@@ -20,6 +20,10 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.MockMvc;
+import org.mybatis.spring.SqlSessionTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -34,6 +38,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.test.context.transaction.AfterTransaction;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -42,6 +48,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @DisplayName("Asset Comprehensive Boundary & Integration Tests (境界・並行性・Recovery・スコープ検証)")
 class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
+
+    private List<Long> salesManagerScopeFixtureOrganizationIds = List.of();
+    private List<Long> salesManagerScopeFixtureAssetIds = List.of();
+    private List<Long> salesManagerScopeFixtureUserIds = List.of();
+    private List<Long> salesManagerScopeFixtureDocumentIds = List.of();
 
     @BeforeEach
     void bindTenantContext() {
@@ -74,6 +85,22 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         org.springframework.security.core.context.SecurityContextHolder.clearContext();
     }
 
+    @AfterTransaction
+    void assertSalesManagerScopeFixtureWasRolledBack() {
+        if (!salesManagerScopeFixtureOrganizationIds.isEmpty()) {
+            assertThat(organizationUnitMapper.selectBatchIds(salesManagerScopeFixtureOrganizationIds)).isEmpty();
+        }
+        if (!salesManagerScopeFixtureAssetIds.isEmpty()) {
+            assertThat(assetMapper.selectBatchIds(salesManagerScopeFixtureAssetIds)).isEmpty();
+        }
+        if (!salesManagerScopeFixtureUserIds.isEmpty()) {
+            assertThat(sysUserMapper.selectBatchIds(salesManagerScopeFixtureUserIds)).isEmpty();
+        }
+        if (!salesManagerScopeFixtureDocumentIds.isEmpty()) {
+            assertThat(documentMapper.selectBatchIds(salesManagerScopeFixtureDocumentIds)).isEmpty();
+        }
+    }
+
     @Autowired
     private AssetService assetService;
 
@@ -88,6 +115,18 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
 
     @Autowired
     private AssetEventMapper assetEventMapper;
+
+    @Autowired
+    private AssetLostIncidentMapper assetLostIncidentMapper;
+
+    @Autowired
+    private NotificationOutboxMapper notificationOutboxMapper;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private SqlSessionTemplate sqlSessionTemplate;
 
     @Autowired
     private LicenseService licenseService;
@@ -890,9 +929,12 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class)
     @DisplayName("Boundary 6-B: 営業/マネージャーの貸与・法人scopeをfail-closedで分離")
     void testSalesAndManagerScopeUsesAssignmentAndManagedOrganization() throws Exception {
+        assertThat(TransactionSynchronizationManager.isActualTransactionActive())
+                .as("共有H2の法人scope fixtureは結合テストのrollback transaction内で実行する")
+                .isTrue();
         String suffix = Long.toString(System.nanoTime());
         long legalA = 91001L;
         long legalB = 91002L;
@@ -905,6 +947,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .type("DEPARTMENT").validFrom(LocalDate.of(2026, 1, 1)).status("有効").build();
         organizationUnitMapper.insert(orgA);
         organizationUnitMapper.insert(orgB);
+        salesManagerScopeFixtureOrganizationIds = List.of(orgA.getId(), orgB.getId());
 
         Engineer engineerA = Engineer.builder().fullName("資産Scope要員A-" + suffix)
                 .employmentType("正社員").status("稼動中").organizationId(orgA.getId())
@@ -921,6 +964,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .tenantId("default").build();
         sysUserMapper.insert(sales);
         sysUserMapper.insert(manager);
+        salesManagerScopeFixtureUserIds = List.of(sales.getId(), manager.getId());
         userOrganizationMapper.insert(UserOrganization.builder().tenantId("default").userId(sales.getId()).organizationId(orgA.getId())
                 .primaryFlag(1).validFrom(LocalDate.of(2026, 1, 1)).build());
         userOrganizationMapper.insert(UserOrganization.builder().tenantId("default").userId(manager.getId()).organizationId(orgA.getId())
@@ -958,6 +1002,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         crossScopeEvidence.setLegalHoldFlag(0);
         crossScopeEvidence.setVersion(1L);
         documentMapper.insert(crossScopeEvidence);
+        salesManagerScopeFixtureDocumentIds = List.of(crossScopeEvidence.getId());
         assetAssignmentService.createAssignment(assignedB.getId(), "ENGINEER", engineerB.getId(),
                 LocalDate.now(), LocalDate.now().plusMonths(1), crossScopeEvidence.getId(), "B", 1L);
         assetAssignmentService.createAssignment(crossCorporation.getId(), "ENGINEER", engineerA.getId(),
@@ -979,11 +1024,43 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         assertThat(assetScopeService.isAccessible(sharedAssigned.getId(), "マネージャー", manager.getId())).isTrue();
 
         // 管理者/HR以外は、別法人資産にしか紐づかない文書IDを紛失台帳へ横取りできない。
-        assertThatThrownBy(() -> assetService.reportLost(
-                assignedA.getId(), "別法人文書を不正指定", manager.getId(), crossScopeEvidence.getId()))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("スコープ外");
-        assertThat(assetService.getById(assignedA.getId()).getStatus()).isEqualTo("ASSIGNED");
+        salesManagerScopeFixtureAssetIds = List.of(assignedA.getId(), assignedB.getId(), unassignedA.getId(),
+                unassignedB.getId(), crossCorporation.getId(), sharedAssigned.getId());
+        Asset assignedABeforeRejectedLostReport = assetMapper.selectById(assignedA.getId());
+        long reportedLostEventsBefore = assetEventMapper.selectCount(new LambdaQueryWrapper<AssetEvent>()
+                .eq(AssetEvent::getAssetId, assignedA.getId()).eq(AssetEvent::getEventType, "REPORTED_LOST"));
+        long lostIncidentsBefore = assetLostIncidentMapper.selectCount(new LambdaQueryWrapper<AssetLostIncident>()
+                .eq(AssetLostIncident::getAssetId, assignedA.getId()));
+        long evidenceLinksBefore = documentLinkMapper.selectCount(new LambdaQueryWrapper<DocumentLink>()
+                .eq(DocumentLink::getDocumentId, crossScopeEvidence.getId()));
+        long lostIncidentOutboxBefore = notificationOutboxMapper.selectCount(new LambdaQueryWrapper<NotificationOutbox>()
+                .like(NotificationOutbox::getDedupeKey, "asset:lost:"));
+
+        TransactionTemplate nestedTransaction = new TransactionTemplate(transactionManager);
+        nestedTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
+        assertThatThrownBy(() -> nestedTransaction.execute(status -> {
+            assertThat(status.hasSavepoint()).as("拒否試行は実際のsavepoint境界でロールバックする").isTrue();
+            assetService.reportLost(assignedA.getId(), "別法人文書を不正指定", manager.getId(), crossScopeEvidence.getId());
+            return null;
+        })).isInstanceOfSatisfying(BusinessException.class, exception -> {
+            assertThat(exception.getCode()).isEqualTo(403);
+            assertThat(exception).hasMessageContaining("スコープ外");
+        });
+
+        // savepoint rollback後、MyBatisのtransaction-local cacheを破棄してDB状態を読み直す。
+        sqlSessionTemplate.clearCache();
+        Asset assignedAAfterRejectedLostReport = assetMapper.selectById(assignedA.getId());
+        assertThat(assignedAAfterRejectedLostReport.getStatus()).isEqualTo("ASSIGNED");
+        assertThat(assignedAAfterRejectedLostReport.getVersion()).isEqualTo(assignedABeforeRejectedLostReport.getVersion());
+        assertThat(assetEventMapper.selectCount(new LambdaQueryWrapper<AssetEvent>()
+                .eq(AssetEvent::getAssetId, assignedA.getId()).eq(AssetEvent::getEventType, "REPORTED_LOST")))
+                .isEqualTo(reportedLostEventsBefore);
+        assertThat(assetLostIncidentMapper.selectCount(new LambdaQueryWrapper<AssetLostIncident>()
+                .eq(AssetLostIncident::getAssetId, assignedA.getId()))).isEqualTo(lostIncidentsBefore);
+        assertThat(documentLinkMapper.selectCount(new LambdaQueryWrapper<DocumentLink>()
+                .eq(DocumentLink::getDocumentId, crossScopeEvidence.getId()))).isEqualTo(evidenceLinksBefore);
+        assertThat(notificationOutboxMapper.selectCount(new LambdaQueryWrapper<NotificationOutbox>()
+                .like(NotificationOutbox::getDedupeKey, "asset:lost:"))).isEqualTo(lostIncidentOutboxBefore);
 
         // 紛失インシデントだけにリンクされた文書も、担当範囲内のマネージャーは参照できる。
         Asset managerLostAsset = Asset.builder().assetTag("AST-SCOPE-LOST-" + suffix)
@@ -1002,6 +1079,12 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         lostEvidence.setLegalHoldFlag(0);
         lostEvidence.setVersion(1L);
         documentMapper.insert(lostEvidence);
+        salesManagerScopeFixtureAssetIds = new ArrayList<>(salesManagerScopeFixtureAssetIds);
+        salesManagerScopeFixtureAssetIds.add(managerLostAsset.getId());
+        salesManagerScopeFixtureAssetIds = List.copyOf(salesManagerScopeFixtureAssetIds);
+        salesManagerScopeFixtureDocumentIds = new ArrayList<>(salesManagerScopeFixtureDocumentIds);
+        salesManagerScopeFixtureDocumentIds.add(lostEvidence.getId());
+        salesManagerScopeFixtureDocumentIds = List.copyOf(salesManagerScopeFixtureDocumentIds);
         assetService.reportLost(managerLostAsset.getId(), "担当範囲内の紛失", 1L, lostEvidence.getId());
         mockMvc.perform(get("/api/documents/" + lostEvidence.getId())
                         .with(loginAs(manager)))

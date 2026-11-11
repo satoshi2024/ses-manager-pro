@@ -89,7 +89,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 要員セルフサービスポータルV2（S14）の全機能一気通貫動作、本人A/BのPII非漏洩・IDOR遮断、
  * 既存マイ勤怠導線回帰、各画面のレンダリング・権限分離を網羅的に検証する。
  */
-@SpringBootTest
+// schema-locationsの再実行でengineer採番だけが戻る共有H2を避け、無トランザクションfixtureを分離する。
+@SpringBootTest(properties = {
+        "spring.datasource.url=jdbc:h2:mem:engineer-self-service-portal-m;DB_CLOSE_DELAY=0;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL"
+})
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)

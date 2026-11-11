@@ -4,6 +4,8 @@ import com.ses.entity.ExternalAccountReference;
 import com.ses.service.provider.ExternalAccountProviderClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.util.StringUtils;
 
 import java.util.Map;
@@ -15,6 +17,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 @Slf4j
 @Service
+@Profile("!prod")
+@ConditionalOnProperty(name = "external-account.provider", havingValue = "mock", matchIfMissing = true)
 public class MockExternalAccountProviderClientImpl implements ExternalAccountProviderClient {
 
     private final Map<Long, RevokeConfirmationStatus> mockStatusMap = new ConcurrentHashMap<>();

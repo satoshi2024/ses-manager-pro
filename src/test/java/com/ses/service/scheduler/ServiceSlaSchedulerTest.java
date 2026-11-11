@@ -29,13 +29,16 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -95,6 +98,9 @@ class ServiceSlaSchedulerTest {
 
     @Autowired
     private SysUserMapper userMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @MockBean
     private NotificationService notificationService;
@@ -287,6 +293,51 @@ class ServiceSlaSchedulerTest {
         // admin1 および admin2 宛てに通知が送信されたこと
         verify(notificationService, atLeastOnce()).publishToUser(eq(admin1.getId()), anyString(), anyString(), anyString(), anyString(), anyString(), anyString());
         verify(notificationService, atLeastOnce()).publishToUser(eq(admin2.getId()), anyString(), anyString(), anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("不適格recipientしかいないSLAは件名を通知せずrecipientCount=0でretry台帳へ残す")
+    void noCurrentlyEligibleRecipientDoesNotPublishNotification() {
+        String tenantId = "nf02-no-recipient-" + UUID.randomUUID();
+        AccountingTenantContextHolder.setTenantId(tenantId);
+        Customer customer = Customer.builder().companyName("recipient-scope-" + UUID.randomUUID()).build();
+        customer.setTenantId(tenantId);
+        customerMapper.insert(customer);
+
+        SysUser hr = new SysUser();
+        hr.setTenantId(tenantId);
+        hr.setUsername("hr_recipient_" + UUID.randomUUID());
+        hr.setPassword("pass123");
+        hr.setRealName("不適格HR");
+        hr.setRole("HR");
+        hr.setStatus(1);
+        userMapper.insert(hr);
+
+        String subject = "機密件名-RECIPIENT-SCOPE-" + UUID.randomUUID();
+        ServiceRequest req = ServiceRequest.builder()
+                .requestNo("REQ-" + UUID.randomUUID().toString().substring(0, 8))
+                .tenantId(tenantId).customerId(customer.getId()).ownerUserId(hr.getId())
+                .status("IN_PROGRESS").priority("P1").category("QUALITY").channel("INTERNAL")
+                .subject(subject).description("private detail").build();
+        requestMapper.insert(req);
+        ServiceSlaClock clock = ServiceSlaClock.builder()
+                .serviceRequestId(req.getId()).roundNo(1).policyId(1L).status("RUNNING")
+                .responseDeadline(LocalDateTime.now().minusMinutes(2))
+                .resolveDeadline(LocalDateTime.now().plusHours(2))
+                .responseBreached(false).resolveBreached(false).build();
+        clockMapper.insert(clock);
+
+        monitoringService.checkSlaBreaches(LocalDateTime.now());
+
+        verify(notificationService, never()).publishToUser(any(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString());
+        String dedupeKey = "SLA_FIRST:" + req.getId() + ":1:RESPONSE:FIRST";
+        var escalation = escalationMapper.selectByDedupeKeyAndTenant(dedupeKey, tenantId);
+        assertNotNull(escalation);
+        assertEquals(0, escalation.getRecipientCount());
+        assertEquals("RETRY", escalation.getStatus());
+        Integer outboxRows = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_notification_outbox WHERE dedupe_key=?", Integer.class, dedupeKey);
+        assertEquals(0, outboxRows);
     }
 
     @Test

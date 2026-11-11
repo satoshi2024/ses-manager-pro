@@ -74,6 +74,7 @@ class LifecycleEvidenceAndCompensationTest {
                 .realName("管理者B2")
                 .role("管理者")
                 .status(1)
+                .tenantId("default")
                 .build();
         sysUserMapper.insert(adminUser);
 
@@ -83,6 +84,7 @@ class LifecycleEvidenceAndCompensationTest {
                 .realName("人事B2")
                 .role("HR")
                 .status(1)
+                .tenantId("default")
                 .build();
         sysUserMapper.insert(hrUser);
 
@@ -99,6 +101,7 @@ class LifecycleEvidenceAndCompensationTest {
                 .fullName("要員B2テスト")
                 .status("稼動中")
                 .employmentType("正社員")
+                .tenantId("default")
                 .build();
         engineer.setOrganizationId(org.getId());
         engineerMapper.insert(engineer);
@@ -176,6 +179,28 @@ class LifecycleEvidenceAndCompensationTest {
         assertEquals(1, links.size());
         assertEquals(validDocument.getId(), links.get(0).getDocumentId());
         assertEquals("原本確認完了", links.get(0).getRemarks());
+    }
+
+    @Test
+    @DisplayName("通常完了経路からDUAL_CONFIRMATIONタスクを完了できないこと")
+    void dualConfirmationIsRejectedByOrdinaryCompletion() {
+        LifecycleTask task = taskMapper.selectById(taskId);
+        task.setStatus("IN_PROGRESS");
+        task.setEvidenceType("DUAL_CONFIRMATION");
+        taskMapper.updateById(task);
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                taskService.completeTask(taskId, adminUser.getId(), CompleteLifecycleTaskCommand.builder()
+                        .completionComment("単独完了の試行")
+                        .documentId(validDocument.getId())
+                        .build()));
+
+        assertEquals(409, ex.getCode());
+        assertEquals("IN_PROGRESS", taskMapper.selectById(taskId).getStatus());
+        assertTrue(evidenceLinkMapper.selectByTaskId(taskId).isEmpty());
+        assertTrue(eventMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<LifecycleEvent>()
+                .eq(LifecycleEvent::getTaskId, taskId)
+                .eq(LifecycleEvent::getEventType, "TASK_COMPLETED")).isEmpty());
     }
 
     @Test

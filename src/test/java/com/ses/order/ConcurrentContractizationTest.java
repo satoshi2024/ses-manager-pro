@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -38,10 +39,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 同一注文明細の契約化を実MySQL 2txで競合させ、DB一意制約を最終防衛線として固定する。 */
-@SpringBootTest
-@ActiveProfiles("test")
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
+@SpringBootTest
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@ActiveProfiles("test")
 @EnableDefaultTenantTestContext
 class ConcurrentContractizationTest {
 

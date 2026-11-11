@@ -978,15 +978,16 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (ownerUserId == null) {
             return;
         }
-        SysUser user = sysUserMapper.selectById(ownerUserId);
-        if (user == null || Integer.valueOf(1).equals(user.getDeletedFlag())) {
-            throw BusinessException.of(400, "指定された担当ユーザーが存在しません: " + ownerUserId);
-        }
-        if (user.getStatus() == null || user.getStatus() != 1) {
-            throw BusinessException.of(400, "指定された担当ユーザーは無効です: " + user.getRealName());
+        String tenantId = currentTenant();
+        SysUser user = sysUserMapper.selectByIdAndTenant(ownerUserId, tenantId);
+        // 存在/tenant/有効状態は同一のsafe errorにし、別tenantや無効userの識別情報を返さない。
+        if (user == null || !tenantId.equals(user.getTenantId())
+                || !Integer.valueOf(1).equals(user.getStatus())
+                || !Integer.valueOf(0).equals(user.getDeletedFlag())) {
+            throw BusinessException.of(400, "指定された担当ユーザーを設定できません");
         }
         if (!Set.of("管理者", "営業", "マネージャー").contains(user.getRole())) {
-            throw BusinessException.of(400, "指定されたユーザーは内部担当者として設定できません（管理者・営業・マネージャーのみ設定可能）: " + user.getRole());
+            throw BusinessException.of(400, "指定された担当ユーザーを設定できません");
         }
     }
 

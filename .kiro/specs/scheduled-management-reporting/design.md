@@ -35,6 +35,8 @@
 
 recipient previewのscope判定は、配布対象がreportの全データを参照可能であることを要求する。すなわち、マネージャーreportでは保存済みowner scopeがrecipientの現在scopeの部分集合でなければならず、全社reportは管理者recipientだけを許可する。現在scopeの縮小、role変更、組織異動、再認証失敗、link期限切れはdownloadをdenyする。`MANAGEMENT_REPORT` documentは汎用Document download APIからもdenyし、delivery token経路だけがdownload bytesを返す。
 
+再認証はdelivery共通の`reauthenticated_at`を認可根拠にしない。成功したpassword確認後、server-side sessionへtenant/user/delivery/current recipient-scope hash/10分expiryを持つgrantを保存し、現在のSpring `Authentication` instanceとsession IDにも束縛する。session rotation/logout、別session、tenant/user/delivery/scope差異、authentication instanceまたはauthority変更、期限切れはfail-closedとし再認証を要求する。認証sessionがserialization/replicationで復元されてgrant内のauthentication instanceと一致しない場合も、安全側で再認証を要求する。各downloadではdeliveryとlink/token、recipient、現時点のrole/organization scope、scope hash、document snapshot/access policyを引き続き再検証し、`reauthenticated_at`は監査時刻としてのみ保持する。
+
 | subject | operation | visibility owner | 承認済み制御 |
 |---|---|---|---|
 | report template/version | create/update/publish | 管理者/マネージャーの承認済み scope | version CAS、変更監査 |
