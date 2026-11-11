@@ -264,7 +264,7 @@ public class ImportMetadataService {
         }
         byte[] hash = HexFormat.of().parseHex(request.sourceSha256Hex());
         byte[] documentHash = jdbc.query("""
-                SELECT v.sha256 FROM t_document d JOIN t_document_version v
+                SELECT UNHEX(v.sha256) FROM t_document d JOIN t_document_version v
                   ON v.tenant_id=d.tenant_id AND v.document_id=d.id
                 WHERE d.tenant_id=? AND d.id=? AND d.deleted_flag=0 AND d.document_type='IMPORT'
                   AND d.legal_entity_id=? AND d.legal_hold_flag=0
