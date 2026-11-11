@@ -78,6 +78,10 @@ public interface DocumentService {
     DocumentVersion authorizeImportJobDownload(Long jobId, Long documentId, Long documentVersionId,
                                                 Integer versionNo, String expectedSha256);
 
+    /** importの再利用時に、認可済みexact versionをStorageからbounded streamで再hashする。 */
+    void verifyImportJobStoredBytes(Long jobId, Long documentId, Long documentVersionId,
+                                    Integer versionNo, String expectedSha256);
+
     /**
      * 文書に法的holdを設定または解除する。
      * hold中は廃棄申請を受け付けない（R4.2）。

@@ -51,6 +51,7 @@ public class ImportCsvUploadCommitService {
                                           ImportAuthorizedContext current, StagedImportDocument staged) {
         if (token == null || manifest == null || staged == null || staged.document() == null
                 || staged.version() == null || token.fixtureKey() == null || token.fixtureKey().isBlank()
+                || staged.operationId() == null || staged.operationId().isBlank()
                 || token.actorUserId() < 1 || token.sourceSystemId() < 1 || token.sourceVersion() < 1
                 || token.entity() != ImportEntity.CUSTOMER || !SesImportV1Schema.VERSION.equals(token.schemaVersion())
                 || token.encoding() == null

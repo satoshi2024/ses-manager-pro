@@ -127,7 +127,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         String tenantId = currentTenant(request);
         Long legalEntityId = request.getLegalEntityId();
         if (legalEntityId == null || legalEntityContextService == null
-                || legalEntityContextService.requireCurrentLegalEntityId() != legalEntityId) {
+                || !java.util.Objects.equals(legalEntityContextService.requireCurrentLegalEntityId(), legalEntityId)) {
             throw BusinessException.of(403, "error.tenant.mismatch");
         }
         validateDocumentType(request.getDocumentType(), "INCOMING");
@@ -152,11 +152,13 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         }
 
         String storageKey = generateStorageKey();
+        String operationId = UUID.randomUUID().toString();
         try {
             try (InputStream input = Files.newInputStream(boundedTempFile)) {
                 documentStorage.put(storageKey, input, true);
             }
             documentStorage.promote(storageKey);
+            verifyStoredImportObject(storageKey, expectedSizeBytes, expectedSha256, operationId);
             ActorAttribution actor = resolveActor(request);
             Document document = buildDocument(request, tenantId, legalEntityId, actor);
             DocumentVersion version = buildVersion(request, tenantId, null, storageKey,
@@ -164,9 +166,9 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             version.setBusinessKey("IMPORT_UPLOAD:" + UUID.randomUUID());
             version.setVersionDiscriminator("v1");
             version.setScanStatus("CLEAN");
-            return new StagedImportDocument(document, version, storageKey);
+            return new StagedImportDocument(document, version, storageKey, operationId);
         } catch (Exception failure) {
-            cleanupStorageAfterFailure(storageKey);
+            deleteImportStorageOrThrow(storageKey, operationId);
             if (failure instanceof RuntimeException runtime) throw runtime;
             throw new RuntimeException("CSV import storage stage failed", failure);
         }
@@ -176,10 +178,43 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     public void discardImportStage(StagedImportDocument staged) {
         if (staged == null || staged.storageKey() == null || staged.version() == null
                 || !staged.storageKey().equals(staged.version().getStorageKey())
-                || staged.document() == null || !"IMPORT".equals(staged.document().getDocumentType())) {
+                || staged.document() == null || !"IMPORT".equals(staged.document().getDocumentType())
+                || staged.operationId() == null || staged.operationId().isBlank()) {
             return;
         }
-        cleanupStorageAfterFailure(staged.storageKey());
+        deleteImportStorageOrThrow(staged.storageKey(), staged.operationId());
+    }
+
+    private void verifyStoredImportObject(String storageKey, long expectedSize, String expectedSha256,
+                                         String operationId) {
+        try (InputStream input = documentStorage.open(storageKey)) {
+            if (input == null) throw new java.io.IOException("storage returned no stream");
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            long count = 0;
+            for (int read; (read = input.read(buffer)) != -1;) {
+                count += read;
+                if (count > 64L * 1024 * 1024) throw new java.io.IOException("stored import object exceeds limit");
+                digest.update(buffer, 0, read);
+            }
+            if (count != expectedSize || !expectedSha256.equals(HexFormat.of().formatHex(digest.digest()))) {
+                throw BusinessException.of(409, "error.import.storedBytesMismatch");
+            }
+        } catch (BusinessException failure) {
+            throw failure;
+        } catch (Exception failure) {
+            throw BusinessException.of(500, "error.import.storageVerificationFailed");
+        }
+    }
+
+    private void deleteImportStorageOrThrow(String storageKey, String operationId) {
+        try {
+            documentStorage.delete(storageKey);
+        } catch (Exception failure) {
+            log.error("[文書台帳] import storage cleanup failed: operationId={} storageKey={} exceptionClass={}",
+                    operationId, storageKey, failure.getClass().getSimpleName());
+            throw BusinessException.of(500, "error.import.storageCleanupFailed");
+        }
     }
 
     private static String sha256File(Path path) throws java.io.IOException {
@@ -527,6 +562,33 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         fileScope.assertImportJobDownloadAllowed(jobId, documentId, documentVersionId, versionNo,
                 version.getStorageKey(), version.getSha256());
         return version;
+    }
+
+    @Override
+    public void verifyImportJobStoredBytes(Long jobId, Long documentId, Long documentVersionId,
+                                           Integer versionNo, String expectedSha256) {
+        DocumentVersion version = authorizeImportJobDownload(jobId, documentId, documentVersionId,
+                versionNo, expectedSha256);
+        try (InputStream input = documentStorage.open(version.getStorageKey())) {
+            if (input == null) throw new java.io.IOException("storage returned no stream");
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            long count = 0;
+            for (int read; (read = input.read(buffer)) != -1;) {
+                count += read;
+                if (count > 64L * 1024 * 1024) throw new java.io.IOException("stored import object exceeds limit");
+                digest.update(buffer, 0, read);
+            }
+            if (version.getSizeBytes() == null || count != version.getSizeBytes()
+                    || !expectedSha256.equals(HexFormat.of().formatHex(digest.digest()))) {
+                throw BusinessException.of(409, "error.import.storedBytesMismatch");
+            }
+            authorizeImportJobDownload(jobId, documentId, documentVersionId, versionNo, expectedSha256);
+        } catch (BusinessException failure) {
+            throw failure;
+        } catch (Exception failure) {
+            throw BusinessException.of(500, "error.import.storageVerificationFailed");
+        }
     }
 
     private void linkWithinRegistration(Long documentId, String tenantId, String targetType, Long targetId) {

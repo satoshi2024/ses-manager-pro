@@ -71,6 +71,7 @@ public class DocumentMetadataCommitService {
     public Document commitImportDocument(StagedImportDocument staged) {
         if (staged == null || staged.document() == null || staged.version() == null
                 || staged.storageKey() == null || !staged.storageKey().equals(staged.version().getStorageKey())
+                || staged.operationId() == null || staged.operationId().isBlank()
                 || !"IMPORT".equals(staged.document().getDocumentType())
                 || !"CLEAN".equals(staged.version().getScanStatus())
                 || staged.document().getId() != null || staged.version().getId() != null
@@ -78,7 +79,7 @@ public class DocumentMetadataCommitService {
                 || staged.version().getSha256() == null || !staged.version().getSha256().matches("[0-9a-f]{64}")) {
             throw BusinessException.of(400, "error.import.invalidStagedDocument");
         }
-        registerImportStorageRollback(staged.storageKey());
+        registerImportStorageRollback(staged.storageKey(), staged.operationId());
         documentMapper.insert(staged.document());
         staged.version().setDocumentId(staged.document().getId());
         documentVersionMapper.insert(staged.version());
@@ -86,7 +87,7 @@ public class DocumentMetadataCommitService {
         return staged.document();
     }
 
-    private void registerImportStorageRollback(String storageKey) {
+    private void registerImportStorageRollback(String storageKey, String operationId) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             throw new IllegalStateException("import metadata commit requires transaction synchronization");
         }
@@ -98,8 +99,8 @@ public class DocumentMetadataCommitService {
                         documentStorage.delete(storageKey);
                     } catch (Exception failure) {
                         org.slf4j.LoggerFactory.getLogger(DocumentMetadataCommitService.class)
-                                .error("[文書台帳] import rollback補償削除失敗: storageKey={} exceptionClass={}",
-                                        storageKey, failure.getClass().getSimpleName());
+                                .error("[文書台帳] import rollback補償削除失敗: operationId={} storageKey={} exceptionClass={}",
+                                        operationId, storageKey, failure.getClass().getSimpleName());
                     }
                 }
             }

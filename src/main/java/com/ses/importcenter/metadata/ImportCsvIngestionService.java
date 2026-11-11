@@ -20,6 +20,7 @@ import java.util.HexFormat;
 /** 同期raw CSV ingress。認可/admission、bounded temp、CLEAN stage、短いmetadata commitを順に実行する。 */
 @Service
 public class ImportCsvIngestionService {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ImportCsvIngestionService.class);
     private static final long MAX_RAW_BYTES = 64L * 1024 * 1024;
     private final ImportMetadataAuthorizationService authorization;
     private final ImportMetadataService metadata;
@@ -52,6 +53,7 @@ public class ImportCsvIngestionService {
         Path temp = null;
         StagedImportDocument staged = null;
         boolean committed = false;
+        boolean preserveStagedForOutcomeCheck = false;
         try {
             temp = Files.createTempFile("ses-import-", ".csv");
             RawDigest raw = copyBounded(bodySupplier.open(), temp);
@@ -90,18 +92,58 @@ public class ImportCsvIngestionService {
                 result = commit.commit(token, content, staged);
             } catch (BusinessException conflict) {
                 if (conflict.getCode() != 409) throw conflict;
+                try {
+                    ImportUploadJobDetail ours = metadata.findCommittedUploadForStage(source, headers.encoding(),
+                            raw.sha256(), staged);
+                    if (ours != null) {
+                        committed = true;
+                        return ours;
+                    }
+                } catch (RuntimeException readbackFailure) {
+                    preserveStagedForOutcomeCheck = true;
+                    log.error("Import conflict readback is uncertain; retain staged object for reconciliation: operationId={} storageKey={} failureClass={}",
+                            staged.operationId(), staged.storageKey(), readbackFailure.getClass().getSimpleName());
+                    throw conflict;
+                }
                 ImportUploadJobDetail winner = metadata.findOrReuseExistingUpload(source, headers.encoding(), raw.sha256());
                 if (winner == null) throw conflict;
                 return winner;
+            } catch (RuntimeException uncertainCommit) {
+                try {
+                    ImportUploadJobDetail ours = metadata.findCommittedUploadForStage(source, headers.encoding(),
+                            raw.sha256(), staged);
+                    if (ours != null) {
+                        committed = true;
+                        return ours;
+                    }
+                    ImportUploadJobDetail winner = metadata.findOrReuseExistingUpload(source, headers.encoding(),
+                            raw.sha256());
+                    if (winner != null) return winner;
+                } catch (RuntimeException readbackFailure) {
+                    preserveStagedForOutcomeCheck = true;
+                    log.error("Import metadata commit outcome is uncertain; retain staged object for reconciliation: operationId={} storageKey={} failureClass={}",
+                            staged.operationId(), staged.storageKey(), readbackFailure.getClass().getSimpleName());
+                }
+                if (!preserveStagedForOutcomeCheck) {
+                    preserveStagedForOutcomeCheck = true;
+                    log.error("Import metadata commit outcome is uncertain and no committed row is visible; retain staged object for reconciliation: operationId={} storageKey={} failureClass={}",
+                            staged.operationId(), staged.storageKey(), uncertainCommit.getClass().getSimpleName());
+                }
+                throw uncertainCommit;
             }
             committed = true;
             return result;
         } catch (IOException failure) {
             throw BusinessException.of(400, "error.import.uploadReadFailed");
         } finally {
-            if (staged != null && !committed) documents.discardImportStage(staged);
-            if (temp != null) {
-                try { Files.deleteIfExists(temp); } catch (IOException ignored) { }
+            try {
+                if (staged != null && !committed && !preserveStagedForOutcomeCheck) {
+                    documents.discardImportStage(staged);
+                }
+            } finally {
+                if (temp != null) {
+                    try { Files.deleteIfExists(temp); } catch (IOException ignored) { }
+                }
             }
         }
     }
