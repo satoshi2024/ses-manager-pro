@@ -35,6 +35,7 @@ import java.util.TreeSet;
  * F2 sessionは最大100,000件までexternal key setを保持するため、heapはnonempty row数に対してO(n)となる。 */
 @Service
 public class ImportValidationAppendService {
+    private static final ReadOnlyImportResolver FAIL_CLOSED_RESOLVER = (type, tenant, legalEntity, key) -> null;
     private static final int CHUNK_ROWS = 250;
     private static final int PREFIX_PAGE_SIZE = 250;
     private static final String ROW_COMMIT_DOMAIN = "SES-IMPORT-VALIDATION-ROW-V1";
@@ -46,7 +47,7 @@ public class ImportValidationAppendService {
     private final ImportValidationLifecycleService lifecycle;
     private final ObjectMapper objectMapper;
     private final ImportValidationPipeline pipeline;
-    private final ReadOnlyImportResolver failClosedResolver;
+    private final ReadOnlyImportResolver validationResolver;
 
     @Autowired
     public ImportValidationAppendService(JdbcTemplate jdbc, ImportMetadataService metadata,
@@ -58,12 +59,18 @@ public class ImportValidationAppendService {
     ImportValidationAppendService(JdbcTemplate jdbc, ImportMetadataService metadata,
                                   ImportValidationLifecycleService lifecycle, ObjectMapper objectMapper,
                                   ImportValidationPipeline pipeline) {
+        this(jdbc, metadata, lifecycle, objectMapper, pipeline, FAIL_CLOSED_RESOLVER);
+    }
+
+    ImportValidationAppendService(JdbcTemplate jdbc, ImportMetadataService metadata,
+                                  ImportValidationLifecycleService lifecycle, ObjectMapper objectMapper,
+                                  ImportValidationPipeline pipeline, ReadOnlyImportResolver validationResolver) {
         this.jdbc = jdbc;
         this.metadata = metadata;
         this.lifecycle = lifecycle;
         this.objectMapper = objectMapper;
         this.pipeline = Objects.requireNonNull(pipeline);
-        this.failClosedResolver = (type, tenant, legalEntity, key) -> null;
+        this.validationResolver = Objects.requireNonNull(validationResolver);
     }
 
     /** callerはrow metadataを渡せない。run leaseからexact inputを導出してsource全体を再検証する。 */
@@ -77,7 +84,7 @@ public class ImportValidationAppendService {
         var snapshot = lifecycle.appendSnapshot(authorizedLease);
         Map<String, String> mapping = loadMapping(snapshot);
         ValidationContext context = new ValidationContext(snapshot.context().tenantId(),
-                Long.toString(snapshot.context().legalEntityId()), failClosedResolver);
+                Long.toString(snapshot.context().legalEntityId()), validationResolver);
 
         ScanResult verified = scan(snapshot, mapping, context, false, authorizedLease);
         if (!MessageDigest.isEqual(snapshot.sourceSha(), HexFormat.of().parseHex(verified.sourceSha256()))) conflict();
@@ -102,7 +109,7 @@ public class ImportValidationAppendService {
         ImportValidationLifecycleService.AppendSnapshot snapshot = lifecycle.appendSnapshot(started);
         Map<String, String> mapping = loadMapping(snapshot);
         ValidationContext context = new ValidationContext(snapshot.context().tenantId(),
-                Long.toString(snapshot.context().legalEntityId()), failClosedResolver);
+                Long.toString(snapshot.context().legalEntityId()), validationResolver);
         ScanResult result = scan(snapshot, mapping, context, false, started, true);
         if (!MessageDigest.isEqual(snapshot.sourceSha(), HexFormat.of().parseHex(result.sourceSha256()))) conflict();
         var counters = result.counters();

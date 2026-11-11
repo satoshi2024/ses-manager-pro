@@ -2234,7 +2234,7 @@ class ImportValidationSealRealMySqlTest {
         jdbc.update("DELETE FROM t_import_source_system WHERE tenant_id=?", TENANT);
     }
 
-    private static void createSchema(JdbcTemplate j) {
+    static void createSchema(JdbcTemplate j) {
         j.execute("CREATE TABLE IF NOT EXISTS t_import_source_system(tenant_id VARCHAR(100),id BIGINT,version_no BIGINT,source_code VARCHAR(64),status VARCHAR(16),PRIMARY KEY(tenant_id,id),CONSTRAINT chk_import_source_status CHECK (status IN ('ACTIVE', 'DISABLED'))) ENGINE=InnoDB");
         j.execute("CREATE TABLE IF NOT EXISTS t_document(tenant_id VARCHAR(100),id BIGINT,legal_entity_id VARCHAR(100),legal_hold_flag INT,retention_until DATE,deleted_flag INT,PRIMARY KEY(tenant_id,id)) ENGINE=InnoDB");
         j.execute("CREATE TABLE IF NOT EXISTS t_document_version(tenant_id VARCHAR(100),document_id BIGINT,id BIGINT,version_no INT,sha256 VARCHAR(64),scan_status VARCHAR(16),deleted_flag INT,PRIMARY KEY(tenant_id,id)) ENGINE=InnoDB");

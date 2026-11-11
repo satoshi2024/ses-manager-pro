@@ -115,6 +115,31 @@ class ImportValidationServiceTest {
     }
 
     @Test
+    void referenceStatusesAndUnknownResolverRemainFailClosed() throws Exception {
+        CanonicalImportRow project = CanonicalRowFactory.create(ImportEntity.PROJECT,
+                parse(ImportEntity.PROJECT, "externalKey,projectName,customerExternalKey\nP-SYN-STATUS,案件,C-SYN-1\n").get(0));
+        for (LookupStatus status : List.of(LookupStatus.NOT_FOUND, LookupStatus.LOGICALLY_DELETED,
+                LookupStatus.AMBIGUOUS, LookupStatus.OUT_OF_SCOPE)) {
+            var result = validator.validate(project, new ValidationContext("tenant-synthetic", "legal-synthetic",
+                    (type, tenant, legal, key) -> new ReferenceLookup(status, List.of())), new ImportValidationSession());
+            assertFalse(result.accepted(), status.name());
+            String expectedCode = switch (status) {
+                case NOT_FOUND -> "REFERENCE_NOT_FOUND";
+                case LOGICALLY_DELETED -> "REFERENCE_DELETED";
+                case AMBIGUOUS -> "REFERENCE_AMBIGUOUS";
+                case OUT_OF_SCOPE -> "REFERENCE_OUT_OF_SCOPE";
+                case UNIQUE_ACTIVE -> throw new AssertionError("positive result is outside negative matrix");
+            };
+            assertTrue(result.findings().stream().anyMatch(f -> f.code().equals(expectedCode)), status.name());
+        }
+        var unknown = validator.validate(project,
+                new ValidationContext("tenant-synthetic", "legal-synthetic", (type, tenant, legal, key) -> null),
+                new ImportValidationSession());
+        assertTrue(unknown.findings().stream().anyMatch(f -> f.code().equals("REFERENCE_LOOKUP_UNKNOWN")));
+        assertFalse(unknown.accepted());
+    }
+
+    @Test
     void jpyIsExactIntegerNoSilentRoundingOrEmptyToZero() {
         assertEquals(new BigDecimal("12"), ImportAmountParser.parse(FieldValue.of("12")).value());
         assertEquals(new BigDecimal("12"), ImportAmountParser.parse(FieldValue.of("00012.000")).value());
