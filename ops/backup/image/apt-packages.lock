@@ -1,0 +1,13 @@
+# ============================================================
+# ツールイメージの Debian パッケージ版の lock（install-toolchain.sh が build 時に照合する）
+#
+# 形式: 1 行 1 パッケージ、「パッケージ名<TAB>版<TAB>アーキテクチャ」（dpkg-query の ii 行と同じ）。
+#   # で始まる行と空行は無視する。
+# - 記載が 1 行も無い場合（現在の状態）: 版は固定せず、build 結果の一覧を image 内
+#   /usr/local/share/ses-backup/image-manifest/dpkg-packages.tsv に記録するだけ（WARN を出す）。
+# - 記載がある場合: build 結果の一覧（base image 由来を含む全 ii パッケージ）と完全一致しなければ
+#   build を失敗させる。Debian の更新で版が変わったときは差分を確認・承認してから更新する。
+#
+# 反映手順: 検証済みの build で image/tool-image.sh build-record が出力した dpkg-packages.tsv を、
+# 内容を確認したうえでこの行の下へそのまま追記する（README「ツールイメージの build・配布」参照）。
+# ============================================================

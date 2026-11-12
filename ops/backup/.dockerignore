@@ -1,0 +1,4 @@
+# ツールイメージの build context から integration の作業ディレクトリ（合成 secret・restic repository を含む）
+# と退避分を除く。Dockerfile が COPY するのは image/・lib/・providers/・*.sh・tests/integration-pitr.sh だけ。
+tests/.integration-work
+tests/.integration-work.*

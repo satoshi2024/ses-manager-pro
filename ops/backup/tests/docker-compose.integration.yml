@@ -1,15 +1,19 @@
 # HFP-03-011 integration suite（実 MySQL PITR の自動検証）
 #
-# - pinned MySQL 8.0.36（source/target を別コンテナ・専用 network で分離）
+# - pinned MySQL 8.0.36（source/target を別コンテナ・専用 network で分離）。tag だけでなく digest で固定する。
+#   digest は manifest list（index）のもの。2 つの独立した出典で一致を確認済み:
+#   .kiro/specs/database-backup-recovery/baseline.md §4.1（2026-08-14 docker inspect 実測）と
+#   Docker Hub の tag API（library/mysql:8.0.36 の digest）。Runner は docker pull 後の
+#   docker image inspect --format '{{index .RepoDigests 0}}' mysql:8.0.36 で再確認する。
 # - host port を公開しない（internal network）
 # - パスワードは env（INTEGRATION_SRC_PW / INTEGRATION_TGT_PW）から注入する
 #   synthetic secret（repo には値を書かない）
-# - tool イメージは ops/backup/Dockerfile から build
+# - tool イメージは ops/backup/Dockerfile から build（Dockerfile の SHA-256 / fingerprint 検証込み）
 # - 共有 work ディレクトリ（INTEGRATION_WORK_DIR）に evidence を出力
 name: ses-backup-integration
 
 x-mysql-common: &mysql-common
-  image: mysql:8.0.36
+  image: mysql:8.0.36@sha256:a532724022429812ec797c285c1b540a644c15e248579c6bfdf12a8fbaab4964
   networks: [ses-bkup]
   restart: "no"
 

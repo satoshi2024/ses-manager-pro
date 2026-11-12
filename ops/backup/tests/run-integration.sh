@@ -73,6 +73,8 @@ WORK_PLAN_HERE=""
 WORK_PLAN_ROTATE_RUN=""
 WORK_PLAN_EXISTED=0
 ROTATE_OLD_RUN=""
+# 本 run の PID 名前空間の識別子（runtime_identity）。判定できなければ unknown。
+RUNTIME_NS=unknown
 
 compose() {
   docker compose -f "$COMPOSE_FILE" -p "$PROJECT" "$@"
@@ -120,6 +122,60 @@ canonical_dir() {
 reject_work_path() {
   echo "FAIL: integration work path を拒否しました（chmod/chown は行いません）: $1" >&2
   return 1
+}
+
+# ------------------------------------------------------------
+# 排他作成・実行環境の識別（P3-S1 / P3-N2）
+# ------------------------------------------------------------
+# <path> を新規作成して <content> を書く。既存のファイル・symlink（宛先の有無を問わない）があれば
+# 書かずに失敗する。noclobber の > は宛先が存在しなければ O_CREAT|O_EXCL で開くため、確認と作成の間に
+# 置かれた symlink も辿らない。作成後は通常ファイル（symlink でない）で内容が一致することを確認する。
+write_exclusive_file() { # <path> <content>
+  local path=$1 content=$2 actual
+  [[ ! -e "$path" && ! -L "$path" ]] || return 1
+  ( set -o noclobber; printf '%s' "$content" > "$path" ) 2>/dev/null || return 1
+  [[ -f "$path" && ! -L "$path" ]] || return 1
+  actual=$(cat -- "$path" 2>/dev/null; printf x) || return 1
+  [[ "$actual" == "${content}x" ]]
+}
+
+# kill -0 による生存確認が意味を持つ範囲（同じ PID 名前空間）を表す識別子を出力する。
+#   Linux（コンテナ・WSL を含む）: linux:<boot_id>:<PID 名前空間>（例: pid:[4026531836]）
+#   Git for Windows / MSYS2 / Cygwin: msys:<ルートの Windows パス>（同じインストールの bash は
+#     同じプロセス表を共有し、別インストールや WSL・コンテナとは共有しない）
+# 判定できない環境では失敗する（呼び出し側は unknown として扱い、生存判定を fail-closed にする）。
+runtime_identity() {
+  local boot="" ns="" root="" kernel=""
+  if [[ -r /proc/sys/kernel/random/boot_id && -e "/proc/$$/ns/pid" ]] && command -v readlink > /dev/null 2>&1; then
+    IFS= read -r boot < /proc/sys/kernel/random/boot_id 2>/dev/null || boot=""
+    ns=$(readlink "/proc/$$/ns/pid" 2>/dev/null) || ns=""
+    if [[ "$boot" =~ ^[0-9a-fA-F-]{8,64}$ && "$ns" =~ ^pid:\[[0-9]{1,20}\]$ ]]; then
+      printf 'linux:%s:%s\n' "$boot" "$ns"
+      return 0
+    fi
+    return 1
+  fi
+  kernel=$(uname -s 2>/dev/null) || return 1
+  case "$kernel" in
+    MINGW*|MSYS*|CYGWIN*)
+      root=$(cygpath -m / 2>/dev/null) || return 1
+      [[ -n "$root" && "$root" != *$'\n'* && ${#root} -le 512 ]] || return 1
+      printf 'msys:%s\n' "$root"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# 本 run が WORK の使用を終えたことを .ses-pitr-run-ended に記録する（終了処理の最後に呼ぶ）。
+# 次回 run はこの記録があれば、どの実行環境（PID 名前空間）の run であっても終了済みと判定できる。
+record_run_ended() {
+  (( WORK_OWNED )) || return 0
+  verify_work_still_owned || return 0
+  if ! write_exclusive_file "$WORK/.ses-pitr-run-ended" "run=$RUN_ID"$'\n'; then
+    echo "cleanup: 終了記録（.ses-pitr-run-ended）を書けませんでした: $WORK" >&2
+  fi
+  return 0
 }
 
 # 検証済み WORK が終了処理の時点でも同一の所有ディレクトリであることを再確認する。
@@ -181,6 +237,8 @@ cleanup() {
   cleanup_project || true
   if (( WORK_OWNED )); then
     normalize_work_permissions || true
+    # WORK への書き込みはここで最後（以降は exit のみ）。
+    record_run_ended || true
   fi
   exit "$primary_rc"
 }
@@ -301,10 +359,14 @@ prune_previous_default_works() {
 
 # 既定 WORK の退避可否を読み取り専用で確認し、退避対象の旧 RUN_ID を ROTATE_OLD_RUN に設定する。
 # 本 harness の所有マーカー（.ses-pitr-run-owner）の work= が既定パスと一致し、前回の run が
-# 終了済み（kill -0 が失敗する、または記録された PID が本プロセス自身＝PID 再利用）の場合だけ許可する。
-# マーカーが無い・一致しない・前回 run が生存している場合は fail-closed（何も変更しない）。
+# 終了済みと判定できる場合だけ許可する。終了済みの判定（P3-N2: kill -0 は同じ PID 名前空間しか見えない）:
+#   1. 前回 run の終了記録 .ses-pitr-run-ended（run= が一致）がある → 実行環境を問わず終了済み
+#   2. 終了記録が無い場合は、所有マーカーの pidns= が本 run の RUNTIME_NS と一致するときだけ kill -0 で
+#      判定する（kill -0 が失敗する、または記録された PID が本プロセス自身＝PID 再利用なら終了済み）
+#   3. pidns= が無い（旧形式）・unknown・一致しない場合は生存を判定できないため fail-closed
+# マーカーが無い・一致しない・前回 run が生存している（または判定できない）場合は何も変更しない。
 check_default_work_rotation() {
-  local default_work=$1 here_canon=$2 owner size old_run old_pid prev
+  local default_work=$1 here_canon=$2 owner size old_run old_pid old_ns ended prev
   ROTATE_OLD_RUN=""
   owner="$default_work/.ses-pitr-run-owner"
   if [[ ! -f "$owner" || -L "$owner" ]]; then
@@ -327,11 +389,23 @@ check_default_work_rotation() {
     default_work_recovery_hint "$default_work" "所有マーカーの run= が不正です"
     return 1
   fi
-  old_pid=${old_run#*-}
-  old_pid=${old_pid%%-*}
-  if [[ "$old_pid" != "$$" ]] && kill -0 "$old_pid" 2>/dev/null; then
-    default_work_recovery_hint "$default_work" "前回の run（pid=$old_pid）が実行中の可能性があります"
-    return 1
+  ended="$default_work/.ses-pitr-run-ended"
+  if [[ -f "$ended" && ! -L "$ended" ]] && grep -qxF "run=$old_run" "$ended" 2>/dev/null; then
+    : # 前回 run は終了処理を完了している（どの PID 名前空間の run でも同じ判定ができる）
+  else
+    old_ns=$(grep '^pidns=' "$owner" 2>/dev/null)
+    old_ns=${old_ns#pidns=}
+    if [[ -z "$old_ns" || "$old_ns" == *$'\n'* || "$old_ns" == unknown \
+        || "$RUNTIME_NS" == unknown || "$old_ns" != "$RUNTIME_NS" ]]; then
+      default_work_recovery_hint "$default_work" "前回の run（run=$old_run）には終了記録が無く、別の実行環境（PID 名前空間）で作られたか実行環境を判定できないため、生存を確認できません（記録: ${old_ns:-なし} / 本 run: $RUNTIME_NS）"
+      return 1
+    fi
+    old_pid=${old_run#*-}
+    old_pid=${old_pid%%-*}
+    if [[ "$old_pid" != "$$" ]] && kill -0 "$old_pid" 2>/dev/null; then
+      default_work_recovery_hint "$default_work" "前回の run（pid=$old_pid）が実行中の可能性があります"
+      return 1
+    fi
   fi
   prev="$here_canon/.integration-work.prev-$old_run"
   if [[ -e "$prev" || -L "$prev" ]]; then
@@ -567,23 +641,28 @@ prepare_work_dir() {
   fi
   WORK=$work_canon
 
-  if ! printf 'run=%s\nwork=%s\nproject=%s\n' "$RUN_ID" "$WORK" "$PROJECT" > "$WORK/.ses-pitr-run-owner"; then
-    echo "FAIL: integration work ownership marker could not be written" >&2
+  # 所有マーカーは排他作成する（P3-S1）。空確認の後に置かれたファイルや symlink は上書きも追従もせず拒否する。
+  # pidns= は次回 run が kill -0 の判定可否（同じ PID 名前空間か）を確かめるために使う（P3-N2）。
+  if ! write_exclusive_file "$WORK/.ses-pitr-run-owner" \
+      "$(printf 'run=%s\nwork=%s\nproject=%s\npidns=%s' "$RUN_ID" "$WORK" "$PROJECT" "$RUNTIME_NS")"$'\n'; then
+    reject_work_path "所有マーカー（.ses-pitr-run-owner）を排他的に作成できません（既存のファイルまたは symlink があります）: $WORK"
     return 1
   fi
   WORK_OWNED=1
-  mkdir -p "$WORK/evidence" "$WORK/drill-evidence" "$WORK/uploads" "$WORK/work" "$WORK/repo" "$WORK/staging" \
+  # サブディレクトリも -p なしの mkdir で新規作成だけを許す（既存のディレクトリ・symlink を引き継がない）。
+  mkdir "$WORK/evidence" "$WORK/drill-evidence" "$WORK/uploads" "$WORK/work" "$WORK/repo" "$WORK/staging" \
     "$WORK/locks" "$WORK/capath" "$WORK/capath-tgt" "$WORK/heartbeats" "$WORK/scheduler" "$WORK/keys" || return 1
   export INTEGRATION_SRC_PW INTEGRATION_TGT_PW
   WWORK=$(cygpath -w "$WORK" 2>/dev/null || echo "$WORK")
   WORK_AWK=$(cygpath -u "$WORK" 2>/dev/null || echo "$WORK")
   export INTEGRATION_WORK_DIR="$WWORK"
-  printf '%s\n' "$INTEGRATION_SRC_PW" > "$WORK/src-password"
-  printf '%s\n' "$INTEGRATION_TGT_PW" > "$WORK/tgt-password"
-  printf '%s\n' "$INTEGRATION_SRC_PW" > "$WORK/repo-password"
-  printf '%s\n' 'restore-svc-pw' > "$WORK/restore-svc-pw"
-  : > "$WORK/keys/priv1.pem"
-  : > "$WORK/keys/priv2.pem"
+  # 合成 secret も排他作成する（既存のファイル・symlink があれば書かずに失敗する）。
+  write_exclusive_file "$WORK/src-password" "$INTEGRATION_SRC_PW"$'\n' || return 1
+  write_exclusive_file "$WORK/tgt-password" "$INTEGRATION_TGT_PW"$'\n' || return 1
+  write_exclusive_file "$WORK/repo-password" "$INTEGRATION_SRC_PW"$'\n' || return 1
+  write_exclusive_file "$WORK/restore-svc-pw" 'restore-svc-pw'$'\n' || return 1
+  write_exclusive_file "$WORK/keys/priv1.pem" "" || return 1
+  write_exclusive_file "$WORK/keys/priv2.pem" "" || return 1
   DIAG_FILE="$WORK/evidence/failure-diagnostics.txt"
   return 0
 }
@@ -1227,16 +1306,20 @@ init_diag_limits
 INTEGRATION_SRC_PW=${INTEGRATION_SRC_PW:-"int-src-$(date +%s)-pw"}
 INTEGRATION_TGT_PW=${INTEGRATION_TGT_PW:-"int-tgt-$(date +%s)-pw"}
 export INTEGRATION_SRC_PW INTEGRATION_TGT_PW
-# 1) WORK の判定（読み取り専用）。不正なパスは Docker に触れる前に拒否する。
+RUNTIME_NS=$(runtime_identity) || RUNTIME_NS=unknown
+[[ -n "$RUNTIME_NS" ]] || RUNTIME_NS=unknown
+# 1) 固定名の事前確認（読み取り専用の docker ps だけ）。他の run のコンテナが残っていれば、WORK の判定
+#    （前回 run の生存判定を含む）より前に止める。どの PID 名前空間の run かに依存せず検出でき、
+#    衝突中の run が前回の証跡を退避・淘汰することもない（P3-N1）。
+if ! check_fixed_container_names; then FAILURE_STAGE=fixed-name-preflight; exit 1; fi
+# 2) WORK の判定（読み取り専用）。不正なパスは compose・run・cp など Docker の状態を変える操作より前に拒否する。
 if ! validate_work_path; then FAILURE_STAGE=work-preflight; exit 1; fi
 RUN_ID="$(date +%s)-$$-$RANDOM"
 PROJECT="ses-bkup-int-$RUN_ID"
 # compose ファイルは INTEGRATION_WORK_DIR を必須変数として補間するため、確認系の compose コマンドにも必要。
 WWORK=$(cygpath -w "$WORK_PLAN_CANON" 2>/dev/null || echo "$WORK_PLAN_CANON")
 export INTEGRATION_WORK_DIR="$WWORK"
-# 2) 固定名・project の事前確認。既定 WORK の退避や WORK の作成より前に行い、衝突中の run が
-#    前回の証跡を退避・淘汰しないようにする。
-if ! check_fixed_container_names; then FAILURE_STAGE=fixed-name-preflight; exit 1; fi
+# 3) project の事前確認と固定名の再確認。既定 WORK の退避や WORK の作成より前に行う。
 existing_project_ids=$(compose ps -aq 2>/dev/null)
 existing_project_rc=$?
 if (( existing_project_rc != 0 )) || [[ -n "$existing_project_ids" ]]; then
@@ -1244,7 +1327,8 @@ if (( existing_project_rc != 0 )) || [[ -n "$existing_project_ids" ]]; then
   echo "FAIL: generated Compose project is not fresh" >&2
   exit 1
 fi
-# 3) WORK を用意して所有する（ここで初めて既定 WORK の退避・作成を行う）。
+if ! check_fixed_container_names; then FAILURE_STAGE=fixed-name-preflight; exit 1; fi
+# 4) WORK を用意して所有する（ここで初めて既定 WORK の退避・作成を行う）。
 if ! prepare_work_dir; then FAILURE_STAGE=work-prepare; exit 1; fi
 PROJECT_OWNED=1
 
@@ -1322,6 +1406,7 @@ docker run --rm --network "$NET" \
   -e REPOSITORY_LOCK_DIR=/work/locks \
   -e APP_COMMIT=integration -e FLYWAY_VERSION=42 \
   -e CRITICAL_TABLES=marker_test,t_report_run,t_report_section_snapshot,t_report_section_attempt,t_document,t_document_version,t_notification_outbox,t_report_delivery \
+  -e CONTENT_HASH_TABLES=marker_test,t_report_run,t_report_section_snapshot,t_report_section_attempt,t_document,t_document_version,t_notification_outbox,t_report_delivery,flyway_schema_history \
   -v "$WWORK:/work:rw" \
   ses-backup-tool:integration /usr/local/bin/integration-pitr.sh 2>&1 | redact_stream_to_file "$PITR_OUTPUT_FILE" 65536
 PITR_STATUS=("${PIPESTATUS[@]}")

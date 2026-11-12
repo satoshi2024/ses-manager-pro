@@ -1,50 +1,43 @@
-# syntax=docker/dockerfile:1
 # ============================================================
 # HFP-03 バックアップツールイメージ（Oracle MySQL 8 client + restic）
-# - base image は digest 固定（debian bookworm-slim）
+# - `# syntax=` 行は置かない（build のたびに docker/dockerfile:1 の floating tag の frontend image を
+#   registry から取得させないため。本 Dockerfile は builtin frontend の機能だけを使う）。
+# - base image は digest 固定（debian bookworm-slim）。tar / util-linux 等の Essential パッケージは
+#   再インストールせず base image の版のまま使う（base digest で固定）。
 # - MySQL client は Oracle MySQL APT repo から exact version で固定導入する。
 #   Alpine の汎用 mysql-client（MariaDB 系: HFP-03-BL-013）は使用しない。
-# - restic は GitHub release から version 固定で導入する。
-# - 注意（2026-08-14 実測）: mysql-apt-config 0.8.33 同梱の署名鍵は期限切れ
-#   （EXPKEYSIG B7B3B788A8D3785C）。repo が InRelease を署名する現行鍵
-#   （RPM-GPG-KEY-mysql-2025 に同梱、同一 fingerprint、有効期限 2027-10-23）を
-#   keyring へ import してから apt-get update する。
-# ビルド後の最終 image digest は evidence に記録し、compose/CI で参照する。
+# - Oracle MySQL APT repo の署名鍵は SHA-256 と full fingerprint で検証し、apt source を直接定義する。
+#   mysql-apt-config deb は使わない（同梱鍵は期限切れ（2026-08-14 実測 EXPKEYSIG B7B3B788A8D3785C）で、
+#   旧版 0.8.33-1 の SHA-256 は一次資料で確認できないため）。repo の InRelease は同じ fingerprint の
+#   現行鍵（RPM-GPG-KEY-mysql-2025、有効期限 2027-10-23）で署名されている。
+# - restic は GitHub release から version 固定で導入し、公式 SHA256SUMS の値で検証する。
+# - 固定値が占位値（UNPINNED）のまま、または検証が一致しなければ build を失敗させる（fail-closed）。
+#   導入処理と固定値の検査は image/install-toolchain.sh、Debian パッケージ版の lock は
+#   image/apt-packages.lock。導入結果の版一覧は image 内 /usr/local/share/ses-backup/image-manifest/。
+# - registry は使わない。build 後の image ID の記録と docker save / load による配布は
+#   image/tool-image.sh で行い、production の compose は記録した image ID と照合してから使う。
 # ============================================================
-ARG MYSQL_CLIENT_VERSION=8.0.46
-FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
+ARG BASE_IMAGE=debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
+FROM ${BASE_IMAGE}
 
+ARG BASE_IMAGE
 ARG MYSQL_CLIENT_VERSION=8.0.46
-ARG MYSQL_APT_CONFIG_VERSION=0.8.33-1
+ARG MYSQL_DEB_REVISION=1debian12
+ARG MYSQL_APT_SUITE=bookworm
+ARG MYSQL_APT_COMPONENT=mysql-8.0
+ARG MYSQL_REPO_KEY_URL=https://repo.mysql.com/RPM-GPG-KEY-mysql-2025
+# 要人手確認: RPM-GPG-KEY-mysql-2025 の SHA-256 は未確認のため占位値（このままでは build が失敗する）。
+# 取得した鍵ファイルの fingerprint が下記と一致することを確認してから、その SHA-256 を設定する。
+ARG MYSQL_REPO_KEY_SHA256=UNPINNED
+# MySQL Release Engineering <mysql-build@oss.oracle.com>（MySQL 8.0 Reference Manual「Signature Checking Using GnuPG」）
+ARG MYSQL_REPO_KEY_FINGERPRINT=BCA43417C3B485DD128EC6D4B7B3B788A8D3785C
 ARG RESTIC_VERSION=0.17.3
+# restic v0.17.3 公式 SHA256SUMS の restic_0.17.3_linux_amd64.bz2 の値
+ARG RESTIC_LINUX_AMD64_SHA256=5097faeda6aa13167aae6e36efdba636637f8741fed89bbf015678334632d4d3
 ARG DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      ca-certificates curl gnupg jq tar bzip2 util-linux procps lsb-release wget \
- && curl -fsSL -o /tmp/mysql-apt-config.deb \
-      "https://repo.mysql.com/mysql-apt-config_${MYSQL_APT_CONFIG_VERSION}_all.deb" \
- && echo "mysql-apt-config mysql-apt-config/select-server select mysql-8.0" | debconf-set-selections \
- && dpkg -i /tmp/mysql-apt-config.deb \
- && curl -fsSL -o /tmp/mysql-2025.asc https://repo.mysql.com/RPM-GPG-KEY-mysql-2025 \
- && mkdir -p /tmp/.gnupg && chmod 700 /tmp/.gnupg \
- && gpg --batch --homedir /tmp/.gnupg --no-default-keyring \
-      --keyring /usr/share/keyrings/mysql-apt-config.gpg --import /tmp/mysql-2025.asc \
- && rm -rf /tmp/.gnupg \
- && apt-get update \
- && apt-get install -y --no-install-recommends \
-      "mysql-community-client=${MYSQL_CLIENT_VERSION}-1debian12" \
-      "mysql-community-server-core=${MYSQL_CLIENT_VERSION}-1debian12" \
- && curl -fsSL -o /tmp/restic.bz2 \
-      "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_amd64.bz2" \
- && bzip2 -dc /tmp/restic.bz2 > /usr/local/bin/restic \
- && chmod 755 /usr/local/bin/restic \
- && rm -f /tmp/mysql-apt-config.deb /tmp/mysql-2025.asc /tmp/restic.bz2 \
- && rm -rf /var/lib/apt/lists/* \
- && mysql --version \
- && mysqlbinlog --version \
- && mysqldump --version \
- && restic version
+COPY image/install-toolchain.sh image/apt-packages.lock /usr/local/share/ses-backup/image-build/
+RUN bash /usr/local/share/ses-backup/image-build/install-toolchain.sh
 
 COPY lib/ /usr/local/lib/ses-backup/
 COPY providers/ /usr/local/lib/ses-backup/providers/
