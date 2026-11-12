@@ -27,7 +27,8 @@
             th:text="#{portal.customer.tab.quotations}">見積</button>
     <button type="button" class="portal-tab" data-tab="sales-orders"
             th:text="#{portal.customer.tab.salesOrders}">注文請</button>
-    <button type="button" class="portal-tab" data-tab="service-desk" id="tabBtnServiceDesk">問い合わせ</button>
+    <!-- NF-02機能スイッチOFF時は問い合わせタブ・画面・モーダル・scriptを出さない（APIも404） -->
+    <button th:unless="${disabledFeatures != null and disabledFeatures.contains('nf02')}" type="button" class="portal-tab" data-tab="service-desk" id="tabBtnServiceDesk">問い合わせ</button>
 </nav>
 
 <main class="portal-container" role="main">
@@ -66,7 +67,7 @@
     </section>
 
     <!-- 問い合わせ (サービスデスク) -->
-    <section id="tab-service-desk" class="portal-tab-panel d-none">
+    <section th:unless="${disabledFeatures != null and disabledFeatures.contains('nf02')}" id="tab-service-desk" class="portal-tab-panel d-none">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <div>
                 <h2>問い合わせ・サポート</h2>
@@ -148,7 +149,7 @@
 </div>
 
 <!-- ポータル新規問い合わせ起票モーダル -->
-<div class="modal fade" id="portalNewRequestModal" tabindex="-1" aria-hidden="true">
+<div th:unless="${disabledFeatures != null and disabledFeatures.contains('nf02')}" class="modal fade" id="portalNewRequestModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
@@ -197,7 +198,7 @@
 </div>
 
 <!-- CSAT 満足度アンケート回答モーダル -->
-<div class="modal fade" id="portalCsatModal" tabindex="-1" aria-hidden="true">
+<div th:unless="${disabledFeatures != null and disabledFeatures.contains('nf02')}" class="modal fade" id="portalCsatModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
@@ -244,10 +245,11 @@
 <script th:src="@{/lib/jquery/jquery.min.js}"></script>
 <script th:src="@{/lib/bootstrap/js/bootstrap.bundle.min.js}"></script>
 <script th:src="@{/portal/js/portal.js}"></script>
-<script th:src="@{/portal/js/portal-service-desk.js}"></script>
+<script th:unless="${disabledFeatures != null and disabledFeatures.contains('nf02')}" th:src="@{/portal/js/portal-service-desk.js}"></script>
 <script>
     PortalAuth.initCustomerPage();
-    PortalServiceDesk.init();
+    // NF-02機能スイッチOFF時はscript自体を読み込まない。
+    if (typeof PortalServiceDesk !== 'undefined') PortalServiceDesk.init();
 </script>
 </body>
 </html>

@@ -7,7 +7,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title layout:title-pattern="$CONTENT_TITLE | $LAYOUT_TITLE" th:text="#{app.title}">SES Manager Pro</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-    <link rel="manifest" href="/manifest.webmanifest">
+    <!-- NF-04機能スイッチOFF時はPWA shellを出さない（manifestなし・Service Worker登録なし。common.jsが既存登録を解除する）。
+         日次入力queueとロック済み下書きの復元（下の「下書きを復元」→/offline.html）はOFFでも使えるようにする。 -->
+    <meta th:if="${disabledFeatures != null and disabledFeatures.contains('nf04')}" name="ses-pwa-shell" content="off">
+    <link th:unless="${disabledFeatures != null and disabledFeatures.contains('nf04')}" rel="manifest" href="/manifest.webmanifest">
     
     <!-- Bootstrap 5 CSS -->
     <link href="/lib/bootstrap/bootstrap.min.css" rel="stylesheet">
