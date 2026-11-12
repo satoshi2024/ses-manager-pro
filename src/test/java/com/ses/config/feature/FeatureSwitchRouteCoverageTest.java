@@ -74,7 +74,13 @@ class FeatureSwitchRouteCoverageTest {
             "/api/my/pwa/timesheet", "既存の要員作業報告画面の通常保存経路（遮断すると日次入力が止まる）",
             "/api/my/pwa/expenses", "既存の要員経費画面の下書き保存経路",
             "/api/my/pwa/change-requests", "既存の要員プロフィール変更申請の下書き保存経路",
-            "/api/my/session-context", "上記保存経路が使うuser scope bootstrap");
+            "/api/my/session-context", "上記保存経路が使うuser scope bootstrap",
+            "/api/my/pwa/restore", "ロック済み下書きの唯一の復元経路（パスワード再認証必須。止めると未同期の入力がlogoutで失われる）");
+
+    /** NF配下だが意図的に機能スイッチの対象外とする静的ファイル（完全一致）と理由。 */
+    private static final Map<String, String> UNGATED_STATIC_PATHS = Map.of(
+            "/offline.html", "ロック済み下書きの復元画面（日次入力queueの一部。Service Workerが無くても到達できる）",
+            "/js/pwa-queue.js", "既存セルフサービス画面の日次入力queue本体");
 
     /** 機能スイッチで {@code @Scheduled} 入口を止めるscheduler。 */
     private static final Map<String, Feature> GATED_SCHEDULERS = Map.of(
@@ -120,6 +126,54 @@ class FeatureSwitchRouteCoverageTest {
                 .as("NF配下の入口がFeatureの遮断表に未登録です。Featureへprefixを追加するか、"
                         + "意図的な対象外なら理由付きでUNGATED_ROUTE_PREFIXESへ登録してください: %s", violations)
                 .isEmpty();
+    }
+
+    @Test
+    void 遮断表に一致するcontroller入口は全てその機能に属し非NFの入口を誤遮断しない() throws Exception {
+        List<Route> routes = controllerRoutes();
+        List<String> misBlocked = new ArrayList<>();
+        int gatedRoutes = 0;
+
+        for (Route route : routes) {
+            Optional<Feature> gate = Feature.forPath(route.normalized());
+            if (gate.isEmpty()) {
+                continue;
+            }
+            gatedRoutes++;
+            Set<Feature> owners = owners(route);
+            if (!owners.contains(gate.get())) {
+                misBlocked.add(route.controller().getSimpleName() + " " + route.path()
+                        + " 遮断=" + gate.get() + " 所属=" + owners);
+            }
+        }
+
+        assertThat(gatedRoutes).as("遮断対象のcontroller入口を1件も検出できない").isPositive();
+        assertThat(misBlocked)
+                .as("機能スイッチの遮断表がNF外（または別NF）のcontroller入口に一致しています。"
+                        + "OFF時に既存機能が404になるため、prefixを見直してください: %s", misBlocked)
+                .isEmpty();
+    }
+
+    @Test
+    void 遮断表に一致する静的ファイルは意図して登録した完全一致pathだけである() throws IOException {
+        Path staticRoot = Path.of("src/main/resources/static");
+        List<String> misBlocked = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(staticRoot)) {
+            for (Path file : files.filter(Files::isRegularFile).toList()) {
+                String path = "/" + staticRoot.relativize(file).toString().replace('\\', '/');
+                Optional<Feature> gate = Feature.forPath(path);
+                if (gate.isPresent() && !gate.get().exactPaths().contains(path)) {
+                    misBlocked.add(path + " 遮断=" + gate.get());
+                }
+            }
+        }
+        for (Map.Entry<String, String> ungated : UNGATED_STATIC_PATHS.entrySet()) {
+            assertThat(new ClassPathResource("static" + ungated.getKey()).exists())
+                    .as("対象外の静的ファイル %s が存在しない（古い登録）", ungated.getKey()).isTrue();
+            assertThat(Feature.forPath(ungated.getKey())).as("対象外 %s が遮断表と矛盾", ungated.getKey()).isEmpty();
+        }
+
+        assertThat(misBlocked).as("意図しない静的ファイルが機能スイッチで遮断される: %s", misBlocked).isEmpty();
     }
 
     @Test
@@ -231,9 +285,10 @@ class FeatureSwitchRouteCoverageTest {
         String engineerDetail = read("src/main/resources/templates/engineer/detail.html");
         String common = read("src/main/resources/static/js/common.js");
 
-        // NF-04: manifest・SW登録フラグ・下書き復元リンク
-        assertThat(count(base, "disabledFeatures.contains('nf04')")).isEqualTo(3);
+        // NF-04: manifestとSW登録フラグだけ。下書き復元リンクはOFFでも出す（ロック済み下書きの復元経路）
+        assertThat(count(base, "disabledFeatures.contains('nf04')")).isEqualTo(2);
         assertThat(base).contains("name=\"ses-pwa-shell\" content=\"off\"");
+        assertThat(base).contains("<a id=\"pwa-restore-link\" href=\"/offline.html\"");
         assertThat(common).contains("shellDisabled: function()", "this.unregisterShell();", "'ses-pwa-shell-'");
         // NF-02: portalの問い合わせタブ・画面・モーダル2件・script
         assertThat(count(portal, "disabledFeatures.contains('nf02')")).isEqualTo(5);

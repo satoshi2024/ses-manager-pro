@@ -67,7 +67,8 @@ class TestIsolationAuditTest {
             entry("com.ses.service.ai.AiExecutionGatewayPersistMetadataTest", "gateway永続化metadataの実DB再読込", true, "trace_id固定prefixを@AfterEachでdelete", "ai-gateway-persist-metadata"),
             entry("com.ses.service.ai.AiRecommendationRetentionTenantIsolationH2Test", "tenant別retentionのcommit可視性", true, "trace_id固定prefixを@AfterEachでdelete", "ai-retention-tenant-isolation"),
             entry("com.ses.service.pwa.PwaRestoreTransactionIntegrationTest", "REQUIRES_NEWとcommit失敗の実TX境界", true, "専用H2 DBとテスト固有user/linkを@AfterEachでdelete", "pwa-restore-transaction"),
-            entry("com.ses.web.PwaRestoreServletBoundaryIntegrationTest", "実Servlet thread/session/listener境界", true, "専用H2 DBとテスト固有user/linkを@AfterEachでdelete", "pwa-restore-servlet")
+            entry("com.ses.web.PwaRestoreServletBoundaryIntegrationTest", "実Servlet thread/session/listener境界", true, "専用H2 DBとテスト固有user/linkを@AfterEachでdelete", "pwa-restore-servlet"),
+            entry("com.ses.config.feature.FeatureSwitchServletContainerIntegrationTest", "機能スイッチOFF時の実Servlet container・Security chain順序・error dispatch（RANDOM_PORTのHTTPはテストTXを共有できない）", true, "専用H2 DBとテスト固有user・session・監査行を@AfterEachでdelete", "feature-switch-servlet")
     );
 
     private static Map.Entry<String, IsolationExceptionMetadata> entry(String className, String reason,

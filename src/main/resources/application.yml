@@ -336,7 +336,7 @@ app:
     retention-days: 30
   # ===== 機能スイッチ（段階公開。既定は全てOFF） =====
   # OFFの機能は画面・API・schedulerの入口を止め、サイドバーからも隠す（管理者も迂回不可。応答は404）。
-  # 1機能ずつ環境変数でONにし、切替はアプリ再起動で反映する。
+  # 1機能ずつ環境変数でONにし、切替はアプリ再起動で反映する。真偽値として解釈できない値（例: ture）は起動失敗になる。
   # 運用手順: .kiro/specs/production-launch/feature-switches.md
   features:
     # NF-01 ライフサイクル管理・退社ゲート
@@ -348,7 +348,7 @@ app:
     # NF-03 資格・学習・スキルギャップ
     nf03:
       enabled: ${FEATURE_NF03_ENABLED:false}
-    # NF-04 要員PWAシェル（Service Worker・manifest・offline下書き復元）。日次入力の保存経路は対象外
+    # NF-04 要員PWAシェル（Service Worker・manifest）。日次入力queue・offline下書き復元は対象外（常時有効）
     nf04:
       enabled: ${FEATURE_NF04_ENABLED:false}
     # NF-10 定期管理レポート

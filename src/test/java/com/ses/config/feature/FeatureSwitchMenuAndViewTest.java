@@ -115,6 +115,28 @@ class FeatureSwitchMenuAndViewTest {
     }
 
     @Test
+    void ログイン後の着地先はOFFの機能のメニューを選ばない() {
+        MenuCacheService menuCache = mock(MenuCacheService.class);
+        when(menuCache.getMenuKeysByRole("営業")).thenReturn(List.of("lifecycle", "project"));
+        Menu lifecycle = menu("lifecycle", "/api/lifecycle");
+        lifecycle.setPathPrefix("/lifecycle");
+        Menu project = menu("project", "/api/projects");
+        project.setPathPrefix("/project");
+        when(menuCache.getAllMenus()).thenReturn(List.of(lifecycle, project));
+        @SuppressWarnings("unchecked")
+        ObjectProvider<com.ses.service.security.BreakGlassService> breakGlass = mock(ObjectProvider.class);
+        com.ses.controller.page.LoginPageController controller = new com.ses.controller.page.LoginPageController(
+                menuCache, new com.ses.config.OidcSecurityProperties(), breakGlass);
+        UsernamePasswordAuthenticationToken sales = new UsernamePasswordAuthenticationToken(
+                "sales", null, List.of(new SimpleGrantedAuthority("ROLE_営業")));
+
+        ReflectionTestUtils.setField(controller, "featureSwitchesProvider", provider(disabledOnly(Feature.NF01)));
+        assertThat(controller.index(sales)).isEqualTo("redirect:/project/list");
+        ReflectionTestUtils.setField(controller, "featureSwitchesProvider", provider(allOn()));
+        assertThat(controller.index(sales)).isEqualTo("redirect:/lifecycle");
+    }
+
+    @Test
     void NF02がOFFの間は契約更新カレンダーへ顧客ヘルスを埋め込まない() {
         CustomerHealthService healthService = mock(CustomerHealthService.class);
         RenewalCalendarServiceImpl service = renewalCalendar(healthService);

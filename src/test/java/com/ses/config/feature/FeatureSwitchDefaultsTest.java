@@ -3,6 +3,7 @@ package com.ses.config.feature;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.springframework.boot.context.properties.bind.BindException;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.bind.PropertySourcesPlaceholdersResolver;
@@ -19,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 機能スイッチの既定値と、環境変数での上書き経路を設定ファイルから検証する（Spring context・DB不要）。
@@ -74,6 +76,13 @@ class FeatureSwitchDefaultsTest {
                     .as("%s=true のとき %s", target.environmentVariable(), feature.name())
                     .isEqualTo(feature == target);
         }
+    }
+
+    @Test
+    void 真偽値として解釈できない環境変数はOFFに倒さずbind失敗で起動を止める() {
+        assertThatThrownBy(() -> bind(Map.of(Feature.NF01.environmentVariable(), "ture"),
+                "application.yml", "application-prod.yml"))
+                .isInstanceOf(BindException.class);
     }
 
     @Test

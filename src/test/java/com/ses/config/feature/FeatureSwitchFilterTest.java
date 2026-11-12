@@ -50,7 +50,8 @@ class FeatureSwitchFilterTest {
             Feature.NF03, List.of("/api/certification-learning-gap/count",
                     "/api/certification-learning-gap/export",
                     "/api/my/certification-learning-gap/learning-plans"),
-            Feature.NF04, List.of("/api/my/pwa/restore/reauthenticate", "/api/my/pwa/restore/confirm"),
+            // NF-04はAPIを遮断しない（日次入力queueと下書き復元は常時有効）
+            Feature.NF04, List.of(),
             Feature.NF10, List.of("/api/management-reports/runs", "/api/management-reports/schedules/7/enable"));
 
     /** 各機能の代表的な画面・静的入口。 */
@@ -59,7 +60,7 @@ class FeatureSwitchFilterTest {
             Feature.NF02, List.of("/service-desk/requests", "/service-desk/requests/4",
                     "/customer-success/health", "/service-desk/health"),
             Feature.NF03, List.of("/certification-learning-skill-gap", "/my/certification-learning-skill-gap"),
-            Feature.NF04, List.of("/service-worker.js", "/manifest.webmanifest", "/offline.html"),
+            Feature.NF04, List.of("/service-worker.js", "/manifest.webmanifest"),
             Feature.NF10, List.of("/management-reports"));
 
     @AfterEach
@@ -68,8 +69,9 @@ class FeatureSwitchFilterTest {
     }
 
     @ParameterizedTest
-    @EnumSource(Feature.class)
+    @EnumSource(value = Feature.class, names = "NF04", mode = EnumSource.Mode.EXCLUDE)
     void OFFの機能のAPIはCustomErrorControllerと同じApiResult形式の404になる(Feature feature) throws Exception {
+        assertThat(API_SAMPLES.get(feature)).as("代表APIが空振りしないこと").isNotEmpty();
         FeatureSwitchFilter filter = filter(disabledOnly(feature));
 
         for (String uri : API_SAMPLES.get(feature)) {
@@ -171,6 +173,8 @@ class FeatureSwitchFilterTest {
             // NF-04でも既存セルフサービスの保存経路・user scope bootstrapは常時有効
             "/api/my/pwa/timesheet/daily", "/api/my/pwa/attendance/daily", "/api/my/pwa/expenses/drafts",
             "/api/my/pwa/change-requests/drafts", "/api/my/session-context", "/js/pwa-queue.js",
+            // NF-04でもロック済み下書きの復元経路（再認証必須）は常時有効
+            "/offline.html", "/api/my/pwa/restore/reauthenticate", "/api/my/pwa/restore/confirm",
             // NF配下ではない既存機能
             "/api/engineers", "/my/timesheet", "/my/expenses", "/portal/customer", "/api/portal/customer/invoices",
             "/api/admin/nf02-nf03/ownership-repair", "/api/contracts/renewal-calendar", "/dashboard", "/",
@@ -184,7 +188,9 @@ class FeatureSwitchFilterTest {
     @ParameterizedTest
     @ValueSource(strings = {
             "/api/lif%65cycle/cases", "/lif%65cycle", "/api/lifecycle;jsessionid=abc/cases",
-            "//api//lifecycle/cases", "/api/management-reports/", "/service-worker.js;x=1"
+            "//api//lifecycle/cases", "/api/management-reports/", "/service-worker.js;x=1",
+            // Windows開発機のfile system classpathでは大文字小文字・末尾/の違いでも静的ファイルが解決され得る
+            "/Service-Worker.js", "/manifest.webmanifest/"
     })
     void 表記ゆれやセミコロンでは迂回できない(String uri) throws Exception {
         assertBlocked(filter(allOff()), uri);
@@ -202,6 +208,28 @@ class FeatureSwitchFilterTest {
         assertThat(chain.getRequest()).isNull();
         assertThat(response.getStatus()).isEqualTo(404);
         assertThat(response.getContentType()).startsWith("application/json");
+    }
+
+    @Test
+    void 遮断応答はSecurity_chainを通らなくてもSpring_Security既定と同じ安全headerを持つ() throws Exception {
+        MockHttpServletResponse plain = new MockHttpServletResponse();
+        filter(allOff()).doFilter(new MockHttpServletRequest("GET", "/api/lifecycle/cases"), plain,
+                new MockFilterChain());
+        MockHttpServletRequest secureRequest = new MockHttpServletRequest("GET", "/service-worker.js");
+        secureRequest.setSecure(true);
+        MockHttpServletResponse secure = new MockHttpServletResponse();
+        filter(allOff()).doFilter(secureRequest, secure, new MockFilterChain());
+
+        for (MockHttpServletResponse response : List.of(plain, secure)) {
+            assertThat(response.getHeader("Cache-Control")).isEqualTo("no-store");
+            assertThat(response.getHeader("Pragma")).isEqualTo("no-cache");
+            assertThat(response.getHeader("Expires")).isEqualTo("0");
+            assertThat(response.getHeader("X-Content-Type-Options")).isEqualTo("nosniff");
+            assertThat(response.getHeader("X-Frame-Options")).isEqualTo("DENY");
+            assertThat(response.getHeader("X-XSS-Protection")).isEqualTo("0");
+        }
+        assertThat(plain.getHeader("Strict-Transport-Security")).isNull();
+        assertThat(secure.getHeader("Strict-Transport-Security")).isEqualTo("max-age=31536000 ; includeSubDomains");
     }
 
     @Test

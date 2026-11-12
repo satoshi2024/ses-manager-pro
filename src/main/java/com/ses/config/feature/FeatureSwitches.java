@@ -43,7 +43,7 @@ public class FeatureSwitches {
             case NF04 -> properties.getNf04();
             case NF10 -> properties.getNf10();
         };
-        // 設定の欠落・不正はOFF扱い（fail-closed）。
+        // 設定キーの欠落（Toggleがnull）はOFF扱い。真偽値として解釈できない値はbind時に失敗し起動しない。
         return toggle != null && toggle.isEnabled();
     }
 
@@ -51,7 +51,8 @@ public class FeatureSwitches {
      * scheduler等の入口判定用。
      *
      * <p>{@code switches} がnullになるのは、Spring管理外で {@code new} した単体テスト対象だけである
-     * （アプリ本体では必須Beanとして常に注入される）。その場合は従来どおり処理を続ける。
+     * （アプリ本体では必須Beanとして常に注入され、欠けていれば起動に失敗する）。その場合だけは
+     * 既存テストの呼出し経路を変えないため従来どおり処理を続ける（本番では到達しないfail-open）。
      */
     public static boolean allows(FeatureSwitches switches, Feature feature) {
         return switches == null || switches.isEnabled(feature);

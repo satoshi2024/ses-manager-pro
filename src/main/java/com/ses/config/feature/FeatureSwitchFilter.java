@@ -27,12 +27,16 @@ import java.util.Optional;
  *   <li>内部chain・portal chain（{@code /api/portal/**}）の両方を1か所で遮断できる。</li>
  *   <li>認証・CSRF・{@code MenuPermissionFilter}・監査より前に止まるため、管理者を含むどのロールでも、
  *       未認証でも同じ404になる（機能スイッチは権限ではなく公開可否。管理者bypassの対象外）。</li>
- *   <li>401/403ではなく404を返すことで、OFFの機能が存在するかどうかを応答から区別させない。</li>
+ *   <li>401/403ではなく404を返す。認証済み利用者には、存在しないURLの404と同じstatus・本文・
+ *       主要なsecurity headerになる。未認証利用者は通常URLだと302（画面）/401（API）になるため、
+ *       OFFの機能pathだけ404になる差は残る（認証後に判定すると、MenuPermissionFilterより後に
+ *       認証されるHTTP Basic等で遮断を迂回できる経路ができるため、認証前に止める方を選んでいる）。</li>
  * </ul>
  * CorrelationIdFilter・PwaNoStoreFilterより後ろに置き、遮断応答にも相関IDとno-storeを付ける。
  *
  * <p>応答: {@code /api/**} は {@code CustomErrorController} の404と同じ {@link ApiResult} JSON、
- * 画面・静的ファイルは {@code sendError(404)} で統一エラーページへ委ねる。
+ * 画面・静的ファイルは {@code sendError(404)} で統一エラーページへ委ねる。Security chainを通らない
+ * API応答にも、Spring Securityの既定header（nosniff・frame拒否等）と同じ値を付ける。
  *
  * <p>{@link FeatureSwitches} はObjectProvider経由で取得する。{@code @WebMvcTest} 等のスライスでは
  * 存在しないため素通しにする（本番コンテキストでは必ず存在する）。
@@ -76,8 +80,7 @@ public class FeatureSwitchFilter extends OncePerRequestFilter {
             log.debug("[機能スイッチ] OFFの機能への要求を404で遮断しました: feature={}, method={}, path={}",
                     blocked.get().name(), request.getMethod(), decodedPath);
         }
-        // ON切替後に古い404がブラウザ・中継装置に残らないようにする。
-        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
+        writeBlockedResponseHeaders(request, response);
         if (isApiPath(decodedPath) || isApiPath(rawPath)) {
             response.setStatus(HttpServletResponse.SC_NOT_FOUND);
             response.setContentType("application/json;charset=UTF-8");
@@ -86,6 +89,22 @@ public class FeatureSwitchFilter extends OncePerRequestFilter {
             return;
         }
         response.sendError(HttpServletResponse.SC_NOT_FOUND);
+    }
+
+    /**
+     * 遮断応答のheader。no-store系はPwaNoStoreFilterと同じ値（ON切替後に古い404を残さない）、
+     * それ以外はSpring Security既定のHeaderWriterと同じ値にして、存在しないURLの404との差を減らす。
+     */
+    private static void writeBlockedResponseHeaders(HttpServletRequest request, HttpServletResponse response) {
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
+        response.setHeader(HttpHeaders.PRAGMA, "no-cache");
+        response.setHeader(HttpHeaders.EXPIRES, "0");
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setHeader("X-Frame-Options", "DENY");
+        response.setHeader("X-XSS-Protection", "0");
+        if (request.isSecure()) {
+            response.setHeader("Strict-Transport-Security", "max-age=31536000 ; includeSubDomains");
+        }
     }
 
     private static boolean isApiPath(String path) {
