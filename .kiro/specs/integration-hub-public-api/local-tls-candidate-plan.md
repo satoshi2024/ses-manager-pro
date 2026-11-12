@@ -10,6 +10,12 @@
 
 このcandidateは既存HTTP loopback transportを置き換えず、HTTPS/TLSの局所境界を独立検証する。現時点で遠隔endpoint、実credential、production外送信を許可する計画ではない。
 
+## 審査記録と状態の束縛
+
+- PR #108 head `f99c993a67d63afc3572ceeeb1cd00c957b17101`（`9bac40c9..f99c993a`、4 commit）は独立安全審査でREQUEST CHANGES（P0 0 / P1 3 / P2 4 / P3 10）となった。審査はHC5 5.3.1 / httpcore5 5.2.5のbytecodeで呼出し順を確認している。
+- 指摘のうちf99c993aの主張「request channel直前で実socket peerを検証する」は不成立だった。`AsyncRequestProducer.sendRequest`は`execute()`提出時に呼出し側threadで同期実行され、経路決定・接続より前に走るため、endpoint/SSL sessionは常にnullで全送信が`NETWORK_ERROR`になっていた。この主張は撤回し、下記「固定する不変条件」1の実装へ置き換えた。
+- 段階Aの修正は`codex/snf-nf05-tls-transport-fix-20261113`（base: `f99c993a`）で行う。修正後のSHAで対象testのsurefire証跡を取り、独立再審査をPASSするまで、統合候補線へ入れずPASSとも扱わない。
+
 ## 開発対象
 
 候補実装は次のsource/test filesだけを想定する。実装前にAstraがこの計画と各不変条件を確認する。
@@ -17,7 +23,8 @@
 - `src/main/java/com/ses/service/integrationhub/LoopbackTlsIntegrationHubWebhookTransportCandidate.java`
 - `src/main/java/com/ses/service/integrationhub/IntegrationHubLoopbackTlsEndpointGuard.java`
 - `src/test/java/com/ses/service/integrationhub/IntegrationHubLoopbackTlsTransportCandidateTest.java`
-- `src/test/resources/com/ses/service/integrationhub/tls/`配下のsynthetic test-only CA、server certificate、private test key fixture
+
+test fixtureの合成CA・server証明書・秘密鍵はrepositoryへ置かない。test classの実行開始時に、実行中JDKの`keytool`でJUnit管理の一時directoryへ一度だけ生成し、class内で再利用してclass終了時に削除する（合成CA 2種、leaf 5種で計19 process）。server側key entryはJDK APIで組み立て、期限切れleafもkeytoolのreply検証を経ずにchain化する。
 
 transport classとguardはpackage-private/finalとし、constructorもpackage-privateでfixture用`SSLContext`を明示的に受け取る。production default trustを置き換えるglobal JVM property、global `HttpsURLConnection` defaults、trust-all manager、hostname verifier overrideは持たない。candidateは`IntegrationHubWebhookTransport`の試験用実装として扱うが、`@Component`、`@Bean`、Spring configuration import、profile property、provider mode enum、production workerへのwiringは追加しない。
 
@@ -27,36 +34,44 @@ HC5でdeadline中のwrite/TLS/header待機をhard-cancelし、shutdownまでpool
 
 ## 固定する不変条件
 
-1. **接続先は本機だけ**: candidate guardは`https` URI、厳密なIP literal `127.0.0.1`または`::1`、明示port allow-listを必須とする。hostname/DNS、proxy、redirect、userinfo、query/fragment、invalid/out-of-range port、dot-segment pathを拒否する。接続先のpeer IP/portを接続直前とTLS接続後に照合する。全テストはloopback fixtureだけに接続し、外部hostを名前解決・接続しない。
-2. **通常のTLS検証**: certificate chain trust、有効期間、TLS hostname/IP SANを既定の証明書検証で検査する。test専用private CAはtest SSLContextだけへ直接注入し、プロセス/global trust storeを書き換えない。SAN不一致、期限切れ、未信頼chainは拒否する。test fixture証明書・秘密鍵は合成値でtest resourcesに限定する。
-3. **一つの総期限**: `send` entryで開始した単調時刻deadlineがadmission待ち、connection lease、TLS handshake、request write、response header受信/parse、response close、transport result確定までを包含する。各段階は残時間を再評価し、その残時間だけをHC5のrequest/connection/socket timeoutへ設定する。deadline後のHTTP responseは成功扱いしない。response bodyはdrainせず、header確定後にstream/socketをcloseする。
-4. **cancelの意味を過大評価しない**: timeout/interruption後のfuture/socket cancellationは、request未送信または相手側処理取消しの証拠ではない。dispatch前だけ`NOT_STARTED`、HTTP execute開始境界を越えた後は結果不明を保守的に記録する。timeout後も副作用未発生・socket已閉鎖と推定しない。再試行で同じdeliveryの既存provider idempotency keyを維持し、成功直後のCAS障害をtransport failureへ読み替えない。
-5. **資源の有限性**: client数、connection pool全体/route別、in-flight交換、admitted交換、I/O reactor thread数を固定上限化する。任意のwork queueを導入する場合は容量固定、拒否policyはAbort/即時拒否とし、CallerRunsで呼出し元にHTTP処理を実行させない。permitはtimeout時に早期解放せず、未submit時のrollbackまたはHC5 completion/cancel callbackのどちらか一度だけ解放する。cancelが戻っただけでconnectionやin-flight permitを解放しない。遅延callback、同期submit例外、cancel競合でもpermit二重解放/漏れを起こさない。
-6. **wire headerの単一正本**: caller headerは総byte数、個数、個別name/value byte上限で拒否する。caller指定`Host`、`Content-Length`、transportが所有するhop-by-hop/encoding headerとの大小文字を無視した重複・衝突を拒否し、transportがauthorityとbody長から一つずつ生成する。bodyは既存`IntegrationHubWebhookRequest.MAX_BODY_BYTES`を超えない。redirect/retryをHTTP client層で自動実行しない。
-7. **safe result**: 2xxはsuccess、429/5xx/timeout/networkはbounded retryable code、その他3xx/4xxはnon-retryable resultへ分類する。raw response body、secret、credential、header値、例外文をlog/resultへ出さない。既存HMAC署名headerと`Idempotency-Key`は改変しない。
+1. **接続先は本機だけ**: candidate guardは`https` URI、厳密なIP literal `127.0.0.1`または`::1`、明示port allow-listを必須とする。hostname/DNS、proxy、redirect、userinfo、query/fragment、invalid/out-of-range port、dot-segment・encoded separator pathを拒否する。許可portはguard構築時のsnapshotだけを使い、可変propertiesを後から読まない。実socket peerの検証は次の3層で行う。
+   - send入口: guardがURIを検証する（DNS・socketは使わない）。
+   - DnsResolver: DNSを使わず、guard snapshotで許可済みのliteralだけを返す（loopback候補ではrebinding窓がない）。
+   - TLS upgrade入口: `ClientTlsStrategyBuilder`のTlsStrategyを包む。HC5 5.3.1では`DefaultAsyncClientConnectionOperator$1.completed(IOSession)`がTCP接続完了後に`DefaultManagedAsyncClientConnection`を生成し、直後に`TlsStrategy.upgrade(TransportSecurityLayer, NamedEndpoint, Object, Timeout, FutureCallback)`を呼ぶ。この時点で`HttpConnection.getRemoteAddress()`（`IOSessionImpl`が`SocketChannel.socket().getRemoteSocketAddress()`を返す実peer）を、HC5が渡すNamedEndpointをguardで再検証した期待宛先と照合する。不一致なら接続をIMMEDIATEで閉じ、ClientHelloもHTTP bytesも送らずに`PEER_REJECTED`とする。handshake完了callbackでもHTTP送信前にTLS sessionの存在と実peerを再確認する。callbackなしの旧`upgrade`は平文続行を防ぐため拒否する。
+   全テストはloopback fixtureだけに接続し、外部hostを名前解決・接続しない。
+2. **通常のTLS検証**: certificate chain trust、有効期間、TLS hostname/IP SANを既定の証明書検証（PKIXとHC5 `DefaultHostnameVerifier`）で検査する。test専用private CAはtest SSLContextだけへ直接注入し、プロセス/global trust storeを書き換えない。SAN不一致は`TLS_IDENTITY_REJECTED`（再試行不可）、期限切れ・未信頼chain・handshake中の切断は`TLS_HANDSHAKE_REJECTED`（再試行可、HTTP未送信）、handshake停滞は`TIMEOUT`とする。TLS upgrade段階の失敗はcandidate内部のmarker例外で包み、HTTP送信後のSSL例外と区別する。test fixture証明書・秘密鍵は実行時生成の合成値で、上記の一時directoryにだけ存在する。
+3. **一つの総期限**: `send` entryで開始した単調時刻deadlineがadmission待ち、connection lease、TLS handshake、request write、response header受信/parse、transport result確定までを包含する。各段階は残時間を再評価し、その残時間だけをHC5のrequest/connection/socket timeoutへ設定する。deadline後のHTTP responseは成功扱いしない（response consumerと呼出し側が同じ判定参照をCASで先取りし、期限側が先に確定した後のheaderは拒否される）。response bodyはdrainせず、header確定後にexchangeをcancelしてstream/socketを閉じる。
+4. **cancelの意味を過大評価しない**: timeout/interruption後のfuture/socket cancellationは、request未送信または相手側処理取消しの証拠ではない。execute提出前に確定した失敗だけを未送信（`TIMEOUT_BEFORE_SEND`、`NETWORK_UNAVAILABLE`、`TRANSPORT_CLOSED`、`TRANSPORT_BUSY`）とし、提出後は結果不明を保守的に記録する（`TIMEOUT`、`NETWORK_ERROR`）。timeout後も副作用未発生・socket閉鎖済みと推定しない。再試行で同じdeliveryの既存provider idempotency keyを維持し、成功直後のCAS障害をtransport failureへ読み替えない。
+5. **資源の有限性**: client数、connection pool全体/route別（8/4）、in-flight交換（8）、admitted交換（12）、I/O reactor thread数（2）を固定上限化する。任意のwork queueを導入する場合は容量固定、拒否policyはAbort/即時拒否とし、CallerRunsで呼出し元にHTTP処理を実行させない。permitは未submit時のrollbackまたはHC5 terminal callback（completed/failed/cancelled）のどちらか一度だけ解放し、遅延callback、同期submit例外、cancel競合、重複callbackでも二重解放/漏れを起こさない。HC5の`BasicFuture.cancel`は`FutureCallback.cancelled()`を呼出し側threadで同期実行し、`ComplexFuture.cancel`はその後にdependencyを取消す。したがってcancelが戻った時点でpermitは解放済みであり、I/Oの取消しと接続closeはその後に進む。cancel後に残るsocket/TLS処理の上限はconnection pool（8/4）であり、permitではない。
+6. **wire headerの単一正本**: caller headerは総byte数、個数、個別name/value byte上限で拒否する。caller指定`Host`、`Content-Length`、`Content-Type`、`Content-Encoding`、`Transfer-Encoding`、`Connection`、`Keep-Alive`、`Expect`などtransportが所有するhop-by-hop/encoding headerとの大小文字を無視した重複・衝突を`REQUEST_HEADER_REJECTED`で拒否し、transportがauthorityとbody長から一つずつ生成する。bodyは既存`IntegrationHubWebhookRequest.MAX_BODY_BYTES`を超えない。redirect/retryをHTTP client層で自動実行しない。
+7. **safe result**: 結果はresponse header受信時に確定する。2xxはsuccess、429/5xxは`HTTP_RETRYABLE`、3xxは`HTTP_3XX`、その他4xxは`HTTP_4XX`、600以上は`HTTP_STATUS_UNEXPECTED`とする。header確定後に届いたbodyは読まずに破棄し（初期受信windowを超えて読まない）、body段階の失敗・cancel・遅いterminal callbackは確定済みの分類を変えない。分類の確定とpermit解放は別に追跡する。停止後の`TRANSPORT_CLOSED`は未送信が確定しているため再試行可能とする。raw response body、secret、credential、header値、例外文をlog/resultへ出さない。既存HMAC署名headerと`Idempotency-Key`は改変しない。
 8. **Java 17**: 実装/API/testは`<java.version>17</java.version>`を守り、Java 21専用APIを使わない。
 
 ## 検証計画
 
-`IntegrationHubLoopbackTlsTransportCandidateTest`は本機`HttpsServer`とephemeral loopback portだけを使う。synthetic test certificateに正しいloopback IP SANを付け、test-only CAを明示注入する。テストは候補クラスのclose、server、test executor/socketの有限終了をfinallyで保証する。実行時は対象4 classの既存HTTP loopback回帰も同じ限定gateで確認するが、確認前にPASSを主張しない。
+`IntegrationHubLoopbackTlsTransportCandidateTest`は本機`HttpsServer`（有界executor付き）、raw `SSLServerSocket`、ephemeral loopback portだけを使う。test classはSpringを起動しない。候補クラスのclose、server、executor、socketの有限終了を`@AfterEach`で保証する。実行時は既存HTTP loopback回帰も同じ限定gateで確認するが、確認前にPASSを主張しない。
 
-| ケース | 期待する証拠 |
+| ケース | 期待する証拠（対応test） |
 |---|---|
-| TLS成功、正しいloopback IP SAN / test CA | 202/2xxとsafe provider request IDだけ返し、serverが受け取ったbodyとHMAC/idempotency headersはfixture期待値と一致 |
-| TLS negative | hostname/IP SAN不一致、expired cert、untrusted CAでTLS失敗。trust-all/global overrideなし |
-| destination rejection | HTTP、hostname、userinfo、query/fragment、port未許可、非loopback literal、traversalを接続前に拒否。外部socket/DNS callは0 |
-| response handling | redirectを追跡しない。header-only応答の後にslow/infinite bodyを送ってもdrainせず期限内に戻る |
-| total deadline | admission飽和、connection lease待ち、TLS handshake stall、request write stall、slow-drip response headerそれぞれで同じmonotonic総期限が働き、期限後のlate 2xxを成功にしない |
-| ambiguity/cancel | execute前拒否はNOT_STARTED。execute開始後timeout/cancelはMAY_HAVE_BEEN_SENT相当。timeout後にside-effect無しと断定しない |
-| bounded concurrency | connection/in-flight/admission/executor上限を超える要求はCallerRunsせずboundedに拒否またはdeadlineで終了。cancel後もcallbackまではpermit保持し、遅延callback後にpermitが一度だけ戻る。pool/thread/queue/permitが最終的に0へ収束 |
-| header/body boundary | aggregate header bytes/count/name/value上限、case-insensitive Host/Content-Length conflict、body max超過を拒否。wire上Host/Content-Length重複なし |
-| bounded results | 2xx/3xx/4xx/429/5xx/network/timeout分類、raw body/exception detail/secretがresult/logにない |
-| isolation | `ApplicationContextRunner`等でcandidate/guardがSpring beanとして生成されないこと、production profile flags false/provider.mode MOCKのまま、workerは既存MOCK/STUB/HTTP LOOPBACKだけから変化しないこと |
+| TLS成功、正しいloopback IP SAN / test CA | 204とsafe provider request IDだけを返し、serverが受け取ったbodyとHMAC/idempotency headersが期待値と一致（`trustedIpSanHttpsFixtureReturnsOnlySafeMetadata`）。`[::1]`でも成功（`ipv6LoopbackLiteralSucceedsWithIpSan`） |
+| 実socket peer | 成功時にTLS upgrade入口の検証が1回だけ走る。DnsResolverを127.0.0.2へ差し替えると`PEER_REJECTED`、127.0.0.2側fixtureの受信0。同じfixtureが127.0.0.1名義の証明書・hostname検証を通ることを対照で示す（`actualSocketPeerIsVerifiedInTlsUpgradeBeforeHandshake`） |
+| TLS negative | IP SAN不一致は`TLS_IDENTITY_REJECTED`、期限切れは`TLS_HANDSHAKE_REJECTED`、未信頼CAは`TLS_HANDSHAKE_REJECTED`。同じtransportが信頼済みfixtureへ成功する正の対照を同じtestに置き、HTTP handler到達0（`tlsIdentityAndValidityFailuresUseTlsCodesWhileTrustedFixtureSucceeds`、`untrustedCaIsRejectedWhileSameTransportAcceptsItsOwnCa`） |
+| destination rejection | HTTP、hostname、userinfo、query/fragment、port未許可/省略、`10.0.0.1`、`169.254.169.254`、`0.0.0.0`、`127.0.0.2`、`[::ffff:127.0.0.1]`、非正規形`::1`、ULA、traversalを接続前に拒否。DnsResolver呼出し0、socket 0（`rejectsDestinationsBeforeAnyDnsOrSocketActivity`） |
+| response handling | redirectを追跡しない（3xxの`Location`先fixture受信0）。header後のslow body、1回のwriteで届く200+body、1MiB body、無限chunked bodyでsuccessのまま期限内に戻り、serverは接続closeを観測する（`wireStatusClassificationDoesNotFollowRedirects`、`slowBodyIsNotDrainedAndReturnsAfterHeaders`、`twoHundredWithBodyInSingleWriteIsSuccess`、`largeAndUnboundedResponseBodiesAreNotDrainedAndConnectionIsClosed`） |
+| total deadline | slow response headerとTLS handshake stallで同じ総期限が働き、requestがfixtureへ届いたことまたはTCP accept・peer検証が走ったことを併せて確認する。期限後のlate 2xxを成功にしない（`slowResponseHeadersUseTheSingleSendDeadline`、`tlsHandshakeStallExpiresInsideTheSharedDeadline`） |
+| ambiguity/cancel | execute前の同期失敗は`NETWORK_UNAVAILABLE`、停止後は`TRANSPORT_CLOSED`（再試行可）。提出後の停止中断は再試行可能な結果不明（`closeCancelRaceAndPostCloseRejectionDoNotLeakPermits`、`delayedTerminalCallbackAndSynchronousExecuteFailureReleasePermitsOnce`） |
+| bounded concurrency | admission/exchange/route上限を超える要求は`TRANSPORT_BUSY`でboundedに拒否し、終了後にpermitが12/8/0へ収束（`admittedAndActiveExchangeLimitsRejectExcessAndReleaseAfterCompletion`）。HC5 `BasicFuture`で、cancel復帰時点のpermit解放、重複terminal callbackでの二重解放なし、header確定後の遅いterminal callbackまでpermitを保持することを示す（`delayedTerminalCallbackAndSynchronousExecuteFailureReleasePermitsOnce`、`lateTerminalCallbackAfterHeadersKeepsOutcomeAndReleasesPermitsOnce`、`published2xxHeadersRemainSuccessWhenTerminalFailsAfterwards`）。close後はreactor停止、pool 0（`closeCapturesReactorPoolAndPeerSocketEvidence`） |
+| header/body boundary | aggregate header bytes/count/name/value上限、case-insensitive transport-owned header衝突、制御文字を`REQUEST_HEADER_REJECTED`（`transportOwnedAndOversizedRequestHeadersAreRejectedBeforeDispatch`）。wire上`Host`/`Content-Length`/`Content-Type`/`Connection`が各1回、`Transfer-Encoding`/`Expect`なし、caller headerとbodyが原文どおり（`wireRequestCarriesSingleHostAndContentLength`）。応答framing衝突・header数/行長超過を`NETWORK_ERROR`（`wireMalformedResponseFramingAndParserBoundsAreRejected`、`responseHeaderParserRejectsFramingConflictsAndCountOrByteOverflow`） |
+| bounded results | 3xx/4xx/429/5xxの分類をwire経由で確認（`wireStatusClassificationDoesNotFollowRedirects`）。HC5本体をDEBUG、wire/header loggerをOFFにした状態で、signature・Idempotency-Key・bodyがlog/resultに出ず、candidate自身はlogを出さない（`logsAndResultsDoNotExposeSecretsWithHc5DebugEnabled`） |
+| proxy | proxy system propertyとJVM既定ProxySelectorを設定しても参照・接続しない（`proxySystemPropertiesAndDefaultSelectorAreIgnored`） |
+| isolation | candidate/guardがpackage-private/final、annotationなし、public constructorなしで、production sourceから参照されない（`candidateAndGuardStayPackagePrivateWithoutSpringWiring`）。production profile flags false/provider.mode MOCKと既存MOCK/STUB/HTTP LOOPBACK workerは本変更で変えない |
 
-期限テストはelapsed timeだけに依存せず、test barrier/phase observer・fixture状態・request受信有無・connection/permit数・terminal callbackを併用する。test hookはpackage-private constructor経由だけでproduction public APIに露出させない。再現不能なOS write stallは成功証拠と誇張せず、拒否/観察可能性を明記する。
+期限テストはelapsed timeだけに依存せず、fixtureのrequest受信有無・TCP accept・peer検証回数・connection/permit数・terminal callbackを併用する。test hookはpackage-private constructor経由だけでproduction public APIに露出させない。
+
+未検証として残すもの: request write stall（OS socket buffer依存で再現不能）、connection lease待ち単独の期限切れ（route上限を占有するexchange自体が同じ総期限で終わるため、lease待ちとheader待ちを決定的に分離できない）、`ApplicationContextRunner`によるSpring context単位のisolation。これらは成功証拠と誇張しない。
 
 ## 変更禁止と後続境界
 
 このwaveでは`IntegrationHubExternalApiProperties.ProviderMode`、`IntegrationHubTransportModeCondition`、application profileのpublic-api/external-transport flags、B1 worker/scheduler、DDL/migration、credential/keyring、subscription endpoint、実provider URL、production connection wiringを変更しない。integration-hubの通常transport構成はMOCK、public APIとexternal transportはfalseのままにする。実provider endpoint、実credential注入、遠隔egress、production enablement・送信は行わない。
 
-Astraの実装Reviewがlocal TLS fixture境界、total deadline、wire header、cancel ambiguity、bounded resourcesをPASSするまでは、この計画を実装済み・PASSとして扱わない。将来のreal remote endpoint/provider/sandboxは、本機fixtureの実装・reviewから推定しない。remote egress policy、特定providerとのsandbox/contract確認、credential lifecycle、SLA/運用手順、production enablementはOwnerによる別の明示判断と運用承認が必要であり、この文書はそれらを代行・付与しない。
+Astraの実装Reviewがlocal TLS fixture境界、total deadline、wire header、cancel ambiguity、bounded resourcesをPASSするまでは、この計画を実装済み・PASSとして扱わない。将来のreal remote endpoint/provider/sandboxは、本機fixtureの実装・reviewから推定しない。remote egress policy（全解決addressの非global判定、期限付きDNS snapshot、TLS upgrade入口での実peer検証、hostname保持によるSNI/hostname検証）、production TLS trust・protocol・失効確認・pinning方針、特定providerとのsandbox/contract確認、credential lifecycle、SLA/運用手順、production enablementはOwnerによる別の明示判断と運用承認が必要であり、この文書はそれらを代行・付与しない。
