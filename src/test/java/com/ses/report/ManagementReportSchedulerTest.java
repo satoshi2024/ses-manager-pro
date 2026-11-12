@@ -84,7 +84,8 @@ class ManagementReportSchedulerTest {
         LocalDateTime scheduledAt = LocalDateTime.of(2026, 9, 1, 0, 0);
         ReportSchedule schedule = schedule(scheduledAt);
         when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(schedule));
-        when(mapper.claimDue(eq("default"), eq(5L), eq(scheduledAt), eq(scheduledAt), any(), any())).thenReturn(0);
+        when(mapper.claimDue(eq("default"), eq(5L), any(), any(), any(), any(), any(), any(),
+                anyInt(), any(), anyString(), any(), any())).thenReturn(0);
 
         new ManagementReportScheduler(mapper, snapshotService, deliveryService, closingService, timezoneResolver(),
                 tenantRunner(), recipientPreviewService(), new ObjectMapper())
@@ -101,13 +102,16 @@ class ManagementReportSchedulerTest {
         MonthlyClosingService closingService = mock(MonthlyClosingService.class);
         LocalDateTime scheduledAt = LocalDateTime.of(2026, 9, 1, 0, 0);
         ReportSchedule schedule = schedule(scheduledAt);
+        when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(schedule));
+        when(mapper.claimDue(eq("default"), eq(5L), any(), any(), any(), any(), any(), any(),
+                anyInt(), any(), anyString(), any(), any())).thenReturn(1);
         when(closingService.isClosed("2026-08")).thenReturn(false);
         when(snapshotService.generate(any())).thenReturn(new ReportGenerationResult(
                 new ReportRun() {{ setId(11L); setStatus("PARTIAL"); }}, List.of(), false));
         ManagementReportScheduler scheduler = new ManagementReportScheduler(mapper, snapshotService,
                 deliveryService, closingService, timezoneResolver(), tenantRunner(), recipientPreviewService(), new ObjectMapper());
 
-        scheduler.runOne(schedule, scheduledAt);
+        scheduler.dispatchDue();
 
         verify(snapshotService).generate(argThat(command -> command.systemPrincipal()
                 && command.principalUserId().equals(1L)
@@ -116,6 +120,8 @@ class ManagementReportSchedulerTest {
                 && command.scopeSnapshot() != null
                 && command.recipientPreviewHash().equals("preview-1")));
         verifyNoInteractions(deliveryService);
+        verify(mapper).markFailure(eq("default"), eq(5L), anyString(), any(), any(), eq(scheduledAt),
+                eq("SCHEDULE_GENERATION_FAILED"), anyString());
     }
 
     @Test
@@ -152,7 +158,8 @@ class ManagementReportSchedulerTest {
         schedule.setProcessingLogicalRunAt(logicalRunAt);
         schedule.setProcessingClaimedAt(logicalRunAt.minusHours(2));
         when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(schedule));
-        when(mapper.claimDue(eq("default"), eq(5L), eq(logicalRunAt), eq(logicalRunAt), any(), any())).thenReturn(1);
+        when(mapper.claimDue(eq("default"), eq(5L), any(), any(), any(), any(), any(), any(),
+                anyInt(), any(), anyString(), any(), any())).thenReturn(1);
         when(closingService.isClosed("2026-08")).thenReturn(true);
         ReportRun run = new ReportRun();
         run.setId(99L);
@@ -163,7 +170,7 @@ class ManagementReportSchedulerTest {
                 tenantRunner(), recipientPreviewService(), new ObjectMapper())
                 .dispatchDue();
 
-        verify(mapper).markSuccess(eq("default"), eq(5L), any(), eq(logicalRunAt));
+        verify(mapper).markSuccess(eq("default"), eq(5L), anyString(), any(), any(), eq(logicalRunAt));
         verify(deliveryService).deliverScheduled(99L,
                 com.ses.dto.report.ReportScheduledDeliveryContext.of(5L, 1L));
     }

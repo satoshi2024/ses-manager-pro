@@ -1,7 +1,6 @@
 package com.ses.service.scheduler;
 
 import com.ses.common.exception.BusinessException;
-import com.ses.common.exception.SafeErrorPolicy;
 import com.ses.common.audit.ExecutionActorContext;
 import com.ses.common.util.LogRedaction;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -26,6 +25,8 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.YearMonth;
+import java.time.Clock;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.UUID;
@@ -41,6 +42,7 @@ public class ManagementReportScheduler {
     private static final int PROCESSING_LEASE_MINUTES = 30;
 
     private final ReportScheduleMapper scheduleMapper;
+    private final ReportScheduleClaimService claimService;
     private final ReportSnapshotService snapshotService;
     private final ReportDeliveryService deliveryService;
     private final MonthlyClosingService monthlyClosingService;
@@ -48,9 +50,12 @@ public class ManagementReportScheduler {
     private final TenantAwareBatchRunner tenantAwareBatchRunner;
     private final ReportRecipientPreviewService recipientPreviewService;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
     @Autowired
     public ManagementReportScheduler(ReportScheduleMapper scheduleMapper,
+                                     ReportScheduleClaimService claimService,
+                                     Clock clock,
                                      ReportSnapshotService snapshotService,
                                      ReportDeliveryService deliveryService,
                                      MonthlyClosingService monthlyClosingService,
@@ -59,6 +64,8 @@ public class ManagementReportScheduler {
                                      ReportRecipientPreviewService recipientPreviewService,
                                      ObjectMapper objectMapper) {
         this.scheduleMapper = scheduleMapper;
+        this.claimService = claimService;
+        this.clock = clock;
         this.snapshotService = snapshotService;
         this.deliveryService = deliveryService;
         this.monthlyClosingService = monthlyClosingService;
@@ -75,7 +82,8 @@ public class ManagementReportScheduler {
                                      AccountingTimezoneResolver timezoneResolver,
                                      ReportRecipientPreviewService recipientPreviewService,
                                      ObjectMapper objectMapper) {
-        this(scheduleMapper, snapshotService, deliveryService, monthlyClosingService, timezoneResolver,
+        this(scheduleMapper, new ReportScheduleClaimService(scheduleMapper), Clock.systemUTC(),
+                snapshotService, deliveryService, monthlyClosingService, timezoneResolver,
                 null, recipientPreviewService, objectMapper);
     }
 
@@ -85,7 +93,8 @@ public class ManagementReportScheduler {
                                      MonthlyClosingService monthlyClosingService,
                                      AccountingTimezoneResolver timezoneResolver,
                                      TenantAwareBatchRunner tenantAwareBatchRunner) {
-        this(scheduleMapper, snapshotService, deliveryService, monthlyClosingService, timezoneResolver,
+        this(scheduleMapper, new ReportScheduleClaimService(scheduleMapper), Clock.systemUTC(),
+                snapshotService, deliveryService, monthlyClosingService, timezoneResolver,
                 tenantAwareBatchRunner, null, new ObjectMapper());
     }
 
@@ -104,54 +113,70 @@ public class ManagementReportScheduler {
     private void dispatchDueForTenant(String tenantId) {
         ZoneId zone = timezoneResolver.resolve(tenantId);
         AccountingTenantContextHolder.runWithTenant(tenantId, zone, () -> {
-            LocalDateTime now = LocalDateTime.now(zone);
-            LocalDateTime staleBefore = now.minusMinutes(PROCESSING_LEASE_MINUTES);
-            List<ReportSchedule> due = scheduleMapper.selectDue(tenantId, now, staleBefore, 50);
+            LocalDateTime pollNow = now(zone);
+            List<ReportSchedule> due = scheduleMapper.selectDue(tenantId, pollNow,
+                    pollNow.minusMinutes(PROCESSING_LEASE_MINUTES), 50);
             for (ReportSchedule schedule : due) {
-                LocalDateTime expected = schedule.getNextRunAt();
-                LocalDateTime logicalRunAt = resolveLogicalRunAt(schedule, now);
+                LocalDateTime claimedAt = now(zone);
+                LocalDateTime staleBefore = claimedAt.minusMinutes(PROCESSING_LEASE_MINUTES);
+                LocalDateTime logicalRunAt = resolveLogicalRunAt(schedule, claimedAt);
                 if (logicalRunAt == null) continue;
-                if (scheduleMapper.claimDue(tenantId, schedule.getId(), expected, logicalRunAt, now, staleBefore) != 1) {
+                ReportScheduleClaimService.Claim claim;
+                try {
+                    claim = claimService.claim(schedule, logicalRunAt, claimedAt, staleBefore);
+                } catch (RuntimeException claimUncertain) {
+                    // claim transactionのcommit結果が不明なら、生成/配布を開始しない。
+                    log.error("[定期管理レポート] claim状態を確認できません: scheduleId={} exceptionType={} diagnosticId={}",
+                            schedule.getId(), LogRedaction.exceptionType(claimUncertain), UUID.randomUUID());
                     continue;
                 }
+                if (claim == null) {
+                    continue;
+                }
+                LocalDateTime nextRunAt;
                 try {
+                    nextRunAt = nextRun(schedule, logicalRunAt, tenantId);
                     runOneInternal(schedule, logicalRunAt);
-                    scheduleMapper.markSuccess(tenantId, schedule.getId(), nextRun(schedule, logicalRunAt, tenantId), logicalRunAt);
                 } catch (Exception ex) {
-                    LocalDateTime retryAt = now.plusMinutes(retryDelayMinutes(schedule));
-                    scheduleMapper.markFailure(tenantId, schedule.getId(), retryAt, logicalRunAt,
-                            "SCHEDULE_GENERATION_FAILED", safeMessage(ex));
+                    LocalDateTime failureAt = now(zone);
+                    LocalDateTime retryAt = failureAt.plusMinutes(retryDelayMinutes(schedule));
+                    try {
+                        int changed = scheduleMapper.markFailure(tenantId, schedule.getId(), claim.token(),
+                                claim.claimedAt(), retryAt, logicalRunAt,
+                                "SCHEDULE_GENERATION_FAILED", safeMessage(ex));
+                        if (changed == 0) {
+                            log.warn("[定期管理レポート] failure completionでclaim所有権を失いました: scheduleId={}",
+                                    schedule.getId());
+                        }
+                    } catch (RuntimeException completionFailure) {
+                        // completionの例外/commit不明をrun failureとして再記録しない。
+                        log.error("[定期管理レポート] failure completionを確認できません: scheduleId={} exceptionType={} diagnosticId={}",
+                                schedule.getId(), LogRedaction.exceptionType(completionFailure), UUID.randomUUID());
+                        continue;
+                    }
                     log.error("[定期管理レポート] schedule実行失敗: scheduleId={} retryAt={} exceptionType={} diagnosticId={} detail={}",
                             schedule.getId(), retryAt, LogRedaction.exceptionType(ex),
                             UUID.randomUUID(), LogRedaction.safeThrowableSummary(ex));
+                    continue;
+                }
+                try {
+                    int changed = scheduleMapper.markSuccess(tenantId, schedule.getId(), claim.token(),
+                            claim.claimedAt(), nextRunAt, logicalRunAt);
+                    if (changed == 0) {
+                        log.warn("[定期管理レポート] success completionでclaim所有権を失いました: scheduleId={}",
+                                schedule.getId());
+                    }
+                } catch (RuntimeException completionFailure) {
+                    // success completionのDB failureをmarkFailureへfallbackしない。
+                    log.error("[定期管理レポート] success completionを確認できません: scheduleId={} exceptionType={} diagnosticId={}",
+                            schedule.getId(), LogRedaction.exceptionType(completionFailure), UUID.randomUUID());
                 }
             }
         });
     }
 
-    public void runOne(ReportSchedule schedule, LocalDateTime scheduledAt) {
-        ExecutionActorContext.runAsSystem("management-report-scheduler", "SCHEDULER_POLL", () -> {
-            String tenantId = schedule == null ? null : schedule.getTenantId();
-            if (tenantId == null || tenantId.isBlank()) {
-                tenantId = AccountingTenantContextHolder.requireTenantContext();
-            }
-            String currentTenant = AccountingTenantContextHolder.getExplicitTenantId();
-            if (currentTenant != null && !currentTenant.equals(tenantId)) {
-                throw BusinessException.of(403, "error.tenant.contextMismatch");
-            }
-            String resolvedTenantId = tenantId;
-            ZoneId zone = timezoneResolver.resolve(resolvedTenantId);
-            AccountingTenantContextHolder.runWithTenant(resolvedTenantId, zone, () -> {
-                try {
-                    runOneInternal(schedule, scheduledAt);
-                } catch (Exception ex) {
-                    log.error("[定期管理レポート] schedule実行失敗: scheduleId={} exceptionType={} diagnosticId={} detail={}",
-                            schedule.getId(), LogRedaction.exceptionType(ex), UUID.randomUUID(),
-                            LogRedaction.safeThrowableSummary(ex));
-                }
-            });
-            return null;
-        });
+    private LocalDateTime now(ZoneId zone) {
+        return LocalDateTime.ofInstant(clock.instant(), zone).truncatedTo(ChronoUnit.SECONDS);
     }
 
     private LocalDateTime resolveLogicalRunAt(ReportSchedule schedule, LocalDateTime now) {

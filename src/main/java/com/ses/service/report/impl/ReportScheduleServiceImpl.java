@@ -1,7 +1,6 @@
 package com.ses.service.report.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
@@ -178,8 +177,8 @@ public class ReportScheduleServiceImpl implements ReportScheduleService {
         if (schedule == null) throw BusinessException.of(404, "error.managementReport.scheduleNotFound");
         schedule.setEnabled(enabled ? 1 : 0);
         schedule.setUpdatedBy(SecurityUtils.currentUserId());
-        int updated = scheduleMapper.update(schedule, new UpdateWrapper<ReportSchedule>()
-                .eq("tenant_id", tenantId()).eq("id", scheduleId));
+        int updated = scheduleMapper.updateEnabled(tenantId(), scheduleId,
+                enabled ? 1 : 0, SecurityUtils.currentUserId());
         if (updated == 0) throw BusinessException.of(404, "error.managementReport.scheduleNotFound");
         return schedule;
     }
