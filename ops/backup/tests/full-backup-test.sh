@@ -49,7 +49,7 @@ setup_full() {
   export FAKE_GET_LOCK_HOLD=1
   export FAKE_MYSQL_STATUS_ROW=$'8.0.36\t'"$FAKE_UUID"$'\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
   unset MYSQL_PWD FAKE_DUMP_FILE FAKE_BINLOG_VERIFY_RC FAKE_GET_LOCK FAKE_RELEASE_LOCK \
-    CONTENT_HASH_TABLES FAKE_CONTENT_ROWS FAKE_CONTENT_RC
+    CONTENT_HASH_TABLES FAKE_CONTENT_ROWS FAKE_CONTENT_RC FAKE_CONTENT_COLUMNS FAKE_CONTENT_COLUMNS_EMPTY
 
   # scheduler / replica ack fixture（background）
   (
@@ -301,10 +301,40 @@ case_backup_full_records_content_hash() {
   expected=$(printf '%b' "$FAKE_CONTENT_ROWS" | sha256sum | awk '{print $1}')
   idx=$(ls "$T/work"/index/full-*.json 2>/dev/null | head -n 1)
   assert_eq "$expected" "$(jq -r '.content_hashes.sys_use.sha256 // empty' "$idx" 2>/dev/null)" "index に内容ハッシュを記録"
-  assert_eq "mysql-batch-ordered-sha256-v1" "$(jq -r '.content_hashes.sys_use.algorithm // empty' "$idx" 2>/dev/null)" "算出方式を記録"
+  assert_eq "mysql-batch-pk-quote-sha256-v2" "$(jq -r '.content_hashes.sys_use.algorithm // empty' "$idx" 2>/dev/null)" "算出方式を記録"
   assert_contains "$(cat "$FAKE_ARGV_LOG" 2>/dev/null)" "time_zone = '+00:00'" "session time_zone を固定して内容を取得"
-  assert_contains "$(cat "$FAKE_ARGV_LOG" 2>/dev/null)" 'ORDER BY `id`' "主キー順に並べて内容を取得"
+  assert_contains "$(cat "$FAKE_ARGV_LOG" 2>/dev/null)" 'ORDER BY `id`;' "主キー（だけ）の順に並べて内容を取得"
+  # W1-B1 r2: SQL の NULL は囲まれない NULL、値は QUOTE() で ' に囲む（NULL と文字列 'NULL' を区別する）
+  assert_contains "$(cat "$FAKE_ARGV_LOG" 2>/dev/null)" "IF(\`id\` IS NULL, 'NULL', QUOTE(\`id\`)), IF(\`name\` IS NULL, 'NULL', QUOTE(\`name\`))" \
+    "全列を NULL と値を区別して取得"
   unset CONTENT_HASH_TABLES FAKE_CONTENT_ROWS
+  teardown_full
+}
+
+# W1-B1 r2: 主キーの無い table・存在しない table は内容ハッシュの対象にできないため、full を VALID にしない。
+case_backup_full_content_hash_requires_primary_key() {
+  setup_full
+  export CONTENT_HASH_TABLES=sys_use FAKE_CONTENT_COLUMNS='id\t\nname\t\n'
+  local out="" code
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_nonzero "$code" "主キーの無い table を指定した full は非 0"
+  assert_contains "$out" "主キーの無い table は内容ハッシュの対象にできません" "主キー不在を通知"
+  unset FAKE_CONTENT_COLUMNS
+  teardown_full
+
+  setup_full
+  export CONTENT_HASH_TABLES=sys_use FAKE_CONTENT_COLUMNS_EMPTY=1
+  out=$("$BACKUP_FULL" 2>&1)
+  code=$?
+  assert_nonzero "$code" "存在しない table を指定した full は非 0"
+  assert_contains "$out" "table がありません（列情報 0 件）: sys_use" "table 不在を通知"
+  if compgen -G "$T/work/index/full-*.json" > /dev/null; then
+    test_fail "内容ハッシュを計算できない full は index 登録しない" "index が登録されています"
+  else
+    test_assert "内容ハッシュを計算できない full は index 登録しない"
+  fi
+  unset CONTENT_HASH_TABLES FAKE_CONTENT_COLUMNS_EMPTY
   teardown_full
 }
 
@@ -342,6 +372,7 @@ run_case case_backup_full_failure_releases_quiesce
 run_case case_backup_full_no_secret_leak
 run_case case_backup_full_records_content_hash
 run_case case_backup_full_content_hash_failure_fails_closed
+run_case case_backup_full_content_hash_requires_primary_key
 
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then
   test_fail "global-secret-scan" "TEST_LOG に秘密が残った"

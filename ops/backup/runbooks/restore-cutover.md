@@ -6,12 +6,13 @@
 ## 1. 前提
 
 - `validate-restore.sh` の結果（`VALIDATION_STATE_FILE`）が `READY_FOR_CUTOVER` であること
-  - report の `checks.flyway_history_required` が `true`（`FLYWAY_HISTORY_REQUIRED=0` で検証した結果は
-    cutover に使わない）、`checks.flyway` が `PASS`、`checks.flyway_latest` が想定の最新 version であること。
+  - report の `checks.flyway_history_required` が `true` かつ `checks.flyway` が `PASS` であること。
+    `cutover.sh` がこの 2 点を `jq` で検査し、満たさない report では cutover しない。
     `flyway_schema_history` の無い DB を Flyway 有効なアプリで起動すると、`baseline-on-migrate` で誤って
-    baseline され migration が再適用され得る（G-15）。
-  - `checks.content_hash` が `PASS`（production の checkpoint は `CONTENT_HASH_TABLES` を設定して取得する。
-    `NOT_RECORDED` の場合は理由を記録し、二者承認者が確認する）
+    baseline され migration が再適用され得る（G-15）。`checks.flyway_latest` が想定の最新 version であることは
+    二者承認者が確認する。
+  - `checks.content_hash` が `PASS`（production では `.env.backup` の `CONTENT_HASH_TABLES` を設定して backup と
+    復元検証を行う。設定時は記録が無い・欠けている checkpoint を validate が FAIL にする）
 - 復元先（recovery target）の MySQL サーバの時刻帯が production と同じ `+09:00` であること
   （`SELECT @@global.time_zone;`。2026-11-13 決定により DBA が設定する）
 - 目標は RPO 15 分 / RTO 4 時間（2026-11-13 決定。DBA Lead / Operations の署名は PENDING）。

@@ -55,6 +55,7 @@ RUNNER_PATH=""
 RUNNER_UNDER_TEST=""
 RUNNER_SELF_PID_MARKER_DIR=""
 RUNNER_SELF_PID_MARKER_NS=""
+PLANT_WORK=""
 
 # 1) 依存未ロード（common.sh を source しない）で mysql_options::init が非 0 になる
 case_dependency_skip_is_nonzero() {
@@ -1232,6 +1233,11 @@ case_integration_default_work_marker_mismatch_rejected() {
   temp=$(mktemp -d)
   runner_mock_init "$temp"
   ns=$(runner_runtime_ns "$temp")
+  if [[ -n "$ns" && "$ns" != unknown ]]; then
+    test_assert "この環境のPID名前空間を識別できる（前提: case 27）"
+  else
+    test_fail "この環境のPID名前空間を識別できる（前提: case 27）" "pidns=[$ns]"
+  fi
   repo="$temp/repo"
   tests_dir="$repo/ops/backup/tests"
   default="$tests_dir/.integration-work"
@@ -1466,12 +1472,36 @@ case_integration_default_work_foreign_namespace_requires_end_record() {
 }
 
 # 35) 所有マーカーは排他作成する（P3-S1）。既存ディレクトリを引き継ぐ場合（controller）に、準備段階の
-#     空確認の後で .ses-pitr-run-owner の名前へ symlink が置かれても、追従して上書きせずに拒否する。
+#     空確認の後で .ses-pitr-run-owner の名前へ symlink が置かれても、追従して書かずに拒否する。
+#     W1-B1 r2: write_exclusive_file の事前確認は「通常ファイル以外」だけを拒否するため、通常ファイルを指す
+#     symlink と宛先の無い symlink は noclobber（O_EXCL）そのものが拒否する。set -o noclobber を外すと
+#     (a) では victim が上書きされ、(b) では宛先のファイルが作られてこの case が失敗する。
+run_owner_marker_plant_case() { # <temp> <name> <plant_target> → RUNNER_* と PLANT_WORK を設定
+  local temp=$1 name=$2 target=$3 parent
+  parent="$temp/allowed/ses-pitr-run-$name"
+  PLANT_WORK="$parent/integration-work"
+  mkdir -p "$PLANT_WORK"
+  write_controller_marker "$parent" "$PLANT_WORK" "$parent"
+  RUNNER_PATH="$temp/plant-bin:$temp/bin:$PATH"
+  runner_mock_run "$temp" up-fail "$PLANT_WORK" MOCK_REAL_FIND="$(command -v find)" MOCK_PLANT_WORK="$PLANT_WORK" \
+    MOCK_PLANT_COUNT="$temp/plant-count-$name" MOCK_PLANT_TARGET="$target"
+  RUNNER_PATH=""
+  if [[ -L "$PLANT_WORK/.ses-pitr-run-owner" ]]; then
+    test_assert "準備段階の空確認の後に所有マーカー名へsymlinkが置かれた（前提: $name）"
+  else
+    test_fail "準備段階の空確認の後に所有マーカー名へsymlinkが置かれた（前提: $name）" "symlink がありません"
+  fi
+  assert_eq 1 "$RUNNER_RC" "所有マーカーを排他作成できなければ1（$name）"
+  assert_contains "$RUNNER_OUT" "所有マーカー（.ses-pitr-run-owner）を排他的に作成できません" "排他作成できない理由を通知（$name）"
+  assert_no_file "$PLANT_WORK/src-password" "所有できないWORKへ合成secretを書かない（$name）"
+  assert_no_file "$temp/chmod.log" "所有できないWORKへchmodしない（$name）"
+  assert_not_contains "$RUNNER_DOCKER_LOG" "up -d --build" "所有マーカーを作れなければcompose upしない（$name）"
+}
+
 case_integration_owner_marker_exclusive_create() {
-  local temp parent work victim real_find
+  local temp victim dangling
   temp=$(mktemp -d)
   runner_mock_init "$temp"
-  real_find=$(command -v find)
   mkdir -p "$temp/plant-bin"
   cat > "$temp/plant-bin/find" <<'MOCK'
 #!/usr/bin/env bash
@@ -1489,27 +1519,17 @@ if [[ -n "$out" ]]; then printf '%s\n' "$out"; fi
 exit "$rc"
 MOCK
   "$REAL_CHMOD" +x "$temp/plant-bin/find"
-  parent="$temp/allowed/ses-pitr-run-s1"
-  work="$parent/integration-work"
-  mkdir -p "$work"
-  write_controller_marker "$parent" "$work" "$parent"
+
+  # (a) 既存の通常ファイルを指す symlink: noclobber は宛先が通常ファイルなら開かない
   victim="$temp/victim.txt"
   printf 'victim original\n' > "$victim"
-  RUNNER_PATH="$temp/plant-bin:$temp/bin:$PATH"
-  runner_mock_run "$temp" up-fail "$work" MOCK_REAL_FIND="$real_find" MOCK_PLANT_WORK="$work" \
-    MOCK_PLANT_COUNT="$temp/plant-count" MOCK_PLANT_TARGET="$victim"
-  RUNNER_PATH=""
-  if [[ -L "$work/.ses-pitr-run-owner" ]]; then
-    test_assert "準備段階の空確認の後に所有マーカー名へsymlinkが置かれた（前提）"
-  else
-    test_fail "準備段階の空確認の後に所有マーカー名へsymlinkが置かれた（前提）" "symlink がありません"
-  fi
-  assert_eq 1 "$RUNNER_RC" "所有マーカーを排他作成できなければ1"
-  assert_contains "$RUNNER_OUT" "所有マーカー（.ses-pitr-run-owner）を排他的に作成できません" "排他作成できない理由を通知"
+  run_owner_marker_plant_case "$temp" s1-regular "$victim"
   assert_eq "victim original" "$(cat "$victim" 2>/dev/null)" "symlink先のファイルを上書きしない"
-  assert_no_file "$work/src-password" "所有できないWORKへ合成secretを書かない"
-  assert_no_file "$temp/chmod.log" "所有できないWORKへchmodしない"
-  assert_not_contains "$RUNNER_DOCKER_LOG" "up -d --build" "所有マーカーを作れなければcompose upしない"
+
+  # (b) 宛先の無い symlink: noclobber は O_CREAT|O_EXCL で開くため、symlink を辿って宛先を作らない
+  dangling="$temp/dangling-target.txt"
+  run_owner_marker_plant_case "$temp" s1-dangling "$dangling"
+  assert_no_file "$dangling" "宛先の無いsymlinkを辿ってファイルを作らない（O_EXCL）"
   rm -rf "$temp"
 }
 

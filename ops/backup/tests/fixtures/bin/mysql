@@ -42,13 +42,14 @@ if [[ -z "${query:-}" ]]; then
 fi
 
 case "$query" in
-  # 内容ハッシュの並び順の列（lib/content-hash.sh）。FAKE_CONTENT_ORDER（改行区切り、既定 id）を返す。
-  # FAKE_CONTENT_ORDER_EMPTY=1: 出力なしで exit 0（table が無い状態の再現）
+  # 内容ハッシュ対象の列情報（lib/content-hash.sh）。FAKE_CONTENT_COLUMNS（「列名<TAB>column_key」の行を
+  # printf %b 形式で。既定は主キー id と通常列 name）を返す。
+  # FAKE_CONTENT_COLUMNS_EMPTY=1: 出力なしで exit 0（table が無い状態の再現）
   *"ses-backup:content-hash-order"*)
-    if [[ -n "${FAKE_CONTENT_ORDER_EMPTY:-}" ]]; then
+    if [[ -n "${FAKE_CONTENT_COLUMNS_EMPTY:-}" ]]; then
       exit 0
     fi
-    printf '%s\n' "${FAKE_CONTENT_ORDER:-id}"
+    printf '%b' "${FAKE_CONTENT_COLUMNS:-id\tPRI\nname\t\n}"
     exit 0
     ;;
   # 内容ハッシュ対象の全行（lib/content-hash.sh）。FAKE_CONTENT_ROWS を printf %b で返す。

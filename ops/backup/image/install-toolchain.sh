@@ -86,10 +86,22 @@ export GNUPGHOME="$TMP_DIR/gnupg"
 mkdir -m 700 "$GNUPGHOME"
 gpg --batch --quiet --import "$TMP_DIR/mysql-repo-key.asc" 2> "$TMP_DIR/gpg-import.log" \
   || die "MySQL APT 署名鍵を読み込めません: $(cat "$TMP_DIR/gpg-import.log")"
-gpg --batch --with-colons --fingerprint "$MYSQL_REPO_KEY_FINGERPRINT" > "$TMP_DIR/fingerprint.txt" 2>/dev/null \
-  || die "MySQL APT 署名鍵に fingerprint $MYSQL_REPO_KEY_FINGERPRINT の鍵がありません"
-grep -qx "fpr:::::::::${MYSQL_REPO_KEY_FINGERPRINT}:" "$TMP_DIR/fingerprint.txt" \
-  || die "MySQL APT 署名鍵の primary fingerprint が $MYSQL_REPO_KEY_FINGERPRINT と一致しません"
+gpg --batch --with-colons --fingerprint > "$TMP_DIR/fingerprint.txt" 2>/dev/null \
+  || die "MySQL APT 署名鍵の一覧を取得できません"
+# 鍵ファイルに含まれる primary key（pub）は 1 つだけであること
+pub_count=$(grep -c '^pub:' "$TMP_DIR/fingerprint.txt" || true)
+[[ "$pub_count" == 1 ]] || die "MySQL APT 署名鍵ファイルの primary key（pub）が 1 つではありません（${pub_count:-0} 個）"
+# fingerprint は primary key のもの（pub の直後の fpr 行）だけを照合する（subkey の fpr 行とは照合しない）
+primary_fpr=$(awk -F: '$1 == "pub" { want = 1; next } want && $1 == "fpr" { print $10; exit }' "$TMP_DIR/fingerprint.txt")
+[[ "$primary_fpr" == "$MYSQL_REPO_KEY_FINGERPRINT" ]] \
+  || die "MySQL APT 署名鍵の primary key の fingerprint が $MYSQL_REPO_KEY_FINGERPRINT と一致しません（actual=${primary_fpr:-なし}）"
+# primary key の有効期限（pub の第 7 欄、epoch 秒。空は無期限）。切れていれば repo の署名検証も通らないため明示的に止める
+primary_expiry=$(awk -F: '$1 == "pub" { print $7; exit }' "$TMP_DIR/fingerprint.txt")
+if [[ -n "$primary_expiry" ]]; then
+  [[ "$primary_expiry" =~ ^[0-9]+$ ]] || die "MySQL APT 署名鍵の有効期限を解釈できません（$primary_expiry）"
+  (( primary_expiry > $(date +%s) )) \
+    || die "MySQL APT 署名鍵の有効期限が切れています（$(date -u -d "@$primary_expiry" +%Y-%m-%d 2>/dev/null || echo "$primary_expiry")）。新しい鍵ファイルの SHA-256 と fingerprint を確認して Dockerfile を更新してください"
+fi
 # fingerprint を確認した鍵だけを keyring に書き出す（同梱された他の鍵は信頼しない）
 gpg --batch --export "$MYSQL_REPO_KEY_FINGERPRINT" > "$MYSQL_KEYRING"
 [[ -s "$MYSQL_KEYRING" ]] || die "MySQL APT keyring を作成できません"

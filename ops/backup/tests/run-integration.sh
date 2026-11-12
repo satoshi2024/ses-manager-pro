@@ -127,12 +127,14 @@ reject_work_path() {
 # ------------------------------------------------------------
 # 排他作成・実行環境の識別（P3-S1 / P3-N2）
 # ------------------------------------------------------------
-# <path> を新規作成して <content> を書く。既存のファイル・symlink（宛先の有無を問わない）があれば
-# 書かずに失敗する。noclobber の > は宛先が存在しなければ O_CREAT|O_EXCL で開くため、確認と作成の間に
-# 置かれた symlink も辿らない。作成後は通常ファイル（symlink でない）で内容が一致することを確認する。
+# <path> を新規作成して <content> を書く。排他性は noclobber の > で担保する: bash は宛先が存在しなければ
+# O_CREAT|O_EXCL で開くため、宛先の無い symlink も辿らずに失敗し、通常ファイル（symlink の先を含む）が
+# 既にあれば開かずに失敗する。noclobber が開いてしまう「通常ファイル以外」（FIFO・デバイス・ディレクトリ、
+# およびそれらを指す symlink）だけは事前に拒否する（FIFO で止まらないため）。作成後は通常ファイル
+# （symlink でない）で内容が一致することを確認する。
 write_exclusive_file() { # <path> <content>
   local path=$1 content=$2 actual
-  [[ ! -e "$path" && ! -L "$path" ]] || return 1
+  if [[ -e "$path" && ! -f "$path" ]]; then return 1; fi
   ( set -o noclobber; printf '%s' "$content" > "$path" ) 2>/dev/null || return 1
   [[ -f "$path" && ! -L "$path" ]] || return 1
   actual=$(cat -- "$path" 2>/dev/null; printf x) || return 1
