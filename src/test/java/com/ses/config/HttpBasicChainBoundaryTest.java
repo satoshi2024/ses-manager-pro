@@ -101,7 +101,7 @@ class HttpBasicChainBoundaryTest {
     }
 
     @Test
-    void session相当の認証主体はaction denyにより403になる() throws Exception {
+    void session相当の認証主体はactionDenyにより403になる() throws Exception {
         // 対照: 自前filterより前に認証済み主体が居れば、MenuPermissionFilterがaction denyを適用する
         mockMvc.perform(get("/api/skill-tags")
                         .with(authentication(TenantTestSecurity.authentication(
