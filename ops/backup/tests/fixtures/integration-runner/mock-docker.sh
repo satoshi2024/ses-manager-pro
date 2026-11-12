@@ -51,8 +51,13 @@ pem_block() {
 }
 
 compose_ids() {
-  [[ -f "$state/up" ]] || return 0
+  if [[ ! -f "$state/up" ]]; then
+    # project-not-fresh: 生成した project 名に既存コンテナがある（project preflight で止まる）
+    if [[ "$scenario" == project-not-fresh ]]; then printf '%s\n' "$SRC_ID"; fi
+    return 0
+  fi
   case "$scenario" in
+    up-fail) return 0 ;;
     partial-up|no-timeout) printf '%s\n' "$SRC_ID" "$TGT_ID" ;;
     foreign-container) printf '%s\n' "$FOREIGN_ID" "$TGT_ID" "$TOOL_ID" "$SCHED_ID" "$REPL_ID" ;;
     diag-ps-fail) return 1 ;;
@@ -80,7 +85,8 @@ do_compose() {
       printf '%s\n' "Container ses-bkup-int-target Created" "mock build log secret=${INTEGRATION_SRC_PW:-}"
       pem_block
       case "$scenario" in
-        partial-up|slow-diag|no-timeout|diag-ps-fail)
+        partial-up|slow-diag|no-timeout|diag-ps-fail|up-fail)
+          # up-fail: コンテナを 1 つも作らずに失敗する（WORK 所有後の最も早い失敗点として使う）
           printf '%s\n' "Error response from daemon: mock-partial-start-failure"
           exit 17 ;;
         tamper-owner)

@@ -17,7 +17,9 @@
 #   - redactor の PEM 種別ごとの END 判定と後続ログ保持、複数・重なり secret、行長/入力上限、先頭+末尾保持
 #   - 診断全体 512KiB 上限、診断予算と per-call timeout、awk timeout、secret scan の fail-closed
 #   - WORK の許可ルート・祖先 symlink・所有マーカー照合（値比較）、既定 WORK の再実行時退避と保持数、
-#     verify-like-ci.ps1 の -CustomPitrWorkDir（一時ディレクトリ外）、所有を失った WORK への chmod 禁止
+#     verify-like-ci.ps1 の -CustomPitrWorkDir（一時ディレクトリ外、PS 5.1 / PS 7・CRLF 形式の marker）、
+#     所有を失った WORK への chmod 禁止、固定名・project の事前確認で止まる run は退避しないこと、
+#     退避分の剪除方針（削除を表示・失敗診断と本 harness 以外のディレクトリは残す）、PID 再利用の扱い
 #   - timeout 不在・GNU 以外の timeout・container 一覧取得失敗・secret ファイル欠落などの欠落入力
 #
 # 実行方式: case 1〜3 は fresh な bash -c 子プロセスで実行する（source 済み関数は子 bash へ継承されないため、
@@ -36,6 +38,7 @@ RUNNER="$ROOT/ops/backup/tests/run-integration.sh"
 MOCK_DOCKER_SRC="$HERE/fixtures/integration-runner/mock-docker.sh"
 REAL_CHMOD=$(command -v chmod)
 REAL_AWK=$(command -v awk)
+REAL_TIMEOUT=$(command -v timeout)
 mock_constant() { sed -n "s/^$1=//p" "$MOCK_DOCKER_SRC" | head -n 1; }
 MOCK_SRC_ID=$(mock_constant SRC_ID)
 MOCK_TGT_ID=$(mock_constant TGT_ID)
@@ -48,6 +51,7 @@ RUNNER_OUT=""
 RUNNER_DOCKER_LOG=""
 RUNNER_PATH=""
 RUNNER_UNDER_TEST=""
+RUNNER_SELF_PID_MARKER_DIR=""
 
 # 1) 依存未ロード（common.sh を source しない）で mysql_options::init が非 0 になる
 case_dependency_skip_is_nonzero() {
@@ -183,9 +187,11 @@ MOCK
 # usage: runner_mock_run <temp> <scenario> <work|-> [VAR=value ...]
 #   work に "-" を渡すと INTEGRATION_WORK_DIR を未設定にする（既定パスの検証用）。
 #   許可ルートは既定で <temp>/allowed（TMPDIR/TMP/TEMP）。追加の VAR=value で上書きできる。
+#   RUNNER_SELF_PID_MARKER_DIR を設定すると、runner 自身の PID（exec で引き継ぐ）を run= に持つ
+#   所有マーカーをそのディレクトリへ書いてから起動する（PID 再利用＝旧 PID が自分自身の検証用）。
 runner_mock_run() {
   local temp=$1 scenario=$2 work=$3 runner=${RUNNER_UNDER_TEST:-$RUNNER}
-  local -a work_env
+  local -a work_env env_args
   shift 3
   rm -rf "$temp/state"
   mkdir -p "$temp/state"
@@ -196,13 +202,24 @@ runner_mock_run() {
   else
     work_env=(INTEGRATION_WORK_DIR="$work")
   fi
-  env "${work_env[@]}" \
-    MOCK_DOCKER_LOG="$temp/docker.log" MOCK_STATE_DIR="$temp/state" MOCK_SCENARIO="$scenario" \
-    MOCK_CHMOD_LOG="$temp/chmod.log" MOCK_REAL_CHMOD="$REAL_CHMOD" MOCK_REAL_AWK="$REAL_AWK" \
-    INTEGRATION_SRC_PW="$SELFTEST_SRC_PW" INTEGRATION_TGT_PW="$SELFTEST_TGT_PW" \
-    TMPDIR="$temp/allowed" TMP="$temp/allowed" TEMP="$temp/allowed" \
-    PATH="${RUNNER_PATH:-$temp/bin:$PATH}" \
-    "$@" bash "$runner" > "$temp/out" 2>&1
+  env_args=("${work_env[@]}"
+    MOCK_DOCKER_LOG="$temp/docker.log" MOCK_STATE_DIR="$temp/state" MOCK_SCENARIO="$scenario"
+    MOCK_CHMOD_LOG="$temp/chmod.log" MOCK_REAL_CHMOD="$REAL_CHMOD" MOCK_REAL_AWK="$REAL_AWK"
+    INTEGRATION_SRC_PW="$SELFTEST_SRC_PW" INTEGRATION_TGT_PW="$SELFTEST_TGT_PW"
+    TMPDIR="$temp/allowed" TMP="$temp/allowed" TEMP="$temp/allowed"
+    PATH="${RUNNER_PATH:-$temp/bin:$PATH}"
+    "$@")
+  if [[ -n "${RUNNER_SELF_PID_MARKER_DIR:-}" ]]; then
+    (
+      # この subshell の PID は exec 後の env → bash（runner）にそのまま引き継がれる
+      printf 'run=1700000000-%s-1\nwork=%s\nproject=selftest\n' "$BASHPID" "$RUNNER_SELF_PID_MARKER_DIR" \
+        > "$RUNNER_SELF_PID_MARKER_DIR/.ses-pitr-run-owner"
+      printf '%s\n' "$BASHPID" > "$temp/self-pid"
+      exec env "${env_args[@]}" bash "$runner"
+    ) > "$temp/out" 2>&1
+  else
+    env "${env_args[@]}" bash "$runner" > "$temp/out" 2>&1
+  fi
   RUNNER_RC=$?
   RUNNER_OUT=$(cat "$temp/out")
   RUNNER_DOCKER_LOG=$(cat "$temp/docker.log")
@@ -256,6 +273,25 @@ write_controller_marker() { # <parent> <workDir 値> <parentDir 値> [runToken]
     "$token" "$ROOT" "$parent_value" "$work_value" > "$parent/.ses-pitr-owner.json"
 }
 
+# PowerShell 7 の ConvertTo-Json（2 空白インデント・"k": "v"）を Windows の CRLF で書いた形。
+write_controller_marker_ps7_crlf() { # <parent> <workDir 値> <parentDir 値>
+  local parent=$1 work_value=$2 parent_value=$3
+  printf '{\r\n  "pid": 4242,\r\n  "createdAt": "2026-11-12T00:00:00.0000000+09:00",\r\n  "runToken": "%s",\r\n  "repoRoot": "%s",\r\n  "parentDir": "%s",\r\n  "workDir": "%s"\r\n}\r\n' \
+    "$SELFTEST_RUN_TOKEN" "$ROOT" "$parent_value" "$work_value" > "$parent/.ses-pitr-owner.json"
+}
+
+# 既定 WORK を使う runner の複製を <temp>/<name>/ops/backup/tests に置き、RUNNER_UNDER_TEST に設定する。
+setup_copied_runner() { # <temp> <name> → stdout: tests ディレクトリ
+  local tests_dir="$1/$2/ops/backup/tests"
+  mkdir -p "$tests_dir"
+  cp "$RUNNER" "$tests_dir/run-integration.sh"
+  printf '%s\n' "$tests_dir"
+}
+
+marker_run_id() { # <dir> → stdout: 所有マーカーの run=
+  sed -n 's/^run=//p' "$1/.ses-pitr-run-owner" 2>/dev/null
+}
+
 # 6) 失敗証跡フローの静的契約（挙動は以降の mock シナリオで検証する）。
 case_integration_failure_capture_contract() {
   local runner
@@ -281,6 +317,11 @@ case_integration_failure_capture_contract() {
   assert_not_contains "$runner" 'mkdir -p "$WORK"' "WORKの祖先をmkdir -pで作らない"
   assert_not_contains "$runner" 'service_container_id' "未使用関数を残さない"
   assert_not_contains "$runner" '.bytes' "旧設計の .bytes 後始末を残さない"
+  assert_contains "$runner" 'mv -T --' "既定WORKの退避は退避先へ入り込まない mv -T で行う"
+  assert_contains "$runner" 'uutils coreutils' "uutils coreutils の timeout も採用する"
+  assert_contains "$runner" 'ringStart = 0' "リングバッファの添字を明示的に初期化する"
+  assert_before "$(first_line_no "$RUNNER" 'if ! check_fixed_container_names; then')" \
+    "$(first_line_no "$RUNNER" 'if ! prepare_work_dir; then')" "固定名の事前確認をWORKの作成・退避より前に行う"
 }
 
 # ------------------------------------------------------------
@@ -435,6 +476,18 @@ case_integration_redactor_bounds_and_fails_closed() {
   assert_contains "$stdout_text" "FINAL-FAILURE-LINE-unique src=[REDACTED]" "端末出力も伏字化済み"
   assert_not_contains "$stdout_text" "src-secret-unique" "端末出力にsecretを出さない"
   assert_contains "$(cat "$temp/tail.err")" "SECTION TRUNCATED" "保存の省略をstderrで通知"
+
+  # 先頭容量（1024B）を超えるが先頭+末尾容量（1024+2816B）に収まる出力: 34 行目が先頭と末尾に分かれ、
+  # 末尾リングの最初の要素になる。省略が無いので保存内容は端末出力と完全に一致しなければならない。
+  for ((i = 1; i <= 70; i++)); do printf 'ring-line-%04d-padding-padding\n' "$i"; done \
+    | redact_stream_to_file "$temp/ring.txt" 4096 > "$temp/ring.stdout" 2> "$temp/ring.err"
+  rc=$?
+  result=$(cat "$temp/ring.txt")
+  assert_zero "$rc" "先頭+末尾容量内の出力でもredactorは成功"
+  assert_eq 2170 "$(file_bytes "$temp/ring.stdout")" "端末へ70行（2170B）を出力（前提）"
+  assert_eq "$(cat "$temp/ring.stdout")" "$result" "省略なしのときは先頭+末尾の保存内容が全出力と一致（リング先頭要素を失わない）"
+  assert_contains "$result" $'ring-line-0033-padding-padding\nring-line-0034-padding-padding\nring-line-0035-' "先頭と末尾の境界で分割された行を復元"
+  assert_not_contains "$result" "[OUTPUT TRUNCATED" "省略が無いときは省略markerを書かない"
 
   diag_budget_start
   {
@@ -805,6 +858,25 @@ MOCK
   assert_eq "" "$fake_calls" "GNU以外のtimeoutで診断コマンドを包まない（--version確認だけ）"
   assert_not_contains "$diag_content" "redaction/secret scan failed" "GNU以外のtimeoutでも最終scanは直接実行で完了"
 
+  mkdir -p "$temp/uutils-bin"
+  cat > "$temp/uutils-bin/timeout" <<'MOCK'
+#!/usr/bin/env bash
+if [[ "${1:-}" == --version ]]; then
+  echo "timeout (uutils coreutils) 0.1.0"
+  exit 0
+fi
+printf '%s\n' "$*" >> "$MOCK_FAKE_TIMEOUT_LOG"
+exec "$MOCK_REAL_TIMEOUT" "$@"
+MOCK
+  "$REAL_CHMOD" +x "$temp/uutils-bin/timeout"
+  work="$temp/allowed/work-uutils-timeout"
+  RUNNER_PATH="$temp/uutils-bin:$temp/bin:$PATH"
+  runner_mock_run "$temp" partial-up "$work" MOCK_FAKE_TIMEOUT_LOG="$temp/uutils-timeout.log" MOCK_REAL_TIMEOUT="$REAL_TIMEOUT"
+  RUNNER_PATH=""
+  diag_content=$(cat "$work/evidence/failure-diagnostics.txt" 2>/dev/null)
+  assert_contains "$diag_content" "[target-state-health-image-mounts]" "uutils coreutils の timeout ではDocker診断を実施"
+  assert_contains "$(cat "$temp/uutils-timeout.log" 2>/dev/null)" "-k 1s" "uutils coreutils の timeout で診断コマンドを包む"
+
   work="$temp/allowed/work-ps-fail"
   runner_mock_run "$temp" diag-ps-fail "$work"
   diag_content=$(cat "$work/evidence/failure-diagnostics.txt" 2>/dev/null)
@@ -873,21 +945,19 @@ case_integration_work_path_boundary_fails_closed() {
 }
 
 # 21) 新規作成・verify-like-ci.ps1 の所有マーカー付き・既定パスの WORK は受理し、検証済みパスだけを正規化する。
+#     固定名の事前確認が WORK 作成より前になったため、WORK 所有後の最初の失敗点（compose up 失敗）で止める。
 case_integration_work_path_accepts_owned_dirs() {
   local temp work parent repo diag_content foreign_chmod
   temp=$(mktemp -d)
   runner_mock_init "$temp"
 
   work="$temp/allowed/fresh-work"
-  runner_mock_run "$temp" fixed-name-occupied "$work"
+  runner_mock_run "$temp" up-fail "$work"
   diag_content=$(cat "$work/evidence/failure-diagnostics.txt" 2>/dev/null)
-  assert_eq 1 "$RUNNER_RC" "固定名衝突はpreflightで失敗"
-  assert_contains "$RUNNER_OUT" "fixed container name is occupied" "固定名衝突を通知"
+  assert_eq 1 "$RUNNER_RC" "WORK所有後のcompose up失敗で1"
   assert_file "$work/.ses-pitr-run-owner" "許可ルート配下の新規WORKを所有"
   assert_contains "$(cat "$work/.ses-pitr-run-owner" 2>/dev/null)" "work=$work" "所有マーカーに正規化済みWORKを記録"
-  assert_contains "$diag_content" "stage=fixed-name-preflight native_exit=n/a" "preflight段階を診断に記録（native_exitは0と書かない）"
-  assert_contains "$diag_content" "collector=preflight failed before" "Compose未操作のpreflight診断"
-  assert_not_contains "$RUNNER_DOCKER_LOG" "up -d --build" "preflight失敗でcompose upしない"
+  assert_contains "$diag_content" "stage=compose-up native_exit=17 runner_exit=1" "所有したWORKへ失敗診断を記録"
   assert_file "$temp/chmod.log" "所有WORKは終了時に権限を正規化"
   foreign_chmod=$(grep -v -F -- "$work" "$temp/chmod.log" 2>/dev/null || true)
   assert_eq "" "$foreign_chmod" "chmodは検証済みWORKだけを対象にする"
@@ -895,17 +965,17 @@ case_integration_work_path_accepts_owned_dirs() {
   parent="$temp/allowed/ses-pitr-run-selftest"
   mkdir -p "$parent/integration-work"
   write_controller_marker "$parent" "$parent/integration-work" "$parent"
-  runner_mock_run "$temp" fixed-name-occupied "$parent/integration-work"
-  assert_eq 1 "$RUNNER_RC" "所有マーカー付き既存WORKでpreflightまで進む"
+  runner_mock_run "$temp" up-fail "$parent/integration-work"
+  assert_eq 1 "$RUNNER_RC" "所有マーカー付き既存WORKでcompose upまで進む"
   assert_file "$parent/integration-work/.ses-pitr-run-owner" "verify-like-ci.ps1形式の空integration-workを所有"
 
   repo="$temp/repo"
   mkdir -p "$repo/ops/backup/tests"
   cp "$RUNNER" "$repo/ops/backup/tests/run-integration.sh"
   RUNNER_UNDER_TEST="$repo/ops/backup/tests/run-integration.sh"
-  runner_mock_run "$temp" fixed-name-occupied "-"
+  runner_mock_run "$temp" up-fail "-"
   RUNNER_UNDER_TEST=""
-  assert_eq 1 "$RUNNER_RC" "既定WORKでpreflightまで進む"
+  assert_eq 1 "$RUNNER_RC" "既定WORKでcompose upまで進む"
   assert_file "$repo/ops/backup/tests/.integration-work/.ses-pitr-run-owner" "既定パス \$HERE/.integration-work を所有"
   rm -rf "$temp"
 }
@@ -1020,13 +1090,97 @@ case_integration_default_work_rerun_rotates_previous_run() {
 
   run4=""
   for n in 3 4 5; do
-    if (( n == 5 )); then run4=$(sed -n 's/^run=//p' "$default/.ses-pitr-run-owner" 2>/dev/null); fi
-    runner_mock_run "$temp" fixed-name-occupied "-"
+    # run ID の epoch を進め、剪除順が PID の大小に依存しないようにする
+    sleep 1
+    if (( n == 5 )); then run4=$(marker_run_id "$default"); fi
+    runner_mock_run "$temp" success "-"
+    assert_eq 0 "$RUNNER_RC" "既定WORKの${n}回目のrunも成功"
   done
   prev_count=$(find "$tests_dir" -mindepth 1 -maxdepth 1 -type d -name '.integration-work.prev-*' | wc -l)
   assert_eq 3 "${prev_count//[[:space:]]/}" "退避ディレクトリは直近3件だけ保持（無限に増やさない）"
   assert_file "$tests_dir/.integration-work.prev-$run4/.ses-pitr-run-owner" "直前runの退避分は必ず保持"
   assert_no_file "$tests_dir/.integration-work.prev-$first_run" "最も古い退避分から削除"
+  assert_contains "$RUNNER_OUT" "退避ディレクトリを削除しました: $tests_dir/.integration-work.prev-$first_run" "剪除した退避ディレクトリ名を表示"
+  RUNNER_UNDER_TEST=""
+  rm -rf "$temp"
+}
+
+# 29) 固定名・project の事前確認で止まる run は既定 WORK を退避しない。剪除は失敗診断を含む退避分と
+#     本 harness 以外のディレクトリを削除せず、削除したものを表示する。
+case_integration_default_work_preflight_and_prune_policy() {
+  local temp tests_dir default run1 run2 n
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  tests_dir=$(setup_copied_runner "$temp" repo)
+  default="$tests_dir/.integration-work"
+  RUNNER_UNDER_TEST="$tests_dir/run-integration.sh"
+
+  runner_mock_run "$temp" up-fail "-"
+  run1=$(marker_run_id "$default")
+  assert_file "$default/evidence/failure-diagnostics.txt" "初回runの失敗診断を既定WORKに保存（前提）"
+
+  runner_mock_run "$temp" fixed-name-occupied "-"
+  assert_eq 1 "$RUNNER_RC" "固定名衝突のrunは1"
+  assert_contains "$RUNNER_OUT" "fixed container name is occupied" "固定名衝突を通知"
+  assert_eq "$run1" "$(marker_run_id "$default")" "固定名衝突のrunは既定WORKを退避・作り直さない"
+  assert_file "$default/evidence/failure-diagnostics.txt" "固定名衝突のrunは前回の失敗診断を残す"
+  assert_not_contains "$RUNNER_OUT" "退避しました" "固定名衝突のrunは退避を行わない"
+  assert_no_file "$temp/chmod.log" "固定名衝突のrunは前回WORKへchmodしない"
+  assert_not_contains "$RUNNER_DOCKER_LOG" "up -d --build" "固定名衝突のrunはcompose upしない"
+
+  runner_mock_run "$temp" project-not-fresh "-"
+  assert_eq 1 "$RUNNER_RC" "既存コンテナのあるprojectのrunは1"
+  assert_contains "$RUNNER_OUT" "generated Compose project is not fresh" "project preflight失敗を通知"
+  assert_eq "$run1" "$(marker_run_id "$default")" "project preflight失敗のrunも既定WORKを退避しない"
+  if compgen -G "$tests_dir/.integration-work.prev-*" > /dev/null; then
+    test_fail "事前確認で止まったrunは退避ディレクトリを作らない" "退避ディレクトリが存在します"
+  else
+    test_assert "事前確認で止まったrunは退避ディレクトリを作らない"
+  fi
+
+  # 本 harness 以外のディレクトリ（剪除対象外）
+  mkdir -p "$tests_dir/.integration-work.prev-1600000000-1-1" "$tests_dir/.integration-work.prev-1600000000-2-2" \
+    "$tests_dir/.integration-work.manual-20261112000000"
+  printf 'run=1600000000-1-1\nwork=/somewhere/else/.integration-work\n' > "$tests_dir/.integration-work.prev-1600000000-1-1/.ses-pitr-run-owner"
+
+  run2=""
+  for n in 2 3 4 5 6; do
+    sleep 1
+    if (( n == 3 )); then run2=$(marker_run_id "$default"); fi
+    runner_mock_run "$temp" success "-"
+    assert_eq 0 "$RUNNER_RC" "既定WORKの${n}回目のrunが成功"
+  done
+  assert_file "$tests_dir/.integration-work.prev-$run1/evidence/failure-diagnostics.txt" "失敗診断を含む最古の退避分は自動削除しない"
+  assert_contains "$RUNNER_OUT" "失敗診断を含む退避ディレクトリは自動削除しません" "失敗診断を含む退避分を保持したことを通知"
+  assert_no_file "$tests_dir/.integration-work.prev-$run2" "失敗診断を含まない退避分は保持数を超えたものから削除"
+  assert_contains "$RUNNER_OUT" "退避ディレクトリを削除しました: $tests_dir/.integration-work.prev-$run2" "削除した退避ディレクトリ名を表示"
+  assert_file "$tests_dir/.integration-work.prev-1600000000-1-1/.ses-pitr-run-owner" "work=不一致の退避ディレクトリは削除しない"
+  assert_file "$tests_dir/.integration-work.prev-1600000000-2-2" "所有マーカーの無い退避ディレクトリは削除しない"
+  assert_file "$tests_dir/.integration-work.manual-20261112000000" "手動退避ディレクトリは削除しない"
+  RUNNER_UNDER_TEST=""
+  rm -rf "$temp"
+}
+
+# 30) 前回 run の PID が本 runner 自身の PID と一致する（PID 再利用）場合は終了済みとして退避する。
+case_integration_default_work_pid_reuse_is_not_alive() {
+  local temp tests_dir default self_pid new_run
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  tests_dir=$(setup_copied_runner "$temp" repo)
+  default="$tests_dir/.integration-work"
+  RUNNER_UNDER_TEST="$tests_dir/run-integration.sh"
+  mkdir -p "$default"
+  printf 'previous evidence\n' > "$default/previous.txt"
+  RUNNER_SELF_PID_MARKER_DIR="$default"
+  runner_mock_run "$temp" up-fail "-"
+  RUNNER_SELF_PID_MARKER_DIR=""
+  self_pid=$(cat "$temp/self-pid" 2>/dev/null)
+  new_run=$(marker_run_id "$default")
+  new_run=${new_run#*-}
+  assert_eq "$self_pid" "${new_run%%-*}" "旧マーカーのPIDがrunner自身のPIDと一致する状況を作れた（前提）"
+  assert_contains "$RUNNER_OUT" "前回の既定作業ディレクトリを退避しました" "自分自身のPIDは生存中の前回runとみなさない"
+  assert_not_contains "$RUNNER_OUT" "実行中の可能性があります" "自分自身のPIDで退避を拒否しない"
+  assert_file "$tests_dir/.integration-work.prev-1700000000-$self_pid-1/previous.txt" "前回の内容を退避先に保全"
   RUNNER_UNDER_TEST=""
   rm -rf "$temp"
 }
@@ -1067,26 +1221,32 @@ case_integration_default_work_marker_mismatch_rejected() {
 
 # 28) -CustomPitrWorkDir（一時ディレクトリ外）: 値の一致する所有マーカーと symlink 無しの祖先なら受理し、それ以外は拒否する。
 case_integration_controller_workdir_outside_temp() {
-  local temp custom value
+  local temp custom value marker_text bs='\'
   temp=$(mktemp -d)
   runner_mock_init "$temp"
 
   custom="$temp/custom/run1"
   mkdir -p "$custom/integration-work"
   write_controller_marker "$custom" "$custom/integration-work" "$custom"
-  runner_mock_run "$temp" fixed-name-occupied "$custom/integration-work"
-  assert_eq 1 "$RUNNER_RC" "一時ディレクトリ外の制御側WORKでpreflightまで進む"
-  assert_contains "$RUNNER_OUT" "fixed container name is occupied" "WORK検証を通過して固定名検査へ進む"
+  runner_mock_run "$temp" up-fail "$custom/integration-work"
+  assert_eq 1 "$RUNNER_RC" "一時ディレクトリ外の制御側WORKでcompose upまで進む"
+  assert_contains "$RUNNER_OUT" "mock-partial-start-failure" "WORK検証と事前確認を通過してcompose upへ進む"
   assert_file "$custom/integration-work/.ses-pitr-run-owner" "値の一致する所有マーカー付きWORKを所有"
 
+  # workDir は「/」を全て「\/」に、integration の 'a' を「a」にしたJSON文字列として書く。
+  # （バックスラッシュは bs 変数から組み立て、fixture と前提の期待値を同じ規則で作る）
   custom="$temp/custom/run2"
   mkdir -p "$custom/integration-work"
   write_controller_marker "$custom" \
-    "$(printf '%s' "$custom/integration-work" | sed -e 's#/#\\/#g' -e 's#integration-work#integr\\u0061tion-work#')" \
-    "$(printf '%s' "$custom" | sed 's#/#\\/#g')"
-  assert_contains "$(cat "$custom/.ses-pitr-owner.json")" '\/integration-work' "JSONエスケープ済み（\\/ と \\u0061）のmarkerを用意（前提）"
-  runner_mock_run "$temp" fixed-name-occupied "$custom/integration-work"
-  assert_file "$custom/integration-work/.ses-pitr-run-owner" "JSONの\\/と印字可能ASCIIの\\u00XXエスケープを解釈して値を照合"
+    "$(printf '%s' "$custom/integration-work" | sed -e "s#/#${bs}${bs}/#g" -e "s#integration-work#integr${bs}${bs}u0061tion-work#")" \
+    "$(printf '%s' "$custom" | sed "s#/#${bs}${bs}/#g")"
+  marker_text=$(cat "$custom/.ses-pitr-owner.json")
+  assert_contains "$marker_text" "\"workDir\":  \"${bs}/" "workDirの値がJSONの${bs}/エスケープで始まる（前提）"
+  assert_contains "$marker_text" "${bs}/integr${bs}u0061tion-work\"" "workDirの値が${bs}/と${bs}u0061の両方のエスケープを含む（前提）"
+  assert_not_contains "$marker_text" "\"workDir\":  \"/" "workDirの値に未エスケープの/が無い（前提）"
+  assert_not_contains "$marker_text" "integration-work" "workDirの値に未エスケープのintegration-workが無い（前提）"
+  runner_mock_run "$temp" up-fail "$custom/integration-work"
+  assert_file "$custom/integration-work/.ses-pitr-run-owner" "JSONの${bs}/と印字可能ASCIIの${bs}u00XXエスケープを解釈して値を照合"
 
   custom="$temp/custom/run3"
   mkdir -p "$custom/integration-work"
@@ -1126,6 +1286,15 @@ case_integration_controller_workdir_outside_temp() {
   write_controller_marker "$temp/custom/run8" "$temp/custom-link/run8/integration-work" "$temp/custom-link/run8"
   expect_work_rejected "$temp" "$temp/custom-link/run8/integration-work" "symlink を含むパス要素" "一時ディレクトリ外で祖先にsymlink"
   assert_eq "" "$(ls -A "$temp/custom/run8/integration-work")" "祖先symlink経由のWORKへ書き込まない"
+
+  custom="$temp/custom/run9"
+  mkdir -p "$custom/integration-work"
+  write_controller_marker_ps7_crlf "$custom" "$custom/integration-work" "$custom"
+  marker_text=$(cat "$custom/.ses-pitr-owner.json")
+  assert_contains "$marker_text" $'\r' "PowerShell 7 形式のmarkerをCRLFで用意（前提）"
+  assert_contains "$marker_text" "\"workDir\": \"$custom/integration-work\"" "PowerShell 7 形式（\"k\": \"v\"）のmarkerを用意（前提）"
+  runner_mock_run "$temp" up-fail "$custom/integration-work"
+  assert_file "$custom/integration-work/.ses-pitr-run-owner" "PowerShell 7・CRLF形式の所有マーカーも値で照合して受理"
   rm -rf "$temp"
 }
 
@@ -1157,5 +1326,7 @@ run_case case_integration_tampered_work_is_not_normalized
 run_case case_integration_default_work_rerun_rotates_previous_run
 run_case case_integration_default_work_marker_mismatch_rejected
 run_case case_integration_controller_workdir_outside_temp
+run_case case_integration_default_work_preflight_and_prune_policy
+run_case case_integration_default_work_pid_reuse_is_not_alive
 
 test_summary "ACC-OPS-P2 harness self-tests"

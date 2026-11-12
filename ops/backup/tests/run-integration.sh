@@ -49,6 +49,14 @@ FAILURE_NATIVE_RC=""
 FAILURE_OUTPUT_FILE=""
 WORK_AWK=""
 WWORK=""
+WORK_PLAN_MODE=""
+WORK_PLAN_CANON=""
+WORK_PLAN_LEXICAL=""
+WORK_PLAN_PARENT=""
+WORK_PLAN_DEFAULT=""
+WORK_PLAN_HERE=""
+WORK_PLAN_ROTATE_RUN=""
+ROTATE_OLD_RUN=""
 
 compose() {
   docker compose -f "$COMPOSE_FILE" -p "$PROJECT" "$@"
@@ -171,8 +179,9 @@ RUN_ID_PATTERN='^[0-9]{1,12}-[0-9]{1,10}-[0-9]{1,5}$'
 DEFAULT_WORK_PREV_KEEP=3
 
 # ConvertTo-Json 形式（1 行 1 プロパティ）のファイルから文字列値を 1 つ取り出す。
-# 対応するエスケープは \\ \/ \" と、Windows PowerShell 5.1 が ' & < > などに使う印字可能 ASCII の
-#  〜~ だけ。それ以外（非 ASCII・制御文字の \uXXXX、\n など）とキーの欠落・重複は失敗（fail-closed）。
+# 対応するエスケープは \\ \/ \" と、Windows PowerShell 5.1 が ' & < > などに使う印字可能 ASCII
+# （U+0020〜U+007E）の \u00XX 形式だけ。それ以外（非 ASCII・制御文字の \uXXXX、\n など）と
+# キーの欠落・重複は失敗（fail-closed）。
 json_string_field() {
   local file=$1 key=$2 line raw="" value="" count=0 pattern ch next hex decoded
   pattern='^[[:space:]]*"'"$key"'"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)"[[:space:]]*,?[[:space:]]*$'
@@ -237,10 +246,11 @@ default_work_recovery_hint() {
 }
 
 # 退避済みの .integration-work.prev-* のうち、本 harness の所有マーカーを持つものだけを対象に、
-# 直前の退避分（keep_path）を含めて新しい順に DEFAULT_WORK_PREV_KEEP 個を残して削除する。
+# 直前の退避分（keep_path）を含めて新しい順に DEFAULT_WORK_PREV_KEEP 個を残して削除し、削除したものを表示する。
+# 失敗診断（evidence/failure-diagnostics.txt）を含む退避分は保持数に数えず、自動削除しない。
 prune_previous_default_works() {
-  local here_canon=$1 default_work=$2 keep_path=$3 entry name index=0
-  local -a names=() sorted=()
+  local here_canon=$1 default_work=$2 keep_path=$3 entry name target index=0
+  local -a names=() sorted=() diagnostic_dirs=()
   for entry in "$here_canon"/.integration-work.prev-*; do
     [[ -d "$entry" && ! -L "$entry" ]] || continue
     [[ "$entry" != "$keep_path" ]] || continue
@@ -249,7 +259,14 @@ prune_previous_default_works() {
     [[ -f "$entry/.ses-pitr-run-owner" && ! -L "$entry/.ses-pitr-run-owner" ]] || continue
     grep -qxF "work=$default_work" "$entry/.ses-pitr-run-owner" 2>/dev/null || continue
     grep -qxF "run=$name" "$entry/.ses-pitr-run-owner" 2>/dev/null || continue
+    if [[ -e "$entry/evidence/failure-diagnostics.txt" || -L "$entry/evidence/failure-diagnostics.txt" ]]; then
+      diagnostic_dirs+=("$entry")
+      continue
+    fi
     names+=("$name")
+  done
+  for entry in "${diagnostic_dirs[@]}"; do
+    echo "失敗診断を含む退避ディレクトリは自動削除しません（不要になったら手動で削除してください）: $entry" >&2
   done
   (( ${#names[@]} > 0 )) || return 0
   mapfile -t sorted < <(printf '%s\n' "${names[@]}" | sort -t- -k1,1nr -k2,2nr -k3,3nr)
@@ -257,17 +274,22 @@ prune_previous_default_works() {
     [[ -n "$name" ]] || continue
     index=$((index + 1))
     (( index < DEFAULT_WORK_PREV_KEEP )) && continue
-    if ! rm -rf -- "$here_canon/.integration-work.prev-$name" 2>/dev/null; then
-      echo "WARN: 古い退避ディレクトリを削除できません（手動で削除してください）: $here_canon/.integration-work.prev-$name" >&2
+    target="$here_canon/.integration-work.prev-$name"
+    if rm -rf -- "$target" 2>/dev/null && [[ ! -e "$target" ]]; then
+      echo "保持数（${DEFAULT_WORK_PREV_KEEP} 件）を超えた退避ディレクトリを削除しました: $target" >&2
+    else
+      echo "WARN: 古い退避ディレクトリを削除できません（手動で削除してください）: $target" >&2
     fi
   done
 }
 
-# 既定 WORK に前回の run が残っている場合、本 harness の所有マーカー（.ses-pitr-run-owner）の
-# work= が既定パスと一致し、前回の run が終了済みのときに限り .integration-work.prev-<旧 RUN_ID> へ
-# 改名して保全する（削除はしない）。マーカーが無い・一致しない場合は fail-closed。
-rotate_default_work() {
+# 既定 WORK の退避可否を読み取り専用で確認し、退避対象の旧 RUN_ID を ROTATE_OLD_RUN に設定する。
+# 本 harness の所有マーカー（.ses-pitr-run-owner）の work= が既定パスと一致し、前回の run が
+# 終了済み（kill -0 が失敗する、または記録された PID が本プロセス自身＝PID 再利用）の場合だけ許可する。
+# マーカーが無い・一致しない・前回 run が生存している場合は fail-closed（何も変更しない）。
+check_default_work_rotation() {
   local default_work=$1 here_canon=$2 owner size old_run old_pid prev
+  ROTATE_OLD_RUN=""
   owner="$default_work/.ses-pitr-run-owner"
   if [[ ! -f "$owner" || -L "$owner" ]]; then
     default_work_recovery_hint "$default_work" "本 harness の所有マーカー .ses-pitr-run-owner がありません"
@@ -291,7 +313,7 @@ rotate_default_work() {
   fi
   old_pid=${old_run#*-}
   old_pid=${old_pid%%-*}
-  if kill -0 "$old_pid" 2>/dev/null; then
+  if [[ "$old_pid" != "$$" ]] && kill -0 "$old_pid" 2>/dev/null; then
     default_work_recovery_hint "$default_work" "前回の run（pid=$old_pid）が実行中の可能性があります"
     return 1
   fi
@@ -300,11 +322,31 @@ rotate_default_work() {
     default_work_recovery_hint "$default_work" "退避先が既に存在します: $prev"
     return 1
   fi
-  if ! mv -- "$default_work" "$prev" 2>/dev/null || [[ ! -d "$prev" || -L "$prev" || -e "$default_work" ]]; then
-    default_work_recovery_hint "$default_work" "退避（mv）に失敗しました"
+  ROTATE_OLD_RUN=$old_run
+  return 0
+}
+
+# 固定名・project の事前確認を通過した後に、直前の再確認を経て既定 WORK を
+# .integration-work.prev-<旧 RUN_ID> へ改名して保全する（削除はしない）。
+apply_default_work_rotation() {
+  local default_work=$1 here_canon=$2 expected_run=$3 prev
+  check_default_work_rotation "$default_work" "$here_canon" || return 1
+  if [[ "$ROTATE_OLD_RUN" != "$expected_run" ]]; then
+    default_work_recovery_hint "$default_work" "確認後に所有マーカーが変化しました"
     return 1
   fi
-  echo "前回の既定作業ディレクトリを退避しました（直近 ${DEFAULT_WORK_PREV_KEEP} 件を保持）: $prev" >&2
+  prev="$here_canon/.integration-work.prev-$expected_run"
+  # -T: 退避先が直前に作られていても、その中へは移動しない（空でないディレクトリや symlink があれば失敗する）
+  if ! mv -T -- "$default_work" "$prev" 2>/dev/null; then
+    default_work_recovery_hint "$default_work" "退避（mv -T）に失敗しました"
+    return 1
+  fi
+  if [[ ! -d "$prev" || -L "$prev" || -e "$default_work" || -L "$default_work" ]] \
+      || ! grep -qxF "run=$expected_run" "$prev/.ses-pitr-run-owner" 2>/dev/null; then
+    echo "FAIL: 既定作業ディレクトリの退避後の状態を確認できません。手動で確認してください: $default_work → $prev" >&2
+    return 1
+  fi
+  echo "前回の既定作業ディレクトリを退避しました（失敗診断を含まない退避分は直近 ${DEFAULT_WORK_PREV_KEEP} 件を保持）: $prev" >&2
   prune_previous_default_works "$here_canon" "$default_work" "$prev"
   return 0
 }
@@ -319,9 +361,12 @@ rotate_default_work() {
 # 許可ルートより下の各要素は symlink を含んではならず、親ディレクトリは既存でなければならない
 # （mkdir -p で祖先を作らない）。default 以外はリポジトリ配下・リポジトリの祖先を拒否する。
 # 条件を満たさなければ fail-closed とし、WORK_OWNED を立てない（chmod/chown は一切行わない）。
+# この関数は判定だけを行い（読み取り専用）、結果を WORK_PLAN_* に設定する。ディスクの変更は
+# 固定名・project の事前確認を通過した後の prepare_work_dir で行う。
 validate_work_path() {
   local posix lexical here_lex here_canon repo_canon default_work candidate candidate_lex candidate_canon
   local mode="" root_canon="" rel="" rest component current i parent_path parent_lex work_canon entries last_index
+  local rotate_run=""
   local -a candidates=() roots_lex=() roots_canon=() rel_parts=()
 
   posix=$(platform_posix_path "$WORK") || { reject_work_path "パスを正規化できません"; return 1; }
@@ -433,7 +478,9 @@ validate_work_path() {
     fi
     if [[ -n "$entries" ]]; then
       if [[ "$mode" == default ]]; then
-        rotate_default_work "$default_work" "$here_canon" || return 1
+        # ここでは退避の可否だけを確認する（実際の退避は固定名・project の事前確認後に prepare_work_dir で行う）
+        check_default_work_rotation "$default_work" "$here_canon" || return 1
+        rotate_run=$ROTATE_OLD_RUN
       else
         echo "FAIL: integration work path is not empty; existing contents are preserved" >&2
         return 1
@@ -450,7 +497,42 @@ validate_work_path() {
     reject_work_path "所有マーカー（.ses-pitr-owner.json）の runToken/workDir/parentDir が本 run の WORK と一致しません: $parent_path/.ses-pitr-owner.json"
     return 1
   fi
-  if [[ ! -e "$work_canon" ]] && ! mkdir "$work_canon" 2>/dev/null; then
+  WORK_PLAN_MODE=$mode
+  WORK_PLAN_CANON=$work_canon
+  WORK_PLAN_LEXICAL=$lexical
+  WORK_PLAN_PARENT=$parent_path
+  WORK_PLAN_DEFAULT=$default_work
+  WORK_PLAN_HERE=$here_canon
+  WORK_PLAN_ROTATE_RUN=$rotate_run
+  return 0
+}
+
+# validate_work_path の判定結果に従い、固定名・project の事前確認後に WORK を用意して所有する。
+# ここで初めてディスクを変更する（既定 WORK の退避・新規作成・所有マーカーと secret ファイルの作成）。
+prepare_work_dir() {
+  local work_canon=$WORK_PLAN_CANON entries
+  [[ -n "$work_canon" && -n "$WORK_PLAN_MODE" && -n "$RUN_ID" ]] || return 1
+  if [[ -n "$WORK_PLAN_ROTATE_RUN" ]]; then
+    apply_default_work_rotation "$WORK_PLAN_DEFAULT" "$WORK_PLAN_HERE" "$WORK_PLAN_ROTATE_RUN" || return 1
+  fi
+  if [[ -e "$work_canon" || -L "$work_canon" ]]; then
+    if [[ ! -d "$work_canon" || -L "$work_canon" ]]; then
+      reject_work_path "事前確認後に作業ディレクトリが変化しました: $work_canon"
+      return 1
+    fi
+    if ! entries=$(find "$work_canon" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) || [[ -n "$entries" ]]; then
+      reject_work_path "事前確認後に作業ディレクトリが空でなくなりました: $work_canon"
+      return 1
+    fi
+    if [[ "$WORK_PLAN_MODE" == controller ]] \
+        && ! verify_controller_marker "$WORK_PLAN_PARENT/.ses-pitr-owner.json" "$WORK_PLAN_LEXICAL"; then
+      reject_work_path "事前確認後に所有マーカー（.ses-pitr-owner.json）が変化しました: $WORK_PLAN_PARENT/.ses-pitr-owner.json"
+      return 1
+    fi
+  elif [[ "$WORK_PLAN_MODE" == controller ]]; then
+    reject_work_path "制御側が作成したはずの integration-work が存在しません: $work_canon"
+    return 1
+  elif ! mkdir "$work_canon" 2>/dev/null; then
     reject_work_path "作業ディレクトリを排他的に作成できません: $work_canon"
     return 1
   fi
@@ -460,8 +542,6 @@ validate_work_path() {
   fi
   WORK=$work_canon
 
-  RUN_ID="$(date +%s)-$$-$RANDOM"
-  PROJECT="ses-bkup-int-$RUN_ID"
   if ! printf 'run=%s\nwork=%s\nproject=%s\n' "$RUN_ID" "$WORK" "$PROJECT" > "$WORK/.ses-pitr-run-owner"; then
     echo "FAIL: integration work ownership marker could not be written" >&2
     return 1
@@ -503,15 +583,18 @@ DIAG_SCAN_TIMEOUT_SECONDS=10
 DIAG_BUDGET_END=0
 DIAG_TIMEOUT_BIN=""
 
-# GNU coreutils の timeout だけを採用する。Windows の System32\timeout.exe のような同名の別物は
-# 引数体系が異なり上限として機能しないため、見つからない扱い（Docker 診断を省略）にする。
+# coreutils 系（GNU coreutils / uutils coreutils）の timeout だけを採用する。Windows の
+# System32\timeout.exe のような同名の別物は引数体系が異なり上限として機能しないため、
+# 見つからない扱い（Docker 診断を省略）にする。
 detect_gnu_timeout() {
   local candidate version
   DIAG_TIMEOUT_BIN=""
   candidate=$(command -v timeout 2>/dev/null) || return 0
   [[ -n "$candidate" ]] || return 0
   version=$("$candidate" --version 2>/dev/null < /dev/null) || return 0
-  if [[ "$version" == *"GNU coreutils"* ]]; then DIAG_TIMEOUT_BIN=$candidate; fi
+  case "$version" in
+    *"GNU coreutils"*|*"uutils coreutils"*) DIAG_TIMEOUT_BIN=$candidate ;;
+  esac
   return 0
 }
 
@@ -743,6 +826,8 @@ BEGIN {
   headCap = int(maxBytes / 4)
   tailCap = maxBytes - headCap - 256
   if (tailCap < 0) tailCap = 0
+  ringStart = 0
+  ringEnd = 0
   maxPemSteps = 64
   maxMatches = 512
   secretFile[1] = secretFile1
@@ -1006,7 +1091,7 @@ collect_failure_diagnostics() {
     return 0
   fi
   if [[ -z "$DIAG_TIMEOUT_BIN" ]]; then
-    append_diagnostic_line "collector=bounded timeout command unavailable; Docker diagnostics omitted (GNU coreutils timeout is required)"
+    append_diagnostic_line "collector=bounded timeout command unavailable; Docker diagnostics omitted (GNU or uutils coreutils timeout is required)"
     finalize_failure_diagnostics
     return 0
   fi
@@ -1116,8 +1201,16 @@ check_fixed_container_names() {
 init_diag_limits
 INTEGRATION_SRC_PW=${INTEGRATION_SRC_PW:-"int-src-$(date +%s)-pw"}
 INTEGRATION_TGT_PW=${INTEGRATION_TGT_PW:-"int-tgt-$(date +%s)-pw"}
-if ! validate_work_path; then FAILURE_STAGE=work-preflight; exit 1; fi
 export INTEGRATION_SRC_PW INTEGRATION_TGT_PW
+# 1) WORK の判定（読み取り専用）。不正なパスは Docker に触れる前に拒否する。
+if ! validate_work_path; then FAILURE_STAGE=work-preflight; exit 1; fi
+RUN_ID="$(date +%s)-$$-$RANDOM"
+PROJECT="ses-bkup-int-$RUN_ID"
+# compose ファイルは INTEGRATION_WORK_DIR を必須変数として補間するため、確認系の compose コマンドにも必要。
+WWORK=$(cygpath -w "$WORK_PLAN_CANON" 2>/dev/null || echo "$WORK_PLAN_CANON")
+export INTEGRATION_WORK_DIR="$WWORK"
+# 2) 固定名・project の事前確認。既定 WORK の退避や WORK の作成より前に行い、衝突中の run が
+#    前回の証跡を退避・淘汰しないようにする。
 if ! check_fixed_container_names; then FAILURE_STAGE=fixed-name-preflight; exit 1; fi
 existing_project_ids=$(compose ps -aq 2>/dev/null)
 existing_project_rc=$?
@@ -1126,6 +1219,8 @@ if (( existing_project_rc != 0 )) || [[ -n "$existing_project_ids" ]]; then
   echo "FAIL: generated Compose project is not fresh" >&2
   exit 1
 fi
+# 3) WORK を用意して所有する（ここで初めて既定 WORK の退避・作成を行う）。
+if ! prepare_work_dir; then FAILURE_STAGE=work-prepare; exit 1; fi
 PROJECT_OWNED=1
 
 echo "== compose up（pinned MySQL 8.0.36 ×2 + tool image build） =="
