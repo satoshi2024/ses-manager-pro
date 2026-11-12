@@ -155,6 +155,8 @@ class PurchaseExpenseIntegrationTest {
         contract.setProjectId(1L);
         contract.setCustomerId(1L);
         contract.setTenantId("default");
+        // NF09: BP仕入ジョブの法人は工数実績→契約の法人から決まる
+        contract.setLegalEntityId(1L);
         contract.setContractType("準委任");
         contract.setStatus("稼動中");
         contract.setStartDate(LocalDate.of(2026, 1, 1));
@@ -236,10 +238,12 @@ class PurchaseExpenseIntegrationTest {
                 "SELECT COUNT(*) FROM t_engineer WHERE id = 1", Integer.class);
         if (engineerCount == null || engineerCount == 0) {
             jdbcTemplate.update("INSERT INTO t_engineer "
-                            + "(id, full_name, employment_type, status, tenant_id, created_by, deleted_flag) "
-                            + "VALUES (1, '会計連携テスト要員', '正社員', 'Bench', 'default', 1, 0)");
+                            + "(id, full_name, employment_type, status, tenant_id, legal_entity_id, created_by, deleted_flag) "
+                            + "VALUES (1, '会計連携テスト要員', '正社員', 'Bench', 'default', 1, 1, 0)");
         } else {
-            jdbcTemplate.update("UPDATE t_engineer SET tenant_id = 'default', deleted_flag = 0 WHERE id = 1");
+            // NF09: 要員経費ジョブの法人は要員の法人から決まる。既存値は上書きしない
+            jdbcTemplate.update("UPDATE t_engineer SET tenant_id = 'default', deleted_flag = 0, "
+                    + "legal_entity_id = COALESCE(legal_entity_id, 1) WHERE id = 1");
         }
         Integer projectCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_project WHERE id = 1", Integer.class);
@@ -277,7 +281,7 @@ class PurchaseExpenseIntegrationTest {
 
         assertThatThrownBy(() -> purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("銀行口座変更が承認待ち");
+                .hasMessage("error.accounting.bpBankAccountPending");
     }
 
     @Test
@@ -380,7 +384,7 @@ class PurchaseExpenseIntegrationTest {
 
         assertThatThrownBy(() -> purchaseIntegrationService.triggerBpPurchaseSync(unapproved.getId(), 1L))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("未払または承認済のBP支払レコードのみ連携可能");
+                .hasMessage("error.accounting.bpPaymentNotSendable");
     }
 
     @Test

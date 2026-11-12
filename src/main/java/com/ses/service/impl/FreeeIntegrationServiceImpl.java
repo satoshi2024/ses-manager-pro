@@ -15,7 +15,6 @@ import com.ses.dto.payroll.FreeeEmployeeDto;
 import com.ses.dto.payroll.PayrollEngineerCandidateDto;
 import com.ses.dto.payroll.PayrollItemDto;
 import com.ses.dto.payroll.PayrollStatementDto;
-import com.ses.dto.reconciliation.BankDepositDto;
 import com.ses.entity.Engineer;
 import com.ses.entity.FreeeConnection;
 import com.ses.entity.FreeeEmployeeLink;
@@ -1117,72 +1116,6 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             throw BusinessException.of(400, "error.payroll.companyMismatchLink");
         }
         linkMapper.deleteByEngineerIdHard(engineerId);
-    }
-
-    @Override
-    public List<BankDepositDto> bankDeposits(java.time.LocalDate from, java.time.LocalDate to) {
-        if (from == null || to == null || from.isAfter(to)) {
-            throw BusinessException.of(400, "error.reconciliation.invalidPeriod");
-        }
-
-        FreeeConnection c = latestActiveRow();
-        if (c == null || c.getCompanyId() == null) {
-            throw BusinessException.of("error.reconciliation.notConnected");
-        }
-
-        // freee会計API: 入金取引(deals, type=income)を取得する。振込名義は明細記載(description)を用いる。
-        String path = "/api/1/deals?company_id=" + c.getCompanyId()
-                + "&type=income&start_issue_date=" + from + "&end_issue_date=" + to;
-        JsonNode arr = get(path);
-        List<BankDepositDto> out = new ArrayList<>();
-
-        if (arr != null) {
-            for (JsonNode n : arr.path("deals")) {
-                BankDepositDto d = new BankDepositDto();
-                d.setFreeeDepositId(n.path("id").asText());
-                d.setDepositDate(java.time.LocalDate.parse(n.path("issue_date").asText()));
-                d.setAmount(decimal(n, "amount"));
-                d.setPayerName(n.path("description").asText(""));
-                out.add(d);
-            }
-        }
-        return out;
-    }
-
-    /** S15会計APIの金額変換（既存挙動を維持: 欠落は0）。HFP-01の給与経路では使わない。 */
-    private BigDecimal decimal(JsonNode n, String k) {
-        return n.has(k) ? n.path(k).decimalValue() : BigDecimal.ZERO;
-    }
-
-    private JsonNode get(String path) {
-        FreeeConnection c = latestActiveRow();
-        if (c == null) {
-            throw BusinessException.of("error.payroll.notConnected");
-        }
-
-        if (c.getTokenExpiresAt() != null && c.getTokenExpiresAt().isBefore(LocalDateTime.now().plusMinutes(1))) {
-            applicationContext.getBean(FreeeIntegrationService.class).refresh();
-            c = latestActiveRow();
-        }
-
-        HttpHeaders h = new HttpHeaders();
-        h.setBearerAuth(decrypt(c.getAccessTokenEncrypted()));
-        h.setAccept(List.of(MediaType.APPLICATION_JSON));
-
-        try {
-            return restTemplate.exchange(apiBase + path, HttpMethod.GET, new HttpEntity<>(h), JsonNode.class).getBody();
-        } catch (org.springframework.web.client.HttpClientErrorException.Unauthorized ex) {
-            applicationContext.getBean(FreeeIntegrationService.class).refreshForced();
-            c = latestActiveRow();
-            h.setBearerAuth(decrypt(c.getAccessTokenEncrypted()));
-            try {
-                return restTemplate.exchange(apiBase + path, HttpMethod.GET, new HttpEntity<>(h), JsonNode.class).getBody();
-            } catch (Exception e) {
-                throw BusinessException.of(503, "error.payroll.providerUnavailable");
-            }
-        } catch (Exception ex) {
-            throw BusinessException.of(503, "error.payroll.providerUnavailable");
-        }
     }
 
     /**

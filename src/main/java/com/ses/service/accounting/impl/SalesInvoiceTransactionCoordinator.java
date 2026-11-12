@@ -42,7 +42,8 @@ public class SalesInvoiceTransactionCoordinator {
 
                 jobService.createJob(
                         conn.getId(), "SALES_INVOICE_CANCEL", "INVOICE", job.getTargetId(), compIdempotencyKey, compHash,
-                        compPayload, conn.getTenantId(), conn.getLegalEntityId(), job.getOrganizationId());
+                        // NF09: 補償取消は元ジョブと同じ法人で実行する（接続の法人は全社共通ではNULL）
+                        compPayload, conn.getTenantId(), job.getLegalEntityId(), job.getOrganizationId());
             } else {
                 jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
                         "freee取引登録成功: dealId=" + result.getExternalId());

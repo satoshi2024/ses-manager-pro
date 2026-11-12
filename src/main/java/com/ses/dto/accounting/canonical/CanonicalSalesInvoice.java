@@ -22,6 +22,11 @@ public class CanonicalSalesInvoice {
     private String invoiceNo;
     private Long customerId;
     private String customerCode;
+    /**
+     * 照合済みCUSTOMER_PARTNERマッピングのfreee取引先ID。freeeへは partner_id として送る。
+     * freeeの取引先コードは事業所設定で無効化されていることがあるため、内部コード（customerCode）は送らない。
+     */
+    private String partnerExternalId;
     private String customerName;
     private LocalDate issueDate;
     private LocalDate dueDate;

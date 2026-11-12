@@ -10,7 +10,7 @@ import com.ses.dto.reconciliation.ReconciliationFetchResultDto;
 import com.ses.entity.BankDeposit;
 import com.ses.mapper.BankDepositMapper;
 import com.ses.mapper.InvoiceMapper;
-import com.ses.service.FreeeIntegrationService;
+import com.ses.service.billing.BankDepositSource;
 import com.ses.service.InvoiceService;
 import com.ses.service.billing.PaymentReconciliationService;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,7 +42,7 @@ class PaymentReconciliationServiceImplTest {
     private InvoiceMapper invoiceMapper;
 
     @Mock
-    private FreeeIntegrationService freeeIntegrationService;
+    private BankDepositSource bankDepositSource;
 
     @Mock
     private InvoiceService invoiceService;
@@ -95,7 +95,7 @@ class PaymentReconciliationServiceImplTest {
     @Test
     void fetchAndReconcile_autoMatchesWhenAmountAndNameMatch() {
         LocalDate depositDate = LocalDate.of(2026, 7, 20);
-        when(freeeIntegrationService.bankDeposits(any(), any()))
+        when(bankDepositSource.fetch(any(), any()))
                 .thenReturn(List.of(depositDto("D1", depositDate, new BigDecimal("550000"), "サンプル商事株式会社")));
         when(bankDepositMapper.insert(any(BankDeposit.class))).thenReturn(1);
 
@@ -130,7 +130,7 @@ class PaymentReconciliationServiceImplTest {
     @Test
     void fetchAndReconcile_skipsDuplicateFreeeDepositId() {
         LocalDate date = LocalDate.of(2026, 7, 20);
-        when(freeeIntegrationService.bankDeposits(any(), any()))
+        when(bankDepositSource.fetch(any(), any()))
                 .thenReturn(List.of(depositDto("D1", date, new BigDecimal("1000"), "テスト")));
         when(bankDepositMapper.insert(any(BankDeposit.class))).thenThrow(new DuplicateKeyException("dup"));
         when(bankDepositMapper.selectList(any())).thenReturn(List.of());
@@ -148,7 +148,7 @@ class PaymentReconciliationServiceImplTest {
     @Test
     void fetchAndReconcile_doesNotAutoApplyWhenMultipleHighConfidenceMatches() {
         LocalDate date = LocalDate.of(2026, 7, 20);
-        when(freeeIntegrationService.bankDeposits(any(), any()))
+        when(bankDepositSource.fetch(any(), any()))
                 .thenReturn(List.of(depositDto("D1", date, new BigDecimal("100000"), "サンプル商事株式会社")));
         when(bankDepositMapper.insert(any(BankDeposit.class))).thenReturn(1);
 
@@ -252,7 +252,7 @@ class PaymentReconciliationServiceImplTest {
     @Test
     void fetchAndReconcile_自動消込の請求書scope拒否時は入金を変更しない() {
         LocalDate date = LocalDate.of(2026, 7, 20);
-        when(freeeIntegrationService.bankDeposits(any(), any()))
+        when(bankDepositSource.fetch(any(), any()))
                 .thenReturn(List.of(depositDto("D-SCOPE", date, new BigDecimal("550000"), "組織外商事株式会社")));
         when(bankDepositMapper.insert(any(BankDeposit.class))).thenReturn(1);
 

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
+import com.ses.dto.accounting.AccountingSendPreviewDto;
 import com.ses.dto.accounting.canonical.CanonicalDealResult;
 import com.ses.dto.accounting.canonical.CanonicalExpenseDeal;
 import com.ses.dto.accounting.canonical.CanonicalPaymentSync;
@@ -16,6 +17,7 @@ import com.ses.mapper.ExpenseRequestMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.BpCompanyService;
 import com.ses.service.MonthlyClosingService;
+import com.ses.service.accounting.AccountingJobLegalEntityResolver;
 import com.ses.service.accounting.AccountingOrganizationResolver;
 import com.ses.service.accounting.AccountingProvider;
 import com.ses.service.accounting.AccountingProviderFactory;
@@ -23,6 +25,7 @@ import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.accounting.PurchaseExpensePaymentIntegrationService;
 import com.ses.service.integration.ExternalMappingService;
+import com.ses.service.integration.ExternalMappingService.MappingCheck;
 import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
 import lombok.RequiredArgsConstructor;
@@ -63,6 +66,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     private final AccountingOrganizationResolver organizationResolver;
     private final AccountingTimezoneResolver timezoneResolver;
     private final ObjectMapper objectMapper;
+    private final AccountingJobLegalEntityResolver legalEntityResolver;
 
     private LocalDate resolveBpIssueDate(BpPayment bpPayment) {
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
@@ -72,7 +76,24 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                 return java.time.YearMonth.parse(wr.getWorkMonth().trim()).atEndOfMonth();
             }
         }
-        throw new BusinessException(400, "BP支払レコードの対象月(workMonth)が未設定です (id=" + bpPayment.getId() + ")");
+        throw BusinessException.of(400, "error.accounting.bpWorkMonthMissing");
+    }
+
+    /** BP仕入送信に必要なマッピング（種別, 内部キー）。送信ガードとプレビューで同じ定義を使う。 */
+    private static List<String[]> requiredPurchaseMappings(BpPayment bpPayment) {
+        return List.of(
+                new String[]{"BP_PARTNER", bpCompanyCode(bpPayment)},
+                new String[]{"ACCOUNT_PURCHASE", "PURCHASE_DEFAULT"},
+                new String[]{"TAX_PURCHASE_10", "TAX_PURCHASE_10"});
+    }
+
+    /** 要員経費送信に必要なマッピング。要員はfreee取引先として送らないため取引先マッピングは不要。 */
+    private static final List<String[]> REQUIRED_EXPENSE_MAPPINGS = List.of(
+            new String[]{"ACCOUNT_EXPENSE", "EXPENSE_DEFAULT"},
+            new String[]{"TAX_PURCHASE_10", "TAX_PURCHASE_10"});
+
+    private static String bpCompanyCode(BpPayment bpPayment) {
+        return bpPayment.getBpCompanyId() != null ? "BP-" + bpPayment.getBpCompanyId() : "BP-UNKNOWN";
     }
 
     @Override
@@ -80,19 +101,19 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     public IntegrationJob triggerBpPurchaseSync(Long bpPaymentId, Long triggeredByUserId) {
         BpPayment bpPayment = bpPaymentMapper.selectById(bpPaymentId);
         if (bpPayment == null) {
-            throw new BusinessException(404, "BP支払レコードが見つかりません (id=" + bpPaymentId + ")");
+            throw BusinessException.of(404, "error.accounting.bpPaymentNotFound");
         }
 
         // P1-08: 金額 NULL 厳格チェック
         if (bpPayment.getAmount() == null || bpPayment.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BusinessException(400, "BP支払金額は必須かつ正数である必要があります (id=" + bpPaymentId + ")");
+            throw BusinessException.of(400, "error.accounting.bpAmountInvalid");
         }
 
         // ステータス適格性チェック
         if (bpPayment.getStatus() != null &&
                 !"未払".equals(bpPayment.getStatus()) && !"承認済".equals(bpPayment.getStatus()) &&
                 !"CONFIRMED".equalsIgnoreCase(bpPayment.getStatus()) && !"APPROVED".equalsIgnoreCase(bpPayment.getStatus())) {
-            throw new BusinessException(400, "未払または承認済のBP支払レコードのみ連携可能です (status=" + bpPayment.getStatus() + ")");
+            throw BusinessException.of(400, "error.accounting.bpPaymentNotSendable");
         }
 
         // 口座変更未承認ガード
@@ -102,7 +123,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                             .eq(com.ses.entity.BpBankAccount::getBpCompanyId, bpPayment.getBpCompanyId())
                             .eq(com.ses.entity.BpBankAccount::getApprovalStatus, "PENDING"));
             if (pendingAccounts != null && pendingAccounts > 0) {
-                throw new BusinessException(400, "銀行口座変更が承認待ちのためBP支払連携を実行できません (bpCompanyId=" + bpPayment.getBpCompanyId() + ")");
+                throw BusinessException.of(400, "error.accounting.bpBankAccountPending");
             }
         }
 
@@ -116,32 +137,17 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         }
 
         IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
-        String bpCompanyCode = bpPayment.getBpCompanyId() != null ? "BP-" + bpPayment.getBpCompanyId() : "BP-UNKNOWN";
 
         // マッピング検証ガード
-        mappingService.assertMappingVerified(conn.getId(), "BP_PARTNER", bpCompanyCode);
-        mappingService.assertMappingVerified(conn.getId(), "ACCOUNT_PURCHASE", "PURCHASE_DEFAULT");
-        mappingService.assertMappingVerified(conn.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10");
-
-        ExternalMapping purchaseAccount = mappingService.getMapping(conn.getId(), "ACCOUNT_PURCHASE", "PURCHASE_DEFAULT");
-        ExternalMapping taxMapping = mappingService.getMapping(conn.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10");
+        for (String[] required : requiredPurchaseMappings(bpPayment)) {
+            mappingService.assertMappingVerified(conn.getId(), required[0], required[1]);
+        }
 
         // P1-08: 業務日付 (issueDate) を対象月 (work_month) 末日に固定 (翌日再試行でもハッシュ不変)
-        LocalDate issueDate = resolveBpIssueDate(bpPayment);
-        LocalDate dueDate = issueDate.plusMonths(1);
+        // NF09: ジョブの法人はBP支払の工数実績が属する契約の法人。未設定・接続の法人と不一致ならジョブを作らない
+        Long legalEntityId = legalEntityResolver.require(conn, legalEntityResolver.ofBpPayment(bpPayment));
 
-        CanonicalPurchaseDeal canonical = CanonicalPurchaseDeal.builder()
-                .bpPaymentId(bpPayment.getId())
-                .bpCompanyId(bpPayment.getBpCompanyId())
-                .bpCompanyCode(bpCompanyCode)
-                .bpCompanyName(bpPayment.getPayeeCompanyName() != null ? bpPayment.getPayeeCompanyName() : "BP会社ID:" + bpPayment.getBpCompanyId())
-                .issueDate(issueDate)
-                .dueDate(dueDate)
-                .amount(bpPayment.getAmount())
-                .accountItemCode(purchaseAccount.getExternalId())
-                .taxCode(taxMapping.getExternalId())
-                .remarks(bpPayment.getRemarks() != null ? bpPayment.getRemarks() : "BP外注費: " + bpPayment.getId())
-                .build();
+        CanonicalPurchaseDeal canonical = buildPurchaseCanonical(bpPayment, conn.getId(), resolveBpIssueDate(bpPayment));
 
         String payloadJson;
         try {
@@ -157,7 +163,51 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         log.info("Enqueueing BP purchase sync job for bpPaymentId={}, idempotencyKey={}, orgId={}", bpPaymentId, idempotencyKey, orgId);
         return jobService.createJob(
                 conn.getId(), "BP_PURCHASE_SYNC", "BP_PAYMENT", bpPayment.getId(), idempotencyKey, payloadHash,
-                payloadJson, conn.getTenantId(), conn.getLegalEntityId(), orgId);
+                payloadJson, conn.getTenantId(), legalEntityId, orgId);
+    }
+
+    @Override
+    public AccountingSendPreviewDto<CanonicalPurchaseDeal> previewBpPurchaseSync(Long bpPaymentId) {
+        BpPayment bpPayment = bpPaymentMapper.selectById(bpPaymentId);
+        if (bpPayment == null) {
+            throw BusinessException.of(404, "error.accounting.bpPaymentNotFound");
+        }
+        // プレビューは参照のみ: 接続は作成しない
+        IntegrationConnection conn = connectionService.getConnection("default", null, "freee", "accounting");
+        Long connectionId = conn != null ? conn.getId() : null;
+        List<MappingCheck> checks = requiredPurchaseMappings(bpPayment).stream()
+                .map(required -> mappingService.inspect(connectionId, required[0], required[1]))
+                .toList();
+        LocalDate issueDate;
+        try {
+            issueDate = resolveBpIssueDate(bpPayment);
+        } catch (BusinessException e) {
+            issueDate = null; // 対象月未設定は送信時に error.accounting.bpWorkMonthMissing で拒否される
+        }
+        return AccountingSendPreviewDto.of("PURCHASE", buildPurchaseCanonical(bpPayment, connectionId, issueDate),
+                checks, conn != null && "CONNECTED".equals(conn.getStatus()),
+                legalEntityResolver.check(conn, legalEntityResolver.ofBpPayment(bpPayment)));
+    }
+
+    /** 送信ジョブへ保存する標準DTO。照合済みマッピングの外部ID（取引先・勘定科目・税区分）を反映する。 */
+    private CanonicalPurchaseDeal buildPurchaseCanonical(BpPayment bpPayment, Long connectionId, LocalDate issueDate) {
+        String bpCompanyCode = bpCompanyCode(bpPayment);
+        ExternalMapping partnerMapping = mappingService.getMapping(connectionId, "BP_PARTNER", bpCompanyCode);
+        ExternalMapping purchaseAccount = mappingService.getMapping(connectionId, "ACCOUNT_PURCHASE", "PURCHASE_DEFAULT");
+        ExternalMapping taxMapping = mappingService.getMapping(connectionId, "TAX_PURCHASE_10", "TAX_PURCHASE_10");
+        return CanonicalPurchaseDeal.builder()
+                .bpPaymentId(bpPayment.getId())
+                .bpCompanyId(bpPayment.getBpCompanyId())
+                .bpCompanyCode(bpCompanyCode)
+                .partnerExternalId(partnerMapping != null ? partnerMapping.getExternalId() : null)
+                .bpCompanyName(bpPayment.getPayeeCompanyName() != null ? bpPayment.getPayeeCompanyName() : "BP会社ID:" + bpPayment.getBpCompanyId())
+                .issueDate(issueDate)
+                .dueDate(issueDate != null ? issueDate.plusMonths(1) : null)
+                .amount(bpPayment.getAmount())
+                .accountItemCode(purchaseAccount != null ? purchaseAccount.getExternalId() : null)
+                .taxCode(taxMapping != null ? taxMapping.getExternalId() : null)
+                .remarks(bpPayment.getRemarks() != null ? bpPayment.getRemarks() : "BP外注費: " + bpPayment.getId())
+                .build();
     }
 
     @Override
@@ -165,14 +215,19 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     public IntegrationJob triggerPaymentSync(Long bpPaymentId, Long triggeredByUserId) {
         BpPayment bpPayment = bpPaymentMapper.selectById(bpPaymentId);
         if (bpPayment == null) {
-            throw new BusinessException(404, "BP支払レコードが見つかりません (id=" + bpPaymentId + ")");
+            throw BusinessException.of(404, "error.accounting.bpPaymentNotFound");
         }
 
         IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
         IntegrationJob latestPurchase = jobService.getLatestJob("BP_PAYMENT", bpPaymentId, "BP_PURCHASE_SYNC");
         if (latestPurchase == null || !"SUCCEEDED".equals(latestPurchase.getStatus()) || latestPurchase.getExternalId() == null) {
-            throw new BusinessException(400, "連携済みの外部取引が存在しないため、支払実績同期を実行できません");
+            throw BusinessException.of(400, "error.accounting.syncedDealMissing");
         }
+
+        // NF09: 支払実績同期は仕入取引を作成したジョブと同じ法人で実行する（旧ジョブに法人が無ければBP支払の法人）
+        Long legalEntityId = latestPurchase.getLegalEntityId() != null
+                ? latestPurchase.getLegalEntityId()
+                : legalEntityResolver.require(conn, legalEntityResolver.ofBpPayment(bpPayment));
 
         String idempotencyKey = "PAYMENT_SYNC:" + bpPayment.getId() + ":" + latestPurchase.getExternalId();
         String payload = "{\"bpPaymentId\":" + bpPaymentId + ",\"externalDealId\":\"" + latestPurchase.getExternalId() + "\",\"expectedAmount\":" + bpPayment.getAmount() + "}";
@@ -182,7 +237,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         log.info("Enqueueing payment sync job for bpPaymentId={}, externalDealId={}, orgId={}", bpPaymentId, latestPurchase.getExternalId(), orgId);
         return jobService.createJob(
                 conn.getId(), "PAYMENT_SYNC", "BP_PAYMENT", bpPayment.getId(), idempotencyKey, payloadHash,
-                payload, conn.getTenantId(), conn.getLegalEntityId(), orgId);
+                payload, conn.getTenantId(), legalEntityId, orgId);
     }
 
     @Override
@@ -191,43 +246,32 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
         ExpenseRequest expense = expenseRequestMapper.selectByIdForTenant(expenseRequestId, tenantId);
         if (expense == null) {
-            throw new BusinessException(404, "経費申請レコードが見つかりません (id=" + expenseRequestId + ")");
+            throw BusinessException.of(404, "error.accounting.expenseNotFound");
         }
 
         // P1-08: 金額・日付 NULL 厳格チェック
         if (expense.getAmount() == null || expense.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BusinessException(400, "経費金額は必須かつ正数である必要があります (id=" + expenseRequestId + ")");
+            throw BusinessException.of(400, "error.accounting.expenseAmountInvalid");
         }
         if (expense.getExpenseDate() == null) {
-            throw new BusinessException(400, "経費発生日は必須です (id=" + expenseRequestId + ")");
+            throw BusinessException.of(400, "error.accounting.expenseDateMissing");
         }
         monthlyClosingService.assertOpenForUpdate(java.time.YearMonth.from(expense.getExpenseDate()).toString());
 
         if (!"承認済".equals(expense.getStatus())) {
-            throw new BusinessException(400, "承認済の経費申請のみ会計連携可能です (現在: " + expense.getStatus() + ")");
+            throw BusinessException.of(400, "error.accounting.expenseNotSendable");
         }
 
         IntegrationConnection conn = resolveConnection(tenantId, null, "freee", "accounting");
-        String engineerCode = "ENG-" + expense.getEngineerId();
 
-        mappingService.assertMappingVerified(conn.getId(), "ACCOUNT_EXPENSE", "EXPENSE_DEFAULT");
-        mappingService.assertMappingVerified(conn.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10");
+        for (String[] required : REQUIRED_EXPENSE_MAPPINGS) {
+            mappingService.assertMappingVerified(conn.getId(), required[0], required[1]);
+        }
 
-        ExternalMapping expenseAccount = mappingService.getMapping(conn.getId(), "ACCOUNT_EXPENSE", "EXPENSE_DEFAULT");
-        ExternalMapping taxMapping = mappingService.getMapping(conn.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10");
+        // NF09: ジョブの法人は要員の法人。未設定・接続の法人と不一致ならジョブを作らない
+        Long legalEntityId = legalEntityResolver.require(conn, legalEntityResolver.ofExpense(expense));
 
-        CanonicalExpenseDeal canonical = CanonicalExpenseDeal.builder()
-                .expenseId(expense.getId())
-                .expenseNo(expense.getExpenseNo() != null ? expense.getExpenseNo() : "EX-" + expense.getId())
-                .engineerId(expense.getEngineerId())
-                .engineerCode(engineerCode)
-                .category(expense.getCategory())
-                .amount(expense.getAmount())
-                .expenseDate(expense.getExpenseDate())
-                .accountItemCode(expenseAccount.getExternalId())
-                .taxCode(taxMapping.getExternalId())
-                .description(expense.getDescription())
-                .build();
+        CanonicalExpenseDeal canonical = buildExpenseCanonical(expense, conn.getId());
 
         String payloadJson;
         try {
@@ -243,7 +287,43 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         log.info("Enqueueing expense sync job for expenseId={}, idempotencyKey={}, orgId={}", expenseRequestId, idempotencyKey, orgId);
         return jobService.createJob(
                 conn.getId(), "EXPENSE_DEAL_SYNC", "EXPENSE_REQUEST", expense.getId(), idempotencyKey, payloadHash,
-                payloadJson, conn.getTenantId(), conn.getLegalEntityId(), orgId);
+                payloadJson, conn.getTenantId(), legalEntityId, orgId);
+    }
+
+    @Override
+    public AccountingSendPreviewDto<CanonicalExpenseDeal> previewExpenseSync(Long expenseRequestId) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        ExpenseRequest expense = expenseRequestMapper.selectByIdForTenant(expenseRequestId, tenantId);
+        if (expense == null) {
+            throw BusinessException.of(404, "error.accounting.expenseNotFound");
+        }
+        // プレビューは参照のみ: 接続は作成しない
+        IntegrationConnection conn = connectionService.getConnection(tenantId, null, "freee", "accounting");
+        Long connectionId = conn != null ? conn.getId() : null;
+        List<MappingCheck> checks = REQUIRED_EXPENSE_MAPPINGS.stream()
+                .map(required -> mappingService.inspect(connectionId, required[0], required[1]))
+                .toList();
+        return AccountingSendPreviewDto.of("EXPENSE", buildExpenseCanonical(expense, connectionId), checks,
+                conn != null && "CONNECTED".equals(conn.getStatus()),
+                legalEntityResolver.check(conn, legalEntityResolver.ofExpense(expense)));
+    }
+
+    /** 送信ジョブへ保存する標準DTO。照合済みマッピングの外部ID（勘定科目・税区分）を反映する。 */
+    private CanonicalExpenseDeal buildExpenseCanonical(ExpenseRequest expense, Long connectionId) {
+        ExternalMapping expenseAccount = mappingService.getMapping(connectionId, "ACCOUNT_EXPENSE", "EXPENSE_DEFAULT");
+        ExternalMapping taxMapping = mappingService.getMapping(connectionId, "TAX_PURCHASE_10", "TAX_PURCHASE_10");
+        return CanonicalExpenseDeal.builder()
+                .expenseId(expense.getId())
+                .expenseNo(expense.getExpenseNo() != null ? expense.getExpenseNo() : "EX-" + expense.getId())
+                .engineerId(expense.getEngineerId())
+                .engineerCode("ENG-" + expense.getEngineerId())
+                .category(expense.getCategory())
+                .amount(expense.getAmount())
+                .expenseDate(expense.getExpenseDate())
+                .accountItemCode(expenseAccount != null ? expenseAccount.getExternalId() : null)
+                .taxCode(taxMapping != null ? taxMapping.getExternalId() : null)
+                .description(expense.getDescription())
+                .build();
     }
 
     @Override

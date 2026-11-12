@@ -302,6 +302,170 @@ class FreeeAccountingProviderTest {
     }
 
     @Test
+    @DisplayName("取引先は照合済みマッピングのfreee取引先IDを partner_id で送り、内部コードを partner_code で送らない")
+    void upsertSalesInvoice_sendsMappedPartnerId_notInternalCode() {
+        CanonicalSalesInvoice invoice = CanonicalSalesInvoice.builder()
+                .invoiceId(102L)
+                .invoiceNo("INV-202608-002")
+                .customerCode("CUST-2018")
+                .partnerExternalId("778899")
+                .issueDate(LocalDate.of(2026, 8, 1))
+                .total(new BigDecimal("1100000"))
+                .details(List.of(CanonicalSalesInvoice.Detail.builder()
+                        .description("SES請求").amount(new BigDecimal("1100000"))
+                        .accountItemCode("4001").taxCode("129").build()))
+                .build();
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.partner_id").value(778899))
+                .andExpect(jsonPath("$.partner_code").doesNotExist())
+                .andExpect(jsonPath("$.details[0].account_item_id").value(4001))
+                .andExpect(jsonPath("$.details[0].tax_code").value(129))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 55556, \"company_id\": 99999, \"amount\": 1100000}}",
+                        MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isTrue();
+    }
+
+    @Test
+    @DisplayName("int範囲を超えるfreee勘定科目ID・取引先IDも欠落させずに送る")
+    void upsertSalesInvoice_keepsIdsBeyondIntRange() {
+        CanonicalSalesInvoice invoice = CanonicalSalesInvoice.builder()
+                .invoiceId(104L)
+                .invoiceNo("INV-202608-004")
+                .customerCode("CUST-2020")
+                .partnerExternalId("3000000002")
+                .issueDate(LocalDate.of(2026, 8, 1))
+                .total(new BigDecimal("110000"))
+                .details(List.of(CanonicalSalesInvoice.Detail.builder()
+                        .description("SES請求").amount(new BigDecimal("110000"))
+                        .accountItemCode("3000000001").taxCode("129").build()))
+                .build();
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(jsonPath("$.partner_id").value(3000000002L))
+                .andExpect(jsonPath("$.details[0].account_item_id").value(3000000001L))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 55558, \"company_id\": 99999, \"amount\": 110000}}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThat(freeeProvider.upsertSalesInvoice(testConnection, invoice).isSuccess()).isTrue();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("BP仕入もBP_PARTNERマッピングのfreee取引先IDを partner_id で送る")
+    void upsertPurchaseDeal_sendsMappedPartnerId() {
+        CanonicalPurchaseDeal purchase = CanonicalPurchaseDeal.builder()
+                .bpPaymentId(203L)
+                .bpCompanyCode("BP-7")
+                .partnerExternalId("665544")
+                .issueDate(LocalDate.of(2026, 8, 31))
+                .amount(new BigDecimal("330000"))
+                .build();
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(jsonPath("$.partner_id").value(665544))
+                .andExpect(jsonPath("$.partner_code").doesNotExist())
+                .andRespond(withSuccess("{\"deal\": {\"id\": 66001, \"company_id\": 99999, \"amount\": 330000}}",
+                        MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertPurchaseDeal(testConnection, purchase);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isTrue();
+    }
+
+    @Test
+    @DisplayName("要員経費は取引先を送らない（要員コードを取引先コードとして送るとfreeeが400を返す）")
+    void upsertExpenseDeal_sendsNoPartner() {
+        CanonicalExpenseDeal expense = CanonicalExpenseDeal.builder()
+                .expenseId(302L)
+                .expenseNo("EX-302")
+                .engineerCode("ENG-15")
+                .expenseDate(LocalDate.of(2026, 8, 10))
+                .amount(new BigDecimal("15000"))
+                .build();
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(jsonPath("$.partner_id").doesNotExist())
+                .andExpect(jsonPath("$.partner_code").doesNotExist())
+                .andExpect(jsonPath("$.ref_number").value("EX-302"))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 77001, \"company_id\": 99999, \"amount\": 15000}}",
+                        MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertExpenseDeal(testConnection, expense);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isTrue();
+    }
+
+    @Test
+    @DisplayName("partnerExternalId導入前に登録されたjob（旧snapshot）は従来どおり取引先コードで送る")
+    void upsertSalesInvoice_legacySnapshot_keepsPartnerCode() {
+        CanonicalSalesInvoice invoice = CanonicalSalesInvoice.builder()
+                .invoiceId(103L)
+                .invoiceNo("INV-202608-003")
+                .customerCode("CUST-2019")
+                .issueDate(LocalDate.of(2026, 8, 1))
+                .total(new BigDecimal("550000"))
+                .build();
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(jsonPath("$.partner_code").value("CUST-2019"))
+                .andExpect(jsonPath("$.partner_id").doesNotExist())
+                .andRespond(withSuccess("{\"deal\": {\"id\": 55557, \"company_id\": 99999, \"amount\": 550000}}",
+                        MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isTrue();
+    }
+
+    @Test
+    @DisplayName("FR-09: 入金は売上取引ではなく口座の入金明細(wallet_txns)から取得し、摘要を振込名義にする")
+    void fetchBankDeposits_readsBankIncomeWalletTxns() {
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/wallet_txns?company_id=99999"
+                        + "&walletable_type=bank_account&entry_side=income"
+                        + "&start_date=2026-11-01&end_date=2026-11-30&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("Authorization", "Bearer secret-token-abcdef123456"))
+                .andRespond(withSuccess("{\"wallet_txns\":["
+                        + "{\"id\":501,\"date\":\"2026-11-10\",\"amount\":1100000,\"entry_side\":\"income\",\"description\":\"ﾌﾘｺﾐ ﾃｽﾄｼｮｳｼﾞ\"},"
+                        + "{\"id\":502,\"date\":\"2026-11-12\",\"amount\":330000,\"entry_side\":\"income\"},"
+                        + "{\"date\":\"2026-11-13\",\"amount\":1}"
+                        + "]}", MediaType.APPLICATION_JSON));
+
+        List<com.ses.dto.reconciliation.BankDepositDto> deposits = freeeProvider.fetchBankDeposits(
+                testConnection, LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 30));
+
+        mockServer.verify();
+        assertThat(deposits).hasSize(2); // idの無い明細は消込対象にしない
+        assertThat(deposits.get(0).getFreeeDepositId()).isEqualTo("501");
+        assertThat(deposits.get(0).getDepositDate()).isEqualTo(LocalDate.of(2026, 11, 10));
+        assertThat(deposits.get(0).getAmount()).isEqualByComparingTo("1100000");
+        assertThat(deposits.get(0).getPayerName()).isEqualTo("ﾌﾘｺﾐ ﾃｽﾄｼｮｳｼﾞ");
+        assertThat(deposits.get(1).getPayerName()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("FR-09: 取得失敗は部分結果で消込を進めず、502で止める")
+    void fetchBankDeposits_failureStopsWithoutPartialResult() {
+        mockServer.expect(requestTo(org.hamcrest.Matchers.startsWith("https://api.freee.co.jp/api/1/wallet_txns?")))
+                .andRespond(withServerError());
+
+        com.ses.common.exception.BusinessException ex = org.junit.jupiter.api.Assertions.assertThrows(
+                com.ses.common.exception.BusinessException.class,
+                () -> freeeProvider.fetchBankDeposits(testConnection, LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 30)));
+        assertThat(ex.getCode()).isEqualTo(502);
+        assertThat(ex.getMessage()).isEqualTo("error.reconciliation.fetchFailed");
+    }
+
+    @Test
     @DisplayName("500 Server Error: リトライ可能として分類されること")
     void serverError500_retryable() {
         CanonicalExpenseDeal expense = CanonicalExpenseDeal.builder()

@@ -14,7 +14,7 @@ import com.ses.dto.reconciliation.ReconciliationFetchResultDto;
 import com.ses.entity.BankDeposit;
 import com.ses.mapper.BankDepositMapper;
 import com.ses.mapper.InvoiceMapper;
-import com.ses.service.FreeeIntegrationService;
+import com.ses.service.billing.BankDepositSource;
 import com.ses.service.InvoiceService;
 import com.ses.service.billing.PaymentReconciliationService;
 import lombok.RequiredArgsConstructor;
@@ -54,7 +54,7 @@ public class PaymentReconciliationServiceImpl implements PaymentReconciliationSe
 
     private final BankDepositMapper bankDepositMapper;
     private final InvoiceMapper invoiceMapper;
-    private final FreeeIntegrationService freeeIntegrationService;
+    private final BankDepositSource bankDepositSource;
     private final InvoiceService invoiceService;
     private final org.springframework.context.ApplicationContext applicationContext;
 
@@ -66,7 +66,7 @@ public class PaymentReconciliationServiceImpl implements PaymentReconciliationSe
             throw BusinessException.of(400, "error.reconciliation.invalidPeriod");
         }
 
-        List<BankDepositDto> fetched = freeeIntegrationService.bankDeposits(resolvedFrom, resolvedTo);
+        List<BankDepositDto> fetched = bankDepositSource.fetch(resolvedFrom, resolvedTo);
 
         int newCount = 0;
         for (BankDepositDto d : fetched) {

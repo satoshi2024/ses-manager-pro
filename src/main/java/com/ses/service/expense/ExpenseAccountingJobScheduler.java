@@ -168,7 +168,10 @@ public class ExpenseAccountingJobScheduler {
         ExpenseAccountingSender sender = resolveSender();
         ExpenseAccountingSender.SendResult result;
         if (sender == null) {
-            log.warn("[経費会計連携] provider未設定のため連携できません: expenseId={}", expenseRequestId);
+            // freeeのsender実装は無い（設定値freeeは旧seed/旧画面で保存されたもの）。
+            // 経費のfreee送信は会計・支払連携の送信プレビュー（EXPENSE_DEAL_SYNC）で行う。
+            log.warn("[経費会計連携] 設定providerに対応するsenderが無いため連携できません"
+                    + "（freeeへの送信は会計・支払連携から行ってください）: expenseId={}", expenseRequestId);
             result = new ExpenseAccountingSender.SendResult(false, null, "PROVIDER_UNAVAILABLE");
         } else {
             try {

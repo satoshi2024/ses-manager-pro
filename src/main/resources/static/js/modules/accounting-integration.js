@@ -49,25 +49,50 @@ window.AccountingIntegration = (function () {
         return el ? bootstrap.Modal.getOrCreateInstance(el) : null;
     }
 
-    function loadPreviewInvoiceOptions() {
-        let sel = $('#previewInvoiceId');
+    /** 送信種別ごとのプレビューAPI・送信APIのパス片。 */
+    const SEND_KINDS = {
+        sales: { preview: 'sales-invoice', sync: 'sales-invoice' },
+        purchase: { preview: 'bp-purchase', sync: 'bp-purchase' },
+        expense: { preview: 'expense', sync: 'expense' }
+    };
+
+    function previewKind() {
+        let kind = $('#previewKind').val();
+        return SEND_KINDS[kind] ? kind : 'sales';
+    }
+
+    function formatYen(value) {
+        return '¥' + Number(value || 0).toLocaleString();
+    }
+
+    /** 送信プレビューの対象候補。売上は請求書一覧API、BP仕入・要員経費は送信候補API（管理者のみ）。 */
+    function loadPreviewTargets() {
+        let sel = $('#previewTargetId');
         if (!sel.length) return;
+        let kind = previewKind();
         let current = sel.val();
-        $.ajax({
-            url: '/api/invoices',
-            type: 'GET',
-            data: { current: 1, size: 1000 }
-        }).done(function (res) {
-            if (!res || res.code !== 200) return;
-            let placeholder = sel.find('option[value=""]').first().prop('outerHTML')
-                || `<option value="">${escapeHtml(t('selectInvoice') || SES.i18n.t('accounting.preview.selectInvoice', '請求書を選択...'))}</option>`;
-            let options = ((res.data && res.data.records) || []).map(function (inv) {
-                let label = (inv.invoiceNo || ('#' + inv.id)) + (inv.billingMonth ? ' / ' + inv.billingMonth : '');
-                return `<option value="${escapeHtml(String(inv.id))}">${escapeHtml(label)}</option>`;
+        let placeholder = `<option value="">${escapeHtml(t('selectTarget'))}</option>`;
+        let request = kind === 'sales'
+            ? { url: '/api/invoices', data: { current: 1, size: 1000 } }
+            : { url: '/api/accounting/send-candidates', data: { kind: kind } };
+        $.ajax({ url: request.url, type: 'GET', data: request.data }).done(function (res) {
+            if (!res || res.code !== 200 || kind !== previewKind()) return;
+            let rows = kind === 'sales' ? ((res.data && res.data.records) || []) : (res.data || []);
+            let options = rows.map(function (row) {
+                let label;
+                if (kind === 'sales') {
+                    label = (row.invoiceNo || ('#' + row.id)) + (row.billingMonth ? ' / ' + row.billingMonth : '')
+                        + (row.status ? ' / ' + row.status : '');
+                } else {
+                    label = [row.no, row.name, row.date, row.amount != null ? formatYen(row.amount) : null]
+                        .filter(function (v) { return v; }).join(' / ');
+                }
+                return `<option value="${escapeHtml(String(row.id))}">${escapeHtml(label)}</option>`;
             }).join('');
             sel.html(placeholder + options);
-            if (current) sel.val(current);
+            if (current && sel.find(`option[value="${current}"]`).length) sel.val(current);
         });
+        // 失敗時の文言はcommon.jsの共通ハンドラが表示する
     }
 
     // === 接続設定 ===
@@ -242,7 +267,9 @@ window.AccountingIntegration = (function () {
                     SES.toast.success(t('mappingVerified'));
                     loadMappings(connectionId);
                 }).fail(function () {
-                    SES.toast.error(t('verifyFailed'));
+                    // 失敗理由はcommon.jsの共通ハンドラがサーバー文言で表示する。
+                    // 照合失敗時はサーバー側で未検証へ戻しているため、一覧を再取得して表示を合わせる。
+                    loadMappings(connectionId);
                 });
             });
 
@@ -414,54 +441,183 @@ window.AccountingIntegration = (function () {
         });
     }
 
-    function renderPreview(data) {
-        let container = $('#previewResultContainer').empty();
-        if (!data) return;
-
-        let detailsHtml = '';
-        if (data.details && data.details.length > 0) {
-            data.details.forEach(function (d) {
-                detailsHtml += `
-                <tr>
-                    <td>${escapeHtml(d.description)}</td>
-                    <td class="text-end font-monospace">&yen;${escapeHtml(Number(d.amount || 0).toLocaleString())}</td>
-                    <td class="font-monospace">${escapeHtml(d.accountCode || '-')}</td>
-                    <td class="font-monospace">${escapeHtml(d.taxCode || '-')}</td>
-                </tr>`;
-            });
+    /** 種別ごとの標準DTOを、見出し・項目・明細行へ揃える。 */
+    function previewSummary(kind, p) {
+        if (kind === 'purchase') {
+            return {
+                title: 'BP-PAY-' + (p.bpPaymentId || ''),
+                fields: [
+                    [t('partnerName'), p.bpCompanyName],
+                    [t('internalCode'), p.bpCompanyCode],
+                    [t('partnerId'), p.partnerExternalId || '-'],
+                    [t('issueDate'), p.issueDate || '-'],
+                    [t('dueDate'), p.dueDate || '-'],
+                    [t('total'), formatYen(p.amount), true]
+                ],
+                lines: [{ description: p.remarks, amount: p.amount, account: p.accountItemCode, tax: p.taxCode }]
+            };
         }
+        if (kind === 'expense') {
+            return {
+                title: p.expenseNo || ('EX-' + (p.expenseId || '')),
+                fields: [
+                    [t('category'), p.category || '-'],
+                    [t('partnerId'), t('partnerNone')],
+                    [t('issueDate'), p.expenseDate || '-'],
+                    [t('total'), formatYen(p.amount), true]
+                ],
+                lines: [{ description: p.description || p.category, amount: p.amount, account: p.accountItemCode, tax: p.taxCode }]
+            };
+        }
+        return {
+            title: p.invoiceNo || ('#' + (p.invoiceId || '')),
+            fields: [
+                [t('customerName'), p.customerName],
+                [t('customerCode'), p.customerCode],
+                [t('partnerId'), p.partnerExternalId || '-'],
+                [t('issueDate'), p.issueDate || '-'],
+                [t('dueDate'), p.dueDate || '-'],
+                [t('subtotal'), formatYen(p.subtotal)],
+                [t('total'), formatYen(p.total), true]
+            ],
+            lines: (p.details || []).map(function (d) {
+                return { description: d.description, amount: d.amount, account: d.accountItemCode, tax: d.taxCode };
+            })
+        };
+    }
 
-        let html = `
+    function checkBadge(status) {
+        if (status === 'OK') return `<span class="badge bg-success">${escapeHtml(t('checkOk'))}</span>`;
+        if (status === 'UNVERIFIED') return `<span class="badge bg-warning text-dark">${escapeHtml(t('checkUnverified'))}</span>`;
+        return `<span class="badge bg-danger">${escapeHtml(t('checkMissing'))}</span>`;
+    }
+
+    /**
+     * 送信プレビューを描画する。dto は AccountingSendPreviewDto（payload / mappingChecks / connectionReady / sendable）。
+     * 送信ボタンは管理者のみ。必要マッピングが揃わない・未接続のときは押せない（送信時のサーバーガードと同じ条件）。
+     */
+    function renderPreview(dto, kind, targetId) {
+        let container = $('#previewResultContainer').empty();
+        if (!dto || !dto.payload) {
+            container.hide();
+            return;
+        }
+        kind = SEND_KINDS[kind] ? kind : 'sales';
+        let summary = previewSummary(kind, dto.payload);
+        summary.fields.push([t('legalEntity'), dto.legalEntityId != null ? String(dto.legalEntityId) : t('legalEntityUnset')]);
+
+        let fieldsHtml = summary.fields.map(function (f) {
+            let value = f[2]
+                ? `<span class="fs-6 fw-bold text-primary">${escapeHtml(f[1])}</span>`
+                : escapeHtml(f[1] == null || f[1] === '' ? '-' : f[1]);
+            return `<div class="col-md-4"><strong>${escapeHtml(f[0])}:</strong> ${value}</div>`;
+        }).join('');
+
+        let linesHtml = summary.lines.map(function (d) {
+            return `<tr>
+                <td>${escapeHtml(d.description || '-')}</td>
+                <td class="text-end font-monospace">${escapeHtml(formatYen(d.amount))}</td>
+                <td class="font-monospace">${escapeHtml(d.account || '-')}</td>
+                <td class="font-monospace">${escapeHtml(d.tax || '-')}</td>
+            </tr>`;
+        }).join('');
+
+        let checksHtml = (dto.mappingChecks || []).map(function (c) {
+            return `<tr>
+                <td class="font-monospace">${escapeHtml(c.objectType)}</td>
+                <td class="font-monospace">${escapeHtml(c.internalCode || '-')}</td>
+                <td class="font-monospace">${escapeHtml(c.externalId || '-')}</td>
+                <td>${checkBadge(c.status)}</td>
+            </tr>`;
+        }).join('');
+
+        // 送信できない理由はすべて並べる（1つ直しても次の理由で止まる、を避ける）
+        let blockers = [];
+        if (!dto.connectionReady) blockers.push(t('previewNotConnected'));
+        if (dto.legalEntityStatus === 'MISSING') blockers.push(t('legalEntityMissing'));
+        if (dto.legalEntityStatus === 'MISMATCH') blockers.push(t('legalEntityMismatch'));
+        if ((dto.mappingChecks || []).some(function (c) { return c.status !== 'OK'; })) blockers.push(t('previewBlocked'));
+        let alertHtml = blockers.map(function (msg) {
+            return `<div class="alert alert-warning small py-2 mb-2">${escapeHtml(msg)}</div>`;
+        }).join('');
+
+        let sendHtml = canManage()
+            ? `<button type="button" id="btnSendToFreee" class="btn btn-sm btn-success"
+                       data-kind="${escapeHtml(kind)}" data-target-id="${escapeHtml(String(targetId))}"
+                       ${dto.sendable ? '' : 'disabled'}>
+                   <i class="bi bi-cloud-upload me-1"></i>${escapeHtml(t('btnSendToFreee'))}
+               </button>`
+            : '';
+
+        container.html(`
             <div class="card shadow-sm border-0">
-                <div class="card-header bg-white fw-bold">
-                    <i class="bi bi-file-earmark-text me-1"></i>${escapeHtml(t('previewHeader'))} (ID: ${escapeHtml(String(data.invoiceId || ''))}, No: ${escapeHtml(data.invoiceNo || '')})
+                <div class="card-header bg-white fw-bold d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <span><i class="bi bi-file-earmark-text me-1"></i>${escapeHtml(t('previewHeader'))}: ${escapeHtml(summary.title)}</span>
+                    ${sendHtml}
                 </div>
                 <div class="card-body">
-                    <div class="row g-2 small mb-3">
-                        <div class="col-md-4"><strong>${escapeHtml(t('customerCode'))}:</strong> ${escapeHtml(data.customerCode)}</div>
-                        <div class="col-md-4"><strong>${escapeHtml(t('customerName'))}:</strong> ${escapeHtml(data.customerName)}</div>
-                        <div class="col-md-4"><strong>${escapeHtml(t('issueDate'))}:</strong> ${escapeHtml(data.issueDate || '-')}</div>
-                        <div class="col-md-4"><strong>${escapeHtml(t('dueDate'))}:</strong> ${escapeHtml(data.dueDate || '-')}</div>
-                        <div class="col-md-4"><strong>${escapeHtml(t('subtotal'))}:</strong> &yen;${escapeHtml(Number(data.subtotal || 0).toLocaleString())}</div>
-                        <div class="col-md-4"><strong>${escapeHtml(t('total'))}:</strong> <span class="fs-6 fw-bold text-primary">&yen;${escapeHtml(Number(data.total || 0).toLocaleString())}</span></div>
+                    ${alertHtml}
+                    <div class="row g-2 small mb-3">${fieldsHtml}</div>
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm table-bordered mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>${escapeHtml(t('description'))}</th>
+                                    <th class="text-end">${escapeHtml(t('amount'))}</th>
+                                    <th>${escapeHtml(t('accountCode'))}</th>
+                                    <th>${escapeHtml(t('taxCode'))}</th>
+                                </tr>
+                            </thead>
+                            <tbody>${linesHtml}</tbody>
+                        </table>
                     </div>
-                    <table class="table table-sm table-bordered mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th>${escapeHtml(t('description'))}</th>
-                                <th class="text-end">${escapeHtml(t('amount'))}</th>
-                                <th>${escapeHtml(t('accountCode'))}</th>
-                                <th>${escapeHtml(t('taxCode'))}</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${detailsHtml}
-                        </tbody>
-                    </table>
+                    <div class="small fw-bold mb-1">${escapeHtml(t('mappingChecks'))}</div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>${escapeHtml(t('objectType'))}</th>
+                                    <th>${escapeHtml(t('internalCode'))}</th>
+                                    <th>${escapeHtml(t('externalIdLabel'))}</th>
+                                    <th>${escapeHtml(t('status'))}</th>
+                                </tr>
+                            </thead>
+                            <tbody>${checksHtml}</tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
-        `;
-        container.html(html);
+        `).show();
+    }
+
+    /** 送信ジョブを登録する（実際のfreee送信はWorkerが非同期に行う）。 */
+    function sendToFreee(kind, targetId, $btn) {
+        if (!SEND_KINDS[kind] || !targetId) return;
+        Swal.fire({
+            title: t('sendConfirmTitle'),
+            text: t('sendConfirmText'),
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: t('btnSendToFreee'),
+            cancelButtonText: t('btnCancelLabel')
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            $btn.prop('disabled', true);
+            $.ajax({
+                url: '/api/accounting/sync/' + SEND_KINDS[kind].sync + '/' + encodeURIComponent(targetId),
+                type: 'POST'
+            }).done(function (res) {
+                if (res && res.code === 200) {
+                    SES.toast.success(t('sendQueued'));
+                    loadJobs(1);
+                } else {
+                    $btn.prop('disabled', false);
+                }
+            }).fail(function () {
+                // 失敗理由（ステータス不適格・月次締め・マッピング未照合など）は共通ハンドラが表示する
+                $btn.prop('disabled', false);
+            });
+        });
     }
 
     // === 月次照合 ===
@@ -561,8 +717,19 @@ window.AccountingIntegration = (function () {
         // 初期ロード
         loadConnections();
         loadJobs(1);
-        loadPreviewInvoiceOptions();
+        loadPreviewTargets();
         showOAuthResult();
+
+        $('#previewKind').on('change', function () {
+            $('#previewResultContainer').empty().hide();
+            $('#previewTargetId').val('');
+            loadPreviewTargets();
+        });
+
+        $('#previewResultContainer').on('click', '#btnSendToFreee', function () {
+            let $btn = $(this);
+            sendToFreee($btn.attr('data-kind'), $btn.attr('data-target-id'), $btn);
+        });
 
         $('#connectionsContainer').on('click', 'button[data-health-conn-id]', function () {
             testConnection($(this).attr('data-health-conn-id'), $(this));
@@ -577,7 +744,7 @@ window.AccountingIntegration = (function () {
             } else if (target === '#connections-panel') {
                 loadConnections();
             } else if (target === '#preview-panel') {
-                loadPreviewInvoiceOptions();
+                loadPreviewTargets();
             } else if (target === '#reconciliation-panel') {
                 loadReconciliation();
             }
@@ -599,8 +766,23 @@ window.AccountingIntegration = (function () {
             }
             $('#mappingForm')[0].reset();
             $('#modalConnId').val(currentConnId);
+            $('#modalObjectType').trigger('change');
             let modal = getMapModal();
             if (modal) modal.show();
+        });
+
+        // 送信ガードが参照する内部キーは種別ごとに固定。空欄または既定値のときだけ補完する。
+        const FIXED_INTERNAL_CODES = {
+            CUSTOMER_PARTNER: 'CUST-', BP_PARTNER: 'BP-',
+            ACCOUNT_SALES: 'SALES_DEFAULT', ACCOUNT_PURCHASE: 'PURCHASE_DEFAULT', ACCOUNT_EXPENSE: 'EXPENSE_DEFAULT',
+            TAX_SALES_10: 'TAX_10', TAX_PURCHASE_10: 'TAX_PURCHASE_10'
+        };
+        $('#modalObjectType').on('change', function () {
+            let $code = $('#modalInternalCode');
+            let current = $code.val().trim();
+            let isDefault = !current || Object.values(FIXED_INTERNAL_CODES).indexOf(current) !== -1;
+            let next = FIXED_INTERNAL_CODES[$(this).val()];
+            if (isDefault && next !== undefined) $code.val(next);
         });
 
         $('#btnSaveMapping').on('click', function () {
@@ -620,7 +802,12 @@ window.AccountingIntegration = (function () {
                 type: 'POST',
                 contentType: 'application/json',
                 data: JSON.stringify(payload)
-            }).done(function () {
+            }).done(function (res) {
+                // 一部のエラーはHTTP 200 + code!=200 で返るため、codeで判定する
+                if (!res || res.code !== 200) {
+                    SES.toast.error((res && res.message) || t('loadError'));
+                    return;
+                }
                 SES.toast.success(t('mappingSaved'));
                 let modal = getMapModal();
                 if (modal) modal.hide();
@@ -628,20 +815,25 @@ window.AccountingIntegration = (function () {
             });
         });
 
-        $('#btnRunPreview, #btnPreviewInvoice').on('click', function () {
-            let invoiceId = $('#previewInvoiceId').val();
-            if (!invoiceId) {
-                SES.toast.warning(t('inputInvoiceId'));
+        $('#btnRunPreview').on('click', function () {
+            let kind = previewKind();
+            let targetId = $('#previewTargetId').val();
+            if (!targetId) {
+                SES.toast.warning(t('selectTarget'));
                 return;
             }
             $.ajax({
-                url: '/api/accounting/preview/sales-invoice/' + invoiceId,
+                url: '/api/accounting/preview/' + SEND_KINDS[kind].preview + '/' + encodeURIComponent(targetId),
                 type: 'GET'
             }).done(function (res) {
-                renderPreview(res.data);
-            }).fail(function (err) {
-                SES.toast.error(err.responseJSON ? err.responseJSON.message : t('loadError'));
+                if (!res || res.code !== 200) {
+                    $('#previewResultContainer').empty().hide();
+                    SES.toast.error((res && res.message) || t('loadError'));
+                    return;
+                }
+                renderPreview(res.data, kind, targetId);
             });
+            // HTTPエラー時の文言はcommon.jsの共通ハンドラが表示する
         });
 
         $('#btnRunReconciliation').on('click', function () {

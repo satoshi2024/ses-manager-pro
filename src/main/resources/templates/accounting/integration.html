@@ -66,7 +66,7 @@
                                 <option value="" th:text="#{accounting.filter.allJobTypes}">全ジョブ種別</option>
                                 <option value="SALES_INVOICE_SYNC" th:text="#{accounting.jobType.salesSync}">売上請求連携</option>
                                 <option value="SALES_INVOICE_CANCEL" th:text="#{accounting.jobType.salesCancel}">売上取消連携</option>
-                                <option value="PURCHASE_DEAL_SYNC" th:text="#{accounting.jobType.purchaseSync}">BP仕入連携</option>
+                                <option value="BP_PURCHASE_SYNC" th:text="#{accounting.jobType.purchaseSync}">BP仕入連携</option>
                                 <option value="EXPENSE_DEAL_SYNC" th:text="#{accounting.jobType.expenseSync}">要員経費連携</option>
                                 <option value="PAYMENT_SYNC" th:text="#{accounting.jobType.paymentSync}">支払実績同期</option>
                             </select>
@@ -115,8 +115,10 @@
                         <option value="CUSTOMER_PARTNER">CUSTOMER_PARTNER</option>
                         <option value="BP_PARTNER">BP_PARTNER</option>
                         <option value="ACCOUNT_SALES">ACCOUNT_SALES</option>
-                        <option value="ACCOUNT_OUTSOURCING">ACCOUNT_OUTSOURCING</option>
+                        <option value="ACCOUNT_PURCHASE">ACCOUNT_PURCHASE</option>
+                        <option value="ACCOUNT_EXPENSE">ACCOUNT_EXPENSE</option>
                         <option value="TAX_SALES_10">TAX_SALES_10</option>
+                        <option value="TAX_PURCHASE_10">TAX_PURCHASE_10</option>
                         <option value="SECTION">SECTION</option>
                     </select>
                 </div>
@@ -161,11 +163,22 @@
                 <div class="card-body">
                     <div class="row g-2 align-items-center">
                         <div class="col-auto">
-                            <label class="form-label mb-0 small fw-bold" th:text="#{accounting.preview.invoiceIdLabel}">請求書:</label>
+                            <label for="previewKind" class="form-label mb-0 small fw-bold" th:text="#{accounting.preview.kindLabel}">種別:</label>
                         </div>
                         <div class="col-auto">
-                            <select id="previewInvoiceId" class="form-select form-select-sm" style="min-width: 220px;">
-                                <option value="" th:text="#{accounting.preview.selectInvoice}">請求書を選択...</option>
+                            <!-- BP仕入・要員経費の候補一覧は送信と同じく管理者のみ取得できる -->
+                            <select id="previewKind" class="form-select form-select-sm">
+                                <option value="sales" th:text="#{accounting.preview.kindSales}">売上請求</option>
+                                <option value="purchase" sec:authorize="hasRole('管理者')" th:text="#{accounting.preview.kindPurchase}">BP仕入</option>
+                                <option value="expense" sec:authorize="hasRole('管理者')" th:text="#{accounting.preview.kindExpense}">要員経費</option>
+                            </select>
+                        </div>
+                        <div class="col-auto">
+                            <label for="previewTargetId" class="form-label mb-0 small fw-bold" th:text="#{accounting.preview.targetLabel}">対象:</label>
+                        </div>
+                        <div class="col-auto">
+                            <select id="previewTargetId" class="form-select form-select-sm" style="min-width: 260px;">
+                                <option value="" th:text="#{accounting.preview.selectTarget}">対象を選択...</option>
                             </select>
                         </div>
                         <div class="col-auto">
@@ -349,14 +362,17 @@
                                 <option value="CUSTOMER_PARTNER">CUSTOMER_PARTNER</option>
                                 <option value="BP_PARTNER">BP_PARTNER</option>
                                 <option value="ACCOUNT_SALES">ACCOUNT_SALES</option>
-                                <option value="ACCOUNT_OUTSOURCING">ACCOUNT_OUTSOURCING</option>
+                                <option value="ACCOUNT_PURCHASE">ACCOUNT_PURCHASE</option>
+                                <option value="ACCOUNT_EXPENSE">ACCOUNT_EXPENSE</option>
                                 <option value="TAX_SALES_10">TAX_SALES_10</option>
+                                <option value="TAX_PURCHASE_10">TAX_PURCHASE_10</option>
                                 <option value="SECTION">SECTION</option>
                             </select>
                         </div>
                         <div class="mb-3">
                             <label class="form-label small fw-bold" th:text="#{accounting.modal.internalCode}">内部キー / コード</label>
                             <input type="text" id="modalInternalCode" class="form-control form-control-sm" th:placeholder="#{accounting.modal.internalCodePlaceholder}" placeholder="例: CUST-001 / SALES_DEFAULT" required>
+                            <div class="form-text" th:text="#{accounting.modal.internalCodeHint}">内部キーは種別ごとに決まっています。</div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label small fw-bold" th:text="#{accounting.modal.externalId}">外部システムID</label>
@@ -443,6 +459,30 @@
          th:data-no-job-events="#{accounting.msg.noJobEvents}"
          th:data-status="#{accounting.detail.status}"
          th:data-error-code="#{accounting.detail.errorCode}"
+         th:data-select-target="#{accounting.preview.selectTarget}"
+         th:data-mapping-checks="#{accounting.preview.mappingChecks}"
+         th:data-check-ok="#{accounting.preview.checkOk}"
+         th:data-check-missing="#{accounting.preview.checkMissing}"
+         th:data-check-unverified="#{accounting.preview.checkUnverified}"
+         th:data-preview-not-connected="#{accounting.preview.notConnected}"
+         th:data-preview-blocked="#{accounting.preview.blocked}"
+         th:data-partner-id="#{accounting.preview.partnerId}"
+         th:data-partner-none="#{accounting.preview.partnerNone}"
+         th:data-partner-name="#{accounting.preview.partnerName}"
+         th:data-target-no="#{accounting.preview.targetNo}"
+         th:data-category="#{accounting.preview.category}"
+         th:data-object-type="#{accounting.modal.objectType}"
+         th:data-internal-code="#{accounting.modal.internalCode}"
+         th:data-external-id-label="#{accounting.modal.externalId}"
+         th:data-btn-send-to-freee="#{accounting.btn.sendToFreee}"
+         th:data-send-confirm-title="#{accounting.msg.sendConfirmTitle}"
+         th:data-send-confirm-text="#{accounting.msg.sendConfirmText}"
+         th:data-send-queued="#{accounting.msg.sendQueued}"
+         th:data-btn-cancel-label="#{accounting.btn.cancel}"
+         th:data-legal-entity="#{accounting.preview.legalEntity}"
+         th:data-legal-entity-unset="#{accounting.preview.legalEntityUnset}"
+         th:data-legal-entity-missing="#{accounting.preview.legalEntityMissing}"
+         th:data-legal-entity-mismatch="#{accounting.preview.legalEntityMismatch}"
     ></div>
 </div>
 

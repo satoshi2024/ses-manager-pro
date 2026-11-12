@@ -4,8 +4,6 @@ import com.ses.dto.payroll.FreeeConnectionStatusDto;
 import com.ses.dto.payroll.FreeeEmployeeDto;
 import com.ses.dto.payroll.PayrollEngineerCandidateDto;
 import com.ses.dto.payroll.PayrollStatementDto;
-import com.ses.dto.reconciliation.BankDepositDto;
-import java.time.LocalDate;
 import java.util.List;
 public interface FreeeIntegrationService {
     String authorizationUrl(String state);
@@ -48,8 +46,6 @@ public interface FreeeIntegrationService {
      * 短TX lock → HTTP外 → 短TX CAS により、同一refresh tokenを並行・再試行で二度使わない（HFP-01-R03-3/AC04）。
      */
     void refreshForced();
-    /** 銀行入金明細（freee会計の入金取引）を期間指定で取得する（入金消込 / FR-09）。 */
-    List<BankDepositDto> bankDeposits(LocalDate from, LocalDate to);
     /**
      * OAuth/refresh共通基盤を使う認証付きGET。401時はrefreshを1回だけ実行して再試行し、
      * 429はexponential backoff、timeout/5xxは503 BusinessExceptionへ変換する。

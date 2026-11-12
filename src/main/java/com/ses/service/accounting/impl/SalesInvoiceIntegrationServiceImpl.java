@@ -2,6 +2,7 @@ package com.ses.service.accounting.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
+import com.ses.dto.accounting.AccountingSendPreviewDto;
 import com.ses.dto.accounting.canonical.CanonicalDealResult;
 import com.ses.dto.accounting.canonical.CanonicalSalesInvoice;
 import com.ses.entity.Customer;
@@ -12,6 +13,7 @@ import com.ses.entity.Invoice;
 import com.ses.service.CustomerService;
 import com.ses.service.InvoiceService;
 import com.ses.service.MonthlyClosingService;
+import com.ses.service.accounting.AccountingJobLegalEntityResolver;
 import com.ses.service.accounting.AccountingOrganizationResolver;
 import com.ses.service.accounting.AccountingProvider;
 import com.ses.service.accounting.AccountingProviderFactory;
@@ -19,6 +21,7 @@ import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.accounting.SalesInvoiceIntegrationService;
 import com.ses.service.integration.ExternalMappingService;
+import com.ses.service.integration.ExternalMappingService.MappingCheck;
 import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +34,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 売上請求書・取引連携サービス実装 (B1 / design §4, §6.1, §6.3)。
@@ -50,18 +54,34 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     private final AccountingOrganizationResolver organizationResolver;
     private final AccountingTimezoneResolver timezoneResolver;
     private final ObjectMapper objectMapper;
+    private final AccountingJobLegalEntityResolver legalEntityResolver;
+
+    /** 会計連携できる請求書ステータス (P1-07)。 */
+    private static final Set<String> SENDABLE_STATUSES = Set.of("送付済", "入金済", "一部入金");
+
+    /** 売上送信に必要なマッピング（種別, 内部キー）。送信ガードとプレビューで同じ定義を使う。 */
+    private static List<String[]> requiredMappings(Invoice invoice) {
+        return List.of(
+                new String[]{"CUSTOMER_PARTNER", customerCode(invoice)},
+                new String[]{"ACCOUNT_SALES", "SALES_DEFAULT"},
+                new String[]{"TAX_SALES_10", "TAX_10"});
+    }
+
+    private static String customerCode(Invoice invoice) {
+        return "CUST-" + invoice.getCustomerId();
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public IntegrationJob triggerSalesSync(Long invoiceId, Long triggeredByUserId) {
         Invoice invoice = invoiceService.getById(invoiceId);
         if (invoice == null) {
-            throw new BusinessException(404, "請求書が見つかりません (id=" + invoiceId + ")");
+            throw BusinessException.of(404, "error.invoice.notFound");
         }
 
         // ステータス適格性ガード (送付済 / 入金済 / 一部入金 のみ許可) (P1-07)
-        if (!"送付済".equals(invoice.getStatus()) && !"入金済".equals(invoice.getStatus()) && !"一部入金".equals(invoice.getStatus())) {
-            throw new BusinessException(400, "送付済または入金済の請求書のみ会計連携可能です (現在: " + invoice.getStatus() + ")");
+        if (!SENDABLE_STATUSES.contains(invoice.getStatus())) {
+            throw BusinessException.of(400, "error.accounting.invoiceNotSendable");
         }
 
         // 月次締めチェック (締め済み月への更新拒否)
@@ -71,39 +91,15 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
 
         IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
 
-        Customer customer = customerService.getById(invoice.getCustomerId());
-        String customerCode = "CUST-" + invoice.getCustomerId();
-        String customerName = customer != null ? customer.getCompanyName() : "顧客ID:" + invoice.getCustomerId();
-
         // マッピング検証ガード (未登録・未検証は送信不可)
-        mappingService.assertMappingVerified(conn.getId(), "CUSTOMER_PARTNER", customerCode);
-        mappingService.assertMappingVerified(conn.getId(), "ACCOUNT_SALES", "SALES_DEFAULT");
-        mappingService.assertMappingVerified(conn.getId(), "TAX_SALES_10", "TAX_10");
+        for (String[] required : requiredMappings(invoice)) {
+            mappingService.assertMappingVerified(conn.getId(), required[0], required[1]);
+        }
 
-        ExternalMapping partnerMapping = mappingService.getMapping(conn.getId(), "CUSTOMER_PARTNER", customerCode);
-        ExternalMapping salesAccount = mappingService.getMapping(conn.getId(), "ACCOUNT_SALES", "SALES_DEFAULT");
-        ExternalMapping taxMapping = mappingService.getMapping(conn.getId(), "TAX_SALES_10", "TAX_10");
+        // NF09: ジョブの法人は請求書の法人。未設定・接続の法人と不一致ならジョブを作らない（Workerで無言失敗させない）
+        Long legalEntityId = legalEntityResolver.require(conn, legalEntityResolver.ofInvoice(invoice));
 
-        CanonicalSalesInvoice canonical = CanonicalSalesInvoice.builder()
-                .invoiceId(invoice.getId())
-                .invoiceNo(invoice.getInvoiceNo())
-                .customerId(invoice.getCustomerId())
-                .customerCode(customerCode)
-                .customerName(customerName)
-                .issueDate(invoice.getIssuedDate())
-                .dueDate(invoice.getDueDate())
-                .subtotal(invoice.getSubtotal())
-                .tax(invoice.getTax())
-                .total(invoice.getTotal())
-                .taxRate(invoice.getTaxRate())
-                .remarks(invoice.getRemarks())
-                .details(List.of(CanonicalSalesInvoice.Detail.builder()
-                        .description(invoice.getRemarks() != null ? invoice.getRemarks() : "SES請求: " + invoice.getInvoiceNo())
-                        .amount(invoice.getTotal())
-                        .accountItemCode(salesAccount != null ? salesAccount.getExternalId() : null)
-                        .taxCode(taxMapping != null ? taxMapping.getExternalId() : null)
-                        .build()))
-                .build();
+        CanonicalSalesInvoice canonical = buildSyncCanonical(invoice, conn.getId());
 
         String payloadJson;
         try {
@@ -119,7 +115,57 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
         log.info("Enqueueing sales sync job for invoiceId={}, idempotencyKey={}, orgId={}", invoiceId, idempotencyKey, orgId);
         return jobService.createJob(
                 conn.getId(), "SALES_INVOICE_SYNC", "INVOICE", invoice.getId(), idempotencyKey, payloadHash,
-                payloadJson, conn.getTenantId(), conn.getLegalEntityId(), orgId);
+                payloadJson, conn.getTenantId(), legalEntityId, orgId);
+    }
+
+    @Override
+    public AccountingSendPreviewDto<CanonicalSalesInvoice> previewSalesSync(Long invoiceId) {
+        Invoice invoice = invoiceService.getById(invoiceId);
+        if (invoice == null) {
+            throw BusinessException.of(404, "error.invoice.notFound");
+        }
+        // プレビューは参照のみ: 接続は作成しない（未作成ならマッピングはすべて未登録扱い）
+        IntegrationConnection conn = connectionService.getConnection("default", null, "freee", "accounting");
+        Long connectionId = conn != null ? conn.getId() : null;
+        List<MappingCheck> checks = requiredMappings(invoice).stream()
+                .map(required -> mappingService.inspect(connectionId, required[0], required[1]))
+                .toList();
+        return AccountingSendPreviewDto.of("SALES", buildSyncCanonical(invoice, connectionId), checks,
+                conn != null && "CONNECTED".equals(conn.getStatus()),
+                legalEntityResolver.check(conn, legalEntityResolver.ofInvoice(invoice)));
+    }
+
+    /** 送信ジョブへ保存する標準DTO。照合済みマッピングの外部ID（取引先・勘定科目・税区分）を反映する。 */
+    private CanonicalSalesInvoice buildSyncCanonical(Invoice invoice, Long connectionId) {
+        Customer customer = customerService.getById(invoice.getCustomerId());
+        String customerCode = customerCode(invoice);
+        String customerName = customer != null ? customer.getCompanyName() : "顧客ID:" + invoice.getCustomerId();
+
+        ExternalMapping partnerMapping = mappingService.getMapping(connectionId, "CUSTOMER_PARTNER", customerCode);
+        ExternalMapping salesAccount = mappingService.getMapping(connectionId, "ACCOUNT_SALES", "SALES_DEFAULT");
+        ExternalMapping taxMapping = mappingService.getMapping(connectionId, "TAX_SALES_10", "TAX_10");
+
+        return CanonicalSalesInvoice.builder()
+                .invoiceId(invoice.getId())
+                .invoiceNo(invoice.getInvoiceNo())
+                .customerId(invoice.getCustomerId())
+                .customerCode(customerCode)
+                .partnerExternalId(partnerMapping != null ? partnerMapping.getExternalId() : null)
+                .customerName(customerName)
+                .issueDate(invoice.getIssuedDate())
+                .dueDate(invoice.getDueDate())
+                .subtotal(invoice.getSubtotal())
+                .tax(invoice.getTax())
+                .total(invoice.getTotal())
+                .taxRate(invoice.getTaxRate())
+                .remarks(invoice.getRemarks())
+                .details(List.of(CanonicalSalesInvoice.Detail.builder()
+                        .description(invoice.getRemarks() != null ? invoice.getRemarks() : "SES請求: " + invoice.getInvoiceNo())
+                        .amount(invoice.getTotal())
+                        .accountItemCode(salesAccount != null ? salesAccount.getExternalId() : null)
+                        .taxCode(taxMapping != null ? taxMapping.getExternalId() : null)
+                        .build()))
+                .build();
     }
 
     @Override
@@ -127,7 +173,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     public IntegrationJob triggerSalesCancel(Long invoiceId, String cancelReason, Long triggeredByUserId) {
         Invoice invoice = invoiceService.getById(invoiceId);
         if (invoice == null) {
-            throw new BusinessException(404, "請求書が見つかりません (id=" + invoiceId + ")");
+            throw BusinessException.of(404, "error.invoice.notFound");
         }
 
         if (invoice.getBillingMonth() != null) {
@@ -137,8 +183,13 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
         IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
         IntegrationJob latestSync = jobService.getLatestJob("INVOICE", invoiceId, "SALES_INVOICE_SYNC");
         if (latestSync == null || !"SUCCEEDED".equals(latestSync.getStatus()) || latestSync.getExternalId() == null) {
-            throw new BusinessException(400, "連携済みの外部取引が存在しないため、取消処理を実行できません");
+            throw BusinessException.of(400, "error.accounting.syncedDealMissing");
         }
+
+        // NF09: 取消は取引を作成したジョブと同じ法人で実行する（旧ジョブに法人が無ければ請求書の法人）
+        Long legalEntityId = latestSync.getLegalEntityId() != null
+                ? latestSync.getLegalEntityId()
+                : legalEntityResolver.require(conn, legalEntityResolver.ofInvoice(invoice));
 
         // P1-11: 取消理由は機械可読コード (design §8.3) を保存・送信する。未知の入力は REASON_OTHER へ正規化
         String reason = normalizeCancelReason(cancelReason);
@@ -150,7 +201,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
         log.info("Enqueueing sales cancel job for invoiceId={}, externalDealId={}, orgId={}", invoiceId, latestSync.getExternalId(), orgId);
         return jobService.createJob(
                 conn.getId(), "SALES_INVOICE_CANCEL", "INVOICE", invoice.getId(), idempotencyKey, payloadHash,
-                payload, conn.getTenantId(), conn.getLegalEntityId(), orgId);
+                payload, conn.getTenantId(), legalEntityId, orgId);
     }
 
     private final SalesInvoiceTransactionCoordinator transactionCoordinator;
@@ -269,7 +320,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     public CanonicalSalesInvoice buildCanonicalInvoice(Long invoiceId) {
         Invoice invoice = invoiceService.getById(invoiceId);
         if (invoice == null) {
-            throw new BusinessException(404, "請求書が見つかりません (id=" + invoiceId + ")");
+            throw BusinessException.of(404, "error.invoice.notFound");
         }
         Customer customer = customerService.getById(invoice.getCustomerId());
         String customerCode = "CUST-" + invoice.getCustomerId();

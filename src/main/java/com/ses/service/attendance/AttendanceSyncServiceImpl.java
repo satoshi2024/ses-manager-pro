@@ -96,7 +96,7 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
     @Override
     public AttendanceSyncResultDto syncPush(String month) {
         YearMonth target = parseMonth(month);
-        AttendanceProvider provider = resolveProvider();
+        AttendanceProvider provider = resolveUsableProvider();
         AttendanceSyncResultDto result = newResult(provider.source(), "push", target);
         List<AttendanceMonth> months = monthsForScope(target);
         for (AttendanceMonth monthRow : months) {
@@ -123,7 +123,7 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
     @Override
     public AttendanceSyncResultDto syncPull(String month) {
         YearMonth target = parseMonth(month);
-        AttendanceProvider provider = resolveProvider();
+        AttendanceProvider provider = resolveUsableProvider();
         AttendanceSyncResultDto result = newResult(provider.source(), "pull", target);
         // R5-P1-01: caller scopeを解決する（管理者=全件(null)、HR=担当法人の要員、マネージャー=組織scope）。
         // R5-P2-03: cursorはlegal entity別（attendance.sync.freee.cursor.le.<id>）に保持し、
@@ -652,6 +652,18 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
             throw BusinessException.of(403, "error.attendance.roleDenied");
         }
         return attendanceMonthMapper.selectList(query);
+    }
+
+    /**
+     * 送信・照合取得の前に、選択中providerが利用可能かを確認する。利用不可のまま実行すると、
+     * 要員ごとに同じエラーが積み上がるだけで原因が分からないため、1件の明確なエラーで止める。
+     */
+    private AttendanceProvider resolveUsableProvider() {
+        AttendanceProvider provider = resolveProvider();
+        if (!provider.available()) {
+            throw BusinessException.of(400, "error.attendance.sync.providerUnavailable");
+        }
+        return provider;
     }
 
     private AttendanceProvider resolveProvider() {

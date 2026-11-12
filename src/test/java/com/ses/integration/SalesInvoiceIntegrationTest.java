@@ -71,6 +71,9 @@ class SalesInvoiceIntegrationTest {
     @Autowired
     private RestTemplate restTemplate;
 
+    @Autowired
+    private com.ses.service.accounting.AccountingIntegrationWorker accountingIntegrationWorker;
+
     private MockRestServiceServer mockServer;
     private IntegrationConnection connection;
     private Customer customer;
@@ -210,6 +213,11 @@ class SalesInvoiceIntegrationTest {
 
         mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
                 .andExpect(method(HttpMethod.POST))
+                // 照合済みマッピングの外部IDがそのままfreeeへ届く（取引先はIDで、内部コードは送らない）
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.partner_id").value(1001))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.partner_code").doesNotExist())
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.details[0].account_item_id").value(2001))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.details[0].tax_code").value(21))
                 .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON).headers(headers));
 
         // Worker 同期実行
@@ -220,6 +228,46 @@ class SalesInvoiceIntegrationTest {
         assertThat(updated.getStatus()).isEqualTo("SUCCEEDED");
         assertThat(updated.getExternalId()).isEqualTo("77777");
         assertThat(updated.getProviderRequestId()).isEqualTo("req-sales-success-001");
+    }
+
+    @Test
+    @DisplayName("NF09: 全社共通接続でも送信ジョブは請求書の法人を持ち、Workerのdispatch経由でfreeeへ送信される")
+    void triggerSalesSync_jobCarriesInvoiceLegalEntity_andWorkerDispatches() {
+        Long invoiceLegalEntity = invoiceService.getById(invoice.getId()).getLegalEntityId();
+        assertThat(connection.getLegalEntityId()).isNull(); // 全社共通接続
+        assertThat(invoiceLegalEntity).isNotNull();
+
+        IntegrationJob job = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        assertThat(job.getLegalEntityId()).isEqualTo(invoiceLegalEntity);
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 77778, \"company_id\": 99001, \"amount\": 1100000}}",
+                        MediaType.APPLICATION_JSON));
+
+        // 以前はここで job.legal_entity_id が NULL のため SCOPE_MISSING で失敗し、freeeへ一度も送られなかった
+        accountingIntegrationWorker.dispatchJob(jobService.getById(job.getId()));
+
+        mockServer.verify();
+        IntegrationJob updated = jobService.getById(job.getId());
+        assertThat(updated.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(updated.getExternalId()).isEqualTo("77778");
+    }
+
+    @Test
+    @DisplayName("NF09: 請求書の法人が未設定なら送信ジョブを作らず、理由を返す")
+    void triggerSalesSync_invoiceWithoutLegalEntity_rejectedBeforeJob() {
+        Long original = invoiceService.getById(invoice.getId()).getLegalEntityId();
+        jdbcTemplate.update("UPDATE t_invoice SET legal_entity_id = NULL WHERE id = ?", invoice.getId());
+        try {
+            assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(invoice.getId(), 1L))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessage("error.accounting.legalEntityMissing");
+            assertThat(jobService.getLatestJob("INVOICE", invoice.getId(), "SALES_INVOICE_SYNC")).isNull();
+        } finally {
+            // 後片付け（removeById）は法人一致を要求するため元へ戻す
+            jdbcTemplate.update("UPDATE t_invoice SET legal_entity_id = ? WHERE id = ?", original, invoice.getId());
+        }
     }
 
     @Test
@@ -311,7 +359,7 @@ class SalesInvoiceIntegrationTest {
 
         assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(draftInvoice.getId(), 1L))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("送付済または入金済の請求書のみ会計連携可能");
+                .hasMessage("error.accounting.invoiceNotSendable");
     }
 
     @Test

@@ -334,6 +334,67 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 .build();
     }
 
+    /** FR-09: 入金明細の取得ページ上限（100件×50ページ）。超過分は次回の期間指定で取得する。 */
+    private static final int DEPOSIT_PAGE_LIMIT = 100;
+    private static final int DEPOSIT_MAX_PAGES = 50;
+
+    /**
+     * FR-09 入金消込: 口座明細（freee会計 wallet_txns）の入金を取得する。
+     *
+     * <p>以前は売上取引（deals?type=income）を「入金」として取得していたが、それは請求（売掛）であって着金ではなく、
+     * 取引に振込名義も無い。SESが送信した売上取引がそのまま「入金」に見えてしまうため、口座の入金明細を使う。
+     * 振込名義は明細の摘要（description）。取得失敗は部分結果で消込を進めず例外にする。</p>
+     */
+    public List<com.ses.dto.reconciliation.BankDepositDto> fetchBankDeposits(IntegrationConnection connection,
+                                                                            LocalDate fromDate, LocalDate toDate) {
+        connection = requireAuthoritativeConnection(connection);
+        Long companyId = connection.getExternalCompanyId();
+        List<com.ses.dto.reconciliation.BankDepositDto> deposits = new ArrayList<>();
+        Set<String> seenIds = new HashSet<>();
+        for (int page = 0; page < DEPOSIT_MAX_PAGES; page++) {
+            String url = apiBaseUrl + "/api/1/wallet_txns?company_id=" + companyId
+                    + "&walletable_type=bank_account&entry_side=income"
+                    + "&start_date=" + fromDate + "&end_date=" + toDate
+                    + "&limit=" + DEPOSIT_PAGE_LIMIT + "&offset=" + (page * DEPOSIT_PAGE_LIMIT);
+            JsonNode txns;
+            try {
+                ResponseEntity<String> response = executeWith401Recovery(connection, headers -> {
+                    HttpEntity<?> entity = new HttpEntity<>(headers);
+                    return restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+                });
+                txns = response.getBody() == null || response.getBody().isBlank()
+                        ? null : objectMapper.readTree(response.getBody()).get("wallet_txns");
+            } catch (Exception e) {
+                log.warn("freee入金明細の取得に失敗しました: page={} error_code=EXTERNAL_API_ERROR exceptionClass={}",
+                        page, e.getClass().getSimpleName());
+                throw com.ses.common.exception.BusinessException.of(502, "error.reconciliation.fetchFailed");
+            }
+            if (txns == null || !txns.isArray() || txns.isEmpty()) {
+                break;
+            }
+            for (JsonNode t : txns) {
+                if (!t.hasNonNull("id") || !t.hasNonNull("date") || !t.hasNonNull("amount")) {
+                    continue; // 識別できない明細は消込対象にしない
+                }
+                String id = String.valueOf(t.get("id").asLong());
+                if (!seenIds.add(id)) {
+                    continue; // ページ跨ぎの重複は1件として扱う（t_bank_deposit側もfreee_deposit_idで一意）
+                }
+                com.ses.dto.reconciliation.BankDepositDto d = new com.ses.dto.reconciliation.BankDepositDto();
+                d.setFreeeDepositId(id);
+                d.setDepositDate(LocalDate.parse(t.get("date").asText()));
+                d.setAmount(BigDecimal.valueOf(t.get("amount").asLong()));
+                d.setPayerName(t.path("description").asText(""));
+                deposits.add(d);
+            }
+            if (txns.size() < DEPOSIT_PAGE_LIMIT) {
+                break;
+            }
+        }
+        log.info("freee入金明細を取得しました: companyId={} from={} to={} count={}", companyId, fromDate, toDate, deposits.size());
+        return deposits;
+    }
+
     @Override
     public CanonicalPaymentSync fetchDealPayment(IntegrationConnection connection, String externalDealId) {
         connection = requireAuthoritativeConnection(connection);
@@ -988,7 +1049,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
             for (CanonicalSalesInvoice.Detail d : invoice.getDetails()) {
                 details.add(FreeeDealDetailDto.builder()
                         .taxCode(parseInteger(d.getTaxCode(), 21)) // デフォルト課税売上10%
-                        .accountItemId(parseInteger(d.getAccountItemCode(), null))
+                        .accountItemId(parseFreeeId(d.getAccountItemCode()))
                         .amount(d.getAmount() != null ? d.getAmount().longValue() : 0L)
                         .description(d.getDescription())
                         .build());
@@ -1006,7 +1067,9 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 .issueDate(invoice.getIssueDate() != null ? invoice.getIssueDate().toString() : LocalDate.now().toString())
                 .dueDate(invoice.getDueDate() != null ? invoice.getDueDate().toString() : null)
                 .type("income")
-                .partnerCode(invoice.getCustomerCode())
+                .partnerId(parseFreeeId(invoice.getPartnerExternalId()))
+                // 旧snapshot（partnerExternalId導入前に登録されたjob）だけ従来どおり取引先コードで送る
+                .partnerCode(invoice.getPartnerExternalId() == null ? invoice.getCustomerCode() : null)
                 .refNumber(invoice.getInvoiceNo())
                 .details(details)
                 .build();
@@ -1015,7 +1078,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
     private FreeeDealCreateRequest buildPurchaseDealRequest(IntegrationConnection connection, CanonicalPurchaseDeal purchase) {
         List<FreeeDealDetailDto> details = List.of(FreeeDealDetailDto.builder()
                 .taxCode(parseInteger(purchase.getTaxCode(), 108)) // 課税仕入10%
-                .accountItemId(parseInteger(purchase.getAccountItemCode(), null))
+                .accountItemId(parseFreeeId(purchase.getAccountItemCode()))
                 .amount(purchase.getAmount() != null ? purchase.getAmount().longValue() : 0L)
                 .description(purchase.getRemarks() != null ? purchase.getRemarks() : "BP外注費: " + purchase.getBpCompanyName())
                 .build());
@@ -1025,7 +1088,8 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 .issueDate(purchase.getIssueDate() != null ? purchase.getIssueDate().toString() : LocalDate.now().toString())
                 .dueDate(purchase.getDueDate() != null ? purchase.getDueDate().toString() : null)
                 .type("expense")
-                .partnerCode(purchase.getBpCompanyCode())
+                .partnerId(parseFreeeId(purchase.getPartnerExternalId()))
+                .partnerCode(purchase.getPartnerExternalId() == null ? purchase.getBpCompanyCode() : null)
                 .refNumber("BP-" + purchase.getBpPaymentId())
                 .details(details)
                 .build();
@@ -1034,7 +1098,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
     private FreeeDealCreateRequest buildExpenseDealRequest(IntegrationConnection connection, CanonicalExpenseDeal expense) {
         List<FreeeDealDetailDto> details = List.of(FreeeDealDetailDto.builder()
                 .taxCode(parseInteger(expense.getTaxCode(), 108))
-                .accountItemId(parseInteger(expense.getAccountItemCode(), null))
+                .accountItemId(parseFreeeId(expense.getAccountItemCode()))
                 .amount(expense.getAmount() != null ? expense.getAmount().longValue() : 0L)
                 .description(expense.getDescription() != null ? expense.getDescription() : "経費: " + expense.getCategory())
                 .build());
@@ -1043,10 +1107,24 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 .companyId(connection.getExternalCompanyId())
                 .issueDate(expense.getExpenseDate() != null ? expense.getExpenseDate().toString() : LocalDate.now().toString())
                 .type("expense")
-                .partnerCode(expense.getEngineerCode())
+                // 要員はfreee取引先として管理しないため取引先は指定しない。要員コードを取引先コードとして送ると、
+                // 取引先コード無効の事業所では400、有効でも該当取引先が無ければ400になる。
                 .refNumber(expense.getExpenseNo())
                 .details(details)
                 .build();
+    }
+
+    /** マッピングのfreee ID（取引先・勘定科目）を数値へ変換する。int範囲を超えるIDも扱えるようLongにする。数値でない値は送らない。 */
+    static Long parseFreeeId(String externalId) {
+        if (externalId == null || externalId.isBlank()) {
+            return null;
+        }
+        try {
+            long id = Long.parseLong(externalId.trim());
+            return id > 0 ? id : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private Integer parseInteger(String str, Integer defaultVal) {
@@ -1064,6 +1142,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
     public static class FreeeDealCreateRequest {
         @JsonProperty("company_id")
         private Long companyId;
@@ -1077,6 +1156,11 @@ public class FreeeAccountingProvider implements AccountingProvider {
         @JsonProperty("type")
         private String type;
 
+        /** freee取引先ID（照合済みマッピングの外部ID）。partner_code とは同時に送らない。 */
+        @JsonProperty("partner_id")
+        private Long partnerId;
+
+        /** 旧snapshot互換のみ。事業所設定で取引先コードが有効な場合に限りfreee側で解決される。 */
         @JsonProperty("partner_code")
         private String partnerCode;
 
@@ -1096,7 +1180,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
         private Integer taxCode;
 
         @JsonProperty("account_item_id")
-        private Integer accountItemId;
+        private Long accountItemId;
 
         @JsonProperty("amount")
         private Long amount;

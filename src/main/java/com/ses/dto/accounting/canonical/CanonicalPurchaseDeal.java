@@ -20,6 +20,8 @@ public class CanonicalPurchaseDeal {
     private Long workRecordId;
     private Long bpCompanyId;
     private String bpCompanyCode;
+    /** 照合済みBP_PARTNERマッピングのfreee取引先ID。freeeへは partner_id として送る。 */
+    private String partnerExternalId;
     private String bpCompanyName;
     private LocalDate issueDate;
     private LocalDate dueDate;

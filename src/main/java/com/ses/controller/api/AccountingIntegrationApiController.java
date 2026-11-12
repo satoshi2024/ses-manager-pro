@@ -6,6 +6,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.PageUtils;
 import com.ses.common.util.SecurityUtils;
+import com.ses.dto.accounting.AccountingSendPreviewDto;
 import com.ses.dto.accounting.canonical.CanonicalExpenseDeal;
 import com.ses.dto.accounting.canonical.CanonicalPurchaseDeal;
 import com.ses.dto.accounting.canonical.CanonicalSalesInvoice;
@@ -207,12 +208,21 @@ public class AccountingIntegrationApiController {
     public ApiResult<Void> verifyMapping(@PathVariable("id") Long mappingId) {
         // R1-P1-06: 他tenantのマッピングは verify も不可 (404)
         // R4-R3: mappingId + current tenant をconnection JOIN付きの最初のSQLで解決する。
-        boolean verified = mappingService.verifyAndSnapshotMappingScoped(
+        // 照合失敗は未検証への差し戻しをcommitした後で例外にする（service内で投げるとロールバックされる）。
+        ExternalMappingService.VerifyOutcome outcome = mappingService.verifyAndSnapshotMappingScoped(
                 mappingId, AccountingTenantContextHolder.requireTenantContext());
-        if (!verified) {
-            return ApiResult.error(404, "マッピングが見つかりません");
-        }
-        return ApiResult.success(null);
+        return switch (outcome) {
+            case VERIFIED -> ApiResult.success(null);
+            // 他tenant・不存在は従来どおり HTTP 200 + code 404（tenant境界テストの契約）
+            case NOT_FOUND -> ApiResult.error(404, "マッピングが見つかりません");
+            case UNSUPPORTED_TYPE -> throw BusinessException.of(400, "error.accounting.mappingTypeUnsupported");
+            case REJECTED -> {
+                ExternalMapping mapping = mappingService.getById(mappingId);
+                Object typeArg = mapping == null ? "-" : com.ses.service.accounting.AccountingMappingType
+                        .parse(mapping.getObjectType()).<Object>map(t -> t).orElse("-");
+                throw BusinessException.of(400, "error.accounting.mappingVerifyFailed", typeArg);
+            }
+        };
     }
 
     // === 3. ジョブ (Job) API ===
@@ -335,8 +345,13 @@ public class AccountingIntegrationApiController {
 
     // === 4. 送信プレビュー API ===
 
+    /*
+     * プレビューは送信ジョブと同じ標準DTO（照合済みマッピングの外部IDを反映）と、必要マッピングの状態を返す。
+     * 以前は勘定科目・税区分を固定値で組み立てていたため、実際に送る内容と一致しなかった。
+     */
+
     @GetMapping("/preview/sales-invoice/{invoiceId}")
-    public ApiResult<CanonicalSalesInvoice> previewSalesInvoice(@PathVariable("invoiceId") Long invoiceId) {
+    public ApiResult<AccountingSendPreviewDto<CanonicalSalesInvoice>> previewSalesInvoice(@PathVariable("invoiceId") Long invoiceId) {
         // R1-P1-06: 組織条件を最初のSQLへ適用 (権限外IDは 404)
         java.util.Set<Long> allowedOrgIds = allowedOrgIdsOrNull();
         Invoice invoice = allowedOrgIds != null
@@ -345,37 +360,11 @@ public class AccountingIntegrationApiController {
         if (invoice == null) {
             return ApiResult.error(404, "請求書が見つかりません");
         }
-
-        Customer customer = customerService.getById(invoice.getCustomerId());
-        String customerCode = "CUST-" + invoice.getCustomerId();
-        String customerName = customer != null ? customer.getCompanyName() : "顧客ID:" + invoice.getCustomerId();
-
-        CanonicalSalesInvoice preview = CanonicalSalesInvoice.builder()
-                .invoiceId(invoice.getId())
-                .invoiceNo(invoice.getInvoiceNo())
-                .customerId(invoice.getCustomerId())
-                .customerCode(customerCode)
-                .customerName(customerName)
-                .issueDate(invoice.getIssuedDate())
-                .dueDate(invoice.getDueDate())
-                .subtotal(invoice.getSubtotal())
-                .tax(invoice.getTax())
-                .total(invoice.getTotal())
-                .taxRate(invoice.getTaxRate())
-                .remarks(invoice.getRemarks())
-                .details(List.of(CanonicalSalesInvoice.Detail.builder()
-                        .description(invoice.getRemarks() != null ? invoice.getRemarks() : "SES請求: " + invoice.getInvoiceNo())
-                        .amount(invoice.getTotal())
-                        .accountItemCode("2101")
-                        .taxCode("21")
-                        .build()))
-                .build();
-
-        return ApiResult.success(preview);
+        return ApiResult.success(salesIntegrationService.previewSalesSync(invoice.getId()));
     }
 
     @GetMapping("/preview/bp-purchase/{bpPaymentId}")
-    public ApiResult<CanonicalPurchaseDeal> previewBpPurchase(@PathVariable("bpPaymentId") Long bpPaymentId) {
+    public ApiResult<AccountingSendPreviewDto<CanonicalPurchaseDeal>> previewBpPurchase(@PathVariable("bpPaymentId") Long bpPaymentId) {
         // R1-P1-06: 組織条件を最初のSQLへ適用 (権限外IDは 404)
         java.util.Set<Long> allowedOrgIds = allowedOrgIdsOrNull();
         BpPayment bp = allowedOrgIds != null
@@ -384,23 +373,11 @@ public class AccountingIntegrationApiController {
         if (bp == null) {
             return ApiResult.error(404, "BP支払レコードが見つかりません");
         }
-        CanonicalPurchaseDeal preview = CanonicalPurchaseDeal.builder()
-                .bpPaymentId(bp.getId())
-                .bpCompanyId(bp.getBpCompanyId())
-                .bpCompanyCode(bp.getBpCompanyId() != null ? "BP-" + bp.getBpCompanyId() : "BP-UNKNOWN")
-                .bpCompanyName(bp.getPayeeCompanyName() != null ? bp.getPayeeCompanyName() : "BP会社ID:" + bp.getBpCompanyId())
-                .issueDate(java.time.LocalDate.now())
-                .dueDate(java.time.LocalDate.now().plusMonths(1))
-                .amount(bp.getAmount() != null ? bp.getAmount() : java.math.BigDecimal.ZERO)
-                .accountItemCode("5101")
-                .taxCode("34")
-                .remarks(bp.getRemarks() != null ? bp.getRemarks() : "BP外注費: " + bp.getId())
-                .build();
-        return ApiResult.success(preview);
+        return ApiResult.success(purchaseIntegrationService.previewBpPurchaseSync(bp.getId()));
     }
 
     @GetMapping("/preview/expense/{expenseRequestId}")
-    public ApiResult<CanonicalExpenseDeal> previewExpense(@PathVariable("expenseRequestId") Long expenseRequestId) {
+    public ApiResult<AccountingSendPreviewDto<CanonicalExpenseDeal>> previewExpense(@PathVariable("expenseRequestId") Long expenseRequestId) {
         // R1-P1-06: 組織条件を最初のSQLへ適用 (UNKNOWN履歴はfail-closed、権限外IDは 404)
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
         java.util.Set<Long> allowedOrgIds = allowedOrgIdsOrNull();
@@ -416,19 +393,43 @@ public class AccountingIntegrationApiController {
         if (exp.getEngineerId() != null && eng == null) {
             return ApiResult.error(404, "経費申請レコードが見つかりません");
         }
-        CanonicalExpenseDeal preview = CanonicalExpenseDeal.builder()
-                .expenseId(exp.getId())
-                .expenseNo(exp.getExpenseNo() != null ? exp.getExpenseNo() : "EX-" + exp.getId())
-                .engineerId(exp.getEngineerId())
-                .engineerCode("ENG-" + exp.getEngineerId())
-                .category(exp.getCategory())
-                .amount(exp.getAmount())
-                .expenseDate(exp.getExpenseDate() != null ? exp.getExpenseDate() : java.time.LocalDate.now())
-                .accountItemCode("6101")
-                .taxCode("34")
-                .description(exp.getDescription())
-                .build();
-        return ApiResult.success(preview);
+        return ApiResult.success(purchaseIntegrationService.previewExpenseSync(exp.getId()));
+    }
+
+    /** 送信プレビューの対象候補。 */
+    public record SendCandidate(Long id, String no, String name, java.math.BigDecimal amount,
+                                String date, String status) {}
+
+    private static final int SEND_CANDIDATE_LIMIT = 200;
+
+    /**
+     * BP仕入・要員経費の送信候補（送信可能ステータスのもの、新しい順に最大200件）。
+     * 送信操作と同じく管理者のみ。売上請求の候補は既存の請求書一覧APIを使う。
+     */
+    @GetMapping("/send-candidates")
+    @PreAuthorize("hasRole('管理者')")
+    public ApiResult<List<SendCandidate>> listSendCandidates(@RequestParam("kind") String kind) {
+        if ("purchase".equals(kind)) {
+            List<BpPayment> payments = bpPaymentMapper.selectList(new LambdaQueryWrapper<BpPayment>()
+                    .in(BpPayment::getStatus, "未払", "承認済", "CONFIRMED", "APPROVED")
+                    .orderByDesc(BpPayment::getId)
+                    .last("LIMIT " + SEND_CANDIDATE_LIMIT));
+            return ApiResult.success(payments.stream()
+                    .map(p -> new SendCandidate(p.getId(), "BP-PAY-" + p.getId(),
+                            p.getPayeeCompanyName() != null ? p.getPayeeCompanyName() : p.getBpCompanyNameSnapshot(),
+                            p.getAmount(), null, p.getStatus()))
+                    .toList());
+        }
+        if ("expense".equals(kind)) {
+            String tenantId = AccountingTenantContextHolder.requireTenantContext();
+            return ApiResult.success(expenseRequestMapper.selectApprovedByTenant(tenantId, SEND_CANDIDATE_LIMIT).stream()
+                    .map(e -> new SendCandidate(e.getId(),
+                            e.getExpenseNo() != null ? e.getExpenseNo() : "EX-" + e.getId(),
+                            e.getCategory(), e.getAmount(),
+                            e.getExpenseDate() != null ? e.getExpenseDate().toString() : null, e.getStatus()))
+                    .toList());
+        }
+        throw BusinessException.of(400, "error.accounting.unknownSendKind");
     }
 
     // === 5. 手動連携トリガー API (管理者のみ) ===
