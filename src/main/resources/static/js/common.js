@@ -979,6 +979,13 @@ SES.pwa = {
         window.addEventListener('online', function() { SES.pwa.setStatus('online'); });
         window.addEventListener('offline', function() { SES.pwa.setStatus('offline'); });
         if (!('serviceWorker' in navigator)) return;
+        if (this.shellDisabled()) {
+            // NF-04機能スイッチOFF: 新規登録せず、過去に登録されたPWA shellとshell cacheだけを解除する。
+            // 日次入力の同期queue（pwa-queue.js）は既存画面の保存経路なので、logout時の削除は継続する。
+            this.unregisterShell();
+            this.bindLogout();
+            return;
+        }
         this.hadController = !!navigator.serviceWorker.controller;
         const self = this;
         navigator.serviceWorker.register('/service-worker.js', { scope: '/' }).then(function(registration) {
@@ -1006,6 +1013,36 @@ SES.pwa = {
             window.location.reload();
         });
         this.bindLogout();
+    },
+
+    /** server側の機能スイッチ（base.htmlのmeta）でPWA shellが無効化されているか。 */
+    shellDisabled: function() {
+        const meta = document.querySelector('meta[name="ses-pwa-shell"]');
+        return !!meta && meta.getAttribute('content') === 'off';
+    },
+
+    /** 本アプリの/service-worker.js登録と、そのshell cache（ses-pwa-shell-*）だけを解除する。 */
+    unregisterShell: function() {
+        try {
+            navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                registrations.forEach(function(registration) {
+                    const worker = registration.active || registration.waiting || registration.installing;
+                    const scriptUrl = worker && worker.scriptURL ? worker.scriptURL : '';
+                    if (scriptUrl && new URL(scriptUrl).pathname === '/service-worker.js') {
+                        registration.unregister().catch(function() {});
+                    }
+                });
+            }).catch(function() {});
+        } catch (_) { /* 登録APIを使えない環境では何もしない */ }
+        if (window.caches && typeof window.caches.keys === 'function') {
+            window.caches.keys().then(function(keys) {
+                return Promise.all(keys.filter(function(key) {
+                    return key.indexOf('ses-pwa-shell-') === 0;
+                }).map(function(key) {
+                    return window.caches.delete(key);
+                }));
+            }).catch(function() {});
+        }
     },
 
     setStatus: function(state, label) {

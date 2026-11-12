@@ -95,6 +95,13 @@ public class GlobalControllerAdvice {
     private final ObjectProvider<com.ses.service.MenuCacheService> menuCacheServiceProvider;
     private final ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
 
+    /**
+     * 機能スイッチ。スライスでは存在しないためObjectProvider経由で取得し、未取得時は何も隠さない。
+     * 既存の2引数constructorを保つためfield injectionにする（Spring管理外で生成した場合はnull）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    private ObjectProvider<com.ses.config.feature.FeatureSwitches> featureSwitchesProvider;
+
     @ModelAttribute("currentUri")
     public String currentUri(HttpServletRequest request) {
         return request.getRequestURI();
@@ -152,10 +159,31 @@ public class GlobalControllerAdvice {
 
     /**
      * ログイン中ユーザーのロールがアクセス可能なメニューキー一覧
-     * サイドバーのメニュー表示可否の判定に使用する
+     * サイドバーのメニュー表示可否の判定に使用する。
+     * 機能スイッチOFFの機能のメニューは、管理者を含む全ロールで除外する（権限ではなく公開可否）。
      */
     @ModelAttribute("allowedMenus")
     public List<String> allowedMenus(Authentication authentication) {
+        List<String> menuKeys = resolveAllowedMenus(authentication);
+        com.ses.config.feature.FeatureSwitches switches = featureSwitches();
+        return switches == null ? menuKeys : switches.visibleMenuKeys(menuKeys);
+    }
+
+    /**
+     * 機能スイッチOFFの機能の識別子（例: nf04）。サイドバー以外の埋込み導線
+     * （PWA shell・portalの問い合わせタブ・要員詳細のライフサイクル欄）の表示制御に使う。
+     */
+    @ModelAttribute("disabledFeatures")
+    public java.util.Set<String> disabledFeatures() {
+        com.ses.config.feature.FeatureSwitches switches = featureSwitches();
+        return switches == null ? Collections.emptySet() : switches.disabledKeys();
+    }
+
+    private com.ses.config.feature.FeatureSwitches featureSwitches() {
+        return featureSwitchesProvider == null ? null : featureSwitchesProvider.getIfAvailable();
+    }
+
+    private List<String> resolveAllowedMenus(Authentication authentication) {
         com.ses.service.MenuCacheService menuCacheService = menuCacheServiceProvider.getIfAvailable();
         if (authentication == null || menuCacheService == null) {
             return Collections.emptyList();

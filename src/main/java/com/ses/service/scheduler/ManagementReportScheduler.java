@@ -4,6 +4,8 @@ import com.ses.common.exception.BusinessException;
 import com.ses.common.exception.SafeErrorPolicy;
 import com.ses.common.audit.ExecutionActorContext;
 import com.ses.common.util.LogRedaction;
+import com.ses.config.feature.Feature;
+import com.ses.config.feature.FeatureSwitches;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.entity.ReportSchedule;
@@ -63,6 +65,9 @@ public class ManagementReportScheduler {
     private final ReportRecipientPreviewService recipientPreviewService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    /** NF-10機能スイッチ。Spring管理外で生成した単体テスト対象ではnull（従来どおり実行）。 */
+    @Autowired
+    private FeatureSwitches featureSwitches;
 
     /**
      * claim serviceはSpring proxy（REQUIRES_NEW）として注入する。transaction境界を迂回する簡易constructorは設けない。
@@ -93,6 +98,11 @@ public class ManagementReportScheduler {
     @Scheduled(cron = "${management-report.schedule-cron:0 * * * * *}", zone = "Asia/Tokyo")
     @SchedulerLock(name = "managementReportScheduleDispatch", lockAtLeastFor = "PT10S", lockAtMostFor = "PT10M")
     public void dispatchDue() {
+        // NF-10がOFFの間はscheduleのclaim・生成・配布を一切開始しない（claim済みleaseも触らない）。
+        if (!FeatureSwitches.allows(featureSwitches, Feature.NF10)) {
+            log.debug("[機能スイッチ] NF10がOFFのため定期管理レポートのdispatchをスキップしました");
+            return;
+        }
         ExecutionActorContext.runAsSystem("management-report-scheduler", "SCHEDULER_POLL", () -> {
             if (tenantAwareBatchRunner == null) {
                 throw BusinessException.of(500, "error.tenant.contextRequired");

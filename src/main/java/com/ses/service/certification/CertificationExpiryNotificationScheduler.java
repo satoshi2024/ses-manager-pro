@@ -1,6 +1,8 @@
 package com.ses.service.certification;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.ses.config.feature.Feature;
+import com.ses.config.feature.FeatureSwitches;
 import com.ses.entity.EngineerCertification;
 import com.ses.mapper.EngineerCertificationMapper;
 import com.ses.service.NotificationService;
@@ -8,6 +10,7 @@ import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.accounting.AccountingTenantInventoryProperties;
 import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.scheduler.TenantAwareBatchRunner;
+import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -18,6 +21,7 @@ import java.time.ZoneId;
 import java.util.List;
 
 /** 資格期限通知の定期dispatch。候補判定はClock、母集団はlifecycle resolver、重複はDB uniqueへ委譲する。 */
+@Slf4j
 @Service
 public class CertificationExpiryNotificationScheduler {
 
@@ -31,6 +35,9 @@ public class CertificationExpiryNotificationScheduler {
     private final AccountingTimezoneResolver timezoneResolver;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private TenantAwareBatchRunner tenantAwareBatchRunner;
+    /** NF-03機能スイッチ。Spring管理外で生成した単体テスト対象ではnull（従来どおり実行）。 */
+    @org.springframework.beans.factory.annotation.Autowired
+    private FeatureSwitches featureSwitches;
 
     @org.springframework.beans.factory.annotation.Autowired
     public CertificationExpiryNotificationScheduler(EngineerCertificationMapper certificationMapper,
@@ -54,6 +61,10 @@ public class CertificationExpiryNotificationScheduler {
     @Scheduled(cron = "0 15 3 * * ?", zone = "Asia/Tokyo")
     @SchedulerLock(name = "certificationExpiryNotificationDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT20M")
     public int dispatchToday() {
+        if (!FeatureSwitches.allows(featureSwitches, Feature.NF03)) {
+            log.debug("[機能スイッチ] NF03がOFFのため資格期限通知をスキップしました");
+            return 0;
+        }
         return dispatch(null);
     }
 

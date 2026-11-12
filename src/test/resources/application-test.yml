@@ -155,6 +155,19 @@ app:
       ids: default
   mail:
     from: test@example.com
+  # 既存テストの意味を保つため、test profileでは段階公開の機能スイッチを全てONにする。
+  # OFF時の遮断・既定値・独立性は com.ses.config.feature の機能スイッチテストで個別に検証する。
+  features:
+    nf01:
+      enabled: true
+    nf02:
+      enabled: true
+    nf03:
+      enabled: true
+    nf04:
+      enabled: true
+    nf10:
+      enabled: true
 
 ai:
   enabled: false

@@ -86,6 +86,19 @@ app:
     # prod 既定は mock 禁止。実 AP 配線まで none（FailClosedDigitalInvoiceProvider）。
     provider: ${DIGITAL_INVOICE_PROVIDER:none}
     webhook-hmac-secret: ${DIGITAL_INVOICE_WEBHOOK_HMAC_SECRET:}
+  # 機能スイッチ（段階公開）。本番も既定は全てOFF。デプロイ後に1機能ずつ環境変数でONにする（再起動で反映）。
+  # 手順: .kiro/specs/production-launch/feature-switches.md
+  features:
+    nf01:
+      enabled: ${FEATURE_NF01_ENABLED:false}
+    nf02:
+      enabled: ${FEATURE_NF02_ENABLED:false}
+    nf03:
+      enabled: ${FEATURE_NF03_ENABLED:false}
+    nf04:
+      enabled: ${FEATURE_NF04_ENABLED:false}
+    nf10:
+      enabled: ${FEATURE_NF10_ENABLED:false}
 
 # ===== freee連携（HFP-01） =====
 # 本番はFREEE_CLIENT_ID/SECRET/REDIRECT_URI/TOKEN_ENCRYPTION_KEYをsecret storeから供給する。
