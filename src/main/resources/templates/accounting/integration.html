@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
       layout:decorate="~{layout/base}">
 <head>
     <title th:text="#{accounting.integration.title}">会計・支払連携</title>
@@ -147,6 +148,8 @@
 
         <!-- 3. 接続設定パネル -->
         <div class="tab-pane fade" id="connections-panel" role="tabpanel">
+            <!-- 接続・再接続は管理者のみ（/integrations/freee は管理者限定）。JSはこの要素の有無で操作ボタンを出し分ける -->
+            <span sec:authorize="hasRole('管理者')" id="accountingCanManage" class="d-none"></span>
             <div class="row g-3" id="connectionsContainer">
                 <div class="col-12 text-center text-muted py-4" th:text="#{accounting.table.loadingConn}">接続情報を読み込み中...</div>
             </div>
@@ -412,6 +415,15 @@
          th:data-company-office="#{accounting.label.companyOffice}"
          th:data-valid-until="#{accounting.label.validUntil}"
          th:data-last-refreshed="#{accounting.label.lastRefreshed}"
+         th:data-btn-freee-connect="#{accounting.btn.freeeConnect}"
+         th:data-btn-freee-reconnect="#{accounting.btn.freeeReconnect}"
+         th:data-btn-connection-test="#{accounting.btn.connectionTest}"
+         th:data-freee-connected="#{accounting.msg.freeeConnected}"
+         th:data-freee-connect-failed="#{accounting.msg.freeeConnectFailed}"
+         th:data-freee-denied="#{accounting.msg.freeeDenied}"
+         th:data-freee-state="#{accounting.msg.freeeState}"
+         th:data-connection-healthy="#{accounting.msg.connectionHealthy}"
+         th:data-connection-unhealthy="#{accounting.msg.connectionUnhealthy}"
          th:data-preview-header="#{accounting.preview.header}"
          th:data-customer-code="#{accounting.preview.customerCode}"
          th:data-customer-name="#{accounting.preview.customerName}"

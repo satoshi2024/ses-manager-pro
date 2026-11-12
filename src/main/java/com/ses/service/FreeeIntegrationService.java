@@ -11,6 +11,11 @@ public interface FreeeIntegrationService {
     String authorizationUrl(String state);
     void handleCallback(String code, String state, Long userId);
     /**
+     * 認可codeをtoken endpointで交換し、access/refresh token・有効期限・company_idの存在を検証して返す。
+     * 保存はしない（給与/会計の保存先と事業所検証は呼出側）。失敗はBusinessException（provider詳細は出さない）。
+     */
+    com.ses.dto.freee.FreeeTokenGrant exchangeAuthorizationCode(String code);
+    /**
      * 接続状態を返す。statusは DISCONNECTED / CONNECTED / REAUTH_REQUIRED / MISCONFIGURED のいずれかで、
      * 日本語の次アクション（message key）をactionへ載せる。company ID・token・期限は返さない。
      */

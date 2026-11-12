@@ -108,6 +108,7 @@ window.AccountingIntegration = (function () {
                                 <div>${escapeHtml(t('validUntil'))}: ${escapeHtml(c.expiresAt ? c.expiresAt.replace('T', ' ') : '-')}</div>
                                 <div>${escapeHtml(t('lastRefreshed'))}: ${escapeHtml(c.lastRefreshedAt ? c.lastRefreshedAt.replace('T', ' ') : '-')}</div>
                             </div>
+                            ${connectionActions(c)}
                         </div>
                     </div>
                 </div>`;
@@ -118,6 +119,77 @@ window.AccountingIntegration = (function () {
                 loadMappings(currentConnId);
             }
         });
+    }
+
+    /** 管理者だけが接続・再接続できる（/integrations/freee は管理者限定）。 */
+    function canManage() {
+        return $('#accountingCanManage').length > 0;
+    }
+
+    /** 接続カードの操作ボタン。freee接続の認可は給与と同じOAuth callbackを target=accounting で使う。 */
+    function connectionActions(c) {
+        let html = '';
+        let isFreee = String(c.provider || '').toLowerCase() === 'freee';
+        if (isFreee && canManage()) {
+            let hasAuthorized = c.status === 'CONNECTED' || c.status === 'REAUTH_REQUIRED';
+            let label = hasAuthorized ? t('btnFreeeReconnect') : t('btnFreeeConnect');
+            let btnClass = c.status === 'CONNECTED' ? 'btn-outline-primary' : 'btn-primary';
+            html += `<a class="btn btn-sm ${btnClass} me-2" href="/integrations/freee/authorize?target=accounting&connectionId=${encodeURIComponent(String(c.id))}">`
+                + `<i class="bi bi-box-arrow-up-right me-1"></i>${escapeHtml(label)}</a>`;
+        }
+        if (c.status === 'CONNECTED') {
+            html += `<button type="button" class="btn btn-sm btn-outline-secondary" data-health-conn-id="${escapeHtml(String(c.id))}">`
+                + `<i class="bi bi-activity me-1"></i>${escapeHtml(t('btnConnectionTest'))}</button>`;
+        }
+        return html ? `<div class="d-flex flex-wrap gap-1">${html}</div>` : '';
+    }
+
+    function testConnection(connectionId, $btn) {
+        $btn.prop('disabled', true);
+        $.ajax({
+            url: '/api/accounting/connections/' + encodeURIComponent(connectionId) + '/health',
+            type: 'GET'
+        }).done(function (res) {
+            if (res && res.code === 200 && res.data === true) {
+                SES.toast.success(t('connectionHealthy'));
+            } else {
+                SES.toast.error(t('connectionUnhealthy'));
+            }
+        }).fail(function () {
+            SES.toast.error(t('connectionUnhealthy'));
+        }).always(function () {
+            $btn.prop('disabled', false);
+        });
+    }
+
+    /** OAuth callbackのredirect（?freee_connected=1 / ?freee_error=<kind>&reason=<message key>）を表示する。 */
+    function showOAuthResult() {
+        let params = new URLSearchParams(window.location.search);
+        if (!params.has('freee_connected') && !params.has('freee_error')) {
+            return;
+        }
+        let tabEl = document.getElementById('connections-tab');
+        if (tabEl && window.bootstrap) {
+            bootstrap.Tab.getOrCreateInstance(tabEl).show();
+        }
+        if (params.get('freee_connected') === '1') {
+            SES.toast.success(t('freeeConnected'));
+        } else {
+            let kind = params.get('freee_error');
+            let reason = params.get('reason');
+            let text;
+            if (reason && /^error\.(payroll|accounting)\.[A-Za-z]{1,60}$/.test(reason)) {
+                text = SES.i18n.t(reason);
+            } else if (kind === 'denied') {
+                text = t('freeeDenied');
+            } else if (kind === 'state') {
+                text = t('freeeState');
+            } else {
+                text = SES.i18n.t('error.payroll.oauthFailed');
+            }
+            Swal.fire({ icon: 'error', title: t('freeeConnectFailed'), text: text });
+        }
+        window.history.replaceState(null, '', window.location.pathname);
     }
 
     // === マッピング一覧 ===
@@ -490,6 +562,11 @@ window.AccountingIntegration = (function () {
         loadConnections();
         loadJobs(1);
         loadPreviewInvoiceOptions();
+        showOAuthResult();
+
+        $('#connectionsContainer').on('click', 'button[data-health-conn-id]', function () {
+            testConnection($(this).attr('data-health-conn-id'), $(this));
+        });
 
         // タブ切り替え時の自動ロード
         $('button[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
