@@ -12,9 +12,12 @@ import com.ses.service.report.ReportDeliveryService;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.report.ReportSnapshotService;
 import com.ses.service.scheduler.ManagementReportScheduler;
+import com.ses.service.scheduler.ReportScheduleClaimService;
 import com.ses.service.scheduler.TenantAwareBatchRunner;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.nio.charset.StandardCharsets;
@@ -25,6 +28,9 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class ManagementReportSchedulerTest {
+
+    /** 2026-09-01T00:00:30 Asia/Tokyo。 */
+    private static final Clock FIXED_CLOCK = Clock.fixed(Instant.parse("2026-08-31T15:00:30Z"), ZoneId.of("Asia/Tokyo"));
 
     private ReportSchedule schedule(LocalDateTime nextRunAt) {
         ReportSchedule schedule = new ReportSchedule();
@@ -66,6 +72,15 @@ class ManagementReportSchedulerTest {
         return previewService;
     }
 
+    private ManagementReportScheduler scheduler(ReportScheduleMapper mapper, ReportSnapshotService snapshotService,
+                                                ReportDeliveryService deliveryService,
+                                                MonthlyClosingService closingService) {
+        // claim serviceは実体を使い、mapperへのCAS引数の受け渡しを検証する（transaction境界はMySQL testで検証）。
+        return new ManagementReportScheduler(mapper, new ReportScheduleClaimService(mapper), FIXED_CLOCK,
+                snapshotService, deliveryService, closingService, timezoneResolver(), tenantRunner(),
+                recipientPreviewService(), new ObjectMapper());
+    }
+
     private TenantAwareBatchRunner tenantRunner() {
         TenantAwareBatchRunner runner = mock(TenantAwareBatchRunner.class);
         doAnswer(invocation -> {
@@ -87,9 +102,7 @@ class ManagementReportSchedulerTest {
         when(mapper.claimDue(eq("default"), eq(5L), any(), any(), any(), any(), any(), any(),
                 anyInt(), any(), anyString(), any(), any())).thenReturn(0);
 
-        new ManagementReportScheduler(mapper, snapshotService, deliveryService, closingService, timezoneResolver(),
-                tenantRunner(), recipientPreviewService(), new ObjectMapper())
-                .dispatchDue();
+        scheduler(mapper, snapshotService, deliveryService, closingService).dispatchDue();
 
         verifyNoInteractions(snapshotService, deliveryService);
     }
@@ -108,8 +121,7 @@ class ManagementReportSchedulerTest {
         when(closingService.isClosed("2026-08")).thenReturn(false);
         when(snapshotService.generate(any())).thenReturn(new ReportGenerationResult(
                 new ReportRun() {{ setId(11L); setStatus("PARTIAL"); }}, List.of(), false));
-        ManagementReportScheduler scheduler = new ManagementReportScheduler(mapper, snapshotService,
-                deliveryService, closingService, timezoneResolver(), tenantRunner(), recipientPreviewService(), new ObjectMapper());
+        ManagementReportScheduler scheduler = scheduler(mapper, snapshotService, deliveryService, closingService);
 
         scheduler.dispatchDue();
 
@@ -133,17 +145,16 @@ class ManagementReportSchedulerTest {
         LocalDateTime scheduledAt = LocalDateTime.of(2026, 9, 1, 0, 0);
         ReportSchedule schedule = schedule(scheduledAt);
         when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(schedule));
-        when(mapper.claimDue(eq("default"), eq(5L), eq(scheduledAt), eq(scheduledAt), any(), any())).thenReturn(1);
+        when(mapper.claimDue(eq("default"), eq(5L), eq(scheduledAt), any(), any(), any(), any(), any(),
+                anyInt(), eq(scheduledAt), anyString(), any(), any())).thenReturn(1);
         when(closingService.isClosed("2026-08")).thenReturn(false);
         when(snapshotService.generate(any())).thenThrow(new IllegalStateException("source unavailable"));
 
-        new ManagementReportScheduler(mapper, snapshotService, deliveryService, closingService, timezoneResolver(),
-                tenantRunner(), recipientPreviewService(), new ObjectMapper())
-                .dispatchDue();
+        scheduler(mapper, snapshotService, deliveryService, closingService).dispatchDue();
 
-        verify(mapper).markFailure(eq("default"), eq(5L), any(), eq(scheduledAt),
+        verify(mapper).markFailure(eq("default"), eq(5L), anyString(), any(), any(), eq(scheduledAt),
                 eq("SCHEDULE_GENERATION_FAILED"), anyString());
-        verify(mapper, never()).markSuccess(anyString(), anyLong(), any(), any());
+        verify(mapper, never()).markSuccess(anyString(), anyLong(), any(), any(), any(), any());
         verifyNoInteractions(deliveryService);
     }
 
@@ -166,9 +177,7 @@ class ManagementReportSchedulerTest {
         run.setStatus("SUCCEEDED");
         when(snapshotService.generate(any())).thenReturn(new ReportGenerationResult(run, List.of(), false));
 
-        new ManagementReportScheduler(mapper, snapshotService, deliveryService, closingService, timezoneResolver(),
-                tenantRunner(), recipientPreviewService(), new ObjectMapper())
-                .dispatchDue();
+        scheduler(mapper, snapshotService, deliveryService, closingService).dispatchDue();
 
         verify(mapper).markSuccess(eq("default"), eq(5L), anyString(), any(), any(), eq(logicalRunAt));
         verify(deliveryService).deliverScheduled(99L,
