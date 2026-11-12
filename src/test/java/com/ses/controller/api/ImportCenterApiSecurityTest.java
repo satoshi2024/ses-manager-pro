@@ -34,6 +34,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.BufferedReader;
@@ -53,10 +54,19 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** real security chainのCsrfFilterが拒否し、その間raw requestを未読に保つことを確認する。 */
+/**
+ * real security chainのCsrfFilterが拒否し、その間raw requestを未読に保つことを確認する。
+ *
+ * <p>共有H2を汚さないよう{@code @Transactional}で各testをrollbackする（TestIsolationAuditTest）。
+ * MockMvcはtest threadで同期実行されるためfilter/controllerもtest transaction内で動くが、
+ * ingestionは{@code @MockBean}で実{@code ImportCsvIngestionService}（外側transaction拒否の守衛）や
+ * {@code ImportCsvUploadCommitService}へは到達しない。guard/CSRFの判定とGlobalExceptionHandlerの
+ * status変換はDB transactionに依存しないため、検証内容は変わらない。
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@Transactional
 @Import(ImportCenterApiSecurityTest.TrackingFilterConfiguration.class)
 class ImportCenterApiSecurityTest {
     @Autowired private MockMvc mockMvc;
