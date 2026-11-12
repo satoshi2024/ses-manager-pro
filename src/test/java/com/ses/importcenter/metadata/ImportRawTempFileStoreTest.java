@@ -72,6 +72,33 @@ class ImportRawTempFileStoreTest {
         assertTrue(store.deleteOrReport(null));
     }
 
+    @Test
+    void deleteFailureWithoutTruncationOrMeterRegistryIsStillReportedWithoutThrowing() {
+        Path directory = uploadRoot.resolve("quarantine");
+        ImportRawTempFileStore store = new ImportRawTempFileStore(directory, null, file -> {
+            throw new java.nio.file.AccessDeniedException(file.toString());
+        });
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ImportRawTempFileStore.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> logs =
+                new ch.qos.logback.core.read.ListAppender<>();
+        logs.start();
+        logger.addAppender(logs);
+        try {
+            // 存在しないfileは切詰めもできない（contentTruncated=false）。MeterRegistryがなくても例外にしない。
+            boolean deleted = store.deleteOrReport(directory.resolve(ImportRawTempFileStore.PREFIX + "gone.csv"));
+
+            assertFalse(deleted);
+            String text = logs.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                    .reduce("", (left, right) -> left + right + "\n");
+            assertTrue(text.contains("contentTruncated=false"));
+            assertTrue(text.contains(ImportRawTempFileStore.PREFIX + "gone.csv"));
+            assertFalse(text.contains(uploadRoot.toString()), "絶対pathをログへ出さない");
+        } finally {
+            logger.detachAppender(logs);
+        }
+    }
+
     private ImportRawTempFileStore springStore() {
         @SuppressWarnings("unchecked")
         ObjectProvider<MeterRegistry> registry = mock(ObjectProvider.class);

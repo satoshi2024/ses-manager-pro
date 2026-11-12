@@ -139,7 +139,10 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                 throw BusinessException.of(409, "error.import.sourceHashMismatch");
             }
         } catch (java.io.IOException failure) {
-            throw BusinessException.of(400, "error.file.scanRejected");
+            // server側一時ファイルの再検証読込失敗。client入力の誤りとして400にしない。
+            log.error("[文書台帳] import一時ファイルの再検証読込に失敗しました: exceptionType={}",
+                    com.ses.common.util.LogRedaction.exceptionType(failure));
+            throw BusinessException.of(500, "error.import.tempStorageFailed");
         }
         deadlineCheckpoint.run();
         FileScanner scanner = fileScannerProvider.getIfAvailable();
@@ -179,9 +182,14 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             version.setScanStatus("CLEAN");
             return new StagedImportDocument(document, version, storageKey, operationId);
         } catch (Exception failure) {
-            deleteImportStorageOrThrow(storageKey, operationId);
+            try {
+                deleteImportStorageOrThrow(storageKey, operationId);
+            } catch (RuntimeException cleanupFailure) {
+                // 補償削除の失敗（ログ済み）で元の失敗（期限超過・検証失敗等）を上書きせず、suppressedとして残す。
+                failure.addSuppressed(cleanupFailure);
+            }
             if (failure instanceof RuntimeException runtime) throw runtime;
-            throw new RuntimeException("CSV import storage stage failed", failure);
+            throw new RuntimeException("CSV取込のstorage stageに失敗しました", failure);
         }
     }
 
@@ -199,14 +207,14 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     private void verifyStoredImportObject(String storageKey, long expectedSize, String expectedSha256,
                                          String operationId, Runnable deadlineCheckpoint) {
         try (InputStream input = documentStorage.open(storageKey)) {
-            if (input == null) throw new java.io.IOException("storage returned no stream");
+            if (input == null) throw new java.io.IOException("storageがstreamを返しませんでした");
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] buffer = new byte[8192];
             long count = 0;
             for (int read; (read = input.read(buffer)) != -1;) {
                 deadlineCheckpoint.run();
                 count += read;
-                if (count > 64L * 1024 * 1024) throw new java.io.IOException("stored import object exceeds limit");
+                if (count > 64L * 1024 * 1024) throw new java.io.IOException("保存済みimport objectが上限を超えています");
                 digest.update(buffer, 0, read);
             }
             if (count != expectedSize || !expectedSha256.equals(HexFormat.of().formatHex(digest.digest()))) {
@@ -225,7 +233,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         try {
             documentStorage.delete(storageKey);
         } catch (Exception failure) {
-            log.error("[文書台帳] import storage cleanup failed: operationId={} storageKey={} exceptionClass={}",
+            log.error("[文書台帳] import storageの補償削除に失敗しました: operationId={} storageKey={} exceptionClass={}",
                     operationId, storageKey, failure.getClass().getSimpleName());
             throw BusinessException.of(500, "error.import.storageCleanupFailed");
         }
@@ -243,7 +251,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             }
             return HexFormat.of().formatHex(digest.digest());
         } catch (java.security.NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("SHA-256 is unavailable", impossible);
+            throw new IllegalStateException("SHA-256が利用できません", impossible);
         }
     }
 
@@ -615,13 +623,13 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         DocumentVersion version = authorizeImportJobDownload(jobId, documentId, documentVersionId,
                 versionNo, expectedSha256);
         try (InputStream input = documentStorage.open(version.getStorageKey())) {
-            if (input == null) throw new java.io.IOException("storage returned no stream");
+            if (input == null) throw new java.io.IOException("storageがstreamを返しませんでした");
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] buffer = new byte[8192];
             long count = 0;
             for (int read; (read = input.read(buffer)) != -1;) {
                 count += read;
-                if (count > 64L * 1024 * 1024) throw new java.io.IOException("stored import object exceeds limit");
+                if (count > 64L * 1024 * 1024) throw new java.io.IOException("保存済みimport objectが上限を超えています");
                 digest.update(buffer, 0, read);
             }
             if (version.getSizeBytes() == null || count != version.getSizeBytes()

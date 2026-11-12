@@ -27,14 +27,19 @@ import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
-import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.CannotCreateTransactionException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.TransactionSystemException;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -48,6 +53,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Duration;
 import java.util.HexFormat;
 import java.nio.charset.StandardCharsets;
@@ -64,6 +72,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -112,6 +121,7 @@ class ImportCsvIngestionRealMySqlTest {
 
     @Autowired private JdbcTemplate jdbc;
     @Autowired private DataSource dataSource;
+    @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private ImportCsvIngestionService ingestion;
     @Autowired private ImportMetadataAuthorizationService authorization;
     @Autowired private ImportRawTempFileStore tempFiles;
@@ -351,18 +361,17 @@ class ImportCsvIngestionRealMySqlTest {
         assertEquals(tempBefore, rawTempFiles());
     }
 
-    // ---------------------------------------------------------------- ACK-loss / readback
+    // ---------------------------------------------------------------- commit失敗の分類 / ACK-loss / readback
 
     @Test
     void commitAckLossAfterDurableCommitReturnsOwnJobFromReadback() {
-        doAnswer(invocation -> {
-            invocation.callRealMethod();
-            throw new DataAccessResourceFailureException("synthetic commit acknowledgement loss");
-        }).when(commitService).commit(any(), any(), any(), anyInt());
+        // 実COMMIT成功後に応答だけ失われた状態（afterCompletion=COMMITTED）をtransaction manager境界で再現する。
+        FaultInjectingTransactionManager ackLoss = new FaultInjectingTransactionManager(transactionManager,
+                false, () -> { }, true);
         Set<String> tempBefore = rawTempFiles();
 
-        ImportUploadJobDetail recovered = ingestion.upload(new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8),
-                () -> new ByteArrayInputStream(CSV));
+        ImportUploadJobDetail recovered = ingestionWith(commitServiceWith(ackLoss), System::nanoTime).upload(
+                new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8), () -> new ByteArrayInputStream(CSV));
 
         assertEquals("UPLOADED", recovered.state());
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_job WHERE tenant_id=? AND id=? "
@@ -381,21 +390,38 @@ class ImportCsvIngestionRealMySqlTest {
     }
 
     @Test
-    void commitFailureWithReadbackOutageRetainsStageForReconciliation() {
-        doThrow(new DataAccessResourceFailureException("synthetic commit failure"))
-                .when(commitService).commit(any(), any(), any(), anyInt());
-        doThrow(new DataAccessResourceFailureException("synthetic readback outage"))
-                .when(metadata).findCommittedUploadForStage(any(), any(), any(), any());
+    void commitAckUncertainWithoutVisibleRowRetainsStageForReconciliation() {
+        // COMMIT送信前にserver側で接続を切断し、client側ではCOMMIT結果が判定不能（afterCompletion=UNKNOWN）な状態を作る。
+        // serverは切断でtransactionをrollbackするため行は見えず、storage補償もROLLED_BACKではないので走らない。
+        FaultInjectingTransactionManager severed = new FaultInjectingTransactionManager(transactionManager,
+                false, this::killTransactionConnection, false);
         Set<String> tempBefore = rawTempFiles();
 
-        DataAccessResourceFailureException failure = assertThrows(DataAccessResourceFailureException.class,
-                () -> ingestion.upload(new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8),
-                        () -> new ByteArrayInputStream(CSV)));
+        assertThrows(ImportCommitOutcomeUnknownException.class, () -> ingestionWith(commitServiceWith(severed),
+                System::nanoTime).upload(new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8),
+                () -> new ByteArrayInputStream(CSV)));
 
-        assertEquals("synthetic commit failure", failure.getMessage());
+        verify(metadata).findCommittedUploadForStage(any(), any(), any(), any());
         verify(documentService, never()).discardImportStage(any());
         assertNoMetadataRows();
-        assertEquals(1, storage.objectCount(), "commit結果を確認できないstageは照合用に保全する");
+        assertEquals(1, storage.objectCount(), "COMMIT結果を確定できないstageだけは照合用に保全する");
+        assertEquals(tempBefore, rawTempFiles());
+    }
+
+    @Test
+    void transactionBeginFailureIsNotCommittedAndDiscardsOwnedStageWithoutReadback() {
+        FaultInjectingTransactionManager exhausted = new FaultInjectingTransactionManager(transactionManager,
+                true, () -> { }, false);
+        Set<String> tempBefore = rawTempFiles();
+
+        assertThrows(CannotCreateTransactionException.class, () -> ingestionWith(commitServiceWith(exhausted),
+                System::nanoTime).upload(new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8),
+                () -> new ByteArrayInputStream(CSV)));
+
+        verify(metadata, never()).findCommittedUploadForStage(any(), any(), any(), any());
+        verify(documentService).discardImportStage(any());
+        assertEquals(1, storage.putCount());
+        assertNoCommittedRows();
         assertEquals(tempBefore, rawTempFiles());
     }
 
@@ -458,14 +484,82 @@ class ImportCsvIngestionRealMySqlTest {
         }
 
         verify(commitService).commit(any(), any(), any(), eq(1));
-        assertNoMetadataRows();
-        assertEquals(1, storage.objectCount(), "commit結果が不確定なstageは照合用に保全する");
+        // 書込gateのtimeoutはコールバック内（COMMIT未発行）で起きるため未commitが確定し、stageは破棄される。
+        verify(documentService).discardImportStage(any());
+        verify(metadata, never()).findCommittedUploadForStage(any(), any(), any(), any());
+        assertEquals(1, storage.putCount());
+        assertNoCommittedRows();
         assertEquals(tempBefore, rawTempFiles());
     }
 
     private ImportCsvIngestionService ingestionWithClock(AtomicLong nanos) {
         return new ImportCsvIngestionService(authorization, metadata, admission, documentService, commitService,
                 tempFiles, nanos::get, ImportIngressDeadline.TOTAL_BUDGET);
+    }
+
+    private ImportCsvIngestionService ingestionWith(ImportCsvUploadCommitService faultCommit, LongSupplier clock) {
+        return new ImportCsvIngestionService(authorization, metadata, admission, documentService, faultCommit,
+                tempFiles, clock, ImportIngressDeadline.TOTAL_BUDGET);
+    }
+
+    private ImportCsvUploadCommitService commitServiceWith(PlatformTransactionManager manager) {
+        return new ImportCsvUploadCommitService(authorization, documentMetadataCommit, metadata, manager);
+    }
+
+    /** 現threadのtransaction接続をserver側でKILLする。COMMIT前に呼び、COMMIT応答を判定不能にする。 */
+    private void killTransactionConnection() {
+        Connection bound = DataSourceUtils.getConnection(dataSource);
+        try {
+            long connectionId;
+            try (Statement statement = bound.createStatement();
+                 ResultSet result = statement.executeQuery("SELECT CONNECTION_ID()")) {
+                assertTrue(result.next());
+                connectionId = result.getLong(1);
+            }
+            try (Connection killer = dataSource.getConnection(); Statement kill = killer.createStatement()) {
+                kill.execute("KILL " + connectionId);
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("transaction接続のKILLに失敗しました", failure);
+        } finally {
+            DataSourceUtils.releaseConnection(bound, dataSource);
+        }
+    }
+
+    /** 実transaction managerへ委譲し、開始失敗・COMMIT直前の処理・COMMIT成功後の応答喪失だけを注入する。 */
+    static final class FaultInjectingTransactionManager implements PlatformTransactionManager {
+        private final PlatformTransactionManager delegate;
+        private final boolean failBegin;
+        private final Runnable beforeCommit;
+        private final boolean failAfterDurableCommit;
+
+        FaultInjectingTransactionManager(PlatformTransactionManager delegate, boolean failBegin,
+                                         Runnable beforeCommit, boolean failAfterDurableCommit) {
+            this.delegate = delegate;
+            this.failBegin = failBegin;
+            this.beforeCommit = beforeCommit;
+            this.failAfterDurableCommit = failAfterDurableCommit;
+        }
+
+        @Override
+        public TransactionStatus getTransaction(TransactionDefinition definition) {
+            if (failBegin) throw new CannotCreateTransactionException("synthetic connection pool exhaustion");
+            return delegate.getTransaction(definition);
+        }
+
+        @Override
+        public void commit(TransactionStatus status) {
+            beforeCommit.run();
+            delegate.commit(status);
+            if (failAfterDurableCommit) {
+                throw new TransactionSystemException("synthetic commit acknowledgement loss");
+            }
+        }
+
+        @Override
+        public void rollback(TransactionStatus status) {
+            delegate.rollback(status);
+        }
     }
 
     private void assertNoCommittedRows() {

@@ -1,5 +1,6 @@
 package com.ses.controller.api;
 
+import com.ses.common.exception.BusinessException;
 import com.ses.importcenter.metadata.ImportCsvIngestionService;
 import com.ses.importcenter.metadata.ImportMetadataAuthorizationService;
 import com.ses.importcenter.metadata.ImportUploadJobDetail;
@@ -50,6 +51,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** real security chainのCsrfFilterが拒否し、その間raw requestを未読に保つことを確認する。 */
@@ -113,6 +115,37 @@ class ImportCenterApiSecurityTest {
 
         verify(ingestion).upload(any(), any());
         assertFalse(bodyTrackingFilter.bodyTouched());
+    }
+
+    @Test
+    void ingressDeadlineExceededIsReturnedAsServiceUnavailableThroughTheRealErrorHandler() throws Exception {
+        when(ingestion.upload(any(), any()))
+                .thenThrow(BusinessException.of(503, "error.import.uploadDeadlineExceeded"));
+
+        mockMvc.perform(validRawUpload().cookie(new Cookie("XSRF-TOKEN", "matching-token"))
+                        .header("X-XSRF-TOKEN", "matching-token"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value(503));
+    }
+
+    @Test
+    void serviceLevelSizeLimitIsReturnedAsClientErrorNotSystemError() throws Exception {
+        when(ingestion.upload(any(), any())).thenThrow(BusinessException.of(400, "error.import.uploadTooLarge"));
+
+        mockMvc.perform(validRawUpload().cookie(new Cookie("XSRF-TOKEN", "matching-token"))
+                        .header("X-XSRF-TOKEN", "matching-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
+    void serverSideTempStorageFailureIsReturnedAsServerError() throws Exception {
+        when(ingestion.upload(any(), any())).thenThrow(BusinessException.of(500, "error.import.tempStorageFailed"));
+
+        mockMvc.perform(validRawUpload().cookie(new Cookie("XSRF-TOKEN", "matching-token"))
+                        .header("X-XSRF-TOKEN", "matching-token"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value(500));
     }
 
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder validRawUpload() {

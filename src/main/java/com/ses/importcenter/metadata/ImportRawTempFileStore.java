@@ -18,10 +18,23 @@ import java.util.Objects;
 
 /**
  * raw CSV ingressの一時ファイル置場。
- * upload rootの{@code quarantine}直下（FileStorageServiceImplの未scan領域と同じ）に作成し、どの
+ *
+ * <p>upload rootの{@code quarantine}直下（FileStorageServiceImplの未scan領域と同じ）に作成し、どの
  * FileReferenceProviderにも登録しない。そのため削除に失敗しても、既存の孤児ファイル清理
- * （FileCleanupScheduler → FileCleanupServiceImpl、cleanup-safety-hours経過後）で必ず回収される。
- * 削除失敗は黙殺せず、日本語ログとmetricで通知し、可能ならraw内容を0 byteへ切り詰める。
+ * {@code FileCleanupServiceImpl.cleanupOrphanFiles()}で回収される。この清理は次の二つのschedulerから呼ばれる。
+ * <ul>
+ *   <li>{@code DocumentArchiveFileCleanupScheduler}：毎日02:00</li>
+ *   <li>{@code FileCleanupScheduler}：毎週日曜03:00</li>
+ * </ul>
+ * 最終更新から{@code cleanup-safety-hours}（既定24時間）経過したものだけが対象のため、残存は最長で
+ * おおむね「safety時間＋1日」となる。いずれもShedLockで1instanceだけが実行するため、upload rootが
+ * instanceごとのlocal directoryである多instance構成では、実行しなかったinstanceの残存は回収されない。
+ *
+ * <p>権限：POSIXでは{@code Files.createTempFile}によりowner限定（0600）で作成される。Windowsでは
+ * POSIX権限が使えず、{@code quarantine} directoryのACLを継承するため、同directoryのACLを運用側で
+ * owner（実行account）限定にしておく必要がある。
+ *
+ * <p>削除失敗は黙殺せず、日本語ログとmetricで通知し、可能ならraw内容を0 byteへ切り詰める。
  */
 @Component
 public class ImportRawTempFileStore {
@@ -49,7 +62,7 @@ public class ImportRawTempFileStore {
 
     /**
      * 孤児清理の走査対象（upload root直下のquarantine、非再帰）へ一時ファイルを作る。
-     * POSIXではFiles.createTempFileによりowner限定権限となる。file名は乱数由来でPIIを含まない。
+     * POSIXではowner限定権限、Windowsではdirectory ACLの継承となる。file名は乱数由来でPIIを含まない。
      */
     Path create() throws IOException {
         Files.createDirectories(directory);

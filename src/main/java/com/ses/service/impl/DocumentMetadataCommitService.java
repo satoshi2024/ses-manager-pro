@@ -89,7 +89,7 @@ public class DocumentMetadataCommitService {
 
     private void registerImportStorageRollback(String storageKey, String operationId) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            throw new IllegalStateException("import metadata commit requires transaction synchronization");
+            throw new IllegalStateException("import metadata commitにはtransaction同期が必要です");
         }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
