@@ -33,7 +33,8 @@ setup_validate() {
   export BINLOG_INDEX="$T/binlog/binlog-index.json"
   export FAKE_COUNT=2 FAKE_FLYWAY_MAX=42 FAKE_CHECK_TABLE=OK FAKE_MARKER_BEFORE=1 FAKE_MARKER_AFTER=0
   export FAKE_TABLE_COUNT=0 FAKE_MYSQL_STATUS_ROW=$'8.0.36\t11111111-2222-3333-4444-555555555555\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
-  unset MYSQL_PWD FAKE_FLYWAY_FAILED FAKE_FLYWAY_MAX FAKE_FLYWAY_VERSIONS FAKE_CHECK_TABLE \
+  unset MYSQL_PWD FAKE_FLYWAY_FAILED FAKE_FLYWAY_MAX FAKE_FLYWAY_VERSIONS \
+    FAKE_FLYWAY_VERSIONS_RC FAKE_FLYWAY_VERSIONS_EMPTY FAKE_CHECK_TABLE \
     FAKE_MARKER_BEFORE FAKE_MARKER_AFTER FAKE_REF_KEYS FAKE_COUNT FAKE_TABLE_COUNT
   export FAKE_COUNT=2 FAKE_FLYWAY_MAX=42 FAKE_CHECK_TABLE=OK FAKE_MARKER_BEFORE=1 FAKE_MARKER_AFTER=0
   chmod +x "$ROOT/ops/backup/providers/approval-verifier-local.sh" 2>/dev/null || true
@@ -167,6 +168,39 @@ case_validate_flyway_lexical_max_rejected() {
   assert_contains "$VAL_OUT" '"flyway": "FAIL"' "flyway FAIL"
 }
 
+# 小数版の比較: 102.10 は 102.9 より新しい（数値 sort -n や辞書順では逆転する）。
+case_validate_flyway_dotted_version_order() {
+  setup_common_fixture
+  make_ckpt_index 102.10 '{"marker_test":2}' "$INVENTORY"
+  export SMOKE_RC=0
+  export FAKE_FLYWAY_VERSIONS="9 102.9 10 102.10 102.2"
+  run_validate
+  assert_zero "$VAL_RC" "102.10 を最新と判定して exit 0"
+  assert_contains "$VAL_OUT" '"flyway": "PASS"' "flyway PASS（102.10 > 102.9）"
+}
+
+# history table はあるが成功 versioned 行が 0 件: actual=NULL として不一致（fail-closed）。
+case_validate_flyway_no_success_rows_fails() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  export FAKE_FLYWAY_VERSIONS_EMPTY=1
+  run_validate
+  assert_nonzero "$VAL_RC" "成功行 0 件は非 0"
+  assert_contains "$VAL_OUT" '"flyway": "FAIL"' "flyway FAIL"
+  assert_contains "$VAL_OUT" "actual=NULL" "actual=NULL を通知"
+}
+
+# version 取得自体の失敗（history table 無し等）は従来どおり照合しない。
+# integration DB には history table が無いため、この既存挙動を固定する。
+case_validate_flyway_query_error_skips_version_check() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  export FAKE_FLYWAY_VERSIONS_RC=1
+  run_validate
+  assert_zero "$VAL_RC" "取得失敗は version 照合を行わず exit 0（既存挙動）"
+  assert_contains "$VAL_OUT" '"flyway": "PASS"' "flyway PASS（照合 skip）"
+}
+
 case_validate_count_mismatch() {
   setup_common_fixture
   export FAKE_COUNT=999
@@ -238,6 +272,9 @@ run_case case_validate_flyway_failed
 run_case case_validate_flyway_version_mismatch
 run_case case_validate_flyway_version_numeric_order
 run_case case_validate_flyway_lexical_max_rejected
+run_case case_validate_flyway_dotted_version_order
+run_case case_validate_flyway_no_success_rows_fails
+run_case case_validate_flyway_query_error_skips_version_check
 run_case case_validate_count_mismatch
 run_case case_validate_marker_after_present
 run_case case_validate_missing_reference

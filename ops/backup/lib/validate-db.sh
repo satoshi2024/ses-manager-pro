@@ -14,7 +14,7 @@ validate_db::fail() { echo "validate-db: $*" >&2; return 1; }
 # Flyway 検証
 validate_db::flyway() { # metadata_flyway
   local expected=$1
-  local failed maxv
+  local failed maxv versions rc=0
   failed=$("$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
     --execute "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 0;" 2>/dev/null)
   if [[ "$failed" == "0" || "$failed" == "" ]]; then
@@ -27,10 +27,21 @@ validate_db::flyway() { # metadata_flyway
   # 「最新」と誤判定する（"99" > "185"）。V102_1（version "102.1"）のような
   # 小数版もあるため数値 CAST も使えない。成功行の version を全件取得し、
   # 版番号順（sort -V）で最大を取る。repeatable migration（version NULL）は除外する。
-  maxv=$("$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
-    --execute "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL;" 2>/dev/null \
-    | sort -V | tail -n 1)
-  if [[ -n "$expected" && -n "$maxv" && "$maxv" != "$expected" ]]; then
+  versions=$("$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
+    --execute "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL;" 2>/dev/null) || rc=$?
+  if (( rc != 0 )); then
+    # 取得自体の失敗（history table 無し・権限不足）は従来どおり照合しない。
+    return 0
+  fi
+  [[ -n "$expected" ]] || return 0
+  # 取得には成功したが成功 versioned 行が 0 件、または整列に失敗した場合は
+  # actual=NULL として不一致にする（従来の MAX(version)=NULL と同じく fail-closed）。
+  maxv=$(printf '%s\n' "$versions" | sed '/^$/d' | sort -V | tail -n 1) || maxv=""
+  if [[ -z "$maxv" ]]; then
+    validate_db::fail "flyway 最新 version 不一致（expected=$expected actual=NULL）"
+    return 1
+  fi
+  if [[ "$maxv" != "$expected" ]]; then
     validate_db::fail "flyway 最新 version 不一致（expected=$expected actual=$maxv）"
     return 1
   fi
