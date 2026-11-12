@@ -1,7 +1,6 @@
 package com.ses.service.report.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
@@ -173,15 +172,16 @@ public class ReportScheduleServiceImpl implements ReportScheduleService {
         if (!"管理者".equals(SecurityUtils.currentRole())) {
             throw BusinessException.of(403, "error.managementReport.adminRequired");
         }
-        ReportSchedule schedule = scheduleMapper.selectOne(new QueryWrapper<ReportSchedule>()
-                .eq("tenant_id", tenantId()).eq("id", scheduleId));
-        if (schedule == null) throw BusinessException.of(404, "error.managementReport.scheduleNotFound");
-        schedule.setEnabled(enabled ? 1 : 0);
-        schedule.setUpdatedBy(SecurityUtils.currentUserId());
-        int updated = scheduleMapper.update(schedule, new UpdateWrapper<ReportSchedule>()
-                .eq("tenant_id", tenantId()).eq("id", scheduleId));
+        String tenantId = tenantId();
+        // entity全体を書き戻すと、読取後にschedulerが更新したlease/next/retry/failure列を古い値へ戻してしまう。
+        // enabledと監査列・versionだけを専用SQLで更新し、応答は更新後の行を読み直して返す。
+        int updated = scheduleMapper.updateEnabled(tenantId, scheduleId,
+                enabled ? 1 : 0, SecurityUtils.currentUserId());
         if (updated == 0) throw BusinessException.of(404, "error.managementReport.scheduleNotFound");
-        return schedule;
+        ReportSchedule refreshed = scheduleMapper.selectOne(new QueryWrapper<ReportSchedule>()
+                .eq("tenant_id", tenantId).eq("id", scheduleId));
+        if (refreshed == null) throw BusinessException.of(404, "error.managementReport.scheduleNotFound");
+        return refreshed;
     }
 
     private String tenantId() {
