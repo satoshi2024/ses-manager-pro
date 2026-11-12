@@ -9,13 +9,15 @@
 # - 全ステップ失敗時は非 0 で終了（CI では allow-failure にしない契約）
 # - Docker が無い環境では BLOCKED として終了する
 #
+# 終了コード: 0 = 成功、1 = 失敗（各段の native 終了コードは失敗診断にだけ記録する）、
+#            2 = BLOCKED（Docker / compose plugin が利用できない）
+#
 # usage: bash ops/backup/tests/run-integration.sh
 set -uo pipefail
 export MSYS_NO_PATHCONV=1
 umask 077
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-ROOT=$(cd "$HERE/../.." && pwd)
 COMPOSE_FILE=$(cygpath -w "$HERE/docker-compose.integration.yml" 2>/dev/null || echo "$HERE/docker-compose.integration.yml")
 
 if ! docker info > /dev/null 2>&1; then
@@ -43,7 +45,7 @@ RUN_ID=""
 PROJECT=""
 DIAG_FILE=""
 FAILURE_STAGE=""
-FAILURE_NATIVE_RC=0
+FAILURE_NATIVE_RC=""
 FAILURE_OUTPUT_FILE=""
 WORK_AWK=""
 WWORK=""
@@ -163,21 +165,169 @@ trap cleanup EXIT
 # ------------------------------------------------------------
 # WORK パス検証（chmod/chown の対象を限定する境界）
 # ------------------------------------------------------------
+# 本 harness が書く run ID（date +%s - PID - RANDOM）の形式。
+RUN_ID_PATTERN='^[0-9]{1,12}-[0-9]{1,10}-[0-9]{1,5}$'
+# 既定 WORK を自動退避した .integration-work.prev-<旧 RUN_ID> の保持数（直前の退避分を含む）。
+DEFAULT_WORK_PREV_KEEP=3
+
+# ConvertTo-Json 形式（1 行 1 プロパティ）のファイルから文字列値を 1 つ取り出す。
+# 対応するエスケープは \\ \/ \" と、Windows PowerShell 5.1 が ' & < > などに使う印字可能 ASCII の
+#  〜~ だけ。それ以外（非 ASCII・制御文字の \uXXXX、\n など）とキーの欠落・重複は失敗（fail-closed）。
+json_string_field() {
+  local file=$1 key=$2 line raw="" value="" count=0 pattern ch next hex decoded
+  pattern='^[[:space:]]*"'"$key"'"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)"[[:space:]]*,?[[:space:]]*$'
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line=${line%$'\r'}
+    if [[ "$line" =~ $pattern ]]; then
+      count=$((count + 1))
+      raw=${BASH_REMATCH[1]}
+    fi
+  done < "$file"
+  (( count == 1 )) || return 1
+  while [[ -n "$raw" ]]; do
+    ch=${raw:0:1}
+    if [[ "$ch" != '\' ]]; then
+      value+=$ch
+      raw=${raw:1}
+      continue
+    fi
+    next=${raw:1:1}
+    case "$next" in
+      '\'|'/'|'"')
+        value+=$next
+        raw=${raw:2}
+        ;;
+      u)
+        hex=${raw:2:4}
+        [[ "$hex" =~ ^00[2-7][0-9a-fA-F]$ && "$hex" != 007[fF] ]] || return 1
+        printf -v decoded '%b' "\\x${hex:2:2}"
+        value+=$decoded
+        raw=${raw:6}
+        ;;
+      *) return 1 ;;
+    esac
+  done
+  printf '%s\n' "$value"
+}
+
+# verify-like-ci.ps1（scripts/verify-ci-common.ps1 の New-ControlledPitrWorkDir）が親ディレクトリに書く
+# .ses-pitr-owner.json を「値」で照合する。runToken は Guid の N 形式、workDir / parentDir は
+# 本 run の WORK とその親に（同じ正規化を通した後で）一致しなければならない。
+verify_controller_marker() {
+  local marker=$1 lexical_work=$2 size value normalized
+  [[ -f "$marker" && ! -L "$marker" ]] || return 1
+  size=$(wc -c < "$marker" 2>/dev/null) || return 1
+  size=${size//[[:space:]]/}
+  [[ "$size" =~ ^[0-9]+$ ]] || return 1
+  (( size > 0 && size <= 65536 )) || return 1
+  value=$(json_string_field "$marker" runToken) || return 1
+  [[ "$value" =~ ^[0-9a-f]{32}$ ]] || return 1
+  value=$(json_string_field "$marker" workDir) || return 1
+  normalized=$(lexical_normalize_abs "$(platform_posix_path "$value")") || return 1
+  [[ "$normalized" == "$lexical_work" ]] || return 1
+  value=$(json_string_field "$marker" parentDir) || return 1
+  normalized=$(lexical_normalize_abs "$(platform_posix_path "$value")") || return 1
+  [[ "$normalized" == "${lexical_work%/*}" ]] || return 1
+}
+
+default_work_recovery_hint() {
+  local path=$1 reason=$2
+  echo "FAIL: 既定の作業ディレクトリを自動退避できません（$reason）。既存の内容は変更していません: $path" >&2
+  echo "復旧手順: 1) 内容を確認する: ls -la '$path'  2) 残す場合は退避する: mv '$path' '$path.manual-$(date +%Y%m%d%H%M%S)'  不要なら削除する: rm -rf '$path'  3) 再実行する" >&2
+}
+
+# 退避済みの .integration-work.prev-* のうち、本 harness の所有マーカーを持つものだけを対象に、
+# 直前の退避分（keep_path）を含めて新しい順に DEFAULT_WORK_PREV_KEEP 個を残して削除する。
+prune_previous_default_works() {
+  local here_canon=$1 default_work=$2 keep_path=$3 entry name index=0
+  local -a names=() sorted=()
+  for entry in "$here_canon"/.integration-work.prev-*; do
+    [[ -d "$entry" && ! -L "$entry" ]] || continue
+    [[ "$entry" != "$keep_path" ]] || continue
+    name=${entry##*/.integration-work.prev-}
+    [[ "$name" =~ $RUN_ID_PATTERN ]] || continue
+    [[ -f "$entry/.ses-pitr-run-owner" && ! -L "$entry/.ses-pitr-run-owner" ]] || continue
+    grep -qxF "work=$default_work" "$entry/.ses-pitr-run-owner" 2>/dev/null || continue
+    grep -qxF "run=$name" "$entry/.ses-pitr-run-owner" 2>/dev/null || continue
+    names+=("$name")
+  done
+  (( ${#names[@]} > 0 )) || return 0
+  mapfile -t sorted < <(printf '%s\n' "${names[@]}" | sort -t- -k1,1nr -k2,2nr -k3,3nr)
+  for name in "${sorted[@]}"; do
+    [[ -n "$name" ]] || continue
+    index=$((index + 1))
+    (( index < DEFAULT_WORK_PREV_KEEP )) && continue
+    if ! rm -rf -- "$here_canon/.integration-work.prev-$name" 2>/dev/null; then
+      echo "WARN: 古い退避ディレクトリを削除できません（手動で削除してください）: $here_canon/.integration-work.prev-$name" >&2
+    fi
+  done
+}
+
+# 既定 WORK に前回の run が残っている場合、本 harness の所有マーカー（.ses-pitr-run-owner）の
+# work= が既定パスと一致し、前回の run が終了済みのときに限り .integration-work.prev-<旧 RUN_ID> へ
+# 改名して保全する（削除はしない）。マーカーが無い・一致しない場合は fail-closed。
+rotate_default_work() {
+  local default_work=$1 here_canon=$2 owner size old_run old_pid prev
+  owner="$default_work/.ses-pitr-run-owner"
+  if [[ ! -f "$owner" || -L "$owner" ]]; then
+    default_work_recovery_hint "$default_work" "本 harness の所有マーカー .ses-pitr-run-owner がありません"
+    return 1
+  fi
+  size=$(wc -c < "$owner" 2>/dev/null) || size=""
+  size=${size//[[:space:]]/}
+  if ! [[ "$size" =~ ^[0-9]+$ ]] || (( size > 4096 )); then
+    default_work_recovery_hint "$default_work" "所有マーカーの形式が不正です"
+    return 1
+  fi
+  if ! grep -qxF "work=$default_work" "$owner" 2>/dev/null; then
+    default_work_recovery_hint "$default_work" "所有マーカーの work= が既定パスと一致しません"
+    return 1
+  fi
+  old_run=$(grep '^run=' "$owner" 2>/dev/null)
+  old_run=${old_run#run=}
+  if ! [[ "$old_run" =~ $RUN_ID_PATTERN ]]; then
+    default_work_recovery_hint "$default_work" "所有マーカーの run= が不正です"
+    return 1
+  fi
+  old_pid=${old_run#*-}
+  old_pid=${old_pid%%-*}
+  if kill -0 "$old_pid" 2>/dev/null; then
+    default_work_recovery_hint "$default_work" "前回の run（pid=$old_pid）が実行中の可能性があります"
+    return 1
+  fi
+  prev="$here_canon/.integration-work.prev-$old_run"
+  if [[ -e "$prev" || -L "$prev" ]]; then
+    default_work_recovery_hint "$default_work" "退避先が既に存在します: $prev"
+    return 1
+  fi
+  if ! mv -- "$default_work" "$prev" 2>/dev/null || [[ ! -d "$prev" || -L "$prev" || -e "$default_work" ]]; then
+    default_work_recovery_hint "$default_work" "退避（mv）に失敗しました"
+    return 1
+  fi
+  echo "前回の既定作業ディレクトリを退避しました（直近 ${DEFAULT_WORK_PREV_KEEP} 件を保持）: $prev" >&2
+  prune_previous_default_works "$here_canon" "$default_work" "$prev"
+  return 0
+}
+
 # WORK は次のいずれかに限る。比較は platform_posix_path → 字句正規化 → 物理パスの順で揃えて行う。
-#   1. 既定値 $HERE/.integration-work（CI・verify-like-ci.sh の evidence artifact パス）
-#   2. 一時ディレクトリルート（TMPDIR / TMP / TEMP。いずれも未設定なら /tmp）の厳密な配下
+#   1. default:    既定値 $HERE/.integration-work（CI・verify-like-ci.sh の evidence artifact パス）。
+#                  前回 run の残りは所有マーカー照合後に .integration-work.prev-<旧 RUN_ID> へ退避する。
+#   2. controller: verify-like-ci.ps1 が作成した空の integration-work。親の .ses-pitr-owner.json を値で照合する。
+#                  一時ディレクトリルート外（-CustomPitrWorkDir）の場合は祖先全体に symlink/junction が無いこと
+#                  （物理パス = 字句パス）を要求する。
+#   3. temp:       一時ディレクトリルート（TMPDIR / TMP / TEMP。いずれも未設定なら /tmp）の厳密な配下に新規作成。
 # 許可ルートより下の各要素は symlink を含んではならず、親ディレクトリは既存でなければならない
-# （mkdir -p で祖先を作らない）。既存の WORK は空であり、かつ (1) の既定値か、親に
-# verify-like-ci.ps1 の所有マーカー（.ses-pitr-owner.json）を持つ integration-work に限る。
+# （mkdir -p で祖先を作らない）。default 以外はリポジトリ配下・リポジトリの祖先を拒否する。
 # 条件を満たさなければ fail-closed とし、WORK_OWNED を立てない（chmod/chown は一切行わない）。
 validate_work_path() {
   local posix lexical here_lex here_canon repo_canon default_work candidate candidate_lex candidate_canon
-  local root_canon="" rel="" rest component current i parent_path work_canon entries owner_file last_index
+  local mode="" root_canon="" rel="" rest component current i parent_path parent_lex work_canon entries last_index
   local -a candidates=() roots_lex=() roots_canon=() rel_parts=()
 
   posix=$(platform_posix_path "$WORK") || { reject_work_path "パスを正規化できません"; return 1; }
   lexical=$(lexical_normalize_abs "$posix") \
     || { reject_work_path "'.'・'..'・改行を含まない絶対パスが必要です: $WORK"; return 1; }
+  [[ "$lexical" != "/" ]] || { reject_work_path "ルートディレクトリは使えません"; return 1; }
   here_canon=$(canonical_dir "$HERE") || { reject_work_path "スクリプトディレクトリを正規化できません"; return 1; }
   repo_canon=$(canonical_dir "$HERE/../../..") || { reject_work_path "リポジトリルートを正規化できません"; return 1; }
   here_lex=$(lexical_normalize_abs "$(platform_posix_path "$HERE")") \
@@ -185,6 +335,7 @@ validate_work_path() {
   default_work="$here_canon/.integration-work"
 
   if [[ "$lexical" == "$here_lex/.integration-work" || "$lexical" == "$default_work" ]]; then
+    mode=default
     root_canon=$here_canon
     rel=".integration-work"
   else
@@ -211,13 +362,29 @@ validate_work_path() {
         break
       fi
     done
+    parent_lex=${lexical%/*}
+    [[ -n "$parent_lex" ]] || parent_lex=/
+    if [[ "${lexical##*/}" == "integration-work" ]] \
+        && [[ -e "$parent_lex/.ses-pitr-owner.json" || -L "$parent_lex/.ses-pitr-owner.json" ]]; then
+      mode=controller
+    elif [[ -n "$rel" ]]; then
+      mode=temp
+    fi
   fi
-  if [[ -z "$rel" || -z "$root_canon" ]]; then
+  if [[ -z "$mode" ]]; then
     echo "FAIL: integration work path is outside the permitted fresh-work boundary（許可ルート外: $lexical）" >&2
     return 1
   fi
 
-  rest=$rel
+  if [[ -n "$rel" ]]; then
+    # 許可ルートより下を 1 要素ずつ検査する（祖先・WORK 自身のいずれも symlink を許さない）。
+    rest=$rel
+    current=$root_canon
+  else
+    # 一時ディレクトリルート外の controller WORK: ルート直下から全要素を検査する。
+    rest=${lexical#/}
+    current=""
+  fi
   while [[ -n "$rest" ]]; do
     component=${rest%%/*}
     if [[ "$rest" == */* ]]; then rest=${rest#*/}; else rest=""; fi
@@ -225,9 +392,6 @@ validate_work_path() {
   done
   (( ${#rel_parts[@]} > 0 )) || { reject_work_path "許可ルートそのものは使えません"; return 1; }
   last_index=$(( ${#rel_parts[@]} - 1 ))
-
-  # 許可ルートより下を 1 要素ずつ検査する（祖先・WORK 自身のいずれも symlink を許さない）。
-  current=$root_canon
   for i in "${!rel_parts[@]}"; do
     current="$current/${rel_parts[i]}"
     if [[ -L "$current" ]]; then
@@ -241,12 +405,13 @@ validate_work_path() {
   done
   work_canon=$current
   parent_path=${work_canon%/*}
+  [[ -n "$parent_path" ]] || parent_path=/
   if [[ "$(canonical_dir "$parent_path")" != "$parent_path" ]]; then
-    reject_work_path "親ディレクトリの物理パスが一致しません: $parent_path"
+    reject_work_path "親ディレクトリの物理パスが一致しません（祖先に symlink/junction があります）: $parent_path"
     return 1
   fi
 
-  if [[ "$work_canon" != "$default_work" ]]; then
+  if [[ "$mode" != default ]]; then
     if [[ "$work_canon/" == "$repo_canon/"* ]]; then
       reject_work_path "リポジトリ配下は既定パス以外使えません: $work_canon"
       return 1
@@ -267,23 +432,27 @@ validate_work_path() {
       return 1
     fi
     if [[ -n "$entries" ]]; then
-      echo "FAIL: integration work path is not empty; existing contents are preserved" >&2
-      return 1
-    fi
-    if [[ "$work_canon" != "$default_work" ]]; then
-      owner_file="$parent_path/.ses-pitr-owner.json"
-      if [[ "${rel_parts[last_index]}" != "integration-work" || ! -f "$owner_file" || -L "$owner_file" ]] \
-          || ! grep -q '"runToken"' "$owner_file" 2>/dev/null \
-          || ! grep -q '"workDir"' "$owner_file" 2>/dev/null; then
-        reject_work_path "既存の空ディレクトリに制御側の所有マーカー（.ses-pitr-owner.json）がありません: $work_canon"
+      if [[ "$mode" == default ]]; then
+        rotate_default_work "$default_work" "$here_canon" || return 1
+      else
+        echo "FAIL: integration work path is not empty; existing contents are preserved" >&2
         return 1
       fi
-    fi
-  else
-    if ! mkdir "$work_canon" 2>/dev/null; then
-      reject_work_path "作業ディレクトリを排他的に作成できません: $work_canon"
+    elif [[ "$mode" == temp ]]; then
+      reject_work_path "既存の空ディレクトリに制御側の所有マーカー（.ses-pitr-owner.json）がありません: $work_canon"
       return 1
     fi
+  elif [[ "$mode" == controller ]]; then
+    reject_work_path "制御側が作成したはずの integration-work が存在しません: $work_canon"
+    return 1
+  fi
+  if [[ "$mode" == controller ]] && ! verify_controller_marker "$parent_path/.ses-pitr-owner.json" "$lexical"; then
+    reject_work_path "所有マーカー（.ses-pitr-owner.json）の runToken/workDir/parentDir が本 run の WORK と一致しません: $parent_path/.ses-pitr-owner.json"
+    return 1
+  fi
+  if [[ ! -e "$work_canon" ]] && ! mkdir "$work_canon" 2>/dev/null; then
+    reject_work_path "作業ディレクトリを排他的に作成できません: $work_canon"
+    return 1
   fi
   if [[ ! -d "$work_canon" || -L "$work_canon" || "$(canonical_dir "$work_canon")" != "$work_canon" ]]; then
     reject_work_path "検証中に作業ディレクトリが変化しました: $work_canon"
@@ -319,10 +488,11 @@ validate_work_path() {
 #
 # 失敗時診断の上限（静的見積り）:
 #   - Docker 呼び出しは ps 1 回 + 所有確認 inspect 最大 5 回 + service ごとの state/logs 最大 10 回 = 最大 16 回。
-#     各回は timeout -k 1s により DIAG_CALL_TIMEOUT_SECONDS（既定 5 秒）+ 強制終了猶予 1 秒で打ち切る。
+#     各回は GNU timeout -k 1s により DIAG_CALL_TIMEOUT_SECONDS（既定 5 秒）+ 強制終了猶予 1 秒で打ち切る。
 #   - redactor（awk）は対応する Docker 呼び出しと並行に走り、同じ上限 + 2 秒（+ 猶予 1 秒）で打ち切る。
 #   - 最終 secret scan は DIAG_SCAN_TIMEOUT_SECONDS（既定 10 秒）+ 猶予 1 秒で打ち切る。
-#   時計の挙動に依存しない上限は「呼び出し回数 × 個別 timeout」（約 127 秒）である。
+#   Linux では時計の挙動に依存しない上限は「呼び出し回数 × 個別 timeout」（約 127 秒）である。
+#   MSYS では timeout が docker.exe を終了させた後に CLI plugin の孫プロセスがパイプを保持し続けるかは未確認。
 #   DIAG_BUDGET_SECONDS（既定 15 秒）は bash の SECONDS（壁時計ベース・1 秒分解能）による目安で、
 #   使い切った後の呼び出しを省略するだけの best-effort であり、硬い期限ではない。
 DIAG_MAX_BYTES=$((512 * 1024))
@@ -331,6 +501,19 @@ DIAG_BUDGET_SECONDS=15
 DIAG_CALL_TIMEOUT_SECONDS=5
 DIAG_SCAN_TIMEOUT_SECONDS=10
 DIAG_BUDGET_END=0
+DIAG_TIMEOUT_BIN=""
+
+# GNU coreutils の timeout だけを採用する。Windows の System32\timeout.exe のような同名の別物は
+# 引数体系が異なり上限として機能しないため、見つからない扱い（Docker 診断を省略）にする。
+detect_gnu_timeout() {
+  local candidate version
+  DIAG_TIMEOUT_BIN=""
+  candidate=$(command -v timeout 2>/dev/null) || return 0
+  [[ -n "$candidate" ]] || return 0
+  version=$("$candidate" --version 2>/dev/null < /dev/null) || return 0
+  if [[ "$version" == *"GNU coreutils"* ]]; then DIAG_TIMEOUT_BIN=$candidate; fi
+  return 0
+}
 
 # 診断上限の環境変数による上書き（selftest 用）。既定値より小さい値だけを受け付ける。
 init_diag_limits() {
@@ -343,6 +526,7 @@ init_diag_limits() {
   if [[ "$value" =~ ^[1-9]$ ]] && (( value < DIAG_CALL_TIMEOUT_SECONDS )); then
     DIAG_CALL_TIMEOUT_SECONDS=$value
   fi
+  detect_gnu_timeout
   return 0
 }
 
@@ -363,9 +547,9 @@ diag_call_limit() {
 bounded_call() {
   local extra=$1 limit
   shift
-  command -v timeout > /dev/null 2>&1 || return 127
+  [[ -n "$DIAG_TIMEOUT_BIN" ]] || return 127
   limit=$(diag_call_limit) || return 124
-  timeout -k 1s "$((limit + extra))s" "$@"
+  "$DIAG_TIMEOUT_BIN" -k 1s "$((limit + extra))s" "$@"
 }
 
 bounded_docker() {
@@ -373,12 +557,12 @@ bounded_docker() {
 }
 
 # usage: fixed_timeout_call <秒> <command...>
-# timeout が無い環境では素の実行になるため、入力サイズで仕事量が有界な処理（最終 scan）にだけ使う。
+# GNU timeout が無い環境では素の実行になるため、入力サイズで仕事量が有界な処理（最終 scan）にだけ使う。
 fixed_timeout_call() {
   local seconds=$1
   shift
-  if command -v timeout > /dev/null 2>&1; then
-    timeout -k 1s "${seconds}s" "$@"
+  if [[ -n "$DIAG_TIMEOUT_BIN" ]]; then
+    "$DIAG_TIMEOUT_BIN" -k 1s "${seconds}s" "$@"
   else
     "$@"
   fi
@@ -386,10 +570,14 @@ fixed_timeout_call() {
 
 # ストリーミング redactor 本体（POSIX awk / mawk / gawk 互換）。
 #   - 1 行は前段の cut で lineCap+1 バイトに切り詰めてから読むため、awk の行バッファは有界。
-#     lineCap を超えた行は lineCap で切り、末尾が secret の接頭辞なら伏字化したうえで以降の出力を止める
-#     （切り捨てた部分の PEM 状態が分からないため fail-closed）。
-#   - 処理する入力は inputCap バイトまで。上限到達後・出力上限到達後は読み捨てるだけで、上流を SIGPIPE で壊さない。
-#   - PEM 秘密鍵ブロックは BEGIN と同じ種別の END（例: END RSA PRIVATE KEY）まで伏字化し、END の後続は残す。
+#     lineCap を超えた行は lineCap で切り、末尾が secret の接頭辞なら伏字化したうえで、その位置に理由付きの
+#     marker を残して以降の処理を止める（切り捨てた部分の PEM 状態が分からないため fail-closed）。
+#   - ファイルには先頭 headCap バイトと末尾 tailCap バイト（リングバッファ）を残し、間を省略した場合は
+#     省略バイト数の marker を挟む。失敗行は通常末尾にあるため末尾を必ず残す。合計は maxBytes 以内。
+#   - echoStdout=1（stream）のときは脱敏済みの全行を逐次 fflush して端末へ流す（上限なし）。
+#   - inputCap > 0（bounded）のときは処理する入力をそのバイト数までにする。上限後は読み捨てるだけで、
+#     上流を SIGPIPE で壊さない。
+#   - PEM 秘密鍵ブロック（PGP PRIVATE KEY BLOCK を含む）は BEGIN と同じ種別の END まで伏字化し、END の後続は残す。
 #   - secret literal は全出現位置（重なり・隣接を含む）を区間併合して伏字化する。
 #   - パスワード系 secret ファイル（1〜4）が読めない・空のときは何も出力せず失敗する。
 REDACT_AWK_PROGRAM='
@@ -432,7 +620,7 @@ function strip_private_keys(text,    kept, endPos, steps) {
       privateKeyEnd = ""
       continue
     }
-    if (!match(text, /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/)) return kept text
+    if (!match(text, /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----/)) return kept text
     kept = kept substr(text, 1, RSTART - 1) "[PRIVATE KEY BLOCK REDACTED]"
     # "-----BEGIN " は 11 バイト。BEGIN 行の種別部分（例: "RSA PRIVATE KEY-----"）をそのまま END に使う。
     privateKeyEnd = "-----END " substr(text, RSTART + 11, RLENGTH - 11)
@@ -495,25 +683,66 @@ function guard_secret_prefix_tail(text,    textLen, i, s, k, best) {
   if (best == 0) return text
   return substr(text, 1, textLen - best) "[REDACTED]"
 }
-function emit(text,    room, piece) {
-  room = maxBytes - emittedBytes
-  if (room <= 0) {
-    outputLimited = 1
-    return
+# 伏字化済みテキストだけを受け取る（分割・切り詰めても secret の断片は生じない）。
+function store(text,    len, room, excess) {
+  len = length(text)
+  if (!headFull) {
+    room = headCap - headBytes
+    if (len <= room) {
+      printf "%s", text >> out
+      fflush(out)
+      headBytes += len
+      return
+    }
+    if (room > 0) {
+      printf "%s", substr(text, 1, room) >> out
+      fflush(out)
+      headBytes += room
+      text = substr(text, room + 1)
+      len = length(text)
+    }
+    headFull = 1
   }
-  piece = text
-  if (length(text) > room) {
-    piece = substr(text, 1, room)
-    outputLimited = 1
+  ringText[ringEnd] = text
+  ringLen[ringEnd] = len
+  ringEnd++
+  ringBytes += len
+  while (ringBytes > tailCap && ringStart < ringEnd) {
+    excess = ringBytes - tailCap
+    if (ringLen[ringStart] <= excess) {
+      omittedBytes += ringLen[ringStart]
+      ringBytes -= ringLen[ringStart]
+      delete ringText[ringStart]
+      delete ringLen[ringStart]
+      ringStart++
+    } else {
+      ringText[ringStart] = substr(ringText[ringStart], excess + 1)
+      ringLen[ringStart] -= excess
+      ringBytes -= excess
+      omittedBytes += excess
+    }
   }
-  printf "%s", piece
-  printf "%s", piece >> out
-  emittedBytes += length(piece)
+}
+function record(text) {
+  if (echoStdout) {
+    printf "%s", text
+    fflush()
+  }
+  store(text)
+}
+function stop_with(marker) {
+  stopped = 1
+  record(marker "\n")
+  print marker > "/dev/stderr"
 }
 BEGIN {
   maxBytes += 0
   lineCap += 0
   inputCap += 0
+  echoStdout += 0
+  headCap = int(maxBytes / 4)
+  tailCap = maxBytes - headCap - 256
+  if (tailCap < 0) tailCap = 0
   maxPemSteps = 64
   maxMatches = 512
   secretFile[1] = secretFile1
@@ -529,16 +758,13 @@ BEGIN {
   load_secret_file(secretFile[6])
 }
 {
-  if (failClosed) next
-  if (stopped) {
-    if (emittedBytes >= maxBytes) outputLimited = 1
-    next
-  }
-  inputBytes += length($0) + 1
-  if (inputBytes > inputCap) {
-    stopped = 1
-    inputLimited = 1
-    next
+  if (failClosed || stopped) next
+  if (inputCap > 0) {
+    inputBytes += length($0) + 1
+    if (inputBytes > inputCap) {
+      stop_with("[SECTION INPUT LIMIT REACHED; REMAINDER OMITTED]")
+      next
+    }
   }
   text = $0
   overLong = 0
@@ -549,37 +775,58 @@ BEGIN {
   reload_secret_files()
   text = redact_literals(strip_private_keys(text))
   if (overLong) text = guard_secret_prefix_tail(text)
-  emit(text "\n")
-  if (overLong) {
-    stopped = 1
-    lineLimited = 1
-  }
-  if (pemLimited || outputLimited || emittedBytes >= maxBytes) stopped = 1
+  record(text "\n")
+  if (overLong) stop_with("[LINE LENGTH LIMIT REACHED; REMAINDER OMITTED (fail-closed: PEM state of the dropped part is unknown)]")
+  else if (pemLimited) stop_with("[PRIVATE KEY PARSE LIMIT REACHED; REMAINDER OMITTED (fail-closed)]")
 }
 END {
   if (failClosed) {
     print "[REDACTOR FAIL-CLOSED: required secret file missing or empty; output omitted]" > "/dev/stderr"
     exit 3
   }
-  if (inputLimited) print "[SECTION INPUT LIMIT REACHED; REMAINDER OMITTED]" > "/dev/stderr"
-  if (lineLimited) print "[LINE LENGTH LIMIT REACHED; REMAINDER OMITTED]" > "/dev/stderr"
-  if (pemLimited) print "[PRIVATE KEY PARSE LIMIT REACHED; REMAINDER OMITTED]" > "/dev/stderr"
-  if (outputLimited) print "[SECTION TRUNCATED AT BYTE LIMIT]" > "/dev/stderr"
-  if (emittedBytes > 0 && close(out) != 0) exit 1
+  if (omittedBytes > 0) {
+    printf "%s\n", ("[OUTPUT TRUNCATED: " omittedBytes " bytes omitted between head and tail]") >> out
+    print ("[SECTION TRUNCATED: head and tail retained, " omittedBytes " bytes omitted]") > "/dev/stderr"
+  }
+  for (i = ringStart; i < ringEnd; i++) printf "%s", ringText[i] >> out
+  if ((headBytes > 0 || omittedBytes > 0 || ringEnd > ringStart) && close(out) != 0) exit 1
 }
 '
 
-# usage: redact_stream_to_file <出力ファイル> <最大出力バイト> [bounded]
-#   既定（stream）: compose/PITR/drill 本体の出力用。上流コマンドの寿命に従うため時間上限は付けないが、
-#     処理する入力バイト（最大出力の 4 倍）・行長・出力バイトは有界で、上限後は読み捨てて上流の終了コードを保つ。
-#   bounded: 失敗時診断用。awk も診断予算付き timeout で打ち切る（打ち切り時は非 0）。
+# usage: redact_stream_to_file <出力ファイル> <最大出力バイト（1024 以上）> [stream|bounded]
+#   stream（既定）: compose/PITR/drill 本体の出力用。脱敏済みの全行を端末へ流し、ファイルには先頭と末尾を残す。
+#     上流コマンドの寿命に従うため時間上限は付けないが、行長と保存バイトは有界。
+#   bounded: 失敗時診断用。端末へは流さず、処理する入力を最大出力の 4 倍までにし、awk も診断予算付き
+#     timeout で打ち切る（打ち切り時は非 0）。
+#   どの経路で戻る場合も標準入力を最後まで読み捨て、上流を SIGPIPE で落とさない。
 redact_stream_to_file() {
-  local output_file=$1 max_bytes=$2 mode=${3:-stream}
+  local output_file=$1 max_bytes=$2 mode=${3:-stream} input_cap=0 echo_stdout=1
   local -a awk_cmd status
-  [[ "$max_bytes" =~ ^[1-9][0-9]{0,7}$ ]] || return 2
-  : > "$output_file" || return 1
+  if ! [[ "$max_bytes" =~ ^[1-9][0-9]{0,7}$ ]] || (( max_bytes < 1024 )); then
+    cat > /dev/null
+    return 2
+  fi
+  case "$mode" in
+    stream) ;;
+    bounded)
+      input_cap=$((max_bytes * 4))
+      echo_stdout=0
+      if [[ -z "$DIAG_TIMEOUT_BIN" ]] || ! diag_call_limit > /dev/null; then
+        cat > /dev/null
+        return 124
+      fi
+      ;;
+    *)
+      cat > /dev/null
+      return 2
+      ;;
+  esac
+  if ! { : > "$output_file"; } 2>/dev/null; then
+    cat > /dev/null
+    return 1
+  fi
   awk_cmd=(env LC_ALL=C awk -v out="$output_file" -v maxBytes="$max_bytes"
-    -v lineCap="$max_bytes" -v inputCap="$((max_bytes * 4))"
+    -v lineCap="$max_bytes" -v inputCap="$input_cap" -v echoStdout="$echo_stdout"
     -v secretFile1="$WORK_AWK/src-password" -v secretFile2="$WORK_AWK/tgt-password"
     -v secretFile3="$WORK_AWK/repo-password" -v secretFile4="$WORK_AWK/restore-svc-pw"
     -v secretFile5="$WORK_AWK/keys/priv1.pem" -v secretFile6="$WORK_AWK/keys/priv2.pem"
@@ -591,6 +838,8 @@ redact_stream_to_file() {
     LC_ALL=C cut -b "1-$((max_bytes + 1))" | "${awk_cmd[@]}"
     status=("${PIPESTATUS[@]}")
   fi
+  # awk が途中で終了・打ち切られた場合も、上流（compose/docker）を SIGPIPE で落とさないよう残りを読み捨てる。
+  cat > /dev/null
   if (( ${status[1]:-1} != 0 )); then return "${status[1]:-1}"; fi
   if (( ${status[0]:-1} != 0 )); then return "${status[0]:-1}"; fi
   return 0
@@ -622,7 +871,8 @@ append_diagnostic_section() {
 }
 
 # 保存直前の最終検査。DIAG_FILE がサイズ上限を超える・secret ファイルが読めない・
-# secret literal / PEM BEGIN が残っている・scan が時間内に終わらない場合は非 0（呼び出し側で全体を破棄）。
+# secret literal / PEM BEGIN（PGP 形式を含む）が残っている・scan が時間内に終わらない場合は非 0
+# （呼び出し側で全体を破棄）。
 scan_failure_diagnostics() {
   local size
   [[ -n "$DIAG_FILE" && -f "$DIAG_FILE" && ! -L "$DIAG_FILE" ]] || return 1
@@ -657,7 +907,7 @@ scan_failure_diagnostics() {
       load_secret_file(secretFile6)
     }
     {
-      if ($0 ~ /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/) exit 1
+      if ($0 ~ /-----BEGIN [A-Z0-9 ]*PRIVATE KEY/) exit 1
       for (i = 1; i <= secretCount; i++) if (index($0, secrets[i]) > 0) exit 1
     }
   ' < "$DIAG_FILE"
@@ -699,18 +949,6 @@ refresh_project_containers() {
   PROJECT_IDS_VERIFIED=1
 }
 
-service_container_id() {
-  local service=$1 ids id count=0
-  ids=$(compose ps -q "$service" 2>/dev/null) || return 1
-  while IFS= read -r id; do
-    [[ -n "$id" ]] || continue
-    count=$((count + 1))
-    (( count == 1 )) || return 1
-    verify_project_container "$id" "$service" || return 1
-  done <<< "$ids"
-  (( count == 1 ))
-}
-
 # source/target が同一の、このrunの Compose network にだけ接続していることを確認する。
 # Go template の改行は {{println}} で出力する（文字列リテラル内の改行エスケープはシェルの
 # クォートを経由すると字面の バックスラッシュ+n になり、network ID が壊れるため使わない）。
@@ -748,10 +986,14 @@ collect_failure_diagnostics() {
   PROJECT_CONTAINER_IDS=()
   SOURCE_CID="" TARGET_CID="" TOOL_CID="" SCHEDULER_CID="" REPLICA_CID=""
   if (( ! WORK_OWNED )) || [[ -z "$DIAG_FILE" ]]; then return 0; fi
+  if ! verify_work_still_owned; then
+    echo "diagnostics: 作業ディレクトリの所有を再確認できないため診断を書き込みません" >&2
+    return 0
+  fi
   : > "$DIAG_FILE" || return 1
   diag_budget_start
   append_diagnostic_line "DIAGNOSTIC ONLY — not PITR or restore-drill success evidence"
-  append_diagnostic_line "run=$RUN_ID project=$PROJECT stage=${FAILURE_STAGE:-unknown} native_exit=${FAILURE_NATIVE_RC:-$primary_rc} runner_exit=$primary_rc time_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  append_diagnostic_line "run=$RUN_ID project=$PROJECT stage=${FAILURE_STAGE:-unknown} native_exit=${FAILURE_NATIVE_RC:-n/a} runner_exit=$primary_rc time_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   append_diagnostic_line "collector-limits advisory_budget_seconds=$DIAG_BUDGET_SECONDS per_call_timeout_seconds=$DIAG_CALL_TIMEOUT_SECONDS (advisory budget uses the wall-clock SECONDS counter; only per-call timeouts are hard bounds)"
   if [[ -n "$FAILURE_OUTPUT_FILE" && -f "$FAILURE_OUTPUT_FILE" ]]; then
     append_diagnostic_section "failing-command-output" "$FAILURE_OUTPUT_FILE"
@@ -763,8 +1005,8 @@ collect_failure_diagnostics() {
     finalize_failure_diagnostics
     return 0
   fi
-  if ! command -v timeout > /dev/null 2>&1; then
-    append_diagnostic_line "collector=bounded timeout command unavailable; Docker diagnostics omitted"
+  if [[ -z "$DIAG_TIMEOUT_BIN" ]]; then
+    append_diagnostic_line "collector=bounded timeout command unavailable; Docker diagnostics omitted (GNU coreutils timeout is required)"
     finalize_failure_diagnostics
     return 0
   fi
@@ -898,10 +1140,10 @@ if (( UP_RC != 0 || UP_REDACT_RC != 0 )); then
   FAILURE_NATIVE_RC=$UP_RC
   FAILURE_OUTPUT_FILE="$UP_OUTPUT_FILE"
   if (( UP_REDACT_RC != 0 )); then printf '%s\n' '[redactor failed; output omitted]' > "$UP_OUTPUT_FILE"; fi
-  echo "FAIL: compose up" >&2
-  if (( UP_RC != 0 )); then exit "$UP_RC"; else exit 1; fi
+  echo "FAIL: compose up（rc=$UP_RC redactor_rc=$UP_REDACT_RC）" >&2
+  exit 1
 fi
-rm -f "$UP_OUTPUT_FILE" "$UP_OUTPUT_FILE.bytes"
+rm -f "$UP_OUTPUT_FILE"
 echo "== compose up --wait（healthcheck） =="
 WAIT_OUTPUT_FILE="$WORK/.compose-wait-output"
 compose up --wait -d 2>&1 | redact_stream_to_file "$WAIT_OUTPUT_FILE" 65536
@@ -913,10 +1155,10 @@ if (( WAIT_RC != 0 || WAIT_REDACT_RC != 0 )); then
   FAILURE_NATIVE_RC=$WAIT_RC
   FAILURE_OUTPUT_FILE="$WAIT_OUTPUT_FILE"
   if (( WAIT_REDACT_RC != 0 )); then printf '%s\n' '[redactor failed; output omitted]' > "$WAIT_OUTPUT_FILE"; fi
-  echo "FAIL: コンテナが healthy になりませんでした" >&2
-  if (( WAIT_RC != 0 )); then exit "$WAIT_RC"; else exit 1; fi
+  echo "FAIL: コンテナが healthy になりませんでした（rc=$WAIT_RC redactor_rc=$WAIT_REDACT_RC）" >&2
+  exit 1
 fi
-rm -f "$WAIT_OUTPUT_FILE" "$WAIT_OUTPUT_FILE.bytes"
+rm -f "$WAIT_OUTPUT_FILE"
 
 if ! refresh_project_containers || [[ -z "$SOURCE_CID" || -z "$TARGET_CID" ]] || ! verify_project_network; then
   FAILURE_STAGE=project-network-verification
@@ -970,10 +1212,10 @@ if (( PITR_RC != 0 || PITR_REDACT_RC != 0 )); then
   FAILURE_NATIVE_RC=$PITR_RC
   FAILURE_OUTPUT_FILE="$PITR_OUTPUT_FILE"
   if (( PITR_REDACT_RC != 0 )); then printf '%s\n' '[redactor failed; output omitted]' > "$PITR_OUTPUT_FILE"; fi
-  echo "FAIL: integration-pitr.sh（rc=$PITR_RC）" >&2
-  if (( PITR_RC != 0 )); then exit "$PITR_RC"; else exit 1; fi
+  echo "FAIL: integration-pitr.sh（rc=$PITR_RC redactor_rc=$PITR_REDACT_RC）" >&2
+  exit 1
 fi
-rm -f "$PITR_OUTPUT_FILE" "$PITR_OUTPUT_FILE.bytes"
+rm -f "$PITR_OUTPUT_FILE"
 normalize_evidence_permissions
 
 echo "== restore-drill 実行（実環境に対する drill。RPO/RTO segment 記録） =="
@@ -983,6 +1225,7 @@ PLAN_ID=$(docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration \
 TARGET_TS=$(docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration \
   jq -r '.requested_target // empty' "/work/plans/${PLAN_ID}.json")
 if [[ -z "$TARGET_TS" || "$TARGET_TS" == "null" ]]; then
+  FAILURE_STAGE=drill-plan-lookup
   echo "FAIL: plan.requested_target を取得できません（plan_id=$PLAN_ID）" >&2
   exit 1
 fi
@@ -1021,10 +1264,10 @@ if (( DRILL_RC != 0 || DRILL_REDACT_RC != 0 )); then
   FAILURE_NATIVE_RC=$DRILL_RC
   FAILURE_OUTPUT_FILE="$DRILL_OUTPUT_FILE"
   if (( DRILL_REDACT_RC != 0 )); then printf '%s\n' '[redactor failed; output omitted]' > "$DRILL_OUTPUT_FILE"; fi
-  echo "FAIL: restore-drill（rc=$DRILL_RC）" >&2
-  if (( DRILL_RC != 0 )); then exit "$DRILL_RC"; else exit 1; fi
+  echo "FAIL: restore-drill（rc=$DRILL_RC redactor_rc=$DRILL_REDACT_RC）" >&2
+  exit 1
 fi
-rm -f "$DRILL_OUTPUT_FILE" "$DRILL_OUTPUT_FILE.bytes"
+rm -f "$DRILL_OUTPUT_FILE"
 normalize_evidence_permissions
 
 docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration \
@@ -1032,17 +1275,19 @@ docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration \
   /work/drill-evidence/drill-report.json | tee "$WORK/evidence/drill-report.json"
 if ! docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration \
   jq -e '.rto_ok == true and .rpo_ok == true' /work/drill-evidence/drill-report.json > /dev/null; then
+  FAILURE_STAGE=drill-rpo-rto
   echo "FAIL: drill の RPO/RTO が目標内にない" >&2
   exit 1
 fi
 
 echo "== 結果検証 =="
 SUMMARY="$WORK/integration-summary.json"
-[[ -f "$SUMMARY" ]] || { echo "FAIL: summary がありません" >&2; exit 1; }
+[[ -f "$SUMMARY" ]] || { FAILURE_STAGE=result-summary; echo "FAIL: summary がありません" >&2; exit 1; }
 docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration jq -r . /work/integration-summary.json \
   | tee "$WORK/evidence/integration-summary.json"
 STATE=$(docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration jq -r '.state' /work/integration-summary.json)
 if [[ "$STATE" != "SUCCESS" ]]; then
+  FAILURE_STAGE=result-state
   echo "FAIL: state=$STATE" >&2
   exit 1
 fi
@@ -1050,14 +1295,15 @@ for k in target_db.before_marker target_db.mid_dml_replayed target_db.after_mark
   uploads_staging.before_marker uploads_staging.after_marker; do
   V=$(docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration jq -r ".$k" /work/integration-summary.json)
   case "$k" in
-    target_db.before_marker|target_db.mid_dml_replayed|uploads_staging.before_marker) [[ "$V" == "1" ]] || { echo "FAIL: $k=$V" >&2; exit 1; } ;;
-    *) [[ "$V" == "0" ]] || { echo "FAIL: $k=$V" >&2; exit 1; } ;;
+    target_db.before_marker|target_db.mid_dml_replayed|uploads_staging.before_marker) [[ "$V" == "1" ]] || { FAILURE_STAGE=result-markers; echo "FAIL: $k=$V" >&2; exit 1; } ;;
+    *) [[ "$V" == "0" ]] || { FAILURE_STAGE=result-markers; echo "FAIL: $k=$V" >&2; exit 1; } ;;
   esac
 done
 
 echo "== secret scan（evidence から合成パスワード・署名秘密鍵が漏れていないこと） =="
 if grep -rl "$INTEGRATION_SRC_PW\|$INTEGRATION_TGT_PW\|PRIVATE KEY" "$WORK/evidence" 2>/dev/null \
   | grep -vE "src-password|tgt-password"; then
+  FAILURE_STAGE=evidence-secret-scan
   echo "FAIL: evidence に secret が含まれます" >&2
   exit 1
 fi

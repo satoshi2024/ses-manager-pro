@@ -53,7 +53,7 @@ pem_block() {
 compose_ids() {
   [[ -f "$state/up" ]] || return 0
   case "$scenario" in
-    partial-up|slow-diag|no-timeout) printf '%s\n' "$SRC_ID" "$TGT_ID" ;;
+    partial-up|no-timeout) printf '%s\n' "$SRC_ID" "$TGT_ID" ;;
     foreign-container) printf '%s\n' "$FOREIGN_ID" "$TGT_ID" "$TOOL_ID" "$SCHED_ID" "$REPL_ID" ;;
     diag-ps-fail) return 1 ;;
     *) printf '%s\n' "$SRC_ID" "$TGT_ID" "$TOOL_ID" "$SCHED_ID" "$REPL_ID" ;;
@@ -82,6 +82,10 @@ do_compose() {
       case "$scenario" in
         partial-up|slow-diag|no-timeout|diag-ps-fail)
           printf '%s\n' "Error response from daemon: mock-partial-start-failure"
+          exit 17 ;;
+        tamper-owner)
+          # 実行中に第三者が所有マーカーを書き換えた状況を再現する（ランナーは chmod/chown してはならない）
+          printf '%s\n' 'run=forged-by-someone-else' > "${INTEGRATION_WORK_DIR:?}/.ses-pitr-run-owner"
           exit 17 ;;
       esac
       exit 0 ;;
@@ -186,13 +190,40 @@ do_cp() {
   exit 0
 }
 
+# docker run の -v <host>:/work:rw|ro から host 側の作業ディレクトリを取り出す
+host_work_dir() {
+  local previous="" arg
+  for arg in "$@"; do
+    if [[ "$previous" == "-v" ]]; then
+      case "$arg" in
+        *:/work:rw) printf '%s\n' "${arg%:/work:rw}"; return 0 ;;
+        *:/work:ro) printf '%s\n' "${arg%:/work:ro}"; return 0 ;;
+      esac
+    fi
+    previous=$arg
+  done
+  return 1
+}
+
+# 成功系シナリオ用に integration-pitr.sh が作る summary と evidence を模擬する
+write_pitr_outputs() {
+  local host file
+  host=$(host_work_dir "$@") || return 1
+  mkdir -p "$host/evidence"
+  printf '%s\n' '{"state":"SUCCESS","plan_id":"plan-mock-1"}' > "$host/integration-summary.json"
+  for file in validate.json restore.log target-markers.txt uploads-markers.txt source-state.txt report-restore-contract.txt; do
+    printf 'mock %s\n' "$file" > "$host/evidence/$file"
+  done
+}
+
 do_run() {
-  case "$*" in
+  case " $* " in
     *integration-pitr.sh*)
       printf '%s\n' "== pitr step: full backup ==" "pitr secret src=${INTEGRATION_SRC_PW:-} tgt=${INTEGRATION_TGT_PW:-} restore=restore-svc-pw"
       pem_block
       printf '%s\n' pitr-normal-tail-after-pem
       if [[ "$scenario" == pitr-native ]]; then exit 42; fi
+      if [[ "$scenario" == success || "$scenario" == state-fail ]]; then write_pitr_outputs "$@" || exit 96; fi
       exit 0 ;;
     *restore-drill.sh*)
       printf '%s\n' "drill failure tgt=${INTEGRATION_TGT_PW:-}" drill-normal-tail
@@ -206,6 +237,23 @@ do_run() {
       exit 0 ;;
     *'.plan_id'*)
       printf '%s\n' plan-mock-1
+      exit 0 ;;
+    *' jq -r .state '*)
+      if [[ "$scenario" == state-fail ]]; then printf '%s\n' FAILED; else printf '%s\n' SUCCESS; fi
+      exit 0 ;;
+    *' jq -r .target_db.before_marker '*|*' jq -r .target_db.mid_dml_replayed '*|*' jq -r .uploads_staging.before_marker '*)
+      printf '%s\n' 1
+      exit 0 ;;
+    *' jq -r .target_db.after_marker '*|*' jq -r .uploads_staging.after_marker '*)
+      printf '%s\n' 0
+      exit 0 ;;
+    *' jq -r . '*)
+      printf '%s\n' '{"state":"SUCCESS","plan_id":"plan-mock-1"}'
+      exit 0 ;;
+    *' jq -e '*)
+      exit 0 ;;
+    *' jq {state'*)
+      printf '%s\n' '{"state":"SUCCESS","rto_ok":true,"rpo_ok":true}'
       exit 0 ;;
   esac
   exit 0
