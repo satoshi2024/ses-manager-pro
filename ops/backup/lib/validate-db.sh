@@ -23,8 +23,13 @@ validate_db::flyway() { # metadata_flyway
     validate_db::fail "flyway_schema_history に失敗行があります（$failed）"
     return 1
   fi
+  # version 列は VARCHAR のため MAX(version) は辞書順になり、V185 より V99 を
+  # 「最新」と誤判定する（"99" > "185"）。V102_1（version "102.1"）のような
+  # 小数版もあるため数値 CAST も使えない。成功行の version を全件取得し、
+  # 版番号順（sort -V）で最大を取る。repeatable migration（version NULL）は除外する。
   maxv=$("$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
-    --execute "SELECT MAX(version) FROM flyway_schema_history WHERE success = 1;" 2>/dev/null)
+    --execute "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL;" 2>/dev/null \
+    | sort -V | tail -n 1)
   if [[ -n "$expected" && -n "$maxv" && "$maxv" != "$expected" ]]; then
     validate_db::fail "flyway 最新 version 不一致（expected=$expected actual=$maxv）"
     return 1

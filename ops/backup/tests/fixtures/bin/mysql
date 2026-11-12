@@ -79,8 +79,15 @@ case "$query" in
     printf '%s\n' "${FAKE_MYSQL_ENGINES:-InnoDB	5}"
     exit 0
     ;;
-  *MAX*version*FROM*flyway_schema_history*)
-    printf '%s\n' "${FAKE_FLYWAY_MAX:-42}"
+  # validate-db の最新 version 取得（成功行の version 全件）。
+  # FAKE_FLYWAY_VERSIONS（空白区切り・任意順）があれば 1 行 1 version で返し、
+  # 無ければ FAKE_FLYWAY_MAX を 1 行だけ返す。
+  *SELECT*version*FROM*flyway_schema_history*version*IS*NOT*NULL*)
+    if [[ -n "${FAKE_FLYWAY_VERSIONS:-}" ]]; then
+      for v in $FAKE_FLYWAY_VERSIONS; do printf '%s\n' "$v"; done
+    else
+      printf '%s\n' "${FAKE_FLYWAY_MAX:-42}"
+    fi
     exit 0
     ;;
   *flyway_schema_history*success*)

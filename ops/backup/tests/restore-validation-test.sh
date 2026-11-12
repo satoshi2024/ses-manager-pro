@@ -33,7 +33,7 @@ setup_validate() {
   export BINLOG_INDEX="$T/binlog/binlog-index.json"
   export FAKE_COUNT=2 FAKE_FLYWAY_MAX=42 FAKE_CHECK_TABLE=OK FAKE_MARKER_BEFORE=1 FAKE_MARKER_AFTER=0
   export FAKE_TABLE_COUNT=0 FAKE_MYSQL_STATUS_ROW=$'8.0.36\t11111111-2222-3333-4444-555555555555\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
-  unset MYSQL_PWD FAKE_FLYWAY_FAILED FAKE_FLYWAY_MAX FAKE_CHECK_TABLE \
+  unset MYSQL_PWD FAKE_FLYWAY_FAILED FAKE_FLYWAY_MAX FAKE_FLYWAY_VERSIONS FAKE_CHECK_TABLE \
     FAKE_MARKER_BEFORE FAKE_MARKER_AFTER FAKE_REF_KEYS FAKE_COUNT FAKE_TABLE_COUNT
   export FAKE_COUNT=2 FAKE_FLYWAY_MAX=42 FAKE_CHECK_TABLE=OK FAKE_MARKER_BEFORE=1 FAKE_MARKER_AFTER=0
   chmod +x "$ROOT/ops/backup/providers/approval-verifier-local.sh" 2>/dev/null || true
@@ -143,6 +143,30 @@ case_validate_flyway_version_mismatch() {
   assert_contains "$VAL_OUT" '"flyway": "FAIL"' "flyway FAIL"
 }
 
+# version 列は VARCHAR。辞書順の最大（"99"）ではなく版番号順の最大（"185"）を
+# 最新として扱うこと。小数版（102.1 など）が混在しても順序が崩れないこと。
+case_validate_flyway_version_numeric_order() {
+  setup_common_fixture
+  make_ckpt_index 185 '{"marker_test":2}' "$INVENTORY"
+  export SMOKE_RC=0
+  export FAKE_FLYWAY_VERSIONS="1 2 9 10 99 102.1 102.4 103 184 185 183"
+  run_validate
+  assert_zero "$VAL_RC" "版番号順の最大 185 と一致すれば exit 0"
+  assert_contains "$VAL_OUT" '"flyway": "PASS"' "flyway PASS（辞書順 99 に引きずられない）"
+  assert_contains "$VAL_OUT" '"state": "READY_FOR_CUTOVER"' "READY_FOR_CUTOVER"
+}
+
+# 逆に、期待値が辞書順の最大（"99"）でも実際の最新が 185 なら不一致として失敗すること。
+case_validate_flyway_lexical_max_rejected() {
+  setup_common_fixture
+  make_ckpt_index 99 '{"marker_test":2}' "$INVENTORY"
+  export SMOKE_RC=0
+  export FAKE_FLYWAY_VERSIONS="9 10 99 185"
+  run_validate
+  assert_nonzero "$VAL_RC" "辞書順の最大 99 を期待値にしても非 0"
+  assert_contains "$VAL_OUT" '"flyway": "FAIL"' "flyway FAIL"
+}
+
 case_validate_count_mismatch() {
   setup_common_fixture
   export FAKE_COUNT=999
@@ -212,6 +236,8 @@ run_case case_validate_normal
 run_case case_validate_decoy_checkpoint_ignored
 run_case case_validate_flyway_failed
 run_case case_validate_flyway_version_mismatch
+run_case case_validate_flyway_version_numeric_order
+run_case case_validate_flyway_lexical_max_rejected
 run_case case_validate_count_mismatch
 run_case case_validate_marker_after_present
 run_case case_validate_missing_reference
