@@ -51,10 +51,15 @@ public class CertificationExpiryNotificationScheduler {
         this.timezoneResolver = timezoneResolver;
     }
 
+    /**
+     * 定期実行の入口。ShedLock の method proxy はプリミティブ戻り値のメソッドをロックできず
+     * {@code LockingNotSupportedException} を投げるため、戻り値は必ず {@code void} にする。
+     * 件数が必要な場合は {@link #dispatch(LocalDate)} を使う。
+     */
     @Scheduled(cron = "0 15 3 * * ?", zone = "Asia/Tokyo")
     @SchedulerLock(name = "certificationExpiryNotificationDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT20M")
-    public int dispatchToday() {
-        return dispatch(null);
+    public void dispatchToday() {
+        dispatch(null);
     }
 
     public int dispatch(LocalDate asOf) {
