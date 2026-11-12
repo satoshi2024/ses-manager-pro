@@ -2,6 +2,7 @@ package com.ses.importcenter.metadata;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.importcenter.foundation.ImportEntity;
+import com.ses.importcenter.foundation.ImportEncoding;
 import com.ses.importcenter.foundation.SesImportV1Schema;
 import com.ses.service.DocumentService;
 import org.springframework.dao.DuplicateKeyException;
@@ -157,6 +158,246 @@ public class ImportMetadataService {
         }
         return jobId;
     }
+
+    /** raw upload用。source selectorはcurrent tenant内でcodeから解決し、client IDは受け取らない。 */
+    @Transactional(readOnly = true)
+    public ImportUploadSource resolveActiveUploadSource(String sourceCode) {
+        ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
+        if (sourceCode == null || !SOURCE_CODE.matcher(sourceCode).matches()) {
+            throw BusinessException.of(400, "error.import.invalidSource");
+        }
+        ImportUploadSource source = jdbc.query("""
+                SELECT id, source_code, version_no FROM t_import_source_system
+                WHERE tenant_id=? AND source_code=? AND status='ACTIVE'
+                """, rs -> rs.next() ? new ImportUploadSource(rs.getLong(1), rs.getString(2), rs.getLong(3)) : null,
+                context.tenantId(), sourceCode.toLowerCase(java.util.Locale.ROOT));
+        if (source == null) throw BusinessException.of(404, "error.import.sourceUnavailable");
+        return source;
+    }
+
+    /** hashとserver scopeが一致する既存jobだけを再利用し、exact document ACLを再確認する。 */
+    public ImportUploadJobDetail findOrReuseExistingUpload(ImportUploadSource source, ImportEncoding encoding,
+                                                            String sourceSha256) {
+        ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
+        if (source == null || encoding == null || sourceSha256 == null || !SHA256.matcher(sourceSha256).matches()) {
+            throw BusinessException.of(400, "error.import.invalidJob");
+        }
+        byte[] hash = HexFormat.of().parseHex(sourceSha256);
+        ExistingUpload existing = jdbc.query("""
+                SELECT id, source_version, source_encoding, legal_entity_id, document_id,
+                       document_version_id, document_version_no, document_sha256, state
+                FROM t_import_job
+                WHERE tenant_id=? AND source_system_id=? AND entity_type='CUSTOMER'
+                  AND schema_version=? AND source_sha256=?
+                """, rs -> rs.next() ? new ExistingUpload(rs.getLong("id"), rs.getLong("source_version"),
+                rs.getString("source_encoding"), rs.getString("legal_entity_id"), rs.getLong("document_id"),
+                rs.getLong("document_version_id"), rs.getInt("document_version_no"),
+                rs.getBytes("document_sha256"), rs.getString("state")) : null,
+                context.tenantId(), source.id(), SesImportV1Schema.VERSION, hash);
+        if (existing == null) return null;
+        if (existing.sourceVersion() != source.version() || !encoding.name().equals(existing.encoding())
+                || !Long.toString(context.legalEntityId()).equals(existing.legalEntityId())
+                || !MessageDigest.isEqual(hash, existing.documentSha256())) {
+            throw BusinessException.of(409, "error.import.jobIdentityConflict");
+        }
+        documentService.verifyImportJobStoredBytes(existing.id(), existing.documentId(), existing.versionId(),
+                existing.versionNo(), sourceSha256);
+        ImportAuthorizedContext after = authorization.requireCurrentAuthorization();
+        if (!context.equals(after)) throw BusinessException.of(403, "error.forbidden");
+        return new ImportUploadJobDetail(existing.id(), existing.state(), ImportEntity.CUSTOMER.name(),
+                sourceSha256.substring(0, 12), existing.versionNo(), existing.encoding());
+    }
+
+    /** transaction ACKが不確かな場合、stage自身のexact documentを指すjobがcommit済みか読み直す。 */
+    public ImportUploadJobDetail findCommittedUploadForStage(ImportUploadSource source, ImportEncoding encoding,
+                                                             String sourceSha256,
+                                                             com.ses.service.impl.StagedImportDocument staged) {
+        ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
+        if (source == null || encoding == null || staged == null || staged.document() == null
+                || staged.version() == null || staged.document().getId() == null || staged.version().getId() == null) {
+            return null;
+        }
+        byte[] hash = HexFormat.of().parseHex(sourceSha256);
+        ExistingUpload existing = jdbc.query("""
+                SELECT id, source_version, source_encoding, legal_entity_id, document_id,
+                       document_version_id, document_version_no, document_sha256, state
+                FROM t_import_job
+                WHERE tenant_id=? AND source_system_id=? AND entity_type='CUSTOMER' AND schema_version=?
+                  AND source_sha256=? AND document_id=? AND document_version_id=?
+                """, rs -> rs.next() ? new ExistingUpload(rs.getLong("id"), rs.getLong("source_version"),
+                rs.getString("source_encoding"), rs.getString("legal_entity_id"), rs.getLong("document_id"),
+                rs.getLong("document_version_id"), rs.getInt("document_version_no"),
+                rs.getBytes("document_sha256"), rs.getString("state")) : null,
+                context.tenantId(), source.id(), SesImportV1Schema.VERSION, hash,
+                staged.document().getId(), staged.version().getId());
+        if (existing == null) return null;
+        if (existing.sourceVersion() != source.version() || !encoding.name().equals(existing.encoding())
+                || !Long.toString(context.legalEntityId()).equals(existing.legalEntityId())
+                || existing.versionNo() != staged.version().getVersionNo()
+                || !MessageDigest.isEqual(hash, existing.documentSha256())) {
+            throw BusinessException.of(409, "error.import.jobIdentityConflict");
+        }
+        String sha = HexFormat.of().formatHex(hash);
+        documentService.verifyImportJobStoredBytes(existing.id(), existing.documentId(), existing.versionId(),
+                existing.versionNo(), sha);
+        return new ImportUploadJobDetail(existing.id(), existing.state(), ImportEntity.CUSTOMER.name(),
+                sha.substring(0, 12), existing.versionNo(), existing.encoding());
+    }
+
+    /** reuse readとcommit ACK-loss readbackの間に現れたjobが当該stage自身かを識別する。 */
+    public boolean isUploadJobForStage(long jobId, ImportUploadSource source, String sourceSha256,
+                                       com.ses.service.impl.StagedImportDocument staged,
+                                       ImportAuthorizedContext expectedContext) {
+        ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
+        if (expectedContext == null || !expectedContext.equals(context)) {
+            throw BusinessException.of(403, "error.import.readbackContextChanged");
+        }
+        if (source == null || staged == null || staged.document() == null || staged.version() == null
+                || staged.document().getId() == null || staged.version().getId() == null) {
+            throw BusinessException.of(500, "error.import.jobReadbackUnknown");
+        }
+        ExistingUploadIdentity actual = jdbc.query("""
+                SELECT source_system_id, source_version, entity_type, schema_version, source_sha256,
+                       legal_entity_id, document_id, document_version_id, document_version_no, document_sha256
+                FROM t_import_job WHERE tenant_id=? AND id=?
+                """, rs -> rs.next() ? new ExistingUploadIdentity(rs.getLong("source_system_id"),
+                rs.getLong("source_version"), rs.getString("entity_type"), rs.getString("schema_version"),
+                rs.getBytes("source_sha256"), rs.getString("legal_entity_id"), rs.getLong("document_id"),
+                rs.getLong("document_version_id"), rs.getInt("document_version_no"),
+                rs.getBytes("document_sha256")) : null, context.tenantId(), jobId);
+        byte[] expectedHash = HexFormat.of().parseHex(sourceSha256);
+        if (actual == null || actual.sourceSystemId() != source.id() || actual.sourceVersion() != source.version()
+                || !ImportEntity.CUSTOMER.name().equals(actual.entity())
+                || !SesImportV1Schema.VERSION.equals(actual.schemaVersion())
+                || !Long.toString(context.legalEntityId()).equals(actual.legalEntityId())
+                || actual.documentVersionNo() != staged.version().getVersionNo()
+                || !MessageDigest.isEqual(expectedHash, actual.sourceSha256())
+                || !MessageDigest.isEqual(expectedHash, actual.documentSha256())) {
+            throw BusinessException.of(500, "error.import.jobReadbackUnknown");
+        }
+        return actual.documentId() == staged.document().getId()
+                && actual.documentVersionId() == staged.version().getId();
+    }
+
+    @Transactional(readOnly = true)
+    public ImportUploadJobDetail getUploadedJobDetail(long jobId) {
+        ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
+        ExistingUploadDetail detail = jdbc.query("""
+                SELECT id, source_version, source_encoding, legal_entity_id, document_id,
+                       document_version_id, document_version_no, document_sha256, state
+                FROM t_import_job
+                WHERE tenant_id=? AND id=? AND entity_type='CUSTOMER' AND schema_version=?
+                """, rs -> rs.next() ? new ExistingUploadDetail(rs.getLong("id"), rs.getLong("source_version"),
+                rs.getString("source_encoding"), rs.getString("legal_entity_id"), rs.getLong("document_id"),
+                rs.getLong("document_version_id"), rs.getInt("document_version_no"),
+                rs.getBytes("document_sha256"), rs.getString("state")) : null,
+                context.tenantId(), jobId, SesImportV1Schema.VERSION);
+        if (detail == null || !Long.toString(context.legalEntityId()).equals(detail.legalEntityId())) {
+            throw BusinessException.of(404, "error.import.jobNotFound");
+        }
+        String hash = HexFormat.of().formatHex(detail.documentSha256());
+        documentService.authorizeImportJobDownload(detail.id(), detail.documentId(), detail.versionId(),
+                detail.versionNo(), hash);
+        return new ImportUploadJobDetail(detail.id(), detail.state(), ImportEntity.CUSTOMER.name(),
+                hash.substring(0, 12), detail.versionNo(), detail.encoding());
+    }
+
+    /** import専用のmetadata insert。呼出元ImportCsvUploadCommitServiceの短いREQUIRED txに参加する。 */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRED,
+            rollbackFor = Exception.class)
+    public long registerImportJobFromStaged(ImportJobRegistrationRequest request, long expectedSourceVersion,
+                                            ImportAdmissionManifest manifest,
+                                            com.ses.service.impl.StagedImportDocument staged) {
+        ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
+        validateJobRequest(request);
+        if (request.entity() != ImportEntity.CUSTOMER || !SesImportV1Schema.VERSION.equals(request.schemaVersion())) {
+            throw BusinessException.of(422, "error.import.unsupportedEntity");
+        }
+        if (manifest == null || !"A1A_UPLOADED".equals(manifest.phase())
+                || !context.tenantId().equals(manifest.tenantId())
+                || context.legalEntityId() != manifest.legalEntityId()
+                || manifest.sourceSystemId() != request.sourceSystemId()
+                || manifest.sourceVersion() != expectedSourceVersion
+                || manifest.entity() != ImportEntity.CUSTOMER
+                || !SesImportV1Schema.VERSION.equals(manifest.schemaVersion())
+                || manifest.encoding() != request.encoding()
+                || !request.sourceSha256Hex().equals(manifest.sourceSha256())
+                || !java.util.Objects.equals(manifest.documentId(), request.documentId())
+                || !java.util.Objects.equals(manifest.documentVersionId(), request.documentVersionId())
+                || !java.util.Objects.equals(manifest.documentVersionNo(), request.documentVersionNo())
+                || !request.sourceSha256Hex().equals(manifest.documentSha256())
+                || staged == null || staged.document() == null || staged.version() == null
+                || !java.util.Objects.equals(manifest.documentId(), staged.document().getId())
+                || !java.util.Objects.equals(manifest.documentVersionId(), staged.version().getId())
+                || !java.util.Objects.equals(manifest.documentVersionNo(), staged.version().getVersionNo())
+                || !java.util.Objects.equals(manifest.documentSha256(), staged.version().getSha256())
+                || !java.util.Objects.equals(staged.storageKey(), staged.version().getStorageKey())) {
+            throw BusinessException.of(403, "error.import.admissionMismatch");
+        }
+        SourceSnapshot source = lockSource(context.tenantId(), request.sourceSystemId());
+        requireActiveSource(source);
+        if (source.version() != expectedSourceVersion) {
+            throw BusinessException.of(409, "error.import.sourceVersionChanged");
+        }
+        byte[] hash = HexFormat.of().parseHex(request.sourceSha256Hex());
+        StagedVersionSnapshot stored = jdbc.query("""
+                SELECT UNHEX(v.sha256), v.storage_key, v.size_bytes FROM t_document d JOIN t_document_version v
+                  ON v.tenant_id=d.tenant_id AND v.document_id=d.id
+                WHERE d.tenant_id=? AND d.id=? AND d.deleted_flag=0 AND d.document_type='IMPORT'
+                  AND d.legal_entity_id=? AND d.legal_hold_flag=0
+                  AND v.id=? AND v.version_no=? AND v.scan_status='CLEAN'
+                FOR UPDATE
+                """, rs -> rs.next() ? new StagedVersionSnapshot(rs.getBytes(1), rs.getString(2), rs.getLong(3)) : null,
+                context.tenantId(), request.documentId(),
+                Long.toString(context.legalEntityId()), request.documentVersionId(), request.documentVersionNo());
+        if (stored == null || !MessageDigest.isEqual(hash, stored.sha256())
+                || !staged.storageKey().equals(stored.storageKey())
+                || staged.version().getSizeBytes() == null || staged.version().getSizeBytes() != stored.sizeBytes()) {
+            throw BusinessException.of(403, "error.import.documentSnapshotMismatch");
+        }
+        byte[] documentHash = stored.sha256();
+        if (findIdempotentJob(context.tenantId(), source.id(), request, hash, documentHash,
+                context.legalEntityId(), source.version()) != null) {
+            throw BusinessException.of(409, "error.import.jobIdentityConflict");
+        }
+        long jobId;
+        try {
+            authorization.requireCurrentAuthorizationForWrite(context);
+            jobId = insertId("""
+                    INSERT INTO t_import_job (tenant_id, source_system_id, source_version, entity_type, schema_version,
+                      source_encoding, source_sha256, legal_entity_id, document_id, document_version_id,
+                      document_version_no, document_sha256, state, version_no, created_by)
+                    VALUES (?, ?, ?, 'CUSTOMER', ?, ?, ?, ?, ?, ?, ?, ?, 'UPLOADED', 1, ?)
+                    """, context.tenantId(), source.id(), source.version(), request.schemaVersion(),
+                    request.encoding().name(), hash, Long.toString(context.legalEntityId()), request.documentId(),
+                    request.documentVersionId(), request.documentVersionNo(), documentHash, context.actorUserId());
+        } catch (DuplicateKeyException duplicate) {
+            throw BusinessException.of(409, "error.import.jobIdentityConflict");
+        }
+        documentService.link(request.documentId(), "IMPORT_JOB", jobId);
+        Integer links = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM t_document_link
+                WHERE tenant_id=? AND document_id=? AND target_type='IMPORT_JOB' AND target_id=? AND deleted_flag=0
+                """, Integer.class, context.tenantId(), request.documentId(), jobId);
+        if (links == null || links != 1) throw BusinessException.of(409, "error.import.documentLinkMissing");
+        authorization.requireCurrentAuthorizationForWrite(context);
+        return jobId;
+    }
+
+    private record ExistingUpload(long id, long sourceVersion, String encoding, String legalEntityId,
+                                  long documentId, long versionId, int versionNo,
+                                  byte[] documentSha256, String state) { }
+
+    private record ExistingUploadDetail(long id, long sourceVersion, String encoding, String legalEntityId,
+                                        long documentId, long versionId, int versionNo,
+                                        byte[] documentSha256, String state) { }
+
+    private record StagedVersionSnapshot(byte[] sha256, String storageKey, long sizeBytes) { }
+
+    private record ExistingUploadIdentity(long sourceSystemId, long sourceVersion, String entity,
+                                          String schemaVersion, byte[] sourceSha256, String legalEntityId,
+                                          long documentId, long documentVersionId, int documentVersionNo,
+                                          byte[] documentSha256) { }
 
     private void ensureJobLink(String tenantId, long documentId, long jobId) {
         documentService.link(documentId, "IMPORT_JOB", jobId);

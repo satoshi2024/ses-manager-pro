@@ -46,7 +46,12 @@ public enum FileKind {
      */
     CONTRACT_PDF(
             Set.of("pdf"),
-            50L * 1024 * 1024);
+            50L * 1024 * 1024),
+
+    /** import center用raw CSV。内容の上限はsource body 64MiB。 */
+    IMPORT(
+            Set.of("csv"),
+            64L * 1024 * 1024);
 
     private final Set<String> allowedExtensions;
     private final long maxBytes;
@@ -79,6 +84,7 @@ public enum FileKind {
             case "jpg", "jpeg" -> ct.equals("image/jpeg");
             case "eml" -> ct.equals("message/rfc822");
             case "txt" -> ct.equals("text/plain");
+            case "csv" -> ct.equals("text/csv");
             default -> false;
         };
     }
@@ -94,6 +100,7 @@ public enum FileKind {
             case "png", "jpg", "jpeg" -> isDecodedImage(ext, data);
             case "docx", "xlsx" -> isOoxml(ext, data);
             case "eml", "txt" -> isText(data);
+            case "csv" -> isText(data) && !(data.length >= 2 && data[0] == 'P' && data[1] == 'K');
             default -> false;
         };
     }

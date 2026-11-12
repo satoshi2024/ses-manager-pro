@@ -111,6 +111,178 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         return doRegister(request, content);
     }
 
+    @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
+    public StagedImportDocument stageReceivedForImport(DocumentRegisterRequest request, Path boundedTempFile,
+                                                       long expectedSizeBytes, String expectedSha256,
+                                                       Runnable deadlineCheckpoint) {
+        if (request == null || boundedTempFile == null || expectedSizeBytes < 1
+                || expectedSizeBytes > 64L * 1024 * 1024 || expectedSha256 == null
+                || !expectedSha256.matches("[0-9a-f]{64}") || deadlineCheckpoint == null) {
+            throw BusinessException.of(400, "error.document.invalidRequest");
+        }
+        if (!"IMPORT".equals(request.getDocumentType()) || !"text/csv".equals(request.getContentType())
+                || !"RECEIVED".equals(request.getSourceType())) {
+            throw BusinessException.of(400, "error.document.invalidType");
+        }
+        String tenantId = currentTenant(request);
+        Long legalEntityId = request.getLegalEntityId();
+        if (legalEntityId == null || legalEntityContextService == null
+                || !java.util.Objects.equals(legalEntityContextService.requireCurrentLegalEntityId(), legalEntityId)) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        validateDocumentType(request.getDocumentType(), "INCOMING");
+        deadlineCheckpoint.run();
+        try {
+            if (Files.size(boundedTempFile) != expectedSizeBytes
+                    || !expectedSha256.equals(sha256File(boundedTempFile, deadlineCheckpoint))) {
+                throw BusinessException.of(409, "error.import.sourceHashMismatch");
+            }
+        } catch (java.io.IOException failure) {
+            // server側一時ファイルの再検証読込失敗。client入力の誤りとして400にしない。
+            log.error("[文書台帳] import一時ファイルの再検証読込に失敗しました: exceptionType={}",
+                    com.ses.common.util.LogRedaction.exceptionType(failure));
+            throw BusinessException.of(500, "error.import.tempStorageFailed");
+        }
+        deadlineCheckpoint.run();
+        FileScanner scanner = fileScannerProvider.getIfAvailable();
+        FileScanResult scan;
+        try {
+            scan = scanner == null ? FileScanResult.unavailable("scanner is not configured")
+                    : scanner.scan(boundedTempFile, com.ses.common.enums.FileKind.IMPORT);
+        } catch (Exception failure) {
+            log.warn("[文書台帳] import scanner実行中例外のためfail-closedで拒否します: exceptionType={}",
+                    com.ses.common.util.LogRedaction.exceptionType(failure));
+            scan = FileScanResult.unavailable("scanner failed");
+        }
+        if (scan == null || scan.status() != FileScanResult.Status.CLEAN) {
+            throw BusinessException.of(400, "error.file.scanRejected");
+        }
+        // scannerが期限後に戻った場合は、CLEAN判定でもstorageへ進めない。
+        deadlineCheckpoint.run();
+
+        String storageKey = generateStorageKey();
+        String operationId = UUID.randomUUID().toString();
+        try {
+            try (InputStream input = new DeadlineCheckpointInputStream(
+                    Files.newInputStream(boundedTempFile), deadlineCheckpoint)) {
+                documentStorage.put(storageKey, input, true);
+            }
+            deadlineCheckpoint.run();
+            documentStorage.promote(storageKey);
+            deadlineCheckpoint.run();
+            verifyStoredImportObject(storageKey, expectedSizeBytes, expectedSha256, operationId, deadlineCheckpoint);
+            deadlineCheckpoint.run();
+            ActorAttribution actor = resolveActor(request);
+            Document document = buildDocument(request, tenantId, legalEntityId, actor);
+            DocumentVersion version = buildVersion(request, tenantId, null, storageKey,
+                    expectedSizeBytes, expectedSha256, actor);
+            version.setBusinessKey("IMPORT_UPLOAD:" + UUID.randomUUID());
+            version.setVersionDiscriminator("v1");
+            version.setScanStatus("CLEAN");
+            return new StagedImportDocument(document, version, storageKey, operationId);
+        } catch (Exception failure) {
+            try {
+                deleteImportStorageOrThrow(storageKey, operationId);
+            } catch (RuntimeException cleanupFailure) {
+                // 補償削除の失敗（ログ済み）で元の失敗（期限超過・検証失敗等）を上書きせず、suppressedとして残す。
+                failure.addSuppressed(cleanupFailure);
+            }
+            if (failure instanceof RuntimeException runtime) throw runtime;
+            throw new RuntimeException("CSV取込のstorage stageに失敗しました", failure);
+        }
+    }
+
+    @Override
+    public void discardImportStage(StagedImportDocument staged) {
+        if (staged == null || staged.storageKey() == null || staged.version() == null
+                || !staged.storageKey().equals(staged.version().getStorageKey())
+                || staged.document() == null || !"IMPORT".equals(staged.document().getDocumentType())
+                || staged.operationId() == null || staged.operationId().isBlank()) {
+            return;
+        }
+        deleteImportStorageOrThrow(staged.storageKey(), staged.operationId());
+    }
+
+    private void verifyStoredImportObject(String storageKey, long expectedSize, String expectedSha256,
+                                         String operationId, Runnable deadlineCheckpoint) {
+        try (InputStream input = documentStorage.open(storageKey)) {
+            if (input == null) throw new java.io.IOException("storageがstreamを返しませんでした");
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            long count = 0;
+            for (int read; (read = input.read(buffer)) != -1;) {
+                deadlineCheckpoint.run();
+                count += read;
+                if (count > 64L * 1024 * 1024) throw new java.io.IOException("保存済みimport objectが上限を超えています");
+                digest.update(buffer, 0, read);
+            }
+            if (count != expectedSize || !expectedSha256.equals(HexFormat.of().formatHex(digest.digest()))) {
+                throw BusinessException.of(409, "error.import.storedBytesMismatch");
+            }
+        } catch (BusinessException failure) {
+            throw failure;
+        } catch (Exception failure) {
+            log.error("[文書台帳] import storage bytes検証失敗: operationId={} exceptionClass={}",
+                    operationId, failure.getClass().getSimpleName());
+            throw BusinessException.of(500, "error.import.storageVerificationFailed");
+        }
+    }
+
+    private void deleteImportStorageOrThrow(String storageKey, String operationId) {
+        try {
+            documentStorage.delete(storageKey);
+        } catch (Exception failure) {
+            log.error("[文書台帳] import storageの補償削除に失敗しました: operationId={} storageKey={} exceptionClass={}",
+                    operationId, storageKey, failure.getClass().getSimpleName());
+            throw BusinessException.of(500, "error.import.storageCleanupFailed");
+        }
+    }
+
+    private static String sha256File(Path path, Runnable deadlineCheckpoint) throws java.io.IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream input = Files.newInputStream(path)) {
+                byte[] buffer = new byte[8192];
+                for (int read; (read = input.read(buffer)) != -1;) {
+                    deadlineCheckpoint.run();
+                    digest.update(buffer, 0, read);
+                }
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256が利用できません", impossible);
+        }
+    }
+
+    /** storage書込中もingress総期限を確認する。超過例外はそのまま伝播し、呼出元catchでstageを自己削除する。 */
+    private static final class DeadlineCheckpointInputStream extends java.io.FilterInputStream {
+        private final Runnable deadlineCheckpoint;
+
+        private DeadlineCheckpointInputStream(InputStream input, Runnable deadlineCheckpoint) {
+            super(input);
+            this.deadlineCheckpoint = deadlineCheckpoint;
+        }
+
+        @Override
+        public int read() throws java.io.IOException {
+            deadlineCheckpoint.run();
+            return super.read();
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws java.io.IOException {
+            deadlineCheckpoint.run();
+            return super.read(buffer, offset, length);
+        }
+
+        @Override
+        public long skip(long count) throws java.io.IOException {
+            deadlineCheckpoint.run();
+            return super.skip(count);
+        }
+    }
+
     private Document doRegister(DocumentRegisterRequest request, InputStream content) {
         if (request == null || content == null) {
             throw BusinessException.of(400, "error.document.invalidRequest");
@@ -443,6 +615,33 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         fileScope.assertImportJobDownloadAllowed(jobId, documentId, documentVersionId, versionNo,
                 version.getStorageKey(), version.getSha256());
         return version;
+    }
+
+    @Override
+    public void verifyImportJobStoredBytes(Long jobId, Long documentId, Long documentVersionId,
+                                           Integer versionNo, String expectedSha256) {
+        DocumentVersion version = authorizeImportJobDownload(jobId, documentId, documentVersionId,
+                versionNo, expectedSha256);
+        try (InputStream input = documentStorage.open(version.getStorageKey())) {
+            if (input == null) throw new java.io.IOException("storageがstreamを返しませんでした");
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            long count = 0;
+            for (int read; (read = input.read(buffer)) != -1;) {
+                count += read;
+                if (count > 64L * 1024 * 1024) throw new java.io.IOException("保存済みimport objectが上限を超えています");
+                digest.update(buffer, 0, read);
+            }
+            if (version.getSizeBytes() == null || count != version.getSizeBytes()
+                    || !expectedSha256.equals(HexFormat.of().formatHex(digest.digest()))) {
+                throw BusinessException.of(409, "error.import.storedBytesMismatch");
+            }
+            authorizeImportJobDownload(jobId, documentId, documentVersionId, versionNo, expectedSha256);
+        } catch (BusinessException failure) {
+            throw failure;
+        } catch (Exception failure) {
+            throw BusinessException.of(500, "error.import.storageVerificationFailed");
+        }
     }
 
     private void linkWithinRegistration(Long documentId, String tenantId, String targetType, Long targetId) {

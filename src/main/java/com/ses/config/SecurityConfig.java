@@ -53,6 +53,7 @@ public class SecurityConfig {
     private final MfaEnforcementFilter mfaEnforcementFilter;
     private final PersistentSessionFilter persistentSessionFilter;
     private final InternalTenantContextFilter internalTenantContextFilter;
+    private final ImportRawBodyTransportGuardFilter importRawBodyTransportGuardFilter;
     private final com.ses.service.AuditLogService auditLogService;
     private final com.ses.service.security.PersistentSessionService persistentSessionService;
     private final ObjectProvider<org.springframework.security.oauth2.client.endpoint.OAuth2AccessTokenResponseClient<
@@ -81,6 +82,15 @@ public class SecurityConfig {
         FilterRegistrationBean<ApiAuditFilter> registrationBean = new FilterRegistrationBean<>(filter);
         registrationBean.setEnabled(false);
         return registrationBean;
+    }
+
+    /** raw CSV guardはCSRFより前に一度だけ動かし、Servlet containerへの二重登録を防ぐ。 */
+    @Bean
+    public FilterRegistrationBean<ImportRawBodyTransportGuardFilter> disableImportRawBodyGuardAutoRegistration(
+            ImportRawBodyTransportGuardFilter filter) {
+        FilterRegistrationBean<ImportRawBodyTransportGuardFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
     }
 
     /**
@@ -126,6 +136,7 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+            .addFilterBefore(importRawBodyTransportGuardFilter, CsrfFilter.class)
             // 認証済みLoginUserのtenantを以降の内部Security/業務チェーン全体へ固定する
             .addFilterAfter(internalTenantContextFilter, UsernamePasswordAuthenticationFilter.class)
             // break-glassを認証主体・incident tenantで再検証してから、業務tenantを固定する。
