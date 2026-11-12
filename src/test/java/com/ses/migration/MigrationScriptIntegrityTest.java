@@ -1,5 +1,6 @@
 package com.ses.migration;
 
+import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
@@ -63,6 +64,57 @@ class MigrationScriptIntegrityTest {
         assertTrue(duplicates.isEmpty(),
                 "同一バージョンのマイグレーションが複数存在します（Flywayが起動時に例外を投げます）。"
                         + "後から追加された側を未使用の最新番号へ採番し直してください: " + duplicates);
+    }
+
+    /** SQL・Java双方のversioned migration名（Java migrationはcompile後の {@code .class}）。 */
+    private static final Pattern VERSIONED_SQL_OR_JAVA =
+            Pattern.compile("^V([0-9]+(?:[._][0-9]+)*)__[^$]+\\.(sql|class)$");
+
+    /**
+     * A-NF10-1: {@link LatestMigrationVersion#LATEST} がclasspath上の最大versioned migrationと一致すること。
+     *
+     * <p>MySQL testは「最新版まで適用された」ことを {@code LATEST} との比較で判定するため、新しい
+     * migrationを追加して定数の更新を忘れると、Docker必須のtestでしか気付けない（かつ期待値自体が古いまま
+     * 通る経路が生じうる）。本testはDB・Docker無しでその漂流を検出する。
+     *
+     * <p>version比較はFlywayの {@link MigrationVersion} に委ねる。{@code V102_1} は {@code 102.1} として
+     * 数値要素ごとに比較され、{@code 102.10 > 102.9}、{@code 185 > 108.3} となる。本class内の
+     * {@code versionOf}（double変換）は {@code 102.1} と {@code 102.10} を同値にするため、ここでは使わない。
+     * 対象は {@code db/migration} だけで、devのseed（{@code db/migration-dev}）とprodのrepeatable
+     * （{@code db/migration-prod}）は含めない。
+     */
+    @Test
+    void LatestMigrationVersionはclasspath上の最大versioned_migrationと一致すること() throws Exception {
+        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+        MigrationVersion max = null;
+        String maxFile = null;
+        int resolved = 0;
+        for (String pattern : List.of("classpath*:db/migration/V*.sql", "classpath*:db/migration/V*.class")) {
+            for (Resource resource : resolver.getResources(pattern)) {
+                String fileName = resource.getFilename();
+                if (fileName == null) {
+                    continue;
+                }
+                Matcher m = VERSIONED_SQL_OR_JAVA.matcher(fileName);
+                if (!m.matches()) {
+                    continue; // inner class（$を含む）等はmigrationではない
+                }
+                resolved++;
+                MigrationVersion version = MigrationVersion.fromVersion(m.group(1).replace('_', '.'));
+                if (max == null || version.compareTo(max) > 0) {
+                    max = version;
+                    maxFile = fileName;
+                }
+            }
+        }
+
+        assertTrue(max != null && resolved > 0, "db/migration からversioned migrationを1件も解決できていません");
+        assertEquals(MigrationVersion.fromVersion(LatestMigrationVersion.LATEST).getVersion(),
+                LatestMigrationVersion.LATEST,
+                "LatestMigrationVersion.LATEST はFlywayの正規化表記（例: 185 / 186.1）で書くこと");
+        assertEquals(max.getVersion(), LatestMigrationVersion.LATEST,
+                "LatestMigrationVersion.LATEST がclasspath上の最大migration（" + maxFile + "）と一致しません。"
+                        + "新しいmigrationを追加したら定数を更新してください");
     }
 
     /**

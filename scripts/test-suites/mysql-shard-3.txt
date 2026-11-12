@@ -30,3 +30,4 @@ FlywayNf06V184MetadataMigrationTest
 ImportValidationLeaseMySqlTest
 ImportValidationSealRealMySqlTest
 ImportValidationResolverRealMySqlTest
+FlywayProdFreshInstallMySqlTest

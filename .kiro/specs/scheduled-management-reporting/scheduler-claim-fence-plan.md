@@ -1,12 +1,13 @@
 # NF-10 scheduler claim fence 修正計画
 
-状態: **実装済・コンパイル確認済・定向fast 288/0/0/0・定向MySQL 1件FAIL（修正中）。** COMPLETE/PASSではない。対象は `m_report_schedule` のscheduler claim所有権競合とclaim時刻の正確性に限定する。NF-10全体の再承認、production/運用gateの承認、remote/release承認を意味しない。
+状態: **実装済・`821076c0` の定向fast 292/0/0/0・定向MySQL 41/0/0/0・browser 1/0/0/0（PowerShell環境）通過・統合候補 `328c2d8b` へ取込済。** COMPLETE/PASSではない（§10のSRE/DBA承認、§11のOwner判断、統合候補に対する全gateが未了）。対象は `m_report_schedule` のscheduler claim所有権競合とclaim時刻の正確性に限定する。NF-10全体の再承認、production/運用gateの承認、remote/release承認を意味しない。
 
 - 当初Planの基準Head: `9bac40c9624e7d964bcf6e18f480b3457662206e`（§1〜§8は当時の記述を保持し、変更点は各節の「改訂」注記と§9以降に記す）。
 - 2026-11-12改訂の実装基準: `73aa70004484db96ffd9100ffa13dd7acaaf365e`（PR #118候補）。migration番号は **V185** をユーザーが承認済み（root/主控経由）。
 - 実装branch: `codex/snf-nf10-v185-integration-20261112`。独立レビュー（REQUEST CHANGES: P0×2、P1×5、P2×12）の指摘ごとの対応は§12。
 - テストは主控（唯一のTestRunner）が実行する。`93c11457c17e7f082d2773500e8c47de2d50ed95` に対する独立レビュー（静的）はPASS。同SHAの定向fast（9 class）は288/0/0/0、定向MySQL（`-Pmysql-tests`、7 class）は41件中1件FAIL（`ReportScheduleClaimFenceMySqlTest` の「同一snapshotの同時claimはInnoDB行lock待ちの後で一件だけが勝つ」、errors/skipped 0）。証拠は主控のrun記録 `nf10-93c11457-fast-targeted` / `nf10-93c11457-mysql-targeted`。
-- 上記FAILはtestの観測方法の欠陥（`information_schema.innodb_trx` のcache固定）と判断し、観測を `performance_schema.data_lock_waits` へ置き換えた（§13）。修正commitは未実行・再レビュー待ち。それ以外の記述はtest名・設計の対応であり、実行結果を意味しない。
+- 上記FAILはtestの観測方法の欠陥（`information_schema.innodb_trx` のcache固定）と判断し、観測を `performance_schema.data_lock_waits` へ置き換えた（§13）。
+- 修正commit `821076c0066119b035e3a7a1a84bdc3170341521` は独立レビュー（静的、第3回）PASS。主控Runnerの定向実行は、fast 10 class 292/0/0/0（上記9 class＋`AssetComprehensiveSecretScanTest`）、MySQL 7 class 41/0/0/0（`ReportScheduleClaimFenceMySqlTest` 17/0/0/0、前回FAILのcaseを含む）、browser `ManagementReportBrowserMTest` 1/0/0/0（PowerShell環境）で、いずれもzero skip。Bash tool環境のbrowser実行はNIO loopbackの環境要因で起動不能となり、環境FAILとして記録を保持している。証拠は主控のrun記録 `nf10-821076c0-fast-targeted` / `nf10-821076c0-mysql-targeted` / `nf10-821076c0-browser-targeted-ps`。`821076c0` は `8dcdbe28` で統合候補へ取り込まれ、`328c2d8b` に含まれる。統合候補に対する全gate（`verify-like-ci`・CI）の通過は未確認。それ以外の記述はtest名・設計の対応であり、実行結果を意味しない。
 
 ## 1. 確認した欠陥と影響
 
@@ -135,7 +136,7 @@ V185がrootにより割り当てられた場合、latest version=184を期待す
 - **処置**: `selectDue` / `claimDue` の未占有判定は `processing_claimed_at IS NULL` だけとし、due snapshotのtoken完全一致（NULL/非NULLを明示照合）を含む全列CASでclaim時に新tokenへ上書きする。同時に `selectDue` のretry分岐へ未占有条件を加え、実行中retry leaseがLIMIT 50枠を毎poll占有しないようにした（P2-5）。
 - **検知**: 置換時にschedulerがWARN「旧版completionが残した孤児claim tokenを新tokenで置換しました」を出す（token値は出力しない）。§10.3のQ2でも検出できる。
 - **限界**: 混在稼働中は旧nodeが新ownerのlease（`processing_claimed_at`）を書き換え得るため、新ownerのcompletionは0件となり、生成/配布の重複は防げない。fenceは状態の上書きを防ぐだけで旧版の挙動は変えられないため、§10のrolling禁止・drainが前提条件である。
-- **検証（`93c11457` の定向fast/MySQLで通過）**: `ReportScheduleClaimFenceMySqlTest` の「旧版success_completionが残した孤児tokenは通常claimで回収され旧ownerは完了できない」「旧版failure_completionが残した孤児token行もretry時刻にscheduler経由で回収される」「実行中のretry_leaseはLIMIT枠を占有せずstale後だけ再選択される」、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest` の孤児token用case。旧版SQLは73aa7000の `ReportScheduleMapper` をtest内に再現して用いる。
+- **検証（`93c11457` の定向fast/MySQLで通過、`821076c0` の定向fast/MySQLでも通過）**: `ReportScheduleClaimFenceMySqlTest` の「旧版success_completionが残した孤児tokenは通常claimで回収され旧ownerは完了できない」「旧版failure_completionが残した孤児token行もretry時刻にscheduler経由で回収される」「実行中のretry_leaseはLIMIT枠を占有せずstale後だけ再選択される」、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest` の孤児token用case。旧版SQLは73aa7000の `ReportScheduleMapper` をtest内に再現して用いる。
 
 ## 10. 本番適用の前提（草案・**SRE/DBA承認待ち**）
 
@@ -216,7 +217,7 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 
 ## 12. 独立レビュー指摘対応表（2026-11-12）
 
-テスト名は追加・更新したtestである。`93c11457` で定向実行済（fast 288/0/0/0、MySQL 41件中1件FAIL。FAILは§13で修正、修正後は未実行）。
+テスト名は追加・更新したtestである。`93c11457` で定向実行済（fast 288/0/0/0、MySQL 41件中1件FAIL。FAILは§13で修正）。修正後の `821076c0` では定向fast 292/0/0/0、MySQL 41/0/0/0、browser 1/0/0/0（PowerShell環境）。
 
 | 指摘 | 対応 | 主なtest |
 |---|---|---|
@@ -236,7 +237,7 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 | P2-11 | 本書の状態を「実装済・独立レビュー待ち・テスト未実行」へ更新、completion-matrixへ追記。公開 `runOne` 削除はcommit messageに明記 | — |
 | P2-12 | latest期待値を `LatestMigrationVersion.LATEST` に集約（4 class・5箇所） | 4 migration test class |
 
-### §7受入試験とtestの対応（`93c11457` の定向MySQLでは3.の行lock待ちcaseだけがFAIL、他は通過。修正後は未実行）
+### §7受入試験とtestの対応（`93c11457` の定向MySQLでは3.の行lock待ちcaseだけがFAIL、他は通過。修正後の `821076c0` では同classの17件が全件通過）
 
 `ReportScheduleClaimFenceMySqlTest` のmethod名で示す。
 
@@ -266,3 +267,8 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 - `performance_schema.data_lock_waits` を `data_locks`（requester/blocker）と `threads` へjoinし、次をすべて満たす待ち辺が1件だけ現れるまで待つ: 対象DBの `m_report_schedule`、`PRIMARY`、`RECORD`、requesterは `WAITING` のX lock、blockerは `GRANTED` のX lock、`LOCK_DATA` が対象id、blockerの接続IDがholder、requesterはholderでも監視接続でもない、requesterの実行中SQLがclaim UPDATE（`UPDATE m_report_schedule SET processing_logical_run_at…`）。
 - contender投入前に待ち辺が0件であること、観測時点でcontenderが未完了であること、holder commit後に待ち辺が残らないことも確認する。10秒の上限は変えない。観測できない場合はdata_lock_waits・data_locks・metadata_locks・実行中SQL先頭を診断として失敗messageへ出す。
 - 強度: 旧helperは「どこかのtransactionがLOCK WAIT」という条件だったが、新helperは「holder接続が保持する対象行のrecord lockを、別接続のclaim UPDATEが待っている」ことを要求するため、同等以上に厳しい。holder=1件、contender=CAS 0件（null）、tokenはholderのもの、という結果assertionは変更していない。
+
+**修正後の実行結果**
+
+- `821076c0` の定向MySQL（7 class）は41/0/0/0で、本caseを含む `ReportScheduleClaimFenceMySqlTest` は17/0/0/0、失敗時の診断段の出力は無かった（主控run記録 `nf10-821076c0-mysql-targeted`）。
+- 上の原因はなお推断である。「`93c11457` の失敗当時、contenderが実際に行lockを待っていたか」は実行で確認しておらず、UNKNOWNのまま（第3回独立レビューも同旨）。
