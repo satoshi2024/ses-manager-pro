@@ -9,6 +9,15 @@
 #   2. parse/setup エラー（必須 env 欠落）→ 非 0
 #   3. backup コマンド失敗（必須 env 欠落で backup-full 実行）→ 非 0（VALID/SUCCESS を出さない）
 #
+# 加えて run-integration.sh（PITR integration runner）の失敗前証跡収集を、実 Docker を使わずに
+# fixtures/integration-runner/mock-docker.sh で検証する:
+#   - Go template の network ID 解析（P1 回帰）、PITR/drill の native 終了コード保持
+#   - Compose partial-up / healthcheck 失敗 / foreign network / foreign container での診断と cleanup 順序
+#   - redactor の PEM 種別ごとの END 判定と後続ログ保持、複数・重なり secret、行長/入力/出力上限
+#   - 診断全体 512KiB 上限、診断予算と per-call timeout、awk timeout、secret scan の fail-closed
+#   - WORK の許可ルート・祖先 symlink・所有マーカー無し既存ディレクトリの拒否（chmod/chown しない）
+#   - timeout 不在・container 一覧取得失敗・secret ファイル欠落などの欠落入力
+#
 # 各ケースは fresh な bash -c 子プロセスで実行する。source 済み関数は子 bash へ
 # 継承されないため、common.sh をロードした/しない状態を確実に切り分けられる。
 set -uo pipefail
@@ -18,6 +27,22 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$HERE/lib/test-framework.sh"
 ROOT=$(cd "$HERE/../../.." && pwd)
 LIB="$ROOT/ops/backup/lib"
+
+RUNNER="$ROOT/ops/backup/tests/run-integration.sh"
+MOCK_DOCKER_SRC="$HERE/fixtures/integration-runner/mock-docker.sh"
+REAL_CHMOD=$(command -v chmod)
+REAL_AWK=$(command -v awk)
+mock_constant() { sed -n "s/^$1=//p" "$MOCK_DOCKER_SRC" | head -n 1; }
+MOCK_SRC_ID=$(mock_constant SRC_ID)
+MOCK_TGT_ID=$(mock_constant TGT_ID)
+MOCK_NET_ID=$(mock_constant NET_ID)
+SELFTEST_SRC_PW="selftest-src-secret-7c1d"
+SELFTEST_TGT_PW="selftest-tgt-secret-9e4a"
+RUNNER_RC=0
+RUNNER_OUT=""
+RUNNER_DOCKER_LOG=""
+RUNNER_PATH=""
+RUNNER_UNDER_TEST=""
 
 # 1) 依存未ロード（common.sh を source しない）で mysql_options::init が非 0 になる
 case_dependency_skip_is_nonzero() {
@@ -130,8 +155,89 @@ MOCK
   rm -rf "$temp"
 }
 
-# 6) 失敗証跡フローの契約を固定する。Docker自体は個別シナリオでモックし、
-#    部分起動時も所有確認した最大5サービスだけを診断し、target を先に収集する。
+# ------------------------------------------------------------
+# run-integration.sh を mock docker で実行するための共通ヘルパー
+# ------------------------------------------------------------
+runner_mock_init() { # <temp>
+  local temp=$1
+  mkdir -p "$temp/bin" "$temp/state" "$temp/allowed"
+  cp "$MOCK_DOCKER_SRC" "$temp/bin/docker"
+  cat > "$temp/bin/cygpath" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "${*: -1}"
+MOCK
+  cat > "$temp/bin/chmod" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$MOCK_CHMOD_LOG"
+if [[ -n "${MOCK_REAL_CHMOD:-}" ]]; then exec "$MOCK_REAL_CHMOD" "$@"; fi
+exit 0
+MOCK
+  "$REAL_CHMOD" +x "$temp/bin/docker" "$temp/bin/cygpath" "$temp/bin/chmod"
+}
+
+# usage: runner_mock_run <temp> <scenario> <work|-> [VAR=value ...]
+#   work に "-" を渡すと INTEGRATION_WORK_DIR を未設定にする（既定パスの検証用）。
+#   許可ルートは既定で <temp>/allowed（TMPDIR/TMP/TEMP）。追加の VAR=value で上書きできる。
+runner_mock_run() {
+  local temp=$1 scenario=$2 work=$3 runner=${RUNNER_UNDER_TEST:-$RUNNER}
+  local -a work_env
+  shift 3
+  rm -rf "$temp/state"
+  mkdir -p "$temp/state"
+  : > "$temp/docker.log"
+  rm -f "$temp/chmod.log"
+  if [[ "$work" == "-" ]]; then
+    work_env=(-u INTEGRATION_WORK_DIR)
+  else
+    work_env=(INTEGRATION_WORK_DIR="$work")
+  fi
+  env "${work_env[@]}" \
+    MOCK_DOCKER_LOG="$temp/docker.log" MOCK_STATE_DIR="$temp/state" MOCK_SCENARIO="$scenario" \
+    MOCK_CHMOD_LOG="$temp/chmod.log" MOCK_REAL_CHMOD="$REAL_CHMOD" \
+    INTEGRATION_SRC_PW="$SELFTEST_SRC_PW" INTEGRATION_TGT_PW="$SELFTEST_TGT_PW" \
+    TMPDIR="$temp/allowed" TMP="$temp/allowed" TEMP="$temp/allowed" \
+    PATH="${RUNNER_PATH:-$temp/bin:$PATH}" \
+    "$@" bash "$runner" > "$temp/out" 2>&1
+  RUNNER_RC=$?
+  RUNNER_OUT=$(cat "$temp/out")
+  RUNNER_DOCKER_LOG=$(cat "$temp/docker.log")
+}
+
+first_line_no() { # <file> <fixed-string>
+  grep -n -F -m 1 -- "$2" "$1" 2>/dev/null | cut -d: -f1
+}
+
+last_line_no() { # <file> <fixed-string>
+  grep -n -F -- "$2" "$1" 2>/dev/null | tail -n 1 | cut -d: -f1
+}
+
+assert_before() { # <earlier_line> <later_line> <label>
+  local earlier=$1 later=$2 label=$3
+  if [[ "$earlier" =~ ^[0-9]+$ && "$later" =~ ^[0-9]+$ ]] && (( earlier < later )); then
+    test_assert "$label"
+  else
+    test_fail "$label" "順序が不正です earlier=[$earlier] later=[$later]"
+  fi
+}
+
+assert_le() { # <actual> <max> <label>
+  local actual=$1 max=$2 label=$3
+  if [[ "$actual" =~ ^[0-9]+$ ]] && (( actual <= max )); then
+    test_assert "$label"
+  else
+    test_fail "$label" "actual=[$actual] max=[$max]"
+  fi
+}
+
+assert_no_secret_leak() { # <text> <label>
+  local text=$1 label=$2
+  assert_not_contains "$text" "$SELFTEST_SRC_PW" "$label: source password を出さない"
+  assert_not_contains "$text" "$SELFTEST_TGT_PW" "$label: target password を出さない"
+  assert_not_contains "$text" "restore-svc-pw" "$label: restore-svc password を出さない"
+  assert_not_contains "$text" "-----BEGIN" "$label: PEM BEGIN marker を出さない"
+}
+
+# 6) 失敗証跡フローの静的契約（挙動は以降の mock シナリオで検証する）。
 case_integration_failure_capture_contract() {
   local runner
   runner=$(cat "$ROOT/ops/backup/tests/run-integration.sh")
@@ -139,57 +245,574 @@ case_integration_failure_capture_contract() {
   assert_contains "$runner" "count <= 5" "部分起動の診断対象を5サービス以下に制限"
   assert_contains "$runner" 'for service in target source tool scheduler replica' "targetを先に診断"
   assert_contains "$runner" 'timeout -k 1s' "Docker診断に終了猶予付きtimeoutを設定"
-  assert_contains "$runner" 'DIAG_DEADLINE_MS=$((diag_start_ms + 15000))' "診断全体の15秒期限を設定"
+  assert_not_contains "$runner" 'EPOCHREALTIME' "壁時計EPOCHREALTIMEで硬い期限を主張しない"
+  assert_contains "$runner" '{{println}}' "Go templateの改行は{{println}}で出力"
+  assert_not_contains "$runner" '\\n' "Go template等に二重バックスラッシュの改行エスケープを残さない（P1）"
   assert_contains "$runner" 'FAILURE_NATIVE_RC=$PITR_RC' "PITRのnative終了コードを保存"
   assert_contains "$runner" 'FAILURE_NATIVE_RC=$DRILL_RC' "drillのnative終了コードを保存"
   assert_contains "$runner" 'command_status=("${PIPESTATUS[@]}")' "診断パイプ直後に両終了コードを取得"
   assert_not_contains "$runner" 'ses-backup-integration_ses-bkup' "固定network名へのfallbackを残さない"
   assert_contains "$runner" 'PROJECT_OWNED && upAttempted' "未所有projectをcleanupしない"
+  assert_not_contains "$runner" 'mkdir -p "$WORK"' "WORKの祖先をmkdir -pで作らない"
 }
 
-# 7) ストリーミング redactor は通常secret・複数/未閉鎖PEM・巨大行を漏らさず、
-#    出力上限とredactor失敗コードを保つ。
-case_integration_redactor_bounds_and_fails_closed() {
-  local temp runner function_file work awk_bin result rc bytes
-  temp=$(mktemp -d)
-  runner="$ROOT/ops/backup/tests/run-integration.sh"
-  function_file="$temp/redactor-functions.sh"
-  work="$temp/work"
-  mkdir -p "$work/keys" "$temp/fake-bin"
-  sed -n '/^redact_stream_to_file() {/,/^append_diagnostic_line() {/p' "$runner" | sed '$d' > "$function_file"
-  WORK_AWK="$work"
+# ------------------------------------------------------------
+# redactor / 診断ヘルパーの単体検証（runner から区間マーカーで切り出して source する）
+# ------------------------------------------------------------
+load_runner_diag_helpers() { # <temp>
+  local helper_file="$1/runner-diag-helpers.sh"
+  sed -n '/^# >>> harness-selftest: diagnostics helpers >>>$/,/^# <<< harness-selftest: diagnostics helpers <<<$/p' \
+    "$RUNNER" > "$helper_file"
+  if ! grep -q '^redact_stream_to_file() {' "$helper_file" || ! grep -q '^scan_failure_diagnostics() {' "$helper_file"; then
+    test_fail "runner診断ヘルパーの切り出し" "区間マーカーまたは関数が見つかりません"
+    return 1
+  fi
+  # shellcheck disable=SC1090
+  . "$helper_file"
+}
+
+write_redactor_secrets() { # <work>
+  local work=$1
+  mkdir -p "$work/keys"
   printf 'src-secret-unique\n' > "$work/src-password"
   printf 'tgt-secret-unique\n' > "$work/tgt-password"
   printf 'repo-secret-unique\n' > "$work/repo-password"
   printf 'restore-secret-unique\n' > "$work/restore-svc-pw"
   printf '%s\n' '-----BEGIN RSA PRIVATE KEY-----' 'key-material-unique' '-----END RSA PRIVATE KEY-----' > "$work/keys/priv1.pem"
   : > "$work/keys/priv2.pem"
-  # shellcheck disable=SC1090
-  . "$function_file"
-  printf '%s\n' 'src-secret-unique' 'before -----BEGIN RSA PRIVATE KEY-----one-----END RSA PRIVATE KEY----- middle -----BEGIN EC PRIVATE KEY-----two-----END EC PRIVATE KEY----- after' '-----BEGIN RSA PRIVATE KEY-----' 'multi-line-key-unique' '-----END RSA PRIVATE KEY-----' '-----BEGIN OPENSSH PRIVATE KEY-----' 'unclosed-key-unique' \
-    | redact_stream_to_file "$temp/redacted.txt" 65536 > "$temp/stream.txt" 2> "$temp/redactor.err"
+}
+
+# 7) PEM の END は BEGIN と同じ種別で判定し、END 後の通常ログ（同一行・後続行）を失わない（P2-2）。
+case_integration_redactor_pem_markers_keep_suffix_logs() {
+  local temp work result rc tail body
+  temp=$(mktemp -d)
+  work="$temp/work"
+  load_runner_diag_helpers "$temp" || { rm -rf "$temp"; return 0; }
+  write_redactor_secrets "$work"
+  WORK_AWK="$work"
+  printf '%s\n' \
+    'before -----BEGIN RSA PRIVATE KEY-----rsa-inline-body-unique-----END RSA PRIVATE KEY----- rsa-inline-tail' \
+    '-----BEGIN EC PRIVATE KEY-----' 'ec-key-body-unique' '-----END EC PRIVATE KEY----- ec-same-line-tail' \
+    'normal-log-after-ec-block' \
+    'x -----BEGIN ENCRYPTED PRIVATE KEY-----enc-body-unique-----END ENCRYPTED PRIVATE KEY----- enc-tail' \
+    '-----BEGIN OPENSSH PRIVATE KEY-----' 'openssh-body-unique' '-----END OPENSSH PRIVATE KEY-----' \
+    'normal-log-after-openssh' \
+    '-----BEGIN DSA PRIVATE KEY-----dsa-body-unique-----END DSA PRIVATE KEY-----dsa-tail' \
+    '-----BEGIN PRIVATE KEY-----pkcs8-body-unique-----END PRIVATE KEY----- pkcs8-tail' \
+    '-----BEGIN RSA PRIVATE KEY-----' 'mismatch-body-1-unique' '-----END EC PRIVATE KEY-----' 'mismatch-body-2-unique' \
+    '-----END RSA PRIVATE KEY----- after-mismatch-close' \
+    'final-normal-line' \
+    '-----BEGIN OPENSSH PRIVATE KEY-----' 'unclosed-key-unique' 'unclosed-follow-unique' \
+    | redact_stream_to_file "$temp/pem.txt" 65536 > "$temp/pem.stdout" 2> "$temp/pem.err"
   rc=$?
-  result=$(cat "$temp/redacted.txt")
+  result=$(cat "$temp/pem.txt")
   assert_zero "$rc" "redactor はPEM複数形式を処理"
-  assert_not_contains "$result" "src-secret-unique" "password literal をファイルへ出さない"
-  assert_not_contains "$result" "key-material-unique" "秘密鍵本体を出さない"
-  assert_not_contains "$result" "multi-line-key-unique" "複数行秘密鍵を出さない"
-  assert_not_contains "$result" "unclosed-key-unique" "未閉鎖秘密鍵の後続を出さない"
+  assert_contains "$result" "before [PRIVATE KEY BLOCK REDACTED] rsa-inline-tail" "END RSA PRIVATE KEY を END RSA に削らず同一行の後続を保持"
+  for tail in ec-same-line-tail normal-log-after-ec-block enc-tail normal-log-after-openssh dsa-tail pkcs8-tail after-mismatch-close final-normal-line; do
+    assert_contains "$result" "$tail" "PEMブロック後の通常ログを保持: $tail"
+  done
+  for body in rsa-inline-body-unique ec-key-body-unique enc-body-unique openssh-body-unique dsa-body-unique \
+      pkcs8-body-unique mismatch-body-1-unique mismatch-body-2-unique unclosed-key-unique unclosed-follow-unique; do
+    assert_not_contains "$result" "$body" "秘密鍵本文・未閉鎖ブロック後続を出さない: $body"
+  done
+  assert_not_contains "$result" "-----BEGIN" "PEM BEGIN marker を残さない"
+  assert_eq "$result" "$(cat "$temp/pem.stdout")" "コンソール出力もファイルと同じ伏字化済み内容"
+  rm -rf "$temp"
+}
+
+# 8) 1 行内の複数 secret（隣接・反復・重なり）をすべて伏字化し、残片を出さない。
+case_integration_redactor_multi_substring_and_overlap() {
+  local temp work result rc
+  temp=$(mktemp -d)
+  work="$temp/work"
+  load_runner_diag_helpers "$temp" || { rm -rf "$temp"; return 0; }
+  write_redactor_secrets "$work"
+  WORK_AWK="$work"
+  printf '%s\n' 'A=src-secret-unique B=tgt-secret-unique C=src-secret-uniquesrc-secret-unique D=restore-secret-unique E=key-material-unique F=repo-secret-unique end' \
+    | redact_stream_to_file "$temp/multi.txt" 65536 > /dev/null 2>&1
+  rc=$?
+  result=$(cat "$temp/multi.txt")
+  assert_zero "$rc" "複数secretの行を処理"
+  assert_eq 'A=[REDACTED] B=[REDACTED] C=[REDACTED] D=[REDACTED] E=[REDACTED] F=[REDACTED] end' "$result" \
+    "1行内の複数secret（隣接・反復を含む）をすべて伏字化"
+
+  printf 'overlap-alpha-beta\n' > "$work/src-password"
+  printf 'beta-gamma-unique\n' > "$work/tgt-password"
+  printf 'abab-abab\n' > "$work/restore-svc-pw"
+  printf '%s\n' 'xx overlap-alpha-beta-gamma-unique yy' 'zz abab-abab-abab ww' \
+    | redact_stream_to_file "$temp/overlap.txt" 65536 > /dev/null 2>&1
+  rc=$?
+  result=$(cat "$temp/overlap.txt")
+  assert_zero "$rc" "重なりsecretの行を処理"
+  assert_eq $'xx [REDACTED] yy\nzz [REDACTED] ww' "$result" "重なり合うsecretを区間併合して伏字化"
+  assert_not_contains "$result" "gamma" "重なりの後半secret残片を出さない"
+  assert_not_contains "$result" "abab" "同一secretの重なり出現の残片を出さない"
+  rm -rf "$temp"
+}
+
+# 9) 行長・入力・出力の上限、上流終了コード保持、欠落入力と awk 失敗/timeout の fail-closed（P2-3）。
+case_integration_redactor_bounds_and_fails_closed() {
+  local temp work result rc bytes long start elapsed
+  local -a status
+  temp=$(mktemp -d)
+  work="$temp/work"
+  load_runner_diag_helpers "$temp" || { rm -rf "$temp"; return 0; }
+  write_redactor_secrets "$work"
+  WORK_AWK="$work"
+  mkdir -p "$temp/fake-bin" "$temp/hang-bin"
 
   head -c 70000 /dev/zero | tr '\000' A | redact_stream_to_file "$temp/large.txt" 65536 > /dev/null 2> "$temp/large.err"
   rc=$?
   bytes=$(wc -c < "$temp/large.txt")
   assert_zero "$rc" "巨大な単一行でもredactorが成功"
-  assert_eq 65536 "$bytes" "1 section の出力を64KiBに制限"
+  assert_eq 65536 "${bytes//[[:space:]]/}" "1 section の出力を64KiBに制限"
+  assert_contains "$(cat "$temp/large.err")" "LINE LENGTH LIMIT" "行長上限到達を通知"
+
+  long=$(head -c 4090 /dev/zero | tr '\000' B)
+  { printf '%s%s%s\n' "$long" 'src-secret-unique' 'CCCC'; printf '%s\n' 'after-long-line-unique'; } \
+    | redact_stream_to_file "$temp/linecap.txt" 4096 > /dev/null 2> "$temp/linecap.err"
+  rc=$?
+  result=$(cat "$temp/linecap.txt")
+  bytes=$(wc -c < "$temp/linecap.txt")
+  assert_zero "$rc" "行長上限を超える行を処理"
+  assert_not_contains "$result" "src-se" "行長上限で切れたsecret接頭辞を出さない"
+  assert_not_contains "$result" "after-long-line-unique" "行長上限超過後は以降を出さない（切捨部のPEM状態不明のためfail-closed）"
+  assert_le "${bytes//[[:space:]]/}" 4096 "行長上限ケースでも出力上限を守る"
+
+  { printf 'BBB%s%s\n' 'src-secret-unique' "$(head -c 5000 /dev/zero | tr '\000' C)"; } \
+    | redact_stream_to_file "$temp/linecap2.txt" 4096 > /dev/null 2>&1
+  result=$(cat "$temp/linecap2.txt")
+  assert_contains "$result" "BBB[REDACTED]CCC" "行長上限内のsecretは全体を伏字化"
+  assert_not_contains "$result" "src-secret-unique" "長い行のsecretを出さない"
+
+  {
+    printf '%s\n' '-----BEGIN RSA PRIVATE KEY-----'
+    for ((i = 0; i < 600; i++)); do printf 'kkkkkkkkkk\n'; done
+    printf '%s\n' '-----END RSA PRIVATE KEY-----' 'after-input-cap-unique'
+    head -c 2000000 /dev/zero | tr '\000' y
+    printf '\nlast\n'
+    exit 5
+  } | redact_stream_to_file "$temp/inputcap.txt" 1024 > /dev/null 2> "$temp/inputcap.err"
+  status=("${PIPESTATUS[@]}")
+  assert_eq 5 "${status[0]:-}" "入力上限後も読み捨てて上流の終了コードを保つ（SIGPIPEにしない）"
+  assert_zero "${status[1]:-1}" "入力上限到達でもredactor自体は成功"
+  assert_not_contains "$(cat "$temp/inputcap.txt")" "after-input-cap-unique" "入力上限後の内容を処理しない"
+  assert_contains "$(cat "$temp/inputcap.err")" "INPUT LIMIT" "入力上限到達を通知"
+
+  rm -f "$work/src-password"
+  printf 'visible src-secret-unique\n' | redact_stream_to_file "$temp/missing.txt" 1024 > "$temp/missing.stdout" 2> "$temp/missing.err"
+  rc=$?
+  assert_nonzero "$rc" "パスワードsecretファイル欠落時は失敗扱い"
+  assert_eq "" "$(cat "$temp/missing.txt")" "secretファイル欠落時はファイルへ何も出さない"
+  assert_eq "" "$(cat "$temp/missing.stdout")" "secretファイル欠落時はコンソールへ何も出さない"
+  assert_contains "$(cat "$temp/missing.err")" "FAIL-CLOSED" "secretファイル欠落のfail-closedを通知"
+  printf 'src-secret-unique\n' > "$work/src-password"
+  : > "$work/tgt-password"
+  printf 'tgt-secret-unique\n' | redact_stream_to_file "$temp/empty-secret.txt" 1024 > /dev/null 2>&1
+  rc=$?
+  assert_nonzero "$rc" "空のパスワードsecretファイルは失敗扱い"
+  assert_eq "" "$(cat "$temp/empty-secret.txt")" "空secretファイル時は何も出さない"
+  printf 'tgt-secret-unique\n' > "$work/tgt-password"
+  rm -f "$work/keys/priv1.pem" "$work/keys/priv2.pem"
+  printf 'key files removed tgt-secret-unique\n' | redact_stream_to_file "$temp/nokeys.txt" 1024 > /dev/null 2>&1
+  rc=$?
+  assert_zero "$rc" "署名鍵ファイル（PITR後に削除される）の欠落は許容"
+  assert_eq "key files removed [REDACTED]" "$(cat "$temp/nokeys.txt")" "鍵ファイル欠落時もパスワードは伏字化"
+  write_redactor_secrets "$work"
+
+  redact_stream_to_file "$temp/empty-input.txt" 1024 < /dev/null > /dev/null 2>&1
+  rc=$?
+  assert_zero "$rc" "空入力でも成功"
+  assert_eq "" "$(cat "$temp/empty-input.txt")" "空入力では何も出さない"
+  redact_stream_to_file "$temp/bad-limit.txt" abc < /dev/null > /dev/null 2>&1
+  rc=$?
+  assert_nonzero "$rc" "不正な上限値を拒否"
 
   cat > "$temp/fake-bin/awk" <<'MOCK'
 #!/usr/bin/env bash
 exit 77
 MOCK
-  chmod +x "$temp/fake-bin/awk"
+  "$REAL_CHMOD" +x "$temp/fake-bin/awk"
   PATH="$temp/fake-bin:$PATH" redact_stream_to_file "$temp/failed.txt" 65536 </dev/null 2>/dev/null
   rc=$?
   assert_nonzero "$rc" "redactor失敗を成功扱いしない"
+
+  cat > "$temp/hang-bin/awk" <<'MOCK'
+#!/usr/bin/env bash
+exec sleep 30
+MOCK
+  "$REAL_CHMOD" +x "$temp/hang-bin/awk"
+  INTEGRATION_DIAG_BUDGET_SECONDS=2 INTEGRATION_DIAG_CALL_TIMEOUT_SECONDS=1 init_diag_limits
+  diag_budget_start
+  start=$SECONDS
+  printf 'x\n' | PATH="$temp/hang-bin:$PATH" redact_stream_to_file "$temp/hang.txt" 1024 bounded > /dev/null 2>&1
+  rc=$?
+  elapsed=$((SECONDS - start))
+  assert_nonzero "$rc" "診断用redactorのawkが期限内に終わらなければ失敗扱い（timeoutがawkも覆う）"
+  assert_le "$elapsed" 10 "awkのハングを診断予算付きtimeoutで打ち切る"
+  rm -rf "$temp"
+}
+
+# 10) 診断ファイル全体を 512KiB に制限し、上限後のセクション・行を追記しない。
+case_integration_diag_total_cap_512kib() {
+  local temp size content
+  temp=$(mktemp -d)
+  load_runner_diag_helpers "$temp" || { rm -rf "$temp"; return 0; }
+  DIAG_FILE="$temp/diag.txt"
+  : > "$DIAG_FILE"
+  head -c 70000 /dev/zero | tr '\000' S > "$temp/section.txt"
+  for ((i = 1; i <= 10; i++)); do
+    append_diagnostic_section "section-$i" "$temp/section.txt"
+  done
+  append_diagnostic_line "line-after-cap-unique"
+  size=$(wc -c < "$DIAG_FILE")
+  content=$(cat "$DIAG_FILE")
+  assert_eq 524288 "${size//[[:space:]]/}" "診断全体を512KiBちょうどで打ち切る"
+  assert_contains "$content" "[section-1]" "上限内の先頭セクションを保持"
+  assert_contains "$content" "[section-8]" "上限に掛かるセクションは残り容量分だけ保持"
+  assert_not_contains "$content" "[section-9]" "上限後のセクションを追記しない"
+  assert_not_contains "$content" "line-after-cap-unique" "上限後の行を追記しない"
+  rm -rf "$temp"
+}
+
+# 11) 最終 secret scan は漏えい・PEM・サイズ超過・欠落入力をすべて失敗として扱う。
+case_integration_secret_scan_fails_closed() {
+  local temp work rc
+  temp=$(mktemp -d)
+  work="$temp/work"
+  load_runner_diag_helpers "$temp" || { rm -rf "$temp"; return 0; }
+  write_redactor_secrets "$work"
+  WORK_AWK="$work"
+  DIAG_FILE="$temp/scan.txt"
+  printf 'clean diagnostic line [REDACTED]\n' > "$DIAG_FILE"
+  scan_failure_diagnostics
+  assert_zero "$?" "secretを含まない診断はscanを通過"
+  printf 'leak src-secret-unique\n' > "$DIAG_FILE"
+  scan_failure_diagnostics
+  rc=$?
+  assert_nonzero "$rc" "secret literalが残った診断を拒否"
+  printf '%s\n' 'leak -----BEGIN PRIVATE KEY-----' > "$DIAG_FILE"
+  scan_failure_diagnostics
+  rc=$?
+  assert_nonzero "$rc" "PEM BEGINが残った診断を拒否"
+  head -c 524289 /dev/zero | tr '\000' Z > "$DIAG_FILE"
+  scan_failure_diagnostics
+  rc=$?
+  assert_nonzero "$rc" "512KiB超の診断を拒否"
+  rm -f "$DIAG_FILE"
+  scan_failure_diagnostics
+  rc=$?
+  assert_nonzero "$rc" "診断ファイル欠落を拒否"
+  printf 'clean\n' > "$DIAG_FILE"
+  rm -f "$work/src-password"
+  scan_failure_diagnostics
+  rc=$?
+  assert_nonzero "$rc" "secretファイル欠落時はscan失敗（fail-closed）"
+  rm -rf "$temp"
+}
+
+# ------------------------------------------------------------
+# mock docker による run-integration.sh の挙動検証
+# ------------------------------------------------------------
+
+# 12) P1 回帰: network ID を正しく解析し、PITR の native 終了コードと capture-before-down を保つ。
+case_integration_p1_network_id_and_pitr_native_rc() {
+  local temp work diag diag_content svc
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  work="$temp/allowed/work-pitr"
+  runner_mock_run "$temp" pitr-native "$work"
+  diag="$work/evidence/failure-diagnostics.txt"
+  diag_content=$(cat "$diag" 2>/dev/null)
+  assert_eq 42 "$RUNNER_RC" "PITR失敗のnative終了コード(42)をrunner終了コードとして保持"
+  assert_contains "$RUNNER_OUT" "network: $MOCK_NET_ID" "Go templateの改行区切りでnetwork IDを正しく解析（P1回帰）"
+  assert_not_contains "$RUNNER_OUT" "network: $MOCK_NET_ID"'\n' "network IDに字面の改行エスケープを含めない（P1回帰）"
+  assert_contains "$RUNNER_DOCKER_LOG" "network inspect --format" "network所有確認を実施"
+  assert_contains "$RUNNER_DOCKER_LOG" "run --rm --network $MOCK_NET_ID " "検証済みnetwork IDでPITRコンテナを起動"
+  assert_contains "$RUNNER_DOCKER_LOG" "cp $MOCK_SRC_ID:/var/lib/mysql/ca.pem" "検証済みsource container IDでCAを取得"
+  assert_contains "$diag_content" "stage=integration-pitr native_exit=42 runner_exit=42" "診断にPITR段階とnative終了コードを記録"
+  assert_contains "$diag_content" "[failing-command-output]" "失敗コマンド出力を診断へ収録"
+  assert_contains "$diag_content" "pitr-normal-tail-after-pem" "PEMブロック後のPITR通常ログを保持"
+  assert_contains "$diag_content" "mock-after-pem-tail" "END RSA PRIVATE KEY同一行の後続ログを保持"
+  assert_not_contains "$diag_content" "mock-key-body-unique" "PITR出力の秘密鍵本文を診断に出さない"
+  for svc in target source tool scheduler replica; do
+    assert_contains "$diag_content" "[$svc-state-health-image-mounts]" "所有確認済み${svc}のstateを収集"
+    assert_contains "$diag_content" "[$svc-logs tail=200]" "所有確認済み${svc}のlogsを収集"
+  done
+  assert_contains "$diag_content" "target-normal-error-after-pem" "コンテナログのEC PEM後の通常ログを保持"
+  assert_before "$(first_line_no "$diag" '[target-state-health-image-mounts]')" \
+    "$(first_line_no "$diag" '[source-state-health-image-mounts]')" "targetを最初に診断"
+  assert_before "$(last_line_no "$temp/docker.log" 'logs --timestamps')" \
+    "$(first_line_no "$temp/docker.log" 'down -v')" "全診断の収集後にcompose down（capture-before-down）"
+  assert_no_secret_leak "$diag_content" "PITR失敗診断"
+  assert_no_secret_leak "$RUNNER_OUT" "PITR失敗時のコンソール出力"
+  rm -rf "$temp"
+}
+
+# 13) restore-drill の native 終了コードと検証済み target ID の使用。
+case_integration_drill_native_rc() {
+  local temp work diag diag_content
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  work="$temp/allowed/work-drill"
+  runner_mock_run "$temp" drill-native "$work"
+  diag="$work/evidence/failure-diagnostics.txt"
+  diag_content=$(cat "$diag" 2>/dev/null)
+  assert_eq 37 "$RUNNER_RC" "drill失敗のnative終了コード(37)をrunner終了コードとして保持"
+  assert_contains "$diag_content" "stage=restore-drill native_exit=37 runner_exit=37" "診断にdrill段階とnative終了コードを記録"
+  assert_contains "$diag_content" "drill-normal-tail" "drill出力を診断へ収録"
+  assert_contains "$RUNNER_DOCKER_LOG" "exec $MOCK_TGT_ID mysql" "検証済みtarget container IDでdocker exec"
+  assert_contains "$RUNNER_DOCKER_LOG" "--target 2026-11-12T00:00:00Z --plan plan-mock-1" "planとrequested_targetをdrillへ渡す"
+  assert_before "$(last_line_no "$temp/docker.log" 'logs --timestamps')" \
+    "$(first_line_no "$temp/docker.log" 'down -v')" "drill失敗時も診断収集後にcompose down"
+  assert_no_secret_leak "$diag_content" "drill失敗診断"
+  rm -rf "$temp"
+}
+
+# 14) Compose partial-up: 起動済みの所有コンテナだけを target 優先で診断し、その後に cleanup する。
+case_integration_compose_partial_up_capture() {
+  local temp work diag diag_content
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  work="$temp/allowed/work-partial"
+  runner_mock_run "$temp" partial-up "$work"
+  diag="$work/evidence/failure-diagnostics.txt"
+  diag_content=$(cat "$diag" 2>/dev/null)
+  assert_eq 17 "$RUNNER_RC" "compose upのnative終了コード(17)を保持"
+  assert_contains "$diag_content" "stage=compose-up native_exit=17" "診断にcompose-up段階を記録"
+  assert_contains "$diag_content" "mock-partial-start-failure" "compose up出力を診断へ収録"
+  assert_contains "$diag_content" "[target-state-health-image-mounts]" "起動済みtargetを診断"
+  assert_contains "$diag_content" "[source-state-health-image-mounts]" "起動済みsourceを診断"
+  assert_not_contains "$diag_content" "[tool-state" "未作成toolを診断しない"
+  assert_not_contains "$diag_content" "[scheduler-state" "未作成schedulerを診断しない"
+  assert_not_contains "$diag_content" "[replica-state" "未作成replicaを診断しない"
+  assert_not_contains "$RUNNER_DOCKER_LOG" "up --wait" "compose up失敗後にwaitへ進まない"
+  assert_contains "$diag_content" "target-same-line-tail" "EC PEM END同一行の後続を保持"
+  assert_contains "$diag_content" "target-normal-error-after-pem" "EC PEM後の通常エラーログを保持"
+  assert_not_contains "$diag_content" "mock-target-key-body-unique" "ログ内の秘密鍵本文を出さない"
+  assert_before "$(first_line_no "$diag" '[target-state-health-image-mounts]')" \
+    "$(first_line_no "$diag" '[source-state-health-image-mounts]')" "partial-upでもtargetを最初に診断"
+  assert_before "$(last_line_no "$temp/docker.log" 'logs --timestamps')" \
+    "$(first_line_no "$temp/docker.log" 'down -v')" "partial-upでも診断収集後にcompose down"
+  assert_no_secret_leak "$diag_content" "partial-up診断"
+  rm -rf "$temp"
+}
+
+# 15) healthcheck 失敗（73aa の失敗段階相当）: health log と mount を行単位で残す。
+case_integration_compose_wait_unhealthy_capture() {
+  local temp work diag diag_content
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  work="$temp/allowed/work-wait"
+  runner_mock_run "$temp" wait-unhealthy "$work"
+  diag="$work/evidence/failure-diagnostics.txt"
+  diag_content=$(cat "$diag" 2>/dev/null)
+  assert_eq 1 "$RUNNER_RC" "compose up --waitのnative終了コード(1)を保持"
+  assert_contains "$diag_content" "stage=compose-wait native_exit=1" "診断にcompose-wait段階を記録"
+  assert_contains "$diag_content" "is unhealthy" "wait出力を診断へ収録"
+  assert_contains "$diag_content" $'\nhealth_start=2026-11-12T00:00:10Z health_exit=1' "health logを独立した行で記録（{{println}}）"
+  assert_contains "$diag_content" "health_output=target-health-second" "複数のhealth logを記録"
+  assert_contains "$diag_content" $'\nmount_type=volume source=/var/lib/docker/volumes/target' "mountを独立した行で記録"
+  assert_before "$(first_line_no "$diag" '[target-state-health-image-mounts]')" \
+    "$(first_line_no "$diag" '[source-state-health-image-mounts]')" "unhealthy targetを最初に診断"
+  assert_before "$(last_line_no "$temp/docker.log" 'logs --timestamps')" \
+    "$(first_line_no "$temp/docker.log" 'down -v')" "wait失敗でも診断収集後にcompose down"
+  assert_no_secret_leak "$diag_content" "healthcheck失敗診断"
+  rm -rf "$temp"
+}
+
+# 16) foreign / 分離 / 複数 network は PITR へ進まず拒否する（自 project の container は cleanup する）。
+case_integration_foreign_network_rejected() {
+  local temp work scenario diag_content
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  for scenario in foreign-network split-network multi-network; do
+    work="$temp/allowed/work-$scenario"
+    runner_mock_run "$temp" "$scenario" "$work"
+    diag_content=$(cat "$work/evidence/failure-diagnostics.txt" 2>/dev/null)
+    assert_eq 1 "$RUNNER_RC" "$scenario: network検証失敗で非0"
+    assert_contains "$diag_content" "stage=project-network-verification" "$scenario: 診断にnetwork検証段階を記録"
+    assert_not_contains "$RUNNER_DOCKER_LOG" "run --rm --network" "$scenario: 未検証networkでPITRコンテナを起動しない"
+    assert_not_contains "$RUNNER_DOCKER_LOG" "cp $MOCK_SRC_ID" "$scenario: CA取得へ進まない"
+    assert_contains "$RUNNER_DOCKER_LOG" "down -v" "$scenario: 所有確認済みprojectはcleanupする"
+  done
+  rm -rf "$temp"
+}
+
+# 17) foreign container が混在したら診断から除外し、所有を確認できない project を down しない。
+case_integration_foreign_container_not_cleaned() {
+  local temp work diag_content
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  work="$temp/allowed/work-foreign-container"
+  runner_mock_run "$temp" foreign-container "$work"
+  diag_content=$(cat "$work/evidence/failure-diagnostics.txt" 2>/dev/null)
+  assert_eq 1 "$RUNNER_RC" "foreign container混在で非0"
+  assert_contains "$diag_content" "stage=project-network-verification" "所有確認失敗段階を記録"
+  assert_contains "$diag_content" "ownership=unverified omitted" "foreign containerを診断から除外"
+  assert_not_contains "$diag_content" "[source-state" "foreign containerのstateを収集しない"
+  assert_contains "$diag_content" "[target-state-health-image-mounts]" "所有確認済みtargetは診断"
+  assert_not_contains "$RUNNER_DOCKER_LOG" "down -v" "所有を確認できないprojectをdownしない"
+  assert_contains "$RUNNER_OUT" "leaving unknown resources untouched" "未確認資源を残したことを通知"
+  rm -rf "$temp"
+}
+
+# 18) 診断予算と per-call timeout: Docker がハングしても有界時間で終わり、予算切れを記録する。
+case_integration_diag_deadline_bounded() {
+  local temp work diag_content start elapsed
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  work="$temp/allowed/work-slow"
+  start=$SECONDS
+  runner_mock_run "$temp" slow-diag "$work" INTEGRATION_DIAG_BUDGET_SECONDS=2 INTEGRATION_DIAG_CALL_TIMEOUT_SECONDS=1
+  elapsed=$((SECONDS - start))
+  diag_content=$(cat "$work/evidence/failure-diagnostics.txt" 2>/dev/null)
+  assert_eq 17 "$RUNNER_RC" "診断がハングしてもprimary終了コードを保持"
+  assert_contains "$diag_content" "advisory_budget_seconds=2 per_call_timeout_seconds=1" "目安予算とper-call上限を記録"
+  assert_contains "$diag_content" "target-state-collector_rc=124" "ハングしたDocker呼び出しをtimeoutで打ち切る"
+  assert_contains "$diag_content" "diagnostic budget exhausted" "予算切れ後の呼び出しを省略して記録"
+  assert_le "$elapsed" 20 "ハングするmock（各30秒）でも有界時間で終了"
+  assert_contains "$RUNNER_DOCKER_LOG" "down -v" "予算切れ後もcleanupを実施"
+  rm -rf "$temp"
+}
+
+make_tool_wrappers() { # <dir> <tool...>
+  local dir=$1 tool real bash_bin
+  shift
+  bash_bin=$(command -v bash)
+  for tool in "$@"; do
+    real=$(command -v "$tool") || continue
+    [[ "$real" == /* ]] || continue
+    printf '#!%s\nexec %q "$@"\n' "$bash_bin" "$real" > "$dir/$tool"
+    "$REAL_CHMOD" +x "$dir/$tool"
+  done
+}
+
+# 19) 欠落入力: timeout コマンド不在・container 一覧取得失敗でも fail-safe に診断し、未確認資源を触らない。
+case_integration_missing_inputs_fail_safe() {
+  local temp work curated diag_content timeout_found
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  curated="$temp/curated-bin"
+  mkdir -p "$curated"
+  cp "$temp/bin/docker" "$temp/bin/cygpath" "$temp/bin/chmod" "$curated/"
+  make_tool_wrappers "$curated" bash env dirname basename date id mkdir find grep cat wc head tail cut awk \
+    rm cp mv tee sha256sum sleep tr ls touch sed
+  timeout_found=$(PATH="$curated"; command -v timeout 2>/dev/null || true)
+  assert_eq "" "$timeout_found" "検証用PATHにtimeoutが存在しない（前提）"
+  work="$temp/allowed/work-no-timeout"
+  RUNNER_PATH="$curated"
+  runner_mock_run "$temp" no-timeout "$work"
+  RUNNER_PATH=""
+  diag_content=$(cat "$work/evidence/failure-diagnostics.txt" 2>/dev/null)
+  assert_eq 17 "$RUNNER_RC" "timeout不在でもprimary終了コードを保持"
+  assert_contains "$diag_content" "collector=bounded timeout command unavailable; Docker diagnostics omitted" "timeout不在ではDocker診断を省略"
+  assert_contains "$diag_content" "[failing-command-output]" "timeout不在でも失敗コマンド出力は収録"
+  assert_not_contains "$diag_content" "[target-state" "timeout不在では上限の無いDocker診断をしない"
+  assert_contains "$RUNNER_DOCKER_LOG" "down -v" "所有確認できたprojectはcleanup"
+
+  work="$temp/allowed/work-ps-fail"
+  runner_mock_run "$temp" diag-ps-fail "$work"
+  diag_content=$(cat "$work/evidence/failure-diagnostics.txt" 2>/dev/null)
+  assert_eq 17 "$RUNNER_RC" "container一覧取得失敗でもprimary終了コードを保持"
+  assert_contains "$diag_content" "container-list=unavailable rc=1" "container一覧の取得失敗を記録"
+  assert_not_contains "$RUNNER_DOCKER_LOG" "down -v" "所有を確認できないprojectをdownしない"
+  assert_contains "$RUNNER_OUT" "leaving unknown resources untouched" "未確認資源を残したことを通知"
+  rm -rf "$temp"
+}
+
+expect_work_rejected() { # <temp> <work> <message-needle> <label> [VAR=value ...]
+  local temp=$1 work=$2 needle=$3 label=$4
+  shift 4
+  runner_mock_run "$temp" pitr-native "$work" "$@"
+  assert_nonzero "$RUNNER_RC" "$label: preflightで拒否"
+  assert_contains "$RUNNER_OUT" "$needle" "$label: 拒否理由を通知"
+  assert_no_file "$temp/chmod.log" "$label: chmodを一切行わない"
+  assert_not_contains "$RUNNER_DOCKER_LOG" "compose -f" "$label: Compose projectを操作しない"
+  assert_not_contains "$RUNNER_DOCKER_LOG" "--user 0:0" "$label: root chownコンテナを起動しない"
+}
+
+# 20) WORK は許可ルート配下・symlink 無し・所有確認済みに限り、満たさなければ chmod/chown しない（P2-4）。
+case_integration_work_path_boundary_fails_closed() {
+  local temp allowed outside repo
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  allowed="$temp/allowed"
+  outside="$temp/outside"
+  mkdir -p "$outside" "$allowed/real" "$allowed/empty-foreign" "$allowed/target-dir"
+  MSYS=winsymlinks:nativestrict ln -s "$allowed/real" "$allowed/link"
+  MSYS=winsymlinks:nativestrict ln -s "$outside" "$allowed/escape"
+  MSYS=winsymlinks:nativestrict ln -s "$allowed/target-dir" "$allowed/work-link"
+  if [[ -L "$allowed/link" && -L "$allowed/escape" && -L "$allowed/work-link" ]]; then
+    test_assert "symlink fixtureを作成（前提）"
+  else
+    test_fail "symlink fixtureを作成（前提）" "この環境では symlink を作成できません"
+  fi
+
+  expect_work_rejected "$temp" "$outside/work" "outside the permitted fresh-work boundary" "許可ルート外"
+  assert_no_file "$outside/work" "許可ルート外にディレクトリを作らない"
+  expect_work_rejected "$temp" "$allowed/link/work" "symlink を含むパス要素" "許可ルート内を指す祖先symlink"
+  assert_no_file "$allowed/real/work" "symlink先にディレクトリを作らない"
+  expect_work_rejected "$temp" "$allowed/escape/work" "symlink を含むパス要素" "許可ルート外を指す祖先symlink"
+  assert_no_file "$outside/work" "祖先symlink経由で外部にディレクトリを作らない"
+  expect_work_rejected "$temp" "$allowed/work-link" "symlink を含むパス要素" "WORK自身のsymlink"
+  assert_eq "" "$(ls -A "$allowed/target-dir")" "symlink先ディレクトリを変更しない"
+  expect_work_rejected "$temp" "$allowed/empty-foreign" "所有マーカー" "所有マーカーの無い既存の空ディレクトリ"
+  assert_eq "" "$(ls -A "$allowed/empty-foreign")" "所有マーカーの無い空ディレクトリへ書き込まない"
+  expect_work_rejected "$temp" "$allowed/real/../work" "絶対パスが必要" "'..'を含むパス"
+  expect_work_rejected "$temp" "relative/work" "絶対パスが必要" "相対パス"
+  expect_work_rejected "$temp" "$allowed/no-parent/work" "親ディレクトリが存在しません" "存在しない祖先"
+  assert_no_file "$allowed/no-parent" "祖先をmkdir -pで作らない"
+  expect_work_rejected "$temp" "$allowed" "outside the permitted fresh-work boundary" "許可ルートそのもの"
+
+  repo="$temp/repo"
+  mkdir -p "$repo/ops/backup/tests"
+  cp "$RUNNER" "$repo/ops/backup/tests/run-integration.sh"
+  RUNNER_UNDER_TEST="$repo/ops/backup/tests/run-integration.sh"
+  expect_work_rejected "$temp" "$repo/ops/inside-work" "リポジトリ配下" "許可ルート内でもリポジトリ配下" \
+    TMPDIR="$temp" TMP="$temp" TEMP="$temp"
+  assert_no_file "$repo/ops/inside-work" "リポジトリ配下にディレクトリを作らない"
+  expect_work_rejected "$temp" "$temp" "リポジトリの祖先" "リポジトリの祖先ディレクトリ" \
+    TMPDIR="${temp%/*}" TMP="${temp%/*}" TEMP="${temp%/*}"
+  RUNNER_UNDER_TEST=""
+  rm -rf "$temp"
+}
+
+# 21) 新規作成・verify-like-ci.ps1 の所有マーカー付き・既定パスの WORK は受理し、検証済みパスだけを正規化する。
+case_integration_work_path_accepts_owned_dirs() {
+  local temp work parent repo diag_content foreign_chmod
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+
+  work="$temp/allowed/fresh-work"
+  runner_mock_run "$temp" fixed-name-occupied "$work"
+  diag_content=$(cat "$work/evidence/failure-diagnostics.txt" 2>/dev/null)
+  assert_eq 1 "$RUNNER_RC" "固定名衝突はpreflightで失敗"
+  assert_contains "$RUNNER_OUT" "fixed container name is occupied" "固定名衝突を通知"
+  assert_file "$work/.ses-pitr-run-owner" "許可ルート配下の新規WORKを所有"
+  assert_contains "$(cat "$work/.ses-pitr-run-owner" 2>/dev/null)" "work=$work" "所有マーカーに正規化済みWORKを記録"
+  assert_contains "$diag_content" "stage=fixed-name-preflight" "preflight段階を診断に記録"
+  assert_contains "$diag_content" "collector=preflight failed before" "Compose未操作のpreflight診断"
+  assert_not_contains "$RUNNER_DOCKER_LOG" "up -d --build" "preflight失敗でcompose upしない"
+  assert_file "$temp/chmod.log" "所有WORKは終了時に権限を正規化"
+  foreign_chmod=$(grep -v -F -- "$work" "$temp/chmod.log" 2>/dev/null || true)
+  assert_eq "" "$foreign_chmod" "chmodは検証済みWORKだけを対象にする"
+
+  parent="$temp/allowed/ses-pitr-run-selftest"
+  mkdir -p "$parent/integration-work"
+  printf '{\n  "pid": 1,\n  "runToken": "selftest",\n  "workDir": "selftest"\n}\n' > "$parent/.ses-pitr-owner.json"
+  runner_mock_run "$temp" fixed-name-occupied "$parent/integration-work"
+  assert_eq 1 "$RUNNER_RC" "所有マーカー付き既存WORKでpreflightまで進む"
+  assert_file "$parent/integration-work/.ses-pitr-run-owner" "verify-like-ci.ps1形式の空integration-workを所有"
+
+  repo="$temp/repo"
+  mkdir -p "$repo/ops/backup/tests"
+  cp "$RUNNER" "$repo/ops/backup/tests/run-integration.sh"
+  RUNNER_UNDER_TEST="$repo/ops/backup/tests/run-integration.sh"
+  runner_mock_run "$temp" fixed-name-occupied "-"
+  RUNNER_UNDER_TEST=""
+  assert_eq 1 "$RUNNER_RC" "既定WORKでpreflightまで進む"
+  assert_file "$repo/ops/backup/tests/.integration-work/.ses-pitr-run-owner" "既定パス \$HERE/.integration-work を所有"
   rm -rf "$temp"
 }
 
@@ -199,6 +822,20 @@ run_case case_failing_backup_command_is_nonzero
 run_case case_integration_runner_keeps_work_private
 run_case case_integration_foreign_work_preflight_is_read_only
 run_case case_integration_failure_capture_contract
+run_case case_integration_redactor_pem_markers_keep_suffix_logs
+run_case case_integration_redactor_multi_substring_and_overlap
 run_case case_integration_redactor_bounds_and_fails_closed
+run_case case_integration_diag_total_cap_512kib
+run_case case_integration_secret_scan_fails_closed
+run_case case_integration_p1_network_id_and_pitr_native_rc
+run_case case_integration_drill_native_rc
+run_case case_integration_compose_partial_up_capture
+run_case case_integration_compose_wait_unhealthy_capture
+run_case case_integration_foreign_network_rejected
+run_case case_integration_foreign_container_not_cleaned
+run_case case_integration_diag_deadline_bounded
+run_case case_integration_missing_inputs_fail_safe
+run_case case_integration_work_path_boundary_fails_closed
+run_case case_integration_work_path_accepts_owned_dirs
 
 test_summary "ACC-OPS-P2 harness self-tests"
