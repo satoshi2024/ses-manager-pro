@@ -1,6 +1,11 @@
 # NF-10 scheduler claim fence 修正計画
 
-状態: **技術修正Plan案 / 実装・migration未着手。** 対象は `m_report_schedule` のscheduler claim所有権競合とclaim時刻の正確性に限定する。NF-10全体の再承認、production/運用gateの承認、remote/release承認を意味しない。現在の基準Headは `9bac40c9624e7d964bcf6e18f480b3457662206e`。
+状態: **実装済・独立レビュー待ち・テスト未実行（コンパイル未確認）。** COMPLETE/PASSではない。対象は `m_report_schedule` のscheduler claim所有権競合とclaim時刻の正確性に限定する。NF-10全体の再承認、production/運用gateの承認、remote/release承認を意味しない。
+
+- 当初Planの基準Head: `9bac40c9624e7d964bcf6e18f480b3457662206e`（§1〜§8は当時の記述を保持し、変更点は各節の「改訂」注記と§9以降に記す）。
+- 2026-11-12改訂の実装基準: `73aa70004484db96ffd9100ffa13dd7acaaf365e`（PR #118候補）。migration番号は **V185** をユーザーが承認済み（root/主控経由）。
+- 実装branch: `codex/snf-nf10-v185-integration-20261112`。独立レビュー（REQUEST CHANGES: P0×2、P1×5、P2×12）の指摘ごとの対応は§12。
+- テストは独立レビューPASS後に主控（唯一のTestRunner）が実行する。本書の記述はいずれも実行結果ではない。
 
 ## 1. 確認した欠陥と影響
 
@@ -14,6 +19,7 @@
 2. 完了更新はtenant/idに加え、`processing_claim_token` の完全一致と `processing_logical_run_at` の完全一致を条件にする。logicalRunAt単独は同一論理実行を再claimすると同値のため所有者識別子にならない。可能なら `processing_claimed_at` もtokenと共に一致条件へ含める。
 3. `markSuccess`/`markFailure` が0行を返したらclaim所有権喪失として扱う。古いworkerは別UPDATE、generic entity update、fallback処理でBの状態を上書きしてはならない。所有権喪失をgeneration failureとして再記録しない。
 4. claimはdue行の期待状態に対するCASとする。selectDueで読んだtenant/idだけでclaimせず、expected next/retry/logical run/claimedAt/token等の必要な状態をUPDATE条件で再照合する。未claimの初回取得は `processing_claimed_at IS NULL AND processing_claim_token IS NULL` の状態だけを許可し、NULLを未占有として明示CASする。通常completionは非NULLのclaim tokenを必須とし、`processing_claim_token = :claimToken` の通常完全一致を使う。NULL-safe比較、NULL token completion、tokenを省略する旧overloadや後方互換completion経路は設けない。tokenなしの旧snapshot、別tenantの行、leaseを既に更新した競合workerはclaimできない。
+   - **2026-11-12改訂（独立レビューP1-1）**: 「未claimは `processing_claimed_at IS NULL AND processing_claim_token IS NULL` だけ」とすると、旧版completionが `processing_claimed_at` だけをclearした行（`processing_claimed_at IS NULL AND processing_claim_token IS NOT NULL`、以下「孤児token」）が永久に選ばれず、retry行はLIMIT枠を占有し続ける。lease占有は `processing_claimed_at` だけで判定し、tokenは `processing_claimed_at` が非NULLの間だけowner識別子として扱うよう改める。孤児tokenはdue snapshotのtoken完全一致を含む全列CASで新tokenへ置換する（§9）。NULL token completion・tokenを省略するcompletionを設けない点は変更しない。
 5. DB日時列は秒精度に正規化し、Java時刻、token生成、SQL引数、テスト比較の精度を統一する。MySQL `DATETIME` の秒精度を前提にし、H2 timestampを秒精度で扱う。
 6. claimの時刻、stale cutoff、failure時刻/retry計算はscheduleごとの現在時刻から求める。poll開始時のbatch timeを後続scheduleへ流用しない。
 
@@ -22,6 +28,8 @@
 ### 3.1 tokenとclaim CAS
 
 新しいlease token列（候補名 `processing_claim_token`、nullable `VARCHAR(36)`）を追加する。`claimDue` は次を一回の条件付きUPDATEで行う。
+
+> 2026-11-12改訂（独立レビューP2-9）: 列は `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL` とし、表既定 `utf8mb4_unicode_ci` による大文字小文字非区別の一致を避ける。`AFTER` 句は付けず末尾追加とする。NULL期待値の照合は `#{x} IS NULL` ではなくMyBatis `<choose>` で `col IS NULL` / `col = #{x}` を明示的に出し分ける。
 
 - tenant/id、enabled、deleted状態とdue条件を確認する。
 - due一覧取得時点の期待状態を再照合する。通常dueは `expectedNextRunAt`、retryは `expectedRetryScheduledAt`、stale takeoverは既存 `expectedProcessingClaimToken` と `expectedProcessingClaimedAt` / logicalRunAtを照合する。NULL値も明示的なNULL一致条件として扱う。
@@ -54,9 +62,13 @@ claim tokenは内部所有権データであり、API入力から設定・変更
 
 rolling deploymentでは旧version nodeはtokenを知らず、token条件なしの`markSuccess`/`markFailure`で新nodeのclaimを完了扱いできる。よってschema適用後に新旧nodeを同時稼働させない。適用前にschedulerを停止し、旧nodeのin-flight schedulerがすべてdrain完了したことを確認し、schemaを適用してから新artifactだけでschedulerを再開する。未知の旧owner/NULL token stateは自動的に新ownerへ帰属させずstale lease再claimまで待つか運用手順で処置する。production migrationとdrain/runbookは後続運用gate。
 
+> 2026-11-12改訂: リリース前提・検出SQL・復旧案の草案を§10に記す（SRE/DBA承認待ち）。`setEnabled` は `updateEnabled`（enabled・updated_by・version・updated_atだけ、`deleted_flag = 0` 条件付き）へ変更し、応答は更新後の行を再読込して返す。lease/retry/token/failure count列は `FieldStrategy.NEVER` でentity由来のINSERT/UPDATEから除外し、next/last runはentity由来のUPDATEから除外した（独立レビューP2-6/P2-7）。
+
 ## 5. Schema / test schema / migration境界
 
 新列を追加する場合のmigration候補は `V185__report_schedule_claim_token.sql`。現時点の最大versionはV184だが、V185は未割当であり、本Planでは採番・DDL追加を行わない。正式受理時にrootが採番を確定する。V1/V112/V114は書き換えず、後続migrationでnullable token列と必要なindex検討だけを追加する。既存lease行はtoken NULLのままとし、migration時に実行ownerを捏造しない。
+
+> 2026-11-12改訂: 73aa7000を基準に **V185** の採番がユーザー承認済みとなり、`V185__report_schedule_claim_token.sql` を作成した。V185はどの環境にも未適用であるため、独立レビューP2-9に合わせて直接修正した（適用後の改変禁止規則の対象外）。他branchがV185以上を先に統合した場合は、空き番号を埋めず次の空き番号へ繰り上げる。latest期待値は `src/test/java/com/ses/migration/LatestMigrationVersion.LATEST` に集約した（P2-12）。index追加は行わない（completion/claimは主キー `id` とtenant条件で1行を特定するため）。
 
 実装時に同期するschema箇所:
 
@@ -112,3 +124,126 @@ V185がrootにより割り当てられた場合、latest version=184を期待す
 ## 8. 実装開始・完了境界
 
 このPlanは原因と対策、対象file、test契約を固定するためのものであり、実装やschema変更の許可そのものではない。Astraの固定Head Plan受理後、rootがmigration versionを正式割当し、実装を別commitで開始する。実装完了判定にはMySQLのA/B takeover各success/failure結果、fresh/upgrade migration、schema/H2同期、API非露出、時刻試験、およびroot指定gateが必要。production適用にはscheduler drain、旧artifact停止、backup/rollback、migration windowと運用責任者の別承認が残る。
+
+## 9. 孤児token（`processing_claimed_at IS NULL AND processing_claim_token IS NOT NULL`）の扱い
+
+2026-11-12追加（独立レビューP1-1）。
+
+- **発生経路**: (a) 新旧scheduler混在稼働で、新nodeがtoken Xでclaimした行を、tokenを知らない旧nodeがstale takeover（`processing_claimed_at` だけ更新し、tokenはXのまま）した後、旧nodeのcompletionが `processing_claimed_at` だけをclearする。(b) V185 schemaを残したまま旧artifactへrollbackし、新版が残したleaseを旧版が引き継いで完了した後に再upgradeする。
+- **意味付け**: completion（`markSuccess`/`markFailure`）は非NULLのclaimedAt完全一致を要求するため、`processing_claimed_at IS NULL` の行に残ったtokenで完了できるworkerは存在しない。したがってowner不在＝未占有として扱う。旧版completionが進めた `next_run_at` / `retry_scheduled_at` / `processing_logical_run_at` はそのまま次回due・retryとして尊重する。
+- **処置**: `selectDue` / `claimDue` の未占有判定は `processing_claimed_at IS NULL` だけとし、due snapshotのtoken完全一致（NULL/非NULLを明示照合）を含む全列CASでclaim時に新tokenへ上書きする。同時に `selectDue` のretry分岐へ未占有条件を加え、実行中retry leaseがLIMIT 50枠を毎poll占有しないようにした（P2-5）。
+- **検知**: 置換時にschedulerがWARN「旧版completionが残した孤児claim tokenを新tokenで置換しました」を出す（token値は出力しない）。§10.3のQ2でも検出できる。
+- **限界**: 混在稼働中は旧nodeが新ownerのlease（`processing_claimed_at`）を書き換え得るため、新ownerのcompletionは0件となり、生成/配布の重複は防げない。fenceは状態の上書きを防ぐだけで旧版の挙動は変えられないため、§10のrolling禁止・drainが前提条件である。
+- **検証（未実行）**: `ReportScheduleClaimFenceMySqlTest` の「旧版success_completionが残した孤児tokenは通常claimで回収され旧ownerは完了できない」「旧版failure_completionが残した孤児token行もretry時刻にscheduler経由で回収される」「実行中のretry_leaseはLIMIT枠を占有せずstale後だけ再選択される」、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest` の孤児token用case。旧版SQLは73aa7000の `ReportScheduleMapper` をtest内に再現して用いる。
+
+## 10. 本番適用の前提（草案・**SRE/DBA承認待ち**）
+
+本節は草案であり、承認・実施されたrunbookではない。コードでは本節の条件を強制していない。
+
+### 10.1 リリース前提
+
+- **rolling deploymentは禁止**。V185適用の前後を問わず、新旧versionのschedulerを同時に稼働させない。
+- Flywayは新artifactの最初の起動時にV185を自動適用する（`spring.flyway.enabled` 既定true）。V185適用と新artifact起動は分離できないため、**旧nodeのschedulerをすべて停止し、in-flight処理のdrain完了を確認してから**新artifactだけを起動する。
+- 新artifactへの切替後に旧artifactへ戻す場合も同じ（新nodeを全停止・drainしてから旧artifactを起動する）。
+- 起動guard（drain未確認やtoken無しの新しいleaseが残る状態でschedulerを起動しない等）は未実装。要否はSRE/Owner判断。
+
+### 10.2 手順草案
+
+1. 全nodeでschedulerを停止する（`app.scheduling.enabled=false` で再起動、またはinstance停止）。
+2. drainを確認する: §10.3のQ1で実行中lease（`processing_claimed_at` 非NULL）が0件、またはすべてがlease期限（30分）を超過していること。0件にならない場合は期限まで待ち、手動でclearしない。
+3. backupを取得する（full dumpまたはPITR基準点）。
+4. 新artifactだけを起動する（V185適用）。`flyway_schema_history` でversion 185の `success = 1` を確認する。
+5. 新artifactのschedulerを有効化する。
+6. 事後確認としてQ2（孤児token）・Q3（token無しlease）を確認し、Q2は次回due/retryで自動回収されることを件数推移で確認する。
+
+### 10.3 検出SQL（read-onlyのSELECTのみ）
+
+DATETIME列はtenant timezoneのwall clock（既定Asia/Tokyo、DST無し）で保存される。以下はAsia/Tokyoのtenantを前提に `CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')` を現在時刻として使う。他のtimezoneのtenantはoffsetを読み替える。
+
+```sql
+-- Q1: 実行中lease（drain確認）。lease_age_minutesが30以上ならstale（新版が引き継ぐ対象）。
+SELECT tenant_id, id, processing_logical_run_at, processing_claimed_at,
+       processing_claim_token IS NOT NULL AS has_token,
+       TIMESTAMPDIFF(MINUTE, processing_claimed_at, CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+09:00')) AS lease_age_minutes
+FROM m_report_schedule
+WHERE deleted_flag = 0 AND processing_claimed_at IS NOT NULL
+ORDER BY tenant_id, id;
+
+-- Q2: 孤児token（旧版completionの痕跡。新旧混在稼働の証拠）。
+SELECT tenant_id, id, enabled, next_run_at, retry_scheduled_at, processing_logical_run_at, failure_count, updated_at
+FROM m_report_schedule
+WHERE deleted_flag = 0 AND processing_claimed_at IS NULL AND processing_claim_token IS NOT NULL
+ORDER BY tenant_id, id;
+
+-- Q3: token無しlease（V185以前のclaim、またはupgrade後に旧nodeがclaimした行）。
+SELECT tenant_id, id, processing_logical_run_at, processing_claimed_at, updated_at
+FROM m_report_schedule
+WHERE deleted_flag = 0 AND processing_claimed_at IS NOT NULL AND processing_claim_token IS NULL
+ORDER BY tenant_id, id;
+
+-- Q4: 連続失敗（retry上限未定義の監視用。12回以上でretry間隔が上限60分に達する）。
+SELECT tenant_id, id, failure_count, retry_scheduled_at, last_error_code, updated_at
+FROM m_report_schedule
+WHERE deleted_flag = 0 AND failure_count >= 12
+ORDER BY failure_count DESC, tenant_id, id;
+```
+
+### 10.4 復旧案草案（未承認・未実行）
+
+- **孤児token（Q2）**: 新版が次回due/retry時刻にCASで自動回収するため、手動UPDATEは原則不要。件数を見かけ上ゼロにする目的のclearは行わない。やむを得ずclearする場合の草案は、scheduler停止中に限り期待tokenを一致条件にした1行CASとする（**DBA承認前に実行しない**）:
+  `UPDATE m_report_schedule SET processing_claim_token = NULL WHERE tenant_id = ? AND id = ? AND processing_claimed_at IS NULL AND processing_claim_token = ?`
+- **token無しlease（Q3）**: 旧node停止・drain確認後、lease期限の超過を待てば新版が `processing_claimed_at` / `processing_logical_run_at` / token=NULLの完全一致CASで引き継ぐ。手動でtokenを付与しない（ownerを捏造しない）。
+- **rollback**: Flywayはforward-onlyとし、V185を取り消すDDL（DROP COLUMN）は用意しない。旧artifactはtoken列を無視して動作し、再upgrade後に残った孤児tokenは自動回収される。切替方向にかかわらず§10.1の停止・drainを行う。
+- **混在稼働が起きた場合**: 直ちに旧nodeのschedulerを停止し、Q1〜Q3を確認する。重複生成/配布の有無は `t_report_run.run_key`（一意）と `t_report_delivery` のdedupeで確認する。
+
+### 10.5 DB前提
+
+- 末尾へのADD COLUMNはMySQL 8.0.12以上でINSTANT対象（列位置指定を付けない理由）。本番MySQLの版とINSTANT可否はDBA確認待ち。対象表は小規模でINPLACEでも影響は限定的と想定するが、未計測。
+
+## 11. Owner判断待ち事項（挙動は変更しない）
+
+| ID | 論点 | 現状の実装 | 追加した防御（挙動不変） | 判断者 |
+|---|---|---|---|---|
+| P2-1 | lease延長、副作用前fence | lease 30分固定・延長なし。30分超のrunは引き継がれ、生成/配布が重複し得る（run_key・delivery dedupeでの収束はMySQL並行で未検証）。disableは実行中runを止めない | WARN「processing lease期限を超えて実行しました」「期限切れprocessing leaseを引き継ぎました」 | Report Owner／技術責任者 |
+| P2-2 | lease時刻のDB時刻化 | 見送り（下記理由） | なし（NTP同期を運用前提とする） | SRE |
+| P2-3 | tenant timezone変更時の扱い | schedule timezoneはAsia/Tokyo固定。tenant zoneと不一致なら `policyFixed` で失敗し、retryを繰り返す | WARN「tenant timezoneとschedule timezoneが一致しない…」 | Report Owner |
+| P2-4 | retry上限・DLQ | 上限なし（間隔は最大60分）。確定的失敗も無限retry | failure count 12以上でWARN、§10.3 Q4 | Report Owner |
+| P2-8 | claim失敗のmetric/alert | 確定的SQL失敗（文法・列不一致・制約・binding）は当tenantの今回pollを中断し、ERROR `errorCode=SCHEDULE_CLAIM_SQL_REJECTED` を出す。結果不明（commit失敗・接続障害・lock競合）は当該scheduleだけ見送る | ERRORログの分類のみ。metric/alert連携は未実装 | SRE |
+| — | 起動guard | 未実装 | なし | SRE／Owner |
+
+P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLocalDateTimeで保存しており、DBの `CURRENT_TIMESTAMP` はsession `time_zone` に依存してtenant timezoneを知らない。混在させるとstale判定とretry判定の基準がずれる。(2) completion CASはclaimedAtの完全一致を条件にしているため、DB生成値を使うとclaim後に読み戻す2文構成が必要になる。(3) H2 testの `CURRENT_TIMESTAMP` はJVM timezoneとなり、テスト結果が環境に依存する。node間の時刻差sがある場合、実効leaseは30−s分になる。
+
+## 12. 独立レビュー指摘対応表（2026-11-12）
+
+テスト名は追加・更新したtestであり、いずれも**未実行**。
+
+| 指摘 | 対応 | 主なtest |
+|---|---|---|
+| P0-1 | `ManagementReportScheduler` に `SafeErrorPolicy` のimportを復元 | （コンパイル） |
+| P0-2 | `ManagementReportSchedulerTest` を10引数constructorと新しいmapper署名へ更新 | `ManagementReportSchedulerTest` 全件 |
+| P1-1 | §9。未占有判定を `processing_claimed_at IS NULL` に統一し、孤児tokenを期待token一致CASで置換 | `ReportScheduleClaimFenceMySqlTest`（孤児token 2件）、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest` |
+| P1-2 | §7の8項目を `ReportScheduleClaimFenceMySqlTest`（`@Tag("mysql")`、`mysql-shard-1.txt` に登録）で実装 | 同class 17件 |
+| P1-3 | fresh/legacyで列の存在と定義（`char(36)\|ascii\|ascii_bin\|YES`）を検証。V184→V185 upgradeはアプリ自身のFlywayでV184のlegacy lease行付きDBへ適用 | `FlywaySelfServiceSchemaSmokeTest`、`ReportScheduleClaimFenceMySqlTest` のV184 legacy lease case |
+| P1-4 | API応答・create入力・entity JSON/toStringのtoken非露出、setEnabledのlease保持 | `ReportScheduleApiBoundaryTest`、`ReportScheduleServiceImplTest`、MySQLのenable/disable case |
+| P1-5 | §10にリリース前提・検出SQL・復旧案草案（SRE/DBA承認待ち）。コードでの強制はしない | — |
+| P2-1/2/3/4/8 | §11（Owner判断待ち。挙動不変の防御ログのみ追加） | 一部 `ManagementReportSchedulerTest` |
+| P2-5 | `selectDue` retry分岐に未占有条件 | MySQL LIMIT枠case、H2 case |
+| P2-6 | `updateEnabled` に `deleted_flag = 0`、version加算、updated_byのnot_null相当処理。応答は再読込 | `ReportScheduleServiceImplTest`、MySQL enable/disable case、H2 case |
+| P2-7 | lease/retry/token/failure countを `FieldStrategy.NEVER`（INSERT/UPDATE）、next/last runをUPDATEのみNEVER | `ReportScheduleApiBoundaryTest`、MySQL entity insert/updateById case |
+| P2-9 | `CHAR(36) ascii ascii_bin`、`AFTER` 削除、H2同期 | `FlywaySelfServiceSchemaSmokeTest`、MySQL V184 case・大文字token case |
+| P2-10 | proxyを迂回する簡易constructorを削除。claim serviceは秒精度へ正規化 | MySQLのREQUIRES_NEW case、`ManagementReportSchedulerTest` のclaim service case |
+| P2-11 | 本書の状態を「実装済・独立レビュー待ち・テスト未実行」へ更新、completion-matrixへ追記。公開 `runOne` 削除はcommit messageに明記 | — |
+| P2-12 | latest期待値を `LatestMigrationVersion.LATEST` に集約（4 class・5箇所） | 4 migration test class |
+
+### §7受入試験とtestの対応（いずれも未実行）
+
+`ReportScheduleClaimFenceMySqlTest` のmethod名で示す。
+
+1. 旧A success拒否: 「stale_takeover後の旧Aのsuccess_completionは0件でBの状態を一切変えない」「長時間実行中のAをBが引き継いでも旧Aのcompletionは0件でBの完了状態を上書きしない」（scheduler 2 instance）
+2. 旧A failure拒否: 「stale_takeover後の旧Aのfailure_completionは0件でBの状態を一切変えない」
+3. 同時競合・tenant: 「同一snapshotの同時claimはInnoDB行lock待ちの後で一件だけが勝つ」（2接続＋latch＋`information_schema.innodb_trx` のLOCK WAIT観測）、「同一snapshotから8並行でclaimしても一件だけがtokenを得る」（barrier）、「他tenantの行はtenant境界を越えてclaimもcompletionも更新もできない」
+4. stale snapshot: 「due選択後に状態が変わった古いsnapshotではclaimできない」（NULL⇔非NULL遷移を含む13パターン）
+5. 正常・retry: 「初回successは次回cronへ進みlease_token_logical_runをclearする」「失敗は失敗検知時刻基準でretryし月跨ぎretryは同一logicalRunAtと新tokenで完了する」。生成/配布の重複がrun_key/delivery dedupeで収束することは実serviceを使っておらず**未検証**（§11 P2-1）。ここではA/Bが同一の生成要求（template version・対象期間・schedule・cutoff）を出すことまでを確認する。
+6. 長時間batch: 「長時間batchでもclaim時刻はscheduleごとの秒精度で保存され直後pollでstale扱いされない」（50件）
+7. API/entity/log: `ReportScheduleApiBoundaryTest` 全件、「enable_disableは実行中leaseとtokenを保持しversionと更新者だけを進める」「entity経由のinsertとupdateByIdはlease_token_retry列を書き込まない」、scheduler log内にtokenが出ないこと（上記1と孤児token case）
+8. deployment/migration: 「V184のlegacy_lease行はV185適用後もtoken無しで保持され期限切れ後だけ引き継げる」、`FlywaySelfServiceSchemaSmokeTest`（fresh/legacy列定義）、孤児token 2件（旧版SQLによる混在稼働の再現）。drain-before-rolloutは§10（草案、SRE/DBA承認待ち）。

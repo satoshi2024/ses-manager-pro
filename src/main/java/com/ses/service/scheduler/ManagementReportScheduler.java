@@ -40,7 +40,7 @@ import java.util.UUID;
  * scheduleはShedLockとDBのprocessing lease（claim token付きCAS）を併用し、HTTP sessionを使わずsystem principalで実行する。
  * claim時はnext_run_atを進めず、成功時のみ次回cronへ進める。claim/stale判定/失敗時刻はscheduleごとの現在時刻を使う。
  *
- * <p>leaseは延長しない（30分固定）。30分を超えて実行中のworkerは他workerに接管され得るため、completionは
+ * <p>leaseは延長しない（30分固定）。30分を超えて実行中のworkerは他workerにtakeover（引き継ぎ）され得るため、completionは
  * claim token・claimedAt・logicalRunAtの完全一致でのみ成立し、所有権を失った旧workerは状態を上書きしない。
  * 重複した生成/配布の副作用はrun_key・delivery dedupeの既存冪等境界に委ねる（lease延長はOwner判断待ち）。
  */
@@ -167,7 +167,7 @@ public class ManagementReportScheduler {
     /** claim前のsnapshotが他workerの状態を引き継いだ場合だけ記録する（tokenは出力しない）。 */
     private void logReplacedClaimState(ReportSchedule previous, ReportScheduleClaimService.Claim claim) {
         if (previous.getProcessingClaimedAt() != null) {
-            log.warn("[定期管理レポート] 期限切れprocessing leaseを接管しました。旧workerの副作用は冪等境界で収束させます: "
+            log.warn("[定期管理レポート] 期限切れprocessing leaseを引き継ぎました。旧workerとの重複副作用は既存の冪等境界に委ねます: "
                             + "scheduleId={} leaseAgeMinutes={} legacyLease={}",
                     previous.getId(), Duration.between(previous.getProcessingClaimedAt(), claim.claimedAt()).toMinutes(),
                     previous.getProcessingClaimToken() == null);
@@ -213,7 +213,7 @@ public class ManagementReportScheduler {
                                  LocalDateTime logicalRunAt) {
         LocalDateTime completedAt = now(zone);
         if (!completedAt.isBefore(claim.claimedAt().plusMinutes(PROCESSING_LEASE_MINUTES))) {
-            log.warn("[定期管理レポート] processing lease期限を超えて実行しました。他workerへ接管された可能性があります: "
+            log.warn("[定期管理レポート] processing lease期限を超えて実行しました。他workerに引き継がれた可能性があります: "
                             + "scheduleId={} elapsedMinutes={}",
                     schedule.getId(), Duration.between(claim.claimedAt(), completedAt).toMinutes());
         }
