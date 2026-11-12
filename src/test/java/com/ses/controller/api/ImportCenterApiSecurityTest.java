@@ -29,7 +29,6 @@ import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.Ordered;
-import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -148,12 +147,57 @@ class ImportCenterApiSecurityTest {
                 .andExpect(jsonPath("$.code").value(500));
     }
 
+    @Test
+    void charsetContradictingTheSelectedEncodingIsRejectedBeforeCsrfControllerAndBody() throws Exception {
+        mockMvc.perform(rawUpload("text/csv;charset=UTF-8", "SHIFT_JIS")
+                        .cookie(new Cookie("XSRF-TOKEN", "matching-token"))
+                        .header("X-XSRF-TOKEN", "matching-token"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.message").value("error.import.uploadMediaType"));
+
+        verify(ingestion, never()).upload(any(), any());
+        assertFalse(bodyTrackingFilter.bodyTouched());
+    }
+
+    @Test
+    void contentTypeParameterOtherThanCharsetIsRejectedBeforeCsrfControllerAndBody() throws Exception {
+        mockMvc.perform(rawUpload("text/csv; header=present", "UTF8")
+                        .cookie(new Cookie("XSRF-TOKEN", "matching-token"))
+                        .header("X-XSRF-TOKEN", "matching-token"))
+                .andExpect(status().isUnsupportedMediaType());
+
+        verify(ingestion, never()).upload(any(), any());
+        assertFalse(bodyTrackingFilter.bodyTouched());
+    }
+
+    @Test
+    void shiftJisCharsetMatchingTheSelectedEncodingReachesController() throws Exception {
+        mockMvc.perform(rawUpload("text/csv;charset=Shift_JIS", "SHIFT_JIS")
+                        .cookie(new Cookie("XSRF-TOKEN", "matching-token"))
+                        .header("X-XSRF-TOKEN", "matching-token"))
+                .andExpect(status().isOk());
+
+        verify(ingestion).upload(any(), any());
+        assertFalse(bodyTrackingFilter.bodyTouched());
+    }
+
+    /**
+     * MockMvcではSpring BootのCharacterEncodingFilter（server.servlet.encoding.force=true）が
+     * {@code setCharacterEncoding("UTF-8")}を呼び、MockHttpServletRequestはcharsetを持たないContent-Type headerへ
+     * {@code ;charset=UTF-8}を付け足す（実Tomcatではrequest headerは書き換わらない）。guardの判定対象を固定するため、
+     * 既定requestではcharsetを明示した{@code text/csv;charset=UTF-8}を送る。素の{@code text/csv}はguard単体testで確認する。
+     */
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder validRawUpload() {
+        return rawUpload("text/csv;charset=UTF-8", "UTF8");
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder rawUpload(String contentType,
+                                                                                                String encoding) {
         return post("/api/import-center/uploads")
                 .with(user(testPrincipal))
-                .contentType(MediaType.valueOf("text/csv"))
+                .contentType(contentType)
                 .header("X-Import-Source-Code", "synthetic-a")
-                .header("X-Import-Encoding", "UTF8")
+                .header("X-Import-Encoding", encoding)
                 .content("externalKey,companyName\nC-SYN-1,Example\n");
     }
 
