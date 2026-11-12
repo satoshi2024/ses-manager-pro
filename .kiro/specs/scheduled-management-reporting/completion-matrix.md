@@ -71,13 +71,15 @@ Review remediation（`codex/nf10-review-remediation`）: delivery TX/outbox/prev
 
 ## NF10-V185 scheduler claim fence（2026-11-12）
 
-状態: **実装済・独立レビュー待ち・テスト未実行（コンパイル未確認）。** COMPLETE/PASSではない。
+状態: **実装済・コンパイル確認済・定向fast 288/0/0/0・定向MySQL 1件FAIL（修正中）。** COMPLETE/PASSではない。
+
+`93c11457c17e7f082d2773500e8c47de2d50ed95` に対し、独立レビュー（静的）PASS、定向fast 9 class 288/0/0/0、定向MySQL 7 class 41件中1件FAIL（errors/skipped 0）。FAILはtestの行lock待ち観測方法の欠陥と判断して修正した（plan §13）。修正commitは未実行・再レビュー待ち。証拠は主控のrun記録 `nf10-93c11457-fast-targeted` / `nf10-93c11457-mysql-targeted`。
 
 | 項目 | 内容 |
 |---|---|
 | 基準 | `73aa70004484db96ffd9100ffa13dd7acaaf365e`（PR #118候補）。branch `codex/snf-nf10-v185-integration-20261112` |
-| migration | `V185__report_schedule_claim_token.sql`（`processing_claim_token CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL`、列位置指定なし）。V185はユーザー承認済みの採番で、どの環境にも未適用 |
+| migration | `V185__report_schedule_claim_token.sql`（`processing_claim_token CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL`、列位置指定なし）。V185はユーザー承認済みの採番で、使い捨てのTestcontainers DB以外の環境には未適用 |
 | 実装 | claim token付き全列CAS、token・claimedAt・logicalRunAt一致のcompletion、per-scheduleの秒精度時刻、孤児token回収、実行中retry leaseのLIMIT枠除外、`updateEnabled` の限定更新、lease列の `FieldStrategy.NEVER`、確定的claim SQL失敗の分類 |
-| 計画・対応表 | `scheduler-claim-fence-plan.md` §9〜§12（独立レビュー指摘ごとの対応、§7受入試験とtestの対応） |
-| 追加test（未実行） | `ReportScheduleClaimFenceMySqlTest`（`@Tag("mysql")`、`scripts/test-suites/mysql-shard-1.txt`）、`ReportScheduleApiBoundaryTest`、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest`/`ReportScheduleServiceImplTest` の追加case、`FlywaySelfServiceSchemaSmokeTest` の列定義assert |
+| 計画・対応表 | `scheduler-claim-fence-plan.md` §9〜§13（独立レビュー指摘ごとの対応、§7受入試験とtestの対応、定向MySQL FAILの診断） |
+| 追加test（`93c11457` で定向実行済、上記1件FAILは修正後未実行） | `ReportScheduleClaimFenceMySqlTest`（`@Tag("mysql")`、`scripts/test-suites/mysql-shard-1.txt`）、`ReportScheduleApiBoundaryTest`、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest`/`ReportScheduleServiceImplTest` の追加case、`FlywaySelfServiceSchemaSmokeTest` の列定義assert |
 | 本番適用の前提 | rolling禁止・drain先行・検出SQL・復旧案は草案（plan §10、**SRE/DBA承認待ち**）。lease延長・retry上限・timezone変更・metric/alert・起動guardはOwner判断待ち（plan §11） |

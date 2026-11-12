@@ -73,11 +73,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -93,7 +93,8 @@ import static org.mockito.Mockito.when;
  *   <li>Spring context起動前にFlyway APIでV184まで適用し、V185以前のlegacy lease行を投入する。その後アプリ自身の
  *       Flyway（spring.flyway.enabled=true）がV184→最新へupgradeする（§7-8、本番起動時と同じ経路）。</li>
  *   <li>claimは実Spring beanの {@link ReportScheduleClaimService}（REQUIRES_NEW proxy）を使う。</li>
- *   <li>競合は2接続＋latch＋InnoDBのLOCK WAIT観測、またはbarrierで再現し、H2を並行性の根拠にしない。</li>
+ *   <li>競合は2接続＋latch＋{@code performance_schema.data_lock_waits} による行lock待ち辺の観測、またはbarrierで
+ *       再現し、H2を並行性の根拠にしない。</li>
  *   <li>Docker必須・零skip（{@code disabledWithoutDocker} は使わない）。fixtureはsyntheticなtenant/scheduleだけを使う。</li>
  * </ul>
  */
@@ -150,6 +151,35 @@ class ReportScheduleClaimFenceMySqlTest {
             + "failure_count = COALESCE(failure_count, 0) + 1, retry_scheduled_at = ?, processing_claimed_at = NULL, "
             + "last_error_code = ?, last_error_message = ?, last_run_at = ?, updated_at = CURRENT_TIMESTAMP "
             + "WHERE tenant_id = ? AND id = ? AND processing_claimed_at IS NOT NULL";
+
+    /**
+     * holder接続（bt）が保持する対象行のPRIMARY record lockに対し、別接続（rt）で実行中のclaim UPDATEが待っている
+     * lock待ち辺を返す。返す値は待っている側の接続ID（{@code CONNECTION_ID()} と同じ値）。
+     *
+     * <p>{@code performance_schema.data_locks}/{@code data_lock_waits} はInnoDBのlock systemを照会のたびに走査する。
+     * {@code information_schema.innodb_trx} はInnoDBの {@code trx_i_s} cacheから返され、cacheは「最後の読取から
+     * 0.1秒を超えて経過した」場合にだけ再取得されるため、20ms間隔のpollingでは最初の読取時点のsnapshotが固定され、
+     * その後に発生したLOCK WAITを観測できない。93c11457の定向MySQL実行で本testが失敗した原因であり、使わない。
+     */
+    private static final String CLAIM_ROW_LOCK_WAIT_SQL = "SELECT rt.PROCESSLIST_ID "
+            + "FROM performance_schema.data_lock_waits w "
+            + "JOIN performance_schema.data_locks req ON req.ENGINE = w.ENGINE "
+            + "  AND req.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID "
+            + "JOIN performance_schema.data_locks blk ON blk.ENGINE = w.ENGINE "
+            + "  AND blk.ENGINE_LOCK_ID = w.BLOCKING_ENGINE_LOCK_ID "
+            + "JOIN performance_schema.threads rt ON rt.THREAD_ID = req.THREAD_ID "
+            + "JOIN performance_schema.threads bt ON bt.THREAD_ID = blk.THREAD_ID "
+            + "WHERE req.OBJECT_SCHEMA = DATABASE() AND req.OBJECT_NAME = 'm_report_schedule' "
+            + "  AND req.INDEX_NAME = 'PRIMARY' AND req.LOCK_TYPE = 'RECORD' "
+            + "  AND req.LOCK_STATUS = 'WAITING' AND req.LOCK_MODE LIKE 'X%' "
+            + "  AND (req.LOCK_DATA = ? OR CAST(req.LOCK_DATA AS UNSIGNED) = ?) "
+            + "  AND blk.OBJECT_SCHEMA = DATABASE() AND blk.OBJECT_NAME = 'm_report_schedule' "
+            + "  AND blk.INDEX_NAME = 'PRIMARY' AND blk.LOCK_TYPE = 'RECORD' "
+            + "  AND blk.LOCK_STATUS = 'GRANTED' AND blk.LOCK_MODE LIKE 'X%' "
+            + "  AND (blk.LOCK_DATA = ? OR CAST(blk.LOCK_DATA AS UNSIGNED) = ?) "
+            + "  AND bt.PROCESSLIST_ID = ? "
+            + "  AND rt.PROCESSLIST_ID <> ? AND rt.PROCESSLIST_ID <> CONNECTION_ID() "
+            + "  AND rt.PROCESSLIST_INFO LIKE '%UPDATE m_report_schedule SET processing_logical_run_at%'";
 
     private static final Object V184_PREPARE_LOCK = new Object();
     private static boolean v184Prepared;
@@ -424,10 +454,14 @@ class ReportScheduleClaimFenceMySqlTest {
         holderTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         CountDownLatch holderUpdated = new CountDownLatch(1);
         CountDownLatch releaseHolder = new CountDownLatch(1);
+        AtomicLong holderConnectionId = new AtomicLong(-1L);
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
             // holder: 同じsnapshotでclaim UPDATEを実行し、行lockを保持したままcommitを待つ。
             Future<Integer> holder = pool.submit(() -> holderTransaction.execute(status -> {
+                // transactionに束縛された接続（MyBatisのUPDATEと同じ接続）のIDを、lock保持者として記録する。
+                Long connectionId = jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class);
+                holderConnectionId.set(connectionId == null ? -1L : connectionId);
                 int changed = scheduleMapper.claimDue(TENANT, id, snapshot.getNextRunAt(),
                         snapshot.getRetryScheduledAt(), snapshot.getProcessingClaimedAt(),
                         snapshot.getProcessingLogicalRunAt(), snapshot.getProcessingClaimToken(),
@@ -438,13 +472,20 @@ class ReportScheduleClaimFenceMySqlTest {
                 return changed;
             }));
             assertThat(holderUpdated.await(10, TimeUnit.SECONDS)).as("holderのclaim UPDATE").isTrue();
+            long holderConnection = holderConnectionId.get();
+            assertThat(holderConnection).as("holder接続ID").isPositive();
+            assertThat(claimRowLockWaiters(id, holderConnection)).as("contender投入前にlock待ちは無い").isEmpty();
+
             // contender: 実claim service（REQUIRES_NEW）で同じsnapshotをclaimし、holderの行lockで待つ。
             Future<ReportScheduleClaimService.Claim> contender = pool.submit(() -> claim(snapshot, SEPT, claimedAt));
-            awaitInnoDbLockWait(contender);
+            long contenderConnection = awaitClaimRowLockWait(id, holderConnection, contender);
+            assertThat(contenderConnection).as("待っているのはholderとは別の接続").isNotEqualTo(holderConnection);
+            assertThat(contender.isDone()).as("holderのcommit前にcontenderは完了しない").isFalse();
             releaseHolder.countDown();
 
             assertThat(holder.get(10, TimeUnit.SECONDS)).isEqualTo(1);
             assertThat(contender.get(10, TimeUnit.SECONDS)).as("lock解放後に再評価されたCASは0件").isNull();
+            assertThat(claimRowLockWaiters(id, holderConnection)).as("holder commit後にlock待ちは残らない").isEmpty();
             assertThat(token(id)).isEqualTo(holderToken);
             assertThat(dateTime(id, "processing_claimed_at")).isEqualTo(claimedAt);
         } finally {
@@ -1047,21 +1088,75 @@ class ReportScheduleClaimFenceMySqlTest {
                 List.of(new SimpleGrantedAuthority("ROLE_管理者"))));
     }
 
-    private void awaitInnoDbLockWait(Future<?> contender) throws Exception {
+    /**
+     * contenderのclaim UPDATEが、holder接続の保持する対象行のPRIMARY record lockで待っていることを観測し、
+     * 待っている接続IDを返す。観測は {@link #CLAIM_ROW_LOCK_WAIT_SQL}（performance_schema、cache無し）で行う。
+     */
+    private long awaitClaimRowLockWait(long id, long holderConnectionId, Future<?> contender) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
             if (contender.isDone()) {
                 contender.get();
-                fail("contenderがInnoDBの行lock待ちに入る前に完了しました");
+                throw new AssertionError("contenderがholderの行lock待ちに入る前に完了しました"
+                        + lockDiagnostics(id, holderConnectionId, contender));
             }
-            Integer waiting = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM information_schema.innodb_trx WHERE trx_state = 'LOCK WAIT'", Integer.class);
-            if (waiting != null && waiting > 0) {
-                return;
+            List<Long> waiters = claimRowLockWaiters(id, holderConnectionId);
+            if (waiters.size() > 1) {
+                throw new AssertionError("holderの行lockを待つclaim UPDATEが複数あります: " + waiters
+                        + lockDiagnostics(id, holderConnectionId, contender));
+            }
+            if (waiters.size() == 1) {
+                return waiters.get(0);
             }
             Thread.sleep(20);
         }
-        fail("contenderのInnoDB LOCK WAITを10秒以内に観測できませんでした");
+        throw new AssertionError("contenderのclaim UPDATEがholderの行lockで待つことを10秒以内に観測できませんでした"
+                + lockDiagnostics(id, holderConnectionId, contender));
+    }
+
+    private List<Long> claimRowLockWaiters(long id, long holderConnectionId) {
+        return jdbcTemplate.queryForList(CLAIM_ROW_LOCK_WAIT_SQL, Long.class,
+                String.valueOf(id), id, String.valueOf(id), id, holderConnectionId, holderConnectionId);
+    }
+
+    /** 観測失敗時に、行lock・metadata lock・実行中SQLの状態を残す（SQLは先頭だけを出し、token値を含めない）。 */
+    private String lockDiagnostics(long id, long holderConnectionId, Future<?> contender) {
+        StringBuilder diagnostics = new StringBuilder("\n=== claim行lock診断 ===\n")
+                .append("scheduleId=").append(id)
+                .append(" holderConnectionId=").append(holderConnectionId)
+                .append(" contenderDone=").append(contender.isDone()).append('\n');
+        appendDiagnostic(diagnostics, "data_lock_waits", "SELECT w.REQUESTING_ENGINE_TRANSACTION_ID AS requesting_trx, "
+                + "w.BLOCKING_ENGINE_TRANSACTION_ID AS blocking_trx, rt.PROCESSLIST_ID AS requesting_connection, "
+                + "bt.PROCESSLIST_ID AS blocking_connection, req.OBJECT_NAME, req.INDEX_NAME, req.LOCK_TYPE, "
+                + "req.LOCK_MODE, req.LOCK_DATA FROM performance_schema.data_lock_waits w "
+                + "JOIN performance_schema.data_locks req ON req.ENGINE = w.ENGINE "
+                + "  AND req.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID "
+                + "JOIN performance_schema.data_locks blk ON blk.ENGINE = w.ENGINE "
+                + "  AND blk.ENGINE_LOCK_ID = w.BLOCKING_ENGINE_LOCK_ID "
+                + "LEFT JOIN performance_schema.threads rt ON rt.THREAD_ID = req.THREAD_ID "
+                + "LEFT JOIN performance_schema.threads bt ON bt.THREAD_ID = blk.THREAD_ID");
+        appendDiagnostic(diagnostics, "data_locks(m_report_schedule)", "SELECT t.PROCESSLIST_ID AS connection_id, "
+                + "l.ENGINE_TRANSACTION_ID, l.INDEX_NAME, l.LOCK_TYPE, l.LOCK_MODE, l.LOCK_STATUS, l.LOCK_DATA "
+                + "FROM performance_schema.data_locks l "
+                + "LEFT JOIN performance_schema.threads t ON t.THREAD_ID = l.THREAD_ID "
+                + "WHERE l.OBJECT_SCHEMA = DATABASE() AND l.OBJECT_NAME = 'm_report_schedule'");
+        appendDiagnostic(diagnostics, "metadata_locks(m_report_schedule)", "SELECT t.PROCESSLIST_ID AS connection_id, "
+                + "m.LOCK_TYPE, m.LOCK_DURATION, m.LOCK_STATUS FROM performance_schema.metadata_locks m "
+                + "LEFT JOIN performance_schema.threads t ON t.THREAD_ID = m.OWNER_THREAD_ID "
+                + "WHERE m.OBJECT_SCHEMA = DATABASE() AND m.OBJECT_NAME = 'm_report_schedule'");
+        appendDiagnostic(diagnostics, "threads(m_report_schedule SQL実行中)", "SELECT PROCESSLIST_ID AS connection_id, "
+                + "PROCESSLIST_COMMAND, PROCESSLIST_STATE, PROCESSLIST_TIME, LEFT(PROCESSLIST_INFO, 80) AS sql_prefix "
+                + "FROM performance_schema.threads WHERE PROCESSLIST_INFO LIKE '%m_report_schedule%' "
+                + "AND PROCESSLIST_ID <> CONNECTION_ID()");
+        return diagnostics.toString();
+    }
+
+    private void appendDiagnostic(StringBuilder diagnostics, String label, String sql) {
+        try {
+            diagnostics.append(label).append(": ").append(jdbcTemplate.queryForList(sql)).append('\n');
+        } catch (RuntimeException ex) {
+            diagnostics.append(label).append(": 取得失敗 ").append(ex.getClass().getName()).append('\n');
+        }
     }
 
     private static void awaitLatch(CountDownLatch latch) {

@@ -1,11 +1,12 @@
 # NF-10 scheduler claim fence 修正計画
 
-状態: **実装済・独立レビュー待ち・テスト未実行（コンパイル未確認）。** COMPLETE/PASSではない。対象は `m_report_schedule` のscheduler claim所有権競合とclaim時刻の正確性に限定する。NF-10全体の再承認、production/運用gateの承認、remote/release承認を意味しない。
+状態: **実装済・コンパイル確認済・定向fast 288/0/0/0・定向MySQL 1件FAIL（修正中）。** COMPLETE/PASSではない。対象は `m_report_schedule` のscheduler claim所有権競合とclaim時刻の正確性に限定する。NF-10全体の再承認、production/運用gateの承認、remote/release承認を意味しない。
 
 - 当初Planの基準Head: `9bac40c9624e7d964bcf6e18f480b3457662206e`（§1〜§8は当時の記述を保持し、変更点は各節の「改訂」注記と§9以降に記す）。
 - 2026-11-12改訂の実装基準: `73aa70004484db96ffd9100ffa13dd7acaaf365e`（PR #118候補）。migration番号は **V185** をユーザーが承認済み（root/主控経由）。
 - 実装branch: `codex/snf-nf10-v185-integration-20261112`。独立レビュー（REQUEST CHANGES: P0×2、P1×5、P2×12）の指摘ごとの対応は§12。
-- テストは独立レビューPASS後に主控（唯一のTestRunner）が実行する。本書の記述はいずれも実行結果ではない。
+- テストは主控（唯一のTestRunner）が実行する。`93c11457c17e7f082d2773500e8c47de2d50ed95` に対する独立レビュー（静的）はPASS。同SHAの定向fast（9 class）は288/0/0/0、定向MySQL（`-Pmysql-tests`、7 class）は41件中1件FAIL（`ReportScheduleClaimFenceMySqlTest` の「同一snapshotの同時claimはInnoDB行lock待ちの後で一件だけが勝つ」、errors/skipped 0）。証拠は主控のrun記録 `nf10-93c11457-fast-targeted` / `nf10-93c11457-mysql-targeted`。
+- 上記FAILはtestの観測方法の欠陥（`information_schema.innodb_trx` のcache固定）と判断し、観測を `performance_schema.data_lock_waits` へ置き換えた（§13）。修正commitは未実行・再レビュー待ち。それ以外の記述はtest名・設計の対応であり、実行結果を意味しない。
 
 ## 1. 確認した欠陥と影響
 
@@ -134,7 +135,7 @@ V185がrootにより割り当てられた場合、latest version=184を期待す
 - **処置**: `selectDue` / `claimDue` の未占有判定は `processing_claimed_at IS NULL` だけとし、due snapshotのtoken完全一致（NULL/非NULLを明示照合）を含む全列CASでclaim時に新tokenへ上書きする。同時に `selectDue` のretry分岐へ未占有条件を加え、実行中retry leaseがLIMIT 50枠を毎poll占有しないようにした（P2-5）。
 - **検知**: 置換時にschedulerがWARN「旧版completionが残した孤児claim tokenを新tokenで置換しました」を出す（token値は出力しない）。§10.3のQ2でも検出できる。
 - **限界**: 混在稼働中は旧nodeが新ownerのlease（`processing_claimed_at`）を書き換え得るため、新ownerのcompletionは0件となり、生成/配布の重複は防げない。fenceは状態の上書きを防ぐだけで旧版の挙動は変えられないため、§10のrolling禁止・drainが前提条件である。
-- **検証（未実行）**: `ReportScheduleClaimFenceMySqlTest` の「旧版success_completionが残した孤児tokenは通常claimで回収され旧ownerは完了できない」「旧版failure_completionが残した孤児token行もretry時刻にscheduler経由で回収される」「実行中のretry_leaseはLIMIT枠を占有せずstale後だけ再選択される」、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest` の孤児token用case。旧版SQLは73aa7000の `ReportScheduleMapper` をtest内に再現して用いる。
+- **検証（`93c11457` の定向fast/MySQLで通過）**: `ReportScheduleClaimFenceMySqlTest` の「旧版success_completionが残した孤児tokenは通常claimで回収され旧ownerは完了できない」「旧版failure_completionが残した孤児token行もretry時刻にscheduler経由で回収される」「実行中のretry_leaseはLIMIT枠を占有せずstale後だけ再選択される」、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest` の孤児token用case。旧版SQLは73aa7000の `ReportScheduleMapper` をtest内に再現して用いる。
 
 ## 10. 本番適用の前提（草案・**SRE/DBA承認待ち**）
 
@@ -215,7 +216,7 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 
 ## 12. 独立レビュー指摘対応表（2026-11-12）
 
-テスト名は追加・更新したtestであり、いずれも**未実行**。
+テスト名は追加・更新したtestである。`93c11457` で定向実行済（fast 288/0/0/0、MySQL 41件中1件FAIL。FAILは§13で修正、修正後は未実行）。
 
 | 指摘 | 対応 | 主なtest |
 |---|---|---|
@@ -235,15 +236,33 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 | P2-11 | 本書の状態を「実装済・独立レビュー待ち・テスト未実行」へ更新、completion-matrixへ追記。公開 `runOne` 削除はcommit messageに明記 | — |
 | P2-12 | latest期待値を `LatestMigrationVersion.LATEST` に集約（4 class・5箇所） | 4 migration test class |
 
-### §7受入試験とtestの対応（いずれも未実行）
+### §7受入試験とtestの対応（`93c11457` の定向MySQLでは3.の行lock待ちcaseだけがFAIL、他は通過。修正後は未実行）
 
 `ReportScheduleClaimFenceMySqlTest` のmethod名で示す。
 
 1. 旧A success拒否: 「stale_takeover後の旧Aのsuccess_completionは0件でBの状態を一切変えない」「長時間実行中のAをBが引き継いでも旧Aのcompletionは0件でBの完了状態を上書きしない」（scheduler 2 instance）
 2. 旧A failure拒否: 「stale_takeover後の旧Aのfailure_completionは0件でBの状態を一切変えない」
-3. 同時競合・tenant: 「同一snapshotの同時claimはInnoDB行lock待ちの後で一件だけが勝つ」（2接続＋latch＋`information_schema.innodb_trx` のLOCK WAIT観測）、「同一snapshotから8並行でclaimしても一件だけがtokenを得る」（barrier）、「他tenantの行はtenant境界を越えてclaimもcompletionも更新もできない」
+3. 同時競合・tenant: 「同一snapshotの同時claimはInnoDB行lock待ちの後で一件だけが勝つ」（2接続＋latch。holder接続ID・対象行のPRIMARY record lock・claim UPDATEを条件に `performance_schema.data_lock_waits` で待ち辺を観測。§13）、「同一snapshotから8並行でclaimしても一件だけがtokenを得る」（barrier）、「他tenantの行はtenant境界を越えてclaimもcompletionも更新もできない」
 4. stale snapshot: 「due選択後に状態が変わった古いsnapshotではclaimできない」（NULL⇔非NULL遷移を含む13パターン）
 5. 正常・retry: 「初回successは次回cronへ進みlease_token_logical_runをclearする」「失敗は失敗検知時刻基準でretryし月跨ぎretryは同一logicalRunAtと新tokenで完了する」。生成/配布の重複がrun_key/delivery dedupeで収束することは実serviceを使っておらず**未検証**（§11 P2-1）。ここではA/Bが同一の生成要求（template version・対象期間・schedule・cutoff）を出すことまでを確認する。
 6. 長時間batch: 「長時間batchでもclaim時刻はscheduleごとの秒精度で保存され直後pollでstale扱いされない」（50件）
 7. API/entity/log: `ReportScheduleApiBoundaryTest` 全件、「enable_disableは実行中leaseとtokenを保持しversionと更新者だけを進める」「entity経由のinsertとupdateByIdはlease_token_retry列を書き込まない」、scheduler log内にtokenが出ないこと（上記1と孤児token case）
 8. deployment/migration: 「V184のlegacy_lease行はV185適用後もtoken無しで保持され期限切れ後だけ引き継げる」、`FlywaySelfServiceSchemaSmokeTest`（fresh/legacy列定義）、孤児token 2件（旧版SQLによる混在稼働の再現）。drain-before-rolloutは§10（草案、SRE/DBA承認待ち）。
+
+## 13. 定向MySQL FAILの静的診断と修正（2026-11-12）
+
+対象: `93c11457` の `ReportScheduleClaimFenceMySqlTest`「同一snapshotの同時claimはInnoDB行lock待ちの後で一件だけが勝つ」。症状は10.07秒で「contenderのInnoDB LOCK WAITを10秒以内に観測できませんでした」。contenderは10秒間完了せず（完了していれば別messageになる）、`information_schema.innodb_trx` には `LOCK WAIT` が一度も現れず、HikariPool timeout・Lock wait timeout・Deadlockのlogも無い。再実行はしていない。
+
+**判断: testの観測方法の欠陥。claim fenceの並行語義（CAS・REQUIRES_NEW）の欠陥ではない。**
+
+- 原因（推断・高確度）: `information_schema.INNODB_TRX` はInnoDBの `trx_i_s` cacheから返される。cacheは「最後の**読取**から0.1秒を超えて経過した」場合にだけ再取得され、読取のたびに最終読取時刻が更新される（MySQL 8.0 `trx0i_s.cc` の `can_cache_be_updated` / `trx_i_s_cache_end_read`、公式文書「Persistence and Consistency of InnoDB Transaction and Locking Information」）。旧helperは約20ms間隔で読み続けたため、contender投入直後の最初の読取（contenderのUPDATEがInnoDBへ届く前）のsnapshotが10秒間固定され、その後に発生したLOCK WAITを観測できなかった。contenderが10秒間完了しなかったこと、待ちが50秒のlock wait timeoutに達せずholder解放後に後続testが正常に進んだことと整合する。
+- 同じrunで通過した `V182TenantScopeHardeningRehearsalMySqlTest` は `performance_schema.data_lock_waits` で行lock待ちを観測しており、同じ環境でこの観測方法は機能している（証拠: 同runの5/0/0/0）。
+- 排除した仮説（静的確認）: (1) 接続取得待ち — Hikari上限20に対し同時使用は最大3（holder・contender・監視）で、監視側は毎回接続を取得できていた。返却時は待機中の要求へhandoffされる。(2) holderがlockを持たない — 唯一の `PlatformTransactionManager` はBoot既定のもので、MyBatis/JdbcTemplateと同じHikariDataSourceを使う。分離levelの設定は無く（application*.yml・Hikari・`@Transactional`）MySQL既定のREPEATABLE READ。PRIMARY const accessのUPDATEは一致の有無にかかわらず当該recordのX lockをcommitまで保持する。READ COMMITTEDのsemi-consistent readでも、最新committed版がsnapshotと一致するため待ちは発生する。(3) MDL — test中にDDLやLOCK TABLESは無く、holderとcontenderはいずれもSHARED_WRITEで両立する。(4) 監視接続の権限 — root（PROCESS権限あり）でinformation_schemaを参照しており、権限不足なら0件ではなく別の結果になる要素は無い。(5) Java側のlock — claim service・MyBatis・Spring transactionにcontenderを止める共有lockは無く、8並行testは同じclaim service経由で通過している。
+- いずれも実行による確認はしていない（本診断はコードと仕様の静的読解）。
+
+**修正（test観測のみ。製品コードは変更しない）**
+
+- holderのtransaction内で `SELECT CONNECTION_ID()` を取得し、lock保持接続を特定する。
+- `performance_schema.data_lock_waits` を `data_locks`（requester/blocker）と `threads` へjoinし、次をすべて満たす待ち辺が1件だけ現れるまで待つ: 対象DBの `m_report_schedule`、`PRIMARY`、`RECORD`、requesterは `WAITING` のX lock、blockerは `GRANTED` のX lock、`LOCK_DATA` が対象id、blockerの接続IDがholder、requesterはholderでも監視接続でもない、requesterの実行中SQLがclaim UPDATE（`UPDATE m_report_schedule SET processing_logical_run_at…`）。
+- contender投入前に待ち辺が0件であること、観測時点でcontenderが未完了であること、holder commit後に待ち辺が残らないことも確認する。10秒の上限は変えない。観測できない場合はdata_lock_waits・data_locks・metadata_locks・実行中SQL先頭を診断として失敗messageへ出す。
+- 強度: 旧helperは「どこかのtransactionがLOCK WAIT」という条件だったが、新helperは「holder接続が保持する対象行のrecord lockを、別接続のclaim UPDATEが待っている」ことを要求するため、同等以上に厳しい。holder=1件、contender=CAS 0件（null）、tokenはholderのもの、という結果assertionは変更していない。
