@@ -110,6 +110,11 @@ do_ps() {
   if [[ "$scenario" == fixed-name-occupied && "$*" == *'name=^/ses-bkup-int-source$'* ]]; then
     printf '%s\n' deadbeefdead
   fi
+  # race-mkdir: WORK の判定後・準備前（固定名の事前確認中）に第三者が作業ディレクトリを先に作った状況を再現する
+  if [[ "$scenario" == race-mkdir && -n "${INTEGRATION_WORK_DIR:-}" && ! -e "$INTEGRATION_WORK_DIR" ]]; then
+    mkdir "$INTEGRATION_WORK_DIR" 2>/dev/null || true
+    printf '%s\n' "$INTEGRATION_WORK_DIR" >> "${MOCK_STATE_DIR:?}/raced-dirs"
+  fi
   exit 0
 }
 

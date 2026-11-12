@@ -320,6 +320,8 @@ case_integration_failure_capture_contract() {
   assert_contains "$runner" 'mv -T --' "既定WORKの退避は退避先へ入り込まない mv -T で行う"
   assert_contains "$runner" 'uutils coreutils' "uutils coreutils の timeout も採用する"
   assert_contains "$runner" 'ringStart = 0' "リングバッファの添字を明示的に初期化する"
+  assert_contains "$runner" 'BASH_VERSINFO' "bash 4.4 未満を BLOCKED にする前提検査を持つ"
+  assert_contains "$runner" 'WORK_PLAN_EXISTED' "判定時に WORK が存在したかを記録して準備時の排他作成に使う"
   assert_before "$(first_line_no "$RUNNER" 'if ! check_fixed_container_names; then')" \
     "$(first_line_no "$RUNNER" 'if ! prepare_work_dir; then')" "固定名の事前確認をWORKの作成・退避より前に行う"
 }
@@ -1076,6 +1078,8 @@ case_integration_default_work_rerun_rotates_previous_run() {
   runner_mock_run "$temp" success "-"
   assert_eq 0 "$RUNNER_RC" "既定WORKの初回runが成功"
   first_run=$(sed -n 's/^run=//p' "$default/.ses-pitr-run-owner" 2>/dev/null)
+  # run ID の epoch を進め、後の剪除順が PID の大小に依存しないようにする
+  sleep 1
   runner_mock_run "$temp" success "-"
   assert_eq 0 "$RUNNER_RC" "既定WORKの2回目のrunも成功（再実行回帰の防止）"
   assert_contains "$RUNNER_OUT" "前回の既定作業ディレクトリを退避しました" "退避を通知"
@@ -1233,7 +1237,8 @@ case_integration_controller_workdir_outside_temp() {
   assert_contains "$RUNNER_OUT" "mock-partial-start-failure" "WORK検証と事前確認を通過してcompose upへ進む"
   assert_file "$custom/integration-work/.ses-pitr-run-owner" "値の一致する所有マーカー付きWORKを所有"
 
-  # workDir は「/」を全て「\/」に、integration の 'a' を「a」にしたJSON文字列として書く。
+  # workDir は「/」を全て JSON のスラッシュエスケープ（バックスラッシュ+スラッシュ）に、integration の 'a' を
+  # JSON の u0061 エスケープ（バックスラッシュ+u0061）にした文字列として書く。
   # （バックスラッシュは bs 変数から組み立て、fixture と前提の期待値を同じ規則で作る）
   custom="$temp/custom/run2"
   mkdir -p "$custom/integration-work"
@@ -1298,6 +1303,57 @@ case_integration_controller_workdir_outside_temp() {
   rm -rf "$temp"
 }
 
+# 31) 判定後・準備前（固定名の事前確認中）に第三者が作成した作業ディレクトリは引き継がない
+#     （temp モード、および判定時に存在しなかった既定 WORK は本プロセスの排他 mkdir だけを許す）。
+case_integration_work_created_during_preflight_is_rejected() {
+  local temp work tests_dir default
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+
+  work="$temp/allowed/work-raced"
+  runner_mock_run "$temp" race-mkdir "$work"
+  assert_contains "$(cat "$temp/state/raced-dirs" 2>/dev/null)" "$work" "固定名の事前確認中に第三者がtemp WORKを作成した（前提）"
+  assert_eq 1 "$RUNNER_RC" "事前確認中に作られたtemp WORKを拒否"
+  assert_contains "$RUNNER_OUT" "排他的に作成できません" "temp WORKを排他作成できない理由を通知"
+  assert_eq "" "$(ls -A "$work" 2>/dev/null)" "他者が作成したtemp WORKへ所有マーカー等を書かない"
+  assert_no_file "$temp/chmod.log" "他者が作成したtemp WORKへchmodしない"
+  assert_not_contains "$RUNNER_DOCKER_LOG" "--user 0:0" "他者が作成したtemp WORKへroot chownコンテナを起動しない"
+  assert_not_contains "$RUNNER_DOCKER_LOG" "up -d --build" "temp WORKを用意できなければcompose upしない"
+
+  tests_dir=$(setup_copied_runner "$temp" repo)
+  default="$tests_dir/.integration-work"
+  RUNNER_UNDER_TEST="$tests_dir/run-integration.sh"
+  runner_mock_run "$temp" race-mkdir "-"
+  RUNNER_UNDER_TEST=""
+  assert_contains "$(cat "$temp/state/raced-dirs" 2>/dev/null)" "$default" "判定時に無かった既定WORKを事前確認中に第三者が作成した（前提）"
+  assert_eq 1 "$RUNNER_RC" "判定時に無かった既定WORKが事前確認中に作られたら拒否"
+  assert_contains "$RUNNER_OUT" "排他的に作成できません" "既定WORKを排他作成できない理由を通知"
+  assert_eq "" "$(ls -A "$default" 2>/dev/null)" "他者が作成した既定WORKへ所有マーカー等を書かない"
+  assert_no_file "$temp/chmod.log" "他者が作成した既定WORKへchmodしない"
+  assert_not_contains "$RUNNER_DOCKER_LOG" "up -d --build" "既定WORKを用意できなければcompose upしない"
+  rm -rf "$temp"
+}
+
+# 32) 実行環境の前提（coreutils の mv）を満たさなければ、Docker にも WORK にも触れず BLOCKED（2）で終了する。
+case_integration_runner_blocks_without_coreutils_mv() {
+  local temp work
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  cat > "$temp/bin/mv" <<'MOCK'
+#!/usr/bin/env bash
+echo "usage: mv [-f | -i | -n] [-hv] source target" >&2
+exit 64
+MOCK
+  "$REAL_CHMOD" +x "$temp/bin/mv"
+  work="$temp/allowed/work-bsd-mv"
+  runner_mock_run "$temp" success "$work"
+  assert_eq 2 "$RUNNER_RC" "coreutils以外のmv（mv -T非対応）ではBLOCKED(2)"
+  assert_contains "$RUNNER_OUT" "BLOCKED: GNU coreutils（または uutils coreutils）の mv が必要です" "前提不足の理由を通知"
+  assert_eq "" "$RUNNER_DOCKER_LOG" "BLOCKED時はDockerに一切触れない"
+  assert_no_file "$work" "BLOCKED時はWORKを作らない"
+  rm -rf "$temp"
+}
+
 run_case case_dependency_skip_is_nonzero
 run_case case_setup_error_is_nonzero
 run_case case_failing_backup_command_is_nonzero
@@ -1328,5 +1384,7 @@ run_case case_integration_default_work_marker_mismatch_rejected
 run_case case_integration_controller_workdir_outside_temp
 run_case case_integration_default_work_preflight_and_prune_policy
 run_case case_integration_default_work_pid_reuse_is_not_alive
+run_case case_integration_work_created_during_preflight_is_rejected
+run_case case_integration_runner_blocks_without_coreutils_mv
 
 test_summary "ACC-OPS-P2 harness self-tests"

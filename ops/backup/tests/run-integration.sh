@@ -17,6 +17,21 @@ set -uo pipefail
 export MSYS_NO_PATHCONV=1
 umask 077
 
+# 実行環境の前提。満たさない環境では途中で誤動作させず、Docker 不在と同じく BLOCKED として終了する。
+#   - bash 4.4 以上: set -u 下での空配列展開（"${arr[@]}"）、mapfile、local -a を使う。
+#   - coreutils（GNU または uutils）の mv: 既定 WORK の退避に mv -T（退避先へ入り込まない改名）を使う。
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
+  echo "BLOCKED: bash 4.4 以上が必要です（現在: ${BASH_VERSION}）。" >&2
+  exit 2
+fi
+case "$(mv --version 2>/dev/null < /dev/null)" in
+  *"GNU coreutils"*|*"uutils coreutils"*) ;;
+  *)
+    echo "BLOCKED: GNU coreutils（または uutils coreutils）の mv が必要です（既定 WORK の退避に mv -T を使用）。" >&2
+    exit 2
+    ;;
+esac
+
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 COMPOSE_FILE=$(cygpath -w "$HERE/docker-compose.integration.yml" 2>/dev/null || echo "$HERE/docker-compose.integration.yml")
 
@@ -56,6 +71,7 @@ WORK_PLAN_PARENT=""
 WORK_PLAN_DEFAULT=""
 WORK_PLAN_HERE=""
 WORK_PLAN_ROTATE_RUN=""
+WORK_PLAN_EXISTED=0
 ROTATE_OLD_RUN=""
 
 compose() {
@@ -366,7 +382,7 @@ apply_default_work_rotation() {
 validate_work_path() {
   local posix lexical here_lex here_canon repo_canon default_work candidate candidate_lex candidate_canon
   local mode="" root_canon="" rel="" rest component current i parent_path parent_lex work_canon entries last_index
-  local rotate_run=""
+  local rotate_run="" existed=0
   local -a candidates=() roots_lex=() roots_canon=() rel_parts=()
 
   posix=$(platform_posix_path "$WORK") || { reject_work_path "パスを正規化できません"; return 1; }
@@ -468,6 +484,7 @@ validate_work_path() {
   fi
 
   if [[ -e "$work_canon" || -L "$work_canon" ]]; then
+    existed=1
     if [[ ! -d "$work_canon" || -L "$work_canon" ]]; then
       echo "FAIL: integration work path is not a fresh owned directory" >&2
       return 1
@@ -504,6 +521,7 @@ validate_work_path() {
   WORK_PLAN_DEFAULT=$default_work
   WORK_PLAN_HERE=$here_canon
   WORK_PLAN_ROTATE_RUN=$rotate_run
+  WORK_PLAN_EXISTED=$existed
   return 0
 }
 
@@ -515,7 +533,17 @@ prepare_work_dir() {
   if [[ -n "$WORK_PLAN_ROTATE_RUN" ]]; then
     apply_default_work_rotation "$WORK_PLAN_DEFAULT" "$WORK_PLAN_HERE" "$WORK_PLAN_ROTATE_RUN" || return 1
   fi
-  if [[ -e "$work_canon" || -L "$work_canon" ]]; then
+  # 既存ディレクトリを使ってよいのは、判定時点で既に存在していた次の 2 つだけ:
+  #   - controller: verify-like-ci.ps1 が作成した空の integration-work（所有マーカーを再照合する）
+  #   - default:    退避対象ではない（判定時点で空だった）既定 WORK
+  # それ以外（temp、判定時点で存在しなかった default、退避後の default）は本プロセスの排他 mkdir
+  # （-p なし）だけを許す。判定と準備の間の Docker 事前確認中に他者が作成したディレクトリを引き継がないため。
+  if [[ "$WORK_PLAN_MODE" == controller ]] \
+      || [[ "$WORK_PLAN_MODE" == default && "$WORK_PLAN_EXISTED" == 1 && -z "$WORK_PLAN_ROTATE_RUN" ]]; then
+    if [[ ! -e "$work_canon" && ! -L "$work_canon" ]]; then
+      reject_work_path "判定時に存在した作業ディレクトリが事前確認後に消えました: $work_canon"
+      return 1
+    fi
     if [[ ! -d "$work_canon" || -L "$work_canon" ]]; then
       reject_work_path "事前確認後に作業ディレクトリが変化しました: $work_canon"
       return 1
@@ -529,11 +557,8 @@ prepare_work_dir() {
       reject_work_path "事前確認後に所有マーカー（.ses-pitr-owner.json）が変化しました: $WORK_PLAN_PARENT/.ses-pitr-owner.json"
       return 1
     fi
-  elif [[ "$WORK_PLAN_MODE" == controller ]]; then
-    reject_work_path "制御側が作成したはずの integration-work が存在しません: $work_canon"
-    return 1
   elif ! mkdir "$work_canon" 2>/dev/null; then
-    reject_work_path "作業ディレクトリを排他的に作成できません: $work_canon"
+    reject_work_path "作業ディレクトリを排他的に作成できません（事前確認中に他者が作成した可能性があります）: $work_canon"
     return 1
   fi
   if [[ ! -d "$work_canon" || -L "$work_canon" || "$(canonical_dir "$work_canon")" != "$work_canon" ]]; then
