@@ -15,8 +15,13 @@ import com.ses.service.scheduler.ManagementReportScheduler;
 import com.ses.service.scheduler.ReportScheduleClaimService;
 import com.ses.service.scheduler.TenantAwareBatchRunner;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.jdbc.BadSqlGrammarException;
+import org.springframework.transaction.TransactionSystemException;
 
+import java.sql.SQLException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -24,13 +29,19 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class ManagementReportSchedulerTest {
 
+    private static final ZoneId TOKYO = ZoneId.of("Asia/Tokyo");
     /** 2026-09-01T00:00:30 Asia/Tokyo。 */
-    private static final Clock FIXED_CLOCK = Clock.fixed(Instant.parse("2026-08-31T15:00:30Z"), ZoneId.of("Asia/Tokyo"));
+    private static final Clock FIXED_CLOCK = Clock.fixed(Instant.parse("2026-08-31T15:00:30Z"), TOKYO);
+    private static final LocalDateTime SEPT = LocalDateTime.of(2026, 9, 1, 0, 0);
+    private static final LocalDateTime OCT = LocalDateTime.of(2026, 10, 1, 0, 0);
+    private static final String ORPHAN_TOKEN = "00000000-0000-4000-8000-0000000000aa";
 
     private ReportSchedule schedule(LocalDateTime nextRunAt) {
         ReportSchedule schedule = new ReportSchedule();
@@ -43,6 +54,7 @@ class ManagementReportSchedulerTest {
         schedule.setScopePolicyVersion("scope-policy-approved-1");
         schedule.setCronExpression("0 0 0 1 * *");
         schedule.setTimezoneId("Asia/Tokyo");
+        schedule.setFailureCount(0);
         schedule.setOrganizationScopeJson("{\"ownerType\":\"COMPANY\",\"ownerId\":null,\"companyWide\":true,\"organizationIds\":[],\"directUserIds\":[],\"engineerIds\":[],\"contractIds\":[],\"invoiceIds\":[],\"policyVersion\":\"scope-policy-approved-1\"}");
         schedule.setScopeHash(sha256(schedule.getOrganizationScopeJson()));
         return schedule;
@@ -61,7 +73,7 @@ class ManagementReportSchedulerTest {
 
     private AccountingTimezoneResolver timezoneResolver() {
         AccountingTimezoneResolver resolver = mock(AccountingTimezoneResolver.class);
-        when(resolver.resolve("default")).thenReturn(ZoneId.of("Asia/Tokyo"));
+        when(resolver.resolve("default")).thenReturn(TOKYO);
         return resolver;
     }
 
@@ -75,8 +87,23 @@ class ManagementReportSchedulerTest {
     private ManagementReportScheduler scheduler(ReportScheduleMapper mapper, ReportSnapshotService snapshotService,
                                                 ReportDeliveryService deliveryService,
                                                 MonthlyClosingService closingService) {
-        // claim serviceは実体を使い、mapperへのCAS引数の受け渡しを検証する（transaction境界はMySQL testで検証）。
-        return new ManagementReportScheduler(mapper, new ReportScheduleClaimService(mapper), FIXED_CLOCK,
+        return scheduler(mapper, FIXED_CLOCK, snapshotService, deliveryService, closingService);
+    }
+
+    private ManagementReportScheduler scheduler(ReportScheduleMapper mapper, Clock clock,
+                                                ReportSnapshotService snapshotService,
+                                                ReportDeliveryService deliveryService,
+                                                MonthlyClosingService closingService) {
+        // claim serviceは実体を使い、mapperへのCAS引数の受け渡しを検証する（REQUIRES_NEW境界はMySQL testで検証）。
+        return scheduler(mapper, new ReportScheduleClaimService(mapper), clock,
+                snapshotService, deliveryService, closingService);
+    }
+
+    private ManagementReportScheduler scheduler(ReportScheduleMapper mapper, ReportScheduleClaimService claimService,
+                                                Clock clock, ReportSnapshotService snapshotService,
+                                                ReportDeliveryService deliveryService,
+                                                MonthlyClosingService closingService) {
+        return new ManagementReportScheduler(mapper, claimService, clock,
                 snapshotService, deliveryService, closingService, timezoneResolver(), tenantRunner(),
                 recipientPreviewService(), new ObjectMapper());
     }
@@ -88,6 +115,18 @@ class ManagementReportSchedulerTest {
             return null;
         }).when(runner).run(any());
         return runner;
+    }
+
+    private ReportGenerationResult succeeded(long runId) {
+        ReportRun run = new ReportRun();
+        run.setId(runId);
+        run.setStatus("SUCCEEDED");
+        return new ReportGenerationResult(run, List.of(), false);
+    }
+
+    private void stubClaimDue(ReportScheduleMapper mapper, int changed) {
+        when(mapper.claimDue(eq("default"), anyLong(), any(), any(), any(), any(), any(), any(),
+                anyInt(), any(), anyString(), any(), any())).thenReturn(changed);
     }
 
     @Test
@@ -182,5 +221,301 @@ class ManagementReportSchedulerTest {
         verify(mapper).markSuccess(eq("default"), eq(5L), anyString(), any(), any(), eq(logicalRunAt));
         verify(deliveryService).deliverScheduled(99L,
                 com.ses.dto.report.ReportScheduledDeliveryContext.of(5L, 1L));
+    }
+
+    @Test
+    void claimとcompletionはscheduleごとの秒精度時刻と同一claim_tokenを使う() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+        ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+        MonthlyClosingService closingService = mock(MonthlyClosingService.class);
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-31T15:00:30.400Z"));
+        ReportSchedule first = schedule(SEPT);
+        ReportSchedule second = schedule(SEPT);
+        second.setId(6L);
+        when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(first, second));
+        stubClaimDue(mapper, 1);
+        when(mapper.markSuccess(anyString(), anyLong(), anyString(), any(), any(), any())).thenReturn(1);
+        when(snapshotService.generate(any())).thenAnswer(invocation -> {
+            // 先行scheduleの生成/配布に40分以上かかった状況を再現する。
+            clock.advance(Duration.ofMinutes(40).plusMillis(700));
+            return succeeded(99L);
+        });
+
+        scheduler(mapper, clock, snapshotService, deliveryService, closingService).dispatchDue();
+
+        ArgumentCaptor<String> tokens = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<LocalDateTime> claimedAts = ArgumentCaptor.forClass(LocalDateTime.class);
+        ArgumentCaptor<LocalDateTime> staleBefores = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(mapper, times(2)).claimDue(eq("default"), anyLong(), any(), any(), any(), any(), any(), any(),
+                anyInt(), eq(SEPT), tokens.capture(), claimedAts.capture(), staleBefores.capture());
+        LocalDateTime firstClaimedAt = LocalDateTime.of(2026, 9, 1, 0, 0, 30);
+        // poll開始時刻（00:00:30）を流用せず、2件目のclaim直前の実時刻を秒精度で使う。
+        LocalDateTime secondClaimedAt = LocalDateTime.of(2026, 9, 1, 0, 40, 31);
+        assertThat(claimedAts.getAllValues()).containsExactly(firstClaimedAt, secondClaimedAt);
+        assertThat(staleBefores.getAllValues())
+                .containsExactly(firstClaimedAt.minusMinutes(30), secondClaimedAt.minusMinutes(30));
+        assertThat(tokens.getAllValues()).hasSize(2).doesNotHaveDuplicates();
+        assertThat(tokens.getAllValues().get(0)).hasSize(36);
+        assertThat(tokens.getAllValues().get(1)).hasSize(36);
+        verify(mapper).markSuccess("default", 5L, tokens.getAllValues().get(0), firstClaimedAt, OCT, SEPT);
+        verify(mapper).markSuccess("default", 6L, tokens.getAllValues().get(1), secondClaimedAt, OCT, SEPT);
+        verify(mapper, never()).markFailure(anyString(), anyLong(), anyString(), any(), any(), any(),
+                anyString(), anyString());
+    }
+
+    @Test
+    void 生成失敗のretryはclaim時刻ではなく失敗検知時刻を基点にする() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+        ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+        MonthlyClosingService closingService = mock(MonthlyClosingService.class);
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-31T15:00:30.400Z"));
+        ReportSchedule schedule = schedule(SEPT);
+        schedule.setFailureCount(2);
+        when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(schedule));
+        stubClaimDue(mapper, 1);
+        when(mapper.markFailure(anyString(), anyLong(), anyString(), any(), any(), any(), anyString(), anyString()))
+                .thenReturn(1);
+        when(snapshotService.generate(any())).thenAnswer(invocation -> {
+            clock.advance(Duration.ofMinutes(3).plusSeconds(10).plusMillis(500));
+            throw new IllegalStateException("source unavailable");
+        });
+
+        scheduler(mapper, clock, snapshotService, deliveryService, closingService).dispatchDue();
+
+        LocalDateTime claimedAt = LocalDateTime.of(2026, 9, 1, 0, 0, 30);
+        // 失敗検知 00:03:40（00:03:40.900を秒へ切捨て）+ 退避15分（failureCount=2 → 5×3）。
+        LocalDateTime retryAt = LocalDateTime.of(2026, 9, 1, 0, 18, 40);
+        verify(mapper).claimDue(eq("default"), eq(5L), eq(SEPT), isNull(), isNull(), isNull(), isNull(), isNull(),
+                eq(2), eq(SEPT), anyString(), eq(claimedAt), eq(claimedAt.minusMinutes(30)));
+        verify(mapper).markFailure(eq("default"), eq(5L), anyString(), eq(claimedAt), eq(retryAt), eq(SEPT),
+                eq("SCHEDULE_GENERATION_FAILED"), anyString());
+        verify(mapper, never()).markSuccess(anyString(), anyLong(), any(), any(), any(), any());
+        verifyNoInteractions(deliveryService);
+    }
+
+    @Test
+    void success_completionが0件でもmarkFailureや再claimへfallbackしない() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+        ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+        MonthlyClosingService closingService = mock(MonthlyClosingService.class);
+        when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(schedule(SEPT)));
+        stubClaimDue(mapper, 1);
+        when(mapper.markSuccess(anyString(), anyLong(), anyString(), any(), any(), any())).thenReturn(0);
+        when(snapshotService.generate(any())).thenReturn(succeeded(99L));
+
+        scheduler(mapper, snapshotService, deliveryService, closingService).dispatchDue();
+
+        verify(snapshotService, times(1)).generate(any());
+        verify(deliveryService, times(1)).deliverScheduled(anyLong(), any());
+        verify(mapper, times(1)).markSuccess(anyString(), anyLong(), anyString(), any(), any(), any());
+        verify(mapper, times(1)).claimDue(anyString(), anyLong(), any(), any(), any(), any(), any(), any(),
+                anyInt(), any(), anyString(), any(), any());
+        verify(mapper, never()).markFailure(anyString(), anyLong(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void success_completionの例外をmarkFailureへfallbackせず再実行もしない() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+        ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+        MonthlyClosingService closingService = mock(MonthlyClosingService.class);
+        when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(schedule(SEPT)));
+        stubClaimDue(mapper, 1);
+        when(mapper.markSuccess(anyString(), anyLong(), anyString(), any(), any(), any()))
+                .thenThrow(new TransactionSystemException("commit result unknown"));
+        when(snapshotService.generate(any())).thenReturn(succeeded(99L));
+        ManagementReportScheduler scheduler = scheduler(mapper, snapshotService, deliveryService, closingService);
+
+        assertThatCode(scheduler::dispatchDue).doesNotThrowAnyException();
+
+        verify(snapshotService, times(1)).generate(any());
+        verify(deliveryService, times(1)).deliverScheduled(anyLong(), any());
+        verify(mapper, never()).markFailure(anyString(), anyLong(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void failure_completionが0件または例外でもcompletionを再試行しない() {
+        for (boolean throwOnCompletion : new boolean[]{false, true}) {
+            ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+            ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+            ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+            MonthlyClosingService closingService = mock(MonthlyClosingService.class);
+            when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(schedule(SEPT)));
+            stubClaimDue(mapper, 1);
+            if (throwOnCompletion) {
+                when(mapper.markFailure(anyString(), anyLong(), anyString(), any(), any(), any(), anyString(),
+                        anyString())).thenThrow(new TransactionSystemException("commit result unknown"));
+            } else {
+                when(mapper.markFailure(anyString(), anyLong(), anyString(), any(), any(), any(), anyString(),
+                        anyString())).thenReturn(0);
+            }
+            when(snapshotService.generate(any())).thenThrow(new IllegalStateException("source unavailable"));
+            ManagementReportScheduler scheduler = scheduler(mapper, snapshotService, deliveryService, closingService);
+
+            assertThatCode(scheduler::dispatchDue).doesNotThrowAnyException();
+
+            verify(mapper, times(1)).markFailure(anyString(), anyLong(), anyString(), any(), any(), any(),
+                    anyString(), anyString());
+            verify(mapper, never()).markSuccess(anyString(), anyLong(), any(), any(), any(), any());
+            verify(snapshotService, times(1)).generate(any());
+            verifyNoInteractions(deliveryService);
+        }
+    }
+
+    @Test
+    void commit結果不明のclaim例外は当該scheduleを実行せず次の候補へ進む() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportScheduleClaimService claimService = mock(ReportScheduleClaimService.class);
+        ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+        ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+        MonthlyClosingService closingService = mock(MonthlyClosingService.class);
+        ReportSchedule second = schedule(SEPT);
+        second.setId(6L);
+        when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(schedule(SEPT), second));
+        when(claimService.claim(any(), any(), any(), any()))
+                .thenThrow(new TransactionSystemException("commit result unknown"))
+                .thenReturn(null);
+
+        scheduler(mapper, claimService, FIXED_CLOCK, snapshotService, deliveryService, closingService).dispatchDue();
+
+        verify(claimService, times(2)).claim(any(), any(), any(), any());
+        verifyNoInteractions(snapshotService, deliveryService);
+        verify(mapper, never()).markSuccess(anyString(), anyLong(), any(), any(), any(), any());
+        verify(mapper, never()).markFailure(anyString(), anyLong(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void 確定的なclaim_SQL失敗は当tenantの残り候補を処理しない() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportScheduleClaimService claimService = mock(ReportScheduleClaimService.class);
+        ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+        ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+        MonthlyClosingService closingService = mock(MonthlyClosingService.class);
+        ReportSchedule second = schedule(SEPT);
+        second.setId(6L);
+        when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(schedule(SEPT), second));
+        when(claimService.claim(any(), any(), any(), any())).thenThrow(new BadSqlGrammarException("claim",
+                "UPDATE m_report_schedule", new SQLException("Unknown column 'processing_claim_token'")));
+        ManagementReportScheduler scheduler = scheduler(mapper, claimService, FIXED_CLOCK,
+                snapshotService, deliveryService, closingService);
+
+        assertThatCode(scheduler::dispatchDue).doesNotThrowAnyException();
+
+        verify(claimService, times(1)).claim(any(), any(), any(), any());
+        verifyNoInteractions(snapshotService, deliveryService);
+        verify(mapper, never()).markSuccess(anyString(), anyLong(), any(), any(), any(), any());
+        verify(mapper, never()).markFailure(anyString(), anyLong(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void 次回時刻を確定できないscheduleは生成も配布もせず失敗として記録する() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+        ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+        MonthlyClosingService closingService = mock(MonthlyClosingService.class);
+        ReportSchedule invalidCron = schedule(SEPT);
+        invalidCron.setCronExpression("not-a-cron");
+        ReportSchedule zoneMismatch = schedule(SEPT);
+        zoneMismatch.setId(6L);
+        zoneMismatch.setTimezoneId("UTC");
+        when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(invalidCron, zoneMismatch));
+        stubClaimDue(mapper, 1);
+
+        scheduler(mapper, snapshotService, deliveryService, closingService).dispatchDue();
+
+        verify(mapper).markFailure(eq("default"), eq(5L), anyString(), any(), any(), eq(SEPT),
+                eq("SCHEDULE_GENERATION_FAILED"), anyString());
+        verify(mapper).markFailure(eq("default"), eq(6L), anyString(), any(), any(), eq(SEPT),
+                eq("SCHEDULE_GENERATION_FAILED"), anyString());
+        verifyNoInteractions(snapshotService, deliveryService);
+        verify(mapper, never()).markSuccess(anyString(), anyLong(), any(), any(), any(), any());
+    }
+
+    @Test
+    void 旧版completionが残した孤児tokenの行は期待tokenを照合し新tokenでclaimする() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+        ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+        MonthlyClosingService closingService = mock(MonthlyClosingService.class);
+        ReportSchedule orphan = schedule(SEPT);
+        orphan.setProcessingClaimToken(ORPHAN_TOKEN);
+        when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(List.of(orphan));
+        stubClaimDue(mapper, 1);
+        when(snapshotService.generate(any())).thenReturn(succeeded(99L));
+        when(mapper.markSuccess(anyString(), anyLong(), anyString(), any(), any(), any())).thenReturn(1);
+
+        scheduler(mapper, snapshotService, deliveryService, closingService).dispatchDue();
+
+        ArgumentCaptor<String> newToken = ArgumentCaptor.forClass(String.class);
+        verify(mapper).claimDue(eq("default"), eq(5L), eq(SEPT), isNull(), isNull(), isNull(), eq(ORPHAN_TOKEN),
+                isNull(), eq(0), eq(SEPT), newToken.capture(), any(), any());
+        assertThat(newToken.getValue()).hasSize(36).isNotEqualTo(ORPHAN_TOKEN);
+        verify(mapper).markSuccess(eq("default"), eq(5L), eq(newToken.getValue()), any(), eq(OCT), eq(SEPT));
+    }
+
+    @Test
+    void claim_serviceは不完全な入力をclaimせずtokenを毎回新規発行し秒精度へ揃える() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportScheduleClaimService service = new ReportScheduleClaimService(mapper);
+        LocalDateTime claimedAt = LocalDateTime.of(2026, 9, 1, 0, 0, 30, 900_000_000);
+        LocalDateTime staleBefore = claimedAt.minusMinutes(30);
+        ReportSchedule noId = schedule(SEPT);
+        noId.setId(null);
+        ReportSchedule noTenant = schedule(SEPT);
+        noTenant.setTenantId(null);
+
+        assertThat(service.claim(null, SEPT, claimedAt, staleBefore)).isNull();
+        assertThat(service.claim(noId, SEPT, claimedAt, staleBefore)).isNull();
+        assertThat(service.claim(noTenant, SEPT, claimedAt, staleBefore)).isNull();
+        assertThat(service.claim(schedule(SEPT), null, claimedAt, staleBefore)).isNull();
+        assertThat(service.claim(schedule(SEPT), SEPT, null, staleBefore)).isNull();
+        assertThat(service.claim(schedule(SEPT), SEPT, claimedAt, null)).isNull();
+        verifyNoInteractions(mapper);
+
+        when(mapper.claimDue(eq("default"), eq(5L), any(), any(), any(), any(), any(), any(),
+                anyInt(), any(), anyString(), any(), any())).thenReturn(1, 1, 0);
+        ReportScheduleClaimService.Claim first = service.claim(schedule(SEPT), SEPT, claimedAt, staleBefore);
+        ReportScheduleClaimService.Claim second = service.claim(schedule(SEPT), SEPT, claimedAt, staleBefore);
+        ReportScheduleClaimService.Claim lost = service.claim(schedule(SEPT), SEPT, claimedAt, staleBefore);
+
+        LocalDateTime normalized = LocalDateTime.of(2026, 9, 1, 0, 0, 30);
+        assertThat(first.token()).hasSize(36).isNotEqualTo(second.token());
+        assertThat(first.claimedAt()).isEqualTo(normalized);
+        assertThat(first.logicalRunAt()).isEqualTo(SEPT);
+        assertThat(first.toString()).doesNotContain(first.token());
+        assertThat(lost).isNull();
+        verify(mapper, times(3)).claimDue(eq("default"), eq(5L), eq(SEPT), isNull(), isNull(), isNull(), isNull(),
+                isNull(), eq(0), eq(SEPT), anyString(), eq(normalized), eq(normalized.minusMinutes(30)));
+    }
+
+    /** schedulerの処理中に進められる可変時計。 */
+    private static final class MutableClock extends Clock {
+        private volatile Instant instant;
+
+        private MutableClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        private void advance(Duration duration) {
+            instant = instant.plus(duration);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return TOKYO;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
+        }
     }
 }

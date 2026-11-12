@@ -65,7 +65,7 @@ CREATE TABLE m_report_schedule (
     retry_scheduled_at TIMESTAMP,
     processing_logical_run_at TIMESTAMP,
     processing_claimed_at TIMESTAMP,
-    processing_claim_token VARCHAR(36),
+    processing_claim_token CHAR(36),
     failure_count INT NOT NULL DEFAULT 0,
     last_error_code VARCHAR(100),
     last_error_message VARCHAR(500),
