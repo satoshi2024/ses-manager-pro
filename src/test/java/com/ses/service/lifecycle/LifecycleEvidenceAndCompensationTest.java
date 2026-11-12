@@ -59,6 +59,9 @@ class LifecycleEvidenceAndCompensationTest {
     @Autowired
     private LifecycleEventMapper eventMapper;
 
+    @Autowired
+    private DocumentVersionMapper documentVersionMapper;
+
     private SysUser adminUser;
     private Engineer engineer;
     private Document validDocument;
@@ -179,6 +182,82 @@ class LifecycleEvidenceAndCompensationTest {
         assertEquals(1, links.size());
         assertEquals(validDocument.getId(), links.get(0).getDocumentId());
         assertEquals("原本確認完了", links.get(0).getRemarks());
+    }
+
+    @Test
+    @DisplayName("NF01-B0: 他tenantの文書IDは存在しない文書と同じ400で拒否され、証跡linkもタスク完了も残らない")
+    void crossTenantEvidenceDocumentIsRejectedLikeMissingDocument() {
+        Document foreignDocument = document("tenant-b-evidence", "他tenant誓約書");
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                taskService.completeTask(taskId, adminUser.getId(), CompleteLifecycleTaskCommand.builder()
+                        .documentId(foreignDocument.getId())
+                        .evidenceRemarks("他tenant文書の流用試行")
+                        .build()));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("error.document.notFound", ex.getMessageKey());
+        assertEquals("IN_PROGRESS", taskMapper.selectById(taskId).getStatus());
+        assertTrue(evidenceLinkMapper.selectByTaskId(taskId).isEmpty());
+    }
+
+    @Test
+    @DisplayName("NF01-B0: 指定版は同tenantかつ同文書の版に限られ、別文書・他tenantの版は拒否される")
+    void evidenceDocumentVersionMustBelongToSameTenantAndDocument() {
+        Document otherDocument = document("default", "別文書");
+        DocumentVersion otherDocumentVersion = version("default", otherDocument.getId(), 1, "other-doc");
+        DocumentVersion foreignTenantVersion = version("tenant-b-evidence", validDocument.getId(), 2, "foreign-tenant");
+        DocumentVersion ownVersion = version("default", validDocument.getId(), 3, "own");
+
+        for (DocumentVersion rejected : List.of(otherDocumentVersion, foreignTenantVersion)) {
+            BusinessException ex = assertThrows(BusinessException.class, () ->
+                    taskService.completeTask(taskId, adminUser.getId(), CompleteLifecycleTaskCommand.builder()
+                            .documentId(validDocument.getId())
+                            .documentVersionId(rejected.getId())
+                            .build()));
+            assertEquals(400, ex.getCode());
+            assertEquals("error.document.notFound", ex.getMessageKey());
+            assertEquals("IN_PROGRESS", taskMapper.selectById(taskId).getStatus());
+            assertTrue(evidenceLinkMapper.selectByTaskId(taskId).isEmpty());
+        }
+
+        taskService.completeTask(taskId, adminUser.getId(), CompleteLifecycleTaskCommand.builder()
+                .documentId(validDocument.getId())
+                .documentVersionId(ownVersion.getId())
+                .build());
+        assertEquals("COMPLETED", taskMapper.selectById(taskId).getStatus());
+        List<LifecycleEvidenceLink> links = evidenceLinkMapper.selectByTaskId(taskId);
+        assertEquals(1, links.size());
+        assertEquals(ownVersion.getId(), links.get(0).getDocumentVersionId());
+    }
+
+    private Document document(String tenantId, String title) {
+        Document document = new Document();
+        document.setTenantId(tenantId);
+        document.setDocumentType("LIFECYCLE_EVIDENCE");
+        document.setTitle(title);
+        document.setDirection("INTERNAL");
+        document.setStatus("CONFIRMED");
+        documentMapper.insert(document);
+        return document;
+    }
+
+    private DocumentVersion version(String tenantId, Long documentId, int versionNo, String key) {
+        DocumentVersion version = new DocumentVersion();
+        version.setTenantId(tenantId);
+        version.setDocumentId(documentId);
+        version.setVersionNo(versionNo);
+        version.setStorageKey("lifecycle-evidence/" + key + "-" + System.nanoTime());
+        version.setOriginalName("evidence.pdf");
+        version.setContentType("application/pdf");
+        version.setSizeBytes(1L);
+        version.setSha256("a".repeat(64));
+        version.setSourceType("LIFECYCLE_TEST");
+        version.setBusinessKey("lifecycle-evidence-" + key + "-" + System.nanoTime());
+        version.setVersionDiscriminator("v" + versionNo);
+        version.setScanStatus("CLEAN");
+        documentVersionMapper.insert(version);
+        return version;
     }
 
     @Test

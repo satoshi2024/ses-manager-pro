@@ -1,6 +1,9 @@
 package com.ses.service.lifecycle;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.ses.common.exception.BusinessException;
 import com.ses.dto.engineersales.EngineerSalesDto;
 import com.ses.dto.lifecycle.ResignationGateResultDto;
 import com.ses.dto.lifecycle.ResignationGateResultDto.GateItemResult;
@@ -17,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -263,19 +267,35 @@ public class ResignationGateChecker {
     /**
      * 案件完了確定時に退社ゲートの自動実行処理（アカウント無効化・セッション強制失効・組織閉鎖・担当営業解除・ポータル連携解除）を行う。
      * Fail-Closed: 例外発生時は例外を送出し、呼び出し元のトランザクションをロールバックする。
+     *
+     * <p>NF01 batch 0: 連携ユーザーは案件tenant限定でlocking readし、停止は status 列だけを更新する
+     * （非ロック読取した全列を updateById で書き戻すと、並行して確定した他列の更新を古い値で上書きする）。
+     * ポータルユーザーは案件tenantのポータル組織に限定して照合し、複数一致はfail-closedとする。
+     * 担当営業の解除は業務規則とDataScope invalidationを持つ {@link EngineerSalesService#releaseAllByEngineerId} を通す。</p>
      */
     public void executeAutomaticGateActions(LifecycleCase lcCase, Engineer engineer) {
         Long engineerId = engineer.getId();
         LocalDate anchorDate = lcCase.getAnchorDate() != null ? lcCase.getAnchorDate() : LocalDate.now();
+        String tenantId = lcCase.getTenantId() == null || lcCase.getTenantId().isBlank()
+                ? null : lcCase.getTenantId().trim();
+        if (tenantId == null) {
+            throw BusinessException.of(409, "error.lifecycle.resignationGateFailed");
+        }
 
         // 1. ユーザーアカウント無効化 & 組織所属閉鎖 & セッション失効 & ポータル連携解除
         EngineerAccountLink link = engineerAccountLinkService.findByEngineerId(engineerId);
         if (link != null && link.getSysUserId() != null) {
             Long userId = link.getSysUserId();
-            SysUser user = sysUserMapper.selectById(userId);
+            SysUser user = lockLinkedUserInTenant(userId, tenantId);
             if (user != null && (user.getStatus() == null || user.getStatus() != 0)) {
-                user.setStatus(0);
-                sysUserMapper.updateById(user);
+                int updated = sysUserMapper.update(null, new UpdateWrapper<SysUser>()
+                        .eq("id", userId)
+                        .eq("tenant_id", tenantId)
+                        .set("status", 0)
+                        .set("updated_at", LocalDateTime.now()));
+                if (updated != 1) {
+                    throw BusinessException.of(409, "error.common.optimisticLock");
+                }
                 log.info("Deactivated user {} due to resignation case completion", userId);
             }
 
@@ -288,8 +308,7 @@ public class ResignationGateChecker {
 
             // ポータルユーザーが存在する場合はポータルセッションも失効 (Fail-Closed)
             if (user != null && user.getEmail() != null) {
-                com.ses.entity.PortalUser portalUser = portalUserMapper.selectOne(
-                        new LambdaQueryWrapper<com.ses.entity.PortalUser>().eq(com.ses.entity.PortalUser::getEmail, user.getEmail()));
+                PortalUser portalUser = findPortalUserInTenant(user.getEmail(), tenantId);
                 if (portalUser != null) {
                     portalSessionService.revokeAllForUser(portalUser.getId(), "退社案件完了によるポータルセッション強制失効");
                     log.info("Revoked all portal sessions for portal user {}", portalUser.getId());
@@ -301,17 +320,40 @@ public class ResignationGateChecker {
             log.info("Unlinked engineer account link for engineer {}", engineerId);
         }
 
-        // 2. 主担当営業および割当の解除
-        List<EngineerSales> activeSales = engineerSalesMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<EngineerSales>()
-                        .eq(EngineerSales::getEngineerId, engineerId)
-                        .isNull(EngineerSales::getReleasedAt)
-        );
-        for (EngineerSales es : activeSales) {
-            es.setReleasedAt(anchorDate);
-            engineerSalesMapper.updateById(es);
-            log.info("Released sales assignment {} for engineer {}", es.getId(), engineerId);
+        // 2. 主担当営業および割当の解除（業務規則・DataScope invalidationを持つservice経由）
+        engineerSalesService.releaseAllByEngineerId(engineerId);
+        log.info("Released active sales assignments for engineer {}", engineerId);
+    }
+
+    /**
+     * 連携ユーザーを案件tenant内でlocking readする。
+     * tenant内に無く他tenantには存在する場合は、越境更新も無効化漏れも起こさないようfail-closedにする。
+     * どのtenantにも有効行が無い（論理削除済み等）場合は従来どおり無効化対象なしとして扱う。
+     */
+    private SysUser lockLinkedUserInTenant(Long userId, String tenantId) {
+        SysUser user = sysUserMapper.selectByIdAndTenantForUpdate(userId, tenantId);
+        if (user == null && sysUserMapper.selectById(userId) != null) {
+            throw BusinessException.of(409, "error.lifecycle.resignationGateFailed");
         }
+        return user;
+    }
+
+    /**
+     * 退社者emailに一致するポータルユーザーを案件tenantのポータル組織に限定して取得する（NF01 batch 0 L6）。
+     * 0件は対象なし、複数件は誤撤権・撤権漏れを避けるためfail-closed（409）とする。
+     */
+    private PortalUser findPortalUserInTenant(String email, String tenantId) {
+        List<PortalUser> matches = portalUserMapper.selectList(new QueryWrapper<PortalUser>()
+                .eq("email", email)
+                .apply("portal_org_id IN (SELECT o.id FROM m_portal_organization o "
+                        + "WHERE o.tenant_id = {0} AND o.deleted_flag = 0)", tenantId));
+        if (matches == null || matches.isEmpty()) {
+            return null;
+        }
+        if (matches.size() > 1) {
+            throw BusinessException.of(409, "error.lifecycle.resignationGateFailed");
+        }
+        return matches.get(0);
     }
 
     private LifecycleTask findTaskByCode(Long caseId, String taskCode) {

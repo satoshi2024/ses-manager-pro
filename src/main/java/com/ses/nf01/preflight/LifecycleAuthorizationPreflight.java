@@ -27,8 +27,12 @@ import java.util.TreeSet;
 public final class LifecycleAuthorizationPreflight {
     private static final List<TableSpec> TABLES = List.of(
             new TableSpec("sys_user", Map.of("id", "bigint", "tenant_id", "varchar")),
-            new TableSpec("t_lifecycle_case", Map.of("id", "bigint", "tenant_id", "varchar", "engineer_id", "bigint")),
-            new TableSpec("t_lifecycle_task", Map.of("id", "bigint", "case_id", "bigint")),
+            new TableSpec("t_lifecycle_case", Map.of("id", "bigint", "tenant_id", "varchar", "engineer_id", "bigint",
+                    "status", "varchar", "deleted_flag", "int")),
+            new TableSpec("t_lifecycle_task", Map.of("id", "bigint", "case_id", "bigint", "evidence_type", "varchar",
+                    "status", "varchar", "deleted_flag", "int")),
+            new TableSpec("t_lifecycle_evidence_link", Map.of("id", "bigint", "task_id", "bigint", "document_id", "bigint",
+                    "document_version_id", "bigint")),
             new TableSpec("t_engineer", Map.of("id", "bigint", "tenant_id", "varchar")),
             new TableSpec("m_customer", Map.of("id", "bigint", "tenant_id", "varchar")),
             new TableSpec("t_contract", Map.of("id", "bigint", "tenant_id", "varchar", "customer_id", "bigint")),
@@ -65,6 +69,24 @@ public final class LifecycleAuthorizationPreflight {
             new ParentQuery("asset_assignment", "SELECT x.id row_id, CASE WHEN x.assignee_type='ENGINEER' THEN e.tenant_id WHEN x.assignee_type='USER' THEN u.tenant_id ELSE NULL END candidate FROM t_asset_assignment x LEFT JOIN t_engineer e ON x.assignee_type='ENGINEER' AND e.id=x.assignee_id LEFT JOIN sys_user u ON x.assignee_type='USER' AND u.id=x.assignee_id"),
             new ParentQuery("asset_lost_incident", "SELECT i.id row_id, e.tenant_id candidate FROM t_asset_lost_incident i LEFT JOIN t_asset_assignment a ON a.asset_id=i.asset_id AND a.actual_return_date IS NULL LEFT JOIN t_engineer e ON a.assignee_type='ENGINEER' AND e.id=a.assignee_id UNION ALL SELECT i.id row_id, u.tenant_id candidate FROM t_asset_lost_incident i LEFT JOIN t_asset_assignment a ON a.asset_id=i.asset_id AND a.actual_return_date IS NULL LEFT JOIN sys_user u ON a.assignee_type='USER' AND u.id=a.assignee_id")
     );
+
+    /**
+     * epoch spine migrationで追加予定の複合一意keyの前提（NF01b実行契約 §9.1）。
+     * 列名・表名は固定allowlistであり、入力値からSQLを組み立てない。
+     */
+    private static final List<UniqueKeySpec> UNIQUE_KEY_PRECONDITIONS = List.of(
+            new UniqueKeySpec("t_lifecycle_case", List.of("tenant_id", "id")),
+            new UniqueKeySpec("t_lifecycle_task", List.of("case_id", "id")),
+            new UniqueKeySpec("sys_user", List.of("tenant_id", "id")),
+            new UniqueKeySpec("t_document", List.of("tenant_id", "id")),
+            new UniqueKeySpec("t_document_version", List.of("tenant_id", "id")),
+            new UniqueKeySpec("t_document_version", List.of("tenant_id", "document_id", "id"))
+    );
+
+    /** アプリが未終結とみなすDUAL_CONFIRMATIONタスク（大文字小文字・末尾空白を畳まないbinary比較）。 */
+    private static final String UNFINISHED_DUAL_TASKS = "FROM t_lifecycle_task t LEFT JOIN t_lifecycle_case c ON c.id=t.case_id "
+            + "WHERE t.deleted_flag=0 AND BINARY t.evidence_type='DUAL_CONFIRMATION' "
+            + "AND (t.status IS NULL OR BINARY t.status NOT IN ('COMPLETED','WAIVED','CANCELLED'))";
 
     private LifecycleAuthorizationPreflight() { }
 
@@ -125,6 +147,8 @@ public final class LifecycleAuthorizationPreflight {
             if (!report.hasFailures()) {
                 tenantSources(connection, report);
                 relationshipChecks(connection, report);
+                lifecycleEvidenceChecks(connection, report);
+                uniqueKeyPreconditions(connection, schema, report);
                 parentCandidates(connection, report);
                 organizationUnitCandidates(connection, report);
             }
@@ -381,6 +405,111 @@ public final class LifecycleAuthorizationPreflight {
         }
     }
 
+    /**
+     * lifecycle証跡のDDL前読取検査（NF01 batch 0 / A-NF01-2）。
+     * 未終結DUAL_CONFIRMATIONは件数のみの参考値（CONFIRM未開放のためWAIVE以外で終結できない。移行方針はHR決定）。
+     * 証跡linkは task→case のtenantと文書・固定版のtenant/所属文書の一致を検査する。
+     */
+    private static void lifecycleEvidenceChecks(Connection connection, PreflightReport report) throws SQLException {
+        long unfinishedDual = scalar(connection, "SELECT COUNT(*) " + UNFINISHED_DUAL_TASKS);
+        long unfinishedDualInOpenCases = scalar(connection, "SELECT COUNT(*) " + UNFINISHED_DUAL_TASKS
+                + " AND c.id IS NOT NULL AND c.deleted_flag=0 AND BINARY c.status IN ('DRAFT','ACTIVE','ON_HOLD')");
+        List<String> dualSamples = new ArrayList<>();
+        if (unfinishedDual > 0) {
+            try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(
+                    "SELECT t.id " + UNFINISHED_DUAL_TASKS + " ORDER BY t.id LIMIT 20")) {
+                while (rows.next()) dualSamples.add(redact("t_lifecycle_task", rows.getLong(1)));
+            }
+        }
+        recordUnfinishedDualTasks(report, unfinishedDual, unfinishedDualInOpenCases, dualSamples);
+
+        checkCount(connection, report, "LIFECYCLE_EVIDENCE_DOCUMENT_TENANT_MISMATCH",
+                "SELECT COUNT(*) FROM t_lifecycle_evidence_link l LEFT JOIN t_lifecycle_task t ON t.id=l.task_id LEFT JOIN t_lifecycle_case c ON c.id=t.case_id LEFT JOIN t_document d ON d.id=l.document_id WHERE t.id IS NULL OR c.id IS NULL OR d.id IS NULL OR NOT (BINARY d.tenant_id <=> BINARY c.tenant_id)",
+                "SELECT l.id FROM t_lifecycle_evidence_link l LEFT JOIN t_lifecycle_task t ON t.id=l.task_id LEFT JOIN t_lifecycle_case c ON c.id=t.case_id LEFT JOIN t_document d ON d.id=l.document_id WHERE t.id IS NULL OR c.id IS NULL OR d.id IS NULL OR NOT (BINARY d.tenant_id <=> BINARY c.tenant_id) ORDER BY l.id LIMIT 20",
+                "t_lifecycle_evidence_link.document_id", "evidence task/case/document missing or document tenant differs from case tenant");
+        checkCount(connection, report, "LIFECYCLE_EVIDENCE_VERSION_MISMATCH",
+                "SELECT COUNT(*) FROM t_lifecycle_evidence_link l LEFT JOIN t_lifecycle_task t ON t.id=l.task_id LEFT JOIN t_lifecycle_case c ON c.id=t.case_id LEFT JOIN t_document_version v ON v.id=l.document_version_id WHERE l.document_version_id IS NOT NULL AND (v.id IS NULL OR NOT (v.document_id <=> l.document_id) OR NOT (BINARY v.tenant_id <=> BINARY c.tenant_id))",
+                "SELECT l.id FROM t_lifecycle_evidence_link l LEFT JOIN t_lifecycle_task t ON t.id=l.task_id LEFT JOIN t_lifecycle_case c ON c.id=t.case_id LEFT JOIN t_document_version v ON v.id=l.document_version_id WHERE l.document_version_id IS NOT NULL AND (v.id IS NULL OR NOT (v.document_id <=> l.document_id) OR NOT (BINARY v.tenant_id <=> BINARY c.tenant_id)) ORDER BY l.id LIMIT 20",
+                "t_lifecycle_evidence_link.document_version_id", "pinned version missing, belongs to another document, or tenant differs from case tenant");
+        long versionless = scalar(connection, "SELECT COUNT(*) FROM t_lifecycle_evidence_link WHERE document_version_id IS NULL");
+        report.finding("LIFECYCLE_EVIDENCE_VERSIONLESS", "t_lifecycle_evidence_link.document_version_id", "PASS",
+                versionless, List.of(), "informational: evidence links without a pinned document version=" + versionless
+                        + "; acceptance of versionless evidence is pending an owner decision");
+    }
+
+    /** 未終結DUAL_CONFIRMATIONの件数を参考値として記録する。schema batchの阻害要因にはしない。 */
+    static void recordUnfinishedDualTasks(PreflightReport report, long unfinished, long inOpenCases, List<String> samples) {
+        report.finding("LIFECYCLE_DUAL_TASK_UNFINISHED", "t_lifecycle_task.evidence_type", "PASS", unfinished, samples,
+                "informational: unfinished DUAL_CONFIRMATION tasks=" + unfinished + "; inOpenCases=" + inOpenCases
+                        + "; inTerminalOrMissingCases=" + Math.max(0, unfinished - inOpenCases)
+                        + "; CONFIRM is disabled, so these can only be waived until an HR transition decision");
+    }
+
+    /**
+     * 将来追加する複合一意keyの前提を検査する。重複groupまたはkey列NULLがあればFAIL。
+     * 既に同一列構成の一意indexがあるかは参考情報として記録する。
+     */
+    private static void uniqueKeyPreconditions(Connection connection, String schema, PreflightReport report) throws SQLException {
+        for (UniqueKeySpec spec : UNIQUE_KEY_PRECONDITIONS) {
+            String columns = String.join(",", spec.columns());
+            String nullPredicate = spec.columns().stream().map(column -> "x." + column + " IS NULL")
+                    .collect(java.util.stream.Collectors.joining(" OR "));
+            String qualified = spec.columns().stream().map(column -> "x." + column)
+                    .collect(java.util.stream.Collectors.joining(","));
+            String violating = "FROM " + spec.table() + " x WHERE " + nullPredicate + " OR (" + qualified + ") IN (SELECT "
+                    + columns + " FROM " + spec.table() + " GROUP BY " + columns + " HAVING COUNT(*) > 1)";
+            long duplicateGroups = scalar(connection, "SELECT COUNT(*) FROM (SELECT 1 FROM " + spec.table()
+                    + " GROUP BY " + columns + " HAVING COUNT(*) > 1) duplicate_groups");
+            long nullKeyRows = scalar(connection, "SELECT COUNT(*) FROM " + spec.table() + " x WHERE " + nullPredicate);
+            long violatingRows = scalar(connection, "SELECT COUNT(*) " + violating);
+            List<String> samples = new ArrayList<>();
+            if (violatingRows > 0) {
+                try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(
+                        "SELECT x.id " + violating + " ORDER BY x.id LIMIT 20")) {
+                    while (rows.next()) samples.add(redact(spec.table(), rows.getLong(1)));
+                }
+            }
+            recordUniqueKeyPrecondition(report, spec.table(), spec.columns(), duplicateGroups, nullKeyRows, violatingRows,
+                    samples, existingUniqueIndex(connection, schema, spec));
+        }
+    }
+
+    static void recordUniqueKeyPrecondition(PreflightReport report, String table, List<String> columns,
+                                            long duplicateGroups, long nullKeyRows, long violatingRows,
+                                            List<String> samples, String existingIndex) {
+        boolean satisfied = duplicateGroups == 0 && nullKeyRows == 0 && violatingRows == 0;
+        report.finding("UNIQUE_KEY_PRECONDITION", table + "(" + String.join(",", columns) + ")",
+                satisfied ? "PASS" : "FAIL", violatingRows, samples,
+                "duplicateGroups=" + duplicateGroups + "; nullKeyRows=" + nullKeyRows
+                        + "; existingUniqueIndex=" + safeToken(existingIndex == null ? "none" : existingIndex));
+    }
+
+    private static String existingUniqueIndex(Connection connection, String schema, UniqueKeySpec spec) throws SQLException {
+        String expected = String.join(",", spec.columns());
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT INDEX_NAME, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') key_columns "
+                        + "FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? AND NON_UNIQUE=0 "
+                        + "GROUP BY INDEX_NAME ORDER BY INDEX_NAME")) {
+            statement.setString(1, schema);
+            statement.setString(2, spec.table());
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    if (expected.equalsIgnoreCase(rows.getString("key_columns"))) {
+                        return rows.getString("INDEX_NAME");
+                    }
+                }
+            }
+        }
+        return "none";
+    }
+
+    private static long scalar(Connection connection, String sql) throws SQLException {
+        try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(sql)) {
+            if (!rows.next()) throw new SQLException("empty aggregate");
+            return rows.getLong(1);
+        }
+    }
+
     private static void checkCount(Connection connection, PreflightReport report, String id, String sql, String sampleSql,
                                    String location, String reason) throws SQLException {
         try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(sql)) {
@@ -490,6 +619,7 @@ public final class LifecycleAuthorizationPreflight {
     private record TableSpec(String name, Map<String, String> columns) { }
     private record TenantSource(String table, String column) { }
     private record ParentQuery(String name, String sql) { }
+    private record UniqueKeySpec(String table, List<String> columns) { }
     private record ColumnInfo(String type, boolean nullable, String charLength, String autoIncrement, String collation) { }
 
     public static final class PreflightReport {

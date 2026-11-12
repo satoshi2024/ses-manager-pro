@@ -49,9 +49,78 @@ class LifecycleAuthorizationPreflightMySqlTest {
 
             assertEquals("BLOCKED_MAPPING", report.status());
             assertFinding(report, "ORG_UNIT_TENANT_MAPPING", "BLOCKED_MAPPING", 1);
+            assertFinding(report, "LIFECYCLE_DUAL_TASK_UNFINISHED", "PASS", 0);
+            assertFinding(report, "LIFECYCLE_EVIDENCE_DOCUMENT_TENANT_MISMATCH", "PASS", 0);
+            assertFinding(report, "LIFECYCLE_EVIDENCE_VERSION_MISMATCH", "PASS", 0);
+            assertFinding(report, "LIFECYCLE_EVIDENCE_VERSIONLESS", "PASS", 0);
+            for (String key : List.of("t_lifecycle_case(tenant_id,id)", "t_lifecycle_task(case_id,id)",
+                    "sys_user(tenant_id,id)", "t_document(tenant_id,id)", "t_document_version(tenant_id,id)",
+                    "t_document_version(tenant_id,document_id,id)")) {
+                assertFindingAt(report, "UNIQUE_KEY_PRECONDITION", key, "PASS", 0);
+            }
             assertTrue(report.legacyDisposalTenantColumnAbsentForTest());
             assertEquals(before, after);
             assertFalse(report.toJson().contains(url));
+        }
+    }
+
+    @Test
+    void lifecycleEvidenceAndUniqueKeyChecksCountSyntheticAnomaliesReadOnly() throws Exception {
+        createFixture(true);
+        String schema = MYSQL.getDatabaseName();
+        createReadOnlyReader();
+        try (Connection reader = readerConnection()) {
+            String before = snapshot(reader, schema);
+            LifecycleAuthorizationPreflight.PreflightReport report =
+                    LifecycleAuthorizationPreflight.run(reader, schema, "synthetic-head");
+            String after = snapshot(reader, schema);
+
+            // 未終結DUALは binary 一致の IN_PROGRESS 1件のみ（COMPLETED・小文字値は数えない）。参考値なのでPASS。
+            assertFinding(report, "LIFECYCLE_DUAL_TASK_UNFINISHED", "PASS", 1);
+            assertReasonContains(report, "LIFECYCLE_DUAL_TASK_UNFINISHED", null, "inOpenCases=1");
+            // link 2: 文書tenantが大文字違い、link 4: 文書が存在しない
+            assertFinding(report, "LIFECYCLE_EVIDENCE_DOCUMENT_TENANT_MISMATCH", "FAIL", 2);
+            // link 3: 固定版が別文書の版
+            assertFinding(report, "LIFECYCLE_EVIDENCE_VERSION_MISMATCH", "FAIL", 1);
+            assertFinding(report, "LIFECYCLE_EVIDENCE_VERSIONLESS", "PASS", 2);
+            // t_document id=4 は tenant NULL のため (tenant_id,id) の一意key前提を満たさない
+            assertFindingAt(report, "UNIQUE_KEY_PRECONDITION", "t_document(tenant_id,id)", "FAIL", 1);
+            assertReasonContains(report, "UNIQUE_KEY_PRECONDITION", "t_document(tenant_id,id)", "nullKeyRows=1");
+            assertFindingAt(report, "UNIQUE_KEY_PRECONDITION", "sys_user(tenant_id,id)", "PASS", 0);
+            assertFindingAt(report, "UNIQUE_KEY_PRECONDITION", "t_document_version(tenant_id,document_id,id)", "PASS", 0);
+            assertReasonContains(report, "UNIQUE_KEY_PRECONDITION", "t_document_version(tenant_id,document_id,id)",
+                    "existingUniqueIndex=none");
+            assertEquals(before, after);
+        }
+    }
+
+    @Test
+    void duplicateCompositeKeyRowsFailUniqueKeyPrecondition() throws Exception {
+        createFixture(false);
+        String target = "nf01_preflight_unique_dup";
+        try (Connection root = rootConnection(); Statement statement = root.createStatement()) {
+            statement.execute("CREATE DATABASE IF NOT EXISTS " + target);
+            for (String table : FIXTURE_TABLES) {
+                statement.execute("DROP TABLE IF EXISTS " + target + "." + table);
+                statement.execute("CREATE TABLE " + target + "." + table + " LIKE " + MYSQL.getDatabaseName() + "." + table);
+                statement.executeUpdate("INSERT INTO " + target + "." + table + " SELECT * FROM "
+                        + MYSQL.getDatabaseName() + "." + table);
+            }
+            // PRIMARY KEY を外した旧schemaを模し、(tenant_id,id) が重複する行を作る
+            statement.execute("ALTER TABLE " + target + ".sys_user DROP PRIMARY KEY");
+            statement.executeUpdate("INSERT INTO " + target + ".sys_user VALUES(1,'tenant-A','営業')");
+            statement.execute("ALTER TABLE " + target + ".t_document_version ADD UNIQUE KEY uk_fixture_version_tenant_id (tenant_id,id)");
+        }
+        String url = "jdbc:mysql://" + MYSQL.getHost() + ":" + MYSQL.getMappedPort(3306) + "/" + target;
+        try (Connection root = DriverManager.getConnection(url, "root", MYSQL.getPassword())) {
+            LifecycleAuthorizationPreflight.PreflightReport report =
+                    LifecycleAuthorizationPreflight.run(root, target, "synthetic-head");
+            assertEquals("FAIL", report.status());
+            assertFindingAt(report, "UNIQUE_KEY_PRECONDITION", "sys_user(tenant_id,id)", "FAIL", 2);
+            assertReasonContains(report, "UNIQUE_KEY_PRECONDITION", "sys_user(tenant_id,id)", "duplicateGroups=1");
+            assertFindingAt(report, "UNIQUE_KEY_PRECONDITION", "t_document_version(tenant_id,id)", "PASS", 0);
+            assertReasonContains(report, "UNIQUE_KEY_PRECONDITION", "t_document_version(tenant_id,id)",
+                    "existingUniqueIndex=uk_fixture_version_tenant_id");
         }
     }
 
@@ -208,13 +277,19 @@ class LifecycleAuthorizationPreflightMySqlTest {
                 appendDigest(digest, rows);
             }
         }
-        for (String table : List.of("flyway_schema_history", "sys_user", "t_lifecycle_case", "t_lifecycle_task", "t_engineer", "m_customer", "t_contract", "t_engineer_account_link", "t_user_organization", "m_organization_unit", "t_document", "t_document_version", "t_document_link", "t_document_disposal_request", "t_proposal", "t_project", "t_sales_activity", "t_engineer_sales", "m_asset", "t_asset_assignment", "t_asset_lost_incident")) {
+        for (String table : FIXTURE_TABLES) {
             try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery("SELECT * FROM " + table + " ORDER BY 1")) {
                 appendDigest(digest, rows);
             }
         }
         return java.util.HexFormat.of().formatHex(digest.digest());
     }
+
+    private static final List<String> FIXTURE_TABLES = List.of("flyway_schema_history", "sys_user", "t_lifecycle_case",
+            "t_lifecycle_task", "t_lifecycle_evidence_link", "t_engineer", "m_customer", "t_contract",
+            "t_engineer_account_link", "t_user_organization", "m_organization_unit", "t_document", "t_document_version",
+            "t_document_link", "t_document_disposal_request", "t_proposal", "t_project", "t_sales_activity",
+            "t_engineer_sales", "m_asset", "t_asset_assignment", "t_asset_lost_incident");
 
     private void appendDigest(java.security.MessageDigest digest, ResultSet rows) throws Exception {
         ResultSetMetaData metadata = rows.getMetaData();
@@ -241,6 +316,30 @@ class LifecycleAuthorizationPreflightMySqlTest {
         assertTrue(false, "missing finding " + id);
     }
 
+    private void assertFindingAt(LifecycleAuthorizationPreflight.PreflightReport report, String id, String location,
+                                 String status, long count) throws Exception {
+        JsonNode finding = finding(report, id, location);
+        assertEquals(status, finding.path("status").asText(), "finding " + id + " at " + location);
+        assertEquals(count, finding.path("rowCount").longValue(), "row count for " + id + " at " + location);
+    }
+
+    private void assertReasonContains(LifecycleAuthorizationPreflight.PreflightReport report, String id, String location,
+                                      String expected) throws Exception {
+        String reason = finding(report, id, location).path("reason").asText();
+        assertTrue(reason.contains(expected), "reason for " + id + " should contain " + expected + ": " + reason);
+    }
+
+    private JsonNode finding(LifecycleAuthorizationPreflight.PreflightReport report, String id, String location)
+            throws Exception {
+        for (JsonNode finding : new ObjectMapper().readTree(report.toJson()).path("findings")) {
+            if (id.equals(finding.path("checkId").asText())
+                    && (location == null || location.equals(finding.path("location").asText()))) {
+                return finding;
+            }
+        }
+        throw new AssertionError("missing finding " + id + " at " + location);
+    }
+
     private void createFixture() throws Exception {
         createFixture(true);
     }
@@ -250,8 +349,9 @@ class LifecycleAuthorizationPreflightMySqlTest {
             for (String ddl : List.of(
                     "CREATE TABLE IF NOT EXISTS flyway_schema_history(installed_rank INT PRIMARY KEY,version VARCHAR(50),success BOOLEAN NOT NULL)",
                     "CREATE TABLE IF NOT EXISTS sys_user(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100),role VARCHAR(30))",
-                    "CREATE TABLE IF NOT EXISTS t_lifecycle_case(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100),engineer_id BIGINT)",
-                    "CREATE TABLE IF NOT EXISTS t_lifecycle_task(id BIGINT PRIMARY KEY,case_id BIGINT)",
+                    "CREATE TABLE IF NOT EXISTS t_lifecycle_case(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100),engineer_id BIGINT,status VARCHAR(20),deleted_flag INT NOT NULL DEFAULT 0)",
+                    "CREATE TABLE IF NOT EXISTS t_lifecycle_task(id BIGINT PRIMARY KEY,case_id BIGINT,evidence_type VARCHAR(30),status VARCHAR(20),deleted_flag INT NOT NULL DEFAULT 0)",
+                    "CREATE TABLE IF NOT EXISTS t_lifecycle_evidence_link(id BIGINT PRIMARY KEY,task_id BIGINT,document_id BIGINT,document_version_id BIGINT NULL)",
                     "CREATE TABLE IF NOT EXISTS t_engineer(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100))",
                     "CREATE TABLE IF NOT EXISTS m_customer(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100))",
                     "CREATE TABLE IF NOT EXISTS t_contract(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100),customer_id BIGINT)",
@@ -274,13 +374,15 @@ class LifecycleAuthorizationPreflightMySqlTest {
             for (String table : List.of("t_asset_lost_incident", "t_asset_assignment", "m_asset", "t_engineer_sales",
                     "t_sales_activity", "t_proposal", "t_project", "t_document_disposal_request", "t_document_link",
                     "t_document_version", "t_document", "t_user_organization", "t_engineer_account_link", "t_contract",
-                    "m_customer", "t_engineer", "t_lifecycle_task", "t_lifecycle_case", "sys_user", "flyway_schema_history")) {
+                    "m_customer", "t_engineer", "t_lifecycle_evidence_link", "t_lifecycle_task", "t_lifecycle_case",
+                    "sys_user", "flyway_schema_history")) {
                 statement.executeUpdate("DELETE FROM " + table);
             }
             statement.executeUpdate("INSERT IGNORE INTO flyway_schema_history VALUES(1,'1',TRUE)");
             statement.executeUpdate("INSERT IGNORE INTO sys_user VALUES(1,'tenant-A','営業')");
-            statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_case VALUES(1,'tenant-A',1)");
-            statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_task VALUES(1,1)");
+            statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_case VALUES(1,'tenant-A',1,'ACTIVE',0)");
+            statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_task VALUES(1,1,'DOCUMENT_LINK','COMPLETED',0)");
+            statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_evidence_link VALUES(1,1,1,1)");
             statement.executeUpdate("INSERT IGNORE INTO t_engineer VALUES(1,'tenant-A')");
             statement.executeUpdate("INSERT IGNORE INTO m_customer VALUES(1,'tenant-A')");
             statement.executeUpdate("INSERT IGNORE INTO t_contract VALUES(1,'tenant-A',1)");
@@ -307,6 +409,14 @@ class LifecycleAuthorizationPreflightMySqlTest {
                 statement.executeUpdate("INSERT IGNORE INTO t_document_version VALUES(4,'tenant-A',4)");
                 statement.executeUpdate("INSERT IGNORE INTO t_sales_activity VALUES(2,999,1)");
                 statement.executeUpdate("INSERT IGNORE INTO t_proposal VALUES(2,1,1,999)");
+                // 未終結DUALはtask 2のみ。完了済みDUALと小文字evidence_typeはアプリ上DUAL未終結ではない。
+                statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_task VALUES(2,1,'DUAL_CONFIRMATION','IN_PROGRESS',0)");
+                statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_task VALUES(3,1,'DUAL_CONFIRMATION','COMPLETED',0)");
+                statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_task VALUES(4,1,'dual_confirmation','IN_PROGRESS',0)");
+                // link 2: 文書tenant不一致（大文字違い）かつ版なし、link 3: 別文書の版、link 4: 文書なしかつ版なし
+                statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_evidence_link VALUES(2,1,2,NULL)");
+                statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_evidence_link VALUES(3,1,1,2)");
+                statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_evidence_link VALUES(4,2,999,NULL)");
             }
         }
     }

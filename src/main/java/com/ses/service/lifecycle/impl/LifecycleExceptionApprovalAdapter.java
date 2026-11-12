@@ -12,6 +12,7 @@ import com.ses.service.approval.ApprovalOrganizationResolver;
 import com.ses.service.approval.ApprovalPayloads;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.approval.ApprovalTargetAdapter;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.lifecycle.LifecycleTaskService;
 import com.ses.service.AssetOffboardingService;
 import lombok.RequiredArgsConstructor;
@@ -105,9 +106,20 @@ public class LifecycleExceptionApprovalAdapter implements ApprovalTargetAdapter 
         );
     }
 
+    /**
+     * 承認確定時の対象version再検証。承認transactionはこの後 waiveTask（案件→タスク）と
+     * approveOffboardingWaiver（案件→タスク）へ進むため、ここでも tenant 限定で「案件 → タスク」の順に
+     * ロックする。タスクだけを先にロックすると cancelCase（案件→タスク）と逆順になり得る（NF01 batch 0）。
+     */
     @Override
     public long currentVersion(Long targetId) {
-        LifecycleTask task = targetId == null ? null : taskMapper.selectByIdForUpdate(targetId);
+        if (targetId == null) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound");
+        }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        LifecycleTask located = taskMapper.selectByIdAndTenant(targetId, tenantId);
+        LifecycleCase lcCase = located == null ? null : caseMapper.selectByIdForUpdateAndTenant(located.getCaseId(), tenantId);
+        LifecycleTask task = lcCase == null ? null : taskMapper.selectByIdAndCaseIdForUpdate(targetId, lcCase.getId());
         if (task == null) {
             throw BusinessException.of(404, "error.lifecycle.taskNotFound");
         }

@@ -21,6 +21,7 @@ import com.ses.service.AssetAssignmentService;
 import com.ses.service.AssetOffboardingService;
 import com.ses.service.ExternalAccountService;
 import com.ses.service.LicenseService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -133,8 +134,12 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
             throw new BusinessException(400, "退社例外免除には対象要員、理由、承認申請IDが必要です。");
         }
 
-        LifecycleTask scopedTask = lifecycleTaskMapper.selectByIdForUpdate(lifecycleTaskId);
-        LifecycleCase scopedCase = scopedTask == null ? null : lifecycleCaseMapper.selectByIdForUpdate(lifecycleCaseId);
+        // ライフサイクル全経路と同じ「案件 → タスク」の順でtenant限定ロックする（NF01 batch 0 L2）。
+        // タスクを先にロックすると、案件を先にロックする cancelCase / completeCase と循環待ちになり得る。
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        LifecycleCase scopedCase = lifecycleCaseMapper.selectByIdForUpdateAndTenant(lifecycleCaseId, tenantId);
+        LifecycleTask scopedTask = scopedCase == null ? null
+                : lifecycleTaskMapper.selectByIdAndCaseIdForUpdate(lifecycleTaskId, scopedCase.getId());
         if (scopedTask == null || scopedCase == null || !lifecycleCaseId.equals(scopedTask.getCaseId())
                 || !lifecycleCaseId.equals(scopedCase.getId())
                 || !"RESIGN_ASSET_RETURN".equals(scopedTask.getTaskCode())
