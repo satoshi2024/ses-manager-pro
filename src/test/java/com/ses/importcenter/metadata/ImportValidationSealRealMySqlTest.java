@@ -33,7 +33,6 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.HexFormat;
@@ -1473,8 +1472,10 @@ class ImportValidationSealRealMySqlTest {
         String csv = "externalKey,companyName\ncust-1,株式会社A\n";
         var fixture = setupFixture(csv);
 
-        LocalDate yesterday = LocalDate.now().minusDays(1);
-        jdbc.update("UPDATE t_document SET retention_until = ? WHERE tenant_id=? AND id=3", yesterday, TENANT);
+        // 「昨日」は DB の CURRENT_DATE を基準に作る。JVM（Asia/Tokyo 固定）の LocalDate.now() を
+        // 使うと、DB セッションが UTC の環境では JST 0〜9 時に判定日がずれ、期限切れにならない。
+        jdbc.update("UPDATE t_document SET retention_until = CURRENT_DATE() - INTERVAL 1 DAY "
+                + "WHERE tenant_id=? AND id=3", TENANT);
 
         var ex = assertThrows(BusinessException.class, () -> service.seal(fixture.capability));
         assertEquals(409, ex.getCode());
