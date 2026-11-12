@@ -278,7 +278,10 @@ final class LoopbackTlsIntegrationHubWebhookTransportCandidate
                 exchange = exchangeExecutor.execute(SimpleRequestProducer.create(httpRequest), consumer,
                         terminalCallback);
             } catch (RuntimeException rejected) {
-                // HC5は停止済みclientへのexecuteを同期CancellationExceptionで拒否する（I/O未開始）。
+                // ここへ来るのは自前ExchangeExecutor（test seam）の同期例外だけで、I/Oは未開始。HC5の
+                // doExecuteは停止済みclientのCancellationException（IllegalStateException系）も
+                // ComplexFuture.failedへ変換するため、入口確認後に停止した競合はfailed callback経由で
+                // NETWORK_ERROR（再試行可）になり、TRANSPORT_CLOSEDにはならない。
                 return closed.get() ? failure("TRANSPORT_CLOSED", true) : failure("NETWORK_UNAVAILABLE", true);
             }
             submitted = true;

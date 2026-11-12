@@ -20,6 +20,7 @@ import org.apache.hc.core5.concurrent.FutureCallback;
 import org.apache.hc.core5.http.EntityDetails;
 import org.apache.hc.core5.http.HttpException;
 import org.apache.hc.core5.http.message.BasicHttpResponse;
+import org.apache.hc.core5.http.nio.AsyncResponseConsumer;
 import org.apache.hc.core5.http.protocol.HttpCoreContext;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -123,7 +124,8 @@ class IntegrationHubLoopbackTlsTransportCandidateTest {
 
     private final List<AutoCloseable> resources = new ArrayList<>();
     private final CountDownLatch releaseResponse = new CountDownLatch(1);
-    private final AtomicBoolean responseSent = new AtomicBoolean();
+    /** stall中のhandlerが期限後に応答の書込みへ進んだこと。書込み自体はclientのRSTで失敗し得る。 */
+    private final AtomicBoolean lateResponseAttempted = new AtomicBoolean();
     private final AtomicBoolean bodyFinished = new AtomicBoolean();
     private final AtomicBoolean socketClosedOnWrite = new AtomicBoolean();
     private final AtomicReference<byte[]> capturedBody = new AtomicReference<>();
@@ -358,14 +360,17 @@ class IntegrationHubLoopbackTlsTransportCandidateTest {
         long started = System.nanoTime();
         IntegrationHubWebhookTransportResult result = transport.send(request(mainEndpoint()));
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+        // 呼出し側は期限切れcancelでIMMEDIATE close（linger 0のRST）を同期実行済みのため、遅い2xxは
+        // clientへ届かず、fixture側の書込みはIOExceptionになり得る。ここでは書込みへ進んだことだけを観測する。
+        // header未受信で確定した後の2xx headerがCASで拒否される性質は
+        // delayedTerminalCallbackAndSynchronousExecuteFailureReleasePermitsOnceで直接検証する。
         releaseResponse.countDown();
-        waitUntil(responseSent::get, 3000);
-        assertEquals("TIMEOUT", result.errorCode());
+        assertTrue(waitUntil(lateResponseAttempted::get, 3000), "期限後にfixtureが2xx応答の書込みへ進んだ");
+        assertEquals("TIMEOUT", result.errorCode(), "期限後の2xxで結果を上書きしない");
         assertTrue(result.retryable());
         assertEquals(1, server.received().get(), "requestはfixtureへ届いた上でheader待ちが期限切れになる");
         assertTrue(elapsedMs >= 1800, "header待ちは期限まで続く: " + elapsedMs);
         assertTrue(elapsedMs < 2600, "単一の総期限で戻る: " + elapsedMs);
-        assertTrue(responseSent.get(), "期限後にfixtureが2xxを返しても結果を上書きしない");
         awaitPermitsReleased(transport);
     }
 
@@ -624,12 +629,14 @@ class IntegrationHubLoopbackTlsTransportCandidateTest {
     void delayedTerminalCallbackAndSynchronousExecuteFailureReleasePermitsOnce() throws Exception {
         AtomicReference<FutureCallback<HeaderOutcome>> callbackRef = new AtomicReference<>();
         AtomicReference<BasicFuture<HeaderOutcome>> futureRef = new AtomicReference<>();
+        AtomicReference<AsyncResponseConsumer<HeaderOutcome>> consumerRef = new AtomicReference<>();
         CountDownLatch executeReturned = new CountDownLatch(1);
         LoopbackTlsIntegrationHubWebhookTransportCandidate delayed = newTransport(properties, trustedClientContext,
                 executorHooks((producer, consumer, callback) -> {
                     BasicFuture<HeaderOutcome> future = new BasicFuture<>(callback);
                     callbackRef.set(callback);
                     futureRef.set(future);
+                    consumerRef.set(consumer);
                     executeReturned.countDown();
                     return future;
                 }));
@@ -648,6 +655,14 @@ class IntegrationHubLoopbackTlsTransportCandidateTest {
             assertEquals(12, delayed.availableAdmissionPermits());
             assertEquals(8, delayed.availableExchangePermits());
             assertEquals(0, delayed.inFlightCount());
+            // 期限内でも、呼出し側がheader未受信で確定した後に届く2xx headerはdecisionのCASで拒否される。
+            FutureCallback<HeaderOutcome> unusedResultCallback = new FutureCallback<>() {
+                @Override public void completed(HeaderOutcome outcome) { }
+                @Override public void failed(Exception failure) { }
+                @Override public void cancelled() { }
+            };
+            assertThrows(IOException.class, () -> consumerRef.get().consumeResponse(new BasicHttpResponse(200), null,
+                    HttpCoreContext.create(), unusedResultCallback), "header未受信で確定した後の2xxを成功根拠にしない");
             assertFalse(futureRef.get().cancel(true), "完了済みBasicFutureのcancelはcallbackを再実行しない");
             callbackRef.get().cancelled();
             callbackRef.get().failed(new IOException("duplicate terminal callback"));
@@ -1035,6 +1050,7 @@ class IntegrationHubLoopbackTlsTransportCandidateTest {
         switch (mode) {
             case STALL_HEADERS -> {
                 awaitRelease();
+                lateResponseAttempted.set(true);
                 respondNoContent(exchange);
             }
             case SLOW_BODY -> respondWithSlowBody(exchange);
@@ -1046,7 +1062,6 @@ class IntegrationHubLoopbackTlsTransportCandidateTest {
     private void respondNoContent(HttpExchange exchange) throws IOException {
         exchange.getResponseHeaders().set("X-Provider-Request-Id", "fixture-123");
         exchange.sendResponseHeaders(204, -1);
-        responseSent.set(true);
         exchange.close();
     }
 
