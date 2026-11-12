@@ -1,5 +1,6 @@
 package com.ses.importcenter.metadata;
 
+import com.ses.common.enums.FileKind;
 import com.ses.common.exception.BusinessException;
 import com.ses.config.LoginUser;
 import com.ses.entity.SysUser;
@@ -26,6 +27,7 @@ import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -36,14 +38,21 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import javax.sql.DataSource;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.time.Duration;
 import java.util.HexFormat;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -54,18 +63,24 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
-/** test専用固定manifestで実MySQLのraw upload、冪等再利用、rollback/競合補償を確認する。 */
+/** test専用固定manifestで実MySQLのraw upload、冪等再利用、rollback/競合補償、総期限、ACK-loss回復を確認する。 */
 @SpringBootTest
 @ActiveProfiles("test")
 @Tag("mysql")
@@ -96,14 +111,19 @@ class ImportCsvIngestionRealMySqlTest {
     }
 
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private DataSource dataSource;
     @Autowired private ImportCsvIngestionService ingestion;
+    @Autowired private ImportMetadataAuthorizationService authorization;
+    @Autowired private ImportRawTempFileStore tempFiles;
     @SpyBean private ImportMetadataService metadata;
+    @SpyBean private ImportCsvUploadCommitService commitService;
     @Autowired private com.ses.mapper.SysUserMapper users;
     @SpyBean private DocumentMetadataCommitService documentMetadataCommit;
     @SpyBean private com.ses.service.DocumentService documentService;
     @SpyBean private DocumentVersionMapper documentVersionMapper;
     @Autowired private SyntheticFixtureAdmission admission;
     @Autowired private InMemoryDocumentStorage storage;
+    @Autowired private SwitchableScanner scanner;
     private SysUser actorUser;
     private long actorId;
     private long groupId;
@@ -114,6 +134,7 @@ class ImportCsvIngestionRealMySqlTest {
     @BeforeEach
     void prepareAuthorizedSource() {
         AccountingTenantContextHolder.setTenantId(TENANT);
+        scanner.set(SwitchableScanner.Mode.CLEAN);
         sourceCode = "nf06_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         actorUser = SysUser.builder().username("nf06-" + sourceCode).password("test-only")
                 .realName("取込テスト管理者").role("管理者").status(1).tenantId(TENANT).build();
@@ -154,6 +175,7 @@ class ImportCsvIngestionRealMySqlTest {
     void cleanupFixture() {
         SecurityContextHolder.clearContext();
         AccountingTenantContextHolder.clear();
+        scanner.set(SwitchableScanner.Mode.CLEAN);
         jdbc.update("DELETE FROM t_import_job WHERE tenant_id=? AND source_system_id=?", TENANT, sourceId);
         jdbc.update("DELETE FROM t_document_link WHERE tenant_id=? AND document_id IN "
                 + "(SELECT id FROM t_document WHERE tenant_id=? AND document_type='IMPORT')", TENANT, TENANT);
@@ -180,6 +202,7 @@ class ImportCsvIngestionRealMySqlTest {
     void realMySqlUploadCommitsExactCleanDocumentVersionJobAndLinkAndIsIdempotent() {
         AtomicBoolean bodyOpened = new AtomicBoolean();
         Map<String, String> domainBefore = snapshotNoDomainWrites();
+        Set<String> tempBefore = rawTempFiles();
 
         ImportRawUploadHeaders headers = new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8);
         ImportUploadJobDetail created = ingestion.upload(headers, () -> {
@@ -213,6 +236,7 @@ class ImportCsvIngestionRealMySqlTest {
         assertFalse(created.toString().contains("Synthetic Company"));
         assertTrue(bodyOpened.get());
         assertEquals(domainBefore, snapshotNoDomainWrites());
+        assertEquals(tempBefore, rawTempFiles(), "成功・再利用の両経路でraw CSV一時ファイルを残さない");
     }
 
     @Test
@@ -263,7 +287,193 @@ class ImportCsvIngestionRealMySqlTest {
         assertNoCommittedRows();
     }
 
+    // ---------------------------------------------------------------- 認可拒否
+
+    @Test
+    void revokedImportGrantRejectsBeforeBodyAndWritesNothing() {
+        jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 WHERE tenant_id=? AND group_id=?",
+                TENANT, groupId);
+        AtomicBoolean bodyOpened = new AtomicBoolean();
+        Set<String> tempBefore = rawTempFiles();
+
+        BusinessException denied = assertThrows(BusinessException.class, () -> ingestion.upload(
+                new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8), () -> {
+                    bodyOpened.set(true);
+                    return new ByteArrayInputStream(CSV);
+                }));
+
+        assertEquals(403, denied.getCode());
+        assertFalse(bodyOpened.get());
+        assertEquals(0, storage.putCount());
+        verify(commitService, never()).commit(any(), any(), any(), anyInt());
+        assertNoCommittedRows();
+        assertEquals(tempBefore, rawTempFiles());
+    }
+
+    @Test
+    void grantRevokedAtCommitWriteGateRollsBackAndDiscardsOwnedStage() {
+        doAnswer(invocation -> {
+            jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 WHERE tenant_id=? AND group_id=?",
+                    TENANT, groupId);
+            return invocation.callRealMethod();
+        }).when(commitService).commit(any(), any(), any(), anyInt());
+        Set<String> tempBefore = rawTempFiles();
+
+        BusinessException denied = assertThrows(BusinessException.class, () -> ingestion.upload(
+                new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8), () -> new ByteArrayInputStream(CSV)));
+
+        assertEquals(403, denied.getCode());
+        verify(commitService).commit(any(), any(), any(), anyInt());
+        verify(documentService).discardImportStage(any());
+        assertEquals(1, storage.putCount());
+        assertNoCommittedRows();
+        assertEquals(tempBefore, rawTempFiles());
+    }
+
+    // ---------------------------------------------------------------- scanner error
+
+    @Test
+    void scannerOutageAndInfectedVerdictLeaveNoStorageMetadataOrTempFile() {
+        Set<String> tempBefore = rawTempFiles();
+        for (SwitchableScanner.Mode mode : List.of(SwitchableScanner.Mode.THROW, SwitchableScanner.Mode.INFECTED)) {
+            scanner.set(mode);
+
+            BusinessException rejected = assertThrows(BusinessException.class, () -> ingestion.upload(
+                    new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8), () -> new ByteArrayInputStream(CSV)));
+
+            assertEquals(400, rejected.getCode());
+            assertEquals("error.file.scanRejected", rejected.getMessageKey());
+        }
+
+        assertEquals(0, storage.putCount());
+        verify(commitService, never()).commit(any(), any(), any(), anyInt());
+        assertNoCommittedRows();
+        assertEquals(tempBefore, rawTempFiles());
+    }
+
+    // ---------------------------------------------------------------- ACK-loss / readback
+
+    @Test
+    void commitAckLossAfterDurableCommitReturnsOwnJobFromReadback() {
+        doAnswer(invocation -> {
+            invocation.callRealMethod();
+            throw new DataAccessResourceFailureException("synthetic commit acknowledgement loss");
+        }).when(commitService).commit(any(), any(), any(), anyInt());
+        Set<String> tempBefore = rawTempFiles();
+
+        ImportUploadJobDetail recovered = ingestion.upload(new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8),
+                () -> new ByteArrayInputStream(CSV));
+
+        assertEquals("UPLOADED", recovered.state());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_import_job WHERE tenant_id=? AND id=? "
+                + "AND source_system_id=? AND state='UPLOADED'", Integer.class, TENANT, recovered.jobId(), sourceId));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_document WHERE tenant_id=? "
+                + "AND document_type='IMPORT'", Integer.class, TENANT));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM t_document_link WHERE tenant_id=? "
+                + "AND target_type='IMPORT_JOB' AND target_id=? AND deleted_flag=0", Integer.class,
+                TENANT, recovered.jobId()));
+        assertEquals(1, storage.objectCount());
+        assertEquals(CSV_HASH, sha256(storage.onlyObject()));
+        assertEquals(recovered, metadata.getUploadedJobDetail(recovered.jobId()));
+        verify(metadata).findCommittedUploadForStage(any(), any(), any(), any());
+        verify(documentService, never()).discardImportStage(any());
+        assertEquals(tempBefore, rawTempFiles());
+    }
+
+    @Test
+    void commitFailureWithReadbackOutageRetainsStageForReconciliation() {
+        doThrow(new DataAccessResourceFailureException("synthetic commit failure"))
+                .when(commitService).commit(any(), any(), any(), anyInt());
+        doThrow(new DataAccessResourceFailureException("synthetic readback outage"))
+                .when(metadata).findCommittedUploadForStage(any(), any(), any(), any());
+        Set<String> tempBefore = rawTempFiles();
+
+        DataAccessResourceFailureException failure = assertThrows(DataAccessResourceFailureException.class,
+                () -> ingestion.upload(new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8),
+                        () -> new ByteArrayInputStream(CSV)));
+
+        assertEquals("synthetic commit failure", failure.getMessage());
+        verify(documentService, never()).discardImportStage(any());
+        assertNoMetadataRows();
+        assertEquals(1, storage.objectCount(), "commit結果を確認できないstageは照合用に保全する");
+        assertEquals(tempBefore, rawTempFiles());
+    }
+
+    // ---------------------------------------------------------------- 120秒総期限
+
+    @Test
+    void deadlineExpiredAfterStageDiscardsOwnedStageAndCommitsNothing() {
+        AtomicLong nanos = new AtomicLong();
+        doAnswer(invocation -> {
+            Object staged = invocation.callRealMethod();
+            nanos.set(ImportIngressDeadline.TOTAL_BUDGET.plusSeconds(1).toNanos());
+            return staged;
+        }).when(documentService).stageReceivedForImport(any(), any(), anyLong(), any(), any());
+        Set<String> tempBefore = rawTempFiles();
+
+        BusinessException expired = assertThrows(BusinessException.class, () -> ingestionWithClock(nanos).upload(
+                new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8), () -> new ByteArrayInputStream(CSV)));
+
+        assertEquals(503, expired.getCode());
+        assertEquals(ImportIngressDeadline.EXCEEDED_MESSAGE_KEY, expired.getMessageKey());
+        verify(commitService, never()).commit(any(), any(), any(), anyInt());
+        verify(documentService).discardImportStage(any());
+        assertEquals(1, storage.putCount());
+        assertNoCommittedRows();
+        assertEquals(tempBefore, rawTempFiles());
+    }
+
+    @Test
+    void commitTransactionTimeoutDerivedFromDeadlineCutsLockWaitAndReportsDeadline() throws Exception {
+        AtomicLong nanos = new AtomicLong();
+        long budgetNanos = ImportIngressDeadline.TOTAL_BUDGET.toNanos();
+        doAnswer(invocation -> {
+            Object staged = invocation.callRealMethod();
+            // commit開始時点の残りを1.5秒にし、transaction timeoutを1秒へ縮める。
+            nanos.set(budgetNanos - Duration.ofMillis(1_500).toNanos());
+            return staged;
+        }).when(documentService).stageReceivedForImport(any(), any(), anyLong(), any(), any());
+        Set<String> tempBefore = rawTempFiles();
+
+        try (Connection blocker = dataSource.getConnection()) {
+            blocker.setAutoCommit(false);
+            try (PreparedStatement lock = blocker.prepareStatement("SELECT id FROM sys_user WHERE id=? FOR UPDATE")) {
+                lock.setLong(1, actorId);
+                lock.executeQuery().close();
+            }
+            try {
+                long started = System.nanoTime();
+                BusinessException expired = assertThrows(BusinessException.class, () -> ingestionWithClock(nanos)
+                        .upload(new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8),
+                                () -> new ByteArrayInputStream(CSV)));
+                long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+                assertEquals(503, expired.getCode());
+                assertEquals(ImportIngressDeadline.EXCEEDED_MESSAGE_KEY, expired.getMessageKey());
+                assertTrue(elapsedMillis < 20_000,
+                        "commitのlock待ちは総期限由来のtransaction timeoutで打ち切られなければなりません: " + elapsedMillis);
+            } finally {
+                blocker.rollback();
+            }
+        }
+
+        verify(commitService).commit(any(), any(), any(), eq(1));
+        assertNoMetadataRows();
+        assertEquals(1, storage.objectCount(), "commit結果が不確定なstageは照合用に保全する");
+        assertEquals(tempBefore, rawTempFiles());
+    }
+
+    private ImportCsvIngestionService ingestionWithClock(AtomicLong nanos) {
+        return new ImportCsvIngestionService(authorization, metadata, admission, documentService, commitService,
+                tempFiles, nanos::get, ImportIngressDeadline.TOTAL_BUDGET);
+    }
+
     private void assertNoCommittedRows() {
+        assertNoMetadataRows();
+        assertEquals(0, storage.objectCount());
+    }
+
+    private void assertNoMetadataRows() {
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_document WHERE tenant_id=? "
                 + "AND document_type='IMPORT'", Integer.class, TENANT));
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_document_version WHERE tenant_id=? "
@@ -272,7 +482,18 @@ class ImportCsvIngestionRealMySqlTest {
                 + "AND source_system_id=?", Integer.class, TENANT, sourceId));
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_document_link WHERE tenant_id=? "
                 + "AND target_type='IMPORT_JOB'", Integer.class, TENANT));
-        assertEquals(0, storage.objectCount());
+    }
+
+    private Set<String> rawTempFiles() {
+        Path directory = tempFiles.directory();
+        if (!Files.isDirectory(directory)) return Set.of();
+        try (Stream<Path> files = Files.list(directory)) {
+            return files.map(file -> file.getFileName().toString())
+                    .filter(name -> name.startsWith(ImportRawTempFileStore.PREFIX))
+                    .collect(Collectors.toUnmodifiableSet());
+        } catch (IOException failure) {
+            throw new IllegalStateException(failure);
+        }
     }
 
     private Map<String, String> snapshotNoDomainWrites() {
@@ -338,7 +559,7 @@ class ImportCsvIngestionRealMySqlTest {
                 }
             }
             return staged;
-        }).when(documentService).stageReceivedForImport(any(), any(), anyLong(), any());
+        }).when(documentService).stageReceivedForImport(any(), any(), anyLong(), any(), any());
         try {
             Future<ImportUploadJobDetail> first = executor.submit(() -> uploadWhenReleased(start));
             Future<ImportUploadJobDetail> second = executor.submit(() -> uploadWhenReleased(start));
@@ -389,7 +610,7 @@ class ImportCsvIngestionRealMySqlTest {
         InMemoryDocumentStorage inMemoryDocumentStorage() { return new InMemoryDocumentStorage(); }
 
         @Bean @Primary
-        FileScanner syntheticCleanScanner() { return (path, kind) -> FileScanResult.clean("test-clean"); }
+        SwitchableScanner syntheticSwitchableScanner() { return new SwitchableScanner(); }
 
         @Bean @Primary
         ImportIdentityKeyProvider importIdentityKeyProvider() {
@@ -398,6 +619,23 @@ class ImportCsvIngestionRealMySqlTest {
                 @Override public byte[] lookupKey(String keyVersion) { return new byte[32]; }
                 @Override public String currentEncryptionKeyVersion() { return "nf06-test-v1"; }
                 @Override public byte[] encryptionKey(String keyVersion) { return new byte[32]; }
+            };
+        }
+    }
+
+    /** 既定はCLEAN。testごとにscanner障害・感染判定へ切り替える。 */
+    static class SwitchableScanner implements FileScanner {
+        enum Mode { CLEAN, INFECTED, THROW }
+
+        private volatile Mode mode = Mode.CLEAN;
+
+        void set(Mode next) { mode = next; }
+
+        @Override public FileScanResult scan(Path quarantinedFile, FileKind kind) {
+            return switch (mode) {
+                case CLEAN -> FileScanResult.clean("test-clean");
+                case INFECTED -> FileScanResult.infected("test-signature");
+                case THROW -> throw new IllegalStateException("synthetic scanner outage");
             };
         }
     }

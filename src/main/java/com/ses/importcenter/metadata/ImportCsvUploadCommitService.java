@@ -6,27 +6,55 @@ import com.ses.importcenter.foundation.SesImportV1Schema;
 import com.ses.service.impl.DocumentMetadataCommitService;
 import com.ses.service.impl.StagedImportDocument;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
-/** CLEAN済みstorageとDocument/version/job/linkを一つの短いDB transactionで確定する。 */
+/**
+ * CLEAN済みstorageとDocument/version/job/linkを一つの短いDB transactionで確定する。
+ * transaction timeoutはingress総期限の残り秒数とし、全statementをその範囲で打ち切る。
+ */
 @Service
 public class ImportCsvUploadCommitService {
+    private static final String TRANSACTION_NAME = "NF06-A1A-raw-upload-commit";
     private final ImportMetadataAuthorizationService authorization;
     private final DocumentMetadataCommitService documentCommit;
     private final ImportMetadataService metadata;
+    private final PlatformTransactionManager transactionManager;
 
     public ImportCsvUploadCommitService(ImportMetadataAuthorizationService authorization,
                                         DocumentMetadataCommitService documentCommit,
-                                        ImportMetadataService metadata) {
+                                        ImportMetadataService metadata,
+                                        PlatformTransactionManager transactionManager) {
         this.authorization = authorization;
         this.documentCommit = documentCommit;
         this.metadata = metadata;
+        this.transactionManager = transactionManager;
     }
 
-    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
+    /**
+     * @param timeoutSeconds ingress総期限から導出した残り秒数。1未満ならtransactionを開始しない。
+     */
     public ImportUploadJobDetail commit(ImportAdmissionToken token, ImportAdmissionManifest contentManifest,
-                                        StagedImportDocument staged) {
+                                        StagedImportDocument staged, int timeoutSeconds) {
+        if (timeoutSeconds < 1) {
+            throw BusinessException.of(503, ImportIngressDeadline.EXCEEDED_MESSAGE_KEY);
+        }
+        // 外側transactionへ参加するとtimeoutが無視され総期限が効かないため、単独transactionだけを許す。
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("raw upload commitは外側transactionなしで呼び出す必要があります");
+        }
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+        transaction.setTimeout(timeoutSeconds);
+        transaction.setName(TRANSACTION_NAME);
+        return transaction.execute(status -> commitInTransaction(token, contentManifest, staged));
+    }
+
+    private ImportUploadJobDetail commitInTransaction(ImportAdmissionToken token,
+                                                      ImportAdmissionManifest contentManifest,
+                                                      StagedImportDocument staged) {
         ImportAuthorizedContext expected = new ImportAuthorizedContext(token.tenantId(),
                 token.actorUserId(), token.legalEntityId());
         ImportAuthorizedContext current = authorization.requireCurrentAuthorizationForWrite(expected);

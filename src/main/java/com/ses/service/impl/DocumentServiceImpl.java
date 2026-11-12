@@ -114,10 +114,11 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     @Override
     @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public StagedImportDocument stageReceivedForImport(DocumentRegisterRequest request, Path boundedTempFile,
-                                                       long expectedSizeBytes, String expectedSha256) {
+                                                       long expectedSizeBytes, String expectedSha256,
+                                                       Runnable deadlineCheckpoint) {
         if (request == null || boundedTempFile == null || expectedSizeBytes < 1
                 || expectedSizeBytes > 64L * 1024 * 1024 || expectedSha256 == null
-                || !expectedSha256.matches("[0-9a-f]{64}")) {
+                || !expectedSha256.matches("[0-9a-f]{64}") || deadlineCheckpoint == null) {
             throw BusinessException.of(400, "error.document.invalidRequest");
         }
         if (!"IMPORT".equals(request.getDocumentType()) || !"text/csv".equals(request.getContentType())
@@ -131,34 +132,44 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             throw BusinessException.of(403, "error.tenant.mismatch");
         }
         validateDocumentType(request.getDocumentType(), "INCOMING");
+        deadlineCheckpoint.run();
         try {
             if (Files.size(boundedTempFile) != expectedSizeBytes
-                    || !expectedSha256.equals(sha256File(boundedTempFile))) {
+                    || !expectedSha256.equals(sha256File(boundedTempFile, deadlineCheckpoint))) {
                 throw BusinessException.of(409, "error.import.sourceHashMismatch");
             }
         } catch (java.io.IOException failure) {
             throw BusinessException.of(400, "error.file.scanRejected");
         }
+        deadlineCheckpoint.run();
         FileScanner scanner = fileScannerProvider.getIfAvailable();
         FileScanResult scan;
         try {
             scan = scanner == null ? FileScanResult.unavailable("scanner is not configured")
                     : scanner.scan(boundedTempFile, com.ses.common.enums.FileKind.IMPORT);
         } catch (Exception failure) {
+            log.warn("[文書台帳] import scanner実行中例外のためfail-closedで拒否します: exceptionType={}",
+                    com.ses.common.util.LogRedaction.exceptionType(failure));
             scan = FileScanResult.unavailable("scanner failed");
         }
         if (scan == null || scan.status() != FileScanResult.Status.CLEAN) {
             throw BusinessException.of(400, "error.file.scanRejected");
         }
+        // scannerが期限後に戻った場合は、CLEAN判定でもstorageへ進めない。
+        deadlineCheckpoint.run();
 
         String storageKey = generateStorageKey();
         String operationId = UUID.randomUUID().toString();
         try {
-            try (InputStream input = Files.newInputStream(boundedTempFile)) {
+            try (InputStream input = new DeadlineCheckpointInputStream(
+                    Files.newInputStream(boundedTempFile), deadlineCheckpoint)) {
                 documentStorage.put(storageKey, input, true);
             }
+            deadlineCheckpoint.run();
             documentStorage.promote(storageKey);
-            verifyStoredImportObject(storageKey, expectedSizeBytes, expectedSha256, operationId);
+            deadlineCheckpoint.run();
+            verifyStoredImportObject(storageKey, expectedSizeBytes, expectedSha256, operationId, deadlineCheckpoint);
+            deadlineCheckpoint.run();
             ActorAttribution actor = resolveActor(request);
             Document document = buildDocument(request, tenantId, legalEntityId, actor);
             DocumentVersion version = buildVersion(request, tenantId, null, storageKey,
@@ -186,13 +197,14 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     }
 
     private void verifyStoredImportObject(String storageKey, long expectedSize, String expectedSha256,
-                                         String operationId) {
+                                         String operationId, Runnable deadlineCheckpoint) {
         try (InputStream input = documentStorage.open(storageKey)) {
             if (input == null) throw new java.io.IOException("storage returned no stream");
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] buffer = new byte[8192];
             long count = 0;
             for (int read; (read = input.read(buffer)) != -1;) {
+                deadlineCheckpoint.run();
                 count += read;
                 if (count > 64L * 1024 * 1024) throw new java.io.IOException("stored import object exceeds limit");
                 digest.update(buffer, 0, read);
@@ -219,16 +231,47 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         }
     }
 
-    private static String sha256File(Path path) throws java.io.IOException {
+    private static String sha256File(Path path, Runnable deadlineCheckpoint) throws java.io.IOException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             try (InputStream input = Files.newInputStream(path)) {
                 byte[] buffer = new byte[8192];
-                for (int read; (read = input.read(buffer)) != -1;) digest.update(buffer, 0, read);
+                for (int read; (read = input.read(buffer)) != -1;) {
+                    deadlineCheckpoint.run();
+                    digest.update(buffer, 0, read);
+                }
             }
             return HexFormat.of().formatHex(digest.digest());
         } catch (java.security.NoSuchAlgorithmException impossible) {
             throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+    }
+
+    /** storage書込中もingress総期限を確認する。超過例外はそのまま伝播し、呼出元catchでstageを自己削除する。 */
+    private static final class DeadlineCheckpointInputStream extends java.io.FilterInputStream {
+        private final Runnable deadlineCheckpoint;
+
+        private DeadlineCheckpointInputStream(InputStream input, Runnable deadlineCheckpoint) {
+            super(input);
+            this.deadlineCheckpoint = deadlineCheckpoint;
+        }
+
+        @Override
+        public int read() throws java.io.IOException {
+            deadlineCheckpoint.run();
+            return super.read();
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws java.io.IOException {
+            deadlineCheckpoint.run();
+            return super.read(buffer, offset, length);
+        }
+
+        @Override
+        public long skip(long count) throws java.io.IOException {
+            deadlineCheckpoint.run();
+            return super.skip(count);
         }
     }
 

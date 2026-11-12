@@ -1,5 +1,8 @@
 package com.ses.importcenter.metadata;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Document;
 import com.ses.entity.DocumentVersion;
@@ -8,44 +11,95 @@ import com.ses.importcenter.foundation.ImportEntity;
 import com.ses.importcenter.foundation.SesImportV1Schema;
 import com.ses.service.DocumentService;
 import com.ses.service.impl.StagedImportDocument;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
+import org.springframework.transaction.TransactionTimedOutException;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.anyLong;
 
+/** raw CSV ingressのservice単体分岐。clockは注入値で進め、実時間のsleepは使わない。 */
 class ImportCsvIngestionServiceTest {
     private static final ImportAuthorizedContext CONTEXT = new ImportAuthorizedContext("tenant-test", 31, 41);
     private static final ImportUploadSource SOURCE = new ImportUploadSource(51, "fixture-a", 3);
     private static final ImportAuthorizedContext OTHER_CONTEXT = new ImportAuthorizedContext("tenant-test", 31, 42);
     private static final byte[] CSV = "externalKey,companyName\nC-SYN-1,架空会社\n".getBytes(StandardCharsets.UTF_8);
     private static final String CSV_HASH = sha256(CSV);
+    private static final Duration BUDGET = Duration.ofSeconds(120);
+    private static final ImportUploadJobDetail UPLOADED = new ImportUploadJobDetail(101, "UPLOADED", "CUSTOMER",
+            CSV_HASH.substring(0, 12), 1, "UTF8");
+
+    @TempDir Path uploadRoot;
+
+    private final AtomicLong clock = new AtomicLong(5_000_000_000L);
+    private SimpleMeterRegistry meterRegistry;
+    private ImportMetadataAuthorizationService authorization;
+    private ImportMetadataService metadata;
+    private DocumentService documents;
+    private ImportCsvUploadCommitService commit;
+    private Logger tempStoreLogger;
+    private ListAppender<ILoggingEvent> tempStoreLogs;
+
+    @BeforeEach
+    void prepareCollaborators() {
+        meterRegistry = new SimpleMeterRegistry();
+        authorization = mock(ImportMetadataAuthorizationService.class);
+        metadata = mock(ImportMetadataService.class);
+        documents = mock(DocumentService.class);
+        commit = mock(ImportCsvUploadCommitService.class);
+        tempStoreLogger = (Logger) LoggerFactory.getLogger(ImportRawTempFileStore.class);
+        tempStoreLogs = new ListAppender<>();
+        tempStoreLogs.start();
+        tempStoreLogger.addAppender(tempStoreLogs);
+    }
+
+    @AfterEach
+    void detachLogCapture() {
+        tempStoreLogger.detachAppender(tempStoreLogs);
+    }
+
+    // ---------------------------------------------------------------- 認可・admission（body未読で拒否）
 
     @Test
     void defaultDenyAdmissionRejectsBeforeOpeningRequestStream() {
-        ImportMetadataAuthorizationService authorization = mock(ImportMetadataAuthorizationService.class);
-        ImportMetadataService metadata = mock(ImportMetadataService.class);
-        DocumentService documents = mock(DocumentService.class);
         when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT);
         when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
-        ImportCsvIngestionService service = new ImportCsvIngestionService(authorization, metadata,
-                new DefaultDenyImportAdmissionPort(), documents, mock(ImportCsvUploadCommitService.class));
+        ImportCsvIngestionService service = service(new DefaultDenyImportAdmissionPort());
         AtomicBoolean opened = new AtomicBoolean();
 
         BusinessException failure = assertThrows(BusinessException.class, () -> service.upload(
@@ -56,32 +110,57 @@ class ImportCsvIngestionServiceTest {
 
         assertEquals(403, failure.getCode());
         assertFalse(opened.get());
-        verify(documents, never()).stageReceivedForImport(any(), any(), anyLong(), any());
+        verify(documents, never()).stageReceivedForImport(any(), any(), anyLong(), any(), any());
+        assertNoRawTempFiles();
     }
 
     @Test
-    void rawBodyHardLimitRejectsByteSixtyFourMiBPlusOne() {
-        ImportMetadataAuthorizationService authorization = mock(ImportMetadataAuthorizationService.class);
-        ImportMetadataService metadata = mock(ImportMetadataService.class);
-        DocumentService documents = mock(DocumentService.class);
-        when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT);
-        when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
-        ImportCsvIngestionService service = new ImportCsvIngestionService(authorization, metadata,
-                fixedFixtureAdmission(), documents, mock(ImportCsvUploadCommitService.class));
+    void authorizationDeniedRejectsBeforeResolvingSourceOrOpeningBody() {
+        when(authorization.requireCurrentAuthorization()).thenThrow(BusinessException.of(403, "error.forbidden"));
+        CountingAdmission admission = new CountingAdmission(fixedFixtureAdmission());
+        ImportCsvIngestionService service = service(admission);
+        AtomicBoolean opened = new AtomicBoolean();
 
-        BusinessException tooLarge = assertThrows(BusinessException.class, () -> service.upload(
-                new ImportRawUploadHeaders("fixture-a", ImportEncoding.UTF8),
-                () -> new RepeatingInputStream(64L * 1024 * 1024 + 1)));
+        BusinessException failure = assertThrows(BusinessException.class, () -> service.upload(
+                new ImportRawUploadHeaders("fixture-a", ImportEncoding.UTF8), () -> {
+                    opened.set(true);
+                    return new ByteArrayInputStream(CSV);
+                }));
 
-        assertEquals(413, tooLarge.getCode());
-        verify(documents, never()).stageReceivedForImport(any(), any(), anyLong(), any());
+        assertEquals(403, failure.getCode());
+        assertEquals("error.forbidden", failure.getMessageKey());
+        assertFalse(opened.get());
+        assertEquals(0, admission.beforeBodyCalls.get());
+        verify(metadata, never()).resolveActiveUploadSource(any());
+        verify(documents, never()).stageReceivedForImport(any(), any(), anyLong(), any(), any());
+        verify(commit, never()).commit(any(), any(), any(), anyInt());
+        assertNoRawTempFiles();
+    }
+
+    @Test
+    void uploadInsideOuterTransactionIsRejectedBeforeAuthorizationOrBody() {
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+        AtomicBoolean opened = new AtomicBoolean();
+
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            assertThrows(IllegalStateException.class, () -> service.upload(
+                    new ImportRawUploadHeaders("fixture-a", ImportEncoding.UTF8), () -> {
+                        opened.set(true);
+                        return new ByteArrayInputStream(CSV);
+                    }));
+        } finally {
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+
+        assertFalse(opened.get());
+        verify(authorization, never()).requireCurrentAuthorization();
+        verify(commit, never()).commit(any(), any(), any(), anyInt());
+        assertNoRawTempFiles();
     }
 
     @Test
     void admissionContextMismatchRejectsBeforeOpeningRequestStream() {
-        ImportMetadataAuthorizationService authorization = mock(ImportMetadataAuthorizationService.class);
-        ImportMetadataService metadata = mock(ImportMetadataService.class);
-        DocumentService documents = mock(DocumentService.class);
         when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT);
         when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
         ImportAdmissionPort mismatched = new ImportAdmissionPort() {
@@ -94,8 +173,7 @@ class ImportCsvIngestionServiceTest {
                 throw new AssertionError("body must not be read");
             }
         };
-        ImportCsvIngestionService service = new ImportCsvIngestionService(authorization, metadata, mismatched,
-                documents, mock(ImportCsvUploadCommitService.class));
+        ImportCsvIngestionService service = service(mismatched);
         AtomicBoolean opened = new AtomicBoolean();
 
         assertThrows(BusinessException.class, () -> service.upload(
@@ -105,19 +183,32 @@ class ImportCsvIngestionServiceTest {
                 }));
 
         assertFalse(opened.get());
-        verify(documents, never()).stageReceivedForImport(any(), any(), anyLong(), any());
+        verify(documents, never()).stageReceivedForImport(any(), any(), anyLong(), any(), any());
+        assertNoRawTempFiles();
     }
 
     @Test
+    void rawBodyHardLimitRejectsByteSixtyFourMiBPlusOne() {
+        when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT);
+        when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        BusinessException tooLarge = assertThrows(BusinessException.class, () -> service.upload(
+                new ImportRawUploadHeaders("fixture-a", ImportEncoding.UTF8),
+                () -> new RepeatingInputStream(64L * 1024 * 1024 + 1)));
+
+        assertEquals(413, tooLarge.getCode());
+        verify(documents, never()).stageReceivedForImport(any(), any(), anyLong(), any(), any());
+        assertNoRawTempFiles();
+    }
+
+    // ---------------------------------------------------------------- 正向
+
+    @Test
     void approvedSyntheticCustomerUploadStagesExactBytesAndReturnsRedactedUploadedDetail() throws Exception {
-        ImportMetadataAuthorizationService authorization = mock(ImportMetadataAuthorizationService.class);
-        ImportMetadataService metadata = mock(ImportMetadataService.class);
-        DocumentService documents = mock(DocumentService.class);
-        ImportCsvUploadCommitService commit = mock(ImportCsvUploadCommitService.class);
         when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT);
         when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
         when(metadata.findOrReuseExistingUpload(eq(SOURCE), eq(ImportEncoding.UTF8), any())).thenReturn(null);
-        String hash = CSV_HASH;
         ImportAdmissionToken token = new ImportAdmissionToken(CONTEXT.tenantId(), CONTEXT.actorUserId(),
                 CONTEXT.legalEntityId(), SOURCE.id(), SOURCE.version(), ImportEntity.CUSTOMER,
                 SesImportV1Schema.VERSION, ImportEncoding.UTF8, "fixture-key");
@@ -131,112 +222,497 @@ class ImportCsvIngestionServiceTest {
             @Override public ImportAdmissionManifest admitContent(ImportAdmissionToken value, String sourceHash) {
                 assertEquals(token, value);
                 if (!CSV_HASH.equals(sourceHash)) throw BusinessException.of(403, "error.import.fixtureContentMismatch");
-                return new ImportAdmissionManifest("fixture-key", CONTEXT.tenantId(), CONTEXT.legalEntityId(),
-                        SOURCE.id(), SOURCE.version(), ImportEntity.CUSTOMER, SesImportV1Schema.VERSION,
-                        ImportEncoding.UTF8, CSV_HASH, null, null, null, null, "A1A_CONTENT");
+                return contentManifest("fixture-key");
             }
         };
-        Document document = new Document();
-        document.setId(81L);
-        document.setTenantId(CONTEXT.tenantId());
-        document.setLegalEntityId(Long.toString(CONTEXT.legalEntityId()));
-        document.setDocumentType("IMPORT");
-        DocumentVersion version = new DocumentVersion();
-        version.setId(91L);
-        version.setDocumentId(81L);
-        version.setTenantId(CONTEXT.tenantId());
-        version.setVersionNo(1);
-        version.setStorageKey("tenant-test/import/unique-stage");
-        version.setSizeBytes((long) CSV.length);
-        version.setSha256(hash);
-        version.setScanStatus("CLEAN");
-        StagedImportDocument staged = new StagedImportDocument(document, version, version.getStorageKey(), "operation-test");
-        when(documents.stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(hash))).thenReturn(staged);
-        ImportUploadJobDetail expected = new ImportUploadJobDetail(101, "UPLOADED", "CUSTOMER",
-                hash.substring(0, 12), 1, "UTF8");
-        when(commit.commit(token, new ImportAdmissionManifest("fixture-key", CONTEXT.tenantId(),
-                CONTEXT.legalEntityId(), SOURCE.id(), SOURCE.version(), ImportEntity.CUSTOMER,
-                SesImportV1Schema.VERSION, ImportEncoding.UTF8, hash, null, null, null, null, "A1A_CONTENT"), staged))
-                .thenReturn(expected);
-        ImportCsvIngestionService service = new ImportCsvIngestionService(authorization, metadata, fixture, documents, commit);
+        StagedImportDocument staged = stagedFixture();
+        AtomicBoolean checkpointPassedInsideBudget = new AtomicBoolean();
+        when(documents.stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(CSV_HASH), any()))
+                .thenAnswer(invocation -> {
+                    Path file = invocation.getArgument(1);
+                    assertEquals(CSV_HASH, sha256(Files.readAllBytes(file)));
+                    invocation.getArgument(4, Runnable.class).run();
+                    checkpointPassedInsideBudget.set(true);
+                    return staged;
+                });
+        when(commit.commit(eq(token), eq(contentManifest("fixture-key")), eq(staged), eq(120)))
+                .thenReturn(UPLOADED);
+        ImportCsvIngestionService service = service(fixture);
 
         ImportUploadJobDetail result = service.upload(new ImportRawUploadHeaders("fixture-a", ImportEncoding.UTF8),
                 () -> new ByteArrayInputStream(CSV));
 
-        assertEquals(expected, result);
+        assertEquals(UPLOADED, result);
         assertEquals("UPLOADED", result.state());
         assertEquals("CUSTOMER", result.entity());
-        assertEquals(hash.substring(0, 12), result.sourceHashPrefix());
-        verify(documents).stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(hash));
+        assertEquals(CSV_HASH.substring(0, 12), result.sourceHashPrefix());
+        assertTrue(checkpointPassedInsideBudget.get());
+        ArgumentCaptor<Path> stagedFile = ArgumentCaptor.forClass(Path.class);
+        verify(documents).stageReceivedForImport(any(), stagedFile.capture(), eq((long) CSV.length), eq(CSV_HASH),
+                any());
+        assertEquals(tempDirectory(), stagedFile.getValue().getParent());
+        assertTrue(stagedFile.getValue().getFileName().toString().startsWith(ImportRawTempFileStore.PREFIX));
+        assertFalse(Files.exists(stagedFile.getValue()));
         verify(documents, never()).discardImportStage(staged);
+        assertNoRawTempFiles();
+        assertEquals(0, cleanupFailureCount());
     }
+
+    // ---------------------------------------------------------------- 認可変更（body読取後）
 
     @Test
     void legalEntityContextChangeAfterStagePreventsCommitAndDiscardsOnlyThatStage() {
-        ImportMetadataAuthorizationService authorization = mock(ImportMetadataAuthorizationService.class);
-        ImportMetadataService metadata = mock(ImportMetadataService.class);
-        DocumentService documents = mock(DocumentService.class);
-        ImportCsvUploadCommitService commit = mock(ImportCsvUploadCommitService.class);
         when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT, CONTEXT, CONTEXT, CONTEXT, OTHER_CONTEXT);
         when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
         when(metadata.findOrReuseExistingUpload(SOURCE, ImportEncoding.UTF8, CSV_HASH)).thenReturn(null);
         StagedImportDocument staged = stagedFixture();
-        when(documents.stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(CSV_HASH))).thenReturn(staged);
+        stubStage(staged);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
 
-        ImportCsvIngestionService service = new ImportCsvIngestionService(authorization, metadata, fixedFixtureAdmission(),
-                documents, commit);
-
-        assertThrows(BusinessException.class, () -> service.upload(
-                new ImportRawUploadHeaders("fixture-a", ImportEncoding.UTF8), () -> new ByteArrayInputStream(CSV)));
+        assertThrows(BusinessException.class, () -> upload(service));
 
         verify(documents).discardImportStage(staged);
-        verify(commit, never()).commit(any(), any(), any());
+        verify(commit, never()).commit(any(), any(), any(), anyInt());
+        assertNoRawTempFiles();
     }
 
     @Test
-    void cleanupFailureIsReportedInsteadOfReturningOrHidingSuccess() {
-        ImportMetadataAuthorizationService authorization = mock(ImportMetadataAuthorizationService.class);
-        ImportMetadataService metadata = mock(ImportMetadataService.class);
-        DocumentService documents = mock(DocumentService.class);
-        ImportCsvUploadCommitService commit = mock(ImportCsvUploadCommitService.class);
-        when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT);
+    void authorizationRevokedBeforeCommitDiscardsStageAndNeverCommits() {
+        when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT, CONTEXT, CONTEXT, CONTEXT)
+                .thenThrow(BusinessException.of(403, "error.forbidden"));
         when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
         when(metadata.findOrReuseExistingUpload(SOURCE, ImportEncoding.UTF8, CSV_HASH)).thenReturn(null);
         StagedImportDocument staged = stagedFixture();
-        when(documents.stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(CSV_HASH))).thenReturn(staged);
-        when(commit.commit(any(), any(), eq(staged))).thenThrow(BusinessException.of(500, "error.test.commitFailure"));
-        doThrow(BusinessException.of(500, "error.test.cleanupFailure")).when(documents).discardImportStage(staged);
-        ImportCsvIngestionService service = new ImportCsvIngestionService(authorization, metadata, fixedFixtureAdmission(),
-                documents, commit);
+        stubStage(staged);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
 
-        BusinessException failure = assertThrows(BusinessException.class, () -> service.upload(
-                new ImportRawUploadHeaders("fixture-a", ImportEncoding.UTF8), () -> new ByteArrayInputStream(CSV)));
+        BusinessException denied = assertThrows(BusinessException.class, () -> upload(service));
+
+        assertEquals(403, denied.getCode());
+        verify(documents).discardImportStage(staged);
+        verify(commit, never()).commit(any(), any(), any(), anyInt());
+        assertNoRawTempFiles();
+    }
+
+    // ---------------------------------------------------------------- scanner error
+
+    @Test
+    void scannerRejectionDuringStageLeavesNoStageCommitOrTempFile() {
+        stubAuthorizedSource();
+        when(documents.stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(CSV_HASH), any()))
+                .thenThrow(BusinessException.of(400, "error.file.scanRejected"));
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        BusinessException rejected = assertThrows(BusinessException.class, () -> upload(service));
+
+        assertEquals(400, rejected.getCode());
+        assertEquals("error.file.scanRejected", rejected.getMessageKey());
+        verify(documents, never()).discardImportStage(any());
+        verify(commit, never()).commit(any(), any(), any(), anyInt());
+        assertNoRawTempFiles();
+    }
+
+    // ---------------------------------------------------------------- stage補償
+
+    @Test
+    void cleanupFailureIsReportedInsteadOfReturningOrHidingSuccess() {
+        stubAuthorizedSource();
+        StagedImportDocument staged = stagedFixture();
+        stubStage(staged);
+        when(commit.commit(any(), any(), eq(staged), anyInt()))
+                .thenThrow(BusinessException.of(500, "error.test.commitFailure"));
+        doThrow(BusinessException.of(500, "error.test.cleanupFailure")).when(documents).discardImportStage(staged);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        BusinessException failure = assertThrows(BusinessException.class, () -> upload(service));
 
         assertEquals(500, failure.getCode());
         assertEquals("error.test.cleanupFailure", failure.getMessageKey());
         verify(documents).discardImportStage(staged);
+        assertNoRawTempFiles();
     }
+
+    // ---------------------------------------------------------------- ACK-loss / readback
 
     @Test
     void uncertainCommitReadbackRetainsThePossiblyCommittedStage() {
-        ImportMetadataAuthorizationService authorization = mock(ImportMetadataAuthorizationService.class);
-        ImportMetadataService metadata = mock(ImportMetadataService.class);
-        DocumentService documents = mock(DocumentService.class);
-        ImportCsvUploadCommitService commit = mock(ImportCsvUploadCommitService.class);
+        stubAuthorizedSource();
+        StagedImportDocument staged = stagedFixture();
+        stubStage(staged);
+        when(commit.commit(any(), any(), eq(staged), anyInt()))
+                .thenThrow(new IllegalStateException("commit acknowledgement lost"));
+        when(metadata.findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged)).thenReturn(null);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        assertThrows(IllegalStateException.class, () -> upload(service));
+
+        verify(documents, never()).discardImportStage(staged);
+        assertNoRawTempFiles();
+    }
+
+    @Test
+    void commitAckLossWithOwnCommittedRowReturnsReadbackWithoutDiscard() {
+        stubAuthorizedSource();
+        StagedImportDocument staged = stagedFixture();
+        stubStage(staged);
+        when(commit.commit(any(), any(), eq(staged), anyInt()))
+                .thenThrow(new IllegalStateException("commit acknowledgement lost"));
+        when(metadata.findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged)).thenReturn(UPLOADED);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        ImportUploadJobDetail result = upload(service);
+
+        assertEquals(UPLOADED, result);
+        verify(metadata).findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged);
+        verify(documents, never()).discardImportStage(staged);
+        assertNoRawTempFiles();
+    }
+
+    @Test
+    void commitAckLossWithReadbackFailureRetainsStageAndRethrowsOriginalFailure() {
+        stubAuthorizedSource();
+        StagedImportDocument staged = stagedFixture();
+        stubStage(staged);
+        IllegalStateException original = new IllegalStateException("commit acknowledgement lost");
+        when(commit.commit(any(), any(), eq(staged), anyInt())).thenThrow(original);
+        when(metadata.findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged))
+                .thenThrow(new IllegalArgumentException("synthetic readback outage"));
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class, () -> upload(service));
+
+        assertSame(original, failure);
+        verify(metadata, times(1)).findOrReuseExistingUpload(SOURCE, ImportEncoding.UTF8, CSV_HASH);
+        verify(documents, never()).discardImportStage(staged);
+        assertNoRawTempFiles();
+    }
+
+    @Test
+    void uniqueConflictWithForeignWinnerReturnsWinnerAndDiscardsOnlyOwnStage() {
+        when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT);
+        when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
+        ImportUploadJobDetail winner = new ImportUploadJobDetail(202, "UPLOADED", "CUSTOMER",
+                CSV_HASH.substring(0, 12), 1, "UTF8");
+        when(metadata.findOrReuseExistingUpload(SOURCE, ImportEncoding.UTF8, CSV_HASH)).thenReturn(null, winner);
+        StagedImportDocument staged = stagedFixture();
+        stubStage(staged);
+        when(commit.commit(any(), any(), eq(staged), anyInt()))
+                .thenThrow(BusinessException.of(409, "error.import.jobIdentityConflict"));
+        when(metadata.findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged)).thenReturn(null);
+        when(metadata.isUploadJobForStage(202L, SOURCE, CSV_HASH, staged, CONTEXT)).thenReturn(false);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        ImportUploadJobDetail result = upload(service);
+
+        assertEquals(winner, result);
+        verify(documents).discardImportStage(staged);
+        assertNoRawTempFiles();
+    }
+
+    @Test
+    void uniqueConflictWhoseWinnerIsOwnStageKeepsStage() {
+        when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT);
+        when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
+        when(metadata.findOrReuseExistingUpload(SOURCE, ImportEncoding.UTF8, CSV_HASH)).thenReturn(null, UPLOADED);
+        StagedImportDocument staged = stagedFixture();
+        stubStage(staged);
+        when(commit.commit(any(), any(), eq(staged), anyInt()))
+                .thenThrow(BusinessException.of(409, "error.import.jobIdentityConflict"));
+        when(metadata.findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged)).thenReturn(null);
+        when(metadata.isUploadJobForStage(101L, SOURCE, CSV_HASH, staged, CONTEXT)).thenReturn(true);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        ImportUploadJobDetail result = upload(service);
+
+        assertEquals(UPLOADED, result);
+        verify(documents, never()).discardImportStage(staged);
+        assertNoRawTempFiles();
+    }
+
+    @Test
+    void uniqueConflictReadbackFailureRetainsStageAndRethrowsConflict() {
+        stubAuthorizedSource();
+        StagedImportDocument staged = stagedFixture();
+        stubStage(staged);
+        when(commit.commit(any(), any(), eq(staged), anyInt()))
+                .thenThrow(BusinessException.of(409, "error.import.jobIdentityConflict"));
+        when(metadata.findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged))
+                .thenThrow(new IllegalArgumentException("synthetic readback outage"));
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        BusinessException conflict = assertThrows(BusinessException.class, () -> upload(service));
+
+        assertEquals(409, conflict.getCode());
+        assertEquals("error.import.jobIdentityConflict", conflict.getMessageKey());
+        verify(documents, never()).discardImportStage(staged);
+        assertNoRawTempFiles();
+    }
+
+    // ---------------------------------------------------------------- 120秒総期限
+
+    @Test
+    void bodyReadPastDeadlineStopsBeforeContentAdmissionAndDeletesTemp() {
+        stubAuthorizedSource();
+        CountingAdmission admission = new CountingAdmission(fixedFixtureAdmission());
+        ImportCsvIngestionService service = service(admission);
+
+        BusinessException expired = assertThrows(BusinessException.class, () -> service.upload(
+                new ImportRawUploadHeaders("fixture-a", ImportEncoding.UTF8),
+                () -> new ClockAdvancingInputStream(CSV, () -> advance(BUDGET.plusSeconds(1)), null)));
+
+        assertDeadlineExceeded(expired);
+        assertEquals(1, admission.beforeBodyCalls.get());
+        assertEquals(0, admission.contentCalls.get());
+        verify(documents, never()).stageReceivedForImport(any(), any(), anyLong(), any(), any());
+        verify(commit, never()).commit(any(), any(), any(), anyInt());
+        assertNoRawTempFiles();
+    }
+
+    @Test
+    void deadlineReachedBeforeParseStopsBeforeContentAdmission() {
+        stubAuthorizedSource();
+        CountingAdmission admission = new CountingAdmission(fixedFixtureAdmission());
+        ImportCsvIngestionService service = service(admission);
+
+        BusinessException expired = assertThrows(BusinessException.class, () -> service.upload(
+                new ImportRawUploadHeaders("fixture-a", ImportEncoding.UTF8),
+                () -> new ClockAdvancingInputStream(CSV, null, () -> advance(BUDGET.plusSeconds(1)))));
+
+        assertDeadlineExceeded(expired);
+        assertEquals(0, admission.contentCalls.get());
+        verify(documents, never()).stageReceivedForImport(any(), any(), anyLong(), any(), any());
+        assertNoRawTempFiles();
+    }
+
+    @Test
+    void stageReturningAfterDeadlineIsDiscardedAndNeverCommitted() {
+        stubAuthorizedSource();
+        StagedImportDocument staged = stagedFixture();
+        when(documents.stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(CSV_HASH), any()))
+                .thenAnswer(invocation -> {
+                    advance(BUDGET.plusSeconds(1));
+                    return staged;
+                });
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        BusinessException expired = assertThrows(BusinessException.class, () -> upload(service));
+
+        assertDeadlineExceeded(expired);
+        verify(documents).discardImportStage(staged);
+        verify(commit, never()).commit(any(), any(), any(), anyInt());
+        assertNoRawTempFiles();
+    }
+
+    @Test
+    void stageCheckpointAbortsScannerOrStoragePhaseAtDeadline() {
+        stubAuthorizedSource();
+        when(documents.stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(CSV_HASH), any()))
+                .thenAnswer(invocation -> {
+                    advance(BUDGET.plusSeconds(1));
+                    invocation.getArgument(4, Runnable.class).run();
+                    throw new AssertionError("checkpointは期限超過で例外を投げなければなりません");
+                });
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        BusinessException expired = assertThrows(BusinessException.class, () -> upload(service));
+
+        assertDeadlineExceeded(expired);
+        verify(documents, never()).discardImportStage(any());
+        verify(commit, never()).commit(any(), any(), any(), anyInt());
+        assertNoRawTempFiles();
+    }
+
+    @Test
+    void lessThanOneSecondLeftRejectsBeforeStartingCommitTransaction() {
+        stubAuthorizedSource();
+        StagedImportDocument staged = stagedFixture();
+        when(documents.stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(CSV_HASH), any()))
+                .thenAnswer(invocation -> {
+                    advance(BUDGET.minusMillis(500));
+                    return staged;
+                });
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        BusinessException expired = assertThrows(BusinessException.class, () -> upload(service));
+
+        assertDeadlineExceeded(expired);
+        verify(commit, never()).commit(any(), any(), any(), anyInt());
+        verify(documents).discardImportStage(staged);
+        assertNoRawTempFiles();
+    }
+
+    @Test
+    void commitReceivesOnlyTheRemainingBudgetAsTransactionTimeout() {
+        stubAuthorizedSource();
+        StagedImportDocument staged = stagedFixture();
+        when(documents.stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(CSV_HASH), any()))
+                .thenAnswer(invocation -> {
+                    advance(Duration.ofMillis(20_500));
+                    return staged;
+                });
+        when(commit.commit(any(), any(), eq(staged), eq(99))).thenReturn(UPLOADED);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        ImportUploadJobDetail result = upload(service);
+
+        assertEquals(UPLOADED, result);
+        verify(commit).commit(any(), any(), eq(staged), eq(99));
+        verify(documents, never()).discardImportStage(staged);
+        assertNoRawTempFiles();
+    }
+
+    @Test
+    void commitTimeoutWithoutVisibleRowReportsDeadlineAndRetainsStage() {
+        stubAuthorizedSource();
+        StagedImportDocument staged = stagedFixture();
+        stubStage(staged);
+        when(commit.commit(any(), any(), eq(staged), anyInt()))
+                .thenThrow(new TransactionTimedOutException("synthetic transaction timeout"));
+        when(metadata.findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged)).thenReturn(null);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        BusinessException expired = assertThrows(BusinessException.class, () -> upload(service));
+
+        assertDeadlineExceeded(expired);
+        verify(metadata).findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged);
+        verify(documents, never()).discardImportStage(staged);
+        assertNoRawTempFiles();
+    }
+
+    @Test
+    void commitTimeoutWhoseReadbackShowsOwnRowStillReturnsTheCommittedJob() {
+        stubAuthorizedSource();
+        StagedImportDocument staged = stagedFixture();
+        stubStage(staged);
+        when(commit.commit(any(), any(), eq(staged), anyInt())).thenAnswer(invocation -> {
+            advance(BUDGET.plusSeconds(1));
+            throw new TransactionTimedOutException("synthetic timeout after durable commit");
+        });
+        when(metadata.findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged)).thenReturn(UPLOADED);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        ImportUploadJobDetail result = upload(service);
+
+        assertEquals(UPLOADED, result);
+        verify(documents, never()).discardImportStage(staged);
+        assertNoRawTempFiles();
+    }
+
+    // ---------------------------------------------------------------- raw temp削除失敗
+
+    @Test
+    void tempCleanupFailureAfterSuccessIsObservableRecoverableAndKeepsResult() throws Exception {
+        stubAuthorizedSource();
+        StagedImportDocument staged = stagedFixture();
+        stubStage(staged);
+        when(commit.commit(any(), any(), eq(staged), anyInt())).thenReturn(UPLOADED);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission(), failingDeleteStore());
+
+        ImportUploadJobDetail result = upload(service);
+
+        assertEquals(UPLOADED, result);
+        assertEquals(1, cleanupFailureCount());
+        List<Path> leftovers = rawTempFiles();
+        assertEquals(1, leftovers.size());
+        assertEquals(0, Files.size(leftovers.get(0)), "削除できないraw CSVは内容を切り詰めて残す");
+        String logs = tempStoreLogText();
+        assertTrue(logs.contains("raw CSV一時ファイルの削除に失敗しました"));
+        assertTrue(logs.contains(leftovers.get(0).getFileName().toString()));
+        assertTrue(logs.contains("AccessDeniedException"));
+        assertFalse(logs.contains(uploadRoot.toString()), "絶対pathをログへ出さない");
+        assertFalse(logs.contains("架空会社"), "raw CSV内容をログへ出さない");
+        verify(documents, never()).discardImportStage(staged);
+    }
+
+    @Test
+    void tempCleanupFailureDoesNotMaskTheOriginalFailure() {
+        stubAuthorizedSource();
+        when(documents.stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(CSV_HASH), any()))
+                .thenThrow(BusinessException.of(400, "error.file.scanRejected"));
+        ImportCsvIngestionService service = service(fixedFixtureAdmission(), failingDeleteStore());
+
+        BusinessException failure = assertThrows(BusinessException.class, () -> upload(service));
+
+        assertEquals("error.file.scanRejected", failure.getMessageKey());
+        assertEquals(1, cleanupFailureCount());
+        assertEquals(1, rawTempFiles().size());
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    private ImportCsvIngestionService service(ImportAdmissionPort admission) {
+        return service(admission, new ImportRawTempFileStore(tempDirectory(), meterRegistry, Files::deleteIfExists));
+    }
+
+    private ImportCsvIngestionService service(ImportAdmissionPort admission, ImportRawTempFileStore tempFiles) {
+        return new ImportCsvIngestionService(authorization, metadata, admission, documents, commit, tempFiles,
+                clock::get, BUDGET);
+    }
+
+    private ImportRawTempFileStore failingDeleteStore() {
+        return new ImportRawTempFileStore(tempDirectory(), meterRegistry, file -> {
+            throw new AccessDeniedException(file.toString());
+        });
+    }
+
+    private static ImportUploadJobDetail upload(ImportCsvIngestionService service) {
+        return service.upload(new ImportRawUploadHeaders("fixture-a", ImportEncoding.UTF8),
+                () -> new ByteArrayInputStream(CSV));
+    }
+
+    private void stubAuthorizedSource() {
         when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT);
         when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
         when(metadata.findOrReuseExistingUpload(SOURCE, ImportEncoding.UTF8, CSV_HASH)).thenReturn(null);
-        StagedImportDocument staged = stagedFixture();
-        when(documents.stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(CSV_HASH))).thenReturn(staged);
-        when(commit.commit(any(), any(), eq(staged))).thenThrow(new IllegalStateException("commit acknowledgement lost"));
-        when(metadata.findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged)).thenReturn(null);
-        ImportCsvIngestionService service = new ImportCsvIngestionService(authorization, metadata, fixedFixtureAdmission(),
-                documents, commit);
+    }
 
-        assertThrows(IllegalStateException.class, () -> service.upload(
-                new ImportRawUploadHeaders("fixture-a", ImportEncoding.UTF8), () -> new ByteArrayInputStream(CSV)));
+    private void stubStage(StagedImportDocument staged) {
+        when(documents.stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(CSV_HASH), any()))
+                .thenReturn(staged);
+    }
 
-        verify(documents, never()).discardImportStage(staged);
+    private void advance(Duration duration) {
+        clock.addAndGet(duration.toNanos());
+    }
+
+    private Path tempDirectory() {
+        return uploadRoot.resolve("quarantine").toAbsolutePath().normalize();
+    }
+
+    private List<Path> rawTempFiles() {
+        if (!Files.isDirectory(tempDirectory())) return List.of();
+        try (Stream<Path> files = Files.list(tempDirectory())) {
+            return files.filter(file -> file.getFileName().toString().startsWith(ImportRawTempFileStore.PREFIX))
+                    .toList();
+        } catch (IOException failure) {
+            throw new IllegalStateException(failure);
+        }
+    }
+
+    private void assertNoRawTempFiles() {
+        assertEquals(List.of(), rawTempFiles(), "raw CSV一時ファイルを残してはいけません");
+    }
+
+    private double cleanupFailureCount() {
+        var counter = meterRegistry.find(ImportRawTempFileStore.CLEANUP_FAILURE_METRIC).counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    private String tempStoreLogText() {
+        StringBuilder text = new StringBuilder();
+        for (ILoggingEvent event : tempStoreLogs.list) text.append(event.getFormattedMessage()).append('\n');
+        return text.toString();
+    }
+
+    private static void assertDeadlineExceeded(BusinessException failure) {
+        assertEquals(503, failure.getCode());
+        assertEquals(ImportIngressDeadline.EXCEEDED_MESSAGE_KEY, failure.getMessageKey());
+    }
+
+    private static ImportAdmissionManifest contentManifest(String fixtureKey) {
+        return new ImportAdmissionManifest(fixtureKey, CONTEXT.tenantId(), CONTEXT.legalEntityId(),
+                SOURCE.id(), SOURCE.version(), ImportEntity.CUSTOMER, SesImportV1Schema.VERSION,
+                ImportEncoding.UTF8, CSV_HASH, null, null, null, null, "A1A_CONTENT");
     }
 
     private static ImportAdmissionPort fixedFixtureAdmission() {
@@ -253,9 +729,7 @@ class ImportCsvIngestionServiceTest {
                 if (!token.equals(candidate) || !CSV_HASH.equals(hash)) {
                     throw BusinessException.of(403, "error.import.fixtureContentMismatch");
                 }
-                return new ImportAdmissionManifest(token.fixtureKey(), CONTEXT.tenantId(), CONTEXT.legalEntityId(),
-                        SOURCE.id(), SOURCE.version(), ImportEntity.CUSTOMER, SesImportV1Schema.VERSION,
-                        ImportEncoding.UTF8, CSV_HASH, null, null, null, null, "A1A_CONTENT");
+                return contentManifest(token.fixtureKey());
             }
         };
     }
@@ -276,6 +750,64 @@ class ImportCsvIngestionServiceTest {
         version.setSha256(CSV_HASH);
         version.setScanStatus("CLEAN");
         return new StagedImportDocument(document, version, version.getStorageKey(), "unit-fixed-operation");
+    }
+
+    private static final class CountingAdmission implements ImportAdmissionPort {
+        private final ImportAdmissionPort delegate;
+        private final AtomicInteger beforeBodyCalls = new AtomicInteger();
+        private final AtomicInteger contentCalls = new AtomicInteger();
+
+        private CountingAdmission(ImportAdmissionPort delegate) { this.delegate = delegate; }
+
+        @Override public ImportAdmissionToken admitBeforeBody(ImportAuthorizedContext context,
+                ImportUploadSource source, ImportEntity entity, String schema, ImportEncoding encoding) {
+            beforeBodyCalls.incrementAndGet();
+            return delegate.admitBeforeBody(context, source, entity, schema, encoding);
+        }
+
+        @Override public ImportAdmissionManifest admitContent(ImportAdmissionToken token, String sourceSha256) {
+            contentCalls.incrementAndGet();
+            return delegate.admitContent(token, sourceSha256);
+        }
+    }
+
+    /** 最初のread、またはclose時にclockを進めて、slow bodyや読取直後の期限到達を再現する。 */
+    private static final class ClockAdvancingInputStream extends InputStream {
+        private final ByteArrayInputStream bytes;
+        private Runnable onFirstRead;
+        private Runnable onClose;
+
+        private ClockAdvancingInputStream(byte[] content, Runnable onFirstRead, Runnable onClose) {
+            this.bytes = new ByteArrayInputStream(content);
+            this.onFirstRead = onFirstRead;
+            this.onClose = onClose;
+        }
+
+        @Override public int read() {
+            fireFirstRead();
+            return bytes.read();
+        }
+
+        @Override public int read(byte[] buffer, int offset, int length) {
+            fireFirstRead();
+            return bytes.read(buffer, offset, length);
+        }
+
+        @Override public void close() {
+            if (onClose != null) {
+                Runnable action = onClose;
+                onClose = null;
+                action.run();
+            }
+        }
+
+        private void fireFirstRead() {
+            if (onFirstRead != null) {
+                Runnable action = onFirstRead;
+                onFirstRead = null;
+                action.run();
+            }
+        }
     }
 
     private static final class RepeatingInputStream extends InputStream {

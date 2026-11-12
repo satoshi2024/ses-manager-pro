@@ -42,9 +42,15 @@ public interface DocumentService {
      */
     Document registerReceived(DocumentRegisterRequest request, InputStream content);
 
-    /** bounded raw CSVをCLEAN scanしStorageへstageする。Document metadataは作らない。 */
+    /**
+     * bounded raw CSVをCLEAN scanしStorageへstageする。Document metadataは作らない。
+     *
+     * @param deadlineCheckpoint 呼出元ingressの総期限check。hash再検証・scanner・storage書込/検証の各境界と
+     *                           read loop内で呼ばれ、超過時に例外を投げて中断させる（storage配置後なら自己削除する）。
+     */
     com.ses.service.impl.StagedImportDocument stageReceivedForImport(DocumentRegisterRequest request,
-            java.nio.file.Path boundedTempFile, long expectedSizeBytes, String expectedSha256);
+            java.nio.file.Path boundedTempFile, long expectedSizeBytes, String expectedSha256,
+            Runnable deadlineCheckpoint);
 
     /** commit失敗時に、当該requestが所有するstaging objectだけを削除する。 */
     void discardImportStage(com.ses.service.impl.StagedImportDocument staged);
