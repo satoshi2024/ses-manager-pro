@@ -54,6 +54,8 @@ class LifecycleResignationGateActionsUnitTest {
     private static final String TENANT = "tenant-a";
     private static final Long ENGINEER_ID = 20L;
     private static final Long USER_ID = 30L;
+    /** 案件の退社基準日。日付なしoverload（本日付）ではなく、この値が渡されることを検証する。 */
+    private static final LocalDate ANCHOR_DATE = LocalDate.of(2026, 11, 30);
 
     @Mock private SysUserMapper sysUserMapper;
     @Mock private EngineerAccountLinkService engineerAccountLinkService;
@@ -92,13 +94,26 @@ class LifecycleResignationGateActionsUnitTest {
     }
 
     @Test
-    void 担当営業解除はEngineerSalesService経由で行いmapperへ直接書き込まない() {
+    void 担当営業解除は退社基準日付きでEngineerSalesService経由で行いmapperへ直接書き込まない() {
         when(engineerAccountLinkService.findByEngineerId(ENGINEER_ID)).thenReturn(null);
 
         checker.executeAutomaticGateActions(resignationCase(), engineer());
 
-        verify(engineerSalesService).releaseAllByEngineerId(ENGINEER_ID);
+        // 解除日は処理日ではなく案件の退社基準日（組織所属の終了日と同じ口径）。
+        verify(engineerSalesService).releaseAllByEngineerId(ENGINEER_ID, ANCHOR_DATE);
+        verify(engineerSalesService, never()).releaseAllByEngineerId(any());
         verifyNoInteractions(engineerSalesMapper);
+    }
+
+    @Test
+    void 組織所属の終了日と担当営業の解除日は同じ退社基準日を使う() {
+        linkedUser(activeUser(null));
+        when(sysUserMapper.update(isNull(), any())).thenReturn(1);
+
+        checker.executeAutomaticGateActions(resignationCase(), engineer());
+
+        verify(organizationService).closeAssignmentsForUser(USER_ID, ANCHOR_DATE);
+        verify(engineerSalesService).releaseAllByEngineerId(ENGINEER_ID, ANCHOR_DATE);
     }
 
     @Test
@@ -119,6 +134,7 @@ class LifecycleResignationGateActionsUnitTest {
         verify(portalSessionService, never()).revokeAllForUser(anyLong(), anyString());
         verify(engineerAccountLinkService, never()).unlinkByEngineerId(any());
         verify(engineerSalesService, never()).releaseAllByEngineerId(any());
+        verify(engineerSalesService, never()).releaseAllByEngineerId(any(), any());
     }
 
     @Test
@@ -179,7 +195,7 @@ class LifecycleResignationGateActionsUnitTest {
                 .tenantId(TENANT)
                 .lifecycleType("RESIGNATION")
                 .engineerId(ENGINEER_ID)
-                .anchorDate(LocalDate.of(2026, 11, 30))
+                .anchorDate(ANCHOR_DATE)
                 .status("ACTIVE")
                 .build();
     }

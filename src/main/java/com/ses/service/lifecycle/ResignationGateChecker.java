@@ -271,7 +271,8 @@ public class ResignationGateChecker {
      * <p>NF01 batch 0: 連携ユーザーは案件tenant限定でlocking readし、停止は status 列だけを更新する
      * （非ロック読取した全列を updateById で書き戻すと、並行して確定した他列の更新を古い値で上書きする）。
      * ポータルユーザーは案件tenantのポータル組織に限定して照合し、複数一致はfail-closedとする。
-     * 担当営業の解除は業務規則とDataScope invalidationを持つ {@link EngineerSalesService#releaseAllByEngineerId} を通す。</p>
+     * 担当営業の解除は更新日時の記録とDataScope invalidationを持つ
+     * {@link EngineerSalesService#releaseAllByEngineerId(Long, LocalDate)} を通し、解除日には退社基準日を残す。</p>
      */
     public void executeAutomaticGateActions(LifecycleCase lcCase, Engineer engineer) {
         Long engineerId = engineer.getId();
@@ -320,9 +321,10 @@ public class ResignationGateChecker {
             log.info("Unlinked engineer account link for engineer {}", engineerId);
         }
 
-        // 2. 主担当営業および割当の解除（業務規則・DataScope invalidationを持つservice経由）
-        engineerSalesService.releaseAllByEngineerId(engineerId);
-        log.info("Released active sales assignments for engineer {}", engineerId);
+        // 2. 主担当営業および割当の解除。解除日は組織所属の終了日と同じ退社基準日とし、
+        //    更新日時の記録とDataScope invalidationを持つservice経由で行う。
+        engineerSalesService.releaseAllByEngineerId(engineerId, anchorDate);
+        log.info("退社案件完了により要員 {} の現任担当営業割当を基準日 {} で解除しました", engineerId, anchorDate);
     }
 
     /**

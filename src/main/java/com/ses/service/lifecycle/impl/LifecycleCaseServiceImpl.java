@@ -750,7 +750,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
                 requiresNew.executeWithoutResult(status -> notificationService.notifyCaseCompleted(completedCase));
             } catch (RuntimeException e) {
-                log.warn("Failed to publish lifecycle case completed notification: caseId={}, exceptionClass={}",
+                log.warn("ライフサイクル案件の完了通知の発行に失敗しました: caseId={}, exceptionClass={}",
                         completedCase.getId(), e.getClass().getSimpleName());
             }
         };

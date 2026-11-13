@@ -75,14 +75,15 @@ class LifecycleAuthorizationPreflightMySqlTest {
                     LifecycleAuthorizationPreflight.run(reader, schema, "synthetic-head");
             String after = snapshot(reader, schema);
 
-            // 未終結DUALは binary 一致の IN_PROGRESS 1件のみ（COMPLETED・小文字値は数えない）。参考値なのでPASS。
-            assertFinding(report, "LIFECYCLE_DUAL_TASK_UNFINISHED", "PASS", 1);
+            // 未終結DUALは binary 一致の IN_PROGRESS 1件のみ（COMPLETED・小文字値は数えない）。残存は人の判断待ち。
+            assertFinding(report, "LIFECYCLE_DUAL_TASK_UNFINISHED", "BLOCKED_MAPPING", 1);
             assertReasonContains(report, "LIFECYCLE_DUAL_TASK_UNFINISHED", null, "inOpenCases=1");
             // link 2: 文書tenantが大文字違い、link 4: 文書が存在しない
             assertFinding(report, "LIFECYCLE_EVIDENCE_DOCUMENT_TENANT_MISMATCH", "FAIL", 2);
             // link 3: 固定版が別文書の版
             assertFinding(report, "LIFECYCLE_EVIDENCE_VERSION_MISMATCH", "FAIL", 1);
-            assertFinding(report, "LIFECYCLE_EVIDENCE_VERSIONLESS", "PASS", 2);
+            // link 2・4 は版なし。公開時は版なし証跡を拒否するため既存行は人の判断待ち。
+            assertFinding(report, "LIFECYCLE_EVIDENCE_VERSIONLESS", "BLOCKED_MAPPING", 2);
             // t_document id=4 は tenant NULL のため (tenant_id,id) の一意key前提を満たさない
             assertFindingAt(report, "UNIQUE_KEY_PRECONDITION", "t_document(tenant_id,id)", "FAIL", 1);
             assertReasonContains(report, "UNIQUE_KEY_PRECONDITION", "t_document(tenant_id,id)", "nullKeyRows=1");
@@ -90,6 +91,7 @@ class LifecycleAuthorizationPreflightMySqlTest {
             assertFindingAt(report, "UNIQUE_KEY_PRECONDITION", "t_document_version(tenant_id,document_id,id)", "PASS", 0);
             assertReasonContains(report, "UNIQUE_KEY_PRECONDITION", "t_document_version(tenant_id,document_id,id)",
                     "existingUniqueIndex=none");
+            assertReasonContains(report, "UNIQUE_KEY_PRECONDITION", "sys_user(tenant_id,id)", "idIsPrimaryKey=true");
             assertEquals(before, after);
         }
     }
@@ -118,6 +120,7 @@ class LifecycleAuthorizationPreflightMySqlTest {
             assertEquals("FAIL", report.status());
             assertFindingAt(report, "UNIQUE_KEY_PRECONDITION", "sys_user(tenant_id,id)", "FAIL", 2);
             assertReasonContains(report, "UNIQUE_KEY_PRECONDITION", "sys_user(tenant_id,id)", "duplicateGroups=1");
+            assertReasonContains(report, "UNIQUE_KEY_PRECONDITION", "sys_user(tenant_id,id)", "idIsPrimaryKey=false");
             assertFindingAt(report, "UNIQUE_KEY_PRECONDITION", "t_document_version(tenant_id,id)", "PASS", 0);
             assertReasonContains(report, "UNIQUE_KEY_PRECONDITION", "t_document_version(tenant_id,id)",
                     "existingUniqueIndex=uk_fixture_version_tenant_id");

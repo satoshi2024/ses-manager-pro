@@ -577,7 +577,13 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         return new LockedTask(lcCase, task);
     }
 
-    /** ロック済み案件配下のタスクをid昇順に行ロックする。存在しないIDは結果に含めない。 */
+    /**
+     * ロック済み案件配下のタスクを、この呼出しの中でid昇順に行ロックする。存在しないIDは結果に含めない。
+     *
+     * <p>注意：transaction全体では「操作対象タスク → 他タスクをid昇順」の順になる（例：タスクBの完了後にAをロック）。
+     * タスク行同士の順序が問題にならないのは、すべてのタスクロックが同一案件行のFOR UPDATE保持下で取られ、
+     * 案件行が真の直列化点になっているためである。案件ロックを外す変更をしてはならない。</p>
+     */
     private Map<Long, LifecycleTask> lockTasksInIdOrder(Long caseId, Collection<Long> taskIds) {
         Map<Long, LifecycleTask> locked = new TreeMap<>();
         if (taskIds == null) {

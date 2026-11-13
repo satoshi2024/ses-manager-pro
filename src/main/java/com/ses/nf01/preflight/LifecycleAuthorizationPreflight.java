@@ -407,8 +407,9 @@ public final class LifecycleAuthorizationPreflight {
 
     /**
      * lifecycle証跡のDDL前読取検査（NF01 batch 0 / A-NF01-2）。
-     * 未終結DUAL_CONFIRMATIONは件数のみの参考値（CONFIRM未開放のためWAIVE以外で終結できない。移行方針はHR決定）。
-     * 証跡linkは task→case のtenantと文書・固定版のtenant/所属文書の一致を検査する。
+     * 未終結DUAL_CONFIRMATIONと版なし証跡linkは、0件ならPASS、1件以上なら人の移行判断が要るためBLOCKED_MAPPINGとする
+     * （B-NF01-1によりCONFIRM完成後に公開し、B-NF01-4により公開時は版なし証跡を拒否するため）。
+     * 証跡linkは task→case のtenantと文書・固定版のtenant/所属文書の一致を検査し、不一致はFAILとする。
      */
     private static void lifecycleEvidenceChecks(Connection connection, PreflightReport report) throws SQLException {
         long unfinishedDual = scalar(connection, "SELECT COUNT(*) " + UNFINISHED_DUAL_TASKS);
@@ -432,17 +433,37 @@ public final class LifecycleAuthorizationPreflight {
                 "SELECT l.id FROM t_lifecycle_evidence_link l LEFT JOIN t_lifecycle_task t ON t.id=l.task_id LEFT JOIN t_lifecycle_case c ON c.id=t.case_id LEFT JOIN t_document_version v ON v.id=l.document_version_id WHERE l.document_version_id IS NOT NULL AND (v.id IS NULL OR NOT (v.document_id <=> l.document_id) OR NOT (BINARY v.tenant_id <=> BINARY c.tenant_id)) ORDER BY l.id LIMIT 20",
                 "t_lifecycle_evidence_link.document_version_id", "pinned version missing, belongs to another document, or tenant differs from case tenant");
         long versionless = scalar(connection, "SELECT COUNT(*) FROM t_lifecycle_evidence_link WHERE document_version_id IS NULL");
-        report.finding("LIFECYCLE_EVIDENCE_VERSIONLESS", "t_lifecycle_evidence_link.document_version_id", "PASS",
-                versionless, List.of(), "informational: evidence links without a pinned document version=" + versionless
-                        + "; acceptance of versionless evidence is pending an owner decision");
+        List<String> versionlessSamples = new ArrayList<>();
+        if (versionless > 0) {
+            try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(
+                    "SELECT id FROM t_lifecycle_evidence_link WHERE document_version_id IS NULL ORDER BY id LIMIT 20")) {
+                while (rows.next()) versionlessSamples.add(redact("t_lifecycle_evidence_link", rows.getLong(1)));
+            }
+        }
+        recordVersionlessEvidenceLinks(report, versionless, versionlessSamples);
     }
 
-    /** 未終結DUAL_CONFIRMATIONの件数を参考値として記録する。schema batchの阻害要因にはしない。 */
+    /**
+     * 未終結DUAL_CONFIRMATIONの件数を記録する。1件以上はCONFIRM移行時の扱い（WAIVE・再提出等）を人が決める必要があるため
+     * BLOCKED_MAPPINGとする。データ不整合ではないためFAILにはしない。
+     */
     static void recordUnfinishedDualTasks(PreflightReport report, long unfinished, long inOpenCases, List<String> samples) {
-        report.finding("LIFECYCLE_DUAL_TASK_UNFINISHED", "t_lifecycle_task.evidence_type", "PASS", unfinished, samples,
-                "informational: unfinished DUAL_CONFIRMATION tasks=" + unfinished + "; inOpenCases=" + inOpenCases
+        report.finding("LIFECYCLE_DUAL_TASK_UNFINISHED", "t_lifecycle_task.evidence_type",
+                unfinished > 0 ? "BLOCKED_MAPPING" : "PASS", unfinished, samples,
+                "unfinished DUAL_CONFIRMATION tasks=" + unfinished + "; inOpenCases=" + inOpenCases
                         + "; inTerminalOrMissingCases=" + Math.max(0, unfinished - inOpenCases)
-                        + "; CONFIRM is disabled, so these can only be waived until an HR transition decision");
+                        + "; launch waits for CONFIRM, so a non-zero count requires an explicit HR transition decision");
+    }
+
+    /**
+     * 版を固定していない証跡linkの件数を記録する。公開時は版なし証跡を拒否するため、1件以上は既存行の扱いを
+     * 文書ownerが決める必要があり BLOCKED_MAPPING とする。
+     */
+    static void recordVersionlessEvidenceLinks(PreflightReport report, long versionless, List<String> samples) {
+        report.finding("LIFECYCLE_EVIDENCE_VERSIONLESS", "t_lifecycle_evidence_link.document_version_id",
+                versionless > 0 ? "BLOCKED_MAPPING" : "PASS", versionless, samples,
+                "evidence links without a pinned document version=" + versionless
+                        + "; versionless evidence is rejected at launch, so existing rows require an explicit owner decision");
     }
 
     /**
@@ -469,38 +490,49 @@ public final class LifecycleAuthorizationPreflight {
                     while (rows.next()) samples.add(redact(spec.table(), rows.getLong(1)));
                 }
             }
+            Map<String, String> uniqueIndexes = uniqueIndexColumns(connection, schema, spec.table());
+            String expected = String.join(",", spec.columns());
+            String existingIndex = uniqueIndexes.entrySet().stream()
+                    .filter(entry -> expected.equalsIgnoreCase(entry.getValue()))
+                    .map(Map.Entry::getKey).findFirst().orElse("none");
+            boolean idIsPrimaryKey = "id".equalsIgnoreCase(uniqueIndexes.get("PRIMARY"));
             recordUniqueKeyPrecondition(report, spec.table(), spec.columns(), duplicateGroups, nullKeyRows, violatingRows,
-                    samples, existingUniqueIndex(connection, schema, spec));
+                    samples, existingIndex, idIsPrimaryKey);
         }
     }
 
+    /**
+     * 一意key前提の判定を記録する。対象keyはすべて {@code id} を含むため、{@code id} が主キーである限り重複は起こり得ず、
+     * 実効的な前提はkey列のNULL検査になる。その旨を {@code idIsPrimaryKey} としてreasonに残す。
+     */
     static void recordUniqueKeyPrecondition(PreflightReport report, String table, List<String> columns,
                                             long duplicateGroups, long nullKeyRows, long violatingRows,
-                                            List<String> samples, String existingIndex) {
+                                            List<String> samples, String existingIndex, boolean idIsPrimaryKey) {
         boolean satisfied = duplicateGroups == 0 && nullKeyRows == 0 && violatingRows == 0;
         report.finding("UNIQUE_KEY_PRECONDITION", table + "(" + String.join(",", columns) + ")",
                 satisfied ? "PASS" : "FAIL", violatingRows, samples,
                 "duplicateGroups=" + duplicateGroups + "; nullKeyRows=" + nullKeyRows
-                        + "; existingUniqueIndex=" + safeToken(existingIndex == null ? "none" : existingIndex));
+                        + "; existingUniqueIndex=" + safeToken(existingIndex == null ? "none" : existingIndex)
+                        + "; idIsPrimaryKey=" + idIsPrimaryKey
+                        + (idIsPrimaryKey ? " (duplicates cannot occur; the null-key check is the effective precondition)" : ""));
     }
 
-    private static String existingUniqueIndex(Connection connection, String schema, UniqueKeySpec spec) throws SQLException {
-        String expected = String.join(",", spec.columns());
+    /** 表の一意index（PRIMARY含む）と列構成（SEQ_IN_INDEX順、カンマ区切り）。 */
+    private static Map<String, String> uniqueIndexColumns(Connection connection, String schema, String table) throws SQLException {
+        Map<String, String> indexes = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT INDEX_NAME, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') key_columns "
                         + "FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? AND NON_UNIQUE=0 "
                         + "GROUP BY INDEX_NAME ORDER BY INDEX_NAME")) {
             statement.setString(1, schema);
-            statement.setString(2, spec.table());
+            statement.setString(2, table);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    if (expected.equalsIgnoreCase(rows.getString("key_columns"))) {
-                        return rows.getString("INDEX_NAME");
-                    }
+                    indexes.put(rows.getString("INDEX_NAME"), rows.getString("key_columns"));
                 }
             }
         }
-        return "none";
+        return indexes;
     }
 
     private static long scalar(Connection connection, String sql) throws SQLException {

@@ -98,6 +98,9 @@ class LifecycleMySqlIntegrationTest {
     @Autowired
     private LifecycleTaskMapper taskMapper;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     @Test
     void 実MySQLで該当案件がない一覧検索は空配列を返す() {
         SysUser admin = SysUser.builder()
@@ -193,6 +196,12 @@ class LifecycleMySqlIntegrationTest {
 
         LifecycleCase finalCase = caseMapper.selectById(caseDto.getId());
         assertEquals("COMPLETED", finalCase.getStatus());
+
+        // 完了通知はcommit後の独立transactionで永続化される（NF01 batch 0: afterCommit + REQUIRES_NEW）。
+        Integer completedNotifications = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_notification WHERE dedupe_key = ? AND recipient_user_id = ?",
+                Integer.class, "lifecycle-case-completed-" + caseDto.getId() + "#u" + admin.getId(), admin.getId());
+        assertEquals(1, completedNotifications, "案件完了のcommit後に起票者宛の完了通知が1件だけ確定していること");
     }
 
     @Test

@@ -43,46 +43,58 @@ class LifecycleAuthorizationPreflightUnitTest {
         LifecycleAuthorizationPreflight.PreflightReport satisfied =
                 new LifecycleAuthorizationPreflight.PreflightReport("baseline", "schema");
         LifecycleAuthorizationPreflight.recordUniqueKeyPrecondition(satisfied, "t_document_version",
-                List.of("tenant_id", "id"), 0, 0, 0, List.of(), "uk_document_version_tenant_id");
+                List.of("tenant_id", "id"), 0, 0, 0, List.of(), "uk_document_version_tenant_id", true);
         assertEquals("PASS", satisfied.status());
         assertTrue(satisfied.toJson().contains("\"checkId\":\"UNIQUE_KEY_PRECONDITION\""));
         assertTrue(satisfied.toJson().contains("t_document_version(tenant_id,id)"));
         assertTrue(satisfied.toJson().contains("existingUniqueIndex=uk_document_version_tenant_id"));
+        assertTrue(satisfied.toJson().contains("idIsPrimaryKey=true"));
 
         LifecycleAuthorizationPreflight.PreflightReport duplicate =
                 new LifecycleAuthorizationPreflight.PreflightReport("baseline", "schema");
         LifecycleAuthorizationPreflight.recordUniqueKeyPrecondition(duplicate, "sys_user",
-                List.of("tenant_id", "id"), 1, 0, 2, List.of("sample|a"), null);
+                List.of("tenant_id", "id"), 1, 0, 2, List.of("sample|a"), null, false);
         assertEquals("FAIL", duplicate.status());
         assertTrue(duplicate.toJson().contains("duplicateGroups=1"));
         assertTrue(duplicate.toJson().contains("existingUniqueIndex=none"));
+        assertTrue(duplicate.toJson().contains("idIsPrimaryKey=false"));
         assertTrue(duplicate.toMarkdown().contains("sample\\|a"));
 
         LifecycleAuthorizationPreflight.PreflightReport nullKey =
                 new LifecycleAuthorizationPreflight.PreflightReport("baseline", "schema");
         LifecycleAuthorizationPreflight.recordUniqueKeyPrecondition(nullKey, "t_document",
-                List.of("tenant_id", "id"), 0, 1, 1, List.of(), "none");
+                List.of("tenant_id", "id"), 0, 1, 1, List.of(), "none", true);
         assertEquals("FAIL", nullKey.status());
         assertTrue(nullKey.toJson().contains("nullKeyRows=1"));
     }
 
     @Test
-    void unfinishedDualTaskCountIsInformationalAndNeverMasksBlockingFindings() {
-        LifecycleAuthorizationPreflight.PreflightReport report =
+    void unfinishedDualTasksAndVersionlessEvidenceBlockOnlyWhenPresentAndNeverMaskFailures() {
+        LifecycleAuthorizationPreflight.PreflightReport empty =
                 new LifecycleAuthorizationPreflight.PreflightReport("baseline", "schema");
-        LifecycleAuthorizationPreflight.recordUnfinishedDualTasks(report, 3, 2, List.of("s1"));
-        assertEquals("PASS", report.status());
-        String json = report.toJson();
+        LifecycleAuthorizationPreflight.recordUnfinishedDualTasks(empty, 0, 0, List.of());
+        LifecycleAuthorizationPreflight.recordVersionlessEvidenceLinks(empty, 0, List.of());
+        assertEquals("PASS", empty.status(), "0件は人の判断を要しない");
+
+        LifecycleAuthorizationPreflight.PreflightReport dual =
+                new LifecycleAuthorizationPreflight.PreflightReport("baseline", "schema");
+        LifecycleAuthorizationPreflight.recordUnfinishedDualTasks(dual, 3, 2, List.of("s1"));
+        assertEquals("BLOCKED_MAPPING", dual.status(), "未終結DUALが残る場合はHRの移行判断を要する");
+        String json = dual.toJson();
         assertTrue(json.contains("\"checkId\":\"LIFECYCLE_DUAL_TASK_UNFINISHED\""));
         assertTrue(json.contains("\"rowCount\":3"));
         assertTrue(json.contains("inOpenCases=2"));
         assertTrue(json.contains("inTerminalOrMissingCases=1"));
 
-        report.finding("mapping", "org", "BLOCKED_MAPPING", 1, List.of(), "review needed");
-        assertEquals("BLOCKED_MAPPING", report.status());
-        LifecycleAuthorizationPreflight.recordUniqueKeyPrecondition(report, "sys_user",
-                List.of("tenant_id", "id"), 0, 1, 1, List.of(), "none");
-        assertEquals("FAIL", report.status());
+        LifecycleAuthorizationPreflight.PreflightReport versionless =
+                new LifecycleAuthorizationPreflight.PreflightReport("baseline", "schema");
+        LifecycleAuthorizationPreflight.recordVersionlessEvidenceLinks(versionless, 2, List.of("v1"));
+        assertEquals("BLOCKED_MAPPING", versionless.status(), "版なし証跡が残る場合は文書ownerの判断を要する");
+        assertTrue(versionless.toJson().contains("\"checkId\":\"LIFECYCLE_EVIDENCE_VERSIONLESS\""));
+
+        LifecycleAuthorizationPreflight.recordUniqueKeyPrecondition(dual, "sys_user",
+                List.of("tenant_id", "id"), 0, 1, 1, List.of(), "none", true);
+        assertEquals("FAIL", dual.status(), "BLOCKED_MAPPINGはFAILを隠さない");
     }
 
     @Test

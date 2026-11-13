@@ -354,11 +354,13 @@ class ResignationGateFailureDrillTest {
     @Test
     @DisplayName("M-2: 全タスク完了後の退社ゲート自動クリーンアップと正常完了検証")
     void testResignationGateAutomaticCleanupAndCompletion() {
+        // 処理日（今日）と異なる退社基準日。担当営業の解除日・組織所属の終了日が基準日で残ることを検証する。
+        LocalDate anchorDate = LocalDate.now().minusDays(3);
         LifecycleCaseDto caseDto = caseService.createCase(adminUser.getId(), CreateLifecycleCaseCommand.builder()
                 .engineerId(engineer.getId())
                 .lifecycleType("RESIGNATION")
                 .templateId(resignationTemplate.getId())
-                .anchorDate(LocalDate.now())
+                .anchorDate(anchorDate)
                 .title("退社手続き正常完了検証")
                 .build());
 
@@ -384,22 +386,25 @@ class ResignationGateFailureDrillTest {
         SysUser updatedUser = sysUserMapper.selectById(engineerUser.getId());
         assertEquals(0, updatedUser.getStatus(), "退社完了によりユーザーアカウントが無効化されていること");
 
-        // 4. 主担当営業が解放されていること (releasedAt != null)
+        // 4. 主担当営業が退社基準日付で解放されていること (releasedAt == anchorDate)
         List<EngineerSales> salesLinks = engineerSalesMapper.selectList(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<EngineerSales>()
                         .eq(EngineerSales::getEngineerId, engineer.getId())
         );
+        assertFalse(salesLinks.isEmpty(), "検証対象の担当営業割当が存在すること");
         for (EngineerSales es : salesLinks) {
             assertNotNull(es.getReleasedAt(), "主担当営業の紐付けが自動終了されていること");
+            assertEquals(anchorDate, es.getReleasedAt(), "解除日は処理日ではなく退社基準日であること");
         }
 
-        // 5. 組織所属が終了されていること (validTo != null)
+        // 5. 組織所属が退社基準日で終了されていること (validTo == anchorDate)
         List<UserOrganization> userOrgs = userOrganizationMapper.selectList(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<UserOrganization>()
                         .eq(UserOrganization::getUserId, engineerUser.getId())
         );
         for (UserOrganization uo : userOrgs) {
             assertNotNull(uo.getValidTo(), "組織所属が自動終了されていること");
+            assertEquals(anchorDate, uo.getValidTo(), "組織所属の終了日も退社基準日であること");
         }
 
         // 6. ポータル連携が解除されていること

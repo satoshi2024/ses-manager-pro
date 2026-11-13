@@ -46,6 +46,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -125,13 +127,14 @@ class LifecycleLockOrderMySqlTest {
         try {
             Future<Throwable> holder = holdRow(pool, "t_lifecycle_task", f.taskA(), holderConnection, held, release);
             awaitLatch(held, "保持transactionがタスクAをロックする");
+            requireSingleHeldRow(holderConnection, "t_lifecycle_task", f.taskA());
             Future<Throwable> cancel = worker(pool, f, cancelConnection, null, null,
                     () -> caseService.cancelCase(f.caseId(), f.admin().getId(), "ロック順検証の中止"));
-            awaitRecordLockWait(cancel, "t_lifecycle_task", f.taskA(), cancelConnection);
+            awaitRecordLockWait(cancel, "t_lifecycle_task", f.taskA(), cancelConnection, holderConnection);
             Future<Throwable> complete = worker(pool, f, completeConnection, null, null,
                     () -> taskService.completeTask(f.taskB(), f.admin().getId(),
                             CompleteLifecycleTaskCommand.builder().completionComment("並行完了").build()));
-            awaitRecordLockWait(complete, "t_lifecycle_case", f.caseId(), completeConnection);
+            awaitRecordLockWait(complete, "t_lifecycle_case", f.caseId(), completeConnection, cancelConnection);
             assertEquals(0, grantedRecordLocks("t_lifecycle_task", completeConnection.get()),
                     "タスク完了は案件行を待つ間タスク行を保持しないこと（案件 → タスク）。locks=" + locks());
 
@@ -170,7 +173,7 @@ class LifecycleLockOrderMySqlTest {
             assertTrue(grantedRecordLocks("t_lifecycle_task", completeConnection.get()) > 0, "locks=" + locks());
             Future<Throwable> cancel = worker(pool, f, cancelConnection, null, null,
                     () -> caseService.cancelCase(f.caseId(), f.admin().getId(), "完了後の中止"));
-            awaitRecordLockWait(cancel, "t_lifecycle_case", f.caseId(), cancelConnection);
+            awaitRecordLockWait(cancel, "t_lifecycle_case", f.caseId(), cancelConnection, completeConnection);
             assertEquals(0, grantedRecordLocks("t_lifecycle_task", cancelConnection.get()),
                     "中止は案件行を待つ間タスク行を保持しないこと。locks=" + locks());
 
@@ -204,14 +207,15 @@ class LifecycleLockOrderMySqlTest {
         try {
             Future<Throwable> holder = holdRow(pool, "t_lifecycle_case", f.caseId(), holderConnection, held, release);
             awaitLatch(held, "保持transactionが案件をロックする");
+            requireSingleHeldRow(holderConnection, "t_lifecycle_case", f.caseId());
             Future<Throwable> reassign = worker(pool, f, reassignConnection, null, null,
                     () -> taskService.reassignTask(f.taskA(), assignee.getId(), f.admin().getId(), "並行担当変更"));
-            awaitRecordLockWait(reassign, "t_lifecycle_case", f.caseId(), reassignConnection);
+            awaitRecordLockWait(reassign, "t_lifecycle_case", f.caseId(), reassignConnection, holderConnection);
             assertEquals(0, grantedRecordLocks("t_lifecycle_task", reassignConnection.get()),
                     "担当変更は案件行を待つ間タスク行を保持しないこと。locks=" + locks());
             Future<Throwable> cancel = worker(pool, f, cancelConnection, null, null,
                     () -> caseService.cancelCase(f.caseId(), f.admin().getId(), "担当変更と競合する中止"));
-            awaitRecordLockWait(cancel, "t_lifecycle_case", f.caseId(), cancelConnection);
+            awaitRecordLockWait(cancel, "t_lifecycle_case", f.caseId(), cancelConnection, holderConnection);
 
             release.countDown();
             assertSucceeded("保持transaction", holder.get(WAIT_SECONDS, TimeUnit.SECONDS));
@@ -247,12 +251,13 @@ class LifecycleLockOrderMySqlTest {
         try {
             Future<Throwable> holder = holdRow(pool, "t_lifecycle_task", f.taskA(), holderConnection, held, release);
             awaitLatch(held, "保持transactionがタスクAをロックする");
+            requireSingleHeldRow(holderConnection, "t_lifecycle_task", f.taskA());
             Future<Throwable> cancel = worker(pool, f, cancelConnection, null, null,
                     () -> caseService.cancelCase(f.caseId(), f.admin().getId(), "承認確定と競合する中止"));
-            awaitRecordLockWait(cancel, "t_lifecycle_task", f.taskA(), cancelConnection);
+            awaitRecordLockWait(cancel, "t_lifecycle_task", f.taskA(), cancelConnection, holderConnection);
             Future<Throwable> approval = worker(pool, f, approvalConnection, null, null,
                     () -> applyApprovedLikeEngine(f, requestId));
-            awaitRecordLockWait(approval, "t_lifecycle_case", f.caseId(), approvalConnection);
+            awaitRecordLockWait(approval, "t_lifecycle_case", f.caseId(), approvalConnection, cancelConnection);
             assertEquals(0, grantedRecordLocks("t_lifecycle_task", approvalConnection.get()),
                     "承認確定（currentVersion→applyApproved）は案件行を待つ間タスク行を保持しないこと。locks=" + locks());
 
@@ -289,7 +294,7 @@ class LifecycleLockOrderMySqlTest {
             awaitLatch(applied, "承認確定transactionが免除を適用してロックを保持する");
             Future<Throwable> cancel = worker(pool, f, cancelConnection, null, null,
                     () -> caseService.cancelCase(f.caseId(), f.admin().getId(), "免除後の中止"));
-            awaitRecordLockWait(cancel, "t_lifecycle_case", f.caseId(), cancelConnection);
+            awaitRecordLockWait(cancel, "t_lifecycle_case", f.caseId(), cancelConnection, approvalConnection);
             assertEquals(0, grantedRecordLocks("t_lifecycle_task", cancelConnection.get()), "locks=" + locks());
 
             release.countDown();
@@ -323,13 +328,14 @@ class LifecycleLockOrderMySqlTest {
         try {
             Future<Throwable> holder = holdRow(pool, "t_lifecycle_task", f.taskA(), holderConnection, held, release);
             awaitLatch(held, "保持transactionがタスクAをロックする");
+            requireSingleHeldRow(holderConnection, "t_lifecycle_task", f.taskA());
             Future<Throwable> cancel = worker(pool, f, cancelConnection, null, null,
                     () -> caseService.cancelCase(f.caseId(), f.admin().getId(), "台帳追記と競合する中止"));
-            awaitRecordLockWait(cancel, "t_lifecycle_task", f.taskA(), cancelConnection);
+            awaitRecordLockWait(cancel, "t_lifecycle_task", f.taskA(), cancelConnection, holderConnection);
             Future<Throwable> waiver = worker(pool, f, waiverConnection, null, null,
                     () -> assetOffboardingService.approveOffboardingWaiver(f.engineer().getId(), f.caseId(), f.taskB(),
                             "ロック順検証の免除", requestId, f.admin().getId()));
-            awaitRecordLockWait(waiver, "t_lifecycle_case", f.caseId(), waiverConnection);
+            awaitRecordLockWait(waiver, "t_lifecycle_case", f.caseId(), waiverConnection, cancelConnection);
             assertEquals(0, grantedRecordLocks("t_lifecycle_task", waiverConnection.get()),
                     "approveOffboardingWaiverは案件行を待つ間タスク行を保持しないこと。locks=" + locks());
 
@@ -364,14 +370,15 @@ class LifecycleLockOrderMySqlTest {
         try {
             Future<Throwable> holder = holdRow(pool, "t_lifecycle_case", f.caseId(), holderConnection, held, release);
             awaitLatch(held, "保持transactionが案件をロックする");
+            requireSingleHeldRow(holderConnection, "t_lifecycle_case", f.caseId());
             Future<Throwable> first = worker(pool, f, firstConnection, null, null,
                     () -> taskService.completeTask(f.taskA(), f.admin().getId(),
                             CompleteLifecycleTaskCommand.builder().completionComment("A完了").build()));
             Future<Throwable> second = worker(pool, f, secondConnection, null, null,
                     () -> taskService.completeTask(f.taskB(), f.admin().getId(),
                             CompleteLifecycleTaskCommand.builder().completionComment("B完了").build()));
-            awaitRecordLockWait(first, "t_lifecycle_case", f.caseId(), firstConnection);
-            awaitRecordLockWait(second, "t_lifecycle_case", f.caseId(), secondConnection);
+            awaitRecordLockWait(first, "t_lifecycle_case", f.caseId(), firstConnection, holderConnection);
+            awaitRecordLockWait(second, "t_lifecycle_case", f.caseId(), secondConnection, holderConnection);
             assertEquals(0, grantedRecordLocks("t_lifecycle_task", firstConnection.get()), "locks=" + locks());
             assertEquals(0, grantedRecordLocks("t_lifecycle_task", secondConnection.get()), "locks=" + locks());
 
@@ -406,12 +413,14 @@ class LifecycleLockOrderMySqlTest {
         ExecutorService pool = Executors.newFixedThreadPool(2);
         CountDownLatch held = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
+        AtomicLong holderConnection = new AtomicLong();
         AtomicLong deactivateConnection = new AtomicLong();
         String renamed = "並行更新後の氏名";
         try {
             Future<Throwable> holder = pool.submit(() -> {
                 try {
                     new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        holderConnection.set(currentConnectionId());
                         jdbc.update("UPDATE sys_user SET real_name = ? WHERE id = ?", renamed, linked.getId());
                         held.countDown();
                         awaitLatch(release, "保持transactionの解放");
@@ -422,9 +431,10 @@ class LifecycleLockOrderMySqlTest {
                 }
             });
             awaitLatch(held, "保持transactionが連携ユーザー行を更新してロックする");
+            requireSingleHeldRow(holderConnection, "sys_user", linked.getId());
             Future<Throwable> deactivate = worker(pool, f, deactivateConnection, null, null,
                     () -> resignationGateChecker.executeAutomaticGateActions(caseMapper.selectById(f.caseId()), f.engineer()));
-            awaitRecordLockWait(deactivate, "sys_user", linked.getId(), deactivateConnection);
+            awaitRecordLockWait(deactivate, "sys_user", linked.getId(), deactivateConnection, holderConnection);
 
             release.countDown();
             assertSucceeded("保持transaction", holder.get(WAIT_SECONDS, TimeUnit.SECONDS));
@@ -525,7 +535,13 @@ class LifecycleLockOrderMySqlTest {
         return user;
     }
 
-    /** ApprovalEngineServiceImpl.approve と同じ順（申請行ロック → currentVersion → applyApproved）で適用する。 */
+    /**
+     * ApprovalEngineServiceImpl.approve と同じロック順（申請行ロック → currentVersion → applyApproved）で適用する。
+     *
+     * <p>本helperが検証するのはロック順だけである。実engineは currentVersion の戻り値を申請時のtarget_versionと比較し、
+     * 先に中止が確定してtask versionが進んでいれば CONFLICT として正常終了するが、ここではversion比較を省くため、
+     * 中止先行時の結果は waiveTask の 400 caseNotActive になる。業務上の最終応答（CONFLICT）の証拠としては扱わない。</p>
+     */
     private void applyApprovedLikeEngine(Fixture f, Long requestId) {
         ApprovalRequest request = approvalRequestMapper.selectByIdForUpdate(requestId, f.tenant());
         assertNotNull(request);
@@ -586,12 +602,33 @@ class LifecycleLockOrderMySqlTest {
         return id == null ? 0L : id;
     }
 
-    private void awaitRecordLockWait(Future<Throwable> worker, String table, Long rowId, AtomicLong requesting)
-            throws Exception {
+    /** 排他record lockのLOCK_MODE（gap専用・insert intentionは含めない）。 */
+    private static final Set<String> EXCLUSIVE_RECORD_MODES = Set.of("X", "X,REC_NOT_GAP");
+
+    /**
+     * requesterが対象表PRIMARYの行ロックをblockerに待たされていることを確認する。
+     *
+     * <p>{@code performance_schema.data_locks.LOCK_DATA} は対象pageをlatch待ちなしで参照できた場合だけ鍵値を返し、
+     * それ以外はNULLになる（ImportMetadataRealMySqlTestで実際に観測済み）。鍵値の一致を必須にすると、実際には待機して
+     * いるのに観測できず期限切れになる非決定性が残るため、鍵値に依存せず次の組合せで「対象行での待機」を確定する。</p>
+     * <ol>
+     *   <li>構造：requesterのRECORD/WAITING排他lockとblockerのRECORD/GRANTED排他lockが、同じ表のPRIMARY上で
+     *       {@code data_lock_waits} の1辺として結ばれ、両端のPROCESSLIST_IDが期待接続と一致し互いに異なる。</li>
+     *   <li>行の同一性（requester基準）：本テストのrequesterが待つ文はすべて主キー一点のlocking read/UPDATEであり、
+     *       InnoDBのtransactionが同時に待機するlockは1件だけなので、その待機lockは期待行のものである。</li>
+     *   <li>行の同一性（blocker基準）：保持用transactionは {@link #requireSingleHeldRow} で当該表PRIMARYの排他record lockを
+     *       ちょうど1件（期待行）だけ持つことを事前確認する。workerがblockerの場合も、当該表で行ロックするのは対象行だけ。</li>
+     *   <li>鍵値：LOCK_DATAが見えている側は期待主キーと一致しなければならない（別行の待機を証拠にしない）。NULLは不可視として扱う。</li>
+     * </ol>
+     */
+    private void awaitRecordLockWait(Future<Throwable> worker, String table, Long rowId, AtomicLong requesting,
+                                     AtomicLong blocking) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS);
         while (System.nanoTime() < deadline) {
-            long connection = requesting.get();
-            if (connection > 0 && hasRecordLockWait(table, rowId, connection)) {
+            long requester = requesting.get();
+            long blocker = blocking.get();
+            if (requester > 0 && blocker > 0 && requester != blocker
+                    && hasRecordLockWait(table, rowId, requester, blocker)) {
                 return;
             }
             if (worker.isDone()) {
@@ -601,19 +638,119 @@ class LifecycleLockOrderMySqlTest {
             }
             Thread.sleep(20);
         }
-        throw new AssertionError(table + "#" + rowId + " の行ロック待機を観測できなかった。connection="
-                + requesting.get() + "; locks=" + locks() + "; waits=" + lockWaits());
+        throw new AssertionError(table + "#" + rowId + " の行ロック待機を観測できなかった。requester="
+                + requesting.get() + ", blocker=" + blocking.get() + "; edges=" + describeWaitEdges(table, requesting.get())
+                + "; locks=" + locks() + "; waits=" + lockWaits());
     }
 
-    private boolean hasRecordLockWait(String table, Long rowId, long requestingConnectionId) {
-        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM performance_schema.data_lock_waits w "
-                        + "JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE "
-                        + "AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
-                        + "JOIN performance_schema.threads rt ON rt.THREAD_ID=req.THREAD_ID "
-                        + "WHERE req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=? AND req.INDEX_NAME='PRIMARY' "
-                        + "AND req.LOCK_TYPE='RECORD' AND CAST(req.LOCK_DATA AS UNSIGNED)=? AND rt.PROCESSLIST_ID=?",
-                Integer.class, table, rowId, requestingConnectionId);
-        return count != null && count > 0;
+    private boolean hasRecordLockWait(String table, Long rowId, long requester, long blocker) {
+        for (WaitEdge edge : waitEdges(table, requester)) {
+            if (edge.blocker() == blocker && edge.exclusivePrimaryRecordWait() && edge.visibleKeysMatch(rowId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** requesterの、指定表上の待機辺（REQUESTING/BLOCKING threadで結ぶ。LOCK_DATAでは結合しない）。 */
+    private List<WaitEdge> waitEdges(String table, long requester) {
+        return jdbc.query("SELECT wt.PROCESSLIST_ID, bt.PROCESSLIST_ID, "
+                        + "req.INDEX_NAME, req.LOCK_TYPE, req.LOCK_MODE, req.LOCK_STATUS, req.LOCK_DATA, "
+                        + "blk.INDEX_NAME, blk.LOCK_TYPE, blk.LOCK_MODE, blk.LOCK_STATUS, blk.LOCK_DATA "
+                        + "FROM performance_schema.data_lock_waits w "
+                        + "JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID "
+                        + "JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID "
+                        + "JOIN performance_schema.data_locks req "
+                        + "ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
+                        + "JOIN performance_schema.data_locks blk "
+                        + "ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID "
+                        + "WHERE wt.PROCESSLIST_ID=? AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=? "
+                        + "AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=?",
+                (rs, row) -> new WaitEdge(rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4),
+                        rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8), rs.getString(9),
+                        rs.getString(10), rs.getString(11), rs.getString(12)),
+                requester, table, table);
+    }
+
+    private String describeWaitEdges(String table, long requester) {
+        try {
+            return waitEdges(table, requester).stream().map(WaitEdge::describe).toList().toString();
+        } catch (RuntimeException failure) {
+            return "待機辺の取得に失敗: " + failure.getClass().getSimpleName();
+        }
+    }
+
+    /**
+     * 保持用transactionが当該表PRIMARYの排他record lockをちょうど1件だけ持ち、鍵値が見える場合は期待行であることを確認する。
+     * 保持用transactionは主キー一点の文だけを実行するため、1件であればそれが期待行のlockである。
+     */
+    private void requireSingleHeldRow(AtomicLong holder, String table, Long rowId) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        List<String> held = List.of();
+        while (System.nanoTime() < deadline) {
+            held = heldExclusivePrimaryRecordKeys(table, holder.get());
+            if (held.size() == 1) {
+                if (!visibleKeyMatches(held.get(0), rowId)) {
+                    throw new AssertionError("保持transactionが期待と異なる行をlockしている: " + table + " key=" + held.get(0));
+                }
+                return;
+            }
+            if (held.size() > 1) {
+                break;
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError("保持transactionが" + table + "/PRIMARYの排他record lockをちょうど1件保持していることを"
+                + "確認できなかった: keys=" + held + "; locks=" + locks());
+    }
+
+    private List<String> heldExclusivePrimaryRecordKeys(String table, long connectionId) {
+        return jdbc.query("SELECT dl.LOCK_MODE, dl.LOCK_DATA FROM performance_schema.data_locks dl "
+                        + "JOIN performance_schema.threads th ON th.THREAD_ID=dl.THREAD_ID "
+                        + "WHERE th.PROCESSLIST_ID=? AND dl.OBJECT_SCHEMA=DATABASE() AND dl.OBJECT_NAME=? "
+                        + "AND dl.INDEX_NAME='PRIMARY' AND dl.LOCK_TYPE='RECORD' AND dl.LOCK_STATUS='GRANTED'",
+                        (rs, row) -> new String[] {rs.getString(1), rs.getString(2)}, connectionId, table).stream()
+                .filter(lock -> EXCLUSIVE_RECORD_MODES.contains(lock[0]))
+                .map(lock -> lock[1])
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    /** LOCK_DATAが見えている場合だけ期待主キーとの一致を要求する（NULLは不可視として合格扱い）。 */
+    private static boolean visibleKeyMatches(String lockData, long rowId) {
+        if (lockData == null) {
+            return true;
+        }
+        String value = lockData.trim();
+        if (value.length() >= 2 && value.startsWith("'") && value.endsWith("'")) {
+            value = value.substring(1, value.length() - 1);
+        }
+        return Long.toString(rowId).equals(value);
+    }
+
+    /** {@code data_lock_waits} の1辺（requesterのWAITING lock → blockerのlock）。 */
+    private record WaitEdge(long requester, long blocker,
+                            String requesterIndex, String requesterType, String requesterMode,
+                            String requesterStatus, String requesterData,
+                            String blockerIndex, String blockerType, String blockerMode,
+                            String blockerStatus, String blockerData) {
+        boolean exclusivePrimaryRecordWait() {
+            return requester != blocker
+                    && "PRIMARY".equals(requesterIndex) && "PRIMARY".equals(blockerIndex)
+                    && "RECORD".equals(requesterType) && "WAITING".equals(requesterStatus)
+                    && EXCLUSIVE_RECORD_MODES.contains(requesterMode)
+                    && "RECORD".equals(blockerType) && "GRANTED".equals(blockerStatus)
+                    && EXCLUSIVE_RECORD_MODES.contains(blockerMode);
+        }
+
+        boolean visibleKeysMatch(long rowId) {
+            return visibleKeyMatches(requesterData, rowId) && visibleKeyMatches(blockerData, rowId);
+        }
+
+        String describe() {
+            return "requester=" + requester + " " + requesterIndex + "," + requesterType + "," + requesterMode + ","
+                    + requesterStatus + ",key=" + requesterData + " -> blocker=" + blocker + " " + blockerIndex + ","
+                    + blockerType + "," + blockerMode + "," + blockerStatus + ",key=" + blockerData;
+        }
     }
 
     private int grantedRecordLocks(String table, long connectionId) {

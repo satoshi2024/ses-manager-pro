@@ -134,9 +134,11 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
             throw new BusinessException(400, "退社例外免除には対象要員、理由、承認申請IDが必要です。");
         }
 
-        // ライフサイクル全経路と同じ「案件 → タスク」の順でtenant限定ロックする（NF01 batch 0 L2）。
-        // タスクを先にロックすると、案件を先にロックする cancelCase / completeCase と循環待ちになり得る。
+        // ApprovalEngineServiceImpl.approve と同じ「承認申請 → 案件 → タスク」の順でtenant限定ロックする（NF01 batch 0 L2）。
+        // 承認engine経由では申請行は既に保持済みのため再取得は待たない。直接呼出しでも同じ順になり、
+        // タスク先行（cancelCase / completeCase と逆順）や申請行の後取り（approve と逆順）による循環待ちを作らない。
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        ApprovalRequest approval = approvalRequestMapper.selectByIdForUpdate(approvalRequestId, tenantId);
         LifecycleCase scopedCase = lifecycleCaseMapper.selectByIdForUpdateAndTenant(lifecycleCaseId, tenantId);
         LifecycleTask scopedTask = scopedCase == null ? null
                 : lifecycleTaskMapper.selectByIdAndCaseIdForUpdate(lifecycleTaskId, scopedCase.getId());
@@ -147,7 +149,6 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
             throw new BusinessException(400, "退社例外免除の案件・タスクscopeが対象要員と一致しません。");
         }
 
-        ApprovalRequest approval = approvalRequestMapper.selectByIdForUpdate(approvalRequestId);
         if (approval == null || !"LIFECYCLE_EXCEPTION".equals(approval.getRequestType())
                 || !isApproved(approval.getStatus()) || !approvalTargetMatches(approval, engineerId)) {
             throw new BusinessException(400, "有効な承認済みLIFECYCLE_EXCEPTION申請が対象要員に紐付いていません。");
