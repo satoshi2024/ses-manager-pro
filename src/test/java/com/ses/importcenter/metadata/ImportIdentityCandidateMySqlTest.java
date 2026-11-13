@@ -34,6 +34,7 @@ import java.sql.Statement;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -211,11 +212,11 @@ class ImportIdentityCandidateMySqlTest {
                 assertTrue(connectionId.next());
                 blockerConnectionId = connectionId.getLong(1);
             }
-            String sourceLockData = sourcePrimaryLockData(blockerConnectionId);
+            InnoDbRecordLockWaits.PointLock sourceLock = sourcePrimaryLock(blockerConnectionId);
             Future<Long> registration = executor.submit(this::registerOnAuthenticatedThread);
             assertTrue(readerPaused.await(5, TimeUnit.SECONDS), "source readerが停止地点へ到達しませんでした");
             continueReader.countDown();
-            awaitSourceRowLockWait(requestingConnectionId, blockerConnectionId, sourceLockData);
+            awaitSourceRowLockWait(requestingConnectionId, sourceLock, registration);
             blocker.commit();
             assertTrue(registration.get(15, TimeUnit.SECONDS) > 0, "candidate IDが返りませんでした");
         } catch (Exception | Error primary) {
@@ -227,48 +228,32 @@ class ImportIdentityCandidateMySqlTest {
         }
     }
 
-    private String sourcePrimaryLockData(long blockerConnectionId) {
-        String lockData = jdbc.queryForObject("""
-                SELECT dl.LOCK_DATA
-                FROM performance_schema.data_locks dl
-                JOIN performance_schema.threads t ON t.THREAD_ID = dl.THREAD_ID
-                WHERE t.PROCESSLIST_ID=? AND dl.OBJECT_SCHEMA=DATABASE()
-                  AND dl.OBJECT_NAME='t_import_source_system' AND dl.INDEX_NAME='PRIMARY'
-                  AND dl.LOCK_DATA IS NOT NULL
-                """, String.class, blockerConnectionId);
-        assertTrue(lockData.contains(tenant) && lockData.contains(Long.toString(sourceId)),
-                "blockerのPRIMARY lock_dataが対象source rowを示していません: " + lockData);
-        return lockData;
+    /**
+     * blockerが主キー一点のFOR UPDATEで対象source行だけを保持していることを確認する。LOCK_DATAはpageを
+     * latch待ちなしで読めた場合だけ見えるため、見えている場合だけ対象行（tenant・source ID）を示すことを要求する。
+     */
+    private InnoDbRecordLockWaits.PointLock sourcePrimaryLock(long blockerConnectionId) throws InterruptedException {
+        return InnoDbRecordLockWaits.requireSinglePointLock(jdbc, blockerConnectionId, "t_import_source_system",
+                "PRIMARY", lockData -> lockData.contains(tenant) && lockData.contains(Long.toString(sourceId)),
+                "candidate source row");
     }
 
     private void awaitSourceRowLockWait(AtomicReference<Long> requestingConnectionId,
-                                        long blockerConnectionId, String sourceLockData) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (System.nanoTime() < deadline) {
-            Long requesterId = requestingConnectionId.get();
-            if (requesterId == null) {
-                Thread.sleep(25);
-                continue;
-            }
-            Integer waits = jdbc.queryForObject("""
-                    SELECT COUNT(*)
-                    FROM performance_schema.data_lock_waits w
-                    JOIN performance_schema.threads wt ON wt.THREAD_ID = w.REQUESTING_THREAD_ID
-                    JOIN performance_schema.threads bt ON bt.THREAD_ID = w.BLOCKING_THREAD_ID
-                    JOIN performance_schema.data_locks req
-                      ON req.ENGINE = w.ENGINE AND req.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID
-                    JOIN performance_schema.data_locks blk
-                      ON blk.ENGINE = w.ENGINE AND blk.ENGINE_LOCK_ID = w.BLOCKING_ENGINE_LOCK_ID
-                    WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
-                      AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='t_import_source_system'
-                      AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='t_import_source_system'
-                      AND req.INDEX_NAME='PRIMARY' AND blk.INDEX_NAME='PRIMARY'
-                      AND req.LOCK_DATA=? AND blk.LOCK_DATA=?
-                    """, Integer.class, requesterId, blockerConnectionId, sourceLockData, sourceLockData);
-            if (waits != null && waits > 0) return;
-            Thread.sleep(25);
+                                        InnoDbRecordLockWaits.PointLock sourceLock, Future<Long> registration)
+            throws Exception {
+        try {
+            InnoDbRecordLockWaits.awaitBlockerAnchoredWait(jdbc, sourceLock, requestingConnectionId::get,
+                    Set.of("X", "X,REC_NOT_GAP", "S", "S,REC_NOT_GAP"), InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES,
+                    10_000, () -> {
+                        if (registration.isDone()) {
+                            throw new AssertionError("candidate登録がsource行lock待機を確認する前に終了しました");
+                        }
+                    }, "候補接続とblocker接続間の対象source PRIMARY行ロック待機");
+            return;
+        } catch (AssertionError timeout) {
+            throw new AssertionError("候補接続とblocker接続間の対象source PRIMARY行ロック待機をperformance_schemaで確認できませんでした: "
+                    + timeout.getMessage(), timeout);
         }
-        throw new AssertionError("候補接続とblocker接続間の対象source PRIMARY行ロック待機をperformance_schemaで確認できませんでした");
     }
 
     private static void shutdownAndAwait(ExecutorService executor, Throwable primaryFailure) throws InterruptedException {

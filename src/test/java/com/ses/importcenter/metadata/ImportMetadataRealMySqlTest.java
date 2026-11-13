@@ -104,6 +104,11 @@ class ImportMetadataRealMySqlTest {
     private static final int SOURCE_WAIT_FUTURE_SECONDS = 25;
     private static final int SOURCE_WAIT_TERMINATION_SECONDS = 5;
     private static final String NF06_DATABASE_NAME = "nf06_import_metadata_real";
+    /**
+     * gate待機中に期限切れさせるleaseの残り秒数。gate待機の確認に使える時間は（本値 − 3秒の残余確認）で、
+     * 遅いCIでもworker起動・gateまでのquery・待機観測が収まるよう余裕を取る（旧8秒→10秒）。
+     */
+    private static final int GATE_LEASE_SECONDS = 10;
 
     @Container
     @SuppressWarnings("resource")
@@ -1453,39 +1458,18 @@ class ImportMetadataRealMySqlTest {
                                                     AtomicReference<Long> blocker, Future<?> service,
                                                     Future<?> mutation, String table, String expectedLockData,
                                                     String label) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (System.nanoTime() < deadline) {
-            assertFuturePending(service, "append holding " + table);
-            assertFuturePending(mutation, label);
-            if (requester.get() != null && blocker.get() != null) {
-                List<SourceLockWait> waits = jdbc.query("""
-                        SELECT wt.PROCESSLIST_ID,bt.PROCESSLIST_ID,req.INDEX_NAME,req.LOCK_DATA,
-                          req.LOCK_TYPE,req.LOCK_MODE,req.LOCK_STATUS,blk.LOCK_TYPE,blk.LOCK_MODE,blk.LOCK_STATUS
-                        FROM performance_schema.data_lock_waits w
-                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
-                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
-                        JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
-                        JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
-                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=?
-                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=?
-                          AND req.INDEX_NAME='PRIMARY' AND blk.INDEX_NAME='PRIMARY'
-                          AND req.LOCK_DATA=? AND blk.LOCK_DATA=?
-                          AND req.LOCK_TYPE='RECORD' AND req.LOCK_STATUS='WAITING'
-                          AND req.LOCK_MODE IN ('X','X,REC_NOT_GAP')
-                          AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_STATUS='GRANTED'
-                          AND blk.LOCK_MODE IN ('X','X,REC_NOT_GAP')
-                        """, (rs, row) -> new SourceLockWait(rs.getLong(1), rs.getLong(2), rs.getString(3),
-                        rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8),
-                        rs.getString(9), rs.getString(10)), requester.get(), blocker.get(), table, table,
-                        expectedLockData, expectedLockData);
-                if (!waits.isEmpty()) return waits.get(0);
-            }
-            Thread.sleep(25);
-        }
-        throw new AssertionError(label + "の" + table + " record X wait graphを確認できませんでした: "
-                + "expected PRIMARY key=" + expectedLockData + "; "
-                + safeWaitDetails(requester.get(), blocker.get()));
+        // requester（mutation）は主キー一点のUPDATEで、InnoDBが同時に待機するlockは1件だけなので、その待機lockが対象行である。
+        // LOCK_DATAはpageをlatch待ちなしで読めた場合だけ見えるため、見えている側だけを期待鍵と照合する（InnoDbRecordLockWaits）。
+        InnoDbRecordLockWaits.WaitEdge edge = InnoDbRecordLockWaits.awaitRequesterAnchoredWait(jdbc, requester::get,
+                blocker::get, table, "PRIMARY", InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES,
+                InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES, key -> expectedLockData.equals(key), 10_000,
+                () -> {
+                    assertFuturePending(service, "append holding " + table);
+                    assertFuturePending(mutation, label);
+                }, label + "の" + table + " record X wait graph（expected PRIMARY key=" + expectedLockData + "）");
+        return new SourceLockWait(edge.requesterConnectionId(), edge.blockerConnectionId(), edge.requesterIndex(),
+                edge.requesterData(), edge.requesterType(), edge.requesterMode(), edge.requesterStatus(),
+                edge.blockerType(), edge.blockerMode(), edge.blockerStatus());
     }
 
     @Test
@@ -1538,7 +1522,7 @@ class ImportMetadataRealMySqlTest {
         prepareBoundCustomerJob();
         var operation = lifecycleService.beginStart(jobId);
         lifecycleService.start(operation);
-        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,8,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND," + GATE_LEASE_SECONDS + ",CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
                 tenantId, jobId);
         Map<String, Object> before = leaseSnapshot();
         BlockedLease blocked = blockLeaseAtAuthorizationGate(() -> lifecycleService.start(operation));
@@ -1566,7 +1550,7 @@ class ImportMetadataRealMySqlTest {
                 tenantId, jobId);
         var operation = lifecycleService.beginTakeover(jobId, initial.runId());
         lifecycleService.takeOver(operation);
-        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,8,CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND," + GATE_LEASE_SECONDS + ",CURRENT_TIMESTAMP(6)) WHERE tenant_id=? AND id=?",
                 tenantId, jobId);
         Map<String, Object> before = leaseSnapshot();
         BlockedLease blocked = blockLeaseAtAuthorizationGate(() -> lifecycleService.takeOver(operation));
@@ -2184,7 +2168,7 @@ class ImportMetadataRealMySqlTest {
         prepareBoundCustomerJob();
         var operation = leaseService.beginAcquire(jobId);
         assertTrue(leaseService.acquire(operation) != null);
-        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,8,CURRENT_TIMESTAMP(6)) "
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND," + GATE_LEASE_SECONDS + ",CURRENT_TIMESTAMP(6)) "
                 + "WHERE tenant_id=? AND id=?", tenantId, jobId);
         Map<String, Object> before = leaseSnapshot();
 
@@ -2207,7 +2191,7 @@ class ImportMetadataRealMySqlTest {
     void gate待機後に失効したrenewは409でleaseを延長しない() throws Exception {
         prepareBoundCustomerJob();
         var grant = leaseService.acquire(leaseService.beginAcquire(jobId));
-        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,8,CURRENT_TIMESTAMP(6)) "
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND," + GATE_LEASE_SECONDS + ",CURRENT_TIMESTAMP(6)) "
                 + "WHERE tenant_id=? AND id=?", tenantId, jobId);
         Map<String, Object> before = leaseSnapshot();
 
@@ -2274,7 +2258,7 @@ class ImportMetadataRealMySqlTest {
     void 未期限takeoverはgate待機中に期限を越えた後freshDB時刻で成功する() throws Exception {
         prepareBoundCustomerJob();
         leaseService.acquire(leaseService.beginAcquire(jobId));
-        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,8,CURRENT_TIMESTAMP(6)) "
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND," + GATE_LEASE_SECONDS + ",CURRENT_TIMESTAMP(6)) "
                 + "WHERE tenant_id=? AND id=?", tenantId, jobId);
         var operation = leaseService.beginTakeover(jobId);
         long generationBefore = ((Number) leaseSnapshot().get("lease_generation")).longValue();
@@ -2305,7 +2289,7 @@ class ImportMetadataRealMySqlTest {
         var operation = leaseService.beginTakeover(jobId);
         assertTrue(leaseService.takeOver(operation) != null);
         assertTrue(leaseService.takeOver(operation) != null, "期限内の同operation retryは冪等成功する");
-        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND,8,CURRENT_TIMESTAMP(6)) "
+        jdbc.update("UPDATE t_import_job SET lease_expires_at=TIMESTAMPADD(SECOND," + GATE_LEASE_SECONDS + ",CURRENT_TIMESTAMP(6)) "
                 + "WHERE tenant_id=? AND id=?", tenantId, jobId);
         Map<String, Object> before = leaseSnapshot();
         BlockedLease blocked = blockLeaseAtAuthorizationGate(() -> leaseService.takeOver(operation));
@@ -2429,9 +2413,10 @@ class ImportMetadataRealMySqlTest {
                         table + " mutation-first service");
                 logSourceLockWait("source mutation committed before service", observed);
             } else {
-                String lockData = permissionLockData(blockerId, table, "PRIMARY");
-                awaitExactLockWait(requesterConnectionId, blockerId, table, "PRIMARY", lockData, submitted,
-                        table + " mutation-first service");
+                InnoDbRecordLockWaits.PointLock anchor = InnoDbRecordLockWaits.requireSinglePointLock(jdbc, blockerId,
+                        table, "PRIMARY", InnoDbRecordLockWaits.primaryKey(pointLockId(lockSql, lockParams)),
+                        table + " mutation-first blocker");
+                awaitExactLockWait(requesterConnectionId, anchor, submitted, table + " mutation-first service");
             }
             executeUpdate(blocker, mutationSql, mutationParams);
             blocker.commit();
@@ -2504,8 +2489,10 @@ class ImportMetadataRealMySqlTest {
             service = pool.submit(() -> withActorContext(serviceAction));
             assertTrue(pause.entered.await(10, TimeUnit.SECONDS), "実serviceのwrite gateに到達しませんでした");
             assertGateRunsInReadCommittedTransaction(pause);
+            // 期待鍵は、mutationが主キー一点のUPDATE（WHERE tenant_id=? AND id=?）であることから文の引数で決める。
+            // 実serviceの保持lockのLOCK_DATAはpage参照の可否でNULLになり得るため、そこからは取らない。
             String lockData = expectedLockData == null
-                    ? permissionLockData(pause.connectionId.get(), table, lockIndex) : expectedLockData;
+                    ? Long.toString(pointUpdateId(mutationSql, mutationParams)) : expectedLockData;
             mutation = pool.submit(() -> updateAndCommit(mutationSql, mutationParams, writerId));
             awaitTargetedWait(writerId, pause.connectionId, service, mutation,
                     table, lockIndex, "X,REC_NOT_GAP", lockData);
@@ -2933,7 +2920,12 @@ class ImportMetadataRealMySqlTest {
     }
 
     private void awaitLeaseExpiryByDatabaseClock() throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12);
+        // 待機上限は固定値でなく、DB時刻で見た残り時間＋余裕から決める（lease秒数を変えても期限前に諦めない）。
+        Long remainingMicros = jdbc.queryForObject("SELECT TIMESTAMPDIFF(MICROSECOND,CURRENT_TIMESTAMP(6),"
+                + "lease_expires_at) FROM t_import_job WHERE tenant_id=? AND id=?", Long.class, tenantId, jobId);
+        long waitMicros = Math.max(0L, remainingMicros == null ? 0L : remainingMicros)
+                + TimeUnit.SECONDS.toMicros(10);
+        long deadline = System.nanoTime() + TimeUnit.MICROSECONDS.toNanos(waitMicros);
         while (System.nanoTime() < deadline) {
             Integer expired = jdbc.queryForObject("SELECT lease_expires_at<=CURRENT_TIMESTAMP(6) FROM t_import_job "
                     + "WHERE tenant_id=? AND id=?", Integer.class, tenantId, jobId);
@@ -2960,11 +2952,13 @@ class ImportMetadataRealMySqlTest {
                 try (ResultSet rows = statement.executeQuery()) { assertTrue(rows.next()); }
             }
             long blockerId = connectionId(blocker);
+            // blockerは主キー一点のFOR UPDATEでgroup行だけを排他lockしている。この保持lockを待機確認の基準にする。
+            InnoDbRecordLockWaits.PointLock anchor = InnoDbRecordLockWaits.requireSinglePointLock(jdbc, blockerId,
+                    "m_permission_group", "PRIMARY", InnoDbRecordLockWaits.primaryKey(groupId),
+                    "validation lease authorization gate");
             pool = Executors.newSingleThreadExecutor();
             service = pool.submit(() -> withActorContext(operation));
-            String lockData = permissionLockData(blockerId, "m_permission_group", "PRIMARY");
-            awaitExactLockWait(blockerId, "m_permission_group", "PRIMARY", lockData, service,
-                    "validation lease authorization gate");
+            awaitExactLockWait(anchor, service, "validation lease authorization gate");
             BlockedLease result = new BlockedLease(blocker, pool, service);
             transferred = true;
             return result;
@@ -3618,42 +3612,33 @@ class ImportMetadataRealMySqlTest {
     private void awaitForeignKeyParentWait(AtomicReference<Long> requester, AtomicReference<Long> blocker,
                                            Future<?> service, Future<?> mutation,
                                            String parentTable, long parentId) throws Exception {
-        String expectedKey = Long.toString(parentId);
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (System.nanoTime() < deadline) {
-            assertFuturePending(service, "実metadata service");
-            assertFuturePending(mutation, "permission FK child insert");
-            Long requesterId = requester.get(), blockerId = blocker.get();
-            if (requesterId != null && blockerId != null) {
-                Integer found = jdbc.queryForObject("""
-                        SELECT COUNT(*) FROM performance_schema.data_lock_waits w
-                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
-                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
-                        JOIN performance_schema.data_locks req
-                          ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
-                        JOIN performance_schema.data_locks blk
-                          ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
-                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=? AND req.INDEX_NAME='PRIMARY'
-                          AND req.LOCK_TYPE='RECORD' AND req.LOCK_MODE='S,REC_NOT_GAP'
-                          AND req.LOCK_STATUS='WAITING' AND req.LOCK_DATA=?
-                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=? AND blk.INDEX_NAME='PRIMARY'
-                          AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_MODE='X,REC_NOT_GAP'
-                          AND blk.LOCK_STATUS='GRANTED' AND blk.LOCK_DATA=?
-                        """, Integer.class, requesterId, blockerId, parentTable, expectedKey,
-                        parentTable, expectedKey);
-                if (found != null && found > 0) return;
-            }
-            Thread.sleep(25);
-        }
-        throw new AssertionError("READ COMMITTED FK parent lock waitを確認できませんでした: parent="
-                + parentTable + " PRIMARY " + expectedKey + "; "
-                + safeWaitDetails(requester.get(), blocker.get()));
+        // requesterは子行1件のinsertで、FK検査が待機する親lockは子行が参照する親（parentId）の1件だけである。
+        // 見えている鍵値だけを期待鍵と照合し、NULL（page未参照）は不可視として扱う（InnoDbRecordLockWaits）。
+        InnoDbRecordLockWaits.awaitRequesterAnchoredWait(jdbc, requester::get, blocker::get, parentTable, "PRIMARY",
+                Set.of("S,REC_NOT_GAP"), InnoDbRecordLockWaits.EXCLUSIVE_NON_GAP_MODE,
+                InnoDbRecordLockWaits.primaryKey(parentId), 10_000,
+                () -> {
+                    assertFuturePending(service, "実metadata service");
+                    assertFuturePending(mutation, "permission FK child insert");
+                }, "READ COMMITTED FK parent lock wait（parent=" + parentTable + " PRIMARY " + parentId + "）");
     }
 
     private void awaitTargetedWait(AtomicReference<Long> requester, AtomicReference<Long> blocker,
                                    Future<?> service, Future<?> mutation, String table, String index,
                                    String requestMode, String lockData) throws Exception {
+        if (lockData == null || !lockData.endsWith("pseudo-record")) {
+            // 通常recordは、requester（mutation）が主キー一点のUPDATEまたは単一行insertで、同時に待機するlockが1件だけ
+            // であることを根拠に、見えている鍵値だけを期待鍵と照合する（LOCK_DATAはpage未参照でNULLになり得る）。
+            InnoDbRecordLockWaits.awaitRequesterAnchoredWait(jdbc, requester::get, blocker::get, table, index,
+                    Set.of(requestMode), InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES,
+                    lockData == null ? null : lockData::equals, 10_000,
+                    () -> {
+                        assertFuturePending(service, "実metadata service");
+                        assertFuturePending(mutation, "permission mutation");
+                    }, "実service gateに対する指定permission lock wait");
+            return;
+        }
+        // infimum/supremum疑似recordのLOCK_DATAはpageを参照せずに決まりNULLにならないため、従来どおり厳密一致を要求する。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
             assertFuturePending(service, "実metadata service");
@@ -3685,42 +3670,22 @@ class ImportMetadataRealMySqlTest {
 
     private void awaitValidationRowWait(AtomicReference<Long> requester, AtomicReference<Long> blocker,
                                        Future<?> append, long rowNumber, long runId, long rowId) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (System.nanoTime() < deadline) {
-            assertFuturePending(append, "REQUIRES_NEW append row lock待機");
-            Long requesterId = requester.get(), blockerId = blocker.get();
-            if (requesterId != null && blockerId != null) {
-                List<String> keys = jdbc.query("""
-                        SELECT req.LOCK_DATA
-                        FROM performance_schema.data_lock_waits w
-                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
-                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
-                        JOIN performance_schema.data_locks req
-                          ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
-                        JOIN performance_schema.data_locks blk
-                          ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
-                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='t_import_validation_row'
-                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='t_import_validation_row'
-                          AND req.INDEX_NAME='uk_import_row_run_number' AND blk.INDEX_NAME=req.INDEX_NAME
-                          AND req.LOCK_DATA=blk.LOCK_DATA
-                          AND req.LOCK_TYPE='RECORD' AND req.LOCK_STATUS='WAITING'
-                          AND req.LOCK_MODE IN ('X','X,REC_NOT_GAP')
-                          AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_STATUS='GRANTED'
-                          AND blk.LOCK_MODE IN ('X','X,REC_NOT_GAP')
-                        """, (rs, row) -> rs.getString(1), requesterId, blockerId);
-                for (String key : keys) {
-                    if (isValidationRowLockData(key, runId, rowNumber, rowId)) {
-                        System.out.printf("NF06 row lock wait確認: requester=%d blocker=%d schema=DATABASE() table=t_import_validation_row index=uk_import_row_run_number keyShape=(tenantId,runId,rowNumber[,primaryId]) mode=record-X WAITING/GRANTED%n",
-                                requesterId, blockerId);
-                        return;
-                    }
-                }
-            }
-            Thread.sleep(25);
-        }
-        throw new AssertionError("実REQUIRES_NEW transactionの指定validation row lock waitを確認できませんでした: "
-                + safeWaitDetails(requester.get(), blocker.get()));
+        // blockerは一意index（tenant・run・row番号）の等値条件で対象行だけを排他lockしている。その保持lockが1件であることと、
+        // 待機辺のblocking lockがそのlockであることで同一行を特定する。LOCK_DATAは見えている場合だけ行の鍵形と照合する
+        // （CIで待機WAITING・保持GRANTEDの両方がkey=nullとなり、鍵の完全一致では確認できなかった）。
+        Long blockerId = blocker.get();
+        if (blockerId == null) throw new AssertionError("validation row blockerの接続IDが未取得です");
+        java.util.function.Predicate<String> rowKey = key -> isValidationRowLockData(key, runId, rowNumber, rowId);
+        InnoDbRecordLockWaits.PointLock anchor = InnoDbRecordLockWaits.requireSinglePointLock(jdbc, blockerId,
+                "t_import_validation_row", "uk_import_row_run_number", rowKey, "REQUIRES_NEW append row lock");
+        InnoDbRecordLockWaits.WaitEdge edge = InnoDbRecordLockWaits.awaitBlockerAnchoredWait(jdbc, anchor,
+                requester::get, InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES,
+                InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES, 10_000,
+                () -> assertFuturePending(append, "REQUIRES_NEW append row lock待機"),
+                "実REQUIRES_NEW transactionの指定validation row lock wait");
+        System.out.printf("NF06 row lock wait確認: requester=%d blocker=%d schema=DATABASE() table=t_import_validation_row index=uk_import_row_run_number keyShape=(tenantId,runId,rowNumber[,primaryId]) keyVisible=%s mode=record-X WAITING/GRANTED%n",
+                edge.requesterConnectionId(), edge.blockerConnectionId(),
+                edge.requesterData() != null || edge.blockerData() != null);
     }
 
     private boolean isValidationRowLockData(String lockData, long runId, long rowNumber, long rowId) {
@@ -3776,13 +3741,15 @@ class ImportMetadataRealMySqlTest {
                 rows.next();
                 blockerId.set(rows.getLong(1));
             }
-            String registryLockData = permissionLockData(blockerId.get(), "t_import_identity_registry",
-                    "uk_import_identity_namespace");
+            // blockerは一意index（tenant・source・entity・lookup_digest）の等値条件で1行だけを排他lockする。
+            // 鍵値はbinary digestを含むため期待鍵の述語は持たず、保持lockが1件であることと見えている鍵どうしの一致で特定する。
+            InnoDbRecordLockWaits.PointLock registryLock = InnoDbRecordLockWaits.requireSinglePointLock(jdbc,
+                    blockerId.get(), "t_import_identity_registry", "uk_import_identity_namespace", null,
+                    "candidate registry");
             Future<?> submitted = pool.submit(() -> withActorContext(() ->
                     candidateService.registerCandidate(jobId, validationRunId, 1)));
             operationFuture = submitted;
-            long requester = awaitExactLockWait(blockerId.get(), "t_import_identity_registry",
-                    "uk_import_identity_namespace", registryLockData, submitted, "candidate registry");
+            awaitExactLockWait(registryLock, submitted, "candidate registry");
             assertEquals(1, jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 WHERE tenant_id=? "
                             + "AND group_id=? AND action_key=? AND deny_flag=0",
                     tenantId, groupId, ImportMetadataAuthorizationService.ACTION));
@@ -3830,10 +3797,12 @@ class ImportMetadataRealMySqlTest {
                 rows.next();
                 blockerId.set(rows.getLong(1));
             }
-            String jobLockData = permissionLockData(blockerId.get(), "t_import_job", "PRIMARY");
+            InnoDbRecordLockWaits.PointLock jobLock = InnoDbRecordLockWaits.requireSinglePointLock(jdbc,
+                    blockerId.get(), "t_import_job", "PRIMARY", InnoDbRecordLockWaits.primaryKey(jobId),
+                    "validation lease job");
             Future<?> submitted = pool.submit(() -> withActorContext(operation::get));
             operationFuture = submitted;
-            awaitExactLockWait(blockerId.get(), "t_import_job", "PRIMARY", jobLockData, submitted, "validation lease job");
+            awaitExactLockWait(jobLock, submitted, "validation lease job");
             assertEquals(1, jdbc.update("UPDATE t_permission_group_action SET deleted_flag=1 WHERE tenant_id=? "
                             + "AND group_id=? AND action_key=? AND deny_flag=0",
                     tenantId, groupId, ImportMetadataAuthorizationService.ACTION));
@@ -3862,50 +3831,39 @@ class ImportMetadataRealMySqlTest {
         }
     }
 
-    private String permissionLockData(long connectionId, String table, String index) {
-        return jdbc.queryForObject("SELECT dl.LOCK_DATA FROM performance_schema.data_locks dl "
-                        + "JOIN performance_schema.threads t ON t.THREAD_ID=dl.THREAD_ID "
-                        + "WHERE t.PROCESSLIST_ID=? AND dl.OBJECT_SCHEMA=DATABASE() AND dl.OBJECT_NAME=? "
-                        + "AND dl.INDEX_NAME=? AND dl.LOCK_TYPE='RECORD' AND dl.LOCK_STATUS='GRANTED' "
-                        + "AND dl.LOCK_DATA IS NOT NULL ORDER BY dl.LOCK_MODE LIMIT 1",
-                String.class, connectionId, table, index);
-    }
-
-    private long awaitExactLockWait(long blockerId, String table, String index, String lockData,
-                                   Future<?> operation, String label) throws Exception {
-        return awaitExactLockWait(null, blockerId, table, index, lockData, operation, label);
-    }
-
-    private long awaitExactLockWait(AtomicReference<Long> expectedRequesterId, long blockerId, String table,
-                                   String index, String lockData, Future<?> operation, String label) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12);
-        while (System.nanoTime() < deadline) {
-            assertFuturePending(operation, label);
-            Long capturedRequesterId = expectedRequesterId == null ? null : expectedRequesterId.get();
-            long requesterFilter = capturedRequesterId == null ? 0L : capturedRequesterId;
-            List<Long> requesters = capturedRequesterId == null && expectedRequesterId != null ? List.of() : jdbc.query("""
-                    SELECT wt.PROCESSLIST_ID
-                    FROM performance_schema.data_lock_waits w
-                    JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
-                    JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
-                    JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
-                    JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                    WHERE (?=0 OR wt.PROCESSLIST_ID=?) AND wt.PROCESSLIST_ID<>? AND bt.PROCESSLIST_ID=?
-                      AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=? AND req.INDEX_NAME=?
-                      AND req.LOCK_TYPE='RECORD' AND req.LOCK_MODE='X,REC_NOT_GAP' AND req.LOCK_STATUS='WAITING'
-                      AND req.LOCK_DATA=?
-                      AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=? AND blk.INDEX_NAME=?
-                      AND blk.LOCK_TYPE='RECORD' AND blk.LOCK_MODE='X,REC_NOT_GAP' AND blk.LOCK_STATUS='GRANTED'
-                      AND blk.LOCK_DATA=?
-                    """, (rs, row) -> rs.getLong(1), requesterFilter, requesterFilter,
-                    blockerId, blockerId, table, index, lockData,
-                    table, index, lockData);
-            if (!requesters.isEmpty()) return requesters.get(0);
-            Thread.sleep(25);
+    /** blocker文{@code SELECT ... WHERE tenant_id=? AND id=? FOR UPDATE}の主キー引数（一点lockの対象行）を返す。 */
+    private static long pointLockId(String lockSql, Object[] lockParams) {
+        if (!lockSql.endsWith("WHERE tenant_id=? AND id=? FOR UPDATE") || lockParams.length != 2) {
+            throw new AssertionError("blockerの文が主キー一点のFOR UPDATEでないため対象行を特定できません: " + lockSql);
         }
-        assertFuturePending(operation, label);
-        throw new AssertionError(label + "の対象record X lock waitを確認できませんでした: "
-                + safeWaitDetails(null, blockerId));
+        return ((Number) lockParams[1]).longValue();
+    }
+
+    /** mutation文{@code UPDATE ... WHERE tenant_id=? AND id=?}の主キー引数（待機する対象行）を返す。 */
+    private static long pointUpdateId(String mutationSql, Object[] mutationParams) {
+        if (!mutationSql.endsWith("WHERE tenant_id=? AND id=?") || mutationParams.length < 2) {
+            throw new AssertionError("mutationが主キー一点のUPDATEでないため期待鍵を導出できません: " + mutationSql);
+        }
+        return ((Number) mutationParams[mutationParams.length - 1]).longValue();
+    }
+
+    private long awaitExactLockWait(InnoDbRecordLockWaits.PointLock anchor, Future<?> operation, String label)
+            throws Exception {
+        return awaitExactLockWait(null, anchor, operation, label);
+    }
+
+    /**
+     * blocker（主キー等の一意条件で1行だけを排他lockした試験側接続）に対するrecord X待機を確認する。
+     * LOCK_DATAの完全一致は要求せず、blockerの保持lockが1件であることと待機辺のblocking lockがそのlockであることで
+     * 同一行を特定する（{@link InnoDbRecordLockWaits}）。modeは従来どおりX,REC_NOT_GAPに限る。
+     */
+    private long awaitExactLockWait(AtomicReference<Long> expectedRequesterId, InnoDbRecordLockWaits.PointLock anchor,
+                                   Future<?> operation, String label) throws Exception {
+        InnoDbRecordLockWaits.WaitEdge edge = InnoDbRecordLockWaits.awaitBlockerAnchoredWait(jdbc, anchor,
+                expectedRequesterId == null ? null : expectedRequesterId::get,
+                InnoDbRecordLockWaits.EXCLUSIVE_NON_GAP_MODE, InnoDbRecordLockWaits.EXCLUSIVE_NON_GAP_MODE, 12_000,
+                () -> assertFuturePending(operation, label), label);
+        return edge.requesterConnectionId();
     }
 
     private <T> T withActorContext(java.util.concurrent.Callable<T> operation) {

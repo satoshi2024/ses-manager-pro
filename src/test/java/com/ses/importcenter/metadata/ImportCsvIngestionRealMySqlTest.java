@@ -140,6 +140,15 @@ class ImportCsvIngestionRealMySqlTest {
     private long sourceId;
     private String sourceCode;
     private volatile CountDownLatch stagedRequestsBarrier;
+    /** test毎に独立した照合台帳。Spring beanの台帳（upload root配下）は使わず、他testの台帳と混ざらないようにする。 */
+    @org.junit.jupiter.api.io.TempDir Path stageLedgerRoot;
+    private ImportStageReconciliationLedger stageLedger;
+
+    @BeforeEach
+    void prepareStageLedger() {
+        stageLedger = new ImportStageReconciliationLedger(stageLedgerRoot.resolve(ImportStageReconciliationLedger.DIRECTORY),
+                null, java.time.Clock.systemUTC());
+    }
 
     @BeforeEach
     void prepareAuthorizedSource() {
@@ -406,6 +415,53 @@ class ImportCsvIngestionRealMySqlTest {
         assertNoMetadataRows();
         assertEquals(1, storage.objectCount(), "COMMIT結果を確定できないstageだけは照合用に保全する");
         assertEquals(tempBefore, rawTempFiles());
+
+        // A-NF06-2：保全したstageは照合台帳に載り、safety window経過後の照合で実MySQLの参照有無から回収される。
+        List<ImportStageReconciliationLedger.Entry> retained = stageLedger.entries();
+        assertEquals(1, retained.size());
+        assertEquals(ImportStageReconciliationLedger.Reason.OUTCOME_UNKNOWN, retained.get(0).reason());
+        assertEquals(TENANT, retained.get(0).tenantId());
+
+        ImportStageReconciler.Result early = reconcilerAt(java.time.Clock.systemUTC()).reconcileDue();
+        assertEquals(1, early.pending(), "safety window内は判定せず残す");
+        assertEquals(1, storage.objectCount());
+
+        ImportStageReconciler.Result due = reconcilerAt(java.time.Clock.offset(java.time.Clock.systemUTC(),
+                ImportStageReconciler.SAFETY_WINDOW.plusMinutes(1))).reconcileDue();
+        assertEquals(1, due.reclaimed());
+        assertEquals(0, due.failed());
+        assertEquals(0, storage.objectCount(), "t_document_versionから参照されないstage objectは回収する");
+        assertEquals(List.of(), stageLedger.entries());
+        verify(documentService).discardImportStage(any());
+        assertNoMetadataRows();
+    }
+
+    @Test
+    void reconcilerKeepsAnObjectWhoseStorageKeyIsReferencedByACommittedVersion() {
+        ImportUploadJobDetail committed = ingestion.upload(new ImportRawUploadHeaders(sourceCode, ImportEncoding.UTF8),
+                () -> new ByteArrayInputStream(CSV));
+        String committedKey = jdbc.queryForObject("""
+                SELECT v.storage_key FROM t_import_job j JOIN t_document_version v
+                  ON v.tenant_id=j.tenant_id AND v.id=j.document_version_id
+                WHERE j.tenant_id=? AND j.id=?
+                """, String.class, TENANT, committed.jobId());
+        com.ses.entity.Document document = new com.ses.entity.Document();
+        document.setDocumentType("IMPORT");
+        DocumentVersion version = new DocumentVersion();
+        version.setStorageKey(committedKey);
+        // COMMIT結果不明で保全したがcommitは成立していた、という状態を台帳だけで再現する。
+        assertTrue(stageLedger.recordRetained(TENANT,
+                new StagedImportDocument(document, version, committedKey, UUID.randomUUID().toString())));
+
+        ImportStageReconciler.Result due = reconcilerAt(java.time.Clock.offset(java.time.Clock.systemUTC(),
+                ImportStageReconciler.SAFETY_WINDOW.plusMinutes(1))).reconcileDue();
+
+        assertEquals(1, due.committed());
+        assertEquals(0, due.reclaimed());
+        assertEquals(1, storage.objectCount(), "commit済みの版が参照するobjectは消さない");
+        assertEquals(List.of(), stageLedger.entries());
+        verify(documentService, never()).discardImportStage(any());
+        assertEquals(committed, metadata.getUploadedJobDetail(committed.jobId()));
     }
 
     @Test
@@ -494,12 +550,17 @@ class ImportCsvIngestionRealMySqlTest {
 
     private ImportCsvIngestionService ingestionWithClock(AtomicLong nanos) {
         return new ImportCsvIngestionService(authorization, metadata, admission, documentService, commitService,
-                tempFiles, nanos::get, ImportIngressDeadline.TOTAL_BUDGET);
+                tempFiles, stageLedger, nanos::get, ImportIngressDeadline.TOTAL_BUDGET);
     }
 
     private ImportCsvIngestionService ingestionWith(ImportCsvUploadCommitService faultCommit, LongSupplier clock) {
         return new ImportCsvIngestionService(authorization, metadata, admission, documentService, faultCommit,
-                tempFiles, clock, ImportIngressDeadline.TOTAL_BUDGET);
+                tempFiles, stageLedger, clock, ImportIngressDeadline.TOTAL_BUDGET);
+    }
+
+    /** 実MySQL（JdbcTemplate）と実DocumentServiceで照合する。時刻だけ差し替えてsafety windowを越えさせる。 */
+    private ImportStageReconciler reconcilerAt(java.time.Clock clock) {
+        return new ImportStageReconciler(stageLedger, jdbc, documentService, null, clock);
     }
 
     private ImportCsvUploadCommitService commitServiceWith(PlatformTransactionManager manager) {

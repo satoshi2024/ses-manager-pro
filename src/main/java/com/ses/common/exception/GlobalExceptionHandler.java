@@ -168,6 +168,8 @@ public class GlobalExceptionHandler {
             case 403 -> HttpStatus.FORBIDDEN;
             case 404 -> HttpStatus.NOT_FOUND;
             case 409 -> HttpStatus.CONFLICT;
+            // SafeErrorPolicy.safeHttpCodeが許可する413（上限超過）をstatus行でも413として返す。
+            case 413 -> HttpStatus.PAYLOAD_TOO_LARGE;
             case 429 -> HttpStatus.TOO_MANY_REQUESTS;
             case 502 -> HttpStatus.BAD_GATEWAY;
             case 503 -> HttpStatus.SERVICE_UNAVAILABLE;

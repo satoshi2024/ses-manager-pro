@@ -1681,8 +1681,19 @@ class ImportValidationSealRealMySqlTest {
                             throw sqlFailure;
                         }
                     }
+                    // LOCK_DATAはpageをlatch待ちなしで読めた場合だけ見え、prewarm後も両端NULLのことがある（CI shard 1で観測）。
+                    // 両端NULLのときは、blockerが当該indexの排他record lockを1件だけ保持し待機辺がそのlockを指すことで
+                    // fixture行の待機と特定する。それも満たさない間は受け入れずにpollを続ける。
+                    boolean blockerAnchored = false;
+                    if (matchingWait.requester.lockData == null && matchingWait.blocker.lockData == null) {
+                        blockerAnchored = isW3dBlockerSinglePointLock(matchingWait, target, blockerPid);
+                        if (!blockerAnchored) {
+                            Thread.sleep(30);
+                            continue;
+                        }
+                    }
                     try {
-                        assertW3dTargetLockWait(matchingWait, target);
+                        assertW3dTargetLockWait(matchingWait, target, blockerAnchored);
                     } catch (AssertionError identityFailure) {
                         attachW3dDiagnostics(identityFailure, target, requesterPid, blockerPid,
                                 workerThreadId, blockerSettings);
@@ -1747,7 +1758,22 @@ class ImportValidationSealRealMySqlTest {
         }
     }
 
-    private static void assertW3dTargetLockWait(W3dLockWait wait, W3dLockTarget target) {
+    /**
+     * 両端のLOCK_DATAがNULLのときの代替の同一行証拠。blockerが待機辺のindexで排他record lock（X / X,REC_NOT_GAP）を
+     * ちょうど1件だけ保持し、その lockが待機辺のblocking lockであること。blockerはfixture行を一意条件でFOR UPDATEしている。
+     */
+    private boolean isW3dBlockerSinglePointLock(W3dLockWait wait, W3dLockTarget target, long blockerPid) {
+        List<String> heldLockIds = jdbc.query("""
+                SELECT dl.ENGINE_LOCK_ID FROM performance_schema.data_locks dl
+                JOIN performance_schema.threads th ON th.THREAD_ID=dl.THREAD_ID
+                WHERE th.PROCESSLIST_ID=? AND dl.OBJECT_SCHEMA=? AND dl.OBJECT_NAME=? AND dl.INDEX_NAME=?
+                  AND dl.LOCK_TYPE='RECORD' AND dl.LOCK_STATUS='GRANTED' AND dl.LOCK_MODE IN ('X','X,REC_NOT_GAP')
+                """, (rs, row) -> rs.getString(1), blockerPid, target.schema, target.table, wait.blocker.index);
+        return wait.blockerPid == blockerPid && heldLockIds.size() == 1
+                && Objects.equals(heldLockIds.get(0), wait.blockerEngineLockId);
+    }
+
+    private static void assertW3dTargetLockWait(W3dLockWait wait, W3dLockTarget target, boolean blockerAnchored) {
         assertTrue(wait.requesterPid > 0 && wait.blockerPid > 0, "wait edge両端のMySQL connection IDを特定する");
         assertNotNull(wait.requesterEngineLockId);
         assertNotNull(wait.blockerEngineLockId);
@@ -1786,8 +1812,8 @@ class ImportValidationSealRealMySqlTest {
             assertEquals(blockerIndex.lockData(), wait.blocker.lockData,
                     "blocker LOCK_DATAはfixture行の明示index keyと一致");
         }
-        assertTrue(wait.requester.lockData != null || wait.blocker.lockData != null,
-                "LOCK_DATA両端NULLはfixture行prewarmと再採取後も許容しない");
+        assertTrue(wait.requester.lockData != null || wait.blocker.lockData != null || blockerAnchored,
+                "LOCK_DATA両端NULLは、blockerの単一排他record lockを待機辺が指すことを確認できた場合だけ許容する");
     }
 
     private static String formatW3dLockDataValue(String column, String value) {

@@ -134,17 +134,21 @@ class ImportCenterApiSecurityTest {
         mockMvc.perform(validRawUpload().cookie(new Cookie("XSRF-TOKEN", "matching-token"))
                         .header("X-XSRF-TOKEN", "matching-token"))
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.code").value(503));
+                .andExpect(jsonPath("$.code").value(503))
+                .andExpect(jsonPath("$.message").value(
+                        "アップロード処理が制限時間（120秒）内に完了しませんでした。時間をおいて再試行してください。"));
     }
 
     @Test
-    void serviceLevelSizeLimitIsReturnedAsClientErrorNotSystemError() throws Exception {
-        when(ingestion.upload(any(), any())).thenThrow(BusinessException.of(400, "error.import.uploadTooLarge"));
+    void serviceLevelSizeLimitIsReturnedAsPayloadTooLargeEndToEnd() throws Exception {
+        when(ingestion.upload(any(), any())).thenThrow(BusinessException.of(413, "error.import.uploadTooLarge"));
 
+        // B-NF06-4：chunked等でservice層に届いた超過も、SafeErrorPolicy/GlobalExceptionHandlerを通って413になる。
         mockMvc.perform(validRawUpload().cookie(new Cookie("XSRF-TOKEN", "matching-token"))
                         .header("X-XSRF-TOKEN", "matching-token"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(400));
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(jsonPath("$.code").value(413))
+                .andExpect(jsonPath("$.message").value("アップロードできるファイルサイズの上限（64MiB）を超えています。"));
     }
 
     @Test
@@ -163,7 +167,9 @@ class ImportCenterApiSecurityTest {
                         .cookie(new Cookie("XSRF-TOKEN", "matching-token"))
                         .header("X-XSRF-TOKEN", "matching-token"))
                 .andExpect(status().isUnsupportedMediaType())
-                .andExpect(jsonPath("$.message").value("error.import.uploadMediaType"));
+                // A-NF06-1：filterもmessage keyを出さず、bundleの文言（既定locale=日本語）で返す。
+                .andExpect(jsonPath("$.message").value(
+                        "CSVファイル（text/csv、文字コードはUTF-8またはShift_JIS）のみアップロードできます。"));
 
         verify(ingestion, never()).upload(any(), any());
         assertFalse(bodyTrackingFilter.bodyTouched());

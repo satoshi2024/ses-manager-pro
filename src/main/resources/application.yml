@@ -16,6 +16,11 @@ server:
       min-spare: ${TOMCAT_MIN_SPARE_THREADS:10}
     accept-count: ${TOMCAT_ACCEPT_COUNT:100}
     max-connections: ${TOMCAT_MAX_CONNECTIONS:8192}
+    # 1回のsocket read（request line・header・bodyの途中停止）の上限。取込ingressの120秒soft期限は
+    # 単一のblocking readを中断できないため、この値が最悪超過量の上限になる（NF-06 B-NF06-1）。
+    # keep-alive待機は従来のTomcat既定（connection-timeoutと同じ60秒）を明示して維持し、LB側idle timeoutとの関係を変えない。
+    connection-timeout: ${TOMCAT_CONNECTION_TIMEOUT:20s}
+    keep-alive-timeout: ${TOMCAT_KEEP_ALIVE_TIMEOUT:60s}
   servlet:
     encoding:
       charset: UTF-8

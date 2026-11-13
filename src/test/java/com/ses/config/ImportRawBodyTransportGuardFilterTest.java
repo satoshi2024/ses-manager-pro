@@ -103,10 +103,69 @@ class ImportRawBodyTransportGuardFilterTest {
 
             assertEquals(415, response.getStatus(), "拒否されるべきContent-Type: " + contentTypeAndEncoding[0]
                     + " / X-Import-Encoding: " + contentTypeAndEncoding[1]);
-            assertTrue(response.getContentAsString().contains("error.import.uploadMediaType"));
+            // message keyは応答へ出さない（MessageSource無しの単体ではstatus別の固定文言）。
+            assertFalse(response.getContentAsString().contains("error.import."));
+            assertTrue(response.getContentAsString(java.nio.charset.StandardCharsets.UTF_8)
+                    .contains("入力内容を確認してください。"));
             assertFalse(continued.get());
             assertFalse(request.bodyTouched());
         }
+    }
+
+    @Test
+    void rejectionResponsesNeverExposeRawMessageKeys() throws Exception {
+        TrackingRequest wrongMethod = validRequest();
+        wrongMethod.setMethod("PUT");
+        TrackingRequest missingCsrf = validRequest(null);
+        TrackingRequest badHeaders = requestWith("text/csv", "EUC_JP");
+        TrackingRequest tooLarge = validRequest();
+        tooLarge.declareContentLength(ImportRawBodyTransportGuardFilter.MAX_RAW_BYTES + 1);
+        TrackingRequest compressed = validRequest();
+        compressed.addHeader("Content-Encoding", "gzip");
+        List<Object[]> cases = List.of(
+                new Object[]{wrongMethod, 405, "入力内容を確認してください。"},
+                new Object[]{missingCsrf, 403, "アクセス権限がありません。"},
+                new Object[]{badHeaders, 400, "入力内容を確認してください。"},
+                new Object[]{tooLarge, 413, "送信データのサイズが上限を超えています。"},
+                new Object[]{compressed, 415, "入力内容を確認してください。"});
+        for (Object[] rejection : cases) {
+            TrackingRequest request = (TrackingRequest) rejection[0];
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            filter.doFilter(request, response, (req, res) -> { throw new AssertionError("must reject"); });
+
+            String body = response.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+            assertEquals(rejection[1], response.getStatus());
+            assertTrue(body.contains("\"code\":" + rejection[1]), body);
+            assertTrue(body.contains((String) rejection[2]), body);
+            assertFalse(body.contains("error."), "message keyを応答へ出さない: " + body);
+            assertFalse(request.bodyTouched());
+        }
+    }
+
+    @Test
+    void rejectionMessageIsResolvedFromTheBundleWithTheApplicationLocaleResolver() throws Exception {
+        org.springframework.context.support.StaticMessageSource messages =
+                new org.springframework.context.support.StaticMessageSource();
+        messages.addMessage("error.import.uploadMediaType", java.util.Locale.ENGLISH,
+                "Only CSV files (text/csv, encoded in UTF-8 or Shift_JIS) can be uploaded.");
+        org.springframework.beans.factory.support.StaticListableBeanFactory beans =
+                new org.springframework.beans.factory.support.StaticListableBeanFactory();
+        beans.addBean("messageSource", messages);
+        beans.addBean("localeResolver",
+                new org.springframework.web.servlet.i18n.FixedLocaleResolver(java.util.Locale.ENGLISH));
+        ImportRawBodyTransportGuardFilter localized = new ImportRawBodyTransportGuardFilter(
+                beans.getBeanProvider(org.springframework.context.MessageSource.class),
+                beans.getBeanProvider(org.springframework.web.servlet.LocaleResolver.class));
+        TrackingRequest request = requestWith("text/csv; header=present", "UTF8");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        localized.doFilter(request, response, (req, res) -> { throw new AssertionError("must reject"); });
+
+        assertEquals(415, response.getStatus());
+        assertTrue(response.getContentAsString(java.nio.charset.StandardCharsets.UTF_8)
+                .contains("Only CSV files (text/csv, encoded in UTF-8 or Shift_JIS) can be uploaded."));
+        assertFalse(request.bodyTouched());
     }
 
     @Test
