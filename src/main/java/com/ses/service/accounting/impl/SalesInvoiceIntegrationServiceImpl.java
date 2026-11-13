@@ -56,6 +56,9 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     private final ObjectMapper objectMapper;
     private final AccountingJobLegalEntityResolver legalEntityResolver;
 
+    /** freee取引の管理番号（ref_number）の上限文字数。 */
+    private static final int FREEE_REF_NUMBER_MAX = 20;
+
     /** 会計連携できる請求書ステータス (P1-07)。 */
     private static final Set<String> SENDABLE_STATUSES = Set.of("送付済", "入金済", "一部入金");
 
@@ -82,6 +85,11 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
         // ステータス適格性ガード (送付済 / 入金済 / 一部入金 のみ許可) (P1-07)
         if (!SENDABLE_STATUSES.contains(invoice.getStatus())) {
             throw BusinessException.of(400, "error.accounting.invoiceNotSendable");
+        }
+
+        // freeeの管理番号（ref_number）は20文字以内。請求書番号をそのまま使うため送信前に拒否する
+        if (invoice.getInvoiceNo() != null && invoice.getInvoiceNo().length() > FREEE_REF_NUMBER_MAX) {
+            throw BusinessException.of(400, "error.accounting.refNumberTooLong");
         }
 
         // 月次締めチェック (締め済み月への更新拒否)

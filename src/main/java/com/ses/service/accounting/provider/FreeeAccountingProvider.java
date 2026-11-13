@@ -584,7 +584,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .externalId(null)
                         .providerRequestId(reqId)
                         .errorCode("INVALID_DEAL_ID")
-                        .errorMessageSafe("freee 応答の取引IDが不正です")
+                        .errorMessageSafe("error.accounting.freeeInvalidResponse")
                         .retryable(false)
                         .build();
             }
@@ -601,7 +601,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .externalId(String.valueOf(dealId))
                         .providerRequestId(reqId)
                         .errorCode("AMOUNT_MISMATCH")
-                        .errorMessageSafe("freee 応答金額不一致 (期待: " + expectedTotal + "円, freee: " + actualAmount + "円)")
+                        .errorMessageSafe("error.accounting.freeeAmountMismatch")
                         .retryable(false)
                         .build();
             }
@@ -904,7 +904,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("VALIDATION_ERROR")
-                        .errorMessageSafe("freee API入力検証エラーが発生しました (エラーコード: VALIDATION_ERROR)")
+                        .errorMessageSafe("error.accounting.freeeValidation")
                         .retryable(false) // 400/422はリトライしない (design §6.3)
                         .build();
             } else if (statusCode == 401) {
@@ -913,7 +913,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("UNAUTHORIZED")
-                        .errorMessageSafe("認証エラー: トークンが無効または失効しています (再認証が必要です)")
+                        .errorMessageSafe("error.accounting.freeeUnauthorized")
                         .retryable(false)
                         .build();
             } else if (statusCode == 403) {
@@ -922,7 +922,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("PLAN_LIMITATION")
-                        .errorMessageSafe("freee 契約プラン制限またはアクセス権限不足です。CSV出力をご利用ください。")
+                        .errorMessageSafe("error.accounting.freeeForbidden")
                         .retryable(false) // プラン制限はリトライしない
                         .build();
             } else if (statusCode == 429) {
@@ -940,7 +940,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("RATE_LIMITED")
-                        .errorMessageSafe("APIレートリミットに達しました。次回再試行します。")
+                        .errorMessageSafe("error.accounting.freeeRateLimited")
                         .retryable(true)
                         .retryAfterSeconds(retryAfter)
                         .build();
@@ -950,7 +950,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("HTTP_CLIENT_ERROR")
-                        .errorMessageSafe("HTTP " + statusCode + " エラーが発生しました")
+                        .errorMessageSafe("error.accounting.freeeHttpError")
                         .retryable(false)
                         .build();
             }
@@ -961,7 +961,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                     .success(false)
                     .providerRequestId(reqId)
                     .errorCode("SERVER_ERROR")
-                    .errorMessageSafe("freee サーバー一時エラー (" + serverEx.getStatusCode() + ")")
+                    .errorMessageSafe("error.accounting.freeeServerError")
                     .retryable(true)
                     .retryAfterSeconds(30)
                     .build();
@@ -970,7 +970,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
             return CanonicalDealResult.builder()
                     .success(false)
                     .errorCode("TIMEOUT")
-                    .errorMessageSafe("freee APIへの接続タイムアウトまたはネットワークエラー")
+                    .errorMessageSafe("error.accounting.freeeTimeout")
                     .retryable(true)
                     .retryAfterSeconds(30)
                     .build();

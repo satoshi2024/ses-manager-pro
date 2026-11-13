@@ -262,6 +262,12 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
             throw BusinessException.of(400, "error.accounting.expenseNotSendable");
         }
 
+        // freeeの管理番号（ref_number）は20文字以内。経費番号をそのまま使うため送信前に拒否する
+        String expenseRefNumber = expense.getExpenseNo() != null ? expense.getExpenseNo() : "EX-" + expense.getId();
+        if (expenseRefNumber.length() > 20) {
+            throw BusinessException.of(400, "error.accounting.refNumberTooLong");
+        }
+
         IntegrationConnection conn = resolveConnection(tenantId, null, "freee", "accounting");
 
         for (String[] required : REQUIRED_EXPENSE_MAPPINGS) {

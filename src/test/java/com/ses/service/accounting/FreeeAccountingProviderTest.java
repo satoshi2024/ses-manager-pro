@@ -196,7 +196,7 @@ class FreeeAccountingProviderTest {
         assertThat(result.isSuccess()).isFalse();
         assertThat(result.getErrorCode()).isEqualTo("AMOUNT_MISMATCH");
         assertThat(result.isRetryable()).isFalse();
-        assertThat(result.getErrorMessageSafe()).contains("不一致");
+        assertThat(result.getErrorMessageSafe()).isEqualTo("error.accounting.freeeAmountMismatch");
     }
 
     @Test
@@ -271,7 +271,7 @@ class FreeeAccountingProviderTest {
         assertThat(result.isSuccess()).isFalse();
         assertThat(result.getErrorCode()).isEqualTo("PLAN_LIMITATION");
         assertThat(result.isRetryable()).isFalse();
-        assertThat(result.getErrorMessageSafe()).contains("CSV出力");
+        assertThat(result.getErrorMessageSafe()).isEqualTo("error.accounting.freeeForbidden");
     }
 
     @Test

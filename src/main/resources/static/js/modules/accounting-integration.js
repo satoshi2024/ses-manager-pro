@@ -56,6 +56,15 @@ window.AccountingIntegration = (function () {
         expense: { preview: 'expense', sync: 'expense' }
     };
 
+    /**
+     * 連携ジョブの安全メッセージはmessage key（SafeErrorPolicyのallow-list）で保存される。
+     * keyなら翻訳し、固定文言ならそのまま表示する。
+     */
+    function localizeJobMessage(message) {
+        if (!message) return '-';
+        return (window.SES && SES.i18n) ? SES.i18n.t(message, message) : message;
+    }
+
     function previewKind() {
         let kind = $('#previewKind').val();
         return SEND_KINDS[kind] ? kind : 'sales';
@@ -416,7 +425,7 @@ window.AccountingIntegration = (function () {
                     <div class="col-md-6"><strong>${escapeHtml(t('externalId'))}:</strong> ${escapeHtml(j.externalId || '-')}</div>
                     <div class="col-md-6"><strong>${escapeHtml(t('attemptCount'))}:</strong> ${j.attemptCount || 0}</div>
                     <div class="col-md-12"><strong>${escapeHtml(t('errorCode'))}:</strong> <span class="text-danger">${escapeHtml(j.errorCode || '-')}</span></div>
-                    <div class="col-md-12"><strong>${escapeHtml(t('safeMessage'))}:</strong> <span class="text-danger">${escapeHtml(j.errorMessageSafe || '-')}</span></div>
+                    <div class="col-md-12"><strong>${escapeHtml(t('safeMessage'))}:</strong> <span class="text-danger">${escapeHtml(localizeJobMessage(j.errorMessageSafe))}</span></div>
                 </div>
             `;
             $('#jobDetailContent').html(html);
@@ -430,7 +439,7 @@ window.AccountingIntegration = (function () {
                     <tr>
                         <td class="small text-muted">${escapeHtml(e.createdAt ? e.createdAt.replace('T', ' ') : '-')}</td>
                         <td><span class="badge bg-light text-dark border">${escapeHtml(e.fromStatus || 'INIT')} &rarr; ${escapeHtml(e.toStatus)}</span></td>
-                        <td class="small">${escapeHtml(e.message || '-')}</td>
+                        <td class="small">${escapeHtml(localizeJobMessage(e.message))}</td>
                     </tr>`;
                     eventTbody.append(tr);
                 });

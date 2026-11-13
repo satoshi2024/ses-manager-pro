@@ -255,6 +255,21 @@ class SalesInvoiceIntegrationTest {
     }
 
     @Test
+    @DisplayName("freeeの管理番号は20文字以内: 請求書番号が長すぎる場合は送信ジョブを作らない")
+    void triggerSalesSync_invoiceNoOver20Chars_rejectedBeforeJob() {
+        String original = invoiceService.getById(invoice.getId()).getInvoiceNo();
+        jdbcTemplate.update("UPDATE t_invoice SET invoice_no = ? WHERE id = ?", "INV-2026-11-000000001", invoice.getId()); // 21文字
+        try {
+            assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(invoice.getId(), 1L))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessage("error.accounting.refNumberTooLong");
+            assertThat(jobService.getLatestJob("INVOICE", invoice.getId(), "SALES_INVOICE_SYNC")).isNull();
+        } finally {
+            jdbcTemplate.update("UPDATE t_invoice SET invoice_no = ? WHERE id = ?", original, invoice.getId());
+        }
+    }
+
+    @Test
     @DisplayName("NF09: 請求書の法人が未設定なら送信ジョブを作らず、理由を返す")
     void triggerSalesSync_invoiceWithoutLegalEntity_rejectedBeforeJob() {
         Long original = invoiceService.getById(invoice.getId()).getLegalEntityId();
