@@ -32,6 +32,10 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.service.AuditLogService auditLogService;
 
+    /** 本番初回の期限付きbootstrap mode。slice等で不在ならbootstrap sessionを発行しない。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ProductionBootstrapMode productionBootstrapMode;
+
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
                                         Authentication authentication) throws IOException, ServletException {
@@ -48,17 +52,40 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
                 rejectBreakGlass(request, "break-glass監査を永続化できません", e);
             }
         }
+        // 本番初回の期限付きbootstrap（初期管理者adminのlocal login）。認証後に期限が過ぎた場合もここで止める。
+        boolean bootstrap = !breakGlass && isBootstrapLogin(authentication);
+        if (bootstrap) {
+            if (!productionBootstrapMode.isActive() || auditLogService == null) {
+                recordBestEffort(authentication.getName(), 401, "BOOTSTRAP_LOGIN_EXPIRED");
+                rejectBreakGlass(request, "bootstrapの期限が過ぎているか監査が利用できません");
+            }
+            try {
+                auditLogService.recordRequired(authentication.getName(), "AUTH", "/login", 200,
+                        "BOOTSTRAP_LOGIN_SUCCESS", true);
+            } catch (RuntimeException e) {
+                rejectBreakGlass(request, "bootstrap loginの監査を永続化できません", e);
+            }
+        }
         accountLockService.onLoginSuccess(authentication.getName());
         persistentSessionService.register(request, authentication);
         if (breakGlass && !breakGlassService.bindSession(request, authentication.getName())) {
             persistentSessionService.revokeCurrent(request, authentication, "BREAK_GLASS_INCIDENT_UNAVAILABLE");
             rejectBreakGlass(request, "break-glass incidentをsessionへ固定できません");
         }
+        if (bootstrap) {
+            // BootstrapSessionFilterが改密 → MFA → bootstrap入口だけの順に制限する。MFA pendingは立てない
+            // （立てるとPasswordChangeEnforcementFilterがMFAを先に待つため、改密 → MFAの順にならない）。
+            jakarta.servlet.http.HttpSession session = request.getSession(true);
+            session.setAttribute(ProductionBootstrapMode.SESSION_ATTRIBUTE, Boolean.TRUE);
+            session.removeAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE);
+        }
         // 遷移先はrequestごとのlocal変数で決める。setDefaultTargetUrl等はこのhandler
         // （singleton）のフィールドを書き換えるため、同時loginで遷移先が混ざる。
         String targetUrl = "/";
         // 初回パスワード変更（配備時の初期admin）。local password loginだけが対象で、MFAがあればMFAを先に完了させる。
-        if (authentication instanceof UsernamePasswordAuthenticationToken && isPasswordChangeRequired(authentication)) {
+        boolean passwordChangeRequired = authentication instanceof UsernamePasswordAuthenticationToken
+                && isPasswordChangeRequired(authentication);
+        if (passwordChangeRequired) {
             request.getSession(true).setAttribute(
                     PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE, Boolean.TRUE);
             targetUrl = PasswordChangeEnforcementFilter.CHANGE_PAGE;
@@ -69,9 +96,13 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
             session.removeAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE);
             targetUrl = mfaService.isConfigured(com.ses.common.util.SecurityUtils.currentUserId())
                     ? "/mfa/challenge" : "/mfa/setup";
+        } else if (bootstrap && !passwordChangeRequired) {
+            // bootstrapは改密 → MFAの順。改密済みならMFAの登録または検証へ進める。
+            targetUrl = mfaService.isConfigured(com.ses.common.util.SecurityUtils.currentUserId())
+                    ? "/mfa/challenge" : "/mfa/setup";
         }
         // session発行まで完了した認証だけを成功として監査する。
-        if (!breakGlass && auditLogService != null) {
+        if (!breakGlass && !bootstrap && auditLogService != null) {
             auditLogService.record(authentication.getName(), "AUTH", "/login", 200, "LOGIN_SUCCESS", true);
         }
         clearAuthenticationAttributes(request);
@@ -83,6 +114,24 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
         return authentication.getPrincipal() instanceof LoginUser loginUser
                 && loginUser.getSysUser() != null
                 && Integer.valueOf(1).equals(loginUser.getSysUser().getPasswordChangeRequired());
+    }
+
+    /** prodでbootstrapが有効化されている間の、初期管理者adminのlocal password loginか。 */
+    private boolean isBootstrapLogin(Authentication authentication) {
+        return authentication instanceof UsernamePasswordAuthenticationToken && productionBootstrapMode != null
+                && productionBootstrapMode.isRequested()
+                && productionBootstrapMode.isBootstrapUsername(authentication.getName());
+    }
+
+    private void recordBestEffort(String username, int status, String applicationCode) {
+        if (auditLogService == null) {
+            return;
+        }
+        try {
+            auditLogService.record(username, "AUTH", "/login", status, applicationCode, false);
+        } catch (RuntimeException ignored) {
+            // 拒否は監査の成否に依存させない（fail-closed）
+        }
     }
 
     private void rejectBreakGlass(HttpServletRequest request, String message) throws ServletException {

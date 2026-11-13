@@ -81,6 +81,12 @@ app:
       enabled: ${PERSISTENT_SESSION_ENABLED:true}
       allow-untracked-sessions: ${ALLOW_UNTRACKED_SESSIONS:false}
       hash-key: ${SESSION_HASH_KEY:}
+    # 本番初回起動の期限付きbootstrap mode（既定OFF）。enabled=true には期限（offset付きISO-8601、
+    # 現在から24時間以内）が必須で、未設定・期限切れ・24時間超は起動を拒否する。期限を過ぎると再起動しなくても
+    # bootstrap login・bootstrap sessionを拒否する。手順: .kiro/specs/production-launch/deploy-runbook.md §5
+    bootstrap:
+      enabled: ${SECURITY_BOOTSTRAP_ENABLED:false}
+      expires-at: ${SECURITY_BOOTSTRAP_EXPIRES_AT:}
   # 一括操作 preview token HMAC（未設定は起動 fail-fast）
   batch:
     token-secret: ${BATCH_TOKEN_SECRET:}

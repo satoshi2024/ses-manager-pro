@@ -26,6 +26,8 @@ import java.io.IOException;
  *   <li>API: 403のApiResult JSONを返す。</li>
  *   <li>通す: 変更画面のGET、変更APIのPUT、logout、静的リソース、ERRORディスパッチ。</li>
  *   <li>MFA未完了の間は {@link MfaEnforcementFilter} の判定に任せる（MFA → パスワード変更の順に完了させる）。</li>
+ *   <li>bootstrap session（{@link ProductionBootstrapMode}）はMFA pendingを立てないため、本filterが先に
+ *       パスワード変更を強制し、変更後に {@link BootstrapSessionFilter} がMFA登録を強制する（改密 → MFAの順）。</li>
  * </ul>
  * 依存beanを持たないため、{@code @WebMvcTest} 等のsliceでもsession属性が無ければ何もしない。
  */
@@ -57,7 +59,8 @@ public class PasswordChangeEnforcementFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    static boolean isChangeRequired(HttpSession session) {
+    /** sessionに初回パスワード変更の要求があるか（break-glass・bootstrapの判定も同じ属性を参照する）。 */
+    public static boolean isChangeRequired(HttpSession session) {
         return session != null && Boolean.TRUE.equals(session.getAttribute(PASSWORD_CHANGE_REQUIRED_ATTRIBUTE));
     }
 
@@ -70,10 +73,21 @@ public class PasswordChangeEnforcementFilter extends OncePerRequestFilter {
     private static boolean isAllowed(HttpServletRequest request) {
         String uri = request.getRequestURI();
         String method = request.getMethod();
-        return ("GET".equalsIgnoreCase(method) && CHANGE_PAGE.equals(uri))
-                || ("PUT".equalsIgnoreCase(method) && CHANGE_API.equals(uri))
+        return isChangeEndpoint(method, uri)
+                // HEADの変更画面を自分自身へredirectし続けない（review P3-8）
+                || ("HEAD".equalsIgnoreCase(method) && CHANGE_PAGE.equals(uri))
                 || "/logout".equals(uri)
                 || SecurityInfrastructureUtils.isStaticResource(request)
                 || SecurityInfrastructureUtils.isErrorDispatch(request);
+    }
+
+    /**
+     * 初回パスワード変更の入口（変更画面のGETと変更APIのPUT）か。
+     * break-glass session（{@code BreakGlassServiceImpl}）とbootstrap session（{@link BootstrapSessionFilter}）も
+     * 同じ定義で変更経路を判定する。
+     */
+    public static boolean isChangeEndpoint(String method, String uri) {
+        return ("GET".equalsIgnoreCase(method) && CHANGE_PAGE.equals(uri))
+                || ("PUT".equalsIgnoreCase(method) && CHANGE_API.equals(uri));
     }
 }

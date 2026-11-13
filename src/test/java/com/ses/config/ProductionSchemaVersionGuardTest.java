@@ -27,6 +27,7 @@ class ProductionSchemaVersionGuardTest {
 
     private static final String BASE = "classpath:schema-guard-test/base";
     private static final String NEXT = "classpath:schema-guard-test/next";
+    private static final String REPEATABLE = "classpath:schema-guard-test/repeatable";
 
     // ---------------------------------------------------------------- 判定規則（合成状態）
 
@@ -36,14 +37,50 @@ class ProductionSchemaVersionGuardTest {
                 entry("1", MigrationState.SUCCESS),
                 entry("74.3", MigrationState.SUCCESS),
                 entry("186", MigrationState.SUCCESS),
-                // placeholderを置換しないためchecksumが合わないRepeatableは照合しない
-                entry(null, MigrationState.OUTDATED),
-                entry(null, MigrationState.PENDING),
-                entry(null, MigrationState.SUCCESS)));
+                // placeholderを置換しないためchecksumが合わないRepeatable（初期管理者hash）は
+                // 「適用済み行 OUTDATED + 解決済み行 PENDING」になる。同じscriptの成功適用があるので照合しない
+                repeatable("R__update_admin_password_bcrypt.sql", MigrationState.OUTDATED),
+                repeatable("R__update_admin_password_bcrypt.sql", MigrationState.PENDING),
+                repeatable("R__remove_v2_sample_data.sql", MigrationState.SUCCESS),
+                // 再適用で古くなった適用行（SUPERSEDED）が残っていても成功適用として扱う
+                repeatable("R__crm_contact_reconciliation.sql", MigrationState.SUPERSEDED),
+                repeatable("R__crm_contact_reconciliation.sql", MigrationState.SUCCESS)));
 
         assertThat(result.ok()).as(result.problems().toString()).isTrue();
         assertThat(result.expectedVersion()).isEqualTo("186");
         assertThat(result.appliedVersion()).isEqualTo("186");
+    }
+
+    /**
+     * D1 review P2-2: 以前は「未適用（PENDING）のRepeatable」を一律に見逃して起動を許していた（旧版の本testは
+     * {@code entry(null, PENDING)} を通過扱いにしていた）。同じscriptの成功適用が無いRepeatableは、jobの
+     * locations漏れ（{@code db/migration-prod} を落とした）やjob未実行を意味するため起動を止める。
+     */
+    @Test
+    void 一度も適用されていないRepeatableがあれば起動しない() {
+        ProductionSchemaVersionGuard.Result result = ProductionSchemaVersionGuard.evaluate(List.of(
+                entry("1", MigrationState.SUCCESS),
+                entry("186", MigrationState.SUCCESS),
+                repeatable("R__crm_contact_reconciliation.sql", MigrationState.SUCCESS),
+                repeatable("R__remove_v2_sample_data.sql", MigrationState.PENDING),
+                repeatable("R__update_admin_password_bcrypt.sql", MigrationState.PENDING)));
+
+        assertThat(result.ok()).isFalse();
+        assertThat(result.problems()).hasSize(2);
+        assertThat(result.problems()).allMatch(problem -> problem.contains("一度も適用されていません"));
+        assertThat(result.message()).contains("R__remove_v2_sample_data.sql").contains("R__update_admin_password_bcrypt.sql");
+
+        // 別scriptの成功適用では見逃さない（script名で対応させる）
+        assertThat(ProductionSchemaVersionGuard.evaluate(List.of(
+                entry("186", MigrationState.SUCCESS),
+                repeatable("R__crm_contact_reconciliation.sql", MigrationState.OUTDATED),
+                repeatable("R__remove_v2_sample_data.sql", MigrationState.PENDING))).ok()).isFalse();
+        // 失敗した適用行は成功適用として数えない
+        assertThat(ProductionSchemaVersionGuard.evaluate(List.of(
+                entry("186", MigrationState.SUCCESS),
+                repeatable("R__update_admin_password_bcrypt.sql", MigrationState.FAILED),
+                repeatable("R__update_admin_password_bcrypt.sql", MigrationState.PENDING))).problems())
+                .anyMatch(problem -> problem.contains("一度も適用されていません"));
     }
 
     @Test
@@ -140,6 +177,18 @@ class ProductionSchemaVersionGuardTest {
     }
 
     @Test
+    void H2上で一度も適用されていないRepeatableがartifactにあれば起動を止める() {
+        DataSource dataSource = h2();
+        // jobがRepeatableのlocationを落として実行した状態（versionedは全て適用済み）
+        migrate(dataSource, BASE);
+
+        assertThatThrownBy(() -> new ProductionSchemaVersionGuard(dataSource, List.of(BASE, REPEATABLE), false).verify())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("一度も適用されていません")
+                .hasMessageContaining("R__guard_never_applied.sql");
+    }
+
+    @Test
     void H2上で空DBならjob未実行として起動を止める() {
         assertThatThrownBy(() -> new ProductionSchemaVersionGuard(h2(), List.of(BASE), false).verify())
                 .isInstanceOf(IllegalStateException.class)
@@ -203,6 +252,10 @@ class ProductionSchemaVersionGuardTest {
     private static ProductionSchemaVersionGuard.Entry entry(String version, MigrationState state) {
         return new ProductionSchemaVersionGuard.Entry(version, state,
                 version == null ? "R__example.sql" : "V" + version.replace('.', '_') + "__example.sql");
+    }
+
+    private static ProductionSchemaVersionGuard.Entry repeatable(String script, MigrationState state) {
+        return new ProductionSchemaVersionGuard.Entry(null, state, script);
     }
 
     private static DataSource h2() {

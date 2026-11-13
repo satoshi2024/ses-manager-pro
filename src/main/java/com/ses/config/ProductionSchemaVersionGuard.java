@@ -11,7 +11,9 @@ import org.springframework.beans.factory.SmartInitializingSingleton;
 import javax.sql.DataSource;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 本番の起動時schema guard（配備決定P-3: migrationは専用Flyway jobだけが実行し、アプリinstanceは実行しない）。
@@ -23,16 +25,18 @@ import java.util.List;
  *   <li>適用履歴が1件も無い（Flyway job未実行、または接続先DBの誤り）</li>
  *   <li>失敗したmigration（versioned / repeatable）が履歴に残っている</li>
  *   <li>artifactにあるversioned migrationが未適用（pending / ignored）</li>
+ *   <li>artifactにあるrepeatable migrationが一度も適用されていない（同じscriptの成功適用が履歴に無い）</li>
  *   <li>artifactに無いversioned migrationが適用済み（DBがartifactより新しい、または別artifact）</li>
  *   <li>成功済みの最新versionがartifactの最新versioned migrationと一致しない</li>
  * </ul>
  *
  * <p>期待versionはコードへ固定せず、Flyway自身にartifactのmigrationを解決させて求める。
  * db/migration-prod にversioned migrationを置いた場合も同じ規則で照合される（test側の
- * {@code LatestMigrationVersion.LATEST} との一致は {@code ProductionSchemaVersionGuardTest} が固定する）。
+ * {@code LatestMigrationVersion.LATEST} との一致は {@code MigrationScriptIntegrityTest} が固定する）。
  *
  * <p>placeholderの置換は行わない。初期管理者パスワードhashをアプリinstanceへ渡さないためで、
- * そのためplaceholderを含むRepeatableのchecksumはjobと一致しない。Repeatableは「失敗が無いこと」だけを確認する。
+ * そのためplaceholderを含むRepeatableのchecksumはjobと一致しない。Repeatableは「失敗が無いこと」と
+ * 「同じscriptが一度は成功適用されていること」を確認し、checksumの一致は見ない。
  *
  * <p>{@link SmartInitializingSingleton} で全singleton生成後・Tomcatのconnector開始とscheduler登録の前に
  * 実行する（失敗するとportを開かず、{@code @Scheduled} も1回も走らない）。読むだけでDBへは書かない。
@@ -137,6 +141,14 @@ public class ProductionSchemaVersionGuard implements SmartInitializingSingleton 
         MigrationVersion expected = null;
         MigrationVersion applied = null;
         boolean anyApplied = false;
+        // 一度でも成功適用されたRepeatableのscript名（OUTDATED / SUPERSEDED / SUCCESS 等）。
+        Set<String> appliedRepeatables = new HashSet<>();
+        for (Entry entry : entries) {
+            if (entry.version() == null && entry.script() != null && entry.state() != MigrationState.DELETED
+                    && entry.state().isApplied() && !entry.state().isFailed()) {
+                appliedRepeatables.add(entry.script());
+            }
+        }
         for (Entry entry : entries) {
             MigrationState state = entry.state();
             if (state.isApplied()) {
@@ -146,8 +158,17 @@ public class ProductionSchemaVersionGuard implements SmartInitializingSingleton 
                 problems.add("失敗したmigrationが履歴に残っています: " + entry.label());
                 continue;
             }
-            if (entry.version() == null || state == MigrationState.DELETED) {
-                // Repeatableは失敗だけを見る（placeholderを置換しないためchecksumはjobと一致しない）。
+            if (state == MigrationState.DELETED) {
+                continue;
+            }
+            if (entry.version() == null) {
+                // placeholderを置換しないため、placeholderを含むRepeatable（初期管理者hash）はjobとchecksumが一致せず
+                // 「適用済み行 OUTDATED + 解決済み行 PENDING」になる。同じscriptの成功適用が履歴にある場合だけ
+                // 未適用を許し、一度も適用されていないRepeatable（jobのlocations漏れ・job未実行）は起動を止める（review P2-2）。
+                if (!state.isApplied() && !appliedRepeatables.contains(entry.script())) {
+                    problems.add("artifactのRepeatable migrationが一度も適用されていません"
+                            + "（専用Flyway jobのlocations漏れ、またはjob未実行）: " + entry.label());
+                }
                 continue;
             }
             switch (state) {

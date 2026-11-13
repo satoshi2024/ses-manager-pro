@@ -69,6 +69,7 @@ public class SecurityConfig {
     private final ObjectProvider<ClientRegistrationRepository> clientRegistrationRepositoryProvider;
     private final MfaEnforcementFilter mfaEnforcementFilter;
     private final PasswordChangeEnforcementFilter passwordChangeEnforcementFilter;
+    private final BootstrapSessionFilter bootstrapSessionFilter;
     private final PersistentSessionFilter persistentSessionFilter;
     private final InternalTenantContextFilter internalTenantContextFilter;
     private final ImportRawBodyTransportGuardFilter importRawBodyTransportGuardFilter;
@@ -135,6 +136,18 @@ public class SecurityConfig {
     }
 
     /**
+     * BootstrapSessionFilterのServletコンテナへの自動登録を無効化する
+     * （Spring Securityフィルタチェーン内で PasswordChangeEnforcementFilter の後に addFilterAfter するため、二重登録を防ぐ）
+     */
+    @Bean
+    public FilterRegistrationBean<BootstrapSessionFilter> disableBootstrapSessionAutoRegistration(
+            BootstrapSessionFilter filter) {
+        FilterRegistrationBean<BootstrapSessionFilter> registrationBean = new FilterRegistrationBean<>(filter);
+        registrationBean.setEnabled(false);
+        return registrationBean;
+    }
+
+    /**
      * PersistentSessionFilterのServletコンテナへの自動登録を無効化する
      * （Spring Securityフィルタチェーン内で addFilterAfter するため、二重登録を防ぐ）
      */
@@ -188,6 +201,8 @@ public class SecurityConfig {
             .addFilterAfter(mfaEnforcementFilter, ApiAuditFilter.class)
             // 初回ログイン時のパスワード変更が済むまで、変更画面・変更API以外を遮断（MFAの後に判定する）
             .addFilterAfter(passwordChangeEnforcementFilter, MfaEnforcementFilter.class)
+            // 本番初回bootstrap sessionだけを、改密 → MFA登録の順とbootstrap用の入口へ限定する（他のsessionは素通り）
+            .addFilterAfter(bootstrapSessionFilter, PasswordChangeEnforcementFilter.class)
             // アクセス制御の設定
                 .authorizeHttpRequests(auth -> auth
                 // 認証不要のパス（ログインページ、静的リソース、認証API）

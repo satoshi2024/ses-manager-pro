@@ -2,6 +2,7 @@ package com.ses.service.security.impl;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.config.OidcSecurityProperties;
+import com.ses.config.PasswordChangeEnforcementFilter;
 import com.ses.entity.AuditLog;
 import com.ses.entity.BreakGlassIncident;
 import com.ses.entity.SysUser;
@@ -196,6 +197,13 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (isAuthenticationInfrastructure(request) || isPassiveInfrastructure(request)) {
             return BreakGlassDecision.ALLOW;
         }
+        // 初回パスワード変更が必要なsessionだけ、変更画面のGETと変更APIのPUTをincident scope外でも許す。
+        // 変更画面はaction keyを持たずscopeへ入れられないため、ここで許さないと変更を完了できない（review P2-1）。
+        // 要求の無いsessionでは、この2つも通常どおりscopeで判定する。
+        if (PasswordChangeEnforcementFilter.isChangeEndpoint(request.getMethod(), request.getRequestURI())
+                && isPasswordChangeRequired(session, authentication)) {
+            return BreakGlassDecision.ALLOW;
+        }
         String action = (String) request.getAttribute(ActionPermissionResolver.REQUEST_ACTION_ATTRIBUTE);
         if (!StringUtils.hasText(action)) {
             action = ActionPermissionResolver.resolve(request.getMethod(), request.getRequestURI());
@@ -262,6 +270,19 @@ public class BreakGlassServiceImpl implements BreakGlassService {
     private boolean isAuthenticationInfrastructure(HttpServletRequest request) {
         return ActionPermissionResolver.isAuthenticationInfrastructure(
                 request.getMethod(), request.getRequestURI());
+    }
+
+    /**
+     * sessionの初回パスワード変更要求（{@code PasswordChangeEnforcementFilter}）、または認証主体の
+     * {@code sys_user.password_change_required = 1}（login時点の値。変更成功時に {@code ProfileApiController} が消す）。
+     */
+    private static boolean isPasswordChangeRequired(HttpSession session, Authentication authentication) {
+        if (PasswordChangeEnforcementFilter.isChangeRequired(session)) {
+            return true;
+        }
+        return authentication != null && authentication.getPrincipal() instanceof com.ses.config.LoginUser loginUser
+                && loginUser.getSysUser() != null
+                && Integer.valueOf(1).equals(loginUser.getSysUser().getPasswordChangeRequired());
     }
 
     /** incidentを再検証した上で、画面描画に不可欠な静的リソースとERRORディスパッチだけscope対象外とする。 */

@@ -47,6 +47,11 @@ public class ProfileApiController {
         if (session != null) {
             session.removeAttribute(PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE);
         }
+        // login時点の値を持つ認証主体の要求も消す（break-glass sessionの変更経路の許可判定が参照する）。
+        if (authentication.getPrincipal() instanceof com.ses.config.LoginUser loginUser
+                && loginUser.getSysUser() != null) {
+            loginUser.getSysUser().setPasswordChangeRequired(0);
+        }
         return ApiResult.success(true);
     }
 }

@@ -10,8 +10,8 @@ package com.ses.migration;
  *
  * <p>本番（{@code db/migration} + {@code db/migration-prod}）の最新versionも同じ値である。
  * {@code db/migration-prod} はRepeatableだけを持ち、versioned migrationを置かない
- * （{@code MigrationScriptIntegrityTest} が固定する）。起動時schema guardの期待値との一致は
- * {@code ProductionSchemaVersionGuardTest} が確認する。
+ * （{@code MigrationScriptIntegrityTest} が固定する）。起動時schema guardの期待値との一致も
+ * {@code MigrationScriptIntegrityTest} が確認する。
  */
 final class LatestMigrationVersion {
 
