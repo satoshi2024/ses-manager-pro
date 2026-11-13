@@ -42,6 +42,7 @@ import java.util.function.ToIntFunction;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -142,8 +143,15 @@ class ManagementReportSchedulerTest {
                                                 ReportSnapshotService snapshotService,
                                                 ReportDeliveryService deliveryService,
                                                 SimpleMeterRegistry registry) {
+        return scheduler(mapper, FIXED_CLOCK, runner, snapshotService, deliveryService, registry);
+    }
+
+    private ManagementReportScheduler scheduler(ReportScheduleMapper mapper, Clock clock, TenantAwareBatchRunner runner,
+                                                ReportSnapshotService snapshotService,
+                                                ReportDeliveryService deliveryService,
+                                                SimpleMeterRegistry registry) {
         ManagementReportScheduler scheduler = new ManagementReportScheduler(mapper,
-                new ReportScheduleClaimService(mapper), FIXED_CLOCK, snapshotService, deliveryService,
+                new ReportScheduleClaimService(mapper), clock, snapshotService, deliveryService,
                 mock(MonthlyClosingService.class), timezoneResolver(), runner, recipientPreviewService(),
                 new ObjectMapper());
         ReflectionTestUtils.setField(scheduler, "scheduleMetrics", new ReportScheduleMetrics(registry));
@@ -531,7 +539,7 @@ class ManagementReportSchedulerTest {
         when(mapper.countLegacyLeases(eq("default"), eq(startedAt))).thenReturn(1);
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         ManagementReportScheduler scheduler = scheduler(mapper, runner, snapshotService, deliveryService, registry);
-        ReflectionTestUtils.setField(scheduler, "legacyLeaseDrainConfirmed", true);
+        ReflectionTestUtils.setField(scheduler, "legacyLeaseDrainConfirmedBefore", "2026-09-01T09:00:00+09:00");
         ListAppender<ILoggingEvent> logs = attachSchedulerLog();
         try {
             scheduler.dispatchDue();
@@ -568,7 +576,7 @@ class ManagementReportSchedulerTest {
         when(snapshotService.generate(any())).thenReturn(succeeded(99L));
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         ManagementReportScheduler scheduler = scheduler(mapper, runner, snapshotService, deliveryService, registry);
-        ReflectionTestUtils.setField(scheduler, "legacyLeaseDrainConfirmed", true);
+        ReflectionTestUtils.setField(scheduler, "legacyLeaseDrainConfirmedBefore", "2026-09-01T09:00:00+09:00");
         ListAppender<ILoggingEvent> logs = attachSchedulerLog();
         try {
             scheduler.dispatchDue();
@@ -612,6 +620,142 @@ class ManagementReportSchedulerTest {
         assertThat(events(registry, ReportScheduleMetrics.Event.LEGACY_LEASE_GUARD_FAILED)).isEqualTo(1.0);
         assertThat(messages(logs, Level.ERROR)).anyMatch(message ->
                 message.contains("errorCode=SCHEDULE_LEGACY_LEASE_GUARD_FAILED"));
+    }
+
+    @Test
+    void drain確認時刻より後に取得されたlegacy_leaseは本instance起動前でもclaimを止める() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+        ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+        TenantAwareBatchRunner runner = guardingTenantRunner();
+        // 確認時刻（2026-08-31 23:00）は起動時刻（09-01 00:00:30）より前。確認設定を戻し忘れて再起動しても、
+        // 確認後に旧版が取得したleaseは「起動前」であっても受け入れない（review P3-1）。
+        LocalDateTime confirmedAt = LocalDateTime.of(2026, 8, 31, 23, 0);
+        when(mapper.countLegacyLeases(eq("default"), isNull())).thenReturn(2);
+        when(mapper.countLegacyLeases(eq("default"), eq(confirmedAt))).thenReturn(1);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        ManagementReportScheduler scheduler = scheduler(mapper, runner, snapshotService, deliveryService, registry);
+        ReflectionTestUtils.setField(scheduler, "legacyLeaseDrainConfirmedBefore", "2026-08-31T23:00:00+09:00");
+        ListAppender<ILoggingEvent> logs = attachSchedulerLog();
+        try {
+            scheduler.dispatchDue();
+        } finally {
+            detachSchedulerLog(logs);
+        }
+
+        verify(mapper).countLegacyLeases("default", confirmedAt);
+        verify(runner, never()).run(any());
+        verifyNoInteractions(snapshotService, deliveryService);
+        assertThat(events(registry, ReportScheduleMetrics.Event.LEGACY_LEASE_ACTIVE_BLOCKED)).isEqualTo(1.0);
+        assertThat(messages(logs, Level.ERROR)).anyMatch(message ->
+                message.contains("errorCode=SCHEDULE_LEGACY_LEASE_ACTIVE"));
+    }
+
+    @Test
+    void drain確認時刻を解釈できない設定はdrain未確認として全tenantのclaimを止める() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+        ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+        TenantAwareBatchRunner runner = guardingTenantRunner();
+        when(mapper.countLegacyLeases(eq("default"), isNull())).thenReturn(1);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        ManagementReportScheduler scheduler = scheduler(mapper, runner, snapshotService, deliveryService, registry);
+        // offsetの無い時刻はtimezoneを推測せず拒否する。
+        ReflectionTestUtils.setField(scheduler, "legacyLeaseDrainConfirmedBefore", "2026-09-01T09:00:00");
+        ListAppender<ILoggingEvent> logs = attachSchedulerLog();
+        try {
+            scheduler.dispatchDue();
+        } finally {
+            detachSchedulerLog(logs);
+        }
+
+        verify(mapper, never()).countLegacyLeases(anyString(), any(LocalDateTime.class));
+        verify(runner, never()).run(any());
+        verifyNoInteractions(snapshotService, deliveryService);
+        assertThat(events(registry, ReportScheduleMetrics.Event.LEGACY_LEASE_BLOCKED)).isEqualTo(1.0);
+        assertThat(messages(logs, Level.ERROR)).anyMatch(message ->
+                message.contains("errorCode=SCHEDULE_LEGACY_LEASE_DRAIN_CONFIG_INVALID"));
+    }
+
+    @Test
+    void legacy_lease検出がDB以外の例外で失敗してもmetricを残しclaimを開始しない() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+        ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+        TenantAwareBatchRunner runner = tenantRunner();
+        when(runner.runAndSum(any())).thenThrow(new IllegalStateException("tenant inventory is empty"));
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        ManagementReportScheduler scheduler = scheduler(mapper, runner, snapshotService, deliveryService, registry);
+
+        assertThatThrownBy(scheduler::dispatchDue).isInstanceOf(IllegalStateException.class);
+
+        verify(runner, never()).run(any());
+        verifyNoInteractions(mapper, snapshotService, deliveryService);
+        assertThat(events(registry, ReportScheduleMetrics.Event.LEGACY_LEASE_GUARD_FAILED)).isEqualTo(1.0);
+    }
+
+    // =========================================================================
+    // 確定的なclaim SQL失敗の待機（review P3-8）
+    // =========================================================================
+
+    @Test
+    void 確定的なclaim_SQL失敗の行は待機の間due一覧から除外されLIMIT枠を占有しない() {
+        ReportScheduleMapper mapper = mock(ReportScheduleMapper.class);
+        ReportSnapshotService snapshotService = mock(ReportSnapshotService.class);
+        ReportDeliveryService deliveryService = mock(ReportDeliveryService.class);
+        MutableClock clock = new MutableClock(Instant.parse("2026-08-31T15:00:30Z"));
+        List<ReportSchedule> rejecting = new java.util.ArrayList<>();
+        for (long id = 100L; id < 150L; id++) {
+            ReportSchedule row = schedule(SEPT);
+            row.setId(id);
+            rejecting.add(row);
+        }
+        ReportSchedule healthy = schedule(SEPT);
+        healthy.setId(6L);
+        List<ReportSchedule> widened = new java.util.ArrayList<>(rejecting);
+        widened.add(healthy);
+        // 失敗する50行が並び順の先頭を占め、LIMIT 50では健全な行に届かない状況。
+        when(mapper.selectDue(eq("default"), any(), any(), eq(50))).thenReturn(rejecting);
+        when(mapper.selectDue(eq("default"), any(), any(), eq(100))).thenReturn(widened);
+        when(mapper.claimDue(eq("default"), argThat((Long id) -> id != null && id >= 100L), any(), any(), any(), any(),
+                any(), any(), anyInt(), any(), anyString(), any(), any())).thenThrow(new BadSqlGrammarException("claim",
+                "UPDATE m_report_schedule", new SQLException("row-specific rejection")));
+        when(mapper.claimDue(eq("default"), eq(6L), any(), any(), any(), any(), any(), any(),
+                anyInt(), any(), anyString(), any(), any())).thenReturn(1);
+        when(mapper.markSuccess(anyString(), anyLong(), anyString(), any(), any(), any())).thenReturn(1);
+        when(snapshotService.generate(any())).thenReturn(succeeded(99L));
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        ManagementReportScheduler scheduler = scheduler(mapper, clock, tenantRunner(), snapshotService,
+                deliveryService, registry);
+        ListAppender<ILoggingEvent> logs = attachSchedulerLog();
+        List<String> secondPollErrors;
+        try {
+            scheduler.dispatchDue();
+            assertThat(events(registry, ReportScheduleMetrics.Event.CLAIM_SQL_REJECTED)).isEqualTo(50.0);
+            verifyNoInteractions(snapshotService);
+            logs.list.clear();
+
+            // 待機中（5分）の50行は除外し、その件数だけ多く取得した一覧から健全な行を処理する。
+            scheduler.dispatchDue();
+            secondPollErrors = messages(logs, Level.ERROR);
+            verify(mapper).selectDue(eq("default"), any(), any(), eq(100));
+            verify(snapshotService, times(1)).generate(argThat(command -> command.scheduleId().equals(6L)));
+            verify(mapper).markSuccess(eq("default"), eq(6L), anyString(), any(), eq(OCT), eq(SEPT));
+
+            // 待機が明けると再試行し、連続2回目は10分待つ。
+            clock.advance(Duration.ofMinutes(5).plusSeconds(1));
+            logs.list.clear();
+            scheduler.dispatchDue();
+        } finally {
+            detachSchedulerLog(logs);
+        }
+
+        assertThat(secondPollErrors).as("待機中の行はERRORを繰り返さない").isEmpty();
+        verify(mapper, times(100)).claimDue(eq("default"), argThat((Long id) -> id != null && id >= 100L), any(),
+                any(), any(), any(), any(), any(), anyInt(), any(), anyString(), any(), any());
+        assertThat(events(registry, ReportScheduleMetrics.Event.CLAIM_SQL_REJECTED)).isEqualTo(100.0);
+        assertThat(messages(logs, Level.ERROR)).hasSize(50)
+                .allMatch(message -> message.contains("retryAfterMinutes=10"));
     }
 
     // =========================================================================

@@ -286,6 +286,19 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
                 .eq("tenant_id", tenantId)
                 .eq("run_key", stableRunKey));
 
+        // 定期実行のrun_keyはcutoffを含まない（buildRunKey）。同一schedule・対象月で最初に作られたrunのcutoffを
+        // 固定し、lease引き継ぎやretryの時点で月次締め状態が変わっていても再判定しない。速報と確定が
+        // 同じ論理runで1回ずつ配布される二重配布を防ぐ（確定版は次の周期で扱う。B-NF10-2 / P2-1）。
+        String effectiveCutoff = cutoffKind;
+        if (run != null && isScheduledStableRun(command) && run.getCutoffKind() != null
+                && !run.getCutoffKind().equals(cutoffKind)) {
+            log.info("[定期管理レポート] 同一論理runで最初に判定したcutoffを維持し、月次締め状態の変化で再判定しません: "
+                            + "runId={} scheduleId={} period={} pinnedCutoff={} requestedCutoff={}",
+                    run.getId(), command.scheduleId(), target, run.getCutoffKind(), cutoffKind);
+            effectiveCutoff = run.getCutoffKind();
+        }
+        final boolean effectiveConfirmed = "MONTHLY_CLOSING".equals(effectiveCutoff);
+
         if (run != null && !command.explicitRegeneration()
                 && "SUCCEEDED".equals(run.getStatus())) {
             if (run.getRecipientPreviewHash() == null
@@ -293,6 +306,10 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
                 throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
             }
             return new ReportGenerationResult(run, listSectionsWithoutLookup(run.getId()), true);
+        }
+        if (run != null && effectiveConfirmed && !confirmed && !monthlyClosingService.isClosed(target.toString())) {
+            // 確定で固定済みの未完了runを、締め解除後に確定として作り直さない（速報への切替もしない）。
+            throw BusinessException.of(400, "error.managementReport.closingRequired");
         }
         if (run == null) {
             run = new ReportRun();
@@ -351,12 +368,12 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             }
             try {
                 SectionValue value = ReportScopeContext.with(scope,
-                        () -> loadSection(sectionKey, target, sourceCache, scope, confirmed));
-                saveSection(run, existing, sectionKey, value, confirmed, asOfAt, periodFrom, periodTo,
+                        () -> loadSection(sectionKey, target, sourceCache, scope, effectiveConfirmed));
+                saveSection(run, existing, sectionKey, value, effectiveConfirmed, asOfAt, periodFrom, periodTo,
                         attemptStartedAt);
             } catch (Exception ex) {
                 hasFailure = true;
-                saveFailedSection(run, existing, sectionKey, confirmed, asOfAt,
+                saveFailedSection(run, existing, sectionKey, effectiveConfirmed, asOfAt,
                         periodFrom, periodTo, attemptStartedAt, ex);
             }
         }
@@ -811,13 +828,33 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         return AccountingTenantContextHolder.requireTenantContext();
     }
 
+    /**
+     * runの冪等キー。明示再生成は毎回新しいrunにする。
+     *
+     * <p>定期実行（system principal・schedule付き・非再生成）はschedule IDを含め、cutoffを含めない。
+     * <ul>
+     *   <li>同一schedule・対象月・template版・scopeでは、月次締め状態（速報/確定）に関わらず同じrunへ収束する。
+     *       lease引き継ぎやretryが締め確定後に走っても、最初に作られたrunのcutoffを使う（generateInternal）。
+     *       並行して別cutoffで作ろうとしても一意制約 {@code uk_report_run_key} が1件に絞る。</li>
+     *   <li>手動生成や他のscheduleのrunとキーを共有しない。共有すると、schedulerが他主体のrunを再利用して
+     *       {@code deliverScheduled} のsystem context検証で拒否され、その論理runが進まなくなる。</li>
+     * </ul>
+     * 手動生成のキーは従来どおり（template版・対象月・cutoff・scope）。
+     */
     private String buildRunKey(ReportTemplateVersion version, YearMonth period, String cutoff,
                                ReportScopeSnapshot scope, ReportGenerationCommand command) {
-        String stable = version.getId() + "|" + period + "|" + cutoff + "|" + scope.getHash();
         if (command.explicitRegeneration()) {
             return "report:" + period + ":" + UUID.randomUUID();
         }
+        String stable = isScheduledStableRun(command)
+                ? "schedule|" + command.scheduleId() + "|" + version.getId() + "|" + period + "|" + scope.getHash()
+                : version.getId() + "|" + period + "|" + cutoff + "|" + scope.getHash();
         return "report:" + period + ":" + sha256(stable).substring(0, 64);
+    }
+
+    /** cutoffを論理runごとに固定する定期実行runか（system principal・schedule付き・明示再生成ではない）。 */
+    private static boolean isScheduledStableRun(ReportGenerationCommand command) {
+        return command.systemPrincipal() && command.scheduleId() != null && !command.explicitRegeneration();
     }
 
     private String normalizeCutoff(String value) {

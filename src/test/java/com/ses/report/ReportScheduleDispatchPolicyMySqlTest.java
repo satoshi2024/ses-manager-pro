@@ -95,19 +95,28 @@ import static org.mockito.Mockito.when;
  * NF-10 scheduler運用方針（B-NF10-2、scheduler-claim-fence-plan.md §14）の実MySQL 8受入試験。
  *
  * <ul>
- *   <li>A-NF10-5: lease期限切れの引き継ぎによる重複実行と、同一run_keyへの並行投入のどちらでも、実
- *       {@link ReportSnapshotService}・{@link ReportDeliveryService} のrun_key・delivery dedupeで配布
- *       （delivery行・アプリ内通知・通知outbox）が1回に収束する。</li>
+ *   <li>A-NF10-5: lease期限切れの引き継ぎによる重複実行と、同一run_keyへの並行投入で、実
+ *       {@link ReportSnapshotService}・{@link ReportDeliveryService} のrun_key・delivery dedupeにより配布
+ *       （delivery行・アプリ内通知・通知outbox）が1回に収束する。引き継ぎの前に月次締めが確定しても、
+ *       引き継いだ側は最初に作られた速報runを使い、確定runを作らない（cutoffの論理run固定）。</li>
  *   <li>retry上限: 連続12回目の失敗で停止し、停止理由を保存して管理者の有効化で同一論理runから再開する
  *       （MySQLのSET句左から評価でも停止判定が加算前の値に基づくことを含む）。</li>
- *   <li>起動guard: token無しlease（legacy lease）がある間は全claimを止め、drain確認後だけ起動前のleaseを
- *       期限後に引き継ぐ。起動後に取得されたlegacy leaseは確認設定に関わらず止める。</li>
+ *   <li>起動guard: token無しlease（legacy lease）がある間は全claimを止め、運用者が設定したdrain確認時刻より前に
+ *       取得されたleaseだけを期限後に引き継ぐ。確認時刻または起動時刻以降に取得されたleaseは止める。</li>
  * </ul>
  *
- * <p>mockにするのはdedupe境界の外側だけ（recipient評価、AR aging正本値、PDF描画とstorage、外部webhook）。
- * t_report_run・section snapshot・t_report_delivery・t_notification・t_notification_outboxは実serviceが実MySQLへ書く。
- * schedulerはclockを制御するため実beanを {@code new} で組み立てる（claim serviceはREQUIRES_NEWの実proxy）。
- * Docker必須・零skip（{@code disabledWithoutDocker} は使わない）。fixtureはsyntheticなtemplate/scheduleだけを使う。
+ * <p><b>収束の前提</b>（scheduler-claim-fence-plan.md §14.4）: 同じ論理run（schedule・対象月）の実行の間で、
+ * recipient preview（配布先と各配布先のscope）とtemplate版が変わらないこと。cutoffは生成serviceが最初のrunに固定する
+ * ため前提にしない。previewが変わった場合は二重配布にはならないが、その論理runは
+ * {@code recipientPreviewStale} で進まなくなる（復旧手順は同plan §14.2）。本testはpreviewを固定値にしているため、
+ * その場合を検証しない。
+ *
+ * <p>mockにするのは次の外部入力だけ: recipient preview（配布先の評価。収束の前提として固定）、AR aging正本値
+ * （section値）、PDF描画とstorage（{@link ReportDeliveryDocumentRegistrar}）、外部webhook。月次締め状態は実
+ * {@link MonthlyClosingService} が {@code t_monthly_closing} から読む。t_report_run・section snapshot・
+ * t_report_delivery・t_notification・t_notification_outboxは実serviceが実MySQLへ書く。schedulerはclockを制御するため
+ * 実beanを {@code new} で組み立てる（claim serviceはREQUIRES_NEWの実proxy）。Docker必須・零skip
+ * （{@code disabledWithoutDocker} は使わない）。fixtureはsyntheticなtemplate/scheduleだけを使う。
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -179,6 +188,9 @@ class ReportScheduleDispatchPolicyMySqlTest {
     private TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Autowired
+    private MonthlyClosingService monthlyClosingService;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
@@ -192,6 +204,8 @@ class ReportScheduleDispatchPolicyMySqlTest {
     @BeforeEach
     void setUp() {
         AccountingTenantContextHolder.setTenantId(TENANT);
+        // 対象月は未締めから始める（月次締めは実serviceがt_monthly_closingから判定する）。
+        reopenTargetMonth();
         adminId = jdbcTemplate.queryForObject("SELECT id FROM sys_user WHERE tenant_id = ? AND username = 'admin' "
                 + "AND deleted_flag = 0", Long.class, TENANT);
         templateVersionId = insertPublishedTemplateVersion();
@@ -231,6 +245,7 @@ class ReportScheduleDispatchPolicyMySqlTest {
                 jdbcTemplate.update("DELETE FROM m_report_template_version WHERE template_id = ?", templateId);
                 jdbcTemplate.update("DELETE FROM m_report_template WHERE id = ?", templateId);
             }
+            reopenTargetMonth();
         } finally {
             scheduleIds.clear();
             templateIds.clear();
@@ -245,12 +260,38 @@ class ReportScheduleDispatchPolicyMySqlTest {
 
     @Test
     void lease期限切れの引き継ぎで同一論理runを重複実行しても実serviceのdedupeで配布は1回に収束する() throws Exception {
+        Takeover takeover = takeoverAfterDelivery(false);
+
+        assertThat(takeover.commandB().cutoffKind()).as("締め状態は変わらず、Bも速報を要求する").isEqualTo("速報");
+        assertConvergedToSingleDelivery(takeover);
+    }
+
+    @Test
+    void 速報配布後に月次締めが確定してから引き継いでも確定runを作らず配布は1回に収束する() throws Exception {
+        Takeover takeover = takeoverAfterDelivery(true);
+
+        // Bの時点では締め確定済みのため、schedulerは「確定」を要求する。生成serviceは同一論理runで最初に作られた
+        // 速報runへ固定し、確定runを作らない（確定版は次の周期で扱う）。
+        assertThat(monthlyClosingService.isClosed(TARGET.toString())).isTrue();
+        assertThat(takeover.commandB().cutoffKind()).isEqualTo("確定");
+        assertThat(takeover.resultB().getRun().getCutoffKind()).isEqualTo("GENERATED_AT");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_report_run WHERE tenant_id = ? "
+                        + "AND schedule_id = ? AND cutoff_kind = 'MONTHLY_CLOSING'", Integer.class, TENANT,
+                takeover.scheduleId())).as("確定runは作られない").isZero();
+        assertConvergedToSingleDelivery(takeover);
+    }
+
+    /** Aの実生成・実配布の後、completion前にleaseを超えて停止したAをBが引き継いで同じ論理runを再実行する。 */
+    private Takeover takeoverAfterDelivery(boolean closeMonthBeforeTakeover) throws Exception {
         long id = insertSchedule(SEPT);
         AtomicReference<ReportGenerationResult> resultA = new AtomicReference<>();
         AtomicReference<ReportGenerationResult> resultB = new AtomicReference<>();
+        AtomicReference<ReportGenerationCommand> commandB = new AtomicReference<>();
         ReportDeliveryService stallingDelivery = mock(ReportDeliveryService.class);
-        Harness workerA = new Harness(SEPT.plusSeconds(30), recording(resultA), stallingDelivery);
-        Harness workerB = new Harness(SEPT.plusMinutes(31), recording(resultB), deliveryService);
+        ReportDeliveryService deliveryB = delegating(deliveryService);
+        Harness workerA = new Harness(SEPT.plusSeconds(30), recording(resultA, new AtomicReference<>()),
+                stallingDelivery);
+        Harness workerB = new Harness(SEPT.plusMinutes(31), recording(resultB, commandB), deliveryB);
         CountDownLatch aDelivered = new CountDownLatch(1);
         CountDownLatch releaseA = new CountDownLatch(1);
         when(stallingDelivery.deliverScheduled(anyLong(), any())).thenAnswer(invocation -> {
@@ -271,8 +312,12 @@ class ReportScheduleDispatchPolicyMySqlTest {
             Future<?> runA = pool.submit(workerA.scheduler::dispatchDue);
             assertThat(aDelivered.await(60, TimeUnit.SECONDS)).as("Aの実生成と実配布: logs=%s", messages(logs)).isTrue();
             assertThat(resultA.get()).as("Aの生成結果").isNotNull();
+            assertThat(resultA.get().getRun().getCutoffKind()).as("Aは未締めで速報を作る").isEqualTo("GENERATED_AT");
             long runIdByA = resultA.get().getRun().getId();
             assertThat(countDeliveries(runIdByA)).as("Aの配布でdelivery行が1件").isEqualTo(1);
+            if (closeMonthBeforeTakeover) {
+                closeTargetMonth();
+            }
 
             // BはAのlease期限切れ後に同じ論理runを引き継ぎ、実serviceで生成と配布をもう一度要求する。
             workerB.scheduler.dispatchDue();
@@ -287,26 +332,34 @@ class ReportScheduleDispatchPolicyMySqlTest {
             pool.shutdownNow();
             detachSchedulerLog(logs);
         }
+        long runId = resultA.get().getRun().getId();
+        verify(stallingDelivery, times(1)).deliverScheduled(eq(runId), any());
+        verify(deliveryB, times(1)).deliverScheduled(eq(runId), any());
+        return new Takeover(id, workerA, workerB, resultA.get(), resultB.get(), commandB.get(), messages(logs));
+    }
 
-        ReportGenerationResult a = resultA.get();
-        ReportGenerationResult b = resultB.get();
+    private void assertConvergedToSingleDelivery(Takeover takeover) {
+        ReportGenerationResult a = takeover.resultA();
+        ReportGenerationResult b = takeover.resultB();
         assertThat(a.isReused()).as("Aは新規run").isFalse();
         assertThat(b).as("Bも生成要求を出した（重複実行が実際に起きた）").isNotNull();
-        assertThat(b.isReused()).as("Bは同一run_keyの成功runを再利用する").isTrue();
+        assertThat(b.isReused()).as("Bは同一論理runの成功runを再利用する").isTrue();
         long runId = a.getRun().getId();
         assertThat(b.getRun().getId()).isEqualTo(runId);
-        assertThat(countRunsForSchedule(id)).isEqualTo(1);
+        assertThat(countRunsForSchedule(takeover.scheduleId())).isEqualTo(1);
         assertThat(countRunsByKey(a.getRun().getRunKey())).isEqualTo(1);
         assertSingleDelivery(runId);
         verify(documentRegistrar, times(1)).registerArtifact(runId, "PDF");
-        verify(stallingDelivery, times(1)).deliverScheduled(eq(runId), any());
-        assertThat(workerB.events(ReportScheduleMetrics.Event.STALE_LEASE_TAKEOVER)).isEqualTo(1.0);
-        assertThat(workerB.events(ReportScheduleMetrics.Event.RUN_SUCCEEDED)).isEqualTo(1.0);
-        assertThat(workerA.events(ReportScheduleMetrics.Event.OWNERSHIP_LOST)).isEqualTo(1.0);
-        assertThat(workerA.events(ReportScheduleMetrics.Event.RUN_SUCCEEDED)).isZero();
-        List<String> messages = messages(logs);
-        assertThat(messages).anyMatch(message -> message.contains("期限切れprocessing leaseを引き継ぎました"));
-        assertThat(messages).anyMatch(message -> message.contains("success completionでclaim所有権を失いました"));
+        assertThat(takeover.workerB().events(ReportScheduleMetrics.Event.STALE_LEASE_TAKEOVER)).isEqualTo(1.0);
+        assertThat(takeover.workerB().events(ReportScheduleMetrics.Event.RUN_SUCCEEDED)).isEqualTo(1.0);
+        assertThat(takeover.workerA().events(ReportScheduleMetrics.Event.OWNERSHIP_LOST)).isEqualTo(1.0);
+        assertThat(takeover.workerA().events(ReportScheduleMetrics.Event.RUN_SUCCEEDED)).isZero();
+        assertThat(takeover.messages()).anyMatch(message -> message.contains("期限切れprocessing leaseを引き継ぎました"));
+        assertThat(takeover.messages()).anyMatch(message -> message.contains("success completionでclaim所有権を失いました"));
+    }
+
+    private record Takeover(long scheduleId, Harness workerA, Harness workerB, ReportGenerationResult resultA,
+                            ReportGenerationResult resultB, ReportGenerationCommand commandB, List<String> messages) {
     }
 
     @Test
@@ -471,9 +524,11 @@ class ReportScheduleDispatchPolicyMySqlTest {
         assertThat(messages(logs, Level.ERROR)).anyMatch(message ->
                 message.contains("errorCode=SCHEDULE_LEGACY_LEASE_DETECTED") && message.contains("legacyLeaseCount=1"));
 
-        // 2) drain確認済みでも、本instance起動後に取得されたlegacy lease（旧版schedulerが稼働中）があれば止める。
+        // 2) drain確認時刻（=起動時刻 00:40）を設定しても、それ以降に取得されたlegacy lease（旧版schedulerが稼働中）が
+        //    あれば止める。
         Harness confirmed = new Harness(afterExpiry, snapshot, delivery);
-        ReflectionTestUtils.setField(confirmed.scheduler, "legacyLeaseDrainConfirmed", true);
+        ReflectionTestUtils.setField(confirmed.scheduler, "legacyLeaseDrainConfirmedBefore",
+                afterExpiry.atZone(TOKYO).toOffsetDateTime().toString());
         long active = insertSchedule(SEPT);
         jdbcTemplate.update(lease, SEPT, SEPT, afterExpiry.plusMinutes(1), active);
         confirmed.clock.set(afterExpiry.plusMinutes(2));
@@ -521,17 +576,20 @@ class ReportScheduleDispatchPolicyMySqlTest {
     // helpers
     // =========================================================================
 
-    /** dispatchDue()用のscheduler。mapper/claim service/tenant runner/timezoneは実bean、metricはtest専用registry。 */
+    /**
+     * dispatchDue()用のscheduler。mapper/claim service/月次締め/tenant runner/timezoneは実bean、metricはtest専用registry。
+     * 月次締めは固定値にせず、{@code t_monthly_closing} の状態（{@link #closeTargetMonth()}）で決まる。
+     */
     private final class Harness {
         final MutableClock clock;
-        final MonthlyClosingService closingService = mock(MonthlyClosingService.class);
         final SimpleMeterRegistry registry = new SimpleMeterRegistry();
         final ManagementReportScheduler scheduler;
 
         Harness(LocalDateTime startAt, ReportSnapshotService snapshot, ReportDeliveryService delivery) {
             clock = new MutableClock(startAt.atZone(TOKYO).toInstant());
             scheduler = new ManagementReportScheduler(scheduleMapper, claimService, clock, snapshot, delivery,
-                    closingService, timezoneResolver, tenantAwareBatchRunner, recipientPreviewService, objectMapper);
+                    monthlyClosingService, timezoneResolver, tenantAwareBatchRunner, recipientPreviewService,
+                    objectMapper);
             ReflectionTestUtils.setField(scheduler, "scheduleMetrics", new ReportScheduleMetrics(registry));
         }
 
@@ -548,15 +606,38 @@ class ReportScheduleDispatchPolicyMySqlTest {
         }
     }
 
-    /** 実snapshot serviceへ委譲し、生成結果（新規/再利用）を記録する。 */
-    private ReportSnapshotService recording(AtomicReference<ReportGenerationResult> holder) {
+    /** 実snapshot serviceへ委譲し、生成要求（要求cutoff）と生成結果（新規/再利用・実cutoff）を記録する。 */
+    private ReportSnapshotService recording(AtomicReference<ReportGenerationResult> holder,
+                                            AtomicReference<ReportGenerationCommand> commandHolder) {
         ReportSnapshotService recording = mock(ReportSnapshotService.class);
         when(recording.generate(any())).thenAnswer(invocation -> {
-            ReportGenerationResult result = snapshotService.generate(invocation.getArgument(0));
+            ReportGenerationCommand command = invocation.getArgument(0);
+            commandHolder.set(command);
+            ReportGenerationResult result = snapshotService.generate(command);
             holder.set(result);
             return result;
         });
         return recording;
+    }
+
+    /** 実delivery serviceへ委譲し、呼出回数を検証できるようにする。 */
+    private ReportDeliveryService delegating(ReportDeliveryService real) {
+        ReportDeliveryService delegating = mock(ReportDeliveryService.class);
+        when(delegating.deliverScheduled(anyLong(), any())).thenAnswer(invocation ->
+                real.deliverScheduled(invocation.getArgument(0), invocation.getArgument(1)));
+        return delegating;
+    }
+
+    /** 対象月（2026-08）の月次締めを確定状態にする（confirm処理の前提検証は本testの対象外のため行を直接置く）。 */
+    private void closeTargetMonth() {
+        reopenTargetMonth();
+        jdbcTemplate.update("INSERT INTO t_monthly_closing (tenant_id, work_month, confirmed_by, confirmed_at, version) "
+                + "VALUES (?, ?, ?, CURRENT_TIMESTAMP, 0)", TENANT, TARGET.toString(), adminId);
+    }
+
+    private void reopenTargetMonth() {
+        jdbcTemplate.update("DELETE FROM t_monthly_closing WHERE tenant_id = ? AND work_month = ?",
+                TENANT, TARGET.toString());
     }
 
     /** schedulerと同じsystem主体・tenant境界で、実serviceの生成と配布を続けて呼ぶ。 */

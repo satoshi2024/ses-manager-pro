@@ -185,8 +185,9 @@ public class ReportScheduleServiceImpl implements ReportScheduleService {
                 .eq("tenant_id", tenantId).eq("id", scheduleId));
         if (refreshed == null) throw BusinessException.of(404, "error.managementReport.scheduleNotFound");
         if (enabled && ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE.equals(refreshed.getLastErrorCode())) {
-            log.info("[定期管理レポート] retry上限で自動停止したscheduleを管理者が有効化しました。連続失敗回数を0に戻し、"
-                            + "保持中のretryから再開します: scheduleId={} failureCount={} retryScheduledAt={}",
+            // 自動停止後の初回completion前は、手動のdisable→enableでも停止理由codeが残るため、断定しない文言にする。
+            log.info("[定期管理レポート] retry上限の停止理由が残るscheduleを管理者が有効化しました。自動停止中だった場合は"
+                            + "連続失敗回数を0に戻し、保持中のretryから再開します: scheduleId={} failureCount={} retryScheduledAt={}",
                     scheduleId, refreshed.getFailureCount(), refreshed.getRetryScheduledAt());
         }
         return refreshed;
