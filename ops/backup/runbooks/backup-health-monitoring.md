@@ -23,20 +23,24 @@
 
 ## 対応手順
 
+job の起動・状態確認は、障害対応中も `ops/backup/image/tool-image.sh compose` 経由で行う（docker compose を
+直接実行しない）。`run` / `up` は compose の pin（content ID）とローカルのツールイメージを照合してから起動する。
+照合に失敗した場合は image を読み込み直す（README「ツールイメージの build・配布」）。pin 照合を省いて起動しない。
+
 ### CRITICAL: checkpoint 30 分超 / RPO 不達
 
 1. `check-backup.sh --json` で reasons を確認。
-2. `docker compose ps` で checkpoint / binlog service の状態確認。
-3. checkpoint 停止中なら手動実行: `docker compose run --rm checkpoint`。
+2. `ops/backup/image/tool-image.sh compose ps` で checkpoint / binlog service の状態確認。
+3. checkpoint 停止中なら手動実行: `ops/backup/image/tool-image.sh compose run --rm checkpoint`。
 4. 復旧後、次の checkpoint が 15 分以内に VALID になることを確認。
 
 ### CRITICAL: archiver lag / heartbeat 停止
 
 1. `ls -la $BINLOG_RAW_DIR` で最新 file と source の差を確認。
-2. archiver 再起動: `docker compose up -d binlog`（state から再開、不完全 file は取り直し）。
+2. archiver 再起動: `ops/backup/image/tool-image.sh compose up -d binlog`（state から再開、不完全 file は取り直し）。
 3. 追従確認: `check-backup.sh --json` の binlog_event_lag_seconds が 0 に戻ること。
 4. lag が残る場合は snapshot-binlog を実行して index を更新:
-   `docker compose run --rm snapshot-binlog`。
+   `ops/backup/image/tool-image.sh compose run --rm snapshot-binlog`。
 
 ### CRITICAL: gap 検出
 

@@ -5,10 +5,18 @@
 # 全チェックが PASS した場合のみ READY_FOR_CUTOVER を返す。
 # 検証項目:
 #   1. plan 検証（tamper / EXPIRED）
-#   2. DB: Flyway / CHECK TABLE / critical counts / markers / 参照解決
+#   2. DB: Flyway（history table の存在を含む）/ CHECK TABLE / critical counts /
+#      主要 table の内容ハッシュ / markers / 参照解決
 #   3. uploads: inventory SHA（checkpoint metadata 照合）/ 参照存在 / orphan report
 #   4. read-only app smoke（APP_SMOKE_SCRIPT。scheduler/Flyway/mail/外部API/cleanup を
 #      recovery 用 profile で無効化した状態を前提とする）
+#
+# flyway_schema_history の存在と最新 version の照合は常に必須（G-15）。照合を省略する設定
+# （旧 FLYWAY_HISTORY_REQUIRED=0）は廃止した。環境に 1 以外の値で残っていれば、検証を始めずに失敗する。
+# report の checks.flyway_history_required は常に true で、cutover.sh / restore-drill.sh が照合する。
+#
+# CONTENT_HASH_TABLES（backup と同じ .env.backup の値）が設定されていれば、その全 table の内容ハッシュが
+# checkpoint に記録され、かつ一致することを要求する（記録が無い = NOT_RECORDED も FAIL）。
 #
 # usage: validate-restore.sh --plan <plan-id> [--uploads-dir DIR]
 # ============================================================
@@ -20,6 +28,7 @@ LIB_DIR="$SCRIPT_DIR/lib"
 [[ -d "$LIB_DIR" ]] || LIB_DIR=/usr/local/lib/ses-backup
 . "$LIB_DIR/common.sh"
 . "$LIB_DIR/plan.sh"
+. "$LIB_DIR/content-hash.sh"
 . "$LIB_DIR/validate-db.sh"
 . "$LIB_DIR/validate-uploads.sh"
 . "$LIB_DIR/mysql-options.sh"
@@ -53,6 +62,12 @@ main() {
     exit 18
   fi
   unset MYSQL_PWD 2>/dev/null || true
+
+  # W1-B1 r2（P2-1）: history の照合を省略する設定は廃止した。テストからの複写などで旧設定が
+  # 残っていても照合が省略されないよう、1 以外の値が設定されていれば READY にせず失敗させる。
+  if [[ -n "${FLYWAY_HISTORY_REQUIRED+set}" && "${FLYWAY_HISTORY_REQUIRED}" != 1 ]]; then
+    validate_db::fail "FLYWAY_HISTORY_REQUIRED は廃止しました（flyway_schema_history の照合は常に必須）。環境から削除してください（受信: ${FLYWAY_HISTORY_REQUIRED}）"
+  fi
 
   # R1 P1-05: 検証先への接続は VERIFY 系 TLS のみ許可（DISABLED/平文は拒否）
   case "${TARGET_TLS_MODE:-VERIFY_CA}" in
@@ -99,12 +114,16 @@ main() {
   local checks_json="{}"
   local ok=true
 
-  # DB 検証
+  # DB 検証（history table の存在は常に必須。G-15）
+  checks_json=$(printf '%s' "$checks_json" | jq -c '. + {flyway_history_required: true}')
   if validate_db::flyway "$flyway_expected"; then
     checks_json=$(printf '%s' "$checks_json" | jq -c '. + {flyway: "PASS"}')
   else
     ok=false
     checks_json=$(printf '%s' "$checks_json" | jq -c '. + {flyway: "FAIL"}')
+  fi
+  if [[ -n "$VALIDATE_DB_FLYWAY_LATEST" ]]; then
+    checks_json=$(printf '%s' "$checks_json" | jq -c --arg v "$VALIDATE_DB_FLYWAY_LATEST" '. + {flyway_latest: $v}')
   fi
 
   if validate_db::check_tables "${VALIDATE_TABLES:-}"; then
@@ -122,6 +141,50 @@ main() {
     ok=false
     checks_json=$(printf '%s' "$checks_json" | jq -c '. + {counts: "FAIL"}')
   fi
+
+  # 主要 table の順序付き内容ハッシュ（A-NF09-5）。記録があれば全 table 一致が必須。
+  # 記録の無い checkpoint は NOT_RECORDED として report に残す。ただし CONTENT_HASH_TABLES が設定されている
+  # （= production の .env.backup で内容ハッシュを取得する運用）場合は、記録が無いこと・指定 table の記録が
+  # 欠けていることを FAIL にする（index から content_hashes を消しても照合が省略されないように）。
+  local content_hashes_json content_hash_required=0 t missing="" required_csv=${CONTENT_HASH_TABLES:-}
+  local -a required_tables=()
+  if [[ -n "${required_csv//[[:space:],]/}" ]]; then
+    content_hash_required=1
+    IFS=',' read -ra required_tables <<< "$required_csv"
+  fi
+  if ! content_hashes_json=$(jq -c '.content_hashes // {}' "$ckpt_index" 2>/dev/null); then
+    content_hashes_json='"invalid"'
+  fi
+  if (( content_hash_required )); then
+    for t in "${required_tables[@]}"; do
+      t=${t//[[:space:]]/}
+      [[ -n "$t" ]] || continue
+      if ! printf '%s' "$content_hashes_json" | jq -e --arg t "$t" 'type == "object" and has($t)' > /dev/null 2>&1; then
+        missing+="${missing:+,}$t"
+      fi
+    done
+  fi
+  if [[ -n "$missing" ]]; then
+    validate_db::fail "CONTENT_HASH_TABLES の table の内容ハッシュが checkpoint に記録されていません: $missing" || true
+    ok=false
+    if [[ "$content_hashes_json" == "{}" ]]; then
+      checks_json=$(printf '%s' "$checks_json" | jq -c '. + {content_hash: "NOT_RECORDED", content_hash_required: true}')
+    else
+      checks_json=$(printf '%s' "$checks_json" | jq -c '. + {content_hash: "FAIL", content_hash_required: true}')
+    fi
+  elif [[ "$content_hashes_json" == "{}" ]]; then
+    checks_json=$(printf '%s' "$checks_json" | jq -c '. + {content_hash: "NOT_RECORDED"}')
+  elif validate_db::content_hashes "$content_hashes_json"; then
+    checks_json=$(printf '%s' "$checks_json" | jq -c '. + {content_hash: "PASS"}')
+  else
+    ok=false
+    checks_json=$(printf '%s' "$checks_json" | jq -c '. + {content_hash: "FAIL"}')
+  fi
+  # 記録が必須だったか（CONTENT_HASH_TABLES の設定有無）を report に残す
+  local content_hash_required_json=false
+  [[ "$content_hash_required" == 1 ]] && content_hash_required_json=true
+  checks_json=$(printf '%s' "$checks_json" | jq -c --argjson r "$content_hash_required_json" \
+    '. + {content_hash_required: $r}')
 
   if validate_db::markers "${VALIDATE_MARKERS_JSON:-}"; then
     checks_json=$(printf '%s' "$checks_json" | jq -c '. + {markers: "PASS"}')

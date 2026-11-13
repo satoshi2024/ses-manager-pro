@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # ============================================================
 # 復元 DB 検証（HFP-03-008 / RQ-007）
-# - Flyway: failed row 0、metadata の flyway_max_success と一致
+# - Flyway: history table の存在（常に必須）、failed row 0、metadata の flyway_max_success と一致
 # - CHECK TABLE（主要 table）
 # - 主要 table count と checkpoint metadata の照合
+# - 主要 table の順序付き内容ハッシュと checkpoint metadata の照合（lib/content-hash.sh）
 # - marker: before が存在、after が存在しない
 # - DB→uploads 参照の解決（storage_key / stored_name / *_path）
 # 検証は read-only のみ。対象は recovery target（staging）。
@@ -11,10 +12,17 @@
 
 validate_db::fail() { echo "validate-db: $*" >&2; return 1; }
 
-# Flyway 検証
+# 直近の validate_db::flyway が求めた最新 version（照合まで進まなかった場合は空）
+VALIDATE_DB_FLYWAY_LATEST=""
+
+# Flyway 検証（G-15）
+# flyway_schema_history を参照できなければ常に失敗する。history table の無い DB で Flyway 有効な
+# アプリを起動すると、baseline-on-migrate により「管理外の既存 schema」として baseline され、
+# 以降の migration が誤って再適用され得るため。照合を省略する設定は持たない（W1-B1 r2 で廃止）。
 validate_db::flyway() { # metadata_flyway
   local expected=$1
   local failed maxv versions rc=0
+  VALIDATE_DB_FLYWAY_LATEST=""
   failed=$("$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
     --execute "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 0;" 2>/dev/null)
   if [[ "$failed" == "0" || "$failed" == "" ]]; then
@@ -30,13 +38,21 @@ validate_db::flyway() { # metadata_flyway
   versions=$("$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
     --execute "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL;" 2>/dev/null) || rc=$?
   if (( rc != 0 )); then
-    # 取得自体の失敗（history table 無し・権限不足）は従来どおり照合しない。
-    return 0
+    validate_db::fail "flyway_schema_history を参照できません（復元 DB に history table が無い、または SELECT 権限がありません）。Flyway 有効なアプリを起動すると baseline-on-migrate で誤って baseline されるため cutover できません"
+    return 1
   fi
-  [[ -n "$expected" ]] || return 0
+  if [[ -z "$expected" ]]; then
+    validate_db::fail "checkpoint metadata に flyway_max_success がありません（復元後の最新 version を照合できません）"
+    return 1
+  fi
+  if [[ "$expected" == unknown ]]; then
+    validate_db::fail "checkpoint metadata の flyway_max_success が unknown です（backup 時に FLYWAY_VERSION が未設定）"
+    return 1
+  fi
   # 取得には成功したが成功 versioned 行が 0 件、または整列に失敗した場合は
   # actual=NULL として不一致にする（従来の MAX(version)=NULL と同じく fail-closed）。
   maxv=$(printf '%s\n' "$versions" | sed '/^$/d' | sort -V | tail -n 1) || maxv=""
+  VALIDATE_DB_FLYWAY_LATEST=$maxv
   if [[ -z "$maxv" ]]; then
     validate_db::fail "flyway 最新 version 不一致（expected=$expected actual=NULL）"
     return 1
@@ -46,6 +62,11 @@ validate_db::flyway() { # metadata_flyway
     return 1
   fi
   return 0
+}
+
+# 主要 table の順序付き内容ハッシュ照合（A-NF09-5。lib/content-hash.sh を先に source すること）
+validate_db::content_hashes() { # content_hashes_json
+  content_hash::verify "$1" "${TARGET_OPT_ARGS[@]}"
 }
 
 # CHECK TABLE

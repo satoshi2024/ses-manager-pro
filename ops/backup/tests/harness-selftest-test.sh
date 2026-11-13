@@ -20,6 +20,8 @@
 #     verify-like-ci.ps1 の -CustomPitrWorkDir（一時ディレクトリ外、PS 5.1 / PS 7・CRLF 形式の marker）、
 #     所有を失った WORK への chmod 禁止、固定名・project の事前確認で止まる run は退避しないこと、
 #     退避分の剪除方針（削除を表示・失敗診断と本 harness 以外のディレクトリは残す）、PID 再利用の扱い
+#   - 固定名の事前確認を WORK 判定より前に行うこと（P3-N1）、別の PID 名前空間の前回 run は終了記録が
+#     無ければ退避しないこと（P3-N2）、所有マーカーの排他作成（P3-S1）
 #   - timeout 不在・GNU 以外の timeout・container 一覧取得失敗・secret ファイル欠落などの欠落入力
 #
 # 実行方式: case 1〜3 は fresh な bash -c 子プロセスで実行する（source 済み関数は子 bash へ継承されないため、
@@ -52,6 +54,8 @@ RUNNER_DOCKER_LOG=""
 RUNNER_PATH=""
 RUNNER_UNDER_TEST=""
 RUNNER_SELF_PID_MARKER_DIR=""
+RUNNER_SELF_PID_MARKER_NS=""
+PLANT_WORK=""
 
 # 1) 依存未ロード（common.sh を source しない）で mysql_options::init が非 0 になる
 case_dependency_skip_is_nonzero() {
@@ -138,6 +142,8 @@ case_integration_foreign_work_preflight_is_read_only() {
 printf '%s\n' "$*" >> "$MOCK_DOCKER_LOG"
 case "$*" in
   info|"compose version") exit 0 ;;
+  # 固定名の事前確認（読み取り専用の docker ps）は WORK 判定より前に行われる。衝突なしとして応答する。
+  "ps -aq --filter "*) exit 0 ;;
   *) exit 91 ;;
 esac
 MOCK
@@ -189,6 +195,7 @@ MOCK
 #   許可ルートは既定で <temp>/allowed（TMPDIR/TMP/TEMP）。追加の VAR=value で上書きできる。
 #   RUNNER_SELF_PID_MARKER_DIR を設定すると、runner 自身の PID（exec で引き継ぐ）を run= に持つ
 #   所有マーカーをそのディレクトリへ書いてから起動する（PID 再利用＝旧 PID が自分自身の検証用）。
+#   RUNNER_SELF_PID_MARKER_NS を併せて設定すると、そのマーカーに pidns= 行を加える。
 runner_mock_run() {
   local temp=$1 scenario=$2 work=$3 runner=${RUNNER_UNDER_TEST:-$RUNNER}
   local -a work_env env_args
@@ -214,6 +221,9 @@ runner_mock_run() {
       # この subshell の PID は exec 後の env → bash（runner）にそのまま引き継がれる
       printf 'run=1700000000-%s-1\nwork=%s\nproject=selftest\n' "$BASHPID" "$RUNNER_SELF_PID_MARKER_DIR" \
         > "$RUNNER_SELF_PID_MARKER_DIR/.ses-pitr-run-owner"
+      if [[ -n "${RUNNER_SELF_PID_MARKER_NS:-}" ]]; then
+        printf 'pidns=%s\n' "$RUNNER_SELF_PID_MARKER_NS" >> "$RUNNER_SELF_PID_MARKER_DIR/.ses-pitr-run-owner"
+      fi
       printf '%s\n' "$BASHPID" > "$temp/self-pid"
       exec env "${env_args[@]}" bash "$runner"
     ) > "$temp/out" 2>&1
@@ -292,6 +302,19 @@ marker_run_id() { # <dir> → stdout: 所有マーカーの run=
   sed -n 's/^run=//p' "$1/.ses-pitr-run-owner" 2>/dev/null
 }
 
+marker_pidns() { # <dir> → stdout: 所有マーカーの pidns=
+  sed -n 's/^pidns=//p' "$1/.ses-pitr-run-owner" 2>/dev/null
+}
+
+# runner 自身が所有マーカーへ書く pidns=（この環境の PID 名前空間の識別子）を、temp モードの実 run から得る。
+runner_runtime_ns() { # <temp> → stdout: pidns=
+  local temp=$1 probe="$1/allowed/ns-probe-$RANDOM" saved_runner=${RUNNER_UNDER_TEST:-}
+  RUNNER_UNDER_TEST=""
+  runner_mock_run "$temp" up-fail "$probe"
+  RUNNER_UNDER_TEST=$saved_runner
+  marker_pidns "$probe"
+}
+
 # 6) 失敗証跡フローの静的契約（挙動は以降の mock シナリオで検証する）。
 case_integration_failure_capture_contract() {
   local runner
@@ -324,6 +347,12 @@ case_integration_failure_capture_contract() {
   assert_contains "$runner" 'WORK_PLAN_EXISTED' "判定時に WORK が存在したかを記録して準備時の排他作成に使う"
   assert_before "$(first_line_no "$RUNNER" 'if ! check_fixed_container_names; then')" \
     "$(first_line_no "$RUNNER" 'if ! prepare_work_dir; then')" "固定名の事前確認をWORKの作成・退避より前に行う"
+  assert_before "$(first_line_no "$RUNNER" 'if ! check_fixed_container_names; then')" \
+    "$(first_line_no "$RUNNER" 'if ! validate_work_path; then')" "固定名の事前確認をWORKの判定（前回runの生存判定）より前に行う（P3-N1）"
+  assert_contains "$runner" 'set -o noclobber' "所有マーカーと合成secretはnoclobber（O_EXCL）で排他作成する（P3-S1）"
+  assert_not_contains "$runner" '> "$WORK/.ses-pitr-run-owner"' "所有マーカーを追従・上書きするリダイレクトで書かない（P3-S1）"
+  assert_contains "$runner" 'pidns=%s' "所有マーカーにPID名前空間の識別子を記録する（P3-N2）"
+  assert_contains "$runner" '.ses-pitr-run-ended' "終了処理の最後に終了記録を残す（P3-N2）"
 }
 
 # ------------------------------------------------------------
@@ -1167,17 +1196,26 @@ case_integration_default_work_preflight_and_prune_policy() {
 
 # 30) 前回 run の PID が本 runner 自身の PID と一致する（PID 再利用）場合は終了済みとして退避する。
 case_integration_default_work_pid_reuse_is_not_alive() {
-  local temp tests_dir default self_pid new_run
+  local temp tests_dir default self_pid new_run ns
   temp=$(mktemp -d)
   runner_mock_init "$temp"
+  # 旧マーカーは本 run と同じ PID 名前空間で書かれたものとする（kill -0 による判定の対象）
+  ns=$(runner_runtime_ns "$temp")
+  if [[ -n "$ns" && "$ns" != unknown ]]; then
+    test_assert "この環境のPID名前空間を識別できる（前提）"
+  else
+    test_fail "この環境のPID名前空間を識別できる（前提）" "pidns=[$ns]"
+  fi
   tests_dir=$(setup_copied_runner "$temp" repo)
   default="$tests_dir/.integration-work"
   RUNNER_UNDER_TEST="$tests_dir/run-integration.sh"
   mkdir -p "$default"
   printf 'previous evidence\n' > "$default/previous.txt"
   RUNNER_SELF_PID_MARKER_DIR="$default"
+  RUNNER_SELF_PID_MARKER_NS="$ns"
   runner_mock_run "$temp" up-fail "-"
   RUNNER_SELF_PID_MARKER_DIR=""
+  RUNNER_SELF_PID_MARKER_NS=""
   self_pid=$(cat "$temp/self-pid" 2>/dev/null)
   new_run=$(marker_run_id "$default")
   new_run=${new_run#*-}
@@ -1191,9 +1229,15 @@ case_integration_default_work_pid_reuse_is_not_alive() {
 
 # 27) 既定 WORK の所有マーカーが無い・一致しない・前回 run が生存中なら退避せず fail-closed（日本語の復旧手順を表示）。
 case_integration_default_work_marker_mismatch_rejected() {
-  local temp repo tests_dir default
+  local temp repo tests_dir default ns
   temp=$(mktemp -d)
   runner_mock_init "$temp"
+  ns=$(runner_runtime_ns "$temp")
+  if [[ -n "$ns" && "$ns" != unknown ]]; then
+    test_assert "この環境のPID名前空間を識別できる（前提: case 27）"
+  else
+    test_fail "この環境のPID名前空間を識別できる（前提: case 27）" "pidns=[$ns]"
+  fi
   repo="$temp/repo"
   tests_dir="$repo/ops/backup/tests"
   default="$tests_dir/.integration-work"
@@ -1211,9 +1255,15 @@ case_integration_default_work_marker_mismatch_rejected() {
   expect_work_rejected "$temp" "-" "所有マーカー .ses-pitr-run-owner がありません" "所有マーカー無し（73aa時代の残り）"
   assert_contains "$(cat "$default/legacy-evidence.txt" 2>/dev/null)" "keep me" "マーカー無し時は既存内容を変更しない"
 
-  printf 'run=1700000000-%s-1\nwork=%s\n' "$$" "$default" > "$default/.ses-pitr-run-owner"
+  # 同じ PID 名前空間で書かれ、終了記録の無い前回 run の PID（この selftest 自身）が生存している
+  printf 'run=1700000000-%s-1\nwork=%s\npidns=%s\n' "$$" "$default" "$ns" > "$default/.ses-pitr-run-owner"
   expect_work_rejected "$temp" "-" "実行中の可能性があります" "前回runのPIDが生存"
   assert_contains "$(cat "$default/legacy-evidence.txt" 2>/dev/null)" "keep me" "前回run生存時は退避しない"
+
+  # pidns= の無い旧形式のマーカー（終了記録も無い）は、どの PID 名前空間の run か分からないため判定不能
+  printf 'run=1700000000-%s-1\nwork=%s\n' "$$" "$default" > "$default/.ses-pitr-run-owner"
+  expect_work_rejected "$temp" "-" "生存を確認できません" "pidns=の無い旧形式マーカー"
+  assert_contains "$(cat "$default/legacy-evidence.txt" 2>/dev/null)" "keep me" "旧形式マーカーでは退避しない"
   if compgen -G "$tests_dir/.integration-work.prev-*" > /dev/null; then
     test_fail "拒否時は退避ディレクトリを作らない" "退避ディレクトリが存在します"
   else
@@ -1303,7 +1353,7 @@ case_integration_controller_workdir_outside_temp() {
   rm -rf "$temp"
 }
 
-# 31) 判定後・準備前（固定名の事前確認中）に第三者が作成した作業ディレクトリは引き継がない
+# 31) 判定後・準備前（project の事前確認中）に第三者が作成した作業ディレクトリは引き継がない
 #     （temp モード、および判定時に存在しなかった既定 WORK は本プロセスの排他 mkdir だけを許す）。
 case_integration_work_created_during_preflight_is_rejected() {
   local temp work tests_dir default
@@ -1312,7 +1362,7 @@ case_integration_work_created_during_preflight_is_rejected() {
 
   work="$temp/allowed/work-raced"
   runner_mock_run "$temp" race-mkdir "$work"
-  assert_contains "$(cat "$temp/state/raced-dirs" 2>/dev/null)" "$work" "固定名の事前確認中に第三者がtemp WORKを作成した（前提）"
+  assert_contains "$(cat "$temp/state/raced-dirs" 2>/dev/null)" "$work" "project の事前確認中に第三者がtemp WORKを作成した（前提）"
   assert_eq 1 "$RUNNER_RC" "事前確認中に作られたtemp WORKを拒否"
   assert_contains "$RUNNER_OUT" "排他的に作成できません" "temp WORKを排他作成できない理由を通知"
   assert_eq "" "$(ls -A "$work" 2>/dev/null)" "他者が作成したtemp WORKへ所有マーカー等を書かない"
@@ -1354,6 +1404,135 @@ MOCK
   rm -rf "$temp"
 }
 
+# 33) 固定名の事前確認は WORK の判定（前回 run の生存判定を含む）より前に行う（P3-N1）。他の run の
+#     コンテナが残っていれば、既定 WORK の状態にかかわらず固定名衝突として止め、WORK は変更しない。
+case_integration_fixed_name_checked_before_work_judgement() {
+  local temp tests_dir default first_cmd
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  tests_dir=$(setup_copied_runner "$temp" repo)
+  default="$tests_dir/.integration-work"
+  RUNNER_UNDER_TEST="$tests_dir/run-integration.sh"
+  mkdir -p "$default"
+  printf 'keep me\n' > "$default/previous.txt"
+  # 生存中の前回 run（この selftest 自身の PID）を示す旧形式マーカー。WORK の判定が先なら判定で止まる。
+  printf 'run=1700000000-%s-1\nwork=%s\n' "$$" "$default" > "$default/.ses-pitr-run-owner"
+  runner_mock_run "$temp" fixed-name-occupied "-"
+  RUNNER_UNDER_TEST=""
+  first_cmd=$(grep -v -x -e info -e 'compose version' "$temp/docker.log" 2>/dev/null | head -n 1)
+  assert_eq 1 "$RUNNER_RC" "固定名衝突のrunは1"
+  assert_contains "$RUNNER_OUT" "fixed container name is occupied" "WORKの状態より先に固定名衝突を通知"
+  assert_not_contains "$RUNNER_OUT" "既定の作業ディレクトリを自動退避できません" "固定名衝突時はWORKの判定まで進まない"
+  assert_contains "$first_cmd" 'ps -aq --filter name=^/ses-bkup-int-source$' "Docker前提確認の直後（WORK判定より前）に固定名を確認する"
+  assert_contains "$(cat "$default/previous.txt" 2>/dev/null)" "keep me" "固定名衝突時は既定WORKを変更しない"
+  assert_not_contains "$RUNNER_DOCKER_LOG" "compose -f" "固定名衝突時はCompose projectを操作しない"
+  assert_no_file "$temp/chmod.log" "固定名衝突時はchmodしない"
+  if compgen -G "$tests_dir/.integration-work.prev-*" > /dev/null; then
+    test_fail "固定名衝突時は退避ディレクトリを作らない" "退避ディレクトリが存在します"
+  else
+    test_assert "固定名衝突時は退避ディレクトリを作らない"
+  fi
+  rm -rf "$temp"
+}
+
+# 34) 終了記録の無い前回 run が別の PID 名前空間（コンテナ・WSL・別の MSYS 等）で作られていれば、kill -0 が
+#     失敗しても生存を判定できないため退避しない（P3-N2）。終了記録があれば名前空間に関係なく退避する。
+case_integration_default_work_foreign_namespace_requires_end_record() {
+  local temp tests_dir default dead_pid old_run
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  tests_dir=$(setup_copied_runner "$temp" repo)
+  default="$tests_dir/.integration-work"
+  RUNNER_UNDER_TEST="$tests_dir/run-integration.sh"
+  ( exit 0 ) &
+  dead_pid=$!
+  wait "$dead_pid" 2>/dev/null
+  if kill -0 "$dead_pid" 2>/dev/null; then
+    test_fail "この名前空間では終了済みのPIDを用意できた（前提）" "pid=$dead_pid が生存しています"
+  else
+    test_assert "この名前空間では終了済みのPIDを用意できた（前提）"
+  fi
+  old_run="1700000000-$dead_pid-1"
+  mkdir -p "$default"
+  printf 'previous evidence\n' > "$default/previous.txt"
+  printf 'run=%s\nwork=%s\nproject=selftest\npidns=%s\n' "$old_run" "$default" 'linux:selftest-foreign-boot:pid:[1]' \
+    > "$default/.ses-pitr-run-owner"
+  expect_work_rejected "$temp" "-" "生存を確認できません" "別PID名前空間で作られ終了記録の無い前回run"
+  assert_contains "$(cat "$default/previous.txt" 2>/dev/null)" "previous evidence" "判定できない前回runの既定WORKを変更しない"
+  assert_no_file "$tests_dir/.integration-work.prev-$old_run" "判定できない前回runの既定WORKを退避しない"
+
+  printf 'run=%s\n' "$old_run" > "$default/.ses-pitr-run-ended"
+  runner_mock_run "$temp" up-fail "-"
+  RUNNER_UNDER_TEST=""
+  assert_contains "$RUNNER_OUT" "前回の既定作業ディレクトリを退避しました" "終了記録があれば別PID名前空間の前回runも退避する"
+  assert_file "$tests_dir/.integration-work.prev-$old_run/previous.txt" "前回の内容を退避先に保全"
+  assert_file "$default/.ses-pitr-run-ended" "本runも終了処理の最後に終了記録を残す"
+  assert_eq "run=$(marker_run_id "$default")" "$(cat "$default/.ses-pitr-run-ended" 2>/dev/null)" "終了記録のrun=は本runの所有マーカーと一致"
+  rm -rf "$temp"
+}
+
+# 35) 所有マーカーは排他作成する（P3-S1）。既存ディレクトリを引き継ぐ場合（controller）に、準備段階の
+#     空確認の後で .ses-pitr-run-owner の名前へ symlink が置かれても、追従して書かずに拒否する。
+#     W1-B1 r2: write_exclusive_file の事前確認は「通常ファイル以外」だけを拒否するため、通常ファイルを指す
+#     symlink と宛先の無い symlink は noclobber（O_EXCL）そのものが拒否する。set -o noclobber を外すと
+#     (a) では victim が上書きされ、(b) では宛先のファイルが作られてこの case が失敗する。
+run_owner_marker_plant_case() { # <temp> <name> <plant_target> → RUNNER_* と PLANT_WORK を設定
+  local temp=$1 name=$2 target=$3 parent
+  parent="$temp/allowed/ses-pitr-run-$name"
+  PLANT_WORK="$parent/integration-work"
+  mkdir -p "$PLANT_WORK"
+  write_controller_marker "$parent" "$PLANT_WORK" "$parent"
+  RUNNER_PATH="$temp/plant-bin:$temp/bin:$PATH"
+  runner_mock_run "$temp" up-fail "$PLANT_WORK" MOCK_REAL_FIND="$(command -v find)" MOCK_PLANT_WORK="$PLANT_WORK" \
+    MOCK_PLANT_COUNT="$temp/plant-count-$name" MOCK_PLANT_TARGET="$target"
+  RUNNER_PATH=""
+  if [[ -L "$PLANT_WORK/.ses-pitr-run-owner" ]]; then
+    test_assert "準備段階の空確認の後に所有マーカー名へsymlinkが置かれた（前提: $name）"
+  else
+    test_fail "準備段階の空確認の後に所有マーカー名へsymlinkが置かれた（前提: $name）" "symlink がありません"
+  fi
+  assert_eq 1 "$RUNNER_RC" "所有マーカーを排他作成できなければ1（$name）"
+  assert_contains "$RUNNER_OUT" "所有マーカー（.ses-pitr-run-owner）を排他的に作成できません" "排他作成できない理由を通知（$name）"
+  assert_no_file "$PLANT_WORK/src-password" "所有できないWORKへ合成secretを書かない（$name）"
+  assert_no_file "$temp/chmod.log" "所有できないWORKへchmodしない（$name）"
+  assert_not_contains "$RUNNER_DOCKER_LOG" "up -d --build" "所有マーカーを作れなければcompose upしない（$name）"
+}
+
+case_integration_owner_marker_exclusive_create() {
+  local temp victim dangling
+  temp=$(mktemp -d)
+  runner_mock_init "$temp"
+  mkdir -p "$temp/plant-bin"
+  cat > "$temp/plant-bin/find" <<'MOCK'
+#!/usr/bin/env bash
+# 同じ WORK に対する 2 回目の find（準備段階の空確認）の直後に、所有マーカー名へ symlink を置く第三者を再現する
+out=$("$MOCK_REAL_FIND" "$@")
+rc=$?
+if [[ "${1:-}" == "$MOCK_PLANT_WORK" ]]; then
+  n=$(( $(cat "$MOCK_PLANT_COUNT" 2>/dev/null || echo 0) + 1 ))
+  printf '%s\n' "$n" > "$MOCK_PLANT_COUNT"
+  if (( n == 2 )); then
+    ln -s "$MOCK_PLANT_TARGET" "$MOCK_PLANT_WORK/.ses-pitr-run-owner"
+  fi
+fi
+if [[ -n "$out" ]]; then printf '%s\n' "$out"; fi
+exit "$rc"
+MOCK
+  "$REAL_CHMOD" +x "$temp/plant-bin/find"
+
+  # (a) 既存の通常ファイルを指す symlink: noclobber は宛先が通常ファイルなら開かない
+  victim="$temp/victim.txt"
+  printf 'victim original\n' > "$victim"
+  run_owner_marker_plant_case "$temp" s1-regular "$victim"
+  assert_eq "victim original" "$(cat "$victim" 2>/dev/null)" "symlink先のファイルを上書きしない"
+
+  # (b) 宛先の無い symlink: noclobber は O_CREAT|O_EXCL で開くため、symlink を辿って宛先を作らない
+  dangling="$temp/dangling-target.txt"
+  run_owner_marker_plant_case "$temp" s1-dangling "$dangling"
+  assert_no_file "$dangling" "宛先の無いsymlinkを辿ってファイルを作らない（O_EXCL）"
+  rm -rf "$temp"
+}
+
 run_case case_dependency_skip_is_nonzero
 run_case case_setup_error_is_nonzero
 run_case case_failing_backup_command_is_nonzero
@@ -1386,5 +1565,8 @@ run_case case_integration_default_work_preflight_and_prune_policy
 run_case case_integration_default_work_pid_reuse_is_not_alive
 run_case case_integration_work_created_during_preflight_is_rejected
 run_case case_integration_runner_blocks_without_coreutils_mv
+run_case case_integration_fixed_name_checked_before_work_judgement
+run_case case_integration_default_work_foreign_namespace_requires_end_record
+run_case case_integration_owner_marker_exclusive_create
 
 test_summary "ACC-OPS-P2 harness self-tests"

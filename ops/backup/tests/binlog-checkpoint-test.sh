@@ -36,7 +36,8 @@ setup_common() {
   export FAKE_GET_LOCK_HOLD=1
   # 前 case の fake 制御 env が漏れないようにする
   unset FAKE_BINLOG_VERIFY_RC FAKE_ARCHIVE_RC FAKE_FLUSH_RC FAKE_GET_LOCK FAKE_RELEASE_LOCK \
-    FAKE_DUMP_FILE FULL_COORDINATE_FILE BINLOG_SERVER_ID FAKE_RESTIC_BACKUP_RC
+    FAKE_DUMP_FILE FULL_COORDINATE_FILE BINLOG_SERVER_ID FAKE_RESTIC_BACKUP_RC \
+    CONTENT_HASH_TABLES FAKE_CONTENT_ROWS FAKE_CONTENT_RC
   unset MYSQL_PWD
 }
 
@@ -284,6 +285,38 @@ case_checkpoint_normal() {
   kill "$FIX_PID" 2>/dev/null || true
 }
 
+# A-NF09-5: checkpoint も静止区間内（closed coordinate 時点）に主要 table の内容ハッシュを記録し、
+# 計算できなければ VALID にしない。
+case_checkpoint_records_content_hash() {
+  setup_checkpoint_env
+  head -c 210 /dev/zero | tr '\0' 'a' > "$BINLOG_RAW_DIR/binlog.000002"
+  export CONTENT_HASH_TABLES=marker_test
+  export FAKE_CONTENT_ROWS='1\tmarker-before-checkpoint\n'
+  local out="" code expected idx
+  out=$("$CHECKPOINT" 2>&1)
+  code=$?
+  assert_zero "$code" "内容ハッシュ付き checkpoint 成功"
+  expected=$(printf '%b' "$FAKE_CONTENT_ROWS" | sha256sum | awk '{print $1}')
+  idx=$(ls "$BACKUP_WORK_DIR"/index/checkpoint-*.json 2>/dev/null | head -n 1)
+  assert_eq "$expected" "$(jq -r '.content_hashes.marker_test.sha256 // empty' "$idx" 2>/dev/null)" "checkpoint index に内容ハッシュを記録"
+  kill "$FIX_PID" 2>/dev/null || true
+
+  setup_checkpoint_env
+  head -c 210 /dev/zero | tr '\0' 'a' > "$BINLOG_RAW_DIR/binlog.000002"
+  export CONTENT_HASH_TABLES=marker_test FAKE_CONTENT_RC=1
+  out=$("$CHECKPOINT" 2>&1)
+  code=$?
+  assert_nonzero "$code" "内容ハッシュを計算できなければ checkpoint は非 0"
+  assert_contains "$out" "内容ハッシュを計算できません" "原因を通知"
+  if compgen -G "$BACKUP_WORK_DIR/index/checkpoint-*.json" > /dev/null; then
+    test_fail "内容ハッシュ失敗時は checkpoint を index 登録しない" "index が登録されています"
+  else
+    test_assert "内容ハッシュ失敗時は checkpoint を index 登録しない"
+  fi
+  unset CONTENT_HASH_TABLES FAKE_CONTENT_ROWS FAKE_CONTENT_RC
+  kill "$FIX_PID" 2>/dev/null || true
+}
+
 case_checkpoint_truncated_reject() {
   setup_checkpoint_env
   printf 'short\n' > "$BINLOG_RAW_DIR/binlog.000002"
@@ -337,6 +370,7 @@ run_case case_snapshot_binlog_checksum_fail
 run_case case_snapshot_restic_fail_keeps_raw
 run_case case_continuity_gap
 run_case case_checkpoint_normal
+run_case case_checkpoint_records_content_hash
 run_case case_checkpoint_truncated_reject
 run_case case_checkpoint_checksum_reject
 run_case case_checkpoint_rotation_twice
