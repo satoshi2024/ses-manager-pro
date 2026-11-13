@@ -663,6 +663,8 @@ CREATE TABLE sys_user (
   status        TINYINT DEFAULT 1,
   failed_count  INT DEFAULT 0,
   locked_until  DATETIME,
+  -- V186: 初回ログイン時のパスワード変更要求
+  password_change_required TINYINT NOT NULL DEFAULT 0,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_flag  TINYINT DEFAULT 0

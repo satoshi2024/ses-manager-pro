@@ -145,8 +145,10 @@ V185がrootにより割り当てられた場合、latest version=184を期待す
 ### 10.1 リリース前提
 
 - **rolling deploymentは禁止**。V185適用の前後を問わず、新旧versionのschedulerを同時に稼働させない。
-- Flywayは新artifactの最初の起動時にV185を自動適用する（`spring.flyway.enabled` 既定true）。V185適用と新artifact起動は分離できないため、**旧nodeのschedulerをすべて停止し、in-flight処理のdrain完了を確認してから**新artifactだけを起動する。
-- 新artifactへの切替後に旧artifactへ戻す場合も同じ（新nodeを全停止・drainしてから旧artifactを起動する）。
+- ~~Flywayは新artifactの最初の起動時にV185を自動適用する（`spring.flyway.enabled` 既定true）。V185適用と新artifact起動は分離できない~~
+  - **2026-11-13訂正（配備決定P-3・配備バッチD1）**: prodは `spring.flyway.enabled=false` で起動時にmigrateせず、V185を含むmigrationは**全停止中に専用Flyway job**（`mvn -Pprod-migrate`、設定は `ops/flyway/flyway-prod.conf`）だけが適用する。誤って有効化しても起動時migrateは拒否され、適用漏れ・失敗行があればアプリは起動時schema guardで起動を止める。手順の正本は `.kiro/specs/production-launch/deploy-runbook.md`。
+- **旧nodeのschedulerをすべて停止し、in-flight処理のdrain完了を確認してから**jobでmigrationを適用し、その後に新artifactだけを起動する。
+- 新artifactへの切替後に旧artifactへ戻す場合も同じ（新nodeを全停止・drainしてから旧artifactを起動する）。DBを戻さずに旧artifactだけを起動することはできない（起動時schema guardが「artifactに無いmigrationが適用済み」として止める）ため、戻す場合はbackupからDBも戻す。
 - 起動guard（drain未確認やtoken無しの新しいleaseが残る状態でschedulerを起動しない等）は未実装。要否はSRE/Owner判断。
   - **2026-11-13改訂**: ユーザー決定（B-NF10-1）により初回本番は全停止＋専用Flyway job（rolling無し）とし、起動guardを誤操作防止として実装した（§14.1、テスト未実行）。token無しleaseが1件でもあれば全tenantのclaimを止める。本節の手順草案とSRE/DBA承認待ちの扱いは変えない。
 
@@ -155,8 +157,8 @@ V185がrootにより割り当てられた場合、latest version=184を期待す
 1. 全nodeでschedulerを停止する（`app.scheduling.enabled=false` で再起動、またはinstance停止）。
 2. drainを確認する: §10.3のQ1で実行中lease（`processing_claimed_at` 非NULL）が0件、またはすべてがlease期限（30分）を超過していること。0件にならない場合は期限まで待ち、手動でclearしない。
 3. backupを取得する（full dumpまたはPITR基準点）。
-4. 新artifactだけを起動する（V185適用）。`flyway_schema_history` でversion 185の `success = 1` を確認する。
-5. 新artifactのschedulerを有効化する。
+4. 全instanceの停止を確認してから専用Flyway jobでmigrationを適用し（2026-11-13訂正: アプリ起動時には適用しない）、`flyway_schema_history` でversion 185（本releaseの最新versionまで）の `success = 1` と失敗行0件を確認する。その後、新artifactだけを `app.scheduling.enabled=false` で起動する（起動時schema guardの成功logを確認する）。詳細は `deploy-runbook.md` §2〜§4。
+5. 新artifactのschedulerを有効化する（`app.scheduling.enabled=true` で再起動）。
 6. 事後確認としてQ2（孤児token）・Q3（token無しlease）を確認し、Q2は次回due/retryで自動回収されることを件数推移で確認する。
 
 ### 10.3 検出SQL（read-onlyのSELECTのみ）

@@ -13,8 +13,13 @@ server:
         same-site: lax
 
 spring:
-  # prod専用マイグレーション(admin初期パスワードのBCrypt化)を追加ロケーションとして適用
+  # 配備決定P-3: 本番のmigrationは全停止中に専用Flyway job（mvn -Pprod-migrate、設定は
+  # ops/flyway/flyway-prod.conf）だけが実行し、アプリinstanceは起動時にmigrateしない。
+  # enabled=true にしても ProductionSchemaGuardConfiguration がmigrateを拒否して起動を止める。
+  # locations は起動時schema guard（ProductionSchemaVersionGuard）がartifactのmigrationを解決する範囲で、
+  # jobのflyway.locationsと同じ値に固定する（ProductionFlywayJobConfigurationTestが一致を確認する）。
   flyway:
+    enabled: false
     locations: classpath:db/migration,classpath:db/migration-prod
 
 # 実プロバイダ実装は未配線のため、prod は明示設定なしで fail-closed provider を使う。

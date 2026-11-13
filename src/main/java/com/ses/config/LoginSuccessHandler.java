@@ -57,6 +57,12 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
         // 遷移先はrequestごとのlocal変数で決める。setDefaultTargetUrl等はこのhandler
         // （singleton）のフィールドを書き換えるため、同時loginで遷移先が混ざる。
         String targetUrl = "/";
+        // 初回パスワード変更（配備時の初期admin）。local password loginだけが対象で、MFAがあればMFAを先に完了させる。
+        if (authentication instanceof UsernamePasswordAuthenticationToken && isPasswordChangeRequired(authentication)) {
+            request.getSession(true).setAttribute(
+                    PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE, Boolean.TRUE);
+            targetUrl = PasswordChangeEnforcementFilter.CHANGE_PAGE;
+        }
         if (authentication instanceof UsernamePasswordAuthenticationToken && mfaService.isRequired(authentication)) {
             jakarta.servlet.http.HttpSession session = request.getSession(true);
             session.setAttribute(MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE, Boolean.TRUE);
@@ -70,6 +76,13 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
         }
         clearAuthenticationAttributes(request);
         getRedirectStrategy().sendRedirect(request, response, targetUrl);
+    }
+
+    /** 認証時に読み込んだ {@code sys_user.password_change_required} が1か（DBを再読込しない）。 */
+    private static boolean isPasswordChangeRequired(Authentication authentication) {
+        return authentication.getPrincipal() instanceof LoginUser loginUser
+                && loginUser.getSysUser() != null
+                && Integer.valueOf(1).equals(loginUser.getSysUser().getPasswordChangeRequired());
     }
 
     private void rejectBreakGlass(HttpServletRequest request, String message) throws ServletException {
