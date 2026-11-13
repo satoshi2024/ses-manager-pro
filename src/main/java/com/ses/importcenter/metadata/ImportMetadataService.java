@@ -175,7 +175,14 @@ public class ImportMetadataService {
         return source;
     }
 
-    /** hashとserver scopeが一致する既存jobだけを再利用し、exact document ACLを再確認する。 */
+    /**
+     * hashとserver scopeが一致する既存jobだけを再利用し、exact document ACLを再確認する。
+     *
+     * <p>同一identityのjobが別法人に属する場合は、他の不一致より先に判定して
+     * {@link ImportIdentityOwnedByOtherLegalEntityException}を投げる。別法人のjobのsource version・encoding等で
+     * 応答が変わらないようにするためで、呼出元はこれを汎用403へ変換する（内容存在のoracleにしない）。
+     * 同一法人内の条件不一致（encoding・source version・document hash）は従来どおり409とする。
+     */
     public ImportUploadJobDetail findOrReuseExistingUpload(ImportUploadSource source, ImportEncoding encoding,
                                                             String sourceSha256) {
         ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
@@ -195,8 +202,10 @@ public class ImportMetadataService {
                 rs.getBytes("document_sha256"), rs.getString("state")) : null,
                 context.tenantId(), source.id(), SesImportV1Schema.VERSION, hash);
         if (existing == null) return null;
+        if (!Long.toString(context.legalEntityId()).equals(existing.legalEntityId())) {
+            throw new ImportIdentityOwnedByOtherLegalEntityException();
+        }
         if (existing.sourceVersion() != source.version() || !encoding.name().equals(existing.encoding())
-                || !Long.toString(context.legalEntityId()).equals(existing.legalEntityId())
                 || !MessageDigest.isEqual(hash, existing.documentSha256())) {
             throw BusinessException.of(409, "error.import.jobIdentityConflict");
         }

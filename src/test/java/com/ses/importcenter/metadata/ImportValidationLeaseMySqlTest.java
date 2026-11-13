@@ -19,6 +19,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.HexFormat;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -168,7 +169,7 @@ class ImportValidationLeaseMySqlTest {
             blocker.setAutoCommit(false);
             lockSource(blocker);
             long blockerId = connectionId(statement);
-            String lockData = sourcePrimaryLockData(blockerId);
+            InnoDbRecordLockWaits.PointLock lockData = sourcePrimaryLockData(blockerId);
             Future<Integer> firstFuture = reverse
                     ? pool.submit(() -> acquireAtBarrier(secondService, second, firstReady, firstStart))
                     : pool.submit(() -> acquireAtBarrier(firstService, first, firstReady, firstStart));
@@ -225,7 +226,7 @@ class ImportValidationLeaseMySqlTest {
             blocker.setAutoCommit(false);
             lockSource(blocker);
             long blockerId = connectionId(statement);
-            String lockData = sourcePrimaryLockData(blockerId);
+            InnoDbRecordLockWaits.PointLock lockData = sourcePrimaryLockData(blockerId);
             Future<ImportValidationLeaseService.LeaseGrant> renewed = pool.submit(() -> {
                 ready.countDown();
                 if (!start.await(5, TimeUnit.SECONDS)) throw new AssertionError("renew barrier timeout");
@@ -260,7 +261,7 @@ class ImportValidationLeaseMySqlTest {
             blocker.setAutoCommit(false);
             lockSource(blocker);
             long blockerId = connectionId(statement);
-            String lockData = sourcePrimaryLockData(blockerId);
+            InnoDbRecordLockWaits.PointLock lockData = sourcePrimaryLockData(blockerId);
             Future<ImportValidationLeaseService.LeaseGrant> result = takeoverPool.submit(() -> {
                 takeoverReady.countDown();
                 if (!takeoverStart.await(5, TimeUnit.SECONDS)) throw new AssertionError("takeover barrier timeout");
@@ -298,7 +299,7 @@ class ImportValidationLeaseMySqlTest {
             blocker.setAutoCommit(false);
             lockSource(blocker);
             long blockerId = connectionId(statement);
-            String lockData = sourcePrimaryLockData(blockerId);
+            InnoDbRecordLockWaits.PointLock lockData = sourcePrimaryLockData(blockerId);
             Future<Integer> result = pool.submit(() -> {
                 ready.countDown();
                 if (!start.await(5, TimeUnit.SECONDS)) throw new AssertionError("source disable barrier timeout");
@@ -342,7 +343,7 @@ class ImportValidationLeaseMySqlTest {
             documentBlocker.setAutoCommit(false);
             lockDocument(documentBlocker);
             long documentBlockerId = connectionId(blockerStatement);
-            String documentLockData = documentPrimaryLockData(documentBlockerId);
+            InnoDbRecordLockWaits.PointLock documentLockData = documentPrimaryLockData(documentBlockerId);
             Future<ImportValidationLeaseService.LeaseGrant> lease = pool.submit(() -> {
                 leaseReady.countDown();
                 if (!leaseStart.await(5, TimeUnit.SECONDS)) throw new AssertionError("lease-first barrier timeout");
@@ -352,7 +353,7 @@ class ImportValidationLeaseMySqlTest {
             leaseStart.countDown();
             awaitPrimaryTableWait(leaseConnection, documentBlockerId, "t_document", documentLockData);
             Long leaseConnectionId = leaseConnection.get();
-            String sourceLockData = sourcePrimaryLockData(leaseConnectionId);
+            InnoDbRecordLockWaits.PointLock sourceLockData = sourcePrimaryLockData(leaseConnectionId);
             Future<Integer> disable = pool.submit(() -> {
                 try (Connection connection = dataSource.getConnection();
                      PreparedStatement update = connection.prepareStatement(
@@ -414,7 +415,7 @@ class ImportValidationLeaseMySqlTest {
             blocker.setAutoCommit(false);
             lockSource(blocker);
             long blockerId = connectionId(statement);
-            String lockData = sourcePrimaryLockData(blockerId);
+            InnoDbRecordLockWaits.PointLock lockData = sourcePrimaryLockData(blockerId);
             Future<Integer> first;
             AtomicReference<Long> firstConnection = takeoverFirst ? takeoverConnection : renewConnection;
             if (takeoverFirst) {
@@ -510,95 +511,67 @@ class ImportValidationLeaseMySqlTest {
         }
     }
 
-    private String sourcePrimaryLockData(long blockerConnectionId) {
-        String lockData = primaryLockData(blockerConnectionId, "t_import_source_system");
-        assertTrue(lockData.contains(context.tenantId()) && lockData.contains("2"),
-                "PRIMARY lock_dataが対象source行ではありません: " + lockData);
-        return lockData;
+    /** 待機側のrecord lock mode。従来の確認はmodeを限定していなかったため、共有・排他のrecord lockを全て許す。 */
+    private static final Set<String> ANY_RECORD_REQUEST_MODES = Set.of("X", "X,REC_NOT_GAP", "S", "S,REC_NOT_GAP");
+
+    /**
+     * blockerが主キー一点のFOR UPDATEでsource行（id=2）だけを排他lockしていることを確認する。LOCK_DATAはpageを
+     * latch待ちなしで読めた場合だけ見えるため（CIでkey=nullを観測）、見えている場合だけ対象行を示すことを要求する。
+     */
+    private InnoDbRecordLockWaits.PointLock sourcePrimaryLockData(long blockerConnectionId) throws InterruptedException {
+        return InnoDbRecordLockWaits.requireSinglePointLock(jdbc, blockerConnectionId, "t_import_source_system",
+                "PRIMARY", lockData -> lockData.contains(context.tenantId()) && lockData.contains("2"),
+                "source PRIMARY行");
     }
 
-    private String documentPrimaryLockData(long connectionId) {
-        return primaryLockData(connectionId, "t_document");
-    }
-
-    private String primaryLockData(long connectionId, String table) {
-        if (!"t_import_source_system".equals(table) && !"t_document".equals(table)) throw new IllegalArgumentException("unsupported lock table");
-        return jdbc.queryForObject("""
-                SELECT dl.LOCK_DATA FROM performance_schema.data_locks dl
-                JOIN performance_schema.threads t ON t.THREAD_ID=dl.THREAD_ID
-                WHERE t.PROCESSLIST_ID=? AND dl.OBJECT_SCHEMA=DATABASE()
-                  AND dl.OBJECT_NAME=? AND dl.INDEX_NAME='PRIMARY' AND dl.LOCK_DATA IS NOT NULL
-                """, String.class, connectionId, table);
+    private InnoDbRecordLockWaits.PointLock documentPrimaryLockData(long connectionId) throws InterruptedException {
+        return InnoDbRecordLockWaits.requireSinglePointLock(jdbc, connectionId, "t_document", "PRIMARY",
+                lockData -> lockData.contains("3"), "document PRIMARY行");
     }
 
     private void awaitSourcePrimaryWait(AtomicReference<Long> requesterConnection, long blockerId,
-                                       String sourceLockData) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (System.nanoTime() < deadline) {
-            Long requesterId = requesterConnection.get();
-            if (requesterId != null) {
-                Integer waits = jdbc.queryForObject("""
-                        SELECT COUNT(*) FROM performance_schema.data_lock_waits w
-                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
-                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
-                        JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
-                        JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
-                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='t_import_source_system'
-                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='t_import_source_system'
-                          AND req.INDEX_NAME='PRIMARY' AND blk.INDEX_NAME='PRIMARY'
-                          AND req.LOCK_DATA=? AND blk.LOCK_DATA=?
-                        """, Integer.class, requesterId, blockerId, sourceLockData, sourceLockData);
-                if (waits != null && waits > 0) return;
-            }
-            Thread.sleep(25);
-        }
-        throw new AssertionError("MySQL performance_schemaで対象source PRIMARY行の実lock waitを確認できませんでした");
+                                       InnoDbRecordLockWaits.PointLock sourceLock) throws Exception {
+        assertEquals(blockerId, sourceLock.connectionId(), "待機確認の基準lockはblocker接続のもの");
+        awaitPrimaryTableWait(requesterConnection, blockerId, "t_import_source_system", sourceLock);
     }
 
+    /**
+     * 2番目の要求はblockerだけでなく先行要求の待機lockにも並ぶため、待機辺ではなくrequester自身のWAITING lockを確認する。
+     * requesterの最初のlockはsource行の主キー一点lockで、InnoDBのtransactionが同時に待機するlockは1件だけである。
+     */
     private void awaitAnySourcePrimaryWait(AtomicReference<Long> requesterConnection,
-                                           String sourceLockData) throws InterruptedException {
+                                           InnoDbRecordLockWaits.PointLock sourceLock) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
             Long requesterId = requesterConnection.get();
             if (requesterId != null) {
-                Integer waits = jdbc.queryForObject("""
-                        SELECT COUNT(*) FROM performance_schema.data_locks dl
+                java.util.List<String> waitingKeys = jdbc.query("""
+                        SELECT dl.LOCK_DATA FROM performance_schema.data_locks dl
                         JOIN performance_schema.threads t ON t.THREAD_ID=dl.THREAD_ID
                         WHERE t.PROCESSLIST_ID=? AND dl.OBJECT_SCHEMA=DATABASE()
                           AND dl.OBJECT_NAME='t_import_source_system' AND dl.INDEX_NAME='PRIMARY'
-                          AND dl.LOCK_STATUS='WAITING' AND dl.LOCK_DATA=?
-                        """, Integer.class, requesterId, sourceLockData);
-                if (waits != null && waits > 0) return;
+                          AND dl.LOCK_TYPE='RECORD' AND dl.LOCK_STATUS='WAITING'
+                        """, (rs, row) -> rs.getString(1), requesterId);
+                for (String key : waitingKeys) {
+                    if (InnoDbRecordLockWaits.keyVisibleAndMatches(key, sourceLock.expectedKey())
+                            && (key == null || sourceLock.lockData() == null || key.equals(sourceLock.lockData()))) {
+                        return;
+                    }
+                }
             }
             Thread.sleep(25);
         }
-        throw new AssertionError("MySQL performance_schemaで待機中requesterのsource PRIMARY lockを確認できませんでした");
+        throw new AssertionError("MySQL performance_schemaで待機中requesterのsource PRIMARY lockを確認できませんでした: "
+                + InnoDbRecordLockWaits.describeWaitsForBlocker(jdbc, sourceLock.connectionId()));
     }
 
     private void awaitPrimaryTableWait(AtomicReference<Long> requesterConnection, long blockerId,
-                                      String table, String lockData) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (System.nanoTime() < deadline) {
-            Long requesterId = requesterConnection.get();
-            if (requesterId != null) {
-                Integer waits = jdbc.queryForObject("""
-                        SELECT COUNT(*) FROM performance_schema.data_lock_waits w
-                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
-                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
-                        JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
-                        JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                        WHERE wt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?
-                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=?
-                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=?
-                          AND req.INDEX_NAME='PRIMARY' AND blk.INDEX_NAME='PRIMARY'
-                          AND req.LOCK_DATA=? AND blk.LOCK_DATA=?
-                        """, Integer.class, requesterId, blockerId, table, table, lockData, lockData);
-                if (waits != null && waits > 0) return;
-            }
-            Thread.sleep(25);
-        }
-        throw new AssertionError("MySQL performance_schemaで対象PRIMARY rowのlock waitを確認できませんでした: " + table);
+                                      String table, InnoDbRecordLockWaits.PointLock lock) throws Exception {
+        assertEquals(blockerId, lock.connectionId(), "待機確認の基準lockはblocker接続のもの");
+        assertEquals(table, lock.table());
+        InnoDbRecordLockWaits.awaitBlockerAnchoredWait(jdbc, lock, requesterConnection::get,
+                ANY_RECORD_REQUEST_MODES, InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES, 10_000, () -> { },
+                "MySQL performance_schemaで対象PRIMARY row（" + table + "）のlock wait");
     }
 
     private long generation() {

@@ -25,6 +25,33 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void 業務例外413はstatus行と本文の両方で413として返却される() {
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+        try {
+            var response = handler.handleBusinessException(BusinessException.of(413, "error.import.uploadTooLarge"));
+
+            assertEquals(413, response.getStatusCode().value());
+            assertEquals(413, response.getBody().getCode());
+            // MessageSource未設定時もkeyを出さずstatus別の固定文言へ倒す。分類は業務エラーのまま。
+            assertEquals("送信データのサイズが上限を超えています。", response.getBody().getMessage());
+            assertEquals("BUSINESS", CorrelationContext.get(CorrelationContext.ERROR_CATEGORY));
+        } finally {
+            CorrelationContext.clear();
+        }
+    }
+
+    @Test
+    void 許可外の業務例外codeは従来どおり500へ丸め413だけを追加で許可する() {
+        assertEquals(413, SafeErrorPolicy.safeHttpCode(413));
+        for (int code : new int[]{400, 401, 403, 404, 409, 429, 500, 502, 503}) {
+            assertEquals(code, SafeErrorPolicy.safeHttpCode(code));
+        }
+        for (int code : new int[]{405, 408, 410, 415, 422, 504, 0, -1}) {
+            assertEquals(500, SafeErrorPolicy.safeHttpCode(code), "code=" + code);
+        }
+    }
+
+    @Test
     void 業務例外の原文をレスポンスとログへ出力しない() {
         GlobalExceptionHandler handler = new GlobalExceptionHandler();
         String secret = "db password=handlerSecret";

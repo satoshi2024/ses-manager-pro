@@ -83,6 +83,7 @@ class ImportCsvIngestionServiceTest {
     private ListAppender<ILoggingEvent> tempStoreLogs;
     private Logger ingestionLogger;
     private ListAppender<ILoggingEvent> ingestionLogs;
+    private ImportStageReconciliationLedger stageLedger;
 
     @BeforeEach
     void prepareCollaborators() {
@@ -99,6 +100,8 @@ class ImportCsvIngestionServiceTest {
         ingestionLogs = new ListAppender<>();
         ingestionLogs.start();
         ingestionLogger.addAppender(ingestionLogs);
+        stageLedger = new ImportStageReconciliationLedger(uploadRoot.resolve(ImportStageReconciliationLedger.DIRECTORY),
+                meterRegistry, java.time.Clock.systemUTC());
     }
 
     @AfterEach
@@ -202,7 +205,7 @@ class ImportCsvIngestionServiceTest {
     }
 
     @Test
-    void rawBodyHardLimitRejectsByteSixtyFourMiBPlusOneAsClientError() {
+    void rawBodyHardLimitRejectsByteSixtyFourMiBPlusOneAsPayloadTooLarge() {
         when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT);
         when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
         ImportCsvIngestionService service = service(fixedFixtureAdmission());
@@ -211,8 +214,8 @@ class ImportCsvIngestionServiceTest {
                 new ImportRawUploadHeaders("fixture-a", ImportEncoding.UTF8),
                 () -> new RepeatingInputStream(64L * 1024 * 1024 + 1)));
 
-        // SafeErrorPolicyの許可codeに413がないため、500（SYSTEM）へ化けない400で返す。
-        assertEquals(400, tooLarge.getCode());
+        // chunked等でfilterのContent-Length検査を通過した超過もfilterと同じ413で返す（B-NF06-4）。
+        assertEquals(413, tooLarge.getCode());
         assertEquals("error.import.uploadTooLarge", tooLarge.getMessageKey());
         verify(documents, never()).stageReceivedForImport(any(), any(), anyLong(), any(), any());
         assertNoRawTempFiles();
@@ -272,6 +275,7 @@ class ImportCsvIngestionServiceTest {
         verify(documents, never()).discardImportStage(staged);
         assertNoRawTempFiles();
         assertEquals(0, cleanupFailureCount());
+        assertEquals(List.of(), stageLedger.entries(), "成功時は照合台帳へ記録しない");
     }
 
     // ---------------------------------------------------------------- 認可変更（body読取後）
@@ -412,6 +416,8 @@ class ImportCsvIngestionServiceTest {
         assertSame(cleanupFailure, failure.getSuppressed()[0]);
         verify(documents).discardImportStage(staged);
         assertNoRawTempFiles();
+        assertSingleLedgerEntry(ImportStageReconciliationLedger.Reason.DISCARD_FAILED);
+        assertEquals(1, discardFailureCount("failure"));
     }
 
     @Test
@@ -431,8 +437,13 @@ class ImportCsvIngestionServiceTest {
 
         BusinessException failure = assertThrows(BusinessException.class, () -> upload(service));
 
+        // 成功応答の途中の補償失敗は500で返すことを受け入れる（B-NF06-5）。代わりにアラートと照合台帳への記録を必須にする。
         assertEquals("error.test.cleanupFailure", failure.getMessageKey());
         assertNoRawTempFiles();
+        assertSingleLedgerEntry(ImportStageReconciliationLedger.Reason.DISCARD_FAILED);
+        assertEquals(1, discardFailureCount("winner"));
+        assertEquals(0, discardFailureCount("failure"));
+        assertTrue(logText(ingestionLogs).contains("アラート対象"));
     }
 
     // ---------------------------------------------------------------- commit失敗の分類（未commit確定）
@@ -475,6 +486,7 @@ class ImportCsvIngestionServiceTest {
         verify(documents).discardImportStage(staged);
         verify(metadata, never()).findCommittedUploadForStage(any(), any(), any(), any());
         assertNoRawTempFiles();
+        assertEquals(List.of(), stageLedger.entries(), "破棄できた未commit stageは照合台帳へ記録しない");
     }
 
     @Test
@@ -534,6 +546,11 @@ class ImportCsvIngestionServiceTest {
         verify(documents, never()).discardImportStage(staged);
         assertTrue(logText(ingestionLogs).contains("照合用に保全"));
         assertNoRawTempFiles();
+        ImportStageReconciliationLedger.Entry retained =
+                assertSingleLedgerEntry(ImportStageReconciliationLedger.Reason.OUTCOME_UNKNOWN);
+        assertEquals(CONTEXT.tenantId(), retained.tenantId());
+        assertEquals(staged.operationId(), retained.operationId());
+        assertEquals(1, retainedCount());
     }
 
     @Test
@@ -552,6 +569,7 @@ class ImportCsvIngestionServiceTest {
         verify(metadata).findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged);
         verify(documents, never()).discardImportStage(staged);
         assertNoRawTempFiles();
+        assertEquals(List.of(), stageLedger.entries(), "commit済みと読み戻せたstageは照合台帳へ記録しない");
     }
 
     @Test
@@ -572,6 +590,7 @@ class ImportCsvIngestionServiceTest {
         verify(metadata, times(1)).findOrReuseExistingUpload(SOURCE, ImportEncoding.UTF8, CSV_HASH);
         verify(documents, never()).discardImportStage(staged);
         assertNoRawTempFiles();
+        assertSingleLedgerEntry(ImportStageReconciliationLedger.Reason.OUTCOME_UNKNOWN);
     }
 
     @Test
@@ -677,6 +696,77 @@ class ImportCsvIngestionServiceTest {
         assertEquals(0, failure.getSuppressed().length);
         verify(documents).discardImportStage(staged);
         assertNoRawTempFiles();
+    }
+
+    // ---------------------------------------------------------------- 別法人のidentity（存在を開示しない汎用403）
+
+    @Test
+    void sameContentOwnedByAnotherLegalEntityIsRejectedAsGenericForbiddenBeforeStaging() {
+        when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT);
+        when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
+        when(metadata.findOrReuseExistingUpload(SOURCE, ImportEncoding.UTF8, CSV_HASH))
+                .thenThrow(new ImportIdentityOwnedByOtherLegalEntityException());
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        BusinessException failure = assertThrows(BusinessException.class, () -> upload(service));
+
+        // 認可context変化と同じcode・keyにし、409（jobIdentityConflict）で内容の存在を示さない（B-NF06-5）。
+        assertEquals(403, failure.getCode());
+        assertEquals("error.forbidden", failure.getMessageKey());
+        verify(documents, never()).stageReceivedForImport(any(), any(), anyLong(), any(), any());
+        verify(commit, never()).commit(any(), any(), any(), anyInt());
+        assertNoRawTempFiles();
+        assertEquals(List.of(), stageLedger.entries());
+        assertFalse(logText(ingestionLogs).contains(Long.toString(CONTEXT.legalEntityId())),
+                "別法人判定のログに法人IDを出さない");
+    }
+
+    @Test
+    void uniqueConflictWithWinnerInAnotherLegalEntityIsGenericForbiddenNotConflictAndDiscardsStage() {
+        when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT);
+        when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
+        when(metadata.findOrReuseExistingUpload(SOURCE, ImportEncoding.UTF8, CSV_HASH)).thenReturn(null)
+                .thenThrow(new ImportIdentityOwnedByOtherLegalEntityException());
+        StagedImportDocument staged = stagedFixture();
+        stubStage(staged);
+        when(commit.commit(any(), any(), eq(staged), anyInt()))
+                .thenThrow(BusinessException.of(409, "error.import.jobIdentityConflict"));
+        when(metadata.findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged)).thenReturn(null);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        BusinessException failure = assertThrows(BusinessException.class, () -> upload(service));
+
+        assertEquals(403, failure.getCode());
+        assertEquals("error.forbidden", failure.getMessageKey());
+        verify(documents).discardImportStage(staged);
+        verify(metadata, never()).isUploadJobForStage(anyLong(), any(), any(), any(), any());
+        assertNoRawTempFiles();
+        assertEquals(List.of(), stageLedger.entries());
+    }
+
+    @Test
+    void outcomeUnknownWithWinnerInAnotherLegalEntityIsGenericForbiddenAndDiscardsTheUncommittableStage() {
+        when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT);
+        when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
+        when(metadata.findOrReuseExistingUpload(SOURCE, ImportEncoding.UTF8, CSV_HASH)).thenReturn(null)
+                .thenThrow(new ImportIdentityOwnedByOtherLegalEntityException());
+        StagedImportDocument staged = stagedFixture();
+        stubStage(staged);
+        when(commit.commit(any(), any(), eq(staged), anyInt())).thenAnswer(
+                insertAndThrow(staged, unknownCommit("synthetic commit acknowledgement loss")));
+        when(metadata.findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged)).thenReturn(null);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        BusinessException failure = assertThrows(BusinessException.class, () -> upload(service));
+
+        // identityを別法人のjobが保持しているため本stageのjobはcommitされ得ず、保全せず破棄してよい。
+        assertEquals(403, failure.getCode());
+        assertEquals("error.forbidden", failure.getMessageKey());
+        verify(documents).discardImportStage(staged);
+        assertFalse(logText(ingestionLogs).contains("照合用に保全"));
+        assertNoRawTempFiles();
+        assertEquals(List.of(), stageLedger.entries());
+        assertEquals(0, retainedCount());
     }
 
     // ---------------------------------------------------------------- 120秒総期限
@@ -850,6 +940,7 @@ class ImportCsvIngestionServiceTest {
         verify(metadata).findCommittedUploadForStage(SOURCE, ImportEncoding.UTF8, CSV_HASH, staged);
         verify(documents, never()).discardImportStage(staged);
         assertNoRawTempFiles();
+        assertSingleLedgerEntry(ImportStageReconciliationLedger.Reason.OUTCOME_UNKNOWN);
     }
 
     @Test
@@ -920,7 +1011,7 @@ class ImportCsvIngestionServiceTest {
 
     private ImportCsvIngestionService service(ImportAdmissionPort admission, ImportRawTempFileStore tempFiles) {
         return new ImportCsvIngestionService(authorization, metadata, admission, documents, commit, tempFiles,
-                clock::get, BUDGET);
+                stageLedger, clock::get, BUDGET);
     }
 
     private ImportRawTempFileStore failingDeleteStore() {
@@ -996,6 +1087,25 @@ class ImportCsvIngestionServiceTest {
     private double cleanupFailureCount() {
         var counter = meterRegistry.find(ImportRawTempFileStore.CLEANUP_FAILURE_METRIC).counter();
         return counter == null ? 0 : counter.count();
+    }
+
+    private double retainedCount() {
+        var counter = meterRegistry.find(ImportStageReconciliationLedger.RETAINED_METRIC).counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    private double discardFailureCount(String path) {
+        var counter = meterRegistry.find(ImportStageReconciliationLedger.DISCARD_FAILURE_METRIC).tag("path", path)
+                .counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    private ImportStageReconciliationLedger.Entry assertSingleLedgerEntry(ImportStageReconciliationLedger.Reason reason) {
+        List<ImportStageReconciliationLedger.Entry> entries = stageLedger.entries();
+        assertEquals(1, entries.size(), "照合台帳はstage一件だけを記録する: " + entries);
+        assertEquals(reason, entries.get(0).reason());
+        assertEquals("unit-fixed-fixture/object", entries.get(0).storageKey());
+        return entries.get(0);
     }
 
     private static String logText(ListAppender<ILoggingEvent> appender) {

@@ -28,12 +28,22 @@ import java.util.function.LongSupplier;
 /**
  * 同期raw CSV ingress。認可/admission、bounded temp、CLEAN stage、短いmetadata commitを順に実行する。
  *
- * <p>全phaseは一つの総期限（{@link ImportIngressDeadline#TOTAL_BUDGET}）を共有するが、これは
- * 「phase境界・read loopでの期限確認」と「各操作自身のtimeout」を組み合わせたsoft deadlineである。
- * 単一のブロッキング操作は途中で中断できないため、最悪超過量と対象外の操作は{@link ImportIngressDeadline}に列挙する。
+ * <p>総期限（B-NF06-1）：{@link ImportIngressDeadline#TOTAL_BUDGET}（120秒）を{@link #upload}の最初の文で開始し、
+ * 全phaseで共有する。HTTP受信・servlet filter・controllerまでの時間は含まない。これは
+ * 「phase境界・read loopでの期限確認」と「各操作自身のtimeout」を組み合わせたsoft deadlineで、超過を検出した時点で
+ * 503（{@code error.import.uploadDeadlineExceeded}）を返す。単一のブロッキング操作は途中で中断できないため、最悪超過量と
+ * 対象外の操作は{@link ImportIngressDeadline}に列挙する（硬い上限化は後続課題）。
+ *
+ * <p>上限超過（B-NF06-4）：chunked転送等でfilterのContent-Length検査を通過したbodyが64MiBを超えた場合も、
+ * filterと同じHTTP 413（{@code error.import.uploadTooLarge}）で返す。
  *
  * <p>metadata commitの失敗は、未commitが確定しているもの（transaction開始失敗・コールバック内失敗・rollback）と
  * COMMIT処理自体の失敗（結果不確定）とに分け、前者は本requestのstageを破棄し、後者だけreadbackのうえ保全する。
+ * 保全したstageと補償削除に失敗したstageは{@link ImportStageReconciliationLedger}へ記録し、
+ * {@link ImportStageReconciler}が後から回収する（A-NF06-2）。
+ *
+ * <p>別法人（B-NF06-5）：同一identityのjobが別法人に属する場合は、内容の存在を判定させないよう
+ * 認可context変化と同じ汎用403（{@code error.forbidden}）で拒否する。
  */
 @Service
 public class ImportCsvIngestionService {
@@ -45,14 +55,16 @@ public class ImportCsvIngestionService {
     private final DocumentService documents;
     private final ImportCsvUploadCommitService commit;
     private final ImportRawTempFileStore tempFiles;
+    private final ImportStageReconciliationLedger stageLedger;
     private final LongSupplier nanoClock;
     private final Duration totalBudget;
 
     @Autowired
     public ImportCsvIngestionService(ImportMetadataAuthorizationService authorization, ImportMetadataService metadata,
                                     ImportAdmissionPort admission, DocumentService documents,
-                                    ImportCsvUploadCommitService commit, ImportRawTempFileStore tempFiles) {
-        this(authorization, metadata, admission, documents, commit, tempFiles, System::nanoTime,
+                                    ImportCsvUploadCommitService commit, ImportRawTempFileStore tempFiles,
+                                    ImportStageReconciliationLedger stageLedger) {
+        this(authorization, metadata, admission, documents, commit, tempFiles, stageLedger, System::nanoTime,
                 ImportIngressDeadline.TOTAL_BUDGET);
     }
 
@@ -60,13 +72,15 @@ public class ImportCsvIngestionService {
     ImportCsvIngestionService(ImportMetadataAuthorizationService authorization, ImportMetadataService metadata,
                               ImportAdmissionPort admission, DocumentService documents,
                               ImportCsvUploadCommitService commit, ImportRawTempFileStore tempFiles,
-                              LongSupplier nanoClock, Duration totalBudget) {
+                              ImportStageReconciliationLedger stageLedger, LongSupplier nanoClock,
+                              Duration totalBudget) {
         this.authorization = authorization;
         this.metadata = metadata;
         this.admission = admission;
         this.documents = documents;
         this.commit = commit;
         this.tempFiles = Objects.requireNonNull(tempFiles, "tempFiles");
+        this.stageLedger = Objects.requireNonNull(stageLedger, "stageLedger");
         this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
         this.totalBudget = Objects.requireNonNull(totalBudget, "totalBudget");
     }
@@ -117,7 +131,12 @@ public class ImportCsvIngestionService {
             if (currentSource.id() != source.id() || currentSource.version() != source.version()) {
                 throw BusinessException.of(409, "error.import.sourceVersionChanged");
             }
-            ImportUploadJobDetail existing = metadata.findOrReuseExistingUpload(source, headers.encoding(), raw.sha256());
+            ImportUploadJobDetail existing;
+            try {
+                existing = metadata.findOrReuseExistingUpload(source, headers.encoding(), raw.sha256());
+            } catch (ImportIdentityOwnedByOtherLegalEntityException otherLegalEntity) {
+                throw crossLegalEntityRejection("reuseLookup", otherLegalEntity);
+            }
             deadline.check("reuseLookup");
             if (existing != null) return existing;
 
@@ -164,6 +183,10 @@ public class ImportCsvIngestionService {
                     log.error("[取込] COMMIT結果が不確定で本stageの行も見えないため、stageを照合用に保全します: "
                                     + "operationId={} storageKey={} failureClass={}", staged.operationId(),
                             staged.storageKey(), LogRedaction.exceptionType(unknown.getCause()));
+                } catch (ImportIdentityOwnedByOtherLegalEntityException otherLegalEntity) {
+                    // 同一identityのjobが別法人でcommit済みなら、identity一意制約により本stageのjobはcommitされ得ない。
+                    // stageはfinallyで破棄し、別法人のjobの存在は汎用403で隠す。
+                    throw crossLegalEntityRejection("commitReadback", otherLegalEntity);
                 } catch (RuntimeException readbackFailure) {
                     preserveStagedForOutcomeCheck = true;
                     log.error("[取込] COMMIT結果が不確定でreadbackにも失敗したため、stageを照合用に保全します: "
@@ -171,6 +194,8 @@ public class ImportCsvIngestionService {
                             staged.operationId(), staged.storageKey(), LogRedaction.exceptionType(unknown.getCause()),
                             LogRedaction.exceptionType(readbackFailure));
                 }
+                // 保全したstageは照合台帳へ記録し、ImportStageReconcilerが後から行方を確定・回収する（A-NF06-2）。
+                stageLedger.recordRetained(before.tenantId(), staged);
                 if (deadline.expired() || ImportIngressDeadline.isTimeoutFailure(unknown)) {
                     BusinessException exceeded = deadline.exceeded("commit");
                     exceeded.addSuppressed(unknown);
@@ -194,6 +219,9 @@ public class ImportCsvIngestionService {
                         committed = true;
                     }
                     return winner;
+                } catch (ImportIdentityOwnedByOtherLegalEntityException otherLegalEntity) {
+                    // 一意性競合の相手が別法人のjob。409（内容存在の示唆）ではなく汎用403で返し、stageはfinallyで破棄する。
+                    throw crossLegalEntityRejection("conflictReadback", otherLegalEntity);
                 } catch (RuntimeException readbackFailure) {
                     if (readbackFailure == conflict) throw conflict;
                     // 本stageのtransactionはrollback済みのため、winnerを確認できなくてもstageはfinallyで破棄してよい。
@@ -229,7 +257,7 @@ public class ImportCsvIngestionService {
         } finally {
             try {
                 if (staged != null && !committed && !preserveStagedForOutcomeCheck) {
-                    discardOwnedStage(staged, primaryFailure);
+                    discardOwnedStage(staged, primaryFailure, before.tenantId());
                 }
             } finally {
                 // 削除失敗は例外にせず通知・回収経路へ回す。成功結果や元の失敗を上書きしない。
@@ -240,18 +268,38 @@ public class ImportCsvIngestionService {
 
     /**
      * 本requestが所有するstageを破棄する。元の失敗がある場合は補償削除の失敗で上書きせずsuppressedとして残す。
-     * 成功応答の途中（別winnerを返す場合）だけは補償失敗を隠さず投げる。
+     * 成功応答の途中（別winnerを返す場合）だけは補償失敗を隠さず投げ、500で返す（B-NF06-5で受容済み）。
+     * どちらの経路でも残ったobjectは照合台帳へ記録し、metric {@code ses.import.stage.discard.failures}でアラートできるようにする。
      */
-    private void discardOwnedStage(StagedImportDocument staged, Throwable primaryFailure) {
+    private void discardOwnedStage(StagedImportDocument staged, Throwable primaryFailure, String tenantId) {
         try {
             documents.discardImportStage(staged);
         } catch (RuntimeException discardFailure) {
-            if (primaryFailure == null) throw discardFailure;
+            if (primaryFailure == null) {
+                stageLedger.recordDiscardFailure(tenantId, staged, "winner");
+                log.error("[取込] 別jobを返す途中でstage補償削除に失敗したため500を返します（アラート対象。objectは照合台帳から回収）: "
+                                + "operationId={} discardFailureClass={}", staged.operationId(),
+                        LogRedaction.exceptionType(discardFailure));
+                throw discardFailure;
+            }
+            stageLedger.recordDiscardFailure(tenantId, staged, "failure");
             primaryFailure.addSuppressed(discardFailure);
             log.error("[取込] 失敗requestのstage補償削除にも失敗しました。元の失敗を優先して返します: "
                             + "operationId={} failureClass={} discardFailureClass={}", staged.operationId(),
                     LogRedaction.exceptionType(primaryFailure), LogRedaction.exceptionType(discardFailure));
         }
+    }
+
+    /**
+     * 同一identityのjobが別法人にある場合の拒否。認可context変化（{@link #requireSameContext}）と同じcode・keyにし、
+     * 別法人のjob・内容の有無を応答から判定できないようにする。ログにも別法人の情報は出さない。
+     */
+    private static BusinessException crossLegalEntityRejection(String phase,
+                                                               ImportIdentityOwnedByOtherLegalEntityException cause) {
+        log.warn("[取込] 同一内容のjobが現在の法人の範囲外にあるため、存在を開示しない汎用403で拒否します: phase={}", phase);
+        BusinessException rejection = BusinessException.of(403, "error.forbidden");
+        rejection.addSuppressed(cause);
+        return rejection;
     }
 
     private static RuntimeException notCommittedFailure(ImportIngressDeadline deadline, RuntimeException failure) {
@@ -289,9 +337,9 @@ public class ImportCsvIngestionService {
             while (true) {
                 long remaining = MAX_RAW_BYTES - count;
                 if (remaining == 0) {
-                    // chunked等でfilterのContent-Length検査を通過した超過。SafeErrorPolicyの許可codeに413が無いため、
-                    // 500（SYSTEM）へ化けないよう業務エラーの400で返す（filter層の超過は従来どおり413）。
-                    if (source.read() != -1) throw BusinessException.of(400, "error.import.uploadTooLarge");
+                    // chunked等でfilterのContent-Length検査を通過した超過。filter層と同じHTTP 413で返す
+                    // （SafeErrorPolicy.safeHttpCodeとGlobalExceptionHandlerが413を許可する。B-NF06-4）。
+                    if (source.read() != -1) throw BusinessException.of(413, "error.import.uploadTooLarge");
                     break;
                 }
                 int read = source.read(buffer, 0, (int) Math.min(buffer.length, remaining));
