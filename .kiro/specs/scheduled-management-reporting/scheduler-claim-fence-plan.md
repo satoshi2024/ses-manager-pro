@@ -280,10 +280,10 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 
 ## 14. 運用方針の実装（2026-11-13、W2-B8）
 
-状態: **実装済・テスト未実行（r2、主控Runnerの定向実行待ち）。** COMPLETE/PASSではない。production/運用gateの承認、SRE/DBA承認（§10）、Report Owner署名を意味しない。
+状態: **実装済・r2は定向テスト通過（統合候補ではCI待ち）。** COMPLETE/PASSではない。production/運用gateの承認、SRE/DBA承認（§10）、Report Owner署名を意味しない。
 
 - r1: `30e058ce1916af52193bdbf4f7fa430513d2a8ae`（基準HEAD `1836eb73…`）。独立レビュー（静的）PASS、Runner定向 fast 324/0/0/0・MySQL 23/0/0/0（DispatchPolicyは別seed 20261113でも4/0/0/0）。証拠は主控のrun記録 `nf10-30e058ce-*`。
-- r2: 上記の上に1 commit（独立レビュー `w2-nf10-policy-30e058ce-review.md` のP2-1・P3-1・P3-3・P3-8対応と文書訂正）。r2のtestは未実行。
+- r2: 上記の上に1 commit（独立レビュー `w2-nf10-policy-30e058ce-review.md` のP2-1・P3-1・P3-3・P3-8対応と文書訂正）。`f0639edbca018b91a4cfda6df5fefc7652bd2665` で独立レビュー（静的）PASS、Runner定向 fast 344/0/0/0・MySQL 24/0/0/0（DispatchPolicyは別seed 424242でも5/0/0/0）。証拠は主控のrun記録 `nf10-f0639edb-*`。
 - branch `codex/snf-w2-nf10-scheduler-policy-20261113`。
 - 入力となった決定（`launch-decisions-20261113`、ユーザー決定。各責任者の署名の代わりではない）:
   - B-NF10-1: 初回本番は全停止＋専用Flyway job（rolling無し）。起動guardは誤操作防止として実装する。

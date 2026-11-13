@@ -88,10 +88,10 @@ Review remediation（`codex/nf10-review-remediation`）: delivery TX/outbox/prev
 
 ## NF10 W2-B8 scheduler運用方針（2026-11-13）
 
-状態: **実装済・r2はテスト未実行（主控Runnerの定向実行待ち）。** COMPLETE/PASSではない。上表「本番適用の前提」のうち、retry上限・metric/alert・起動guardはユーザー決定（B-NF10-1/B-NF10-2）を受けて実装した。lease延長は「行わない」と決定し、重複はrun_key・delivery dedupeで収束させる。§10の手順草案のSRE/DBA承認、alertの設定・配信先、Report Owner署名は未完了のまま。
+状態: **実装済・r2は定向テスト通過（統合候補ではCI待ち）。** COMPLETE/PASSではない。上表「本番適用の前提」のうち、retry上限・metric/alert・起動guardはユーザー決定（B-NF10-1/B-NF10-2）を受けて実装した。lease延長は「行わない」と決定し、重複はrun_key・delivery dedupeで収束させる。§10の手順草案のSRE/DBA承認、alertの設定・配信先、Report Owner署名は未完了のまま。
 
 - r1 `30e058ce1916af52193bdbf4f7fa430513d2a8ae`: 独立レビュー（静的）PASS（P2×1、P3×12）。Runner定向 fast 324/0/0/0、MySQL 23/0/0/0（`ReportScheduleDispatchPolicyMySqlTest` は別seed 20261113でも4/0/0/0）。証拠は主控のrun記録 `nf10-30e058ce-*`。
-- r2: review P2-1（cutoffの論理run固定、ユーザー決定）、P3-1・P3-3・P3-8の修正と文書訂正。r2のtestは未実行。
+- r2: review P2-1（cutoffの論理run固定、ユーザー決定）、P3-1・P3-3・P3-8の修正と文書訂正。`f0639edbca018b91a4cfda6df5fefc7652bd2665` で独立レビュー（静的）PASS、Runner定向 fast 344/0/0/0、MySQL 24/0/0/0（`ReportScheduleDispatchPolicyMySqlTest` は別seed 424242でも5/0/0/0）。証拠は主控のrun記録 `nf10-f0639edb-*`。
 
 | 項目 | 内容 |
 |---|---|

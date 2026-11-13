@@ -96,6 +96,8 @@ class SchedulingDisabledDrainTest {
             "@Async用taskExecutor。周期実行は持たない。shutdown時はwaitForTasksToCompleteOnShutdown=true・最大30秒",
             "com.ses.service.ai.impl.CopilotBoundedHttpTransport:CloseableHttpAsyncClient.start",
             "HttpClient5のI/O reactor（@Lazy bean、Copilot送信時に初期化）。周期実行は持たない",
+            "com.ses.service.integrationhub.LoopbackTlsIntegrationHubWebhookTransportCandidate:CloseableHttpAsyncClient.start",
+            "NF05段階A候補のHttpClient5 I/O reactor。package-privateでBean未登録、testからのみ生成する。周期実行は持たず、close()で停止する",
             "com.ses.service.skillgap.AiLearningCandidateServiceImpl:CompletableFuture.supplyAsync",
             "request内のAI呼出をcommonPoolでtimeout付き実行する。timeout後もtaskは継続しうるがshutdown待ちは無い");
 
