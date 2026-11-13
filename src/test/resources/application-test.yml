@@ -162,7 +162,11 @@ app:
       enabled: true
     nf02:
       enabled: true
+    nf02-customer-portal:
+      enabled: true
     nf03:
+      enabled: true
+    nf03-certification-pii:
       enabled: true
     nf04:
       enabled: true

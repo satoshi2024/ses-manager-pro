@@ -93,8 +93,14 @@ app:
       enabled: ${FEATURE_NF01_ENABLED:false}
     nf02:
       enabled: ${FEATURE_NF02_ENABLED:false}
+    # NF-02の子（顧客ポータルの問い合わせ）。初回リリースはOFF（B-NF02-2）
+    nf02-customer-portal:
+      enabled: ${FEATURE_NF02_CUSTOMER_PORTAL_ENABLED:false}
     nf03:
       enabled: ${FEATURE_NF03_ENABLED:false}
+    # NF-03の子（資格番号の入力）。DG-07承認までOFF（B-NF03-1）
+    nf03-certification-pii:
+      enabled: ${FEATURE_NF03_CERTIFICATION_PII_ENABLED:false}
     nf04:
       enabled: ${FEATURE_NF04_ENABLED:false}
     nf10:

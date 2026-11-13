@@ -342,12 +342,18 @@ app:
     # NF-01 ライフサイクル管理・退社ゲート
     nf01:
       enabled: ${FEATURE_NF01_ENABLED:false}
-    # NF-02 カスタマーサクセス・サービスデスク（顧客ポータルの問い合わせを含む）
+    # NF-02 カスタマーサクセス・サービスデスク（内部画面）
     nf02:
       enabled: ${FEATURE_NF02_ENABLED:false}
+    # NF-02の子: 顧客ポータルの問い合わせ（起票・返信・CSAT）。NF-02がOFFなら本値に関係なくOFF。初回リリースはOFF（B-NF02-2）
+    nf02-customer-portal:
+      enabled: ${FEATURE_NF02_CUSTOMER_PORTAL_ENABLED:false}
     # NF-03 資格・学習・スキルギャップ
     nf03:
       enabled: ${FEATURE_NF03_ENABLED:false}
+    # NF-03の子: 資格番号（CERTIFICATION_PII）の入力。NF-03がOFFなら本値に関係なくOFF。DG-07承認までOFF（B-NF03-1）
+    nf03-certification-pii:
+      enabled: ${FEATURE_NF03_CERTIFICATION_PII_ENABLED:false}
     # NF-04 要員PWAシェル（Service Worker・manifest）。日次入力queue・offline下書き復元は対象外（常時有効）
     nf04:
       enabled: ${FEATURE_NF04_ENABLED:false}
