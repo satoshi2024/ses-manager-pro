@@ -22,6 +22,11 @@ public class CanonicalSalesInvoice {
     private String invoiceNo;
     private Long customerId;
     private String customerCode;
+    /**
+     * 照合済みCUSTOMER_PARTNERマッピングのfreee取引先ID。freeeへは partner_id として送る。
+     * freeeの取引先コードは事業所設定で無効化されていることがあるため、内部コード（customerCode）は送らない。
+     */
+    private String partnerExternalId;
     private String customerName;
     private LocalDate issueDate;
     private LocalDate dueDate;
@@ -39,7 +44,10 @@ public class CanonicalSalesInvoice {
     @AllArgsConstructor
     public static class Detail {
         private String description;
+        /** 税込金額。 */
         private BigDecimal amount;
+        /** 明細の消費税額（請求書の消費税額を明細へ按分した値。合計は請求書の消費税額と一致する）。旧snapshotはnull。 */
+        private BigDecimal vat;
         private BigDecimal taxRate;
         private String accountItemCode;
         private String taxCode;

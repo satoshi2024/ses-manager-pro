@@ -14,7 +14,7 @@ import com.ses.dto.reconciliation.ReconciliationFetchResultDto;
 import com.ses.entity.BankDeposit;
 import com.ses.mapper.BankDepositMapper;
 import com.ses.mapper.InvoiceMapper;
-import com.ses.service.FreeeIntegrationService;
+import com.ses.service.billing.BankDepositSource;
 import com.ses.service.InvoiceService;
 import com.ses.service.billing.PaymentReconciliationService;
 import lombok.RequiredArgsConstructor;
@@ -54,7 +54,7 @@ public class PaymentReconciliationServiceImpl implements PaymentReconciliationSe
 
     private final BankDepositMapper bankDepositMapper;
     private final InvoiceMapper invoiceMapper;
-    private final FreeeIntegrationService freeeIntegrationService;
+    private final BankDepositSource bankDepositSource;
     private final InvoiceService invoiceService;
     private final org.springframework.context.ApplicationContext applicationContext;
 
@@ -66,7 +66,7 @@ public class PaymentReconciliationServiceImpl implements PaymentReconciliationSe
             throw BusinessException.of(400, "error.reconciliation.invalidPeriod");
         }
 
-        List<BankDepositDto> fetched = freeeIntegrationService.bankDeposits(resolvedFrom, resolvedTo);
+        List<BankDepositDto> fetched = bankDepositSource.fetch(resolvedFrom, resolvedTo);
 
         int newCount = 0;
         for (BankDepositDto d : fetched) {
@@ -212,7 +212,8 @@ public class PaymentReconciliationServiceImpl implements PaymentReconciliationSe
     static ReconciliationCandidateDto score(BankDeposit deposit, InvoiceBalanceDto inv) {
         boolean amountMatch = inv.getBalance() != null && deposit.getAmount() != null
                 && inv.getBalance().compareTo(deposit.getAmount()) == 0;
-        boolean nameMatch = isNameMatch(inv.getCustomerName(), deposit.getPayerName());
+        boolean nameMatch = isNameMatch(inv.getCustomerName(), deposit.getPayerName())
+                || isKanaNameMatch(inv.getCustomerNameKana(), deposit.getPayerName());
         boolean dateNear = inv.getDueDate() != null && deposit.getDepositDate() != null
                 && Math.abs(ChronoUnit.DAYS.between(inv.getDueDate(), deposit.getDepositDate())) <= DATE_WINDOW_DAYS;
 
@@ -243,6 +244,75 @@ public class PaymentReconciliationServiceImpl implements PaymentReconciliationSe
             return false;
         }
         return a.contains(b) || b.contains(a);
+    }
+
+    /** 振込名義（銀行の半角カナ）の法人略号。先頭「ｶ)」・末尾「(ｶ」・途中「(ｶ)」の形で付く。 */
+    private static final String KANA_CORPORATE_ABBREVIATIONS = "カ|ユ|ド|シヤ|ザイ|トクヒ|イ|ガク|ギヨ|ノウ|シユウ|ホ|ゴ|メ";
+    private static final java.util.regex.Pattern KANA_ABBREVIATION_HEAD =
+            java.util.regex.Pattern.compile("^[(（]?(?:" + KANA_CORPORATE_ABBREVIATIONS + ")[)）]");
+    private static final java.util.regex.Pattern KANA_ABBREVIATION_TAIL =
+            java.util.regex.Pattern.compile("[(（](?:" + KANA_CORPORATE_ABBREVIATIONS + ")[)）]?$");
+    private static final java.util.regex.Pattern KANA_ABBREVIATION_MIDDLE =
+            java.util.regex.Pattern.compile("[(（](?:" + KANA_CORPORATE_ABBREVIATIONS + ")[)）]");
+    /** 会社名カナに書かれる法人格（小書き文字は大文字化した後の表記）。 */
+    private static final List<String> KANA_CORPORATE_WORDS = List.of(
+            "カブシキガイシヤ", "カブシキカイシヤ", "ユウゲンガイシヤ", "ユウゲンカイシヤ", "ゴウドウガイシヤ",
+            "ゴウドウカイシヤ", "イツパンシヤダンホウジン", "コウエキシヤダンホウジン", "トクテイヒエイリカツドウホウジン");
+    /** 部分一致を認める最小文字数（短い名義の偶然一致で自動消込しない）。 */
+    static final int KANA_PARTIAL_MIN_LENGTH = 4;
+
+    /**
+     * 顧客の会社名カナと振込名義の一致判定。銀行の振込名義は半角カナ・大文字のみ・法人略号付き
+     * （例「ｶ)ｻﾝﾌﾟﾙｼﾖｳｼﾞ」）のため、両方を同じ表記へ正規化して比べる。完全一致、または短い方が
+     * {@value #KANA_PARTIAL_MIN_LENGTH} 文字以上の部分一致を一致とする。
+     */
+    static boolean isKanaNameMatch(String customerKana, String payerName) {
+        String a = normalizeKana(customerKana);
+        String b = normalizeKana(payerName);
+        if (a.isEmpty() || b.isEmpty() || !isKatakanaOnly(a) || !isKatakanaOnly(b)) {
+            return false;
+        }
+        if (a.equals(b)) {
+            return true;
+        }
+        String shorter = a.length() <= b.length() ? a : b;
+        String longer = shorter == a ? b : a;
+        return shorter.length() >= KANA_PARTIAL_MIN_LENGTH && longer.contains(shorter);
+    }
+
+    /**
+     * カナ表記の正規化: NFKC（半角カナ→全角・濁点合成）、ひらがな→カタカナ、小書き文字→大文字
+     * （銀行は「ショウ」を「シヨウ」と表記する）、長音・ハイフン・空白・記号の除去、法人略号と法人格の除去。
+     */
+    static String normalizeKana(String s) {
+        if (s == null || s.isBlank()) {
+            return "";
+        }
+        String n = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFKC);
+        StringBuilder sb = new StringBuilder(n.length());
+        for (char ch : n.toCharArray()) {
+            if (ch >= 'ぁ' && ch <= 'ゖ') {
+                ch = (char) (ch + ('ァ' - 'ぁ'));
+            }
+            sb.append(switch (ch) {
+                case 'ァ' -> 'ア'; case 'ィ' -> 'イ'; case 'ゥ' -> 'ウ'; case 'ェ' -> 'エ'; case 'ォ' -> 'オ';
+                case 'ッ' -> 'ツ'; case 'ャ' -> 'ヤ'; case 'ュ' -> 'ユ'; case 'ョ' -> 'ヨ'; case 'ヮ' -> 'ワ';
+                case 'ヵ' -> 'カ'; case 'ヶ' -> 'ケ';
+                default -> ch;
+            });
+        }
+        n = sb.toString().replaceAll("[\\s　ー‐－\\-・.．,，、]", "");
+        n = KANA_ABBREVIATION_HEAD.matcher(n).replaceFirst("");
+        n = KANA_ABBREVIATION_TAIL.matcher(n).replaceFirst("");
+        n = KANA_ABBREVIATION_MIDDLE.matcher(n).replaceAll("");
+        for (String word : KANA_CORPORATE_WORDS) {
+            n = n.replace(word, "");
+        }
+        return n;
+    }
+
+    private static boolean isKatakanaOnly(String s) {
+        return s.chars().allMatch(c -> (c >= 'ァ' && c <= 'ヺ') || c == 'ヽ' || c == 'ヾ');
     }
 
     static String normalizeName(String s) {

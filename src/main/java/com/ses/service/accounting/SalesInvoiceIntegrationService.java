@@ -13,6 +13,12 @@ public interface SalesInvoiceIntegrationService {
     IntegrationJob triggerSalesSync(Long invoiceId, Long triggeredByUserId);
 
     /**
+     * 送信プレビュー。送信ジョブへ保存するのと同じ標準DTOと、送信ガードが要求するマッピングの状態を返す。
+     * 接続の作成・ジョブ登録などの副作用は持たない。請求書が無ければ404。
+     */
+    com.ses.dto.accounting.AccountingSendPreviewDto<com.ses.dto.accounting.canonical.CanonicalSalesInvoice> previewSalesSync(Long invoiceId);
+
+    /**
      * 請求書の取消連携ジョブを生成・キューイングする。
      */
     IntegrationJob triggerSalesCancel(Long invoiceId, String cancelReason, Long triggeredByUserId);

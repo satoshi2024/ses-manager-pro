@@ -221,12 +221,20 @@ public class FreeeAccountingProvider implements AccountingProvider {
         boolean fetchFailed = false;
         String errorCode = null;
 
+        // 1回目: 決済済み取引（発生日で絞らない）。入金母集団は payments[].date 基準で、発生日の固定期間で
+        //   絞ると支払サイトを欠落させる（R4-R4）。deals母集団だけを後段で対象月に絞る。
+        // 2回目: 対象月に発生した未決済取引。freeeで直接作られた未入金の取引もEXTERNAL_ONLYとして
+        //   検出するため（決済済みだけでは未入金の取引が母集団に入らない）。一部入金があれば入金母集団にも入る。
+        String[] passes = fromDate == null || toDate == null
+                ? new String[]{"&status=settled"}
+                : new String[]{"&status=settled",
+                        "&status=unsettled&start_issue_date=" + fromDate + "&end_issue_date=" + toDate};
+        passLoop:
+        for (String pass : passes) {
         for (int page = 0; page < maxPages; page++) {
             int offset = page * limit;
-            // R4-R4: 入金母集団は payments[].date 基準。dealの発生日による固定期間の絞り込みは
-            // 支払サイトを欠落させるため行わず、deals母集団だけを後段で対象月に絞る。
             String url = apiBaseUrl + "/api/1/deals?company_id=" + connection.getExternalCompanyId()
-                    + "&status=settled&limit=" + limit
+                    + pass + "&limit=" + limit
                     + "&offset=" + offset;
 
             try {
@@ -320,8 +328,9 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 log.error("Failed to fetch payments from freee on page {}: error_code=EXTERNAL_API_ERROR", page);
                 fetchFailed = true;
                 errorCode = "EXTERNAL_API_ERROR";
-                break;
+                break passLoop;
             }
+        }
         }
         return com.ses.dto.accounting.PaymentFetchResult.builder()
                 .deals(deals)
@@ -332,6 +341,93 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 .fetchFailed(fetchFailed)
                 .errorCode(errorCode)
                 .build();
+    }
+
+    /** FR-09: 入金明細の取得ページ上限（100件×50ページ）。超過分は次回の期間指定で取得する。 */
+    private static final int DEPOSIT_PAGE_LIMIT = 100;
+    private static final int DEPOSIT_MAX_PAGES = 50;
+
+    /**
+     * FR-09 入金消込: 口座明細（freee会計 wallet_txns）の入金を取得する。
+     *
+     * <p>以前は売上取引（deals?type=income）を「入金」として取得していたが、それは請求（売掛）であって着金ではなく、
+     * 取引に振込名義も無い。SESが送信した売上取引がそのまま「入金」に見えてしまうため、口座の入金明細を使う。
+     * 振込名義は明細の摘要（description）。取得失敗は部分結果で消込を進めず例外にする。</p>
+     */
+    public List<com.ses.dto.reconciliation.BankDepositDto> fetchBankDeposits(IntegrationConnection connection,
+                                                                            LocalDate fromDate, LocalDate toDate) {
+        connection = requireAuthoritativeConnection(connection);
+        Long companyId = connection.getExternalCompanyId();
+        List<com.ses.dto.reconciliation.BankDepositDto> deposits = new ArrayList<>();
+        Set<String> seenIds = new HashSet<>();
+        for (int page = 0; page < DEPOSIT_MAX_PAGES; page++) {
+            String url = apiBaseUrl + "/api/1/wallet_txns?company_id=" + companyId
+                    + "&walletable_type=bank_account&entry_side=income"
+                    + "&start_date=" + fromDate + "&end_date=" + toDate
+                    + "&limit=" + DEPOSIT_PAGE_LIMIT + "&offset=" + (page * DEPOSIT_PAGE_LIMIT);
+            JsonNode txns;
+            try {
+                ResponseEntity<String> response = executeWith401Recovery(connection, headers -> {
+                    HttpEntity<?> entity = new HttpEntity<>(headers);
+                    return restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+                });
+                txns = response.getBody() == null || response.getBody().isBlank()
+                        ? null : objectMapper.readTree(response.getBody()).get("wallet_txns");
+            } catch (Exception e) {
+                log.warn("freee入金明細の取得に失敗しました: page={} error_code=EXTERNAL_API_ERROR exceptionClass={}",
+                        page, e.getClass().getSimpleName());
+                throw com.ses.common.exception.BusinessException.of(502, "error.reconciliation.fetchFailed");
+            }
+            if (txns == null || !txns.isArray() || txns.isEmpty()) {
+                break;
+            }
+            for (JsonNode t : txns) {
+                if (!t.hasNonNull("id") || !t.hasNonNull("date") || !t.hasNonNull("amount")) {
+                    continue; // 識別できない明細は消込対象にしない
+                }
+                String id = String.valueOf(t.get("id").asLong());
+                if (!seenIds.add(id)) {
+                    continue; // ページ跨ぎの重複は1件として扱う（t_bank_deposit側もfreee_deposit_idで一意）
+                }
+                com.ses.dto.reconciliation.BankDepositDto d = new com.ses.dto.reconciliation.BankDepositDto();
+                d.setFreeeDepositId(id);
+                d.setDepositDate(LocalDate.parse(t.get("date").asText()));
+                d.setAmount(BigDecimal.valueOf(t.get("amount").asLong()));
+                d.setPayerName(t.path("description").asText(""));
+                deposits.add(d);
+            }
+            if (txns.size() < DEPOSIT_PAGE_LIMIT) {
+                break;
+            }
+        }
+        log.info("freee入金明細を取得しました: companyId={} from={} to={} count={}", companyId, fromDate, toDate, deposits.size());
+        return deposits;
+    }
+
+    @Override
+    public DealLookup lookupDeal(IntegrationConnection connection, String externalDealId) {
+        if (externalDealId == null || !externalDealId.matches("\\d{1,19}")) {
+            return DealLookup.notFound(); // 数値でないID（旧seedの仮IDなど）はfreeeに存在し得ない
+        }
+        try {
+            IntegrationConnection authoritative = requireAuthoritativeConnection(connection);
+            String url = apiBaseUrl + "/api/1/deals/" + externalDealId + "?company_id=" + authoritative.getExternalCompanyId();
+            ResponseEntity<String> response = executeWith401Recovery(authoritative, headers -> {
+                HttpEntity<?> entity = new HttpEntity<>(headers);
+                return restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            });
+            JsonNode deal = response.getBody() == null ? null : objectMapper.readTree(response.getBody()).get("deal");
+            if (deal == null || !deal.hasNonNull("id")) {
+                return DealLookup.unknown();
+            }
+            return DealLookup.found(deal.hasNonNull("amount") ? BigDecimal.valueOf(deal.get("amount").asLong()) : null);
+        } catch (HttpClientErrorException.NotFound e) {
+            return DealLookup.notFound();
+        } catch (Exception e) {
+            log.warn("freee取引の照会に失敗しました: error_code=EXTERNAL_API_ERROR dealId={} exceptionClass={}",
+                    externalDealId, e.getClass().getSimpleName());
+            return DealLookup.unknown();
+        }
     }
 
     @Override
@@ -417,7 +513,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 path = "/api/1/account_items?company_id=" + companyId;
                 isListSearch = true;
             }
-            case "TAX_SALES_10", "TAX_PURCHASE_10", "TAX_EXPENSE_10" -> {
+            case "TAX_SALES_10", "TAX_SALES_8", "TAX_SALES_0", "TAX_PURCHASE_10", "TAX_EXPENSE_10" -> {
                 path = "/api/1/taxes/companies/" + companyId;
                 isListSearch = true;
             }
@@ -464,7 +560,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                     }
                     return false;
                 }
-                case "TAX_SALES_10", "TAX_PURCHASE_10", "TAX_EXPENSE_10" -> {
+                case "TAX_SALES_10", "TAX_SALES_8", "TAX_SALES_0", "TAX_PURCHASE_10", "TAX_EXPENSE_10" -> {
                     JsonNode taxes = root.get("taxes");
                     if (taxes != null && taxes.isArray()) {
                         for (JsonNode t : taxes) {
@@ -523,7 +619,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .externalId(null)
                         .providerRequestId(reqId)
                         .errorCode("INVALID_DEAL_ID")
-                        .errorMessageSafe("freee 応答の取引IDが不正です")
+                        .errorMessageSafe("error.accounting.freeeInvalidResponse")
                         .retryable(false)
                         .build();
             }
@@ -540,7 +636,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .externalId(String.valueOf(dealId))
                         .providerRequestId(reqId)
                         .errorCode("AMOUNT_MISMATCH")
-                        .errorMessageSafe("freee 応答金額不一致 (期待: " + expectedTotal + "円, freee: " + actualAmount + "円)")
+                        .errorMessageSafe("error.accounting.freeeAmountMismatch")
                         .retryable(false)
                         .build();
             }
@@ -843,7 +939,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("VALIDATION_ERROR")
-                        .errorMessageSafe("freee API入力検証エラーが発生しました (エラーコード: VALIDATION_ERROR)")
+                        .errorMessageSafe("error.accounting.freeeValidation")
                         .retryable(false) // 400/422はリトライしない (design §6.3)
                         .build();
             } else if (statusCode == 401) {
@@ -852,7 +948,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("UNAUTHORIZED")
-                        .errorMessageSafe("認証エラー: トークンが無効または失効しています (再認証が必要です)")
+                        .errorMessageSafe("error.accounting.freeeUnauthorized")
                         .retryable(false)
                         .build();
             } else if (statusCode == 403) {
@@ -861,7 +957,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("PLAN_LIMITATION")
-                        .errorMessageSafe("freee 契約プラン制限またはアクセス権限不足です。CSV出力をご利用ください。")
+                        .errorMessageSafe("error.accounting.freeeForbidden")
                         .retryable(false) // プラン制限はリトライしない
                         .build();
             } else if (statusCode == 429) {
@@ -879,7 +975,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("RATE_LIMITED")
-                        .errorMessageSafe("APIレートリミットに達しました。次回再試行します。")
+                        .errorMessageSafe("error.accounting.freeeRateLimited")
                         .retryable(true)
                         .retryAfterSeconds(retryAfter)
                         .build();
@@ -889,7 +985,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("HTTP_CLIENT_ERROR")
-                        .errorMessageSafe("HTTP " + statusCode + " エラーが発生しました")
+                        .errorMessageSafe("error.accounting.freeeHttpError")
                         .retryable(false)
                         .build();
             }
@@ -900,7 +996,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                     .success(false)
                     .providerRequestId(reqId)
                     .errorCode("SERVER_ERROR")
-                    .errorMessageSafe("freee サーバー一時エラー (" + serverEx.getStatusCode() + ")")
+                    .errorMessageSafe("error.accounting.freeeServerError")
                     .retryable(true)
                     .retryAfterSeconds(30)
                     .build();
@@ -909,7 +1005,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
             return CanonicalDealResult.builder()
                     .success(false)
                     .errorCode("TIMEOUT")
-                    .errorMessageSafe("freee APIへの接続タイムアウトまたはネットワークエラー")
+                    .errorMessageSafe("error.accounting.freeeTimeout")
                     .retryable(true)
                     .retryAfterSeconds(30)
                     .build();
@@ -988,8 +1084,9 @@ public class FreeeAccountingProvider implements AccountingProvider {
             for (CanonicalSalesInvoice.Detail d : invoice.getDetails()) {
                 details.add(FreeeDealDetailDto.builder()
                         .taxCode(parseInteger(d.getTaxCode(), 21)) // デフォルト課税売上10%
-                        .accountItemId(parseInteger(d.getAccountItemCode(), null))
+                        .accountItemId(parseFreeeId(d.getAccountItemCode()))
                         .amount(d.getAmount() != null ? d.getAmount().longValue() : 0L)
+                        .vat(d.getVat() != null ? d.getVat().longValue() : null)
                         .description(d.getDescription())
                         .build());
             }
@@ -1006,7 +1103,9 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 .issueDate(invoice.getIssueDate() != null ? invoice.getIssueDate().toString() : LocalDate.now().toString())
                 .dueDate(invoice.getDueDate() != null ? invoice.getDueDate().toString() : null)
                 .type("income")
-                .partnerCode(invoice.getCustomerCode())
+                .partnerId(parseFreeeId(invoice.getPartnerExternalId()))
+                // 旧snapshot（partnerExternalId導入前に登録されたjob）だけ従来どおり取引先コードで送る
+                .partnerCode(invoice.getPartnerExternalId() == null ? invoice.getCustomerCode() : null)
                 .refNumber(invoice.getInvoiceNo())
                 .details(details)
                 .build();
@@ -1015,7 +1114,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
     private FreeeDealCreateRequest buildPurchaseDealRequest(IntegrationConnection connection, CanonicalPurchaseDeal purchase) {
         List<FreeeDealDetailDto> details = List.of(FreeeDealDetailDto.builder()
                 .taxCode(parseInteger(purchase.getTaxCode(), 108)) // 課税仕入10%
-                .accountItemId(parseInteger(purchase.getAccountItemCode(), null))
+                .accountItemId(parseFreeeId(purchase.getAccountItemCode()))
                 .amount(purchase.getAmount() != null ? purchase.getAmount().longValue() : 0L)
                 .description(purchase.getRemarks() != null ? purchase.getRemarks() : "BP外注費: " + purchase.getBpCompanyName())
                 .build());
@@ -1025,7 +1124,8 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 .issueDate(purchase.getIssueDate() != null ? purchase.getIssueDate().toString() : LocalDate.now().toString())
                 .dueDate(purchase.getDueDate() != null ? purchase.getDueDate().toString() : null)
                 .type("expense")
-                .partnerCode(purchase.getBpCompanyCode())
+                .partnerId(parseFreeeId(purchase.getPartnerExternalId()))
+                .partnerCode(purchase.getPartnerExternalId() == null ? purchase.getBpCompanyCode() : null)
                 .refNumber("BP-" + purchase.getBpPaymentId())
                 .details(details)
                 .build();
@@ -1034,7 +1134,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
     private FreeeDealCreateRequest buildExpenseDealRequest(IntegrationConnection connection, CanonicalExpenseDeal expense) {
         List<FreeeDealDetailDto> details = List.of(FreeeDealDetailDto.builder()
                 .taxCode(parseInteger(expense.getTaxCode(), 108))
-                .accountItemId(parseInteger(expense.getAccountItemCode(), null))
+                .accountItemId(parseFreeeId(expense.getAccountItemCode()))
                 .amount(expense.getAmount() != null ? expense.getAmount().longValue() : 0L)
                 .description(expense.getDescription() != null ? expense.getDescription() : "経費: " + expense.getCategory())
                 .build());
@@ -1043,10 +1143,24 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 .companyId(connection.getExternalCompanyId())
                 .issueDate(expense.getExpenseDate() != null ? expense.getExpenseDate().toString() : LocalDate.now().toString())
                 .type("expense")
-                .partnerCode(expense.getEngineerCode())
+                // 要員はfreee取引先として管理しないため取引先は指定しない。要員コードを取引先コードとして送ると、
+                // 取引先コード無効の事業所では400、有効でも該当取引先が無ければ400になる。
                 .refNumber(expense.getExpenseNo())
                 .details(details)
                 .build();
+    }
+
+    /** マッピングのfreee ID（取引先・勘定科目）を数値へ変換する。int範囲を超えるIDも扱えるようLongにする。数値でない値は送らない。 */
+    static Long parseFreeeId(String externalId) {
+        if (externalId == null || externalId.isBlank()) {
+            return null;
+        }
+        try {
+            long id = Long.parseLong(externalId.trim());
+            return id > 0 ? id : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private Integer parseInteger(String str, Integer defaultVal) {
@@ -1064,6 +1178,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
     public static class FreeeDealCreateRequest {
         @JsonProperty("company_id")
         private Long companyId;
@@ -1077,6 +1192,11 @@ public class FreeeAccountingProvider implements AccountingProvider {
         @JsonProperty("type")
         private String type;
 
+        /** freee取引先ID（照合済みマッピングの外部ID）。partner_code とは同時に送らない。 */
+        @JsonProperty("partner_id")
+        private Long partnerId;
+
+        /** 旧snapshot互換のみ。事業所設定で取引先コードが有効な場合に限りfreee側で解決される。 */
         @JsonProperty("partner_code")
         private String partnerCode;
 
@@ -1096,10 +1216,15 @@ public class FreeeAccountingProvider implements AccountingProvider {
         private Integer taxCode;
 
         @JsonProperty("account_item_id")
-        private Integer accountItemId;
+        private Long accountItemId;
 
         @JsonProperty("amount")
         private Long amount;
+
+        /** 明細の消費税額。nullなら送らない（freeeが税込金額から計算する）。 */
+        @JsonProperty("vat")
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private Long vat;
 
         @JsonProperty("description")
         private String description;

@@ -84,6 +84,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
 
         IntegrationConnection conn = resolveConnection(tenantId, null, "freee", "accounting");
         boolean externalFetchFailed = false;
+        AccountingProvider provider = null;
         List<CanonicalPaymentSync> extDeals = new ArrayList<>();    // deal単位 (売上/仕入/経費照合・EXTERNAL_ONLY)
         List<CanonicalPaymentSync> extPayments = new ArrayList<>(); // payment単位 (入金 1:1 消込)
 
@@ -98,7 +99,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
                     .build());
         } else {
             try {
-                AccountingProvider provider = providerFactory.getProvider(conn);
+                provider = providerFactory.getProvider(conn);
                 com.ses.dto.accounting.PaymentFetchResult fetchResult = provider.fetchPayments(conn, startOfMonth, endOfMonth);
                 extDeals = fetchResult != null && fetchResult.getDeals() != null ? fetchResult.getDeals() : new ArrayList<>();
                 extPayments = fetchResult != null && fetchResult.getPayments() != null ? fetchResult.getPayments() : new ArrayList<>();
@@ -146,6 +147,9 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             }
         }
         Set<String> matchedExternalDealIds = new HashSet<>();
+        // 一覧は決済済み取引のみ（入金照合のため）。送信直後の未決済取引は一覧に無いので、
+        // 送信ジョブの取引IDを個別に照会してから「削除または未存在」と判定する。
+        SentDealResolver sentDeals = new SentDealResolver(externalFetchFailed ? null : provider, conn, extDealMap);
 
         // ============================================================
         // 1. 母集団 1: 売上請求 (t_invoice)
@@ -169,7 +173,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
 
             if (latestJob != null && "SUCCEEDED".equals(latestJob.getStatus()) && latestJob.getExternalId() != null) {
                 String dealId = latestJob.getExternalId();
-                CanonicalPaymentSync extDeal = extDealMap.get(dealId);
+                CanonicalPaymentSync extDeal = sentDeals.find(dealId);
 
                 if (extDeal == null) {
                     // P1-09: 外部取引が削除または未存在の場合は INTERNAL_ONLY (fail-closed)
@@ -182,8 +186,11 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
                             .externalDealId(dealId)
                             .externalRefNo(inv.getInvoiceNo())
                             .externalAmount(BigDecimal.ZERO)
-                            .status(ignoreReason != null ? "IGNORED" : "INTERNAL_ONLY")
-                            .discrepancyReason("freee取引が削除または未存在 (dealId=" + dealId + ")")
+                            .status(ignoreReason != null ? "IGNORED"
+                                    : sentDeals.lookupFailed(dealId) ? "AMOUNT_MISMATCH" : "INTERNAL_ONLY")
+                            .discrepancyReason(sentDeals.lookupFailed(dealId)
+                                    ? "freee取引の照会に失敗しました (dealId=" + dealId + ")"
+                                    : "freee取引が削除または未存在 (dealId=" + dealId + ")")
                             .ignoreReason(ignoreReason)
                             .build());
                 } else {
@@ -269,7 +276,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
 
             if (latestJob != null && "SUCCEEDED".equals(latestJob.getStatus()) && latestJob.getExternalId() != null) {
                 String dealId = latestJob.getExternalId();
-                CanonicalPaymentSync extDeal = extDealMap.get(dealId);
+                CanonicalPaymentSync extDeal = sentDeals.find(dealId);
 
                 if (extDeal == null) {
                     // P1-09: 外部取引が削除または未存在の場合は INTERNAL_ONLY (fail-closed)
@@ -282,8 +289,11 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
                             .externalDealId(dealId)
                             .externalRefNo("BP-" + bp.getId())
                             .externalAmount(BigDecimal.ZERO)
-                            .status(ignoreReason != null ? "IGNORED" : "INTERNAL_ONLY")
-                            .discrepancyReason("freee仕入取引が削除または未存在 (dealId=" + dealId + ")")
+                            .status(ignoreReason != null ? "IGNORED"
+                                    : sentDeals.lookupFailed(dealId) ? "AMOUNT_MISMATCH" : "INTERNAL_ONLY")
+                            .discrepancyReason(sentDeals.lookupFailed(dealId)
+                                    ? "freee取引の照会に失敗しました (dealId=" + dealId + ")"
+                                    : "freee仕入取引が削除または未存在 (dealId=" + dealId + ")")
                             .ignoreReason(ignoreReason)
                             .build());
                 } else {
@@ -357,7 +367,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
 
             if (latestJob != null && "SUCCEEDED".equals(latestJob.getStatus()) && latestJob.getExternalId() != null) {
                 String dealId = latestJob.getExternalId();
-                CanonicalPaymentSync extDeal = extDealMap.get(dealId);
+                CanonicalPaymentSync extDeal = sentDeals.find(dealId);
 
                 if (extDeal == null) {
                     // P1-09: 外部経費取引が削除または未存在の場合は INTERNAL_ONLY (fail-closed)
@@ -370,8 +380,11 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
                             .externalDealId(dealId)
                             .externalRefNo(exp.getExpenseNo())
                             .externalAmount(BigDecimal.ZERO)
-                            .status(ignoreReason != null ? "IGNORED" : "INTERNAL_ONLY")
-                            .discrepancyReason("freee経費取引が削除または未存在 (dealId=" + dealId + ")")
+                            .status(ignoreReason != null ? "IGNORED"
+                                    : sentDeals.lookupFailed(dealId) ? "AMOUNT_MISMATCH" : "INTERNAL_ONLY")
+                            .discrepancyReason(sentDeals.lookupFailed(dealId)
+                                    ? "freee取引の照会に失敗しました (dealId=" + dealId + ")"
+                                    : "freee経費取引が削除または未存在 (dealId=" + dealId + ")")
                             .ignoreReason(ignoreReason)
                             .build());
                 } else {
@@ -546,6 +559,9 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
         }
 
         // 重大不一致が0件かつ外部取得失敗がない場合にのみ月次締め可能 (P1-09: fail-closed)
+        if (sentDeals.anyLookupFailed()) {
+            externalFetchFailed = true; // 個別照会の失敗も外部取得失敗として締めを止める
+        }
         boolean readyForClosing = !externalFetchFailed && (mismatch == 0 && internalOnly == 0 && externalOnly == 0);
 
         return AccountingReconciliationSummaryDto.builder()
@@ -587,6 +603,46 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
                     month, summary.getMatchedCount(), summary.getInternalOnlyCount(),
                     summary.getExternalOnlyCount(), summary.getAmountMismatchCount(),
                     summary.isExternalFetchFailed()));
+        }
+    }
+
+    /**
+     * 送信ジョブの取引IDから外部取引を引く。一覧（決済済み）にあればそれを使い、無ければ1件ずつ照会する。
+     * 結果は照合1回の中でキャッシュする。照会失敗（UNKNOWN）は「削除」と区別して記録する。
+     */
+    static final class SentDealResolver {
+        private final AccountingProvider provider;
+        private final IntegrationConnection connection;
+        private final Map<String, CanonicalPaymentSync> listed;
+        private final Map<String, AccountingProvider.DealLookup> lookedUp = new HashMap<>();
+
+        SentDealResolver(AccountingProvider provider, IntegrationConnection connection,
+                         Map<String, CanonicalPaymentSync> listed) {
+            this.provider = provider;
+            this.connection = connection;
+            this.listed = listed;
+        }
+
+        CanonicalPaymentSync find(String dealId) {
+            CanonicalPaymentSync inList = listed.get(dealId);
+            if (inList != null || provider == null || dealId == null) {
+                return inList;
+            }
+            AccountingProvider.DealLookup lookup = lookedUp.computeIfAbsent(dealId,
+                    id -> provider.lookupDeal(connection, id));
+            if (!"FOUND".equals(lookup.status())) {
+                return null;
+            }
+            return CanonicalPaymentSync.builder().dealId(dealId).amount(lookup.amount()).settled(false).build();
+        }
+
+        boolean lookupFailed(String dealId) {
+            AccountingProvider.DealLookup lookup = lookedUp.get(dealId);
+            return lookup != null && "UNKNOWN".equals(lookup.status());
+        }
+
+        boolean anyLookupFailed() {
+            return lookedUp.values().stream().anyMatch(l -> "UNKNOWN".equals(l.status()));
         }
     }
 

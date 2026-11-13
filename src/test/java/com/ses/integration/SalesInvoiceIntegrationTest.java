@@ -71,6 +71,9 @@ class SalesInvoiceIntegrationTest {
     @Autowired
     private RestTemplate restTemplate;
 
+    @Autowired
+    private com.ses.service.accounting.AccountingIntegrationWorker accountingIntegrationWorker;
+
     private MockRestServiceServer mockServer;
     private IntegrationConnection connection;
     private Customer customer;
@@ -210,6 +213,11 @@ class SalesInvoiceIntegrationTest {
 
         mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
                 .andExpect(method(HttpMethod.POST))
+                // 照合済みマッピングの外部IDがそのままfreeeへ届く（取引先はIDで、内部コードは送らない）
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.partner_id").value(1001))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.partner_code").doesNotExist())
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.details[0].account_item_id").value(2001))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.details[0].tax_code").value(21))
                 .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON).headers(headers));
 
         // Worker 同期実行
@@ -220,6 +228,61 @@ class SalesInvoiceIntegrationTest {
         assertThat(updated.getStatus()).isEqualTo("SUCCEEDED");
         assertThat(updated.getExternalId()).isEqualTo("77777");
         assertThat(updated.getProviderRequestId()).isEqualTo("req-sales-success-001");
+    }
+
+    @Test
+    @DisplayName("NF09: 全社共通接続でも送信ジョブは請求書の法人を持ち、Workerのdispatch経由でfreeeへ送信される")
+    void triggerSalesSync_jobCarriesInvoiceLegalEntity_andWorkerDispatches() {
+        Long invoiceLegalEntity = invoiceService.getById(invoice.getId()).getLegalEntityId();
+        assertThat(connection.getLegalEntityId()).isNull(); // 全社共通接続
+        assertThat(invoiceLegalEntity).isNotNull();
+
+        IntegrationJob job = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        assertThat(job.getLegalEntityId()).isEqualTo(invoiceLegalEntity);
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 77778, \"company_id\": 99001, \"amount\": 1100000}}",
+                        MediaType.APPLICATION_JSON));
+
+        // 以前はここで job.legal_entity_id が NULL のため SCOPE_MISSING で失敗し、freeeへ一度も送られなかった
+        accountingIntegrationWorker.dispatchJob(jobService.getById(job.getId()));
+
+        mockServer.verify();
+        IntegrationJob updated = jobService.getById(job.getId());
+        assertThat(updated.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(updated.getExternalId()).isEqualTo("77778");
+    }
+
+    @Test
+    @DisplayName("freeeの管理番号は20文字以内: 請求書番号が長すぎる場合は送信ジョブを作らない")
+    void triggerSalesSync_invoiceNoOver20Chars_rejectedBeforeJob() {
+        String original = invoiceService.getById(invoice.getId()).getInvoiceNo();
+        jdbcTemplate.update("UPDATE t_invoice SET invoice_no = ? WHERE id = ?", "INV-2026-11-000000001", invoice.getId()); // 21文字
+        try {
+            assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(invoice.getId(), 1L))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessage("error.accounting.refNumberTooLong");
+            assertThat(jobService.getLatestJob("INVOICE", invoice.getId(), "SALES_INVOICE_SYNC")).isNull();
+        } finally {
+            jdbcTemplate.update("UPDATE t_invoice SET invoice_no = ? WHERE id = ?", original, invoice.getId());
+        }
+    }
+
+    @Test
+    @DisplayName("NF09: 請求書の法人が未設定なら送信ジョブを作らず、理由を返す")
+    void triggerSalesSync_invoiceWithoutLegalEntity_rejectedBeforeJob() {
+        Long original = invoiceService.getById(invoice.getId()).getLegalEntityId();
+        jdbcTemplate.update("UPDATE t_invoice SET legal_entity_id = NULL WHERE id = ?", invoice.getId());
+        try {
+            assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(invoice.getId(), 1L))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessage("error.accounting.legalEntityMissing");
+            assertThat(jobService.getLatestJob("INVOICE", invoice.getId(), "SALES_INVOICE_SYNC")).isNull();
+        } finally {
+            // 後片付け（removeById）は法人一致を要求するため元へ戻す
+            jdbcTemplate.update("UPDATE t_invoice SET legal_entity_id = ? WHERE id = ?", original, invoice.getId());
+        }
     }
 
     @Test
@@ -270,6 +333,41 @@ class SalesInvoiceIntegrationTest {
     }
 
     @Test
+    @DisplayName("取消後の再送信: 送信済みの再送信は理由付きで拒否し、freee取引を取消した後は新しい世代で再送信できる")
+    void resendAfterCancel_createsNewGenerationJob() {
+        IntegrationJob first = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        jobService.claimJob(first.getId());
+        jobService.markSucceeded(first.getId(), "77801", "req-sync-01", "売上登録完了");
+
+        // 送信済みのまま再送信 → 以前は既存ジョブが黙って返り「登録しました」と表示されていた
+        assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(invoice.getId(), 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.accounting.alreadySynced");
+
+        IntegrationJob cancel = salesIntegrationService.triggerSalesCancel(invoice.getId(), "REASON_AMOUNT_CORRECTION", 1L);
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/77801?company_id=99001"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 77801}}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/77801?company_id=99001"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesCancelJob(cancel.getId());
+        mockServer.verify();
+        assertThat(jobService.getById(cancel.getId()).getStatus()).isEqualTo("SUCCEEDED");
+
+        // 取消済みの取引をもう一度取消そうとしても、理由付きで拒否する
+        assertThatThrownBy(() -> salesIntegrationService.triggerSalesCancel(invoice.getId(), "REASON_OTHER", 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.accounting.alreadyCancelled");
+
+        // 取消後は訂正した請求書を新しい世代のジョブとして再送信できる（以前は旧ジョブが返り送信されなかった）
+        IntegrationJob second = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        assertThat(second.getId()).isNotEqualTo(first.getId());
+        assertThat(second.getStatus()).isEqualTo("PENDING");
+        assertThat(second.getIdempotencyKey()).isEqualTo(first.getIdempotencyKey() + ":g1");
+    }
+
+    @Test
     @DisplayName("月次締めガード: 締め済み月の請求書に対する連携トリガーは拒否される")
     void triggerSalesSync_closedMonth_rejected() {
         Invoice closedInvoice = new Invoice();
@@ -311,7 +409,7 @@ class SalesInvoiceIntegrationTest {
 
         assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(draftInvoice.getId(), 1L))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("送付済または入金済の請求書のみ会計連携可能");
+                .hasMessage("error.accounting.invoiceNotSendable");
     }
 
     @Test

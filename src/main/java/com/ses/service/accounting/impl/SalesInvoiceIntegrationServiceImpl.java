@@ -2,6 +2,7 @@ package com.ses.service.accounting.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
+import com.ses.dto.accounting.AccountingSendPreviewDto;
 import com.ses.dto.accounting.canonical.CanonicalDealResult;
 import com.ses.dto.accounting.canonical.CanonicalSalesInvoice;
 import com.ses.entity.Customer;
@@ -12,6 +13,7 @@ import com.ses.entity.Invoice;
 import com.ses.service.CustomerService;
 import com.ses.service.InvoiceService;
 import com.ses.service.MonthlyClosingService;
+import com.ses.service.accounting.AccountingJobLegalEntityResolver;
 import com.ses.service.accounting.AccountingOrganizationResolver;
 import com.ses.service.accounting.AccountingProvider;
 import com.ses.service.accounting.AccountingProviderFactory;
@@ -19,6 +21,7 @@ import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.accounting.SalesInvoiceIntegrationService;
 import com.ses.service.integration.ExternalMappingService;
+import com.ses.service.integration.ExternalMappingService.MappingCheck;
 import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +34,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 売上請求書・取引連携サービス実装 (B1 / design §4, §6.1, §6.3)。
@@ -50,18 +54,140 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     private final AccountingOrganizationResolver organizationResolver;
     private final AccountingTimezoneResolver timezoneResolver;
     private final ObjectMapper objectMapper;
+    private final AccountingJobLegalEntityResolver legalEntityResolver;
+    private final com.ses.service.accounting.AccountingSendKeyResolver sendKeyResolver;
+    private final com.ses.mapper.InvoiceItemMapper invoiceItemMapper;
+
+    /** freee取引の管理番号（ref_number）の上限文字数。 */
+    private static final int FREEE_REF_NUMBER_MAX = 20;
+
+    /** 会計連携できる請求書ステータス (P1-07)。 */
+    private static final Set<String> SENDABLE_STATUSES = Set.of("送付済", "入金済", "一部入金");
+
+    /** 売上送信に必要なマッピング（種別, 内部キー）。送信ガードとプレビューで同じ定義を使う。 */
+    private static List<String[]> requiredMappings(Invoice invoice) {
+        return List.of(
+                new String[]{"CUSTOMER_PARTNER", customerCode(invoice)},
+                new String[]{"ACCOUNT_SALES", "SALES_DEFAULT"},
+                taxMapping(invoice));
+    }
+
+    /**
+     * 請求書の適用税率に対応する税区分マッピング（種別, 内部キー）。税率は保存値（0.10形式）を正とし、
+     * 未保存の旧請求書は従来どおり10%として扱う。対応していない税率は送らずに拒否する
+     * （10%の税区分で送ると消費税額が請求書と食い違うため）。
+     */
+    static String[] taxMapping(Invoice invoice) {
+        java.math.BigDecimal rate = invoice.getTaxRate() == null ? new java.math.BigDecimal("0.10") : invoice.getTaxRate();
+        java.math.BigDecimal percent = rate.compareTo(java.math.BigDecimal.ONE) < 0
+                ? rate.multiply(new java.math.BigDecimal("100")) : rate;
+        percent = percent.stripTrailingZeros();
+        if (percent.compareTo(new java.math.BigDecimal("10")) == 0) {
+            return new String[]{"TAX_SALES_10", "TAX_10"};
+        }
+        if (percent.compareTo(new java.math.BigDecimal("8")) == 0) {
+            return new String[]{"TAX_SALES_8", "TAX_8"};
+        }
+        if (percent.signum() == 0) {
+            return new String[]{"TAX_SALES_0", "TAX_0"};
+        }
+        throw BusinessException.of(400, "error.accounting.taxRateUnsupported");
+    }
+
+    /** freeeの取引明細の備考の上限文字数。 */
+    static final int FREEE_DETAIL_DESCRIPTION_MAX = 250;
+
+    /**
+     * 請求明細ごとのfreee取引明細。請求書の消費税額を明細の税抜金額で按分し（端数は金額の大きい明細へ寄せる）、
+     * 明細の税込金額・消費税額の合計が請求書の合計・消費税額と一致するようにする。明細が1件以下、
+     * 明細合計が小計と一致しない、0円以下・円未満を含む等で按分できない場合は、従来どおり請求書合計の1明細にする。
+     */
+    static List<CanonicalSalesInvoice.Detail> buildDetails(Invoice invoice, List<com.ses.entity.InvoiceItem> items,
+                                                           String accountItemCode, String taxCode) {
+        String fallback = invoice.getRemarks() != null ? invoice.getRemarks() : "SES請求: " + invoice.getInvoiceNo();
+        List<CanonicalSalesInvoice.Detail> single = List.of(CanonicalSalesInvoice.Detail.builder()
+                .description(truncate(fallback))
+                .amount(invoice.getTotal())
+                .accountItemCode(accountItemCode)
+                .taxCode(taxCode)
+                .build());
+        java.math.BigDecimal subtotal = invoice.getSubtotal();
+        java.math.BigDecimal tax = invoice.getTax();
+        java.math.BigDecimal total = invoice.getTotal();
+        if (items == null || items.size() < 2 || subtotal == null || tax == null || total == null
+                || subtotal.signum() <= 0 || tax.signum() < 0 || !isWholeYen(tax)
+                || subtotal.add(tax).compareTo(total) != 0) {
+            return single;
+        }
+        java.math.BigDecimal itemSum = java.math.BigDecimal.ZERO;
+        for (com.ses.entity.InvoiceItem item : items) {
+            if (item.getAmount() == null || item.getAmount().signum() <= 0 || !isWholeYen(item.getAmount())) {
+                return single;
+            }
+            itemSum = itemSum.add(item.getAmount());
+        }
+        if (itemSum.compareTo(subtotal) != 0) {
+            return single;
+        }
+        long taxYen = tax.longValueExact();
+        long subtotalYen = subtotal.longValueExact();
+        long[] vat = new long[items.size()];
+        long allocated = 0;
+        int largest = 0;
+        for (int i = 0; i < items.size(); i++) {
+            long amount = items.get(i).getAmount().longValueExact();
+            vat[i] = java.math.BigInteger.valueOf(amount).multiply(java.math.BigInteger.valueOf(taxYen))
+                    .divide(java.math.BigInteger.valueOf(subtotalYen)).longValueExact();
+            allocated += vat[i];
+            if (amount > items.get(largest).getAmount().longValueExact()) {
+                largest = i;
+            }
+        }
+        vat[largest] += taxYen - allocated;
+        List<CanonicalSalesInvoice.Detail> details = new java.util.ArrayList<>();
+        for (int i = 0; i < items.size(); i++) {
+            com.ses.entity.InvoiceItem item = items.get(i);
+            String description = item.getDescription() == null || item.getDescription().isBlank()
+                    ? fallback : item.getDescription();
+            details.add(CanonicalSalesInvoice.Detail.builder()
+                    .description(truncate(description))
+                    .amount(item.getAmount().add(java.math.BigDecimal.valueOf(vat[i])))
+                    .vat(java.math.BigDecimal.valueOf(vat[i]))
+                    .accountItemCode(accountItemCode)
+                    .taxCode(taxCode)
+                    .build());
+        }
+        return details;
+    }
+
+    private static boolean isWholeYen(java.math.BigDecimal value) {
+        return value.stripTrailingZeros().scale() <= 0;
+    }
+
+    private static String truncate(String text) {
+        return text.length() <= FREEE_DETAIL_DESCRIPTION_MAX ? text : text.substring(0, FREEE_DETAIL_DESCRIPTION_MAX);
+    }
+
+    private static String customerCode(Invoice invoice) {
+        return "CUST-" + invoice.getCustomerId();
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public IntegrationJob triggerSalesSync(Long invoiceId, Long triggeredByUserId) {
         Invoice invoice = invoiceService.getById(invoiceId);
         if (invoice == null) {
-            throw new BusinessException(404, "請求書が見つかりません (id=" + invoiceId + ")");
+            throw BusinessException.of(404, "error.invoice.notFound");
         }
 
         // ステータス適格性ガード (送付済 / 入金済 / 一部入金 のみ許可) (P1-07)
-        if (!"送付済".equals(invoice.getStatus()) && !"入金済".equals(invoice.getStatus()) && !"一部入金".equals(invoice.getStatus())) {
-            throw new BusinessException(400, "送付済または入金済の請求書のみ会計連携可能です (現在: " + invoice.getStatus() + ")");
+        if (!SENDABLE_STATUSES.contains(invoice.getStatus())) {
+            throw BusinessException.of(400, "error.accounting.invoiceNotSendable");
+        }
+
+        // freeeの管理番号（ref_number）は20文字以内。請求書番号をそのまま使うため送信前に拒否する
+        if (invoice.getInvoiceNo() != null && invoice.getInvoiceNo().length() > FREEE_REF_NUMBER_MAX) {
+            throw BusinessException.of(400, "error.accounting.refNumberTooLong");
         }
 
         // 月次締めチェック (締め済み月への更新拒否)
@@ -69,41 +195,17 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
             monthlyClosingService.assertOpenForUpdate(invoice.getBillingMonth());
         }
 
-        IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
-
-        Customer customer = customerService.getById(invoice.getCustomerId());
-        String customerCode = "CUST-" + invoice.getCustomerId();
-        String customerName = customer != null ? customer.getCompanyName() : "顧客ID:" + invoice.getCustomerId();
+        IntegrationConnection conn = resolveConnection(AccountingTenantContextHolder.requireTenantContext(), null, "freee", "accounting");
 
         // マッピング検証ガード (未登録・未検証は送信不可)
-        mappingService.assertMappingVerified(conn.getId(), "CUSTOMER_PARTNER", customerCode);
-        mappingService.assertMappingVerified(conn.getId(), "ACCOUNT_SALES", "SALES_DEFAULT");
-        mappingService.assertMappingVerified(conn.getId(), "TAX_SALES_10", "TAX_10");
+        for (String[] required : requiredMappings(invoice)) {
+            mappingService.assertMappingVerified(conn.getId(), required[0], required[1]);
+        }
 
-        ExternalMapping partnerMapping = mappingService.getMapping(conn.getId(), "CUSTOMER_PARTNER", customerCode);
-        ExternalMapping salesAccount = mappingService.getMapping(conn.getId(), "ACCOUNT_SALES", "SALES_DEFAULT");
-        ExternalMapping taxMapping = mappingService.getMapping(conn.getId(), "TAX_SALES_10", "TAX_10");
+        // NF09: ジョブの法人は請求書の法人。未設定・接続の法人と不一致ならジョブを作らない（Workerで無言失敗させない）
+        Long legalEntityId = legalEntityResolver.require(conn, legalEntityResolver.ofInvoice(invoice));
 
-        CanonicalSalesInvoice canonical = CanonicalSalesInvoice.builder()
-                .invoiceId(invoice.getId())
-                .invoiceNo(invoice.getInvoiceNo())
-                .customerId(invoice.getCustomerId())
-                .customerCode(customerCode)
-                .customerName(customerName)
-                .issueDate(invoice.getIssuedDate())
-                .dueDate(invoice.getDueDate())
-                .subtotal(invoice.getSubtotal())
-                .tax(invoice.getTax())
-                .total(invoice.getTotal())
-                .taxRate(invoice.getTaxRate())
-                .remarks(invoice.getRemarks())
-                .details(List.of(CanonicalSalesInvoice.Detail.builder()
-                        .description(invoice.getRemarks() != null ? invoice.getRemarks() : "SES請求: " + invoice.getInvoiceNo())
-                        .amount(invoice.getTotal())
-                        .accountItemCode(salesAccount != null ? salesAccount.getExternalId() : null)
-                        .taxCode(taxMapping != null ? taxMapping.getExternalId() : null)
-                        .build()))
-                .build();
+        CanonicalSalesInvoice canonical = buildSyncCanonical(invoice, conn.getId());
 
         String payloadJson;
         try {
@@ -113,13 +215,67 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
         }
 
         String payloadHash = calculateSha256(payloadJson);
-        String idempotencyKey = "SALES_INVOICE:" + invoice.getId() + ":" + invoice.getInvoiceNo();
+        // 取消後の再送信を可能にするため、キーは世代付き（世代0は従来形式）
+        String idempotencyKey = sendKeyResolver.resolve("SALES_INVOICE:" + invoice.getId() + ":" + invoice.getInvoiceNo(),
+                "INVOICE", invoice.getId(), "SALES_INVOICE_SYNC", "SALES_INVOICE_CANCEL", payloadHash);
         Long orgId = organizationResolver.resolveInvoiceOrganizationId(invoice);
 
         log.info("Enqueueing sales sync job for invoiceId={}, idempotencyKey={}, orgId={}", invoiceId, idempotencyKey, orgId);
         return jobService.createJob(
                 conn.getId(), "SALES_INVOICE_SYNC", "INVOICE", invoice.getId(), idempotencyKey, payloadHash,
-                payloadJson, conn.getTenantId(), conn.getLegalEntityId(), orgId);
+                payloadJson, conn.getTenantId(), legalEntityId, orgId);
+    }
+
+    @Override
+    public AccountingSendPreviewDto<CanonicalSalesInvoice> previewSalesSync(Long invoiceId) {
+        Invoice invoice = invoiceService.getById(invoiceId);
+        if (invoice == null) {
+            throw BusinessException.of(404, "error.invoice.notFound");
+        }
+        // プレビューは参照のみ: 接続は作成しない（未作成ならマッピングはすべて未登録扱い）
+        IntegrationConnection conn = connectionService.getConnection(AccountingTenantContextHolder.requireTenantContext(), null, "freee", "accounting");
+        Long connectionId = conn != null ? conn.getId() : null;
+        List<MappingCheck> checks = requiredMappings(invoice).stream()
+                .map(required -> mappingService.inspect(connectionId, required[0], required[1]))
+                .toList();
+        return AccountingSendPreviewDto.of("SALES", buildSyncCanonical(invoice, connectionId), checks,
+                conn != null && "CONNECTED".equals(conn.getStatus()),
+                legalEntityResolver.check(conn, legalEntityResolver.ofInvoice(invoice)));
+    }
+
+    /** 送信ジョブへ保存する標準DTO。照合済みマッピングの外部ID（取引先・勘定科目・税区分）を反映する。 */
+    private CanonicalSalesInvoice buildSyncCanonical(Invoice invoice, Long connectionId) {
+        Customer customer = customerService.getById(invoice.getCustomerId());
+        String customerCode = customerCode(invoice);
+        String customerName = customer != null ? customer.getCompanyName() : "顧客ID:" + invoice.getCustomerId();
+
+        ExternalMapping partnerMapping = mappingService.getMapping(connectionId, "CUSTOMER_PARTNER", customerCode);
+        ExternalMapping salesAccount = mappingService.getMapping(connectionId, "ACCOUNT_SALES", "SALES_DEFAULT");
+        String[] taxKey = taxMapping(invoice);
+        ExternalMapping taxMapping = mappingService.getMapping(connectionId, taxKey[0], taxKey[1]);
+        List<com.ses.entity.InvoiceItem> items = invoiceItemMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.InvoiceItem>()
+                        .eq(com.ses.entity.InvoiceItem::getInvoiceId, invoice.getId())
+                        .orderByAsc(com.ses.entity.InvoiceItem::getId));
+
+        return CanonicalSalesInvoice.builder()
+                .invoiceId(invoice.getId())
+                .invoiceNo(invoice.getInvoiceNo())
+                .customerId(invoice.getCustomerId())
+                .customerCode(customerCode)
+                .partnerExternalId(partnerMapping != null ? partnerMapping.getExternalId() : null)
+                .customerName(customerName)
+                .issueDate(invoice.getIssuedDate())
+                .dueDate(invoice.getDueDate())
+                .subtotal(invoice.getSubtotal())
+                .tax(invoice.getTax())
+                .total(invoice.getTotal())
+                .taxRate(invoice.getTaxRate())
+                .remarks(invoice.getRemarks())
+                .details(buildDetails(invoice, items,
+                        salesAccount != null ? salesAccount.getExternalId() : null,
+                        taxMapping != null ? taxMapping.getExternalId() : null))
+                .build();
     }
 
     @Override
@@ -127,30 +283,48 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     public IntegrationJob triggerSalesCancel(Long invoiceId, String cancelReason, Long triggeredByUserId) {
         Invoice invoice = invoiceService.getById(invoiceId);
         if (invoice == null) {
-            throw new BusinessException(404, "請求書が見つかりません (id=" + invoiceId + ")");
+            throw BusinessException.of(404, "error.invoice.notFound");
         }
 
         if (invoice.getBillingMonth() != null) {
             monthlyClosingService.assertOpenForUpdate(invoice.getBillingMonth());
         }
 
-        IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
+        IntegrationConnection conn = resolveConnection(AccountingTenantContextHolder.requireTenantContext(), null, "freee", "accounting");
         IntegrationJob latestSync = jobService.getLatestJob("INVOICE", invoiceId, "SALES_INVOICE_SYNC");
         if (latestSync == null || !"SUCCEEDED".equals(latestSync.getStatus()) || latestSync.getExternalId() == null) {
-            throw new BusinessException(400, "連携済みの外部取引が存在しないため、取消処理を実行できません");
+            throw BusinessException.of(400, "error.accounting.syncedDealMissing");
         }
+
+        // NF09: 取消は取引を作成したジョブと同じ法人で実行する（旧ジョブに法人が無ければ請求書の法人）
+        Long legalEntityId = latestSync.getLegalEntityId() != null
+                ? latestSync.getLegalEntityId()
+                : legalEntityResolver.require(conn, legalEntityResolver.ofInvoice(invoice));
 
         // P1-11: 取消理由は機械可読コード (design §8.3) を保存・送信する。未知の入力は REASON_OTHER へ正規化
         String reason = normalizeCancelReason(cancelReason);
         String idempotencyKey = "SALES_CANCEL:" + invoice.getId() + ":" + latestSync.getExternalId();
         String payload = "{\"invoiceId\":" + invoiceId + ",\"externalDealId\":\"" + latestSync.getExternalId() + "\",\"reason\":\"" + reason + "\"}";
         String payloadHash = calculateSha256(payload);
+        // 取消済み・取消処理中の取引は理由付きで返す（既存ジョブを黙って返すと「登録しました」と誤表示になる）
+        IntegrationJob existingCancel = jobService.getByIdempotencyKey(idempotencyKey);
+        if (existingCancel != null) {
+            if ("SUCCEEDED".equals(existingCancel.getStatus())) {
+                throw BusinessException.of(409, "error.accounting.alreadyCancelled");
+            }
+            if ("FAILED".equals(existingCancel.getStatus())) {
+                throw BusinessException.of(409, "error.accounting.previousJobFailed");
+            }
+            if (!payloadHash.equals(existingCancel.getPayloadHash())) {
+                throw BusinessException.of(409, "error.accounting.jobInProgress");
+            }
+        }
         Long orgId = organizationResolver.resolveInvoiceOrganizationId(invoice);
 
         log.info("Enqueueing sales cancel job for invoiceId={}, externalDealId={}, orgId={}", invoiceId, latestSync.getExternalId(), orgId);
         return jobService.createJob(
                 conn.getId(), "SALES_INVOICE_CANCEL", "INVOICE", invoice.getId(), idempotencyKey, payloadHash,
-                payload, conn.getTenantId(), conn.getLegalEntityId(), orgId);
+                payload, conn.getTenantId(), legalEntityId, orgId);
     }
 
     private final SalesInvoiceTransactionCoordinator transactionCoordinator;
@@ -269,7 +443,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     public CanonicalSalesInvoice buildCanonicalInvoice(Long invoiceId) {
         Invoice invoice = invoiceService.getById(invoiceId);
         if (invoice == null) {
-            throw new BusinessException(404, "請求書が見つかりません (id=" + invoiceId + ")");
+            throw BusinessException.of(404, "error.invoice.notFound");
         }
         Customer customer = customerService.getById(invoice.getCustomerId());
         String customerCode = "CUST-" + invoice.getCustomerId();

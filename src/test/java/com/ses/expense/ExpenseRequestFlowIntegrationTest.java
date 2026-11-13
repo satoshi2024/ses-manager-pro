@@ -419,6 +419,100 @@ class ExpenseRequestFlowIntegrationTest {
         assertEquals(403, denied.getCode());
     }
 
+    @Test
+    void provider_manualでは承認しても自動連携せず会計連携済にも通知にもならない() {
+        systemConfigService.put("expense.accounting.provider", "manual", "テスト用");
+        try {
+            long applicant = insertUser("管理者");
+            long approver = insertUser("管理者");
+            long engineerId = createEngineer(null);
+            link(engineerId, applicant);
+            insertRoute(List.of(List.of(approver)));
+            long expenseId = approvedExpense(engineerId, applicant, approver, LocalDate.of(2026, 8, 20), "1300");
+
+            assertEquals(0, scheduler.processDue(100));
+
+            assertEquals(0, jobMapper.selectCount(new LambdaQueryWrapper<ExpenseAccountingJob>()
+                    .eq(ExpenseAccountingJob::getExpenseRequestId, expenseId)), "送れないjobを作らない");
+            assertEquals("承認済", expenseRequestMapper.selectById(expenseId).getStatus());
+            assertEquals(0, countNotification(applicant, "EXPENSE_ACCOUNTING_SENT", "expense-accounting-sent:" + expenseId));
+        } finally {
+            systemConfigService.put("expense.accounting.provider", "mock", "テスト用");
+        }
+    }
+
+    @Test
+    void provider_freeeではfreee取引の作成を待ってから会計連携済にし通知は1件だけ() {
+        systemConfigService.put("expense.accounting.provider", "freee", "テスト用");
+        Long integrationJobId = null;
+        try {
+            long applicant = insertUser("管理者");
+            long approver = insertUser("管理者");
+            long engineerId = createEngineer(null);
+            link(engineerId, applicant);
+            insertRoute(List.of(List.of(approver)));
+            long expenseId = approvedExpense(engineerId, applicant, approver, LocalDate.of(2026, 8, 21), "1400");
+
+            // 会計・支払連携の送信ジョブが処理中（freee取引はまだ無い）
+            integrationJobId = insertExpenseSendJob(expenseId, "RUNNING", null);
+            scheduler.createAccountingJobs(100);
+            assertFalse(scheduler.dispatchOne(expenseId));
+
+            ExpenseAccountingJob waiting = jobMapper.selectOne(new LambdaQueryWrapper<ExpenseAccountingJob>()
+                    .eq(ExpenseAccountingJob::getExpenseRequestId, expenseId));
+            assertEquals("PENDING", waiting.getStatus());
+            assertEquals(0, waiting.getAttemptCount(), "処理待ちは試行回数を消費しない");
+            assertEquals(ExpenseAccountingSender.PENDING, waiting.getLastErrorCode());
+            assertEquals("承認済", expenseRequestMapper.selectById(expenseId).getStatus(), "freee取引の作成前に会計連携済にしない");
+            assertEquals(0, countNotification(applicant, "EXPENSE_ACCOUNTING_SENT", "expense-accounting-sent:" + expenseId));
+
+            // 送信ジョブが成功（会計側が経費を会計連携済へ進めた）
+            jdbcTemplate.update("UPDATE t_integration_job SET status = 'SUCCEEDED', external_id = '4401' WHERE id = ?",
+                    integrationJobId);
+            jdbcTemplate.update("UPDATE t_expense_request SET status = '会計連携済' WHERE id = ?", expenseId);
+            jdbcTemplate.update("UPDATE t_expense_accounting_job SET next_attempt_at = ? WHERE expense_request_id = ?",
+                    java.time.LocalDateTime.now().minusMinutes(1), expenseId);
+
+            assertTrue(scheduler.dispatchOne(expenseId));
+            ExpenseAccountingJob sent = jobMapper.selectById(waiting.getId());
+            assertEquals("SUCCEEDED", sent.getStatus());
+            assertEquals("4401", sent.getCorrelationId());
+            ExpenseRequest after = expenseRequestMapper.selectById(expenseId);
+            assertEquals("会計連携済", after.getStatus());
+            assertEquals(waiting.getId(), after.getAccountingJobId());
+            assertEquals(1, countNotification(applicant, "EXPENSE_ACCOUNTING_SENT", "expense-accounting-sent:" + expenseId));
+        } finally {
+            systemConfigService.put("expense.accounting.provider", "mock", "テスト用");
+            if (integrationJobId != null) {
+                jdbcTemplate.update("DELETE FROM t_integration_job WHERE id = ?", integrationJobId);
+            }
+        }
+    }
+
+    /** 下書き→申請→承認まで進めた経費IDを返す（schedulerは呼ばない）。 */
+    private long approvedExpense(long engineerId, long applicant, long approver, LocalDate date, String amount) {
+        authenticate(applicant, "要員");
+        ExpenseRequestService.ExpenseRequestDto draft = expenseRequestService.createDraft(engineerId,
+                cmd(date, "交通費", new BigDecimal(amount)));
+        expenseRequestService.attachReceipt(engineerId, draft.id(), "receipt.pdf", "application/pdf",
+                new java.io.ByteArrayInputStream("%PDF-1.4 ok".getBytes(StandardCharsets.UTF_8)));
+        ExpenseRequestService.ExpenseRequestDto applied = expenseRequestService.submit(engineerId, draft.id());
+        authenticate(approver, "管理者");
+        approvalEngineService.approve(applied.approvalRequestId(), approver, "承認します");
+        assertEquals("承認済", expenseRequestMapper.selectById(draft.id()).getStatus());
+        return draft.id();
+    }
+
+    /** 会計・支払連携の経費送信ジョブ（EXPENSE_DEAL_SYNC）を直接置く。schedulerはtest profileで止まっている。 */
+    private Long insertExpenseSendJob(long expenseId, String status, String externalId) {
+        String key = "EXPENSE:" + expenseId + ":test-" + System.nanoTime();
+        jdbcTemplate.update("INSERT INTO t_integration_job (connection_id, job_type, target_type, target_id, tenant_id, "
+                        + "legal_entity_id, idempotency_key, payload_hash, status, attempt_count, max_attempts, external_id) "
+                        + "VALUES (999999, 'EXPENSE_DEAL_SYNC', 'EXPENSE_REQUEST', ?, 'default', 1, ?, ?, ?, 1, 5, ?)",
+                expenseId, key, "0".repeat(64), status, externalId);
+        return jdbcTemplate.queryForObject("SELECT id FROM t_integration_job WHERE idempotency_key = ?", Long.class, key);
+    }
+
     // ----------------------------------------------------------------
     // ヘルパー
     // ----------------------------------------------------------------
