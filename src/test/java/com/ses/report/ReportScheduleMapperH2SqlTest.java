@@ -104,6 +104,94 @@ class ReportScheduleMapperH2SqlTest {
     }
 
     @Test
+    void 連続失敗が上限に達したfailure_completionは同じUPDATEで停止理由を保存し管理者enableで回数だけ戻す() {
+        long id = insertDue(SEPT);
+        // 10回失敗済み。次の失敗（11回目）では停止せず、その次（12回目）で停止する。
+        jdbcTemplate.update("UPDATE m_report_schedule SET failure_count = 10 WHERE id = ?", id);
+        LocalDateTime firstClaimAt = SEPT.plusMinutes(1);
+        String firstToken = UUID.randomUUID().toString();
+        assertThat(claim(only(scheduleMapper.selectDue(TENANT, firstClaimAt, firstClaimAt.minusMinutes(30), 50), id),
+                firstToken, firstClaimAt)).isEqualTo(1);
+        LocalDateTime firstRetryAt = firstClaimAt.plusMinutes(55);
+        assertThat(scheduleMapper.markFailure(TENANT, id, firstToken, firstClaimAt, firstRetryAt, SEPT,
+                "SCHEDULE_GENERATION_FAILED", "error.system.unexpected")).isEqualTo(1);
+        ReportSchedule eleventh = scheduleMapper.selectById(id);
+        assertThat(eleventh.getEnabled()).as("11回目の失敗では停止しない").isEqualTo(1);
+        assertThat(eleventh.getFailureCount()).isEqualTo(11);
+        assertThat(eleventh.getLastErrorCode()).isEqualTo("SCHEDULE_GENERATION_FAILED");
+
+        LocalDateTime secondClaimAt = firstRetryAt.plusMinutes(1);
+        String secondToken = UUID.randomUUID().toString();
+        assertThat(claim(only(scheduleMapper.selectDue(TENANT, secondClaimAt, secondClaimAt.minusMinutes(30), 50), id),
+                secondToken, secondClaimAt)).isEqualTo(1);
+        LocalDateTime secondRetryAt = secondClaimAt.plusMinutes(60);
+        assertThat(scheduleMapper.markFailure(TENANT, id, secondToken, secondClaimAt, secondRetryAt, SEPT,
+                "SCHEDULE_GENERATION_FAILED", "error.system.unexpected")).isEqualTo(1);
+        ReportSchedule exhausted = scheduleMapper.selectById(id);
+        assertThat(exhausted.getEnabled()).as("12回目の失敗で停止").isZero();
+        assertThat(exhausted.getFailureCount()).isEqualTo(ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES);
+        assertThat(exhausted.getLastErrorCode()).isEqualTo(ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE);
+        assertThat(exhausted.getLastErrorMessage()).isEqualTo("error.system.unexpected");
+        assertThat(exhausted.getRetryScheduledAt()).as("再開用にretry予定を保持").isEqualTo(secondRetryAt);
+        assertThat(exhausted.getProcessingLogicalRunAt()).isEqualTo(SEPT);
+        assertThat(exhausted.getProcessingClaimedAt()).isNull();
+        assertThat(exhausted.getProcessingClaimToken()).isNull();
+        LocalDateTime afterRetry = secondRetryAt.plusMinutes(1);
+        assertThat(scheduleMapper.selectDue(TENANT, afterRetry, afterRetry.minusMinutes(30), 50))
+                .extracting(ReportSchedule::getId).as("停止中はdue候補にならない").doesNotContain(id);
+
+        // 停止中のdisableは回数を変えず、管理者のenableだけが連続失敗回数を0へ戻す。
+        assertThat(scheduleMapper.updateEnabled(TENANT, id, 0, 1L)).isEqualTo(1);
+        assertThat(scheduleMapper.selectById(id).getFailureCount()).isEqualTo(12);
+        assertThat(scheduleMapper.updateEnabled(TENANT, id, 1, 1L)).isEqualTo(1);
+        ReportSchedule resumed = scheduleMapper.selectById(id);
+        assertThat(resumed.getEnabled()).isEqualTo(1);
+        assertThat(resumed.getFailureCount()).isZero();
+        assertThat(resumed.getRetryScheduledAt()).isEqualTo(secondRetryAt);
+        assertThat(resumed.getProcessingLogicalRunAt()).isEqualTo(SEPT);
+        assertThat(resumed.getLastErrorCode()).as("停止理由は次のcompletionまで保持")
+                .isEqualTo(ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE);
+        ReportSchedule retry = only(scheduleMapper.selectDue(TENANT, afterRetry, afterRetry.minusMinutes(30), 50), id);
+        assertThat(retry.getFailureCount()).isZero();
+
+        // 自動停止以外の理由で無効化された行のenableは、連続失敗回数を変えない。
+        long manual = insertDue(SEPT);
+        jdbcTemplate.update("UPDATE m_report_schedule SET enabled = 0, failure_count = 4, "
+                + "last_error_code = 'SCHEDULE_GENERATION_FAILED' WHERE id = ?", manual);
+        assertThat(scheduleMapper.updateEnabled(TENANT, manual, 1, 1L)).isEqualTo(1);
+        assertThat(scheduleMapper.selectById(manual).getFailureCount()).isEqualTo(4);
+    }
+
+    @Test
+    void countLegacyLeasesはtoken無しの占有中leaseだけを数え取得時刻で絞り込める() {
+        long early = insertDue(SEPT);
+        long late = insertDue(SEPT);
+        long tokened = insertDue(SEPT);
+        long orphan = insertDue(SEPT);
+        long disabled = insertDue(SEPT);
+        long deleted = insertDue(SEPT);
+        String lease = "UPDATE m_report_schedule SET processing_logical_run_at = ?, last_run_at = ?, "
+                + "processing_claimed_at = ? WHERE id = ?";
+        jdbcTemplate.update(lease, SEPT, SEPT, SEPT.plusMinutes(5), early);
+        jdbcTemplate.update(lease, SEPT, SEPT, SEPT.plusMinutes(20), late);
+        jdbcTemplate.update(lease, SEPT, SEPT, SEPT.plusMinutes(5), tokened);
+        jdbcTemplate.update("UPDATE m_report_schedule SET processing_claim_token = ? WHERE id = ?",
+                "00000000-0000-4000-8000-0000000000cc", tokened);
+        jdbcTemplate.update("UPDATE m_report_schedule SET processing_claim_token = ? WHERE id = ?",
+                "00000000-0000-4000-8000-0000000000dd", orphan);
+        jdbcTemplate.update(lease, SEPT, SEPT, SEPT.plusMinutes(5), disabled);
+        jdbcTemplate.update("UPDATE m_report_schedule SET enabled = 0 WHERE id = ?", disabled);
+        jdbcTemplate.update(lease, SEPT, SEPT, SEPT.plusMinutes(5), deleted);
+        jdbcTemplate.update("UPDATE m_report_schedule SET deleted_flag = 1 WHERE id = ?", deleted);
+
+        assertThat(scheduleMapper.countLegacyLeases(TENANT, null)).as("token無しの占有中leaseだけ").isEqualTo(2);
+        assertThat(scheduleMapper.countLegacyLeases(TENANT, SEPT.plusMinutes(20))).as("取得時刻以降（境界を含む）")
+                .isEqualTo(1);
+        assertThat(scheduleMapper.countLegacyLeases(TENANT, SEPT.plusMinutes(21))).isZero();
+        assertThat(scheduleMapper.countLegacyLeases(TENANT + "-other", null)).as("他tenantの行は数えない").isZero();
+    }
+
+    @Test
     void 孤児tokenは未占有として選ばれ実行中retry_leaseはLIMIT枠を占有しない() {
         long orphanId = insertDue(SEPT);
         jdbcTemplate.update("UPDATE m_report_schedule SET processing_claim_token = ? WHERE id = ?",

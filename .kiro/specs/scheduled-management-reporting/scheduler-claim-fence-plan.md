@@ -147,6 +147,7 @@ V185がrootにより割り当てられた場合、latest version=184を期待す
 - Flywayは新artifactの最初の起動時にV185を自動適用する（`spring.flyway.enabled` 既定true）。V185適用と新artifact起動は分離できないため、**旧nodeのschedulerをすべて停止し、in-flight処理のdrain完了を確認してから**新artifactだけを起動する。
 - 新artifactへの切替後に旧artifactへ戻す場合も同じ（新nodeを全停止・drainしてから旧artifactを起動する）。
 - 起動guard（drain未確認やtoken無しの新しいleaseが残る状態でschedulerを起動しない等）は未実装。要否はSRE/Owner判断。
+  - **2026-11-13改訂**: ユーザー決定（B-NF10-1）により初回本番は全停止＋専用Flyway job（rolling無し）とし、起動guardを誤操作防止として実装した（§14.1、テスト未実行）。token無しleaseが1件でもあれば全tenantのclaimを止める。本節の手順草案とSRE/DBA承認待ちの扱いは変えない。
 
 ### 10.2 手順草案
 
@@ -182,7 +183,7 @@ FROM m_report_schedule
 WHERE deleted_flag = 0 AND processing_claimed_at IS NOT NULL AND processing_claim_token IS NULL
 ORDER BY tenant_id, id;
 
--- Q4: 連続失敗（retry上限未定義の監視用。12回以上でretry間隔が上限60分に達する）。
+-- Q4: 連続失敗。2026-11-13以降は12回目の失敗で自動停止する（enabled = 0、last_error_code = 'SCHEDULE_RETRY_EXHAUSTED'、§14.2）。
 SELECT tenant_id, id, failure_count, retry_scheduled_at, last_error_code, updated_at
 FROM m_report_schedule
 WHERE deleted_flag = 0 AND failure_count >= 12
@@ -194,6 +195,7 @@ ORDER BY failure_count DESC, tenant_id, id;
 - **孤児token（Q2）**: 新版が次回due/retry時刻にCASで自動回収するため、手動UPDATEは原則不要。件数を見かけ上ゼロにする目的のclearは行わない。やむを得ずclearする場合の草案は、scheduler停止中に限り期待tokenを一致条件にした1行CASとする（**DBA承認前に実行しない**）:
   `UPDATE m_report_schedule SET processing_claim_token = NULL WHERE tenant_id = ? AND id = ? AND processing_claimed_at IS NULL AND processing_claim_token = ?`
 - **token無しlease（Q3）**: 旧node停止・drain確認後、lease期限の超過を待てば新版が `processing_claimed_at` / `processing_logical_run_at` / token=NULLの完全一致CASで引き継ぐ。手動でtokenを付与しない（ownerを捏造しない）。
+  - 2026-11-13以降は起動guardがQ3を1件でも検出すると全claimを止めるため、引き継ぎには運用者のdrain確認設定（`management-report.legacy-lease-drain-confirmed=true`）での再起動が要る。手順は§14.1。
 - **rollback**: Flywayはforward-onlyとし、V185を取り消すDDL（DROP COLUMN）は用意しない。旧artifactはtoken列を無視して動作し、再upgrade後に残った孤児tokenは自動回収される。切替方向にかかわらず§10.1の停止・drainを行う。
 - **混在稼働が起きた場合**: 直ちに旧nodeのschedulerを停止し、Q1〜Q3を確認する。重複生成/配布の有無は `t_report_run.run_key`（一意）と `t_report_delivery` のdedupeで確認する。
 
@@ -203,14 +205,17 @@ ORDER BY failure_count DESC, tenant_id, id;
 
 ## 11. Owner判断待ち事項（挙動は変更しない）
 
-| ID | 論点 | 現状の実装 | 追加した防御（挙動不変） | 判断者 |
-|---|---|---|---|---|
-| P2-1 | lease延長、副作用前fence | lease 30分固定・延長なし。30分超のrunは引き継がれ、生成/配布が重複し得る（run_key・delivery dedupeでの収束はMySQL並行で未検証）。disableは実行中runを止めない | WARN「processing lease期限を超えて実行しました」「期限切れprocessing leaseを引き継ぎました」 | Report Owner／技術責任者 |
-| P2-2 | lease時刻のDB時刻化 | 見送り（下記理由） | なし（NTP同期を運用前提とする） | SRE |
-| P2-3 | tenant timezone変更時の扱い | schedule timezoneはAsia/Tokyo固定。tenant zoneと不一致なら `policyFixed` で失敗し、retryを繰り返す | WARN「tenant timezoneとschedule timezoneが一致しない…」 | Report Owner |
-| P2-4 | retry上限・DLQ | 上限なし（間隔は最大60分）。確定的失敗も無限retry | failure count 12以上でWARN、§10.3 Q4 | Report Owner |
-| P2-8 | claim失敗のmetric/alert | 確定的SQL失敗（文法・列不一致・制約・binding）は当tenantの今回pollを中断し、ERROR `errorCode=SCHEDULE_CLAIM_SQL_REJECTED` を出す。結果不明（commit失敗・接続障害・lock競合）は当該scheduleだけ見送る | ERRORログの分類のみ。metric/alert連携は未実装 | SRE |
-| — | 起動guard | 未実装 | なし | SRE／Owner |
+> 2026-11-13改訂: P2-1・P2-4・P2-8・P3-3・起動guardはユーザー決定（B-NF10-1/B-NF10-2、`launch-decisions-20261113`）を受けて§14で実装した（テスト未実行）。下表の「現状の実装」列は2026-11-12時点の記述として残し、決定と現在の扱いを「2026-11-13」列に記す。
+
+| ID | 論点 | 現状の実装 | 追加した防御（挙動不変） | 判断者 | 2026-11-13 |
+|---|---|---|---|---|---|
+| P2-1 | lease延長、副作用前fence | lease 30分固定・延長なし。30分超のrunは引き継がれ、生成/配布が重複し得る（run_key・delivery dedupeでの収束はMySQL並行で未検証）。disableは実行中runを止めない | WARN「processing lease期限を超えて実行しました」「期限切れprocessing leaseを引き継ぎました」 | Report Owner／技術責任者 | **決定済**: lease延長はしない。重複はrun_key・delivery dedupeで収束させ、実service・実MySQLのtestで証明する（§14.4、未実行） |
+| P2-2 | lease時刻のDB時刻化 | 見送り（下記理由） | なし（NTP同期を運用前提とする） | SRE | 変更なし |
+| P2-3 | tenant timezone変更時の扱い | schedule timezoneはAsia/Tokyo固定。tenant zoneと不一致なら `policyFixed` で失敗し、retryを繰り返す | WARN「tenant timezoneとschedule timezoneが一致しない…」 | Report Owner | 再計算方針は未決のまま。無限retryはretry上限（12回で自動停止）で有界になった |
+| P2-4 | retry上限・DLQ | 上限なし（間隔は最大60分）。確定的失敗も無限retry | failure count 12以上でWARN、§10.3 Q4 | Report Owner | **実装**: 連続12回目の失敗で自動停止し停止理由を保存、ERROR＋metric、管理者の有効化で再開（§14.2） |
+| P2-8 | claim失敗のmetric/alert | 確定的SQL失敗（文法・列不一致・制約・binding）は当tenantの今回pollを中断し、ERROR `errorCode=SCHEDULE_CLAIM_SQL_REJECTED` を出す。結果不明（commit失敗・接続障害・lock競合）は当該scheduleだけ見送る | ERRORログの分類のみ。metric/alert連携は未実装 | SRE | **実装**: Micrometer counter/gauge（§14.5）。alert ruleと配信先はSRE |
+| P3-3 | 行単位の確定的失敗による同tenantの後続停止 | 当tenantの今回pollを中断（head-of-line blocking） | なし | Owner | **実装**: 当該行だけを見送り、残り候補は続行（§14.3） |
+| — | 起動guard | 未実装 | なし | SRE／Owner | **実装**: token無しleaseで全claim停止（fail-closed）、drain確認設定（§14.1） |
 
 P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLocalDateTimeで保存しており、DBの `CURRENT_TIMESTAMP` はsession `time_zone` に依存してtenant timezoneを知らない。混在させるとstale判定とretry判定の基準がずれる。(2) completion CASはclaimedAtの完全一致を条件にしているため、DB生成値を使うとclaim後に読み戻す2文構成が必要になる。(3) H2 testの `CURRENT_TIMESTAMP` はJVM timezoneとなり、テスト結果が環境に依存する。node間の時刻差sがある場合、実効leaseは30−s分になる。
 
@@ -266,3 +271,88 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 - `performance_schema.data_lock_waits` を `data_locks`（requester/blocker）と `threads` へjoinし、次をすべて満たす待ち辺が1件だけ現れるまで待つ: 対象DBの `m_report_schedule`、`PRIMARY`、`RECORD`、requesterは `WAITING` のX lock、blockerは `GRANTED` のX lock、`LOCK_DATA` が対象id、blockerの接続IDがholder、requesterはholderでも監視接続でもない、requesterの実行中SQLがclaim UPDATE（`UPDATE m_report_schedule SET processing_logical_run_at…`）。
 - contender投入前に待ち辺が0件であること、観測時点でcontenderが未完了であること、holder commit後に待ち辺が残らないことも確認する。10秒の上限は変えない。観測できない場合はdata_lock_waits・data_locks・metadata_locks・実行中SQL先頭を診断として失敗messageへ出す。
 - 強度: 旧helperは「どこかのtransactionがLOCK WAIT」という条件だったが、新helperは「holder接続が保持する対象行のrecord lockを、別接続のclaim UPDATEが待っている」ことを要求するため、同等以上に厳しい。holder=1件、contender=CAS 0件（null）、tokenはholderのもの、という結果assertionは変更していない。
+
+## 14. 運用方針の実装（2026-11-13、W2-B8）
+
+状態: **実装済・静的確認のみ・テスト未実行（主控Runnerの定向実行待ち）。** COMPLETE/PASSではない。production/運用gateの承認、SRE/DBA承認（§10）、Report Owner署名を意味しない。
+
+- 基準HEAD: `1836eb73fec57421d2acc9503e3e84fe1f267856`。branch `codex/snf-w2-nf10-scheduler-policy-20261113`。
+- 入力となった決定（`launch-decisions-20261113`、ユーザー決定。各責任者の署名の代わりではない）:
+  - B-NF10-1: 初回本番は全停止＋専用Flyway job（rolling無し）。起動guardは誤操作防止として実装する。
+  - B-NF10-2: 重複配布はrun_key dedupeで受容する（testで証明する）。retryは12回で計画を停止しalertする。確定的SQL失敗は当該行だけを見送り、tenant全体を止めない。
+  - NF10は機能スイッチ `app.features.nf10.enabled`（既定OFF）で守り、Report Owner署名後にONにする。
+- DDL・messages・application*.yml・機能スイッチ実装は変更していない。
+
+### 14.1 起動guard（legacy lease検出、A-NF10-3）
+
+- **判定**: 毎poll、`dispatchDue` の入口（機能スイッチ確認の後、tenant処理の前）で、inventory内の全tenantについて `enabled = 1 AND deleted_flag = 0 AND processing_claimed_at IS NOT NULL AND processing_claim_token IS NULL` を数える（`ReportScheduleMapper.countLegacyLeases`、§10.3 Q3と同じ条件）。新版のclaimは必ずtokenを保存するため、1件でもあれば旧版schedulerの痕跡である。旧版のcompletionはtoken条件を持たず新ownerの状態を上書きし得るため、tenant単位ではなく全tenantのclaimを止める。
+- **drain未確認（既定）**: 1件以上なら全tenantのclaimを開始しない。ERROR `errorCode=SCHEDULE_LEGACY_LEASE_DETECTED`、metric `LEGACY_LEASE_BLOCKED`、gauge `ses_report_schedule_legacy_leases`。
+- **drain確認設定**（`management-report.legacy-lease-drain-confirmed`、コード既定false）がtrueの場合:
+  - 本instanceの起動時刻（scheduler bean生成時刻をtenant timezone・秒精度へ変換）以降に取得されたlegacy leaseが1件でもあれば、設定に関わらず止める。ERROR `errorCode=SCHEDULE_LEGACY_LEASE_ACTIVE`、metric `LEGACY_LEASE_ACTIVE_BLOCKED`。
+  - 起動前から残るleaseだけなら許可し、lease期限（30分）後に既存のtoken=NULL完全一致CASで引き継ぐ。WARN `errorCode=SCHEDULE_LEGACY_LEASE_DRAIN_ACCEPTED`、metric `LEGACY_LEASE_DRAIN_ACCEPTED`。
+- **検出SQL自体の失敗**（`DataAccessException`。V185未適用でtoken列が無い等）でも全claimを止める。ERROR `errorCode=SCHEDULE_LEGACY_LEASE_GUARD_FAILED`、metric `LEGACY_LEASE_GUARD_FAILED`。
+- **drain確認設定が必要な理由**: legacy leaseは「旧版nodeが実行中」と「旧版nodeは停止済みでleaseだけが残った」をDBから区別できない。
+  - 設定なしで止め続けると、crashした旧版nodeのleaseが永久にclaimを止める（guardが引き継ぎも止めるため自然には解消しない）。
+  - 逆に期限後の自動引き継ぎを許すと、旧版nodeが稼働中のまま新版が引き継ぎ、旧版のtoken条件なしcompletionが新ownerの状態を上書きする（§9の限界）。
+  - そこで「停止済み」の確認だけを人に委ねる。設定をtrueのまま放置してもguardが無効にならないよう、起動後に取得された新しいlegacy leaseは設定に関わらず止める。
+- **限界**: 旧版nodeがclaimしていない（idle）間は検出できない（ShedLock名が共通のため新旧はpollを交互に取り得る）。全停止デプロイ（B-NF10-1）が一次防御で、guardは誤操作の検出と被害拡大の防止である。孤児token（§9）はclaimを止めず、WARNと `ORPHAN_TOKEN_REPLACED` で通知する。inventory外tenantの行とenabled=0の行は数えない（schedulerがclaimしない行のため。再有効化すれば再び数える）。
+- **復旧手順（草案、SRE/DBA承認待ち）**:
+  1. ERRORまたはalertを検知したら、旧版artifactが全nodeで停止していることを確認する。
+  2. §10.3 Q1・Q3で残っているleaseを確認する。手動UPDATEでclearしない。
+  3. `MANAGEMENT_REPORT_LEGACY_LEASE_DRAIN_CONFIRMED=true` で新版を再起動する（起動時刻を更新するため再起動が必要）。
+  4. lease期限後の次pollで引き継がれ、gaugeが0になることを確認する。
+  5. 設定をfalseへ戻して再起動する。
+
+### 14.2 retry上限（A-NF10-4 / P2-4）
+
+- 連続失敗回数（`failure_count`、初回実行の失敗を含む）が12回に達したfailure completionで、所有権CASと同じUPDATEにより `enabled = 0`、`last_error_code = 'SCHEDULE_RETRY_EXHAUSTED'` を保存する。`retry_scheduled_at`・`processing_logical_run_at`・`failure_count`（12）・`last_error_message` は保持する。
+- **DDL不要**: 既存列の組合せ（`enabled` / `last_error_code` / `failure_count` / `retry_scheduled_at`）で、停止・停止理由・再開位置を表す。新列は使わない。
+- **SET句の順序**: MySQLの単一表UPDATEはSET句を左から評価し、後ろの式が更新後の値を参照する（H2は更新前の値）。`failure_count` を参照する式を `failure_count` の代入より前に置き、H2とMySQLの両方のtestで確認する。
+- **通知**: ERROR「連続失敗が上限（12回）に達したためscheduleを自動停止しました」、metric `RETRY_EXHAUSTED_DISABLED`。
+- **可視化**: `GET /api/management-reports/schedules` の `enabled=0`、`lastErrorCode=SCHEDULE_RETRY_EXHAUSTED`、`failureCount=12`、`retryScheduledAt`。schedule一覧の画面は現状存在しないため、UI表示は後続。
+- **手動再開**: 管理者の `POST /api/management-reports/schedules/{id}/enable`。`updateEnabled` は「`enabled = 0` かつ `last_error_code = 'SCHEDULE_RETRY_EXHAUSTED'`」の行を有効化する時だけ `failure_count = 0` に戻す。retry予定から同一論理runを再開する。停止理由のerror codeは次のcompletionまで保持し、successでclear、failureで上書きする。それ以外のenable/disableは回数を変えない。
+- **解釈（Report Owner確認事項）**: 「12回」は連続失敗回数（初回＋retry 11回）とした。「初回＋retry 12回＝13回」の意図であれば定数 `ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES` だけを変える。上限はSQLへ定数として埋め込み、設定値にはしない。
+- 再開後、停止中に過ぎた `next_run_at` は既存の扱い（成功ごとにcronの次回へ1回分ずつ進む）に従う。
+
+### 14.3 確定的claim SQL失敗（P3-3）
+
+- 当該行だけを見送り、同tenantの残り候補は続行する。ERROR `errorCode=SCHEDULE_CLAIM_SQL_REJECTED`、metric `CLAIM_SQL_REJECTED`。
+- claimが成立していないため、行へ失敗を記録できない。当該行は毎poll再試行される（最大50件/tenant/poll）。
+- schema全体の不整合（token列の欠落等）は、起動guardの検出SQLが先に失敗して全claimを止めるため、行ごとのERRORが大量に出る状況になりにくい。
+
+### 14.4 重複配布の収束（A-NF10-5 / P2-1）
+
+- lease延長は行わない（B-NF10-2）。stale takeoverで同一論理runが重複実行されても、実serviceのrun_key（`uk_report_run_key`）とdelivery（`uk_report_delivery_recipient` / `uk_report_delivery_dedupe`）で配布が1回に収束することを `ReportScheduleDispatchPolicyMySqlTest`（`@Tag("mysql")`、`mysql-shard-2.txt`）で検証する。
+  - 重複実行: Aが実生成・実配布の後、completion前にlease期限を超えて停止する。Bが引き継ぎ、実生成はrunを再利用（`reused=true`）、実配布は既存deliveryを再利用する。delivery・アプリ内通知・outboxは各1件、文書登録は1回、Aのcompletionは0件。
+  - 並行投入: 同一command（同一run_key）を8並行で生成・配布する。run・delivery・通知・outboxは各1件。失敗した投入は一意制約またはlock競合による拒否だけで、transactionごとrollbackされる。その後の再投入も同じrun・deliveryへ収束する。
+- mockにしたのはdedupe境界の外側だけ（recipient preview、AR aging正本値、PDF描画とstorage = `ReportDeliveryDocumentRegistrar`、外部webhook）。並行時の文書artifactの重複（document business key）は本testの対象外で、UNKNOWN。
+
+### 14.5 metric / alert（P2-8）
+
+- 既存のMicrometer（`/actuator/prometheus`）へ接続する。tagは有限のevent種別だけで、tenant/schedule ID・token・PIIを載せない。
+  - `ses_report_schedule_events_total{event=...}`: `RUN_SUCCEEDED` / `RUN_FAILED` / `RETRY_EXHAUSTED_DISABLED` / `CLAIM_SQL_REJECTED` / `CLAIM_UNCERTAIN` / `OWNERSHIP_LOST` / `COMPLETION_UNCERTAIN` / `STALE_LEASE_TAKEOVER` / `ORPHAN_TOKEN_REPLACED` / `LEASE_OVERRUN` / `LEGACY_LEASE_BLOCKED` / `LEGACY_LEASE_ACTIVE_BLOCKED` / `LEGACY_LEASE_DRAIN_ACCEPTED` / `LEGACY_LEASE_GUARD_FAILED`
+  - `ses_report_schedule_legacy_leases`（gauge）: 直近pollで検出したlegacy lease件数
+- 推奨alert rule（案。repoにalert配信基盤は無く、設定と配信先はSRE）:
+
+| 条件 | 重要度 |
+|---|---|
+| `increase(ses_report_schedule_events_total{event=~"LEGACY_LEASE_BLOCKED\|LEGACY_LEASE_ACTIVE_BLOCKED\|LEGACY_LEASE_GUARD_FAILED"}[5m]) > 0` | critical |
+| `ses_report_schedule_legacy_leases > 0` が10分継続 | warning |
+| `increase(ses_report_schedule_events_total{event="RETRY_EXHAUSTED_DISABLED"}[1h]) > 0` | warning（Report Ownerへ） |
+| `increase(ses_report_schedule_events_total{event="CLAIM_SQL_REJECTED"}[15m]) > 0` | warning |
+| `increase(ses_report_schedule_events_total{event=~"COMPLETION_UNCERTAIN\|ORPHAN_TOKEN_REPLACED"}[1h]) > 0` | warning |
+| `increase(ses_report_schedule_events_total{event="LEGACY_LEASE_DRAIN_ACCEPTED"}[1h]) > 0` | info（drain確認設定の戻し忘れ確認） |
+
+### 14.6 機能スイッチとdelivery（A-NF10-6）
+
+- 新しいスイッチは追加しない。NF10がOFFなら `dispatchDue` は起動guardを含め何も実行しない（DB問合せも無い）。手動の生成・配布・retry・replay・downloadのAPI（`/api/management-reports/**`）は `FeatureSwitchFilter` が404にする。
+- 残る隙間: OFFにする前に通知outboxへ投入済みの通知は、汎用の `NotificationOutboxScheduler` が送る（`.kiro/specs/production-launch/feature-switches.md` §4.5）。delivery専用スイッチは作らない決定のため、OFF前に該当の配布を取消す運用で扱う。
+
+### 14.7 test対応（すべて未実行）
+
+| 方針 | test |
+|---|---|
+| 起動guard | `ManagementReportSchedulerTest`（drain未確認で停止・起動後leaseは確認設定でも停止・起動前leaseだけなら引き継ぎ・検出SQL失敗で停止の4件）、`ReportScheduleMapperH2SqlTest`（`countLegacyLeases` の条件）、`ReportScheduleDispatchPolicyMySqlTest`（実MySQLで4段階） |
+| retry上限 | `ManagementReportSchedulerTest`（11回目は通知せず12回目でERROR＋metric、tagはeventのみ）、`ReportScheduleMapperH2SqlTest`（H2のSET句評価、再開）、`ReportScheduleDispatchPolicyMySqlTest`（MySQLのSET句評価、一覧での停止理由、管理者の再開と同一論理runの再実行）、`ReportScheduleApiBoundaryTest`（一覧JSONの停止理由） |
+| 確定的SQL失敗 | `ManagementReportSchedulerTest`（先頭行の失敗後も次の行を実行） |
+| 重複配布の収束 | `ReportScheduleDispatchPolicyMySqlTest`（重複実行・8並行） |
