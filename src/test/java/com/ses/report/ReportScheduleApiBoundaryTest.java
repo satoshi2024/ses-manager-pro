@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.controller.api.ManagementReportScheduleApiController;
 import com.ses.dto.report.ReportScheduleCreateRequest;
 import com.ses.entity.ReportSchedule;
+import com.ses.mapper.ReportScheduleMapper;
 import com.ses.service.report.ReportScheduleService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -89,6 +90,29 @@ class ReportScheduleApiBoundaryTest {
             assertThat(body).doesNotContain(TOKEN).doesNotContain("processingClaimToken")
                     .doesNotContain("processing_claim_token");
         }
+    }
+
+    @Test
+    void retry上限による自動停止の理由はschedule一覧APIで確認できtokenは出ない() throws Exception {
+        ReportSchedule exhausted = claimedSchedule();
+        exhausted.setEnabled(0);
+        exhausted.setProcessingClaimedAt(null);
+        exhausted.setFailureCount(ReportScheduleMapper.MAX_CONSECUTIVE_FAILURES);
+        exhausted.setLastErrorCode(ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE);
+        exhausted.setLastErrorMessage("error.system.unexpected");
+        exhausted.setRetryScheduledAt(LocalDateTime.of(2026, 9, 1, 13, 0));
+        when(scheduleService.list()).thenReturn(List.of(exhausted));
+
+        MvcResult list = mockMvc.perform(get("/api/management-reports/schedules"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].enabled").value(0))
+                .andExpect(jsonPath("$.data[0].lastErrorCode").value("SCHEDULE_RETRY_EXHAUSTED"))
+                .andExpect(jsonPath("$.data[0].failureCount").value(12))
+                .andExpect(jsonPath("$.data[0].retryScheduledAt").exists())
+                .andExpect(jsonPath("$.data[0].processingClaimToken").doesNotExist())
+                .andReturn();
+
+        assertThat(list.getResponse().getContentAsString(StandardCharsets.UTF_8)).doesNotContain(TOKEN);
     }
 
     @Test

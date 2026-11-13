@@ -18,9 +18,38 @@ import java.util.List;
  * の行に残ったtoken（V185以前の旧版completionが {@code processing_claimed_at} だけをclearした「孤児token」）は、
  * completionが非NULLのclaimedAt一致を要求するためどのworkerも完了できない。したがって未占有として扱い、
  * due snapshotのtoken完全一致を条件に、claim時に新tokenで上書きする（scheduler-claim-fence-plan.md §9）。
+ *
+ * <p>retry上限（scheduler-claim-fence-plan.md §14.2）: 連続失敗が {@link #MAX_CONSECUTIVE_FAILURES} 回に達したfailure completionは、同じUPDATEで
+ * {@code enabled = 0} と停止理由 {@link #RETRY_EXHAUSTED_ERROR_CODE} を保存する（所有権CASと停止を分離しない）。
+ * 停止したscheduleは管理者の {@link #updateEnabled} で再開でき、その時だけ連続失敗回数を0へ戻す。
  */
 @Mapper
 public interface ReportScheduleMapper extends BaseMapper<ReportSchedule> {
+
+    /**
+     * scheduleを自動停止する連続失敗回数（初回実行の失敗を含む。B-NF10-2の決定値）。
+     * 値はSQLへ定数として埋め込むため、変更はmapperの変更として扱う（設定値にはしない）。
+     */
+    int MAX_CONSECUTIVE_FAILURES = 12;
+
+    /** retry上限で自動停止したことを示す {@code last_error_code}。API応答でも停止理由として確認できる。 */
+    String RETRY_EXHAUSTED_ERROR_CODE = "SCHEDULE_RETRY_EXHAUSTED";
+
+    /**
+     * 起動guard用に、token無しのprocessing lease（legacy lease。V185以前のclaim、またはV185適用後に旧版schedulerが
+     * 取得したlease）を数える。{@code claimedSince} を指定した場合はその時刻以降に取得されたleaseだけを数える。
+     * 新版のclaimは必ずtokenを保存するため、0件でない限り旧版schedulerの痕跡である（同plan §14.1）。
+     */
+    @Select("""
+            <script>
+            SELECT COUNT(*) FROM m_report_schedule WHERE tenant_id = #{tenantId}
+              AND enabled = 1 AND deleted_flag = 0
+              AND processing_claimed_at IS NOT NULL AND processing_claim_token IS NULL
+              <if test="claimedSince != null">AND processing_claimed_at &gt;= #{claimedSince}</if>
+            </script>
+            """)
+    int countLegacyLeases(@Param("tenantId") String tenantId,
+                          @Param("claimedSince") LocalDateTime claimedSince);
 
     /**
      * due候補を取得する。retry/通常dueは未占有（{@code processing_claimed_at IS NULL}）の行だけを返し、
@@ -103,10 +132,23 @@ public interface ReportScheduleMapper extends BaseMapper<ReportSchedule> {
     /**
      * 失敗completion。成功と同じ所有者条件で、lease/tokenだけをclearしlogical runを保持する。
      * failure countは所有者条件下のDB式で加算し、古いsnapshot値で上書きしない。0件は所有権喪失を意味する。
+     *
+     * <p>加算後の連続失敗回数が {@link #MAX_CONSECUTIVE_FAILURES} 以上なら、同じUPDATEで {@code enabled = 0} と
+     * {@code last_error_code = }{@link #RETRY_EXHAUSTED_ERROR_CODE} を保存する。retry予定とlogical runは保持し、
+     * 管理者が再有効化した時に同一論理runから再開できるようにする。
+     *
+     * <p><b>SET句の順序に依存する。</b>MySQLの単一表UPDATEはSET句を左から評価し、後ろの式は更新後の列値を参照する
+     * （H2は標準SQLどおり更新前の値）。両DBで同じ結果にするため、{@code failure_count} を参照する式は必ず
+     * {@code failure_count} の代入より前に置く。
      */
-    @Update("UPDATE m_report_schedule SET failure_count = COALESCE(failure_count, 0) + 1, "
+    @Update("UPDATE m_report_schedule SET "
+            + "enabled = CASE WHEN COALESCE(failure_count, 0) + 1 >= " + MAX_CONSECUTIVE_FAILURES
+            + " THEN 0 ELSE enabled END, "
+            + "last_error_code = COALESCE(CASE WHEN COALESCE(failure_count, 0) + 1 >= " + MAX_CONSECUTIVE_FAILURES
+            + " THEN '" + RETRY_EXHAUSTED_ERROR_CODE + "' END, #{errorCode}), "
+            + "failure_count = COALESCE(failure_count, 0) + 1, "
             + "retry_scheduled_at = #{retryAt}, processing_claimed_at = NULL, processing_claim_token = NULL, "
-            + "last_error_code = #{errorCode}, last_error_message = #{errorMessage}, "
+            + "last_error_message = #{errorMessage}, "
             + "last_run_at = #{logicalRunAt}, updated_at = CURRENT_TIMESTAMP "
             + "WHERE tenant_id = #{tenantId} AND id = #{id} AND processing_claim_token = #{claimToken} "
             + "AND processing_logical_run_at = #{logicalRunAt} AND processing_claimed_at = #{claimedAt}")
@@ -121,15 +163,19 @@ public interface ReportScheduleMapper extends BaseMapper<ReportSchedule> {
      * 管理者のenable/disable。lease/next/retry/failure列を読取時点の値で書き戻さないよう、enabledと監査列、
      * 楽観lock versionだけを更新する。論理削除済み行は対象外。更新者不明（null）の場合は既存の
      * {@code updated_by} を保持する（global {@code update-strategy: not_null} と同じ扱い）。
+     *
+     * <p>retry上限で自動停止した行（{@code enabled = 0} かつ {@code last_error_code = }
+     * {@link #RETRY_EXHAUSTED_ERROR_CODE}）を有効化する時だけ、連続失敗回数を0へ戻す（手動再開）。
+     * retry予定・logical run・停止理由のerror codeは保持し、次のcompletionが上書き/clearする。
+     * {@code failure_count} の式は {@code enabled} の代入より前に置く（MySQLのSET句左から評価への対策）。
      */
-    @Update("""
-            <script>
-            UPDATE m_report_schedule SET enabled = #{enabled},
-                <if test="updatedBy != null">updated_by = #{updatedBy},</if>
-                version = version + 1, updated_at = CURRENT_TIMESTAMP
-            WHERE tenant_id = #{tenantId} AND id = #{id} AND deleted_flag = 0
-            </script>
-            """)
+    @Update("<script>UPDATE m_report_schedule SET "
+            + "<if test=\"enabled == 1\">failure_count = CASE WHEN enabled = 0 AND last_error_code = '"
+            + RETRY_EXHAUSTED_ERROR_CODE + "' THEN 0 ELSE failure_count END, </if>"
+            + "enabled = #{enabled}, "
+            + "<if test=\"updatedBy != null\">updated_by = #{updatedBy}, </if>"
+            + "version = version + 1, updated_at = CURRENT_TIMESTAMP "
+            + "WHERE tenant_id = #{tenantId} AND id = #{id} AND deleted_flag = 0</script>")
     int updateEnabled(@Param("tenantId") String tenantId, @Param("id") Long id,
                       @Param("enabled") int enabled, @Param("updatedBy") Long updatedBy);
 }

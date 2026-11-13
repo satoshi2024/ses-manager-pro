@@ -83,3 +83,23 @@ Review remediation（`codex/nf10-review-remediation`）: delivery TX/outbox/prev
 | 計画・対応表 | `scheduler-claim-fence-plan.md` §9〜§13（独立レビュー指摘ごとの対応、§7受入試験とtestの対応、定向MySQL FAILの診断） |
 | 追加test（`93c11457` で定向実行済、上記1件FAILは修正後未実行） | `ReportScheduleClaimFenceMySqlTest`（`@Tag("mysql")`、`scripts/test-suites/mysql-shard-1.txt`）、`ReportScheduleApiBoundaryTest`、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest`/`ReportScheduleServiceImplTest` の追加case、`FlywaySelfServiceSchemaSmokeTest` の列定義assert |
 | 本番適用の前提 | rolling禁止・drain先行・検出SQL・復旧案は草案（plan §10、**SRE/DBA承認待ち**）。lease延長・retry上限・timezone変更・metric/alert・起動guardはOwner判断待ち（plan §11） |
+
+## NF10 W2-B8 scheduler運用方針（2026-11-13）
+
+状態: **実装済・r2はテスト未実行（主控Runnerの定向実行待ち）。** COMPLETE/PASSではない。上表「本番適用の前提」のうち、retry上限・metric/alert・起動guardはユーザー決定（B-NF10-1/B-NF10-2）を受けて実装した。lease延長は「行わない」と決定し、重複はrun_key・delivery dedupeで収束させる。§10の手順草案のSRE/DBA承認、alertの設定・配信先、Report Owner署名は未完了のまま。
+
+- r1 `30e058ce1916af52193bdbf4f7fa430513d2a8ae`: 独立レビュー（静的）PASS（P2×1、P3×12）。Runner定向 fast 324/0/0/0、MySQL 23/0/0/0（`ReportScheduleDispatchPolicyMySqlTest` は別seed 20261113でも4/0/0/0）。証拠は主控のrun記録 `nf10-30e058ce-*`。
+- r2: review P2-1（cutoffの論理run固定、ユーザー決定）、P3-1・P3-3・P3-8の修正と文書訂正。r2のtestは未実行。
+
+| 項目 | 内容 |
+|---|---|
+| 基準 | `1836eb73fec57421d2acc9503e3e84fe1f267856`。branch `codex/snf-w2-nf10-scheduler-policy-20261113` |
+| 起動guard（A-NF10-3） | token無しlease（legacy lease）が1件でもあれば全tenantのclaimを止める（fail-closed）。運用者がdrainを確認した時刻 `management-report.legacy-lease-drain-confirmed-before`（既定は空）より前、かつ本instance起動前に取得されたleaseだけを期限後に引き継ぐ。それ以降のleaseと、解釈できない設定値は止める。検出の失敗も停止（plan §14.1） |
+| retry上限（A-NF10-4 / P2-4） | 初回を含む連続12回目の失敗で `enabled = 0`・`last_error_code = SCHEDULE_RETRY_EXHAUSTED` を所有権CASと同じUPDATEで保存。停止理由はschedule一覧APIで確認でき、管理者の有効化で連続失敗回数を0へ戻して同一論理runから再開する。同一論理runで確定的に失敗する原因の復旧手順（新schedule作成等）とpoison pillの限界を記載。DDL不要（plan §14.2） |
+| 確定的SQL失敗（P3-3） | 当該行だけを見送り、同tenantの残り候補は続行。見送った行は待機（5分×回数、上限60分）の間due一覧から除外し、LIMIT枠を占有させない（plan §14.3） |
+| 重複配布（A-NF10-5 / P2-1） | lease延長はしない。定期runのrun_keyはschedule・template版・対象月・scopeで作りcutoffを含めないため、同一論理runのcutoffは最初のrunに固定される。前提はrecipient previewとtemplate版が同一論理runの間で変わらないこと。重複実行・締めを跨ぐ重複実行・8並行投入で配布が1回に収束することを実MySQLで検証する（plan §14.4） |
+| metric/alert（P2-8） | `ses_report_schedule_events_total{event}`（14種）と `ses_report_schedule_legacy_leases`（gaugeの古い値に注意）。推奨alert ruleは案のみ（plan §14.5） |
+| 機能スイッチ（A-NF10-6） | 既存のNF10スイッチを使い、新しいスイッチは追加しない。OFF前に投入済みの通知outboxは汎用schedulerが送る隙間が残る（plan §14.6） |
+| 追加・更新test（r2は未実行） | `ReportScheduleDispatchPolicyMySqlTest`（新規、`@Tag("mysql")`、`scripts/test-suites/mysql-shard-2.txt`、5件）、`ManagementReportSchedulerTest`（r1で1件置換・5件追加、r2で4件追加）、`ReportSnapshotServiceImplTest`（r2で2件追加）、`ReportScheduleMapperH2SqlTest`（2件追加）、`ReportScheduleApiBoundaryTest`（1件追加） |
+| 変更しないもの | DDL、`messages*.properties`、`application*.yml`、機能スイッチ実装。新設定はコード既定値（空＝未確認）で動き、`application.yml` への明示は提案のみ |
+| 残課題 | schedule一覧画面での停止理由表示（画面自体が未実装）、論理runのskip API（未実装の方針のみ）、引き継ぎ回数の上限（DDLが要るため方針のみ）、alert ruleの設定、並行時の文書artifact重複（UNKNOWN）、P2-3のtimezone変更時の再計算 |

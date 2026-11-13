@@ -188,6 +188,72 @@ class ReportSnapshotServiceImplTest {
     }
 
     @Test
+    void 定期runは同一schedule対象月で最初のcutoffを固定し締め後の引き継ぎでも確定runを作らない() {
+        authorizeSystemPrincipalAdmin();
+
+        ReportGenerationResult first = generateScheduled("速報");
+        // 速報を配布した後、completion前に月次締めが確定し、引き継ぎ/retryは「確定」を要求する。
+        when(monthlyClosingService.isClosed("2026-08")).thenReturn(true);
+        ReportGenerationResult takeover = generateScheduled("確定");
+
+        assertThat(first.getRun().getCutoffKind()).isEqualTo("GENERATED_AT");
+        assertThat(takeover.isReused()).as("同じ論理runの速報runを再利用する").isTrue();
+        assertThat(takeover.getRun().getId()).isEqualTo(first.getRun().getId());
+        assertThat(takeover.getRun().getCutoffKind()).isEqualTo("GENERATED_AT");
+        assertThat(takeover.getRun().getRunKey()).isEqualTo(first.getRun().getRunKey());
+        verify(runMapper, times(1)).insert(any(ReportRun.class));
+
+        // 定期runのキーはscheduleに属し、同じtemplate版・対象月・cutoff・scopeの手動生成とは共有しない。
+        currentRun = null;
+        snapshots.clear();
+        ReportGenerationResult manual = service.generate(ReportGenerationCommand.manual(
+                3L, YearMonth.of(2026, 8), "速報", "preview-1"));
+        assertThat(manual.getRun().getRunKey()).startsWith("report:2026-08:")
+                .isNotEqualTo(first.getRun().getRunKey());
+    }
+
+    @Test
+    void 定期runの未完了runを締め後にretryしても固定した速報cutoffでsectionを作り直す() {
+        authorizeSystemPrincipalAdmin();
+        DashboardSummaryDto summary = dashboardService.getSummary(2026);
+        when(dashboardService.getSummary(anyInt()))
+                .thenThrow(new IllegalStateException("source failure"))
+                .thenReturn(summary);
+
+        ReportGenerationResult partial = generateScheduled("速報");
+        // mockのrunMapperは同じrun objectを返すため、retry前に状態を確認する。
+        assertThat(partial.getRun().getStatus()).isEqualTo("PARTIAL");
+        Long partialRunId = partial.getRun().getId();
+        when(monthlyClosingService.isClosed("2026-08")).thenReturn(true);
+        ReportGenerationResult retried = generateScheduled("確定");
+
+        assertThat(retried.isReused()).isFalse();
+        assertThat(retried.getRun().getId()).isEqualTo(partialRunId);
+        assertThat(retried.getRun().getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(retried.getRun().getCutoffKind()).isEqualTo("GENERATED_AT");
+        assertThat(retried.getSections()).singleElement().satisfies(section -> {
+            assertThat(section.getSectionStatus()).isEqualTo("SUCCEEDED");
+            assertThat(section.getConfirmation()).as("要求cutoff（確定）ではなく固定cutoffで作る").isEqualTo("速報");
+        });
+        verify(runMapper, times(1)).insert(any(ReportRun.class));
+    }
+
+    /** schedulerと同じsystem主体（principal=管理者id 1）で定期runを生成する。 */
+    private ReportGenerationResult generateScheduled(String cutoff) {
+        return ExecutionActorContext.runAsSystem("report-cutoff-pin-test", "SCHEDULER_POLL",
+                () -> service.generate(ReportGenerationCommand.scheduled(
+                        3L, YearMonth.of(2026, 8), cutoff, 5L, 1L)));
+    }
+
+    private void authorizeSystemPrincipalAdmin() {
+        SysUser admin = new SysUser();
+        admin.setId(1L);
+        admin.setRole("管理者");
+        admin.setStatus(1);
+        when(userMapper.selectByIdAndTenant(1L, "default")).thenReturn(admin);
+    }
+
+    @Test
     void 確定版は月次締め未完了なら生成しない() {
         assertThatThrownBy(() -> service.generate(ReportGenerationCommand.manual(
                 3L, YearMonth.of(2026, 8), "確定", "preview-1")))
