@@ -453,9 +453,9 @@ window.AccountingIntegration = (function () {
                 events.forEach(function (e) {
                     let tr = `
                     <tr>
-                        <td class="small text-muted">${escapeHtml(e.createdAt ? e.createdAt.replace('T', ' ') : '-')}</td>
+                        <td class="small text-muted">${escapeHtml(e.occurredAt ? String(e.occurredAt).replace('T', ' ') : '-')}</td>
                         <td><span class="badge bg-light text-dark border">${escapeHtml(e.fromStatus || 'INIT')} &rarr; ${escapeHtml(e.toStatus)}</span></td>
-                        <td class="small">${escapeHtml(localizeJobMessage(e.message))}</td>
+                        <td class="small">${escapeHtml(localizeJobMessage(e.safeDetail))}</td>
                     </tr>`;
                     eventTbody.append(tr);
                 });

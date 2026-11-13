@@ -111,18 +111,11 @@ public class AccountingSendKeyResolver {
     }
 
     /**
-     * 再送信するジョブが、作成前に同じ管理番号の取引がfreeeに無いことを確認すべきか。
+     * 外部へ送信した後に取消された前の世代ごとの走査範囲（取引先・発生日）。空なら既存取引の確認は不要。
      *
      * <p>外部へ送信した後（試行回数 &gt; 0）に取消された送信ジョブは、freeeに取引が作成されたか確定できない
      * （タイムアウト後の再試行待ちを取消した場合や、通信中の取消で応答が失敗だった場合）。
      * その後の世代を確認なしに作ると、freeeに同じ取引が2件できる。</p>
-     */
-    public boolean requiresExistingDealCheck(String targetType, Long targetId, String syncJobType) {
-        return !priorDealScopes(targetType, targetId, syncJobType).isEmpty();
-    }
-
-    /**
-     * 外部へ送信した後に取消された前の世代ごとの走査範囲（取引先・発生日）。空なら既存取引の確認は不要。
      * 送信スナップショットの {@code partnerExternalId} と {@code issueDate}（経費は {@code expenseDate}）を読む。
      * 読めない世代は範囲不明（両方null）として残す（確認を省かない）。
      */

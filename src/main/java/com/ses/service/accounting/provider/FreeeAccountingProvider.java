@@ -843,7 +843,10 @@ public class FreeeAccountingProvider implements AccountingProvider {
         return scan.status() == DealScan.Status.REJECTED ? DealScan.unconfirmed() : scan;
     }
 
-    /** 管理番号での既存取引の走査結果。REJECTED は走査条件がfreeeに拒否された（400）。 */
+    /**
+     * 管理番号での既存取引の走査結果。REJECTED は走査条件がfreeeに拒否された（1ページ目の400）。
+     * UNCONFIRMED・LIMIT でも、それまでに見つけた取引は matches に残す（見つかれば拒否する）。
+     */
     record DealScan(Status status, List<JsonNode> matches) {
         enum Status { CONFIRMED, UNCONFIRMED, LIMIT, REJECTED }
 
@@ -860,7 +863,8 @@ public class FreeeAccountingProvider implements AccountingProvider {
     /**
      * 管理番号（ref_number）と事業所が一致するfreee取引を探す。freeeの取引一覧は管理番号で絞れないため、
      * 呼出側が {@link #dealScanFilter} で決めた条件（収支区分・取引先・発生日）で走査する。
-     * 照会失敗と応答形式の異常（deals が配列でない等）は確認できない扱い（作成しない側へ倒す）。
+     * 照会失敗と応答形式の異常（deals が配列でない等）は確認できない扱い（作成しない側へ倒す）。それまでに見つけた
+     * 取引は残す。1ページ目の400は走査条件の拒否（REJECTED）として返し、呼出側が取引先なしで走査し直す。
      * 他ノードのトークン更新待ちは確認失敗にせず、そのまま呼出元へ返す（Workerが短い間隔で再試行する）。
      */
     DealScan scanDealsByRefNumber(IntegrationConnection connection, String filter, String refNumber) {
@@ -879,7 +883,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         ? null : objectMapper.readTree(res.getBody()).get("deals");
                 if (deals == null || !deals.isArray()) {
                     log.warn("既存取引の確認で想定外の応答形式: page={} error_code=INVALID_RESPONSE", page);
-                    return DealScan.unconfirmed();
+                    return new DealScan(DealScan.Status.UNCONFIRMED, matches);
                 }
                 for (JsonNode d : deals) {
                     if (!d.hasNonNull("ref_number") || !refNumber.equals(d.get("ref_number").asText())) {
@@ -896,11 +900,15 @@ public class FreeeAccountingProvider implements AccountingProvider {
             } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
                 throw e;
             } catch (HttpClientErrorException.BadRequest e) {
-                log.warn("既存取引の確認の走査条件がfreeeに拒否されました: page={} error_code=VALIDATION_ERROR", page);
-                return new DealScan(DealScan.Status.REJECTED, List.of());
+                if (page == 0) {
+                    log.warn("既存取引の確認の走査条件がfreeeに拒否されました: error_code=VALIDATION_ERROR");
+                    return new DealScan(DealScan.Status.REJECTED, List.of());
+                }
+                log.warn("既存取引の確認が途中で拒否されました: page={} error_code=VALIDATION_ERROR", page);
+                return new DealScan(DealScan.Status.UNCONFIRMED, matches);
             } catch (Exception ex) {
                 log.warn("既存取引の確認に失敗: page={} error_code=UNKNOWN_ERROR", page);
-                return DealScan.unconfirmed();
+                return new DealScan(DealScan.Status.UNCONFIRMED, matches);
             }
         }
         return new DealScan(DealScan.Status.LIMIT, matches); // 全ページ満杯: 続きがあり得るため確定できない
@@ -1025,6 +1033,9 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         // 最大1回のリプレイ実行
                         return execution.execute(newHeaders);
                     }
+                } catch (com.ses.common.exception.TokenRefreshInProgressException refreshInProgress) {
+                    // 他ノードがトークンを更新中: 認証失敗（401）ではないため置き換えずに返す（短い間隔で再試行させる）
+                    throw refreshInProgress;
                 } catch (Exception refreshEx) {
                     log.error("Token refresh or replay failed on 401: error_code=UNAUTHORIZED");
                     throw httpEx;
@@ -1078,6 +1089,16 @@ public class FreeeAccountingProvider implements AccountingProvider {
     }
 
     private CanonicalDealResult handleApiException(Exception e, String apiPath) {
+        if (e instanceof com.ses.common.exception.TokenRefreshInProgressException) {
+            log.warn("freee API呼出し中に他ノードのトークン更新待ちになりました: api_path={} error_code=TOKEN_REFRESH_IN_PROGRESS", apiPath);
+            return CanonicalDealResult.builder()
+                    .success(false)
+                    .errorCode("TOKEN_REFRESH_IN_PROGRESS")
+                    .errorMessageSafe("他ノードでトークン更新中のため再試行待ち")
+                    .retryable(true)
+                    .retryAfterSeconds(5)
+                    .build();
+        }
         if (e instanceof HttpClientErrorException httpEx) {
             int statusCode = httpEx.getStatusCode().value();
             String reqId = extractRequestId(httpEx.getResponseHeaders());

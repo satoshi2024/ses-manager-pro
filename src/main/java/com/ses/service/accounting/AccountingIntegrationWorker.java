@@ -119,7 +119,7 @@ public class AccountingIntegrationWorker {
                         });
                 retryable++;
             } catch (Exception e) {
-                log.warn("滞留連携ジョブの復旧照合に失敗: jobId={} category=SYSTEM errorCode=STALE_RECOVERY_ERROR exceptionClass={} detail={}",
+                log.warn("滞留連携ジョブを再試行待ちへ戻す処理に失敗: jobId={} category=SYSTEM errorCode=STALE_RECOVERY_ERROR exceptionClass={} detail={}",
                         job.getId(), LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
                 try {
                     jobService.markRetryable(job.getId(), "STALE_LEASE",
