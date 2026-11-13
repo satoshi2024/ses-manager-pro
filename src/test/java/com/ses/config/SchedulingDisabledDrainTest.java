@@ -236,7 +236,22 @@ class SchedulingDisabledDrainTest {
         assertThat(beanNames(ScheduledTaskHolder.class)).isEmpty();
         assertThat(beanNames(TaskScheduler.class)).isEmpty();
         assertThat(beanNames(ScheduledExecutorService.class)).isEmpty();
-        assertThat(beanNames(SchedulingConfigurer.class)).isEmpty();
+        // Spring Boot actuator の ScheduledTasksObservabilityAutoConfiguration は scheduling の有効・無効に
+        // 関係なく ObservabilitySchedulingConfigurer を登録する。これは ScheduledAnnotationBeanPostProcessor
+        // から呼ばれて初めて registrar に observation 設定を載せるだけで、BPP・ScheduledTaskHolder・
+        // TaskScheduler が無い（上で確認済み）限り何も実行しない。アプリ自身の SchedulingConfigurer は 0 件であること。
+        Set<String> appSchedulingConfigurers = new TreeSet<>();
+        for (String name : beanNames(SchedulingConfigurer.class)) {
+            Class<?> type = applicationContext.getType(name);
+            String typeName = type == null ? "" : type.getName();
+            if (!typeName.equals("org.springframework.boot.actuate.autoconfigure.scheduling."
+                    + "ScheduledTasksObservabilityAutoConfiguration$ObservabilitySchedulingConfigurer")) {
+                appSchedulingConfigurers.add(name + "=" + typeName);
+            }
+        }
+        assertThat(appSchedulingConfigurers)
+                .as("フレームワークの observability configurer 以外の SchedulingConfigurer が存在しないこと")
+                .isEmpty();
 
         MainClassScan scan = MainClassScan.scan();
         Set<String> presentScheduledMethods = scheduledMethodsOfPresentBeans();
