@@ -106,13 +106,15 @@ class ImportRawUploadServletContainerE2ETest {
         Client admin = login();
         for (ImportEncoding encoding : ImportEncoding.values()) {
             AtomicReference<byte[]> received = new AtomicReference<>();
-            when(ingestion.upload(any(), any())).thenAnswer(invocation -> {
+            // when(mock.upload(any(), any())) 形式で再 stub すると、2 周目に前回の answer が
+            // null 引数のまま呼ばれて NPE になるため、doAnswer 形式で stub する。
+            org.mockito.Mockito.doAnswer(invocation -> {
                 ImportCsvIngestionService.InputStreamSupplier body = invocation.getArgument(1);
                 try (var input = body.open()) {
                     received.set(input.readAllBytes());
                 }
                 return UPLOADED;
-            });
+            }).when(ingestion).upload(any(), any());
 
             HttpResponse<String> response = admin.upload("text/csv", encoding.name(),
                     HttpRequest.BodyPublishers.ofByteArray(CSV));
