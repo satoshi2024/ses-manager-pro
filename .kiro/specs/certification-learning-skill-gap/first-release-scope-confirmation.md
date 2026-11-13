@@ -24,8 +24,8 @@
 
 | # | 経路 | 種別 | 資格番号の扱い | 初回リリースの処置 |
 |---|---|---|---|---|
-| 1 | `POST /api/my/certification-learning-gap/certifications`（`MyCertificationLearningGapApiController#apply` → `CertificationLearningGapSelfServiceImpl#applyCertification` → `EngineerCertificationServiceImpl#submitApplication`） | API（本人） | request の `certificateNumber` を暗号化して保存 | 子スイッチOFFで値が空欄でなければ400（`certification.record.numberEntryDisabled`）。DB・暗号化に触れる前に拒否 |
-| 2 | `POST /api/my/certification-learning-gap/certifications/{recordId}/resubmit`（`#resubmit` → `#resubmitCertification` → `EngineerCertificationServiceImpl#resubmit`） | API（本人） | 新recordへ暗号化して保存 | 同上。元recordのlock・CAS・RESUBMIT eventより前に拒否する（拒否時は元recordを変えない） |
+| 1 | `POST /api/my/certification-learning-gap/certifications`（`MyCertificationLearningGapApiController#apply` → `CertificationLearningGapSelfServiceImpl#applyCertification` → `EngineerCertificationServiceImpl#submitApplication`） | API（本人） | request の `certificateNumber` を暗号化して保存 | 子スイッチOFFで値が空欄でなければ400（`certification.record.numberEntryDisabled`）。書込み・lock・暗号化の前に拒否（本人scope確認のための読取りは先に行う） |
+| 2 | `POST /api/my/certification-learning-gap/certifications/{recordId}/resubmit`（`#resubmit` → `#resubmitCertification` → `EngineerCertificationServiceImpl#resubmit`） | API（本人） | 新recordへ暗号化して保存 | 同上。元recordのlock・CAS・RESUBMIT eventより前に拒否する（拒否時は元recordを変えない）。本人scope確認とversion照合は本人service側で先に行うため、version不一致は409が先に返る |
 | 3 | `templates/my/certification-learning-skill-gap.html` の申請モーダル `#my-cert-number` | 画面 | 入力欄 | OFF中は入力欄を出さない（`disabledFeatures.contains('nf03-certification-pii')`） |
 | 4 | `static/js/modules/my-certification-learning-skill-gap.js` の再申請ダイアログ | 画面 | SweetAlert2の入力欄 | OFF中（#3の入力欄が無い場合）は確認だけのダイアログにし、`certificateNumber: null` を送る |
 | 5 | `EngineerCertificationMapper#updateCertificateNumberForTenant` | DB書込 | 暗号文・key version・cipher format・maskを書く唯一の更新 | 呼出し元は `submitApplication` だけで、#1のガードの後にある |
@@ -41,7 +41,8 @@
 
 - `com.ses.config.feature.Feature.NF03_CERTIFICATION_PII`（NF-03の子スイッチ。設定キー `app.features.nf03-certification-pii.enabled`、環境変数 `FEATURE_NF03_CERTIFICATION_PII_ENABLED`、既定 `false`。実効値は NF-03 との論理積）。URLは遮断しない。
 - `EngineerCertificationServiceImpl#requireCertificateNumberEntryAllowed`: `submitApplication` と `resubmit` の先頭で、資格番号が空欄でなく子スイッチの実効値がOFFなら `BusinessException(400, "certification.record.numberEntryDisabled")`。空欄（null・空文字・空白のみ）は「入力なし」として通す。黙って捨てないのは、利用者が保存されたと誤認しないため。
-- message key `certification.record.numberEntryDisabled` は本変更ではbundleへ追加していない。追加されるまでは `SafeErrorPolicy` により400の汎用文言が返る（keyの生文字列は出ない）。
+- 判定の位置: 両メソッドの先頭（`@Transactional` のため、この時点で既にtransactionは開始している）。拒否は資格recordのinsert・lock・CAS・暗号化・event追記より前であり、拒否時に書込みは残らない。
+- message key `certification.record.numberEntryDisabled` は本変更ではbundleへ追加していない。追加されるまでは `SafeErrorPolicy` により400の汎用文言「入力内容を確認してください。」が返る（keyの生文字列は出ない）。
 - test profileは子スイッチもONのため、既存の資格番号暗号化テスト（`EngineerCertificationServiceTest` 等）の意味は変わらない。OFF時の挙動は `EngineerCertificationNumberEntrySwitchTest` で検証する。
 
 ### 2.3 資格番号の暗号鍵（prod fail-fast）との関係（現状）
@@ -109,7 +110,7 @@
 | H-2 | SELF | account linkが一致する有効な本人だけ。提案（PROPOSED）として保存し、公式skillを変えない | `#submitSelf` | |
 | H-3 | MANAGER | role `マネージャー` かつ評価の有効日時点で当該要員の上長に割り当てられている者だけ。提案として保存し、公式skillを変えない | `#submitManager` | |
 | H-4 | HR_FINAL の実行者 | role `HR` または `管理者` | `#finalizeByHr` | |
-| H-5 | HR_FINAL の前提 | 理由入力が必須。事前のSELF/MANAGER提案が無くても確定できる | `#finalizeByHr` | |
+| H-5 | HR_FINAL の前提 | 理由入力が必須（SELF・MANAGERも同じく理由必須）。事前のSELF/MANAGER提案が無くても確定できる | `#finalizeByHr`、`#requireActor` | |
 | H-6 | HR_FINAL の反映 | 要員の公式skill（`t_engineer_skill`）の該当skillの習熟度を置き換え、無ければ追加する（経験年数は保持）。決定event（`SKILL_LEVEL`）を追記する | `#finalizeByHr`、`EngineerSkillService#replaceSkills` | |
 | H-7 | 習熟度 | 「初級」「中級」「上級」の3段階だけ | `#save` | |
 | H-8 | 有効日 | 未指定なら当日（Asia/Tokyo） | `#save` | |

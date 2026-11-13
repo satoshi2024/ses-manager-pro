@@ -164,6 +164,9 @@ app:
       enabled: true
     nf02-customer-portal:
       enabled: true
+      # 既存のportalテストは社内起票の問い合わせをfixtureに使うため、全期間をportalの公開範囲にする。
+      # 未設定時（portal起票のみ）の挙動は PortalServiceRequestVisibility*Test で個別に検証する。
+      visible-since: "2000-01-01T00:00:00+09:00"
     nf03:
       enabled: true
     nf03-certification-pii:

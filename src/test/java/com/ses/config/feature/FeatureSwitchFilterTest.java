@@ -81,6 +81,12 @@ class FeatureSwitchFilterTest {
             Feature.NF04, List.of("/service-worker.js", "/manifest.webmanifest"),
             Feature.NF10, List.of("/management-reports"));
 
+    /** 画面URLを持たない子スイッチ → 子をOFFにしても遮断してはならない埋込み先の画面。 */
+    private static final Map<Feature, List<String>> CHILD_HOST_PAGES = Map.of(
+            Feature.NF02_CUSTOMER_PORTAL, List.of("/portal/customer", "/service-desk/requests"),
+            Feature.NF03_CERTIFICATION_PII, List.of("/my/certification-learning-skill-gap",
+                    "/certification-learning-skill-gap"));
+
     @AfterEach
     void clearSecurityContext() {
         SecurityContextHolder.clearContext();
@@ -116,6 +122,16 @@ class FeatureSwitchFilterTest {
     void OFFの機能の画面と静的入口は統一エラーページへ委ねる404になる(Feature feature) throws Exception {
         FeatureSwitchFilter filter = filter(disabledOnly(feature));
 
+        if (PAGE_SAMPLES.get(feature).isEmpty()) {
+            // 画面URLを持たないのは子スイッチだけ。子をOFFにしても、子が埋め込まれた画面のURLは遮断しない
+            // （portal画面は他のタブと共用、本人画面は非PII部分を使う。表示制御はtemplate側）。
+            assertThat(feature.isTopLevel()).as("%s は画面入口を持つべき最上位の機能", feature).isFalse();
+            assertThat(CHILD_HOST_PAGES.get(feature)).as("%s の埋込み先画面", feature).isNotEmpty();
+            for (String uri : CHILD_HOST_PAGES.get(feature)) {
+                assertPassesThrough(filter, "GET", uri);
+            }
+            return;
+        }
         for (String uri : PAGE_SAMPLES.get(feature)) {
             MockHttpServletResponse response = new MockHttpServletResponse();
             MockFilterChain chain = new MockFilterChain();

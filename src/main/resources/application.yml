@@ -348,6 +348,9 @@ app:
     # NF-02の子: 顧客ポータルの問い合わせ（起票・返信・CSAT）。NF-02がOFFなら本値に関係なくOFF。初回リリースはOFF（B-NF02-2）
     nf02-customer-portal:
       enabled: ${FEATURE_NF02_CUSTOMER_PORTAL_ENABLED:false}
+      # portalへ出す問い合わせの公開開始時刻（offset付きISO-8601。例: 2027-04-01T00:00:00+09:00）。
+      # 未設定ならportal起票の問い合わせだけを出す（初回リリース中に社内で登録した問い合わせを顧客へ出さない）。
+      visible-since: ${FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE:}
     # NF-03 資格・学習・スキルギャップ
     nf03:
       enabled: ${FEATURE_NF03_ENABLED:false}

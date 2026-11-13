@@ -19,6 +19,7 @@
 
 - **子スイッチ**: 親機能の一部だけを後から公開するためのスイッチ。**実効値は「親がON かつ 子がON」**で、親がOFFなら子の設定値に関係なくOFFになる（子だけ `true` にしても何も公開されない）。子だけ `true` で親がOFFの設定は起動を止めず、起動ログに `[機能スイッチ] NF02_CUSTOMER_PORTAL は設定上ONですが、親機能 NF02 がOFFのため無効です` のWARNを出す。
 - 子スイッチの設定キーは小文字・kebab-case（`nf02-customer-portal`）、環境変数は大文字・snake_case（`FEATURE_NF02_CUSTOMER_PORTAL_ENABLED`）。テンプレートで使う識別子は設定キーと同じ（`disabledFeatures.contains('nf02-customer-portal')`）。
+- **顧客ポータルの問い合わせの公開範囲**（ON/OFFとは別の設定）: `app.features.nf02-customer-portal.visible-since`（環境変数 `FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE`、offset付きISO-8601。例: `2027-04-01T00:00:00+09:00`）。**未設定（既定）ならportalから起票された問い合わせだけ**をportalへ出す。設定すると、その時刻以降に作成された問い合わせも起票経路にかかわらず出す。不正な値（offsetなし等）は起動失敗になる。test profileは既存テストのため `2000-01-01T00:00:00+09:00`。詳細は4.3.1。
 - `application.yml` と `application-prod.yml` は同じプレースホルダ（`${FEATURE_NF0x_ENABLED:false}`、子は `${FEATURE_NF02_CUSTOMER_PORTAL_ENABLED:false}` 等）を持つ。環境変数を設定しない限り本番もOFF。
 - 値は `true` / `false` で指定する。**真偽値として解釈できない値（例: `ture`）はOFFにはならず、起動時のbindで失敗してアプリが起動しない**（設定誤りを起動失敗で検出する）。環境変数そのものが無い場合はOFF。
 - dev profileも既定はOFF。ローカル起動（`mvn spring-boot:run`）や各specの `tasks.md` にあるNF画面のDemo手順を行う場合は、先に対象の `FEATURE_NF0x_ENABLED=true` を設定して起動すること（`CLAUDE.md` には未記載）。
@@ -47,9 +48,9 @@
 |---|---|---|---|
 | NF-01 | `/lifecycle/**`、`/my/lifecycle/**`、`/api/lifecycle/**`、`/api/my/lifecycle/**` | `LifecycleSlaScheduler#runSlaCheck`（毎朝8時） | menu `lifecycle`・`myLifecycle`、要員詳細画面のライフサイクル欄、ログイン後の着地先 |
 | NF-02 | `/service-desk/**`、`/customer-success/**`、`/api/service-desk/**`、`/api/customer-success/**`（親がOFFなら下の子の入口も遮断） | `ServiceSlaScheduler#runSlaMonitoring`（5分毎）、`CustomerHealthScheduler#runDailySnapshot`（日次）、`ServiceRequestAttachmentCompensationScheduler#retryDue`（5分毎） | menu `service-desk`・`customer-success`、契約更新カレンダーの顧客ヘルス値（＋子の埋込み表示） |
-| NF-02の子 `nf02-customer-portal` | `/api/portal/customer/service-desk/**`（顧客ポータルの問い合わせAPI: 一覧・詳細・起票・返信・CSAT・添付upload/download） | なし（schedulerは親NF-02に従う） | 顧客ポータル（`/portal/customer`）の「問い合わせ」タブ・画面・起票モーダル・CSATモーダル・script。portal画面自体と検収・契約・請求・見積・注文請タブは止めない |
+| NF-02の子 `nf02-customer-portal` | `/api/portal/customer/service-desk/**`（顧客ポータルの問い合わせAPI: 一覧・詳細・起票・返信・CSAT・添付upload/download）。ON中も公開範囲（`visible-since`）外の問い合わせは同じ404 | なし（schedulerは親NF-02に従う） | 顧客ポータル（`/portal/customer`）の「問い合わせ」タブ・画面・起票モーダル・CSATモーダル・scriptの参照。portal画面自体と検収・契約・請求・見積・注文請タブは止めない（`/portal/js/portal-service-desk.js` 自体のURLは遮断しないが、dataを含まない） |
 | NF-03 | `/certification-learning-skill-gap/**`、`/my/certification-learning-skill-gap/**`、`/api/certification-learning-gap/**`、`/api/my/certification-learning-gap/**` | `CertificationExpiryNotificationScheduler#dispatchToday`（日次） | menu `certification-learning-skill-gap`・`myCertificationLearningGap` |
-| NF-03の子 `nf03-certification-pii` | **URLは遮断しない**。資格申請（`POST /api/my/certification-learning-gap/certifications`）・再申請（`POST .../certifications/{id}/resubmit`）で資格番号が空欄でない要求を `EngineerCertificationServiceImpl` が400（message key `certification.record.numberEntryDisabled`）で拒否する（DB・暗号化に触れる前） | なし | 本人画面（`/my/certification-learning-skill-gap`）の申請モーダルの資格番号入力欄、再申請ダイアログの資格番号入力（確認だけのダイアログになる） |
+| NF-03の子 `nf03-certification-pii` | **URLは遮断しない**。資格申請（`POST /api/my/certification-learning-gap/certifications`）・再申請（`POST .../certifications/{id}/resubmit`）で資格番号が空欄でない要求を `EngineerCertificationServiceImpl` が400（message key `certification.record.numberEntryDisabled`）で拒否する（書込み・lock・暗号化の前。本人scope確認の読取りと再申請のversion照合は先に行うため、version不一致は409が先に返る） | なし | 本人画面（`/my/certification-learning-skill-gap`）の申請モーダルの資格番号入力欄、再申請ダイアログの資格番号入力（確認だけのダイアログになる） |
 | NF-04 | `/service-worker.js`、`/manifest.webmanifest` のみ | なし（下記4.4参照） | manifestリンク、Service Worker登録（`common.js` が既存登録とshell cacheを解除） |
 | NF-10 | `/management-reports/**`、`/api/management-reports/**` | `ManagementReportScheduler#dispatchDue`（毎分。claim・生成・配布を開始しない） | menu `management-report` |
 
@@ -84,10 +85,11 @@
 
 初回リリースでは、親機能をONにする場合でも次の2つの子スイッチは**設定しない（既定のOFFのまま）**。
 
-| 環境変数 | 初回リリース | 根拠 | ONにする条件 |
+| 環境変数 | 初回リリース | 根拠（決定記録） | ONにする条件（**実装側の提案。未決定**） |
 |---|---|---|---|
-| `FEATURE_NF02_CUSTOMER_PORTAL_ENABLED` | 未設定（OFF） | B-NF02-2: 初回は内部サービスデスクだけを公開し、顧客ポータルからの起票・返信・CSATは第二段階とする | 第二段階のOwner承認、DG-02-A/C（portal対象・公開commentの扱い）の署名、4.3の「ON前の確認」の完了 |
-| `FEATURE_NF03_CERTIFICATION_PII_ENABLED` | 未設定（OFF） | B-NF03-1: 初回は非PII部分（資格の取得日・期限・証憑、学習計画、skill gap）だけを公開し、資格番号は本番で入力しない | DG-07（`CERTIFICATION_PII` の保持年数・破棄）の承認と、NF-07の本番破棄経路の接続 |
+| `FEATURE_NF02_CUSTOMER_PORTAL_ENABLED` | 未設定（OFF） | B-NF02-2: 初回は内部サービスデスクだけを公開し、顧客ポータルからの起票・返信・CSATは第二段階とする | 第二段階のOwner承認、DG-02-A/C（portal対象・公開commentの扱い）の署名、`visible-since` の値の決定（4.3.1） |
+| `FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE` | 未設定（portal起票のみ） | 2026-11-13 決定: 第二段階でportalを開いても、初回リリース中に社内で登録した問い合わせは顧客へ出さない | 第二段階で過去分も出す必要がある場合だけ、CS Ownerが公開開始時刻を決めて設定する |
+| `FEATURE_NF03_CERTIFICATION_PII_ENABLED` | 未設定（OFF） | B-NF03-1: 初回は非PII部分（資格の取得日・期限・証憑、学習計画、skill gap）だけを公開し、資格番号はDG-07確定まで本番で入力しない | DG-07（`CERTIFICATION_PII` の保持年数・破棄）の承認。NF-07の本番破棄経路の接続を条件に加えるかはPrivacy/Ownerが判断する |
 
 - 起動ログで `NF02=ON, NF02_CUSTOMER_PORTAL=OFF`、`NF03=ON, NF03_CERTIFICATION_PII=OFF` となることを確認する（NF-02/NF-03をONにした場合）。
 - 確認URL（NF-02 ON時）: `/api/portal/customer/service-desk/requests` が404、`/api/service-desk/requests` は権限どおり、顧客ポータル `/portal/customer` に「問い合わせ」タブが出ない。
@@ -102,7 +104,9 @@
 - 機能スイッチは権限ではない。ON後のアクセス制御は従来どおり `SecurityConfig`・`MenuPermissionFilter`・action権限で行う。
 - 遮断はSpring Securityより前で行うため、監査ログ（`ApiAuditFilter`）には記録されない。調査時は `logging.level.com.ses.config.feature=DEBUG` で `[機能スイッチ] OFFの機能への要求を404で遮断しました` を出力できる。
 - OFF中も、既に送信済みの通知に含まれるNF画面へのリンクは404になる。
-- OFFでもprod起動時の必須secret検証は変わらない（例: `PWA_CONTEXT_SECRET`、資格番号の暗号鍵）。OFFを理由にsecret供給を省略できない。資格番号の子スイッチ（`nf03-certification-pii`）をOFFにしても、prodでは `certification.number-crypto.*` の鍵が無いと起動しない（`CertificationNumberKeyProviderImpl` のfail-fast。現状は変更していない）。鍵を不要にする設計案は `.kiro/specs/certification-learning-skill-gap/first-release-scope-confirmation.md` 2.4 を参照（Security承認待ち・未実装）。
+- OFFでもprod起動時の必須secret検証は変わらない（例: `PWA_CONTEXT_SECRET`、資格番号の暗号鍵）。OFFを理由にsecret供給を省略できない。
+  - **現状**: 資格番号の子スイッチ（`nf03-certification-pii`）をOFFにしても、prodでは `certification.number-crypto.*` の鍵が無いと起動しない（`CertificationNumberKeyProviderImpl` のfail-fast）。
+  - **提案（未実装・Security承認待ち。現状の運用には影響しない）**: 子スイッチOFFの間は鍵なしでも起動させる設計案を `.kiro/specs/certification-learning-skill-gap/first-release-scope-confirmation.md` 2.4 に記録している。
 - OFF→ONの補完は保証しない。OFF期間中に到来した期限・閾値をON後にさかのぼって処理するかどうかは、各機能の既存ロジック（実行日基準の判定等）に従う（4.2〜4.5参照）。
 
 ### 4.2 NF-01
@@ -126,8 +130,15 @@
 
 - OFF中（初回リリース）は、顧客からの起票・返信・CSAT回答・添付upload/downloadが全て404になる。問い合わせは社内担当がメール・電話等で受け、内部サービスデスク（`/service-desk`）へ代理起票する運用になる。
 - CSATはportalからしか回答できないため、OFF中はCSATが集まらない。顧客ヘルスのCSAT要因は「missing input」となり減点されない（`CustomerHealthServiceImpl`。欠損を普通点で埋めない）。
-- **内部画面の返信の既定は「顧客ポータル公開返信」（`visibility=PORTAL_VISIBLE`）である**。OFF中は顧客から見えないが、データとしては公開扱いで保存される。また、初回応答時刻（first response）は内部担当が `PORTAL_VISIBLE` の返信を登録したときだけ記録される（`INTERNAL` メモでは記録されない）。初回応答SLAを計測するため、OFF中も「顧客へ回答した内容」は `PORTAL_VISIBLE` で記録する運用とし、顧客に見せない内容は必ず「社内限定メモ」を選ぶこと。
-- **ON前の確認（第二段階）**: portalの一覧は顧客IDで絞り込むため、ONにした時点で、OFF期間中に社内で代理起票された当該顧客の問い合わせと、その `PORTAL_VISIBLE` 返信・添付が全て顧客から見えるようになる。ONにする前に、対象顧客の既存問い合わせの公開範囲（`PORTAL_VISIBLE` の返信内容・添付）をCS Ownerが棚卸しし、顧客へ見せない内容が公開扱いで残っていないことを確認すること。
+- **初回応答時刻（first response）の記録条件（現行実装）**: 社内担当が状態を `IN_PROGRESS`（内部画面の「対応着手」「対応再開」）へ変更したとき、または `PORTAL_VISIBLE` の返信を登録したときの早い方で記録される（`ServiceRequestServiceImpl#changeStatus` / `#addComment`）。`INTERNAL` メモだけでは記録されない。したがって初回リリース中は、**受付後に「対応着手」を押せば初回応答SLAを計測できる**。初回応答SLA上の「初回応答」を「対応着手」とみなしてよいかはDG-02-C2（CS Ownerの判断事項）。
+- **内部画面の返信の既定は「顧客ポータル公開返信」（`visibility=PORTAL_VISIBLE`）である**。初回リリース中は顧客から見えないが、データとしては公開扱いで保存される。**初回リリース中は、顧客への回答内容（メール・電話で伝えた内容の記録）も「社内限定メモ（`INTERNAL`）」で記録することを推奨する**（第二段階の公開対象を増やさない）。
+- **第二段階でONにしたときに顧客へ出る範囲（2026-11-13 決定により実装済み）**: portalの一覧・詳細・返信・CSAT・添付upload/downloadは、次のいずれかを満たす問い合わせだけを扱う（`PortalServiceRequestVisibilityPolicy`。範囲外は他社の問い合わせと同じ404）。
+  1. portalから起票された問い合わせ（`channel='PORTAL'` かつ `portal_user_id` あり。社内起票でchannelに「PORTAL」を選んでも該当しない）
+  2. 公開開始時刻 `FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE` 以降に作成された問い合わせ（未設定なら該当なし）
+  - 既定（未設定）では、**初回リリース中に社内で登録した問い合わせとその返信・添付は、ON後も顧客へ出ない**。件名・本文は返信と異なり公開範囲を個別に指定できないため、この時刻による区切りが件名・本文を守る唯一の手段である。
+  - 公開開始時刻を設定すると、その時刻以降に社内で登録した問い合わせは件名・本文・`PORTAL_VISIBLE` の返信・公開添付が顧客に見える（顧客portal利用者は招待時に `service-desk.view` を自動付与される）。設定する場合は、その時刻以降に社内で登録する問い合わせの件名・本文に顧客へ見せない内容を書かない運用とすること。
+  - 内部サービスデスク（`/service-desk`、`/api/service-desk/**`）の一覧・詳細・返信・状態変更・添付は、この範囲の影響を受けない。
+- **ON前の確認（第二段階）**: (1) `visible-since` を設定するかと、その値をCS Ownerが決める。(2) 設定する場合は、その時刻以降に作成された社内登録分の件名・本文・`PORTAL_VISIBLE` 返信・公開添付を棚卸しする。(3) portalの問い合わせ詳細画面への画面リンク（`portal-service-desk.js` の「詳細・返信」が指す `/portal/customer/service-desk/requests/{id}`）には対応するpage controllerが無く404になる既存の不具合があるため、第二段階のON前に修正する。
 - ONにするには `FEATURE_NF02_ENABLED=true` と `FEATURE_NF02_CUSTOMER_PORTAL_ENABLED=true` の両方が必要。portal側の権限（`service-desk.view` / `service-desk.create`）・招待・規約は既存portalの正本に従う。
 
 ### 4.4 NF-04
@@ -154,7 +165,7 @@
 #### 4.6.1 資格番号の子スイッチ（`nf03-certification-pii`）
 
 - OFF中（初回リリース）も、資格の申請・取得日・有効期限・証憑upload・HR確認（verify/reject）・訂正・取消・更新、学習計画、skill gapは従来どおり使える。止めるのは**資格番号の入力だけ**である。
-- 資格番号の入力経路は本人の申請と再申請の2つだけ（管理側API・CSV取込・他画面に資格番号の入力経路は無い。入口の一覧は `.kiro/specs/certification-learning-skill-gap/first-release-scope-confirmation.md` 2.1）。OFF中にAPIへ資格番号を付けて送ると、DB・暗号化に触れる前に400で拒否する（黙って捨てない）。
+- 資格番号の入力経路は本人の申請と再申請の2つだけ（管理側API・CSV取込・他画面に資格番号の入力経路は無い。入口の一覧は `.kiro/specs/certification-learning-skill-gap/first-release-scope-confirmation.md` 2.1）。OFF中にAPIへ資格番号を付けて送ると、書込み・lock・暗号化の前に400で拒否する（黙って捨てない）。本人scope確認の読取りと再申請のversion照合は先に行うため、version不一致の再申請は409が先に返る。message key `certification.record.numberEntryDisabled` はbundle未登録のため、登録されるまでは400の汎用文言「入力内容を確認してください。」が表示される（正常な画面は資格番号を送らないため、直接API呼出しか、子スイッチON時に開いた古い画面だけが該当する）。
 - 新規構築でOFFのまま運用した期間は資格番号の暗号文が作られないため、一覧・詳細は「未登録」表示になる。
 - 証憑（資格証の画像・PDF）は資格番号や氏名を含み得るが、`CERTIFICATION_EVIDENCE` 文書として既存の文書台帳・retention/legal hold・scanに従う（本スイッチの対象外）。Privacyの確認事項として残す。
 - ONにするには `FEATURE_NF03_ENABLED=true` と `FEATURE_NF03_CERTIFICATION_PII_ENABLED=true` の両方が必要。OFFへ戻しても既に保存した暗号文は削除されない（表示はmaskのまま、`certification.pii.view` 権限者は従来どおり復号表示できる）。
@@ -178,5 +189,9 @@
 | `FeatureSwitchMenuAndViewTest` | Docker不要 | サイドバー非表示（管理者・一般ロール）、ログイン後の着地先、テンプレート用OFF一覧（親OFFで子の識別子も含む）、契約更新カレンダーの顧客ヘルス抑止 |
 | `FeatureSwitchSchedulerGateTest` | Docker不要 | 6 schedulerの `@Scheduled` 入口がOFFでno-op、ONで従来どおり実行 |
 | `FeatureSwitchRouteCoverageTest` | Docker不要 | 登録漏れ・誤遮断の検出（controller・静的ファイル・scheduler・サイドバー導線）、prefixの重複・古い登録の検出、子スイッチが一致するcontrollerの固定とportal配下のNF-02入口が全て子スイッチに属すること、portal問い合わせタブ・資格番号入力欄の埋込み判定 |
-| `EngineerCertificationNumberEntrySwitchTest` | Docker不要 | 資格番号の子スイッチOFF時に申請・再申請をDB・暗号化前に400で拒否、空欄は受付、ON時は従来どおり暗号化保存 |
+| `EngineerCertificationNumberEntrySwitchTest` | Docker不要 | 資格番号の子スイッチOFF時に申請・再申請を書込み・暗号化前に400で拒否、空欄は受付、ON時は従来どおり暗号化保存 |
+| `MyCertificationNumberEntryDisabledApiTest` | Docker不要 | 子スイッチOFF時、本人API（controller → 本人service → 資格service）の申請・再申請がHTTP 400の `ApiResult` になる |
+| `FeatureSwitchChildTemplateRenderingTest` | Docker不要 | 実templateをThymeleafで描画し、子スイッチOFFでportalの問い合わせ導線・本人画面の資格番号欄が出ないこと |
+| `PortalServiceRequestVisibilityPolicyTest` | Docker不要 | portal公開範囲の判定（portal起票・公開開始時刻・timezone・不正値の起動失敗・一覧条件） |
+| `PortalServiceRequestVisibilityIntegrationTest` | Docker不要（H2） | 公開開始時刻未設定の実context。portalの一覧・詳細・返信・CSAT・添付uploadが社内登録分を404/非表示にし、内部サービスデスクは従来どおり |
 | `FeatureSwitchServletContainerIntegrationTest` | Docker不要・実Tomcat起動（Windowsでは **PowerShell環境** で実行） | NF-01をproperty形式、NF-04を環境変数形式でOFFにした実context。未認証の画面404（login誘導されない・no-store）、管理者と未認証で同一の404 JSON、存在しないURLの404との同一性、ONの機能・中核APIはSpring Securityへ届くこと、PWA静的入口の遮断範囲、filter登録順 |

@@ -96,6 +96,8 @@ app:
     # NF-02の子（顧客ポータルの問い合わせ）。初回リリースはOFF（B-NF02-2）
     nf02-customer-portal:
       enabled: ${FEATURE_NF02_CUSTOMER_PORTAL_ENABLED:false}
+      # 未設定ならportal起票の問い合わせだけをportalへ出す（初回リリース中の社内登録分を出さない）
+      visible-since: ${FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE:}
     nf03:
       enabled: ${FEATURE_NF03_ENABLED:false}
     # NF-03の子（資格番号の入力）。DG-07承認までOFF（B-NF03-1）

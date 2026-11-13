@@ -1,6 +1,8 @@
 package com.ses.config.feature;
 
 import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.ToString;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -25,8 +27,11 @@ public class FeatureSwitchProperties {
     /** NF-02 カスタマーサクセス・サービスデスク（内部画面）。 */
     private Toggle nf02 = new Toggle();
 
-    /** NF-02の子: 顧客ポータルの問い合わせ（{@code app.features.nf02-customer-portal.enabled}）。 */
-    private Toggle nf02CustomerPortal = new Toggle();
+    /**
+     * NF-02の子: 顧客ポータルの問い合わせ（{@code app.features.nf02-customer-portal.enabled}）。
+     * 公開開始時刻 {@code app.features.nf02-customer-portal.visible-since} も持つ。
+     */
+    private CustomerPortalToggle nf02CustomerPortal = new CustomerPortalToggle();
 
     /** NF-03 資格・学習・スキルギャップ。 */
     private Toggle nf03 = new Toggle();
@@ -60,5 +65,20 @@ public class FeatureSwitchProperties {
     public static class Toggle {
         /** 既定OFF。明示的にtrueを設定した機能だけを公開する。 */
         private boolean enabled = false;
+    }
+
+    /**
+     * 顧客ポータルの問い合わせの子スイッチ。ON/OFFに加えて、portalへ出してよい問い合わせの範囲を持つ。
+     *
+     * <p>{@code visibleSince} はoffset付きISO-8601（例: {@code 2027-04-01T00:00:00+09:00}）。未設定・空なら
+     * portalから起票された問い合わせだけをportalへ出す（初回リリース中に社内で登録した問い合わせを出さないfail-closed）。
+     * 解釈は {@code com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy} が行い、不正な値は起動失敗になる。
+     */
+    @Data
+    @EqualsAndHashCode(callSuper = true)
+    @ToString(callSuper = true)
+    public static class CustomerPortalToggle extends Toggle {
+        /** 公開開始時刻。この時刻以降に作成された問い合わせは、起票経路にかかわらずportalへ出す。 */
+        private String visibleSince;
     }
 }
