@@ -71,9 +71,11 @@ Review remediation（`codex/nf10-review-remediation`）: delivery TX/outbox/prev
 
 ## NF10-V185 scheduler claim fence（2026-11-12）
 
-状態: **実装済・コンパイル確認済・定向fast 288/0/0/0・定向MySQL 1件FAIL（修正中）。** COMPLETE/PASSではない。
+状態: **実装済・`821076c0` の定向fast 292/0/0/0・定向MySQL 41/0/0/0・browser 1/0/0/0（PowerShell環境）通過・統合候補 `328c2d8b` へ取込済。** COMPLETE/PASSではない（下表「本番適用の前提」のSRE/DBA承認・Owner判断と、統合候補に対する全gateが未了）。
 
-`93c11457c17e7f082d2773500e8c47de2d50ed95` に対し、独立レビュー（静的）PASS、定向fast 9 class 288/0/0/0、定向MySQL 7 class 41件中1件FAIL（errors/skipped 0）。FAILはtestの行lock待ち観測方法の欠陥と判断して修正した（plan §13）。修正commitは未実行・再レビュー待ち。証拠は主控のrun記録 `nf10-93c11457-fast-targeted` / `nf10-93c11457-mysql-targeted`。
+`93c11457c17e7f082d2773500e8c47de2d50ed95` に対し、独立レビュー（静的）PASS、定向fast 9 class 288/0/0/0、定向MySQL 7 class 41件中1件FAIL（errors/skipped 0）。FAILはtestの行lock待ち観測方法の欠陥と判断して修正した（plan §13）。証拠は主控のrun記録 `nf10-93c11457-fast-targeted` / `nf10-93c11457-mysql-targeted`。
+
+修正commit `821076c0066119b035e3a7a1a84bdc3170341521` は独立レビュー（静的、第3回）PASS。主控Runnerの定向実行は、fast 10 class 292/0/0/0（上記9 class＋`AssetComprehensiveSecretScanTest`）、MySQL 7 class 41/0/0/0（`ReportScheduleClaimFenceMySqlTest` 17/0/0/0、前回FAILのcaseを含む）、browser `ManagementReportBrowserMTest` 1/0/0/0（PowerShell環境）で、いずれもzero skip。Bash tool環境のbrowser実行はNIO loopbackの環境要因で起動不能となり、その記録は環境FAILとして保持している。証拠は主控のrun記録 `nf10-821076c0-fast-targeted` / `nf10-821076c0-mysql-targeted` / `nf10-821076c0-browser-targeted-ps`。`821076c0` は `8dcdbe28` で統合候補へ取り込まれ、`328c2d8b` に含まれる。統合候補に対する全gate（`verify-like-ci`・CI）の通過は本記録の対象外で、未確認である。
 
 | 項目 | 内容 |
 |---|---|
@@ -81,8 +83,8 @@ Review remediation（`codex/nf10-review-remediation`）: delivery TX/outbox/prev
 | migration | `V185__report_schedule_claim_token.sql`（`processing_claim_token CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL`、列位置指定なし）。V185はユーザー承認済みの採番で、使い捨てのTestcontainers DB以外の環境には未適用 |
 | 実装 | claim token付き全列CAS、token・claimedAt・logicalRunAt一致のcompletion、per-scheduleの秒精度時刻、孤児token回収、実行中retry leaseのLIMIT枠除外、`updateEnabled` の限定更新、lease列の `FieldStrategy.NEVER`、確定的claim SQL失敗の分類 |
 | 計画・対応表 | `scheduler-claim-fence-plan.md` §9〜§13（独立レビュー指摘ごとの対応、§7受入試験とtestの対応、定向MySQL FAILの診断） |
-| 追加test（`93c11457` で定向実行済、上記1件FAILは修正後未実行） | `ReportScheduleClaimFenceMySqlTest`（`@Tag("mysql")`、`scripts/test-suites/mysql-shard-1.txt`）、`ReportScheduleApiBoundaryTest`、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest`/`ReportScheduleServiceImplTest` の追加case、`FlywaySelfServiceSchemaSmokeTest` の列定義assert |
-| 本番適用の前提 | rolling禁止・drain先行・検出SQL・復旧案は草案（plan §10、**SRE/DBA承認待ち**）。lease延長・retry上限・timezone変更・metric/alert・起動guardはOwner判断待ち（plan §11） |
+| 追加test（`93c11457` で定向実行、1件FAILを修正した `821076c0` で定向fast/MySQL/browserが全件通過） | `ReportScheduleClaimFenceMySqlTest`（`@Tag("mysql")`、`scripts/test-suites/mysql-shard-1.txt`）、`ReportScheduleApiBoundaryTest`、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest`/`ReportScheduleServiceImplTest` の追加case、`FlywaySelfServiceSchemaSmokeTest` の列定義assert |
+| 本番適用の前提 | rolling禁止・drain先行・検出SQL・復旧案は草案（plan §10、**SRE/DBA承認待ち**）。lease延長・retry上限・timezone変更・metric/alert・起動guardはOwner判断待ち（plan §11）。2026-11-13にユーザーが初回導入を空DBへの新規導入・全停止配備・専用Flyway jobによるmigration単独実行と決定したが、drain手順の確定とSRE/DBA承認は未了 |
 
 ## NF10 W2-B8 scheduler運用方針（2026-11-13）
 
