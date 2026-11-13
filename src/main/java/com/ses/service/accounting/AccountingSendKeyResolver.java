@@ -67,6 +67,24 @@ public class AccountingSendKeyResolver {
             throw alreadySynced(cancelJobType);
         }
 
+        // 閉じていない送信ジョブ（処理中・失敗）があれば、それが今の世代。キーの採番に関係なくそのジョブで判定する
+        // （旧方式の採番で世代が飛んでいても、処理中のジョブの横に2件目を作らない）
+        IntegrationJob open = null;
+        for (IntegrationJob job : syncJobs) {
+            if (!isClosed(job, cancelledDealIds) && !"SUCCEEDED".equals(job.getStatus())) {
+                open = job;
+            }
+        }
+        if (open != null) {
+            if ("FAILED".equals(open.getStatus())) {
+                throw BusinessException.of(409, "error.accounting.previousJobFailed");
+            }
+            if (payloadHash != null && open.getPayloadHash() != null && !payloadHash.equals(open.getPayloadHash())) {
+                throw BusinessException.of(409, "error.accounting.jobInProgress");
+            }
+            return open.getIdempotencyKey(); // 処理中で内容も同じ: 既存ジョブへ統合される（createJobの冪等性）
+        }
+
         long generation = syncJobs.stream().filter(job -> isClosed(job, cancelledDealIds)).count();
         for (int scanned = 0; scanned < MAX_GENERATION_SCAN; scanned++, generation++) {
             String key = generation == 0 ? baseKey : baseKey + ":g" + generation;

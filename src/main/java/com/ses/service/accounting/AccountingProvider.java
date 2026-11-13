@@ -38,6 +38,53 @@ public interface AccountingProvider {
     CanonicalDealResult upsertExpenseDeal(IntegrationConnection connection, CanonicalExpenseDeal expense);
 
     /**
+     * 取引を作成する前に、同じ管理番号の取引が外部に既にあるかを確認する方法。
+     * 送信ジョブの状態から {@link #of(Boolean, Integer)} で決める。
+     */
+    enum DealCreateGuard {
+        /** 確認しない（そのジョブの初回の試行）。 */
+        NONE,
+        /** 同じ管理番号の取引があれば作成しない（前の世代が外部へ送信した後に取消された再送信）。 */
+        REFUSE_IF_EXISTS,
+        /**
+         * 同じジョブの再試行（タイムアウト・5xx・滞留回収・手動再試行の後）。前回の試行で作成済みの取引
+         * （管理番号・金額・事業所が一致する1件）は採用し、それ以外の同じ管理番号の取引があれば作成しない。
+         */
+        ADOPT_OWN_OR_REFUSE;
+
+        /**
+         * @param verifyNoExistingDeal 送信スナップショットの指定（前の世代が送信後に取消された）
+         * @param attemptCount         claim後の試行回数（1 = 初回）
+         */
+        public static DealCreateGuard of(Boolean verifyNoExistingDeal, Integer attemptCount) {
+            if (Boolean.TRUE.equals(verifyNoExistingDeal)) {
+                // 前の世代の取引が残っている可能性があるため、再試行でも採用せず拒否する
+                // （補償取消が後から削除する取引を採用すると、送信済みのまま取引が消える）
+                return REFUSE_IF_EXISTS;
+            }
+            return attemptCount != null && attemptCount > 1 ? ADOPT_OWN_OR_REFUSE : NONE;
+        }
+    }
+
+    /** 既存取引の確認方法を指定して売上取引を登録する。未対応providerは確認しない。 */
+    default CanonicalDealResult upsertSalesInvoice(IntegrationConnection connection, CanonicalSalesInvoice invoice,
+                                                   DealCreateGuard guard) {
+        return upsertSalesInvoice(connection, invoice);
+    }
+
+    /** 既存取引の確認方法を指定してBP仕入取引を登録する。未対応providerは確認しない。 */
+    default CanonicalDealResult upsertPurchaseDeal(IntegrationConnection connection, CanonicalPurchaseDeal purchase,
+                                                   DealCreateGuard guard) {
+        return upsertPurchaseDeal(connection, purchase);
+    }
+
+    /** 既存取引の確認方法を指定して要員経費取引を登録する。未対応providerは確認しない。 */
+    default CanonicalDealResult upsertExpenseDeal(IntegrationConnection connection, CanonicalExpenseDeal expense,
+                                                  DealCreateGuard guard) {
+        return upsertExpenseDeal(connection, expense);
+    }
+
+    /**
      * 外部システムの支払・決済実績を取得する。
      * 50ページ上限到達・重複ID・取得途中障害は結果オブジェクトで fail-closed 通知する (P1-09)。
      */

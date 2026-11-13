@@ -563,6 +563,10 @@ class PurchaseExpenseIntegrationTest {
         closedContract.setEngineerId(1L);
         closedContract.setProjectId(1L);
         closedContract.setCustomerId(1L);
+        // BP支払は工数実績→契約→顧客でtenantが決まり、送信ジョブの法人は契約の法人。両方が無いと
+        // 締めの検査より前（BP支払の取得・法人の解決）で拒否され、このテストが締めを検証しなくなる
+        closedContract.setTenantId("default");
+        closedContract.setLegalEntityId(1L);
         closedContract.setContractType("準委任");
         closedContract.setStatus("稼動中");
         closedContract.setStartDate(LocalDate.of(2025, 1, 1));
@@ -593,7 +597,9 @@ class PurchaseExpenseIntegrationTest {
         }
 
         assertThatThrownBy(() -> purchaseIntegrationService.triggerBpPurchaseSync(closedPayment.getId(), 1L))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.closing.hardLocked");
+        assertThat(jobService.getLatestJob("BP_PAYMENT", closedPayment.getId(), "BP_PURCHASE_SYNC")).isNull();
     }
 
     @Test

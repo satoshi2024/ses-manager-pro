@@ -383,7 +383,9 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                 CanonicalPurchaseDeal canonical = objectMapper.readValue(job.getPayloadSnapshot(), CanonicalPurchaseDeal.class);
 
                 AccountingProvider provider = providerFactory.getProvider(conn);
-                CanonicalDealResult result = provider.upsertPurchaseDeal(conn, canonical);
+                // 再試行（試行2回目以降）は前回の試行で作成済みの取引を確認してからPOSTする（再POSTで二重に作らない）
+                CanonicalDealResult result = provider.upsertPurchaseDeal(conn, canonical,
+                        AccountingProvider.DealCreateGuard.of(canonical.getVerifyNoExistingDeal(), job.getAttemptCount()));
 
                 if (result.isSuccess()) {
                     jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
@@ -532,7 +534,9 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                 }
 
                 AccountingProvider provider = providerFactory.getProvider(conn);
-                CanonicalDealResult result = provider.upsertExpenseDeal(conn, canonical);
+                // 再試行（試行2回目以降）は前回の試行で作成済みの取引を確認してからPOSTする（再POSTで二重に作らない）
+                CanonicalDealResult result = provider.upsertExpenseDeal(conn, canonical,
+                        AccountingProvider.DealCreateGuard.of(canonical.getVerifyNoExistingDeal(), job.getAttemptCount()));
 
                 if (result.isSuccess()) {
                     if (canonical.getExpenseDate() != null) {
