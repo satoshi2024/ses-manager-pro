@@ -6,12 +6,14 @@ import com.ses.common.exception.BusinessException;
 import com.ses.common.security.OutboundUrlException;
 import com.ses.common.security.OutboundUrlGuard;
 import com.ses.config.AiConfig;
+import com.ses.service.ai.AiExternalSendApproval;
 import com.ses.service.ai.AiTextService;
 import com.ses.service.ai.CopilotBoundedAiTextService;
 import com.ses.service.ai.CopilotProviderResponse;
 import com.ses.service.ai.CopilotProviderUsage;
 import com.ses.service.ai.copilot.CopilotConfigSnapshot;
 import com.ses.service.ai.copilot.CopilotInvocation;
+import com.ses.service.ai.copilot.summary.ApprovedExternalSendCostPolicy;
 import com.ses.service.ai.copilot.summary.CopilotSummaryPromptTemplate;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.ses.service.ai.impl.CopilotBoundedHttpTransport.Response;
@@ -65,6 +67,11 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
     private final CopilotConfigSnapshot copilotConfigSnapshot;
     private final boolean syntheticLoopbackFixture;
     private final CopilotGeminiResponseParser copilotResponseParser;
+    /**
+     * 起動時に完全だった外部送信承認の決定ID。未承認・合成fixture・transportなしではnullで、
+     * Copilot送信は固定deny-allのまま（config hashにもdeny-all markerを残す）。
+     */
+    private final String approvedDecisionId;
 
     @Autowired
     public GeminiTextServiceImpl(AiConfig aiConfig,
@@ -97,6 +104,8 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         if (syntheticLoopbackFixture && (copilotTransport == null || !copilotTransport.isTestLoopbackMode())) {
             throw new IllegalArgumentException("合成Gemini fixtureにはloopback transportが必要です");
         }
+        this.approvedDecisionId = syntheticLoopbackFixture || copilotTransport == null
+                ? null : startupApprovedDecisionId(aiConfig);
         this.copilotConfigSnapshot = captureCopilotConfig(aiConfig, syntheticLoopbackFixture);
     }
 
@@ -110,6 +119,7 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         this.copilotTransport = null;
         this.syntheticLoopbackFixture = false;
         this.copilotResponseParser = new CopilotGeminiResponseParser();
+        this.approvedDecisionId = null;
         this.copilotConfigSnapshot = captureCopilotConfig(aiConfig, false);
     }
 
@@ -221,13 +231,51 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
 
     private boolean allowsDispatch(CopilotInvocation invocation) {
         var evidence = invocation.preflightCostEvidence();
-        if (!syntheticLoopbackFixture) return false; // production Gemini adapter is fixed deny-all
+        // 本番adapterは署名済み承認に束縛した証拠だけを受理する。承認がなければ固定deny-all。
+        if (!syntheticLoopbackFixture) return allowsApprovedDispatch(evidence);
         return evidence.dispatchAllowed()
                 && "synthetic-loopback-test-v1".equals(evidence.policyId())
                 && "synthetic-loopback-proof-v1".equals(evidence.proofIdentity())
                 && evidence.costState() == com.ses.service.ai.copilot.summary.CopilotCostState.UPPER_BOUND
                 && evidence.dispatchOutcome().state()
                 == com.ses.service.ai.copilot.summary.DispatchOutcome.State.NOT_STARTED;
+    }
+
+    /**
+     * gatewayの承認policyが発行した上限証拠か、送信直前に再確認する（gateway迂回の多層防御）。
+     * 現在の承認設定が完全で起動時の決定IDと一致し、proof identity・config hash・1回上限が整合する場合だけ許可する。
+     */
+    private boolean allowsApprovedDispatch(com.ses.service.ai.copilot.summary.PreflightCostEvidence evidence) {
+        if (approvedDecisionId == null || aiConfig == null || !aiConfig.isExternalSendEnabled()) {
+            return false;
+        }
+        AiExternalSendApproval.Evaluation live = AiExternalSendApproval.evaluate(aiConfig,
+                AiExternalSendApproval.businessDate(java.time.Clock.systemUTC()));
+        if (!live.complete() || !approvedDecisionId.equals(live.snapshot().decisionId())
+                || !live.snapshot().model().equals(copilotConfigSnapshot.modelId())
+                || !live.snapshot().permitsPurpose(com.ses.service.ai.AiGatewayRequest.USE_COPILOT)
+                || !ALLOWED_HOSTS.contains(live.snapshot().destinationHost())) {
+            return false;
+        }
+        return evidence.dispatchAllowed()
+                && ApprovedExternalSendCostPolicy.POLICY_ID.equals(evidence.policyId())
+                && ApprovedExternalSendCostPolicy.proofIdentity(approvedDecisionId).equals(evidence.proofIdentity())
+                && copilotConfigSnapshot.configHash().equals(evidence.configIdentity())
+                && evidence.costState() == com.ses.service.ai.copilot.summary.CopilotCostState.UPPER_BOUND
+                && evidence.upperBoundYen() != null
+                && evidence.upperBoundYen() <= live.snapshot().costLimit().perRequestYen()
+                && evidence.dispatchOutcome().state()
+                == com.ses.service.ai.copilot.summary.DispatchOutcome.State.NOT_STARTED;
+    }
+
+    /** 起動時の承認決定ID。external-send無効・承認不完全ならnull。 */
+    private static String startupApprovedDecisionId(AiConfig config) {
+        if (config == null || !config.isExternalSendEnabled()) {
+            return null;
+        }
+        AiExternalSendApproval.Evaluation evaluation = AiExternalSendApproval.evaluate(config,
+                AiExternalSendApproval.businessDate(java.time.Clock.systemUTC()));
+        return evaluation.complete() ? evaluation.snapshot().decisionId() : null;
     }
 
     private static CopilotProviderUsage toProviderUsage(CopilotGeminiResponseParser.UsageMetadata usage) {
@@ -243,9 +291,12 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         int tokens = config == null ? 0 : Math.max(0, config.getMaxTokens());
         String promptVersion = CopilotSummaryPromptTemplate.VERSION + "-gemini-json-v1";
         String canonical = canonicalGeminiBase(endpoint, testFixture);
+        // 承認済み構成ではartifact identityを決定IDへ束縛する（決定の差替えにはartifact再登録が必要）。
+        String costPolicyMarker = testFixture || approvedDecisionId == null
+                ? "production-deny-all-v1" : ApprovedExternalSendCostPolicy.POLICY_ID + ":" + approvedDecisionId;
         String hash = sha256(String.join("\n", "gemini", canonical, model, promptVersion,
                 CopilotSummaryPromptTemplate.OUTPUT_SCHEMA_VERSION, Integer.toString(tokens),
-                "json-envelope-parser-v1", "production-deny-all-v1"));
+                "json-envelope-parser-v1", costPolicyMarker));
         return new CopilotConfigSnapshot("gemini", "gemini", canonical, model, promptVersion, hash, tokens);
     }
 

@@ -10,6 +10,9 @@ import com.ses.entity.AiRecommendationRun;
 import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.ai.AiExecutionGateway;
+import com.ses.service.ai.AiExternalSendApproval;
+import com.ses.service.ai.AiExternalSendAuditor;
+import com.ses.service.ai.AiExternalSendBudgetLedger;
 import com.ses.service.ai.CopilotExecutionFailure;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
@@ -17,6 +20,7 @@ import com.ses.service.ai.AiOutboundProbe;
 import com.ses.service.ai.AiPiiMasker;
 import com.ses.service.ai.AiTextService;
 import com.ses.service.ai.CopilotBoundedAiTextService;
+import com.ses.service.ai.CopilotProviderUsage;
 import com.ses.service.ai.AiProductionApprovalGate;
 import com.ses.service.ai.AiProviderRegistry;
 import com.ses.service.ai.AiUseCasePolicy;
@@ -24,10 +28,16 @@ import com.ses.service.ai.copilot.CopilotFeatureGate;
 import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.CopilotConfigSnapshot;
 import com.ses.service.ai.copilot.CopilotInvocation;
+import com.ses.service.ai.copilot.summary.ApprovedExternalSendCostPolicy;
+import com.ses.service.ai.copilot.summary.CopilotCostState;
 import com.ses.service.ai.copilot.summary.CopilotProviderCostPolicy;
+import com.ses.service.ai.copilot.summary.DispatchOutcome;
 import com.ses.service.ai.copilot.summary.PreflightCostEvidence;
 import com.ses.service.ai.copilot.summary.ProductionDenyAllCopilotCostPolicy;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -43,6 +53,8 @@ import java.util.UUID;
 
 @Service
 public class AiExecutionGatewayImpl implements AiExecutionGateway {
+
+    private static final Logger log = LoggerFactory.getLogger(AiExecutionGatewayImpl.class);
 
     private final AiTextService aiTextService;
     private final AiConfig aiConfig;
@@ -60,9 +72,18 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
     private final AiProviderRegistry providerRegistry = new AiProviderRegistry();
     /** 起動時に一度だけ固定し、Copilot経路ではAiConfigを再読しない。 */
     private final CopilotConfigSnapshot startupCopilotConfigSnapshot;
-    /** production policyはコード固定で、外部設定からallowへ変更できない。 */
+    /** 承認設定がない場合のproduction policy。コード固定で、外部設定からallowへ変更できない。 */
     private final CopilotProviderCostPolicy copilotCostPolicy = new ProductionDenyAllCopilotCostPolicy();
+    /** 外部送信の監査。送信前監査を永続化できなければ送信しない。 */
+    private final AiExternalSendAuditor externalSendAuditor;
+    /** 起動時に完全だった署名済み承認。未承認ならnullで、Copilot外部送信は固定deny-allに留まる。 */
+    private final AiExternalSendApproval.Snapshot startupExternalSendApproval;
+    /** 承認snapshotに束縛した費用policy。startupExternalSendApprovalがnullならnull。 */
+    private final ApprovedExternalSendCostPolicy approvedExternalSendCostPolicy;
+    /** 外部送信費用の日次/月次累計（プロセス内）。startupExternalSendApprovalがnullならnull。 */
+    private final AiExternalSendBudgetLedger externalSendBudget;
 
+    /** 監査先を持たない手動構築用。外部送信は送信前監査で必ず失敗し、local providerは従来通り動作する。 */
     public AiExecutionGatewayImpl(AiTextService aiTextService, AiConfig aiConfig,
                                   AiOutboundProbe outboundProbe, ObjectMapper objectMapper,
                                   AiArtifactVersionMapper versionMapper,
@@ -70,6 +91,19 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                                   PlatformTransactionManager transactionManager, Clock clock,
                                   AiProductionApprovalGate productionApprovalGate,
                                   CopilotFeatureGate copilotFeatureGate) {
+        this(aiTextService, aiConfig, outboundProbe, objectMapper, versionMapper, runMapper, transactionManager,
+                clock, productionApprovalGate, copilotFeatureGate, AiExternalSendAuditor.unavailable());
+    }
+
+    @Autowired
+    public AiExecutionGatewayImpl(AiTextService aiTextService, AiConfig aiConfig,
+                                  AiOutboundProbe outboundProbe, ObjectMapper objectMapper,
+                                  AiArtifactVersionMapper versionMapper,
+                                  AiRecommendationRunMapper runMapper,
+                                  PlatformTransactionManager transactionManager, Clock clock,
+                                  AiProductionApprovalGate productionApprovalGate,
+                                  CopilotFeatureGate copilotFeatureGate,
+                                  AiExternalSendAuditor externalSendAuditor) {
         this.aiTextService = aiTextService;
         this.aiConfig = aiConfig;
         this.outboundProbe = outboundProbe;
@@ -81,6 +115,20 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         this.productionApprovalGate = productionApprovalGate;
         this.copilotFeatureGate = copilotFeatureGate;
         this.startupCopilotConfigSnapshot = CopilotConfigSnapshot.capture(aiConfig, aiTextService);
+        this.externalSendAuditor = externalSendAuditor == null
+                ? AiExternalSendAuditor.unavailable() : externalSendAuditor;
+        // 承認は起動時に一度だけ固定する。実行中に設定が変わっても承認policyへ切り替わらない（再起動が必要）。
+        AiProductionApprovalGate.AiExternalSendGateStatus approval =
+                productionApprovalGate == null ? null : productionApprovalGate.externalSendStatus();
+        if (approval != null && approval.approved()) {
+            this.startupExternalSendApproval = approval.approval();
+            this.approvedExternalSendCostPolicy = new ApprovedExternalSendCostPolicy(approval.approval());
+            this.externalSendBudget = new AiExternalSendBudgetLedger(approval.approval().costLimit(), clock);
+        } else {
+            this.startupExternalSendApproval = null;
+            this.approvedExternalSendCostPolicy = null;
+            this.externalSendBudget = null;
+        }
     }
 
     /**
@@ -99,9 +147,11 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         String prompt = prepared.prompt();
         CopilotInvocation invocation = null;
         if (AiGatewayRequest.USE_COPILOT.equals(request.getUseCase())) {
-            invocation = assertCopilotBoundedRequest(request);
+            invocation = assertCopilotBoundedRequest(request, prompt);
         }
         assertFinalProviderBoundary(request);
+        // 外部送信は送信前に費用予約と必須監査を完了させる。local providerではnull。
+        ExternalSendTicket externalSend = invocation == null ? null : openExternalSend(request, invocation, prompt);
         outboundProbe.record(prompt);
         if (request.getTraceId() == null || request.getTraceId().isBlank()) {
             request.setTraceId(java.util.UUID.randomUUID().toString());
@@ -128,29 +178,12 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         } catch (RuntimeException ex) {
             status = "FAILED";
             error = "PROVIDER_ERROR";
+            RuntimeException failure = translateProviderFailure(ex, invocation, copilotDispatchAttempted);
+            finishExternalSendFailure(externalSend, failure, started);
             persistIfNeeded(request, masked, status, error, started);
-            if (ex instanceof CopilotExecutionFailure typedFailure) {
-                throw typedFailure;
-            }
-            if (invocation != null) {
-                var preflight = invocation.preflightCostEvidence();
-                if (ex instanceof CopilotTransportFailure transportFailure) {
-                    throw new CopilotExecutionFailure(transportFailure.reasonCode(), preflight,
-                            transportFailure.outcome());
-                }
-                var dispatch = preflight.costState() == com.ses.service.ai.copilot.summary.CopilotCostState.NOT_SENT
-                        ? com.ses.service.ai.copilot.summary.DispatchOutcome.notStarted(preflight.reasonCode())
-                        : new com.ses.service.ai.copilot.summary.DispatchOutcome(
-                                copilotDispatchAttempted
-                                        ? com.ses.service.ai.copilot.summary.DispatchOutcome.State.MAY_HAVE_BEEN_SENT
-                                        : com.ses.service.ai.copilot.summary.DispatchOutcome.State.NOT_STARTED,
-                                copilotDispatchAttempted ? "PROVIDER_CALL_FAILED" : "DISPATCH_NOT_STARTED");
-                String safeReason = ex instanceof BusinessException business
-                        ? business.getMessage() : "COPILOT_PROVIDER_FAILURE";
-                throw new CopilotExecutionFailure(safeReason, preflight, dispatch);
-            }
-            throw ex;
+            throw failure;
         }
+        finishExternalSendSuccess(externalSend, providerUsage, started);
         persistIfNeeded(request, masked, status, error, started);
         Long runId = null;
         if (request.isPersistRun()) {
@@ -189,8 +222,8 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 || !currentTenant.equals(context.tenantId())) {
             throw BusinessException.of(403, "SCOPE_CONTEXT_REQUIRED");
         }
-        preparePrompt(request);
-        PreflightCostEvidence evidence = validateCopilotPreflight(request);
+        PromptPreparation prepared = preparePrompt(request);
+        PreflightCostEvidence evidence = validateCopilotPreflight(request, prepared.prompt(), false);
         // Read-only preflight must exercise the same final provider/policy boundary as execute.
         // execute deliberately repeats this check immediately before any probe or provider call.
         assertFinalProviderBoundary(request);
@@ -216,11 +249,15 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         return aiTextService.generate(prompt);
     }
 
-    private CopilotInvocation assertCopilotBoundedRequest(AiGatewayRequest request) {
-        PreflightCostEvidence preflight = validateCopilotPreflight(request);
+    private CopilotInvocation assertCopilotBoundedRequest(AiGatewayRequest request, String prompt) {
+        PreflightCostEvidence preflight = validateCopilotPreflight(request, prompt, true);
         if (!preflight.dispatchAllowed()) {
-            throw new CopilotExecutionFailure("COPILOT_COST_UNKNOWN", preflight,
-                    com.ses.service.ai.copilot.summary.DispatchOutcome.notStarted("COPILOT_COST_UNKNOWN"));
+            // 固定deny-allの理由は従来通りCOPILOT_COST_UNKNOWN。承認policyは超過理由をそのまま返す。
+            String reason = preflight.reasonCode().isBlank() ? "COPILOT_COST_UNKNOWN" : preflight.reasonCode();
+            if (ApprovedExternalSendCostPolicy.POLICY_ID.equals(preflight.policyId())) {
+                recordExternalSendDenied(request, prompt, preflight, reason);
+            }
+            throw new CopilotExecutionFailure(reason, preflight, DispatchOutcome.notStarted(reason));
         }
         CopilotInvocation invocation = new CopilotInvocation(startupCopilotConfigSnapshot,
                 request.getExpectedArtifactVersionId(), request.getExpectedProvider(), request.getExpectedModel(),
@@ -232,8 +269,12 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         return invocation;
     }
 
-    /** request identityとpolicyを検証するが、CopilotInvocationやdispatch authorityは生成しない。 */
-    private PreflightCostEvidence validateCopilotPreflight(AiGatewayRequest request) {
+    /**
+     * request identityとpolicyを検証するが、CopilotInvocationやdispatch authorityは生成しない。
+     * auditDenialsがfalse（読取専用preflight）の場合は拒否監査も書かない。
+     */
+    private PreflightCostEvidence validateCopilotPreflight(AiGatewayRequest request, String prompt,
+                                                           boolean auditDenials) {
         if (request.getCostBudgetYen() == null || request.getCostBudgetYen() < 0) {
             throw BusinessException.of(503, "COPILOT_COST_BUDGET_REQUIRED");
         }
@@ -255,18 +296,61 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         }
         PreflightCostEvidence preflight;
         if (!configured.localOnly()) {
-            // production cost policyは固定deny-all。budget欠落を0円へ補完しない。
-            preflight = copilotCostPolicy.preflight(startupCopilotConfigSnapshot, request.getCostBudgetYen());
+            if (approvedExternalSendCostPolicy == null) {
+                // 承認設定なし（既定）: production cost policyは固定deny-all。budget欠落を0円へ補完しない。
+                preflight = copilotCostPolicy.preflight(startupCopilotConfigSnapshot, request.getCostBudgetYen());
+                if (preflight.dispatchAllowed()) {
+                    throw BusinessException.of(503, "COPILOT_COST_POLICY_INVALID");
+                }
+                return preflight;
+            }
+            try {
+                assertExternalSendTenantBinding(request);
+                assertBoundedIdentity(request, configured);
+                assertApprovedExternalSendBinding(configured);
+            } catch (BusinessException ex) {
+                if (auditDenials) {
+                    recordExternalSendDenied(request, prompt, null, ex.getMessage());
+                }
+                throw ex;
+            }
+            preflight = approvedExternalSendCostPolicy.preflight(startupCopilotConfigSnapshot,
+                    request.getCostBudgetYen(), utf8Length(prompt));
             if (preflight.dispatchAllowed()) {
-                throw BusinessException.of(503, "COPILOT_COST_POLICY_INVALID");
+                // 読取専用の累計判定。原子的な予約はprovider呼出し直前にopenExternalSendで行う。
+                String exceeded = externalSendBudget.exceededReason(preflight.upperBoundYen());
+                if (exceeded != null) {
+                    preflight = PreflightCostEvidence.denied(preflight.policyId(), preflight.configIdentity(),
+                            preflight.proofIdentity(), preflight.upperBoundYen(), preflight.budgetYen(), exceeded);
+                }
             }
             return preflight;
         }
+        assertBoundedIdentity(request, configured);
+        if (request.getCostBudgetYen() == null) {
+            throw BusinessException.of(503, "COPILOT_COST_BUDGET_REQUIRED");
+        }
+        preflight = PreflightCostEvidence.localNoEgress(startupCopilotConfigSnapshot.configHash(),
+                request.getCostBudgetYen());
+        return preflight;
+    }
+
+    /** 外部送信は実行中tenantとExecutionContextのtenantが一致する場合だけ許可する（他tenant文脈での送信を防ぐ）。 */
+    private void assertExternalSendTenantBinding(AiGatewayRequest request) {
+        String currentTenant = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        CopilotExecutionContext context = request.getExecutionContext();
+        if (context == null || !currentTenant.equals(context.tenantId())) {
+            throw BusinessException.of(403, "SCOPE_CONTEXT_REQUIRED");
+        }
+    }
+
+    /** 起動時snapshotとbounded adapter・artifact identityの一致。local/承認済み外部送信で共通。 */
+    private void assertBoundedIdentity(AiGatewayRequest request, AiProviderRegistry.ProviderDescriptor configured) {
         if (!startupCopilotConfigSnapshot.hasBoundedIdentity()
                 || !configured.name().equals(startupCopilotConfigSnapshot.adapterProvider())) {
             throw BusinessException.of(503, "COPILOT_EXECUTION_SNAPSHOT_INVALID");
         }
-        if (!(aiTextService instanceof CopilotBoundedAiTextService bounded)
+        if (!(aiTextService instanceof CopilotBoundedAiTextService)
                 || !configured.name().equals(startupCopilotConfigSnapshot.adapterProvider())
                 || !request.getExpectedModel().equals(startupCopilotConfigSnapshot.modelId())) {
             throw BusinessException.of(503, "COPILOT_BOUNDED_PROVIDER_MISMATCH");
@@ -277,12 +361,221 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         if (!request.getExpectedConfigHash().equals(startupCopilotConfigSnapshot.configHash())) {
             throw BusinessException.of(503, "COPILOT_CONFIG_HASH_MISMATCH");
         }
-        if (request.getCostBudgetYen() == null) {
-            throw BusinessException.of(503, "COPILOT_COST_BUDGET_REQUIRED");
+    }
+
+    /**
+     * 呼出し時の承認束縛。現在の承認設定が完全で、起動時に固定した承認と同一であり、
+     * 用途・provider・model・宛先hostが承認値と一致する場合だけ通す（失効・設定差替えはここで拒否）。
+     */
+    private void assertApprovedExternalSendBinding(AiProviderRegistry.ProviderDescriptor configured) {
+        AiProductionApprovalGate.AiExternalSendGateStatus live = productionApprovalGate.externalSendStatus();
+        if (live == null || !live.approved()) {
+            throw BusinessException.of(503, "AI_EXTERNAL_SEND_NOT_APPROVED");
         }
-        preflight = PreflightCostEvidence.localNoEgress(startupCopilotConfigSnapshot.configHash(),
-                request.getCostBudgetYen());
-        return preflight;
+        AiExternalSendApproval.Snapshot approval = live.approval();
+        if (!approval.equals(startupExternalSendApproval)) {
+            throw BusinessException.of(503, "AI_EXTERNAL_SEND_DECISION_CHANGED");
+        }
+        if (!approval.permitsPurpose(AiGatewayRequest.USE_COPILOT)) {
+            throw BusinessException.of(503, "AI_EXTERNAL_SEND_PURPOSE_NOT_APPROVED");
+        }
+        if (!approval.provider().equals(configured.name())) {
+            throw BusinessException.of(503, "AI_EXTERNAL_SEND_PROVIDER_NOT_APPROVED");
+        }
+        if (!approval.model().equals(startupCopilotConfigSnapshot.modelId())) {
+            throw BusinessException.of(503, "AI_EXTERNAL_SEND_MODEL_NOT_APPROVED");
+        }
+        if (!approval.destinationHost().equals(hostOf(startupCopilotConfigSnapshot.canonicalEndpoint()))) {
+            throw BusinessException.of(503, "AI_EXTERNAL_SEND_DESTINATION_NOT_APPROVED");
+        }
+    }
+
+    /**
+     * 外部送信の開始。費用上限見積りを日次/月次累計へ原子的に予約し、送信前監査を必須で永続化する。
+     * どちらかに失敗した場合はprovider I/Oを開始しない（NOT_STARTED）。local providerではnullを返す。
+     */
+    private ExternalSendTicket openExternalSend(AiGatewayRequest request, CopilotInvocation invocation,
+                                                String prompt) {
+        AiProviderRegistry.ProviderDescriptor provider = providerRegistry.requireRegistered(
+                startupCopilotConfigSnapshot.configuredProvider());
+        if (provider.localOnly()) {
+            return null;
+        }
+        PreflightCostEvidence preflight = invocation.preflightCostEvidence();
+        if (startupExternalSendApproval == null || externalSendBudget == null
+                || !ApprovedExternalSendCostPolicy.POLICY_ID.equals(preflight.policyId())
+                || preflight.costState() != CopilotCostState.UPPER_BOUND || preflight.upperBoundYen() == null) {
+            throw new CopilotExecutionFailure("AI_EXTERNAL_SEND_NOT_APPROVED", preflight,
+                    DispatchOutcome.notStarted("AI_EXTERNAL_SEND_NOT_APPROVED"));
+        }
+        String traceId = ensureTraceId(request);
+        AiExternalSendBudgetLedger.Reservation reservation;
+        try {
+            reservation = externalSendBudget.reserve(preflight.upperBoundYen());
+        } catch (BusinessException ex) {
+            recordExternalSendDenied(request, prompt, preflight, ex.getMessage());
+            throw new CopilotExecutionFailure(ex.getMessage(), preflight, DispatchOutcome.notStarted(ex.getMessage()));
+        }
+        ExternalSendTicket ticket = new ExternalSendTicket(UUID.randomUUID().toString(), traceId,
+                request.getUseCase(), utf8Length(prompt), preflight, reservation);
+        AiExternalSendBudgetLedger.Totals totals = externalSendBudget.totals();
+        try {
+            externalSendAuditor.recordAttempt(sendAudit(ticket, totals.dayYen(), totals.monthYen(),
+                    DispatchOutcome.State.NOT_STARTED.name(), ApprovedExternalSendCostPolicy.REASON_APPROVED,
+                    null, preflight.upperBoundYen(), CopilotCostState.UPPER_BOUND.name(), 202, true, null));
+        } catch (RuntimeException ex) {
+            externalSendBudget.release(reservation);
+            log.warn("AI外部送信の送信前監査を永続化できないため送信しません: attempt={} errorType={}",
+                    ticket.attemptId(), ex.getClass().getSimpleName());
+            throw new CopilotExecutionFailure("AI_EXTERNAL_SEND_AUDIT_UNAVAILABLE", preflight,
+                    DispatchOutcome.notStarted("AI_EXTERNAL_SEND_AUDIT_UNAVAILABLE"));
+        }
+        return ticket;
+    }
+
+    /** 応答受領後の精算と必須結果監査。監査を永続化できない場合は応答を破棄する。 */
+    private void finishExternalSendSuccess(ExternalSendTicket ticket, CopilotProviderUsage usage, long startedNanos) {
+        if (ticket == null) {
+            return;
+        }
+        Integer actualYen = ApprovedExternalSendCostPolicy.actualCostYen(
+                startupExternalSendApproval.costLimit(), usage);
+        externalSendBudget.settle(ticket.reservation(), actualYen);
+        try {
+            externalSendAuditor.recordResult(sendAudit(ticket, null, null,
+                    DispatchOutcome.State.RESPONSE_RECEIVED.name(), "SUCCEEDED", usage,
+                    actualYen == null ? ticket.preflight().upperBoundYen() : actualYen,
+                    costState(ticket, actualYen), 200, true, elapsedMillis(startedNanos)));
+        } catch (RuntimeException ex) {
+            log.warn("AI外部送信の結果監査を永続化できないため応答を破棄します: attempt={} errorType={}",
+                    ticket.attemptId(), ex.getClass().getSimpleName());
+            throw new CopilotExecutionFailure("AI_EXTERNAL_SEND_AUDIT_UNAVAILABLE", ticket.preflight(),
+                    new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED, "AI_EXTERNAL_SEND_AUDIT_UNAVAILABLE"),
+                    usage);
+        }
+    }
+
+    /** provider失敗時の精算と結果監査。未送信確定なら予約を戻し、送信の可能性があれば上限見積りを維持する。 */
+    private void finishExternalSendFailure(ExternalSendTicket ticket, RuntimeException failure, long startedNanos) {
+        if (ticket == null) {
+            return;
+        }
+        CopilotExecutionFailure typed = failure instanceof CopilotExecutionFailure f ? f : null;
+        DispatchOutcome outcome = typed != null && typed.dispatchOutcome() != null ? typed.dispatchOutcome()
+                : new DispatchOutcome(DispatchOutcome.State.MAY_HAVE_BEEN_SENT, "PROVIDER_CALL_FAILED");
+        CopilotProviderUsage usage = typed == null ? null : typed.usage();
+        String reason = typed == null ? "COPILOT_PROVIDER_FAILURE" : typed.reasonCode();
+        Integer costYen;
+        String costState;
+        if (outcome.state() == DispatchOutcome.State.NOT_STARTED) {
+            externalSendBudget.release(ticket.reservation());
+            costYen = 0;
+            costState = CopilotCostState.NOT_SENT.name();
+        } else {
+            Integer actualYen = ApprovedExternalSendCostPolicy.actualCostYen(
+                    startupExternalSendApproval.costLimit(), usage);
+            externalSendBudget.settle(ticket.reservation(), actualYen);
+            costYen = actualYen == null ? ticket.preflight().upperBoundYen() : actualYen;
+            costState = costState(ticket, actualYen);
+        }
+        int status = failure instanceof BusinessException business ? business.getCode() : 502;
+        try {
+            externalSendAuditor.recordResult(sendAudit(ticket, null, null, outcome.state().name(), reason, usage,
+                    costYen, costState, status, false, elapsedMillis(startedNanos)));
+        } catch (RuntimeException ex) {
+            // 送信前監査は永続化済み。結果監査の欠落は運用で照合できるよう固定コードだけを残す。
+            log.warn("AI外部送信の結果監査を永続化できません: attempt={} reason={} errorType={}",
+                    ticket.attemptId(), reason, ex.getClass().getSimpleName());
+        }
+    }
+
+    /** 承認済み経路の送信前拒否をbest effortで監査する。承認がない場合（既定deny-all）は記録しない。 */
+    private void recordExternalSendDenied(AiGatewayRequest request, String prompt, PreflightCostEvidence preflight,
+                                          String reason) {
+        if (startupExternalSendApproval == null) {
+            return;
+        }
+        String safeReason = reason == null ? "AI_EXTERNAL_SEND_DENIED" : reason;
+        int status = safeReason.contains("COST_LIMIT") || safeReason.contains("BUDGET") ? 429 : 503;
+        externalSendAuditor.recordDenied(new AiExternalSendAuditor.SendAudit(UUID.randomUUID().toString(),
+                ensureTraceId(request), startupExternalSendApproval.decisionId(),
+                startupCopilotConfigSnapshot.configuredProvider(), startupCopilotConfigSnapshot.modelId(),
+                request.getUseCase(), hostOf(startupCopilotConfigSnapshot.canonicalEndpoint()), utf8Length(prompt),
+                preflight == null ? null : preflight.upperBoundYen(), null, null,
+                DispatchOutcome.State.NOT_STARTED.name(), safeReason, null, 0, CopilotCostState.NOT_SENT.name(),
+                status, false, null));
+    }
+
+    private AiExternalSendAuditor.SendAudit sendAudit(ExternalSendTicket ticket, Long dayTotalYen, Long monthTotalYen,
+                                                      String outcome, String reason, CopilotProviderUsage usage,
+                                                      Integer costYen, String costState, int status,
+                                                      boolean succeeded, Long latencyMs) {
+        return new AiExternalSendAuditor.SendAudit(ticket.attemptId(), ticket.traceId(),
+                startupExternalSendApproval.decisionId(), startupCopilotConfigSnapshot.configuredProvider(),
+                startupCopilotConfigSnapshot.modelId(), ticket.purpose(),
+                hostOf(startupCopilotConfigSnapshot.canonicalEndpoint()), ticket.promptBytes(),
+                ticket.preflight().upperBoundYen(), dayTotalYen, monthTotalYen, outcome, reason, usage, costYen,
+                costState, status, succeeded, latencyMs);
+    }
+
+    private static String costState(ExternalSendTicket ticket, Integer actualYen) {
+        if (actualYen == null) {
+            return CopilotCostState.UPPER_BOUND.name();
+        }
+        return actualYen > ticket.preflight().upperBoundYen() ? "ACTUAL_OVER_BOUND" : CopilotCostState.ACTUAL.name();
+    }
+
+    /** 既存のprovider失敗変換（CopilotExecutionFailureへの型付け）。挙動は変えずに例外を返す。 */
+    private RuntimeException translateProviderFailure(RuntimeException ex, CopilotInvocation invocation,
+                                                      boolean copilotDispatchAttempted) {
+        if (ex instanceof CopilotExecutionFailure typedFailure) {
+            return typedFailure;
+        }
+        if (invocation == null) {
+            return ex;
+        }
+        PreflightCostEvidence preflight = invocation.preflightCostEvidence();
+        if (ex instanceof CopilotTransportFailure transportFailure) {
+            return new CopilotExecutionFailure(transportFailure.reasonCode(), preflight, transportFailure.outcome());
+        }
+        DispatchOutcome dispatch = preflight.costState() == CopilotCostState.NOT_SENT
+                ? DispatchOutcome.notStarted(preflight.reasonCode())
+                : new DispatchOutcome(copilotDispatchAttempted
+                        ? DispatchOutcome.State.MAY_HAVE_BEEN_SENT : DispatchOutcome.State.NOT_STARTED,
+                        copilotDispatchAttempted ? "PROVIDER_CALL_FAILED" : "DISPATCH_NOT_STARTED");
+        String safeReason = ex instanceof BusinessException business
+                ? business.getMessage() : "COPILOT_PROVIDER_FAILURE";
+        return new CopilotExecutionFailure(safeReason, preflight, dispatch);
+    }
+
+    private static String ensureTraceId(AiGatewayRequest request) {
+        if (request.getTraceId() == null || request.getTraceId().isBlank()) {
+            request.setTraceId(UUID.randomUUID().toString());
+        }
+        return request.getTraceId();
+    }
+
+    private static String hostOf(String endpoint) {
+        try {
+            String host = endpoint == null || endpoint.isBlank() ? null : java.net.URI.create(endpoint).getHost();
+            return host == null ? "" : host.toLowerCase(java.util.Locale.ROOT);
+        } catch (RuntimeException ex) {
+            return "";
+        }
+    }
+
+    private static int utf8Length(String value) {
+        return value == null ? 0 : value.getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    private static long elapsedMillis(long startedNanos) {
+        return (System.nanoTime() - startedNanos) / 1_000_000L;
+    }
+
+    /** 1回の外部送信の束縛値（秘密値・prompt原文を保持しない）。 */
+    private record ExternalSendTicket(String attemptId, String traceId, String purpose, int promptBytes,
+                                      PreflightCostEvidence preflight,
+                                      AiExternalSendBudgetLedger.Reservation reservation) {
     }
 
     private com.ses.service.ai.CopilotProviderResponse callCopilotProvider(String prompt, CopilotInvocation invocation) {
@@ -321,7 +614,8 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 throw new BusinessException(403, "EXECUTION_CONTEXT_REQUIRED");
             }
             copilotFeatureGate.assertQueryAllowed();
-            productionApprovalGateAsserted(startupCopilotConfigSnapshot.configuredProvider());
+            productionApprovalGateAsserted(startupCopilotConfigSnapshot.configuredProvider(),
+                    AiGatewayRequest.USE_COPILOT);
             return;
         }
 
@@ -337,7 +631,7 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
             if (requiresLegacyContext(request)) {
                 assertLegacyResourceContext(request);
             }
-            productionApprovalGateAsserted(aiConfig.getProvider());
+            productionApprovalGateAsserted(aiConfig.getProvider(), request.getUseCase());
         }
     }
 
@@ -370,8 +664,8 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         }
     }
 
-    private void productionApprovalGateAsserted(String provider) {
-        productionApprovalGate.assertProviderAllowed(provider);
+    private void productionApprovalGateAsserted(String provider, String purpose) {
+        productionApprovalGate.assertProviderAllowed(provider, purpose);
     }
 
 

@@ -39,13 +39,22 @@ public class CopilotFeatureGate {
         if (!aiConfig.isEnabled()) {
             throw new BusinessException(503, "AI機能は現在無効化されています。");
         }
-        productionApprovalGate.assertProviderAllowed(aiConfig.getProvider());
+        // legacy用途は外部送信の承認用途に含められないため、非local providerはここで拒否される。
+        productionApprovalGate.assertProviderAllowed(aiConfig.getProvider(),
+                AiProductionApprovalGate.PURPOSE_LEGACY_ENDPOINT);
     }
 
-    /** retention purgeは推論/外部送信ではなく安全なmaintenanceであり、flag OFFでも実行可能。 */
+    /**
+     * retention purgeは推論/外部送信ではなく安全なmaintenanceであり、flag OFFでも実行可能。
+     * external-sendが有効でも署名済み承認設定が完全なら保存期間の遵守を優先して止めない。
+     * 承認設定のないexternal-send有効化は設定誤りとしてfail-closedにする。
+     */
     public void assertRetentionMaintenanceAllowed() {
         if (aiConfig.isExternalSendEnabled()) {
-            throw new BusinessException(503, "コパイロットの外部provider送信は許可されていません。");
+            AiProductionApprovalGate.AiExternalSendGateStatus decision = productionApprovalGate.externalSendStatus();
+            if (decision == null || !decision.approved()) {
+                throw new BusinessException(503, "コパイロットの外部provider送信は許可されていません。");
+            }
         }
     }
 
@@ -56,7 +65,8 @@ public class CopilotFeatureGate {
         if (!aiConfig.isManagementCopilotEnabled()) {
             throw new BusinessException(503, "経営コパイロットは現在無効化されています。");
         }
-        // providerの空/未知値、外部送信、独立production gateを一箇所でfail-closed判定する。
-        productionApprovalGate.assertProviderAllowed(aiConfig.getProvider());
+        // providerの空/未知値、外部送信、承認設定、用途を一箇所でfail-closed判定する。
+        productionApprovalGate.assertProviderAllowed(aiConfig.getProvider(),
+                com.ses.service.ai.AiGatewayRequest.USE_COPILOT);
     }
 }

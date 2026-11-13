@@ -360,7 +360,30 @@ ai:
   enabled: true
   provider: mock
   management-copilot-enabled: false
-  external-send-enabled: false
+  # NF08 外部送信。既定false。trueにする場合は下記 external-send-approval が全て揃い、
+  # production-gates（運用者確認チェックリスト）が全てtrueでなければprodは起動しない（fail-fast）。
+  external-send-enabled: ${AI_EXTERNAL_SEND_ENABLED:false}
+  # NF08 外部送信承認設定。値は署名済み決定書の転記（秘密値を置かない）。既定は全て未設定＝拒否。
+  # 手順・項目一覧: .kiro/specs/ai-management-copilot/external-send-approval-gate.md
+  external-send-approval:
+    decision-id: ${AI_EXTERNAL_SEND_DECISION_ID:}
+    dg08-decision-id: ${AI_EXTERNAL_SEND_DG08_DECISION_ID:}
+    nf07-policy-id: ${AI_EXTERNAL_SEND_NF07_POLICY_ID:}
+    dpa-reference: ${AI_EXTERNAL_SEND_DPA_REFERENCE:}
+    signed-on: ${AI_EXTERNAL_SEND_SIGNED_ON:}
+    expires-on: ${AI_EXTERNAL_SEND_EXPIRES_ON:}
+    provider: ${AI_EXTERNAL_SEND_PROVIDER:}
+    model: ${AI_EXTERNAL_SEND_MODEL:}
+    purposes: ${AI_EXTERNAL_SEND_PURPOSES:}
+    destination-host: ${AI_EXTERNAL_SEND_DESTINATION_HOST:}
+    cost-limit:
+      per-request-yen: ${AI_EXTERNAL_SEND_PER_REQUEST_YEN:}
+      daily-yen: ${AI_EXTERNAL_SEND_DAILY_YEN:}
+      monthly-yen: ${AI_EXTERNAL_SEND_MONTHLY_YEN:}
+      input-yen-per-thousand-tokens: ${AI_EXTERNAL_SEND_INPUT_YEN_PER_THOUSAND_TOKENS:}
+      output-yen-per-thousand-tokens: ${AI_EXTERNAL_SEND_OUTPUT_YEN_PER_THOUSAND_TOKENS:}
+      max-request-bytes: ${AI_EXTERNAL_SEND_MAX_REQUEST_BYTES:}
+      max-thinking-tokens: ${AI_EXTERNAL_SEND_MAX_THINKING_TOKENS:0}
   learning-candidate-timeout-ms: 2000
   learning-candidate-ttl-minutes: 60
   retention:
