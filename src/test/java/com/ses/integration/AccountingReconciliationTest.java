@@ -96,6 +96,7 @@ public class AccountingReconciliationTest {
         jdbcTemplate.update("UPDATE m_customer SET tenant_id = 'default', deleted_flag = 0 WHERE id = 3");
         jdbcTemplate.update("UPDATE t_contract SET customer_id = 1, project_id = 1, engineer_id = 1, tenant_id = 'default', deleted_flag = 0 WHERE id = 1");
         mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
+        expectNoUnsettledDeals();
 
         connection = connectionService.getOrCreateConnection("default", null, "freee", "accounting");
         IntegrationTokensDto tokens = IntegrationTokensDto.builder()
@@ -298,6 +299,27 @@ public class AccountingReconciliationTest {
         // 内部の請求書レコードが自動作成されていないことを確認
         int finalInvoiceCount = invoiceMapper.selectList(new LambdaQueryWrapper<Invoice>().eq(Invoice::getBillingMonth, testMonth)).size();
         assertThat(finalInvoiceCount).isEqualTo(initialInvoiceCount);
+    }
+
+    @Test
+    @DisplayName("外部のみ取引: freeeで直接作られた未入金（未決済）の取引も対象月の発生分は外部のみとして検出する")
+    void externalOnly_detectsUnsettledDealCreatedInFreee() {
+        String testMonth = "2027-01";
+        mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&status=settled&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&status=unsettled"
+                        + "&start_issue_date=2027-01-01&end_issue_date=2027-01-31&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": [{\"id\": 88901, \"issue_date\": \"2027-01-20\", \"amount\": 440000, "
+                        + "\"ref_number\": \"FREEE-DIRECT-01\", \"status\": \"unsettled\", \"payments\": []}]}", MediaType.APPLICATION_JSON));
+
+        AccountingReconciliationSummaryDto summary = reconciliationService.reconcileMonth(testMonth);
+        mockServer.verify();
+
+        assertThat(summary.getExternalOnlyCount()).isEqualTo(1);
+        assertThat(summary.isReadyForClosing()).isFalse();
     }
 
     @Test
@@ -716,5 +738,12 @@ public class AccountingReconciliationTest {
         ip.setAmount(amount);
         ip.setFee(fee);
         invoicePaymentMapper.insert(ip);
+    }
+
+    /** 月次照合の2回目の取得（対象月に発生した未決済取引）。個別テストで上書きしない限り0件。 */
+    private void expectNoUnsettledDeals() {
+        mockServer.expect(org.springframework.test.web.client.ExpectedCount.between(0, 10),
+                        requestTo(org.hamcrest.Matchers.containsString("status=unsettled")))
+                .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
     }
 }

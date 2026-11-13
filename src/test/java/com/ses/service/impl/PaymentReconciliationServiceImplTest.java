@@ -6,6 +6,7 @@ import com.ses.dto.invoice.InvoicePaymentCreateRequest;
 import com.ses.dto.invoice.InvoicePaymentResponse;
 import com.ses.dto.reconciliation.BankDepositDto;
 import com.ses.dto.reconciliation.PendingDepositDto;
+import com.ses.dto.reconciliation.ReconciliationCandidateDto;
 import com.ses.dto.reconciliation.ReconciliationFetchResultDto;
 import com.ses.entity.BankDeposit;
 import com.ses.mapper.BankDepositMapper;
@@ -302,6 +303,40 @@ class PaymentReconciliationServiceImplTest {
         assertTrue(PaymentReconciliationServiceImpl.isNameMatch("サンプル商事株式会社", "サンプル商事"));
         assertFalse(PaymentReconciliationServiceImpl.isNameMatch("サンプル商事株式会社", "全く関係ない会社"));
         assertFalse(PaymentReconciliationServiceImpl.isNameMatch(null, "サンプル商事"));
+    }
+
+    @Test
+    void isKanaNameMatch_matchesBankHalfWidthKanaWithCorporateAbbreviation() {
+        // 銀行の振込名義: 半角カナ・小書き文字なし・法人略号付き
+        assertTrue(PaymentReconciliationServiceImpl.isKanaNameMatch("サンプルショウジ", "ｶ)ｻﾝﾌﾟﾙｼﾖｳｼﾞ"));
+        assertTrue(PaymentReconciliationServiceImpl.isKanaNameMatch("さんぷるしょうじ", "ｻﾝﾌﾟﾙｼﾖｳｼﾞ(ｶ"));
+        assertTrue(PaymentReconciliationServiceImpl.isKanaNameMatch("カブシキガイシャ　サンプルショウジ", "ｶ) ｻﾝﾌﾟﾙ ｼﾖｳｼﾞ"));
+        assertTrue(PaymentReconciliationServiceImpl.isKanaNameMatch("サンプルショウジ", "ｻﾝﾌﾟﾙ(ｶ)ｼﾖｳｼﾞ"));
+        assertTrue(PaymentReconciliationServiceImpl.isKanaNameMatch("エス・イー・エス", "ｴｽｲ-ｴｽ"));
+        // 4文字以上の部分一致（支店名付き等）
+        assertTrue(PaymentReconciliationServiceImpl.isKanaNameMatch("サンプルショウジ", "ｶ)ｻﾝﾌﾟﾙｼﾖｳｼﾞﾄｳｷﾖｳｼﾃﾝ"));
+    }
+
+    @Test
+    void isKanaNameMatch_rejectsShortPartialsAndNonKana() {
+        assertFalse(PaymentReconciliationServiceImpl.isKanaNameMatch("サン", "ｻﾝﾌﾟﾙｼﾖｳｼﾞ"), "短い部分一致で自動消込しない");
+        assertFalse(PaymentReconciliationServiceImpl.isKanaNameMatch("サンプルショウジ", "ｶ)ﾍﾞﾂﾉｶｲｼﾔ"));
+        assertFalse(PaymentReconciliationServiceImpl.isKanaNameMatch(null, "ｻﾝﾌﾟﾙｼﾖｳｼﾞ"));
+        assertFalse(PaymentReconciliationServiceImpl.isKanaNameMatch("サンプル商事", "ｻﾝﾌﾟﾙ商事"), "漢字はカナ照合の対象外");
+        // 法人略号だけの名義は空になり一致しない
+        assertFalse(PaymentReconciliationServiceImpl.isKanaNameMatch("カ", "ｶ)"));
+    }
+
+    @Test
+    void score_usesCustomerKanaForHalfWidthKanaPayerName() {
+        BankDeposit deposit = depositEntity(1L, LocalDate.of(2026, 1, 31), new BigDecimal("330000"), "ｶ)ｻﾝﾌﾟﾙｼﾖｳｼﾞ", "未消込");
+        InvoiceBalanceDto inv = invoiceBalance(1L, "INV-1", 1L, "株式会社サンプル商事", new BigDecimal("330000"), LocalDate.of(2026, 1, 31));
+        inv.setCustomerNameKana("サンプルショウジ");
+
+        ReconciliationCandidateDto candidate = PaymentReconciliationServiceImpl.score(deposit, inv);
+
+        assertTrue(candidate.isNameMatch(), "漢字の顧客名でも会社名カナで振込名義と一致する");
+        assertTrue(candidate.isAmountMatch());
     }
 
     @Test

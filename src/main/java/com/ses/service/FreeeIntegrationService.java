@@ -58,4 +58,19 @@ public interface FreeeIntegrationService {
      * 401時はrefreshを1回だけ実行して再試行し、429はexponential backoff、timeout/5xxは503へ変換する。
      */
     JsonNode apiPost(String path, Object body, String idempotencyKey, String correlationId);
+
+    /** 接続中の事業所ID（freee人事労務のcompany_id）。未接続ならnull。 */
+    Long connectedCompanyId();
+
+    /**
+     * 人事労務API（hrApiBase）への認証付きGET。queryはURLエンコードして付与する。
+     * 401はrefresh 1回＋再試行、429はbackoff、5xx/timeoutは最大2回retryの後に503。
+     */
+    JsonNode hrApiGet(String path, java.util.Map<String, String> query);
+
+    /**
+     * 人事労務API（hrApiBase）への認証付きPUT（勤怠サマリ等の上書き更新）。PUTは同じbodyなら結果が同じため
+     * 5xx/timeoutはretryしない（送れたか不明な状態で多重送信しない。呼出側が再実行する）。
+     */
+    JsonNode hrApiPut(String path, Object body, String correlationId);
 }

@@ -68,6 +68,8 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     private final ObjectMapper objectMapper;
     private final AccountingJobLegalEntityResolver legalEntityResolver;
     private final com.ses.service.accounting.AccountingSendKeyResolver sendKeyResolver;
+    /** freee取引の作成を確認できたときだけ申請者へ「経費を会計へ連携しました」を通知する（自動送信と同じdedupeKey）。 */
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.expense.ExpenseAccountingNotifier> expenseAccountingNotifier;
 
     private LocalDate resolveBpIssueDate(BpPayment bpPayment) {
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
@@ -545,6 +547,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
 
                     jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
                             "freee経費取引作成成功: dealId=" + result.getExternalId());
+                    notifyExpenseAccountingSent(job.getTargetId(), tenantId);
                 } else {
                     if (result.isRetryable()) {
                         jobService.markRetryable(jobId, result.getErrorCode(), result.getErrorMessageSafe(),
@@ -561,6 +564,23 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                 jobService.markRetryable(jobId, "EXPENSE_JOB_EXCEPTION", "経費取引連携処理中にエラーが発生しました", 60);
             }
         });
+    }
+
+    /** 通知の失敗でfreee取引の作成結果（SUCCEEDED）を巻き戻さない。 */
+    private void notifyExpenseAccountingSent(Long expenseId, String tenantId) {
+        com.ses.service.expense.ExpenseAccountingNotifier notifier = expenseAccountingNotifier.getIfAvailable();
+        if (notifier == null) {
+            return;
+        }
+        try {
+            ExpenseRequest expense = expenseRequestMapper.selectByIdForTenant(expenseId, tenantId);
+            if (expense != null) {
+                notifier.notifySent(expense);
+            }
+        } catch (RuntimeException e) {
+            log.warn("経費の会計連携通知に失敗しました（freee取引は作成済み）: expenseId={} exceptionClass={}",
+                    expenseId, e.getClass().getSimpleName());
+        }
     }
 
     private IntegrationConnection resolveConnection(String tenantId, Long legalEntityId, String provider, String product) {

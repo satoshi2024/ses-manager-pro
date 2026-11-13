@@ -385,6 +385,7 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
             i.invoice_no AS invoiceNo,
             i.customer_id AS customerId,
             c.company_name AS customerName,
+            c.company_name_kana AS customerNameKana,
             i.billing_month AS billingMonth,
             i.status AS status,
             i.total AS total,

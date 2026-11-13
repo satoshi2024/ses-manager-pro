@@ -24,6 +24,10 @@ public enum AccountingMappingType {
     ACCOUNT_OUTSOURCING,
     /** 課税売上10%の税区分コード。内部キーは {@code TAX_10}。 */
     TAX_SALES_10,
+    /** 課税売上8%（軽減税率）の税区分コード。内部キーは {@code TAX_8}。税率8%の請求書だけが使う。 */
+    TAX_SALES_8,
+    /** 税率0%の売上（非課税・免税・対象外のいずれかを事業所の運用で選ぶ）。内部キーは {@code TAX_0}。 */
+    TAX_SALES_0,
     /** 課税仕入10%の税区分コード（BP仕入・要員経費で共用）。内部キーは {@code TAX_PURCHASE_10}。 */
     TAX_PURCHASE_10,
     /** 旧種別。送信経路では未使用だが、既存データの照合のため受け付ける。 */

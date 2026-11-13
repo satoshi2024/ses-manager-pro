@@ -1149,6 +1149,25 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         return executeWithRetry(apiBase, path, HttpMethod.POST, body, idempotencyKey, correlationId, false);
     }
 
+    @Override
+    public Long connectedCompanyId() {
+        if (!connected()) {
+            return null;
+        }
+        FreeeConnection c = latestActiveRow();
+        return c == null ? null : c.getCompanyId();
+    }
+
+    @Override
+    public JsonNode hrApiGet(String path, Map<String, String> query) {
+        return hrGet(path, query);
+    }
+
+    @Override
+    public JsonNode hrApiPut(String path, Object body, String correlationId) {
+        return executeWithRetry(hrApiBase, path, HttpMethod.PUT, body, null, correlationId, false);
+    }
+
     private JsonNode executeWithRetry(String baseUrl, String path, HttpMethod method, Object body,
                                       String idempotencyKey, String correlationId) {
         return executeWithRetry(baseUrl, path, method, body, idempotencyKey, correlationId, false);

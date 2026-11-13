@@ -865,7 +865,7 @@ window.AccountingIntegration = (function () {
         const FIXED_INTERNAL_CODES = {
             CUSTOMER_PARTNER: 'CUST-', BP_PARTNER: 'BP-',
             ACCOUNT_SALES: 'SALES_DEFAULT', ACCOUNT_PURCHASE: 'PURCHASE_DEFAULT', ACCOUNT_EXPENSE: 'EXPENSE_DEFAULT',
-            TAX_SALES_10: 'TAX_10', TAX_PURCHASE_10: 'TAX_PURCHASE_10'
+            TAX_SALES_10: 'TAX_10', TAX_SALES_8: 'TAX_8', TAX_SALES_0: 'TAX_0', TAX_PURCHASE_10: 'TAX_PURCHASE_10'
         };
         $('#modalObjectType').on('change', function () {
             let $code = $('#modalInternalCode');

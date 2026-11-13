@@ -629,7 +629,9 @@ class AccountingIntegrationApiAndPageTest {
 
         org.springframework.test.web.client.MockRestServiceServer reconMock =
                 org.springframework.test.web.client.MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
-        reconMock.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo(
+        // 月次照合はdealsを2回取得する（決済済み・対象月に発生した未決済）
+        reconMock.expect(org.springframework.test.web.client.ExpectedCount.manyTimes(),
+                        org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo(
                         org.hamcrest.Matchers.containsString("/api/1/deals")))
                 .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.method(HttpMethod.GET))
                 .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));

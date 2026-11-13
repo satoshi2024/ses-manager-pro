@@ -56,6 +56,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     private final ObjectMapper objectMapper;
     private final AccountingJobLegalEntityResolver legalEntityResolver;
     private final com.ses.service.accounting.AccountingSendKeyResolver sendKeyResolver;
+    private final com.ses.mapper.InvoiceItemMapper invoiceItemMapper;
 
     /** freee取引の管理番号（ref_number）の上限文字数。 */
     private static final int FREEE_REF_NUMBER_MAX = 20;
@@ -68,7 +69,103 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
         return List.of(
                 new String[]{"CUSTOMER_PARTNER", customerCode(invoice)},
                 new String[]{"ACCOUNT_SALES", "SALES_DEFAULT"},
-                new String[]{"TAX_SALES_10", "TAX_10"});
+                taxMapping(invoice));
+    }
+
+    /**
+     * 請求書の適用税率に対応する税区分マッピング（種別, 内部キー）。税率は保存値（0.10形式）を正とし、
+     * 未保存の旧請求書は従来どおり10%として扱う。対応していない税率は送らずに拒否する
+     * （10%の税区分で送ると消費税額が請求書と食い違うため）。
+     */
+    static String[] taxMapping(Invoice invoice) {
+        java.math.BigDecimal rate = invoice.getTaxRate() == null ? new java.math.BigDecimal("0.10") : invoice.getTaxRate();
+        java.math.BigDecimal percent = rate.compareTo(java.math.BigDecimal.ONE) < 0
+                ? rate.multiply(new java.math.BigDecimal("100")) : rate;
+        percent = percent.stripTrailingZeros();
+        if (percent.compareTo(new java.math.BigDecimal("10")) == 0) {
+            return new String[]{"TAX_SALES_10", "TAX_10"};
+        }
+        if (percent.compareTo(new java.math.BigDecimal("8")) == 0) {
+            return new String[]{"TAX_SALES_8", "TAX_8"};
+        }
+        if (percent.signum() == 0) {
+            return new String[]{"TAX_SALES_0", "TAX_0"};
+        }
+        throw BusinessException.of(400, "error.accounting.taxRateUnsupported");
+    }
+
+    /** freeeの取引明細の備考の上限文字数。 */
+    static final int FREEE_DETAIL_DESCRIPTION_MAX = 250;
+
+    /**
+     * 請求明細ごとのfreee取引明細。請求書の消費税額を明細の税抜金額で按分し（端数は金額の大きい明細へ寄せる）、
+     * 明細の税込金額・消費税額の合計が請求書の合計・消費税額と一致するようにする。明細が1件以下、
+     * 明細合計が小計と一致しない、0円以下・円未満を含む等で按分できない場合は、従来どおり請求書合計の1明細にする。
+     */
+    static List<CanonicalSalesInvoice.Detail> buildDetails(Invoice invoice, List<com.ses.entity.InvoiceItem> items,
+                                                           String accountItemCode, String taxCode) {
+        String fallback = invoice.getRemarks() != null ? invoice.getRemarks() : "SES請求: " + invoice.getInvoiceNo();
+        List<CanonicalSalesInvoice.Detail> single = List.of(CanonicalSalesInvoice.Detail.builder()
+                .description(truncate(fallback))
+                .amount(invoice.getTotal())
+                .accountItemCode(accountItemCode)
+                .taxCode(taxCode)
+                .build());
+        java.math.BigDecimal subtotal = invoice.getSubtotal();
+        java.math.BigDecimal tax = invoice.getTax();
+        java.math.BigDecimal total = invoice.getTotal();
+        if (items == null || items.size() < 2 || subtotal == null || tax == null || total == null
+                || subtotal.signum() <= 0 || tax.signum() < 0 || !isWholeYen(tax)
+                || subtotal.add(tax).compareTo(total) != 0) {
+            return single;
+        }
+        java.math.BigDecimal itemSum = java.math.BigDecimal.ZERO;
+        for (com.ses.entity.InvoiceItem item : items) {
+            if (item.getAmount() == null || item.getAmount().signum() <= 0 || !isWholeYen(item.getAmount())) {
+                return single;
+            }
+            itemSum = itemSum.add(item.getAmount());
+        }
+        if (itemSum.compareTo(subtotal) != 0) {
+            return single;
+        }
+        long taxYen = tax.longValueExact();
+        long subtotalYen = subtotal.longValueExact();
+        long[] vat = new long[items.size()];
+        long allocated = 0;
+        int largest = 0;
+        for (int i = 0; i < items.size(); i++) {
+            long amount = items.get(i).getAmount().longValueExact();
+            vat[i] = java.math.BigInteger.valueOf(amount).multiply(java.math.BigInteger.valueOf(taxYen))
+                    .divide(java.math.BigInteger.valueOf(subtotalYen)).longValueExact();
+            allocated += vat[i];
+            if (amount > items.get(largest).getAmount().longValueExact()) {
+                largest = i;
+            }
+        }
+        vat[largest] += taxYen - allocated;
+        List<CanonicalSalesInvoice.Detail> details = new java.util.ArrayList<>();
+        for (int i = 0; i < items.size(); i++) {
+            com.ses.entity.InvoiceItem item = items.get(i);
+            String description = item.getDescription() == null || item.getDescription().isBlank()
+                    ? fallback : item.getDescription();
+            details.add(CanonicalSalesInvoice.Detail.builder()
+                    .description(truncate(description))
+                    .amount(item.getAmount().add(java.math.BigDecimal.valueOf(vat[i])))
+                    .vat(java.math.BigDecimal.valueOf(vat[i]))
+                    .accountItemCode(accountItemCode)
+                    .taxCode(taxCode)
+                    .build());
+        }
+        return details;
+    }
+
+    private static boolean isWholeYen(java.math.BigDecimal value) {
+        return value.stripTrailingZeros().scale() <= 0;
+    }
+
+    private static String truncate(String text) {
+        return text.length() <= FREEE_DETAIL_DESCRIPTION_MAX ? text : text.substring(0, FREEE_DETAIL_DESCRIPTION_MAX);
     }
 
     private static String customerCode(Invoice invoice) {
@@ -154,7 +251,12 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
 
         ExternalMapping partnerMapping = mappingService.getMapping(connectionId, "CUSTOMER_PARTNER", customerCode);
         ExternalMapping salesAccount = mappingService.getMapping(connectionId, "ACCOUNT_SALES", "SALES_DEFAULT");
-        ExternalMapping taxMapping = mappingService.getMapping(connectionId, "TAX_SALES_10", "TAX_10");
+        String[] taxKey = taxMapping(invoice);
+        ExternalMapping taxMapping = mappingService.getMapping(connectionId, taxKey[0], taxKey[1]);
+        List<com.ses.entity.InvoiceItem> items = invoiceItemMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.InvoiceItem>()
+                        .eq(com.ses.entity.InvoiceItem::getInvoiceId, invoice.getId())
+                        .orderByAsc(com.ses.entity.InvoiceItem::getId));
 
         return CanonicalSalesInvoice.builder()
                 .invoiceId(invoice.getId())
@@ -170,12 +272,9 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
                 .total(invoice.getTotal())
                 .taxRate(invoice.getTaxRate())
                 .remarks(invoice.getRemarks())
-                .details(List.of(CanonicalSalesInvoice.Detail.builder()
-                        .description(invoice.getRemarks() != null ? invoice.getRemarks() : "SES請求: " + invoice.getInvoiceNo())
-                        .amount(invoice.getTotal())
-                        .accountItemCode(salesAccount != null ? salesAccount.getExternalId() : null)
-                        .taxCode(taxMapping != null ? taxMapping.getExternalId() : null)
-                        .build()))
+                .details(buildDetails(invoice, items,
+                        salesAccount != null ? salesAccount.getExternalId() : null,
+                        taxMapping != null ? taxMapping.getExternalId() : null))
                 .build();
     }
 

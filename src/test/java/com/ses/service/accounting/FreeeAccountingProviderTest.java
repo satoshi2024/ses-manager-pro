@@ -85,6 +85,9 @@ class FreeeAccountingProviderTest {
     @BeforeEach
     void setUp() {
         mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
+        // 月次照合の2回目（対象月に発生した未決済取引）。個別テストで上書きしない限り0件
+        mockServer.expect(ExpectedCount.between(0, 10), requestTo(org.hamcrest.Matchers.containsString("status=unsettled")))
+                .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
 
         testConnection = connectionService.getOrCreateConnection("test-tenant", 1L, "freee", "accounting");
         IntegrationTokensDto tokens = IntegrationTokensDto.builder()
@@ -1323,5 +1326,27 @@ class FreeeAccountingProviderTest {
         var snapshot = connectionService.getTokenSnapshot(testConnection.getId());
         assertThat(snapshot.getRefreshToken()).isEqualTo("secret-refresh-987654321");
         assertThat(snapshot.getAccessToken()).isEqualTo("secret-token-abcdef123456");
+    }
+
+    @Test
+    void fetchPayments_includesUnsettledDealsIssuedInTheMonth() {
+        mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&status=settled&limit=100&offset=0"))
+                .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&status=unsettled"
+                        + "&start_issue_date=2026-08-01&end_issue_date=2026-08-31&limit=100&offset=0"))
+                .andRespond(withSuccess("{\"deals\": [{\"id\": 82001, \"issue_date\": \"2026-08-20\", \"amount\": 50000, "
+                        + "\"status\": \"unsettled\", \"payments\": [{\"id\": 92001, \"date\": \"2026-08-25\", \"amount\": 20000}]}]}",
+                        MediaType.APPLICATION_JSON));
+
+        com.ses.dto.accounting.PaymentFetchResult result = freeeProvider.fetchPayments(
+                testConnection, LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31));
+
+        mockServer.verify();
+        assertThat(result.isFetchFailed()).isFalse();
+        assertThat(result.getDeals()).extracting(CanonicalPaymentSync::getDealId).containsExactly("82001");
+        assertThat(result.getDeals().get(0).isSettled()).isFalse();
+        // 未決済取引の一部入金も入金母集団に入る
+        assertThat(result.getPayments()).extracting(CanonicalPaymentSync::getPaymentId).containsExactly("92001");
     }
 }

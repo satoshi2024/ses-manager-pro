@@ -112,6 +112,12 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
                 } else {
                     result.setDuplicateSkippedCount(value(result.getDuplicateSkippedCount()) + 1);
                 }
+            } catch (BusinessException e) {
+                if (AttendanceProvider.NOT_LINKED_KEY.equals(e.getMessage())) {
+                    result.setNotLinkedSkippedCount(value(result.getNotLinkedSkippedCount()) + 1);
+                } else {
+                    result.getErrors().add("engineer=" + monthRow.getEngineerId() + ": " + safeMessage(e));
+                }
             } catch (Exception e) {
                 result.getErrors().add("engineer=" + monthRow.getEngineerId() + ": " + safeMessage(e));
             }
@@ -143,7 +149,7 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
                     fetchCursor = c;
                 }
             }
-            List<ExternalAttendanceRecord> records = provider.fetchUpdatedSince(fetchCursor);
+            List<ExternalAttendanceRecord> records = provider.fetchForMonth(target, fetchCursor);
             result.setPulledCount(records.size());
             // R5-P2-01: cursorはtenant timezone（attendance.sync.timezone）で正規化して比較・保存する
             ZoneId zone = tenantZone();
@@ -175,7 +181,10 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
                     continue;
                 }
                 try {
-                    if (isClosedOrApproved(record)) {
+                    if (isClosedOrApproved(record) && isSnapshotOfInternal(record, target, internalByEngineer)) {
+                        // 更新日時の無い外部（freee）は月の全件を返すため、送信済みの値と同じなら外部更新ではない
+                        result.setMatchedCount(value(result.getMatchedCount()) + 1);
+                    } else if (isClosedOrApproved(record)) {
                         rejectExternalUpdate(record, target);
                         result.setRejectedCount(value(result.getRejectedCount()) + 1);
                     } else {
@@ -327,6 +336,21 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
         }
     }
 
+    /**
+     * 更新日時を持たない外部レコード（月単位のスナップショット）が本システムの日次と同じ値か。
+     * 更新日時のある外部（cursor差分）は、差分として届いた時点で外部更新とみなすため対象外。
+     */
+    private boolean isSnapshotOfInternal(ExternalAttendanceRecord record, YearMonth target,
+                                         Map<Long, Map<LocalDate, EmployeeAttendance>> internalByEngineer) {
+        if (record.getUpdatedAt() != null || record.getEngineerId() == null || record.getWorkDate() == null) {
+            return false;
+        }
+        EmployeeAttendance internal = internalByEngineer
+                .computeIfAbsent(record.getEngineerId(), id -> loadInternalDays(id, target))
+                .get(record.getWorkDate());
+        return internal != null && externalValue(record).equals(internalValue(internal));
+    }
+
     private Map<LocalDate, EmployeeAttendance> loadInternalDays(Long engineerId, YearMonth target) {
         Map<LocalDate, EmployeeAttendance> result = new HashMap<>();
         List<EmployeeAttendance> days = employeeAttendanceMapper.selectList(
@@ -423,6 +447,7 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
         AttendanceSyncResultDto combined = newResult(push.getProvider(), "all", parseMonth(month));
         combined.setPushedCount(push.getPushedCount());
         combined.setDuplicateSkippedCount(push.getDuplicateSkippedCount());
+        combined.setNotLinkedSkippedCount(push.getNotLinkedSkippedCount());
         combined.setPulledCount(pull.getPulledCount());
         combined.setRegisteredCount(pull.getRegisteredCount());
         combined.setRejectedCount(pull.getRejectedCount());

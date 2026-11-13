@@ -459,6 +459,57 @@ class PurchaseExpenseIntegrationTest {
 
         ExpenseRequest updatedExp = expenseRequestMapper.selectById(exp.getId());
         assertThat(updatedExp.getStatus()).isEqualTo("会計連携済");
+
+        // 手動送信でもfreee取引の作成後に申請者へ通知する（自動送信と同じdedupeKeyで1件）
+        Integer notified = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_notification WHERE type = 'EXPENSE_ACCOUNTING_SENT' "
+                        + "AND dedupe_key = ? AND recipient_user_id = 1",
+                Integer.class, "expense-accounting-sent:" + exp.getId() + "#u1");
+        assertThat(notified).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("要員経費連携: 送信が失敗した経費は申請者へ「会計へ連携しました」を通知しない")
+    void failedExpenseSend_doesNotNotifyApplicant() {
+        ExternalMapping expAccount = new ExternalMapping();
+        expAccount.setConnectionId(connection.getId());
+        expAccount.setObjectType("ACCOUNT_EXPENSE");
+        expAccount.setInternalCode("EXPENSE_DEFAULT");
+        expAccount.setExternalId("2201");
+        mappingService.saveOrUpdateMapping(expAccount);
+        mappingService.verifyMapping(mappingService.getMapping(connection.getId(), "ACCOUNT_EXPENSE", "EXPENSE_DEFAULT").getId(), "{\"verified\":true}");
+        ExternalMapping taxMap = new ExternalMapping();
+        taxMap.setConnectionId(connection.getId());
+        taxMap.setObjectType("TAX_PURCHASE_10");
+        taxMap.setInternalCode("TAX_PURCHASE_10");
+        taxMap.setExternalId("108");
+        mappingService.saveOrUpdateMapping(taxMap);
+        mappingService.verifyMapping(mappingService.getMapping(connection.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10").getId(), "{\"verified\":true}");
+
+        ExpenseRequest exp = new ExpenseRequest();
+        exp.setEngineerId(1L);
+        exp.setExpenseNo("EX-202608-997");
+        exp.setExpenseDate(LocalDate.of(2026, 8, 12));
+        exp.setCategory("交通費");
+        exp.setAmount(new BigDecimal("2100"));
+        exp.setStatus("承認済");
+        expenseRequestMapper.insert(exp);
+
+        IntegrationJob job = purchaseIntegrationService.triggerExpenseSync(exp.getId(), 1L);
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators
+                        .withBadRequest().contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"status_code\":400,\"errors\":[{\"type\":\"validation\",\"messages\":[\"invalid\"]}]}"));
+
+        purchaseIntegrationService.processExpenseJob(job.getId());
+
+        assertThat(jobService.getById(job.getId()).getStatus()).isEqualTo("FAILED");
+        assertThat(expenseRequestMapper.selectById(exp.getId()).getStatus()).isEqualTo("承認済");
+        Integer notified = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_notification WHERE type = 'EXPENSE_ACCOUNTING_SENT' AND dedupe_key = ?",
+                Integer.class, "expense-accounting-sent:" + exp.getId() + "#u1");
+        assertThat(notified).isZero();
     }
 
     @Test

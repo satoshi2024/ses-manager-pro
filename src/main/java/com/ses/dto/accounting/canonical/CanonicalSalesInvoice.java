@@ -44,7 +44,10 @@ public class CanonicalSalesInvoice {
     @AllArgsConstructor
     public static class Detail {
         private String description;
+        /** 税込金額。 */
         private BigDecimal amount;
+        /** 明細の消費税額（請求書の消費税額を明細へ按分した値。合計は請求書の消費税額と一致する）。旧snapshotはnull。 */
+        private BigDecimal vat;
         private BigDecimal taxRate;
         private String accountItemCode;
         private String taxCode;

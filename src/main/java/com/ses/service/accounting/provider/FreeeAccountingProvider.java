@@ -221,12 +221,20 @@ public class FreeeAccountingProvider implements AccountingProvider {
         boolean fetchFailed = false;
         String errorCode = null;
 
+        // 1回目: 決済済み取引（発生日で絞らない）。入金母集団は payments[].date 基準で、発生日の固定期間で
+        //   絞ると支払サイトを欠落させる（R4-R4）。deals母集団だけを後段で対象月に絞る。
+        // 2回目: 対象月に発生した未決済取引。freeeで直接作られた未入金の取引もEXTERNAL_ONLYとして
+        //   検出するため（決済済みだけでは未入金の取引が母集団に入らない）。一部入金があれば入金母集団にも入る。
+        String[] passes = fromDate == null || toDate == null
+                ? new String[]{"&status=settled"}
+                : new String[]{"&status=settled",
+                        "&status=unsettled&start_issue_date=" + fromDate + "&end_issue_date=" + toDate};
+        passLoop:
+        for (String pass : passes) {
         for (int page = 0; page < maxPages; page++) {
             int offset = page * limit;
-            // R4-R4: 入金母集団は payments[].date 基準。dealの発生日による固定期間の絞り込みは
-            // 支払サイトを欠落させるため行わず、deals母集団だけを後段で対象月に絞る。
             String url = apiBaseUrl + "/api/1/deals?company_id=" + connection.getExternalCompanyId()
-                    + "&status=settled&limit=" + limit
+                    + pass + "&limit=" + limit
                     + "&offset=" + offset;
 
             try {
@@ -320,8 +328,9 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 log.error("Failed to fetch payments from freee on page {}: error_code=EXTERNAL_API_ERROR", page);
                 fetchFailed = true;
                 errorCode = "EXTERNAL_API_ERROR";
-                break;
+                break passLoop;
             }
+        }
         }
         return com.ses.dto.accounting.PaymentFetchResult.builder()
                 .deals(deals)
@@ -504,7 +513,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 path = "/api/1/account_items?company_id=" + companyId;
                 isListSearch = true;
             }
-            case "TAX_SALES_10", "TAX_PURCHASE_10", "TAX_EXPENSE_10" -> {
+            case "TAX_SALES_10", "TAX_SALES_8", "TAX_SALES_0", "TAX_PURCHASE_10", "TAX_EXPENSE_10" -> {
                 path = "/api/1/taxes/companies/" + companyId;
                 isListSearch = true;
             }
@@ -551,7 +560,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                     }
                     return false;
                 }
-                case "TAX_SALES_10", "TAX_PURCHASE_10", "TAX_EXPENSE_10" -> {
+                case "TAX_SALES_10", "TAX_SALES_8", "TAX_SALES_0", "TAX_PURCHASE_10", "TAX_EXPENSE_10" -> {
                     JsonNode taxes = root.get("taxes");
                     if (taxes != null && taxes.isArray()) {
                         for (JsonNode t : taxes) {
@@ -1077,6 +1086,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .taxCode(parseInteger(d.getTaxCode(), 21)) // デフォルト課税売上10%
                         .accountItemId(parseFreeeId(d.getAccountItemCode()))
                         .amount(d.getAmount() != null ? d.getAmount().longValue() : 0L)
+                        .vat(d.getVat() != null ? d.getVat().longValue() : null)
                         .description(d.getDescription())
                         .build());
             }
@@ -1210,6 +1220,11 @@ public class FreeeAccountingProvider implements AccountingProvider {
 
         @JsonProperty("amount")
         private Long amount;
+
+        /** 明細の消費税額。nullなら送らない（freeeが税込金額から計算する）。 */
+        @JsonProperty("vat")
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private Long vat;
 
         @JsonProperty("description")
         private String description;

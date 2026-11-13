@@ -121,9 +121,8 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("retention.risk.threshold", ConfigSchema.integer(0, 100));
         SCHEMAS.put("procurement.payment-max-days", ConfigSchema.integer(1, null));
         // S11 T072: 外部勤怠同期（provider選択・tenant timezone・cursor・直近結果）
-        // freeeは未対応（実freee人事労務APIへの対応表が未設計。FreeeAttendanceProvider参照）のため新規選択させない。
-        // 既存の保存値freeeは同期実行時に error.attendance.sync.providerUnavailable で止まる。
-        SCHEMAS.put("attendance.sync.provider", ConfigSchema.enumOf("mock"));
+        // freee=月次サマリ送信・日次勤怠の照合取得（給与連携の接続と従業員対応付けを使う。FreeeAttendanceProvider参照）
+        SCHEMAS.put("attendance.sync.provider", ConfigSchema.enumOf("mock", "freee"));
         SCHEMAS.put("attendance.sync.timezone", ConfigSchema.string());
         SCHEMAS.put("attendance.sync.freee.cursor", ConfigSchema.string()); // JSON/ISO cursor。操作状態
         SCHEMAS.put("attendance.sync.last-result", ConfigSchema.string()); // JSON。操作状態
@@ -142,8 +141,9 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("portal.base-domain", ConfigSchema.string());
         // S14 (engineer-self-service-portal-v2 / V105): サーベイ匿名閾値と経費の会計連携provider
         SCHEMAS.put("survey.min-answers", ConfigSchema.integer(1, null));
-        // freeeのsender実装は無い。経費のfreee送信は会計・支払連携（EXPENSE_DEAL_SYNC、送信プレビュー画面）で行う。
-        SCHEMAS.put("expense.accounting.provider", ConfigSchema.enumOf("mock"));
+        // freee=承認後にfreeeへ自動送信（会計・支払連携のEXPENSE_DEAL_SYNCを使う）、manual=自動送信しない、
+        // mock=開発用（freeeへは送らない。prodではsenderが無いため何もしない）。
+        SCHEMAS.put("expense.accounting.provider", ConfigSchema.enumOf("freee", "manual", "mock"));
     }
 
     private void ensureLoaded() {

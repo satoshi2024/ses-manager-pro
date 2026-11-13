@@ -25,6 +25,8 @@ public class AttendanceSyncResultDto {
     private Integer pushedCount;
     /** push重複スキップ件数（冪等キー一致で外部1件） */
     private Integer duplicateSkippedCount;
+    /** push対象外: 外部の従業員と対応付けされていない要員（BP・業務委託など外部で給与計算しない要員）の件数 */
+    private Integer notLinkedSkippedCount;
     /** pull取得レコード件数 */
     private Integer pulledCount;
     /** pullで登録した件数（source='freee'行） */
@@ -64,6 +66,7 @@ public class AttendanceSyncResultDto {
         return AttendanceSyncResultDto.builder()
                 .pushedCount(0)
                 .duplicateSkippedCount(0)
+                .notLinkedSkippedCount(0)
                 .pulledCount(0)
                 .registeredCount(0)
                 .rejectedCount(0)

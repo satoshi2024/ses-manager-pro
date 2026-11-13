@@ -8,8 +8,6 @@ import com.ses.entity.ExpenseAccountingJob;
 import com.ses.entity.ExpenseRequest;
 import com.ses.mapper.ExpenseAccountingJobMapper;
 import com.ses.mapper.ExpenseRequestMapper;
-import com.ses.mapper.EngineerAccountLinkMapper;
-import com.ses.service.NotificationService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
@@ -41,6 +39,11 @@ import java.util.Map;
  * 成功時: expense.status=会計連携済 + accounting_job_id記録 + 本人へEXPENSE_ACCOUNTING_SENT通知。
  * 失敗時: attempt加算 + backoff再試行、max 5回でFAILED。
  * 二重起動・クラッシュ後リトライでも同一経費の二重連携は起きない。
+ *
+ * <p>providerは {@code expense.accounting.provider}: freee=承認後にfreeeへ自動送信
+ * （{@code FreeeExpenseAccountingSender}。会計・支払連携と同じEXPENSE_DEAL_SYNCを使う）、
+ * manual=自動送信しない（会計・支払連携から手動で送る）、mock=開発用（freeeへは送らない）。
+ * 設定providerのsenderが無い場合（prodのmock等）はjobを作らず何もしない。</p>
  */
 @Slf4j
 @Component
@@ -52,15 +55,14 @@ public class ExpenseAccountingJobScheduler {
     static final String STATUS_SUCCEEDED = "SUCCEEDED";
     static final String STATUS_FAILED = "FAILED";
     static final int MAX_ATTEMPTS = 5;
-    static final String LINK_MENU_KEY = "myExpenses";
-    static final String LINK_URL = "/my/expenses";
+    /** 外部側の処理待ち（{@link ExpenseAccountingSender#PENDING}）の再確認間隔（分）。試行回数は消費しない。 */
+    static final long PENDING_RECHECK_MINUTES = 1L;
 
     private final ExpenseRequestMapper expenseRequestMapper;
     private final ExpenseAccountingJobMapper jobMapper;
     private final ObjectProvider<ExpenseAccountingSender> senderProvider;
     private final SystemConfigService systemConfigService;
-    private final EngineerAccountLinkMapper engineerAccountLinkMapper;
-    private final NotificationService notificationService;
+    private final ExpenseAccountingNotifier notifier;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final PlatformTransactionManager transactionManager;
@@ -85,6 +87,11 @@ public class ExpenseAccountingJobScheduler {
     /** schedulerと同じ経路をテスト/Demoから起動する。処理したjob件数を返す。 */
     public int processDue(int limit) {
         recoverStaleRows();
+        if (resolveSender() == null) {
+            // manual、またはsenderの無いprovider（prodのmock等）。送れないjobを作って失敗させ続けない。
+            log.debug("[経費会計連携] 自動連携のsenderが無いため処理しません: provider={}", configuredProvider());
+            return 0;
+        }
         createAccountingJobs(limit);
         int processed = 0;
         for (Long expenseRequestId : dueJobExpenseRequestIds(limit)) {
@@ -168,11 +175,10 @@ public class ExpenseAccountingJobScheduler {
         ExpenseAccountingSender sender = resolveSender();
         ExpenseAccountingSender.SendResult result;
         if (sender == null) {
-            // freeeのsender実装は無い（設定値freeeは旧seed/旧画面で保存されたもの）。
-            // 経費のfreee送信は会計・支払連携の送信プレビュー（EXPENSE_DEAL_SYNC）で行う。
-            log.warn("[経費会計連携] 設定providerに対応するsenderが無いため連携できません"
-                    + "（freeeへの送信は会計・支払連携から行ってください）: expenseId={}", expenseRequestId);
-            result = new ExpenseAccountingSender.SendResult(false, null, "PROVIDER_UNAVAILABLE");
+            // claim後にproviderがmanual等へ切り替わった。試行回数を消費せずに待たせる。
+            log.info("[経費会計連携] providerが自動連携でなくなったため待機します: expenseId={}", expenseRequestId);
+            markWaiting(expenseRequestId, "PROVIDER_UNAVAILABLE");
+            return false;
         } else {
             try {
                 result = sender.send(claimed.expense(), claimed.job());
@@ -190,6 +196,9 @@ public class ExpenseAccountingJobScheduler {
                 markFailure(expenseRequestId, claimed, "DB_COMMIT_FAILED");
                 return false;
             }
+        } else if (ExpenseAccountingSender.PENDING.equals(result.errorCode())) {
+            // 会計側の送信ジョブが処理中。失敗ではないため試行回数を消費しない（会計ジョブ自身に上限がある）。
+            markWaiting(expenseRequestId, ExpenseAccountingSender.PENDING);
         } else {
             markFailure(expenseRequestId, claimed,
                     result.errorCode() == null ? "SEND_FAILED" : result.errorCode());
@@ -197,9 +206,13 @@ public class ExpenseAccountingJobScheduler {
         return result.success();
     }
 
-    /** m_system_configのexpense.accounting.provider（既定mock）に一致するsenderを選ぶ。 */
+    private String configuredProvider() {
+        return systemConfigService.getString("expense.accounting.provider", "mock");
+    }
+
+    /** m_system_configのexpense.accounting.provider（既定mock）に一致するsenderを選ぶ。manualは常にnull。 */
     private ExpenseAccountingSender resolveSender() {
-        String provider = systemConfigService.getString("expense.accounting.provider", "mock");
+        String provider = configuredProvider();
         if (provider == null || provider.isBlank()) {
             return null;
         }
@@ -269,7 +282,7 @@ public class ExpenseAccountingJobScheduler {
                     .set("accounting_job_id", claimed.job().getId())
                     .set("version", version + 1)
                     .set("updated_at", now));
-            if (expUpdated != 1) {
+            if (expUpdated != 1 && !recordJobOnAdvancedExpense(expense.getId(), tenantId, claimed.job().getId(), now)) {
                 throw new IllegalStateException("Expense CAS update failed for expenseId=" + expense.getId());
             }
 
@@ -286,7 +299,44 @@ public class ExpenseAccountingJobScheduler {
             if (jobUpdated != 1) {
                 throw new IllegalStateException("Job update failed for expenseRequestId=" + expenseRequestId);
             }
-            notifyAccountingSent(expense);
+            notifier.notifySent(expense);
+        });
+    }
+
+    /**
+     * freee送信（EXPENSE_DEAL_SYNC）は成功時に経費を承認済→会計連携済へ進めるため、こちらのCASは外れる。
+     * 既に会計連携済・支払済なら、このjobのIDだけを記録して成功として扱う。それ以外（差戻し等）は不整合。
+     */
+    private boolean recordJobOnAdvancedExpense(Long expenseId, String tenantId, Long jobId, LocalDateTime now) {
+        ExpenseRequest current = expenseRequestMapper.selectByIdForTenant(expenseId, tenantId);
+        if (current == null || !(ExpenseRequestService.STATUS_ACCOUNTING_SENT.equals(current.getStatus())
+                || ExpenseRequestService.STATUS_PAID.equals(current.getStatus()))) {
+            return false;
+        }
+        if (current.getAccountingJobId() == null) {
+            expenseRequestMapper.update(null, new UpdateWrapper<ExpenseRequest>()
+                    .eq("id", expenseId)
+                    .isNull("accounting_job_id")
+                    .set("accounting_job_id", jobId)
+                    .set("updated_at", now));
+        }
+        return true;
+    }
+
+    /** 外部側の処理待ち（試行回数を消費しない）。PENDINGへ戻して少し後に再確認する。 */
+    void markWaiting(Long expenseRequestId, String reasonCode) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        requiresNewTx().executeWithoutResult(st -> {
+            LocalDateTime now = LocalDateTime.now(clock);
+            jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
+                    .eq("tenant_id", tenantId)
+                    .eq("expense_request_id", expenseRequestId)
+                    .eq("status", STATUS_PROCESSING)
+                    .set("status", STATUS_PENDING)
+                    .setSql("attempt_count = GREATEST(attempt_count - 1, 0)")
+                    .set("last_error_code", reasonCode)
+                    .set("next_attempt_at", now.plusMinutes(PENDING_RECHECK_MINUTES))
+                    .set("updated_at", now));
         });
     }
 
@@ -321,33 +371,6 @@ public class ExpenseAccountingJobScheduler {
             log.warn("[経費会計連携] 再試行待ち: expenseId={} attempt={} backoff={}min errorCode={}",
                     expenseRequestId, attempts, backoffMinutes, errorCode);
         });
-    }
-
-    /** 本人へ会計連携通知を発行する（dedupeKeyで冪等）。 */
-    void notifyAccountingSent(ExpenseRequest expense) {
-        Long userId = applicantUserId(expense);
-        if (userId == null) {
-            return;
-        }
-        String expenseNo = displayExpenseNo(expense);
-        String message = "[\"notification.msg.EXPENSE_ACCOUNTING_SENT\", \"" + expenseNo + "\"]";
-        notificationService.publishToUser(userId, "EXPENSE_ACCOUNTING_SENT", "経費を会計へ連携しました",
-                message, LINK_URL, "expense-accounting-sent:" + expense.getId(), LINK_MENU_KEY);
-    }
-
-    Long applicantUserId(ExpenseRequest expense) {
-        if (expense == null || expense.getEngineerId() == null) {
-            return null;
-        }
-        String tenantId = AccountingTenantContextHolder.requireTenantContext();
-        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerIdAndTenant(
-                expense.getEngineerId(), tenantId);
-        return link == null ? null : link.getSysUserId();
-    }
-
-    static String displayExpenseNo(ExpenseRequest expense) {
-        return expense.getExpenseNo() == null || expense.getExpenseNo().isBlank()
-                ? "EX-" + expense.getId() : expense.getExpenseNo();
     }
 
     /** 送信payloadのSHA-256（job作成時に固定。sender側の冪等キー）。 */
