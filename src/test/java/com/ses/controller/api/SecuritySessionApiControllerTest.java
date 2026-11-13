@@ -110,7 +110,7 @@ class SecuritySessionApiControllerTest {
     }
 
     @Test
-    void MFA検証の成功は検証済みの印を本人のuser idへ結び付ける() {
+    void MFA検証の成功は検証済みの印を本人のuserIdへ結び付ける() {
         when(mfaService.isRequired(org.mockito.ArgumentMatchers.any())).thenReturn(true);
         when(mfaService.verify(1L, "123456")).thenReturn(true);
 
