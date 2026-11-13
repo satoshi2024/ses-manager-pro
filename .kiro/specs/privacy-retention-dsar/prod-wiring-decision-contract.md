@@ -8,6 +8,8 @@
 担当: AI-5（接線・意思決定契約設計担当）
 対象ブランチ: `codex/snf-prod-nf07-evidence-contract`
 
+2026-11-14 追記: 本契約の Phase 1〜6 は、依頼者の決定 Q-1（段階化）/ Q-8（署名前実装可）に基づき [`production-bridge-phased-plan.md`](production-bridge-phased-plan.md) の batch へ割り当てた。§5 の D-01〜D-09 は全て「未承認（記入禁止）」のままであり、本追記は署名・承認日を補完しない。状態記述の食い違いは [`status-alignment.md`](status-alignment.md) で整合した。
+
 ---
 
 ## 1. 目的とスコープ境界
@@ -35,7 +37,7 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
 |---|---|---|---|---|---|
 | **純粋状態機械・エンベロープ検証** | `PrivacyCaseStateMachine`<br>`ApprovalEnvelopeVerifier`<br>`CaseApprovalEnvelope`<br>`PolicyApprovalEnvelope` | 固定Head `6ec4ca28`<br>Astra限定CODE PASS<br>3クラス 18/0/0/0 合格 | 基準SHAでの新規テスト実行なし（`c8b78dc3` での42件定向テスト合格を継承） | 本番PKI/HSM/KMS連携なし<br>本番Trust Anchor動的配布なし | DG-07未承認<br>署名機関責任者未選任<br>スキーマv1以降の合意なし |
 | **環境隔離ガード** | `SyntheticEnvironmentGuard`<br>(active/default `prod` 拒否) | 固定Head `6ec4ca28`<br>prod混入時の即時fail-closed実証済 | 基準SHAでの新規テスト実行なし | 本番用環境ガード及び本番専用Audience（`PRODUCTION`）未分離 | 本番環境運用ポリシー未承認 |
-| **独立Journal・CAS排他・留置** | `PrivacyJournalPort`<br>`JdbcPrivacyJournalAdapter`<br>`VerifiedDispatchFence`<br>`DispatchFenceVerifier` | 固定証拠 `nf07-w2a`<br>並行境界・MySQL分離確認済 | 基準SHA下での実MySQL並行・耐久性テスト未再実行（AI-1担当） | 本番独立Journal用MySQLインスタンス/クラスター不在<br>本番Flyway DDL未発行（V185未割当） | 留置（Legal Hold）権限規程未策定<br>職務分離（SoD）の法務承認なし |
+| **独立Journal・CAS排他・留置** | `PrivacyJournalPort`<br>`JdbcPrivacyJournalAdapter`<br>`VerifiedDispatchFence`<br>`DispatchFenceVerifier` | 固定証拠 `nf07-w2a`<br>並行境界・MySQL分離確認済 | 基準SHA下での実MySQL並行・耐久性テスト未再実行（AI-1担当） | 本番独立Journal用MySQLインスタンス/クラスター不在<br>本番Flyway DDL未発行（作成時「V185未割当」。V185はNF10が使用済み、C-21） | 留置（Legal Hold）権限規程未策定<br>職務分離（SoD）の法務承認なし |
 | **投影・署名Watermark・リカバリ** | `PrivacyProjectionPort`<br>`JdbcPrivacyProjectionAdapter`<br>`JournalProjectionService`<br>`SignedWatermarkVerifier`<br>`LatestWitnessPort`<br>`JdbcLatestWitnessAdapter`<br>`PrivacyRecoveryService` | 固定Head `ac894ac6`<br>W2b D2b2 35/0/0/0 合格<br>(Astra限定Review) | 基準SHA下での3-MySQL隔離リカバリテスト未再実行（AI-1担当） | 本番Witness独立ストア不在<br>アプリケーションDBへの本番投影バッチ不在<br>リカバリ隔離解除APIの本番配線なし | 復旧後隔離（`READ_ONLY_QUARANTINED`）解除権限者未指定<br>災害復旧SOP未承認 |
 | **合成DSARプレビュー** | `SyntheticPreviewPort`<br>`SyntheticPreviewStore`<br>`SyntheticPrivacyRequestService`<br>`SyntheticIdentityEvidenceVerifier` | 固定Head `92d91d58`<br>W3a 26/0/0/0 合格<br>(control `b6e2992b` 統合) | 基準SHA下での実MySQLプレビューテスト未再実行（AI-1担当） | 本番IdP（Keycloak/OAuth2）連携不在<br>実テーブル/ファイル用Scope Provider不在<br>同姓同名・名寄せ解決SOP不在 | DSAR受付窓口規程未策定<br>第三者マスキング基準の法務合意なし |
 | **只読Policy照会・説明** | `PolicyReadonlyQueryPort`<br>`PolicyReadonlyQueryService`<br>`SyntheticPolicyCatalog`<br>`PolicyEnvelopeSource`<br>`SyntheticCallerContextProvider` | `c8b78dc3` 固定実績:<br>定向42件合格 (`targeted-01`)<br>Fast全4,292件合格 (`fast-01`) | 全MySQLテストプロファイル（Docker依存）は未実行（AI-1担当） | 本番Spring Security連携コンテキスト未配線<br>本番ポリシーカタログ未配線<br>本番失効CRL/OCSPプロバイダー未配線 | DG-07全データ保持期間未承認<br>正式Privacy Owner未選任 |
@@ -51,7 +53,7 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
    * 対象: マイグレーション 183 ファイル、254 テーブル、244 エンティティ、708 プロバイダー候補。
    * 結果: プライバシーカタログ未分類 74 テーブル、インベントリ欠落 1,082 列、プロバイダー参照欠落 285 件、エンティティ未マップ 68 件で `BLOCKED`。
 3. **将来リリースの閉環ゲート規約**:
-   * 上記いずれの統計も本設計の基準コミットの直接スキャン結果ではない。
+   * 上記いずれの統計も本設計の基準コミットの直接スキャン結果ではない。2026-11-14 状態整合（C-15）: 以後の 2026-10-04 `ad9bb1c6`（provider候補724）と B0/V182 時点（253 table、未分類73）の値もあるが、いずれも過去SHAの値である。基準 `1be03bea`（V183〜V186 を含む）に対するscanは未実施で、現行coverageは UNKNOWN（BLOCKED想定）とする。
    * Phase 4 の実装時および将来の本番公開（Production Enablement）時には、**対象となるリリース固定コミット SHA に対してインベントリ・カバレッジの閉環スキャンを再実行し、未分類 0・欠落 0 の証拠を固定すること**を必須のゲート条件とする。
 
 ---
@@ -111,6 +113,8 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
 | **サービス内部認証**<br>(Daemon / Worker) | サービス固有識別子<br>(例: `service:privacy-outbox`) | 対象処理テナントID | 内部暗号トークンまたは mTLS で検証された場合のみ `ROLE_SYSTEM_SERVICE` | 一般ユーザーセッションからの昇格は厳格に拒絶 |
 | **`AnonymousAuthenticationToken`**<br>(未認証 / ゲスト) | なし (`null`) | なし (`null`) | 解決不可 | `MISSING_CALLER_IDENTITY` により即座に `ACCESS_DENIED` |
 | **未知の Principal 型** | なし (`null`) | なし (`null`) | 解決不可 | `UNAUTHORIZED_ACTOR_ROLE` により即座に `ACCESS_DENIED` |
+
+> 2026-11-14 状態整合（[`status-alignment.md`](status-alignment.md) C-14）: 上表のうち `LoginUser` の「ID欠落時は `user.getUsername()`」、`ExternalApiPrincipal` / サービス内部認証の写像は、後続の Batch 4a（[`production-readonly-boundary-slice-plan.md`](production-readonly-boundary-slice-plan.md) §4.1〜§4.2）と実装 `SecurityContextCallerContextProvider`（基準 `1be03bea`）で次のとおり狭められている。現行の正本は Batch 4a と実装である。(1) actor IDは永続 `SysUser` のIDだけを使い、欠落時は拒否する（username fallbackなし）。(2) `ExternalApiPrincipal`、`PortalLoginUser`、service/daemon principal は本sliceでは拒否する（`ROLE_SYSTEM_SERVICE` の発行・昇格経路は作らない）。サービス主体による照会は NF07-NF08-LINK 等の別Planで改めて設計する（production-bridge-phased-plan.md §8）。
 
 #### 2. OidcLoginUser のテナント解決とクレーム一致性検証規約（OIDC Tenant & Claim Verification Contract）
 * **可信データソースの単一性（認証バインディング優先）**:
@@ -223,6 +227,8 @@ NF07（プライバシー・データ保持・DSAR）における既存の合成
      ポリシー照会結果が `APPROVED_ACTIVE` を返した場合であっても、それ自体は外部送信の実行許可を一切付与しない。
      実際の外部送信には、独立Journalによって直列化された `CaseApprovalEnvelope` の検証、および `VerifiedDispatchFence` の発行が不可欠である。
 
+> 2026-11-14 追記（21件の状態整合の対象外。[`status-alignment.md`](status-alignment.md) §3 X-1）: 依頼者の決定 B-NF08-2（2026-11-13）により、NF08 Copilot の外部送信の実行認可は「署名済み決定IDに束縛した承認設定（model・用途・宛先・費用上限）＋送信毎の監査」（`ai.external-send-approval.*`、`AiExternalSendApproval`）で行う。上の 3. 後段の「`CaseApprovalEnvelope` と `VerifiedDispatchFence` が不可欠」は、NF07 自身の外部dispatch（処分・DSAR交付のprovider送信）に適用する条項として読む。NF08 は 1.〜3. 前段（非 `APPROVED_ACTIVE` の外送禁止、allow-list は許可でない、`APPROVED_ACTIVE` 単独は許可でない）に従い、NF07 policy は `nf07PolicyId` で参照する。手順は [`production-bridge-phased-plan.md`](production-bridge-phased-plan.md) §8。
+
 ---
 
 ## 5. 人手意思決定チェックリスト（Manual Decision Checklist）
@@ -283,7 +289,7 @@ flowchart TD
 ### Phase 3: 独立Journal・Witness本番インフラ構築（Production Journal & Witness）
 * **実装内容**:
   * 本番用独立 MySQL インスタンス（Journal用、Witness用）のプロビジョニング。
-  * 本番 Flyway マイグレーション（総括による番号管理、V185は占用しない）。
+  * 本番 Flyway マイグレーション（総括による番号管理、V185は占用しない）。2026-11-14 状態整合（C-21）: V185 は NF10 が `V185__report_schedule_claim_token.sql` として使用済み（基準 `1be03bea` の最新は V186）。NF07 の application DB 側DDLは merged 状態で次の空き番号を総括が採番する（W3-14 の暫定 V192/V193）。Journal/Witness インスタンス側のDDLは application DB の `db/migration` とは別の location・履歴表で管理する（[`journal-witness-grant-design.md`](journal-witness-grant-design.md) §2.5）。
   * `JdbcPrivacyJournalAdapter` および `JdbcLatestWitnessAdapter` の本番データソース配線。
 * **完了・検証条件**:
   * アプリケーションDBとの物理的・論理的独立性の確認。

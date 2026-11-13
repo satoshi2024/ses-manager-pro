@@ -1,5 +1,16 @@
 # privacy-retention-dsar 設計（Discovery / Dry-run increment）
 
+## 2026-11-14 production bridge 段階計画の設計正本
+
+依頼者の決定 Q-1 / Q-7 / Q-8（2026-11-14）と B-NF07-1 / B-NF07-2（2026-11-13）に基づく production bridge（W-1〜W-12）の段階実施は、次の文書を正本とする。
+
+- [`production-bridge-phased-plan.md`](production-bridge-phased-plan.md): W-1〜W-13 と batch の対応、第1期 batch（W3-14「F1 + PERM」、NF07-F2、NF07-A1J、NF07-A1H、NF07-A2）と署名後 batch、F1 の DDL 草案、flag と UNKNOWN の扱い、W-5 権限設計、署名項目ごとの開放手順、NF08 との関係、署名前実装のリスク。
+- [`journal-witness-grant-design.md`](journal-witness-grant-design.md): W-6 Journal/Witness インスタンスの設定契約、W-12 の最小 SQL 権限 GRANT 設計案。
+- [`policy-source-catalog-wiring-plan.md`](policy-source-catalog-wiring-plan.md): current policy source / catalog の port 契約と負例（2026-11-04 作成、2026-11-14 取込）。
+- [`status-alignment.md`](status-alignment.md): spec 内の状態記述 21 件の整合一覧。
+
+下記 §3 の候補表は W3-14 で実装する（disposition job 表は B1 へ移す）。§8 の非採用事項は、Q-8 により「実装着手」については解除し、「本番開放」については維持する。
+
 ## 2026-10-26 本番接線・意思決定契約および純粋カーネル抽出の設計正本
 
 合成基盤から本番能力への接線（Wiring）および意思決定契約（Decision Contract）の設計正本は、[`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md) に定める。また、その第一弾となる純粋検証カーネル抽出の具体的実施設計は [`pure-policy-verification-kernel-plan.md`](pure-policy-verification-kernel-plan.md) に定める。
@@ -63,7 +74,7 @@ evidence
 
 ## 3. 将来F1のcatalog/policy/hold/request/job（今回は未実装）
 
-requirements/designの候補には次のテーブルを置くが、今回のbranchにはDDLを追加しない。
+requirements/designの候補には次のテーブルを置くが、今回のbranchにはDDLを追加しない。（2026-11-14: W3-14 で `t_disposition_job` / `t_disposition_item` 以外を実装する計画とした。列の草案は production-bridge-phased-plan.md §3.1、disposition 表は同 §4 の B1）
 
 | 候補テーブル | 責務 | fail-closed条件 |
 |---|---|---|
@@ -136,7 +147,7 @@ requirements/designの候補には次のテーブルを置くが、今回のbran
 - anonymize/delete/restrict writer、batch scheduler、backup restore操作。
 - 法務、HR、税務、外部専門家の判断を代替するルール。
 
-これらはDG-07と外部/社内gateがPASSし、approved scope/policyが実値になった後に、別task・別commit・別Reviewで再計画する。
+これらはDG-07と外部/社内gateがPASSし、approved scope/policyが実値になった後に、別task・別commit・別Reviewで再計画する。（2026-11-14: Q-8 により、値UNKNOWN・flag OFF・未知は一律拒否の形での実装着手は署名前でも可とし、再計画は production-bridge-phased-plan.md で行った。anonymize/delete/restrict writer と処分 batch は Q-1 により署名後の B1。本番開放の条件は本節のとおり維持する）
 
 ## 9. gate evidence validator
 

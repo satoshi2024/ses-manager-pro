@@ -1,6 +1,7 @@
 # NF07 SYNTHETIC_FOUNDATION 技術契約案
 
-状態: **SF-W0 TECHNICAL PLAN PASS / SF-W1 FOUNDATION CODE PASS（Astra限定Review） / SF-W2以降未着手**。旧`NF07-DEV-GATE-20260828`の範囲と署名を変更しない。
+状態: **SF-W0 TECHNICAL PLAN PASS / SF-W1 FOUNDATION CODE PASS（Astra限定Review） / SF-W2以降は合成部分実装あり・各wave未完了**。旧`NF07-DEV-GATE-20260828`の範囲と署名を変更しない。
+2026-11-14 状態整合（[`status-alignment.md`](status-alignment.md) C-05）: 作成時の「SF-W2以降未着手」は過去記録である。現在は W2a journal/hold/fence、W2b projection/witness（Slice B/C）、Slice D2b2 recovery、W3a preview が合成隔離層として `com.ses.privacy.foundation` に存在する（基準 `1be03bea`）。ただしSF-W2/W3/W4の各Demo・完了条件を全件証明した記録はなく、各waveは未完了のままとする。上記のPASS表記は実装側記録の転記であり、正式verdictは外部記録で確認する（C-17）。
 根拠は2026-10-01の依頼者による技術方式選定・開発実行の委任である。
 本incrementはgeneric安全機構を合成データで実装・検証する案であり、DG-07、Privacy Owner、
 法的保持期間、実DSAR交付、実処分、実provider、production enablementを承認しない。

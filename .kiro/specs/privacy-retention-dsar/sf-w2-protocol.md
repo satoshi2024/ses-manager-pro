@@ -1,6 +1,7 @@
 # SF-W2 独立Journal protocol計画
 
-状態: **技術設計案 / Astra追加Plan再Review待ち**。前fixed head `3e05b32f`のPlan CONDITIONAL findingsを本書で補正した。これはSF-W2実装、migration採番、正式journal運用、DG-07、Privacy/Legal/production承認ではない。SF-W1の限定CODE PASSをNF07全体の完了として扱わない。
+状態: **技術設計案 / Astra追加Plan再Review待ち**（作成時の記録）。前fixed head `3e05b32f`のPlan CONDITIONAL findingsを本書で補正した。
+2026-11-14 状態整合（[`status-alignment.md`](status-alignment.md) C-06）: その後 `.kiro/roadmap/2026-10-01-snf-production-execution-ledger.md` に、W2b Slice B fixed `27dc74d7` 三DB MySQL 10/0/0/0 の限定受理（`:813-815`）、Slice C fixed `1803803f` 13/0/0/0（`:855`）、control C 16/0/0/0 の限定統合証拠PASS（`:914`）が記録されている。いずれも実装側ledgerの転記であり、本protocol全体のPlan PASS、SF-W2完了、NF07完了を意味しない。§11 のhold解除proofは未実装のまま。これはSF-W2実装、migration採番、正式journal運用、DG-07、Privacy/Legal/production承認ではない。SF-W1の限定CODE PASSをNF07全体の完了として扱わない。
 
 ## 1. 目的と境界
 

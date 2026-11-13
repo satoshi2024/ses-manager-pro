@@ -1,6 +1,7 @@
 # SF-Policy-Readonly-Query-Plan: NF03/NF08向け読み取り専用Policy照会・評価契約
 
-状態: **PLAN REVISION (R4) / 総括および Astra 独立レビュー待ち。未実装。**
+状態: **PLAN REVISION (R4) / 総括および Astra 独立レビュー待ち。未実装。**（作成時の記録）
+2026-11-14 状態整合（[`status-alignment.md`](status-alignment.md) C-09）: 本計画の合成の読み取り専用照会は実装済み（commit `110eeb36`、`1559d437`。`PolicyReadonlyQueryService` 等）。`c8b78dc3` で対象3 class 42/0/0/0、Fast 4,292件の歴史的固定証拠がある（tasks.md SF-RO-QUERY行）。独立CODE verdictはrepo内に記録が無く **UNKNOWN**（C-11）。本番接線は [`policy-source-catalog-wiring-plan.md`](policy-source-catalog-wiring-plan.md) と [`production-bridge-phased-plan.md`](production-bridge-phased-plan.md) を参照。
 本仕様は、NF03（スキル資格情報）および NF08（AI要約・プロンプト・ログ）から参照される「読み取り専用のポリシー照会・評価契約」の限定設計である。実処分、外部送信、worker、IdP 連携、Flyway migration、本番配線、実データ操作は含めない。
 
 ---
