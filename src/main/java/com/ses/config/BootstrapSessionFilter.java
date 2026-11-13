@@ -39,7 +39,8 @@ import java.util.Set;
  * allow-list化ではない。通常のsession・OIDCのsessionには一切作用しない。
  *
  * <p>期限切れのbootstrap sessionは {@link PersistentSessionFilter} が先に失効させる。本filterも念のため
- * 期限を再確認し、期限外なら401で拒否する（fail-closed）。
+ * 期限を再確認し、期限外なら401で拒否する（fail-closed）。印が現在の認証主体（bootstrap loginの本人）に
+ * 結び付いていない場合も、別の主体へ引き継がれた印として401で失効させる（review P3-a）。
  *
  * <p>依存beanは {@link ObjectProvider} で取得する（{@code @WebMvcTest} 等のsliceでは不在のため）。
  * bootstrap sessionの印が無い要求は何もせず通す。
@@ -55,12 +56,20 @@ public class BootstrapSessionFilter extends OncePerRequestFilter {
     /**
      * bootstrap sessionで到達してよい業務action keyのresource（action keyの {@code .} より前）。
      * <ul>
-     *   <li>{@code user}: 2・3人目の管理者の作成（ユーザーCRUD・状態変更）</li>
-     *   <li>{@code permission}: 権限group・role別menu（{@code permission.manage}）</li>
+     *   <li>{@code user}: 2人目以降の管理者の作成（ユーザーCRUD・状態変更）</li>
      *   <li>{@code identity-provider}: IdPの登録と外部identity linkの登録・承認</li>
      * </ul>
      */
-    static final Set<String> BOOTSTRAP_RESOURCES = Set.of("user", "permission", "identity-provider");
+    static final Set<String> BOOTSTRAP_RESOURCES = Set.of("user", "identity-provider");
+
+    /**
+     * bootstrap sessionでは参照（GET）だけを許すresource（review P3-b）。
+     * {@code permission}（{@code /api/permission-groups/**}・{@code /api/role-menus/**}）はユーザー管理画面の権限タブが
+     * 読むため参照は残すが、role別menuの全置換（{@code PUT /api/role-menus}）と権限groupの割当替え
+     * （{@code PUT /api/permission-groups/users/*}）は通さない。管理者の作成時はroleの既定権限groupがserver側で割り当たる
+     * （{@code SysUserServiceImpl.createUser}）ため、bootstrapに権限の書込は要らない。
+     */
+    static final Set<String> BOOTSTRAP_READ_ONLY_RESOURCES = Set.of("permission");
 
     /** ユーザー一覧画面の検索候補（ユーザー管理画面が使う管理者専用の候補API）。 */
     private static final String USER_SUGGEST_API = "/api/autocomplete/users";
@@ -84,14 +93,21 @@ public class BootstrapSessionFilter extends OncePerRequestFilter {
 
         ProductionBootstrapMode mode = bootstrapModeProvider.getIfAvailable();
         if (mode == null || !mode.isActive()) {
-            rejectExpired(request, response, session);
+            rejectSession(request, response, session, "BOOTSTRAP_SESSION_EXPIRED", "bootstrapの期限が過ぎています");
+            return;
+        }
+        // 印がbootstrap loginの本人（local loginのadmin・同じsys_user.id）に結び付いていなければ、別の主体へ
+        // 引き継がれた印として扱いsessionごと失効させる（review P3-a。通常はLoginSuccessHandlerがlogin時に消す）。
+        if (!ProductionBootstrapMode.isBootstrapSessionOf(session, authentication)) {
+            rejectSession(request, response, session, "BOOTSTRAP_SESSION_MISMATCH",
+                    "bootstrap sessionの認証主体が一致しません");
             return;
         }
 
         String method = request.getMethod() == null ? "" : request.getMethod().toUpperCase(Locale.ROOT);
         String uri = request.getRequestURI();
         boolean passwordChangeRequired = PasswordChangeEnforcementFilter.isChangeRequired(session);
-        boolean mfaVerified = Boolean.TRUE.equals(session.getAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE));
+        boolean mfaVerified = MfaEnforcementFilter.isVerifiedFor(session, SecurityUtils.currentUserId());
 
         // 改密 → MFAの順。改密前は PasswordChangeEnforcementFilter が既に変更経路以外を止めている。
         if (!passwordChangeRequired && !mfaVerified && !isMfaFlow(method, uri)) {
@@ -131,6 +147,9 @@ public class BootstrapSessionFilter extends OncePerRequestFilter {
         }
         int separator = action.indexOf('.');
         String resource = separator > 0 ? action.substring(0, separator) : action;
+        if (BOOTSTRAP_READ_ONLY_RESOURCES.contains(resource)) {
+            return "GET".equals(method);
+        }
         return BOOTSTRAP_RESOURCES.contains(resource);
     }
 
@@ -178,14 +197,15 @@ public class BootstrapSessionFilter extends OncePerRequestFilter {
         }
     }
 
-    private void rejectExpired(HttpServletRequest request, HttpServletResponse response, HttpSession session)
-            throws IOException {
-        audit(request, HttpServletResponse.SC_UNAUTHORIZED, "BOOTSTRAP_SESSION_EXPIRED");
+    /** bootstrap sessionを失効させる（期限切れ・認証主体の不一致）。永続sessionの失効は既存の仕組みに任せる。 */
+    private void rejectSession(HttpServletRequest request, HttpServletResponse response, HttpSession session,
+                               String applicationCode, String message) throws IOException {
+        audit(request, HttpServletResponse.SC_UNAUTHORIZED, applicationCode);
         session.invalidate();
         SecurityContextHolder.clearContext();
         if (request.getRequestURI().startsWith("/api/")) {
             writeJson(response, HttpServletResponse.SC_UNAUTHORIZED,
-                    "{\"code\":401,\"message\":\"bootstrapの期限が過ぎています\",\"data\":null}");
+                    "{\"code\":401,\"message\":\"" + message + "\",\"data\":null}");
         } else {
             response.sendRedirect(request.getContextPath() + "/login?sessionExpired");
         }

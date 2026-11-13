@@ -36,9 +36,24 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private ProductionBootstrapMode productionBootstrapMode;
 
+    /**
+     * 前の認証主体のsessionから引き継いではならない安全状態の属性（review P3-a）。
+     * session fixation対策（{@code ChangeSessionIdAuthenticationStrategy}）はsession IDだけを替えて属性を残すため、
+     * 同じブラウザでbootstrap session等から別の主体（例: OIDCの管理者）がloginすると、bootstrapの印・MFA検証済み・
+     * 初回パスワード変更要求がそのまま新しい主体へ引き継がれる。loginのたびに消し、必要なものだけを以下で立て直す。
+     */
+    static final java.util.List<String> AUTHENTICATION_SCOPED_ATTRIBUTES = java.util.List.of(
+            ProductionBootstrapMode.SESSION_ATTRIBUTE,
+            ProductionBootstrapMode.SESSION_USER_ATTRIBUTE,
+            MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE,
+            MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE,
+            MfaEnforcementFilter.MFA_VERIFIED_USER_ATTRIBUTE,
+            PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE);
+
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
                                         Authentication authentication) throws IOException, ServletException {
+        clearAuthenticationScopedAttributes(request);
         boolean breakGlass = authentication instanceof UsernamePasswordAuthenticationToken
                 && oidcSecurityProperties.isBreakGlassUsername(authentication.getName());
         if (breakGlass) {
@@ -75,9 +90,12 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
         if (bootstrap) {
             // BootstrapSessionFilterが改密 → MFA → bootstrap入口だけの順に制限する。MFA pendingは立てない
             // （立てるとPasswordChangeEnforcementFilterがMFAを先に待つため、改密 → MFAの順にならない）。
+            // 印はbootstrap loginの本人（sys_user.id）へ結び付け、別の主体のsessionでは効かせない（review P3-a）。
             jakarta.servlet.http.HttpSession session = request.getSession(true);
             session.setAttribute(ProductionBootstrapMode.SESSION_ATTRIBUTE, Boolean.TRUE);
+            session.setAttribute(ProductionBootstrapMode.SESSION_USER_ATTRIBUTE, principalUserId(authentication));
             session.removeAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE);
+            session.removeAttribute(MfaEnforcementFilter.MFA_VERIFIED_USER_ATTRIBUTE);
         }
         // 遷移先はrequestごとのlocal変数で決める。setDefaultTargetUrl等はこのhandler
         // （singleton）のフィールドを書き換えるため、同時loginで遷移先が混ざる。
@@ -94,6 +112,7 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
             jakarta.servlet.http.HttpSession session = request.getSession(true);
             session.setAttribute(MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE, Boolean.TRUE);
             session.removeAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE);
+            session.removeAttribute(MfaEnforcementFilter.MFA_VERIFIED_USER_ATTRIBUTE);
             targetUrl = mfaService.isConfigured(com.ses.common.util.SecurityUtils.currentUserId())
                     ? "/mfa/challenge" : "/mfa/setup";
         } else if (bootstrap && !passwordChangeRequired) {
@@ -107,6 +126,23 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
         }
         clearAuthenticationAttributes(request);
         getRedirectStrategy().sendRedirect(request, response, targetUrl);
+    }
+
+    /** 前の認証主体から引き継いだ安全状態の属性を消す（既存sessionが無ければ何もしない）。 */
+    private static void clearAuthenticationScopedAttributes(HttpServletRequest request) {
+        jakarta.servlet.http.HttpSession session = request.getSession(false);
+        if (session == null) {
+            return;
+        }
+        for (String attribute : AUTHENTICATION_SCOPED_ATTRIBUTES) {
+            session.removeAttribute(attribute);
+        }
+    }
+
+    /** 認証主体の {@code sys_user.id}（LoginUserでなければnull。nullの印はどの主体にも一致しない）。 */
+    private static Long principalUserId(Authentication authentication) {
+        return authentication.getPrincipal() instanceof LoginUser loginUser && loginUser.getSysUser() != null
+                ? loginUser.getSysUser().getId() : null;
     }
 
     /** 認証時に読み込んだ {@code sys_user.password_change_required} が1か（DBを再読込しない）。 */

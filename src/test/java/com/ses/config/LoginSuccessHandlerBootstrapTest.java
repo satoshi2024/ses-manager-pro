@@ -58,6 +58,8 @@ class LoginSuccessHandlerBootstrapTest {
 
         assertThat(response.getRedirectedUrl()).isEqualTo(PasswordChangeEnforcementFilter.CHANGE_PAGE);
         assertThat(request.getSession().getAttribute(ProductionBootstrapMode.SESSION_ATTRIBUTE)).isEqualTo(Boolean.TRUE);
+        assertThat(request.getSession().getAttribute(ProductionBootstrapMode.SESSION_USER_ATTRIBUTE))
+                .as("印はbootstrap loginの本人のuser idへ結び付ける（review P3-a）").isEqualTo(10L);
         assertThat(request.getSession().getAttribute(PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE))
                 .isEqualTo(Boolean.TRUE);
         assertThat(request.getSession().getAttribute(MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE)).isNull();
@@ -129,6 +131,34 @@ class LoginSuccessHandlerBootstrapTest {
                 : other.getSession(false).getAttribute(ProductionBootstrapMode.SESSION_ATTRIBUTE)).isNull();
     }
 
+    @Test
+    void 同じsessionで別の主体がloginするとbootstrapの印とMFA検証と改密要求を引き継がない() throws Exception {
+        // review P3-a: session fixation対策はsession IDだけを替えて属性を残すため、login時に安全状態を消す
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute(ProductionBootstrapMode.SESSION_ATTRIBUTE, Boolean.TRUE);
+        session.setAttribute(ProductionBootstrapMode.SESSION_USER_ATTRIBUTE, 10L);
+        session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE, Boolean.TRUE);
+        session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_USER_ATTRIBUTE, 10L);
+        session.setAttribute(MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE, Boolean.TRUE);
+        session.setAttribute(PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE, Boolean.TRUE);
+        request.setSession(session);
+        DefaultOAuth2User oidcUser = new DefaultOAuth2User(
+                List.of(new SimpleGrantedAuthority("ROLE_管理者")), Map.of("sub", "second-admin"), "sub");
+
+        handler(mode(true, true)).onAuthenticationSuccess(request, new MockHttpServletResponse(),
+                new OAuth2AuthenticationToken(oidcUser, oidcUser.getAuthorities(), "enterprise"));
+
+        for (String attribute : LoginSuccessHandler.AUTHENTICATION_SCOPED_ATTRIBUTES) {
+            assertThat(session.getAttribute(attribute)).as("引き継がない属性: %s", attribute).isNull();
+        }
+        assertThat(LoginSuccessHandler.AUTHENTICATION_SCOPED_ATTRIBUTES).contains(
+                ProductionBootstrapMode.SESSION_ATTRIBUTE, ProductionBootstrapMode.SESSION_USER_ATTRIBUTE,
+                MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE, MfaEnforcementFilter.MFA_VERIFIED_USER_ATTRIBUTE,
+                MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE,
+                PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE);
+    }
+
     // ---------------------------------------------------------------- helper
 
     private LoginSuccessHandler handler(ProductionBootstrapMode mode) {
@@ -144,7 +174,8 @@ class LoginSuccessHandlerBootstrapTest {
         ProductionBootstrapProperties properties = new ProductionBootstrapProperties();
         properties.setEnabled(enabled);
         properties.setExpiresAt("2026-11-13T20:00:00+09:00");
-        ProductionBootstrapMode mode = new ProductionBootstrapMode(properties, production, clock);
+        ProductionBootstrapMode mode = new ProductionBootstrapMode(properties, production, clock,
+                ProductionBootstrapModeTest.notCompletedLatch());
         mode.validateAtStartup();
         return mode;
     }

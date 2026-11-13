@@ -25,10 +25,14 @@ public class SystemConfigApiController {
     /** マスキング済みであることを示すプレースホルダー値。 */
     private static final String MASK_PLACEHOLDER = "********";
 
-    /** システム管理キー（画面からの直接編集・閲覧を禁止するキー） */
+    /**
+     * システム管理キー（画面からの直接編集・閲覧を禁止するキー）。
+     * 本番初回bootstrapの完了marker（{@code ProductionBootstrapCompletionLatch}）も含める。一覧に出すと、画面の保存が
+     * 全行を送り返すため未知keyとして保存全体が失敗する上、markerを画面から書き換える経路になる。
+     */
     private static final Set<String> SYSTEM_MANAGED_KEYS = Set.of("closing.confirmed-months",
             "attendance.sync.freee.cursor", "attendance.sync.last-result",
-            "attendance.discrepancy.confirmed");
+            "attendance.discrepancy.confirmed", com.ses.config.ProductionBootstrapCompletionLatch.CONFIG_KEY);
 
     /** 法人別cursor等、動的システム管理キーのprefix（R5-P2-03） */
     private static final String SYSTEM_MANAGED_PREFIX = "attendance.sync.freee.cursor.le.";

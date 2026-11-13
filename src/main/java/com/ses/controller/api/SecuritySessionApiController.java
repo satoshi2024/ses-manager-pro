@@ -53,8 +53,7 @@ public class SecuritySessionApiController {
         HttpSession session = request.getSession(false);
         boolean pending = session != null && Boolean.TRUE.equals(
                 session.getAttribute(MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE));
-        boolean verified = session != null && Boolean.TRUE.equals(
-                session.getAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE));
+        boolean verified = MfaEnforcementFilter.isVerifiedFor(session, userId);
         return ApiResult.success(new MfaStatusResponse(required, mfaService.isConfigured(userId), pending, verified));
     }
 
@@ -81,7 +80,7 @@ public class SecuritySessionApiController {
         auditLogService.recordRequired(authentication.getName(), "AUTH", "/api/security/mfa/enable", 200,
                 mfaService.isRequired(authentication) ? "BREAK_GLASS_MFA_ENABLED" : "BOOTSTRAP_MFA_ENABLED", true);
         mfaAttemptService.recordSuccess(userId, httpRequest);
-        markVerified(httpRequest);
+        markVerified(httpRequest, userId);
         return ApiResult.success(response);
     }
 
@@ -99,7 +98,7 @@ public class SecuritySessionApiController {
         auditLogService.recordRequired(authentication.getName(), "AUTH", "/api/security/mfa/verify", 200,
                 mfaService.isRequired(authentication) ? "BREAK_GLASS_MFA_VERIFIED" : "BOOTSTRAP_MFA_VERIFIED", true);
         mfaAttemptService.recordSuccess(userId, httpRequest);
-        markVerified(httpRequest);
+        markVerified(httpRequest, userId);
         return ApiResult.success(true);
     }
 
@@ -108,7 +107,7 @@ public class SecuritySessionApiController {
     @PreAuthorize("hasRole('管理者')")
     public ApiResult<Boolean> reset(@PathVariable Long userId, HttpServletRequest request) {
         Long currentUserId = currentUserId();
-        if (currentUserId.equals(userId) && !isMfaVerified(request)) {
+        if (currentUserId.equals(userId) && !isMfaVerified(request, currentUserId)) {
             throw BusinessException.of(403, "error.mfa.reauthenticationRequired");
         }
         mfaService.reset(userId, "MFA_RESET_BY_ADMIN");
@@ -160,15 +159,15 @@ public class SecuritySessionApiController {
 
     private void requireEnrollmentAccess(Authentication authentication, HttpServletRequest request) {
         requireMfaUser(authentication, request);
-        if (mfaService.isConfigured(currentUserId()) && !isMfaVerified(request)) {
+        Long userId = currentUserId();
+        if (mfaService.isConfigured(userId) && !isMfaVerified(request, userId)) {
             throw BusinessException.of(403, "error.mfa.reauthenticationRequired");
         }
     }
 
-    private boolean isMfaVerified(HttpServletRequest request) {
-        HttpSession session = request.getSession(false);
-        return session != null && Boolean.TRUE.equals(
-                session.getAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE));
+    /** このsessionのMFA検証が、現在の認証主体本人について行われたものか（別の主体の検証を引き継がない。review P3-a）。 */
+    private boolean isMfaVerified(HttpServletRequest request, Long userId) {
+        return MfaEnforcementFilter.isVerifiedFor(request.getSession(false), userId);
     }
 
     private Long currentUserId() {
@@ -179,9 +178,10 @@ public class SecuritySessionApiController {
         return userId;
     }
 
-    private void markVerified(HttpServletRequest request) {
+    private void markVerified(HttpServletRequest request, Long userId) {
         HttpSession session = request.getSession(true);
         session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE, Boolean.TRUE);
+        session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_USER_ATTRIBUTE, userId);
         session.removeAttribute(MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE);
     }
 

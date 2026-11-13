@@ -35,6 +35,8 @@ class ProductionSecurityConfigurationValidatorTest {
         oidc.setEnabled(true);
         oidc.setLocalLoginEnabled(false);
         oidc.setBreakGlassLoginEnabled(true);
+        // prodではtenant-idが常に必須（review P2-B）
+        oidc.setTenantId("default");
         oidc.setBreakGlassUsernames(Set.of("admin-a", "admin-b"));
         oidc.setIssuerUri("https://idp.example/tenant/v2.0");
         oidc.setAuthorizationUri("https://idp.example/authorize");
@@ -68,6 +70,20 @@ class ProductionSecurityConfigurationValidatorTest {
         ProductionSecurityConfigurationValidator validator =
                 new ProductionSecurityConfigurationValidator(oidc, mfa, session, mapper, userMfaMapper, permissionGroupMapper,
                         aiConfig, outboundUrlGuard);
+        // break-glass以外にOIDCでログインできる管理者3名（起票1名・承認2名）と、初回bootstrapの完了marker
+        com.ses.entity.IdentityProvider provider = new com.ses.entity.IdentityProvider();
+        provider.setId(7L);
+        provider.setProviderType("OIDC");
+        com.ses.mapper.IdentityProviderMapper identityProviderMapper = mock(com.ses.mapper.IdentityProviderMapper.class);
+        when(identityProviderMapper.selectEnabledByTenantAndIssuer(org.mockito.ArgumentMatchers.eq("default"),
+                anyString())).thenReturn(provider);
+        com.ses.mapper.UserExternalIdentityMapper externalIdentityMapper =
+                mock(com.ses.mapper.UserExternalIdentityMapper.class);
+        when(externalIdentityMapper.selectApprovedActiveUsernamesByRole("default", 7L, "管理者"))
+                .thenReturn(java.util.List.of("ops-a", "ops-b", "ops-c"));
+        validator.setIdentityProviderMapper(identityProviderMapper);
+        validator.setUserExternalIdentityMapper(externalIdentityMapper);
+        validator.setBootstrapCompletionLatch(mock(ProductionBootstrapCompletionLatch.class));
 
         assertDoesNotThrow(validator::validate);
 

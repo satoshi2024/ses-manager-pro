@@ -86,8 +86,8 @@ class ProductionBootstrapIntegrationTest {
             ProductionBootstrapProperties properties = new ProductionBootstrapProperties();
             properties.setEnabled(true);
             properties.setExpiresAt(EXPIRES_AT);
-            // prod判定を明示する（@PostConstructの期限検査もこのbeanで行われる）
-            return new ProductionBootstrapMode(properties, true, CLOCK);
+            // prod判定を明示する（@PostConstructの期限検査もこのbeanで行われる）。初回bootstrap（完了markerが無い）とする
+            return new ProductionBootstrapMode(properties, true, CLOCK, ProductionBootstrapModeTest.notCompletedLatch());
         }
     }
 
@@ -159,6 +159,9 @@ class ProductionBootstrapIntegrationTest {
                 eq("BOOTSTRAP_WRITE_ATTEMPT"), eq(false));
         verify(auditLogService).record(eq("admin"), eq("PUT"), eq("/api/profile/password"), eq(200),
                 eq("BOOTSTRAP_WRITE"), eq(true));
+        // review P3-e: 改密時に同じユーザーの他sessionを失効させる（このsessionは永続session未追跡のため全件）
+        Long adminId = jdbcTemplate.queryForObject("SELECT id FROM sys_user WHERE username = 'admin'", Long.class);
+        verify(persistentSessionService).revokeAllForUser(adminId, "BOOTSTRAP_PASSWORD_CHANGED");
 
         // 2. 改密後: MFA完了までMFA登録画面へ誘導し、業務・bootstrap用APIも403
         mockMvc.perform(get("/").session(session))
@@ -195,6 +198,54 @@ class ProductionBootstrapIntegrationTest {
                 .andExpect(jsonPath("$.code").value(200));
         mockMvc.perform(get("/api/identity-providers").session(session))
                 .andExpect(status().isOk());
+        // review P3-f: bootstrap sessionの参照も結果を監査する
+        verify(auditLogService).record(eq("admin"), eq("GET"), eq("/api/users"), eq(200),
+                eq("BOOTSTRAP_READ"), eq(true));
+    }
+
+    @Test
+    void bootstrap_sessionの改密は追跡中の現在session以外の同じユーザーのsessionを失効させる() throws Exception {
+        MockHttpSession session = loginAsBootstrapAdmin();
+        session.setAttribute(PersistentSessionService.SESSION_HASH_ATTRIBUTE, "bootstrap-current-session-hash");
+
+        changePassword(session);
+
+        Long adminId = jdbcTemplate.queryForObject("SELECT id FROM sys_user WHERE username = 'admin'", Long.class);
+        verify(persistentSessionService).revokeOthers(adminId, "bootstrap-current-session-hash",
+                "BOOTSTRAP_PASSWORD_CHANGED");
+        verify(persistentSessionService, never()).revokeAllForUser(any(), any());
+    }
+
+    @Test
+    void 完了したbootstrap_sessionでも権限groupとrole別menuは参照だけできる() throws Exception {
+        MockHttpSession session = completedBootstrapSession();
+
+        mockMvc.perform(get("/api/role-menus/menus").session(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+        // review P3-b: role別menuの全置換と権限groupの割当替えは通さない
+        mockMvc.perform(put("/api/role-menus").param("role", "営業").session(session).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("[]"))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("X-SES-Error-Code", "BOOTSTRAP_SCOPE_VIOLATION"));
+        mockMvc.perform(put("/api/permission-groups/users/1").session(session).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"groupIds\":[]}"))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("X-SES-Error-Code", "BOOTSTRAP_SCOPE_VIOLATION"));
+    }
+
+    @Test
+    void bootstrapの印が現在の認証主体に結び付いていなければsessionごと失効させる() throws Exception {
+        // review P3-a: 印はbootstrap loginの本人のuser idに結び付く。別のuser idに結び付いた印は効かせず失効させる
+        // （login時に印を消すこと自体は LoginSuccessHandlerBootstrapTest が見る）
+        MockHttpSession session = completedBootstrapSession();
+        session.setAttribute(ProductionBootstrapMode.SESSION_USER_ATTRIBUTE, -1L);
+
+        mockMvc.perform(get("/api/users").session(session))
+                .andExpect(status().isUnauthorized());
+        assertThat(session.isInvalid()).isTrue();
+        verify(auditLogService).record(eq("admin"), eq("GET"), eq("/api/users"), eq(401),
+                eq("BOOTSTRAP_SESSION_MISMATCH"), eq(false));
     }
 
     @Test
