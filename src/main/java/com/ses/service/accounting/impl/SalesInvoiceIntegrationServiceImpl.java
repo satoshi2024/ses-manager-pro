@@ -363,7 +363,9 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
                 CanonicalSalesInvoice canonical = objectMapper.readValue(job.getPayloadSnapshot(), CanonicalSalesInvoice.class);
 
                 AccountingProvider provider = providerFactory.getProvider(conn);
-                CanonicalDealResult result = provider.upsertSalesInvoice(conn, canonical);
+                // 再試行（試行2回目以降）は前回の試行で作成済みの取引を確認してからPOSTする（再POSTで二重に作らない）
+                CanonicalDealResult result = provider.upsertSalesInvoice(conn, canonical,
+                        AccountingProvider.DealCreateGuard.of(canonical.getVerifyNoExistingDeal(), job.getAttemptCount()));
 
                 // P1-02: トランザクションコーディネーター (Spring プロキシ経由) で原子反映
                 transactionCoordinator.handleSalesInvoiceResult(jobId, job, conn, result);

@@ -592,7 +592,11 @@ class SalesInvoiceIntegrationTest {
         mockServer.verify();
     }
 
-    private static final String DEALS_LIST_URL = "https://api.freee.co.jp/api/1/deals?company_id=99001&limit=100&offset=0";
+    /** 既存取引の確認: 売上（income）・取引先（CUSTOMER_PARTNERの1001）・発生日の前後1年で絞る。 */
+    private static final String DEALS_LIST_URL = "https://api.freee.co.jp/api/1/deals?company_id=99001&type=income&partner_id=1001"
+            + "&start_issue_date=" + LocalDate.of(2026, 8, 1).minusDays(366)
+            + "&end_issue_date=" + LocalDate.of(2026, 8, 1).plusDays(366)
+            + "&limit=100&offset=0";
 
     private long countSalesSyncJobs() {
         return jobService.count(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<IntegrationJob>()
@@ -703,5 +707,48 @@ class SalesInvoiceIntegrationTest {
         IntegrationJob second = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
         assertThat(second.getIdempotencyKey()).isEqualTo(first.getIdempotencyKey() + ":g1");
         assertThat(second.getPayloadSnapshot()).doesNotContain("verifyNoExistingDeal");
+    }
+
+    @Test
+    @DisplayName("同じジョブの再試行: タイムアウト後の再試行は前回の試行で作成済みの取引を採用し、再POSTしない")
+    void retryAfterTimeout_adoptsTheDealCreatedByTheFirstAttempt() {
+        IntegrationJob job = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        jobService.claimJob(job.getId()); // 1回目の試行: freeeでは取引が作成されたが、応答がタイムアウトした
+        jobService.markRetryable(job.getId(), "TIMEOUT", "一時的タイムアウト", 0);
+        jdbcTemplate.update("UPDATE t_integration_job SET next_retry_at = NULL WHERE id = ?", job.getId());
+
+        mockServer.expect(requestTo(DEALS_LIST_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": [{\"id\": 667901, \"company_id\": 99001, \"amount\": 1100000, "
+                        + "\"ref_number\": \"" + invoice.getInvoiceNo() + "\"}]}", MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesInvoiceJob(job.getId()); // 2回目の試行（以前は確認せずに再POSTしていた）
+
+        mockServer.verify();
+        IntegrationJob retried = jobService.getById(job.getId());
+        assertThat(retried.getAttemptCount()).isEqualTo(2);
+        assertThat(retried.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(retried.getExternalId()).isEqualTo("667901");
+    }
+
+    @Test
+    @DisplayName("同じジョブの再試行: 前回の試行で取引が作成されていなければ作成する")
+    void retryAfterServerError_postsWhenNoDealWasCreated() {
+        IntegrationJob job = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        jobService.claimJob(job.getId()); // 1回目の試行: 5xxで作成されなかった
+        jobService.markRetryable(job.getId(), "HTTP_503", "一時的な障害", 0);
+        jdbcTemplate.update("UPDATE t_integration_job SET next_retry_at = NULL WHERE id = ?", job.getId());
+
+        mockServer.expect(requestTo(DEALS_LIST_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 667902, \"company_id\": 99001, \"amount\": 1100000, \"status\": \"unsettled\"}}",
+                        MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesInvoiceJob(job.getId());
+
+        mockServer.verify();
+        assertThat(jobService.getById(job.getId()).getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(jobService.getById(job.getId()).getExternalId()).isEqualTo("667902");
     }
 }

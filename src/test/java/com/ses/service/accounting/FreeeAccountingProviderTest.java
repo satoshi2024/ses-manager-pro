@@ -1351,7 +1351,7 @@ class FreeeAccountingProviderTest {
     }
 
     @Test
-    @DisplayName("月次照合: 2回の取得の間に決済済みへ変わった取引は重複IDにせず、決済済み側を1件だけ採用する")
+    @DisplayName("月次照合: 2回の取得の間に未決済へ戻った取引（両方に現れる）は重複IDにせず、決済済み側を1件だけ採用する")
     void fetchPayments_dealInBothPasses_isNotDuplicate() {
         mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
         mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&status=settled&limit=100&offset=0"))
@@ -1374,5 +1374,159 @@ class FreeeAccountingProviderTest {
         assertThat(result.getDeals()).extracting(CanonicalPaymentSync::getDealId).containsExactly("83001");
         assertThat(result.getDeals().get(0).isSettled()).isTrue();
         assertThat(result.getPayments()).extracting(CanonicalPaymentSync::getPaymentId).containsExactly("93001");
+    }
+
+    // ===== 取引作成前の既存取引確認（DealCreateGuard: 再試行・取消後の再送信） =====
+
+    private static final LocalDate GUARD_ISSUE_DATE = LocalDate.of(2026, 8, 1);
+
+    /** 取引先ありの売上: 収支区分・取引先・発生日の前後1年で絞って走査する。 */
+    private static String partnerScanUrl(int offset) {
+        return "https://api.freee.co.jp/api/1/deals?company_id=99999&type=income&partner_id=3001"
+                + "&start_issue_date=" + GUARD_ISSUE_DATE.minusDays(366)
+                + "&end_issue_date=" + GUARD_ISSUE_DATE.plusDays(366)
+                + "&limit=100&offset=" + offset;
+    }
+
+    private CanonicalSalesInvoice guardedInvoice(String invoiceNo) {
+        return CanonicalSalesInvoice.builder()
+                .invoiceId(990L)
+                .invoiceNo(invoiceNo)
+                .partnerExternalId("3001")
+                .issueDate(GUARD_ISSUE_DATE)
+                .dueDate(GUARD_ISSUE_DATE.plusDays(30))
+                .subtotal(new BigDecimal("1000000"))
+                .tax(new BigDecimal("100000"))
+                .total(new BigDecimal("1100000"))
+                .build();
+    }
+
+    @Test
+    @DisplayName("再試行: 前回の試行で作成済みの取引（管理番号・金額・事業所が一致する1件）は採用し、再POSTしない")
+    void retry_adoptsTheDealCreatedByThePreviousAttempt() {
+        mockServer.expect(requestTo(partnerScanUrl(0)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": [{\"id\": 56001, \"ref_number\": \"INV-GUARD-ADOPT\", "
+                        + "\"amount\": 1100000, \"company_id\": 99999}]}", MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-GUARD-ADOPT"),
+                AccountingProvider.DealCreateGuard.ADOPT_OWN_OR_REFUSE);
+
+        mockServer.verify(); // POSTは期待していない（呼ばれればAssertionErrorで失敗する）
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getExternalId()).isEqualTo("56001");
+    }
+
+    @Test
+    @DisplayName("再試行: 同じ管理番号でも金額が違う取引は採用せず、作成もしない")
+    void retry_refusesWhenTheSameReferenceHasAnotherAmount() {
+        mockServer.expect(requestTo(partnerScanUrl(0)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": [{\"id\": 56002, \"ref_number\": \"INV-GUARD-OTHER\", "
+                        + "\"amount\": 900000, \"company_id\": 99999}]}", MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-GUARD-OTHER"),
+                AccountingProvider.DealCreateGuard.ADOPT_OWN_OR_REFUSE);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isFalse();
+        assertThat(result.getErrorCode()).isEqualTo("EXISTING_DEAL_FOUND");
+    }
+
+    @Test
+    @DisplayName("再試行: 同じ管理番号の取引が無ければ作成する")
+    void retry_postsWhenNoDealExists() {
+        mockServer.expect(requestTo(partnerScanUrl(0)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 56003, \"company_id\": 99999, \"amount\": 1100000}}",
+                        MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-GUARD-NEW"),
+                AccountingProvider.DealCreateGuard.ADOPT_OWN_OR_REFUSE);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getExternalId()).isEqualTo("56003");
+    }
+
+    @Test
+    @DisplayName("取消後の再送信: 走査が50ページ上限に達したら作成せず、再試行しない失敗にする（待っても確定しない）")
+    void refuse_pageCapReached_failsWithoutRetry() {
+        for (int page = 0; page < 50; page++) {
+            mockServer.expect(ExpectedCount.once(), requestTo(partnerScanUrl(page * 100)))
+                    .andExpect(method(HttpMethod.GET))
+                    .andRespond(withSuccess(fullDealPage("INV-GUARD-CAP", page, 0), MediaType.APPLICATION_JSON));
+        }
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-GUARD-CAP"),
+                AccountingProvider.DealCreateGuard.REFUSE_IF_EXISTS);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isFalse();
+        assertThat(result.getErrorCode()).isEqualTo("EXISTING_DEAL_CHECK_LIMIT");
+        assertThat(result.getErrorMessageSafe()).isEqualTo("error.accounting.existingDealCheckLimit");
+    }
+
+    @Test
+    @DisplayName("取消後の再送信: 応答にdeals配列が無い（形式の異常）は「無い」と扱わず、作成せずに再試行待ちにする")
+    void refuse_malformedResponse_isUnconfirmed() {
+        mockServer.expect(requestTo(partnerScanUrl(0)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"message\": \"maintenance\"}", MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-GUARD-BROKEN"),
+                AccountingProvider.DealCreateGuard.REFUSE_IF_EXISTS);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isTrue();
+        assertThat(result.getErrorCode()).isEqualTo("EXISTING_DEAL_CHECK_FAILED");
+    }
+
+    @Test
+    @DisplayName("取引先の無い要員経費の確認は、収支区分と同じ発生日で絞る")
+    void guard_expenseWithoutPartner_scansTheSameIssueDate() {
+        CanonicalExpenseDeal expense = CanonicalExpenseDeal.builder()
+                .expenseId(303L)
+                .expenseNo("EX-303")
+                .expenseDate(LocalDate.of(2026, 8, 21))
+                .amount(new BigDecimal("15000"))
+                .build();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&type=expense"
+                        + "&start_issue_date=2026-08-21&end_issue_date=2026-08-21&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": [{\"id\": 77003, \"ref_number\": \"EX-303\", "
+                        + "\"amount\": 15000, \"company_id\": 99999}]}", MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertExpenseDeal(testConnection, expense,
+                AccountingProvider.DealCreateGuard.ADOPT_OWN_OR_REFUSE);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getExternalId()).isEqualTo("77003");
+    }
+
+    @Test
+    @DisplayName("送信ジョブの状態から確認方法を決める: 初回は確認なし・再試行は採用または拒否・前世代の取消後は常に拒否")
+    void dealCreateGuard_isDecidedFromTheJob() {
+        assertThat(AccountingProvider.DealCreateGuard.of(null, 1)).isEqualTo(AccountingProvider.DealCreateGuard.NONE);
+        assertThat(AccountingProvider.DealCreateGuard.of(null, 2)).isEqualTo(AccountingProvider.DealCreateGuard.ADOPT_OWN_OR_REFUSE);
+        assertThat(AccountingProvider.DealCreateGuard.of(Boolean.TRUE, 1)).isEqualTo(AccountingProvider.DealCreateGuard.REFUSE_IF_EXISTS);
+        // 前の世代の取引は補償取消が後から削除し得るため、再試行でも採用しない
+        assertThat(AccountingProvider.DealCreateGuard.of(Boolean.TRUE, 3)).isEqualTo(AccountingProvider.DealCreateGuard.REFUSE_IF_EXISTS);
+    }
+
+    @Test
+    @DisplayName("滞留回収の照合: 50ページ上限に達したら一意と判断せず採用しない（再試行時の事前確認に任せる）")
+    void findDealIdByRefNumber_pageCap_doesNotAdopt() {
+        expectFullDealPages("INV-STALE-CAP", 1);
+
+        assertThat(freeeProvider.findDealIdByRefNumber(testConnection, "INV-STALE-CAP")).isEmpty();
+        mockServer.verify();
     }
 }
