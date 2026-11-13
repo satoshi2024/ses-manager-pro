@@ -163,8 +163,11 @@ class LifecycleEvidenceAndCompensationTest {
     @Test
     @DisplayName("B2-2: 有効な文書台帳IDを指定して完了報告した場合、証跡リンクが正しく永続化されること")
     void testSuccessDocumentLinkAndEvidenceRecord() {
+        // 版を固定しない証跡は拒否されるため（N1-3）、画面と同じくCLEAN版を選んで完了報告する。
+        DocumentVersion cleanVersion = version("default", validDocument.getId(), 1, "b2-2");
         CompleteLifecycleTaskCommand cmd = CompleteLifecycleTaskCommand.builder()
                 .documentId(validDocument.getId())
+                .documentVersionId(cleanVersion.getId())
                 .evidenceRemarks("原本確認完了")
                 .completionComment("人事部にて原本受理")
                 .build();
@@ -181,6 +184,7 @@ class LifecycleEvidenceAndCompensationTest {
         );
         assertEquals(1, links.size());
         assertEquals(validDocument.getId(), links.get(0).getDocumentId());
+        assertEquals(cleanVersion.getId(), links.get(0).getDocumentVersionId());
         assertEquals("原本確認完了", links.get(0).getRemarks());
     }
 

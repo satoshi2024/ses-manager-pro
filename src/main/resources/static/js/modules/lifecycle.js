@@ -463,6 +463,8 @@ SES.lifecycle = {
         }
         document.getElementById('completeTaskId').value = taskId;
         document.getElementById('completeComment').value = '';
+        document.getElementById('completeDocumentId').value = '';
+        this.resetEvidenceVersions();
         const evSection = document.getElementById('evidenceSection');
         if (evidenceType === 'DOCUMENT_LINK') {
             evSection.style.display = 'block';
@@ -472,14 +474,66 @@ SES.lifecycle = {
         new bootstrap.Modal(document.getElementById('completeTaskModal')).show();
     },
 
+    // ==========================================
+    // 証跡文書の版選択
+    // 版を固定しない証跡はサーバーが400で拒否するため、ウイルス検査済み（CLEAN）の版から選ばせて版IDを送る。
+    // ==========================================
+    resetEvidenceVersions: function() {
+        const select = document.getElementById('completeDocumentVersionId');
+        if (!select) return;
+        select.innerHTML = '<option value="">文書IDを入力して版を読み込んでください</option>';
+        select.disabled = true;
+    },
+
+    loadEvidenceVersions: async function() {
+        const taskId = document.getElementById('completeTaskId').value;
+        const docId = document.getElementById('completeDocumentId').value;
+        const select = document.getElementById('completeDocumentVersionId');
+        if (!docId) {
+            SES.toast.warning('文書IDを入力してください');
+            return;
+        }
+        try {
+            const versions = (await SES.api.get(
+                `/api/lifecycle/tasks/${encodeURIComponent(taskId)}/evidence-versions`,
+                { documentId: parseInt(docId, 10) })) || [];
+            SES.lifecycle.renderEvidenceVersions(select, versions);
+        } catch (e) {
+            console.error(e);
+            SES.lifecycle.resetEvidenceVersions();
+        }
+    },
+
+    renderEvidenceVersions: function(select, versions) {
+        if (!select) return;
+        if (versions.length === 0) {
+            select.innerHTML = '<option value="">選択できる版がありません（ウイルス検査済みの版がありません）</option>';
+            select.disabled = true;
+            return;
+        }
+        select.innerHTML = versions.map(v => {
+            const registered = v.createdAt ? String(v.createdAt).replace('T', ' ').substring(0, 16) : '-';
+            return `<option value="${SES.escapeHtml(String(v.id))}">第${SES.escapeHtml(String(v.versionNo))}版（登録 ${SES.escapeHtml(registered)}）</option>`;
+        }).join('');
+        select.disabled = false;
+    },
+
     submitCompleteTask: async function() {
         const taskId = document.getElementById('completeTaskId').value;
         const comment = document.getElementById('completeComment').value;
         const docId = document.getElementById('completeDocumentId').value;
+        const versionSelect = document.getElementById('completeDocumentVersionId');
+        const versionId = versionSelect && !versionSelect.disabled ? versionSelect.value : '';
+
+        if (docId && !versionId) {
+            SES.toast.warning('証跡にする版を選択してください');
+            return;
+        }
 
         const payload = {
             completionComment: comment || undefined,
-            documentId: docId ? parseInt(docId, 10) : undefined
+            documentId: docId ? parseInt(docId, 10) : undefined,
+            documentVersionId: docId && versionId ? parseInt(versionId, 10) : undefined
         };
 
         try {

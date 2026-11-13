@@ -143,6 +143,8 @@ SES.myLifecycle = {
         document.getElementById('myTaskTitleLabel').textContent = taskName;
         document.getElementById('myTaskDescLabel').textContent = desc || '';
         document.getElementById('myCompletionComment').value = '';
+        document.getElementById('myDocumentId').value = '';
+        this.resetEvidenceVersions('myDocumentVersionId');
         const docSection = document.getElementById('myDocIdSection');
         if (evidenceType === 'DOCUMENT_LINK') {
             docSection.style.display = 'block';
@@ -152,14 +154,75 @@ SES.myLifecycle = {
         new bootstrap.Modal(document.getElementById('myCompleteModal')).show();
     },
 
+    // ==========================================
+    // 提出文書の版選択
+    // 版を固定しない提出はサーバーが400で拒否するため、ウイルス検査済み（CLEAN）の版から選ばせて版IDを送る。
+    // ==========================================
+    resetEvidenceVersions: function(selectId) {
+        const select = document.getElementById(selectId);
+        if (!select) return;
+        select.innerHTML = '<option value="">文書IDを入力して版を読み込んでください</option>';
+        select.disabled = true;
+    },
+
+    loadEvidenceVersions: async function(taskInputId, docInputId, selectId) {
+        const taskId = document.getElementById(taskInputId).value;
+        const docId = document.getElementById(docInputId).value;
+        const select = document.getElementById(selectId);
+        if (!docId) {
+            SES.toast.warning('文書IDを入力してください');
+            return;
+        }
+        try {
+            const versions = (await SES.api.get(
+                `/api/my/lifecycle/tasks/${encodeURIComponent(taskId)}/evidence-versions`,
+                { documentId: parseInt(docId, 10) })) || [];
+            this.renderEvidenceVersions(select, versions);
+        } catch (e) {
+            console.error(e);
+            this.resetEvidenceVersions(selectId);
+        }
+    },
+
+    renderEvidenceVersions: function(select, versions) {
+        if (!select) return;
+        if (versions.length === 0) {
+            select.innerHTML = '<option value="">選択できる版がありません（ウイルス検査済みの版がありません）</option>';
+            select.disabled = true;
+            return;
+        }
+        select.innerHTML = versions.map(v => {
+            const registered = v.createdAt ? String(v.createdAt).replace('T', ' ').substring(0, 16) : '-';
+            return `<option value="${SES.escapeHtml(String(v.id))}">第${SES.escapeHtml(String(v.versionNo))}版（登録 ${SES.escapeHtml(registered)}）</option>`;
+        }).join('');
+        select.disabled = false;
+    },
+
+    /** 文書IDと選択中の版IDから完了報告の証跡部分を組み立てる。版未選択ならnull（送信しない）。 */
+    evidencePayload: function(docInputId, selectId) {
+        const docId = document.getElementById(docInputId).value;
+        const select = document.getElementById(selectId);
+        const versionId = select && !select.disabled ? select.value : '';
+        if (docId && !versionId) {
+            SES.toast.warning('提出する版を選択してください');
+            return null;
+        }
+        return {
+            documentId: docId ? parseInt(docId, 10) : undefined,
+            documentVersionId: docId && versionId ? parseInt(versionId, 10) : undefined
+        };
+    },
+
     submitComplete: async function() {
         const taskId = document.getElementById('myTaskId').value;
         const comment = document.getElementById('myCompletionComment').value;
-        const docId = document.getElementById('myDocumentId').value;
+        const evidence = this.evidencePayload('myDocumentId', 'myDocumentVersionId');
+        if (!evidence) return;
 
         const payload = {
             completionComment: comment || undefined,
-            documentId: docId ? parseInt(docId, 10) : undefined
+            documentId: evidence.documentId,
+            documentVersionId: evidence.documentVersionId
         };
 
         try {
@@ -278,6 +341,8 @@ SES.myLifecycle = {
         }
         document.getElementById('myDetailTaskId').value = taskId;
         document.getElementById('myDetailCompletionComment').value = '';
+        document.getElementById('myDetailDocumentId').value = '';
+        this.resetEvidenceVersions('myDetailDocumentVersionId');
         const docSection = document.getElementById('myDetailDocIdSection');
         if (evidenceType === 'DOCUMENT_LINK') {
             docSection.style.display = 'block';
@@ -290,11 +355,13 @@ SES.myLifecycle = {
     submitDetailComplete: async function() {
         const taskId = document.getElementById('myDetailTaskId').value;
         const comment = document.getElementById('myDetailCompletionComment').value;
-        const docId = document.getElementById('myDetailDocumentId').value;
+        const evidence = this.evidencePayload('myDetailDocumentId', 'myDetailDocumentVersionId');
+        if (!evidence) return;
 
         const payload = {
             completionComment: comment || undefined,
-            documentId: docId ? parseInt(docId, 10) : undefined
+            documentId: evidence.documentId,
+            documentVersionId: evidence.documentVersionId
         };
 
         try {

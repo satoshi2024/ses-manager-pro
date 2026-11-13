@@ -6,6 +6,7 @@ import com.ses.common.audit.ActorType;
 import com.ses.common.audit.ConfirmationSource;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.lifecycle.CompleteLifecycleTaskCommand;
+import com.ses.dto.lifecycle.LifecycleEvidenceVersionDto;
 import com.ses.dto.lifecycle.LifecycleTaskDto;
 import com.ses.entity.*;
 import com.ses.mapper.*;
@@ -29,6 +30,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, LifecycleTask>
         implements LifecycleTaskService {
+
+    /** 証跡として固定してよい文書版のscan結果。 */
+    private static final String CLEAN_SCAN_STATUS = "CLEAN";
 
     private final LifecycleTaskMapper taskMapper;
     private final LifecycleTaskDepMapper taskDepMapper;
@@ -603,9 +607,17 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
     }
 
     /**
-     * 証跡文書をactorのtenant内に限定して解決する。版IDが指定された場合は同tenantかつ同文書の版であることを要求する。
-     * 他tenantの文書・別文書の版・存在しないIDはすべて同じ「文書が見つかりません」で拒否し、存在を推測させない。
-     * 版IDなし（versionless）の扱いは現行どおり許可する（B-NF01-4 の決定待ち）。
+     * 証跡文書と固定する版をactorのtenant内に限定して解決する（決定 B-NF01-4 / Q-9）。
+     * <ol>
+     *   <li>文書はactorのtenant内に限る。他tenantの文書・存在しないIDは同じ「文書が見つかりません」で拒否し、存在を推測させない。</li>
+     *   <li>版の指定は必須とし、版を固定しない（versionless）証跡は400で拒否する。画面は {@link #listEvidenceVersions} の
+     *       CLEAN版一覧から利用者に版を選ばせ、その版IDを送る。NF01はCONFIRM完成後に公開し機能スイッチも既定OFFのため、
+     *       「CONFIRM公開時に拒否」を前倒しして現時点から拒否する（判断の経緯は
+     *       .kiro/specs/engineer-lifecycle-workflow/runbook.md §5.4）。</li>
+     *   <li>版は同tenantかつ同文書の版に限る。別文書・他tenantの版は「文書が見つかりません」で拒否する。</li>
+     *   <li>版はscan結果がCLEANのものに限る。未検査・拒否済みの版を証跡として固定しない。</li>
+     * </ol>
+     * 判定順は文書 → 版指定の有無 → 版の所属 → CLEANとし、他tenant文書の拒否理由を版の有無で変えない。
      */
     private void requireEvidenceDocumentInTenant(Long documentId, Long documentVersionId, String tenantId) {
         Document document = documentMapper.selectOne(new LambdaQueryWrapper<Document>()
@@ -615,7 +627,8 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
             throw BusinessException.of(400, "error.document.notFound");
         }
         if (documentVersionId == null) {
-            return;
+            throw BusinessException.of(400, "error.lifecycle.evidenceVersionRequired",
+                    "証跡文書の版を選択してください");
         }
         DocumentVersion version = documentVersionMapper.selectOne(new LambdaQueryWrapper<DocumentVersion>()
                 .eq(DocumentVersion::getId, documentVersionId)
@@ -624,6 +637,60 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         if (version == null) {
             throw BusinessException.of(400, "error.document.notFound");
         }
+        if (!CLEAN_SCAN_STATUS.equals(version.getScanStatus())) {
+            throw BusinessException.of(400, "error.lifecycle.evidenceVersionNotClean",
+                    "選択した版はウイルス検査を通過していないため証跡にできません");
+        }
+    }
+
+    /**
+     * タスク証跡として選べる文書版（scan結果CLEAN）を版番号の降順で返す（Q-9: 画面で版を選択する）。
+     *
+     * <p>認可は完了操作と同じにする: actorのtenant、案件・要員のtenant一致、{@link LifecycleScopeService#assertCanEditTask}
+     * （閲覧scope・本人公開・担当者）。文書はactorのtenant内に限り、他tenant・存在しない文書は区別せず404とする。
+     * 返すのは版ID・版番号・登録日時だけで、元ファイル名・storage key・hashは返さない
+     * （文書台帳の閲覧権限を持たない担当者にも、完了時に指定できる範囲以上の情報を出さない）。</p>
+     */
+    @Override
+    public List<LifecycleEvidenceVersionDto> listEvidenceVersions(Long taskId, Long documentId, SysUser currentUser) {
+        String tenantId = scopeService.requireTenant(currentUser);
+        LifecycleTask task = taskId == null ? null : taskMapper.selectByIdAndTenant(taskId, tenantId);
+        if (task == null) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
+        }
+        LifecycleCase lcCase = caseMapper.selectByIdAndTenant(task.getCaseId(), tenantId);
+        if (lcCase == null) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
+        }
+        Engineer engineer = engineerMapper.selectOne(new LambdaQueryWrapper<Engineer>()
+                .eq(Engineer::getId, lcCase.getEngineerId()).eq(Engineer::getTenantId, tenantId));
+        if (engineer == null) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
+        }
+        scopeService.assertCanEditTask(currentUser, task, lcCase, engineer);
+
+        Document document = documentId == null ? null : documentMapper.selectOne(new LambdaQueryWrapper<Document>()
+                .eq(Document::getId, documentId)
+                .eq(Document::getTenantId, tenantId));
+        if (document == null) {
+            throw BusinessException.of(404, "error.document.notFound");
+        }
+        List<DocumentVersion> versions = documentVersionMapper.findByTenantAndDocumentId(tenantId, document.getId());
+        if (versions == null) {
+            return List.of();
+        }
+        return versions.stream()
+                .filter(version -> version != null && CLEAN_SCAN_STATUS.equals(version.getScanStatus()))
+                .filter(version -> Objects.equals(version.getDocumentId(), document.getId()))
+                .sorted(Comparator.comparing(DocumentVersion::getVersionNo,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .map(version -> LifecycleEvidenceVersionDto.builder()
+                        .id(version.getId())
+                        .documentId(version.getDocumentId())
+                        .versionNo(version.getVersionNo())
+                        .createdAt(version.getCreatedAt())
+                        .build())
+                .collect(Collectors.toList());
     }
 
     private record LockedTask(LifecycleCase lcCase, LifecycleTask task) {

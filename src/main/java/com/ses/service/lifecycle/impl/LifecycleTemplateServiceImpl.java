@@ -34,6 +34,9 @@ import java.util.stream.Collectors;
 public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateMapper, LifecycleTemplate>
         implements LifecycleTemplateService {
 
+    /** 確認機能（CONFIRM）の公開まで新規作成・改定を受け付けない証跡種別。 */
+    private static final String DUAL_CONFIRMATION = "DUAL_CONFIRMATION";
+
     private final LifecycleTemplateMapper templateMapper;
     private final LifecycleTemplateTaskMapper templateTaskMapper;
     private final LifecycleTemplateTaskDepMapper templateTaskDepMapper;
@@ -149,6 +152,7 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     @Transactional(rollbackFor = Exception.class)
     public LifecycleTemplateDto createTemplate(LifecycleTemplateDto dto, Long userId) {
         requireTemplateManager(userId);
+        rejectUnavailableEvidenceTypes(dto.getTasks());
         dagValidator.validateDtoDag(dto.getTasks());
 
         Integer maxVer = templateMapper.selectMaxVersionNo(dto.getTemplateType());
@@ -191,6 +195,7 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
             throw BusinessException.of(400, "error.lifecycle.notLatestVersion", "最新版のテンプレートのみ改定可能です");
         }
 
+        rejectUnavailableEvidenceTypes(dto.getTasks());
         dagValidator.validateDtoDag(dto.getTasks());
 
         // 改定時は過去の進行中案件の定義を保護するため、旧バージョンを変更せず新バージョンとして保存
@@ -249,6 +254,26 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
         templateMapper.updateById(entity);
     }
 
+    /**
+     * 確認機能（CONFIRM）の公開前は、二者確認（DUAL_CONFIRMATION）タスクを持つテンプレートの新規作成・改定を拒否する
+     * （決定 B-NF01-3）。DUAL_CONFIRMATIONは通常完了経路で完了できず（LifecycleTaskServiceImpl.completeTask は409）、
+     * 新しい案件へ展開されると免除以外に進めない。CONFIRM公開の批次で本判定を開放する。
+     * 値は前後空白・大文字小文字を畳んで照合する（小文字等で登録されると完了経路の完全一致判定をすり抜けるため）。
+     * 拒否は1件も書き込む前に行う。
+     */
+    private void rejectUnavailableEvidenceTypes(List<LifecycleTemplateTaskDto> tasks) {
+        if (tasks == null) {
+            return;
+        }
+        for (LifecycleTemplateTaskDto task : tasks) {
+            String evidenceType = task == null ? null : task.getEvidenceType();
+            if (evidenceType != null && DUAL_CONFIRMATION.equalsIgnoreCase(evidenceType.trim())) {
+                throw BusinessException.of(400, "error.lifecycle.dualConfirmationNotAvailable",
+                        "二者確認タスクは確認機能の公開前のため作成・改定できません");
+            }
+        }
+    }
+
     private void requireTemplateManager(Long userId) {
         SysUser user = userId == null ? null : sysUserMapper.selectById(userId);
         if (user == null || user.getStatus() == null || user.getStatus() != 1
@@ -261,6 +286,8 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
         if (taskDtos == null || taskDtos.isEmpty()) {
             return;
         }
+        // 呼出元（作成・改定）は書込み前に検査済み。将来の呼出元が検査を省いても保存しないよう、保存直前にも確認する。
+        rejectUnavailableEvidenceTypes(taskDtos);
 
         int order = 10;
         for (LifecycleTemplateTaskDto tDto : taskDtos) {

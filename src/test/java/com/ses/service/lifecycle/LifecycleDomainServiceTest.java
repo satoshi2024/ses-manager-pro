@@ -85,6 +85,9 @@ class LifecycleDomainServiceTest {
     private com.ses.mapper.DocumentMapper documentMapper;
 
     @Autowired
+    private DocumentVersionMapper documentVersionMapper;
+
+    @Autowired
     private LifecycleExceptionApprovalAdapter approvalAdapter;
 
     @Autowired
@@ -464,9 +467,25 @@ class LifecycleDomainServiceTest {
         doc.setDirection("INTERNAL");
         doc.setStatus("CONFIRMED");
         documentMapper.insert(doc);
+        // 版を固定しない証跡は拒否されるため（N1-3）、画面と同じくCLEAN版を選んで完了報告する。
+        DocumentVersion docVersion = new DocumentVersion();
+        docVersion.setTenantId("default");
+        docVersion.setDocumentId(doc.getId());
+        docVersion.setVersionNo(1);
+        docVersion.setStorageKey("lifecycle-domain/pledge-" + System.nanoTime());
+        docVersion.setOriginalName("pledge.pdf");
+        docVersion.setContentType("application/pdf");
+        docVersion.setSizeBytes(1L);
+        docVersion.setSha256("b".repeat(64));
+        docVersion.setSourceType("LIFECYCLE_TEST");
+        docVersion.setBusinessKey("lifecycle-domain-pledge-" + System.nanoTime());
+        docVersion.setVersionDiscriminator("v1");
+        docVersion.setScanStatus("CLEAN");
+        documentVersionMapper.insert(docVersion);
 
         taskService.completeTask(docTask.getId(), hrUser.getId(), CompleteLifecycleTaskCommand.builder()
                 .documentId(doc.getId())
+                .documentVersionId(docVersion.getId())
                 .completionComment("誓約書受領確認")
                 .build());
 

@@ -19,6 +19,7 @@ import com.ses.service.EngineerSalesService;
 import com.ses.service.lifecycle.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -42,6 +43,12 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, LifecycleCase>
         implements LifecycleCaseService {
+
+    /** 同一要員の未終結退社案件をtenant内で1件に限定する一意index（V187）。 */
+    static final String ACTIVE_RESIGNATION_UNIQUE_KEY = "uk_lifecycle_case_active_resignation";
+
+    /** 終結した案件の状態。これ以外（DRAFT・ACTIVE・ON_HOLD・想定外の値）は未終結として扱う。 */
+    private static final List<String> TERMINAL_CASE_STATUSES = List.of("COMPLETED", "CANCELLED");
 
     private final LifecycleCaseMapper caseMapper;
     private final LifecycleCaseSequenceMapper caseSequenceMapper;
@@ -79,15 +86,18 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         }
         scopeService.assertCanAccessEngineer(applicantUser, engineer);
 
-        // 同一要員の進行中退社案件の重複作成ガード
+        // 同一要員の未終結退社案件の重複作成ガード（早期に400を返すための事前確認）。
+        // この確認はlocking readではないため並行起票を止められない。正はV187の一意制約
+        // uk_lifecycle_case_active_resignation で、違反はinsert時に同じ400へ変換する（insertCase）。
+        // 未終結の定義は一意制約の生成列と同じ「COMPLETED / CANCELLED 以外」にそろえる。
         if ("RESIGNATION".equals(cmd.getLifecycleType())) {
             Long activeResignCount = caseMapper.selectCount(new LambdaQueryWrapper<LifecycleCase>()
                     .eq(LifecycleCase::getTenantId, tenantId)
                     .eq(LifecycleCase::getEngineerId, cmd.getEngineerId())
                     .eq(LifecycleCase::getLifecycleType, "RESIGNATION")
-                    .in(LifecycleCase::getStatus, List.of("ACTIVE", "ON_HOLD")));
+                    .notIn(LifecycleCase::getStatus, TERMINAL_CASE_STATUSES));
             if (activeResignCount != null && activeResignCount > 0) {
-                throw BusinessException.of(400, "error.lifecycle.duplicateActiveCase", "対象要員には既に進行中の退社手続き案件が存在します");
+                throw duplicateActiveResignationCase();
             }
         }
 
@@ -204,7 +214,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 .createdBy(applicantUserId)
                 .updatedBy(applicantUserId)
                 .build();
-        caseMapper.insert(lcCase);
+        insertCase(lcCase);
 
         // タスクインスタンス生成 & 担当者解決
         Map<String, LifecycleTask> createdTasksByCode = new HashMap<>();
@@ -282,6 +292,44 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         eventMapper.insert(event);
 
         return getCaseDetail(lcCase.getId(), applicant);
+    }
+
+    /**
+     * 案件行を登録する。同一要員の未終結退社案件の一意制約（V187）に当たった場合だけ、事前確認と同じ
+     * 400 {@code error.lifecycle.duplicateActiveCase} へ変換する（並行起票で事前確認を両方が通過した場合）。
+     * 案件番号の一意制約など他の一意制約違反は業務上の重複ではないため、そのまま送出する。
+     */
+    private void insertCase(LifecycleCase lcCase) {
+        try {
+            caseMapper.insert(lcCase);
+        } catch (DuplicateKeyException ex) {
+            if (violatesActiveResignationKey(ex)) {
+                log.info("同一要員の未終結退社案件の一意制約により起票を拒否しました: engineerId={}", lcCase.getEngineerId());
+                throw duplicateActiveResignationCase();
+            }
+            throw ex;
+        }
+    }
+
+    /**
+     * 一意制約違反が {@link #ACTIVE_RESIGNATION_UNIQUE_KEY} によるものかを判定する。
+     * MySQLは {@code for key 't_lifecycle_case.uk_...'}、H2はindex名を大文字で含むため、原因chainの
+     * メッセージを大文字小文字を区別せずに照合する。
+     */
+    static boolean violatesActiveResignationKey(Throwable failure) {
+        Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Throwable cause = failure; cause != null && visited.add(cause); cause = cause.getCause()) {
+            String message = cause.getMessage();
+            if (message != null && message.toLowerCase(Locale.ROOT).contains(ACTIVE_RESIGNATION_UNIQUE_KEY)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private BusinessException duplicateActiveResignationCase() {
+        return BusinessException.of(400, "error.lifecycle.duplicateActiveCase",
+                "対象要員には既に進行中の退社手続き案件が存在します");
     }
 
     private String tenantKey(String tenantId) {

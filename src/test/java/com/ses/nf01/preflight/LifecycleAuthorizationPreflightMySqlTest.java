@@ -53,6 +53,7 @@ class LifecycleAuthorizationPreflightMySqlTest {
             assertFinding(report, "LIFECYCLE_EVIDENCE_DOCUMENT_TENANT_MISMATCH", "PASS", 0);
             assertFinding(report, "LIFECYCLE_EVIDENCE_VERSION_MISMATCH", "PASS", 0);
             assertFinding(report, "LIFECYCLE_EVIDENCE_VERSIONLESS", "PASS", 0);
+            assertFinding(report, "LIFECYCLE_RESIGNATION_ACTIVE_DUPLICATE", "PASS", 0);
             for (String key : List.of("t_lifecycle_case(tenant_id,id)", "t_lifecycle_task(case_id,id)",
                     "sys_user(tenant_id,id)", "t_document(tenant_id,id)", "t_document_version(tenant_id,id)",
                     "t_document_version(tenant_id,document_id,id)")) {
@@ -84,6 +85,9 @@ class LifecycleAuthorizationPreflightMySqlTest {
             assertFinding(report, "LIFECYCLE_EVIDENCE_VERSION_MISMATCH", "FAIL", 1);
             // link 2・4 は版なし。公開時は版なし証跡を拒否するため既存行は人の判断待ち。
             assertFinding(report, "LIFECYCLE_EVIDENCE_VERSIONLESS", "BLOCKED_MAPPING", 2);
+            // 未終結退社案件の重複は case 1・2 の1組2件。V187を適用できないため人の判断待ち。
+            assertFinding(report, "LIFECYCLE_RESIGNATION_ACTIVE_DUPLICATE", "BLOCKED_MAPPING", 2);
+            assertReasonContains(report, "LIFECYCLE_RESIGNATION_ACTIVE_DUPLICATE", null, "duplicateGroups=1");
             // t_document id=4 は tenant NULL のため (tenant_id,id) の一意key前提を満たさない
             assertFindingAt(report, "UNIQUE_KEY_PRECONDITION", "t_document(tenant_id,id)", "FAIL", 1);
             assertReasonContains(report, "UNIQUE_KEY_PRECONDITION", "t_document(tenant_id,id)", "nullKeyRows=1");
@@ -352,7 +356,7 @@ class LifecycleAuthorizationPreflightMySqlTest {
             for (String ddl : List.of(
                     "CREATE TABLE IF NOT EXISTS flyway_schema_history(installed_rank INT PRIMARY KEY,version VARCHAR(50),success BOOLEAN NOT NULL)",
                     "CREATE TABLE IF NOT EXISTS sys_user(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100),role VARCHAR(30))",
-                    "CREATE TABLE IF NOT EXISTS t_lifecycle_case(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100),engineer_id BIGINT,status VARCHAR(20),deleted_flag INT NOT NULL DEFAULT 0)",
+                    "CREATE TABLE IF NOT EXISTS t_lifecycle_case(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100),engineer_id BIGINT,status VARCHAR(20),deleted_flag INT NOT NULL DEFAULT 0,lifecycle_type VARCHAR(30) NOT NULL DEFAULT 'RESIGNATION')",
                     "CREATE TABLE IF NOT EXISTS t_lifecycle_task(id BIGINT PRIMARY KEY,case_id BIGINT,evidence_type VARCHAR(30),status VARCHAR(20),deleted_flag INT NOT NULL DEFAULT 0)",
                     "CREATE TABLE IF NOT EXISTS t_lifecycle_evidence_link(id BIGINT PRIMARY KEY,task_id BIGINT,document_id BIGINT,document_version_id BIGINT NULL)",
                     "CREATE TABLE IF NOT EXISTS t_engineer(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100))",
@@ -383,7 +387,8 @@ class LifecycleAuthorizationPreflightMySqlTest {
             }
             statement.executeUpdate("INSERT IGNORE INTO flyway_schema_history VALUES(1,'1',TRUE)");
             statement.executeUpdate("INSERT IGNORE INTO sys_user VALUES(1,'tenant-A','営業')");
-            statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_case VALUES(1,'tenant-A',1,'ACTIVE',0)");
+            statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_case(id,tenant_id,engineer_id,status,deleted_flag,lifecycle_type) "
+                    + "VALUES(1,'tenant-A',1,'ACTIVE',0,'RESIGNATION')");
             statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_task VALUES(1,1,'DOCUMENT_LINK','COMPLETED',0)");
             statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_evidence_link VALUES(1,1,1,1)");
             statement.executeUpdate("INSERT IGNORE INTO t_engineer VALUES(1,'tenant-A')");
@@ -420,6 +425,11 @@ class LifecycleAuthorizationPreflightMySqlTest {
                 statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_evidence_link VALUES(2,1,2,NULL)");
                 statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_evidence_link VALUES(3,1,1,2)");
                 statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_evidence_link VALUES(4,2,999,NULL)");
+                // L7: case 1（ACTIVE）と case 2（ON_HOLD）は同一tenant・同一要員の未終結退社案件で重複する。
+                // case 3（CANCELLED）・case 4（退社以外）・case 5（論理削除済み）は一意制約の対象外なので数えない。
+                statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_case(id,tenant_id,engineer_id,status,deleted_flag,lifecycle_type) "
+                        + "VALUES(2,'tenant-A',1,'ON_HOLD',0,'RESIGNATION'),(3,'tenant-A',1,'CANCELLED',0,'RESIGNATION'),"
+                        + "(4,'tenant-A',1,'ACTIVE',0,'JOIN'),(5,'tenant-A',1,'ACTIVE',1,'RESIGNATION')");
             }
         }
     }

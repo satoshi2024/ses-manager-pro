@@ -15,8 +15,8 @@ package com.ses.migration;
  */
 final class LatestMigrationVersion {
 
-    /** 現在の最新versioned migration（V186: 初回ログイン時のパスワード変更要求）。 */
-    static final String LATEST = "186";
+    /** 現在の最新versioned migration（V187: 同一要員の未終結退社案件の一意制約）。 */
+    static final String LATEST = "187";
 
     private LatestMigrationVersion() {
     }

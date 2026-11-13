@@ -36,7 +36,7 @@ class ProductionSchemaVersionGuardTest {
         ProductionSchemaVersionGuard.Result result = ProductionSchemaVersionGuard.evaluate(List.of(
                 entry("1", MigrationState.SUCCESS),
                 entry("74.3", MigrationState.SUCCESS),
-                entry("186", MigrationState.SUCCESS),
+                entry("187", MigrationState.SUCCESS),
                 // placeholderを置換しないためchecksumが合わないRepeatable（初期管理者hash）は
                 // 「適用済み行 OUTDATED + 解決済み行 PENDING」になる。同じscriptの成功適用があるので照合しない
                 repeatable("R__update_admin_password_bcrypt.sql", MigrationState.OUTDATED),
@@ -47,8 +47,8 @@ class ProductionSchemaVersionGuardTest {
                 repeatable("R__crm_contact_reconciliation.sql", MigrationState.SUCCESS)));
 
         assertThat(result.ok()).as(result.problems().toString()).isTrue();
-        assertThat(result.expectedVersion()).isEqualTo("186");
-        assertThat(result.appliedVersion()).isEqualTo("186");
+        assertThat(result.expectedVersion()).isEqualTo("187");
+        assertThat(result.appliedVersion()).isEqualTo("187");
     }
 
     /**
@@ -60,7 +60,7 @@ class ProductionSchemaVersionGuardTest {
     void 一度も適用されていないRepeatableがあれば起動しない() {
         ProductionSchemaVersionGuard.Result result = ProductionSchemaVersionGuard.evaluate(List.of(
                 entry("1", MigrationState.SUCCESS),
-                entry("186", MigrationState.SUCCESS),
+                entry("187", MigrationState.SUCCESS),
                 repeatable("R__crm_contact_reconciliation.sql", MigrationState.SUCCESS),
                 repeatable("R__remove_v2_sample_data.sql", MigrationState.PENDING),
                 repeatable("R__update_admin_password_bcrypt.sql", MigrationState.PENDING)));
@@ -72,12 +72,12 @@ class ProductionSchemaVersionGuardTest {
 
         // 別scriptの成功適用では見逃さない（script名で対応させる）
         assertThat(ProductionSchemaVersionGuard.evaluate(List.of(
-                entry("186", MigrationState.SUCCESS),
+                entry("187", MigrationState.SUCCESS),
                 repeatable("R__crm_contact_reconciliation.sql", MigrationState.OUTDATED),
                 repeatable("R__remove_v2_sample_data.sql", MigrationState.PENDING))).ok()).isFalse();
         // 失敗した適用行は成功適用として数えない
         assertThat(ProductionSchemaVersionGuard.evaluate(List.of(
-                entry("186", MigrationState.SUCCESS),
+                entry("187", MigrationState.SUCCESS),
                 repeatable("R__update_admin_password_bcrypt.sql", MigrationState.FAILED),
                 repeatable("R__update_admin_password_bcrypt.sql", MigrationState.PENDING))).problems())
                 .anyMatch(problem -> problem.contains("一度も適用されていません"));
@@ -86,45 +86,45 @@ class ProductionSchemaVersionGuardTest {
     @Test
     void 未適用のversionedがあれば起動しない() {
         ProductionSchemaVersionGuard.Result result = ProductionSchemaVersionGuard.evaluate(List.of(
-                entry("185", MigrationState.SUCCESS),
-                entry("186", MigrationState.PENDING)));
+                entry("186", MigrationState.SUCCESS),
+                entry("187", MigrationState.PENDING)));
 
         assertThat(result.ok()).isFalse();
-        assertThat(result.problems()).anyMatch(problem -> problem.contains("未適用") && problem.contains("V186"));
-        assertThat(result.message()).contains("V186").contains("V185").contains("deploy-runbook.md");
+        assertThat(result.problems()).anyMatch(problem -> problem.contains("未適用") && problem.contains("V187"));
+        assertThat(result.message()).contains("V187").contains("V186").contains("deploy-runbook.md");
     }
 
     @Test
     void 失敗したmigrationが残っていれば起動しない() {
         assertThat(ProductionSchemaVersionGuard.evaluate(List.of(
-                entry("185", MigrationState.SUCCESS),
-                entry("186", MigrationState.FAILED))).problems())
-                .anyMatch(problem -> problem.contains("失敗") && problem.contains("V186"));
+                entry("186", MigrationState.SUCCESS),
+                entry("187", MigrationState.FAILED))).problems())
+                .anyMatch(problem -> problem.contains("失敗") && problem.contains("V187"));
         // Repeatableの失敗（例: 初期管理者hashの検査）も止める
         assertThat(ProductionSchemaVersionGuard.evaluate(List.of(
-                entry("186", MigrationState.SUCCESS),
+                entry("187", MigrationState.SUCCESS),
                 entry(null, MigrationState.FAILED))).ok()).isFalse();
     }
 
     @Test
     void artifactに無いmigrationが適用済みなら起動しない() {
         ProductionSchemaVersionGuard.Result future = ProductionSchemaVersionGuard.evaluate(List.of(
-                entry("186", MigrationState.SUCCESS),
-                entry("187", MigrationState.FUTURE_SUCCESS)));
+                entry("187", MigrationState.SUCCESS),
+                entry("188", MigrationState.FUTURE_SUCCESS)));
         assertThat(future.ok()).isFalse();
         assertThat(future.problems()).anyMatch(problem -> problem.contains("artifactに無い"));
-        assertThat(future.appliedVersion()).isEqualTo("187");
+        assertThat(future.appliedVersion()).isEqualTo("188");
 
         assertThat(ProductionSchemaVersionGuard.evaluate(List.of(
-                entry("185", MigrationState.MISSING_SUCCESS),
-                entry("186", MigrationState.SUCCESS))).ok()).isFalse();
+                entry("186", MigrationState.MISSING_SUCCESS),
+                entry("187", MigrationState.SUCCESS))).ok()).isFalse();
     }
 
     @Test
     void 適用履歴が無ければjob未実行として起動しない() {
         ProductionSchemaVersionGuard.Result result = ProductionSchemaVersionGuard.evaluate(List.of(
                 entry("1", MigrationState.PENDING),
-                entry("186", MigrationState.PENDING)));
+                entry("187", MigrationState.PENDING)));
 
         assertThat(result.ok()).isFalse();
         assertThat(result.problems().get(0)).contains("適用履歴がありません");

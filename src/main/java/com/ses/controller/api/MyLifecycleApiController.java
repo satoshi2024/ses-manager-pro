@@ -5,6 +5,7 @@ import com.ses.common.result.ApiResult;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.lifecycle.CompleteLifecycleTaskCommand;
 import com.ses.dto.lifecycle.LifecycleCaseDto;
+import com.ses.dto.lifecycle.LifecycleEvidenceVersionDto;
 import com.ses.dto.lifecycle.LifecycleTaskDto;
 import com.ses.entity.LifecycleCase;
 import com.ses.entity.LifecycleTask;
@@ -159,5 +160,28 @@ public class MyLifecycleApiController {
 
         taskService.completeTask(taskId, userId, cmd);
         return ApiResult.success("タスクを完了しました", null);
+    }
+
+    /**
+     * 要員本人のタスク証跡として選択できる文書版（scan結果CLEAN）の一覧（NF01 Q-9）。
+     * 本人の案件・本人公開タスクに限る点は完了報告と同じで、残りの認可（tenant・担当者）はserviceで判定する。
+     */
+    @GetMapping("/tasks/{id}/evidence-versions")
+    public ApiResult<List<LifecycleEvidenceVersionDto>> listMyEvidenceVersions(
+            @PathVariable("id") Long taskId,
+            @RequestParam("documentId") Long documentId) {
+        Long engineerId = currentEngineerId();
+        SysUser user = getCurrentUser();
+        String tenantId = currentTenantId(user);
+
+        LifecycleTask task = taskMapper.selectByIdAndTenant(taskId, tenantId);
+        if (task == null || task.getIsEngineerVisible() == null || task.getIsEngineerVisible() == 0) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
+        }
+        LifecycleCase lcCase = caseMapper.selectByIdAndTenant(task.getCaseId(), tenantId);
+        if (lcCase == null || !engineerId.equals(lcCase.getEngineerId())) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
+        }
+        return ApiResult.success(taskService.listEvidenceVersions(taskId, documentId, user));
     }
 }

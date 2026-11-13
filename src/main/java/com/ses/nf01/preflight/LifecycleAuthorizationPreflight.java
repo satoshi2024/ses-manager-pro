@@ -28,7 +28,7 @@ public final class LifecycleAuthorizationPreflight {
     private static final List<TableSpec> TABLES = List.of(
             new TableSpec("sys_user", Map.of("id", "bigint", "tenant_id", "varchar")),
             new TableSpec("t_lifecycle_case", Map.of("id", "bigint", "tenant_id", "varchar", "engineer_id", "bigint",
-                    "status", "varchar", "deleted_flag", "int")),
+                    "lifecycle_type", "varchar", "status", "varchar", "deleted_flag", "int")),
             new TableSpec("t_lifecycle_task", Map.of("id", "bigint", "case_id", "bigint", "evidence_type", "varchar",
                     "status", "varchar", "deleted_flag", "int")),
             new TableSpec("t_lifecycle_evidence_link", Map.of("id", "bigint", "task_id", "bigint", "document_id", "bigint",
@@ -82,6 +82,20 @@ public final class LifecycleAuthorizationPreflight {
             new UniqueKeySpec("t_document_version", List.of("tenant_id", "id")),
             new UniqueKeySpec("t_document_version", List.of("tenant_id", "document_id", "id"))
     );
+
+    /**
+     * V187の一意制約 uk_lifecycle_case_active_resignation の対象行（退社・未終結・未削除）。
+     * 生成列と同じ式で数えるため、他の検査と違ってBINARYを付けず列のcollationで比較する
+     * （一意indexもcollationで比較するので、ここで重複と数えた組はDDLでも重複になる）。tenant・要員がNULLの行は
+     * 一意判定の対象外なので数えない。
+     */
+    private static final String ACTIVE_RESIGNATION_ROWS = "FROM t_lifecycle_case x WHERE x.lifecycle_type='RESIGNATION' "
+            + "AND x.status NOT IN ('COMPLETED','CANCELLED') AND x.deleted_flag=0 "
+            + "AND x.tenant_id IS NOT NULL AND x.engineer_id IS NOT NULL";
+
+    /** {@link #ACTIVE_RESIGNATION_ROWS} のうち、同一tenant・同一要員で2件以上ある組。 */
+    private static final String ACTIVE_RESIGNATION_DUPLICATE_GROUPS = "SELECT x.tenant_id, x.engineer_id "
+            + ACTIVE_RESIGNATION_ROWS + " GROUP BY x.tenant_id, x.engineer_id HAVING COUNT(*) > 1";
 
     /** アプリが未終結とみなすDUAL_CONFIRMATIONタスク（大文字小文字・末尾空白を畳まないbinary比較）。 */
     private static final String UNFINISHED_DUAL_TASKS = "FROM t_lifecycle_task t LEFT JOIN t_lifecycle_case c ON c.id=t.case_id "
@@ -148,6 +162,7 @@ public final class LifecycleAuthorizationPreflight {
                 tenantSources(connection, report);
                 relationshipChecks(connection, report);
                 lifecycleEvidenceChecks(connection, report);
+                activeResignationDuplicates(connection, report);
                 uniqueKeyPreconditions(connection, schema, report);
                 parentCandidates(connection, report);
                 organizationUnitCandidates(connection, report);
@@ -441,6 +456,39 @@ public final class LifecycleAuthorizationPreflight {
             }
         }
         recordVersionlessEvidenceLinks(report, versionless, versionlessSamples);
+    }
+
+    /**
+     * 同一tenant・同一要員の未終結退社案件の重複を数える（NF01 L7 / V187の適用前提）。
+     * 1組でもあるとV187の一意制約追加が重複エラーで失敗するため、どの案件を終結させるかを人が決めるまでBLOCKED_MAPPINGとする。
+     * 実MySQLで「本検査の件数とV187のDDL成否が一致する」ことを試験から確認するため、package-privateにしている。
+     */
+    static void activeResignationDuplicates(Connection connection, PreflightReport report) throws SQLException {
+        long groups = scalar(connection, "SELECT COUNT(*) FROM (" + ACTIVE_RESIGNATION_DUPLICATE_GROUPS + ") duplicate_groups");
+        String violating = ACTIVE_RESIGNATION_ROWS + " AND (x.tenant_id, x.engineer_id) IN (SELECT d.tenant_id, d.engineer_id FROM ("
+                + ACTIVE_RESIGNATION_DUPLICATE_GROUPS + ") d)";
+        long rows = scalar(connection, "SELECT COUNT(*) " + violating);
+        List<String> samples = new ArrayList<>();
+        if (rows > 0) {
+            try (Statement statement = connection.createStatement(); ResultSet result = statement.executeQuery(
+                    "SELECT x.id " + violating + " ORDER BY x.id LIMIT 20")) {
+                while (result.next()) samples.add(redact("t_lifecycle_case", result.getLong(1)));
+            }
+        }
+        recordActiveResignationDuplicates(report, groups, rows, samples);
+    }
+
+    /**
+     * 未終結退社案件の重複を記録する。0件ならPASS、1件以上はV187を適用できないためBLOCKED_MAPPING
+     * （データ不整合ではなく、残す案件を人が決めれば解消するためFAILにはしない）。
+     */
+    static void recordActiveResignationDuplicates(PreflightReport report, long duplicateGroups, long rows,
+                                                  List<String> samples) {
+        report.finding("LIFECYCLE_RESIGNATION_ACTIVE_DUPLICATE", "t_lifecycle_case(tenant_id,engineer_id)",
+                rows > 0 || duplicateGroups > 0 ? "BLOCKED_MAPPING" : "PASS", rows, samples,
+                "duplicateGroups=" + duplicateGroups + "; openResignationCasesInDuplicateGroups=" + rows
+                        + "; V187 unique key uk_lifecycle_case_active_resignation fails while any group remains,"
+                        + " so an owner must complete or cancel the extra cases before migration");
     }
 
     /**

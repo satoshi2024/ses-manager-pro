@@ -161,6 +161,18 @@ public class LifecycleApiController {
     }
 
     /**
+     * タスク証跡として選択できる文書版（scan結果CLEAN）の一覧（NF01 Q-9）。
+     * 完了時は版IDの指定が必須のため、画面はここで得た版から利用者に選ばせる。認可は完了操作と同じ。
+     */
+    @GetMapping("/tasks/{id}/evidence-versions")
+    public ApiResult<List<LifecycleEvidenceVersionDto>> listEvidenceVersions(
+            @PathVariable("id") Long id,
+            @RequestParam("documentId") Long documentId) {
+        SysUser user = getCurrentUser();
+        return ApiResult.success(taskService.listEvidenceVersions(id, documentId, user));
+    }
+
+    /**
      * タスク免除 (例外処理)
      */
     @PostMapping("/tasks/{id}/waive")
