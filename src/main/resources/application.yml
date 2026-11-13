@@ -4,7 +4,8 @@
 server:
   port: 8080
   forward-headers-strategy: framework
-  # ECS/ALB 相当のローリング更新向け。SIGTERM 後に処理中リクエストを排水してから終了する。
+  # SIGTERM 後に処理中リクエストを排水してから終了する。本番は全停止配備でrolling更新は行わない
+  # （手順は .kiro/specs/production-launch/deploy-runbook.md）。
   shutdown: graceful
   # ===== 同時接続の受け口 =====
   # threads.max を超えた分は accept-count まで待たされ、それも超えると接続拒否になる。
@@ -139,8 +140,9 @@ spring:
   # ===== Flyway（DBマイグレーション。旧「001〜009を手動実行」手順を自動化） =====
   # 既存の手動構築済みDBに対して初めて導入する場合は baseline-on-migrate により
   # 「既にV9まで適用済み」とみなして以降のマイグレーションのみ実行する。
-  # prod では application-prod.yml が db/migration-prod を追加ロケーションとして
-  # 差し込み、admin初期パスワードのBCrypt化(Repeatable)のみ prod 限定で適用する。
+  # dev/test 向けの設定。prod は application-prod.yml で enabled=false とし、起動時にmigrateしない。
+  # 本番のmigration（db/migration + db/migration-prod）は専用Flyway job（mvn -Pprod-migrate、
+  # 設定は ops/flyway/flyway-prod.conf）が実行する。
   flyway:
     enabled: true
     locations: classpath:db/migration

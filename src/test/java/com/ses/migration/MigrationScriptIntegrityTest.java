@@ -133,6 +133,61 @@ class MigrationScriptIntegrityTest {
         assertTrue(empties.isEmpty(), "空のマイグレーションスクリプトがあります（no-opでも SELECT 1; が必要）: " + empties);
     }
 
+    /**
+     * {@code db/migration-prod} はRepeatableだけを持つ。versioned scriptを置くと {@code db/migration} と同じ
+     * version空間を共有し、過去に2回（旧V10 / 旧V41）衝突した。さらに本classの重複・LATEST検査と
+     * {@link LatestMigrationVersion} は {@code db/migration} だけを見ているため、prod側のversionは見落とされる。
+     * Flywayはlocation配下を再帰的に走査するので、ここも再帰で確認する。
+     */
+    @Test
+    void db_migration_prodはRepeatableだけを持ちversioned_migrationを置かない() throws Exception {
+        List<String> files = new ArrayList<>();
+        List<String> nonRepeatable = new ArrayList<>();
+        for (Resource resource : new PathMatchingResourcePatternResolver()
+                .getResources("classpath*:db/migration-prod/**/*")) {
+            String fileName = resource.getFilename();
+            if (fileName == null || fileName.isEmpty() || !resource.isReadable()) {
+                continue; // directory
+            }
+            files.add(fileName);
+            if (!fileName.matches("^R__[A-Za-z0-9_]+\\.sql$") || resource.contentLength() == 0) {
+                nonRepeatable.add(fileName);
+            }
+        }
+        assertTrue(files.contains("R__update_admin_password_bcrypt.sql")
+                        && files.contains("R__remove_v2_sample_data.sql"),
+                "db/migration-prod の初期管理者scriptとV2 sample削除scriptを解決できていません: " + files);
+        assertTrue(nonRepeatable.isEmpty(),
+                "db/migration-prod にはRepeatable（R__*.sql、空でない）以外を置かないでください: " + nonRepeatable);
+    }
+
+    /**
+     * 本番の起動時schema guard（{@code ProductionSchemaVersionGuard}）が、本番のlocationsから求める
+     * 「artifactの最新versioned migration」が {@link LatestMigrationVersion#LATEST} と一致すること。
+     *
+     * <p>guardは期待versionをコードへ固定せず、Flywayに {@code db/migration} + {@code db/migration-prod} を
+     * 解決させて求める。空のH2に対して実行すると「適用履歴なし」で起動を止め、messageに期待versionを出すので、
+     * その値を比べる。version重複などFlywayが解決に失敗する状態でも、このmessageにならず失敗する。
+     * placeholderは置換しないため、初期管理者hashが無くても解決できること（アプリへsecretを渡さない）も同時に確認する。
+     */
+    @Test
+    void 起動時schema_guardの期待versionはLatestMigrationVersionと一致する() {
+        org.springframework.jdbc.datasource.DriverManagerDataSource dataSource =
+                new org.springframework.jdbc.datasource.DriverManagerDataSource(
+                        "jdbc:h2:mem:schema_guard_latest_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1;MODE=MySQL",
+                        "sa", "");
+        com.ses.config.ProductionSchemaVersionGuard guard = new com.ses.config.ProductionSchemaVersionGuard(
+                dataSource, List.of("classpath:db/migration", "classpath:db/migration-prod"), false);
+
+        IllegalStateException failure = org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalStateException.class, guard::verify);
+
+        assertTrue(failure.getMessage().contains("artifactの最新versioned migration=V" + LatestMigrationVersion.LATEST + ","),
+                "guardの期待versionがLatestMigrationVersion.LATESTと一致すること: " + failure.getMessage());
+        assertTrue(failure.getMessage().contains("適用履歴がありません"),
+                "空DBではjob未実行として起動を止めること: " + failure.getMessage());
+    }
+
     private static final Pattern FUNCTION_IF = Pattern.compile("\\bIF\\s*\\(", Pattern.CASE_INSENSITIVE);
     private static final Pattern MODIFIER_IF = Pattern.compile(
             "\\bIF\\s+(NOT\\s+)?EXISTS\\s+`?[A-Za-z_]", Pattern.CASE_INSENSITIVE);
@@ -164,6 +219,12 @@ class MigrationScriptIntegrityTest {
         for (Resource resource : new PathMatchingResourcePatternResolver()
                 .getResources("classpath:db/migration/*.sql")) {
             sources.put(String.valueOf(resource.getFilename()),
+                    resource.getContentAsString(StandardCharsets.UTF_8));
+        }
+        // prod専用のRepeatable（初期管理者hashの検査procedure等）も本番の専用Flyway jobで実行される
+        for (Resource resource : new PathMatchingResourcePatternResolver()
+                .getResources("classpath:db/migration-prod/*.sql")) {
+            sources.put("db/migration-prod/" + resource.getFilename(),
                     resource.getContentAsString(StandardCharsets.UTF_8));
         }
         java.io.File[] runbookFiles = new java.io.File("sql/runbook")

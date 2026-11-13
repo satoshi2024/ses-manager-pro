@@ -12,6 +12,8 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Tag("mysql")
@@ -58,10 +60,16 @@ class FlywayRepairRunbookTest {
         }
 
         // 3. この状態でマイグレーションしようとすると失敗するはず（Validateエラー）
+        // prod locationの初期管理者scriptは配備時にsecretから注入するhashを要求する（配備決定-3）。
+        // 本testでは実行ごとに乱数パスワードからhashを作り、公開パスワードを使わない。
+        String initialPassword = "Init1-" + java.util.UUID.randomUUID();
+        String initialHash = new BCryptPasswordEncoder().encode(initialPassword);
         Flyway flywayRepair = Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration", "classpath:db/migration-prod")
                 .callbacks(new com.ses.config.LegacyDatabaseFlywayCallback()) // コールバックを明示的に登録
+                .placeholders(java.util.Map.of(
+                        com.ses.config.ProductionAdminInitialPasswordFlywayCallback.PLACEHOLDER, initialHash))
                 .load();
 
         // repair() 実行前に、許可対象の V10 以外の履歴が混入していないことを確認する。
@@ -80,13 +88,17 @@ class FlywayRepairRunbookTest {
         flywayRepair.migrate(); // migrateを実行するとLegacyDatabaseFlywayCallbackが補償を行う
 
 
-        // 4. Repeatable migration の検証
+        // 4. Repeatable migration の検証（初期adminは注入hashになり、公開パスワード admin123 は使えない）
         try (Connection conn = MYSQL.createConnection(""); Statement st = conn.createStatement()) {
-            try (ResultSet rs = st.executeQuery("SELECT password FROM sys_user WHERE username = 'admin'")) {
+            try (ResultSet rs = st.executeQuery(
+                    "SELECT password, password_change_required FROM sys_user WHERE username = 'admin'")) {
                 assertTrue(rs.next(), "adminユーザーが存在すること");
                 String hash = rs.getString("password");
                 BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
-                assertTrue(encoder.matches("admin123", hash), "ハッシュが admin123 と一致すること");
+                assertEquals(initialHash, hash, "adminのパスワードが注入したhashになること");
+                assertTrue(encoder.matches(initialPassword, hash), "注入hashが初期パスワードと照合できること");
+                assertFalse(encoder.matches("admin123", hash), "公開パスワード admin123 と一致しないこと");
+                assertEquals(1, rs.getInt("password_change_required"), "初回ログイン時の変更が要求されること");
             }
 
             // 5. Schema Compensation の検証

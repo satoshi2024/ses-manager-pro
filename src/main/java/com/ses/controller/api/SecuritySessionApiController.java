@@ -38,10 +38,18 @@ public class SecuritySessionApiController {
     private final com.ses.service.security.MfaAttemptService mfaAttemptService;
     private final com.ses.service.AuditLogService auditLogService;
 
+    /** 本番初回の期限付きbootstrap mode。slice・単体testで不在なら従来どおりbreak-glassだけがMFAを使う。 */
+    private com.ses.config.ProductionBootstrapMode productionBootstrapMode;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setProductionBootstrapMode(com.ses.config.ProductionBootstrapMode productionBootstrapMode) {
+        this.productionBootstrapMode = productionBootstrapMode;
+    }
+
     @GetMapping("/mfa/status")
     public ApiResult<MfaStatusResponse> mfaStatus(Authentication authentication, HttpServletRequest request) {
         Long userId = currentUserId();
-        boolean required = mfaService.isRequired(authentication);
+        boolean required = mfaService.isRequired(authentication) || isBootstrapMfa(authentication, request);
         HttpSession session = request.getSession(false);
         boolean pending = session != null && Boolean.TRUE.equals(
                 session.getAttribute(MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE));
@@ -71,7 +79,7 @@ public class SecuritySessionApiController {
             throw e;
         }
         auditLogService.recordRequired(authentication.getName(), "AUTH", "/api/security/mfa/enable", 200,
-                "BREAK_GLASS_MFA_ENABLED", true);
+                mfaService.isRequired(authentication) ? "BREAK_GLASS_MFA_ENABLED" : "BOOTSTRAP_MFA_ENABLED", true);
         mfaAttemptService.recordSuccess(userId, httpRequest);
         markVerified(httpRequest);
         return ApiResult.success(response);
@@ -81,7 +89,7 @@ public class SecuritySessionApiController {
     public ApiResult<Boolean> verify(@Valid @RequestBody MfaCodeRequest request,
                                      Authentication authentication,
                                      HttpServletRequest httpRequest) {
-        requireMfaUser(authentication);
+        requireMfaUser(authentication, httpRequest);
         Long userId = currentUserId();
         mfaAttemptService.assertAllowed(userId, httpRequest);
         if (!mfaService.verify(userId, request.code())) {
@@ -89,7 +97,7 @@ public class SecuritySessionApiController {
             throw BusinessException.of(401, "error.mfa.invalidCode");
         }
         auditLogService.recordRequired(authentication.getName(), "AUTH", "/api/security/mfa/verify", 200,
-                "BREAK_GLASS_MFA_VERIFIED", true);
+                mfaService.isRequired(authentication) ? "BREAK_GLASS_MFA_VERIFIED" : "BOOTSTRAP_MFA_VERIFIED", true);
         mfaAttemptService.recordSuccess(userId, httpRequest);
         markVerified(httpRequest);
         return ApiResult.success(true);
@@ -136,14 +144,22 @@ public class SecuritySessionApiController {
         return ApiResult.success(true);
     }
 
-    private void requireMfaUser(Authentication authentication) {
-        if (!mfaService.isRequired(authentication)) {
+    private void requireMfaUser(Authentication authentication, HttpServletRequest request) {
+        if (!mfaService.isRequired(authentication) && !isBootstrapMfa(authentication, request)) {
             throw BusinessException.of(403, "error.mfa.notRequired");
         }
     }
 
+    /**
+     * 本番初回bootstrap中は、bootstrap session本人と、OIDC等でログインした有効な管理者もMFA（TOTP）を
+     * 登録・検証できる（break-glass管理者として指定する前に登録を済ませ、起動時検査を満たすため）。
+     */
+    private boolean isBootstrapMfa(Authentication authentication, HttpServletRequest request) {
+        return productionBootstrapMode != null && productionBootstrapMode.allowsMfaEnrollment(authentication, request);
+    }
+
     private void requireEnrollmentAccess(Authentication authentication, HttpServletRequest request) {
-        requireMfaUser(authentication);
+        requireMfaUser(authentication, request);
         if (mfaService.isConfigured(currentUserId()) && !isMfaVerified(request)) {
             throw BusinessException.of(403, "error.mfa.reauthenticationRequired");
         }

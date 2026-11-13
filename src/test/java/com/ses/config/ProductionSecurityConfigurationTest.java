@@ -57,6 +57,11 @@ class ProductionSecurityConfigurationTest {
     @MockBean
     private ProductionSecurityConfigurationValidator productionSecurityConfigurationValidator;
 
+    // H2（Flyway無し・flyway_schema_history無し）で起動するため、起動時schema guardは
+    // ProductionSchemaVersionGuardTest / FlywayProdFreshInstallMySqlTest へ分離する。
+    @MockBean
+    private ProductionSchemaVersionGuard productionSchemaVersionGuard;
+
     @Autowired
     private MockMvc mockMvc;
 

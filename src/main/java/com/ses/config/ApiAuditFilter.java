@@ -25,6 +25,8 @@ import java.io.IOException;
  * 実行者・HTTPメソッド・URI・レスポンスステータスをアプリケーションログに記録し、
  * t_audit_log にも永続化する（アプリケーションログはローテーションで消えるため）。
  * 参照系（GET）は原則対象外。ただしファイルdownloadは成功・拒否とも記録する。
+ * 本番初回bootstrap session（{@link ProductionBootstrapMode}）の書込操作は、break-glassと同様に
+ * 実行前の必須監査（BOOTSTRAP_WRITE_ATTEMPT）と結果（BOOTSTRAP_WRITE）を残す。
  *
  * AuditLogServiceはObjectProviderで任意依存にし、@WebMvcTest等の薄いテスト
  * コンテキストでBeanが無い場合でもフィルター自体は動作するようにする
@@ -55,6 +57,21 @@ public class ApiAuditFilter extends OncePerRequestFilter {
                 return;
             }
         }
+        // 本番初回bootstrap sessionの書込操作は、実行前に必須監査を残す（永続化できなければ実行しない）。
+        boolean bootstrapWrite = !breakGlassRequest && isBootstrapWrite(request);
+        if (bootstrapWrite) {
+            if (auditLogService == null) {
+                response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return;
+            }
+            try {
+                auditLogService.recordRequired(SecurityUtils.currentUsername(), request.getMethod(),
+                        request.getRequestURI(), 102, "BOOTSTRAP_WRITE_ATTEMPT", false);
+            } catch (RuntimeException e) {
+                response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                return;
+            }
+        }
         int observedStatus = HttpServletResponse.SC_OK;
         try {
             filterChain.doFilter(request, response);
@@ -66,7 +83,8 @@ public class ApiAuditFilter extends OncePerRequestFilter {
             observedStatus = HttpServletResponse.SC_UNAUTHORIZED;
             throw e;
         } finally {
-            if (isAuditTarget(request)) {
+            // bootstrapの書込は実行中にsessionが失効・破棄されても結果を残すため、開始時の判定を使う。
+            if (bootstrapWrite || isAuditTarget(request)) {
                 if (!Boolean.TRUE.equals(request.getAttribute(
                         com.ses.service.pwa.PwaClientMutationLedgerService.REPLAY_REQUEST_ATTRIBUTE))) {
                     String username = SecurityUtils.currentUsername();
@@ -81,6 +99,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
                             context(CorrelationContext.ERROR_CATEGORY));
                     if (auditLogService != null) {
                         String applicationCode = breakGlassRequest ? "BREAK_GLASS_ACCESS"
+                                : bootstrapWrite ? "BOOTSTRAP_WRITE"
                                 : "GET".equals(method) && isDownloadUri(uri)
                                 ? (status >= 400 ? "FILE_DOWNLOAD_REJECTED" : "FILE_DOWNLOAD")
                                 : "ses-manager";
@@ -115,7 +134,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
      * 1 request = 1 audit rowを保つ（design §12.3）。
      */
     private boolean isAuditTarget(HttpServletRequest request) {
-        if (isBreakGlassRequest(request)) {
+        if (isBreakGlassRequest(request) || isBootstrapWrite(request)) {
             return true;
         }
         String uri = request.getRequestURI();
@@ -128,6 +147,18 @@ public class ApiAuditFilter extends OncePerRequestFilter {
         String method = request.getMethod();
         return "POST".equals(method) || "PUT".equals(method) || "DELETE".equals(method)
                 || ("GET".equals(method) && isDownloadUri(uri));
+    }
+
+    /** bootstrap session（{@link ProductionBootstrapMode}）の書込操作（画面・APIとも。静的資源とERRORは除く）か。 */
+    private boolean isBootstrapWrite(HttpServletRequest request) {
+        if (!ProductionBootstrapMode.isBootstrapRequest(request)) {
+            return false;
+        }
+        String method = request.getMethod();
+        boolean write = "POST".equalsIgnoreCase(method) || "PUT".equalsIgnoreCase(method)
+                || "PATCH".equalsIgnoreCase(method) || "DELETE".equalsIgnoreCase(method);
+        return write && !SecurityInfrastructureUtils.isStaticResource(request)
+                && !SecurityInfrastructureUtils.isErrorDispatch(request);
     }
 
     private boolean isBreakGlassRequest(HttpServletRequest request) {

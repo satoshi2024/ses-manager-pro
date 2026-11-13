@@ -19,11 +19,20 @@ import java.util.Set;
 import java.net.URI;
 import java.net.URISyntaxException;
 
-/** 本番起動時に、OIDC・break-glass・暗号鍵のfail-closed設定を検証する。 */
+/**
+ * 本番起動時に、OIDC・break-glass・暗号鍵のfail-closed設定を検証する。
+ *
+ * <p>本番初回の期限付きbootstrap mode（{@link ProductionBootstrapMode}）の有効期間中だけ、break-glass管理者の
+ * 登録検査（ちょうど2件・有効な管理者・MFA登録済み）を省略し、代わりにbootstrapの前提を検査する。
+ * 通常local loginの無効化を含むその他の検査は常に行い、bootstrapを無効にすれば完全な検査へ戻る。
+ */
 @Component
 @Profile("prod")
 @RequiredArgsConstructor
 public class ProductionSecurityConfigurationValidator implements ApplicationRunner {
+
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(ProductionSecurityConfigurationValidator.class);
 
     private static final String DEFAULT_MFA_KEY = "dev-only-change-this-mfa-key";
     private static final String DEFAULT_SESSION_KEY = "dev-only-change-this-session-key";
@@ -41,24 +50,42 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
     private final AiConfig aiConfig;
     private final OutboundUrlGuard outboundUrlGuard;
 
+    /**
+     * 本番初回の期限付きbootstrap mode。有効期間中だけbreak-glass登録の検査を省略する。
+     * 不在・無効・期限切れなら完全な検査を行う（fail-closed）。
+     */
+    private ProductionBootstrapMode productionBootstrapMode;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setProductionBootstrapMode(ProductionBootstrapMode productionBootstrapMode) {
+        this.productionBootstrapMode = productionBootstrapMode;
+    }
+
     @Override
     public void run(ApplicationArguments args) {
         validate();
     }
 
     public void validate() {
+        boolean bootstrap = productionBootstrapMode != null && productionBootstrapMode.isActive();
         List<String> errors = new ArrayList<>();
         if (!oidcProperties.isEnabled()) {
             errors.add("OIDCを有効化してください");
         }
         validateOidcMetadata(errors);
+        // bootstrap中も通常local loginの無効化は必須。初期管理者adminのlocal loginだけは
+        // ProductionBootstrapModeが期限付きで開ける（他のユーザーのlocal loginは開かない）。
         if (oidcProperties.isLocalLoginEnabled()) {
             errors.add("通常local loginを無効化してください");
         }
         if (!oidcProperties.isBreakGlassLoginEnabled()) {
             errors.add("break-glass login入口を有効化してください");
         }
-        validateBreakGlassUsers(errors);
+        if (bootstrap) {
+            validateBootstrap(errors);
+        } else {
+            validateBreakGlassUsers(errors);
+        }
         validateDefaultPermissionGroups(errors);
         if (!mfaProperties.isEnabled() || !mfaProperties.isRequiredForBreakGlass()) {
             errors.add("break-glass MFAを必須化してください");
@@ -126,6 +153,30 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
                     errors.add("MFA keyringの各versionは32文字以上の鍵が必要です");
                 }
             });
+        }
+    }
+
+    /**
+     * bootstrap中の代替検査。break-glass管理者（2件・MFA登録済み）の検査は省略するが、
+     * <ul>
+     *   <li>break-glass usernameは未設定であること（初期管理者のbootstrap loginがbreak-glass扱いになる衝突と、
+     *       OIDCでMFAを登録する予定の管理者のsessionがincident未束縛として失効させられることを防ぐ。
+     *       break-glass usernameはbootstrapを無効にする再起動で設定する）</li>
+     *   <li>bootstrap用の初期管理者が有効な管理者として存在すること</li>
+     * </ul>
+     * を要求する。
+     */
+    private void validateBootstrap(List<String> errors) {
+        log.warn("[bootstrap] 期限付きbootstrap mode中のため、break-glass管理者の登録検査を省略します（期限: {}）",
+                productionBootstrapMode.getExpiresAt());
+        if (!normalizedUsernames(oidcProperties.getBreakGlassUsernames()).isEmpty()) {
+            errors.add("bootstrap中はbreak-glass usernameを設定しないでください（bootstrapを無効にする再起動で設定します）");
+        }
+        SysUser bootstrapUser = sysUserMapper.selectByUsername(ProductionBootstrapMode.BOOTSTRAP_USERNAME);
+        if (bootstrapUser == null || !ProductionBootstrapMode.BOOTSTRAP_USERNAME.equals(bootstrapUser.getUsername())
+                || !ADMIN_ROLE.equals(bootstrapUser.getRole()) || !Integer.valueOf(1).equals(bootstrapUser.getStatus())) {
+            errors.add("bootstrap用の初期管理者(" + ProductionBootstrapMode.BOOTSTRAP_USERNAME
+                    + ")が有効な管理者として存在しません");
         }
     }
 

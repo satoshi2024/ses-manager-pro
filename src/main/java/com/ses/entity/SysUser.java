@@ -72,4 +72,11 @@ public class SysUser extends BaseEntity {
      * アカウントロック解除日時（未来日時ならロック中）
      */
     private java.time.LocalDateTime lockedUntil;
+
+    /**
+     * 初回ログイン時のパスワード変更要求（1: 本人が変更するまで変更画面・API以外を遮断、0: 通常）。
+     * 本番の初期adminにだけ配備時のprod migrationが1を立て、本人のパスワード変更（ProfileApiController）で0へ戻す。
+     * ユーザー管理APIの入力では変更しない（SysUserServiceImplが無視する）。
+     */
+    private Integer passwordChangeRequired;
 }

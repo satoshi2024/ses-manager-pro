@@ -27,13 +27,23 @@ public class LoginFailureHandler extends SimpleUrlAuthenticationFailureHandler {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.service.AuditLogService auditLogService;
 
+    /** 本番初回の期限付きbootstrap mode。bootstrap loginの失敗・期限切れ拒否を区別して監査する。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ProductionBootstrapMode productionBootstrapMode;
+
     @Override
     public void onAuthenticationFailure(HttpServletRequest request, HttpServletResponse response,
                                         AuthenticationException exception) throws IOException, ServletException {
         String username = request.getParameter("username");
+        boolean locked = exception instanceof LockedException;
         if (auditLogService != null) {
-            auditLogService.record(username, "AUTH", "/login", exception instanceof LockedException ? 423 : 401,
-                    exception instanceof LockedException ? "LOGIN_LOCKED" : "LOGIN_FAILURE", false);
+            String applicationCode = locked ? "LOGIN_LOCKED" : "LOGIN_FAILURE";
+            if (productionBootstrapMode != null && productionBootstrapMode.isRequested()
+                    && productionBootstrapMode.isBootstrapUsername(username)) {
+                applicationCode = !productionBootstrapMode.isActive() ? "BOOTSTRAP_LOGIN_EXPIRED"
+                        : locked ? "BOOTSTRAP_LOGIN_LOCKED" : "BOOTSTRAP_LOGIN_FAILURE";
+            }
+            auditLogService.record(username, "AUTH", "/login", locked ? 423 : 401, applicationCode, false);
         }
         String target;
         if (exception instanceof LockedException) {

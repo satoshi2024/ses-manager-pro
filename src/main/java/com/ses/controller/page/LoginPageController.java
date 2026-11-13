@@ -28,6 +28,15 @@ public class LoginPageController {
             featureSwitchesProvider;
 
     /**
+     * 本番初回の期限付きbootstrap mode。期限内だけ初期管理者のlocal login formを表示する
+     * （通常local login無効・incident無しのprodでは、formが無いと初回ログインできないため）。
+     * スライス・Spring管理外では未取得（null）となり、formの表示条件は従来どおり。
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.beans.factory.ObjectProvider<com.ses.config.ProductionBootstrapMode>
+            bootstrapModeProvider;
+
+    /**
      * ログインページを表示する
      *
      * @return ログインテンプレート名
@@ -39,6 +48,9 @@ public class LoginPageController {
         com.ses.service.security.BreakGlassService breakGlassService = breakGlassServiceProvider.getIfAvailable();
         model.addAttribute("breakGlassLoginEnabled", oidcSecurityProperties.isBreakGlassLoginEnabled()
                 && breakGlassService != null && breakGlassService.hasActiveIncident());
+        com.ses.config.ProductionBootstrapMode bootstrapMode =
+                bootstrapModeProvider == null ? null : bootstrapModeProvider.getIfAvailable();
+        model.addAttribute("bootstrapLoginEnabled", bootstrapMode != null && bootstrapMode.isActive());
         model.addAttribute("oidcRegistrationId", oidcSecurityProperties.getProviderRegistrationId());
         return "login";
     }

@@ -68,6 +68,8 @@ public class SecurityConfig {
     private final OidcAuthenticationFailureHandler oidcAuthenticationFailureHandler;
     private final ObjectProvider<ClientRegistrationRepository> clientRegistrationRepositoryProvider;
     private final MfaEnforcementFilter mfaEnforcementFilter;
+    private final PasswordChangeEnforcementFilter passwordChangeEnforcementFilter;
+    private final BootstrapSessionFilter bootstrapSessionFilter;
     private final PersistentSessionFilter persistentSessionFilter;
     private final InternalTenantContextFilter internalTenantContextFilter;
     private final ImportRawBodyTransportGuardFilter importRawBodyTransportGuardFilter;
@@ -117,6 +119,30 @@ public class SecurityConfig {
     @Bean
     public FilterRegistrationBean<MfaEnforcementFilter> disableMfaAutoRegistration(MfaEnforcementFilter filter) {
         FilterRegistrationBean<MfaEnforcementFilter> registrationBean = new FilterRegistrationBean<>(filter);
+        registrationBean.setEnabled(false);
+        return registrationBean;
+    }
+
+    /**
+     * PasswordChangeEnforcementFilterのServletコンテナへの自動登録を無効化する
+     * （Spring Securityフィルタチェーン内で MfaEnforcementFilter の後に addFilterAfter するため、二重登録を防ぐ）
+     */
+    @Bean
+    public FilterRegistrationBean<PasswordChangeEnforcementFilter> disablePasswordChangeAutoRegistration(
+            PasswordChangeEnforcementFilter filter) {
+        FilterRegistrationBean<PasswordChangeEnforcementFilter> registrationBean = new FilterRegistrationBean<>(filter);
+        registrationBean.setEnabled(false);
+        return registrationBean;
+    }
+
+    /**
+     * BootstrapSessionFilterのServletコンテナへの自動登録を無効化する
+     * （Spring Securityフィルタチェーン内で PasswordChangeEnforcementFilter の後に addFilterAfter するため、二重登録を防ぐ）
+     */
+    @Bean
+    public FilterRegistrationBean<BootstrapSessionFilter> disableBootstrapSessionAutoRegistration(
+            BootstrapSessionFilter filter) {
+        FilterRegistrationBean<BootstrapSessionFilter> registrationBean = new FilterRegistrationBean<>(filter);
         registrationBean.setEnabled(false);
         return registrationBean;
     }
@@ -173,6 +199,10 @@ public class SecurityConfig {
             .addFilterAfter(apiAuditFilter, MenuPermissionFilter.class)
             // break-glassのMFA未完了中はMFA endpoint以外を遮断
             .addFilterAfter(mfaEnforcementFilter, ApiAuditFilter.class)
+            // 初回ログイン時のパスワード変更が済むまで、変更画面・変更API以外を遮断（MFAの後に判定する）
+            .addFilterAfter(passwordChangeEnforcementFilter, MfaEnforcementFilter.class)
+            // 本番初回bootstrap sessionだけを、改密 → MFA登録の順とbootstrap用の入口へ限定する（他のsessionは素通り）
+            .addFilterAfter(bootstrapSessionFilter, PasswordChangeEnforcementFilter.class)
             // アクセス制御の設定
                 .authorizeHttpRequests(auth -> auth
                 // 認証不要のパス（ログインページ、静的リソース、認証API）
@@ -285,8 +315,9 @@ public class SecurityConfig {
                 // 新たに認証ユーザー全体向け機能を追加する場合は必ずここへ追記すること。
                 //   /                    ← ロール別振り分けルーター（LoginSuccessHandler が全ロールを / へ送る）
                 //   /api/profile/**      ← パスワード変更（ヘッダーに表示・要員も利用）
+                //   /password/change     ← 初回ログイン時のパスワード変更画面（PasswordChangeEnforcementFilter）
                 //   /api/notifications   ← 通知ベル
-                .requestMatchers("/", "/api/profile/**").authenticated()
+                .requestMatchers("/", "/password/change", "/api/profile/**").authenticated()
                 .requestMatchers("/api/notifications", "/api/notifications/**").authenticated()
                 // 資産貸与証跡のdetail/downloadはDocumentServiceのDocumentLink認可を通す。
                 // 一覧/exportは要員へ開放せず、本人証跡の対象IDだけをserviceで再検証する。

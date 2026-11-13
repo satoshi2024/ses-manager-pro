@@ -72,6 +72,8 @@ spring:
         - classpath:sql/schema-service-desk-h2.sql
         - classpath:sql/schema-nf02-nf03-tenant-ownership-h2.sql
         - classpath:sql/schema-import-center-f1a-h2.sql
+        # V186: 初回ログイン時のパスワード変更要求（sys_user.password_change_required）
+        - classpath:sql/schema-sys-user-password-change-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

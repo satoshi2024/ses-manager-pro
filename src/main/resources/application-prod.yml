@@ -13,8 +13,13 @@ server:
         same-site: lax
 
 spring:
-  # prod専用マイグレーション(admin初期パスワードのBCrypt化)を追加ロケーションとして適用
+  # 配備決定P-3: 本番のmigrationは全停止中に専用Flyway job（mvn -Pprod-migrate、設定は
+  # ops/flyway/flyway-prod.conf）だけが実行し、アプリinstanceは起動時にmigrateしない。
+  # enabled=true にしても ProductionSchemaGuardConfiguration がmigrateを拒否して起動を止める。
+  # locations は起動時schema guard（ProductionSchemaVersionGuard）がartifactのmigrationを解決する範囲で、
+  # jobのflyway.locationsと同じ値に固定する（ProductionFlywayJobConfigurationTestが一致を確認する）。
   flyway:
+    enabled: false
     locations: classpath:db/migration,classpath:db/migration-prod
 
 # 実プロバイダ実装は未配線のため、prod は明示設定なしで fail-closed provider を使う。
@@ -76,6 +81,12 @@ app:
       enabled: ${PERSISTENT_SESSION_ENABLED:true}
       allow-untracked-sessions: ${ALLOW_UNTRACKED_SESSIONS:false}
       hash-key: ${SESSION_HASH_KEY:}
+    # 本番初回起動の期限付きbootstrap mode（既定OFF）。enabled=true には期限（offset付きISO-8601、
+    # 現在から24時間以内）が必須で、未設定・期限切れ・24時間超は起動を拒否する。期限を過ぎると再起動しなくても
+    # bootstrap login・bootstrap sessionを拒否する。手順: .kiro/specs/production-launch/deploy-runbook.md §5
+    bootstrap:
+      enabled: ${SECURITY_BOOTSTRAP_ENABLED:false}
+      expires-at: ${SECURITY_BOOTSTRAP_EXPIRES_AT:}
   # 一括操作 preview token HMAC（未設定は起動 fail-fast）
   batch:
     token-secret: ${BATCH_TOKEN_SECRET:}

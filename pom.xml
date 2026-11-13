@@ -273,9 +273,26 @@
                     </excludes>
                 </configuration>
             </plugin>
+            <!-- Flyway Maven plugin。下のconfigurationはlocal開発DB向け（README/CLAUDE.mdのrepair手順）で、
+                 本番では使わない。本番の専用Flyway jobは prod-migrate profile（ops/flyway/flyway-prod.conf）で実行する。
+                 dependenciesは両方に効く。pluginはproject依存（compile/runtime classpath）もclassloaderへ加えるため
+                 冗長の可能性があるが、DB対応plugin（flyway-mysql）とJDBC driverを確実に解決させるため念のため明示する
+                 （「無いとNo database foundになる」ことは実行では未確認。D1 review P3-14）。 -->
             <plugin>
                 <groupId>org.flywaydb</groupId>
                 <artifactId>flyway-maven-plugin</artifactId>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.flywaydb</groupId>
+                        <artifactId>flyway-mysql</artifactId>
+                        <version>${flyway.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>com.mysql</groupId>
+                        <artifactId>mysql-connector-j</artifactId>
+                        <version>${mysql.version}</version>
+                    </dependency>
+                </dependencies>
                 <configuration>
                     <url>${env.DB_URL}</url>
                     <user>${env.DB_USERNAME}</user>
@@ -350,6 +367,32 @@
                 <test.groups></test.groups>
                 <test.excluded-groups>__none__</test.excluded-groups>
             </properties>
+        </profile>
+
+        <!-- 本番の専用Flyway job（配備決定P-3/部署-2）。実行: mvn -B -Pprod-migrate clean compile flyway:migrate
+             設定はops/flyway/flyway-prod.confだけに書く（FlywayProdFreshInstallMySqlTestも同じfileを読む）。
+             combine.self="override" で上のlocal開発向けconfiguration（filesystem location等）を一切引き継がない。
+             compileを先に行うのは、classpath location（target/classes）からJava migrationとcallback classを
+             解決するため。接続情報と初期管理者パスワードhashは環境変数（FLYWAY_URL / FLYWAY_USER /
+             FLYWAY_PASSWORD / FLYWAY_PLACEHOLDERS_ADMIN_INITIAL_PASSWORD_HASH）で渡し、POMとMaven propertyを
+             経由させない（process引数にsecretを出さない）。
+             このjobでは mvn -X（長形式のdebug optionも同じ）を使わず、org.flywaydb のlogもDEBUGにしない。FlywayはDEBUGで
+             実行SQL（注入したhashを含む SET 文）をそのままlogへ出す（D1 review P3-1。deploy-runbook.md §1.3）。 -->
+        <profile>
+            <id>prod-migrate</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.flywaydb</groupId>
+                        <artifactId>flyway-maven-plugin</artifactId>
+                        <configuration combine.self="override">
+                            <configFiles>
+                                <configFile>${project.basedir}/ops/flyway/flyway-prod.conf</configFile>
+                            </configFiles>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
 
         <!-- 実Chrome（CDP・headless）必須のbrowser Demo。default fast suiteへは無条件追加しない。 -->
