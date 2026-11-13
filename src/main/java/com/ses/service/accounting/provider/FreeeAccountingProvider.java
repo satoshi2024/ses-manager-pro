@@ -1088,6 +1088,30 @@ public class FreeeAccountingProvider implements AccountingProvider {
         ResponseEntity<T> execute(HttpHeaders headers);
     }
 
+    /**
+     * freeeの入力エラー（400/422）のうち、運用者が自分で直せる既知の理由を本システムのmessage keyへ置き換える。
+     * 応答本文はこの判定にだけ使い、ログ・DTO・ジョブには渡さない（R1-P1-10）。該当しなければ null。
+     * 文言は実freeeで確認したもの（期首日より前の発生日、存在しない取引先ID）。
+     */
+    static String classifyFreeeValidation(HttpClientErrorException httpEx) {
+        String body;
+        try {
+            body = httpEx.getResponseBodyAsString(java.nio.charset.StandardCharsets.UTF_8);
+        } catch (RuntimeException e) {
+            return null;
+        }
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        if (body.contains("期首日")) {
+            return "error.accounting.freeeBeforeFiscalYear";
+        }
+        if (body.contains("存在しない取引先")) {
+            return "error.accounting.freeePartnerNotFound";
+        }
+        return null;
+    }
+
     private CanonicalDealResult handleApiException(Exception e, String apiPath) {
         if (e instanceof com.ses.common.exception.TokenRefreshInProgressException) {
             log.warn("freee API呼出し中に他ノードのトークン更新待ちになりました: api_path={} error_code=TOKEN_REFRESH_IN_PROGRESS", apiPath);
@@ -1105,12 +1129,15 @@ public class FreeeAccountingProvider implements AccountingProvider {
 
             // R1-P1-10: 外部応答本文・例外メッセージは一切ログ・DTO・jobへ渡さない (固定文言のみ)
             if (statusCode == 400 || statusCode == 422) {
-                log.warn("freee validation error: status_code={}, error_code=VALIDATION_ERROR", statusCode);
+                // 応答本文は記録しない。既知の理由だけを本システムのmessage keyへ置き換える（運用者が直せるように）
+                String reasonKey = classifyFreeeValidation(httpEx);
+                log.warn("freee validation error: status_code={}, error_code=VALIDATION_ERROR reason={}",
+                        statusCode, reasonKey == null ? "UNCLASSIFIED" : reasonKey);
                 return CanonicalDealResult.builder()
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("VALIDATION_ERROR")
-                        .errorMessageSafe("error.accounting.freeeValidation")
+                        .errorMessageSafe(reasonKey != null ? reasonKey : "error.accounting.freeeValidation")
                         .retryable(false) // 400/422はリトライしない (design §6.3)
                         .build();
             } else if (statusCode == 401) {

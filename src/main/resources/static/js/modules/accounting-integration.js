@@ -342,7 +342,10 @@ window.AccountingIntegration = (function () {
                         actionBtns += `<button class="btn btn-xs btn-outline-success btn-payment-sync" data-target-id="${j.targetId}" title="${escapeHtml(t('btnPaymentSync'))}" aria-label="${escapeHtml(t('btnPaymentSync'))}"><i class="bi bi-cash-coin" aria-hidden="true"></i></button>`;
                     }
                 }
-                if (j.status === 'PENDING' || j.status === 'RETRYABLE' || j.status === 'RUNNING') {
+                // FAILEDの送信ジョブ（取引作成系）も取消せる。取消すと内容を直して再送信できる（再送信時にfreeeの既存取引を確認する）
+                let cancellableFailed = j.status === 'FAILED'
+                    && (j.jobType === 'SALES_INVOICE_SYNC' || j.jobType === 'BP_PURCHASE_SYNC' || j.jobType === 'EXPENSE_DEAL_SYNC');
+                if (j.status === 'PENDING' || j.status === 'RETRYABLE' || j.status === 'RUNNING' || cancellableFailed) {
                     actionBtns += `<button class="btn btn-xs btn-outline-danger btn-job-cancel" data-id="${j.id}" title="${escapeHtml(t('btnCancel'))}" aria-label="${escapeHtml(t('btnCancel'))}"><i class="bi bi-x-circle" aria-hidden="true"></i></button>`;
                 }
 

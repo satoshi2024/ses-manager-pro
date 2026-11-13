@@ -1713,4 +1713,30 @@ class FreeeAccountingProviderTest {
         assertThat(result.isSuccess()).isFalse();
         assertThat(result.getErrorCode()).isEqualTo("EXISTING_DEAL_FOUND");
     }
+
+    @Test
+    @DisplayName("freeeの入力エラーは既知の理由（存在しない取引先・期首日より前）だけ専用の案内にし、それ以外は従来の案内のまま（応答本文は渡さない）")
+    void validationError_knownReasonsAreClassified() {
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withBadRequest()
+                        .body("{\"status_code\":400,\"errors\":[{\"type\":\"validation\",\"messages\":[\"存在しない取引先が指定されています。\"]}]}")
+                        .contentType(MediaType.APPLICATION_JSON));
+        CanonicalDealResult partner = freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-VALID-PARTNER"));
+        mockServer.verify();
+        assertThat(partner.getErrorCode()).isEqualTo("VALIDATION_ERROR");
+        assertThat(partner.getErrorMessageSafe()).isEqualTo("error.accounting.freeePartnerNotFound");
+        assertThat(partner.isRetryable()).isFalse();
+
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withBadRequest()
+                        .body("{\"status_code\":400,\"errors\":[{\"type\":\"validation\",\"messages\":[\"顧客名に使用できない文字が含まれています: secret-value\"]}]}")
+                        .contentType(MediaType.APPLICATION_JSON));
+        CanonicalDealResult other = freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-VALID-OTHER"));
+        mockServer.verify();
+        assertThat(other.getErrorMessageSafe()).isEqualTo("error.accounting.freeeValidation");
+        assertThat(String.valueOf(other.getErrorMessageSafe())).doesNotContain("secret-value");
+    }
 }

@@ -789,4 +789,46 @@ class SalesInvoiceIntegrationTest {
         assertThat(refused.getStatus()).isEqualTo("FAILED");
         assertThat(refused.getErrorCode()).isEqualTo("EXISTING_DEAL_FOUND");
     }
+
+    @Test
+    @DisplayName("freeeの入力エラー（期首日より前）で失敗した送信は理由を表示し、ジョブを取消すと内容を直して再送信できる（実freeeで見つかった詰まり）")
+    void failedByFreeeValidation_canBeCancelledAndSentAgain() {
+        IntegrationJob first = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withBadRequest()
+                        .body("{\"status_code\":400,\"errors\":[{\"type\":\"validation\",\"messages\":[\"現在選択している会計年度の期首日以前の取引を登録することができません。\"]}]}")
+                        .contentType(MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesInvoiceJob(first.getId());
+        mockServer.verify();
+        IntegrationJob failed = jobService.getById(first.getId());
+        assertThat(failed.getStatus()).isEqualTo("FAILED");
+        assertThat(failed.getErrorCode()).isEqualTo("VALIDATION_ERROR");
+        // 以前は「freeeの入力チェックでエラー」だけで、何を直せばよいか分からなかった
+        assertThat(failed.getErrorMessageSafe()).isEqualTo("error.accounting.freeeBeforeFiscalYear");
+
+        // FAILEDのままでは再送信できない（再試行は固定スナップショットのため同じ失敗になる）
+        assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(invoice.getId(), 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.accounting.previousJobFailed");
+
+        // 失敗したジョブを取消すと新しい世代で再送信でき、作成前にfreeeの既存取引を確認する
+        jobService.cancelJob(first.getId(), "発生日を直して再送信");
+        IntegrationJob second = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        assertThat(second.getIdempotencyKey()).isEqualTo(first.getIdempotencyKey() + ":g1");
+        assertThat(second.getPayloadSnapshot()).contains("\"verifyNoExistingDeal\":true");
+
+        mockServer.reset();
+        mockServer.expect(requestTo(DEALS_LIST_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 668101, \"company_id\": 99001, \"amount\": 1100000, \"status\": \"unsettled\"}}",
+                        MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesInvoiceJob(second.getId());
+        mockServer.verify();
+        assertThat(jobService.getById(second.getId()).getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(jobService.getById(second.getId()).getExternalId()).isEqualTo("668101");
+    }
 }
