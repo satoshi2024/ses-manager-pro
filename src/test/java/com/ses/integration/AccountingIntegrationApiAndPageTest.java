@@ -771,4 +771,75 @@ class AccountingIntegrationApiAndPageTest {
                 java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_" + role)));
         return new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
     }
+
+    @Autowired
+    private com.ses.mapper.ContractMapper contractMapperForCandidates;
+
+    @Autowired
+    private com.ses.mapper.WorkRecordMapper workRecordMapperForCandidates;
+
+    @Autowired
+    private com.ses.mapper.BpPaymentMapper bpPaymentMapperForCandidates;
+
+    /** 顧客→契約→工数実績→BP支払を指定tenantで作る（BP支払はtenant列を持たず、この連鎖でtenantが決まる）。 */
+    private com.ses.entity.BpPayment insertBpPaymentOwnedBy(String tenantId, String label) {
+        Customer customer = new Customer();
+        customer.setCompanyName("送信候補テスト顧客-" + label);
+        customer.setTenantId(tenantId);
+        customerService.save(customer);
+
+        com.ses.entity.Contract contract = new com.ses.entity.Contract();
+        contract.setContractNo("CON-CAND-" + label + "-" + java.util.UUID.randomUUID().toString().substring(0, 8));
+        contract.setEngineerId(1L);
+        contract.setProjectId(1L);
+        contract.setCustomerId(customer.getId());
+        contract.setTenantId(tenantId);
+        contract.setLegalEntityId(1L);
+        contract.setContractType("準委任");
+        contract.setStatus("稼動中");
+        contract.setStartDate(LocalDate.of(2026, 1, 1));
+        contract.setEndDate(LocalDate.of(2026, 12, 31));
+        contract.setSellingPrice(new BigDecimal("900000"));
+        contract.setCostPrice(new BigDecimal("800000"));
+        contractMapperForCandidates.insert(contract);
+
+        com.ses.entity.WorkRecord workRecord = new com.ses.entity.WorkRecord();
+        workRecord.setContractId(contract.getId());
+        workRecord.setWorkMonth("2026-08");
+        workRecord.setActualHours(new BigDecimal("160.00"));
+        workRecordMapperForCandidates.insert(workRecord);
+
+        com.ses.entity.BpPayment payment = new com.ses.entity.BpPayment();
+        payment.setWorkRecordId(workRecord.getId());
+        payment.setPayeeCompanyName("送信候補テストBP-" + label);
+        payment.setAmount(new BigDecimal("800000"));
+        payment.setStatus("未払");
+        bpPaymentMapperForCandidates.insert(payment);
+        return payment;
+    }
+
+    @Test
+    @DisplayName("BP仕入の送信候補・プレビュー・送信は現在tenantのBP支払だけを対象にする（他tenantの支払先・金額を返さない）")
+    @WithMockUser(username = "admin_user", roles = {"管理者"})
+    void bpPurchaseSendCandidates_areTenantScoped() throws Exception {
+        com.ses.entity.BpPayment own = insertBpPaymentOwnedBy("default", "OWN");
+        com.ses.entity.BpPayment other = insertBpPaymentOwnedBy("other-tenant", "OTHER");
+
+        String body = mockMvc.perform(get("/api/accounting/send-candidates").param("kind", "purchase"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        com.fasterxml.jackson.databind.JsonNode candidates = objectMapper.readTree(body).get("data");
+        java.util.List<Long> ids = new java.util.ArrayList<>();
+        candidates.forEach(c -> ids.add(c.get("id").asLong()));
+        assertThat(ids).contains(own.getId()).doesNotContain(other.getId());
+        assertThat(body).doesNotContain("送信候補テストBP-OTHER");
+
+        // 他tenantのBP支払はプレビューも送信も見つからない扱い（存在を推測させない）
+        mockMvc.perform(get("/api/accounting/preview/bp-purchase/" + other.getId()))
+                .andExpect(jsonPath("$.code").value(404));
+        mockMvc.perform(post("/api/accounting/sync/bp-purchase/" + other.getId()).with(csrf()))
+                .andExpect(jsonPath("$.code").value(404));
+        assertThat(jobService.getLatestJob("BP_PAYMENT", other.getId(), "BP_PURCHASE_SYNC")).isNull();
+    }
 }

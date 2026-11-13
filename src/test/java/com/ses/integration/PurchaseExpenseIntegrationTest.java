@@ -370,8 +370,9 @@ class PurchaseExpenseIntegrationTest {
     @DisplayName("BP支払適格性ガード: 未承認・下書き状態のBP支払レコードは連携拒否される")
     void triggerBpPurchaseSync_unapprovedStatus_rejected() {
         WorkRecord unapprovedWr = new WorkRecord();
-        unapprovedWr.setContractId(1L);
-        unapprovedWr.setWorkMonth("2026-08");
+        // BP支払は工数実績→契約→顧客のownershipでtenantが決まるため、現在tenantの契約に紐づける
+        unapprovedWr.setContractId(workRecordMapper.selectById(bpPayment.getWorkRecordId()).getContractId());
+        unapprovedWr.setWorkMonth("2026-09"); // 契約×月は一意のため、setUpの工数実績（2026-08）と別の月にする
         unapprovedWr.setActualHours(new BigDecimal("160.00"));
         workRecordMapper.insert(unapprovedWr);
 
@@ -777,6 +778,14 @@ class PurchaseExpenseIntegrationTest {
 
         // 2. 非 default テナントの BP ジョブを Worker 実行しても ThreadLocal コンテキストがリークしない
         IntegrationJob src = purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L);
+
+        // BP 連携は冪等キーにより同一ジョブへ収束し、payload_hash が再実行で変動しない (翌日 retry でも不変)
+        // （下のny-tenantジョブで取引が作成された後は「送信済み」として拒否されるため、その前に確認する）
+        IntegrationJob again = purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L);
+        assertThat(again.getId()).isEqualTo(src.getId());
+        assertThat(again.getPayloadHash()).isEqualTo(src.getPayloadHash());
+        assertThat(again.getPayloadSnapshot()).contains("\"issueDate\":\"2026-08-31\"");
+
         IntegrationJob nyJob = jobService.createJob(connection.getId(), "BP_PURCHASE_SYNC", "BP_PAYMENT",
                 bpPayment.getId(), "BP-TENANT-NY-1", src.getPayloadHash(), src.getPayloadSnapshot(),
                 "ny-tenant", null, null);
@@ -799,10 +808,9 @@ class PurchaseExpenseIntegrationTest {
         // 3. NULL 金額 BP / NULL 経費日付は enqueue 時に fail-closed (カラムNOT NULLのため、直接INSERTできない行をspyで検証)
         //    -> 専用テストクラス AccountingNullGuardTest で検証 (DB制約上、NULL行は本来存在しない防御的ガード)
 
-        // 4. BP 連携は冪等キーにより同一ジョブへ収束し、payload_hash が再実行で変動しない (翌日 retry でも不変)
-        IntegrationJob again = purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L);
-        assertThat(again.getId()).isEqualTo(src.getId());
-        assertThat(again.getPayloadHash()).isEqualTo(src.getPayloadHash());
-        assertThat(again.getPayloadSnapshot()).contains("\"issueDate\":\"2026-08-31\"");
+        // 4. 取引が作成された後の再送信は、既存ジョブへ黙って統合せず「送信済み」として理由付きで拒否する
+        assertThatThrownBy(() -> purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.accounting.alreadySyncedNoCancel");
     }
 }

@@ -38,6 +38,7 @@ class AccountingNullGuardTest {
     private com.ses.mapper.ExpenseRequestMapper expenseRequestMapper;
 
     @Test
+    @EnableDefaultTenantTestContext
     @DisplayName("NULL金額BP支払は enqueue 時に拒否される (R1-P1-08)")
     void bpNullAmount_rejected() {
         BpPayment nullAmountRow = new BpPayment();
@@ -47,6 +48,7 @@ class AccountingNullGuardTest {
         nullAmountRow.setPayeeCompanyName("NULL金額BP");
         nullAmountRow.setStatus("未払");
         doReturn(nullAmountRow).when(bpPaymentMapper).selectById(1L);
+        doReturn(nullAmountRow).when(bpPaymentMapper).selectByIdForTenant(eq(1L), any());
 
         assertThatThrownBy(() -> purchaseIntegrationService.triggerBpPurchaseSync(1L, 1L))
                 .isInstanceOf(BusinessException.class)

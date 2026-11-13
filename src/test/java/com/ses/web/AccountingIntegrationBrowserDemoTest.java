@@ -74,6 +74,7 @@ class AccountingIntegrationBrowserDemoTest {
     private static volatile String dealsJson = "{\"deals\": []}";
     private static final AtomicInteger deals401Count = new AtomicInteger(0);
     private static final AtomicInteger tokenRefreshCount = new AtomicInteger(0);
+    private static final AtomicInteger unsettledDealsRequestCount = new AtomicInteger(0);
 
     static {
         try {
@@ -89,7 +90,14 @@ class AccountingIntegrationBrowserDemoTest {
                     exchange.close();
                     return;
                 }
-                byte[] body = dealsJson.getBytes(StandardCharsets.UTF_8);
+                // 月次照合は決済済み（status=settled）と対象月の未決済（status=unsettled）を別々に取得する。
+                // 4母集団の取引はすべて決済済みなので、未決済の取得には空を返す（同じ取引を2回返すと重複IDで締不可になる）
+                String query = exchange.getRequestURI().getRawQuery();
+                boolean unsettledPass = query != null && query.contains("status=unsettled");
+                if (unsettledPass) {
+                    unsettledDealsRequestCount.incrementAndGet();
+                }
+                byte[] body = (unsettledPass ? "{\"deals\": []}" : dealsJson).getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type", "application/json");
                 exchange.sendResponseHeaders(200, body.length);
                 exchange.getResponseBody().write(body);
@@ -384,8 +392,11 @@ class AccountingIntegrationBrowserDemoTest {
         // 401 自動復旧の実演検証: 初回 deals 呼出は 401 -> OAuth 更新 -> リプレイ成功
         assertTrue(deals401Count.get() >= 1, "freee stub が初回のトークン失効 (401) を再現していること");
         assertTrue(tokenRefreshCount.get() >= 1, "401 検知後に OAuth トークン更新が実行されていること");
+        // 月次照合がfreeeで直接作られた未決済取引も取得していること（EXTERNAL_ONLY検出の前提）
+        assertTrue(unsettledDealsRequestCount.get() >= 1, "月次照合が未決済取引（status=unsettled）も取得していること");
         summary.put("deals401Count", deals401Count.get());
         summary.put("tokenRefreshCount", tokenRefreshCount.get());
+        summary.put("unsettledDealsRequestCount", unsettledDealsRequestCount.get());
 
         Files.writeString(evidenceDir.resolve("summary.json"),
                 MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(summary));

@@ -1349,4 +1349,30 @@ class FreeeAccountingProviderTest {
         // 未決済取引の一部入金も入金母集団に入る
         assertThat(result.getPayments()).extracting(CanonicalPaymentSync::getPaymentId).containsExactly("92001");
     }
+
+    @Test
+    @DisplayName("月次照合: 2回の取得の間に決済済みへ変わった取引は重複IDにせず、決済済み側を1件だけ採用する")
+    void fetchPayments_dealInBothPasses_isNotDuplicate() {
+        mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&status=settled&limit=100&offset=0"))
+                .andRespond(withSuccess("{\"deals\": [{\"id\": 83001, \"issue_date\": \"2026-08-10\", \"amount\": 70000, "
+                        + "\"status\": \"settled\", \"payments\": [{\"id\": 93001, \"date\": \"2026-08-20\", \"amount\": 70000}]}]}",
+                        MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&status=unsettled"
+                        + "&start_issue_date=2026-08-01&end_issue_date=2026-08-31&limit=100&offset=0"))
+                .andRespond(withSuccess("{\"deals\": [{\"id\": 83001, \"issue_date\": \"2026-08-10\", \"amount\": 70000, "
+                        + "\"status\": \"unsettled\", \"payments\": [{\"id\": 93001, \"date\": \"2026-08-20\", \"amount\": 70000}]}]}",
+                        MediaType.APPLICATION_JSON));
+
+        com.ses.dto.accounting.PaymentFetchResult result = freeeProvider.fetchPayments(
+                testConnection, LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31));
+
+        mockServer.verify();
+        assertThat(result.isFetchFailed()).isFalse();
+        assertThat(result.isDuplicateDealId()).isFalse();
+        assertThat(result.isDuplicatePaymentId()).isFalse();
+        assertThat(result.getDeals()).extracting(CanonicalPaymentSync::getDealId).containsExactly("83001");
+        assertThat(result.getDeals().get(0).isSettled()).isTrue();
+        assertThat(result.getPayments()).extracting(CanonicalPaymentSync::getPaymentId).containsExactly("93001");
+    }
 }

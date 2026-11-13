@@ -19,7 +19,8 @@ import org.springframework.stereotype.Component;
  * 同じマッピング照合・法人境界・管理番号長の検査と冪等性キーを通すため、送信経路は1本のまま。
  * このsenderは「送信ジョブを1件だけ作り、取引が作成されたら成功を返す」だけを行う:</p>
  * <ul>
- *   <li>送信ジョブが無い（または取消済み）→ ジョブを作成して {@link #PENDING}</li>
+ *   <li>送信ジョブが無い → ジョブを作成して {@link #PENDING}</li>
+ *   <li>CANCELLED（管理者が取消した）→ {@link #CANCELLED}。終端で、作り直さない</li>
  *   <li>PENDING/RUNNING/RETRYABLE → {@link #PENDING}（会計workerが処理する。試行回数は消費しない）</li>
  *   <li>SUCCEEDED → 成功（correlationId = freee取引ID）。手動送信で先に作成された場合も同じ</li>
  *   <li>FAILED、または送信前の検査で拒否 → 失敗（理由は会計・支払連携の連携ジョブ一覧で確認する）</li>
@@ -52,7 +53,13 @@ public class FreeeExpenseAccountingSender implements ExpenseAccountingSender {
             return new SendResult(false, null, "EXPENSE_NOT_FOUND");
         }
         IntegrationJob latest = jobService.getLatestJob(TARGET_TYPE, expense.getId(), JOB_TYPE);
-        if (latest == null || "CANCELLED".equals(latest.getStatus())) {
+        if (latest != null && "CANCELLED".equals(latest.getStatus())) {
+            // 管理者の取消は終端。ここで作り直すと取消が次の実行で無効になる（再送信は画面から手動で行う）
+            log.info("[経費会計連携] freee送信ジョブが取消済みのため自動送信を終了します: expenseId={} jobId={}",
+                    expense.getId(), latest.getId());
+            return new SendResult(false, null, CANCELLED);
+        }
+        if (latest == null) {
             try {
                 latest = integrationService.getObject().triggerExpenseSync(expense.getId(), null);
             } catch (BusinessException e) {

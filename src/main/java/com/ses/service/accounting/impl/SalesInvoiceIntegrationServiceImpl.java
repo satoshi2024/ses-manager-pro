@@ -206,6 +206,10 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
         Long legalEntityId = legalEntityResolver.require(conn, legalEntityResolver.ofInvoice(invoice));
 
         CanonicalSalesInvoice canonical = buildSyncCanonical(invoice, conn.getId());
+        // 前の世代が外部へ送信した後に取消された場合は、作成前に同じ管理番号の取引がfreeeに無いことを確認させる
+        if (sendKeyResolver.requiresExistingDealCheck("INVOICE", invoice.getId(), "SALES_INVOICE_SYNC")) {
+            canonical.setVerifyNoExistingDeal(Boolean.TRUE);
+        }
 
         String payloadJson;
         try {

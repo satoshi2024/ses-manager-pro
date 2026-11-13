@@ -487,6 +487,47 @@ class ExpenseRequestFlowIntegrationTest {
         }
     }
 
+    @Test
+    void provider_freeeで管理者が送信ジョブを取消すと自動で作り直さず終端にする() {
+        systemConfigService.put("expense.accounting.provider", "freee", "テスト用");
+        Long integrationJobId = null;
+        try {
+            long applicant = insertUser("管理者");
+            long approver = insertUser("管理者");
+            long engineerId = createEngineer(null);
+            link(engineerId, applicant);
+            insertRoute(List.of(List.of(approver)));
+            long expenseId = approvedExpense(engineerId, applicant, approver, LocalDate.of(2026, 8, 22), "1600");
+
+            // 管理者が会計・支払連携の連携ジョブ画面で送信ジョブを取消した
+            integrationJobId = insertExpenseSendJob(expenseId, "CANCELLED", null);
+            scheduler.createAccountingJobs(100);
+            assertFalse(scheduler.dispatchOne(expenseId));
+
+            ExpenseAccountingJob stopped = jobMapper.selectOne(new LambdaQueryWrapper<ExpenseAccountingJob>()
+                    .eq(ExpenseAccountingJob::getExpenseRequestId, expenseId));
+            assertEquals("FAILED", stopped.getStatus(), "取消は終端（再試行しない）");
+            assertEquals(ExpenseAccountingSender.CANCELLED, stopped.getLastErrorCode());
+            assertNull(stopped.getNextAttemptAt());
+
+            // 次の実行でも送信ジョブを作り直さない（取消が無効にならない）
+            scheduler.createAccountingJobs(100);
+            assertFalse(scheduler.dispatchOne(expenseId), "終端のjobは再びclaimされない");
+            assertEquals(1, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM t_integration_job WHERE target_type = 'EXPENSE_REQUEST' AND target_id = ? "
+                            + "AND job_type = 'EXPENSE_DEAL_SYNC'", Integer.class, expenseId),
+                    "取消後に新しい送信ジョブを作らない");
+            assertEquals("FAILED", jobMapper.selectById(stopped.getId()).getStatus());
+            assertEquals("承認済", expenseRequestMapper.selectById(expenseId).getStatus());
+            assertEquals(0, countNotification(applicant, "EXPENSE_ACCOUNTING_SENT", "expense-accounting-sent:" + expenseId));
+        } finally {
+            systemConfigService.put("expense.accounting.provider", "mock", "テスト用");
+            if (integrationJobId != null) {
+                jdbcTemplate.update("DELETE FROM t_integration_job WHERE id = ?", integrationJobId);
+            }
+        }
+    }
+
     /** 下書き→申請→承認まで進めた経費IDを返す（schedulerは呼ばない）。 */
     private long approvedExpense(long engineerId, long applicant, long approver, LocalDate date, String amount) {
         authenticate(applicant, "要員");
