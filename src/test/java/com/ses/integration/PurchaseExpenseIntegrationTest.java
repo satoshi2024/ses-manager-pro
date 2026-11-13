@@ -563,8 +563,9 @@ class PurchaseExpenseIntegrationTest {
         closedContract.setEngineerId(1L);
         closedContract.setProjectId(1L);
         closedContract.setCustomerId(1L);
-        // BP支払は工数実績→契約→顧客でtenantが決まり、送信ジョブの法人は契約の法人。両方が無いと
-        // 締めの検査より前（BP支払の取得・法人の解決）で拒否され、このテストが締めを検証しなくなる
+        // BP支払は工数実績→契約→顧客でtenantが決まる。契約にtenantが無いと、締めの検査より前のBP支払の取得で
+        // 見つからず（404）、このテストが締めを検証しなくなる。法人は締めの検査の後で解決されるが、
+        // 締めが開いていれば送信できる状態にそろえておく
         closedContract.setTenantId("default");
         closedContract.setLegalEntityId(1L);
         closedContract.setContractType("準委任");

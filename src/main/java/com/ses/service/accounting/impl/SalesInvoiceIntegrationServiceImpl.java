@@ -207,8 +207,12 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
 
         CanonicalSalesInvoice canonical = buildSyncCanonical(invoice, conn.getId());
         // 前の世代が外部へ送信した後に取消された場合は、作成前に同じ管理番号の取引がfreeeに無いことを確認させる
-        if (sendKeyResolver.requiresExistingDealCheck("INVOICE", invoice.getId(), "SALES_INVOICE_SYNC")) {
+        // （今回の取引先・発生日に加えて、取消された世代の取引先・発生日も走査する）
+        java.util.List<com.ses.dto.accounting.canonical.PriorDealScope> priorScopes =
+                sendKeyResolver.priorDealScopes("INVOICE", invoice.getId(), "SALES_INVOICE_SYNC");
+        if (!priorScopes.isEmpty()) {
             canonical.setVerifyNoExistingDeal(Boolean.TRUE);
+            canonical.setPriorDealScopes(priorScopes);
         }
 
         String payloadJson;

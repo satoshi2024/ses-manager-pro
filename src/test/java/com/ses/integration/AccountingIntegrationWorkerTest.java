@@ -3,7 +3,6 @@ package com.ses.integration;
 import com.ses.entity.IntegrationConnection;
 import com.ses.entity.IntegrationJob;
 import com.ses.service.accounting.AccountingIntegrationWorker;
-import com.ses.service.accounting.AccountingProvider;
 import com.ses.service.accounting.AccountingProviderFactory;
 import com.ses.service.accounting.PurchaseExpensePaymentIntegrationService;
 import com.ses.service.accounting.SalesInvoiceIntegrationService;
@@ -20,11 +19,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.util.AopTestUtils;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @SpringBootTest
@@ -119,8 +116,8 @@ class AccountingIntegrationWorkerTest {
     }
 
     @Test
-    @DisplayName("Stale Running Recovery: freee上に同一ref_numberが存在するならSUCCEEDED（再POSTしない）")
-    void worker_recoversStaleRunningToSucceededWhenDealExists() {
+    @DisplayName("Stale Running Recovery: 取引作成系も滞留回収ではfreeeを照会せず再試行待ちへ戻す（既存取引の確認は再試行の事前確認が行う）")
+    void worker_staleCreateJob_isRetriedWithTheCreateGuardInsteadOfAdoptedHere() {
         IntegrationJob j = jobService.createJob(connId, "BP_PURCHASE_SYNC", "BP_PAYMENT", 301L,
                 "KEY-STALE-EXIST", "hashE",
                 "{\"bpPaymentId\":301}", "default", 1L, null);
@@ -130,16 +127,14 @@ class AccountingIntegrationWorkerTest {
                 .eq(IntegrationJob::getId, claimed.getId())
                 .set(IntegrationJob::getUpdatedAt, claimed.getUpdatedAt()));
 
-        AccountingProvider provider = mock(AccountingProvider.class);
-        when(providerFactory.getProvider(any())).thenReturn(provider);
-        when(provider.findDealIdByRefNumber(any(), eq("BP-301"))).thenReturn(Optional.of("deal-901"));
-
         targetWorker().recoverStaleRunning();
 
+        // ここで別の規則（金額を見ない・範囲を絞らない・取消後の再送信でも採用する）で取引を採用しない。
+        // 再試行は試行2回目以降になり、作成時と同じ範囲・規則の事前確認（DealCreateGuard）が既存取引を判定する
         IntegrationJob recovered = jobService.getById(j.getId());
-        assertThat(recovered.getStatus()).isEqualTo("SUCCEEDED");
-        assertThat(recovered.getExternalId()).isEqualTo("deal-901");
-        verify(provider, times(1)).findDealIdByRefNumber(any(), eq("BP-301"));
+        assertThat(recovered.getStatus()).isEqualTo("RETRYABLE");
+        assertThat(recovered.getExternalId()).isNull();
+        verify(providerFactory, never()).getProvider(any());
         verify(purchaseService, never()).processBpPurchaseJob(any());
     }
 

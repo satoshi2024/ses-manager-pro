@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
+import com.ses.dto.accounting.canonical.PriorDealScope;
 import com.ses.entity.IntegrationJob;
 import com.ses.service.integration.IntegrationJobService;
 import lombok.RequiredArgsConstructor;
@@ -117,9 +118,45 @@ public class AccountingSendKeyResolver {
      * その後の世代を確認なしに作ると、freeeに同じ取引が2件できる。</p>
      */
     public boolean requiresExistingDealCheck(String targetType, Long targetId, String syncJobType) {
-        return list(targetType, targetId, syncJobType).stream()
-                .anyMatch(job -> "CANCELLED".equals(job.getStatus())
-                        && job.getAttemptCount() != null && job.getAttemptCount() > 0);
+        return !priorDealScopes(targetType, targetId, syncJobType).isEmpty();
+    }
+
+    /**
+     * 外部へ送信した後に取消された前の世代ごとの走査範囲（取引先・発生日）。空なら既存取引の確認は不要。
+     * 送信スナップショットの {@code partnerExternalId} と {@code issueDate}（経費は {@code expenseDate}）を読む。
+     * 読めない世代は範囲不明（両方null）として残す（確認を省かない）。
+     */
+    public List<PriorDealScope> priorDealScopes(String targetType, Long targetId, String syncJobType) {
+        java.util.LinkedHashSet<PriorDealScope> scopes = new java.util.LinkedHashSet<>();
+        for (IntegrationJob job : list(targetType, targetId, syncJobType)) {
+            if ("CANCELLED".equals(job.getStatus()) && job.getAttemptCount() != null && job.getAttemptCount() > 0) {
+                scopes.add(scopeOf(job));
+            }
+        }
+        return List.copyOf(scopes);
+    }
+
+    private PriorDealScope scopeOf(IntegrationJob job) {
+        try {
+            JsonNode root = job.getPayloadSnapshot() == null ? null : objectMapper.readTree(job.getPayloadSnapshot());
+            if (root == null || !root.isObject()) {
+                return new PriorDealScope(null, null);
+            }
+            String partner = text(root, "partnerExternalId");
+            String date = text(root, "issueDate");
+            if (date == null) {
+                date = text(root, "expenseDate");
+            }
+            return new PriorDealScope(partner, date == null ? null : java.time.LocalDate.parse(date));
+        } catch (Exception e) {
+            log.warn("取消済み送信ジョブのスナップショットを解釈できないため、範囲を限定せずに確認します: jobId={}", job.getId());
+            return new PriorDealScope(null, null);
+        }
+    }
+
+    private static String text(JsonNode root, String field) {
+        JsonNode node = root.get(field);
+        return node == null || node.isNull() || node.asText().isBlank() ? null : node.asText();
     }
 
     /** 閉じた送信ジョブ: 取消済み、または作成した取引の取消が成功した送信成功ジョブ。このキーは二度と使わない。 */

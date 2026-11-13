@@ -1,6 +1,7 @@
 package com.ses.service.accounting;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.dto.accounting.canonical.PriorDealScope;
 import com.ses.entity.IntegrationJob;
 import com.ses.mapper.IntegrationJobMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -178,5 +179,23 @@ class AccountingSendKeyResolverTest {
         cancelJob("D3", "SUCCEEDED");
         assertThat(requiresCheck()).as("後の世代が正常に送信・取消されても確認を外さない").isTrue();
         assertThat(resolve("hash-4")).isEqualTo(base() + ":g3");
+    }
+
+    @Test
+    @DisplayName("取消された世代の走査範囲: スナップショットの取引先・発生日（経費は経費日付）を読み、読めなければ範囲不明として残す")
+    void priorDealScopes_comeFromTheCancelledSnapshots() {
+        insert(SYNC, base(), "CANCELLED", 1, null, "hash-1",
+                "{\"invoiceId\":" + target + ",\"partnerExternalId\":\"3002\",\"issueDate\":\"2026-07-01\"}");
+        insert(SYNC, base() + ":g1", "CANCELLED", 0, null, "hash-2",
+                "{\"invoiceId\":" + target + ",\"partnerExternalId\":\"3009\",\"issueDate\":\"2026-07-09\"}"); // 送信前の取消は対象外
+        insert(SYNC, base() + ":g2", "CANCELLED", 2, null, "hash-3",
+                "{\"expenseId\":" + target + ",\"expenseDate\":\"2026-08-21\"}");
+        insert(SYNC, base() + ":g3", "CANCELLED", 1, null, "hash-4", "not-json");
+
+        assertThat(resolver.priorDealScopes("INVOICE", target, SYNC)).containsExactly(
+                new PriorDealScope("3002", java.time.LocalDate.of(2026, 7, 1)),
+                new PriorDealScope(null, java.time.LocalDate.of(2026, 8, 21)),
+                new PriorDealScope(null, null));
+        assertThat(requiresCheck()).isTrue();
     }
 }

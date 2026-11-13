@@ -1,13 +1,9 @@
 package com.ses.service.accounting;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ses.entity.IntegrationConnection;
 import com.ses.entity.IntegrationJob;
 import com.ses.common.audit.ExecutionActorContext;
 import com.ses.common.util.CorrelationContext;
 import com.ses.common.util.LogRedaction;
-import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,8 +12,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
-import java.util.Optional;
-import java.util.Set;
 
 /**
  * 会計・支払連携ジョブワーカー (P1-01 / design §6.2 scheduler/async)。
@@ -28,8 +22,9 @@ import java.util.Set;
  * </p>
  * <ul>
  *   <li>5秒間隔で PENDING/RETRYABLE の due job を最大10件 claim・dispatch する。</li>
- *   <li>1分間隔で lease timeout (15分) を超えた stale RUNNING を回収する。
- *       回収前に freee 上の ref_number を照合し、既存なら SUCCEEDED（再POST禁止）。</li>
+ *   <li>1分間隔で lease timeout (15分) を超えた stale RUNNING を再試行待ちへ戻す。
+ *       取引作成系の既存取引の確認は、再試行（試行2回目以降）の事前確認（{@link AccountingProvider.DealCreateGuard}）が
+ *       作成時と同じ範囲・同じ規則で行う（ここで別の規則で採用すると、取消後の再送信でも採用してしまう）。</li>
  * </ul>
  */
 @Slf4j
@@ -40,16 +35,10 @@ public class AccountingIntegrationWorker {
     /** RUNNING state の lease 期限 (分)。この期間を超えると worker crash とみなして回収する。 */
     private static final int RUNNING_LEASE_MINUTES = 15;
 
-    private static final Set<String> DEAL_CREATE_JOB_TYPES = Set.of(
-            "SALES_INVOICE_SYNC", "BP_PURCHASE_SYNC", "PURCHASE_DEAL_SYNC", "EXPENSE_DEAL_SYNC");
-
     private final IntegrationJobService jobService;
-    private final IntegrationConnectionService connectionService;
-    private final AccountingProviderFactory providerFactory;
     private final SalesInvoiceIntegrationService salesInvoiceIntegrationService;
     private final PurchaseExpensePaymentIntegrationService purchaseIntegrationService;
     private final com.ses.service.DigitalInvoiceService digitalInvoiceService;
-    private final ObjectMapper objectMapper;
     private final AccountingTimezoneResolver timezoneResolver;
 
     /**
@@ -93,7 +82,7 @@ public class AccountingIntegrationWorker {
 
     /**
      * 15分以上 RUNNING のまま残った stale job を回収する。
-     * 取引作成系は回収前に ref_number で freee を照合し、既存なら SUCCEEDED（再POSTしない）。
+     * 再試行待ちへ戻すだけで、取引作成系の既存取引の確認は再試行の事前確認に任せる（再POSTで二重に作らない）。
      */
     @Scheduled(fixedDelay = 60_000)
     @SchedulerLock(name = "accountingRecoverStaleRunning", lockAtLeastFor = "PT1S", lockAtMostFor = "PT2M")
@@ -114,7 +103,6 @@ public class AccountingIntegrationWorker {
         if (stale.isEmpty()) {
             return;
         }
-        int succeeded = 0;
         int retryable = 0;
         for (IntegrationJob job : stale) {
             CorrelationContext.beginJob(job.getId(), job.getCorrelationId());
@@ -123,19 +111,13 @@ public class AccountingIntegrationWorker {
                     jobService.markFailed(job.getId(), "SCOPE_MISSING", "error.tenant.contextRequired");
                     continue;
                 }
-                boolean recovered = AccountingTenantContextHolder.runWithTenant(
+                AccountingTenantContextHolder.runWithTenant(
                         job.getTenantId(), timezoneResolver.resolve(job.getTenantId()), () -> {
-                            Optional<String> existingDealId = findExistingDealIfCreateJob(job);
-                            if (existingDealId.isPresent()) {
-                                jobService.markSucceeded(job.getId(), existingDealId.get(), null,
-                                        "外部取引の存在を照合して復旧しました。");
-                                return true;
-                            }
                             jobService.markRetryable(job.getId(), "STALE_LEASE",
                                     "error.integration.maxAttemptsExceeded", 0);
-                            return false;
+                            return true;
                         });
-                if (recovered) succeeded++; else retryable++;
+                retryable++;
             } catch (Exception e) {
                 log.warn("滞留連携ジョブの復旧照合に失敗: jobId={} category=SYSTEM errorCode=STALE_RECOVERY_ERROR exceptionClass={} detail={}",
                         job.getId(), LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
@@ -152,8 +134,8 @@ public class AccountingIntegrationWorker {
                 CorrelationContext.clear();
             }
         }
-        log.warn("滞留連携ジョブを復旧: 件数={} lease={}分 成功={} 再試行待ち={}",
-                stale.size(), RUNNING_LEASE_MINUTES, succeeded, retryable);
+        log.warn("滞留連携ジョブを再試行待ちへ戻しました: 件数={} lease={}分 再試行待ち={}",
+                stale.size(), RUNNING_LEASE_MINUTES, retryable);
     }
 
     /** ジョブ種別ごとに適切な process メソッドへ dispatch する (P1-01)。 */
@@ -193,47 +175,5 @@ public class AccountingIntegrationWorker {
                 }
             }
         }
-    }
-
-    private Optional<String> findExistingDealIfCreateJob(IntegrationJob job) {
-        if (job.getJobType() == null || !DEAL_CREATE_JOB_TYPES.contains(job.getJobType())) {
-            return Optional.empty();
-        }
-        String refNumber = resolveRefNumber(job);
-        if (refNumber == null || refNumber.isBlank()) {
-            return Optional.empty();
-        }
-        IntegrationConnection conn = connectionService.getById(job.getConnectionId());
-        if (conn == null) {
-            return Optional.empty();
-        }
-        AccountingProvider provider = providerFactory.getProvider(conn);
-        return provider.findDealIdByRefNumber(conn, refNumber);
-    }
-
-    private String resolveRefNumber(IntegrationJob job) {
-        if ("BP_PURCHASE_SYNC".equals(job.getJobType()) || "PURCHASE_DEAL_SYNC".equals(job.getJobType())) {
-            return job.getTargetId() == null ? null : "BP-" + job.getTargetId();
-        }
-        String snapshot = job.getPayloadSnapshot();
-        if (snapshot == null || snapshot.isBlank()) {
-            return null;
-        }
-        try {
-            JsonNode root = objectMapper.readTree(snapshot);
-            if (root.hasNonNull("invoiceNo")) {
-                return root.get("invoiceNo").asText();
-            }
-            if (root.hasNonNull("refNumber")) {
-                return root.get("refNumber").asText();
-            }
-            if (root.hasNonNull("expenseNo")) {
-                return root.get("expenseNo").asText();
-            }
-        } catch (Exception e) {
-            log.warn("連携ジョブの送信スナップショットを解釈できない: jobId={} category=BUSINESS errorCode=INVALID_PAYLOAD",
-                    job.getId());
-        }
-        return null;
     }
 }

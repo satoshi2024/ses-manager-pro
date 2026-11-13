@@ -728,6 +728,9 @@ class SalesInvoiceIntegrationTest {
         assertThat(retried.getAttemptCount()).isEqualTo(2);
         assertThat(retried.getStatus()).isEqualTo("SUCCEEDED");
         assertThat(retried.getExternalId()).isEqualTo("667901");
+        // 新しく作成した取引と区別できるよう、採用したことをイベントに残す
+        assertThat(jobService.listEvents(job.getId()))
+                .anyMatch(e -> "ADOPTED_EXISTING_DEAL".equals(e.getToStatus()));
     }
 
     @Test
@@ -750,5 +753,40 @@ class SalesInvoiceIntegrationTest {
         mockServer.verify();
         assertThat(jobService.getById(job.getId()).getStatus()).isEqualTo("SUCCEEDED");
         assertThat(jobService.getById(job.getId()).getExternalId()).isEqualTo("667902");
+    }
+
+    @Test
+    @DisplayName("取消後の再送信: 取引先マッピングを訂正して再送信しても、取消前の取引先で作成された取引を見つけて作成しない")
+    void resendAfterPartnerMappingChange_findsTheDealUnderThePreviousPartner() {
+        IntegrationJob first = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        jobService.claimJob(first.getId());
+        jobService.markRetryable(first.getId(), "TIMEOUT", "一時的タイムアウト", 60);
+        jobService.cancelJob(first.getId(), "取引先を訂正するため取消");
+
+        // 取引先マッピングを訂正（1001 → 1002）
+        ExternalMapping partner = mappingService.getMapping(connection.getId(), "CUSTOMER_PARTNER", "CUST-" + customer.getId());
+        partner.setExternalId("1002");
+        mappingService.saveOrUpdateMapping(partner);
+        ExternalMapping corrected = mappingService.getMapping(connection.getId(), "CUSTOMER_PARTNER", "CUST-" + customer.getId());
+        mappingService.verifyMapping(corrected.getId(), "{\"verified\":true}");
+
+        IntegrationJob second = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        assertThat(second.getPayloadSnapshot()).contains("\"partnerExternalId\":\"1002\"")
+                .contains("\"priorDealScopes\":[{\"partnerExternalId\":\"1001\"");
+
+        // 今回の取引先（1002）の範囲には無いが、取消前の取引先（1001）の範囲に作成済みの取引がある
+        mockServer.expect(requestTo(DEALS_LIST_URL.replace("partner_id=1001", "partner_id=1002")))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(DEALS_LIST_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": [{\"id\": 668001, \"company_id\": 99001, \"amount\": 1100000, "
+                        + "\"ref_number\": \"" + invoice.getInvoiceNo() + "\"}]}", MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesInvoiceJob(second.getId());
+
+        mockServer.verify(); // POSTは期待していない
+        IntegrationJob refused = jobService.getById(second.getId());
+        assertThat(refused.getStatus()).isEqualTo("FAILED");
+        assertThat(refused.getErrorCode()).isEqualTo("EXISTING_DEAL_FOUND");
     }
 }
