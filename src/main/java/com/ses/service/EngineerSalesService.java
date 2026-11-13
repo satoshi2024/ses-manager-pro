@@ -52,6 +52,13 @@ public interface EngineerSalesService extends IService<EngineerSales> {
      */
     void releaseAllByEngineerId(Long engineerId);
 
+    /**
+     * 要員の現任担当営業割当（released_at IS NULL）すべてを指定日付で解除する。
+     * 退社案件の完了時は処理日ではなく退社基準日を解除日として残すために使う（NF01）。
+     * 更新日時の記録とDataScope invalidationは日付なし版と同じ。{@code releasedAt} が null の場合は本日付とする。
+     */
+    void releaseAllByEngineerId(Long engineerId, java.time.LocalDate releasedAt);
+
     /** 複数要員の現任主担当営業を一括取得（key=要員ID） */
     Map<Long, EngineerPrimarySalesDto> mapPrimaryByEngineerIds(List<Long> engineerIds);
 

@@ -21,6 +21,7 @@ import com.ses.service.AssetAssignmentService;
 import com.ses.service.AssetOffboardingService;
 import com.ses.service.ExternalAccountService;
 import com.ses.service.LicenseService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -133,8 +134,14 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
             throw new BusinessException(400, "退社例外免除には対象要員、理由、承認申請IDが必要です。");
         }
 
-        LifecycleTask scopedTask = lifecycleTaskMapper.selectByIdForUpdate(lifecycleTaskId);
-        LifecycleCase scopedCase = scopedTask == null ? null : lifecycleCaseMapper.selectByIdForUpdate(lifecycleCaseId);
+        // ApprovalEngineServiceImpl.approve と同じ「承認申請 → 案件 → タスク」の順でtenant限定ロックする（NF01 batch 0 L2）。
+        // 承認engine経由では申請行は既に保持済みのため再取得は待たない。直接呼出しでも同じ順になり、
+        // タスク先行（cancelCase / completeCase と逆順）や申請行の後取り（approve と逆順）による循環待ちを作らない。
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        ApprovalRequest approval = approvalRequestMapper.selectByIdForUpdate(approvalRequestId, tenantId);
+        LifecycleCase scopedCase = lifecycleCaseMapper.selectByIdForUpdateAndTenant(lifecycleCaseId, tenantId);
+        LifecycleTask scopedTask = scopedCase == null ? null
+                : lifecycleTaskMapper.selectByIdAndCaseIdForUpdate(lifecycleTaskId, scopedCase.getId());
         if (scopedTask == null || scopedCase == null || !lifecycleCaseId.equals(scopedTask.getCaseId())
                 || !lifecycleCaseId.equals(scopedCase.getId())
                 || !"RESIGN_ASSET_RETURN".equals(scopedTask.getTaskCode())
@@ -142,7 +149,6 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
             throw new BusinessException(400, "退社例外免除の案件・タスクscopeが対象要員と一致しません。");
         }
 
-        ApprovalRequest approval = approvalRequestMapper.selectByIdForUpdate(approvalRequestId);
         if (approval == null || !"LIFECYCLE_EXCEPTION".equals(approval.getRequestType())
                 || !isApproved(approval.getStatus()) || !approvalTargetMatches(approval, engineerId)) {
             throw new BusinessException(400, "有効な承認済みLIFECYCLE_EXCEPTION申請が対象要員に紐付いていません。");

@@ -29,3 +29,4 @@ CopilotRunServiceMySqlIntegrationTest
 LifecycleAuthorizationPreflightMySqlTest
 V182TenantScopeHardeningRehearsalMySqlTest
 ReportScheduleClaimFenceMySqlTest
+LifecycleLockOrderMySqlTest

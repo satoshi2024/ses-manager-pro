@@ -20,7 +20,12 @@ import com.ses.service.lifecycle.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -56,6 +61,8 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     private final EngineerSalesService engineerSalesService;
     private final com.ses.service.lifecycle.LifecycleNotificationService notificationService;
     private final ObjectMapper objectMapper;
+    /** 完了通知のafterCommit発行用。手動構築の単体テストではnullになり得る。 */
+    private final PlatformTransactionManager transactionManager;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -693,9 +700,11 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
             }
             resignationGateChecker.executeAutomaticGateActions(lcCase, engineer);
 
-            // 要員ステータスをBenchへ更新
+            // 要員ステータスをBenchへ更新。楽観ロックCASが0件のまま完了すると要員だけ稼動扱いで残るため409にする。
             engineer.setStatus("Bench");
-            engineerMapper.updateById(engineer);
+            if (engineerMapper.updateById(engineer) != 1) {
+                throw BusinessException.of(409, "error.common.optimisticLock");
+            }
         }
 
         String before = lcCase.getStatus();
@@ -720,11 +729,40 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 .occurredAt(LocalDateTime.now())
                 .build());
 
-        // 完了通知発行
-        try {
-            notificationService.notifyCaseCompleted(lcCase);
-        } catch (Exception e) {
-            log.warn("Failed to send case completed notification: {}", e.getMessage());
+        // 完了通知はcommit後に発行する。ロールバックされた完了を通知せず、通知失敗で完了をrollback-onlyにしない。
+        publishCaseCompletedAfterCommit(lcCase);
+    }
+
+    /**
+     * 案件完了通知をafterCommitで独立transaction（REQUIRES_NEW）として発行する（NF01 batch 0）。
+     * 従来は完了transaction内で呼び例外を握り潰していたが、通知serviceの@Transactional(REQUIRED)が
+     * 失敗時に外側をrollback-onlyにするため、握り潰しても完了自体がUnexpectedRollbackで失敗し得た。
+     * afterCommit中のDB書込は完了済みtransactionのresourceに参加してしまうため、必ず新規transactionで行う。
+     */
+    private void publishCaseCompletedAfterCommit(LifecycleCase completedCase) {
+        Runnable publish = () -> {
+            try {
+                if (transactionManager == null) {
+                    notificationService.notifyCaseCompleted(completedCase);
+                    return;
+                }
+                TransactionTemplate requiresNew = new TransactionTemplate(transactionManager);
+                requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                requiresNew.executeWithoutResult(status -> notificationService.notifyCaseCompleted(completedCase));
+            } catch (RuntimeException e) {
+                log.warn("ライフサイクル案件の完了通知の発行に失敗しました: caseId={}, exceptionClass={}",
+                        completedCase.getId(), e.getClass().getSimpleName());
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    publish.run();
+                }
+            });
+        } else {
+            publish.run();
         }
     }
 
@@ -752,14 +790,27 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
             throw BusinessException.of(409, "error.concurrentModification", "案件の状態が変更されました。再読み込みしてください。");
         }
 
-        // 配下の未完了タスクもキャンセル
-        List<LifecycleTask> tasks = taskMapper.selectByCaseIdAndTenant(caseId, tenantId);
-        for (LifecycleTask task : tasks) {
+        // 配下の未完了タスクもキャンセルする。案件ロック保持下でタスクをid昇順に行ロックし、
+        // ロック後の現在値で判定する。CASが0件なら案件だけCANCELLEDでタスクが進行中のまま残る
+        // 不整合になるため、黙って続行せず409でtransactionごとロールバックする（NF01 batch 0 L4）。
+        List<Long> taskIds = taskMapper.selectByCaseIdAndTenant(caseId, tenantId).stream()
+                .map(LifecycleTask::getId)
+                .filter(Objects::nonNull)
+                .sorted()
+                .distinct()
+                .collect(Collectors.toList());
+        for (Long taskId : taskIds) {
+            LifecycleTask task = taskMapper.selectByIdAndCaseIdForUpdate(taskId, lcCase.getId());
+            if (task == null) {
+                continue;
+            }
             if ("PENDING".equals(task.getStatus()) || "IN_PROGRESS".equals(task.getStatus()) || "ON_HOLD".equals(task.getStatus())) {
                 task.setStatus("CANCELLED");
                 task.setCompletionComment("案件中止に伴うキャンセル: " + (reason != null ? reason : ""));
                 task.setUpdatedBy(userId);
-                taskMapper.updateById(task);
+                if (taskMapper.updateById(task) != 1) {
+                    throw BusinessException.of(409, "error.common.optimisticLock");
+                }
             }
         }
 
