@@ -1,5 +1,6 @@
 package com.ses.migration;
 
+import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
@@ -7,6 +8,9 @@ import org.flywaydb.core.api.configuration.FluentConfiguration;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -408,6 +412,13 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             }
             assertEquals(1, tx1InvoiceUpdated, "第1トランザクションの先行更新が行ロックを獲得");
 
+            // 観測接続（DATABASE()=dbName）で、第1トランザクションが主キー一点のUPDATEにより対象インボイス行の
+            // PRIMARY排他record lockをちょうど1件だけ保持していることを確定する。以後の待機確認はこのlockを基準にする。
+            JdbcTemplate monitor = new JdbcTemplate(new SingleConnectionDataSource(monitorConn, true));
+            InnoDbRecordLockWaits.PointLock invoiceLock = InnoDbRecordLockWaits.requireSinglePointLock(monitor,
+                    holderConnId, "t_digital_invoice", "PRIMARY",
+                    InnoDbRecordLockWaits.primaryKey(concurrentInvoiceId), "第1トランザクションのインボイス行ロック");
+
             // 2. 第2トランザクションを別スレッドで実行開始。同一インボイス行を更新しようとしてInnoDB行ロック待ちに入る
             future2 = pool.submit(() -> {
                 try {
@@ -451,7 +462,8 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
             assertTrue(workerEnteringUpdate.await(5, TimeUnit.SECONDS),
                     "Worker thread failed to signal before entering UPDATE within 5 seconds");
 
-            // 3. MySQL内部のrequester→blockerロック待ち関係を接続ID・対象テーブル・PRIMARYインデックス・ロックデータで確認
+            // 3. MySQL内部のrequester→blockerロック待ち関係を、接続ID・対象テーブル・PRIMARYインデックスと、
+            //    第1トランザクションの単一排他record lockを指す待機辺であることで確認する（LOCK_DATAは見えている場合だけ照合）
             long deadline = System.currentTimeMillis() + 5000;
             boolean lockWaitObserved = false;
             while (System.currentTimeMillis() < deadline) {
@@ -470,7 +482,7 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
                 }
 
                 try {
-                    if (hasTargetInvoiceRecordLockWait(monitorConn, dbName, concurrentInvoiceId, contenderConnId, holderConnId)) {
+                    if (hasTargetInvoiceRecordLockWait(monitor, invoiceLock, contenderConnId)) {
                         lockWaitObserved = true;
                         break;
                     }
@@ -989,36 +1001,25 @@ class V182TenantScopeHardeningRehearsalMySqlTest {
         CAS_CONFLICT
     }
 
+    /**
+     * contenderが、第1トランザクションの保持する対象インボイス行のPRIMARY排他record lockを待っているかを1回だけ確認する。
+     *
+     * <p>{@code performance_schema.data_locks.LOCK_DATA}はInnoDBが対象pageをlatch待ちなしで参照できた場合だけ鍵値を返し、
+     * 待機中でもNULLになり得る（{@link InnoDbRecordLockWaits}）。そのため鍵値の等値は必須条件にせず、第1トランザクションが
+     * 主キー一点のUPDATEで当該PRIMARYの排他record lockを1件だけ保持し、contenderの待機辺のblocking lockがそのlockである
+     * ことで対象行を特定する。LOCK_DATAが見えている側は対象インボイスIDと一致しなければならない。
+     */
     private boolean hasTargetInvoiceRecordLockWait(
-            Connection conn, String dbName, long invoiceId, long requestingConnId, long blockingConnId) throws SQLException {
-        String sql = "SELECT COUNT(*) FROM performance_schema.data_lock_waits w "
-                + "JOIN performance_schema.data_locks req ON req.ENGINE = w.ENGINE "
-                + "  AND req.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID "
-                + "JOIN performance_schema.data_locks blk ON blk.ENGINE = w.ENGINE "
-                + "  AND blk.ENGINE_LOCK_ID = w.BLOCKING_ENGINE_LOCK_ID "
-                + "JOIN performance_schema.threads rt ON rt.THREAD_ID = req.THREAD_ID "
-                + "JOIN performance_schema.threads bt ON bt.THREAD_ID = blk.THREAD_ID "
-                + "WHERE (req.OBJECT_SCHEMA = DATABASE() OR req.OBJECT_SCHEMA = ?) "
-                + "  AND req.OBJECT_NAME = 't_digital_invoice' "
-                + "  AND req.INDEX_NAME = 'PRIMARY' AND req.LOCK_TYPE = 'RECORD' "
-                + "  AND (blk.OBJECT_SCHEMA = DATABASE() OR blk.OBJECT_SCHEMA = ?) "
-                + "  AND blk.OBJECT_NAME = 't_digital_invoice' "
-                + "  AND blk.INDEX_NAME = 'PRIMARY' AND blk.LOCK_TYPE = 'RECORD' "
-                + "  AND (CAST(req.LOCK_DATA AS UNSIGNED) = ? OR req.LOCK_DATA = ?) "
-                + "  AND (CAST(blk.LOCK_DATA AS UNSIGNED) = ? OR blk.LOCK_DATA = ?) "
-                + "  AND rt.PROCESSLIST_ID = ? AND bt.PROCESSLIST_ID = ?";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, dbName);
-            ps.setString(2, dbName);
-            ps.setLong(3, invoiceId);
-            ps.setString(4, String.valueOf(invoiceId));
-            ps.setLong(5, invoiceId);
-            ps.setString(6, String.valueOf(invoiceId));
-            ps.setLong(7, requestingConnId);
-            ps.setLong(8, blockingConnId);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() && rs.getLong(1) > 0;
+            JdbcTemplate monitor, InnoDbRecordLockWaits.PointLock invoiceLock, long requestingConnId) throws SQLException {
+        try {
+            return !InnoDbRecordLockWaits.blockerAnchoredWaits(monitor, invoiceLock, requestingConnId,
+                    InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES, InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES).isEmpty();
+        } catch (DataAccessException observationFailure) {
+            // 呼出側は観測クエリの失敗を原例外のSQLState・errorCode付きで報告するため、元のSQLExceptionへ戻す。
+            if (observationFailure.getCause() instanceof SQLException sqlFailure) {
+                throw sqlFailure;
             }
+            throw observationFailure;
         }
     }
 

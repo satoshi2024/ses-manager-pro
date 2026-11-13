@@ -1,8 +1,10 @@
-package com.ses.importcenter.metadata;
+package com.ses.test;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -18,7 +20,8 @@ import java.util.function.Supplier;
  * {@code data_locks}表の説明では「pageがbuffer poolに無い場合はNULL」。実装はpageをtry-getで取得し、取得できなければNULL）。
  * 実際に待機WAITING・保持GRANTEDの両lockが{@code key=null}で観測された。鍵値の完全一致を待機確認の必須条件にすると、
  * 実際には待機しているのに確認できず期限切れになる非決定性が生じる。infimum/supremum疑似recordはpageを参照せず
- * 文字列が決まるため、この問題は無い。
+ * 文字列が決まるため、この問題は無い。CI run 43457549091 shard 2 でも、{@code LOCK_DATA}の等値結合を条件にした
+ * privacy試験が、待機中なのに待機辺を1件も観測できず（observed=[]）失敗した。
  *
  * <p>本helperは次の組合せで「同一recordでの待機」を確定する。
  * <ol>
@@ -32,36 +35,41 @@ import java.util.function.Supplier;
  *   <li>鍵値：LOCK_DATAが見えている側は期待鍵（と相手側の見えている鍵）に一致しなければならない。誤った行の待機を
  *       証拠として受け入れない。NULLは「不可視」として扱い、1〜4で判定する。</li>
  * </ol>
+ *
+ * <p>importcenter・privacy・migration・report・trainingの実MySQL試験で共有するため、共通test packageに置く。
  */
-final class InnoDbRecordLockWaits {
-    static final Set<String> EXCLUSIVE_RECORD_MODES = Set.of("X", "X,REC_NOT_GAP");
-    static final Set<String> EXCLUSIVE_NON_GAP_MODE = Set.of("X,REC_NOT_GAP");
+public final class InnoDbRecordLockWaits {
+    public static final Set<String> EXCLUSIVE_RECORD_MODES = Set.of("X", "X,REC_NOT_GAP");
+    public static final Set<String> EXCLUSIVE_NON_GAP_MODE = Set.of("X,REC_NOT_GAP");
 
     private InnoDbRecordLockWaits() {
     }
 
     /** 接続が保持するRECORD lock（GRANTED）。 */
-    record HeldLock(long connectionId, String lockId, String transactionId, String table, String index,
-                    String mode, String lockData) { }
+    public record HeldLock(long connectionId, String lockId, String transactionId, String table, String index,
+                           String mode, String lockData) { }
 
     /**
      * blocker基準の待機確認に使う基準lock。{@code expectedKey}は、見えている鍵値が満たすべき条件（null=条件なし。
      * その場合も見えている鍵どうしの一致は要求する）。
      */
-    record PointLock(HeldLock lock, Predicate<String> expectedKey) {
-        long connectionId() { return lock.connectionId(); }
-        String table() { return lock.table(); }
-        String index() { return lock.index(); }
-        String lockData() { return lock.lockData(); }
+    public record PointLock(HeldLock lock, Predicate<String> expectedKey) {
+        public long connectionId() { return lock.connectionId(); }
+        public String table() { return lock.table(); }
+        public String index() { return lock.index(); }
+        public String lockData() { return lock.lockData(); }
     }
 
-    /** {@code data_lock_waits}の一辺（requesterのWAITING lock → blockerのGRANTED lock）。 */
-    record WaitEdge(long requesterConnectionId, long blockerConnectionId,
-                    String requesterLockId, String requesterTable, String requesterIndex, String requesterType,
-                    String requesterMode, String requesterStatus, String requesterData,
-                    String blockerLockId, String blockerTable, String blockerIndex, String blockerType,
-                    String blockerMode, String blockerStatus, String blockerData) {
-        String describe() {
+    /**
+     * {@code data_lock_waits}の一辺（requesterのWAITING lock → blockerのlock。blockerのlockは通常GRANTEDだが、
+     * 待機列で先行するrequesterのWAITING lockを指す辺もある）。
+     */
+    public record WaitEdge(long requesterConnectionId, long blockerConnectionId,
+                           String requesterLockId, String requesterTable, String requesterIndex, String requesterType,
+                           String requesterMode, String requesterStatus, String requesterData,
+                           String blockerLockId, String blockerTable, String blockerIndex, String blockerType,
+                           String blockerMode, String blockerStatus, String blockerData) {
+        public String describe() {
             return "requester=" + requesterConnectionId + " " + requesterTable + "/" + requesterIndex + ","
                     + requesterType + "," + requesterMode + "," + requesterStatus + ",key=" + requesterData
                     + "; blocker=" + blockerConnectionId + " " + blockerTable + "/" + blockerIndex + ","
@@ -71,12 +79,12 @@ final class InnoDbRecordLockWaits {
 
     /** 各pollの前に呼ぶ確認（worker futureが期待より早く終わっていないか等）。 */
     @FunctionalInterface
-    interface PollCheck {
+    public interface PollCheck {
         void run() throws Exception;
     }
 
-    static List<HeldLock> grantedRecordLocks(JdbcTemplate jdbc, long connectionId, String table, String index,
-                                             Set<String> modes) {
+    public static List<HeldLock> grantedRecordLocks(JdbcTemplate jdbc, long connectionId, String table, String index,
+                                                    Set<String> modes) {
         return jdbc.query("""
                         SELECT th.PROCESSLIST_ID, dl.ENGINE_LOCK_ID, dl.ENGINE_TRANSACTION_ID, dl.OBJECT_NAME,
                                dl.INDEX_NAME, dl.LOCK_MODE, dl.LOCK_DATA
@@ -90,8 +98,8 @@ final class InnoDbRecordLockWaits {
     }
 
     /** requester（null=任意）からblockerへの、指定table・indexのrecord lock待機辺。 */
-    static List<WaitEdge> waitEdges(JdbcTemplate jdbc, Long requesterConnectionId, long blockerConnectionId,
-                                    String table, String index) {
+    public static List<WaitEdge> waitEdges(JdbcTemplate jdbc, Long requesterConnectionId, long blockerConnectionId,
+                                           String table, String index) {
         long requesterFilter = requesterConnectionId == null ? 0L : requesterConnectionId;
         return jdbc.query("""
                         SELECT wt.PROCESSLIST_ID, bt.PROCESSLIST_ID,
@@ -117,11 +125,39 @@ final class InnoDbRecordLockWaits {
     }
 
     /**
+     * 指定table・index上の全record lock待機辺（requester・blockerを限定しない）。待機列に並ぶ複数requesterの
+     * 待機graphを辿る試験が使う。LOCK_DATAでは結合・絞込みしない。
+     */
+    public static List<WaitEdge> waitEdgesOnIndex(JdbcTemplate jdbc, String table, String index) {
+        return jdbc.query("""
+                        SELECT wt.PROCESSLIST_ID, bt.PROCESSLIST_ID,
+                               req.ENGINE_LOCK_ID, req.OBJECT_NAME, req.INDEX_NAME, req.LOCK_TYPE, req.LOCK_MODE,
+                               req.LOCK_STATUS, req.LOCK_DATA,
+                               blk.ENGINE_LOCK_ID, blk.OBJECT_NAME, blk.INDEX_NAME, blk.LOCK_TYPE, blk.LOCK_MODE,
+                               blk.LOCK_STATUS, blk.LOCK_DATA
+                        FROM performance_schema.data_lock_waits w
+                        JOIN performance_schema.threads wt ON wt.THREAD_ID=w.REQUESTING_THREAD_ID
+                        JOIN performance_schema.threads bt ON bt.THREAD_ID=w.BLOCKING_THREAD_ID
+                        JOIN performance_schema.data_locks req
+                          ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                        JOIN performance_schema.data_locks blk
+                          ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                        WHERE req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=? AND req.INDEX_NAME=?
+                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=? AND blk.INDEX_NAME=?
+                        """, (rs, row) -> new WaitEdge(rs.getLong(1), rs.getLong(2), rs.getString(3),
+                        rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8),
+                        rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(12), rs.getString(13),
+                        rs.getString(14), rs.getString(15), rs.getString(16)),
+                table, index, table, index);
+    }
+
+    /**
      * blockerが一意条件で1行だけを排他lockしたことを確認し、その保持lockを返す。保持lockが1件でない、または見えている
      * 鍵値が期待と違う場合は対象行を特定できないため失敗させる（lockは同期的に作られるが念のため短く待つ）。
      */
-    static PointLock requireSinglePointLock(JdbcTemplate jdbc, long blockerConnectionId, String table, String index,
-                                            Predicate<String> expectedKey, String label) throws InterruptedException {
+    public static PointLock requireSinglePointLock(JdbcTemplate jdbc, long blockerConnectionId, String table,
+                                                   String index, Predicate<String> expectedKey, String label)
+            throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         List<HeldLock> held = List.of();
         while (System.nanoTime() < deadline) {
@@ -144,27 +180,18 @@ final class InnoDbRecordLockWaits {
      * blocker基準の待機を待つ。毎poll、blockerが当該indexの排他record lockを1件だけ保持し、待機辺のblocking lockが
      * そのlockであることを確認する（lock IDはpage再編成で変わり得るため、取得済みIDの固定比較はしない）。
      */
-    static WaitEdge awaitBlockerAnchoredWait(JdbcTemplate jdbc, PointLock anchor, Supplier<Long> expectedRequester,
-                                             Set<String> requestModes, Set<String> blockerModes, long timeoutMillis,
-                                             PollCheck beforeEachPoll, String label) throws Exception {
-        Predicate<String> expectedKey = anchor.expectedKey();
+    public static WaitEdge awaitBlockerAnchoredWait(JdbcTemplate jdbc, PointLock anchor,
+                                                    Supplier<Long> expectedRequester, Set<String> requestModes,
+                                                    Set<String> blockerModes, long timeoutMillis,
+                                                    PollCheck beforeEachPoll, String label) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
         while (System.nanoTime() < deadline) {
             beforeEachPoll.run();
             Long requester = expectedRequester == null ? null : expectedRequester.get();
             if (expectedRequester == null || requester != null) {
-                List<HeldLock> held = grantedRecordLocks(jdbc, anchor.connectionId(), anchor.table(), anchor.index(),
-                        EXCLUSIVE_RECORD_MODES);
-                if (held.size() == 1 && keyVisibleAndMatches(held.get(0).lockData(), expectedKey)) {
-                    HeldLock current = held.get(0);
-                    for (WaitEdge edge : waitEdges(jdbc, requester, anchor.connectionId(), anchor.table(),
-                            anchor.index())) {
-                        if (Objects.equals(edge.blockerLockId(), current.lockId())
-                                && structurallyMatches(edge, requestModes, blockerModes)
-                                && keysConsistent(edge, expectedKey, anchor.lockData(), current.lockData())) {
-                            return edge;
-                        }
-                    }
+                List<WaitEdge> anchored = blockerAnchoredWaits(jdbc, anchor, requester, requestModes, blockerModes);
+                if (!anchored.isEmpty()) {
+                    return anchored.get(0);
                 }
             }
             Thread.sleep(25);
@@ -175,13 +202,73 @@ final class InnoDbRecordLockWaits {
     }
 
     /**
+     * blocker基準の待機を1回だけ確認し、条件を満たす待機辺を返す（空=未確認）。独自のpoll loopと診断を持つ呼出側も使う。
+     * blockerが当該indexの排他record lockを今も1件だけ保持し（見えている鍵値は期待と一致）、requester（null=任意）から
+     * の待機辺のblocking lockがそのlockである辺だけを返す。
+     */
+    public static List<WaitEdge> blockerAnchoredWaits(JdbcTemplate jdbc, PointLock anchor, Long requesterConnectionId,
+                                                      Set<String> requestModes, Set<String> blockerModes) {
+        Predicate<String> expectedKey = anchor.expectedKey();
+        List<HeldLock> held = grantedRecordLocks(jdbc, anchor.connectionId(), anchor.table(), anchor.index(),
+                EXCLUSIVE_RECORD_MODES);
+        if (held.size() != 1 || !keyVisibleAndMatches(held.get(0).lockData(), expectedKey)) {
+            return List.of();
+        }
+        HeldLock current = held.get(0);
+        List<WaitEdge> anchored = new ArrayList<>();
+        for (WaitEdge edge : waitEdges(jdbc, requesterConnectionId, anchor.connectionId(), anchor.table(),
+                anchor.index())) {
+            if (Objects.equals(edge.blockerLockId(), current.lockId())
+                    && structurallyMatches(edge, requestModes, blockerModes)
+                    && keysConsistent(edge, expectedKey, anchor.lockData(), current.lockData())) {
+                anchored.add(edge);
+            }
+        }
+        return anchored;
+    }
+
+    /**
+     * requesterの待機をlock IDで辿り、holderが保持する対象行の排他lock（{@code holderLockId}）へ到達するか。
+     * 待機列に複数requesterが並ぶ場合に使う（{@code waits}は呼出側が構造・鍵値で絞った同一table・index上の辺）。
+     *
+     * <p>record lockの待機辺は同一recordのlock同士にしか生じず、transactionが同時に待つlockは1件だけである。そのため
+     * 辺のblocking lockが他requesterのWAITING lock（待機列で先行する要求）なら、そのlockを起点に辿り続けてよい。
+     * holderへの辺は、holderの単一排他lockを指す場合だけ到達とする。他接続のGRANTED lockで行き止まる経路や、holderの
+     * 別lockを指す辺は、対象行での待機の証拠にしない。
+     */
+    public static boolean reachesHolder(List<WaitEdge> waits, long requesterConnectionId, long holderConnectionId,
+                                        String holderLockId) {
+        Set<String> visited = new HashSet<>();
+        ArrayDeque<String> pending = new ArrayDeque<>();
+        for (WaitEdge wait : waits) {
+            if (wait.requesterConnectionId() == requesterConnectionId && wait.requesterLockId() != null) {
+                pending.addLast(wait.requesterLockId());
+            }
+        }
+        while (!pending.isEmpty()) {
+            String waitingLockId = pending.removeFirst();
+            if (!visited.add(waitingLockId)) continue;
+            for (WaitEdge wait : waits) {
+                if (!waitingLockId.equals(wait.requesterLockId())) continue;
+                if (wait.blockerConnectionId() == holderConnectionId) {
+                    if (holderLockId != null && holderLockId.equals(wait.blockerLockId())) return true;
+                } else if (wait.blockerLockId() != null) {
+                    pending.addLast(wait.blockerLockId());
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * requester基準の待機を待つ。requesterの文が主キー一点（または単一行FK）であることは呼出側が保証する。
      * requester・blockerの接続IDが揃うまでは問い合わせない。
      */
-    static WaitEdge awaitRequesterAnchoredWait(JdbcTemplate jdbc, Supplier<Long> requester, Supplier<Long> blocker,
-                                               String table, String index, Set<String> requestModes,
-                                               Set<String> blockerModes, Predicate<String> expectedKey,
-                                               long timeoutMillis, PollCheck beforeEachPoll, String label)
+    public static WaitEdge awaitRequesterAnchoredWait(JdbcTemplate jdbc, Supplier<Long> requester,
+                                                      Supplier<Long> blocker, String table, String index,
+                                                      Set<String> requestModes, Set<String> blockerModes,
+                                                      Predicate<String> expectedKey, long timeoutMillis,
+                                                      PollCheck beforeEachPoll, String label)
             throws Exception {
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
         while (System.nanoTime() < deadline) {
@@ -206,17 +293,39 @@ final class InnoDbRecordLockWaits {
     }
 
     /** 見えている鍵値が期待に合うか。NULL（不可視）と期待なしは合格とする。 */
-    static boolean keyVisibleAndMatches(String lockData, Predicate<String> expectedKey) {
+    public static boolean keyVisibleAndMatches(String lockData, Predicate<String> expectedKey) {
         return lockData == null || expectedKey == null || expectedKey.test(lockData);
     }
 
     /** LOCK_DATAの単純な数値主キー（例 {@code 123}）が期待値と一致するか。 */
-    static Predicate<String> primaryKey(long id) {
+    public static Predicate<String> primaryKey(long id) {
         String expected = Long.toString(id);
         return lockData -> expected.equals(unquote(lockData.trim()));
     }
 
-    static String unquote(String value) {
+    /**
+     * 複合主キーのLOCK_DATA（例 {@code 'tenant-a', 'subject-b'}。列値は「, 」区切りで、文字列は引用符付き）が、
+     * 期待する列値の並びと完全に一致するか。列数・列順・どれか1列の違いはすべて不一致とする。区切りと衝突する
+     * 「,」や引用符を含む期待値は誤照合の余地があるため受け付けない。
+     */
+    public static Predicate<String> compositeKey(String... expectedValues) {
+        List<String> expected = List.of(expectedValues);
+        for (String value : expected) {
+            if (value.isEmpty() || value.contains(",") || value.contains("'")) {
+                throw new IllegalArgumentException("LOCK_DATAの区切りと衝突する鍵値は照合できません: " + value);
+            }
+        }
+        return lockData -> {
+            String[] parts = lockData.split(",", -1);
+            if (parts.length != expected.size()) return false;
+            for (int i = 0; i < parts.length; i++) {
+                if (!expected.get(i).equals(unquote(parts[i].trim()))) return false;
+            }
+            return true;
+        };
+    }
+
+    public static String unquote(String value) {
         if (value.length() >= 2 && value.startsWith("'") && value.endsWith("'")) {
             return value.substring(1, value.length() - 1).replace("''", "'");
         }
@@ -224,7 +333,7 @@ final class InnoDbRecordLockWaits {
     }
 
     /** 失敗時の診断。blockerを待っている全辺を、鍵値（NULLを含む）とともに列挙する。 */
-    static String describeWaitsForBlocker(JdbcTemplate jdbc, long blockerConnectionId) {
+    public static String describeWaitsForBlocker(JdbcTemplate jdbc, long blockerConnectionId) {
         try {
             List<String> details = new ArrayList<>();
             for (WaitEdge edge : jdbc.query("""

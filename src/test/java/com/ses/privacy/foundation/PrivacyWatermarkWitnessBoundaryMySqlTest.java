@@ -1,5 +1,6 @@
 package com.ses.privacy.foundation;
 
+import com.ses.test.InnoDbRecordLockWaits;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -36,6 +37,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import java.security.MessageDigest;
 import java.security.PublicKey;
 import java.util.HexFormat;
@@ -334,7 +336,8 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             }
             long startedNanos = System.nanoTime();
             Future<PrivacyRecoveryService.Result> recovery = pool.submit(() -> timedService.recover(witnessPartition()));
-            awaitTableLockWaits(1, recording, blockerId, APPLICATION.getDatabaseName(), "sf_w2b_projection");
+            awaitTableLockWaits(1, recording, blockerId, APPLICATION.getDatabaseName(), "sf_w2b_projection",
+                    InnoDbRecordLockWaits.compositeKey(tenantId, subjectRef));
             PrivacyRecoveryService.Result timedOut = recovery.get(10, TimeUnit.SECONDS);
             long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
             assertEquals(PrivacyRecoveryService.Status.QUARANTINED, timedOut.status());
@@ -348,7 +351,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             pool.shutdown();
             assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS), "deadline後にrecovery workerが残らない");
             assertTrue(tableLockWaits(APPLICATION.getDatabaseName(), "sf_w2b_projection").stream()
-                    .noneMatch(wait -> recording.connectionIds().contains(wait.requesterId())), "timeout後にprojection lock waiterが残らない");
+                    .noneMatch(wait -> recording.connectionIds().contains(wait.requesterConnectionId())), "timeout後にprojection lock waiterが残らない");
             assertEquals(0, recording.openConnectionIds().size(), "記録したJDBC connectionがすべてclose済み");
             assertNoDatabaseSessions(recording.connectionIds(), "timeout後に実MySQL session/transactionが残らない");
         } catch (Throwable failure) {
@@ -495,7 +498,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             workerA = pool.submit(() -> runLegacyFenceInsertAndUpgrade(workers, partition, start, insertsReturned));
             workerB = pool.submit(() -> runLegacyFenceInsertAndUpgrade(workers, partition, start, insertsReturned));
             start.countDown();
-            var waitEvidence = awaitFenceLockWaits(2, workers, holderId, APPLICATION.getDatabaseName());
+            var waitEvidence = awaitFenceLockWaits(2, workers, holderId, APPLICATION.getDatabaseName(), partition);
             assertTrue(waitEvidence.stream().allMatch(wait -> wait.requestedIndex().equals("PRIMARY")
                             && wait.blockingIndex().equals("PRIMARY") && wait.requestedStatus().equals("WAITING")
                             && wait.blockingStatus().equals("GRANTED") && wait.requestedMode().startsWith("S")
@@ -556,7 +559,7 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             workerB = pool.submit(() -> { start.await(); return service.projectAcknowledged(partition, ack); });
             start.countDown();
 
-            var waitEvidence = awaitFenceLockWaits(2, serviceDataSource, holderId, APPLICATION.getDatabaseName());
+            var waitEvidence = awaitFenceLockWaits(2, serviceDataSource, holderId, APPLICATION.getDatabaseName(), partition);
             var serviceConnectionIds = serviceDataSource.connectionIds().stream().distinct().sorted().toList();
             var waitingConnectionIds = waitEvidence.stream().map(FenceLockWait::requesterId).distinct().sorted().toList();
             assertEquals(2, serviceConnectionIds.size(), "2つの実service connectionを観測する");
@@ -655,7 +658,8 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             }
             Future<PrivacyRecoveryService.Result> recovery = pool.submit(() ->
                     timedService.recover(witnessPartition(), Duration.ofSeconds(2)));
-            awaitTableLockWaits(1, recording, blockerId, APPLICATION.getDatabaseName(), "sf_w2b_partition_fence");
+            awaitTableLockWaits(1, recording, blockerId, APPLICATION.getDatabaseName(), "sf_w2b_partition_fence",
+                    InnoDbRecordLockWaits.compositeKey(tenantId, subjectRef));
             PrivacyRecoveryService.Result unconfirmed = recovery.get(5, TimeUnit.SECONDS);
             assertEquals(PrivacyRecoveryService.Status.ABORTED_UNKNOWN, unconfirmed.status());
             assertEquals("FENCE_ACQUIRE_UNCONFIRMED", unconfirmed.reason());
@@ -1703,9 +1707,9 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
             SignedWatermark early = reverseSubmission ? second : first;
             SignedWatermark late = reverseSubmission ? first : second;
             Future<LatestWitnessPort.AppendResult> earlyFuture = pool.submit(() -> writerAdapter.append(early, 0, "0".repeat(64)));
-            awaitPrimaryLockWaits(1, writerDataSource, holderId, WITNESS.getDatabaseName());
+            awaitPrimaryLockWaits(1, writerDataSource, holderId, WITNESS.getDatabaseName(), partition);
             Future<LatestWitnessPort.AppendResult> lateFuture = pool.submit(() -> writerAdapter.append(late, 0, "0".repeat(64)));
-            awaitPrimaryLockWaits(2, writerDataSource, holderId, WITNESS.getDatabaseName());
+            awaitPrimaryLockWaits(2, writerDataSource, holderId, WITNESS.getDatabaseName(), partition);
             blocker.commit();
             blockerReleased = true;
             LatestWitnessPort.AppendResult earlyResult = earlyFuture.get(10, TimeUnit.SECONDS);
@@ -1746,104 +1750,146 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
     }
 
     private void awaitPrimaryLockWaits(int expected, RecordingConnectionDataSource writerDataSource,
-            long holderId, String schema)
+            long holderId, String schema, LatestWitnessPort.Partition partition)
             throws InterruptedException {
-        awaitTableLockWaits(expected, writerDataSource, holderId, schema, "sf_w2b_latest_checkpoint");
+        awaitTableLockWaits(expected, writerDataSource, holderId, schema, "sf_w2b_latest_checkpoint",
+                InnoDbRecordLockWaits.compositeKey(partition.journalId(), partition.tenantId(), partition.subjectRef()));
     }
 
+    /**
+     * 既知接続のうち{@code expected}件以上が、holderの保持する対象PRIMARY行のlockを待っていることを確認する。
+     *
+     * <p>LOCK_DATAはInnoDBがpageをlatch待ちなしで参照できた場合だけ見え、待機中でもNULLになり得る（CI run 43457549091
+     * shard 2で、LOCK_DATAの等値結合が成立せずobserved=[]となった原因。{@link InnoDbRecordLockWaits}参照）。そのため
+     * 鍵値の一致には依存せず、次の全てを満たす待機だけを証拠にする。
+     * <ol>
+     *   <li>構造：requesterのlockが対象schema・table・PRIMARY上のRECORD/WAITINGで、blockerのlockも同じindex上のRECORD。</li>
+     *   <li>requesterはfixtureが記録した既知接続。</li>
+     *   <li>holderは主キー一点の{@code FOR UPDATE}で当該PRIMARYの排他record lockをちょうど1件だけ保持する（開始時と毎pollで確認）。
+     *       その1件が対象行のlockである。</li>
+     *   <li>{@code data_lock_waits}のblocker graphをlock IDで辿り、holderのその1件のlockへ到達する
+     *       （{@link InnoDbRecordLockWaits#reachesHolder}）。</li>
+     *   <li>LOCK_DATAが見えている側は期待主キーと一致する。NULLは不可視として扱う。</li>
+     * </ol>
+     */
     private void awaitTableLockWaits(int expected, RecordingConnectionDataSource writerDataSource,
-            long holderId, String schema, String table)
+            long holderId, String schema, String table, Predicate<String> expectedKey)
             throws InterruptedException {
+        JdbcTemplate observer = lockObserver(schema, table);
+        InnoDbRecordLockWaits.PointLock holderLock = InnoDbRecordLockWaits.requireSinglePointLock(observer, holderId,
+                table, "PRIMARY", expectedKey, table + "のholder");
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        List<LockWait> observed = List.of();
+        List<InnoDbRecordLockWaits.WaitEdge> observed = List.of();
         while (System.nanoTime() < deadline) {
             List<Long> ids = writerDataSource.connectionIds().stream().distinct().toList();
             if (ids.size() >= expected) {
-                observed = tableLockWaits(schema, table);
-                List<LockWait> matching = observed.stream()
-                        .filter(wait -> ids.contains(wait.requesterId()))
-                        .filter(wait -> wait.lockData() != null)
-                        .toList();
-                String targetLockData = matching.stream().map(LockWait::lockData).findFirst().orElse(null);
-                List<LockWait> targetWaits = matching.stream()
-                        .filter(wait -> wait.lockData().equals(targetLockData)).toList();
-                List<Long> waitingIds = targetWaits.stream().map(LockWait::requesterId).distinct().toList();
-                boolean allReachHolder = waitingIds.size() >= expected && waitingIds.stream().limit(expected)
-                        .allMatch(id -> reachesHolder(targetWaits, id, holderId));
-                if (allReachHolder) return;
+                String holderLockId = currentHolderLockId(observer, holderLock);
+                observed = tableLockWaits(observer, table);
+                if (holderLockId != null) {
+                    List<InnoDbRecordLockWaits.WaitEdge> targetWaits = observed.stream()
+                            .filter(wait -> visibleKeysMatch(wait, expectedKey)).toList();
+                    long reached = ids.stream().filter(id ->
+                            InnoDbRecordLockWaits.reachesHolder(targetWaits, id, holderId, holderLockId)).count();
+                    if (reached >= expected) return;
+                }
             }
             Thread.sleep(25);
         }
         fail("対象PRIMARY行で既知接続のlock waitを確認できません。expected=" + expected
-                + " connectionIds=" + writerDataSource.connectionIds() + " holderId=" + holderId + " observed=" + observed);
+                + " connectionIds=" + writerDataSource.connectionIds() + " holderId=" + holderId
+                + " holder=" + InnoDbRecordLockWaits.describeWaitsForBlocker(observer, holderId)
+                + " observed=" + observed.stream().map(InnoDbRecordLockWaits.WaitEdge::describe).toList());
     }
 
-    private List<LockWait> primaryLockWaits(String schema) {
-        return tableLockWaits(schema, "sf_w2b_latest_checkpoint");
+    /** 対象schema・table・PRIMARY上のrecord lock待機辺。LOCK_DATAでは結合・絞込みしない。 */
+    private List<InnoDbRecordLockWaits.WaitEdge> tableLockWaits(String schema, String table) {
+        return tableLockWaits(lockObserver(schema, table), table);
     }
 
-    private List<LockWait> tableLockWaits(String schema, String table) {
+    private List<InnoDbRecordLockWaits.WaitEdge> tableLockWaits(JdbcTemplate observer, String table) {
+        return InnoDbRecordLockWaits.waitEdgesOnIndex(observer, table, "PRIMARY").stream()
+                .filter(wait -> wait.requesterConnectionId() != wait.blockerConnectionId())
+                .filter(wait -> "RECORD".equals(wait.requesterType()) && "WAITING".equals(wait.requesterStatus()))
+                .filter(wait -> "RECORD".equals(wait.blockerType()))
+                .toList();
+    }
+
+    /**
+     * fixture表に対応する観測用admin接続を返す。helperは{@code OBJECT_SCHEMA=DATABASE()}で絞るため、観測接続の既定schemaが
+     * 対象schemaと一致することを先に確かめ、別schemaの待機を拾わないようにする。
+     */
+    private JdbcTemplate lockObserver(String schema, String table) {
         if (!List.of("sf_w2b_latest_checkpoint", "sf_w2b_projection", "sf_w2b_partition_fence").contains(table)) {
             throw new IllegalArgumentException("unsupported fixture lock table");
         }
-        JdbcTemplate lockObserver = List.of("sf_w2b_projection", "sf_w2b_partition_fence").contains(table)
+        JdbcTemplate observer = List.of("sf_w2b_projection", "sf_w2b_partition_fence").contains(table)
                 ? projectionAdmin : witnessAdmin;
-        return lockObserver.query("SELECT requester.PROCESSLIST_ID AS requester_id, blocker.PROCESSLIST_ID AS blocker_id, requested.LOCK_DATA AS lock_data, blocking.LOCK_STATUS AS blocker_status "
-                        + "FROM performance_schema.data_lock_waits waits "
-                        + "JOIN performance_schema.data_locks requested ON requested.ENGINE = waits.ENGINE AND requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID "
-                        + "JOIN performance_schema.data_locks blocking ON blocking.ENGINE = waits.ENGINE AND blocking.ENGINE_LOCK_ID = waits.BLOCKING_ENGINE_LOCK_ID "
-                        + "JOIN performance_schema.threads requester ON requester.THREAD_ID = requested.THREAD_ID "
-                        + "JOIN performance_schema.threads blocker ON blocker.THREAD_ID = blocking.THREAD_ID "
-                        + "WHERE requested.OBJECT_SCHEMA = ? AND requested.OBJECT_NAME = ? "
-                        + "AND requested.INDEX_NAME = 'PRIMARY' AND requested.LOCK_TYPE = 'RECORD' AND requested.LOCK_STATUS = 'WAITING' "
-                        + "AND blocking.OBJECT_SCHEMA = requested.OBJECT_SCHEMA AND blocking.OBJECT_NAME = requested.OBJECT_NAME "
-                        + "AND blocking.INDEX_NAME = 'PRIMARY' AND blocking.LOCK_TYPE = 'RECORD' "
-                        + "AND blocking.LOCK_DATA = requested.LOCK_DATA",
-                (rs, row) -> new LockWait(rs.getLong("requester_id"), rs.getLong("blocker_id"),
-                        rs.getString("lock_data"), rs.getString("blocker_status")), schema, table);
+        String observerSchema = observer.queryForObject("SELECT DATABASE()", String.class);
+        if (!schema.equals(observerSchema)) {
+            throw new IllegalStateException("lock観測接続のschemaが対象と一致しません: expected=" + schema
+                    + " actual=" + observerSchema);
+        }
+        return observer;
     }
 
+    /** holderが今も対象PRIMARYの排他record lockを1件だけ保持し、見えている鍵値が期待と一致すれば、そのlock IDを返す。 */
+    private static String currentHolderLockId(JdbcTemplate observer, InnoDbRecordLockWaits.PointLock holderLock) {
+        List<InnoDbRecordLockWaits.HeldLock> held = InnoDbRecordLockWaits.grantedRecordLocks(observer,
+                holderLock.connectionId(), holderLock.table(), holderLock.index(),
+                InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES);
+        if (held.size() != 1
+                || !InnoDbRecordLockWaits.keyVisibleAndMatches(held.get(0).lockData(), holderLock.expectedKey())) {
+            return null;
+        }
+        return held.get(0).lockId();
+    }
+
+    /** 待機辺の両端のLOCK_DATAのうち、見えている側がすべて期待鍵と一致するか（NULLは不可視）。 */
+    private static boolean visibleKeysMatch(InnoDbRecordLockWaits.WaitEdge wait, Predicate<String> expectedKey) {
+        return InnoDbRecordLockWaits.keyVisibleAndMatches(wait.requesterData(), expectedKey)
+                && InnoDbRecordLockWaits.keyVisibleAndMatches(wait.blockerData(), expectedKey);
+    }
+
+    /**
+     * 指定workerのうち{@code expected}件以上が、holderの保持するfence PRIMARY行のlockを直接待っていることを確認し、
+     * その待機辺を返す。判定は{@link #awaitTableLockWaits}と同じくLOCK_DATAの値に依存せず、holderの単一排他record lockを
+     * blocking lockとして指す辺だけを採る（LOCK_DATAが見えている側は期待主キーと一致すること）。
+     */
     private List<FenceLockWait> awaitFenceLockWaits(int expected, RecordingConnectionDataSource workerDataSource,
-            long holderId, String schema) throws InterruptedException {
+            long holderId, String schema, PrivacyJournalPort.JournalPartition partition) throws InterruptedException {
+        String table = "sf_w2b_partition_fence";
+        Predicate<String> expectedKey = InnoDbRecordLockWaits.compositeKey(partition.tenantId(), partition.subjectRef());
+        JdbcTemplate observer = lockObserver(schema, table);
+        InnoDbRecordLockWaits.PointLock holderLock = InnoDbRecordLockWaits.requireSinglePointLock(observer, holderId,
+                table, "PRIMARY", expectedKey, "fence holder");
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        List<FenceLockWait> observed = List.of();
+        List<InnoDbRecordLockWaits.WaitEdge> observed = List.of();
         while (System.nanoTime() < deadline) {
             Set<Long> workerIds = workerDataSource.connectionIds().stream().collect(java.util.stream.Collectors.toSet());
             if (workerIds.size() >= expected) {
-                observed = fenceLockWaits(schema);
-                List<FenceLockWait> matching = observed.stream()
-                        .filter(wait -> workerIds.contains(wait.requesterId()) && wait.blockerId() == holderId)
-                        .toList();
-                if (matching.stream().map(FenceLockWait::requesterId).distinct().count() >= expected) return matching;
+                String holderLockId = currentHolderLockId(observer, holderLock);
+                observed = tableLockWaits(observer, table);
+                if (holderLockId != null) {
+                    List<FenceLockWait> matching = observed.stream()
+                            .filter(wait -> workerIds.contains(wait.requesterConnectionId())
+                                    && wait.blockerConnectionId() == holderId)
+                            .filter(wait -> holderLockId.equals(wait.blockerLockId()))
+                            .filter(wait -> visibleKeysMatch(wait, expectedKey))
+                            .map(wait -> new FenceLockWait(wait.requesterConnectionId(), wait.blockerConnectionId(),
+                                    wait.requesterIndex(), wait.requesterMode(), wait.requesterStatus(),
+                                    wait.blockerIndex(), wait.blockerMode(), wait.blockerStatus()))
+                            .toList();
+                    if (matching.stream().map(FenceLockWait::requesterId).distinct().count() >= expected) return matching;
+                }
             }
             Thread.sleep(25);
         }
         fail("対象PRIMARY行で指定workerからholderへのwait graphを確認できません。expected=" + expected
                 + " workerConnectionIds=" + workerDataSource.connectionIds().stream().distinct().toList()
-                + " holderConnectionId=" + holderId + " observedEdges=" + observed);
+                + " holderConnectionId=" + holderId
+                + " holder=" + InnoDbRecordLockWaits.describeWaitsForBlocker(observer, holderId)
+                + " observedEdges=" + observed.stream().map(InnoDbRecordLockWaits.WaitEdge::describe).toList());
         return List.of();
-    }
-
-    private List<FenceLockWait> fenceLockWaits(String schema) {
-        return projectionAdmin.query("SELECT requester.PROCESSLIST_ID AS requester_id, blocker.PROCESSLIST_ID AS blocker_id, "
-                        + "requested.INDEX_NAME AS requested_index, requested.LOCK_MODE AS requested_mode, "
-                        + "requested.LOCK_STATUS AS requested_status, blocking.INDEX_NAME AS blocking_index, "
-                        + "blocking.LOCK_MODE AS blocking_mode, blocking.LOCK_STATUS AS blocking_status "
-                        + "FROM performance_schema.data_lock_waits waits "
-                        + "JOIN performance_schema.data_locks requested ON requested.ENGINE = waits.ENGINE "
-                        + "AND requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID "
-                        + "JOIN performance_schema.data_locks blocking ON blocking.ENGINE = waits.ENGINE "
-                        + "AND blocking.ENGINE_LOCK_ID = waits.BLOCKING_ENGINE_LOCK_ID "
-                        + "JOIN performance_schema.threads requester ON requester.THREAD_ID = requested.THREAD_ID "
-                        + "JOIN performance_schema.threads blocker ON blocker.THREAD_ID = blocking.THREAD_ID "
-                        + "WHERE requested.OBJECT_SCHEMA = ? AND requested.OBJECT_NAME = 'sf_w2b_partition_fence' "
-                        + "AND requested.INDEX_NAME = 'PRIMARY' AND requested.LOCK_TYPE = 'RECORD' "
-                        + "AND requested.LOCK_STATUS = 'WAITING' AND blocking.OBJECT_SCHEMA = requested.OBJECT_SCHEMA "
-                        + "AND blocking.OBJECT_NAME = requested.OBJECT_NAME AND blocking.INDEX_NAME = 'PRIMARY' "
-                        + "AND blocking.LOCK_TYPE = 'RECORD' AND blocking.LOCK_DATA = requested.LOCK_DATA",
-                (rs, row) -> new FenceLockWait(rs.getLong("requester_id"), rs.getLong("blocker_id"),
-                        rs.getString("requested_index"), rs.getString("requested_mode"), rs.getString("requested_status"),
-                        rs.getString("blocking_index"), rs.getString("blocking_mode"), rs.getString("blocking_status")), schema);
     }
 
     private LegacyFenceLockOutcome runLegacyFenceInsertAndUpgrade(RecordingConnectionDataSource dataSource,
@@ -1928,20 +1974,6 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         journalAdmin.update("DELETE FROM sf_journal_head WHERE tenant_id=? AND subject_ref=?", partition.tenantId(), partition.subjectRef());
     }
 
-    private boolean reachesHolder(List<LockWait> waits, long requesterId, long holderId) {
-        var reached = new java.util.HashSet<Long>();
-        var pending = new java.util.ArrayDeque<Long>();
-        pending.add(requesterId);
-        while (!pending.isEmpty()) {
-            long current = pending.removeFirst();
-            if (!reached.add(current)) continue;
-            if (current == holderId) return true;
-            waits.stream().filter(wait -> wait.requesterId() == current).map(LockWait::blockerId)
-                    .filter(blocker -> !reached.contains(blocker)).forEach(pending::addLast);
-        }
-        return false;
-    }
-
     private long connectionId(Connection connection) throws SQLException {
         try (var statement = connection.createStatement(); var result = statement.executeQuery("SELECT CONNECTION_ID()")) {
             assertTrue(result.next());
@@ -1954,8 +1986,6 @@ class PrivacyWatermarkWitnessBoundaryMySqlTest {
         primary.addSuppressed(next);
         return primary;
     }
-
-    private record LockWait(long requesterId, long blockerId, String lockData, String blockerStatus) { }
 
     private record FenceLockWait(long requesterId, long blockerId, String requestedIndex, String requestedMode,
             String requestedStatus, String blockingIndex, String blockingMode, String blockingStatus) { }

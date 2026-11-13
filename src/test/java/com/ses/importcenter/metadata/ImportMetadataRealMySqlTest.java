@@ -22,6 +22,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.storage.DocumentStorage;
+import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
