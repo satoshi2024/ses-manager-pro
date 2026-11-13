@@ -105,7 +105,8 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     @Override
     @Transactional(rollbackFor = Exception.class)
     public IntegrationJob triggerBpPurchaseSync(Long bpPaymentId, Long triggeredByUserId) {
-        BpPayment bpPayment = bpPaymentMapper.selectById(bpPaymentId);
+        // BP支払はtenant列を持たないため、工数実績→契約→顧客のownershipで現在tenantへ限定する
+        BpPayment bpPayment = bpPaymentMapper.selectByIdForTenant(bpPaymentId, AccountingTenantContextHolder.requireTenantContext());
         if (bpPayment == null) {
             throw BusinessException.of(404, "error.accounting.bpPaymentNotFound");
         }
@@ -154,6 +155,10 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         Long legalEntityId = legalEntityResolver.require(conn, legalEntityResolver.ofBpPayment(bpPayment));
 
         CanonicalPurchaseDeal canonical = buildPurchaseCanonical(bpPayment, conn.getId(), resolveBpIssueDate(bpPayment));
+        // 前の世代が外部へ送信した後に取消された場合は、作成前に同じ管理番号の取引がfreeeに無いことを確認させる
+        if (sendKeyResolver.requiresExistingDealCheck("BP_PAYMENT", bpPayment.getId(), "BP_PURCHASE_SYNC")) {
+            canonical.setVerifyNoExistingDeal(Boolean.TRUE);
+        }
 
         String payloadJson;
         try {
@@ -175,7 +180,8 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
 
     @Override
     public AccountingSendPreviewDto<CanonicalPurchaseDeal> previewBpPurchaseSync(Long bpPaymentId) {
-        BpPayment bpPayment = bpPaymentMapper.selectById(bpPaymentId);
+        // BP支払はtenant列を持たないため、工数実績→契約→顧客のownershipで現在tenantへ限定する
+        BpPayment bpPayment = bpPaymentMapper.selectByIdForTenant(bpPaymentId, AccountingTenantContextHolder.requireTenantContext());
         if (bpPayment == null) {
             throw BusinessException.of(404, "error.accounting.bpPaymentNotFound");
         }
@@ -220,7 +226,8 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     @Override
     @Transactional(rollbackFor = Exception.class)
     public IntegrationJob triggerPaymentSync(Long bpPaymentId, Long triggeredByUserId) {
-        BpPayment bpPayment = bpPaymentMapper.selectById(bpPaymentId);
+        // BP支払はtenant列を持たないため、工数実績→契約→顧客のownershipで現在tenantへ限定する
+        BpPayment bpPayment = bpPaymentMapper.selectByIdForTenant(bpPaymentId, AccountingTenantContextHolder.requireTenantContext());
         if (bpPayment == null) {
             throw BusinessException.of(404, "error.accounting.bpPaymentNotFound");
         }
@@ -287,6 +294,10 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         Long legalEntityId = legalEntityResolver.require(conn, legalEntityResolver.ofExpense(expense));
 
         CanonicalExpenseDeal canonical = buildExpenseCanonical(expense, conn.getId());
+        // 前の世代が外部へ送信した後に取消された場合は、作成前に同じ管理番号の取引がfreeeに無いことを確認させる
+        if (sendKeyResolver.requiresExistingDealCheck("EXPENSE_REQUEST", expense.getId(), "EXPENSE_DEAL_SYNC")) {
+            canonical.setVerifyNoExistingDeal(Boolean.TRUE);
+        }
 
         String payloadJson;
         try {

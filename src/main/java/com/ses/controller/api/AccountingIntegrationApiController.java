@@ -369,7 +369,7 @@ public class AccountingIntegrationApiController {
         java.util.Set<Long> allowedOrgIds = allowedOrgIdsOrNull();
         BpPayment bp = allowedOrgIds != null
                 ? bpPaymentMapper.selectForPreviewScoped(bpPaymentId, new java.util.ArrayList<>(allowedOrgIds))
-                : bpPaymentMapper.selectById(bpPaymentId);
+                : bpPaymentMapper.selectByIdForTenant(bpPaymentId, AccountingTenantContextHolder.requireTenantContext());
         if (bp == null) {
             return ApiResult.error(404, "BP支払レコードが見つかりません");
         }
@@ -410,10 +410,9 @@ public class AccountingIntegrationApiController {
     @PreAuthorize("hasRole('管理者')")
     public ApiResult<List<SendCandidate>> listSendCandidates(@RequestParam("kind") String kind) {
         if ("purchase".equals(kind)) {
-            List<BpPayment> payments = bpPaymentMapper.selectList(new LambdaQueryWrapper<BpPayment>()
-                    .in(BpPayment::getStatus, "未払", "承認済", "CONFIRMED", "APPROVED")
-                    .orderByDesc(BpPayment::getId)
-                    .last("LIMIT " + SEND_CANDIDATE_LIMIT));
+            // BP支払はtenant列を持たないため、工数実績→契約→顧客のownershipで現在tenantへ限定する
+            String tenantId = AccountingTenantContextHolder.requireTenantContext();
+            List<BpPayment> payments = bpPaymentMapper.selectSendCandidatesForTenant(tenantId, SEND_CANDIDATE_LIMIT);
             return ApiResult.success(payments.stream()
                     .map(p -> new SendCandidate(p.getId(), "BP-PAY-" + p.getId(),
                             p.getPayeeCompanyName() != null ? p.getPayeeCompanyName() : p.getBpCompanyNameSnapshot(),

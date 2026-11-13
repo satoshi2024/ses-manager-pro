@@ -95,12 +95,16 @@ class FreeeExpenseAccountingSenderTest {
     }
 
     @Test
-    void cancelledSendJob_isSentAgain() {
+    void cancelledSendJob_isTerminal_andIsNotSentAgain() {
+        // 管理者の取消を自動送信が1分後に作り直すと、取消が無効になる（結果不明のジョブなら二重作成になる）
         when(jobService.getLatestJob("EXPENSE_REQUEST", 501L, "EXPENSE_DEAL_SYNC")).thenReturn(job("CANCELLED", null));
-        when(integrationService.triggerExpenseSync(501L, null)).thenReturn(job("PENDING", null));
 
-        assertThat(sender.send(expense, outboxJob).errorCode()).isEqualTo(ExpenseAccountingSender.PENDING);
-        verify(integrationService).triggerExpenseSync(501L, null);
+        ExpenseAccountingSender.SendResult result = sender.send(expense, outboxJob);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errorCode()).isEqualTo(ExpenseAccountingSender.CANCELLED);
+        assertThat(ExpenseAccountingSender.CANCELLED.length()).isLessThanOrEqualTo(40);
+        verify(integrationService, never()).triggerExpenseSync(anyLong(), any());
     }
 
     @Test

@@ -199,6 +199,9 @@ public class ExpenseAccountingJobScheduler {
         } else if (ExpenseAccountingSender.PENDING.equals(result.errorCode())) {
             // 会計側の送信ジョブが処理中。失敗ではないため試行回数を消費しない（会計ジョブ自身に上限がある）。
             markWaiting(expenseRequestId, ExpenseAccountingSender.PENDING);
+        } else if (ExpenseAccountingSender.CANCELLED.equals(result.errorCode())) {
+            // 管理者が会計側の送信ジョブを取消した。再試行すると取消を無効にするため、ここで終端させる。
+            markTerminal(expenseRequestId, ExpenseAccountingSender.CANCELLED);
         } else {
             markFailure(expenseRequestId, claimed,
                     result.errorCode() == null ? "SEND_FAILED" : result.errorCode());
@@ -338,6 +341,24 @@ public class ExpenseAccountingJobScheduler {
                     .set("next_attempt_at", now.plusMinutes(PENDING_RECHECK_MINUTES))
                     .set("updated_at", now));
         });
+    }
+
+    /** 再試行しない終端の結果反映（REQUIRES_NEW）。試行回数に関係なくFAILEDにする。 */
+    void markTerminal(Long expenseRequestId, String errorCode) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        requiresNewTx().executeWithoutResult(st -> {
+            LocalDateTime now = LocalDateTime.now(clock);
+            jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
+                    .eq("tenant_id", tenantId)
+                    .eq("expense_request_id", expenseRequestId)
+                    .eq("status", STATUS_PROCESSING)
+                    .set("status", STATUS_FAILED)
+                    .set("last_error_code", errorCode)
+                    .set("next_attempt_at", null)
+                    .set("updated_at", now));
+        });
+        log.info("[経費会計連携] 自動送信を終了しました（再試行しません）: expenseId={} errorCode={}",
+                expenseRequestId, errorCode);
     }
 
     /** 送信失敗の結果反映（REQUIRES_NEW）。max 5回でFAILED、それ以外はbackoff付きでPENDINGへ戻す。 */
