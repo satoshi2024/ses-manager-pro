@@ -103,7 +103,13 @@ class FeatureSwitchMenuAndViewTest {
     @Test
     void テンプレート用のOFF機能一覧を公開しFeatureSwitches未取得時は何も隠さない() {
         GlobalControllerAdvice advice = adminAdvice(disabledOnly(Feature.NF02, Feature.NF04));
-        assertThat(advice.disabledFeatures()).containsExactly("nf02", "nf04");
+        // 親（NF-02）がOFFなら子（顧客ポータルの問い合わせ）も実効値OFFとして一覧に載る。
+        assertThat(advice.disabledFeatures()).containsExactly("nf02", "nf02-customer-portal", "nf04");
+        // 子だけOFFなら親のメニュー・導線は残り、portalの問い合わせ導線と資格番号入力欄だけが隠れる。
+        GlobalControllerAdvice childOff = adminAdvice(disabledOnly(Feature.NF02_CUSTOMER_PORTAL,
+                Feature.NF03_CERTIFICATION_PII));
+        assertThat(childOff.disabledFeatures()).containsExactly("nf02-customer-portal", "nf03-certification-pii");
+        assertThat(childOff.allowedMenus(admin())).containsExactlyElementsOf(ALL_MENU_KEYS);
 
         GlobalControllerAdvice withoutSwitches = new GlobalControllerAdvice(null, null);
         assertThat(withoutSwitches.disabledFeatures()).isEmpty();

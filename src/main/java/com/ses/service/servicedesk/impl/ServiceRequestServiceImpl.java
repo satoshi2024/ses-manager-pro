@@ -83,6 +83,13 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private ServiceRequestSequenceMapper requestSequenceMapper;
 
+    /**
+     * 顧客ポータルへ出してよい問い合わせの範囲。portal経路（一覧・詳細・返信・CSAT）だけが使い、内部経路は使わない。
+     * 既存constructorを保つためfield injectionにする。未注入ならportal起票のみ（fail-closed）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy portalVisibilityPolicy;
+
     private final ServiceRequestMapper serviceRequestMapper;
     private final ServiceRequestSequenceMapper sequenceMapper;
     private final ServiceSlaPolicyMapper slaPolicyMapper;
@@ -280,8 +287,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Transactional(readOnly = true)
     public PortalServiceRequestDto getPortalDetail(Long id, Long customerId) {
         ServiceRequest req = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
-        if (req == null || !currentTenant().equals(req.getTenantId()) || !Objects.equals(req.getCustomerId(), customerId)) {
-            // 他社または存在しない場合は404秘匿
+        if (req == null || !currentTenant().equals(req.getTenantId()) || !Objects.equals(req.getCustomerId(), customerId)
+                || !isPortalVisible(req)) {
+            // 他社・存在しない・portalへ出さない範囲（初回リリース中の社内登録分等）は同じ404で秘匿
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
 
@@ -349,6 +357,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         LambdaQueryWrapper<ServiceRequest> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ServiceRequest::getTenantId, currentTenant());
         wrapper.eq(ServiceRequest::getCustomerId, customerId);
+        // portalへ出してよい範囲（portal起票、または公開開始時刻以降の作成）だけに絞る。件数もこの範囲で数える。
+        portalVisibility().restrict(wrapper, com.ses.service.accounting.AccountingTenantContextHolder.getZoneId());
 
         if (StringUtils.hasText(status)) {
             wrapper.eq(ServiceRequest::getStatus, status);
@@ -654,7 +664,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                                         ServiceDeskExecutionContext executionContext) {
         requireExecutionContext(executionContext);
         ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
-        if (existing == null) {
+        if (existing == null || (isPortal && !isPortalVisible(existing))) {
+            // portalからの返信は、portalへ出してよい範囲の問い合わせだけに限る（controllerの自社scope検証に加えた防御）
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
         // 顧客返信による WAITING_CUSTOMER→IN_PROGRESS 自動復帰でも法人既定カレンダーを使う。
@@ -758,7 +769,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Transactional(rollbackFor = Exception.class)
     public void submitCsat(Long id, PortalCsatCreateRequest req, Long customerId, Long portalUserId) {
         ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
-        if (existing == null || !currentTenant().equals(existing.getTenantId()) || !Objects.equals(existing.getCustomerId(), customerId)) {
+        if (existing == null || !currentTenant().equals(existing.getTenantId()) || !Objects.equals(existing.getCustomerId(), customerId)
+                || !isPortalVisible(existing)) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
 
@@ -1200,6 +1212,16 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (userId == null) return "SYSTEM";
         SysUser u = sysUserMapper.selectByIdAndTenant(userId, currentTenant());
         return u != null && u.getRealName() != null ? u.getRealName() : "ユーザー#" + userId;
+    }
+
+    /** portal経路で扱ってよい問い合わせか（portal起票、または公開開始時刻以降の作成）。 */
+    private boolean isPortalVisible(ServiceRequest request) {
+        return portalVisibility().isVisible(request, com.ses.service.accounting.AccountingTenantContextHolder.getZoneId());
+    }
+
+    private com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy portalVisibility() {
+        return portalVisibilityPolicy != null ? portalVisibilityPolicy
+                : com.ses.service.servicedesk.PortalServiceRequestVisibilityPolicy.PORTAL_ORIGINATED_ONLY;
     }
 
     private String resolvePortalUserName(Long portalUserId) {

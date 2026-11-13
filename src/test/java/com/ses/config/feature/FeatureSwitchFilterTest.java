@@ -25,11 +25,14 @@ import org.springframework.ui.ExtendedModelMap;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static com.ses.config.feature.FeatureSwitchTestSupport.allOff;
 import static com.ses.config.feature.FeatureSwitchTestSupport.allOn;
 import static com.ses.config.feature.FeatureSwitchTestSupport.disabledOnly;
 import static com.ses.config.feature.FeatureSwitchTestSupport.enabledOnly;
+import static com.ses.config.feature.FeatureSwitchTestSupport.isSelfOrDescendant;
+import static com.ses.config.feature.FeatureSwitchTestSupport.lineage;
 import static com.ses.config.feature.FeatureSwitchTestSupport.provider;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -40,16 +43,28 @@ class FeatureSwitchFilterTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    /** 顧客ポータルの問い合わせAPI（{@code PortalCustomerServiceDeskApiController} の全入口の代表）。 */
+    private static final List<String> PORTAL_SERVICE_DESK_APIS = List.of(
+            "/api/portal/customer/service-desk/requests",
+            "/api/portal/customer/service-desk/requests/5",
+            "/api/portal/customer/service-desk/requests/5/comments",
+            "/api/portal/customer/service-desk/requests/5/csat",
+            "/api/portal/customer/service-desk/requests/5/attachments",
+            "/api/portal/customer/service-desk/requests/5/attachments/8/download");
+
     /** 各機能の代表的なAPI入口（内部・本人・portal・管理者専用を含む）。 */
     private static final Map<Feature, List<String>> API_SAMPLES = Map.of(
             Feature.NF01, List.of("/api/lifecycle/cases", "/api/lifecycle/templates/3",
                     "/api/my/lifecycle/tasks/pending"),
             Feature.NF02, List.of("/api/service-desk/requests", "/api/service-desk/health/snapshots",
-                    "/api/customer-success/health/9", "/api/customer-success/qbrs",
-                    "/api/portal/customer/service-desk/requests/5/comments"),
+                    "/api/customer-success/health/9", "/api/customer-success/qbrs"),
+            // 顧客ポータルの問い合わせ（起票・一覧・返信・CSAT・添付）はNF-02の子スイッチで遮断する
+            Feature.NF02_CUSTOMER_PORTAL, PORTAL_SERVICE_DESK_APIS,
             Feature.NF03, List.of("/api/certification-learning-gap/count",
                     "/api/certification-learning-gap/export",
                     "/api/my/certification-learning-gap/learning-plans"),
+            // 資格番号の子スイッチはURLを遮断しない（service層で資格番号の入力だけを拒否する）
+            Feature.NF03_CERTIFICATION_PII, List.of(),
             // NF-04はAPIを遮断しない（日次入力queueと下書き復元は常時有効）
             Feature.NF04, List.of(),
             Feature.NF10, List.of("/api/management-reports/runs", "/api/management-reports/schedules/7/enable"));
@@ -59,9 +74,18 @@ class FeatureSwitchFilterTest {
             Feature.NF01, List.of("/lifecycle", "/lifecycle/12", "/lifecycle/templates", "/my/lifecycle"),
             Feature.NF02, List.of("/service-desk/requests", "/service-desk/requests/4",
                     "/customer-success/health", "/service-desk/health"),
+            // portal画面（/portal/customer）は検収・請求等と共用のため遮断せず、問い合わせタブだけをtemplateで隠す
+            Feature.NF02_CUSTOMER_PORTAL, List.of(),
             Feature.NF03, List.of("/certification-learning-skill-gap", "/my/certification-learning-skill-gap"),
+            Feature.NF03_CERTIFICATION_PII, List.of(),
             Feature.NF04, List.of("/service-worker.js", "/manifest.webmanifest"),
             Feature.NF10, List.of("/management-reports"));
+
+    /** 画面URLを持たない子スイッチ → 子をOFFにしても遮断してはならない埋込み先の画面。 */
+    private static final Map<Feature, List<String>> CHILD_HOST_PAGES = Map.of(
+            Feature.NF02_CUSTOMER_PORTAL, List.of("/portal/customer", "/service-desk/requests"),
+            Feature.NF03_CERTIFICATION_PII, List.of("/my/certification-learning-skill-gap",
+                    "/certification-learning-skill-gap"));
 
     @AfterEach
     void clearSecurityContext() {
@@ -69,7 +93,7 @@ class FeatureSwitchFilterTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = Feature.class, names = "NF04", mode = EnumSource.Mode.EXCLUDE)
+    @EnumSource(value = Feature.class, names = {"NF04", "NF03_CERTIFICATION_PII"}, mode = EnumSource.Mode.EXCLUDE)
     void OFFの機能のAPIはCustomErrorControllerと同じApiResult形式の404になる(Feature feature) throws Exception {
         assertThat(API_SAMPLES.get(feature)).as("代表APIが空振りしないこと").isNotEmpty();
         FeatureSwitchFilter filter = filter(disabledOnly(feature));
@@ -98,6 +122,16 @@ class FeatureSwitchFilterTest {
     void OFFの機能の画面と静的入口は統一エラーページへ委ねる404になる(Feature feature) throws Exception {
         FeatureSwitchFilter filter = filter(disabledOnly(feature));
 
+        if (PAGE_SAMPLES.get(feature).isEmpty()) {
+            // 画面URLを持たないのは子スイッチだけ。子をOFFにしても、子が埋め込まれた画面のURLは遮断しない
+            // （portal画面は他のタブと共用、本人画面は非PII部分を使う。表示制御はtemplate側）。
+            assertThat(feature.isTopLevel()).as("%s は画面入口を持つべき最上位の機能", feature).isFalse();
+            assertThat(CHILD_HOST_PAGES.get(feature)).as("%s の埋込み先画面", feature).isNotEmpty();
+            for (String uri : CHILD_HOST_PAGES.get(feature)) {
+                assertPassesThrough(filter, "GET", uri);
+            }
+            return;
+        }
         for (String uri : PAGE_SAMPLES.get(feature)) {
             MockHttpServletResponse response = new MockHttpServletResponse();
             MockFilterChain chain = new MockFilterChain();
@@ -115,29 +149,95 @@ class FeatureSwitchFilterTest {
 
     @ParameterizedTest
     @EnumSource(Feature.class)
-    void 機能スイッチは互いに独立しOFFにした機能だけを遮断する(Feature disabled) throws Exception {
+    void 機能スイッチは互いに独立しOFFにした機能とその子だけを遮断する(Feature disabled) throws Exception {
         FeatureSwitchFilter filter = filter(disabledOnly(disabled));
 
         for (Feature other : Feature.values()) {
-            if (other == disabled) {
-                continue;
-            }
             for (String uri : samples(other)) {
-                assertPassesThrough(filter, "GET", uri);
+                if (isSelfOrDescendant(other, disabled)) {
+                    // 親をOFFにすると子の入口も遮断される（子の設定値がONでも迂回できない）。
+                    assertBlocked(filter, uri);
+                } else {
+                    assertPassesThrough(filter, "GET", uri);
+                }
             }
         }
-        // 逆に、この機能だけONにすると他の機能は全て遮断され、この機能だけ通る。
-        FeatureSwitchFilter onlyThis = filter(enabledOnly(disabled));
-        for (String uri : samples(disabled)) {
-            assertPassesThrough(onlyThis, "GET", uri);
-        }
+        // 逆に、この機能（子なら親も）だけONにすると、それ以外は全て遮断され、この機能と親だけ通る。
+        Set<Feature> lineage = lineage(disabled);
+        FeatureSwitchFilter onlyThis = filter(enabledOnly(lineage.toArray(Feature[]::new)));
         for (Feature other : Feature.values()) {
-            if (other != disabled) {
-                for (String uri : samples(other)) {
+            for (String uri : samples(other)) {
+                if (lineage.contains(other)) {
+                    assertPassesThrough(onlyThis, "GET", uri);
+                } else {
                     assertBlocked(onlyThis, uri);
                 }
             }
         }
+    }
+
+    @Test
+    void NF02がONでも顧客ポータルの子スイッチがOFFならportalの問い合わせAPIだけを遮断する() throws Exception {
+        FeatureSwitches switches = disabledOnly(Feature.NF02_CUSTOMER_PORTAL);
+        FeatureSwitchFilter filter = filter(switches);
+
+        assertThat(switches.isEnabled(Feature.NF02)).isTrue();
+        assertThat(switches.isEnabled(Feature.NF02_CUSTOMER_PORTAL)).isFalse();
+        assertThat(switches.disabledKeys()).containsExactly("nf02-customer-portal");
+        for (String uri : PORTAL_SERVICE_DESK_APIS) {
+            for (String method : List.of("GET", "POST")) {
+                MockHttpServletResponse response = new MockHttpServletResponse();
+                MockFilterChain chain = new MockFilterChain();
+
+                filter.doFilter(new MockHttpServletRequest(method, uri), response, chain);
+
+                assertThat(chain.getRequest()).as("%s %s はcontrollerへ到達しない", method, uri).isNull();
+                assertThat(response.getStatus()).as(uri).isEqualTo(404);
+                assertThat(response.getContentType()).startsWith("application/json");
+                assertThat(JSON.readTree(response.getContentAsString()).get("message").asText())
+                        .isEqualTo(FeatureSwitchFilter.NOT_FOUND_MESSAGE);
+            }
+        }
+        // 表記ゆれでも子スイッチの遮断を迂回できない。
+        for (String uri : List.of("/api/portal/customer/service%2Ddesk/requests",
+                "/api/portal/customer//service-desk/requests", "/api/portal/customer/service-desk;x=1/requests",
+                "/api/portal/customer/service-desk")) {
+            assertBlocked(filter, uri);
+        }
+        // 内部サービスデスク・顧客ヘルス・QBRと、portalの他タブ（検収・請求等）は従来どおり通す。
+        for (String uri : List.of("/api/service-desk/requests", "/api/service-desk/requests/5/comments",
+                "/service-desk/requests", "/customer-success/health", "/api/customer-success/qbrs",
+                "/portal/customer", "/api/portal/customer/invoices", "/api/portal/customer/service-desk-guide")) {
+            assertPassesThrough(filter, "POST", uri);
+        }
+    }
+
+    @Test
+    void NF02がOFFなら顧客ポータルの子スイッチをONにしても問い合わせAPIは遮断される() throws Exception {
+        FeatureSwitches childOnly = enabledOnly(Feature.NF02_CUSTOMER_PORTAL);
+        FeatureSwitchFilter filter = filter(childOnly);
+
+        assertThat(childOnly.isEnabled(Feature.NF02_CUSTOMER_PORTAL)).isFalse();
+        for (String uri : PORTAL_SERVICE_DESK_APIS) {
+            assertBlocked(filter, uri);
+        }
+        assertBlocked(filter, "/api/service-desk/requests");
+        // 両方ONにして初めてportalの問い合わせAPIが通る。
+        FeatureSwitchFilter both = filter(enabledOnly(Feature.NF02, Feature.NF02_CUSTOMER_PORTAL));
+        for (String uri : PORTAL_SERVICE_DESK_APIS) {
+            assertPassesThrough(both, "POST", uri);
+        }
+    }
+
+    @Test
+    void 資格番号の子スイッチはURLを遮断せずNF03の入口はNF03本体のスイッチだけに従う() throws Exception {
+        FeatureSwitchFilter piiOff = filter(disabledOnly(Feature.NF03_CERTIFICATION_PII));
+
+        for (String uri : samples(Feature.NF03)) {
+            assertPassesThrough(piiOff, "POST", uri);
+        }
+        assertPassesThrough(piiOff, "POST", "/api/my/certification-learning-gap/certifications");
+        assertPassesThrough(piiOff, "POST", "/api/my/certification-learning-gap/certifications/3/resubmit");
     }
 
     @Test

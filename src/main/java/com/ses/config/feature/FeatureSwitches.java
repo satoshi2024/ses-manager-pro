@@ -30,19 +30,31 @@ public class FeatureSwitches {
     @PostConstruct
     void logStates() {
         log.info("[機能スイッチ] 起動時の状態: {}", describe());
+        for (Feature feature : Feature.values()) {
+            // 子だけONにして親を忘れる設定誤りは、起動を止めずにOFFとして扱い、理由をログへ残す。
+            if (!feature.isTopLevel() && isConfiguredOn(feature) && !isEnabled(feature)) {
+                log.warn("[機能スイッチ] {} は設定上ONですが、親機能 {} がOFFのため無効です",
+                        feature.name(), feature.root().name());
+            }
+        }
     }
 
+    /**
+     * 機能の実効値。子スイッチは自身の設定値と親の実効値の論理積（親がOFFなら子は常にOFF）。
+     */
     public boolean isEnabled(Feature feature) {
+        if (!isConfiguredOn(feature)) {
+            return false;
+        }
+        return feature.parent().map(this::isEnabled).orElse(true);
+    }
+
+    /** 親子の論理積を取る前の設定値。 */
+    private boolean isConfiguredOn(Feature feature) {
         if (feature == null || properties == null) {
             return false;
         }
-        FeatureSwitchProperties.Toggle toggle = switch (feature) {
-            case NF01 -> properties.getNf01();
-            case NF02 -> properties.getNf02();
-            case NF03 -> properties.getNf03();
-            case NF04 -> properties.getNf04();
-            case NF10 -> properties.getNf10();
-        };
+        FeatureSwitchProperties.Toggle toggle = properties.toggle(feature);
         // 設定キーの欠落（Toggleがnull）はOFF扱い。真偽値として解釈できない値はbind時に失敗し起動しない。
         return toggle != null && toggle.isEnabled();
     }
@@ -63,7 +75,10 @@ public class FeatureSwitches {
         return Feature.forPath(path).filter(feature -> !isEnabled(feature));
     }
 
-    /** OFFの機能の識別子（例: {@code nf01}）。テンプレートの表示制御に使う。 */
+    /**
+     * 実効値がOFFの機能の識別子（例: {@code nf01}、{@code nf02-customer-portal}）。テンプレートの表示制御に使う。
+     * 親がOFFなら子の識別子も含まれるため、子の導線は子の識別子だけで判定すればよい。
+     */
     public Set<String> disabledKeys() {
         Set<String> keys = Arrays.stream(Feature.values())
                 .filter(feature -> !isEnabled(feature))
@@ -87,7 +102,7 @@ public class FeatureSwitches {
         return menuKeys.stream().filter(key -> !hidden.contains(key)).toList();
     }
 
-    /** ログ出力用の状態一覧（例: {@code NF01=OFF, NF02=ON}）。 */
+    /** ログ出力用の実効値の一覧（例: {@code NF01=OFF, NF02=ON, NF02_CUSTOMER_PORTAL=OFF}）。 */
     public String describe() {
         return Arrays.stream(Feature.values())
                 .map(feature -> feature.name() + "=" + (isEnabled(feature) ? "ON" : "OFF"))
