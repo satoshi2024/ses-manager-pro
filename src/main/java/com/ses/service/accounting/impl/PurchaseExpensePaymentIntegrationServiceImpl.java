@@ -156,8 +156,12 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
 
         CanonicalPurchaseDeal canonical = buildPurchaseCanonical(bpPayment, conn.getId(), resolveBpIssueDate(bpPayment));
         // 前の世代が外部へ送信した後に取消された場合は、作成前に同じ管理番号の取引がfreeeに無いことを確認させる
-        if (sendKeyResolver.requiresExistingDealCheck("BP_PAYMENT", bpPayment.getId(), "BP_PURCHASE_SYNC")) {
+        // （今回の取引先・発生日に加えて、取消された世代の取引先・発生日も走査する）
+        java.util.List<com.ses.dto.accounting.canonical.PriorDealScope> priorScopes =
+                sendKeyResolver.priorDealScopes("BP_PAYMENT", bpPayment.getId(), "BP_PURCHASE_SYNC");
+        if (!priorScopes.isEmpty()) {
             canonical.setVerifyNoExistingDeal(Boolean.TRUE);
+            canonical.setPriorDealScopes(priorScopes);
         }
 
         String payloadJson;
@@ -295,8 +299,12 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
 
         CanonicalExpenseDeal canonical = buildExpenseCanonical(expense, conn.getId());
         // 前の世代が外部へ送信した後に取消された場合は、作成前に同じ管理番号の取引がfreeeに無いことを確認させる
-        if (sendKeyResolver.requiresExistingDealCheck("EXPENSE_REQUEST", expense.getId(), "EXPENSE_DEAL_SYNC")) {
+        // （今回の取引先・発生日に加えて、取消された世代の取引先・発生日も走査する）
+        java.util.List<com.ses.dto.accounting.canonical.PriorDealScope> priorScopes =
+                sendKeyResolver.priorDealScopes("EXPENSE_REQUEST", expense.getId(), "EXPENSE_DEAL_SYNC");
+        if (!priorScopes.isEmpty()) {
             canonical.setVerifyNoExistingDeal(Boolean.TRUE);
+            canonical.setPriorDealScopes(priorScopes);
         }
 
         String payloadJson;
@@ -388,6 +396,10 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                         AccountingProvider.DealCreateGuard.of(canonical.getVerifyNoExistingDeal(), job.getAttemptCount()));
 
                 if (result.isSuccess()) {
+                    if (result.isAdoptedExisting()) {
+                        // 新しく作成せずfreeeに既にあった取引を採用した（再試行・タイムアウト後の照合）。新規作成と区別して残す
+                        jobService.recordJobEvent(jobId, "ADOPTED_EXISTING_DEAL", "accounting.event.adoptedExistingDeal", null);
+                    }
                     jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
                             "freee仕入取引作成成功: dealId=" + result.getExternalId());
                 } else {
@@ -560,6 +572,10 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                         }
                     }
 
+                    if (result.isAdoptedExisting()) {
+                        // 新しく作成せずfreeeに既にあった取引を採用した（再試行・タイムアウト後の照合）。新規作成と区別して残す
+                        jobService.recordJobEvent(jobId, "ADOPTED_EXISTING_DEAL", "accounting.event.adoptedExistingDeal", null);
+                    }
                     jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
                             "freee経費取引作成成功: dealId=" + result.getExternalId());
                     notifyExpenseAccountingSent(job.getTargetId(), tenantId);

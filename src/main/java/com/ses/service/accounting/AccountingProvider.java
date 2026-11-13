@@ -97,7 +97,8 @@ public interface AccountingProvider {
 
     /**
      * 月次照合用: 送信済み取引の存在と取引金額を1件照会する。
-     * 照合の一覧取得は決済済み取引のみを対象とするため、未決済（送信直後）の取引はこれで確認する。
+     * 照合の一覧取得（決済済み全件＋対象月に発生した未決済）に現れない送信済み取引（前月以前に発生した未決済、
+     * 2回の取得の間に決済済みになった取引など）はこれで確認する。
      * 未対応providerは UNKNOWN を返す。
      */
     default DealLookup lookupDeal(IntegrationConnection connection, String externalDealId) {
@@ -129,11 +130,4 @@ public interface AccountingProvider {
      */
     boolean verifyMaster(IntegrationConnection connection, String objectType, String externalId, String externalCode);
 
-    /**
-     * ref_number で既存取引を照合する（stale RUNNING 回収時の再POST抑止）。
-     * 見つからない/曖昧/障害時は empty。
-     */
-    default java.util.Optional<String> findDealIdByRefNumber(IntegrationConnection connection, String refNumber) {
-        return java.util.Optional.empty();
-    }
 }

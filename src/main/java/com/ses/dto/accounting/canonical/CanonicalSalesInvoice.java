@@ -46,6 +46,14 @@ public class CanonicalSalesInvoice {
     @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
     private Boolean verifyNoExistingDeal;
 
+    /**
+     * 外部へ送信した後に取消された前の世代ごとの走査範囲（取引先・発生日）。既存取引の確認は、
+     * 今回の取引先・発生日に加えてこの範囲も走査する（取消の前に別の取引先・発生日で作成された取引を見落とさない）。
+     * 通常の送信では空（スナップショットに出力しない）。
+     */
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
+    private List<PriorDealScope> priorDealScopes;
+
     @Data
     @Builder
     @NoArgsConstructor

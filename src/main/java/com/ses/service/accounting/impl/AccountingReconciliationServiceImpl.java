@@ -147,8 +147,8 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             }
         }
         Set<String> matchedExternalDealIds = new HashSet<>();
-        // 一覧は決済済み取引のみ（入金照合のため）。送信直後の未決済取引は一覧に無いので、
-        // 送信ジョブの取引IDを個別に照会してから「削除または未存在」と判定する。
+        // 一覧は決済済み全件＋対象月に発生した未決済。前月以前に発生した未決済や、2回の取得の間に決済済みになった
+        // 取引は一覧に無いので、送信ジョブの取引IDを個別に照会してから「削除または未存在」と判定する。
         SentDealResolver sentDeals = new SentDealResolver(externalFetchFailed ? null : provider, conn, extDealMap);
 
         // ============================================================

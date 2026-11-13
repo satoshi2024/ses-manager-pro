@@ -41,4 +41,10 @@ public class CanonicalDealResult {
     private BigDecimal responseSubtotal;
     private BigDecimal responseTax;
     private BigDecimal responseTotal;
+
+    /**
+     * 新しく作成せず、freeeに既にあった取引を採用した（再試行で前回の試行の取引を見つけた、またはタイムアウト後の照合）。
+     * 送信ジョブに ADOPTED_EXISTING_DEAL イベントを残し、新規作成と区別できるようにする。
+     */
+    private boolean adoptedExisting;
 }
