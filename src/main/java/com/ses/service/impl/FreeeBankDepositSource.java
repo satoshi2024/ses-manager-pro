@@ -3,6 +3,7 @@ package com.ses.service.impl;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.reconciliation.BankDepositDto;
 import com.ses.entity.IntegrationConnection;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.accounting.provider.FreeeAccountingProvider;
 import com.ses.service.billing.BankDepositSource;
 import com.ses.service.integration.IntegrationConnectionService;
@@ -30,7 +31,7 @@ public class FreeeBankDepositSource implements BankDepositSource {
         if (from == null || to == null || from.isAfter(to)) {
             throw BusinessException.of(400, "error.reconciliation.invalidPeriod");
         }
-        IntegrationConnection connection = connectionService.getConnection("default", null, "freee", "accounting");
+        IntegrationConnection connection = connectionService.getConnection(AccountingTenantContextHolder.requireTenantContext(), null, "freee", "accounting");
         if (connection == null || !"CONNECTED".equals(connection.getStatus())
                 || connection.getExternalCompanyId() == null) {
             throw BusinessException.of("error.reconciliation.notConnected");

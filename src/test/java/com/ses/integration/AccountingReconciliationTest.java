@@ -474,6 +474,86 @@ public class AccountingReconciliationTest {
                 && i.getDiscrepancyReason().contains("PAGE_CAP_REACHED"));
     }
 
+    /** 決済済み一覧（入金照合用）が空、という前提の照合を実行する。 */
+    private AccountingReconciliationSummaryDto reconcileWithEmptySettledList(String month) {
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&status=settled&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
+        return reconciliationService.reconcileMonth(month);
+    }
+
+    private ReconciliationItemDto salesItem(AccountingReconciliationSummaryDto summary, Invoice inv) {
+        return summary.getItems().stream()
+                .filter(i -> "SALES".equals(i.getCategory()) && inv.getId().equals(i.getInternalId()))
+                .findFirst().orElseThrow();
+    }
+
+    @Test
+    @DisplayName("送信直後の未決済取引: 決済済み一覧に無くても取引を個別照会し、存在すればMATCHED")
+    void reconciliation_unsettledSentDeal_matchedByLookup() {
+        String testMonth = "2031-01"; // 他テスト・seedの請求と混ざらない月
+        Invoice inv = createInvoice(testMonth, "INV-UNSETTLED-1", new BigDecimal("770000"));
+        IntegrationJob job = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", inv.getId(), "SALES:UNSETTLED:1", "hashU1");
+        jobService.claimJob(job.getId());
+        jobService.markSucceeded(job.getId(), "88001", "req-u1", "同期成功");
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/88001?company_id=99001"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 88001, \"amount\": 770000, \"status\": \"unsettled\"}}", MediaType.APPLICATION_JSON));
+
+        AccountingReconciliationSummaryDto summary = reconcileWithEmptySettledList(testMonth);
+        mockServer.verify();
+
+        ReconciliationItemDto item = salesItem(summary, inv);
+        assertThat(item.getStatus()).isEqualTo("MATCHED");
+        assertThat(item.getExternalAmount()).isEqualByComparingTo("770000");
+        assertThat(summary.isExternalFetchFailed()).isFalse();
+    }
+
+    @Test
+    @DisplayName("個別照会で404なら削除済みとしてINTERNAL_ONLY")
+    void reconciliation_sentDealNotFound_internalOnly() {
+        String testMonth = "2031-02";
+        Invoice inv = createInvoice(testMonth, "INV-UNSETTLED-2", new BigDecimal("330000"));
+        IntegrationJob job = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", inv.getId(), "SALES:UNSETTLED:2", "hashU2");
+        jobService.claimJob(job.getId());
+        jobService.markSucceeded(job.getId(), "88002", "req-u2", "同期成功");
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/88002?company_id=99001"))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withStatus(
+                        org.springframework.http.HttpStatus.NOT_FOUND));
+
+        AccountingReconciliationSummaryDto summary = reconcileWithEmptySettledList(testMonth);
+        mockServer.verify();
+
+        ReconciliationItemDto item = salesItem(summary, inv);
+        assertThat(item.getStatus()).isEqualTo("INTERNAL_ONLY");
+        assertThat(item.getDiscrepancyReason()).contains("削除または未存在");
+        assertThat(summary.isExternalFetchFailed()).isFalse();
+    }
+
+    @Test
+    @DisplayName("個別照会が失敗したら削除と断定せず、照会失敗の差異として締めを止める")
+    void reconciliation_sentDealLookupFails_blocksClosing() {
+        String testMonth = "2031-03";
+        Invoice inv = createInvoice(testMonth, "INV-UNSETTLED-3", new BigDecimal("440000"));
+        IntegrationJob job = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", inv.getId(), "SALES:UNSETTLED:3", "hashU3");
+        jobService.claimJob(job.getId());
+        jobService.markSucceeded(job.getId(), "88003", "req-u3", "同期成功");
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/88003?company_id=99001"))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withServerError());
+
+        AccountingReconciliationSummaryDto summary = reconcileWithEmptySettledList(testMonth);
+        mockServer.verify();
+
+        ReconciliationItemDto item = salesItem(summary, inv);
+        assertThat(item.getStatus()).isEqualTo("AMOUNT_MISMATCH");
+        assertThat(item.getDiscrepancyReason()).contains("照会に失敗");
+        assertThat(summary.isExternalFetchFailed()).isTrue();
+        assertThat(summary.isReadyForClosing()).isFalse();
+    }
+
     @Test
     @DisplayName("外部取引削除検知: SUCCEEDEDジョブの外部dealが存在しない場合はINTERNAL_ONLYでfail-closed (R1-P1-09)")
     void reconciliation_succeededJobExternalDealDeleted_internalOnly() {

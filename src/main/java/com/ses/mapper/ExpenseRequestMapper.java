@@ -132,7 +132,7 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
                                                            @Param("limit") int limit);
 
     /**
-     * freee会計送信の候補（承認済）。経費会計連携schedulerの処理有無（accounting_job_id）では絞らない。
+     * freee会計送信の候補（承認後: 承認済・会計連携済・支払済）。経費会計連携schedulerの処理有無では絞らない。
      * tenant境界は selectApprovedUnaccountedByTenant と同じ要員account link経由で適用する。
      */
     @Select("SELECT DISTINCT er.* FROM t_expense_request er "
@@ -140,7 +140,7 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
             + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id "
             + "AND l.tenant_id = #{tenantId} "
             + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
-            + "WHERE u.tenant_id = #{tenantId} AND er.status = '承認済' AND er.deleted_flag = 0 "
+            + "WHERE u.tenant_id = #{tenantId} AND er.status IN ('承認済', '会計連携済', '支払済') AND er.deleted_flag = 0 "
             + "ORDER BY er.id DESC LIMIT #{limit}")
     List<ExpenseRequest> selectApprovedByTenant(@Param("tenantId") String tenantId,
                                                 @Param("limit") int limit);

@@ -5,6 +5,9 @@ import com.ses.dto.reconciliation.BankDepositDto;
 import com.ses.entity.IntegrationConnection;
 import com.ses.service.accounting.provider.FreeeAccountingProvider;
 import com.ses.service.integration.IntegrationConnectionService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
@@ -31,6 +34,17 @@ class FreeeBankDepositSourceTest {
     private final IntegrationConnectionService connectionService = mock(IntegrationConnectionService.class);
     private final FreeeAccountingProvider provider = mock(FreeeAccountingProvider.class);
     private final FreeeBankDepositSource source = new FreeeBankDepositSource(connectionService, provider);
+
+    @BeforeEach
+    void setTenant() {
+        // 接続は要求のtenantで引く（全社 "default" 固定ではない）
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+    }
 
     private IntegrationConnection connection(String status, Long companyId) {
         IntegrationConnection c = new IntegrationConnection();

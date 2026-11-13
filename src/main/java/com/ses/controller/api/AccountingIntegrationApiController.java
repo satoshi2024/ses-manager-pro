@@ -451,6 +451,32 @@ public class AccountingIntegrationApiController {
         return ApiResult.success(job);
     }
 
+    /**
+     * 連携ジョブ一覧から、送信済みのfreee売上取引を取消する。
+     * 取消対象は「その請求書の最新の成功した送信ジョブ」に限る。取消→再送信の後に古い行から操作すると、
+     * 請求書単位の取消APIは最新の取引を消してしまうため、行と取引の対応をここで確かめる。
+     */
+    @PostMapping("/jobs/{id}/cancel-deal")
+    @PreAuthorize("hasRole('管理者')")
+    public ApiResult<IntegrationJob> cancelSyncedSalesDeal(@PathVariable("id") Long jobId,
+                                                           @RequestParam(value = "reason", required = false) String reason) {
+        IntegrationJob job = jobService.getOne(new LambdaQueryWrapper<IntegrationJob>()
+                .eq(IntegrationJob::getId, jobId)
+                .eq(IntegrationJob::getTenantId, AccountingTenantContextHolder.requireTenantContext()));
+        if (job == null) {
+            return ApiResult.error(404, "ジョブが見つかりません");
+        }
+        if (!"SALES_INVOICE_SYNC".equals(job.getJobType()) || !"SUCCEEDED".equals(job.getStatus())
+                || job.getExternalId() == null) {
+            throw BusinessException.of(400, "error.accounting.dealNotCancellable");
+        }
+        IntegrationJob latest = jobService.getLatestJob("INVOICE", job.getTargetId(), "SALES_INVOICE_SYNC");
+        if (latest == null || !latest.getId().equals(job.getId())) {
+            throw BusinessException.of(409, "error.accounting.notLatestDeal");
+        }
+        return ApiResult.success(salesIntegrationService.triggerSalesCancel(job.getTargetId(), reason, resolveActorId()));
+    }
+
     @PostMapping("/sync/bp-purchase/{bpPaymentId}")
     @PreAuthorize("hasRole('管理者')")
     public ApiResult<IntegrationJob> triggerBpPurchaseSync(@PathVariable("bpPaymentId") Long bpPaymentId) {

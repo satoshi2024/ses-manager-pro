@@ -396,6 +396,32 @@ public class FreeeAccountingProvider implements AccountingProvider {
     }
 
     @Override
+    public DealLookup lookupDeal(IntegrationConnection connection, String externalDealId) {
+        if (externalDealId == null || !externalDealId.matches("\\d{1,19}")) {
+            return DealLookup.notFound(); // 数値でないID（旧seedの仮IDなど）はfreeeに存在し得ない
+        }
+        try {
+            IntegrationConnection authoritative = requireAuthoritativeConnection(connection);
+            String url = apiBaseUrl + "/api/1/deals/" + externalDealId + "?company_id=" + authoritative.getExternalCompanyId();
+            ResponseEntity<String> response = executeWith401Recovery(authoritative, headers -> {
+                HttpEntity<?> entity = new HttpEntity<>(headers);
+                return restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            });
+            JsonNode deal = response.getBody() == null ? null : objectMapper.readTree(response.getBody()).get("deal");
+            if (deal == null || !deal.hasNonNull("id")) {
+                return DealLookup.unknown();
+            }
+            return DealLookup.found(deal.hasNonNull("amount") ? BigDecimal.valueOf(deal.get("amount").asLong()) : null);
+        } catch (HttpClientErrorException.NotFound e) {
+            return DealLookup.notFound();
+        } catch (Exception e) {
+            log.warn("freee取引の照会に失敗しました: error_code=EXTERNAL_API_ERROR dealId={} exceptionClass={}",
+                    externalDealId, e.getClass().getSimpleName());
+            return DealLookup.unknown();
+        }
+    }
+
+    @Override
     public CanonicalPaymentSync fetchDealPayment(IntegrationConnection connection, String externalDealId) {
         connection = requireAuthoritativeConnection(connection);
         String url = apiBaseUrl + "/api/1/deals/" + externalDealId + "?company_id=" + connection.getExternalCompanyId();

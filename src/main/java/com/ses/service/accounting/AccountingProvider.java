@@ -49,6 +49,30 @@ public interface AccountingProvider {
     CanonicalPaymentSync fetchDealPayment(IntegrationConnection connection, String externalDealId);
 
     /**
+     * 月次照合用: 送信済み取引の存在と取引金額を1件照会する。
+     * 照合の一覧取得は決済済み取引のみを対象とするため、未決済（送信直後）の取引はこれで確認する。
+     * 未対応providerは UNKNOWN を返す。
+     */
+    default DealLookup lookupDeal(IntegrationConnection connection, String externalDealId) {
+        return DealLookup.unknown();
+    }
+
+    /** 単一取引の照会結果。status は FOUND / NOT_FOUND / UNKNOWN（照会失敗・未対応）。 */
+    record DealLookup(String status, java.math.BigDecimal amount) {
+        public static DealLookup found(java.math.BigDecimal amount) {
+            return new DealLookup("FOUND", amount);
+        }
+
+        public static DealLookup notFound() {
+            return new DealLookup("NOT_FOUND", null);
+        }
+
+        public static DealLookup unknown() {
+            return new DealLookup("UNKNOWN", null);
+        }
+    }
+
+    /**
      * 接続が有効か検証する。
      */
     boolean validateConnection(IntegrationConnection connection);

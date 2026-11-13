@@ -67,6 +67,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     private final AccountingTimezoneResolver timezoneResolver;
     private final ObjectMapper objectMapper;
     private final AccountingJobLegalEntityResolver legalEntityResolver;
+    private final com.ses.service.accounting.AccountingSendKeyResolver sendKeyResolver;
 
     private LocalDate resolveBpIssueDate(BpPayment bpPayment) {
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
@@ -91,6 +92,9 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     private static final List<String[]> REQUIRED_EXPENSE_MAPPINGS = List.of(
             new String[]{"ACCOUNT_EXPENSE", "EXPENSE_DEFAULT"},
             new String[]{"TAX_PURCHASE_10", "TAX_PURCHASE_10"});
+
+    /** freeeへ送信できる経費ステータス（承認後）。下書き・申請中は送らない。 */
+    private static final java.util.Set<String> SENDABLE_EXPENSE_STATUSES = java.util.Set.of("承認済", "会計連携済", "支払済");
 
     private static String bpCompanyCode(BpPayment bpPayment) {
         return bpPayment.getBpCompanyId() != null ? "BP-" + bpPayment.getBpCompanyId() : "BP-UNKNOWN";
@@ -136,7 +140,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
             }
         }
 
-        IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
+        IntegrationConnection conn = resolveConnection(AccountingTenantContextHolder.requireTenantContext(), null, "freee", "accounting");
 
         // マッピング検証ガード
         for (String[] required : requiredPurchaseMappings(bpPayment)) {
@@ -157,7 +161,8 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         }
 
         String payloadHash = calculateSha256(payloadJson);
-        String idempotencyKey = "BP_PURCHASE:" + bpPayment.getId();
+        String idempotencyKey = sendKeyResolver.resolve("BP_PURCHASE:" + bpPayment.getId(),
+                "BP_PAYMENT", bpPayment.getId(), "BP_PURCHASE_SYNC", null, payloadHash);
         Long orgId = organizationResolver.resolveBpPaymentOrganizationId(bpPayment);
 
         log.info("Enqueueing BP purchase sync job for bpPaymentId={}, idempotencyKey={}, orgId={}", bpPaymentId, idempotencyKey, orgId);
@@ -173,7 +178,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
             throw BusinessException.of(404, "error.accounting.bpPaymentNotFound");
         }
         // プレビューは参照のみ: 接続は作成しない
-        IntegrationConnection conn = connectionService.getConnection("default", null, "freee", "accounting");
+        IntegrationConnection conn = connectionService.getConnection(AccountingTenantContextHolder.requireTenantContext(), null, "freee", "accounting");
         Long connectionId = conn != null ? conn.getId() : null;
         List<MappingCheck> checks = requiredPurchaseMappings(bpPayment).stream()
                 .map(required -> mappingService.inspect(connectionId, required[0], required[1]))
@@ -218,7 +223,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
             throw BusinessException.of(404, "error.accounting.bpPaymentNotFound");
         }
 
-        IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
+        IntegrationConnection conn = resolveConnection(AccountingTenantContextHolder.requireTenantContext(), null, "freee", "accounting");
         IntegrationJob latestPurchase = jobService.getLatestJob("BP_PAYMENT", bpPaymentId, "BP_PURCHASE_SYNC");
         if (latestPurchase == null || !"SUCCEEDED".equals(latestPurchase.getStatus()) || latestPurchase.getExternalId() == null) {
             throw BusinessException.of(400, "error.accounting.syncedDealMissing");
@@ -258,7 +263,9 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         }
         monthlyClosingService.assertOpenForUpdate(java.time.YearMonth.from(expense.getExpenseDate()).toString());
 
-        if (!"承認済".equals(expense.getStatus())) {
+        // 承認後であれば送信できる。経費モジュールの会計連携ジョブ（ExpenseAccountingJobScheduler）が先に
+        // 会計連携済へ進めることがあり、承認済のみに限るとfreeeへ送れなくなる。
+        if (!SENDABLE_EXPENSE_STATUSES.contains(expense.getStatus())) {
             throw BusinessException.of(400, "error.accounting.expenseNotSendable");
         }
 
@@ -287,7 +294,8 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         }
 
         String payloadHash = calculateSha256(payloadJson);
-        String idempotencyKey = "EXPENSE:" + expense.getId() + ":" + canonical.getExpenseNo();
+        String idempotencyKey = sendKeyResolver.resolve("EXPENSE:" + expense.getId() + ":" + canonical.getExpenseNo(),
+                "EXPENSE_REQUEST", expense.getId(), "EXPENSE_DEAL_SYNC", null, payloadHash);
         Long orgId = organizationResolver.resolveExpenseOrganizationId(expense);
 
         log.info("Enqueueing expense sync job for expenseId={}, idempotencyKey={}, orgId={}", expenseRequestId, idempotencyKey, orgId);
@@ -523,9 +531,16 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                             job.getTargetId(), tenantId, "承認済", "会計連携済");
 
                     if (updated != 1) {
-                        jobService.markFailed(jobId, "CAS_CONFLICT",
-                                "経費申請ステータスのCAS更新に失敗しました (承認済ではありません)");
-                        return;
+                        // 経費モジュール側が先に会計連携済・支払済へ進めた場合、freee取引は作成済みなので成功として記録する。
+                        // 承認前へ戻った（差戻し等）場合だけは不整合として人の確認に回す。
+                        ExpenseRequest current = expenseRequestMapper.selectByIdForTenant(job.getTargetId(), tenantId);
+                        boolean advanced = current != null
+                                && ("会計連携済".equals(current.getStatus()) || "支払済".equals(current.getStatus()));
+                        if (!advanced) {
+                            jobService.markFailed(jobId, "CAS_CONFLICT",
+                                    "経費申請ステータスのCAS更新に失敗しました (承認済ではありません)");
+                            return;
+                        }
                     }
 
                     jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),

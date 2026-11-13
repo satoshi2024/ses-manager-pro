@@ -334,6 +334,14 @@ window.AccountingIntegration = (function () {
                 if (j.status === 'RETRYABLE' || j.status === 'FAILED') {
                     actionBtns += `<button class="btn btn-xs btn-outline-warning btn-job-retry" data-id="${j.id}" title="${escapeHtml(t('btnRetry'))}" aria-label="${escapeHtml(t('btnRetry'))}"><i class="bi bi-arrow-repeat" aria-hidden="true"></i></button>`;
                 }
+                // 送信済みfreee取引への操作（管理者のみ）。取消対象の妥当性（最新の送信か）はサーバーで確認する
+                if (canManage() && j.status === 'SUCCEEDED' && j.externalId) {
+                    if (j.jobType === 'SALES_INVOICE_SYNC') {
+                        actionBtns += `<button class="btn btn-xs btn-outline-danger btn-cancel-deal" data-id="${j.id}" data-deal-id="${escapeHtml(j.externalId)}" title="${escapeHtml(t('btnCancelDeal'))}" aria-label="${escapeHtml(t('btnCancelDeal'))}"><i class="bi bi-trash3" aria-hidden="true"></i></button>`;
+                    } else if (j.jobType === 'BP_PURCHASE_SYNC' || j.jobType === 'PURCHASE_DEAL_SYNC') {
+                        actionBtns += `<button class="btn btn-xs btn-outline-success btn-payment-sync" data-target-id="${j.targetId}" title="${escapeHtml(t('btnPaymentSync'))}" aria-label="${escapeHtml(t('btnPaymentSync'))}"><i class="bi bi-cash-coin" aria-hidden="true"></i></button>`;
+                    }
+                }
                 if (j.status === 'PENDING' || j.status === 'RETRYABLE' || j.status === 'RUNNING') {
                     actionBtns += `<button class="btn btn-xs btn-outline-danger btn-job-cancel" data-id="${j.id}" title="${escapeHtml(t('btnCancel'))}" aria-label="${escapeHtml(t('btnCancel'))}"><i class="bi bi-x-circle" aria-hidden="true"></i></button>`;
                 }
@@ -357,6 +365,14 @@ window.AccountingIntegration = (function () {
             $('.btn-job-detail').on('click', function () {
                 let id = $(this).data('id');
                 showJobDetail(id);
+            });
+
+            $('.btn-cancel-deal').on('click', function () {
+                cancelSyncedDeal($(this).data('id'), String($(this).attr('data-deal-id')), page);
+            });
+
+            $('.btn-payment-sync').on('click', function () {
+                syncBpPayment($(this).data('target-id'), page);
             });
 
             $('.btn-job-retry').on('click', function () {
@@ -597,6 +613,71 @@ window.AccountingIntegration = (function () {
                 </div>
             </div>
         `).show();
+    }
+
+    /** 取消理由（機械可読コード。サーバー側の allow-list と同じ）と表示用i18nキー。 */
+    const CANCEL_REASONS = {
+        REASON_AMOUNT_CORRECTION: 'cancelReasonAmountCorrection',
+        REASON_CLIENT_CANCEL: 'cancelReasonClientCancel',
+        REASON_DUPLICATE: 'cancelReasonDuplicate',
+        REASON_DISPUTE: 'cancelReasonDispute',
+        REASON_OTHER: 'cancelReasonOther'
+    };
+
+    /** freee売上取引の取消（理由を選んで取消ジョブを登録する。freeeからの削除はWorkerが行う）。 */
+    function cancelSyncedDeal(jobId, dealId, page) {
+        let options = {};
+        Object.keys(CANCEL_REASONS).forEach(function (code) { options[code] = t(CANCEL_REASONS[code]); });
+        Swal.fire({
+            title: t('cancelDealConfirmTitle'),
+            text: t('cancelDealConfirmText') + ' (dealId: ' + dealId + ')',
+            icon: 'warning',
+            input: 'select',
+            inputOptions: options,
+            inputValue: 'REASON_AMOUNT_CORRECTION',
+            showCancelButton: true,
+            confirmButtonText: t('btnCancelDeal'),
+            cancelButtonText: t('btnCancelLabel')
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            $.ajax({
+                url: '/api/accounting/jobs/' + encodeURIComponent(jobId) + '/cancel-deal?reason=' + encodeURIComponent(result.value),
+                type: 'POST'
+            }).done(function (res) {
+                if (res && res.code === 200) {
+                    SES.toast.success(t('cancelDealQueued'));
+                    loadJobs(page);
+                } else if (res && res.message) {
+                    SES.toast.error(res.message);
+                }
+            });
+            // HTTPエラー時の文言はcommon.jsの共通ハンドラが表示する
+        });
+    }
+
+    /** BP支払の支払実績同期（freeeで決済済みの仕入取引の支払額・支払日をSESへ反映するジョブを登録する）。 */
+    function syncBpPayment(bpPaymentId, page) {
+        Swal.fire({
+            title: t('paymentSyncConfirmTitle'),
+            text: t('paymentSyncConfirmText'),
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: t('btnPaymentSync'),
+            cancelButtonText: t('btnCancelLabel')
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            $.ajax({
+                url: '/api/accounting/sync/payment/' + encodeURIComponent(bpPaymentId),
+                type: 'POST'
+            }).done(function (res) {
+                if (res && res.code === 200) {
+                    SES.toast.success(t('paymentSyncQueued'));
+                    loadJobs(page);
+                } else if (res && res.message) {
+                    SES.toast.error(res.message);
+                }
+            });
+        });
     }
 
     /** 送信ジョブを登録する（実際のfreee送信はWorkerが非同期に行う）。 */

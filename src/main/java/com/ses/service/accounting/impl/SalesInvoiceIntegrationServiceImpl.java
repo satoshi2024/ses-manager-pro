@@ -55,6 +55,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     private final AccountingTimezoneResolver timezoneResolver;
     private final ObjectMapper objectMapper;
     private final AccountingJobLegalEntityResolver legalEntityResolver;
+    private final com.ses.service.accounting.AccountingSendKeyResolver sendKeyResolver;
 
     /** freee取引の管理番号（ref_number）の上限文字数。 */
     private static final int FREEE_REF_NUMBER_MAX = 20;
@@ -97,7 +98,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
             monthlyClosingService.assertOpenForUpdate(invoice.getBillingMonth());
         }
 
-        IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
+        IntegrationConnection conn = resolveConnection(AccountingTenantContextHolder.requireTenantContext(), null, "freee", "accounting");
 
         // マッピング検証ガード (未登録・未検証は送信不可)
         for (String[] required : requiredMappings(invoice)) {
@@ -117,7 +118,9 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
         }
 
         String payloadHash = calculateSha256(payloadJson);
-        String idempotencyKey = "SALES_INVOICE:" + invoice.getId() + ":" + invoice.getInvoiceNo();
+        // 取消後の再送信を可能にするため、キーは世代付き（世代0は従来形式）
+        String idempotencyKey = sendKeyResolver.resolve("SALES_INVOICE:" + invoice.getId() + ":" + invoice.getInvoiceNo(),
+                "INVOICE", invoice.getId(), "SALES_INVOICE_SYNC", "SALES_INVOICE_CANCEL", payloadHash);
         Long orgId = organizationResolver.resolveInvoiceOrganizationId(invoice);
 
         log.info("Enqueueing sales sync job for invoiceId={}, idempotencyKey={}, orgId={}", invoiceId, idempotencyKey, orgId);
@@ -133,7 +136,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
             throw BusinessException.of(404, "error.invoice.notFound");
         }
         // プレビューは参照のみ: 接続は作成しない（未作成ならマッピングはすべて未登録扱い）
-        IntegrationConnection conn = connectionService.getConnection("default", null, "freee", "accounting");
+        IntegrationConnection conn = connectionService.getConnection(AccountingTenantContextHolder.requireTenantContext(), null, "freee", "accounting");
         Long connectionId = conn != null ? conn.getId() : null;
         List<MappingCheck> checks = requiredMappings(invoice).stream()
                 .map(required -> mappingService.inspect(connectionId, required[0], required[1]))
@@ -188,7 +191,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
             monthlyClosingService.assertOpenForUpdate(invoice.getBillingMonth());
         }
 
-        IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
+        IntegrationConnection conn = resolveConnection(AccountingTenantContextHolder.requireTenantContext(), null, "freee", "accounting");
         IntegrationJob latestSync = jobService.getLatestJob("INVOICE", invoiceId, "SALES_INVOICE_SYNC");
         if (latestSync == null || !"SUCCEEDED".equals(latestSync.getStatus()) || latestSync.getExternalId() == null) {
             throw BusinessException.of(400, "error.accounting.syncedDealMissing");
@@ -204,6 +207,19 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
         String idempotencyKey = "SALES_CANCEL:" + invoice.getId() + ":" + latestSync.getExternalId();
         String payload = "{\"invoiceId\":" + invoiceId + ",\"externalDealId\":\"" + latestSync.getExternalId() + "\",\"reason\":\"" + reason + "\"}";
         String payloadHash = calculateSha256(payload);
+        // 取消済み・取消処理中の取引は理由付きで返す（既存ジョブを黙って返すと「登録しました」と誤表示になる）
+        IntegrationJob existingCancel = jobService.getByIdempotencyKey(idempotencyKey);
+        if (existingCancel != null) {
+            if ("SUCCEEDED".equals(existingCancel.getStatus())) {
+                throw BusinessException.of(409, "error.accounting.alreadyCancelled");
+            }
+            if ("FAILED".equals(existingCancel.getStatus())) {
+                throw BusinessException.of(409, "error.accounting.previousJobFailed");
+            }
+            if (!payloadHash.equals(existingCancel.getPayloadHash())) {
+                throw BusinessException.of(409, "error.accounting.jobInProgress");
+            }
+        }
         Long orgId = organizationResolver.resolveInvoiceOrganizationId(invoice);
 
         log.info("Enqueueing sales cancel job for invoiceId={}, externalDealId={}, orgId={}", invoiceId, latestSync.getExternalId(), orgId);

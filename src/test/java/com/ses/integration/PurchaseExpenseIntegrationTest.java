@@ -462,6 +462,48 @@ class PurchaseExpenseIntegrationTest {
     }
 
     @Test
+    @DisplayName("要員経費連携: 経費モジュールが先に会計連携済へ進めていても送信でき、作成済みのfreee取引をFAILEDにしない")
+    void expenseAlreadyAdvancedByExpenseModule_sendSucceeds() {
+        ExternalMapping expAccount = new ExternalMapping();
+        expAccount.setConnectionId(connection.getId());
+        expAccount.setObjectType("ACCOUNT_EXPENSE");
+        expAccount.setInternalCode("EXPENSE_DEFAULT");
+        expAccount.setExternalId("2201");
+        mappingService.saveOrUpdateMapping(expAccount);
+        mappingService.verifyMapping(mappingService.getMapping(connection.getId(), "ACCOUNT_EXPENSE", "EXPENSE_DEFAULT").getId(), "{\"verified\":true}");
+        ExternalMapping taxMap = new ExternalMapping();
+        taxMap.setConnectionId(connection.getId());
+        taxMap.setObjectType("TAX_PURCHASE_10");
+        taxMap.setInternalCode("TAX_PURCHASE_10");
+        taxMap.setExternalId("108");
+        mappingService.saveOrUpdateMapping(taxMap);
+        mappingService.verifyMapping(mappingService.getMapping(connection.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10").getId(), "{\"verified\":true}");
+
+        // ExpenseAccountingJobScheduler（mock）が承認直後に会計連携済へ進めた状態
+        ExpenseRequest exp = new ExpenseRequest();
+        exp.setEngineerId(1L);
+        exp.setExpenseNo("EX-202608-998");
+        exp.setExpenseDate(LocalDate.of(2026, 8, 11));
+        exp.setCategory("交通費");
+        exp.setAmount(new BigDecimal("3300"));
+        exp.setStatus("会計連携済");
+        expenseRequestMapper.insert(exp);
+
+        IntegrationJob job = purchaseIntegrationService.triggerExpenseSync(exp.getId(), 1L);
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 77712, \"amount\": 3300, \"status\": \"unsettled\"}}", MediaType.APPLICATION_JSON));
+
+        purchaseIntegrationService.processExpenseJob(job.getId());
+
+        mockServer.verify();
+        IntegrationJob updatedJob = jobService.getById(job.getId());
+        assertThat(updatedJob.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(updatedJob.getExternalId()).isEqualTo("77712");
+        assertThat(expenseRequestMapper.selectById(exp.getId()).getStatus()).isEqualTo("会計連携済");
+    }
+
+    @Test
     @DisplayName("月次締めガード: 締め済み月の工数に紐づくBP支払の連携トリガーは拒否される")
     void triggerBpPurchaseSync_closedMonth_rejected() {
         Contract closedContract = new Contract();

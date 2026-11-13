@@ -333,6 +333,41 @@ class SalesInvoiceIntegrationTest {
     }
 
     @Test
+    @DisplayName("取消後の再送信: 送信済みの再送信は理由付きで拒否し、freee取引を取消した後は新しい世代で再送信できる")
+    void resendAfterCancel_createsNewGenerationJob() {
+        IntegrationJob first = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        jobService.claimJob(first.getId());
+        jobService.markSucceeded(first.getId(), "77801", "req-sync-01", "売上登録完了");
+
+        // 送信済みのまま再送信 → 以前は既存ジョブが黙って返り「登録しました」と表示されていた
+        assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(invoice.getId(), 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.accounting.alreadySynced");
+
+        IntegrationJob cancel = salesIntegrationService.triggerSalesCancel(invoice.getId(), "REASON_AMOUNT_CORRECTION", 1L);
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/77801?company_id=99001"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 77801}}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/77801?company_id=99001"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        salesIntegrationService.processSalesCancelJob(cancel.getId());
+        mockServer.verify();
+        assertThat(jobService.getById(cancel.getId()).getStatus()).isEqualTo("SUCCEEDED");
+
+        // 取消済みの取引をもう一度取消そうとしても、理由付きで拒否する
+        assertThatThrownBy(() -> salesIntegrationService.triggerSalesCancel(invoice.getId(), "REASON_OTHER", 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.accounting.alreadyCancelled");
+
+        // 取消後は訂正した請求書を新しい世代のジョブとして再送信できる（以前は旧ジョブが返り送信されなかった）
+        IntegrationJob second = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        assertThat(second.getId()).isNotEqualTo(first.getId());
+        assertThat(second.getStatus()).isEqualTo("PENDING");
+        assertThat(second.getIdempotencyKey()).isEqualTo(first.getIdempotencyKey() + ":g1");
+    }
+
+    @Test
     @DisplayName("月次締めガード: 締め済み月の請求書に対する連携トリガーは拒否される")
     void triggerSalesSync_closedMonth_rejected() {
         Invoice closedInvoice = new Invoice();

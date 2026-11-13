@@ -355,6 +355,27 @@ class AccountingIntegrationApiAndPageTest {
     }
 
     @Test
+    @DisplayName("freee取引の取消は最新の成功した送信ジョブからだけ受け付ける（取消→再送信後に古い行で新しい取引を消さない）")
+    @WithMockUser(username = "admin_user", roles = {"管理者"})
+    void cancelDeal_onlyFromLatestSucceededSendJob() throws Exception {
+        long invoiceId = 777_001L;
+        IntegrationJob older = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", invoiceId, "idemp-cancel-old", "h-old");
+        jobService.claimJob(older.getId());
+        jobService.markSucceeded(older.getId(), "50001", "req-old", "売上登録完了");
+        IntegrationJob newer = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", invoiceId, "idemp-cancel-new", "h-new");
+        jobService.claimJob(newer.getId());
+        jobService.markSucceeded(newer.getId(), "50002", "req-new", "売上登録完了");
+
+        mockMvc.perform(post("/api/accounting/jobs/" + older.getId() + "/cancel-deal").with(csrf()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.not("他の操作と競合しました。再読み込みして再試行してください。")));
+
+        IntegrationJob pending = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", 777_002L, "idemp-cancel-pending", "h-p");
+        mockMvc.perform(post("/api/accounting/jobs/" + pending.getId() + "/cancel-deal").with(csrf()))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     @DisplayName("ジョブ手動リトライとキャンセル")
     @WithMockUser(username = "admin_user", roles = {"管理者"})
     void jobRetryAndCancel() throws Exception {
