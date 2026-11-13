@@ -1,12 +1,16 @@
 package com.ses.config;
 
+import com.ses.entity.IdentityProvider;
 import com.ses.entity.SysUser;
+import com.ses.mapper.IdentityProviderMapper;
 import com.ses.mapper.PermissionGroupMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.UserExternalIdentityMapper;
 import com.ses.mapper.UserMfaMapper;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -14,12 +18,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 期限付きbootstrap mode中だけbreak-glass登録の検査を省略し、それ以外の検査は維持し、
+ * 期限付きbootstrap mode中だけbreak-glass登録・OIDC管理者の人数の検査を省略し、それ以外の検査は維持し、
  * bootstrapを無効にする（または期限を過ぎる）と完全な検査へ戻ることを検証する。
+ * あわせて、tenant-idの常時必須（review P2-B）と、完全な検査の通過時に完了markerを書くこと（review P2-A）を検証する。
  */
 class ProductionSecurityConfigurationValidatorBootstrapTest {
 
@@ -29,6 +38,9 @@ class ProductionSecurityConfigurationValidatorBootstrapTest {
     private final SysUserMapper sysUserMapper = mock(SysUserMapper.class);
     private final UserMfaMapper userMfaMapper = mock(UserMfaMapper.class);
     private final PermissionGroupMapper permissionGroupMapper = mock(PermissionGroupMapper.class);
+    private final IdentityProviderMapper identityProviderMapper = mock(IdentityProviderMapper.class);
+    private final UserExternalIdentityMapper userExternalIdentityMapper = mock(UserExternalIdentityMapper.class);
+    private final ProductionBootstrapCompletionLatch completionLatch = mock(ProductionBootstrapCompletionLatch.class);
 
     @Test
     void bootstrap中はbreak_glass未登録の空DBでも起動検査を通す() {
@@ -50,11 +62,8 @@ class ProductionSecurityConfigurationValidatorBootstrapTest {
                     .hasMessageContaining("break-glass管理者usernameをちょうど2件");
         }
 
-        // bootstrap終了の手順どおりbreak-glass管理者2名（MFA登録済み）を設定すれば通る
-        oidc.setBreakGlassUsernames(Set.of("admin", "breakglass2"));
-        when(sysUserMapper.selectByUsername("breakglass2")).thenReturn(user(2L, "breakglass2", "管理者", 1));
-        when(userMfaMapper.countEnrolled("default", 1L)).thenReturn(1);
-        when(userMfaMapper.countEnrolled("default", 2L)).thenReturn(1);
+        // bootstrap終了の手順どおりbreak-glass管理者2名（MFA登録済み）と、OIDCでログインできる管理者3名を揃えれば通る
+        stubCompletedBootstrapUsers(oidc);
         assertThatCode(validator(oidc, bootstrapMode(false))::validate).doesNotThrowAnyException();
 
         // MFA未登録のbreak-glass管理者は完全な検査で拒否する
@@ -119,7 +128,128 @@ class ProductionSecurityConfigurationValidatorBootstrapTest {
                 .hasMessageContaining("bootstrap用の初期管理者(admin)");
     }
 
+    // ---------------------------------------------------------------- tenant-id（review P2-B）
+
+    @Test
+    void tenant_idが未設定ならbootstrap中も完全な検査でも起動しない() {
+        stubFreshInstall();
+        for (String tenantId : new String[]{null, "", "  "}) {
+            OidcSecurityProperties bootstrapOidc = productionOidc();
+            bootstrapOidc.setTenantId(tenantId);
+            assertThatThrownBy(validator(bootstrapOidc, bootstrapMode(true))::validate)
+                    .hasMessageContaining("OIDCのtenant-id（OIDC_TENANT_ID）を設定してください");
+
+            OidcSecurityProperties fullOidc = productionOidc();
+            stubCompletedBootstrapUsers(fullOidc);
+            fullOidc.setTenantId(tenantId);
+            assertThatThrownBy(validator(fullOidc, bootstrapMode(false))::validate)
+                    .hasMessageContaining("OIDCのtenant-id（OIDC_TENANT_ID）を設定してください");
+        }
+        verify(completionLatch, never()).markCompletedIfAbsent();
+    }
+
+    // ---------------------------------------------------------------- OIDC管理者の人数
+
+    @Test
+    void OIDCでログインできる管理者がbreak_glass以外に3名未満なら起動しない() {
+        stubFreshInstall();
+        OidcSecurityProperties oidc = productionOidc();
+        stubCompletedBootstrapUsers(oidc);
+
+        // break-glass usernameは数えない（admin・breakglass2を除くと2名）
+        stubOidcAdministrators("admin", "breakglass2", "ops-issuer", "ops-approver1");
+        assertThatThrownBy(validator(oidc, bootstrapMode(false))::validate)
+                .hasMessageContaining("OIDCでログインできる有効な管理者（break-glass username以外）が3名以上必要です")
+                .hasMessageContaining("現在2名");
+
+        // 3名いれば通る
+        stubOidcAdministrators("admin", "breakglass2", "ops-issuer", "ops-approver1", "ops-approver2");
+        assertThatCode(validator(oidc, bootstrapMode(false))::validate).doesNotThrowAnyException();
+
+        // bootstrap中は人数を見ない（これから作る）
+        OidcSecurityProperties bootstrapOidc = productionOidc();
+        stubOidcAdministrators();
+        assertThatCode(validator(bootstrapOidc, bootstrapMode(true))::validate).doesNotThrowAnyException();
+    }
+
+    @Test
+    void 設定issuerの有効なOIDC_providerが無ければ完全な検査で起動しない() {
+        stubFreshInstall();
+        OidcSecurityProperties oidc = productionOidc();
+        stubCompletedBootstrapUsers(oidc);
+        when(identityProviderMapper.selectEnabledByTenantAndIssuer("default", "https://idp.example/tenant/v2.0"))
+                .thenReturn(null);
+
+        assertThatThrownBy(validator(oidc, bootstrapMode(false))::validate)
+                .hasMessageContaining("有効なOIDC providerが登録されていません");
+    }
+
+    // ---------------------------------------------------------------- 完了marker（review P2-A）
+
+    @Test
+    void bootstrapを無効にした完全な検査が通ったら完了markerを書きbootstrap中は書かない() {
+        stubFreshInstall();
+        assertThatCode(validator(productionOidc(), bootstrapMode(true))::validate).doesNotThrowAnyException();
+        verify(completionLatch, never()).markCompletedIfAbsent();
+
+        OidcSecurityProperties oidc = productionOidc();
+        stubCompletedBootstrapUsers(oidc);
+        ProductionSecurityConfigurationValidator validator = validator(oidc, bootstrapMode(false));
+        validator.validate();
+        validator.validate();
+        verify(completionLatch, times(2)).markCompletedIfAbsent();
+
+        // 完全な検査が通らなければ書かない
+        org.mockito.Mockito.clearInvocations(completionLatch);
+        when(userMfaMapper.countEnrolled("default", 2L)).thenReturn(0);
+        assertThatThrownBy(validator::validate).hasMessageContaining("MFA enrollment完了済み");
+        verify(completionLatch, never()).markCompletedIfAbsent();
+    }
+
+    @Test
+    void 完了markerを書けなければ起動を拒否し失敗を監査する() {
+        stubFreshInstall();
+        OidcSecurityProperties oidc = productionOidc();
+        stubCompletedBootstrapUsers(oidc);
+        doThrow(new IllegalStateException("db unavailable")).when(completionLatch).markCompletedIfAbsent();
+
+        assertThatThrownBy(validator(oidc, bootstrapMode(false))::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("[bootstrap] 初回bootstrapの完了markerを記録できないため起動しません");
+        verify(completionLatch).recordCompletionFailure();
+
+        // latch自体が無い場合も起動しない（fail-closed）
+        ProductionSecurityConfigurationValidator withoutLatch = validator(oidc, bootstrapMode(false));
+        withoutLatch.setBootstrapCompletionLatch(null);
+        assertThatThrownBy(withoutLatch::validate).hasMessageContaining("完了markerを記録できない");
+    }
+
     // ---------------------------------------------------------------- helper
+
+    /**
+     * bootstrap終了後の状態: break-glass管理者2名（admin・breakglass2、MFA登録済み）と、
+     * OIDCでログインできる管理者3名（起票者1名・承認者2名）。
+     */
+    private void stubCompletedBootstrapUsers(OidcSecurityProperties oidc) {
+        oidc.setBreakGlassUsernames(Set.of("admin", "breakglass2"));
+        when(sysUserMapper.selectByUsername("breakglass2")).thenReturn(user(2L, "breakglass2", "管理者", 1));
+        when(userMfaMapper.countEnrolled("default", 1L)).thenReturn(1);
+        when(userMfaMapper.countEnrolled("default", 2L)).thenReturn(1);
+        IdentityProvider provider = new IdentityProvider();
+        provider.setId(7L);
+        provider.setTenantId("default");
+        provider.setProviderType("OIDC");
+        provider.setIssuerUri("https://idp.example/tenant/v2.0");
+        provider.setEnabled(1);
+        when(identityProviderMapper.selectEnabledByTenantAndIssuer("default", "https://idp.example/tenant/v2.0"))
+                .thenReturn(provider);
+        stubOidcAdministrators("ops-issuer", "ops-approver1", "ops-approver2");
+    }
+
+    private void stubOidcAdministrators(String... usernames) {
+        when(userExternalIdentityMapper.selectApprovedActiveUsernamesByRole("default", 7L, "管理者"))
+                .thenReturn(List.of(usernames));
+    }
 
     /** 空DBへの新規導入直後: adminだけが居てMFA登録は無い。default permission groupはV64のseedで揃う。 */
     private void stubFreshInstall() {
@@ -143,6 +273,9 @@ class ProductionSecurityConfigurationValidatorBootstrapTest {
                 oidc, mfa, session(), sysUserMapper, userMfaMapper, permissionGroupMapper, new AiConfig(),
                 new com.ses.common.security.OutboundUrlGuard());
         validator.setProductionBootstrapMode(mode);
+        validator.setBootstrapCompletionLatch(completionLatch);
+        validator.setIdentityProviderMapper(identityProviderMapper);
+        validator.setUserExternalIdentityMapper(userExternalIdentityMapper);
         return validator;
     }
 
@@ -150,7 +283,8 @@ class ProductionSecurityConfigurationValidatorBootstrapTest {
         ProductionBootstrapProperties properties = new ProductionBootstrapProperties();
         properties.setEnabled(enabled);
         properties.setExpiresAt(enabled ? "2026-11-13T20:00:00+09:00" : null);
-        ProductionBootstrapMode mode = new ProductionBootstrapMode(properties, true, clock);
+        ProductionBootstrapMode mode = new ProductionBootstrapMode(properties, true, clock,
+                ProductionBootstrapModeTest.notCompletedLatch());
         mode.validateAtStartup();
         return mode;
     }

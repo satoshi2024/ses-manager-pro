@@ -196,6 +196,41 @@ class ProductionFlywayJobConfigurationTest {
     }
 
     @Test
+    void pomのflyway_pluginのJDBC_driverはprotobufを除外しprod_migrate_profileはそれを継承する() throws Exception {
+        Document pom = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(new File("pom.xml"));
+        Element project = pom.getDocumentElement();
+
+        Element basePlugin = flywayPlugin(child(child(project, "build"), "plugins"));
+        Element driver = null;
+        for (Element dependency : children(child(basePlugin, "dependencies"), "dependency")) {
+            if ("com.mysql".equals(text(dependency, "groupId"))
+                    && "mysql-connector-j".equals(text(dependency, "artifactId"))) {
+                driver = dependency;
+            }
+        }
+        assertThat(driver).as("plugin依存にmysql-connector-jがあること").isNotNull();
+        List<String> exclusions = new ArrayList<>();
+        for (Element exclusion : children(child(driver, "exclusions"), "exclusion")) {
+            exclusions.add(text(exclusion, "groupId") + ":" + text(exclusion, "artifactId"));
+        }
+        assertThat(exclusions)
+                .as("dependencyManagementの除外はplugin依存に効かない。X DevAPI専用のprotobuf-javaを除外し、"
+                        + "offlineのjobで未取得のartifactを要求しないこと（R-3）")
+                .contains("com.google.protobuf:protobuf-java");
+
+        Element profilePlugin = null;
+        for (Element candidate : children(child(project, "profiles"), "profile")) {
+            if ("prod-migrate".equals(text(candidate, "id"))) {
+                profilePlugin = flywayPlugin(child(child(candidate, "build"), "plugins"));
+            }
+        }
+        assertThat(profilePlugin).isNotNull();
+        assertThat(children(profilePlugin, "dependencies"))
+                .as("prod-migrate profileはbase pluginのdependencies（除外を含む）をそのまま継承すること")
+                .isEmpty();
+    }
+
+    @Test
     void V2_sample削除はRepeatableで一度だけ_新規導入直後だけ_DMLだけで実行する() throws Exception {
         String sql = Files.readString(SAMPLE_DATA_SCRIPT, StandardCharsets.UTF_8);
         String statements = withoutComments(sql).toUpperCase(java.util.Locale.ROOT);

@@ -51,8 +51,8 @@ class BootstrapSessionFilterTest {
     void bootstrapに必要な入口だけを許す() {
         String[][] allowed = {
                 {"GET", "/user/list"}, {"GET", "/api/users"}, {"POST", "/api/users"}, {"PUT", "/api/users/2"},
-                {"PUT", "/api/users/2/status"}, {"GET", "/api/role-menus/menus"}, {"PUT", "/api/role-menus"},
-                {"GET", "/api/permission-groups"}, {"PUT", "/api/permission-groups/users/2"},
+                {"PUT", "/api/users/2/status"}, {"GET", "/api/role-menus/menus"}, {"GET", "/api/role-menus"},
+                {"GET", "/api/permission-groups"}, {"GET", "/api/permission-groups/users/2"},
                 {"GET", "/api/identity-providers"}, {"POST", "/api/identity-providers"},
                 {"POST", "/api/identity-providers/1/external-identities"},
                 {"GET", "/mfa/setup"}, {"GET", "/mfa/challenge"}, {"GET", "/api/security/mfa/status"},
@@ -81,6 +81,52 @@ class BootstrapSessionFilterTest {
             assertThat(BootstrapSessionFilter.isBootstrapEntry(new MockHttpServletRequest(entry[0], entry[1])))
                     .as("拒否: %s %s", entry[0], entry[1]).isFalse();
         }
+    }
+
+    @Test
+    void 権限groupとrole別menuは参照だけを許し書込は許さない() {
+        // review P3-b: role別menuの全置換と権限groupの割当替えはbootstrapに要らない（作成時に既定groupが割り当たる）
+        String[][] denied = {
+                {"PUT", "/api/role-menus"}, {"POST", "/api/role-menus"}, {"DELETE", "/api/role-menus"},
+                {"PUT", "/api/permission-groups/users/2"}, {"POST", "/api/permission-groups"},
+                {"DELETE", "/api/permission-groups/1"}};
+        for (String[] entry : denied) {
+            assertThat(BootstrapSessionFilter.isBootstrapEntry(new MockHttpServletRequest(entry[0], entry[1])))
+                    .as("拒否: %s %s", entry[0], entry[1]).isFalse();
+        }
+    }
+
+    @Test
+    void 別の主体へ引き継がれたbootstrapの印はsessionごと失効させる() throws Exception {
+        // review P3-a: 印はbootstrap loginの本人（user id 1）に結び付いている。別のuser idの主体では効かせない
+        authenticateAs(2L, "admin");
+        MockHttpSession session = bootstrapSession();
+        markMfaVerified(session, 2L);
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        filter.doFilter(request("GET", "/api/users", session), response, chain);
+
+        assertThat(chain.getRequest()).isNull();
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(session.isInvalid()).isTrue();
+        verify(auditLogService).record(eq("admin"), eq("GET"), eq("/api/users"), eq(401),
+                eq("BOOTSTRAP_SESSION_MISMATCH"), eq(false));
+    }
+
+    @Test
+    void 別の主体のMFA検証済みの印ではbootstrap_sessionのMFA完了にしない() throws Exception {
+        authenticate();
+        MockHttpSession session = bootstrapSession();
+        markMfaVerified(session, 99L);
+
+        MockHttpServletResponse api = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        filter.doFilter(request("GET", "/api/users", session), api, chain);
+
+        assertThat(chain.getRequest()).isNull();
+        assertThat(api.getStatus()).isEqualTo(403);
+        assertThat(api.getContentAsString()).contains("MFA認証が必要です");
     }
 
     // ---------------------------------------------------------------- filterの挙動
@@ -137,7 +183,7 @@ class BootstrapSessionFilterTest {
     void MFA完了後は入口だけを通し他は403で監査しrootはユーザー管理へ誘導する() throws Exception {
         authenticate();
         MockHttpSession session = bootstrapSession();
-        session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE, Boolean.TRUE);
+        markMfaVerified(session, 1L);
 
         MockFilterChain allowed = new MockFilterChain();
         filter.doFilter(request("POST", "/api/users", session), new MockHttpServletResponse(), allowed);
@@ -167,7 +213,7 @@ class BootstrapSessionFilterTest {
     void 期限を過ぎたbootstrap_sessionは401で失効させる() throws Exception {
         authenticate();
         MockHttpSession session = bootstrapSession();
-        session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE, Boolean.TRUE);
+        markMfaVerified(session, 1L);
         clock.set(Instant.parse("2026-11-13T12:00:00Z"));
 
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -211,15 +257,24 @@ class BootstrapSessionFilterTest {
         ProductionBootstrapProperties properties = new ProductionBootstrapProperties();
         properties.setEnabled(true);
         properties.setExpiresAt("2026-11-13T20:00:00+09:00");
-        ProductionBootstrapMode mode = new ProductionBootstrapMode(properties, true, clock);
+        ProductionBootstrapMode mode = new ProductionBootstrapMode(properties, true, clock,
+                ProductionBootstrapModeTest.notCompletedLatch());
         mode.validateAtStartup();
         return mode;
     }
 
+    /** bootstrap login（user id 1のadmin）で発行したsession。 */
     private static MockHttpSession bootstrapSession() {
         MockHttpSession session = new MockHttpSession();
         session.setAttribute(ProductionBootstrapMode.SESSION_ATTRIBUTE, Boolean.TRUE);
+        session.setAttribute(ProductionBootstrapMode.SESSION_USER_ATTRIBUTE, 1L);
         return session;
+    }
+
+    /** 指定user idの本人がMFAを検証した状態にする（{@code SecuritySessionApiController.markVerified} と同じ属性）。 */
+    private static void markMfaVerified(MockHttpSession session, Long userId) {
+        session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE, Boolean.TRUE);
+        session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_USER_ATTRIBUTE, userId);
     }
 
     private static MockHttpServletRequest request(String method, String uri, MockHttpSession session) {
@@ -229,9 +284,13 @@ class BootstrapSessionFilterTest {
     }
 
     private static void authenticate() {
+        authenticateAs(1L, "admin");
+    }
+
+    private static void authenticateAs(Long userId, String username) {
         SysUser user = new SysUser();
-        user.setId(1L);
-        user.setUsername("admin");
+        user.setId(userId);
+        user.setUsername(username);
         user.setRole("管理者");
         user.setStatus(1);
         user.setTenantId("default");

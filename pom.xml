@@ -277,7 +277,14 @@
                  本番では使わない。本番の専用Flyway jobは prod-migrate profile（ops/flyway/flyway-prod.conf）で実行する。
                  dependenciesは両方に効く。pluginはproject依存（compile/runtime classpath）もclassloaderへ加えるため
                  冗長の可能性があるが、DB対応plugin（flyway-mysql）とJDBC driverを確実に解決させるため念のため明示する
-                 （「無いとNo database foundになる」ことは実行では未確認。D1 review P3-14）。 -->
+                 （「無いとNo database foundになる」ことは実行では未確認。D1 review P3-14）。
+                 mysql-connector-jからはprotobuf-javaを除外する。protobuf-javaはX DevAPIだけが使い、JDBC（Flyway）では
+                 使わない。アプリ側のdriverはSpring BootのdependencyManagementがprotobuf-javaを除外しているが、
+                 dependencyManagementの除外はplugin依存には効かないため、ここで明示しないとpluginだけがprotobuf-javaを
+                 要求し、アプリのdriverとplugin依存がずれる。配備環境はofflineや社内registry無しのことがあり、
+                 local repositoryに無いprotobuf-javaでjob（mvn -o -Pprod-migrate ...）が依存解決に失敗する
+                 （R-3のjob経路リハーサルで発生）。prod-migrate profileはこのdependenciesをそのまま継承する
+                 （profile側では書かない）。 -->
             <plugin>
                 <groupId>org.flywaydb</groupId>
                 <artifactId>flyway-maven-plugin</artifactId>
@@ -291,6 +298,12 @@
                         <groupId>com.mysql</groupId>
                         <artifactId>mysql-connector-j</artifactId>
                         <version>${mysql.version}</version>
+                        <exclusions>
+                            <exclusion>
+                                <groupId>com.google.protobuf</groupId>
+                                <artifactId>protobuf-java</artifactId>
+                            </exclusion>
+                        </exclusions>
                     </dependency>
                 </dependencies>
                 <configuration>
