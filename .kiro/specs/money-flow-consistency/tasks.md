@@ -35,12 +35,12 @@ i18n 4ファイルは A/C/D すべてが追記するため、並行時はキー�
 
 - [x] B1. 共通集計サービス（R3）
   - **Objective**: `MonthlyRevenueCalcService` を新設し、契約単位フォールバック＋準備中除外の
-    共通口径を実装する。
+    共通基準を実装する。
   - **実装ガイダンス**: design.md R3。`resolveContractAmount` も併せて公開。
   - **テスト要件**: `MonthlyRevenueCalcServiceTest`（design.md 記載の5ケース以上）。
   - **Demo**: `mvn test -Dtest=MonthlyRevenueCalcServiceTest` グリーン。
 
-- [x] B2. Dashboard / Excel帳票 / 営業成績の共通口径への置換（R3）
+- [x] B2. Dashboard / Excel帳票 / 営業成績の共通基準への置換（R3）
   - **Objective**: 3モジュールの独自集計を共通サービス委譲に置き換え、KPI・チャート・帳票・
     営業成績合計の数値を一致させる。
   - **実装ガイダンス**: design.md R3「呼び出し元の置換」。`calcMonthlyAmount` と
@@ -86,7 +86,7 @@ i18n 4ファイルは A/C/D すべてが追記するため、並行時はキー�
     （`ContractApiController` / `ContractMapper.selectPageWithNames` / `contract.js` /
     `contract/list.html` — レーンAの担当ファイルに触れるため A 完了後）し、未帰属行からリンク。
   - **テスト要件**: `SalesPerformanceServiceImplTest` に未帰属集計ケース追加
-    （全行合計 = 共通口径の全社売上）。
+    （全行合計 = 共通基準の全社売上）。
   - **Demo**: 担当営業なしの稼動契約がある月で、営業成績に未帰属行が出て、
     リンク先の契約一覧で当該契約に担当を設定すると未帰属行から消えることを確認。
 

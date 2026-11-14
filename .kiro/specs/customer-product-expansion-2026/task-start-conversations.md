@@ -5,7 +5,7 @@
 通常運用は `spec-start-conversations.md` と `spec-review-conversations.md` を使用し、本書から115対話を作らない。
 T001は完了済みのため再派工しない。
 
-T014〜T115は `test-execution-policy-s03-s17.md` を必須適用する。通常Taskは定向testと直接回帰で完了し、
+T014〜T115は `test-execution-policy-s03-s17.md` を必須適用する。通常Taskは対象限定テストと直接回帰で完了し、
 無条件の全量testを実行しない。全量は各specのM task、明記された昇格checkpoint、CI/releaseへ集約する。
 
 ## 使用ルール
@@ -2670,7 +2670,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 - [ ] B1. CRM KPI
   - **Objective**: B1. CRM KPI を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **実装ガイダンス**: stage金額/滞留/転換/失注/source ROI。
-  - **テスト要件**: 集計口径とscope。
+  - **テスト要件**: 集計基準とscope。
   - **Demo**: 担当別funnel drilldown。
 
 【着手判定】
@@ -4002,7 +4002,7 @@ T番号は検索・派工用の固定IDであり、実行順ではない。実�
 - [ ] B1. 需給heatmap/KPI
   - **Objective**: B1. 需給heatmap/KPI を完了し、requirementsに定義した利用者効果を検証可能にする。
   - **実装ガイダンス**: skill/role/location/月aggregate、bench cost。
-  - **テスト要件**: FTE口径、全社=内訳、24か月。
+  - **テスト要件**: FTE基準、全社=内訳、24か月。
   - **Demo**: Java需要不足をdrilldown。
 
 【着手判定】

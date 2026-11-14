@@ -1,6 +1,6 @@
 # Implementation Plan — BP会社マスタ・発注コンプライアンス
 
-> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T034〜T039はL0〜L3の定向test・直接回帰、T040でL4全量を実行する。
+> **階層別テスト方針**（正本: `test-execution-policy-s03-s17.md`）: T034〜T039はL0〜L3の対象限定テスト・直接回帰、T040でL4全量を実行する。
 > migration/共通取引先contract変更時だけ中間昇格を判定する。
 >
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。

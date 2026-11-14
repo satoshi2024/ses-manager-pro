@@ -20,7 +20,7 @@
 | R3-008 | `engineer/detail.html:14,15,41,224`に「田中 太郎」「T.T」があり、API失敗時も初期DOMとactionが残る。 | 既存API/scope testはresponse拒否だけを検証し、HTML初期値とJS error stateを検証しない。 | `EngineerScaleUiContractTest#detail失敗時にdummyと操作を表示しない` |
 | R3-018 | `quotation.js:83`が`SES.i18n.t(key, [total,start,end], fallback)`と呼び、共通関数の配列flatten契約から外れる。 | backendの`QuotationApiControllerTest`はstatic JS/i18n placeholderを実行しない。 | `FrontendScaleUiContractTest#見積paginationの位置引数を配列一引数で渡す` |
 
-修正前定向testとして
+修正前対象限定テストとして
 `mvn -B test -Dtest=PersistentSessionServiceImplTest,ContractApiControllerTest,QuotationApiControllerTest`
 を実行し、20 tests / failure 0 / error 0 / skip 0を確認した。上表の不具合が残ったままgreenになることが、既存coverage gapの証跡である。
 
@@ -88,7 +88,7 @@ Task 0 Demo判定: **PASS**。上記6件の修正前事象、consumer、既存co
 | baseline 2026-08-02 | `mvn -B test` | H2 / Dockerなし | 1,277 | 0 | 0 | 8 | - | `target/surefire-reports` | 参考値 |
 | baseline 2026-08-02 | 25 unique simultaneous login | MySQL | 25 login | - | 10 | - | - | app log | FAIL |
 | baseline 2026-08-02 | staggered login + 25 steady | MySQL | 2,027 request | 0 | 0 | - | 41.65ms | temp capacity output | 参考値 |
-| 2026-08-02 | S1 H2/service/security定向 | H2 / Java 17 | 21 tests | 0 | 0 | 0 | - | `target/surefire-reports` | PASS |
+| 2026-08-02 | S1 H2/service/security対象限定 | H2 / Java 17 | 21 tests | 0 | 0 | 0 | - | `target/surefire-reports` | PASS |
 | 2026-08-02 | `ConcurrentLoginSessionSmokeTest` | Testcontainers / Dockerなし | 2 tests | 0 | 0 | 2 | - | `target/surefire-reports/TEST-com.ses.service.security.ConcurrentLoginSessionSmokeTest.xml` | BLOCKED(Dockerなし) |
 | 2026-08-02 | S1 25 unique barrier login | MySQL 8.4 / app:8081 | 25 login | 0 | 0 | 0 | - | `target/r3-evidence/s1-login-spike.csv`、`s1-app-stdout.log` | PASS |
 | 2026-08-02 | `CapacityBaselineScriptTest` | PowerShell fixture server | 4 tests | 0 | 0 | 0 | - | `target/surefire-reports/TEST-com.ses.scripts.CapacityBaselineScriptTest.xml` | PASS |
@@ -98,11 +98,11 @@ Task 0 Demo判定: **PASS**。上記6件の修正前事象、consumer、既存co
 | 2026-08-02 | S3 authenticated monitor | app:8081 | 8 metrics probe | 0 | 8 unavailable | 0 | - | `target/r3-evidence/s3-metrics/20260802-203346` | PASS（正しいUnavailable判定、RequireMetrics非0） |
 | 2026-08-02 | `BpAvailabilityIngestionPageControllerTest` | H2 / Java 17 | 3 tests | 0 | 0 | 0 | - | `target/surefire-reports/TEST-com.ses.controller.page.BpAvailabilityIngestionPageControllerTest.xml` | PASS |
 | 2026-08-02 | A1 list→pagination→review→取消→確定 | MySQL 8.4 / app:8081 / in-app browser | 13件、2 pages、1 confirm | 0 | 0 | 0 | - | `target/r3-evidence/a1-app-stdout.log`（confirm API 200） | PASS |
-| 2026-08-02 | A2 pagination定向 | H2 / Java 17 / Node | 38 tests | 0 | 0 | 0 | - | `target/surefire-reports` | PASS |
+| 2026-08-02 | A2 pagination対象限定 | H2 / Java 17 / Node | 38 tests | 0 | 0 | 0 | - | `target/surefire-reports` | PASS |
 | 2026-08-02 | A2 admin/manager page境界 | MySQL 8.4 / app:8081 / authenticated web session | admin 8 pages、manager 2 pages | 0 | 0 | 0 | - | `target/r3-evidence/a2-pagination.json` | PASS |
-| 2026-08-02 | A3 customer参照validation定向 | H2 / Java 17 / MockMvc | 23 tests | 0 | 0 | 0 | - | `target/surefire-reports` | PASS |
+| 2026-08-02 | A3 customer参照validation対象限定 | H2 / Java 17 / MockMvc | 23 tests | 0 | 0 | 0 | - | `target/surefire-reports` | PASS |
 | 2026-08-02 | A3 invalid customer create/update | MySQL 8.4 / app:8081 / authenticated API | 2 write requests | 0 | 0 | 0 | - | `target/r3-evidence/a3-invalid-customer.json`、`a3-app-stdout.log` | PASS |
-| 2026-08-02 | B1 Bench filter定向 | H2 / Java 17 / Node | 22 tests | 0 | 0 | 0 | - | `target/surefire-reports` | PASS |
+| 2026-08-02 | B1 Bench filter対象限定 | H2 / Java 17 / Node | 22 tests | 0 | 0 | 0 | - | `target/surefire-reports` | PASS |
 | 2026-08-02 | B1 Dashboard/手動Bench filter | MySQL 8.4 / app:8081 / authenticated web session | 32件、4 pages | 0 | 0 | 0 | - | `target/r3-evidence/b1-bench-filter.json`、`b1-app-stdout.log` | PASS |
 | 2026-08-02 Review | `mvn -B test`（独立Review、**Docker有効**） | H2 + Testcontainers MySQL 8.0 / Java 17 / Node v24.18.0 | 1,352 tests | 0 | **1** | 0 | - | scratchpad `mvn-test.log`、`target/surefire-reports` | **FAIL**（BUILD FAILURE / `ConcurrentLoginSessionSmokeTest`=RV1-01） |
 | 2026-08-02 Review | `verify-like-ci.ps1 -PreflightOnly` PS5.1 / PS7 | Windows PowerShell 5.1 / PowerShell 7 | 2 run | 0 | 0 | 0 | - | 実行output（両方exit 0） | PASS（R3-021） |

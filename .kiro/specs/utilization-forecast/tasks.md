@@ -4,7 +4,7 @@
 
 - [x] A. 予測サービス
   - **Objective**: `forecast(months)` で月次稼働/Bench/稼働率＋ロールオフ一覧。
-  - **実装ガイダンス**: design 1章。有効契約判定を当月ダッシュボードと共用（口径一致）。autoRenew見込みは設定。
+  - **実装ガイダンス**: design 1章。有効契約判定を当月ダッシュボードと共用（基準一致）。autoRenew見込みは設定。
   - **テスト要件**: `UtilizationForecastServiceTest`（endDate跨ぎ/null/autoRenew/当月一致/ロールオフ/スコープ）。
   - **Demo**: curl で3ヶ月予測。
 

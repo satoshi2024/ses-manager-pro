@@ -13,7 +13,7 @@
 作業前にREADINESS、対象taskのTASK CONTRACT、現行Issue Register、Base/Head、dirty fileの所有者を提示してください。
 旧基線と新版に矛盾がある場合は差分表を提示して停止し、推測で大規模改修しないでください。
 修正完了時はcommit固定済みREVIEW PACKETを提出し、自己PASSは宣言しないでください。
-S03〜S17の通常TaskはL0〜L3の定向test・直接回帰で完了し、無条件の全量testを実行しないでください。
+S03〜S17の通常TaskはL0〜L3の対象限定テスト・直接回帰で完了し、無条件の全量testを実行しないでください。
 各specのM taskでL4全量を1回実行し、それ以前は昇格条件に該当する安定checkpointだけ中間L4を実行してください。
 ```
 

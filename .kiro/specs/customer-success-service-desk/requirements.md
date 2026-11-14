@@ -73,7 +73,7 @@
 3. THE 外部I/O（通知outbox、file scan）SHALL DB transaction外で実行する。
 4. THE 文言 SHALL 4 bundle（`messages`/`_en`/`_zh_CN`/`_ko`）へ同一keyを追加し、日本語を正として翻訳する。`messages_ja` は作らない。
 5. THE UI SHALL desktopと390pxで起票・返信・CSAT・内部メモ切替を完了できる。二重click抑止はserver冪等の代替にしない。
-6. THE 各acceptance criterion SHALL 定向自動testまたは明示Demoへtraceする。skipを成功としない。snapshot serviceのSecurityContextなし呼出しはデフォルト拒否し、管理者または厳格なSYSTEM schedulerコンテキストだけを許可する。
+6. THE 各acceptance criterion SHALL 対象限定の自動テストまたは明示Demoへtraceする。skipを成功としない。snapshot serviceのSecurityContextなし呼出しはデフォルト拒否し、管理者または厳格なSYSTEM schedulerコンテキストだけを許可する。
 
 ---
 

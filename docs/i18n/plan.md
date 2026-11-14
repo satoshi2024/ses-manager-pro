@@ -60,7 +60,7 @@ public void addInterceptors(InterceptorRegistry registry) {
 
 ### 決定2: 言語切替UI
 
-- `header.html` の `div.header-tools` 内、テーマ切替ボタンと通知ベルの間に bi-globe2 アイコンのドロップダウン(日本語 / English / 简体中文 / 한국어、現在言語を `active` 強調)
+- `header.html` の `div.header-tools` 内、テーマ切替ボタンと通知ベルの間に bi-globe2 アイコンのドロップダウン(日本語 / English / 中国語（簡体字） / 한국어、現在言語を `active` 強調)
 - `login.html` はカード下部に同構造のリンク行
 - 切替は `<a th:href="${langSwitchBase} + 'en'">` による GET 全画面リロード(JS不要・CSRF問題なし)
 - `langSwitchBase`(現在URI+クエリ、既存 lang を除去し `lang=` で終わる文字列)は `GlobalControllerAdvice` の `@ModelAttribute` で全画面へ供給

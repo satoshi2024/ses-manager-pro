@@ -117,7 +117,7 @@ Page<ContractListDto> selectPageWithNames(Page<ContractListDto> page, @Param("st
         @Param("endDateFrom") LocalDate endDateFrom, @Param("endDateTo") LocalDate endDateTo);
 ```
 
-(MyBatis-Plus の分页インターセプターは第1引数 `Page` の Mapper メソッドに自動適用される。
+(MyBatis-Plus のページングインターセプターは第1引数 `Page` の Mapper メソッドに自動適用される。
 テーブル/カラム名は `V1__create_tables.sql` を実装時に必ず確認して合わせること。)
 
 `ContractApiController.page` は上記に委譲し `ApiResult<Page<ContractListDto>>` を返す。

@@ -11,7 +11,7 @@
 2. **未知行の任意・デフォルトテナント割当の絶対禁止**:
    所属テナントや法人が判定できないレコード（孤立インボイス、所有者未確定アカウント等）に対し、**便宜上適当なデフォルトテナントや管理用テナントを推測で割り当てて解決とすることは固く禁止する**。必ず第 7 節に規定する正当な証憑調査および業務 Owner の確認・決裁を得て解決する。
 3. **合成 HUMAN サインオフの非代替性**:
-   リハーサル演練で用いられた `resolved_by = 1001L` 等の合成値は、技術的 CAS 検証のためのダミー値に過ぎず、**業務 Owner、財務統括責任者、法務・コンプライアンス責任者の実サインオフを法的に代替するものでは決してない**。
+   リハーサルで用いられた `resolved_by = 1001L` 等の合成値は、技術的 CAS 検証のためのダミー値に過ぎず、**業務 Owner、財務統括責任者、法務・コンプライアンス責任者の実サインオフを法的に代替するものでは決してない**。
 4. **本番修復実行プログラム（Repair Executor）の未実装・未承認ステータス**:
    本番環境用のデータ修復自動実行プログラム（Production Repair Executor）は現時点で**未実装・未承認**である。テストコード `V182TenantScopeHardeningRehearsalMySqlTest` 内のヘルパーメソッド群（`repairInvoiceInTransaction`, `repairPeppolConflictInTransaction` 等）は、Disposable コンテナでのリハーサル検証用に作られたテスト専用ヘルパーに過ぎず、**本番運用の実行エントリポイントでは決してない**。
 5. **本番 Owner 承認ステータス**:
@@ -32,7 +32,7 @@
 | **データ規模・容量** | 合成テストデータ（数十〜数百件）によるスキーマ遷移・キュー隔離ロジックの成立を確認済み。 | 本番対象テーブルは数万〜数百万円規模の実ビジネスレコードを想定。実データ件数は Preflight で測定。 | **Preflight で確定 (PENDING)** |
 | **DDL 実行所要時間** | Disposable コンテナ上で全 DDL/DML が数秒で完了することを確認済み。 | 本番テーブルサイズおよび I/O 負荷に応じ、数分〜数十分の保守ウィンドウ枠を確保。 | **保守計画値 (PENDING)** |
 | **Binlog 保持期間** | テスト環境では Binlog 永続保持なし（コンテナ破棄で破棄）。 | `binlog_format = ROW`、保持期間最低 7 日間以上を必須要件として推奨。 | **要 DBA 確認 (PENDING)** |
-| **演練結果の有効期限** | Commit `27a000f2225f272fe2c3b5094de6325c7714dd41` にて 5 シナリオ完全合格を確認済み。 | スキーマおよびデータ構造にドリフトがない限り、演練完了後 30 日以内を作業有効枠として推奨。 | **計画基準日設定 (PENDING)** |
+| **リハーサル結果の有効期限** | Commit `27a000f2225f272fe2c3b5094de6325c7714dd41` にて 5 シナリオ完全合格を確認済み。 | スキーマおよびデータ構造にドリフトがない限り、リハーサル完了後 30 日以内を作業有効枠として推奨。 | **計画基準日設定 (PENDING)** |
 | **RTO / RPO** | コンテナ障害時のプロセス中断およびログ退避が即時実行可能であることを確認済み。 | 本番 PITR の目標値は `ops/backup/README.md`「復旧目標」と同一の **RPO 15 分 / RTO 4 時間**（2026-11-13 の本番投入決定 B-NF09-4 で統一。旧草案の RTO ≤ 60 分 / RPO = 0 秒は廃止）。代表データ量の隔離演習で実測するまでは未達成扱い。 | **目標値決定済み・DBA Lead / Operations 署名待ち (PENDING)** |
 
 ### 2.2 フルバックアップとポイントインタイムリカバリ（PITR）要件
@@ -41,8 +41,8 @@
 2. **Binlog（バイナリログ）保持と PITR 境界点の記録**:
    - MySQL のバイナリログが有効（`log_bin = ON`, `binlog_format = ROW`）であり、十分な保持期間（推奨目標: 最低 7 日間以上、実環境設定値は DBA 確認待ち・PENDING）が確保されていることを確認する。
    - マイグレーション直前のバイナリログファイル名およびポジション（`SHOW MASTER STATUS` または `SHOW BINARY LOG STATUS`）、および正確な JST タイムスタンプ（秒単位）を記録・固定する。
-3. **リストア演練実績と目標 SLA の確認**:
-   - リストア演練実績および復旧目標値（計画目標基準: 30 日以内のリストア演練実績、目標 RPO 15 分 / RTO 4 時間。`ops/backup/README.md`「復旧目標」と同一で、DBA Lead / Operations の署名は PENDING）についてインフラ／DBA チームと確認を行う。
+3. **リストアリハーサル実績と目標 SLA の確認**:
+   - リストアリハーサル実績および復旧目標値（計画目標基準: 30 日以内のリストアリハーサル実績、目標 RPO 15 分 / RTO 4 時間。`ops/backup/README.md`「復旧目標」と同一で、DBA Lead / Operations の署名は PENDING）についてインフラ／DBA チームと確認を行う。
    - 復元先（recovery target）の MySQL サーバの時刻帯が production と同じ `+09:00` であることを確認する（2026-11-13 決定。`SELECT @@global.time_zone;`）。
 
 ### 2.3 アプリケーション保守モードとトラフィック遮断
@@ -99,7 +99,7 @@ SELECT table_name
 - **期待結果**: **0 行**。
 
 ### Preflight SQL-05: 顧客マスタスコープ健全性と未解決候補の事前把握
-- **目的**: 回填の基点となる `m_customer` において、`tenant_id` または `legal_entity_id` が未設定のレコード件数を把握する。
+- **目的**: 補完の基点となる `m_customer` において、`tenant_id` または `legal_entity_id` が未設定のレコード件数を把握する。
 ```sql
 SELECT COUNT(*) AS total_active_customers,
        SUM(CASE WHEN tenant_id IS NULL OR tenant_id = '' OR legal_entity_id IS NULL THEN 1 ELSE 0 END) AS unassigned_scope_customers
@@ -309,14 +309,14 @@ SELECT COUNT(*) AS unisolated_account_count
 
 ---
 
-## 6. 未解決行（PENDING / 未確定行）の厳密な解消口径 (Strict Resolution Criteria)
+## 6. 未解決行（PENDING / 未確定行）の厳密な解消基準 (Strict Resolution Criteria)
 
-データ修復フェーズの完了条件である「`PENDING = 0`」および「未確定行 = 0」の口径を厳密に定義する。
+データ修復フェーズの完了条件である「`PENDING = 0`」および「未確定行 = 0」の基準を厳密に定義する。
 
-### 6.1 修復キューの結案口径
+### 6.1 修復キューの完了判定基準
 - `t_nf09_scope_repair_queue` において、`status = 'PENDING'` の行が **0 件**（全件 `status = 'RESOLVED'`）であること。
 
-### 6.2 業務テーブルのスコープ確定口径
+### 6.2 業務テーブルのスコープ確定事項
 以下の 4 クエリがすべて **0 件** を返却すること：
 ```sql
 SELECT COUNT(*) FROM t_digital_invoice WHERE tenant_id IS NULL OR legal_entity_id IS NULL;
@@ -328,7 +328,7 @@ SELECT COUNT(*) FROM t_external_account_reference WHERE tenant_id IS NULL OR leg
 ### 6.3 論理削除行（`deleted_flag = 1`）の扱い
 - **除外の禁止**: `deleted_flag = 1` の論理削除レコードであっても、監査ログや過去データ集計の整合性を保つため、**スコープが NULL のまま放置することは認められない**。
 - **解決方針**:
-  - 削除前に紐づいていた顧客／要員／組織情報から正当な `(tenant_id, legal_entity_id)` を特定して回填・結案する。
+  - 削除前に紐づいていた顧客／要員／組織情報から正当な `(tenant_id, legal_entity_id)` を特定して補完・完了する。
   - 実体が完全に消滅して特定不能なテストデータ残骸等である場合は、業務 Owner および法務コンプライアンス責任者の承認を得た上で、正規の廃止手順として処理する（決して任意のテナントを埋めない）。
 
 ### 6.4 Peppol 修復の 2 分類（通常スコープ未解決／コールバック衝突）と MySQL 1062 制御
@@ -337,7 +337,7 @@ SELECT COUNT(*) FROM t_external_account_reference WHERE tenant_id IS NULL OR leg
 #### 1. Type A: 通常スコープ未解決（`SCOPE_UNRESOLVED`）の修復規程
 - **対象**: コールバック識別子の競合を伴わず、単に所属組織や顧客のスコープが未確定なレコード。
 - **修復原則**:
-  - `owner_type` / `owner_id`（例: 顧客マスタ `m_customer`）に基づき、正当な `(tenant_id, legal_entity_id)` を特定して回填する。
+  - `owner_type` / `owner_id`（例: 顧客マスタ `m_customer`）に基づき、正当な `(tenant_id, legal_entity_id)` を特定して補完する。
   - **業務状態および削除フラグの原値維持**:
     - **`status`（業務状態）および `deleted_flag`（論理削除状態）は一切変更せず、ロック取得時の原値を完全に維持**する（勝手に `VERIFIED` や `DUPLICATE_DEPRECATED` に変更することは禁止）。
     - 例えば `status = 'PENDING_VERIFICATION'` や `status = 'VERIFIED'`、あるいは `deleted_flag = 1` の行は、その状態を保持したまま `tenant_id` と `legal_entity_id` のみが更新される。
@@ -346,21 +346,21 @@ SELECT COUNT(*) FROM t_external_account_reference WHERE tenant_id IS NULL OR leg
 - **対象**: 同一 `(provider, scheme_id, participant_id)` を共有し、複数の有効レコードが存在することで複合一意制約 `uk_peppol_callback_active` 違反を回避するために `CONFLICT_REPAIR` に隔離されたレコード群。
 - **修復原則と境界条件**:
   1. **勝者行および全淘汰（敗者）行の独立個別帰属**:
-     - 衝突グループ内の正当勝者（唯一の活性化行）のみならず、**淘汰されるすべての敗者行についても、各レコード自身の `owner_type` / `owner_id` に基づき独立して正当な `(tenant_id, legal_entity_id)` を調査・特定し、回填しなければならない**。
-     - **【禁止】敗者行を単に `status = 'DUPLICATE_DEPRECATED'` に変更しただけで、スコープを NULL のまま結案することは固く禁止する**（野良 NULL 残存の禁止、Postflight SQL-06 違反）。
+     - 衝突グループ内の正当勝者（唯一の活性化行）のみならず、**淘汰されるすべての敗者行についても、各レコード自身の `owner_type` / `owner_id` に基づき独立して正当な `(tenant_id, legal_entity_id)` を調査・特定し、補完しなければならない**。
+     - **【禁止】敗者行を単に `status = 'DUPLICATE_DEPRECATED'` に変更しただけで、スコープを NULL のまま完了することは固く禁止する**（野良 NULL 残存の禁止、Postflight SQL-06 違反）。
   2. **異 Owner 間のスコープ複製の絶対禁止**:
      - 勝者行のスコープを、異なる `owner_id` を持つ敗者行へ便宜上コピーすることは固く禁止する。各行は必ず各行自身の正当な法的実体へ帰属させなければならない。
   3. **全行確定または全量保留（All-or-Nothing）**:
-     - 衝突グループ内の 1 行でも正当なスコープが特定・確認できない場合、**グループ全体の修復を結案せず、全行のキューを `PENDING` に維持**する（部分結案の禁止）。
+     - 衝突グループ内の 1 行でも正当なスコープが特定・確認できない場合、**グループ全体の修復を完了せず、全行のキューを `PENDING` に維持**する（部分完了の禁止）。
   4. **論理削除行（`deleted_flag = 1`）の扱い**:
-     - 論理削除済みの行であっても、Postflight SQL-06 の全量 0-NULL 規則が例外なく適用され、正当なスコープの回填を必須とする。
+     - 論理削除済みの行であっても、Postflight SQL-06 の全量 0-NULL 規則が例外なく適用され、正当なスコープの補完を必須とする。
   5. **重複活性化の物理遮断（MySQL 1062 Guard）**:
      - 衝突グループのうち、正当と確認された唯一の 1 件のみを `status = 'VERIFIED'`, `deleted_flag = 0` に更新する（これにより DB 仮想生成列 `callback_active_slot = 1` が自動算出される）。
-     - 重複する他の全レコードは、各々の正当スコープを回填した上で `status = 'DUPLICATE_DEPRECATED'`（`callback_active_slot IS NULL`）に更新する。
+     - 重複する他の全レコードは、各々の正当スコープを補完した上で `status = 'DUPLICATE_DEPRECATED'`（`callback_active_slot IS NULL`）に更新する。
      - 複合一意インデックス `uk_peppol_callback_active` は `(provider, scheme_id, participant_id, callback_active_slot)` で張られており、複数の `VERIFIED` 行が存在すると MySQL エラー `1062 (Duplicate entry '...' for key 'uk_peppol_callback_active')` が発生する。手動・スクリプトを問わず、2件以上を同時に `VERIFIED` とすることは物理的に拒否される。
   6. **同一 Owner 重複時の `uk_peppol_scope_owner` 衝突と Fail-Stop 規程**:
      - 複合一意インデックス `uk_peppol_scope_owner` は `(tenant_id, legal_entity_id, owner_type, owner_id)` の 4 列で構成されている。
-     - 衝突グループ内に同一 Owner（同一 `owner_type`, `owner_id`）を持つ複数レコードが存在する場合、それら全行に当該 Owner の正当な `(tenant_id, legal_entity_id)` を回填することは、**`status` や `deleted_flag` の値に関わらず `uk_peppol_scope_owner` の一意制約違反（MySQL エラー 1062）を引き起こす**。`status` を `DUPLICATE_DEPRECATED` に変更したり、`deleted_flag = 1` に更新しても当該制約は解除されない。
+     - 衝突グループ内に同一 Owner（同一 `owner_type`, `owner_id`）を持つ複数レコードが存在する場合、それら全行に当該 Owner の正当な `(tenant_id, legal_entity_id)` を補完することは、**`status` や `deleted_flag` の値に関わらず `uk_peppol_scope_owner` の一意制約違反（MySQL エラー 1062）を引き起こす**。`status` を `DUPLICATE_DEPRECATED` に変更したり、`deleted_flag = 1` に更新しても当該制約は解除されない。
      - **処置**: 同一 Owner 重複による一意制約衝突を検知した場合、**直ちに Fail-Stop し、修復トランザクション全体を ROLLBACK、修復キュー全行を `PENDING` に維持**する。
      - 当該レコード群は、別途独立承認された合法な重複排除・統合スキーム（合法去重方案：業務 Owner、法務、および EDI 統括リードの決裁を経たデータ統合等）へ引き渡す。
      - **本バッチ（NF09）では、レコードの物理削除、マージ処理、Owner 情報の改変・書き換えは一切設計・実行しない**。
@@ -370,11 +370,11 @@ SELECT COUNT(*) FROM t_external_account_reference WHERE tenant_id IS NULL OR leg
 
 | シナリオ ID | 状況・対象レコード構成 | 適用される修復処置 | 判定結果 | 判定理由・整合性根拠 |
 |---|---|---|---|---|
-| **PEP-SCN-01**<br/>(拒例: 同一Owner重複登録衝突) | 同一 Customer A (`tenant_1`, `entity_10`) に紐づく同一 Peppol ID の 2 レコード (Row 1, Row 2)。 | 両行に Customer A のスコープ `(tenant_1, entity_10)` を回填しようと試みる。 | **REJECT（拒絶・Fail-Stop）** | 同一 Owner の複数行に同一スコープを付与すると、複合一意制約 `uk_peppol_scope_owner (tenant_id, legal_entity_id, owner_type, owner_id)` に抵触し MySQL エラー 1062 が発生する。`status` や `deleted_flag` の変更では本制約を回避できない。本バッチでは削除・統合・Owner 改変を行わないため、直ちにトランザクション全体を ROLLBACK し、キュー全行を `PENDING` に維持して独立承認の合法去重スキームへ引き渡す。 |
-| **PEP-SCN-02**<br/>(正例: 異Owner誤登録) | Peppol ID が誤って Customer B (`tenant_1`, `entity_20`) に重複登録。真の保有者は Customer A (`tenant_1`, `entity_10`)。 | Row 1 (Owner: A) を `tenant_1, entity_10, status='VERIFIED'`。Row 2 (Owner: B) には Customer B の正当スコープ `tenant_1, entity_20` を付与し `status='DUPLICATE_DEPRECATED'`。両キュー結案。 | **ACCEPT（正例合格）** | 勝者・敗者がそれぞれの正当 Owner へ独立帰属され、越境汚染なし。0-NULL も充足。 |
-| **PEP-SCN-03**<br/>(拒例: 敗者NULL放置) | 勝者 Row 1 にスコープを付与して `VERIFIED` とするが、敗者 Row 2 はスコープを NULL のまま `status='DUPLICATE_DEPRECATED'` として結案しようとする。 | 敗者 Row 2 のスコープ未設定を検知し、処理を拒絶。キュー結案をブロック。 | **REJECT（拒絶・Fail-Stop）** | 業務テーブル上に野良 NULL が残存し、Postflight SQL-06 および全量 0-NULL 規則に違反するため。 |
+| **PEP-SCN-01**<br/>(拒例: 同一Owner重複登録衝突) | 同一 Customer A (`tenant_1`, `entity_10`) に紐づく同一 Peppol ID の 2 レコード (Row 1, Row 2)。 | 両行に Customer A のスコープ `(tenant_1, entity_10)` を補完しようと試みる。 | **REJECT（拒絶・Fail-Stop）** | 同一 Owner の複数行に同一スコープを付与すると、複合一意制約 `uk_peppol_scope_owner (tenant_id, legal_entity_id, owner_type, owner_id)` に抵触し MySQL エラー 1062 が発生する。`status` や `deleted_flag` の変更では本制約を回避できない。本バッチでは削除・統合・Owner 改変を行わないため、直ちにトランザクション全体を ROLLBACK し、キュー全行を `PENDING` に維持して独立承認の合法去重スキームへ引き渡す。 |
+| **PEP-SCN-02**<br/>(正例: 異Owner誤登録) | Peppol ID が誤って Customer B (`tenant_1`, `entity_20`) に重複登録。真の保有者は Customer A (`tenant_1`, `entity_10`)。 | Row 1 (Owner: A) を `tenant_1, entity_10, status='VERIFIED'`。Row 2 (Owner: B) には Customer B の正当スコープ `tenant_1, entity_20` を付与し `status='DUPLICATE_DEPRECATED'`。両キュー完了。 | **ACCEPT（正例合格）** | 勝者・敗者がそれぞれの正当 Owner へ独立帰属され、越境汚染なし。0-NULL も充足。 |
+| **PEP-SCN-03**<br/>(拒例: 敗者NULL放置) | 勝者 Row 1 にスコープを付与して `VERIFIED` とするが、敗者 Row 2 はスコープを NULL のまま `status='DUPLICATE_DEPRECATED'` として完了しようとする。 | 敗者 Row 2 のスコープ未設定を検知し、処理を拒絶。キュー完了をブロック。 | **REJECT（拒絶・Fail-Stop）** | 業務テーブル上に野良 NULL が残存し、Postflight SQL-06 および全量 0-NULL 規則に違反するため。 |
 | **PEP-SCN-04**<br/>(拒例: 異Ownerスコープ複製) | 勝者 Row 1 (Owner: Customer A) のスコープ `tenant_1, entity_10` を、Owner が異なる敗者 Row 2 (Owner: Customer B) に便宜上コピーしようとする。 | 異 Owner へのスコープコピーを検知し、処理を拒絶。 | **REJECT（拒絶・Fail-Stop）** | Customer B のレコードが Customer A の法的実体に誤帰属し、テナント・法人分離を破壊するため絶対禁止。 |
-| **PEP-SCN-05**<br/>(拒例: 敗者未確定時の部分結案) | 勝者 Row 1 は確定したが、敗者 Row 2 の登録元 Owner が不明でスコープが特定できない。勝者のみ結案し、敗者を放置しようとする。 | 衝突グループ内の未解決残存を検知し、勝者を含めグループ全体の結案を拒絶。 | **REJECT（拒絶・Fail-Stop）** | 衝突グループは不可分の集約境界（Boundary B）であり、全行の帰属が確定しない限りグループ全体を PENDING に維持するため。 |
+| **PEP-SCN-05**<br/>(拒例: 敗者未確定時の部分完了) | 勝者 Row 1 は確定したが、敗者 Row 2 の登録元 Owner が不明でスコープが特定できない。勝者のみ完了し、敗者を放置しようとする。 | 衝突グループ内の未解決残存を検知し、勝者を含めグループ全体の完了を拒絶。 | **REJECT（拒絶・Fail-Stop）** | 衝突グループは不可分の集約境界（Boundary B）であり、全行の帰属が確定しない限りグループ全体を PENDING に維持するため。 |
 
 ---
 
@@ -386,7 +386,7 @@ SELECT COUNT(*) FROM t_external_account_reference WHERE tenant_id IS NULL OR leg
 |---|---|---|---|---|
 | `DIGITAL_INVOICE` | `SCOPE_CONFLICT` | 請求書（`t_invoice`）、発注書（`t_sales_order`）、契約書（`t_contract`）間で参照している顧客の所属法人が相違している | 取引基本契約書、発注書、納品検収書の実電子文書原本を照合し、真の契約締結法人・請求先法人を特定 | **財務管理責任者 (Finance Manager)** ＋ **顧客担当営業責任者** |
 | `DIGITAL_INVOICE` | `SCOPE_UNRESOLVED` | 請求・発注・契約の全親行が存在しない孤立レコード | インボイス XML/PDF の事業者登録番号（T番号）、受領先口座、銀行振込入金照合ログから帰属法人を特定 | **財務統括責任者 (Finance Director)** ＋ **システム管理責任者** |
-| `DIGITAL_INVOICE_EVENT` | `PARENT_SCOPE_UNRESOLVED` | 親インボイスが未解決のためスコープ未設定 | 親 `t_digital_invoice` の修復完了後、親の `(tenant_id, legal_entity_id)` を連動回填（単独での別テナント付与は禁止） | 親インボイスの承認に準拠 |
+| `DIGITAL_INVOICE_EVENT` | `PARENT_SCOPE_UNRESOLVED` | 親インボイスが未解決のためスコープ未設定 | 親 `t_digital_invoice` の修復完了後、親の `(tenant_id, legal_entity_id)` を連動補完（単独での別テナント付与は禁止） | 親インボイスの承認に準拠 |
 | `PEPPOL_PARTICIPANT` | `SCOPE_UNRESOLVED` | `owner_type != 'CUSTOMER'` または顧客のスコープが未確定 | 顧客マスタ `m_customer` の法人番号・契約書照合、または社内利用アカウントであるかの事実確認 | **営業管理責任者** ＋ **顧客アカウントOwner** |
 | `PEPPOL_PARTICIPANT` | `CALLBACK_IDENTITY_CONFLICT` | 同一 Peppol ID が複数顧客／組織で重複登録されている | Peppol サービスプロバイダ（OpenPeppol / SMP ディレクトリ）の正式登録企業名・契約書を照合し、正当な 1 社を特定 | **EDI 統括リード** ＋ **法務コンプライアンス責任者** |
 | `EXTERNAL_ACCOUNT` | `SCOPE_UNRESOLVED` | `assignee_type = 'USER'` で組織所属が曖昧、または要員未紐付け | 人事発令台帳、社内 SSO アカウント（Keycloak/IdP）の所属組織コード、業務委託基本契約書を照合 | **人事労務責任者** ＋ **社内情シス責任者 (Corporate IT)** |
@@ -409,12 +409,12 @@ flowchart TD
         LockInv[1. 親インボイス行 FOR UPDATE] --> LockEvts[2. 子イベント全行 id ASC で FOR UPDATE]
         LockEvts --> LockInvQ[3. 親キュー行 FOR UPDATE]
         LockInvQ --> LockEvtQs[4. 子イベントキュー全行 id ASC で FOR UPDATE]
-        LockEvtQs --> ClassifyEvts{5. 子イベント逐項分類<br/>1:一致確認 / 2:欠落回填 / 3:衝突}
+        LockEvtQs --> ClassifyEvts{5. 子イベント逐項分類<br/>1:一致確認 / 2:欠落補完 / 3:衝突}
         ClassifyEvts -->|3:衝突あり| FailStopA[即時中止 ROLLBACK<br/>全行PENDING維持・人工裁定へ]
         ClassifyEvts -->|1及び2のみ| UpdInv[6. 親インボイス更新 version CAS]
-        UpdInv --> UpdEvts[7. 分類2の子イベントのみ親スコープ回填<br/>精密ID・親ID・原値NULL-safe比較]
-        UpdEvts --> ResInvQ[8. 親キュー結案 version CAS]
-        ResInvQ --> ResEvtQs[9. 子イベントキュー全結案 version CAS]
+        UpdInv --> UpdEvts[7. 分類2の子イベントのみ親スコープ補完<br/>精密ID・親ID・原値NULL-safe比較]
+        UpdEvts --> ResInvQ[8. 親キュー完了 version CAS]
+        ResInvQ --> ResEvtQs[9. 子イベントキュー全完了 version CAS]
     end
 
     subgraph BoundaryB [境界 B: Peppol コールバック衝突グループ集約境界 (Peppol Conflict Group)]
@@ -423,26 +423,26 @@ flowchart TD
         CheckAllOwners -->|1行でも特定不能| FailStopB[即時中止 ROLLBACK<br/>グループ全行PENDING維持]
         CheckAllOwners -->|全行特定完了| CheckScopeOwner{4. スコープ・Owner一意性事前検査<br/>組内衝突および組外現存行衝突ゼロか?}
         CheckScopeOwner -->|衝突検知| FailStopB
-        CheckScopeOwner -->|一意性確認完了| UpdWinner[5. 正当行 1 件にOwnerスコープ回填＋VERIFIED]
-        UpdWinner --> UpdLosers[6. 淘汰行全件に各々正当Ownerスコープ回填＋DUPLICATE_DEPRECATED]
-        UpdLosers --> ResPepQs[7. 対象キュー全行を結案 version CAS]
+        CheckScopeOwner -->|一意性確認完了| UpdWinner[5. 正当行 1 件にOwnerスコープ補完＋VERIFIED]
+        UpdWinner --> UpdLosers[6. 淘汰行全件に各々正当Ownerスコープ補完＋DUPLICATE_DEPRECATED]
+        UpdLosers --> ResPepQs[7. 対象キュー全行を完了 version CAS]
     end
 
     subgraph BoundaryC [境界 C: 外部アカウント単一境界 (External Account Aggregate)]
         LockAcc[1. 外部アカウント行 FOR UPDATE] --> LockAccQ[2. キュー行 FOR UPDATE]
         LockAccQ --> UpdAcc[3. 外部アカウント更新 version CAS]
-        UpdAcc --> ResAccQ[4. キュー結案 version CAS]
+        UpdAcc --> ResAccQ[4. キュー完了 version CAS]
     end
 ```
 
 1. **境界 A: 電子インボイス集約境界（Digital Invoice + Child Events + Queues）**:
    - **理由**: 3列複合外部キー `fk_digital_invoice_event_scope` により、親 `t_digital_invoice` と子 `t_digital_invoice_event` は `(tenant_id, legal_entity_id, digital_invoice_id)` が完全に一致していなければならない。親と子を別トランザクションで修復すると中間状態で外部キー違反が発生し、またイベントが親と異なるスコープへ誤分離されるリスクがある。
-   - **境界範囲**: 対象の親インボイス、紐づく全子イベント、親のキュー行、および全子イベントのキュー行を**単一の `@Transactional` 内でアトミックに修復・結案**する。子イベントに親と矛盾する非 NULL スコープが存在する場合は、即座に全体を ROLLBACK して中断する。
+   - **境界範囲**: 対象の親インボイス、紐づく全子イベント、親のキュー行、および全子イベントのキュー行を**単一の `@Transactional` 内でアトミックに修復・完了**する。子イベントに親と矛盾する非 NULL スコープが存在する場合は、即座に全体を ROLLBACK して中断する。
 2. **境界 B: Peppol コールバック衝突グループ集約境界（Peppol Identity Group Aggregate）**:
    - **理由**: 同一 `(provider, scheme_id, participant_id)` を共有する複数行は、1 件を `VERIFIED`（`callback_active_slot=1`）とし、残りを `DUPLICATE_DEPRECATED`（`callback_active_slot IS NULL`）とする処置が不可分である。また、複合一意インデックス `uk_peppol_scope_owner` により、同一 Owner に対する同一スコープの重複付与は物理的に拒絶される。1件ずつ別トランザクションで処理すると、一意制約 `uk_peppol_callback_active` や `uk_peppol_scope_owner` 違反、中間状態でのアクティブ二重化を招く。
-   - **境界範囲**: 同一識別子を持つすべての重複 Peppol レコード（勝者行および全淘汰行）に対し、UPDATE 実行前のスコープ・Owner 一意性事前検査（組内・組外衝突ゼロ）を通過した上で、それぞれ独立して正当な Owner スコープを回填し、勝者 1 件を `VERIFIED`、全淘汰行を `DUPLICATE_DEPRECATED` に更新し、その全キュー行を**単一の `@Transactional` 内でアトミックに修復・結案**する。1 行でも正当スコープが特定できない場合、または同一 Owner 重複等のスコープ・Owner 一意性衝突が検知された場合は、グループ全体を結案せず ROLLBACK して `PENDING` に維持する。
+   - **境界範囲**: 同一識別子を持つすべての重複 Peppol レコード（勝者行および全淘汰行）に対し、UPDATE 実行前のスコープ・Owner 一意性事前検査（組内・組外衝突ゼロ）を通過した上で、それぞれ独立して正当な Owner スコープを補完し、勝者 1 件を `VERIFIED`、全淘汰行を `DUPLICATE_DEPRECATED` に更新し、その全キュー行を**単一の `@Transactional` 内でアトミックに修復・完了**する。1 行でも正当スコープが特定できない場合、または同一 Owner 重複等のスコープ・Owner 一意性衝突が検知された場合は、グループ全体を完了せず ROLLBACK して `PENDING` に維持する。
 3. **境界 C: 外部アカウント集約境界（External Account Aggregate）**:
-   - 対象の `t_external_account_reference` 1 件と、その `t_nf09_scope_repair_queue` 1 件を単一の `@Transactional` 内で修復・結案する。
+   - 対象の `t_external_account_reference` 1 件と、その `t_nf09_scope_repair_queue` 1 件を単一の `@Transactional` 内で修復・完了する。
 
 ### 8.2 実スキーマに基づくエンティティ別並行制御（Concurrency Control per Actual Schema）
 文書の都合で実 DB に存在しない列を追加する migration を作成することは禁止されている。実際のスキーマに基づき、エンティティ別に以下の通り並行制御を実装する：
@@ -460,7 +460,7 @@ UPDATE t_digital_invoice
    AND version = :expectedInvoiceVersion;
 -- 更新行数 == 1 を検証。0 件の場合は即座に例外をスローしてロールバック。
 
--- 例: t_nf09_scope_repair_queue の結案
+-- 例: t_nf09_scope_repair_queue の完了
 UPDATE t_nf09_scope_repair_queue
    SET status = 'RESOLVED',
        resolved_at = NOW(),
@@ -478,7 +478,7 @@ UPDATE t_nf09_scope_repair_queue
 ##### 1. Peppol 参加者レコード（`t_peppol_participant`）の並行制御
 - 更新前に必ず `SELECT ... FOR UPDATE`（衝突グループ時は `ORDER BY id ASC`）を発行して行ロックを確保。
 - **Type A: 通常 `SCOPE_UNRESOLVED` の更新**:
-  - 原値の `status` および `deleted_flag` を完全に保持したまま、スコープ未設定行に正当値を回填する：
+  - 原値の `status` および `deleted_flag` を完全に保持したまま、スコープ未設定行に正当値を補完する：
   ```sql
   UPDATE t_peppol_participant
      SET tenant_id = :resolvedTenantId,
@@ -510,13 +510,13 @@ UPDATE t_nf09_scope_repair_queue
            - **本クエリにおいて `status = 'DUPLICATE_DEPRECATED'` や `deleted_flag = 1` などの条件で除外してはならない**。`uk_peppol_scope_owner` はこれらの列を含まないため、非アクティブ行であっても一意性違反（1062）を引き起こす。
       3. **DB 物理制約の非代替性と 1062 発生時の全体ロールバック**:
          - 上記事前検査はフェイルファストを目的とした防護ゲートであり、**データベースの物理一意制約（`uk_peppol_scope_owner`）を代替するものでは決してない**。
-         - 並行トランザクションの競合等により、実際の UPDATE 実行時に MySQL エラー `1062 (Duplicate entry '...' for key 'uk_peppol_scope_owner')` が発生した場合は、**決してこれを「冪等成功」と誤認したり処理を続行して結案してはならず、直ちにトランザクション全体を ROLLBACK し、キュー全行を `PENDING` に維持**しなければならない。
+         - 並行トランザクションの競合等により、実際の UPDATE 実行時に MySQL エラー `1062 (Duplicate entry '...' for key 'uk_peppol_scope_owner')` が発生した場合は、**決してこれを「冪等成功」と誤認したり処理を続行して完了してはならず、直ちにトランザクション全体を ROLLBACK し、キュー全行を `PENDING` に維持**しなければならない。
   - **絶対禁止事項の堅持**:
     - **虚構スコープ割当の絶対禁止**: 一意制約衝突を回避するために、実在しない架空の法人 ID や便宜的ダミーテナントを割り当てることは固く禁ずる。
     - **他 Owner スコープ複製の絶対禁止**: 勝者行のスコープを異なる Owner の敗者行へコピーすることは固く禁ずる。
     - **制約無効化・スキーマ改変の絶対禁止**: 一意制約を無効化したり、V182 マイグレーションを改変したり、問題を回避するための新規マイグレーション（V185 等の利用を含む）を追加することは固く禁ずる。
   - **更新 SQL（一意性事前検査 PASS 後にのみ実行）**:
-    - 勝者行（正当 Owner スコープ回填 ＋ `VERIFIED` 活性化）:
+    - 勝者行（正当 Owner スコープ補完 ＋ `VERIFIED` 活性化）:
       ```sql
       UPDATE t_peppol_participant
          SET tenant_id = :winnerTenantId,
@@ -530,7 +530,7 @@ UPDATE t_nf09_scope_repair_queue
          AND legal_entity_id <=> :lockedWinnerLegalEntityId;
       ```
       -- 更新行数 == 1 を検証。
-    - 淘汰（敗者）行（**各敗者自身の正当 Owner スコープ回填** ＋ `DUPLICATE_DEPRECATED`）:
+    - 淘汰（敗者）行（**各敗者自身の正当 Owner スコープ補完** ＋ `DUPLICATE_DEPRECATED`）:
       ```sql
       UPDATE t_peppol_participant
          SET tenant_id = :loserTenantId,
@@ -543,7 +543,7 @@ UPDATE t_nf09_scope_repair_queue
          AND legal_entity_id <=> :lockedLoserLegalEntityId;
       ```
       -- 各淘汰行ごとに更新行数 == 1 を検証。
-      ※**【禁止】敗者行のスコープを NULL のまま結案することは厳禁**。勝者のスコープを異 Owner の敗者へコピーすることも厳禁。
+      ※**【禁止】敗者行のスコープを NULL のまま完了することは厳禁**。勝者のスコープを異 Owner の敗者へコピーすることも厳禁。
 ##### 2. 子イベントレコード（`t_digital_invoice_event`）の逐項分類と並行制御
 - **MySQL 即時制約検査の技術的現実**:
   - 3列複合外部キー `fk_digital_invoice_event_scope`（`(tenant_id, legal_entity_id, digital_invoice_id)` 参照）は、**MySQL 8 の仕様により各 SQL 文の実行時点（Statement-by-Statement）で即時に RESTRICT 検査**が行われる（遅延外部キー検査は MySQL 未対応）。
@@ -554,9 +554,9 @@ UPDATE t_nf09_scope_repair_queue
     1. **分類 1（完全一致・検証済）**:
        - `tenant_id` および `legal_entity_id` の**双方が親と完全一致**している行。
        - **処置**: 整合性が確認されたため、再更新は行わずスキップする（更新行数カウント $N_1 = 0$）。
-    2. **分類 2（欠落回填・非衝突）**:
+    2. **分類 2（欠落補完・非衝突）**:
        - スコープに欠落（`tenant_id` または `legal_entity_id` のいずれか、あるいは双方が NULL）があり、かつ非 NULL の分量が存在する場合も親の値と一致している行。
-       - **処置**: 承認済親スコープにより回填する。更新時は**精密なイベント ID、親 ID、およびロック取得時の原値を用いた NULL-Safe 等価比較（`<=>` または明示的 IS NULL / = 条件）**を必須とする：
+       - **処置**: 承認済親スコープにより補完する。更新時は**精密なイベント ID、親 ID、およびロック取得時の原値を用いた NULL-Safe 等価比較（`<=>` または明示的 IS NULL / = 条件）**を必須とする：
          ```sql
          UPDATE t_digital_invoice_event
             SET tenant_id = :parentTenantId,
@@ -572,8 +572,8 @@ UPDATE t_nf09_scope_repair_queue
        - **処置**: **直ちにフェイルストップ（Fail-Stop）し、トランザクション全体を ROLLBACK** する。親スコープによる強制上書きや勝手な再帰属は絶対に行わず、キューを `PENDING` に維持して人間による調査・人工裁定へ回す。
 - **重大禁止事項（スコープ検査の網羅性）**:
   - **`tenant_id` のみを検査して `legal_entity_id` の検証を省略することは重大な欠陥であり固く禁止する**。必ず両列の完全一致および衝突有無を判定しなければならない。
-- **子イベントキューの個別 version CAS 結案**:
-  - 分類 2 の回填がすべて成功し、分類 3 の衝突が皆無であることを確認した後、親キューおよび全子イベントキュー行（`t_nf09_scope_repair_queue`）を個別に version CAS（`WHERE id = :queueId AND version = :expectedQueueVersion AND status = 'PENDING'`）で `RESOLVED` に更新し、各々更新行数 == 1 を検証する。
+- **子イベントキューの個別 version CAS 完了**:
+  - 分類 2 の補完がすべて成功し、分類 3 の衝突が皆無であることを確認した後、親キューおよび全子イベントキュー行（`t_nf09_scope_repair_queue`）を個別に version CAS（`WHERE id = :queueId AND version = :expectedQueueVersion AND status = 'PENDING'`）で `RESOLVED` に更新し、各々更新行数 == 1 を検証する。
 - **影響行数の厳格検証と全体ロールバック**:
   - 更新行数が期待値（正当行は 1、淘汰行は 1、分類 2 イベントは $N$、キュー行は 1）と合致しない場合、**トランザクション全体を即座に ROLLBACK** する。
 
@@ -581,10 +581,10 @@ UPDATE t_nf09_scope_repair_queue
 本番適用に先立ち、以下の実行プログラム要件と Staging 検証ゲートを通過しなければならない：
 1. **実装要件**:
    - テスト用ヘルパーから独立した本番専用 CLI／バッチツールとして実装すること。
-   - 事前ドライラン機能（`--dry-run`: トランザクションをコミットせず計画される更新差分・影響行数・キュー結案内容を標準出力へ JSON 出力）を必須具備すること。
+   - 事前ドライラン機能（`--dry-run`: トランザクションをコミットせず計画される更新差分・影響行数・キュー完了内容を標準出力へ JSON 出力）を必須具備すること。
    - バッチレートリミット（例: 1 秒あたり最大 5 トランザクション）を設け、本番 DB の I/O およびレプリケーション遅延（Replication Lag）を監視しながら進行できること。
 2. **Staging 検証ゲート（本番前必須実行）**:
-   - 本番相当のデータ規模・分布を持つ Staging 環境において、本ツールを用いて未解決行の全量修復演練を実施すること。
+   - 本番相当のデータ規模・分布を持つ Staging 環境において、本ツールを用いて未解決行の全量修復リハーサルを実施すること。
    - 実行後に Postflight SQL-06（野良 NULL ゼロ件検証）およびキュー `status = 'PENDING'` ゼロ件検証が完全に PASS することを実証し、ログおよび証跡を添えて本番運用承認申請を行うこと。
 
 ### 8.4 失敗時のフェイルストップ（Fail-Stop）と現場証拠保全
@@ -646,7 +646,7 @@ V182 DDL の中途失敗等によりロールバックが必要となった場�
    - **インシデントコマンダー（運用統括責任者）およびリード DBA の両名が書面／チャット記録にて「人工放行（Go-Live Approval）」を発行**した後に限り、保守モードを解除して一般トラフィックを再開する。
 
 ### 9.3.1 アプリケーション／DB 配対復元契約と人工放行 4 大前置核検 (App & DB Pairing Recovery Contract)
-PITR 発動によりデータベースが V181 時点へ巻き戻された場合、アプリケーション層との整合性を保つため、以下の契約を厳格に順守する。本契約は **Staging 演練 Gate（ステージング環境での事前検証必須項目）** として位置付け、本番環境への接触や直接変更は行わない。
+PITR 発動によりデータベースが V181 時点へ巻き戻された場合、アプリケーション層との整合性を保つため、以下の契約を厳格に順守する。本契約は **Staging リハーサル Gate（ステージング環境での事前検証必須項目）** として位置付け、本番環境への接触や直接変更は行わない。
 
 #### 1. V181 配対合法アプリケーション製品・設定・ダイジェスト登記台帳
 データベースが V181 スキーマである環境に対し、V182 変更を前提としたアプリケーション（`t_digital_invoice.tenant_id` 列への参照や新規 CHECK 制約前提のロジック）を起動することは固く禁止する（起動時エラーまたは SQL 実行時エラーとなるため）。V181 と配対（Pairing）する正規アーティファクトおよび設定は以下のように管理する：
@@ -698,11 +698,11 @@ PITR 発動によりデータベースが V181 時点へ巻き戻された場合
 
 ---
 
-## 10. ステージング演練（Staging Rehearsal）と本番実行（Production Execution）の差異一覧 (Differences Matrix)
+## 10. ステージングリハーサル（Staging Rehearsal）と本番実行（Production Execution）の差異一覧 (Differences Matrix)
 
-リハーサル演練で実証された前提と、本番環境における固有の制約・差異を正しく理解し、過信を排除する。
+リハーサルで実証された前提と、本番環境における固有の制約・差異を正しく理解し、過信を排除する。
 
-| 比較項目 | 使い捨て検証演練 (Confirmed Facts) | 本番環境実行 (Suggested / Target) | 差異の性質と留意事項 |
+| 比較項目 | 使い捨て検証リハーサル (Confirmed Facts) | 本番環境実行 (Suggested / Target) | 差異の性質と留意事項 |
 |---|---|---|---|
 | **DB 環境** | Docker コンテナ内使い捨て `mysql:8.0`（tmpfs マウント） | Multi-AZ マネージド MySQL 8 / Amazon Aurora クラスタ | ストレージ遅延、ネットワークレイテンシ、AZ 間同期負荷が存在。 |
 | **データ規模** | 合成テストデータ数十〜数百件 | 数万〜数百万円規模の実ビジネスレコード（想定） | DDL の実行時間、インデックス作成時の I/O バッファ負荷が大幅に増大。 |
@@ -717,11 +717,11 @@ PITR 発動によりデータベースが V181 時点へ巻き戻された場合
 ## 11. シナリオ 5 の正確な位置づけと限定表明 (Scenario 5 Scoping & Explicit Disclaimer)
 
 ### 11.1 シナリオ 5 の実態
-`V182TenantScopeHardeningRehearsalMySqlTest` の第 5 節（`scenario5_faultEvidencePreservation_verifiesErrorCapturedBeforeTeardown`）は、**「本番 V182 マイグレーション自体は正常完了（version='182', success=1）した状態から、隔離テストリソースよりテスト専用の V182.99 を意図的に故障注入（CHECK 制約違反エラー 3819）して中途失敗させた環境において、コンテナが破棄される前に実行ログ・スキーマ定義・履歴テーブル・修復キュー・SHA-256 マニフェストをディスクに確実に書き出して保全できること」を検証した証拠保全演練（Evidence Preservation Rehearsal）**である。
+`V182TenantScopeHardeningRehearsalMySqlTest` の第 5 節（`scenario5_faultEvidencePreservation_verifiesErrorCapturedBeforeTeardown`）は、**「本番 V182 マイグレーション自体は正常完了（version='182', success=1）した状態から、隔離テストリソースよりテスト専用の V182.99 を意図的に故障注入（CHECK 制約違反エラー 3819）して中途失敗させた環境において、コンテナが破棄される前に実行ログ・スキーマ定義・履歴テーブル・修復キュー・SHA-256 マニフェストをディスクに確実に書き出して保全できること」を検証した証拠保全リハーサル（Evidence Preservation Rehearsal）**である。
 
 ### 11.2 限定表明（明確な非対象事項）
 1. **V182 本番スクリプト自体の途上クラッシュ非検証**:
-   シナリオ 5 は、V182 自体の中途停止ではなく、V182 適用済みの状態に対して後続のテスト用スクリプト（182.99）を失敗させた演練である。V182 自体が実行途中でクラッシュした場合の中途状態をシミュレーションしたものではない。
+   シナリオ 5 は、V182 自体の中途停止ではなく、V182 適用済みの状態に対して後続のテスト用スクリプト（182.99）を失敗させたリハーサルである。V182 自体が実行途中でクラッシュした場合の中途状態をシミュレーションしたものではない。
 2. **部分失敗からの自動回復・ロールバックの非検証**:
    シナリオ 5 は、障害注入によって `ALTER TABLE` が MySQL の暗黙コミットにより永続化された現場を保全・確認したものであり、**「本番 V182 が部分的に失敗した後に、自動的または安全に旧スキーマへロールバックできること」を実証したものでは決してない**。
 3. **本番自動修復の完全否定**:

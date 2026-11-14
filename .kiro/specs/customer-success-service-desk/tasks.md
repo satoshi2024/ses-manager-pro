@@ -2,13 +2,13 @@
 
 > **承認状態**: traceability は CANDIDATE/DISCOVERY。Approved scope / Owner / DecisionId / DG-02 は未確定で、production releaseの承認はない。本ブランチではユーザー指示により統合hardeningと検証を実施するが、承認済みとは記録しない。
 >
-> **分層test**: 通常TaskはL1〜L3の定向test、Task Mで必要gate全量。skipを成功にしない。
+> **階層別テスト**: 通常TaskはL1〜L3の対象限定テスト、Task Mで必要gate全量。skipを成功にしない。
 >
 > **既定解**: `platform-invariants.md`。時間/scope/状態は `design.md` 決定表。無い論点は推測実装せずspecへ戻す。
 >
 > **Migration**: 現行mainへ統合するNF-02版はV147、月次採番シーケンス是正版はV150。旧featureのV110は履歴衝突用fixtureとしてのみreset/repair検証し、正規migration番号として再利用しない。欠番埋め・公開済み編集禁止。
 >
-> **先行WIP**: branch `codex/customer-success-service-desk` の旧V110実装は履歴衝突の検証対象。F1〜Mのcheckboxは、現行branchの定向test・MySQL gate・Demo evidenceが揃うまで完了とみなさない。
+> **先行WIP**: branch `codex/customer-success-service-desk` の旧V110実装は履歴衝突の検証対象。F1〜Mのcheckboxは、現行branchの対象限定テスト・MySQL gate・Demo evidenceが揃うまで完了とみなさない。
 
 ---
 
@@ -36,7 +36,7 @@
   - **テスト要件**: 祝日跨ぎ、pause、reopen旧round不変、CAS 409、portal A/B 404、INTERNALがportal DTOに無い。
   - **Demo**: 金曜夕方P2が土日祝を飛ばすこと、WAITING_CUSTOMER中に期限が営業分数だけ延びること。
   - **Rollback**: service feature flag OFF（テーブルは残してAPI 404）。
-  - **WIP注意**: 完了判定には休日跨ぎ、pause営業分数、reopen旧round不変、CAS競合を定向testと実MySQLで確認する。
+  - **WIP注意**: 完了判定には休日跨ぎ、pause営業分数、reopen旧round不変、CAS競合を対象限定テストと実MySQLで確認する。
 
 - [ ] **A1. 内部 service desk UI/API**
   - **Objective**: 管理者/営業/マネージャーが一覧・詳細・起票・内部メモ/公開返信・状態変更できる。HR/要員は403。

@@ -37,7 +37,7 @@ i18n 4ファイルは全レーンが追記（キー追加のみ、マージ順�
     `countActivePrimaryGroupBySalesUser` に `t_engineer` join を追加（過去残骸への防御）。
   - **テスト要件**: `EngineerSalesServiceImplTest` — 削除後 released_at 設定 /
     H2 統合で count SQL が削除済み要員を除外。
-  - **Demo**: 割当あり Bench 要員を削除 → 営業成績の担当要員数が即時减る。
+  - **Demo**: 割当あり Bench 要員を削除 → 営業成績の担当要員数が即座に減る。
 
 - [x] B1. 通知リンク修正＋ルート整合テスト（S3）
   - **Objective**: リンク切れ2件の修正と、通知リンク⇔ページルートの恒常的な整合検証。

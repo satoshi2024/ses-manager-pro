@@ -9,7 +9,7 @@
 - DB: 新規マイグレーション（以下 `VNN` と表記。**番号は実装時点の最新+1** — 2026-07-16 時点で
   `db/migration` は V22 まで存在するため V23 以降になる。V16 等の固定番号を使わないこと）
 
-既存挙動を変えるのは「集計口径（R2/R3）」のみ。請求・精算の確定済み金額
+既存挙動を変えるのは「集計基準（R2/R3）」のみ。請求・精算の確定済み金額
 （`t_work_record.billing_amount` / `t_invoice.*`）には一切手を入れない。
 
 ---
@@ -65,7 +65,7 @@
 
 メッセージキー追加（4言語）: `error.contract.cancelDateRequired` / `error.contract.cancelDateInvalid`。
 
-## R3. 集計口径統一
+## R3. 集計基準統一
 
 ### 新規 `service/billing/MonthlyRevenueCalcService`（+ impl）
 
@@ -103,7 +103,7 @@ MonthlyAmount calc(YearMonth month,
 `MonthlyRevenueCalcServiceTest`（純粋ロジックのためモック不要）:
 実績あり月の実績なし契約計上 / 準備中除外 / 期間境界（月初・月末・end_date null）/
 実績優先 / payment null 時 profit=sales。
-既存 `DashboardServiceImplTest` は期待値を新口径へ更新。
+既存 `DashboardServiceImplTest` は期待値を新基準へ更新。
 
 ## R4. reopen の手動BP階層保護
 
@@ -185,7 +185,7 @@ MonthlyAmount calc(YearMonth month,
 - **レーンA（契約UI + 解約日）**: R1 + R2 + R6の契約フォーム注記。担当: `ContractApiController` /
   `ContractService(Impl)` / `StatusChangeRequest`（または契約専用DTO新設） / `contract.js` /
   `contract/list.html`。
-- **レーンB（集計口径）**: R3。担当: 新規 `MonthlyRevenueCalcService` / `DashboardServiceImpl` /
+- **レーンB（集計基準）**: R3。担当: 新規 `MonthlyRevenueCalcService` / `DashboardServiceImpl` /
   `ExportApiController` / `SalesPerformanceServiceImpl` / 各テスト。
 - **レーンC（勤怠・BP・請求・細部）**: R4 + R6の勤怠グリッド注記 + R7 + R8。担当:
   `WorkRecordServiceImpl` / `WorkRecordMapper` / `InvoiceMapper` / `Invoice` / `InvoiceServiceImpl` /
@@ -201,7 +201,7 @@ MonthlyAmount calc(YearMonth month,
   （既存行の変更禁止）とし、マージ順を決めておくこと。
 - D は `SalesPerformanceServiceImpl`（Bと同一ファイル）**かつ** 契約検索まわり（Aと同一ファイル）
   に触れるため、**A・B 両方の完了後**に着手する。
-- R2 の解約日が R3 の口径テストの前提になるため、テスト都合上 A→B の順が安全
+- R2 の解約日が R3 の基準テストの前提になるため、テスト都合上 A→B の順が安全
   （並行させる場合は B のテストで解約契約ケースを A マージ後に追加）。
 
 推奨順序: `(A ∥ C) → B → D → M`。

@@ -58,7 +58,7 @@
 2. acceptanceを正常/境界/失敗/権限/rollbackの観点でtest methodへ割り当てる。
 3. 修正前に defect を再現するred testを追加する。
 4. acceptanceを満たす最小production変更を行う。
-5. 定向testを実行し、外部call回数、transaction境界、DB state、hash/header/logを確認する。
+5. 対象限定テストを実行し、外部call回数、transaction境界、DB state、hash/header/logを確認する。
 6. taskのDemoを実行する。sandbox必須taskをstubで代用しない。
 7. `review-ledger.md` に requirement→diff→test→Demo→evidence→risk/rollbackを追記する。
 8. 独立reviewでfindingが無いか、findingを修正して同じgateを再実行した後だけ、そのtask一つを`- [x]`にする。

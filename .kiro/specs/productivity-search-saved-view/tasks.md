@@ -1,6 +1,6 @@
 # Implementation Plan — 横断検索・実ToDo・保存ビュー・一括操作
 
-> **分層test方針**（正本: `test-execution-policy-s03-s17.md`）: T028〜T032はL1〜L3の定向test・直接回帰、T033でL4全量を実行する。
+> **階層別テスト方針**（正本: `test-execution-policy-s03-s17.md`）: T028〜T032はL1〜L3の対象限定テスト・直接回帰、T033でL4全量を実行する。
 > 通常Taskの完了条件へ無条件の`mvn test`全量を追加しない。
 >
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md` を実装前に読む。

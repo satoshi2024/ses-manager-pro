@@ -65,7 +65,7 @@ Lane A/B/C/D は並行実装可能。Lane E と最終統合は各 lane 完了後
   - **Demo**: 英語/韓国語環境の通知 center で key ではなく翻訳 text が表示される。
 
 - [ ] E2. 統合回帰と文書整理
-  - **Objective**: R1～R9 の全体验収。
+  - **Objective**: R1～R9 の全体の受入検証。
   - **実装ガイダンス**: design.md の統合検証。完了済み task だけ `[x]` にし、未検証 demo は完了扱いにしない。
   - **テスト要件**: 対象 business test、message consistency、`git diff --check`。Docker 使用可能時は MySQL smoke test。
   - **Demo**: 各 task の demo を確認し、自動検証できない環境制約を記録する。

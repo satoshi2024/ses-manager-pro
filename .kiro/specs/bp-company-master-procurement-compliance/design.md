@@ -1,6 +1,6 @@
 # Design — BP会社マスタ・発注コンプライアンス
 
-> Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは定向・直接回帰、M taskで全量を行う。
+> Test実行範囲は `test-execution-policy-s03-s17.md` のL0〜L5を正とし、通常Taskは対象限定・直接回帰、M taskで全量を行う。
 
 ## 1. DDL（予約V70, V71）
 
@@ -86,7 +86,7 @@ BP支払は「過去の支払先表示が後から変わらない」ことが要
 | 遡及登録 | 既存区間を分割し、重複区間を作らない |
 | 所属なし期間 | 空白期間を許容（自社要員化・離脱）。**直前の所属へfallbackしない** |
 
-### 5.3 主体 × 操作 × 可見母集団
+### 5.3 主体 × 操作 × 閲覧可能な母集団
 
 | 主体 | list/detail/count | export/download | notification | scheduler/async |
 |---|---|---|---|---|

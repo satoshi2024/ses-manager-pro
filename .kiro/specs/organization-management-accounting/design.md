@@ -18,7 +18,7 @@
   子組織・在籍所属・要員の所属組織・cost center・当月以降の予算を統合先へ付け替え、
   過去月の予算と月次snapshotは動かさない。退職・停止時は有効な所属を締め、上長参照を外す。
 - `OrganizationScopeService`: current userのdescendant IDsと既存DataScopeの結合。
-- `ManagementAccountingService`: 既存`MonthlyRevenueCalcService`の金額口径を再利用し、独自再計算禁止。
+- `ManagementAccountingService`: 既存`MonthlyRevenueCalcService`の金額算定基準を再利用し、独自再計算禁止。
 - `BudgetService`: upsert、CSV、楽観ロック。
 
 ### 帰属の解決順（管理会計・組織scope共通）
@@ -55,5 +55,5 @@
 
 ## 5. テスト
 
-階層循環、期間重複、異動前後、上長scope、全社=子組織合計、既存金額口径一致、CSV formula injection。
+階層循環、期間重複、異動前後、上長scope、全社=子組織合計、既存金額算定基準一致、CSV formula injection。
 
