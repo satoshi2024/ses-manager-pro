@@ -724,3 +724,11 @@ controller、error writer、connector E2Eの契約を同じstatus/codeへ固定�
 内部詳細を捨てて500/`INTERNAL_ERROR`とする。これによりpayload conflict、未承認provider、subscription拒否、Content-Type拒否の
 controller由来status/codeと専用auditのresponse status/result codeが一致する。実Tomcatで初回202、duplicate200、conflict409、
 unknown/inactive/subscription外403、invalid content type400を検証し、reject ledgerなしを確認する。
+
+
+### G3（2026-11-14）の実装差分と証跡境界
+
+起点b7da8299からHTTPS専用transport、公開IP固定と実peer照合、v2 audience署名、管理者API、業務transactionのproducer、
+有限状態gauge、V192の外部監査一年保存を追加した。詳細はg3-implementation-and-runner.mdとrunbook §11。
+#108候補のtest hookはproduction実装へ移植しない。MOCK/STUB/LOOPBACKは本番outbound不可。
+prod既定は両方向OFF+MOCK。DG-05は未署名のまま、Production NO-GOを維持する。

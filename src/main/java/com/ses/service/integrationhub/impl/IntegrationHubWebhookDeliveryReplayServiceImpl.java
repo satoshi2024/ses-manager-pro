@@ -71,7 +71,7 @@ public class IntegrationHubWebhookDeliveryReplayServiceImpl
                 .maxAttempts(8)
                 .nextAttemptAt(now)
                 .version(0)
-                .createdAt(now)
+                .createdAt(original.getCreatedAt())
                 .updatedAt(now)
                 .build();
         try {

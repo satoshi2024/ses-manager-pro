@@ -131,6 +131,10 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
                 }
             }
 
+            // HMAC検証済みの拒否はbudgetにより監査から消さない。client IDは検証後だけ記録する。
+            ExternalApiAuditTrail.principal(request, new ExternalApiPrincipal(client.getClientId(), client.getId(),
+                    client.getTenantId(), client.getLegalEntityId(), client.getDataScopeJson(),
+                    credentialVersion, keyId, client.getClientTier()));
             if (!ExternalApiCidrMatcher.matchesAny(sourceIp, client.getAllowedCidrs())
                     || !withinApprovedClientCidrs(properties, sourceIp)) {
                 throw ExternalApiSecurityException.authentication("CLIENT_IP_NOT_ALLOWED");

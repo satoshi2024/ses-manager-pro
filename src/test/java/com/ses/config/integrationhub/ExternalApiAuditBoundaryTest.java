@@ -25,6 +25,25 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 class ExternalApiAuditBoundaryTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"CLIENT_IP_NOT_ALLOWED", "NONCE_REPLAY"})
+    void HMAC検証済みの拒否は未認証budgetがゼロでもclientを監査する(String decision) throws Exception {
+        ExternalApiAuditService service = mock(ExternalApiAuditService.class);
+        var properties = properties(true, 0);
+        var boundary = new ExternalApiAuditBoundary(providerOf(service), providerOf(mock(ExternalApiMetricsRecorder.class)),
+                providerOf(properties), providerOf(budget(properties)), new ObjectMapper());
+        MockHttpServletRequest request = request();
+        boundary.doFilter(request, new MockHttpServletResponse(), (req, res) -> {
+            ExternalApiAuditTrail.principal(request, new ExternalApiPrincipal("verified-client", 1L, "tenant-a", 9L,
+                    "{\"tenantIds\":[\"tenant-a\"]}", 1, "key-1", "STANDARD"));
+            req.setAttribute(ExternalApiErrorWriter.DECISION_ATTRIBUTE, decision);
+            ((jakarta.servlet.http.HttpServletResponse) res).setStatus(401);
+        });
+        var captured = org.mockito.ArgumentCaptor.forClass(ExternalApiAuditRecord.class);
+        verify(service).recordRequired(captured.capture());
+        assertEquals("verified-client", captured.getValue().clientId());
+    }
+
     @Test
     void oneBoundedRecordContainsPrincipalCredentialCorrelationAndAllDecisions() throws Exception {
         ExternalApiAuditService service = mock(ExternalApiAuditService.class);

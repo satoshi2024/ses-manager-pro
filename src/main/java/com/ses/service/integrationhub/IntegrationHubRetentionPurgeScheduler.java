@@ -24,7 +24,7 @@ import java.util.List;
 public class IntegrationHubRetentionPurgeScheduler {
 
     private static final List<String> RECORD_KINDS = List.of(
-            "IDEMPOTENCY", "DELIVERY", "INBOUND", "INBOUND_REPLAY", "AUDIT");
+            "IDEMPOTENCY", "DELIVERY", "INBOUND", "INBOUND_REPLAY", "AUDIT", "EXTERNAL_AUDIT");
     private static final List<String> RETENTION_CLASSES = List.of(
             IntegrationHubStates.RETENTION_SUCCEEDED_30D,
             IntegrationHubStates.RETENTION_FAILED_90D,

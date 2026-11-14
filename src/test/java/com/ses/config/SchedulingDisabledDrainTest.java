@@ -98,6 +98,12 @@ class SchedulingDisabledDrainTest {
             "HttpClient5のI/O reactor（@Lazy bean、Copilot送信時に初期化）。周期実行は持たない",
             "com.ses.service.integrationhub.LoopbackTlsIntegrationHubWebhookTransportCandidate:CloseableHttpAsyncClient.start",
             "NF05段階A候補のHttpClient5 I/O reactor。package-privateでBean未登録、testからのみ生成する。周期実行は持たず、close()で停止する",
+            "com.ses.service.integrationhub.HttpsIntegrationHubWebhookTransport:CloseableHttpAsyncClient.start",
+            "NF05のHTTPS有効時だけ生成するI/O reactor。周期実行はなくclose()で即時停止する",
+            "com.ses.service.integrationhub.IntegrationHubHttpsEndpointGuard:ThreadPoolExecutor.<init>",
+            "NF05のDNS解決を二thread・待機八件へ制限する。周期実行はなくclose()で中断し最大二秒待つ",
+            "com.ses.service.integrationhub.IntegrationHubHttpsEndpointGuard:Thread.<init>",
+            "DNS専用daemon thread。外部I/Oは要求起点だけで、schedulerの停止と独立にclose()で停止要求する",
             "com.ses.service.skillgap.AiLearningCandidateServiceImpl:CompletableFuture.supplyAsync",
             "request内のAI呼出をcommonPoolでtimeout付き実行する。timeout後もtaskは継続しうるがshutdown待ちは無い");
 

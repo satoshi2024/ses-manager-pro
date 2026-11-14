@@ -135,7 +135,7 @@ public class ApiDeliveryServiceImpl implements ApiDeliveryService {
             throw new IllegalArgumentException("invalid retry result");
         }
         ApiDelivery row = mapper.selectById(id);
-        if (row == null || row.getAttemptCount() == null || row.getAttemptCount() >= MAX_ATTEMPTS) {
+        if (row == null || row.getAttemptCount() == null || (row.getAttemptCount() - (com.ses.service.integrationhub.IntegrationHubWebhookAttemptAccounting.definitelyUnsent(errorCode) ? 1 : 0)) >= MAX_ATTEMPTS) {
             return markTerminal(id, version, generation, leaseToken, providerIdempotencyKey, payloadHash, IntegrationHubStates.DELIVERY_DLQ,
                     "MAX_ATTEMPTS", now);
         }

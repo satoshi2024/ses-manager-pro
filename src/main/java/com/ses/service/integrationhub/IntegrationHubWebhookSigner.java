@@ -61,6 +61,28 @@ public final class IntegrationHubWebhookSigner {
         return SIGNATURE_VERSION + "=" + signature;
     }
 
+    /** v2は設定済みの完全なHTTPS URLをaudienceとして署名する。受信側も同じURLを照合する。 */
+    public String signForAudience(ApiDelivery delivery, int credentialVersion, String keyId,
+                                  long timestampEpochSeconds, String secret, byte[] body, String audience) {
+        if (audience == null || audience.length() > 512 || !audience.startsWith("https://")) {
+            throw new IllegalArgumentException("invalid webhook audience");
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        writeAscii(out, "IH-WEBHOOK-2\n");
+        writeField(out, audience);
+        byte[] v1 = canonicalBytes(delivery, credentialVersion, keyId, timestampEpochSeconds, body);
+        // v1のbounded bodyにmetadata framingが加わるため、外側fieldへbodyの上限を重ねて適用しない。
+        writeAscii(out, Integer.toString(v1.length));
+        writeAscii(out, ":");
+        out.writeBytes(v1);
+        out.write('\n');
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(hmac(secret, out.toByteArray()));
+    }
+
+    public String audienceSignatureHeaderValue(String signature) {
+        return "v2=" + signatureHeaderValue(signature).substring(3);
+    }
+
     private byte[] hmac(String secret, byte[] canonical) {
         if (secret == null || secret.isBlank() || canonical == null) {
             throw new IllegalArgumentException("invalid webhook signing secret");

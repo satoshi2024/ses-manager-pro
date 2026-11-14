@@ -79,10 +79,18 @@ public class IntegrationHubExternalApiProperties {
                 || externalTransport.readTimeoutMs < 100 || externalTransport.readTimeoutMs > 30_000) {
             throw new IllegalStateException("external transport設定が不正です");
         }
-        long providerTimeoutSeconds = (externalTransport.connectTimeoutMs
-                + (long) externalTransport.readTimeoutMs + 999L) / 1000L;
+        long providerTimeoutSeconds = (externalTransport.dnsTimeoutMs + externalTransport.connectTimeoutMs
+                + (long) externalTransport.readTimeoutMs + 2_000L + 999L) / 1000L;
         if (externalTransport.leaseSeconds <= providerTimeoutSeconds) {
-            throw new IllegalStateException("leaseはconnect/read timeout合計より長く設定してください");
+            throw new IllegalStateException("leaseはDNS/connect/read/closeの合計より長く設定してください");
+        }
+        if (externalTransport.dnsTimeoutMs < 100 || externalTransport.dnsTimeoutMs > 5_000) {
+            throw new IllegalStateException("DNS timeoutは100〜5000msで指定してください");
+        }
+        if (externalTransport.enabled && provider.mode == ProviderMode.HTTPS
+                && (!StringUtils.hasText(externalTransport.truststorePath)
+                || !SetHolder.TRUSTSTORE_TYPES.contains(externalTransport.truststoreType))) {
+            throw new IllegalStateException("HTTPS transportにはtruststoreが必要です");
         }
         if (externalTransport.enabled && provider.mode == ProviderMode.LOOPBACK
                 && security.allowedLoopbackPorts.isEmpty()) {
@@ -112,6 +120,10 @@ public class IntegrationHubExternalApiProperties {
         if (environment != null && environment.acceptsProfiles(org.springframework.core.env.Profiles.of("prod"))) {
             IntegrationHubProductionEnablementPolicy.requireProductionBoundary(this, environment);
         }
+    }
+
+    private static class SetHolder {
+        static final java.util.Set<String> TRUSTSTORE_TYPES = java.util.Set.of("PKCS12", "JKS");
     }
 
     @Data
@@ -160,6 +172,10 @@ public class IntegrationHubExternalApiProperties {
         private long fixedDelayMs = 1_000L;
         private int connectTimeoutMs = 3_000;
         private int readTimeoutMs = 3_000;
+        private int dnsTimeoutMs = 2_000;
+        private String truststorePath;
+        private String truststorePassword;
+        private String truststoreType = "PKCS12";
         /** outbound方向のproduction承認（DG-05）。dev/testでは任意。 */
         private OutboundApproval approval = new OutboundApproval();
     }
@@ -183,7 +199,7 @@ public class IntegrationHubExternalApiProperties {
     }
 
     public enum ProviderMode {
-        MOCK, STUB, LOOPBACK
+        MOCK, STUB, LOOPBACK, HTTPS
     }
 
     /** trusted proxyが送信元を追記するheader種別。指定外のheaderはclientが書ける値として読まない。 */

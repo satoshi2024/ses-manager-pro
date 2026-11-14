@@ -83,6 +83,19 @@ final class IntegrationHubProductionEnablementPolicy {
         } else if (cidrs.stream().anyMatch(cidr -> !narrowEnough(cidr))) {
             violations.add("public-api.approval.allowed-client-cidrsにIPv4 /16・IPv6 /32より広い範囲は指定できません");
         }
+        if (properties.getSecurity().getForwardedHeader()
+                != IntegrationHubExternalApiProperties.ForwardedHeader.X_FORWARDED_FOR) {
+            violations.add("ALBのinboundはX_FORWARDED_FORだけを使用できます");
+        }
+        for (String proxy : properties.getSecurity().getTrustedProxies()) {
+            int minimum = ExternalApiCidrMatcher.isIpv4Cidr(proxy) ? 24 : 64;
+            if (!ExternalApiCidrMatcher.isValidCidr(proxy) || ExternalApiCidrMatcher.prefixLength(proxy) < minimum) {
+                violations.add("trusted proxyはALB専用のIPv4 /24・IPv6 /64以上の狭い範囲へ限定してください");
+            }
+            if (cidrs != null && cidrs.stream().anyMatch(client -> overlaps(proxy, client))) {
+                violations.add("trusted proxyとclient CIDRの重複は許可できません");
+            }
+        }
         if (properties.getSecurity().getTrustedProxies().isEmpty()) {
             // D-1: production入口はLBのみ。trusted proxy未設定では全requestがLB自身のIPと判定される。
             violations.add("inbound開放にはLBのCIDRをsecurity.trusted-proxiesへ設定してください");
@@ -105,14 +118,14 @@ final class IntegrationHubProductionEnablementPolicy {
             violations.add("external-transport.approval.allowed-destinationsは小文字FQDNのhost:port形式で指定してください");
         }
         if (!productionOutboundCapable(properties.getProvider().getMode())) {
-            violations.add("outbound開放には本番用transport modeが必要です（実HTTPS transportはW3-06bで追加）");
+            violations.add("outbound開放にはprovider.mode=HTTPSが必要です");
         }
         return violations;
     }
 
     /**
      * 本番で実送信を担えるtransport modeか。MOCKは送らずに成功を返し、STUB/LOOPBACKは開発・test専用のため、
-     * 現行modeはすべてfalse。実HTTPS modeを追加したらこのswitchで明示的に判定する（網羅switchで追加漏れを防ぐ）。
+     * HTTPSだけを許可する。網羅switchで追加漏れを防ぐ。
      */
     static boolean productionOutboundCapable(IntegrationHubExternalApiProperties.ProviderMode mode) {
         if (mode == null) {
@@ -120,6 +133,7 @@ final class IntegrationHubProductionEnablementPolicy {
         }
         return switch (mode) {
             case MOCK, STUB, LOOPBACK -> false;
+            case HTTPS -> true;
         };
     }
 
@@ -142,6 +156,12 @@ final class IntegrationHubProductionEnablementPolicy {
         int prefix = ExternalApiCidrMatcher.prefixLength(cidr);
         return ExternalApiCidrMatcher.isIpv4Cidr(cidr)
                 ? prefix >= MIN_IPV4_CLIENT_PREFIX : prefix >= MIN_IPV6_CLIENT_PREFIX;
+    }
+
+    private static boolean overlaps(String left, String right) {
+        if (!ExternalApiCidrMatcher.isValidCidr(left) || !ExternalApiCidrMatcher.isValidCidr(right)) return true;
+        return ExternalApiCidrMatcher.matchesAny(left.substring(0, left.indexOf('/')), List.of(right))
+                || ExternalApiCidrMatcher.matchesAny(right.substring(0, right.indexOf('/')), List.of(left));
     }
 
     static boolean validDestination(String destination) {

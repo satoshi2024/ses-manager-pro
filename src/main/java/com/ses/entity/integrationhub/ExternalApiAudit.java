@@ -30,4 +30,5 @@ public class ExternalApiAudit {
     private String resultCode;
     private Boolean successFlag;
     private LocalDateTime createdAt;
+    private LocalDateTime retentionExpiresAt;
 }

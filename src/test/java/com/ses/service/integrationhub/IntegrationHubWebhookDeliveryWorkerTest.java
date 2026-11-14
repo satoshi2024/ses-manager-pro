@@ -274,6 +274,45 @@ class IntegrationHubWebhookDeliveryWorkerTest {
                 eq("PRIMARY_BINDING_INVALID"), eq(now));
     }
 
+    @Test
+    void lease余量が不足する場合はHTTPを始めず再試行へ送る() {
+        ApiDelivery row = claimed(1);
+        row.setLeaseExpiresAt(now.plusSeconds(5));
+        arrangeClaim(row);
+        when(subscriptionService.getActive(7L)).thenReturn(subscription());
+        when(crypto.decrypt(any(), anyInt(), any(), any())).thenReturn("test-webhook-secret");
+        when(deliveryService.markRetryable(any(), any(), any(), any(), any(), any(),
+                eq("LEASE_MARGIN_INSUFFICIENT"), any(), any())).thenReturn(true);
+        assertTrue(worker.dispatchOne(7L, now));
+        verify(transport, never()).send(any());
+    }
+
+    @Test
+    void HTTPSはaudience署名と送信直前のcurrentScopeを要求する() {
+        var properties = (IntegrationHubExternalApiProperties) org.springframework.test.util.ReflectionTestUtils.getField(worker, "properties");
+        properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.HTTPS);
+        properties.getTopology().setBoundTenantId("tenant-a");
+        var current = mock(IntegrationHubWebhookReplayAuthorizationService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(worker, "currentScope", current);
+        ApiDelivery row = claimed(1); arrangeClaim(row);
+        WebhookSubscription subscription = subscription(); subscription.setEndpointUrl("https://web.example.com:443/hook");
+        when(subscriptionService.getActive(7L)).thenReturn(subscription);
+        when(crypto.decrypt(any(), anyInt(), any(), any())).thenReturn("synthetic-secret");
+        when(transport.send(any())).thenReturn(IntegrationHubWebhookTransportResult.success(204, "fixture"));
+        when(deliveryService.markSucceeded(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(true);
+        assertTrue(worker.dispatchOne(7L, now));
+        var captured = ArgumentCaptor.forClass(IntegrationHubWebhookRequest.class);
+        verify(transport).send(captured.capture());
+        assertTrue(captured.getValue().headers().get("X-Integration-Hub-Signature").startsWith("v2="));
+        verify(current).assertCurrentSendScope(row, now);
+        org.mockito.Mockito.clearInvocations(transport);
+        doThrow(new SecurityException("synthetic-revocation")).when(current).assertCurrentSendScope(row, now);
+        when(deliveryService.markTerminal(any(), any(), any(), any(), any(), any(), eq("DLQ"), eq("CURRENT_SCOPE_REJECTED"), any()))
+                .thenReturn(true);
+        assertTrue(worker.dispatchOne(7L, now));
+        verify(transport, never()).send(any());
+    }
+
     private void arrangeClaim(ApiDelivery claimed) {
         when(deliveryService.claim(eq(7L), any(), eq(now), any())).thenReturn(claimed);
     }
@@ -292,7 +331,7 @@ class IntegrationHubWebhookDeliveryWorkerTest {
                 .externalDtoSnapshot(new String(body, StandardCharsets.UTF_8))
                 .payloadHash(IntegrationHubDigest.sha256Hex(body)).status("CLAIMED")
                 .attemptCount(attempt).maxAttempts(8).nextAttemptAt(now).leaseToken("lease")
-                .createdAt(now).updatedAt(now).build();
+                .leaseExpiresAt(now.plusHours(1)).createdAt(now).updatedAt(now).build();
     }
 
     private WebhookSubscription subscription() {

@@ -755,11 +755,14 @@ CREATE TABLE t_external_api_audit (
   rate_decision VARCHAR(64) NOT NULL, status SMALLINT NOT NULL,
   result_code VARCHAR(64) NOT NULL, success_flag BOOLEAN NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  retention_expires_at DATETIME NOT NULL,
   CONSTRAINT chk_external_audit_principal CHECK (pre_auth_principal = 'UNAUTHENTICATED'),
   CONSTRAINT chk_external_audit_status CHECK (status >= 100 AND status <= 599)
 );
 CREATE INDEX idx_external_audit_created ON t_external_api_audit (created_at, id);
 CREATE INDEX idx_external_audit_client ON t_external_api_audit (client_id, created_at, id);
+
+CREATE INDEX idx_external_audit_retention ON t_external_api_audit (retention_expires_at, id);
 
 DROP TABLE IF EXISTS t_freee_connection CASCADE;
 CREATE TABLE t_freee_connection (

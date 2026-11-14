@@ -40,7 +40,9 @@ public class ExternalApiAuditServiceImpl implements ExternalApiAuditService {
         entry.setStatus(record.status());
         entry.setResultCode(safe(record.resultCode(), 64));
         entry.setSuccessFlag(record.successFlag());
-        entry.setCreatedAt(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now(java.time.ZoneOffset.UTC);
+        entry.setCreatedAt(now);
+        entry.setRetentionExpiresAt(now.plusYears(1));
         if (mapper.insert(entry) != 1) {
             throw new IllegalStateException("external API audit persistence failed");
         }

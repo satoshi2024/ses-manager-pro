@@ -17,8 +17,8 @@ public final class IntegrationHubRetentionPurgeCondition implements Condition {
 
     @Override
     public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
-        String inbound = context.getEnvironment().getProperty(PUBLIC_API_ENABLED);
-        String outbound = context.getEnvironment().getProperty(EXTERNAL_TRANSPORT_ENABLED);
-        return "true".equalsIgnoreCase(inbound) || "true".equalsIgnoreCase(outbound);
+        var binder = org.springframework.boot.context.properties.bind.Binder.get(context.getEnvironment());
+        return binder.bind(PUBLIC_API_ENABLED, Boolean.class).orElse(false)
+                || binder.bind(EXTERNAL_TRANSPORT_ENABLED, Boolean.class).orElse(false);
     }
 }

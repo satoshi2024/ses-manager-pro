@@ -15,8 +15,8 @@ package com.ses.migration;
  */
 final class LatestMigrationVersion {
 
-    /** 現在の最新versioned migration（V188: ポータルユーザーと要員の紐付け）。 */
-    static final String LATEST = "188";
+    /** 現在の最新versioned migration（V192: 外部API監査の保存期限）。 */
+    static final String LATEST = "192";
 
     private LatestMigrationVersion() {
     }

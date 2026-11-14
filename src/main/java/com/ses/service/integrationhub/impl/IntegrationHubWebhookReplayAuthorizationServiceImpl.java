@@ -46,6 +46,45 @@ public class IntegrationHubWebhookReplayAuthorizationServiceImpl
     private final ExternalApiPublicIdCodec publicIdCodec;
     private final AuthorizationService internalAuthorizationService;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.ses.service.integrationhub.CredentialVersionService credentialVersions;
+
+    @Override
+    public void assertCurrentSendScope(ApiDelivery delivery, LocalDateTime now) {
+        ApiClient client = clientMapper.selectByClientId(delivery.getClientId());
+        if (client == null || !"ACTIVE".equals(client.getStatus()) || client.getRevokedAt() != null
+                || !delivery.getTenantId().equals(client.getTenantId()) || client.getLegalEntityId() == null
+                || client.getExpiresAt() != null && !client.getExpiresAt().isAfter(now)) {
+            throw new SecurityException("現在のclient bindingを許可できません");
+        }
+        ApiClientScope permission = clientScopeMapper.selectActive(client.getId(), delivery.getScopeCode(),
+                "integration.webhook.deliver");
+        WebhookSubscription subscription = subscriptionMapper.selectActiveById(delivery.getSubscriptionId());
+        if (permission == null || subscription == null || !"OUTBOUND".equals(subscription.getDirection())
+                || !delivery.getClientId().equals(subscription.getClientId())
+                || !delivery.getEventType().equals(subscription.getEventType())) {
+            throw new SecurityException("現在のdeliver権限を許可できません");
+        }
+        var usable = credentialVersions == null ? null : credentialVersions.findUsable(client.getId(), subscription.getKeyId(), now);
+        if (usable == null || !java.util.Objects.equals(usable.getCredentialVersion(), subscription.getSigningCredentialVersion())
+               ) {
+            throw new SecurityException("現在のcredentialまたはresource ownershipを許可できません");
+        }
+        ExternalApiDataScope effective = parse(client.getDataScopeJson()).intersect(parse(permission.getDataScopeJson()))
+                .intersect(parse(subscription.getDataScopeJson()));
+        // 省略したdimensionによってclient側の制限が消える構成は送信しない。
+        Set<String> declared = new HashSet<>(parse(client.getDataScopeJson()).values().keySet());
+        declared.addAll(parse(permission.getDataScopeJson()).values().keySet());
+        declared.addAll(parse(subscription.getDataScopeJson()).values().keySet());
+        if (!effective.values().keySet().containsAll(declared)) {
+            throw new SecurityException("各scopeのdimensionを揃えてください");
+        }
+        requireAuthoritativeScope(effective, client, delivery);
+        if (!resourceScopeMapper.isCurrentOwnership(delivery.getPrimaryResourceType(), delivery.getPrimaryResourceId(),
+                client.getTenantId(), client.getLegalEntityId())) throw new SecurityException("現在のresource ownershipを許可できません");
+        requirePayloadMembership(delivery, effective, client);
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public IntegrationHubWebhookReplayAuthorizationService.ReplayAuthorization authorize(
@@ -87,6 +126,8 @@ public class IntegrationHubWebhookReplayAuthorizationServiceImpl
                 .intersect(parse(permission.getDataScopeJson()))
                 .intersect(parse(subscription.getDataScopeJson()));
         requireAuthoritativeScope(effective, client, delivery);
+        if (!resourceScopeMapper.isCurrentOwnership(delivery.getPrimaryResourceType(), delivery.getPrimaryResourceId(),
+                client.getTenantId(), client.getLegalEntityId())) throw new SecurityException("現在のresource ownershipを許可できません");
         requirePayloadMembership(delivery, effective, client);
         return operator;
     }

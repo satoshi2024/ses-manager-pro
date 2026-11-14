@@ -41,14 +41,14 @@ class IntegrationHubRetentionPurgeConditionTest {
     }
 
     @Test
-    void schedulerIsNotCreatedWhenBothDirectionsAreOffMissingOrInvalid() {
+    void schedulerIsNotCreatedWhenBothDirectionsAreOffOrMissing() {
         runner.withPropertyValues("integration.hub.public-api.enabled=false",
                         "integration.hub.external-transport.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(IntegrationHubRetentionPurgeScheduler.class));
         runner.run(context -> assertThat(context).doesNotHaveBean(IntegrationHubRetentionPurgeScheduler.class));
         runner.withPropertyValues("integration.hub.public-api.enabled=yes",
                         "integration.hub.external-transport.enabled=1")
-                .run(context -> assertThat(context).doesNotHaveBean(IntegrationHubRetentionPurgeScheduler.class));
+                .run(context -> assertThat(context).hasSingleBean(IntegrationHubRetentionPurgeScheduler.class));
     }
 
     @Test

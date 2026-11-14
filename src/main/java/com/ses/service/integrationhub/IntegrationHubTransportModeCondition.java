@@ -15,6 +15,8 @@ public final class IntegrationHubTransportModeCondition implements Condition {
         String expectedMode = attributes == null ? null : (String) attributes.get("mode");
         String enabled = context.getEnvironment().getProperty("integration.hub.external-transport.enabled");
         String mode = context.getEnvironment().getProperty("integration.hub.provider.mode");
-        return "true".equalsIgnoreCase(enabled) && expectedMode != null && expectedMode.equals(mode);
+        boolean active = org.springframework.boot.context.properties.bind.Binder.get(context.getEnvironment())
+                .bind("integration.hub.external-transport.enabled", Boolean.class).orElse(false);
+        return active && expectedMode != null && expectedMode.equalsIgnoreCase(mode);
     }
 }

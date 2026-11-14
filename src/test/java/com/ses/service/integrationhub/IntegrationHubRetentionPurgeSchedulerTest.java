@@ -33,7 +33,7 @@ class IntegrationHubRetentionPurgeSchedulerTest {
 
         var now = java.time.LocalDateTime.of(2026, 8, 31, 15, 4, 5);
         var expected = new ArrayList<String>();
-        for (String kind : List.of("IDEMPOTENCY", "DELIVERY", "INBOUND", "INBOUND_REPLAY", "AUDIT")) {
+        for (String kind : List.of("IDEMPOTENCY", "DELIVERY", "INBOUND", "INBOUND_REPLAY", "AUDIT", "EXTERNAL_AUDIT")) {
             for (String retentionClass : List.of(
                     IntegrationHubStates.RETENTION_SUCCEEDED_30D,
                     IntegrationHubStates.RETENTION_FAILED_90D,
@@ -44,7 +44,7 @@ class IntegrationHubRetentionPurgeSchedulerTest {
         }
         verify(nonce).purgeExpired(now, 7);
         verifyNoMoreInteractions(retention, nonce);
-        assertEquals(15, expected.size());
+        assertEquals(18, expected.size());
     }
 
     @Test

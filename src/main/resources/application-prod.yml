@@ -42,6 +42,10 @@ integration:
       fixed-delay-ms: 1000
       connect-timeout-ms: 3000
       read-timeout-ms: 3000
+      dns-timeout-ms: 2000
+      truststore-path: ${INTEGRATION_HUB_TRUSTSTORE_PATH:}
+      truststore-password: ${INTEGRATION_HUB_TRUSTSTORE_PASSWORD:}
+      truststore-type: PKCS12
     provider:
       mode: MOCK
 

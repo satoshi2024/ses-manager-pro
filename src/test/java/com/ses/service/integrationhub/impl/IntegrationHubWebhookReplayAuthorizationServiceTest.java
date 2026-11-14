@@ -63,6 +63,9 @@ class IntegrationHubWebhookReplayAuthorizationServiceTest {
         service = new IntegrationHubWebhookReplayAuthorizationServiceImpl(clientMapper, clientScopeMapper,
                 subscriptionMapper, resourceScopeMapper, new ObjectMapper(), publicIdCodec, internalAuthorizationService);
         delivery = delivery();
+        when(resourceScopeMapper.isCurrentOwnership(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyLong()))
+                .thenReturn(true);
         when(internalAuthorizationService.isAllowed(adminAuthentication,
                 IntegrationHubWebhookReplayAuthorizationService.REPLAY_OPERATION)).thenReturn(true);
         when(clientMapper.selectByClientIdForUpdate("client-a")).thenReturn(client());
@@ -71,6 +74,34 @@ class IntegrationHubWebhookReplayAuthorizationServiceTest {
         when(subscriptionMapper.selectActiveByIdForUpdate(7L)).thenReturn(subscription());
         when(resourceScopeMapper.selectCurrentMemberships("project", 1L))
                 .thenReturn(List.of(membership(1L, 10L, null, null)));
+    }
+
+    @Test
+    void replayも現行法人またはtenantを移管したresourceを拒否する() {
+        when(resourceScopeMapper.isCurrentOwnership("project", 1L, "tenant-a", 9L)).thenReturn(false);
+        assertThrows(SecurityException.class, () -> service.authorize(delivery, delivery.getScopeDigest(), adminAuthentication, NOW));
+    }
+
+    @Test
+    void currentSendは失効credentialと移管後ownershipと権限失効を拒否する() {
+        var credentialVersions = mock(com.ses.service.integrationhub.CredentialVersionService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "credentialVersions", credentialVersions);
+        var activeSubscription = subscription(); activeSubscription.setKeyId("key-1"); activeSubscription.setSigningCredentialVersion(1);
+        when(clientMapper.selectByClientId("client-a")).thenReturn(client());
+        when(clientScopeMapper.selectActive(11L, "resource.read", "integration.webhook.deliver")).thenReturn(permission());
+        when(subscriptionMapper.selectActiveById(7L)).thenReturn(activeSubscription);
+        when(resourceScopeMapper.isCurrentOwnership("project", 1L, "tenant-a", 9L)).thenReturn(true);
+        var credential = com.ses.entity.integrationhub.CredentialVersion.builder().credentialVersion(1).build();
+        when(credentialVersions.findUsable(11L, "key-1", NOW)).thenReturn(credential);
+        assertDoesNotThrow(() -> service.assertCurrentSendScope(delivery, NOW));
+        when(credentialVersions.findUsable(11L, "key-1", NOW)).thenReturn(null);
+        assertThrows(SecurityException.class, () -> service.assertCurrentSendScope(delivery, NOW));
+        when(credentialVersions.findUsable(11L, "key-1", NOW)).thenReturn(credential);
+        when(resourceScopeMapper.isCurrentOwnership("project", 1L, "tenant-a", 9L)).thenReturn(false);
+        assertThrows(SecurityException.class, () -> service.assertCurrentSendScope(delivery, NOW));
+        when(resourceScopeMapper.isCurrentOwnership("project", 1L, "tenant-a", 9L)).thenReturn(true);
+        when(clientScopeMapper.selectActive(11L, "resource.read", "integration.webhook.deliver")).thenReturn(null);
+        assertThrows(SecurityException.class, () -> service.assertCurrentSendScope(delivery, NOW));
     }
 
     @Test
