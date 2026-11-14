@@ -46,7 +46,8 @@ class PwaSessionApiControllerTest {
     void ローカルパスワードでloginしたsessionはrestoreAvailableをtrueで返す() throws Exception {
         var authorities = List.of(new SimpleGrantedAuthority("ROLE_要員"));
         LoginUser principal = new LoginUser(user(), authorities, "tenant-a");
-        mockMvc.perform(get("/api/my/session-context")
+        // sessionの無い要求は復元できない側に倒すため、session認証と同じくsessionを付ける（R2-P3-1）。
+        mockMvc.perform(get("/api/my/session-context").session(new MockHttpSession())
                         .with(authentication(UsernamePasswordAuthenticationToken.authenticated(
                                 principal, "", authorities))))
                 .andExpect(status().isOk())

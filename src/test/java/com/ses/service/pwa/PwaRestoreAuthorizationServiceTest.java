@@ -477,6 +477,8 @@ class PwaRestoreAuthorizationServiceTest {
         MockHttpSession invalidated = new MockHttpSession();
         invalidated.invalidate();
         assertThat(PwaRestoreAuthorizationService.supportsPasswordReauthentication(authentication, invalidated)).isFalse();
+        // sessionを確かめられない場合もfail-closed（R2-P3-1）。
+        assertThat(PwaRestoreAuthorizationService.supportsPasswordReauthentication(authentication, null)).isFalse();
         verify(failureRecorder, never()).record(any(), any());
         verify(identityService, never()).load(any(), any());
     }

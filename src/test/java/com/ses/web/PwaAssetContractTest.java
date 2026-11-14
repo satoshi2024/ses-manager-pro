@@ -133,7 +133,8 @@ class PwaAssetContractTest {
                 "self.clearUserScope()");
         assertThat(logout.indexOf("confirmDraftLoss")).isLessThan(logout.indexOf("clearUserScope"));
         // 件数はIndexedDBから数え（他tab・隔離後の下書きを含む）、応答が無ければ画面の件数で判断する（W3-09 P3-4）。
-        assertThat(common).contains("draftLossSummary", "draftLossCount", "pwa.logout.draftLossConfirm");
+        assertThat(common).contains("draftLossSummary", "draftLossCount", "pwa.logout.draftLossConfirm",
+                "pwa.logout.draftLossConfirmUnknown");
         // SW更新の確認は「下書きは維持される」と約束しない（W3-09 P3-6）。
         int promptStart = common.indexOf("promptUpdate: function(worker)");
         String prompt = common.substring(promptStart, common.indexOf("clearUserScope: function()", promptStart));
@@ -161,12 +162,15 @@ class PwaAssetContractTest {
         // 送信中（fetch未完了）の新規recordも、送信を始める前に未送信として数える（W3-09 P2-W309-1）。
         int requestStart = queue.indexOf("async function request(spec)");
         String request = queue.substring(requestStart, queue.indexOf("async function flush()", requestStart));
-        assertThat(request.indexOf("state.sendingRequestIds.add(record.clientRequestId)"))
+        assertThat(request.indexOf("markSending(record)"))
                 .isNotNegative()
                 .isLessThan(request.indexOf("return await sendRecord(record)"));
-        assertThat(request).contains("state.sendingRequestIds.delete(record.clientRequestId)");
+        assertThat(request).contains("unmarkSending(record)", "SENDING_NOTICE_DELAY_MS", "clearTimeout(sendingNotice)");
+        // 応答が遅い送信は同期パネルに「送信中」と出し、flushは送信中のaggregateを待たない（R2-P2-1、R2-P3-5）。
+        assertThat(queue).contains("const SENDING_NOTICE_DELAY_MS = 1000", "pwa.queue.sendingLeaveWarning", "pwa.queue.sending",
+                "if (state.sendingResourceKeys.has(record.resourceKey)) {");
         // session有効時間を超えると復元できなくなることを画面で示す（W3-09 P1-W309-1 (a)）。
-        assertThat(queue).contains("ログインの有効時間（30分。端末のスリープ中を含む）");
+        assertThat(queue).contains("サーバーとの通信が無い状態がログインの有効時間（30分。端末のスリープ中を含む。画面での入力だけでは延長されません）");
         // パスワードを送る前に復元可否を確かめる。
         String prepare = queue.substring(queue.indexOf("prepareRestore: async password =>"),
                 queue.indexOf("confirmRestore: async () =>"));

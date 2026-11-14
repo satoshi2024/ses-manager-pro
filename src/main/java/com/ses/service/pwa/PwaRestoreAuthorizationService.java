@@ -85,11 +85,11 @@ public class PwaRestoreAuthorizationService {
      * （W3-09 P3-1、多層防御）。どちらもローカルパスワードのform loginだが、事故対応・初期構築用の共用・期限付き資格情報であり、
      * 要員本人の本人確認には使わない（いずれも {@code /api/my/**} は {@code hasRole('要員')} で既に届かない）。
      * 印はserverが立てるsession属性（{@link BreakGlassService#INCIDENT_ID_ATTRIBUTE}、
-     * {@link ProductionBootstrapMode#SESSION_ATTRIBUTE}）だけを見る。
+     * {@link ProductionBootstrapMode#SESSION_ATTRIBUTE}）だけを見る。sessionが無い・破棄済みの場合も復元できない側に倒す
+     * （fail-closed。W3-09 R2-P3-1）。
      */
     public static boolean supportsPasswordReauthentication(Authentication authentication, HttpSession session) {
-        if (!supportsPasswordReauthentication(authentication)) return false;
-        if (session == null) return true;
+        if (!supportsPasswordReauthentication(authentication) || session == null) return false;
         try {
             return session.getAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE) == null
                     && !ProductionBootstrapMode.isBootstrapSession(session);

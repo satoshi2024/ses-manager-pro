@@ -146,6 +146,16 @@ class PwaQueueRestoreAvailabilityBrowserTest {
             assertTrue(browser.waitForStrict("SES.pwaQueue.draftLossSummary().unsent===1", WAIT),
                     "fetch未完了の新規recordも未送信として数える");
             assertTrue(browser.evaluateStrict(BEFORE_UNLOAD_PREVENTED).asBoolean(), "送信中に画面を離れる前に確認する");
+            // iOSでは離脱確認が出ないため、応答が遅い送信は同期パネルに「送信中」として出す（R2-P2-1）。
+            assertTrue(browser.waitForStrict("!document.getElementById('pwa-queue-panel').hidden"
+                    + "&&document.getElementById('pwa-queue-status').textContent.includes('送信中')"
+                    + "&&document.getElementById('pwa-queue-status').textContent.includes('復元できなくなります')", WAIT),
+                    "送信が止まっている間、同期パネルに送信中と復元できなくなる条件を表示する");
+            // 送信中のaggregateでflushが止まらない（flushingのまま表示が「同期中」に固定されない。R2-P3-5）。
+            assertEquals("done", browser.evaluateStrict("Promise.race([SES.pwaQueue.flush().then(()=>'done'),"
+                    + "new Promise(ok=>setTimeout(()=>ok('timeout'),5000))])").asText());
+            assertTrue(browser.evaluateStrict("document.getElementById('pwa-queue-status').textContent.includes('送信中')")
+                    .asBoolean(), "flush後も送信中の警告を表示し続ける");
             assertTrue(browser.evaluateStrict(READ_QUEUE.replace("return JSON.stringify(rows)",
                     "return rows.length===1&&rows[0].status==='PENDING'")).asBoolean(), "recordは端末に保存済み");
 

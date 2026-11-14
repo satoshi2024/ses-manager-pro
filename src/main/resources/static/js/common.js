@@ -1132,10 +1132,16 @@ SES.pwa = {
         }
         const timeout = new Promise(function(resolve) { setTimeout(function() { resolve(null); }, 1000); });
         return Promise.race([counting.catch(function() { return null; }), timeout]).then(function(counted) {
-            const count = Number.isFinite(Number(counted)) && counted !== null ? Number(counted) : knownCount();
-            if (!count) return true;
-            const message = SES.i18n.t('pwa.logout.draftLossConfirm', count,
-                'この端末に未送信またはロック中の下書きが {0} 件あります。ログアウトすると端末から削除され、復元できません。ログアウトしますか？');
+            const countKnown = counted !== null && counted !== undefined && Number.isFinite(Number(counted));
+            const count = countKnown ? Number(counted) : knownCount();
+            // 件数を確かめられず（IndexedDBが応答しない等）、画面も件数を把握していないときは、件数なしで確認する（R2-P3-6）。
+            const unknown = !countKnown && !count && !!pwa;
+            if (!count && !unknown) return true;
+            const message = unknown
+                ? SES.i18n.t('pwa.logout.draftLossConfirmUnknown',
+                    'この端末の下書きの件数を確認できませんでした。未送信またはロック中の下書きがある場合、ログアウトすると端末から削除され、復元できません。ログアウトしますか？')
+                : SES.i18n.t('pwa.logout.draftLossConfirm', count,
+                    'この端末に未送信またはロック中の下書きが {0} 件あります。ログアウトすると端末から削除され、復元できません。ログアウトしますか？');
             if (window.Swal && typeof Swal.fire === 'function') {
                 try {
                     return Swal.fire({

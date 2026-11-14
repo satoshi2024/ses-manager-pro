@@ -45,8 +45,12 @@
         // 現在documentで扱う未送信の下書き（render時点のIndexedDB）と、送信中（fetch未完了）の新規record。
         // 離脱確認・logout確認だけに使う。送信中は応答まで render されないため別に数える（W3-09 P2-W309-1）。
         unsentRequestIds: new Set(),
-        sendingRequestIds: new Set()
+        sendingRequestIds: new Set(),
+        // request()が直接送信中のaggregate（resourceKey→件数）。flushはこのaggregateを待たずに飛ばす（W3-09 R2-P3-5）。
+        sendingResourceKeys: new Map()
     };
+    // 保存の送信が止まったときだけ同期パネルへ「送信中」を出すまでの待ち時間（通常の保存で警告を点滅させない）。
+    const SENDING_NOTICE_DELAY_MS = 1000;
 
     const REVOCATION_KEY = 'ses_pwa_revocation_epoch';
     const SCOPE_EPOCH_KEY = 'ses_pwa_scope_epoch';
@@ -105,6 +109,21 @@
     function resetUnsentDrafts() {
         state.unsentRequestIds = new Set();
         state.sendingRequestIds = new Set();
+        state.sendingResourceKeys = new Map();
+        updateUnloadGuard();
+    }
+
+    function markSending(record) {
+        state.sendingRequestIds.add(record.clientRequestId);
+        state.sendingResourceKeys.set(record.resourceKey, (state.sendingResourceKeys.get(record.resourceKey) || 0) + 1);
+        updateUnloadGuard();
+    }
+
+    function unmarkSending(record) {
+        state.sendingRequestIds.delete(record.clientRequestId);
+        const remaining = (state.sendingResourceKeys.get(record.resourceKey) || 0) - 1;
+        if (remaining > 0) state.sendingResourceKeys.set(record.resourceKey, remaining);
+        else state.sendingResourceKeys.delete(record.resourceKey);
         updateUnloadGuard();
     }
 
@@ -908,6 +927,8 @@
         const pending = records.filter(record => record.status === 'PENDING');
         const conflicts = records.filter(record => record.status === 'CONFLICT');
         const errors = records.filter(record => record.status === 'ERROR');
+        // request()が応答を待っている（保存が止まっている）record。応答が遅いときだけrenderされる（R2-P2-1）。
+        const sending = pending.filter(record => state.sendingRequestIds.has(record.clientRequestId)).length;
         if (renderGeneration === state.documentGeneration) {
             // 撤回後に遅れて完了したrenderで件数を戻さない。
             state.unsentRequestIds = new Set(records
@@ -935,14 +956,23 @@
                     : uiText('pwa.queue.quarantinedRestorable', '下書きはロックされています。オンラインで再認証し、明示的に復元してください。');
             }
             else if (state.paused) status.textContent = 'セッション期限切れ。再認証後に同じユーザーで同期を再開します。';
-            else if (unsentWarning && !state.flushing) {
-                const warning = navigator.onLine
-                    ? uiText('pwa.queue.unsentLeaveWarning', '未送信 {0} 件。送信が終わる前にこの画面を離れるか、操作の無い状態がログインの有効時間（30分。端末のスリープ中を含む）を超えると、この下書きは復元できなくなります。', pending.length)
-                    : uiText('pwa.queue.offlineLeaveWarning', 'オフライン: 未送信 {0} 件。通信が戻ったら、すぐにこの画面で送信を終えてください。この画面を離れるか、オフラインや操作の無い状態がログインの有効時間（30分。端末のスリープ中を含む）を超えると、この下書きは復元できなくなります。', pending.length);
+            else if (unsentWarning) {
+                // 復元できない（未確認を含む）sessionでは、同期中でも警告を隠さない（iOSでは離脱確認が出ないため）。
+                let warning;
+                if (!navigator.onLine) {
+                    warning = uiText('pwa.queue.offlineLeaveWarning', 'オフライン: 未送信 {0} 件。通信が戻ったら、すぐにこの画面で送信を終えてください。この画面を離れるか、オフラインなどでサーバーとの通信が無い状態がログインの有効時間（30分。端末のスリープ中を含む。画面での入力だけでは延長されません）を超えると、この下書きは復元できなくなります。', pending.length);
+                } else if (sending > 0) {
+                    warning = uiText('pwa.queue.sendingLeaveWarning', '送信中を含む未送信 {0} 件（サーバーの応答を待っています）。送信が終わる前にこの画面を離れるか、サーバーとの通信が無い状態がログインの有効時間（30分。端末のスリープ中を含む。画面での入力だけでは延長されません）を超えると、この下書きは復元できなくなります。', pending.length);
+                } else {
+                    warning = uiText('pwa.queue.unsentLeaveWarning', '未送信 {0} 件。送信が終わる前にこの画面を離れるか、サーバーとの通信が無い状態がログインの有効時間（30分。端末のスリープ中を含む。画面での入力だけでは延長されません）を超えると、この下書きは復元できなくなります。', pending.length);
+                }
                 status.textContent = lockedText ? `${warning} ${lockedText}` : warning;
             }
             else if (state.lockedDraftCount) status.textContent = lockedText;
             else if (!navigator.onLine && pending.length) status.textContent = `オフライン: 未送信 ${pending.length} 件`;
+            else if (sending > 0) {
+                status.textContent = uiText('pwa.queue.sending', '送信中を含む未送信 {0} 件（サーバーの応答を待っています）。', pending.length);
+            }
             else if (state.flushing) status.textContent = `同期中: ${pending.length} 件`;
             else if (pending.length) status.textContent = `未送信 ${pending.length} 件`;
             else if (conflicts.length) status.textContent = `競合 ${conflicts.length} 件。サーバー版と端末版を確認してください。`;
@@ -953,7 +983,7 @@
         if (window.SES && SES.pwa) {
             const nextState = state.paused || errors.length ? 'error'
                 : conflicts.length ? 'conflict'
-                    : state.flushing ? 'syncing'
+                    : state.flushing || sending > 0 ? 'syncing'
                         : pending.length ? 'pending' : (navigator.onLine ? 'online' : 'offline');
             SES.pwa.setStatus(nextState);
         }
@@ -1345,13 +1375,18 @@
                 return { queued: true, clientRequestId: record.clientRequestId };
             }
             // 送信中（fetch未完了）も未送信として数え、保存が止まっている間の離脱・logoutを確認できるようにする（P2-W309-1）。
-            state.sendingRequestIds.add(record.clientRequestId);
-            updateUnloadGuard();
+            markSending(record);
+            // 応答が遅いときだけ同期パネルに「送信中」を出す（iOSでは離脱確認が出ず、パネルが唯一の目印になる。R2-P2-1）。
+            const sendingNotice = setTimeout(() => {
+                if (state.sendingRequestIds.has(record.clientRequestId)) render();
+            }, SENDING_NOTICE_DELAY_MS);
             try {
                 return await sendRecord(record);
             } finally {
-                state.sendingRequestIds.delete(record.clientRequestId);
-                updateUnloadGuard();
+                clearTimeout(sendingNotice);
+                unmarkSending(record);
+                // 送信中の表示を外し、送信を飛ばした・端末に残った場合も表示を現在の状態へ戻す。
+                render();
             }
         })();
         state.inFlight.set(dedupeKey, operation);
@@ -1372,6 +1407,12 @@
             for (const record of records) {
                 if (state.paused || !navigator.onLine) break;
                 if (blocked.has(record.resourceKey)) continue;
+                // request()が送信中（応答待ち）のaggregateは、その送信の終了を待たずに飛ばす。
+                // 待つとflushが終わらず、flushingのまま後続のflushと表示が止まる（W3-09 R2-P3-5）。
+                if (state.sendingResourceKeys.has(record.resourceKey)) {
+                    blocked.add(record.resourceKey);
+                    continue;
+                }
                 const result = await sendRecord(record);
                 // 送信できなかった（応答喪失・5xx・offline）recordより後の同aggregateは送らない。
                 // serverが先行commandをcommit済みでも応答を失った場合、後続を旧baseVersionで送ると
