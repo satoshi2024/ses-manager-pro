@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.common.util.RequestPaths;
 import com.ses.common.util.SecurityInfrastructureUtils;
 import com.ses.common.util.SecurityUtils;
 import com.ses.common.util.CorrelationContext;
@@ -44,6 +45,8 @@ public class ApiAuditFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
         AuditLogService auditLogService = auditLogServiceProvider.getIfAvailable();
+        // 記録対象の判定と記録するURIは、X-Forwarded-Prefix・context pathを含まないアプリ内path（FWD-SANITIZE PRE-P1-1）。
+        String path = RequestPaths.pathWithinApplication(request);
         boolean breakGlassRequest = isBreakGlassRequest(request);
         if (breakGlassRequest) {
             if (auditLogService == null) {
@@ -52,7 +55,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
             }
             try {
                 auditLogService.recordRequired(SecurityUtils.currentUsername(), request.getMethod(),
-                        request.getRequestURI(), 102, "BREAK_GLASS_ACCESS_ATTEMPT", false);
+                        path, 102, "BREAK_GLASS_ACCESS_ATTEMPT", false);
             } catch (RuntimeException e) {
                 response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
                 return;
@@ -67,7 +70,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
             }
             try {
                 auditLogService.recordRequired(SecurityUtils.currentUsername(), request.getMethod(),
-                        request.getRequestURI(), 102, "BOOTSTRAP_WRITE_ATTEMPT", false);
+                        path, 102, "BOOTSTRAP_WRITE_ATTEMPT", false);
             } catch (RuntimeException e) {
                 response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
                 return;
@@ -92,7 +95,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
                         com.ses.service.pwa.PwaClientMutationLedgerService.REPLAY_REQUEST_ATTRIBUTE))) {
                     String username = SecurityUtils.currentUsername();
                     String method = request.getMethod();
-                    String uri = request.getRequestURI();
+                    String uri = path;
                     int status = response.getStatus() >= 400 ? response.getStatus() : observedStatus;
                     log.info("API操作監査: user={} method={} uri={} status={} correlationId={} invoiceId={} digitalInvoiceId={} jobId={} providerOperationId={} errorCode={} errorCategory={}",
                             username != null ? username : "-", method, uri, status,
@@ -141,7 +144,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
         if (isBreakGlassRequest(request) || isBootstrapWrite(request)) {
             return true;
         }
-        String uri = request.getRequestURI();
+        String uri = RequestPaths.pathWithinApplication(request);
         if (uri == null || !uri.startsWith("/api/")) {
             return false;
         }

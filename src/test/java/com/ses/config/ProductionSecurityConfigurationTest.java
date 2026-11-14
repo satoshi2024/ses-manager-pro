@@ -28,6 +28,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "app.security.oidc.break-glass-usernames=admin,breakglass2",
     "app.security.mfa.encryption-key=test-production-mfa-encryption-key-0001",
     "app.security.session.hash-key=test-production-session-hash-key-0001"
+    // FWD-SANITIZE: 本番は信頼プロキシ必須。MockMvcの接続元（127.0.0.1）をALB相当として扱う
+    ,"app.security.trusted-proxies=127.0.0.1/32"
     ,"app.security.oidc.issuer-uri=https://idp.invalid/tenant/v2.0"
     ,"app.security.oidc.authorization-uri=https://idp.invalid/authorize"
     ,"app.security.oidc.token-uri=https://idp.invalid/token"

@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.common.util.RequestPaths;
 import com.ses.common.util.SecurityInfrastructureUtils;
 import com.ses.common.util.SecurityUtils;
 import com.ses.service.AuditLogService;
@@ -105,7 +106,8 @@ public class BootstrapSessionFilter extends OncePerRequestFilter {
         }
 
         String method = request.getMethod() == null ? "" : request.getMethod().toUpperCase(Locale.ROOT);
-        String uri = request.getRequestURI();
+        // 到達範囲（allow-list）はX-Forwarded-Prefix・context pathを含まないアプリ内pathで判定する（FWD-SANITIZE）。
+        String uri = RequestPaths.pathWithinApplication(request);
         boolean passwordChangeRequired = PasswordChangeEnforcementFilter.isChangeRequired(session);
         boolean mfaVerified = MfaEnforcementFilter.isVerifiedFor(session, SecurityUtils.currentUserId());
 
@@ -135,7 +137,7 @@ public class BootstrapSessionFilter extends OncePerRequestFilter {
             return true;
         }
         String method = request.getMethod() == null ? "" : request.getMethod().toUpperCase(Locale.ROOT);
-        String uri = request.getRequestURI();
+        String uri = RequestPaths.pathWithinApplication(request);
         if (ActionPermissionResolver.isAuthenticationInfrastructure(method, uri)
                 || PasswordChangeEnforcementFilter.isChangeEndpoint(method, uri)
                 || ("GET".equals(method) && USER_SUGGEST_API.equals(uri))) {
@@ -163,7 +165,7 @@ public class BootstrapSessionFilter extends OncePerRequestFilter {
     }
 
     private void requireMfa(HttpServletRequest request, HttpServletResponse response) throws IOException {
-        if (request.getRequestURI().startsWith("/api/")) {
+        if (RequestPaths.isApiPath(request)) {
             writeJson(response, HttpServletResponse.SC_FORBIDDEN,
                     "{\"code\":403,\"message\":\"MFA認証が必要です\",\"data\":null}");
             return;
@@ -188,7 +190,7 @@ public class BootstrapSessionFilter extends OncePerRequestFilter {
     private void deny(HttpServletRequest request, HttpServletResponse response) throws IOException {
         audit(request, HttpServletResponse.SC_FORBIDDEN, "BOOTSTRAP_SCOPE_DENIED");
         response.setHeader("X-SES-Error-Code", "BOOTSTRAP_SCOPE_VIOLATION");
-        if (request.getRequestURI().startsWith("/api/")) {
+        if (RequestPaths.isApiPath(request)) {
             writeJson(response, HttpServletResponse.SC_FORBIDDEN,
                     "{\"code\":403,\"message\":\"bootstrap中はこの操作を利用できません\",\"data\":\"BOOTSTRAP_SCOPE_VIOLATION\"}");
         } else {
@@ -203,7 +205,7 @@ public class BootstrapSessionFilter extends OncePerRequestFilter {
         audit(request, HttpServletResponse.SC_UNAUTHORIZED, applicationCode);
         session.invalidate();
         SecurityContextHolder.clearContext();
-        if (request.getRequestURI().startsWith("/api/")) {
+        if (RequestPaths.isApiPath(request)) {
             writeJson(response, HttpServletResponse.SC_UNAUTHORIZED,
                     "{\"code\":401,\"message\":\"" + message + "\",\"data\":null}");
         } else {
@@ -217,7 +219,7 @@ public class BootstrapSessionFilter extends OncePerRequestFilter {
             return;
         }
         try {
-            auditLogService.record(SecurityUtils.currentUsername(), request.getMethod(), request.getRequestURI(),
+            auditLogService.record(SecurityUtils.currentUsername(), request.getMethod(), RequestPaths.pathWithinApplication(request),
                     status, applicationCode, false);
         } catch (RuntimeException e) {
             log.warn("[bootstrap] 監査ログを記録できませんでした: code={}", applicationCode, e);

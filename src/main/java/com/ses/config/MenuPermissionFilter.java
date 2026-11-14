@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.common.util.RequestPaths;
 import com.ses.entity.Menu;
 import com.ses.service.security.AuthorizationService;
 import com.ses.service.security.ActionPermissionResolver;
@@ -47,7 +48,9 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
 
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        String uri = request.getRequestURI();
+        // getRequestURI()はX-Forwarded-Prefix・context pathを含み、MVC/Spring Securityが照合するpathと一致しない。
+        // menu・actionの判定はcontrollerへの到達と同じアプリ内pathで行う（FWD-SANITIZE PRE-P1-1）。
+        String uri = RequestPaths.pathWithinApplication(request);
 
         if (authentication == null || authentication instanceof AnonymousAuthenticationToken
                 || !authentication.isAuthenticated() || !isMenuControlledPath(uri)) {
@@ -137,6 +140,7 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
     }
 
     private void deny(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        String uri = RequestPaths.pathWithinApplication(request);
         com.ses.service.AuditLogService auditLogService = auditLogServiceProvider.getIfAvailable();
         jakarta.servlet.http.HttpSession session = request.getSession(false);
         boolean breakGlass = session != null
@@ -148,7 +152,7 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
             }
             try {
                 auditLogService.recordRequired(com.ses.common.util.SecurityUtils.currentUsername(),
-                        request.getMethod(), request.getRequestURI(), HttpServletResponse.SC_FORBIDDEN,
+                        request.getMethod(), uri, HttpServletResponse.SC_FORBIDDEN,
                         "BREAK_GLASS_PERMISSION_DENIED", false);
             } catch (RuntimeException e) {
                 response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
@@ -157,10 +161,10 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
         }
         if (auditLogService != null) {
             auditLogService.record(com.ses.common.util.SecurityUtils.currentUsername(), request.getMethod(),
-                    request.getRequestURI(), HttpServletResponse.SC_FORBIDDEN,
+                    uri, HttpServletResponse.SC_FORBIDDEN,
                     "PERMISSION_DENIED", false);
         }
-        if (request.getRequestURI().startsWith("/api/")) {
+        if (uri.startsWith("/api/")) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write("{\"code\":403,\"message\":\"このactionへのアクセス権限がありません\",\"data\":null}");
@@ -192,7 +196,7 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
             }
         } catch (RuntimeException e) {
             log.warn("action権限の判定に失敗したためアクセスを拒否します: uri={}, action={}",
-                    request.getRequestURI(), actionKey, e);
+                    RequestPaths.pathWithinApplication(request), actionKey, e);
         }
         deny(request, response);
         return false;

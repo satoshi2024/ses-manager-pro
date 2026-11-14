@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.common.util.RequestPaths;
 import com.ses.common.util.SecurityInfrastructureUtils;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -46,7 +47,7 @@ public class PasswordChangeEnforcementFilter extends OncePerRequestFilter {
         if (authentication != null && authentication.isAuthenticated()
                 && !(authentication instanceof AnonymousAuthenticationToken)
                 && isChangeRequired(session) && !isMfaPending(session) && !isAllowed(request)) {
-            if (request.getRequestURI().startsWith("/api/")) {
+            if (RequestPaths.isApiPath(request)) {
                 response.setStatus(HttpServletResponse.SC_FORBIDDEN);
                 response.setContentType("application/json;charset=UTF-8");
                 response.getWriter().write(
@@ -70,8 +71,9 @@ public class PasswordChangeEnforcementFilter extends OncePerRequestFilter {
                 && !Boolean.TRUE.equals(session.getAttribute(MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE));
     }
 
+    /** 変更前でも通す入口（allow-list）。前置したprefixで誤一致させないようアプリ内pathで判定する（FWD-SANITIZE）。 */
     private static boolean isAllowed(HttpServletRequest request) {
-        String uri = request.getRequestURI();
+        String uri = RequestPaths.pathWithinApplication(request);
         String method = request.getMethod();
         return isChangeEndpoint(method, uri)
                 // HEADの変更画面を自分自身へredirectし続けない（review P3-8）

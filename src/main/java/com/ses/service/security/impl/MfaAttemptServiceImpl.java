@@ -1,6 +1,7 @@
 package com.ses.service.security.impl;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.ClientIpResolver;
 import com.ses.common.util.SecurityHashUtil;
 import com.ses.config.MfaSecurityProperties;
 import com.ses.config.OidcSecurityProperties;
@@ -11,6 +12,7 @@ import com.ses.service.security.MfaAttemptService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +31,19 @@ public class MfaAttemptServiceImpl implements MfaAttemptService {
     private final PersistentSessionProperties sessionProperties;
     private final OidcSecurityProperties oidcProperties;
     private final Clock clock;
+
+    /**
+     * 送信元scopeのIP解決（FWD-SANITIZE PRE-P2-1）。X-Forwarded-Forの最左はclientが書けるため直接読まない。
+     * 既存constructorを保つためsetter注入にし、未注入時は信頼プロキシ無し（清浄化filterのattribute、無ければTCP peer）。
+     */
+    private ClientIpResolver clientIpResolver = new ClientIpResolver("");
+
+    @Autowired(required = false)
+    public void setClientIpResolver(ClientIpResolver clientIpResolver) {
+        if (clientIpResolver != null) {
+            this.clientIpResolver = clientIpResolver;
+        }
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -116,9 +131,8 @@ public class MfaAttemptServiceImpl implements MfaAttemptService {
     }
 
     private String sourceHash(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        String source = StringUtils.hasText(forwarded) ? forwarded.split(",", 2)[0].trim() : request.getRemoteAddr();
-        return scopedHash(StringUtils.hasText(source) ? source : "UNKNOWN_SOURCE");
+        String source = clientIpResolver.resolve(request);
+        return scopedHash(StringUtils.hasText(source) && !"unknown".equals(source) ? source : "UNKNOWN_SOURCE");
     }
 
     private String scopedHash(String value) {

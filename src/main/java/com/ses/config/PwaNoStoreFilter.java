@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.common.util.RequestPaths;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,7 +23,7 @@ public class PwaNoStoreFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        boolean noStore = isDynamicPath(request.getRequestURI());
+        boolean noStore = isDynamicPath(RequestPaths.pathWithinApplication(request));
         if (noStore) {
             applyNoStore(response);
         }
