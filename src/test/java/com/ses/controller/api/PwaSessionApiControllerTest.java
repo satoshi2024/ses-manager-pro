@@ -3,6 +3,7 @@ package com.ses.controller.api;
 import com.ses.config.LoginUser;
 import com.ses.config.OidcLoginUser;
 import com.ses.entity.SysUser;
+import com.ses.service.AuditLogService;
 import com.ses.service.pwa.PwaUserContextService;
 import com.ses.service.security.BreakGlassService;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +23,8 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -35,6 +38,11 @@ class PwaSessionApiControllerTest {
 
     @Autowired private MockMvc mockMvc;
     @MockBean private PwaUserContextService userContextService;
+    /**
+     * break-glass sessionの要求は、{@code ApiAuditFilter} が必須監査（BREAK_GLASS_ACCESS_ATTEMPT）を残せない限り
+     * 503で止める（fail-closed）。WebMvcTestのsliceには監査beanが無いため、mockで監査を受け付けてcontrollerまで通す。
+     */
+    @MockBean private AuditLogService auditLogService;
 
     @BeforeEach
     void stubContext() {
@@ -67,6 +75,9 @@ class PwaSessionApiControllerTest {
                                 principal, "", authorities))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.restoreAvailable").value(false));
+        // break-glass sessionの要求として必須監査を通ったうえでcontrollerへ届いている。
+        verify(auditLogService).recordRequired(any(), eq("GET"), eq("/api/my/session-context"), eq(102),
+                eq("BREAK_GLASS_ACCESS_ATTEMPT"), eq(false));
     }
 
     @Test
