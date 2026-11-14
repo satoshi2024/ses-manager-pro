@@ -64,7 +64,7 @@
 | S07 ORGANIZATION_MANAGER / Wave1 adapter `organizationId` | **FIXED** | `ApprovalOrganizationResolver` 経由で createdBy/salesUser/costCenter/engineer から解決 |
 | S07 見積 `amountSnapshot` | **FIXED（単価帯）** | 明細テーブル無しのため `unitPrice` を唯一行金額＝金額帯基準と明記。seed 変更不要 |
 | S06 `updateBpCompany` の version | **FIXED** | 更新前に client `version` をセット。null → 400 |
-| S13 限流 X-Forwarded-For / アカウントロック | **FIXED** | `app.security.trusted-proxies` 時のみ XFF。email 失敗ロック（既定 5 回/15 分） |
+| S13 レート制限 X-Forwarded-For / アカウントロック | **FIXED** | `app.security.trusted-proxies` 時のみ XFF。email 失敗ロック（既定 5 回/15 分） |
 | FIND-I18N-01 / FIND-SCHED-01 | **FIXED** | 上記表参照 |
 | S17 FAILED 行の TX rollback | **NOT A DEFECT（第一波後）** | `execute` は `@Transactional` なし。FAILED は独立 `TransactionTemplate` で persist 済み |
 
@@ -72,8 +72,8 @@
 
 | 版 | 用途 | 状態 |
 |---|---|---|
-| V108.2 | `t_sales_order.quotation_id` 可空 UNIQUE | 落地 |
-| V108.3 | digital invoice SEND UNIQUE（profile/spec 含む） | 落地 |
+| V108.2 | `t_sales_order.quotation_id` NULL許容 UNIQUE | 反映済 |
+| V108.3 | digital invoice SEND UNIQUE（profile/spec 含む） | 反映済 |
 | V108.4 | S17-P2-03 人手修正差分 | **未使用（DEFERRED）** |
 | V59/V72/V82/V99 | 永久欠番 | 未充填 |
 

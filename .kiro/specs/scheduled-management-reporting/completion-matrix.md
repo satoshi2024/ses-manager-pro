@@ -65,33 +65,34 @@ Review remediation（`codex/nf10-review-remediation`）: delivery TX/outbox/prev
 
 ## PRD-NF10-001（2026-10-01）
 
-状態: 実装修正・定向検証完了、独立Review待ち。共有deliveryの`reauthenticated_at`をdownload認可根拠から外し、server-side session / Authentication instance / tenant / user / delivery / current scope / 10分TTLに束縛したgrantを追加した。token/delivery/link expiry/recipient/current scope/snapshotの既存service検証は維持。session rotation/logout、期限、tenant/user/delivery/scope境界、role authority差異、anonymous経路と実controller→serviceの二session経路を回帰へ追加した。証拠は`docs/review/NF10-reauth-session-boundary-evidence.md`。Head=`1443fb68943849a3260d7ebe005259f3eb609d60`＋未commit実装（固定commit hash追記待ち）。
+状態: 実装修正・対象限定検証完了、独立Review待ち。共有deliveryの`reauthenticated_at`をdownload認可根拠から外し、server-side session / Authentication instance / tenant / user / delivery / current scope / 10分TTLに束縛したgrantを追加した。token/delivery/link expiry/recipient/current scope/snapshotの既存service検証は維持。session rotation/logout、期限、tenant/user/delivery/scope境界、role authority差異、anonymous経路と実controller→serviceの二session経路を回帰へ追加した。証拠は`docs/review/NF10-reauth-session-boundary-evidence.md`。Head=`1443fb68943849a3260d7ebe005259f3eb609d60`＋未commit実装（固定commit hash追記待ち）。
 
 初回有効targeted実行は37/0/0/0、zero skip。その後変更したgrant helper classは4/0/0/0、zero skipで単独再実行。合わせた対象範囲は38 checksでfailures/errors/skipsなし。四つの初回Surefire text reportと最終helper `.txt/.xml` は証拠ディレクトリに保存した。独立Review後もfull fast gateはrootの統合スケジュールで実施する。
 
 ## NF10-V185 scheduler claim fence（2026-11-12）
 
-状態: **実装済・`821076c0` の定向fast 292/0/0/0・定向MySQL 41/0/0/0・browser 1/0/0/0（PowerShell環境）通過・統合候補 `328c2d8b` へ取込済。** COMPLETE/PASSではない（下表「本番適用の前提」のSRE/DBA承認・Owner判断と、統合候補に対する全gateが未了）。
+状態: **実装済・`821076c0` の対象限定fast 292/0/0/0・対象限定MySQL 41/0/0/0・browser 1/0/0/0（PowerShell環境）通過・統合候補 `328c2d8b` へ取込済・統合候補 `8000d94e` のCI 7 job通過。** COMPLETE/PASSではない（下表「本番適用の前提」のSRE/DBA承認・Owner判断が未了）。
 
-`93c11457c17e7f082d2773500e8c47de2d50ed95` に対し、独立レビュー（静的）PASS、定向fast 9 class 288/0/0/0、定向MySQL 7 class 41件中1件FAIL（errors/skipped 0）。FAILはtestの行lock待ち観測方法の欠陥と判断して修正した（plan §13）。証拠は主控のrun記録 `nf10-93c11457-fast-targeted` / `nf10-93c11457-mysql-targeted`。
+`93c11457c17e7f082d2773500e8c47de2d50ed95` に対し、独立レビュー（静的）PASS、対象限定fast 9 class 288/0/0/0、対象限定MySQL 7 class 41件中1件FAIL（errors/skipped 0）。FAILはtestの行lock待ち観測方法の欠陥と判断して修正した（plan §13）。証拠は統括のrun記録 `nf10-93c11457-fast-targeted` / `nf10-93c11457-mysql-targeted`。
 
-修正commit `821076c0066119b035e3a7a1a84bdc3170341521` は独立レビュー（静的、第3回）PASS。主控Runnerの定向実行は、fast 10 class 292/0/0/0（上記9 class＋`AssetComprehensiveSecretScanTest`）、MySQL 7 class 41/0/0/0（`ReportScheduleClaimFenceMySqlTest` 17/0/0/0、前回FAILのcaseを含む）、browser `ManagementReportBrowserMTest` 1/0/0/0（PowerShell環境）で、いずれもzero skip。Bash tool環境のbrowser実行はNIO loopbackの環境要因で起動不能となり、その記録は環境FAILとして保持している。証拠は主控のrun記録 `nf10-821076c0-fast-targeted` / `nf10-821076c0-mysql-targeted` / `nf10-821076c0-browser-targeted-ps`。`821076c0` は `8dcdbe28` で統合候補へ取り込まれ、`328c2d8b` に含まれる。統合候補に対する全gate（`verify-like-ci`・CI）の通過は本記録の対象外で、未確認である。
+修正commit `821076c0066119b035e3a7a1a84bdc3170341521` は独立レビュー（静的、第3回）PASS。統括Runnerの対象限定実行は、fast 10 class 292/0/0/0（上記9 class＋`AssetComprehensiveSecretScanTest`）、MySQL 7 class 41/0/0/0（`ReportScheduleClaimFenceMySqlTest` 17/0/0/0、前回FAILのcaseを含む）、browser `ManagementReportBrowserMTest` 1/0/0/0（PowerShell環境）で、いずれもzero skip。Bash tool環境のbrowser実行はNIO loopbackの環境要因で起動不能となり、その記録は環境FAILとして保持している。証拠は統括のrun記録 `nf10-821076c0-fast-targeted` / `nf10-821076c0-mysql-targeted` / `nf10-821076c0-browser-targeted-ps`。`821076c0` は `8dcdbe28` で統合候補へ取り込まれ、`328c2d8b` に含まれる。2026-11-14追記: 統合候補に対するCIは、第1・2波の全batchを取り込んだ `8000d94e` で7 job（fast・MySQL shard 1〜3・backup integration・browser・performance）すべて通過した（run 43387006667、統括の記録）。手元での `verify-like-ci` 全体実行は本記録の対象外である。
 
 | 項目 | 内容 |
 |---|---|
 | 基準 | `73aa70004484db96ffd9100ffa13dd7acaaf365e`（PR #118候補）。branch `codex/snf-nf10-v185-integration-20261112` |
 | migration | `V185__report_schedule_claim_token.sql`（`processing_claim_token CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL`、列位置指定なし）。V185はユーザー承認済みの採番で、使い捨てのTestcontainers DB以外の環境には未適用 |
 | 実装 | claim token付き全列CAS、token・claimedAt・logicalRunAt一致のcompletion、per-scheduleの秒精度時刻、孤児token回収、実行中retry leaseのLIMIT枠除外、`updateEnabled` の限定更新、lease列の `FieldStrategy.NEVER`、確定的claim SQL失敗の分類 |
-| 計画・対応表 | `scheduler-claim-fence-plan.md` §9〜§13（独立レビュー指摘ごとの対応、§7受入試験とtestの対応、定向MySQL FAILの診断） |
-| 追加test（`93c11457` で定向実行、1件FAILを修正した `821076c0` で定向fast/MySQL/browserが全件通過） | `ReportScheduleClaimFenceMySqlTest`（`@Tag("mysql")`、`scripts/test-suites/mysql-shard-1.txt`）、`ReportScheduleApiBoundaryTest`、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest`/`ReportScheduleServiceImplTest` の追加case、`FlywaySelfServiceSchemaSmokeTest` の列定義assert |
+| 計画・対応表 | `scheduler-claim-fence-plan.md` §9〜§13（独立レビュー指摘ごとの対応、§7受入試験とtestの対応、対象限定MySQL FAILの診断） |
+| 追加test（`93c11457` で対象限定実行、1件FAILを修正した `821076c0` で対象限定fast/MySQL/browserが全件通過） | `ReportScheduleClaimFenceMySqlTest`（`@Tag("mysql")`、`scripts/test-suites/mysql-shard-1.txt`）、`ReportScheduleApiBoundaryTest`、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest`/`ReportScheduleServiceImplTest` の追加case、`FlywaySelfServiceSchemaSmokeTest` の列定義assert |
 | 本番適用の前提 | rolling禁止・drain先行・検出SQL・復旧案は草案（plan §10、**SRE/DBA承認待ち**）。lease延長・retry上限・timezone変更・metric/alert・起動guardはOwner判断待ち（plan §11）。2026-11-13にユーザーが初回導入を空DBへの新規導入・全停止配備・専用Flyway jobによるmigration単独実行と決定したが、drain手順の確定とSRE/DBA承認は未了 |
 
 ## NF10 W2-B8 scheduler運用方針（2026-11-13）
 
-状態: **実装済・r2は定向テスト通過（統合候補ではCI待ち）。** COMPLETE/PASSではない。上表「本番適用の前提」のうち、retry上限・metric/alert・起動guardはユーザー決定（B-NF10-1/B-NF10-2）を受けて実装した。lease延長は「行わない」と決定し、重複はrun_key・delivery dedupeで収束させる。§10の手順草案のSRE/DBA承認、alertの設定・配信先、Report Owner署名は未完了のまま。
+状態: **実装済・r2は対象限定テスト通過・統合候補 `8000d94e` のCI 7 job通過。** COMPLETE/PASSではない。上表「本番適用の前提」のうち、retry上限・metric/alert・起動guardはユーザー決定（B-NF10-1/B-NF10-2）を受けて実装した。lease延長は「行わない」と決定し、重複はrun_key・delivery dedupeで収束させる。§10の手順草案のSRE/DBA承認、alertの設定・配信先、Report Owner署名は未完了のまま。
 
-- r1 `30e058ce1916af52193bdbf4f7fa430513d2a8ae`: 独立レビュー（静的）PASS（P2×1、P3×12）。Runner定向 fast 324/0/0/0、MySQL 23/0/0/0（`ReportScheduleDispatchPolicyMySqlTest` は別seed 20261113でも4/0/0/0）。証拠は主控のrun記録 `nf10-30e058ce-*`。
-- r2: review P2-1（cutoffの論理run固定、ユーザー決定）、P3-1・P3-3・P3-8の修正と文書訂正。`f0639edbca018b91a4cfda6df5fefc7652bd2665` で独立レビュー（静的）PASS、Runner定向 fast 344/0/0/0、MySQL 24/0/0/0（`ReportScheduleDispatchPolicyMySqlTest` は別seed 424242でも5/0/0/0）。証拠は主控のrun記録 `nf10-f0639edb-*`。
+- r1 `30e058ce1916af52193bdbf4f7fa430513d2a8ae`: 独立レビュー（静的）PASS（P2×1、P3×12）。Runner対象限定 fast 324/0/0/0、MySQL 23/0/0/0（`ReportScheduleDispatchPolicyMySqlTest` は別seed 20261113でも4/0/0/0）。証拠は統括のrun記録 `nf10-30e058ce-*`。
+- r2: review P2-1（cutoffの論理run固定、ユーザー決定）、P3-1・P3-3・P3-8の修正と文書訂正。`f0639edbca018b91a4cfda6df5fefc7652bd2665` で独立レビュー（静的）PASS、Runner対象限定 fast 344/0/0/0、MySQL 24/0/0/0（`ReportScheduleDispatchPolicyMySqlTest` は別seed 424242でも5/0/0/0）。証拠は統括のrun記録 `nf10-f0639edb-*`。
+- 統合: r2は `07988f40` で統合候補へ取り込まれ、第1・2波の全batchを含む `8000d94e` でCI 7 job（`ReportScheduleDispatchPolicyMySqlTest` が属するMySQL shard 2を含む）がすべて通過した（run 43387006667）。その後の統合候補 `430f0a2a`・`0fc507b8`・`00d1e539` でもCI 7 jobが通過している。`1be03bea` のMySQL shard 2失敗はNF10外のprivacy test（lock待ち観測の `LOCK_DATA` 依存）が原因で、HYG-0（`00d1e539`）で修正済み。
 
 | 項目 | 内容 |
 |---|---|
@@ -102,6 +103,6 @@ Review remediation（`codex/nf10-review-remediation`）: delivery TX/outbox/prev
 | 重複配布（A-NF10-5 / P2-1） | lease延長はしない。定期runのrun_keyはschedule・template版・対象月・scopeで作りcutoffを含めないため、同一論理runのcutoffは最初のrunに固定される。前提はrecipient previewとtemplate版が同一論理runの間で変わらないこと。重複実行・締めを跨ぐ重複実行・8並行投入で配布が1回に収束することを実MySQLで検証する（plan §14.4） |
 | metric/alert（P2-8） | `ses_report_schedule_events_total{event}`（14種）と `ses_report_schedule_legacy_leases`（gaugeの古い値に注意）。推奨alert ruleは案のみ（plan §14.5） |
 | 機能スイッチ（A-NF10-6） | 既存のNF10スイッチを使い、新しいスイッチは追加しない。OFF前に投入済みの通知outboxは汎用schedulerが送る隙間が残る（plan §14.6） |
-| 追加・更新test（r2は未実行） | `ReportScheduleDispatchPolicyMySqlTest`（新規、`@Tag("mysql")`、`scripts/test-suites/mysql-shard-2.txt`、5件）、`ManagementReportSchedulerTest`（r1で1件置換・5件追加、r2で4件追加）、`ReportSnapshotServiceImplTest`（r2で2件追加）、`ReportScheduleMapperH2SqlTest`（2件追加）、`ReportScheduleApiBoundaryTest`（1件追加） |
+| 追加・更新test（r2は `f0639edb` の対象限定実行と統合候補 `8000d94e` のCIで通過） | `ReportScheduleDispatchPolicyMySqlTest`（新規、`@Tag("mysql")`、`scripts/test-suites/mysql-shard-2.txt`、5件）、`ManagementReportSchedulerTest`（r1で1件置換・5件追加、r2で4件追加）、`ReportSnapshotServiceImplTest`（r2で2件追加）、`ReportScheduleMapperH2SqlTest`（2件追加）、`ReportScheduleApiBoundaryTest`（1件追加） |
 | 変更しないもの | DDL、`messages*.properties`、`application*.yml`、機能スイッチ実装。新設定はコード既定値（空＝未確認）で動き、`application.yml` への明示は提案のみ |
 | 残課題 | schedule一覧画面での停止理由表示（画面自体が未実装）、論理runのskip API（未実装の方針のみ）、引き継ぎ回数の上限（DDLが要るため方針のみ）、alert ruleの設定、並行時の文書artifact重複（UNKNOWN）、P2-3のtimezone変更時の再計算 |

@@ -296,8 +296,13 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
                 ? oidcProperties.getTenantId().trim() : "default";
         for (String username : usernames) {
             SysUser user = sysUserMapper.selectByUsername(username);
-            if (user == null || !ADMIN_ROLE.equals(user.getRole()) || !Integer.valueOf(1).equals(user.getStatus())) {
-                errors.add("break-glass usernameは有効な管理者ユーザーでなければなりません: " + username);
+            // selectByUsernameは大文字小文字を区別しないcollationで一致するが、実行時のbreak-glass判定
+            // （OidcSecurityProperties.isBreakGlassUsername）は区別する。表記が違うまま通すと、break-glassが
+            // 使えない、または通常管理者sessionになるため、DBのusernameと完全一致を要求する（D1 review N-1）。
+            if (user == null || !username.equals(user.getUsername())
+                    || !ADMIN_ROLE.equals(user.getRole()) || !Integer.valueOf(1).equals(user.getStatus())) {
+                errors.add("break-glass usernameは有効な管理者ユーザーのusername（大文字小文字も一致）でなければなりません: "
+                        + username);
                 continue;
             }
             if (userMfaMapper.countEnrolled(tenantId, user.getId()) != 1) {

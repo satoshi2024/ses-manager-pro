@@ -541,14 +541,14 @@ UPDATE t_nf09_scope_repair_queue
 - 障害現場の保全は、主トランザクションがロールバックされた後、外側の catch ブロックにおいて独立して実行される。
 - 取証処理自体の失敗例外は、元の業務例外へ `addSuppressed` として付加して再スローし、根本原因を絶対に隠蔽しない。成功ステータスの偽装を厳禁する。
 
-### 6.4 実行主体・承認責任者・承認単据の明確な分離記録
+### 6.4 実行主体・承認責任者・承認記録の明確な分離記録
 現場証跡には、以下の主体を混同せずに明確に分離して記録する：
 - `executorUserId`: 認証コンテキストから取得された実際のコマンド実行操作者（`sys_user.id`）。
 - `approverUserIds`: 決裁申請を現輪次で正式承認した責任者一覧（`List<Long>`）。
 - `approvalTicketId`: 承認の根拠となった正本決裁番号（`t_approval_request.request_no`）。
 - `approvalRoundNo`: 承認が成立した現在有効輪次番号（`t_approval_request.round_no`）。
 
-### 6.5 現場証跡ファイル仕様・ファイル権限・機微情報脱敏
+### 6.5 現場証跡ファイル仕様・ファイル権限・機微情報のマスキング
 - 出力パス: `${ses.repair.evidence-dir:logs/repair-evidence}/repair-failure-INV-{invoiceId}-{timestamp}.json`
 - パーミッション: POSIX `0600`（親ディレクトリ `0700`）。
 - 顧客の売上金額、税額、品目名、銀行口座番号、個人情報（PII）は一切 JSON に出力せず、スコープ識別子、主キー、バージョン、および技術的診断情報のみを記録する。

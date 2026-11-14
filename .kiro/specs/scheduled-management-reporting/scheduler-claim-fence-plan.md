@@ -1,13 +1,13 @@
 # NF-10 scheduler claim fence 修正計画
 
-状態: **実装済・`821076c0` の定向fast 292/0/0/0・定向MySQL 41/0/0/0・browser 1/0/0/0（PowerShell環境）通過・統合候補 `328c2d8b` へ取込済。** COMPLETE/PASSではない（§10のSRE/DBA承認、§11のOwner判断、統合候補に対する全gateが未了）。対象は `m_report_schedule` のscheduler claim所有権競合とclaim時刻の正確性に限定する。NF-10全体の再承認、production/運用gateの承認、remote/release承認を意味しない。
+状態: **実装済・`821076c0` の対象限定fast 292/0/0/0・対象限定MySQL 41/0/0/0・browser 1/0/0/0（PowerShell環境）通過・統合候補 `328c2d8b` へ取込済・統合候補 `8000d94e` のCI 7 job通過。** COMPLETE/PASSではない（§10のSRE/DBA承認、§11のOwner判断が未了）。対象は `m_report_schedule` のscheduler claim所有権競合とclaim時刻の正確性に限定する。NF-10全体の再承認、production/運用gateの承認、remote/release承認を意味しない。
 
 - 当初Planの基準Head: `9bac40c9624e7d964bcf6e18f480b3457662206e`（§1〜§8は当時の記述を保持し、変更点は各節の「改訂」注記と§9以降に記す）。
-- 2026-11-12改訂の実装基準: `73aa70004484db96ffd9100ffa13dd7acaaf365e`（PR #118候補）。migration番号は **V185** をユーザーが承認済み（root/主控経由）。
+- 2026-11-12改訂の実装基準: `73aa70004484db96ffd9100ffa13dd7acaaf365e`（PR #118候補）。migration番号は **V185** をユーザーが承認済み（root/統括経由）。
 - 実装branch: `codex/snf-nf10-v185-integration-20261112`。独立レビュー（REQUEST CHANGES: P0×2、P1×5、P2×12）の指摘ごとの対応は§12。
-- テストは主控（唯一のTestRunner）が実行する。`93c11457c17e7f082d2773500e8c47de2d50ed95` に対する独立レビュー（静的）はPASS。同SHAの定向fast（9 class）は288/0/0/0、定向MySQL（`-Pmysql-tests`、7 class）は41件中1件FAIL（`ReportScheduleClaimFenceMySqlTest` の「同一snapshotの同時claimはInnoDB行lock待ちの後で一件だけが勝つ」、errors/skipped 0）。証拠は主控のrun記録 `nf10-93c11457-fast-targeted` / `nf10-93c11457-mysql-targeted`。
+- テストは統括（唯一のTestRunner）が実行する。`93c11457c17e7f082d2773500e8c47de2d50ed95` に対する独立レビュー（静的）はPASS。同SHAの対象限定fast（9 class）は288/0/0/0、対象限定MySQL（`-Pmysql-tests`、7 class）は41件中1件FAIL（`ReportScheduleClaimFenceMySqlTest` の「同一snapshotの同時claimはInnoDB行lock待ちの後で一件だけが勝つ」、errors/skipped 0）。証拠は統括のrun記録 `nf10-93c11457-fast-targeted` / `nf10-93c11457-mysql-targeted`。
 - 上記FAILはtestの観測方法の欠陥（`information_schema.innodb_trx` のcache固定）と判断し、観測を `performance_schema.data_lock_waits` へ置き換えた（§13）。
-- 修正commit `821076c0066119b035e3a7a1a84bdc3170341521` は独立レビュー（静的、第3回）PASS。主控Runnerの定向実行は、fast 10 class 292/0/0/0（上記9 class＋`AssetComprehensiveSecretScanTest`）、MySQL 7 class 41/0/0/0（`ReportScheduleClaimFenceMySqlTest` 17/0/0/0、前回FAILのcaseを含む）、browser `ManagementReportBrowserMTest` 1/0/0/0（PowerShell環境）で、いずれもzero skip。Bash tool環境のbrowser実行はNIO loopbackの環境要因で起動不能となり、環境FAILとして記録を保持している。証拠は主控のrun記録 `nf10-821076c0-fast-targeted` / `nf10-821076c0-mysql-targeted` / `nf10-821076c0-browser-targeted-ps`。`821076c0` は `8dcdbe28` で統合候補へ取り込まれ、`328c2d8b` に含まれる。統合候補に対する全gate（`verify-like-ci`・CI）の通過は未確認。それ以外の記述はtest名・設計の対応であり、実行結果を意味しない。
+- 修正commit `821076c0066119b035e3a7a1a84bdc3170341521` は独立レビュー（静的、第3回）PASS。統括Runnerの対象限定実行は、fast 10 class 292/0/0/0（上記9 class＋`AssetComprehensiveSecretScanTest`）、MySQL 7 class 41/0/0/0（`ReportScheduleClaimFenceMySqlTest` 17/0/0/0、前回FAILのcaseを含む）、browser `ManagementReportBrowserMTest` 1/0/0/0（PowerShell環境）で、いずれもzero skip。Bash tool環境のbrowser実行はNIO loopbackの環境要因で起動不能となり、環境FAILとして記録を保持している。証拠は統括のrun記録 `nf10-821076c0-fast-targeted` / `nf10-821076c0-mysql-targeted` / `nf10-821076c0-browser-targeted-ps`。`821076c0` は `8dcdbe28` で統合候補へ取り込まれ、`328c2d8b` に含まれる。2026-11-14追記: 統合候補に対するCIは、第1・2波の全batchを取り込んだ `8000d94e` で7 job（fast・MySQL shard 1〜3・backup integration・browser・performance）すべて通過した（run 43387006667、統括の記録）。手元での `verify-like-ci` 全体実行は本書の記録対象外。それ以外の記述はtest名・設計の対応であり、実行結果を意味しない。
 
 ## 1. 確認した欠陥と影響
 
@@ -136,7 +136,7 @@ V185がrootにより割り当てられた場合、latest version=184を期待す
 - **処置**: `selectDue` / `claimDue` の未占有判定は `processing_claimed_at IS NULL` だけとし、due snapshotのtoken完全一致（NULL/非NULLを明示照合）を含む全列CASでclaim時に新tokenへ上書きする。同時に `selectDue` のretry分岐へ未占有条件を加え、実行中retry leaseがLIMIT 50枠を毎poll占有しないようにした（P2-5）。
 - **検知**: 置換時にschedulerがWARN「旧版completionが残した孤児claim tokenを新tokenで置換しました」を出す（token値は出力しない）。§10.3のQ2でも検出できる。
 - **限界**: 混在稼働中は旧nodeが新ownerのlease（`processing_claimed_at`）を書き換え得るため、新ownerのcompletionは0件となり、生成/配布の重複は防げない。fenceは状態の上書きを防ぐだけで旧版の挙動は変えられないため、§10のrolling禁止・drainが前提条件である。
-- **検証（`93c11457` の定向fast/MySQLで通過、`821076c0` の定向fast/MySQLでも通過）**: `ReportScheduleClaimFenceMySqlTest` の「旧版success_completionが残した孤児tokenは通常claimで回収され旧ownerは完了できない」「旧版failure_completionが残した孤児token行もretry時刻にscheduler経由で回収される」「実行中のretry_leaseはLIMIT枠を占有せずstale後だけ再選択される」、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest` の孤児token用case。旧版SQLは73aa7000の `ReportScheduleMapper` をtest内に再現して用いる。
+- **検証（`93c11457` の対象限定fast/MySQLで通過、`821076c0` の対象限定fast/MySQLでも通過）**: `ReportScheduleClaimFenceMySqlTest` の「旧版success_completionが残した孤児tokenは通常claimで回収され旧ownerは完了できない」「旧版failure_completionが残した孤児token行もretry時刻にscheduler経由で回収される」「実行中のretry_leaseはLIMIT枠を占有せずstale後だけ再選択される」、`ReportScheduleMapperH2SqlTest`、`ManagementReportSchedulerTest` の孤児token用case。旧版SQLは73aa7000の `ReportScheduleMapper` をtest内に再現して用いる。
 
 ## 10. 本番適用の前提（草案・**SRE/DBA承認待ち**）
 
@@ -150,7 +150,7 @@ V185がrootにより割り当てられた場合、latest version=184を期待す
 - **旧nodeのschedulerをすべて停止し、in-flight処理のdrain完了を確認してから**jobでmigrationを適用し、その後に新artifactだけを起動する。
 - 新artifactへの切替後に旧artifactへ戻す場合も同じ（新nodeを全停止・drainしてから旧artifactを起動する）。DBを戻さずに旧artifactだけを起動することはできない（起動時schema guardが「artifactに無いmigrationが適用済み」として止める）ため、戻す場合はbackupからDBも戻す。
 - 起動guard（drain未確認やtoken無しの新しいleaseが残る状態でschedulerを起動しない等）は未実装。要否はSRE/Owner判断。
-  - **2026-11-13改訂**: ユーザー決定（B-NF10-1）により初回本番は全停止＋専用Flyway job（rolling無し）とし、起動guardを誤操作防止として実装した（§14.1、テスト未実行）。token無しleaseが1件でもあれば全tenantのclaimを止める。本節の手順草案とSRE/DBA承認待ちの扱いは変えない。
+  - **2026-11-13改訂**: ユーザー決定（B-NF10-1）により初回本番は全停止＋専用Flyway job（rolling無し）とし、起動guardを誤操作防止として実装した（§14.1。testは `f0639edb` の対象限定実行と統合候補 `8000d94e` のCIで通過、§14冒頭）。token無しleaseが1件でもあれば全tenantのclaimを止める。本節の手順草案とSRE/DBA承認待ちの扱いは変えない。
 
 ### 10.2 手順草案
 
@@ -208,11 +208,11 @@ ORDER BY failure_count DESC, tenant_id, id;
 
 ## 11. Owner判断待ち事項（挙動は変更しない）
 
-> 2026-11-13改訂: P2-1・P2-4・P2-8・P3-3・起動guardはユーザー決定（B-NF10-1/B-NF10-2、`launch-decisions-20261113`）を受けて§14で実装した（テスト未実行）。下表の「現状の実装」列は2026-11-12時点の記述として残し、決定と現在の扱いを「2026-11-13」列に記す。
+> 2026-11-13改訂: P2-1・P2-4・P2-8・P3-3・起動guardはユーザー決定（B-NF10-1/B-NF10-2、`launch-decisions-20261113`）を受けて§14で実装した（testは `f0639edb` の対象限定実行と統合候補 `8000d94e` のCIで通過、§14冒頭）。下表の「現状の実装」列は2026-11-12時点の記述として残し、決定と現在の扱いを「2026-11-13」列に記す。
 
 | ID | 論点 | 現状の実装 | 追加した防御（挙動不変） | 判断者 | 2026-11-13 |
 |---|---|---|---|---|---|
-| P2-1 | lease延長、副作用前fence | lease 30分固定・延長なし。30分超のrunは引き継がれ、生成/配布が重複し得る（run_key・delivery dedupeでの収束はMySQL並行で未検証）。disableは実行中runを止めない | WARN「processing lease期限を超えて実行しました」「期限切れprocessing leaseを引き継ぎました」 | Report Owner／技術責任者 | **決定済**: lease延長はしない。重複はrun_key・delivery dedupeで収束させ、実service・実MySQLのtestで証明する（§14.4、未実行） |
+| P2-1 | lease延長、副作用前fence | lease 30分固定・延長なし。30分超のrunは引き継がれ、生成/配布が重複し得る（run_key・delivery dedupeでの収束はMySQL並行で未検証）。disableは実行中runを止めない | WARN「processing lease期限を超えて実行しました」「期限切れprocessing leaseを引き継ぎました」 | Report Owner／技術責任者 | **決定済**: lease延長はしない。重複はrun_key・delivery dedupeで収束させ、実service・実MySQLのtestで証明する（§14.4。`ReportScheduleDispatchPolicyMySqlTest` が `f0639edb` の対象限定実行と統合候補 `8000d94e` のCIで通過） |
 | P2-2 | lease時刻のDB時刻化 | 見送り（下記理由） | なし（NTP同期を運用前提とする） | SRE | 変更なし |
 | P2-3 | tenant timezone変更時の扱い | schedule timezoneはAsia/Tokyo固定。tenant zoneと不一致なら `policyFixed` で失敗し、retryを繰り返す | WARN「tenant timezoneとschedule timezoneが一致しない…」 | Report Owner | 再計算方針は未決のまま。無限retryはretry上限（12回で自動停止）で有界になった |
 | P2-4 | retry上限・DLQ | 上限なし（間隔は最大60分）。確定的失敗も無限retry | failure count 12以上でWARN、§10.3 Q4 | Report Owner | **実装**: 連続12回目の失敗で自動停止し停止理由を保存、ERROR＋metric、管理者の有効化で再開（§14.2） |
@@ -224,7 +224,7 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 
 ## 12. 独立レビュー指摘対応表（2026-11-12）
 
-テスト名は追加・更新したtestである。`93c11457` で定向実行済（fast 288/0/0/0、MySQL 41件中1件FAIL。FAILは§13で修正）。修正後の `821076c0` では定向fast 292/0/0/0、MySQL 41/0/0/0、browser 1/0/0/0（PowerShell環境）。
+テスト名は追加・更新したtestである。`93c11457` で対象限定実行済（fast 288/0/0/0、MySQL 41件中1件FAIL。FAILは§13で修正）。修正後の `821076c0` では対象限定fast 292/0/0/0、MySQL 41/0/0/0、browser 1/0/0/0（PowerShell環境）。
 
 | 指摘 | 対応 | 主なtest |
 |---|---|---|
@@ -244,7 +244,7 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 | P2-11 | 本書の状態を「実装済・独立レビュー待ち・テスト未実行」へ更新、completion-matrixへ追記。公開 `runOne` 削除はcommit messageに明記 | — |
 | P2-12 | latest期待値を `LatestMigrationVersion.LATEST` に集約（4 class・5箇所） | 4 migration test class |
 
-### §7受入試験とtestの対応（`93c11457` の定向MySQLでは3.の行lock待ちcaseだけがFAIL、他は通過。修正後の `821076c0` では同classの17件が全件通過）
+### §7受入試験とtestの対応（`93c11457` の対象限定MySQLでは3.の行lock待ちcaseだけがFAIL、他は通過。修正後の `821076c0` では同classの17件が全件通過）
 
 `ReportScheduleClaimFenceMySqlTest` のmethod名で示す。
 
@@ -257,7 +257,7 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 7. API/entity/log: `ReportScheduleApiBoundaryTest` 全件、「enable_disableは実行中leaseとtokenを保持しversionと更新者だけを進める」「entity経由のinsertとupdateByIdはlease_token_retry列を書き込まない」、scheduler log内にtokenが出ないこと（上記1と孤児token case）
 8. deployment/migration: 「V184のlegacy_lease行はV185適用後もtoken無しで保持され期限切れ後だけ引き継げる」、`FlywaySelfServiceSchemaSmokeTest`（fresh/legacy列定義）、孤児token 2件（旧版SQLによる混在稼働の再現）。drain-before-rolloutは§10（草案、SRE/DBA承認待ち）。
 
-## 13. 定向MySQL FAILの静的診断と修正（2026-11-12）
+## 13. 対象限定MySQL FAILの静的診断と修正（2026-11-12）
 
 対象: `93c11457` の `ReportScheduleClaimFenceMySqlTest`「同一snapshotの同時claimはInnoDB行lock待ちの後で一件だけが勝つ」。症状は10.07秒で「contenderのInnoDB LOCK WAITを10秒以内に観測できませんでした」。contenderは10秒間完了せず（完了していれば別messageになる）、`information_schema.innodb_trx` には `LOCK WAIT` が一度も現れず、HikariPool timeout・Lock wait timeout・Deadlockのlogも無い。再実行はしていない。
 
@@ -277,20 +277,21 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 
 **修正後の実行結果**
 
-- `821076c0` の定向MySQL（7 class）は41/0/0/0で、本caseを含む `ReportScheduleClaimFenceMySqlTest` は17/0/0/0、失敗時の診断段の出力は無かった（主控run記録 `nf10-821076c0-mysql-targeted`）。
+- `821076c0` の対象限定MySQL（7 class）は41/0/0/0で、本caseを含む `ReportScheduleClaimFenceMySqlTest` は17/0/0/0、失敗時の診断段の出力は無かった（統括run記録 `nf10-821076c0-mysql-targeted`）。
 - 上の原因はなお推断である。「`93c11457` の失敗当時、contenderが実際に行lockを待っていたか」は実行で確認しておらず、UNKNOWNのまま（第3回独立レビューも同旨）。
 
 ## 14. 運用方針の実装（2026-11-13、W2-B8）
 
-状態: **実装済・r2は定向テスト通過（統合候補ではCI待ち）。** COMPLETE/PASSではない。production/運用gateの承認、SRE/DBA承認（§10）、Report Owner署名を意味しない。
+状態: **実装済・r2は対象限定テスト通過・統合候補 `8000d94e` のCI 7 job通過。** COMPLETE/PASSではない。production/運用gateの承認、SRE/DBA承認（§10）、Report Owner署名を意味しない。
 
-- r1: `30e058ce1916af52193bdbf4f7fa430513d2a8ae`（基準HEAD `1836eb73…`）。独立レビュー（静的）PASS、Runner定向 fast 324/0/0/0・MySQL 23/0/0/0（DispatchPolicyは別seed 20261113でも4/0/0/0）。証拠は主控のrun記録 `nf10-30e058ce-*`。
-- r2: 上記の上に1 commit（独立レビュー `w2-nf10-policy-30e058ce-review.md` のP2-1・P3-1・P3-3・P3-8対応と文書訂正）。`f0639edbca018b91a4cfda6df5fefc7652bd2665` で独立レビュー（静的）PASS、Runner定向 fast 344/0/0/0・MySQL 24/0/0/0（DispatchPolicyは別seed 424242でも5/0/0/0）。証拠は主控のrun記録 `nf10-f0639edb-*`。
+- r1: `30e058ce1916af52193bdbf4f7fa430513d2a8ae`（基準HEAD `1836eb73…`）。独立レビュー（静的）PASS、Runner対象限定 fast 324/0/0/0・MySQL 23/0/0/0（DispatchPolicyは別seed 20261113でも4/0/0/0）。証拠は統括のrun記録 `nf10-30e058ce-*`。
+- r2: 上記の上に1 commit（独立レビュー `w2-nf10-policy-30e058ce-review.md` のP2-1・P3-1・P3-3・P3-8対応と文書訂正）。`f0639edbca018b91a4cfda6df5fefc7652bd2665` で独立レビュー（静的）PASS、Runner対象限定 fast 344/0/0/0・MySQL 24/0/0/0（DispatchPolicyは別seed 424242でも5/0/0/0）。証拠は統括のrun記録 `nf10-f0639edb-*`。
+- 統合: r2は `07988f40` で統合候補へ取り込まれ、第1・2波の全batchを含む `8000d94e` でCI 7 job（`ReportScheduleDispatchPolicyMySqlTest` が属するMySQL shard 2を含む）がすべて通過した（run 43387006667）。その後の統合候補 `430f0a2a`・`0fc507b8`・`00d1e539` でもCI 7 jobが通過している。`1be03bea` のMySQL shard 2失敗はNF10外のprivacy test（lock待ち観測の `LOCK_DATA` 依存）が原因で、HYG-0（`00d1e539`）で修正済み。
 - branch `codex/snf-w2-nf10-scheduler-policy-20261113`。
 - 入力となった決定（`launch-decisions-20261113`、ユーザー決定。各責任者の署名の代わりではない）:
   - B-NF10-1: 初回本番は全停止＋専用Flyway job（rolling無し）。起動guardは誤操作防止として実装する。
   - B-NF10-2: 重複配布はrun_key dedupeで受容する（testで証明する）。retryは12回で計画を停止しalertする。確定的SQL失敗は当該行だけを見送り、tenant全体を止めない。
-  - 2026-11-13追加（r2）: 同一論理runのcutoff（速報/確定）は最初の判定で固定し、引き継ぎとretryでも再判定しない。月次締めを跨いでも速報と確定を1回ずつ配布しない（確定版は次の周期で扱う）。「12回」は初回実行を含む連続失敗12回のまま。
+  - 2026-11-13追加（r2）: 同一論理runのcutoff（速報/確定）は最初の判定で固定し、引き継ぎとretryでも再判定しない。月次締めを跨いでも速報と確定を1回ずつ配布しない（決定時は「確定版は次の周期で扱う」と記したが、実際の扱いは§14.4のとおり手動生成で行う）。「12回」は初回実行を含む連続失敗12回のまま。
   - NF10は機能スイッチ `app.features.nf10.enabled`（既定OFF）で守り、Report Owner署名後にONにする。
 - DDL・messages・application*.yml・機能スイッチ実装は変更していない。
 
@@ -354,7 +355,12 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 - lease延長は行わない（B-NF10-2）。stale takeoverやretryで同一論理runが重複実行されても、実serviceのrun_key（`uk_report_run_key`）とdelivery（`uk_report_delivery_recipient` / `uk_report_delivery_dedupe`）で配布を1回に収束させる。
 - **cutoffの論理run固定（r2、ユーザー決定）**: 定期runのrun_keyは `schedule ID・template版・対象月・scope hash` から作り、cutoffを含めない（`ReportSnapshotServiceImpl.buildRunKey`。手動生成のキーは従来どおりcutoffを含む）。
   - schedulerは現在の締め状態で速報/確定を「要求」するが、生成serviceは同じrun_keyの既存runがあればそのcutoffで再利用・再生成し、再判定しない。
-  - 速報を配布した後、completion前に月次締めが確定して引き継ぎ・retryが走っても、確定runは作らず速報runを再利用する。確定版は次の周期で扱う（自動では配布しない。必要なら明示再生成）。
+  - 速報を配布した後、completion前に月次締めが確定して引き継ぎ・retryが走っても、確定runは作らず速報runを再利用する。その対象月の確定版は自動では作られず、配布もされない。
+  - **2026-11-14訂正（review P3-r2-1）**: 改訂前は「確定版は次の周期で扱う（必要なら明示再生成）」と記していたが、どちらも成り立たない。
+    - 月次cronの次の周期は次の対象月（`ManagementReportScheduler` は実行月の前月を対象にする）を扱うため、当該対象月の確定版は作らない。
+    - 明示再生成（`POST /api/management-reports/runs/{runId}/regenerate`）は元runのcutoffを引き継ぐため、速報runから再生成しても速報のままである。
+    - 確定版が必要な場合は、月次締めの確定後に `POST /api/management-reports/runs` で `cutoffKind=確定` を指定して手動生成し、`POST /api/management-reports/runs/{runId}/deliver` で手動配布する（手動生成のrun_keyはcutoffを含むため、定期runの速報runとは別runになる）。
+    - 既存挙動として、製品仕様の月次cron（毎月1日0時）は通常は前月の月次締めより前に実行されるため、定期配布は実質的にほぼ速報になる。確定版の配布を定期運用に含めるかはReport Ownerの判断事項である。
   - 最初のrunが未完了（PARTIAL等）でも、retryは固定したcutoffでsectionを作り直す。確定で固定済みの未完了runは、締め解除中は `closingRequired` で失敗する（速報へ切り替えない）。
   - 別cutoffでの並行作成も同じrun_keyの一意制約で1件に絞られる。
   - 副次効果: scheduleごとにキーが分かれるため、同じtemplate版・scopeの手動生成や別scheduleのrunを再利用して `deliverScheduled` のsystem context検証で拒否され、論理runが進まなくなる既存の問題も解消する。
@@ -392,7 +398,7 @@ P2-2を見送る理由: (1) lease列はnext/retryと同じtenant timezoneのLoca
 - 新しいスイッチは追加しない。NF10がOFFなら `dispatchDue` は起動guardを含め何も実行せず、schedule表への問合せも無い（ShedLockのlock表は毎分更新される。review P3-10）。手動の生成・配布・retry・replay・downloadのAPI（`/api/management-reports/**`）は `FeatureSwitchFilter` が404にする。
 - 残る隙間: OFFにする前に通知outboxへ投入済みの通知は、汎用の `NotificationOutboxScheduler` が送る（`.kiro/specs/production-launch/feature-switches.md` §4.5）。delivery専用スイッチは作らない決定のため、OFF前に該当の配布を取消す運用で扱う。
 
-### 14.7 test対応（r2は未実行）
+### 14.7 test対応（r2は `f0639edb` の対象限定実行と統合候補 `8000d94e` のCIで通過）
 
 | 方針 | test |
 |---|---|
