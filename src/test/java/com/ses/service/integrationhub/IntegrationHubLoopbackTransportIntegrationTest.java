@@ -358,6 +358,9 @@ class IntegrationHubLoopbackTransportIntegrationTest {
             properties.getExternalTransport().setEnabled(true);
             properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.LOOPBACK);
             properties.getSecurity().getAllowedLoopbackPorts().add(18080);
+            // outboundだけの有効化でもpayload binding用のpublic-id-keyとbound-tenantを起動時に要求する（N5-P2-3）。
+            properties.getPublicApi().setPublicIdKey("test-integration-hub-public-id-key-at-least-32-bytes");
+            properties.getTopology().setBoundTenantId("tenant-loopback-test");
             return properties;
         }
     }

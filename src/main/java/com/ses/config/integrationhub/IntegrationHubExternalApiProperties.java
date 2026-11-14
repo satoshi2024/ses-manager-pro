@@ -11,7 +11,14 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.List;
 
-/** NF-05公開APIの起動境界。暗黙の安全な既定値をコード側へ持ち込まない。 */
+/**
+ * NF-05公開APIの起動境界。暗黙の安全な既定値をコード側へ持ち込まない。
+ *
+ * <p>inbound（{@code public-api}：read APIとinbound webhook）とoutbound（{@code external-transport}：
+ * outbound webhook送信）は独立に有効化する（Q-12）。両方向に共通する前提（public-id-key、bound-tenant）は
+ * どちらか一方が有効なら要求し、production固有の承認項目は {@link IntegrationHubProductionEnablementPolicy}
+ * が方向ごとに検査する。
+ */
 @Data
 @Component
 @ConfigurationProperties(prefix = "integration.hub")
@@ -30,24 +37,23 @@ public class IntegrationHubExternalApiProperties {
         if (publicApi.enabled == null || externalTransport.enabled == null || provider.mode == null) {
             throw new IllegalStateException("integration.hubのpublic-api/external-transport/provider.modeは明示設定が必要です");
         }
-        if (publicApi.enabled && (publicApi.publicIdKey == null
+        boolean anyDirection = publicApi.enabled || externalTransport.enabled;
+        // public IDはread APIの応答とoutbound payloadのprimary bindingの両方で使うため、方向を問わず要求する。
+        if (anyDirection && (publicApi.publicIdKey == null
                 || publicApi.publicIdKey.getBytes(java.nio.charset.StandardCharsets.UTF_8).length < 32)) {
-            throw new IllegalStateException("public-api.enabled=trueには32 byte以上のpublic-id-keyが必要です");
+            throw new IllegalStateException(
+                    "public-api.enabledまたはexternal-transport.enabled=trueには32 byte以上のpublic-id-keyが必要です");
         }
-        if (publicApi.enabled && (!"DEDICATED_DATABASE".equals(topology.mode)
+        if (anyDirection && (!"DEDICATED_DATABASE".equals(topology.mode)
                 || !StringUtils.hasText(topology.boundTenantId))) {
-            throw new IllegalStateException("公開APIはDEDICATED_DATABASEとbound-tenant-idの明示設定が必要です");
+            throw new IllegalStateException("公開API/外部transportはDEDICATED_DATABASEとbound-tenant-idの明示設定が必要です");
         }
         if (provider.approvedInboundProviders == null
                 || provider.approvedInboundProviders.stream().anyMatch(value -> value == null
                 || !value.matches("[A-Za-z0-9._~-]{1,100}"))) {
             throw new IllegalStateException("approved inbound providerが不正です");
         }
-        if (environment != null && environment.acceptsProfiles(org.springframework.core.env.Profiles.of("prod"))
-                && (publicApi.enabled || externalTransport.enabled || provider.mode != ProviderMode.MOCK)) {
-            throw new IllegalStateException("productionの公開APIと外部transportはoff、provider.modeはMOCK固定です");
-        }
-        if (security.allowedLoopbackPorts.stream().anyMatch(port -> port < 1 || port > 65535)) {
+        if (security.allowedLoopbackPorts.stream().anyMatch(port -> port == null || port < 1 || port > 65535)) {
             throw new IllegalStateException("loopback許可portが不正です");
         }
         if (publicApi.readSnapshotPurgeBatchSize < 1 || publicApi.readSnapshotPurgeBatchSize > 32
@@ -59,6 +65,12 @@ public class IntegrationHubExternalApiProperties {
                 || publicApi.retentionPurgeFixedDelayMs < 1000
                 || publicApi.retentionPurgeFixedDelayMs > 86_400_000L) {
             throw new IllegalStateException("retention purge設定が不正です");
+        }
+        if (publicApi.inboundLeaseSeconds < 1 || publicApi.inboundLeaseSeconds > 900) {
+            throw new IllegalStateException("inbound lease設定が不正です");
+        }
+        if (publicApi.unauthenticatedAuditMaxPerMinute < 0 || publicApi.unauthenticatedAuditMaxPerMinute > 6000) {
+            throw new IllegalStateException("未認証監査の上限設定が不正です");
         }
         if (externalTransport.batchSize < 1 || externalTransport.batchSize > 32
                 || externalTransport.leaseSeconds < 1 || externalTransport.leaseSeconds > 900
@@ -76,10 +88,29 @@ public class IntegrationHubExternalApiProperties {
                 && security.allowedLoopbackPorts.isEmpty()) {
             throw new IllegalStateException("LOOPBACK transportには明示的な許可portが必要です");
         }
+        if (security.trustedProxies == null || security.forwardedHeader == null) {
+            throw new IllegalStateException("trusted proxy設定が不正です");
+        }
         for (String proxy : security.trustedProxies) {
             if (!StringUtils.hasText(proxy)) {
                 throw new IllegalStateException("trusted proxyに空要素は指定できません");
             }
+            // 構文不正のCIDRは黙って一致しなくなり、全requestをproxy自身のIPとして扱う誤設定になる。
+            if (!ExternalApiCidrMatcher.isValidCidr(proxy)) {
+                throw new IllegalStateException("trusted proxyはCIDR形式で指定してください");
+            }
+        }
+        if (publicApi.approval == null || publicApi.approval.allowedClientCidrs == null
+                || externalTransport.approval == null || externalTransport.approval.allowedDestinations == null) {
+            throw new IllegalStateException("integration.hubの承認設定が不正です");
+        }
+        for (String cidr : publicApi.approval.allowedClientCidrs) {
+            if (!ExternalApiCidrMatcher.isValidCidr(cidr)) {
+                throw new IllegalStateException("public-api.approval.allowed-client-cidrsはCIDR形式で指定してください");
+            }
+        }
+        if (environment != null && environment.acceptsProfiles(org.springframework.core.env.Profiles.of("prod"))) {
+            IntegrationHubProductionEnablementPolicy.requireProductionBoundary(this, environment);
         }
     }
 
@@ -87,7 +118,7 @@ public class IntegrationHubExternalApiProperties {
     public static class PublicApi {
         /** nullを許し、設定バインド漏れを起動時に検知する。 */
         private Boolean enabled;
-        /** 公開IDとcursorの用途分離に使う環境注入鍵。平文IDを外部契約へ出さない。 */
+        /** 公開IDとcursorの用途分離に使う環境注入鍵。平文IDを外部契約へ出さない。outbound payloadのbindingにも使う。 */
         private String publicIdKey;
         /** cursorの有効秒数。短い上限で失効させる。 */
         private int cursorTtlSeconds = 300;
@@ -95,10 +126,30 @@ public class IntegrationHubExternalApiProperties {
         private int readSnapshotPurgeBatchSize = 32;
         /** snapshot purge schedulerの実行間隔。 */
         private long readSnapshotPurgeFixedDelayMs = 60_000L;
-        /** retention/nonce purge schedulerの1回上限。 */
+        /** retention/nonce purge schedulerの1回上限。inbound/outboundの両方向で共用する。 */
         private int retentionPurgeBatchSize = 100;
-        /** retention/nonce purge schedulerの実行間隔。 */
+        /** retention/nonce purge schedulerの実行間隔。inbound/outboundの両方向で共用する。 */
         private long retentionPurgeFixedDelayMs = 60_000L;
+        /** inbound webhook処理のlease秒数。outboundのexternal-transport.lease-secondsとは独立させる。 */
+        private int inboundLeaseSeconds = 60;
+        /**
+         * 有効時に未認証rejectを監査tableへ書く1分あたりの上限（node単位）。超過分はmetricだけに集約する。
+         * 0は未認証rejectを一切永続化しない。認証済みrequestと5xxはこの上限の対象外。
+         */
+        private int unauthenticatedAuditMaxPerMinute = 60;
+        /** inbound方向のproduction承認（DG-05）。dev/testでは任意。 */
+        private InboundApproval approval = new InboundApproval();
+    }
+
+    @Data
+    public static class InboundApproval {
+        /** 署名済みDG-05 inbound決定ID（例: DG-05-IN-20261201-01）。productionで必須。 */
+        private String decisionId;
+        /**
+         * 承認済み取引先の送信元CIDR上限。空でなければclientごとのallowed_cidrsに加えてここにも一致する必要がある。
+         * productionのinbound有効時は必須。DBのclient行だけで受信元を広げられないようにする。
+         */
+        private List<String> allowedClientCidrs = new ArrayList<>();
     }
 
     @Data
@@ -109,6 +160,19 @@ public class IntegrationHubExternalApiProperties {
         private long fixedDelayMs = 1_000L;
         private int connectTimeoutMs = 3_000;
         private int readTimeoutMs = 3_000;
+        /** outbound方向のproduction承認（DG-05）。dev/testでは任意。 */
+        private OutboundApproval approval = new OutboundApproval();
+    }
+
+    @Data
+    public static class OutboundApproval {
+        /** 署名済みDG-05 outbound決定ID（例: DG-05-OUT-20261201-01）。productionで必須。 */
+        private String decisionId;
+        /**
+         * 承認済み送信先の {@code host:port}（小文字FQDN、IP literal不可）。productionのoutbound有効時は必須。
+         * 送信時のegress照合と登録時検証は実HTTPS transport（W3-06b）で同じ一覧を使う。
+         */
+        private List<String> allowedDestinations = new ArrayList<>();
     }
 
     @Data
@@ -122,10 +186,17 @@ public class IntegrationHubExternalApiProperties {
         MOCK, STUB, LOOPBACK
     }
 
+    /** trusted proxyが送信元を追記するheader種別。指定外のheaderはclientが書ける値として読まない。 */
+    public enum ForwardedHeader {
+        X_FORWARDED_FOR, FORWARDED
+    }
+
     @Data
     public static class Security {
         /** Forwarded/X-Forwarded-Forを信頼できるproxyのCIDR。空なら転送ヘッダーを拒否する。 */
         private List<String> trustedProxies = new ArrayList<>();
+        /** trusted proxyが送信元を追記するheader。ALBはX_FORWARDED_FOR（append mode）。 */
+        private ForwardedHeader forwardedHeader = ForwardedHeader.X_FORWARDED_FOR;
         /** LOOPBACK接続先で使用できるportのallow-list。 */
         private List<Integer> allowedLoopbackPorts = new ArrayList<>();
     }

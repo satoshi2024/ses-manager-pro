@@ -6,14 +6,21 @@ import org.apache.catalina.connector.Response;
 import org.apache.catalina.valves.ValveBase;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
+import org.apache.tomcat.util.http.MimeHeaders;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Enumeration;
+import java.util.List;
 
 /**
  * Tomcat connector境界でservlet正規化前のorigin-form request-targetを捕捉する。
  * getRequestURI()/getQueryString()はcanonicalizerの入力に使わない。
+ *
+ * <p>同じ境界でTCP peerと転送header（X-Forwarded-For/Forwarded）の原文も捕捉する。
+ * ForwardedHeaderFilterはservlet filterとしてこのvalveの後に動くため、ここで見える値は書換え前である。
  */
 public final class ExternalApiRawRequestTargetValve extends ValveBase {
     public ExternalApiRawRequestTargetValve() {
@@ -30,11 +37,40 @@ public final class ExternalApiRawRequestTargetValve extends ValveBase {
         if (connectorPeer != null && !connectorPeer.isBlank()) {
             request.setAttribute(ExternalApiSourceIpResolver.CONNECTOR_PEER_ATTRIBUTE, connectorPeer);
         }
+        ExternalApiRawForwardedHeaders forwarded = rawForwardedHeaders(request);
+        if (forwarded != null) {
+            // ForwardedHeaderFilterがheaderを隠す前の原文。remoteAddr自体は書き換えず、他機能の意味を変えない。
+            request.setAttribute(ExternalApiRawForwardedHeaders.ATTRIBUTE, forwarded);
+        }
         Valve next = getNext();
         if (next == null) {
             throw new IllegalStateException("external raw request-target valve has no next valve");
         }
         next.invoke(request, response);
+    }
+
+    /** coyoteのMimeHeadersから転送headerの全行を受信順に取り出す。coyote requestが無ければ未捕捉のまま返す。 */
+    private ExternalApiRawForwardedHeaders rawForwardedHeaders(Request request) {
+        if (request == null || request.getCoyoteRequest() == null) {
+            return null;
+        }
+        MimeHeaders headers = request.getCoyoteRequest().getMimeHeaders();
+        if (headers == null) {
+            return null;
+        }
+        return ExternalApiRawForwardedHeaders.of(lines(headers, "X-Forwarded-For"), lines(headers, "Forwarded"));
+    }
+
+    private List<String> lines(MimeHeaders headers, String name) {
+        List<String> values = new ArrayList<>();
+        Enumeration<String> enumeration = headers.values(name);
+        while (enumeration.hasMoreElements()) {
+            values.add(enumeration.nextElement());
+            if (values.size() > ExternalApiRawForwardedHeaders.MAX_HEADER_LINES) {
+                break;
+            }
+        }
+        return values;
     }
 
     private byte[] rawTarget(Request request) {

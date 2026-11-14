@@ -26,7 +26,9 @@ public class ApiNonceReplayServiceImpl implements ApiNonceReplayService {
             throw new IllegalArgumentException("invalid nonce acceptance");
         }
         String nonceHash = IntegrationHubDigest.sha256Hex(rawNonce);
-        LocalDateTime expiresAt = (acceptedAt.isAfter(signedTimestamp) ? acceptedAt : signedTimestamp).plusMinutes(5);
+        // 受付窓（±許容差、秒切捨て）より長く保存し、purge直後の境界replayを残さない（N5-P3-1）。
+        LocalDateTime expiresAt = (acceptedAt.isAfter(signedTimestamp) ? acceptedAt : signedTimestamp)
+                .plusSeconds(NONCE_RETENTION_SECONDS);
         ApiNonceReplay row = ApiNonceReplay.builder()
                 .clientId(clientId)
                 .credentialVersion(credentialVersion)

@@ -39,7 +39,8 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
     private static final int MAX_HEADER_FIELDS = 32;
     private static final int MAX_HEADER_VALUE_BYTES = 256;
     private static final int MAX_BODY_BYTES = 1_048_576;
-    private static final long CLOCK_SKEW_SECONDS = 300;
+    /** nonce保存期限と同じ定数を使い、受付窓と保存期限がずれないようにする（N5-P3-1）。 */
+    private static final long CLOCK_SKEW_SECONDS = ApiNonceReplayService.SIGNED_TIMESTAMP_SKEW_SECONDS;
 
     private final ObjectProvider<IntegrationHubExternalApiProperties> propertiesProvider;
     private final ObjectProvider<ExternalApiSourceIpResolver> sourceIpResolverProvider;
@@ -67,7 +68,7 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
             byte[] body = readAndValidateBody(request);
             validateHeaderEnvelope(request);
             ExternalApiSourceIpResolver sourceIpResolver = required(sourceIpResolverProvider);
-            String sourceIp = sourceIpResolver.resolve(request, properties.getSecurity().getTrustedProxies());
+            String sourceIp = sourceIpResolver.resolve(request, properties.getSecurity());
             ExternalApiCanonicalRequest.Parsed parsed = ExternalApiCanonicalRequest.parse(request, body);
             ExternalApiRouteCatalog.Route preAuthRoute = ExternalApiRouteCatalog.resolve(request.getMethod(),
                     parsed.canonicalPath());
@@ -130,7 +131,8 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
                 }
             }
 
-            if (!ExternalApiCidrMatcher.matchesAny(sourceIp, client.getAllowedCidrs())) {
+            if (!ExternalApiCidrMatcher.matchesAny(sourceIp, client.getAllowedCidrs())
+                    || !withinApprovedClientCidrs(properties, sourceIp)) {
                 throw ExternalApiSecurityException.authentication("CLIENT_IP_NOT_ALLOWED");
             }
             LocalDateTime signedAt = LocalDateTime.ofInstant(Instant.ofEpochSecond(timestamp), ZoneOffset.UTC);
@@ -235,6 +237,19 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(secret, "HmacSHA256"));
         return mac.doFinal(canonical);
+    }
+
+    /**
+     * DG-05で承認された送信元CIDRの上限。設定が空ならclient行のallowed_cidrsだけで判定する（dev/test）。
+     * productionのinbound有効時はvalidatorが空を拒否するため、DBのclient行だけで受信元を広げられない。
+     */
+    private boolean withinApprovedClientCidrs(IntegrationHubExternalApiProperties properties, String sourceIp) {
+        IntegrationHubExternalApiProperties.InboundApproval approval = properties.getPublicApi().getApproval();
+        if (approval == null || approval.getAllowedClientCidrs() == null
+                || approval.getAllowedClientCidrs().isEmpty()) {
+            return true;
+        }
+        return ExternalApiCidrMatcher.matchesAny(sourceIp, approval.getAllowedClientCidrs());
     }
 
     private boolean usableClient(ApiClient client, LocalDateTime now) {

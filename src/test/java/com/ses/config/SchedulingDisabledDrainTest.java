@@ -114,7 +114,7 @@ class SchedulingDisabledDrainTest {
             "com.ses.service.migration.DocumentMigrationScript:CommandLineRunner",
             "起動引数 --migrate-documents のときだけ文書台帳移行を行う",
             "com.ses.config.LegalEntityReadinessStartupValidator#validate:EventListener",
-            "ApplicationReadyEvent。公開API/Copilot有効時だけ法人readinessを読取検証する",
+            "ApplicationReadyEvent。公開API（inbound）/外部transport（outbound）/Copilotのどれかが有効な時だけ法人readinessを読取検証する（DB書込なし）",
             "com.ses.service.impl.BpCompanyServiceImpl#validateBankKeyConfig:EventListener",
             "ApplicationReadyEvent。prodの口座暗号化key設定を検証するだけ");
 
