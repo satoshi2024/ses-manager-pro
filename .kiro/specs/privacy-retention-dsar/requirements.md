@@ -1,5 +1,13 @@
 # privacy-retention-dsar 要件
 
+## 2026-11-14 production bridge 段階化（W3-04 NF07-P）
+
+依頼者の決定 B-NF07-1 / B-NF07-2（2026-11-13）と Q-1 / Q-7 / Q-8（2026-11-14）により、production bridge（W-1〜W-12）を段階化して実装する。第1期は F1（表・読み取り専用 policy source Bean・flag OFF）、W-5 権限、A1 保全hold、A2 DSAR（半手動）とし、B1 自動処分と B2 recovery は署名後とする。D-01〜D-09 / DG-07 の署名前でも、値UNKNOWN・flag OFF・未知は一律拒否の形でコードをマージしてよい（Q-8）。この決定は tasks.md「F1〜M（DG-07完了まで実装禁止）」の**実装着手の停止条件だけ**を上書きし、本番開放（flag ON、実PIIの処理、処分、DSAR成果物の交付、外部送信）の停止条件は維持する。下記の要求・承認状態・placeholderは変更しない。
+
+- 段階計画の正本: [`production-bridge-phased-plan.md`](production-bridge-phased-plan.md)
+- Journal/Witness 設定契約と GRANT 設計案: [`journal-witness-grant-design.md`](journal-witness-grant-design.md)
+- 状態文書の整合一覧（21件）: [`status-alignment.md`](status-alignment.md)
+
 ## 2026-10-01 SYNTHETIC_FOUNDATION increment
 
 初期技術base `1443fb68943849a3260d7ebe005259f3eb609d60`、branch `codex/snf-prod-nf07-foundation-plan`。
@@ -7,7 +15,7 @@
 の停止条件を履歴として維持する。正式Privacy Owner、DG-07、法的policy、実処分・交付の承認は未完了。
 新incrementの正本は`synthetic-foundation.md`で、Astraは固定計画Head
 `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`を技術Plan PASSと判定した。
-SF-W1は実装済みで、追加した安全拒否試験の再実行と独立Implementation Reviewは未完了。
+SF-W1は実装済み。実装側記録では固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9` をAstraが限定CODE PASS（対象3 class 18/0/0/0）としたが、repo内に独立Review記録は無く、正式verdictは外部記録で確認する（2026-11-14 状態整合、[`status-alignment.md`](status-alignment.md) C-04）。
 この判定はDG-07、実PII、法的policy、実処分/交付、本番承認を許可しない。
 
 - SF-R1: generated fixture、独立temporary DB/object store/journal、test-only authority/provider、
@@ -35,11 +43,11 @@ synthetic protocolの技術Plan PASS後に隔離環境の実装を進められ�
 | DEV-0/D0 technical scope | `Task 0`、`D0`、`0.3`、`0.5` | `APPROVED_DEV_ONLY`。synthetic/redacted only、external I/O/provider/write/destructive operationは禁止 |
 | Full Feature / Production approved policy/scope | `<APPROVED_SCOPE>`（未置換） | `BLOCKED`。処分対象の範囲を確定できない |
 | Privacy owner | `UNASSIGNED_UNTIL_PRE_PRODUCTION` | development-only Owner role以外は未定。正式責任者を推測しない |
-| Base commit / branch | 承認値は未提供（`<BASE_COMMIT>` / `<BASE_BRANCH>`） | 技術比較baseは `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e`、開始時merge-baseは `0333b0a4afadef42639bad27e1ae443758f9804f`。これは承認済みBaseではなく、decision evidenceがないためrebase/PLAN PASSを行わない |
-| NF-07 | CANDIDATE | 開発用decisionはDEV-0/D0だけを許可し、承認済み要求・本番承認ではない |
+| Base commit / branch | 承認値は未提供（`<BASE_COMMIT>` / `<BASE_BRANCH>`） | 技術比較baseは `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e`、開始時merge-baseは `0333b0a4afadef42639bad27e1ae443758f9804f`。これは承認済みBaseではなく、decision evidenceがないためrebase/PLAN PASSを行わない。後続incrementの `1443fb68`（SF）、`7e1a9cdf`（Batch 4a）、`73aa7000` / `1be03bea`（統合候補）も全て技術比較baseであり、approved Baseではない（2026-11-14、C-16） |
+| NF-07 | CANDIDATE | 開発用decisionはDEV-0/D0だけを許可し、承認済み要求・本番承認ではない。承認面はCANDIDATEのまま。技術面は合成基盤（`com.ses.privacy.foundation` 68 main class）が統合済みで、production bridgeは未接続（2026-11-14、C-01） |
 | DG-07 | 未完了 | 保持期間、法的根拠、hold権限、二者承認、法務/HR/税務責任者が未確定 |
 | 外部専門家 / 社内責任者 gate | 未完了 | 本番処分を許可しない |
-| 処分 feature flag | 未導入。将来の既定値は OFF とする | 今回は処分経路を追加しない |
+| 処分 feature flag | 未導入。将来の既定値は OFF とする | 今回は処分経路を追加しない。2026-11-14 の段階計画で `privacy.retention.enabled` / `privacy.dsar.enabled`（既定OFF）を W3-14 で導入する予定とした（[`production-bridge-phased-plan.md`](production-bridge-phased-plan.md) §5）。処分経路は署名後のB1まで追加しない |
 
 DG-07 および外部専門家/社内責任者 gate が完了していないため、このincrementはDEV-0/D0の技術的範囲として以下だけを対象とする。
 

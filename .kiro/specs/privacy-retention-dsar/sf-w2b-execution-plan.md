@@ -1,6 +1,8 @@
 # SF-W2b 投影・attestation 技術実行計画
 
-状態: **実装前の技術実行案 / Astra追加Review待ち**。対象は合成journalからapplication DBへの再構築可能投影、独立attestor署名checkpoint、latest witness照合とquarantine契約に限る。実PII、実credential、実provider、外部呼出、production bean/接続、Flyway migration、実処分、policy/Legal承認を追加しない。W2aの`HOLD_RELEASED` fail-closedと合成`DISPATCH_AUTHORIZED` ACKの非送信許可性を維持する。
+状態: **実装前の技術実行案 / Astra追加Review待ち**（作成時の記録）。
+2026-11-14 状態整合（[`status-alignment.md`](status-alignment.md) C-07）: 本計画のprojection/attestor/witness/recoveryは合成隔離層として実装済み（`JdbcPrivacyProjectionAdapter`、`JdbcLatestWitnessAdapter`、`PrivacyRecoveryService` 等、基準 `1be03bea`）。限定受理・限定証拠PASSの記録は execution-ledger `:813-815,855,914` と `sf-w2b-slice-d-recovery-plan.md` の2026-10-16節にある（実装側転記）。production witness耐久性・非巻戻し境界・運用者分離は未充足のhuman gateのまま。
+対象は合成journalからapplication DBへの再構築可能投影、独立attestor署名checkpoint、latest witness照合とquarantine契約に限る。実PII、実credential、実provider、外部呼出、production bean/接続、Flyway migration、実処分、policy/Legal承認を追加しない。W2aの`HOLD_RELEASED` fail-closedと合成`DISPATCH_AUTHORIZED` ACKの非送信許可性を維持する。
 
 ## 1. 現行コード差分監査
 

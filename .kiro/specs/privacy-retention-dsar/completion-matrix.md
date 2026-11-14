@@ -1,5 +1,25 @@
 # completion mapping
 
+## 2026-11-14 状態整合と production bridge 段階計画（基準 `1be03bea`）
+
+読み方（[`status-alignment.md`](status-alignment.md) §1）: 本書と tasks.md の「Astra PASS」「受理」表記は実装側の転記であり、正式なReview verdictではない（review-ledger.md:22。C-17）。repo内に受理記録が無いBatch 2 / Batch 3 / Batch 4a の独立CODE verdictは **UNKNOWN** とする。テスト件数は記載SHAでの歴史的固定証拠であり、別SHAの結果と合算しない。
+
+### 7. 本番読み取り専用境界 Batch 4a（2026-11-04 統合、C-13 で追記）
+
+* 設計: [`production-readonly-boundary-slice-plan.md`](production-readonly-boundary-slice-plan.md)（Astra限定 PLAN PASS、plan SHA `7ad5d9ab` の記録あり）。
+* コード: `ProductionEnvironmentGuard`、`ProductionApprovalEnvelopeVerifier`、`SecurityContextCallerContextProvider`（package-private final、Spring Beanではない）。`97007872` で統合、基準 `1be03bea` まで無変更。
+* テスト: `73aa7000` のFULL_GATE artifactで3 class 19/0/0/0（8 + 4 + 7）。本整合で再実行していない。`498f04ba` の76/0/0/0 は証拠dirがrepo内に無く UNKNOWN。
+* 独立CODE verdict: **UNKNOWN**（C-12）。
+* 本番状態: production policy source・trust registry未設定、privacy権限の付与なし（現状は全実利用者で fail-closed）。D-01〜D-09 未承認。
+
+### 8. production bridge 段階計画（2026-11-14、W3-04 NF07-P）
+
+* 計画: [`production-bridge-phased-plan.md`](production-bridge-phased-plan.md)、[`journal-witness-grant-design.md`](journal-witness-grant-design.md)、取込計画 [`policy-source-catalog-wiring-plan.md`](policy-source-catalog-wiring-plan.md)。
+* 状態: 計画のみ（コード・migration・Bean登録なし）。R1（`3d59ffae`）は独立 Plan Review で REQUEST CHANGES（外部記録の転記）（P1×2、P2×8、P3×12。W-5 の方向と N7-2 は成立）。指摘を反映した R2 を再 Review 待ち（対応表は計画の冒頭）。
+* F1〜M の実装着手条件は Q-8（2026-11-14）で変更した（tasks.md「F1〜M」節の変更記録）。本番開放の停止条件は変わらない。
+
+---
+
 ## 2026-10-28 NF07 本番接線・意思決定契約および純粋カーネル抽出実装（Base: 93b40985 / 直前Base: 197386f8 / c8b78dc3 証拠継承）
 
 現行作業ブランチ: `codex/snf-prod-nf07-evidence-contract`
@@ -60,7 +80,7 @@
 * **人手承認ギャップ**: DG-07 未承認、正式 Privacy Owner 未選任、法的留置（Hold）/SoD 権限未承認、DSAR 本人確認・第三者マスキング SOP 未承認、外部 AI ベンダー DPA 未確認。
 * **安全保護の根拠**: `privacy.retention.enabled` および `privacy.dsar.enabled` は導入予定・未実装であり、現行の保護根拠は「実際の `SyntheticEnvironmentGuard` による fail-closed 拒絶」および「破壊的実行能力の構造的不在」に立脚する。
 
-### 6. 純粋Policy検証カーネル実装（Batch 2 実装完了・CODE REVIEW PENDING）
+### 6. 純粋Policy検証カーネル実装（Batch 2 実装完了・CODE REVIEW PENDING。2026-11-14 時点の独立CODE verdictは UNKNOWN、C-10）
 詳細設計は [`pure-policy-verification-kernel-plan.md`](pure-policy-verification-kernel-plan.md) を参照。
 * **計画審査状況**: `pure-policy-verification-kernel-plan.md` は Astra より限定 PLAN PASS を受理（コミット `93b40985`）。
 * **抽出実装（PurePolicyVerificationKernel）**: 分段階ヘルパー群（スキーマ検証、Anchor ID比対、Scope照合、時間窓検査、ACTIVE失効判定、Ed25519署名検証、Policy SoD、Policyバインディング、Case/Policy相互バインディング）を package-private クラスとして実装。
@@ -68,7 +88,7 @@
 * **承認証明（VerifiedApproval）の生成境界**: 純粋カーネルは `VerifiedApproval` を生成・返却せず（void または純計算値 effectiveExpiry のみ返却）、環境防護・Anchor解決・失効照会を完遂したラッパー末端においてのみ構築。
 * **単体テスト拡充**: `PurePolicyVerificationKernelTest` を新規追加し純粋ヘルパーの各境界値を単体網羅。`ApprovalEnvelopeVerifierTest` に計画受入テスト 7 項目を追加。
 * **安全原則・非依存不変条件**: 純粋カーネルは Spring、DB、ネットワーク、KMS、環境プロファイルへのアクセスを一切持たない。
-* **状態**: **CODE REVIEW PENDING**（Astra / 総括による独立コードレビュー待ち。CODE PASS 未取得、生産承認未付与）。
+* **状態**: **CODE REVIEW PENDING**（Astra / 総括による独立コードレビュー待ち。CODE PASS 未取得、本番承認未付与）。2026-11-14 状態整合: 2026-11-04 の autonomous-coordination `:44` はテスト履歴（57件対象・4,307件Fast）の受理であり CODE PASS ではないため、独立CODE verdictは **UNKNOWN** とする（C-10）。
 
 ---
 
@@ -84,7 +104,7 @@ SF-W0完了。SF-W1固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`は対�
 | scope | fixed evidence | 結果 | 境界 |
 |---|---|---|---|
 | SF-W1 foundation | `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`、`synthetic-foundation.md`の3 XML SHA-256、対象3 class | Astra CODE PASS、18/0/0/0 | pure envelope/verifier/FSM/test harnessのみ。worker/journal/restore、Full Feature/Production PASSではない |
-| 最新read-only source scan | control Head `cde61306`、`verification-evidence/20261001-privacy-coverage-02` | 183 SQL / 254 table / 244 entity / 708 provider候補。unclassified 74、missing columns 1,082、provider 285、entity 68でBLOCKED | source structure gapとpolicy UNKNOWNを別管理。0.4 coverage closure、DG-07、正式Owner/法的判断を満たさない |
+| 2026-10-01 時点のread-only source scan（現行値ではない。2026-10-04 `ad9bb1c6` では provider候補724 / provider欠落301、B0/V182時点では253 table / 未分類73。基準 `1be03bea` は未scanで UNKNOWN、C-15） | control Head `cde61306`、`verification-evidence/20261001-privacy-coverage-02` | 183 SQL / 254 table / 244 entity / 708 provider候補。unclassified 74、missing columns 1,082、provider 285、entity 68でBLOCKED | source structure gapとpolicy UNKNOWNを別管理。0.4 coverage closure、DG-07、正式Owner/法的判断を満たさない |
 
 上記scanはcontrolで固定されたread-only inventory証拠であり、SF-W1のworktree HEADに対する実行結果とは称さない。旧coverage行の180 tables/unclassified 0/provider 424等はその当時の履歴として保持し、現状gapの解消証拠に転用しない。
 
@@ -109,7 +129,7 @@ DEV decision: `NF07-DEV-GATE-20260828` / `APPROVED_DEV_ONLY` / Owner role `Proje
 | DEV-0/D0 plan | `plan.md`、`dev-gate-evidence.json` | `NF07-DEV-GATE-20260828`のscopeに限定してPASS相当。独立ReviewはDEV-0/D0 scopeだけ | APPROVED_DEV_ONLY / REVIEW REQUIRED |
 | Full Feature / Production plan | `plan.md` | policy/owner/Base/DG-07/外部gate未完。F1-M、本番処分、PRは不可 | BLOCKED BY GATE |
 | Git isolation | start validation/handoff | dedicated worktree、branch、clean status、base/remoteを確認 | COMPLETE |
-| F1〜M | tasks.md | DG-07/external/internal gate未完のため未着手 | STOPPED |
+| F1〜M | tasks.md | DG-07/external/internal gate未完のため未着手（2026-08-28 時点）。2026-11-14 Q-8 により、値UNKNOWN・flag OFF・未知は一律拒否の形での実装着手は可となった | 実装: 未着手（計画のみ）/ 本番開放: STOPPED |
 
 ## task commit/push record
 

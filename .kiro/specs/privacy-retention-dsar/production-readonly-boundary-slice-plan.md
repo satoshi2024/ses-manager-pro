@@ -1,6 +1,8 @@
 # NF07 本番只読境界スライス Batch 4a 設計書
 
-状態: **Astra限定 PLAN PASS（plan SHA `7ad5d9ab5670b70d454e91335c880f38665a8add`）/ CODE REVIEW PENDING（直近REQUEST CHANGESへの修正後、再審査待ち）**
+状態: **Astra限定 PLAN PASS（plan SHA `7ad5d9ab5670b70d454e91335c880f38665a8add`）/ CODE REVIEW PENDING（直近REQUEST CHANGESへの修正後、再審査待ち）**（作成時の記録）
+
+2026-11-14 状態整合（[`status-alignment.md`](status-alignment.md) C-11 / C-12）: Batch 4a の独立CODE verdictは **UNKNOWN** とする。本書の「CODE REVIEW PENDING」と、`policy-source-catalog-wiring-plan.md` 作成時の「`498f04ba` 限定CODE/runtime PASS 76/0/0/0」は食い違い、76件の証拠dirはrepo内に無い。Batch 4a の3 classは `73aa7000` のFULL_GATE artifactで19/0/0/0（ProductionApprovalEnvelopeVerifierTest 8、ProductionEnvironmentGuardTest 4、SecurityContextCallerContextProviderTest 7）であり、これは同SHAの技術証拠に留まる。コード（`97007872` で統合）は基準 `1be03bea` まで無変更。下の「Batch 3はAstra独立CODE PASS済み」「Batch 3で独立審査済み」も repo内に受理記録が無いため **UNKNOWN** と読む。
 
 対象worktree基準: `7e1a9cdfa78d914e55e031c37762d245f12571d0`
 

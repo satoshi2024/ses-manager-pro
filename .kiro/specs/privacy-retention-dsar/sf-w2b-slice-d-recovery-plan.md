@@ -1,6 +1,8 @@
 # SF-W2b Slice D 独立witness recovery gate計画
 
-状態: **設計案 / Astra review待ち。実装・合格・NF07完了を意味しない。** 対象はsynthetic test環境のapplication projection/journal restore後に、独立witnessのlive latestを起点としてjournal chainを再検証し、projectionを再構築できるかの技術検証に限る。production接続、migration、外部provider、credential、dispatch/publicationの有効化、人工承認は含めない。
+状態: **設計案 / Astra review待ち。実装・合格・NF07完了を意味しない。**（作成時の記録）
+2026-11-14 状態整合（[`status-alignment.md`](status-alignment.md) C-08）: 本書の最新状態は末尾「2026-10-16 固定sourceの追加検証」節である。D2b1固定 `64db441d` 32/0/0/0、D2b2固定 `ac894ac6` 35/0/0/0 をAstraが限定証拠PASSとした記録がある（実装側転記、execution-ledger `:377`）。下の「D2b1候補」「root固定再試験待ち」は当時の記録として読む。§7.3 の未完境界（recovery principalのSQL ACL全matrix、process再起動・旧owner全matrix、socket stall hard上限、maxAge後のsame-revision renewal、人手unquarantine）は未完了のまま。
+対象はsynthetic test環境のapplication projection/journal restore後に、独立witnessのlive latestを起点としてjournal chainを再検証し、projectionを再構築できるかの技術検証に限る。production接続、migration、外部provider、credential、dispatch/publicationの有効化、人工承認は含めない。
 
 実装状態: 現在のコードは**D2b1候補**であり、Slice DまたはNF07の完了ではない。monotonic work deadline、statement/transaction timeout、test fixtureの接続上限、有限cleanup readback候補は実装済みだが、実MySQL固定試験の合格前であり、一般的なJDBC/socketのhard wall-clock上限を保証しない。ACL拒否の全matrix、process再起動後の継続・旧owner拒否の全matrixも未完了として扱う。下記の設計受入条件を満たした証拠が揃うまで、`RECOVERED_SYNTHETIC`をproduction recovery readinessとして扱わない。
 

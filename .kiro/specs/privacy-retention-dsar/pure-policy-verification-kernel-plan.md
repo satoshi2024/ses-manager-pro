@@ -1,7 +1,8 @@
 # NF07 純粋 Policy 検証カーネル抽出・実施設計書
 （Pure Policy Verification Kernel Extraction Plan）
 
-状態: **PLAN PASS（Astra 限定 PLAN PASS 受理、コミット `93b40985`）/ Batch 2 実装完了、CODE REVIEW PENDING**<br>
+状態: **PLAN PASS（Astra 限定 PLAN PASS 受理、コミット `93b40985`）/ Batch 2 実装完了、CODE REVIEW PENDING**（作成時の記録）<br>
+2026-11-14 状態整合（[`status-alignment.md`](status-alignment.md) C-10 / C-11）: Batch 2 の独立CODE verdictは **UNKNOWN**。`.kiro/roadmap/2026-11-04-snf-autonomous-coordination.md:44` の「57件の対象検証および4307件の全Fast履歴が受理済み」はテスト履歴の受理であり、CODE PASSの記録ではない。Batch 2 のコードは `35f16aad` で統合され、基準 `1be03bea` まで無変更。下の §5 の Batch 3「REVIEW PENDING」も、repo内に受理記録が無いため **UNKNOWN** と読む。<br>
 対象ブランチ: `codex/snf-prod-nf07-evidence-contract`<br>
 本フェーズ基準（Base）: `93b40985e45e29c1531cec93ea41648cb7c8ad38`<br>
 直前基準（Previous Base）: `197386f866c834c7232590ec2f16fd13b8ac17d6`<br>
@@ -458,7 +459,7 @@ Policy-only 経路および Policy+Case 経路の双方について、現行実�
 | **期限切れかつ失効プロバイダー例外** | 時間窓検査（第4段階）が失効プロバイダー呼び出し（第5段階）より先に行われるため、`EXPIRED_AT_OR_AFTER_DEADLINE` で拒絶され、失効プロバイダーの呼び出し回数は **厳格に 0 回** | `ApprovalEnvelopeVerifierTest` |
 | **Policy 失敗時における Case 失効照会の不実行** | Policy が改竄・期限切れ等で失敗した場合、Case エンベロープの検証には到達せず、Case の失効プロバイダー呼び出し回数は **厳格に 0 回** | `ApprovalEnvelopeVerifierTest` |
 | **失効プロバイダー呼び出し順序・回数と短絡** | 1. 署名鍵（`authorityId:keyId`）照会が先、エンベロープ（`revocationReference`）照会が後。<br>2. 鍵照会で例外発生時は即座に `REVOCATION_PROVIDER_ERROR` で短絡し、エンベロープ照会は行われない（呼び出し回数 1 回）。<br>3. 双方正常時は呼び出し回数 2 回。 | `ApprovalEnvelopeVerifierTest` |
-| **传入 now と wrapper clock の乖離** | `verifyPolicyOnly` において引数 `now` が `clock.instant()` と異なる場合、引数 `now` のみが時間評価に採用され、`clock.instant()` は一切呼び出されない | `ApprovalEnvelopeVerifierTest` |
+| **引数 now と wrapper clock の乖離** | `verifyPolicyOnly` において引数 `now` が `clock.instant()` と異なる場合、引数 `now` のみが時間評価に採用され、`clock.instant()` は一切呼び出されない | `ApprovalEnvelopeVerifierTest` |
 | **入口ごとの SoD 異常型および文言の厳格一致** | 1. `verifyPolicyOnly`: `PolicySecurityException`（理由: `SOD_VIOLATION`、文言: `"職務分離違反: 申請者と承認者は異なる必要があります"`）。<br>2. `verify`: `SecurityException`（文言: `"職務分離条件に違反しています"`）。Policy の違反でも Case の違反でも同一の普通 `SecurityException` が送出される。 | `ApprovalEnvelopeVerifierTest`<br>`PurePolicyVerificationKernelTest` |
 | **null 失効ステータスの挙動** | 鍵またはエンベロープの失効ステータスが `null` の場合、既存ルール通り `REVOCATION_STATUS_UNKNOWN`（文言: `"keyまたはenvelopeの失効状態がACTIVEではありません"`）が送出される（NPE 発生や新規セマンティクス導入のないことを確認） | `ApprovalEnvelopeVerifierTest`<br>`PurePolicyVerificationKernelTest` |
 
