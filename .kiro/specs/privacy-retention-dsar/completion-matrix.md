@@ -15,7 +15,7 @@
 ### 8. production bridge 段階計画（2026-11-14、W3-04 NF07-P）
 
 * 計画: [`production-bridge-phased-plan.md`](production-bridge-phased-plan.md)、[`journal-witness-grant-design.md`](journal-witness-grant-design.md)、取込計画 [`policy-source-catalog-wiring-plan.md`](policy-source-catalog-wiring-plan.md)。
-* 状態: 計画のみ（コード・migration・Bean登録なし）。Plan Review待ち。
+* 状態: 計画のみ（コード・migration・Bean登録なし）。R1（`3d59ffae`）は独立 Plan Review で REQUEST CHANGES（外部記録の転記）（P1×2、P2×8、P3×12。W-5 の方向と N7-2 は成立）。指摘を反映した R2 を再 Review 待ち（対応表は計画の冒頭）。
 * F1〜M の実装着手条件は Q-8（2026-11-14）で変更した（tasks.md「F1〜M」節の変更記録）。本番開放の停止条件は変わらない。
 
 ---
@@ -88,7 +88,7 @@
 * **承認証明（VerifiedApproval）の生成境界**: 純粋カーネルは `VerifiedApproval` を生成・返却せず（void または純計算値 effectiveExpiry のみ返却）、環境防護・Anchor解決・失効照会を完遂したラッパー末端においてのみ構築。
 * **単体テスト拡充**: `PurePolicyVerificationKernelTest` を新規追加し純粋ヘルパーの各境界値を単体網羅。`ApprovalEnvelopeVerifierTest` に計画受入テスト 7 項目を追加。
 * **安全原則・非依存不変条件**: 純粋カーネルは Spring、DB、ネットワーク、KMS、環境プロファイルへのアクセスを一切持たない。
-* **状態**: **CODE REVIEW PENDING**（Astra / 総括による独立コードレビュー待ち。CODE PASS 未取得、生産承認未付与）。2026-11-14 状態整合: 2026-11-04 の autonomous-coordination `:44` はテスト履歴（57件対象・4,307件Fast）の受理であり CODE PASS ではないため、独立CODE verdictは **UNKNOWN** とする（C-10）。
+* **状態**: **CODE REVIEW PENDING**（Astra / 総括による独立コードレビュー待ち。CODE PASS 未取得、本番承認未付与）。2026-11-14 状態整合: 2026-11-04 の autonomous-coordination `:44` はテスト履歴（57件対象・4,307件Fast）の受理であり CODE PASS ではないため、独立CODE verdictは **UNKNOWN** とする（C-10）。
 
 ---
 

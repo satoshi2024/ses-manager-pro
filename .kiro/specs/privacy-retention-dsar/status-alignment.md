@@ -1,6 +1,7 @@
 # NF07 状態文書の整合一覧（N7-2 / S-1、2026-11-14）
 
 状態: **整合済み（文書のみ）。テストの再実行、Review verdict の記録、承認状態の変更は行っていない。**
+2026-11-14 追記: R1（`3d59ffae`）に対する独立 Plan Review の結果は外部記録（control repo の review 報告）にあり、本書には転記しない。R2 では X-3 の訳語だけを改めた。
 基準: `1be03bea`。`.kiro/specs/privacy-retention-dsar/` と `src/{main,test}/java/com/ses/privacy/` は `73aa7000` から無変更（`git diff --quiet 73aa7000 1be03bea -- <path>` で確認）。
 入力: control repo の調査報告 `ses-claude-control-20261112-r1/reports/nf07-privacy-readiness.md` §4（2026-11-12、基準 `73aa7000`）が挙げた C-01〜C-21。各箇所を基準 `1be03bea` で grep し直して位置と文言を確認した。報告と行番号が違ったものは本表の値が正しい（例: C-21 の `prod-wiring-decision-contract.md` は `:38` と `:286`）。下表の行番号は整合前（`1be03bea`）の行である。
 
@@ -28,7 +29,7 @@
 
 | # | 対象（ファイル:行、日付・範囲） | 統一前 | 統一後 | 根拠 | 変更した箇所 |
 |---|---|---|---|---|---|
-| C-01 | `.kiro/roadmap/2026-08-27-post-acceptance-traceability.md:60`（2026-08-27、承認面）と同 `:18`（2026-10-01 節、技術面） | 一方は「NF-07 CANDIDATE、Owner 未定」、他方は「SF基盤・D2b2・W3a 限定 scope 統合済み」 | 二軸で書く: 承認面は CANDIDATE、技術面は合成基盤統合済み・production bridge 未接線 | §1 の出所の分け方。両者は scope が違い、どちらも正しい | `requirements.md` §0 表の NF-07 行（spec 外の roadmap は変更しない） |
+| C-01 | `.kiro/roadmap/2026-08-27-post-acceptance-traceability.md:60`（2026-08-27、承認面）と同 `:18`（2026-10-01 節、技術面） | 一方は「NF-07 CANDIDATE、Owner 未定」、他方は「SF基盤・D2b2・W3a 限定 scope 統合済み」 | 二軸で書く: 承認面は CANDIDATE、技術面は合成基盤統合済み・production bridge 未接続 | §1 の出所の分け方。両者は scope が違い、どちらも正しい | `requirements.md` §0 表の NF-07 行（spec 外の roadmap は変更しない） |
 | C-02 | `traceability.md:324`（2026-09-07 統合 gate） | NF-07「未着手 / DISCOVERY 維持」 | 過去記録として読む。現在は合成基盤 68 main class が存在する | 基準の git tree | 変更なし（spec 外）。本表の読み替え規則だけ |
 | C-03 | `.kiro/roadmap/2026-09-07-snf01-10-remediation-audit.md:176-181`（2026-09-07） | DISCOVERY（DEV-0/D0 only）、F1〜M STOPPED | 「DEV-0/D0 only」は過去記録。F1〜M STOPPED は、実装着手について Q-8（2026-11-14）で解除、本番開放について維持 | 依頼者の決定 Q-8 | `tasks.md` 「F1〜M」節の変更記録（spec 外は変更しない） |
 | C-04 | `requirements.md:10`、`plan.md:8`（2026-10-01） | SF-W1 の独立 Implementation Review は未完了／待ち | SF-W1 は `6ec4ca28` で記録上 PASS（外部記録未照合、18/0/0/0） | `tasks.md:6,12`、`completion-matrix.md:42,78,86`、`synthetic-foundation.md:3,30` が同じ SHA・件数で記録 | `requirements.md:10`、`plan.md:8` |
@@ -56,5 +57,5 @@
 |---|---|---|---|
 | X-1 | `prod-wiring-decision-contract.md` §4.2 の 3.（`:222-224`） | 「外部送信には `CaseApprovalEnvelope` と `VerifiedDispatchFence` が不可欠」が、依頼者の決定 B-NF08-2（2026-11-13、NF08 は署名済み決定IDに束縛した承認設定＋送信毎の監査）と食い違う | §4.2 の後に追記: その条項は NF07 自身の外部 dispatch に適用し、NF08 Copilot は B-NF08-2 に従う。NF07 policy は `nf07PolicyId` で参照する（production-bridge-phased-plan.md §8）。Plan Review の確認対象 |
 | X-2 | `pure-policy-verification-kernel-plan.md:461` | 表の見出しの先頭に中国語の2文字の語（U+4F20 U+5165、「渡された」の意）が残っていた | 「引数」に置き換えた（意味は同じ） |
-| X-3 | `policy-source-catalog-wiring-plan.md:1`（`711aa557`） | 見出しの「接線計画」に当たる語が中国語の字形（U+7EBF、U+8BA1、U+5212 を含む）で書かれていた | N7-1 の取込時に日本語の「接線計画」へ直した |
+| X-3 | `policy-source-catalog-wiring-plan.md:1`（`711aa557`） | 見出しの「接続計画」に当たる語が中国語の字形（U+7EBF、U+8BA1、U+5212 を含む）で書かれていた | N7-1 の取込時に日本語の「接続計画」へ直した（R1 の訳語は中国語式の用語だったため、R2 で改めた） |
 | X-4 | `dev-gate-evidence.json`（2026-08-28）の Full gate prohibited `F1-M` | Q-8（2026-11-14）と食い違う | JSON は当時の決定記録なので変更しない。tasks.md の変更記録に、Q-8 が実装着手についてだけ上書きすること、validator の FULL_FEATURE_PRODUCTION mode の HARD_STOP は本番承認が無い現状と一致することを書いた |

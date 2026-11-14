@@ -44,7 +44,7 @@ synthetic protocolの技術Plan PASS後に隔離環境の実装を進められ�
 | Full Feature / Production approved policy/scope | `<APPROVED_SCOPE>`（未置換） | `BLOCKED`。処分対象の範囲を確定できない |
 | Privacy owner | `UNASSIGNED_UNTIL_PRE_PRODUCTION` | development-only Owner role以外は未定。正式責任者を推測しない |
 | Base commit / branch | 承認値は未提供（`<BASE_COMMIT>` / `<BASE_BRANCH>`） | 技術比較baseは `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e`、開始時merge-baseは `0333b0a4afadef42639bad27e1ae443758f9804f`。これは承認済みBaseではなく、decision evidenceがないためrebase/PLAN PASSを行わない。後続incrementの `1443fb68`（SF）、`7e1a9cdf`（Batch 4a）、`73aa7000` / `1be03bea`（統合候補）も全て技術比較baseであり、approved Baseではない（2026-11-14、C-16） |
-| NF-07 | CANDIDATE | 開発用decisionはDEV-0/D0だけを許可し、承認済み要求・本番承認ではない。承認面はCANDIDATEのまま。技術面は合成基盤（`com.ses.privacy.foundation` 68 main class）が統合済みで、production bridgeは未接線（2026-11-14、C-01） |
+| NF-07 | CANDIDATE | 開発用decisionはDEV-0/D0だけを許可し、承認済み要求・本番承認ではない。承認面はCANDIDATEのまま。技術面は合成基盤（`com.ses.privacy.foundation` 68 main class）が統合済みで、production bridgeは未接続（2026-11-14、C-01） |
 | DG-07 | 未完了 | 保持期間、法的根拠、hold権限、二者承認、法務/HR/税務責任者が未確定 |
 | 外部専門家 / 社内責任者 gate | 未完了 | 本番処分を許可しない |
 | 処分 feature flag | 未導入。将来の既定値は OFF とする | 今回は処分経路を追加しない。2026-11-14 の段階計画で `privacy.retention.enabled` / `privacy.dsar.enabled`（既定OFF）を W3-14 で導入する予定とした（[`production-bridge-phased-plan.md`](production-bridge-phased-plan.md) §5）。処分経路は署名後のB1まで追加しない |

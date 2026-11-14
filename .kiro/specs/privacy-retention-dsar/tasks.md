@@ -89,7 +89,7 @@ Full Feature / Production Gateは `BLOCKED` のままであり、F1-M、実PII�
 - **変更前**: 見出し「F1〜M（DG-07完了まで実装禁止）」と、各行の「…がPASSになるまで着手しない」。
 - **変更後**: 実装着手は署名を待たない。条件は (1) 法的な値はUNKNOWNのまま（コード・migration・設定の既定値に保持期間等を書かない）、(2) `privacy.retention.enabled` / `privacy.dsar.enabled` は既定OFF、(3) 未知（決定ID欠落、policy UNKNOWN、provider未登録、journal不達、trust anchor不明）は一律拒否。本番開放（flag ON、実PIIの処理、処分、DSAR成果物の交付、外部送信）の停止条件は変えず、各行の「本番開放条件」として残す。
 - **範囲**: 第1期は F1・PERM・F2・A1（hold開始）・A2（半手動）。B1 自動処分と B2 recovery は着手も署名後（Q-1）。Q-8 は B1/B2 を前倒しする許可ではない。
-- **理由**: production bridge の全接線（B-NF07-1）を外部署名の到着順に直列化しないため。署名は「コードをマージしてよいか」ではなく「本番で開いてよいか」の条件として扱い、値は署名後に設定と署名済み envelope で与える。
+- **理由**: production bridge の全接続（B-NF07-1）を外部署名の到着順に直列化しないため。署名は「コードをマージしてよいか」ではなく「本番で開いてよいか」の条件として扱い、値は署名後に設定と署名済み envelope で与える。
 - **変えないもの**: `dev-gate-evidence.json`（2026-08-28 の決定記録）、`review-ledger.md`、0.4 coverage closure の未完了、plan.md の `FULL_FEATURE_PRODUCTION PLAN: BLOCKED`。`gate-evidence-validator.ps1` の FULL_FEATURE_PRODUCTION mode が HARD_STOP を返すことは本番承認が無い現状と一致するので、そのまま維持する。
 - **F1 の定義の変更**: 旧 F1 の「job DDL」（`t_disposition_job` / `t_disposition_item`）は B1 へ移す（署名前に使わない表を作らないため）。
 - **計画の正本**: [`production-bridge-phased-plan.md`](production-bridge-phased-plan.md)。batch ごとのファイル集合・DDL 草案・依存・対象限定テスト・完了条件・Demo・規模は同書 §3〜§4。
@@ -99,28 +99,28 @@ Full Feature / Production Gateは `BLOCKED` のままであり、F1-M、実PII�
 - [ ] **F1 catalog/policy/hold/request DDL（W3-14「F1 + PERM」）**
   - **Objective**: F1 表、flag、決定ID束縛、読み取り専用 policy source Bean、説明APIを値UNKNOWN・flag OFFでマージする。
   - **Implementation**: plan §3.1。migration は `V?__nf07_privacy_f1_core.sql`（暫定 V192）。
-  - **Test requirements**: plan §3.1 の対象限定テスト（`FlywayNf07PrivacyF1MigrationTest` を含む）。
-  - **Demo**: plan §3.1 Demo 1〜3。
+  - **Test requirements**: plan §3.1.6 の対象限定テスト（`FlywayNf07PrivacyF1MigrationTest`、`FeatureSwitchDefaultsTest`、`FeatureSwitchRouteCoverageTest` を含む）。
+  - **Demo**: plan §3.1.8 Demo 1〜3。
   - **本番開放条件（旧停止条件）**: DG-07、owner、approved scope、policy version、二者承認、migration方針がPASS。
 - [ ] **PERM privacy権限（W3-14「F1 + PERM」）**
   - **Objective**: `privacy.*` を `privacy-admin` 以外の全 group で deny し、`privacy-admin` だけに開く（B-NF07-2）。
   - **Implementation**: plan §6。migration は `V?__nf07_privacy_permission_seed.sql`（暫定 V193）。
-  - **Test requirements**: `ActionPermissionMatrixTest` の変更（plan §6.5）、`PermissionGroupManagementServiceImplTest`、`BreakGlassServiceImplTest`、`SecurityContextCallerContextProviderTest`。
-  - **Demo**: plan §3.1 Demo 2〜4。
+  - **Test requirements**: `ActionPermissionMatrixTest` の変更（plan §6.5。既存 assertion の変更は seed 件数3行だけ）、`PermissionGroupManagementServiceImplTest`、`BreakGlassServiceImplTest`、`SecurityContextCallerContextProviderTest`、`ProductionSecurityConfigurationValidatorTest`（plan §3.1.3）。
+  - **Demo**: plan §3.1.8 Demo 2〜5。
   - **本番開放条件**: G-ID の割当規則、D-01。
 - [ ] **F2 provider/search/dry-runの本番接続（NF07-F2、read-onlyのみ）**
   - **Objective**: 本番 read-only provider と registry、第三者 redaction 規則の枠。外部 provider は登録しない。
   - **Implementation / Test / Demo**: plan §3.2。
   - **本番開放条件（旧停止条件）**: table/file/AI/backup/replica providerのscope審査、redaction、unknown隔離がPASS。
 - [ ] **A1 privacy dashboard/hold/approval（NF07-A1J + NF07-A1H、第1期は hold 開始のみ）**
-  - **Objective**: 独立 Journal の本番 adapter と設定契約、hold 開始、既存削除経路の hold 照会。hold 解除は署名後の NF07-REL。
-  - **Implementation / Test / Demo**: plan §3.3、§3.4、[`journal-witness-grant-design.md`](journal-witness-grant-design.md)。
+  - **Objective**: 独立 Journal の本番 adapter と設定契約、hold 開始、実際に消す全経路（文書処分の実行を含む）への hold 接続。帰属できない行は SUBJECT hold で止めない。hold 解除は NF07-REL（実装は A1H の直後に前倒し、開放は署名後）。
+  - **Implementation / Test / Demo**: plan §3.3、§3.4（§3.4.1 破壊的経路、§3.4.3 帰属できない行、§3.4.4 gate・reconciler）、[`journal-witness-grant-design.md`](journal-witness-grant-design.md)。
   - **本番開放条件（旧停止条件）**: hold start/release authority、SoD、監査、emergency stopがPASS（D-05、G-DBA、G-BKP）。
-- [ ] **A2 DSAR case/export/redaction（NF07-A2、半手動）**
-  - **Objective**: 受付〜交付記録の追跡、read-only 検索、redaction 済み草案、二者承認。交付は system 外で人が行う。
-  - **Implementation / Test / Demo**: plan §3.5。
+- [ ] **A2 DSAR case/export/redaction（NF07-A2a 受付〜SCOPED → NF07-A2b 検索〜交付記録、半手動）**
+  - **Objective**: 受付〜交付記録の追跡、read-only 検索、redaction 済み草案、package に束縛した二者承認、専用経路だけの取得。交付は system 外で人が行う。
+  - **Implementation / Test / Demo**: plan §3.5（§3.5.1 A2a、§3.5.2 A2b）。
   - **本番開放条件（旧停止条件）**: identity verification、同姓同名のhuman resolution、第三者redaction、deadline/appeal/reopenがPASS（D-06、G-AUD）。
 - [ ] **B1 disposition batch（flag OFF）** — 着手は署名後（Q-1）。approved policyだけを対象に、retry/partial failure/wrong-target cancelを含むitem CASとevidenceがPASSになるまで着手しない。計画は plan §4。
 - [ ] **B2 recovery/evidence** — 着手は署名後（Q-1）。DB+binary同時点backup、restore後hash/scope/hold再検証、監査証跡がPASSになるまで着手しない。計画は plan §4。
 - [ ] **M release** — production flag OFF、approved policy allow-list、外部/社内責任者gate、independent ReviewのPLAN/IMPLEMENTATION PASS、remote Head固定後のみrelease候補とする。
-- [ ] **開放は署名後・実装は前倒し可の batch（Q-8）**: NF07-REG（W-2）、NF07-TRUST（W-3）、NF07-REL（hold解除）、NF07-NF08-LINK。計画は plan §4、§8。
+- [ ] **開放は署名後・実装は前倒し可の batch（Q-8）**: NF07-REL（hold解除。A1H の直後に実装）、NF07-REG（W-2）、NF07-TRUST（W-3）、NF07-NF08-LINK（NF08 外部送信の開放前に必ずマージする）。計画は plan §4、§8。

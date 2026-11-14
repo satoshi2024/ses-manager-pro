@@ -4,7 +4,7 @@
 
 依頼者の決定 Q-1 / Q-7 / Q-8（2026-11-14）と B-NF07-1 / B-NF07-2（2026-11-13）に基づく production bridge（W-1〜W-12）の段階実施は、次の文書を正本とする。
 
-- [`production-bridge-phased-plan.md`](production-bridge-phased-plan.md): W-1〜W-13 と batch の対応、第1期 batch（W3-14「F1 + PERM」、NF07-F2、NF07-A1J、NF07-A1H、NF07-A2）と署名後 batch、F1 の DDL 草案、flag と UNKNOWN の扱い、W-5 権限設計、署名項目ごとの開放手順、NF08 との関係、署名前実装のリスク。
+- [`production-bridge-phased-plan.md`](production-bridge-phased-plan.md): W-1〜W-13 と batch の対応、第1期 batch（W3-14「F1 + PERM」、NF07-F2、NF07-A1J、NF07-A1H、NF07-A2a、NF07-A2b）と署名後 batch、F1 の DDL 草案、flag と UNKNOWN の扱い、W-5 権限設計、署名項目ごとの開放手順、NF08 との関係、署名前実装のリスク。
 - [`journal-witness-grant-design.md`](journal-witness-grant-design.md): W-6 Journal/Witness インスタンスの設定契約、W-12 の最小 SQL 権限 GRANT 設計案。
 - [`policy-source-catalog-wiring-plan.md`](policy-source-catalog-wiring-plan.md): current policy source / catalog の port 契約と負例（2026-11-04 作成、2026-11-14 取込）。
 - [`status-alignment.md`](status-alignment.md): spec 内の状態記述 21 件の整合一覧。

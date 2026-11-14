@@ -1,4 +1,4 @@
-# NF07 最小 Production Current Policy Source / Catalog 接線計画
+# NF07 最小 Production Current Policy Source / Catalog 接続計画
 
 状態: **PLAN REVIEW 提出前ドラフト。実装・Spring Bean登録・本番接続は未実施。**
 基準（作成時、2026-11-04）: `498f04ba459557d93d180b9f1a910bf3dff3c71f`（NF07 Batch4a）。作成時の本行は「限定CODE/runtime PASS 76/0/0/0」と記していたが、その76件の証拠dirはrepo内に無く、Batch 4aの独立CODE verdictは **UNKNOWN** として扱う（[`status-alignment.md`](status-alignment.md) C-12）。同SHA範囲の技術証拠としては、`73aa7000` のFULL_GATE artifactにBatch 4aの3 class 19/0/0/0がある（歴史的固定証拠。本取込で再実行していない）。
