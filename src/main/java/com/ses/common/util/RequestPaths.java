@@ -75,7 +75,7 @@ public final class RequestPaths {
                     escaped = new StringBuilder(path.length() + 16).append(path, 0, i);
                 }
                 byte[] bytes = Character.getType(codePoint) == Character.SURROGATE
-                        ? "�".getBytes(StandardCharsets.UTF_8)
+                        ? "\uFFFD".getBytes(StandardCharsets.UTF_8)
                         : new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8);
                 for (byte b : bytes) {
                     escaped.append('%').append(HEX[(b >> 4) & 0x0f]).append(HEX[b & 0x0f]);

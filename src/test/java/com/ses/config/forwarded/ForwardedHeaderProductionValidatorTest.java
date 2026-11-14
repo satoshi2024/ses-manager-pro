@@ -92,6 +92,24 @@ class ForwardedHeaderProductionValidatorTest {
     }
 
     @Test
+    void IPv6のloopbackと未指定とlink_localとmulticastは起動を拒否する() {
+        // r3 D-P3-3: IPv4の127.0.0.0/8拒否と同じく、ALBになり得ない範囲はIPv6でも信頼しない
+        for (String range : new String[]{"::1", "::1/128", "::", "::/128", "::/48", "fe80::/64", "fe80::1",
+                "febf:ffff::/64", "ff02::/64"}) {
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                    () -> validator("framework", range).validate(), range);
+
+            assertTrue(error.getMessage().contains("loopback"), range + ": " + error.getMessage());
+        }
+    }
+
+    @Test
+    void IPv6のglobal_unicastとULAのsubnetは許可する() {
+        assertDoesNotThrow(() -> validator("framework",
+                "2600:1f18:abc:de00::/64, 2406:da14:1:200::/56, fd00:1:2:3::/64").validate());
+    }
+
+    @Test
     void host部にbitがあるCIDRは起動を拒否する() {
         for (String range : new String[]{"10.0.1.5/24", "2600:1f18:abc:de00::1/64"}) {
             IllegalStateException error = assertThrows(IllegalStateException.class,

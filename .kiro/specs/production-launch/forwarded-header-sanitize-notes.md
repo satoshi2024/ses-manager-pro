@@ -25,7 +25,8 @@
 | 監査・logの表記 | 監査（`t_audit_log.uri`）と `API操作監査` 等のlogへは、復号で現れた制御文字・書式文字（ESC、bidi制御等）を `%XX` へ戻した表記（`RequestPaths.forAudit`）で書く。判定には使わない |
 | client IPの統一 | `ClientIpResolver` は「信頼プロキシが追記したXFF右端1 hop」だけを採用し、それ以外はTCP peerを返す。Portal rate limit・Portal監査・Portal session・永続sessionのIP hash・MFA試行の送信元scopeは全てこの結果を使う。Portal login・招待受諾のIP単位rate limitは、IPv6を `/64` へ集約する |
 | health probeのHTTP許可 | `/actuator/health`・`/actuator/health/liveness`・`/actuator/health/readiness` のGETだけは、HTTPS強制（`requiresSecure`）の対象外とした。ECSのcontainer health check（task内の127.0.0.1から）とALBのtarget group health checkは `X-Forwarded-Proto` を持たないため、HTTPS強制のままだと302になる。応答は `show-details/show-components: never` によりUP/DOWNだけ。他のactuator・`/actuator/health/**` の他のpath・画面とAPIは従来どおりHTTPSへredirectする |
-| 本番起動時の検査 | `ForwardedHeaderProductionValidator`（prod profile）が次の場合に起動を拒否する: `server.forward-headers-strategy` がframework以外、`TRUSTED_PROXIES` 未設定、IPv4で `/16` より広い・IPv6で `/48` より広い範囲、IPv4がprivate address（RFC 1918の `10/8`・`172.16/12`・`192.168/16`）またはshared address（RFC 6598の `100.64/10`）に収まらない範囲（公開IPv4・`127.0.0.0/8` 等）、host部にbitがあるCIDR（`10.0.1.5/24` 等）。構文不正のCIDRは全profileで起動時に拒否する |
+| 本番起動時の検査 | `ForwardedHeaderProductionValidator`（prod profile）が次の場合に起動を拒否する: `server.forward-headers-strategy` がframework以外、`TRUSTED_PROXIES` 未設定、IPv4で `/16` より広い・IPv6で `/48` より広い範囲、IPv4がprivate address（RFC 1918の `10/8`・`172.16/12`・`192.168/16`）またはshared address（RFC 6598の `100.64/10`）に収まらない範囲（公開IPv4・`127.0.0.0/8` 等）、IPv6でloopback（`::1`）・未指定（`::`）・link-local（`fe80::/10`）・multicast（`ff00::/8`）と重なる範囲、host部にbitがあるCIDR（`10.0.1.5/24` 等）。構文不正のCIDRは全profileで起動時に拒否する |
+| 判定に生のpathを使わせない検査 | `RequestUriDecisionGuardTest` が `src/main/java` 全体で `getRequestURI()`・`getServletPath()`・`getRequestURL()` の呼出しとメソッド参照を数え、許可表（表示・log・ledger用、context path考慮済み等の理由と件数付き）以外を失敗にする |
 
 `forward-headers-strategy` を `native` に切り替える案は採らない。TomcatのRemoteIpValveは信頼プロキシ経由のrequestについてclientが送った `X-Forwarded-Host` を反映し、内部proxyの指定もCIDRではなく正規表現になる。またNF-05公開APIのTomcat valveとの順序（W6A-P3-6）を変えることになる。
 
@@ -75,7 +76,9 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Forwarded-Ssl: on' https://<公�
 - task定義（`infra/ecs/task-definition.prod.json`）には `TRUSTED_PROXIES=ALB_SUBNET_CIDRS_PLACEHOLDER` を置いてある。**置換しないまま配備するとapplicationは起動しない**（構文検査で拒否）。
 - 既定値は無い。**未設定・空では本番は起動しない**（`本番の転送ヘッダー設定が不正なため起動できません: app.security.trusted-proxies（環境変数TRUSTED_PROXIES）にALBのsubnet CIDRを設定してください`）。dev/testの未設定は「転送ヘッダーを一切信頼しない」（fail-closed）として動く。
 - IPv4で `/16` より広い（`10.0.0.0/8`、`0.0.0.0/0` 等）、IPv6で `/48` より広い指定は起動を拒否する（`...の範囲が広すぎます`）。VPC全体（`/16`）は許可されるが、ALBのsubnetだけに絞ること。
-- IPv4はprivate address（`10/8`・`172.16/12`・`192.168/16`）またはshared address（`100.64/10`）だけを許す（`...private address（10/8・172.16/12・192.168/16）またはshared address（100.64/10）のALB subnetに限ります`）。ALBのnodeはVPC内のsubnetからprivate IPv4で接続するため、公開IPv4や `127.0.0.1` が信頼プロキシになる正規の構成は無い。IPv6はVPCに割り当たる範囲自体がglobal unicastのため、address種別では絞らずprefix長だけを検査する。
+- IPv4はprivate address（`10/8`・`172.16/12`・`192.168/16`）またはshared address（`100.64/10`）だけを許す（`...private address（10/8・172.16/12・192.168/16）またはshared address（100.64/10）のALB subnetに限ります`）。ALBのnodeはsubnetのIPv4からtargetへ接続するため、ALB subnetがこの範囲にあれば公開IPv4や `127.0.0.1` を信頼プロキシに入れる理由は無い。
+- **前提: 本番のVPCとALB subnetはRFC 1918または `100.64/10` で設計する**。AWSはVPCに公開routableなCIDRや `198.19.0.0/16` 等（secondary CIDRを含む）も使わせるが、それらにALB subnetを置く構成は**本batchの対象外**で、validatorが起動を拒否する。採用する場合はvalidator（`ForwardedHeaderProductionValidator.ALLOWED_IPV4_BLOCKS`）の変更とその復審が必要になる。配備前に §3.4 の0でVPC CIDRを確認する。
+- IPv6はVPCに割り当たる範囲自体がglobal unicastのため、許可する種別では絞らない。ただしIPv4と同じく、ALBになり得ないloopback（`::1`）・未指定（`::`）・link-local（`fe80::/10`）・multicast（`ff00::/8`）と重なる範囲は拒否する（`...のIPv6にloopback（::1）・未指定（::）・link-local（fe80::/10）・multicast（ff00::/8）は指定できません`）。
 - host部にbitがあるCIDR（`10.0.1.5/24` 等）は拒否する（`...network address（host部が0）のCIDRで指定してください`）。
 - 構文不正（`10.0.0/24`、host名、空要素、末尾のカンマ、zone ID、空白区切り、`/33` 等）は**全profile**で起動時に拒否する（`app.security.trusted-proxiesはIPアドレスまたはCIDR形式で指定してください: ...`）。host名はDNS解決しない。本batchを入れる前に、dev・staging・CIで既に設定している値を確認すること。
 - **範囲がALBの実IPを含まない場合**: 起動は成功するが、全requestの `X-Forwarded-Proto` が捨てられHTTPとして扱われるため、HTTPS強制のredirectが終わらず（`https://` へ302し続ける）、OIDCのredirect URIも `http://` になる。deploy直後に §3.4 の確認を必ず行う。
@@ -83,8 +86,9 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Forwarded-Ssl: on' https://<公�
 - 本番では `spring.main.lazy-initialization=true` にしない。validatorは `@PostConstruct` で検査するため、lazy初期化では検査されない（他の起動時validatorと同じ前提）。
 - NF-05公開APIの `integration.hub.security.trusted-proxies` は別の設定である（本番では公開APIはOFF）。将来公開APIを有効にする場合は両方にALBのsubnetを入れる。W3-06a（`35add3ac`）の統合後は、NF-05のTomcat valveがこの清浄化より前に転送ヘッダーの原文を捕捉するため、NF-05のsource IP判定はこの清浄化の影響を受けない。W3-06a統合前のNF-05 resolverはservletの `getRemoteAddr()` を読むため、清浄化後の値（信頼プロキシ経由なら右端1 hop、それ以外はTCP peer）を使う（従来の最左より安全側）。
 
-### 3.4 deploy後の確認
+### 3.4 deploy前・deploy後の確認
 
+0. **配備前: VPC CIDRとALB subnetの確認**。本番VPCのprimary・secondary CIDRと、ALBを置くsubnetのIPv4 CIDRが全てRFC 1918（`10/8`・`172.16/12`・`192.168/16`）または `100.64/10` に収まること、`TRUSTED_PROXIES` に入れる値がそのALB subnetのnetwork address（host部が0）であることを確認する。収まらない場合は配備を止め、§3.3の前提の見直し（validatorの変更）を依頼する。
 1. ブラウザで公開FQDNの `/login` を開き、redirectが繰り返されずにlogin画面が出ること（`X-Forwarded-Proto` が信頼されている）。
 2. OIDC loginを開始し、IdPへのredirectの `redirect_uri` が `https://<公開FQDN>/login/oauth2/code/<registrationId>` であること。
 3. §3.1 のcurl 4本がWAFの403になること（BLOCK切替後）。

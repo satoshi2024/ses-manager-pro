@@ -29,7 +29,12 @@ import java.util.List;
  *       private IPv4を受け取ってtargetへ接続するため、公開IPv4（{@code 8.8.0.0/16} 等）が信頼プロキシに
  *       なる正規の構成は無く、指定されていれば誤設定である。{@code 127.0.0.0/8} もALBではないため拒否する
  *       （container内からのhealth checkはHTTP許可path（{@code /actuator/health}）を使い、信頼しない）。
- *       IPv6はVPCに割り当たる範囲自体がglobal unicastのため、address種別では絞らずprefix長だけを検査する。</li>
+ *       IPv6はVPCに割り当たる範囲自体がglobal unicastのため、許可する種別では絞らない。ただしIPv4と同じく
+ *       ALBになり得ないloopback（{@code ::1}）・未指定（{@code ::}）・link-local（{@code fe80::/10}）・
+ *       multicast（{@code ff00::/8}）と重なる範囲は拒否する（r3 D-P3-3）。</li>
+ *   <li>この制約は本番VPC・ALB subnetをRFC 1918または {@code 100.64/10} で設計することを前提にする。
+ *       AWSが許す公開routableなCIDRや {@code 198.19.0.0/16} 等をVPCに使う構成は対象外で、採用する場合は
+ *       このvalidatorの変更が必要になる（r3 D-P3-4。runbookの配備前確認でVPC CIDRを確かめる）。</li>
  *   <li>host部に1のbitがあるCIDR（{@code 10.0.1.5/24} 等）は、意図した範囲が曖昧なため拒否する。</li>
  * </ul>
  * <p>{@code @PostConstruct} で検査するため、{@code spring.main.lazy-initialization=true} にすると検査されない。
@@ -46,6 +51,8 @@ public class ForwardedHeaderProductionValidator {
     /** 信頼プロキシとして許すIPv4の範囲（RFC 1918のprivate addressとRFC 6598のshared address）。 */
     static final List<String> ALLOWED_IPV4_BLOCKS = List.of("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
             "100.64.0.0/10");
+    /** 信頼プロキシと重なってはならないIPv6の範囲（loopback・未指定・link-local・multicast）。 */
+    static final List<String> FORBIDDEN_IPV6_BLOCKS = List.of("::1/128", "::/128", "fe80::/10", "ff00::/8");
 
     private final Environment environment;
     private final ClientIpResolver clientIpResolver;
@@ -88,6 +95,11 @@ public class ForwardedHeaderProductionValidator {
             if (ipv4 && ALLOWED_IPV4_BLOCKS.stream().noneMatch(block -> IpCidrMatcher.isContainedIn(proxy, block))) {
                 errors.add("app.security.trusted-proxiesのIPv4はprivate address（10/8・172.16/12・192.168/16）"
                         + "またはshared address（100.64/10）のALB subnetに限ります: " + proxy);
+            }
+            if (!ipv4 && FORBIDDEN_IPV6_BLOCKS.stream().anyMatch(block -> IpCidrMatcher.isContainedIn(proxy, block)
+                    || IpCidrMatcher.isContainedIn(block, proxy))) {
+                errors.add("app.security.trusted-proxiesのIPv6にloopback（::1）・未指定（::）・link-local（fe80::/10）・"
+                        + "multicast（ff00::/8）は指定できません: " + proxy);
             }
             if (IpCidrMatcher.hasHostBits(proxy)) {
                 errors.add("app.security.trusted-proxiesはnetwork address（host部が0）のCIDRで指定してください: " + proxy);
