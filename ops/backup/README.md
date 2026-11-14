@@ -12,7 +12,7 @@ MySQL 8 の業務データと uploads を restic repository へ退避し、指�
 | RPO | **15 分** | incident / 要求時刻と実効復旧点（checkpoint）の差 |
 | RTO | **4 時間** | incident 宣言から read-write 再開承認まで（plan・承認 / download・verify / DB replay / uploads / validation / cutover の区間合計） |
 
-- 2026-11-13 の上線決定（B-NF09-4）で上記を正式な目標値とした。本リポジトリ内の他文書
+- 2026-11-13 の本番投入決定（B-NF09-4）で上記を正式な目標値とした。本リポジトリ内の他文書
   （`.kiro/specs/asset-account-license-lifecycle/v182-production-runbook-draft.md` を含む）もこの値に揃えている。
 - **DBA Lead / Operations の署名は未取得（PENDING）**。署名までは承認済みの SLA として扱わない。
 - 代表データ量（HFP-03-PROD-007）の隔離演習（HFP-03-012）で実測するまでは「未達成」扱い。

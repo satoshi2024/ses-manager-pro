@@ -33,7 +33,7 @@
 | **DDL 実行所要時間** | Disposable コンテナ上で全 DDL/DML が数秒で完了することを確認済み。 | 本番テーブルサイズおよび I/O 負荷に応じ、数分〜数十分の保守ウィンドウ枠を確保。 | **保守計画値 (PENDING)** |
 | **Binlog 保持期間** | テスト環境では Binlog 永続保持なし（コンテナ破棄で破棄）。 | `binlog_format = ROW`、保持期間最低 7 日間以上を必須要件として推奨。 | **要 DBA 確認 (PENDING)** |
 | **演練結果の有効期限** | Commit `27a000f2225f272fe2c3b5094de6325c7714dd41` にて 5 シナリオ完全合格を確認済み。 | スキーマおよびデータ構造にドリフトがない限り、演練完了後 30 日以内を作業有効枠として推奨。 | **計画基準日設定 (PENDING)** |
-| **RTO / RPO** | コンテナ障害時のプロセス中断およびログ退避が即時実行可能であることを確認済み。 | 本番 PITR の目標値は `ops/backup/README.md`「復旧目標」と同一の **RPO 15 分 / RTO 4 時間**（2026-11-13 上線決定 B-NF09-4 で統一。旧草案の RTO ≤ 60 分 / RPO = 0 秒は廃止）。代表データ量の隔離演習で実測するまでは未達成扱い。 | **目標値決定済み・DBA Lead / Operations 署名待ち (PENDING)** |
+| **RTO / RPO** | コンテナ障害時のプロセス中断およびログ退避が即時実行可能であることを確認済み。 | 本番 PITR の目標値は `ops/backup/README.md`「復旧目標」と同一の **RPO 15 分 / RTO 4 時間**（2026-11-13 の本番投入決定 B-NF09-4 で統一。旧草案の RTO ≤ 60 分 / RPO = 0 秒は廃止）。代表データ量の隔離演習で実測するまでは未達成扱い。 | **目標値決定済み・DBA Lead / Operations 署名待ち (PENDING)** |
 
 ### 2.2 フルバックアップとポイントインタイムリカバリ（PITR）要件
 1. **直前フルスナップショットの取得**:
@@ -717,7 +717,7 @@ PITR 発動によりデータベースが V181 時点へ巻き戻された場合
 ## 11. シナリオ 5 の正確な位置づけと限定表明 (Scenario 5 Scoping & Explicit Disclaimer)
 
 ### 11.1 シナリオ 5 の実態
-`V182TenantScopeHardeningRehearsalMySqlTest` の第 5 節（`scenario5_faultEvidencePreservation_verifiesErrorCapturedBeforeTeardown`）は、**「本番 V182 マイグレーション自体は正常完了（version='182', success=1）した状態から、隔離テストリソースよりテスト専用の V182.99 を意図的に故障注入（CHECK 制約違反エラー 3819）して中途失敗させた環境において、コンテナが破棄される前に実行ログ・スキーマ定義・履歴テーブル・修復キュー・SHA-256 マニフェストをディスクに確実に落盤・保全できること」を検証した証拠保全演練（Evidence Preservation Rehearsal）**である。
+`V182TenantScopeHardeningRehearsalMySqlTest` の第 5 節（`scenario5_faultEvidencePreservation_verifiesErrorCapturedBeforeTeardown`）は、**「本番 V182 マイグレーション自体は正常完了（version='182', success=1）した状態から、隔離テストリソースよりテスト専用の V182.99 を意図的に故障注入（CHECK 制約違反エラー 3819）して中途失敗させた環境において、コンテナが破棄される前に実行ログ・スキーマ定義・履歴テーブル・修復キュー・SHA-256 マニフェストをディスクに確実に書き出して保全できること」を検証した証拠保全演練（Evidence Preservation Rehearsal）**である。
 
 ### 11.2 限定表明（明確な非対象事項）
 1. **V182 本番スクリプト自体の途上クラッシュ非検証**:

@@ -45,7 +45,7 @@ freeze 後に実装や migration が変わった場合、差分 inventory を再
 - `V100` 自体が追加する `s300.*` は 299 アカウントであり、V2 の既存 `admin` を加えて DB 全体で 300 アカウントになる。内訳は、既存 `admin` + `s300.admin01`、営業 25、HR 8、マネージャー 10、要員 255 である。
 - 要員 username は `s300.member001`〜`s300.member255` であり、`s300.eng001`〜`s300.eng255` ではない。
 - `s300.sales07`、`s300.hr05`、`s300.member200` は意図的に disabled である。ログイン oracle は **297 active 成功 / 3 disabled 拒否**（V2 `admin` が active である前提）とし、「300 アカウント全てログイン成功」を期待してはならない。
-- 既存の `.kiro/specs/scale-300-e2e/` は role/menu、desktop/mobile、代表的 API 権限の回帰 baseline である。本計画はその再実行と差分確認から開始し、未検証の業務更新、DB 落盤、競合、外部連携を追加する。
+- 既存の `.kiro/specs/scale-300-e2e/` は role/menu、desktop/mobile、代表的 API 権限の回帰 baseline である。本計画はその再実行と差分確認から開始し、未検証の業務更新、DB への永続化、競合、外部連携を追加する。
 
 ## 4. 論理ケースと実行 instance
 
@@ -64,7 +64,7 @@ freeze 後に実装や migration が変わった場合、差分 inventory を再
 | 詳細 | 存在、存在しない ID、scope 外 ID、削除済み ID、query/path parameter 契約、関連データ欠損 |
 | 登録/更新/削除 | 正常、required、型/桁/境界、重複、業務 conflict、CSRF 欠落/不正、role/action deny、data scope deny、二重送信、DB before/after、audit、rollback |
 | 状態遷移 | 許可される全 edge、禁止 edge、同一状態の冪等性、履歴、通知、承認待ち、同時更新 conflict |
-| 複数表 transaction | 各落盤先、途中例外、全 rollback、再試行、採番/unique conflict、外部 side effect との整合 |
+| 複数表 transaction | 各永続化先、途中例外、全 rollback、再試行、採番/unique conflict、外部 side effect との整合 |
 | file/PDF/CSV/XML | MIME、filename、文字コード、schema/項目、金額・丸め、0件、大容量、権限、再実行、ブラウザ download、目視 evidence |
 | 操作/UX（UI 実操作レイヤー） | クリック/連打、ドラッグ&ドロップ、back/forward、再読込、IME、モバイル/タッチ、キーボード、ネットワーク変調、セッション変動、入力保持、空/読込/エラー 3 態、二重送信、focus/aria。全 page × 適用可能プリミティブを `ui-real-user-simulation.md` へ mapping |
 | ランダム探索（モンキー） | ランダム操作・入力を seed 固定で大量実行し、500/未捕捉例外/白画面/想定外 4xx、DB invariant 違反、権限突破、UI 破壊を検出。時間予算・検出数・異常率・探索カバレッジで報告し、合格率には換算しない |

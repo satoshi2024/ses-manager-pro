@@ -123,8 +123,10 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                 clockUpdated = true;
             }
 
-            // 期限30分前からwarningを一度だけ発行する。
-            if (!responseWasBreached && !Boolean.TRUE.equals(clk.getResponseWarningSent())
+            // 期限30分前からwarningを一度だけ発行する。初回応答を記録済みの依頼は初回応答期限の対象外のため、
+            // 超過判定（上記1.）と同じく初回応答の記録有無を見て、応答済みの依頼へ初回応答warningを出さない。
+            if (!responseWasBreached && clk.getFirstRespondedAt() == null
+                    && !Boolean.TRUE.equals(clk.getResponseWarningSent())
                     && dueForWarning(clk.getResponseDeadline(), now)) {
                 clk.setResponseWarningSent(true);
                 clockUpdated = true;
@@ -139,7 +141,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                         String.format("リクエスト %s [%s] の解決期限まで30分以内です", req.getRequestNo(), req.getSubject())));
             }
 
-            // 無接收者・部分失敗の通知は台帳へ残し、退避時間経過後に同じdedupe keyで再送する。
+            // 受信者なし・部分失敗の通知は台帳へ残し、退避時間経過後に同じdedupe keyで再送する。
             for (ServiceSlaEscalation retry : retryRows) {
                 if (retry.getNextRetryAt() != null && retry.getNextRetryAt().isAfter(now)) {
                     continue;

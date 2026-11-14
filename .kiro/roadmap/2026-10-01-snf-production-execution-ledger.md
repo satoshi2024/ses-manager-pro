@@ -515,7 +515,7 @@ JaCoCo mismatchはcoverage結論に使用しない。W3a CODE FAILおよびprodu
 
 | Batch | 担当model | branch / worktree | 状態 |
 |---|---|---|---|
-| F0 統括・決定包 | root | `codex/snf-prod-control` / `C:\work\ses-snf-status-audit` | IN_PROGRESS |
+| F0 統括・決定パッケージ | root | `codex/snf-prod-control` / `C:\work\ses-snf-status-audit` | IN_PROGRESS |
 | C0 Browser fixture | gpt-6-luna | `codex/snf-prod-browser-isolation` / `C:\work\ses-nf02-remediation` | `0d78cc13` Astra CODE PASS、control `778e372d`へ統合。main CI再実行なし |
 | Q0 Fast fixture | gpt-6-luna / browser_fix | `codex/snf-prod-fast-isolation` / `C:\work\ses-nf02-remediation` | `b1775812` Astra限定CODE PASS、control `198ee8e5`へ統合。2 classの両実行順序・最終態で各12/0/0/0。第3回全fastで旧5 errorは非再現。全体は別Portal failureでFAIL |
 | R09 provider境界 | gpt-6-luna | `codex/snf-prod-nf09-provider-boundary` / `C:\work\ses-nf09-system-actor-attribution` | 最終`da850b97`、profile4＋実service反復2=6/0/0/0、Astra CODE PASS、control `036b3eed`へ統合 |
