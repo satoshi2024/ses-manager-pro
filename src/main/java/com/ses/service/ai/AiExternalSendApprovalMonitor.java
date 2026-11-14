@@ -52,7 +52,9 @@ public class AiExternalSendApprovalMonitor {
         /** 署名日前で、外部送信は停止中。 */
         NOT_YET_VALID,
         /** 承認設定・チェックリストが不完全で、外部送信は停止中。 */
-        INCOMPLETE;
+        INCOMPLETE,
+        /** 起動時の固定承認と一致せず、再起動するまで外部送信できない。 */
+        RESTART_REQUIRED;
 
         public boolean requiresAttention() {
             return this != DISABLED && this != VALID;
@@ -66,6 +68,7 @@ public class AiExternalSendApprovalMonitor {
     private final AiConfig aiConfig;
     private final AiProductionApprovalGate approvalGate;
     private final Clock clock;
+    private final AiExternalSendApproval.Snapshot startupApproval;
     private final Supplier<MeterRegistry> registrySupplier;
     private final AtomicReference<String> lastReported = new AtomicReference<>();
 
@@ -85,6 +88,9 @@ public class AiExternalSendApprovalMonitor {
                                           Supplier<MeterRegistry> registrySupplier) {
         this.aiConfig = aiConfig;
         this.approvalGate = approvalGate;
+        AiProductionApprovalGate.AiExternalSendGateStatus initial =
+                approvalGate == null ? null : approvalGate.externalSendStatus();
+        this.startupApproval = initial != null && initial.approved() ? initial.approval() : null;
         this.clock = clock == null ? Clock.system(AiExternalSendApproval.BUSINESS_ZONE) : clock;
         this.registrySupplier = registrySupplier;
     }
@@ -98,7 +104,8 @@ public class AiExternalSendApprovalMonitor {
     /** 失効前警告の日数（設定値を1〜366日に丸める）。 */
     public int warningDays() {
         AiConfig.ExternalSendMonitor monitor = aiConfig == null ? null : aiConfig.getExternalSendMonitor();
-        int configured = monitor == null ? DEFAULT_WARNING_DAYS : monitor.getExpiryWarningDays();
+        int configured = monitor == null || monitor.getExpiryWarningDays() == null
+                ? DEFAULT_WARNING_DAYS : monitor.getExpiryWarningDays();
         return Math.max(1, Math.min(AiExternalSendApproval.MAX_VALIDITY_DAYS, configured));
     }
 
@@ -112,7 +119,9 @@ public class AiExternalSendApprovalMonitor {
         AiProductionApprovalGate.AiExternalSendGateStatus gate =
                 approvalGate == null ? null : approvalGate.externalSendStatus();
         State state;
-        if (gate != null && gate.approved()) {
+        if (gate != null && gate.approved() && !gate.approval().equals(startupApproval)) {
+            state = State.RESTART_REQUIRED;
+        } else if (gate != null && gate.approved()) {
             state = window.state() == AiExternalSendApproval.WindowState.EXPIRING ? State.EXPIRING : State.VALID;
         } else if (window.state() == AiExternalSendApproval.WindowState.EXPIRED) {
             state = State.EXPIRED;

@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
  */
 @Slf4j
 @Service
-@ConditionalOnExpression("!'gemini'.equals('${ai.provider:mock}')")
+@ConditionalOnExpression("!'gemini'.equalsIgnoreCase('${ai.provider:mock}')")
 public class MockProjectParseServiceImpl implements ProjectParseService {
 
     private static final Pattern NAME_PATTERN = Pattern.compile(

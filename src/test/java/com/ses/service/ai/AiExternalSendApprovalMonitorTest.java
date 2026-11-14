@@ -161,6 +161,35 @@ class AiExternalSendApprovalMonitorTest {
         assertEquals(Long.valueOf(0L), monitor.currentStatus().daysRemaining());
     }
 
+    @Test
+    void 署名日前に起動した場合は署名日を迎えても再起動待ちを通知する() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(TODAY);
+        config.getExternalSendApproval().setSignedOn(TODAY.plusDays(1).toString());
+        AiExternalSendApprovalFixtures.resign(config);
+        MutableClock clock = new MutableClock(NOW);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AiExternalSendApprovalMonitor monitor = monitor(config, clock, registry);
+        assertEquals(AiExternalSendApprovalMonitor.State.NOT_YET_VALID, monitor.currentStatus().state());
+        clock.set(NOW.plusSeconds(86_400));
+        assertEquals(AiExternalSendApprovalMonitor.State.RESTART_REQUIRED, monitor.currentStatus().state());
+        assertEquals(1.0, stateGauge(registry, AiExternalSendApprovalMonitor.State.RESTART_REQUIRED));
+        daysGauge(registry);
+        assertTrue(warnings().stream().anyMatch(event -> event.getFormattedMessage().contains("RESTART_REQUIRED")));
+        assertEquals(AiExternalSendApprovalMonitor.State.VALID, monitor(config, clock, null).currentStatus().state());
+    }
+
+    @Test
+    void 起動後に再署名した別承認も再起動待ちとして通知する() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(TODAY);
+        MutableClock clock = new MutableClock(NOW);
+        AiExternalSendApprovalMonitor monitor = monitor(config, clock, null);
+        config.getExternalSendApproval().setDecisionId("NF08-EXT-2026-0999");
+        AiExternalSendApprovalFixtures.resign(config);
+        assertEquals(AiExternalSendApprovalMonitor.State.RESTART_REQUIRED, monitor.currentStatus().state());
+        config.getExternalSendMonitor().setExpiryWarningDays(null);
+        assertEquals(AiExternalSendApprovalMonitor.DEFAULT_WARNING_DAYS, monitor.warningDays());
+    }
+
     private static AiExternalSendApprovalMonitor monitor(AiConfig config, Clock clock, MeterRegistry registry) {
         AiExternalSendApprovalMonitor monitor = new AiExternalSendApprovalMonitor(config,
                 new AiProductionApprovalGate(config, clock), clock, registry);

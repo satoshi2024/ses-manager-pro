@@ -169,7 +169,7 @@ public class AiConfig {
     @Data
     public static class ExternalSendMonitor {
         /** 失効の何日前から警告（WARN log・監視metricのEXPIRING）とするか。1〜366日。 */
-        private int expiryWarningDays = 30;
+        private Integer expiryWarningDays = 30;
     }
 
     /** 署名済み決定に記載された費用上限と料金単価（円換算済み、安全余裕込み）。 */
