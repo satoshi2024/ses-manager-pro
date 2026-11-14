@@ -151,6 +151,9 @@ public final class ActionPermissionResolver {
         if (root.isBlank()) {
             return null;
         }
+        if ("import-center".equals(root)) {
+            return resolveImportCenterAction(method, uri);
+        }
         String resource = RESOURCE_NAMES.get(root);
         if (resource == null) {
             return null;
@@ -312,6 +315,27 @@ public final class ActionPermissionResolver {
                     || uri.equals("/api/security/sessions/revoke-all");
         }
         return "DELETE".equals(method) && uri.matches("/api/security/sessions/\\d+");
+    }
+
+    /**
+     * NF-06取込センター。初回リリースで公開するrouteだけを完全一致で{@code import.metadata.manage}へ解決し、
+     * それ以外（apply・restart・rollback・compensation等）はnullのまま返してMenuPermissionFilterで403にする
+     * （B-NF06-3。route単位の閉鎖であり、role別のaction allow-listではない。action層はbaseline+denyのまま）。
+     */
+    private static String resolveImportCenterAction(String method, String uri) {
+        boolean published = switch (method) {
+            case "POST" -> "/api/import-center/uploads".equals(uri)
+                    || "/api/import-center/sources".equals(uri)
+                    || uri.matches("/api/import-center/jobs/[0-9]+/validations")
+                    || uri.matches("/api/import-center/sources/[0-9]+/mappings");
+            case "GET" -> uri.matches("/api/import-center/jobs/[0-9]+")
+                    || uri.matches("/api/import-center/jobs/[0-9]+/(preview|error-export)")
+                    || "/api/import-center/sources".equals(uri)
+                    || uri.matches("/api/import-center/sources/[0-9]+/mappings");
+            case "PUT" -> uri.matches("/api/import-center/sources/[0-9]+");
+            default -> false;
+        };
+        return published ? "import.metadata.manage" : null;
     }
 
     private static boolean matchesPrefix(String uri, String prefix) {

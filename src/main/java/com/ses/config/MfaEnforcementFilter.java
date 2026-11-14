@@ -20,6 +20,20 @@ public class MfaEnforcementFilter extends OncePerRequestFilter {
     public static final String MFA_PENDING_ATTRIBUTE = "SES_MFA_PENDING";
     public static final String MFA_VERIFIED_ATTRIBUTE = "SES_MFA_VERIFIED";
 
+    /**
+     * MFAを検証した本人（{@code sys_user.id}）。検証済みの印を認証主体へ結び付け、同じブラウザで別の主体が
+     * loginした場合に引き継がせない（review P3-a）。TOTPの再登録・本人のMFA resetの許可とbootstrap sessionは
+     * {@link #isVerifiedFor(HttpSession, Long)} で判定する。
+     */
+    public static final String MFA_VERIFIED_USER_ATTRIBUTE = "SES_MFA_VERIFIED_USER_ID";
+
+    /** sessionのMFA検証済みの印が、指定の {@code sys_user.id} について立てられたものか。 */
+    public static boolean isVerifiedFor(HttpSession session, Long userId) {
+        return session != null && userId != null
+                && Boolean.TRUE.equals(session.getAttribute(MFA_VERIFIED_ATTRIBUTE))
+                && userId.equals(session.getAttribute(MFA_VERIFIED_USER_ATTRIBUTE));
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {

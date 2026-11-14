@@ -19,6 +19,10 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
     @Select("SELECT * FROM sys_user WHERE id = #{id} AND tenant_id = #{tenantId} AND deleted_flag = 0")
     SysUser selectByIdAndTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
 
+    /** 信頼済みの要員ID/tenantから失敗回数を更新するtransactionで対象行をロックする。 */
+    @Select("SELECT * FROM sys_user WHERE id = #{id} AND tenant_id = #{tenantId} AND deleted_flag = 0 FOR UPDATE")
+    SysUser selectByIdAndTenantForUpdate(@Param("id") Long id, @Param("tenantId") String tenantId);
+
     @Select("SELECT * FROM sys_user WHERE tenant_id = #{tenantId} AND role = #{role} "
             + "AND status = 1 AND deleted_flag = 0 ORDER BY id")
     List<SysUser> selectActiveByRoleAndTenant(@Param("role") String role,
@@ -53,6 +57,10 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
     @Select("SELECT * FROM sys_user WHERE username = #{username} AND deleted_flag = 0")
     SysUser selectByUsername(@Param("username") String username);
 
+    /** ログイン失敗の更新transaction内で最新状態を取得し、同じユーザーへの加算を直列化する。 */
+    @Select("SELECT * FROM sys_user WHERE username = #{username} AND deleted_flag = 0 FOR UPDATE")
+    SysUser selectByUsernameForUpdate(@Param("username") String username);
+
     @Select("SELECT * FROM sys_user WHERE username = #{username} AND tenant_id = #{tenantId} "
             + "AND deleted_flag = 0")
     SysUser selectByUsernameAndTenant(@Param("username") String username,
@@ -70,30 +78,6 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
     int updateLockState(@Param("id") Long id,
                         @Param("failedCount") int failedCount,
                         @Param("lockedUntil") LocalDateTime lockedUntil);
-
-    /**
-     * ログイン失敗回数をデータベース上で原子的に加算する。期限切れロックは
-     * 新しいカウント周期として扱い、閾値到達時のみロック日時を設定する。
-     */
-    @Update("""
-        UPDATE sys_user
-        SET failed_count = CASE
-              WHEN (CASE WHEN locked_until IS NOT NULL AND locked_until <= #{now} THEN 1
-                         ELSE COALESCE(failed_count, 0) + 1 END) >= #{maxFailed} THEN 0
-              WHEN locked_until IS NOT NULL AND locked_until <= #{now} THEN 1
-              ELSE COALESCE(failed_count, 0) + 1 END,
-            locked_until = CASE
-              WHEN (CASE WHEN locked_until IS NOT NULL AND locked_until <= #{now} THEN 1
-                         ELSE COALESCE(failed_count, 0) + 1 END) >= #{maxFailed}
-                THEN TIMESTAMPADD(MINUTE, #{lockMinutes}, #{now})
-              WHEN locked_until IS NOT NULL AND locked_until <= #{now} THEN NULL
-              ELSE locked_until END
-        WHERE id = #{id} AND deleted_flag = 0
-        """)
-    int incrementLoginFailure(@Param("id") Long id,
-                              @Param("now") LocalDateTime now,
-                              @Param("maxFailed") int maxFailed,
-                              @Param("lockMinutes") int lockMinutes);
 
     /**
      * 営業成績の過去実績表示用に、論理削除済みユーザーも含めて取得する。

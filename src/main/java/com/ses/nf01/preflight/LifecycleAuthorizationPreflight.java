@@ -1,0 +1,961 @@
+package com.ses.nf01.preflight;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+
+/**
+ * NF01 migration前のschema/tenant状態を読み取る専用CLI。
+ * 固定SELECTとJDBC metadataだけを実行し、業務データを変更しない。
+ */
+public final class LifecycleAuthorizationPreflight {
+    private static final List<TableSpec> TABLES = List.of(
+            new TableSpec("sys_user", Map.of("id", "bigint", "tenant_id", "varchar", "email", "varchar")),
+            new TableSpec("t_lifecycle_case", Map.of("id", "bigint", "tenant_id", "varchar", "engineer_id", "bigint",
+                    "lifecycle_type", "varchar", "status", "varchar", "deleted_flag", "int")),
+            new TableSpec("t_lifecycle_task", Map.of("id", "bigint", "case_id", "bigint", "evidence_type", "varchar",
+                    "status", "varchar", "deleted_flag", "int")),
+            new TableSpec("t_lifecycle_evidence_link", Map.of("id", "bigint", "task_id", "bigint", "document_id", "bigint",
+                    "document_version_id", "bigint")),
+            new TableSpec("t_engineer", Map.of("id", "bigint", "tenant_id", "varchar")),
+            new TableSpec("m_customer", Map.of("id", "bigint", "tenant_id", "varchar")),
+            new TableSpec("t_contract", Map.of("id", "bigint", "tenant_id", "varchar", "customer_id", "bigint")),
+            new TableSpec("t_engineer_account_link", Map.of("id", "bigint", "tenant_id", "varchar", "engineer_id", "bigint", "sys_user_id", "bigint")),
+            new TableSpec("t_user_organization", Map.of("id", "bigint", "tenant_id", "varchar", "user_id", "bigint", "organization_id", "bigint")),
+            new TableSpec("m_organization_unit", Map.of("id", "bigint", "tenant_id", "bigint")),
+            new TableSpec("t_document", Map.of("id", "bigint", "tenant_id", "varchar")),
+            new TableSpec("t_document_version", Map.of("id", "bigint", "tenant_id", "varchar", "document_id", "bigint")),
+            new TableSpec("t_document_link", Map.of("id", "bigint", "tenant_id", "varchar", "document_id", "bigint")),
+            new TableSpec("t_document_disposal_request", Map.of("id", "bigint", "document_id", "bigint")),
+            new TableSpec("t_proposal", Map.of("id", "bigint", "engineer_id", "bigint", "project_id", "bigint", "proposed_by", "bigint")),
+            new TableSpec("t_project", Map.of("id", "bigint", "customer_id", "bigint")),
+            new TableSpec("t_sales_activity", Map.of("id", "bigint", "customer_id", "bigint", "created_by", "bigint")),
+            new TableSpec("t_engineer_sales", Map.of("id", "bigint", "engineer_id", "bigint", "sales_user_id", "bigint")),
+            new TableSpec("m_asset", Map.of("id", "bigint")),
+            new TableSpec("t_asset_assignment", Map.of("id", "bigint", "asset_id", "bigint", "assignee_type", "varchar", "assignee_id", "bigint")),
+            new TableSpec("t_asset_lost_incident", Map.of("id", "bigint", "asset_id", "bigint")),
+            new TableSpec("m_portal_organization", Map.of("id", "bigint", "tenant_id", "varchar", "deleted_flag", "tinyint")),
+            new TableSpec("t_portal_user", Map.of("id", "bigint", "portal_org_id", "bigint", "email", "varchar",
+                    "deleted_flag", "tinyint"))
+    );
+
+    /** V188のポータルユーザーと要員の紐付け表。V188適用前は存在しないため必須表には入れない。 */
+    private static final String PORTAL_ENGINEER_LINK_TABLE = "t_portal_user_engineer_link";
+
+    /**
+     * 旧email照合（ResignationGateCheckerのNF01 batch 0 L6）なら退社時に自動処理されていたポータルユーザー:
+     * 未削除の組織に属する未削除のポータルユーザーで、同じtenantの内部アカウント（要員連携あり）とemailが一致するもの。
+     * 旧照合と同じく列のcollationで比較する（大文字小文字を畳む。対象を広く拾う側に倒す）。
+     */
+    private static final String PORTAL_EMAIL_CANDIDATES = "FROM t_portal_user pu "
+            + "JOIN m_portal_organization po ON po.id=pu.portal_org_id AND po.deleted_flag=0 "
+            + "WHERE pu.deleted_flag=0 AND EXISTS (SELECT 1 FROM sys_user su "
+            + "JOIN t_engineer_account_link al ON al.sys_user_id=su.id AND al.tenant_id=su.tenant_id "
+            + "WHERE su.email IS NOT NULL AND TRIM(su.email)<>'' AND LOWER(TRIM(su.email))=LOWER(TRIM(pu.email)) "
+            + "AND su.tenant_id=po.tenant_id)";
+
+    /** 現行（未解除・未削除）の紐付けを持つポータルユーザーを除く条件。紐付け表がある場合だけ付ける。 */
+    private static final String WITHOUT_ACTIVE_PORTAL_LINK = " AND NOT EXISTS (SELECT 1 FROM t_portal_user_engineer_link l "
+            + "WHERE l.portal_user_id=pu.id AND l.released_at IS NULL AND l.deleted_flag=0)";
+
+    /**
+     * 現行の紐付けのうち、紐付けtenantと要員・ポータル組織のtenantが一致しないもの、要員・未削除ポータルユーザーの組織が
+     * 無いもの（tenantはbinary・NULL安全で比較する）。退社自動処理はこの状態をfail-closedにする。
+     */
+    private static final String PORTAL_LINK_SCOPE_MISMATCH = "FROM t_portal_user_engineer_link l "
+            + "LEFT JOIN t_engineer e ON e.id=l.engineer_id "
+            + "LEFT JOIN t_portal_user pu ON pu.id=l.portal_user_id "
+            + "LEFT JOIN m_portal_organization po ON po.id=pu.portal_org_id AND po.deleted_flag=0 "
+            + "WHERE l.released_at IS NULL AND l.deleted_flag=0 AND (e.id IS NULL OR NOT (BINARY e.tenant_id <=> BINARY l.tenant_id) "
+            + "OR pu.id IS NULL OR (pu.deleted_flag=0 AND (po.id IS NULL OR NOT (BINARY po.tenant_id <=> BINARY l.tenant_id))))";
+
+    private static final List<TenantSource> TENANT_SOURCES = List.of(
+            new TenantSource("sys_user", "tenant_id"), new TenantSource("t_lifecycle_case", "tenant_id"),
+            new TenantSource("t_engineer", "tenant_id"), new TenantSource("m_customer", "tenant_id"),
+            new TenantSource("t_contract", "tenant_id"), new TenantSource("t_engineer_account_link", "tenant_id"),
+            new TenantSource("t_user_organization", "tenant_id"), new TenantSource("t_document", "tenant_id"),
+            new TenantSource("t_document_version", "tenant_id"), new TenantSource("t_document_link", "tenant_id")
+    );
+
+    private static final List<ParentQuery> PARENT_QUERIES = List.of(
+            new ParentQuery("proposal", "SELECT p.id row_id, e.tenant_id candidate FROM t_proposal p LEFT JOIN t_engineer e ON e.id=p.engineer_id UNION ALL SELECT p.id row_id, c.tenant_id candidate FROM t_proposal p LEFT JOIN t_project pr ON pr.id=p.project_id LEFT JOIN m_customer c ON c.id=pr.customer_id UNION ALL SELECT p.id row_id, u.tenant_id candidate FROM t_proposal p LEFT JOIN sys_user u ON u.id=p.proposed_by"),
+            new ParentQuery("project", "SELECT p.id row_id, c.tenant_id candidate FROM t_project p LEFT JOIN m_customer c ON c.id=p.customer_id"),
+            new ParentQuery("sales_activity", "SELECT a.id row_id, c.tenant_id candidate FROM t_sales_activity a LEFT JOIN m_customer c ON c.id=a.customer_id UNION ALL SELECT a.id row_id, u.tenant_id candidate FROM t_sales_activity a LEFT JOIN sys_user u ON u.id=a.created_by"),
+            new ParentQuery("engineer_sales", "SELECT x.id row_id, e.tenant_id candidate FROM t_engineer_sales x LEFT JOIN t_engineer e ON e.id=x.engineer_id UNION ALL SELECT x.id row_id, u.tenant_id candidate FROM t_engineer_sales x LEFT JOIN sys_user u ON u.id=x.sales_user_id"),
+            new ParentQuery("asset", "SELECT a.id row_id, CASE WHEN x.assignee_type='ENGINEER' THEN e.tenant_id WHEN x.assignee_type='USER' THEN u.tenant_id ELSE NULL END candidate FROM m_asset a LEFT JOIN t_asset_assignment x ON x.asset_id=a.id AND x.actual_return_date IS NULL LEFT JOIN t_engineer e ON x.assignee_type='ENGINEER' AND e.id=x.assignee_id LEFT JOIN sys_user u ON x.assignee_type='USER' AND u.id=x.assignee_id"),
+            new ParentQuery("asset_assignment", "SELECT x.id row_id, CASE WHEN x.assignee_type='ENGINEER' THEN e.tenant_id WHEN x.assignee_type='USER' THEN u.tenant_id ELSE NULL END candidate FROM t_asset_assignment x LEFT JOIN t_engineer e ON x.assignee_type='ENGINEER' AND e.id=x.assignee_id LEFT JOIN sys_user u ON x.assignee_type='USER' AND u.id=x.assignee_id"),
+            new ParentQuery("asset_lost_incident", "SELECT i.id row_id, e.tenant_id candidate FROM t_asset_lost_incident i LEFT JOIN t_asset_assignment a ON a.asset_id=i.asset_id AND a.actual_return_date IS NULL LEFT JOIN t_engineer e ON a.assignee_type='ENGINEER' AND e.id=a.assignee_id UNION ALL SELECT i.id row_id, u.tenant_id candidate FROM t_asset_lost_incident i LEFT JOIN t_asset_assignment a ON a.asset_id=i.asset_id AND a.actual_return_date IS NULL LEFT JOIN sys_user u ON a.assignee_type='USER' AND u.id=a.assignee_id")
+    );
+
+    /**
+     * epoch spine migrationで追加予定の複合一意keyの前提（NF01b実行契約 §9.1）。
+     * 列名・表名は固定allowlistであり、入力値からSQLを組み立てない。
+     */
+    private static final List<UniqueKeySpec> UNIQUE_KEY_PRECONDITIONS = List.of(
+            new UniqueKeySpec("t_lifecycle_case", List.of("tenant_id", "id")),
+            new UniqueKeySpec("t_lifecycle_task", List.of("case_id", "id")),
+            new UniqueKeySpec("sys_user", List.of("tenant_id", "id")),
+            new UniqueKeySpec("t_document", List.of("tenant_id", "id")),
+            new UniqueKeySpec("t_document_version", List.of("tenant_id", "id")),
+            new UniqueKeySpec("t_document_version", List.of("tenant_id", "document_id", "id"))
+    );
+
+    /**
+     * V187の一意制約 uk_lifecycle_case_active_resignation の対象行（退社・未終結・未削除）。
+     * 生成列と同じ式で数えるため、他の検査と違ってBINARYを付けず列のcollationで比較する
+     * （一意indexもcollationで比較するので、ここで重複と数えた組はDDLでも重複になる）。tenant・要員がNULLの行は
+     * 一意判定の対象外なので数えない。
+     */
+    private static final String ACTIVE_RESIGNATION_ROWS = "FROM t_lifecycle_case x WHERE x.lifecycle_type='RESIGNATION' "
+            + "AND x.status NOT IN ('COMPLETED','CANCELLED') AND x.deleted_flag=0 "
+            + "AND x.tenant_id IS NOT NULL AND x.engineer_id IS NOT NULL";
+
+    /** {@link #ACTIVE_RESIGNATION_ROWS} のうち、同一tenant・同一要員で2件以上ある組。 */
+    private static final String ACTIVE_RESIGNATION_DUPLICATE_GROUPS = "SELECT x.tenant_id, x.engineer_id "
+            + ACTIVE_RESIGNATION_ROWS + " GROUP BY x.tenant_id, x.engineer_id HAVING COUNT(*) > 1";
+
+    /** アプリが未終結とみなすDUAL_CONFIRMATIONタスク（大文字小文字・末尾空白を畳まないbinary比較）。 */
+    private static final String UNFINISHED_DUAL_TASKS = "FROM t_lifecycle_task t LEFT JOIN t_lifecycle_case c ON c.id=t.case_id "
+            + "WHERE t.deleted_flag=0 AND BINARY t.evidence_type='DUAL_CONFIRMATION' "
+            + "AND (t.status IS NULL OR BINARY t.status NOT IN ('COMPLETED','WAIVED','CANCELLED'))";
+
+    private LifecycleAuthorizationPreflight() { }
+
+    public static void main(String[] args) {
+        String schema = System.getenv("NF01_PREFLIGHT_SCHEMA");
+        String baseline = System.getenv("NF01_PREFLIGHT_CODE_BASELINE");
+        String actualHead = System.getenv("NF01_PREFLIGHT_ACTUAL_HEAD");
+        String sourceSha256 = System.getenv("NF01_PREFLIGHT_SOURCE_SHA256");
+        String outputValue = System.getenv("NF01_PREFLIGHT_OUTPUT_DIR");
+        String url = System.getenv("NF01_PREFLIGHT_JDBC_URL");
+        String user = System.getenv("NF01_PREFLIGHT_DB_USER");
+        String password = System.getenv("NF01_PREFLIGHT_DB_PASSWORD");
+        Path output = outputValue == null || outputValue.isBlank() ? null : Path.of(outputValue);
+        if (url == null || !url.startsWith("jdbc:mysql:")) {
+            PreflightReport failed = PreflightReport.failed(baseline == null ? "unknown" : baseline,
+                    schema == null ? "unknown" : schema, "PREFLIGHT_DATABASE_UNSUPPORTED");
+            try { if (output != null) write(failed, output); } catch (IOException ignored) { }
+            System.exit(2);
+            return;
+        }
+        try (Connection connection = java.sql.DriverManager.getConnection(url, user, password)) {
+            PreflightReport report = run(connection, schema, baseline);
+            report.provenance(actualHead, sourceSha256);
+            write(report, output);
+            if (!report.status().equals("PASS")) {
+                System.exit(2);
+            }
+        } catch (Exception ignored) {
+            PreflightReport failed = PreflightReport.failed(baseline == null ? "unknown" : baseline,
+                    schema == null ? "unknown" : schema, "PREFLIGHT_EXECUTION_FAILED");
+            try {
+                if (output != null) write(failed, output);
+            } catch (IOException ignoredWrite) {
+                // DB exceptionやoutput pathをstdout/stderrへ出さない。
+            }
+            System.exit(2);
+        }
+    }
+
+    public static PreflightReport run(Connection connection, String schema, String codeBaseline) {
+        PreflightReport report = new PreflightReport(codeBaseline, schema);
+        try {
+            if (schema == null || schema.isBlank() || codeBaseline == null || codeBaseline.isBlank()) {
+                return report.fail("INPUT_INVALID", "input", "schema/code baseline is required");
+            }
+            if (!connection.getMetaData().getDatabaseProductName().toLowerCase().contains("mysql")) {
+                return report.fail("DATABASE_UNSUPPORTED", "database", "MySQL is required");
+            }
+            if (!schema.equals(connection.getCatalog())) {
+                return report.fail("SCHEMA_MISMATCH", "schema", "requested schema differs from JDBC catalog");
+            }
+            connection.setReadOnly(true);
+            connection.setAutoCommit(false);
+            try (Statement transaction = connection.createStatement()) {
+                transaction.execute("START TRANSACTION READ ONLY");
+            }
+            inventory(connection, schema, report);
+            if (!report.hasFailures()) {
+                tenantSources(connection, report);
+                relationshipChecks(connection, report);
+                lifecycleEvidenceChecks(connection, report);
+                activeResignationDuplicates(connection, report);
+                portalEngineerLinkChecks(connection, schema, report);
+                uniqueKeyPreconditions(connection, schema, report);
+                parentCandidates(connection, report);
+                organizationUnitCandidates(connection, report);
+            }
+            connection.commit();
+            return report;
+        } catch (Exception ignored) {
+            rollbackQuietly(connection);
+            return report.fail("PREFLIGHT_INCOMPLETE", "execution", "read-only collection did not complete");
+        }
+    }
+
+    private static void inventory(Connection connection, String schema, PreflightReport report) throws SQLException {
+        DatabaseMetaData metadata = connection.getMetaData();
+        Map<String, Map<String, ColumnInfo>> columns = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        try (ResultSet result = metadata.getColumns(schema, null, "%", "%")) {
+            while (result.next()) {
+                String table = result.getString("TABLE_NAME");
+                String column = result.getString("COLUMN_NAME");
+                columns.computeIfAbsent(table, ignored -> new TreeMap<>(String.CASE_INSENSITIVE_ORDER))
+                        .put(column, new ColumnInfo(result.getString("TYPE_NAME"), result.getInt("NULLABLE") != DatabaseMetaData.columnNoNulls,
+                                result.getString("CHAR_OCTET_LENGTH"), result.getString("IS_AUTOINCREMENT"), null));
+            }
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT TABLE_NAME,COLUMN_NAME,COLUMN_TYPE,IS_NULLABLE,CHARACTER_MAXIMUM_LENGTH,COLLATION_NAME,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=?")) {
+            statement.setString(1, schema);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    Map<String, ColumnInfo> table = columns.get(result.getString("TABLE_NAME"));
+                    if (table == null) continue;
+                    String column = result.getString("COLUMN_NAME");
+                    if (table.containsKey(column)) table.put(column, new ColumnInfo(result.getString("COLUMN_TYPE"),
+                            "YES".equalsIgnoreCase(result.getString("IS_NULLABLE")),
+                            result.getString("CHARACTER_MAXIMUM_LENGTH"),
+                            result.getString("EXTRA").contains("auto_increment") ? "YES" : "NO",
+                            result.getString("COLLATION_NAME")));
+                }
+            }
+        }
+        for (TableSpec spec : TABLES) {
+            Map<String, ColumnInfo> present = columns.get(spec.name());
+            if (present == null) {
+                report.fail("SCHEMA_TABLE_MISSING", spec.name(), "required current table is missing");
+                continue;
+            }
+            for (Map.Entry<String, String> expected : spec.columns().entrySet()) {
+                ColumnInfo actual = present.get(expected.getKey());
+                if (actual == null) {
+                    report.fail("SCHEMA_COLUMN_MISSING", spec.name() + "." + expected.getKey(), "required current column is missing");
+                } else if (!actual.type().toLowerCase().startsWith(expected.getValue())) {
+                    report.fail("SCHEMA_COLUMN_TYPE", spec.name() + "." + expected.getKey(), "current column type differs from expected family");
+                } else {
+                    report.column(spec.name(), expected.getKey(), actual);
+                }
+            }
+            if (spec.name().equals("t_document_disposal_request")) {
+                boolean hasTenant = present.containsKey("tenant_id");
+                report.legacyDisposalTenantColumnAbsent(!hasTenant);
+                if (hasTenant && !present.get("tenant_id").type().toLowerCase().startsWith("varchar")) {
+                    report.fail("SCHEMA_COLUMN_TYPE", spec.name() + ".tenant_id", "optional future column has unexpected type");
+                }
+                if (hasTenant) report.column(spec.name(), "tenant_id", present.get("tenant_id"));
+            }
+        }
+        compareTenantColumnDefinitions(columns, report);
+        Map<String, ColumnInfo> flywayColumns = columns.get("flyway_schema_history");
+        if (flywayColumns == null) {
+            report.migrationHistory(false, List.of());
+
+        } else if (flywayColumns.containsKey("version") && flywayColumns.containsKey("success")
+                && flywayColumns.containsKey("installed_rank")) {
+            List<String> applied = new ArrayList<>();
+            try (Statement statement = connection.createStatement(); ResultSet result = statement.executeQuery(
+                    "SELECT version,installed_rank,success FROM flyway_schema_history ORDER BY installed_rank")) {
+                while (result.next()) {
+                    boolean success = result.getBoolean("success");
+                    applied.add(result.getString("installed_rank") + ":" + safeToken(result.getString("version")) + ":success=" + success);
+                    if (!success) report.fail("FLYWAY_FAILED_MIGRATION", "flyway_schema_history", "failed migration entry exists");
+                }
+            }
+            report.migrationHistory(true, applied);
+
+        } else {
+            report.fail("SCHEMA_FLYWAY_HISTORY_INCOMPLETE", "flyway_schema_history", "history table lacks required inventory columns");
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT TABLE_NAME,TABLE_COLLATION FROM information_schema.TABLES WHERE TABLE_SCHEMA=? AND TABLE_TYPE='BASE TABLE'")) {
+            statement.setString(1, schema);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) report.tableCollation(result.getString("TABLE_NAME"), result.getString("TABLE_COLLATION"));
+            }
+        }
+        for (TableSpec spec : TABLES) {
+            if (!columns.containsKey(spec.name())) continue;
+            try (ResultSet result = metadata.getIndexInfo(schema, null, spec.name(), false, false)) {
+                Map<String, Map<Short, String>> indexes = new TreeMap<>();
+                while (result.next()) {
+                    String name = result.getString("INDEX_NAME");
+                    String column = result.getString("COLUMN_NAME");
+                    if (name != null && column != null) {
+                        String uniqueName = name + (result.getBoolean("NON_UNIQUE") ? "" : " [UNIQUE]");
+                        indexes.computeIfAbsent(uniqueName, ignored -> new TreeMap<>())
+                                .put(result.getShort("ORDINAL_POSITION"), column);
+                    }
+                }
+                report.indexes(spec.name(), indexes);
+            }
+            try (ResultSet result = metadata.getImportedKeys(schema, null, spec.name())) {
+                Map<String, Map<Short, String>> foreignKeys = new TreeMap<>();
+                while (result.next()) {
+                    String name = result.getString("FK_NAME");
+                    if (name == null) name = "unnamed";
+                    String link = result.getString("FKCOLUMN_NAME") + " -> " + result.getString("PKTABLE_NAME")
+                            + "(" + result.getString("PKCOLUMN_NAME") + ")";
+                    foreignKeys.computeIfAbsent(name, ignored -> new TreeMap<>()).put(result.getShort("KEY_SEQ"), link);
+                }
+                report.foreignKeys(spec.name(), foreignKeys);
+            }
+        }
+    }
+
+    private static void compareTenantColumnDefinitions(Map<String, Map<String, ColumnInfo>> columns,
+                                                       PreflightReport report) {
+        List<String> tenantTables = List.of("sys_user", "t_lifecycle_case", "t_engineer", "m_customer", "t_contract",
+                "t_engineer_account_link", "t_user_organization", "t_document", "t_document_version", "t_document_link");
+        Map<String, ColumnInfo> documentColumns = columns.get("t_document");
+        if (documentColumns == null || documentColumns.get("tenant_id") == null) {
+            report.fail("TENANT_COLUMN_COLLATION", "t_document.tenant_id", "reference definition is unavailable");
+            return;
+        }
+        ColumnInfo reference = documentColumns.get("tenant_id");
+        List<String> mismatches = new ArrayList<>();
+        for (String tableName : tenantTables) {
+            Map<String, ColumnInfo> table = columns.get(tableName);
+            ColumnInfo actual = table == null ? null : table.get("tenant_id");
+            if (actual == null) continue;
+            if (!reference.charLength().equals(actual.charLength())
+                    || !java.util.Objects.equals(reference.collation(), actual.collation())) {
+                mismatches.add(tableName + ".tenant_id");
+            }
+        }
+        report.finding("TENANT_COLUMN_COLLATION", "tenant_id columns", mismatches.isEmpty() ? "PASS" : "FAIL",
+                mismatches.size(), mismatches, mismatches.isEmpty()
+                        ? "string tenant columns share length and collation"
+                        : "string tenant column length/collation differs from t_document.tenant_id");
+    }
+
+    private static void tenantSources(Connection connection, PreflightReport report) throws SQLException {
+        Set<String> union = new TreeSet<>();
+        for (TenantSource source : TENANT_SOURCES) {
+            long totalRows = 0;
+            String sql = "SELECT CONVERT(MIN(BINARY " + source.column() + ") USING utf8mb4) tenant_id, COUNT(*) row_count FROM "
+                    + source.table() + " GROUP BY BINARY " + source.column();
+            try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(sql)) {
+                while (rows.next()) {
+                    String tenant = rows.getString("tenant_id");
+                    long count = rows.getLong("row_count");
+                    totalRows += count;
+                    report.tenantBucket(source.table(), tenant, count);
+                    if (tenant != null && !tenant.isBlank()) union.add(tenant);
+                }
+            }
+            report.finding("TENANT_SOURCE_TOTAL", source.table(), "PASS", totalRows, List.of(), "all rows included in tenant bucket scan");
+            String nullSql = "SELECT COUNT(*) FROM " + source.table() + " WHERE " + source.column() + " IS NULL OR TRIM(CAST(" + source.column() + " AS CHAR)) = '' OR CAST(" + source.column() + " AS CHAR) REGEXP '^[[:space:]]*$'";
+            try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(nullSql)) {
+                rows.next();
+                long missing = rows.getLong(1);
+                if (missing > 0) {
+                    List<String> samples = new ArrayList<>();
+                    try (Statement sampleStatement = connection.createStatement(); ResultSet sampleRows = sampleStatement.executeQuery(
+                            "SELECT id FROM " + source.table() + " WHERE " + source.column() + " IS NULL OR TRIM(CAST(" + source.column() + " AS CHAR)) = '' OR CAST(" + source.column() + " AS CHAR) REGEXP '^[[:space:]]*$' ORDER BY id LIMIT 20")) {
+                        while (sampleRows.next()) samples.add(redact(source.table(), sampleRows.getLong(1)));
+                    }
+                    report.finding("TENANT_NULL_OR_BLANK", source.table() + "." + source.column(), "FAIL", missing,
+                            samples, "rows with null/blank tenant");
+                }
+            }
+        }
+        report.tenantCandidates(union);
+    }
+
+    private static void relationshipChecks(Connection connection, PreflightReport report) throws SQLException {
+        checkCount(connection, report, "DOCUMENT_VERSION_PARENT_MISMATCH",
+                "SELECT COUNT(*) FROM t_document_version v LEFT JOIN t_document d ON d.id=v.document_id WHERE d.id IS NULL OR NOT (BINARY d.tenant_id <=> BINARY v.tenant_id)",
+                "SELECT v.id FROM t_document_version v LEFT JOIN t_document d ON d.id=v.document_id WHERE d.id IS NULL OR NOT (BINARY d.tenant_id <=> BINARY v.tenant_id) ORDER BY v.id LIMIT 20",
+                "t_document_version.document_id", "version parent missing or tenant differs");
+        checkCount(connection, report, "DOCUMENT_LINK_PARENT_MISMATCH",
+                "SELECT COUNT(*) FROM t_document_link l LEFT JOIN t_document d ON d.id=l.document_id WHERE d.id IS NULL OR NOT (BINARY d.tenant_id <=> BINARY l.tenant_id)",
+                "SELECT l.id FROM t_document_link l LEFT JOIN t_document d ON d.id=l.document_id WHERE d.id IS NULL OR NOT (BINARY d.tenant_id <=> BINARY l.tenant_id) ORDER BY l.id LIMIT 20",
+                "t_document_link.document_id", "link parent missing or tenant differs");
+        checkCount(connection, report, "DISPOSAL_PARENT_MISSING",
+                "SELECT COUNT(*) FROM t_document_disposal_request r LEFT JOIN t_document d ON d.id=r.document_id WHERE d.id IS NULL",
+                "SELECT r.id FROM t_document_disposal_request r LEFT JOIN t_document d ON d.id=r.document_id WHERE d.id IS NULL ORDER BY r.id LIMIT 20",
+                "t_document_disposal_request.document_id", "disposal request parent missing");
+        checkCount(connection, report, "LIFECYCLE_TASK_CASE_MISSING",
+                "SELECT COUNT(*) FROM t_lifecycle_task t LEFT JOIN t_lifecycle_case c ON c.id=t.case_id WHERE c.id IS NULL",
+                "SELECT t.id FROM t_lifecycle_task t LEFT JOIN t_lifecycle_case c ON c.id=t.case_id WHERE c.id IS NULL ORDER BY t.id LIMIT 20",
+                "t_lifecycle_task.case_id", "task case parent missing");
+        checkCount(connection, report, "CASE_ENGINEER_TENANT_MISMATCH",
+                "SELECT COUNT(*) FROM t_lifecycle_case c LEFT JOIN t_engineer e ON e.id=c.engineer_id WHERE e.id IS NULL OR NOT (BINARY e.tenant_id <=> BINARY c.tenant_id)",
+                "SELECT c.id FROM t_lifecycle_case c LEFT JOIN t_engineer e ON e.id=c.engineer_id WHERE e.id IS NULL OR NOT (BINARY e.tenant_id <=> BINARY c.tenant_id) ORDER BY c.id LIMIT 20",
+                "t_lifecycle_case.engineer_id", "case engineer parent missing or tenant differs");
+        checkCount(connection, report, "CONTRACT_CUSTOMER_TENANT_MISMATCH",
+                "SELECT COUNT(*) FROM t_contract c LEFT JOIN m_customer m ON m.id=c.customer_id WHERE m.id IS NULL OR (c.tenant_id IS NOT NULL AND m.tenant_id IS NOT NULL AND NOT (BINARY c.tenant_id <=> BINARY m.tenant_id))",
+                "SELECT c.id FROM t_contract c LEFT JOIN m_customer m ON m.id=c.customer_id WHERE m.id IS NULL OR (c.tenant_id IS NOT NULL AND m.tenant_id IS NOT NULL AND NOT (BINARY c.tenant_id <=> BINARY m.tenant_id)) ORDER BY c.id LIMIT 20",
+                "t_contract.customer_id", "contract customer parent missing or tenant differs");
+        checkCount(connection, report, "ACCOUNT_LINK_PARENT_MISMATCH",
+                "SELECT COUNT(*) FROM t_engineer_account_link l LEFT JOIN t_engineer e ON e.id=l.engineer_id LEFT JOIN sys_user u ON u.id=l.sys_user_id WHERE e.id IS NULL OR u.id IS NULL OR NOT (BINARY e.tenant_id <=> BINARY l.tenant_id) OR NOT (BINARY u.tenant_id <=> BINARY l.tenant_id)",
+                "SELECT l.id FROM t_engineer_account_link l LEFT JOIN t_engineer e ON e.id=l.engineer_id LEFT JOIN sys_user u ON u.id=l.sys_user_id WHERE e.id IS NULL OR u.id IS NULL OR NOT (BINARY e.tenant_id <=> BINARY l.tenant_id) OR NOT (BINARY u.tenant_id <=> BINARY l.tenant_id) ORDER BY l.id LIMIT 20",
+                "t_engineer_account_link", "engineer/user parent missing or tenant differs");
+        checkCount(connection, report, "USER_ORGANIZATION_PARENT_MISSING",
+                "SELECT COUNT(*) FROM t_user_organization x LEFT JOIN sys_user u ON u.id=x.user_id LEFT JOIN m_organization_unit o ON o.id=x.organization_id WHERE u.id IS NULL OR o.id IS NULL OR NOT (BINARY u.tenant_id <=> BINARY x.tenant_id)",
+                "SELECT x.id FROM t_user_organization x LEFT JOIN sys_user u ON u.id=x.user_id LEFT JOIN m_organization_unit o ON o.id=x.organization_id WHERE u.id IS NULL OR o.id IS NULL OR NOT (BINARY u.tenant_id <=> BINARY x.tenant_id) ORDER BY x.id LIMIT 20",
+                "t_user_organization", "user/organization parent missing or user tenant differs");
+        checkCount(connection, report, "ASSET_ASSIGNMENT_ASSET_MISSING",
+                "SELECT COUNT(*) FROM t_asset_assignment x LEFT JOIN m_asset a ON a.id=x.asset_id WHERE a.id IS NULL",
+                "SELECT x.id FROM t_asset_assignment x LEFT JOIN m_asset a ON a.id=x.asset_id WHERE a.id IS NULL ORDER BY x.id LIMIT 20",
+                "t_asset_assignment.asset_id", "asset parent missing");
+        checkCount(connection, report, "ASSET_INCIDENT_ASSET_MISSING",
+                "SELECT COUNT(*) FROM t_asset_lost_incident i LEFT JOIN m_asset a ON a.id=i.asset_id WHERE a.id IS NULL",
+                "SELECT i.id FROM t_asset_lost_incident i LEFT JOIN m_asset a ON a.id=i.asset_id WHERE a.id IS NULL ORDER BY i.id LIMIT 20",
+                "t_asset_lost_incident.asset_id", "asset parent missing");
+        checkCount(connection, report, "PROPOSAL_AUTHOR_DANGLING",
+                "SELECT COUNT(*) FROM t_proposal p LEFT JOIN sys_user u ON u.id=p.proposed_by WHERE p.proposed_by IS NOT NULL AND u.id IS NULL",
+                "SELECT p.id FROM t_proposal p LEFT JOIN sys_user u ON u.id=p.proposed_by WHERE p.proposed_by IS NOT NULL AND u.id IS NULL ORDER BY p.id LIMIT 20",
+                "t_proposal.proposed_by", "nonnull author must resolve; null author is permitted");
+        checkCount(connection, report, "PROJECT_CUSTOMER_MISSING",
+                "SELECT COUNT(*) FROM t_project p LEFT JOIN m_customer c ON c.id=p.customer_id WHERE p.customer_id IS NULL OR c.id IS NULL",
+                "SELECT p.id FROM t_project p LEFT JOIN m_customer c ON c.id=p.customer_id WHERE p.customer_id IS NULL OR c.id IS NULL ORDER BY p.id LIMIT 20",
+                "t_project.customer_id", "required customer must resolve");
+        checkCount(connection, report, "SALES_ACTIVITY_CUSTOMER_DANGLING",
+                "SELECT COUNT(*) FROM t_sales_activity a LEFT JOIN m_customer c ON c.id=a.customer_id WHERE a.customer_id IS NOT NULL AND c.id IS NULL",
+                "SELECT a.id FROM t_sales_activity a LEFT JOIN m_customer c ON c.id=a.customer_id WHERE a.customer_id IS NOT NULL AND c.id IS NULL ORDER BY a.id LIMIT 20",
+                "t_sales_activity.customer_id", "nonnull customer must resolve; null customer is permitted");
+        checkCount(connection, report, "SALES_ACTIVITY_CREATOR_DANGLING",
+                "SELECT COUNT(*) FROM t_sales_activity a LEFT JOIN sys_user u ON u.id=a.created_by WHERE a.created_by IS NOT NULL AND u.id IS NULL",
+                "SELECT a.id FROM t_sales_activity a LEFT JOIN sys_user u ON u.id=a.created_by WHERE a.created_by IS NOT NULL AND u.id IS NULL ORDER BY a.id LIMIT 20",
+                "t_sales_activity.created_by", "nonnull creator must resolve; null creator is permitted");
+        checkCount(connection, report, "ASSET_ASSIGNMENT_ASSIGNEE_DANGLING",
+                "SELECT COUNT(*) FROM t_asset_assignment x LEFT JOIN t_engineer e ON x.assignee_type='ENGINEER' AND e.id=x.assignee_id LEFT JOIN sys_user u ON x.assignee_type='USER' AND u.id=x.assignee_id WHERE x.assignee_id IS NULL OR (x.assignee_type='ENGINEER' AND e.id IS NULL) OR (x.assignee_type='USER' AND u.id IS NULL) OR x.assignee_type NOT IN ('ENGINEER','USER')",
+                "SELECT x.id FROM t_asset_assignment x LEFT JOIN t_engineer e ON x.assignee_type='ENGINEER' AND e.id=x.assignee_id LEFT JOIN sys_user u ON x.assignee_type='USER' AND u.id=x.assignee_id WHERE x.assignee_id IS NULL OR (x.assignee_type='ENGINEER' AND e.id IS NULL) OR (x.assignee_type='USER' AND u.id IS NULL) OR x.assignee_type NOT IN ('ENGINEER','USER') ORDER BY x.id LIMIT 20",
+                "t_asset_assignment.assignee", "assignee type and target must resolve");
+        checkCount(connection, report, "PROPOSAL_PARENT_MISSING",
+                "SELECT COUNT(*) FROM t_proposal p LEFT JOIN t_engineer e ON e.id=p.engineer_id LEFT JOIN t_project pr ON pr.id=p.project_id WHERE e.id IS NULL OR pr.id IS NULL",
+                "SELECT p.id FROM t_proposal p LEFT JOIN t_engineer e ON e.id=p.engineer_id LEFT JOIN t_project pr ON pr.id=p.project_id WHERE e.id IS NULL OR pr.id IS NULL ORDER BY p.id LIMIT 20",
+                "t_proposal", "required engineer/project parent missing");
+        checkCount(connection, report, "ENGINEER_SALES_PARENT_MISSING",
+                "SELECT COUNT(*) FROM t_engineer_sales x LEFT JOIN t_engineer e ON e.id=x.engineer_id LEFT JOIN sys_user u ON u.id=x.sales_user_id WHERE e.id IS NULL OR u.id IS NULL",
+                "SELECT x.id FROM t_engineer_sales x LEFT JOIN t_engineer e ON e.id=x.engineer_id LEFT JOIN sys_user u ON u.id=x.sales_user_id WHERE e.id IS NULL OR u.id IS NULL ORDER BY x.id LIMIT 20",
+                "t_engineer_sales", "engineer or sales user parent missing");
+        try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(
+                "SELECT d.tenant_id, COUNT(*) row_count FROM t_document_disposal_request r JOIN t_document d ON d.id=r.document_id GROUP BY d.tenant_id")) {
+            while (rows.next()) report.tenantBucket("t_document_disposal_request(parent)", rows.getString("tenant_id"), rows.getLong("row_count"));
+        }
+    }
+
+    /**
+     * lifecycle証跡のDDL前読取検査（NF01 batch 0 / A-NF01-2）。
+     * 未終結DUAL_CONFIRMATIONと版なし証跡linkは、0件ならPASS、1件以上なら人の移行判断が要るためBLOCKED_MAPPINGとする
+     * （B-NF01-1によりCONFIRM完成後に公開し、B-NF01-4により公開時は版なし証跡を拒否するため）。
+     * 証跡linkは task→case のtenantと文書・固定版のtenant/所属文書の一致を検査し、不一致はFAILとする。
+     */
+    private static void lifecycleEvidenceChecks(Connection connection, PreflightReport report) throws SQLException {
+        long unfinishedDual = scalar(connection, "SELECT COUNT(*) " + UNFINISHED_DUAL_TASKS);
+        long unfinishedDualInOpenCases = scalar(connection, "SELECT COUNT(*) " + UNFINISHED_DUAL_TASKS
+                + " AND c.id IS NOT NULL AND c.deleted_flag=0 AND BINARY c.status IN ('DRAFT','ACTIVE','ON_HOLD')");
+        List<String> dualSamples = new ArrayList<>();
+        if (unfinishedDual > 0) {
+            try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(
+                    "SELECT t.id " + UNFINISHED_DUAL_TASKS + " ORDER BY t.id LIMIT 20")) {
+                while (rows.next()) dualSamples.add(redact("t_lifecycle_task", rows.getLong(1)));
+            }
+        }
+        recordUnfinishedDualTasks(report, unfinishedDual, unfinishedDualInOpenCases, dualSamples);
+
+        checkCount(connection, report, "LIFECYCLE_EVIDENCE_DOCUMENT_TENANT_MISMATCH",
+                "SELECT COUNT(*) FROM t_lifecycle_evidence_link l LEFT JOIN t_lifecycle_task t ON t.id=l.task_id LEFT JOIN t_lifecycle_case c ON c.id=t.case_id LEFT JOIN t_document d ON d.id=l.document_id WHERE t.id IS NULL OR c.id IS NULL OR d.id IS NULL OR NOT (BINARY d.tenant_id <=> BINARY c.tenant_id)",
+                "SELECT l.id FROM t_lifecycle_evidence_link l LEFT JOIN t_lifecycle_task t ON t.id=l.task_id LEFT JOIN t_lifecycle_case c ON c.id=t.case_id LEFT JOIN t_document d ON d.id=l.document_id WHERE t.id IS NULL OR c.id IS NULL OR d.id IS NULL OR NOT (BINARY d.tenant_id <=> BINARY c.tenant_id) ORDER BY l.id LIMIT 20",
+                "t_lifecycle_evidence_link.document_id", "evidence task/case/document missing or document tenant differs from case tenant");
+        checkCount(connection, report, "LIFECYCLE_EVIDENCE_VERSION_MISMATCH",
+                "SELECT COUNT(*) FROM t_lifecycle_evidence_link l LEFT JOIN t_lifecycle_task t ON t.id=l.task_id LEFT JOIN t_lifecycle_case c ON c.id=t.case_id LEFT JOIN t_document_version v ON v.id=l.document_version_id WHERE l.document_version_id IS NOT NULL AND (v.id IS NULL OR NOT (v.document_id <=> l.document_id) OR NOT (BINARY v.tenant_id <=> BINARY c.tenant_id))",
+                "SELECT l.id FROM t_lifecycle_evidence_link l LEFT JOIN t_lifecycle_task t ON t.id=l.task_id LEFT JOIN t_lifecycle_case c ON c.id=t.case_id LEFT JOIN t_document_version v ON v.id=l.document_version_id WHERE l.document_version_id IS NOT NULL AND (v.id IS NULL OR NOT (v.document_id <=> l.document_id) OR NOT (BINARY v.tenant_id <=> BINARY c.tenant_id)) ORDER BY l.id LIMIT 20",
+                "t_lifecycle_evidence_link.document_version_id", "pinned version missing, belongs to another document, or tenant differs from case tenant");
+        long versionless = scalar(connection, "SELECT COUNT(*) FROM t_lifecycle_evidence_link WHERE document_version_id IS NULL");
+        List<String> versionlessSamples = new ArrayList<>();
+        if (versionless > 0) {
+            try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(
+                    "SELECT id FROM t_lifecycle_evidence_link WHERE document_version_id IS NULL ORDER BY id LIMIT 20")) {
+                while (rows.next()) versionlessSamples.add(redact("t_lifecycle_evidence_link", rows.getLong(1)));
+            }
+        }
+        recordVersionlessEvidenceLinks(report, versionless, versionlessSamples);
+    }
+
+    /**
+     * 同一tenant・同一要員の未終結退社案件の重複を数える（NF01 L7 / V187の適用前提）。
+     * 1組でもあるとV187の一意制約追加が重複エラーで失敗するため、どの案件を終結させるかを人が決めるまでBLOCKED_MAPPINGとする。
+     * 実MySQLで「本検査の件数とV187のDDL成否が一致する」ことを試験から確認するため、package-privateにしている。
+     */
+    static void activeResignationDuplicates(Connection connection, PreflightReport report) throws SQLException {
+        long groups = scalar(connection, "SELECT COUNT(*) FROM (" + ACTIVE_RESIGNATION_DUPLICATE_GROUPS + ") duplicate_groups");
+        String violating = ACTIVE_RESIGNATION_ROWS + " AND (x.tenant_id, x.engineer_id) IN (SELECT d.tenant_id, d.engineer_id FROM ("
+                + ACTIVE_RESIGNATION_DUPLICATE_GROUPS + ") d)";
+        long rows = scalar(connection, "SELECT COUNT(*) " + violating);
+        List<String> samples = new ArrayList<>();
+        if (rows > 0) {
+            try (Statement statement = connection.createStatement(); ResultSet result = statement.executeQuery(
+                    "SELECT x.id " + violating + " ORDER BY x.id LIMIT 20")) {
+                while (result.next()) samples.add(redact("t_lifecycle_case", result.getLong(1)));
+            }
+        }
+        recordActiveResignationDuplicates(report, groups, rows, samples);
+    }
+
+    /**
+     * ポータルユーザーと要員の紐付け（V188 / NF01 N1-4）の前提を検査する。
+     * <ul>
+     *   <li>PORTAL_ENGINEER_LINK_CANDIDATES: 旧email照合なら退社時に自動処理されていたのに、現行の紐付けが無いポータルユーザー。
+     *       紐付け照合へ切り替えると自動処理されず「要確認」になるため、管理者が紐付けを登録するか許容を記録するまで
+     *       BLOCKED_MAPPING とする。V188適用前（紐付け表が無い）は全候補を数える。</li>
+     *   <li>PORTAL_ENGINEER_LINK_SCOPE_MISMATCH: 紐付け表がある場合だけ、tenant不整合・参照先欠落の現行紐付けを数えFAILとする
+     *       （退社完了は409で止まるデータ不整合のため）。</li>
+     * </ul>
+     */
+    static void portalEngineerLinkChecks(Connection connection, String schema, PreflightReport report) throws SQLException {
+        boolean linkTablePresent;
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=? AND TABLE_NAME=?")) {
+            statement.setString(1, schema);
+            statement.setString(2, PORTAL_ENGINEER_LINK_TABLE);
+            try (ResultSet rows = statement.executeQuery()) {
+                linkTablePresent = rows.next() && rows.getLong(1) > 0;
+            }
+        }
+        String candidates = PORTAL_EMAIL_CANDIDATES + (linkTablePresent ? WITHOUT_ACTIVE_PORTAL_LINK : "");
+        long candidateCount = scalar(connection, "SELECT COUNT(*) " + candidates);
+        List<String> candidateSamples = new ArrayList<>();
+        if (candidateCount > 0) {
+            try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(
+                    "SELECT pu.id " + candidates + " ORDER BY pu.id LIMIT 20")) {
+                while (rows.next()) candidateSamples.add(redact("t_portal_user", rows.getLong(1)));
+            }
+        }
+        recordPortalEngineerLinkCandidates(report, candidateCount, candidateSamples, linkTablePresent);
+        if (linkTablePresent) {
+            checkCount(connection, report, "PORTAL_ENGINEER_LINK_SCOPE_MISMATCH",
+                    "SELECT COUNT(*) " + PORTAL_LINK_SCOPE_MISMATCH,
+                    "SELECT l.id " + PORTAL_LINK_SCOPE_MISMATCH + " ORDER BY l.id LIMIT 20",
+                    PORTAL_ENGINEER_LINK_TABLE,
+                    "active link whose engineer or portal organization is missing or belongs to another tenant");
+        }
+    }
+
+    /** 紐付けの無い旧email照合対象を記録する。0件ならPASS、1件以上はBLOCKED_MAPPING。 */
+    static void recordPortalEngineerLinkCandidates(PreflightReport report, long candidates, List<String> samples,
+                                                   boolean linkTablePresent) {
+        report.finding("PORTAL_ENGINEER_LINK_CANDIDATES", "t_portal_user.email",
+                candidates > 0 ? "BLOCKED_MAPPING" : "PASS", candidates, samples,
+                "portal users matched by the legacy email rule but without an active engineer link=" + candidates
+                        + "; linkTablePresent=" + linkTablePresent
+                        + "; resignation processing now uses links only, so an administrator must register links"
+                        + " or record acceptance (these users are listed as pending confirmation at the gate)");
+    }
+
+    /**
+     * 未終結退社案件の重複を記録する。0件ならPASS、1件以上はV187を適用できないためBLOCKED_MAPPING
+     * （データ不整合ではなく、残す案件を人が決めれば解消するためFAILにはしない）。
+     */
+    static void recordActiveResignationDuplicates(PreflightReport report, long duplicateGroups, long rows,
+                                                  List<String> samples) {
+        report.finding("LIFECYCLE_RESIGNATION_ACTIVE_DUPLICATE", "t_lifecycle_case(tenant_id,engineer_id)",
+                rows > 0 || duplicateGroups > 0 ? "BLOCKED_MAPPING" : "PASS", rows, samples,
+                "duplicateGroups=" + duplicateGroups + "; openResignationCasesInDuplicateGroups=" + rows
+                        + "; V187 unique key uk_lifecycle_case_active_resignation fails while any group remains,"
+                        + " so an owner must complete or cancel the extra cases before migration");
+    }
+
+    /**
+     * 未終結DUAL_CONFIRMATIONの件数を記録する。1件以上はCONFIRM移行時の扱い（WAIVE・再提出等）を人が決める必要があるため
+     * BLOCKED_MAPPINGとする。データ不整合ではないためFAILにはしない。
+     */
+    static void recordUnfinishedDualTasks(PreflightReport report, long unfinished, long inOpenCases, List<String> samples) {
+        report.finding("LIFECYCLE_DUAL_TASK_UNFINISHED", "t_lifecycle_task.evidence_type",
+                unfinished > 0 ? "BLOCKED_MAPPING" : "PASS", unfinished, samples,
+                "unfinished DUAL_CONFIRMATION tasks=" + unfinished + "; inOpenCases=" + inOpenCases
+                        + "; inTerminalOrMissingCases=" + Math.max(0, unfinished - inOpenCases)
+                        + "; launch waits for CONFIRM, so a non-zero count requires an explicit HR transition decision");
+    }
+
+    /**
+     * 版を固定していない証跡linkの件数を記録する。公開時は版なし証跡を拒否するため、1件以上は既存行の扱いを
+     * 文書ownerが決める必要があり BLOCKED_MAPPING とする。
+     */
+    static void recordVersionlessEvidenceLinks(PreflightReport report, long versionless, List<String> samples) {
+        report.finding("LIFECYCLE_EVIDENCE_VERSIONLESS", "t_lifecycle_evidence_link.document_version_id",
+                versionless > 0 ? "BLOCKED_MAPPING" : "PASS", versionless, samples,
+                "evidence links without a pinned document version=" + versionless
+                        + "; versionless evidence is rejected at launch, so existing rows require an explicit owner decision");
+    }
+
+    /**
+     * 将来追加する複合一意keyの前提を検査する。重複groupまたはkey列NULLがあればFAIL。
+     * 既に同一列構成の一意indexがあるかは参考情報として記録する。
+     */
+    private static void uniqueKeyPreconditions(Connection connection, String schema, PreflightReport report) throws SQLException {
+        for (UniqueKeySpec spec : UNIQUE_KEY_PRECONDITIONS) {
+            String columns = String.join(",", spec.columns());
+            String nullPredicate = spec.columns().stream().map(column -> "x." + column + " IS NULL")
+                    .collect(java.util.stream.Collectors.joining(" OR "));
+            String qualified = spec.columns().stream().map(column -> "x." + column)
+                    .collect(java.util.stream.Collectors.joining(","));
+            String violating = "FROM " + spec.table() + " x WHERE " + nullPredicate + " OR (" + qualified + ") IN (SELECT "
+                    + columns + " FROM " + spec.table() + " GROUP BY " + columns + " HAVING COUNT(*) > 1)";
+            long duplicateGroups = scalar(connection, "SELECT COUNT(*) FROM (SELECT 1 FROM " + spec.table()
+                    + " GROUP BY " + columns + " HAVING COUNT(*) > 1) duplicate_groups");
+            long nullKeyRows = scalar(connection, "SELECT COUNT(*) FROM " + spec.table() + " x WHERE " + nullPredicate);
+            long violatingRows = scalar(connection, "SELECT COUNT(*) " + violating);
+            List<String> samples = new ArrayList<>();
+            if (violatingRows > 0) {
+                try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(
+                        "SELECT x.id " + violating + " ORDER BY x.id LIMIT 20")) {
+                    while (rows.next()) samples.add(redact(spec.table(), rows.getLong(1)));
+                }
+            }
+            Map<String, String> uniqueIndexes = uniqueIndexColumns(connection, schema, spec.table());
+            String expected = String.join(",", spec.columns());
+            String existingIndex = uniqueIndexes.entrySet().stream()
+                    .filter(entry -> expected.equalsIgnoreCase(entry.getValue()))
+                    .map(Map.Entry::getKey).findFirst().orElse("none");
+            boolean idIsPrimaryKey = "id".equalsIgnoreCase(uniqueIndexes.get("PRIMARY"));
+            recordUniqueKeyPrecondition(report, spec.table(), spec.columns(), duplicateGroups, nullKeyRows, violatingRows,
+                    samples, existingIndex, idIsPrimaryKey);
+        }
+    }
+
+    /**
+     * 一意key前提の判定を記録する。対象keyはすべて {@code id} を含むため、{@code id} が主キーである限り重複は起こり得ず、
+     * 実効的な前提はkey列のNULL検査になる。その旨を {@code idIsPrimaryKey} としてreasonに残す。
+     */
+    static void recordUniqueKeyPrecondition(PreflightReport report, String table, List<String> columns,
+                                            long duplicateGroups, long nullKeyRows, long violatingRows,
+                                            List<String> samples, String existingIndex, boolean idIsPrimaryKey) {
+        boolean satisfied = duplicateGroups == 0 && nullKeyRows == 0 && violatingRows == 0;
+        report.finding("UNIQUE_KEY_PRECONDITION", table + "(" + String.join(",", columns) + ")",
+                satisfied ? "PASS" : "FAIL", violatingRows, samples,
+                "duplicateGroups=" + duplicateGroups + "; nullKeyRows=" + nullKeyRows
+                        + "; existingUniqueIndex=" + safeToken(existingIndex == null ? "none" : existingIndex)
+                        + "; idIsPrimaryKey=" + idIsPrimaryKey
+                        + (idIsPrimaryKey ? " (duplicates cannot occur; the null-key check is the effective precondition)" : ""));
+    }
+
+    /** 表の一意index（PRIMARY含む）と列構成（SEQ_IN_INDEX順、カンマ区切り）。 */
+    private static Map<String, String> uniqueIndexColumns(Connection connection, String schema, String table) throws SQLException {
+        Map<String, String> indexes = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT INDEX_NAME, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') key_columns "
+                        + "FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? AND NON_UNIQUE=0 "
+                        + "GROUP BY INDEX_NAME ORDER BY INDEX_NAME")) {
+            statement.setString(1, schema);
+            statement.setString(2, table);
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    indexes.put(rows.getString("INDEX_NAME"), rows.getString("key_columns"));
+                }
+            }
+        }
+        return indexes;
+    }
+
+    private static long scalar(Connection connection, String sql) throws SQLException {
+        try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(sql)) {
+            if (!rows.next()) throw new SQLException("empty aggregate");
+            return rows.getLong(1);
+        }
+    }
+
+    private static void checkCount(Connection connection, PreflightReport report, String id, String sql, String sampleSql,
+                                   String location, String reason) throws SQLException {
+        try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(sql)) {
+            if (!rows.next()) throw new SQLException("empty aggregate");
+            long count = rows.getLong(1);
+            if (count > 0) {
+                List<String> samples = new ArrayList<>();
+                try (Statement sampleStatement = connection.createStatement(); ResultSet sampleRows = sampleStatement.executeQuery(sampleSql)) {
+                    while (sampleRows.next()) samples.add(redact(id, sampleRows.getLong(1)));
+                }
+                report.finding(id, location, "FAIL", count, samples, reason);
+            }
+            else report.finding(id, location, "PASS", 0, List.of(), "no mismatch found");
+        }
+    }
+
+    private static void parentCandidates(Connection connection, PreflightReport report) throws SQLException {
+        for (ParentQuery query : PARENT_QUERIES) {
+            Map<Long, Set<String>> candidates = new TreeMap<>();
+            try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(query.sql())) {
+                while (rows.next()) {
+                    long rowId = rows.getLong("row_id");
+                    candidates.computeIfAbsent(rowId, ignored -> new TreeSet<>());
+                    String tenant = rows.getString("candidate");
+                    if (tenant != null && !tenant.isBlank()) candidates.get(rowId).add(tenant);
+                }
+            }
+            List<String> unresolved = new ArrayList<>();
+            long ambiguous = 0;
+            for (Map.Entry<Long, Set<String>> entry : candidates.entrySet()) {
+                if (entry.getValue().size() != 1) {
+                    unresolved.add(redact(query.name(), entry.getKey()));
+                    if (entry.getValue().size() > 1) ambiguous++;
+                } else {
+                    report.tenantCandidate(entry.getValue().iterator().next());
+                }
+            }
+            report.finding("TENANT_PARENT_CANDIDATES", query.name(), unresolved.isEmpty() ? "PASS" : "BLOCKED_MAPPING",
+                    candidates.size(), unresolved.subList(0, Math.min(20, unresolved.size())),
+                    "source rows=" + candidates.size() + "; unresolved=" + unresolved.size() + "; ambiguous=" + ambiguous);
+        }
+    }
+
+    private static void organizationUnitCandidates(Connection connection, PreflightReport report) throws SQLException {
+        Set<String> numericIds = new TreeSet<>();
+        try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(
+                "SELECT tenant_id, COUNT(*) row_count FROM m_organization_unit GROUP BY tenant_id")) {
+            while (rows.next()) {
+                Long id = rows.getObject("tenant_id", Long.class);
+                if (id == null) {
+                    List<String> samples = new ArrayList<>();
+                    try (Statement sampleStatement = connection.createStatement(); ResultSet sampleRows = sampleStatement.executeQuery(
+                            "SELECT id FROM m_organization_unit WHERE tenant_id IS NULL ORDER BY id LIMIT 20")) {
+                        while (sampleRows.next()) samples.add(redact("m_organization_unit", sampleRows.getLong(1)));
+                    }
+                    report.finding("ORG_UNIT_TENANT_NULL", "m_organization_unit.tenant_id", "BLOCKED_MAPPING",
+                            rows.getLong("row_count"), samples, "legacy numeric tenant is null");
+                }
+                else numericIds.add(Long.toString(id));
+            }
+        }
+        List<String> candidates = new ArrayList<>();
+        try (Statement statement = connection.createStatement(); ResultSet rows = statement.executeQuery(
+                "SELECT u.organization_id, CONVERT(MIN(BINARY u.tenant_id) USING utf8mb4) tenant_id, o.tenant_id legacy_numeric_tenant_id FROM t_user_organization u JOIN m_organization_unit o ON o.id=u.organization_id GROUP BY u.organization_id,BINARY u.tenant_id,o.tenant_id")) {
+            while (rows.next()) {
+                candidates.add("organization=" + redact("organization", rows.getLong("organization_id"))
+                        + ", membershipTenant=" + safeToken(rows.getString("tenant_id"))
+                        + ", legacyNumericTenantId=" + rows.getObject("legacy_numeric_tenant_id", Long.class));
+            }
+        }
+        if (!numericIds.isEmpty() || !candidates.isEmpty()) {
+            report.finding("ORG_UNIT_TENANT_MAPPING", "m_organization_unit.tenant_id", "BLOCKED_MAPPING",
+                    numericIds.size(), candidates.subList(0, Math.min(20, candidates.size())),
+                    "numeric legacy IDs require an explicitly reviewed mapping; no numeric-to-string conversion is applied");
+        } else {
+            report.finding("ORG_UNIT_TENANT_MAPPING", "m_organization_unit.tenant_id", "PASS", 0, List.of(),
+                    "no non-null numeric legacy tenant IDs were found");
+        }
+    }
+
+    private static String redact(String table, long id) {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest((table + ":" + id).getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (int index = 0; index < 6; index++) hex.append(String.format("%02x", hash[index]));
+            return hex.toString();
+        } catch (NoSuchAlgorithmException impossible) {
+            return "redacted";
+        }
+    }
+
+    private static String safeToken(String value) {
+        if (value == null) return "<null>";
+        return value.length() <= 100 ? value : value.substring(0, 100);
+    }
+
+    private static void rollbackQuietly(Connection connection) {
+        try { connection.rollback(); } catch (SQLException ignored) { }
+    }
+
+    public static void write(PreflightReport report, Path outputDirectory) throws IOException {
+        Files.createDirectories(outputDirectory);
+        Files.writeString(outputDirectory.resolve("nf01-preflight.json"), report.toJson(), StandardCharsets.UTF_8);
+        Files.writeString(outputDirectory.resolve("nf01-preflight.md"), report.toMarkdown(), StandardCharsets.UTF_8);
+    }
+
+    private record TableSpec(String name, Map<String, String> columns) { }
+    private record TenantSource(String table, String column) { }
+    private record ParentQuery(String name, String sql) { }
+    private record UniqueKeySpec(String table, List<String> columns) { }
+    private record ColumnInfo(String type, boolean nullable, String charLength, String autoIncrement, String collation) { }
+
+    public static final class PreflightReport {
+        private final String codeBaseline;
+        private final String schema;
+        private String actualHead = "unavailable";
+        private String sourceSha256 = "unavailable";
+        private final String generatedAt = Instant.now().toString();
+        private final List<Finding> findings = new ArrayList<>();
+        private final List<String> columns = new ArrayList<>();
+        private final Map<String, List<String>> indexes = new TreeMap<>();
+        private final Map<String, List<String>> foreignKeys = new TreeMap<>();
+        private final Map<String, String> tableCollations = new TreeMap<>();
+        private final Map<String, Long> tenantBuckets = new TreeMap<>();
+        private final Set<String> tenantCandidates = new TreeSet<>();
+        private boolean migrationHistoryPresent;
+        private List<String> appliedMigrations = List.of();
+        private boolean legacyDisposalTenantColumnAbsent;
+
+        PreflightReport(String codeBaseline, String schema) {
+            this.codeBaseline = safeToken(codeBaseline);
+            this.schema = safeToken(schema);
+        }
+
+        static PreflightReport failed(String baseline, String schema, String id) {
+            PreflightReport report = new PreflightReport(baseline, schema);
+            report.fail(id, "execution", "read-only collection did not complete");
+            return report;
+        }
+
+        public String status() {
+            if (findings.stream().anyMatch(item -> item.status().equals("FAIL"))) return "FAIL";
+            if (findings.stream().anyMatch(item -> item.status().equals("BLOCKED_MAPPING"))) return "BLOCKED_MAPPING";
+            return "PASS";
+        }
+
+        private boolean hasFailures() { return findings.stream().anyMatch(item -> item.status().equals("FAIL")); }
+        private PreflightReport fail(String id, String location, String reason) {
+            finding(id, location, "FAIL", 1, List.of(), reason);
+            return this;
+        }
+        void finding(String id, String location, String status, long count, List<String> samples, String reason) {
+            findings.add(new Finding(id, location, status, count, List.copyOf(samples), reason));
+        }
+        private void column(String table, String column, ColumnInfo info) {
+            columns.add(table + "." + column + " type=" + info.type() + " nullable=" + info.nullable()
+                    + " charLength=" + info.charLength() + " collation=" + info.collation() + " autoIncrement=" + info.autoIncrement());
+        }
+        private void indexes(String table, Map<String, Map<Short, String>> values) {
+            values.forEach((name, cols) -> indexes.put(table + "." + name, List.copyOf(cols.values())));
+        }
+        private void foreignKeys(String table, Map<String, Map<Short, String>> values) {
+            values.forEach((name, cols) -> foreignKeys.put(table + "." + name, List.copyOf(cols.values())));
+        }
+        private void tableCollation(String table, String collation) { tableCollations.put(table, collation); }
+        private void tenantBucket(String table, String tenant, long count) {
+            tenantBuckets.put(table + "." + (tenant == null ? "<null>" : safeToken(tenant)), count);
+        }
+        private void tenantCandidates(Set<String> values) { tenantCandidates.addAll(values); }
+        private void tenantCandidate(String value) { tenantCandidates.add(value); }
+        private void legacyDisposalTenantColumnAbsent(boolean absent) { legacyDisposalTenantColumnAbsent = absent; }
+        void provenance(String head, String hash) { actualHead = safeToken(head); sourceSha256 = safeToken(hash); }
+        void migrationHistory(boolean present, List<String> versions) {
+            migrationHistoryPresent = present;
+            appliedMigrations = List.copyOf(versions);
+            if (!present) fail("FLYWAY_HISTORY_MISSING", "flyway_schema_history", "required migration history table is missing");
+            else if (versions.isEmpty()) fail("FLYWAY_HISTORY_EMPTY", "flyway_schema_history", "migration history contains no entries");
+            else if (versions.stream().anyMatch(value -> value.endsWith("success=false"))) fail("FLYWAY_FAILED_MIGRATION", "flyway_schema_history", "failed migration entry exists");
+        }
+        boolean legacyDisposalTenantColumnAbsentForTest() { return legacyDisposalTenantColumnAbsent; }
+
+        public String toJson() {
+            StringBuilder json = new StringBuilder("{");
+            field(json, "status", status()).append(',');
+            field(json, "codeBaselineInput", codeBaseline).append(',');
+            field(json, "actualHead", actualHead).append(',');
+            field(json, "sourceSha256", sourceSha256).append(',');
+            field(json, "schema", schema).append(',');
+            field(json, "generatedAt", generatedAt).append(',');
+            json.append("\"legacyDisposalTenantColumnAbsent\":").append(legacyDisposalTenantColumnAbsent).append(',');
+            json.append("\"migrationHistoryPresent\":").append(migrationHistoryPresent).append(',');
+            json.append("\"appliedMigrations\":"); stringArray(json, appliedMigrations).append(',');
+            json.append("\"tenantCandidates\":"); stringArray(json, tenantCandidates).append(',');
+            json.append("\"schemaColumns\":"); stringArray(json, columns).append(',');
+            json.append("\"tenantBuckets\":{");
+            boolean first = true;
+            for (Map.Entry<String, Long> entry : tenantBuckets.entrySet()) {
+                if (!first) json.append(','); first = false;
+                quote(json, entry.getKey()).append(':').append(entry.getValue());
+            }
+            json.append("},\"tableCollations\":{");
+            first = true;
+            for (Map.Entry<String, String> entry : tableCollations.entrySet()) {
+                if (!first) json.append(','); first = false;
+                quote(json, entry.getKey()).append(':'); quote(json, entry.getValue());
+            }
+            json.append("},\"indexes\":{");
+            first = true;
+            for (Map.Entry<String, List<String>> entry : indexes.entrySet()) {
+                if (!first) json.append(','); first = false;
+                quote(json, entry.getKey()).append(':'); stringArray(json, entry.getValue());
+            }
+            json.append("},\"foreignKeys\":{");
+            first = true;
+            for (Map.Entry<String, List<String>> entry : foreignKeys.entrySet()) {
+                if (!first) json.append(','); first = false;
+                quote(json, entry.getKey()).append(':'); stringArray(json, entry.getValue());
+            }
+            json.append("},\"findings\":[");
+            for (int i = 0; i < findings.size(); i++) {
+                if (i > 0) json.append(',');
+                Finding finding = findings.get(i);
+                json.append('{'); field(json, "checkId", finding.checkId()).append(',');
+                field(json, "location", finding.location()).append(','); field(json, "status", finding.status()).append(',');
+                json.append("\"rowCount\":").append(finding.rowCount()).append(',');
+                json.append("\"samples\":"); stringArray(json, finding.samples()).append(','); field(json, "reason", finding.reason());
+                json.append('}');
+            }
+            return json.append("]}").toString();
+        }
+
+        public String toMarkdown() {
+            StringBuilder out = new StringBuilder("# NF01 read-only preflight\n\n")
+                    .append("- Status: `").append(status()).append("`\n- Code baseline input: `").append(md(codeBaseline)).append("`\n- Actual source HEAD: `").append(md(actualHead)).append("`\n- Checker source SHA-256: `").append(md(sourceSha256))
+                    .append("`\n- Schema: `").append(md(schema)).append("`\n- Generated: `").append(generatedAt)
+                    .append("`\n- Disposal tenant column absent in current schema: `").append(legacyDisposalTenantColumnAbsent).append("`\n\n")
+                    .append("## Migration inventory\n\n");
+            out.append("- Flyway history present: `").append(migrationHistoryPresent).append("`\n");
+            out.append("- Successful migration entries: `").append(appliedMigrations.size()).append("`\n\n");
+            out.append("## Tenant candidates\n\n");
+            for (String tenant : tenantCandidates) out.append("- `").append(md(tenant)).append("`\n");
+            out.append("\n## Findings\n\n| Check | Location | Status | Rows | Samples | Reason |\n|---|---|---:|---:|---|---|\n");
+            for (Finding finding : findings) {
+                out.append('|').append(md(finding.checkId())).append('|').append(md(finding.location())).append('|')
+                        .append(finding.status()).append('|').append(finding.rowCount()).append('|')
+                        .append(md(String.join(", ", finding.samples()))).append('|').append(md(finding.reason())).append("|\n");
+            }
+            out.append("\n## Schema inventory\n\n");
+            for (Map.Entry<String, String> entry : tableCollations.entrySet()) {
+                out.append("- table `").append(md(entry.getKey())).append("` collation=`")
+                        .append(md(entry.getValue())).append("`\n");
+            }
+            for (String column : columns) out.append("- ").append(md(column)).append('\n');
+            out.append("\n## Index inventory\n\n");
+            indexes.forEach((name, cols) -> out.append("- `").append(md(name)).append("`: ")
+                    .append(md(String.join(", ", cols))).append('\n'));
+            out.append("\n## Foreign-key inventory\n\n");
+            foreignKeys.forEach((name, links) -> out.append("- `").append(md(name)).append("`: ")
+                    .append(md(String.join(", ", links))).append('\n'));
+            return out.toString();
+        }
+
+        private static StringBuilder field(StringBuilder out, String name, String value) {
+            quote(out, name).append(':'); return quote(out, value);
+        }
+        private static StringBuilder stringArray(StringBuilder out, Iterable<String> values) {
+            out.append('['); boolean first = true;
+            for (String value : values) { if (!first) out.append(','); first = false; quote(out, value); }
+            return out.append(']');
+        }
+        private static StringBuilder quote(StringBuilder out, String value) {
+            out.append('"');
+            for (int i = 0; i < value.length(); i++) {
+                char c = value.charAt(i);
+                if (c == '"' || c == '\\') out.append('\\').append(c);
+                else if (c < 0x20) out.append(String.format("\\u%04x", (int) c));
+                else out.append(c);
+            }
+            return out.append('"');
+        }
+        private static String md(String value) { return value.replace("|", "\\|").replace("\n", " ").replace("\r", " "); }
+    }
+
+    private record Finding(String checkId, String location, String status, long rowCount, List<String> samples, String reason) { }
+}

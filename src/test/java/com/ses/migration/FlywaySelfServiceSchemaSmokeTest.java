@@ -55,10 +55,11 @@ class FlywaySelfServiceSchemaSmokeTest {
                 .migrate();
 
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
-            // ---- 最新version=182（repeatable migration（version=NULL）を除く） ----
+            // ---- 最新version（repeatable migration（version=NULL）を除く） ----
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("182", latestVersion, "最新のマイグレーションバージョンは182であること");
+            assertEquals(LatestMigrationVersion.LATEST, latestVersion,
+                    "最新のマイグレーションバージョンは" + LatestMigrationVersion.LATEST + "であること");
 
             for (String table : new String[]{
                     "t_engineer_change_request", "t_expense_request", "t_expense_accounting_job",
@@ -76,6 +77,8 @@ class FlywaySelfServiceSchemaSmokeTest {
             assertColumnExists(statement, "m_report_schedule", "retry_scheduled_at");
             assertColumnExists(statement, "m_report_schedule", "processing_logical_run_at");
             assertColumnExists(statement, "m_report_schedule", "processing_claimed_at");
+            assertColumnExists(statement, "m_report_schedule", "processing_claim_token");
+            assertClaimTokenColumnDefinition(statement);
             assertColumnExists(statement, "t_report_run", "snapshot_version");
             assertColumnExists(statement, "t_report_delivery", "reauth_required");
             assertColumnExists(statement, "t_report_delivery", "notification_outbox_id");
@@ -304,7 +307,8 @@ class FlywaySelfServiceSchemaSmokeTest {
         try (Connection connection = LEGACY_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("182", latestVersion, "legacy DBの最新マイグレーションバージョンは182であること");
+            assertEquals(LatestMigrationVersion.LATEST, latestVersion,
+                    "legacy DBの最新マイグレーションバージョンは" + LatestMigrationVersion.LATEST + "であること");
 
             for (String table : new String[]{
                     "t_engineer_change_request", "t_expense_request", "t_expense_accounting_job",
@@ -320,6 +324,8 @@ class FlywaySelfServiceSchemaSmokeTest {
             assertColumnExists(statement, "t_report_delivery", "notification_outbox_id");
             assertColumnExists(statement, "m_report_schedule", "processing_logical_run_at");
             assertColumnExists(statement, "m_report_schedule", "processing_claimed_at");
+            assertColumnExists(statement, "m_report_schedule", "processing_claim_token");
+            assertClaimTokenColumnDefinition(statement);
             assertIndexExists(statement, "t_report_section_attempt", "idx_report_section_attempt_run");
             assertIndexExists(statement, "t_report_delivery", "idx_report_delivery_outbox");
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_at");
@@ -480,6 +486,15 @@ class FlywaySelfServiceSchemaSmokeTest {
         assertTrue(queryInt(statement, "SELECT COUNT(*) FROM information_schema.columns "
                 + "WHERE table_schema=DATABASE() AND table_name='" + table + "' AND column_name='" + column + "'") == 1,
                 table + "." + column + "が存在するはず");
+    }
+
+    /** V185のclaim tokenはUUID固定長・大文字小文字を区別するascii_bin・nullableで追加されていること。 */
+    private void assertClaimTokenColumnDefinition(Statement statement) throws Exception {
+        assertEquals("char(36)|ascii|ascii_bin|YES", queryString(statement,
+                "SELECT CONCAT(column_type, '|', character_set_name, '|', collation_name, '|', is_nullable) "
+                        + "FROM information_schema.columns WHERE table_schema=DATABASE() "
+                        + "AND table_name='m_report_schedule' AND column_name='processing_claim_token'"),
+                "m_report_schedule.processing_claim_tokenの列定義");
     }
 
     private void assertIndexExists(Statement statement, String table, String index) throws Exception {

@@ -49,6 +49,7 @@ class FlywayMigrationVersionResolutionTest {
         assertTrue(seenVersions.contains("154"), "V154 (certification_continuity_group) が解決されること");
         assertTrue(seenVersions.contains("162"), "V162 (nf02_nf03_boundary_repair) が解決されること");
         assertTrue(seenVersions.contains("182"), "V182 (nf09_tenant_scope_hardening) が解決されること");
+        assertTrue(seenVersions.contains("183"), "V183 (lifecycle_case_sequence) が解決されること");
 
         // V144 のスクリプト名が digital_invoice_safe_diagnostics であること
         List<MigrationInfo> v144Info = Arrays.stream(allMigrations)
@@ -102,7 +103,15 @@ class FlywayMigrationVersionResolutionTest {
         assertEquals(1, v182Info.size(), "V182 は1件のみ存在すること");
         assertTrue(v182Info.get(0).getScript().contains("nf09_tenant_scope_hardening"),
                 "V182 のスクリプト名は nf09_tenant_scope_hardening であること: " + v182Info.get(0).getScript());
+        List<MigrationInfo> v183Info = Arrays.stream(allMigrations)
+                .filter(m -> m.getVersion() != null && "183".equals(m.getVersion().getVersion()))
+                .toList();
+        assertEquals(1, v183Info.size(), "V183 は1件のみ存在すること");
+        assertTrue(v183Info.get(0).getScript().contains("lifecycle_case_sequence"),
+                "V183 のスクリプト名が一意であること: " + v183Info.get(0).getScript());
         assertTrue(v162Info.get(0).getVersion().compareTo(v182Info.get(0).getVersion()) < 0,
                 "V162 は V182 より前に解決されること");
+        assertTrue(v182Info.get(0).getVersion().compareTo(v183Info.get(0).getVersion()) < 0,
+                "V182 は V183 より前に解決されること");
     }
 }

@@ -1,0 +1,10 @@
+# ツールイメージの build context から次を除く。Dockerfile が COPY するのは image/・lib/・providers/・*.sh・
+# tests/integration-pitr.sh だけだが、classic builder は context 全体を daemon へ送るため、秘密を含み得る
+# ファイルは context に入れない。
+# - integration の作業ディレクトリ（合成 secret・restic repository を含む）と退避分
+tests/.integration-work
+tests/.integration-work.*
+# - production の秘密（MySQL / restic のパスワード、CA）と接続設定
+secrets
+.env.backup
+.env

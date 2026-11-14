@@ -29,7 +29,7 @@
 4. [R1] 支払済チェック:
    bpPaymentMapper.selectCount(QueryWrapper: work_record_id IN ids AND status = '支払済')
    > 0 なら BusinessException("支払済のBP支払が" + n + "件あるため解除できません")
-5. ステータス回退(現状どおり)
+5. ステータスの差し戻し(現状どおり)
 6. BP支払削除は status = '未払' 条件を追加:
    bpPaymentMapper.delete(new QueryWrapper<BpPayment>().in("work_record_id", ids).eq("status", "未払"))
 ```

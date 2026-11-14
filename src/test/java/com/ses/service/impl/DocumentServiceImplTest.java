@@ -776,6 +776,229 @@ class DocumentServiceImplTest {
         verify(documentStorage, never()).put(anyString(), any(InputStream.class), anyBoolean());
     }
 
+    // ----------------------------------------------------------------
+    // NF06 A1a raw CSV stage: scanner fail-closed と ingress総期限checkpoint
+    // ----------------------------------------------------------------
+
+    @org.junit.jupiter.api.io.TempDir
+    java.nio.file.Path importStageTempDir;
+
+    @Test
+    void stageImport_scannerExceptionFailsClosedBeforeAnyStorageWrite() throws Exception {
+        StageFixture fixture = importStageFixture();
+        when(fileScanner.scan(any(), any())).thenThrow(new IllegalStateException("synthetic scanner outage"));
+
+        BusinessException error = assertThrows(BusinessException.class, () -> sut.stageReceivedForImport(
+                fixture.request(), fixture.file(), fixture.size(), fixture.sha256(), () -> { }));
+
+        assertEquals(400, error.getCode());
+        assertEquals("error.file.scanRejected", error.getMessageKey());
+        verify(documentStorage, never()).put(anyString(), any(InputStream.class), anyBoolean());
+        verify(documentStorage, never()).promote(anyString());
+    }
+
+    @Test
+    void stageImport_infectedOrUnavailableScanFailsClosedBeforeAnyStorageWrite() throws Exception {
+        StageFixture fixture = importStageFixture();
+        when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.infected("synthetic-signature"),
+                FileScanResult.unavailable("synthetic-unavailable"));
+
+        BusinessException infected = assertThrows(BusinessException.class, () -> sut.stageReceivedForImport(
+                fixture.request(), fixture.file(), fixture.size(), fixture.sha256(), () -> { }));
+        BusinessException unavailable = assertThrows(BusinessException.class, () -> sut.stageReceivedForImport(
+                fixture.request(), fixture.file(), fixture.size(), fixture.sha256(), () -> { }));
+
+        assertEquals("error.file.scanRejected", infected.getMessageKey());
+        assertEquals("error.file.scanRejected", unavailable.getMessageKey());
+        verify(documentStorage, never()).put(anyString(), any(InputStream.class), anyBoolean());
+    }
+
+    @Test
+    void stageImport_scannerReturningAfterDeadlineIsNotStoredEvenWhenClean() throws Exception {
+        StageFixture fixture = importStageFixture();
+        java.util.concurrent.atomic.AtomicBoolean expired = new java.util.concurrent.atomic.AtomicBoolean();
+        when(fileScanner.scan(any(), any())).thenAnswer(invocation -> {
+            expired.set(true);
+            return FileScanResult.clean("test");
+        });
+
+        BusinessException error = assertThrows(BusinessException.class, () -> sut.stageReceivedForImport(
+                fixture.request(), fixture.file(), fixture.size(), fixture.sha256(), deadlineCheckpoint(expired)));
+
+        assertEquals(503, error.getCode());
+        assertEquals("error.import.uploadDeadlineExceeded", error.getMessageKey());
+        verify(fileScanner).scan(any(), any());
+        verify(documentStorage, never()).put(anyString(), any(InputStream.class), anyBoolean());
+    }
+
+    @Test
+    void stageImport_deadlineAfterStoragePromoteDeletesOnlyTheOwnedObject() throws Exception {
+        StageFixture fixture = importStageFixture();
+        java.util.concurrent.atomic.AtomicBoolean expired = new java.util.concurrent.atomic.AtomicBoolean();
+        doAnswer(invocation -> {
+            expired.set(true);
+            return null;
+        }).when(documentStorage).promote(anyString());
+
+        BusinessException error = assertThrows(BusinessException.class, () -> sut.stageReceivedForImport(
+                fixture.request(), fixture.file(), fixture.size(), fixture.sha256(), deadlineCheckpoint(expired)));
+
+        assertEquals(503, error.getCode());
+        ArgumentCaptor<String> putKey = ArgumentCaptor.forClass(String.class);
+        verify(documentStorage).put(putKey.capture(), any(InputStream.class), eq(true));
+        verify(documentStorage).deleteStrict(putKey.getValue());
+        verify(documentStorage, never()).delete(anyString());
+        verify(documentStorage, never()).open(anyString());
+    }
+
+    @Test
+    void stageImport_nullDeadlineCheckpointIsRejectedBeforeScan() throws Exception {
+        StageFixture fixture = importStageFixture();
+
+        BusinessException error = assertThrows(BusinessException.class, () -> sut.stageReceivedForImport(
+                fixture.request(), fixture.file(), fixture.size(), fixture.sha256(), null));
+
+        assertEquals(400, error.getCode());
+        verify(fileScanner, never()).scan(any(), any());
+        verify(documentStorage, never()).put(anyString(), any(InputStream.class), anyBoolean());
+    }
+
+    @Test
+    void stageImport_deadlineWhileStreamingToStorageDeletesTheOwnedPartialObject() throws Exception {
+        StageFixture fixture = importStageFixture();
+        java.util.concurrent.atomic.AtomicBoolean expired = new java.util.concurrent.atomic.AtomicBoolean();
+        doAnswer(invocation -> {
+            expired.set(true);
+            InputStream content = invocation.getArgument(1);
+            content.read(new byte[16]);
+            return null;
+        }).when(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
+
+        BusinessException error = assertThrows(BusinessException.class, () -> sut.stageReceivedForImport(
+                fixture.request(), fixture.file(), fixture.size(), fixture.sha256(), deadlineCheckpoint(expired)));
+
+        assertEquals(503, error.getCode());
+        ArgumentCaptor<String> putKey = ArgumentCaptor.forClass(String.class);
+        verify(documentStorage).put(putKey.capture(), any(InputStream.class), eq(true));
+        verify(documentStorage).deleteStrict(putKey.getValue());
+        verify(documentStorage, never()).promote(anyString());
+    }
+
+    @Test
+    void stageImport_deadlineDuringStoredBytesVerificationDeletesTheOwnedObject() throws Exception {
+        StageFixture fixture = importStageFixture();
+        java.util.concurrent.atomic.AtomicBoolean expired = new java.util.concurrent.atomic.AtomicBoolean();
+        java.util.concurrent.atomic.AtomicReference<byte[]> stored = new java.util.concurrent.atomic.AtomicReference<>();
+        doAnswer(invocation -> {
+            stored.set(((InputStream) invocation.getArgument(1)).readAllBytes());
+            return null;
+        }).when(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
+        when(documentStorage.open(anyString())).thenAnswer(invocation -> {
+            expired.set(true);
+            return new ByteArrayInputStream(stored.get());
+        });
+
+        BusinessException error = assertThrows(BusinessException.class, () -> sut.stageReceivedForImport(
+                fixture.request(), fixture.file(), fixture.size(), fixture.sha256(), deadlineCheckpoint(expired)));
+
+        assertEquals(503, error.getCode());
+        ArgumentCaptor<String> putKey = ArgumentCaptor.forClass(String.class);
+        verify(documentStorage).put(putKey.capture(), any(InputStream.class), eq(true));
+        verify(documentStorage).open(putKey.getValue());
+        verify(documentStorage).deleteStrict(putKey.getValue());
+    }
+
+    @Test
+    void stageImport_compensationDeleteFailureIsSuppressedUnderTheOriginalFailure() throws Exception {
+        StageFixture fixture = importStageFixture();
+        java.util.concurrent.atomic.AtomicBoolean expired = new java.util.concurrent.atomic.AtomicBoolean();
+        doAnswer(invocation -> {
+            expired.set(true);
+            return null;
+        }).when(documentStorage).promote(anyString());
+        doThrow(new IllegalStateException("synthetic storage delete outage")).when(documentStorage).deleteStrict(anyString());
+
+        BusinessException error = assertThrows(BusinessException.class, () -> sut.stageReceivedForImport(
+                fixture.request(), fixture.file(), fixture.size(), fixture.sha256(), deadlineCheckpoint(expired)));
+
+        assertEquals(503, error.getCode());
+        assertEquals("error.import.uploadDeadlineExceeded", error.getMessageKey());
+        assertEquals(1, error.getSuppressed().length);
+        BusinessException cleanup = assertInstanceOf(BusinessException.class, error.getSuppressed()[0]);
+        assertEquals("error.import.storageCleanupFailed", cleanup.getMessageKey());
+        // N6-2: 取込側が照合台帳へ記録できるよう、原因にstorage keyとoperation IDの印を付ける。
+        ImportStageCleanupFailure marker = ImportStageCleanupFailure.find(error).orElseThrow();
+        ArgumentCaptor<String> putKey = ArgumentCaptor.forClass(String.class);
+        verify(documentStorage).put(putKey.capture(), any(InputStream.class), eq(true));
+        assertEquals(putKey.getValue(), marker.storageKey());
+        assertNotNull(marker.operationId());
+        verify(documentStorage, never()).delete(anyString());
+    }
+
+    @Test
+    void discardImportStage_strictDeleteFailureIsReportedInsteadOfSwallowed() throws Exception {
+        java.io.IOException outage = new java.io.IOException("synthetic strict delete outage");
+        doThrow(outage).when(documentStorage).deleteStrict("0123456789abcdef0123456789abcdef/key");
+        Document document = new Document();
+        document.setDocumentType("IMPORT");
+        DocumentVersion version = new DocumentVersion();
+        version.setStorageKey("0123456789abcdef0123456789abcdef/key");
+        StagedImportDocument staged = new StagedImportDocument(document, version,
+                "0123456789abcdef0123456789abcdef/key", "op-n6-2");
+
+        BusinessException error = assertThrows(BusinessException.class, () -> sut.discardImportStage(staged));
+
+        assertEquals(500, error.getCode());
+        assertEquals("error.import.storageCleanupFailed", error.getMessageKey());
+        ImportStageCleanupFailure marker = ImportStageCleanupFailure.find(error).orElseThrow();
+        assertEquals("0123456789abcdef0123456789abcdef/key", marker.storageKey());
+        assertEquals("op-n6-2", marker.operationId());
+        assertSame(outage, marker.getCause());
+        verify(documentStorage, never()).delete(anyString());
+    }
+
+    @Test
+    void stageImport_unreadableServerTempFileIsServerErrorNotClientError() throws Exception {
+        StageFixture fixture = importStageFixture();
+        java.nio.file.Files.delete(fixture.file());
+
+        BusinessException error = assertThrows(BusinessException.class, () -> sut.stageReceivedForImport(
+                fixture.request(), fixture.file(), fixture.size(), fixture.sha256(), () -> { }));
+
+        assertEquals(500, error.getCode());
+        assertEquals("error.import.tempStorageFailed", error.getMessageKey());
+        verify(fileScanner, never()).scan(any(), any());
+        verify(documentStorage, never()).put(anyString(), any(InputStream.class), anyBoolean());
+    }
+
+    private static Runnable deadlineCheckpoint(java.util.concurrent.atomic.AtomicBoolean expired) {
+        return () -> {
+            if (expired.get()) throw BusinessException.of(503, "error.import.uploadDeadlineExceeded");
+        };
+    }
+
+    private StageFixture importStageFixture() throws Exception {
+        byte[] csv = "externalKey,companyName\nC-SYN-1,Synthetic Company\n".getBytes(StandardCharsets.UTF_8);
+        java.nio.file.Path file = java.nio.file.Files.write(importStageTempDir.resolve("import-raw-unit.csv"), csv);
+        String sha256 = java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256").digest(csv));
+        DocumentType importType = new DocumentType();
+        importType.setCode("IMPORT");
+        importType.setDirection("INCOMING");
+        importType.setRetentionYears(7);
+        importType.setRetentionStartRule("CREATED_AT");
+        lenient().when(documentTypeMapper.selectActiveByCode("IMPORT")).thenReturn(importType);
+        DocumentRegisterRequest request = DocumentRegisterRequest.builder()
+                .tenantId("default").legalEntityId(1L)
+                .documentType("IMPORT").title("CSV import")
+                .direction("INCOMING").sourceType("RECEIVED")
+                .originalName("upload.csv").contentType("text/csv")
+                .createdBy(1L).build();
+        return new StageFixture(request, file, csv.length, sha256);
+    }
+
+    private record StageFixture(DocumentRegisterRequest request, java.nio.file.Path file, long size, String sha256) { }
+
     private Document digitalInvoiceDocument(Long id, String legalEntityId, String type) {
         Document document = new Document();
         document.setId(id);

@@ -45,6 +45,15 @@ public class AiGatewayRequest {
     private CopilotExecutionContext executionContext;
     private CopilotScopeContext scopeContext;
     private String scopeHash;
+    /** MANAGEMENT_COPILOT専用の単調時計deadline。旧AI用途では未設定。 */
+    private Long deadlineNanos;
+    /** 上限。費用が事前確定しないproviderはこれを理由にfail-closedする。 */
+    private Integer costBudgetYen;
+    private Long expectedArtifactVersionId;
+    private String expectedProvider;
+    private String expectedModel;
+    private String expectedPromptVersion;
+    private String expectedConfigHash;
 
     public static AiGatewayRequestBuilder legacyChat(Long engineerId, Long projectId,
                                                      CopilotExecutionContext context) {

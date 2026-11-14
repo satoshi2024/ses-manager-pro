@@ -2,7 +2,8 @@
 'use strict';
 
 const CACHE_PREFIX = 'ses-pwa-shell-';
-const CACHE_NAME = CACHE_PREFIX + 'v2';
+// shell資産（pwa-queue.js・offline.html等）はcache優先で配るため、資産を変えたら版を上げて入れ替える。
+const CACHE_NAME = CACHE_PREFIX + 'v4';
 const SHELL_ASSETS = [
     '/manifest.webmanifest',
     '/offline.html',
@@ -32,12 +33,6 @@ function isStaticAsset(request) {
     const path = new URL(request.url).pathname;
     if (path === '/js/i18n.js') return false;
     return SHELL_ASSETS.indexOf(path) !== -1;
-}
-
-function isDynamicOrSensitive(request) {
-    const path = new URL(request.url).pathname;
-    return path.startsWith('/api/') || path.startsWith('/my/') || path.startsWith('/portal/')
-        || /(?:document|payroll|bank|attachment|receipt|files|pdf|reconciliation)/i.test(path);
 }
 
 function isSafeShellResponse(response) {
@@ -85,8 +80,7 @@ self.addEventListener('fetch', event => {
 
     // API、portal、document、給与、銀行、添付、PDF、その他PIIはnetwork-only。
     // ナビゲーションもHTMLをcacheせず、オフライン時だけ汎用ページを返す。
-    if (request.method === 'GET' && isSameOrigin(request) && !isDynamicOrSensitive(request)
-            && request.mode === 'navigate') {
+    if (request.method === 'GET' && isSameOrigin(request) && request.mode === 'navigate') {
         event.respondWith(fetch(request).catch(() => caches.match('/offline.html')));
         return;
     }

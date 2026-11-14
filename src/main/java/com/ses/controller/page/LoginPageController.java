@@ -20,6 +20,23 @@ public class LoginPageController {
             breakGlassServiceProvider;
 
     /**
+     * 機能スイッチ。OFFの機能のメニューをログイン後の着地先に選ばない（404画面へ誘導しない）。
+     * スライス・Spring管理外では未取得（null）となり、従来どおりの判定になる。
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.beans.factory.ObjectProvider<com.ses.config.feature.FeatureSwitches>
+            featureSwitchesProvider;
+
+    /**
+     * 本番初回の期限付きbootstrap mode。期限内だけ初期管理者のlocal login formを表示する
+     * （通常local login無効・incident無しのprodでは、formが無いと初回ログインできないため）。
+     * スライス・Spring管理外では未取得（null）となり、formの表示条件は従来どおり。
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.beans.factory.ObjectProvider<com.ses.config.ProductionBootstrapMode>
+            bootstrapModeProvider;
+
+    /**
      * ログインページを表示する
      *
      * @return ログインテンプレート名
@@ -31,6 +48,9 @@ public class LoginPageController {
         com.ses.service.security.BreakGlassService breakGlassService = breakGlassServiceProvider.getIfAvailable();
         model.addAttribute("breakGlassLoginEnabled", oidcSecurityProperties.isBreakGlassLoginEnabled()
                 && breakGlassService != null && breakGlassService.hasActiveIncident());
+        com.ses.config.ProductionBootstrapMode bootstrapMode =
+                bootstrapModeProvider == null ? null : bootstrapModeProvider.getIfAvailable();
+        model.addAttribute("bootstrapLoginEnabled", bootstrapMode != null && bootstrapMode.isActive());
         model.addAttribute("oidcRegistrationId", oidcSecurityProperties.getProviderRegistrationId());
         return "login";
     }
@@ -58,7 +78,7 @@ public class LoginPageController {
             return "redirect:/dashboard";
         }
 
-        java.util.List<String> allowedMenus = menuCacheService.getMenuKeysByRole(role);
+        java.util.List<String> allowedMenus = visibleMenuKeys(menuCacheService.getMenuKeysByRole(role));
         if (allowedMenus.isEmpty()) {
             throw new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.FORBIDDEN, "アクセス可能なメニューがありません");
@@ -106,6 +126,12 @@ public class LoginPageController {
 
         throw new org.springframework.web.server.ResponseStatusException(
             org.springframework.http.HttpStatus.FORBIDDEN, "アクセス可能なメニューがありません");
+    }
+
+    private java.util.List<String> visibleMenuKeys(java.util.List<String> menuKeys) {
+        com.ses.config.feature.FeatureSwitches switches =
+                featureSwitchesProvider == null ? null : featureSwitchesProvider.getIfAvailable();
+        return switches == null ? menuKeys : switches.visibleMenuKeys(menuKeys);
     }
 
     /**

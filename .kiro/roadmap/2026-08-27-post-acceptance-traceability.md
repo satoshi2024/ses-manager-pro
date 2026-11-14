@@ -1,5 +1,34 @@
 # 受入後機能候補 — 対応表・決定台帳
 
+## 2026-10-01 Production Readiness 再判定（最新追記）
+
+**総合NO-GO。** 下記の2026-08/09の承認・COMPLETE・Gate記録は当時のscope/Headの履歴として保持し、
+現在のproduction approvalへ継承しない。2026-10-01の依頼者による技術選定・隔離開発の委任は、
+外部契約・法的判断・正式Owner署名・実credential使用・production deployの代理承認ではない。
+最新の統合・固定Head・試験は`2026-10-01-snf-production-execution-ledger.md`と修復Review記録を参照する。
+
+| NF | 現行実装/Reviewの再判定 | productionの未完条件 |
+|---|---|---|
+| 01 | R01a・canonical証跡/DUAL防御基盤をcontrol6ce313ceへ限定統合。基盤fast59/0/0/0受理。readonly preflight source c4045575は限定CODE・fast4/MySQL7件PASS、control5206ee4a統合・同control unit/inventory4件PASS。実epoch/current-read/CONFIRMは未実装 | 文書ACL/version、二者確認、信頼できる退社撤権要求・確認、legacy scope、運用承認 |
+| 02 | CANDIDATE維持。recipient現在scope/owner tenantの両P1は36dcfdfcでAstra限定CODE PASS、control統合済み | DG-02、正式Owner/最終Review、release |
+| 03 | 集約完了修復と実MySQL並行証拠 `89384928`は限定CODE PASS、control統合済み | 全体最終Review、NF07 policy、retention、staging/運用承認 |
+| 04 | G1限定CODE PASS、34/0/0/0とMySQL4/0/0/0。実servlet修復91dbca13は独立Review・3/0/0/0、control統合後40/0/0/0。Chrome06 fixed5b40590eの2/0/0/0はAstra限定証拠PASS。bootstrap撤回競合P1を修復しfull06 fixed38f684acは11 class17/0/0/0。G2をcontrol6980dff8へ統合、同SHA browser17/0/0/0と定向fast13 class85/0/0/0をAstra限定受理 | 実PWA/browser全体検証、非通知tab/分散session環境、正式release |
+| 05 | 開発scope CONDITIONAL。総deadline 2187b5f9限定CODE PASS、26/0/0/0、control統合。実transport未完 | provider/credential、許可先、正式production enablement |
+| 06 | F1a/V184・candidate/lease・wave2をcontrolf932a888へ限定統合。wave2 source fast64/0/0/0と別SHA MySQL95/0/0/0受理。W3A source0f45 fast64/0/0/0、旧MySQL97/1/56 FAIL後に修復8f9が98/0/0/0・限定CODE/証拠PASS、controld8469ecb統合（別SHA結果を合算しない）。seal/publish/apply/UI未実装 | 全synthetic実装/独立Review、実source/mapping/data owner、移行承認 |
+| 07 | SF基盤・D2b2・W3a限定scope統合済み。全gateでPrivacy自由競合失敗、診断3ddは53/1/0/0。fence no-op upsert修復125eは限定CODE・5class MySQL56/0/0/0 PASS、control670b7b5c統合。旧35件/26件成功を最新競合問題の解決としない。本人同定/交付/処分・実provider未完 | DG-07、Privacy/Legal、本人同定/交付、hold/処分、外部provider、復元/運用 |
+| 08 | A/B/C1・C2-A1/A2・B1/B2aとB2b限定境界をcontrol703647aaへ統合。B2b source bdaは20class116/0/0/0、Astra限定CODE/証拠PASS。並行test違反とJaCoCo警告を記録しcoverage結論なし。B2c-0 source647bは122/0/0/0限定PASS、controla16ea908統合。実TLS issuer、durable claim、dispatch/usage authority未完 | NF07 policy、model/provider/DPA/外送/費用、feature flag有効化承認 |
+| 09 | fail-closed修復 `da850b97`限定CODE PASS、control統合済み。実providerの完成ではない | V182 PENDING=0/帰属不明0/親子一致、実撤権/session/token、production owner |
+| 10 | session共有reauth修復 `20cce0f7`限定CODE PASS、46/0/0/0、control統合済み | 全体独立Review、実browser/session環境、staging、正式release |
+
+2026-10-23最新: fixed control `19bdbebc` の全fast第8回は695 class 4247/0/0/0（独立証拠PASS）。同verify-like-ciのMySQLは部分73class 249/4/0/0で中断、完全gateは未完。同SHAの別run performance 1/0/0/0・browser 17/0/0/0・backup 476 assertions/0 failure + PITR SUCCESSは個別受理済みであり、完全gateへ合成しない。最新sourceと未完範囲は実行台帳の2026-10-23節を参照。全体NO-GO。
+
+履歴: 2026-10-21の固定統合HEAD `6b5415a6fd7311f6ff60e5571d8063f8b33e7b20` の全fast第7回は **694 class、4232/0/0/0、PASS**。Astraが694 XML、1388 report hash、起止SHA/clean、selectorなしを独立照合した。raw evidenceは `verification-evidence/20261021-control-fast-07/`。旧第6回FAILは履歴に保持する。NF06 wave2/NF08 B2a/NF01基盤は後続control `6ce313ce` までに統合したが、本runの対象外。各sourceの限定証拠は実行台帳の最新節に記録した。最新全MySQL/performance/browser/backup/staging/production承認は未完。最新詳細は実行台帳冒頭を参照する。
+
+NF01の「退社確定時一括失効trigger」は現行コードでNF01呼出が確認できず、下記承認範囲の記述を
+実装済み証拠としない。NF06/NF07のflag OFFを全機能完成として扱わない。
+PR101 CIは全7 SUCCESSだったがmerge後main CIはBrowser FAILURE。Browser修復はlocalで独立PASSを得た段階であり、
+remote mainのCIをPASSに変更したとは報告しない。2026-10-04再照合では最新local全fastは第4回、fixed `3d9e3a87`、4088/0/0/0でPASS。同Headの全MySQLは190/7/0/0でFAIL。Q2/Q3限定修復は再試験20/0/0/0とAstra限定CODE PASSを得てcontrolへ統合した。初回20件全skipのFAIL履歴を保持し、全MySQL再合格とは扱わない。NF04 G1/G2は限定統合済みで、control6980dff8のbrowser17件/定向fast85件は限定受理。最新control全体Gateとproduction approvalは未完である。
+
 - 親文書: `2026-08-27-post-acceptance-feature-backlog.md`
 - 状態: 候補。各Decisionが`APPROVED`になるまでproduction変更を開始しない。
 

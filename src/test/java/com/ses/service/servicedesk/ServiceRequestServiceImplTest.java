@@ -8,6 +8,7 @@ import com.ses.dto.servicedesk.ServiceCommentCreateRequest;
 import com.ses.dto.servicedesk.ServiceRequestCreateRequest;
 import com.ses.dto.servicedesk.ServiceRequestDto;
 import com.ses.dto.servicedesk.ServiceRequestStatusChangeRequest;
+import com.ses.dto.servicedesk.ServiceRequestUpdateRequest;
 import com.ses.entity.Customer;
 import com.ses.entity.CustomerCsat;
 import com.ses.entity.ServiceRequest;
@@ -547,7 +548,7 @@ class ServiceRequestServiceImplTest {
         BusinessException ex1 = assertThrows(BusinessException.class, () ->
                 serviceRequestService.createRequest(reqNonexistent, 100L, false, null));
         assertEquals(400, ex1.getCode());
-        assertTrue(ex1.getMessage().contains("指定された担当ユーザーが存在しません"));
+        assertEquals("指定された担当ユーザーを設定できません", ex1.getMessage());
 
         // 2. 無効化されたユーザー (status = 0)
         SysUser inactiveUser = SysUser.builder()
@@ -570,7 +571,7 @@ class ServiceRequestServiceImplTest {
         BusinessException ex2 = assertThrows(BusinessException.class, () ->
                 serviceRequestService.createRequest(reqInactive, 100L, false, null));
         assertEquals(400, ex2.getCode());
-        assertTrue(ex2.getMessage().contains("指定された担当ユーザーは無効です"));
+        assertEquals("指定された担当ユーザーを設定できません", ex2.getMessage());
 
         // 3. 対象外ロール (HR)
         SysUser hrUser = SysUser.builder()
@@ -593,7 +594,7 @@ class ServiceRequestServiceImplTest {
         BusinessException ex3 = assertThrows(BusinessException.class, () ->
                 serviceRequestService.createRequest(reqHr, 100L, false, null));
         assertEquals(400, ex3.getCode());
-        assertTrue(ex3.getMessage().contains("指定されたユーザーは内部担当者として設定できません"));
+        assertEquals(ex2.getMessage(), ex3.getMessage());
 
         // 4. 有効な営業担当者 (営業) -> 成功
         SysUser salesUser = SysUser.builder()
@@ -615,5 +616,44 @@ class ServiceRequestServiceImplTest {
                 .build();
         ServiceRequest created = serviceRequestService.createRequest(reqValid, 100L, false, null);
         assertEquals(salesUser.getId(), created.getOwnerUserId());
+    }
+
+    @Test
+    @DisplayName("別tenant担当者はcreate/updateで同一safe errorとなりrequestを変更しない")
+    void ownerFromAnotherTenantIsRejectedWithoutDisclosureOrMutation() {
+        SysUser foreign = new SysUser();
+        foreign.setTenantId("another-tenant");
+        foreign.setUsername("foreign_owner");
+        foreign.setPassword("pass123");
+        foreign.setRealName("他社限定名-DO-NOT-LEAK");
+        foreign.setRole("営業");
+        foreign.setStatus(1);
+        sysUserMapper.insert(foreign);
+
+        ServiceRequestCreateRequest create = ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId()).category("SYSTEM").priority("P2")
+                .subject("tenant境界create").description("test").ownerUserId(foreign.getId()).build();
+        BusinessException createError = assertThrows(BusinessException.class,
+                () -> serviceRequestService.createRequest(create, 100L, false, null));
+        assertEquals(400, createError.getCode());
+        assertEquals("指定された担当ユーザーを設定できません", createError.getMessage());
+        assertTrue(!createError.getMessage().contains("DO-NOT-LEAK"));
+        assertEquals(0L, serviceRequestMapper.selectCount(new LambdaQueryWrapper<ServiceRequest>()
+                .eq(ServiceRequest::getSubject, "tenant境界create")));
+
+        ServiceRequestCreateRequest validCreate = ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId()).category("SYSTEM").priority("P2")
+                .subject("update対象").description("before").build();
+        ServiceRequest saved = serviceRequestService.createRequest(validCreate, 100L, false, null);
+        ServiceRequestUpdateRequest update = ServiceRequestUpdateRequest.builder()
+                .category(saved.getCategory()).priority(saved.getPriority()).subject("after")
+                .description("after").ownerUserId(foreign.getId()).version(saved.getVersion()).build();
+        BusinessException updateError = assertThrows(BusinessException.class,
+                () -> serviceRequestService.updateRequest(saved.getId(), update));
+        assertEquals(createError.getMessage(), updateError.getMessage());
+        ServiceRequest unchanged = serviceRequestMapper.selectByIdAndTenant(saved.getId(), "default");
+        assertEquals("update対象", unchanged.getSubject());
+        assertEquals(saved.getVersion(), unchanged.getVersion());
+        assertNull(unchanged.getOwnerUserId());
     }
 }

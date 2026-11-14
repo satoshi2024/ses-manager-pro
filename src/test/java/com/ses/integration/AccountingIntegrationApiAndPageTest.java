@@ -185,8 +185,10 @@ class AccountingIntegrationApiAndPageTest {
         mockMvc.perform(get("/api/accounting/preview/sales-invoice/" + invoice.getId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.invoiceNo").value("INV-TEST-001"))
-                .andExpect(jsonPath("$.data.total").value(1100000));
+                .andExpect(jsonPath("$.data.payload.invoiceNo").value("INV-TEST-001"))
+                .andExpect(jsonPath("$.data.payload.total").value(1100000))
+                .andExpect(jsonPath("$.data.mappingChecks.length()").value(3))
+                .andExpect(jsonPath("$.data.sendable").value(false));
     }
 
     @Test
@@ -226,6 +228,151 @@ class AccountingIntegrationApiAndPageTest {
 
         ExternalMapping verified = mappingService.getById(saved.getId());
         assertThat(verified.getVerifiedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("照合失敗: 以前の検証済みを未検証へ戻し、種別入りの理由を400で返す")
+    @WithMockUser(username = "admin_user", roles = {"管理者"})
+    void mappingVerifyFailure_clearsVerifiedAndExplainsReason() throws Exception {
+        ExternalMapping mapping = new ExternalMapping();
+        mapping.setConnectionId(connection.getId());
+        mapping.setObjectType("CUSTOMER_PARTNER");
+        mapping.setInternalCode("CUST-TEST-REJECT");
+        mapping.setExternalId("112233");
+        mappingService.saveOrUpdateMapping(mapping);
+        ExternalMapping saved = mappingService.getMapping(connection.getId(), "CUSTOMER_PARTNER", "CUST-TEST-REJECT");
+        mappingService.verifyMapping(saved.getId(), "{\"verified\":true}");
+        assertThat(mappingService.getById(saved.getId()).getVerifiedAt()).isNotNull();
+
+        org.springframework.test.web.client.MockRestServiceServer mockServer =
+                org.springframework.test.web.client.MockRestServiceServer.bindTo(restTemplate).build();
+        mockServer.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo(
+                        "https://api.freee.co.jp/api/1/partners/112233?company_id=10001"))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withStatus(
+                        org.springframework.http.HttpStatus.NOT_FOUND));
+
+        mockMvc.perform(post("/api/accounting/mappings/" + saved.getId() + "/verify").with(csrf()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                // 汎用文言（入力内容を確認してください）へ潰さず、照合失敗と種別を伝える
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("CUSTOMER_PARTNER")));
+        mockServer.verify();
+
+        assertThat(mappingService.getById(saved.getId()).getVerifiedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("マッピング保存: 本文の検証済み日時は受け付けず、外部IDが変わったら未検証へ戻す")
+    @WithMockUser(username = "admin_user", roles = {"管理者"})
+    void mappingSave_neverTrustsClientVerification_andResetsOnExternalIdChange() throws Exception {
+        java.util.Map<String, Object> body = new java.util.HashMap<>();
+        body.put("connectionId", connection.getId());
+        body.put("objectType", "ACCOUNT_SALES");
+        body.put("internalCode", "SALES_DEFAULT");
+        body.put("externalId", "4001");
+        body.put("verifiedAt", "2026-08-08T10:00:00"); // 照合を経ずに検証済みにしようとする
+        mockMvc.perform(post("/api/accounting/mappings").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk());
+        ExternalMapping saved = mappingService.getMapping(connection.getId(), "ACCOUNT_SALES", "SALES_DEFAULT");
+        assertThat(saved.getVerifiedAt()).isNull();
+
+        mappingService.verifyMapping(saved.getId(), "{\"verified\":true}");
+
+        // 表示名だけの変更では検証状態を維持する
+        body.remove("verifiedAt");
+        body.put("externalCode", "売上高");
+        mockMvc.perform(post("/api/accounting/mappings").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk());
+        assertThat(mappingService.getById(saved.getId()).getVerifiedAt()).isNotNull();
+
+        // 外部IDの変更は未照合のIDなので未検証へ戻す
+        body.put("externalId", "4002");
+        mockMvc.perform(post("/api/accounting/mappings").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk());
+        ExternalMapping changed = mappingService.getById(saved.getId());
+        assertThat(changed.getExternalId()).isEqualTo("4002");
+        assertThat(changed.getVerifiedAt()).isNull();
+
+        // 未知の種別（旧seedの CUSTOMER など）は保存させない
+        body.put("objectType", "CUSTOMER");
+        mockMvc.perform(post("/api/accounting/mappings").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.not("入力内容を確認してください。")));
+    }
+
+    @Test
+    @DisplayName("送信プレビュー: 必要マッピングの状態を返し、未登録があれば送信不可")
+    @WithMockUser(username = "admin_user", roles = {"管理者"})
+    void previewReportsMappingReadiness() throws Exception {
+        // 売上送信が使う全社共通接続（legal_entity_id NULL）を接続済みにする
+        IntegrationConnection companyWide = connectionService.getOrCreateConnection("default", null, "freee", "accounting");
+        connectionService.saveTokens(companyWide.getId(), IntegrationTokensDto.builder()
+                .accessToken("test-secret-access-token-777").refreshToken("test-secret-refresh-token-666")
+                .tokenType("Bearer").expiresIn(3600L).build(), 10001L, "テスト株式会社", 1L);
+
+        // 請求書を1件用意（顧客マッピング・税区分マッピングは未登録のまま）
+        Customer customer = new Customer();
+        customer.setCompanyName("プレビュー顧客");
+        customerService.save(customer);
+        Invoice invoice = new Invoice();
+        invoice.setInvoiceNo("INV-PREVIEW-001");
+        invoice.setCustomerId(customer.getId());
+        invoice.setBillingMonth("2026-08");
+        invoice.setIssuedDate(LocalDate.now());
+        invoice.setDueDate(LocalDate.now().plusMonths(1));
+        invoice.setSubtotal(new BigDecimal("100000"));
+        invoice.setTax(new BigDecimal("10000"));
+        invoice.setTotal(new BigDecimal("110000"));
+        invoice.setTaxRate(new BigDecimal("0.100"));
+        invoiceService.save(invoice);
+
+        ExternalMapping account = new ExternalMapping();
+        account.setConnectionId(companyWide.getId());
+        account.setObjectType("ACCOUNT_SALES");
+        account.setInternalCode("SALES_DEFAULT");
+        account.setExternalId("4001");
+        mappingService.saveOrUpdateMapping(account);
+        mappingService.verifyMapping(mappingService.getMapping(companyWide.getId(), "ACCOUNT_SALES", "SALES_DEFAULT").getId(), "{}");
+
+        mockMvc.perform(get("/api/accounting/preview/sales-invoice/" + invoice.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.kind").value("SALES"))
+                .andExpect(jsonPath("$.data.payload.customerCode").value("CUST-" + customer.getId()))
+                .andExpect(jsonPath("$.data.payload.details[0].accountItemCode").value("4001"))
+                .andExpect(jsonPath("$.data.mappingChecks[0].objectType").value("CUSTOMER_PARTNER"))
+                .andExpect(jsonPath("$.data.mappingChecks[0].status").value("MISSING"))
+                .andExpect(jsonPath("$.data.mappingChecks[1].status").value("OK"))
+                .andExpect(jsonPath("$.data.mappingChecks[2].status").value("MISSING"))
+                .andExpect(jsonPath("$.data.connectionReady").value(true))
+                // 法人は請求書（顧客）から決まる。全社共通接続なのでOK
+                .andExpect(jsonPath("$.data.legalEntityId").value(invoiceService.getById(invoice.getId()).getLegalEntityId()))
+                .andExpect(jsonPath("$.data.legalEntityStatus").value("OK"))
+                .andExpect(jsonPath("$.data.sendable").value(false));
+    }
+
+    @Test
+    @DisplayName("freee取引の取消は最新の成功した送信ジョブからだけ受け付ける（取消→再送信後に古い行で新しい取引を消さない）")
+    @WithMockUser(username = "admin_user", roles = {"管理者"})
+    void cancelDeal_onlyFromLatestSucceededSendJob() throws Exception {
+        long invoiceId = 777_001L;
+        IntegrationJob older = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", invoiceId, "idemp-cancel-old", "h-old");
+        jobService.claimJob(older.getId());
+        jobService.markSucceeded(older.getId(), "50001", "req-old", "売上登録完了");
+        IntegrationJob newer = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", invoiceId, "idemp-cancel-new", "h-new");
+        jobService.claimJob(newer.getId());
+        jobService.markSucceeded(newer.getId(), "50002", "req-new", "売上登録完了");
+
+        mockMvc.perform(post("/api/accounting/jobs/" + older.getId() + "/cancel-deal").with(csrf()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.not("他の操作と競合しました。再読み込みして再試行してください。")));
+
+        IntegrationJob pending = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", 777_002L, "idemp-cancel-pending", "h-p");
+        mockMvc.perform(post("/api/accounting/jobs/" + pending.getId() + "/cancel-deal").with(csrf()))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -465,7 +612,7 @@ class AccountingIntegrationApiAndPageTest {
 
         mockMvc.perform(get("/api/accounting/preview/sales-invoice/" + invoiceX.getId()))
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.invoiceNo").value("INV-SCOPE-X"));
+                .andExpect(jsonPath("$.data.payload.invoiceNo").value("INV-SCOPE-X"));
         mockMvc.perform(get("/api/accounting/preview/sales-invoice/" + invoiceY.getId()))
                 .andExpect(jsonPath("$.code").value(404));
 
@@ -482,7 +629,9 @@ class AccountingIntegrationApiAndPageTest {
 
         org.springframework.test.web.client.MockRestServiceServer reconMock =
                 org.springframework.test.web.client.MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
-        reconMock.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo(
+        // 月次照合はdealsを2回取得する（決済済み・対象月に発生した未決済）
+        reconMock.expect(org.springframework.test.web.client.ExpectedCount.manyTimes(),
+                        org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo(
                         org.hamcrest.Matchers.containsString("/api/1/deals")))
                 .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.method(HttpMethod.GET))
                 .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
@@ -621,5 +770,76 @@ class AccountingIntegrationApiAndPageTest {
         LoginUser principal = new LoginUser(user,
                 java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_" + role)));
         return new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
+    }
+
+    @Autowired
+    private com.ses.mapper.ContractMapper contractMapperForCandidates;
+
+    @Autowired
+    private com.ses.mapper.WorkRecordMapper workRecordMapperForCandidates;
+
+    @Autowired
+    private com.ses.mapper.BpPaymentMapper bpPaymentMapperForCandidates;
+
+    /** 顧客→契約→工数実績→BP支払を指定tenantで作る（BP支払はtenant列を持たず、この連鎖でtenantが決まる）。 */
+    private com.ses.entity.BpPayment insertBpPaymentOwnedBy(String tenantId, String label) {
+        Customer customer = new Customer();
+        customer.setCompanyName("送信候補テスト顧客-" + label);
+        customer.setTenantId(tenantId);
+        customerService.save(customer);
+
+        com.ses.entity.Contract contract = new com.ses.entity.Contract();
+        contract.setContractNo("CON-CAND-" + label + "-" + java.util.UUID.randomUUID().toString().substring(0, 8));
+        contract.setEngineerId(1L);
+        contract.setProjectId(1L);
+        contract.setCustomerId(customer.getId());
+        contract.setTenantId(tenantId);
+        contract.setLegalEntityId(1L);
+        contract.setContractType("準委任");
+        contract.setStatus("稼動中");
+        contract.setStartDate(LocalDate.of(2026, 1, 1));
+        contract.setEndDate(LocalDate.of(2026, 12, 31));
+        contract.setSellingPrice(new BigDecimal("900000"));
+        contract.setCostPrice(new BigDecimal("800000"));
+        contractMapperForCandidates.insert(contract);
+
+        com.ses.entity.WorkRecord workRecord = new com.ses.entity.WorkRecord();
+        workRecord.setContractId(contract.getId());
+        workRecord.setWorkMonth("2026-08");
+        workRecord.setActualHours(new BigDecimal("160.00"));
+        workRecordMapperForCandidates.insert(workRecord);
+
+        com.ses.entity.BpPayment payment = new com.ses.entity.BpPayment();
+        payment.setWorkRecordId(workRecord.getId());
+        payment.setPayeeCompanyName("送信候補テストBP-" + label);
+        payment.setAmount(new BigDecimal("800000"));
+        payment.setStatus("未払");
+        bpPaymentMapperForCandidates.insert(payment);
+        return payment;
+    }
+
+    @Test
+    @DisplayName("BP仕入の送信候補・プレビュー・送信は現在tenantのBP支払だけを対象にする（他tenantの支払先・金額を返さない）")
+    @WithMockUser(username = "admin_user", roles = {"管理者"})
+    void bpPurchaseSendCandidates_areTenantScoped() throws Exception {
+        com.ses.entity.BpPayment own = insertBpPaymentOwnedBy("default", "OWN");
+        com.ses.entity.BpPayment other = insertBpPaymentOwnedBy("other-tenant", "OTHER");
+
+        String body = mockMvc.perform(get("/api/accounting/send-candidates").param("kind", "purchase"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        com.fasterxml.jackson.databind.JsonNode candidates = objectMapper.readTree(body).get("data");
+        java.util.List<Long> ids = new java.util.ArrayList<>();
+        candidates.forEach(c -> ids.add(c.get("id").asLong()));
+        assertThat(ids).contains(own.getId()).doesNotContain(other.getId());
+        assertThat(body).doesNotContain("送信候補テストBP-OTHER");
+
+        // 他tenantのBP支払はプレビューも送信も見つからない扱い（存在を推測させない）
+        mockMvc.perform(get("/api/accounting/preview/bp-purchase/" + other.getId()))
+                .andExpect(jsonPath("$.code").value(404));
+        mockMvc.perform(post("/api/accounting/sync/bp-purchase/" + other.getId()).with(csrf()))
+                .andExpect(jsonPath("$.code").value(404));
+        assertThat(jobService.getLatestJob("BP_PAYMENT", other.getId(), "BP_PURCHASE_SYNC")).isNull();
     }
 }

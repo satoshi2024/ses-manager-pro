@@ -13,21 +13,30 @@ import com.ses.mapper.ServiceRequestMapper;
 import com.ses.mapper.ServiceSlaClockMapper;
 import com.ses.mapper.ServiceSlaEscalationMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.RoleMenuMapper;
+import com.ses.config.LoginUser;
 import com.ses.service.NotificationService;
 import com.ses.service.servicedesk.ServiceSlaMonitoringService;
 import com.ses.service.security.CustomerScopeResolver;
+import com.ses.service.security.ReportScopeContext;
 import com.ses.common.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * SLA監視・アラート通知サービス実装
@@ -51,6 +60,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
     private final SysUserMapper sysUserMapper;
     private final NotificationService notificationService;
     private final Clock clock;
+    private final RoleMenuMapper roleMenuMapper;
 
     @Override
     public void checkAndNotifyBreaches() {
@@ -113,8 +123,10 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                 clockUpdated = true;
             }
 
-            // 期限30分前からwarningを一度だけ発行する。
-            if (!responseWasBreached && !Boolean.TRUE.equals(clk.getResponseWarningSent())
+            // 期限30分前からwarningを一度だけ発行する。初回応答を記録済みの依頼は初回応答期限の対象外のため、
+            // 超過判定（上記1.）と同じく初回応答の記録有無を見て、応答済みの依頼へ初回応答warningを出さない。
+            if (!responseWasBreached && clk.getFirstRespondedAt() == null
+                    && !Boolean.TRUE.equals(clk.getResponseWarningSent())
                     && dueForWarning(clk.getResponseDeadline(), now)) {
                 clk.setResponseWarningSent(true);
                 clockUpdated = true;
@@ -129,7 +141,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                         String.format("リクエスト %s [%s] の解決期限まで30分以内です", req.getRequestNo(), req.getSubject())));
             }
 
-            // 無接收者・部分失敗の通知は台帳へ残し、退避時間経過後に同じdedupe keyで再送する。
+            // 受信者なし・部分失敗の通知は台帳へ残し、退避時間経過後に同じdedupe keyで再送する。
             for (ServiceSlaEscalation retry : retryRows) {
                 if (retry.getNextRetryAt() != null && retry.getNextRetryAt().isAfter(now)) {
                     continue;
@@ -335,7 +347,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
         // ① リクエスト担当者
         if (req.getOwnerUserId() != null) {
             SysUser owner = sysUserMapper.selectByIdAndTenant(req.getOwnerUserId(), tenantId);
-            if (owner != null && Integer.valueOf(1).equals(owner.getStatus()) && Integer.valueOf(0).equals(owner.getDeletedFlag())) {
+            if (isEligibleNotificationRecipient(owner, req.getCustomerId(), tenantId)) {
                 return List.of(owner.getId());
             }
         }
@@ -349,7 +361,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             }
             if (contract.getSalesUserId() != null) {
                 SysUser salesUser = sysUserMapper.selectByIdAndTenant(contract.getSalesUserId(), tenantId);
-                if (salesUser != null && Integer.valueOf(1).equals(salesUser.getStatus()) && Integer.valueOf(0).equals(salesUser.getDeletedFlag())) {
+                if (isEligibleNotificationRecipient(salesUser, req.getCustomerId(), tenantId)) {
                     return List.of(salesUser.getId());
                 }
             }
@@ -362,8 +374,11 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                 contracts = List.of();
             }
             for (Contract c : contracts) {
+                if (!Objects.equals(req.getCustomerId(), c.getCustomerId()) || c.getSalesUserId() == null) {
+                    continue;
+                }
                 SysUser salesUser = sysUserMapper.selectByIdAndTenant(c.getSalesUserId(), tenantId);
-                if (salesUser != null && Integer.valueOf(1).equals(salesUser.getStatus()) && Integer.valueOf(0).equals(salesUser.getDeletedFlag())) {
+                if (isEligibleNotificationRecipient(salesUser, req.getCustomerId(), tenantId)) {
                     return List.of(salesUser.getId());
                 }
             }
@@ -371,11 +386,63 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
 
         // ④ 有効な全管理者へのエスカレーション
         List<SysUser> activeAdmins = sysUserMapper.selectActiveByRoleAndTenant("管理者", tenantId);
-        if (!activeAdmins.isEmpty()) {
-            return activeAdmins.stream().map(SysUser::getId).toList();
+        if (activeAdmins != null) {
+            List<Long> eligibleAdmins = activeAdmins.stream()
+                    .filter(admin -> isEligibleNotificationRecipient(admin, req.getCustomerId(), tenantId))
+                    .map(SysUser::getId).toList();
+            if (!eligibleAdmins.isEmpty()) {
+                return eligibleAdmins;
+            }
         }
 
         return Collections.emptyList();
+    }
+
+    /** Scheduler/actor権限を流用せず、候補recipient本人のrole/menu/customer scopeで評価する。 */
+    private boolean isEligibleNotificationRecipient(SysUser user, Long customerId, String tenantId) {
+        if (user == null || user.getId() == null || !tenantId.equals(user.getTenantId())
+                || !Integer.valueOf(1).equals(user.getStatus())
+                || !Integer.valueOf(0).equals(user.getDeletedFlag()) || customerId == null) {
+            return false;
+        }
+        String role = user.getRole();
+        if ("管理者".equals(role)) {
+            // 管理者は既存の静的security boundaryと同様にmenuをbypassする。
+            return true;
+        }
+        if (!Set.of("営業", "マネージャー").contains(role) || customerScopeResolver == null) {
+            return false;
+        }
+        SecurityContext previous = SecurityContextHolder.getContext();
+        org.springframework.web.context.request.RequestAttributes previousRequestAttributes =
+                org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+        try {
+            // 既存DataScopeはrequest cacheのkeyを保持しないので、candidate評価ではrequest cacheも切り離す。
+            org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();
+            List<String> menuKeys = roleMenuMapper.selectMenuKeysByRole(role);
+            if (menuKeys == null || !menuKeys.contains("service-desk")) {
+                return false;
+            }
+            LoginUser principal = new LoginUser(user,
+                    List.of(new SimpleGrantedAuthority("ROLE_" + role)), tenantId);
+            SecurityContext recipientContext = SecurityContextHolder.createEmptyContext();
+            recipientContext.setAuthentication(new UsernamePasswordAuthenticationToken(
+                    principal, null, principal.getAuthorities()));
+            SecurityContextHolder.setContext(recipientContext);
+            return ReportScopeContext.with(null, () -> {
+                java.util.Set<Long> allowedCustomers = customerScopeResolver.resolve(LocalDate.now(clock));
+                return allowedCustomers == null || allowedCustomers.contains(customerId);
+            });
+        } catch (RuntimeException denied) {
+            return false;
+        } finally {
+            SecurityContextHolder.setContext(previous);
+            if (previousRequestAttributes == null) {
+                org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();
+            } else {
+                org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(previousRequestAttributes);
+            }
+        }
     }
 
     private boolean isVisibleCustomer(Long customerId) {

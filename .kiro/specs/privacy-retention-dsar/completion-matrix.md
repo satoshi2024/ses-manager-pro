@@ -1,5 +1,113 @@
 # completion mapping
 
+## 2026-11-14 状態整合と production bridge 段階計画（基準 `1be03bea`）
+
+読み方（[`status-alignment.md`](status-alignment.md) §1）: 本書と tasks.md の「Astra PASS」「受理」表記は実装側の転記であり、正式なReview verdictではない（review-ledger.md:22。C-17）。repo内に受理記録が無いBatch 2 / Batch 3 / Batch 4a の独立CODE verdictは **UNKNOWN** とする。テスト件数は記載SHAでの歴史的固定証拠であり、別SHAの結果と合算しない。
+
+### 7. 本番読み取り専用境界 Batch 4a（2026-11-04 統合、C-13 で追記）
+
+* 設計: [`production-readonly-boundary-slice-plan.md`](production-readonly-boundary-slice-plan.md)（Astra限定 PLAN PASS、plan SHA `7ad5d9ab` の記録あり）。
+* コード: `ProductionEnvironmentGuard`、`ProductionApprovalEnvelopeVerifier`、`SecurityContextCallerContextProvider`（package-private final、Spring Beanではない）。`97007872` で統合、基準 `1be03bea` まで無変更。
+* テスト: `73aa7000` のFULL_GATE artifactで3 class 19/0/0/0（8 + 4 + 7）。本整合で再実行していない。`498f04ba` の76/0/0/0 は証拠dirがrepo内に無く UNKNOWN。
+* 独立CODE verdict: **UNKNOWN**（C-12）。
+* 本番状態: production policy source・trust registry未設定、privacy権限の付与なし（現状は全実利用者で fail-closed）。D-01〜D-09 未承認。
+
+### 8. production bridge 段階計画（2026-11-14、W3-04 NF07-P）
+
+* 計画: [`production-bridge-phased-plan.md`](production-bridge-phased-plan.md)、[`journal-witness-grant-design.md`](journal-witness-grant-design.md)、取込計画 [`policy-source-catalog-wiring-plan.md`](policy-source-catalog-wiring-plan.md)。
+* 状態: 計画のみ（コード・migration・Bean登録なし）。R1（`3d59ffae`）は独立 Plan Review で REQUEST CHANGES（外部記録の転記）（P1×2、P2×8、P3×12。W-5 の方向と N7-2 は成立）。指摘を反映した R2 を再 Review 待ち（対応表は計画の冒頭）。
+* F1〜M の実装着手条件は Q-8（2026-11-14）で変更した（tasks.md「F1〜M」節の変更記録）。本番開放の停止条件は変わらない。
+
+---
+
+## 2026-10-28 NF07 本番接線・意思決定契約および純粋カーネル抽出実装（Base: 93b40985 / 直前Base: 197386f8 / c8b78dc3 証拠継承）
+
+現行作業ブランチ: `codex/snf-prod-nf07-evidence-contract`
+本フェーズ基準（Base）: `93b40985e45e29c1531cec93ea41648cb7c8ad38`（Astra 限定 PLAN PASS 承認コミット）
+直前基準（Previous Base）: `197386f866c834c7232590ec2f16fd13b8ac17d6`
+固定テスト証拠コミット: `c8b78dc3c8c3906e8ba734a2aa81037bd3a77dfb`
+担当: AI-5（接線・意思決定契約および純粋カーネル抽出設計担当）
+設計正本:
+* 本番接線・意思決定契約: [`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md)
+* 純粋Policy検証カーネル抽出・実施設計: [`pure-policy-verification-kernel-plan.md`](pure-policy-verification-kernel-plan.md)
+
+### 1. 直前固定検証実績（c8b78dc3 の歴史的証拠）
+本ラウンドにおいては新規のテスト実行は行っていない（NO NEW TESTS RUN IN THIS ROUND）。以下の実績は直前固定コミット `c8b78dc3` において完了・記録された歴史的証拠であり、全体の COMPLETE 状態を不当に引き上げるものではない。
+* **只読Policy照会スライス定向テスト (`verification-evidence/20261025-nf07-targeted-01`)**:
+  * 実行コマンド: `mvn test -Dtest=PolicyReadonlyQueryServiceTest,ApprovalEnvelopeVerifierTest,PrivacyFoundationIsolationTest`
+  * 結果: **3クラス / 42テスト / 0 failure / 0 error / 0 skip（完全合格、ExitCode: 0）**
+  * 内訳:
+    * `PolicyReadonlyQueryServiceTest`: 29テスト合格
+    * `ApprovalEnvelopeVerifierTest`: 9テスト合格
+    * `PrivacyFoundationIsolationTest`: 4テスト合格
+* **Fast 回帰テストスイート (`verification-evidence/20261025-nf07-fast-01`)**:
+  * 実行コマンド: `mvn test` (Fast H2/Unit)
+  * 結果: **697クラス / 4,292テスト / 0 failure / 0 error / 0 skip（完全合格、ExitCode: 0）**
+
+### 2. 履歴スキャン統計の分離と将来リリースの閉環ゲート規約
+過去のインベントリスキャン統計は計測時点のコミットSHAが異なっており、直前基準（`9024f7b2` / `b2886c47`）や本フェーズ基準（`aad2afee`）の直接スキャン結果と混同してはならない。
+* **歴史的ベースライン 1（2026-08-28、コミット `b678ce98`）**:
+  * 116 migration / 180 table / 4,279 CREATE column / 153 ALTER column / 176 entity / 424 provider候補。
+  * プライバシーカタログ構造的未分類は 0 であるが、法定保持ポリシーが未確定のテーブルが 78 件存在（`COVERAGE_EXPLICIT_POLICY_UNKNOWN`）。
+* **固定読取専用スキャン 2（2026-10-01、Control Head `cde61306`、証拠 `20261001-privacy-coverage-02`）**:
+  * 183 SQL / 254 table / 244 entity / 708 provider候補。
+  * プライバシーカタログ未分類 74、インベントリ欠落 1,082 列、プロバイダー参照欠落 285、エンティティ未マップ 68 で `BLOCKED`。
+* **将来リリースの閉環ゲート規約**:
+  * 上記の統計はいずれも本設計の基準コミットの直接再走査結果ではない。
+  * Phase 4 実装時および将来の本番公開（Production Enablement）時には、リリース対象コミット SHA に対するインベントリ・カバレッジの閉環スキャンを再実行し、未分類 0・欠落 0 の証拠を固定することを必須ゲートとする。
+
+### 3. 既存合成機能の実在状況と歴史的固定検証
+既存の Journal、Hold/Fence、署名検証/SoD、Recovery、Preview は既に合成隔離層として部分実装・検証が存在しており、未実装または白紙として扱ってはならない。
+* **SF-W0**: 計画固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`（Astra技術Plan PASS）
+* **SF-W1**: 固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`（Astra限定CODE PASS、対象3クラス 18/0/0/0）
+* **SF-W2a**: 固定証拠 `verification-evidence/nf07-w2a`（MySQL並行境界・線形化整合性確認）
+* **SF-W2b (Slice D2b2)**: 固定Head `ac894ac6ec9df2eada9e47c5f242f268270daec4`（1クラス 35/0/0/0 合格）
+* **SF-W3a (Preview)**: 固定Head `92d91d58172288406f6048e69ad38aa85880eb04`（Astra限定CODE PASS、26/0/0/0、control `b6e2992b` 統合）
+
+### 4. 基準SHA未検証項目（TEST NOT RUN）
+以下の項目は Docker/MySQL、パフォーマンステスト環境依存のため AI-1 担当としてキューされ、基準 SHA においては未再実行（NOT RUN）である：
+* W2b Journal CAS / 独立 Witness / アプリケーション投影の実 MySQL 統合テスト
+* W2b Slice D リカバリ（3-MySQL 独立インスタンス）実 MySQL 統合テスト
+* W3a 合成 DSAR プレビュー（`SyntheticPrivacyRequestServiceMySQLTest`）実 MySQL 統合テスト
+* パフォーマンステストプロファイル（`-Pperformance-tests`）
+* PITR / バックアップリストア統合検証
+
+### 5. 本番接線ギャップおよび人手承認ギャップ
+詳細設計は [`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md) §2 を参照。
+* **技術配線ギャップ**: 純粋検証カーネルの独立審査未完、本番用 Trust Anchor / KMS 連携不在、本番独立 Journal/Witness インフラ不在、実テーブル/ファイル/AI プロバイダー不在、Outbox ディスパッチャー不在、本番用 Spring Security Context 呼出元プロバイダー不在。
+* **OIDC テナント解決（P1解消）**: `OidcLoginUser` のテナントは内部認証バインディング `oidc.getTenantId()` のみを唯一の根拠とし、トークンクレーム（`tenant_id` 等）は一致性検査のみに使用（上書き・フォールバック禁止）。不一致・内部欠落・クレーム衝突はすべて `ACCESS_DENIED`。
+* **ログ証跡の扱い**: 本スライスはデータベース監査（`t_audit_log`）への書き込みを行わない（0 DB write）。ログがファイルや外部基盤で永続化されるかを保証するものではなく、アプリDBへの永続化を行わない規約とする。DB 監査未実装の現段階において生産監査完備を主張してはならない。
+* **人手承認ギャップ**: DG-07 未承認、正式 Privacy Owner 未選任、法的留置（Hold）/SoD 権限未承認、DSAR 本人確認・第三者マスキング SOP 未承認、外部 AI ベンダー DPA 未確認。
+* **安全保護の根拠**: `privacy.retention.enabled` および `privacy.dsar.enabled` は導入予定・未実装であり、現行の保護根拠は「実際の `SyntheticEnvironmentGuard` による fail-closed 拒絶」および「破壊的実行能力の構造的不在」に立脚する。
+
+### 6. 純粋Policy検証カーネル実装（Batch 2 実装完了・CODE REVIEW PENDING。2026-11-14 時点の独立CODE verdictは UNKNOWN、C-10）
+詳細設計は [`pure-policy-verification-kernel-plan.md`](pure-policy-verification-kernel-plan.md) を参照。
+* **計画審査状況**: `pure-policy-verification-kernel-plan.md` は Astra より限定 PLAN PASS を受理（コミット `93b40985`）。
+* **抽出実装（PurePolicyVerificationKernel）**: 分段階ヘルパー群（スキーマ検証、Anchor ID比対、Scope照合、時間窓検査、ACTIVE失効判定、Ed25519署名検証、Policy SoD、Policyバインディング、Case/Policy相互バインディング）を package-private クラスとして実装。
+* **オーケストレーション維持**: ラッパー（`ApprovalEnvelopeVerifier`）が評価順序（schema → anchor → scope → time → revocation → signature）を厳格にオーケストレーション。Policy 完備検証後に初めて Case を検証し、先行バッチ照会は行わない。
+* **承認証明（VerifiedApproval）の生成境界**: 純粋カーネルは `VerifiedApproval` を生成・返却せず（void または純計算値 effectiveExpiry のみ返却）、環境防護・Anchor解決・失効照会を完遂したラッパー末端においてのみ構築。
+* **単体テスト拡充**: `PurePolicyVerificationKernelTest` を新規追加し純粋ヘルパーの各境界値を単体網羅。`ApprovalEnvelopeVerifierTest` に計画受入テスト 7 項目を追加。
+* **安全原則・非依存不変条件**: 純粋カーネルは Spring、DB、ネットワーク、KMS、環境プロファイルへのアクセスを一切持たない。
+* **状態**: **CODE REVIEW PENDING**（Astra / 総括による独立コードレビュー待ち。CODE PASS 未取得、本番承認未付与）。2026-11-14 状態整合: 2026-11-04 の autonomous-coordination `:44` はテスト履歴（57件対象・4,307件Fast）の受理であり CODE PASS ではないため、独立CODE verdictは **UNKNOWN** とする（C-10）。
+
+---
+
+## 2026-10-01 現行追加scope
+
+`SYNTHETIC_FOUNDATION`は新しい技術incrementであり、計画固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`はAstra技術Plan PASS。
+SF-W0完了。SF-W1固定Head `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`は対象3 class 18/0/0/0、Astra限定CODE PASS。worker/処分/recoveryは未実装、production BLOCKED。
+初期baseは`1443fb68943849a3260d7ebe005259f3eb609d60`、branchは`codex/snf-prod-nf07-foundation-plan`。
+以下のDEV-0/D0行、旧base、旧coverage件数は過去の証跡として保持し、現行HeadのPASSへ転用しない。
+
+### SF-W1限定Reviewと現行coverage gap
+
+| scope | fixed evidence | 結果 | 境界 |
+|---|---|---|---|
+| SF-W1 foundation | `6ec4ca2837502b9defc33a7a4fe938b5e9d3ecd9`、`synthetic-foundation.md`の3 XML SHA-256、対象3 class | Astra CODE PASS、18/0/0/0 | pure envelope/verifier/FSM/test harnessのみ。worker/journal/restore、Full Feature/Production PASSではない |
+| 2026-10-01 時点のread-only source scan（現行値ではない。2026-10-04 `ad9bb1c6` では provider候補724 / provider欠落301、B0/V182時点では253 table / 未分類73。基準 `1be03bea` は未scanで UNKNOWN、C-15） | control Head `cde61306`、`verification-evidence/20261001-privacy-coverage-02` | 183 SQL / 254 table / 244 entity / 708 provider候補。unclassified 74、missing columns 1,082、provider 285、entity 68でBLOCKED | source structure gapとpolicy UNKNOWNを別管理。0.4 coverage closure、DG-07、正式Owner/法的判断を満たさない |
+
+上記scanはcontrolで固定されたread-only inventory証拠であり、SF-W1のworktree HEADに対する実行結果とは称さない。旧coverage行の180 tables/unclassified 0/provider 424等はその当時の履歴として保持し、現状gapの解消証拠に転用しない。
+
 開始時base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`
 fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（base drift。`<BASE_COMMIT>`未確定のためrebaseなし）
 DEV decision: `NF07-DEV-GATE-20260828` / `APPROVED_DEV_ONLY` / Owner role `Project Maintainer（development-only）` / formal Privacy Owner `UNASSIGNED_UNTIL_PRE_PRODUCTION`。Full Feature/Productionのapproved policy/scope、正式owner、approved Base branch/SHAは未提供でBLOCKED。上記origin/mainは技術比較境界であり承認済みBaseではない。
@@ -21,7 +129,7 @@ DEV decision: `NF07-DEV-GATE-20260828` / `APPROVED_DEV_ONLY` / Owner role `Proje
 | DEV-0/D0 plan | `plan.md`、`dev-gate-evidence.json` | `NF07-DEV-GATE-20260828`のscopeに限定してPASS相当。独立ReviewはDEV-0/D0 scopeだけ | APPROVED_DEV_ONLY / REVIEW REQUIRED |
 | Full Feature / Production plan | `plan.md` | policy/owner/Base/DG-07/外部gate未完。F1-M、本番処分、PRは不可 | BLOCKED BY GATE |
 | Git isolation | start validation/handoff | dedicated worktree、branch、clean status、base/remoteを確認 | COMPLETE |
-| F1〜M | tasks.md | DG-07/external/internal gate未完のため未着手 | STOPPED |
+| F1〜M | tasks.md | DG-07/external/internal gate未完のため未着手（2026-08-28 時点）。2026-11-14 Q-8 により、値UNKNOWN・flag OFF・未知は一律拒否の形での実装着手は可となった | 実装: 未着手（計画のみ）/ 本番開放: STOPPED |
 
 ## task commit/push record
 

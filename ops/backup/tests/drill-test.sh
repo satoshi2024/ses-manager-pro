@@ -291,6 +291,32 @@ EOF
   assert_contains "$OUT" "write-enable" "理由"
 }
 
+# G-15 / W1-B1 r2: validate が READY_FOR_CUTOVER を返しても、flyway_schema_history を必須として照合し
+# PASS した結果でなければ drill を失敗させる（r1 は state だけを見て cutover リハーサルへ進んでいた）。
+# 照合を省略した validator を模すため、ops/backup の script を複製し validate-restore.sh だけを差し替える。
+case_drill_requires_flyway_history_check() {
+  setup_drill
+  prebuild_plan > /dev/null
+  local pid bk saved_drill=$DRILL
+  pid=$(ls "$PLANS_DIR"/*.json | head -1 | xargs -r basename | sed "s/.json$//")
+  bk="$T/backup-copy"
+  mkdir -p "$bk"
+  cp -a "$ROOT/ops/backup/"*.sh "$bk/"
+  cp -a "$ROOT/ops/backup/lib" "$ROOT/ops/backup/providers" "$bk/"
+  cat > "$bk/validate-restore.sh" <<'EOF'
+#!/usr/bin/env bash
+# 照合を省略した validator を模す（state は READY だが、history を必須とした照合結果を持たない）
+printf '%s\n' '{"state": "READY_FOR_CUTOVER", "plan_id": "stub", "checks": {"flyway_history_required": false, "flyway": "PASS"}}'
+EOF
+  chmod +x "$bk"/*.sh "$bk/providers"/*.sh
+  DRILL="$bk/restore-drill.sh"
+  run_drill "$pid"
+  DRILL=$saved_drill
+  assert_nonzero "$RC" "Flyway 照合を確認できない validate 結果では drill は非 0"
+  assert_contains "$OUT" "validate の Flyway 照合" "理由を表示"
+  assert_no_file "$T/drill-report/cutover.log" "cutover リハーサルへ進まない"
+}
+
 run_case case_drill_success
 run_case case_drill_target_plan_mismatch
 run_case case_drill_plan_fail
@@ -299,6 +325,7 @@ run_case case_drill_evidence_missing
 run_case case_drill_ping_only_rejected
 run_case case_drill_rto_exceeded
 run_case case_drill_write_enable_refused
+run_case case_drill_requires_flyway_history_check
 
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then
   test_fail "global-secret-scan" "TEST_LOG に秘密が残った"

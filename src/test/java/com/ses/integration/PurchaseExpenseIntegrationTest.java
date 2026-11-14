@@ -155,6 +155,8 @@ class PurchaseExpenseIntegrationTest {
         contract.setProjectId(1L);
         contract.setCustomerId(1L);
         contract.setTenantId("default");
+        // NF09: BP仕入ジョブの法人は工数実績→契約の法人から決まる
+        contract.setLegalEntityId(1L);
         contract.setContractType("準委任");
         contract.setStatus("稼動中");
         contract.setStartDate(LocalDate.of(2026, 1, 1));
@@ -236,10 +238,12 @@ class PurchaseExpenseIntegrationTest {
                 "SELECT COUNT(*) FROM t_engineer WHERE id = 1", Integer.class);
         if (engineerCount == null || engineerCount == 0) {
             jdbcTemplate.update("INSERT INTO t_engineer "
-                            + "(id, full_name, employment_type, status, tenant_id, created_by, deleted_flag) "
-                            + "VALUES (1, '会計連携テスト要員', '正社員', 'Bench', 'default', 1, 0)");
+                            + "(id, full_name, employment_type, status, tenant_id, legal_entity_id, created_by, deleted_flag) "
+                            + "VALUES (1, '会計連携テスト要員', '正社員', 'Bench', 'default', 1, 1, 0)");
         } else {
-            jdbcTemplate.update("UPDATE t_engineer SET tenant_id = 'default', deleted_flag = 0 WHERE id = 1");
+            // NF09: 要員経費ジョブの法人は要員の法人から決まる。既存値は上書きしない
+            jdbcTemplate.update("UPDATE t_engineer SET tenant_id = 'default', deleted_flag = 0, "
+                    + "legal_entity_id = COALESCE(legal_entity_id, 1) WHERE id = 1");
         }
         Integer projectCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_project WHERE id = 1", Integer.class);
@@ -277,7 +281,7 @@ class PurchaseExpenseIntegrationTest {
 
         assertThatThrownBy(() -> purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("銀行口座変更が承認待ち");
+                .hasMessage("error.accounting.bpBankAccountPending");
     }
 
     @Test
@@ -366,8 +370,9 @@ class PurchaseExpenseIntegrationTest {
     @DisplayName("BP支払適格性ガード: 未承認・下書き状態のBP支払レコードは連携拒否される")
     void triggerBpPurchaseSync_unapprovedStatus_rejected() {
         WorkRecord unapprovedWr = new WorkRecord();
-        unapprovedWr.setContractId(1L);
-        unapprovedWr.setWorkMonth("2026-08");
+        // BP支払は工数実績→契約→顧客のownershipでtenantが決まるため、現在tenantの契約に紐づける
+        unapprovedWr.setContractId(workRecordMapper.selectById(bpPayment.getWorkRecordId()).getContractId());
+        unapprovedWr.setWorkMonth("2026-09"); // 契約×月は一意のため、setUpの工数実績（2026-08）と別の月にする
         unapprovedWr.setActualHours(new BigDecimal("160.00"));
         workRecordMapper.insert(unapprovedWr);
 
@@ -380,7 +385,7 @@ class PurchaseExpenseIntegrationTest {
 
         assertThatThrownBy(() -> purchaseIntegrationService.triggerBpPurchaseSync(unapproved.getId(), 1L))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("未払または承認済のBP支払レコードのみ連携可能");
+                .hasMessage("error.accounting.bpPaymentNotSendable");
     }
 
     @Test
@@ -455,6 +460,99 @@ class PurchaseExpenseIntegrationTest {
 
         ExpenseRequest updatedExp = expenseRequestMapper.selectById(exp.getId());
         assertThat(updatedExp.getStatus()).isEqualTo("会計連携済");
+
+        // 手動送信でもfreee取引の作成後に申請者へ通知する（自動送信と同じdedupeKeyで1件）
+        Integer notified = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_notification WHERE type = 'EXPENSE_ACCOUNTING_SENT' "
+                        + "AND dedupe_key = ? AND recipient_user_id = 1",
+                Integer.class, "expense-accounting-sent:" + exp.getId() + "#u1");
+        assertThat(notified).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("要員経費連携: 送信が失敗した経費は申請者へ「会計へ連携しました」を通知しない")
+    void failedExpenseSend_doesNotNotifyApplicant() {
+        ExternalMapping expAccount = new ExternalMapping();
+        expAccount.setConnectionId(connection.getId());
+        expAccount.setObjectType("ACCOUNT_EXPENSE");
+        expAccount.setInternalCode("EXPENSE_DEFAULT");
+        expAccount.setExternalId("2201");
+        mappingService.saveOrUpdateMapping(expAccount);
+        mappingService.verifyMapping(mappingService.getMapping(connection.getId(), "ACCOUNT_EXPENSE", "EXPENSE_DEFAULT").getId(), "{\"verified\":true}");
+        ExternalMapping taxMap = new ExternalMapping();
+        taxMap.setConnectionId(connection.getId());
+        taxMap.setObjectType("TAX_PURCHASE_10");
+        taxMap.setInternalCode("TAX_PURCHASE_10");
+        taxMap.setExternalId("108");
+        mappingService.saveOrUpdateMapping(taxMap);
+        mappingService.verifyMapping(mappingService.getMapping(connection.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10").getId(), "{\"verified\":true}");
+
+        ExpenseRequest exp = new ExpenseRequest();
+        exp.setEngineerId(1L);
+        exp.setExpenseNo("EX-202608-997");
+        exp.setExpenseDate(LocalDate.of(2026, 8, 12));
+        exp.setCategory("交通費");
+        exp.setAmount(new BigDecimal("2100"));
+        exp.setStatus("承認済");
+        expenseRequestMapper.insert(exp);
+
+        IntegrationJob job = purchaseIntegrationService.triggerExpenseSync(exp.getId(), 1L);
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators
+                        .withBadRequest().contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"status_code\":400,\"errors\":[{\"type\":\"validation\",\"messages\":[\"invalid\"]}]}"));
+
+        purchaseIntegrationService.processExpenseJob(job.getId());
+
+        assertThat(jobService.getById(job.getId()).getStatus()).isEqualTo("FAILED");
+        assertThat(expenseRequestMapper.selectById(exp.getId()).getStatus()).isEqualTo("承認済");
+        Integer notified = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_notification WHERE type = 'EXPENSE_ACCOUNTING_SENT' AND dedupe_key = ?",
+                Integer.class, "expense-accounting-sent:" + exp.getId() + "#u1");
+        assertThat(notified).isZero();
+    }
+
+    @Test
+    @DisplayName("要員経費連携: 経費モジュールが先に会計連携済へ進めていても送信でき、作成済みのfreee取引をFAILEDにしない")
+    void expenseAlreadyAdvancedByExpenseModule_sendSucceeds() {
+        ExternalMapping expAccount = new ExternalMapping();
+        expAccount.setConnectionId(connection.getId());
+        expAccount.setObjectType("ACCOUNT_EXPENSE");
+        expAccount.setInternalCode("EXPENSE_DEFAULT");
+        expAccount.setExternalId("2201");
+        mappingService.saveOrUpdateMapping(expAccount);
+        mappingService.verifyMapping(mappingService.getMapping(connection.getId(), "ACCOUNT_EXPENSE", "EXPENSE_DEFAULT").getId(), "{\"verified\":true}");
+        ExternalMapping taxMap = new ExternalMapping();
+        taxMap.setConnectionId(connection.getId());
+        taxMap.setObjectType("TAX_PURCHASE_10");
+        taxMap.setInternalCode("TAX_PURCHASE_10");
+        taxMap.setExternalId("108");
+        mappingService.saveOrUpdateMapping(taxMap);
+        mappingService.verifyMapping(mappingService.getMapping(connection.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10").getId(), "{\"verified\":true}");
+
+        // ExpenseAccountingJobScheduler（mock）が承認直後に会計連携済へ進めた状態
+        ExpenseRequest exp = new ExpenseRequest();
+        exp.setEngineerId(1L);
+        exp.setExpenseNo("EX-202608-998");
+        exp.setExpenseDate(LocalDate.of(2026, 8, 11));
+        exp.setCategory("交通費");
+        exp.setAmount(new BigDecimal("3300"));
+        exp.setStatus("会計連携済");
+        expenseRequestMapper.insert(exp);
+
+        IntegrationJob job = purchaseIntegrationService.triggerExpenseSync(exp.getId(), 1L);
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 77712, \"amount\": 3300, \"status\": \"unsettled\"}}", MediaType.APPLICATION_JSON));
+
+        purchaseIntegrationService.processExpenseJob(job.getId());
+
+        mockServer.verify();
+        IntegrationJob updatedJob = jobService.getById(job.getId());
+        assertThat(updatedJob.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(updatedJob.getExternalId()).isEqualTo("77712");
+        assertThat(expenseRequestMapper.selectById(exp.getId()).getStatus()).isEqualTo("会計連携済");
     }
 
     @Test
@@ -465,6 +563,11 @@ class PurchaseExpenseIntegrationTest {
         closedContract.setEngineerId(1L);
         closedContract.setProjectId(1L);
         closedContract.setCustomerId(1L);
+        // BP支払は工数実績→契約→顧客でtenantが決まる。契約にtenantが無いと、締めの検査より前のBP支払の取得で
+        // 見つからず（404）、このテストが締めを検証しなくなる。法人は締めの検査の後で解決されるが、
+        // 締めが開いていれば送信できる状態にそろえておく
+        closedContract.setTenantId("default");
+        closedContract.setLegalEntityId(1L);
         closedContract.setContractType("準委任");
         closedContract.setStatus("稼動中");
         closedContract.setStartDate(LocalDate.of(2025, 1, 1));
@@ -495,7 +598,9 @@ class PurchaseExpenseIntegrationTest {
         }
 
         assertThatThrownBy(() -> purchaseIntegrationService.triggerBpPurchaseSync(closedPayment.getId(), 1L))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.closing.hardLocked");
+        assertThat(jobService.getLatestJob("BP_PAYMENT", closedPayment.getId(), "BP_PURCHASE_SYNC")).isNull();
     }
 
     @Test
@@ -680,6 +785,14 @@ class PurchaseExpenseIntegrationTest {
 
         // 2. 非 default テナントの BP ジョブを Worker 実行しても ThreadLocal コンテキストがリークしない
         IntegrationJob src = purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L);
+
+        // BP 連携は冪等キーにより同一ジョブへ収束し、payload_hash が再実行で変動しない (翌日 retry でも不変)
+        // （下のny-tenantジョブで取引が作成された後は「送信済み」として拒否されるため、その前に確認する）
+        IntegrationJob again = purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L);
+        assertThat(again.getId()).isEqualTo(src.getId());
+        assertThat(again.getPayloadHash()).isEqualTo(src.getPayloadHash());
+        assertThat(again.getPayloadSnapshot()).contains("\"issueDate\":\"2026-08-31\"");
+
         IntegrationJob nyJob = jobService.createJob(connection.getId(), "BP_PURCHASE_SYNC", "BP_PAYMENT",
                 bpPayment.getId(), "BP-TENANT-NY-1", src.getPayloadHash(), src.getPayloadSnapshot(),
                 "ny-tenant", null, null);
@@ -702,10 +815,9 @@ class PurchaseExpenseIntegrationTest {
         // 3. NULL 金額 BP / NULL 経費日付は enqueue 時に fail-closed (カラムNOT NULLのため、直接INSERTできない行をspyで検証)
         //    -> 専用テストクラス AccountingNullGuardTest で検証 (DB制約上、NULL行は本来存在しない防御的ガード)
 
-        // 4. BP 連携は冪等キーにより同一ジョブへ収束し、payload_hash が再実行で変動しない (翌日 retry でも不変)
-        IntegrationJob again = purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L);
-        assertThat(again.getId()).isEqualTo(src.getId());
-        assertThat(again.getPayloadHash()).isEqualTo(src.getPayloadHash());
-        assertThat(again.getPayloadSnapshot()).contains("\"issueDate\":\"2026-08-31\"");
+        // 4. 取引が作成された後の再送信は、既存ジョブへ黙って統合せず「送信済み」として理由付きで拒否する
+        assertThatThrownBy(() -> purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.accounting.alreadySyncedNoCancel");
     }
 }

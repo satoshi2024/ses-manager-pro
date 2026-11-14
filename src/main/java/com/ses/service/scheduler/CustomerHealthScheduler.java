@@ -1,5 +1,7 @@
 package com.ses.service.scheduler;
 
+import com.ses.config.feature.Feature;
+import com.ses.config.feature.FeatureSwitches;
 import com.ses.service.servicedesk.CustomerHealthService;
 import com.ses.service.servicedesk.SnapshotExecutionContext;
 import lombok.RequiredArgsConstructor;
@@ -22,10 +24,17 @@ public class CustomerHealthScheduler {
     private final CustomerHealthService customerHealthService;
     private final Clock clock;
     private final TenantAwareBatchRunner tenantAwareBatchRunner;
+    /** NF-02機能スイッチ。Spring管理外で生成した単体テスト対象ではnull（従来どおり実行）。 */
+    @org.springframework.beans.factory.annotation.Autowired
+    private FeatureSwitches featureSwitches;
 
     @Scheduled(cron = "${customerhealth.snapshot.cron:0 0 2 * * *}")
     @SchedulerLock(name = "customerHealthSnapshotDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void runDailySnapshot() {
+        if (!FeatureSwitches.allows(featureSwitches, Feature.NF02)) {
+            log.debug("[機能スイッチ] NF02がOFFのため顧客ヘルス日次スナップショットをスキップしました");
+            return;
+        }
         processDailySnapshot(YearMonth.now(clock.getZone()).toString());
     }
 

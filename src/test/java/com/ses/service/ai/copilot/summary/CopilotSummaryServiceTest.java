@@ -2,11 +2,14 @@ package com.ses.service.ai.copilot.summary;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
-import com.ses.entity.AiArtifactVersion;
-import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
+import com.ses.service.ai.CopilotExecutionFailure;
+import com.ses.service.ai.CopilotProviderUsage;
+import com.ses.service.ai.copilot.summary.DispatchOutcome;
+import com.ses.service.ai.copilot.summary.PreflightCostEvidence;
+import com.ses.service.ai.copilot.summary.CopilotCostState;
 import com.ses.service.ai.copilot.result.CopilotFreshnessInfo;
 import com.ses.service.ai.copilot.result.CopilotLimitInfo;
 import com.ses.service.ai.copilot.result.CopilotScopeInfo;
@@ -17,6 +20,7 @@ import com.ses.service.ai.copilot.result.MetricValue;
 import com.ses.service.ai.copilot.result.TypedResultEnvelope;
 import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.CopilotFeatureGate;
+import com.ses.service.ai.copilot.CopilotRunService;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
@@ -26,6 +30,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -37,14 +42,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
 class CopilotSummaryServiceTest {
 
     @Mock
     private AiExecutionGateway aiExecutionGateway;
-    @Mock
-    private AiArtifactVersionMapper artifactVersionMapper;
     @Mock
     private CopilotFeatureGate featureGate;
 
@@ -54,17 +59,83 @@ class CopilotSummaryServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new CopilotSummaryService(aiExecutionGateway, artifactVersionMapper, new ObjectMapper(), featureGate);
+        service = new CopilotSummaryService(aiExecutionGateway, new ObjectMapper(), featureGate);
         boundSnapshot = new EffectiveScopeSnapshot(
                 "tenant-a", 10L, java.time.LocalDate.of(2026, 10, 1), "COMPANY_WIDE",
                 true, false, false, null, null, null, null, null, null, null, null, null,
                 EffectiveScopeSnapshotFactory.POLICY_VERSION, false, "ALL",
                 "6811db559741de8ebd33485d5982d4f8ca0f05a008231a12e22b1ee85dceea7e");
         boundScope = boundSnapshot.scope();
-        AiArtifactVersion artifact = new AiArtifactVersion();
-        artifact.setPromptVersion("nf08-f1");
-        artifact.setModelName("mock");
-        when(artifactVersionMapper.selectOne(any())).thenReturn(artifact);
+    }
+
+    @Test
+    void readOnlyPreflightはlocalNoEgressだけ候補を返しexecuteしない() {
+        PreflightCostEvidence local = PreflightCostEvidence.localNoEgress(pinnedArtifact().configHash(), 0);
+        when(aiExecutionGateway.preflightCopilot(any())).thenReturn(local);
+
+        boolean allowed = service.preflightLocalSummary(sampleEnvelope(), sampleContext(), sampleScope(),
+                sampleScope().scopeHash(), pinnedArtifact(), "existing-query-trace", "parameter-hash");
+
+        assertTrue(allowed);
+        verify(aiExecutionGateway).preflightCopilot(any());
+        verify(aiExecutionGateway, never()).execute(any());
+    }
+
+    @Test
+    void denyまたはsynthetic外部allowは候補を返さずexecuteしない() {
+        PreflightCostEvidence denied = PreflightCostEvidence.denied(
+                "production-deny-all-v1", pinnedArtifact().configHash(), "deny-proof", null, 0,
+                "COPILOT_COST_UNKNOWN");
+        when(aiExecutionGateway.preflightCopilot(any())).thenReturn(denied);
+        assertFalse(service.preflightLocalSummary(sampleEnvelope(), sampleContext(), sampleScope(),
+                sampleScope().scopeHash(), pinnedArtifact(), "existing-query-trace", "parameter-hash"));
+
+        PreflightCostEvidence syntheticRemoteAllow = new PreflightCostEvidence(
+                "synthetic-remote-policy", pinnedArtifact().configHash(), "synthetic-allow-proof",
+                0, 0, true, CopilotCostState.UPPER_BOUND,
+                DispatchOutcome.notStarted("SYNTHETIC_ONLY"), "SYNTHETIC_ONLY");
+        when(aiExecutionGateway.preflightCopilot(any())).thenReturn(syntheticRemoteAllow);
+        assertFalse(service.preflightLocalSummary(sampleEnvelope(), sampleContext(), sampleScope(),
+                sampleScope().scopeHash(), pinnedArtifact(), "existing-query-trace", "parameter-hash"));
+        verify(aiExecutionGateway, never()).execute(any());
+    }
+
+    @Test
+    void immutableCandidateはbindingの各項目差異を拒否する() {
+        PreflightCostEvidence evidence = PreflightCostEvidence.localNoEgress("config-hash", 0);
+        CopilotSummaryPreflightCandidate candidate = new CopilotSummaryPreflightCandidate(
+                "tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "mock",
+                "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash", evidence);
+        assertTrue(candidate.matches("tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L,
+                "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash"));
+        assertFalse(candidate.matches("tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L,
+                "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash",
+                PreflightCostEvidence.denied("other-policy", "config-hash", "other-proof", null, 0,
+                        "COPILOT_COST_UNKNOWN")));
+
+        Object[][] drifted = {
+                {"tenant-b", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 11L, "dashboard.utilization-forecast", "query-trace", 7L, "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "other.query", "query-trace", 7L, "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "other-trace", 7L, "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 8L, "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "other-provider", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "mock", "other-model", "prompt-v1", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "mock", "mock-management-copilot", "other-prompt", "config-hash", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "mock", "mock-management-copilot", "prompt-v1", "other-config", "scope-hash", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "mock", "mock-management-copilot", "prompt-v1", "config-hash", "other-scope", "input-hash"},
+                {"tenant-a", 10L, "dashboard.utilization-forecast", "query-trace", 7L, "mock", "mock-management-copilot", "prompt-v1", "config-hash", "scope-hash", "other-input"}
+        };
+        for (Object[] row : drifted) {
+            assertFalse(candidate.matches((String) row[0], (Long) row[1], (String) row[2], (String) row[3],
+                    (Long) row[4], (String) row[5], (String) row[6], (String) row[7],
+                    (String) row[8], (String) row[9], (String) row[10]));
+        }
+        assertFalse(java.util.Arrays.stream(CopilotSummaryPreflightCandidate.class.getDeclaredFields())
+                .map(java.lang.reflect.Field::getName)
+                .anyMatch(name -> name.toLowerCase(java.util.Locale.ROOT).contains("attemptid")
+                        || name.toLowerCase(java.util.Locale.ROOT).contains("nonce")
+                        || name.toLowerCase(java.util.Locale.ROOT).contains("tls")));
     }
 
     @Test
@@ -79,16 +150,27 @@ class CopilotSummaryServiceTest {
                 "trace-1", null, null));
 
         SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
-                sampleScope().scopeHash(), "trace-1");
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
 
         assertTrue(response.isAvailable());
         assertEquals(SummaryResponse.STATUS_SUCCEEDED, response.providerStatus());
-        assertEquals("mock", response.modelVersion());
+        assertEquals("mock-management-copilot", response.modelVersion());
         assertEquals(List.of("forecast.utilization.2026-09"), response.claimKeys());
+        ArgumentCaptor<AiGatewayRequest> request = ArgumentCaptor.forClass(AiGatewayRequest.class);
+        verify(aiExecutionGateway).execute(request.capture());
+        assertEquals(7L, request.getValue().getExpectedArtifactVersionId());
+        assertEquals("mock", request.getValue().getExpectedProvider());
+        assertEquals("mock-management-copilot", request.getValue().getExpectedModel());
+        assertEquals("nf08-f1", request.getValue().getExpectedPromptVersion());
+        assertEquals(0, request.getValue().getCostBudgetYen());
+        assertTrue(request.getValue().getDeadlineNanos() > System.nanoTime());
     }
 
     @Test
     void 未知claimKeyは拒否してmetricsは呼び出し元で保持される() {
+        CopilotProviderUsage usage = new CopilotProviderUsage(8, 3, 11, 0, 0);
+        DispatchOutcome dispatch = new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED,
+                "PROVIDER_RESPONSE_RECEIVED");
         when(aiExecutionGateway.execute(any())).thenReturn(new AiGatewayResult(
                 """
                         {
@@ -96,13 +178,38 @@ class CopilotSummaryServiceTest {
                           "claimKeys": ["kpi.utilization"]
                         }
                         """,
-                "trace-1", null, null));
+                "trace-1", null, null, usage, null, dispatch));
 
         SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
-                sampleScope().scopeHash(), "trace-1");
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
 
         assertFalse(response.isAvailable());
         assertEquals(SummaryResponse.STATUS_REJECTED, response.providerStatus());
+        assertEquals(usage, response.costEvidence().usage());
+        assertEquals(dispatch, response.costEvidence().dispatchOutcome());
+    }
+
+    @Test
+    void 数値claim拒否でも受領usageとdispatchを保持する() {
+        CopilotProviderUsage usage = new CopilotProviderUsage(9, 4, 13, 0, 0);
+        DispatchOutcome dispatch = new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED,
+                "PROVIDER_RESPONSE_RECEIVED");
+        when(aiExecutionGateway.execute(any())).thenReturn(new AiGatewayResult(
+                """
+                        {
+                          "summaryText": "売上は12円です。",
+                          "claimKeys": ["forecast.utilization.2026-09"]
+                        }
+                        """,
+                "trace-1", null, null, usage, null, dispatch));
+
+        SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
+
+        assertFalse(response.isAvailable());
+        assertEquals(SummaryResponse.STATUS_REJECTED, response.providerStatus());
+        assertEquals(usage, response.costEvidence().usage());
+        assertEquals(dispatch, response.costEvidence().dispatchOutcome());
     }
 
     @Test
@@ -110,10 +217,94 @@ class CopilotSummaryServiceTest {
         when(aiExecutionGateway.execute(any())).thenReturn(new AiGatewayResult("not-json", "trace-1", null, null));
 
         SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
-                sampleScope().scopeHash(), "trace-1");
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
 
         assertFalse(response.isAvailable());
         assertEquals("PROVIDER_INVALID_JSON", response.providerStatus());
+    }
+
+    @Test
+    void 未検証のpreflight上限は送信後でもUNKNOWNにしusageを保持する() {
+        PreflightCostEvidence preflight = new PreflightCostEvidence(
+                "synthetic-test", "config-hash", "synthetic-loopback-proof-v1", 2, 5, true,
+                CopilotCostState.UPPER_BOUND, DispatchOutcome.notStarted("PREFLIGHT_ALLOWED"), "PREFLIGHT_ALLOWED");
+        CopilotProviderUsage usage = new CopilotProviderUsage(12, 4, 16, null, null);
+        when(aiExecutionGateway.execute(any())).thenReturn(new AiGatewayResult("not-json", "trace-1", null, null,
+                usage, preflight, new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED, "RESPONSE_RECEIVED")));
+
+        SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
+
+        assertEquals("PROVIDER_INVALID_JSON", response.providerStatus());
+        assertEquals(CopilotCostState.UNKNOWN, response.costEvidence().costState());
+        assertEquals(null, response.costEvidence().upperBoundYen());
+        assertEquals(usage, response.costEvidence().usage());
+        assertEquals(DispatchOutcome.State.RESPONSE_RECEIVED, response.costEvidence().dispatchOutcome().state());
+    }
+
+    @Test
+    void parserのinner失敗でもtypedFailureのusageと実dispatchを保持する() {
+        PreflightCostEvidence preflight = new PreflightCostEvidence(
+                "synthetic-loopback-test-v1", "config-hash", "synthetic-loopback-proof-v1", 0, 0, true,
+                CopilotCostState.UPPER_BOUND, DispatchOutcome.notStarted("PREFLIGHT_ALLOWED"), "PREFLIGHT_ALLOWED");
+        CopilotProviderUsage usage = new CopilotProviderUsage(12, 4, 16, null, null);
+        DispatchOutcome dispatch = new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED,
+                "PROVIDER_RESPONSE_RECEIVED");
+        when(aiExecutionGateway.execute(any())).thenThrow(new CopilotExecutionFailure(
+                "COPILOT_RESPONSE_INVALID", preflight, dispatch, usage));
+
+        SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
+
+        assertFalse(response.isAvailable());
+        assertEquals("PROVIDER_INVALID_JSON", response.providerStatus());
+        assertEquals(CopilotCostState.UNKNOWN, response.costEvidence().costState());
+        assertEquals(null, response.costEvidence().actualCostYen());
+        assertEquals(null, response.costEvidence().upperBoundYen());
+        assertEquals(usage, response.costEvidence().usage());
+        assertEquals(dispatch, response.costEvidence().dispatchOutcome());
+    }
+
+    @Test
+    void preflightのNOT_SENTは実際のdispatch証拠を上書きしない() {
+        PreflightCostEvidence preflight = PreflightCostEvidence.denied(
+                "production-deny-all-v1", "config-hash", "deny-all-proof-v1", null, 0, "DENIED");
+        CopilotProviderUsage usage = new CopilotProviderUsage(8, 3, 11, null, null);
+        DispatchOutcome dispatched = new DispatchOutcome(DispatchOutcome.State.RESPONSE_RECEIVED, "HEADERS_RECEIVED");
+
+        SummaryCostEvidence evidence = SummaryCostEvidence.fromPreflight(preflight, dispatched, usage, "FAILED");
+
+        assertEquals(CopilotCostState.UNKNOWN, evidence.costState());
+        assertEquals(dispatched, evidence.dispatchOutcome());
+        assertEquals(usage, evidence.usage());
+    }
+
+    @Test
+    void preflightがnullでもdispatchとusageを保持する() {
+        CopilotProviderUsage usage = new CopilotProviderUsage(8, 3, 11, null, null);
+        DispatchOutcome dispatched = new DispatchOutcome(DispatchOutcome.State.MAY_HAVE_BEEN_SENT, "TRANSPORT_TIMEOUT");
+
+        SummaryCostEvidence evidence = SummaryCostEvidence.fromPreflight(null, dispatched, usage, "FAILED");
+
+        assertEquals(CopilotCostState.UNKNOWN, evidence.costState());
+        assertEquals(dispatched, evidence.dispatchOutcome());
+        assertEquals(usage, evidence.usage());
+    }
+
+    @Test
+    void 送信前費用拒否はNOT_SENT証拠を保持する() {
+        PreflightCostEvidence denied = PreflightCostEvidence.denied(
+                "production-deny-all-v1", "config-hash", "deny-all-proof-v1", null, 0, "COPILOT_COST_UNKNOWN");
+        when(aiExecutionGateway.execute(any())).thenThrow(new CopilotExecutionFailure("COPILOT_COST_UNKNOWN",
+                denied, DispatchOutcome.notStarted("COPILOT_COST_UNKNOWN")));
+
+        SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
+
+        assertEquals("COST_UNKNOWN", response.providerStatus());
+        assertEquals(CopilotCostState.NOT_SENT, response.costEvidence().costState());
+        assertEquals(null, response.costEvidence().actualCostYen());
+        assertEquals(DispatchOutcome.State.NOT_STARTED, response.costEvidence().dispatchOutcome().state());
     }
 
     @Test
@@ -121,7 +312,7 @@ class CopilotSummaryServiceTest {
         when(aiExecutionGateway.execute(any())).thenThrow(new BusinessException(429, "rate limited"));
 
         SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
-                sampleScope().scopeHash(), "trace-1");
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
 
         assertFalse(response.isAvailable());
         assertEquals("PROVIDER_429", response.providerStatus());
@@ -132,18 +323,16 @@ class CopilotSummaryServiceTest {
         TypedResultEnvelope envelope = sampleEnvelopeWithQueryId(AiGatewayRequest.CANARY);
 
         SummaryResponse response = service.summarize(envelope, sampleContext(AiGatewayRequest.CANARY), sampleScope(),
-                sampleScope().scopeHash(), "trace-1");
+                sampleScope().scopeHash(), pinnedArtifact(), "trace-1");
 
         assertFalse(response.isAvailable());
         assertEquals(SummaryResponse.STATUS_REJECTED, response.providerStatus());
     }
 
     @Test
-    void artifact未登録はunavailableになる() {
-        when(artifactVersionMapper.selectOne(any())).thenReturn(null);
-
+    void pinnedArtifactがない場合はunavailableになる() {
         SummaryResponse response = service.summarize(sampleEnvelope(), sampleContext(), sampleScope(),
-                sampleScope().scopeHash(), "trace-1");
+                sampleScope().scopeHash(), null, "trace-1");
 
         assertFalse(response.isAvailable());
         assertEquals("ARTIFACT_MISSING", response.providerStatus());
@@ -175,6 +364,13 @@ class CopilotSummaryServiceTest {
 
     private CopilotScopeContext sampleScope() {
         return boundScope;
+    }
+
+    private CopilotRunService.CopilotArtifactSnapshot pinnedArtifact() {
+        return new CopilotRunService.CopilotArtifactSnapshot(7L, "mock", "mock-management-copilot",
+                CopilotSummaryPromptTemplate.VERSION,
+                CopilotSummaryPromptTemplate.localConfigHash("mock", "mock-management-copilot"),
+                "catalog-v1", 0);
     }
 
     private CopilotExecutionContext sampleContext() {

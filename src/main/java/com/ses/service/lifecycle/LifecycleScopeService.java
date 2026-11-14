@@ -1,12 +1,14 @@
 package com.ses.service.lifecycle;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.SecurityUtils;
 import com.ses.dto.engineersales.EngineerSalesDto;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.LifecycleCase;
 import com.ses.entity.LifecycleTask;
 import com.ses.entity.SysUser;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.EngineerSalesService;
 import com.ses.service.security.OrganizationScopeService;
@@ -30,13 +32,53 @@ public class LifecycleScopeService {
     private final OrganizationScopeService organizationScopeService;
     private final EngineerSalesService engineerSalesService;
     private final EngineerAccountLinkService engineerAccountLinkService;
+    private final SysUserMapper sysUserMapper;
+
+    public String requireTenant(SysUser currentUser) {
+        if (currentUser == null || currentUser.getId() == null) {
+            throw BusinessException.of(403, "error.lifecycle.accessDenied");
+        }
+        SysUser persistedUser = sysUserMapper.selectById(currentUser.getId());
+        if (persistedUser == null || !Integer.valueOf(1).equals(persistedUser.getStatus())
+                || !Objects.equals(currentUser.getRole(), persistedUser.getRole())
+                || !Objects.equals(normalized(currentUser.getTenantId()), normalized(persistedUser.getTenantId()))
+                || !isKnownRole(persistedUser.getRole())) {
+            throw BusinessException.of(403, "error.lifecycle.accessDenied");
+        }
+        String actorTenant = normalized(persistedUser.getTenantId());
+        String requestTenant = normalized(SecurityUtils.currentTenantId());
+        if (actorTenant == null || (requestTenant != null && !actorTenant.equals(requestTenant))) {
+            throw BusinessException.of(403, "error.lifecycle.accessDenied");
+        }
+        return actorTenant;
+    }
+
+    private String normalized(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private boolean isKnownRole(String role) {
+        return role != null && Set.of("管理者", "HR", "マネージャー", "営業", "要員").contains(role);
+    }
+
+    private boolean tenantMatches(SysUser user, LifecycleCase lcCase, Engineer engineer) {
+        try {
+            String tenant = requireTenant(user);
+            return lcCase != null && engineer != null
+                    && tenant.equals(normalized(lcCase.getTenantId()))
+                    && tenant.equals(normalized(engineer.getTenantId()));
+        } catch (BusinessException ex) {
+            return false;
+        }
+    }
 
     /**
      * 要員起票・参照権限チェック
      */
     public void assertCanAccessEngineer(SysUser currentUser, Engineer engineer) {
-        if (currentUser == null) {
-            throw BusinessException.of(401, "error.unauthorized");
+        String tenant = requireTenant(currentUser);
+        if (engineer == null || !tenant.equals(normalized(engineer.getTenantId()))) {
+            throw BusinessException.of(404, "error.lifecycle.engineerNotFound");
         }
         String role = currentUser.getRole();
         if ("管理者".equals(role) || "HR".equals(role)) {
@@ -59,6 +101,7 @@ public class LifecycleScopeService {
             }
             throw BusinessException.of(403, "error.lifecycle.accessDenied", "担当外の要員に対する案件起票はできません");
         }
+        throw BusinessException.of(403, "error.lifecycle.accessDenied");
     }
 
     /**
@@ -66,7 +109,7 @@ public class LifecycleScopeService {
      */
     public void assertCanViewCase(SysUser currentUser, LifecycleCase lcCase, Engineer engineer) {
         if (!canViewCase(currentUser, lcCase, engineer)) {
-            throw BusinessException.of(403, "error.lifecycle.accessDenied", "この案件の閲覧権限がありません");
+            throw BusinessException.of(404, "error.lifecycle.caseNotFound");
         }
     }
 
@@ -74,8 +117,9 @@ public class LifecycleScopeService {
      * 案件の更新・進行・完了権限チェック
      */
     public void assertCanEditCase(SysUser currentUser, LifecycleCase lcCase, Engineer engineer) {
-        if (currentUser == null) {
-            throw BusinessException.of(401, "error.unauthorized");
+        requireTenant(currentUser);
+        if (!tenantMatches(currentUser, lcCase, engineer)) {
+            throw BusinessException.of(404, "error.lifecycle.caseNotFound");
         }
         String role = currentUser.getRole();
         // 管理者・HRは全案件を編集可能
@@ -99,11 +143,8 @@ public class LifecycleScopeService {
             throw BusinessException.of(403, "error.lifecycle.accessDenied", "管轄外の要員案件は編集できません");
         }
 
-        // 営業は自身が起票したか担当している要員案件のみ
+        // 営業は現在担当中の要員案件のみ
         if ("営業".equals(role)) {
-            if (Objects.equals(lcCase.getApplicantUserId(), currentUser.getId())) {
-                return;
-            }
             List<EngineerSalesDto> salesList = engineerSalesService.listActive(engineer.getId());
             boolean isAssigned = salesList.stream().anyMatch(s -> Objects.equals(s.getSalesUserId(), currentUser.getId()));
             if (isAssigned) {
@@ -119,7 +160,7 @@ public class LifecycleScopeService {
      * 案件閲覧可否判定
      */
     public boolean canViewCase(SysUser currentUser, LifecycleCase lcCase, Engineer engineer) {
-        if (currentUser == null) return false;
+        if (currentUser == null || !tenantMatches(currentUser, lcCase, engineer)) return false;
         String role = currentUser.getRole();
 
         if ("管理者".equals(role) || "HR".equals(role)) {
@@ -141,9 +182,6 @@ public class LifecycleScopeService {
         }
 
         if ("営業".equals(role)) {
-            if (Objects.equals(lcCase.getApplicantUserId(), currentUser.getId())) {
-                return true;
-            }
             List<EngineerSalesDto> salesList = engineerSalesService.listActive(engineer.getId());
             return salesList.stream().anyMatch(s -> Objects.equals(s.getSalesUserId(), currentUser.getId()));
         }
@@ -164,7 +202,7 @@ public class LifecycleScopeService {
      * </ul>
      */
     public boolean isTaskVisibleToUser(SysUser currentUser, LifecycleTask task) {
-        if (currentUser == null) return false;
+        if (currentUser == null || task == null || !isKnownRole(currentUser.getRole())) return false;
         String role = currentUser.getRole();
 
         if ("要員".equals(role)) {
@@ -182,19 +220,24 @@ public class LifecycleScopeService {
                     || (task.getAssigneeUserId() != null && Objects.equals(task.getAssigneeUserId(), currentUser.getId()));
         }
 
-        // 管理者・HR・マネージャーは全タスク可視
-        return true;
+        // 管理者・HR・マネージャーは自tenant内の全タスク可視
+        return "管理者".equals(role) || "HR".equals(role) || "マネージャー".equals(role);
     }
 
     /**
      * タスクの完了・更新・訂正権限チェック
      */
     public void assertCanEditTask(SysUser currentUser, LifecycleTask task, LifecycleCase lcCase, Engineer engineer) {
-        if (currentUser == null) {
-            throw BusinessException.of(401, "error.unauthorized");
+        requireTenant(currentUser);
+        if (!tenantMatches(currentUser, lcCase, engineer)) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound");
         }
 
         String role = currentUser.getRole();
+
+        if (!canViewCase(currentUser, lcCase, engineer) || !isTaskVisibleToUser(currentUser, task)) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound");
+        }
 
         // 管理者・HRは全タスクを更新可能
         if ("管理者".equals(role) || "HR".equals(role)) {
@@ -211,10 +254,6 @@ public class LifecycleScopeService {
         }
 
         // 閲覧不可のタスク（スコープ外または非公開HRタスク）への操作は存在を推測させない 404 で拒否
-        if (!canViewCase(currentUser, lcCase, engineer) || !isTaskVisibleToUser(currentUser, task)) {
-            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
-        }
-
         // 要員本人の場合: 本人公開タスクかつ自身が担当者であること (上記本人チェックを通過しなかった場合は拒否)
         if ("要員".equals(role)) {
             throw BusinessException.of(403, "error.lifecycle.notAssignedToYou", "あなたに割り当てられたタスクではありません");

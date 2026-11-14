@@ -66,8 +66,13 @@ class OvertimeComplianceWiringTest {
     @BeforeEach
     void setUp() {
         AccountingTenantContextHolder.setTenantId("default");
-        jdbcTemplate.update("UPDATE sys_user SET tenant_id = 'default', deleted_flag = 0, status = 1 WHERE id = 1");
         String suffix = String.valueOf(System.nanoTime());
+        long sysUserId;
+        jdbcTemplate.update("INSERT INTO sys_user (tenant_id, username, password, real_name, role, status, deleted_flag) "
+                        + "VALUES ('default', ?, 'test-only', ?, '要員', 1, 0)",
+                "otw-user-" + suffix, "otw-user-" + suffix);
+        sysUserId = jdbcTemplate.queryForObject(
+                "SELECT id FROM sys_user WHERE username = ?", Long.class, "otw-user-" + suffix);
         jdbcTemplate.update("INSERT INTO m_organization_unit (tenant_id, legal_entity_id, code, name, type, valid_from, status) "
                 + "VALUES (1, 70001, ?, ?, '部門', '2026-01-01', '有効')",
                 "otw-" + suffix, "otw-" + suffix);
@@ -79,7 +84,7 @@ class OvertimeComplianceWiringTest {
         engineerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "otw-eng-" + suffix);
         jdbcTemplate.update("INSERT INTO t_engineer_account_link (tenant_id, engineer_id, sys_user_id) "
-                + "VALUES ('default', ?, 1)", engineerId);
+                + "VALUES ('default', ?, ?)", engineerId, sysUserId);
     }
 
     @AfterEach

@@ -58,6 +58,8 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
         // MI-26: 作成時は常に有効（1）に強制する
         sysUser.setStatus(1);
+        // 初回パスワード変更要求は配備時の初期adminと本人の変更だけが扱う。入力値は使わず列の既定値(0)にする。
+        sysUser.setPasswordChangeRequired(null);
         boolean saved = save(sysUser);
         if (!saved) {
             throw BusinessException.of("error.user.saveFailed");
@@ -74,6 +76,8 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         // 有効/無効の切替は専用エンドポイント(/{id}/status)の無効化ガードを経由させる。
         // 汎用 update で status を受け付けると S1-2 の担当残存ガードを迂回できるため無視する。
         sysUser.setStatus(null);
+        // 初回パスワード変更要求は汎用updateで変更させない（null は not_null 戦略で更新対象外）。
+        sysUser.setPasswordChangeRequired(null);
         if (StringUtils.hasText(sysUser.getUsername())) {
             long duplicated = baseMapper.countUsernameIncludingDeleted(sysUser.getUsername(), id);
             if (duplicated > 0) {

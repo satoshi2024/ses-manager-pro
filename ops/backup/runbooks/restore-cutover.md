@@ -6,6 +6,17 @@
 ## 1. 前提
 
 - `validate-restore.sh` の結果（`VALIDATION_STATE_FILE`）が `READY_FOR_CUTOVER` であること
+  - report の `checks.flyway_history_required` が `true` かつ `checks.flyway` が `PASS` であること。
+    `cutover.sh` がこの 2 点を `jq` で検査し、満たさない report では cutover しない。
+    `flyway_schema_history` の無い DB を Flyway 有効なアプリで起動すると、`baseline-on-migrate` で誤って
+    baseline され migration が再適用され得る（G-15）。`checks.flyway_latest` が想定の最新 version であることは
+    二者承認者が確認する。
+  - `checks.content_hash` が `PASS`（production では `.env.backup` の `CONTENT_HASH_TABLES` を設定して backup と
+    復元検証を行う。設定時は記録が無い・欠けている checkpoint を validate が FAIL にする）
+- 復元先（recovery target）の MySQL サーバの時刻帯が production と同じ `+09:00` であること
+  （`SELECT @@global.time_zone;`。2026-11-13 決定により DBA が設定する）
+- 目標は RPO 15 分 / RTO 4 時間（2026-11-13 決定。DBA Lead / Operations の署名は PENDING）。
+  超過した場合も cutover の判断は incident commander が行い、超過時間を記録する
 - plan（`PLANS_DIR/<plan-id>.json` + `.sha256`）が存在し、`plan::verify` を通ること
 - 二者承認（同一 plan SHA / 同一 target UUID に bind された 2 名の claim）が揃うこと
 - read-only smoke スクリプト（`APP_SMOKE_SCRIPT`）と write-enable provider

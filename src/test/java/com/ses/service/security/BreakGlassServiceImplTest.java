@@ -265,6 +265,83 @@ class BreakGlassServiceImplTest {
                 breakGlassAuthentication()));
     }
 
+    // ---------------------------------------------------------------- 初回パスワード変更（D1 review P2-1）
+
+    @Test
+    void session変更要求のあるbreakGlassは変更画面と変更APIだけscope外でも許可する() {
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(active());
+        var authentication = breakGlassAuthentication();
+
+        for (String[] endpoint : new String[][]{{"GET", "/password/change"}, {"PUT", "/api/profile/password"}}) {
+            MockHttpServletRequest request = passwordChangeRequest(endpoint[0], endpoint[1]);
+            request.getSession().setAttribute(
+                    com.ses.config.PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE, Boolean.TRUE);
+            assertEquals(BreakGlassService.BreakGlassDecision.ALLOW, service.validateBoundSession(request, authentication),
+                    endpoint[0] + " " + endpoint[1]);
+        }
+        verifyNoInteractions(sessionService);
+    }
+
+    @Test
+    void 認証主体に変更要求のあるbreakGlassも変更経路を許可する() {
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(active());
+        var authentication = breakGlassAuthentication();
+        ((LoginUser) authentication.getPrincipal()).getSysUser().setPasswordChangeRequired(1);
+
+        assertEquals(BreakGlassService.BreakGlassDecision.ALLOW, service.validateBoundSession(
+                passwordChangeRequest("PUT", "/api/profile/password"), authentication));
+        assertEquals(BreakGlassService.BreakGlassDecision.ALLOW, service.validateBoundSession(
+                passwordChangeRequest("GET", "/password/change"), authentication));
+    }
+
+    @Test
+    void 変更要求の無いbreakGlassは変更経路もscopeで判定しDENY_SCOPEにする() {
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(active());
+        var authentication = breakGlassAuthentication();
+        ((LoginUser) authentication.getPrincipal()).getSysUser().setPasswordChangeRequired(0);
+
+        assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE, service.validateBoundSession(
+                passwordChangeRequest("GET", "/password/change"), authentication));
+        assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE, service.validateBoundSession(
+                passwordChangeRequest("PUT", "/api/profile/password"), authentication));
+        verifyNoInteractions(sessionService);
+    }
+
+    @Test
+    void 変更要求があっても変更経路以外とmethod違いはscopeで判定する() {
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(active());
+        var authentication = breakGlassAuthentication();
+
+        for (String[] other : new String[][]{{"GET", "/invoice/list"}, {"POST", "/password/change"},
+                {"GET", "/api/profile/password"}, {"PUT", "/api/users/1"}}) {
+            MockHttpServletRequest request = passwordChangeRequest(other[0], other[1]);
+            request.getSession().setAttribute(
+                    com.ses.config.PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE, Boolean.TRUE);
+            assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE, service.validateBoundSession(request, authentication),
+                    other[0] + " " + other[1]);
+        }
+        verifyNoInteractions(sessionService);
+    }
+
+    @Test
+    void 期限切れincidentでは変更要求があっても変更経路を許可しない() {
+        BreakGlassIncident expired = active();
+        expired.setEnabledUntil(java.time.LocalDateTime.now(clock).minusMinutes(1));
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(expired);
+        MockHttpServletRequest request = passwordChangeRequest("GET", "/password/change");
+        request.getSession().setAttribute(
+                com.ses.config.PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE, Boolean.TRUE);
+
+        assertEquals(BreakGlassService.BreakGlassDecision.REVOKE,
+                service.validateBoundSession(request, breakGlassAuthentication()));
+    }
+
+    private static MockHttpServletRequest passwordChangeRequest(String method, String uri) {
+        MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
+        request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
+        return request;
+    }
+
     private BreakGlassIncident pending() {
         BreakGlassIncident incident = new BreakGlassIncident();
         incident.setId(10L);

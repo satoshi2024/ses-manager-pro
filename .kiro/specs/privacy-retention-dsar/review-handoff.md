@@ -6,6 +6,7 @@
 - 開始時Base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`。
 - fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`。`<BASE_COMMIT>/<BASE_BRANCH>` が未置換のためbase driftを解消せず、rebase/取り込みを行っていない。
 - approved Base branch/SHA: **未提供**。上記 `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e` は技術比較用の観測値であり、承認証跡ではない。Full Feature/Productionはapproval-missing/hard stopを維持する。DEV-0/D0は `NF07-DEV-GATE-20260828` の範囲だけを独立Reviewへ渡す。
+- 2026-11-14 状態整合（[`status-alignment.md`](status-alignment.md) C-16）: 本handoffはDEV-0/D0当時の記録である。以後のincrementで使われた `1443fb68`、`7e1a9cdf`、`73aa7000`、`1be03bea` も全て技術比較baseであり、approved Base branch/SHA は引き続き未提供（BLOCKED）。production bridge の段階計画は [`production-bridge-phased-plan.md`](production-bridge-phased-plan.md)。
 - Worktree: `C:\work\ses-manager-pro-privacy-retention-dsar`。
 - Normal checkout: `C:\work\ses-manager-pro`。既存のuntracked `.kiro/reviews/production-acceptance/` は変更していない。
 - Remote: `origin = https://github.com/satoshi2024/ses-manager-pro.git`。

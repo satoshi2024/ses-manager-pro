@@ -440,6 +440,15 @@ function deletePayment(paymentId) {
             if (data.code === 200) {
                 loadPayments();
                 loadInvoices();
+                // 入金消込の取消でfreee側に消込が残る場合は、削除は済んでいるがfreeeで手動の取消が必要な旨を警告する
+                const warnings = (data.data && Array.isArray(data.data.warnings)) ? data.data.warnings : [];
+                if (warnings.length > 0) {
+                    Swal.fire({
+                        title: SES.i18n.t('accounting.job.actionRequired', '要対応'),
+                        text: warnings.map(key => SES.i18n.t(key)).join('\n'),
+                        icon: 'warning'
+                    });
+                }
             } else {
                 alert(data.message);
             }

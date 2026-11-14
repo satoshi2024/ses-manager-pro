@@ -1,6 +1,8 @@
 package com.ses.service.lifecycle;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.ses.common.exception.BusinessException;
 import com.ses.dto.engineersales.EngineerSalesDto;
 import com.ses.dto.lifecycle.ResignationGateResultDto;
 import com.ses.dto.lifecycle.ResignationGateResultDto.GateItemResult;
@@ -17,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -32,7 +35,7 @@ public class ResignationGateChecker {
     private final EngineerAccountLinkService engineerAccountLinkService;
     private final EngineerSalesService engineerSalesService;
     private final com.ses.mapper.EngineerSalesMapper engineerSalesMapper;
-    private final com.ses.mapper.PortalUserMapper portalUserMapper;
+    private final com.ses.mapper.PortalUserEngineerLinkMapper portalUserEngineerLinkMapper;
     private final com.ses.mapper.ContractMapper contractMapper;
     private final OrganizationService organizationService;
     private final PersistentSessionService persistentSessionService;
@@ -79,9 +82,10 @@ public class ResignationGateChecker {
 
         // 2. Webセッション失効 (SESSION_REVOCATION - 自動実行)
         // executeAutomaticGateActions で必ず実行される。未連携の場合はセッションなし。
+        // ポータルsessionの失効対象は紐付け済みのポータルユーザーだけ（PORTAL_ACCOUNT_LINK）。
         String sessionMsg = linkedUser != null
-                ? "案件完了確定時に内部およびポータルの有効セッションを強制失効します"
-                : "ログインアカウント未連携のためセッション失効対象なし";
+                ? "案件完了確定時に内部の有効セッションを強制失効します（ポータルは紐付け済みユーザーのみ）"
+                : "ログインアカウント未連携のため内部セッション失効対象なし";
         items.add(GateItemResult.builder()
                 .code("SESSION_REVOCATION")
                 .name("全セッション強制失効")
@@ -101,6 +105,22 @@ public class ResignationGateChecker {
                 .passed(true)
                 .autoExecutable(true)
                 .message(portalMsg)
+                .build());
+
+        // 3b. ポータルアカウントの紐付け確認 (PORTAL_ACCOUNT_LINK - 自動実行 / NF01 N1-4・決定 Q-10)
+        // 自動処理（ポータルsession失効）の対象は管理者が登録した紐付けだけ。emailが一致しても紐付けの無い
+        // ポータルユーザーは自動処理せず「要確認」として列挙する（ブロックはしない）。紐付けのtenant不整合は
+        // 誤処理・処理漏れを避けるためFAILとし、完了確定も409で止まる。
+        PortalLinkTargets portalTargets = portalLinkTargets(lcCase, engineerId, linkedUser);
+        if (portalTargets.mismatchedLinks() > 0) allPassed = false;
+        items.add(GateItemResult.builder()
+                .code("PORTAL_ACCOUNT_LINK")
+                .name("ポータルアカウントの紐付け確認")
+                .passed(portalTargets.mismatchedLinks() == 0)
+                .autoExecutable(true)
+                .pendingConfirmation(!portalTargets.pendingPortalUserIds().isEmpty())
+                .pendingPortalUserIds(portalTargets.pendingPortalUserIds())
+                .message(portalLinkMessage(portalTargets))
                 .build());
 
         // 4. 担当営業割当の解除・引継ぎ (SALES_RELEASE - 自動実行)
@@ -263,19 +283,41 @@ public class ResignationGateChecker {
     /**
      * 案件完了確定時に退社ゲートの自動実行処理（アカウント無効化・セッション強制失効・組織閉鎖・担当営業解除・ポータル連携解除）を行う。
      * Fail-Closed: 例外発生時は例外を送出し、呼び出し元のトランザクションをロールバックする。
+     *
+     * <p>NF01 batch 0: 連携ユーザーは案件tenant限定でlocking readし、停止は status 列だけを更新する
+     * （非ロック読取した全列を updateById で書き戻すと、並行して確定した他列の更新を古い値で上書きする）。
+     * 担当営業の解除は更新日時の記録とDataScope invalidationを持つ
+     * {@link EngineerSalesService#releaseAllByEngineerId(Long, LocalDate)} を通し、解除日には退社基準日を残す。</p>
+     *
+     * <p>NF01 N1-4（決定 B-NF01-8・Q-10）: ポータルsessionを失効させるのは、管理者が登録した紐付け
+     * （V188 t_portal_user_engineer_link）があり、紐付け・ポータル組織とも案件tenantに属するポータルユーザーだけ。
+     * emailでは照合しない（同じemailの無関係なユーザー・他tenantのユーザーを処理しない）。紐付けの無いポータルユーザーは
+     * {@link #evaluate} が「要確認」として列挙する。紐付けにtenant不整合があれば、どの撤権より先に409で止める。</p>
      */
     public void executeAutomaticGateActions(LifecycleCase lcCase, Engineer engineer) {
         Long engineerId = engineer.getId();
         LocalDate anchorDate = lcCase.getAnchorDate() != null ? lcCase.getAnchorDate() : LocalDate.now();
+        String tenantId = lcCase.getTenantId() == null || lcCase.getTenantId().isBlank()
+                ? null : lcCase.getTenantId().trim();
+        if (tenantId == null) {
+            throw BusinessException.of(409, "error.lifecycle.resignationGateFailed");
+        }
+        List<PortalUserEngineerLink> portalLinks = linkedPortalUsersFailClosed(engineerId, tenantId);
 
         // 1. ユーザーアカウント無効化 & 組織所属閉鎖 & セッション失効 & ポータル連携解除
         EngineerAccountLink link = engineerAccountLinkService.findByEngineerId(engineerId);
         if (link != null && link.getSysUserId() != null) {
             Long userId = link.getSysUserId();
-            SysUser user = sysUserMapper.selectById(userId);
+            SysUser user = lockLinkedUserInTenant(userId, tenantId);
             if (user != null && (user.getStatus() == null || user.getStatus() != 0)) {
-                user.setStatus(0);
-                sysUserMapper.updateById(user);
+                int updated = sysUserMapper.update(null, new UpdateWrapper<SysUser>()
+                        .eq("id", userId)
+                        .eq("tenant_id", tenantId)
+                        .set("status", 0)
+                        .set("updated_at", LocalDateTime.now()));
+                if (updated != 1) {
+                    throw BusinessException.of(409, "error.common.optimisticLock");
+                }
                 log.info("Deactivated user {} due to resignation case completion", userId);
             }
 
@@ -286,32 +328,93 @@ public class ResignationGateChecker {
             persistentSessionService.revokeAllForUser(userId, "退社案件完了によるセッション強制失効");
             log.info("Revoked all persistent sessions for user {}", userId);
 
-            // ポータルユーザーが存在する場合はポータルセッションも失効 (Fail-Closed)
-            if (user != null && user.getEmail() != null) {
-                com.ses.entity.PortalUser portalUser = portalUserMapper.selectOne(
-                        new LambdaQueryWrapper<com.ses.entity.PortalUser>().eq(com.ses.entity.PortalUser::getEmail, user.getEmail()));
-                if (portalUser != null) {
-                    portalSessionService.revokeAllForUser(portalUser.getId(), "退社案件完了によるポータルセッション強制失効");
-                    log.info("Revoked all portal sessions for portal user {}", portalUser.getId());
-                }
-            }
-
             // ポータル連携解除
             engineerAccountLinkService.unlinkByEngineerId(engineerId);
             log.info("Unlinked engineer account link for engineer {}", engineerId);
         }
 
-        // 2. 主担当営業および割当の解除
-        List<EngineerSales> activeSales = engineerSalesMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<EngineerSales>()
-                        .eq(EngineerSales::getEngineerId, engineerId)
-                        .isNull(EngineerSales::getReleasedAt)
-        );
-        for (EngineerSales es : activeSales) {
-            es.setReleasedAt(anchorDate);
-            engineerSalesMapper.updateById(es);
-            log.info("Released sales assignment {} for engineer {}", es.getId(), engineerId);
+        // 紐付け済みポータルユーザーのセッション失効 (Fail-Closed)。内部アカウント連携の有無とは独立に行う。
+        for (PortalUserEngineerLink portalLink : portalLinks) {
+            portalSessionService.revokeAllForUser(portalLink.getPortalUserId(), "退社案件完了によるポータルセッション強制失効");
+            log.info("退社案件完了により紐付け済みポータルユーザー {} のセッションを失効しました", portalLink.getPortalUserId());
         }
+
+        // 2. 主担当営業および割当の解除。解除日は組織所属の終了日と同じ退社基準日とし、
+        //    更新日時の記録とDataScope invalidationを持つservice経由で行う。
+        engineerSalesService.releaseAllByEngineerId(engineerId, anchorDate);
+        log.info("退社案件完了により要員 {} の現任担当営業割当を基準日 {} で解除しました", engineerId, anchorDate);
+    }
+
+    /**
+     * 連携ユーザーを案件tenant内でlocking readする。
+     * tenant内に無く他tenantには存在する場合は、越境更新も無効化漏れも起こさないようfail-closedにする。
+     * どのtenantにも有効行が無い（論理削除済み等）場合は従来どおり無効化対象なしとして扱う。
+     */
+    private SysUser lockLinkedUserInTenant(Long userId, String tenantId) {
+        SysUser user = sysUserMapper.selectByIdAndTenantForUpdate(userId, tenantId);
+        if (user == null && sysUserMapper.selectById(userId) != null) {
+            throw BusinessException.of(409, "error.lifecycle.resignationGateFailed");
+        }
+        return user;
+    }
+
+    /**
+     * 自動処理の対象にする紐付け済みポータルユーザーを返す。tenant不整合の現行紐付けが1件でもあれば、
+     * 誤撤権・撤権漏れを避けるため409で中断する（NF01 N1-4。batch 0 L6のemail照合を置き換える）。
+     */
+    private List<PortalUserEngineerLink> linkedPortalUsersFailClosed(Long engineerId, String tenantId) {
+        Long mismatched = portalUserEngineerLinkMapper.countActiveScopeMismatchForEngineer(engineerId, tenantId);
+        if (mismatched != null && mismatched > 0) {
+            throw BusinessException.of(409, "error.lifecycle.resignationGateFailed");
+        }
+        List<PortalUserEngineerLink> links =
+                portalUserEngineerLinkMapper.selectActiveForEngineerInTenant(engineerId, tenantId);
+        return links == null ? List.of() : links;
+    }
+
+    /**
+     * 退社ゲートに表示するポータルアカウントの状況。紐付け済み（自動処理の対象）、要確認（同じtenantで
+     * 内部アカウントのemailが一致するが、どの要員とも紐付いていないポータルユーザー）、tenant不整合の紐付けの件数。
+     * 要確認の照合は表示のためだけに行い、自動処理には使わない。内部アカウントが案件tenantに無い場合は照合しない。
+     */
+    private PortalLinkTargets portalLinkTargets(LifecycleCase lcCase, Long engineerId, SysUser linkedUser) {
+        String tenantId = lcCase.getTenantId() == null || lcCase.getTenantId().isBlank()
+                ? null : lcCase.getTenantId().trim();
+        if (tenantId == null) {
+            return new PortalLinkTargets(0, List.of(), 1);
+        }
+        Long mismatched = portalUserEngineerLinkMapper.countActiveScopeMismatchForEngineer(engineerId, tenantId);
+        List<PortalUserEngineerLink> linked =
+                portalUserEngineerLinkMapper.selectActiveForEngineerInTenant(engineerId, tenantId);
+        List<Long> pending = List.of();
+        String email = linkedUser == null || linkedUser.getEmail() == null ? null : linkedUser.getEmail().trim();
+        if (email != null && !email.isEmpty() && linkedUser.getTenantId() != null
+                && tenantId.equals(linkedUser.getTenantId().trim())) {
+            List<Long> candidates = portalUserEngineerLinkMapper.selectUnlinkedPortalUserIdsByEmailInTenant(email, tenantId);
+            pending = candidates == null ? List.of() : List.copyOf(candidates);
+        }
+        return new PortalLinkTargets(linked == null ? 0 : linked.size(), pending,
+                mismatched == null ? 0 : mismatched);
+    }
+
+    private String portalLinkMessage(PortalLinkTargets targets) {
+        if (targets.mismatchedLinks() > 0) {
+            return "tenantが一致しないポータルユーザーの紐付けが " + targets.mismatchedLinks()
+                    + " 件あります。ポータル管理で紐付けを解除・再登録してから完了してください";
+        }
+        StringBuilder message = new StringBuilder(targets.linkedCount() > 0
+                ? "案件完了確定時に紐付け済みポータルユーザー " + targets.linkedCount() + " 件のセッションを強制失効します"
+                : "紐付け済みのポータルユーザーなし");
+        if (!targets.pendingPortalUserIds().isEmpty()) {
+            message.append("。要確認: emailが一致するが紐付けの無いポータルユーザー ")
+                    .append(targets.pendingPortalUserIds().size())
+                    .append(" 件は自動処理の対象外です（ポータル管理で紐付けを登録するか、個別に停止してください）");
+        }
+        return message.toString();
+    }
+
+    /** ポータルアカウントの紐付け状況（件数と要確認のポータルユーザーID）。 */
+    private record PortalLinkTargets(int linkedCount, List<Long> pendingPortalUserIds, long mismatchedLinks) {
     }
 
     private LifecycleTask findTaskByCode(Long caseId, String taskCode) {

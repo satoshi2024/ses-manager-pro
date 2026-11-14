@@ -42,6 +42,25 @@ if [[ -z "${query:-}" ]]; then
 fi
 
 case "$query" in
+  # 内容ハッシュ対象の列情報（lib/content-hash.sh）。FAKE_CONTENT_COLUMNS（「列名<TAB>column_key」の行を
+  # printf %b 形式で。既定は主キー id と通常列 name）を返す。
+  # FAKE_CONTENT_COLUMNS_EMPTY=1: 出力なしで exit 0（table が無い状態の再現）
+  *"ses-backup:content-hash-order"*)
+    if [[ -n "${FAKE_CONTENT_COLUMNS_EMPTY:-}" ]]; then
+      exit 0
+    fi
+    printf '%b' "${FAKE_CONTENT_COLUMNS:-id\tPRI\nname\t\n}"
+    exit 0
+    ;;
+  # 内容ハッシュ対象の全行（lib/content-hash.sh）。FAKE_CONTENT_ROWS を printf %b で返す。
+  # FAKE_CONTENT_RC=N: 出力なしで exit N（取得失敗の再現）
+  *"ses-backup:content-hash */"*)
+    if [[ -n "${FAKE_CONTENT_RC:-}" ]]; then
+      exit "$FAKE_CONTENT_RC"
+    fi
+    printf '%b' "${FAKE_CONTENT_ROWS:-1\tfake-content-row\n}"
+    exit 0
+    ;;
   # target guard の object 数（tables+routines+events 合算）
   *COUNT*table_schema*routines*|*COUNT*routine_schema*|*COUNT*event_schema*)
     if [[ "${FAKE_TABLE_COUNT_FAIL:-0}" == "1" ]]; then
@@ -79,8 +98,38 @@ case "$query" in
     printf '%s\n' "${FAKE_MYSQL_ENGINES:-InnoDB	5}"
     exit 0
     ;;
+  # validate-db の最新 version 取得（成功行の version 全件）。
+  # FAKE_FLYWAY_VERSIONS（空白区切り・任意順）があれば 1 行 1 version で返し、
+  # 無ければ FAKE_FLYWAY_MAX を 1 行だけ返す。
+  # FAKE_FLYWAY_VERSIONS_RC=N: 出力なしで exit N（取得失敗の再現）
+  # FAKE_FLYWAY_VERSIONS_EMPTY=1: 出力なしで exit 0（成功行 0 件の再現）
+  *SELECT*version*FROM*flyway_schema_history*version*IS*NOT*NULL*)
+    if [[ -n "${FAKE_FLYWAY_VERSIONS_RC:-}" ]]; then
+      exit "$FAKE_FLYWAY_VERSIONS_RC"
+    fi
+    if [[ -n "${FAKE_FLYWAY_VERSIONS_EMPTY:-}" ]]; then
+      exit 0
+    fi
+    if [[ -n "${FAKE_FLYWAY_VERSIONS:-}" ]]; then
+      # 空白区切りの一覧を 1 行 1 version に分解するため、意図的に分割する。
+      # shellcheck disable=SC2086
+      for v in $FAKE_FLYWAY_VERSIONS; do printf '%s\n' "$v"; done
+    else
+      printf '%s\n' "${FAKE_FLYWAY_MAX:-42}"
+    fi
+    exit 0
+    ;;
+  # 旧方式 MAX(version) を実 MySQL と同じ辞書順で再現する（VARCHAR の MAX）。
+  # 0 件なら NULL。修正前の実装をテストで検出できるようにするための応答。
   *MAX*version*FROM*flyway_schema_history*)
-    printf '%s\n' "${FAKE_FLYWAY_MAX:-42}"
+    if [[ -n "${FAKE_FLYWAY_VERSIONS_EMPTY:-}" ]]; then
+      printf '%s\n' NULL
+    elif [[ -n "${FAKE_FLYWAY_VERSIONS:-}" ]]; then
+      # shellcheck disable=SC2086
+      printf '%s\n' $FAKE_FLYWAY_VERSIONS | LC_ALL=C sort | tail -n 1
+    else
+      printf '%s\n' "${FAKE_FLYWAY_MAX:-42}"
+    fi
     exit 0
     ;;
   *flyway_schema_history*success*)

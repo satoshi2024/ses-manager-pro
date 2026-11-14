@@ -1,5 +1,20 @@
 # privacy-retention-dsar 実施計画
 
+## 2026-11-14 production bridge 段階計画（W3-04 NF07-P）
+
+依頼者の決定 Q-1（段階化）と Q-8（署名前実装可: 値UNKNOWN・flag OFF・未知は一律拒否）により、F1〜M の実装着手は署名を待たない。第1期は W3-14「F1 + PERM」→ F2 provider / A1 Journal adapter → A1 保全hold → A2 DSAR（半手動）、署名後は B1 自動処分・B2 recovery・M release とする。詳細は [`production-bridge-phased-plan.md`](production-bridge-phased-plan.md)。下記 approval status の `FULL_FEATURE_PRODUCTION PLAN` は **本番承認** の状態として `BLOCKED` を維持する（本番開放・処分・実交付・外部送信は引き続き禁止）。実装着手の可否だけが変わった。
+
+## 2026-10-01 追加技術increment
+
+SYNTHETIC_FOUNDATIONを旧DEV-0/D0と分けて計画する。依頼者による技術方式・隔離開発の委任が入力であり、
+正式Privacy OwnerやDG-07を代行していない。正本`synthetic-foundation.md`、新requirements SF-R1〜6、
+計画固定Head `f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`はAstraの技術Plan Review PASS。
+SF-W0完了。SF-W1は実装済みで、実装側記録では固定Head `6ec4ca28` をAstraが限定CODE PASS（18/0/0/0）としたが、正式verdictは外部記録で確認する（[`status-alignment.md`](status-alignment.md) C-04）。初期base `1443fb68943849a3260d7ebe005259f3eb609d60`。
+下記の古いbase/件数/実装scopeは当時の記録であり、現行coverageや新incrementの承認と混同しない。
+B0/V182時点（2026-10、execution-ledger `:558`）のscanは253 migration table、244 entity table、699 provider候補、未分類73 table、欠落column1077、
+欠落provider276、missing entity68でBLOCKED_COVERAGE_INCOMPLETE。これは現行値ではない。2026-11-14時点の基準 `1be03bea`（V183〜V186を含む）に対するscanは未実施であり、現行coverageは **UNKNOWN（BLOCKED想定）** とする（C-15）。policy unknownの正式判定は別途必要。
+NF03/NF08のpolicy依存は継続し、実retention/外送を未承認のまま有効化しない。
+
 ## approval status
 
 この計画は二段階Gateで管理する。`NF07-DEV-GATE-20260828`（依頼者によるdevelopment-only technical authorization）により、**DEV-0/D0 PLAN: `APPROVED_DEV_ONLY`** とする。**FULL_FEATURE_PRODUCTION PLAN: `BLOCKED`** のまま維持する。これは法的結論、本番承認、正式Privacy Ownerの指定、Full Feature PLAN PASSではない。
@@ -19,12 +34,12 @@
 |---|---|---|---|---|
 | 0 | legal/PII inventory | table/column/file/AI payload catalog、owner/purpose/trigger/retention/hold/disposition/provider | DEV-0/D0 Gate、読み取り可能なrepo evidence、全migration/entity/providerのcoverage hash | DEV-ONLY APPROVED（0.4 policy closureは未完。unclassified 0、policy UNKNOWN/BLOCKED 78、fail-closed） |
 | D0 | dry-run | redacted snapshotのcandidate/blocked/unknown、no-write evidence | DEV-0/D0 Gate。実データ/provider接続なし | DEV-ONLY APPROVED（offline） |
-| F1 | catalog/policy/hold/request/job DDL | versioned policy、hold、case/action/job | DG-07とapproved scope/owner、migration approval | BLOCKED |
-| F2 | provider/search/dry-run | DB/file/AI/backup/replica provider、scope/redaction | F1、external provider scope/security approval | BLOCKED |
-| A1 | dashboard/hold/approval | hold表示、二者承認、SoD、audit | F2、legal/HR/Privacy owner approval | BLOCKED |
-| A2 | DSAR case/export/redaction | identity resolution、第三者redaction、delivery/appeal | A1、期限/identity/export policy approval | BLOCKED |
-| B1 | disposition batch | flag OFF、policy allow-list、CAS/idempotency/retry/partial failure/cancel | A2、backup/restoreと処分方式のgate | BLOCKED |
-| B2 | recovery/evidence | DB+binary restore、hash/scope/hold再検証、evidence | B1、backup/recovery gate | BLOCKED |
+| F1 | catalog/policy/hold/request/job DDL | versioned policy、hold、case/action/job | DG-07とapproved scope/owner、migration approval | 2026-11-14: 第1期（W3-14）。実装着手可（Q-8、値UNKNOWN・flag OFF）。disposition job表はB1へ移す。本番開放はBLOCKED |
+| F2 | provider/search/dry-run | DB/file/AI/backup/replica provider、scope/redaction | F1、external provider scope/security approval | 2026-11-14: 第1期。read-onlyのみ実装着手可。外部providerは登録しない。本番開放はBLOCKED |
+| A1 | dashboard/hold/approval | hold表示、二者承認、SoD、audit | F2、legal/HR/Privacy owner approval | 2026-11-14: 第1期（Journal adapter + hold開始）。hold解除は署名後。本番開放はBLOCKED |
+| A2 | DSAR case/export/redaction | identity resolution、第三者redaction、delivery/appeal | A1、期限/identity/export policy approval | 2026-11-14: 第1期（半手動）。前提はF2（A1は表示のみ）。本番開放はBLOCKED |
+| B1 | disposition batch | flag OFF、policy allow-list、CAS/idempotency/retry/partial failure/cancel | A2、backup/restoreと処分方式のgate | BLOCKED（署名後に着手） |
+| B2 | recovery/evidence | DB+binary restore、hash/scope/hold再検証、evidence | B1、backup/recovery gate | BLOCKED（署名後に着手） |
 | M | release | production enablement候補 | independent ReviewのPLAN/IMPLEMENTATION双方PASS、全外部/社内gate | BLOCKED |
 
 ## hard stop

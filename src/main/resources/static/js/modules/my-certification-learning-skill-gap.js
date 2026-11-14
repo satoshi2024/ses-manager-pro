@@ -9,6 +9,10 @@
     const showError = error => { const el = document.getElementById('my-cert-error'); el.textContent = error?.message || '処理に失敗しました'; el.classList.remove('d-none'); };
     const hideError = () => document.getElementById('my-cert-error').classList.add('d-none');
     const today = () => { const date = new Date(); return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0'); };
+    // 資格番号（CERTIFICATION_PII）の入力可否は、templateが入力欄を出したかどうかだけで判定する（nf03-certification-pii）。
+    // OFFの間は申請・再申請とも資格番号を送らない（APIも資格番号付きの要求を拒否する）。
+    const certificateNumberInput = () => document.getElementById('my-cert-number');
+    const certificateNumberEntryEnabled = () => certificateNumberInput() !== null;
 
     // これはSES.apiではなくmultipart fetchのレスポンスラッパーを検証する。
     async function uploadCertificationEvidence(recordId, file) {
@@ -79,7 +83,7 @@
         try {
             const certificationId = Number(document.getElementById('my-certification-id').value);
             if (!certificationId) throw new Error('資格を選択してください');
-            await SES.api.post(base + '/certifications', { certificationId: certificationId, acquiredOn: document.getElementById('my-cert-acquired-on').value, expiresOn: document.getElementById('my-cert-expires-on').value || null, certificateNumber: document.getElementById('my-cert-number').value });
+            await SES.api.post(base + '/certifications', { certificationId: certificationId, acquiredOn: document.getElementById('my-cert-acquired-on').value, expiresOn: document.getElementById('my-cert-expires-on').value || null, certificateNumber: certificateNumberEntryEnabled() ? certificateNumberInput().value : null });
             bootstrap.Modal.getInstance(document.getElementById('my-cert-apply-modal')).hide(); await load();
         } catch (e) { showError(e); }
     };
@@ -102,7 +106,7 @@
     };
     window.withdrawMyCertification = async function (id, version) { const result = await Swal.fire({ title: '資格申請を取消', input: 'text', inputLabel: '理由', showCancelButton: true, confirmButtonText: '取消', cancelButtonText: '戻る' }); if (!result.isConfirmed) return; try { await SES.api.post(base + '/certifications/' + id + '/withdraw', { expectedVersion: version, reason: result.value }); await load(); } catch (e) { showError(e); } };
     window.correctMyCertification = async function (id, version, expiresOn) { const date = await Swal.fire({ title: '取得日を訂正', input: 'date', inputValue: today(), showCancelButton: true, confirmButtonText: '次へ', cancelButtonText: '戻る' }); if (!date.isConfirmed) return; const reason = await Swal.fire({ title: '訂正理由', input: 'text', showCancelButton: true, confirmButtonText: '訂正', cancelButtonText: '戻る' }); if (!reason.isConfirmed) return; try { await SES.api.post(base + '/certifications/' + id + '/correct', { expectedVersion: version, acquiredOn: date.value, expiresOn: expiresOn || null, reason: reason.value }); await load(); } catch (e) { showError(e); } };
-    window.resubmitMyCertification = async function (id, version) { const result = await Swal.fire({ title: '資格を再申請', input: 'text', inputLabel: '資格番号（任意）', showCancelButton: true, confirmButtonText: '再申請', cancelButtonText: '戻る' }); if (!result.isConfirmed) return; try { await SES.api.post(base + '/certifications/' + id + '/resubmit', { expectedVersion: version, certificateNumber: result.value }); await load(); } catch (e) { showError(e); } };
+    window.resubmitMyCertification = async function (id, version) { const withNumber = certificateNumberEntryEnabled(); const result = await Swal.fire(withNumber ? { title: '資格を再申請', input: 'text', inputLabel: '資格番号（任意）', showCancelButton: true, confirmButtonText: '再申請', cancelButtonText: '戻る' } : { title: '資格を再申請', text: 'この資格を再申請しますか？', showCancelButton: true, confirmButtonText: '再申請', cancelButtonText: '戻る' }); if (!result.isConfirmed) return; try { await SES.api.post(base + '/certifications/' + id + '/resubmit', { expectedVersion: version, certificateNumber: withNumber ? result.value : null }); await load(); } catch (e) { showError(e); } };
     window.openMyPlanForm = () => bootstrap.Modal.getOrCreateInstance(document.getElementById('my-plan-modal')).show();
     window.submitMyPlan = async function () { try { await SES.api.post(base + '/learning-plans', { title: document.getElementById('my-plan-title').value, goalDescription: document.getElementById('my-plan-goal').value, attainmentCriteria: document.getElementById('my-plan-criteria').value, plannedStartOn: document.getElementById('my-plan-start').value || null, plannedEndOn: document.getElementById('my-plan-end').value || null, plannedCostJpy: Number(document.getElementById('my-plan-cost').value || 0) }); bootstrap.Modal.getInstance(document.getElementById('my-plan-modal')).hide(); await load(); } catch (e) { showError(e); } };
     window.submitMyPlanById = async function (id, version) { const reason = await Swal.fire({ title: '0円の場合は理由を入力', input: 'text', showCancelButton: true, confirmButtonText: '申請', cancelButtonText: '戻る' }); if (!reason.isConfirmed) return; try { await SES.api.post(base + '/learning-plans/' + id + '/submit', { expectedVersion: version, zeroCostReason: reason.value }); await load(); } catch (e) { showError(e); } };

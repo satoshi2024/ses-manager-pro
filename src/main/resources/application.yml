@@ -4,7 +4,8 @@
 server:
   port: 8080
   forward-headers-strategy: framework
-  # ECS/ALB 相当のローリング更新向け。SIGTERM 後に処理中リクエストを排水してから終了する。
+  # SIGTERM 後に処理中リクエストを排水してから終了する。本番は全停止配備でrolling更新は行わない
+  # （手順は .kiro/specs/production-launch/deploy-runbook.md）。
   shutdown: graceful
   # ===== 同時接続の受け口 =====
   # threads.max を超えた分は accept-count まで待たされ、それも超えると接続拒否になる。
@@ -16,6 +17,11 @@ server:
       min-spare: ${TOMCAT_MIN_SPARE_THREADS:10}
     accept-count: ${TOMCAT_ACCEPT_COUNT:100}
     max-connections: ${TOMCAT_MAX_CONNECTIONS:8192}
+    # 1回のsocket read（request line・header・bodyの途中停止）の上限。取込ingressの120秒soft期限は
+    # 単一のblocking readを中断できないため、この値が最悪超過量の上限になる（NF-06 B-NF06-1）。
+    # keep-alive待機は従来のTomcat既定（connection-timeoutと同じ60秒）を明示して維持し、LB側idle timeoutとの関係を変えない。
+    connection-timeout: ${TOMCAT_CONNECTION_TIMEOUT:20s}
+    keep-alive-timeout: ${TOMCAT_KEEP_ALIVE_TIMEOUT:60s}
   servlet:
     encoding:
       charset: UTF-8
@@ -134,8 +140,9 @@ spring:
   # ===== Flyway（DBマイグレーション。旧「001〜009を手動実行」手順を自動化） =====
   # 既存の手動構築済みDBに対して初めて導入する場合は baseline-on-migrate により
   # 「既にV9まで適用済み」とみなして以降のマイグレーションのみ実行する。
-  # prod では application-prod.yml が db/migration-prod を追加ロケーションとして
-  # 差し込み、admin初期パスワードのBCrypt化(Repeatable)のみ prod 限定で適用する。
+  # dev/test 向けの設定。prod は application-prod.yml で enabled=false とし、起動時にmigrateしない。
+  # 本番のmigration（db/migration + db/migration-prod）は専用Flyway job（mvn -Pprod-migrate、
+  # 設定は ops/flyway/flyway-prod.conf）が実行する。
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -283,6 +290,20 @@ app:
     scanner-read-timeout-ms: ${FILE_SCANNER_READ_TIMEOUT_MS:10000}
     legacy-migration-enabled: ${LEGACY_MIGRATION_ENABLED:true}
     contract-backfill-enabled: ${CONTRACT_BACKFILL_ENABLED:true}
+  # ===== NF-06 取込センターの本番admission（Q-5） =====
+  # 値は署名済みData Owner決定書の転記（秘密値を置かない）。既定は全て未設定＝全sourceの取込を拒否する。
+  # NF-06スイッチがONのprodは、時間経過（署名日前・失効）以外の不備があれば起動しない。OFFなら起動を止めない。
+  # 手順・digestの正規形: .kiro/specs/data-migration-import-center/a1a-ingress-operations.md §10
+  import-center:
+    admission:
+      decision-id: ${IMPORT_ADMISSION_DECISION_ID:}
+      tenant-id: ${IMPORT_ADMISSION_TENANT_ID:}
+      signed-on: ${IMPORT_ADMISSION_SIGNED_ON:}
+      expires-on: ${IMPORT_ADMISSION_EXPIRES_ON:}
+      # 承認済みsource code（カンマ区切り。比較は小文字）
+      source-codes: ${IMPORT_ADMISSION_SOURCE_CODES:}
+      # 決定書に記載された承認内容のSHA-256（小文字hex 64桁）
+      approval-digest: ${IMPORT_ADMISSION_APPROVAL_DIGEST:}
   # メール差出人
   mail:
     from: ${MAIL_FROM:noreply@example.com}
@@ -334,13 +355,76 @@ app:
   # ===== スキルシート取込設定 =====
   resume:
     retention-days: 30
+  # ===== 機能スイッチ（段階公開。既定は全てOFF） =====
+  # OFFの機能は画面・API・schedulerの入口を止め、サイドバーからも隠す（管理者も迂回不可。応答は404）。
+  # 1機能ずつ環境変数でONにし、切替はアプリ再起動で反映する。真偽値として解釈できない値（例: ture）は起動失敗になる。
+  # 運用手順: .kiro/specs/production-launch/feature-switches.md
+  features:
+    # NF-01 ライフサイクル管理・退社ゲート
+    nf01:
+      enabled: ${FEATURE_NF01_ENABLED:false}
+    # NF-02 カスタマーサクセス・サービスデスク（内部画面）
+    nf02:
+      enabled: ${FEATURE_NF02_ENABLED:false}
+    # NF-02の子: 顧客ポータルの問い合わせ（起票・返信・CSAT）。NF-02がOFFなら本値に関係なくOFF。初回リリースはOFF（B-NF02-2）
+    nf02-customer-portal:
+      enabled: ${FEATURE_NF02_CUSTOMER_PORTAL_ENABLED:false}
+      # portalへ出す問い合わせの公開開始時刻（offset付きISO-8601。例: 2027-04-01T00:00:00+09:00）。
+      # 未設定ならportal起票の問い合わせだけを出す（初回リリース中に社内で登録した問い合わせを顧客へ出さない）。
+      visible-since: ${FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE:}
+    # NF-03 資格・学習・スキルギャップ
+    nf03:
+      enabled: ${FEATURE_NF03_ENABLED:false}
+    # NF-03の子: 資格番号（CERTIFICATION_PII）の入力。NF-03がOFFなら本値に関係なくOFF。DG-07承認までOFF（B-NF03-1）
+    nf03-certification-pii:
+      enabled: ${FEATURE_NF03_CERTIFICATION_PII_ENABLED:false}
+    # NF-04 要員PWAシェル（Service Worker・manifest）。日次入力queue・offline下書き復元は対象外（常時有効）
+    nf04:
+      enabled: ${FEATURE_NF04_ENABLED:false}
+    # NF-06 データ移行・取込センター（API。apply系は含まない）。ONにするprodはimport-center.admissionの承認設定が必須
+    nf06:
+      enabled: ${FEATURE_NF06_ENABLED:false}
+    # NF-10 定期管理レポート
+    nf10:
+      enabled: ${FEATURE_NF10_ENABLED:false}
 
 # ===== AI設定（将来のAPI接続用） =====
 ai:
   enabled: true
   provider: mock
   management-copilot-enabled: false
-  external-send-enabled: false
+  # NF08 外部送信。既定false。trueにする場合は下記 external-send-approval が全て揃い、
+  # production-gates（運用者確認チェックリスト）が全てtrueでなければprodは起動しない（fail-fast）。
+  # ただし失効日経過・署名日前だけが理由の場合は起動を止めず、外部送信だけを停止してWARNを出す。
+  external-send-enabled: ${AI_EXTERNAL_SEND_ENABLED:false}
+  # NF08 外部送信承認設定。値は署名済み決定書の転記（秘密値を置かない）。既定は全て未設定＝拒否。
+  # 手順・項目一覧: .kiro/specs/ai-management-copilot/external-send-approval-gate.md
+  external-send-approval:
+    decision-id: ${AI_EXTERNAL_SEND_DECISION_ID:}
+    dg08-decision-id: ${AI_EXTERNAL_SEND_DG08_DECISION_ID:}
+    nf07-policy-id: ${AI_EXTERNAL_SEND_NF07_POLICY_ID:}
+    dpa-reference: ${AI_EXTERNAL_SEND_DPA_REFERENCE:}
+    signed-on: ${AI_EXTERNAL_SEND_SIGNED_ON:}
+    expires-on: ${AI_EXTERNAL_SEND_EXPIRES_ON:}
+    provider: ${AI_EXTERNAL_SEND_PROVIDER:}
+    model: ${AI_EXTERNAL_SEND_MODEL:}
+    purposes: ${AI_EXTERNAL_SEND_PURPOSES:}
+    # 送信してよいfield id（catalog.queryId,catalog.catalogVersion,summary.claimKeys の部分集合）
+    data-categories: ${AI_EXTERNAL_SEND_DATA_CATEGORIES:}
+    destination-host: ${AI_EXTERNAL_SEND_DESTINATION_HOST:}
+    # 決定書に記載された承認内容のSHA-256（小文字hex 64桁）。現行設定からの再計算値と一致しなければ拒否
+    approval-digest: ${AI_EXTERNAL_SEND_APPROVAL_DIGEST:}
+    cost-limit:
+      per-request-yen: ${AI_EXTERNAL_SEND_PER_REQUEST_YEN:}
+      daily-yen: ${AI_EXTERNAL_SEND_DAILY_YEN:}
+      monthly-yen: ${AI_EXTERNAL_SEND_MONTHLY_YEN:}
+      input-yen-per-thousand-tokens: ${AI_EXTERNAL_SEND_INPUT_YEN_PER_THOUSAND_TOKENS:}
+      output-yen-per-thousand-tokens: ${AI_EXTERNAL_SEND_OUTPUT_YEN_PER_THOUSAND_TOKENS:}
+      max-request-bytes: ${AI_EXTERNAL_SEND_MAX_REQUEST_BYTES:}
+      max-thinking-tokens: ${AI_EXTERNAL_SEND_MAX_THINKING_TOKENS:0}
+  # 承認の有効期間監視。失効の何日前からWARN logと監視metric（EXPIRING）を出すか（1〜366）
+  external-send-monitor:
+    expiry-warning-days: ${AI_EXTERNAL_SEND_EXPIRY_WARNING_DAYS:30}
   learning-candidate-timeout-ms: 2000
   learning-candidate-ttl-minutes: 60
   retention:
@@ -427,14 +511,25 @@ compliance:
 integration:
   hub:
     # NF-05 F2はdefault-off。値を省略せず、起動validatorでfail-closedにする。
+    # inbound（public-api）とoutbound（external-transport）は独立に開放する（Q-12）。
+    # productionの承認項目は .kiro/specs/integration-hub-public-api/dg-05-enablement-decision-draft.md。
     public-api:
       enabled: false
+      # outbound payloadのbindingにも使うため、どちらかの方向を開けるときに必須。
       public-id-key: ${INTEGRATION_HUB_PUBLIC_ID_KEY:}
       cursor-ttl-seconds: 300
       read-snapshot-purge-batch-size: 32
       read-snapshot-purge-fixed-delay-ms: 60000
+      # retention/nonce purgeは両方向で共用する。
       retention-purge-batch-size: 100
       retention-purge-fixed-delay-ms: 60000
+      # inbound webhook処理のlease。outboundのlease-secondsとは独立。
+      inbound-lease-seconds: 60
+      # 有効時に未認証rejectを監査tableへ書く1分あたりの上限（node単位）。超過分はmetricだけに残す。
+      unauthenticated-audit-max-per-minute: 60
+      approval:
+        decision-id: ${INTEGRATION_HUB_INBOUND_DECISION_ID:}
+        allowed-client-cidrs: []
     external-transport:
       enabled: false
       batch-size: 32
@@ -442,10 +537,15 @@ integration:
       fixed-delay-ms: 1000
       connect-timeout-ms: 3000
       read-timeout-ms: 3000
+      approval:
+        decision-id: ${INTEGRATION_HUB_OUTBOUND_DECISION_ID:}
+        allowed-destinations: []
     provider:
       mode: MOCK
     security:
       trusted-proxies: []
+      # trusted proxyが送信元を追記するheader。ALB（xff_header_processing.mode=append）はX_FORWARDED_FOR。
+      forwarded-header: X_FORWARDED_FOR
       allowed-loopback-ports: []
     topology:
       mode: DEDICATED_DATABASE

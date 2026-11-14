@@ -5,6 +5,8 @@
 #   smoke 全 PASS → READY_FOR_CUTOVER
 # - 負: Flyway failed、version 不一致、count 不一致、missing reference、
 #   hash mismatch、after marker 存在、smoke failure → FAILED_VALIDATION
+# - history table を参照できない復元 DB は常に FAIL（G-15）。照合を省略する設定は廃止（r2）
+# - 主要 table の内容ハッシュ: 一致 PASS / 不一致・取得失敗 FAIL / 記録なし NOT_RECORDED（A-NF09-5）
 set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -33,21 +35,34 @@ setup_validate() {
   export BINLOG_INDEX="$T/binlog/binlog-index.json"
   export FAKE_COUNT=2 FAKE_FLYWAY_MAX=42 FAKE_CHECK_TABLE=OK FAKE_MARKER_BEFORE=1 FAKE_MARKER_AFTER=0
   export FAKE_TABLE_COUNT=0 FAKE_MYSQL_STATUS_ROW=$'8.0.36\t11111111-2222-3333-4444-555555555555\t1\tROW\tCRC32\t0\tON\tYES\t/var/lib/mysql/binlog.000001\t2592000'
-  unset MYSQL_PWD FAKE_FLYWAY_FAILED FAKE_FLYWAY_MAX FAKE_CHECK_TABLE \
-    FAKE_MARKER_BEFORE FAKE_MARKER_AFTER FAKE_REF_KEYS FAKE_COUNT FAKE_TABLE_COUNT
+  unset MYSQL_PWD FAKE_FLYWAY_FAILED FAKE_FLYWAY_MAX FAKE_FLYWAY_VERSIONS \
+    FAKE_FLYWAY_VERSIONS_RC FAKE_FLYWAY_VERSIONS_EMPTY FAKE_CHECK_TABLE \
+    FAKE_MARKER_BEFORE FAKE_MARKER_AFTER FAKE_REF_KEYS FAKE_COUNT FAKE_TABLE_COUNT \
+    FLYWAY_HISTORY_REQUIRED FAKE_CONTENT_ROWS FAKE_CONTENT_RC FAKE_CONTENT_COLUMNS FAKE_CONTENT_COLUMNS_EMPTY \
+    CONTENT_HASH_TABLES
   export FAKE_COUNT=2 FAKE_FLYWAY_MAX=42 FAKE_CHECK_TABLE=OK FAKE_MARKER_BEFORE=1 FAKE_MARKER_AFTER=0
   chmod +x "$ROOT/ops/backup/providers/approval-verifier-local.sh" 2>/dev/null || true
 }
 
-# checkpoint index（flyway / counts / uploads inventory の出所）
-make_ckpt_index() { # flyway counts_json uploads_inv_json
+# checkpoint index（flyway / counts / uploads inventory / 内容ハッシュの出所）
+# 第 4 引数（content_hashes の JSON）を省略した場合は content_hashes を持たない（従来の metadata）。
+make_ckpt_index() { # flyway counts_json uploads_inv_json [content_hashes_json]
   mkdir -p "$T/work/index"
-  jq -n --arg f "$1" --argjson c "$2" --argjson u "$3" \
+  jq -n --arg f "$1" --argjson c "$2" --argjson u "$3" --argjson h "${4:-null}" \
     '{kind:"checkpoint", status:"VALID", flyway_max_success:$f,
       critical_table_counts:$c, uploads:{inventory:$u},
       consistency_time_utc:"2026-08-14T09:15:00Z",
       source_lineage:"'"$LINEAGE"'", binlog_end:{file:"binlog.000012", position:400},
-      uploads_snapshot_id:"u1", restic_snapshot_id:"s1"}' > "$T/work/index/checkpoint-fixture.json"
+      uploads_snapshot_id:"u1", restic_snapshot_id:"s1"}
+     + (if $h == null then {} else {content_hashes: $h} end)' > "$T/work/index/checkpoint-fixture.json"
+}
+
+# fake mysql が返す内容（FAKE_CONTENT_ROWS）の SHA-256 を記録値とする content_hashes
+content_hashes_for() { # table rows(printf %b 形式)
+  local sum
+  sum=$(printf '%b' "$2" | sha256sum | awk '{print $1}')
+  jq -n -c --arg t "$1" --arg s "$sum" \
+    '{($t): {algorithm: "mysql-batch-pk-quote-sha256-v2", sha256: $s, order_by: ["id"]}}'
 }
 
 # plan（検証対象として)
@@ -143,6 +158,214 @@ case_validate_flyway_version_mismatch() {
   assert_contains "$VAL_OUT" '"flyway": "FAIL"' "flyway FAIL"
 }
 
+# version 列は VARCHAR。辞書順の最大（"99"）ではなく版番号順の最大（"185"）を
+# 最新として扱うこと。小数版（102.1 など）が混在しても順序が崩れないこと。
+case_validate_flyway_version_numeric_order() {
+  setup_common_fixture
+  make_ckpt_index 185 '{"marker_test":2}' "$INVENTORY"
+  export SMOKE_RC=0
+  export FAKE_FLYWAY_VERSIONS="1 2 9 10 99 102.1 102.4 103 184 185 183"
+  run_validate
+  assert_zero "$VAL_RC" "版番号順の最大 185 と一致すれば exit 0"
+  assert_contains "$VAL_OUT" '"flyway": "PASS"' "flyway PASS（辞書順 99 に引きずられない）"
+  assert_contains "$VAL_OUT" '"state": "READY_FOR_CUTOVER"' "READY_FOR_CUTOVER"
+}
+
+# 逆に、期待値が辞書順の最大（"99"）でも実際の最新が 185 なら不一致として失敗すること。
+case_validate_flyway_lexical_max_rejected() {
+  setup_common_fixture
+  make_ckpt_index 99 '{"marker_test":2}' "$INVENTORY"
+  export SMOKE_RC=0
+  export FAKE_FLYWAY_VERSIONS="9 10 99 185"
+  run_validate
+  assert_nonzero "$VAL_RC" "辞書順の最大 99 を期待値にしても非 0"
+  assert_contains "$VAL_OUT" '"flyway": "FAIL"' "flyway FAIL"
+}
+
+# 小数版の比較: 102.10 は 102.9 より新しい（数値 sort -n や辞書順では逆転する）。
+case_validate_flyway_dotted_version_order() {
+  setup_common_fixture
+  make_ckpt_index 102.10 '{"marker_test":2}' "$INVENTORY"
+  export SMOKE_RC=0
+  export FAKE_FLYWAY_VERSIONS="9 102.9 10 102.10 102.2"
+  run_validate
+  assert_zero "$VAL_RC" "102.10 を最新と判定して exit 0"
+  assert_contains "$VAL_OUT" '"flyway": "PASS"' "flyway PASS（102.10 > 102.9）"
+}
+
+# history table はあるが成功 versioned 行が 0 件: actual=NULL として不一致（fail-closed）。
+case_validate_flyway_no_success_rows_fails() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  export FAKE_FLYWAY_VERSIONS_EMPTY=1
+  run_validate
+  assert_nonzero "$VAL_RC" "成功行 0 件は非 0"
+  assert_contains "$VAL_OUT" '"flyway": "FAIL"' "flyway FAIL"
+  assert_contains "$VAL_OUT" "actual=NULL" "actual=NULL を通知"
+}
+
+# G-15: 復元 DB の flyway_schema_history を参照できない（history table 無し・権限不足）場合は FAIL にする。
+# 修正前は照合 skip で PASS（READY_FOR_CUTOVER）になっていた。
+case_validate_flyway_history_missing_fails_by_default() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  export FAKE_FLYWAY_VERSIONS_RC=1
+  run_validate
+  assert_nonzero "$VAL_RC" "history table を参照できなければ既定で非 0"
+  assert_contains "$VAL_OUT" '"flyway": "FAIL"' "flyway FAIL"
+  assert_contains "$VAL_OUT" '"flyway_history_required": true' "history 必須で検証したことを report に残す"
+  assert_contains "$VAL_OUT" "flyway_schema_history を参照できません" "history 不在を通知"
+  assert_contains "$VAL_OUT" '"state": "FAILED_VALIDATION"' "FAILED_VALIDATION"
+}
+
+# P2-1（W1-B1 r2）: history の照合を省略する設定（旧 FLYWAY_HISTORY_REQUIRED=0）は廃止した。
+# 環境に残っていても照合を省略せず、READY_FOR_CUTOVER を出さずに失敗する。
+# r1 では FLYWAY_HISTORY_REQUIRED=0 + history 不在で READY_FOR_CUTOVER（exit 0）になっていた。
+case_validate_flyway_history_switch_cannot_skip() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  export FAKE_FLYWAY_VERSIONS_RC=1
+  export FLYWAY_HISTORY_REQUIRED=0
+  run_validate
+  assert_nonzero "$VAL_RC" "FLYWAY_HISTORY_REQUIRED=0 + history 不在は非 0"
+  assert_not_contains "$VAL_OUT" "READY_FOR_CUTOVER" "history 不在を READY_FOR_CUTOVER にしない"
+  assert_contains "$VAL_OUT" "FLYWAY_HISTORY_REQUIRED は廃止しました" "廃止した設定が残っていることを通知"
+
+  # history が正常でも、照合を省略する設定が残っていれば受け付けない（設定の残置を見逃さない）
+  unset FAKE_FLYWAY_VERSIONS_RC
+  export FLYWAY_HISTORY_REQUIRED=no
+  run_validate
+  assert_nonzero "$VAL_RC" "FLYWAY_HISTORY_REQUIRED に 1 以外が残っていれば非 0"
+  assert_not_contains "$VAL_OUT" "READY_FOR_CUTOVER" "READY_FOR_CUTOVER にしない"
+  unset FLYWAY_HISTORY_REQUIRED
+}
+
+# 照合した最新 version を report に残す（integration が version 照合経路を通ったことの証跡）。
+case_validate_flyway_latest_reported() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  run_validate
+  assert_zero "$VAL_RC" "正常系は exit 0"
+  assert_contains "$VAL_OUT" '"flyway_latest": "42"' "照合した最新 version を report に残す"
+}
+
+# backup 時に FLYWAY_VERSION が未設定（metadata が unknown）なら照合できないため FAIL。
+case_validate_flyway_expected_unknown_fails() {
+  setup_common_fixture
+  make_ckpt_index unknown '{"marker_test":2}' "$INVENTORY"
+  export SMOKE_RC=0
+  run_validate
+  assert_nonzero "$VAL_RC" "flyway_max_success=unknown は非 0"
+  assert_contains "$VAL_OUT" '"flyway": "FAIL"' "flyway FAIL"
+  assert_contains "$VAL_OUT" "FLYWAY_VERSION が未設定" "原因を通知"
+}
+
+# A-NF09-5: checkpoint metadata の内容ハッシュと復元 DB の内容が一致すれば PASS。
+case_validate_content_hash_match() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  export FAKE_CONTENT_ROWS='1\tmarker-before-checkpoint\n2\tmarker-mid\n'
+  make_ckpt_index 42 '{"marker_test":2}' "$INVENTORY" "$(content_hashes_for marker_test "$FAKE_CONTENT_ROWS")"
+  run_validate
+  assert_zero "$VAL_RC" "内容ハッシュ一致は exit 0"
+  assert_contains "$VAL_OUT" '"content_hash": "PASS"' "content_hash PASS"
+  assert_contains "$VAL_OUT" '"state": "READY_FOR_CUTOVER"' "READY_FOR_CUTOVER"
+}
+
+# 件数は同じでも内容が違えば FAIL（count 照合だけでは検出できない差異）。
+case_validate_content_hash_mismatch() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  make_ckpt_index 42 '{"marker_test":2}' "$INVENTORY" \
+    "$(content_hashes_for marker_test '1\tmarker-before-checkpoint\n2\tmarker-mid\n')"
+  export FAKE_CONTENT_ROWS='1\tmarker-before-checkpoint\n2\tmarker-tampered\n'
+  run_validate
+  assert_nonzero "$VAL_RC" "内容ハッシュ不一致は非 0"
+  assert_contains "$VAL_OUT" '"counts": "PASS"' "count は一致（前提）"
+  assert_contains "$VAL_OUT" '"content_hash": "FAIL"' "content_hash FAIL"
+  assert_contains "$VAL_OUT" "内容ハッシュ不一致: marker_test" "不一致の table を通知"
+  assert_contains "$VAL_OUT" '"state": "FAILED_VALIDATION"' "FAILED_VALIDATION"
+}
+
+# 記録があるのに復元 DB から内容を取得できない場合も FAIL（照合を skip しない）。
+case_validate_content_hash_query_error_fails() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  make_ckpt_index 42 '{"marker_test":2}' "$INVENTORY" "$(content_hashes_for marker_test '1\tx\n')"
+  export FAKE_CONTENT_RC=1
+  run_validate
+  assert_nonzero "$VAL_RC" "内容を取得できなければ非 0"
+  assert_contains "$VAL_OUT" '"content_hash": "FAIL"' "content_hash FAIL"
+}
+
+# 記録の無い checkpoint（従来の metadata）は NOT_RECORDED として残し、それだけでは失敗にしない。
+case_validate_content_hash_not_recorded() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  run_validate
+  assert_zero "$VAL_RC" "記録なしは exit 0"
+  assert_contains "$VAL_OUT" '"content_hash": "NOT_RECORDED"' "content_hash NOT_RECORDED"
+}
+
+# W1-B1 r2: CONTENT_HASH_TABLES が設定された（production の）復元では、記録が無いことを FAIL にする。
+# r1 では NOT_RECORDED のまま READY_FOR_CUTOVER（exit 0）になっていた。
+case_validate_content_hash_not_recorded_fails_when_tables_configured() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  export CONTENT_HASH_TABLES=marker_test
+  run_validate
+  assert_nonzero "$VAL_RC" "CONTENT_HASH_TABLES 設定時の記録なしは非 0"
+  assert_contains "$VAL_OUT" '"content_hash": "NOT_RECORDED"' "content_hash NOT_RECORDED を残す"
+  assert_contains "$VAL_OUT" '"content_hash_required": true' "記録が必須だったことを report に残す"
+  assert_contains "$VAL_OUT" "内容ハッシュが checkpoint に記録されていません: marker_test" "記録の無い table を通知"
+  assert_contains "$VAL_OUT" '"state": "FAILED_VALIDATION"' "FAILED_VALIDATION"
+  unset CONTENT_HASH_TABLES
+}
+
+# CONTENT_HASH_TABLES の一部の table だけ記録が欠けている場合も FAIL（記録済み table が一致しても通さない）。
+case_validate_content_hash_configured_table_missing() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  export FAKE_CONTENT_ROWS='1\tmarker-before-checkpoint\n'
+  make_ckpt_index 42 '{"marker_test":2}' "$INVENTORY" "$(content_hashes_for marker_test "$FAKE_CONTENT_ROWS")"
+  export CONTENT_HASH_TABLES='marker_test, t_report_run'
+  run_validate
+  assert_nonzero "$VAL_RC" "指定 table の記録欠落は非 0"
+  assert_contains "$VAL_OUT" '"content_hash": "FAIL"' "content_hash FAIL"
+  assert_contains "$VAL_OUT" "記録されていません: t_report_run" "記録の欠けた table を通知"
+  unset CONTENT_HASH_TABLES
+}
+
+# 主キーの無い table は行の並びが一意に決まらないため、内容ハッシュの照合を FAIL にする（誤 PASS させない）。
+case_validate_content_hash_requires_primary_key() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  make_ckpt_index 42 '{"marker_test":2}' "$INVENTORY" "$(content_hashes_for marker_test '1\tx\n')"
+  export FAKE_CONTENT_COLUMNS='id\t\nmarker\t\n'
+  run_validate
+  assert_nonzero "$VAL_RC" "主キーの無い table は非 0"
+  assert_contains "$VAL_OUT" '"content_hash": "FAIL"' "content_hash FAIL"
+  assert_contains "$VAL_OUT" "主キーの無い table は内容ハッシュの対象にできません" "主キー不在を通知"
+  assert_contains "$VAL_OUT" "一意に決まらないため）: marker_test" "主キーの無い table 名を通知"
+}
+
+# 記録された table が復元先に無い場合、旧方式（v1）の記録の場合も FAIL。
+case_validate_content_hash_missing_table_and_old_algorithm() {
+  setup_common_fixture
+  export SMOKE_RC=0
+  make_ckpt_index 42 '{"marker_test":2}' "$INVENTORY" "$(content_hashes_for marker_test '1\tx\n')"
+  export FAKE_CONTENT_COLUMNS_EMPTY=1
+  run_validate
+  assert_nonzero "$VAL_RC" "記録された table が復元先に無ければ非 0"
+  assert_contains "$VAL_OUT" "table がありません（列情報 0 件）: marker_test" "table 不在を通知"
+  unset FAKE_CONTENT_COLUMNS_EMPTY
+  make_ckpt_index 42 '{"marker_test":2}' "$INVENTORY" \
+    "$(content_hashes_for marker_test '1\tx\n' | jq -c '.marker_test.algorithm = "mysql-batch-ordered-sha256-v1"')"
+  run_validate
+  assert_nonzero "$VAL_RC" "算出方式が異なる記録は非 0"
+  assert_contains "$VAL_OUT" "算出方式が異なります: marker_test" "算出方式の不一致を通知"
+}
+
 case_validate_count_mismatch() {
   setup_common_fixture
   export FAKE_COUNT=999
@@ -212,6 +435,22 @@ run_case case_validate_normal
 run_case case_validate_decoy_checkpoint_ignored
 run_case case_validate_flyway_failed
 run_case case_validate_flyway_version_mismatch
+run_case case_validate_flyway_version_numeric_order
+run_case case_validate_flyway_lexical_max_rejected
+run_case case_validate_flyway_dotted_version_order
+run_case case_validate_flyway_no_success_rows_fails
+run_case case_validate_flyway_history_missing_fails_by_default
+run_case case_validate_flyway_history_switch_cannot_skip
+run_case case_validate_flyway_latest_reported
+run_case case_validate_flyway_expected_unknown_fails
+run_case case_validate_content_hash_match
+run_case case_validate_content_hash_mismatch
+run_case case_validate_content_hash_query_error_fails
+run_case case_validate_content_hash_not_recorded
+run_case case_validate_content_hash_not_recorded_fails_when_tables_configured
+run_case case_validate_content_hash_configured_table_missing
+run_case case_validate_content_hash_requires_primary_key
+run_case case_validate_content_hash_missing_table_and_old_algorithm
 run_case case_validate_count_mismatch
 run_case case_validate_marker_after_present
 run_case case_validate_missing_reference

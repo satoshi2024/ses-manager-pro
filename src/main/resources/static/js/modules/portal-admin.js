@@ -80,7 +80,13 @@
                     + (user.status === 'ACTIVE' ? t('portalAdmin.users.suspend') : t('portalAdmin.users.resume'))
                     + '</button>'
                     + '<button type="button" class="btn btn-sm btn-outline-danger" data-user-mfa="' + user.id + '" title="MFAをリセット" aria-label="MFAをリセット">'
-                    + t('portalAdmin.users.mfaReset') + '</button></div>';
+                    + t('portalAdmin.users.mfaReset') + '</button>'
+                    + (canLinkEngineer()
+                        ? '<button type="button" class="btn btn-sm btn-outline-info" data-user-engineer-link="' + user.id
+                            + '" data-user-email="' + esc(user.email) + '" title="要員との紐付けを管理" aria-label="要員との紐付けを管理">'
+                            + t('portalAdmin.engineerLink.open') + '</button>'
+                        : '')
+                    + '</div>';
                 return '<tr><td>' + user.id + '</td><td>' + esc(user.email) + '</td><td>' + esc(user.status)
                     + '</td><td>' + mfa + '</td><td>' + esc(user.lastLoginAt || '') + '</td><td>' + actions + '</td></tr>';
             }).join('');
@@ -118,9 +124,84 @@
                     });
                 });
             });
+            $('[data-user-engineer-link]').on('click', function () {
+                openEngineerLinks($(this).data('user-engineer-link'), $(this).data('user-email'));
+            });
         }).catch(function (error) {
             reportError(error, t('common.msg.fetchFail'));
         });
+    }
+
+    // ===== 要員との紐付け（管理者のみ。退社時の自動処理は紐付け済みのポータルユーザーだけが対象: NF01 Q-10） =====
+    function canLinkEngineer() {
+        return $('#portalAdminCanLinkEngineer').length > 0;
+    }
+
+    function openEngineerLinks(portalUserId, email) {
+        $('#engineerLinkPortalUserId').val(portalUserId);
+        $('#engineerLinkPortalUserLabel').text('#' + portalUserId + ' ' + (email || ''));
+        $('#engineerLinkEngineerId').val('');
+        loadEngineerLinks(portalUserId);
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('engineerLinkModal')).show();
+    }
+
+    function loadEngineerLinks(portalUserId) {
+        SES.api.get('/api/portal-admin/users/' + portalUserId + '/engineer-links').then(function (links) {
+            const rows = (links || []).map(function (link) {
+                const engineer = '#' + esc(link.engineerId) + (link.engineerName ? ' ' + esc(link.engineerName) : '');
+                const state = link.active ? t('portalAdmin.engineerLink.active') : t('portalAdmin.engineerLink.released');
+                const action = link.active
+                    ? '<button type="button" class="btn btn-sm btn-outline-warning" data-engineer-link-release="' + link.id
+                        + '" title="紐付けを解除" aria-label="紐付けを解除">' + t('portalAdmin.engineerLink.release') + '</button>'
+                    : '';
+                return '<tr><td>' + engineer + '</td><td>' + state + '</td><td>' + esc(link.linkedAt || '')
+                    + '</td><td class="text-end">' + action + '</td></tr>';
+            }).join('');
+            $('#engineerLinkTableBody').html(rows || '<tr><td colspan="4" class="text-center text-muted">'
+                + t('portalAdmin.engineerLink.none') + '</td></tr>');
+            $('[data-engineer-link-release]').on('click', function () {
+                const linkId = $(this).data('engineer-link-release');
+                Swal.fire({
+                    title: t('portalAdmin.engineerLink.releaseConfirm'),
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: t('common.btn.confirm')
+                }).then(function (result) {
+                    if (!result.isConfirmed) {
+                        return;
+                    }
+                    SES.api.post('/api/portal-admin/engineer-links/' + linkId + '/release').then(function () {
+                        Toast.success(t('common.msg.saved'));
+                        loadEngineerLinks(portalUserId);
+                    }).catch(function (error) {
+                        reportError(error, t('common.msg.saveFail'));
+                    });
+                });
+            });
+        }).catch(function (error) {
+            reportError(error, t('common.msg.fetchFail'));
+        });
+    }
+
+    function registerEngineerLink() {
+        const portalUserId = $('#engineerLinkPortalUserId').val();
+        const engineerId = parseInt($('#engineerLinkEngineerId').val(), 10);
+        if (!portalUserId || !engineerId) {
+            Toast.warning(t('portalAdmin.engineerLink.engineerRequired'));
+            return;
+        }
+        SES.api.post('/api/portal-admin/users/' + portalUserId + '/engineer-links', { engineerId: engineerId })
+            .then(function (link) {
+                Toast.success(t('common.msg.saved'));
+                if (link && link.engineerResigned) {
+                    // 退社完了後の紐付けは完了時の自動処理が遡って行われないため、停止の要否を管理者へ促す（要確認）
+                    Toast.warning(t('portalAdmin.engineerLink.resignedWarning'));
+                }
+                $('#engineerLinkEngineerId').val('');
+                loadEngineerLinks(portalUserId);
+            }).catch(function (error) {
+                reportError(error, t('common.msg.saveFail'));
+            });
     }
 
     // ===== 招待 =====
@@ -280,6 +361,11 @@
         });
 
         $('#sessionLoadButton').on('click', loadSessions);
+
+        $('#engineerLinkForm').on('submit', function (event) {
+            event.preventDefault();
+            registerEngineerLink();
+        });
 
         $('#termsPublishButton').on('click', function () {
             SES.api.put('/api/portal-admin/terms',

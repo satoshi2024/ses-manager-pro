@@ -11,6 +11,7 @@ spring:
       mode: always
       encoding: UTF-8
       schema-locations:
+        - classpath:sql/test-schema-import-precleanup-h2.sql
         - classpath:db/migration/V1__create_tables.sql
         - classpath:db/migration/V2__init_master_data.sql
         - classpath:db/migration/V4__create_notification.sql
@@ -31,6 +32,8 @@ spring:
         - classpath:sql/schema-contract-document-h2.sql
         - classpath:sql/schema-freee-payroll-h2.sql
         - classpath:sql/schema-ar-management-h2.sql
+        # V52: 入金消込（FR-09）の銀行入金明細。入金消込のfreee反映をH2統合テストで通すために用意する
+        - classpath:sql/schema-bank-deposit-h2.sql
         - classpath:sql/schema-quotation-h2.sql
         - classpath:sql/schema-self-service-h2.sql
         - classpath:sql/schema-price-history-h2.sql
@@ -59,6 +62,7 @@ spring:
         - classpath:sql/schema-optimistic-lock-core-h2.sql
         - classpath:sql/schema-pwa-selfservice-h2.sql
         - classpath:sql/schema-lifecycle-workflow-h2.sql
+        - classpath:sql/schema-lifecycle-case-sequence-h2.sql
         - classpath:sql/schema-scheduled-management-reporting-h2.sql
         - classpath:sql/schema-certification-learning-skill-gap-h2.sql
         # NF-09のactor_type/confirmation_sourceと相互制約はV1およびH2統合schemaで同期する。
@@ -69,6 +73,13 @@ spring:
         - classpath:sql/schema-integration-hub-b2-h2.sql
         - classpath:sql/schema-service-desk-h2.sql
         - classpath:sql/schema-nf02-nf03-tenant-ownership-h2.sql
+        - classpath:sql/schema-import-center-f1a-h2.sql
+        # V186: 初回ログイン時のパスワード変更要求（sys_user.password_change_required）
+        - classpath:sql/schema-sys-user-password-change-h2.sql
+        # V187: 同一要員の未終結退社案件を1件に限定する生成列と一意index（tenant_id付与より後）
+        - classpath:sql/schema-lifecycle-resignation-unique-h2.sql
+        # V188: ポータルユーザーと要員の紐付け（schema-portal-h2.sqlがポータル表を作り直した後）
+        - classpath:sql/schema-portal-user-engineer-link-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 
@@ -152,6 +163,28 @@ app:
       ids: default
   mail:
     from: test@example.com
+  # 既存テストの意味を保つため、test profileでは段階公開の機能スイッチを全てONにする。
+  # OFF時の遮断・既定値・独立性は com.ses.config.feature の機能スイッチテストで個別に検証する。
+  features:
+    nf01:
+      enabled: true
+    nf02:
+      enabled: true
+    nf02-customer-portal:
+      enabled: true
+      # 既存のportalテストは社内起票の問い合わせをfixtureに使うため、全期間をportalの公開範囲にする。
+      # 未設定時（portal起票のみ）の挙動は PortalServiceRequestVisibility*Test で個別に検証する。
+      visible-since: "2000-01-01T00:00:00+09:00"
+    nf03:
+      enabled: true
+    nf03-certification-pii:
+      enabled: true
+    nf04:
+      enabled: true
+    nf06:
+      enabled: true
+    nf10:
+      enabled: true
 
 ai:
   enabled: false

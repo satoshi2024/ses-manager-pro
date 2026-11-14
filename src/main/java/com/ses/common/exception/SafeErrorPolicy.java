@@ -82,6 +82,7 @@ public final class SafeErrorPolicy {
             403, "アクセス権限がありません。",
             404, "対象が見つかりません。",
             409, "他の操作と競合しました。再読み込みして再試行してください。",
+            413, "送信データのサイズが上限を超えています。",
             429, "短時間にリクエストが集中しています。時間をおいて再試行してください。",
             502, "外部サービスとの連携に失敗しました。",
             503, "外部サービスを利用できません。",
@@ -111,9 +112,14 @@ public final class SafeErrorPolicy {
                 || "STALE_LEASE".equals(safeCode) || "TIMEOUT".equals(safeCode) ? "SYSTEM" : "BUSINESS";
     }
 
+    /**
+     * 業務例外のcodeを外部へ返せるHTTP statusへ丸める。許可外のcodeは500（SYSTEM）とする。
+     * 413は上限超過を利用者・監視の双方で障害と区別するため許可する（NF-06 B-NF06-4。chunked転送で
+     * filterのContent-Length検査を通過した取込bodyの超過もHTTP 413で返す）。
+     */
     public static int safeHttpCode(int code) {
         return switch (code) {
-            case 400, 401, 403, 404, 409, 429, 500, 502, 503 -> code;
+            case 400, 401, 403, 404, 409, 413, 429, 500, 502, 503 -> code;
             default -> 500;
         };
     }

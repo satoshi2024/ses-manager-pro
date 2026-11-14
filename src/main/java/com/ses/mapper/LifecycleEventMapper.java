@@ -22,6 +22,11 @@ public interface LifecycleEventMapper extends BaseMapper<LifecycleEvent> {
     @Select("SELECT * FROM t_lifecycle_event WHERE case_id = #{caseId} ORDER BY occurred_at ASC, id ASC")
     List<LifecycleEvent> selectByCaseId(@Param("caseId") Long caseId);
 
+    @Select("SELECT e.* FROM t_lifecycle_event e INNER JOIN t_lifecycle_case c ON c.id = e.case_id "
+            + "WHERE e.case_id = #{caseId} AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
+            + "ORDER BY e.occurred_at ASC, e.id ASC")
+    List<LifecycleEvent> selectByCaseIdAndTenant(@Param("caseId") Long caseId, @Param("tenantId") String tenantId);
+
     @Select("SELECT * FROM t_lifecycle_event WHERE task_id = #{taskId} ORDER BY occurred_at ASC, id ASC")
     List<LifecycleEvent> selectByTaskId(@Param("taskId") Long taskId);
 

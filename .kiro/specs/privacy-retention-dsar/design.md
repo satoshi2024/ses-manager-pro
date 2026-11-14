@@ -1,5 +1,43 @@
 # privacy-retention-dsar 設計（Discovery / Dry-run increment）
 
+## 2026-11-14 production bridge 段階計画の設計正本
+
+依頼者の決定 Q-1 / Q-7 / Q-8（2026-11-14）と B-NF07-1 / B-NF07-2（2026-11-13）に基づく production bridge（W-1〜W-12）の段階実施は、次の文書を正本とする。
+
+- [`production-bridge-phased-plan.md`](production-bridge-phased-plan.md): W-1〜W-13 と batch の対応、第1期 batch（W3-14「F1 + PERM」、NF07-F2、NF07-A1J、NF07-A1H、NF07-A2a、NF07-A2b）と署名後 batch、F1 の DDL 草案、flag と UNKNOWN の扱い、W-5 権限設計、署名項目ごとの開放手順、NF08 との関係、署名前実装のリスク。
+- [`journal-witness-grant-design.md`](journal-witness-grant-design.md): W-6 Journal/Witness インスタンスの設定契約、W-12 の最小 SQL 権限 GRANT 設計案。
+- [`policy-source-catalog-wiring-plan.md`](policy-source-catalog-wiring-plan.md): current policy source / catalog の port 契約と負例（2026-11-04 作成、2026-11-14 取込）。
+- [`status-alignment.md`](status-alignment.md): spec 内の状態記述 21 件の整合一覧。
+
+下記 §3 の候補表は W3-14 で実装する（disposition job 表は B1 へ移す）。§8 の非採用事項は、Q-8 により「実装着手」については解除し、「本番開放」については維持する。
+
+## 2026-10-26 本番接線・意思決定契約および純粋カーネル抽出の設計正本
+
+合成基盤から本番能力への接線（Wiring）および意思決定契約（Decision Contract）の設計正本は、[`prod-wiring-decision-contract.md`](prod-wiring-decision-contract.md) に定める。また、その第一弾となる純粋検証カーネル抽出の具体的実施設計は [`pure-policy-verification-kernel-plan.md`](pure-policy-verification-kernel-plan.md) に定める。
+Astra/総括によるP1指摘を受け、OidcLoginUser認証バインディング優先テナント解決・クレーム一致性検査・拒絶条件の厳格化、ログ証跡表現是正（アプリDB書き込みなし）、純粋検証カーネル分離（`PurePolicyVerificationKernel`）と独立本番入口（合成環境守衛 `SyntheticEnvironmentGuard` の完全維持と正常prod拒絶の尊重）、完全0 DB書込（DB監査永続化はPhase 5延期）、LoginUser/OidcLoginUser/ExternalApiPrincipal/サービス身元の厳格マッピング（同名短絡マッピング禁止・昇格禁止・各種拒絶受入条件）、歴史スキャン統計分離（180表/254表、対象SHA閉環ゲート必須化）、機能フラグ未実装明記（実ガード及び破壊的能力欠落に依拠）、下流モジュール（NF03/NF08）依存契約（日常業務非封鎖・外送絶対禁止）、人手意思決定チェックリスト（提議≠承認）、および最小実装順序を規定する。実処分・外送・本番書込・環境ガード解除は含まない。
+
+## 2026-10-01 新incrementの設計正本
+
+下記Discovery/DEV-0/D0設計は歴史scopeとして保持する。新SYNTHETIC_FOUNDATIONは
+`synthetic-foundation.md` SF-01〜05、SF-03a、SF-04aを正本とする。Astraは計画固定Head
+`f007ef9aecc01e5cbf79bc02e595eb64a2bfe19b`を技術Plan PASSと判定した。実装Reviewと全人手gateは別途必要である。
+実処分/実PII/外部provider/正式Legal承認をこの変更で許可しない。
+
+| 資源 | 状態遷移 | 原子性・失敗時動作 |
+|---|---|---|
+| case | REQUESTED→RESOLVED→PREVIEWED→APPROVAL_PENDING→APPROVED | 版付きsubject/対象hash/policyを固定。変更で承認失効 |
+| local action | APPROVED→CLAIMED→AUTHORIZATION_PENDING | DB lease generation/CAS。外部I/OをDB lock保持中に実行しない |
+| journal action | NONE→DISPATCH_AUTHORIZED | hold/期限/署名/対象revisionと同subject sequenceを検証しintentをatomic append。ACK前呼出禁止 |
+| external action | DISPATCH_AUTHORIZED→EXECUTING→CONFIRMED/UNKNOWN/PARTIAL_FAILED | 認可receiptを検証し、安定keyで実行・照会。未知結果を成功/未実行としない |
+| hold | NONE/RELEASED→ACTIVE→RELEASED | 独立journalのdurable appendが正本。DBはprojection。解除は権限/SoD/expected revisionが必要 |
+| restore | QUARANTINED→REPLAYING→VERIFIED | 独立watermark、intent/receipt、holdを照合。欠落/gap/未知結果はQUARANTINED維持 |
+
+dispatch認可commitが外部操作とholdの線形化点である。認可後のholdでは既認可操作をin-flightとして扱う。
+取消receiptがない操作を取消済みにしない。必要なpolicy整合モデルを実providerが満たさなければ有効化不可。
+独立journalは旧DB/object snapshotと別の保護領域で、単なる非同期audit logではない。
+provider成功〜receipt前crashは先行intentで検出する。holdはjournal ACK先行、local projection後追いとする。
+不明ACK・不一致・journal障害時はdefault deny。詳細な拒否・再適用・署名境界は正本文書に従う。
+
 ## 1. 設計方針
 
 この設計はNF-07の候補要求を、DG-07未完了の安全境界内で観測可能にするためのものだ。今回の成果物は `pii-inventory.md` と offline dry-run のみで、Spring bean、controller、mapper、migration、scheduler、storage writer、外部HTTP clientを追加しない。
@@ -36,7 +74,7 @@ evidence
 
 ## 3. 将来F1のcatalog/policy/hold/request/job（今回は未実装）
 
-requirements/designの候補には次のテーブルを置くが、今回のbranchにはDDLを追加しない。
+requirements/designの候補には次のテーブルを置くが、今回のbranchにはDDLを追加しない。（2026-11-14: W3-14 で `t_disposition_job` / `t_disposition_item` 以外を実装する計画とした。列の草案は production-bridge-phased-plan.md §3.1、disposition 表は同 §4 の B1）
 
 | 候補テーブル | 責務 | fail-closed条件 |
 |---|---|---|
@@ -109,7 +147,7 @@ requirements/designの候補には次のテーブルを置くが、今回のbran
 - anonymize/delete/restrict writer、batch scheduler、backup restore操作。
 - 法務、HR、税務、外部専門家の判断を代替するルール。
 
-これらはDG-07と外部/社内gateがPASSし、approved scope/policyが実値になった後に、別task・別commit・別Reviewで再計画する。
+これらはDG-07と外部/社内gateがPASSし、approved scope/policyが実値になった後に、別task・別commit・別Reviewで再計画する。（2026-11-14: Q-8 により、値UNKNOWN・flag OFF・未知は一律拒否の形での実装着手は署名前でも可とし、再計画は production-bridge-phased-plan.md で行った。anonymize/delete/restrict writer と処分 batch は Q-1 により署名後の B1。本番開放の条件は本節のとおり維持する）
 
 ## 9. gate evidence validator
 

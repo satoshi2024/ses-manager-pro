@@ -453,7 +453,7 @@ P0/P1が4件顕在化した。** いずれも修正・回帰テスト済み。
 - Docker Engine を起動し、`FlywayMigrationSmokeTest`（空庫V1→V61）と
   `FlywayLegacyV60MigrationSmokeTest`（旧V58形状→V61）を**実MySQL 8で実行して成功**。
 - `mvn clean test`: **848 tests / Failures 0 / Errors 0 / Skipped 0 / BUILD SUCCESS**
-  （環境変数の小細工なし。Docker/Node.jsの門禁も実行済み）。
+  （環境変数の小細工なし。Docker/Node.jsのゲートも実行済み）。
 - 未実施: desktop/390px 実ブラウザ一気通貫Demo（本環境はアプリ常駐用MySQLを持てない）。
 
 ### 判定（第十三次指摘に対する自己申告。独立再Reviewは未実施）

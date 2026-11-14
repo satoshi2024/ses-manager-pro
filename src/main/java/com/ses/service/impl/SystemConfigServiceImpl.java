@@ -45,10 +45,10 @@ public class SystemConfigServiceImpl implements SystemConfigService {
     /** Webhook URLの設定キー（保存時にSSRF観点で宛先を検証する対象） */
     private static final String KEY_WEBHOOK_URL = "notification.webhook-url";
 
-    /** システム管理キー（画面からの直接編集・閲覧を禁止するキー） */
+    /** システム管理キー（画面からの直接編集・閲覧を禁止するキー。本番初回bootstrapの完了markerを含む） */
     private static final Set<String> SYSTEM_MANAGED_KEYS = Set.of("closing.confirmed-months",
             "attendance.sync.freee.cursor", "attendance.sync.last-result",
-            "attendance.discrepancy.confirmed");
+            "attendance.discrepancy.confirmed", com.ses.config.ProductionBootstrapCompletionLatch.CONFIG_KEY);
 
     /** 法人別cursor等、動的システム管理キーのprefix（R5-P2-03） */
     private static final String SYSTEM_MANAGED_PREFIX = "attendance.sync.freee.cursor.le.";
@@ -121,6 +121,7 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("retention.risk.threshold", ConfigSchema.integer(0, 100));
         SCHEMAS.put("procurement.payment-max-days", ConfigSchema.integer(1, null));
         // S11 T072: 外部勤怠同期（provider選択・tenant timezone・cursor・直近結果）
+        // freee=月次サマリ送信・日次勤怠の照合取得（給与連携の接続と従業員対応付けを使う。FreeeAttendanceProvider参照）
         SCHEMAS.put("attendance.sync.provider", ConfigSchema.enumOf("mock", "freee"));
         SCHEMAS.put("attendance.sync.timezone", ConfigSchema.string());
         SCHEMAS.put("attendance.sync.freee.cursor", ConfigSchema.string()); // JSON/ISO cursor。操作状態
@@ -140,7 +141,9 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         SCHEMAS.put("portal.base-domain", ConfigSchema.string());
         // S14 (engineer-self-service-portal-v2 / V105): サーベイ匿名閾値と経費の会計連携provider
         SCHEMAS.put("survey.min-answers", ConfigSchema.integer(1, null));
-        SCHEMAS.put("expense.accounting.provider", ConfigSchema.enumOf("mock", "freee"));
+        // freee=承認後にfreeeへ自動送信（会計・支払連携のEXPENSE_DEAL_SYNCを使う）、manual=自動送信しない、
+        // mock=開発用（freeeへは送らない。prodではsenderが無いため何もしない）。
+        SCHEMAS.put("expense.accounting.provider", ConfigSchema.enumOf("freee", "manual", "mock"));
     }
 
     private void ensureLoaded() {

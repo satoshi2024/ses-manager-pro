@@ -5,6 +5,7 @@ import com.ses.entity.ApprovalAction;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.ExpenseRequest;
 import com.ses.entity.LearningPlan;
+import com.ses.entity.LearningPlanEvent;
 import com.ses.entity.TrainingCourse;
 import com.ses.entity.TrainingEnrollment;
 import com.ses.mapper.LearningPlanEventMapper;
@@ -31,6 +32,12 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -168,10 +175,146 @@ class TrainingPlanServiceTest {
         enrollment.setStatus(TrainingPlanService.ENROLLMENT_STARTED);
         enrollment.setVersion(0);
         when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(enrollment);
-        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
         when(expenseRequestService.getEntity(50L)).thenReturn(expense("申請中", new BigDecimal("100")));
         assertThrows(BusinessException.class, () -> service.completeEnrollment(90L, 0,
                 LocalDate.of(2026, 9, 1), null, 7L));
+    }
+
+    @Test
+    void 複数courseは全ての非取消enrollment完了までplanを進行中に保ち重複完了eventを作らない() {
+        LearningPlan plan = draft(1L, BigDecimal.ZERO);
+        plan.setStatus(TrainingPlanService.PLAN_IN_PROGRESS);
+        plan.setVersion(3);
+        TrainingEnrollment first = startedEnrollment(90L);
+        TrainingEnrollment second = startedEnrollment(91L);
+        when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(first);
+        when(enrollmentMapper.selectByIdForUpdateWithTenant(91L, "default")).thenReturn(second);
+        when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
+        when(enrollmentMapper.selectStatusesByPlanIdAndTenant(1L, "default"))
+                .thenAnswer(invocation -> java.util.List.of(first.getStatus(), second.getStatus()));
+        when(enrollmentMapper.update(any(), any())).thenReturn(1);
+        when(planMapper.update(any(), any())).thenReturn(1);
+
+        service.completeEnrollment(90L, 0, LocalDate.of(2026, 9, 1), null, 7L);
+
+        assertEquals(TrainingPlanService.PLAN_IN_PROGRESS, plan.getStatus());
+        verify(planMapper, never()).update(any(), any());
+
+        service.completeEnrollment(91L, 0, LocalDate.of(2026, 9, 2), null, 7L);
+
+        assertEquals(TrainingPlanService.PLAN_COMPLETED, plan.getStatus());
+        verify(planMapper).update(any(), any());
+        ArgumentCaptor<LearningPlanEvent> events = ArgumentCaptor.forClass(LearningPlanEvent.class);
+        verify(eventMapper, org.mockito.Mockito.times(2)).insertEvent(events.capture());
+        assertEquals("ENROLLMENT", events.getAllValues().get(0).getSourceType());
+        assertEquals("ENROLLMENT", events.getAllValues().get(1).getSourceType());
+        org.junit.jupiter.api.Assertions.assertNotEquals(events.getAllValues().get(0).getIdempotencyKey(),
+                events.getAllValues().get(1).getIdempotencyKey());
+        assertThrows(BusinessException.class, () -> service.completeEnrollment(91L, 0,
+                LocalDate.of(2026, 9, 2), null, 7L));
+        verify(eventMapper, org.mockito.Mockito.times(2)).insertEvent(any());
+    }
+
+    @Test
+    void 取消course不阻止残るcourse完了し全取消ではplanを完了扱いしない() {
+        LearningPlan plan = draft(1L, BigDecimal.ZERO);
+        plan.setStatus(TrainingPlanService.PLAN_IN_PROGRESS);
+        plan.setVersion(3);
+        TrainingEnrollment cancelled = startedEnrollment(90L);
+        TrainingEnrollment completed = startedEnrollment(91L);
+        when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(cancelled);
+        when(enrollmentMapper.selectByIdForUpdateWithTenant(91L, "default")).thenReturn(completed);
+        when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
+        when(enrollmentMapper.update(any(), any())).thenReturn(1);
+        when(planMapper.update(any(), any())).thenReturn(1);
+        when(enrollmentMapper.selectStatusesByPlanIdAndTenant(1L, "default"))
+                .thenAnswer(invocation -> java.util.List.of(cancelled.getStatus(), completed.getStatus()));
+
+        service.cancelEnrollment(90L, 0, 7L, "日程変更");
+        assertEquals(TrainingPlanService.PLAN_IN_PROGRESS, plan.getStatus());
+
+        service.completeEnrollment(91L, 0, LocalDate.of(2026, 9, 3), null, 7L);
+        assertEquals(TrainingPlanService.PLAN_COMPLETED, plan.getStatus());
+
+        LearningPlan allCancelledPlan = draft(2L, BigDecimal.ZERO);
+        allCancelledPlan.setStatus(TrainingPlanService.PLAN_IN_PROGRESS);
+        TrainingEnrollment onlyCancelled = startedEnrollment(92L);
+        onlyCancelled.setPlanId(2L);
+        when(enrollmentMapper.selectByIdForUpdateWithTenant(92L, "default")).thenReturn(onlyCancelled);
+        when(planMapper.selectByIdForUpdateWithTenant(2L, "default")).thenReturn(allCancelledPlan);
+        when(enrollmentMapper.selectStatusesByPlanIdAndTenant(2L, "default"))
+                .thenReturn(java.util.List.of(TrainingPlanService.ENROLLMENT_CANCELLED));
+
+        service.cancelEnrollment(92L, 0, 7L, "全講座取消");
+        assertEquals(TrainingPlanService.PLAN_IN_PROGRESS, allCancelledPlan.getStatus());
+    }
+
+    @Test
+    void 空のstatus集合ではplanを完了扱いしない() {
+        LearningPlan plan = draft(1L, BigDecimal.ZERO);
+        plan.setStatus(TrainingPlanService.PLAN_IN_PROGRESS);
+        TrainingEnrollment enrollment = startedEnrollment(90L);
+        when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(enrollment);
+        when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
+        when(enrollmentMapper.update(any(), any())).thenReturn(1);
+        when(enrollmentMapper.selectStatusesByPlanIdAndTenant(1L, "default")).thenReturn(java.util.List.of());
+
+        service.completeEnrollment(90L, 0, LocalDate.of(2026, 9, 1), null, 7L);
+
+        assertEquals(TrainingPlanService.PLAN_IN_PROGRESS, plan.getStatus());
+        verify(planMapper, never()).update(any(), any());
+        verify(eventMapper).insertEvent(any());
+    }
+
+    @Test
+    void 同一enrollmentの並行completion再送は一方だけがeventを記録する() throws Exception {
+        LearningPlan plan = draft(1L, BigDecimal.ZERO);
+        plan.setStatus(TrainingPlanService.PLAN_IN_PROGRESS);
+        TrainingEnrollment enrollment = startedEnrollment(90L);
+        ReentrantLock enrollmentRowLock = new ReentrantLock();
+        when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenAnswer(invocation -> {
+            enrollmentRowLock.lock();
+            return enrollment;
+        });
+        when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
+        when(enrollmentMapper.selectStatusesByPlanIdAndTenant(1L, "default"))
+                .thenAnswer(invocation -> java.util.List.of(enrollment.getStatus()));
+        when(enrollmentMapper.update(any(), any())).thenReturn(1);
+        when(planMapper.update(any(), any())).thenReturn(1);
+
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            java.util.concurrent.Callable<Boolean> completion = () -> {
+                ready.countDown();
+                start.await();
+                AccountingTenantContextHolder.setTenantId("default");
+                try {
+                    service.completeEnrollment(90L, 0, LocalDate.of(2026, 9, 1), null, 7L);
+                    return true;
+                } catch (BusinessException duplicate) {
+                    return false;
+                } finally {
+                    AccountingTenantContextHolder.clear();
+                    if (enrollmentRowLock.isHeldByCurrentThread()) {
+                        enrollmentRowLock.unlock();
+                    }
+                }
+            };
+            Future<Boolean> first = executor.submit(completion);
+            Future<Boolean> second = executor.submit(completion);
+            org.junit.jupiter.api.Assertions.assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+            assertEquals(1, (first.get(5, TimeUnit.SECONDS) ? 1 : 0)
+                    + (second.get(5, TimeUnit.SECONDS) ? 1 : 0));
+        } finally {
+            executor.shutdownNow();
+        }
+        assertEquals(TrainingPlanService.ENROLLMENT_COMPLETED, enrollment.getStatus());
+        assertEquals(TrainingPlanService.PLAN_COMPLETED, plan.getStatus());
+        verify(eventMapper).insertEvent(any());
     }
 
     @Test
@@ -200,6 +343,7 @@ class TrainingPlanServiceTest {
             TrainingEnrollment enrollment = startedEnrollment(90L);
             when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(enrollment);
             when(planMapper.selectOne(any())).thenReturn(plan);
+            when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
             when(expenseRequestService.getEntity(50L)).thenReturn(expense(status, new BigDecimal("150")));
 
             assertThrows(BusinessException.class,
@@ -219,7 +363,7 @@ class TrainingPlanServiceTest {
         relation.setEnrollmentId(90L);
         relation.setExpenseRequestId(50L);
         when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(enrollment);
-        when(planMapper.selectOne(any())).thenReturn(plan);
+        when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
         when(enrollmentExpenseMapper.selectList(any())).thenReturn(java.util.List.of(relation));
         when(expenseRequestService.getEntity(50L)).thenReturn(expense("承認済", new BigDecimal("150")));
 

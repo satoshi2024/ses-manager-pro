@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -53,10 +54,11 @@ import static org.mockito.Mockito.when;
  * クラスに @Transactional を付けない（並行スレッドが互いの INSERT を見えるようにする）。
  * 実DB(MySQL Testcontainers)で一意制約／CAS の実効性を検証する。
  */
-@SpringBootTest
-@ActiveProfiles("test")
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
+@SpringBootTest
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@ActiveProfiles("test")
 class DigitalInvoiceEnqueueConcurrentTest {
 
     @Container

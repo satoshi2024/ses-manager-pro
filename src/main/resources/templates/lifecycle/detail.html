@@ -162,8 +162,20 @@
                             <textarea class="form-control bg-dark border-secondary text-light" id="completeComment" rows="3" placeholder="確認内容や連絡事項"></textarea>
                         </div>
                         <div class="mb-3" id="evidenceSection" style="display: none;">
-                            <label class="form-label text-light">証跡文書ID (DOCUMENT_LINK)</label>
-                            <input type="number" class="form-control bg-dark border-secondary text-light" id="completeDocumentId" placeholder="文書ID">
+                            <label class="form-label text-light" for="completeDocumentId">証跡文書ID (DOCUMENT_LINK)</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control bg-dark border-secondary text-light" id="completeDocumentId" placeholder="文書ID"
+                                       onchange="SES.lifecycle.resetEvidenceVersions()">
+                                <button type="button" class="btn btn-outline-info" onclick="SES.lifecycle.loadEvidenceVersions()"
+                                        title="文書の版を読み込む" aria-label="文書の版を読み込む">
+                                    <i class="bi bi-arrow-repeat me-1"></i>版を読み込む
+                                </button>
+                            </div>
+                            <label class="form-label text-light mt-2" for="completeDocumentVersionId">証跡にする版</label>
+                            <select class="form-select bg-dark border-secondary text-light" id="completeDocumentVersionId" disabled>
+                                <option value="">文書IDを入力して版を読み込んでください</option>
+                            </select>
+                            <div class="form-text text-muted">ウイルス検査済み（CLEAN）の版だけが表示されます。版を選ばない証跡は登録できません。</div>
                         </div>
                     </div>
                     <div class="modal-footer border-secondary">

@@ -6,6 +6,7 @@ import com.ses.common.audit.ActorType;
 import com.ses.common.audit.ConfirmationSource;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.lifecycle.CompleteLifecycleTaskCommand;
+import com.ses.dto.lifecycle.LifecycleEvidenceVersionDto;
 import com.ses.dto.lifecycle.LifecycleTaskDto;
 import com.ses.entity.*;
 import com.ses.mapper.*;
@@ -30,6 +31,9 @@ import java.util.stream.Collectors;
 public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, LifecycleTask>
         implements LifecycleTaskService {
 
+    /** 証跡として固定してよい文書版のscan結果。 */
+    private static final String CLEAN_SCAN_STATUS = "CLEAN";
+
     private final LifecycleTaskMapper taskMapper;
     private final LifecycleTaskDepMapper taskDepMapper;
     private final LifecycleCaseMapper caseMapper;
@@ -39,31 +43,31 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
     private final SysUserMapper sysUserMapper;
     private final LifecycleScopeService scopeService;
     private final com.ses.mapper.DocumentMapper documentMapper;
+    private final DocumentVersionMapper documentVersionMapper;
     private final com.ses.mapper.ApprovalRequestMapper approvalRequestMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void startTask(Long taskId, Long userId) {
-        LifecycleTask task = taskMapper.selectByIdForUpdate(taskId);
-        if (task == null) {
-            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
-        }
-
-        LifecycleCase lcCase = caseMapper.selectById(task.getCaseId());
-        if (lcCase == null || !"ACTIVE".equals(lcCase.getStatus())) {
+        SysUser user = requireActor(userId);
+        String tenantId = scopeService.requireTenant(user);
+        LockedTask locked = lockCaseThenTask(taskId, tenantId);
+        LifecycleTask task = locked.task();
+        LifecycleCase lcCase = locked.lcCase();
+        if (!"ACTIVE".equals(lcCase.getStatus())) {
             throw BusinessException.of(400, "error.lifecycle.caseNotActive", "案件が進行中ではありません");
         }
 
-        Engineer engineer = engineerMapper.selectById(lcCase.getEngineerId());
-        SysUser user = userId != null ? sysUserMapper.selectById(userId) : null;
+        Engineer engineer = findEngineerInTenant(lcCase, tenantId);
         scopeService.assertCanEditTask(user, task, lcCase, engineer);
-
-        // 先行タスクがすべて完了しているかチェック
-        assertPredecessorsCompleted(task);
 
         if ("IN_PROGRESS".equals(task.getStatus())) {
             return; // 既に進行中なら冪等に成功
         }
+        if (!"PENDING".equals(task.getStatus()) && !"ON_HOLD".equals(task.getStatus())) {
+            throw BusinessException.of(400, "error.lifecycle.invalidStateTransition", "完了・免除・取消済みのタスクは開始できません");
+        }
+        assertPredecessorsCompleted(task, lcCase.getId(), tenantId);
 
         String before = task.getStatus();
         task.setStatus("IN_PROGRESS");
@@ -90,30 +94,34 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void completeTask(Long taskId, Long userId, CompleteLifecycleTaskCommand cmd) {
-        LifecycleTask task = taskMapper.selectByIdForUpdate(taskId);
-        if (task == null) {
-            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
+        SysUser user = requireActor(userId);
+        String tenantId = scopeService.requireTenant(user);
+        LockedTask locked = lockCaseThenTask(taskId, tenantId);
+        LifecycleTask task = locked.task();
+        LifecycleCase lcCase = locked.lcCase();
+
+        Engineer engineer = findEngineerInTenant(lcCase, tenantId);
+        scopeService.assertCanEditTask(user, task, lcCase, engineer);
+
+        if ("DUAL_CONFIRMATION".equals(task.getEvidenceType())) {
+            throw BusinessException.of(409, "error.lifecycle.invalidStateTransition");
         }
 
         if ("COMPLETED".equals(task.getStatus())) {
-            return; // 既に完了済みなら冪等に終了
+            return; // 認証・tenant・担当scope確認後に限り冪等成功
         }
-
         if ("WAIVED".equals(task.getStatus())) {
             throw BusinessException.of(400, "error.lifecycle.taskAlreadyWaived", "既に免除されたタスクです");
         }
-
-        LifecycleCase lcCase = caseMapper.selectById(task.getCaseId());
-        if (lcCase == null || !"ACTIVE".equals(lcCase.getStatus())) {
+        if (!"ACTIVE".equals(lcCase.getStatus())) {
             throw BusinessException.of(400, "error.lifecycle.caseNotActive", "案件が進行中ではありません");
         }
-
-        Engineer engineer = engineerMapper.selectById(lcCase.getEngineerId());
-        SysUser user = userId != null ? sysUserMapper.selectById(userId) : null;
-        scopeService.assertCanEditTask(user, task, lcCase, engineer);
+        if (!"IN_PROGRESS".equals(task.getStatus())) {
+            throw BusinessException.of(400, "error.lifecycle.invalidStateTransition", "着手中のタスクのみ完了できます");
+        }
 
         // 先行タスクがすべて完了しているかチェック
-        assertPredecessorsCompleted(task);
+        assertPredecessorsCompleted(task, lcCase.getId(), tenantId);
 
         // DOCUMENT_LINK の証跡強制
         if ("DOCUMENT_LINK".equals(task.getEvidenceType())) {
@@ -126,10 +134,7 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
 
         // 証跡リンク登録 (DOCUMENT_LINK時など)
         if (cmd != null && cmd.getDocumentId() != null) {
-            com.ses.entity.Document doc = documentMapper.selectById(cmd.getDocumentId());
-            if (doc == null) {
-                throw BusinessException.of(400, "error.document.notFound", "指定された文書が見つかりません: " + cmd.getDocumentId());
-            }
+            requireEvidenceDocumentInTenant(cmd.getDocumentId(), cmd.getDocumentVersionId(), tenantId);
             LifecycleEvidenceLink link = LifecycleEvidenceLink.builder()
                     .taskId(taskId)
                     .documentId(cmd.getDocumentId())
@@ -172,22 +177,23 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
                 .build());
 
         // 後続タスクの自動昇格判定 (先行がすべてCOMPLETED/WAIVEDならIN_PROGRESSへ)
-        promoteEligibleSuccessors(task.getCaseId(), taskId, userId);
+        promoteEligibleSuccessors(lcCase, taskId, userId, tenantId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void waiveTask(Long taskId, Long userId, Long approvalRequestId, String reason) {
-        LifecycleTask task = taskMapper.selectByIdForUpdate(taskId);
-        if (task == null) {
-            throw BusinessException.of(404, "error.lifecycle.taskNotFound");
-        }
+        SysUser user = requireActor(userId);
+        String tenantId = scopeService.requireTenant(user);
+        LockedTask locked = lockCaseThenTask(taskId, tenantId);
+        LifecycleTask task = locked.task();
+        LifecycleCase lcCase = locked.lcCase();
+        Engineer engineer = findEngineerInTenant(lcCase, tenantId);
+        scopeService.assertCanEditTask(user, task, lcCase, engineer);
         if ("COMPLETED".equals(task.getStatus()) || "WAIVED".equals(task.getStatus())) {
             return;
         }
-
-        LifecycleCase lcCase = caseMapper.selectById(task.getCaseId());
-        if (lcCase == null || !"ACTIVE".equals(lcCase.getStatus())) {
+        if (!"ACTIVE".equals(lcCase.getStatus())) {
             throw BusinessException.of(400, "error.lifecycle.caseNotActive", "進行中の案件のみタスク免除が可能です");
         }
 
@@ -195,15 +201,13 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         if (approvalRequestId == null) {
             throw BusinessException.of(400, "error.lifecycle.waiveRequiresApproval", "免除には承認済みの例外申請が必要です");
         }
-        com.ses.entity.ApprovalRequest approvalReq = approvalRequestMapper.selectByIdAndTenant(approvalRequestId,
-                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
+        com.ses.entity.ApprovalRequest approvalReq = approvalRequestMapper.selectByIdAndTenant(approvalRequestId, tenantId);
         if (approvalReq == null || !"LIFECYCLE_EXCEPTION".equals(approvalReq.getRequestType())
                 || !taskId.equals(approvalReq.getTargetId())
                 || !"APPROVED".equalsIgnoreCase(approvalReq.getStatus())) {
             throw BusinessException.of(400, "error.lifecycle.waiveRequiresApproval", "有効な承認済み例外申請が見つかりません");
         }
 
-        SysUser user = userId != null ? sysUserMapper.selectById(userId) : null;
         String before = task.getStatus();
         task.setStatus("WAIVED");
         task.setApprovalRequestId(approvalRequestId);
@@ -231,29 +235,29 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
                 .build());
 
         // 後続タスクの自動昇格判定
-        promoteEligibleSuccessors(task.getCaseId(), taskId, userId);
+        promoteEligibleSuccessors(lcCase, taskId, userId, tenantId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void reassignTask(Long taskId, Long newAssigneeUserId, Long actorUserId, String reason) {
-        LifecycleTask task = taskMapper.selectByIdForUpdate(taskId);
-        if (task == null) {
-            throw BusinessException.of(404, "error.lifecycle.taskNotFound");
-        }
+        SysUser actor = requireActor(actorUserId);
+        String tenantId = scopeService.requireTenant(actor);
+        LockedTask locked = lockCaseThenTask(taskId, tenantId);
+        LifecycleTask task = locked.task();
 
         // 案件がACTIVEであることを確認（終端状態の案件は担当変更不可）
-        LifecycleCase lcCase = caseMapper.selectById(task.getCaseId());
-        if (lcCase == null || !"ACTIVE".equals(lcCase.getStatus())) {
+        LifecycleCase lcCase = locked.lcCase();
+        if (!"ACTIVE".equals(lcCase.getStatus())) {
             throw BusinessException.of(400, "error.lifecycle.caseNotActive", "進行中の案件のタスクのみ担当者を変更できます");
         }
 
         // 操作者のタスク編集権限チェック
-        Engineer engineer = engineerMapper.selectById(lcCase.getEngineerId());
-        SysUser actor = actorUserId != null ? sysUserMapper.selectById(actorUserId) : null;
+        Engineer engineer = findEngineerInTenant(lcCase, tenantId);
         scopeService.assertCanEditTask(actor, task, lcCase, engineer);
 
-        SysUser newAssignee = sysUserMapper.selectById(newAssigneeUserId);
+        SysUser newAssignee = newAssigneeUserId == null ? null : sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getId, newAssigneeUserId).eq(SysUser::getTenantId, tenantId));
         if (newAssignee == null || newAssignee.getStatus() == null || newAssignee.getStatus() != 1) {
             throw BusinessException.of(400, "error.lifecycle.invalidAssignee", "有効なユーザーを指定してください");
         }
@@ -285,8 +289,13 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
 
     @Override
     public List<LifecycleTaskDto> getTasksByCaseId(Long caseId, SysUser currentUser) {
-        List<LifecycleTask> allTasks = taskMapper.selectByCaseId(caseId);
-        List<LifecycleTaskDep> allDeps = taskDepMapper.selectByCaseId(caseId);
+        String tenantId = scopeService.requireTenant(currentUser);
+        LifecycleCase lcCase = caseMapper.selectByIdAndTenant(caseId, tenantId);
+        if (lcCase == null) throw BusinessException.of(404, "error.lifecycle.caseNotFound");
+        Engineer engineer = findEngineerInTenant(lcCase, tenantId);
+        scopeService.assertCanViewCase(currentUser, lcCase, engineer);
+        List<LifecycleTask> allTasks = taskMapper.selectByCaseIdAndTenant(caseId, tenantId);
+        List<LifecycleTaskDep> allDeps = taskDepMapper.selectByCaseIdAndTenant(caseId, tenantId);
 
         Map<Long, String> taskCodeById = allTasks.stream().collect(Collectors.toMap(LifecycleTask::getId, LifecycleTask::getTaskCode));
         Map<Long, List<String>> predCodesByTaskId = new HashMap<>();
@@ -294,8 +303,12 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         for (LifecycleTaskDep dep : allDeps) {
             String predCode = taskCodeById.get(dep.getPredecessorTaskId());
             if (predCode != null) {
-                predCodesByTaskId.computeIfAbsent(dep.getSuccessorTaskId(), k -> new ArrayList<>()).add(predCode);
                 predTaskIdsByTaskId.computeIfAbsent(dep.getSuccessorTaskId(), k -> new ArrayList<>()).add(dep.getPredecessorTaskId());
+                LifecycleTask predecessor = allTasks.stream()
+                        .filter(t -> Objects.equals(t.getId(), dep.getPredecessorTaskId())).findFirst().orElse(null);
+                if (predecessor != null && scopeService.isTaskVisibleToUser(currentUser, predecessor)) {
+                    predCodesByTaskId.computeIfAbsent(dep.getSuccessorTaskId(), k -> new ArrayList<>()).add(predCode);
+                }
             }
         }
 
@@ -345,18 +358,24 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
 
     @Override
     public LifecycleTaskDto getTaskDetail(Long taskId, SysUser currentUser) {
-        LifecycleTask task = taskMapper.selectById(taskId);
+        String tenantId = scopeService.requireTenant(currentUser);
+        LifecycleTask task = taskMapper.selectByIdAndTenant(taskId, tenantId);
         if (task == null) {
             throw BusinessException.of(404, "error.lifecycle.taskNotFound");
         }
-        if (!scopeService.isTaskVisibleToUser(currentUser, task)) {
-            throw BusinessException.of(403, "error.lifecycle.accessDenied");
+        LifecycleCase lcCase = caseMapper.selectByIdAndTenant(task.getCaseId(), tenantId);
+        if (lcCase == null) throw BusinessException.of(404, "error.lifecycle.taskNotFound");
+        Engineer engineer = findEngineerInTenant(lcCase, tenantId);
+        if (!scopeService.canViewCase(currentUser, lcCase, engineer)
+                || !scopeService.isTaskVisibleToUser(currentUser, task)) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound");
         }
 
         List<LifecycleEvidenceLink> evidenceLinks = evidenceLinkMapper.selectByTaskId(taskId);
         Long docId = evidenceLinks != null && !evidenceLinks.isEmpty() ? evidenceLinks.get(0).getDocumentId() : null;
 
-        SysUser completedUser = task.getCompletedBy() != null ? sysUserMapper.selectById(task.getCompletedBy()) : null;
+        SysUser completedUser = task.getCompletedBy() != null ? sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getId, task.getCompletedBy()).eq(SysUser::getTenantId, tenantId)) : null;
 
         return LifecycleTaskDto.builder()
                 .id(task.getId())
@@ -386,20 +405,18 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
 
     @Override
     public List<LifecycleTaskDto> getMyPendingTasks(SysUser currentUser) {
-        if (currentUser == null) return List.of();
-
-        LambdaQueryWrapper<LifecycleTask> wrapper = new LambdaQueryWrapper<LifecycleTask>()
-                .in(LifecycleTask::getStatus, List.of("PENDING", "IN_PROGRESS"))
-                .and(w -> w.eq(LifecycleTask::getAssigneeUserId, currentUser.getId())
-                        .or().eq(LifecycleTask::getAssigneeRole, currentUser.getRole()))
-                .orderByAsc(LifecycleTask::getDueDate)
-                .orderByAsc(LifecycleTask::getId);
-
-        List<LifecycleTask> tasks = taskMapper.selectList(wrapper);
+        String tenantId = scopeService.requireTenant(currentUser);
+        List<LifecycleTask> tasks = taskMapper.selectMyPendingByTenant(tenantId, currentUser.getId(), currentUser.getRole());
 
         // 本人可視性チェック
         return tasks.stream()
-                .filter(t -> scopeService.isTaskVisibleToUser(currentUser, t))
+                .filter(t -> {
+                    LifecycleCase lcCase = caseMapper.selectByIdAndTenant(t.getCaseId(), tenantId);
+                    if (lcCase == null) return false;
+                    Engineer engineer = findEngineerInTenant(lcCase, tenantId);
+                    return scopeService.canViewCase(currentUser, lcCase, engineer)
+                            && scopeService.isTaskVisibleToUser(currentUser, t);
+                })
                 .map(t -> LifecycleTaskDto.builder()
                         .id(t.getId())
                         .caseId(t.getCaseId())
@@ -423,12 +440,14 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void correctCompletedTask(Long taskId, Long actorUserId, String correctionNote) {
-        LifecycleTask task = taskMapper.selectById(taskId);
+        SysUser actor = requireActor(actorUserId);
+        String tenantId = scopeService.requireTenant(actor);
+        LifecycleTask task = taskMapper.selectByIdAndTenant(taskId, tenantId);
         if (task == null) {
             throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
         }
 
-        LifecycleCase lcCase = caseMapper.selectById(task.getCaseId());
+        LifecycleCase lcCase = caseMapper.selectByIdAndTenant(task.getCaseId(), tenantId);
         if (lcCase == null) {
             throw BusinessException.of(404, "error.lifecycle.caseNotFound", "案件が見つかりません");
         }
@@ -436,8 +455,7 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
             throw BusinessException.of(400, "error.lifecycle.caseCancelled", "取消済みの案件のタスクは訂正できません");
         }
 
-        Engineer engineer = engineerMapper.selectById(lcCase.getEngineerId());
-        SysUser actor = actorUserId != null ? sysUserMapper.selectById(actorUserId) : null;
+        Engineer engineer = findEngineerInTenant(lcCase, tenantId);
         scopeService.assertCanEditTask(actor, task, lcCase, engineer);
 
         if (!"COMPLETED".equals(task.getStatus()) && !"WAIVED".equals(task.getStatus())) {
@@ -467,58 +485,228 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         log.info("Recorded correction for task {} in case {} by user {}: {}", taskId, lcCase.getId(), actorUserId, correctionNote);
     }
 
-    private void assertPredecessorsCompleted(LifecycleTask task) {
-        List<LifecycleTaskDep> deps = taskDepMapper.selectBySuccessorTaskId(task.getId());
+    /**
+     * 先行タスクの完了判定。案件ロック保持下で先行タスクをid昇順にlocking readし、
+     * RR snapshotの古い状態（並行完了直後の未反映）で誤判定しない。
+     */
+    private void assertPredecessorsCompleted(LifecycleTask task, Long caseId, String tenantId) {
+        List<LifecycleTaskDep> deps = taskDepMapper.selectBySuccessorTaskIdAndTenant(task.getId(), tenantId);
         if (deps == null || deps.isEmpty()) return;
 
+        Map<Long, LifecycleTask> predecessors = lockTasksInIdOrder(caseId, deps.stream()
+                .map(LifecycleTaskDep::getPredecessorTaskId).collect(Collectors.toList()));
         for (LifecycleTaskDep dep : deps) {
-            LifecycleTask pred = taskMapper.selectById(dep.getPredecessorTaskId());
-            if (pred != null && !"COMPLETED".equals(pred.getStatus()) && !"WAIVED".equals(pred.getStatus())) {
+            if (!isDone(predecessors.get(dep.getPredecessorTaskId()))) {
                 throw BusinessException.of(400, "error.lifecycle.predecessorNotCompleted",
-                        "先行タスク「" + pred.getTaskName() + "」が未完了のため実行できません");
+                        "前提条件が未充足のため実行できません");
             }
         }
     }
 
-    private void promoteEligibleSuccessors(Long caseId, Long completedTaskId, Long actorUserId) {
-        List<LifecycleTaskDep> succDeps = taskDepMapper.selectByPredecessorTaskId(completedTaskId);
+    /**
+     * 後続タスクの自動昇格。後続タスクとその全先行タスクを1回の掃引でid昇順に行ロックしてから判定する。
+     * 依存定義順にロックすると同一案件の並行完了で取得順が揃わず、また先行タスクを
+     * 非ロック読取するとRR snapshotで並行完了を見落として昇格が失われる（NF01 batch 0 L3）。
+     */
+    private void promoteEligibleSuccessors(LifecycleCase lcCase, Long completedTaskId, Long actorUserId, String tenantId) {
+        List<LifecycleTaskDep> succDeps = taskDepMapper.selectByPredecessorTaskIdAndTenant(completedTaskId, tenantId);
         if (succDeps == null || succDeps.isEmpty()) return;
 
-        for (LifecycleTaskDep dep : succDeps) {
-            Long succId = dep.getSuccessorTaskId();
-            LifecycleTask succ = taskMapper.selectByIdForUpdate(succId);
-            if (succ != null && "PENDING".equals(succ.getStatus())) {
-                // succの全先行タスクが完了しているか確認
-                List<LifecycleTaskDep> allPredDeps = taskDepMapper.selectBySuccessorTaskId(succId);
-                boolean allDone = true;
-                for (LifecycleTaskDep pDep : allPredDeps) {
-                    LifecycleTask pTask = taskMapper.selectById(pDep.getPredecessorTaskId());
-                    if (pTask != null && !"COMPLETED".equals(pTask.getStatus()) && !"WAIVED".equals(pTask.getStatus())) {
-                        allDone = false;
-                        break;
-                    }
-                }
-                if (allDone) {
-                    succ.setStatus("IN_PROGRESS");
-                    succ.setUpdatedBy(actorUserId);
-                    taskMapper.updateById(succ);
+        Set<Long> successorIds = succDeps.stream()
+                .map(LifecycleTaskDep::getSuccessorTaskId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(TreeSet::new));
+        Map<Long, List<Long>> predecessorIdsBySuccessor = new TreeMap<>();
+        Set<Long> lockIds = new TreeSet<>(successorIds);
+        for (Long succId : successorIds) {
+            List<Long> predecessorIds = taskDepMapper.selectBySuccessorTaskIdAndTenant(succId, tenantId).stream()
+                    .map(LifecycleTaskDep::getPredecessorTaskId)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            predecessorIdsBySuccessor.put(succId, predecessorIds);
+            lockIds.addAll(predecessorIds);
+        }
+        Map<Long, LifecycleTask> lockedTasks = lockTasksInIdOrder(lcCase.getId(), lockIds);
 
-                    eventMapper.insert(LifecycleEvent.builder()
-                            .caseId(caseId)
-                            .taskId(succId)
-                            .eventType("TASK_STARTED")
-                            .actorUserId(null)
-                            .actorRoleSnapshot("SYSTEM")
-                            .actorType(ActorType.SYSTEM.name())
-                            .confirmationSource(ConfirmationSource.SCHEDULER_POLL.name())
-                            .beforeState("PENDING")
-                            .afterState("IN_PROGRESS")
-                            .detailsJson("{\"autoPromoted\":true}")
-                            .occurredAt(LocalDateTime.now())
-                            .build());
-                }
+        for (Long succId : successorIds) {
+            LifecycleTask succ = lockedTasks.get(succId);
+            if (succ == null || !"PENDING".equals(succ.getStatus())) {
+                continue;
+            }
+            boolean allDone = predecessorIdsBySuccessor.getOrDefault(succId, List.of()).stream()
+                    .allMatch(predecessorId -> isDone(lockedTasks.get(predecessorId)));
+            if (!allDone) {
+                continue;
+            }
+            succ.setStatus("IN_PROGRESS");
+            succ.setUpdatedBy(actorUserId);
+            if (taskMapper.updateById(succ) != 1) {
+                throw BusinessException.of(409, "error.common.optimisticLock");
+            }
+
+            eventMapper.insert(LifecycleEvent.builder()
+                    .caseId(lcCase.getId())
+                    .taskId(succId)
+                    .eventType("TASK_STARTED")
+                    .actorUserId(null)
+                    .actorRoleSnapshot("SYSTEM")
+                    .actorType(ActorType.SYSTEM.name())
+                    .confirmationSource(ConfirmationSource.SCHEDULER_POLL.name())
+                    .beforeState("PENDING")
+                    .afterState("IN_PROGRESS")
+                    .detailsJson("{\"autoPromoted\":true}")
+                    .occurredAt(LocalDateTime.now())
+                    .build());
+        }
+    }
+
+    /**
+     * タスク操作の行ロックを「案件 → タスク」の順で取得する（NF01 batch 0 L1）。
+     * 所属案件IDは非ロック読取で特定するだけで、ロックは案件行を先に取る。
+     * 返す案件・タスクはロック取得後の現在値であり、以後の状態判定はこの値で行う。
+     */
+    private LockedTask lockCaseThenTask(Long taskId, String tenantId) {
+        LifecycleTask located = taskId == null ? null : taskMapper.selectByIdAndTenant(taskId, tenantId);
+        if (located == null) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
+        }
+        LifecycleCase lcCase = caseMapper.selectByIdForUpdateAndTenant(located.getCaseId(), tenantId);
+        if (lcCase == null) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
+        }
+        LifecycleTask task = taskMapper.selectByIdAndCaseIdForUpdate(taskId, lcCase.getId());
+        if (task == null) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
+        }
+        return new LockedTask(lcCase, task);
+    }
+
+    /**
+     * ロック済み案件配下のタスクを、この呼出しの中でid昇順に行ロックする。存在しないIDは結果に含めない。
+     *
+     * <p>注意：transaction全体では「操作対象タスク → 他タスクをid昇順」の順になる（例：タスクBの完了後にAをロック）。
+     * タスク行同士の順序が問題にならないのは、すべてのタスクロックが同一案件行のFOR UPDATE保持下で取られ、
+     * 案件行が真の直列化点になっているためである。案件ロックを外す変更をしてはならない。</p>
+     */
+    private Map<Long, LifecycleTask> lockTasksInIdOrder(Long caseId, Collection<Long> taskIds) {
+        Map<Long, LifecycleTask> locked = new TreeMap<>();
+        if (taskIds == null) {
+            return locked;
+        }
+        for (Long id : new TreeSet<>(taskIds.stream().filter(Objects::nonNull).collect(Collectors.toSet()))) {
+            LifecycleTask task = taskMapper.selectByIdAndCaseIdForUpdate(id, caseId);
+            if (task != null) {
+                locked.put(id, task);
             }
         }
+        return locked;
+    }
+
+    private boolean isDone(LifecycleTask task) {
+        return task != null && ("COMPLETED".equals(task.getStatus()) || "WAIVED".equals(task.getStatus()));
+    }
+
+    /**
+     * 証跡文書と固定する版をactorのtenant内に限定して解決する（決定 B-NF01-4 / Q-9）。
+     * <ol>
+     *   <li>文書はactorのtenant内に限る。他tenantの文書・存在しないIDは同じ「文書が見つかりません」で拒否し、存在を推測させない。</li>
+     *   <li>版の指定は必須とし、版を固定しない（versionless）証跡は400で拒否する。画面は {@link #listEvidenceVersions} の
+     *       CLEAN版一覧から利用者に版を選ばせ、その版IDを送る。NF01はCONFIRM完成後に公開し機能スイッチも既定OFFのため、
+     *       「CONFIRM公開時に拒否」を前倒しして現時点から拒否する（判断の経緯は
+     *       .kiro/specs/engineer-lifecycle-workflow/runbook.md §5.4）。</li>
+     *   <li>版は同tenantかつ同文書の版に限る。別文書・他tenantの版は「文書が見つかりません」で拒否する。</li>
+     *   <li>版はscan結果がCLEANのものに限る。未検査・拒否済みの版を証跡として固定しない。</li>
+     * </ol>
+     * 判定順は文書 → 版指定の有無 → 版の所属 → CLEANとし、他tenant文書の拒否理由を版の有無で変えない。
+     */
+    private void requireEvidenceDocumentInTenant(Long documentId, Long documentVersionId, String tenantId) {
+        Document document = documentMapper.selectOne(new LambdaQueryWrapper<Document>()
+                .eq(Document::getId, documentId)
+                .eq(Document::getTenantId, tenantId));
+        if (document == null) {
+            throw BusinessException.of(400, "error.document.notFound");
+        }
+        if (documentVersionId == null) {
+            throw BusinessException.of(400, "error.lifecycle.evidenceVersionRequired",
+                    "証跡文書の版を選択してください");
+        }
+        DocumentVersion version = documentVersionMapper.selectOne(new LambdaQueryWrapper<DocumentVersion>()
+                .eq(DocumentVersion::getId, documentVersionId)
+                .eq(DocumentVersion::getTenantId, tenantId)
+                .eq(DocumentVersion::getDocumentId, document.getId()));
+        if (version == null) {
+            throw BusinessException.of(400, "error.document.notFound");
+        }
+        if (!CLEAN_SCAN_STATUS.equals(version.getScanStatus())) {
+            throw BusinessException.of(400, "error.lifecycle.evidenceVersionNotClean",
+                    "選択した版はウイルス検査を通過していないため証跡にできません");
+        }
+    }
+
+    /**
+     * タスク証跡として選べる文書版（scan結果CLEAN）を版番号の降順で返す（Q-9: 画面で版を選択する）。
+     *
+     * <p>認可は完了操作と同じにする: actorのtenant、案件・要員のtenant一致、{@link LifecycleScopeService#assertCanEditTask}
+     * （閲覧scope・本人公開・担当者）。文書はactorのtenant内に限り、他tenant・存在しない文書は区別せず404とする。
+     * 返すのは版ID・版番号・登録日時だけで、元ファイル名・storage key・hashは返さない
+     * （文書台帳の閲覧権限を持たない担当者にも、完了時に指定できる範囲以上の情報を出さない）。</p>
+     */
+    @Override
+    public List<LifecycleEvidenceVersionDto> listEvidenceVersions(Long taskId, Long documentId, SysUser currentUser) {
+        String tenantId = scopeService.requireTenant(currentUser);
+        LifecycleTask task = taskId == null ? null : taskMapper.selectByIdAndTenant(taskId, tenantId);
+        if (task == null) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
+        }
+        LifecycleCase lcCase = caseMapper.selectByIdAndTenant(task.getCaseId(), tenantId);
+        if (lcCase == null) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
+        }
+        Engineer engineer = engineerMapper.selectOne(new LambdaQueryWrapper<Engineer>()
+                .eq(Engineer::getId, lcCase.getEngineerId()).eq(Engineer::getTenantId, tenantId));
+        if (engineer == null) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
+        }
+        scopeService.assertCanEditTask(currentUser, task, lcCase, engineer);
+
+        Document document = documentId == null ? null : documentMapper.selectOne(new LambdaQueryWrapper<Document>()
+                .eq(Document::getId, documentId)
+                .eq(Document::getTenantId, tenantId));
+        if (document == null) {
+            throw BusinessException.of(404, "error.document.notFound");
+        }
+        List<DocumentVersion> versions = documentVersionMapper.findByTenantAndDocumentId(tenantId, document.getId());
+        if (versions == null) {
+            return List.of();
+        }
+        return versions.stream()
+                .filter(version -> version != null && CLEAN_SCAN_STATUS.equals(version.getScanStatus()))
+                .filter(version -> Objects.equals(version.getDocumentId(), document.getId()))
+                .sorted(Comparator.comparing(DocumentVersion::getVersionNo,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .map(version -> LifecycleEvidenceVersionDto.builder()
+                        .id(version.getId())
+                        .documentId(version.getDocumentId())
+                        .versionNo(version.getVersionNo())
+                        .createdAt(version.getCreatedAt())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    private record LockedTask(LifecycleCase lcCase, LifecycleTask task) {
+    }
+
+    private SysUser requireActor(Long userId) {
+        SysUser actor = userId == null ? null : sysUserMapper.selectById(userId);
+        scopeService.requireTenant(actor);
+        return actor;
+    }
+
+    private Engineer findEngineerInTenant(LifecycleCase lcCase, String tenantId) {
+        Engineer engineer = engineerMapper.selectOne(new LambdaQueryWrapper<Engineer>()
+                .eq(Engineer::getId, lcCase.getEngineerId()).eq(Engineer::getTenantId, tenantId));
+        if (engineer == null) throw BusinessException.of(404, "error.lifecycle.caseNotFound");
+        return engineer;
     }
 
     private String eventActorType(Long actorUserId, SysUser actor) {

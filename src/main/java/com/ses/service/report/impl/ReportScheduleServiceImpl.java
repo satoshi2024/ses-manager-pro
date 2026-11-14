@@ -1,7 +1,6 @@
 package com.ses.service.report.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
@@ -15,6 +14,7 @@ import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.OrganizationScopeService;
 import com.ses.service.report.ReportScheduleService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +30,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /** scheduleを管理し、二重実行防止用lock keyをDB一意制約へ保存する。 */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ReportScheduleServiceImpl implements ReportScheduleService {
@@ -173,15 +174,23 @@ public class ReportScheduleServiceImpl implements ReportScheduleService {
         if (!"管理者".equals(SecurityUtils.currentRole())) {
             throw BusinessException.of(403, "error.managementReport.adminRequired");
         }
-        ReportSchedule schedule = scheduleMapper.selectOne(new QueryWrapper<ReportSchedule>()
-                .eq("tenant_id", tenantId()).eq("id", scheduleId));
-        if (schedule == null) throw BusinessException.of(404, "error.managementReport.scheduleNotFound");
-        schedule.setEnabled(enabled ? 1 : 0);
-        schedule.setUpdatedBy(SecurityUtils.currentUserId());
-        int updated = scheduleMapper.update(schedule, new UpdateWrapper<ReportSchedule>()
-                .eq("tenant_id", tenantId()).eq("id", scheduleId));
+        String tenantId = tenantId();
+        // entity全体を書き戻すと、読取後にschedulerが更新したlease/next/retry/failure列を古い値へ戻してしまう。
+        // enabledと監査列・versionだけを専用SQLで更新し、応答は更新後の行を読み直して返す。
+        // retry上限で自動停止した行の有効化は、同じSQLが連続失敗回数を0へ戻す（手動再開）。
+        int updated = scheduleMapper.updateEnabled(tenantId, scheduleId,
+                enabled ? 1 : 0, SecurityUtils.currentUserId());
         if (updated == 0) throw BusinessException.of(404, "error.managementReport.scheduleNotFound");
-        return schedule;
+        ReportSchedule refreshed = scheduleMapper.selectOne(new QueryWrapper<ReportSchedule>()
+                .eq("tenant_id", tenantId).eq("id", scheduleId));
+        if (refreshed == null) throw BusinessException.of(404, "error.managementReport.scheduleNotFound");
+        if (enabled && ReportScheduleMapper.RETRY_EXHAUSTED_ERROR_CODE.equals(refreshed.getLastErrorCode())) {
+            // 自動停止後の初回completion前は、手動のdisable→enableでも停止理由codeが残るため、断定しない文言にする。
+            log.info("[定期管理レポート] retry上限の停止理由が残るscheduleを管理者が有効化しました。自動停止中だった場合は"
+                            + "連続失敗回数を0に戻し、保持中のretryから再開します: scheduleId={} failureCount={} retryScheduledAt={}",
+                    scheduleId, refreshed.getFailureCount(), refreshed.getRetryScheduledAt());
+        }
+        return refreshed;
     }
 
     private String tenantId() {

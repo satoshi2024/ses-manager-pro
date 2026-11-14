@@ -19,13 +19,20 @@ import com.ses.service.EngineerSalesService;
 import com.ses.service.lifecycle.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.math.BigInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -37,7 +44,14 @@ import java.util.stream.Collectors;
 public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, LifecycleCase>
         implements LifecycleCaseService {
 
+    /** 同一要員の未終結退社案件をtenant内で1件に限定する一意index（V187）。 */
+    static final String ACTIVE_RESIGNATION_UNIQUE_KEY = "uk_lifecycle_case_active_resignation";
+
+    /** 終結した案件の状態。これ以外（DRAFT・ACTIVE・ON_HOLD・想定外の値）は未終結として扱う。 */
+    private static final List<String> TERMINAL_CASE_STATUSES = List.of("COMPLETED", "CANCELLED");
+
     private final LifecycleCaseMapper caseMapper;
+    private final LifecycleCaseSequenceMapper caseSequenceMapper;
     private final LifecycleTaskMapper taskMapper;
     private final LifecycleTaskDepMapper taskDepMapper;
     private final LifecycleEventMapper eventMapper;
@@ -54,29 +68,36 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     private final EngineerSalesService engineerSalesService;
     private final com.ses.service.lifecycle.LifecycleNotificationService notificationService;
     private final ObjectMapper objectMapper;
+    /** 完了通知のafterCommit発行用。手動構築の単体テストではnullになり得る。 */
+    private final PlatformTransactionManager transactionManager;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public LifecycleCaseDto createCase(Long applicantUserId, CreateLifecycleCaseCommand cmd) {
+        SysUser applicantUser = applicantUserId != null ? sysUserMapper.selectById(applicantUserId) : null;
+        String tenantId = scopeService.requireTenant(applicantUser);
         if (cmd.getEngineerId() == null) {
             throw BusinessException.of(400, "error.lifecycle.engineerRequired", "対象要員は必須です");
         }
-        Engineer engineer = engineerMapper.selectById(cmd.getEngineerId());
+        Engineer engineer = engineerMapper.selectOne(new LambdaQueryWrapper<Engineer>()
+                .eq(Engineer::getId, cmd.getEngineerId()).eq(Engineer::getTenantId, tenantId));
         if (engineer == null) {
             throw BusinessException.of(404, "error.lifecycle.engineerNotFound", "要員が見つかりません");
         }
-
-        SysUser applicantUser = applicantUserId != null ? sysUserMapper.selectById(applicantUserId) : null;
         scopeService.assertCanAccessEngineer(applicantUser, engineer);
 
-        // 同一要員の進行中退社案件の重複作成ガード
+        // 同一要員の未終結退社案件の重複作成ガード（早期に400を返すための事前確認）。
+        // この確認はlocking readではないため並行起票を止められない。正はV187の一意制約
+        // uk_lifecycle_case_active_resignation で、違反はinsert時に同じ400へ変換する（insertCase）。
+        // 未終結の定義は一意制約の生成列と同じ「COMPLETED / CANCELLED 以外」にそろえる。
         if ("RESIGNATION".equals(cmd.getLifecycleType())) {
             Long activeResignCount = caseMapper.selectCount(new LambdaQueryWrapper<LifecycleCase>()
+                    .eq(LifecycleCase::getTenantId, tenantId)
                     .eq(LifecycleCase::getEngineerId, cmd.getEngineerId())
                     .eq(LifecycleCase::getLifecycleType, "RESIGNATION")
-                    .in(LifecycleCase::getStatus, List.of("ACTIVE", "ON_HOLD")));
+                    .notIn(LifecycleCase::getStatus, TERMINAL_CASE_STATUSES));
             if (activeResignCount != null && activeResignCount > 0) {
-                throw BusinessException.of(400, "error.lifecycle.duplicateActiveCase", "対象要員には既に進行中の退社手続き案件が存在します");
+                throw duplicateActiveResignationCase();
             }
         }
 
@@ -119,17 +140,40 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         // DAG検証 (フィルタ後のタスクと依存関係で検証)
         dagValidator.validateTemplateDag(tplTasks, tplDeps);
 
-        // 案件番号採番 (LC-yyyyMM-XXXX)
-        String prefix = "LC-" + anchorDate.format(DateTimeFormatter.ofPattern("yyyyMM")) + "-";
-        String maxCaseNo = caseMapper.selectMaxCaseNoIncludingDeleted(prefix);
-        int seq = 1;
-        if (maxCaseNo != null && maxCaseNo.length() > prefix.length()) {
-            try {
-                seq = Integer.parseInt(maxCaseNo.substring(prefix.length())) + 1;
-            } catch (NumberFormatException ignored) {
-            }
+        // 既存案件番号から初期値を復元し、tenant・月のDB行更新で並行採番する。
+        String caseMonth = anchorDate.format(DateTimeFormatter.ofPattern("yyyyMM"));
+        String legacyPrefix = "LC-" + caseMonth + "-";
+        String prefix = legacyPrefix + tenantKey(tenantId) + "-";
+        int maxDigits = 50 - prefix.length();
+        if (maxDigits < 1) {
+            throw caseNumberCapacityExceeded();
         }
-        String caseNo = String.format("%s%04d", prefix, seq);
+        long maximumNumber = BigInteger.TEN.pow(maxDigits).subtract(BigInteger.ONE).longValueExact();
+        LocalDate monthStart = anchorDate.withDayOfMonth(1);
+        LocalDate nextMonth = monthStart.plusMonths(1);
+        BigInteger existingMaximum = caseSequenceMapper.selectExistingCaseNos(tenantId, monthStart, nextMonth).stream()
+                .filter(Objects::nonNull)
+                .filter(caseNo -> caseNo.startsWith(legacyPrefix))
+                .map(caseNo -> caseNo.substring(caseNo.lastIndexOf('-') + 1))
+                .filter(suffix -> suffix.matches("[0-9]+"))
+                .map(BigInteger::new)
+                .max(BigInteger::compareTo)
+                .orElse(BigInteger.ZERO);
+        if (existingMaximum.compareTo(BigInteger.valueOf(maximumNumber)) > 0) {
+            throw caseNumberCapacityExceeded();
+        }
+        caseSequenceMapper.ensureRow(tenantId, caseMonth, existingMaximum.longValueExact());
+        if (caseSequenceMapper.incrementIfAvailable(tenantId, caseMonth, maximumNumber) != 1) {
+            throw caseNumberCapacityExceeded();
+        }
+        Long nextNumber = caseSequenceMapper.selectLastNumber(tenantId, caseMonth);
+        if (nextNumber == null || nextNumber < 1 || nextNumber > maximumNumber) {
+            throw caseNumberCapacityExceeded();
+        }
+        String caseNo = prefix + String.format(Locale.ROOT, "%04d", nextNumber);
+        if (caseNo.length() > 50) {
+            throw caseNumberCapacityExceeded();
+        }
 
         // 要員スナップショット作成
         Map<String, Object> snapshot = new HashMap<>();
@@ -154,6 +198,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         }
 
         LifecycleCase lcCase = LifecycleCase.builder()
+                .tenantId(tenantId)
                 .caseNo(caseNo)
                 .lifecycleType(cmd.getLifecycleType())
                 .engineerId(engineer.getId())
@@ -169,7 +214,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 .createdBy(applicantUserId)
                 .updatedBy(applicantUserId)
                 .build();
-        caseMapper.insert(lcCase);
+        insertCase(lcCase);
 
         // タスクインスタンス生成 & 担当者解決
         Map<String, LifecycleTask> createdTasksByCode = new HashMap<>();
@@ -229,7 +274,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
             }
         }
 
-        SysUser applicant = applicantUserId != null ? sysUserMapper.selectById(applicantUserId) : null;
+        SysUser applicant = applicantUser;
         String applicantRole = applicant != null && applicant.getRole() != null ? applicant.getRole() : "SYSTEM";
 
         // 起票イベント記録
@@ -249,21 +294,78 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         return getCaseDetail(lcCase.getId(), applicant);
     }
 
+    /**
+     * 案件行を登録する。同一要員の未終結退社案件の一意制約（V187）に当たった場合だけ、事前確認と同じ
+     * 400 {@code error.lifecycle.duplicateActiveCase} へ変換する（並行起票で事前確認を両方が通過した場合）。
+     * 案件番号の一意制約など他の一意制約違反は業務上の重複ではないため、そのまま送出する。
+     */
+    private void insertCase(LifecycleCase lcCase) {
+        try {
+            caseMapper.insert(lcCase);
+        } catch (DuplicateKeyException ex) {
+            if (violatesActiveResignationKey(ex)) {
+                log.info("同一要員の未終結退社案件の一意制約により起票を拒否しました: engineerId={}", lcCase.getEngineerId());
+                throw duplicateActiveResignationCase();
+            }
+            throw ex;
+        }
+    }
+
+    /**
+     * 一意制約違反が {@link #ACTIVE_RESIGNATION_UNIQUE_KEY} によるものかを判定する。
+     * MySQLは {@code for key 't_lifecycle_case.uk_...'}、H2はindex名を大文字で含むため、原因chainの
+     * メッセージを大文字小文字を区別せずに照合する。
+     */
+    static boolean violatesActiveResignationKey(Throwable failure) {
+        Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Throwable cause = failure; cause != null && visited.add(cause); cause = cause.getCause()) {
+            String message = cause.getMessage();
+            if (message != null && message.toLowerCase(Locale.ROOT).contains(ACTIVE_RESIGNATION_UNIQUE_KEY)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private BusinessException duplicateActiveResignationCase() {
+        return BusinessException.of(400, "error.lifecycle.duplicateActiveCase",
+                "対象要員には既に進行中の退社手続き案件が存在します");
+    }
+
+    private String tenantKey(String tenantId) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(tenantId.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest, 0, 12);
+        } catch (java.security.NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is unavailable", ex);
+        }
+    }
+
+    private BusinessException caseNumberCapacityExceeded() {
+        return BusinessException.of(409, "error.lifecycle.caseNumberCapacityExceeded",
+                "案件番号の上限に達したため採番できません");
+    }
+
     @Override
     public LifecycleCaseDto getCaseDetail(Long caseId, SysUser currentUser) {
-        LifecycleCase lcCase = caseMapper.selectById(caseId);
+        String tenantId = scopeService.requireTenant(currentUser);
+        LifecycleCase lcCase = caseMapper.selectByIdAndTenant(caseId, tenantId);
         if (lcCase == null) {
             throw BusinessException.of(404, "error.lifecycle.caseNotFound", "案件が見つかりません");
         }
-        Engineer engineer = engineerMapper.selectById(lcCase.getEngineerId());
+        Engineer engineer = engineerMapper.selectOne(new LambdaQueryWrapper<Engineer>()
+                .eq(Engineer::getId, lcCase.getEngineerId()).eq(Engineer::getTenantId, tenantId));
         scopeService.assertCanViewCase(currentUser, lcCase, engineer);
 
         LifecycleTemplate template = templateMapper.selectById(lcCase.getTemplateId());
-        SysUser applicant = lcCase.getApplicantUserId() != null ? sysUserMapper.selectById(lcCase.getApplicantUserId()) : null;
-        SysUser completedUser = lcCase.getCompletedBy() != null ? sysUserMapper.selectById(lcCase.getCompletedBy()) : null;
+        SysUser applicant = lcCase.getApplicantUserId() != null ? sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getId, lcCase.getApplicantUserId()).eq(SysUser::getTenantId, tenantId)) : null;
+        SysUser completedUser = lcCase.getCompletedBy() != null ? sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getId, lcCase.getCompletedBy()).eq(SysUser::getTenantId, tenantId)) : null;
 
-        List<LifecycleTask> allTasks = taskMapper.selectByCaseId(caseId);
-        List<LifecycleTaskDep> allDeps = taskDepMapper.selectByCaseId(caseId);
+        List<LifecycleTask> allTasks = taskMapper.selectByCaseIdAndTenant(caseId, tenantId);
+        List<LifecycleTaskDep> allDeps = taskDepMapper.selectByCaseIdAndTenant(caseId, tenantId);
 
         // タスクID -> 先行タスクコード群のマップ作成
         Map<Long, String> taskCodeById = allTasks.stream().collect(Collectors.toMap(LifecycleTask::getId, LifecycleTask::getTaskCode));
@@ -271,15 +373,19 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         Map<Long, List<Long>> predTaskIdsByTaskId = new HashMap<>();
         for (LifecycleTaskDep dep : allDeps) {
             String predCode = taskCodeById.get(dep.getPredecessorTaskId());
-            if (predCode != null) {
+            LifecycleTask predecessor = allTasks.stream()
+                    .filter(t -> Objects.equals(t.getId(), dep.getPredecessorTaskId())).findFirst().orElse(null);
+            if (predCode != null && predecessor != null) {
+                predTaskIdsByTaskId.computeIfAbsent(dep.getSuccessorTaskId(), k -> new ArrayList<>())
+                        .add(dep.getPredecessorTaskId());
+                if (!scopeService.isTaskVisibleToUser(currentUser, predecessor)) {
+                    continue;
+                }
                 predCodesByTaskId.computeIfAbsent(dep.getSuccessorTaskId(), k -> new ArrayList<>()).add(predCode);
-                predTaskIdsByTaskId.computeIfAbsent(dep.getSuccessorTaskId(), k -> new ArrayList<>()).add(dep.getPredecessorTaskId());
             }
         }
 
         Map<Long, LifecycleTask> taskMapById = allTasks.stream().collect(Collectors.toMap(LifecycleTask::getId, t -> t));
-
-        boolean isEngineerRole = currentUser != null && "要員".equals(currentUser.getRole());
 
         int total = 0;
         int completed = 0;
@@ -291,8 +397,8 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
 
         for (LifecycleTask task : allTasks) {
             boolean visible = scopeService.isTaskVisibleToUser(currentUser, task);
-            if (isEngineerRole && !visible) {
-                continue; // 要員ロールには内部タスクの存在・件数・進捗を一切含めない
+            if (!visible) {
+                continue; // 非公開タスクは全ロールの件数・進捗・詳細から除外
             }
 
             total++;
@@ -304,10 +410,6 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 if (task.getIsBlocking() != null && task.getIsBlocking() == 1) {
                     blockingUncompleted++;
                 }
-            }
-
-            if (!visible) {
-                continue;
             }
 
             // 先行タスクがすべて完了しているか判定
@@ -346,9 +448,8 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                     .build());
         }
 
-        List<LifecycleEvent> allEvents = eventMapper.selectByCaseId(caseId).stream()
-                .filter(event -> !isEngineerRole
-                        || event.getTaskId() == null
+        List<LifecycleEvent> allEvents = eventMapper.selectByCaseIdAndTenant(caseId, tenantId).stream()
+                .filter(event -> event.getTaskId() == null
                         || (taskMapById.get(event.getTaskId()) != null
                         && scopeService.isTaskVisibleToUser(currentUser, taskMapById.get(event.getTaskId()))))
                 .collect(Collectors.toList());
@@ -357,7 +458,8 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 .filter(Objects::nonNull)
                 .distinct()
                 .map(id -> {
-                    SysUser actor = sysUserMapper.selectById(id);
+                    SysUser actor = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                            .eq(SysUser::getId, id).eq(SysUser::getTenantId, tenantId));
                     return actor == null ? null : Map.entry(id, actor);
                 })
                 .filter(Objects::nonNull)
@@ -368,6 +470,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 .collect(Collectors.toList());
 
         int progressPercent = total > 0 ? (int) Math.round(((double) completed / total) * 100) : 0;
+        boolean isEngineerRole = "要員".equals(currentUser.getRole());
 
         return LifecycleCaseDto.builder()
                 .id(lcCase.getId())
@@ -475,7 +578,9 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                                             LocalDate fromDate,
                                             LocalDate toDate,
                                             SysUser currentUser) {
+        String tenantId = scopeService.requireTenant(currentUser);
         LambdaQueryWrapper<LifecycleCase> wrapper = new LambdaQueryWrapper<LifecycleCase>()
+                .eq(LifecycleCase::getTenantId, tenantId)
                 .orderByDesc(LifecycleCase::getAnchorDate)
                 .orderByDesc(LifecycleCase::getId);
 
@@ -501,9 +606,11 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         }
 
         // 認可スコープフィルタリング
-        Map<Long, Engineer> engineerMap = engineerMapper.selectBatchIds(
-                list.stream().map(LifecycleCase::getEngineerId).filter(Objects::nonNull).distinct().collect(Collectors.toList())
-        ).stream().collect(Collectors.toMap(Engineer::getId, e -> e));
+        Map<Long, Engineer> engineerMap = engineerMapper.selectList(new LambdaQueryWrapper<Engineer>()
+                        .eq(Engineer::getTenantId, tenantId)
+                        .in(Engineer::getId, list.stream().map(LifecycleCase::getEngineerId)
+                                .filter(Objects::nonNull).distinct().collect(Collectors.toList())))
+                .stream().collect(Collectors.toMap(Engineer::getId, e -> e));
 
         return list.stream()
                 .filter(c -> {
@@ -533,7 +640,9 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void holdCase(Long caseId, Long userId, String reason) {
-        LifecycleCase lcCase = caseMapper.selectByIdForUpdate(caseId);
+        SysUser user = requireActor(userId);
+        String tenantId = scopeService.requireTenant(user);
+        LifecycleCase lcCase = caseMapper.selectByIdForUpdateAndTenant(caseId, tenantId);
         if (lcCase == null) {
             throw BusinessException.of(404, "error.lifecycle.caseNotFound");
         }
@@ -541,8 +650,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
             throw BusinessException.of(400, "error.lifecycle.invalidStateTransition", "進行中(ACTIVE)以外の案件は保留にできません");
         }
 
-        SysUser user = userId != null ? sysUserMapper.selectById(userId) : null;
-        Engineer engineer = engineerMapper.selectById(lcCase.getEngineerId());
+        Engineer engineer = findEngineerInTenant(lcCase, tenantId);
         scopeService.assertCanEditCase(user, lcCase, engineer);
 
         String before = lcCase.getStatus();
@@ -570,7 +678,9 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void resumeCase(Long caseId, Long userId) {
-        LifecycleCase lcCase = caseMapper.selectByIdForUpdate(caseId);
+        SysUser user = requireActor(userId);
+        String tenantId = scopeService.requireTenant(user);
+        LifecycleCase lcCase = caseMapper.selectByIdForUpdateAndTenant(caseId, tenantId);
         if (lcCase == null) {
             throw BusinessException.of(404, "error.lifecycle.caseNotFound");
         }
@@ -578,8 +688,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
             throw BusinessException.of(400, "error.lifecycle.invalidStateTransition", "保留(ON_HOLD)以外の案件は再開できません");
         }
 
-        SysUser user = userId != null ? sysUserMapper.selectById(userId) : null;
-        Engineer engineer = engineerMapper.selectById(lcCase.getEngineerId());
+        Engineer engineer = findEngineerInTenant(lcCase, tenantId);
         scopeService.assertCanEditCase(user, lcCase, engineer);
 
         String before = lcCase.getStatus();
@@ -606,7 +715,9 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void completeCase(Long caseId, Long userId) {
-        LifecycleCase lcCase = caseMapper.selectByIdForUpdate(caseId);
+        SysUser user = requireActor(userId);
+        String tenantId = scopeService.requireTenant(user);
+        LifecycleCase lcCase = caseMapper.selectByIdForUpdateAndTenant(caseId, tenantId);
         if (lcCase == null) {
             throw BusinessException.of(404, "error.lifecycle.caseNotFound");
         }
@@ -614,12 +725,11 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
             throw BusinessException.of(400, "error.lifecycle.invalidStateTransition", "進行中(ACTIVE)以外の案件は完了できません");
         }
 
-        SysUser user = userId != null ? sysUserMapper.selectById(userId) : null;
-        Engineer engineer = engineerMapper.selectById(lcCase.getEngineerId());
+        Engineer engineer = findEngineerInTenant(lcCase, tenantId);
         scopeService.assertCanEditCase(user, lcCase, engineer);
 
         // 阻害タスクの完了確認
-        List<LifecycleTask> tasks = taskMapper.selectByCaseId(caseId);
+        List<LifecycleTask> tasks = taskMapper.selectByCaseIdAndTenant(caseId, tenantId);
         List<LifecycleTask> uncompletedBlocking = tasks.stream()
                 .filter(t -> t.getIsBlocking() != null && t.getIsBlocking() == 1)
                 .filter(t -> !"COMPLETED".equals(t.getStatus()) && !"WAIVED".equals(t.getStatus()))
@@ -638,9 +748,11 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
             }
             resignationGateChecker.executeAutomaticGateActions(lcCase, engineer);
 
-            // 要員ステータスをBenchへ更新
+            // 要員ステータスをBenchへ更新。楽観ロックCASが0件のまま完了すると要員だけ稼動扱いで残るため409にする。
             engineer.setStatus("Bench");
-            engineerMapper.updateById(engineer);
+            if (engineerMapper.updateById(engineer) != 1) {
+                throw BusinessException.of(409, "error.common.optimisticLock");
+            }
         }
 
         String before = lcCase.getStatus();
@@ -665,18 +777,49 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 .occurredAt(LocalDateTime.now())
                 .build());
 
-        // 完了通知発行
-        try {
-            notificationService.notifyCaseCompleted(lcCase);
-        } catch (Exception e) {
-            log.warn("Failed to send case completed notification: {}", e.getMessage());
+        // 完了通知はcommit後に発行する。ロールバックされた完了を通知せず、通知失敗で完了をrollback-onlyにしない。
+        publishCaseCompletedAfterCommit(lcCase);
+    }
+
+    /**
+     * 案件完了通知をafterCommitで独立transaction（REQUIRES_NEW）として発行する（NF01 batch 0）。
+     * 従来は完了transaction内で呼び例外を握り潰していたが、通知serviceの@Transactional(REQUIRED)が
+     * 失敗時に外側をrollback-onlyにするため、握り潰しても完了自体がUnexpectedRollbackで失敗し得た。
+     * afterCommit中のDB書込は完了済みtransactionのresourceに参加してしまうため、必ず新規transactionで行う。
+     */
+    private void publishCaseCompletedAfterCommit(LifecycleCase completedCase) {
+        Runnable publish = () -> {
+            try {
+                if (transactionManager == null) {
+                    notificationService.notifyCaseCompleted(completedCase);
+                    return;
+                }
+                TransactionTemplate requiresNew = new TransactionTemplate(transactionManager);
+                requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                requiresNew.executeWithoutResult(status -> notificationService.notifyCaseCompleted(completedCase));
+            } catch (RuntimeException e) {
+                log.warn("ライフサイクル案件の完了通知の発行に失敗しました: caseId={}, exceptionClass={}",
+                        completedCase.getId(), e.getClass().getSimpleName());
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    publish.run();
+                }
+            });
+        } else {
+            publish.run();
         }
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void cancelCase(Long caseId, Long userId, String reason) {
-        LifecycleCase lcCase = caseMapper.selectByIdForUpdate(caseId);
+        SysUser user = requireActor(userId);
+        String tenantId = scopeService.requireTenant(user);
+        LifecycleCase lcCase = caseMapper.selectByIdForUpdateAndTenant(caseId, tenantId);
         if (lcCase == null) {
             throw BusinessException.of(404, "error.lifecycle.caseNotFound");
         }
@@ -684,8 +827,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
             throw BusinessException.of(400, "error.lifecycle.invalidStateTransition", "すでに終了した案件は中止できません");
         }
 
-        SysUser user = userId != null ? sysUserMapper.selectById(userId) : null;
-        Engineer engineer = engineerMapper.selectById(lcCase.getEngineerId());
+        Engineer engineer = findEngineerInTenant(lcCase, tenantId);
         scopeService.assertCanEditCase(user, lcCase, engineer);
 
         String before = lcCase.getStatus();
@@ -696,14 +838,27 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
             throw BusinessException.of(409, "error.concurrentModification", "案件の状態が変更されました。再読み込みしてください。");
         }
 
-        // 配下の未完了タスクもキャンセル
-        List<LifecycleTask> tasks = taskMapper.selectByCaseId(caseId);
-        for (LifecycleTask task : tasks) {
+        // 配下の未完了タスクもキャンセルする。案件ロック保持下でタスクをid昇順に行ロックし、
+        // ロック後の現在値で判定する。CASが0件なら案件だけCANCELLEDでタスクが進行中のまま残る
+        // 不整合になるため、黙って続行せず409でtransactionごとロールバックする（NF01 batch 0 L4）。
+        List<Long> taskIds = taskMapper.selectByCaseIdAndTenant(caseId, tenantId).stream()
+                .map(LifecycleTask::getId)
+                .filter(Objects::nonNull)
+                .sorted()
+                .distinct()
+                .collect(Collectors.toList());
+        for (Long taskId : taskIds) {
+            LifecycleTask task = taskMapper.selectByIdAndCaseIdForUpdate(taskId, lcCase.getId());
+            if (task == null) {
+                continue;
+            }
             if ("PENDING".equals(task.getStatus()) || "IN_PROGRESS".equals(task.getStatus()) || "ON_HOLD".equals(task.getStatus())) {
                 task.setStatus("CANCELLED");
                 task.setCompletionComment("案件中止に伴うキャンセル: " + (reason != null ? reason : ""));
                 task.setUpdatedBy(userId);
-                taskMapper.updateById(task);
+                if (taskMapper.updateById(task) != 1) {
+                    throw BusinessException.of(409, "error.common.optimisticLock");
+                }
             }
         }
 
@@ -723,14 +878,30 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
 
     @Override
     public ResignationGateResultDto evaluateResignationGate(Long caseId, SysUser currentUser) {
-        LifecycleCase lcCase = caseMapper.selectById(caseId);
+        String tenantId = scopeService.requireTenant(currentUser);
+        LifecycleCase lcCase = caseMapper.selectByIdAndTenant(caseId, tenantId);
         if (lcCase == null) {
             throw BusinessException.of(404, "error.lifecycle.caseNotFound");
         }
-        Engineer engineer = engineerMapper.selectById(lcCase.getEngineerId());
+        Engineer engineer = findEngineerInTenant(lcCase, tenantId);
         scopeService.assertCanViewCase(currentUser, lcCase, engineer);
 
         return resignationGateChecker.evaluate(lcCase, engineer);
+    }
+
+    private SysUser requireActor(Long userId) {
+        SysUser actor = userId == null ? null : sysUserMapper.selectById(userId);
+        scopeService.requireTenant(actor);
+        return actor;
+    }
+
+    private Engineer findEngineerInTenant(LifecycleCase lcCase, String tenantId) {
+        Engineer engineer = engineerMapper.selectOne(new LambdaQueryWrapper<Engineer>()
+                .eq(Engineer::getId, lcCase.getEngineerId()).eq(Engineer::getTenantId, tenantId));
+        if (engineer == null) {
+            throw BusinessException.of(404, "error.lifecycle.caseNotFound");
+        }
+        return engineer;
     }
 
     private String eventActorType(Long actorUserId, SysUser actor) {

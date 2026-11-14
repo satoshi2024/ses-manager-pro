@@ -4,12 +4,15 @@ import com.ses.dto.payroll.FreeeConnectionStatusDto;
 import com.ses.dto.payroll.FreeeEmployeeDto;
 import com.ses.dto.payroll.PayrollEngineerCandidateDto;
 import com.ses.dto.payroll.PayrollStatementDto;
-import com.ses.dto.reconciliation.BankDepositDto;
-import java.time.LocalDate;
 import java.util.List;
 public interface FreeeIntegrationService {
     String authorizationUrl(String state);
     void handleCallback(String code, String state, Long userId);
+    /**
+     * 認可codeをtoken endpointで交換し、access/refresh token・有効期限・company_idの存在を検証して返す。
+     * 保存はしない（給与/会計の保存先と事業所検証は呼出側）。失敗はBusinessException（provider詳細は出さない）。
+     */
+    com.ses.dto.freee.FreeeTokenGrant exchangeAuthorizationCode(String code);
     /**
      * 接続状態を返す。statusは DISCONNECTED / CONNECTED / REAUTH_REQUIRED / MISCONFIGURED のいずれかで、
      * 日本語の次アクション（message key）をactionへ載せる。company ID・token・期限は返さない。
@@ -43,8 +46,6 @@ public interface FreeeIntegrationService {
      * 短TX lock → HTTP外 → 短TX CAS により、同一refresh tokenを並行・再試行で二度使わない（HFP-01-R03-3/AC04）。
      */
     void refreshForced();
-    /** 銀行入金明細（freee会計の入金取引）を期間指定で取得する（入金消込 / FR-09）。 */
-    List<BankDepositDto> bankDeposits(LocalDate from, LocalDate to);
     /**
      * OAuth/refresh共通基盤を使う認証付きGET。401時はrefreshを1回だけ実行して再試行し、
      * 429はexponential backoff、timeout/5xxは503 BusinessExceptionへ変換する。
@@ -57,4 +58,19 @@ public interface FreeeIntegrationService {
      * 401時はrefreshを1回だけ実行して再試行し、429はexponential backoff、timeout/5xxは503へ変換する。
      */
     JsonNode apiPost(String path, Object body, String idempotencyKey, String correlationId);
+
+    /** 接続中の事業所ID（freee人事労務のcompany_id）。未接続ならnull。 */
+    Long connectedCompanyId();
+
+    /**
+     * 人事労務API（hrApiBase）への認証付きGET。queryはURLエンコードして付与する。
+     * 401はrefresh 1回＋再試行、429はbackoff、5xx/timeoutは最大2回retryの後に503。
+     */
+    JsonNode hrApiGet(String path, java.util.Map<String, String> query);
+
+    /**
+     * 人事労務API（hrApiBase）への認証付きPUT（勤怠サマリ等の上書き更新）。PUTは同じbodyなら結果が同じため
+     * 5xx/timeoutはretryしない（送れたか不明な状態で多重送信しない。呼出側が再実行する）。
+     */
+    JsonNode hrApiPut(String path, Object body, String correlationId);
 }

@@ -105,11 +105,39 @@ class ServiceRequestAttachmentServiceTest {
 
     @Test
     void Portalの顧客scope内uploadは公開リンクとして登録する() {
+        // portal起票の問い合わせ（portalへ出してよい範囲。policy未注入の既定はportal起票のみ）
+        request.setChannel("PORTAL");
+        request.setPortalUserId(200L);
+
         ServiceAttachmentLink result = service.uploadPortal(10L, null,
                 new MockMultipartFile("file", "reply.pdf", "application/pdf", "PDF".getBytes()), 20L, 200L);
 
         assertEquals("PORTAL_VISIBLE", result.getVisibility());
         verify(documentService).link(30L, "SERVICE_REQUEST", 10L);
+    }
+
+    @Test
+    void 社内登録の問い合わせへのPortaluploadは公開範囲外として文書登録前に404で拒否する() {
+        // 既定（公開開始時刻なし）では、社内起票の問い合わせはportalから扱えない。
+        BusinessException error = assertThrows(BusinessException.class, () -> service.uploadPortal(10L, null,
+                new MockMultipartFile("file", "reply.pdf", "application/pdf", "PDF".getBytes()), 20L, 200L));
+
+        assertEquals(404, error.getCode());
+        verify(documentService, never()).registerReceived(any(), any());
+        verify(attachmentLinkMapper, never()).insert(any(ServiceAttachmentLink.class));
+    }
+
+    @Test
+    void 社内uploadは公開範囲policyの影響を受けない() {
+        // 内部経路は社内起票の問い合わせにも従来どおり登録できる（policyを使わない）。
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "portalVisibilityPolicy",
+                PortalServiceRequestVisibilityPolicy.PORTAL_ORIGINATED_ONLY);
+
+        ServiceAttachmentLink result = service.uploadInternal(10L, null,
+                new MockMultipartFile("file", "memo.pdf", "application/pdf", "PDF".getBytes()), "INTERNAL", 100L);
+
+        assertEquals("INTERNAL", result.getVisibility());
+        verify(attachmentLinkMapper).insert(any(ServiceAttachmentLink.class));
     }
 
     @Test

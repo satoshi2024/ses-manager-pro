@@ -35,6 +35,12 @@ metadata::build() { # staging_dir out_json
   if [[ -n "${METADATA_TABLE_COUNTS_JSON:-}" ]]; then
     counts=$METADATA_TABLE_COUNTS_JSON
   fi
+  # 主要 table の順序付き内容ハッシュ（A-NF09-5。呼び出し元が METADATA_CONTENT_HASHES_JSON で渡す。
+  # 未指定なら {} = 未記録。lib/content-hash.sh 参照）
+  local content_hashes="{}"
+  if [[ -n "${METADATA_CONTENT_HASHES_JSON:-}" ]]; then
+    content_hashes=$METADATA_CONTENT_HASHES_JSON
+  fi
 
   jq -n \
     --arg schema_version "$METADATA_SCHEMA_VERSION" \
@@ -56,6 +62,7 @@ metadata::build() { # staging_dir out_json
     --argjson quiesce "$quiesce" \
     --argjson uploads "$uploads_json" \
     --argjson critical_table_counts "$counts" \
+    --argjson content_hashes "$content_hashes" \
     '{schema_version: $schema_version,
       kind: $kind,
       status: $status,
@@ -73,7 +80,8 @@ metadata::build() { # staging_dir out_json
       uploads_snapshot_id: $uploads_snapshot_id,
       quiesce: $quiesce,
       uploads: $uploads,
-      critical_table_counts: $critical_table_counts}' > "$out_json"
+      critical_table_counts: $critical_table_counts,
+      content_hashes: $content_hashes}' > "$out_json"
   chmod 600 "$out_json"
   return 0
 }

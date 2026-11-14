@@ -38,7 +38,12 @@ public class IntegrationConnectionServiceImpl
     private final ObjectMapper objectMapper;
     private final Map<Long, ReentrantLock> connectionLocks = new ConcurrentHashMap<>();
 
-    @Value("${freee.token.encryption-key:ses-manager-pro-default-32byte-key!!}")
+    /**
+     * 会計接続tokenの暗号鍵。専用キー未指定時は給与接続と同じ {@code freee.token-encryption-key}
+     * （FREEE_TOKEN_ENCRYPTION_KEY）を使う。以前は専用キー名（ドット区切り）が設定ファイルのどこにも無く、
+     * 常にソース内の固定既定値で暗号化される状態だった。
+     */
+    @Value("${freee.token.encryption-key:${freee.token-encryption-key:ses-manager-pro-default-32byte-key!!}}")
     private String encryptionKey;
 
     @Override

@@ -6,12 +6,24 @@
 #   - secrets/mysql-password, secrets/restic-password を配置（0600）
 #   - secrets/mysql-capath/ に hashed CA ディレクトリを配置
 #     （c_rehash 済み: <subject_hash>.0 ファイル）
-#   - ツールイメージは Dockerfile からビルドし、evidence に digest を記録する。
-#     production では digest pin（image: ses-backup-tool@sha256:...）へ差し替える。
+#   - ツールイメージは private registry を使わずに配布する（XB-10）。検証済みの build 機で
+#     image/tool-image.sh build-record → save し、各ホストでは tool-image.sh load（tar の SHA-256 と
+#     content ID を照合）で読み込む。この compose は build しない（build: を書かない）。
+#   - 下記 x-ses-backup-tool-content-id に、記録した content ID（sha256:<16 進 64 桁>。image store に
+#     依存しない識別子。image ID は store により変わるため使わない）を設定する。占位値（UNPINNED）のまま、
+#     またはローカルの ses-backup-tool:8.0.46 の content ID と一致しない場合、image/tool-image.sh check /
+#     compose が拒否する。job は必ず
+#       ops/backup/image/tool-image.sh compose run --rm <service>
+#     で起動する（docker compose を直接実行しない。tool-image.sh は許可した使い方だけを渡す）。
+#   - .env.backup の FLYWAY_VERSION（Flyway 形式。例: 185、185.1）、CONTENT_HASH_TABLES
+#     （内容ハッシュを記録する主要 table）を設定する。README「設定」参照。
 # ============================================================
+# 要人手確認: 検証済み build の content ID を設定するまで production では使えない（fail-closed）。
+x-ses-backup-tool-content-id: "sha256:UNPINNED"
+
 x-backup-common: &backup-common
-  build: .
   image: ses-backup-tool:8.0.46
+  pull_policy: never
   env_file: [.env.backup]
   secrets: [mysql_password, restic_password]
   volumes:

@@ -35,6 +35,26 @@ public final class ExternalApiCidrMatcher {
         return cidrs.stream().anyMatch(cidr -> matches(target, cidr == null ? "" : cidr.trim()));
     }
 
+    /** 設定値のCIDR構文だけを検証する。黙って一致しないCIDRを起動時に拒否するために使う。 */
+    public static boolean isValidCidr(String cidr) {
+        return parseCidr(cidr == null ? null : cidr.trim()) != null;
+    }
+
+    /**
+     * CIDRのprefix長を、IPv4は0〜32、IPv6は0〜128の範囲で返す。構文不正は-1。
+     * IPv4-mapped IPv6表記はIPv4として扱い、広すぎる範囲の判定を表記に依存させない。
+     */
+    public static int prefixLength(String cidr) {
+        ParsedCidr parsed = parseCidr(cidr == null ? null : cidr.trim());
+        return parsed == null ? -1 : parsed.prefixLength();
+    }
+
+    /** CIDRがIPv4範囲（IPv4-mapped表記を含む）ならtrue。構文不正はfalse。 */
+    public static boolean isIpv4Cidr(String cidr) {
+        ParsedCidr parsed = parseCidr(cidr == null ? null : cidr.trim());
+        return parsed != null && parsed.network().length == 4;
+    }
+
     static String normalizeIp(String value) {
         byte[] bytes = parseIp(value);
         if (bytes == null) {

@@ -72,7 +72,8 @@ public class ExternalApiInboundWebhookController {
         }
 
         String leaseToken = UUID.randomUUID().toString();
-        LocalDateTime leaseExpiresAt = receivedAt.plusSeconds(properties.getExternalTransport().getLeaseSeconds());
+        // inboundのleaseはoutbound transportの設定から独立させる（N5-P2-3）。
+        LocalDateTime leaseExpiresAt = receivedAt.plusSeconds(properties.getPublicApi().getInboundLeaseSeconds());
         InboundEvent claimed = inboundEventService.claim(receipt.event().getId(), leaseToken, receivedAt, leaseExpiresAt);
         if (claimed == null) {
             return response(receipt.event(), false, false, IntegrationHubStates.INBOUND_PROCESSING, 202);

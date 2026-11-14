@@ -29,13 +29,17 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -95,6 +99,9 @@ class ServiceSlaSchedulerTest {
 
     @Autowired
     private SysUserMapper userMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @MockBean
     private NotificationService notificationService;
@@ -290,6 +297,51 @@ class ServiceSlaSchedulerTest {
     }
 
     @Test
+    @DisplayName("不適格recipientしかいないSLAは件名を通知せずrecipientCount=0でretry台帳へ残す")
+    void noCurrentlyEligibleRecipientDoesNotPublishNotification() {
+        String tenantId = "nf02-no-recipient-" + UUID.randomUUID();
+        AccountingTenantContextHolder.setTenantId(tenantId);
+        Customer customer = Customer.builder().companyName("recipient-scope-" + UUID.randomUUID()).build();
+        customer.setTenantId(tenantId);
+        customerMapper.insert(customer);
+
+        SysUser hr = new SysUser();
+        hr.setTenantId(tenantId);
+        hr.setUsername("hr_recipient_" + UUID.randomUUID());
+        hr.setPassword("pass123");
+        hr.setRealName("不適格HR");
+        hr.setRole("HR");
+        hr.setStatus(1);
+        userMapper.insert(hr);
+
+        String subject = "機密件名-RECIPIENT-SCOPE-" + UUID.randomUUID();
+        ServiceRequest req = ServiceRequest.builder()
+                .requestNo("REQ-" + UUID.randomUUID().toString().substring(0, 8))
+                .tenantId(tenantId).customerId(customer.getId()).ownerUserId(hr.getId())
+                .status("IN_PROGRESS").priority("P1").category("QUALITY").channel("INTERNAL")
+                .subject(subject).description("private detail").build();
+        requestMapper.insert(req);
+        ServiceSlaClock clock = ServiceSlaClock.builder()
+                .serviceRequestId(req.getId()).roundNo(1).policyId(1L).status("RUNNING")
+                .responseDeadline(LocalDateTime.now().minusMinutes(2))
+                .resolveDeadline(LocalDateTime.now().plusHours(2))
+                .responseBreached(false).resolveBreached(false).build();
+        clockMapper.insert(clock);
+
+        monitoringService.checkSlaBreaches(LocalDateTime.now());
+
+        verify(notificationService, never()).publishToUser(any(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString());
+        String dedupeKey = "SLA_FIRST:" + req.getId() + ":1:RESPONSE:FIRST";
+        var escalation = escalationMapper.selectByDedupeKeyAndTenant(dedupeKey, tenantId);
+        assertNotNull(escalation);
+        assertEquals(0, escalation.getRecipientCount());
+        assertEquals("RETRY", escalation.getStatus());
+        Integer outboxRows = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_notification_outbox WHERE dedupe_key=?", Integer.class, dedupeKey);
+        assertEquals(0, outboxRows);
+    }
+
+    @Test
     @DisplayName("期限30分前warningと初回breach・継続breachが別段階で記録されること")
     void testWarningFirstAndContinuingBreach() {
         Customer customer = Customer.builder().companyName("warning顧客-" + UUID.randomUUID()).build();
@@ -326,6 +378,52 @@ class ServiceSlaSchedulerTest {
         verify(notificationService, times(1)).publishToUser(eq(owner.getId()), eq("SLA_BREACH_CONTINUING"),
                 anyString(), anyString(), anyString(), anyString(), anyString());
         assertEquals(3, escalationMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ServiceSlaEscalation>()
+                .eq(com.ses.entity.ServiceSlaEscalation::getServiceRequestId, req.getId())));
+    }
+
+    @Test
+    @DisplayName("初回応答を記録済みの依頼には初回応答期限のwarningを出さず、解決期限のwarningは従来どおり出すこと")
+    void respondedRequestDoesNotReceiveResponseDeadlineWarning() {
+        Customer customer = Customer.builder().companyName("応答済warning顧客-" + UUID.randomUUID()).build();
+        customer.setTenantId("default");
+        customerMapper.insert(customer);
+        // username = prefix + "_" + UUID(36文字) は sys_user.username VARCHAR(50) に収める（prefixは13文字以下）
+        SysUser owner = activeUser("resp_owner");
+
+        ServiceRequest req = ServiceRequest.builder()
+                .requestNo("REQ-" + UUID.randomUUID().toString().substring(0, 8))
+                .customerId(customer.getId()).status("IN_PROGRESS").priority("P0")
+                .category("SYSTEM").channel("INTERNAL").subject("responded warning test").description("responded")
+                .ownerUserId(owner.getId()).build();
+        requestMapper.insert(req);
+        LocalDateTime base = LocalDateTime.of(2026, 8, 31, 10, 0);
+        // 「対応着手」で初回応答を記録済み（ServiceRequestServiceImplのIN_PROGRESS遷移と同じ状態）
+        ServiceSlaClock clock = ServiceSlaClock.builder()
+                .serviceRequestId(req.getId()).roundNo(1).policyId(1L).status("RUNNING")
+                .responseDeadline(base.plusMinutes(20)).resolveDeadline(base.plusHours(2))
+                .firstRespondedAt(base.minusMinutes(5))
+                .responseBreached(false).resolveBreached(false).build();
+        clockMapper.insert(clock);
+
+        // 初回応答期限まで20分（warningの時間帯）でも、応答済みなのでwarningを出さない
+        monitoringService.checkSlaBreaches(base);
+        verify(notificationService, never()).publishToUser(eq(owner.getId()), eq("SLA_WARNING"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        assertFalse(Boolean.TRUE.equals(clockMapper.selectById(clock.getId()).getResponseWarningSent()));
+
+        // 初回応答期限を過ぎても、応答済みなので超過通知も出さない（既存の超過判定と同じ扱い）
+        monitoringService.checkSlaBreaches(base.plusMinutes(21));
+        verify(notificationService, never()).publishToUser(eq(owner.getId()), eq("SLA_BREACH"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+
+        // 解決期限まで25分になれば、解決期限のwarningだけを1回出す
+        monitoringService.checkSlaBreaches(base.plusMinutes(95));
+        verify(notificationService, times(1)).publishToUser(eq(owner.getId()), eq("SLA_WARNING"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        ServiceSlaClock resolvedWindow = clockMapper.selectById(clock.getId());
+        assertTrue(Boolean.TRUE.equals(resolvedWindow.getResolveWarningSent()));
+        assertFalse(Boolean.TRUE.equals(resolvedWindow.getResponseWarningSent()));
+        assertEquals(1, escalationMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ServiceSlaEscalation>()
                 .eq(com.ses.entity.ServiceSlaEscalation::getServiceRequestId, req.getId())));
     }
 

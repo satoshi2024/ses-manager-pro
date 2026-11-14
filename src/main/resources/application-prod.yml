@@ -13,13 +13,24 @@ server:
         same-site: lax
 
 spring:
-  # prod専用マイグレーション(admin初期パスワードのBCrypt化)を追加ロケーションとして適用
+  # 配備決定P-3: 本番のmigrationは全停止中に専用Flyway job（mvn -Pprod-migrate、設定は
+  # ops/flyway/flyway-prod.conf）だけが実行し、アプリinstanceは起動時にmigrateしない。
+  # enabled=true にしても ProductionSchemaGuardConfiguration がmigrateを拒否して起動を止める。
+  # locations は起動時schema guard（ProductionSchemaVersionGuard）がartifactのmigrationを解決する範囲で、
+  # jobのflyway.locationsと同じ値に固定する（ProductionFlywayJobConfigurationTestが一致を確認する）。
   flyway:
+    enabled: false
     locations: classpath:db/migration,classpath:db/migration-prod
+
+# 実プロバイダ実装は未配線のため、prod は明示設定なしで fail-closed provider を使う。
+external-account:
+  provider: ${EXTERNAL_ACCOUNT_PROVIDER:none}
 
 integration:
   hub:
-    # production enablementは本Decisionで禁止。validatorもtrue/非MOCKを拒否する。
+    # 既定は両方向OFF・provider.mode=MOCK（現行DG-05は本番開放を禁止）。開放はinbound/outboundを別々に、
+    # 署名済みDG-05決定（DG-05-IN-*/DG-05-OUT-*）と承認値を環境から注入し、方向別validatorを通過した場合だけ。
+    # outboundは実HTTPS transport（W3-06b）が入るまで本番では開けない。STUB/LOOPBACKは本番で常に拒否する。
     public-api:
       enabled: false
       public-id-key: ${INTEGRATION_HUB_PUBLIC_ID_KEY:}
@@ -43,6 +54,10 @@ logging:
     org.springframework.security: WARN
     # ECS/ALB 排水時のネイティブ Tomcat GracefulShutdown を CloudWatch に残す（カスタム reporter 不要）
     org.springframework.boot.web.embedded.tomcat.GracefulShutdown: INFO
+    # HttpClient5のwire/header logは署名・Idempotency-Key・payloadを出すため、障害調査でDEBUGを上げても出さない
+    # （NF05 TLS P3-3）。NF08 Copilot送信も同じHttpClient5を使う。
+    org.apache.hc.client5.http.wire: "OFF"
+    org.apache.hc.client5.http.headers: "OFF"
 
 app:
   security:
@@ -72,6 +87,15 @@ app:
       enabled: ${PERSISTENT_SESSION_ENABLED:true}
       allow-untracked-sessions: ${ALLOW_UNTRACKED_SESSIONS:false}
       hash-key: ${SESSION_HASH_KEY:}
+    # 本番初回起動の期限付きbootstrap mode（既定OFF）。enabled=true には期限（offset付きISO-8601、
+    # 現在から24時間以内）が必須で、未設定・期限切れ・24時間超は起動を拒否する。期限を過ぎると再起動しなくても
+    # bootstrap login・bootstrap sessionを拒否する。初回bootstrapの完了後（m_system_config:
+    # security.bootstrap.completed-at が有る状態）に再び有効化するには、承認済みの変更ticket（reopen-ticket）も必要で、
+    # 無ければ起動を拒否する。再開は必須監査 BOOTSTRAP_REOPENED に残る。手順: .kiro/specs/production-launch/deploy-runbook.md §5
+    bootstrap:
+      enabled: ${SECURITY_BOOTSTRAP_ENABLED:false}
+      expires-at: ${SECURITY_BOOTSTRAP_EXPIRES_AT:}
+      reopen-ticket: ${SECURITY_BOOTSTRAP_REOPEN_TICKET:}
   # 一括操作 preview token HMAC（未設定は起動 fail-fast）
   batch:
     token-secret: ${BATCH_TOKEN_SECRET:}
@@ -82,6 +106,30 @@ app:
     # prod 既定は mock 禁止。実 AP 配線まで none（FailClosedDigitalInvoiceProvider）。
     provider: ${DIGITAL_INVOICE_PROVIDER:none}
     webhook-hmac-secret: ${DIGITAL_INVOICE_WEBHOOK_HMAC_SECRET:}
+  # 機能スイッチ（段階公開）。本番も既定は全てOFF。デプロイ後に1機能ずつ環境変数でONにする（再起動で反映）。
+  # 手順: .kiro/specs/production-launch/feature-switches.md
+  features:
+    nf01:
+      enabled: ${FEATURE_NF01_ENABLED:false}
+    nf02:
+      enabled: ${FEATURE_NF02_ENABLED:false}
+    # NF-02の子（顧客ポータルの問い合わせ）。初回リリースはOFF（B-NF02-2）
+    nf02-customer-portal:
+      enabled: ${FEATURE_NF02_CUSTOMER_PORTAL_ENABLED:false}
+      # 未設定ならportal起票の問い合わせだけをportalへ出す（初回リリース中の社内登録分を出さない）
+      visible-since: ${FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE:}
+    nf03:
+      enabled: ${FEATURE_NF03_ENABLED:false}
+    # NF-03の子（資格番号の入力）。DG-07承認までOFF（B-NF03-1）
+    nf03-certification-pii:
+      enabled: ${FEATURE_NF03_CERTIFICATION_PII_ENABLED:false}
+    nf04:
+      enabled: ${FEATURE_NF04_ENABLED:false}
+    # NF-06（取込センターAPI）。ONにする場合はapp.import-center.admissionの署名済み承認設定が必須（不備は起動失敗）
+    nf06:
+      enabled: ${FEATURE_NF06_ENABLED:false}
+    nf10:
+      enabled: ${FEATURE_NF10_ENABLED:false}
 
 # ===== freee連携（HFP-01） =====
 # 本番はFREEE_CLIENT_ID/SECRET/REDIRECT_URI/TOKEN_ENCRYPTION_KEYをsecret storeから供給する。

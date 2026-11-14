@@ -119,7 +119,7 @@
    2. **空の**データベースを作成する: `CREATE DATABASE ses_manager_db;`
    3. アプリを起動すると、Flyway が `src/main/resources/db/migration/`（`V1`〜`V14`）を順に適用し、テーブル定義と初期管理者 `admin/admin123` を含むマスタデータを自動投入します。
 
-   > 💡 `V1__create_tables.sql` は**統合ベーススキーマ**（後続の列追加を折り込み済み）です。列を追加する際は V1 の `CREATE TABLE` に追記し、後続マイグレーションで同じ列を再度 `ADD COLUMN` しないでください（空DBからの適用が「Duplicate column」で失敗します）。
+   > 💡 `V1__create_tables.sql` は**統合ベーススキーマ**（過去の列追加を折り込み済み）ですが、この折り込みは過去の経緯として終了しています。本番DBは初回リリースでこれらのスクリプトから作成され、以後 V1 を含む適用済みマイグレーションは変更できません。列やテーブルを追加する際は必ず新しい `Vxx__...sql` を作成し、V1 や既存スクリプトは編集しないでください。追加前に、その列が V1 や既存マイグレーションに無いことを確認してください（同じ列を再度 `ADD COLUMN` すると空DBからの適用が「Duplicate column」で失敗します）。
    > 💡 既存の（旧 `sql/001`〜`008` を手動適用済みの）DBに対しては、`baseline-on-migrate: true` / `baseline-version: 9` により V1〜V9 は再実行されず V10 以降のみ適用されます。
    > 💡 既定の `mvn test` はH2/unit/MVCの高速feedback suiteで、`mysql`/`performance` tagを明示的に除外します。Dockerの有無で実行範囲が変化することはありません。
    > 💡 実MySQL/Flywayは `mvn test -Pmysql-tests`（Docker必須）、性能回帰は `mvn test -Pperformance-tests` で実行します。push前は `scripts/verify-like-ci.sh`（Windowsは `scripts\verify-like-ci.ps1`）を実行すると、CIと同じ3つのgateとbackup integrationを検証します。
