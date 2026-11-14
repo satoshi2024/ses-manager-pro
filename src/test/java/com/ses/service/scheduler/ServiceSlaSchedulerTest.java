@@ -387,7 +387,8 @@ class ServiceSlaSchedulerTest {
         Customer customer = Customer.builder().companyName("応答済warning顧客-" + UUID.randomUUID()).build();
         customer.setTenantId("default");
         customerMapper.insert(customer);
-        SysUser owner = activeUser("responded_owner");
+        // username = prefix + "_" + UUID(36文字) は sys_user.username VARCHAR(50) に収める（prefixは13文字以下）
+        SysUser owner = activeUser("resp_owner");
 
         ServiceRequest req = ServiceRequest.builder()
                 .requestNo("REQ-" + UUID.randomUUID().toString().substring(0, 8))
