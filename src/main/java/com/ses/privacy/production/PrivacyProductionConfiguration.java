@@ -21,6 +21,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.util.StringUtils;
 
 import java.time.Clock;
+import java.util.function.BooleanSupplier;
 
 /**
  * NF07 policy 照会 port の Spring 登録（production-bridge-phased-plan.md §3.1.1、W-4）。
@@ -28,8 +29,9 @@ import java.time.Clock;
  * <ul>
  *   <li>prod: foundation の {@link ProductionPrivacyComponents} が生成する production の読み取り専用照会。
  *       catalog・source は application DB の F1 表（{@code m_pii_data_element}・{@code m_retention_policy}）、
- *       trust registry は空、失効状態は常に UNKNOWN。公開スイッチ（{@code privacy.retention.enabled}）は照会のたびに読み、
- *       OFF なら source を読まない。Bean の構築時に DB へ触れない。</li>
+ *       trust registry は空、失効状態は常に UNKNOWN。公開スイッチ（{@code privacy.retention.enabled}）と決定ID束縛の
+ *       有効期間（{@link PrivacyDecisionWindowMonitor}）は照会のたびに読み、OFF・期間外なら source を読まない。
+ *       Bean の構築時に DB へ触れない。</li>
  *   <li>prod 以外: 常に {@code POLICY_UNKNOWN} を返す {@link UnavailablePolicyReadonlyQueryPort}（DB を読まない）。</li>
  * </ul>
  * catalog・source の部品は Bean として公開しない（他の service から直接使わせない）。
@@ -48,13 +50,13 @@ public class PrivacyProductionConfiguration {
             OidcSecurityProperties oidcProperties,
             PiiDataElementMapper piiDataElementMapper,
             RetentionPolicyMapper retentionPolicyMapper,
+            ObjectProvider<PrivacyDecisionWindowMonitor> decisionWindowProvider,
             Clock clock) {
         String authorizationTenantId = StringUtils.hasText(oidcProperties.getTenantId())
                 ? oidcProperties.getTenantId() : "default";
         return ProductionPrivacyComponents.productionPolicyReadonlyQuery(
                 environment,
-                () -> privacyFeatureProperties.getRetention() != null
-                        && privacyFeatureProperties.getRetention().isEnabled(),
+                retentionSourceEnabled(privacyFeatureProperties, decisionWindowProvider),
                 legalEntityContextService,
                 sysUserMapper,
                 authorizationServiceProvider::getIfAvailable,
@@ -64,6 +66,28 @@ public class PrivacyProductionConfiguration {
                 ConfiguredPolicyTrustRegistry.empty(),
                 new UnknownRevocationStatusProvider(),
                 clock);
+    }
+
+    /**
+     * policy source を読んでよいか（照会のたびに評価する）。公開スイッチが OFF なら決定ID束縛を見ずに false。
+     * ON でも決定ID束縛が有効期間外（署名日前・失効）の間は OFF と同じく source を読まない（W3-14b）。
+     * 判定部品が取れない・例外なら false（fail-closed）。
+     */
+    static BooleanSupplier retentionSourceEnabled(PrivacyFeatureProperties privacyFeatureProperties,
+                                                  ObjectProvider<PrivacyDecisionWindowMonitor> decisionWindowProvider) {
+        return () -> privacyFeatureProperties != null
+                && privacyFeatureProperties.getRetention() != null
+                && privacyFeatureProperties.getRetention().isEnabled()
+                && decisionWindowSatisfied(decisionWindowProvider);
+    }
+
+    private static boolean decisionWindowSatisfied(ObjectProvider<PrivacyDecisionWindowMonitor> provider) {
+        try {
+            PrivacyDecisionWindowMonitor monitor = provider == null ? null : provider.getIfAvailable();
+            return monitor != null && monitor.satisfied();
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     @Bean

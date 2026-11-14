@@ -52,6 +52,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     ,"compliance.gate.fingerprint-keys.default.keys.v1=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"
     ,"certification.number-crypto.current-key-version=v1"
     ,"certification.number-crypto.keys.v1=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"
+    // importしたapplication-test.ymlはNF07をONにするが、本番既定はOFF。prodでONにするとNF07の起動前提検査
+    // （PrivacyProductionConfigurationValidator、W3-14b）が決定ID束縛とprivacy-adminを要求するため、本番既定へ戻す
+    // （本番既定OFFは FeatureSwitchDefaultsTest、前提検査は PrivacyProductionConfigurationValidatorTest が検証する）。
+    ,"privacy.retention.enabled=false"
+    ,"privacy.dsar.enabled=false"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles("prod")

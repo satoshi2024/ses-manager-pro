@@ -564,11 +564,41 @@ integration:
 # ===== NF07 プライバシー（保持・DSAR）。production-bridge-phased-plan.md §5.1 =====
 # 既定OFF。真偽値として解釈できない値（例: ture）は起動失敗になる（app.features.* と同じ扱い）。
 # privacy.retention.enabled は機能スイッチ Feature.NF07_RETENTION の設定値でもある（app.features.* に別名は作らない）。
-# OFFの間は /api/privacy/policies が404になり、policy source は読まずに POLICY_UNKNOWN を返す。
+# OFFの間は登録済みの /api/privacy/policies が404になり（FeatureSwitchFilter と PrivacyAccessGuard）、policy source は
+# 読まずに POLICY_UNKNOWN を返す。登録していない /api/privacy/<x> には handler が無く guard も通らないため、
+# privacy-admin 以外の管理者は403（MenuPermissionFilter）、privacy-admin は Spring の404になる。
 # privacy.dsar.enabled はW3-14では設定値だけを持つ（入口と Feature 登録は A2a で追加する）。
 # 法的な値（保持期間・期限・本人確認基準等）はここへ書かない（署名後に人が別の設定で与える）。
+# prodで1つでもONにすると PrivacyProductionConfigurationValidator が、下の決定ID束縛（approval）の完全性、
+# privacy-admin の有効な管理者2名以上、privacy-admin 以外のgroupに privacy.* 系の許可行が無いことを検査し、
+# 満たさなければ起動しない（手順: .kiro/specs/production-launch/feature-switches.md 4.7）。
+# ただし決定の署名日前・失効だけが理由の場合は起動を止めず、NF07をOFFとして扱ってWARNを出す（NF06・NF08と同じ）。
+# 実行中に失効日を迎えた場合も、その日（JST）から入口はOFFと同じ404になる。
 privacy:
   retention:
     enabled: ${PRIVACY_RETENTION_ENABLED:false}
   dsar:
     enabled: ${PRIVACY_DSAR_ENABLED:false}
+  # 決定ID束縛（PrivacyDecisionBinding）。値は署名済み決定書の転記で、秘密値を置かない。既定は全て未設定＝ONにできない。
+  # retention は D-01・D-09、dsar は D-01・D-06・D-09 を必要とする。AI・実装者は値を設定しない。
+  approval:
+    # 承認tenant。OIDC_TENANT_ID（未設定なら default）と完全一致しなければ拒否
+    tenant-id: ${PRIVACY_APPROVAL_TENANT_ID:}
+    # D-09 で開放を承認した capability（retention / dsar のカンマ区切り）
+    capabilities: ${PRIVACY_APPROVAL_CAPABILITIES:}
+    # 決定書（D-09）に記載された束縛内容のSHA-256（小文字hex 64桁）。現行設定からの再計算値と一致しなければ拒否
+    approval-digest: ${PRIVACY_APPROVAL_DIGEST:}
+    d01:
+      decision-id: ${PRIVACY_APPROVAL_D01_DECISION_ID:}
+      signed-on: ${PRIVACY_APPROVAL_D01_SIGNED_ON:}
+      expires-on: ${PRIVACY_APPROVAL_D01_EXPIRES_ON:}
+    d06:
+      decision-id: ${PRIVACY_APPROVAL_D06_DECISION_ID:}
+      signed-on: ${PRIVACY_APPROVAL_D06_SIGNED_ON:}
+      expires-on: ${PRIVACY_APPROVAL_D06_EXPIRES_ON:}
+    d09:
+      decision-id: ${PRIVACY_APPROVAL_D09_DECISION_ID:}
+      signed-on: ${PRIVACY_APPROVAL_D09_SIGNED_ON:}
+      expires-on: ${PRIVACY_APPROVAL_D09_EXPIRES_ON:}
+    # 失効の何日前からWARN logと監視metric（EXPIRING）を出すか（1〜366）。承認内容ではないためdigestに含めない
+    expiry-warning-days: ${PRIVACY_APPROVAL_EXPIRY_WARNING_DAYS:30}

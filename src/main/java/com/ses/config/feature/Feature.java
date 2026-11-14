@@ -114,8 +114,10 @@ public enum Feature {
      * {@code PRIVACY_RETENTION_ENABLED}）。値の正本は {@code PrivacyFeatureProperties} で、{@code app.features.*} 側に
      * 別名は作らない。prefixは入口のcontrollerを追加するbatchで足す（W3-14 は {@code /api/privacy/policies} だけ。
      * F2 が {@code /api/privacy/catalog}、A1H が {@code /api/privacy/holds}・{@code /privacy/holds}）。
-     * {@code /privacy} 自体は前方一致にも完全一致にも登録しない。登録していない {@code /api/privacy/<x>} も
-     * OFF の間は service 層の {@code PrivacyAccessGuard} が同じ本文の404にする。
+     * {@code /privacy} 自体は前方一致にも完全一致にも登録しない。登録済みの入口は OFF の間、{@code FeatureSwitchFilter} と service 層の
+     * {@code PrivacyAccessGuard} が同じ本文の404にする。登録していない {@code /api/privacy/<x>} には handler が無く
+     * guard も通らないため、privacy-admin 以外の管理者は {@code MenuPermissionFilter} の403、privacy-admin は Spring の404になる
+     * （入口を足す batch は必ずここへ prefix を登録し、guard を通す）。
      * DSAR（{@code privacy.dsar.enabled}）は入口を持つ A2a で別の最上位機能として登録する（C-1）。
      */
     NF07_RETENTION("プライバシー保持・保全（policy説明・catalog・hold）",
