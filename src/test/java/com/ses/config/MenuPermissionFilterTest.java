@@ -325,4 +325,53 @@ class MenuPermissionFilterTest {
                 org.mockito.ArgumentMatchers.eq(false));
         verify(chain, never()).doFilter(any(), any());
     }
+
+    /** NF07 W-5: privacy-admin に所属しない管理者は、管理者bypassより前の action 判定で403 JSONになる。 */
+    @ParameterizedTest
+    @CsvSource({
+            "GET,/api/privacy/policies,privacy.policy.view",
+            "GET,/api/privacy/unknown-sub,privacy.view",
+            "GET,/api/privacy/dsar/1/package/download,privacy.dsar.export"
+    })
+    void privacy_admin未所属の管理者はprivacyのAPIで403_JSONになる(String method, String uri, String action)
+            throws Exception {
+        @SuppressWarnings("unchecked") ObjectProvider<MenuCacheService> menuProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<AuthorizationService> authorizationProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<com.ses.service.AuditLogService> auditProvider = mock(ObjectProvider.class);
+        AuthorizationService authorizationService = mock(AuthorizationService.class);
+        when(authorizationProvider.getIfAvailable()).thenReturn(authorizationService);
+        when(authorizationService.isAllowed(any(), org.mockito.ArgumentMatchers.eq(action))).thenReturn(false);
+        MenuPermissionFilter filter = new MenuPermissionFilter(menuProvider, authorizationProvider, auditProvider);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                "1", null, java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者"))));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        jakarta.servlet.FilterChain chain = mock(jakarta.servlet.FilterChain.class);
+
+        filter.doFilter(new MockHttpServletRequest(method, uri), response, chain);
+
+        assertEquals(403, response.getStatus());
+        assertEquals("application/json;charset=UTF-8", response.getContentType());
+        verify(authorizationService).isAllowed(any(), org.mockito.ArgumentMatchers.eq(action));
+        verify(chain, never()).doFilter(any(), any());
+    }
+
+    @Test
+    void privacyのAPIへの6method以外の要求はaction判定前に403になる() throws Exception {
+        @SuppressWarnings("unchecked") ObjectProvider<MenuCacheService> menuProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<AuthorizationService> authorizationProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<com.ses.service.AuditLogService> auditProvider = mock(ObjectProvider.class);
+        AuthorizationService authorizationService = mock(AuthorizationService.class);
+        when(authorizationProvider.getIfAvailable()).thenReturn(authorizationService);
+        MenuPermissionFilter filter = new MenuPermissionFilter(menuProvider, authorizationProvider, auditProvider);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                "1", null, java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者"))));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        jakarta.servlet.FilterChain chain = mock(jakarta.servlet.FilterChain.class);
+
+        filter.doFilter(new MockHttpServletRequest("OPTIONS", "/api/privacy/holds"), response, chain);
+
+        assertEquals(403, response.getStatus());
+        verify(authorizationService, never()).isAllowed(any(), any());
+        verify(chain, never()).doFilter(any(), any());
+    }
 }

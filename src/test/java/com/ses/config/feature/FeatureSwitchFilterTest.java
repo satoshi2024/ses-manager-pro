@@ -67,7 +67,13 @@ class FeatureSwitchFilterTest {
             Feature.NF03_CERTIFICATION_PII, List.of(),
             // NF-04はAPIを遮断しない（日次入力queueと下書き復元は常時有効）
             Feature.NF04, List.of(),
+            // NF-07 保持・保全はW3-14ではpolicy説明APIだけを持つ（catalog・holdは後続batchが入口と同時に登録する）
+            Feature.NF07_RETENTION, List.of("/api/privacy/policies", "/api/privacy/policies/3",
+                    "/api/privacy/policies/evaluate"),
             Feature.NF10, List.of("/api/management-reports/runs", "/api/management-reports/schedules/7/enable"));
+
+    /** 画面を持たずAPIだけを遮断する最上位の機能（画面prefixは画面を追加するbatchで登録する）。 */
+    private static final Set<Feature> API_ONLY_TOP_LEVEL = Set.of(Feature.NF07_RETENTION);
 
     /** 各機能の代表的な画面・静的入口。 */
     private static final Map<Feature, List<String>> PAGE_SAMPLES = Map.of(
@@ -79,6 +85,7 @@ class FeatureSwitchFilterTest {
             Feature.NF03, List.of("/certification-learning-skill-gap", "/my/certification-learning-skill-gap"),
             Feature.NF03_CERTIFICATION_PII, List.of(),
             Feature.NF04, List.of("/service-worker.js", "/manifest.webmanifest"),
+            Feature.NF07_RETENTION, List.of(),
             Feature.NF10, List.of("/management-reports"));
 
     /** 画面URLを持たない子スイッチ → 子をOFFにしても遮断してはならない埋込み先の画面。 */
@@ -122,6 +129,14 @@ class FeatureSwitchFilterTest {
     void OFFの機能の画面と静的入口は統一エラーページへ委ねる404になる(Feature feature) throws Exception {
         FeatureSwitchFilter filter = filter(disabledOnly(feature));
 
+        if (API_ONLY_TOP_LEVEL.contains(feature)) {
+            // APIだけの最上位の機能は画面・静的入口を遮断表に持たない（/privacy 自体も登録しない）。
+            assertThat(feature.pagePrefixes()).as("%s の画面prefix", feature).isEmpty();
+            assertThat(feature.exactPaths()).as("%s の静的入口", feature).isEmpty();
+            assertThat(PAGE_SAMPLES.get(feature)).isEmpty();
+            assertPassesThrough(filter, "GET", "/privacy");
+            return;
+        }
         if (PAGE_SAMPLES.get(feature).isEmpty()) {
             // 画面URLを持たないのは子スイッチだけ。子をOFFにしても、子が埋め込まれた画面のURLは遮断しない
             // （portal画面は他のタブと共用、本人画面は非PII部分を使う。表示制御はtemplate側）。

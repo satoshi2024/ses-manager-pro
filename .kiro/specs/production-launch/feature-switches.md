@@ -1,9 +1,9 @@
-# 機能スイッチ運用手順（NF-01 / NF-02 / NF-03 / NF-04 / NF-10、子スイッチ2件）
+# 機能スイッチ運用手順（NF-01 / NF-02 / NF-03 / NF-04 / NF-07 / NF-10、子スイッチ2件）
 
 - 対象: 初回本番リリース（新規構築・全停止デプロイ・専用Flyway job）で段階公開するS-NF機能
 - 位置づけ: **権限ではなく公開可否のスイッチ**。OFFの機能は管理者を含む全ロール・未認証利用者から見えなくなる
 - 実装: `com.ses.config.feature`（`Feature` / `FeatureSwitchProperties` / `FeatureSwitches` / `FeatureSwitchFilter`）
-- 対象外: NF-05・NF-06・NF-08（既存の本番向けハードゲートで制御）、NF-07（本番経路未接続）、NF-09
+- 対象外: NF-05・NF-06・NF-08（既存の本番向けハードゲートで制御）、NF-09。NF-07は保持・保全（`NF07_RETENTION`）だけを登録し、DSAR（`privacy.dsar.enabled`）は入口を追加するA2aで登録する
 
 ## 1. スイッチ一覧
 
@@ -15,6 +15,7 @@
 | NF-03 資格・学習・スキルギャップ | `app.features.nf03.enabled` | `FEATURE_NF03_ENABLED` | `false` | `true` |
 | └ NF-03の子: 資格番号（retention class `CERTIFICATION_PII`）の入力 | `app.features.nf03-certification-pii.enabled` | `FEATURE_NF03_CERTIFICATION_PII_ENABLED` | `false` | `true` |
 | NF-04 要員PWAシェル（Service Worker・manifest） | `app.features.nf04.enabled` | `FEATURE_NF04_ENABLED` | `false` | `true` |
+| NF-07 保持・保全（policy説明。catalog・holdは後続batchで追加） | `privacy.retention.enabled` | `PRIVACY_RETENTION_ENABLED` | `false` | `true` |
 | NF-10 定期管理レポート | `app.features.nf10.enabled` | `FEATURE_NF10_ENABLED` | `false` | `true` |
 
 - **子スイッチ**: 親機能の一部だけを後から公開するためのスイッチ。**実効値は「親がON かつ 子がON」**で、親がOFFなら子の設定値に関係なくOFFになる（子だけ `true` にしても何も公開されない）。子だけ `true` で親がOFFの設定は起動を止めず、起動ログに `[機能スイッチ] NF02_CUSTOMER_PORTAL は設定上ONですが、親機能 NF02 がOFFのため無効です` のWARNを出す。
@@ -52,6 +53,7 @@
 | NF-03 | `/certification-learning-skill-gap/**`、`/my/certification-learning-skill-gap/**`、`/api/certification-learning-gap/**`、`/api/my/certification-learning-gap/**` | `CertificationExpiryNotificationScheduler#dispatchToday`（日次） | menu `certification-learning-skill-gap`・`myCertificationLearningGap` |
 | NF-03の子 `nf03-certification-pii` | **URLは遮断しない**。資格申請（`POST /api/my/certification-learning-gap/certifications`）・再申請（`POST .../certifications/{id}/resubmit`）で資格番号が空欄でない要求を `EngineerCertificationServiceImpl` が400（message key `certification.record.numberEntryDisabled`）で拒否する（書込み・lock・暗号化の前。本人scope確認の読取りと再申請のversion照合は先に行うため、version不一致は409が先に返る） | なし | 本人画面（`/my/certification-learning-skill-gap`）の申請モーダルの資格番号入力欄、再申請ダイアログの資格番号入力（確認だけのダイアログになる） |
 | NF-04 | `/service-worker.js`、`/manifest.webmanifest` のみ | なし（下記4.4参照） | manifestリンク、Service Worker登録（`common.js` が既存登録とshell cacheを解除） |
+| NF-07 保持・保全 | `/api/privacy/policies/**`（W3-14）。遮断表に無い `/api/privacy/<x>` もOFF中は service 層の `PrivacyAccessGuard` が同じ本文の404にする。ONでも `privacy.*` の action 権限（privacy-admin）が別に要る | なし | menu `privacy-retention`（W3-14では sidebar 導線なし） |
 | NF-10 | `/management-reports/**`、`/api/management-reports/**` | `ManagementReportScheduler#dispatchDue`（毎分。claim・生成・配布を開始しない） | menu `management-report` |
 
 手動実行・テスト用の入口（`processSlaCheck`、`monitorSlaClocks`、`processDailySnapshot`、`dispatch(asOf)` 等）はスイッチの対象外。これらを呼ぶ本番画面・APIは上表のfilterで止まる（本番コードからの呼出し元は無い）。
@@ -61,7 +63,7 @@
 ### 3.1 初回デプロイ
 
 1. 全スイッチOFF（環境変数未設定）のまま、全停止デプロイと専用Flyway jobを実施する。機能スイッチはFlywayに影響しない（OFFでもNFのテーブル・seedは作成される）。
-2. 起動ログで `[機能スイッチ] 起動時の状態: NF01=OFF, NF02=OFF, NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF10=OFF` を確認する（子スイッチは実効値を表示する）。
+2. 起動ログで `[機能スイッチ] 起動時の状態: NF01=OFF, NF02=OFF, NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF07_RETENTION=OFF, NF10=OFF` を確認する（子スイッチは実効値を表示する）。
 3. 各NFの代表URL（例: `/api/lifecycle/cases`）が404になり、サイドバーに表示されないことを確認する。
 
 ### 3.2 1機能ずつONにする

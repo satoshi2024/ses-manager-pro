@@ -74,6 +74,9 @@ spring:
         - classpath:sql/schema-import-center-f1a-h2.sql
         # V186: 初回ログイン時のパスワード変更要求（sys_user.password_change_required）
         - classpath:sql/schema-sys-user-password-change-h2.sql
+        # V190/V191: NF07 F1表（catalog / policy / hold projection / DSAR）と W-5 権限seed（privacy-admin・privacy.* deny・menu）
+        - classpath:sql/schema-privacy-f1-h2.sql
+        - classpath:sql/schema-privacy-permission-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 
@@ -177,6 +180,13 @@ app:
       enabled: true
     nf10:
       enabled: true
+
+# NF07: 既存テストの意味を保つため、機能スイッチ（Feature.NF07_RETENTION）と同じく test profile ではONにする。
+# OFF時の404・policy source読取0回は PrivacyAccessGuardTest / ProductionPolicyReadonlyQueryServiceTest で検証する。
+# privacy.dsar はW3-14ではFeature未登録（A2aで登録）のため既定OFFのままにする。
+privacy:
+  retention:
+    enabled: true
 
 ai:
   enabled: false

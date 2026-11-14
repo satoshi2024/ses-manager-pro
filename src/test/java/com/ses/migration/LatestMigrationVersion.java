@@ -15,8 +15,8 @@ package com.ses.migration;
  */
 final class LatestMigrationVersion {
 
-    /** 現在の最新versioned migration（V186: 初回ログイン時のパスワード変更要求）。 */
-    static final String LATEST = "186";
+    /** 現在の最新versioned migration（V191: NF07 W-5 権限seed。V187〜V189 は本branchでは欠番で、統合時に総括が実際の順序で採番する）。 */
+    static final String LATEST = "191";
 
     private LatestMigrationVersion() {
     }

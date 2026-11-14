@@ -51,6 +51,21 @@ class ProductionSecurityConfigurationValidatorBootstrapTest {
         assertThatCode(validator::validate).doesNotThrowAnyException();
     }
 
+    /** NF07 W-5（§3.1.3）: privacy deny 不変条件は bootstrap 中も通常起動と同じく検査する。 */
+    @Test
+    void bootstrap中もprivacyの拒否不変条件を検査し欠けていれば起動しない() {
+        OidcSecurityProperties oidc = productionOidc();
+        ProductionSecurityConfigurationValidator validator = validator(oidc, bootstrapMode(true));
+        stubFreshInstall();
+        when(permissionGroupMapper.selectWildcardGroupKeysMissingPrivacyDeny("default"))
+                .thenReturn(List.of("role-admin"));
+
+        assertThatThrownBy(validator::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("privacy.*")
+                .hasMessageContaining("role-admin");
+    }
+
     @Test
     void bootstrapを無効にすると完全な検査へ戻る() {
         OidcSecurityProperties oidc = productionOidc();

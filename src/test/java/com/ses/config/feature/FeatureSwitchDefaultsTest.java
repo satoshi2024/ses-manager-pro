@@ -36,9 +36,9 @@ class FeatureSwitchDefaultsTest {
             assertThat(switches.isEnabled(feature)).as(feature.name()).isFalse();
         }
         assertThat(switches.disabledKeys()).containsExactly("nf01", "nf02", "nf02-customer-portal", "nf03",
-                "nf03-certification-pii", "nf04", "nf10");
+                "nf03-certification-pii", "nf04", "nf07-retention", "nf10");
         assertThat(switches.describe()).isEqualTo("NF01=OFF, NF02=OFF, NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, "
-                + "NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF10=OFF");
+                + "NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF07_RETENTION=OFF, NF10=OFF");
     }
 
     @Test
@@ -88,7 +88,7 @@ class FeatureSwitchDefaultsTest {
         assertThat(Feature.NF02.parent()).isEmpty();
         assertThat(Feature.NF02.root()).isEqualTo(Feature.NF02);
         assertThat(Feature.topLevel()).containsExactly(Feature.NF01, Feature.NF02, Feature.NF03, Feature.NF04,
-                Feature.NF10);
+                Feature.NF07_RETENTION, Feature.NF10);
         // 子はメニューを持たない（メニューの表示可否は親スイッチで決まる）。
         assertThat(Feature.NF02_CUSTOMER_PORTAL.menuKeys()).isEmpty();
         assertThat(Feature.NF03_CERTIFICATION_PII.menuKeys()).isEmpty();
@@ -196,7 +196,40 @@ class FeatureSwitchDefaultsTest {
                 .isEqualTo("app.features.nf03-certification-pii.enabled");
         assertThat(Feature.NF03_CERTIFICATION_PII.environmentVariable())
                 .isEqualTo("FEATURE_NF03_CERTIFICATION_PII_ENABLED");
-        assertThat(Set.of(Feature.values())).hasSize(7);
+        // NF-07 は privacy.* の設定キー・環境変数を使い、app.features.* には別名を作らない（§3.1.2）。
+        assertThat(Feature.NF07_RETENTION.key()).isEqualTo("nf07-retention");
+        assertThat(Feature.NF07_RETENTION.propertyName()).isEqualTo("privacy.retention.enabled");
+        assertThat(Feature.NF07_RETENTION.environmentVariable()).isEqualTo("PRIVACY_RETENTION_ENABLED");
+        assertThat(Set.of(Feature.values())).hasSize(8);
+    }
+
+    @Test
+    void NF07はprivacy設定の値をそのまま使いapp_featuresの別名ではONにならない() throws IOException {
+        FeatureSwitches alias = bind(Map.of("app.features.nf07-retention.enabled", "true",
+                        "FEATURE_NF07_RETENTION_ENABLED", "true"),
+                "application.yml", "application-prod.yml");
+        assertThat(alias.isEnabled(Feature.NF07_RETENTION)).isFalse();
+
+        FeatureSwitches byProperty = bind(Map.of(Feature.NF07_RETENTION.propertyName(), "true"),
+                "application.yml", "application-prod.yml");
+        assertThat(byProperty.isEnabled(Feature.NF07_RETENTION)).isTrue();
+
+        // DSARはW3-14では機能スイッチ未登録。privacy.dsar.enabled をONにしても機能スイッチは何もONにならない。
+        FeatureSwitches dsarOnly = bind(Map.of("PRIVACY_DSAR_ENABLED", "true"),
+                "application.yml", "application-prod.yml");
+        for (Feature feature : Feature.values()) {
+            assertThat(dsarOnly.isEnabled(feature)).as(feature.name()).isFalse();
+        }
+    }
+
+    @Test
+    void 真偽値として解釈できないprivacyの環境変数もbind失敗で起動を止める() {
+        assertThatThrownBy(() -> bind(Map.of(Feature.NF07_RETENTION.environmentVariable(), "ture"),
+                "application.yml", "application-prod.yml"))
+                .isInstanceOf(BindException.class);
+        assertThatThrownBy(() -> bind(Map.of("PRIVACY_DSAR_ENABLED", "ture"),
+                "application.yml", "application-prod.yml"))
+                .isInstanceOf(BindException.class);
     }
 
     @Test
@@ -231,6 +264,11 @@ class FeatureSwitchDefaultsTest {
                 new PropertySourcesPlaceholdersResolver(sources));
         FeatureSwitchProperties properties = binder.bind("app.features", Bindable.of(FeatureSwitchProperties.class))
                 .orElseGet(FeatureSwitchProperties::new);
+        // NF-07 は privacy.* を正本にする（Spring contextでは同じbeanを usePrivacyFeatureProperties で受け取る）。
+        com.ses.privacy.production.PrivacyFeatureProperties privacy = binder.bind("privacy",
+                        Bindable.of(com.ses.privacy.production.PrivacyFeatureProperties.class))
+                .orElseGet(com.ses.privacy.production.PrivacyFeatureProperties::new);
+        properties.usePrivacyFeatureProperties(privacy);
         return new FeatureSwitches(properties);
     }
 }

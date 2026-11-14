@@ -6,10 +6,13 @@ import com.ses.common.util.SecurityUtils;
 import com.ses.config.OidcSecurityProperties;
 import com.ses.entity.AuditLog;
 import com.ses.entity.PermissionGroup;
+import com.ses.entity.PermissionGroupAction;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserPermissionGroup;
 import com.ses.mapper.AuditLogMapper;
+import com.ses.mapper.PermissionGroupActionMapper;
 import com.ses.mapper.PermissionGroupMapper;
+import com.ses.service.NotificationService;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserPermissionGroupMapper;
 import com.ses.service.security.PermissionGroupManagementService;
@@ -30,12 +33,23 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class PermissionGroupManagementServiceImpl implements PermissionGroupManagementService {
 
+    private static final String ADMIN_ROLE = "管理者";
+    /** NF07 W-5 の管理者専用 group（V191）。privacy.* の唯一の許可根拠。 */
+    static final String PRIVACY_ADMIN_GROUP_KEY = "privacy-admin";
+    private static final String PRIVACY_WILDCARD = "privacy.*";
+    static final String PRIVACY_ADMIN_AUDIT_CODE = "PRIVACY_ADMIN_GROUP_CHANGED";
+    static final String PRIVACY_ADMIN_NOTIFICATION_TYPE = "PRIVACY_ADMIN_CHANGED";
+    /** t_audit_log.before_state / after_state の列長（V136）。 */
+    private static final int AUDIT_STATE_MAX_LENGTH = 255;
+
     private final PermissionGroupMapper permissionGroupMapper;
     private final UserPermissionGroupMapper userPermissionGroupMapper;
     private final SysUserMapper sysUserMapper;
     private final AuditLogMapper auditLogMapper;
     private final PersistentSessionService persistentSessionService;
     private final OidcSecurityProperties oidcProperties;
+    private final PermissionGroupActionMapper permissionGroupActionMapper;
+    private final NotificationService notificationService;
 
     @Override
     public List<PermissionGroup> listGroups() {
@@ -83,6 +97,18 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
         if (groups.size() != requested.size()) {
             throw BusinessException.of(400, "error.permission.invalidGroup");
         }
+        Set<String> requestedKeys = groupKeys(groups);
+        if (requestedKeys.contains(PRIVACY_ADMIN_GROUP_KEY)) {
+            guardPrivacyAdminAssignment(target, groups);
+        }
+        // privacy-admin の割当・解除（role変更による既定groupへの再割当を含む）は、変更前の所属と
+        // 既存の privacy-admin を書込み前に確定してから、同一transactionで監査・通知する（G-ID 署名までの暫定規則）。
+        Set<String> beforeKeys = currentGroupKeys(userId);
+        boolean privacyAdminChanged = beforeKeys.contains(PRIVACY_ADMIN_GROUP_KEY)
+                != requestedKeys.contains(PRIVACY_ADMIN_GROUP_KEY);
+        List<Long> existingPrivacyAdmins = privacyAdminChanged
+                ? userPermissionGroupMapper.selectActiveUserIdsByGroupKey(tenantId(), PRIVACY_ADMIN_GROUP_KEY)
+                : List.of();
 
         userPermissionGroupMapper.deleteAllForUser(tenantId(), userId);
         LocalDateTime now = LocalDateTime.now();
@@ -99,6 +125,119 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
         }
         persistentSessionService.revokeAllForUser(userId, "PERMISSION_CHANGED");
         insertAudit(authentication.getName(), userId, now);
+        if (privacyAdminChanged) {
+            boolean granted = requestedKeys.contains(PRIVACY_ADMIN_GROUP_KEY);
+            insertPrivacyAdminAudit(authentication.getName(), userId, beforeKeys, requestedKeys, now);
+            notifyPrivacyAdmins(existingPrivacyAdmins, userId, granted, now);
+        }
+    }
+
+    /**
+     * privacy-admin の割当 guard（production-bridge-phased-plan.md §6.7）。
+     * <ul>
+     *   <li>対象ユーザーの role が管理者でなければ400。privacy-admin は '*' を持つので、誤割当を data の deny だけに任せない。</li>
+     *   <li>privacy.* の拒否行を持つ他の group との同時割当は409（deny 優先で privacy が使えなくなるため）。
+     *       判定は group key の固定値ではなく拒否行の有無で行う。</li>
+     * </ul>
+     */
+    private void guardPrivacyAdminAssignment(SysUser target, List<PermissionGroup> groups) {
+        if (!ADMIN_ROLE.equals(target.getRole())) {
+            throw BusinessException.of(400, "error.permission.adminOnlyGroup");
+        }
+        Set<Long> otherGroupIds = new LinkedHashSet<>();
+        for (PermissionGroup group : groups) {
+            if (group.getId() != null && !PRIVACY_ADMIN_GROUP_KEY.equals(group.getGroupKey())) {
+                otherGroupIds.add(group.getId());
+            }
+        }
+        if (otherGroupIds.isEmpty()) {
+            return;
+        }
+        Long denying = permissionGroupActionMapper.selectCount(new LambdaQueryWrapper<PermissionGroupAction>()
+                .eq(PermissionGroupAction::getTenantId, tenantId())
+                .in(PermissionGroupAction::getGroupId, otherGroupIds)
+                .eq(PermissionGroupAction::getDenyFlag, 1)
+                .in(PermissionGroupAction::getActionKey, List.of(PRIVACY_WILDCARD, "*")));
+        if (denying == null || denying > 0) {
+            throw BusinessException.of(409, "error.permission.privacyGroupConflict");
+        }
+    }
+
+    /** 対象ユーザーの現在の所属group key（有効・無効を問わない）。 */
+    private Set<String> currentGroupKeys(Long userId) {
+        Set<Long> groupIds = new LinkedHashSet<>();
+        for (UserPermissionGroup assignment : userPermissionGroupMapper.selectList(
+                new LambdaQueryWrapper<UserPermissionGroup>()
+                        .eq(UserPermissionGroup::getTenantId, tenantId())
+                        .eq(UserPermissionGroup::getUserId, userId))) {
+            if (assignment.getGroupId() != null) {
+                groupIds.add(assignment.getGroupId());
+            }
+        }
+        if (groupIds.isEmpty()) {
+            return new java.util.TreeSet<>();
+        }
+        return groupKeys(permissionGroupMapper.selectList(new LambdaQueryWrapper<PermissionGroup>()
+                .eq(PermissionGroup::getTenantId, tenantId())
+                .in(PermissionGroup::getId, groupIds)));
+    }
+
+    private static Set<String> groupKeys(List<PermissionGroup> groups) {
+        Set<String> keys = new java.util.TreeSet<>();
+        if (groups != null) {
+            for (PermissionGroup group : groups) {
+                if (group != null && StringUtils.hasText(group.getGroupKey())) {
+                    keys.add(group.getGroupKey());
+                }
+            }
+        }
+        return keys;
+    }
+
+    /**
+     * privacy-admin の割当・解除の required 監査。変更前後の group key を残す（既存の監査は group key を持たない）。
+     * 書けなければ例外で割当ごと rollback する。本文に data subject の識別子は入れない。
+     */
+    private void insertPrivacyAdminAudit(String username, Long userId, Set<String> beforeKeys,
+                                         Set<String> afterKeys, LocalDateTime now) {
+        AuditLog entry = new AuditLog();
+        entry.setUsername(username);
+        entry.setMethod("SECURITY");
+        entry.setUri("/api/permission-groups/users/" + userId);
+        entry.setStatus(200);
+        entry.setApplicationCode(PRIVACY_ADMIN_AUDIT_CODE);
+        entry.setSuccessFlag(true);
+        entry.setReferenceType("SYS_USER");
+        entry.setReferenceId(userId);
+        entry.setBeforeState(auditState(beforeKeys));
+        entry.setAfterState(auditState(afterKeys));
+        entry.setCreatedAt(now);
+        if (auditLogMapper.insert(entry) != 1) {
+            throw BusinessException.of("error.permission.auditFailed");
+        }
+    }
+
+    private static String auditState(Set<String> keys) {
+        String joined = "groups=" + String.join(",", new java.util.TreeSet<>(keys));
+        return joined.length() <= AUDIT_STATE_MAX_LENGTH ? joined : joined.substring(0, AUDIT_STATE_MAX_LENGTH);
+    }
+
+    /** 変更前から privacy-admin に所属していた有効なユーザーへ通知する（本文に対象者・subject の識別子は入れない）。 */
+    private void notifyPrivacyAdmins(List<Long> recipients, Long targetUserId, boolean granted, LocalDateTime now) {
+        if (recipients == null || recipients.isEmpty()) {
+            return;
+        }
+        String title = granted ? "プライバシー管理者の割当が追加されました" : "プライバシー管理者の割当が解除されました";
+        String message = "監査ログ（" + PRIVACY_ADMIN_AUDIT_CODE + "）で変更内容を確認してください";
+        String change = granted ? "grant" : "revoke";
+        for (Long recipient : new LinkedHashSet<>(recipients)) {
+            if (recipient == null) {
+                continue;
+            }
+            notificationService.publishToUser(recipient, PRIVACY_ADMIN_NOTIFICATION_TYPE, title, message,
+                    "/audit-log", "privacy-admin-changed:" + targetUserId + ":" + change + ":" + now + ":" + recipient,
+                    "audit-log");
+        }
     }
 
     private Long defaultGroupId(String role) {

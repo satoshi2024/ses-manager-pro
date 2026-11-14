@@ -167,6 +167,9 @@ class ActionPermissionMatrixTest {
         assertFalse(authorizationService.isAllowed(sales, "audit.security.view"));
         assertFalse(authorizationService.isAllowed(sales, "file.scan.retry"));
         assertFalse(authorizationService.isAllowed(sales, "payroll.view"));
+        // NF07 W-5: privacy は既知resourceでも営業には開かない（role検査とV191のdeny）。
+        assertFalse(authorizationService.isAllowed(sales, "privacy.view"));
+        assertFalse(authorizationService.isAllowed(sales, "privacy.dsar.manage"));
     }
 
     @Test
@@ -180,6 +183,8 @@ class ActionPermissionMatrixTest {
         assertFalse(authorizationService.isAllowed(manager, "payroll.view"));
         assertFalse(authorizationService.isAllowed(manager, "audit.security.view"));
         assertFalse(authorizationService.isAllowed(manager, "file.scan.retry"));
+        assertFalse(authorizationService.isAllowed(manager, "privacy.view"));
+        assertFalse(authorizationService.isAllowed(manager, "privacy.dsar.manage"));
         // 業務actionは従来どおり通る
         assertTrue(authorizationService.isAllowed(manager, "dashboard.view"));
         assertTrue(authorizationService.isAllowed(manager, "contract.cost.view"));
@@ -270,17 +275,18 @@ class ActionPermissionMatrixTest {
         org.junit.jupiter.api.Assertions.assertEquals(1, adminBaselineCount, "管理者groupにbaselineが未セット");
 
         // manager(4) と sales(2) はV66の5件 + V78口座action + Fix Batch 1の2件で計8件。
+        // V191（NF07 W-5）で privacy.* の deny が各1件加わり、営業 9・HR 8・マネージャー 9 件。
         Integer salesDenyCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 2 AND deny_flag = 1", Integer.class);
-        org.junit.jupiter.api.Assertions.assertEquals(8, salesDenyCount, "営業groupのdeny行数が不一致");
+        org.junit.jupiter.api.Assertions.assertEquals(9, salesDenyCount, "営業groupのdeny行数が不一致");
 
         Integer hrDenyCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 3 AND deny_flag = 1", Integer.class);
-        org.junit.jupiter.api.Assertions.assertEquals(7, hrDenyCount, "HRgroupのdeny行数が不一致");
+        org.junit.jupiter.api.Assertions.assertEquals(8, hrDenyCount, "HRgroupのdeny行数が不一致");
 
         Integer managerDenyCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 4 AND deny_flag = 1", Integer.class);
-        org.junit.jupiter.api.Assertions.assertEquals(8, managerDenyCount, "マネージャーgroupのdeny行数が不一致");
+        org.junit.jupiter.api.Assertions.assertEquals(9, managerDenyCount, "マネージャーgroupのdeny行数が不一致");
 
         Integer salesBankDeny = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 2 "
@@ -292,6 +298,126 @@ class ActionPermissionMatrixTest {
                         + "AND action_key = 'bp-company.bank-account.view' AND deny_flag = 1", Integer.class);
         org.junit.jupiter.api.Assertions.assertEquals(1, managerBankDeny,
                 "マネージャーgroupにV78の口座action denyが必要");
+    }
+
+    // ---------------------------------------------------------------- NF07 W-5（production-bridge-phased-plan.md §6.5）
+
+    /** privacy の代表action（未知subpathを含む）。BUSINESS_ACTIONS には足さない。 */
+    private static final List<String> PRIVACY_ACTIONS = List.of(
+            "privacy.view", "privacy.policy.view", "privacy.hold.manage", "privacy.dsar.approve",
+            "privacy.unknown-sub.view");
+
+    @Test
+    void privacy系actionはprivacy_admin所属の管理者だけに許可される() {
+        for (String action : PRIVACY_ACTIONS) {
+            assertTrue(authorizationService.isAllowed(authenticate(9005L, "管理者"), action),
+                    "privacy-adminだけの管理者に " + action + " が拒否された");
+            assertFalse(authorizationService.isAllowed(authenticate(9007L, "管理者"), action),
+                    "role-adminだけの管理者に " + action + " が許可された");
+            assertFalse(authorizationService.isAllowed(authenticate(9008L, "管理者"), action),
+                    "role-adminとprivacy-adminの両方の管理者に " + action + " が許可された");
+            assertFalse(authorizationService.isAllowed(authenticate(9000L, "管理者"), action),
+                    "group未割当の管理者に " + action + " が許可された");
+            assertFalse(authorizationService.isAllowed(authenticate(9001L, "営業"), action));
+            assertFalse(authorizationService.isAllowed(authenticate(9002L, "HR"), action));
+            assertFalse(authorizationService.isAllowed(authenticate(9003L, "マネージャー"), action));
+            assertFalse(authorizationService.isAllowed(authenticate(9004L, "要員"), action));
+            // 9006: 営業を privacy-admin へ直接所属させた誤割当の再現。code の role 検査で拒否する。
+            assertFalse(authorizationService.isAllowed(authenticate(9006L, "営業"), action),
+                    "privacy-adminへ誤割当された営業に " + action + " が許可された");
+        }
+    }
+
+    @Test
+    void privacy_adminとrole_adminの両方に所属すると拒否優先でprivacyは使えない() {
+        Authentication both = authenticate(9008L, "管理者");
+        for (String action : PRIVACY_ACTIONS) {
+            assertFalse(authorizationService.isAllowed(both, action), action);
+        }
+        // 管理者の業務actionと、短絡許可の対象外で group 評価される one-on-one.confidential は '*' で通る
+        assertTrue(authorizationService.isAllowed(both, "dashboard.view"));
+        assertTrue(authorizationService.isAllowed(both, "one-on-one.confidential"));
+    }
+
+    @Test
+    void privacy_admin所属の管理者は管理者の既存actionを失わない() {
+        Authentication privacyAdmin = authenticate(9005L, "管理者");
+        assertTrue(authorizationService.isAllowed(privacyAdmin, "dashboard.view"));
+        assertTrue(authorizationService.isAllowed(privacyAdmin, "user.view"));
+        assertTrue(authorizationService.isAllowed(privacyAdmin, "one-on-one.confidential"));
+        for (String action : BUSINESS_ACTIONS) {
+            assertTrue(authorizationService.isAllowed(privacyAdmin, action), action + " が拒否された");
+        }
+    }
+
+    @Test
+    void legacy_fallbackはprivacy系actionを誰にも許可しない() {
+        for (String action : PRIVACY_ACTIONS) {
+            assertFalse(authorizationService.isAllowed(authenticate(9000L, "管理者"), action), "管理者: " + action);
+            assertFalse(authorizationService.isAllowed(authenticate(9999L, "営業"), action), "営業: " + action);
+            assertFalse(authorizationService.isAllowed(authenticate(9997L, "HR"), action), "HR: " + action);
+        }
+        // legacy の管理者は privacy 以外の既存actionを維持する
+        assertTrue(authorizationService.isAllowed(authenticate(9000L, "管理者"), "dashboard.view"));
+    }
+
+    @Test
+    void 全体baselineはprivacyの許可根拠にならない() {
+        // '*' だけを複製し privacy.* の deny を欠いた group（運用上の誤り）を一時的に作る。
+        jdbcTemplate.update("INSERT INTO m_permission_group (id, tenant_id, group_key, group_name, enabled, deleted_flag) "
+                + "VALUES (99, 'default', 'copied-admin', '複製された管理者group', 1, 0)");
+        jdbcTemplate.update("INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag) "
+                + "VALUES ('default', 99, '*', 0, 0)");
+        jdbcTemplate.update("INSERT INTO t_user_permission_group (tenant_id, user_id, group_id, assigned_at, deleted_flag) "
+                + "VALUES ('default', 9010, 99, CURRENT_TIMESTAMP, 0)");
+        Authentication copiedAdmin = authenticate(9010L, "管理者");
+
+        for (String action : PRIVACY_ACTIONS) {
+            assertFalse(authorizationService.isAllowed(copiedAdmin, action), "'*' だけで " + action + " が許可された");
+        }
+        // privacy 以外では '*' は従来どおり baseline として働く
+        assertTrue(authorizationService.isAllowed(copiedAdmin, "one-on-one.confidential"));
+    }
+
+    @Test
+    void privacyのURIはexportとdownloadと画面判定より先にprivacy_actionへ解決される() {
+        assertEquals("privacy.dsar.export",
+                ActionPermissionResolver.resolve("GET", "/api/privacy/dsar/1/package/download"));
+        assertEquals("privacy.dsar.export", ActionPermissionResolver.resolve("POST", "/api/privacy/dsar/1/export"));
+        assertEquals("privacy.dsar.export",
+                ActionPermissionResolver.resolve("GET", "/api/privacy/dsar/1/package/x.pdf"));
+        assertEquals("privacy.hold.manage", ActionPermissionResolver.resolve("POST", "/api/privacy/holds"));
+        assertEquals("privacy.view", ActionPermissionResolver.resolve("GET", "/api/privacy/unknown-sub"));
+        assertEquals("privacy.view", ActionPermissionResolver.resolve("GET", "/privacy/holds"));
+        assertEquals("privacy.create", ActionPermissionResolver.resolve("POST", "/privacy/holds"));
+        org.junit.jupiter.api.Assertions.assertNull(ActionPermissionResolver.resolve("OPTIONS", "/api/privacy/holds"));
+        // 営業・要員が持つ汎用actionには解決されない
+        for (String action : List.of("export.execute", "file.download")) {
+            org.junit.jupiter.api.Assertions.assertNotEquals(action,
+                    ActionPermissionResolver.resolve("GET", "/api/privacy/dsar/1/export"));
+        }
+    }
+
+    @Test
+    void privacyの権限seedはprivacy_admin以外の全groupでdenyしprivacy_adminだけが明示許可を持つ() {
+        for (int groupId : new int[]{1, 2, 3, 4, 5}) {
+            assertEquals(1, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = ? "
+                            + "AND action_key = 'privacy.*' AND deny_flag = 1", Integer.class, groupId),
+                    "group " + groupId + " に privacy.* の deny が必要");
+        }
+        assertEquals(1, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_permission_group_action "
+                + "WHERE group_id = 6 AND action_key = '*' AND deny_flag = 0", Integer.class));
+        assertEquals(1, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_permission_group_action "
+                + "WHERE group_id = 6 AND action_key = 'privacy.*' AND deny_flag = 0", Integer.class));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_permission_group_action "
+                + "WHERE group_id = 6 AND deny_flag = 1", Integer.class));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM m_permission_group g "
+                + "WHERE g.group_key <> 'privacy-admin' AND NOT EXISTS (SELECT 1 FROM t_permission_group_action a "
+                + "WHERE a.group_id = g.id AND a.action_key = 'privacy.*' AND a.deny_flag = 1)", Integer.class),
+                "privacy-admin以外で privacy.* の deny を持たない group がある");
+        assertEquals("privacy-admin", jdbcTemplate.queryForObject(
+                "SELECT group_key FROM m_permission_group WHERE id = 6", String.class));
     }
 
     private Authentication authenticate(Long id, String role) {

@@ -138,6 +138,7 @@ class FlywayProdFreshInstallMySqlTest {
             assertSampleDataAndDerivedRowsRemoved(st);
             assertNoSampleReferenceRemains(st);
             assertInitialRepairAndLedgerTables(st);
+            assertNf07PrivacyFreshInstall(st);
             assertEquals(List.of(), rows(st, "SELECT routine_name FROM information_schema.routines "
                             + "WHERE routine_schema = DATABASE() ORDER BY routine_name"),
                     "migration用のhelper procedure（V102_1の残置分・admin scriptの一時procedureを含む）が残らないこと");
@@ -509,6 +510,37 @@ class FlywayProdFreshInstallMySqlTest {
         assertTrue(queryString(st, "SELECT description FROM m_system_config "
                         + "WHERE config_key = 'closing.confirmed-months'").startsWith("【移行済・参照禁止】"),
                 "V181:50-52で旧keyが参照禁止として注記されること");
+    }
+
+    /**
+     * NF07 F1 + PERM（V190 / V191、deploy-runbook §3.4）の新規導入直後の件数。
+     * F1表は行を持たず、privacy-admin は1件・未割当、privacy.* の deny は既定5 groupに1件ずつ、menu は2件。
+     * prod 起動検査（{@code ProductionSecurityConfigurationValidator}）の不変条件に違反する group も0件であること。
+     */
+    private void assertNf07PrivacyFreshInstall(Statement st) throws Exception {
+        for (String table : List.of("m_pii_data_element", "m_retention_policy", "t_legal_hold",
+                "t_privacy_projection_state", "t_privacy_request", "t_privacy_request_subject_link",
+                "t_privacy_action", "t_privacy_export_package")) {
+            assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM " + table),
+                    "NF07 F1表はfresh installで0件であること（法的な値をseedしない）: " + table);
+        }
+        assertEquals(1L, scalar(st, "SELECT COUNT(*) FROM m_permission_group WHERE group_key = 'privacy-admin'"));
+        assertEquals(5L, scalar(st, "SELECT COUNT(*) FROM t_permission_group_action a JOIN m_permission_group g "
+                + "ON g.id = a.group_id WHERE a.action_key = 'privacy.*' AND a.deny_flag = 1 "
+                + "AND g.group_key <> 'privacy-admin'"), "既定5 groupに privacy.* の deny");
+        assertEquals(2L, scalar(st, "SELECT COUNT(*) FROM t_permission_group_action a JOIN m_permission_group g "
+                + "ON g.id = a.group_id WHERE g.group_key = 'privacy-admin' AND a.deny_flag = 0 "
+                + "AND a.action_key IN ('*', 'privacy.*')"));
+        assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM t_user_permission_group u JOIN m_permission_group g "
+                + "ON g.id = u.group_id WHERE g.group_key = 'privacy-admin'"), "privacy-adminへ誰も割り当てない");
+        assertEquals(2L, scalar(st, "SELECT COUNT(*) FROM m_menu WHERE menu_key IN ('privacy-retention', 'privacy-dsar')"));
+        assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM m_permission_group g WHERE g.enabled = 1 "
+                + "AND g.deleted_flag = 0 AND g.group_key <> 'privacy-admin' "
+                + "AND EXISTS (SELECT 1 FROM t_permission_group_action a WHERE a.tenant_id = g.tenant_id "
+                + "AND a.group_id = g.id AND a.action_key = '*' AND a.deny_flag = 0 AND a.deleted_flag = 0) "
+                + "AND NOT EXISTS (SELECT 1 FROM t_permission_group_action d WHERE d.tenant_id = g.tenant_id "
+                + "AND d.group_id = g.id AND d.action_key = 'privacy.*' AND d.deny_flag = 1 AND d.deleted_flag = 0)"),
+                "prod起動検査のprivacy deny不変条件を満たすこと");
     }
 
     // ---------------------------------------------------------------------

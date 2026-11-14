@@ -520,3 +520,15 @@ integration:
     crypto:
       current-key-version: ${INTEGRATION_HUB_CRYPTO_CURRENT_KEY_VERSION:}
       keys: {}
+
+# ===== NF07 プライバシー（保持・DSAR）。production-bridge-phased-plan.md §5.1 =====
+# 既定OFF。真偽値として解釈できない値（例: ture）は起動失敗になる（app.features.* と同じ扱い）。
+# privacy.retention.enabled は機能スイッチ Feature.NF07_RETENTION の設定値でもある（app.features.* に別名は作らない）。
+# OFFの間は /api/privacy/policies が404になり、policy source は読まずに POLICY_UNKNOWN を返す。
+# privacy.dsar.enabled はW3-14では設定値だけを持つ（入口と Feature 登録は A2a で追加する）。
+# 法的な値（保持期間・期限・本人確認基準等）はここへ書かない（署名後に人が別の設定で与える）。
+privacy:
+  retention:
+    enabled: ${PRIVACY_RETENTION_ENABLED:false}
+  dsar:
+    enabled: ${PRIVACY_DSAR_ENABLED:false}
