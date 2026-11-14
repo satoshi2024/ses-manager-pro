@@ -1,6 +1,8 @@
 package com.ses.privacy.production;
 
 import com.ses.config.OidcSecurityProperties;
+import com.ses.entity.IdentityProvider;
+import com.ses.mapper.IdentityProviderMapper;
 import com.ses.mapper.PermissionGroupMapper;
 import com.ses.mapper.UserPermissionGroupMapper;
 import com.ses.privacy.production.PrivacyAccessGuard.Capability;
@@ -13,11 +15,11 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.time.Clock;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -34,7 +36,8 @@ import java.util.TreeSet;
  *           有効期間の上限の規則を満たし、approval digest が一致する。</li>
  *       <li>{@code privacy-admin} group が有効で {@code privacy.*} を許可し、privacy の拒否行を持たない。</li>
  *       <li>{@code privacy-admin} の有効な管理者（{@link UserPermissionGroupMapper#selectEffectivePrivacyAdminUsernames}。
- *           break-glass username は数えない）が {@value #MIN_PRIVACY_ADMINISTRATORS} 名以上。</li>
+ *           OIDC でログインできる管理者だけを数え、break-glass username は大文字小文字を区別せず除く）が
+ *           {@value #MIN_PRIVACY_ADMINISTRATORS} 名以上。アカウントロックは数え方に影響しない（review P2-1）。</li>
  *       <li>{@code privacy-admin} 以外の有効な group が {@code privacy.} 接頭辞の許可行を持たない（review P3-2）。</li>
  *       <li>{@code dsar}: 入口と §5.1 の追加前提（D-06 の値、F2 provider 等）を検査する A2a が未実装のため、常に不可。</li>
  *     </ol>
@@ -45,8 +48,10 @@ import java.util.TreeSet;
  * WARN（{@value #LOG_CODE_STOPPED}）を出して起動し、{@link PrivacyDecisionWindowMonitor} が NF07 を OFF として扱う
  * （入口は OFF と同じ404。実行中に失効日を迎えた場合も同じ）。構造的な不足と同時なら起動を止める（失効日を書き換えた
  * 設定は digest 不一致になるため、時間要因だけとはみなされない）。照会できない場合は確認できないとして起動を止める（fail-closed）。
- * {@link SmartInitializingSingleton} で全 singleton 生成後・Tomcat の connector 開始前に実行する
- * （{@code ProductionSchemaVersionGuard} と同じ時点。失敗すると port を開かない）。読むだけで DB へは書かない。
+ *
+ * <p>{@link SmartInitializingSingleton} で全 singleton 生成後・Tomcat の connector 開始前に実行する（失敗すると port を開かない）。
+ * 同じ時点の {@code ProductionSchemaVersionGuard} より先に動くことがあるため、schema が artifact と一致しないと
+ * {@code *.unverifiable} で止まる場合がある（その場合は schema guard の結果を先に確認する）。読むだけで DB へは書かない。
  */
 @Component
 @Profile("prod")
@@ -61,12 +66,14 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
     public static final String LOG_CODE_STOPPED = "NF07_PRIVACY_STOPPED_AT_STARTUP";
 
     private static final String ADMIN_ROLE = "管理者";
+    private static final String OIDC_PROVIDER_TYPE = "OIDC";
 
     private final PrivacyFeatureProperties featureProperties;
     private final PrivacyApprovalProperties approvalProperties;
     private final OidcSecurityProperties oidcProperties;
     private final PermissionGroupMapper permissionGroupMapper;
     private final UserPermissionGroupMapper userPermissionGroupMapper;
+    private final IdentityProviderMapper identityProviderMapper;
     private final Clock clock;
 
     @Autowired
@@ -75,13 +82,15 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
                                                    OidcSecurityProperties oidcProperties,
                                                    PermissionGroupMapper permissionGroupMapper,
                                                    UserPermissionGroupMapper userPermissionGroupMapper,
+                                                   IdentityProviderMapper identityProviderMapper,
                                                    Clock clock) {
         this.featureProperties = featureProperties;
         this.approvalProperties = approvalProperties;
         this.oidcProperties = oidcProperties;
         this.permissionGroupMapper = permissionGroupMapper;
         this.userPermissionGroupMapper = userPermissionGroupMapper;
-        this.clock = clock == null ? Clock.systemUTC() : clock;
+        this.identityProviderMapper = identityProviderMapper;
+        this.clock = clock == null ? Clock.system(PrivacyDecisionBinding.BUSINESS_ZONE) : clock;
     }
 
     @Override
@@ -145,12 +154,29 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
         }
     }
 
-    /** 有効な privacy-admin の人数（break-glass username を除く）を返す。照会できなければ -1。 */
+    /**
+     * 有効な privacy-admin の人数（OIDC でログインできる管理者。break-glass username を除く）を返す。数えられなければ -1。
+     * 「OIDC でログインできる」は {@code ProductionSecurityConfigurationValidator#validateOidcAdministrators} と同じ判定
+     * （設定tenant・issuer の有効な OIDC provider に APPROVED の外部identity link を持つ）。
+     */
     private int validatePrivacyAdministrators(String tenantId, List<String> missing) {
+        String identityTenantId = trimmed(oidcProperties == null ? null : oidcProperties.getTenantId());
+        String issuer = trimmed(oidcProperties == null ? null : oidcProperties.getIssuerUri());
+        if (identityTenantId == null || issuer == null) {
+            missing.add("privacyAdmins.oidcProviderUnavailable");
+            return -1;
+        }
         List<String> usernames;
         try {
+            IdentityProvider provider = identityProviderMapper == null ? null
+                    : identityProviderMapper.selectEnabledByTenantAndIssuer(identityTenantId, issuer);
+            if (provider == null || provider.getId() == null
+                    || !OIDC_PROVIDER_TYPE.equalsIgnoreCase(provider.getProviderType())) {
+                missing.add("privacyAdmins.oidcProviderUnavailable");
+                return -1;
+            }
             usernames = userPermissionGroupMapper.selectEffectivePrivacyAdminUsernames(
-                    tenantId, ADMIN_ROLE, LocalDateTime.now(clock));
+                    tenantId, ADMIN_ROLE, identityTenantId, provider.getId());
         } catch (RuntimeException e) {
             log.error("[privacy] privacy-adminの所属者を照会できません", e);
             missing.add("privacyAdmins.unverifiable");
@@ -160,11 +186,16 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
             missing.add("privacyAdmins.unverifiable");
             return -1;
         }
-        Set<String> administrators = new TreeSet<>();
-        usernames.stream().filter(StringUtils::hasText).map(String::trim).forEach(administrators::add);
         // break-glass username は incident 外の OIDC session が失効させられ、break-glass session では privacy が
-        // DENY_SCOPE になるため、privacy を実際に使える管理者として数えない。
-        administrators.removeAll(breakGlassUsernames());
+        // DENY_SCOPE になるため数えない。DB の照合順序が大文字小文字を区別しないため、比較も区別しない（SecurityConfig と同じ）。
+        Set<String> breakGlass = breakGlassUsernames();
+        Set<String> administrators = new TreeSet<>();
+        usernames.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .filter(username -> !breakGlass.contains(username.toLowerCase(Locale.ROOT)))
+                .map(username -> username.toLowerCase(Locale.ROOT))
+                .forEach(administrators::add);
         if (administrators.size() < MIN_PRIVACY_ADMINISTRATORS) {
             missing.add("privacyAdmins.insufficient[current=" + administrators.size()
                     + ";required=" + MIN_PRIVACY_ADMINISTRATORS + "]");
@@ -211,15 +242,20 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
         return StringUtils.hasText(configured) ? configured : "default";
     }
 
+    /** break-glass username（前後空白を除き小文字化）。 */
     private Set<String> breakGlassUsernames() {
         Set<String> result = new LinkedHashSet<>();
         if (oidcProperties != null && oidcProperties.getBreakGlassUsernames() != null) {
             oidcProperties.getBreakGlassUsernames().stream()
                     .filter(StringUtils::hasText)
-                    .map(String::trim)
+                    .map(name -> name.trim().toLowerCase(Locale.ROOT))
                     .forEach(result::add);
         }
         return result;
+    }
+
+    private static String trimmed(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 
     private static String flagNames(Set<Capability> enabled) {

@@ -301,6 +301,10 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
         }
     }
 
+    /**
+     * break-glass username か。DB の照合順序（大文字小文字を区別しない）で break-glass 行へ解決される表記揺れも
+     * 同じ口座とみなす（{@code SecurityConfig} の HTTP Basic 防護と同じ比較。W3-14b review P3-2）。
+     */
     private boolean isBreakGlassUsername(String username) {
         if (!StringUtils.hasText(username) || oidcProperties.getBreakGlassUsernames() == null) {
             return false;
@@ -309,7 +313,7 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
         return oidcProperties.getBreakGlassUsernames().stream()
                 .filter(StringUtils::hasText)
                 .map(String::trim)
-                .anyMatch(normalized::equals);
+                .anyMatch(normalized::equalsIgnoreCase);
     }
 
     private String tenantId() {

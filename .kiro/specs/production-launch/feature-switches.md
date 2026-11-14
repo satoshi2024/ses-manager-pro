@@ -192,12 +192,14 @@
 |---|---|---|
 | 1 | 決定ID束縛 `privacy.approval.*`（`PrivacyDecisionBinding`）に構造的な不足が無い: 承認tenantが設定tenant（`OIDC_TENANT_ID`、未設定なら `default`）と完全一致、ONのcapabilityが全て承認capabilityに含まれる、必要な決定（retention は D-01・D-09、dsar は D-01・D-06・D-09）のID・署名日・失効日が NF08 と同じ規則（形式・placeholder・ID重複・署名日より後の失効日・最長366日）を満たす、approval digest が一致 | `decisionBinding.tenantId.missing` / `decisionBinding.tenantId.mismatch` / `decisionBinding.capabilities.retention.notApproved` / `decisionBinding.d01.decisionId.placeholder` / `decisionBinding.d09.expiresOn.tooLong` / `decisionBinding.decisionIds.notDistinct` / `decisionBinding.approvalDigest.mismatch` |
 | 2 | `privacy-admin` group が有効・未削除で `privacy.*` を許可し、`'*'`・`privacy.` 接頭辞の拒否行を持たない | `privacyAdminGroup.notGrantingPrivacy` |
-| 3 | `privacy-admin` の有効な管理者が2名以上。「有効」= 所属行が未削除、設定tenantの管理者roleで `status=1`・未削除・未ロック（`locked_until` が無いか過去）、`privacy.*`・`'*'` を拒否する他の有効なgroupに所属していない、break-glass username（`BREAK_GLASS_USERNAMES`）ではない | `privacyAdmins.insufficient[current=1;required=2]` |
+| 3 | `privacy-admin` の有効な管理者が2名以上。「有効」= 所属行が未削除、設定tenantの管理者roleで `status=1`・未削除、**OIDCでログインできる**（設定tenant・`OIDC_ISSUER_URI` の有効なOIDC providerに APPROVED の外部identity link を持つ。`ProductionSecurityConfigurationValidator` のOIDC管理者の数え方と同じ）、`'*'`・`privacy.` 接頭辞の拒否行を持つ有効なgroupに所属していない、break-glass username（`BREAK_GLASS_USERNAMES`。大文字小文字を区別しない）ではない。**アカウントロック中の管理者も数える**（下記） | `privacyAdmins.insufficient[current=1;required=2]` / `privacyAdmins.oidcProviderUnavailable` |
 | 4 | `privacy-admin` 以外の有効なgroupが `privacy.` 接頭辞の許可行（`privacy.*`・`privacy.<x>`）を持たない（W3-14 review P3-2。`'*'` だけの検査では privacy-admin を複製したgroupを見落とすため） | `privacyAllow.outsidePrivacyAdmin[<group key>;…]` |
 | 5 | `PRIVACY_DSAR_ENABLED` は A2a のマージまでONにできない（入口と §5.1 の追加前提の検査が未実装） | `dsar.prerequisitesNotImplemented` |
 
 - 例外messageには固定の違反コード・flag名・group key・人数だけを出し、決定ID・digest・username・例外本文は出さない。照会に失敗した場合は `*.unverifiable` として起動を止める（fail-closed）。
-- privacy-admin が2名を下回った状態（無効化・ロック・退職・role変更）でも動作中のprocessは止めないが、次回の起動は失敗する。所属者を無効化する前に後任を割り当てる。
+- **アカウントロックは起動時の人数に影響しない**（W3-14b review P2-1）。ロックは未認証者でもlogin失敗5回で30分起こせる一時的な状態なので、起動条件にすると外部からアプリ全体の再起動を止められてしまう。ロック中の管理者は、実行時に privacy の各要求で拒否される（`SecurityContextCallerContextProvider` が要求ごとに `locked_until` を確認する）。
+- privacy-admin が2名を下回った状態（無効化・退職・role変更・OIDC link の解除）でも動作中のprocessは止めないが、次回の起動は失敗する。所属者を無効化する前に後任を割り当てる。**privacy-admin は3名（deploy-runbook.md §5.0 のOIDC管理者 C〜E 全員）を推奨する**。2名だと1名の退職・無効化で次回の起動が止まり、ロック中の1名しか実際に操作できない時間も生じる。
+- `*.unverifiable` で止まった場合は、DB接続とschemaを先に確認する（この検査は `ProductionSchemaVersionGuard` より先に動くことがあるため、schemaが artifact と一致しない場合にもこのコードになる）。
 
 ##### 4.7.2.1 署名日前・失効（時間要因）の扱い（NF-06・NF-08と同じ。2026-11-14 決定）
 
@@ -233,10 +235,10 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 #### 4.7.4 ONにする手順（`PRIVACY_RETENTION_ENABLED`）
 
 1. **署名の確認**: D-01・D-09 の決定書（決定ID・署名日・失効日・承認tenant・承認capability・digest）が揃っていることを Owner が確認する。B-NF07-1 により、本番公開は production bridge（W-1〜W-12）の接続後である。
-2. **privacy-admin を2名割り当てる**（deploy-runbook.md §5.0 のOIDC管理者 C〜E のうち2名を推奨。break-glass口座 A・B は400で拒否される）。
+2. **privacy-admin を割り当てる**（最低2名。deploy-runbook.md §5.0 のOIDC管理者 C〜E の**3名全員を推奨**。OIDCでログインできない管理者は数えられない。break-glass口座 A・B は大文字小文字の表記揺れも含めて400で拒否される）。
    - 割当は `PUT /api/permission-groups/users/{id}` で、対象者を `privacy-admin` **だけ**に割り当てる（`role-admin` の代わり。`'*'` を持つので管理権限は減らない。`role-admin` 等との同時割当は409）。対象者のsessionは失効し、再ログインが必要。
-   - **最初の割当には既存の privacy-admin がいない**（W3-14 review P3-4）。この場合の通知は、対象者以外の有効な管理者全員へ送られる（`PRIVACY_ADMIN_CHANGED`）。ただし通知は事後の知らせにすぎないため、最初の2名の割当は **Owner と Security の二者が対象者を事前に確認し、割当後に監査（`t_audit_log.application_code='PRIVACY_ADMIN_GROUP_CHANGED'`、`before_state`/`after_state` に group key）を二者で照合する**。G-ID の署名で割当規則が置き換わるまでの暫定規則である。
-   - 確認SQL（DBA。設定tenantを `:tenant` に入れる。2以上であること）:
+   - **最初の割当には既存の privacy-admin がいない**（W3-14 review P3-4）。この場合の通知は、対象者以外の有効な管理者全員へ送られる（`PRIVACY_ADMIN_CHANGED`）。ただし通知は事後の知らせにすぎないため、最初の2名（推奨3名）の割当は **Owner と Security の二者が対象者を事前に確認し、割当後に監査（`t_audit_log.application_code='PRIVACY_ADMIN_GROUP_CHANGED'`、`before_state`/`after_state` に group key）を二者で照合する**。G-ID の署名で割当規則が置き換わるまでの暫定規則である。
+   - 確認SQL（DBA。起動検査 `UserPermissionGroupMapper#selectEffectivePrivacyAdminUsernames` と同じ条件。`:tenant` に `OIDC_TENANT_ID`、`:issuer` に `OIDC_ISSUER_URI`、`:bg1`・`:bg2` に `BREAK_GLASS_USERNAMES` の2件を小文字で入れる。2以上（推奨3）であること。ロックの有無は見ない）:
      ```sql
      SELECT COUNT(DISTINCT u.id) FROM t_user_permission_group upg
        JOIN m_permission_group pg ON pg.id = upg.group_id
@@ -244,12 +246,23 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
       WHERE upg.tenant_id = :tenant AND upg.deleted_flag = 0
         AND pg.tenant_id = :tenant AND pg.group_key = 'privacy-admin' AND pg.enabled = 1 AND pg.deleted_flag = 0
         AND u.tenant_id = :tenant AND u.role = '管理者' AND u.status = 1 AND u.deleted_flag = 0
-        AND (u.locked_until IS NULL OR u.locked_until <= NOW());
-     -- break-glass username と、privacy.* / '*' を拒否する他groupへの所属者は起動検査で除かれる
+        AND LOWER(TRIM(u.username)) NOT IN (:bg1, :bg2)
+        AND EXISTS (SELECT 1 FROM t_user_external_identity x
+                      JOIN m_identity_provider p ON p.id = x.provider_id
+                     WHERE x.tenant_id = :tenant AND x.user_id = u.id AND x.review_status = 'APPROVED'
+                       AND x.deleted_flag = 0 AND p.tenant_id = :tenant AND p.issuer_uri = :issuer
+                       AND p.provider_type = 'OIDC' AND p.enabled = 1 AND p.deleted_flag = 0)
+        AND NOT EXISTS (SELECT 1 FROM t_user_permission_group o
+                          JOIN m_permission_group og ON og.id = o.group_id
+                          JOIN t_permission_group_action d ON d.group_id = og.id
+                         WHERE o.tenant_id = :tenant AND o.user_id = u.id AND o.deleted_flag = 0
+                           AND og.tenant_id = :tenant AND og.enabled = 1 AND og.deleted_flag = 0
+                           AND d.tenant_id = :tenant AND d.deny_flag = 1 AND d.deleted_flag = 0
+                           AND (d.action_key = '*' OR d.action_key LIKE 'privacy.%'));
      ```
 3. **束縛値の設定**: 4.7.3 の環境変数を全instanceに同じ値で設定する。digest は決定書の値から二者がそれぞれ正規形を作り、同じ値になることを確認してから転記する。
 4. `PRIVACY_RETENTION_ENABLED=true` にして**全停止で再起動**する（rolling 更新で旧値のinstanceと混在させない）。
-5. 起動ログで `[privacy] NF07のflag ONの前提を確認しました: flags=privacy.retention.enabled decisionIds=[…] privacyAdmins=2` と、`[機能スイッチ] 起動時の状態` の `NF07_RETENTION=ON` を確認する。起動に失敗した場合は例外messageの違反コード（4.7.2）を確認し、直すまでは `PRIVACY_RETENTION_ENABLED` を外して起動する。代わりに `NF07_PRIVACY_STOPPED_AT_STARTUP` のWARNが出て `NF07_RETENTION=OFF` になった場合は、署名日前か失効である（4.7.2.1。署名日前なら署名日に自動で開く）。
+5. 起動ログで `[privacy] NF07のflag ONの前提を確認しました: flags=privacy.retention.enabled decisionIds=[…] privacyAdmins=3`（2名以上）と、`[機能スイッチ] 起動時の状態` の `NF07_RETENTION=ON` を確認する。起動に失敗した場合は例外messageの違反コード（4.7.2）を確認し、直すまでは `PRIVACY_RETENTION_ENABLED` を外して起動する。代わりに `NF07_PRIVACY_STOPPED_AT_STARTUP` のWARNが出て `NF07_RETENTION=OFF` になった場合は、署名日前か失効である（4.7.2.1。署名日前なら署名日に自動で開く）。
 6. 動作確認: privacy-admin で `GET /api/privacy/policies/evaluate?...` が200（`decisionStatus=POLICY_UNKNOWN`。NF07-REG・TRUST の前は `APPROVED_ACTIVE` にならない）、privacy-admin 以外の管理者は403。
 
 #### 4.7.5 失効・再承認（更新）・OFF
@@ -287,5 +300,7 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 | `PortalServiceRequestVisibilityIntegrationTest` | Docker不要（H2） | 公開開始時刻未設定の実context。portalの一覧・詳細・返信・CSAT・添付uploadが社内登録分を404/非表示にし、内部サービスデスクは従来どおり |
 | `FeatureSwitchServletContainerIntegrationTest` | Docker不要・実Tomcat起動（Windowsでは **PowerShell環境** で実行） | NF-01をproperty形式、NF-04を環境変数形式でOFFにした実context。未認証の画面404（login誘導されない・no-store）、管理者と未認証で同一の404 JSON、存在しないURLの404との同一性、ONの機能・中核APIはSpring Securityへ届くこと、PWA静的入口の遮断範囲、filter登録順 |
 | `PrivacyDecisionBindingTest` | Docker不要 | NF-07の決定ID束縛: 正規形とdigest、各項目の欠落、capabilityごとの必要な決定、未承認capability、tenant不一致、失効・署名日前、digest改竄、ID重複、決定ID・日付の判定がNF-08と一致すること |
-| `PrivacyProductionConfigurationValidatorTest` | Docker不要（H2） | NF-07 flag ONのprod起動検査: 全OFFは無検査、各欠項・tenant不一致・digest改竄で起動失敗、失効・署名日前は起動してWARNとOFF扱い、時間要因と構造的不足の同時は起動失敗、privacy-admin 1名／無効・ロック・削除・他role・他tenant・拒否group所属・break-glassの除外、privacy-admin groupの許可欠落・拒否行、他groupの `privacy.` 許可行、DSAR未実装、照会失敗、messageに値を出さないこと |
+| `PrivacyProductionConfigurationValidatorTest` | Docker不要（H2） | NF-07 flag ONのprod起動検査: 全OFFは無検査、各欠項・tenant不一致・digest改竄・capability未承認で起動失敗、失効・署名日前は起動してWARNとOFF扱い、時間要因と構造的不足の同時は起動失敗、privacy-admin 1名／無効・削除・他role・他tenant・OIDC link無し・`'*'`/`privacy.<x>` 拒否group所属・break-glass（大文字小文字違い含む）の除外、ロック中は数える、OIDC provider無し、privacy-admin groupの許可欠落・拒否行、他groupの `privacy.` 許可行、DSAR未実装、照会失敗、messageに値を出さないこと |
 | `PrivacyDecisionWindowMonitorTest` | Docker不要 | NF-07の有効期間監視: 固定・可変Clockで、有効・EXPIRING・失効・署名日前・不完全の状態とmetric・日付ごとのWARN、実行中に失効日（JST 0:00）を迎えると `FeatureSwitches`・`FeatureSwitchFilter`・`PrivacyAccessGuard` がOFFと同じ404になること、署名日に自動で開くこと、実行時条件の例外はOFF |
+| `FeatureSwitchRuntimeConditionTest` | Docker不要 | 機能スイッチの実行時条件: 設定ONでも条件を満たさない間は `isEnabled`・`blockingFeature`・`disabledKeys`・`visibleMenuKeys` がOFFと同じ、起動ログの `NF07_RETENTION=OFF` と理由のWARN、条件の無い機能・`new` は従来どおり |
+| `PrivacyProductionConfigurationTest` | Docker不要 | prod の policy source はスイッチONかつ決定ID束縛の有効期間内だけ読む（OFFなら束縛を見ない、判定部品が無い・例外なら読まない） |

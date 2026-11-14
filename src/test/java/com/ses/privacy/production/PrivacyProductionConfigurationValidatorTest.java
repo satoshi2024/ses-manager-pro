@@ -5,6 +5,8 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.ses.config.OidcSecurityProperties;
+import com.ses.entity.IdentityProvider;
+import com.ses.mapper.IdentityProviderMapper;
 import com.ses.mapper.PermissionGroupMapper;
 import com.ses.mapper.UserPermissionGroupMapper;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -52,6 +54,7 @@ class PrivacyProductionConfigurationValidatorTest {
     /** JST 2026-11-14 12:00。 */
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-11-14T03:00:00Z"), ZoneId.of("Asia/Tokyo"));
     private static final long BASE_ID = 1_414_000L;
+    private static final String ISSUER = "https://idp.invalid/nf07-14b";
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -59,14 +62,18 @@ class PrivacyProductionConfigurationValidatorTest {
     private PermissionGroupMapper permissionGroupMapper;
     @Autowired
     private UserPermissionGroupMapper userPermissionGroupMapper;
+    @Autowired
+    private IdentityProviderMapper identityProviderMapper;
 
     private long nextId;
+    private long providerId;
     private long privacyAdminGroupId;
     private long roleAdminGroupId;
 
     @BeforeEach
     void setUpPermissionGroups() {
         nextId = BASE_ID;
+        providerId = insertProvider(TENANT, "OIDC", ISSUER, 1);
         privacyAdminGroupId = insertGroup("privacy-admin", 1);
         allow(privacyAdminGroupId, "*");
         allow(privacyAdminGroupId, "privacy.*");
@@ -81,12 +88,13 @@ class PrivacyProductionConfigurationValidatorTest {
     void flagが全てOFFなら承認設定もDBも見ずに起動を止めない() {
         PermissionGroupMapper groups = mock(PermissionGroupMapper.class);
         UserPermissionGroupMapper members = mock(UserPermissionGroupMapper.class);
+        IdentityProviderMapper providers = mock(IdentityProviderMapper.class);
         PrivacyProductionConfigurationValidator validator = new PrivacyProductionConfigurationValidator(
-                flags(false, false), new PrivacyApprovalProperties(), oidc(), groups, members, CLOCK);
+                flags(false, false), new PrivacyApprovalProperties(), oidc(), groups, members, providers, CLOCK);
 
         assertDoesNotThrow(validator::validate);
         assertDoesNotThrow(validator::afterSingletonsInstantiated);
-        verifyNoInteractions(groups, members);
+        verifyNoInteractions(groups, members, providers);
     }
 
     // ---------------------------------------------------------------- flag ON
@@ -181,12 +189,28 @@ class PrivacyProductionConfigurationValidatorTest {
         expired.getD09().setSignedOn("2025-11-15");
         expired.getD09().setExpiresOn("2026-11-14");
         expired.setApprovalDigest(PrivacyDecisionBinding.computeDigest(expired));
-        // privacy-admin の条件は時間要因と同時でも起動を止める（mapperは0件・空を返す）
+        // privacy-admin の条件は時間要因と同時でも起動を止める（mapperは0件・空・providerなしを返す）
         IllegalStateException noAdmins = assertThrows(IllegalStateException.class, () ->
                 new PrivacyProductionConfigurationValidator(flags(true, false), expired, oidc(Set.of()),
-                        mock(PermissionGroupMapper.class), mock(UserPermissionGroupMapper.class), CLOCK).validate());
-        assertContainsAll(noAdmins, "privacyAdminGroup.notGrantingPrivacy", "privacyAdmins.insufficient[current=0;required=2]",
+                        mock(PermissionGroupMapper.class), mock(UserPermissionGroupMapper.class),
+                        mock(IdentityProviderMapper.class), CLOCK).validate());
+        assertContainsAll(noAdmins, "privacyAdminGroup.notGrantingPrivacy", "privacyAdmins.oidcProviderUnavailable",
                 "decisionBinding.d09.expiresOn.expired");
+    }
+
+    @Test
+    void ONのcapabilityが承認capabilityに無ければ起動を止める() {
+        twoPrivacyAdmins();
+        PrivacyApprovalProperties dsarOnly = approval();
+        dsarOnly.setCapabilities(new ArrayList<>(List.of("dsar")));
+        dsarOnly.getD06().setDecisionId("D06-NF07-2026-0006");
+        dsarOnly.getD06().setSignedOn("2026-11-05");
+        dsarOnly.getD06().setExpiresOn("2027-11-04");
+        dsarOnly.setApprovalDigest(PrivacyDecisionBinding.computeDigest(dsarOnly));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class, validator(dsarOnly)::validate);
+
+        assertContainsAll(error, "decisionBinding.capabilities.retention.notApproved");
     }
 
     @Test
@@ -239,25 +263,85 @@ class PrivacyProductionConfigurationValidatorTest {
     // 組合せは test method を分ける（本番の起動検査は1回だけ照会する）。
 
     @Test
-    void privacy_admin2名のうち1名がロック中なら起動を止める() {
+    void ロック中のprivacy_adminも起動時の人数に数える() {
+        // 未認証者がlogin失敗でロックを起こせるため、ロックで起動を止めない（review P2-1）。実行時は要求ごとに拒否される。
         member(admin("nf07b-ops-d"), privacyAdminGroupId);
         long locked = admin("nf07b-ops-e");
-        jdbcTemplate.update("UPDATE sys_user SET locked_until = ? WHERE id = ?",
+        jdbcTemplate.update("UPDATE sys_user SET locked_until = ?, failed_count = 5 WHERE id = ?",
                 LocalDateTime.of(2026, 11, 14, 12, 30), locked);
         member(locked, privacyAdminGroupId);
+
+        assertDoesNotThrow(validator(approval())::validate);
+    }
+
+    @Test
+    void OIDCでログインできない管理者は有効なprivacy_adminに数えない() {
+        member(admin("nf07b-ops-d"), privacyAdminGroupId);
+
+        long noLink = user("nf07b-no-link", "管理者", TENANT);
+        member(noLink, privacyAdminGroupId);
+
+        long quarantined = user("nf07b-quarantined", "管理者", TENANT);
+        identity(quarantined, providerId, "QUARANTINED");
+        member(quarantined, privacyAdminGroupId);
+
+        long deletedLink = user("nf07b-deleted-link", "管理者", TENANT);
+        long linkId = identity(deletedLink, providerId, "APPROVED");
+        jdbcTemplate.update("UPDATE t_user_external_identity SET deleted_flag = 1 WHERE id = ?", linkId);
+        member(deletedLink, privacyAdminGroupId);
+
+        long otherProvider = user("nf07b-other-provider", "管理者", TENANT);
+        identity(otherProvider, insertProvider(TENANT, "OIDC", ISSUER + "/other", 1), "APPROVED");
+        member(otherProvider, privacyAdminGroupId);
 
         assertInsufficient(1);
     }
 
     @Test
-    void ロック期限を過ぎたprivacy_adminは有効な管理者に数える() {
-        member(admin("nf07b-ops-d"), privacyAdminGroupId);
-        long unlocked = admin("nf07b-ops-e");
-        jdbcTemplate.update("UPDATE sys_user SET locked_until = ? WHERE id = ?",
-                LocalDateTime.of(2026, 11, 14, 11, 30), unlocked);
-        member(unlocked, privacyAdminGroupId);
+    void 設定tenant_issuerの有効なOIDC_providerが無ければ起動を止める() {
+        twoPrivacyAdmins();
+        jdbcTemplate.update("UPDATE m_identity_provider SET enabled = 0 WHERE id = ?", providerId);
 
-        assertDoesNotThrow(validator(approval())::validate);
+        IllegalStateException disabled = assertThrows(IllegalStateException.class, validator(approval())::validate);
+
+        assertContainsAll(disabled, "privacyAdmins.oidcProviderUnavailable");
+        assertFalse(disabled.getMessage().contains("privacyAdmins.insufficient"), "人数は数えない");
+    }
+
+    @Test
+    void issuerが未設定ならOIDC_providerを確認できないとして起動を止める() {
+        twoPrivacyAdmins();
+        OidcSecurityProperties withoutIssuer = oidc(Set.of());
+        withoutIssuer.setIssuerUri(" ");
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                new PrivacyProductionConfigurationValidator(flags(true, false), approval(), withoutIssuer,
+                        permissionGroupMapper, userPermissionGroupMapper, identityProviderMapper, CLOCK)::validate);
+
+        assertContainsAll(error, "privacyAdmins.oidcProviderUnavailable");
+    }
+
+    @Test
+    void privacy系の個別の拒否行を持つgroupにも所属する管理者は数えない() {
+        member(admin("nf07b-ops-d"), privacyAdminGroupId);
+        long narrowDeny = insertGroup("custom-policy-deny", 1);
+        deny(narrowDeny, "privacy.policy.view");
+        long partlyDenied = admin("nf07b-partly-denied");
+        member(partlyDenied, privacyAdminGroupId);
+        member(partlyDenied, narrowDeny);
+
+        assertInsufficient(1);
+    }
+
+    @Test
+    void break_glass_usernameは大文字小文字を区別せず除く() {
+        member(admin("nf07b-ops-d"), privacyAdminGroupId);
+        member(admin("nf07b-bg-second"), privacyAdminGroupId);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                validator(approval(), Set.of(" NF07B-BG-Second "))::validate);
+
+        assertContainsAll(error, "privacyAdmins.insufficient[current=1;required=2]");
     }
 
     @Test
@@ -269,9 +353,11 @@ class PrivacyProductionConfigurationValidatorTest {
         member(deletedUser, privacyAdminGroupId);
 
         long sales = user("nf07b-sales", "営業", TENANT);
+        identity(sales, providerId, "APPROVED");
         member(sales, privacyAdminGroupId);
 
         long otherTenantUser = user("nf07b-other-tenant", "管理者", "default");
+        identity(otherTenantUser, providerId, "APPROVED");
         member(otherTenantUser, privacyAdminGroupId);
 
         long removedMembership = admin("nf07b-removed");
@@ -367,7 +453,7 @@ class PrivacyProductionConfigurationValidatorTest {
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 new PrivacyProductionConfigurationValidator(flags(true, true), both, oidc(Set.of()),
-                        permissionGroupMapper, userPermissionGroupMapper, CLOCK)::validate);
+                        permissionGroupMapper, userPermissionGroupMapper, identityProviderMapper, CLOCK)::validate);
 
         assertContainsAll(error, "privacy.dsar.enabled", "dsar.prerequisitesNotImplemented");
         assertFalse(error.getMessage().contains("decisionBinding."), "束縛自体は揃っている");
@@ -377,19 +463,34 @@ class PrivacyProductionConfigurationValidatorTest {
     void 照会できなければ確認できないとして起動を止め例外の本文を出さない() {
         PermissionGroupMapper groups = mock(PermissionGroupMapper.class);
         UserPermissionGroupMapper members = mock(UserPermissionGroupMapper.class);
+        IdentityProviderMapper providers = mock(IdentityProviderMapper.class);
         when(groups.countPrivacyAdminGroupsGrantingPrivacy(any())).thenThrow(new IllegalStateException("secret-sql-1"));
         when(groups.selectGroupKeysAllowingPrivacyOutsidePrivacyAdmin(any()))
                 .thenThrow(new IllegalStateException("secret-sql-2"));
-        when(members.selectEffectivePrivacyAdminUsernames(any(), any(), any()))
+        IdentityProvider provider = new IdentityProvider();
+        provider.setId(1L);
+        provider.setProviderType("OIDC");
+        when(providers.selectEnabledByTenantAndIssuer(TENANT, ISSUER)).thenReturn(provider);
+        when(members.selectEffectivePrivacyAdminUsernames(any(), any(), any(), any()))
                 .thenThrow(new IllegalStateException("secret-sql-3"));
         PrivacyProductionConfigurationValidator validator = new PrivacyProductionConfigurationValidator(
-                flags(true, false), approval(), oidc(Set.of()), groups, members, CLOCK);
+                flags(true, false), approval(), oidc(Set.of()), groups, members, providers, CLOCK);
 
         IllegalStateException error = assertThrows(IllegalStateException.class, validator::validate);
 
         assertContainsAll(error, "privacyAdminGroup.unverifiable", "privacyAdmins.unverifiable",
                 "privacyAllow.unverifiable");
         assertFalse(error.getMessage().contains("secret-sql"), "例外の本文を出さない");
+
+        IdentityProviderMapper brokenProviders = mock(IdentityProviderMapper.class);
+        when(brokenProviders.selectEnabledByTenantAndIssuer(any(), any()))
+                .thenThrow(new IllegalStateException("secret-sql-4"));
+        IllegalStateException providerError = assertThrows(IllegalStateException.class,
+                new PrivacyProductionConfigurationValidator(flags(true, false), approval(), oidc(Set.of()),
+                        mock(PermissionGroupMapper.class), mock(UserPermissionGroupMapper.class),
+                        brokenProviders, CLOCK)::validate);
+        assertContainsAll(providerError, "privacyAdmins.unverifiable");
+        assertFalse(providerError.getMessage().contains("secret-sql"), "例外の本文を出さない");
     }
 
     @Test
@@ -441,7 +542,7 @@ class PrivacyProductionConfigurationValidatorTest {
     private PrivacyProductionConfigurationValidator validator(PrivacyApprovalProperties approval,
                                                               Set<String> breakGlassUsernames) {
         return new PrivacyProductionConfigurationValidator(flags(true, false), approval, oidc(breakGlassUsernames),
-                permissionGroupMapper, userPermissionGroupMapper, CLOCK);
+                permissionGroupMapper, userPermissionGroupMapper, identityProviderMapper, CLOCK);
     }
 
     private static PrivacyFeatureProperties flags(boolean retention, boolean dsar) {
@@ -458,6 +559,7 @@ class PrivacyProductionConfigurationValidatorTest {
     private static OidcSecurityProperties oidc(Set<String> breakGlassUsernames) {
         OidcSecurityProperties properties = new OidcSecurityProperties();
         properties.setTenantId(TENANT);
+        properties.setIssuerUri(ISSUER);
         properties.setBreakGlassUsernames(new LinkedHashSet<>(breakGlassUsernames));
         return properties;
     }
@@ -514,8 +616,28 @@ class PrivacyProductionConfigurationValidatorTest {
         return id;
     }
 
+    /** OIDC でログインできる管理者（設定 provider に APPROVED の外部identity link を持つ）。 */
     private long admin(String username) {
-        return user(username, "管理者", TENANT);
+        long id = user(username, "管理者", TENANT);
+        identity(id, providerId, "APPROVED");
+        return id;
+    }
+
+    private long insertProvider(String tenantId, String providerType, String issuer, int enabled) {
+        long id = nextId++;
+        jdbcTemplate.update("INSERT INTO m_identity_provider (id, tenant_id, provider_type, issuer_uri, client_id, enabled, "
+                + "deleted_flag) VALUES (?, ?, ?, ?, ?, ?, 0)", id, tenantId, providerType, issuer, "nf07b-client", enabled);
+        return id;
+    }
+
+    private long identity(long userId, long provider, String reviewStatus) {
+        long id = nextId++;
+        boolean approved = "APPROVED".equals(reviewStatus);
+        jdbcTemplate.update("INSERT INTO t_user_external_identity (id, tenant_id, user_id, provider_id, subject, review_status, "
+                        + "reviewed_at, reviewed_by, deleted_flag) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
+                id, TENANT, userId, provider, "nf07b-subject-" + id, reviewStatus,
+                approved ? LocalDateTime.of(2026, 11, 1, 10, 0) : null, approved ? 1L : null);
+        return id;
     }
 
     private long user(String username, String role, String tenantId) {

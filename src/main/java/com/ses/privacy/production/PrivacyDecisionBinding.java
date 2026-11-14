@@ -117,26 +117,6 @@ public final class PrivacyDecisionBinding {
         return capability == null ? Set.of() : REQUIRED_DECISIONS.get(capability);
     }
 
-    /** いずれかの項目が設定されているか（部分設定の検出用）。 */
-    public static boolean configured(PrivacyApprovalProperties properties) {
-        if (properties == null) {
-            return false;
-        }
-        if (!trim(properties.getTenantId()).isEmpty() || !trim(properties.getApprovalDigest()).isEmpty()
-                || (properties.getCapabilities() != null
-                && properties.getCapabilities().stream().anyMatch(value -> !trim(value).isEmpty()))) {
-            return true;
-        }
-        for (Decision decision : Decision.values()) {
-            PrivacyApprovalProperties.DecisionReference reference = properties.reference(decision);
-            if (reference != null && (!trim(reference.getDecisionId()).isEmpty()
-                    || !trim(reference.getSignedOn()).isEmpty() || !trim(reference.getExpiresOn()).isEmpty())) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     /**
      * 束縛を評価する。
      *

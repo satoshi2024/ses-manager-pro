@@ -60,7 +60,7 @@
 | # | 不変条件 |
 |---|---|
 | I-1 | 法的な値（保持期間、起算trigger、処分方式、本人確認基準、DSAR期限、hold種類と権限者、unquarantine基準）は署名まで UNKNOWN。コード・migration・設定の既定値に書かない。技術上の現在値（例: `app.resume.retention-days`=30、g10 allow-list の 730日）を法的値へ昇格しない |
-| I-2 | `privacy.retention.enabled` / `privacy.dsar.enabled` は既定OFF。真偽値として解釈できない値は起動失敗（既存 `FeatureSwitchProperties` と同じ扱い）。OFF の入口は 404（登録済み path は `FeatureSwitchFilter`、それ以外は `PrivacyAccessGuard`） |
+| I-2 | `privacy.retention.enabled` / `privacy.dsar.enabled` は既定OFF。真偽値として解釈できない値は起動失敗（既存 `FeatureSwitchProperties` と同じ扱い）。OFF の入口は 404（`Feature` に登録した path は `FeatureSwitchFilter` と `PrivacyAccessGuard`。未登録の `/api/privacy/<x>` は handler が無く guard を通らないため、privacy-admin 以外の管理者は 403、privacy-admin は Spring の 404。W3-14b で訂正） |
 | I-3 | 未知は capability 単位で拒否する。決定ID欠落、policy UNKNOWN、provider 未登録、journal 不達、trust anchor 不明、失効状態不明は全て拒否（§5.2 の理由コード）。保全方向（hold 開始）は決定と journal が揃えば許可し、解除・処分・交付・外部送信は署名と専用 proof が揃うまで拒否する |
 | I-4 | 第1期は業務データに対する削除・匿名化・restrict の writer、外部 provider の呼出、DSAR 成果物の自動交付を一切持たない（NF07 自身が作った一時 package を交付記録・期限で消すことは対象外） |
 | I-5 | NF03 の日常 CRUD 等の既存業務を `POLICY_UNKNOWN` を理由に止めない（prod-wiring §4.1） |
@@ -400,7 +400,7 @@ H2 では生成列・CHECK・複合 FK の構文や挙動が異なるため、`s
 #### 3.1.7 完了条件
 
 1. 上記テストが固定 SHA で 0 failure / 0 error / 0 skip（Runner 実行）。
-2. 既定構成（flag OFF）で `/api/privacy/**` が 404 になり（登録済み prefix は `FeatureSwitchFilter`、未登録は `PrivacyAccessGuard`）、policy source の DB 読取が 0 回。
+2. 既定構成（flag OFF）で `Feature` に登録した `/api/privacy/**` の入口が 404 になり（`FeatureSwitchFilter` と `PrivacyAccessGuard`。未登録の path は I-2 のとおり privacy-admin 以外の管理者 403・privacy-admin は Spring の 404。W3-14b で訂正）、policy source の DB 読取が 0 回。
 3. 業務 action の判定を確かめる既存 assertion は1つも変更しない。既存 assertion で変更するのは `ActionPermissionMatrixTest` の seed 件数3行（`permissionGroupSeedの内容そのものを検査する` の営業 deny 8→9、HR deny 7→8、マネージャー deny 8→9）だけで、Runner と Review は diff でこの3行以外の既存 assertion に変更が無いことを機械的に確認する。
 4. 保持期間・処分方式などの法的な値が migration・設定既定値に1件も無い（Review で確認）。
 5. `com.ses.privacy.foundation` の合成層の test（`PrivacyJournalLinearizationMySqlTest` 等）に回帰がない（Runner が既存 shard で確認）。
@@ -408,7 +408,7 @@ H2 では生成列・CHECK・複合 FK の構文や挙動が異なるため、`s
 
 #### 3.1.8 Demo
 
-1. 既定（flag OFF）で起動し、管理者で `GET /api/privacy/policies/evaluate?moduleCode=NF08_AI_SUMMARY&dataElementId=AI_PROMPT_LOG&targetAction=EXTERNAL_DISPATCH&targetProvider=gemini-adapter` を呼ぶ → 404。`GET /api/privacy/unknown-sub` も 404。
+1. 既定（flag OFF）で起動し、管理者で `GET /api/privacy/policies/evaluate?moduleCode=NF08_AI_SUMMARY&dataElementId=AI_PROMPT_LOG&targetAction=EXTERNAL_DISPATCH&targetProvider=gemini-adapter` を呼ぶ → 404。`GET /api/privacy/unknown-sub` は handler が無いため、`role-admin` だけの管理者は 403（privacy-admin なら Spring の 404。W3-14b で訂正）。
 2. dev で `PRIVACY_RETENTION_ENABLED=true` として再起動し、`role-admin` だけの管理者で同じ API を呼ぶ → 403（`privacy.*` deny）。
 3. 別の管理者が `PUT /api/permission-groups/users/{id}` で対象管理者を `privacy-admin` だけに割り当てる → 対象者の session が失効し、監査に group key が残り、既存の privacy-admin に通知が届く → 再ログインして同じ API を呼ぶ → 200、`decisionStatus=POLICY_UNKNOWN`。
 4. 営業ユーザーに `privacy-admin` を割り当てようとする → 400。`role-admin` と `privacy-admin` の同時割当 → 409。
@@ -673,7 +673,7 @@ CREATE TABLE t_disposition_item (
 
 | key（環境変数） | 既定 | OFF のとき | ON にしたとき追加で要るもの（prod の起動時検査） |
 |---|---|---|---|
-| `privacy.retention.enabled`（`PRIVACY_RETENTION_ENABLED`） | false | `NF07_RETENTION` に登録した `/api/privacy/policies`・`/api/privacy/catalog`・`/api/privacy/holds`・`/privacy/holds` が 404（`FeatureSwitchFilter`）。未登録の `/api/privacy/<x>` も `PrivacyAccessGuard` が 404。policy source は読まずに `POLICY_UNKNOWN`/`SOURCE_DISABLED`。`PrivacyHoldGate` の判定は flag に依存しない（掛けた hold は OFF でも守る。§3.4.4） | D-01・D-09 の決定ID、`privacy-admin` group が存在し有効な管理者が2名以上所属、hold を使うなら journal 設定 |
+| `privacy.retention.enabled`（`PRIVACY_RETENTION_ENABLED`） | false | `NF07_RETENTION` に登録した `/api/privacy/policies`・`/api/privacy/catalog`・`/api/privacy/holds`・`/privacy/holds` が 404（`FeatureSwitchFilter`・`PrivacyAccessGuard`）。未登録の `/api/privacy/<x>` は handler が無く guard を通らないため、privacy-admin 以外の管理者は 403、privacy-admin は Spring の 404（W3-14b で訂正）。policy source は読まずに `POLICY_UNKNOWN`/`SOURCE_DISABLED`。`PrivacyHoldGate` の判定は flag に依存しない（掛けた hold は OFF でも守る。§3.4.4） | D-01・D-09 の決定ID、`privacy-admin` group が存在し有効な管理者が2名以上所属、hold を使うなら journal 設定 |
 | `privacy.dsar.enabled`（`PRIVACY_DSAR_ENABLED`） | false | `/api/privacy/dsar`・`/privacy/dsar` が 404、期限 scheduler 停止 | D-01・D-06・D-09 の決定ID、`privacy.dsar.due-days` と `privacy.dsar.package-max-age`、privacy-admin 2名以上、F2 provider が1件以上登録済み |
 | `privacy.retention.disposition.enabled`（B1 で追加） | false | 処分 batch の入口と worker 停止 | 親が ON、D-02・D-04 の決定ID、緊急停止の設定 |
 
@@ -682,8 +682,8 @@ CREATE TABLE t_disposition_item (
 **W3-14b 実装記録（2026-11-14）**: W3-14 は §3.1 を W3-14a/b に分け、決定ID束縛と ON の起動時検査を W3-14b で実装した（W3-14 review P2-1）。
 
 - `PrivacyDecisionBinding`（純粋評価）と `PrivacyApprovalProperties`（`privacy.approval.*`）。§5.2 の `privacy.approval.dNN.decision-id` / `signed-on` に、NF06・NF08 と同じく `expires-on`、承認 tenant（`tenant-id`）、承認 capability（`capabilities`）、決定書に記載する束縛内容 digest（`approval-digest`、正規形 `nf07-privacy-decision-binding-v1`）を加えた。retention は D-01・D-09、dsar は D-01・D-06・D-09 を要する。D-02〜D-05・D-07・D-08 はそれを前提にする batch で足す。
-- `PrivacyProductionConfigurationValidator`（prod、`SmartInitializingSingleton`）: いずれかの flag が ON なら、束縛の構造的な完全性（tenant 一致・capability 承認・digest 一致等）、`privacy-admin` group が `privacy.*` を許可し privacy の拒否行を持たないこと、有効な管理者2名以上（有効・未削除・未ロック・管理者 role・拒否 group 非所属・break-glass username 以外）、`privacy-admin` 以外の有効な group に `privacy.` 接頭辞の許可行が無いこと（review P3-2）を検査し、欠ければ起動しない。全て OFF なら検査しない。NF06・NF08 と同じく、失効・署名日前（時間要因）だけなら起動を止めず WARN（`NF07_PRIVACY_STOPPED_AT_STARTUP`）を出す（依頼者決定 2026-11-14）。その間は `PrivacyDecisionWindowMonitor` が機能スイッチの実行時条件として NF07 を OFF と同じに扱い（filter・guard の404、policy source を読まない）、JST 業務日ごとに再評価するため実行中に失効日を迎えた日からも閉じる。状態は metric `ses_privacy_decision_binding_state` と WARN（`NF07_PRIVACY_DECISION_STATE`）で知らせる。dsar は A2a まで前提（上表の `privacy.dsar.*`・F2 provider）を検査できないため、ON にすると起動しない。
-- 上表の「未登録の `/api/privacy/<x>` も `PrivacyAccessGuard` が 404」は不正確だった（review P3-6、R2-P3-2）。未登録の path には handler が無く guard を通らないため、privacy-admin 以外の管理者は 403（`MenuPermissionFilter`）、privacy-admin は Spring の 404 になる。404 を保証するのは `Feature` に登録し guard を通す入口だけである（I-2 の同じ記述も同様）。
+- `PrivacyProductionConfigurationValidator`（prod、`SmartInitializingSingleton`）: いずれかの flag が ON なら、束縛の構造的な完全性（tenant 一致・capability 承認・digest 一致等）、`privacy-admin` group が `privacy.*` を許可し privacy の拒否行を持たないこと、有効な管理者2名以上（有効・未削除・管理者 role・OIDC でログインできる・`'*'`/`privacy.` の拒否 group 非所属・break-glass username 以外。アカウントロックは外部から起こせる一時状態なので数え方に含めず、実行時に要求ごとに拒否する。W3-14b review P2-1）、`privacy-admin` 以外の有効な group に `privacy.` 接頭辞の許可行が無いこと（review P3-2）を検査し、欠ければ起動しない。全て OFF なら検査しない。NF06・NF08 と同じく、失効・署名日前（時間要因）だけなら起動を止めず WARN（`NF07_PRIVACY_STOPPED_AT_STARTUP`）を出す（依頼者決定 2026-11-14）。その間は `PrivacyDecisionWindowMonitor` が機能スイッチの実行時条件として NF07 を OFF と同じに扱い（filter・guard の404、policy source を読まない）、JST 業務日ごとに再評価するため実行中に失効日を迎えた日からも閉じる。状態は metric `ses_privacy_decision_binding_state` と WARN（`NF07_PRIVACY_DECISION_STATE`）で知らせる。dsar は A2a まで前提（上表の `privacy.dsar.*`・F2 provider）を検査できないため、ON にすると起動しない。
+- 上表の「未登録の `/api/privacy/<x>` も `PrivacyAccessGuard` が 404」は不正確だった（review P3-6、R2-P3-2）。未登録の path には handler が無く guard を通らないため、privacy-admin 以外の管理者は 403（`MenuPermissionFilter`）、privacy-admin は Spring の 404 になる。404 を保証するのは `Feature` に登録し guard を通す入口だけである。I-2、§3.1.7 の2、§3.1.8 の Demo 1（`unknown-sub` は role-admin の管理者で 403）、上表の原文も W3-14b r3 で訂正した（review P3-5）。
 - 運用手順は `.kiro/specs/production-launch/feature-switches.md` 4.7。最初の privacy-admin の割当は既存の privacy-admin がいないため、対象者以外の有効な管理者全員へ通知する（review P3-4）。break-glass username への `privacy-admin` 割当は 400（review P3-11）。
 
 ### 5.2 UNKNOWN の理由コード（capability 単位の拒否）

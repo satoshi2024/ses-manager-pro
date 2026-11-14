@@ -53,7 +53,7 @@ class PermissionGroupManagementServiceImplTest {
         OidcSecurityProperties properties = new OidcSecurityProperties();
         properties.setTenantId("tenant-a");
         properties.setBreakGlassUsernames(new java.util.LinkedHashSet<>(List.of("admin", "bg-second")));
-        service =new PermissionGroupManagementServiceImpl(permissionGroupMapper,
+        service = new PermissionGroupManagementServiceImpl(permissionGroupMapper,
                 userPermissionGroupMapper, sysUserMapper, auditLogMapper,
                 persistentSessionService, properties, permissionGroupActionMapper, notificationService);
         authentication = authenticate(1L, "admin", "管理者");
@@ -231,6 +231,21 @@ class PermissionGroupManagementServiceImplTest {
         verify(userPermissionGroupMapper, never()).deleteAllForUser(any(), any());
         verify(auditLogMapper, never()).insert(any(AuditLog.class));
         verify(notificationService, never()).publishToUser(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void break_glass口座の大文字小文字の表記揺れもprivacy_adminの割当を400で拒否する() {
+        SysUser target = target(9L, "管理者");
+        target.setUsername("BG-Second");
+        when(sysUserMapper.selectByIdForUpdate(9L)).thenReturn(target);
+        when(permissionGroupMapper.selectList(any())).thenReturn(List.of(group(6L, "privacy-admin")));
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.replaceAssignments(9L, Set.of(6L), authentication));
+
+        assertEquals(400, error.getCode());
+        assertEquals("error.permission.breakGlassPrivacyAdmin", error.getMessageKey());
+        verify(userPermissionGroupMapper, never()).deleteAllForUser(any(), any());
     }
 
     @Test

@@ -21,6 +21,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.util.StringUtils;
 
 import java.time.Clock;
+import java.util.function.BooleanSupplier;
 
 /**
  * NF07 policy 照会 port の Spring 登録（production-bridge-phased-plan.md §3.1.1、W-4）。
@@ -55,11 +56,7 @@ public class PrivacyProductionConfiguration {
                 ? oidcProperties.getTenantId() : "default";
         return ProductionPrivacyComponents.productionPolicyReadonlyQuery(
                 environment,
-                // 決定ID束縛が有効期間外（署名日前・失効）の間は OFF と同じく source を読まない（W3-14b）。
-                // 判定部品が取れなければ OFF（fail-closed）。
-                () -> privacyFeatureProperties.getRetention() != null
-                        && privacyFeatureProperties.getRetention().isEnabled()
-                        && decisionWindowSatisfied(decisionWindowProvider),
+                retentionSourceEnabled(privacyFeatureProperties, decisionWindowProvider),
                 legalEntityContextService,
                 sysUserMapper,
                 authorizationServiceProvider::getIfAvailable,
@@ -69,6 +66,19 @@ public class PrivacyProductionConfiguration {
                 ConfiguredPolicyTrustRegistry.empty(),
                 new UnknownRevocationStatusProvider(),
                 clock);
+    }
+
+    /**
+     * policy source を読んでよいか（照会のたびに評価する）。公開スイッチが OFF なら決定ID束縛を見ずに false。
+     * ON でも決定ID束縛が有効期間外（署名日前・失効）の間は OFF と同じく source を読まない（W3-14b）。
+     * 判定部品が取れない・例外なら false（fail-closed）。
+     */
+    static BooleanSupplier retentionSourceEnabled(PrivacyFeatureProperties privacyFeatureProperties,
+                                                  ObjectProvider<PrivacyDecisionWindowMonitor> decisionWindowProvider) {
+        return () -> privacyFeatureProperties != null
+                && privacyFeatureProperties.getRetention() != null
+                && privacyFeatureProperties.getRetention().isEnabled()
+                && decisionWindowSatisfied(decisionWindowProvider);
     }
 
     private static boolean decisionWindowSatisfied(ObjectProvider<PrivacyDecisionWindowMonitor> provider) {

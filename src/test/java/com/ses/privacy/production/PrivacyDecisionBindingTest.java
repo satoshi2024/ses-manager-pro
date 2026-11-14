@@ -79,10 +79,6 @@ class PrivacyDecisionBindingTest {
                 List.of("tenantId.missing", "capabilities.missing", "approvalDigest.missing")),
                 () -> String.join(",", evaluation.violations()));
         assertNull(PrivacyDecisionBinding.computeDigest(new PrivacyApprovalProperties()));
-        assertFalse(PrivacyDecisionBinding.configured(new PrivacyApprovalProperties()));
-        PrivacyApprovalProperties partial = new PrivacyApprovalProperties();
-        partial.getD09().setSignedOn("2026-11-10");
-        assertTrue(PrivacyDecisionBinding.configured(partial), "部分設定を検出する");
     }
 
     @Test
