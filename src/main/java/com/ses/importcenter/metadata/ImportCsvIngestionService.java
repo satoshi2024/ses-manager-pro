@@ -42,8 +42,11 @@ import java.util.function.LongSupplier;
  * 保全したstageと補償削除に失敗したstageは{@link ImportStageReconciliationLedger}へ記録し、
  * {@link ImportStageReconciler}が後から回収する（A-NF06-2）。
  *
- * <p>別法人（B-NF06-5）：同一identityのjobが別法人に属する場合は、内容の存在を判定させないよう
- * 認可context変化と同じ汎用403（{@code error.forbidden}）で拒否する。
+ * <p>別法人（B-NF06-5）：同一identityのjobが別法人に属する場合は、認可context変化と同じ汎用403
+ * （{@code error.forbidden}）で拒否し、専用の409を返さない。ただしidentityの一意制約が法人を含まないため、
+ * 存在のoracleは残る（N6-3、Q-15で受容した既知リスク）。upload権限を持つ別法人の利用者は、同じbytesを送って
+ * 「成功するか403か」を比べれば、その内容が別法人に存在するかを判定できる（内容・job ID・法人は返らない）。
+ * 解消には法人を含むidentityのDDLが必要。詳細は{@code a1a-ingress-operations.md} §4。
  */
 @Service
 public class ImportCsvIngestionService {
@@ -146,8 +149,13 @@ public class ImportCsvIngestionService {
                     .direction("INCOMING").sourceType("RECEIVED")
                     .originalName("upload.csv").contentType("text/csv")
                     .createdBy(before.actorUserId()).build();
-            staged = documents.stageReceivedForImport(documentRequest, temp, raw.size(), raw.sha256(),
-                    () -> deadline.check("stage"));
+            try {
+                staged = documents.stageReceivedForImport(documentRequest, temp, raw.size(), raw.sha256(),
+                        () -> deadline.check("stage"));
+            } catch (RuntimeException stageFailure) {
+                recordStageCompensationFailure(before.tenantId(), stageFailure);
+                throw stageFailure;
+            }
             deadline.check("stage");
             ImportAuthorizedContext beforeCommit = authorization.requireCurrentAuthorization();
             requireSameContext(before, beforeCommit);
@@ -291,8 +299,30 @@ public class ImportCsvIngestionService {
     }
 
     /**
+     * stage処理の途中失敗で、stage自身の補償削除も失敗した場合（N6-2）。stageは呼出元へ返らないため
+     * {@link #discardOwnedStage}の対象にならない。原因の印からstorage keyを取り出して照合台帳へ記録し、
+     * metric（{@code path=stage}）で通知する。元の失敗は呼出元がそのまま投げる。
+     */
+    private void recordStageCompensationFailure(String tenantId, RuntimeException stageFailure) {
+        com.ses.service.impl.ImportStageCleanupFailure.find(stageFailure).ifPresent(marker -> {
+            com.ses.entity.Document document = new com.ses.entity.Document();
+            document.setTenantId(tenantId);
+            document.setDocumentType("IMPORT");
+            com.ses.entity.DocumentVersion version = new com.ses.entity.DocumentVersion();
+            version.setTenantId(tenantId);
+            version.setStorageKey(marker.storageKey());
+            stageLedger.recordDiscardFailure(tenantId, new StagedImportDocument(document, version,
+                    marker.storageKey(), marker.operationId()), "stage");
+            log.error("[取込] stage途中失敗の補償削除にも失敗しました。objectは照合台帳から回収します: operationId={} "
+                    + "failureClass={}", marker.operationId(), LogRedaction.exceptionType(stageFailure));
+        });
+    }
+
+    /**
      * 同一identityのjobが別法人にある場合の拒否。認可context変化（{@link #requireSameContext}）と同じcode・keyにし、
-     * 別法人のjob・内容の有無を応答から判定できないようにする。ログにも別法人の情報は出さない。
+     * 応答の本文・statusからは他の認可拒否と区別できないようにする。ログにも別法人の情報は出さない。
+     * ただし、同じ利用者が他の内容ならuploadできる以上、「この内容だけ403になる」こと自体が別法人での存在を示す
+     * （N6-3。403化で消えたのは専用の409だけで、存在のoracleは残る。Q-15で既知リスクとして受容）。
      */
     private static BusinessException crossLegalEntityRejection(String phase,
                                                                ImportIdentityOwnedByOtherLegalEntityException cause) {

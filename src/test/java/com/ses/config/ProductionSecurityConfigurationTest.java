@@ -22,6 +22,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {
     // prod 単独で起動するため、H2/スキーマは test 設定を import（REV-B2-P1-003: prod+test 併用禁止）
     "spring.config.import=optional:classpath:application-test.yml",
+    // importしたapplication-test.ymlは機能スイッチを全てONにし、application-prod.ymlの既定OFFより優先される。
+    // NF-06はONのprodで署名済みadmission承認設定を必須とする（ImportAdmissionStartupValidator）ため、
+    // 本番既定と同じOFFへ戻す（本番既定がOFFであることはFeatureSwitchDefaultsTestが検証する）。
+    "app.features.nf06.enabled=false",
     "spring.flyway.enabled=false",
     "spring.flyway.locations=classpath:db/migration,classpath:db/migration-prod",
     "spring.sql.init.data-locations=classpath:sql/dummy.sql,classpath:sql/production-security-users-h2.sql",

@@ -229,13 +229,20 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         }
     }
 
+    /**
+     * 取込stageの補償削除（stage失敗時と破棄時の両方）。N6-2: 失敗を握りつぶす{@code delete}ではなく
+     * {@code deleteStrict}を使い、失敗は原因に{@link ImportStageCleanupFailure}を付けた500で返す。
+     * 取込側はこの印から照合台帳へ記録し、metricで通知し、照合batchで再試行する。
+     */
     private void deleteImportStorageOrThrow(String storageKey, String operationId) {
         try {
-            documentStorage.delete(storageKey);
+            documentStorage.deleteStrict(storageKey);
         } catch (Exception failure) {
             log.error("[文書台帳] import storageの補償削除に失敗しました: operationId={} storageKey={} exceptionClass={}",
                     operationId, storageKey, failure.getClass().getSimpleName());
-            throw BusinessException.of(500, "error.import.storageCleanupFailed");
+            BusinessException cleanup = BusinessException.of(500, "error.import.storageCleanupFailed");
+            cleanup.initCause(new ImportStageCleanupFailure(storageKey, operationId, failure));
+            throw cleanup;
         }
     }
 

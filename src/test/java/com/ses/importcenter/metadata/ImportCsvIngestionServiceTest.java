@@ -116,7 +116,9 @@ class ImportCsvIngestionServiceTest {
     void defaultDenyAdmissionRejectsBeforeOpeningRequestStream() {
         when(authorization.requireCurrentAuthorization()).thenReturn(CONTEXT);
         when(metadata.resolveActiveUploadSource("fixture-a")).thenReturn(SOURCE);
-        ImportCsvIngestionService service = service(new DefaultDenyImportAdmissionPort());
+        // 承認設定が未設定の本番admission port（既定deny）
+        ImportCsvIngestionService service = service(new ApprovedSourceImportAdmissionPort(
+                new ImportAdmissionApprovalProperties(), null, null));
         AtomicBoolean opened = new AtomicBoolean();
 
         BusinessException failure = assertThrows(BusinessException.class, () -> service.upload(
@@ -418,6 +420,43 @@ class ImportCsvIngestionServiceTest {
         assertNoRawTempFiles();
         assertSingleLedgerEntry(ImportStageReconciliationLedger.Reason.DISCARD_FAILED);
         assertEquals(1, discardFailureCount("failure"));
+    }
+
+    @Test
+    void stageInternalCompensationFailureIsLedgeredFromTheCleanupMarker() {
+        stubAuthorizedSource();
+        BusinessException stageFailure = BusinessException.of(503, "error.import.uploadDeadlineExceeded");
+        BusinessException cleanup = BusinessException.of(500, "error.import.storageCleanupFailed");
+        cleanup.initCause(new com.ses.service.impl.ImportStageCleanupFailure("unit-fixed-fixture/object",
+                "00000000-0000-4000-8000-000000000001", new java.io.IOException("synthetic")));
+        stageFailure.addSuppressed(cleanup);
+        when(documents.stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(CSV_HASH), any()))
+                .thenThrow(stageFailure);
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        BusinessException failure = assertThrows(BusinessException.class, () -> upload(service));
+
+        assertSame(stageFailure, failure, "元の失敗をそのまま返す");
+        verify(documents, never()).discardImportStage(any());
+        ImportStageReconciliationLedger.Entry entry =
+                assertSingleLedgerEntry(ImportStageReconciliationLedger.Reason.DISCARD_FAILED);
+        assertEquals("00000000-0000-4000-8000-000000000001", entry.operationId());
+        assertEquals(CONTEXT.tenantId(), entry.tenantId());
+        assertEquals(1, discardFailureCount("stage"));
+        assertNoRawTempFiles();
+    }
+
+    @Test
+    void stageFailureWithoutCleanupMarkerIsNotLedgered() {
+        stubAuthorizedSource();
+        when(documents.stageReceivedForImport(any(), any(), eq((long) CSV.length), eq(CSV_HASH), any()))
+                .thenThrow(BusinessException.of(400, "error.file.scanRejected"));
+        ImportCsvIngestionService service = service(fixedFixtureAdmission());
+
+        assertThrows(BusinessException.class, () -> upload(service));
+
+        assertEquals(List.of(), stageLedger.entries());
+        assertEquals(0, discardFailureCount("stage"));
     }
 
     @Test

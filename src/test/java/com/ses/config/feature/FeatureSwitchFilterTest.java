@@ -67,7 +67,13 @@ class FeatureSwitchFilterTest {
             Feature.NF03_CERTIFICATION_PII, List.of(),
             // NF-04はAPIを遮断しない（日次入力queueと下書き復元は常時有効）
             Feature.NF04, List.of(),
+            // NF-06は取込センターAPI（upload・検証・preview・error export・source/mapping管理）
+            Feature.NF06, List.of("/api/import-center/uploads", "/api/import-center/jobs/5/validations",
+                    "/api/import-center/jobs/5/preview", "/api/import-center/sources/2/mappings"),
             Feature.NF10, List.of("/api/management-reports/runs", "/api/management-reports/schedules/7/enable"));
+
+    /** 画面prefixを持たない最上位の機能（API先行。画面は後続バッチで追加する）。 */
+    private static final java.util.Set<Feature> API_ONLY_TOP_LEVEL = java.util.Set.of(Feature.NF06);
 
     /** 各機能の代表的な画面・静的入口。 */
     private static final Map<Feature, List<String>> PAGE_SAMPLES = Map.of(
@@ -79,6 +85,8 @@ class FeatureSwitchFilterTest {
             Feature.NF03, List.of("/certification-learning-skill-gap", "/my/certification-learning-skill-gap"),
             Feature.NF03_CERTIFICATION_PII, List.of(),
             Feature.NF04, List.of("/service-worker.js", "/manifest.webmanifest"),
+            // NF-06の画面（/import-center）はW3-12で追加する。現時点は画面入口を持たない
+            Feature.NF06, List.of(),
             Feature.NF10, List.of("/management-reports"));
 
     /** 画面URLを持たない子スイッチ → 子をOFFにしても遮断してはならない埋込み先の画面。 */
@@ -122,6 +130,15 @@ class FeatureSwitchFilterTest {
     void OFFの機能の画面と静的入口は統一エラーページへ委ねる404になる(Feature feature) throws Exception {
         FeatureSwitchFilter filter = filter(disabledOnly(feature));
 
+        if (API_ONLY_TOP_LEVEL.contains(feature)) {
+            // API先行の最上位機能は画面・静的入口を遮断表に持たない。既存画面を巻き込んで遮断しないことだけを確認する。
+            assertThat(PAGE_SAMPLES.get(feature)).isEmpty();
+            assertThat(feature.pagePrefixes()).as("%s の画面prefix", feature).isEmpty();
+            assertThat(feature.exactPaths()).as("%s の静的入口", feature).isEmpty();
+            assertPassesThrough(filter, "GET", "/dashboard");
+            assertPassesThrough(filter, "GET", "/import-center-like");
+            return;
+        }
         if (PAGE_SAMPLES.get(feature).isEmpty()) {
             // 画面URLを持たないのは子スイッチだけ。子をOFFにしても、子が埋め込まれた画面のURLは遮断しない
             // （portal画面は他のタブと共用、本人画面は非PII部分を使う。表示制御はtemplate側）。

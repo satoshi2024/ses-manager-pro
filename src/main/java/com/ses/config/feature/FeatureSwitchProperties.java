@@ -42,6 +42,9 @@ public class FeatureSwitchProperties {
     /** NF-04 要員PWAシェル（Service Worker・manifest）。日次入力queueと下書き復元は対象外。 */
     private Toggle nf04 = new Toggle();
 
+    /** NF-06 データ移行・取込センター（API。画面はW3-12で追加）。 */
+    private Toggle nf06 = new Toggle();
+
     /** NF-10 定期管理レポート。 */
     private Toggle nf10 = new Toggle();
 
@@ -57,6 +60,7 @@ public class FeatureSwitchProperties {
             case NF03 -> nf03;
             case NF03_CERTIFICATION_PII -> nf03CertificationPii;
             case NF04 -> nf04;
+            case NF06 -> nf06;
             case NF10 -> nf10;
         };
     }

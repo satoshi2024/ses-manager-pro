@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Consumer;
 
 /** F1b-2: exact sourceを先頭から検証し、privacy-safe row metadataを最大250件ずつappendする。
  * F2 sessionは最大100,000件までexternal key setを保持するため、heapはnonempty row数に対してO(n)となる。 */
@@ -42,6 +43,7 @@ public class ImportValidationAppendService {
     private static final String ROW_SET_DOMAIN = "SES-IMPORT-ROW-SET-V1";
     private static final String FINDING_DOMAIN = "SES-IMPORT-FINDING-CODES-V1";
     private static final TypeReference<Map<String, String>> MAPPING_TYPE = new TypeReference<>() { };
+    private static final Consumer<ImportValidationLifecycleService.RunLease> NO_PROGRESS = lease -> { };
     private final JdbcTemplate jdbc;
     private final ImportMetadataService metadata;
     private final ImportValidationLifecycleService lifecycle;
@@ -80,20 +82,32 @@ public class ImportValidationAppendService {
 
     /** EOFと全保存rowの照合完了後だけseal用証明を発行する。caller入力から証明は構築できない。 */
     AppendCompletion appendRemainingWithSealCapability(ImportValidationLifecycleService.RunLease lease) {
+        return appendRemainingWithSealCapability(lease, NO_PROGRESS);
+    }
+
+    /**
+     * 進捗通知付きの版（A1a検証編成用）。renewで最新になったleaseをchunk境界ごとに{@code progress}へ渡す。
+     * 呼出元は総期限の確認（超過時は例外で中断）と、中断時のabortに使う最新leaseの保持に使う。
+     */
+    AppendCompletion appendRemainingWithSealCapability(ImportValidationLifecycleService.RunLease lease,
+                                                       Consumer<ImportValidationLifecycleService.RunLease> progress) {
         ImportValidationLifecycleService.RunLease authorizedLease = lifecycle.renew(lease);
+        progress.accept(authorizedLease);
         var snapshot = lifecycle.appendSnapshot(authorizedLease);
         Map<String, String> mapping = loadMapping(snapshot);
         ValidationContext context = new ValidationContext(snapshot.context().tenantId(),
                 Long.toString(snapshot.context().legalEntityId()), validationResolver);
 
-        ScanResult verified = scan(snapshot, mapping, context, false, authorizedLease);
+        ScanResult verified = scan(snapshot, mapping, context, false, authorizedLease, false, progress);
         if (!MessageDigest.isEqual(snapshot.sourceSha(), HexFormat.of().parseHex(verified.sourceSha256()))) conflict();
 
         ImportValidationLifecycleService.RunLease currentLease = lifecycle.renew(verified.lease());
-        ScanResult appended = scan(snapshot, mapping, context, true, currentLease);
+        progress.accept(currentLease);
+        ScanResult appended = scan(snapshot, mapping, context, true, currentLease, false, progress);
         if (!MessageDigest.isEqual(snapshot.sourceSha(), HexFormat.of().parseHex(appended.sourceSha256()))) conflict();
         if (!verified.counters().sameValues(appended.counters())) conflict();
         ImportValidationLifecycleService.RunLease finalLease = lifecycle.renew(appended.lease());
+        progress.accept(finalLease);
         var counters = appended.counters();
         if (counters.sourceRows() != appended.rowCount()
                 || counters.sourceRows() != counters.validatedAcceptedTotal() + counters.rejected()
@@ -105,12 +119,19 @@ public class ImportValidationAppendService {
 
     /** SEALED snapshotをsource先頭から再検証し、final exact gate通過後だけprivate capabilityを発行する。 */
     PublishCapability recountSealed(ImportValidationLifecycleService.RunLease lease) {
+        return recountSealed(lease, NO_PROGRESS);
+    }
+
+    /** 進捗通知付きの版（A1a検証編成用）。通知の意味はappendRemainingWithSealCapabilityの進捗通知と同じ。 */
+    PublishCapability recountSealed(ImportValidationLifecycleService.RunLease lease,
+                                    Consumer<ImportValidationLifecycleService.RunLease> progress) {
         ImportValidationLifecycleService.RunLease started = lifecycle.beginSealedRecount(lease);
+        progress.accept(started);
         ImportValidationLifecycleService.AppendSnapshot snapshot = lifecycle.appendSnapshot(started);
         Map<String, String> mapping = loadMapping(snapshot);
         ValidationContext context = new ValidationContext(snapshot.context().tenantId(),
                 Long.toString(snapshot.context().legalEntityId()), validationResolver);
-        ScanResult result = scan(snapshot, mapping, context, false, started, true);
+        ScanResult result = scan(snapshot, mapping, context, false, started, true, progress);
         if (!MessageDigest.isEqual(snapshot.sourceSha(), HexFormat.of().parseHex(result.sourceSha256()))) conflict();
         var counters = result.counters();
         if (counters.sourceRows() != result.rowCount()
@@ -122,18 +143,14 @@ public class ImportValidationAppendService {
         RecountProof proof = new RecountProof(result.lease(), lifecycle.appendSnapshot(result.lease()), result.sourceSha256(), result.rowSetSha256(),
                 HexFormat.of().formatHex(summarySha), counters);
         ImportValidationLifecycleService.RunLease confirmed = lifecycle.confirmSealedRecount(proof);
+        progress.accept(confirmed);
         return new PublishCapability(confirmed, lifecycle.appendSnapshot(confirmed), result.sourceSha256(), result.rowSetSha256(),
                 HexFormat.of().formatHex(summarySha), counters);
     }
 
     private ScanResult scan(ImportValidationLifecycleService.AppendSnapshot snapshot, Map<String, String> mapping,
-                            ValidationContext context, boolean write, ImportValidationLifecycleService.RunLease initialLease) {
-        return scan(snapshot, mapping, context, write, initialLease, false);
-    }
-
-    private ScanResult scan(ImportValidationLifecycleService.AppendSnapshot snapshot, Map<String, String> mapping,
                             ValidationContext context, boolean write, ImportValidationLifecycleService.RunLease initialLease,
-                            boolean strictSealed) {
+                            boolean strictSealed, Consumer<ImportValidationLifecycleService.RunLease> progress) {
         PrefixCursor prefix = new PrefixCursor(snapshot, strictSealed);
         List<RowMetadata> batch = new ArrayList<>(CHUNK_ROWS);
         ImportValidationLifecycleService.RunLease[] current = {initialLease};
@@ -160,10 +177,12 @@ public class ImportValidationAppendService {
                                 batch.clear();
                                 current[0] = strictSealed
                                         ? lifecycle.renewSealedRecountExact(current[0]) : lifecycle.renew(current[0]);
+                                progress.accept(current[0]);
                             }
                         } else if (processedRows[0] % CHUNK_ROWS == 0) {
                             current[0] = strictSealed
                                     ? lifecycle.renewSealedRecountExact(current[0]) : lifecycle.renew(current[0]);
+                            progress.accept(current[0]);
                         }
                     });
             prefix.requireExhausted();

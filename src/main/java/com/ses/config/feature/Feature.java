@@ -94,6 +94,19 @@ public enum Feature {
             List.of("/service-worker.js", "/manifest.webmanifest"),
             List.of()),
 
+    /**
+     * NF-06 データ移行・取込センター（初回はupload・検証・preview・error export・source/mapping管理のAPIだけ）。
+     *
+     * <p>画面とmenuは後続バッチ（W3-12）で追加するため、現時点の入口は {@code /api/import-center} だけである
+     * （画面prefixは実在するcontrollerが入った時点で登録する）。apply系はこのスイッチではなく、route不在・
+     * {@code ActionPermissionResolver} のnull解決・admission portで閉じる（B-NF06-3）。
+     */
+    NF06("データ移行・取込センター",
+            List.of(),
+            List.of("/api/import-center"),
+            List.of(),
+            List.of()),
+
     /** NF-10 定期管理レポート。 */
     NF10("定期管理レポート",
             List.of("/management-reports"),

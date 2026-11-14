@@ -1,11 +1,14 @@
 package com.ses.importcenter.metadata;
 
 import com.ses.controller.api.ImportCenterApiController;
+import com.ses.controller.api.ImportCenterSourceApiController;
+import com.ses.controller.api.ImportCenterValidationApiController;
 import com.ses.service.security.ActionPermissionResolver;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestMapping;
 
 import java.lang.reflect.Method;
@@ -20,38 +23,50 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 初回リリースはupload・validation・previewだけを開放し、apply系（apply・restart・rollback・compensation）は含めない（B-NF06-3）。
+ * 初回リリースはupload・validation・preview（＋error export・source/mapping管理）だけを開放し、apply系
+ * （apply・restart・rollback・compensation）は含めない（B-NF06-3）。
  *
- * <p>apply系の入口が本番で閉じていることを、既存のDENY機構だけで確認する（機能スイッチは使わない）。
+ * <p>apply系の入口が本番で閉じていることを、DENY機構で確認する。
  * <ul>
- *   <li>取込API controllerが公開するrouteはupload（POST）とjob詳細（GET）の2本だけ。</li>
+ *   <li>{@code /api/import-center}のcontrollerが公開するrouteは、A1aの許可routeだけ（下記の完全一致）。</li>
  *   <li>{@code /api/import-center/**}の他のpathは{@link ActionPermissionResolver}がaction keyを返さず（null）、
  *       {@code MenuPermissionFilter}が管理者を含め403で拒否する（fail-closed）。</li>
- *   <li>本番classpathの{@link ImportAdmissionPort}実装は{@link DefaultDenyImportAdmissionPort}だけで、
- *       承認済みsourceのadmission port（A-NF06-8）が入るまではuploadもbody読取前に403になる。</li>
+ *   <li>本番classpathの{@link ImportAdmissionPort}実装は{@link ApprovedSourceImportAdmissionPort}だけで、
+ *       署名済みData Owner決定IDとsource承認一覧が揃うまでuploadはbody読取前に403になる（Q-5）。</li>
  *   <li>本番classpathに{@code com.ses.importcenter.apply}等のapply実装packageが無い。</li>
  * </ul>
+ * 機能スイッチNF06（既定OFF）は公開可否の別層であり、apply系の閉鎖はスイッチに依存しない。
  * apply（W3-B6）を開放するバッチは、本testをそのバッチの承認条件（DG-06・admission port）に合わせて更新すること。
  */
 class ImportCenterApplyEntryClosedTest {
 
     @Test
-    void importCenterControllerExposesOnlyUploadAndJobDetailRoutes() {
+    void importCenterControllersExposeOnlyTheA1aRoutes() throws Exception {
         Set<String> routes = new TreeSet<>();
-        RequestMapping root = AnnotatedElementUtils.findMergedAnnotation(ImportCenterApiController.class,
-                RequestMapping.class);
-        assertEquals(List.of("/api/import-center"), List.of(root.value()));
-        for (Method method : ImportCenterApiController.class.getDeclaredMethods()) {
-            if (!Modifier.isPublic(method.getModifiers())) continue;
-            RequestMapping mapping = AnnotatedElementUtils.findMergedAnnotation(method, RequestMapping.class);
-            if (mapping == null) continue;
-            for (var httpMethod : mapping.method()) {
-                for (String path : mapping.value().length == 0 ? mapping.path() : mapping.value()) {
-                    routes.add(httpMethod.name() + " " + path);
+        for (Class<?> controller : importCenterControllers()) {
+            RequestMapping root = AnnotatedElementUtils.findMergedAnnotation(controller, RequestMapping.class);
+            assertEquals(List.of("/api/import-center"), List.of(root.value()), controller.getName());
+            for (Method method : controller.getDeclaredMethods()) {
+                if (!Modifier.isPublic(method.getModifiers())) continue;
+                RequestMapping mapping = AnnotatedElementUtils.findMergedAnnotation(method, RequestMapping.class);
+                if (mapping == null) continue;
+                for (var httpMethod : mapping.method()) {
+                    for (String path : mapping.value().length == 0 ? mapping.path() : mapping.value()) {
+                        routes.add(httpMethod.name() + " " + path);
+                    }
                 }
             }
         }
-        assertEquals(new TreeSet<>(List.of("GET /jobs/{id}", "POST /uploads")), routes);
+        assertEquals(new TreeSet<>(List.of(
+                "GET /jobs/{id}", "POST /uploads",
+                "POST /jobs/{id}/validations", "GET /jobs/{id}/preview", "GET /jobs/{id}/error-export",
+                "GET /sources", "POST /sources", "PUT /sources/{id}",
+                "GET /sources/{id}/mappings", "POST /sources/{id}/mappings")), routes);
+        for (String route : routes) {
+            String[] parts = route.split(" ", 2);
+            String concrete = "/api/import-center" + parts[1].replace("{id}", "1");
+            assertEquals("import.metadata.manage", ActionPermissionResolver.resolve(parts[0], concrete), route);
+        }
     }
 
     @Test
@@ -65,14 +80,17 @@ class ImportCenterApplyEntryClosedTest {
                 new String[]{"PUT", "/api/import-center/jobs/1"},
                 new String[]{"DELETE", "/api/import-center/jobs/1"},
                 new String[]{"PATCH", "/api/import-center/uploads"},
-                new String[]{"GET", "/api/import-center/jobs/1/apply-status"});
+                new String[]{"GET", "/api/import-center/jobs/1/apply-status"},
+                new String[]{"DELETE", "/api/import-center/sources/1"},
+                new String[]{"DELETE", "/api/import-center/sources/1/mappings/2"},
+                new String[]{"POST", "/api/import-center/jobs/1/validations/2/apply"});
         for (String[] route : closed) {
             assertNull(ActionPermissionResolver.resolve(route[0], route[1]), route[0] + " " + route[1]);
         }
     }
 
     @Test
-    void productionClasspathHasOnlyTheDefaultDenyAdmissionPortAndNoApplyPackage() throws Exception {
+    void productionClasspathHasOnlyTheApprovedSourceAdmissionPortAndNoApplyPackage() throws Exception {
         PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
         List<String> admissionPorts = new ArrayList<>();
         ClassLoader loader = Thread.currentThread().getContextClassLoader();
@@ -90,6 +108,31 @@ class ImportCenterApplyEntryClosedTest {
                 admissionPorts.add(type.getName());
             }
         }
-        assertEquals(List.of(DefaultDenyImportAdmissionPort.class.getName()), admissionPorts);
+        assertEquals(List.of(ApprovedSourceImportAdmissionPort.class.getName()), admissionPorts);
+    }
+
+    /** {@code /api/import-center}をrootに持つ本番controller。新しいcontrollerを足したら本testの許可routeも見直す。 */
+    private static List<Class<?>> importCenterControllers() throws Exception {
+        List<Class<?>> found = new ArrayList<>();
+        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+        ClassLoader loader = Thread.currentThread().getContextClassLoader();
+        for (Resource resource : resolver.getResources("classpath*:com/ses/controller/**/*.class")) {
+            String url = resource.getURL().toString().replace('\\', '/');
+            if (url.contains("/test-classes/") || url.contains("-tests.jar")) continue;
+            int index = url.indexOf("com/ses/");
+            if (index < 0) continue;
+            String className = url.substring(index, url.length() - ".class".length()).replace('/', '.');
+            if (className.contains("$")) continue;
+            Class<?> type = Class.forName(className, false, loader);
+            if (!AnnotatedElementUtils.hasAnnotation(type, Controller.class)) continue;
+            RequestMapping root = AnnotatedElementUtils.findMergedAnnotation(type, RequestMapping.class);
+            if (root != null && List.of(root.value()).stream().anyMatch(path -> path.startsWith("/api/import-center"))) {
+                found.add(type);
+            }
+        }
+        assertEquals(new TreeSet<>(List.of(ImportCenterApiController.class.getName(),
+                        ImportCenterSourceApiController.class.getName(), ImportCenterValidationApiController.class.getName())),
+                new TreeSet<>(found.stream().map(Class::getName).toList()));
+        return found;
     }
 }

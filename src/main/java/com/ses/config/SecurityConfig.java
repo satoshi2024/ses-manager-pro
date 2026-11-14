@@ -259,7 +259,11 @@ public class SecurityConfig {
                     // ポータルユーザーと要員の紐付け（NF01 退社自動処理の対象特定、決定 Q-10）。
                     // portal-admin menuは営業にも付与されるため、紐付けの参照・登録・解除だけを管理者へ静的に限定する。
                     "/api/portal-admin/users/*/engineer-links",
-                    "/api/portal-admin/engineer-links/**"
+                    "/api/portal-admin/engineer-links/**",
+                    // NF-06取込センター（upload・検証・preview・error export・source/mapping管理）は管理者のみ。
+                    // serviceも管理者role＋明示action（import.metadata.manage）を毎回再確認する。画面はW3-12で追加する。
+                    "/import-center/**",
+                    "/api/import-center/**"
                 ).hasRole("管理者")
                 .requestMatchers("/api/management-reports/schedules/*/enable",
                         "/api/management-reports/schedules/*/disable")

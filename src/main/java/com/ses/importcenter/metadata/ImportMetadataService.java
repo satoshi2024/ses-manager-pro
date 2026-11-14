@@ -180,7 +180,9 @@ public class ImportMetadataService {
      *
      * <p>同一identityのjobが別法人に属する場合は、他の不一致より先に判定して
      * {@link ImportIdentityOwnedByOtherLegalEntityException}を投げる。別法人のjobのsource version・encoding等で
-     * 応答が変わらないようにするためで、呼出元はこれを汎用403へ変換する（内容存在のoracleにしない）。
+     * 応答が変わらないようにするためで、呼出元はこれを汎用403へ変換する（専用の409を返さない）。
+     * ただしidentityの一意制約は法人を含まないため、uploadできる別法人の利用者は「同じbytesなら403になる」ことから
+     * 別法人での存在を判定できる（N6-3。存在のoracleは残り、Q-15で既知リスクとして受容。解消には法人を含むDDLが必要）。
      * 同一法人内の条件不一致（encoding・source version・document hash）は従来どおり409とする。
      */
     public ImportUploadJobDetail findOrReuseExistingUpload(ImportUploadSource source, ImportEncoding encoding,
@@ -648,16 +650,28 @@ public class ImportMetadataService {
         }
     }
 
+    /**
+     * 採番列{@code id}を明示して挿入する。{@code RETURN_GENERATED_KEYS}だとH2は既定値付きの列
+     * （例: {@code updated_at DEFAULT CURRENT_TIMESTAMP}）もkeyとして返し、単一keyの取得に失敗するため。
+     * MySQL Connector/Jは列名指定でもAUTO_INCREMENT値1列（{@code GENERATED_KEY}）だけを返すため従来と同じ値になる。
+     */
     private long insertId(String sql, Object... args) {
         KeyHolder keys = new GeneratedKeyHolder();
         jdbc.update((Connection connection) -> {
-            PreparedStatement statement = connection.prepareStatement(sql, PreparedStatement.RETURN_GENERATED_KEYS);
+            PreparedStatement statement = connection.prepareStatement(sql, new String[]{"id"});
             for (int i = 0; i < args.length; i++) statement.setObject(i + 1, args[i]);
             return statement;
         }, keys);
-        Number key = keys.getKey();
-        if (key == null) throw new IllegalStateException("取込metadata IDを採番できません");
-        return key.longValue();
+        Map<String, Object> generated = keys.getKeys();
+        Object key = null;
+        if (generated != null && generated.size() == 1) {
+            key = generated.values().iterator().next();
+        } else if (generated != null) {
+            key = generated.entrySet().stream().filter(entry -> "id".equalsIgnoreCase(entry.getKey()))
+                    .map(Map.Entry::getValue).findFirst().orElse(null);
+        }
+        if (!(key instanceof Number number)) throw new IllegalStateException("取込metadata IDを採番できません");
+        return number.longValue();
     }
 
     private record SourceSnapshot(long id, String code, String status, long version, String lookupKeyVersion) { }

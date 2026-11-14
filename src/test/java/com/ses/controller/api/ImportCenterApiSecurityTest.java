@@ -75,6 +75,7 @@ class ImportCenterApiSecurityTest {
     @MockBean private AuthorizationService authorizationService;
     @MockBean private ImportCsvIngestionService ingestion;
     @MockBean private AuditLogService auditLogService;
+    @MockBean private com.ses.importcenter.metadata.ImportValidationRunService validationRuns;
     private UserDetails testPrincipal;
 
     @BeforeEach
@@ -195,6 +196,74 @@ class ImportCenterApiSecurityTest {
 
         verify(ingestion).upload(any(), any());
         assertFalse(bodyTrackingFilter.bodyTouched());
+    }
+
+    @Test
+    void a1aWriteRoutesRequireCsrfBeforeReachingTheServices() throws Exception {
+        mockMvc.perform(post("/api/import-center/jobs/7/validations").with(user(testPrincipal))
+                        .contentType("application/json").content("{\"mappingId\":3}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/import-center/sources").with(user(testPrincipal))
+                        .contentType("application/json").content("{\"sourceCode\":\"legacy-a\",\"displayName\":\"A\"}"))
+                .andExpect(status().isForbidden());
+
+        verify(validationRuns, never()).validate(org.mockito.ArgumentMatchers.anyLong(), any());
+    }
+
+    @Test
+    void validationRouteWithMatchingCsrfReachesTheOrchestrationWithTheRequestedMapping() throws Exception {
+        when(validationRuns.validate(7L, 3L)).thenReturn(
+                new com.ses.importcenter.metadata.ImportValidationRunSummary(7L, "VALIDATED", 11L, 1, 3, 1, 2, 0));
+
+        mockMvc.perform(post("/api/import-center/jobs/7/validations").with(user(testPrincipal))
+                        .cookie(new Cookie("XSRF-TOKEN", "matching-token")).header("X-XSRF-TOKEN", "matching-token")
+                        .contentType("application/json").content("{\"mappingId\":3}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.state").value("VALIDATED"))
+                .andExpect(jsonPath("$.data.rejectedRows").value(2));
+
+        verify(validationRuns).validate(7L, 3L);
+    }
+
+    @Test
+    void validationDeadlineIsReturnedAsServiceUnavailableThroughTheRealErrorHandler() throws Exception {
+        when(validationRuns.validate(7L, null))
+                .thenThrow(BusinessException.of(503, "error.import.processingDeadlineExceeded"));
+
+        mockMvc.perform(post("/api/import-center/jobs/7/validations").with(user(testPrincipal))
+                        .cookie(new Cookie("XSRF-TOKEN", "matching-token")).header("X-XSRF-TOKEN", "matching-token"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value(503))
+                .andExpect(jsonPath("$.message").value(
+                        "取込の処理が制限時間（120秒）内に完了しませんでした。時間をおいて再試行してください。"));
+    }
+
+    @Test
+    void nonAdministratorRoleIsRejectedByTheStaticBoundary() throws Exception {
+        var authorities = java.util.List.of(new SimpleGrantedAuthority("ROLE_営業"));
+        SysUser sales = SysUser.builder().username("nf06-sales-test").password("test-only")
+                .realName("営業テスト").role("営業").status(1).tenantId("nf06-csrf-test").build();
+        UserDetails salesPrincipal = new LoginUser(sales, authorities, "nf06-csrf-test");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/api/import-center/sources").with(user(salesPrincipal)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/api/import-center/jobs/7/preview").with(user(salesPrincipal)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void unpublishedImportCenterRoutesAreDeniedEvenForAdministrators() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/api/import-center/jobs/7/apply-status").with(user(testPrincipal)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/import-center/jobs/7/apply").with(user(testPrincipal))
+                        .cookie(new Cookie("XSRF-TOKEN", "matching-token")).header("X-XSRF-TOKEN", "matching-token"))
+                .andExpect(status().isForbidden());
+
+        verify(validationRuns, never()).validate(org.mockito.ArgumentMatchers.anyLong(), any());
     }
 
     /**
