@@ -46,7 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PwaQueueRestoreAvailabilityBrowserTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Path STATIC = Path.of("src/main/resources/static");
-    private static final Set<String> STATIC_ALLOWLIST = Set.of("/js/pwa-queue.js", "/offline.html");
+    private static final Set<String> STATIC_ALLOWLIST = Set.of("/js/pwa-queue.js", "/js/common.js", "/offline.html");
     private static final Duration WAIT = Duration.ofSeconds(20);
 
     private static final String READY = "(()=>{const q=window.SES&&SES.pwaQueue;"
@@ -84,7 +84,7 @@ class PwaQueueRestoreAvailabilityBrowserTest {
             browser.evaluateStrict("(async()=>{window.__setOnline(false);await SES.pwaQueue.request("
                     + attendance("2026-10-01", 0, "oidc-unsent") + ");return true})()");
             assertTrue(browser.waitForStrict("document.getElementById('pwa-queue-status').textContent"
-                    + ".includes('離れると復元できません')", WAIT), "未送信の下書きを離れると失うことを表示する");
+                    + ".includes('復元できなくなります')", WAIT), "画面を離れる・session有効時間を超えると失うことを表示する");
             assertTrue(browser.evaluateStrict(BEFORE_UNLOAD_PREVENTED).asBoolean(), "未送信の間は離脱前に確認する");
             assertEquals(1, browser.evaluateStrict("SES.pwaQueue.draftLossSummary().unsent").asInt(),
                     "logout確認へ未送信件数を渡す");
@@ -130,6 +130,57 @@ class PwaQueueRestoreAvailabilityBrowserTest {
     }
 
     @Test
+    void oidcSessionでは送信中で止まった下書きも未送信として数え離脱前とlogout前に確認する() throws Exception {
+        Stub stub = new Stub();
+        stub.restoreAvailable.set(false);
+        try (Harness harness = Harness.start(stub, "ses-nf04-inflight-")) {
+            CdpBrowser browser = harness.browser;
+            browser.navigate(harness.base + "/test.html");
+            assertTrue(browser.waitForStrict(READY, WAIT));
+            // 通信が不安定で保存が止まった状態（navigator.onLineはtrueのまま、fetchが返らない）を作る。
+            assertTrue(browser.evaluateStrict("window.__nativeFetch=window.fetch.bind(window);"
+                    + "window.fetch=(input,init)=>String(input).includes('/api/my/pwa/attendance/daily')"
+                    + "?new Promise(()=>{}):window.__nativeFetch(input,init);"
+                    + "window.__stalled=SES.pwaQueue.request(" + attendance("2026-10-04", 0, "stalled") + ");true")
+                    .asBoolean());
+            assertTrue(browser.waitForStrict("SES.pwaQueue.draftLossSummary().unsent===1", WAIT),
+                    "fetch未完了の新規recordも未送信として数える");
+            assertTrue(browser.evaluateStrict(BEFORE_UNLOAD_PREVENTED).asBoolean(), "送信中に画面を離れる前に確認する");
+            assertTrue(browser.evaluateStrict(READ_QUEUE.replace("return JSON.stringify(rows)",
+                    "return rows.length===1&&rows[0].status==='PENDING'")).asBoolean(), "recordは端末に保存済み");
+
+            // logout（common.js）は削除される件数を確認し、取消時は削除もlogoutもしない。
+            assertTrue(browser.evaluateStrict("(async()=>{const q=window.SES.pwaQueue;window.$=function(){};"
+                    + "await new Promise((ok,no)=>{const s=document.createElement('script');s.src='/js/common.js';"
+                    + "s.onload=ok;s.onerror=()=>no(new Error('common.jsを読めません'));document.body.appendChild(s)});"
+                    + "window.SES.pwaQueue=q;window.__confirmMessages=[];"
+                    + "window.confirm=m=>{window.__confirmMessages.push(String(m));return false};"
+                    + "const form=document.createElement('form');form.setAttribute('action','/logout');form.method='post';"
+                    + "document.body.appendChild(form);window.SES.pwa.bindLogout();window.__cleared=0;"
+                    + "const nativeClear=window.SES.pwa.clearUserScope;"
+                    + "window.SES.pwa.clearUserScope=function(){window.__cleared++;return nativeClear.call(this)};"
+                    + "window.__logoutForm=form;return form.dataset.sesPwaBound==='true'})()").asBoolean(),
+                    "logout formへ確認処理を結び付ける");
+            String firstConfirm = submitLogoutAndReadConfirm(browser);
+            assertTrue(firstConfirm.contains("1 件"), firstConfirm);
+            assertEquals(0, browser.evaluateStrict("window.__cleared").asInt(), "取消したlogoutでは下書きを削除しない");
+            assertEquals(1, browser.evaluateStrict(READ_QUEUE.replace("return JSON.stringify(rows)", "return rows.length"))
+                    .asInt());
+
+            // session期限切れで画面が隔離されても、logoutで削除される下書きとして数える（P3-4）。
+            browser.evaluateStrict("window.dispatchEvent(new CustomEvent('ses:session-expired'));true");
+            assertTrue(browser.waitForStrict("document.getElementById('pwa-queue-status').textContent"
+                    + ".includes('復元できません')", WAIT), "OIDC sessionの期限切れ後は復元できないことを表示する");
+            assertEquals(0, browser.evaluateStrict("SES.pwaQueue.draftLossSummary().unsent").asInt());
+            assertEquals(1, browser.evaluateStrict("SES.pwaQueue.draftLossCount()").asInt(),
+                    "隔離後もIndexedDBの下書きを数える");
+            String secondConfirm = submitLogoutAndReadConfirm(browser);
+            assertTrue(secondConfirm.contains("1 件"), secondConfirm);
+            assertEquals(0, browser.evaluateStrict("window.__cleared").asInt());
+        }
+    }
+
+    @Test
     void ローカルパスワードsessionは復元入口を維持し撤回epochのcookie期限を同じ値で延長する() throws Exception {
         Stub stub = new Stub();
         try (Harness harness = Harness.start(stub, "ses-nf04-local-")) {
@@ -142,7 +193,7 @@ class PwaQueueRestoreAvailabilityBrowserTest {
                     + attendance("2026-10-01", 0, "local-unsent") + ");return true})()");
             assertTrue(browser.waitForStrict("document.getElementById('pwa-queue-status').textContent.includes('未送信')", WAIT));
             assertFalse(browser.evaluateStrict("document.getElementById('pwa-queue-status').textContent"
-                    + ".includes('離れると復元できません')").asBoolean(), "復元できるsessionの表示は従来どおり");
+                    + ".includes('復元できなくなります')").asBoolean(), "復元できるsessionの表示は従来どおり");
             assertFalse(browser.evaluateStrict(BEFORE_UNLOAD_PREVENTED).asBoolean(),
                     "ローカルパスワードsessionは画面移動後も復元できるため離脱確認を出さない");
             browser.evaluateStrict("(async()=>{window.__setOnline(true);await SES.pwaQueue.flush();return true})()");
@@ -335,6 +386,16 @@ class PwaQueueRestoreAvailabilityBrowserTest {
                 + baseVersion + ",resourceKey:'attendance:2026-10',payload:{workDate:'" + workDate
                 + "',clockIn:'09:00',clockOut:'18:00',breaks:[],breakMinutes:60,workType:'出勤',workplaceType:'客先',remarks:'"
                 + remarks + "'}}";
+    }
+
+    /** 結び付けたlogout formを送信し、確認（window.confirm）に出た最後の文言を返す。 */
+    private static String submitLogoutAndReadConfirm(CdpBrowser browser) throws Exception {
+        return browser.evaluateStrict("(async()=>{const before=window.__confirmMessages.length;"
+                + "window.__logoutForm.requestSubmit();const deadline=Date.now()+5000;"
+                + "while(window.__confirmMessages.length===before&&Date.now()<deadline)"
+                + "await new Promise(ok=>setTimeout(ok,50));"
+                + "return window.__confirmMessages.length>before?window.__confirmMessages[window.__confirmMessages.length-1]:'確認なし'})()")
+                .asText();
     }
 
     private static void assertNoThirdPartyData(String stored) {

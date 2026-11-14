@@ -4,11 +4,13 @@ import com.ses.config.LoginUser;
 import com.ses.config.OidcLoginUser;
 import com.ses.entity.SysUser;
 import com.ses.service.pwa.PwaUserContextService;
+import com.ses.service.security.BreakGlassService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
@@ -51,6 +53,19 @@ class PwaSessionApiControllerTest {
                 .andExpect(jsonPath("$.data.userScope").value("scope-v2"))
                 .andExpect(jsonPath("$.data.preserveQueue").value(true))
                 .andExpect(jsonPath("$.data.restoreAvailable").value(true));
+    }
+
+    @Test
+    void breakGlassのsessionはローカルパスワードでもrestoreAvailableをfalseで返す() throws Exception {
+        var authorities = List.of(new SimpleGrantedAuthority("ROLE_要員"));
+        LoginUser principal = new LoginUser(user(), authorities, "tenant-a");
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 99L);
+        mockMvc.perform(get("/api/my/session-context").session(session)
+                        .with(authentication(UsernamePasswordAuthenticationToken.authenticated(
+                                principal, "", authorities))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.restoreAvailable").value(false));
     }
 
     @Test

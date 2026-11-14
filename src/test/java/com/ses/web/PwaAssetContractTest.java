@@ -132,10 +132,16 @@ class PwaAssetContractTest {
         assertThat(logout).contains("self.confirmDraftLoss().then(function(proceed)", "if (!proceed) return;",
                 "self.clearUserScope()");
         assertThat(logout.indexOf("confirmDraftLoss")).isLessThan(logout.indexOf("clearUserScope"));
-        assertThat(common).contains("draftLossSummary", "pwa.logout.draftLossConfirm");
+        // 件数はIndexedDBから数え（他tab・隔離後の下書きを含む）、応答が無ければ画面の件数で判断する（W3-09 P3-4）。
+        assertThat(common).contains("draftLossSummary", "draftLossCount", "pwa.logout.draftLossConfirm");
+        // SW更新の確認は「下書きは維持される」と約束しない（W3-09 P3-6）。
+        int promptStart = common.indexOf("promptUpdate: function(worker)");
+        String prompt = common.substring(promptStart, common.indexOf("clearUserScope: function()", promptStart));
+        assertThat(prompt).contains("pwa.update.text", "pwa.update.confirmPlain")
+                .doesNotContain("保存済みの下書きは維持されます");
         assertThat(sessionApi).contains("@RequestHeader(value = \"X-User-Scope\", required = false)",
                 "resolve(presentedScope)", "preserveQueue", "\"restoreAvailable\"",
-                "supportsPasswordReauthentication(authentication)");
+                "supportsPasswordReauthentication(", "authentication, request.getSession(false))");
     }
 
     @Test
@@ -148,10 +154,19 @@ class PwaAssetContractTest {
                 "pwa.queue.lockedUnavailable", "pwa.queue.unsentLeaveWarning", "pwa.restore.unavailable",
                 "PWA_RESTORE_REAUTH_UNSUPPORTED", "checkRestoreAvailability", "draftLossSummary");
         // beforeunloadは必要な間だけ登録し、復元可能なsession（true）では出さない。
-        assertThat(queue).contains("state.restoreAvailable !== true && state.unsentDraftCount > 0",
+        assertThat(queue).contains("state.restoreAvailable !== true && currentUnsentCount() > 0",
                 "window.addEventListener('beforeunload', onBeforeUnload)",
                 "window.removeEventListener('beforeunload', onBeforeUnload)",
                 "'visibilitychange'", "'pagehide', flushBeforeLeaving");
+        // 送信中（fetch未完了）の新規recordも、送信を始める前に未送信として数える（W3-09 P2-W309-1）。
+        int requestStart = queue.indexOf("async function request(spec)");
+        String request = queue.substring(requestStart, queue.indexOf("async function flush()", requestStart));
+        assertThat(request.indexOf("state.sendingRequestIds.add(record.clientRequestId)"))
+                .isNotNegative()
+                .isLessThan(request.indexOf("return await sendRecord(record)"));
+        assertThat(request).contains("state.sendingRequestIds.delete(record.clientRequestId)");
+        // session有効時間を超えると復元できなくなることを画面で示す（W3-09 P1-W309-1 (a)）。
+        assertThat(queue).contains("ログインの有効時間（30分。端末のスリープ中を含む）");
         // パスワードを送る前に復元可否を確かめる。
         String prepare = queue.substring(queue.indexOf("prepareRestore: async password =>"),
                 queue.indexOf("confirmRestore: async () =>"));
@@ -163,7 +178,8 @@ class PwaAssetContractTest {
         // offline.htmlは復元可否を確認するまでパスワード欄を使わせず、不可ならパスワード欄を隠す。
         assertThat(offline).contains("id=\"offline-restore-auth\"", "id=\"offline-restore-unavailable\"",
                 "この下書きは復元できません", "checkRestoreAvailability()", "restoreAvailability === true",
-                "error.restoreUnavailable", "window.addEventListener('online', refreshAvailability)");
+                "error.restoreUnavailable", "window.addEventListener('online', refreshAvailability)",
+                "window.addEventListener('focus', refreshAvailability)", "availabilityRetries < 5");
     }
 
     @Test

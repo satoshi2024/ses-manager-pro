@@ -42,8 +42,10 @@
         // server（session-context）が返す「このsessionでロック中の下書きを復元できるか」。null=未確認。
         // 表示（復元入口・離脱確認）にだけ使い、認可はserverの復元APIが同じ判定をやり直す。
         restoreAvailable: null,
-        // 現在documentで扱う未送信の下書き件数（render時点）。離脱確認・logout確認だけに使う。
-        unsentDraftCount: 0
+        // 現在documentで扱う未送信の下書き（render時点のIndexedDB）と、送信中（fetch未完了）の新規record。
+        // 離脱確認・logout確認だけに使う。送信中は応答まで render されないため別に数える（W3-09 P2-W309-1）。
+        unsentRequestIds: new Set(),
+        sendingRequestIds: new Set()
     };
 
     const REVOCATION_KEY = 'ses_pwa_revocation_epoch';
@@ -67,12 +69,17 @@
             '現在のログイン方式（シングルサインオン）では、この下書きは復元できません。')), { restoreUnavailable: true });
     }
 
+    /** 現在documentの未送信の下書き件数（送信中を含む。同じrecordは1件と数える）。 */
+    function currentUnsentCount() {
+        return new Set([...state.unsentRequestIds, ...state.sendingRequestIds]).size;
+    }
+
     /**
-     * 復元できないsession（OIDC等。未確認も含む）で、現在documentに未送信の下書きがあるか。
+     * 復元できないsession（OIDC等。未確認も含む）で、現在documentに未送信（送信中を含む）の下書きがあるか。
      * この状態で画面を離れると下書きはロックされ、復元できないまま30日後またはlogout時に削除される。
      */
     function draftLossWarningRequired() {
-        return state.restoreAvailable !== true && state.unsentDraftCount > 0
+        return state.restoreAvailable !== true && currentUnsentCount() > 0
             && !state.quarantined && Boolean(state.scope);
     }
 
@@ -96,7 +103,8 @@
     }
 
     function resetUnsentDrafts() {
-        state.unsentDraftCount = 0;
+        state.unsentRequestIds = new Set();
+        state.sendingRequestIds = new Set();
         updateUnloadGuard();
     }
 
@@ -883,7 +891,9 @@
     function lockedDraftText() {
         const count = state.lockedDraftCount;
         if (!count) return '';
-        if (state.restoreAvailable === true) return `ロック中の下書き ${count} 件。再認証後に明示的に復元できます。`;
+        if (state.restoreAvailable === true) {
+            return uiText('pwa.queue.lockedRestorable', 'ロック中の下書き {0} 件。再認証後に明示的に復元できます。', count);
+        }
         if (state.restoreAvailable === false) {
             return uiText('pwa.queue.lockedUnavailable',
                 'ロック中の下書き {0} 件は、現在のログイン方式（シングルサインオン）では復元できません。必要な内容は再入力してください。', count);
@@ -900,8 +910,10 @@
         const errors = records.filter(record => record.status === 'ERROR');
         if (renderGeneration === state.documentGeneration) {
             // 撤回後に遅れて完了したrenderで件数を戻さない。
-            state.unsentDraftCount = pending.length + conflicts.length
-                + errors.filter(record => record.payload).length;
+            state.unsentRequestIds = new Set(records
+                .filter(record => record.status === 'PENDING' || record.status === 'CONFLICT'
+                    || (record.status === 'ERROR' && record.payload))
+                .map(record => record.clientRequestId));
         }
         updateUnloadGuard();
         const panel = document.getElementById('pwa-queue-panel');
@@ -920,13 +932,13 @@
             if (state.quarantined) {
                 status.textContent = unavailable
                     ? uiText('pwa.queue.quarantinedUnavailable', '下書きはロックされています。現在のログイン方式（シングルサインオン）では復元できません。')
-                    : '下書きはロックされています。オンラインで再認証し、明示的に復元してください。';
+                    : uiText('pwa.queue.quarantinedRestorable', '下書きはロックされています。オンラインで再認証し、明示的に復元してください。');
             }
             else if (state.paused) status.textContent = 'セッション期限切れ。再認証後に同じユーザーで同期を再開します。';
             else if (unsentWarning && !state.flushing) {
                 const warning = navigator.onLine
-                    ? uiText('pwa.queue.unsentLeaveWarning', '未送信 {0} 件。送信が終わる前にこの画面を離れると、この下書きは復元できません。', pending.length)
-                    : uiText('pwa.queue.offlineLeaveWarning', 'オフライン: 未送信 {0} 件。通信が戻って送信が終わるまで、この画面を離れないでください（離れると復元できません）。', pending.length);
+                    ? uiText('pwa.queue.unsentLeaveWarning', '未送信 {0} 件。送信が終わる前にこの画面を離れるか、操作の無い状態がログインの有効時間（30分。端末のスリープ中を含む）を超えると、この下書きは復元できなくなります。', pending.length)
+                    : uiText('pwa.queue.offlineLeaveWarning', 'オフライン: 未送信 {0} 件。通信が戻ったら、すぐにこの画面で送信を終えてください。この画面を離れるか、オフラインや操作の無い状態がログインの有効時間（30分。端末のスリープ中を含む）を超えると、この下書きは復元できなくなります。', pending.length);
                 status.textContent = lockedText ? `${warning} ${lockedText}` : warning;
             }
             else if (state.lockedDraftCount) status.textContent = lockedText;
@@ -1332,7 +1344,15 @@
                 await render();
                 return { queued: true, clientRequestId: record.clientRequestId };
             }
-            return sendRecord(record);
+            // 送信中（fetch未完了）も未送信として数え、保存が止まっている間の離脱・logoutを確認できるようにする（P2-W309-1）。
+            state.sendingRequestIds.add(record.clientRequestId);
+            updateUnloadGuard();
+            try {
+                return await sendRecord(record);
+            } finally {
+                state.sendingRequestIds.delete(record.clientRequestId);
+                updateUnloadGuard();
+            }
         })();
         state.inFlight.set(dedupeKey, operation);
         operation.finally(() => setTimeout(() => state.inFlight.delete(dedupeKey), 250));
@@ -1375,7 +1395,7 @@
 
     /** 復元できないsessionで画面が隠れる・離れる直前に、未送信の下書きの送信を試みる（完了は保証しない）。 */
     function flushBeforeLeaving() {
-        if (state.restoreAvailable === true || state.unsentDraftCount === 0 || state.paused
+        if (state.restoreAvailable === true || currentUnsentCount() === 0 || state.paused
                 || state.quarantined || state.flushing || !navigator.onLine) return;
         flush().catch(() => undefined);
     }
@@ -1475,6 +1495,31 @@
         }
     }
 
+    /**
+     * logoutで端末から削除される下書きの件数（logout確認用。W3-09 P3-4）。
+     * logoutはIndexedDBのqueueを丸ごと削除するため、現在documentの未送信（送信中を含む）に加えて、
+     * IndexedDB上の現在epochの下書き（他tabの入力、session期限切れ等で隔離されたdocumentのロック中を含む）を数える。
+     * IndexedDBを読めないときは、このdocumentが把握している件数を返す。
+     */
+    async function draftLossCount() {
+        const ids = new Set(state.quarantined ? [] : [...state.unsentRequestIds, ...state.sendingRequestIds]);
+        try {
+            const epoch = readRevocationEpoch();
+            const records = await withStore('readonly', store => {
+                const request = store.getAll();
+                request.onsuccess = () => { request._pwaResult = request.result || []; };
+                return request;
+            }).then(request => request._pwaResult || []);
+            records.forEach(record => {
+                if (record && record.revocationEpoch === epoch && record.payload
+                        && ['PENDING', 'CONFLICT', 'ERROR'].includes(record.status)) ids.add(record.clientRequestId);
+            });
+            return ids.size;
+        } catch (_) {
+            return ids.size + (state.quarantined ? 0 : state.lockedDraftCount);
+        }
+    }
+
     targetSes.pwaQueue = {
         init,
         whenReady: () => state.ready,
@@ -1490,10 +1535,11 @@
         checkRestoreAvailability,
         /** logout確認用の同期値。unsent=現在documentの未送信、locked=ロック中（logoutでどちらも削除される）。 */
         draftLossSummary: () => ({
-            unsent: state.quarantined ? 0 : state.unsentDraftCount,
+            unsent: state.quarantined ? 0 : currentUnsentCount(),
             locked: state.quarantined ? 0 : state.lockedDraftCount,
             restoreAvailable: state.restoreAvailable
         }),
+        draftLossCount,
         getOfflineDrafts: async () => {
             await state.ready;
             if (!restorePermitIsCurrent()) return [];

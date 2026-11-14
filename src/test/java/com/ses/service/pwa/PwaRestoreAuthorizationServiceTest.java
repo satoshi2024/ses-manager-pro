@@ -453,6 +453,34 @@ class PwaRestoreAuthorizationServiceTest {
         assertThat(PwaRestoreAuthorizationService.supportsPasswordReauthentication(null)).isFalse();
     }
 
+    @Test
+    void breakGlassとbootstrapのsessionはローカルパスワードでも復元対象にせず失敗回数を加算しない() {
+        assertThat(PwaRestoreAuthorizationService.supportsPasswordReauthentication(authentication, session)).isTrue();
+
+        MockHttpSession breakGlass = new MockHttpSession();
+        breakGlass.setAttribute("SPRING_SECURITY_CONTEXT", contextFor(authentication));
+        breakGlass.setAttribute(com.ses.service.security.BreakGlassService.INCIDENT_ID_ATTRIBUTE, 99L);
+        assertThat(PwaRestoreAuthorizationService.supportsPasswordReauthentication(authentication, breakGlass)).isFalse();
+        PwaRestoreReauthenticateRequest wrong = reauth(nonce(48), "scope-v2");
+        wrong.setPassword("incorrect");
+        assertThatThrownBy(() -> service.reauthenticate(wrong, breakGlass, authentication))
+                .isInstanceOf(PwaRestoreReauthUnsupportedException.class)
+                .hasMessage("error.pwa.restore.reauthUnsupported");
+
+        MockHttpSession bootstrap = new MockHttpSession();
+        bootstrap.setAttribute("SPRING_SECURITY_CONTEXT", contextFor(authentication));
+        bootstrap.setAttribute(com.ses.config.ProductionBootstrapMode.SESSION_ATTRIBUTE, Boolean.TRUE);
+        assertThat(PwaRestoreAuthorizationService.supportsPasswordReauthentication(authentication, bootstrap)).isFalse();
+        assertThatThrownBy(() -> service.confirm(confirm("p".repeat(43), nonce(49), "scope-v2"), bootstrap, authentication))
+                .isInstanceOf(PwaRestoreReauthUnsupportedException.class);
+
+        MockHttpSession invalidated = new MockHttpSession();
+        invalidated.invalidate();
+        assertThat(PwaRestoreAuthorizationService.supportsPasswordReauthentication(authentication, invalidated)).isFalse();
+        verify(failureRecorder, never()).record(any(), any());
+        verify(identityService, never()).load(any(), any());
+    }
+
     private static OAuth2AuthenticationToken oidcAuthentication() {
         var authorities = List.of(new SimpleGrantedAuthority("ROLE_要員"));
         OidcIdToken idToken = OidcIdToken.withTokenValue("pwa-restore-test-id-token")

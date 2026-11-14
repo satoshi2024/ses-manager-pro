@@ -4,11 +4,13 @@ import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.config.LoginUser;
 import com.ses.config.OidcLoginUser;
+import com.ses.config.ProductionBootstrapMode;
 import com.ses.dto.pwa.PwaRestoreConfirmRequest;
 import com.ses.dto.pwa.PwaRestorePermitResponse;
 import com.ses.dto.pwa.PwaRestoreProofResponse;
 import com.ses.dto.pwa.PwaRestoreReauthenticateRequest;
 import com.ses.service.pwa.PwaRestoreIdentityService.CurrentIdentity;
+import com.ses.service.security.BreakGlassService;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
@@ -78,10 +80,28 @@ public class PwaRestoreAuthorizationService {
         return principal instanceof LoginUser && !(principal instanceof OidcLoginUser);
     }
 
+    /**
+     * {@link #supportsPasswordReauthentication(Authentication)} に加え、break-glass・本番初回bootstrapのsessionを除く
+     * （W3-09 P3-1、多層防御）。どちらもローカルパスワードのform loginだが、事故対応・初期構築用の共用・期限付き資格情報であり、
+     * 要員本人の本人確認には使わない（いずれも {@code /api/my/**} は {@code hasRole('要員')} で既に届かない）。
+     * 印はserverが立てるsession属性（{@link BreakGlassService#INCIDENT_ID_ATTRIBUTE}、
+     * {@link ProductionBootstrapMode#SESSION_ATTRIBUTE}）だけを見る。
+     */
+    public static boolean supportsPasswordReauthentication(Authentication authentication, HttpSession session) {
+        if (!supportsPasswordReauthentication(authentication)) return false;
+        if (session == null) return true;
+        try {
+            return session.getAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE) == null
+                    && !ProductionBootstrapMode.isBootstrapSession(session);
+        } catch (IllegalStateException invalidated) {
+            return false;
+        }
+    }
+
     public PwaRestoreProofResponse reauthenticate(PwaRestoreReauthenticateRequest request,
                                                    HttpSession session, Authentication authentication) {
         // OIDC等のsessionは、パスワード照合・失敗回数加算（AccountLock）・DB読取より前に専用codeで拒否する。
-        rejectUnlessPasswordReauthentication(authentication);
+        rejectUnlessPasswordReauthentication(authentication, session);
         if (request == null || request.getPassword() == null || request.getPassword().isEmpty()
                 || request.getPassword().length() > 1024) reject();
         validateBoundary(request.getDocumentNonce(), request.getUserScope(), session, authentication);
@@ -155,7 +175,7 @@ public class PwaRestoreAuthorizationService {
     public PwaRestorePermitResponse confirm(PwaRestoreConfirmRequest request,
                                             HttpSession session, Authentication authentication) {
         // proofはローカルパスワードsessionでしか発行しないが、confirmも同じ判定で先に拒否する。
-        rejectUnlessPasswordReauthentication(authentication);
+        rejectUnlessPasswordReauthentication(authentication, session);
         if (request == null) reject();
         validateBoundary(request.getDocumentNonce(), request.getUserScope(), session, authentication);
         Object sessionMutex = sessionMutexOrReject(session);
@@ -243,10 +263,10 @@ public class PwaRestoreAuthorizationService {
         }
     }
 
-    private static void rejectUnlessPasswordReauthentication(Authentication authentication) {
+    private static void rejectUnlessPasswordReauthentication(Authentication authentication, HttpSession session) {
         if (authentication == null || !authentication.isAuthenticated()
                 || authentication instanceof AnonymousAuthenticationToken) reject();
-        if (!supportsPasswordReauthentication(authentication)) throw new PwaRestoreReauthUnsupportedException();
+        if (!supportsPasswordReauthentication(authentication, session)) throw new PwaRestoreReauthUnsupportedException();
     }
 
     private static void validateBoundary(String documentNonce, String userScope, HttpSession session,

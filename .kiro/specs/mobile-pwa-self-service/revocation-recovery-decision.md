@@ -121,3 +121,10 @@ W3-R1静的再レビュー（1be03bea）は、本番がOIDC必須（要員のロ
 - 非対応sessionでは、現在documentに未送信の下書きがある間だけ `beforeunload` の確認を出し、`visibilitychange`・`pagehide` で送信を試みる。logoutは未送信・ロック中の下書きがあれば確認する。
 - 契約5に関連して、撤回epoch cookie は online bootstrap のたびに照合済みの同じ値で期限だけを延ばす（Safari ITPの7日上限対策。localStorageは書き直さない）。
 - OIDC sessionで復元を可能にする方案B（IdP step-up再認証と document nonce の結合）は、Plan Review と Security 設計審査を経る別batchとする。本追記は CODE PASS・production 許可・B-NF04-4 の承認を意味しない。
+
+## 2026-11-14 追記2: OIDC sessionの期限切れと離脱確認の制限（W3-09 独立レビュー `071fb7be`）
+
+- **P1-W309-1 = (a) 受け入れ（利用者決定、2026-11-14）**: OIDC sessionでは、ログインsessionの期限切れ（無操作30分。オフライン中・端末のスリープ中も時間は進む。server再起動・instance入れ替えを含む）を検知すると画面は下書きを隔離し、再ログイン後の新しい画面ではロック中として扱うため、未送信の下書きは復元できない。この経路は画面を離れないため離脱確認では止められない。B-NF04-2 の「30日保存」はローカルパスワードsessionについての記述とし、OIDC sessionではこの制限を画面文言（`pwa.queue.unsentLeaveWarning`・`pwa.queue.offlineLeaveWarning`、SW更新確認）と利用者・運用説明で告知する。コードによる緩和（期限切れ後も同じdocumentで同一user・engineer・linkを再確認して送信を再開する案 (b)）は、OIDC再ログインを再認証として扱う設計になるため、方案B・B-NF04-4 と合わせてSecurity設計審査を経る別batchとする。
+- **P2-W309-2（プラットフォームの制限）**: `beforeunload` の確認は iOS Safari では表示されず、Android Chrome でもタブを閉じる・アプリ切替では表示されない。方案Aの「離脱前の確認」はこれらの端末では働かず、同期パネルの文言が唯一の手掛かりになる。実機受入の S-02 で記録する。
+- **P2-W309-1（修正）**: 送信中（fetch未完了）の新規recordも未送信として数え、離脱確認・logout確認の対象にした。logout確認の件数はIndexedDB上の現在epochの下書き（他tab・隔離後の画面の分を含む）から数える。
+- 本追記も CODE PASS・production 許可・B-NF04-4 の承認を意味しない。

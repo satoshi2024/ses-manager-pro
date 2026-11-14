@@ -99,6 +99,7 @@
         // serverが返す復元可否（true/false）。null=未確認。OIDC等（false）ではパスワード欄を出さず、パスワードも送らない。
         let restoreAvailability = null;
         let checkingAvailability = false;
+        let availabilityRetries = 0;
         function applyAvailability() {
             const unavailable = restoreAvailability === false;
             authBox.hidden = unavailable;
@@ -128,6 +129,11 @@
             updateNetwork();
             if (restoreAvailability === null && navigator.onLine) {
                 status.textContent = '復元できるかを確認できませんでした。通信を確認して再読み込みしてください。';
+                // 一時的な失敗は数回だけ自動で再確認する（focus・表示復帰でも再確認する。W3-09 P3-7）。
+                if (availabilityRetries < 5) {
+                    availabilityRetries++;
+                    setTimeout(refreshAvailability, 2000);
+                }
             }
         }
         reauth.addEventListener('click', async function() {
@@ -171,6 +177,10 @@
             } finally { confirmRestore.disabled = false; }
         });
         window.addEventListener('online', refreshAvailability);
+        window.addEventListener('focus', refreshAvailability);
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible') refreshAvailability();
+        });
         window.addEventListener('offline', updateNetwork);
         window.addEventListener('ses:pwa-revoked', clearDrafts);
         refreshAvailability();

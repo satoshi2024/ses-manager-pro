@@ -148,7 +148,10 @@ class PwaRestoreChromeAuthenticationBrowserTest {
                     .as("再認証前は確認操作を表示しない").isTrue();
 
             assertThat(browser.waitForStrict("!!navigator.onLine", Duration.ofSeconds(10))).isTrue();
-            assertThat(browser.waitForStrict("!!(document.getElementById('offline-reauth') && !document.getElementById('offline-reauth').disabled)", Duration.ofSeconds(10))).isTrue();
+            // W3-09: offline.htmlは実session-contextで復元可否（form login = true）を確認してからパスワード欄を有効にする。
+            assertThat(browser.waitForStrict("!!(window.SES&&SES.pwaQueue&&SES.pwaQueue.restoreAvailability()===true)", Duration.ofSeconds(30)))
+                    .as("online復帰後にローカルパスワードsessionの復元可否を確認する").isTrue();
+            assertThat(browser.waitForStrict("!!(document.getElementById('offline-reauth') && !document.getElementById('offline-reauth').disabled)", Duration.ofSeconds(30))).isTrue();
             browser.evaluate("document.getElementById('offline-restore-password').value="
                     + JSON.writeValueAsString(PASSWORD) + ";document.getElementById('offline-reauth').click();true");
             assertThat(browser.waitForStrict("!!(document.getElementById('offline-confirm-restore') && !document.getElementById('offline-confirm-restore').hidden)", Duration.ofSeconds(15)))
