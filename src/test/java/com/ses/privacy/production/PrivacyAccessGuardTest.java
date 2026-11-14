@@ -7,6 +7,7 @@ import com.ses.config.feature.FeatureSwitchFilter;
 import com.ses.config.feature.FeatureSwitchProperties;
 import com.ses.config.feature.FeatureSwitches;
 import com.ses.service.security.AuthorizationService;
+import com.ses.test.DisableDefaultTenantTestContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,7 +32,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** NF07 の service 層の再認可（公開スイッチ → action 権限の順。§3.1.2 の6、§6.8）。 */
+/**
+ * NF07 の service 層の再認可（公開スイッチ → action 権限の順。§3.1.2 の6、§6.8）。
+ *
+ * <p>guard が現在の認証をそのまま判定へ渡すことを同一instanceで検証するため、principal を差し替える
+ * 既定tenant拡張を無効にする（DBもtenant contextも使わない単体テスト）。</p>
+ */
+@DisableDefaultTenantTestContext
 class PrivacyAccessGuardTest {
 
     private AuthorizationService authorizationService;
