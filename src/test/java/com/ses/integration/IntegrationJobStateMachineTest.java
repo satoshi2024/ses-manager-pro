@@ -134,4 +134,26 @@ class IntegrationJobStateMachineTest {
         IntegrationJob cancelled = jobService.getById(bpJob.getId());
         assertThat(cancelled.getStatus()).isEqualTo("CANCELLED");
     }
+
+    @Test
+    @DisplayName("取消マトリクス: FAILEDの取引作成系の送信ジョブは取消せる（内容を直して再送信するため）。それ以外のFAILEDは取消不可")
+    void cancelJob_failedCreateJobCanBeCancelled_otherFailedJobsCannot() {
+        // freeeの入力エラーで失敗した送信ジョブ（再試行は固定スナップショットのまま同じ失敗になる）
+        IntegrationJob bpJob = jobService.createJob(connId, "BP_PURCHASE_SYNC", "BP_PAYMENT", 9101L, "IDEM-FAILED-BP", "hashFb");
+        jobService.claimJob(bpJob.getId());
+        jobService.markFailed(bpJob.getId(), "VALIDATION_ERROR", "error.accounting.freeeBeforeFiscalYear");
+        assertThat(jobService.getById(bpJob.getId()).getStatus()).isEqualTo("FAILED");
+
+        jobService.cancelJob(bpJob.getId(), "内容を直して再送信");
+        assertThat(jobService.getById(bpJob.getId()).getStatus()).isEqualTo("CANCELLED");
+
+        // 取引作成系でないジョブ（支払実績同期など）はキーが取引IDで固定のため、FAILEDの取消は認めない
+        IntegrationJob paymentJob = jobService.createJob(connId, "PAYMENT_SYNC", "BP_PAYMENT", 9102L, "IDEM-FAILED-PAY", "hashFp");
+        jobService.claimJob(paymentJob.getId());
+        jobService.markFailed(paymentJob.getId(), "VALIDATION_ERROR", "error.accounting.freeeValidation");
+        assertThatThrownBy(() -> jobService.cancelJob(paymentJob.getId(), "取消"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("CANNOT_CANCEL_TERMINAL_JOB");
+        assertThat(jobService.getById(paymentJob.getId()).getStatus()).isEqualTo("FAILED");
+    }
 }

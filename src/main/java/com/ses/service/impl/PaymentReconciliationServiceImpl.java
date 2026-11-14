@@ -57,6 +57,8 @@ public class PaymentReconciliationServiceImpl implements PaymentReconciliationSe
     private final BankDepositSource bankDepositSource;
     private final InvoiceService invoiceService;
     private final org.springframework.context.ApplicationContext applicationContext;
+    /** SESの入金消込をfreeeの取引の消込へ反映する（請求書がfreeeへ送信済みのときだけ）。テストslice等では無い。 */
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.accounting.SalesInvoiceIntegrationService> salesInvoiceIntegration;
 
     @Override
     public ReconciliationFetchResultDto fetchAndReconcile(LocalDate from, LocalDate to) {
@@ -197,6 +199,15 @@ public class PaymentReconciliationServiceImpl implements PaymentReconciliationSe
         if (updated == 0) {
             // FOR UPDATE で行ロック済みのため通常到達しないが、防御的にCASを二重チェックする。
             throw BusinessException.of(409, "error.reconciliation.alreadyReconciled");
+        }
+
+        // freee側でも同じ口座明細で取引を消込む（反映しないと月次照合で入金が INTERNAL_ONLY のまま残り締められない）。
+        // 外部APIは呼ばず、同じトランザクションで反映ジョブを登録する（入金消込が確定したときだけ送られる）
+        com.ses.service.accounting.SalesInvoiceIntegrationService sync =
+                salesInvoiceIntegration == null ? null : salesInvoiceIntegration.getIfAvailable();
+        if (sync != null) {
+            sync.enqueueDepositReconcile(depositId, deposit.getFreeeDepositId(), invoiceId, payment.getId(),
+                    deposit.getAmount());
         }
     }
 
