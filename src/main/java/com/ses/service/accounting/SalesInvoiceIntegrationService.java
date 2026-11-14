@@ -13,6 +13,12 @@ public interface SalesInvoiceIntegrationService {
     IntegrationJob triggerSalesSync(Long invoiceId, Long triggeredByUserId);
 
     /**
+     * 送信プレビュー。送信ジョブへ保存するのと同じ標準DTOと、送信ガードが要求するマッピングの状態を返す。
+     * 接続の作成・ジョブ登録などの副作用は持たない。請求書が無ければ404。
+     */
+    com.ses.dto.accounting.AccountingSendPreviewDto<com.ses.dto.accounting.canonical.CanonicalSalesInvoice> previewSalesSync(Long invoiceId);
+
+    /**
      * 請求書の取消連携ジョブを生成・キューイングする。
      */
     IntegrationJob triggerSalesCancel(Long invoiceId, String cancelReason, Long triggeredByUserId);
@@ -31,6 +37,19 @@ public interface SalesInvoiceIntegrationService {
      * 請求書から送信標準DTOを構築する（プレビュー用）。
      */
     com.ses.dto.accounting.canonical.CanonicalSalesInvoice buildCanonicalInvoice(Long invoiceId);
+
+    /**
+     * SESで入金消込した入金明細（freeeの口座明細）を、freeeの取引の消込として反映するジョブを登録する（Outbox）。
+     * 入金消込と同じトランザクションで呼ぶ。請求書がfreeeへ送信済み（取引が取消されていない）ときだけ登録し、
+     * それ以外（未送信・取引取消済み・会計接続なし・口座明細IDが無い）は登録せず null を返す。
+     */
+    IntegrationJob enqueueDepositReconcile(Long depositId, String walletTxnId, Long invoiceId, Long paymentId,
+                                           java.math.BigDecimal amount);
+
+    /**
+     * 入金消込の反映ジョブを1件同期処理する（Worker実行用 / DBトランザクション外）。
+     */
+    void processDepositReconcileJob(Long jobId);
 
     /**
      * 外部API実行後の結果をDBに反映する（トランザクション内）。

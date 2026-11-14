@@ -139,6 +139,9 @@
             let html = `<span class="badge ${result.success ? 'text-bg-success' : 'text-bg-danger'}">${result.success ? t('attendance.sync.success', '成功') : t('attendance.sync.partial', '部分失敗')}</span> `
                 + `${t('attendance.sync.pushed', '送信')}: ${esc(result.pushedCount || 0)} / ${t('attendance.sync.duplicate', '重複skip')}: ${esc(result.duplicateSkippedCount || 0)}`
                 + ` / ${t('attendance.sync.pulled', '取得')}: ${esc(result.pulledCount || 0)} / ${t('attendance.sync.rejected', '拒否')}: ${esc(result.rejectedCount || 0)}`;
+            if (result.notLinkedSkippedCount) {
+                html += ` / ${t('attendance.sync.notLinked', '未対応付けの要員（対象外）')}: ${esc(result.notLinkedSkippedCount)}`;
+            }
             if (result.direction !== 'push') {
                 html += `<div class="mt-1">${t('attendance.sync.matched', '一致')}: ${esc(result.matchedCount || 0)}`
                     + ` / ${t('attendance.sync.diff', '差異')}: ${esc(result.diffCount || 0)}`
@@ -149,7 +152,8 @@
                 }
             }
             if (result.errors && result.errors.length) {
-                html += `<div class="mt-1 text-danger">${result.errors.map(esc).join('<br>')}</div>`;
+                // エラーは「engineer=ID: message key」の形。keyだけを表示言語へ置き換える
+                html += `<div class="mt-1 text-danger">${result.errors.map(e => esc(String(e).replace(/(error\.[A-Za-z0-9_.]+)/g, k => t(k, k)))).join('<br>')}</div>`;
             }
             el.innerHTML = html;
         }

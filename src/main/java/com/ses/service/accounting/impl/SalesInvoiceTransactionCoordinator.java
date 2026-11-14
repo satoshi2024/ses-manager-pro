@@ -42,8 +42,13 @@ public class SalesInvoiceTransactionCoordinator {
 
                 jobService.createJob(
                         conn.getId(), "SALES_INVOICE_CANCEL", "INVOICE", job.getTargetId(), compIdempotencyKey, compHash,
-                        compPayload, conn.getTenantId(), conn.getLegalEntityId(), job.getOrganizationId());
+                        // NF09: 補償取消は元ジョブと同じ法人で実行する（接続の法人は全社共通ではNULL）
+                        compPayload, conn.getTenantId(), job.getLegalEntityId(), job.getOrganizationId());
             } else {
+                if (result.isAdoptedExisting()) {
+                    // 新しく作成せずfreeeに既にあった取引を採用した（再試行・タイムアウト後の照合）。新規作成と区別して残す
+                    jobService.recordJobEvent(jobId, "ADOPTED_EXISTING_DEAL", "accounting.event.adoptedExistingDeal", null);
+                }
                 jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
                         "freee取引登録成功: dealId=" + result.getExternalId());
             }

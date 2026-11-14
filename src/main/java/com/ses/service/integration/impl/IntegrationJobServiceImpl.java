@@ -25,6 +25,10 @@ import java.util.List;
 public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper, IntegrationJob>
         implements IntegrationJobService {
 
+    /** freee取引を作成する送信ジョブ（世代付きの冪等キーで再送信できる種別）。FAILEDでも取消せる。 */
+    private static final java.util.Set<String> DEAL_CREATE_JOB_TYPES = java.util.Set.of(
+            "SALES_INVOICE_SYNC", "BP_PURCHASE_SYNC", "EXPENSE_DEAL_SYNC");
+
     private final IntegrationJobEventMapper jobEventMapper;
 
     @Override
@@ -234,9 +238,19 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
             }
         }
 
+        // 4. FAILED は取引作成系の送信ジョブだけ取消せる。FAILEDは再試行しても固定スナップショットのまま同じ失敗になり
+        //    （freeeの期首日より前の発生日など）、送信ボタンも previousJobFailed で拒否するため、取消さないと二度と送れない。
+        //    取消後の再送信は新しい世代になり、作成前にfreeeの既存取引を確認する（失敗前に作成されていれば作らない）。
+        boolean failedCreateJob = "FAILED".equals(job.getStatus());
+        if (failedCreateJob && !DEAL_CREATE_JOB_TYPES.contains(job.getJobType())) {
+            throw new BusinessException(400, "CANNOT_CANCEL_TERMINAL_JOB: 失敗したジョブは再試行してください (status=FAILED)");
+        }
+
         String fromStatus = job.getStatus();
         String safeReason = SafeErrorPolicy.safeJobMessage("USER_CANCELLED", reason);
-        int updated = baseMapper.transitionToCancelled(jobId, job.getVersion(), safeReason);
+        int updated = failedCreateJob
+                ? baseMapper.transitionFailedToCancelled(jobId, job.getVersion(), safeReason)
+                : baseMapper.transitionToCancelled(jobId, job.getVersion(), safeReason);
         if (updated == 0) {
             throw new BusinessException(409, "ジョブの状態が変更されました。再試行してください。");
         }

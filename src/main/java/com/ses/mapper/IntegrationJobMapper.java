@@ -80,6 +80,18 @@ public interface IntegrationJobMapper extends BaseMapper<IntegrationJob> {
                            @Param("safeMessage") String safeMessage);
 
     /**
+     * FAILED から CANCELLED へのバージョン CAS 遷移（取引作成系の送信ジョブだけ。呼出側で種別を確認する）。
+     * 取消すと送信の世代が進み、内容を直して再送信できる（次の世代は作成前にfreeeの既存取引を確認する）。
+     */
+    @Update("UPDATE t_integration_job " +
+            "SET status = 'CANCELLED', error_code = 'USER_CANCELLED', error_category = 'BUSINESS', error_message_safe = #{reason}, " +
+            "    version = version + 1, updated_at = NOW() " +
+            "WHERE id = #{id} AND version = #{version} AND status = 'FAILED' AND deleted_flag = 0")
+    int transitionFailedToCancelled(@Param("id") Long id,
+                                    @Param("version") Integer version,
+                                    @Param("reason") String reason);
+
+    /**
      * PENDING, RETRYABLE, または RUNNING から CANCELLED へのバージョン CAS 遷移。
      */
     @Update("UPDATE t_integration_job " +

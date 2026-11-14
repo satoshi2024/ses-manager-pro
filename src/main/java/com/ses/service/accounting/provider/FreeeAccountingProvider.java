@@ -118,12 +118,19 @@ public class FreeeAccountingProvider implements AccountingProvider {
 
     @Override
     public CanonicalDealResult upsertSalesInvoice(IntegrationConnection connection, CanonicalSalesInvoice invoice) {
+        return upsertSalesInvoice(connection, invoice, DealCreateGuard.of(invoice.getVerifyNoExistingDeal(), 1));
+    }
+
+    @Override
+    public CanonicalDealResult upsertSalesInvoice(IntegrationConnection connection, CanonicalSalesInvoice invoice,
+                                                  DealCreateGuard guard) {
         connection = requireAuthoritativeConnection(connection);
         log.info("Upserting sales invoice to freee: invoiceNo={}, customerCode={}, total={}",
                 invoice.getInvoiceNo(), invoice.getCustomerCode(), invoice.getTotal());
 
         FreeeDealCreateRequest request = buildSalesDealRequest(connection, invoice);
-        return executeDealCreationWithRecovery(connection, "/api/1/deals", request, invoice.getTotal(), invoice.getInvoiceNo());
+        return executeDealCreationWithRecovery(connection, "/api/1/deals", request, invoice.getTotal(), invoice.getInvoiceNo(), guard,
+                invoice.getPriorDealScopes());
     }
 
     @Override
@@ -184,23 +191,37 @@ public class FreeeAccountingProvider implements AccountingProvider {
 
     @Override
     public CanonicalDealResult upsertPurchaseDeal(IntegrationConnection connection, CanonicalPurchaseDeal purchase) {
+        return upsertPurchaseDeal(connection, purchase, DealCreateGuard.of(purchase.getVerifyNoExistingDeal(), 1));
+    }
+
+    @Override
+    public CanonicalDealResult upsertPurchaseDeal(IntegrationConnection connection, CanonicalPurchaseDeal purchase,
+                                                  DealCreateGuard guard) {
         connection = requireAuthoritativeConnection(connection);
         log.info("Upserting purchase deal to freee: bpPaymentId={}, bpCompanyCode={}, amount={}",
                 purchase.getBpPaymentId(), purchase.getBpCompanyCode(), purchase.getAmount());
 
         FreeeDealCreateRequest request = buildPurchaseDealRequest(connection, purchase);
         String refNumber = "BP-" + purchase.getBpPaymentId();
-        return executeDealCreationWithRecovery(connection, "/api/1/deals", request, purchase.getAmount(), refNumber);
+        return executeDealCreationWithRecovery(connection, "/api/1/deals", request, purchase.getAmount(), refNumber, guard,
+                purchase.getPriorDealScopes());
     }
 
     @Override
     public CanonicalDealResult upsertExpenseDeal(IntegrationConnection connection, CanonicalExpenseDeal expense) {
+        return upsertExpenseDeal(connection, expense, DealCreateGuard.of(expense.getVerifyNoExistingDeal(), 1));
+    }
+
+    @Override
+    public CanonicalDealResult upsertExpenseDeal(IntegrationConnection connection, CanonicalExpenseDeal expense,
+                                                 DealCreateGuard guard) {
         connection = requireAuthoritativeConnection(connection);
         log.info("Upserting expense deal to freee: expenseNo={}, engineerCode={}, amount={}",
                 expense.getExpenseNo(), expense.getEngineerCode(), expense.getAmount());
 
         FreeeDealCreateRequest request = buildExpenseDealRequest(connection, expense);
-        return executeDealCreationWithRecovery(connection, "/api/1/deals", request, expense.getAmount(), expense.getExpenseNo());
+        return executeDealCreationWithRecovery(connection, "/api/1/deals", request, expense.getAmount(), expense.getExpenseNo(), guard,
+                expense.getPriorDealScopes());
     }
 
     @Override
@@ -221,12 +242,26 @@ public class FreeeAccountingProvider implements AccountingProvider {
         boolean fetchFailed = false;
         String errorCode = null;
 
+        // 1回目: 決済済み取引（発生日で絞らない）。入金母集団は payments[].date 基準で、発生日の固定期間で
+        //   絞ると支払サイトを欠落させる（R4-R4）。deals母集団だけを後段で対象月に絞る。
+        // 2回目: 対象月に発生した未決済取引。freeeで直接作られた未入金の取引もEXTERNAL_ONLYとして
+        //   検出するため（決済済みだけでは未入金の取引が母集団に入らない）。一部入金があれば入金母集団にも入る。
+        String[] passes = fromDate == null || toDate == null
+                ? new String[]{"&status=settled"}
+                : new String[]{"&status=settled",
+                        "&status=unsettled&start_issue_date=" + fromDate + "&end_issue_date=" + toDate};
+        passLoop:
+        for (String pass : passes) {
+        // 重複IDの判定は取得ごと（ページ跨ぎ）に行う。2回の取得の間に決済済みの取引が未決済へ戻ると（入金の削除等）
+        // 両方に現れるが、それは外部データの不整合ではないため、先に取得した決済済み側を採用して読み飛ばす。
+        // 逆に未決済の取引が2回の取得の間に決済済みになると、どちらにも現れない（freeeの一覧に時点指定が無いため）。
+        // SESが送信した取引は一覧に無くても照合側が1件ずつ照会するため欠落しない。freeeで直接作られた取引の
+        // 外部のみ検出だけが次回の照合へ持ち越しになる。
+        Set<String> seenInPass = new HashSet<>();
         for (int page = 0; page < maxPages; page++) {
             int offset = page * limit;
-            // R4-R4: 入金母集団は payments[].date 基準。dealの発生日による固定期間の絞り込みは
-            // 支払サイトを欠落させるため行わず、deals母集団だけを後段で対象月に絞る。
             String url = apiBaseUrl + "/api/1/deals?company_id=" + connection.getExternalCompanyId()
-                    + "&status=settled&limit=" + limit
+                    + pass + "&limit=" + limit
                     + "&offset=" + offset;
 
             try {
@@ -247,10 +282,14 @@ public class FreeeAccountingProvider implements AccountingProvider {
 
                 for (JsonNode d : dealsNode) {
                     String dealId = d.has("id") ? String.valueOf(d.get("id").asLong()) : null;
-                    if (dealId != null && !seenDealIds.add(dealId)) {
-                        // R1-P1-09: ページ跨ぎ重複IDは外部データ不整合として fail-closed
+                    if (dealId != null && !seenInPass.add(dealId)) {
+                        // R1-P1-09: 同じ取得内のページ跨ぎ重複IDは外部データ不整合として fail-closed
                         duplicateDealId = true;
                         log.warn("Duplicate dealId={} detected while fetching payments (fail-closed)", dealId);
+                        continue;
+                    }
+                    if (dealId != null && !seenDealIds.add(dealId)) {
+                        log.info("dealId={} が決済済み・未決済の両方の取得に現れたため（取得の間に未決済へ戻った）、決済済み側を採用します", dealId);
                         continue;
                     }
                     BigDecimal dealAmount = d.has("amount") ? BigDecimal.valueOf(d.get("amount").asLong()) : BigDecimal.ZERO;
@@ -320,8 +359,9 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 log.error("Failed to fetch payments from freee on page {}: error_code=EXTERNAL_API_ERROR", page);
                 fetchFailed = true;
                 errorCode = "EXTERNAL_API_ERROR";
-                break;
+                break passLoop;
             }
+        }
         }
         return com.ses.dto.accounting.PaymentFetchResult.builder()
                 .deals(deals)
@@ -332,6 +372,158 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 .fetchFailed(fetchFailed)
                 .errorCode(errorCode)
                 .build();
+    }
+
+    /** FR-09: 入金明細の取得ページ上限（100件×50ページ）。超過分は次回の期間指定で取得する。 */
+    private static final int DEPOSIT_PAGE_LIMIT = 100;
+    private static final int DEPOSIT_MAX_PAGES = 50;
+
+    /**
+     * FR-09 入金消込: 口座明細（freee会計 wallet_txns）の入金を取得する。
+     *
+     * <p>以前は売上取引（deals?type=income）を「入金」として取得していたが、それは請求（売掛）であって着金ではなく、
+     * 取引に振込名義も無い。SESが送信した売上取引がそのまま「入金」に見えてしまうため、口座の入金明細を使う。
+     * 振込名義は明細の摘要（description）。取得失敗は部分結果で消込を進めず例外にする。</p>
+     */
+    public List<com.ses.dto.reconciliation.BankDepositDto> fetchBankDeposits(IntegrationConnection connection,
+                                                                            LocalDate fromDate, LocalDate toDate) {
+        connection = requireAuthoritativeConnection(connection);
+        Long companyId = connection.getExternalCompanyId();
+        List<com.ses.dto.reconciliation.BankDepositDto> deposits = new ArrayList<>();
+        Set<String> seenIds = new HashSet<>();
+        for (int page = 0; page < DEPOSIT_MAX_PAGES; page++) {
+            String url = apiBaseUrl + "/api/1/wallet_txns?company_id=" + companyId
+                    + "&walletable_type=bank_account&entry_side=income"
+                    + "&start_date=" + fromDate + "&end_date=" + toDate
+                    + "&limit=" + DEPOSIT_PAGE_LIMIT + "&offset=" + (page * DEPOSIT_PAGE_LIMIT);
+            JsonNode txns;
+            try {
+                ResponseEntity<String> response = executeWith401Recovery(connection, headers -> {
+                    HttpEntity<?> entity = new HttpEntity<>(headers);
+                    return restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+                });
+                txns = response.getBody() == null || response.getBody().isBlank()
+                        ? null : objectMapper.readTree(response.getBody()).get("wallet_txns");
+            } catch (Exception e) {
+                log.warn("freee入金明細の取得に失敗しました: page={} error_code=EXTERNAL_API_ERROR exceptionClass={}",
+                        page, e.getClass().getSimpleName());
+                throw com.ses.common.exception.BusinessException.of(502, "error.reconciliation.fetchFailed");
+            }
+            if (txns == null || !txns.isArray() || txns.isEmpty()) {
+                break;
+            }
+            for (JsonNode t : txns) {
+                if (!t.hasNonNull("id") || !t.hasNonNull("date") || !t.hasNonNull("amount")) {
+                    continue; // 識別できない明細は消込対象にしない
+                }
+                String id = String.valueOf(t.get("id").asLong());
+                if (!seenIds.add(id)) {
+                    continue; // ページ跨ぎの重複は1件として扱う（t_bank_deposit側もfreee_deposit_idで一意）
+                }
+                com.ses.dto.reconciliation.BankDepositDto d = new com.ses.dto.reconciliation.BankDepositDto();
+                d.setFreeeDepositId(id);
+                d.setDepositDate(LocalDate.parse(t.get("date").asText()));
+                d.setAmount(BigDecimal.valueOf(t.get("amount").asLong()));
+                d.setPayerName(t.path("description").asText(""));
+                deposits.add(d);
+            }
+            if (txns.size() < DEPOSIT_PAGE_LIMIT) {
+                break;
+            }
+        }
+        log.info("freee入金明細を取得しました: companyId={} from={} to={} count={}", companyId, fromDate, toDate, deposits.size());
+        return deposits;
+    }
+
+    @Override
+    public DealLookup lookupDeal(IntegrationConnection connection, String externalDealId) {
+        if (externalDealId == null || !externalDealId.matches("\\d{1,19}")) {
+            return DealLookup.notFound(); // 数値でないID（旧seedの仮IDなど）はfreeeに存在し得ない
+        }
+        try {
+            IntegrationConnection authoritative = requireAuthoritativeConnection(connection);
+            String url = apiBaseUrl + "/api/1/deals/" + externalDealId + "?company_id=" + authoritative.getExternalCompanyId();
+            ResponseEntity<String> response = executeWith401Recovery(authoritative, headers -> {
+                HttpEntity<?> entity = new HttpEntity<>(headers);
+                return restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            });
+            JsonNode deal = response.getBody() == null ? null : objectMapper.readTree(response.getBody()).get("deal");
+            if (deal == null || !deal.hasNonNull("id")) {
+                return DealLookup.unknown();
+            }
+            return DealLookup.found(deal.hasNonNull("amount") ? BigDecimal.valueOf(deal.get("amount").asLong()) : null);
+        } catch (HttpClientErrorException.NotFound e) {
+            return DealLookup.notFound();
+        } catch (Exception e) {
+            log.warn("freee取引の照会に失敗しました: error_code=EXTERNAL_API_ERROR dealId={} exceptionClass={}",
+                    externalDealId, e.getClass().getSimpleName());
+            return DealLookup.unknown();
+        }
+    }
+
+    /**
+     * SESで入金消込した入金を、freeeの口座明細で未決済の取引を消込む API（POST /api/1/wallet_txns/{id}/reconcile）へ反映する。
+     * 口座明細の金額と決済金額は一致する（SESは入金額をそのまま請求書の入金にしており、手数料は持たない）ため、
+     * 差額取引（adjustment_deal）は送らない。freeeは同一パラメータの再実行に同じ応答を返すため、タイムアウト後の再試行も安全。
+     * 明細が別の取引で、または取引が別の明細で既に消込済みなら409（再試行しない）。
+     */
+    @Override
+    public CanonicalDealResult reconcileDeposit(IntegrationConnection connection, String walletTxnId,
+                                                String externalDealId, BigDecimal amount) {
+        connection = requireAuthoritativeConnection(connection);
+        if (walletTxnId == null || !walletTxnId.matches("\\d{1,19}")
+                || externalDealId == null || !externalDealId.matches("\\d{1,19}")
+                || amount == null || amount.signum() <= 0 || amount.stripTrailingZeros().scale() > 0) {
+            return CanonicalDealResult.builder()
+                    .success(false)
+                    .errorCode("INVALID_SNAPSHOT")
+                    .errorMessageSafe("error.accounting.freeeValidation")
+                    .retryable(false)
+                    .build();
+        }
+        java.util.Map<String, Object> deal = new java.util.LinkedHashMap<>();
+        deal.put("deal_id", Long.parseLong(externalDealId));
+        deal.put("amount", amount.longValueExact());
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("company_id", connection.getExternalCompanyId());
+        body.put("deals", List.of(deal));
+        String url = apiBaseUrl + "/api/1/wallet_txns/" + walletTxnId + "/reconcile";
+        try {
+            ResponseEntity<JsonNode> response = executeWith401Recovery(connection, headers -> {
+                HttpEntity<Object> entity = new HttpEntity<>(body, headers);
+                return restTemplate.exchange(url, HttpMethod.POST, entity, JsonNode.class);
+            });
+            log.info("freeeの口座明細で取引を消込みました: walletTxnId={} dealId={}", walletTxnId, externalDealId);
+            return CanonicalDealResult.builder()
+                    .success(true)
+                    .externalId(externalDealId)
+                    .providerRequestId(extractRequestId(response.getHeaders()))
+                    .build();
+        } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+            throw e; // 他ノードのトークン更新待ち: Workerが短い間隔で再試行する
+        } catch (HttpClientErrorException.Forbidden e) {
+            // 口座明細の消込は「[会計] 明細 更新」の権限が要る（取引の作成とは別）。実freeeで、明細の参照だけでは403になった
+            log.warn("freeeが入金消込の反映を拒否しました（権限不足またはプラン）: status_code=403 error_code=PLAN_LIMITATION");
+            return CanonicalDealResult.builder()
+                    .success(false)
+                    .errorCode("PLAN_LIMITATION")
+                    .errorMessageSafe("error.accounting.freeeWalletTxnWriteForbidden")
+                    .providerRequestId(extractRequestId(e.getResponseHeaders()))
+                    .retryable(false)
+                    .build();
+        } catch (HttpClientErrorException.Conflict e) {
+            log.warn("freeeの口座明細または取引が既に別の明細・取引と消込済みです: walletTxnId={} dealId={} error_code=DEPOSIT_ALREADY_RECONCILED",
+                    walletTxnId, externalDealId);
+            return CanonicalDealResult.builder()
+                    .success(false)
+                    .errorCode("DEPOSIT_ALREADY_RECONCILED")
+                    .errorMessageSafe("error.accounting.freeeDepositAlreadyReconciled")
+                    .providerRequestId(extractRequestId(e.getResponseHeaders()))
+                    .retryable(false)
+                    .build();
+        } catch (Exception e) {
+            return handleApiException(e, "POST /api/1/wallet_txns/{id}/reconcile");
+        }
     }
 
     @Override
@@ -417,7 +609,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 path = "/api/1/account_items?company_id=" + companyId;
                 isListSearch = true;
             }
-            case "TAX_SALES_10", "TAX_PURCHASE_10", "TAX_EXPENSE_10" -> {
+            case "TAX_SALES_10", "TAX_SALES_8", "TAX_SALES_0", "TAX_PURCHASE_10", "TAX_EXPENSE_10" -> {
                 path = "/api/1/taxes/companies/" + companyId;
                 isListSearch = true;
             }
@@ -464,7 +656,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                     }
                     return false;
                 }
-                case "TAX_SALES_10", "TAX_PURCHASE_10", "TAX_EXPENSE_10" -> {
+                case "TAX_SALES_10", "TAX_SALES_8", "TAX_SALES_0", "TAX_PURCHASE_10", "TAX_EXPENSE_10" -> {
                     JsonNode taxes = root.get("taxes");
                     if (taxes != null && taxes.isArray()) {
                         for (JsonNode t : taxes) {
@@ -505,8 +697,18 @@ public class FreeeAccountingProvider implements AccountingProvider {
                                                                  String path,
                                                                  FreeeDealCreateRequest request,
                                                                  BigDecimal expectedTotal,
-                                                                 String refNumber) {
+                                                                 String refNumber,
+                                                                 DealCreateGuard guard,
+                                                                 List<PriorDealScope> priorScopes) {
         String url = apiBaseUrl + path;
+        // 送信するのと同じ管理番号で確認する（経費番号が無い場合などは request 側の値）
+        String scanRef = request != null && request.getRefNumber() != null ? request.getRefNumber() : refNumber;
+        if (guard != null && guard != DealCreateGuard.NONE) {
+            CanonicalDealResult guarded = guardDealCreation(connection, request, scanRef, expectedTotal, guard, priorScopes);
+            if (guarded != null) {
+                return guarded;
+            }
+        }
         try {
             ResponseEntity<JsonNode> response = executeWith401Recovery(connection, headers -> {
                 HttpEntity<FreeeDealCreateRequest> entity = new HttpEntity<>(request, headers);
@@ -523,7 +725,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .externalId(null)
                         .providerRequestId(reqId)
                         .errorCode("INVALID_DEAL_ID")
-                        .errorMessageSafe("freee 応答の取引IDが不正です")
+                        .errorMessageSafe("error.accounting.freeeInvalidResponse")
                         .retryable(false)
                         .build();
             }
@@ -540,7 +742,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .externalId(String.valueOf(dealId))
                         .providerRequestId(reqId)
                         .errorCode("AMOUNT_MISMATCH")
-                        .errorMessageSafe("freee 応答金額不一致 (期待: " + expectedTotal + "円, freee: " + actualAmount + "円)")
+                        .errorMessageSafe("error.accounting.freeeAmountMismatch")
                         .retryable(false)
                         .build();
             }
@@ -552,12 +754,14 @@ public class FreeeAccountingProvider implements AccountingProvider {
                     .responseTotal(actualAmount != null ? BigDecimal.valueOf(actualAmount) : expectedTotal)
                     .build();
 
+        } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+            throw e; // 他ノードのトークン更新待ち: Workerが短い間隔で再試行する
         } catch (Exception e) {
             // タイムアウトまたはネットワーク切断時の未知結果照合 (P1-03)
             if ((e instanceof ResourceAccessException || e.getCause() instanceof java.net.SocketTimeoutException)
-                    && refNumber != null && !refNumber.isBlank()) {
-                log.warn("Timeout on deal creation for refNumber={}, querying freee to check if deal was created", refNumber);
-                CanonicalDealResult verified = verifyDealCreatedByRefNumber(connection, refNumber, expectedTotal, request != null ? request.getCompanyId() : null);
+                    && scanRef != null && !scanRef.isBlank()) {
+                log.warn("取引作成がタイムアウトしたため、freeeに作成されたかを照合します: refNumber={}", scanRef);
+                CanonicalDealResult verified = verifyDealCreatedByRefNumber(connection, request, scanRef, expectedTotal);
                 if (verified != null) {
                     return verified;
                 }
@@ -566,162 +770,277 @@ public class FreeeAccountingProvider implements AccountingProvider {
         }
     }
 
-    @Override
-    public Optional<String> findDealIdByRefNumber(IntegrationConnection connection, String refNumber) {
-        if (connection == null || refNumber == null || refNumber.isBlank()) {
-            return Optional.empty();
+    /**
+     * 取引作成前の既存取引確認（{@link DealCreateGuard}）。
+     *
+     * <ul>
+     *   <li>REFUSE_IF_EXISTS: 前の世代が送信後に取消された再送信。今回の範囲に加えて、取消された世代ごとの
+     *       取引先・発生日の範囲も走査し、同じ管理番号の取引があれば作成しない</li>
+     *   <li>ADOPT_OWN_OR_REFUSE: 同じジョブの再試行。前回の試行で作成済みの取引（管理番号・金額・事業所が一致する1件）は
+     *       採用して成功を返し、それ以外の同じ管理番号の取引があれば作成しない（再POSTで二重に作らない）</li>
+     * </ul>
+     * 見つかれば確定で拒否。見つからないとき、確認できない走査（照会失敗・応答形式の異常）があれば再試行待ち、
+     * 件数を確定できない走査（ページ上限）があれば作成せずに失敗させる。
+     *
+     * @return 作成を止める（または採用した）結果。作成してよければ null
+     */
+    private CanonicalDealResult guardDealCreation(IntegrationConnection connection, FreeeDealCreateRequest request,
+                                                  String refNumber, BigDecimal expectedTotal, DealCreateGuard guard,
+                                                  List<PriorDealScope> priorScopes) {
+        if (refNumber == null || refNumber.isBlank()) {
+            return checkUnconfirmed(refNumber, guard);
         }
-        try {
-            connection = requireAuthoritativeConnection(connection);
-        } catch (IllegalStateException e) {
-            log.warn("freee deal lookup skipped: error_code=CONNECTION_COMPANY_ID_INVALID");
-            return Optional.empty();
-        }
-        Long expectedCompanyId = connection.getExternalCompanyId();
-        List<String> matched = new ArrayList<>();
-        int limit = 100;
-        int maxPages = 50;
-        for (int page = 0; page < maxPages; page++) {
-            int offset = page * limit;
-            try {
-                String checkUrl = apiBaseUrl + "/api/1/deals?company_id=" + connection.getExternalCompanyId()
-                        + "&limit=" + limit + "&offset=" + offset;
-                ResponseEntity<String> res = executeWith401Recovery(connection, headers -> {
-                    HttpEntity<?> entity = new HttpEntity<>(headers);
-                    return restTemplate.exchange(checkUrl, HttpMethod.GET, entity, String.class);
-                });
-                if (res.getBody() == null) {
-                    break;
-                }
-                JsonNode deals = objectMapper.readTree(res.getBody()).get("deals");
-                if (deals == null || !deals.isArray() || deals.isEmpty()) {
-                    break;
-                }
-                for (JsonNode d : deals) {
-                    if (!d.has("ref_number") || !refNumber.equals(d.get("ref_number").asText())) {
-                        continue;
-                    }
-                    Long companyId = d.has("company_id") ? d.get("company_id").asLong() : null;
-                    if (companyId == null || !java.util.Objects.equals(companyId, expectedCompanyId)) {
-                        continue;
-                    }
-                    Long dealId = parsePositiveLong(d.get("id"));
-                    if (dealId == null) {
-                        log.warn("findDealIdByRefNumber skipped a deal without a valid id: error_code=INVALID_DEAL_ID");
-                        continue;
-                    }
-                    matched.add(String.valueOf(dealId));
-                }
-                if (deals.size() < limit) {
-                    break;
-                }
-            } catch (Exception ex) {
-                log.warn("findDealIdByRefNumber failed for refNumber={}: error_code=UNKNOWN_ERROR", refNumber);
-                return Optional.empty();
-            }
-        }
-        if (matched.size() == 1) {
-            return Optional.of(matched.get(0));
-        }
-        if (matched.size() > 1) {
-            log.warn("Ambiguous deals for refNumber={} (count={}), refuse SUCCEEDED to avoid wrong binding",
-                    refNumber, matched.size());
-        }
-        return Optional.empty();
-    }
-
-    private CanonicalDealResult verifyDealCreatedByRefNumber(IntegrationConnection connection,
-                                                             String refNumber,
-                                                             BigDecimal expectedTotal,
-                                                             Long expectedCompanyId) {
-        // R1-P1-03: 全ページを走査し、3項目 (ref_number + amount + company_id) 完全一致の件数を一意に特定する。
-        // 不一致行があっても走査を継続し、完全一致が1件だけなら成功、複数なら曖昧として fail-closed (再POST抑止)。
-        int limit = 100;
-        int maxPages = 50;
-        List<String> strictlyMatchedDealIds = new ArrayList<>();
-        boolean pageCapReached = false;
-
-        for (int page = 0; page < maxPages; page++) {
-            int offset = page * limit;
-            try {
-                String checkUrl = apiBaseUrl + "/api/1/deals?company_id=" + connection.getExternalCompanyId()
-                        + "&limit=" + limit + "&offset=" + offset;
-                ResponseEntity<String> res = executeWith401Recovery(connection, headers -> {
-                    HttpEntity<?> entity = new HttpEntity<>(headers);
-                    return restTemplate.exchange(checkUrl, HttpMethod.GET, entity, String.class);
-                });
-                if (res.getBody() != null) {
-                    JsonNode root = objectMapper.readTree(res.getBody());
-                    JsonNode deals = root.get("deals");
-                    if (deals != null && deals.isArray() && !deals.isEmpty()) {
-                        for (JsonNode d : deals) {
-                            if (d.has("ref_number") && refNumber.equals(d.get("ref_number").asText())) {
-                                Long dealId = parsePositiveLong(d.get("id"));
-                                Long amount = d.has("amount") ? d.get("amount").asLong() : null;
-                                Long companyId = d.has("company_id") ? d.get("company_id").asLong() : null;
-
-                                if (dealId == null) {
-                                    log.warn("Deal verification skipped a row without a valid id: error_code=INVALID_DEAL_ID");
-                                    continue;
-                                }
-
-                                boolean strictAmountMatch = expectedTotal != null && amount != null
-                                        && expectedTotal.compareTo(BigDecimal.valueOf(amount)) == 0;
-                                boolean strictCompanyMatch = expectedCompanyId != null && companyId != null
-                                        && java.util.Objects.equals(companyId, expectedCompanyId);
-
-                                if (strictAmountMatch && strictCompanyMatch) {
-                                    strictlyMatchedDealIds.add(String.valueOf(dealId));
-                                    log.info("Found strictly matching deal for refNumber={}, amount={}, companyId={} (page={}): dealId={}",
-                                            refNumber, amount, companyId, page, dealId);
-                                } else {
-                                    log.warn("Deal found with refNumber={} but strict match failed (amount expected={}, actual={}; company expected={}, actual={}), continuing scan",
-                                            refNumber, expectedTotal, amount, expectedCompanyId, companyId);
-                                }
-                            }
-                        }
-                        if (deals.size() < limit) {
-                            break;
-                        }
-                        if (page == maxPages - 1) {
-                            // R1-P1-03: 50ページ目も full なら次ページ以降が存在し得る -> page cap (一意性未確定)
-                            pageCapReached = true;
-                        }
-                    } else {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            } catch (Exception ex) {
-                log.warn("Failed to check existing deal by refNumber after timeout on page {}: error_code=UNKNOWN_ERROR", page);
-                return null;
+        java.util.LinkedHashSet<ScanScope> scopes = new java.util.LinkedHashSet<>();
+        scopes.add(ScanScope.of(request));
+        if (guard == DealCreateGuard.REFUSE_IF_EXISTS && priorScopes != null) {
+            String type = request != null ? request.getType() : null;
+            for (PriorDealScope scope : priorScopes) {
+                scopes.add(new ScanScope(type, scope == null ? null : parseFreeeId(scope.getPartnerExternalId()),
+                        scope == null ? null : scope.getIssueDate()));
             }
         }
 
-        // R1-P1-03: 50ページ上限に到達した場合、完全一致数にかかわらず一意性を確定できないため fail-closed (RETRYABLE)
-        if (pageCapReached) {
-            log.warn("Reached 50-page cap while verifying deal by refNumber={} after timeout (matched={}), page-cap fail-closed",
-                    refNumber, strictlyMatchedDealIds.size());
+        java.util.Map<String, JsonNode> matches = new java.util.LinkedHashMap<>();
+        boolean unconfirmed = false;
+        boolean limitReached = false;
+        for (ScanScope scope : scopes) {
+            DealScan scan = scanScope(connection, scope, refNumber);
+            for (JsonNode d : scan.matches()) {
+                String key = d.hasNonNull("id") ? d.get("id").asText() : "row-" + matches.size();
+                matches.putIfAbsent(key, d);
+            }
+            unconfirmed |= scan.status() == DealScan.Status.UNCONFIRMED;
+            limitReached |= scan.status() == DealScan.Status.LIMIT;
+        }
+
+        if (matches.isEmpty()) {
+            if (unconfirmed) {
+                return checkUnconfirmed(refNumber, guard);
+            }
+            if (limitReached) {
+                // 待っても件数は確定しない（再試行しても同じ）。作成せずに失敗させ、理由を画面に出す
+                log.warn("既存取引の確認が件数上限に達したため作成しません: refNumber={} guard={} error_code=EXISTING_DEAL_CHECK_LIMIT",
+                        refNumber, guard);
+                return CanonicalDealResult.builder()
+                        .success(false)
+                        .errorCode("EXISTING_DEAL_CHECK_LIMIT")
+                        .errorMessageSafe("error.accounting.existingDealCheckLimit")
+                        .retryable(false)
+                        .build();
+            }
             return null;
         }
+        if (guard == DealCreateGuard.ADOPT_OWN_OR_REFUSE && matches.size() == 1 && !unconfirmed && !limitReached) {
+            JsonNode d = matches.values().iterator().next();
+            String adopted = strictlyMatchingDealId(d, expectedTotal, connection.getExternalCompanyId());
+            if (adopted != null) {
+                log.info("再試行: 前回の試行で作成済みの取引を採用します（再POSTしない）: refNumber={} dealId={}", refNumber, adopted);
+                return CanonicalDealResult.builder()
+                        .success(true)
+                        .externalId(adopted)
+                        .responseTotal(expectedTotal)
+                        .adoptedExisting(true)
+                        .build();
+            }
+        }
+        log.warn("同じ管理番号の取引がfreeeに既にあるため作成しません: refNumber={} count={} guard={} error_code=EXISTING_DEAL_FOUND",
+                refNumber, matches.size(), guard);
+        return CanonicalDealResult.builder()
+                .success(false)
+                .errorCode("EXISTING_DEAL_FOUND")
+                .errorMessageSafe("error.accounting.existingDealFound")
+                .retryable(false)
+                .build();
+    }
 
-        // 全ページ走査後の一意性判定 (R1-P1-03)
+    private CanonicalDealResult checkUnconfirmed(String refNumber, DealCreateGuard guard) {
+        log.warn("既存取引を確認できないため作成を保留します: refNumber={} guard={} error_code=EXISTING_DEAL_CHECK_FAILED",
+                refNumber, guard);
+        return CanonicalDealResult.builder()
+                .success(false)
+                .errorCode("EXISTING_DEAL_CHECK_FAILED")
+                .errorMessageSafe("error.accounting.existingDealCheckFailed")
+                .retryable(true)
+                .retryAfterSeconds(300)
+                .build();
+    }
+
+    /** 管理番号・金額・事業所がすべて一致し、取引IDが正しい場合だけそのIDを返す。 */
+    private String strictlyMatchingDealId(JsonNode d, BigDecimal expectedTotal, Long expectedCompanyId) {
+        Long dealId = parsePositiveLong(d.get("id"));
+        Long amount = d.hasNonNull("amount") ? d.get("amount").asLong() : null;
+        Long companyId = d.hasNonNull("company_id") ? d.get("company_id").asLong() : null;
+        boolean sameAmount = expectedTotal != null && amount != null
+                && expectedTotal.compareTo(BigDecimal.valueOf(amount)) == 0;
+        boolean sameCompany = expectedCompanyId != null && java.util.Objects.equals(companyId, expectedCompanyId);
+        return dealId != null && sameAmount && sameCompany ? String.valueOf(dealId) : null;
+    }
+
+    /** 既存取引の走査範囲（収支区分・取引先・発生日）。 */
+    record ScanScope(String type, Long partnerId, LocalDate issueDate) {
+        /** 作成する取引と同じ範囲。 */
+        static ScanScope of(FreeeDealCreateRequest request) {
+            if (request == null) {
+                return new ScanScope(null, null, null);
+            }
+            LocalDate issueDate;
+            try {
+                issueDate = request.getIssueDate() == null ? null : LocalDate.parse(request.getIssueDate());
+            } catch (java.time.format.DateTimeParseException e) {
+                issueDate = null;
+            }
+            return new ScanScope(request.getType(), request.getPartnerId(), issueDate);
+        }
+    }
+
+    /**
+     * 1つの範囲を走査する。freeeは存在しない取引先IDの指定を400で拒否するため（前の世代の取引先が削除された等）、
+     * 取引先で絞った走査が拒否されたら、取引先で絞らずに同じ発生日（無ければ収支区分だけ）で走査し直す。
+     */
+    private DealScan scanScope(IntegrationConnection connection, ScanScope scope, String refNumber) {
+        DealScan scan = scanDealsByRefNumber(connection,
+                dealScanFilter(scope.type(), scope.partnerId(), scope.issueDate()), refNumber);
+        if (scan.status() == DealScan.Status.REJECTED && scope.partnerId() != null) {
+            log.warn("既存取引の確認で取引先の指定が拒否されたため、取引先で絞らずに確認します: refNumber={} partnerId={}",
+                    refNumber, scope.partnerId());
+            scan = scanDealsByRefNumber(connection, dealScanFilter(scope.type(), null, scope.issueDate()), refNumber);
+        }
+        return scan.status() == DealScan.Status.REJECTED ? DealScan.unconfirmed() : scan;
+    }
+
+    /**
+     * 管理番号での既存取引の走査結果。REJECTED は走査条件がfreeeに拒否された（1ページ目の400）。
+     * UNCONFIRMED・LIMIT でも、それまでに見つけた取引は matches に残す（見つかれば拒否する）。
+     */
+    record DealScan(Status status, List<JsonNode> matches) {
+        enum Status { CONFIRMED, UNCONFIRMED, LIMIT, REJECTED }
+
+        static DealScan unconfirmed() {
+            return new DealScan(Status.UNCONFIRMED, List.of());
+        }
+    }
+
+    /** 1回の確認で読む最大ページ数（100件×50ページ）。超えると件数を確定できない。 */
+    static final int DEAL_SCAN_MAX_PAGES = 50;
+    /** 取引先で絞れるときの発生日の幅（取消後の訂正で請求書の発生日が変わっても見つけられるように）。 */
+    static final int DEAL_SCAN_PARTNER_DATE_RANGE_DAYS = 366;
+
+    /**
+     * 管理番号（ref_number）と事業所が一致するfreee取引を探す。freeeの取引一覧は管理番号で絞れないため、
+     * 呼出側が {@link #dealScanFilter} で決めた条件（収支区分・取引先・発生日）で走査する。
+     * 照会失敗と応答形式の異常（deals が配列でない等）は確認できない扱い（作成しない側へ倒す）。それまでに見つけた
+     * 取引は残す。1ページ目の400は走査条件の拒否（REJECTED）として返し、呼出側が取引先なしで走査し直す。
+     * 他ノードのトークン更新待ちは確認失敗にせず、そのまま呼出元へ返す（Workerが短い間隔で再試行する）。
+     */
+    DealScan scanDealsByRefNumber(IntegrationConnection connection, String filter, String refNumber) {
+        Long expectedCompanyId = connection.getExternalCompanyId();
+        int limit = 100;
+        List<JsonNode> matches = new ArrayList<>();
+        for (int page = 0; page < DEAL_SCAN_MAX_PAGES; page++) {
+            String checkUrl = apiBaseUrl + "/api/1/deals?company_id=" + expectedCompanyId + filter
+                    + "&limit=" + limit + "&offset=" + (page * limit);
+            try {
+                ResponseEntity<String> res = executeWith401Recovery(connection, headers -> {
+                    HttpEntity<?> entity = new HttpEntity<>(headers);
+                    return restTemplate.exchange(checkUrl, HttpMethod.GET, entity, String.class);
+                });
+                JsonNode deals = res.getBody() == null || res.getBody().isBlank()
+                        ? null : objectMapper.readTree(res.getBody()).get("deals");
+                if (deals == null || !deals.isArray()) {
+                    log.warn("既存取引の確認で想定外の応答形式: page={} error_code=INVALID_RESPONSE", page);
+                    return new DealScan(DealScan.Status.UNCONFIRMED, matches);
+                }
+                for (JsonNode d : deals) {
+                    if (!d.hasNonNull("ref_number") || !refNumber.equals(d.get("ref_number").asText())) {
+                        continue;
+                    }
+                    Long companyId = d.hasNonNull("company_id") ? d.get("company_id").asLong() : null;
+                    if (companyId == null || java.util.Objects.equals(companyId, expectedCompanyId)) {
+                        matches.add(d); // 事業所不明の行も安全側（既存あり）に数える
+                    }
+                }
+                if (deals.size() < limit) {
+                    return new DealScan(DealScan.Status.CONFIRMED, matches);
+                }
+            } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+                throw e;
+            } catch (HttpClientErrorException.BadRequest e) {
+                if (page == 0) {
+                    log.warn("既存取引の確認の走査条件がfreeeに拒否されました: error_code=VALIDATION_ERROR");
+                    return new DealScan(DealScan.Status.REJECTED, List.of());
+                }
+                log.warn("既存取引の確認が途中で拒否されました: page={} error_code=VALIDATION_ERROR", page);
+                return new DealScan(DealScan.Status.UNCONFIRMED, matches);
+            } catch (Exception ex) {
+                log.warn("既存取引の確認に失敗: page={} error_code=UNKNOWN_ERROR", page);
+                return new DealScan(DealScan.Status.UNCONFIRMED, matches);
+            }
+        }
+        return new DealScan(DealScan.Status.LIMIT, matches); // 全ページ満杯: 続きがあり得るため確定できない
+    }
+
+    /**
+     * 既存取引の走査条件。収支区分は常に付ける。取引先があれば取引先と発生日の前後1年、無ければ同じ発生日で絞る。
+     * 取引先も発生日も無ければ収支区分だけ（件数が多ければ上限に達し、作成せずに失敗する）。
+     */
+    static String dealScanFilter(String type, Long partnerId, LocalDate issueDate) {
+        StringBuilder filter = new StringBuilder();
+        if (type != null && !type.isBlank()) {
+            filter.append("&type=").append(type);
+        }
+        if (partnerId != null) {
+            filter.append("&partner_id=").append(partnerId);
+            if (issueDate != null) {
+                filter.append("&start_issue_date=").append(issueDate.minusDays(DEAL_SCAN_PARTNER_DATE_RANGE_DAYS))
+                        .append("&end_issue_date=").append(issueDate.plusDays(DEAL_SCAN_PARTNER_DATE_RANGE_DAYS));
+            }
+        } else if (issueDate != null) {
+            filter.append("&start_issue_date=").append(issueDate).append("&end_issue_date=").append(issueDate);
+        }
+        return filter.toString();
+    }
+
+    /**
+     * POSTがタイムアウトした後、その試行でfreeeに取引が作成されたかを確認する（P1-03）。
+     * 作成時の事前確認と同じ範囲（{@link #dealScanFilter}）で走査し、管理番号・金額・事業所が一致する取引が
+     * ちょうど1件なら作成済みとして採用する。0件・複数・走査を確定できない場合は null（再試行時の事前確認に任せる）。
+     */
+    private CanonicalDealResult verifyDealCreatedByRefNumber(IntegrationConnection connection,
+                                                             FreeeDealCreateRequest request,
+                                                             String refNumber,
+                                                             BigDecimal expectedTotal) {
+        DealScan scan = scanScope(connection, ScanScope.of(request), refNumber);
+        if (scan.status() != DealScan.Status.CONFIRMED) {
+            log.warn("タイムアウト後の照合を確定できないため成功扱いにしません（再試行時の事前確認に任せる）: refNumber={} status={}",
+                    refNumber, scan.status());
+            return null;
+        }
+        Long expectedCompanyId = request != null && request.getCompanyId() != null
+                ? request.getCompanyId() : connection.getExternalCompanyId();
+        List<String> strictlyMatchedDealIds = new ArrayList<>();
+        for (JsonNode d : scan.matches()) {
+            String dealId = strictlyMatchingDealId(d, expectedTotal, expectedCompanyId);
+            if (dealId != null) {
+                strictlyMatchedDealIds.add(dealId);
+            }
+        }
         if (strictlyMatchedDealIds.size() == 1) {
             String dealId = strictlyMatchedDealIds.get(0);
+            log.info("タイムアウト後の照合で作成済みの取引を確認しました: refNumber={} dealId={}", refNumber, dealId);
             return CanonicalDealResult.builder()
                     .success(true)
                     .externalId(dealId)
                     .responseTotal(expectedTotal)
+                    .adoptedExisting(true)
                     .errorMessageSafe("タイムアウト後に外部照合により取引作成を確認 (dealId=" + dealId + ")")
                     .build();
         }
         if (strictlyMatchedDealIds.size() > 1) {
-            log.warn("Multiple strictly matching deals found for refNumber={} after timeout (dealIds={}), ambiguous fail-closed",
+            log.warn("タイムアウト後の照合で一致する取引が複数あるため成功扱いにしません: refNumber={} dealIds={}",
                     refNumber, strictlyMatchedDealIds);
             return null; // 曖昧: 二重登録防止のため成功扱いしない
         }
-        log.warn("No strictly matching deal found for refNumber={} after timeout, fail-closed (retryable)", refNumber);
+        log.warn("タイムアウト後の照合で一致する取引が無いため成功扱いにしません（再試行時の事前確認に任せる）: refNumber={}", refNumber);
         return null;
     }
 
@@ -779,6 +1098,9 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         // 最大1回のリプレイ実行
                         return execution.execute(newHeaders);
                     }
+                } catch (com.ses.common.exception.TokenRefreshInProgressException refreshInProgress) {
+                    // 他ノードがトークンを更新中: 認証失敗（401）ではないため置き換えずに返す（短い間隔で再試行させる）
+                    throw refreshInProgress;
                 } catch (Exception refreshEx) {
                     log.error("Token refresh or replay failed on 401: error_code=UNAUTHORIZED");
                     throw httpEx;
@@ -831,19 +1153,56 @@ public class FreeeAccountingProvider implements AccountingProvider {
         ResponseEntity<T> execute(HttpHeaders headers);
     }
 
+    /**
+     * freeeの入力エラー（400/422）のうち、運用者が自分で直せる既知の理由を本システムのmessage keyへ置き換える。
+     * 応答本文はこの判定にだけ使い、ログ・DTO・ジョブには渡さない（R1-P1-10）。該当しなければ null。
+     * 文言は実freeeで確認したもの（期首日より前の発生日、存在しない取引先ID）。
+     */
+    static String classifyFreeeValidation(HttpClientErrorException httpEx) {
+        String body;
+        try {
+            body = httpEx.getResponseBodyAsString(java.nio.charset.StandardCharsets.UTF_8);
+        } catch (RuntimeException e) {
+            return null;
+        }
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        if (body.contains("期首日")) {
+            return "error.accounting.freeeBeforeFiscalYear";
+        }
+        if (body.contains("存在しない取引先")) {
+            return "error.accounting.freeePartnerNotFound";
+        }
+        return null;
+    }
+
     private CanonicalDealResult handleApiException(Exception e, String apiPath) {
+        if (e instanceof com.ses.common.exception.TokenRefreshInProgressException) {
+            log.warn("freee API呼出し中に他ノードのトークン更新待ちになりました: api_path={} error_code=TOKEN_REFRESH_IN_PROGRESS", apiPath);
+            return CanonicalDealResult.builder()
+                    .success(false)
+                    .errorCode("TOKEN_REFRESH_IN_PROGRESS")
+                    .errorMessageSafe("他ノードでトークン更新中のため再試行待ち")
+                    .retryable(true)
+                    .retryAfterSeconds(5)
+                    .build();
+        }
         if (e instanceof HttpClientErrorException httpEx) {
             int statusCode = httpEx.getStatusCode().value();
             String reqId = extractRequestId(httpEx.getResponseHeaders());
 
             // R1-P1-10: 外部応答本文・例外メッセージは一切ログ・DTO・jobへ渡さない (固定文言のみ)
             if (statusCode == 400 || statusCode == 422) {
-                log.warn("freee validation error: status_code={}, error_code=VALIDATION_ERROR", statusCode);
+                // 応答本文は記録しない。既知の理由だけを本システムのmessage keyへ置き換える（運用者が直せるように）
+                String reasonKey = classifyFreeeValidation(httpEx);
+                log.warn("freee validation error: status_code={}, error_code=VALIDATION_ERROR reason={}",
+                        statusCode, reasonKey == null ? "UNCLASSIFIED" : reasonKey);
                 return CanonicalDealResult.builder()
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("VALIDATION_ERROR")
-                        .errorMessageSafe("freee API入力検証エラーが発生しました (エラーコード: VALIDATION_ERROR)")
+                        .errorMessageSafe(reasonKey != null ? reasonKey : "error.accounting.freeeValidation")
                         .retryable(false) // 400/422はリトライしない (design §6.3)
                         .build();
             } else if (statusCode == 401) {
@@ -852,7 +1211,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("UNAUTHORIZED")
-                        .errorMessageSafe("認証エラー: トークンが無効または失効しています (再認証が必要です)")
+                        .errorMessageSafe("error.accounting.freeeUnauthorized")
                         .retryable(false)
                         .build();
             } else if (statusCode == 403) {
@@ -861,7 +1220,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("PLAN_LIMITATION")
-                        .errorMessageSafe("freee 契約プラン制限またはアクセス権限不足です。CSV出力をご利用ください。")
+                        .errorMessageSafe("error.accounting.freeeForbidden")
                         .retryable(false) // プラン制限はリトライしない
                         .build();
             } else if (statusCode == 429) {
@@ -879,7 +1238,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("RATE_LIMITED")
-                        .errorMessageSafe("APIレートリミットに達しました。次回再試行します。")
+                        .errorMessageSafe("error.accounting.freeeRateLimited")
                         .retryable(true)
                         .retryAfterSeconds(retryAfter)
                         .build();
@@ -889,7 +1248,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("HTTP_CLIENT_ERROR")
-                        .errorMessageSafe("HTTP " + statusCode + " エラーが発生しました")
+                        .errorMessageSafe("error.accounting.freeeHttpError")
                         .retryable(false)
                         .build();
             }
@@ -900,7 +1259,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                     .success(false)
                     .providerRequestId(reqId)
                     .errorCode("SERVER_ERROR")
-                    .errorMessageSafe("freee サーバー一時エラー (" + serverEx.getStatusCode() + ")")
+                    .errorMessageSafe("error.accounting.freeeServerError")
                     .retryable(true)
                     .retryAfterSeconds(30)
                     .build();
@@ -909,7 +1268,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
             return CanonicalDealResult.builder()
                     .success(false)
                     .errorCode("TIMEOUT")
-                    .errorMessageSafe("freee APIへの接続タイムアウトまたはネットワークエラー")
+                    .errorMessageSafe("error.accounting.freeeTimeout")
                     .retryable(true)
                     .retryAfterSeconds(30)
                     .build();
@@ -988,8 +1347,9 @@ public class FreeeAccountingProvider implements AccountingProvider {
             for (CanonicalSalesInvoice.Detail d : invoice.getDetails()) {
                 details.add(FreeeDealDetailDto.builder()
                         .taxCode(parseInteger(d.getTaxCode(), 21)) // デフォルト課税売上10%
-                        .accountItemId(parseInteger(d.getAccountItemCode(), null))
+                        .accountItemId(parseFreeeId(d.getAccountItemCode()))
                         .amount(d.getAmount() != null ? d.getAmount().longValue() : 0L)
+                        .vat(d.getVat() != null ? d.getVat().longValue() : null)
                         .description(d.getDescription())
                         .build());
             }
@@ -1006,7 +1366,9 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 .issueDate(invoice.getIssueDate() != null ? invoice.getIssueDate().toString() : LocalDate.now().toString())
                 .dueDate(invoice.getDueDate() != null ? invoice.getDueDate().toString() : null)
                 .type("income")
-                .partnerCode(invoice.getCustomerCode())
+                .partnerId(parseFreeeId(invoice.getPartnerExternalId()))
+                // 旧snapshot（partnerExternalId導入前に登録されたjob）だけ従来どおり取引先コードで送る
+                .partnerCode(invoice.getPartnerExternalId() == null ? invoice.getCustomerCode() : null)
                 .refNumber(invoice.getInvoiceNo())
                 .details(details)
                 .build();
@@ -1015,7 +1377,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
     private FreeeDealCreateRequest buildPurchaseDealRequest(IntegrationConnection connection, CanonicalPurchaseDeal purchase) {
         List<FreeeDealDetailDto> details = List.of(FreeeDealDetailDto.builder()
                 .taxCode(parseInteger(purchase.getTaxCode(), 108)) // 課税仕入10%
-                .accountItemId(parseInteger(purchase.getAccountItemCode(), null))
+                .accountItemId(parseFreeeId(purchase.getAccountItemCode()))
                 .amount(purchase.getAmount() != null ? purchase.getAmount().longValue() : 0L)
                 .description(purchase.getRemarks() != null ? purchase.getRemarks() : "BP外注費: " + purchase.getBpCompanyName())
                 .build());
@@ -1025,7 +1387,8 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 .issueDate(purchase.getIssueDate() != null ? purchase.getIssueDate().toString() : LocalDate.now().toString())
                 .dueDate(purchase.getDueDate() != null ? purchase.getDueDate().toString() : null)
                 .type("expense")
-                .partnerCode(purchase.getBpCompanyCode())
+                .partnerId(parseFreeeId(purchase.getPartnerExternalId()))
+                .partnerCode(purchase.getPartnerExternalId() == null ? purchase.getBpCompanyCode() : null)
                 .refNumber("BP-" + purchase.getBpPaymentId())
                 .details(details)
                 .build();
@@ -1034,7 +1397,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
     private FreeeDealCreateRequest buildExpenseDealRequest(IntegrationConnection connection, CanonicalExpenseDeal expense) {
         List<FreeeDealDetailDto> details = List.of(FreeeDealDetailDto.builder()
                 .taxCode(parseInteger(expense.getTaxCode(), 108))
-                .accountItemId(parseInteger(expense.getAccountItemCode(), null))
+                .accountItemId(parseFreeeId(expense.getAccountItemCode()))
                 .amount(expense.getAmount() != null ? expense.getAmount().longValue() : 0L)
                 .description(expense.getDescription() != null ? expense.getDescription() : "経費: " + expense.getCategory())
                 .build());
@@ -1043,10 +1406,24 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 .companyId(connection.getExternalCompanyId())
                 .issueDate(expense.getExpenseDate() != null ? expense.getExpenseDate().toString() : LocalDate.now().toString())
                 .type("expense")
-                .partnerCode(expense.getEngineerCode())
+                // 要員はfreee取引先として管理しないため取引先は指定しない。要員コードを取引先コードとして送ると、
+                // 取引先コード無効の事業所では400、有効でも該当取引先が無ければ400になる。
                 .refNumber(expense.getExpenseNo())
                 .details(details)
                 .build();
+    }
+
+    /** マッピングのfreee ID（取引先・勘定科目）を数値へ変換する。int範囲を超えるIDも扱えるようLongにする。数値でない値は送らない。 */
+    static Long parseFreeeId(String externalId) {
+        if (externalId == null || externalId.isBlank()) {
+            return null;
+        }
+        try {
+            long id = Long.parseLong(externalId.trim());
+            return id > 0 ? id : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private Integer parseInteger(String str, Integer defaultVal) {
@@ -1064,6 +1441,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
     public static class FreeeDealCreateRequest {
         @JsonProperty("company_id")
         private Long companyId;
@@ -1077,6 +1455,11 @@ public class FreeeAccountingProvider implements AccountingProvider {
         @JsonProperty("type")
         private String type;
 
+        /** freee取引先ID（照合済みマッピングの外部ID）。partner_code とは同時に送らない。 */
+        @JsonProperty("partner_id")
+        private Long partnerId;
+
+        /** 旧snapshot互換のみ。事業所設定で取引先コードが有効な場合に限りfreee側で解決される。 */
         @JsonProperty("partner_code")
         private String partnerCode;
 
@@ -1096,10 +1479,15 @@ public class FreeeAccountingProvider implements AccountingProvider {
         private Integer taxCode;
 
         @JsonProperty("account_item_id")
-        private Integer accountItemId;
+        private Long accountItemId;
 
         @JsonProperty("amount")
         private Long amount;
+
+        /** 明細の消費税額。nullなら送らない（freeeが税込金額から計算する）。 */
+        @JsonProperty("vat")
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private Long vat;
 
         @JsonProperty("description")
         private String description;

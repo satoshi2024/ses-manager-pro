@@ -12,6 +12,12 @@ public interface PurchaseExpensePaymentIntegrationService {
      */
     IntegrationJob triggerBpPurchaseSync(Long bpPaymentId, Long triggeredByUserId);
 
+    /** BP仕入の送信プレビュー（副作用なし）。BP支払が無ければ404。 */
+    com.ses.dto.accounting.AccountingSendPreviewDto<com.ses.dto.accounting.canonical.CanonicalPurchaseDeal> previewBpPurchaseSync(Long bpPaymentId);
+
+    /** 要員経費の送信プレビュー（副作用なし）。現tenantの経費申請が無ければ404。 */
+    com.ses.dto.accounting.AccountingSendPreviewDto<com.ses.dto.accounting.canonical.CanonicalExpenseDeal> previewExpenseSync(Long expenseRequestId);
+
     /**
      * 外部決済情報の同期ジョブを生成・キューイングする。
      */

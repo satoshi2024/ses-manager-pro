@@ -237,6 +237,53 @@ class FreeeOAuthContractTest {
     }
 
     @Test
+    @DisplayName("token応答にcompany_idが無ければ（事業所未選択の認可）users/meを呼ばず接続しない")
+    void company_id欠落は接続しない() throws Exception {
+        server.expect(once(), requestTo(OAUTH_BASE + "/token"))
+                .andRespond(withSuccess("{\"access_token\":\"fixture-access-token\","
+                        + "\"refresh_token\":\"fixture-refresh-token\",\"expires_in\":21600}",
+                        MediaType.APPLICATION_JSON));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.handleCallback("fixture-code", "fixture-state", 7L));
+        assertEquals("error.payroll.oauthFailed", ex.getMessage());
+        server.verify(); // users/meへ進まない
+        verify(connectionMapper, never()).insert(any(com.ses.entity.FreeeConnection.class));
+    }
+
+    @Test
+    @DisplayName("exchangeAuthorizationCode: 保存せずtoken・期限・company_idを返す（会計接続と共通）")
+    void code交換は保存せず結果を返す() throws Exception {
+        server.expect(once(), requestTo(OAUTH_BASE + "/token"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess(fixture("token-success.json"), MediaType.APPLICATION_JSON));
+
+        com.ses.dto.freee.FreeeTokenGrant grant = service.exchangeAuthorizationCode("fixture-code");
+        server.verify();
+        assertEquals("fixture-access-token", grant.accessToken());
+        assertEquals("fixture-refresh-token", grant.refreshToken());
+        assertEquals(3600L, grant.expiresIn());
+        assertEquals(123L, grant.companyId());
+        assertFalse(grant.toString().contains("fixture-access-token"), "toStringへtokenを出さない");
+        verify(connectionMapper, never()).insert(any(com.ses.entity.FreeeConnection.class));
+        verify(connectionMapper, never()).updateById(any(com.ses.entity.FreeeConnection.class));
+    }
+
+    @Test
+    @DisplayName("HR users/meが403（人事労務の権限なし）なら権限不足として接続しない")
+    void hr_users_meの403は権限不足() throws Exception {
+        server.expect(once(), requestTo(OAUTH_BASE + "/token"))
+                .andRespond(withSuccess(fixture("token-success.json"), MediaType.APPLICATION_JSON));
+        server.expect(once(), requestTo(HR_BASE + "/api/v1/users/me"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.FORBIDDEN));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.handleCallback("fixture-code", "fixture-state", 7L));
+        assertEquals("error.payroll.permissionDenied", ex.getMessage());
+        verify(connectionMapper, never()).insert(any(com.ses.entity.FreeeConnection.class));
+    }
+
+    @Test
     @DisplayName("users/meでcompany_adminでない事業所は接続不可（AC03）")
     void self_onlyはcompanyNotAdminで接続しない() throws Exception {
         server.expect(once(), requestTo(OAUTH_BASE + "/token"))

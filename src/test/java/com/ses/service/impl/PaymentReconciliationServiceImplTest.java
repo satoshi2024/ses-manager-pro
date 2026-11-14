@@ -6,11 +6,12 @@ import com.ses.dto.invoice.InvoicePaymentCreateRequest;
 import com.ses.dto.invoice.InvoicePaymentResponse;
 import com.ses.dto.reconciliation.BankDepositDto;
 import com.ses.dto.reconciliation.PendingDepositDto;
+import com.ses.dto.reconciliation.ReconciliationCandidateDto;
 import com.ses.dto.reconciliation.ReconciliationFetchResultDto;
 import com.ses.entity.BankDeposit;
 import com.ses.mapper.BankDepositMapper;
 import com.ses.mapper.InvoiceMapper;
-import com.ses.service.FreeeIntegrationService;
+import com.ses.service.billing.BankDepositSource;
 import com.ses.service.InvoiceService;
 import com.ses.service.billing.PaymentReconciliationService;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,13 +43,19 @@ class PaymentReconciliationServiceImplTest {
     private InvoiceMapper invoiceMapper;
 
     @Mock
-    private FreeeIntegrationService freeeIntegrationService;
+    private BankDepositSource bankDepositSource;
 
     @Mock
     private InvoiceService invoiceService;
 
     @Mock
     private ApplicationContext applicationContext;
+
+    @Mock
+    private org.springframework.beans.factory.ObjectProvider<com.ses.service.accounting.SalesInvoiceIntegrationService> salesInvoiceIntegration;
+
+    @Mock
+    private com.ses.service.accounting.SalesInvoiceIntegrationService salesInvoiceIntegrationService;
 
     @InjectMocks
     private PaymentReconciliationServiceImpl service;
@@ -95,7 +102,7 @@ class PaymentReconciliationServiceImplTest {
     @Test
     void fetchAndReconcile_autoMatchesWhenAmountAndNameMatch() {
         LocalDate depositDate = LocalDate.of(2026, 7, 20);
-        when(freeeIntegrationService.bankDeposits(any(), any()))
+        when(bankDepositSource.fetch(any(), any()))
                 .thenReturn(List.of(depositDto("D1", depositDate, new BigDecimal("550000"), "サンプル商事株式会社")));
         when(bankDepositMapper.insert(any(BankDeposit.class))).thenReturn(1);
 
@@ -130,7 +137,7 @@ class PaymentReconciliationServiceImplTest {
     @Test
     void fetchAndReconcile_skipsDuplicateFreeeDepositId() {
         LocalDate date = LocalDate.of(2026, 7, 20);
-        when(freeeIntegrationService.bankDeposits(any(), any()))
+        when(bankDepositSource.fetch(any(), any()))
                 .thenReturn(List.of(depositDto("D1", date, new BigDecimal("1000"), "テスト")));
         when(bankDepositMapper.insert(any(BankDeposit.class))).thenThrow(new DuplicateKeyException("dup"));
         when(bankDepositMapper.selectList(any())).thenReturn(List.of());
@@ -148,7 +155,7 @@ class PaymentReconciliationServiceImplTest {
     @Test
     void fetchAndReconcile_doesNotAutoApplyWhenMultipleHighConfidenceMatches() {
         LocalDate date = LocalDate.of(2026, 7, 20);
-        when(freeeIntegrationService.bankDeposits(any(), any()))
+        when(bankDepositSource.fetch(any(), any()))
                 .thenReturn(List.of(depositDto("D1", date, new BigDecimal("100000"), "サンプル商事株式会社")));
         when(bankDepositMapper.insert(any(BankDeposit.class))).thenReturn(1);
 
@@ -237,6 +244,36 @@ class PaymentReconciliationServiceImplTest {
     }
 
     @Test
+    void apply_消込が確定したらfreeeの取引の消込へ反映するジョブを同じトランザクションで登録する() {
+        LocalDate date = LocalDate.of(2026, 11, 13);
+        BankDeposit unresolved = depositEntity(1L, date, new BigDecimal("889900"), "ｶ)ｸﾛｽﾃﾂｸ", "未消込");
+        unresolved.setFreeeDepositId("2542342002");
+        when(bankDepositMapper.selectOne(any())).thenReturn(unresolved);
+        InvoicePaymentResponse resp = new InvoicePaymentResponse();
+        resp.setId(43L);
+        when(invoiceService.addPayment(eq(10L), any())).thenReturn(resp);
+        when(bankDepositMapper.update(isNull(), any())).thenReturn(1);
+        when(salesInvoiceIntegration.getIfAvailable()).thenReturn(salesInvoiceIntegrationService);
+
+        service.apply(1L, 10L);
+
+        verify(salesInvoiceIntegrationService).enqueueDepositReconcile(1L, "2542342002", 10L, 43L, new BigDecimal("889900"));
+    }
+
+    @Test
+    void apply_消込できなければfreeeへの反映ジョブも登録しない() {
+        LocalDate date = LocalDate.of(2026, 11, 13);
+        BankDeposit unresolved = depositEntity(1L, date, new BigDecimal("889900"), "ｶ)ｸﾛｽﾃﾂｸ", "未消込");
+        when(bankDepositMapper.selectOne(any())).thenReturn(unresolved);
+        when(invoiceService.addPayment(eq(10L), any())).thenThrow(BusinessException.of(400, "error.invoice.overpayment"));
+        lenient().when(salesInvoiceIntegration.getIfAvailable()).thenReturn(salesInvoiceIntegrationService);
+
+        assertThrows(BusinessException.class, () -> service.apply(1L, 10L));
+
+        verify(salesInvoiceIntegrationService, never()).enqueueDepositReconcile(any(), any(), any(), any(), any());
+    }
+
+    @Test
     void apply_請求書scope拒否時は入金を消込済へ更新しない() {
         LocalDate date = LocalDate.of(2026, 7, 20);
         BankDeposit unresolved = depositEntity(1L, date, new BigDecimal("200000"), "組織外入金", "未消込");
@@ -252,7 +289,7 @@ class PaymentReconciliationServiceImplTest {
     @Test
     void fetchAndReconcile_自動消込の請求書scope拒否時は入金を変更しない() {
         LocalDate date = LocalDate.of(2026, 7, 20);
-        when(freeeIntegrationService.bankDeposits(any(), any()))
+        when(bankDepositSource.fetch(any(), any()))
                 .thenReturn(List.of(depositDto("D-SCOPE", date, new BigDecimal("550000"), "組織外商事株式会社")));
         when(bankDepositMapper.insert(any(BankDeposit.class))).thenReturn(1);
 
@@ -302,6 +339,40 @@ class PaymentReconciliationServiceImplTest {
         assertTrue(PaymentReconciliationServiceImpl.isNameMatch("サンプル商事株式会社", "サンプル商事"));
         assertFalse(PaymentReconciliationServiceImpl.isNameMatch("サンプル商事株式会社", "全く関係ない会社"));
         assertFalse(PaymentReconciliationServiceImpl.isNameMatch(null, "サンプル商事"));
+    }
+
+    @Test
+    void isKanaNameMatch_matchesBankHalfWidthKanaWithCorporateAbbreviation() {
+        // 銀行の振込名義: 半角カナ・小書き文字なし・法人略号付き
+        assertTrue(PaymentReconciliationServiceImpl.isKanaNameMatch("サンプルショウジ", "ｶ)ｻﾝﾌﾟﾙｼﾖｳｼﾞ"));
+        assertTrue(PaymentReconciliationServiceImpl.isKanaNameMatch("さんぷるしょうじ", "ｻﾝﾌﾟﾙｼﾖｳｼﾞ(ｶ"));
+        assertTrue(PaymentReconciliationServiceImpl.isKanaNameMatch("カブシキガイシャ　サンプルショウジ", "ｶ) ｻﾝﾌﾟﾙ ｼﾖｳｼﾞ"));
+        assertTrue(PaymentReconciliationServiceImpl.isKanaNameMatch("サンプルショウジ", "ｻﾝﾌﾟﾙ(ｶ)ｼﾖｳｼﾞ"));
+        assertTrue(PaymentReconciliationServiceImpl.isKanaNameMatch("エス・イー・エス", "ｴｽｲ-ｴｽ"));
+        // 4文字以上の部分一致（支店名付き等）
+        assertTrue(PaymentReconciliationServiceImpl.isKanaNameMatch("サンプルショウジ", "ｶ)ｻﾝﾌﾟﾙｼﾖｳｼﾞﾄｳｷﾖｳｼﾃﾝ"));
+    }
+
+    @Test
+    void isKanaNameMatch_rejectsShortPartialsAndNonKana() {
+        assertFalse(PaymentReconciliationServiceImpl.isKanaNameMatch("サン", "ｻﾝﾌﾟﾙｼﾖｳｼﾞ"), "短い部分一致で自動消込しない");
+        assertFalse(PaymentReconciliationServiceImpl.isKanaNameMatch("サンプルショウジ", "ｶ)ﾍﾞﾂﾉｶｲｼﾔ"));
+        assertFalse(PaymentReconciliationServiceImpl.isKanaNameMatch(null, "ｻﾝﾌﾟﾙｼﾖｳｼﾞ"));
+        assertFalse(PaymentReconciliationServiceImpl.isKanaNameMatch("サンプル商事", "ｻﾝﾌﾟﾙ商事"), "漢字はカナ照合の対象外");
+        // 法人略号だけの名義は空になり一致しない
+        assertFalse(PaymentReconciliationServiceImpl.isKanaNameMatch("カ", "ｶ)"));
+    }
+
+    @Test
+    void score_usesCustomerKanaForHalfWidthKanaPayerName() {
+        BankDeposit deposit = depositEntity(1L, LocalDate.of(2026, 1, 31), new BigDecimal("330000"), "ｶ)ｻﾝﾌﾟﾙｼﾖｳｼﾞ", "未消込");
+        InvoiceBalanceDto inv = invoiceBalance(1L, "INV-1", 1L, "株式会社サンプル商事", new BigDecimal("330000"), LocalDate.of(2026, 1, 31));
+        inv.setCustomerNameKana("サンプルショウジ");
+
+        ReconciliationCandidateDto candidate = PaymentReconciliationServiceImpl.score(deposit, inv);
+
+        assertTrue(candidate.isNameMatch(), "漢字の顧客名でも会社名カナで振込名義と一致する");
+        assertTrue(candidate.isAmountMatch());
     }
 
     @Test
