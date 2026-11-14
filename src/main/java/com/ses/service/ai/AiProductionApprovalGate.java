@@ -136,5 +136,23 @@ public class AiProductionApprovalGate {
                 throw new IllegalArgumentException("外部送信判定と承認snapshotが不整合です");
             }
         }
+
+        /**
+         * 起動を止めるべき不足（設定の構造的な誤り）。失効日経過・署名日前のように時間の経過だけで変わる不足は除く。
+         * これらは起動後にも同じ判定で外部送信を止められるため、アプリ全体の起動失敗にしない。
+         */
+        public List<String> startupBlockingGates() {
+            return missingGates.stream().filter(gate -> !AiExternalSendApproval.isTemporalGateCode(gate)).toList();
+        }
+
+        /** 不足が時間要因（失効・署名日前）だけか。承認済み、または構造的な不足がある場合はfalse。 */
+        public boolean onlyTemporalViolations() {
+            return !approved && !missingGates.isEmpty() && startupBlockingGates().isEmpty();
+        }
+
+        /** 決定書に記載されたdigestと現行設定の承認内容が食い違うか。 */
+        public boolean digestMismatch() {
+            return missingGates.contains("approval." + AiExternalSendApproval.VIOLATION_DIGEST_MISMATCH);
+        }
     }
 }

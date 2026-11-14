@@ -13,6 +13,9 @@ import com.ses.service.AuditLogService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -85,6 +88,26 @@ public class AuditLogServiceImpl implements AuditLogService {
         if (auditLogMapper.insert(entry) != 1) {
             throw new IllegalStateException("ドメイン監査を永続化できません");
         }
+    }
+
+    /**
+     * 呼出側transactionの成否から独立して必須記録するドメイン監査（NF08 AI外部送信のATTEMPT/RESULT/DENIED）。
+     * <p>{@code REQUIRES_NEW} の別transactionでcommitするため、外側transactionが後でrollbackしても記録は残る。
+     * 外部送信のように「送信した事実」が外側の業務処理の成否と無関係に残らなければならない監査に使う。
+     * 検証・永続化の内容は {@link #recordDomainEventRequired} と同じで、既存methodの意味（呼出側transactionへの参加。
+     * D1 bootstrap等の必須監査が依存）は変えない。</p>
+     * <p>独立transactionはSpring proxy経由の呼出しでだけ成立する。proxyを通らない呼出し（自己呼出し・手動構築）で
+     * 外側transactionに参加してしまうと独立性を保証できないため、このmethodで開始されたtransaction内でなければ
+     * 記録せずに失敗させる（fail-closed）。別connectionを取得できない場合（pool枯渇等）もここで失敗する。</p>
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void recordDomainEventRequiredInNewTransaction(AuditLog entry) {
+        String transactionName = TransactionSynchronizationManager.getCurrentTransactionName();
+        if (!TransactionSynchronizationManager.isActualTransactionActive() || transactionName == null
+                || !transactionName.endsWith(".recordDomainEventRequiredInNewTransaction")) {
+            throw new IllegalStateException("独立transactionでドメイン監査を記録できません");
+        }
+        recordDomainEventRequired(entry);
     }
 
     private void applyRequestAttribution(AuditLog entry) {

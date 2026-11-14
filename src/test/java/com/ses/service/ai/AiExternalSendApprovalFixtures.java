@@ -20,6 +20,8 @@ public final class AiExternalSendApprovalFixtures {
     public static final String DPA_REFERENCE = "DPA-GCP-2026-0003";
     public static final String MODEL = "gemini-synthetic-model";
     public static final String HOST = "generativelanguage.googleapis.com";
+    public static final List<String> DATA_CATEGORIES = List.of(
+            "catalog.queryId", "catalog.catalogVersion", "summary.claimKeys");
 
     private AiExternalSendApprovalFixtures() {
     }
@@ -29,7 +31,10 @@ public final class AiExternalSendApprovalFixtures {
         return AiExternalSendApproval.businessDate(Clock.systemUTC());
     }
 
-    /** today基準で有効期間内の完全な承認設定（external-send有効・チェックリスト全true）。 */
+    /**
+     * today基準で有効期間内の完全な承認設定（external-send有効・チェックリスト全true）。
+     * approval-digestは決定書への記載を模して、fixtureの承認内容から算出した値を入れる。
+     */
     public static AiConfig approvedConfig(LocalDate today) {
         AiConfig config = new AiConfig();
         config.setEnabled(true);
@@ -49,6 +54,7 @@ public final class AiExternalSendApprovalFixtures {
         approval.setProvider("gemini");
         approval.setModel(MODEL);
         approval.setPurposes(new ArrayList<>(List.of(AiGatewayRequest.USE_COPILOT)));
+        approval.setDataCategories(new ArrayList<>(DATA_CATEGORIES));
         approval.setDestinationHost(HOST);
         AiConfig.CostLimit cost = approval.getCostLimit();
         cost.setPerRequestYen(50);
@@ -58,6 +64,15 @@ public final class AiExternalSendApprovalFixtures {
         cost.setOutputYenPerThousandTokens(new BigDecimal("4"));
         cost.setMaxRequestBytes(8192);
         cost.setMaxThinkingTokens(0);
+        return resign(config);
+    }
+
+    /**
+     * 承認内容を変更した後に、決定書のdigestも取り直したこと（再署名）を模す。
+     * 内容が不完全でdigestを算出できない場合はdigestを外す。
+     */
+    public static AiConfig resign(AiConfig config) {
+        config.getExternalSendApproval().setApprovalDigest(AiExternalSendApproval.computeDigest(config));
         return config;
     }
 

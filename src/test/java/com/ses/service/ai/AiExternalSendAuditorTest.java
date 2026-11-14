@@ -2,10 +2,13 @@ package com.ses.service.ai;
 
 import com.ses.entity.AuditLog;
 import com.ses.service.AuditLogService;
+import com.ses.service.impl.AuditLogServiceImpl;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 
@@ -18,11 +21,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
-/** NF08: 外部送信監査は既存t_audit_logへ必須記録し、prompt原文・PIIを含めない。 */
+/**
+ * NF08: 外部送信監査は既存t_audit_logへ必須記録し、prompt原文・PIIを含めない。
+ * 実DBへのinsertと外側rollback後の残存は {@code AiExternalSendAuditorH2PersistenceTest} で確認する。
+ */
 class AiExternalSendAuditorTest {
+
+    private static final String DIGEST = "a467bc9955f3827dfd7a8465a560562c8221e792bbee578c1aa4cccd519a6e6c";
+    private static final String CONFIG_HASH = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     @BeforeEach
     void clearSecurityContext() {
@@ -30,8 +41,13 @@ class AiExternalSendAuditorTest {
         SecurityContextHolder.clearContext();
     }
 
+    @AfterEach
+    void clearTransactionFlag() {
+        TransactionSynchronizationManager.setActualTransactionActive(false);
+    }
+
     @Test
-    void 送信前監査は決定ID_model_用途_宛先_byte数を固定書式で記録する() {
+    void 送信前監査は決定ID_digest_model_用途_送信範囲_byte数を固定書式で記録する() {
         AuditLogService service = mock(AuditLogService.class);
         new AiExternalSendAuditor(service).recordAttempt(audit("APPROVED_UPPER_BOUND", null, true, 202));
 
@@ -40,9 +56,11 @@ class AiExternalSendAuditorTest {
         AuditLog entry = captor.getValue();
         assertEquals(AiExternalSendAuditor.APPLICATION_ATTEMPT, entry.getApplicationCode());
         assertEquals(AiExternalSendAuditor.METHOD, entry.getMethod());
-        assertEquals("ai-external-send://generativelanguage.googleapis.com/MANAGEMENT_COPILOT", entry.getUri());
+        assertEquals("ai-external-send://generativelanguage.googleapis.com/MANAGEMENT_COPILOT"
+                + "?provider=gemini&tenant=tenant-a&le=1&query=dashboard.summary&artifact=7&cfg=" + CONFIG_HASH,
+                entry.getUri());
         assertEquals(AiExternalSendAuditor.REFERENCE_TYPE, entry.getReferenceType());
-        assertEquals("decision=NF08-EXT-2026-0001;purpose=MANAGEMENT_COPILOT;provider=gemini;"
+        assertEquals("decision=NF08-EXT-2026-0001;digest=" + DIGEST + ";purpose=MANAGEMENT_COPILOT;"
                 + "model=gemini-synthetic-model", entry.getBeforeState());
         assertEquals("bytes=1234;upperYen=6;dayYen=6;monthYen=6", entry.getAfterState());
         assertEquals("trace-1", entry.getCorrelationId());
@@ -84,8 +102,10 @@ class AiExternalSendAuditorTest {
         AuditLogService service = mock(AuditLogService.class);
         AiExternalSendAuditor.SendAudit hostile = new AiExternalSendAuditor.SendAudit(
                 "attempt 1 ヤマダ タロウ", "trace\n<script>", "NF08-EXT-2026-0001 tel:090-1234-5678",
-                "gemini", "model\"; DROP TABLE x;--", "MANAGEMENT_COPILOT", "host name.example",
-                10, 1, 1L, 1L, "RESPONSE_RECEIVED", "x".repeat(400), null, 1, "ACTUAL", 200, true, 1L);
+                "x".repeat(300), "gemini", "model\"; DROP TABLE x;--", "MANAGEMENT_COPILOT", "host name.example",
+                "tenant 株式会社サンプル " + "t".repeat(300), Long.MAX_VALUE, "q".repeat(300), Long.MIN_VALUE,
+                "c".repeat(300), 10, 1, 1L, 1L, "RESPONSE_RECEIVED", "x".repeat(400), null, 1, "ACTUAL", 200,
+                true, 1L);
 
         new AiExternalSendAuditor(service).recordResult(hostile);
 
@@ -95,6 +115,7 @@ class AiExternalSendAuditorTest {
         String all = String.join("|", entry.getUri(), entry.getBeforeState(), entry.getAfterState(),
                 entry.getCorrelationId(), entry.getIdempotencyKey());
         assertFalse(all.contains("ヤマダ"));
+        assertFalse(all.contains("株式会社"));
         assertFalse(all.contains(" "));
         assertFalse(all.contains("<"));
         assertFalse(all.contains("\n"));
@@ -102,6 +123,7 @@ class AiExternalSendAuditorTest {
         assertTrue(entry.getBeforeState().length() <= 255);
         assertTrue(entry.getAfterState().length() <= 255);
         assertTrue(entry.getUri().length() <= 500);
+        assertTrue(entry.getUri().contains("&cfg="), "各識別子を64文字に切り詰め、末尾のconfig hashまでuri列に収める");
     }
 
     @Test
@@ -125,11 +147,39 @@ class AiExternalSendAuditorTest {
         assertDoesNotThrow(() -> auditor.recordDenied(audit("AI_EXTERNAL_SEND_DAILY_COST_LIMIT", null, false, 429)));
     }
 
+    @Test
+    void 外側transaction内で独立transactionを使えない監査先は記録せず失敗させる() {
+        AuditLogService service = mock(AuditLogService.class);
+        AiExternalSendAuditor auditor = new AiExternalSendAuditor(service);
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+
+        assertThrows(IllegalStateException.class,
+                () -> auditor.recordAttempt(audit("APPROVED_UPPER_BOUND", null, true, 202)),
+                "外側rollbackで監査だけが消える経路では送信前監査を成立させない");
+        assertThrows(IllegalStateException.class,
+                () -> auditor.recordResult(audit("SUCCEEDED", null, true, 200)));
+        assertDoesNotThrow(() -> auditor.recordDenied(audit("AI_EXTERNAL_SEND_DAILY_COST_LIMIT", null, false, 429)));
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void Spring_proxyを通らない監査serviceは独立transactionとして扱わない() {
+        // 手動構築・mockのAuditLogServiceImplはAOP proxyではないため、REQUIRES_NEWのmethodを呼ばない。
+        AuditLogServiceImpl service = mock(AuditLogServiceImpl.class);
+        AiExternalSendAuditor auditor = new AiExternalSendAuditor(service);
+
+        auditor.recordAttempt(audit("APPROVED_UPPER_BOUND", null, true, 202));
+
+        verify(service, never()).recordDomainEventRequiredInNewTransaction(any());
+        verify(service).recordDomainEventRequired(any());
+    }
+
     private static AiExternalSendAuditor.SendAudit audit(String reason, CopilotProviderUsage usage,
                                                          boolean succeeded, int status) {
         return new AiExternalSendAuditor.SendAudit("attempt-1", "trace-1", AiExternalSendApprovalFixtures.DECISION_ID,
-                "gemini", AiExternalSendApprovalFixtures.MODEL, AiGatewayRequest.USE_COPILOT,
-                AiExternalSendApprovalFixtures.HOST, 1234, 6, 6L, 6L, "RESPONSE_RECEIVED", reason, usage,
+                DIGEST, "gemini", AiExternalSendApprovalFixtures.MODEL, AiGatewayRequest.USE_COPILOT,
+                AiExternalSendApprovalFixtures.HOST, "tenant-a", 1L, "dashboard.summary", 7L, CONFIG_HASH,
+                1234, 6, 6L, 6L, "RESPONSE_RECEIVED", reason, usage,
                 usage == null ? null : 1, usage == null ? "UPPER_BOUND" : "ACTUAL", status, succeeded, 42L);
     }
 }

@@ -13,6 +13,7 @@ import com.ses.service.ai.AiExternalSendAuditor;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.ai.AiOutboundProbe;
+import com.ses.service.ai.AiPiiMasker;
 import com.ses.service.ai.AiProductionApprovalGate;
 import com.ses.service.ai.CopilotBoundedAiTextService;
 import com.ses.service.ai.CopilotExecutionFailure;
@@ -41,6 +42,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -48,6 +50,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -66,25 +69,31 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 /**
- * A-NF08-1: 外部送信gateの対抗テスト（mock/fake adapterのみ。ネットワークI/O・実provider・実secretなし）。
- * prompt injection、最小field、PII mask、外部送信拒否、費用上限、監査の非PII性、log脱敏を確認する。
+ * A-NF08-1: 外部送信gateの敵対的テスト（mock/fake adapterのみ。ネットワークI/O・実provider・実secretなし）。
+ * prompt injection、最小field、PII mask（最終gate）、外部送信拒否、承認digest、費用上限、監査の非PII性、log脱敏を確認する。
+ * 時計は固定（2026-11-13 10:00 JST）にし、JST日付の境界で結果が変わらないようにする。
  */
 class CopilotExternalSendGateAdversarialTest {
 
     private static final String PROMPT_VERSION = CopilotSummaryPromptTemplate.VERSION + "-gemini-json-v1";
     private static final String CONFIG_HASH = "synthetic-approved-config-hash-v1";
     private static final String CLAIM_KEY = "forecast.utilization.2026-09";
+    private static final Instant NOW = Instant.parse("2026-11-13T01:00:00Z");
+    /** fixture（2026-11-13基準）の承認内容digest（AiExternalSendApprovalTestの正規形と同じ値）。 */
+    private static final String DIGEST = "a467bc9955f3827dfd7a8465a560562c8221e792bbee578c1aa4cccd519a6e6c";
 
     private AuditLogService auditLogService;
     private AiOutboundProbe probe;
     private LocalDate today;
+    private MutableClock clock;
 
     @BeforeEach
     void setUp() {
         SecurityContextHolder.clearContext();
         auditLogService = mock(AuditLogService.class);
         probe = mock(AiOutboundProbe.class);
-        today = AiExternalSendApprovalFixtures.today();
+        today = LocalDate.of(2026, 11, 13);
+        clock = new MutableClock(NOW);
     }
 
     @Test
@@ -104,11 +113,13 @@ class CopilotExternalSendGateAdversarialTest {
         AuditLog outcome = audits.get(1);
         int promptBytes = adapter.prompts.get(0).getBytes(StandardCharsets.UTF_8).length;
         assertEquals(AiExternalSendAuditor.APPLICATION_ATTEMPT, attempt.getApplicationCode());
-        assertEquals("decision=" + AiExternalSendApprovalFixtures.DECISION_ID + ";purpose=MANAGEMENT_COPILOT;"
-                + "provider=gemini;model=" + AiExternalSendApprovalFixtures.MODEL, attempt.getBeforeState());
-        assertEquals("ai-external-send://generativelanguage.googleapis.com/MANAGEMENT_COPILOT", attempt.getUri());
+        assertEquals("decision=" + AiExternalSendApprovalFixtures.DECISION_ID + ";digest=" + DIGEST
+                + ";purpose=MANAGEMENT_COPILOT;model=" + AiExternalSendApprovalFixtures.MODEL, attempt.getBeforeState());
+        assertEquals("ai-external-send://generativelanguage.googleapis.com/MANAGEMENT_COPILOT?provider=gemini"
+                + "&tenant=tenant-a&le=1&query=dashboard.summary&artifact=7&cfg=" + CONFIG_HASH, attempt.getUri());
         assertTrue(attempt.getAfterState().startsWith("bytes=" + promptBytes + ";upperYen="), attempt.getAfterState());
         assertEquals(AiExternalSendAuditor.APPLICATION_RESULT, outcome.getApplicationCode());
+        assertEquals(attempt.getUri(), outcome.getUri(), "結果監査も同じ送信範囲を記録する");
         assertTrue(outcome.getSuccessFlag());
         assertTrue(outcome.getAfterState().contains("outcome=RESPONSE_RECEIVED;reason=SUCCEEDED"));
         assertTrue(outcome.getAfterState().contains("inTok=100;outTok=20"));
@@ -169,6 +180,174 @@ class CopilotExternalSendGateAdversarialTest {
     }
 
     @Test
+    void untrustedに連絡先や敬称付きの人名があれば最終gateで送信せず監査に値を残さない() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(config, adapter);
+        String untrusted = "担当の山田太郎様（090-1234-5678、taro.yamada@example.com）へ連絡";
+
+        BusinessException ex = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                () -> assertThrows(BusinessException.class,
+                        () -> gateway.execute(request(50, minimalFields(), untrusted))));
+
+        assertEquals(400, ex.getCode());
+        assertEquals(AiExecutionGatewayImpl.REASON_UNMASKED_PII, ex.getMessage());
+        assertTrue(adapter.prompts.isEmpty());
+        verify(probe, never()).record(any());
+        AuditLog denied = capturedAudits(1).get(0);
+        assertEquals(AiExternalSendAuditor.APPLICATION_DENIED, denied.getApplicationCode());
+        assertEquals(AiExecutionGatewayImpl.REASON_UNMASKED_PII, denied.getErrorCode());
+        assertEquals(400, denied.getStatus());
+        String all = auditText(denied);
+        for (String forbidden : List.of("山田", "090-1234-5678", "taro.yamada", "example.com")) {
+            assertFalse(all.contains(forbidden), "拒否監査にPIIの値を残さない: " + forbidden);
+        }
+    }
+
+    @Test
+    void untrustedに法人格付きのbp会社名があれば最終gateで送信しない() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(config, adapter);
+
+        for (String untrusted : List.of("株式会社サンプルパートナーズから要員の空き連絡", "㈱サンプルパートナーズ経由の提案",
+                "Sample Partners Co., Ltd. の要員")) {
+            BusinessException ex = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                    () -> assertThrows(BusinessException.class,
+                            () -> gateway.execute(request(50, minimalFields(), untrusted))));
+            assertEquals(AiExecutionGatewayImpl.REASON_UNMASKED_PII, ex.getMessage(), untrusted);
+        }
+        assertTrue(adapter.prompts.isEmpty());
+        verify(probe, never()).record(any());
+    }
+
+    @Test
+    void 送信契約外のfieldで外したbp会社名や氏名がuntrustedへ再出現すれば送信しない() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(config, adapter);
+        Map<String, Object> withName = minimalFields();
+        withName.put("engineer.fullName", "ヤマダ タロウ");
+        Map<String, Object> withRemarks = minimalFields();
+        withRemarks.put("bp.remarks", "サンプルパートナーズ");
+
+        BusinessException name = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                () -> assertThrows(BusinessException.class,
+                        () -> gateway.execute(request(50, withName, "ヤマダタロウの稼働状況を要約"))));
+        BusinessException company = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                () -> assertThrows(BusinessException.class,
+                        () -> gateway.execute(request(50, withRemarks, "サンプル パートナーズの要員"))));
+
+        assertEquals(AiExecutionGatewayImpl.REASON_UNMASKED_PII, name.getMessage(), "空白の違いでは回避できない");
+        assertEquals(AiExecutionGatewayImpl.REASON_UNMASKED_PII, company.getMessage());
+        assertTrue(adapter.prompts.isEmpty());
+    }
+
+    @Test
+    void bpBpCompany等のlegacy_allowlist項目は承認data_category外として送信しない() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(config, adapter);
+        Map<String, Object> fields = minimalFields();
+        // AiPiiMasker.mask（legacy matching用allow-list）は通過する項目だが、管理Copilotの外部送信契約外。
+        fields.put("bp.bpCompany", "サンプルパートナーズ");
+        fields.put("engineer.initialName", "Y.T.");
+        fields.put("project.projectName", "基幹刷新");
+
+        BusinessException ex = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                () -> assertThrows(BusinessException.class, () -> gateway.execute(request(50, fields, null))));
+
+        assertEquals(400, ex.getCode());
+        assertEquals(AiExecutionGatewayImpl.REASON_FIELD_NOT_APPROVED, ex.getMessage());
+        assertTrue(adapter.prompts.isEmpty());
+        AuditLog denied = capturedAudits(1).get(0);
+        assertEquals(AiExecutionGatewayImpl.REASON_FIELD_NOT_APPROVED, denied.getErrorCode());
+        assertFalse(auditText(denied).contains("サンプルパートナーズ"));
+    }
+
+    @Test
+    void 承認でdata_categoryを狭めれば範囲外の最小fieldも送信しない() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
+        config.getExternalSendApproval().setDataCategories(new ArrayList<>(List.of("catalog.queryId")));
+        AiExternalSendApprovalFixtures.resign(config);
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(config, adapter);
+
+        BusinessException ex = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                () -> assertThrows(BusinessException.class,
+                        () -> gateway.execute(request(50, minimalFields(), null))));
+
+        assertEquals(AiExecutionGatewayImpl.REASON_FIELD_NOT_APPROVED, ex.getMessage());
+        assertTrue(adapter.prompts.isEmpty());
+    }
+
+    @Test
+    void 送信field値に連絡先が紛れ込めば最終gateで送信しない() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(config, adapter);
+        Map<String, Object> fields = minimalFields();
+        fields.put("summary.claimKeys", CLAIM_KEY + ",contact:taro.yamada@example.com");
+
+        BusinessException ex = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                () -> assertThrows(BusinessException.class, () -> gateway.execute(request(50, fields, null))));
+
+        assertEquals(AiExecutionGatewayImpl.REASON_UNMASKED_PII, ex.getMessage());
+        assertTrue(adapter.prompts.isEmpty());
+    }
+
+    @Test
+    void 伏せ字済みのuntrustedは最終gateを通過して送信できる() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(config, adapter);
+        String masked = "対象者 *** (Y.T.) の稼働は 80% です。お客様向けの要約";
+
+        AccountingTenantContextHolder.runWithTenant("tenant-a",
+                () -> gateway.execute(request(50, minimalFields(), masked)));
+
+        assertEquals(1, adapter.prompts.size());
+        assertTrue(adapter.prompts.get(0).contains("***"));
+        capturedAudits(2);
+    }
+
+    @Test
+    void 読取専用preflightもPII最終gateを通し監査は書かない() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(config, adapter);
+
+        BusinessException ex = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                () -> assertThrows(BusinessException.class,
+                        () -> gateway.preflightCopilot(request(50, minimalFields(), "連絡先 03-1234-5678"))));
+
+        assertEquals(AiExecutionGatewayImpl.REASON_UNMASKED_PII, ex.getMessage());
+        verifyNoInteractions(auditLogService);
+        verify(probe, never()).record(any());
+        assertTrue(adapter.prompts.isEmpty());
+    }
+
+    @Test
+    void PII検出は種別コードだけを返し伏せ字や識別子を誤検出しない() {
+        assertEquals(List.of(AiPiiMasker.PII_PHONE),
+                AiPiiMasker.findUnmaskedPii("連絡先は０９０－１２３４－５６７８", Map.of()), "全角もNFKCで検出する");
+        assertEquals(List.of(AiPiiMasker.PII_EMAIL), AiPiiMasker.findUnmaskedPii("a.b+c@example.co.jp", Map.of()));
+        assertEquals(List.of(AiPiiMasker.PII_POSTAL_CODE), AiPiiMasker.findUnmaskedPii("〒100-0001", Map.of()));
+        assertEquals(List.of(AiPiiMasker.PII_PERSON_HONORIFIC), AiPiiMasker.findUnmaskedPii("Mr. Smith", Map.of()));
+        assertEquals(List.of(AiPiiMasker.PII_PERSON_HONORIFIC), AiPiiMasker.findUnmaskedPii("鈴木さん", Map.of()));
+        assertEquals(List.of(AiPiiMasker.PII_CORPORATE_NAME), AiPiiMasker.findUnmaskedPii("(有)サンプル", Map.of()));
+        assertEquals(List.of(AiPiiMasker.PII_WITHHELD_FIELD_VALUE),
+                AiPiiMasker.findUnmaskedPii(Map.of("k", List.of("x", "サンプルパートナーズ")),
+                        Map.of("bp.bpCompany", "サンプル パートナーズ")));
+        for (String safe : List.of(CLAIM_KEY, "dashboard.summary", "corp.revenue.2026-10-01", "顧客氏名の項目",
+                "お客様向け", "皆様へ", "*** 様", "Y.T.さん", "0.15", "2026-09-08", "稼働率 80%")) {
+            assertEquals(List.of(), AiPiiMasker.findUnmaskedPii(safe, Map.of()), "誤検出しない: " + safe);
+        }
+        assertEquals(List.of(), AiPiiMasker.findUnmaskedPii("任意の文", Map.of("engineer.fullName", "林")),
+                "1文字の値は照合しない");
+    }
+
+    @Test
     void 他tenantの実行文脈では承認済みでも送信前に拒否する() {
         AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
         FakeRemoteAdapter adapter = new FakeRemoteAdapter();
@@ -193,6 +372,13 @@ class CopilotExternalSendGateAdversarialTest {
     }
 
     @Test
+    void 承認digestが決定書と一致しなければ起動時から固定denyAllで送信しない() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
+        config.getExternalSendApproval().getCostLimit().setDailyYen(900);
+        assertDeniedWithoutDispatch(config, "COPILOT_COST_UNKNOWN");
+    }
+
+    @Test
     void チェックリストが一つ欠ければ承認設定があっても送信しない() {
         AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
         config.getProductionGates().setHumanEscalation(false);
@@ -207,7 +393,7 @@ class CopilotExternalSendGateAdversarialTest {
     }
 
     @Test
-    void 起動後に決定IDを差し替えると送信前に拒否し拒否監査を残す() {
+    void 起動後に決定IDだけを書き換えるとdigest不一致として送信前に拒否し拒否監査を残す() {
         AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
         FakeRemoteAdapter adapter = new FakeRemoteAdapter();
         AiExecutionGatewayImpl gateway = gateway(config, adapter);
@@ -216,20 +402,54 @@ class CopilotExternalSendGateAdversarialTest {
         BusinessException ex = AccountingTenantContextHolder.runWithTenant("tenant-a",
                 () -> assertThrows(BusinessException.class, () -> gateway.execute(request(50, minimalFields(), null))));
 
-        assertEquals("AI_EXTERNAL_SEND_DECISION_CHANGED", ex.getMessage());
+        assertEquals(AiExecutionGatewayImpl.REASON_APPROVAL_DIGEST_MISMATCH, ex.getMessage());
         assertTrue(adapter.prompts.isEmpty());
         AuditLog denied = capturedAudits(1).get(0);
         assertEquals(AiExternalSendAuditor.APPLICATION_DENIED, denied.getApplicationCode());
-        assertEquals("AI_EXTERNAL_SEND_DECISION_CHANGED", denied.getErrorCode());
+        assertEquals(AiExecutionGatewayImpl.REASON_APPROVAL_DIGEST_MISMATCH, denied.getErrorCode());
         assertTrue(denied.getBeforeState().contains("decision=" + AiExternalSendApprovalFixtures.DECISION_ID));
+        assertTrue(denied.getBeforeState().contains(";digest=" + DIGEST + ";"), "起動時に固定した承認内容を記録する");
+    }
+
+    @Test
+    void 同じ決定IDのまま上限を書き換えてもdigest不一致として送信前に拒否する() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(config, adapter);
+        config.getExternalSendApproval().getCostLimit().setDailyYen(900);
+
+        BusinessException ex = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                () -> assertThrows(BusinessException.class, () -> gateway.execute(request(50, minimalFields(), null))));
+
+        assertEquals(AiExecutionGatewayImpl.REASON_APPROVAL_DIGEST_MISMATCH, ex.getMessage());
+        assertTrue(adapter.prompts.isEmpty());
+    }
+
+    @Test
+    void 再署名した別の承認へ差し替えても再起動まで新しい承認として扱わない() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(config, adapter);
+        config.getExternalSendApproval().setDecisionId("NF08-EXT-2026-0999");
+        AiExternalSendApprovalFixtures.resign(config);
+
+        BusinessException ex = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                () -> assertThrows(BusinessException.class, () -> gateway.execute(request(50, minimalFields(), null))));
+
+        assertEquals("AI_EXTERNAL_SEND_DECISION_CHANGED", ex.getMessage());
+        assertTrue(adapter.prompts.isEmpty());
+        assertEquals("AI_EXTERNAL_SEND_DECISION_CHANGED", capturedAudits(1).get(0).getErrorCode());
     }
 
     @Test
     void 実行中に承認が失効すると送信前に拒否する() {
         AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
+        config.getExternalSendApproval().setExpiresOn(today.plusDays(1).toString());
+        AiExternalSendApprovalFixtures.resign(config);
         FakeRemoteAdapter adapter = new FakeRemoteAdapter();
         AiExecutionGatewayImpl gateway = gateway(config, adapter);
-        config.getExternalSendApproval().setExpiresOn(today.toString());
+        // 2026-11-14 10:00 JST（失効日当日）。設定は署名どおりのまま時間だけが進む。
+        clock.set(NOW.plusSeconds(86_400));
 
         BusinessException ex = AccountingTenantContextHolder.runWithTenant("tenant-a",
                 () -> assertThrows(BusinessException.class, () -> gateway.execute(request(50, minimalFields(), null))));
@@ -242,6 +462,7 @@ class CopilotExternalSendGateAdversarialTest {
     void 一回上限とrequest予算の超過は送信前に拒否し拒否監査を残す() {
         AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
         config.getExternalSendApproval().getCostLimit().setPerRequestYen(1);
+        AiExternalSendApprovalFixtures.resign(config);
         FakeRemoteAdapter adapter = new FakeRemoteAdapter();
         AiExecutionGatewayImpl gateway = gateway(config, adapter);
 
@@ -268,9 +489,7 @@ class CopilotExternalSendGateAdversarialTest {
 
     @Test
     void 日次上限に達すると二回目は送信前に拒否する() {
-        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
-        config.getExternalSendApproval().getCostLimit().setPerRequestYen(8);
-        config.getExternalSendApproval().getCostLimit().setDailyYen(8);
+        AiConfig config = tightDailyLimitConfig();
         FakeRemoteAdapter adapter = new FakeRemoteAdapter();
         adapter.usage = null; // usage不明なら上限見積りを費用として維持する
         AiExecutionGatewayImpl gateway = gateway(config, adapter);
@@ -287,9 +506,7 @@ class CopilotExternalSendGateAdversarialTest {
 
     @Test
     void 送信前監査を永続化できなければ送信せず予約も戻す() {
-        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
-        config.getExternalSendApproval().getCostLimit().setPerRequestYen(8);
-        config.getExternalSendApproval().getCostLimit().setDailyYen(8);
+        AiConfig config = tightDailyLimitConfig();
         FakeRemoteAdapter adapter = new FakeRemoteAdapter();
         adapter.usage = null;
         AiExecutionGatewayImpl gateway = gateway(config, adapter);
@@ -312,9 +529,7 @@ class CopilotExternalSendGateAdversarialTest {
 
     @Test
     void 送信後の失敗は結果監査を残し費用は上限見積りで維持する() {
-        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
-        config.getExternalSendApproval().getCostLimit().setPerRequestYen(8);
-        config.getExternalSendApproval().getCostLimit().setDailyYen(8);
+        AiConfig config = tightDailyLimitConfig();
         FakeRemoteAdapter adapter = new FakeRemoteAdapter();
         adapter.failure = invocation -> new CopilotExecutionFailure("COPILOT_PROVIDER_429",
                 invocation.preflightCostEvidence(),
@@ -342,9 +557,7 @@ class CopilotExternalSendGateAdversarialTest {
 
     @Test
     void 未送信が確定したprovider失敗は予約を戻す() {
-        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
-        config.getExternalSendApproval().getCostLimit().setPerRequestYen(8);
-        config.getExternalSendApproval().getCostLimit().setDailyYen(8);
+        AiConfig config = tightDailyLimitConfig();
         FakeRemoteAdapter adapter = new FakeRemoteAdapter();
         adapter.usage = null;
         adapter.failure = invocation -> new CopilotExecutionFailure("COPILOT_DNS_UNAVAILABLE",
@@ -386,9 +599,7 @@ class CopilotExternalSendGateAdversarialTest {
 
     @Test
     void 読取専用preflightは予約も監査もしない() {
-        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
-        config.getExternalSendApproval().getCostLimit().setPerRequestYen(8);
-        config.getExternalSendApproval().getCostLimit().setDailyYen(8);
+        AiConfig config = tightDailyLimitConfig();
         FakeRemoteAdapter adapter = new FakeRemoteAdapter();
         adapter.usage = null;
         AiExecutionGatewayImpl gateway = gateway(config, adapter);
@@ -420,7 +631,10 @@ class CopilotExternalSendGateAdversarialTest {
                 "src/main/java/com/ses/service/ai/AiExternalSendAuditor.java",
                 "src/main/java/com/ses/service/ai/AiExternalSendBudgetLedger.java",
                 "src/main/java/com/ses/service/ai/AiExternalSendApproval.java",
+                "src/main/java/com/ses/service/ai/AiExternalSendApprovalMonitor.java",
+                "src/main/java/com/ses/service/ai/AiPiiMasker.java",
                 "src/main/java/com/ses/service/ai/AiProductionApprovalGate.java",
+                "src/main/java/com/ses/config/AiProductionSafetyValidator.java",
                 "src/main/java/com/ses/service/ai/copilot/summary/ApprovedExternalSendCostPolicy.java")) {
             String source = Files.readString(Path.of(file), StandardCharsets.UTF_8);
             Matcher matcher = logCall.matcher(source);
@@ -453,11 +667,19 @@ class CopilotExternalSendGateAdversarialTest {
         verify(probe, never()).record(any());
     }
 
+    /** 1回の上限見積り（約5円）で日次上限8円に達する承認（再署名済み）。 */
+    private AiConfig tightDailyLimitConfig() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(today);
+        config.getExternalSendApproval().getCostLimit().setPerRequestYen(8);
+        config.getExternalSendApproval().getCostLimit().setDailyYen(8);
+        return AiExternalSendApprovalFixtures.resign(config);
+    }
+
     private AiExecutionGatewayImpl gateway(AiConfig config, CopilotBoundedAiTextService adapter) {
-        AiProductionApprovalGate gate = new AiProductionApprovalGate(config, Clock.systemUTC());
+        AiProductionApprovalGate gate = new AiProductionApprovalGate(config, clock);
         return new AiExecutionGatewayImpl(adapter, config, probe, new ObjectMapper(),
                 mock(AiArtifactVersionMapper.class), mock(AiRecommendationRunMapper.class),
-                mock(PlatformTransactionManager.class), Clock.systemUTC(), gate,
+                mock(PlatformTransactionManager.class), clock, gate,
                 new CopilotFeatureGate(config, gate), new AiExternalSendAuditor(auditLogService));
     }
 
@@ -537,6 +759,34 @@ class CopilotExternalSendGateAdversarialTest {
                     .digest(canonical.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception ex) {
             throw new IllegalStateException("effective scope hash calculation failed", ex);
+        }
+    }
+
+    /** テスト用の可変時計（承認の失効を設定の書換えではなく時間の経過で再現する）。 */
+    private static final class MutableClock extends Clock {
+        private final AtomicReference<Instant> now;
+
+        MutableClock(Instant initial) {
+            this.now = new AtomicReference<>(initial);
+        }
+
+        void set(Instant instant) {
+            now.set(instant);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now.get();
         }
     }
 

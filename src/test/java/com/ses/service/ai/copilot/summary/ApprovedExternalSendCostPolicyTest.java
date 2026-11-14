@@ -12,6 +12,7 @@ import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -38,6 +39,7 @@ class ApprovedExternalSendCostPolicyTest {
         config.getExternalSendApproval().getCostLimit().setInputYenPerThousandTokens(new BigDecimal("0.0375"));
         config.getExternalSendApproval().getCostLimit().setOutputYenPerThousandTokens(new BigDecimal("0.15"));
         config.getExternalSendApproval().getCostLimit().setMaxThinkingTokens(500);
+        AiExternalSendApprovalFixtures.resign(config);
         AiExternalSendApproval.CostLimitSnapshot limit =
                 AiExternalSendApproval.evaluate(config, TODAY).snapshot().costLimit();
 
@@ -46,7 +48,7 @@ class ApprovedExternalSendCostPolicyTest {
     }
 
     @Test
-    void 上限内かつ予算内なら決定IDに束縛したUPPER_BOUND証拠を返す() {
+    void 上限内かつ予算内なら決定IDと承認digestに束縛したUPPER_BOUND証拠を返す() {
         ApprovedExternalSendCostPolicy policy = new ApprovedExternalSendCostPolicy(approval());
 
         PreflightCostEvidence evidence = policy.preflight(snapshot(1000), 10, 744);
@@ -54,11 +56,26 @@ class ApprovedExternalSendCostPolicyTest {
         assertTrue(evidence.dispatchAllowed());
         assertEquals(ApprovedExternalSendCostPolicy.POLICY_ID, evidence.policyId());
         assertEquals("config-hash-v1", evidence.configIdentity());
-        assertEquals("approved-external-send:" + AiExternalSendApprovalFixtures.DECISION_ID, evidence.proofIdentity());
+        assertEquals("approved-external-send:" + AiExternalSendApprovalFixtures.DECISION_ID
+                + ":a467bc9955f3827dfd7a8465a560562c", evidence.proofIdentity());
         assertEquals(5, evidence.upperBoundYen());
         assertEquals(10, evidence.budgetYen());
         assertEquals(CopilotCostState.UPPER_BOUND, evidence.costState());
         assertEquals(DispatchOutcome.State.NOT_STARTED, evidence.dispatchOutcome().state());
+    }
+
+    @Test
+    void 同じ決定IDでも承認内容が異なればproof_identityを区別しrun_metadataの長さに収める() {
+        AiConfig changed = AiExternalSendApprovalFixtures.approvedConfig(TODAY);
+        changed.getExternalSendApproval().getCostLimit().setDailyYen(200);
+        AiExternalSendApprovalFixtures.resign(changed);
+        AiExternalSendApproval.Snapshot other = AiExternalSendApproval.evaluate(changed, TODAY).snapshot();
+
+        assertEquals(approval().decisionId(), other.decisionId());
+        assertNotEquals(ApprovedExternalSendCostPolicy.proofIdentity(approval()),
+                ApprovedExternalSendCostPolicy.proofIdentity(other));
+        String longest = ApprovedExternalSendCostPolicy.proofIdentity("D".repeat(64), "e".repeat(64));
+        assertTrue(longest.matches("[A-Za-z0-9._:-]{1,128}"), "CopilotRunServiceのmetadata識別子上限に収める");
     }
 
     @Test

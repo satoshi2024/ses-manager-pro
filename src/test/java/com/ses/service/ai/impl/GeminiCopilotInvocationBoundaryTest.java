@@ -180,12 +180,21 @@ class GeminiCopilotInvocationBoundaryTest {
 
             // 別決定IDに束縛した（偽造）証拠はcost gateで拒否し、宛先検査まで進まない。
             PreflightCostEvidence forged = new PreflightCostEvidence(approved.policyId(), approved.configIdentity(),
-                    ApprovedExternalSendCostPolicy.proofIdentity("NF08-EXT-2026-0999"), approved.upperBoundYen(),
-                    approved.budgetYen(), true, CopilotCostState.UPPER_BOUND, DispatchOutcome.notStarted("FORGED"),
-                    "FORGED");
+                    ApprovedExternalSendCostPolicy.proofIdentity("NF08-EXT-2026-0999", approval.approvalDigest()),
+                    approved.upperBoundYen(), approved.budgetYen(), true, CopilotCostState.UPPER_BOUND,
+                    DispatchOutcome.notStarted("FORGED"), "FORGED");
             BusinessException forgedRejection = assertThrows(BusinessException.class,
                     () -> adapter.generateCopilotSummary("synthetic", invocation(snapshot, forged)));
             org.junit.jupiter.api.Assertions.assertEquals("COPILOT_COST_UNKNOWN", forgedRejection.getMessage());
+            // 決定IDは正しくても、別の承認内容（digest）に束縛した証拠も拒否する。
+            PreflightCostEvidence otherContent = new PreflightCostEvidence(approved.policyId(),
+                    approved.configIdentity(), ApprovedExternalSendCostPolicy.proofIdentity(
+                            AiExternalSendApprovalFixtures.DECISION_ID, "0".repeat(64)),
+                    approved.upperBoundYen(), approved.budgetYen(), true, CopilotCostState.UPPER_BOUND,
+                    DispatchOutcome.notStarted("FORGED"), "FORGED");
+            BusinessException otherContentRejection = assertThrows(BusinessException.class,
+                    () -> adapter.generateCopilotSummary("synthetic", invocation(snapshot, otherContent)));
+            org.junit.jupiter.api.Assertions.assertEquals("COPILOT_COST_UNKNOWN", otherContentRejection.getMessage());
             verify(guard, never()).validateExactHostHttpsUrl(org.mockito.ArgumentMatchers.anyString(),
                     org.mockito.ArgumentMatchers.any());
 
@@ -226,6 +235,14 @@ class GeminiCopilotInvocationBoundaryTest {
 
             org.junit.jupiter.api.Assertions.assertNotEquals(approvedAdapter.copilotConfigHash(),
                     unapprovedAdapter.copilotConfigHash(), "artifact identityは承認決定IDに束縛する");
+            // 同じ決定IDでも承認内容（digest）が異なればartifact identityも区別する（再登録が必要）。
+            AiConfig resignedConfig = AiExternalSendApprovalFixtures.approvedConfig(AiExternalSendApprovalFixtures.today());
+            resignedConfig.getExternalSendApproval().getCostLimit().setMonthlyYen(2000);
+            AiExternalSendApprovalFixtures.resign(resignedConfig);
+            GeminiTextServiceImpl resignedAdapter = new GeminiTextServiceImpl(resignedConfig, mock(RestTemplate.class),
+                    new ObjectMapper(), guard, transport);
+            org.junit.jupiter.api.Assertions.assertNotEquals(approvedAdapter.copilotConfigHash(),
+                    resignedAdapter.copilotConfigHash(), "artifact identityは承認内容digestにも束縛する");
 
             CopilotConfigSnapshot snapshot = CopilotConfigSnapshot.capture(unapprovedConfig, unapprovedAdapter);
             AiExternalSendApproval.Snapshot approval = AiExternalSendApproval.evaluate(
