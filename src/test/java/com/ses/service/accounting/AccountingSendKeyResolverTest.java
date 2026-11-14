@@ -88,7 +88,7 @@ class AccountingSendKeyResolverTest {
     }
 
     private boolean requiresCheck() {
-        return resolver.requiresExistingDealCheck("INVOICE", target, SYNC);
+        return !resolver.priorDealScopes("INVOICE", target, SYNC).isEmpty();
     }
 
     @Test

@@ -78,6 +78,17 @@ public class InvoiceServiceImplTest {
     @Mock
     private com.ses.mapper.BankDepositMapper bankDepositMapper;
 
+    /** フィールド名で注入先を決める（同じ型の ObjectProvider フィールドが他にもあるため）。 */
+    @Mock
+    private org.springframework.beans.factory.ObjectProvider<com.ses.service.accounting.SalesInvoiceIntegrationService>
+            salesInvoiceIntegrationProvider;
+
+    @Mock
+    private com.ses.service.accounting.SalesInvoiceIntegrationService salesInvoiceIntegrationService;
+
+    @Mock
+    private com.ses.service.AuditLogService auditLogService;
+
     @InjectMocks
     private InvoiceServiceImpl invoiceService;
 
@@ -861,6 +872,68 @@ public class InvoiceServiceImplTest {
         assertTrue(setSql.contains("status"), setSql);
         assertTrue(setSql.contains("matched_invoice_id"), setSql);
         assertTrue(setSql.contains("matched_payment_id"), setSql);
+    }
+
+    private Invoice sentInvoiceForPaymentDelete(Long invoiceId, Long paymentId) {
+        Invoice invoice = new Invoice();
+        invoice.setId(invoiceId);
+        invoice.setCustomerId(9L);
+        invoice.setLegalEntityId(1L);
+        invoice.setTotal(new BigDecimal("110000"));
+        invoice.setStatus("送付済");
+        when(invoiceMapper.selectOne(any())).thenReturn(invoice);
+        InvoicePayment payment = new InvoicePayment();
+        payment.setId(paymentId);
+        payment.setInvoiceId(invoiceId);
+        payment.setAmount(new BigDecimal("110000"));
+        when(invoicePaymentMapper.selectById(paymentId)).thenReturn(payment);
+        when(invoicePaymentMapper.selectList(any())).thenReturn(List.of());
+        com.ses.entity.BankDeposit deposit = new com.ses.entity.BankDeposit();
+        deposit.setId(77L);
+        when(bankDepositMapper.selectList(any())).thenReturn(List.of(deposit));
+        when(salesInvoiceIntegrationProvider.getIfAvailable()).thenReturn(salesInvoiceIntegrationService);
+        return invoice;
+    }
+
+    /** F2: freeeへ反映済みの消込を取り消すときは削除を拒否せず、freeeで手動の取消が必要な旨を返して監査に残す。 */
+    @Test
+    void deletePayment_freeeへ反映済みの消込を取り消すと警告を返して監査に残し削除は続ける() {
+        sentInvoiceForPaymentDelete(1L, 56L);
+        when(salesInvoiceIntegrationService.releaseDepositReconcile(77L, 56L))
+                .thenReturn("accounting.depositReconcile.releasedAfterSync");
+
+        com.ses.dto.invoice.InvoicePaymentDeleteResult result = invoiceService.deletePayment(1L, 56L);
+
+        assertEquals(List.of("accounting.depositReconcile.releasedAfterSync"), result.getWarnings());
+        verify(invoicePaymentMapper).deleteById(56L);
+        verify(auditLogService).record(any(), org.mockito.ArgumentMatchers.eq("DELETE"),
+                org.mockito.ArgumentMatchers.eq("/api/invoices/1/payments/56"), org.mockito.ArgumentMatchers.eq(200),
+                org.mockito.ArgumentMatchers.eq("FREEE_UNRECONCILE_REQUIRED"), org.mockito.ArgumentMatchers.eq(false));
+    }
+
+    /** F2: freeeへの反映の後始末が失敗しても入金の削除は止めず、freeeの状態を確認できない旨を安全側で返す。 */
+    @Test
+    void deletePayment_freee反映の後始末に失敗しても削除は続け確認を促す() {
+        sentInvoiceForPaymentDelete(1L, 57L);
+        when(salesInvoiceIntegrationService.releaseDepositReconcile(77L, 57L))
+                .thenThrow(new IllegalStateException("job table unavailable"));
+
+        com.ses.dto.invoice.InvoicePaymentDeleteResult result = invoiceService.deletePayment(1L, 57L);
+
+        assertEquals(List.of("accounting.depositReconcile.releasedWhileSyncing"), result.getWarnings());
+        verify(invoicePaymentMapper).deleteById(57L);
+    }
+
+    /** freeeへの反映が無い（後始末で何もしない）ときは警告も監査も出さない。 */
+    @Test
+    void deletePayment_freeeへの反映が無ければ警告も監査も出さない() {
+        sentInvoiceForPaymentDelete(1L, 58L);
+        when(salesInvoiceIntegrationService.releaseDepositReconcile(77L, 58L)).thenReturn(null);
+
+        com.ses.dto.invoice.InvoicePaymentDeleteResult result = invoiceService.deletePayment(1L, 58L);
+
+        assertTrue(result.getWarnings().isEmpty());
+        verifyNoInteractions(auditLogService);
     }
 
     // ===== INV-01: 一括督促の短トランザクション / i18n キー返却 =====

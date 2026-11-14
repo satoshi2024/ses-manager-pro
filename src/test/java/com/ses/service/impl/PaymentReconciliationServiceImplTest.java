@@ -51,6 +51,15 @@ class PaymentReconciliationServiceImplTest {
     @Mock
     private ApplicationContext applicationContext;
 
+    @Mock
+    private org.springframework.beans.factory.ObjectProvider<com.ses.service.accounting.SalesInvoiceIntegrationService> salesInvoiceIntegration;
+
+    @Mock
+    private com.ses.service.accounting.SalesInvoiceIntegrationService salesInvoiceIntegrationService;
+
+    @Mock
+    private com.ses.service.AuditLogService auditLogService;
+
     @InjectMocks
     private PaymentReconciliationServiceImpl service;
 
@@ -235,6 +244,59 @@ class PaymentReconciliationServiceImplTest {
 
         verify(invoiceService, times(1)).addPayment(eq(10L), any());
         verify(bankDepositMapper, times(1)).update(isNull(), any());
+    }
+
+    @Test
+    void apply_消込が確定したらfreeeの取引の消込へ反映するジョブを同じトランザクションで登録する() {
+        LocalDate date = LocalDate.of(2026, 11, 13);
+        BankDeposit unresolved = depositEntity(1L, date, new BigDecimal("889900"), "ｶ)ｸﾛｽﾃﾂｸ", "未消込");
+        unresolved.setFreeeDepositId("2542342002");
+        when(bankDepositMapper.selectOne(any())).thenReturn(unresolved);
+        InvoicePaymentResponse resp = new InvoicePaymentResponse();
+        resp.setId(43L);
+        when(invoiceService.addPayment(eq(10L), any())).thenReturn(resp);
+        when(bankDepositMapper.update(isNull(), any())).thenReturn(1);
+        when(salesInvoiceIntegration.getIfAvailable()).thenReturn(salesInvoiceIntegrationService);
+
+        service.apply(1L, 10L);
+
+        verify(salesInvoiceIntegrationService).enqueueDepositReconcile(1L, "2542342002", 10L, 43L, new BigDecimal("889900"));
+    }
+
+    @Test
+    void apply_freeeへの反映ジョブの登録に失敗してもSESの消込は確定し監査に残す() {
+        LocalDate date = LocalDate.of(2026, 11, 13);
+        BankDeposit unresolved = depositEntity(1L, date, new BigDecimal("889900"), "ｶ)ｸﾛｽﾃﾂｸ", "未消込");
+        unresolved.setFreeeDepositId("2542342003");
+        when(bankDepositMapper.selectOne(any())).thenReturn(unresolved);
+        InvoicePaymentResponse resp = new InvoicePaymentResponse();
+        resp.setId(44L);
+        when(invoiceService.addPayment(eq(10L), any())).thenReturn(resp);
+        when(bankDepositMapper.update(isNull(), any())).thenReturn(1);
+        when(salesInvoiceIntegration.getIfAvailable()).thenReturn(salesInvoiceIntegrationService);
+        // 以前はここで409が外へ出て、SESの消込（入金登録・入金明細の消込済み）ごと巻き戻っていた
+        when(salesInvoiceIntegrationService.enqueueDepositReconcile(any(), any(), any(), any(), any()))
+                .thenThrow(new BusinessException(409, "同一の冪等性キーに対して異なるペイロードでの再送は拒否されます"));
+
+        assertDoesNotThrow(() -> service.apply(1L, 10L));
+
+        verify(invoiceService).addPayment(eq(10L), any());
+        verify(bankDepositMapper).update(isNull(), any());
+        verify(auditLogService).record(any(), eq("POST"), eq("/api/reconciliation/1/apply"), eq(200),
+                eq("FREEE_RECONCILE_NOT_QUEUED"), eq(false));
+    }
+
+    @Test
+    void apply_消込できなければfreeeへの反映ジョブも登録しない() {
+        LocalDate date = LocalDate.of(2026, 11, 13);
+        BankDeposit unresolved = depositEntity(1L, date, new BigDecimal("889900"), "ｶ)ｸﾛｽﾃﾂｸ", "未消込");
+        when(bankDepositMapper.selectOne(any())).thenReturn(unresolved);
+        when(invoiceService.addPayment(eq(10L), any())).thenThrow(BusinessException.of(400, "error.invoice.overpayment"));
+        lenient().when(salesInvoiceIntegration.getIfAvailable()).thenReturn(salesInvoiceIntegrationService);
+
+        assertThrows(BusinessException.class, () -> service.apply(1L, 10L));
+
+        verify(salesInvoiceIntegrationService, never()).enqueueDepositReconcile(any(), any(), any(), any(), any());
     }
 
     @Test

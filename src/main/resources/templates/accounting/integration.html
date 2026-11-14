@@ -69,6 +69,7 @@
                                 <option value="BP_PURCHASE_SYNC" th:text="#{accounting.jobType.purchaseSync}">BP仕入連携</option>
                                 <option value="EXPENSE_DEAL_SYNC" th:text="#{accounting.jobType.expenseSync}">要員経費連携</option>
                                 <option value="PAYMENT_SYNC" th:text="#{accounting.jobType.paymentSync}">支払実績同期</option>
+                                <option value="DEPOSIT_RECONCILE_SYNC" th:text="#{accounting.jobType.depositReconcile}">入金消込の反映</option>
                             </select>
                         </div>
                         <div class="col-auto">
@@ -428,6 +429,7 @@
          th:data-ready="#{accounting.status.ready}"
          th:data-not-ready="#{accounting.status.notReady}"
          th:data-no-jobs="#{accounting.msg.noJobs}"
+         th:data-action-required="#{accounting.job.actionRequired}"
          th:data-no-mappings="#{accounting.msg.noMappings}"
          th:data-no-connections="#{accounting.msg.noConnections}"
          th:data-no-reconcile="#{accounting.msg.noReconciliationData}"

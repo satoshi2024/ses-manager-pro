@@ -91,6 +91,24 @@ public interface AccountingProvider {
     com.ses.dto.accounting.PaymentFetchResult fetchPayments(IntegrationConnection connection, LocalDate fromDate, LocalDate toDate);
 
     /**
+     * SESで入金消込した入金（外部の口座明細）で、外部の未決済取引を消込む。
+     * 同じ内容の再実行は冪等（freeeは同一パラメータに同じ応答を返す）。未対応providerは再試行しない失敗を返す。
+     *
+     * @param walletTxnId    口座明細ID（SESの入金明細の freee_deposit_id）
+     * @param externalDealId 消込む取引ID（請求書を送信した取引）
+     * @param amount         決済金額（SESで請求書へ登録した入金額）
+     */
+    default CanonicalDealResult reconcileDeposit(IntegrationConnection connection, String walletTxnId,
+                                                 String externalDealId, java.math.BigDecimal amount) {
+        return CanonicalDealResult.builder()
+                .success(false)
+                .errorCode("UNSUPPORTED_PROVIDER")
+                .errorMessageSafe("error.accounting.depositReconcileUnsupported")
+                .retryable(false)
+                .build();
+    }
+
+    /**
      * 特定の取引IDの決済実績を取得する。
      */
     CanonicalPaymentSync fetchDealPayment(IntegrationConnection connection, String externalDealId);

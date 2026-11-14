@@ -461,6 +461,71 @@ public class FreeeAccountingProvider implements AccountingProvider {
         }
     }
 
+    /**
+     * SESで入金消込した入金を、freeeの口座明細で未決済の取引を消込む API（POST /api/1/wallet_txns/{id}/reconcile）へ反映する。
+     * 口座明細の金額と決済金額は一致する（SESは入金額をそのまま請求書の入金にしており、手数料は持たない）ため、
+     * 差額取引（adjustment_deal）は送らない。freeeは同一パラメータの再実行に同じ応答を返すため、タイムアウト後の再試行も安全。
+     * 明細が別の取引で、または取引が別の明細で既に消込済みなら409（再試行しない）。
+     */
+    @Override
+    public CanonicalDealResult reconcileDeposit(IntegrationConnection connection, String walletTxnId,
+                                                String externalDealId, BigDecimal amount) {
+        connection = requireAuthoritativeConnection(connection);
+        if (walletTxnId == null || !walletTxnId.matches("\\d{1,19}")
+                || externalDealId == null || !externalDealId.matches("\\d{1,19}")
+                || amount == null || amount.signum() <= 0 || amount.stripTrailingZeros().scale() > 0) {
+            return CanonicalDealResult.builder()
+                    .success(false)
+                    .errorCode("INVALID_SNAPSHOT")
+                    .errorMessageSafe("error.accounting.freeeValidation")
+                    .retryable(false)
+                    .build();
+        }
+        java.util.Map<String, Object> deal = new java.util.LinkedHashMap<>();
+        deal.put("deal_id", Long.parseLong(externalDealId));
+        deal.put("amount", amount.longValueExact());
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("company_id", connection.getExternalCompanyId());
+        body.put("deals", List.of(deal));
+        String url = apiBaseUrl + "/api/1/wallet_txns/" + walletTxnId + "/reconcile";
+        try {
+            ResponseEntity<JsonNode> response = executeWith401Recovery(connection, headers -> {
+                HttpEntity<Object> entity = new HttpEntity<>(body, headers);
+                return restTemplate.exchange(url, HttpMethod.POST, entity, JsonNode.class);
+            });
+            log.info("freeeの口座明細で取引を消込みました: walletTxnId={} dealId={}", walletTxnId, externalDealId);
+            return CanonicalDealResult.builder()
+                    .success(true)
+                    .externalId(externalDealId)
+                    .providerRequestId(extractRequestId(response.getHeaders()))
+                    .build();
+        } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+            throw e; // 他ノードのトークン更新待ち: Workerが短い間隔で再試行する
+        } catch (HttpClientErrorException.Forbidden e) {
+            // 口座明細の消込は「[会計] 明細 更新」の権限が要る（取引の作成とは別）。実freeeで、明細の参照だけでは403になった
+            log.warn("freeeが入金消込の反映を拒否しました（権限不足またはプラン）: status_code=403 error_code=PLAN_LIMITATION");
+            return CanonicalDealResult.builder()
+                    .success(false)
+                    .errorCode("PLAN_LIMITATION")
+                    .errorMessageSafe("error.accounting.freeeWalletTxnWriteForbidden")
+                    .providerRequestId(extractRequestId(e.getResponseHeaders()))
+                    .retryable(false)
+                    .build();
+        } catch (HttpClientErrorException.Conflict e) {
+            log.warn("freeeの口座明細または取引が既に別の明細・取引と消込済みです: walletTxnId={} dealId={} error_code=DEPOSIT_ALREADY_RECONCILED",
+                    walletTxnId, externalDealId);
+            return CanonicalDealResult.builder()
+                    .success(false)
+                    .errorCode("DEPOSIT_ALREADY_RECONCILED")
+                    .errorMessageSafe("error.accounting.freeeDepositAlreadyReconciled")
+                    .providerRequestId(extractRequestId(e.getResponseHeaders()))
+                    .retryable(false)
+                    .build();
+        } catch (Exception e) {
+            return handleApiException(e, "POST /api/1/wallet_txns/{id}/reconcile");
+        }
+    }
+
     @Override
     public CanonicalPaymentSync fetchDealPayment(IntegrationConnection connection, String externalDealId) {
         connection = requireAuthoritativeConnection(connection);
@@ -715,7 +780,8 @@ public class FreeeAccountingProvider implements AccountingProvider {
      *       採用して成功を返し、それ以外の同じ管理番号の取引があれば作成しない（再POSTで二重に作らない）</li>
      * </ul>
      * 見つかれば確定で拒否。見つからないとき、確認できない走査（照会失敗・応答形式の異常）があれば再試行待ち、
-     * 件数を確定できない走査（ページ上限）があれば作成せずに失敗させる。
+     * 件数を確定できない走査（ページ上限）があれば作成せずに失敗させる。ADOPT_OWN_OR_REFUSE で見つかったのが
+     * 前回の試行で作成した1件だけでも、走査が確認できていなければ再試行待ち・ページ上限なら失敗にする（採用も拒否もしない）。
      *
      * @return 作成を止める（または採用した）結果。作成してよければ null
      */
@@ -754,20 +820,22 @@ public class FreeeAccountingProvider implements AccountingProvider {
             }
             if (limitReached) {
                 // 待っても件数は確定しない（再試行しても同じ）。作成せずに失敗させ、理由を画面に出す
-                log.warn("既存取引の確認が件数上限に達したため作成しません: refNumber={} guard={} error_code=EXISTING_DEAL_CHECK_LIMIT",
-                        refNumber, guard);
-                return CanonicalDealResult.builder()
-                        .success(false)
-                        .errorCode("EXISTING_DEAL_CHECK_LIMIT")
-                        .errorMessageSafe("error.accounting.existingDealCheckLimit")
-                        .retryable(false)
-                        .build();
+                return existingDealCheckLimit(refNumber, guard);
             }
             return null;
         }
-        if (guard == DealCreateGuard.ADOPT_OWN_OR_REFUSE && matches.size() == 1 && !unconfirmed && !limitReached) {
+        if (guard == DealCreateGuard.ADOPT_OWN_OR_REFUSE && matches.size() == 1) {
             JsonNode d = matches.values().iterator().next();
             String adopted = strictlyMatchingDealId(d, expectedTotal, connection.getExternalCompanyId());
+            if (adopted != null && unconfirmed) {
+                // 見つかったのは前回の試行で作成した取引（管理番号・金額・事業所が一致する1件）だけだが、走査を最後まで
+                // 確認できていない（他に同じ管理番号の取引があるかは不明）。採用も拒否もせず再試行待ちにする
+                // （以前は既存取引ありで終わり、正しい取引の削除へ誘導し得た）
+                return checkUnconfirmed(refNumber, guard);
+            }
+            if (adopted != null && limitReached) {
+                return existingDealCheckLimit(refNumber, guard);
+            }
             if (adopted != null) {
                 log.info("再試行: 前回の試行で作成済みの取引を採用します（再POSTしない）: refNumber={} dealId={}", refNumber, adopted);
                 return CanonicalDealResult.builder()
@@ -784,6 +852,18 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 .success(false)
                 .errorCode("EXISTING_DEAL_FOUND")
                 .errorMessageSafe("error.accounting.existingDealFound")
+                .retryable(false)
+                .build();
+    }
+
+    /** 既存取引の確認が件数上限に達した（件数を確定できない）。作成せず、再試行しない失敗にする。 */
+    private CanonicalDealResult existingDealCheckLimit(String refNumber, DealCreateGuard guard) {
+        log.warn("既存取引の確認が件数上限に達したため作成しません: refNumber={} guard={} error_code=EXISTING_DEAL_CHECK_LIMIT",
+                refNumber, guard);
+        return CanonicalDealResult.builder()
+                .success(false)
+                .errorCode("EXISTING_DEAL_CHECK_LIMIT")
+                .errorMessageSafe("error.accounting.existingDealCheckLimit")
                 .retryable(false)
                 .build();
     }
@@ -843,7 +923,10 @@ public class FreeeAccountingProvider implements AccountingProvider {
         return scan.status() == DealScan.Status.REJECTED ? DealScan.unconfirmed() : scan;
     }
 
-    /** 管理番号での既存取引の走査結果。REJECTED は走査条件がfreeeに拒否された（400）。 */
+    /**
+     * 管理番号での既存取引の走査結果。REJECTED は走査条件がfreeeに拒否された（1ページ目の400）。
+     * UNCONFIRMED・LIMIT でも、それまでに見つけた取引は matches に残す（見つかれば拒否する）。
+     */
     record DealScan(Status status, List<JsonNode> matches) {
         enum Status { CONFIRMED, UNCONFIRMED, LIMIT, REJECTED }
 
@@ -860,7 +943,8 @@ public class FreeeAccountingProvider implements AccountingProvider {
     /**
      * 管理番号（ref_number）と事業所が一致するfreee取引を探す。freeeの取引一覧は管理番号で絞れないため、
      * 呼出側が {@link #dealScanFilter} で決めた条件（収支区分・取引先・発生日）で走査する。
-     * 照会失敗と応答形式の異常（deals が配列でない等）は確認できない扱い（作成しない側へ倒す）。
+     * 照会失敗と応答形式の異常（deals が配列でない等）は確認できない扱い（作成しない側へ倒す）。それまでに見つけた
+     * 取引は残す。1ページ目の400は走査条件の拒否（REJECTED）として返し、呼出側が取引先なしで走査し直す。
      * 他ノードのトークン更新待ちは確認失敗にせず、そのまま呼出元へ返す（Workerが短い間隔で再試行する）。
      */
     DealScan scanDealsByRefNumber(IntegrationConnection connection, String filter, String refNumber) {
@@ -879,7 +963,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         ? null : objectMapper.readTree(res.getBody()).get("deals");
                 if (deals == null || !deals.isArray()) {
                     log.warn("既存取引の確認で想定外の応答形式: page={} error_code=INVALID_RESPONSE", page);
-                    return DealScan.unconfirmed();
+                    return new DealScan(DealScan.Status.UNCONFIRMED, matches);
                 }
                 for (JsonNode d : deals) {
                     if (!d.hasNonNull("ref_number") || !refNumber.equals(d.get("ref_number").asText())) {
@@ -896,11 +980,15 @@ public class FreeeAccountingProvider implements AccountingProvider {
             } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
                 throw e;
             } catch (HttpClientErrorException.BadRequest e) {
-                log.warn("既存取引の確認の走査条件がfreeeに拒否されました: page={} error_code=VALIDATION_ERROR", page);
-                return new DealScan(DealScan.Status.REJECTED, List.of());
+                if (page == 0) {
+                    log.warn("既存取引の確認の走査条件がfreeeに拒否されました: error_code=VALIDATION_ERROR");
+                    return new DealScan(DealScan.Status.REJECTED, List.of());
+                }
+                log.warn("既存取引の確認が途中で拒否されました: page={} error_code=VALIDATION_ERROR", page);
+                return new DealScan(DealScan.Status.UNCONFIRMED, matches);
             } catch (Exception ex) {
                 log.warn("既存取引の確認に失敗: page={} error_code=UNKNOWN_ERROR", page);
-                return DealScan.unconfirmed();
+                return new DealScan(DealScan.Status.UNCONFIRMED, matches);
             }
         }
         return new DealScan(DealScan.Status.LIMIT, matches); // 全ページ満杯: 続きがあり得るため確定できない
@@ -1025,6 +1113,9 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         // 最大1回のリプレイ実行
                         return execution.execute(newHeaders);
                     }
+                } catch (com.ses.common.exception.TokenRefreshInProgressException refreshInProgress) {
+                    // 他ノードがトークンを更新中: 認証失敗（401）ではないため置き換えずに返す（短い間隔で再試行させる）
+                    throw refreshInProgress;
                 } catch (Exception refreshEx) {
                     log.error("Token refresh or replay failed on 401: error_code=UNAUTHORIZED");
                     throw httpEx;
@@ -1077,19 +1168,56 @@ public class FreeeAccountingProvider implements AccountingProvider {
         ResponseEntity<T> execute(HttpHeaders headers);
     }
 
+    /**
+     * freeeの入力エラー（400/422）のうち、運用者が自分で直せる既知の理由を本システムのmessage keyへ置き換える。
+     * 応答本文はこの判定にだけ使い、ログ・DTO・ジョブには渡さない（R1-P1-10）。該当しなければ null。
+     * 文言は実freeeで確認したもの（期首日より前の発生日、存在しない取引先ID）。
+     */
+    static String classifyFreeeValidation(HttpClientErrorException httpEx) {
+        String body;
+        try {
+            body = httpEx.getResponseBodyAsString(java.nio.charset.StandardCharsets.UTF_8);
+        } catch (RuntimeException e) {
+            return null;
+        }
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        if (body.contains("期首日")) {
+            return "error.accounting.freeeBeforeFiscalYear";
+        }
+        if (body.contains("存在しない取引先")) {
+            return "error.accounting.freeePartnerNotFound";
+        }
+        return null;
+    }
+
     private CanonicalDealResult handleApiException(Exception e, String apiPath) {
+        if (e instanceof com.ses.common.exception.TokenRefreshInProgressException) {
+            log.warn("freee API呼出し中に他ノードのトークン更新待ちになりました: api_path={} error_code=TOKEN_REFRESH_IN_PROGRESS", apiPath);
+            return CanonicalDealResult.builder()
+                    .success(false)
+                    .errorCode("TOKEN_REFRESH_IN_PROGRESS")
+                    .errorMessageSafe("他ノードでトークン更新中のため再試行待ち")
+                    .retryable(true)
+                    .retryAfterSeconds(5)
+                    .build();
+        }
         if (e instanceof HttpClientErrorException httpEx) {
             int statusCode = httpEx.getStatusCode().value();
             String reqId = extractRequestId(httpEx.getResponseHeaders());
 
             // R1-P1-10: 外部応答本文・例外メッセージは一切ログ・DTO・jobへ渡さない (固定文言のみ)
             if (statusCode == 400 || statusCode == 422) {
-                log.warn("freee validation error: status_code={}, error_code=VALIDATION_ERROR", statusCode);
+                // 応答本文は記録しない。既知の理由だけを本システムのmessage keyへ置き換える（運用者が直せるように）
+                String reasonKey = classifyFreeeValidation(httpEx);
+                log.warn("freee validation error: status_code={}, error_code=VALIDATION_ERROR reason={}",
+                        statusCode, reasonKey == null ? "UNCLASSIFIED" : reasonKey);
                 return CanonicalDealResult.builder()
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("VALIDATION_ERROR")
-                        .errorMessageSafe("error.accounting.freeeValidation")
+                        .errorMessageSafe(reasonKey != null ? reasonKey : "error.accounting.freeeValidation")
                         .retryable(false) // 400/422はリトライしない (design §6.3)
                         .build();
             } else if (statusCode == 401) {

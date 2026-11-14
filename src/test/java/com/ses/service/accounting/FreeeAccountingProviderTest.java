@@ -35,6 +35,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
 
@@ -660,13 +661,13 @@ class FreeeAccountingProviderTest {
         }
         page0Deals.append("]}");
 
-        mockServer.expect(requestTo(timeoutScan() + "0"))
+        mockServer.expect(requestTo(timeoutScan(0)))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(page0Deals.toString(), MediaType.APPLICATION_JSON));
 
         // 3. verifyDealCreatedByRefNumber: Page 1 (offset=100, limit=100) -> 対象 refNumber 発見！
         String page1Deals = "{\"deals\": [{\"id\": 998877, \"ref_number\": \"INV-PAGINATION-TEST\", \"amount\": 500000, \"company_id\": 99999}]}";
-        mockServer.expect(requestTo(timeoutScan() + "100"))
+        mockServer.expect(requestTo(timeoutScan(100)))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(page1Deals, MediaType.APPLICATION_JSON));
 
@@ -683,7 +684,7 @@ class FreeeAccountingProviderTest {
     void unknownOutcome_missingDealId_failClosed() {
         CanonicalSalesInvoice invoice = timeoutInvoice("INV-MISSING-DEAL-ID", 899L);
         expectDealCreateTimeout();
-        mockServer.expect(requestTo(timeoutScan() + "0"))
+        mockServer.expect(requestTo(timeoutScan(0)))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(
                         "{\"deals\": [{\"ref_number\": \"INV-MISSING-DEAL-ID\", "
@@ -702,7 +703,7 @@ class FreeeAccountingProviderTest {
     void unknownOutcome_fractionalDealId_failClosed() {
         CanonicalSalesInvoice invoice = timeoutInvoice("INV-FRACTIONAL-DEAL-ID", 900L);
         expectDealCreateTimeout();
-        mockServer.expect(requestTo(timeoutScan() + "0"))
+        mockServer.expect(requestTo(timeoutScan(0)))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(
                         "{\"deals\": [{\"id\": 1.5, \"ref_number\": \"INV-FRACTIONAL-DEAL-ID\", "
@@ -764,7 +765,7 @@ class FreeeAccountingProviderTest {
         CanonicalSalesInvoice invoice = timeoutInvoice("INV-PAGECAP-SHORT", 897L);
         expectDealCreateTimeout();
         expectFullDealPagesExceptLast("INV-PAGECAP-SHORT");
-        mockServer.expect(requestTo(timeoutScan() + "4900"))
+        mockServer.expect(requestTo(timeoutScan(4900)))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("{\"deals\": [{\"id\": 799999, \"ref_number\": \"INV-PAGECAP-SHORT\", \"amount\": 500000, \"company_id\": 99999}]}",
                         MediaType.APPLICATION_JSON));
@@ -781,10 +782,10 @@ class FreeeAccountingProviderTest {
     void unknownOutcome_midPaginationApiFailure_failClosed() {
         CanonicalSalesInvoice invoice = timeoutInvoice("INV-PAGECAP-ERROR", 898L);
         expectDealCreateTimeout();
-        mockServer.expect(requestTo(timeoutScan() + "0"))
+        mockServer.expect(requestTo(timeoutScan(0)))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(fullDealPage("INV-PAGECAP-ERROR", 0, 0), MediaType.APPLICATION_JSON));
-        mockServer.expect(requestTo(timeoutScan() + "100"))
+        mockServer.expect(requestTo(timeoutScan(100)))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(request -> {
                     throw new org.springframework.web.client.ResourceAccessException(
@@ -799,12 +800,15 @@ class FreeeAccountingProviderTest {
     }
 
     /**
-     * タイムアウト後照合の走査URL（offsetの直前まで）。取引先も発生日も無い売上は、送信時の発生日（当日）と
-     * 収支区分で絞る（作成時の事前確認と同じ範囲）。
+     * タイムアウト後照合の走査URL。取引先も発生日も無い売上は、送信時の発生日（当日）と収支区分で絞る
+     * （作成時の事前確認と同じ範囲）。当日は実行時刻で変わるため日付は形式で照合し、開始日と終了日が同じことだけを検査する
+     * （0時をまたいで実行しても失敗しない）。
      */
-    private static String timeoutScan() {
-        return "https://api.freee.co.jp/api/1/deals?company_id=99999&type=income"
-                + "&start_issue_date=" + LocalDate.now() + "&end_issue_date=" + LocalDate.now() + "&limit=100&offset=";
+    private static org.hamcrest.Matcher<String> timeoutScan(int offset) {
+        return org.hamcrest.Matchers.matchesPattern(
+                java.util.regex.Pattern.quote("https://api.freee.co.jp/api/1/deals?company_id=99999&type=income&start_issue_date=")
+                        + "(\\d{4}-\\d{2}-\\d{2})&end_issue_date=\\1"
+                        + java.util.regex.Pattern.quote("&limit=100&offset=" + offset));
     }
 
     private CanonicalSalesInvoice timeoutInvoice(String invoiceNo, long invoiceId) {
@@ -828,7 +832,7 @@ class FreeeAccountingProviderTest {
         for (int page = 0; page < 50; page++) {
             String body = fullDealPage(refNumber, page, exactMatchCount);
             mockServer.expect(ExpectedCount.once(), requestTo(
-                            timeoutScan() + (page * 100)))
+                            timeoutScan(page * 100)))
                     .andExpect(method(HttpMethod.GET))
                     .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
         }
@@ -837,7 +841,7 @@ class FreeeAccountingProviderTest {
     private void expectFullDealPagesExceptLast(String refNumber) {
         for (int page = 0; page < 49; page++) {
             mockServer.expect(ExpectedCount.once(), requestTo(
-                            timeoutScan() + (page * 100)))
+                            timeoutScan(page * 100)))
                     .andExpect(method(HttpMethod.GET))
                     .andRespond(withSuccess(fullDealPage(refNumber, page, 0), MediaType.APPLICATION_JSON));
         }
@@ -1044,7 +1048,7 @@ class FreeeAccountingProviderTest {
 
         // 2. 照合ページ0: ref_number は一致するが amount が不一致
         String page0Deals = "{\"deals\": [{\"id\": 555111, \"ref_number\": \"INV-STRICT-TEST\", \"amount\": 499999, \"company_id\": 99999}]}";
-        mockServer.expect(requestTo(timeoutScan() + "0"))
+        mockServer.expect(requestTo(timeoutScan(0)))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(page0Deals, MediaType.APPLICATION_JSON));
 
@@ -1060,7 +1064,7 @@ class FreeeAccountingProviderTest {
                     throw new org.springframework.web.client.ResourceAccessException("Read timed out", new java.net.SocketTimeoutException("Read timed out"));
                 });
         String page0OtherCompany = "{\"deals\": [{\"id\": 555222, \"ref_number\": \"INV-STRICT-TEST\", \"amount\": 500000, \"company_id\": 88888}]}";
-        mockServer.expect(requestTo(timeoutScan() + "0"))
+        mockServer.expect(requestTo(timeoutScan(0)))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(page0OtherCompany, MediaType.APPLICATION_JSON));
 
@@ -1088,7 +1092,7 @@ class FreeeAccountingProviderTest {
                 + "{\"id\": 61001, \"ref_number\": \"INV-SAMEPAGE-CONFLICT\", \"amount\": 499999, \"company_id\": 99999},"
                 + "{\"id\": 61002, \"ref_number\": \"INV-SAMEPAGE-CONFLICT\", \"amount\": 500000, \"company_id\": 99999}"
                 + "]}";
-        mockServer.expect(requestTo(timeoutScan() + "0"))
+        mockServer.expect(requestTo(timeoutScan(0)))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(page0, MediaType.APPLICATION_JSON));
 
@@ -1120,12 +1124,12 @@ class FreeeAccountingProviderTest {
         }
         page0.append(",{\"id\": 62001, \"ref_number\": \"INV-PAGECROSS-CONFLICT\", \"amount\": 499999, \"company_id\": 99999}");
         page0.append("]}");
-        mockServer.expect(requestTo(timeoutScan() + "0"))
+        mockServer.expect(requestTo(timeoutScan(0)))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(page0.toString(), MediaType.APPLICATION_JSON));
         // Page 1: 完全一致
         String page1 = "{\"deals\": [{\"id\": 62002, \"ref_number\": \"INV-PAGECROSS-CONFLICT\", \"amount\": 500000, \"company_id\": 99999}]}";
-        mockServer.expect(requestTo(timeoutScan() + "100"))
+        mockServer.expect(requestTo(timeoutScan(100)))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(page1, MediaType.APPLICATION_JSON));
 
@@ -1154,7 +1158,7 @@ class FreeeAccountingProviderTest {
                 + "{\"id\": 63001, \"ref_number\": \"INV-MULTI-EXACT\", \"amount\": 500000, \"company_id\": 99999},"
                 + "{\"id\": 63002, \"ref_number\": \"INV-MULTI-EXACT\", \"amount\": 500000, \"company_id\": 99999}"
                 + "]}";
-        mockServer.expect(requestTo(timeoutScan() + "0"))
+        mockServer.expect(requestTo(timeoutScan(0)))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(page0, MediaType.APPLICATION_JSON));
 
@@ -1629,5 +1633,245 @@ class FreeeAccountingProviderTest {
         mockServer.verify(); // POSTは期待していない
         assertThat(result.isSuccess()).isFalse();
         assertThat(result.getErrorCode()).isEqualTo("EXISTING_DEAL_FOUND");
+    }
+
+    /** 別ノードがトークン更新のリースを保有中にする（401後の強制更新は待機の後 TokenRefreshInProgressException になる）。 */
+    private void holdRefreshLeaseByAnotherNode() {
+        IntegrationConnection conn = connectionService.getById(testConnection.getId());
+        conn.setRefreshLeaseToken("other-node-lease");
+        conn.setRefreshLeaseExpiresAt(java.time.LocalDateTime.now().plusSeconds(45));
+        connectionService.updateById(conn);
+    }
+
+    @Test
+    @DisplayName("既存取引の確認中に他ノードがトークン更新中なら、認証失敗（401）にせずWorkerの短い再試行へ返す")
+    void scan_tokenRefreshInProgress_isReturnedToTheWorker() {
+        holdRefreshLeaseByAnotherNode();
+        mockServer.expect(requestTo(partnerScanUrl(0)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withUnauthorizedRequest());
+
+        assertThatThrownBy(() -> freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-GUARD-LEASE"),
+                AccountingProvider.DealCreateGuard.REFUSE_IF_EXISTS))
+                .isInstanceOf(com.ses.common.exception.TokenRefreshInProgressException.class);
+        mockServer.verify(); // POSTは期待していない
+    }
+
+    @Test
+    @DisplayName("取引作成のPOSTで401の後に他ノードがトークン更新中なら、認証失敗にせずWorkerの短い再試行へ返す")
+    void post_tokenRefreshInProgress_isReturnedToTheWorker() {
+        holdRefreshLeaseByAnotherNode();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withUnauthorizedRequest());
+
+        assertThatThrownBy(() -> freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-POST-LEASE")))
+                .isInstanceOf(com.ses.common.exception.TokenRefreshInProgressException.class);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("取消など結果へ変換する経路でも、他ノードのトークン更新待ちは5秒後の再試行にする（認証失敗・不明エラーで止めない）")
+    void cancel_tokenRefreshInProgress_isRetryable() {
+        holdRefreshLeaseByAnotherNode();
+        mockServer.expect(ExpectedCount.manyTimes(), requestTo(org.hamcrest.Matchers.startsWith(
+                        "https://api.freee.co.jp/api/1/deals/77801?company_id=99999")))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withUnauthorizedRequest());
+
+        CanonicalDealResult result = freeeProvider.cancelSalesInvoice(testConnection, "77801", "REASON_OTHER");
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isTrue();
+        assertThat(result.getErrorCode()).isEqualTo("TOKEN_REFRESH_IN_PROGRESS");
+        assertThat(result.getRetryAfterSeconds()).isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("走査の途中（2ページ目以降）で拒否されても、それまでに見つけた同じ管理番号の取引で作成を拒否する（取引先なしの再走査で捨てない）")
+    void scan_laterPageRejected_keepsTheMatchesFoundSoFar() {
+        StringBuilder page0 = new StringBuilder("{\"deals\": [");
+        for (int i = 0; i < 100; i++) {
+            if (i > 0) {
+                page0.append(',');
+            }
+            page0.append("{\"id\": ").append(57000 + i).append(", \"ref_number\": \"")
+                    .append(i == 42 ? "INV-GUARD-MIDFAIL" : "OTHER-" + i)
+                    .append("\", \"amount\": 1100000, \"company_id\": 99999}");
+        }
+        page0.append("]}");
+        mockServer.expect(requestTo(partnerScanUrl(0)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(page0.toString(), MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(partnerScanUrl(100)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withBadRequest());
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-GUARD-MIDFAIL"),
+                AccountingProvider.DealCreateGuard.REFUSE_IF_EXISTS);
+
+        mockServer.verify(); // 取引先なしの再走査もPOSTもしない
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.getErrorCode()).isEqualTo("EXISTING_DEAL_FOUND");
+    }
+
+    /** 1ページ目（100件満杯）に、前回の試行で作成した取引（管理番号・金額・事業所が一致）を1件だけ含む。 */
+    private static String fullPageWithOwnDeal(String refNumber) {
+        StringBuilder page = new StringBuilder("{\"deals\": [");
+        for (int i = 0; i < 100; i++) {
+            if (i > 0) {
+                page.append(',');
+            }
+            page.append("{\"id\": ").append(58000 + i).append(", \"ref_number\": \"")
+                    .append(i == 17 ? refNumber : "OTHER-" + i)
+                    .append("\", \"amount\": 1100000, \"company_id\": 99999}");
+        }
+        return page.append("]}").toString();
+    }
+
+    @Test
+    @DisplayName("F4: 同じジョブの再試行で、自分の作成した取引だけを見つけた後に走査が一時障害で途切れたら、拒否で終わらせず再試行待ちにする")
+    void retry_ownDealFoundButLaterPageFailed_isRetriedInsteadOfRefused() {
+        mockServer.expect(requestTo(partnerScanUrl(0)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(fullPageWithOwnDeal("INV-GUARD-OWNMID"), MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(partnerScanUrl(100)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withServerError());
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-GUARD-OWNMID"),
+                AccountingProvider.DealCreateGuard.ADOPT_OWN_OR_REFUSE);
+
+        mockServer.verify(); // POSTもしない（他に同じ管理番号の取引があるかを確認できていない）
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isTrue();
+        assertThat(result.getErrorCode()).isEqualTo("EXISTING_DEAL_CHECK_FAILED");
+    }
+
+    @Test
+    @DisplayName("F4: 同じジョブの再試行でも、自分の取引と別の同じ管理番号の取引が見つかれば、走査が途切れていても拒否する")
+    void retry_otherDealFoundBeforeLaterPageFailed_isStillRefused() {
+        mockServer.expect(requestTo(partnerScanUrl(0)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(fullPageWithOwnDeal("INV-GUARD-OTHERMID").replace(
+                        "\"id\": 58017, \"ref_number\": \"INV-GUARD-OTHERMID\", \"amount\": 1100000",
+                        "\"id\": 58017, \"ref_number\": \"INV-GUARD-OTHERMID\", \"amount\": 900000"),
+                        MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(partnerScanUrl(100)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withServerError());
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-GUARD-OTHERMID"),
+                AccountingProvider.DealCreateGuard.ADOPT_OWN_OR_REFUSE);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isFalse();
+        assertThat(result.getErrorCode()).isEqualTo("EXISTING_DEAL_FOUND");
+    }
+
+    @Test
+    @DisplayName("freeeの入力エラーは既知の理由（存在しない取引先・期首日より前）だけ専用の案内にし、それ以外は従来の案内のまま（応答本文は渡さない）")
+    void validationError_knownReasonsAreClassified() {
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withBadRequest()
+                        .body("{\"status_code\":400,\"errors\":[{\"type\":\"validation\",\"messages\":[\"存在しない取引先が指定されています。\"]}]}")
+                        .contentType(MediaType.APPLICATION_JSON));
+        CanonicalDealResult partner = freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-VALID-PARTNER"));
+        mockServer.verify();
+        assertThat(partner.getErrorCode()).isEqualTo("VALIDATION_ERROR");
+        assertThat(partner.getErrorMessageSafe()).isEqualTo("error.accounting.freeePartnerNotFound");
+        assertThat(partner.isRetryable()).isFalse();
+
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withBadRequest()
+                        .body("{\"status_code\":400,\"errors\":[{\"type\":\"validation\",\"messages\":[\"顧客名に使用できない文字が含まれています: secret-value\"]}]}")
+                        .contentType(MediaType.APPLICATION_JSON));
+        CanonicalDealResult other = freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-VALID-OTHER"));
+        mockServer.verify();
+        assertThat(other.getErrorMessageSafe()).isEqualTo("error.accounting.freeeValidation");
+        assertThat(String.valueOf(other.getErrorMessageSafe())).doesNotContain("secret-value");
+    }
+
+    @Test
+    @DisplayName("入金消込の反映: freeeの口座明細で請求書の取引を、SESで登録した入金額で消込む")
+    void reconcileDeposit_reconcilesTheDealWithTheDepositAmount() {
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/wallet_txns/2542340001/reconcile"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.company_id").value(99999))
+                .andExpect(jsonPath("$.deals[0].deal_id").value(3908700001L))
+                .andExpect(jsonPath("$.deals[0].amount").value(889900))
+                .andExpect(jsonPath("$.adjustment_deal").doesNotExist())
+                .andRespond(withSuccess("{\"wallet_txn_id\": 2542340001, \"deal_ids\": [3908700001], \"new_deal_id\": null}",
+                        MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.reconcileDeposit(testConnection, "2542340001", "3908700001",
+                new BigDecimal("889900"));
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getExternalId()).isEqualTo("3908700001");
+    }
+
+    @Test
+    @DisplayName("入金消込の反映: freee側で既に別の明細・取引と消込済み（409）なら再試行しない失敗にする")
+    void reconcileDeposit_alreadyReconciledInFreee_isNotRetried() {
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/wallet_txns/2542340002/reconcile"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.CONFLICT)
+                        .body("{\"status_code\":409,\"errors\":[{\"type\":\"conflict\",\"messages\":[\"既に消込済みです\"]}]}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.reconcileDeposit(testConnection, "2542340002", "3908700002",
+                new BigDecimal("100000"));
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isFalse();
+        assertThat(result.getErrorCode()).isEqualTo("DEPOSIT_ALREADY_RECONCILED");
+        assertThat(result.getErrorMessageSafe()).isEqualTo("error.accounting.freeeDepositAlreadyReconciled");
+    }
+
+    @Test
+    @DisplayName("入金消込の反映: freeeの一時障害（5xx）は再試行する（同じ内容の再実行はfreeeで冪等）")
+    void reconcileDeposit_serverError_isRetried() {
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/wallet_txns/2542340003/reconcile"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withServerError());
+
+        CanonicalDealResult result = freeeProvider.reconcileDeposit(testConnection, "2542340003", "3908700003",
+                new BigDecimal("100000"));
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isTrue();
+    }
+
+    @Test
+    @DisplayName("入金消込の反映: 口座明細ID・取引IDが数値でない、または金額が円単位でない内容はfreeeへ送らない")
+    void reconcileDeposit_invalidInput_isNotSent() {
+        assertThat(freeeProvider.reconcileDeposit(testConnection, "abc", "3908700004", new BigDecimal("100")).getErrorCode())
+                .isEqualTo("INVALID_SNAPSHOT");
+        assertThat(freeeProvider.reconcileDeposit(testConnection, "2542340004", "3908700004", new BigDecimal("100.5")).getErrorCode())
+                .isEqualTo("INVALID_SNAPSHOT");
+        mockServer.verify(); // 何も送っていない
+    }
+
+    @Test
+    @DisplayName("入金消込の反映: freeeアプリに「[会計] 明細 更新」が無い（403）なら、必要な権限を案内して再試行しない（実freeeで確認）")
+    void reconcileDeposit_forbidden_namesTheMissingPermission() {
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/wallet_txns/2542340005/reconcile"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.FORBIDDEN));
+
+        CanonicalDealResult result = freeeProvider.reconcileDeposit(testConnection, "2542340005", "3908700005",
+                new BigDecimal("100000"));
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isFalse();
+        assertThat(result.getErrorMessageSafe()).isEqualTo("error.accounting.freeeWalletTxnWriteForbidden");
     }
 }

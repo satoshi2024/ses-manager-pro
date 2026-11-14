@@ -57,6 +57,10 @@ public class PaymentReconciliationServiceImpl implements PaymentReconciliationSe
     private final BankDepositSource bankDepositSource;
     private final InvoiceService invoiceService;
     private final org.springframework.context.ApplicationContext applicationContext;
+    /** SESの入金消込をfreeeの取引の消込へ反映する（請求書がfreeeへ送信済みのときだけ）。テストslice等では無い。 */
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.accounting.SalesInvoiceIntegrationService> salesInvoiceIntegration;
+    /** freeeへの反映ジョブを登録できなかった消込を要対応として残す（記録の失敗は消込に影響させない）。 */
+    private final com.ses.service.AuditLogService auditLogService;
 
     @Override
     public ReconciliationFetchResultDto fetchAndReconcile(LocalDate from, LocalDate to) {
@@ -198,6 +202,31 @@ public class PaymentReconciliationServiceImpl implements PaymentReconciliationSe
             // FOR UPDATE で行ロック済みのため通常到達しないが、防御的にCASを二重チェックする。
             throw BusinessException.of(409, "error.reconciliation.alreadyReconciled");
         }
+
+        // freee側でも同じ口座明細で取引を消込む（反映しないと月次照合で入金が INTERNAL_ONLY のまま残り締められない）。
+        // 外部APIは呼ばず、同じトランザクションで反映ジョブを登録する（入金消込が確定したときだけ送られる）。
+        // 登録は savepoint（NESTED）で行う。登録の失敗・競合でSESの消込を巻き戻さない（反映は要対応として残す）
+        com.ses.service.accounting.SalesInvoiceIntegrationService sync =
+                salesInvoiceIntegration == null ? null : salesInvoiceIntegration.getIfAvailable();
+        if (sync != null) {
+            try {
+                sync.enqueueDepositReconcile(depositId, deposit.getFreeeDepositId(), invoiceId, payment.getId(),
+                        deposit.getAmount());
+            } catch (RuntimeException e) {
+                log.warn("freeeへの入金消込の反映ジョブを登録できませんでした（SESの消込は確定・要対応）: depositId={} invoiceId={} error_code=DEPOSIT_RECONCILE_ENQUEUE_FAILED exceptionClass={}",
+                        depositId, invoiceId, e.getClass().getSimpleName());
+                recordEnqueueFailure(depositId);
+            }
+        }
+    }
+
+    /** freeeへの反映を登録できなかった消込を監査ログへ残す（要対応。監査の記録失敗は呼出側へ伝えない）。 */
+    private void recordEnqueueFailure(Long depositId) {
+        if (auditLogService == null) {
+            return;
+        }
+        auditLogService.record(com.ses.common.util.SecurityUtils.currentUsername(), "POST",
+                "/api/reconciliation/" + depositId + "/apply", 200, "FREEE_RECONCILE_NOT_QUEUED", false);
     }
 
     private List<ReconciliationCandidateDto> scoreCandidates(BankDeposit deposit, List<InvoiceBalanceDto> balances) {

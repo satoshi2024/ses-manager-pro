@@ -30,8 +30,9 @@ import java.util.Set;
  * <ul>
  *   <li>最新の送信成功ジョブの取引が取消済みでない: freeeへ送信済み。取消してから再送信するよう案内する</li>
  *   <li>取引の取消ジョブが処理中・失敗: 取消が終わるまで再送信しない（補償取消の前に作ると重複が残り得る）</li>
- *   <li>同じ世代のジョブが FAILED: 連携ジョブタブで原因を確認して再試行するよう案内する
- *       （FAILEDには金額不一致など取引作成済みのものも含むため、送信ボタンからは作り直さない）</li>
+ *   <li>同じ世代のジョブが FAILED: 連携ジョブタブで原因を確認して再試行するか、内容を直すならジョブを取消すよう案内する
+ *       （送信ボタンからは同じ世代で作り直さない。取消すと次の世代になり、FAILEDには金額不一致など取引作成済みのものも
+ *       含むため、次の世代は作成前にfreeeの既存取引を確認する）</li>
  *   <li>処理中（PENDING/RUNNING/RETRYABLE）で内容が変わった: 完了を待つよう案内する</li>
  * </ul>
  */
@@ -111,18 +112,11 @@ public class AccountingSendKeyResolver {
     }
 
     /**
-     * 再送信するジョブが、作成前に同じ管理番号の取引がfreeeに無いことを確認すべきか。
+     * 外部へ送信した後に取消された前の世代ごとの走査範囲（取引先・発生日）。空なら既存取引の確認は不要。
      *
      * <p>外部へ送信した後（試行回数 &gt; 0）に取消された送信ジョブは、freeeに取引が作成されたか確定できない
      * （タイムアウト後の再試行待ちを取消した場合や、通信中の取消で応答が失敗だった場合）。
      * その後の世代を確認なしに作ると、freeeに同じ取引が2件できる。</p>
-     */
-    public boolean requiresExistingDealCheck(String targetType, Long targetId, String syncJobType) {
-        return !priorDealScopes(targetType, targetId, syncJobType).isEmpty();
-    }
-
-    /**
-     * 外部へ送信した後に取消された前の世代ごとの走査範囲（取引先・発生日）。空なら既存取引の確認は不要。
      * 送信スナップショットの {@code partnerExternalId} と {@code issueDate}（経費は {@code expenseDate}）を読む。
      * 読めない世代は範囲不明（両方null）として残す（確認を省かない）。
      */

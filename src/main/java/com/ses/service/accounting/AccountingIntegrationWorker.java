@@ -119,7 +119,7 @@ public class AccountingIntegrationWorker {
                         });
                 retryable++;
             } catch (Exception e) {
-                log.warn("滞留連携ジョブの復旧照合に失敗: jobId={} category=SYSTEM errorCode=STALE_RECOVERY_ERROR exceptionClass={} detail={}",
+                log.warn("滞留連携ジョブを再試行待ちへ戻す処理に失敗: jobId={} category=SYSTEM errorCode=STALE_RECOVERY_ERROR exceptionClass={} detail={}",
                         job.getId(), LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
                 try {
                     jobService.markRetryable(job.getId(), "STALE_LEASE",
@@ -162,6 +162,7 @@ public class AccountingIntegrationWorker {
             case "DIGITAL_INVOICE_CREDIT_NOTE" -> digitalInvoiceService.processCreditNoteJob(job.getId());
             case "SALES_INVOICE_SYNC"   -> salesInvoiceIntegrationService.processSalesInvoiceJob(job.getId());
             case "SALES_INVOICE_CANCEL" -> salesInvoiceIntegrationService.processSalesCancelJob(job.getId());
+            case "DEPOSIT_RECONCILE_SYNC" -> salesInvoiceIntegrationService.processDepositReconcileJob(job.getId());
             case "BP_PURCHASE_SYNC",
                  "PURCHASE_DEAL_SYNC"   -> purchaseIntegrationService.processBpPurchaseJob(job.getId());
             case "EXPENSE_DEAL_SYNC"    -> purchaseIntegrationService.processExpenseJob(job.getId());
