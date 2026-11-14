@@ -219,7 +219,7 @@ public class BootstrapSessionFilter extends OncePerRequestFilter {
             return;
         }
         try {
-            auditLogService.record(SecurityUtils.currentUsername(), request.getMethod(), RequestPaths.pathWithinApplication(request),
+            auditLogService.record(SecurityUtils.currentUsername(), request.getMethod(), RequestPaths.auditPath(request),
                     status, applicationCode, false);
         } catch (RuntimeException e) {
             log.warn("[bootstrap] 監査ログを記録できませんでした: code={}", applicationCode, e);

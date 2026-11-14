@@ -281,4 +281,85 @@ class ForwardedHeaderBypassRegressionTest {
         assertEquals(PEER, result.reached().getRemoteAddr());
         assertEquals(PEER, new ClientIpResolver("").resolve(result.reached()));
     }
+
+    // ---------------------------------------------------------------- P3-5: 他のallow-list・判定filter
+
+    @ParameterizedTest
+    @ValueSource(strings = {"sanitizing", "vanilla"})
+    void 永続session検証はXForwardedPrefixにcssを前置しても静的資源扱いで省略しない(String mode) throws Exception {
+        authenticate("営業");
+        com.ses.service.security.PersistentSessionService sessions =
+                mock(com.ses.service.security.PersistentSessionService.class);
+        when(sessions.validateAndTouch(any(), any())).thenReturn(false);
+        com.ses.config.PersistentSessionFilter filter = new com.ses.config.PersistentSessionFilter(
+                provider(sessions), provider(null), provider(mock(AuditLogService.class)));
+
+        Result result = run(request("GET", "/api/engineers", "/css"), front(mode), filter);
+
+        assertEquals(401, result.status());
+        assertNull(result.reached());
+        verify(sessions).validateAndTouch(any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"sanitizing", "vanilla"})
+    void 動的APIはXForwardedPrefixにcssを前置してもno_storeになる(String mode) throws Exception {
+        MockHttpServletRequest request = request("GET", "/api/engineers", "/css");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        new MockFilterChain(new HttpServlet() {
+            @Override
+            protected void service(HttpServletRequest req, HttpServletResponse resp) {
+                // 応答本文は不要。filterが付けたheaderだけを確かめる。
+            }
+        }, front(mode), new com.ses.config.PwaNoStoreFilter()).doFilter(request, response);
+
+        assertEquals("no-store", response.getHeader("Cache-Control"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"sanitizing", "vanilla"})
+    void 規約同意待ちのPortal利用者はXForwardedPrefixにportalのcssを前置してもAPIへ到達できない(String mode)
+            throws Exception {
+        com.ses.service.portal.PortalSessionService sessions = mock(com.ses.service.portal.PortalSessionService.class);
+        when(sessions.resolve(any())).thenReturn(com.ses.portal.PortalLoginUser.builder()
+                .portalUserId(1L).email("portal@example.invalid").termsPending(true).build());
+        com.ses.config.portal.PortalSessionFilter filter = new com.ses.config.portal.PortalSessionFilter(sessions,
+                new PortalSecurityProperties(), mock(com.ses.service.accounting.AccountingTimezoneResolver.class));
+
+        Result result = run(request("GET", "/api/portal/customer/contracts", "/portal/css"), front(mode), filter);
+
+        assertEquals(403, result.status());
+        assertNull(result.reached());
+    }
+
+    @Test
+    void IPv6のPortal_loginは同じ64bit_network内でaddressを替えても11回目で429になる() throws Exception {
+        PortalRateLimitFilter rateLimit = new PortalRateLimitFilter(new PortalRateLimiterImpl(),
+                new PortalSecurityProperties(), new ClientIpResolver("10.0.0.0/24"));
+        List<Integer> statuses = new ArrayList<>();
+        for (int i = 1; i <= 11; i++) {
+            MockHttpServletRequest request = request("POST", "/api/portal/auth/login", null);
+            request.addHeader("X-Forwarded-For", "2001:db8:1:2::" + Integer.toHexString(i));
+            statuses.add(run(request, front("sanitizing"), rateLimit).status());
+        }
+        MockHttpServletRequest otherNetwork = request("POST", "/api/portal/auth/login", null);
+        otherNetwork.addHeader("X-Forwarded-For", "2001:db8:1:3::1");
+
+        assertEquals(429, statuses.get(10), statuses.toString());
+        assertEquals(200, run(otherNetwork, front("sanitizing"), rateLimit).status());
+    }
+
+    @Test
+    void 監査には制御文字と書式文字を百分率表記へ戻したpathを残す() throws Exception {
+        // P3-4: 復号後のpathをそのまま書くとESCやbidi制御で監査画面・logの表示を偽装できる
+        authenticate("営業");
+        AuditLogService auditLogService = mock(AuditLogService.class);
+        MockHttpServletRequest request = request("POST", "/api/engineers/%1B%E2%80%AE1", null);
+        request.setCharacterEncoding("UTF-8");
+
+        run(request, front("sanitizing"), new ApiAuditFilter(provider(auditLogService)));
+
+        verify(auditLogService).record(any(), eq("POST"), eq("/api/engineers/%1B%E2%80%AE1"), eq(200),
+                eq("ses-manager"), eq(true));
+    }
 }

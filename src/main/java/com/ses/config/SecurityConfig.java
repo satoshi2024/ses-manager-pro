@@ -493,6 +493,22 @@ public class SecurityConfig {
         return entryPoint;
     }
 
+    /**
+     * HTTPのままでもHTTPSへredirectしないhealth probe（FWD-SANITIZE P2-1）。完全一致の3pathだけで、
+     * {@code /actuator/health/**} の他のpathや他のactuatorは含めない。
+     *
+     * <p>ECSのcontainer health check（task内の127.0.0.1から）とALBのtarget group health checkは
+     * HTTPで直接届き、信頼プロキシ経由の {@code X-Forwarded-Proto} を持たない。HTTPS強制のままだと302になり、
+     * {@code curl -f} は302を成功と扱うためLivenessState=BROKEN（503）を検知できず、ALBは {@code matcher=200} で
+     * targetをhealthyにできない。応答は {@code show-details/show-components: never} によりUP/DOWNだけで、
+     * cookie・sessionに依存せず秘密も含まないため、平文で返しても漏れる情報は無い。
+     * loopbackを信頼プロキシにして {@code X-Forwarded-Proto} を受け入れる方式は採らない（同じtask内の任意の
+     * processがHTTPS判定とclient IPを偽装できるようになるため）。
+     */
+    static final String[] PLAIN_HTTP_HEALTH_PROBES = {
+        "/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness"
+    };
+
     /** HTTPS強制とHSTSを全内部chainで同一にする（metrics chainだけ平文で到達させない）。 */
     private void applyTransportSecurity(HttpSecurity http) throws Exception {
         http.headers(headers -> {
@@ -504,7 +520,15 @@ public class SecurityConfig {
             }
         });
         if (requireHttps) {
-            http.requiresChannel(channel -> channel.anyRequest().requiresSecure());
+            org.springframework.security.web.util.matcher.RequestMatcher[] healthProbes =
+                java.util.Arrays.stream(PLAIN_HTTP_HEALTH_PROBES)
+                    .map(path -> (org.springframework.security.web.util.matcher.RequestMatcher)
+                        new AntPathRequestMatcher(path, HttpMethod.GET.name()))
+                    .toArray(org.springframework.security.web.util.matcher.RequestMatcher[]::new);
+            http.requiresChannel(channel -> channel
+                .requestMatchers(healthProbes)
+                .requires(org.springframework.security.web.access.channel.ChannelDecisionManagerImpl.ANY_CHANNEL)
+                .anyRequest().requiresSecure());
         }
     }
 

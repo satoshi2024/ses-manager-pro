@@ -53,7 +53,52 @@ public final class IpCidrMatcher {
     public static boolean matches(String address, String range) {
         byte[] target = parseIp(address);
         ParsedRange parsed = parseRange(range);
-        if (target == null || parsed == null || parsed.network().length != target.length) {
+        return target != null && parsed != null && contains(parsed, target);
+    }
+
+    /** rangeの全体がblockに含まれるか（同じaddress familyで、blockより狭いか等しい）。どちらかが不正ならfalse。 */
+    public static boolean isContainedIn(String range, String block) {
+        ParsedRange inner = parseRange(range);
+        ParsedRange outer = parseRange(block);
+        return inner != null && outer != null && inner.prefixLength() >= outer.prefixLength()
+                && contains(outer, inner.network());
+    }
+
+    /** CIDRのprefixより後ろ（host部）に1のbitがあるか（{@code 10.0.1.5/24} 等）。不正はfalse。 */
+    public static boolean hasHostBits(String range) {
+        ParsedRange parsed = parseRange(range);
+        if (parsed == null) {
+            return false;
+        }
+        byte[] network = parsed.network();
+        for (int bit = parsed.prefixLength(); bit < network.length * 8; bit++) {
+            if ((network[bit / 8] & (0x80 >>> (bit % 8))) != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * IPv6アドレスの/64 network（例 {@code 2001:db8:1:2:0:0:0:0/64}）。IPv4（IPv4-mappedを含む）や不正値はnull。
+     * IPv6は1利用者が/64を丸ごと持つのが通例のため、IP単位のrate limit keyを/64へ集約するのに使う。
+     */
+    public static String ipv6Network64(String address) {
+        byte[] bytes = parseIp(address);
+        if (bytes == null || bytes.length != 16) {
+            return null;
+        }
+        byte[] network = Arrays.copyOf(bytes, 16);
+        Arrays.fill(network, 8, 16, (byte) 0);
+        try {
+            return InetAddress.getByAddress(network).getHostAddress() + "/64";
+        } catch (UnknownHostException e) {
+            return null;
+        }
+    }
+
+    private static boolean contains(ParsedRange parsed, byte[] target) {
+        if (parsed.network().length != target.length) {
             return false;
         }
         int prefix = parsed.prefixLength();

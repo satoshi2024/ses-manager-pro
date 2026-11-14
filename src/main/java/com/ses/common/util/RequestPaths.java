@@ -3,6 +3,8 @@ package com.ses.common.util;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.util.UrlPathHelper;
 
+import java.nio.charset.StandardCharsets;
+
 /**
  * 認可・監査・rate limit・MFA強制などの判定に使う「アプリ内path」（FWD-SANITIZE PRE-P1-1）。
  *
@@ -45,6 +47,53 @@ public final class RequestPaths {
     /** アプリ内pathが {@code /api/} 配下か（応答をJSONにするかの判定用）。 */
     public static boolean isApiPath(HttpServletRequest request) {
         return pathWithinApplication(request).startsWith("/api/");
+    }
+
+    /** 監査・logへ書くアプリ内path（{@link #forAudit(String)} 済み）。判定には {@link #pathWithinApplication} を使う。 */
+    public static String auditPath(HttpServletRequest request) {
+        return forAudit(pathWithinApplication(request));
+    }
+
+    /**
+     * 監査（{@code t_audit_log.uri}）・logへ書く前に、復号で現れた制御文字・書式文字を {@code %XX}（UTF-8）へ戻す。
+     *
+     * <p>CR・LF・NULはfirewallが拒否するが、ESC（{@code %1b}）やbidi制御（{@code %E2%80%AE} 等）は通るため、
+     * そのまま書くと端末・log viewerの表示を偽装できる。対象はUnicodeの制御文字（Cc）・書式文字（Cf）・
+     * 行/段落区切り・単独surrogate。表示用の変換であり、権限判定には使わない。
+     */
+    public static String forAudit(String path) {
+        if (path == null) {
+            return null;
+        }
+        StringBuilder escaped = null;
+        int i = 0;
+        while (i < path.length()) {
+            int codePoint = path.codePointAt(i);
+            int length = Character.charCount(codePoint);
+            if (needsEscape(codePoint)) {
+                if (escaped == null) {
+                    escaped = new StringBuilder(path.length() + 16).append(path, 0, i);
+                }
+                byte[] bytes = Character.getType(codePoint) == Character.SURROGATE
+                        ? "�".getBytes(StandardCharsets.UTF_8)
+                        : new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8);
+                for (byte b : bytes) {
+                    escaped.append('%').append(HEX[(b >> 4) & 0x0f]).append(HEX[b & 0x0f]);
+                }
+            } else if (escaped != null) {
+                escaped.append(path, i, i + length);
+            }
+            i += length;
+        }
+        return escaped == null ? path : escaped.toString();
+    }
+
+    private static final char[] HEX = "0123456789ABCDEF".toCharArray();
+
+    private static boolean needsEscape(int codePoint) {
+        int type = Character.getType(codePoint);
+        return type == Character.CONTROL || type == Character.FORMAT || type == Character.LINE_SEPARATOR
+                || type == Character.PARAGRAPH_SEPARATOR || type == Character.SURROGATE;
     }
 
     private static String rawPathWithinApplication(HttpServletRequest request) {

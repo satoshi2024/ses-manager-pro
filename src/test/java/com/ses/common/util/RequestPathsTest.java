@@ -51,4 +51,25 @@ class RequestPathsTest {
         assertFalse(RequestPaths.isApiPath(null));
         assertFalse(RequestPaths.isApiPath(new MockHttpServletRequest("GET", "/engineer/list")));
     }
+
+    @Test
+    void 監査用pathは制御文字と書式文字だけを百分率表記へ戻す() {
+        // P3-4: ESC・bidi制御（RLO/LRI）・ZWSP（書式文字）・行区切り・DEL・TABは表示を偽装できるため戻す
+        assertEquals("/api/x%1B%5B31m", RequestPaths.forAudit("/api/x\u001B%5B31m"));
+        assertEquals("/api/a%E2%80%AEb%E2%81%A6c", RequestPaths.forAudit("/api/a‮b⁦c"));
+        assertEquals("/api/%E2%80%8B%E2%80%A8%7F%09", RequestPaths.forAudit("/api/​ \u007F\t"));
+        assertEquals("/api/%EF%BF%BD", RequestPaths.forAudit("/api/\uD800"));
+        // 通常の文字（日本語・記号）はそのまま
+        assertEquals("/api/files/資料 (1).pdf", RequestPaths.forAudit("/api/files/資料 (1).pdf"));
+        assertEquals(null, RequestPaths.forAudit(null));
+    }
+
+    @Test
+    void 監査用pathは復号後のpathへ同じ変換をかける() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/engineers/%1B%E2%80%AE1");
+        request.setCharacterEncoding("UTF-8");
+
+        assertEquals("/api/engineers/\u001B‮1", RequestPaths.pathWithinApplication(request));
+        assertEquals("/api/engineers/%1B%E2%80%AE1", RequestPaths.auditPath(request));
+    }
 }

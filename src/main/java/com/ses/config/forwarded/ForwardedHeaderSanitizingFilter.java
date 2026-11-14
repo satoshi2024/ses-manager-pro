@@ -59,6 +59,26 @@ public class ForwardedHeaderSanitizingFilter extends ForwardedHeaderFilter {
             "forwarded", "x-forwarded-host", "x-forwarded-port", "x-forwarded-proto",
             "x-forwarded-prefix", "x-forwarded-ssl", "x-forwarded-for");
 
+    /**
+     * header名が転送headerのどれかなら、その小文字の正規名を返す（該当しなければnull）。
+     *
+     * <p>Springは {@code String#equalsIgnoreCase} でも照合する（{@code ForwardedPrefixExtractor}）。
+     * {@code toLowerCase} してからの集合照合だと、{@code ſ}（U+017F）や {@code K}（U+212A）を含む名前が
+     * 「Springには同じ名前、清浄化には別の名前」に見えるため、照合もequalsIgnoreCaseにそろえる
+     * （TomcatはISO-8859-1外・token外の名前を拒否するので実際には届かないが、判定の口径を一致させておく）。
+     */
+    static String canonicalForwardedName(String name) {
+        if (name == null) {
+            return null;
+        }
+        for (String canonical : FORWARDED_HEADER_NAMES) {
+            if (canonical.equalsIgnoreCase(name)) {
+                return canonical;
+            }
+        }
+        return null;
+    }
+
     private final ClientIpResolver clientIpResolver;
 
     public ForwardedHeaderSanitizingFilter(ClientIpResolver clientIpResolver) {
@@ -94,10 +114,16 @@ public class ForwardedHeaderSanitizingFilter extends ForwardedHeaderFilter {
             }
         }
 
-        request.setAttribute(ClientIpResolver.CONNECTOR_PEER_ATTRIBUTE, connectorPeer);
-        request.setAttribute(ClientIpResolver.CLIENT_IP_ATTRIBUTE,
-                clientIpResolver.resolveFromConnection(connectorPeer,
-                        trustedPeer ? request.getHeaders(X_FORWARDED_FOR) : null));
+        // ASYNCディスパッチでは反映済みのrequest（remoteAddr＝client IP）で再入するため、REQUEST時に置いた
+        // TCP peer・client IPを上書きしない（P3-9）。ERRORディスパッチは同じrequestの同じ値になる。
+        if (request.getAttribute(ClientIpResolver.CONNECTOR_PEER_ATTRIBUTE) == null) {
+            request.setAttribute(ClientIpResolver.CONNECTOR_PEER_ATTRIBUTE, connectorPeer);
+        }
+        if (request.getAttribute(ClientIpResolver.CLIENT_IP_ATTRIBUTE) == null) {
+            request.setAttribute(ClientIpResolver.CLIENT_IP_ATTRIBUTE,
+                    clientIpResolver.resolveFromConnection(connectorPeer,
+                            trustedPeer ? request.getHeaders(X_FORWARDED_FOR) : null));
+        }
 
         List<String> dropped = droppedHeaderNames(request, retained);
         if (!dropped.isEmpty() && log.isDebugEnabled()) {
@@ -119,10 +145,9 @@ public class ForwardedHeaderSanitizingFilter extends ForwardedHeaderFilter {
             return dropped;
         }
         while (names.hasMoreElements()) {
-            String name = names.nextElement();
-            String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
-            if (FORWARDED_HEADER_NAMES.contains(lower) && !retained.containsKey(lower) && !dropped.contains(lower)) {
-                dropped.add(lower);
+            String canonical = canonicalForwardedName(names.nextElement());
+            if (canonical != null && !retained.containsKey(canonical) && !dropped.contains(canonical)) {
+                dropped.add(canonical);
             }
         }
         return dropped;
@@ -159,18 +184,18 @@ public class ForwardedHeaderSanitizingFilter extends ForwardedHeaderFilter {
 
         @Override
         public String getHeader(String name) {
-            String lower = lower(name);
-            if (FORWARDED_HEADER_NAMES.contains(lower)) {
-                return retained.get(lower);
+            String canonical = canonicalForwardedName(name);
+            if (canonical != null) {
+                return retained.get(canonical);
             }
             return super.getHeader(name);
         }
 
         @Override
         public Enumeration<String> getHeaders(String name) {
-            String lower = lower(name);
-            if (FORWARDED_HEADER_NAMES.contains(lower)) {
-                String value = retained.get(lower);
+            String canonical = canonicalForwardedName(name);
+            if (canonical != null) {
+                String value = retained.get(canonical);
                 return value == null ? Collections.emptyEnumeration() : Collections.enumeration(List.of(value));
             }
             return super.getHeaders(name);
@@ -182,7 +207,7 @@ public class ForwardedHeaderSanitizingFilter extends ForwardedHeaderFilter {
             Enumeration<String> original = super.getHeaderNames();
             while (original != null && original.hasMoreElements()) {
                 String name = original.nextElement();
-                if (!FORWARDED_HEADER_NAMES.contains(lower(name))) {
+                if (canonicalForwardedName(name) == null) {
                     names.add(name);
                 }
             }
@@ -192,9 +217,9 @@ public class ForwardedHeaderSanitizingFilter extends ForwardedHeaderFilter {
 
         @Override
         public int getIntHeader(String name) {
-            String lower = lower(name);
-            if (FORWARDED_HEADER_NAMES.contains(lower)) {
-                String value = retained.get(lower);
+            String canonical = canonicalForwardedName(name);
+            if (canonical != null) {
+                String value = retained.get(canonical);
                 return value == null ? -1 : Integer.parseInt(value);
             }
             return super.getIntHeader(name);
@@ -202,15 +227,11 @@ public class ForwardedHeaderSanitizingFilter extends ForwardedHeaderFilter {
 
         @Override
         public long getDateHeader(String name) {
-            if (FORWARDED_HEADER_NAMES.contains(lower(name))) {
+            if (canonicalForwardedName(name) != null) {
                 // 転送headerは日付値を持たない。
                 return -1L;
             }
             return super.getDateHeader(name);
-        }
-
-        private static String lower(String name) {
-            return name == null ? "" : name.toLowerCase(Locale.ROOT);
         }
     }
 }

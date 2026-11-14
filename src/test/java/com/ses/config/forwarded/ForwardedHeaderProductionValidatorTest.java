@@ -2,10 +2,12 @@ package com.ses.config.forwarded;
 
 import com.ses.common.util.ClientIpResolver;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.mock.env.MockEnvironment;
 
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -68,5 +70,68 @@ class ForwardedHeaderProductionValidatorTest {
     @Test
     void 単一IPの信頼プロキシは全長prefixとして許可する() {
         assertDoesNotThrow(() -> validator("framework", "10.0.1.10, 2600:1f18:abc:de00::10").validate());
+    }
+
+    @Test
+    void privateとshared以外のIPv4範囲は起動を拒否する() {
+        // P3-7: ALBのnodeはVPC内のprivate IPv4から接続する。公開IPv4やloopbackが信頼プロキシになる構成は無い。
+        for (String range : new String[]{"8.8.0.0/16", "203.0.113.0/24", "127.0.0.1/32", "169.254.0.0/16",
+                "172.32.0.0/16", "192.169.0.0/16", "100.128.0.0/16", "::ffff:8.8.8.0/120"}) {
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                    () -> validator("framework", range).validate(), range);
+
+            assertTrue(error.getMessage().contains("private address"), range + ": " + error.getMessage());
+        }
+    }
+
+    @Test
+    void RFC1918とRFC6598のALB_subnetは許可する() {
+        assertDoesNotThrow(() -> validator("framework",
+                "10.20.0.0/24, 172.16.0.0/16, 172.31.255.0/24, 192.168.10.0/24, 100.64.0.0/16, 100.127.255.0/24")
+                .validate());
+    }
+
+    @Test
+    void host部にbitがあるCIDRは起動を拒否する() {
+        for (String range : new String[]{"10.0.1.5/24", "2600:1f18:abc:de00::1/64"}) {
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                    () -> validator("framework", range).validate(), range);
+
+            assertTrue(error.getMessage().contains("network address"), range + ": " + error.getMessage());
+        }
+    }
+
+    private final ApplicationContextRunner prodRunner = new ApplicationContextRunner()
+            .withUserConfiguration(ClientIpResolver.class, ForwardedHeaderProductionValidator.class)
+            .withPropertyValues("spring.profiles.active=prod", "server.forward-headers-strategy=framework");
+
+    @Test
+    void prodのcontextは信頼プロキシ未設定なら起動しない() {
+        prodRunner.run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure()).rootCause().hasMessageContaining("TRUSTED_PROXIES");
+        });
+    }
+
+    @Test
+    void prodのcontextは置換前のplaceholderでも起動しない() {
+        prodRunner.withPropertyValues("app.security.trusted-proxies=ALB_SUBNET_CIDRS_PLACEHOLDER")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).rootCause()
+                            .hasMessageContaining("IPアドレスまたはCIDR形式");
+                });
+    }
+
+    @Test
+    void prodのcontextはALB_subnetを設定すれば起動しprod以外ではvalidatorを作らない() {
+        prodRunner.withPropertyValues("app.security.trusted-proxies=10.0.1.0/24,10.0.2.0/24")
+                .run(context -> assertThat(context).hasNotFailed()
+                        .hasSingleBean(ForwardedHeaderProductionValidator.class));
+        new ApplicationContextRunner()
+                .withUserConfiguration(ClientIpResolver.class, ForwardedHeaderProductionValidator.class)
+                .withPropertyValues("spring.profiles.active=test")
+                .run(context -> assertThat(context).hasNotFailed()
+                        .doesNotHaveBean(ForwardedHeaderProductionValidator.class));
     }
 }

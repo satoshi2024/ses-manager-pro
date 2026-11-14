@@ -95,7 +95,7 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
 
             allowedMenuKeys = role == null ? List.of() : menuCacheService.getMenuKeysByRole(role);
         } catch (Exception e) {
-            log.warn("メニュー権限の判定に失敗したためアクセスを拒否します: uri={}", uri, e);
+            log.warn("メニュー権限の判定に失敗したためアクセスを拒否します: uri={}", RequestPaths.forAudit(uri), e);
             deny(request, response);
             return;
         }
@@ -141,6 +141,8 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
 
     private void deny(HttpServletRequest request, HttpServletResponse response) throws IOException {
         String uri = RequestPaths.pathWithinApplication(request);
+        // 監査へは制御文字・書式文字を%XXへ戻した表記で残す（FWD-SANITIZE P3-4）。
+        String auditUri = RequestPaths.forAudit(uri);
         com.ses.service.AuditLogService auditLogService = auditLogServiceProvider.getIfAvailable();
         jakarta.servlet.http.HttpSession session = request.getSession(false);
         boolean breakGlass = session != null
@@ -152,7 +154,7 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
             }
             try {
                 auditLogService.recordRequired(com.ses.common.util.SecurityUtils.currentUsername(),
-                        request.getMethod(), uri, HttpServletResponse.SC_FORBIDDEN,
+                        request.getMethod(), auditUri, HttpServletResponse.SC_FORBIDDEN,
                         "BREAK_GLASS_PERMISSION_DENIED", false);
             } catch (RuntimeException e) {
                 response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
@@ -161,7 +163,7 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
         }
         if (auditLogService != null) {
             auditLogService.record(com.ses.common.util.SecurityUtils.currentUsername(), request.getMethod(),
-                    uri, HttpServletResponse.SC_FORBIDDEN,
+                    auditUri, HttpServletResponse.SC_FORBIDDEN,
                     "PERMISSION_DENIED", false);
         }
         if (uri.startsWith("/api/")) {
@@ -196,7 +198,7 @@ public class MenuPermissionFilter extends OncePerRequestFilter {
             }
         } catch (RuntimeException e) {
             log.warn("action権限の判定に失敗したためアクセスを拒否します: uri={}, action={}",
-                    RequestPaths.pathWithinApplication(request), actionKey, e);
+                    RequestPaths.auditPath(request), actionKey, e);
         }
         deny(request, response);
         return false;

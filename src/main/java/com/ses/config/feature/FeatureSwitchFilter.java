@@ -78,7 +78,7 @@ public class FeatureSwitchFilter extends OncePerRequestFilter {
         }
         if (log.isDebugEnabled()) {
             log.debug("[機能スイッチ] OFFの機能への要求を404で遮断しました: feature={}, method={}, path={}",
-                    blocked.get().name(), request.getMethod(), decodedPath);
+                    blocked.get().name(), request.getMethod(), com.ses.common.util.RequestPaths.forAudit(decodedPath));
         }
         writeBlockedResponseHeaders(request, response);
         if (isApiPath(decodedPath) || isApiPath(rawPath)) {

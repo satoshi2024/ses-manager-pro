@@ -24,7 +24,16 @@ import java.util.List;
  *   <li>各要素はCIDR（構文は {@link ClientIpResolver} が起動時に検査済み）で、範囲が広すぎないこと
  *       （IPv4は/{@value #MIN_IPV4_PREFIX}以上、IPv6は/{@value #MIN_IPV6_PREFIX}以上）。範囲内の任意のhostが
  *       client IPとHTTPS判定を偽装できるため、VPC全体より広い指定（{@code 0.0.0.0/0} 等）は拒否する。</li>
+ *   <li>IPv4の範囲はprivate address（RFC 1918の {@code 10/8}・{@code 172.16/12}・{@code 192.168/16}）または
+ *       shared address（RFC 6598の {@code 100.64/10}）に収まること（P3-7）。ALBのnodeはVPC内のsubnetから
+ *       private IPv4を受け取ってtargetへ接続するため、公開IPv4（{@code 8.8.0.0/16} 等）が信頼プロキシに
+ *       なる正規の構成は無く、指定されていれば誤設定である。{@code 127.0.0.0/8} もALBではないため拒否する
+ *       （container内からのhealth checkはHTTP許可path（{@code /actuator/health}）を使い、信頼しない）。
+ *       IPv6はVPCに割り当たる範囲自体がglobal unicastのため、address種別では絞らずprefix長だけを検査する。</li>
+ *   <li>host部に1のbitがあるCIDR（{@code 10.0.1.5/24} 等）は、意図した範囲が曖昧なため拒否する。</li>
  * </ul>
+ * <p>{@code @PostConstruct} で検査するため、{@code spring.main.lazy-initialization=true} にすると検査されない。
+ * 本番でlazy初期化を有効にしないこと（他の起動時validatorと同じ前提）。
  */
 @Component
 @Profile("prod")
@@ -34,6 +43,9 @@ public class ForwardedHeaderProductionValidator {
     static final int MIN_IPV4_PREFIX = 16;
     /** AWS VPCのIPv6 CIDRは/56、subnetは/64。/48より広い範囲は拒否する。 */
     static final int MIN_IPV6_PREFIX = 48;
+    /** 信頼プロキシとして許すIPv4の範囲（RFC 1918のprivate addressとRFC 6598のshared address）。 */
+    static final List<String> ALLOWED_IPV4_BLOCKS = List.of("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+            "100.64.0.0/10");
 
     private final Environment environment;
     private final ClientIpResolver clientIpResolver;
@@ -67,10 +79,18 @@ public class ForwardedHeaderProductionValidator {
                 errors.add("app.security.trusted-proxiesはIPアドレスまたはCIDR形式で指定してください: " + proxy);
                 continue;
             }
-            int minimum = IpCidrMatcher.isIpv4Range(proxy) ? MIN_IPV4_PREFIX : MIN_IPV6_PREFIX;
+            boolean ipv4 = IpCidrMatcher.isIpv4Range(proxy);
+            int minimum = ipv4 ? MIN_IPV4_PREFIX : MIN_IPV6_PREFIX;
             if (prefix < minimum) {
                 errors.add("app.security.trusted-proxiesの範囲が広すぎます（IPv4は/" + MIN_IPV4_PREFIX
                         + "以上、IPv6は/" + MIN_IPV6_PREFIX + "以上）: " + proxy);
+            }
+            if (ipv4 && ALLOWED_IPV4_BLOCKS.stream().noneMatch(block -> IpCidrMatcher.isContainedIn(proxy, block))) {
+                errors.add("app.security.trusted-proxiesのIPv4はprivate address（10/8・172.16/12・192.168/16）"
+                        + "またはshared address（100.64/10）のALB subnetに限ります: " + proxy);
+            }
+            if (IpCidrMatcher.hasHostBits(proxy)) {
+                errors.add("app.security.trusted-proxiesはnetwork address（host部が0）のCIDRで指定してください: " + proxy);
             }
         }
         return errors;

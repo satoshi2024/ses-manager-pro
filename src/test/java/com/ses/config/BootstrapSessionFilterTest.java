@@ -97,6 +97,33 @@ class BootstrapSessionFilterTest {
     }
 
     @Test
+    void XForwardedPrefixや百分率エンコードでbootstrapの入口と誤判定しない() throws Exception {
+        // FWD-SANITIZE P3-5: 清浄化が無い（Boot標準のForwardedHeaderFilter）場合でもアプリ内pathで判定する。
+        // 修正前は X-Forwarded-Prefix: /css で /css/api/engineers になり、静的資源として通っていた。
+        for (String prefix : List.of("/css", "/lib", "/api/security", "/mfa", "/api/users")) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/engineers");
+            request.addHeader("X-Forwarded-Prefix", prefix);
+            assertThat(BootstrapSessionFilter.isBootstrapEntry(viaVanillaForwardedHeaderFilter(request)))
+                    .as("prefix=%s", prefix).isFalse();
+        }
+        MockHttpServletRequest encoded = new MockHttpServletRequest("GET", "/%61pi/engineers");
+        assertThat(BootstrapSessionFilter.isBootstrapEntry(encoded)).isFalse();
+        // 許可された入口はprefixが付いても従来どおり許可（判定がアプリ内pathになっただけ）
+        MockHttpServletRequest allowed = new MockHttpServletRequest("GET", "/api/users");
+        allowed.addHeader("X-Forwarded-Prefix", "/x");
+        assertThat(BootstrapSessionFilter.isBootstrapEntry(viaVanillaForwardedHeaderFilter(allowed))).isTrue();
+    }
+
+    private static jakarta.servlet.http.HttpServletRequest viaVanillaForwardedHeaderFilter(
+            MockHttpServletRequest request) throws Exception {
+        java.util.concurrent.atomic.AtomicReference<jakarta.servlet.http.HttpServletRequest> seen =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        new org.springframework.web.filter.ForwardedHeaderFilter().doFilter(request, new MockHttpServletResponse(),
+                (req, res) -> seen.set((jakarta.servlet.http.HttpServletRequest) req));
+        return seen.get();
+    }
+
+    @Test
     void 別の主体へ引き継がれたbootstrapの印はsessionごと失効させる() throws Exception {
         // review P3-a: 印はbootstrap loginの本人（user id 1）に結び付いている。別のuser idの主体では効かせない
         authenticateAs(2L, "admin");

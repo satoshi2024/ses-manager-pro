@@ -2,49 +2,42 @@ package com.ses.config.forwarded;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ses.common.util.ClientIpResolver;
-import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.UUID;
 
+import static com.ses.config.forwarded.ForwardedHeaderEchoTestConfiguration.ECHO;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * FWD-SANITIZE: 実Servlet container（Tomcat）の実connectorで、転送ヘッダーの清浄化がBoot標準の
- * ForwardedHeaderFilterに代わって最前段で働くことを確かめる。
+ * ForwardedHeaderFilterに代わって最前段で働くことを確かめる（接続元loopbackを信頼プロキシに設定した場合）。
+ * 信頼しない接続元の逆側は {@link ForwardedHeaderUntrustedPeerServletContainerIntegrationTest}。
  *
- * <p>接続元はloopback（127.0.0.1）で、このクラスだけloopbackを信頼プロキシに設定する。テスト専用のecho endpointは
- * 認証不要の {@code /lib/**} 配下に置き、servlet側から見えるURI・remote address・scheme・headerを返す。
- * DBへは書かない（{@code @Transactional} はTestIsolationAuditTestの規約のため。HTTP処理はテストTXを共有しない）。
+ * <p>分離: RANDOM_PORTのHTTP要求はテストのtransactionを共有できないため {@code @Transactional} は使わない
+ * （TestIsolationAuditTestのallowlistに登録）。テストはDBへ書かず、起動時の初期化もクラス専用のH2 DB
+ * （UUID名）に閉じ、{@code @DirtiesContext} でclass終了時にcontextを閉じる。
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = "app.security.trusted-proxies=127.0.0.1/32")
+@Import(ForwardedHeaderEchoTestConfiguration.class)
 @ActiveProfiles("test")
-@Transactional
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class ForwardedHeaderServletContainerIntegrationTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final String ECHO = "/lib/__forwarded-header-echo";
 
     @LocalServerPort
     private int port;
@@ -56,33 +49,7 @@ class ForwardedHeaderServletContainerIntegrationTest {
                 + ";DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL");
     }
 
-    @TestConfiguration
-    static class EchoConfiguration {
-        @Bean
-        ForwardedHeaderEcho forwardedHeaderEcho() {
-            return new ForwardedHeaderEcho();
-        }
-    }
-
-    @RestController
-    public static class ForwardedHeaderEcho {
-        @GetMapping(ECHO)
-        public Map<String, Object> echo(HttpServletRequest request) {
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("requestUri", request.getRequestURI());
-            body.put("contextPath", request.getContextPath());
-            body.put("remoteAddr", request.getRemoteAddr());
-            body.put("secure", request.isSecure());
-            body.put("serverName", request.getServerName());
-            body.put("requestUrl", request.getRequestURL().toString());
-            body.put("clientIp", String.valueOf(request.getAttribute(ClientIpResolver.CLIENT_IP_ATTRIBUTE)));
-            body.put("prefixHeader", String.valueOf(request.getHeader("X-Forwarded-Prefix")));
-            body.put("forwardedHeader", String.valueOf(request.getHeader("Forwarded")));
-            return body;
-        }
-    }
-
-    private JsonNode echo(String... headers) throws Exception {
+    static JsonNode echo(int port, String... headers) throws Exception {
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + ECHO))
                 .timeout(Duration.ofSeconds(10))
                 .header("Accept", "application/json")
@@ -99,7 +66,7 @@ class ForwardedHeaderServletContainerIntegrationTest {
 
     @Test
     void 実connectorでもPrefixとHostとForwardedは反映されない() throws Exception {
-        JsonNode body = echo(
+        JsonNode body = echo(port,
                 "X-Forwarded-Prefix", "/x",
                 "X-Forwarded-Host", "evil.example",
                 "X-Forwarded-Ssl", "on",
@@ -116,7 +83,7 @@ class ForwardedHeaderServletContainerIntegrationTest {
 
     @Test
     void 信頼プロキシからのXFFは右端1hopだけをremoteAddrとclientIPにする() throws Exception {
-        JsonNode body = echo(
+        JsonNode body = echo(port,
                 "X-Forwarded-For", "203.0.113.9, 198.51.100.7",
                 "X-Forwarded-Proto", "https",
                 "X-Forwarded-Port", "443");
@@ -125,11 +92,12 @@ class ForwardedHeaderServletContainerIntegrationTest {
         assertThat(body.path("clientIp").asText()).isEqualTo("198.51.100.7");
         assertThat(body.path("secure").asBoolean()).isTrue();
         assertThat(body.path("requestUrl").asText()).isEqualTo("https://127.0.0.1" + ECHO);
+        assertThat(body.path("forwardedForHeader").asText()).isEqualTo("null");
     }
 
     @Test
     void 転送ヘッダーが無ければTCPpeerをclientIPにする() throws Exception {
-        JsonNode body = echo();
+        JsonNode body = echo(port);
 
         assertThat(body.path("remoteAddr").asText()).isEqualTo("127.0.0.1");
         assertThat(body.path("clientIp").asText()).isEqualTo("127.0.0.1");

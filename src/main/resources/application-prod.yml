@@ -59,8 +59,9 @@ app:
   security:
     require-https: true
     # ALBのsubnet CIDR（カンマ区切り）。TCP peerがこの範囲のときだけX-Forwarded-For/Proto/Portの右端1要素を使う。
-    # 既定値は持たない（未設定なら転送ヘッダーを一切信頼しない）。本番では未設定・IPv4で/16より広い・IPv6で/48より広い
-    # 指定を起動時に拒否する（ForwardedHeaderProductionValidator。手順は .kiro/specs/production-launch/forwarded-header-sanitize-notes.md）。
+    # 既定値は持たない（未設定なら転送ヘッダーを一切信頼しない）。本番では未設定・IPv4で/16より広い・IPv6で/48より広い指定、
+    # private（10/8・172.16/12・192.168/16）とshared（100.64/10）以外のIPv4、host部にbitがあるCIDRを起動時に拒否する
+    # （ForwardedHeaderProductionValidator。127.0.0.1は入れない。手順は .kiro/specs/production-launch/forwarded-header-sanitize-notes.md）。
     trusted-proxies: ${TRUSTED_PROXIES:}
     oidc:
       enabled: ${OIDC_ENABLED:true}

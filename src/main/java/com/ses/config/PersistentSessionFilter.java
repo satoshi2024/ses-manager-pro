@@ -72,7 +72,7 @@ public class PersistentSessionFilter extends OncePerRequestFilter {
                 }
                 try {
                     auditLogService.recordRequired(SecurityUtils.currentUsername(), request.getMethod(),
-                            RequestPaths.pathWithinApplication(request), HttpServletResponse.SC_FORBIDDEN,
+                            RequestPaths.auditPath(request), HttpServletResponse.SC_FORBIDDEN,
                             "BREAK_GLASS_SCOPE_VIOLATION", false);
                 } catch (RuntimeException e) {
                     response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
@@ -109,7 +109,7 @@ public class PersistentSessionFilter extends OncePerRequestFilter {
         AuditLogService auditLogService = auditLogServiceProvider.getIfAvailable();
         if (auditLogService != null) {
             try {
-                auditLogService.record(authentication.getName(), request.getMethod(), RequestPaths.pathWithinApplication(request),
+                auditLogService.record(authentication.getName(), request.getMethod(), RequestPaths.auditPath(request),
                         HttpServletResponse.SC_UNAUTHORIZED, "BOOTSTRAP_SESSION_EXPIRED", false);
             } catch (RuntimeException ignored) {
                 // 失効は監査の成否に依存させない（fail-closed）

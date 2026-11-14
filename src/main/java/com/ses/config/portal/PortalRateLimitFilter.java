@@ -1,6 +1,7 @@
 package com.ses.config.portal;
 
 import com.ses.common.util.ClientIpResolver;
+import com.ses.common.util.IpCidrMatcher;
 import com.ses.common.util.RequestPaths;
 import com.ses.config.PortalSecurityProperties;
 import com.ses.service.portal.PortalRateLimiter;
@@ -74,8 +75,14 @@ public class PortalRateLimitFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
+    /**
+     * IP単位keyの送信元。IPv6は/64へ集約する（FWD-SANITIZE P3-8）。IPv6では1利用者が/64を丸ごと持つのが通例で、
+     * /128のままだと同じ/64内でaddressを替えるだけで上限を回避できる。IPv4はそのまま使う。
+     */
     private String clientIp(HttpServletRequest request) {
-        return clientIpResolver.resolve(request);
+        String ip = clientIpResolver.resolve(request);
+        String network64 = IpCidrMatcher.ipv6Network64(ip);
+        return network64 != null ? network64 : ip;
     }
 
     private String currentUserId() {

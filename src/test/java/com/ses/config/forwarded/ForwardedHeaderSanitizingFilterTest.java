@@ -197,4 +197,41 @@ class ForwardedHeaderSanitizingFilterTest {
         assertFalse(seen.get().isSecure());
         assertEquals("127.0.0.1", seen.get().getAttribute(ClientIpResolver.CLIENT_IP_ATTRIBUTE));
     }
+
+    @Test
+    void 転送header名の判定はSpringと同じequalsIgnoreCaseでそろえる() throws Exception {
+        // P3-1: U+017F（ſ）はequalsIgnoreCaseでsと一致する。toLowerCaseの集合照合だけでは隠せない。
+        MockHttpServletRequest request = request(TRUSTED_PEER);
+        request.addHeader("X-FORWARDED-PREFIX", "/x");
+        request.addHeader("X-Forwarded-ſsl", "on");
+
+        HttpServletRequest seen = run(request);
+
+        assertEquals("/api/compliance/findings", seen.getRequestURI());
+        assertNull(seen.getHeader("X-Forwarded-ſsl"));
+        assertNull(seen.getHeader("x-forwarded-prefix"));
+        assertFalse(seen.isSecure());
+        assertFalse(Collections.list(seen.getHeaderNames()).stream()
+                .anyMatch(name -> ForwardedHeaderSanitizingFilter.canonicalForwardedName(name) != null));
+        assertEquals("x-forwarded-ssl", ForwardedHeaderSanitizingFilter.canonicalForwardedName("X-Forwarded-ſsl"));
+        assertNull(ForwardedHeaderSanitizingFilter.canonicalForwardedName("X-Forwarded-Proto-Extra"));
+    }
+
+    @Test
+    void ASYNCで再入しても書換え前のTCPpeerとclientIPを上書きしない() throws Exception {
+        // P3-9: ASYNCディスパッチは反映済みrequest（remoteAddr＝client IP）で再入する。
+        MockHttpServletRequest request = request(TRUSTED_PEER);
+        request.addHeader("X-Forwarded-For", "198.51.100.7");
+        HttpServletRequest first = run(request);
+        MockHttpServletRequest reentry = request("198.51.100.7");
+        reentry.setAttribute(ClientIpResolver.CONNECTOR_PEER_ATTRIBUTE,
+                first.getAttribute(ClientIpResolver.CONNECTOR_PEER_ATTRIBUTE));
+        reentry.setAttribute(ClientIpResolver.CLIENT_IP_ATTRIBUTE, first.getAttribute(ClientIpResolver.CLIENT_IP_ATTRIBUTE));
+        reentry.setDispatcherType(DispatcherType.ASYNC);
+
+        HttpServletRequest seen = run(reentry);
+
+        assertEquals(TRUSTED_PEER, seen.getAttribute(ClientIpResolver.CONNECTOR_PEER_ATTRIBUTE));
+        assertEquals("198.51.100.7", seen.getAttribute(ClientIpResolver.CLIENT_IP_ATTRIBUTE));
+    }
 }

@@ -1,5 +1,6 @@
 package com.ses.config.forwarded;
 
+import com.ses.config.MfaEnforcementFilter;
 import com.ses.entity.Menu;
 import com.ses.service.AuditLogService;
 import com.ses.service.MenuCacheService;
@@ -15,12 +16,14 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.ApplicationContext;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.filter.ForwardedHeaderFilter;
 
+import java.net.URI;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -124,5 +127,53 @@ class ForwardedHeaderSecurityChainTest {
 
         verify(auditLogService).record(any(), eq("POST"), eq("/api/compliance/rules/run"), eq(200),
                 eq("ses-manager"), eq(true));
+    }
+
+    // ---------------------------------------------------------------- %エンコードしたpath（P2-2）
+    // 修正前は転送ヘッダーが無くても、getRequestURI()（未復号）で判定していたため、営業が /%61pi/... と送るだけで
+    // m_menu・action denyを素通りし、更新系の監査も残らなかった（firewallは %61 を通し、MVCは復号後のpathで
+    // controllerへ振り分ける）。MockMvcへは URI.create で未復号のまま渡す。
+
+    @Test
+    @WithMockUser(roles = "営業")
+    void 営業は先頭segmentを百分率エンコードしてもmenuで禁止されたcomplianceAPIへ到達できない() throws Exception {
+        mockMvc.perform(get(URI.create("/%61pi/compliance/findings")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get(URI.create("/api/compli%61nce/findings")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get(URI.create("/%61pi/%63ompliance/findings")))
+                .andExpect(status().isForbidden());
+        verify(laborComplianceService, never()).findCurrentRisks();
+        verify(auditLogService, org.mockito.Mockito.atLeastOnce()).record(any(), eq("GET"),
+                eq("/api/compliance/findings"), eq(403), eq("PERMISSION_DENIED"), eq(false));
+    }
+
+    @Test
+    @WithMockUser(roles = "マネージャー")
+    void menu許可のあるroleは百分率エンコードしたpathでも従来どおり到達できる() throws Exception {
+        mockMvc.perform(get(URI.create("/%61pi/compliance/findings")))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void 百分率エンコードしたpathの更新系操作も復号後のpathで監査に記録される() throws Exception {
+        mockMvc.perform(post(URI.create("/%61pi/compliance/rules/run")).with(csrf()))
+                .andExpect(status().isOk());
+
+        verify(auditLogService).record(any(), eq("POST"), eq("/api/compliance/rules/run"), eq(200),
+                eq("ses-manager"), eq(true));
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void MFA未完了sessionは百分率エンコードしたpathでもAPIへ到達できない() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute(MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE, Boolean.TRUE);
+
+        for (String uri : List.of("/%61pi/engineers", "/api/%65ngineers")) {
+            mockMvc.perform(get(URI.create(uri)).session(session))
+                    .andExpect(status().isForbidden());
+        }
     }
 }
