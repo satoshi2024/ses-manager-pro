@@ -107,7 +107,7 @@ SLA計算機が土日のみを休日とし祝日カレンダーを読まない�
 |---|---|
 | 既定営業時間 | 09:00–18:00（ポリシー列で上書き可）。1日あたり終業−始業の分数 |
 | timezone | `Clock` + `spring.jackson.time-zone`（またはtenant resolver）。計算機へ `Asia/Tokyo` 文字列を直書きしない |
-| 休日 | **法人既定**の `m_work_calendar`（`legal_entity_id` あり、`organization_id`/`engineer_id` NULL）の `day_type` ≠ 通常 を休日とする。未設定時は土日のみ＋ `missing_calendar` をSLAメタに記録。祝日masterを新規に作らない |
+| 休日 | **法人既定 → 全社共通** の有効カレンダーを一つ採用する（`organization_id`/`engineer_id` NULL、他法人と和集合しない）。当日行を週末も優先し、「休」「祝」/HOLIDAY/NON_WORKINGは休日、「通常」「所定日」/WORKINGは営業日、その他はscheduled_minutes>0だけ営業日（NULL・0は休日）。日別行無しは平日営業・土日休業。両カレンダー欠損は `missing_calendar` WARNへtenant・法人・問い合わせID・相関IDを計算毎に一回記録する。候補と日別行は計算内キャッシュ。2026-11-14に実装方針を決定（署名はCS Owner）。祝日masterを新規に作らない |
 | 使わない暦 | 要員個人カレンダー、`t_compliance_work_calendar` |
 | Pause | `WAITING_CUSTOMER` のみ。停止分数は**営業分数**で期限を延長。過去roundの `response_breached`/`resolve_breached`/確定時刻は更新しない |
 | Reopen | 新 `round_no`。UNIQUE(request_id, round_no)。旧roundは COMPLETED のまま |

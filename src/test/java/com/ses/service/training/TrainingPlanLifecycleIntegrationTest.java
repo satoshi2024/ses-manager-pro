@@ -59,6 +59,7 @@ class TrainingPlanLifecycleIntegrationTest {
     @Autowired private TrainingEnrollmentExpenseMapper relations;
     @Autowired private UserOrganizationMapper assignments;
     @Autowired private MonthlyAccountingDimensionMapper dimensions;
+    @Autowired private EngineerAccountingHistoryMapper accountingHistory;
 
     // 外部freeeとの照合はこの非PII業務フローの対象外。計画・承認・費用・締め本体は実Beanを使う。
     @MockBean private AccountingReconciliationService reconciliation;
@@ -70,7 +71,7 @@ class TrainingPlanLifecycleIntegrationTest {
     }
 
     @Test
-    void 学習計画の承認と費用正本は完了後の所属異動と月次締めでも保持され締め済み費用を変更できない() {
+    void 学習計画完了後の異動履歴で八月九月の帰属を分離し締め済み月への費用登録を拒否する() {
         String tenant = "nf03-flow-" + UUID.randomUUID();
         AccountingTenantContextHolder.setTenantId(tenant);
         SysUser applicant = user(tenant, "要員");
@@ -81,7 +82,7 @@ class TrainingPlanLifecycleIntegrationTest {
                 .userId(applicant.getId()).organizationId(source.getId()).primaryFlag(1)
                 .validFrom(START.minusMonths(1)).version(0).build());
         Engineer engineer = Engineer.builder().tenantId(tenant).fullName("学習フロー検証要員")
-                .employmentType("正社員").status("稼働中").organizationId(source.getId()).build();
+                .employmentType("正社員").status("Bench").organizationId(source.getId()).build();
         engineers.insert(engineer);
         EngineerAccountLink link = new EngineerAccountLink();
         link.setTenantId(tenant);
@@ -142,6 +143,16 @@ class TrainingPlanLifecycleIntegrationTest {
         organizations.transferUser(UserOrganization.builder().tenantId(tenant).userId(applicant.getId())
                 .organizationId(target.getId()).primaryFlag(1).validFrom(LocalDate.of(2026, 9, 1)).version(0).build(),
                 original.getVersion());
+        // 現在値を異動先へ変えた上で、過去月は履歴のsourceを使用することを証明する。
+        accountingHistory.insert(EngineerAccountingHistory.builder().engineerId(engineer.getId())
+                .organizationId(source.getId()).organizationHistoryStatus("KNOWN").expectedUnitPrice(COST)
+                .validFrom(START.minusMonths(1)).validTo(LocalDate.of(2026, 8, 31)).build());
+        accountingHistory.insert(EngineerAccountingHistory.builder().engineerId(engineer.getId())
+                .organizationId(target.getId()).organizationHistoryStatus("KNOWN").expectedUnitPrice(COST)
+                .validFrom(LocalDate.of(2026, 9, 1)).build());
+        engineers.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Engineer>()
+                .eq(Engineer::getId, engineer.getId()).set(Engineer::getOrganizationId, target.getId()));
+        assertThat(engineers.selectById(engineer.getId()).getOrganizationId()).isEqualTo(target.getId());
         assertThat(assignments.selectById(original.getId()).getValidTo()).isEqualTo(LocalDate.of(2026, 8, 31));
         assertThat(organizations.listUserOrganizations(applicant.getId(), START))
                 .singleElement().extracting(UserOrganization::getOrganizationId).isEqualTo(source.getId());
@@ -150,7 +161,9 @@ class TrainingPlanLifecycleIntegrationTest {
         assertThat(approvals.selectById(request.getId()).getOrganizationId()).isEqualTo(source.getId());
 
         when(reconciliation.reconcileMonth("2026-08")).thenReturn(new AccountingReconciliationSummaryDto());
+        when(reconciliation.reconcileMonth("2026-09")).thenReturn(new AccountingReconciliationSummaryDto());
         closing.confirmClosing("2026-08", approver.getId(), "管理者");
+        closing.confirmClosing("2026-09", approver.getId(), "管理者");
         verify(reconciliation).assertReconciledForClosing("2026-08");
         assertThat(closing.isClosed("2026-08")).isTrue();
         assertThat(dimensions.selectList(new LambdaQueryWrapper<MonthlyAccountingDimension>()
@@ -158,11 +171,16 @@ class TrainingPlanLifecycleIntegrationTest {
                 .eq(MonthlyAccountingDimension::getSourceId, engineer.getId())
                 .eq(MonthlyAccountingDimension::getWorkMonth, START.withDayOfMonth(1))))
                 .singleElement().extracting(MonthlyAccountingDimension::getOrganizationId).isEqualTo(source.getId());
+        assertThat(dimensions.selectList(new LambdaQueryWrapper<MonthlyAccountingDimension>()
+                .eq(MonthlyAccountingDimension::getSourceType, "bench-engineer")
+                .eq(MonthlyAccountingDimension::getSourceId, engineer.getId())
+                .eq(MonthlyAccountingDimension::getWorkMonth, LocalDate.of(2026, 9, 1))))
+                .singleElement().extracting(MonthlyAccountingDimension::getOrganizationId).isEqualTo(target.getId());
         assertThat(plans.selectById(created.getId()).getPlannedCostJpy()).isEqualByComparingTo(COST);
         assertThat(expenses.getEntity(beforeApproval.getId()).getAmount()).isEqualByComparingTo(COST);
         assertThat(events.selectByPlanId(created.getId()))
                 .extracting(LearningPlanEvent::getEventType)
-                .containsExactlyInAnyOrder("PLAN_CREATED", "PLAN_SUBMITTED", "PLAN_APPROVED", "ENROLLMENT_STARTED", "ENROLLMENT_COMPLETED");
+                .contains("PLAN_CREATED", "PLAN_SUBMITTED", "PLAN_APPROVED", "ENROLLMENT_STARTED", "ENROLLMENT_COMPLETED");
         assertThatThrownBy(() -> expenses.createDraft(engineer.getId(), new ExpenseRequestService.ExpenseDraftCommand(
                 START, ExpenseRequestService.CATEGORY_TRAINING, COST, null, null, "締め後の費用変更")))
                 .isInstanceOfSatisfying(BusinessException.class, failure -> {

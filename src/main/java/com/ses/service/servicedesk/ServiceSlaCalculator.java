@@ -21,11 +21,16 @@ import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * サービスデスクSLA計算機
  * - Instant / ZoneIdによる明示的時間計算（DST・跨日・タイムゾーン完全対応）
  * - 法人・組織ごとの営業日カレンダー完全分離（法人跨ぎ休日結合の禁止）
+ * - サービスデスクの唯一の呼出し元は組織指定を403で拒否し、organizationIdを常にNULLで渡す。
+ *   組織一致の分岐は互換APIとして残すが、本番経路は法人既定→全社共通だけを使用する。
  */
 @Slf4j
 @Component
@@ -43,6 +48,12 @@ public class ServiceSlaCalculator {
      */
     public Instant calculateDeadline(Instant startAt, int targetHours, ServiceSlaPolicy policy,
                                     Long organizationId, Long legalEntityId, ZoneId zoneId) {
+        return calculateDeadline(startAt, targetHours, policy, organizationId, legalEntityId, zoneId, null);
+    }
+
+    public Instant calculateDeadline(Instant startAt, int targetHours, ServiceSlaPolicy policy,
+                                    Long organizationId, Long legalEntityId, ZoneId zoneId, Long requestId) {
+        CalendarLookup lookup = new CalendarLookup(requestId);
         ZoneId effectiveZone = zoneId != null ? zoneId : DEFAULT_ZONE;
         Instant start = startAt != null ? startAt : clock.instant();
 
@@ -63,7 +74,7 @@ public class ServiceSlaCalculator {
         ZonedDateTime cursor = start.atZone(effectiveZone);
 
         // 始点を営業時間内にアライメント
-        cursor = alignToBusinessHours(cursor, businessStart, businessEnd, includeHolidays, organizationId, legalEntityId, effectiveZone);
+        cursor = alignToBusinessHours(cursor, businessStart, businessEnd, includeHolidays, organizationId, legalEntityId, effectiveZone, lookup);
 
         long remainingMinutes = (long) targetHours * 60;
         while (remainingMinutes > 0) {
@@ -75,7 +86,7 @@ public class ServiceSlaCalculator {
                 remainingMinutes = 0;
             } else {
                 remainingMinutes -= availableMinutesToday;
-                LocalDate nextWorkDate = getNextWorkDay(cursor.toLocalDate().plusDays(1), includeHolidays, organizationId, legalEntityId);
+                LocalDate nextWorkDate = getNextWorkDay(cursor.toLocalDate().plusDays(1), includeHolidays, organizationId, legalEntityId, lookup);
                 cursor = nextWorkDate.atTime(businessStart).atZone(effectiveZone);
             }
         }
@@ -112,6 +123,12 @@ public class ServiceSlaCalculator {
      */
     public Instant calculateExtendedDeadline(Instant currentDeadline, int pauseMinutes, ServiceSlaPolicy policy,
                                             Long organizationId, Long legalEntityId, ZoneId zoneId) {
+        return calculateExtendedDeadline(currentDeadline, pauseMinutes, policy, organizationId, legalEntityId, zoneId, null);
+    }
+
+    public Instant calculateExtendedDeadline(Instant currentDeadline, int pauseMinutes, ServiceSlaPolicy policy,
+                                            Long organizationId, Long legalEntityId, ZoneId zoneId, Long requestId) {
+        CalendarLookup lookup = new CalendarLookup(requestId);
         if (currentDeadline == null || pauseMinutes <= 0) {
             return currentDeadline;
         }
@@ -133,7 +150,7 @@ public class ServiceSlaCalculator {
         }
 
         ZonedDateTime cursor = currentDeadline.atZone(effectiveZone);
-        cursor = alignToBusinessHours(cursor, businessStart, businessEnd, includeHolidays, organizationId, legalEntityId, effectiveZone);
+        cursor = alignToBusinessHours(cursor, businessStart, businessEnd, includeHolidays, organizationId, legalEntityId, effectiveZone, lookup);
 
         long remainingMinutes = pauseMinutes;
         while (remainingMinutes > 0) {
@@ -145,7 +162,7 @@ public class ServiceSlaCalculator {
                 remainingMinutes = 0;
             } else {
                 remainingMinutes -= availableMinutesToday;
-                LocalDate nextWorkDate = getNextWorkDay(cursor.toLocalDate().plusDays(1), includeHolidays, organizationId, legalEntityId);
+                LocalDate nextWorkDate = getNextWorkDay(cursor.toLocalDate().plusDays(1), includeHolidays, organizationId, legalEntityId, lookup);
                 cursor = nextWorkDate.atTime(businessStart).atZone(effectiveZone);
             }
         }
@@ -159,12 +176,17 @@ public class ServiceSlaCalculator {
 
     public LocalDateTime calculateExtendedDeadline(LocalDateTime currentDeadline, int pauseMinutes, ServiceSlaPolicy policy,
                                                   Long organizationId, Long legalEntityId, ZoneId zoneId) {
+        return calculateExtendedDeadline(currentDeadline, pauseMinutes, policy, organizationId, legalEntityId, zoneId, null);
+    }
+
+    public LocalDateTime calculateExtendedDeadline(LocalDateTime currentDeadline, int pauseMinutes, ServiceSlaPolicy policy,
+                                                  Long organizationId, Long legalEntityId, ZoneId zoneId, Long requestId) {
         if (currentDeadline == null) {
             return null;
         }
         ZoneId effectiveZone = zoneId != null ? zoneId : DEFAULT_ZONE;
         Instant instant = currentDeadline.atZone(effectiveZone).toInstant();
-        Instant extended = calculateExtendedDeadline(instant, pauseMinutes, policy, organizationId, legalEntityId, effectiveZone);
+        Instant extended = calculateExtendedDeadline(instant, pauseMinutes, policy, organizationId, legalEntityId, effectiveZone, requestId);
         return extended.atZone(effectiveZone).toLocalDateTime();
     }
 
@@ -176,14 +198,26 @@ public class ServiceSlaCalculator {
     public int businessMinutesBetween(LocalDateTime startAt, LocalDateTime endAt,
                                       ServiceSlaPolicy policy, Long organizationId,
                                       Long legalEntityId, ZoneId zoneId) {
+        return businessMinutesBetween(startAt, endAt, policy, organizationId, legalEntityId, zoneId, null);
+    }
+
+    public int businessMinutesBetween(LocalDateTime startAt, LocalDateTime endAt,
+                                      ServiceSlaPolicy policy, Long organizationId,
+                                      Long legalEntityId, ZoneId zoneId, Long requestId) {
         if (startAt == null || endAt == null || !endAt.isAfter(startAt)) return 0;
         ZoneId effectiveZone = zoneId != null ? zoneId : DEFAULT_ZONE;
         return businessMinutesBetween(startAt.atZone(effectiveZone).toInstant(),
-                endAt.atZone(effectiveZone).toInstant(), policy, organizationId, legalEntityId, effectiveZone);
+                endAt.atZone(effectiveZone).toInstant(), policy, organizationId, legalEntityId, effectiveZone, requestId);
     }
 
     public int businessMinutesBetween(Instant startAt, Instant endAt, ServiceSlaPolicy policy,
                                       Long organizationId, Long legalEntityId, ZoneId zoneId) {
+        return businessMinutesBetween(startAt, endAt, policy, organizationId, legalEntityId, zoneId, null);
+    }
+
+    public int businessMinutesBetween(Instant startAt, Instant endAt, ServiceSlaPolicy policy,
+                                      Long organizationId, Long legalEntityId, ZoneId zoneId, Long requestId) {
+        CalendarLookup lookup = new CalendarLookup(requestId);
         if (startAt == null || endAt == null || !endAt.isAfter(startAt)) return 0;
         ZoneId effectiveZone = zoneId != null ? zoneId : DEFAULT_ZONE;
         if (policy == null) {
@@ -203,7 +237,7 @@ public class ServiceSlaCalculator {
         LocalDate date = from.toLocalDate();
         while (!date.isAfter(to.toLocalDate()) && minutes < Integer.MAX_VALUE) {
             if (Boolean.TRUE.equals(policy.getIncludeHolidays())
-                    || !isNonWorkingDay(date, organizationId, legalEntityId)) {
+                    || !isNonWorkingDay(date, organizationId, legalEntityId, lookup)) {
                 ZonedDateTime dayStart = date.atTime(businessStart).atZone(effectiveZone);
                 ZonedDateTime dayEnd = date.atTime(businessEnd).atZone(effectiveZone);
                 ZonedDateTime clippedStart = from.isAfter(dayStart) ? from : dayStart;
@@ -228,7 +262,7 @@ public class ServiceSlaCalculator {
         ZoneId effectiveZone = zoneId != null ? zoneId : DEFAULT_ZONE;
         ZonedDateTime zdt = instant.atZone(effectiveZone);
 
-        if (!Boolean.TRUE.equals(policy.getIncludeHolidays()) && isNonWorkingDay(zdt.toLocalDate(), organizationId, legalEntityId)) {
+        if (!Boolean.TRUE.equals(policy.getIncludeHolidays()) && isNonWorkingDay(zdt.toLocalDate(), organizationId, legalEntityId, new CalendarLookup(null))) {
             return false;
         }
 
@@ -240,29 +274,31 @@ public class ServiceSlaCalculator {
     }
 
     private ZonedDateTime alignToBusinessHours(ZonedDateTime dt, LocalTime start, LocalTime end,
-                                               boolean includeHolidays, Long organizationId, Long legalEntityId, ZoneId zoneId) {
+                                               boolean includeHolidays, Long organizationId, Long legalEntityId, ZoneId zoneId,
+                                               CalendarLookup lookup) {
         LocalDate date = dt.toLocalDate();
         LocalTime time = dt.toLocalTime();
 
-        if (!includeHolidays && isNonWorkingDay(date, organizationId, legalEntityId)) {
-            LocalDate nextWorkDate = getNextWorkDay(date, includeHolidays, organizationId, legalEntityId);
+        if (!includeHolidays && isNonWorkingDay(date, organizationId, legalEntityId, lookup)) {
+            LocalDate nextWorkDate = getNextWorkDay(date, includeHolidays, organizationId, legalEntityId, lookup);
             return nextWorkDate.atTime(start).atZone(zoneId);
         }
 
         if (time.isBefore(start)) {
             return date.atTime(start).atZone(zoneId);
         } else if (!time.isBefore(end)) {
-            LocalDate nextWorkDate = getNextWorkDay(date.plusDays(1), includeHolidays, organizationId, legalEntityId);
+            LocalDate nextWorkDate = getNextWorkDay(date.plusDays(1), includeHolidays, organizationId, legalEntityId, lookup);
             return nextWorkDate.atTime(start).atZone(zoneId);
         }
 
         return dt;
     }
 
-    private LocalDate getNextWorkDay(LocalDate startDate, boolean includeHolidays, Long organizationId, Long legalEntityId) {
+    private LocalDate getNextWorkDay(LocalDate startDate, boolean includeHolidays, Long organizationId, Long legalEntityId,
+                                     CalendarLookup lookup) {
         LocalDate current = startDate;
         int safetyLimit = 365;
-        while (!includeHolidays && isNonWorkingDay(current, organizationId, legalEntityId)) {
+        while (!includeHolidays && isNonWorkingDay(current, organizationId, legalEntityId, lookup)) {
             current = current.plusDays(1);
             if (--safetyLimit <= 0) {
                 break;
@@ -272,26 +308,33 @@ public class ServiceSlaCalculator {
     }
 
     public boolean isNonWorkingDay(LocalDate date, Long organizationId, Long legalEntityId) {
-        // 1. 土日の標準判定
-        DayOfWeek dow = date.getDayOfWeek();
-        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) {
-            return true;
-        }
+        return isNonWorkingDay(date, organizationId, legalEntityId, new CalendarLookup(null));
+    }
 
-        // 2. 所属法人・組織に限定した勤務カレンダーの探索（他法人の休日とはUNIONしない）
-        WorkCalendar calendar = findCalendarForScope(date, organizationId, legalEntityId);
+    private boolean isNonWorkingDay(LocalDate date, Long organizationId, Long legalEntityId, CalendarLookup lookup) {
+        boolean weekend = date.getDayOfWeek() == DayOfWeek.SATURDAY || date.getDayOfWeek() == DayOfWeek.SUNDAY;
+        WorkCalendar calendar = lookup.calendars.computeIfAbsent(date,
+                key -> Optional.ofNullable(findCalendarForScope(key, organizationId, legalEntityId, lookup))).orElse(null);
         if (calendar == null) {
-            return false;
+            if (!lookup.warned) {
+                String tenant = com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId();
+                if (tenant == null) tenant = com.ses.common.util.SecurityUtils.currentTenantId();
+                log.warn("SLAカレンダー未登録 missing_calendar tenant={} legalEntityId={} requestId={} correlationId={}",
+                        tenant == null ? "UNAVAILABLE" : tenant,
+                        legalEntityId, lookup.requestId == null ? "UNAVAILABLE" : lookup.requestId,
+                        com.ses.common.util.CorrelationContext.current());
+                lookup.warned = true;
+            }
+            return weekend;
         }
 
-        WorkCalendarDay day = workCalendarDayMapper.selectOne(
+        WorkCalendarDay day = lookup.days.computeIfAbsent(date, key -> Optional.ofNullable(workCalendarDayMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<WorkCalendarDay>()
                         .eq("calendar_id", calendar.getId())
-                        .eq("calendar_date", date)
-        );
+                        .eq("calendar_date", key)))).orElse(null);
 
         if (day == null) {
-            return false;
+            return weekend;
         }
 
         String type = day.getDayType();
@@ -304,17 +347,31 @@ public class ServiceSlaCalculator {
             }
         }
 
-        return day.getScheduledMinutes() != null && day.getScheduledMinutes() == 0;
+        return day.getScheduledMinutes() == null || day.getScheduledMinutes() <= 0;
     }
 
-    private WorkCalendar findCalendarForScope(LocalDate date, Long organizationId, Long legalEntityId) {
+    /** 計算単位のスナップショット。NULL結果も保持し、同日再判定でDBを再読込しない。 */
+    private static final class CalendarLookup {
+        private final Long requestId;
+        private List<WorkCalendar> candidates;
+        private final Map<LocalDate, Optional<WorkCalendar>> calendars = new HashMap<>();
+        private final Map<LocalDate, Optional<WorkCalendarDay>> days = new HashMap<>();
+        private boolean warned;
+
+        private CalendarLookup(Long requestId) {
+            this.requestId = requestId;
+        }
+    }
+
+    private WorkCalendar findCalendarForScope(LocalDate date, Long organizationId, Long legalEntityId, CalendarLookup lookup) {
         LambdaQueryWrapper<WorkCalendar> wrapper = new LambdaQueryWrapper<WorkCalendar>()
                 .isNull(WorkCalendar::getEngineerId)
-                .and(w -> w.eq(WorkCalendar::getStatus, "有効").or().eq(WorkCalendar::getStatus, "ACTIVE"))
-                .le(WorkCalendar::getValidFrom, date)
-                .and(w -> w.isNull(WorkCalendar::getValidTo).or().ge(WorkCalendar::getValidTo, date));
+                .and(w -> w.eq(WorkCalendar::getStatus, "有効").or().eq(WorkCalendar::getStatus, "ACTIVE"));
 
-        List<WorkCalendar> candidates = workCalendarMapper.selectList(wrapper);
+        if (lookup.candidates == null) lookup.candidates = workCalendarMapper.selectList(wrapper);
+        List<WorkCalendar> candidates = lookup.candidates.stream()
+                .filter(c -> c.getValidFrom() != null && !c.getValidFrom().isAfter(date))
+                .filter(c -> c.getValidTo() == null || !c.getValidTo().isBefore(date)).toList();
         if (candidates.isEmpty()) {
             return null;
         }

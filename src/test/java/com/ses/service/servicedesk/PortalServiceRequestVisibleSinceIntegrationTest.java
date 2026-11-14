@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @ActiveProfiles("test")
 @Transactional
 @TestPropertySource(properties = PortalServiceRequestVisibilityPolicy.VISIBLE_SINCE_PROPERTY
-        + "=2027-04-01T00:00:00+09:00")
+        + "=2027-03-31T15:00:00Z")
 class PortalServiceRequestVisibleSinceIntegrationTest {
     private static final LocalDateTime SINCE = LocalDateTime.of(2027, 4, 1, 0, 0);
     @Autowired private ServiceRequestService service;
@@ -89,6 +89,33 @@ class PortalServiceRequestVisibleSinceIntegrationTest {
         assertThat(service.searchPortalRequests(1, 50, null, null, other.getId()).getRecords())
                 .extracting(PortalServiceRequestDto::getId)
                 .containsExactlyInAnyOrder(otherInternal.getId(), otherPortal.getId());
+    }
+
+    @Test
+    void サービス境界はクライアント指定の組織日暦を403で拒否する() {
+        ServiceDeskExecutionContext context = new ServiceDeskExecutionContext("default", java.time.ZoneId.of("Asia/Tokyo"),
+                java.time.Instant.parse("2026-08-31T00:00:00Z"), 7L, null, 100L, "INTERNAL_USER", "検証担当", "TEST");
+        assertThatThrownBy(() -> service.bindCalendarScope(context, customer.getId(), null))
+                .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.getCode()).isEqualTo(403));
+        ServiceDeskExecutionContext accepted = service.bindCalendarScope(new ServiceDeskExecutionContext("default",
+                context.zoneId(), context.occurredAt(), null, null, 100L, "INTERNAL_USER", "検証担当", "TEST"), customer.getId(), null);
+        assertThat(accepted.organizationId()).isNull();
+    }
+
+    @Test
+    void 公開開始前の社内起票は解決済みでもCSAT不可で開始後は回答できる() {
+        ServiceRequest before = request(customer, false, SINCE.minusSeconds(1));
+        ServiceRequest after = request(customer, false, SINCE);
+        for (ServiceRequest row : new ServiceRequest[]{before, after}) {
+            service.changeStatus(row.getId(), com.ses.dto.servicedesk.ServiceRequestStatusChangeRequest.builder()
+                    .toStatus("IN_PROGRESS").version(0).build(), 100L, "INTERNAL_USER", "検証担当");
+            service.changeStatus(row.getId(), com.ses.dto.servicedesk.ServiceRequestStatusChangeRequest.builder()
+                    .toStatus("RESOLVED").version(1).reason("回答済み").build(), 100L, "INTERNAL_USER", "検証担当");
+        }
+        var answer = com.ses.dto.portal.PortalCsatCreateRequest.builder().score(5).feedbackComment("確認済み").build();
+        assertNotFound(() -> service.submitCsat(before.getId(), answer, customer.getId(), 200L));
+        service.submitCsat(after.getId(), answer, customer.getId(), 200L);
+        assertThat(service.getPortalDetail(after.getId(), customer.getId()).getCsatScore()).isEqualTo(5);
     }
 
     private Customer customer() {
