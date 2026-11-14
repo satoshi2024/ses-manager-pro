@@ -23,30 +23,67 @@ public class FeatureSwitches {
 
     private final FeatureSwitchProperties properties;
 
+    /** 実行時条件（{@link FeatureRuntimeCondition}）。Spring管理外で {@code new} した場合は無し。 */
+    private List<FeatureRuntimeCondition> runtimeConditions = List.of();
+
     public FeatureSwitches(FeatureSwitchProperties properties) {
         this.properties = properties;
+    }
+
+    /** 実行時条件を受け取る（現在は prod の NF07 決定ID束縛の有効期間だけ）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setRuntimeConditions(List<FeatureRuntimeCondition> runtimeConditions) {
+        this.runtimeConditions = runtimeConditions == null ? List.of() : List.copyOf(runtimeConditions);
     }
 
     @PostConstruct
     void logStates() {
         log.info("[機能スイッチ] 起動時の状態: {}", describe());
         for (Feature feature : Feature.values()) {
+            if (!isConfiguredOn(feature)) {
+                continue;
+            }
             // 子だけONにして親を忘れる設定誤りは、起動を止めずにOFFとして扱い、理由をログへ残す。
-            if (!feature.isTopLevel() && isConfiguredOn(feature) && !isEnabled(feature)) {
+            if (!feature.parent().map(this::isEnabled).orElse(true)) {
                 log.warn("[機能スイッチ] {} は設定上ONですが、親機能 {} がOFFのため無効です",
                         feature.name(), feature.root().name());
+            } else if (!runtimeConditionsSatisfied(feature)) {
+                log.warn("[機能スイッチ] {} は設定上ONですが、実行時条件（署名済み決定の有効期間等）を満たさないため無効です",
+                        feature.name());
             }
         }
     }
 
     /**
      * 機能の実効値。子スイッチは自身の設定値と親の実効値の論理積（親がOFFなら子は常にOFF）。
+     * 対象機能の実行時条件（{@link FeatureRuntimeCondition}）を1つでも満たさなければOFF。
      */
     public boolean isEnabled(Feature feature) {
         if (!isConfiguredOn(feature)) {
             return false;
         }
-        return feature.parent().map(this::isEnabled).orElse(true);
+        if (!feature.parent().map(this::isEnabled).orElse(true)) {
+            return false;
+        }
+        return runtimeConditionsSatisfied(feature);
+    }
+
+    /** 対象機能の実行時条件を全て満たすか。評価の例外はOFF（fail-closed）。 */
+    private boolean runtimeConditionsSatisfied(Feature feature) {
+        for (FeatureRuntimeCondition condition : runtimeConditions) {
+            if (condition == null || condition.feature() != feature) {
+                continue;
+            }
+            try {
+                if (!condition.satisfied()) {
+                    return false;
+                }
+            } catch (RuntimeException e) {
+                log.warn("[機能スイッチ] {} の実行時条件を評価できないためOFFとして扱います", feature.name(), e);
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 親子の論理積を取る前の設定値。 */

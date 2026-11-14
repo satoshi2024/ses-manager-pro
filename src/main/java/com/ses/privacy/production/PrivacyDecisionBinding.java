@@ -9,6 +9,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
@@ -34,6 +35,10 @@ import java.util.regex.Pattern;
  * {@code dsar} は D-01・D-06・D-09。digest の対象は、承認 tenant、承認 capability、承認 capability が必要とする決定
  * （ID・署名日・失効日）である。設定が不完全・形式不正・digest 不一致なら「未承認」（complete=false）とする。
  * 違反は固定コードだけで返し、設定値そのものを含めない。I/O や状態を持たない。
+ *
+ * <p>署名日前・失効（{@link #isTemporalViolation}）も未承認だが、NF06・NF08 と同じく prod の起動は止めない。
+ * 起動時検査は {@link #structuralViolations} だけで止め、時間要因の間は {@code PrivacyDecisionWindowMonitor} が
+ * 実行時に NF07 を OFF として扱う（JST業務日ごとに再評価する）。
  */
 public final class PrivacyDecisionBinding {
 
@@ -47,6 +52,9 @@ public final class PrivacyDecisionBinding {
     public static final String VIOLATION_DIGEST_MISMATCH = "approvalDigest.mismatch";
     /** 承認tenantが権限評価の設定tenantと一致しない。 */
     public static final String VIOLATION_TENANT_MISMATCH = "tenantId.mismatch";
+    /** 時間要因の違反コードの接尾辞（{@code d01.signedOn.future} 等）。 */
+    private static final String TEMPORAL_SIGNED_ON_FUTURE = ".signedOn.future";
+    private static final String TEMPORAL_EXPIRED = ".expiresOn.expired";
 
     private static final Pattern ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]{3,63}");
     private static final Pattern TENANT = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]{0,99}");
@@ -183,6 +191,69 @@ public final class PrivacyDecisionBinding {
         content.decisions().forEach((decision, value) -> decisionIds.put(decision, value.decisionId()));
         return new Evaluation(true, List.of(), new Snapshot(content.tenantId(), content.capabilities(),
                 decisionIds, configuredDigest));
+    }
+
+    /**
+     * 時間の経過だけで変わる違反（いずれかの決定の署名日前・失効）か。NF06・NF08 と同じく、prod でもこれだけなら
+     * 起動を止めず、NF07 を OFF として扱う（{@code PrivacyDecisionWindowMonitor}）。
+     */
+    public static boolean isTemporalViolation(String code) {
+        return code != null && (code.endsWith(TEMPORAL_SIGNED_ON_FUTURE) || code.endsWith(TEMPORAL_EXPIRED));
+    }
+
+    /** 違反のうち、時間の経過だけが理由ではないもの（prod で起動を止める対象）。 */
+    public static List<String> structuralViolations(Evaluation evaluation) {
+        if (evaluation == null) {
+            return List.of("approval.unavailable");
+        }
+        return evaluation.violations().stream().filter(code -> !isTemporalViolation(code)).toList();
+    }
+
+    /** 違反のうち、時間の経過だけが理由のもの。 */
+    public static List<String> temporalViolations(Evaluation evaluation) {
+        if (evaluation == null) {
+            return List.of();
+        }
+        return evaluation.violations().stream().filter(PrivacyDecisionBinding::isTemporalViolation).toList();
+    }
+
+    /**
+     * 有効期間の監視用状態。承認 capability が必要とする決定の署名日・失効日だけを見て、他の項目の完全性は判定しない
+     * （完全性は {@link #evaluate} が正）。失効までの日数は最も早い失効日で数える。warningDays は失効の何日前から
+     * {@link WindowState#EXPIRING} とするか（1以上に丸める）。
+     */
+    public static Window window(PrivacyApprovalProperties properties, LocalDate today, int warningDays) {
+        if (properties == null || today == null) {
+            return new Window(WindowState.NOT_CONFIGURED, null);
+        }
+        Content content = readContent(properties, new ArrayList<>());
+        if (content.decisions().isEmpty()) {
+            return new Window(WindowState.NOT_CONFIGURED, null);
+        }
+        LocalDate earliestExpiry = null;
+        boolean notYetValid = false;
+        for (DecisionContent decision : content.decisions().values()) {
+            if (decision.expiresOn() == null) {
+                return new Window(WindowState.NOT_CONFIGURED, null);
+            }
+            if (earliestExpiry == null || decision.expiresOn().isBefore(earliestExpiry)) {
+                earliestExpiry = decision.expiresOn();
+            }
+            if (decision.signedOn() != null && decision.signedOn().isAfter(today)) {
+                notYetValid = true;
+            }
+        }
+        long daysRemaining = ChronoUnit.DAYS.between(today, earliestExpiry);
+        if (daysRemaining <= 0) {
+            return new Window(WindowState.EXPIRED, daysRemaining);
+        }
+        if (notYetValid) {
+            return new Window(WindowState.NOT_YET_VALID, daysRemaining);
+        }
+        if (daysRemaining <= Math.max(1, warningDays)) {
+            return new Window(WindowState.EXPIRING, daysRemaining);
+        }
+        return new Window(WindowState.VALID, daysRemaining);
     }
 
     /**
@@ -411,6 +482,24 @@ public final class PrivacyDecisionBinding {
                 throw new IllegalArgumentException("NF07の決定ID束縛の評価結果が不整合です");
             }
         }
+    }
+
+    /** 有効期間の監視状態。 */
+    public enum WindowState {
+        /** 承認 capability・失効日が未設定・形式不正。 */
+        NOT_CONFIGURED,
+        /** いずれかの決定の署名日が未来（まだ有効でない）。 */
+        NOT_YET_VALID,
+        /** 有効期間内で、最も早い失効日までの日数が警告日数より多い。 */
+        VALID,
+        /** 有効期間内だが、最も早い失効日まで警告日数以内。 */
+        EXPIRING,
+        /** 最も早い失効日以降。 */
+        EXPIRED
+    }
+
+    /** 有効期間の監視結果。daysRemainingは最も早い失効日までのJST暦日数（失効後は0以下、未設定はnull）。 */
+    public record Window(WindowState state, Long daysRemaining) {
     }
 
     /** 起動時に確認した束縛値。秘密値を含まない（決定IDは決定書の公開識別子）。 */

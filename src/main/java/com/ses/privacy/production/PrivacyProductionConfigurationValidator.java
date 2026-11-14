@@ -29,9 +29,9 @@ import java.util.TreeSet;
  *       起動を止めない（初回リリースは OFF で配備する。OFF の間は入口が404で、DB も読まない）。</li>
  *   <li>1つでも ON: 次の全てを満たさなければ起動を失敗させる（固定の違反コードだけを列挙し、設定値・username は出さない）。
  *     <ol>
- *       <li>決定ID束縛（{@link PrivacyDecisionBinding}）が完全: 承認tenantが設定tenantと一致、ON の capability が全て承認済み、
- *           必要な決定（retention は D-01・D-09、dsar は D-01・D-06・D-09）が形式・placeholder・重複・署名日・失効日の
- *           規則を満たし、approval digest が一致する。</li>
+ *       <li>決定ID束縛（{@link PrivacyDecisionBinding}）に構造的な不足が無い: 承認tenantが設定tenantと一致、ON の capability が
+ *           全て承認済み、必要な決定（retention は D-01・D-09、dsar は D-01・D-06・D-09）が形式・placeholder・重複・
+ *           有効期間の上限の規則を満たし、approval digest が一致する。</li>
  *       <li>{@code privacy-admin} group が有効で {@code privacy.*} を許可し、privacy の拒否行を持たない。</li>
  *       <li>{@code privacy-admin} の有効な管理者（{@link UserPermissionGroupMapper#selectEffectivePrivacyAdminUsernames}。
  *           break-glass username は数えない）が {@value #MIN_PRIVACY_ADMINISTRATORS} 名以上。</li>
@@ -41,8 +41,10 @@ import java.util.TreeSet;
  *   </li>
  * </ul>
  *
- * <p>NF08・NF06 の承認検査と異なり、署名日前・失効も起動を止める（A1H 以降の capability を実行時に止める仕組みが
- * まだ無いため、ON のまま起動させない）。照会できない場合は確認できないとして起動を止める（fail-closed）。
+ * <p>NF08・NF06 と同じく、決定の署名日前・失効のように時間の経過だけで生じる不足では起動を止めない。その場合は
+ * WARN（{@value #LOG_CODE_STOPPED}）を出して起動し、{@link PrivacyDecisionWindowMonitor} が NF07 を OFF として扱う
+ * （入口は OFF と同じ404。実行中に失効日を迎えた場合も同じ）。構造的な不足と同時なら起動を止める（失効日を書き換えた
+ * 設定は digest 不一致になるため、時間要因だけとはみなされない）。照会できない場合は確認できないとして起動を止める（fail-closed）。
  * {@link SmartInitializingSingleton} で全 singleton 生成後・Tomcat の connector 開始前に実行する
  * （{@code ProductionSchemaVersionGuard} と同じ時点。失敗すると port を開かない）。読むだけで DB へは書かない。
  */
@@ -54,6 +56,9 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
 
     /** 登録者と有効化者の分離（NF07-REG）等の SoD に要る privacy-admin の人数（§5.1）。 */
     public static final int MIN_PRIVACY_ADMINISTRATORS = 2;
+
+    /** 時間要因で NF07 を OFF として扱ったまま起動したことを示す固定コード（監視のlog検索用）。 */
+    public static final String LOG_CODE_STOPPED = "NF07_PRIVACY_STOPPED_AT_STARTUP";
 
     private static final String ADMIN_ROLE = "管理者";
 
@@ -84,7 +89,10 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
         validate();
     }
 
-    /** 前提を検査し、満たさなければ {@link IllegalStateException} で起動を止める。 */
+    /**
+     * 前提を検査し、構造的な不足があれば {@link IllegalStateException} で起動を止める。
+     * 時間要因（署名日前・失効）だけなら WARN を出して起動を続ける（NF07 は OFF として扱われる）。
+     */
     public void validate() {
         Set<Capability> enabled = enabledCapabilities();
         if (enabled.isEmpty()) {
@@ -92,21 +100,32 @@ public class PrivacyProductionConfigurationValidator implements SmartInitializin
             return;
         }
         String tenantId = authorizationTenantId();
-        List<String> missing = new ArrayList<>();
+        List<String> blocking = new ArrayList<>();
 
         PrivacyDecisionBinding.Evaluation binding = PrivacyDecisionBinding.evaluate(approvalProperties, enabled,
                 tenantId, PrivacyDecisionBinding.businessDate(clock));
-        binding.violations().forEach(code -> missing.add("decisionBinding." + code));
+        PrivacyDecisionBinding.structuralViolations(binding).forEach(code -> blocking.add("decisionBinding." + code));
         if (enabled.contains(Capability.DSAR)) {
-            missing.add("dsar.prerequisitesNotImplemented");
+            blocking.add("dsar.prerequisitesNotImplemented");
         }
-        validatePrivacyAdminGroup(tenantId, missing);
-        int administrators = validatePrivacyAdministrators(tenantId, missing);
-        validateNoPrivacyAllowOutsidePrivacyAdmin(tenantId, missing);
+        validatePrivacyAdminGroup(tenantId, blocking);
+        int administrators = validatePrivacyAdministrators(tenantId, blocking);
+        validateNoPrivacyAllowOutsidePrivacyAdmin(tenantId, blocking);
 
-        if (!missing.isEmpty()) {
+        List<String> temporal = new ArrayList<>();
+        PrivacyDecisionBinding.temporalViolations(binding).forEach(code -> temporal.add("decisionBinding." + code));
+        if (!blocking.isEmpty()) {
+            List<String> all = new ArrayList<>(blocking);
+            all.addAll(temporal);
             throw new IllegalStateException("本番でNF07のflag（" + flagNames(enabled)
-                    + "）をONにする前提を満たさないため起動できません: " + String.join(",", missing));
+                    + "）をONにする前提を満たさないため起動できません: " + String.join(",", all));
+        }
+        if (!temporal.isEmpty()) {
+            // 署名日前・失効だけ: 起動は止めず、NF07 は PrivacyDecisionWindowMonitor が OFF として扱う（入口は404）。
+            log.warn("{}: NF07の決定ID束縛が有効期間外のため、NF07をOFFとして扱って起動します。再承認後に設定を差し替えて"
+                    + "再起動してください: flags={} violations={} privacyAdmins={}", LOG_CODE_STOPPED,
+                    flagNames(enabled), String.join(",", temporal), administrators);
+            return;
         }
         log.info("[privacy] NF07のflag ONの前提を確認しました: flags={} decisionIds={} privacyAdmins={}",
                 flagNames(enabled), binding.snapshot().decisionIds().values(), administrators);

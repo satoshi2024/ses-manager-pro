@@ -41,6 +41,12 @@ public class PrivacyApprovalProperties {
     /** D-09 本番 flag 開放。全 capability の前提。 */
     private DecisionReference d09 = new DecisionReference();
 
+    /**
+     * 失効の何日前から WARN log と監視metric（EXPIRING）を出すか（1〜366に丸める）。承認内容ではないため digest に含めない。
+     * {@code PrivacyDecisionWindowMonitor} が使う。
+     */
+    private int expiryWarningDays = 30;
+
     /** 決定ごとの設定。未対応の決定は null。 */
     public DecisionReference reference(PrivacyDecisionBinding.Decision decision) {
         if (decision == null) {

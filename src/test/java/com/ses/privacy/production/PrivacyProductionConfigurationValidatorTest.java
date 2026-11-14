@@ -1,10 +1,16 @@
 package com.ses.privacy.production;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.ses.config.OidcSecurityProperties;
 import com.ses.mapper.PermissionGroupMapper;
 import com.ses.mapper.UserPermissionGroupMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Profile;
@@ -121,17 +127,66 @@ class PrivacyProductionConfigurationValidatorTest {
         }
     }
 
+    // ---------------------------------------------------------------- 時間要因（NF06・NF08 と同じく起動は止めない）
+
     @Test
-    void 決定の失効日以降は起動を止める() {
+    void 決定の失効日以降は起動を止めずNF07を閉じたままWARNを出す() {
         twoPrivacyAdmins();
         PrivacyApprovalProperties expired = approval();
         expired.getD09().setSignedOn("2025-11-15");
         expired.getD09().setExpiresOn("2026-11-14");
         expired.setApprovalDigest(PrivacyDecisionBinding.computeDigest(expired));
 
-        IllegalStateException error = assertThrows(IllegalStateException.class, validator(expired)::validate);
+        List<ILoggingEvent> warnings = captureWarnings(() -> assertDoesNotThrow(validator(expired)::validate));
 
-        assertContainsAll(error, "decisionBinding.d09.expiresOn.expired");
+        assertTrue(warnings.stream().anyMatch(event -> event.getFormattedMessage().contains(
+                        PrivacyProductionConfigurationValidator.LOG_CODE_STOPPED)
+                        && event.getFormattedMessage().contains("decisionBinding.d09.expiresOn.expired")),
+                "起動時にWARNを出す");
+        assertTrue(warnings.stream().noneMatch(event -> event.getFormattedMessage().contains("D09-NF07")),
+                "決定IDをWARNへ出さない");
+        assertFalse(monitor(expired).satisfied(), "入口はOFFと同じ扱い");
+    }
+
+    @Test
+    void 署名日前の決定は起動を止めずNF07を閉じたままWARNを出す() {
+        twoPrivacyAdmins();
+        PrivacyApprovalProperties notYet = approval();
+        notYet.getD09().setSignedOn("2026-11-15");
+        notYet.setApprovalDigest(PrivacyDecisionBinding.computeDigest(notYet));
+
+        List<ILoggingEvent> warnings = captureWarnings(() -> assertDoesNotThrow(validator(notYet)::validate));
+
+        assertTrue(warnings.stream().anyMatch(event -> event.getFormattedMessage().contains(
+                        PrivacyProductionConfigurationValidator.LOG_CODE_STOPPED)
+                        && event.getFormattedMessage().contains("decisionBinding.d09.signedOn.future")));
+        assertFalse(monitor(notYet).satisfied(), "入口はOFFと同じ扱い");
+    }
+
+    @Test
+    void 失効と構造的な不足が同時なら起動を止める() {
+        twoPrivacyAdmins();
+        PrivacyApprovalProperties expiredAndTampered = approval();
+        expiredAndTampered.getD09().setSignedOn("2025-11-15");
+        expiredAndTampered.getD09().setExpiresOn("2026-11-14");
+        expiredAndTampered.setApprovalDigest(PrivacyDecisionBinding.computeDigest(expiredAndTampered));
+        expiredAndTampered.getD01().setDecisionId("D01-NF07-2026-7777");
+
+        IllegalStateException tampered = assertThrows(IllegalStateException.class,
+                validator(expiredAndTampered)::validate);
+        assertContainsAll(tampered, "decisionBinding." + PrivacyDecisionBinding.VIOLATION_DIGEST_MISMATCH,
+                "decisionBinding.d09.expiresOn.expired");
+
+        PrivacyApprovalProperties expired = approval();
+        expired.getD09().setSignedOn("2025-11-15");
+        expired.getD09().setExpiresOn("2026-11-14");
+        expired.setApprovalDigest(PrivacyDecisionBinding.computeDigest(expired));
+        // privacy-admin の条件は時間要因と同時でも起動を止める（mapperは0件・空を返す）
+        IllegalStateException noAdmins = assertThrows(IllegalStateException.class, () ->
+                new PrivacyProductionConfigurationValidator(flags(true, false), expired, oidc(Set.of()),
+                        mock(PermissionGroupMapper.class), mock(UserPermissionGroupMapper.class), CLOCK).validate());
+        assertContainsAll(noAdmins, "privacyAdminGroup.notGrantingPrivacy", "privacyAdmins.insufficient[current=0;required=2]",
+                "decisionBinding.d09.expiresOn.expired");
     }
 
     @Test
@@ -344,6 +399,24 @@ class PrivacyProductionConfigurationValidatorTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    private static List<ILoggingEvent> captureWarnings(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(PrivacyProductionConfigurationValidator.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+        }
+        return appender.list.stream().filter(event -> event.getLevel() == Level.WARN).toList();
+    }
+
+    /** 起動後の入口の判定（PrivacyDecisionWindowMonitor）を同じ設定・同じ時刻で作る。 */
+    private static PrivacyDecisionWindowMonitor monitor(PrivacyApprovalProperties approval) {
+        return new PrivacyDecisionWindowMonitor(flags(true, false), approval, oidc(), CLOCK, (MeterRegistry) null);
+    }
 
     private void twoPrivacyAdmins() {
         member(admin("nf07b-ops-d"), privacyAdminGroupId);

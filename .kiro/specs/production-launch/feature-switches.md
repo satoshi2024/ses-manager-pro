@@ -15,7 +15,7 @@
 | NF-03 資格・学習・スキルギャップ | `app.features.nf03.enabled` | `FEATURE_NF03_ENABLED` | `false` | `true` |
 | └ NF-03の子: 資格番号（retention class `CERTIFICATION_PII`）の入力 | `app.features.nf03-certification-pii.enabled` | `FEATURE_NF03_CERTIFICATION_PII_ENABLED` | `false` | `true` |
 | NF-04 要員PWAシェル（Service Worker・manifest） | `app.features.nf04.enabled` | `FEATURE_NF04_ENABLED` | `false` | `true` |
-| NF-07 保持・保全（policy説明。catalog・holdは後続batchで追加）。**ONの条件: 決定ID束縛（D-01・D-09）の完了と、privacy-admin の有効な管理者2名以上**（prodでは起動時に強制。4.7） | `privacy.retention.enabled` | `PRIVACY_RETENTION_ENABLED` | `false` | `true` |
+| NF-07 保持・保全（policy説明。catalog・holdは後続batchで追加）。**ONの条件: 決定ID束縛（D-01・D-09）の完了と、privacy-admin の有効な管理者2名以上**（prodでは起動時に強制。決定の署名日前・失効の間は起動を止めずOFFとして扱う。4.7） | `privacy.retention.enabled` | `PRIVACY_RETENTION_ENABLED` | `false` | `true` |
 | NF-10 定期管理レポート | `app.features.nf10.enabled` | `FEATURE_NF10_ENABLED` | `false` | `true` |
 
 - **子スイッチ**: 親機能の一部だけを後から公開するためのスイッチ。**実効値は「親がON かつ 子がON」**で、親がOFFなら子の設定値に関係なくOFFになる（子だけ `true` にしても何も公開されない）。子だけ `true` で親がOFFの設定は起動を止めず、起動ログに `[機能スイッチ] NF02_CUSTOMER_PORTAL は設定上ONですが、親機能 NF02 がOFFのため無効です` のWARNを出す。
@@ -89,7 +89,7 @@
 
 | 環境変数 | 初回リリース | 根拠（決定記録） | ONにする条件（NF-02/NF-03は**実装側の提案。未決定**。NF-07は計画 §5.1 の条件で、prodでは起動時に強制する） |
 |---|---|---|---|
-| `PRIVACY_RETENTION_ENABLED` | 未設定（OFF） | B-NF07-1: production bridge（W-1〜W-12）を全て接続してから公開する。Q-8: 署名前は値UNKNOWN・flag OFF・未知は拒否のままマージする | 決定ID束縛（D-01・D-09 の決定ID・署名日・失効日、承認tenant、承認capability `retention`、approval digest）の完了と、privacy-admin の有効な管理者2名以上（break-glass口座を除く）。満たさなければ `PrivacyProductionConfigurationValidator` が起動を止める（4.7） |
+| `PRIVACY_RETENTION_ENABLED` | 未設定（OFF） | B-NF07-1: production bridge（W-1〜W-12）を全て接続してから公開する。Q-8: 署名前は値UNKNOWN・flag OFF・未知は拒否のままマージする | 決定ID束縛（D-01・D-09 の決定ID・署名日・失効日、承認tenant、承認capability `retention`、approval digest）の完了と、privacy-admin の有効な管理者2名以上（break-glass口座を除く）。満たさなければ `PrivacyProductionConfigurationValidator` が起動を止める。決定の署名日前・失効だけなら起動は止めず、その間（実行中に失効日を迎えた日以降を含む）NF07はOFFとして扱われる（4.7.2.1） |
 | `PRIVACY_DSAR_ENABLED` | 未設定（OFF） | 同上。DSAR の入口と前提検査（D-06 の値・`privacy.dsar.*`・F2 provider）は A2a で追加する | A2a のマージまでは、prodでONにすると前提未実装（`dsar.prerequisitesNotImplemented`）として起動しない。A2a 以降は上記に加えて D-06 の決定ID束縛と計画 §5.1 の追加前提 |
 | `FEATURE_NF02_CUSTOMER_PORTAL_ENABLED` | 未設定（OFF） | B-NF02-2: 初回は内部サービスデスクだけを公開し、顧客ポータルからの起票・返信・CSATは第二段階とする | 第二段階のOwner承認、DG-02-A/C（portal対象・公開commentの扱い）の署名、`visible-since` の値の決定（4.3.1） |
 | `FEATURE_NF02_CUSTOMER_PORTAL_VISIBLE_SINCE` | 未設定（portal起票のみ） | 2026-11-13 決定: 第二段階でportalを開いても、初回リリース中に社内で登録した問い合わせは顧客へ出さない | 第二段階で過去分も出す必要がある場合だけ、CS Ownerが公開開始時刻を決めて設定する |
@@ -186,19 +186,26 @@
 
 #### 4.7.2 ONの条件（prodでは起動時に強制）
 
-`PRIVACY_RETENTION_ENABLED` か `PRIVACY_DSAR_ENABLED` を1つでも `true` にしたprodの起動では、`PrivacyProductionConfigurationValidator` が次を全て検査し、1つでも欠ければ起動しない（Tomcatのportを開く前）。全てOFFなら何も検査せず、起動も止めない。
+`PRIVACY_RETENTION_ENABLED` か `PRIVACY_DSAR_ENABLED` を1つでも `true` にしたprodの起動では、`PrivacyProductionConfigurationValidator` が次を全て検査し、1つでも欠ければ起動しない（Tomcatのportを開く前）。全てOFFなら何も検査せず、起動も止めない。決定の署名日前・失効（時間の経過だけで生じる不足）は起動を止めない（4.7.2.1）。
 
-| # | 条件 | 欠けたときの違反コード（例） |
+| # | 条件（欠ければ起動しない） | 欠けたときの違反コード（例） |
 |---|---|---|
-| 1 | 決定ID束縛 `privacy.approval.*`（`PrivacyDecisionBinding`）が完全: 承認tenantが設定tenant（`OIDC_TENANT_ID`、未設定なら `default`）と完全一致、ONのcapabilityが全て承認capabilityに含まれる、必要な決定（retention は D-01・D-09、dsar は D-01・D-06・D-09）のID・署名日・失効日が NF08 と同じ規則を満たす、approval digest が一致 | `decisionBinding.tenantId.missing` / `decisionBinding.tenantId.mismatch` / `decisionBinding.capabilities.retention.notApproved` / `decisionBinding.d01.decisionId.placeholder` / `decisionBinding.d09.expiresOn.expired` / `decisionBinding.decisionIds.notDistinct` / `decisionBinding.approvalDigest.mismatch` |
+| 1 | 決定ID束縛 `privacy.approval.*`（`PrivacyDecisionBinding`）に構造的な不足が無い: 承認tenantが設定tenant（`OIDC_TENANT_ID`、未設定なら `default`）と完全一致、ONのcapabilityが全て承認capabilityに含まれる、必要な決定（retention は D-01・D-09、dsar は D-01・D-06・D-09）のID・署名日・失効日が NF08 と同じ規則（形式・placeholder・ID重複・署名日より後の失効日・最長366日）を満たす、approval digest が一致 | `decisionBinding.tenantId.missing` / `decisionBinding.tenantId.mismatch` / `decisionBinding.capabilities.retention.notApproved` / `decisionBinding.d01.decisionId.placeholder` / `decisionBinding.d09.expiresOn.tooLong` / `decisionBinding.decisionIds.notDistinct` / `decisionBinding.approvalDigest.mismatch` |
 | 2 | `privacy-admin` group が有効・未削除で `privacy.*` を許可し、`'*'`・`privacy.` 接頭辞の拒否行を持たない | `privacyAdminGroup.notGrantingPrivacy` |
 | 3 | `privacy-admin` の有効な管理者が2名以上。「有効」= 所属行が未削除、設定tenantの管理者roleで `status=1`・未削除・未ロック（`locked_until` が無いか過去）、`privacy.*`・`'*'` を拒否する他の有効なgroupに所属していない、break-glass username（`BREAK_GLASS_USERNAMES`）ではない | `privacyAdmins.insufficient[current=1;required=2]` |
 | 4 | `privacy-admin` 以外の有効なgroupが `privacy.` 接頭辞の許可行（`privacy.*`・`privacy.<x>`）を持たない（W3-14 review P3-2。`'*'` だけの検査では privacy-admin を複製したgroupを見落とすため） | `privacyAllow.outsidePrivacyAdmin[<group key>;…]` |
 | 5 | `PRIVACY_DSAR_ENABLED` は A2a のマージまでONにできない（入口と §5.1 の追加前提の検査が未実装） | `dsar.prerequisitesNotImplemented` |
 
 - 例外messageには固定の違反コード・flag名・group key・人数だけを出し、決定ID・digest・username・例外本文は出さない。照会に失敗した場合は `*.unverifiable` として起動を止める（fail-closed）。
-- **NF-06・NF-08と異なり、署名日前・失効日以降も起動を止める**。A1H 以降の capability を実行時に決定IDで止める仕組み（計画 §5.2 の `DECISION_UNKNOWN`）がまだ無いため、ONのまま起動させない。実行中に失効日を迎えても動作中のprocessは止めない（W3-14 の入口は読み取り専用の説明照会だけ）が、次回の起動は失敗する。失効日の前に再承認を得て設定を差し替えるか、OFFへ戻すこと。
 - privacy-admin が2名を下回った状態（無効化・ロック・退職・role変更）でも動作中のprocessは止めないが、次回の起動は失敗する。所属者を無効化する前に後任を割り当てる。
+
+##### 4.7.2.1 署名日前・失効（時間要因）の扱い（NF-06・NF-08と同じ。2026-11-14 決定）
+
+- 上表の構造的な不足が無く、**いずれかの決定の署名日前（`decisionBinding.dNN.signedOn.future`）・失効日以降（`decisionBinding.dNN.expiresOn.expired`）だけ**が理由なら、起動は止めない。起動時にWARN `NF07_PRIVACY_STOPPED_AT_STARTUP: NF07の決定ID束縛が有効期間外のため、NF07をOFFとして扱って起動します…` を出し、NF07 を **OFFとして扱う**。
+- 「OFFとして扱う」の範囲: `PrivacyDecisionWindowMonitor` が機能スイッチの実行時条件（`FeatureRuntimeCondition`）として `FeatureSwitches#isEnabled(NF07_RETENTION)` を false にする。したがって `FeatureSwitchFilter` の404（OFFと同じ本文・全role同じ応答）、`PrivacyAccessGuard` の404、policy source を読まないこと、menu `privacy-retention` を隠すこと、起動ログの `[機能スイッチ] 起動時の状態` が `NF07_RETENTION=OFF` になること（加えて `… は設定上ONですが、実行時条件…を満たさないため無効です` のWARN）が、全てOFFと同じになる。
+- **実行中に失効日を迎えた場合**: 判定は入口・metric取得のたびに JST 業務日で行う（同じ日の結果は再利用）。失効日（`expires-on`）の **JST 0:00 から**入口はOFFと同じ404になり、その日の最初の判定でWARN `NF07_PRIVACY_DECISION_STATE: NF07の決定ID束縛の状態=EXPIRED …` を1回出す。署名日前で起動した場合は、署名日の JST 0:00 から自動で開く。process の再起動は不要だが、**再承認の値は再起動しないと反映されない**（設定は起動時に1回だけ読む）。
+- 監視: metric `ses_privacy_decision_binding_state{state="VALID|EXPIRING|EXPIRED|NOT_YET_VALID|INCOMPLETE|DISABLED"}`（現在の状態だけ1）と `ses_privacy_decision_binding_days_remaining`（最も早い失効日までのJST暦日数）。失効の `privacy.approval.expiry-warning-days`（`PRIVACY_APPROVAL_EXPIRY_WARNING_DAYS`、既定30日、1〜366）日前から `EXPIRING` としてWARNを日ごとに1回出す（公開は続く）。`EXPIRING`・`EXPIRED`・`NOT_YET_VALID`・`INCOMPLETE` をアラート対象にする。tag に決定ID・tenant・PII は載せない。
+- 構造的な不足と同時なら起動を止める。失効日だけを書き換えた設定は digest 不一致（構造的な不足）になるため、「時間要因だけ」とはみなされない。
 
 #### 4.7.3 決定ID束縛の設定項目
 
@@ -212,6 +219,7 @@
 | `privacy.approval.d06.*` | `PRIVACY_APPROVAL_D06_*` | D-06 DSAR SOP（`dsar` を承認する場合だけ必要） |
 | `privacy.approval.d09.*` | `PRIVACY_APPROVAL_D09_*` | D-09 本番 flag 開放 |
 | `privacy.approval.approval-digest` | `PRIVACY_APPROVAL_DIGEST` | 決定書（D-09）に記載された束縛内容のSHA-256（小文字hex 64桁。大文字も可） |
+| `privacy.approval.expiry-warning-days` | `PRIVACY_APPROVAL_EXPIRY_WARNING_DAYS` | 失効の何日前から `EXPIRING` のWARN・metricを出すか（既定30、1〜366に丸める）。承認内容ではないため digest に含めない |
 
 決定IDの規則は NF-08（`ai.external-send-approval.*`）と同じ: 英数字で始まる4〜64文字（`A-Z a-z 0-9 . _ : -`）、`TBD`・`TODO`・`PENDING`・`DRAFT`・`UNKNOWN`・`XXXX` 等の断片や `NONE`・`NULL`・`N-A` は拒否、必要な決定の間で同じIDは拒否（大文字小文字を区別しない）。規則の一致は `PrivacyDecisionBindingTest` が NF-08 との比較で固定している。
 
@@ -241,12 +249,16 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
      ```
 3. **束縛値の設定**: 4.7.3 の環境変数を全instanceに同じ値で設定する。digest は決定書の値から二者がそれぞれ正規形を作り、同じ値になることを確認してから転記する。
 4. `PRIVACY_RETENTION_ENABLED=true` にして**全停止で再起動**する（rolling 更新で旧値のinstanceと混在させない）。
-5. 起動ログで `[privacy] NF07のflag ONの前提を確認しました: flags=privacy.retention.enabled decisionIds=[…] privacyAdmins=2` と、`[機能スイッチ] 起動時の状態` の `NF07_RETENTION=ON` を確認する。起動に失敗した場合は例外messageの違反コード（4.7.2）を確認し、直すまでは `PRIVACY_RETENTION_ENABLED` を外して起動する。
+5. 起動ログで `[privacy] NF07のflag ONの前提を確認しました: flags=privacy.retention.enabled decisionIds=[…] privacyAdmins=2` と、`[機能スイッチ] 起動時の状態` の `NF07_RETENTION=ON` を確認する。起動に失敗した場合は例外messageの違反コード（4.7.2）を確認し、直すまでは `PRIVACY_RETENTION_ENABLED` を外して起動する。代わりに `NF07_PRIVACY_STOPPED_AT_STARTUP` のWARNが出て `NF07_RETENTION=OFF` になった場合は、署名日前か失効である（4.7.2.1。署名日前なら署名日に自動で開く）。
 6. 動作確認: privacy-admin で `GET /api/privacy/policies/evaluate?...` が200（`decisionStatus=POLICY_UNKNOWN`。NF07-REG・TRUST の前は `APPROVED_ACTIVE` にならない）、privacy-admin 以外の管理者は403。
 
-#### 4.7.5 失効・再承認・OFF
+#### 4.7.5 失効・再承認（更新）・OFF
 
-- 失効日の前に新しい決定（決定ID・署名日・失効日・digest）を得て、4.7.4 の3〜5で差し替える。digest は決定IDや日付を変えると変わる。
+- **失効前（推奨）**: `EXPIRING` のWARN・metric（既定で失効30日前から）を受けたら、次の手順で再承認する。
+  1. 失効する決定（最も早い失効日の決定。D-01 か D-09）の署名者から新しい決定（新しい決定ID・署名日・失効日）を得る。D-09 を再署名する場合は、新しい束縛内容の digest を決定書に記載してもらう（決定ID・日付が変わると digest も変わる）。
+  2. 4.7.4 の3（二者で正規形から digest を作って照合し、全instanceに同じ値を設定）を行う。新しい署名日が未来の場合は、その日まで NF07 は閉じる（`NOT_YET_VALID`）ので、旧決定の失効日より前の日付で署名してもらう。
+  3. 全停止で再起動し、`[privacy] NF07のflag ONの前提を確認しました` と `NF07_RETENTION=ON`、metric `state="VALID"` と `days_remaining` が新しい失効日に合うことを確認する。
+- **失効後**: 入口は失効日（JST）から既にOFFと同じ404で、process はそのまま動く。上の1〜3で再承認して再起動すれば開く。再承認を待たない場合は `PRIVACY_RETENTION_ENABLED` を外して再起動する（WARNとmetricの `EXPIRED` を止める）。
 - 問題時は `PRIVACY_RETENTION_ENABLED` を外して再起動する（OFFでは決定ID束縛と privacy-admin の検査を行わない）。privacy-admin の割当は残る（OFF中は入口が404のため使われない）。
 
 ## 5. 新しい入口を追加するとき
@@ -275,4 +287,5 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 | `PortalServiceRequestVisibilityIntegrationTest` | Docker不要（H2） | 公開開始時刻未設定の実context。portalの一覧・詳細・返信・CSAT・添付uploadが社内登録分を404/非表示にし、内部サービスデスクは従来どおり |
 | `FeatureSwitchServletContainerIntegrationTest` | Docker不要・実Tomcat起動（Windowsでは **PowerShell環境** で実行） | NF-01をproperty形式、NF-04を環境変数形式でOFFにした実context。未認証の画面404（login誘導されない・no-store）、管理者と未認証で同一の404 JSON、存在しないURLの404との同一性、ONの機能・中核APIはSpring Securityへ届くこと、PWA静的入口の遮断範囲、filter登録順 |
 | `PrivacyDecisionBindingTest` | Docker不要 | NF-07の決定ID束縛: 正規形とdigest、各項目の欠落、capabilityごとの必要な決定、未承認capability、tenant不一致、失効・署名日前、digest改竄、ID重複、決定ID・日付の判定がNF-08と一致すること |
-| `PrivacyProductionConfigurationValidatorTest` | Docker不要（H2） | NF-07 flag ONのprod起動検査: 全OFFは無検査、各欠項・失効・tenant不一致・digest改竄・privacy-admin 1名／無効・ロック・削除・他role・他tenant・拒否group所属・break-glassの除外、privacy-admin groupの許可欠落・拒否行、他groupの `privacy.` 許可行、DSAR未実装、照会失敗、messageに値を出さないこと |
+| `PrivacyProductionConfigurationValidatorTest` | Docker不要（H2） | NF-07 flag ONのprod起動検査: 全OFFは無検査、各欠項・tenant不一致・digest改竄で起動失敗、失効・署名日前は起動してWARNとOFF扱い、時間要因と構造的不足の同時は起動失敗、privacy-admin 1名／無効・ロック・削除・他role・他tenant・拒否group所属・break-glassの除外、privacy-admin groupの許可欠落・拒否行、他groupの `privacy.` 許可行、DSAR未実装、照会失敗、messageに値を出さないこと |
+| `PrivacyDecisionWindowMonitorTest` | Docker不要 | NF-07の有効期間監視: 固定・可変Clockで、有効・EXPIRING・失効・署名日前・不完全の状態とmetric・日付ごとのWARN、実行中に失効日（JST 0:00）を迎えると `FeatureSwitches`・`FeatureSwitchFilter`・`PrivacyAccessGuard` がOFFと同じ404になること、署名日に自動で開くこと、実行時条件の例外はOFF |

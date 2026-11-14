@@ -242,6 +242,54 @@ class PrivacyDecisionBindingTest {
     }
 
     @Test
+    void 署名日前と失効だけを時間要因としそれ以外を構造的な違反とする() {
+        PrivacyApprovalProperties approval = approved(List.of("retention"));
+        PrivacyDecisionBinding.Evaluation expired = evaluate(approval, RETENTION, TENANT, LocalDate.of(2027, 5, 31));
+        assertEquals(List.of(), PrivacyDecisionBinding.structuralViolations(expired));
+        assertEquals(List.of("d09.expiresOn.expired"), PrivacyDecisionBinding.temporalViolations(expired));
+
+        PrivacyDecisionBinding.Evaluation future = evaluate(approval, RETENTION, TENANT, LocalDate.of(2026, 11, 9));
+        assertEquals(List.of(), PrivacyDecisionBinding.structuralViolations(future));
+        assertEquals(List.of("d09.signedOn.future"), PrivacyDecisionBinding.temporalViolations(future));
+
+        // 失効日を書き換えた設定は digest 不一致になり、時間要因だけとはみなされない（NF08 と同じ）
+        PrivacyApprovalProperties rewritten = approved(List.of("retention"));
+        rewritten.getD09().setExpiresOn("2027-06-30");
+        PrivacyDecisionBinding.Evaluation mismatch =
+                evaluate(rewritten, RETENTION, TENANT, LocalDate.of(2027, 6, 30));
+        assertEquals(List.of(PrivacyDecisionBinding.VIOLATION_DIGEST_MISMATCH),
+                PrivacyDecisionBinding.structuralViolations(mismatch));
+        assertEquals(List.of("d09.expiresOn.expired"), PrivacyDecisionBinding.temporalViolations(mismatch));
+
+        assertTrue(PrivacyDecisionBinding.isTemporalViolation("d01.signedOn.future"));
+        assertFalse(PrivacyDecisionBinding.isTemporalViolation("d01.signedOn.missing"));
+        assertFalse(PrivacyDecisionBinding.isTemporalViolation("d01.expiresOn.tooLong"));
+        assertEquals(List.of("approval.unavailable"), PrivacyDecisionBinding.structuralViolations(null));
+    }
+
+    @Test
+    void 有効期間の監視状態は最も早い失効日と署名日で決まる() {
+        PrivacyApprovalProperties approval = approved(List.of("retention"));
+
+        assertEquals(new PrivacyDecisionBinding.Window(PrivacyDecisionBinding.WindowState.VALID, 198L),
+                PrivacyDecisionBinding.window(approval, TODAY, 30));
+        assertEquals(new PrivacyDecisionBinding.Window(PrivacyDecisionBinding.WindowState.EXPIRING, 30L),
+                PrivacyDecisionBinding.window(approval, LocalDate.of(2027, 5, 1), 30));
+        assertEquals(new PrivacyDecisionBinding.Window(PrivacyDecisionBinding.WindowState.EXPIRING, 1L),
+                PrivacyDecisionBinding.window(approval, LocalDate.of(2027, 5, 30), 30));
+        assertEquals(new PrivacyDecisionBinding.Window(PrivacyDecisionBinding.WindowState.EXPIRED, 0L),
+                PrivacyDecisionBinding.window(approval, LocalDate.of(2027, 5, 31), 30));
+        assertEquals(PrivacyDecisionBinding.WindowState.NOT_YET_VALID,
+                PrivacyDecisionBinding.window(approval, LocalDate.of(2026, 11, 9), 30).state());
+        assertEquals(PrivacyDecisionBinding.WindowState.NOT_CONFIGURED,
+                PrivacyDecisionBinding.window(new PrivacyApprovalProperties(), TODAY, 30).state());
+        PrivacyApprovalProperties noExpiry = approved(List.of("retention"));
+        noExpiry.getD01().setExpiresOn("");
+        assertEquals(PrivacyDecisionBinding.WindowState.NOT_CONFIGURED,
+                PrivacyDecisionBinding.window(noExpiry, TODAY, 30).state());
+    }
+
+    @Test
     void 署名日と失効日の判定はNF08の外部送信承認と一致する() {
         String[][] cases = {
                 {"2026-11-01", "2027-10-31"},
