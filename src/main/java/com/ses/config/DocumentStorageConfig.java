@@ -78,5 +78,14 @@ public class DocumentStorageConfig {
             s3Bucket.remove("s3-q:" + key);
             log.debug("[S3MockDocumentStorage] delete S3 key={}", key);
         }
+
+        /** in-memoryのため失敗しない。削除後に残っていないことだけを確認する。 */
+        @Override
+        public void deleteStrict(String key) throws IOException {
+            delete(key);
+            if (s3Bucket.containsKey("s3:" + key) || s3Bucket.containsKey("s3-q:" + key)) {
+                throw new IOException("S3 object remains after delete: " + key);
+            }
+        }
     }
 }

@@ -31,3 +31,4 @@ ImportValidationLeaseMySqlTest
 ImportValidationSealRealMySqlTest
 ImportValidationResolverRealMySqlTest
 FlywayProdFreshInstallMySqlTest
+ImportValidationRunRealMySqlTest

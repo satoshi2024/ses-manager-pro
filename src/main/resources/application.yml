@@ -290,6 +290,20 @@ app:
     scanner-read-timeout-ms: ${FILE_SCANNER_READ_TIMEOUT_MS:10000}
     legacy-migration-enabled: ${LEGACY_MIGRATION_ENABLED:true}
     contract-backfill-enabled: ${CONTRACT_BACKFILL_ENABLED:true}
+  # ===== NF-06 取込センターの本番admission（Q-5） =====
+  # 値は署名済みData Owner決定書の転記（秘密値を置かない）。既定は全て未設定＝全sourceの取込を拒否する。
+  # NF-06スイッチがONのprodは、時間経過（署名日前・失効）以外の不備があれば起動しない。OFFなら起動を止めない。
+  # 手順・digestの正規形: .kiro/specs/data-migration-import-center/a1a-ingress-operations.md §10
+  import-center:
+    admission:
+      decision-id: ${IMPORT_ADMISSION_DECISION_ID:}
+      tenant-id: ${IMPORT_ADMISSION_TENANT_ID:}
+      signed-on: ${IMPORT_ADMISSION_SIGNED_ON:}
+      expires-on: ${IMPORT_ADMISSION_EXPIRES_ON:}
+      # 承認済みsource code（カンマ区切り。比較は小文字）
+      source-codes: ${IMPORT_ADMISSION_SOURCE_CODES:}
+      # 決定書に記載された承認内容のSHA-256（小文字hex 64桁）
+      approval-digest: ${IMPORT_ADMISSION_APPROVAL_DIGEST:}
   # メール差出人
   mail:
     from: ${MAIL_FROM:noreply@example.com}
@@ -367,6 +381,9 @@ app:
     # NF-04 要員PWAシェル（Service Worker・manifest）。日次入力queue・offline下書き復元は対象外（常時有効）
     nf04:
       enabled: ${FEATURE_NF04_ENABLED:false}
+    # NF-06 データ移行・取込センター（API。apply系は含まない）。ONにするprodはimport-center.admissionの承認設定が必須
+    nf06:
+      enabled: ${FEATURE_NF06_ENABLED:false}
     # NF-10 定期管理レポート
     nf10:
       enabled: ${FEATURE_NF10_ENABLED:false}

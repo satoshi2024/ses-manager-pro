@@ -57,6 +57,7 @@ class FeatureSwitchRouteCoverageTest {
             "com.ses.service.training", Feature.NF03,
             "com.ses.service.skillgap", Feature.NF03,
             "com.ses.service.pwa", Feature.NF04,
+            "com.ses.importcenter", Feature.NF06,
             "com.ses.service.report", Feature.NF10);
 
     /** ActionPermissionResolverのresource名 → 所属機能（API root・画面rootの解決結果で判定）。 */
@@ -102,7 +103,9 @@ class FeatureSwitchRouteCoverageTest {
     /** NF配下だが意図的に止めないscheduler（理由必須）。 */
     private static final Map<String, String> UNGATED_SCHEDULERS = Map.of(
             "com.ses.service.pwa.PwaClientMutationCleanupScheduler",
-            "常時有効な保存経路が書くidempotency ledgerの保持期限を守るため、NF-04 OFF中も削除を続ける");
+            "常時有効な保存経路が書くidempotency ledgerの保持期限を守るため、NF-04 OFF中も削除を続ける",
+            "com.ses.importcenter.metadata.ImportStageReconcileScheduler",
+            "照合台帳に残った取込stage objectの回収は公開可否と無関係に続ける（NF-06 OFFへ切り替えた後も原本objectを残さない）");
 
     @Test
     void NF配下のcontroller入口は全て対応する機能スイッチへ登録されている() throws Exception {

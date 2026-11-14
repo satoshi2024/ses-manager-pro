@@ -5133,6 +5133,7 @@ class ImportMetadataRealMySqlTest {
             return content.clone();
         }
         @Override public void delete(String key) { objects.remove(key); }
+        @Override public void deleteStrict(String key) { objects.remove(key); }
         int openCount() { return opens.get(); }
         void resetOpenCount() { opens.set(0); failAtOpen.set(-1); failAfterBytes.set(-1); changeAtOpen.set(-1); }
         void failOpenAt(int openNumber, int afterBytes) {

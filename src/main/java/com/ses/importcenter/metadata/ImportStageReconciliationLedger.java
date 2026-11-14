@@ -53,7 +53,10 @@ public class ImportStageReconciliationLedger {
     static final String SUFFIX = ".properties";
     /** COMMIT結果不明で保全したstage件数。増加は照合待ちの発生を意味する（アラート対象）。 */
     static final String RETAINED_METRIC = "ses.import.stage.retained";
-    /** stage補償削除の失敗件数。tag {@code path}は{@code winner}（成功応答の途中、500）または{@code failure}。 */
+    /**
+     * stage補償削除の失敗件数。tag {@code path}は{@code winner}（成功応答の途中、500）、{@code failure}、
+     * {@code stage}（stage処理の途中失敗時の補償。N6-2）。
+     */
     static final String DISCARD_FAILURE_METRIC = "ses.import.stage.discard.failures";
     /** 台帳fileの書込失敗件数。増加時は自動回収されないため手作業の照合が必要（アラート対象）。 */
     static final String LEDGER_FAILURE_METRIC = "ses.import.stage.ledger.failures";
@@ -96,7 +99,8 @@ public class ImportStageReconciliationLedger {
     /**
      * 未commit確定のstageで補償削除に失敗したことを記録する。例外は投げない。
      *
-     * @param path {@code winner}（別winnerを返す成功応答の途中）または{@code failure}（元の失敗を返す途中）
+     * @param path {@code winner}（別winnerを返す成功応答の途中）、{@code failure}（元の失敗を返す途中）、
+     *             または{@code stage}（stage処理の途中失敗時の補償）
      */
     boolean recordDiscardFailure(String tenantId, StagedImportDocument staged, String path) {
         increment(DISCARD_FAILURE_METRIC, path);

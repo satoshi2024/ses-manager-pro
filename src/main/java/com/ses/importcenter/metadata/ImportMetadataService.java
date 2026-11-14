@@ -180,7 +180,9 @@ public class ImportMetadataService {
      *
      * <p>同一identityのjobが別法人に属する場合は、他の不一致より先に判定して
      * {@link ImportIdentityOwnedByOtherLegalEntityException}を投げる。別法人のjobのsource version・encoding等で
-     * 応答が変わらないようにするためで、呼出元はこれを汎用403へ変換する（内容存在のoracleにしない）。
+     * 応答が変わらないようにするためで、呼出元はこれを汎用403へ変換する（専用の409を返さない）。
+     * ただしidentityの一意制約は法人を含まないため、uploadできる別法人の利用者は「同じbytesなら403になる」ことから
+     * 別法人での存在を判定できる（N6-3。存在のoracleは残り、Q-15で既知リスクとして受容。解消には法人を含むDDLが必要）。
      * 同一法人内の条件不一致（encoding・source version・document hash）は従来どおり409とする。
      */
     public ImportUploadJobDetail findOrReuseExistingUpload(ImportUploadSource source, ImportEncoding encoding,

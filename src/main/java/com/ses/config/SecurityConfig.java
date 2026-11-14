@@ -255,7 +255,11 @@ public class SecurityConfig {
                     "/api/customer-success/health/snapshots",
                     "/api/customer-success/health/snapshots/**",
                     "/api/service-desk/health/snapshots",
-                    "/api/service-desk/health/snapshots/**"
+                    "/api/service-desk/health/snapshots/**",
+                    // NF-06取込センター（upload・検証・preview・error export・source/mapping管理）は管理者のみ。
+                    // serviceも管理者role＋明示action（import.metadata.manage）を毎回再確認する。画面はW3-12で追加する。
+                    "/import-center/**",
+                    "/api/import-center/**"
                 ).hasRole("管理者")
                 .requestMatchers("/api/management-reports/schedules/*/enable",
                         "/api/management-reports/schedules/*/disable")

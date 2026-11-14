@@ -57,4 +57,16 @@ public interface DocumentStorage {
      * @param key オブジェクトキー
      */
     void delete(String key);
+
+    /**
+     * Storage実体を削除し、削除できなかった場合は呼出元へ失敗を返す厳格版（NF-06 N6-2）。
+     *
+     * <p>{@link #delete}は実装により入出力失敗をログだけで握りつぶす（既存利用者の意味は変えない）。補償削除の失敗を
+     * 台帳・metric・再試行へ回す必要がある経路（取込stageの破棄）だけが本メソッドを使う。対象が既に無い場合は成功とし
+     * （冪等）、quarantine・公開の両領域を試みたうえで、どちらかが残った場合は{@link IOException}を投げる。
+     *
+     * @param key オブジェクトキー
+     * @throws IOException 削除に失敗した、または削除後も実体が残っている
+     */
+    void deleteStrict(String key) throws IOException;
 }

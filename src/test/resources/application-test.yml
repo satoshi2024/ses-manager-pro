@@ -175,6 +175,8 @@ app:
       enabled: true
     nf04:
       enabled: true
+    nf06:
+      enabled: true
     nf10:
       enabled: true
 

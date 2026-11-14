@@ -854,6 +854,7 @@ class ImportCsvIngestionRealMySqlTest {
             return bytes.clone();
         }
         @Override public void delete(String key) { objects.remove(key); }
+        @Override public void deleteStrict(String key) { objects.remove(key); }
         int putCount() { return putCount.get(); }
         int objectCount() { return objects.size(); }
         byte[] onlyObject() { return objects.values().stream().findFirst().orElseThrow().clone(); }

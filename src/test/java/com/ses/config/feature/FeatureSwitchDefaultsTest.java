@@ -36,9 +36,9 @@ class FeatureSwitchDefaultsTest {
             assertThat(switches.isEnabled(feature)).as(feature.name()).isFalse();
         }
         assertThat(switches.disabledKeys()).containsExactly("nf01", "nf02", "nf02-customer-portal", "nf03",
-                "nf03-certification-pii", "nf04", "nf10");
+                "nf03-certification-pii", "nf04", "nf06", "nf10");
         assertThat(switches.describe()).isEqualTo("NF01=OFF, NF02=OFF, NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, "
-                + "NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF10=OFF");
+                + "NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF06=OFF, NF10=OFF");
     }
 
     @Test
@@ -88,7 +88,7 @@ class FeatureSwitchDefaultsTest {
         assertThat(Feature.NF02.parent()).isEmpty();
         assertThat(Feature.NF02.root()).isEqualTo(Feature.NF02);
         assertThat(Feature.topLevel()).containsExactly(Feature.NF01, Feature.NF02, Feature.NF03, Feature.NF04,
-                Feature.NF10);
+                Feature.NF06, Feature.NF10);
         // 子はメニューを持たない（メニューの表示可否は親スイッチで決まる）。
         assertThat(Feature.NF02_CUSTOMER_PORTAL.menuKeys()).isEmpty();
         assertThat(Feature.NF03_CERTIFICATION_PII.menuKeys()).isEmpty();
@@ -196,7 +196,9 @@ class FeatureSwitchDefaultsTest {
                 .isEqualTo("app.features.nf03-certification-pii.enabled");
         assertThat(Feature.NF03_CERTIFICATION_PII.environmentVariable())
                 .isEqualTo("FEATURE_NF03_CERTIFICATION_PII_ENABLED");
-        assertThat(Set.of(Feature.values())).hasSize(7);
+        assertThat(Feature.NF06.propertyName()).isEqualTo("app.features.nf06.enabled");
+        assertThat(Feature.NF06.environmentVariable()).isEqualTo("FEATURE_NF06_ENABLED");
+        assertThat(Set.of(Feature.values())).hasSize(8);
     }
 
     @Test

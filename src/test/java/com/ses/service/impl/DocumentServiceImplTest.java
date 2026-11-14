@@ -846,7 +846,8 @@ class DocumentServiceImplTest {
         assertEquals(503, error.getCode());
         ArgumentCaptor<String> putKey = ArgumentCaptor.forClass(String.class);
         verify(documentStorage).put(putKey.capture(), any(InputStream.class), eq(true));
-        verify(documentStorage).delete(putKey.getValue());
+        verify(documentStorage).deleteStrict(putKey.getValue());
+        verify(documentStorage, never()).delete(anyString());
         verify(documentStorage, never()).open(anyString());
     }
 
@@ -879,7 +880,7 @@ class DocumentServiceImplTest {
         assertEquals(503, error.getCode());
         ArgumentCaptor<String> putKey = ArgumentCaptor.forClass(String.class);
         verify(documentStorage).put(putKey.capture(), any(InputStream.class), eq(true));
-        verify(documentStorage).delete(putKey.getValue());
+        verify(documentStorage).deleteStrict(putKey.getValue());
         verify(documentStorage, never()).promote(anyString());
     }
 
@@ -904,7 +905,7 @@ class DocumentServiceImplTest {
         ArgumentCaptor<String> putKey = ArgumentCaptor.forClass(String.class);
         verify(documentStorage).put(putKey.capture(), any(InputStream.class), eq(true));
         verify(documentStorage).open(putKey.getValue());
-        verify(documentStorage).delete(putKey.getValue());
+        verify(documentStorage).deleteStrict(putKey.getValue());
     }
 
     @Test
@@ -915,7 +916,7 @@ class DocumentServiceImplTest {
             expired.set(true);
             return null;
         }).when(documentStorage).promote(anyString());
-        doThrow(new IllegalStateException("synthetic storage delete outage")).when(documentStorage).delete(anyString());
+        doThrow(new IllegalStateException("synthetic storage delete outage")).when(documentStorage).deleteStrict(anyString());
 
         BusinessException error = assertThrows(BusinessException.class, () -> sut.stageReceivedForImport(
                 fixture.request(), fixture.file(), fixture.size(), fixture.sha256(), deadlineCheckpoint(expired)));
@@ -925,6 +926,35 @@ class DocumentServiceImplTest {
         assertEquals(1, error.getSuppressed().length);
         BusinessException cleanup = assertInstanceOf(BusinessException.class, error.getSuppressed()[0]);
         assertEquals("error.import.storageCleanupFailed", cleanup.getMessageKey());
+        // N6-2: 取込側が照合台帳へ記録できるよう、原因にstorage keyとoperation IDの印を付ける。
+        ImportStageCleanupFailure marker = ImportStageCleanupFailure.find(error).orElseThrow();
+        ArgumentCaptor<String> putKey = ArgumentCaptor.forClass(String.class);
+        verify(documentStorage).put(putKey.capture(), any(InputStream.class), eq(true));
+        assertEquals(putKey.getValue(), marker.storageKey());
+        assertNotNull(marker.operationId());
+        verify(documentStorage, never()).delete(anyString());
+    }
+
+    @Test
+    void discardImportStage_strictDeleteFailureIsReportedInsteadOfSwallowed() throws Exception {
+        java.io.IOException outage = new java.io.IOException("synthetic strict delete outage");
+        doThrow(outage).when(documentStorage).deleteStrict("0123456789abcdef0123456789abcdef/key");
+        Document document = new Document();
+        document.setDocumentType("IMPORT");
+        DocumentVersion version = new DocumentVersion();
+        version.setStorageKey("0123456789abcdef0123456789abcdef/key");
+        StagedImportDocument staged = new StagedImportDocument(document, version,
+                "0123456789abcdef0123456789abcdef/key", "op-n6-2");
+
+        BusinessException error = assertThrows(BusinessException.class, () -> sut.discardImportStage(staged));
+
+        assertEquals(500, error.getCode());
+        assertEquals("error.import.storageCleanupFailed", error.getMessageKey());
+        ImportStageCleanupFailure marker = ImportStageCleanupFailure.find(error).orElseThrow();
+        assertEquals("0123456789abcdef0123456789abcdef/key", marker.storageKey());
+        assertEquals("op-n6-2", marker.operationId());
+        assertSame(outage, marker.getCause());
+        verify(documentStorage, never()).delete(anyString());
     }
 
     @Test

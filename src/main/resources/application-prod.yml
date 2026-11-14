@@ -119,6 +119,9 @@ app:
       enabled: ${FEATURE_NF03_CERTIFICATION_PII_ENABLED:false}
     nf04:
       enabled: ${FEATURE_NF04_ENABLED:false}
+    # NF-06（取込センターAPI）。ONにする場合はapp.import-center.admissionの署名済み承認設定が必須（不備は起動失敗）
+    nf06:
+      enabled: ${FEATURE_NF06_ENABLED:false}
     nf10:
       enabled: ${FEATURE_NF10_ENABLED:false}
 
