@@ -2,6 +2,7 @@ package com.ses.importcenter.metadata;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.service.DocumentService;
+import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;

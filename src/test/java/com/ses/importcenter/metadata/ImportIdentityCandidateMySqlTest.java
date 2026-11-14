@@ -8,6 +8,7 @@ import com.ses.importcenter.foundation.ImportEncoding;
 import com.ses.importcenter.foundation.ImportEntity;
 import com.ses.service.DocumentService;
 import com.ses.service.security.LegalEntityContextService;
+import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

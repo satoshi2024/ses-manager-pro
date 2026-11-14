@@ -22,6 +22,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.storage.DocumentStorage;
+import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -1176,7 +1177,9 @@ class ImportMetadataRealMySqlTest {
             assertTrue(binding != null, "実service transactionからactor identityを取得します");
             assertEquals(tenantId, binding.tenantId());
             assertEquals(actorUserId, binding.actorUserId());
-            ActorPrimaryRecordLock initialLock = exactActorPrimaryRecordLock(binding, actorUserId, true);
+            // LOCK_DATAはpageをlatch待ちなしで読めた場合だけ見えるため、初回取得時もNULL（不可視）を許す。対象行は
+            // service connectionが主キー一点のFOR UPDATEで保持する唯一のsys_user PRIMARY RECORD lockのidentityで束縛する。
+            ActorPrimaryRecordLock initialLock = exactActorPrimaryRecordLock(binding, actorUserId, false);
             mutation = pool.submit(() -> runActorMutationWithBudget(actorMutationConnectionId,
                     "UPDATE sys_user SET status=0 WHERE tenant_id=? AND id=?", tenantId, actorUserId));
             ActorPrimaryWaitEdge observed = awaitExactActorPrimaryWait(binding, initialLock,
@@ -1701,6 +1704,13 @@ class ImportMetadataRealMySqlTest {
 
         assertTrue(isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(edge), captured, binding, 72L, "tenant-a", 301L),
                 "初回keyがactor IDと確認済みなら、wait中のNULL LOCK_DATAは不可視として扱いlock identityで照合する");
+        assertTrue(isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(edge), hiddenKeyAfterWait, binding,
+                        72L, "tenant-a", 301L),
+                "初回keyがNULL（page未参照で不可視）でも、唯一のactor lockのidentityが一致すれば照合する");
+        assertTrue(!isExactActorPrimaryWait(List.of(new ActorPrimaryRecordLock("INNODB", "actor-lock", "holder-trx",
+                        71L, binding.schema(), "sys_user", "PRIMARY", "RECORD", "X,REC_NOT_GAP", "GRANTED", "302")),
+                List.of(edge), hiddenKeyAfterWait, binding, 72L, "tenant-a", 301L),
+                "初回keyがNULLでも、wait中に見える誤keyは拒否する");
         assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(edge), captured,
                 binding, 72L, "tenant-b", 301L), "誤tenantを拒否");
         assertTrue(!isExactActorPrimaryWait(List.of(hiddenKeyAfterWait), List.of(edge),
@@ -1852,6 +1862,16 @@ class ImportMetadataRealMySqlTest {
                 "t_import_source_system", "uk_import_source_tenant_id", "RECORD", "X,REC_NOT_GAP", "GRANTED", null);
         assertTrue(isExactSourcePrimaryWait(List.of(hiddenKeyUk), List.of(edgeUk), capturedUk, 72L, 71L, 301L),
                 "uk_import_source_tenant_idでも初回key確認済みならNULL LOCK_DATAをlock identityで照合する");
+        assertTrue(isExactSourcePrimaryWait(List.of(hiddenKeyAfterWait), List.of(edge), hiddenKeyAfterWait,
+                        72L, 71L, 301L),
+                "初回keyがNULL（page未参照で不可視）でも、唯一のsource lockのidentityが一致すれば照合する");
+        assertTrue(isExactSourcePrimaryWait(List.of(hiddenKeyUk), List.of(edgeUk), hiddenKeyUk, 72L, 71L, 301L),
+                "uk_import_source_tenant_idでも初回keyがNULLならlock identityで照合する");
+        assertTrue(!isExactSourcePrimaryWait(List.of(new SourcePrimaryRecordLock("INNODB", "source-lock", "holder-trx",
+                        71L, "nf06_import_metadata_real", "t_import_source_system", "PRIMARY", "RECORD",
+                        "X,REC_NOT_GAP", "GRANTED", "302", 301L)),
+                List.of(edge), hiddenKeyAfterWait, 72L, 71L, 301L),
+                "初回keyがNULLでも、wait中に見える誤keyは拒否する");
 
         assertTrue(!isExactSourcePrimaryWait(List.of(hiddenKeyAfterWait), List.of(edge), captured, 73L, 71L, 301L), "誤requester connectionを拒否");
         assertTrue(!isExactSourcePrimaryWait(List.of(hiddenKeyAfterWait), List.of(edge), captured, 72L, 74L, 301L), "誤holder connectionを拒否");
@@ -2534,8 +2554,10 @@ class ImportMetadataRealMySqlTest {
                 throw new AssertionError("実candidate serviceのwrite gateに到達しませんでした");
             }
             assertGateRunsInReadCommittedTransaction(pause);
+            // LOCK_DATAはpageをlatch待ちなしで読めた場合だけ見えるため、初回取得時もNULL（不可視）を許す。対象行は
+            // service connectionが主キー一点のFOR UPDATEで保持する唯一のt_import_source_system RECORD lockのidentityで束縛する。
             SourcePrimaryRecordLock initialLock = exactSourceRecordLock(pause.connectionId.get(),
-                    pause.transactionId.get(), pause.schema.get(), sourceId, true);
+                    pause.transactionId.get(), pause.schema.get(), sourceId, false);
             mutation = pool.submit(() -> runSourceMutationWithBudget(writerId, mutationSql, mutationParams));
             SourcePrimaryWaitEdge observed = awaitSourceLockWait(writerId, pause.connectionId, service, mutation, initialLock);
             logSourceLockWait("source mutation waiting on candidate", observed);
@@ -3210,7 +3232,9 @@ class ImportMetadataRealMySqlTest {
                                             long expectedActorId) {
         if (observedHolderLocks == null || observedHolderLocks.size() != 1 || waits == null || waits.size() != 1
                 || !binding.tenantId().equals(expectedTenantId) || binding.actorUserId() != expectedActorId
-                || capturedLock == null || !Long.toString(expectedActorId).equals(capturedLock.lockData())
+                || capturedLock == null
+                // 初回keyはNULL（不可視）か期待actor IDとの一致。見えている誤keyは拒否する。
+                || capturedLock.lockData() != null && !Long.toString(expectedActorId).equals(capturedLock.lockData())
                 || !isActorPrimaryRecordLock(capturedLock, binding, expectedActorId)) return false;
         ActorPrimaryRecordLock holder = observedHolderLocks.get(0);
         ActorPrimaryWaitEdge edge = waits.get(0);
@@ -4393,7 +4417,9 @@ class ImportMetadataRealMySqlTest {
                                              long requesterId, long holderId, long expectedSourceId) {
         if (holderRecords == null || holderRecords.size() != 1 || waits == null || waits.size() != 1
                 || capturedLock == null
-                || !isAllowedSourceLockData(capturedLock.index(), capturedLock.lockData(), tenantId, expectedSourceId)
+                // 初回keyはNULL（不可視）か期待source行のkeyとの一致。見えている誤keyは拒否する。
+                || capturedLock.lockData() != null
+                        && !isAllowedSourceLockData(capturedLock.index(), capturedLock.lockData(), tenantId, expectedSourceId)
                 || !isSourceRecordLock(capturedLock, expectedSourceId, "GRANTED")) return false;
         SourcePrimaryRecordLock holder = holderRecords.get(0);
         SourcePrimaryWaitEdge edge = waits.get(0);

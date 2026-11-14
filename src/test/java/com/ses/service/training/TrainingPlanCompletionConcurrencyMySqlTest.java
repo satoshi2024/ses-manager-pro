@@ -10,6 +10,7 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.TrainingCourseMapper;
 import com.ses.mapper.TrainingEnrollmentMapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -99,8 +100,8 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
                 } finally { AccountingTenantContextHolder.clear(); }
             });
             assertTrue(firstChanged.await(10, TimeUnit.SECONDS), "先行transactionがplan lockを保持する");
-            assertTrue(hasGrantedPlanRecordLock(f.planId, blockingConnectionId.get()),
-                    "先行connectionが対象planのPRIMARY RECORD lockを保持する。locks=" + locks());
+            InnoDbRecordLockWaits.PointLock planLock = requirePlanRecordLock(f.planId, blockingConnectionId.get(),
+                    "先行connection");
             Future<?> second = pool.submit(() -> {
                 tenant();
                 try {
@@ -113,7 +114,7 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
                 } finally { AccountingTenantContextHolder.clear(); }
             });
             assertTrue(secondStarted.await(5, TimeUnit.SECONDS), "後続transactionがworkerで開始する");
-            awaitLockWait(second, f.planId, requestingConnectionId, blockingConnectionId);
+            awaitLockWait(second, planLock, requestingConnectionId);
             releaseFirst.countDown();
             first.get(20, TimeUnit.SECONDS);
             second.get(20, TimeUnit.SECONDS);
@@ -173,8 +174,8 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
                 } finally { AccountingTenantContextHolder.clear(); }
             });
             assertTrue(enrolled.await(10, TimeUnit.SECONDS), "enrollment insert後もplan lockを保持する");
-            assertTrue(hasGrantedPlanRecordLock(f.planId, blockingConnectionId.get()),
-                    "enroll connectionが対象planのPRIMARY RECORD lockを保持する。locks=" + locks());
+            InnoDbRecordLockWaits.PointLock planLock = requirePlanRecordLock(f.planId, blockingConnectionId.get(),
+                    "enroll connection");
             Future<?> completion = pool.submit(() -> {
                 tenant();
                 try {
@@ -187,7 +188,7 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
                 } finally { AccountingTenantContextHolder.clear(); }
             });
             assertTrue(completionStarted.await(5, TimeUnit.SECONDS), "完了transactionがworkerで開始する");
-            awaitLockWait(completion, f.planId, requestingConnectionId, blockingConnectionId);
+            awaitLockWait(completion, planLock, requestingConnectionId);
             releaseEnroll.countDown();
             first.get(20, TimeUnit.SECONDS);
             completion.get(20, TimeUnit.SECONDS);
@@ -234,8 +235,8 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
                 } finally { AccountingTenantContextHolder.clear(); }
             });
             assertTrue(firstChanged.await(10, TimeUnit.SECONDS), "先行operationがplan lockを保持する");
-            assertTrue(hasGrantedPlanRecordLock(f.planId, blockingConnectionId.get()),
-                    "先行connectionが対象planのPRIMARY RECORD lockを保持する。locks=" + locks());
+            InnoDbRecordLockWaits.PointLock planLock = requirePlanRecordLock(f.planId, blockingConnectionId.get(),
+                    "先行connection");
             Future<?> second = pool.submit(() -> {
                 tenant();
                 try {
@@ -248,7 +249,7 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
                 } finally { AccountingTenantContextHolder.clear(); }
             });
             assertTrue(secondStarted.await(5, TimeUnit.SECONDS), "後続operationが独立connectionで開始する");
-            awaitLockWait(second, f.planId, requestingConnectionId, blockingConnectionId);
+            awaitLockWait(second, planLock, requestingConnectionId);
             releaseFirst.countDown();
             first.get(20, TimeUnit.SECONDS);
             second.get(20, TimeUnit.SECONDS);
@@ -295,55 +296,50 @@ class TrainingPlanCompletionConcurrencyMySqlTest {
         courseMapper.insert(course); return course;
     }
 
-    private void awaitLockWait(Future<?> worker, Long planId, AtomicLong requestingConnectionId,
-                               AtomicLong blockingConnectionId) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (System.nanoTime() < deadline) {
-            if (hasTargetPlanRecordLockWait(planId, requestingConnectionId.get(), blockingConnectionId.get())) return;
-            if (worker.isDone()) {
-                try {
-                    worker.get();
-                    throw new AssertionError("後続workerがlock wait前に正常完了した。transactions=" + transactions());
-                } catch (java.util.concurrent.ExecutionException failed) {
-                    throw new AssertionError("後続workerがlock wait前に失敗した。原因=" + failed.getCause()
-                            + "; transactions=" + transactions(), failed.getCause());
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                    throw new AssertionError(interrupted);
-                }
-            }
-            Thread.yield();
+    /**
+     * 後続workerが、先行transactionの保持する対象plan行のPRIMARY record lockを待っていることを確認する。
+     * LOCK_DATAはInnoDBがpageをlatch待ちなしで参照できた場合だけ鍵値を返し、待機中でもNULLになり得るため
+     * （{@link InnoDbRecordLockWaits}）鍵値の一致は必須にせず、先行transactionの単一排他record lockをblocking lockとして
+     * 指す待機辺で対象行を特定する。LOCK_DATAが見えている側はplan IDと一致しなければならない。
+     */
+    private void awaitLockWait(Future<?> worker, InnoDbRecordLockWaits.PointLock planLock,
+                               AtomicLong requestingConnectionId) throws Exception {
+        try {
+            InnoDbRecordLockWaits.awaitBlockerAnchoredWait(jdbc, planLock,
+                    () -> requestingConnectionId.get() > 0 ? requestingConnectionId.get() : null,
+                    InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES, InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES,
+                    10_000, () -> failIfWorkerFinished(worker),
+                    "worker同士の対象plan PRIMARY RECORD lock（requestingConnectionId=" + requestingConnectionId.get()
+                            + ", blockingConnectionId=" + planLock.connectionId() + "）");
+        } catch (AssertionError failure) {
+            throw new AssertionError(failure.getMessage() + "; transactions=" + transactions()
+                    + "; lockWaits=" + lockWaits(), failure);
         }
-        throw new AssertionError("worker同士が対象plan PRIMARY RECORD lockで待機しなかった。planId=" + planId
-                + ", requestingConnectionId=" + requestingConnectionId.get() + ", blockingConnectionId="
-                + blockingConnectionId.get() + "; transactions=" + transactions() + "; lockWaits=" + lockWaits());
     }
 
-    private boolean hasGrantedPlanRecordLock(Long planId, long connectionId) {
-        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM performance_schema.data_locks dl "
-                + "JOIN performance_schema.threads th ON th.THREAD_ID=dl.THREAD_ID "
-                + "WHERE dl.OBJECT_SCHEMA=DATABASE() AND dl.OBJECT_NAME='t_learning_plan' "
-                + "AND dl.INDEX_NAME='PRIMARY' AND dl.LOCK_TYPE='RECORD' AND dl.LOCK_STATUS='GRANTED' "
-                + "AND CAST(dl.LOCK_DATA AS UNSIGNED)=? AND th.PROCESSLIST_ID=?", Integer.class, planId, connectionId);
-        return count != null && count > 0;
+    private void failIfWorkerFinished(Future<?> worker) throws InterruptedException {
+        if (!worker.isDone()) return;
+        try {
+            worker.get();
+        } catch (java.util.concurrent.ExecutionException failed) {
+            throw new AssertionError("後続workerがlock wait前に失敗した。原因=" + failed.getCause(), failed.getCause());
+        }
+        throw new AssertionError("後続workerがlock wait前に正常完了した");
     }
 
-    private boolean hasTargetPlanRecordLockWait(Long planId, long requestingConnectionId, long blockingConnectionId) {
-        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM performance_schema.data_lock_waits w "
-                + "JOIN performance_schema.data_locks req ON req.ENGINE=w.ENGINE "
-                + "AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID "
-                + "JOIN performance_schema.data_locks blk ON blk.ENGINE=w.ENGINE "
-                + "AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID "
-                + "JOIN performance_schema.threads rt ON rt.THREAD_ID=req.THREAD_ID "
-                + "JOIN performance_schema.threads bt ON bt.THREAD_ID=blk.THREAD_ID "
-                + "WHERE req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME='t_learning_plan' "
-                + "AND req.INDEX_NAME='PRIMARY' AND req.LOCK_TYPE='RECORD' "
-                + "AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME='t_learning_plan' "
-                + "AND blk.INDEX_NAME='PRIMARY' AND blk.LOCK_TYPE='RECORD' "
-                + "AND CAST(req.LOCK_DATA AS UNSIGNED)=? AND CAST(blk.LOCK_DATA AS UNSIGNED)=? "
-                + "AND rt.PROCESSLIST_ID=? AND bt.PROCESSLIST_ID=?", Integer.class,
-                planId, planId, requestingConnectionId, blockingConnectionId);
-        return count != null && count > 0;
+    /**
+     * 先行transactionが対象planのPRIMARY排他record lockをちょうど1件だけ保持することを確認し、待機確認の基準lockを返す。
+     * 先行transactionはplanを主キー一点の{@code FOR UPDATE}でlockし、t_learning_planの他の行はlockしない。
+     * LOCK_DATAは見えている場合だけplan IDとの一致を要求する（NULLは不可視）。
+     */
+    private InnoDbRecordLockWaits.PointLock requirePlanRecordLock(Long planId, long connectionId, String holder)
+            throws InterruptedException {
+        try {
+            return InnoDbRecordLockWaits.requireSinglePointLock(jdbc, connectionId, "t_learning_plan", "PRIMARY",
+                    InnoDbRecordLockWaits.primaryKey(planId), holder + "の対象plan PRIMARY RECORD lock");
+        } catch (AssertionError failure) {
+            throw new AssertionError(failure.getMessage() + "; locks=" + locks(), failure);
+        }
     }
 
     private long connectionId() {

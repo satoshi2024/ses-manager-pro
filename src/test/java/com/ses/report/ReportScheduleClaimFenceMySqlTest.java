@@ -21,6 +21,7 @@ import com.ses.service.report.ReportSnapshotService;
 import com.ses.service.scheduler.ManagementReportScheduler;
 import com.ses.service.scheduler.ReportScheduleClaimService;
 import com.ses.service.scheduler.TenantAwareBatchRunner;
+import com.ses.test.InnoDbRecordLockWaits;
 import com.ses.test.MySQLContainer;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
@@ -153,15 +154,21 @@ class ReportScheduleClaimFenceMySqlTest {
             + "WHERE tenant_id = ? AND id = ? AND processing_claimed_at IS NOT NULL";
 
     /**
-     * holder接続（bt）が保持する対象行のPRIMARY record lockに対し、別接続（rt）で実行中のclaim UPDATEが待っている
-     * lock待ち辺を返す。返す値は待っている側の接続ID（{@code CONNECTION_ID()} と同じ値）。
+     * holder接続（bt）が保持するm_report_scheduleのPRIMARY record lockに対し、別接続（rt）で実行中のclaim UPDATEが
+     * 待っているlock待ち辺を返す。列は待っている側の接続ID（{@code CONNECTION_ID()} と同じ値）、blocking lockの
+     * ENGINE_LOCK_ID、待機lockのmode、両端のLOCK_DATA（診断・可視時の照合用）。
      *
      * <p>{@code performance_schema.data_locks}/{@code data_lock_waits} はInnoDBのlock systemを照会のたびに走査する。
      * {@code information_schema.innodb_trx} はInnoDBの {@code trx_i_s} cacheから返され、cacheは「最後の読取から
      * 0.1秒を超えて経過した」場合にだけ再取得されるため、20ms間隔のpollingでは最初の読取時点のsnapshotが固定され、
      * その後に発生したLOCK WAITを観測できない。93c11457の定向MySQL実行で本testが失敗した原因であり、使わない。
+     *
+     * <p>{@code LOCK_DATA}はInnoDBが対象pageをlatch待ちなしで参照できた場合だけ鍵値を返し、待機中でもNULLになり得るため
+     * （{@link InnoDbRecordLockWaits}）、ここでは結合・絞込みに使わない。対象行の特定は
+     * {@link #anchoredClaimRowLockWaits}が、holderの単一排他record lockを指す辺だけを採ることで行う。
      */
-    private static final String CLAIM_ROW_LOCK_WAIT_SQL = "SELECT rt.PROCESSLIST_ID "
+    private static final String CLAIM_ROW_LOCK_WAIT_SQL = "SELECT rt.PROCESSLIST_ID, blk.ENGINE_LOCK_ID, "
+            + "req.LOCK_MODE, req.LOCK_DATA, blk.LOCK_DATA "
             + "FROM performance_schema.data_lock_waits w "
             + "JOIN performance_schema.data_locks req ON req.ENGINE = w.ENGINE "
             + "  AND req.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID "
@@ -172,11 +179,9 @@ class ReportScheduleClaimFenceMySqlTest {
             + "WHERE req.OBJECT_SCHEMA = DATABASE() AND req.OBJECT_NAME = 'm_report_schedule' "
             + "  AND req.INDEX_NAME = 'PRIMARY' AND req.LOCK_TYPE = 'RECORD' "
             + "  AND req.LOCK_STATUS = 'WAITING' AND req.LOCK_MODE LIKE 'X%' "
-            + "  AND (req.LOCK_DATA = ? OR CAST(req.LOCK_DATA AS UNSIGNED) = ?) "
             + "  AND blk.OBJECT_SCHEMA = DATABASE() AND blk.OBJECT_NAME = 'm_report_schedule' "
             + "  AND blk.INDEX_NAME = 'PRIMARY' AND blk.LOCK_TYPE = 'RECORD' "
             + "  AND blk.LOCK_STATUS = 'GRANTED' AND blk.LOCK_MODE LIKE 'X%' "
-            + "  AND (blk.LOCK_DATA = ? OR CAST(blk.LOCK_DATA AS UNSIGNED) = ?) "
             + "  AND bt.PROCESSLIST_ID = ? "
             + "  AND rt.PROCESSLIST_ID <> ? AND rt.PROCESSLIST_ID <> CONNECTION_ID() "
             + "  AND rt.PROCESSLIST_INFO LIKE '%UPDATE m_report_schedule SET processing_logical_run_at%'";
@@ -474,18 +479,22 @@ class ReportScheduleClaimFenceMySqlTest {
             assertThat(holderUpdated.await(10, TimeUnit.SECONDS)).as("holderのclaim UPDATE").isTrue();
             long holderConnection = holderConnectionId.get();
             assertThat(holderConnection).as("holder接続ID").isPositive();
-            assertThat(claimRowLockWaiters(id, holderConnection)).as("contender投入前にlock待ちは無い").isEmpty();
+            // holderのclaim UPDATEは主キー一点（WHERE tenant_id=? AND id=?）なので、PRIMARYの排他record lockは対象行の1件だけ。
+            InnoDbRecordLockWaits.PointLock holderLock = InnoDbRecordLockWaits.requireSinglePointLock(jdbcTemplate,
+                    holderConnection, "m_report_schedule", "PRIMARY", InnoDbRecordLockWaits.primaryKey(id),
+                    "holderのclaim UPDATE");
+            assertThat(claimRowLockWaiters(holderConnection)).as("contender投入前にlock待ちは無い").isEmpty();
 
             // contender: 実claim service（REQUIRES_NEW）で同じsnapshotをclaimし、holderの行lockで待つ。
             Future<ReportScheduleClaimService.Claim> contender = pool.submit(() -> claim(snapshot, SEPT, claimedAt));
-            long contenderConnection = awaitClaimRowLockWait(id, holderConnection, contender);
+            long contenderConnection = awaitClaimRowLockWait(id, holderLock, contender);
             assertThat(contenderConnection).as("待っているのはholderとは別の接続").isNotEqualTo(holderConnection);
             assertThat(contender.isDone()).as("holderのcommit前にcontenderは完了しない").isFalse();
             releaseHolder.countDown();
 
             assertThat(holder.get(10, TimeUnit.SECONDS)).isEqualTo(1);
             assertThat(contender.get(10, TimeUnit.SECONDS)).as("lock解放後に再評価されたCASは0件").isNull();
-            assertThat(claimRowLockWaiters(id, holderConnection)).as("holder commit後にlock待ちは残らない").isEmpty();
+            assertThat(claimRowLockWaiters(holderConnection)).as("holder commit後にlock待ちは残らない").isEmpty();
             assertThat(token(id)).isEqualTo(holderToken);
             assertThat(dateTime(id, "processing_claimed_at")).isEqualTo(claimedAt);
         } finally {
@@ -1090,9 +1099,12 @@ class ReportScheduleClaimFenceMySqlTest {
 
     /**
      * contenderのclaim UPDATEが、holder接続の保持する対象行のPRIMARY record lockで待っていることを観測し、
-     * 待っている接続IDを返す。観測は {@link #CLAIM_ROW_LOCK_WAIT_SQL}（performance_schema、cache無し）で行う。
+     * 待っている接続IDを返す。観測は {@link #CLAIM_ROW_LOCK_WAIT_SQL}（performance_schema、cache無し）で行い、
+     * 対象行は {@link #anchoredClaimRowLockWaits} でLOCK_DATAの値に依存せずに特定する。
      */
-    private long awaitClaimRowLockWait(long id, long holderConnectionId, Future<?> contender) throws Exception {
+    private long awaitClaimRowLockWait(long id, InnoDbRecordLockWaits.PointLock holderLock, Future<?> contender)
+            throws Exception {
+        long holderConnectionId = holderLock.connectionId();
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
             if (contender.isDone()) {
@@ -1100,13 +1112,13 @@ class ReportScheduleClaimFenceMySqlTest {
                 throw new AssertionError("contenderがholderの行lock待ちに入る前に完了しました"
                         + lockDiagnostics(id, holderConnectionId, contender));
             }
-            List<Long> waiters = claimRowLockWaiters(id, holderConnectionId);
+            List<ClaimRowLockWait> waiters = anchoredClaimRowLockWaits(holderLock);
             if (waiters.size() > 1) {
                 throw new AssertionError("holderの行lockを待つclaim UPDATEが複数あります: " + waiters
                         + lockDiagnostics(id, holderConnectionId, contender));
             }
             if (waiters.size() == 1) {
-                return waiters.get(0);
+                return waiters.get(0).requesterConnectionId();
             }
             Thread.sleep(20);
         }
@@ -1114,10 +1126,38 @@ class ReportScheduleClaimFenceMySqlTest {
                 + lockDiagnostics(id, holderConnectionId, contender));
     }
 
-    private List<Long> claimRowLockWaiters(long id, long holderConnectionId) {
-        return jdbcTemplate.queryForList(CLAIM_ROW_LOCK_WAIT_SQL, Long.class,
-                String.valueOf(id), id, String.valueOf(id), id, holderConnectionId, holderConnectionId);
+    /**
+     * holderの対象行lockを待つclaim UPDATEの待機辺だけを返す。holderが今もm_report_scheduleのPRIMARY排他record lockを
+     * ちょうど1件（主キー一点のclaim UPDATEで得た対象行のlock）だけ保持し、待機辺のblocking lockがそのlockで、待機lockが
+     * 排他record lockである辺に限る。LOCK_DATAが見えている側は対象schedule IDと一致しなければならず、NULLは不可視として扱う。
+     */
+    private List<ClaimRowLockWait> anchoredClaimRowLockWaits(InnoDbRecordLockWaits.PointLock holderLock) {
+        List<InnoDbRecordLockWaits.HeldLock> held = InnoDbRecordLockWaits.grantedRecordLocks(jdbcTemplate,
+                holderLock.connectionId(), holderLock.table(), holderLock.index(),
+                InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES);
+        if (held.size() != 1
+                || !InnoDbRecordLockWaits.keyVisibleAndMatches(held.get(0).lockData(), holderLock.expectedKey())) {
+            return List.of();
+        }
+        String holderLockId = held.get(0).lockId();
+        return claimRowLockWaiters(holderLock.connectionId()).stream()
+                .filter(wait -> holderLockId.equals(wait.blockingLockId()))
+                .filter(wait -> InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES.contains(wait.requestMode()))
+                .filter(wait -> InnoDbRecordLockWaits.keyVisibleAndMatches(wait.requesterKey(), holderLock.expectedKey())
+                        && InnoDbRecordLockWaits.keyVisibleAndMatches(wait.blockerKey(), holderLock.expectedKey()))
+                .toList();
     }
+
+    /** holderのm_report_schedule PRIMARY lockを待つclaim UPDATEの全待機辺（LOCK_DATAでは絞り込まない）。 */
+    private List<ClaimRowLockWait> claimRowLockWaiters(long holderConnectionId) {
+        return jdbcTemplate.query(CLAIM_ROW_LOCK_WAIT_SQL, (rs, row) -> new ClaimRowLockWait(rs.getLong(1),
+                rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5)),
+                holderConnectionId, holderConnectionId);
+    }
+
+    /** claim UPDATEの待機辺。鍵値はNULL（不可視）を含めて観測値のまま保持する。 */
+    private record ClaimRowLockWait(long requesterConnectionId, String blockingLockId, String requestMode,
+                                    String requesterKey, String blockerKey) { }
 
     /** 観測失敗時に、行lock・metadata lock・実行中SQLの状態を残す（SQLは先頭だけを出し、token値を含めない）。 */
     private String lockDiagnostics(long id, long holderConnectionId, Future<?> contender) {
