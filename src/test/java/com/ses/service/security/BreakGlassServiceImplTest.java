@@ -226,6 +226,37 @@ class BreakGlassServiceImplTest {
     }
 
     @Test
+    void XForwardedPrefixや百分率エンコードで静的resourceや認証基盤とscope免除を誤判定しない() throws Exception {
+        // FWD-SANITIZE P3-5: 清浄化が無い（Boot標準のForwardedHeaderFilter）場合でもアプリ内pathで判定する。
+        // 修正前は /css・/api/security を前置すると、静的resource・認証基盤としてincident scope外のAPIを通していた。
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(active());
+        var authentication = breakGlassAuthentication();
+
+        for (String prefix : java.util.List.of("/css", "/lib", "/api/security", "/mfa", "/x")) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/engineers");
+            request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
+            request.addHeader("X-Forwarded-Prefix", prefix);
+            assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE,
+                    service.validateBoundSession(viaVanillaForwardedHeaderFilter(request), authentication), prefix);
+        }
+        MockHttpServletRequest encoded = new MockHttpServletRequest("GET", "/%61pi/engineers");
+        encoded.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
+        assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE,
+                service.validateBoundSession(encoded, authentication));
+        verifyNoInteractions(sessionService);
+    }
+
+    private static jakarta.servlet.http.HttpServletRequest viaVanillaForwardedHeaderFilter(
+            MockHttpServletRequest request) throws Exception {
+        java.util.concurrent.atomic.AtomicReference<jakarta.servlet.http.HttpServletRequest> seen =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        new org.springframework.web.filter.ForwardedHeaderFilter().doFilter(request,
+                new org.springframework.mock.web.MockHttpServletResponse(),
+                (req, res) -> seen.set((jakarta.servlet.http.HttpServletRequest) req));
+        return seen.get();
+    }
+
+    @Test
     void 静的resourceと同じUriでも安全でないmethodはscope違反にする() {
         when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(active());
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/css/common.css");

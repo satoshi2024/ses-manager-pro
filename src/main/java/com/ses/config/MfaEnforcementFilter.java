@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.common.util.RequestPaths;
 import com.ses.common.util.SecurityInfrastructureUtils;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -43,7 +44,7 @@ public class MfaEnforcementFilter extends OncePerRequestFilter {
         boolean verified = session != null && Boolean.TRUE.equals(session.getAttribute(MFA_VERIFIED_ATTRIBUTE));
         if (authentication != null && authentication.isAuthenticated() && pending && !verified
                 && !isMfaEndpoint(request)) {
-            if (request.getRequestURI().startsWith("/api/")) {
+            if (RequestPaths.isApiPath(request)) {
                 response.setStatus(HttpServletResponse.SC_FORBIDDEN);
                 response.setContentType("application/json;charset=UTF-8");
                 response.getWriter().write("{\"code\":403,\"message\":\"MFA認証が必要です\",\"data\":null}");
@@ -55,8 +56,12 @@ public class MfaEnforcementFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
+    /**
+     * MFA未完了でも通す入口（allow-list）。{@code X-Forwarded-Prefix: /mfa} 等の前置で {@code /mfa/api/...} と
+     * 誤一致させないよう、アプリ内pathで判定する（FWD-SANITIZE PRE-P1-1）。
+     */
     private boolean isMfaEndpoint(HttpServletRequest request) {
-        String uri = request.getRequestURI();
+        String uri = RequestPaths.pathWithinApplication(request);
         boolean mfaFlowEndpoint = uri.equals("/api/security/mfa/status")
                 || uri.equals("/api/security/mfa/setup")
                 || uri.equals("/api/security/mfa/enable")

@@ -1,6 +1,8 @@
 package com.ses.config.portal;
 
 import com.ses.common.util.ClientIpResolver;
+import com.ses.common.util.IpCidrMatcher;
+import com.ses.common.util.RequestPaths;
 import com.ses.config.PortalSecurityProperties;
 import com.ses.service.portal.PortalRateLimiter;
 import com.ses.portal.PortalLoginUser;
@@ -21,7 +23,8 @@ import java.util.regex.Pattern;
 /**
  * portal APIのrate limit適用フィルタ（R4.5）。
  * login/招待はIP単位、download/upload/検収はuser単位（未認証は対象APIに到達できない）。
- * IPは {@link ClientIpResolver}（信頼プロキシ時のみ XFF）で解決する（S13-XFF-01）。
+ * IPは {@link ClientIpResolver}（信頼プロキシが追記したXFF右端1 hopのみ）で解決する（S13-XFF-01 / FWD-SANITIZE）。
+ * 対象pathの判定はX-Forwarded-Prefix・context pathを含まないアプリ内pathで行う（FWD-SANITIZE PRE-P1-1）。
  */
 @RequiredArgsConstructor
 public class PortalRateLimitFilter extends OncePerRequestFilter {
@@ -40,7 +43,7 @@ public class PortalRateLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
         String method = request.getMethod();
-        String uri = request.getRequestURI();
+        String uri = RequestPaths.pathWithinApplication(request);
         String key = null;
         int perMinute = 0;
 
@@ -72,8 +75,14 @@ public class PortalRateLimitFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
+    /**
+     * IP単位keyの送信元。IPv6は/64へ集約する（FWD-SANITIZE P3-8）。IPv6では1利用者が/64を丸ごと持つのが通例で、
+     * /128のままだと同じ/64内でaddressを替えるだけで上限を回避できる。IPv4はそのまま使う。
+     */
     private String clientIp(HttpServletRequest request) {
-        return clientIpResolver.resolve(request);
+        String ip = clientIpResolver.resolve(request);
+        String network64 = IpCidrMatcher.ipv6Network64(ip);
+        return network64 != null ? network64 : ip;
     }
 
     private String currentUserId() {

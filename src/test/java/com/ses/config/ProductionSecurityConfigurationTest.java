@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** 本番環境のHTTPS、HSTS、Cookieセキュリティ設定を検証する。 */
@@ -32,6 +33,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "app.security.oidc.break-glass-usernames=admin,breakglass2",
     "app.security.mfa.encryption-key=test-production-mfa-encryption-key-0001",
     "app.security.session.hash-key=test-production-session-hash-key-0001"
+    // FWD-SANITIZE: 本番は信頼プロキシ必須（private IPv4のALB subnetだけ）。loopbackは信頼しない。
+    // ALB経由の要求は接続元を10.0.0.5にして再現し、MockMvc既定の127.0.0.1は「task内のhealth check」扱いになる。
+    ,"app.security.trusted-proxies=10.0.0.0/24"
     ,"app.security.oidc.issuer-uri=https://idp.invalid/tenant/v2.0"
     ,"app.security.oidc.authorization-uri=https://idp.invalid/authorize"
     ,"app.security.oidc.token-uri=https://idp.invalid/token"
@@ -83,10 +87,66 @@ class ProductionSecurityConfigurationTest {
     @Test
     @com.ses.test.DisableDefaultTenantTestContext
     void XForwardedProtoがHTTPSならログインページへアクセスできる() throws Exception {
-        mockMvc.perform(get("/login").header("X-Forwarded-Proto", "https"))
+        mockMvc.perform(get("/login").header("X-Forwarded-Proto", "https").with(peer(ALB_NODE)))
             .andExpect(status().isOk())
             .andExpect(header().string("Strict-Transport-Security",
                 containsString("max-age=31536000")));
+    }
+
+    @Test
+    @com.ses.test.DisableDefaultTenantTestContext
+    void 信頼しない接続元のXForwardedProtoではHTTPSと扱わずリダイレクトする() throws Exception {
+        for (String untrusted : new String[]{"127.0.0.1", "203.0.113.5", "10.0.1.5"}) {
+            mockMvc.perform(get("/login").header("X-Forwarded-Proto", "https").with(peer(untrusted)))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string(HttpHeaders.LOCATION, "https://localhost/login"))
+                .andExpect(header().doesNotExist("Strict-Transport-Security"));
+        }
+    }
+
+    @Test
+    @com.ses.test.DisableDefaultTenantTestContext
+    void health系3pathはloopbackからのHTTPでもリダイレクトせず状態だけを返す() throws Exception {
+        // FWD-SANITIZE P2-1: ECS container health check（task内の127.0.0.1・X-Forwarded-Protoなし）を再現する。
+        for (String probe : new String[]{"/actuator/health/liveness", "/actuator/health/readiness"}) {
+            mockMvc.perform(get(probe).secure(false))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"))
+                .andExpect(jsonPath("$.components").doesNotExist())
+                .andExpect(jsonPath("$.details").doesNotExist())
+                .andExpect(header().doesNotExist(HttpHeaders.LOCATION));
+        }
+        // 集約healthはindicator次第で200/503（ALBはreadinessだけを見る）。302にはならない。
+        mockMvc.perform(get("/actuator/health").secure(false))
+            .andExpect(status().is(org.hamcrest.Matchers.anyOf(
+                org.hamcrest.Matchers.is(200), org.hamcrest.Matchers.is(503))))
+            .andExpect(jsonPath("$.status").exists())
+            .andExpect(jsonPath("$.components").doesNotExist())
+            .andExpect(jsonPath("$.details").doesNotExist());
+    }
+
+    @Test
+    @com.ses.test.DisableDefaultTenantTestContext
+    void health以外のactuatorと通常画面はHTTPならHTTPSへリダイレクトする() throws Exception {
+        for (String path : new String[]{"/actuator/prometheus", "/actuator/env", "/actuator/health/db",
+                "/actuator/health/liveness/extra", "/actuator/health/", "/login", "/dashboard", "/api/engineers"}) {
+            mockMvc.perform(get(path).secure(false))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string(HttpHeaders.LOCATION, "https://localhost" + path));
+        }
+        // health probeでもGET以外はHTTPS強制のまま
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .post("/actuator/health/liveness").secure(false))
+            .andExpect(status().is3xxRedirection());
+    }
+
+    private static final String ALB_NODE = "10.0.0.5";
+
+    private static org.springframework.test.web.servlet.request.RequestPostProcessor peer(String address) {
+        return request -> {
+            request.setRemoteAddr(address);
+            return request;
+        };
     }
 
     @Test

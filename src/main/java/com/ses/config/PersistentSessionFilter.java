@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.common.util.RequestPaths;
 import com.ses.common.util.SecurityInfrastructureUtils;
 import com.ses.common.util.SecurityUtils;
 import com.ses.service.AuditLogService;
@@ -71,14 +72,14 @@ public class PersistentSessionFilter extends OncePerRequestFilter {
                 }
                 try {
                     auditLogService.recordRequired(SecurityUtils.currentUsername(), request.getMethod(),
-                            request.getRequestURI(), HttpServletResponse.SC_FORBIDDEN,
+                            RequestPaths.auditPath(request), HttpServletResponse.SC_FORBIDDEN,
                             "BREAK_GLASS_SCOPE_VIOLATION", false);
                 } catch (RuntimeException e) {
                     response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
                     return;
                 }
                 response.setHeader("X-SES-Error-Code", "BREAK_GLASS_SCOPE_VIOLATION");
-                if (request.getRequestURI().startsWith("/api/")) {
+                if (RequestPaths.isApiPath(request)) {
                     response.setStatus(HttpServletResponse.SC_FORBIDDEN);
                     response.setContentType("application/json;charset=UTF-8");
                     // レスポンスの message には message key ("error.breakGlass.scopeViolation") を直接設定。
@@ -108,7 +109,7 @@ public class PersistentSessionFilter extends OncePerRequestFilter {
         AuditLogService auditLogService = auditLogServiceProvider.getIfAvailable();
         if (auditLogService != null) {
             try {
-                auditLogService.record(authentication.getName(), request.getMethod(), request.getRequestURI(),
+                auditLogService.record(authentication.getName(), request.getMethod(), RequestPaths.auditPath(request),
                         HttpServletResponse.SC_UNAUTHORIZED, "BOOTSTRAP_SESSION_EXPIRED", false);
             } catch (RuntimeException ignored) {
                 // 失効は監査の成否に依存させない（fail-closed）
@@ -130,7 +131,7 @@ public class PersistentSessionFilter extends OncePerRequestFilter {
             session.invalidate();
         }
         SecurityContextHolder.clearContext();
-        if (request.getRequestURI().startsWith("/api/")) {
+        if (RequestPaths.isApiPath(request)) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write("{\"code\":401,\"message\":\"sessionが失効しています\",\"data\":null}");

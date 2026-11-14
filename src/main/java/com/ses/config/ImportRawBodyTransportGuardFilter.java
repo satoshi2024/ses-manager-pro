@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.exception.SafeErrorPolicy;
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.RequestPaths;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -62,11 +63,8 @@ public final class ImportRawBodyTransportGuardFilter extends OncePerRequestFilte
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        String path = request.getRequestURI();
-        String contextPath = request.getContextPath();
-        if (contextPath != null && !contextPath.isEmpty() && path.startsWith(contextPath)) {
-            path = path.substring(contextPath.length());
-        }
+        // 対象判定はMVCのhandler解決と同じ復号・正規化後のアプリ内path（%エンコード等で検査を外さない。FWD-SANITIZE）。
+        String path = RequestPaths.pathWithinApplication(request);
         if (!"/api/import-center/uploads".equals(path)) {
             filterChain.doFilter(request, response);
             return;

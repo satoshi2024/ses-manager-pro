@@ -36,6 +36,24 @@ class ImportRawBodyTransportGuardFilterTest {
     }
 
     @Test
+    void rejectsEncodedPathVariantSoTheGuardCannotBeSkipped() throws Exception {
+        // FWD-SANITIZE: MVCは復号後のpathでcontrollerへ振り分けるため、%エンコードしたpathでも同じguardを通す。
+        for (String uri : List.of("/api/import-center/%75ploads", "/api/import-center//uploads")) {
+            TrackingRequest request = validRequest();
+            request.setRequestURI(uri);
+            request.setContentType("multipart/form-data; boundary=x");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            AtomicBoolean continued = new AtomicBoolean();
+
+            filter.doFilter(request, response, (req, res) -> continued.set(true));
+
+            assertEquals(415, response.getStatus(), uri);
+            assertFalse(continued.get(), uri);
+            assertFalse(request.bodyTouched(), uri);
+        }
+    }
+
+    @Test
     void rejectsMissingCsrfAndOversizeLengthWithoutReadingBody() throws Exception {
         TrackingRequest missingCsrf = validRequest(null);
         MockHttpServletResponse csrfResponse = new MockHttpServletResponse();

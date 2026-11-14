@@ -29,7 +29,8 @@
         { "name": "DIGITAL_INVOICE_PROVIDER", "value": "none" },
         { "name": "SERVER_TOMCAT_THREADS_MAX", "value": "100" },
         { "name": "DB_POOL_SIZE", "value": "10" },
-        { "name": "SHUTDOWN_TIMEOUT", "value": "30s" }
+        { "name": "SHUTDOWN_TIMEOUT", "value": "30s" },
+        { "name": "TRUSTED_PROXIES", "value": "ALB_SUBNET_CIDRS_PLACEHOLDER" }
       ],
       "secrets": [
         {
@@ -81,7 +82,7 @@
       "healthCheck": {
         "command": [
           "CMD-SHELL",
-          "curl -fsS -H \"X-Forwarded-Proto: https\" http://127.0.0.1:8080/actuator/health/liveness >/dev/null || exit 1"
+          "test \"$(curl -sS -o /dev/null -m 4 -w '%{http_code}' http://127.0.0.1:8080/actuator/health/liveness)\" = 200 || exit 1"
         ],
         "interval": 30,
         "timeout": 5,
@@ -113,6 +114,7 @@
     "taskRoleArn": "PLACEHOLDER — OUT-OF-SCOPE until real IAM",
     "awslogs": "PLACEHOLDER — CloudWatch NOT verified offline",
     "secrets": "PLACEHOLDER ARNs — no plaintext DB/OIDC secrets in environment",
+    "TRUSTED_PROXIES": "PLACEHOLDER — replace with the ALB subnet CIDRs (comma separated; IPv4 must be RFC1918 or 100.64/10, /16 or narrower; IPv6 /48 or narrower). Left unreplaced, the app refuses to start (invalid CIDR). Never add 127.0.0.1: the container health check uses the plain-HTTP health path instead. See .kiro/specs/production-launch/forwarded-header-sanitize-notes.md",
     "albTargetGroupHealthCheck": {
       "path": "/actuator/health/readiness",
       "matcher": "200",
@@ -120,7 +122,8 @@
     },
     "ecsContainerHealthCheck": {
       "path": "/actuator/health/liveness",
-      "note": "Process liveness only; DB loss must not kill the task"
+      "note": "Process liveness only; DB loss must not kill the task",
+      "strictStatus": "Healthy only on HTTP 200 (curl -w '%{http_code}' compared to 200). curl -f treats 302 as success, and no X-Forwarded-Proto is sent because a loopback peer is never trusted; /actuator/health{,/liveness,/readiness} answer over plain HTTP (FWD-SANITIZE P2-1)"
     },
     "efsUploads": {
       "status": "EFS-ACTUAL=DEFERRED until real AWS",

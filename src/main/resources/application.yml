@@ -3,6 +3,11 @@
 # ========================================
 server:
   port: 8080
+  # 転送ヘッダーはframework（ForwardedHeaderFilter）で反映するが、Boot標準のfilterは送信元を確認しないため
+  # com.ses.config.forwarded.ForwardedHeaderSanitizingFilter に置き換えている（FWD-SANITIZE）。
+  #   - X-Forwarded-Prefix / X-Forwarded-Host / X-Forwarded-Ssl / Forwarded は常に削除する。
+  #   - X-Forwarded-For / Proto / Port は TCP peer が app.security.trusted-proxies に含まれるときだけ右端1要素を使う。
+  # native へ変更しないこと（TomcatのRemoteIpValveはclientが送ったX-Forwarded-Hostを反映する。本番はvalidatorで拒否）。
   forward-headers-strategy: framework
   # SIGTERM 後に処理中リクエストを排水してから終了する。本番は全停止配備でrolling更新は行わない
   # （手順は .kiro/specs/production-launch/deploy-runbook.md）。
@@ -247,7 +252,9 @@ app:
     dashboard-max-size: ${DASHBOARD_CACHE_MAX:500}
   security:
     require-https: false
-    # X-Forwarded-For を読むのは remoteAddr がこのリストに含まれるときだけ（CIDR可。空=常に remoteAddr）
+    # 転送ヘッダー（X-Forwarded-For/Proto/Port）を信頼するTCP peer（ALBのsubnet）。CIDRまたは単一IPのカンマ区切り。
+    # 含まれるときだけ、プロキシが右端に追記した1要素を採用する。空=転送ヘッダーを一切信頼しない（fail-closed）。
+    # 構文不正の要素は起動時に拒否する。本番では未設定・広すぎる範囲も起動時に拒否する（ForwardedHeaderProductionValidator）。
     trusted-proxies: ${TRUSTED_PROXIES:}
     oidc:
       enabled: ${OIDC_ENABLED:false}

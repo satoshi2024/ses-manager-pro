@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.common.util.RequestPaths;
 import com.ses.common.util.SecurityInfrastructureUtils;
 import com.ses.common.util.SecurityUtils;
 import com.ses.common.util.CorrelationContext;
@@ -44,6 +45,10 @@ public class ApiAuditFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
         AuditLogService auditLogService = auditLogServiceProvider.getIfAvailable();
+        // 記録対象の判定と記録するURIは、X-Forwarded-Prefix・context pathを含まないアプリ内path（FWD-SANITIZE PRE-P1-1）。
+        // 記録する値だけは制御文字・書式文字を%XXへ戻す（P3-4）。判定は復号後のpathのまま行う。
+        String path = RequestPaths.pathWithinApplication(request);
+        String auditPath = RequestPaths.forAudit(path);
         boolean breakGlassRequest = isBreakGlassRequest(request);
         if (breakGlassRequest) {
             if (auditLogService == null) {
@@ -52,7 +57,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
             }
             try {
                 auditLogService.recordRequired(SecurityUtils.currentUsername(), request.getMethod(),
-                        request.getRequestURI(), 102, "BREAK_GLASS_ACCESS_ATTEMPT", false);
+                        auditPath, 102, "BREAK_GLASS_ACCESS_ATTEMPT", false);
             } catch (RuntimeException e) {
                 response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
                 return;
@@ -67,7 +72,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
             }
             try {
                 auditLogService.recordRequired(SecurityUtils.currentUsername(), request.getMethod(),
-                        request.getRequestURI(), 102, "BOOTSTRAP_WRITE_ATTEMPT", false);
+                        auditPath, 102, "BOOTSTRAP_WRITE_ATTEMPT", false);
             } catch (RuntimeException e) {
                 response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
                 return;
@@ -92,10 +97,9 @@ public class ApiAuditFilter extends OncePerRequestFilter {
                         com.ses.service.pwa.PwaClientMutationLedgerService.REPLAY_REQUEST_ATTRIBUTE))) {
                     String username = SecurityUtils.currentUsername();
                     String method = request.getMethod();
-                    String uri = request.getRequestURI();
                     int status = response.getStatus() >= 400 ? response.getStatus() : observedStatus;
                     log.info("API操作監査: user={} method={} uri={} status={} correlationId={} invoiceId={} digitalInvoiceId={} jobId={} providerOperationId={} errorCode={} errorCategory={}",
-                            username != null ? username : "-", method, uri, status,
+                            username != null ? username : "-", method, auditPath, status,
                             context(CorrelationContext.CORRELATION_ID), context(CorrelationContext.INVOICE_ID),
                             context(CorrelationContext.DIGITAL_INVOICE_ID), context(CorrelationContext.JOB_ID),
                             context(CorrelationContext.PROVIDER_OPERATION_ID), context(CorrelationContext.ERROR_CODE),
@@ -104,10 +108,10 @@ public class ApiAuditFilter extends OncePerRequestFilter {
                         String applicationCode = breakGlassRequest ? "BREAK_GLASS_ACCESS"
                                 : bootstrapWrite ? "BOOTSTRAP_WRITE"
                                 : bootstrapRead ? "BOOTSTRAP_READ"
-                                : "GET".equals(method) && isDownloadUri(uri)
+                                : "GET".equals(method) && isDownloadUri(path)
                                 ? (status >= 400 ? "FILE_DOWNLOAD_REJECTED" : "FILE_DOWNLOAD")
                                 : "ses-manager";
-                        auditLogService.record(username, method, uri, status, applicationCode,
+                        auditLogService.record(username, method, auditPath, status, applicationCode,
                                 status >= 200 && status < 400);
                     }
                 }
@@ -141,7 +145,7 @@ public class ApiAuditFilter extends OncePerRequestFilter {
         if (isBreakGlassRequest(request) || isBootstrapWrite(request)) {
             return true;
         }
-        String uri = request.getRequestURI();
+        String uri = RequestPaths.pathWithinApplication(request);
         if (uri == null || !uri.startsWith("/api/")) {
             return false;
         }

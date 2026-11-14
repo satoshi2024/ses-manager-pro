@@ -1,6 +1,7 @@
 package com.ses.service.security.impl;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.RequestPaths;
 import com.ses.config.OidcSecurityProperties;
 import com.ses.config.PasswordChangeEnforcementFilter;
 import com.ses.entity.AuditLog;
@@ -202,13 +203,13 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         // 初回パスワード変更が必要なsessionだけ、変更画面のGETと変更APIのPUTをincident scope外でも許す。
         // 変更画面はaction keyを持たずscopeへ入れられないため、ここで許さないと変更を完了できない（review P2-1）。
         // 要求の無いsessionでは、この2つも通常どおりscopeで判定する。
-        if (PasswordChangeEnforcementFilter.isChangeEndpoint(request.getMethod(), request.getRequestURI())
+        if (PasswordChangeEnforcementFilter.isChangeEndpoint(request.getMethod(), RequestPaths.pathWithinApplication(request))
                 && isPasswordChangeRequired(session, authentication)) {
             return BreakGlassDecision.ALLOW;
         }
         String action = (String) request.getAttribute(ActionPermissionResolver.REQUEST_ACTION_ATTRIBUTE);
         if (!StringUtils.hasText(action)) {
-            action = ActionPermissionResolver.resolve(request.getMethod(), request.getRequestURI());
+            action = ActionPermissionResolver.resolve(request.getMethod(), RequestPaths.pathWithinApplication(request));
         }
         // 起票時に privacy を拒否していても、DBへ直接書かれたincidentで privacy を開かない（多重防御）。
         if (!StringUtils.hasText(action) || action.startsWith(PRIVACY_ACTION_PREFIX)
@@ -273,7 +274,7 @@ public class BreakGlassServiceImpl implements BreakGlassService {
 
     private boolean isAuthenticationInfrastructure(HttpServletRequest request) {
         return ActionPermissionResolver.isAuthenticationInfrastructure(
-                request.getMethod(), request.getRequestURI());
+                request.getMethod(), RequestPaths.pathWithinApplication(request));
     }
 
     /**
