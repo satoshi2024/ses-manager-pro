@@ -1739,4 +1739,84 @@ class FreeeAccountingProviderTest {
         assertThat(other.getErrorMessageSafe()).isEqualTo("error.accounting.freeeValidation");
         assertThat(String.valueOf(other.getErrorMessageSafe())).doesNotContain("secret-value");
     }
+
+    @Test
+    @DisplayName("入金消込の反映: freeeの口座明細で請求書の取引を、SESで登録した入金額で消込む")
+    void reconcileDeposit_reconcilesTheDealWithTheDepositAmount() {
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/wallet_txns/2542340001/reconcile"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.company_id").value(99999))
+                .andExpect(jsonPath("$.deals[0].deal_id").value(3908700001L))
+                .andExpect(jsonPath("$.deals[0].amount").value(889900))
+                .andExpect(jsonPath("$.adjustment_deal").doesNotExist())
+                .andRespond(withSuccess("{\"wallet_txn_id\": 2542340001, \"deal_ids\": [3908700001], \"new_deal_id\": null}",
+                        MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.reconcileDeposit(testConnection, "2542340001", "3908700001",
+                new BigDecimal("889900"));
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getExternalId()).isEqualTo("3908700001");
+    }
+
+    @Test
+    @DisplayName("入金消込の反映: freee側で既に別の明細・取引と消込済み（409）なら再試行しない失敗にする")
+    void reconcileDeposit_alreadyReconciledInFreee_isNotRetried() {
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/wallet_txns/2542340002/reconcile"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.CONFLICT)
+                        .body("{\"status_code\":409,\"errors\":[{\"type\":\"conflict\",\"messages\":[\"既に消込済みです\"]}]}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.reconcileDeposit(testConnection, "2542340002", "3908700002",
+                new BigDecimal("100000"));
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isFalse();
+        assertThat(result.getErrorCode()).isEqualTo("DEPOSIT_ALREADY_RECONCILED");
+        assertThat(result.getErrorMessageSafe()).isEqualTo("error.accounting.freeeDepositAlreadyReconciled");
+    }
+
+    @Test
+    @DisplayName("入金消込の反映: freeeの一時障害（5xx）は再試行する（同じ内容の再実行はfreeeで冪等）")
+    void reconcileDeposit_serverError_isRetried() {
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/wallet_txns/2542340003/reconcile"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withServerError());
+
+        CanonicalDealResult result = freeeProvider.reconcileDeposit(testConnection, "2542340003", "3908700003",
+                new BigDecimal("100000"));
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isTrue();
+    }
+
+    @Test
+    @DisplayName("入金消込の反映: 口座明細ID・取引IDが数値でない、または金額が円単位でない内容はfreeeへ送らない")
+    void reconcileDeposit_invalidInput_isNotSent() {
+        assertThat(freeeProvider.reconcileDeposit(testConnection, "abc", "3908700004", new BigDecimal("100")).getErrorCode())
+                .isEqualTo("INVALID_SNAPSHOT");
+        assertThat(freeeProvider.reconcileDeposit(testConnection, "2542340004", "3908700004", new BigDecimal("100.5")).getErrorCode())
+                .isEqualTo("INVALID_SNAPSHOT");
+        mockServer.verify(); // 何も送っていない
+    }
+
+    @Test
+    @DisplayName("入金消込の反映: freeeアプリに「[会計] 明細 更新」が無い（403）なら、必要な権限を案内して再試行しない（実freeeで確認）")
+    void reconcileDeposit_forbidden_namesTheMissingPermission() {
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/wallet_txns/2542340005/reconcile"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.FORBIDDEN));
+
+        CanonicalDealResult result = freeeProvider.reconcileDeposit(testConnection, "2542340005", "3908700005",
+                new BigDecimal("100000"));
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isFalse();
+        assertThat(result.getErrorMessageSafe()).isEqualTo("error.accounting.freeeWalletTxnWriteForbidden");
+    }
 }

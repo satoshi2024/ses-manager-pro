@@ -449,6 +449,124 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
         });
     }
 
+    /** 入金消込の反映ジョブ種別（SESの入金消込 → freeeの口座明細で取引を消込）。 */
+    static final String DEPOSIT_RECONCILE_JOB_TYPE = "DEPOSIT_RECONCILE_SYNC";
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public IntegrationJob enqueueDepositReconcile(Long depositId, String walletTxnId, Long invoiceId, Long paymentId,
+                                                  java.math.BigDecimal amount) {
+        if (depositId == null || invoiceId == null || walletTxnId == null || !walletTxnId.matches("\\d{1,19}")
+                || amount == null || amount.signum() <= 0) {
+            return null;
+        }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        // 入金明細はfreeeの会計接続から取り込んだもの。接続が無ければ反映先も無い（ここで接続は作らない）
+        IntegrationConnection conn = connectionService.getConnection(tenantId, null, "freee", "accounting");
+        if (conn == null) {
+            log.info("会計接続が無いため、freeeへの入金消込の反映を行いません: depositId={}", depositId);
+            return null;
+        }
+        // 反映先はこの請求書をfreeeへ送信した取引。未送信・取消済みなら反映しない（月次照合で差異として残る）
+        IntegrationJob latestSync = jobService.getLatestJob("INVOICE", invoiceId, "SALES_INVOICE_SYNC");
+        if (latestSync == null || !"SUCCEEDED".equals(latestSync.getStatus())
+                || latestSync.getExternalId() == null || latestSync.getExternalId().isBlank()) {
+            log.info("請求書がfreeeへ未送信のため、freeeへの入金消込の反映を行いません: depositId={} invoiceId={}",
+                    depositId, invoiceId);
+            return null;
+        }
+        String dealId = latestSync.getExternalId();
+        if (isDealCancelled(invoiceId, dealId)) {
+            log.info("freeeの取引が取消済みのため、入金消込の反映を行いません: depositId={} invoiceId={} dealId={}",
+                    depositId, invoiceId, dealId);
+            return null;
+        }
+        Long legalEntityId = latestSync.getLegalEntityId() != null
+                ? latestSync.getLegalEntityId()
+                : legalEntityResolver.require(conn, legalEntityResolver.ofInvoice(invoiceService.getById(invoiceId)));
+
+        java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("depositId", depositId);
+        payload.put("walletTxnId", walletTxnId);
+        payload.put("invoiceId", invoiceId);
+        payload.put("paymentId", paymentId);
+        payload.put("externalDealId", dealId);
+        payload.put("amount", amount);
+        String payloadJson;
+        try {
+            payloadJson = objectMapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            throw new IllegalStateException("入金消込の反映内容をシリアライズできません", e);
+        }
+        String idempotencyKey = "DEPOSIT_RECONCILE:" + depositId + ":" + dealId;
+        log.info("freeeへの入金消込の反映ジョブを登録します: depositId={} invoiceId={} dealId={}", depositId, invoiceId, dealId);
+        return jobService.createJob(conn.getId(), DEPOSIT_RECONCILE_JOB_TYPE, "BANK_DEPOSIT", depositId, idempotencyKey,
+                calculateSha256(payloadJson), payloadJson, conn.getTenantId(), legalEntityId, latestSync.getOrganizationId());
+    }
+
+    /** この取引の取消（手動の取消・通信中取消の補償取消）が成功しているか。 */
+    private boolean isDealCancelled(Long invoiceId, String dealId) {
+        for (String key : List.of("SALES_CANCEL:" + invoiceId + ":" + dealId, "COMPENSATE_CANCEL:" + invoiceId + ":" + dealId)) {
+            IntegrationJob cancel = jobService.getByIdempotencyKey(key);
+            if (cancel != null && "SUCCEEDED".equals(cancel.getStatus())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public void processDepositReconcileJob(Long jobId) {
+        IntegrationJob job = jobService.claimJob(jobId);
+        if (job == null) {
+            return;
+        }
+        IntegrationConnection conn = connectionService.getById(job.getConnectionId());
+        if (conn == null) {
+            jobService.markFailed(jobId, "CONNECTION_NOT_FOUND", "外部連携接続情報が見つかりません");
+            return;
+        }
+        if (job.getPayloadSnapshot() == null || job.getPayloadSnapshot().isBlank()) {
+            jobService.markFailed(jobId, "LEGACY_SNAPSHOT_MISSING", "Snapshotが存在しないジョブは実行できません");
+            return;
+        }
+        if (job.getPayloadHash() != null && !job.getPayloadHash().equals(calculateSha256(job.getPayloadSnapshot()))) {
+            jobService.markFailed(jobId, "PAYLOAD_HASH_MISMATCH", "SnapshotのSHA-256ハッシュが一致しません");
+            return;
+        }
+
+        AccountingTenantContextHolder.runWithTenant(job.getTenantId(), timezoneResolver.resolve(job.getTenantId()), () -> {
+            try {
+                com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(job.getPayloadSnapshot());
+                String walletTxnId = node.path("walletTxnId").asText(null);
+                String dealId = node.path("externalDealId").asText(null);
+                java.math.BigDecimal amount = node.hasNonNull("amount") ? node.get("amount").decimalValue() : null;
+                if (walletTxnId == null || dealId == null || amount == null) {
+                    jobService.markFailed(jobId, "INVALID_SNAPSHOT", "Snapshotに口座明細ID・取引ID・金額が含まれていません");
+                    return;
+                }
+                AccountingProvider provider = providerFactory.getProvider(conn);
+                CanonicalDealResult result = provider.reconcileDeposit(conn, walletTxnId, dealId, amount);
+                if (result.isSuccess()) {
+                    jobService.markSucceeded(jobId, dealId, result.getProviderRequestId(),
+                            "freeeの口座明細で取引を消込: dealId=" + dealId);
+                } else if (result.isRetryable()) {
+                    jobService.markRetryable(jobId, result.getErrorCode(), result.getErrorMessageSafe(),
+                            result.getRetryAfterSeconds());
+                } else {
+                    jobService.markFailed(jobId, result.getErrorCode(), result.getErrorMessageSafe());
+                }
+            } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+                log.warn("Token refresh in progress during deposit reconcile job {}: rescheduling retry in 5s", jobId);
+                jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
+            } catch (Exception e) {
+                log.error("Error executing deposit reconcile job: error_code=JOB_EXECUTION_EXCEPTION, jobId={}, jobType={}",
+                        jobId, DEPOSIT_RECONCILE_JOB_TYPE);
+                jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", "入金消込の反映中にシステムエラーが発生しました", 60);
+            }
+        });
+    }
+
     @Override
     public CanonicalSalesInvoice buildCanonicalInvoice(Long invoiceId) {
         Invoice invoice = invoiceService.getById(invoiceId);

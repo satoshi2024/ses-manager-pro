@@ -461,6 +461,71 @@ public class FreeeAccountingProvider implements AccountingProvider {
         }
     }
 
+    /**
+     * SESで入金消込した入金を、freeeの口座明細で未決済の取引を消込む API（POST /api/1/wallet_txns/{id}/reconcile）へ反映する。
+     * 口座明細の金額と決済金額は一致する（SESは入金額をそのまま請求書の入金にしており、手数料は持たない）ため、
+     * 差額取引（adjustment_deal）は送らない。freeeは同一パラメータの再実行に同じ応答を返すため、タイムアウト後の再試行も安全。
+     * 明細が別の取引で、または取引が別の明細で既に消込済みなら409（再試行しない）。
+     */
+    @Override
+    public CanonicalDealResult reconcileDeposit(IntegrationConnection connection, String walletTxnId,
+                                                String externalDealId, BigDecimal amount) {
+        connection = requireAuthoritativeConnection(connection);
+        if (walletTxnId == null || !walletTxnId.matches("\\d{1,19}")
+                || externalDealId == null || !externalDealId.matches("\\d{1,19}")
+                || amount == null || amount.signum() <= 0 || amount.stripTrailingZeros().scale() > 0) {
+            return CanonicalDealResult.builder()
+                    .success(false)
+                    .errorCode("INVALID_SNAPSHOT")
+                    .errorMessageSafe("error.accounting.freeeValidation")
+                    .retryable(false)
+                    .build();
+        }
+        java.util.Map<String, Object> deal = new java.util.LinkedHashMap<>();
+        deal.put("deal_id", Long.parseLong(externalDealId));
+        deal.put("amount", amount.longValueExact());
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("company_id", connection.getExternalCompanyId());
+        body.put("deals", List.of(deal));
+        String url = apiBaseUrl + "/api/1/wallet_txns/" + walletTxnId + "/reconcile";
+        try {
+            ResponseEntity<JsonNode> response = executeWith401Recovery(connection, headers -> {
+                HttpEntity<Object> entity = new HttpEntity<>(body, headers);
+                return restTemplate.exchange(url, HttpMethod.POST, entity, JsonNode.class);
+            });
+            log.info("freeeの口座明細で取引を消込みました: walletTxnId={} dealId={}", walletTxnId, externalDealId);
+            return CanonicalDealResult.builder()
+                    .success(true)
+                    .externalId(externalDealId)
+                    .providerRequestId(extractRequestId(response.getHeaders()))
+                    .build();
+        } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+            throw e; // 他ノードのトークン更新待ち: Workerが短い間隔で再試行する
+        } catch (HttpClientErrorException.Forbidden e) {
+            // 口座明細の消込は「[会計] 明細 更新」の権限が要る（取引の作成とは別）。実freeeで、明細の参照だけでは403になった
+            log.warn("freeeが入金消込の反映を拒否しました（権限不足またはプラン）: status_code=403 error_code=PLAN_LIMITATION");
+            return CanonicalDealResult.builder()
+                    .success(false)
+                    .errorCode("PLAN_LIMITATION")
+                    .errorMessageSafe("error.accounting.freeeWalletTxnWriteForbidden")
+                    .providerRequestId(extractRequestId(e.getResponseHeaders()))
+                    .retryable(false)
+                    .build();
+        } catch (HttpClientErrorException.Conflict e) {
+            log.warn("freeeの口座明細または取引が既に別の明細・取引と消込済みです: walletTxnId={} dealId={} error_code=DEPOSIT_ALREADY_RECONCILED",
+                    walletTxnId, externalDealId);
+            return CanonicalDealResult.builder()
+                    .success(false)
+                    .errorCode("DEPOSIT_ALREADY_RECONCILED")
+                    .errorMessageSafe("error.accounting.freeeDepositAlreadyReconciled")
+                    .providerRequestId(extractRequestId(e.getResponseHeaders()))
+                    .retryable(false)
+                    .build();
+        } catch (Exception e) {
+            return handleApiException(e, "POST /api/1/wallet_txns/{id}/reconcile");
+        }
+    }
+
     @Override
     public CanonicalPaymentSync fetchDealPayment(IntegrationConnection connection, String externalDealId) {
         connection = requireAuthoritativeConnection(connection);

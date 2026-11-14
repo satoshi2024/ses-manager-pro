@@ -831,4 +831,59 @@ class SalesInvoiceIntegrationTest {
         assertThat(jobService.getById(second.getId()).getStatus()).isEqualTo("SUCCEEDED");
         assertThat(jobService.getById(second.getId()).getExternalId()).isEqualTo("668101");
     }
+
+    /** 請求書を送信済みにする（freee取引IDを持つ送信成功ジョブ）。 */
+    private IntegrationJob markInvoiceSentToFreee(String dealId) {
+        IntegrationJob sync = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        jobService.claimJob(sync.getId());
+        jobService.markSucceeded(sync.getId(), dealId, "req-sent", "売上登録完了");
+        return jobService.getById(sync.getId());
+    }
+
+    @Test
+    @DisplayName("入金消込のfreee反映: 送信済みの請求書なら、口座明細・取引・入金額の反映ジョブを登録し、Workerがfreeeで消込む")
+    void depositReconcile_sentInvoice_isReflectedToFreee() {
+        IntegrationJob sync = markInvoiceSentToFreee("668201");
+
+        IntegrationJob job = salesIntegrationService.enqueueDepositReconcile(9301L, "2542349301", invoice.getId(), 9401L,
+                new BigDecimal("1100000"));
+        assertThat(job).isNotNull();
+        assertThat(job.getJobType()).isEqualTo("DEPOSIT_RECONCILE_SYNC");
+        assertThat(job.getTargetType()).isEqualTo("BANK_DEPOSIT");
+        assertThat(job.getLegalEntityId()).isEqualTo(sync.getLegalEntityId());
+        assertThat(job.getPayloadSnapshot()).contains("\"walletTxnId\":\"2542349301\"").contains("\"externalDealId\":\"668201\"");
+        // 同じ入金の再登録は同じジョブへ統合される（冪等）
+        assertThat(salesIntegrationService.enqueueDepositReconcile(9301L, "2542349301", invoice.getId(), 9401L,
+                new BigDecimal("1100000")).getId()).isEqualTo(job.getId());
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/wallet_txns/2542349301/reconcile"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.deals[0].deal_id").value(668201))
+                .andExpect(jsonPath("$.deals[0].amount").value(1100000))
+                .andRespond(withSuccess("{\"wallet_txn_id\": 2542349301, \"deal_ids\": [668201], \"new_deal_id\": null}",
+                        MediaType.APPLICATION_JSON));
+        accountingIntegrationWorker.dispatchJob(jobService.getById(job.getId()));
+        mockServer.verify();
+        IntegrationJob done = jobService.getById(job.getId());
+        assertThat(done.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(done.getExternalId()).isEqualTo("668201");
+    }
+
+    @Test
+    @DisplayName("入金消込のfreee反映: 請求書が未送信、または取引が取消済みなら反映ジョブを作らない")
+    void depositReconcile_unsentOrCancelledInvoice_isNotReflected() {
+        assertThat(salesIntegrationService.enqueueDepositReconcile(9302L, "2542349302", invoice.getId(), 9402L,
+                new BigDecimal("1100000"))).isNull();
+
+        markInvoiceSentToFreee("668202");
+        IntegrationJob cancel = salesIntegrationService.triggerSalesCancel(invoice.getId(), "REASON_OTHER", 1L);
+        jobService.claimJob(cancel.getId());
+        jobService.markSucceeded(cancel.getId(), "668202", "req-cancel", "取消完了");
+        assertThat(salesIntegrationService.enqueueDepositReconcile(9303L, "2542349303", invoice.getId(), 9403L,
+                new BigDecimal("1100000"))).isNull();
+
+        // 口座明細IDが無い（freee以外から登録した入金）・金額が0以下も反映しない
+        assertThat(salesIntegrationService.enqueueDepositReconcile(9304L, null, invoice.getId(), 9404L,
+                new BigDecimal("1100000"))).isNull();
+    }
 }

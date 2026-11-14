@@ -39,6 +39,19 @@ public interface SalesInvoiceIntegrationService {
     com.ses.dto.accounting.canonical.CanonicalSalesInvoice buildCanonicalInvoice(Long invoiceId);
 
     /**
+     * SESで入金消込した入金明細（freeeの口座明細）を、freeeの取引の消込として反映するジョブを登録する（Outbox）。
+     * 入金消込と同じトランザクションで呼ぶ。請求書がfreeeへ送信済み（取引が取消されていない）ときだけ登録し、
+     * それ以外（未送信・取引取消済み・会計接続なし・口座明細IDが無い）は登録せず null を返す。
+     */
+    IntegrationJob enqueueDepositReconcile(Long depositId, String walletTxnId, Long invoiceId, Long paymentId,
+                                           java.math.BigDecimal amount);
+
+    /**
+     * 入金消込の反映ジョブを1件同期処理する（Worker実行用 / DBトランザクション外）。
+     */
+    void processDepositReconcileJob(Long jobId);
+
+    /**
      * 外部API実行後の結果をDBに反映する（トランザクション内）。
      */
     void handleSalesInvoiceResult(Long jobId, IntegrationJob job, com.ses.entity.IntegrationConnection conn, com.ses.dto.accounting.canonical.CanonicalDealResult result);
