@@ -32,6 +32,8 @@ spring:
         - classpath:sql/schema-contract-document-h2.sql
         - classpath:sql/schema-freee-payroll-h2.sql
         - classpath:sql/schema-ar-management-h2.sql
+        # V52: 入金消込（FR-09）の銀行入金明細。入金消込のfreee反映をH2統合テストで通すために用意する
+        - classpath:sql/schema-bank-deposit-h2.sql
         - classpath:sql/schema-quotation-h2.sql
         - classpath:sql/schema-self-service-h2.sql
         - classpath:sql/schema-price-history-h2.sql

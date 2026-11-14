@@ -1714,6 +1714,61 @@ class FreeeAccountingProviderTest {
         assertThat(result.getErrorCode()).isEqualTo("EXISTING_DEAL_FOUND");
     }
 
+    /** 1ページ目（100件満杯）に、前回の試行で作成した取引（管理番号・金額・事業所が一致）を1件だけ含む。 */
+    private static String fullPageWithOwnDeal(String refNumber) {
+        StringBuilder page = new StringBuilder("{\"deals\": [");
+        for (int i = 0; i < 100; i++) {
+            if (i > 0) {
+                page.append(',');
+            }
+            page.append("{\"id\": ").append(58000 + i).append(", \"ref_number\": \"")
+                    .append(i == 17 ? refNumber : "OTHER-" + i)
+                    .append("\", \"amount\": 1100000, \"company_id\": 99999}");
+        }
+        return page.append("]}").toString();
+    }
+
+    @Test
+    @DisplayName("F4: 同じジョブの再試行で、自分の作成した取引だけを見つけた後に走査が一時障害で途切れたら、拒否で終わらせず再試行待ちにする")
+    void retry_ownDealFoundButLaterPageFailed_isRetriedInsteadOfRefused() {
+        mockServer.expect(requestTo(partnerScanUrl(0)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(fullPageWithOwnDeal("INV-GUARD-OWNMID"), MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(partnerScanUrl(100)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withServerError());
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-GUARD-OWNMID"),
+                AccountingProvider.DealCreateGuard.ADOPT_OWN_OR_REFUSE);
+
+        mockServer.verify(); // POSTもしない（他に同じ管理番号の取引があるかを確認できていない）
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isTrue();
+        assertThat(result.getErrorCode()).isEqualTo("EXISTING_DEAL_CHECK_FAILED");
+    }
+
+    @Test
+    @DisplayName("F4: 同じジョブの再試行でも、自分の取引と別の同じ管理番号の取引が見つかれば、走査が途切れていても拒否する")
+    void retry_otherDealFoundBeforeLaterPageFailed_isStillRefused() {
+        mockServer.expect(requestTo(partnerScanUrl(0)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(fullPageWithOwnDeal("INV-GUARD-OTHERMID").replace(
+                        "\"id\": 58017, \"ref_number\": \"INV-GUARD-OTHERMID\", \"amount\": 1100000",
+                        "\"id\": 58017, \"ref_number\": \"INV-GUARD-OTHERMID\", \"amount\": 900000"),
+                        MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(partnerScanUrl(100)))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withServerError());
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, guardedInvoice("INV-GUARD-OTHERMID"),
+                AccountingProvider.DealCreateGuard.ADOPT_OWN_OR_REFUSE);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isFalse();
+        assertThat(result.getErrorCode()).isEqualTo("EXISTING_DEAL_FOUND");
+    }
+
     @Test
     @DisplayName("freeeの入力エラーは既知の理由（存在しない取引先・期首日より前）だけ専用の案内にし、それ以外は従来の案内のまま（応答本文は渡さない）")
     void validationError_knownReasonsAreClassified() {

@@ -83,6 +83,7 @@ class SalesInvoiceIntegrationTest {
     void cleanupFixtures() {
         com.ses.service.accounting.AccountingTenantContextHolder.clear();
         if (invoice != null && invoice.getId() != null) {
+            jdbcTemplate.update("DELETE FROM t_bank_deposit WHERE matched_invoice_id = ?", invoice.getId());
             invoiceService.removeById(invoice.getId());
             jdbcTemplate.update("DELETE FROM t_invoice_item WHERE invoice_id = ?", invoice.getId());
         }
@@ -844,16 +845,25 @@ class SalesInvoiceIntegrationTest {
     @DisplayName("入金消込のfreee反映: 送信済みの請求書なら、口座明細・取引・入金額の反映ジョブを登録し、Workerがfreeeで消込む")
     void depositReconcile_sentInvoice_isReflectedToFreee() {
         IntegrationJob sync = markInvoiceSentToFreee("668201");
+        // Workerは送る直前に入金明細がこの請求書・入金行で消込済みかを確かめるため、消込済みの入金明細を用意する
+        jdbcTemplate.update("DELETE FROM t_bank_deposit WHERE freee_deposit_id = '2542349301'");
+        jdbcTemplate.update("INSERT INTO t_bank_deposit (freee_deposit_id, deposit_date, amount, payer_name, status, "
+                + "matched_invoice_id, matched_payment_id) VALUES ('2542349301', ?, 1100000, 'ﾃｽﾄ', '消込済', ?, 9401)",
+                LocalDate.of(2026, 9, 30), invoice.getId());
+        Long depositId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_bank_deposit WHERE freee_deposit_id = '2542349301'", Long.class);
 
-        IntegrationJob job = salesIntegrationService.enqueueDepositReconcile(9301L, "2542349301", invoice.getId(), 9401L,
+        IntegrationJob job = salesIntegrationService.enqueueDepositReconcile(depositId, "2542349301", invoice.getId(), 9401L,
                 new BigDecimal("1100000"));
         assertThat(job).isNotNull();
         assertThat(job.getJobType()).isEqualTo("DEPOSIT_RECONCILE_SYNC");
         assertThat(job.getTargetType()).isEqualTo("BANK_DEPOSIT");
         assertThat(job.getLegalEntityId()).isEqualTo(sync.getLegalEntityId());
+        // 冪等キーはSESの入金行ごと（入金を削除して消込し直すと別のジョブになる）
+        assertThat(job.getIdempotencyKey()).isEqualTo("DEPOSIT_RECONCILE:" + depositId + ":9401:668201");
         assertThat(job.getPayloadSnapshot()).contains("\"walletTxnId\":\"2542349301\"").contains("\"externalDealId\":\"668201\"");
         // 同じ入金の再登録は同じジョブへ統合される（冪等）
-        assertThat(salesIntegrationService.enqueueDepositReconcile(9301L, "2542349301", invoice.getId(), 9401L,
+        assertThat(salesIntegrationService.enqueueDepositReconcile(depositId, "2542349301", invoice.getId(), 9401L,
                 new BigDecimal("1100000")).getId()).isEqualTo(job.getId());
 
         mockServer.expect(requestTo("https://api.freee.co.jp/api/1/wallet_txns/2542349301/reconcile"))
@@ -878,6 +888,9 @@ class SalesInvoiceIntegrationTest {
         markInvoiceSentToFreee("668202");
         IntegrationJob cancel = salesIntegrationService.triggerSalesCancel(invoice.getId(), "REASON_OTHER", 1L);
         jobService.claimJob(cancel.getId());
+        // 取消の処理中も反映しない（取引の削除とfreee上で食い違うため）
+        assertThat(salesIntegrationService.enqueueDepositReconcile(9305L, "2542349305", invoice.getId(), 9405L,
+                new BigDecimal("1100000"))).isNull();
         jobService.markSucceeded(cancel.getId(), "668202", "req-cancel", "取消完了");
         assertThat(salesIntegrationService.enqueueDepositReconcile(9303L, "2542349303", invoice.getId(), 9403L,
                 new BigDecimal("1100000"))).isNull();
@@ -885,5 +898,18 @@ class SalesInvoiceIntegrationTest {
         // 口座明細IDが無い（freee以外から登録した入金）・金額が0以下も反映しない
         assertThat(salesIntegrationService.enqueueDepositReconcile(9304L, null, invoice.getId(), 9404L,
                 new BigDecimal("1100000"))).isNull();
+    }
+
+    @Test
+    @DisplayName("取消ジョブが失敗したまま取消を依頼し直すと、送信ジョブ向けではなく取消ジョブの再試行を案内する")
+    void triggerSalesCancel_failedCancelJob_asksToRetryTheCancelJob() {
+        markInvoiceSentToFreee("668203");
+        IntegrationJob cancel = salesIntegrationService.triggerSalesCancel(invoice.getId(), "REASON_OTHER", 1L);
+        jobService.claimJob(cancel.getId());
+        jobService.markFailed(cancel.getId(), "VALIDATION_ERROR", "error.accounting.freeeValidation");
+
+        assertThatThrownBy(() -> salesIntegrationService.triggerSalesCancel(invoice.getId(), "REASON_OTHER", 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.accounting.cancelRetryRequired");
     }
 }

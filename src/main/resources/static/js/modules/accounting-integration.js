@@ -329,6 +329,10 @@ window.AccountingIntegration = (function () {
                             j.status === 'FAILED' ? '<span class="badge bg-danger">FAILED</span>' :
                                 j.status === 'CANCELLED' ? '<span class="badge bg-secondary">CANCELLED</span>' :
                                     '<span class="badge bg-primary">PENDING</span>';
+                // SESで入金消込を取り消したが、freeeに消込が残っている（可能性がある）反映ジョブ。freeeで手動の取消が必要
+                if (j.errorCode === 'DEPOSIT_RECONCILE_ACTION_REQUIRED') {
+                    statusBadge += ` <span class="badge bg-warning text-dark">${escapeHtml(t('actionRequired'))}</span>`;
+                }
 
                 let actionBtns = `<button class="btn btn-xs btn-outline-info btn-job-detail" data-id="${j.id}" title="${escapeHtml(t('btnDetail'))}" aria-label="${escapeHtml(t('btnDetail'))}"><i class="bi bi-info-circle" aria-hidden="true"></i></button>`;
                 if (j.status === 'RETRYABLE' || j.status === 'FAILED') {
@@ -342,9 +346,11 @@ window.AccountingIntegration = (function () {
                         actionBtns += `<button class="btn btn-xs btn-outline-success btn-payment-sync" data-target-id="${j.targetId}" title="${escapeHtml(t('btnPaymentSync'))}" aria-label="${escapeHtml(t('btnPaymentSync'))}"><i class="bi bi-cash-coin" aria-hidden="true"></i></button>`;
                     }
                 }
-                // FAILEDの送信ジョブ（取引作成系）も取消せる。取消すと内容を直して再送信できる（再送信時にfreeeの既存取引を確認する）
+                // FAILEDの送信ジョブ（取引作成系）も取消せる。取消すと内容を直して再送信できる（再送信時にfreeeの既存取引を確認する）。
+                // 入金消込の反映ジョブも、freeeで既に消込済み等で失敗したものは取消せる（再試行しても結果は変わらない）
                 let cancellableFailed = j.status === 'FAILED'
-                    && (j.jobType === 'SALES_INVOICE_SYNC' || j.jobType === 'BP_PURCHASE_SYNC' || j.jobType === 'EXPENSE_DEAL_SYNC');
+                    && (j.jobType === 'SALES_INVOICE_SYNC' || j.jobType === 'BP_PURCHASE_SYNC' || j.jobType === 'EXPENSE_DEAL_SYNC'
+                        || j.jobType === 'DEPOSIT_RECONCILE_SYNC');
                 if (j.status === 'PENDING' || j.status === 'RETRYABLE' || j.status === 'RUNNING' || cancellableFailed) {
                     actionBtns += `<button class="btn btn-xs btn-outline-danger btn-job-cancel" data-id="${j.id}" title="${escapeHtml(t('btnCancel'))}" aria-label="${escapeHtml(t('btnCancel'))}"><i class="bi bi-x-circle" aria-hidden="true"></i></button>`;
                 }

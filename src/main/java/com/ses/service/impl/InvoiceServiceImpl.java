@@ -76,6 +76,18 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     @Autowired
     private com.ses.mapper.BankDepositMapper bankDepositMapper;
 
+    /**
+     * 入金消込の取消をfreeeへの反映（DEPOSIT_RECONCILE_SYNC）へ伝える。売上連携サービスは InvoiceService に依存するため、
+     * 循環しないよう遅延取得する（テストslice等では無い）。
+     */
+    @Autowired
+    private org.springframework.beans.factory.ObjectProvider<com.ses.service.accounting.SalesInvoiceIntegrationService>
+            salesInvoiceIntegrationProvider;
+
+    /** freee側に消込が残る入金消込の取消を要対応として監査に残す。 */
+    @Autowired(required = false)
+    private com.ses.service.AuditLogService auditLogService;
+
     @Autowired
     private MailService mailService;
 
@@ -386,7 +398,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void deletePayment(Long invoiceId, Long paymentId) {
+    public com.ses.dto.invoice.InvoicePaymentDeleteResult deletePayment(Long invoiceId, Long paymentId) {
         Invoice invoice = this.baseMapper.selectOne(new QueryWrapper<Invoice>().eq("id", invoiceId).last("FOR UPDATE"));
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
@@ -400,9 +412,13 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (payment == null || !invoiceId.equals(payment.getInvoiceId())) {
             throw BusinessException.of("error.invoice.paymentNotFound");
         }
-        releaseBankDeposit(paymentId);
+        List<com.ses.entity.BankDeposit> releasedDeposits = releaseBankDeposit(paymentId);
         invoicePaymentMapper.deleteById(paymentId);
         recalcPaymentStatus(invoice);
+
+        com.ses.dto.invoice.InvoicePaymentDeleteResult result = new com.ses.dto.invoice.InvoicePaymentDeleteResult();
+        result.setWarnings(releaseFreeeReconcile(invoiceId, paymentId, releasedDeposits));
+        return result;
     }
 
     /**
@@ -413,14 +429,57 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
      * {@code ON DELETE RESTRICT} で参照している。先に解除しないと入金の削除自体が
      * FK違反で落ち（画面には500が返る）、誤って自動消込された入金を取り消す手段が
      * 一切無くなる（消込を戻すAPIも無いため入金が固定されてしまう）。
-     * 解除して未消込に戻せば、正しい請求書へ消込し直せる。
+     * 解除して未消込に戻せば、正しい請求書へ消込し直せる。</p>
+     *
+     * @return 未消込へ戻した入金明細（freeeへの反映の後始末に使う）
      */
-    private void releaseBankDeposit(Long paymentId) {
+    private List<com.ses.entity.BankDeposit> releaseBankDeposit(Long paymentId) {
+        List<com.ses.entity.BankDeposit> matched = bankDepositMapper.selectList(
+                new QueryWrapper<com.ses.entity.BankDeposit>().eq("matched_payment_id", paymentId));
         bankDepositMapper.update(null, new UpdateWrapper<com.ses.entity.BankDeposit>()
                 .eq("matched_payment_id", paymentId)
                 .set("status", "未消込")
                 .set("matched_invoice_id", null)
                 .set("matched_payment_id", null));
+        return matched == null ? List.of() : matched;
+    }
+
+    /**
+     * 未消込へ戻した入金明細のfreeeへの反映（DEPOSIT_RECONCILE_SYNC）を後始末する。未完了の反映ジョブは取消し、
+     * freeeへ反映済み（または反映された可能性がある）なら、freee側で手動の取消が必要な旨を警告として返し、監査に残す。
+     *
+     * <p>後始末の失敗ではSES側の入金削除（消込の取消）を止めない。後始末は savepoint（NESTED）で実行されるため
+     * このトランザクションを rollback-only にせず、残った反映ジョブもWorkerが送る直前に消込の状態を確かめて取消す。
+     * 失敗したときはfreeeの状態を確認できないため、安全側で警告を返す。</p>
+     */
+    private List<String> releaseFreeeReconcile(Long invoiceId, Long paymentId,
+                                               List<com.ses.entity.BankDeposit> releasedDeposits) {
+        if (releasedDeposits.isEmpty() || salesInvoiceIntegrationProvider == null) {
+            return new java.util.ArrayList<>();
+        }
+        com.ses.service.accounting.SalesInvoiceIntegrationService sync = salesInvoiceIntegrationProvider.getIfAvailable();
+        if (sync == null) {
+            return new java.util.ArrayList<>();
+        }
+        java.util.LinkedHashSet<String> warnings = new java.util.LinkedHashSet<>();
+        for (com.ses.entity.BankDeposit deposit : releasedDeposits) {
+            String warning;
+            try {
+                warning = sync.releaseDepositReconcile(deposit.getId(), paymentId);
+            } catch (RuntimeException e) {
+                log.warn("入金消込の取消をfreeeへの反映ジョブへ伝えられませんでした（SESの取消は確定・要対応）: depositId={} paymentId={} error_code=DEPOSIT_RECONCILE_RELEASE_FAILED exceptionClass={}",
+                        deposit.getId(), paymentId, e.getClass().getSimpleName());
+                warning = com.ses.service.accounting.SalesInvoiceIntegrationService.RELEASE_WARNING_UNCERTAIN;
+            }
+            if (warning != null) {
+                warnings.add(warning);
+            }
+        }
+        if (!warnings.isEmpty() && auditLogService != null) {
+            auditLogService.record(com.ses.common.util.SecurityUtils.currentUsername(), "DELETE",
+                    "/api/invoices/" + invoiceId + "/payments/" + paymentId, 200, "FREEE_UNRECONCILE_REQUIRED", false);
+        }
+        return new java.util.ArrayList<>(warnings);
     }
 
     @Override

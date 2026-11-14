@@ -23,8 +23,11 @@ public interface InvoiceService extends IService<Invoice> {
     // ===== 債権管理（ar-management / P2） =====
     /** 入金を登録し、消込ステータスを再計算する（過入金・取消済み請求書は拒否）。 */
     InvoicePaymentResponse addPayment(Long invoiceId, InvoicePaymentCreateRequest request);
-    /** 入金を削除し、消込ステータスを再計算する。 */
-    void deletePayment(Long invoiceId, Long paymentId);
+    /**
+     * 入金を削除し、消込ステータスを再計算する。入金消込（FR-09）で作られた入金なら入金明細を未消込へ戻し、
+     * freeeへの反映を後始末する。freee側で手動の対応が要るときは結果の warnings に注意（message key）を返す。
+     */
+    com.ses.dto.invoice.InvoicePaymentDeleteResult deletePayment(Long invoiceId, Long paymentId);
     /** 請求書の入金履歴を入金日昇順で返す。 */
     List<InvoicePaymentResponse> listPayments(Long invoiceId);
     /** 顧客×経過区分の未回収エイジングレポート。 */

@@ -162,8 +162,8 @@ public class InvoiceApiController {
     @DeleteMapping("/{id}/payments/{paymentId}")
     public ApiResult<?> deletePayment(@PathVariable Long id, @PathVariable Long paymentId) {
         assertInvoiceVisible(id);
-        invoiceService.deletePayment(id, paymentId);
-        return ApiResult.success(null);
+        // 削除は成功。freee側で手動の対応が要る場合は warnings（message key）を画面で警告する
+        return ApiResult.success(invoiceService.deletePayment(id, paymentId));
     }
 
     /** エイジング（債権年齢）レポート。asOf 省略時は今日基準。 */

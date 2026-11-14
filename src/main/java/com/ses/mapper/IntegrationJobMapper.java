@@ -92,6 +92,32 @@ public interface IntegrationJobMapper extends BaseMapper<IntegrationJob> {
                                     @Param("reason") String reason);
 
     /**
+     * システムの判断（SES側の入金消込の取消・実行前の状態確認）による CANCELLED へのバージョン CAS 遷移。
+     * 利用者の取消（USER_CANCELLED）と区別できるよう理由コードを保存する。状態は呼出側が読んだ値（fromStatus）で照合する。
+     */
+    @Update("UPDATE t_integration_job " +
+            "SET status = 'CANCELLED', error_code = #{errorCode}, error_category = 'BUSINESS', error_message_safe = #{reason}, " +
+            "    version = version + 1, updated_at = NOW() " +
+            "WHERE id = #{id} AND version = #{version} AND status = #{fromStatus} " +
+            "  AND status IN ('PENDING', 'RETRYABLE', 'RUNNING', 'FAILED') AND deleted_flag = 0")
+    int transitionToCancelledBySystem(@Param("id") Long id,
+                                      @Param("version") Integer version,
+                                      @Param("fromStatus") String fromStatus,
+                                      @Param("errorCode") String errorCode,
+                                      @Param("reason") String reason);
+
+    /**
+     * 成功済みのジョブへ要対応の印（理由コード・安全メッセージ）を付ける。状態は SUCCEEDED のまま変えない。
+     */
+    @Update("UPDATE t_integration_job " +
+            "SET error_code = #{errorCode}, error_category = 'BUSINESS', error_message_safe = #{reason}, " +
+            "    version = version + 1, updated_at = NOW() " +
+            "WHERE id = #{id} AND status = 'SUCCEEDED' AND deleted_flag = 0")
+    int markSucceededActionRequired(@Param("id") Long id,
+                                    @Param("errorCode") String errorCode,
+                                    @Param("reason") String reason);
+
+    /**
      * PENDING, RETRYABLE, または RUNNING から CANCELLED へのバージョン CAS 遷移。
      */
     @Update("UPDATE t_integration_job " +

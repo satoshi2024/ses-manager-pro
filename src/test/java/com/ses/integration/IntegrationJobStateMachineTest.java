@@ -156,4 +156,58 @@ class IntegrationJobStateMachineTest {
                 .hasMessageContaining("CANNOT_CANCEL_TERMINAL_JOB");
         assertThat(jobService.getById(paymentJob.getId()).getStatus()).isEqualTo("FAILED");
     }
+
+    @Test
+    @DisplayName("入金消込の反映ジョブ: FAILEDは利用者が取消せる。実行中（RUNNING）はfreeeで消込が成立しても補償できないため取消せない")
+    void cancelJob_depositReconcileJob_failedCanBeCancelledButRunningCannot() {
+        IntegrationJob failed = jobService.createJob(connId, "DEPOSIT_RECONCILE_SYNC", "BANK_DEPOSIT", 9201L,
+                "IDEM-DEPOSIT-FAILED", "hashDf");
+        jobService.claimJob(failed.getId());
+        jobService.markFailed(failed.getId(), "DEPOSIT_ALREADY_RECONCILED", "error.accounting.freeeDepositAlreadyReconciled");
+        jobService.cancelJob(failed.getId(), "freeeで確認済み");
+        assertThat(jobService.getById(failed.getId()).getStatus()).isEqualTo("CANCELLED");
+
+        IntegrationJob running = jobService.createJob(connId, "DEPOSIT_RECONCILE_SYNC", "BANK_DEPOSIT", 9202L,
+                "IDEM-DEPOSIT-RUNNING", "hashDr");
+        jobService.claimJob(running.getId());
+        assertThatThrownBy(() -> jobService.cancelJob(running.getId(), "取消"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("CANNOT_CANCEL_RUNNING_JOB");
+        assertThat(jobService.getById(running.getId()).getStatus()).isEqualTo("RUNNING");
+    }
+
+    @Test
+    @DisplayName("システム取消は読んだ状態・バージョンで照合し、変わっていれば取消さない。要対応の印は成功済みジョブにだけ付く")
+    void cancelBySystem_andMarkActionRequired_followTheReadState() {
+        IntegrationJob pending = jobService.createJob(connId, "DEPOSIT_RECONCILE_SYNC", "BANK_DEPOSIT", 9301L,
+                "IDEM-DEPOSIT-SYSTEM", "hashDs");
+        IntegrationJob readBeforeClaim = jobService.getById(pending.getId());
+        jobService.claimJob(pending.getId());
+        // 読んだ後にWorkerが実行を始めた（PENDING → RUNNING）: 取消さない
+        assertThat(jobService.cancelBySystem(readBeforeClaim, "DEPOSIT_RECONCILE_STALE", "error.accounting.depositReconcileStale"))
+                .isFalse();
+        assertThat(jobService.getById(pending.getId()).getStatus()).isEqualTo("RUNNING");
+        // 今の状態で読み直せば取消せる（理由コードは利用者の取消と区別して残る）
+        assertThat(jobService.cancelBySystem(jobService.getById(pending.getId()), "DEPOSIT_RECONCILE_STALE",
+                "error.accounting.depositReconcileStale")).isTrue();
+        IntegrationJob cancelled = jobService.getById(pending.getId());
+        assertThat(cancelled.getStatus()).isEqualTo("CANCELLED");
+        assertThat(cancelled.getErrorCode()).isEqualTo("DEPOSIT_RECONCILE_STALE");
+        assertThat(cancelled.getErrorMessageSafe()).isEqualTo("error.accounting.depositReconcileStale");
+        assertThat(jobService.markActionRequired(pending.getId(), "DEPOSIT_RECONCILE_ACTION_REQUIRED",
+                "accounting.depositReconcile.releasedAfterSync")).isFalse();
+
+        IntegrationJob succeeded = jobService.createJob(connId, "DEPOSIT_RECONCILE_SYNC", "BANK_DEPOSIT", 9302L,
+                "IDEM-DEPOSIT-DONE", "hashDd");
+        jobService.claimJob(succeeded.getId());
+        jobService.markSucceeded(succeeded.getId(), "668401", "req-done", "連携成功");
+        assertThat(jobService.markActionRequired(succeeded.getId(), "DEPOSIT_RECONCILE_ACTION_REQUIRED",
+                "accounting.depositReconcile.releasedAfterSync")).isTrue();
+        IntegrationJob flagged = jobService.getById(succeeded.getId());
+        assertThat(flagged.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(flagged.getErrorCode()).isEqualTo("DEPOSIT_RECONCILE_ACTION_REQUIRED");
+        assertThat(jobService.listEvents(succeeded.getId()))
+                .extracting(IntegrationJobEvent::getToStatus)
+                .contains("ACTION_REQUIRED");
+    }
 }

@@ -780,7 +780,8 @@ public class FreeeAccountingProvider implements AccountingProvider {
      *       採用して成功を返し、それ以外の同じ管理番号の取引があれば作成しない（再POSTで二重に作らない）</li>
      * </ul>
      * 見つかれば確定で拒否。見つからないとき、確認できない走査（照会失敗・応答形式の異常）があれば再試行待ち、
-     * 件数を確定できない走査（ページ上限）があれば作成せずに失敗させる。
+     * 件数を確定できない走査（ページ上限）があれば作成せずに失敗させる。ADOPT_OWN_OR_REFUSE で見つかったのが
+     * 前回の試行で作成した1件だけでも、走査が確認できていなければ再試行待ち・ページ上限なら失敗にする（採用も拒否もしない）。
      *
      * @return 作成を止める（または採用した）結果。作成してよければ null
      */
@@ -819,20 +820,22 @@ public class FreeeAccountingProvider implements AccountingProvider {
             }
             if (limitReached) {
                 // 待っても件数は確定しない（再試行しても同じ）。作成せずに失敗させ、理由を画面に出す
-                log.warn("既存取引の確認が件数上限に達したため作成しません: refNumber={} guard={} error_code=EXISTING_DEAL_CHECK_LIMIT",
-                        refNumber, guard);
-                return CanonicalDealResult.builder()
-                        .success(false)
-                        .errorCode("EXISTING_DEAL_CHECK_LIMIT")
-                        .errorMessageSafe("error.accounting.existingDealCheckLimit")
-                        .retryable(false)
-                        .build();
+                return existingDealCheckLimit(refNumber, guard);
             }
             return null;
         }
-        if (guard == DealCreateGuard.ADOPT_OWN_OR_REFUSE && matches.size() == 1 && !unconfirmed && !limitReached) {
+        if (guard == DealCreateGuard.ADOPT_OWN_OR_REFUSE && matches.size() == 1) {
             JsonNode d = matches.values().iterator().next();
             String adopted = strictlyMatchingDealId(d, expectedTotal, connection.getExternalCompanyId());
+            if (adopted != null && unconfirmed) {
+                // 見つかったのは前回の試行で作成した取引（管理番号・金額・事業所が一致する1件）だけだが、走査を最後まで
+                // 確認できていない（他に同じ管理番号の取引があるかは不明）。採用も拒否もせず再試行待ちにする
+                // （以前は既存取引ありで終わり、正しい取引の削除へ誘導し得た）
+                return checkUnconfirmed(refNumber, guard);
+            }
+            if (adopted != null && limitReached) {
+                return existingDealCheckLimit(refNumber, guard);
+            }
             if (adopted != null) {
                 log.info("再試行: 前回の試行で作成済みの取引を採用します（再POSTしない）: refNumber={} dealId={}", refNumber, adopted);
                 return CanonicalDealResult.builder()
@@ -849,6 +852,18 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 .success(false)
                 .errorCode("EXISTING_DEAL_FOUND")
                 .errorMessageSafe("error.accounting.existingDealFound")
+                .retryable(false)
+                .build();
+    }
+
+    /** 既存取引の確認が件数上限に達した（件数を確定できない）。作成せず、再試行しない失敗にする。 */
+    private CanonicalDealResult existingDealCheckLimit(String refNumber, DealCreateGuard guard) {
+        log.warn("既存取引の確認が件数上限に達したため作成しません: refNumber={} guard={} error_code=EXISTING_DEAL_CHECK_LIMIT",
+                refNumber, guard);
+        return CanonicalDealResult.builder()
+                .success(false)
+                .errorCode("EXISTING_DEAL_CHECK_LIMIT")
+                .errorMessageSafe("error.accounting.existingDealCheckLimit")
                 .retryable(false)
                 .build();
     }

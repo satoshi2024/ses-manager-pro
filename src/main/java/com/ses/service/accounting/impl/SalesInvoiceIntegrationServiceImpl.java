@@ -57,6 +57,8 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     private final AccountingJobLegalEntityResolver legalEntityResolver;
     private final com.ses.service.accounting.AccountingSendKeyResolver sendKeyResolver;
     private final com.ses.mapper.InvoiceItemMapper invoiceItemMapper;
+    /** 入金消込の反映: freeeへ送る直前・登録時に、SESの入金明細の消込状態を確かめる。 */
+    private final com.ses.mapper.BankDepositMapper bankDepositMapper;
 
     /** freee取引の管理番号（ref_number）の上限文字数。 */
     private static final int FREEE_REF_NUMBER_MAX = 20;
@@ -321,7 +323,8 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
                 throw BusinessException.of(409, "error.accounting.alreadyCancelled");
             }
             if ("FAILED".equals(existingCancel.getStatus())) {
-                throw BusinessException.of(409, "error.accounting.previousJobFailed");
+                // 取消ジョブ自体は取消せない。失敗した取消ジョブを再試行するよう案内する（送信ジョブ向けの案内は出さない）
+                throw BusinessException.of(409, "error.accounting.cancelRetryRequired");
             }
             if (!payloadHash.equals(existingCancel.getPayloadHash())) {
                 throw BusinessException.of(409, "error.accounting.jobInProgress");
@@ -452,12 +455,59 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     /** 入金消込の反映ジョブ種別（SESの入金消込 → freeeの口座明細で取引を消込）。 */
     static final String DEPOSIT_RECONCILE_JOB_TYPE = "DEPOSIT_RECONCILE_SYNC";
 
+    /** 反映ジョブの取消理由: SESで消込が取り消された・消込先が変わった・取引が取消された（freeeへは反映されていない）。 */
+    static final String DEPOSIT_RECONCILE_STALE = "DEPOSIT_RECONCILE_STALE";
+
+    /** 反映ジョブの要対応: SESで消込を取り消したが、freeeに反映済み（または反映された可能性がある）。 */
+    static final String DEPOSIT_RECONCILE_ACTION_REQUIRED = "DEPOSIT_RECONCILE_ACTION_REQUIRED";
+
+    /** 反映ジョブの取消理由（画面に出す message key）。 */
+    static final String DEPOSIT_RECONCILE_STALE_MESSAGE = "error.accounting.depositReconcileStale";
+
+    /**
+     * freeeが確定的に拒否した、またはfreeeへ送っていない失敗の理由コード。これらで終わった試行はfreeeに反映されていない。
+     * それ以外（タイムアウト・5xx・401・システムエラー・試行上限など）は反映されたかを確定できない。
+     */
+    private static final Set<String> NOT_REFLECTED_ERROR_CODES = Set.of(
+            "DEPOSIT_ALREADY_RECONCILED", "PLAN_LIMITATION", "VALIDATION_ERROR", "HTTP_CLIENT_ERROR", "RATE_LIMITED",
+            "INVALID_SNAPSHOT", "TOKEN_REFRESH_IN_PROGRESS", "CONNECTION_NOT_FOUND", "LEGACY_SNAPSHOT_MISSING",
+            "PAYLOAD_HASH_MISMATCH", "SCOPE_MISSING", DEPOSIT_RECONCILE_STALE);
+
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NESTED, rollbackFor = Exception.class)
     public IntegrationJob enqueueDepositReconcile(Long depositId, String walletTxnId, Long invoiceId, Long paymentId,
                                                   java.math.BigDecimal amount) {
-        if (depositId == null || invoiceId == null || walletTxnId == null || !walletTxnId.matches("\\d{1,19}")
-                || amount == null || amount.signum() <= 0) {
+        return enqueueDepositReconcileInternal(depositId, walletTxnId, invoiceId, paymentId, amount);
+    }
+
+    @Override
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NESTED, rollbackFor = Exception.class)
+    public int enqueueDepositReconcilesForInvoice(Long invoiceId) {
+        if (invoiceId == null) {
+            return 0;
+        }
+        List<com.ses.entity.BankDeposit> deposits = bankDepositMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.BankDeposit>()
+                        .eq(com.ses.entity.BankDeposit::getMatchedInvoiceId, invoiceId)
+                        .eq(com.ses.entity.BankDeposit::getStatus, "消込済")
+                        .orderByAsc(com.ses.entity.BankDeposit::getId));
+        int queued = 0;
+        for (com.ses.entity.BankDeposit deposit : deposits) {
+            if (enqueueDepositReconcileInternal(deposit.getId(), deposit.getFreeeDepositId(), invoiceId,
+                    deposit.getMatchedPaymentId(), deposit.getAmount()) != null) {
+                queued++;
+            }
+        }
+        if (queued > 0) {
+            log.info("請求書のfreee送信後に、消込済みの入金明細の反映ジョブを登録しました: invoiceId={} 件数={}", invoiceId, queued);
+        }
+        return queued;
+    }
+
+    private IntegrationJob enqueueDepositReconcileInternal(Long depositId, String walletTxnId, Long invoiceId,
+                                                           Long paymentId, java.math.BigDecimal amount) {
+        if (depositId == null || invoiceId == null || paymentId == null || walletTxnId == null
+                || !walletTxnId.matches("\\d{1,19}") || amount == null || amount.signum() <= 0) {
             return null;
         }
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
@@ -467,7 +517,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
             log.info("会計接続が無いため、freeeへの入金消込の反映を行いません: depositId={}", depositId);
             return null;
         }
-        // 反映先はこの請求書をfreeeへ送信した取引。未送信・取消済みなら反映しない（月次照合で差異として残る）
+        // 反映先はこの請求書をfreeeへ送信した取引。未送信・取消済みなら反映しない（送信が成功した時点で登録し直す）
         IntegrationJob latestSync = jobService.getLatestJob("INVOICE", invoiceId, "SALES_INVOICE_SYNC");
         if (latestSync == null || !"SUCCEEDED".equals(latestSync.getStatus())
                 || latestSync.getExternalId() == null || latestSync.getExternalId().isBlank()) {
@@ -475,15 +525,30 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
                     depositId, invoiceId);
             return null;
         }
+        // 送信した接続と今の会計接続が違えば、その取引は今の事業所に無い（別の事業所へ書き込まない）
+        if (latestSync.getConnectionId() != null && !latestSync.getConnectionId().equals(conn.getId())) {
+            log.info("請求書を送信した接続が今の会計接続と異なるため、入金消込の反映を行いません: depositId={} invoiceId={}",
+                    depositId, invoiceId);
+            return null;
+        }
         String dealId = latestSync.getExternalId();
-        if (isDealCancelled(invoiceId, dealId)) {
-            log.info("freeeの取引が取消済みのため、入金消込の反映を行いません: depositId={} invoiceId={} dealId={}",
+        if (isDealCancelledOrCancelling(invoiceId, dealId)) {
+            log.info("freeeの取引が取消済み・取消中のため、入金消込の反映を行いません: depositId={} invoiceId={} dealId={}",
                     depositId, invoiceId, dealId);
             return null;
         }
-        Long legalEntityId = latestSync.getLegalEntityId() != null
-                ? latestSync.getLegalEntityId()
-                : legalEntityResolver.require(conn, legalEntityResolver.ofInvoice(invoiceService.getById(invoiceId)));
+        // NF09: 取引を作成したジョブの法人。旧ジョブに法人が無ければ請求書の法人（決められなければ登録しない）
+        Long legalEntityId = latestSync.getLegalEntityId();
+        if (legalEntityId == null) {
+            AccountingJobLegalEntityResolver.LegalEntityCheck check =
+                    legalEntityResolver.check(conn, legalEntityResolver.ofInvoice(invoiceService.getById(invoiceId)));
+            if (!check.ok()) {
+                log.warn("請求書の法人を決められないため、入金消込の反映ジョブを登録しません（SESの消込は確定）: depositId={} invoiceId={} status={}",
+                        depositId, invoiceId, check.status());
+                return null;
+            }
+            legalEntityId = check.legalEntityId();
+        }
 
         java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
         payload.put("depositId", depositId);
@@ -498,21 +563,137 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
         } catch (Exception e) {
             throw new IllegalStateException("入金消込の反映内容をシリアライズできません", e);
         }
-        String idempotencyKey = "DEPOSIT_RECONCILE:" + depositId + ":" + dealId;
+        String payloadHash = calculateSha256(payloadJson);
+        // キーはSESの入金行ごと: 入金を削除して同じ請求書へ消込し直すと別のジョブになる（以前は入金明細×取引で固定され、
+        // 2回目の消込が「同じキーで別内容」の409になってSESの消込ごと巻き戻っていた）
+        String idempotencyKey = depositReconcileKey(depositId, paymentId, dealId);
+        IntegrationJob existing = jobService.getByIdempotencyKey(idempotencyKey);
+        if (existing != null) {
+            if (existing.getPayloadHash() != null && !existing.getPayloadHash().equals(payloadHash)) {
+                log.warn("同じ入金の反映ジョブが別の内容で登録済みのため、新たに登録しません（SESの消込は確定）: depositId={} jobId={} error_code=DEPOSIT_RECONCILE_CONFLICT",
+                        depositId, existing.getId());
+                return null;
+            }
+            return existing;
+        }
         log.info("freeeへの入金消込の反映ジョブを登録します: depositId={} invoiceId={} dealId={}", depositId, invoiceId, dealId);
         return jobService.createJob(conn.getId(), DEPOSIT_RECONCILE_JOB_TYPE, "BANK_DEPOSIT", depositId, idempotencyKey,
-                calculateSha256(payloadJson), payloadJson, conn.getTenantId(), legalEntityId, latestSync.getOrganizationId());
+                payloadHash, payloadJson, conn.getTenantId(), legalEntityId, latestSync.getOrganizationId());
     }
 
-    /** この取引の取消（手動の取消・通信中取消の補償取消）が成功しているか。 */
-    private boolean isDealCancelled(Long invoiceId, String dealId) {
+    /** 入金消込の反映ジョブの冪等キー（入金明細・SESの入金行・freee取引の組）。 */
+    static String depositReconcileKey(Long depositId, Long paymentId, String dealId) {
+        return "DEPOSIT_RECONCILE:" + depositId + ":" + paymentId + ":" + dealId;
+    }
+
+    /**
+     * この取引の取消（手動の取消・通信中取消の補償取消）が成功している、または処理中・失敗で残っているか。
+     * 取消が終わる前の取引へ消込を反映すると、取消（取引の削除）とfreee上で食い違うため反映しない。
+     */
+    private boolean isDealCancelledOrCancelling(Long invoiceId, String dealId) {
         for (String key : List.of("SALES_CANCEL:" + invoiceId + ":" + dealId, "COMPENSATE_CANCEL:" + invoiceId + ":" + dealId)) {
             IntegrationJob cancel = jobService.getByIdempotencyKey(key);
-            if (cancel != null && "SUCCEEDED".equals(cancel.getStatus())) {
+            if (cancel != null && !"CANCELLED".equals(cancel.getStatus())) {
                 return true;
             }
         }
         return false;
+    }
+
+    @Override
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NESTED, rollbackFor = Exception.class)
+    public String releaseDepositReconcile(Long depositId, Long paymentId) {
+        if (depositId == null) {
+            return null;
+        }
+        List<IntegrationJob> jobs = jobService.list(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<IntegrationJob>()
+                        .eq(IntegrationJob::getJobType, DEPOSIT_RECONCILE_JOB_TYPE)
+                        .eq(IntegrationJob::getTargetType, "BANK_DEPOSIT")
+                        .eq(IntegrationJob::getTargetId, depositId)
+                        .orderByAsc(IntegrationJob::getId));
+        boolean reflected = false;
+        boolean uncertain = false;
+        for (IntegrationJob job : jobs) {
+            String status = job.getStatus();
+            if ("SUCCEEDED".equals(status)) {
+                // freeeでは消込済み。SESから取り消す手段は無いため、要対応の印を付けて画面で手動の取消を案内する
+                // （前の入金行で既に印を付けたジョブは数えない）
+                if (!DEPOSIT_RECONCILE_ACTION_REQUIRED.equals(job.getErrorCode()) && snapshotPaymentMatches(job, paymentId)) {
+                    jobService.markActionRequired(job.getId(), DEPOSIT_RECONCILE_ACTION_REQUIRED, RELEASE_WARNING_REFLECTED);
+                    reflected = true;
+                }
+            } else if ("PENDING".equals(status) || "RETRYABLE".equals(status) || "FAILED".equals(status)) {
+                // まだfreeeで消込されていないジョブは取消す。以前の試行が結果不明（タイムアウト等）なら反映された可能性を残す
+                boolean mayHaveReached = mayHaveReachedFreee(job.getAttemptCount(), job.getErrorCode());
+                boolean cancelled = jobService.cancelBySystem(job,
+                        mayHaveReached ? DEPOSIT_RECONCILE_ACTION_REQUIRED : DEPOSIT_RECONCILE_STALE,
+                        mayHaveReached ? RELEASE_WARNING_UNCERTAIN : DEPOSIT_RECONCILE_STALE_MESSAGE);
+                if (!cancelled) {
+                    // 取消の直前にWorkerが実行を始めた等。反映されたかは実行結果まで分からない
+                    jobService.recordJobEvent(job.getId(), "ACTION_REQUIRED", RELEASE_WARNING_UNCERTAIN, null);
+                    uncertain = true;
+                } else if (mayHaveReached) {
+                    uncertain = true;
+                }
+            } else if ("RUNNING".equals(status)) {
+                // freeeへ送信中。成功した場合はWorkerが送信後に消込の状態を確かめて要対応の印を付ける
+                jobService.recordJobEvent(job.getId(), "ACTION_REQUIRED", RELEASE_WARNING_UNCERTAIN, null);
+                uncertain = true;
+            }
+        }
+        if (reflected || uncertain) {
+            log.warn("SESで入金消込を取り消しましたが、freeeに消込が残っている可能性があります（要対応）: depositId={} reflected={} error_code={}",
+                    depositId, reflected, DEPOSIT_RECONCILE_ACTION_REQUIRED);
+        }
+        return reflected ? RELEASE_WARNING_REFLECTED : uncertain ? RELEASE_WARNING_UNCERTAIN : null;
+    }
+
+    /**
+     * 以前の試行がfreeeに反映された可能性があるか。一度も送っていなければ無い。送った後でも、確定的な拒否
+     * （{@link #NOT_REFLECTED_ERROR_CODES}）で終わっていれば無い。それ以外（結果不明）は可能性ありとする。
+     */
+    static boolean mayHaveReachedFreee(Integer priorAttempts, String lastErrorCode) {
+        if (priorAttempts == null || priorAttempts <= 0) {
+            return false;
+        }
+        return lastErrorCode == null || !NOT_REFLECTED_ERROR_CODES.contains(lastErrorCode);
+    }
+
+    /** 反映ジョブのスナップショットの入金行がこの入金行か（読めなければ安全側で同じとみなす）。 */
+    private boolean snapshotPaymentMatches(IntegrationJob job, Long paymentId) {
+        if (paymentId == null || job.getPayloadSnapshot() == null || job.getPayloadSnapshot().isBlank()) {
+            return true;
+        }
+        try {
+            Long snapshotPaymentId = longOrNull(objectMapper.readTree(job.getPayloadSnapshot()), "paymentId");
+            return snapshotPaymentId == null || snapshotPaymentId.equals(paymentId);
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    private static Long longOrNull(com.fasterxml.jackson.databind.JsonNode node, String field) {
+        com.fasterxml.jackson.databind.JsonNode value = node == null ? null : node.get(field);
+        return value != null && !value.isNull() && value.canConvertToLong() ? value.asLong() : null;
+    }
+
+    /**
+     * 入金明細がまだこのジョブの請求書・入金行・口座明細で消込済みか。行ロック付きで読むため、同じ行を更新している
+     * SESの消込取消（入金の削除）があれば、その確定を待ってから判定する。
+     */
+    private boolean depositStillReconciled(Long depositId, Long invoiceId, Long paymentId, String walletTxnId) {
+        if (depositId == null || invoiceId == null || paymentId == null) {
+            return false;
+        }
+        com.ses.entity.BankDeposit deposit = bankDepositMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.BankDeposit>()
+                        .eq("id", depositId).last("FOR UPDATE"));
+        return deposit != null
+                && "消込済".equals(deposit.getStatus())
+                && invoiceId.equals(deposit.getMatchedInvoiceId())
+                && paymentId.equals(deposit.getMatchedPaymentId())
+                && (deposit.getFreeeDepositId() == null || deposit.getFreeeDepositId().equals(walletTxnId));
     }
 
     @Override
@@ -545,11 +726,27 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
                     jobService.markFailed(jobId, "INVALID_SNAPSHOT", "Snapshotに口座明細ID・取引ID・金額が含まれていません");
                     return;
                 }
+                Long depositId = longOrNull(node, "depositId");
+                Long invoiceId = longOrNull(node, "invoiceId");
+                Long paymentId = longOrNull(node, "paymentId");
+                // 送る直前に、SESの消込がまだこのジョブの内容のままかを確かめる。取消・消込し直し・取引の取消の後に
+                // 残った古いジョブ（再試行待ち・権限を直して手動再試行したFAILED等）をfreeeへ書き込まない
+                if (!depositStillReconciled(depositId, invoiceId, paymentId, walletTxnId)
+                        || isDealCancelledOrCancelling(invoiceId, dealId)) {
+                    cancelStaleDepositReconcileJob(job);
+                    return;
+                }
                 AccountingProvider provider = providerFactory.getProvider(conn);
                 CanonicalDealResult result = provider.reconcileDeposit(conn, walletTxnId, dealId, amount);
                 if (result.isSuccess()) {
                     jobService.markSucceeded(jobId, dealId, result.getProviderRequestId(),
                             "freeeの口座明細で取引を消込: dealId=" + dealId);
+                    // freeeへ送っている間にSESで消込が取り消されていたら、freee側の消込だけが残る。要対応の印を付ける
+                    if (!depositStillReconciled(depositId, invoiceId, paymentId, walletTxnId)) {
+                        log.warn("freeeへの消込の反映中にSESで消込が取り消されました（要対応）: jobId={} depositId={} error_code={}",
+                                jobId, depositId, DEPOSIT_RECONCILE_ACTION_REQUIRED);
+                        jobService.markActionRequired(jobId, DEPOSIT_RECONCILE_ACTION_REQUIRED, RELEASE_WARNING_REFLECTED);
+                    }
                 } else if (result.isRetryable()) {
                     jobService.markRetryable(jobId, result.getErrorCode(), result.getErrorMessageSafe(),
                             result.getRetryAfterSeconds());
@@ -557,14 +754,28 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
                     jobService.markFailed(jobId, result.getErrorCode(), result.getErrorMessageSafe());
                 }
             } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
-                log.warn("Token refresh in progress during deposit reconcile job {}: rescheduling retry in 5s", jobId);
+                log.warn("他ノードでトークン更新中のため、入金消込の反映ジョブを5秒後に再試行します: jobId={} error_code=TOKEN_REFRESH_IN_PROGRESS", jobId);
                 jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
             } catch (Exception e) {
-                log.error("Error executing deposit reconcile job: error_code=JOB_EXECUTION_EXCEPTION, jobId={}, jobType={}",
+                log.error("入金消込の反映ジョブの実行中にエラーが発生しました: error_code=JOB_EXECUTION_EXCEPTION jobId={} jobType={}",
                         jobId, DEPOSIT_RECONCILE_JOB_TYPE);
                 jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", "入金消込の反映中にシステムエラーが発生しました", 60);
             }
         });
+    }
+
+    /**
+     * SESの消込と内容が合わなくなった反映ジョブを、freeeへ送らずに取消す。以前の試行が結果不明なら
+     * （freeeに反映された可能性があるため）要対応の理由で取消す。
+     */
+    private void cancelStaleDepositReconcileJob(IntegrationJob claimed) {
+        int priorAttempts = claimed.getAttemptCount() == null ? 0 : claimed.getAttemptCount() - 1;
+        boolean mayHaveReached = mayHaveReachedFreee(priorAttempts, claimed.getErrorCode());
+        log.warn("SESの入金消込がジョブの内容と異なるため、freeeへ反映せずに取消します: jobId={} error_code={}",
+                claimed.getId(), mayHaveReached ? DEPOSIT_RECONCILE_ACTION_REQUIRED : DEPOSIT_RECONCILE_STALE);
+        jobService.cancelBySystem(claimed,
+                mayHaveReached ? DEPOSIT_RECONCILE_ACTION_REQUIRED : DEPOSIT_RECONCILE_STALE,
+                mayHaveReached ? RELEASE_WARNING_UNCERTAIN : DEPOSIT_RECONCILE_STALE_MESSAGE);
     }
 
     @Override
