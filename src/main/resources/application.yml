@@ -378,6 +378,7 @@ ai:
   management-copilot-enabled: false
   # NF08 外部送信。既定false。trueにする場合は下記 external-send-approval が全て揃い、
   # production-gates（運用者確認チェックリスト）が全てtrueでなければprodは起動しない（fail-fast）。
+  # ただし失効日経過・署名日前だけが理由の場合は起動を止めず、外部送信だけを停止してWARNを出す。
   external-send-enabled: ${AI_EXTERNAL_SEND_ENABLED:false}
   # NF08 外部送信承認設定。値は署名済み決定書の転記（秘密値を置かない）。既定は全て未設定＝拒否。
   # 手順・項目一覧: .kiro/specs/ai-management-copilot/external-send-approval-gate.md
@@ -391,7 +392,11 @@ ai:
     provider: ${AI_EXTERNAL_SEND_PROVIDER:}
     model: ${AI_EXTERNAL_SEND_MODEL:}
     purposes: ${AI_EXTERNAL_SEND_PURPOSES:}
+    # 送信してよいfield id（catalog.queryId,catalog.catalogVersion,summary.claimKeys の部分集合）
+    data-categories: ${AI_EXTERNAL_SEND_DATA_CATEGORIES:}
     destination-host: ${AI_EXTERNAL_SEND_DESTINATION_HOST:}
+    # 決定書に記載された承認内容のSHA-256（小文字hex 64桁）。現行設定からの再計算値と一致しなければ拒否
+    approval-digest: ${AI_EXTERNAL_SEND_APPROVAL_DIGEST:}
     cost-limit:
       per-request-yen: ${AI_EXTERNAL_SEND_PER_REQUEST_YEN:}
       daily-yen: ${AI_EXTERNAL_SEND_DAILY_YEN:}
@@ -400,6 +405,9 @@ ai:
       output-yen-per-thousand-tokens: ${AI_EXTERNAL_SEND_OUTPUT_YEN_PER_THOUSAND_TOKENS:}
       max-request-bytes: ${AI_EXTERNAL_SEND_MAX_REQUEST_BYTES:}
       max-thinking-tokens: ${AI_EXTERNAL_SEND_MAX_THINKING_TOKENS:0}
+  # 承認の有効期間監視。失効の何日前からWARN logと監視metric（EXPIRING）を出すか（1〜366）
+  external-send-monitor:
+    expiry-warning-days: ${AI_EXTERNAL_SEND_EXPIRY_WARNING_DAYS:30}
   learning-candidate-timeout-ms: 2000
   learning-candidate-ttl-minutes: 60
   retention:

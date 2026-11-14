@@ -103,4 +103,33 @@ class CopilotFeatureGateTest {
 
         assertThrows(BusinessException.class, gate::assertQueryAllowed);
     }
+
+    @Test
+    void 承認が失効しても保存期間のpurgeは止めず推論は拒否する() {
+        java.time.LocalDate today = java.time.LocalDate.of(2026, 11, 13);
+        AiConfig config = com.ses.service.ai.AiExternalSendApprovalFixtures.approvedConfig(today);
+        config.getExternalSendApproval().setExpiresOn(today.plusDays(1).toString());
+        com.ses.service.ai.AiExternalSendApprovalFixtures.resign(config);
+        // 2026-11-14 10:00 JST（失効日当日）。失効しても起動は継続するため、purgeまで止めると保存期間を超える。
+        java.time.Clock expired = java.time.Clock.fixed(java.time.Instant.parse("2026-11-14T01:00:00Z"),
+                java.time.ZoneId.of("UTC"));
+        CopilotFeatureGate gate = new CopilotFeatureGate(config,
+                new com.ses.service.ai.AiProductionApprovalGate(config, expired));
+
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(gate::assertRetentionMaintenanceAllowed);
+        assertThrows(BusinessException.class, gate::assertQueryAllowed);
+    }
+
+    @Test
+    void 承認設定に構造的な不足があるexternalSendはpurgeもfailClosedする() {
+        java.time.LocalDate today = java.time.LocalDate.of(2026, 11, 13);
+        AiConfig config = com.ses.service.ai.AiExternalSendApprovalFixtures.approvedConfig(today);
+        config.getExternalSendApproval().setDecisionId(null);
+        CopilotFeatureGate gate = new CopilotFeatureGate(config, new com.ses.service.ai.AiProductionApprovalGate(
+                config, java.time.Clock.fixed(java.time.Instant.parse("2026-11-13T01:00:00Z"),
+                        java.time.ZoneId.of("UTC"))));
+
+        BusinessException ex = assertThrows(BusinessException.class, gate::assertRetentionMaintenanceAllowed);
+        assertEquals(503, ex.getCode());
+    }
 }

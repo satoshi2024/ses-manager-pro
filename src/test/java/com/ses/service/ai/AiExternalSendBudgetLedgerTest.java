@@ -97,6 +97,47 @@ class AiExternalSendBudgetLedgerTest {
     }
 
     @Test
+    void 時計が戻っても日次と月次の累計を0へ戻さない() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-11-14T01:00:00Z"));
+        AiExternalSendBudgetLedger ledger = new AiExternalSendBudgetLedger(LIMIT, clock);
+        ledger.reserve(10);
+        ledger.reserve(10);
+
+        // NTP補正等で前日（2026-11-13 JST）へ戻っても、記録済みの日付の累計で判定する。
+        clock.set(Instant.parse("2026-11-13T01:00:00Z"));
+        assertEquals(AiExternalSendBudgetLedger.REASON_DAILY, ledger.exceededReason(1));
+        assertEquals(AiExternalSendBudgetLedger.REASON_DAILY,
+                assertThrows(BusinessException.class, () -> ledger.reserve(1)).getMessage());
+        assertEquals(20, ledger.totals().dayYen());
+        assertEquals(java.time.LocalDate.of(2026, 11, 14), ledger.totals().day());
+
+        // 前月（2026-10 JST）へ戻っても月次累計を戻さない。
+        clock.set(Instant.parse("2026-10-31T01:00:00Z"));
+        assertEquals(20, ledger.totals().monthYen());
+        assertEquals(java.time.YearMonth.of(2026, 11), ledger.totals().month());
+
+        // 時計が再び進めば、記録済みの日付より後になった時点で日次だけ戻る。
+        clock.set(Instant.parse("2026-11-14T15:00:00Z"));
+        assertNull(ledger.exceededReason(10));
+        assertEquals(20, ledger.totals().monthYen());
+    }
+
+    @Test
+    void 時計が戻った後の予約も精算と取消を正しく反映する() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-11-14T01:00:00Z"));
+        AiExternalSendBudgetLedger ledger = new AiExternalSendBudgetLedger(LIMIT, clock);
+        AiExternalSendBudgetLedger.Reservation before = ledger.reserve(5);
+        clock.set(Instant.parse("2026-11-13T01:00:00Z"));
+        AiExternalSendBudgetLedger.Reservation after = ledger.reserve(5);
+
+        ledger.release(after);
+        ledger.settle(before, 2);
+
+        assertEquals(2, ledger.totals().dayYen());
+        assertEquals(2, ledger.totals().monthYen());
+    }
+
+    @Test
     void 負の予約額は受け付けない() {
         AiExternalSendBudgetLedger ledger = new AiExternalSendBudgetLedger(LIMIT, fixed("2026-11-13T01:00:00Z"));
         assertThrows(IllegalArgumentException.class, () -> ledger.reserve(-1));

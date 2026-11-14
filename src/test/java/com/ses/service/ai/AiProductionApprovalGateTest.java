@@ -10,6 +10,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -155,6 +156,7 @@ class AiProductionApprovalGateTest {
     void 承認の失効日を過ぎると実行中でも拒否する() {
         AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(FIXED_TODAY);
         config.getExternalSendApproval().setExpiresOn(FIXED_TODAY.plusDays(1).toString());
+        AiExternalSendApprovalFixtures.resign(config);
         AiProductionApprovalGate today = new AiProductionApprovalGate(config, FIXED);
         AiProductionApprovalGate tomorrow = new AiProductionApprovalGate(config,
                 Clock.offset(FIXED, java.time.Duration.ofDays(1)));
@@ -163,6 +165,60 @@ class AiProductionApprovalGateTest {
         assertThrows(BusinessException.class,
                 () -> tomorrow.assertProviderAllowed("gemini", AiGatewayRequest.USE_COPILOT));
         assertTrue(tomorrow.externalSendStatus().missingGates().contains("approval.expiresOn.expired"));
+    }
+
+    @Test
+    void 失効だけの不足は起動を止めない時間要因として分類する() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(FIXED_TODAY);
+        config.getExternalSendApproval().setExpiresOn(FIXED_TODAY.plusDays(1).toString());
+        AiExternalSendApprovalFixtures.resign(config);
+        AiProductionApprovalGate.AiExternalSendGateStatus expired = new AiProductionApprovalGate(config,
+                Clock.offset(FIXED, java.time.Duration.ofDays(1))).externalSendStatus();
+
+        assertFalse(expired.approved());
+        assertEquals(List.of("approval.expiresOn.expired"), expired.missingGates());
+        assertTrue(expired.startupBlockingGates().isEmpty());
+        assertTrue(expired.onlyTemporalViolations());
+        assertFalse(expired.digestMismatch());
+
+        AiConfig notYetSigned = AiExternalSendApprovalFixtures.approvedConfig(FIXED_TODAY);
+        notYetSigned.getExternalSendApproval().setSignedOn(FIXED_TODAY.plusDays(3).toString());
+        AiExternalSendApprovalFixtures.resign(notYetSigned);
+        assertTrue(new AiProductionApprovalGate(notYetSigned, FIXED).externalSendStatus().onlyTemporalViolations());
+    }
+
+    @Test
+    void 構造的な不足が一つでもあれば時間要因だけとはみなさない() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(FIXED_TODAY);
+        config.getExternalSendApproval().setExpiresOn(FIXED_TODAY.toString());
+        config.getProductionGates().setDg08Approved(false);
+        AiProductionApprovalGate.AiExternalSendGateStatus status =
+                new AiProductionApprovalGate(config, FIXED).externalSendStatus();
+
+        assertFalse(status.onlyTemporalViolations());
+        assertTrue(status.startupBlockingGates().contains("checklist.DG08"));
+        assertTrue(status.startupBlockingGates().contains("approval.approvalDigest.mismatch"),
+                "失効日の書換え（digest不一致）は時間要因ではない");
+        assertFalse(status.startupBlockingGates().contains("approval.expiresOn.expired"));
+        assertTrue(status.digestMismatch());
+
+        AiProductionApprovalGate.AiExternalSendGateStatus approved = new AiProductionApprovalGate(
+                AiExternalSendApprovalFixtures.approvedConfig(FIXED_TODAY), FIXED).externalSendStatus();
+        assertTrue(approved.approved());
+        assertFalse(approved.onlyTemporalViolations(), "承認済みは時間要因の不足として扱わない");
+        assertEquals(AiExternalSendApprovalFixtures.DECISION_ID, approved.approval().decisionId());
+    }
+
+    @Test
+    void 同じ決定IDで承認内容だけを変えた設定は外部送信を拒否する() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(FIXED_TODAY);
+        config.getExternalSendApproval().getCostLimit().setDailyYen(500);
+        AiProductionApprovalGate gate = new AiProductionApprovalGate(config, FIXED);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> gate.assertProviderAllowed("gemini", AiGatewayRequest.USE_COPILOT));
+        assertEquals("AI_EXTERNAL_SEND_APPROVAL_INCOMPLETE", ex.getMessage());
+        assertTrue(gate.externalSendStatus().digestMismatch());
     }
 
     @Test

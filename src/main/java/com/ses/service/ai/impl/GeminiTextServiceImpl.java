@@ -72,6 +72,8 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
      * Copilot送信は固定deny-allのまま（config hashにもdeny-all markerを残す）。
      */
     private final String approvedDecisionId;
+    /** 起動時に完全だった外部送信承認の承認内容digest。approvedDecisionIdと同時にnull/非nullになる。 */
+    private final String approvedDigest;
 
     @Autowired
     public GeminiTextServiceImpl(AiConfig aiConfig,
@@ -104,8 +106,10 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         if (syntheticLoopbackFixture && (copilotTransport == null || !copilotTransport.isTestLoopbackMode())) {
             throw new IllegalArgumentException("合成Gemini fixtureにはloopback transportが必要です");
         }
-        this.approvedDecisionId = syntheticLoopbackFixture || copilotTransport == null
-                ? null : startupApprovedDecisionId(aiConfig);
+        AiExternalSendApproval.Snapshot startupApproval = syntheticLoopbackFixture || copilotTransport == null
+                ? null : startupApproval(aiConfig);
+        this.approvedDecisionId = startupApproval == null ? null : startupApproval.decisionId();
+        this.approvedDigest = startupApproval == null ? null : startupApproval.approvalDigest();
         this.copilotConfigSnapshot = captureCopilotConfig(aiConfig, syntheticLoopbackFixture);
     }
 
@@ -120,6 +124,7 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         this.syntheticLoopbackFixture = false;
         this.copilotResponseParser = new CopilotGeminiResponseParser();
         this.approvedDecisionId = null;
+        this.approvedDigest = null;
         this.copilotConfigSnapshot = captureCopilotConfig(aiConfig, false);
     }
 
@@ -243,15 +248,18 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
 
     /**
      * gatewayの承認policyが発行した上限証拠か、送信直前に再確認する（gateway迂回の多層防御）。
-     * 現在の承認設定が完全で起動時の決定IDと一致し、proof identity・config hash・1回上限が整合する場合だけ許可する。
+     * 現在の承認設定が完全で起動時の決定ID・承認内容digestと一致し、proof identity・config hash・1回上限が整合する
+     * 場合だけ許可する。同じ決定IDのまま承認内容（上限・用途・期限等）を差し替えた設定はdigestの不一致で拒否する。
      */
     private boolean allowsApprovedDispatch(com.ses.service.ai.copilot.summary.PreflightCostEvidence evidence) {
-        if (approvedDecisionId == null || aiConfig == null || !aiConfig.isExternalSendEnabled()) {
+        if (approvedDecisionId == null || approvedDigest == null || aiConfig == null
+                || !aiConfig.isExternalSendEnabled()) {
             return false;
         }
         AiExternalSendApproval.Evaluation live = AiExternalSendApproval.evaluate(aiConfig,
                 AiExternalSendApproval.businessDate(java.time.Clock.systemUTC()));
         if (!live.complete() || !approvedDecisionId.equals(live.snapshot().decisionId())
+                || !approvedDigest.equals(live.snapshot().approvalDigest())
                 || !live.snapshot().model().equals(copilotConfigSnapshot.modelId())
                 || !live.snapshot().permitsPurpose(com.ses.service.ai.AiGatewayRequest.USE_COPILOT)
                 || !ALLOWED_HOSTS.contains(live.snapshot().destinationHost())) {
@@ -259,7 +267,8 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         }
         return evidence.dispatchAllowed()
                 && ApprovedExternalSendCostPolicy.POLICY_ID.equals(evidence.policyId())
-                && ApprovedExternalSendCostPolicy.proofIdentity(approvedDecisionId).equals(evidence.proofIdentity())
+                && ApprovedExternalSendCostPolicy.proofIdentity(approvedDecisionId, approvedDigest)
+                        .equals(evidence.proofIdentity())
                 && copilotConfigSnapshot.configHash().equals(evidence.configIdentity())
                 && evidence.costState() == com.ses.service.ai.copilot.summary.CopilotCostState.UPPER_BOUND
                 && evidence.upperBoundYen() != null
@@ -268,14 +277,14 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
                 == com.ses.service.ai.copilot.summary.DispatchOutcome.State.NOT_STARTED;
     }
 
-    /** 起動時の承認決定ID。external-send無効・承認不完全ならnull。 */
-    private static String startupApprovedDecisionId(AiConfig config) {
+    /** 起動時の承認snapshot。external-send無効・承認不完全（失効・digest不一致を含む）ならnull。 */
+    private static AiExternalSendApproval.Snapshot startupApproval(AiConfig config) {
         if (config == null || !config.isExternalSendEnabled()) {
             return null;
         }
         AiExternalSendApproval.Evaluation evaluation = AiExternalSendApproval.evaluate(config,
                 AiExternalSendApproval.businessDate(java.time.Clock.systemUTC()));
-        return evaluation.complete() ? evaluation.snapshot().decisionId() : null;
+        return evaluation.complete() ? evaluation.snapshot() : null;
     }
 
     private static CopilotProviderUsage toProviderUsage(CopilotGeminiResponseParser.UsageMetadata usage) {
@@ -291,9 +300,11 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         int tokens = config == null ? 0 : Math.max(0, config.getMaxTokens());
         String promptVersion = CopilotSummaryPromptTemplate.VERSION + "-gemini-json-v1";
         String canonical = canonicalGeminiBase(endpoint, testFixture);
-        // 承認済み構成ではartifact identityを決定IDへ束縛する（決定の差替えにはartifact再登録が必要）。
-        String costPolicyMarker = testFixture || approvedDecisionId == null
-                ? "production-deny-all-v1" : ApprovedExternalSendCostPolicy.POLICY_ID + ":" + approvedDecisionId;
+        // 承認済み構成ではartifact identityを決定IDと承認内容digestへ束縛する
+        // （決定の差替え・同じ決定IDでの承認内容の変更にはartifact再登録が必要）。
+        String costPolicyMarker = testFixture || approvedDecisionId == null || approvedDigest == null
+                ? "production-deny-all-v1"
+                : ApprovedExternalSendCostPolicy.POLICY_ID + ":" + approvedDecisionId + ":" + approvedDigest;
         String hash = sha256(String.join("\n", "gemini", canonical, model, promptVersion,
                 CopilotSummaryPromptTemplate.OUTPUT_SCHEMA_VERSION, Integer.toString(tokens),
                 "json-envelope-parser-v1", costPolicyMarker));

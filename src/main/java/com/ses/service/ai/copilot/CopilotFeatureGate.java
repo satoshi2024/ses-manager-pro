@@ -47,12 +47,14 @@ public class CopilotFeatureGate {
     /**
      * retention purgeは推論/外部送信ではなく安全なmaintenanceであり、flag OFFでも実行可能。
      * external-sendが有効でも署名済み承認設定が完全なら保存期間の遵守を優先して止めない。
-     * 承認設定のないexternal-send有効化は設定誤りとしてfail-closedにする。
+     * 承認が失効日経過・署名日前だけで無効な場合も、外部送信は停止したまま保存期間の遵守を優先して止めない
+     * （失効しても起動は継続するため、purgeまで止めると保存期間を超えてデータが残る）。
+     * 承認設定に構造的な不足があるexternal-send有効化は設定誤りとしてfail-closedにする。
      */
     public void assertRetentionMaintenanceAllowed() {
         if (aiConfig.isExternalSendEnabled()) {
             AiProductionApprovalGate.AiExternalSendGateStatus decision = productionApprovalGate.externalSendStatus();
-            if (decision == null || !decision.approved()) {
+            if (decision == null || !(decision.approved() || decision.onlyTemporalViolations())) {
                 throw new BusinessException(503, "コパイロットの外部provider送信は許可されていません。");
             }
         }

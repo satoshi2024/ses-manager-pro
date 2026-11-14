@@ -41,6 +41,9 @@ public class AiConfig {
      */
     private ExternalSendApproval externalSendApproval = new ExternalSendApproval();
 
+    /** NF08 外部送信承認の有効期間監視（失効前警告の時期）。承認内容ではないためdigestに含めない。 */
+    private ExternalSendMonitor externalSendMonitor = new ExternalSendMonitor();
+
     /**
      * AIプロバイダー名（例: openai, gemini, claude）
      */
@@ -147,9 +150,26 @@ public class AiConfig {
         private String model;
         /** 承認済み用途。現時点で受理するのは MANAGEMENT_COPILOT のみ。 */
         private List<String> purposes = new ArrayList<>();
+        /**
+         * 承認済みdata category（送信してよいfield id）。管理Copilotの最小field
+         * （catalog.queryId / catalog.catalogVersion / summary.claimKeys）の部分集合に限る。
+         */
+        private List<String> dataCategories = new ArrayList<>();
         /** 承認済み送信先host。ai.api-urlの宛先と一致しなければならない。 */
         private String destinationHost;
         private CostLimit costLimit = new CostLimit();
+        /**
+         * 決定書に記載された承認内容のdigest（SHA-256、小文字hex 64桁）。現行設定から再計算した値と一致しなければ
+         * 承認しない。同じ決定IDのまま上限・用途・期限等を書き換えた設定を検出するためである。
+         */
+        private String approvalDigest;
+    }
+
+    /** 外部送信承認の有効期間監視。 */
+    @Data
+    public static class ExternalSendMonitor {
+        /** 失効の何日前から警告（WARN log・監視metricのEXPIRING）とするか。1〜366日。 */
+        private int expiryWarningDays = 30;
     }
 
     /** 署名済み決定に記載された費用上限と料金単価（円換算済み、安全余裕込み）。 */

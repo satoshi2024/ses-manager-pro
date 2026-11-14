@@ -30,9 +30,22 @@ public final class ApprovedExternalSendCostPolicy implements CopilotProviderCost
         this.approval = Objects.requireNonNull(approval, "承認snapshotが必要です");
     }
 
-    /** 決定IDに束縛したproof identity。adapterは同じ値でなければ送信しない。 */
-    public static String proofIdentity(String decisionId) {
-        return "approved-external-send:" + decisionId;
+    /** proof identityに含める承認digestの桁数（run metadataの識別子上限128文字に収めるため先頭32桁）。 */
+    public static final int PROOF_DIGEST_PREFIX_LENGTH = 32;
+
+    /**
+     * 決定IDと承認内容digestに束縛したproof identity。adapterは同じ値でなければ送信しない。
+     * 同じ決定IDでも承認内容（上限・用途・期限等）が異なれば別の値になる。
+     */
+    public static String proofIdentity(String decisionId, String approvalDigest) {
+        String digest = approvalDigest == null ? "" : approvalDigest;
+        return "approved-external-send:" + decisionId + ":"
+                + digest.substring(0, Math.min(PROOF_DIGEST_PREFIX_LENGTH, digest.length()));
+    }
+
+    /** 承認snapshotのproof identity。 */
+    public static String proofIdentity(AiExternalSendApproval.Snapshot approval) {
+        return proofIdentity(approval.decisionId(), approval.approvalDigest());
     }
 
     /** prompt sizeが不明な見積りは上限を証明できないため拒否する。 */
@@ -65,7 +78,7 @@ public final class ApprovedExternalSendCostPolicy implements CopilotProviderCost
         if (upperBoundYen > budgetYen) {
             return deny(snapshot, upperBoundYen, budgetYen, "COPILOT_COST_BUDGET_EXCEEDED");
         }
-        return new PreflightCostEvidence(POLICY_ID, configIdentity(snapshot), proofIdentity(approval.decisionId()),
+        return new PreflightCostEvidence(POLICY_ID, configIdentity(snapshot), proofIdentity(approval),
                 upperBoundYen, budgetYen, true, CopilotCostState.UPPER_BOUND,
                 DispatchOutcome.notStarted(REASON_APPROVED), REASON_APPROVED);
     }
@@ -112,7 +125,7 @@ public final class ApprovedExternalSendCostPolicy implements CopilotProviderCost
 
     private PreflightCostEvidence deny(CopilotConfigSnapshot snapshot, Integer upperBoundYen, Integer budgetYen,
                                        String reasonCode) {
-        return PreflightCostEvidence.denied(POLICY_ID, configIdentity(snapshot), proofIdentity(approval.decisionId()),
+        return PreflightCostEvidence.denied(POLICY_ID, configIdentity(snapshot), proofIdentity(approval),
                 upperBoundYen, budgetYen, reasonCode);
     }
 

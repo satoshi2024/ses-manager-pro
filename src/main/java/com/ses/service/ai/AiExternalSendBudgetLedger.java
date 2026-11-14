@@ -11,8 +11,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * 外部送信費用のJST日次/月次累計。送信前に上限見積りを予約し、応答後にusageの実費へ精算する。
  * <p>制約: 単一プロセス内のメモリ計数であり、再起動で累計は0に戻り、複数instance間でも共有しない。
- * 永続化（再起動跨ぎ・instance間共有）にはDDL（専用ledger table）が必要であり、本classの範囲外である。
- * 永続化までの運用では、provider側の請求上限・予算alertを併用する。</p>
+ * 永続化（再起動跨ぎ・instance間共有）は利用者決定Q-11により専用の永続費用ledger table（DDL、B2c-1と同じ
+ * migration。版番号は未割当で暫定V191）で行う。設計は
+ * {@code .kiro/roadmap/2026-10-18-snf-nf08-c2-b2-technical-plan.md} の「永続費用ledger」節を参照。
+ * それまでの運用は単一instanceとし、provider側の硬い上限（GCP API quota。budget alertは通知だけで止めない）を併用する。</p>
+ * <p>時計が戻った場合は記録済みの日付・月を維持し、累計を0へ戻さない（時計の逆行で上限を回避させない）。</p>
  */
 public final class AiExternalSendBudgetLedger {
 
@@ -100,14 +103,18 @@ public final class AiExternalSendBudgetLedger {
         return null;
     }
 
+    /**
+     * JST日付・月が進んだ場合だけ累計を切り替える。時計が戻った場合は記録済みの（より新しい）日付・月の累計を
+     * そのまま使い、0へ戻さない（fail-closed）。
+     */
     private void roll() {
         LocalDate today = AiExternalSendApproval.businessDate(clock);
-        if (!today.equals(day)) {
+        if (day == null || today.isAfter(day)) {
             day = today;
             dayTotalYen = 0;
         }
-        YearMonth current = YearMonth.from(today);
-        if (!current.equals(month)) {
+        YearMonth current = YearMonth.from(day);
+        if (month == null || current.isAfter(month)) {
             month = current;
             monthTotalYen = 0;
         }
