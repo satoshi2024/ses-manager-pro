@@ -90,6 +90,7 @@ let prepared = 0;
 let confirmed = 0;
 const windowEvents = {};
 const window = { SES: { pwaQueue: {
+    async checkRestoreAvailability() { return true; },
     async prepareRestore(password) { assert.equal(password, 'secret'); prepared++; },
     async confirmRestore() { confirmed++; },
     async getOfflineDrafts() { return [{ screen: 'attendance', status: 'PENDING', payload: { workDate: '2026-10-07' } }]; }
@@ -108,7 +109,7 @@ assert.equal(element('offline-drafts').hidden, false, '明示確認後だけDOM�
 assert.match(element('offline-draft-list').textContent, /2026-10-07/);
 
 const workerEvents = new Map();
-const cacheData = new Map([['ses-pwa-shell-v1', new Map()], ['ses-pwa-shell-v2', new Map()], ['other-cache', new Map()]]);
+const cacheData = new Map([['ses-pwa-shell-v1', new Map()], ['ses-pwa-shell-v2', new Map()], ['ses-pwa-shell-v3', new Map()], ['other-cache', new Map()]]);
 const caches = {
     async open(name) {
         if (!cacheData.has(name)) cacheData.set(name, new Map());
@@ -138,8 +139,8 @@ await installPromise;
 let activatePromise;
 workerEvents.get('activate')({ waitUntil(promise) { activatePromise = promise; } });
 await activatePromise;
-assert.deepEqual([...cacheData.keys()].sort(), ['other-cache', 'ses-pwa-shell-v3'].sort(),
-    'v3 worker activation purges v1/v2 shell caches and retains unrelated caches');
+assert.deepEqual([...cacheData.keys()].sort(), ['other-cache', 'ses-pwa-shell-v4'].sort(),
+    'v4 worker activation purges v1/v2/v3 shell caches and retains unrelated caches');
 networkAvailable = false;
 let offlineResponse;
 workerEvents.get('fetch')({

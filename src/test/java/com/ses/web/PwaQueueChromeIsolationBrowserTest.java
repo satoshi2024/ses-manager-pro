@@ -707,10 +707,14 @@ class PwaQueueChromeIsolationBrowserTest {
             // Spring Securityと同じbootstrap契約を合成し、CSRF tokenは通常のHTTP応答で発行する。
             exchange.getResponseHeaders().add("Set-Cookie", "XSRF-TOKEN=synthetic-csrf; Path=/; SameSite=Lax");
             String presented = exchange.getRequestHeaders().getFirst("X-User-Scope");
-            String scope = presented == null || presented.isBlank() ? "scope-A" : presented;
-            if (rebindScopeOnNextContext.compareAndSet(true, false)) scope += "-rebound";
-            boolean preserveQueue = !discardQueueOnNextContext.compareAndSet(true, false);
-            reply(exchange, 200, "application/json", "{\"code\":200,\"data\":{\"userScope\":\"" + scope + "\",\"preserveQueue\":" + preserveQueue + "}}");
+            boolean scopePresented = presented != null && !presented.isBlank();
+            String scope = scopePresented ? presented : "scope-A";
+            // 復元可否だけを確かめるGET（X-User-Scopeなし。checkRestoreAvailability）では、scope切替の試験用flagを消費しない。
+            if (scopePresented && rebindScopeOnNextContext.compareAndSet(true, false)) scope += "-rebound";
+            boolean preserveQueue = !(scopePresented && discardQueueOnNextContext.compareAndSet(true, false));
+            // ローカルパスワードsession相当（W3-09以降のsession-context契約）。OIDC側はPwaQueueRestoreAvailabilityBrowserTest。
+            reply(exchange, 200, "application/json", "{\"code\":200,\"data\":{\"userScope\":\"" + scope
+                    + "\",\"preserveQueue\":" + preserveQueue + ",\"restoreAvailable\":true}}");
             return;
         }
         if (path.equals("/__test/enable-scope-drift")) {

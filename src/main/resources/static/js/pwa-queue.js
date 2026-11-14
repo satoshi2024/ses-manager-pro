@@ -38,12 +38,67 @@
         permitDeadline: null,
         permitServerTime: null,
         permitWallTime: null,
-        permitMonotonicTime: null
+        permitMonotonicTime: null,
+        // server（session-context）が返す「このsessionでロック中の下書きを復元できるか」。null=未確認。
+        // 表示（復元入口・離脱確認）にだけ使い、認可はserverの復元APIが同じ判定をやり直す。
+        restoreAvailable: null,
+        // 現在documentで扱う未送信の下書き件数（render時点）。離脱確認・logout確認だけに使う。
+        unsentDraftCount: 0
     };
 
     const REVOCATION_KEY = 'ses_pwa_revocation_epoch';
     const SCOPE_EPOCH_KEY = 'ses_pwa_scope_epoch';
     const TAB_ID = newRequestId();
+    let unloadGuardBound = false;
+
+    /** 画面文言。共通のi18n（window.SES_MESSAGES）があれば使い、offline.html等では日本語の既定文言にする。 */
+    function uiText(key, fallback, ...args) {
+        let template = fallback;
+        try {
+            const messages = window.SES_MESSAGES;
+            if (messages && typeof messages[key] === 'string' && messages[key]) template = messages[key];
+        } catch (_) { /* 既定文言を使う */ }
+        return String(template).replace(/\{(\d+)\}/g,
+            (match, index) => (args[index] === undefined ? match : String(args[index])));
+    }
+
+    function restoreUnavailableError() {
+        return Object.assign(new Error(uiText('pwa.restore.unavailable',
+            '現在のログイン方式（シングルサインオン）では、この下書きは復元できません。')), { restoreUnavailable: true });
+    }
+
+    /**
+     * 復元できないsession（OIDC等。未確認も含む）で、現在documentに未送信の下書きがあるか。
+     * この状態で画面を離れると下書きはロックされ、復元できないまま30日後またはlogout時に削除される。
+     */
+    function draftLossWarningRequired() {
+        return state.restoreAvailable !== true && state.unsentDraftCount > 0
+            && !state.quarantined && Boolean(state.scope);
+    }
+
+    function onBeforeUnload(event) {
+        if (!draftLossWarningRequired()) return undefined;
+        event.preventDefault();
+        event.returnValue = '';
+        return '';
+    }
+
+    /** beforeunloadは必要な間だけ登録する（常時登録するとbfcacheの対象外になるブラウザがある）。 */
+    function updateUnloadGuard() {
+        const required = draftLossWarningRequired();
+        if (required && !unloadGuardBound) {
+            window.addEventListener('beforeunload', onBeforeUnload);
+            unloadGuardBound = true;
+        } else if (!required && unloadGuardBound) {
+            window.removeEventListener('beforeunload', onBeforeUnload);
+            unloadGuardBound = false;
+        }
+    }
+
+    function resetUnsentDrafts() {
+        state.unsentDraftCount = 0;
+        updateUnloadGuard();
+    }
 
     function newDocumentNonce() {
         const bytes = new Uint8Array(16);
@@ -139,10 +194,30 @@
         catch (_) { return `${newRequestId()}-${Math.random().toString(36).slice(2)}`; }
     }
 
+    function writeRevocationCookie(epoch) {
+        // 本番はHTTPSなのでSecureを付ける（http://localhost等の開発・試験ではSecure cookieを書けないため付けない）。
+        const secure = location.protocol === 'https:' ? '; Secure' : '';
+        try { document.cookie = `ses_pwa_revocation_epoch=${encodeURIComponent(epoch)}; Max-Age=31536000; Path=/; SameSite=Strict${secure}`; }
+        catch (_) { /* localStorage側の記録を照合する */ }
+    }
+
     function persistRevocationEpoch(epoch) {
         try { localStorage.setItem(REVOCATION_KEY, epoch); } catch (_) { /* cookie側の記録を照合する */ }
-        try { document.cookie = `ses_pwa_revocation_epoch=${encodeURIComponent(epoch)}; Max-Age=31536000; Path=/; SameSite=Strict`; }
-        catch (_) { /* localStorage側の記録を照合する */ }
+        writeRevocationCookie(epoch);
+        return readRevocationEpoch() === epoch;
+    }
+
+    /**
+     * 照合済みの撤回epoch cookieを同じ値で書き直し、期限を延ばす（P2-N4-2）。
+     * Safari（ITP）はscriptで書いたcookieの期限を最終書込みから7日に制限するため、online bootstrap
+     * （画面表示・同期のたび）に書き直して「最後の利用から7日」まで延ばす。
+     * localStorageは書き直さない。他tabの撤回と交差しても、cookieだけが旧値になり不一致（unverified）として
+     * 隔離側に倒れる（旧epochを復活させない）。
+     */
+    function refreshRevocationEpochCookie(epoch) {
+        if (!epoch || epoch === 'uninitialized' || epoch === 'unverified'
+                || readRevocationEpoch() !== epoch) return false;
+        writeRevocationCookie(epoch);
         return readRevocationEpoch() === epoch;
     }
 
@@ -161,6 +236,7 @@
         state.newRequestIds.clear();
         state.candidateRestoreScope = null;
         state.lockedDraftCount = 0;
+        resetUnsentDrafts();
         clearRestorePermit();
         clearDraftDom();
         window.dispatchEvent(new CustomEvent('ses:pwa-revoked'));
@@ -177,6 +253,7 @@
         state.newRequestIds.clear();
         state.candidateRestoreScope = null;
         state.lockedDraftCount = 0;
+        resetUnsentDrafts();
         clearRestorePermit();
         state.scope = null;
         state.paused = true;
@@ -201,6 +278,7 @@
         state.newRequestIds.clear();
         state.candidateRestoreScope = null;
         state.lockedDraftCount = 0;
+        resetUnsentDrafts();
         clearRestorePermit();
         clearDraftDom();
         window.dispatchEvent(new CustomEvent('ses:pwa-revoked'));
@@ -243,10 +321,13 @@
                         const cursor = cursorRequest.result;
                         if (!cursor) return;
                         const record = cursor.value;
+                        let changed = false;
                         if (!record.revocationEpoch) {
                             const migrationEpoch = readRevocationEpoch();
                             // epoch契約導入前のrecordは未撤回初期値(0)のときだけ引き継ぐ。
+                            // 付与したepochは保存する（従来はconflict・過大recordの場合しか書き戻していなかった）。
                             record.revocationEpoch = migrationEpoch === '0' ? '0' : 'legacy-revoked';
+                            changed = true;
                         }
                         if (record.conflict || JSON.stringify(record).length > MAX_PAYLOAD_BYTES) {
                             record.status = 'ERROR';
@@ -254,8 +335,9 @@
                             record.payload = null;
                             record.payloadHash = null;
                             delete record.conflict;
-                            cursor.update(record);
+                            changed = true;
                         }
+                        if (changed) cursor.update(record);
                         cursor.continue();
                     };
                 }
@@ -381,13 +463,18 @@
     function countLockedScope(scope) {
         if (!scope) return Promise.resolve(0);
         const allowedIds = new Set([...state.newRequestIds, ...state.restoredRequestIds]);
+        const epoch = readRevocationEpoch();
         return withStore('readonly', store => {
-            const request = store.index('userScope').openKeyCursor(IDBKeyRange.only(scope));
+            const request = store.index('userScope').openCursor(IDBKeyRange.only(scope));
             let count = 0;
             request.onsuccess = () => {
                 const cursor = request.result;
                 if (!cursor) { request._pwaResult = count; return; }
-                if (!allowedIds.has(cursor.primaryKey)) count++;
+                const record = cursor.value;
+                // confirmRestoreが復元候補にする条件（現在epoch・PENDING/CONFLICT・payloadあり）だけを数える。
+                // 撤回済みepochのrecordを「復元できる」と数えない（P3-N4-4）。
+                if (!allowedIds.has(cursor.primaryKey) && record && record.revocationEpoch === epoch
+                        && ['PENDING', 'CONFLICT'].includes(record.status) && record.payload) count++;
                 cursor.continue();
             };
             return request;
@@ -716,9 +803,14 @@
             }
             const scope = result && result.data && result.data.userScope;
             if (!scope || typeof scope !== 'string') throw new Error('ユーザーscopeが不正です');
+            // 復元可否はserverのsession認証主体で決まる（OIDC等はfalse）。欠落は復元できない側に倒す。
+            state.restoreAvailable = result.data.restoreAvailable === true;
             if (bootstrapEpoch === 'uninitialized' || bootstrapEpoch === 'unverified') {
                 bootstrapEpoch = newRevocationEpoch();
                 if (!persistRevocationEpoch(bootstrapEpoch)) throw new Error('撤回状態を永続化できません');
+            } else {
+                // Safari ITPの7日上限に対し、照合済みの同じepochでcookie期限だけを延ばす（失敗しても続行し、次回照合で隔離される）。
+                refreshRevocationEpochCookie(bootstrapEpoch);
             }
             const preserveQueue = Boolean(result && result.data && result.data.preserveQueue);
             if (!preserveQueue) state.candidateRestoreScope = null;
@@ -788,23 +880,56 @@
         return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
     }
 
+    function lockedDraftText() {
+        const count = state.lockedDraftCount;
+        if (!count) return '';
+        if (state.restoreAvailable === true) return `ロック中の下書き ${count} 件。再認証後に明示的に復元できます。`;
+        if (state.restoreAvailable === false) {
+            return uiText('pwa.queue.lockedUnavailable',
+                'ロック中の下書き {0} 件は、現在のログイン方式（シングルサインオン）では復元できません。必要な内容は再入力してください。', count);
+        }
+        return uiText('pwa.queue.lockedUnknown', 'ロック中の下書き {0} 件。復元できるかはオンラインで確認できます。', count);
+    }
+
     async function render() {
+        const renderGeneration = state.documentGeneration;
         let records = [];
         try { records = await readAllowedRecords(); } catch (_) { return; }
         const pending = records.filter(record => record.status === 'PENDING');
         const conflicts = records.filter(record => record.status === 'CONFLICT');
         const errors = records.filter(record => record.status === 'ERROR');
+        if (renderGeneration === state.documentGeneration) {
+            // 撤回後に遅れて完了したrenderで件数を戻さない。
+            state.unsentDraftCount = pending.length + conflicts.length
+                + errors.filter(record => record.payload).length;
+        }
+        updateUnloadGuard();
         const panel = document.getElementById('pwa-queue-panel');
         const status = document.getElementById('pwa-queue-status');
         const conflictBox = document.getElementById('pwa-conflicts');
         const restoreLink = document.getElementById('pwa-restore-link');
         if (panel && status && conflictBox) {
+            const unavailable = state.restoreAvailable === false;
+            // 復元できない（または未確認の）sessionでは、この画面を離れると未送信の下書きを失うことを先に示す。
+            const unsentWarning = state.restoreAvailable !== true && pending.length > 0;
+            const lockedText = lockedDraftText();
             panel.hidden = pending.length === 0 && conflicts.length === 0 && errors.length === 0
                 && state.lockedDraftCount === 0;
-            if (restoreLink) restoreLink.hidden = state.lockedDraftCount === 0;
-            if (state.quarantined) status.textContent = '下書きはロックされています。オンラインで再認証し、明示的に復元してください。';
+            // 復元入口はserverが復元可能と返したsessionだけに出す（OIDC等・未確認では隠す）。
+            if (restoreLink) restoreLink.hidden = state.lockedDraftCount === 0 || state.restoreAvailable !== true;
+            if (state.quarantined) {
+                status.textContent = unavailable
+                    ? uiText('pwa.queue.quarantinedUnavailable', '下書きはロックされています。現在のログイン方式（シングルサインオン）では復元できません。')
+                    : '下書きはロックされています。オンラインで再認証し、明示的に復元してください。';
+            }
             else if (state.paused) status.textContent = 'セッション期限切れ。再認証後に同じユーザーで同期を再開します。';
-            else if (state.lockedDraftCount) status.textContent = `ロック中の下書き ${state.lockedDraftCount} 件。再認証後に明示的に復元できます。`;
+            else if (unsentWarning && !state.flushing) {
+                const warning = navigator.onLine
+                    ? uiText('pwa.queue.unsentLeaveWarning', '未送信 {0} 件。送信が終わる前にこの画面を離れると、この下書きは復元できません。', pending.length)
+                    : uiText('pwa.queue.offlineLeaveWarning', 'オフライン: 未送信 {0} 件。通信が戻って送信が終わるまで、この画面を離れないでください（離れると復元できません）。', pending.length);
+                status.textContent = lockedText ? `${warning} ${lockedText}` : warning;
+            }
+            else if (state.lockedDraftCount) status.textContent = lockedText;
             else if (!navigator.onLine && pending.length) status.textContent = `オフライン: 未送信 ${pending.length} 件`;
             else if (state.flushing) status.textContent = `同期中: ${pending.length} 件`;
             else if (pending.length) status.textContent = `未送信 ${pending.length} 件`;
@@ -1019,10 +1144,13 @@
             const version = server && Number.isInteger(Number(server.version))
                 ? Number(server.version) : refreshedVersion(result, record);
             if (version === null) throw new Error('server versionを再取得できません');
+            // change-requestは外側の {requestType,payload,reason} ではなく申請内容（payload.payload）と比べる（P3-N4-5）。
+            const clientPayload = record.screen === 'change-request'
+                ? ((record.payload || {}).payload || {}) : record.payload;
             record.conflict = sanitizeConflict(record, Object.assign({}, record.conflict, {
                 server: server || record.conflict.server,
                 serverVersion: version,
-                fields: refreshedFields(server || record.conflict.server, record.payload,
+                fields: refreshedFields(server || record.conflict.server, clientPayload,
                     record.baseVersion),
                 serverRefreshAt: new Date().toISOString()
             }));
@@ -1225,7 +1353,10 @@
                 if (state.paused || !navigator.onLine) break;
                 if (blocked.has(record.resourceKey)) continue;
                 const result = await sendRecord(record);
-                if (result && result.conflict) blocked.add(record.resourceKey);
+                // 送信できなかった（応答喪失・5xx・offline）recordより後の同aggregateは送らない。
+                // serverが先行commandをcommit済みでも応答を失った場合、後続を旧baseVersionで送ると
+                // 自己生成の409になるため、次回flushで同じIDを再送しledger replayで版を進めてから送る（PRD-NF04-002）。
+                if (result && (result.conflict || result.queued)) blocked.add(record.resourceKey);
                 if (result && result.paused) break;
             }
         } catch (error) {
@@ -1242,6 +1373,13 @@
         if (!state.paused) await flush();
     }
 
+    /** 復元できないsessionで画面が隠れる・離れる直前に、未送信の下書きの送信を試みる（完了は保証しない）。 */
+    function flushBeforeLeaving() {
+        if (state.restoreAvailable === true || state.unsentDraftCount === 0 || state.paused
+                || state.quarantined || state.flushing || !navigator.onLine) return;
+        flush().catch(() => undefined);
+    }
+
     function bind() {
         window.addEventListener('offline', () => { render(); });
         window.addEventListener('online', () => { if (!state.paused) flush(); else render(); });
@@ -1249,6 +1387,10 @@
         window.addEventListener('pageshow', event => {
             if (event.persisted) quarantineDocument();
         });
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') flushBeforeLeaving();
+        });
+        window.addEventListener('pagehide', flushBeforeLeaving);
         document.addEventListener('click', event => {
             const toggle = event.target.closest('#pwa-panel-toggle');
             if (toggle) {
@@ -1307,6 +1449,32 @@
         if (state.permitDeadline) restorePermitIsCurrent();
     }, 1000);
 
+    /**
+     * このsessionでロック中の下書きを復元できるかをserverへ確認する（true/false、確認できなければnull）。
+     * offline起動後にonlineへ戻ったoffline.html等、bootstrapで確認できていない場合だけGETする。
+     * 結果は表示にだけ使う（復元APIはserver側で同じ判定をやり直す）。
+     */
+    async function checkRestoreAvailability() {
+        try { await state.ready; } catch (_) { /* 下で確認する */ }
+        if (state.restoreAvailable !== null) return state.restoreAvailable;
+        if (!navigator.onLine) return null;
+        const generation = state.documentGeneration;
+        try {
+            const response = await fetch('/api/my/session-context', {
+                method: 'GET', cache: 'no-store', credentials: 'same-origin',
+                headers: { 'Accept': 'application/json' }
+            });
+            if (!response.ok) return null;
+            const result = await response.json();
+            if (generation !== state.documentGeneration || !result || result.code !== 200 || !result.data) return null;
+            state.restoreAvailable = result.data.restoreAvailable === true;
+            render();
+            return state.restoreAvailable;
+        } catch (_) {
+            return null;
+        }
+    }
+
     targetSes.pwaQueue = {
         init,
         whenReady: () => state.ready,
@@ -1317,6 +1485,15 @@
         clear: deleteAll,
         reset: revokeScope,
         getScope: () => state.scope,
+        /** serverが返した復元可否（true/false、未確認はnull）。 */
+        restoreAvailability: () => state.restoreAvailable,
+        checkRestoreAvailability,
+        /** logout確認用の同期値。unsent=現在documentの未送信、locked=ロック中（logoutでどちらも削除される）。 */
+        draftLossSummary: () => ({
+            unsent: state.quarantined ? 0 : state.unsentDraftCount,
+            locked: state.quarantined ? 0 : state.lockedDraftCount,
+            restoreAvailable: state.restoreAvailable
+        }),
         getOfflineDrafts: async () => {
             await state.ready;
             if (!restorePermitIsCurrent()) return [];
@@ -1329,6 +1506,10 @@
         prepareRestore: async password => {
             await state.ready;
             if (!navigator.onLine || !password || state.quarantined) throw new Error('オンラインでログインし直してください');
+            // パスワードを送る前に、このsessionがパスワード再認証に対応するかを確かめる（OIDC等では送らない）。
+            const availability = await checkRestoreAvailability();
+            if (availability === false) throw restoreUnavailableError();
+            if (availability !== true) throw new Error('復元できるかを確認できません。オンラインで再読み込みしてください');
             const generation = state.documentGeneration;
             const oldScope = state.candidateRestoreScope;
             if (generation !== state.documentGeneration || !oldScope
@@ -1343,6 +1524,12 @@
             });
             if (generation !== state.documentGeneration) throw new Error('復元が取り消されました。最初からやり直してください');
             const result = await response.json().catch(() => null);
+            if (result && result.data && result.data.type === 'PWA_RESTORE_REAUTH_UNSUPPORTED') {
+                // serverが「このsessionはパスワード再認証に対応しない」と返した。以後は復元入口を出さない。
+                state.restoreAvailable = false;
+                render();
+                throw restoreUnavailableError();
+            }
             if (!response.ok || !result || result.code !== 200 || !result.data || !result.data.proof) {
                 throw new Error('再認証できませんでした。入力を確認してください');
             }
@@ -1352,6 +1539,10 @@
         },
         confirmRestore: async () => {
             await state.ready;
+            if (state.restoreAvailable === false) {
+                clearRestorePermit();
+                throw restoreUnavailableError();
+            }
             const generation = state.documentGeneration;
             const operationEpoch = state.revocationEpoch;
             if (!state.restoreProof || !state.restoreScope || !navigator.onLine) throw new Error('再認証からやり直してください');
@@ -1363,6 +1554,12 @@
             const result = await response.json().catch(() => null);
             const oldScope = state.restoreScope;
             state.restoreProof = null;
+            if (result && result.data && result.data.type === 'PWA_RESTORE_REAUTH_UNSUPPORTED') {
+                clearRestorePermit();
+                state.restoreAvailable = false;
+                render();
+                throw restoreUnavailableError();
+            }
             if (generation !== state.documentGeneration || !response.ok || !result || result.code !== 200
                     || !result.data || result.data.documentNonce !== state.documentNonce
                     || result.data.userScope !== oldScope || !result.data.serverTime || !result.data.permitExpiresAt) {

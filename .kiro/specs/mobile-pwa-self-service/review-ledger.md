@@ -78,3 +78,14 @@ Self-review notes:
   - MySQL Testcontainers Suite (`PwaClientMutationLedgerMySqlConcurrencyTest`, `FlywaySelfServiceSchemaSmokeTest`, `FlywayV110AdminBoundaryUpgradeSmokeTest`): `10 run / 0 failures / 0 errors / 0 skipped`
   - CI Shard Inventory: `1 run / 0 failures / 0 errors / 0 skipped`
   - Performance Test: `1 run / 0 failures / 0 errors / 0 skipped`
+
+## 6. W3-R1 / W3-09 追記（2026-11-14）
+
+- W3-R1静的再レビュー（`1be03bea`）で PRD-NF04-001〜004 を CLOSED と判定した。証拠（ファイル:行）は `.kiro/roadmap/2026-10-01-snf-production-nf04-review.md` の「状態更新」に記録した。
+- W3-09（NF04-1）: P1-N4-1 は 2026-11-14 の決定（方案A）で、OIDC sessionでは復元不可と明示する扱いにした（`first-release-user-and-operations-notes.md` 1.4・2.4、`revocation-recovery-decision.md` 追記）。P2-N4-2（Safari ITP と撤回epoch cookie）、P2-N4-3（テスト欠落）、R1 P3-N4-1・3・4・5 を同じbatchで扱った。
+- 追加・変更したテスト: `PwaRestoreAuthorizationServiceTest`、`PwaRestoreTransactionIntegrationTest`、`MyPwaRestoreApiControllerTest`、`PwaSessionApiControllerTest`（新規）、`PwaRestoreOidcSessionIntegrationTest`（新規）、`PwaAssetContractTest`、`PwaQueueRestoreAvailabilityBrowserTest`（新規、browser）、`PwaQueueChromeIsolationBrowserTest`（stub契約の更新）。実行結果は Runner の記録を正とし、本台帳はPASSを主張しない。
+- 実機ブラウザ受入（A-NF04-2）は `real-device-browser-acceptance-template.md` の様式で、下の記録表へ追記する。
+
+| 日付 | 確認者 | OS / 端末 | ブラウザ / 版 | 画面幅 | 機能スイッチ（NF-04） | 確認ID | 結果 | 補足 | 証跡の保存先 |
+|---|---|---|---|---|---|---|---|---|---|
+| | | | | | | | | | |

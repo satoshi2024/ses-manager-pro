@@ -978,12 +978,13 @@ SES.pwa = {
         this.setStatus(navigator.onLine ? 'online' : 'offline');
         window.addEventListener('online', function() { SES.pwa.setStatus('online'); });
         window.addEventListener('offline', function() { SES.pwa.setStatus('offline'); });
+        // 日次入力の同期queue（pwa-queue.js）はService Workerの有無・NF-04スイッチに関係なく動くため、
+        // logout時の確認と端末内queueの削除はService Worker判定より前に必ず結び付ける（R1 P3-N4-1）。
+        this.bindLogout();
         if (!('serviceWorker' in navigator)) return;
         if (this.shellDisabled()) {
             // NF-04機能スイッチOFF: 新規登録せず、過去に登録されたPWA shellとshell cacheだけを解除する。
-            // 日次入力の同期queue（pwa-queue.js）は既存画面の保存経路なので、logout時の削除は継続する。
             this.unregisterShell();
-            this.bindLogout();
             return;
         }
         this.hadController = !!navigator.serviceWorker.controller;
@@ -1012,7 +1013,6 @@ SES.pwa = {
             self._reloadingForUpdate = true;
             window.location.reload();
         });
-        this.bindLogout();
     },
 
     /** server側の機能スイッチ（base.htmlのmeta）でPWA shellが無効化されているか。 */
@@ -1106,6 +1106,36 @@ SES.pwa = {
         // session expiryではqueueを削除しない。再認証後に同一user scopeを検証してから再開する。
     },
 
+    /**
+     * logoutで端末内の未送信・ロック中の下書きが削除される場合だけ、先に利用者の確認を取る（NF04 P1-N4-1 方案A）。
+     * 下書きが無ければ確認せずに進める。確認できない環境（SweetAlert2無し）はwindow.confirmを使う。
+     */
+    confirmDraftLoss: function() {
+        const pwa = (window.SES && window.SES.pwaQueue) || (typeof SES !== 'undefined' && SES.pwaQueue);
+        let count = 0;
+        try {
+            const summary = pwa && typeof pwa.draftLossSummary === 'function' ? pwa.draftLossSummary() : null;
+            count = summary ? (Number(summary.unsent) || 0) + (Number(summary.locked) || 0) : 0;
+        } catch (_) { count = 0; }
+        if (!count) return Promise.resolve(true);
+        const message = SES.i18n.t('pwa.logout.draftLossConfirm', count,
+            'この端末に未送信またはロック中の下書きが {0} 件あります。ログアウトすると端末から削除され、復元できません。ログアウトしますか？');
+        if (window.Swal && typeof Swal.fire === 'function') {
+            try {
+                return Swal.fire({
+                    title: SES.i18n.t('pwa.logout.draftLossTitle', '未送信の下書きがあります'),
+                    text: message,
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: SES.i18n.t('pwa.logout.confirmButton', 'ログアウトする'),
+                    cancelButtonText: SES.i18n.t('common.cancel', 'キャンセル')
+                }).then(function(result) { return !!(result && result.isConfirmed); },
+                    function() { return window.confirm(message); });
+            } catch (_) { /* 下のwindow.confirmで確認する */ }
+        }
+        return Promise.resolve(window.confirm(message));
+    },
+
     bindLogout: function() {
         const self = this;
         document.querySelectorAll('form[action="/logout"]').forEach(function(form) {
@@ -1113,8 +1143,12 @@ SES.pwa = {
             form.dataset.sesPwaBound = 'true';
             form.addEventListener('submit', function(event) {
                 event.preventDefault();
-                self.clearUserScope().finally(function() {
-                    HTMLFormElement.prototype.submit.call(form);
+                // 取消した場合はlogoutせず、下書きも削除しない。
+                self.confirmDraftLoss().then(function(proceed) {
+                    if (!proceed) return;
+                    self.clearUserScope().finally(function() {
+                        HTMLFormElement.prototype.submit.call(form);
+                    });
                 });
             });
         });

@@ -110,3 +110,14 @@ session破棄listenerはPWA session registryを同一mutexで失効させる。l
 静的指摘によりscope v2の`linkedAt`と`issuedAt`はmillisecond値からISO-8601 `Instant`の完全精度値へ変更した。新しいnanosecond Clockとmicrosecond link時刻のroundtrip回帰を追加した。H2 transaction integration testは固有memory DBと`DirtiesContext`で共有DBから分離し、外側rollback後のREQUIRES_NEW failure count、同時加算後のlock/count、DB active/link/lock再読込、およびtest-only transaction-manager commit fault時にproofをsessionへ発行しないことを確認する設計である。これらの補記時点の変更は未コンパイル・未実行で、source SHA-256一覧を`verification-evidence/nf04-g1/run-04-unverified/source-sha256.txt`へ置く。commit fault injectionはSpring transaction境界の模擬であり、H2/JDBC engine自体のcommit故障証拠ではない。
 
 次のruntime窓でH2 integration testと限定selectorを検証し、実Spring servlet containerでのlistener登録・logout順序raceは別途確認する。DB engine commit故障、実servlet listener/logout統合、Chrome/CSRF、分散session topologyは引き続き未検証である。run-03 PASSをこれらの証明として扱わず、G1またはNF04全体の完了とも扱わない。
+
+## 2026-11-14 追記: OIDC sessionでは復元しない（NF04 P1-N4-1 = 方案A）
+
+W3-R1静的再レビュー（1be03bea）は、本番がOIDC必須（要員のローカルパスワードloginは無効）であるため、契約2の「password再確認」による復元が本番では事実上使えないと指摘した（P1-N4-1）。利用者は2026-11-14に方案Aを決定した。上記の契約はローカルパスワードsessionについてそのまま維持し、次を追加する。従来の記述は履歴として変更しない。
+
+- 復元可否はserver側sessionの認証主体の型だけで判定する（`PwaRestoreAuthorizationService.supportsPasswordReauthentication`）。`UsernamePasswordAuthenticationToken` + `LoginUser` だけを対応とし、`OAuth2AuthenticationToken` + `OidcLoginUser` とその他の型は非対応（fail-closed）。client申告は使わない。
+- `reauthenticate`・`confirm` は非対応sessionを、パスワード照合・DB読取・`AccountLockService` の失敗加算より前に拒否する（HTTP 403、`PWA_RESTORE_REAUTH_UNSUPPORTED`、`error.pwa.restore.reauthUnsupported`）。IdPのパスワードを入力しても失敗回数に数えず、lockしない。
+- `session-context` は `restoreAvailable` を返し、画面は非対応・未確認のとき復元入口とパスワード欄を出さず、パスワードを送らない。
+- 非対応sessionでは、現在documentに未送信の下書きがある間だけ `beforeunload` の確認を出し、`visibilitychange`・`pagehide` で送信を試みる。logoutは未送信・ロック中の下書きがあれば確認する。
+- 契約5に関連して、撤回epoch cookie は online bootstrap のたびに照合済みの同じ値で期限だけを延ばす（Safari ITPの7日上限対策。localStorageは書き直さない）。
+- OIDC sessionで復元を可能にする方案B（IdP step-up再認証と document nonce の結合）は、Plan Review と Security 設計審査を経る別batchとする。本追記は CODE PASS・production 許可・B-NF04-4 の承認を意味しない。

@@ -27,7 +27,9 @@ class PwaAssetContractTest {
         String worker = read("service-worker.js");
 
         assertThat(worker).contains("const SHELL_ASSETS = [");
-        assertThat(worker).contains("const CACHE_NAME = CACHE_PREFIX + 'v3'");
+        // shell資産（pwa-queue.js・offline.html）を変えたためcache版を上げ、旧shellを入れ替える（W3-09）。
+        assertThat(worker).contains("const CACHE_NAME = CACHE_PREFIX + 'v4'");
+        assertThat(worker).doesNotContain("isDynamicOrSensitive");
         assertThat(worker).contains("path === '/js/i18n.js'");
         assertThat(worker).contains("request.method === 'GET'");
         assertThat(worker).contains("cache.put(request, response.clone())");
@@ -108,14 +110,76 @@ class PwaAssetContractTest {
     }
 
     @Test
-    void serviceWorker非対応環境でもlogout時のscope削除を継続する() throws Exception {
+    void serviceWorker判定より前にlogout時の確認とscope削除を結び付ける() throws Exception {
         String common = read("js/common.js");
         String sessionApi = Files.readString(Path.of(
                 "src/main/java/com/ses/controller/api/PwaSessionApiController.java"), StandardCharsets.UTF_8);
 
+        // R1 P3-N4-1: serviceWorker非対応環境（非secure context・一部WebView）でreturnする前にlogoutを結び付ける。
+        int pwaStart = common.indexOf("SES.pwa = {");
+        int initStart = common.indexOf("init: function()", pwaStart);
+        int bind = common.indexOf("this.bindLogout();", initStart);
+        int swGuard = common.indexOf("if (!('serviceWorker' in navigator)) return;", initStart);
+        int initEnd = common.indexOf("shellDisabled: function()", initStart);
+        assertThat(pwaStart).isNotNegative();
+        assertThat(bind).isGreaterThan(initStart).isLessThan(swGuard);
+        assertThat(swGuard).isLessThan(initEnd);
+        assertThat(common.substring(swGuard, initEnd)).doesNotContain("this.bindLogout();");
         assertThat(common).contains("'serviceWorker' in navigator && navigator.serviceWorker.controller");
+        // logoutは未送信・ロック中の下書きがあるときだけ確認し、取消時は削除もlogoutもしない。
+        int bindLogout = common.indexOf("bindLogout: function()");
+        String logout = common.substring(bindLogout, common.indexOf("};", bindLogout));
+        assertThat(logout).contains("self.confirmDraftLoss().then(function(proceed)", "if (!proceed) return;",
+                "self.clearUserScope()");
+        assertThat(logout.indexOf("confirmDraftLoss")).isLessThan(logout.indexOf("clearUserScope"));
+        assertThat(common).contains("draftLossSummary", "pwa.logout.draftLossConfirm");
         assertThat(sessionApi).contains("@RequestHeader(value = \"X-User-Scope\", required = false)",
-                "resolve(presentedScope)", "preserveQueue");
+                "resolve(presentedScope)", "preserveQueue", "\"restoreAvailable\"",
+                "supportsPasswordReauthentication(authentication)");
+    }
+
+    @Test
+    void 復元できないsessionでは復元入口を隠し離脱前に確認する() throws Exception {
+        String queue = read("js/pwa-queue.js");
+        String offline = read("offline.html");
+
+        assertThat(queue).contains("state.restoreAvailable = result.data.restoreAvailable === true",
+                "restoreLink.hidden = state.lockedDraftCount === 0 || state.restoreAvailable !== true",
+                "pwa.queue.lockedUnavailable", "pwa.queue.unsentLeaveWarning", "pwa.restore.unavailable",
+                "PWA_RESTORE_REAUTH_UNSUPPORTED", "checkRestoreAvailability", "draftLossSummary");
+        // beforeunloadは必要な間だけ登録し、復元可能なsession（true）では出さない。
+        assertThat(queue).contains("state.restoreAvailable !== true && state.unsentDraftCount > 0",
+                "window.addEventListener('beforeunload', onBeforeUnload)",
+                "window.removeEventListener('beforeunload', onBeforeUnload)",
+                "'visibilitychange'", "'pagehide', flushBeforeLeaving");
+        // パスワードを送る前に復元可否を確かめる。
+        String prepare = queue.substring(queue.indexOf("prepareRestore: async password =>"),
+                queue.indexOf("confirmRestore: async () =>"));
+        assertThat(prepare.indexOf("checkRestoreAvailability()"))
+                .isNotNegative()
+                .isLessThan(prepare.indexOf("/api/my/pwa/restore/reauthenticate"));
+        // 応答喪失・5xxのrecordより後の同aggregateは同じflushで送らない（PRD-NF04-002）。
+        assertThat(queue).contains("if (result && (result.conflict || result.queued)) blocked.add(record.resourceKey);");
+        // offline.htmlは復元可否を確認するまでパスワード欄を使わせず、不可ならパスワード欄を隠す。
+        assertThat(offline).contains("id=\"offline-restore-auth\"", "id=\"offline-restore-unavailable\"",
+                "この下書きは復元できません", "checkRestoreAvailability()", "restoreAvailability === true",
+                "error.restoreUnavailable", "window.addEventListener('online', refreshAvailability)");
+    }
+
+    @Test
+    void 撤回epochのcookieは照合済みの同じ値だけで期限を延ばしhttpsではSecureを付ける() throws Exception {
+        String queue = read("js/pwa-queue.js");
+
+        int refresh = queue.indexOf("function refreshRevocationEpochCookie(epoch)");
+        assertThat(refresh).isNotNegative();
+        String refreshBody = queue.substring(refresh, queue.indexOf("function scopeTicket()", refresh));
+        assertThat(refreshBody).contains("readRevocationEpoch() !== epoch", "writeRevocationCookie(epoch)")
+                .doesNotContain("localStorage.setItem");
+        assertThat(queue).contains("location.protocol === 'https:' ? '; Secure' : ''",
+                "Max-Age=31536000; Path=/; SameSite=Strict${secure}");
+        int bootstrapStart = queue.indexOf("async function bootstrapScope()");
+        String bootstrap = queue.substring(bootstrapStart, queue.indexOf("async function cleanupExpired()", bootstrapStart));
+        assertThat(bootstrap).contains("refreshRevocationEpochCookie(bootstrapEpoch)");
     }
 
     @Test

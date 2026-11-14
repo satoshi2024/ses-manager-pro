@@ -4,6 +4,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.dto.pwa.PwaRestoreConfirmRequest;
 import com.ses.dto.pwa.PwaRestoreReauthenticateRequest;
 import com.ses.config.LoginUser;
+import com.ses.config.OidcLoginUser;
 import com.ses.entity.SysUser;
 import com.ses.service.pwa.PwaRestoreIdentityService.CurrentIdentity;
 import jakarta.servlet.http.HttpSession;
@@ -12,8 +13,12 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
+import org.springframework.security.oauth2.core.oidc.OidcIdToken;
+import org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.NoOpPasswordEncoder;
@@ -377,6 +382,85 @@ class PwaRestoreAuthorizationServiceTest {
         } finally {
             SecurityContextHolder.clearContext();
         }
+    }
+
+    @Test
+    void oidcSessionの再認証はパスワード照合前に専用keyで拒否し失敗回数を加算しない() {
+        OAuth2AuthenticationToken oidc = oidcAuthentication();
+        SecurityContext oidcContext = SecurityContextHolder.createEmptyContext();
+        oidcContext.setAuthentication(oidc);
+        SecurityContextHolder.setContext(oidcContext);
+        session.setAttribute("SPRING_SECURITY_CONTEXT", oidcContext);
+
+        // 要員がIdPのパスワード等を入力し続けても、lock閾値（5回）を超えて失敗として数えない。
+        for (int attempt = 0; attempt < 6; attempt++) {
+            PwaRestoreReauthenticateRequest wrong = reauth(nonce(40 + attempt), "scope-v2");
+            wrong.setPassword("idp-password-" + attempt);
+            assertThatThrownBy(() -> service.reauthenticate(wrong, session, oidc))
+                    .isInstanceOf(PwaRestoreReauthUnsupportedException.class)
+                    .hasMessage("error.pwa.restore.reauthUnsupported");
+        }
+        // ローカルDBのパスワードと一致する値でも、OIDC sessionではproofを発行しない。
+        assertThatThrownBy(() -> service.reauthenticate(reauth(nonce(46), "scope-v2"), session, oidc))
+                .isInstanceOf(PwaRestoreReauthUnsupportedException.class)
+                .hasMessage("error.pwa.restore.reauthUnsupported");
+
+        verify(failureRecorder, never()).record(any(), any());
+        verify(identityService, never()).load(any(), any());
+        verify(userContextService, never()).assertRestoreScope(any(), any(), any(), any(), any(), any());
+        assertThat(session.getAttribute(PwaRestoreAuthorizationService.SESSION_STATE_ATTRIBUTE)).isNull();
+    }
+
+    @Test
+    void oidcSessionのconfirmはproofを消費する前に専用keyで拒否する() {
+        var proof = service.reauthenticate(reauth(nonce(47), "scope-v2"), session, authentication);
+        OAuth2AuthenticationToken oidc = oidcAuthentication();
+        SecurityContext oidcContext = SecurityContextHolder.createEmptyContext();
+        oidcContext.setAuthentication(oidc);
+        SecurityContextHolder.setContext(oidcContext);
+
+        assertThatThrownBy(() -> service.confirm(confirm(proof.proof(), nonce(47), "scope-v2"), session, oidc))
+                .isInstanceOf(PwaRestoreReauthUnsupportedException.class)
+                .hasMessage("error.pwa.restore.reauthUnsupported");
+        verify(failureRecorder, never()).record(any(), any());
+
+        // 拒否はproof検証より前なので、元のローカルパスワードsessionのproofは消費されていない。
+        SecurityContextHolder.setContext(contextFor(authentication));
+        var permit = service.confirm(confirm(proof.proof(), nonce(47), "scope-v2"), session, authentication);
+        assertThat(permit.userScope()).isEqualTo("scope-v2");
+    }
+
+    @Test
+    void 復元可否はserver側Authenticationの型だけで判定しfailClosedにする() {
+        assertThat(PwaRestoreAuthorizationService.supportsPasswordReauthentication(authentication)).isTrue();
+        OAuth2AuthenticationToken oidc = oidcAuthentication();
+        assertThat(PwaRestoreAuthorizationService.supportsPasswordReauthentication(oidc)).isFalse();
+        // OIDCのprincipalを入れたform系tokenも、ローカルパスワードで認証したsessionとはみなさない。
+        OidcLoginUser oidcPrincipal = (OidcLoginUser) oidc.getPrincipal();
+        assertThat(PwaRestoreAuthorizationService.supportsPasswordReauthentication(
+                UsernamePasswordAuthenticationToken.authenticated(oidcPrincipal, "", oidcPrincipal.getAuthorities())))
+                .isFalse();
+        assertThat(PwaRestoreAuthorizationService.supportsPasswordReauthentication(
+                UsernamePasswordAuthenticationToken.authenticated("user-a", "",
+                        List.of(new SimpleGrantedAuthority("ROLE_要員"))))).isFalse();
+        assertThat(PwaRestoreAuthorizationService.supportsPasswordReauthentication(
+                UsernamePasswordAuthenticationToken.unauthenticated(
+                        new LoginUser(userForAuthentication(), List.of(new SimpleGrantedAuthority("ROLE_要員")),
+                                "tenant-a"), "pw"))).isFalse();
+        assertThat(PwaRestoreAuthorizationService.supportsPasswordReauthentication(
+                new AnonymousAuthenticationToken("pwa-test", "anonymousUser",
+                        List.of(new SimpleGrantedAuthority("ROLE_ANONYMOUS"))))).isFalse();
+        assertThat(PwaRestoreAuthorizationService.supportsPasswordReauthentication(null)).isFalse();
+    }
+
+    private static OAuth2AuthenticationToken oidcAuthentication() {
+        var authorities = List.of(new SimpleGrantedAuthority("ROLE_要員"));
+        OidcIdToken idToken = OidcIdToken.withTokenValue("pwa-restore-test-id-token")
+                .subject("idp-subject-7").issuer("https://idp.invalid/tenant-a")
+                .issuedAt(NOW).expiresAt(NOW.plusSeconds(300)).build();
+        OidcLoginUser principal = new OidcLoginUser(userForAuthentication(),
+                new DefaultOidcUser(authorities, idToken), authorities);
+        return new OAuth2AuthenticationToken(principal, authorities, "enterprise");
     }
 
     private static PwaRestoreReauthenticateRequest reauth(String nonce, String scope) {

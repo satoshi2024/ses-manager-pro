@@ -2,6 +2,8 @@ package com.ses.service.pwa;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
+import com.ses.config.LoginUser;
+import com.ses.config.OidcLoginUser;
 import com.ses.dto.pwa.PwaRestoreConfirmRequest;
 import com.ses.dto.pwa.PwaRestorePermitResponse;
 import com.ses.dto.pwa.PwaRestoreProofResponse;
@@ -9,6 +11,8 @@ import com.ses.dto.pwa.PwaRestoreReauthenticateRequest;
 import com.ses.service.pwa.PwaRestoreIdentityService.CurrentIdentity;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -54,8 +58,30 @@ public class PwaRestoreAuthorizationService {
     private final PasswordEncoder passwordEncoder;
     private final Clock clock;
 
+    /**
+     * このsessionがローカルパスワードの再確認で下書きを復元できるか（NF04 P1-N4-1 方案A）。
+     *
+     * <p>判定はserver側のsessionに保存された {@link Authentication} の型だけで行い、client申告
+     * （header・body・localStorage等）は使わない。{@link Authentication} を作るのはserver側のlogin処理だけである。</p>
+     * <ul>
+     *   <li>form login（{@code SecurityConfig} の formLogin → {@code CustomUserDetailsService}）:
+     *       {@link UsernamePasswordAuthenticationToken} + {@link LoginUser}。ローカルパスワードで認証済みなので復元できる。</li>
+     *   <li>OIDC login（{@code SecurityConfig} の oauth2Login → {@code OidcLoginUserService}）:
+     *       {@code OAuth2AuthenticationToken} + {@link OidcLoginUser}。ローカルパスワードを使っていないため復元できない。</li>
+     *   <li>上記以外の型（未認証・匿名・将来の別方式）: 復元できない側に倒す（fail-closed）。</li>
+     * </ul>
+     */
+    public static boolean supportsPasswordReauthentication(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()
+                || !(authentication instanceof UsernamePasswordAuthenticationToken)) return false;
+        Object principal = authentication.getPrincipal();
+        return principal instanceof LoginUser && !(principal instanceof OidcLoginUser);
+    }
+
     public PwaRestoreProofResponse reauthenticate(PwaRestoreReauthenticateRequest request,
                                                    HttpSession session, Authentication authentication) {
+        // OIDC等のsessionは、パスワード照合・失敗回数加算（AccountLock）・DB読取より前に専用codeで拒否する。
+        rejectUnlessPasswordReauthentication(authentication);
         if (request == null || request.getPassword() == null || request.getPassword().isEmpty()
                 || request.getPassword().length() > 1024) reject();
         validateBoundary(request.getDocumentNonce(), request.getUserScope(), session, authentication);
@@ -128,6 +154,8 @@ public class PwaRestoreAuthorizationService {
 
     public PwaRestorePermitResponse confirm(PwaRestoreConfirmRequest request,
                                             HttpSession session, Authentication authentication) {
+        // proofはローカルパスワードsessionでしか発行しないが、confirmも同じ判定で先に拒否する。
+        rejectUnlessPasswordReauthentication(authentication);
         if (request == null) reject();
         validateBoundary(request.getDocumentNonce(), request.getUserScope(), session, authentication);
         Object sessionMutex = sessionMutexOrReject(session);
@@ -213,6 +241,12 @@ public class PwaRestoreAuthorizationService {
                 }
             }
         }
+    }
+
+    private static void rejectUnlessPasswordReauthentication(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()
+                || authentication instanceof AnonymousAuthenticationToken) reject();
+        if (!supportsPasswordReauthentication(authentication)) throw new PwaRestoreReauthUnsupportedException();
     }
 
     private static void validateBoundary(String documentNonce, String userScope, HttpSession session,
