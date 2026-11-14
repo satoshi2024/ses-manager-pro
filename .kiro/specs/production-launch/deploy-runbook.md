@@ -159,7 +159,7 @@ mvn -B -o -Pprod-migrate clean compile flyway:info
 mvn -B -o -Pprod-migrate clean compile flyway:migrate
 ```
 - `compile` を先に行うのは、classpath location（`target/classes`）からJava migration（`db.migration.V74_3`）とcallback classを解決するため。
-- 実行順: V1〜V187（versioned 187件。SQL 186件＋Java migration `V74_3` 1件）→ Repeatable（説明の昇順: `crm contact reconciliation` → `remove v2 sample data` → `update admin password bcrypt`）。
+- 実行順: V1〜V188（versioned 188件。SQL 187件＋Java migration `V74_3` 1件）→ Repeatable（説明の昇順: `crm contact reconciliation` → `remove v2 sample data` → `update admin password bcrypt`）。
 - callback: `ProductionAdminInitialPasswordFlywayCallback`（hash検査）→ `LegacyDatabaseFlywayCallback`（空DBでは何もしない）。
 
 ### 3.4 適用結果の確認（DBA立会い）
@@ -176,9 +176,9 @@ SELECT COUNT(*) FROM flyway_schema_history WHERE type = 'BASELINE';             
 SELECT version FROM flyway_schema_history ORDER BY installed_rank LIMIT 1;                     -- '1'
 -- 最新version（本releaseのLATEST）
 SELECT version FROM flyway_schema_history WHERE version IS NOT NULL
- ORDER BY installed_rank DESC LIMIT 1;                                                         -- '187'
+ ORDER BY installed_rank DESC LIMIT 1;                                                         -- '188'
 -- versioned migrationの適用件数（本releaseの総件数）
-SELECT COUNT(*) FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1;          -- 187
+SELECT COUNT(*) FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1;          -- 188
 -- Repeatable 3本が成功
 SELECT script FROM flyway_schema_history WHERE version IS NULL AND success = 1 ORDER BY script;
 -- R__crm_contact_reconciliation.sql / R__remove_v2_sample_data.sql / R__update_admin_password_bcrypt.sql
@@ -223,7 +223,7 @@ SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE
   - 理由: account lockは `AccountLockServiceImpl` が `Asia/Tokyo` の時計で `sys_user.locked_until` を書き、login時の判定（`LoginUser.isAccountNonLocked`）はJVMの既定時区の `LocalDateTime.now()` と比べる。JVMがUTCのままだと30分のlockが約9時間30分続く（bootstrap中に `admin` がlockされると作業時間枠が実質閉じる。§5.6）。監査の `created_at` 等、JVMの既定時区で日時を作る箇所は他にもある。testは `argLine` で時区を固定しているが、本番は配備側で固定しない限り固定されない。DB側の時区（§1.1、`+09:00`）とは別に必要。
 - 初回は `APP_SCHEDULING_ENABLED=false` で1台だけ起動する。
 - 起動時schema guard: DBの `flyway_schema_history` とartifactのmigrationを照合し、一致しなければTomcatのport・schedulerを開始する前に起動を中止する。
-  - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V187 と一致しています`
+  - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V188 と一致しています`
   - 失敗: ERROR log `[schema guard] DBのschemaがartifactと一致しないため起動を中止します。...`（未適用・失敗行・artifactに無いmigration・最新versionの不一致・一度も適用されていないRepeatableを列挙する）。jobの結果（§3.4）とartifactのSHA（§1.4）を確認する。
   - guardはplaceholderを置換しないため、アプリへ初期管理者hashを渡す必要は無い。placeholderを含むRepeatable（初期管理者）は「同じscriptの成功適用が履歴にある」ことだけを確認する。jobが `db/migration-prod` を落として実行された（`-Dflyway.locations` 等の上書き）場合は、prodのRepeatableが一度も適用されていないとして起動を止める。
 - `/actuator/health/readiness` がUPであることを確認する。

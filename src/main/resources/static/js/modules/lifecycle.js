@@ -414,19 +414,34 @@ SES.lifecycle = {
             }
             document.getElementById('gateSummaryText').textContent = data.summary || '';
 
+            // ゲート項目はAPIの items（code/name/passed/message/pendingConfirmation）で返る。
+            // 「要確認」（自動処理の対象外で人の確認が要る項目。例: 紐付けの無いポータルユーザー）は通過扱いのまま警告色で示す。
             const list = document.getElementById('gateCriteriaList');
-            if (list && data.criteria) {
+            const criteria = data.items || data.criteria;
+            if (list && Array.isArray(criteria)) {
                 let html = '';
-                data.criteria.forEach(c => {
-                    const icon = c.passed ? '<i class="bi bi-check-circle-fill text-success fs-5"></i>' : '<i class="bi bi-x-circle-fill text-danger fs-5"></i>';
-                    const border = c.passed ? 'border-success' : 'border-danger';
+                criteria.forEach(c => {
+                    const pending = c.passed && c.pendingConfirmation;
+                    let icon = '<i class="bi bi-x-circle-fill text-danger fs-5"></i>';
+                    let border = 'border-danger';
+                    if (pending) {
+                        icon = '<i class="bi bi-exclamation-triangle-fill text-warning fs-5"></i>';
+                        border = 'border-warning';
+                    } else if (c.passed) {
+                        icon = '<i class="bi bi-check-circle-fill text-success fs-5"></i>';
+                        border = 'border-success';
+                    }
+                    const pendingIds = pending && Array.isArray(c.pendingPortalUserIds) && c.pendingPortalUserIds.length > 0
+                        ? `<div class="text-warning small">要確認のポータルユーザーID: ${SES.escapeHtml(c.pendingPortalUserIds.join(', '))}</div>`
+                        : '';
                     html += `
                         <div class="col-md-6">
                             <div class="p-2 border ${border} rounded bg-card d-flex align-items-center gap-3">
                                 <div>${icon}</div>
                                 <div>
-                                    <div class="text-theme small fw-bold">${SES.escapeHtml(c.criterionName)}</div>
-                                    <div class="text-muted small">${SES.escapeHtml(c.detail || '')}</div>
+                                    <div class="text-theme small fw-bold">${SES.escapeHtml(c.name || c.criterionName || c.code || '')}</div>
+                                    <div class="text-muted small">${SES.escapeHtml(c.message || c.detail || '')}</div>
+                                    ${pendingIds}
                                 </div>
                             </div>
                         </div>

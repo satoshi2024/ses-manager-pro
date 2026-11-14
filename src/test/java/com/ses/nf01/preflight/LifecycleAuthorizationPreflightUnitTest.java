@@ -120,6 +120,24 @@ class LifecycleAuthorizationPreflightUnitTest {
     }
 
     @Test
+    void 紐付けの無い旧email照合対象のポータルユーザーは紐付け登録か許容の判断待ちになる() {
+        LifecycleAuthorizationPreflight.PreflightReport none =
+                new LifecycleAuthorizationPreflight.PreflightReport("baseline", "schema");
+        LifecycleAuthorizationPreflight.recordPortalEngineerLinkCandidates(none, 0, List.of(), true);
+        assertEquals("PASS", none.status());
+        assertTrue(none.toJson().contains("linkTablePresent=true"));
+
+        LifecycleAuthorizationPreflight.PreflightReport pending =
+                new LifecycleAuthorizationPreflight.PreflightReport("baseline", "schema");
+        LifecycleAuthorizationPreflight.recordPortalEngineerLinkCandidates(pending, 3, List.of("p1"), false);
+        assertEquals("BLOCKED_MAPPING", pending.status());
+        String json = pending.toJson();
+        assertTrue(json.contains("\"checkId\":\"PORTAL_ENGINEER_LINK_CANDIDATES\""));
+        assertTrue(json.contains("\"rowCount\":3"));
+        assertTrue(json.contains("linkTablePresent=false"));
+    }
+
+    @Test
     void jsonEscapesUnsafeCharactersAndMarkdownEscapesPipes() {
         LifecycleAuthorizationPreflight.PreflightReport report =
                 new LifecycleAuthorizationPreflight.PreflightReport("head\"x", "schema|x");

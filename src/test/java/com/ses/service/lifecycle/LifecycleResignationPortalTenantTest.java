@@ -1,11 +1,15 @@
 package com.ses.service.lifecycle;
 
+import com.ses.common.exception.BusinessException;
+import com.ses.dto.lifecycle.ResignationGateResultDto;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.LifecycleCase;
+import com.ses.entity.PortalUserEngineerLink;
 import com.ses.entity.SysUser;
 import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.PortalUserEngineerLinkMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.AfterEach;
@@ -20,15 +24,21 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * NF01 batch 0 L6: 退社自動処理のポータルsession失効は案件tenantのポータル組織に限定される。
- * 旧実装はemailだけで全tenantのポータルユーザーを検索し、他tenantの同一emailユーザーを誤って失効させた。
+ * NF01 N1-4（決定 B-NF01-8・Q-10）: 退社自動処理のポータルsession失効は、管理者が登録した紐付け（V188）があり、
+ * 紐付け・ポータル組織とも案件tenantのポータルユーザーだけに行う。emailでは照合しない。
+ * 同じemailでも紐付けの無いポータルユーザー・他tenantのユーザーは処理せず、前者はゲートに「要確認」として表示する
+ * （NF01 batch 0 L6 の「案件tenantに限定したemail照合」を置き換える）。
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -48,6 +58,9 @@ class LifecycleResignationPortalTenantTest {
 
     @Autowired
     private EngineerAccountLinkMapper engineerAccountLinkMapper;
+
+    @Autowired
+    private PortalUserEngineerLinkMapper portalUserEngineerLinkMapper;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -104,13 +117,64 @@ class LifecycleResignationPortalTenantTest {
     }
 
     @Test
-    @DisplayName("案件tenantのポータル組織に属する同一emailユーザーのsessionは失効する")
+    @DisplayName("案件tenantで要員と紐付けたポータルユーザーのsessionは失効する")
     void sameTenantPortalSessionIsRevoked() {
         Long portalUserId = portalUserWithActiveSession("default", email);
+        registerLink("default", portalUserId);
 
         resignationGateChecker.executeAutomaticGateActions(resignationCase("default"), engineer);
 
-        assertNotNull(revokedAt(portalUserId), "案件tenantのポータルsessionは失効すること");
+        assertNotNull(revokedAt(portalUserId), "紐付け済みのポータルsessionは失効すること");
+    }
+
+    @Test
+    @DisplayName("同tenant・同emailでも紐付けの無いポータルユーザーは失効させず、ゲートに要確認として表示する")
+    void unlinkedSameEmailPortalUserIsListedAsPendingWithoutRevocation() {
+        Long unlinkedPortalUserId = portalUserWithActiveSession("default", email);
+
+        ResignationGateResultDto gate = resignationGateChecker.evaluate(resignationCase("default"), engineer);
+        resignationGateChecker.executeAutomaticGateActions(resignationCase("default"), engineer);
+
+        assertNull(revokedAt(unlinkedPortalUserId), "紐付けの無いポータルユーザーは自動処理しないこと");
+        ResignationGateResultDto.GateItemResult item = portalItem(gate);
+        assertTrue(item.isPassed(), "要確認はゲートをブロックしないこと");
+        assertTrue(item.isPendingConfirmation());
+        assertEquals(List.of(unlinkedPortalUserId), item.getPendingPortalUserIds());
+        assertFalse(item.getMessage().contains(email), "要確認の表示にemailを出さないこと");
+    }
+
+    @Test
+    @DisplayName("紐付けのtenantが案件tenantと違う場合はゲートを不通過にし、自動処理も撤権せず409で止める")
+    void foreignTenantLinkFailsTheGateAndAutomaticActions() {
+        Long portalUserId = portalUserWithActiveSession("default", "other-" + email);
+        registerLink("tenant-other-portal", portalUserId);
+
+        ResignationGateResultDto gate = resignationGateChecker.evaluate(resignationCase("default"), engineer);
+        assertFalse(portalItem(gate).isPassed());
+        assertFalse(gate.isPassed());
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> resignationGateChecker.executeAutomaticGateActions(resignationCase("default"), engineer));
+        assertEquals(409, ex.getCode());
+        assertNull(revokedAt(portalUserId));
+        assertEquals(1, sysUserMapper.selectById(linkedUser.getId()).getStatus(), "不整合のまま内部アカウントも停止しないこと");
+    }
+
+    private ResignationGateResultDto.GateItemResult portalItem(ResignationGateResultDto gate) {
+        return gate.getItems().stream()
+                .filter(item -> "PORTAL_ACCOUNT_LINK".equals(item.getCode()))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private void registerLink(String tenantId, Long portalUserId) {
+        PortalUserEngineerLink link = new PortalUserEngineerLink();
+        link.setTenantId(tenantId);
+        link.setPortalUserId(portalUserId);
+        link.setEngineerId(engineer.getId());
+        link.setLinkedBy(1L);
+        link.setLinkedAt(LocalDateTime.now());
+        portalUserEngineerLinkMapper.insert(link);
     }
 
     private Long portalUserWithActiveSession(String portalTenantId, String portalEmail) {

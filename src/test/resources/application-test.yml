@@ -76,6 +76,8 @@ spring:
         - classpath:sql/schema-sys-user-password-change-h2.sql
         # V187: 同一要員の未終結退社案件を1件に限定する生成列と一意index（tenant_id付与より後）
         - classpath:sql/schema-lifecycle-resignation-unique-h2.sql
+        # V188: ポータルユーザーと要員の紐付け（schema-portal-h2.sqlがポータル表を作り直した後）
+        - classpath:sql/schema-portal-user-engineer-link-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

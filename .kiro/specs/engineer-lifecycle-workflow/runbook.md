@@ -6,14 +6,14 @@
 
 ---
 
-## 2. 退社統制ゲート（9項目）の運用基準
+## 2. 退社統制ゲート（10項目）の運用基準
 
-退社案件（`RESIGNATION`）の完了確定（`POST /api/lifecycle/cases/{id}/complete`）は、以下の9項目がすべて充足されている場合にのみ実行可能となる。
+退社案件（`RESIGNATION`）の完了確定（`POST /api/lifecycle/cases/{id}/complete`）は、以下の10項目がすべて充足されている場合にのみ実行可能となる。
 
 | No | 項目コード | 項目名 | 自動/手動 | 判定基準・アクション |
 |:---|:---|:---|:---|:---|
 | 1 | `USER_DEACTIVATION` | ログインアカウント無効化 | 自動実行 | 案件完了時に `sys_user.status = 0` に自動更新。アカウント未連携の場合は対象なし（自動PASS）。 |
-| 2 | `SESSION_REVOCATION` | 全セッション強制失効 | 自動実行 | `PersistentSessionService` および `PortalSessionService` による全セッション即時破棄（Fail-Closed）。 |
+| 2 | `SESSION_REVOCATION` | 全セッション強制失効 | 自動実行 | `PersistentSessionService` による内部セッションの即時破棄（Fail-Closed）。ポータルセッションは10の紐付け済みユーザーだけを対象にする。 |
 | 3 | `PORTAL_UNLINK` | 要員ポータル連携解除 | 自動実行 | `EngineerAccountLinkService.unlinkByEngineerId` による連携解除。ポータル連携なしの場合は対象なし（自動PASS）。 |
 | 4 | `SALES_RELEASE` | 担当営業割当の解除 | 自動実行 | `EngineerSales` の全アクティブ割当の `released_at` に基準日を設定。割当なしの場合は対象なし（自動PASS）。 |
 | 5 | `ORG_ASSIGNMENT_CLOSE` | 組織所属の終了 | 自動実行 | `OrganizationService.closeAssignmentsForUser` による組織配属終了。 |
@@ -21,6 +21,7 @@
 | 7 | `UNSETTLED_EXPENSE` | 立替経費・精算確認 | 手動タスク | `t_expense_request` で対象要員の未精算件数を確認。未精算0件 → 自動PASS。未精算あり → `RESIGN_EXPENSE_SETTLE` タスクが承認済み `WAIVED` でなければFAIL。 |
 | 8 | `DOCUMENT_RETENTION` | 退職関連文書の保管確認 | 手動タスク | `RESIGN_DOC_RETENTION` タスクが `COMPLETED` または承認済み `WAIVED`。タスク未定義の場合はゲートFAIL。 |
 | 9 | `ACTIVE_CONTRACT` | 稼働中契約の終了確認 | 手動確認 | `t_contract` で対象要員の `status='稼動中'` の件数を確認。残存している場合はゲートFAIL（契約を終了または解約してから退社を完了）。 |
+| 10 | `PORTAL_ACCOUNT_LINK` | ポータルアカウントの紐付け確認 | 自動実行 | 管理者が登録した紐付け（V188、5.5）のあるポータルユーザーだけ `PortalSessionService` でセッションを失効させる。emailが一致しても紐付けの無いポータルユーザーは自動処理せず「要確認」（`pendingConfirmation`・`pendingPortalUserIds`）として表示し、ブロックはしない。紐付けのtenant不整合はFAILで、完了確定も409になる。 |
 
 ---
 
@@ -97,6 +98,8 @@ NF01（機能スイッチ `FEATURE_NF01_ENABLED`、既定OFF）はCONFIRM完成�
 | `LIFECYCLE_DUAL_TASK_UNFINISHED` | HR | 未終結の二者確認タスクを免除（承認済み例外）・再提出のどちらで扱うか決める（5.4） |
 | `LIFECYCLE_EVIDENCE_VERSIONLESS` | 文書owner | 版を固定していない既存証跡の扱いを決める（5.4） |
 | `LIFECYCLE_RESIGNATION_ACTIVE_DUPLICATE` | HR | **0件にするまでV187を適用しない**（5.3） |
+| `PORTAL_ENGINEER_LINK_CANDIDATES` | 管理者 | 旧email照合なら退社時に自動処理されていたが紐付けの無いポータルユーザー。V188適用後にポータル管理で紐付けを登録するか、紐付けない（要確認で個別対応する）ことを記録する（5.5） |
+| `PORTAL_ENGINEER_LINK_SCOPE_MISMATCH`（FAIL） | 管理者・DBA | tenant不整合・参照先欠落の現行紐付け。退社完了が409で止まるため、紐付けを解除して正しいtenantで登録し直す（5.5） |
 
 ### 5.3 L7: 同一要員の未終結退社案件は1件まで（V187）
 
@@ -122,4 +125,26 @@ NF01（機能スイッチ `FEATURE_NF01_ENABLED`、既定OFF）はCONFIRM完成�
 - **画面**: 完了モーダルで文書IDを入力して「版を読み込む」を押すと、その文書の `CLEAN` 版が版番号の降順で表示され、選んだ版のIDを送る。一覧APIは `GET /api/lifecycle/tasks/{id}/evidence-versions?documentId=` と本人用 `GET /api/my/lifecycle/tasks/{id}/evidence-versions?documentId=`。完了操作と同じtenant・権限・本人scopeで判定し、他tenant・存在しない文書は区別せず404、版ID・版番号・登録日時以外（元ファイル名・storage key・hash）は返さない。
 - **拒否を今から有効にした理由**: 決定は「CONFIRM公開時にversionlessを拒否」である。NF01はCONFIRM完成後に公開し（B-NF01-1）、機能スイッチも既定OFFのため、公開前に拒否を始めても利用者の業務は止まらない。既存テストの業務フロー（退社ゲートの文書保管タスク等）は版を選ぶ形に置き換えるだけで成立することを確認した。公開時に切り替えるための別スイッチを持たないことで、切替漏れのまま公開する危険を無くす。
 - **既存のversionless証跡**: preflightの `LIFECYCLE_EVIDENCE_VERSIONLESS` が件数を示す。証跡linkを書き換えるAPIは無いため、文書ownerが「当該タスクを訂正記録（`POST /api/lifecycle/tasks/{id}/correct`）で版を追記する」か「現状のまま許容する」かを決め、5.2の手順で記録する。
-- **二者確認（DUAL_CONFIRMATION）**: CONFIRM公開前は、DUAL_CONFIRMATIONタスクを含むテンプレートの新規作成・改定を `400 error.lifecycle.dualConfirmationNotAvailable` で拒否する（表記揺れ・前後空白も拒否）。公開前から残るDUALタスクは通常の完了経路では完了できない（409）ため、preflightの `LIFECYCLE_DUAL_TASK_UNFINISHED` を見てHRが免除または再作成を決める。
+- **二者確認（DUAL_CONFIRMATION）**: CONFIRM公開前は、DUAL_CONFIRMATIONタスクを含むテンプレートの新規作成・改定を `400 error.lifecycle.dualConfirmationDisabled` で拒否する（表記揺れ・前後空白も拒否）。公開前から残るDUALタスクは通常の完了経路では完了できない（409）ため、preflightの `LIFECYCLE_DUAL_TASK_UNFINISHED` を見てHRが免除または再作成を決める。
+
+### 5.5 ポータルユーザーと要員の紐付け（N1-4 / V188）
+
+- 規則（決定 B-NF01-8・Q-10）: 退社完了時にポータルセッションを失効させるのは、管理者が登録した紐付け（`t_portal_user_engineer_link`）があるポータルユーザーだけ。emailでは照合しない。紐付け・ポータル組織・要員はすべて同じtenantであること。
+- 紐付けの無いポータルユーザーは自動処理しない。内部アカウントとemailが一致する同tenantのポータルユーザーは、退社ゲート（`GET /api/lifecycle/cases/{id}/gate`）の `PORTAL_ACCOUNT_LINK` に「要確認」としてIDだけ表示される（emailは出さない。ゲートはブロックしない）。
+- **登録・解除（管理者のみ）**: ポータル管理画面 `/portal-admin` の「組織」タブでユーザー一覧を開き、「要員紐付け」から要員IDを入力して登録する。解除は同じ画面の「解除」。API は次のとおりで、`SecurityConfig` が管理者に静的限定し、serviceも管理者・tenantを再判定する（営業は portal-admin menuを持つが操作できない）。
+  - `GET /api/portal-admin/users/{portalUserId}/engineer-links`（現行と解除済みの履歴）
+  - `POST /api/portal-admin/users/{portalUserId}/engineer-links`（body: `{"engineerId": n}`）
+  - `POST /api/portal-admin/engineer-links/{linkId}/release`
+- 1ポータルユーザーの現行紐付けは1件まで（V188の一意制約）。別の要員へ付け替える場合は解除してから登録する（重複は409）。解除は行を残して `released_at` / `released_by` を記録する。他tenantの要員・ポータルユーザーは存在しないものと同じ404。
+- **監査**: 登録は `PORTAL_ENGINEER_LINK_REGISTERED`、解除は `PORTAL_ENGINEER_LINK_RELEASED` として `t_audit_log`（`reference_type = PORTAL_USER_ENGINEER_LINK`、`reference_id` = 紐付けID、HUMAN / MANUAL_API）へ同一transactionで必須記録する。記録できなければ登録・解除も取り消される。
+  ```sql
+  SELECT created_at, username, application_code, reference_id, before_state, after_state
+    FROM t_audit_log WHERE reference_type = 'PORTAL_USER_ENGINEER_LINK' ORDER BY id DESC;
+  ```
+- **退社完了済みの要員への紐付け**: 拒否はしない（再入社等で正当な場合がある）。ただし完了時の自動処理は遡って行われないため、登録応答の `engineerResigned=true` で画面に警告を出し、監査の `after_state` に `engineerResigned=true` を残す。管理者はポータルユーザーの停止（「停止」ボタン）を個別に判断する。
+- **lock順**: 登録・解除は対象要員の `t_engineer` 行を `FOR UPDATE` してから紐付け行を書く（NF01細粒度epoch計画 §3.1 の 順7 ENGINEER → 順12 PORTAL_ENGINEER_LINK → 葉の監査）。退社完了が要員行を保持して紐付けを読む並べ替えはW3-16bで入る（それまでは、退社完了の直前に登録された紐付けが失効対象に入らない競合が残る。退社完了の直前・直後の紐付け変更は避ける）。
+- **公開前の準備（データのある環境）**:
+  1. V188適用前にpreflightの `PORTAL_ENGINEER_LINK_CANDIDATES` を確認する（旧email照合の対象だったポータルユーザーの件数）。
+  2. V188適用後、管理者が該当するポータルユーザーの紐付けを登録する。要員本人ではないポータルユーザー（共有アドレス等）は紐付けず、その判断を5.2の手順で記録する。
+  3. preflightを再実行し、`PORTAL_ENGINEER_LINK_CANDIDATES` が0件（または記録済みの許容分だけ）で、`PORTAL_ENGINEER_LINK_SCOPE_MISMATCH` が `PASS` であることを確認してから機能スイッチを検討する。
+- **ゲートが `PORTAL_ACCOUNT_LINK` のFAIL（tenant不整合）で止まった場合**: 監査SQLで経緯を確認し、ポータル管理で不整合の紐付けを解除して正しいtenantの要員へ登録し直してから、再度完了確定する。DBの直接更新はしない。

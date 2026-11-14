@@ -62,7 +62,7 @@ class LifecycleTemplateDualConfirmationGuardTest {
                 template(name, task("GUARD_OK", "NONE"), task("GUARD_DUAL", "DUAL_CONFIRMATION")), hrUser.getId()));
 
         assertEquals(400, ex.getCode());
-        assertEquals("error.lifecycle.dualConfirmationNotAvailable", ex.getMessageKey());
+        assertEquals("error.lifecycle.dualConfirmationDisabled", ex.getMessageKey());
         assertEquals(0L, templateMapper.selectCount(new LambdaQueryWrapper<LifecycleTemplate>()
                 .eq(LifecycleTemplate::getName, name)));
     }
@@ -75,7 +75,7 @@ class LifecycleTemplateDualConfirmationGuardTest {
                     template("二者確認ガード表記-" + System.nanoTime(), task("GUARD_VARIANT", variant)),
                     hrUser.getId()));
             assertEquals(400, ex.getCode(), variant);
-            assertEquals("error.lifecycle.dualConfirmationNotAvailable", ex.getMessageKey(), variant);
+            assertEquals("error.lifecycle.dualConfirmationDisabled", ex.getMessageKey(), variant);
         }
     }
 
@@ -93,7 +93,7 @@ class LifecycleTemplateDualConfirmationGuardTest {
                 hrUser.getId()));
 
         assertEquals(400, ex.getCode());
-        assertEquals("error.lifecycle.dualConfirmationNotAvailable", ex.getMessageKey());
+        assertEquals("error.lifecycle.dualConfirmationDisabled", ex.getMessageKey());
         assertNull(templateMapper.selectById(existing.getId()).getValidTo(), "旧版の有効期限を閉じないこと");
         assertEquals(versionsBefore, templateMapper.selectCount(new LambdaQueryWrapper<LifecycleTemplate>()
                 .eq(LifecycleTemplate::getTemplateType, "TRANSFER")), "新版を作らないこと");

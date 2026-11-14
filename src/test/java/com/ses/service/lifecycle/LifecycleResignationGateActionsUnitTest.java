@@ -6,13 +6,13 @@ import com.ses.common.exception.BusinessException;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.LifecycleCase;
-import com.ses.entity.PortalUser;
+import com.ses.entity.PortalUserEngineerLink;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.ExpenseRequestMapper;
 import com.ses.mapper.LifecycleTaskMapper;
-import com.ses.mapper.PortalUserMapper;
+import com.ses.mapper.PortalUserEngineerLinkMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.AssetOffboardingService;
 import com.ses.service.EngineerAccountLinkService;
@@ -40,13 +40,14 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
  * NF01 batch 0: 退社ゲート自動処理の一貫性（ユーザー停止の部分列更新、担当営業解除のservice経由、
- * ポータルユーザー複数一致のfail-closed、他tenant連携ユーザーのfail-closed）。
+ * ポータルsession失効は紐付け（V188）だけを対象にし紐付けのtenant不整合はfail-closed、他tenant連携ユーザーのfail-closed）。
  */
 @ExtendWith(MockitoExtension.class)
 class LifecycleResignationGateActionsUnitTest {
@@ -61,7 +62,7 @@ class LifecycleResignationGateActionsUnitTest {
     @Mock private EngineerAccountLinkService engineerAccountLinkService;
     @Mock private EngineerSalesService engineerSalesService;
     @Mock private EngineerSalesMapper engineerSalesMapper;
-    @Mock private PortalUserMapper portalUserMapper;
+    @Mock private PortalUserEngineerLinkMapper portalUserEngineerLinkMapper;
     @Mock private ContractMapper contractMapper;
     @Mock private OrganizationService organizationService;
     @Mock private PersistentSessionService persistentSessionService;
@@ -117,24 +118,54 @@ class LifecycleResignationGateActionsUnitTest {
     }
 
     @Test
-    void 案件tenantのポータルユーザーが複数一致したら失効も連携解除もせず409で中断する() {
-        linkedUser(activeUser("dup@example.test"));
-        when(sysUserMapper.update(isNull(), any())).thenReturn(1);
-        PortalUser first = new PortalUser();
-        first.setId(101L);
-        PortalUser second = new PortalUser();
-        second.setId(102L);
-        when(portalUserMapper.selectList(any())).thenReturn(List.of(first, second));
+    void ポータルユーザーの紐付けにtenant不整合があれば停止も失効も連携解除もせず409で中断する() {
+        when(portalUserEngineerLinkMapper.countActiveScopeMismatchForEngineer(ENGINEER_ID, TENANT)).thenReturn(1L);
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> checker.executeAutomaticGateActions(resignationCase(), engineer()));
 
         assertEquals(409, ex.getCode());
         assertEquals("error.lifecycle.resignationGateFailed", ex.getMessageKey());
+        verify(sysUserMapper, never()).update(any(), any());
         verify(portalSessionService, never()).revokeAllForUser(anyLong(), anyString());
         verify(engineerAccountLinkService, never()).unlinkByEngineerId(any());
         verify(engineerSalesService, never()).releaseAllByEngineerId(any());
         verify(engineerSalesService, never()).releaseAllByEngineerId(any(), any());
+    }
+
+    @Test
+    void ポータルsessionは紐付け済みのポータルユーザーだけを失効させemailでは照合しない() {
+        linkedUser(activeUser("resign@example.test"));
+        when(sysUserMapper.update(isNull(), any())).thenReturn(1);
+        when(portalUserEngineerLinkMapper.selectActiveForEngineerInTenant(ENGINEER_ID, TENANT))
+                .thenReturn(List.of(portalLink(101L), portalLink(102L)));
+
+        checker.executeAutomaticGateActions(resignationCase(), engineer());
+
+        verify(portalSessionService).revokeAllForUser(eq(101L), anyString());
+        verify(portalSessionService).revokeAllForUser(eq(102L), anyString());
+        verify(portalSessionService, times(2)).revokeAllForUser(anyLong(), anyString());
+        verify(portalUserEngineerLinkMapper, never()).selectUnlinkedPortalUserIdsByEmailInTenant(any(), any());
+    }
+
+    @Test
+    void 内部アカウント未連携の要員でも紐付け済みのポータルユーザーは失効させる() {
+        when(engineerAccountLinkService.findByEngineerId(ENGINEER_ID)).thenReturn(null);
+        when(portalUserEngineerLinkMapper.selectActiveForEngineerInTenant(ENGINEER_ID, TENANT))
+                .thenReturn(List.of(portalLink(201L)));
+
+        checker.executeAutomaticGateActions(resignationCase(), engineer());
+
+        verify(portalSessionService).revokeAllForUser(eq(201L), anyString());
+        verifyNoInteractions(persistentSessionService, organizationService);
+    }
+
+    private PortalUserEngineerLink portalLink(Long portalUserId) {
+        PortalUserEngineerLink link = new PortalUserEngineerLink();
+        link.setTenantId(TENANT);
+        link.setPortalUserId(portalUserId);
+        link.setEngineerId(ENGINEER_ID);
+        return link;
     }
 
     @Test

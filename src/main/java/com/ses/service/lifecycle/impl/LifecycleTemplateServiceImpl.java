@@ -268,7 +268,7 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
         for (LifecycleTemplateTaskDto task : tasks) {
             String evidenceType = task == null ? null : task.getEvidenceType();
             if (evidenceType != null && DUAL_CONFIRMATION.equalsIgnoreCase(evidenceType.trim())) {
-                throw BusinessException.of(400, "error.lifecycle.dualConfirmationNotAvailable",
+                throw BusinessException.of(400, "error.lifecycle.dualConfirmationDisabled",
                         "二者確認タスクは確認機能の公開前のため作成・改定できません");
             }
         }
