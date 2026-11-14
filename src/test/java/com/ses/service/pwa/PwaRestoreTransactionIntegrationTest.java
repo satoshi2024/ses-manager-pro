@@ -2,6 +2,7 @@ package com.ses.service.pwa;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.config.LoginUser;
+import com.ses.config.OidcLoginUser;
 import com.ses.dto.pwa.PwaRestoreReauthenticateRequest;
 import com.ses.entity.SysUser;
 import com.ses.service.pwa.PwaRestoreIdentityService.CurrentIdentity;
@@ -21,6 +22,9 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
+import org.springframework.security.oauth2.core.oidc.OidcIdToken;
+import org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -149,6 +153,74 @@ class PwaRestoreTransactionIntegrationTest {
         assertThat(identityService.load(userId, tenant).locked()).isTrue();
         jdbc.update("DELETE FROM t_engineer_account_link WHERE sys_user_id = ?", userId);
         assertThat(identityService.load(userId, tenant)).isNull();
+    }
+
+    @Test
+    void oidcSessionの復元要求は実AccountLockへ失敗回数を加算せずローカルsessionのlockも起こさない() {
+        SysUser user = new SysUser();
+        user.setId(userId);
+        user.setUsername(username);
+        user.setTenantId(tenant);
+        user.setRole("要員");
+        user.setStatus(1);
+        var authorities = List.of(new SimpleGrantedAuthority("ROLE_要員"));
+        OidcIdToken idToken = OidcIdToken.withTokenValue("pwa-restore-it-id-token")
+                .subject("idp-" + userId).issuer("https://idp.invalid/" + tenant)
+                .issuedAt(clock.instant()).expiresAt(clock.instant().plusSeconds(300)).build();
+        OAuth2AuthenticationToken oidc = new OAuth2AuthenticationToken(
+                new OidcLoginUser(user, new DefaultOidcUser(authorities, idToken), authorities),
+                authorities, "enterprise");
+        SecurityContext oidcContext = SecurityContextHolder.createEmptyContext();
+        oidcContext.setAuthentication(oidc);
+        SecurityContextHolder.setContext(oidcContext);
+        AccountingTenantContextHolder.setTenantId(tenant);
+        String scope = userContextService.current().userScope();
+        MockHttpSession session = new MockHttpSession();
+        session.setMaxInactiveInterval(300);
+        session.setAttribute("SPRING_SECURITY_CONTEXT", oidcContext);
+
+        // lock閾値（5回）を超える回数、IdPのパスワード等を入力しても失敗として数えない。
+        for (int attempt = 0; attempt < 6; attempt++) {
+            var wrong = new PwaRestoreReauthenticateRequest();
+            wrong.setPassword("idp-password-" + attempt);
+            wrong.setDocumentNonce("AAAAAAAAAAAAAAAAAAAAAA");
+            wrong.setUserScope(scope);
+            assertThatThrownBy(() -> authorizationService.reauthenticate(wrong, session, oidc))
+                    .isInstanceOf(PwaRestoreReauthUnsupportedException.class)
+                    .hasMessage("error.pwa.restore.reauthUnsupported");
+        }
+        // DBのローカルパスワードと一致する値でもproofを発行しない。
+        var matching = new PwaRestoreReauthenticateRequest();
+        matching.setPassword("pw-hash");
+        matching.setDocumentNonce("AAAAAAAAAAAAAAAAAAAAAA");
+        matching.setUserScope(scope);
+        assertThatThrownBy(() -> authorizationService.reauthenticate(matching, session, oidc))
+                .isInstanceOf(PwaRestoreReauthUnsupportedException.class);
+        var confirm = new com.ses.dto.pwa.PwaRestoreConfirmRequest();
+        confirm.setProof("p".repeat(43));
+        confirm.setDocumentNonce("AAAAAAAAAAAAAAAAAAAAAA");
+        confirm.setUserScope(scope);
+        assertThatThrownBy(() -> authorizationService.confirm(confirm, session, oidc))
+                .isInstanceOf(PwaRestoreReauthUnsupportedException.class);
+
+        assertThat(failedCount()).isZero();
+        assertThat(jdbc.queryForObject("SELECT locked_until FROM sys_user WHERE id = ?", LocalDateTime.class, userId))
+                .isNull();
+        assertThat(identityService.load(userId, tenant).locked()).isFalse();
+        assertThat(session.getAttribute(PwaRestoreAuthorizationService.SESSION_STATE_ATTRIBUTE)).isNull();
+
+        // 同じ要員がローカルパスワードでlogin済みのsessionなら、従来どおり正しいパスワードで再認証できる（lockされていない）。
+        LoginUser principal = new LoginUser(user, authorities, tenant);
+        var local = UsernamePasswordAuthenticationToken.authenticated(principal, "", principal.getAuthorities());
+        SecurityContext localContext = SecurityContextHolder.createEmptyContext();
+        localContext.setAuthentication(local);
+        SecurityContextHolder.setContext(localContext);
+        MockHttpSession localSession = new MockHttpSession();
+        localSession.setMaxInactiveInterval(300);
+        localSession.setAttribute("SPRING_SECURITY_CONTEXT", localContext);
+        var proof = authorizationService.reauthenticate(matching, localSession, local);
+        assertThat(proof.proof()).hasSize(43);
+        assertThat(failedCount()).isZero();
     }
 
     private int failedCount() {

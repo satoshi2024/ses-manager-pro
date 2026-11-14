@@ -142,6 +142,7 @@ class LoginSuccessHandlerBootstrapTest {
         session.setAttribute(MfaEnforcementFilter.MFA_VERIFIED_USER_ATTRIBUTE, 10L);
         session.setAttribute(MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE, Boolean.TRUE);
         session.setAttribute(PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE, Boolean.TRUE);
+        session.setAttribute(com.ses.service.security.BreakGlassService.INCIDENT_ID_ATTRIBUTE, 5L);
         request.setSession(session);
         DefaultOAuth2User oidcUser = new DefaultOAuth2User(
                 List.of(new SimpleGrantedAuthority("ROLE_管理者")), Map.of("sub", "second-admin"), "sub");
@@ -156,7 +157,8 @@ class LoginSuccessHandlerBootstrapTest {
                 ProductionBootstrapMode.SESSION_ATTRIBUTE, ProductionBootstrapMode.SESSION_USER_ATTRIBUTE,
                 MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE, MfaEnforcementFilter.MFA_VERIFIED_USER_ATTRIBUTE,
                 MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE,
-                PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE);
+                PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE,
+                com.ses.service.security.BreakGlassService.INCIDENT_ID_ATTRIBUTE);
     }
 
     // ---------------------------------------------------------------- helper

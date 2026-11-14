@@ -78,3 +78,16 @@ Self-review notes:
   - MySQL Testcontainers Suite (`PwaClientMutationLedgerMySqlConcurrencyTest`, `FlywaySelfServiceSchemaSmokeTest`, `FlywayV110AdminBoundaryUpgradeSmokeTest`): `10 run / 0 failures / 0 errors / 0 skipped`
   - CI Shard Inventory: `1 run / 0 failures / 0 errors / 0 skipped`
   - Performance Test: `1 run / 0 failures / 0 errors / 0 skipped`
+
+## 6. W3-R1 / W3-09 追記（2026-11-14）
+
+- W3-R1静的再レビュー（`1be03bea`）で PRD-NF04-001〜004 を CLOSED（静的）と判定した。証拠（ファイル:行）は `.kiro/roadmap/2026-10-01-snf-production-nf04-review.md` の「状態更新」に記録した。runtime CLOSED は W3-09 最終SHAの browser gate 通過を条件とする。
+- W3-09（NF04-1）: P1-N4-1 は 2026-11-14 の決定（方案A）で、OIDC sessionでは復元不可と明示する扱いにした（`first-release-user-and-operations-notes.md` 1.4・2.4、`revocation-recovery-decision.md` 追記）。P2-N4-2（Safari ITP と撤回epoch cookie）、P2-N4-3（テスト欠落）、R1 P3-N4-1・3・4・5 を同じbatchで扱った。
+- W3-09 独立レビュー（`071fb7be`、REQUEST CHANGES）への対応: P1-W309-1（OIDC sessionの期限切れで下書きが復元できなくなる）は 2026-11-14 の利用者決定 (a) で受け入れ、画面文言・説明・決定記録・受入項目（S-14）へ反映した。P2-W309-1（送信中の未送信件数）は修正し、S-15 を追加した。P2-W309-2（iOS Safari・Android Chrome で離脱確認が出ない）は説明・決定記録・S-02 へ明記した。
+- W3-09 増分レビュー（`e527cce3`、REQUEST CHANGES）への対応: R2-P2-1（送信中の下書きが同期パネルに出ない）は、応答が1秒以上返らないときに「送信中」を表示するよう修正し、S-15 を改めた。R2-P3-1〜6（sessionの無い判定のfail-closed、break-glass印のlogin時消去、「サーバーへの要求が無い状態」と最長12時間の明記、`pwa.queued` の4言語化、送信中aggregateでflushが止まる問題、件数不明時のlogout確認）も同じcommitで扱った。
+- 追加・変更したテスト: `PwaRestoreAuthorizationServiceTest`、`PwaRestoreTransactionIntegrationTest`、`MyPwaRestoreApiControllerTest`、`PwaSessionApiControllerTest`（新規）、`PwaRestoreOidcSessionIntegrationTest`（新規）、`PwaAssetContractTest`、`PwaQueueRestoreAvailabilityBrowserTest`（新規、browser）、`PwaQueueChromeIsolationBrowserTest`（stub契約・復元可否の待機の更新）、`PwaRestoreChromeAuthenticationBrowserTest`（復元可否の待機の更新）。実行結果は Runner の記録を正とし、本台帳はPASSを主張しない。
+- 実機ブラウザ受入（A-NF04-2）は `real-device-browser-acceptance-template.md` の様式で、下の記録表へ追記する。
+
+| 日付 | 確認者 | OS / 端末 | ブラウザ / 版 | 画面幅 | 機能スイッチ（NF-04） | 確認ID | 結果 | 補足 | 証跡の保存先 |
+|---|---|---|---|---|---|---|---|---|---|
+| | | | | | | | | | |

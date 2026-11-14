@@ -16,18 +16,22 @@
         article dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 0; text-align: left; }
         article dt { color: #94a3b8; }
         article dd { margin: 0; overflow-wrap: anywhere; }
-        #offline-drafts[hidden] { display: none; }
+        #offline-drafts[hidden], #offline-restore-auth[hidden], #offline-restore-unavailable[hidden] { display: none; }
     </style>
 </head>
 <body>
 <main>
     <h1>現在オフラインです</h1>
-    <p>保存済みの下書きはロックされています。通常の再読み込みでは表示・送信されません。通信が回復した後、パスワードを再確認し、復元を明示してください。</p>
+    <p>保存済みの下書きはロックされています。通常の再読み込みでは表示・送信されません。通信が回復した後、パスワードを再確認し、復元を明示してください（パスワードでログインしている場合だけ復元できます）。</p>
     <button type="button" onclick="location.reload()">再読み込み</button>
     <section id="offline-restore" aria-live="polite">
-        <label for="offline-restore-password">パスワード</label>
-        <input id="offline-restore-password" type="password" autocomplete="current-password" disabled>
-        <button id="offline-reauth" type="button" disabled>再認証</button>
+        <!-- 復元できるか（serverのsession認証主体で判定）を確認できるまでパスワード欄は使えない。OIDC等では隠す。 -->
+        <div id="offline-restore-auth">
+            <label for="offline-restore-password">パスワード</label>
+            <input id="offline-restore-password" type="password" autocomplete="current-password" disabled>
+            <button id="offline-reauth" type="button" disabled>再認証</button>
+        </div>
+        <p id="offline-restore-unavailable" hidden>この下書きは復元できません。シングルサインオン（社内の共通ログイン）でログインしている場合は、パスワードによる本人確認を使えないためです。必要な内容は通常の画面で再入力してください。</p>
         <button id="offline-confirm-restore" type="button" hidden>下書きを復元する</button>
         <p id="offline-restore-status" role="status"></p>
     </section>
@@ -90,10 +94,47 @@
                 list.appendChild(article);
             });
         }
+        const authBox = document.getElementById('offline-restore-auth');
+        const unavailableNote = document.getElementById('offline-restore-unavailable');
+        // serverが返す復元可否（true/false）。null=未確認。OIDC等（false）ではパスワード欄を出さず、パスワードも送らない。
+        let restoreAvailability = null;
+        let checkingAvailability = false;
+        let availabilityRetries = 0;
+        function applyAvailability() {
+            const unavailable = restoreAvailability === false;
+            authBox.hidden = unavailable;
+            unavailableNote.hidden = !unavailable;
+            const enabled = navigator.onLine && restoreAvailability === true;
+            password.disabled = !enabled;
+            reauth.disabled = !enabled;
+        }
         function updateNetwork() {
-            password.disabled = !navigator.onLine;
-            reauth.disabled = !navigator.onLine;
+            applyAvailability();
             if (!navigator.onLine) status.textContent = '再認証には通信が必要です。下書きはロック中です。';
+            else if (restoreAvailability === false) status.textContent = '';
+            else if (restoreAvailability === null && checkingAvailability) status.textContent = '復元できるかを確認しています。';
+        }
+        async function refreshAvailability() {
+            if (!navigator.onLine || restoreAvailability !== null || checkingAvailability) { updateNetwork(); return; }
+            checkingAvailability = true;
+            updateNetwork();
+            let result = null;
+            try {
+                result = await window.SES.pwaQueue.checkRestoreAvailability();
+            } catch (_) {
+                result = null;
+            }
+            checkingAvailability = false;
+            if (result === true || result === false) restoreAvailability = result;
+            updateNetwork();
+            if (restoreAvailability === null && navigator.onLine) {
+                status.textContent = '復元できるかを確認できませんでした。通信を確認して再読み込みしてください。';
+                // 一時的な失敗は数回だけ自動で再確認する（focus・表示復帰でも再確認する。W3-09 P3-7）。
+                if (availabilityRetries < 5) {
+                    availabilityRetries++;
+                    setTimeout(refreshAvailability, 2000);
+                }
+            }
         }
         reauth.addEventListener('click', async function() {
             reauth.disabled = true;
@@ -104,10 +145,16 @@
                 await window.SES.pwaQueue.prepareRestore(secret);
                 confirmRestore.hidden = false;
                 status.textContent = '再認証できました。下書き内容を表示するには「下書きを復元する」を選択してください。';
-            } catch (_) {
-                status.textContent = '再認証できませんでした。オンライン状態とパスワードを確認してください。';
+            } catch (error) {
+                if (error && error.restoreUnavailable) {
+                    // serverがパスワード再認証に対応しないsessionと判定した（失敗回数には数えられない）。
+                    restoreAvailability = false;
+                    status.textContent = '';
+                } else {
+                    status.textContent = '再認証できませんでした。オンライン状態とパスワードを確認してください。';
+                }
             } finally {
-                reauth.disabled = !navigator.onLine;
+                applyAvailability();
                 password.value = '';
             }
         });
@@ -118,15 +165,25 @@
                 const drafts = await window.SES.pwaQueue.getOfflineDrafts();
                 showDrafts(drafts);
                 status.textContent = drafts.length ? '復元した下書きを確認してください。' : '復元できる下書きがありません。';
-            } catch (_) {
+            } catch (error) {
                 clearDrafts();
-                status.textContent = '復元できませんでした。下書きはロックされたままです。再認証からやり直してください。';
+                if (error && error.restoreUnavailable) {
+                    restoreAvailability = false;
+                    applyAvailability();
+                    status.textContent = '';
+                } else {
+                    status.textContent = '復元できませんでした。下書きはロックされたままです。再認証からやり直してください。';
+                }
             } finally { confirmRestore.disabled = false; }
         });
-        window.addEventListener('online', updateNetwork);
+        window.addEventListener('online', refreshAvailability);
+        window.addEventListener('focus', refreshAvailability);
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible') refreshAvailability();
+        });
         window.addEventListener('offline', updateNetwork);
         window.addEventListener('ses:pwa-revoked', clearDrafts);
-        updateNetwork();
+        refreshAvailability();
     });
 </script>
 </body>

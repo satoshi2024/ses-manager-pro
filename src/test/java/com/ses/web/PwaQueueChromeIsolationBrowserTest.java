@@ -271,7 +271,10 @@ class PwaQueueChromeIsolationBrowserTest {
             browser.send("Network.emulateNetworkConditions", Map.of("offline", false, "latency", 0,
                     "downloadThroughput", -1, "uploadThroughput", -1, "connectionType", "wifi"));
             assertTrue(browser.waitForStrict("navigator.onLine", Duration.ofSeconds(10)));
-            assertTrue(browser.waitForStrict("!!(document.getElementById('offline-reauth') && !document.getElementById('offline-reauth').disabled)", Duration.ofSeconds(10)));
+            // W3-09: offline.htmlは復元可否（session-context）を確認してからパスワード欄を有効にする。
+            assertTrue(browser.waitForStrict("!!(window.SES&&SES.pwaQueue&&SES.pwaQueue.restoreAvailability()===true)", Duration.ofSeconds(30)),
+                    "online復帰後にローカルパスワードsessionの復元可否を確認する");
+            assertTrue(browser.waitForStrict("!!(document.getElementById('offline-reauth') && !document.getElementById('offline-reauth').disabled)", Duration.ofSeconds(30)));
             JsonNode csrfBootstrap = browser.evaluateStrict("(async()=>{const r=await fetch('/api/my/session-context',{method:'GET',cache:'no-store',credentials:'same-origin',headers:{'Accept':'application/json'}});const j=await r.json();return JSON.stringify({status:r.status,code:j.code,cookie:document.cookie.split(';').some(x=>x.trim().startsWith('XSRF-TOKEN='))})})()");
             JsonNode csrfBootstrapState = JSON.readTree(csrfBootstrap.asText());
             assertEquals(200, csrfBootstrapState.path("status").asInt(), "onlineの正規bootstrap GETが成功する");
@@ -343,7 +346,9 @@ class PwaQueueChromeIsolationBrowserTest {
             assertTrue(leaseFirstStarted.await(15, TimeUnit.SECONDS), "最初のtabがHTTP barrierへ到達する");
             browser.evaluate("window.__child.location='/offline.html';true");
             assertTrue(browser.waitForStrict("window.__child.document.title.includes('オフライン')", Duration.ofSeconds(15)));
-            assertTrue(browser.waitForStrict("!!(window.__child && window.__child.document.getElementById('offline-reauth') && !window.__child.document.getElementById('offline-reauth').disabled)", Duration.ofSeconds(10)));
+            assertTrue(browser.waitForStrict("!!(window.__child && window.__child.SES && window.__child.SES.pwaQueue && window.__child.SES.pwaQueue.restoreAvailability()===true)", Duration.ofSeconds(30)),
+                    "第2documentでも復元可否を確認してからパスワード欄を有効にする");
+            assertTrue(browser.waitForStrict("!!(window.__child && window.__child.document.getElementById('offline-reauth') && !window.__child.document.getElementById('offline-reauth').disabled)", Duration.ofSeconds(30)));
             browser.evaluate("window.__child.document.getElementById('offline-restore-password').value='test-password';"
                     + "window.__child.document.getElementById('offline-reauth').click();true");
             assertTrue(browser.waitForStrict("!!(window.__child && window.__child.document.getElementById('offline-confirm-restore') && !window.__child.document.getElementById('offline-confirm-restore').hidden)", Duration.ofSeconds(15)));
@@ -707,10 +712,14 @@ class PwaQueueChromeIsolationBrowserTest {
             // Spring Securityと同じbootstrap契約を合成し、CSRF tokenは通常のHTTP応答で発行する。
             exchange.getResponseHeaders().add("Set-Cookie", "XSRF-TOKEN=synthetic-csrf; Path=/; SameSite=Lax");
             String presented = exchange.getRequestHeaders().getFirst("X-User-Scope");
-            String scope = presented == null || presented.isBlank() ? "scope-A" : presented;
-            if (rebindScopeOnNextContext.compareAndSet(true, false)) scope += "-rebound";
-            boolean preserveQueue = !discardQueueOnNextContext.compareAndSet(true, false);
-            reply(exchange, 200, "application/json", "{\"code\":200,\"data\":{\"userScope\":\"" + scope + "\",\"preserveQueue\":" + preserveQueue + "}}");
+            boolean scopePresented = presented != null && !presented.isBlank();
+            String scope = scopePresented ? presented : "scope-A";
+            // 復元可否だけを確かめるGET（X-User-Scopeなし。checkRestoreAvailability）では、scope切替の試験用flagを消費しない。
+            if (scopePresented && rebindScopeOnNextContext.compareAndSet(true, false)) scope += "-rebound";
+            boolean preserveQueue = !(scopePresented && discardQueueOnNextContext.compareAndSet(true, false));
+            // ローカルパスワードsession相当（W3-09以降のsession-context契約）。OIDC側はPwaQueueRestoreAvailabilityBrowserTest。
+            reply(exchange, 200, "application/json", "{\"code\":200,\"data\":{\"userScope\":\"" + scope
+                    + "\",\"preserveQueue\":" + preserveQueue + ",\"restoreAvailable\":true}}");
             return;
         }
         if (path.equals("/__test/enable-scope-drift")) {

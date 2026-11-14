@@ -149,6 +149,7 @@
 - **次はOFFでも止めない（常時有効）**:
   - 日次入力の保存経路: 要員の勤怠・作業報告・経費下書き・変更申請下書きは `/api/my/pwa/{attendance,timesheet,expenses,change-requests}`、`/api/my/session-context`、`/js/pwa-queue.js` を通常の保存経路として使っている。止めると要員の日次入力そのものが停止する。
   - ロック済み下書きの復元: 通信不安定・サーバー5xx・オフライン時に保存した入力は端末に残り、画面を移動・再読み込みすると「ロック中の下書き」になる。その唯一の復元経路が同期パネルの「下書きを復元」→ `/offline.html` → `/api/my/pwa/restore/{reauthenticate,confirm}`（パスワード再認証が必須で、権限は広がらない）であるため、OFFでも有効にしておく。止めると、OFF期間中（新規構築の既定状態を含む）に生じたロック済み下書きは送信も復元もできず、logout時に端末から削除されてしまう。
+    - ただし復元できるのは**ローカルパスワードでloginしたsessionだけ**である。OIDC（本番の要員の通常login）のsessionでは、復元APIがパスワード照合・失敗回数加算より前に拒否し、画面は「復元できません」と表示して入口を隠す（NF04 P1-N4-1 方案A、2026-11-14。`mobile-pwa-self-service/first-release-user-and-operations-notes.md` 1.4・2.4）。この扱いもスイッチに関係しない。
   - server側のidempotency ledger掃除（`PwaClientMutationCleanupScheduler`）: 常時有効な保存経路が書き込むため止めない（止めるとledgerが保持期限を超えて増え続ける）。
   - logout・session破棄時のPWA復元失効処理（`PwaRestoreSessionListener`）: 失効側の処理なので常時有効。
 

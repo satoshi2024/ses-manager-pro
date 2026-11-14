@@ -48,7 +48,9 @@ public class LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
             MfaEnforcementFilter.MFA_PENDING_ATTRIBUTE,
             MfaEnforcementFilter.MFA_VERIFIED_ATTRIBUTE,
             MfaEnforcementFilter.MFA_VERIFIED_USER_ATTRIBUTE,
-            PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE);
+            PasswordChangeEnforcementFilter.PASSWORD_CHANGE_REQUIRED_ATTRIBUTE,
+            // break-glassのincident束縛（break-glass loginでは下のbindSessionで立て直す。W3-09 R2-P3-2）
+            com.ses.service.security.BreakGlassService.INCIDENT_ID_ATTRIBUTE);
 
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,

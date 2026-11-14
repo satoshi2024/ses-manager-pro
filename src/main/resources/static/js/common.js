@@ -978,12 +978,13 @@ SES.pwa = {
         this.setStatus(navigator.onLine ? 'online' : 'offline');
         window.addEventListener('online', function() { SES.pwa.setStatus('online'); });
         window.addEventListener('offline', function() { SES.pwa.setStatus('offline'); });
+        // 日次入力の同期queue（pwa-queue.js）はService Workerの有無・NF-04スイッチに関係なく動くため、
+        // logout時の確認と端末内queueの削除はService Worker判定より前に必ず結び付ける（R1 P3-N4-1）。
+        this.bindLogout();
         if (!('serviceWorker' in navigator)) return;
         if (this.shellDisabled()) {
             // NF-04機能スイッチOFF: 新規登録せず、過去に登録されたPWA shellとshell cacheだけを解除する。
-            // 日次入力の同期queue（pwa-queue.js）は既存画面の保存経路なので、logout時の削除は継続する。
             this.unregisterShell();
-            this.bindLogout();
             return;
         }
         this.hadController = !!navigator.serviceWorker.controller;
@@ -1012,7 +1013,6 @@ SES.pwa = {
             self._reloadingForUpdate = true;
             window.location.reload();
         });
-        this.bindLogout();
     },
 
     /** server側の機能スイッチ（base.htmlのmeta）でPWA shellが無効化されているか。 */
@@ -1060,19 +1060,22 @@ SES.pwa = {
         this.updatePrompted = true;
         const self = this;
         const apply = function() { worker.postMessage({ type: 'SKIP_WAITING' }); };
+        // 読み込み直すと未送信の下書きはロック中になり、シングルサインオンでは復元できない（W3-09 P1-W309-1 / P3-6）。
         if (window.Swal && typeof Swal.fire === 'function') {
             Swal.fire({
-                title: '更新があります',
-                text: '最新の画面を読み込みます。保存済みの下書きは維持されます。',
+                title: SES.i18n.t('pwa.update.title', '更新があります'),
+                text: SES.i18n.t('pwa.update.text',
+                    '最新の画面を読み込みます。未送信の下書きは端末に残りますが、読み込み直すとロック中になり、シングルサインオンでログインしている場合は復元できません。送信が終わってから更新してください。'),
                 icon: 'info',
                 showCancelButton: true,
-                confirmButtonText: '更新する',
-                cancelButtonText: '後で'
+                confirmButtonText: SES.i18n.t('pwa.update.confirmButton', '更新する'),
+                cancelButtonText: SES.i18n.t('pwa.update.laterButton', '後で')
             }).then(function(result) {
                 if (result.isConfirmed) apply();
                 else self.updatePrompted = false;
             });
-        } else if (window.confirm('最新の画面を読み込みますか？')) {
+        } else if (window.confirm(SES.i18n.t('pwa.update.confirmPlain',
+                '最新の画面を読み込みますか？未送信の下書きがある場合は、送信が終わってから更新してください。'))) {
             apply();
         } else {
             self.updatePrompted = false;
@@ -1106,6 +1109,56 @@ SES.pwa = {
         // session expiryではqueueを削除しない。再認証後に同一user scopeを検証してから再開する。
     },
 
+    /**
+     * logoutで端末内の未送信・ロック中の下書きが削除される場合だけ、先に利用者の確認を取る（NF04 P1-N4-1 方案A）。
+     * 件数はIndexedDBから数える（他tabの入力やsession期限切れで隔離された画面の下書きも含む。W3-09 P3-4）。
+     * IndexedDBが1秒以内に応答しない場合は、この画面が把握している件数で判断する。
+     * 下書きが無ければ確認せずに進める。確認できない環境（SweetAlert2無し）はwindow.confirmを使う。
+     */
+    confirmDraftLoss: function() {
+        const pwa = (window.SES && window.SES.pwaQueue) || (typeof SES !== 'undefined' && SES.pwaQueue);
+        const knownCount = function() {
+            try {
+                const summary = pwa && typeof pwa.draftLossSummary === 'function' ? pwa.draftLossSummary() : null;
+                return summary ? (Number(summary.unsent) || 0) + (Number(summary.locked) || 0) : 0;
+            } catch (_) { return 0; }
+        };
+        let counting;
+        try {
+            counting = pwa && typeof pwa.draftLossCount === 'function'
+                ? Promise.resolve(pwa.draftLossCount()) : Promise.resolve(knownCount());
+        } catch (_) {
+            counting = Promise.resolve(null);
+        }
+        const timeout = new Promise(function(resolve) { setTimeout(function() { resolve(null); }, 1000); });
+        return Promise.race([counting.catch(function() { return null; }), timeout]).then(function(counted) {
+            const countKnown = counted !== null && counted !== undefined && Number.isFinite(Number(counted));
+            const count = countKnown ? Number(counted) : knownCount();
+            // 件数を確かめられず（IndexedDBが応答しない等）、画面も件数を把握していないときは、件数なしで確認する（R2-P3-6）。
+            const unknown = !countKnown && !count && !!pwa;
+            if (!count && !unknown) return true;
+            const message = unknown
+                ? SES.i18n.t('pwa.logout.draftLossConfirmUnknown',
+                    'この端末の下書きの件数を確認できませんでした。未送信またはロック中の下書きがある場合、ログアウトすると端末から削除され、復元できません。ログアウトしますか？')
+                : SES.i18n.t('pwa.logout.draftLossConfirm', count,
+                    'この端末に未送信またはロック中の下書きが {0} 件あります。ログアウトすると端末から削除され、復元できません。ログアウトしますか？');
+            if (window.Swal && typeof Swal.fire === 'function') {
+                try {
+                    return Swal.fire({
+                        title: SES.i18n.t('pwa.logout.draftLossTitle', '未送信の下書きがあります'),
+                        text: message,
+                        icon: 'warning',
+                        showCancelButton: true,
+                        confirmButtonText: SES.i18n.t('pwa.logout.confirmButton', 'ログアウトする'),
+                        cancelButtonText: SES.i18n.t('common.cancel', 'キャンセル')
+                    }).then(function(result) { return !!(result && result.isConfirmed); },
+                        function() { return window.confirm(message); });
+                } catch (_) { /* 下のwindow.confirmで確認する */ }
+            }
+            return window.confirm(message);
+        });
+    },
+
     bindLogout: function() {
         const self = this;
         document.querySelectorAll('form[action="/logout"]').forEach(function(form) {
@@ -1113,8 +1166,12 @@ SES.pwa = {
             form.dataset.sesPwaBound = 'true';
             form.addEventListener('submit', function(event) {
                 event.preventDefault();
-                self.clearUserScope().finally(function() {
-                    HTMLFormElement.prototype.submit.call(form);
+                // 取消した場合はlogoutせず、下書きも削除しない。
+                self.confirmDraftLoss().then(function(proceed) {
+                    if (!proceed) return;
+                    self.clearUserScope().finally(function() {
+                        HTMLFormElement.prototype.submit.call(form);
+                    });
                 });
             });
         });
