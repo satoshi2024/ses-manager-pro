@@ -258,6 +258,26 @@ class LifecycleResignationUniquenessMySqlTest {
         }
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"COMPLETED,0", "CANCELLED,0", "ACTIVE,1"})
+    void 終結中止または論理削除の状態遷移で生成列がNULLとなり再起票できる(String status, int deleted) {
+        Fixture f = fixture();
+        bindTenant(f);
+        try {
+            LifecycleCaseDto first = caseService.createCase(f.admin().getId(), command(f, LocalDate.now()));
+            assertEquals(f.engineer().getId(), jdbc.queryForObject(
+                    "SELECT active_resignation_engineer_id FROM t_lifecycle_case WHERE id = ?", Long.class, first.getId()));
+            jdbc.update("UPDATE t_lifecycle_case SET status = ?, deleted_flag = ? WHERE id = ?", status, deleted, first.getId());
+            org.junit.jupiter.api.Assertions.assertNull(jdbc.queryForObject(
+                    "SELECT active_resignation_engineer_id FROM t_lifecycle_case WHERE id = ?", Long.class, first.getId()));
+            LifecycleCaseDto second = caseService.createCase(f.admin().getId(), command(f, LocalDate.now().plusMonths(1)));
+            assertEquals("ACTIVE", second.getStatus());
+            assertEquals(1L, countOpenResignationCases(f));
+        } finally {
+            clearTenant();
+        }
+    }
+
     // ===== fixture =====
 
     private Fixture fixture() {
