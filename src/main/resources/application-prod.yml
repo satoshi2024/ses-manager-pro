@@ -28,7 +28,9 @@ external-account:
 
 integration:
   hub:
-    # production enablementは本Decisionで禁止。validatorもtrue/非MOCKを拒否する。
+    # 既定は両方向OFF・provider.mode=MOCK（現行DG-05は本番開放を禁止）。開放はinbound/outboundを別々に、
+    # 署名済みDG-05決定（DG-05-IN-*/DG-05-OUT-*）と承認値を環境から注入し、方向別validatorを通過した場合だけ。
+    # outboundは実HTTPS transport（W3-06b）が入るまで本番では開けない。STUB/LOOPBACKは本番で常に拒否する。
     public-api:
       enabled: false
       public-id-key: ${INTEGRATION_HUB_PUBLIC_ID_KEY:}
@@ -52,6 +54,10 @@ logging:
     org.springframework.security: WARN
     # ECS/ALB 排水時のネイティブ Tomcat GracefulShutdown を CloudWatch に残す（カスタム reporter 不要）
     org.springframework.boot.web.embedded.tomcat.GracefulShutdown: INFO
+    # HttpClient5のwire/header logは署名・Idempotency-Key・payloadを出すため、障害調査でDEBUGを上げても出さない
+    # （NF05 TLS P3-3）。NF08 Copilot送信も同じHttpClient5を使う。
+    org.apache.hc.client5.http.wire: "OFF"
+    org.apache.hc.client5.http.headers: "OFF"
 
 app:
   security:

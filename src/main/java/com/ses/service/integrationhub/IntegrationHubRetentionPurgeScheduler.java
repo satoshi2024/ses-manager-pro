@@ -4,7 +4,7 @@ import com.ses.config.integrationhub.IntegrationHubExternalApiProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -13,11 +13,14 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 
-/** NF-05 retention/nonceをrequest pathから分離してbounded purgeするscheduler。 */
+/**
+ * NF-05 retention/nonceをrequest pathから分離してbounded purgeするscheduler。
+ * inbound/outboundのどちらかが有効なら生成する（{@link IntegrationHubRetentionPurgeCondition}）。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "integration.hub.public-api.enabled", havingValue = "true")
+@Conditional(IntegrationHubRetentionPurgeCondition.class)
 public class IntegrationHubRetentionPurgeScheduler {
 
     private static final List<String> RECORD_KINDS = List.of(

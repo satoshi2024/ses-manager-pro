@@ -148,3 +148,9 @@ B2は独立再ReviewまでIMPLEMENTATION_REVIEW_PENDINGとし、Linux実Tomcat c
 code commit `e564f400`で対応した。`ExternalApiResponseBoundaryFilter`はServlet/Spring wrapperのcause chainに
 `ExternalApiSecurityException`が厳密に含まれる場合だけ元の外部status/codeへ復元し、それ以外は詳細非公開の500へ収束する。
 Linux実connectorで202/200/409/403/400、監査status/result code、拒否時ledger非作成を独立確認するまでB2はPASSへ昇格しない。
+
+## 後続のproduction開放決定（草案・未署名）
+
+production enablementの禁止を方向別（inbound `DG-05-IN-*` / outbound `DG-05-OUT-*`）に解除する追加決定の草案を
+`dg-05-enablement-decision-draft.md` に置く。草案は未署名で効力が無く、署名されるまで本書の禁止条項がそのまま有効である。
+起動時validatorは決定ID・承認値が揃わない方向の開放を拒否し、production既定値（両方向OFF、`provider.mode=MOCK`）を維持する。

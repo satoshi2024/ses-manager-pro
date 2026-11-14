@@ -27,7 +27,29 @@ public class ExternalApiMetricsRecorder {
             "/external-api/v1/invoice-statuses/count",
             "/external-api/v1/invoice-statuses/{publicInvoiceId}",
             "/external-api/v1/webhooks/{provider}");
+    /** 監査行を永続化しなかったrequestの集約counter（N5-P2-1）。labelは理由の有限集合だけ。 */
+    static final String AUDIT_SUPPRESSED_METRIC = "integration_hub_external_api_audit_suppressed_total";
     private final ObjectProvider<MeterRegistry> meterRegistryProvider;
+
+    /** 監査行を書かなかった理由。値はmetrics labelにそのまま使う。 */
+    public enum AuditSuppressionReason {
+        /** public-api無効時。DISABLED_DENYはDBへ書かずcounterだけを残す。 */
+        PUBLIC_API_DISABLED,
+        /** 有効時の未認証rejectがnode単位の1分上限を超えた。 */
+        UNAUTHENTICATED_BUDGET
+    }
+
+    public void recordAuditSuppressed(AuditSuppressionReason reason) {
+        MeterRegistry registry = meterRegistryProvider.getIfAvailable();
+        if (registry == null || reason == null) {
+            return;
+        }
+        Counter.builder(AUDIT_SUPPRESSED_METRIC)
+                .description("NF-05 external API requests whose audit row was not persisted")
+                .tag("reason", reason.name())
+                .register(registry)
+                .increment();
+    }
 
     public void record(String routeTemplate, String method, int status, String decision, String clientTier) {
         MeterRegistry registry = meterRegistryProvider.getIfAvailable();

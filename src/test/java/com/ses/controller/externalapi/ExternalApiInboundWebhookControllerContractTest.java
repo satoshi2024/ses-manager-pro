@@ -109,6 +109,36 @@ class ExternalApiInboundWebhookControllerContractTest {
         org.junit.jupiter.api.Assertions.assertTrue(invalid.getContentAsString().contains("REQUEST_INVALID"));
     }
 
+    /** N5-P2-3: inboundのleaseはpublic-api.inbound-lease-secondsで決まり、outboundのlease設定に依存しない。 */
+    @Test
+    void inboundLeaseUsesItsOwnSettingInsteadOfTheOutboundTransportLease() {
+        ExternalApiInboundWebhookParser parser = mock(ExternalApiInboundWebhookParser.class);
+        InboundEventService events = mock(InboundEventService.class);
+        InboundEventProcessor processor = mock(InboundEventProcessor.class);
+        IntegrationHubExternalApiProperties properties = new IntegrationHubExternalApiProperties();
+        properties.getPublicApi().setInboundLeaseSeconds(17);
+        properties.getExternalTransport().setLeaseSeconds(600);
+        ExternalApiInboundWebhookController controller = new ExternalApiInboundWebhookController(
+                parser, events, processor, properties,
+                Clock.fixed(Instant.parse("2026-08-31T00:00:00Z"), ZoneOffset.UTC));
+        InboundEvent event = InboundEvent.builder().id(3L).status(IntegrationHubStates.INBOUND_RECEIVED)
+                .resultCode("INBOUND_ACCEPTED").version(0).build();
+        when(parser.parse(anyString(), anyString(), any(byte[].class), any(LocalDateTime.class)))
+                .thenReturn(new ExternalApiInboundWebhookParser.Parsed(
+                        "provider-a", "event-lease", "health.ping", snapshot()));
+        when(events.recordReceived(anyString(), anyString(), anyString(), anyString(), any(LocalDateTime.class),
+                any(ExternalDtoSnapshot.class), anyBoolean(), any(LocalDateTime.class)))
+                .thenReturn(new InboundEventService.Receipt(event, false, false, false));
+        when(events.claim(any(), anyString(), any(LocalDateTime.class), any(LocalDateTime.class))).thenReturn(null);
+
+        controller.receive("provider-a", request("event-lease"));
+
+        LocalDateTime receivedAt = LocalDateTime.of(2026, 8, 31, 0, 0);
+        org.mockito.Mockito.verify(events).claim(org.mockito.ArgumentMatchers.eq(3L), anyString(),
+                org.mockito.ArgumentMatchers.eq(receivedAt),
+                org.mockito.ArgumentMatchers.eq(receivedAt.plusSeconds(17)));
+    }
+
     private void invoke(ExternalApiInboundWebhookController controller,
                         jakarta.servlet.ServletRequest request, jakarta.servlet.ServletResponse response)
             throws ServletException {
