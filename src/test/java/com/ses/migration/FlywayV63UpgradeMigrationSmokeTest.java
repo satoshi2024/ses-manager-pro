@@ -57,8 +57,13 @@ class FlywayV63UpgradeMigrationSmokeTest {
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='65' AND success=1"));
             assertEquals(1, count(statement,
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='66.1' AND success=1"));
+            // V64〜V66.1 の role 系 group。V191 が追加する privacy-admin（NF07）は別に1件だけあることを確認する。
             assertEquals(5, count(statement,
-                    "SELECT COUNT(*) FROM m_permission_group WHERE tenant_id='default' AND deleted_flag=0"));
+                    "SELECT COUNT(*) FROM m_permission_group WHERE tenant_id='default' AND deleted_flag=0 "
+                            + "AND group_key <> 'privacy-admin'"));
+            assertEquals(1, count(statement,
+                    "SELECT COUNT(*) FROM m_permission_group WHERE tenant_id='default' AND deleted_flag=0 "
+                            + "AND group_key = 'privacy-admin'"));
             assertEquals(2, count(statement,
                     "SELECT COUNT(*) FROM t_permission_group_action a "
                             + "JOIN m_permission_group g ON g.id=a.group_id "

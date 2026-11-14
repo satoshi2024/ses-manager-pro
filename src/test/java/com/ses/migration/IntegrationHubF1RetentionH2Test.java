@@ -95,7 +95,11 @@ class IntegrationHubF1RetentionH2Test {
         LocalDateTime accepted = LocalDateTime.of(2026, 8, 30, 12, 0);
         assertTrue(nonceReplayService.accept("nonce-client", 1,
                 "nonce-value-which-is-not-persisted".getBytes(StandardCharsets.UTF_8), accepted, accepted));
-        assertEquals(1, nonceReplayService.purgeExpired(accepted.plusMinutes(5), 100));
+        // 保存期限は max(受付時刻, 署名時刻) + NONCE_RETENTION_SECONDS（W3-06a N5-P3-1）。期限の1秒前は残し、期限ちょうどで消す。
+        assertEquals(0, nonceReplayService.purgeExpired(
+                accepted.plusSeconds(ApiNonceReplayService.NONCE_RETENTION_SECONDS - 1), 100));
+        assertEquals(1, nonceReplayService.purgeExpired(
+                accepted.plusSeconds(ApiNonceReplayService.NONCE_RETENTION_SECONDS), 100));
         assertEquals(0, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_api_nonce_replay WHERE client_id = 'nonce-client'", Integer.class));
     }

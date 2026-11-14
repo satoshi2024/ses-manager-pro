@@ -27,6 +27,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Testcontainers
 class FlywayNf06V184MetadataMigrationTest {
 
+    /**
+     * V184 より後の migration が追加する permission action を除いた件数。V191（NF07 W-5）は privacy-admin group の
+     * 許可行と、他の全 group の {@code privacy.*} deny 行を追加するため、最新版まで上げた後の比較から除外する。
+     */
+    private static final String PERMISSION_ACTIONS_BEFORE_V184_SCOPE = "SELECT COUNT(*) FROM t_permission_group_action a "
+            + "WHERE a.action_key <> 'privacy.*' AND a.group_id NOT IN "
+            + "(SELECT g.id FROM m_permission_group g WHERE g.group_key = 'privacy-admin')";
+
     @Container
     @SuppressWarnings("resource")
     static final MySQLContainer<?> FRESH = mysql("ses_nf06_v184_fresh");
@@ -84,7 +92,7 @@ class FlywayNf06V184MetadataMigrationTest {
         try (Connection connection = UPGRADE.createConnection(""); Statement statement = connection.createStatement()) {
             insertUpgradeSentinel(statement);
             before = scalar(statement, "SELECT COUNT(*) FROM sys_user");
-            permissionActionsBefore = scalar(statement, "SELECT COUNT(*) FROM t_permission_group_action");
+            permissionActionsBefore = scalar(statement, PERMISSION_ACTIONS_BEFORE_V184_SCOPE);
             assertTrue(before > 0, "B0には既存業務ユーザーが存在する");
             assertEquals(1L, scalar(statement,
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='182' AND success=1"));
@@ -100,7 +108,7 @@ class FlywayNf06V184MetadataMigrationTest {
             assertMetadataSchema(statement);
             assertEquals(before, scalar(statement, "SELECT COUNT(*) FROM sys_user"),
                     "upgrade前の既存ユーザー行が保持される");
-            assertEquals(permissionActionsBefore, scalar(statement, "SELECT COUNT(*) FROM t_permission_group_action"),
+            assertEquals(permissionActionsBefore, scalar(statement, PERMISSION_ACTIONS_BEFORE_V184_SCOPE),
                     "V184の適用は既存permission actionを変更しない");
             assertUpgradeSentinelPreserved(statement);
             assertEquals(1L, scalar(statement,
