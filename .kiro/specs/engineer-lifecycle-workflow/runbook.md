@@ -148,3 +148,36 @@ NF01（機能スイッチ `FEATURE_NF01_ENABLED`、既定OFF）はCONFIRM完成�
   2. V188適用後、管理者が該当するポータルユーザーの紐付けを登録する。要員本人ではないポータルユーザー（共有アドレス等）は紐付けず、その判断を5.2の手順で記録する。
   3. preflightを再実行し、`PORTAL_ENGINEER_LINK_CANDIDATES` が0件（または記録済みの許容分だけ）で、`PORTAL_ENGINEER_LINK_SCOPE_MISMATCH` が `PASS` であることを確認してから機能スイッチを検討する。
 - **ゲートが `PORTAL_ACCOUNT_LINK` のFAIL（tenant不整合）で止まった場合**: 監査SQLで経緯を確認し、ポータル管理で不整合の紐付けを解除して正しいtenantの要員へ登録し直してから、再度完了確定する。DBの直接更新はしない。
+
+## 6. 外部アカウント失効要求のoutbox（W3-11 / Q-6）
+
+- 対象は案件tenant内の要員に紐付く全法人の未失効アカウント。所有法人が分かる行は要求登録可能として退社ゲートを通す。法人がNULLの行だけ登録不能として止める。資産返却とライセンス解放の条件は残る。資産・ライセンスの承認済み免除があっても、所有法人不明の外部アカウントは完了を止める。
+- 完了transactionはengineer行を先にロックし、各account行をID順にロックして要求と履歴を登録する。同じcommitに案件完了が入り、provider I/Oはcommit後だけ行う。定期回収はNF01スイッチとShedLockで制御する。
+- 状態は REVOKE_REQUESTED → REVOKE_SENDING → REVOKE_SENT。明確な不受理はREVOKE_SEND_FAILEDとして指数的に再試行し、待機上限は1440分。通信結果不明・ACK前停止では、providerに同じkeyの冪等再送保証が無ければUNKNOWN / REVOKE_SEND_UNKNOWNとし、無条件に再送しない。未送信の3状態は確認pollの対象外。
+- keyはlifecycle-resign:{caseId}:{accountId}:g{n}。UNKNOWNを管理者が再要求するとg{n+1}となる。旧keyの自動確認は新しい要求を確定できない。登録後は識別子・権限・状態を直接変更しない。状態とkeyの変更はt_asset_eventに追記する。適用済みV129の列コメントは変更せず、新値の定義はentityと本節を正本とする。
+- 退社後の新規登録は、最新の終結案件が完了済みRESIGNATIONで、後続にJOIN/REINSTATEMENT案件が無い場合だけ自動登録する。後続の再入社案件はDRAFTでも自動失効を止める。再入社起票とaccount登録は同じengineer行ロックで直列化する。
+- 登録の新規transactionは互換入口を含めREAD_COMMITTEDとする。外側transactionに参加する場合も、最初のscope読取前に実connectionの分離レベルを確認し、READ_COMMITTED以外は409で拒否する。既存のREPEATABLE_READ transactionから登録する呼出元は境界を分離して再設計する。
+
+### 6.1 送信失敗・結果不明の対応
+
+1. 管理者・HRは通知を確認し、外部アカウント画面で「失効要求の未処理一覧（全法人）」を選ぶ。APIはGET /api/external-accounts/pending-revocations（最大100行）。識別子はマスクされる。reference IDと法人で対象を特定する。
+2. 当日中にHRが担当を割り当てる。送信失敗・結果不明が1件でもあれば通知とERRORログで検知し、解消まで毎営業日確認する。大量障害時はNF01を停止して外部システム側を先に確認する。停止中の要求は台帳に残る。
+3. provider=noneでは自動失効しない。外部システムの管理者が対象accountの無効化、既存session、offline session、tokenの失効を個別に実施・確認し、証跡を保管する。識別子の原値が必要な場合は、権限を持つDBAがreference ID・tenant・法人を条件に元台帳を照合し、承認済みの安全な経路で連携先管理者へ伝える（通知やチケット本文へ転記しない）。SESの「失効確認」またはPOST /api/external-accounts/{id}/confirm-revokeで人間の確認主体を記録する。
+4. 実状態を確認できない場合はUNKNOWNを維持する。再要求が必要なlifecycle形式のkeyに限り、現在の法人scopeを選んだ管理者がPOST /api/external-accounts/{id}/re-request-revokeを使う。legacy形式のkeyは手動確認で閉じる。provider callbackもlifecycleの現行要求keyを提示できない場合は確認を拒否する。
+5. ライセンスは完了前に1件ずつPOST /api/licenses/assignments/{id}/releaseで解放する。releasedDateは処理日でなく案件の退社基準日を指定する。1件の409で残りの解放を止めず、当該IDを再読込してから再実行する。旧triggerOffboardingRevocationsは基準日を持たず同期送信する入口だったため、409で拒否し使用しない。
+6. ACCOUNTING_TENANT_IDSには1つのtenantだけを指定する。workerは行ごとの法人とrunWithTenantのtenantを使い、SecurityContextの操作者法人を参照しない。複数tenantの本番運用は別承認まで行わない。
+
+### 6.2 実provider公開前に残る接続プールの制約
+
+現在のafterCommitは計画§5.13に従ってNOT_SUPPORTED dispatcherを同期呼出しする。Springはcallbackが戻るまで完了transactionのconnectionを保持するため、claim用の別connectionが必要になり、provider I/O中も元のconnectionを占有し得る。同時完了数がpool上限へ近付くと枯渇する可能性がある。provider=noneを維持し、実provider公開前に、受付数を制限した非同期dispatchとdrainの設計・独立レビューを別途行う。既存taskExecutorにはCallerRunsPolicyがあるため、単に@Asyncを付けても呼出元threadで実行される可能性があり、対策とはみなさない。
+
+### 6.3 Runner・運用者の確認項目
+
+- [ ] 退社完了commit前の送信0回、rollback時の要求0件を確認する。
+- [ ] 別法人のaccountも各行の法人で登録され、同一要求の送信競合は1回となる。
+- [ ] REQUESTEDの停止回収、SENDINGの非冪等providerでのUNKNOWN、未送信行へのpoll更新0件を確認する。
+- [ ] 退社後登録は自動要求になり、後続JOIN/REINSTATEMENT後の登録は通常accountとして残る。
+- [ ] UNKNOWNのg1→g2と履歴、通知・一覧の識別子マスクを確認する。
+- [ ] NF01 OFFで送信を開始しないこと、ShedLockと既存scheduler停止手順を確認する。新しい常駐threadやexecutorは追加しない。
+
+本節は実装と確認手順であり、本番有効化の承認ではない。epoch/CONFIRMを含む残りの条件と独立レビュー・Runnerが完了するまで本番はNO-GOとする。

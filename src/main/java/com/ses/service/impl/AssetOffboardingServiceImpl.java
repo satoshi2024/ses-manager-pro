@@ -75,7 +75,9 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
             blockingItems.add("未返却端末: " + tag + " [貸与ID: " + as.getId() + "]");
         }
         for (ExternalAccountReference acc : activeAccounts) {
-            blockingItems.add("未失効外部アカウント: " + maskIdentifier(acc.getAccountIdentifier()) + " (System#" + acc.getSystemId() + ")");
+            if (acc.getLegalEntityId() == null) {
+                blockingItems.add("所有法人不明の外部アカウント: " + maskIdentifier(acc.getAccountIdentifier()));
+            }
         }
         for (LicenseAssignment lic : activeLicenses) {
             blockingItems.add("未解放有償ライセンス: Plan#" + lic.getPlanId() + " [割当ID: " + lic.getId() + "]");
@@ -86,12 +88,14 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
         boolean hasWaiver = lifecycleCaseId != null && lifecycleTaskId != null
                 && assetOffboardingWaiverMapper.selectValidByCaseAndTask(
                 engineerId, lifecycleCaseId, lifecycleTaskId) != null;
-        boolean passed = blockingItems.isEmpty() || hasWaiver;
+        boolean passed = (blockingItems.isEmpty() || hasWaiver)
+                && activeAccounts.stream().noneMatch(account -> account.getLegalEntityId() == null);
 
         return OffboardingClearanceResultDto.builder()
                 .clearancePassed(passed)
                 .unreturnedAssetCount(activeAssignments.size())
                 .unrevokedAccountCount(activeAccounts.size())
+                .unregisterableAccountCount((int) activeAccounts.stream().filter(a -> a.getLegalEntityId() == null).count())
                 .unreleasedLicenseCount(activeLicenses.size())
                 .waived(hasWaiver)
                 .blockingItems(blockingItems)
@@ -104,21 +108,8 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
     public void triggerOffboardingRevocations(Long engineerId, Long actorUserId) {
         log.info("Triggering offboarding revocations for engineerId={}, actorUserId={}", engineerId, actorUserId);
 
-        // 1. 外部アカウントの失効要求
-        List<ExternalAccountReference> activeAccounts =
-                externalAccountService.getActiveAccountsByAssignee("ENGINEER", engineerId);
-        for (ExternalAccountReference acc : activeAccounts) {
-            // 要求送信・確認・タイムアウト再試行の契約を共通サービスへ委譲する。
-            externalAccountService.requestRevokeWithIdempotency(acc.getId(), acc.getIdempotencyKey(), actorUserId);
-        }
-
-        // 2. 有償ライセンスの一括解放
-        List<LicenseAssignment> activeLicenses = licenseAssignmentMapper.selectActiveByAssignee("ENGINEER", engineerId);
-        for (LicenseAssignment lic : activeLicenses) {
-            licenseService.releaseLicense(lic.getId(), LocalDate.now(), actorUserId);
-        }
-
-        log.info("Offboarding revocations completed for engineerId={}", engineerId);
+        // 失効要求とライセンスは案件の基準日を使う完了処理で扱う。旧入口から同期送信しない。
+        throw BusinessException.of(409, "error.asset.revocationLifecycleRequired");
     }
 
     @Override

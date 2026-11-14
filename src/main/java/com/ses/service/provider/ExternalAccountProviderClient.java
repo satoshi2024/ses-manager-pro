@@ -18,6 +18,12 @@ public interface ExternalAccountProviderClient {
      */
     boolean requestRevoke(ExternalAccountReference accountRef);
 
+    /** 同じ失効keyの再送をprovider側が冪等に処理すると明示できる実装だけtrueにする。 */
+    default boolean supportsIdempotentRevoke() { return false; }
+
+    /** 送信leaseにはHTTP呼出しの上限と接続解放の余裕を含める。 */
+    default Duration revokeRequestTimeout() { return Duration.ofSeconds(30); }
+
     /**
      * 外部プロバイダ側で実際に失効・削除が完了したか確証ステータスを確認する
      * @return CONFIRMED（失効確証取得）, PENDING（外部側処理中/未完了）, FAILED_OR_TIMEOUT（通信失敗/タイムアウト）, UNKNOWN（応答形式を分類不能）

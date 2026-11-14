@@ -43,6 +43,7 @@ public class ResignationGateChecker {
     private final ExpenseRequestMapper expenseRequestMapper;
     private final LifecycleTaskMapper lifecycleTaskMapper;
     private final AssetOffboardingService assetOffboardingService;
+    private final EngineerAccountLinkMapper engineerAccountLinkMapper;
 
     /**
      * 退社ゲートの全項目を検証する。
@@ -52,7 +53,7 @@ public class ResignationGateChecker {
         boolean allPassed = true;
 
         Long engineerId = engineer.getId();
-        EngineerAccountLink link = engineerAccountLinkService.findByEngineerId(engineerId);
+        EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerIdAndTenant(engineerId, lcCase.getTenantId());
         Long linkedUserId = link != null ? link.getSysUserId() : null;
         SysUser linkedUser = linkedUserId != null ? sysUserMapper.selectById(linkedUserId) : null;
 
@@ -159,7 +160,7 @@ public class ResignationGateChecker {
                 assetOffboardingService.checkOffboardingClearance(
                         engineerId, lcCase.getId(), assetTask != null ? assetTask.getId() : null);
         boolean blockersClear = offboarding.getUnreturnedAssetCount() == 0
-                && offboarding.getUnrevokedAccountCount() == 0
+                && offboarding.getUnregisterableAccountCount() == 0
                 && offboarding.getUnreleasedLicenseCount() == 0;
         boolean assetReturned = false;
         boolean assetWaived = false;
@@ -168,14 +169,15 @@ public class ResignationGateChecker {
             if ("COMPLETED".equals(assetTask.getStatus())) {
                 assetReturned = blockersClear;
                 assetMsg = blockersClear
-                        ? "貸与物返却確認済み（3大blockerなし）"
-                        : "貸与物返却タスクは完了していますが、未返却・未失効・未解放のblockerが残存しています";
+                        ? "貸与物返却確認済み（完了時に未失効アカウントの失効要求を登録します）"
+                        : "貸与物返却タスクは完了していますが、未返却・失効要求登録不能・未解放のblockerが残存しています";
             } else if ("WAIVED".equals(assetTask.getStatus()) && offboarding.isWaived()) {
-                assetReturned = true;
-                assetWaived = true;
-                assetMsg = blockersClear
+                // 資産・licenseの承認済み免除でも、法人不明の外部アカウントは要求を登録できない。
+                assetReturned = offboarding.getUnregisterableAccountCount() == 0;
+                assetWaived = assetReturned;
+                assetMsg = !assetReturned ? "所有法人が不明な外部アカウントの失効要求を登録できません" : blockersClear
                         ? "例外承認により返却免除済み（3大blockerなし）"
-                        : "承認済み例外により3大blockerを免除済み";
+                        : "承認済み例外により資産・ライセンスの条件を免除済み。外部アカウントは完了時に失効要求を登録します";
             } else {
                 assetReturned = false;
                 assetMsg = "貸与資産返却タスク（PC、スマートフォン、入館証等）が未完了、または3大blockerが残存しています";
@@ -305,7 +307,7 @@ public class ResignationGateChecker {
         List<PortalUserEngineerLink> portalLinks = linkedPortalUsersFailClosed(engineerId, tenantId);
 
         // 1. ユーザーアカウント無効化 & 組織所属閉鎖 & セッション失効 & ポータル連携解除
-        EngineerAccountLink link = engineerAccountLinkService.findByEngineerId(engineerId);
+        EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerIdAndTenant(engineerId, lcCase.getTenantId());
         if (link != null && link.getSysUserId() != null) {
             Long userId = link.getSysUserId();
             SysUser user = lockLinkedUserInTenant(userId, tenantId);

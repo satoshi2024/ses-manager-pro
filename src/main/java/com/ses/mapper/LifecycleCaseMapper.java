@@ -9,6 +9,17 @@ import org.apache.ibatis.annotations.Select;
 @Mapper
 public interface LifecycleCaseMapper extends BaseMapper<LifecycleCase> {
 
+    /** 要員行を先にロックした呼出元から利用する。後続の再入社案件は未完了でも自動失効を止める。 */
+    @Select("SELECT c.* FROM t_lifecycle_case c WHERE c.tenant_id = #{tenantId} "
+            + "AND c.engineer_id = #{engineerId} AND c.deleted_flag = 0 AND c.status = 'COMPLETED' "
+            + "AND c.lifecycle_type = 'RESIGNATION' "
+            + "AND NOT EXISTS (SELECT 1 FROM t_lifecycle_case newer WHERE newer.tenant_id = c.tenant_id "
+            + "AND newer.engineer_id = c.engineer_id AND newer.deleted_flag = 0 AND newer.id > c.id "
+            + "AND (newer.status IN ('COMPLETED','CANCELLED') OR newer.lifecycle_type IN ('JOIN','REINSTATEMENT'))) "
+            + "ORDER BY c.id DESC LIMIT 1")
+    LifecycleCase selectLatestCompletedResignationWithoutReentry(@Param("tenantId") String tenantId,
+                                                                 @Param("engineerId") Long engineerId);
+
     @Select("SELECT * FROM t_lifecycle_case WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     LifecycleCase selectByIdForUpdate(@Param("id") Long id);
 

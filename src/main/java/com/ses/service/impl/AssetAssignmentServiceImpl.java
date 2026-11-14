@@ -216,7 +216,9 @@ public class AssetAssignmentServiceImpl implements AssetAssignmentService {
                                             String reason,
                                             Long approvalRequestId,
                                             Long actorUserId) {
-        // 返却と同じ資産→貸与の固定lock orderを使用する。
+        // §3 rank 2の承認申請を資産・貸与より前にロックする。
+        if (approvalRequestId == null) throw new BusinessException(400, "貸与免除には承認済みの例外申請が必要です。");
+        ApprovalRequest lockedApproval = approvalRequestMapper.selectByIdForUpdate(approvalRequestId);
         AssetAssignment hint = assetAssignmentMapper.selectById(assignmentId);
         if (hint == null) {
             throw new BusinessException("指定された貸与データが見つかりません。");
@@ -232,7 +234,7 @@ public class AssetAssignmentServiceImpl implements AssetAssignmentService {
         if (assignment.getActualReturnDate() != null || !List.of("ACTIVE", "OVERDUE").contains(assignment.getStatus())) {
             throw new BusinessException("この貸与は既に返却または免除済みです。");
         }
-        assertWaiverApproval(assignment, approvalRequestId);
+        assertWaiverApproval(assignment, lockedApproval);
         if (!"ASSIGNED".equals(asset.getStatus())) {
             throw new BusinessException(409, "資産状態が貸与中ではないため、免除を完了できません。");
         }
@@ -270,11 +272,7 @@ public class AssetAssignmentServiceImpl implements AssetAssignmentService {
         return assignment;
     }
 
-    private void assertWaiverApproval(AssetAssignment assignment, Long approvalRequestId) {
-        if (approvalRequestId == null) {
-            throw new BusinessException(400, "貸与免除には承認済みの例外申請が必要です。");
-        }
-        ApprovalRequest approval = approvalRequestMapper.selectByIdForUpdate(approvalRequestId);
+    private void assertWaiverApproval(AssetAssignment assignment, ApprovalRequest approval) {
         if (approval == null || !"LIFECYCLE_EXCEPTION".equals(approval.getRequestType())
                 || approval.getStatus() == null || !"APPROVED".equalsIgnoreCase(approval.getStatus())) {
             throw new BusinessException(400, "有効な承認済み例外申請が見つかりません。");

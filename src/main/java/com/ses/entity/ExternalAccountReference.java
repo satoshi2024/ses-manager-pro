@@ -109,7 +109,8 @@ public class ExternalAccountReference extends BaseEntity {
     private String revokeConfirmedSource;
 
     /**
-     * 外部連携ステータス: NONE, SYNC_PENDING, SYNC_SUCCESS, SYNC_FAILED, TIMEOUT
+     * 外部連携ステータス: NONE, SYNC_PENDING, SYNC_SUCCESS, SYNC_FAILED, TIMEOUT,
+     * REVOKE_REQUESTED, REVOKE_SENDING, REVOKE_SEND_FAILED, REVOKE_SENT, REVOKE_SEND_UNKNOWN
      */
     @Builder.Default
     private String externalSyncStatus = "NONE";

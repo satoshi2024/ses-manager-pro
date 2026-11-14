@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 public class ExternalAccountReferenceDto {
     private Long id;
     private Long systemId;
+    private Long legalEntityId;
     private String accountIdentifier;
     private String assigneeType;
     private Long assigneeId;
@@ -39,7 +40,8 @@ public class ExternalAccountReferenceDto {
         ExternalAccountReferenceDto dto = new ExternalAccountReferenceDto();
         dto.id = source.getId();
         dto.systemId = source.getSystemId();
-        dto.accountIdentifier = source.getAccountIdentifier();
+        dto.legalEntityId = source.getLegalEntityId();
+        dto.accountIdentifier = com.ses.service.ExternalAccountRevocationStates.maskIdentifier(source.getAccountIdentifier());
         dto.assigneeType = source.getAssigneeType();
         dto.assigneeId = source.getAssigneeId();
         dto.permissionLevel = source.getPermissionLevel();

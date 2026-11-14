@@ -59,6 +59,7 @@ class LifecycleResignationGateActionsUnitTest {
     private static final LocalDate ANCHOR_DATE = LocalDate.of(2026, 11, 30);
 
     @Mock private SysUserMapper sysUserMapper;
+    @Mock private com.ses.mapper.EngineerAccountLinkMapper engineerAccountLinkMapper;
     @Mock private EngineerAccountLinkService engineerAccountLinkService;
     @Mock private EngineerSalesService engineerSalesService;
     @Mock private EngineerSalesMapper engineerSalesMapper;
@@ -73,6 +74,24 @@ class LifecycleResignationGateActionsUnitTest {
 
     @InjectMocks
     private ResignationGateChecker checker;
+
+    @Test
+    void 資産免除があっても法人不明の外部アカウントは退社ゲートを通さない() {
+        LifecycleCase resignation = resignationCase();
+        resignation.setId(100L);
+        com.ses.entity.LifecycleTask asset = com.ses.entity.LifecycleTask.builder()
+                .caseId(resignation.getId()).taskCode("RESIGN_ASSET_RETURN").status("WAIVED").build();
+        asset.setId(101L);
+        when(lifecycleTaskMapper.selectByCaseId(resignation.getId())).thenReturn(List.of(asset));
+        when(assetOffboardingService.checkOffboardingClearance(any(), any(), any()))
+                .thenReturn(com.ses.dto.asset.OffboardingClearanceResultDto.builder()
+                        .waived(true).unregisterableAccountCount(1).unrevokedAccountCount(1).build());
+        var item = com.ses.service.accounting.AccountingTenantContextHolder.runWithTenant(TENANT,
+                () -> checker.evaluate(resignation, engineer())).getItems().stream()
+                .filter(result -> "ASSET_RETURN".equals(result.getCode())).findFirst().orElseThrow();
+        assertFalse(item.isPassed());
+        assertFalse(item.isWaived());
+    }
 
     @Test
     void 連携ユーザー停止はtenant限定の行ロック後にstatus列だけを更新する() {
@@ -96,11 +115,11 @@ class LifecycleResignationGateActionsUnitTest {
 
     @Test
     void 担当営業解除は退社基準日付きでEngineerSalesService経由で行いmapperへ直接書き込まない() {
-        when(engineerAccountLinkService.findByEngineerId(ENGINEER_ID)).thenReturn(null);
+        when(engineerAccountLinkMapper.selectByEngineerIdAndTenant(ENGINEER_ID, TENANT)).thenReturn(null);
 
         checker.executeAutomaticGateActions(resignationCase(), engineer());
 
-        // 解除日は処理日ではなく案件の退社基準日（組織所属の終了日と同じ口径）。
+        // 解除日は処理日ではなく案件の退社基準日（組織所属の終了日と同じ基準）。
         verify(engineerSalesService).releaseAllByEngineerId(ENGINEER_ID, ANCHOR_DATE);
         verify(engineerSalesService, never()).releaseAllByEngineerId(any());
         verifyNoInteractions(engineerSalesMapper);
@@ -150,7 +169,7 @@ class LifecycleResignationGateActionsUnitTest {
 
     @Test
     void 内部アカウント未連携の要員でも紐付け済みのポータルユーザーは失効させる() {
-        when(engineerAccountLinkService.findByEngineerId(ENGINEER_ID)).thenReturn(null);
+        when(engineerAccountLinkMapper.selectByEngineerIdAndTenant(ENGINEER_ID, TENANT)).thenReturn(null);
         when(portalUserEngineerLinkMapper.selectActiveForEngineerInTenant(ENGINEER_ID, TENANT))
                 .thenReturn(List.of(portalLink(201L)));
 
@@ -173,7 +192,7 @@ class LifecycleResignationGateActionsUnitTest {
         EngineerAccountLink link = new EngineerAccountLink();
         link.setEngineerId(ENGINEER_ID);
         link.setSysUserId(USER_ID);
-        when(engineerAccountLinkService.findByEngineerId(ENGINEER_ID)).thenReturn(link);
+        when(engineerAccountLinkMapper.selectByEngineerIdAndTenant(ENGINEER_ID, TENANT)).thenReturn(link);
         when(sysUserMapper.selectByIdAndTenantForUpdate(USER_ID, TENANT)).thenReturn(null);
         SysUser foreign = activeUser(null);
         foreign.setTenantId("tenant-b");
@@ -204,7 +223,7 @@ class LifecycleResignationGateActionsUnitTest {
         EngineerAccountLink link = new EngineerAccountLink();
         link.setEngineerId(ENGINEER_ID);
         link.setSysUserId(USER_ID);
-        when(engineerAccountLinkService.findByEngineerId(ENGINEER_ID)).thenReturn(link);
+        when(engineerAccountLinkMapper.selectByEngineerIdAndTenant(ENGINEER_ID, TENANT)).thenReturn(link);
         when(sysUserMapper.selectByIdAndTenantForUpdate(USER_ID, TENANT)).thenReturn(user);
     }
 

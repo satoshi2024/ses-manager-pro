@@ -84,6 +84,7 @@ class FeatureSwitchRouteCoverageTest {
 
     /** 機能スイッチで {@code @Scheduled} 入口を止めるscheduler。 */
     private static final Map<String, Feature> GATED_SCHEDULERS = Map.of(
+            "com.ses.service.lifecycle.ExternalAccountRevocationScheduler", Feature.NF01,
             "com.ses.service.scheduler.LifecycleSlaScheduler", Feature.NF01,
             "com.ses.service.scheduler.CustomerHealthScheduler", Feature.NF02,
             "com.ses.service.scheduler.ServiceSlaScheduler", Feature.NF02,

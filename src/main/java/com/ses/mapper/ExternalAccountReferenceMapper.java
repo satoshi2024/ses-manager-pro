@@ -50,9 +50,53 @@ public interface ExternalAccountReferenceMapper extends BaseMapper<ExternalAccou
                                                           @Param("tenantId") String tenantId,
                                                           @Param("legalEntityId") Long legalEntityId);
 
+    /** 退社対象は操作者の法人で絞らず、tenant内の全法人を列挙する。 */
+    @Select("SELECT * FROM t_external_account_reference WHERE tenant_id = #{tenantId} "
+            + "AND assignee_type = 'ENGINEER' AND assignee_id = #{engineerId} "
+            + "AND status <> 'REVOKED' AND deleted_flag = 0 ORDER BY id")
+    List<ExternalAccountReference> selectUnrevokedForEngineer(@Param("tenantId") String tenantId,
+                                                              @Param("engineerId") Long engineerId);
+
+    @Select("SELECT * FROM t_external_account_reference WHERE tenant_id = #{tenantId} "
+            + "AND legal_entity_id IS NOT NULL AND deleted_flag = 0 AND status <> 'REVOKED' "
+            + "AND idempotency_key IS NOT NULL AND external_sync_status IN "
+            + "('REVOKE_REQUESTED','REVOKE_SENDING','REVOKE_SEND_FAILED') "
+            + "AND (next_retry_at IS NULL OR next_retry_at <= #{now}) ORDER BY id LIMIT 100")
+    List<ExternalAccountReference> selectOutboxForTenant(@Param("tenantId") String tenantId,
+                                                        @Param("now") LocalDateTime now);
+
+    @Update("UPDATE t_external_account_reference SET idempotency_key = #{newKey}, "
+            + "status = 'PENDING_CONFIRMATION', external_sync_status = 'REVOKE_REQUESTED', "
+            + "revoke_requested_at = #{now}, revoke_requested_by = #{actorId}, retry_count = 0, "
+            + "next_retry_at = #{now}, last_error_message = NULL, sync_error_message = NULL, version = version + 1 "
+            + "WHERE id = #{id} AND tenant_id = #{tenantId} AND legal_entity_id = #{legalEntityId} "
+            + "AND version = #{version} AND deleted_flag = 0 AND status <> 'REVOKED' "
+            + "AND revoke_confirmed_at IS NULL AND "
+            + "((#{oldKey} IS NULL AND idempotency_key IS NULL) OR "
+            + "(idempotency_key = #{oldKey} AND status = 'UNKNOWN'))")
+    int enqueueRevoke(@Param("id") Long id, @Param("tenantId") String tenantId,
+                       @Param("legalEntityId") Long legalEntityId, @Param("version") Integer version,
+                       @Param("oldKey") String oldKey, @Param("newKey") String newKey,
+                       @Param("actorId") Long actorId, @Param("now") LocalDateTime now);
+
+    /** key・version・送信状態が全て現在値と一致する場合だけ遷移する。 */
+    @Update("UPDATE t_external_account_reference SET status = #{status}, external_sync_status = #{toState}, "
+            + "retry_count = #{retries}, next_retry_at = #{nextAt}, last_error_message = #{error}, "
+            + "version = version + 1 WHERE id = #{id} AND tenant_id = #{tenantId} "
+            + "AND legal_entity_id = #{legalEntityId} AND deleted_flag = 0 AND revoke_confirmed_at IS NULL "
+            + "AND status <> 'REVOKED' AND version = #{version} AND idempotency_key = #{key} "
+            + "AND external_sync_status = #{fromState}")
+    int transitionOutbox(@Param("id") Long id, @Param("tenantId") String tenantId,
+                         @Param("legalEntityId") Long legalEntityId, @Param("version") Integer version,
+                         @Param("key") String key, @Param("fromState") String fromState,
+                         @Param("toState") String toState, @Param("status") String status,
+                         @Param("retries") int retries, @Param("nextAt") LocalDateTime nextAt,
+                         @Param("error") String error);
+
     @Select("SELECT * FROM t_external_account_reference "
             + "WHERE tenant_id = #{tenantId} AND legal_entity_id IS NOT NULL "
             + "AND status IN ('PENDING_CONFIRMATION', 'SUSPENDED', 'UNKNOWN') "
+            + "AND (external_sync_status IS NULL OR external_sync_status NOT IN ('REVOKE_REQUESTED','REVOKE_SENDING','REVOKE_SEND_FAILED')) "
             + "AND (next_retry_at IS NULL OR next_retry_at <= #{now}) "
             + "AND deleted_flag = 0 ORDER BY id")
     List<ExternalAccountReference> selectPendingForTenant(@Param("tenantId") String tenantId,
@@ -133,6 +177,7 @@ public interface ExternalAccountReferenceMapper extends BaseMapper<ExternalAccou
             "AND deleted_flag = 0 " +
             "AND version = #{expectedVersion} " +
             "AND status IN ('PENDING_CONFIRMATION', 'SUSPENDED', 'UNKNOWN') " +
+            "AND (external_sync_status IS NULL OR external_sync_status NOT IN ('REVOKE_REQUESTED','REVOKE_SENDING','REVOKE_SEND_FAILED')) " +
             "AND (next_retry_at IS NULL OR next_retry_at <= #{now})")
     int claimRevokePoll(@Param("id") Long id,
                         @Param("expectedVersion") Integer expectedVersion,
@@ -149,7 +194,8 @@ public interface ExternalAccountReferenceMapper extends BaseMapper<ExternalAccou
             "WHERE id = #{id} AND tenant_id = #{tenantId} AND legal_entity_id = #{legalEntityId} " +
             "AND deleted_flag = 0 " +
             "AND version = #{claimVersion} AND revoke_confirmed_at IS NULL " +
-            "AND status IN ('PENDING_CONFIRMATION', 'SUSPENDED', 'UNKNOWN')")
+            "AND status IN ('PENDING_CONFIRMATION', 'SUSPENDED', 'UNKNOWN') " +
+            "AND (external_sync_status IS NULL OR external_sync_status NOT IN ('REVOKE_REQUESTED','REVOKE_SENDING','REVOKE_SEND_FAILED'))")
     int completeRevokePollWithCas(@Param("id") Long id,
                                   @Param("status") String status,
                                   @Param("retryCount") Integer retryCount,
