@@ -7,6 +7,7 @@ import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.result.MetricBasis;
 import com.ses.service.ai.copilot.result.MetricValue;
+import com.ses.service.ai.copilot.result.CopilotMetricKeys;
 import com.ses.service.ai.copilot.result.TypedResultEnvelope;
 import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import lombok.RequiredArgsConstructor;
@@ -42,24 +43,24 @@ class DashboardUtilizationForecastCatalogAdapter extends CatalogAdapterSupport i
             for (UtilizationForecastDto.MonthlyForecastDto month : forecast.getMonthlyForecasts()) {
                 String period = month.getYearMonth() != null ? month.getYearMonth() : month.getMonth();
                 values.add(MetricValue.percent(
-                        "forecast.utilization." + period,
+                        CopilotMetricKeys.monthly(CopilotMetricKeys.FORECAST_UTILIZATION, period),
                         month.getUtilizationRate(),
                         period,
                         MetricBasis.FORECAST));
                 values.add(MetricValue.count(
-                        "forecast.benchCount." + period,
+                        CopilotMetricKeys.monthly(CopilotMetricKeys.FORECAST_BENCH_COUNT, period),
                         month.getBenchCount(),
                         period,
                         MetricBasis.FORECAST));
                 values.add(MetricValue.count(
-                        "forecast.workingCount." + period,
+                        CopilotMetricKeys.monthly(CopilotMetricKeys.FORECAST_WORKING_COUNT, period),
                         month.getWorkingCount(),
                         period,
                         MetricBasis.FORECAST));
             }
         }
         int rolloffCount = forecast.getRolloffEngineers() == null ? 0 : forecast.getRolloffEngineers().size();
-        values.add(MetricValue.count("forecast.rolloffCount", rolloffCount, "current", MetricBasis.FORECAST));
+        values.add(MetricValue.count(CopilotMetricKeys.FORECAST_ROLLOFF_COUNT, rolloffCount, "current", MetricBasis.FORECAST));
         return envelope(entry, scope, values, List.of(), MetricBasis.FORECAST, false, entry.resultLimit(), context);
     }
 }

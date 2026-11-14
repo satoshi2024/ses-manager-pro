@@ -12,7 +12,7 @@
 | 実provider呼出し・実secret | 一切追加しない。テストは mock / fake adapter / test用 loopback transport のみ |
 | 利用者経路での実送信 | **まだ発生しない**。B2c-0 の local-only summary attempt 境界（`CopilotSummaryPreflightCandidate.permitsLocalSummaryAttempt`）と予算0円の呼出しを維持する。解放は B2c-1/2（A-NF08-2、DDL・Plan Review 要）完了後 |
 
-**G1 NF08-1b**: 実prompt全体のPII走査、非null自由文の拒否、登録templateとfield値形式の制約、transaction内呼出しの拒否を追加した。provider条件は大小文字を無視する相補条件とし、monitorは再起動待ちを明示する。本番は引き続きNO-GO。
+**G1 NF08-1b**: 実prompt全体のPII走査、非null自由文の拒否、登録templateとfield値形式の制約、transaction内呼出しの拒否を追加した。G1rでは同期scopeやthread-bound resource保持中も400で拒否し、固定use caseと理由コードだけをWARNへ出す。gateway・adapter・monitorの起動承認はAiProductionApprovalGateの一つのsnapshotを共用する。provider条件は大小文字を無視する相補条件とし、monitorは再起動待ちを明示する。本番は引き続きNO-GO。
 
 **NF07への依存（有効化の必要条件）**: NF08外部送信 ← NF07のREG + TRUST + LINKの統合完了 + `privacy.retention.enabled=true` + 対象policyが `APPROVED_ACTIVE` + NF08の署名・承認設定完備。設定のチェック印だけでは統合・policy状態の証拠にならない。開放前に統合担当とPrivacy Ownerが統合SHA・policy状態・retention設定を記録する。いずれかが未完なら外部送信を開放しない。
 
@@ -170,10 +170,12 @@ digestは次の3か所に束縛する。
 - 送信fieldは承認data categoryの範囲内に限定する（400、AI_EXTERNAL_SEND_FIELD_NOT_APPROVED）。
 - untrustedSourceTextはnullだけを受理する。空文字・空白・伏せ字・ゼロ幅文字を含む自由文も400、AI_EXTERNAL_SEND_UNTRUSTED_NOT_ALLOWEDで拒否する。将来の自由文追加はNF07/DG-08の新しいdata category承認を必要とする。
 - taskMarkerとtrustedInstructionはCopilotSummaryPromptTemplateの登録済み定数との完全一致を求める。任意のinstructionを承認済みとみなさない。artifactのprompt版・config hashの一致も既存のidentity gateで確認する。
-- 値はStringのみ、空値不可、1項目4096文字以内。catalog.queryIdはSemanticCatalogRegistryの登録済みID、catalog.catalogVersionは現行固定版に限定する。summary.claimKeysはコード登録済みmetric名と、年月付きmetricの正しいyyyy-MMのカンマ列挙だけを受理する。Map/List/POJO/StringBuilder、未知名、改行・非ASCII・空要素・過長値は400、AI_EXTERNAL_SEND_PAYLOAD_SHAPE_INVALIDとする。
-- UTF-8 prompt上限を確認してから、providerへ渡す同一prompt文字列全体をPII走査する。instruction・taskMarker・toString化された値・深い入れ子も走査対象から外れない。email正規表現は左境界とバックトラッキングを抑止する量指定子で長い連続文字列の再走査を抑制する。
-- 連絡先・敬称付き人名・法人格付き会社名・除外field値の再出現を検出した場合は400、AI_EXTERNAL_SEND_UNMASKED_PIIで拒否する。負向検出は上記の値形式の許可条件に追加する防御であり、自由文の安全性判定には使わない。
+- 値はStringのみ、空値不可、1項目8192文字以内。catalog.queryIdはSemanticCatalogRegistryの登録済みID、catalog.catalogVersionは現行固定版に限定する。summary.claimKeysはコード登録済みmetric名と、年月付きmetricの正しいyyyy-MMのカンマ列挙だけを受理する。Map/List/POJO/StringBuilder、未知名、改行・非ASCII・空要素は400、AI_EXTERNAL_SEND_PAYLOAD_SHAPE_INVALIDとする。ただしPII検査を先に行うため、PIIが含まれる場合はUNMASKED_PIIが優先する。サイズ超過はHTML処理より前にREQUEST_TOO_LARGEとなる。
+- untrustedを最初に拒否し、送信候補の文字列を固定してUTF-8 prompt上限をHTML処理より前に確認してから、providerへ渡す同一prompt文字列全体をPII走査する。instruction・taskMarker・toString化された値・深い入れ子も走査対象から外れない。email正規表現は左境界とバックトラッキングを抑止する量指定子で長い連続文字列の再走査を抑制する。
+- 連絡先・敬称付き人名・法人格付き会社名・除外field値の再出現を検出した場合は400、AI_EXTERNAL_SEND_UNMASKED_PIIで拒否する。拒否リスト方式の検出は上記の値形式の許可条件に追加する防御であり、自由文の安全性判定には使わない。
 - logと監査にprompt原文、PII、検出値は出さない。PII canaryの拒否は従来通り全用途で先に行う（監査なし）。非null自由文の400拒否はサイズ超過判定より先に行う。
+
+metric識別子はCopilotMetricKeysを唯一の定義とし、adapterとgatewayが共用する。36か月cashflowの144月次項目と3照合項目のカンマ列挙は3528文字。8192文字上限まで4664文字の余裕があるが、prompt全体は別に署名済みmaxRequestBytesで制限する。
 
 ## 5. 外部送信ごとの監査（P2-1・P2-2）
 
@@ -225,6 +227,8 @@ digestは次の3か所に束縛する。
 
 ### 7.1 有効化（全署名完了後）
 
+以下は本番開放の手順である。S-9取得のためのstaging観測は、B2c-2とpersistent接続の実装・独立Review完了後、S-1〜S-8と対象を限定したstaging送信の人手承認を受けて行う。その観測自体にS-9完了を要求しない。観測結果をS-9として記録した後に本番手順へ進む。
+
 1. NF07のREG/TRUST/LINK統合、retention ON、APPROVED_ACTIVEの依存gateを確認し、§8 の S-1〜S-9 の記録（決定ID・署名日・失効日・承認digest）を揃え、決定書と設定値の転記を二者で照合する。承認digestは §2.1 の正規形を決定書の値から二者がそれぞれ作り、同じ値になることを確認する。
 2. secret manager で API key を発行し `ai.api-key` へ注入する（値を設定ファイル・ログ・チケットへ書かない）。
 3. `ai.copilot.transport.hosts.*` の DNS snapshot を配布する。
@@ -263,6 +267,8 @@ digestは次の3か所に束縛する。
 - 旧決定を新決定で置き換える場合は、旧決定を明示失効させ、監査digestを現行決定と定期照合する。digestは署名でも失効台帳でもなく、永続的な承認高水位は未実装である。
 - 失効中も保存期間のpurge（`CopilotFeatureGate#assertRetentionMaintenanceAllowed`）は止めない（構造的な不足がある場合だけ止める）。
 
+S-9のstaging観測はB2c-2実装・persistent接続完了後、本番開放前に実施する。B2c-2着手時にはS-1〜S-8を要求し、実装前の実送信観測は要求しない。
+
 ## 8. 本番リリース前に必要な署名・決定（未完）
 
 | # | 署名・決定 | 責任主体 | 反映先 |
@@ -295,7 +301,7 @@ digestは次の3か所に束縛する。
 | `AiExternalSendAuditMySqlIntegrationTest`（`mysql`） | 実MySQL（Flyway schema・CHECK制約・strict mode）でのREQUIRES_NEW独立commitと列長上限 |
 | `CopilotExternalSendGateAdversarialTest` | prompt injection、最小field、`bp.bpCompany` 等のdata category外、untrusted text の連絡先・敬称付き人名・法人格付き会社名・送信契約外field値の再出現、送信field値のPII、自由文の全面拒否、登録templateと値形式、transaction内拒否、prompt上限優先、PII canary、承認なし/チェックリスト欠落/flag OFF/digest不一致の固定 deny-all、実行中のdigest不一致・再署名・失効、費用上限、送信前監査失敗、送信後失敗の費用維持、未送信失敗の予約取消、legacy/取込用途の拒否、読取専用 preflight の無副作用、log へ prompt・応答本文を渡さない |
 | `AiConfigurationBindingTest` | 空の警告日数のbindingと30日へのfallback |
-| `AiProviderBeanUniquenessTest` | provider未設定・大小文字の変種・空・未知値で4種のAI契約が一意に解決する |
+| `AiProviderBeanUniquenessTest` | main sourceのprovider条件付き実装を機械的に列挙し、BP解析を含む全契約を検査する。空白付き値は既存条件と同じlocal fallbackとなり、snapshotはregistryと同じtrim/lowercase。未知・空値はdev/testで互換動作、prodでは起動拒否 |
 | `GeminiCopilotInvocationBoundaryTest` | 本番adapterの決定ID・digest束縛（偽造証拠の拒否）、承認証拠でも test用 loopback transport は公開hostへ送らない、未承認adapterの固定 deny-all と config hash の区別（digestでも区別） |
 
 DNS/TLS/応答body上限・429/timeout は既存の `CopilotBoundedHttpTransportTest`、`CopilotBoundedHttpTransportTlsTest`、`CopilotBoundedJsonParserTest`、`CopilotGeminiResponseParserTest` が担う。実 provider・実 TLS issuer・実 credential での確認は §8 S-9 の staging 観測で行う。

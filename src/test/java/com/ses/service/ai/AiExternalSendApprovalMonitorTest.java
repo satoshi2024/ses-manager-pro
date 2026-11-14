@@ -190,6 +190,20 @@ class AiExternalSendApprovalMonitorTest {
         assertEquals(AiExternalSendApprovalMonitor.DEFAULT_WARNING_DAYS, monitor.warningDays());
     }
 
+    @Test
+    void 共有gateの起動snapshotはmonitor生成前に日付が変わっても取り直さない() {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(TODAY);
+        MutableClock clock = new MutableClock(NOW);
+        AiProductionApprovalGate gate = new AiProductionApprovalGate(config, clock);
+        var initial = gate.startupExternalSendStatus();
+        clock.set(NOW.plusSeconds(86400 * 100L));
+        AiExternalSendApprovalMonitor monitor = new AiExternalSendApprovalMonitor(config, gate, clock, (MeterRegistry) null);
+        org.junit.jupiter.api.Assertions.assertSame(initial, gate.startupExternalSendStatus());
+        org.junit.jupiter.api.Assertions.assertSame(initial.approval(),
+                org.springframework.test.util.ReflectionTestUtils.getField(monitor, "startupApproval"));
+        assertEquals(AiExternalSendApprovalMonitor.State.EXPIRED, monitor.currentStatus().state());
+    }
+
     private static AiExternalSendApprovalMonitor monitor(AiConfig config, Clock clock, MeterRegistry registry) {
         AiExternalSendApprovalMonitor monitor = new AiExternalSendApprovalMonitor(config,
                 new AiProductionApprovalGate(config, clock), clock, registry);

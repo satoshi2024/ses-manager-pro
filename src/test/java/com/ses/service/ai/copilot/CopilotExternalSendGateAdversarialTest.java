@@ -765,6 +765,79 @@ class CopilotExternalSendGateAdversarialTest {
         });
     }
 
+    @Test
+    void synchronizationだけの接続保持も監査せず拒否し固定理由をWARNへ出す() {
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(AiExternalSendApprovalFixtures.approvedConfig(today), adapter);
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(AiExecutionGatewayImpl.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> events =
+                new ch.qos.logback.core.read.ListAppender<>();
+        events.start();
+        logger.addAppender(events);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            BusinessException failure = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                    () -> assertThrows(BusinessException.class,
+                            () -> gateway.execute(request(50, minimalFields(), null))));
+            assertEquals(400, failure.getCode());
+            assertEquals(AiExecutionGatewayImpl.REASON_TRANSACTION, failure.getMessage());
+            assertTrue(events.list.stream().anyMatch(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN
+                    && e.getFormattedMessage().contains(AiExecutionGatewayImpl.REASON_TRANSACTION)));
+            verifyNoInteractions(auditLogService);
+            assertTrue(adapter.prompts.isEmpty());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            logger.detachAppender(events);
+        }
+    }
+
+    @Test
+    void HTML未閉鎖の巨大自由文はHTML正規表現へ渡さず400にする() {
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(AiExternalSendApprovalFixtures.approvedConfig(today), adapter);
+        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(2), () -> {
+            BusinessException failure = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                    () -> assertThrows(BusinessException.class, () -> gateway.execute(
+                            request(50, minimalFields(), "<".repeat(100000)))));
+            assertEquals(AiExecutionGatewayImpl.REASON_UNTRUSTED, failure.getMessage());
+        });
+        assertTrue(adapter.prompts.isEmpty());
+    }
+
+    @Test
+    void HTML未閉鎖の巨大fieldはHTML正規表現より前にサイズで拒否する() {
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(AiExternalSendApprovalFixtures.approvedConfig(today), adapter);
+        Map<String, Object> fields = minimalFields();
+        fields.put("summary.claimKeys", "<".repeat(100000));
+        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(2), () -> {
+            CopilotExecutionFailure failure = AccountingTenantContextHolder.runWithTenant("tenant-a",
+                    () -> assertThrows(CopilotExecutionFailure.class, () -> gateway.execute(request(50, fields, null))));
+            assertEquals("AI_EXTERNAL_SEND_REQUEST_TOO_LARGE", failure.reasonCode());
+        });
+        assertTrue(adapter.prompts.isEmpty());
+    }
+
+    @Test
+    void 最大36か月のcashflow識別子も承認されたprompt上限内で送信できる() {
+        List<String> keys = new ArrayList<>();
+        for (int month = 0; month < 36; month++) {
+            String period = java.time.YearMonth.of(2026, 1).plusMonths(month).toString();
+            for (String prefix : List.of("cashflow.inflow", "cashflow.outflow", "cashflow.net", "cashflow.balance")) {
+                keys.add(com.ses.service.ai.copilot.result.CopilotMetricKeys.monthly(prefix, period));
+            }
+        }
+        keys.addAll(List.of("cashflow.reconciliation.kpiSales", "cashflow.reconciliation.invoicedSubtotal",
+                "cashflow.reconciliation.difference"));
+        Map<String, Object> fields = minimalFields();
+        fields.put("summary.claimKeys", String.join(",", keys));
+        FakeRemoteAdapter adapter = new FakeRemoteAdapter();
+        AiExecutionGatewayImpl gateway = gateway(AiExternalSendApprovalFixtures.approvedConfig(today), adapter);
+        AccountingTenantContextHolder.runWithTenant("tenant-a", () -> gateway.execute(request(50, fields, null)));
+        assertEquals(1, adapter.prompts.size());
+    }
+
     private void assertInvalidFields(Map<String, Object> invalid) {
         FakeRemoteAdapter adapter = new FakeRemoteAdapter();
         AiExecutionGatewayImpl gateway = gateway(AiExternalSendApprovalFixtures.approvedConfig(today), adapter);

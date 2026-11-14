@@ -124,12 +124,14 @@ private final・非serializable・非cloneable `ClaimPermit` はcommit完了を�
 | 区分 | 内容 |
 |---|---|
 | 利用者決定 | B-NF08-1（第1期は実Geminiを接続）、B-NF08-2（承認設定+外部送信ごとの監査）、Q-7（NF08のledgerとclaimのDDLは新migrationで承認）、**Q-11（費用上限は永続ledger。B2c-1のDDLと一緒に行う）** |
-| W3-03で実装済み（DDLなし） | 承認内容digest（`AiExternalSendApproval`、決定書のdigestと一致しなければ拒否）、監査のREQUIRES_NEW（`AuditLogServiceImpl#recordDomainEventRequiredInNewTransaction`）、失効で起動を止めない（`AiProductionSafetyValidator`・`AiExternalSendApprovalMonitor`）、最終gateの最小field・PII検査（`AiExecutionGatewayImpl#assertExternalSendPayload`）、理由コードのmessage key。詳細は `.kiro/specs/ai-management-copilot/external-send-approval-gate.md` |
+| W3-03/G1/G1rで実装済み（DDLなし） | 承認内容digest（`AiExternalSendApproval`、決定書のdigestと一致しなければ拒否）、監査のREQUIRES_NEW（`AuditLogServiceImpl#recordDomainEventRequiredInNewTransaction`）、失効で起動を止めない（`AiProductionSafetyValidator`・`AiExternalSendApprovalMonitor`）、最終gateの最小field・PII検査（`AiExecutionGatewayImpl#assertExternalSendPayload`）、理由コードのmessage key。G1rでは自由文・サイズの先行拒否、接続保持の拒否log、共有起動判定、provider全実装の機械的テスト、metric定義の共有を追加。詳細は `.kiro/specs/ai-management-copilot/external-send-approval-gate.md` |
 | 本節で前提にする不変条件 | (1) 外部socketは commit済みclaim の one-shot permit からだけ開く。(2) claim commit後は `NOT_SENT` にしない・再送しない・費用予約を戻さない。(3) 費用上限はDBの原子的な条件付き更新で守り、プロセス内計数を本番の上限にしない。(4) 監査はtransaction外からREQUIRES_NEWで呼び、業務transactionのcommit/rollback後も記録を残す。(5) production policy・registryは承認設定が揃うまでdeny-allのまま |
 
 ### 1. B2c-1: durable claim、commit後permit、永続費用ledger（V?）
 
 **開始条件**: 本節のPlan Review PASS、DDL laneでの版番号割当、DB ownerによるDDL草案の承認。
+
+**B2c-1の最初の変更（C-2）**: prodでexternal-send-enabled=trueを拒否するvalidatorと、その拒否を固定するfastテストを最初に実装・統合する。DDLやclaim実装より先に、この起動拒否を有効にする。B2c-2のpersistent接続完了と独立Reviewまで解除しない。
 
 **外部送信の依存gate**: NF08外部送信 ← NF07のREG + TRUST + LINKの統合完了 + `privacy.retention.enabled=true` + 対象policyの `APPROVED_ACTIVE` + NF08承認設定・署名の完備。いずれかが未完なら開放しない。NF07の段階的実装や本計画の承認だけでは、この依存gateを満たさない。
 
@@ -168,7 +170,6 @@ ALTER TABLE t_ai_recommendation_run
   ADD COLUMN dispatch_scope_hash BINARY(32) NULL,
   ADD COLUMN dispatch_input_hash BINARY(32) NULL,
   ADD COLUMN dispatch_approval_digest BINARY(32) NULL COMMENT 'W3-03の承認内容digest',
-  ADD COLUMN dispatch_cost_reservation_id BINARY(16) NULL,
   ADD COLUMN dispatch_card_id VARCHAR(64) NULL,
   ADD COLUMN dispatch_card_version VARCHAR(32) NULL,
   ADD COLUMN dispatch_card_digest BINARY(32) NULL,
@@ -177,10 +178,9 @@ ALTER TABLE t_ai_recommendation_run
   ADD COLUMN dispatch_policy_digest BINARY(32) NULL,
   ADD CONSTRAINT ck_ai_run_dispatch_state
       CHECK (dispatch_state IN ('NOT_APPLICABLE', 'READY', 'CLAIMED', 'UNKNOWN')),
-  ADD UNIQUE KEY uk_ai_run_dispatch_claim (tenant_id, dispatch_claim_id),
+  ADD UNIQUE KEY uk_ai_run_dispatch_claim (dispatch_claim_id),
   ADD UNIQUE KEY uk_ai_run_dispatch_nonce (tenant_id, dispatch_nonce_hash),
   ADD UNIQUE KEY uk_ai_run_dispatch_idem (tenant_id, dispatch_idempotency_hash),
-  ADD UNIQUE KEY uk_ai_run_dispatch_reservation (dispatch_cost_reservation_id),
   ADD KEY idx_ai_run_dispatch_reconcile (dispatch_state, status, dispatch_expires_at);
 
 -- (b) 永続費用ledger（Q-11）。上限の適用範囲（cost_scope）ごとのJST日次・月次の合計。
@@ -233,6 +233,10 @@ CREATE TABLE t_ai_external_send_cost_entry (
 - `cost_scope` はprovider単位でtenant・承認をまたいで共有する。再承認（digestの変更）や月途中の上限変更で合計を0へ戻さない（上限の回避にならない方向）。
 - FKは張らない（`t_ai_recommendation_run` の行削除・retention purgeとledgerの保持期間が異なるため）。参照整合は `reservation_id` の一意性とservice側の同一transaction更新で保つ。
 
+**C-1の索引**: V?でt_audit_logへidx_audit_dispatch_key(idempotency_key, application_code, id)を追加する。照会はclaim IDの完全一致で、application_codeがAI_EXTERNAL_SEND_ATTEMPTとAI_EXTERNAL_SEND_RESULTの存在照会を別々に行う。それぞれORDER BY id、LIMIT 1とし、ATTEMPTが先に見つかってRESULTを見落とす照会にはしない。tenantへの束縛は照会前のrun確認で行い、claim IDは全tenantで一意なUUIDとする。無索引の監査全表走査を読取経路へ入れない。既存監査の保持期間との境界では、監査の消去後にREADYが残らない順序をretention設計で保証する。
+
+**C-3の識別子**: dispatch_cost_reservation_idとその一意索引を草案から削除する。dispatch_claim_idを全tenantで一意とし、cost_entry.reservation_id、ATTEMPT/RESULTのidempotency_key、permitのreservation IDは同じUUIDを参照する。READY作成時に一度生成し、再試行で変更しない。
+
 #### 1.3 claim transaction（単一transaction、lock順固定）
 
 ```text
@@ -254,9 +258,9 @@ CREATE TABLE t_ai_external_send_cost_entry (
      day_key/month_keyは準備済み値を使う。fresh ClockがJST日/月を跨いだ場合はrollbackし、
      transaction外で新しいkeyを決め直してbucketを事前生成する（ATTEMPTは増やさない）。
   3. DAY bucketをFOR UPDATE。条件付きUPDATEでcommitted_yen + upper <= dailyを検査して予約。
-     0件なら同じtransactionのSELECTで存在を再確認し、欠行はLEDGER_BUCKET_MISSING（再試行可能）、
+     0件なら同じtransactionのSELECTで存在を再確認し、bucket行の欠落はLEDGER_BUCKET_MISSING（再試行可能）、
      存在するが上限超過ならAI_EXTERNAL_SEND_DAILY_COST_LIMITとして区別する。
-  4. MONTHも同様にロック・予約し、欠行とAI_EXTERNAL_SEND_MONTHLY_COST_LIMITを区別する。
+  4. MONTHも同様にロック・予約し、bucket行の欠落とAI_EXTERNAL_SEND_MONTHLY_COST_LIMITを区別する。
   5. 同じclaim IDをreservation_idとしてcost_entryをRESERVEDで作成する。
   6. runを同じ全binding・claim ID・status/versionのCASでCLAIMEDへ更新する（0件ならrollback）。
      dispatch_claimed_atとbucket.clock_high_water_atにはアプリClockの観測値を記録する。
@@ -267,11 +271,12 @@ CREATE TABLE t_ai_external_send_cost_entry (
 ```
 
 - **transaction境界（R-2）**: いかなるtransactionを保持している間もREQUIRES_NEW監査を呼ばない。gatewayは `TransactionSynchronizationManager.isActualTransactionActive()` で拒否し、費用予約・ATTEMPT・DENIEDを開始しない。provider I/Oもtransaction外に限定する。同一送信が同時に占有するDB connectionは最大1本とする。
-- **競合とtimeout（R-3）**: claim、B2d完了、照合の全経路でロック順をrun → DAY → MONTH → entryへ統一する。完了/照合ではentryの不変keyをtransaction前に読み、runをロックして束縛を確認後、DAY/MONTH/entryを順にロックして同じkeyを再照合する。1213/1205・bucket欠行・日付境界による再準備は合計最大3試行とし、各試行でfresh Clockと残deadlineを再確認する。同じclaim IDを保持し、ATTEMPTは重複記録しない。
+- **競合とtimeout（R-3）**: claim、B2d完了、照合の全経路でロック順をrun → DAY → MONTH → entryへ統一する。完了/照合ではentryの不変keyをtransaction前に読み、runをロックして束縛を確認後、DAY/MONTH/entryを順にロックして同じkeyを再照合する。1213/1205・bucket行の欠落・日付境界による再準備は合計最大3試行とし、各試行でfresh Clockと残deadlineを再確認する。同じclaim IDを保持し、ATTEMPTは重複記録しない。
 - 各短transactionのtimeoutは残deadline以下へ切り下げ、残1秒未満なら開始しない。必要なら借用connectionの `innodb_lock_wait_timeout` を同じ秒数以下に設定し、返却前に元の値へ戻す（戻せなければconnectionを破棄）。JDBC statement timeoutとmonotonic deadlineも併用し、既定50秒のlock待ちに依存しない。中断・timeout・再試行上限ではrollback後にRESULTを記録しpermitは発行しない。
 - 精算はentryの固定day_key/month_keyへ反映する。再承認でも累計を0へ戻さない。READY作成時はtrace IDをUUID形式で検証し、tenant IDは既存runと同じ64文字以内にする。
 - **commit不明**: permitを発行しない。別の短transactionのreadbackでCLAIMEDなら予約を維持、READYなら予約rollbackとして扱う。同attemptは再claimしない。RESULTはreadback transaction終了後に記録する。
-- **孤立ATTEMPT（R-1）**: READYの期限切れでclaimが無くRESULTも無い行を、同じtenant・claim IDで照合する。短transactionでREADY失効を確定後、`ATTEMPT_ORPHANED` / NOT_STARTED / NOT_SENTのRESULTを同じidempotency_keyで補記する。CLAIMEDなら送信の可能性ありとして上限を維持し、孤立READYと混同しない。補記失敗は次回照合で再試行し、既存RESULTとの重複を防ぐ。
+- **孤立ATTEMPT（R-1/C-1、案bを採用）**: RESULT監査はat-least-onceとし、独立監査transactionとrunの間で厳密な一回性を主張しない。期限切れREADY/PENDINGをtenant別に最大100件ずつkeyset走査し、runの短transactionで期限・未claimを確認して終了する。索引付き監査照会でATTEMPTの存在とRESULTの存在を確認し、既存RESULTがなければ同じclaim IDへNOT_STARTED/NOT_SENTのRESULTを補記する。#18はATTEMPTありでATTEMPT_ORPHANED、#2はATTEMPTなしでATTEMPT_NOT_PERSISTEDと区別する。監査commit後に応答が失われた場合は、行の存在を正本とする。#2にもNOT_SENTのRESULTを記録することを明示的に受け入れる。
+- 同時照合や監査commit直後の停止でRESULTが重複してもよい。取得・metric・表示は(idempotency_key, application_code)単位で集約し、最小idを代表行、重複件数を運用表示する。同じkeyの結果が矛盾する場合は警告し、送信可能性の高い状態を採用する。補記失敗時はREADY/PENDINGを維持して次回に再試行する。RESULT存在確認後だけ別の短transactionでstatusをFAILEDへCASし、期限切れREADYを未完了一覧から外す。runの処理確定前の再試行もindexed RESULTの存在を確認する。runの処理完了より先に監査済みと推測しない。CLAIMEDは送信可能性ありとして別に照合し費用予約を維持する。
 - **時刻逆行の比較基準（R-6）**: fresh Clockを、(a) runの永続 `dispatch_issued_at` / `dispatch_claimed_at`、(b) 同じcost_scopeの索引付き最新 `clock_high_water_at` と比較する。既存の別日/月bucketも含む最大高水位を各試行前に読み、ロックしたDAY/MONTHの値とも照合する。高水位より1秒を超えて前ならCLOCK_INVALIDで拒否し、高水位を減らさない。新規scopeで履歴が無い場合はREADYのissued_atを最初の基準とする。socket前もclaimed_at以上であることを確認し、プロセス内ではclaim時のClock/monotonic tickからの経過とも比較する。再起動後は永続値を使い、旧permitは再発行しない。DBの自動updated_atはアプリClockと異なるため基準にしない。
 
 #### 1.4 ClaimPermit
@@ -289,7 +294,7 @@ CREATE TABLE t_ai_external_send_cost_entry (
 
 ### 2. B2c-2: permit-only 送信
 
-**開始条件**: B2c-1 の MySQL gate と独立CODE review の PASS、実送信のための別の人手承認（S-1〜S-9）。
+**開始条件**: B2c-1 の MySQL gate と独立CODE review の PASS、S-1〜S-8の署名およびB2c-2実装の人手承認。S-9のstaging外部送信観測はB2c-2完了後かつ本番開放前に実施する。prod profileでのstaging検証はpersistent接続完了・validator拒否解除の独立Review後に限り、事前の観測を開始条件にしない（C-2）。
 
 - 外部socketへ進む唯一の入口を `CopilotBoundedHttpTransport#dispatchWithPermit(ClaimPermit, RequestSnapshot)`（package-private）とする。既存の public `post(...)` / `postGemini(...)` は、test用loopback以外では `COPILOT_PERMIT_REQUIRED` で拒否する（raw `Response` DTOの互換は維持するが、production dispatchの権限にはしない）。
 - `GeminiTextServiceImpl#generateCopilotResponse` は permit 付きの内部入口に置き換え、permitの無い呼出しは送信前に拒否する。gatewayの `openExternalSend` は claim service を経由し、プロセス内ledgerの予約は使わない。
@@ -351,6 +356,8 @@ claim commit前は送信も費用計上もしない。claim commit後は送信�
 
 provider契約・DPA・region、model usageの意味、実料金・為替、production key/card registry、実credential、Gemini実送信、Copilot/AI/external-send flag、artifact ACTIVE、本番rollout。DDLは本節では草案であり、版番号の割当とファイル化はB2c-1のDDL laneで行う。
 
+
+**追加運用条件**: 費用予約見積りは1円以上とし、JDBCのuseAffectedRows設定をDDL Reviewで固定する。条件付きUPDATEはversionも必ず増やし、found rowsとchanged rowsの違いで超過判定が変わらないよう検証する。Clockが誤って未来へ進んだ場合、高水位を自動で下げない。SREとSecurityの二者承認、対象scopeの送信停止、原時刻と修正値の監査、DB整合性確認を経て手動再設定し、再開前にstagingで再検証する。
 
 **残る運用判断**: 承認digestは署名や失効台帳の代替ではない。旧決定を取り消し、監査digestを現行決定と定期照合する。永続的な承認高水位、ledger保存期間（Finance確認）、pre-socket失敗のbreakerは別設計とする。これらを実装済みとは扱わない。
 

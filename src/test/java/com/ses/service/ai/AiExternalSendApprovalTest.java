@@ -23,6 +23,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** NF08: 外部送信承認設定は全項目が揃い現行設定と一致し、承認digestが決定書と一致する場合だけ完全とみなす。 */
 class AiExternalSendApprovalTest {
 
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"TEST", "FAKE", "MOCK", "DEMO"})
+    void 合成用途の決定IDは未署名として拒否する(String marker) {
+        AiConfig config = AiExternalSendApprovalFixtures.approvedConfig(TODAY);
+        config.getExternalSendApproval().setDecisionId("NF08-" + marker + "-0001");
+        assertTrue(AiExternalSendApproval.evaluate(config, TODAY).violations().contains("decisionId.placeholder"));
+    }
+
     private static final LocalDate TODAY = LocalDate.of(2026, 11, 13);
     /**
      * fixture（TODAY基準）の承認内容の正規形digest。正規形を変えるとこの値が変わる（決定書の取り直しが必要）。

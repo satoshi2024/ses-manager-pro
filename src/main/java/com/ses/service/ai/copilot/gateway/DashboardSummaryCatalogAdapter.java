@@ -7,6 +7,7 @@ import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.result.MetricBasis;
 import com.ses.service.ai.copilot.result.MetricValue;
+import com.ses.service.ai.copilot.result.CopilotMetricKeys;
 import com.ses.service.ai.copilot.result.TypedResultEnvelope;
 import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import lombok.RequiredArgsConstructor;
@@ -41,12 +42,12 @@ class DashboardSummaryCatalogAdapter extends CatalogAdapterSupport implements Ca
         List<MetricValue> values = new ArrayList<>();
         if (summary.getKpi() != null) {
             DashboardSummaryDto.KpiDto kpi = summary.getKpi();
-            values.add(MetricValue.percent("kpi.utilization", kpi.getUtilization(), period, MetricBasis.ACTUAL));
-            values.add(MetricValue.count("kpi.benchCount", kpi.getBenchCount(), period, MetricBasis.ACTUAL));
-            values.add(MetricValue.yen("kpi.revenue", kpi.getRevenue(), period, MetricBasis.MIXED));
-            values.add(MetricValue.percent("kpi.profitMargin", kpi.getProfitMargin(), period, MetricBasis.MIXED));
-            values.add(MetricValue.yen("kpi.unacceptedSales", kpi.getUnacceptedSales(), period, MetricBasis.ACTUAL));
-            values.add(MetricValue.percent("kpi.avgAcceptanceDays", kpi.getAvgAcceptanceDays(), period, MetricBasis.ACTUAL));
+            values.add(MetricValue.percent(CopilotMetricKeys.KPI_UTILIZATION, kpi.getUtilization(), period, MetricBasis.ACTUAL));
+            values.add(MetricValue.count(CopilotMetricKeys.KPI_BENCH_COUNT, kpi.getBenchCount(), period, MetricBasis.ACTUAL));
+            values.add(MetricValue.yen(CopilotMetricKeys.KPI_REVENUE, kpi.getRevenue(), period, MetricBasis.MIXED));
+            values.add(MetricValue.percent(CopilotMetricKeys.KPI_PROFIT_MARGIN, kpi.getProfitMargin(), period, MetricBasis.MIXED));
+            values.add(MetricValue.yen(CopilotMetricKeys.KPI_UNACCEPTED_SALES, kpi.getUnacceptedSales(), period, MetricBasis.ACTUAL));
+            values.add(MetricValue.percent(CopilotMetricKeys.KPI_AVG_ACCEPTANCE_DAYS, kpi.getAvgAcceptanceDays(), period, MetricBasis.ACTUAL));
         }
         return envelope(entry, scope, values, List.of(), MetricBasis.MIXED, false, entry.resultLimit(), context);
     }

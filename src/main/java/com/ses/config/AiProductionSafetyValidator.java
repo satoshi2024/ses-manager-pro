@@ -42,6 +42,11 @@ public class AiProductionSafetyValidator {
 
     @PostConstruct
     void validate() {
+        try {
+            new com.ses.service.ai.AiProviderRegistry().requireRegistered(aiConfig.getProvider());
+        } catch (com.ses.common.exception.BusinessException ex) {
+            throw new IllegalStateException("本番のAI providerが未登録です: AI_PROVIDER_NOT_REGISTERED");
+        }
         if (aiConfig.isExternalSendEnabled()) {
             AiProductionApprovalGate.AiExternalSendGateStatus decision = productionApprovalGate.externalSendStatus();
             if (decision == null) {

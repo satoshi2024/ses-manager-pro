@@ -24,17 +24,12 @@ import static org.mockito.Mockito.mock;
 
 /** provider値の大小文字・未設定・未知値によらず全AI実装が一意に解決する（外部I/Oなし）。 */
 class AiProviderBeanUniquenessTest {
-    private static final Class<?>[] IMPLEMENTATIONS = {
-            GeminiTextServiceImpl.class, RuleAiTextServiceImpl.class, MockAiTextServiceImpl.class,
-            GeminiMatchingServiceImpl.class, RuleMatchingServiceImpl.class, AiMatchingServiceImpl.class,
-            GeminiProjectParseServiceImpl.class, MockProjectParseServiceImpl.class,
-            GeminiResumeParseServiceImpl.class, MockResumeParseServiceImpl.class
-    };
-    private static final Set<Class<?>> CONTRACTS = Set.of(AiTextService.class, AiMatchingService.class,
-            ProjectParseService.class, ResumeParseService.class);
+    private static final Class<?>[] IMPLEMENTATIONS = discoverImplementations();
+    private static final Set<Class<?>> CONTRACTS = discoverContracts();
 
     @ParameterizedTest
-    @ValueSource(strings = {"gemini", "GEMINI", "GeMiNi", "rule", "RULE", "RuLe", "mock", "MOCK", "", "unknown"})
+    @ValueSource(strings = {"gemini", "GEMINI", "Gemini", "rule", "RULE", "mock", "MOCK",
+            " gemini", "gemini ", " GEMINI ", " mock ", "", "unknown"})
     void providerごとに全AI契約を一意に解決する(String provider) {
         verifyUnique(provider);
     }
@@ -68,7 +63,9 @@ class AiProviderBeanUniquenessTest {
                         context.getBeanFactory().registerSingleton(name, mock(dependency));
                     }
                 });
-        if (provider != null) runner = runner.withPropertyValues("ai.provider=" + provider);
+        if (provider != null) runner = runner.withInitializer(context -> context.getEnvironment().getPropertySources()
+                .addFirst(new org.springframework.core.env.MapPropertySource("raw-provider",
+                        java.util.Map.of("ai.provider", provider))));
         runner.run(context -> {
             assertThat(context).hasNotFailed();
             for (Class<?> contract : CONTRACTS) {
@@ -77,7 +74,12 @@ class AiProviderBeanUniquenessTest {
             Class<?> textType = "gemini".equalsIgnoreCase(provider) ? GeminiTextServiceImpl.class
                     : "rule".equalsIgnoreCase(provider) ? RuleAiTextServiceImpl.class : MockAiTextServiceImpl.class;
             assertThat(context.getBean(AiTextService.class)).isInstanceOf(textType);
-            if (provider != null && !provider.isBlank() && !"unknown".equals(provider)) {
+            if (provider != null) {
+                assertThat(CopilotConfigSnapshot.capture(config, context.getBean(AiTextService.class)).configuredProvider())
+                        .isEqualTo(provider.trim().toLowerCase(java.util.Locale.ROOT));
+            }
+            if (provider != null && !provider.isBlank() && !"unknown".equals(provider)
+                    && provider.equals(provider.trim())) {
                 assertThat(CopilotConfigSnapshot.capture(config, context.getBean(AiTextService.class))
                         .hasBoundedIdentity()).isTrue();
             }
@@ -85,5 +87,40 @@ class AiProviderBeanUniquenessTest {
                     ? GeminiProjectParseServiceImpl.class : MockProjectParseServiceImpl.class;
             assertThat(context.getBean(ProjectParseService.class)).isInstanceOf(projectType);
         });
+    }
+
+    /** 全main sourceから条件付き実装を発見し、新しい契約の追加も自動的に対象にする。 */
+    private static Class<?>[] discoverImplementations() {
+        try (var files = java.nio.file.Files.walk(java.nio.file.Path.of("src/main/java"))) {
+            java.util.List<Class<?>> found = new java.util.ArrayList<>();
+            for (var file : files.filter(p -> p.toString().endsWith(".java")).sorted().toList()) {
+                String source = java.nio.file.Files.readString(file);
+                if (!source.contains("ai.provider") || !java.util.regex.Pattern.compile(
+                        "@(?:[\\w.]+\\.)?ConditionalOn(?:Expression|Property)\\s*\\(").matcher(source).find()) continue;
+                var pkg = java.util.regex.Pattern.compile("package\\s+([\\w.]+);").matcher(source);
+                if (!pkg.find()) continue;
+                String name = file.getFileName().toString().replace(".java", "");
+                Class<?> type = Class.forName(pkg.group(1) + "." + name);
+                if (!type.isInterface() && type.getInterfaces().length > 0) found.add(type);
+            }
+            assertThat(found).as("provider条件付き実装を機械的に発見する").isNotEmpty();
+            return found.toArray(Class<?>[]::new);
+        } catch (Exception ex) {
+            throw new IllegalStateException("provider条件付き実装を列挙できません", ex);
+        }
+    }
+
+    private static Set<Class<?>> discoverContracts() {
+        Set<Class<?>> result = new LinkedHashSet<>();
+        for (Class<?> implementation : IMPLEMENTATIONS) {
+            for (Class<?> contract : implementation.getInterfaces()) addContract(contract, result);
+        }
+        return Set.copyOf(result);
+    }
+
+    private static void addContract(Class<?> contract, Set<Class<?>> result) {
+        if (!contract.getPackageName().startsWith("com.ses.service")) return;
+        result.add(contract);
+        for (Class<?> parent : contract.getInterfaces()) addContract(parent, result);
     }
 }

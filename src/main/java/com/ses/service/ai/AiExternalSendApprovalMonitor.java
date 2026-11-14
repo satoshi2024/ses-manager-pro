@@ -89,7 +89,7 @@ public class AiExternalSendApprovalMonitor {
         this.aiConfig = aiConfig;
         this.approvalGate = approvalGate;
         AiProductionApprovalGate.AiExternalSendGateStatus initial =
-                approvalGate == null ? null : approvalGate.externalSendStatus();
+                approvalGate == null ? null : approvalGate.startupExternalSendStatus();
         this.startupApproval = initial != null && initial.approved() ? initial.approval() : null;
         this.clock = clock == null ? Clock.system(AiExternalSendApproval.BUSINESS_ZONE) : clock;
         this.registrySupplier = registrySupplier;
