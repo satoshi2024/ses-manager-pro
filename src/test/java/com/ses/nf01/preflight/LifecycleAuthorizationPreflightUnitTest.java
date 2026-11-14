@@ -138,6 +138,108 @@ class LifecycleAuthorizationPreflightUnitTest {
     }
 
     @Test
+    void epoch列は未適用か定義どおりの適用だけをPASSにし同名CHECKや定義違いや負値をFAILにする() {
+        LifecycleAuthorizationPreflight.EpochColumnSpec spec = new LifecycleAuthorizationPreflight.EpochColumnSpec(
+                "t_engineer", "engineer_scope_epoch", "ck_engineer_scope_epoch");
+
+        LifecycleAuthorizationPreflight.PreflightReport notApplied = report();
+        LifecycleAuthorizationPreflight.recordAuthorizationEpochColumn(notApplied, spec,
+                new LifecycleAuthorizationPreflight.EpochColumnState(false, null, true, null, false, false, false, 0));
+        assertEquals("PASS", notApplied.status());
+        assertTrue(notApplied.toJson().contains("state=NOT_APPLIED"));
+        assertTrue(notApplied.toJson().contains("t_engineer.engineer_scope_epoch"));
+
+        LifecycleAuthorizationPreflight.PreflightReport applied = report();
+        LifecycleAuthorizationPreflight.recordAuthorizationEpochColumn(applied, spec,
+                new LifecycleAuthorizationPreflight.EpochColumnState(true, "bigint", false, "0", true, true, false, 0));
+        assertEquals("PASS", applied.status());
+        assertTrue(applied.toJson().contains("state=APPLIED"));
+        assertTrue(applied.toJson().contains("problems=none"));
+
+        LifecycleAuthorizationPreflight.PreflightReport nameTaken = report();
+        LifecycleAuthorizationPreflight.recordAuthorizationEpochColumn(nameTaken, spec,
+                new LifecycleAuthorizationPreflight.EpochColumnState(false, null, true, null, false, false, true, 0));
+        assertEquals("FAIL", nameTaken.status());
+        assertTrue(nameTaken.toJson().contains("checkNameUsedByAnotherTable=ck_engineer_scope_epoch"));
+
+        LifecycleAuthorizationPreflight.PreflightReport wrongDefinition = report();
+        LifecycleAuthorizationPreflight.recordAuthorizationEpochColumn(wrongDefinition, spec,
+                new LifecycleAuthorizationPreflight.EpochColumnState(true, "int", true, null, true, false, false, 2));
+        assertEquals("FAIL", wrongDefinition.status());
+        String json = wrongDefinition.toJson();
+        assertTrue(json.contains("type=int"));
+        assertTrue(json.contains("nullable"));
+        assertTrue(json.contains("default=<null>"));
+        assertTrue(json.contains("checkNotEnforced=ck_engineer_scope_epoch"));
+        assertTrue(json.contains("negativeRows=2"));
+
+        LifecycleAuthorizationPreflight.PreflightReport checkMissing = report();
+        LifecycleAuthorizationPreflight.recordAuthorizationEpochColumn(checkMissing, spec,
+                new LifecycleAuthorizationPreflight.EpochColumnState(true, "bigint", false, "0", false, false, false, 0));
+        assertEquals("FAIL", checkMissing.status());
+        assertTrue(checkMissing.toJson().contains("checkMissing=ck_engineer_scope_epoch"));
+    }
+
+    @Test
+    void 全体epoch表は1行だけでCHECK2件のときと未適用のときだけPASSになる() {
+        LifecycleAuthorizationPreflight.PreflightReport notApplied = report();
+        LifecycleAuthorizationPreflight.recordAuthorizationGlobalEpoch(notApplied,
+                new LifecycleAuthorizationPreflight.GlobalEpochState(false, 0, 0, 0, true, false));
+        assertEquals("PASS", notApplied.status());
+
+        LifecycleAuthorizationPreflight.PreflightReport applied = report();
+        LifecycleAuthorizationPreflight.recordAuthorizationGlobalEpoch(applied,
+                new LifecycleAuthorizationPreflight.GlobalEpochState(true, 1, 1, 2, true, false));
+        assertEquals("PASS", applied.status());
+        assertTrue(applied.toJson().contains("state=APPLIED"));
+
+        LifecycleAuthorizationPreflight.PreflightReport missingRow = report();
+        LifecycleAuthorizationPreflight.recordAuthorizationGlobalEpoch(missingRow,
+                new LifecycleAuthorizationPreflight.GlobalEpochState(true, 0, 0, 2, true, false));
+        assertEquals("FAIL", missingRow.status());
+        assertTrue(missingRow.toJson().contains("rows=0,validSingletonRows=0"));
+
+        LifecycleAuthorizationPreflight.PreflightReport extraRow = report();
+        LifecycleAuthorizationPreflight.recordAuthorizationGlobalEpoch(extraRow,
+                new LifecycleAuthorizationPreflight.GlobalEpochState(true, 2, 1, 2, true, false));
+        assertEquals("FAIL", extraRow.status());
+
+        LifecycleAuthorizationPreflight.PreflightReport checkMissing = report();
+        LifecycleAuthorizationPreflight.recordAuthorizationGlobalEpoch(checkMissing,
+                new LifecycleAuthorizationPreflight.GlobalEpochState(true, 1, 1, 1, true, false));
+        assertEquals("FAIL", checkMissing.status());
+
+        LifecycleAuthorizationPreflight.PreflightReport nameTaken = report();
+        LifecycleAuthorizationPreflight.recordAuthorizationGlobalEpoch(nameTaken,
+                new LifecycleAuthorizationPreflight.GlobalEpochState(false, 0, 0, 0, true, true));
+        assertEquals("FAIL", nameTaken.status());
+    }
+
+    @Test
+    void epoch_Aの一部だけの適用はFAILで全部か無しならPASSになりORG_UNITの対応付けを前提にしない() {
+        LifecycleAuthorizationPreflight.PreflightReport none = report();
+        LifecycleAuthorizationPreflight.recordAuthorizationEpochApplication(none, 0, 6);
+        assertEquals("PASS", none.status());
+        assertTrue(none.toJson().contains("state=NOT_APPLIED"));
+        assertTrue(none.toJson().contains("ORG_UNIT_TENANT_MAPPING (BLOCKED_MAPPING) does not block epoch A"));
+
+        LifecycleAuthorizationPreflight.PreflightReport all = report();
+        LifecycleAuthorizationPreflight.recordAuthorizationEpochApplication(all, 6, 6);
+        assertEquals("PASS", all.status());
+        assertTrue(all.toJson().contains("state=APPLIED"));
+
+        LifecycleAuthorizationPreflight.PreflightReport partial = report();
+        LifecycleAuthorizationPreflight.recordAuthorizationEpochApplication(partial, 3, 6);
+        assertEquals("FAIL", partial.status());
+        assertTrue(partial.toJson().contains("state=PARTIAL"));
+        assertTrue(partial.toJson().contains("presentObjects=3/6"));
+    }
+
+    private static LifecycleAuthorizationPreflight.PreflightReport report() {
+        return new LifecycleAuthorizationPreflight.PreflightReport("baseline", "schema");
+    }
+
+    @Test
     void jsonEscapesUnsafeCharactersAndMarkdownEscapesPipes() {
         LifecycleAuthorizationPreflight.PreflightReport report =
                 new LifecycleAuthorizationPreflight.PreflightReport("head\"x", "schema|x");

@@ -93,13 +93,14 @@ NF01（機能スイッチ `FEATURE_NF01_ENABLED`、既定OFF）はCONFIRM完成�
 
 | checkId | 担当 | 対応 |
 |:---|:---|:---|
-| `ORG_UNIT_TENANT_NULL` / `ORG_UNIT_TENANT_MAPPING` | DBA・Security | 組織の数値tenantと文字列tenantの対応を決める。V60の `LEGACY` 組織だけなら新規導入として許容してよい（数値→文字列の自動変換はしない） |
+| `ORG_UNIT_TENANT_NULL` / `ORG_UNIT_TENANT_MAPPING` | DBA・Security | 組織の数値tenantと文字列tenantの対応を決める。V60の `LEGACY` 組織だけなら新規導入として許容してよい（数値→文字列の自動変換はしない）。V189（epoch A）の適用は止めない（組織epochはtenantに依存しない。5.6） |
 | `TENANT_PARENT_CANDIDATES` | DBA | 親行からtenantを一意に決められない行を確認し、対応付けを決める |
 | `LIFECYCLE_DUAL_TASK_UNFINISHED` | HR | 未終結の二者確認タスクを免除（承認済み例外）・再提出のどちらで扱うか決める（5.4） |
 | `LIFECYCLE_EVIDENCE_VERSIONLESS` | 文書owner | 版を固定していない既存証跡の扱いを決める（5.4） |
 | `LIFECYCLE_RESIGNATION_ACTIVE_DUPLICATE` | HR | **0件にするまでV187を適用しない**（5.3） |
 | `PORTAL_ENGINEER_LINK_CANDIDATES` | 管理者 | 旧email照合なら退社時に自動処理されていたが紐付けの無いポータルユーザー。V188適用後にポータル管理で紐付けを登録するか、紐付けない（要確認で個別対応する）ことを記録する（5.5） |
 | `PORTAL_ENGINEER_LINK_SCOPE_MISMATCH`（FAIL） | 管理者・DBA | tenant不整合・参照先欠落の現行紐付け。退社完了が409で止まるため、紐付けを解除して正しいtenantで登録し直す（5.5） |
+| `AUTHORIZATION_EPOCH_COLUMN` / `AUTHORIZATION_GLOBAL_EPOCH` / `AUTHORIZATION_EPOCH_APPLICATION`（FAIL） | DBA | V189（epoch A）の前提と適用状態。FAILは同名CHECK制約の衝突、列定義・CHECKの不一致、全体epoch行の欠落・複数行、一部だけの適用（失敗したmigrationの残骸）のいずれか。DBを手で直さず、新規導入はschemaを作り直す（5.6） |
 
 ### 5.3 L7: 同一要員の未終結退社案件は1件まで（V187）
 
@@ -148,3 +149,11 @@ NF01（機能スイッチ `FEATURE_NF01_ENABLED`、既定OFF）はCONFIRM完成�
   2. V188適用後、管理者が該当するポータルユーザーの紐付けを登録する。要員本人ではないポータルユーザー（共有アドレス等）は紐付けず、その判断を5.2の手順で記録する。
   3. preflightを再実行し、`PORTAL_ENGINEER_LINK_CANDIDATES` が0件（または記録済みの許容分だけ）で、`PORTAL_ENGINEER_LINK_SCOPE_MISMATCH` が `PASS` であることを確認してから機能スイッチを検討する。
 - **ゲートが `PORTAL_ACCOUNT_LINK` のFAIL（tenant不整合）で止まった場合**: 監査SQLで経緯を確認し、ポータル管理で不整合の紐付けを解除して正しいtenantの要員へ登録し直してから、再度完了確定する。DBの直接更新はしない。
+
+### 5.6 細粒度認可epoch（V189 / epoch A spine）
+
+- 内容（NF01細粒度epoch計画 §2.2・§2.3）: 全体epoch表 `t_authorization_global_epoch`（1行、初期値 `singleton_id=1, epoch=0`）と、既存の業務行のepoch列 `sys_user.actor_authz_epoch`・`t_engineer.engineer_scope_epoch`・`m_organization_unit.org_scope_epoch`・`t_document.evidence_eligibility_epoch`・`t_lifecycle_task.task_generation`（いずれも BIGINT NOT NULL DEFAULT 0、負値はCHECKで拒否）。あわせて二者確認coordinatorの表（W3-18）が参照する複合一意key `uk_lifecycle_case_tenant_id`・`uk_lifecycle_task_case_id`・`uk_document_version_tenant_doc_id` を追加する（`sys_user (tenant_id, id)` はV165の `uk_sys_user_tenant_id` を使う）。
+- 適用前の確認: preflightの `AUTHORIZATION_EPOCH_COLUMN`・`AUTHORIZATION_GLOBAL_EPOCH`・`AUTHORIZATION_EPOCH_APPLICATION` が `PASS`（`state=NOT_APPLIED`）であること、`UNIQUE_KEY_PRECONDITION` が `PASS` であること。epoch列はDEFAULT 0で追加するため、既存行のbackfillやtenant対応付けは要らない（`ORG_UNIT_TENANT_MAPPING` の `BLOCKED_MAPPING` は本migrationを止めない）。
+- 適用後の確認: 同じ3項目が `PASS`（`state=APPLIED`）。全体epoch行が無い・複数ある状態ではCONFIRMが `409 error.authorization.epochUnavailable` で止まる（fail-closed）。
+- **epoch列を手で書き換えない・表単位でrestoreしない**: epoch列は entity に写像せず、`AuthorizationEpochMapper` の専用SQLだけが進める（値を戻す操作は無い）。anchor表（`sys_user`・`t_engineer`・`m_organization_unit`・`t_document`・`t_lifecycle_task`）だけを古い行へ戻すとepochが巻き戻り、失効済みの提出が復活し得る（計画 §9 RR-13）。DB全体のPITRは前後で一貫するため問題ない。
+- W3-10の時点では部品（`AuthorizationEpochFence`・`AuthorizationEpochReader`・`LifecycleLockExecutor`）だけで、業務経路はepochを進めない。writerの接続はW3-15（全体・利用者）、W3-16a/b（要員・組織・タスク世代）、W3-17（文書）で行う。

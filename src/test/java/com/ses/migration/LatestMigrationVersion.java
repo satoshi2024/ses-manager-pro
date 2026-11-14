@@ -15,8 +15,8 @@ package com.ses.migration;
  */
 final class LatestMigrationVersion {
 
-    /** 現在の最新versioned migration（V188: ポータルユーザーと要員の紐付け）。 */
-    static final String LATEST = "188";
+    /** 現在の最新versioned migration（V189: NF01 細粒度認可epoch・epoch A spine）。 */
+    static final String LATEST = "189";
 
     private LatestMigrationVersion() {
     }

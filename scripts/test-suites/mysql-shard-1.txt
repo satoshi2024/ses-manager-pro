@@ -31,3 +31,4 @@ V182TenantScopeHardeningRehearsalMySqlTest
 ReportScheduleClaimFenceMySqlTest
 LifecycleLockOrderMySqlTest
 AiExternalSendAuditMySqlIntegrationTest
+AuthorizationEpochSchemaMySqlTest

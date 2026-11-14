@@ -73,7 +73,10 @@ CREATE TABLE t_engineer (
   created_at          DATETIME,
   updated_at          DATETIME,
   deleted_flag        TINYINT DEFAULT 0,
-  version             INT NOT NULL DEFAULT 0
+  version             INT NOT NULL DEFAULT 0,
+  -- V189: 要員単位のscope世代（entityへは写像しない。NF01 epoch A）
+  engineer_scope_epoch BIGINT NOT NULL DEFAULT 0,
+  CONSTRAINT ck_engineer_scope_epoch CHECK (engineer_scope_epoch >= 0)
 );
 
 DROP TABLE IF EXISTS m_skill_tag CASCADE;
@@ -667,7 +670,10 @@ CREATE TABLE sys_user (
   password_change_required TINYINT NOT NULL DEFAULT 0,
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted_flag  TINYINT DEFAULT 0
+  deleted_flag  TINYINT DEFAULT 0,
+  -- V189: 利用者単位の認可世代（entityへは写像しない。NF01 epoch A）
+  actor_authz_epoch BIGINT NOT NULL DEFAULT 0,
+  CONSTRAINT ck_sys_user_actor_authz_epoch CHECK (actor_authz_epoch >= 0)
 );
 
 INSERT INTO sys_user (username, password, real_name, role, email, status)
@@ -1125,7 +1131,10 @@ CREATE TABLE m_organization_unit (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag TINYINT NOT NULL DEFAULT 0,
   legal_entity_key BIGINT AS (COALESCE(legal_entity_id, 0)),
-  UNIQUE (legal_entity_key, code, valid_from)
+  -- V189: 組織部分木単位のscope世代（entityへは写像しない。NF01 epoch A）
+  org_scope_epoch BIGINT NOT NULL DEFAULT 0,
+  UNIQUE (legal_entity_key, code, valid_from),
+  CONSTRAINT ck_org_scope_epoch CHECK (org_scope_epoch >= 0)
 );
 
 CREATE TABLE t_user_organization (

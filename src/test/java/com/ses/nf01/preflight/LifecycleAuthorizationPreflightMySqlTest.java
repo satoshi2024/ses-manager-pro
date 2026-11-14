@@ -55,6 +55,17 @@ class LifecycleAuthorizationPreflightMySqlTest {
             assertFinding(report, "LIFECYCLE_EVIDENCE_VERSIONLESS", "PASS", 0);
             assertFinding(report, "LIFECYCLE_RESIGNATION_ACTIVE_DUPLICATE", "PASS", 0);
             assertFinding(report, "PORTAL_ENGINEER_LINK_CANDIDATES", "PASS", 0);
+            // V189（epoch A）適用前: 列・全体表とも未適用で、同名CHECK制約も無いためPASS（DEFAULT 0のためbackfill不要）
+            for (String column : List.of("sys_user.actor_authz_epoch", "t_engineer.engineer_scope_epoch",
+                    "m_organization_unit.org_scope_epoch", "t_document.evidence_eligibility_epoch",
+                    "t_lifecycle_task.task_generation")) {
+                assertFindingAt(report, "AUTHORIZATION_EPOCH_COLUMN", column, "PASS", 0);
+                assertReasonContains(report, "AUTHORIZATION_EPOCH_COLUMN", column, "state=NOT_APPLIED");
+            }
+            assertFinding(report, "AUTHORIZATION_GLOBAL_EPOCH", "PASS", 0);
+            assertFinding(report, "AUTHORIZATION_EPOCH_APPLICATION", "PASS", 0);
+            assertReasonContains(report, "AUTHORIZATION_EPOCH_APPLICATION", null, "state=NOT_APPLIED");
+            assertReasonContains(report, "ORG_UNIT_TENANT_MAPPING", null, "does not block NF01 epoch A");
             for (String key : List.of("t_lifecycle_case(tenant_id,id)", "t_lifecycle_task(case_id,id)",
                     "sys_user(tenant_id,id)", "t_document(tenant_id,id)", "t_document_version(tenant_id,id)",
                     "t_document_version(tenant_id,document_id,id)")) {

@@ -71,7 +71,10 @@ CREATE TABLE t_document (
   idempotency_key            VARCHAR(190),
   created_at                 TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
   updated_at                 TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
-  deleted_flag               TINYINT       NOT NULL DEFAULT 0
+  deleted_flag               TINYINT       NOT NULL DEFAULT 0,
+  -- V189: 証跡利用可否の世代（entityへは写像しない。NF01 epoch A）
+  evidence_eligibility_epoch BIGINT        NOT NULL DEFAULT 0,
+  CONSTRAINT ck_document_evidence_eligibility_epoch CHECK (evidence_eligibility_epoch >= 0)
 );
 
 CREATE TABLE t_document_version (

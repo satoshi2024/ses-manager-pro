@@ -111,39 +111,52 @@ class LifecycleCanonicalizationTest {
     }
 
     @Test
-    @DisplayName("認可epoch tupleのいずれかが変わればfail-closedになること")
-    void authorizationEpochTupleDetectsRevocation() {
-        var submission = new LifecycleAuthorizationEpochs(2, 5, 3);
-        assertTrue(submission.submitterStillCurrent(new LifecycleAuthorizationEpochs(2, 5, 3)));
-        assertFalse(submission.submitterStillCurrent(new LifecycleAuthorizationEpochs(3, 5, 3)));
-        assertFalse(submission.submitterStillCurrent(new LifecycleAuthorizationEpochs(2, 6, 3)));
-        assertFalse(submission.submitterStillCurrent(new LifecycleAuthorizationEpochs(2, 5, 4)));
+    @DisplayName("認可fenceのいずれかの成分が変わればfail-closedになること")
+    void authorizationFenceDetectsRevocation() {
+        var submission = new LifecycleAuthorizationFence(2, 5, 3, organizations(10L, 1L));
+        assertTrue(submission.submitterStillCurrent(new LifecycleAuthorizationFence(2, 5, 3, organizations(10L, 1L))));
+        assertEquals(LifecycleAuthorizationFence.Component.GLOBAL,
+                submission.firstChange(new LifecycleAuthorizationFence(3, 5, 3, organizations(10L, 1L))));
+        assertEquals(LifecycleAuthorizationFence.Component.ACTOR,
+                submission.firstChange(new LifecycleAuthorizationFence(2, 6, 3, organizations(10L, 1L))));
+        assertEquals(LifecycleAuthorizationFence.Component.ENGINEER,
+                submission.firstChange(new LifecycleAuthorizationFence(2, 5, 4, organizations(10L, 1L))));
+        assertEquals(LifecycleAuthorizationFence.Component.ORGANIZATION,
+                submission.firstChange(new LifecycleAuthorizationFence(2, 5, 3, organizations(10L, 2L))));
+        assertEquals(LifecycleAuthorizationFence.Component.ORGANIZATION,
+                submission.firstChange(new LifecycleAuthorizationFence(2, 5, 3, organizations(11L, 1L))));
+        assertFalse(submission.submitterStillCurrent(LifecycleAuthorizationFence.withoutOrganizations(2, 5, 3)));
+        assertFalse(submission.submitterStillCurrent(null));
+        assertThrows(IllegalArgumentException.class,
+                () -> new LifecycleAuthorizationFence(-1, 0, 0, organizations(10L, 1L)));
+        assertThrows(IllegalArgumentException.class,
+                () -> new LifecycleAuthorizationFence(0, 0, 0, organizations(10L, -1L)));
     }
 
     @Test
     @DisplayName("依存lockが固定rank順に整列し同じparent行を重複排除すること")
     void lockPlanSortsAndDeduplicates() {
-        var assetAssignment = new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.ASSET_ASSIGNMENT, "tenant-a", 9);
-        var engineer = new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.ENGINEER, "tenant-a", 4);
+        var assetAssignment = LifecycleLockPlan.LockKey.exclusive(LifecycleLockPlan.Rank.ASSET_ASSIGNMENT, "", 9);
+        var engineer = LifecycleLockPlan.LockKey.exclusive(LifecycleLockPlan.Rank.ENGINEER, "tenant-a", 4);
         var plan = LifecycleLockPlan.from(List.of(
-                new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.DOCUMENT, "tenant-a", 12),
+                LifecycleLockPlan.LockKey.exclusive(LifecycleLockPlan.Rank.DOCUMENT, "tenant-a", 12),
                 assetAssignment,
                 engineer,
-                new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.ASSET, "tenant-a", 2),
+                LifecycleLockPlan.LockKey.exclusive(LifecycleLockPlan.Rank.ASSET, "", 2),
                 engineer));
 
         assertEquals(List.of(
-                new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.ENGINEER, "tenant-a", 4),
-                new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.ASSET, "tenant-a", 2),
+                LifecycleLockPlan.LockKey.exclusive(LifecycleLockPlan.Rank.ENGINEER, "tenant-a", 4),
+                LifecycleLockPlan.LockKey.exclusive(LifecycleLockPlan.Rank.ASSET, "", 2),
                 assetAssignment,
-                new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.DOCUMENT, "tenant-a", 12)), plan.locks());
+                LifecycleLockPlan.LockKey.exclusive(LifecycleLockPlan.Rank.DOCUMENT, "tenant-a", 12)), plan.locks());
     }
 
     @Test
-    @DisplayName("依存lock集合が同じなら順序と重複を許容し、追加・削除・tenant・ID変更を拒否すること")
+    @DisplayName("依存lock集合が同じなら順序と重複を許容し、追加・削除・tenant・ID・mode変更を拒否すること")
     void dependencyFenceComparesCanonicalLockSet() {
-        var engineer = new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.ENGINEER, "tenant-a", 4);
-        var document = new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.DOCUMENT, "tenant-a", 12);
+        var engineer = LifecycleLockPlan.LockKey.shared(LifecycleLockPlan.Rank.ENGINEER, "tenant-a", 4);
+        var document = LifecycleLockPlan.LockKey.shared(LifecycleLockPlan.Rank.DOCUMENT, "tenant-a", 12);
         var selected = LifecycleLockPlan.from(List.of(engineer, document));
 
         selected.requireSameDependencies(LifecycleLockPlan.from(List.of(document, engineer, document)));
@@ -151,12 +164,19 @@ class LifecycleCanonicalizationTest {
                 () -> selected.requireSameDependencies(LifecycleLockPlan.from(List.of(engineer))));
         assertThrows(LifecycleLockPlan.DependencyChangedException.class,
                 () -> selected.requireSameDependencies(LifecycleLockPlan.from(List.of(engineer, document,
-                        new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.CUSTOMER, "tenant-a", 8)))));
+                        LifecycleLockPlan.LockKey.exclusive(LifecycleLockPlan.Rank.CUSTOMER, "tenant-a", 8)))));
         assertThrows(LifecycleLockPlan.DependencyChangedException.class,
                 () -> selected.requireSameDependencies(LifecycleLockPlan.from(List.of(engineer,
-                        new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.DOCUMENT, "tenant-b", 12)))));
+                        LifecycleLockPlan.LockKey.shared(LifecycleLockPlan.Rank.DOCUMENT, "tenant-b", 12)))));
         assertThrows(LifecycleLockPlan.DependencyChangedException.class,
                 () -> selected.requireSameDependencies(LifecycleLockPlan.from(List.of(engineer,
-                        new LifecycleLockPlan.LockKey(LifecycleLockPlan.Rank.DOCUMENT, "tenant-a", 13)))));
+                        LifecycleLockPlan.LockKey.shared(LifecycleLockPlan.Rank.DOCUMENT, "tenant-a", 13)))));
+        assertThrows(LifecycleLockPlan.DependencyChangedException.class,
+                () -> selected.requireSameDependencies(LifecycleLockPlan.from(List.of(engineer,
+                        LifecycleLockPlan.LockKey.exclusive(LifecycleLockPlan.Rank.DOCUMENT, "tenant-a", 12)))));
+    }
+
+    private static java.util.SortedMap<Long, Long> organizations(long organizationId, long epoch) {
+        return new java.util.TreeMap<>(java.util.Map.of(organizationId, epoch));
     }
 }
