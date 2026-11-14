@@ -82,6 +82,9 @@ spring:
         - classpath:sql/schema-portal-user-engineer-link-h2.sql
         # V189: NF01 細粒度認可epoch（全体epoch表・5 anchor列・複合一意key。tenant_id付与と文書表の作り直しより後）
         - classpath:sql/schema-authorization-epoch-h2.sql
+        # V190/V191: NF07 F1表（catalog / policy / hold projection / DSAR）と W-5 権限seed（privacy-admin・privacy.* deny・menu）
+        - classpath:sql/schema-privacy-f1-h2.sql
+        - classpath:sql/schema-privacy-permission-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 
@@ -187,6 +190,13 @@ app:
       enabled: true
     nf10:
       enabled: true
+
+# NF07: 既存テストの意味を保つため、機能スイッチ（Feature.NF07_RETENTION）と同じく test profile ではONにする。
+# OFF時の404・policy source読取0回は PrivacyAccessGuardTest / ProductionPolicyReadonlyQueryServiceTest で検証する。
+# privacy.dsar はW3-14ではFeature未登録（A2aで登録）のため既定OFFのままにする。
+privacy:
+  retention:
+    enabled: true
 
 ai:
   enabled: false

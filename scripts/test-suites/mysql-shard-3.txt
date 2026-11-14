@@ -32,3 +32,4 @@ ImportValidationSealRealMySqlTest
 ImportValidationResolverRealMySqlTest
 FlywayProdFreshInstallMySqlTest
 ImportValidationRunRealMySqlTest
+FlywayNf07PrivacyF1MigrationTest

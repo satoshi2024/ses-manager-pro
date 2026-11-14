@@ -80,6 +80,11 @@ public final class ActionPermissionResolver {
             Map.entry("organizations", "organization"),
             Map.entry("payroll", "payroll"),
             Map.entry("permission-groups", "permission"),
+            // NF07 privacy（W-5）。/api/privacy/** と /privacy/** は resolve() 冒頭の専用分岐が解決するため、
+            // ここでの登録は isKnownAction() の判定用である。登録すると privacy.* が既知actionになるので、
+            // AuthorizationServiceImpl の legacy fallback 先頭と BreakGlassServiceImpl で privacy. を同じ変更で拒否している
+            // （片方だけだと legacy と break-glass が privacy を通す。Plan Review 注意事項1）。
+            Map.entry("privacy", "privacy"),
             // external-customer-bp-portal(S13)。未登録のままだと/api/portal-admin/**が
             // 管理者を含む全roleで403になる（CRM-R2-P1-01と同じ罠）。V104の権限seedと対にする。
             Map.entry("portal-admin", "portal-admin"),
@@ -123,6 +128,12 @@ public final class ActionPermissionResolver {
         int queryIndex = uri.indexOf('?');
         if (queryIndex >= 0) {
             uri = uri.substring(0, queryIndex);
+        }
+        // NF07 privacy は画面判定（/api/ 以外）・export・download の判定より前に解決する。後ろに置くと
+        // /privacy/** が resolvePageAction で null（action判定の素通し）になり、/api/privacy/dsar/1/export が
+        // export.execute、.../download や .pdf が file.download に解決され、営業・要員が持つactionで通過してしまう。
+        if (isPrivacyPath(uri)) {
+            return resolvePrivacyAction(method, uri);
         }
         if ("/".equals(uri)) {
             return "dashboard.view";
@@ -340,6 +351,57 @@ public final class ActionPermissionResolver {
 
     private static boolean matchesPrefix(String uri, String prefix) {
         return uri.equals(prefix) || uri.startsWith(prefix + "/");
+    }
+
+    /** NF07 privacy の画面（{@code /privacy}）とAPI（{@code /api/privacy}）。パス区切り単位で照合する。 */
+    public static boolean isPrivacyPath(String uri) {
+        return uri != null && (matchesPrefix(uri, "/privacy") || matchesPrefix(uri, "/api/privacy"));
+    }
+
+    /** privacy配下でaction keyを返すmethod。これ以外（OPTIONS等）はnull。 */
+    private static final java.util.Set<String> PRIVACY_METHODS =
+            java.util.Set.of("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE");
+
+    /**
+     * privacy配下は、上の6 methodなら画面を含めどのsubpathでも null でない {@code privacy.*} を返す
+     * （画面の null は action判定の素通し、{@code /api/**} の null は全員403になるため。privacy配下に留めれば
+     * {@code privacy.*} の規則（privacy-admin だけ許可）がそのまま効く）。
+     * それ以外のmethodは null を返す: {@code /api/privacy/**} は MenuPermissionFilter が拒否し、
+     * {@code /privacy/**} は SecurityConfig が許可methodを6つに限って拒否する。
+     */
+    private static String resolvePrivacyAction(String method, String uri) {
+        if (!PRIVACY_METHODS.contains(method)) {
+            return null;
+        }
+        boolean read = "GET".equals(method) || "HEAD".equals(method);
+        if (!uri.startsWith("/api/")) {
+            return action("privacy", method);
+        }
+        if (matchesPrefix(uri, "/api/privacy/policies")) {
+            return read ? "privacy.policy.view" : "privacy.policy.manage";
+        }
+        if (matchesPrefix(uri, "/api/privacy/catalog")) {
+            return read ? "privacy.catalog.view" : "privacy.catalog.manage";
+        }
+        if (matchesPrefix(uri, "/api/privacy/holds")) {
+            if (uri.matches("/api/privacy/holds/[^/]+/release(/.*)?")) {
+                return "privacy.hold.release";
+            }
+            return read ? "privacy.hold.view" : "privacy.hold.manage";
+        }
+        if (matchesPrefix(uri, "/api/privacy/dsar")) {
+            // 開示packageとexportは、形（/package/**・/export・download・.pdf等）とmethodに関係なく専用actionにする。
+            if (uri.matches("/api/privacy/dsar/(.+/)?(package|export)(/.*)?")
+                    || isExportPath(uri) || isDownloadPath(uri)) {
+                return "privacy.dsar.export";
+            }
+            if (uri.matches("/api/privacy/dsar/[^/]+/approve(/.*)?")) {
+                return "privacy.dsar.approve";
+            }
+            return read ? "privacy.dsar.view" : "privacy.dsar.manage";
+        }
+        // /api/privacy 直下の未知subpath（将来の入口を含む）も privacy.* に留める。
+        return action("privacy", method);
     }
 
     private static boolean isExportPath(String uri) {

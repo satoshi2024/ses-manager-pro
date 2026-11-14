@@ -48,17 +48,26 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class FeatureSwitchRouteCoverageTest {
 
-    /** NF機能のservice package → 所属機能（controller/schedulerの依存型・自身のpackageで判定）。 */
-    private static final Map<String, Feature> NF_SERVICE_PACKAGES = Map.of(
-            "com.ses.service.lifecycle", Feature.NF01,
-            "com.ses.service.servicedesk", Feature.NF02,
-            "com.ses.service.certificationlearninggap", Feature.NF03,
-            "com.ses.service.certification", Feature.NF03,
-            "com.ses.service.training", Feature.NF03,
-            "com.ses.service.skillgap", Feature.NF03,
-            "com.ses.service.pwa", Feature.NF04,
-            "com.ses.importcenter", Feature.NF06,
-            "com.ses.service.report", Feature.NF10);
+    /**
+     * NF機能のservice package → 所属機能（controller/schedulerの依存型・自身のpackageで判定）。
+     *
+     * <p>NF-07 は1つのresource（{@code privacy}）が保持・保全とDSARの2機能にまたがるため、
+     * {@link #NF_ACTION_RESOURCES} には登録せず package で判定する。privacy の controller は
+     * {@code com.ses.privacy.production.retention.*}（保持・保全）の型に依存させる（C-1）。
+     * {@code com.ses.privacy.production.dsar} は DSAR の機能スイッチを登録する A2a で追加する（W3-14 では
+     * {@code Feature.NF07_DSAR} が未登録のため対応先が無い）。
+     */
+    private static final Map<String, Feature> NF_SERVICE_PACKAGES = Map.ofEntries(
+            Map.entry("com.ses.service.lifecycle", Feature.NF01),
+            Map.entry("com.ses.service.servicedesk", Feature.NF02),
+            Map.entry("com.ses.service.certificationlearninggap", Feature.NF03),
+            Map.entry("com.ses.service.certification", Feature.NF03),
+            Map.entry("com.ses.service.training", Feature.NF03),
+            Map.entry("com.ses.service.skillgap", Feature.NF03),
+            Map.entry("com.ses.service.pwa", Feature.NF04),
+            Map.entry("com.ses.importcenter", Feature.NF06),
+            Map.entry("com.ses.privacy.production.retention", Feature.NF07_RETENTION),
+            Map.entry("com.ses.service.report", Feature.NF10));
 
     /** ActionPermissionResolverのresource名 → 所属機能（API root・画面rootの解決結果で判定）。 */
     private static final Map<String, Feature> NF_ACTION_RESOURCES = Map.of(
@@ -138,6 +147,28 @@ class FeatureSwitchRouteCoverageTest {
                 .as("NF配下の入口がFeatureの遮断表に未登録です。Featureへprefixを追加するか、"
                         + "意図的な対象外なら理由付きでUNGATED_ROUTE_PREFIXESへ登録してください: %s", violations)
                 .isEmpty();
+    }
+
+    /** C-1: privacy の入口は保持・保全の機能に属し、{@code /privacy}・{@code /api/privacy} 自体は遮断表に登録しない。 */
+    @Test
+    void NF07のpolicy説明APIは保持保全の機能に属しprivacyの根は遮断表へ登録しない() throws Exception {
+        List<Route> privacyRoutes = controllerRoutes().stream()
+                .filter(route -> Feature.matchesSegmentPrefix(route.normalized(), "/api/privacy")
+                        || Feature.matchesSegmentPrefix(route.normalized(), "/privacy"))
+                .toList();
+
+        assertThat(privacyRoutes).as("privacyのcontroller入口を検出できること").isNotEmpty();
+        for (Route route : privacyRoutes) {
+            assertThat(owners(route)).as(route.path()).containsExactly(Feature.NF07_RETENTION);
+            assertThat(Feature.forPath(route.normalized())).as(route.path()).contains(Feature.NF07_RETENTION);
+        }
+        assertThat(Feature.forPath("/privacy")).isEmpty();
+        assertThat(Feature.forPath("/api/privacy")).isEmpty();
+        assertThat(Feature.forPath("/api/privacy/unknown-sub")).isEmpty();
+        assertThat(Feature.NF07_RETENTION.apiPrefixes()).containsExactly("/api/privacy/policies");
+        assertThat(Feature.NF07_RETENTION.pagePrefixes()).isEmpty();
+        assertThat(Feature.NF07_RETENTION.menuKeys()).containsExactly("privacy-retention");
+        assertThat(NF_ACTION_RESOURCES).doesNotContainKey("privacy");
     }
 
     @Test

@@ -130,6 +130,8 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
             validateOidcAdministrators(errors);
         }
         validateDefaultPermissionGroups(errors);
+        // NF07 W-5: bootstrapでも通常でも、privacy flag の状態に関係なく常に検査する（V191 と同じ commit）。
+        validatePrivacyDenyInvariant(errors);
         if (!mfaProperties.isEnabled() || !mfaProperties.isRequiredForBreakGlass()) {
             errors.add("break-glass MFAを必須化してください");
         }
@@ -241,6 +243,36 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
             if (count == null || count == 0) {
                 errors.add("設定tenant(" + tenantId + ")にdefault permission groupが存在しません: " + groupKey);
             }
+        }
+    }
+
+    /**
+     * NF07 W-5 の privacy deny 不変条件（production-bridge-phased-plan.md §3.1.3）。
+     *
+     * <p>設定tenantの有効なgroupのうち、全体baseline {@code '*'} の許可を持つもの（{@code privacy-admin} 以外）は、
+     * 全て {@code privacy.*} の拒否行を持たなければならない。1件でも欠ければ起動を止め、group keyだけを出す
+     * （action行の内容や利用者は出さない）。{@code AuthorizationServiceImpl} は privacy の許可候補から {@code '*'} を
+     * 外しているため欠けても privacy は開かないが、運用上の誤り（V191 の後に '*' を複製したgroup等）を早期に知らせる。
+     * {@code privacy-admin} 自体の欠落・無効は起動を止めない（flag OFF なら使わないため）。
+     * 照会できない場合は確認できないとして起動を止める（fail-closed）。
+     */
+    private void validatePrivacyDenyInvariant(List<String> errors) {
+        String tenantId = StringUtils.hasText(oidcProperties.getTenantId()) ? oidcProperties.getTenantId() : "default";
+        List<String> missing;
+        try {
+            missing = permissionGroupMapper.selectWildcardGroupKeysMissingPrivacyDeny(tenantId);
+        } catch (RuntimeException e) {
+            log.error("[privacy] permission groupのprivacy deny不変条件を照会できません", e);
+            errors.add("permission groupのprivacy deny不変条件を確認できません");
+            return;
+        }
+        if (missing == null) {
+            errors.add("permission groupのprivacy deny不変条件を確認できません");
+            return;
+        }
+        if (!missing.isEmpty()) {
+            errors.add("全体baseline('*')を持つpermission groupにprivacy.*の拒否行がありません（privacy-admin以外は必須）: "
+                    + String.join(",", new java.util.TreeSet<>(missing)));
         }
     }
 

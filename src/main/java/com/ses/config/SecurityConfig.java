@@ -236,6 +236,18 @@ public class SecurityConfig {
                 // session主体（自前filterの検証を通過済み）または未認証の要求だけである。
                 .requestMatchers(METRICS_ENDPOINT).hasAnyRole(
                         "管理者", "マネージャー", MetricsScraperAuthConfig.ROLE_METRICS_SCRAPER)
+                // ===== NF07 privacy（W-5 §6.1・§6.8）: 管理者だけの静的境界（/user/** と同じ二重化）。 =====
+                // action層は privacy-admin だけを許可する（role-admin の管理者は MenuPermissionFilter で403）。
+                // 画面は ActionPermissionResolver が action key を返す6 methodだけ許し、それ以外（OPTIONS等）は拒否する
+                // （画面の null action は MenuPermissionFilter で素通しになるため）。APIの他methodは null action で filter が拒否する。
+                .requestMatchers(HttpMethod.GET, "/privacy", "/privacy/**").hasRole("管理者")
+                .requestMatchers(HttpMethod.HEAD, "/privacy", "/privacy/**").hasRole("管理者")
+                .requestMatchers(HttpMethod.POST, "/privacy", "/privacy/**").hasRole("管理者")
+                .requestMatchers(HttpMethod.PUT, "/privacy", "/privacy/**").hasRole("管理者")
+                .requestMatchers(HttpMethod.PATCH, "/privacy", "/privacy/**").hasRole("管理者")
+                .requestMatchers(HttpMethod.DELETE, "/privacy", "/privacy/**").hasRole("管理者")
+                .requestMatchers("/privacy", "/privacy/**").denyAll()
+                .requestMatchers("/api/privacy", "/api/privacy/**").hasRole("管理者")
                 // ユーザー管理・identity-provider・権限設定・監査・システム設定は管理者のみアクセス可能
                 .requestMatchers(
                     "/user/**",

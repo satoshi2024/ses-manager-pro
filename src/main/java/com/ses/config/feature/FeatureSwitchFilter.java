@@ -50,8 +50,11 @@ public class FeatureSwitchFilter extends OncePerRequestFilter {
     /** Spring Security（{@code SecurityProperties.DEFAULT_FILTER_ORDER} = -100）より十分前。 */
     public static final int ORDER = Ordered.HIGHEST_PRECEDENCE + 30;
 
-    /** {@code CustomErrorController} の404と同じ文言。機能の有無を応答本文から区別させない。 */
-    static final String NOT_FOUND_MESSAGE = "お探しのページは存在しないか、移動された可能性があります。";
+    /**
+     * {@code CustomErrorController} の404と同じ文言。機能の有無を応答本文から区別させない。
+     * service層でOFFを再判定する {@code PrivacyAccessGuard} も同じ本文を返すため公開する。
+     */
+    public static final String NOT_FOUND_MESSAGE = "お探しのページは存在しないか、移動された可能性があります。";
 
     private static final ObjectMapper JSON = new ObjectMapper();
 

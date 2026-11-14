@@ -336,6 +336,36 @@ class BreakGlassServiceImplTest {
                 service.validateBoundSession(request, breakGlassAuthentication()));
     }
 
+    /** NF07 W-5: privacy は既知resource（isKnownAction=true）になったが、緊急accessの対象にはしない。 */
+    @Test
+    void privacy接頭辞のactionを含むincident起票は400で拒否し保存しない() {
+        for (Set<String> actions : java.util.List.of(Set.of("privacy.view"), Set.of("privacy.dsar.export"),
+                Set.of("dashboard.view", "privacy.policy.view"))) {
+            BusinessException error = assertThrows(BusinessException.class,
+                    () -> service.create(1L, "IdP outage", true, 30, "INC-2026-001", actions));
+            assertEquals(400, error.getCode());
+        }
+        org.mockito.Mockito.verify(incidentMapper, org.mockito.Mockito.never()).insert(any(BreakGlassIncident.class));
+    }
+
+    @Test
+    void DBへ直接privacyを書いたincidentでもprivacyの要求はDENY_SCOPEにする() {
+        BreakGlassIncident incident = active();
+        incident.setAllowedActions("dashboard.view,privacy.policy.view,privacy.view");
+        when(incidentMapper.selectByIdAndTenant("default", 10L)).thenReturn(incident);
+        var authentication = breakGlassAuthentication();
+
+        for (String[] request : new String[][]{{"GET", "/api/privacy/policies"}, {"GET", "/privacy/holds"}}) {
+            MockHttpServletRequest privacyRequest = new MockHttpServletRequest(request[0], request[1]);
+            privacyRequest.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);
+            assertEquals(BreakGlassService.BreakGlassDecision.DENY_SCOPE,
+                    service.validateBoundSession(privacyRequest, authentication), request[1]);
+        }
+        assertEquals(BreakGlassService.BreakGlassDecision.ALLOW,
+                service.validateBoundSession(boundRequest("dashboard.view"), authentication));
+        verifyNoInteractions(sessionService);
+    }
+
     private static MockHttpServletRequest passwordChangeRequest(String method, String uri) {
         MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
         request.getSession(true).setAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE, 10L);

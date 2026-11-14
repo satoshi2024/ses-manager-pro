@@ -8,6 +8,54 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PrivacyFoundationIsolationTest {
+    /** foundation に置いてはならない Spring の登録・注入アノテーション（W3-14 §3.1.1）。 */
+    private static final java.util.List<String> FORBIDDEN_SPRING_ANNOTATIONS = java.util.List.of(
+            "@Component", "@Service", "@Repository", "@Controller", "@RestController", "@Configuration",
+            "@Bean", "@Autowired", "@ConfigurationProperties", "@Transactional", "@Scheduled", "@Profile",
+            "@ConditionalOn", "@EventListener", "@Value(");
+
+    @Test
+    void foundationにはSpringの登録と注入のアノテーションが無い() throws Exception {
+        Path foundation = Path.of("src/main/java/com/ses/privacy/foundation");
+        java.util.List<String> violations = new java.util.ArrayList<>();
+        try (java.util.stream.Stream<Path> files = Files.list(foundation)) {
+            for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                String source = Files.readString(file, java.nio.charset.StandardCharsets.UTF_8);
+                for (String annotation : FORBIDDEN_SPRING_ANNOTATIONS) {
+                    if (source.lines().map(String::trim).anyMatch(line -> line.startsWith(annotation))) {
+                        violations.add(file.getFileName() + " " + annotation);
+                    }
+                }
+            }
+        }
+        assertTrue(violations.isEmpty(), "foundationにSpring登録のアノテーションがあります: " + violations);
+    }
+
+    @Test
+    void production部品はProductionPrivacyComponents経由でしか生成できない() throws Exception {
+        for (Class<?> type : java.util.List.of(ProductionPolicyReadonlyQueryService.class,
+                ProductionApprovalEnvelopeVerifier.class, SecurityContextCallerContextProvider.class,
+                ProductionPolicyEnvelopeDecoder.class, ProductionEnvironmentGuard.class)) {
+            assertFalse(java.lang.reflect.Modifier.isPublic(type.getModifiers()), type.getSimpleName() + " はpackage-private");
+            for (java.lang.reflect.Constructor<?> constructor : type.getDeclaredConstructors()) {
+                assertFalse(java.lang.reflect.Modifier.isPublic(constructor.getModifiers()),
+                        type.getSimpleName() + " のconstructorはpublicにしない");
+            }
+        }
+        assertTrue(java.lang.reflect.Modifier.isPublic(ProductionPrivacyComponents.class.getModifiers()));
+        assertTrue(java.lang.reflect.Modifier.isFinal(ProductionPrivacyComponents.class.getModifiers()));
+        for (java.lang.reflect.Constructor<?> constructor : ProductionPrivacyComponents.class.getDeclaredConstructors()) {
+            assertTrue(java.lang.reflect.Modifier.isPrivate(constructor.getModifiers()));
+        }
+        // foundation 外の production 部品は foundation の package-private 型を参照できない（compileで保証される）。
+        // 公開しているのは port・record・factory だけであることを固定する。
+        for (Class<?> type : java.util.List.of(ProductionPolicyCatalogPort.class, CurrentPolicySource.class,
+                ProductionPolicyTrustRegistry.class, PolicyLookupKey.class, ProductionCatalogBinding.class,
+                CurrentPolicySnapshot.class)) {
+            assertTrue(java.lang.reflect.Modifier.isPublic(type.getModifiers()), type.getSimpleName());
+        }
+    }
+
     @Test
     void missingProviderFailsClosedAndNoSyntheticOrRealProviderIsCalledByDefault() {
         PrivacyProviderRegistry registry = new PrivacyProviderRegistry(java.util.Map.of(),

@@ -107,6 +107,23 @@ public enum Feature {
             List.of(),
             List.of()),
 
+    /**
+     * NF-07 保持・保全（policy説明・catalog・hold）。production-bridge-phased-plan.md §3.1.2。
+     *
+     * <p>設定キーは {@code app.features.*} ではなく {@code privacy.retention.enabled}（環境変数
+     * {@code PRIVACY_RETENTION_ENABLED}）。値の正本は {@code PrivacyFeatureProperties} で、{@code app.features.*} 側に
+     * 別名は作らない。prefixは入口のcontrollerを追加するbatchで足す（W3-14 は {@code /api/privacy/policies} だけ。
+     * F2 が {@code /api/privacy/catalog}、A1H が {@code /api/privacy/holds}・{@code /privacy/holds}）。
+     * {@code /privacy} 自体は前方一致にも完全一致にも登録しない。登録していない {@code /api/privacy/<x>} も
+     * OFF の間は service 層の {@code PrivacyAccessGuard} が同じ本文の404にする。
+     * DSAR（{@code privacy.dsar.enabled}）は入口を持つ A2a で別の最上位機能として登録する（C-1）。
+     */
+    NF07_RETENTION("プライバシー保持・保全（policy説明・catalog・hold）",
+            List.of(),
+            List.of("/api/privacy/policies"),
+            List.of(),
+            List.of("privacy-retention")),
+
     /** NF-10 定期管理レポート。 */
     NF10("定期管理レポート",
             List.of("/management-reports"),
@@ -168,13 +185,19 @@ public enum Feature {
         return Arrays.stream(values()).filter(Feature::isTopLevel).toList();
     }
 
-    /** 設定プロパティ名（例: {@code app.features.nf01.enabled}）。 */
+    /** 設定プロパティ名（例: {@code app.features.nf01.enabled}。NF-07は {@code privacy.retention.enabled}）。 */
     public String propertyName() {
+        if (this == NF07_RETENTION) {
+            return "privacy.retention.enabled";
+        }
         return "app.features." + key() + ".enabled";
     }
 
-    /** 運用で上書きする環境変数名（例: {@code FEATURE_NF01_ENABLED}）。 */
+    /** 運用で上書きする環境変数名（例: {@code FEATURE_NF01_ENABLED}。NF-07は {@code PRIVACY_RETENTION_ENABLED}）。 */
     public String environmentVariable() {
+        if (this == NF07_RETENTION) {
+            return "PRIVACY_RETENTION_ENABLED";
+        }
         return "FEATURE_" + name() + "_ENABLED";
     }
 

@@ -19,6 +19,7 @@
   - 初回パスワード変更: `V186__sys_user_password_change_required.sql`、`PasswordChangeEnforcementFilter`、`/password/change`。
   - 期限付きbootstrap mode: `ProductionBootstrapProperties`（`app.security.bootstrap.*`）、`ProductionBootstrapMode`、`BootstrapSessionFilter`。IdPの登録API: `POST /api/identity-providers`（`IdentityProviderApiController`）。
   - 初回bootstrapの完了marker: `ProductionBootstrapCompletionLatch`（`m_system_config` の `security.bootstrap.completed-at`。新しいmigrationは無い）。
+  - NF07 F1 + PERM（W3-14）: `V190__nf07_privacy_f1_core.sql`（F1表。行は作らない）、`V191__nf07_privacy_permission_seed.sql`（privacy-admin・privacy.* の拒否・menu）。prodの起動検査 `ProductionSecurityConfigurationValidator` は、全体baseline `'*'` を持つgroup（privacy-admin以外）に privacy.* の拒否行が無ければ起動を止める（bootstrap中も同じ）。`privacy.retention.enabled` / `privacy.dsar.enabled` は既定OFF。
   - 検証: `FlywayProdFreshInstallMySqlTest`（実MySQL、job設定そのものを読む）、`ProductionFlywayJobConfigurationTest`、`ProductionSchemaVersionGuardTest`、`PasswordChangeEnforcementIntegrationTest`、`ProductionBootstrapIntegrationTest`、`ProductionBootstrapModeTest`、`ProductionBootstrapPersistenceTest`、`ProductionSecurityConfigurationValidatorBootstrapTest` ほか。
 
 ## 0. 全体の流れ
@@ -159,7 +160,7 @@ mvn -B -o -Pprod-migrate clean compile flyway:info
 mvn -B -o -Pprod-migrate clean compile flyway:migrate
 ```
 - `compile` を先に行うのは、classpath location（`target/classes`）からJava migration（`db.migration.V74_3`）とcallback classを解決するため。
-- 実行順: V1〜V189（versioned 189件。SQL 188件＋Java migration `V74_3` 1件）→ Repeatable（説明の昇順: `crm contact reconciliation` → `remove v2 sample data` → `update admin password bcrypt`）。
+- 実行順: V1〜V191（versioned 191件。SQL 190件＋Java migration `V74_3` 1件）→ Repeatable（説明の昇順: `crm contact reconciliation` → `remove v2 sample data` → `update admin password bcrypt`）。
 - callback: `ProductionAdminInitialPasswordFlywayCallback`（hash検査）→ `LegacyDatabaseFlywayCallback`（空DBでは何もしない）。
 
 ### 3.4 適用結果の確認（DBA立会い）
@@ -176,9 +177,9 @@ SELECT COUNT(*) FROM flyway_schema_history WHERE type = 'BASELINE';             
 SELECT version FROM flyway_schema_history ORDER BY installed_rank LIMIT 1;                     -- '1'
 -- 最新version（本releaseのLATEST）
 SELECT version FROM flyway_schema_history WHERE version IS NOT NULL
- ORDER BY installed_rank DESC LIMIT 1;                                                         -- '189'
+ ORDER BY installed_rank DESC LIMIT 1;                                                         -- '191'
 -- versioned migrationの適用件数（本releaseの総件数）
-SELECT COUNT(*) FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1;          -- 189
+SELECT COUNT(*) FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1;          -- 191
 -- Repeatable 3本が成功
 SELECT script FROM flyway_schema_history WHERE version IS NULL AND success = 1 ORDER BY script;
 -- R__crm_contact_reconciliation.sql / R__remove_v2_sample_data.sql / R__update_admin_password_bcrypt.sql
@@ -202,6 +203,23 @@ SELECT (SELECT COUNT(*) FROM m_customer) AS customers, (SELECT COUNT(*) FROM t_p
 SELECT contract_id FROM t_contract_acceptance_backfill;                                        -- 0 の1行（V80の完了marker）
 SELECT code FROM m_organization_unit WHERE deleted_flag = 0;                                   -- LEGACY（V60の移行組織。V2 sampleとは無関係に作られる）
 
+-- NF07 W-5（V191）: privacy-admin は1件、privacy.* の拒否は privacy-admin 以外の全group（新規導入では5件）、menu 2件
+SELECT COUNT(*) FROM m_permission_group WHERE group_key = 'privacy-admin';                    -- 1
+SELECT COUNT(*) FROM t_permission_group_action a JOIN m_permission_group g ON g.id = a.group_id
+ WHERE a.action_key = 'privacy.*' AND a.deny_flag = 1 AND g.group_key <> 'privacy-admin';    -- 5
+SELECT COUNT(*) FROM t_permission_group_action a JOIN m_permission_group g ON g.id = a.group_id
+ WHERE g.group_key = 'privacy-admin' AND a.deny_flag = 0 AND a.action_key IN ('*', 'privacy.*'); -- 2
+SELECT COUNT(*) FROM t_user_permission_group u JOIN m_permission_group g ON g.id = u.group_id
+ WHERE g.group_key = 'privacy-admin';                                                        -- 0（割当は監査・通知付きの画面操作だけで行う）
+SELECT menu_key, sort_order FROM m_menu WHERE menu_key IN ('privacy-retention', 'privacy-dsar') ORDER BY sort_order;
+-- privacy-retention 260 / privacy-dsar 261
+-- NF07 F1（V190）: 表は8件作られ、行は1件も無い（法的な値はseedしない）
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN
+ ('m_pii_data_element', 'm_retention_policy', 't_legal_hold', 't_privacy_projection_state', 't_privacy_request',
+  't_privacy_request_subject_link', 't_privacy_action', 't_privacy_export_package');      -- 8
+SELECT (SELECT COUNT(*) FROM m_pii_data_element) + (SELECT COUNT(*) FROM m_retention_policy)
+     + (SELECT COUNT(*) FROM t_legal_hold) + (SELECT COUNT(*) FROM t_privacy_request);       -- 0
+
 -- helper procedureが残っていない・trigger件数
 SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema = DATABASE();           -- 0
 SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE();           -- 55（2026-11-14 R-3予行演習（MySQL 8.0.36・offline job）の実測値。静的計数の56は誤り）
@@ -223,7 +241,7 @@ SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE
   - 理由: account lockは `AccountLockServiceImpl` が `Asia/Tokyo` の時計で `sys_user.locked_until` を書き、login時の判定（`LoginUser.isAccountNonLocked`）はJVMの既定時区の `LocalDateTime.now()` と比べる。JVMがUTCのままだと30分のlockが約9時間30分続く（bootstrap中に `admin` がlockされると作業時間枠が実質閉じる。§5.6）。監査の `created_at` 等、JVMの既定時区で日時を作る箇所は他にもある。testは `argLine` で時区を固定しているが、本番は配備側で固定しない限り固定されない。DB側の時区（§1.1、`+09:00`）とは別に必要。
 - 初回は `APP_SCHEDULING_ENABLED=false` で1台だけ起動する。
 - 起動時schema guard: DBの `flyway_schema_history` とartifactのmigrationを照合し、一致しなければTomcatのport・schedulerを開始する前に起動を中止する。
-  - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V189 と一致しています`
+  - 成功: INFO log `[schema guard] DBのschemaはartifactの最新migration V191 と一致しています`
   - 失敗: ERROR log `[schema guard] DBのschemaがartifactと一致しないため起動を中止します。...`（未適用・失敗行・artifactに無いmigration・最新versionの不一致・一度も適用されていないRepeatableを列挙する）。jobの結果（§3.4）とartifactのSHA（§1.4）を確認する。
   - guardはplaceholderを置換しないため、アプリへ初期管理者hashを渡す必要は無い。placeholderを含むRepeatable（初期管理者）は「同じscriptの成功適用が履歴にある」ことだけを確認する。jobが `db/migration-prod` を落として実行された（`-Dflyway.locations` 等の上書き）場合は、prodのRepeatableが一度も適用されていないとして起動を止める。
 - `/actuator/health/readiness` がUPであることを確認する。

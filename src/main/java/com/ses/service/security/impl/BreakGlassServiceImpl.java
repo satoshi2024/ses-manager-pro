@@ -38,6 +38,8 @@ import org.springframework.security.core.Authentication;
 public class BreakGlassServiceImpl implements BreakGlassService {
 
     private static final String ADMIN_ROLE = "管理者";
+    /** NF07 privacy action の接頭辞。break-glass の許可対象にしない。 */
+    private static final String PRIVACY_ACTION_PREFIX = "privacy.";
 
     private final BreakGlassIncidentMapper incidentMapper;
     private final SysUserMapper sysUserMapper;
@@ -208,7 +210,9 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (!StringUtils.hasText(action)) {
             action = ActionPermissionResolver.resolve(request.getMethod(), request.getRequestURI());
         }
-        if (!StringUtils.hasText(action) || !allowedActions(incident).contains(action)) {
+        // 起票時に privacy を拒否していても、DBへ直接書かれたincidentで privacy を開かない（多重防御）。
+        if (!StringUtils.hasText(action) || action.startsWith(PRIVACY_ACTION_PREFIX)
+                || !allowedActions(incident).contains(action)) {
             return BreakGlassDecision.DENY_SCOPE;
         }
         return BreakGlassDecision.ALLOW;
@@ -317,7 +321,9 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (normalized.size() != actions.size() || normalized.stream().anyMatch(action ->
                 !ActionPermissionResolver.isKnownAction(action) || action.contains("*")
                         || "permission.manage".equals(action)
-                        || action.startsWith("user."))) {
+                        || action.startsWith("user.")
+                        // NF07: privacy は既知resource（isKnownAction=true）だが、緊急accessの対象にしない（W-5 §6.8）。
+                        || action.startsWith(PRIVACY_ACTION_PREFIX))) {
             throw BusinessException.of(400, "error.breakGlass.invalidRequest");
         }
         return String.join(",", normalized);

@@ -49,6 +49,23 @@ public class FeatureSwitchProperties {
     private Toggle nf10 = new Toggle();
 
     /**
+     * NF-07 の設定値（{@code privacy.*}）。{@code app.features.*} としてはbindしない（getter/setterを持たせず、
+     * 別名を作らない）。Spring contextでは同じ {@link com.ses.privacy.production.PrivacyFeatureProperties} beanを
+     * {@link #usePrivacyFeatureProperties} で受け取る。Spring管理外で {@code new} した場合は既定OFFの値を持つ。
+     */
+    @lombok.Getter(lombok.AccessLevel.NONE)
+    @lombok.Setter(lombok.AccessLevel.NONE)
+    private com.ses.privacy.production.PrivacyFeatureProperties privacy =
+            new com.ses.privacy.production.PrivacyFeatureProperties();
+
+    /** NF-07 の設定値の正本（{@code privacy.*} のbind結果）を受け取る。null は既定OFFとして扱う。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void usePrivacyFeatureProperties(com.ses.privacy.production.PrivacyFeatureProperties privacyProperties) {
+        this.privacy = privacyProperties == null
+                ? new com.ses.privacy.production.PrivacyFeatureProperties() : privacyProperties;
+    }
+
+    /**
      * 機能に対応する設定値（親子の論理積を取る前の値）。機能を追加したらここへcaseを追加する
      * （switch式が網羅的でないとcompileできないため、登録漏れはbuildで検出される）。
      */
@@ -61,6 +78,7 @@ public class FeatureSwitchProperties {
             case NF03_CERTIFICATION_PII -> nf03CertificationPii;
             case NF04 -> nf04;
             case NF06 -> nf06;
+            case NF07_RETENTION -> privacy.getRetention();
             case NF10 -> nf10;
         };
     }

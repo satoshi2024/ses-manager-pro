@@ -6,6 +6,7 @@ import com.ses.entity.SysUser;
 import com.ses.config.integrationhub.ExternalApiPrincipal;
 import com.ses.mapper.SysUserMapper;
 import com.ses.portal.PortalLoginUser;
+import com.ses.service.security.AuthorizationService;
 import com.ses.service.security.LegalEntityContextService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,28 +24,40 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * production policy 照会者の判定（production-bridge-phased-plan.md §6.4）。
+ *
+ * <p>正本は permission group の action 権限 {@code privacy.policy.view}（privacy-admin だけが許可）。
+ * GrantedAuthority 文字列（旧 {@code PRIVACY_ADMIN_READ}）だけでは通らない。tenant 不一致・
+ * {@code AuthorizationService} 不在・例外は拒否する。
+ */
 class SecurityContextCallerContextProviderTest {
     private static final Instant NOW = Instant.parse("2026-11-04T03:00:00Z");
     private LegalEntityContextService legalEntityContext;
     private SysUserMapper sysUserMapper;
+    private AuthorizationService authorizationService;
     private SecurityContextCallerContextProvider provider;
 
     @BeforeEach
     void setUp() {
         legalEntityContext = mock(LegalEntityContextService.class);
         sysUserMapper = mock(SysUserMapper.class);
+        authorizationService = mock(AuthorizationService.class);
         when(sysUserMapper.selectByIdAndTenant(17L, "tenant-a")).thenReturn(activeAdmin("tenant-a"));
         when(legalEntityContext.requireCurrentLegalEntityId()).thenReturn(42L);
-        provider = new SecurityContextCallerContextProvider(legalEntityContext, sysUserMapper,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+        when(authorizationService.isAllowed(any(), eq("privacy.policy.view"))).thenReturn(true);
+        provider = provider(() -> authorizationService, "tenant-a");
     }
 
     @AfterEach
@@ -69,7 +82,7 @@ class SecurityContextCallerContextProviderTest {
     }
 
     @Test
-    void acceptsActiveInternalLoginAndUsesIdentityObservationTime() {
+    void acceptsActiveInternalLoginOnlyWhenPermissionGroupAllowsPrivacyPolicyView() {
         setAuthentication(loginUser(activeAdmin("tenant-a"), authorities(), "tenant-a"), authorities());
 
         TrustedCallerContext caller = provider.getCallerContext().orElseThrow();
@@ -77,6 +90,7 @@ class SecurityContextCallerContextProviderTest {
         assertEquals("17", caller.actorId());
         assertEquals(TrustedActorRole.ROLE_ADMIN, caller.actorRole());
         assertEquals(NOW, caller.authenticatedAt());
+        verify(authorizationService).isAllowed(any(), eq("privacy.policy.view"));
     }
 
     @Test
@@ -149,18 +163,42 @@ class SecurityContextCallerContextProviderTest {
     }
 
     @Test
-    void rejectsManagerNameWithoutExplicitAdminAndPrivacyAuthorities() {
-        List<SimpleGrantedAuthority> ordinaryAdmin = List.of(new SimpleGrantedAuthority("ROLE_管理者"));
-        setAuthentication(loginUser(activeAdmin("tenant-a"), ordinaryAdmin, "tenant-a"), ordinaryAdmin);
-        assertFalse(provider.getCallerContext().isPresent());
+    void grantedAuthorityStringsAloneDoNotGrantPrivacyRead() {
+        // role-admin だけの管理者（privacy.* は deny）。旧方式の authority 文字列を持たせても通らない。
+        when(authorizationService.isAllowed(any(), eq("privacy.policy.view"))).thenReturn(false);
+        List<SimpleGrantedAuthority> legacyAuthorities = List.of(new SimpleGrantedAuthority("ROLE_ADMIN"),
+                new SimpleGrantedAuthority("PRIVACY_ADMIN_READ"), new SimpleGrantedAuthority("ROLE_管理者"));
+        setAuthentication(loginUser(activeAdmin("tenant-a"), legacyAuthorities, "tenant-a"), legacyAuthorities);
 
-        List<SimpleGrantedAuthority> missingPrivacy = List.of(new SimpleGrantedAuthority("ROLE_ADMIN"));
-        setAuthentication(loginUser(activeAdmin("tenant-a"), missingPrivacy, "tenant-a"), missingPrivacy);
         assertFalse(provider.getCallerContext().isPresent());
+    }
 
-        List<SimpleGrantedAuthority> privacyOnly = List.of(new SimpleGrantedAuthority("PRIVACY_ADMIN_READ"));
-        setAuthentication(loginUser(activeAdmin("tenant-a"), privacyOnly, "tenant-a"), privacyOnly);
-        assertFalse(provider.getCallerContext().isPresent());
+    @Test
+    void rejectsWhenAuthorizationTenantDiffersFromPrincipalTenant() {
+        // AuthorizationServiceImpl は設定tenantで group を評価する。principal と違う tenant の group では判定させない。
+        SecurityContextCallerContextProvider otherTenant = provider(() -> authorizationService, "tenant-b");
+        setAuthentication(loginUser(activeAdmin("tenant-a"), authorities(), "tenant-a"), authorities());
+        assertFalse(otherTenant.getCallerContext().isPresent());
+
+        SecurityContextCallerContextProvider unsetTenant = provider(() -> authorizationService, null);
+        assertFalse(unsetTenant.getCallerContext().isPresent());
+        verify(authorizationService, never()).isAllowed(any(), any());
+        verify(sysUserMapper, never()).selectByIdAndTenant(any(), any());
+    }
+
+    @Test
+    void rejectsWhenAuthorizationServiceIsUnavailableOrThrows() {
+        setAuthentication(loginUser(activeAdmin("tenant-a"), authorities(), "tenant-a"), authorities());
+
+        assertFalse(provider(null, "tenant-a").getCallerContext().isPresent());
+        assertFalse(provider(() -> null, "tenant-a").getCallerContext().isPresent());
+        assertFalse(provider(() -> {
+            throw new IllegalStateException("no bean");
+        }, "tenant-a").getCallerContext().isPresent());
+
+        AuthorizationService failing = mock(AuthorizationService.class);
+        when(failing.isAllowed(any(), any())).thenThrow(new IllegalStateException("db unavailable"));
+        assertFalse(provider(() -> failing, "tenant-a").getCallerContext().isPresent());
     }
 
     @Test
@@ -191,6 +229,12 @@ class SecurityContextCallerContextProviderTest {
         assertFalse(provider.getCallerContext().isPresent());
     }
 
+    private SecurityContextCallerContextProvider provider(java.util.function.Supplier<AuthorizationService> supplier,
+                                                          String authorizationTenantId) {
+        return new SecurityContextCallerContextProvider(legalEntityContext, sysUserMapper, supplier,
+                authorizationTenantId, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
     private static SysUser activeAdmin(String tenantId) {
         SysUser sysUser = new SysUser();
         sysUser.setId(17L);
@@ -205,9 +249,9 @@ class SecurityContextCallerContextProviderTest {
         return new LoginUser(sysUser, granted, tenantId);
     }
 
+    /** この app が発行する authority は ROLE_&lt;role&gt; だけ。privacy の判定には使わない。 */
     private static List<SimpleGrantedAuthority> authorities() {
-        return List.of(new SimpleGrantedAuthority("ROLE_ADMIN"),
-                new SimpleGrantedAuthority("PRIVACY_ADMIN_READ"));
+        return List.of(new SimpleGrantedAuthority("ROLE_管理者"));
     }
 
     private static void setAuthentication(Object principal, List<SimpleGrantedAuthority> granted) {

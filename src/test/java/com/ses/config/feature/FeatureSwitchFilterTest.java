@@ -70,10 +70,13 @@ class FeatureSwitchFilterTest {
             // NF-06は取込センターAPI（upload・検証・preview・error export・source/mapping管理）
             Feature.NF06, List.of("/api/import-center/uploads", "/api/import-center/jobs/5/validations",
                     "/api/import-center/jobs/5/preview", "/api/import-center/sources/2/mappings"),
+            // NF-07 保持・保全はW3-14ではpolicy説明APIだけを持つ（catalog・holdは後続batchが入口と同時に登録する）
+            Feature.NF07_RETENTION, List.of("/api/privacy/policies", "/api/privacy/policies/3",
+                    "/api/privacy/policies/evaluate"),
             Feature.NF10, List.of("/api/management-reports/runs", "/api/management-reports/schedules/7/enable"));
 
-    /** 画面prefixを持たない最上位の機能（API先行。画面は後続バッチで追加する）。 */
-    private static final java.util.Set<Feature> API_ONLY_TOP_LEVEL = java.util.Set.of(Feature.NF06);
+    /** 画面を持たずAPIだけを遮断する最上位の機能（API先行。画面prefixは画面を追加するbatchで登録する）。 */
+    private static final Set<Feature> API_ONLY_TOP_LEVEL = Set.of(Feature.NF06, Feature.NF07_RETENTION);
 
     /** 各機能の代表的な画面・静的入口。 */
     private static final Map<Feature, List<String>> PAGE_SAMPLES = Map.of(
@@ -87,6 +90,7 @@ class FeatureSwitchFilterTest {
             Feature.NF04, List.of("/service-worker.js", "/manifest.webmanifest"),
             // NF-06の画面（/import-center）はW3-12で追加する。現時点は画面入口を持たない
             Feature.NF06, List.of(),
+            Feature.NF07_RETENTION, List.of(),
             Feature.NF10, List.of("/management-reports"));
 
     /** 画面URLを持たない子スイッチ → 子をOFFにしても遮断してはならない埋込み先の画面。 */
@@ -131,12 +135,14 @@ class FeatureSwitchFilterTest {
         FeatureSwitchFilter filter = filter(disabledOnly(feature));
 
         if (API_ONLY_TOP_LEVEL.contains(feature)) {
-            // API先行の最上位機能は画面・静的入口を遮断表に持たない。既存画面を巻き込んで遮断しないことだけを確認する。
+            // API先行・APIだけの最上位機能は画面・静的入口を遮断表に持たない（/privacy 自体も登録しない）。
+            // 既存画面を巻き込んで遮断しないことだけを確認する。
             assertThat(PAGE_SAMPLES.get(feature)).isEmpty();
             assertThat(feature.pagePrefixes()).as("%s の画面prefix", feature).isEmpty();
             assertThat(feature.exactPaths()).as("%s の静的入口", feature).isEmpty();
             assertPassesThrough(filter, "GET", "/dashboard");
             assertPassesThrough(filter, "GET", "/import-center-like");
+            assertPassesThrough(filter, "GET", "/privacy");
             return;
         }
         if (PAGE_SAMPLES.get(feature).isEmpty()) {
