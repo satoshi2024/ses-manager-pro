@@ -679,6 +679,13 @@ CREATE TABLE t_disposition_item (
 
 `Feature` への登録の仕方は §3.1.2。flag は公開可否であって権限ではないので、ON でも §6 の権限が別に要る。prod では flag の状態に関係なく §3.1.3 の privacy deny 不変条件を検査する。
 
+**W3-14b 実装記録（2026-11-14）**: W3-14 は §3.1 を W3-14a/b に分け、決定ID束縛と ON の起動時検査を W3-14b で実装した（W3-14 review P2-1）。
+
+- `PrivacyDecisionBinding`（純粋評価）と `PrivacyApprovalProperties`（`privacy.approval.*`）。§5.2 の `privacy.approval.dNN.decision-id` / `signed-on` に、NF06・NF08 と同じく `expires-on`、承認 tenant（`tenant-id`）、承認 capability（`capabilities`）、決定書に記載する束縛内容 digest（`approval-digest`、正規形 `nf07-privacy-decision-binding-v1`）を加えた。retention は D-01・D-09、dsar は D-01・D-06・D-09 を要する。D-02〜D-05・D-07・D-08 はそれを前提にする batch で足す。
+- `PrivacyProductionConfigurationValidator`（prod、`SmartInitializingSingleton`）: いずれかの flag が ON なら、束縛の完全性（tenant 一致・期限内・digest 一致）、`privacy-admin` group が `privacy.*` を許可し privacy の拒否行を持たないこと、有効な管理者2名以上（有効・未削除・未ロック・管理者 role・拒否 group 非所属・break-glass username 以外）、`privacy-admin` 以外の有効な group に `privacy.` 接頭辞の許可行が無いこと（review P3-2）を検査し、欠ければ起動しない。全て OFF なら検査しない。NF06・NF08 と異なり、失効・署名日前も起動を止める（実行時に決定IDで止める仕組みが A1H まで無いため）。dsar は A2a まで前提（上表の `privacy.dsar.*`・F2 provider）を検査できないため、ON にすると起動しない。
+- 上表の「未登録の `/api/privacy/<x>` も `PrivacyAccessGuard` が 404」は不正確だった（review P3-6、R2-P3-2）。未登録の path には handler が無く guard を通らないため、privacy-admin 以外の管理者は 403（`MenuPermissionFilter`）、privacy-admin は Spring の 404 になる。404 を保証するのは `Feature` に登録し guard を通す入口だけである（I-2 の同じ記述も同様）。
+- 運用手順は `.kiro/specs/production-launch/feature-switches.md` 4.7。最初の privacy-admin の割当は既存の privacy-admin がいないため、対象者以外の有効な管理者全員へ通知する（review P3-4）。break-glass username への `privacy-admin` 割当は 400（review P3-11）。
+
 ### 5.2 UNKNOWN の理由コード（capability 単位の拒否）
 
 | capability | 必要な決定・設定 | 欠けたときの結果 |

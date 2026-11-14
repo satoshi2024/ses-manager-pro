@@ -144,6 +144,11 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
         if (!ADMIN_ROLE.equals(target.getRole())) {
             throw BusinessException.of(400, "error.permission.adminOnlyGroup");
         }
+        // break-glass username は incident 外の OIDC session が失効させられ、break-glass session では privacy が
+        // DENY_SCOPE になる。privacy 管理者として使えない口座を割り当てさせない（W3-14 review P3-11）。
+        if (isBreakGlassUsername(target.getUsername())) {
+            throw BusinessException.of(400, "error.permission.breakGlassPrivacyAdmin");
+        }
         Set<Long> otherGroupIds = new LinkedHashSet<>();
         for (PermissionGroup group : groups) {
             if (group.getId() != null && !PRIVACY_ADMIN_GROUP_KEY.equals(group.getGroupKey())) {
@@ -222,18 +227,35 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
         return joined.length() <= AUDIT_STATE_MAX_LENGTH ? joined : joined.substring(0, AUDIT_STATE_MAX_LENGTH);
     }
 
-    /** 変更前から privacy-admin に所属していた有効なユーザーへ通知する（本文に対象者・subject の識別子は入れない）。 */
-    private void notifyPrivacyAdmins(List<Long> recipients, Long targetUserId, boolean granted, LocalDateTime now) {
-        if (recipients == null || recipients.isEmpty()) {
+    /**
+     * 変更前から privacy-admin に所属していた有効なユーザーへ通知する（本文に対象者・subject の識別子は入れない）。
+     * 対象者本人以外に既存の privacy-admin がいない場合（最初の割当・最後の解除）は、対象者以外の有効な管理者全員へ
+     * 通知する（W3-14 review P3-4。通知先が無いまま監査だけが残る状態を作らない）。
+     */
+    private void notifyPrivacyAdmins(List<Long> existingPrivacyAdmins, Long targetUserId, boolean granted,
+                                     LocalDateTime now) {
+        Set<Long> recipients = new LinkedHashSet<>();
+        if (existingPrivacyAdmins != null) {
+            existingPrivacyAdmins.stream().filter(java.util.Objects::nonNull).forEach(recipients::add);
+        }
+        boolean othersExist = recipients.stream().anyMatch(recipient -> !recipient.equals(targetUserId));
+        if (!othersExist) {
+            List<SysUser> administrators = sysUserMapper.selectActiveByRoleAndTenant(ADMIN_ROLE, tenantId());
+            if (administrators != null) {
+                administrators.stream()
+                        .filter(java.util.Objects::nonNull)
+                        .map(SysUser::getId)
+                        .filter(id -> id != null && !id.equals(targetUserId))
+                        .forEach(recipients::add);
+            }
+        }
+        if (recipients.isEmpty()) {
             return;
         }
         String title = granted ? "プライバシー管理者の割当が追加されました" : "プライバシー管理者の割当が解除されました";
         String message = "監査ログ（" + PRIVACY_ADMIN_AUDIT_CODE + "）で変更内容を確認してください";
         String change = granted ? "grant" : "revoke";
-        for (Long recipient : new LinkedHashSet<>(recipients)) {
-            if (recipient == null) {
-                continue;
-            }
+        for (Long recipient : recipients) {
             notificationService.publishToUser(recipient, PRIVACY_ADMIN_NOTIFICATION_TYPE, title, message,
                     "/audit-log", "privacy-admin-changed:" + targetUserId + ":" + change + ":" + now + ":" + recipient,
                     "audit-log");
@@ -277,6 +299,17 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
         if (auditLogMapper.insert(entry) != 1) {
             throw BusinessException.of("error.permission.auditFailed");
         }
+    }
+
+    private boolean isBreakGlassUsername(String username) {
+        if (!StringUtils.hasText(username) || oidcProperties.getBreakGlassUsernames() == null) {
+            return false;
+        }
+        String normalized = username.trim();
+        return oidcProperties.getBreakGlassUsernames().stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .anyMatch(normalized::equals);
     }
 
     private String tenantId() {

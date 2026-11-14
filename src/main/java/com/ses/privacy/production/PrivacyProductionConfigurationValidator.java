@@ -1,0 +1,213 @@
+package com.ses.privacy.production;
+
+import com.ses.config.OidcSecurityProperties;
+import com.ses.mapper.PermissionGroupMapper;
+import com.ses.mapper.UserPermissionGroupMapper;
+import com.ses.privacy.production.PrivacyAccessGuard.Capability;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.SmartInitializingSingleton;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Profile;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
+
+/**
+ * 本番起動時の NF07 flag ON の前提検査（W3-14b、production-bridge-phased-plan.md §3.1.1・§5.1）。
+ *
+ * <ul>
+ *   <li>NF07 の flag（{@code privacy.retention.enabled}・{@code privacy.dsar.enabled}）が全て OFF: 何も検査せず、
+ *       起動を止めない（初回リリースは OFF で配備する。OFF の間は入口が404で、DB も読まない）。</li>
+ *   <li>1つでも ON: 次の全てを満たさなければ起動を失敗させる（固定の違反コードだけを列挙し、設定値・username は出さない）。
+ *     <ol>
+ *       <li>決定ID束縛（{@link PrivacyDecisionBinding}）が完全: 承認tenantが設定tenantと一致、ON の capability が全て承認済み、
+ *           必要な決定（retention は D-01・D-09、dsar は D-01・D-06・D-09）が形式・placeholder・重複・署名日・失効日の
+ *           規則を満たし、approval digest が一致する。</li>
+ *       <li>{@code privacy-admin} group が有効で {@code privacy.*} を許可し、privacy の拒否行を持たない。</li>
+ *       <li>{@code privacy-admin} の有効な管理者（{@link UserPermissionGroupMapper#selectEffectivePrivacyAdminUsernames}。
+ *           break-glass username は数えない）が {@value #MIN_PRIVACY_ADMINISTRATORS} 名以上。</li>
+ *       <li>{@code privacy-admin} 以外の有効な group が {@code privacy.} 接頭辞の許可行を持たない（review P3-2）。</li>
+ *       <li>{@code dsar}: 入口と §5.1 の追加前提（D-06 の値、F2 provider 等）を検査する A2a が未実装のため、常に不可。</li>
+ *     </ol>
+ *   </li>
+ * </ul>
+ *
+ * <p>NF08・NF06 の承認検査と異なり、署名日前・失効も起動を止める（A1H 以降の capability を実行時に止める仕組みが
+ * まだ無いため、ON のまま起動させない）。照会できない場合は確認できないとして起動を止める（fail-closed）。
+ * {@link SmartInitializingSingleton} で全 singleton 生成後・Tomcat の connector 開始前に実行する
+ * （{@code ProductionSchemaVersionGuard} と同じ時点。失敗すると port を開かない）。読むだけで DB へは書かない。
+ */
+@Component
+@Profile("prod")
+public class PrivacyProductionConfigurationValidator implements SmartInitializingSingleton {
+
+    private static final Logger log = LoggerFactory.getLogger(PrivacyProductionConfigurationValidator.class);
+
+    /** 登録者と有効化者の分離（NF07-REG）等の SoD に要る privacy-admin の人数（§5.1）。 */
+    public static final int MIN_PRIVACY_ADMINISTRATORS = 2;
+
+    private static final String ADMIN_ROLE = "管理者";
+
+    private final PrivacyFeatureProperties featureProperties;
+    private final PrivacyApprovalProperties approvalProperties;
+    private final OidcSecurityProperties oidcProperties;
+    private final PermissionGroupMapper permissionGroupMapper;
+    private final UserPermissionGroupMapper userPermissionGroupMapper;
+    private final Clock clock;
+
+    @Autowired
+    public PrivacyProductionConfigurationValidator(PrivacyFeatureProperties featureProperties,
+                                                   PrivacyApprovalProperties approvalProperties,
+                                                   OidcSecurityProperties oidcProperties,
+                                                   PermissionGroupMapper permissionGroupMapper,
+                                                   UserPermissionGroupMapper userPermissionGroupMapper,
+                                                   Clock clock) {
+        this.featureProperties = featureProperties;
+        this.approvalProperties = approvalProperties;
+        this.oidcProperties = oidcProperties;
+        this.permissionGroupMapper = permissionGroupMapper;
+        this.userPermissionGroupMapper = userPermissionGroupMapper;
+        this.clock = clock == null ? Clock.systemUTC() : clock;
+    }
+
+    @Override
+    public void afterSingletonsInstantiated() {
+        validate();
+    }
+
+    /** 前提を検査し、満たさなければ {@link IllegalStateException} で起動を止める。 */
+    public void validate() {
+        Set<Capability> enabled = enabledCapabilities();
+        if (enabled.isEmpty()) {
+            log.info("[privacy] NF07のflagが全てOFFのため、決定ID束縛とprivacy-adminの起動検査を行いません");
+            return;
+        }
+        String tenantId = authorizationTenantId();
+        List<String> missing = new ArrayList<>();
+
+        PrivacyDecisionBinding.Evaluation binding = PrivacyDecisionBinding.evaluate(approvalProperties, enabled,
+                tenantId, PrivacyDecisionBinding.businessDate(clock));
+        binding.violations().forEach(code -> missing.add("decisionBinding." + code));
+        if (enabled.contains(Capability.DSAR)) {
+            missing.add("dsar.prerequisitesNotImplemented");
+        }
+        validatePrivacyAdminGroup(tenantId, missing);
+        int administrators = validatePrivacyAdministrators(tenantId, missing);
+        validateNoPrivacyAllowOutsidePrivacyAdmin(tenantId, missing);
+
+        if (!missing.isEmpty()) {
+            throw new IllegalStateException("本番でNF07のflag（" + flagNames(enabled)
+                    + "）をONにする前提を満たさないため起動できません: " + String.join(",", missing));
+        }
+        log.info("[privacy] NF07のflag ONの前提を確認しました: flags={} decisionIds={} privacyAdmins={}",
+                flagNames(enabled), binding.snapshot().decisionIds().values(), administrators);
+    }
+
+    private void validatePrivacyAdminGroup(String tenantId, List<String> missing) {
+        Long count;
+        try {
+            count = permissionGroupMapper.countPrivacyAdminGroupsGrantingPrivacy(tenantId);
+        } catch (RuntimeException e) {
+            log.error("[privacy] privacy-admin groupの状態を照会できません", e);
+            missing.add("privacyAdminGroup.unverifiable");
+            return;
+        }
+        if (count == null || count != 1L) {
+            missing.add("privacyAdminGroup.notGrantingPrivacy");
+        }
+    }
+
+    /** 有効な privacy-admin の人数（break-glass username を除く）を返す。照会できなければ -1。 */
+    private int validatePrivacyAdministrators(String tenantId, List<String> missing) {
+        List<String> usernames;
+        try {
+            usernames = userPermissionGroupMapper.selectEffectivePrivacyAdminUsernames(
+                    tenantId, ADMIN_ROLE, LocalDateTime.now(clock));
+        } catch (RuntimeException e) {
+            log.error("[privacy] privacy-adminの所属者を照会できません", e);
+            missing.add("privacyAdmins.unverifiable");
+            return -1;
+        }
+        if (usernames == null) {
+            missing.add("privacyAdmins.unverifiable");
+            return -1;
+        }
+        Set<String> administrators = new TreeSet<>();
+        usernames.stream().filter(StringUtils::hasText).map(String::trim).forEach(administrators::add);
+        // break-glass username は incident 外の OIDC session が失効させられ、break-glass session では privacy が
+        // DENY_SCOPE になるため、privacy を実際に使える管理者として数えない。
+        administrators.removeAll(breakGlassUsernames());
+        if (administrators.size() < MIN_PRIVACY_ADMINISTRATORS) {
+            missing.add("privacyAdmins.insufficient[current=" + administrators.size()
+                    + ";required=" + MIN_PRIVACY_ADMINISTRATORS + "]");
+        }
+        return administrators.size();
+    }
+
+    private void validateNoPrivacyAllowOutsidePrivacyAdmin(String tenantId, List<String> missing) {
+        List<String> groupKeys;
+        try {
+            groupKeys = permissionGroupMapper.selectGroupKeysAllowingPrivacyOutsidePrivacyAdmin(tenantId);
+        } catch (RuntimeException e) {
+            log.error("[privacy] privacy-admin以外のgroupのprivacy許可行を照会できません", e);
+            missing.add("privacyAllow.unverifiable");
+            return;
+        }
+        if (groupKeys == null) {
+            missing.add("privacyAllow.unverifiable");
+            return;
+        }
+        if (!groupKeys.isEmpty()) {
+            // group key は設定識別子であり利用者情報を含まない（既存の '*' 検査と同じく出す）。
+            missing.add("privacyAllow.outsidePrivacyAdmin[" + String.join(";", new TreeSet<>(groupKeys)) + "]");
+        }
+    }
+
+    private Set<Capability> enabledCapabilities() {
+        Set<Capability> enabled = EnumSet.noneOf(Capability.class);
+        if (featureProperties == null) {
+            return enabled;
+        }
+        if (featureProperties.getRetention() != null && featureProperties.getRetention().isEnabled()) {
+            enabled.add(Capability.RETENTION);
+        }
+        if (featureProperties.getDsar() != null && featureProperties.getDsar().isEnabled()) {
+            enabled.add(Capability.DSAR);
+        }
+        return enabled;
+    }
+
+    /** {@code AuthorizationServiceImpl}・{@code PermissionGroupManagementServiceImpl} が group を評価する tenant。 */
+    private String authorizationTenantId() {
+        String configured = oidcProperties == null ? null : oidcProperties.getTenantId();
+        return StringUtils.hasText(configured) ? configured : "default";
+    }
+
+    private Set<String> breakGlassUsernames() {
+        Set<String> result = new LinkedHashSet<>();
+        if (oidcProperties != null && oidcProperties.getBreakGlassUsernames() != null) {
+            oidcProperties.getBreakGlassUsernames().stream()
+                    .filter(StringUtils::hasText)
+                    .map(String::trim)
+                    .forEach(result::add);
+        }
+        return result;
+    }
+
+    private static String flagNames(Set<Capability> enabled) {
+        List<String> names = new ArrayList<>();
+        for (Capability capability : enabled) {
+            names.add("privacy." + PrivacyDecisionBinding.capabilityKey(capability) + ".enabled");
+        }
+        return String.join(",", names);
+    }
+}
