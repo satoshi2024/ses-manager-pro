@@ -2746,6 +2746,29 @@ CREATE INDEX idx_portal_access_log_org ON t_portal_access_log(portal_org_id, cre
 CREATE INDEX idx_portal_access_log_user ON t_portal_access_log(portal_user_id, created_at);
 CREATE INDEX idx_portal_access_log_action ON t_portal_access_log(action, created_at);
 
+-- V188: ポータルユーザーと要員の紐付け（NF01 退社自動処理の対象特定）。
+-- FKは置かない（共有H2のschema再投入でt_portal_user・t_engineerのDROPを妨げないため。schema-portal-user-engineer-link-h2.sqlと同じ）。
+DROP TABLE IF EXISTS t_portal_user_engineer_link CASCADE;
+CREATE TABLE t_portal_user_engineer_link (
+  id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id      VARCHAR(100) NOT NULL,
+  portal_user_id BIGINT NOT NULL,
+  engineer_id    BIGINT NOT NULL,
+  linked_by      BIGINT NOT NULL,
+  linked_at      DATETIME NOT NULL,
+  released_by    BIGINT,
+  released_at    DATETIME,
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag   TINYINT NOT NULL DEFAULT 0,
+  active_portal_user_id BIGINT GENERATED ALWAYS AS (
+    CASE WHEN released_at IS NULL AND deleted_flag = 0 THEN portal_user_id ELSE NULL END
+  )
+);
+CREATE UNIQUE INDEX uk_portal_user_engineer_link_active ON t_portal_user_engineer_link(active_portal_user_id);
+CREATE INDEX idx_portal_user_engineer_link_engineer ON t_portal_user_engineer_link(tenant_id, engineer_id, released_at);
+CREATE INDEX idx_portal_user_engineer_link_user ON t_portal_user_engineer_link(portal_user_id);
+
 -- S15: 会計・支払連携テーブル (m_integration_connection, m_external_mapping, t_integration_job, t_integration_job_event)
 DROP TABLE IF EXISTS t_integration_job_event CASCADE;
 DROP TABLE IF EXISTS t_integration_job CASCADE;

@@ -5,11 +5,13 @@ import com.ses.common.util.SecurityUtils;
 import com.ses.dto.portal.PortalInvitationAdminDto;
 import com.ses.dto.portal.PortalSessionAdminDto;
 import com.ses.dto.portal.PortalUserAdminDto;
+import com.ses.dto.portal.PortalUserEngineerLinkDto;
 import com.ses.entity.PortalAccessLog;
 import com.ses.entity.PortalInvitation;
 import com.ses.entity.PortalOrganization;
 import com.ses.entity.PortalUser;
 import com.ses.service.portal.PortalAdminService;
+import com.ses.service.portal.PortalEngineerLinkService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -37,6 +39,7 @@ public class PortalAdminApiController {
 
     private final PortalAdminService adminService;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final PortalEngineerLinkService engineerLinkService;
 
     private boolean isAdmin() {
         return "管理者".equals(SecurityUtils.currentRole());
@@ -129,6 +132,30 @@ public class PortalAdminApiController {
         assertUserVisible(id);
         adminService.setUserOrgAdmin(id, Boolean.TRUE.equals(body.get("orgAdmin")));
         return ApiResult.success(null);
+    }
+
+    // ===== 要員との紐付け（NF01 退社自動処理の対象特定。管理者のみ: 決定 Q-10） =====
+    // SecurityConfigでも /api/portal-admin/users/*/engineer-links と /api/portal-admin/engineer-links/** を
+    // 管理者に静的限定する。tenant・対象の存在・監査はserviceが判定・記録する。
+
+    @GetMapping("/users/{id}/engineer-links")
+    public ApiResult<List<PortalUserEngineerLinkDto>> engineerLinks(@PathVariable Long id) {
+        requireAdmin();
+        return ApiResult.success(engineerLinkService.listForPortalUser(id));
+    }
+
+    @PostMapping("/users/{id}/engineer-links")
+    public ApiResult<PortalUserEngineerLinkDto> registerEngineerLink(@PathVariable Long id,
+                                                                     @RequestBody(required = false) Map<String, Object> body) {
+        requireAdmin();
+        Long engineerId = body == null ? null : longOrNull(body.get("engineerId"));
+        return ApiResult.success(engineerLinkService.register(id, engineerId));
+    }
+
+    @PostMapping("/engineer-links/{linkId}/release")
+    public ApiResult<PortalUserEngineerLinkDto> releaseEngineerLink(@PathVariable Long linkId) {
+        requireAdmin();
+        return ApiResult.success(engineerLinkService.release(linkId));
     }
 
     // ===== 招待（発行は管理者のみ。営業は自担当顧客の一覧参照のみ: design §6.2） =====

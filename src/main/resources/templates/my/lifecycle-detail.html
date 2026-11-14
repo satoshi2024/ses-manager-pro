@@ -91,8 +91,21 @@
                             <textarea class="form-control bg-dark border-secondary text-light" id="myDetailCompletionComment" rows="3" placeholder="提出内容・受領確認メモ等"></textarea>
                         </div>
                         <div class="mb-3" id="myDetailDocIdSection" style="display:none;">
-                            <label class="form-label text-light">提出文書ID (DOCUMENT_LINK)</label>
-                            <input type="number" class="form-control bg-dark border-secondary text-light" id="myDetailDocumentId" placeholder="添付文書ID">
+                            <label class="form-label text-light" for="myDetailDocumentId">提出文書ID (DOCUMENT_LINK)</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control bg-dark border-secondary text-light" id="myDetailDocumentId" placeholder="添付文書ID"
+                                       onchange="SES.myLifecycle.resetEvidenceVersions('myDetailDocumentVersionId')">
+                                <button type="button" class="btn btn-outline-info"
+                                        onclick="SES.myLifecycle.loadEvidenceVersions('myDetailTaskId', 'myDetailDocumentId', 'myDetailDocumentVersionId')"
+                                        title="文書の版を読み込む" aria-label="文書の版を読み込む">
+                                    <i class="bi bi-arrow-repeat me-1"></i>版を読み込む
+                                </button>
+                            </div>
+                            <label class="form-label text-light mt-2" for="myDetailDocumentVersionId">提出する版</label>
+                            <select class="form-select bg-dark border-secondary text-light" id="myDetailDocumentVersionId" disabled>
+                                <option value="">文書IDを入力して版を読み込んでください</option>
+                            </select>
+                            <div class="form-text text-muted">ウイルス検査済み（CLEAN）の版だけが表示されます。版を選ばない提出はできません。</div>
                         </div>
                     </div>
                     <div class="modal-footer border-secondary">

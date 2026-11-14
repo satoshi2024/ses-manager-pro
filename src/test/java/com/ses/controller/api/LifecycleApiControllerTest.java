@@ -374,6 +374,8 @@ class LifecycleApiControllerTest {
     @DisplayName("通常のタスク完了APIはDUAL_CONFIRMATIONを拒否すること")
     @WithMockUser(username = "admin_api_test", roles = {"管理者"})
     void testOrdinaryCompletionApiRejectsDualConfirmation() throws Exception {
+        // CONFIRM公開前はテンプレートAPIがDUAL_CONFIRMATIONを受け付けない（N1-2）。公開前から残る
+        // DUAL_CONFIRMATIONタスクを想定し、案件生成後にタスクの証跡種別を直接書き換えて通常完了経路を検証する。
         LifecycleTemplateDto dualTemplate = templateService.createTemplate(LifecycleTemplateDto.builder()
                 .templateType("JOIN")
                 .name("二者確認API拒否テスト")
@@ -386,7 +388,7 @@ class LifecycleApiControllerTest {
                         .sortOrder(1)
                         .isMandatory(1)
                         .isBlocking(1)
-                        .evidenceType("DUAL_CONFIRMATION")
+                        .evidenceType("NONE")
                         .build()))
                 .build(), adminUser.getId());
         var lifecycleCase = caseService.createCase(adminUser.getId(), CreateLifecycleCaseCommand.builder()
@@ -398,6 +400,7 @@ class LifecycleApiControllerTest {
                 .build());
         LifecycleTask task = lifecycleTaskMapper.selectById(lifecycleCase.getTasks().get(0).getId());
         task.setStatus("IN_PROGRESS");
+        task.setEvidenceType("DUAL_CONFIRMATION");
         lifecycleTaskMapper.updateById(task);
 
         mockMvc.perform(post("/api/lifecycle/tasks/" + task.getId() + "/complete")

@@ -53,6 +53,8 @@ class LifecycleAuthorizationPreflightMySqlTest {
             assertFinding(report, "LIFECYCLE_EVIDENCE_DOCUMENT_TENANT_MISMATCH", "PASS", 0);
             assertFinding(report, "LIFECYCLE_EVIDENCE_VERSION_MISMATCH", "PASS", 0);
             assertFinding(report, "LIFECYCLE_EVIDENCE_VERSIONLESS", "PASS", 0);
+            assertFinding(report, "LIFECYCLE_RESIGNATION_ACTIVE_DUPLICATE", "PASS", 0);
+            assertFinding(report, "PORTAL_ENGINEER_LINK_CANDIDATES", "PASS", 0);
             for (String key : List.of("t_lifecycle_case(tenant_id,id)", "t_lifecycle_task(case_id,id)",
                     "sys_user(tenant_id,id)", "t_document(tenant_id,id)", "t_document_version(tenant_id,id)",
                     "t_document_version(tenant_id,document_id,id)")) {
@@ -84,6 +86,14 @@ class LifecycleAuthorizationPreflightMySqlTest {
             assertFinding(report, "LIFECYCLE_EVIDENCE_VERSION_MISMATCH", "FAIL", 1);
             // link 2・4 は版なし。公開時は版なし証跡を拒否するため既存行は人の判断待ち。
             assertFinding(report, "LIFECYCLE_EVIDENCE_VERSIONLESS", "BLOCKED_MAPPING", 2);
+            // 未終結退社案件の重複は case 1・2 の1組2件。V187を適用できないため人の判断待ち。
+            assertFinding(report, "LIFECYCLE_RESIGNATION_ACTIVE_DUPLICATE", "BLOCKED_MAPPING", 2);
+            assertReasonContains(report, "LIFECYCLE_RESIGNATION_ACTIVE_DUPLICATE", null, "duplicateGroups=1");
+            // V188適用前（紐付け表なし）: 旧email照合の対象だったポータルユーザー1件は、紐付けを登録するまで人の判断待ち。
+            assertFinding(report, "PORTAL_ENGINEER_LINK_CANDIDATES", "BLOCKED_MAPPING", 1);
+            assertReasonContains(report, "PORTAL_ENGINEER_LINK_CANDIDATES", null, "linkTablePresent=false");
+            assertTrue(report.toJson().indexOf("PORTAL_ENGINEER_LINK_SCOPE_MISMATCH") < 0,
+                    "紐付け表が無い間は紐付けの整合検査を出さないこと");
             // t_document id=4 は tenant NULL のため (tenant_id,id) の一意key前提を満たさない
             assertFindingAt(report, "UNIQUE_KEY_PRECONDITION", "t_document(tenant_id,id)", "FAIL", 1);
             assertReasonContains(report, "UNIQUE_KEY_PRECONDITION", "t_document(tenant_id,id)", "nullKeyRows=1");
@@ -93,6 +103,32 @@ class LifecycleAuthorizationPreflightMySqlTest {
                     "existingUniqueIndex=none");
             assertReasonContains(report, "UNIQUE_KEY_PRECONDITION", "sys_user(tenant_id,id)", "idIsPrimaryKey=true");
             assertEquals(before, after);
+        }
+    }
+
+    @Test
+    void portalEngineerLinkTableExcludesLinkedCandidatesAndFailsOnScopeMismatch() throws Exception {
+        createFixture(true);
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE t_portal_user_engineer_link(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100),"
+                    + "portal_user_id BIGINT,engineer_id BIGINT,released_at DATETIME NULL,deleted_flag TINYINT NOT NULL DEFAULT 0)");
+            // link 1: ポータルユーザー1を要員1へ紐付け（正）。link 2: 解除済み（数えない）。
+            // link 3: ポータルユーザー3（tenant-Aの組織）をtenant-Bの紐付けとして登録した不整合。
+            statement.executeUpdate("INSERT INTO t_portal_user_engineer_link VALUES(1,'tenant-A',1,1,NULL,0),"
+                    + "(2,'tenant-A',2,1,'2026-11-01 00:00:00',0),(3,'tenant-B',3,1,NULL,0)");
+        }
+        createReadOnlyReader();
+        try (Connection reader = readerConnection()) {
+            LifecycleAuthorizationPreflight.PreflightReport report =
+                    LifecycleAuthorizationPreflight.run(reader, MYSQL.getDatabaseName(), "synthetic-head");
+            assertFinding(report, "PORTAL_ENGINEER_LINK_CANDIDATES", "PASS", 0);
+            assertReasonContains(report, "PORTAL_ENGINEER_LINK_CANDIDATES", null, "linkTablePresent=true");
+            assertFinding(report, "PORTAL_ENGINEER_LINK_SCOPE_MISMATCH", "FAIL", 1);
+            assertEquals("FAIL", report.status());
+        } finally {
+            try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+                statement.execute("DROP TABLE IF EXISTS t_portal_user_engineer_link");
+            }
         }
     }
 
@@ -110,7 +146,7 @@ class LifecycleAuthorizationPreflightMySqlTest {
             }
             // PRIMARY KEY を外した旧schemaを模し、(tenant_id,id) が重複する行を作る
             statement.execute("ALTER TABLE " + target + ".sys_user DROP PRIMARY KEY");
-            statement.executeUpdate("INSERT INTO " + target + ".sys_user VALUES(1,'tenant-A','営業')");
+            statement.executeUpdate("INSERT INTO " + target + ".sys_user(id,tenant_id,role) VALUES(1,'tenant-A','営業')");
             statement.execute("ALTER TABLE " + target + ".t_document_version ADD UNIQUE KEY uk_fixture_version_tenant_id (tenant_id,id)");
         }
         String url = "jdbc:mysql://" + MYSQL.getHost() + ":" + MYSQL.getMappedPort(3306) + "/" + target;
@@ -292,7 +328,8 @@ class LifecycleAuthorizationPreflightMySqlTest {
             "t_lifecycle_task", "t_lifecycle_evidence_link", "t_engineer", "m_customer", "t_contract",
             "t_engineer_account_link", "t_user_organization", "m_organization_unit", "t_document", "t_document_version",
             "t_document_link", "t_document_disposal_request", "t_proposal", "t_project", "t_sales_activity",
-            "t_engineer_sales", "m_asset", "t_asset_assignment", "t_asset_lost_incident");
+            "t_engineer_sales", "m_asset", "t_asset_assignment", "t_asset_lost_incident",
+            "m_portal_organization", "t_portal_user");
 
     private void appendDigest(java.security.MessageDigest digest, ResultSet rows) throws Exception {
         ResultSetMetaData metadata = rows.getMetaData();
@@ -351,8 +388,8 @@ class LifecycleAuthorizationPreflightMySqlTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             for (String ddl : List.of(
                     "CREATE TABLE IF NOT EXISTS flyway_schema_history(installed_rank INT PRIMARY KEY,version VARCHAR(50),success BOOLEAN NOT NULL)",
-                    "CREATE TABLE IF NOT EXISTS sys_user(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100),role VARCHAR(30))",
-                    "CREATE TABLE IF NOT EXISTS t_lifecycle_case(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100),engineer_id BIGINT,status VARCHAR(20),deleted_flag INT NOT NULL DEFAULT 0)",
+                    "CREATE TABLE IF NOT EXISTS sys_user(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100),role VARCHAR(30),email VARCHAR(100) NULL)",
+                    "CREATE TABLE IF NOT EXISTS t_lifecycle_case(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100),engineer_id BIGINT,status VARCHAR(20),deleted_flag INT NOT NULL DEFAULT 0,lifecycle_type VARCHAR(30) NOT NULL DEFAULT 'RESIGNATION')",
                     "CREATE TABLE IF NOT EXISTS t_lifecycle_task(id BIGINT PRIMARY KEY,case_id BIGINT,evidence_type VARCHAR(30),status VARCHAR(20),deleted_flag INT NOT NULL DEFAULT 0)",
                     "CREATE TABLE IF NOT EXISTS t_lifecycle_evidence_link(id BIGINT PRIMARY KEY,task_id BIGINT,document_id BIGINT,document_version_id BIGINT NULL)",
                     "CREATE TABLE IF NOT EXISTS t_engineer(id BIGINT PRIMARY KEY,tenant_id VARCHAR(100))",
@@ -371,10 +408,15 @@ class LifecycleAuthorizationPreflightMySqlTest {
                     "CREATE TABLE IF NOT EXISTS t_engineer_sales(id BIGINT PRIMARY KEY,engineer_id BIGINT,sales_user_id BIGINT)",
                     "CREATE TABLE IF NOT EXISTS m_asset(id BIGINT PRIMARY KEY)",
                     "CREATE TABLE IF NOT EXISTS t_asset_assignment(id BIGINT PRIMARY KEY,asset_id BIGINT,assignee_type VARCHAR(20),assignee_id BIGINT,actual_return_date DATE NULL)",
-                    "CREATE TABLE IF NOT EXISTS t_asset_lost_incident(id BIGINT PRIMARY KEY,asset_id BIGINT)")) {
+                    "CREATE TABLE IF NOT EXISTS t_asset_lost_incident(id BIGINT PRIMARY KEY,asset_id BIGINT)",
+                    "CREATE TABLE IF NOT EXISTS m_portal_organization(id BIGINT PRIMARY KEY,tenant_id VARCHAR(64),deleted_flag TINYINT NOT NULL DEFAULT 0)",
+                    "CREATE TABLE IF NOT EXISTS t_portal_user(id BIGINT PRIMARY KEY,portal_org_id BIGINT,email VARCHAR(255),deleted_flag TINYINT NOT NULL DEFAULT 0)",
+                    // V188の紐付け表は既定で「適用前（表なし）」にする。表ありの検査は個別testが作る。
+                    "DROP TABLE IF EXISTS t_portal_user_engineer_link")) {
                 statement.execute(ddl);
             }
-            for (String table : List.of("t_asset_lost_incident", "t_asset_assignment", "m_asset", "t_engineer_sales",
+            for (String table : List.of("t_portal_user", "m_portal_organization",
+                    "t_asset_lost_incident", "t_asset_assignment", "m_asset", "t_engineer_sales",
                     "t_sales_activity", "t_proposal", "t_project", "t_document_disposal_request", "t_document_link",
                     "t_document_version", "t_document", "t_user_organization", "t_engineer_account_link", "t_contract",
                     "m_customer", "t_engineer", "t_lifecycle_evidence_link", "t_lifecycle_task", "t_lifecycle_case",
@@ -382,8 +424,9 @@ class LifecycleAuthorizationPreflightMySqlTest {
                 statement.executeUpdate("DELETE FROM " + table);
             }
             statement.executeUpdate("INSERT IGNORE INTO flyway_schema_history VALUES(1,'1',TRUE)");
-            statement.executeUpdate("INSERT IGNORE INTO sys_user VALUES(1,'tenant-A','営業')");
-            statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_case VALUES(1,'tenant-A',1,'ACTIVE',0)");
+            statement.executeUpdate("INSERT IGNORE INTO sys_user(id,tenant_id,role) VALUES(1,'tenant-A','営業')");
+            statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_case(id,tenant_id,engineer_id,status,deleted_flag,lifecycle_type) "
+                    + "VALUES(1,'tenant-A',1,'ACTIVE',0,'RESIGNATION')");
             statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_task VALUES(1,1,'DOCUMENT_LINK','COMPLETED',0)");
             statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_evidence_link VALUES(1,1,1,1)");
             statement.executeUpdate("INSERT IGNORE INTO t_engineer VALUES(1,'tenant-A')");
@@ -420,6 +463,18 @@ class LifecycleAuthorizationPreflightMySqlTest {
                 statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_evidence_link VALUES(2,1,2,NULL)");
                 statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_evidence_link VALUES(3,1,1,2)");
                 statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_evidence_link VALUES(4,2,999,NULL)");
+                // L7: case 1（ACTIVE）と case 2（ON_HOLD）は同一tenant・同一要員の未終結退社案件で重複する。
+                // case 3（CANCELLED）・case 4（退社以外）・case 5（論理削除済み）は一意制約の対象外なので数えない。
+                statement.executeUpdate("INSERT IGNORE INTO t_lifecycle_case(id,tenant_id,engineer_id,status,deleted_flag,lifecycle_type) "
+                        + "VALUES(2,'tenant-A',1,'ON_HOLD',0,'RESIGNATION'),(3,'tenant-A',1,'CANCELLED',0,'RESIGNATION'),"
+                        + "(4,'tenant-A',1,'ACTIVE',0,'JOIN'),(5,'tenant-A',1,'ACTIVE',1,'RESIGNATION')");
+                // N1-4: 要員1の連携ユーザー（sys_user 1）とemailが一致する同tenantのポータルユーザー1は、旧email照合の対象。
+                // ポータルユーザー2（他tenantの組織）・3（別email）・4（論理削除済み）は数えない。
+                statement.executeUpdate("UPDATE sys_user SET email='resign-portal@example.test' WHERE id=1");
+                statement.executeUpdate("INSERT IGNORE INTO m_portal_organization VALUES(1,'tenant-A',0),(2,'tenant-B',0)");
+                statement.executeUpdate("INSERT IGNORE INTO t_portal_user VALUES(1,1,'RESIGN-PORTAL@example.test',0),"
+                        + "(2,2,'resign-portal@example.test',0),(3,1,'other@example.test',0),"
+                        + "(4,1,'resign-portal@example.test',1)");
             }
         }
     }

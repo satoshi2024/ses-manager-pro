@@ -255,7 +255,11 @@ public class SecurityConfig {
                     "/api/customer-success/health/snapshots",
                     "/api/customer-success/health/snapshots/**",
                     "/api/service-desk/health/snapshots",
-                    "/api/service-desk/health/snapshots/**"
+                    "/api/service-desk/health/snapshots/**",
+                    // ポータルユーザーと要員の紐付け（NF01 退社自動処理の対象特定、決定 Q-10）。
+                    // portal-admin menuは営業にも付与されるため、紐付けの参照・登録・解除だけを管理者へ静的に限定する。
+                    "/api/portal-admin/users/*/engineer-links",
+                    "/api/portal-admin/engineer-links/**"
                 ).hasRole("管理者")
                 .requestMatchers("/api/management-reports/schedules/*/enable",
                         "/api/management-reports/schedules/*/disable")

@@ -98,6 +98,46 @@ class LifecycleAuthorizationPreflightUnitTest {
     }
 
     @Test
+    void 未終結退社案件の重複は0件ならPASSで1組以上ならV187適用前の人の判断待ちになる() {
+        LifecycleAuthorizationPreflight.PreflightReport none =
+                new LifecycleAuthorizationPreflight.PreflightReport("baseline", "schema");
+        LifecycleAuthorizationPreflight.recordActiveResignationDuplicates(none, 0, 0, List.of());
+        assertEquals("PASS", none.status());
+        assertTrue(none.toJson().contains("\"checkId\":\"LIFECYCLE_RESIGNATION_ACTIVE_DUPLICATE\""));
+
+        LifecycleAuthorizationPreflight.PreflightReport duplicated =
+                new LifecycleAuthorizationPreflight.PreflightReport("baseline", "schema");
+        LifecycleAuthorizationPreflight.recordActiveResignationDuplicates(duplicated, 1, 2, List.of("c1", "c2"));
+        assertEquals("BLOCKED_MAPPING", duplicated.status(), "重複が残る間はV187の一意制約を追加できない");
+        String json = duplicated.toJson();
+        assertTrue(json.contains("\"rowCount\":2"));
+        assertTrue(json.contains("duplicateGroups=1"));
+        assertTrue(json.contains("uk_lifecycle_case_active_resignation"));
+
+        LifecycleAuthorizationPreflight.recordUniqueKeyPrecondition(duplicated, "sys_user",
+                List.of("tenant_id", "id"), 0, 1, 1, List.of(), "none", true);
+        assertEquals("FAIL", duplicated.status(), "BLOCKED_MAPPINGはFAILを隠さない");
+    }
+
+    @Test
+    void 紐付けの無い旧email照合対象のポータルユーザーは紐付け登録か許容の判断待ちになる() {
+        LifecycleAuthorizationPreflight.PreflightReport none =
+                new LifecycleAuthorizationPreflight.PreflightReport("baseline", "schema");
+        LifecycleAuthorizationPreflight.recordPortalEngineerLinkCandidates(none, 0, List.of(), true);
+        assertEquals("PASS", none.status());
+        assertTrue(none.toJson().contains("linkTablePresent=true"));
+
+        LifecycleAuthorizationPreflight.PreflightReport pending =
+                new LifecycleAuthorizationPreflight.PreflightReport("baseline", "schema");
+        LifecycleAuthorizationPreflight.recordPortalEngineerLinkCandidates(pending, 3, List.of("p1"), false);
+        assertEquals("BLOCKED_MAPPING", pending.status());
+        String json = pending.toJson();
+        assertTrue(json.contains("\"checkId\":\"PORTAL_ENGINEER_LINK_CANDIDATES\""));
+        assertTrue(json.contains("\"rowCount\":3"));
+        assertTrue(json.contains("linkTablePresent=false"));
+    }
+
+    @Test
     void jsonEscapesUnsafeCharactersAndMarkdownEscapesPipes() {
         LifecycleAuthorizationPreflight.PreflightReport report =
                 new LifecycleAuthorizationPreflight.PreflightReport("head\"x", "schema|x");
