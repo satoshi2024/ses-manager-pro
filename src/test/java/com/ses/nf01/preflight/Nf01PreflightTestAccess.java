@@ -22,4 +22,15 @@ public final class Nf01PreflightTestAccess {
         LifecycleAuthorizationPreflight.activeResignationDuplicates(connection, report);
         return report.toJson();
     }
+
+    /**
+     * V189（NF01 epoch A）の前提・適用状態の検査（AUTHORIZATION_EPOCH_*）だけを実行し、reportのJSONを返す。
+     * 接続先schemaの他の表・列の状態（inventoryの結果）には依存しない。
+     */
+    public static String authorizationEpochChecksJson(Connection connection, String schema) throws SQLException {
+        LifecycleAuthorizationPreflight.PreflightReport report =
+                new LifecycleAuthorizationPreflight.PreflightReport("test-access", "test-access");
+        LifecycleAuthorizationPreflight.authorizationEpochChecks(connection, schema, report);
+        return report.toJson();
+    }
 }

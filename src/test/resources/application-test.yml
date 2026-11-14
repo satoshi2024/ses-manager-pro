@@ -78,6 +78,8 @@ spring:
         - classpath:sql/schema-lifecycle-resignation-unique-h2.sql
         # V188: ポータルユーザーと要員の紐付け（schema-portal-h2.sqlがポータル表を作り直した後）
         - classpath:sql/schema-portal-user-engineer-link-h2.sql
+        # V189: NF01 細粒度認可epoch（全体epoch表・5 anchor列・複合一意key。tenant_id付与と文書表の作り直しより後）
+        - classpath:sql/schema-authorization-epoch-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

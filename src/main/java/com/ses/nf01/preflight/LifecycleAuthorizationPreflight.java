@@ -104,8 +104,10 @@ public final class LifecycleAuthorizationPreflight {
     );
 
     /**
-     * epoch spine migrationで追加予定の複合一意keyの前提（NF01b実行契約 §9.1）。
-     * 列名・表名は固定allowlistであり、入力値からSQLを組み立てない。
+     * 複合一意keyの前提（NF01b実行契約 §9.1、NF01細粒度epoch計画 §5.12）。列名・表名は固定allowlistであり、入力値からSQLを組み立てない。
+     * V189（epoch A spine）が t_lifecycle_case(tenant_id,id)・t_lifecycle_task(case_id,id)・
+     * t_document_version(tenant_id,document_id,id) を追加する。sys_user(tenant_id,id) はV165、t_document(tenant_id,id)・
+     * t_document_version(tenant_id,id) はV1の既存keyである。適用後も existingUniqueIndex として作成済みkeyを記録する。
      */
     private static final List<UniqueKeySpec> UNIQUE_KEY_PRECONDITIONS = List.of(
             new UniqueKeySpec("t_lifecycle_case", List.of("tenant_id", "id")),
@@ -129,6 +131,21 @@ public final class LifecycleAuthorizationPreflight {
     /** {@link #ACTIVE_RESIGNATION_ROWS} のうち、同一tenant・同一要員で2件以上ある組。 */
     private static final String ACTIVE_RESIGNATION_DUPLICATE_GROUPS = "SELECT x.tenant_id, x.engineer_id "
             + ACTIVE_RESIGNATION_ROWS + " GROUP BY x.tenant_id, x.engineer_id HAVING COUNT(*) > 1";
+
+    /**
+     * V189（NF01 epoch A）が既存の業務行へ追加するepoch列とCHECK制約。表名・列名・制約名は固定allowlistであり、
+     * 入力値からSQLを組み立てない。MySQLのCHECK制約名はschema内で一意のため、未適用時は同名制約の有無も確認する。
+     */
+    private static final List<EpochColumnSpec> AUTHORIZATION_EPOCH_COLUMNS = List.of(
+            new EpochColumnSpec("sys_user", "actor_authz_epoch", "ck_sys_user_actor_authz_epoch"),
+            new EpochColumnSpec("t_engineer", "engineer_scope_epoch", "ck_engineer_scope_epoch"),
+            new EpochColumnSpec("m_organization_unit", "org_scope_epoch", "ck_org_scope_epoch"),
+            new EpochColumnSpec("t_document", "evidence_eligibility_epoch", "ck_document_evidence_eligibility_epoch"),
+            new EpochColumnSpec("t_lifecycle_task", "task_generation", "ck_lifecycle_task_generation"));
+
+    /** V189の全体epoch表（singleton_id=1 の1行）とCHECK制約。 */
+    private static final String GLOBAL_EPOCH_TABLE = "t_authorization_global_epoch";
+    private static final List<String> GLOBAL_EPOCH_CHECKS = List.of("ck_authz_global_singleton", "ck_authz_global_epoch_nonneg");
 
     /** アプリが未終結とみなすDUAL_CONFIRMATIONタスク（大文字小文字・末尾空白を畳まないbinary比較）。 */
     private static final String UNFINISHED_DUAL_TASKS = "FROM t_lifecycle_task t LEFT JOIN t_lifecycle_case c ON c.id=t.case_id "
@@ -198,6 +215,7 @@ public final class LifecycleAuthorizationPreflight {
                 activeResignationDuplicates(connection, report);
                 portalEngineerLinkChecks(connection, schema, report);
                 uniqueKeyPreconditions(connection, schema, report);
+                authorizationEpochChecks(connection, schema, report);
                 parentCandidates(connection, report);
                 organizationUnitCandidates(connection, report);
             }
@@ -649,6 +667,160 @@ public final class LifecycleAuthorizationPreflight {
                         + (idIsPrimaryKey ? " (duplicates cannot occur; the null-key check is the effective precondition)" : ""));
     }
 
+    /**
+     * V189（NF01 細粒度認可epoch / epoch A）の前提と適用状態を検査する（NF01細粒度epoch計画 §2.3・§2.6・§7.1）。
+     * <ul>
+     *   <li>AUTHORIZATION_EPOCH_COLUMN: anchor列ごと。未適用なら同名CHECK制約が他表に無いこと（あるとV189のADD CONSTRAINTが
+     *       失敗する）。適用済みなら BIGINT・NOT NULL・DEFAULT 0・有効なCHECK制約・負値0件であること。満たさなければFAIL。</li>
+     *   <li>AUTHORIZATION_GLOBAL_EPOCH: 全体epoch表。未適用なら同名CHECK制約が無いこと。適用済みなら行がちょうど1件で
+     *       singleton_id=1・epoch≥0、CHECK制約2件があること（無い・複数行はCONFIRMが409 epochUnavailableで止まるためFAIL）。</li>
+     *   <li>AUTHORIZATION_EPOCH_APPLICATION: 列5件と全体表が「すべて未適用」か「すべて適用済み」であること（一部だけは失敗した
+     *       migrationの残骸としてFAIL）。epoch列はDEFAULT 0で追加するため、既存行のbackfillや数値tenantの対応付けを要しない
+     *       （ORG_UNIT_TENANT_MAPPING の BLOCKED_MAPPING は epoch A を止めない）。</li>
+     * </ul>
+     */
+    static void authorizationEpochChecks(Connection connection, String schema, PreflightReport report) throws SQLException {
+        int present = 0;
+        for (EpochColumnSpec spec : AUTHORIZATION_EPOCH_COLUMNS) {
+            EpochColumnState state = epochColumnState(connection, schema, spec);
+            if (state.present()) present++;
+            recordAuthorizationEpochColumn(report, spec, state);
+        }
+        GlobalEpochState global = globalEpochState(connection, schema);
+        if (global.present()) present++;
+        recordAuthorizationGlobalEpoch(report, global);
+        recordAuthorizationEpochApplication(report, present, AUTHORIZATION_EPOCH_COLUMNS.size() + 1);
+    }
+
+    private static EpochColumnState epochColumnState(Connection connection, String schema, EpochColumnSpec spec)
+            throws SQLException {
+        String dataType = null;
+        boolean nullable = true;
+        String columnDefault = null;
+        boolean present = false;
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS "
+                        + "WHERE TABLE_SCHEMA=? AND TABLE_NAME=? AND COLUMN_NAME=?")) {
+            statement.setString(1, schema);
+            statement.setString(2, spec.table());
+            statement.setString(3, spec.column());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (rows.next()) {
+                    present = true;
+                    dataType = rows.getString("DATA_TYPE");
+                    nullable = "YES".equalsIgnoreCase(rows.getString("IS_NULLABLE"));
+                    columnDefault = rows.getString("COLUMN_DEFAULT");
+                }
+            }
+        }
+        CheckPlacement check = checkPlacement(connection, schema, spec.checkName(), spec.table());
+        long negativeRows = present
+                ? scalar(connection, "SELECT COUNT(*) FROM " + spec.table() + " WHERE " + spec.column() + " < 0")
+                : 0;
+        return new EpochColumnState(present, dataType, nullable, columnDefault, check.onTable(), check.enforced(),
+                check.elsewhere(), negativeRows);
+    }
+
+    private static GlobalEpochState globalEpochState(Connection connection, String schema) throws SQLException {
+        boolean present;
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=? AND TABLE_NAME=?")) {
+            statement.setString(1, schema);
+            statement.setString(2, GLOBAL_EPOCH_TABLE);
+            try (ResultSet rows = statement.executeQuery()) {
+                present = rows.next() && rows.getLong(1) > 0;
+            }
+        }
+        int checksOnTable = 0;
+        boolean checksEnforced = true;
+        boolean checksElsewhere = false;
+        for (String checkName : GLOBAL_EPOCH_CHECKS) {
+            CheckPlacement check = checkPlacement(connection, schema, checkName, GLOBAL_EPOCH_TABLE);
+            if (check.onTable()) checksOnTable++;
+            checksEnforced &= !check.onTable() || check.enforced();
+            checksElsewhere |= check.elsewhere();
+        }
+        long rowCount = present ? scalar(connection, "SELECT COUNT(*) FROM " + GLOBAL_EPOCH_TABLE) : 0;
+        long validRows = present
+                ? scalar(connection, "SELECT COUNT(*) FROM " + GLOBAL_EPOCH_TABLE + " WHERE singleton_id=1 AND epoch>=0")
+                : 0;
+        return new GlobalEpochState(present, rowCount, validRows, checksOnTable, checksEnforced, checksElsewhere);
+    }
+
+    /** CHECK制約名が対象表にあるか（ENFORCEDか）、他の表で使われているか。 */
+    private static CheckPlacement checkPlacement(Connection connection, String schema, String checkName, String table)
+            throws SQLException {
+        boolean onTable = false;
+        boolean enforced = false;
+        boolean elsewhere = false;
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT TABLE_NAME, ENFORCED FROM information_schema.TABLE_CONSTRAINTS "
+                        + "WHERE CONSTRAINT_SCHEMA=? AND CONSTRAINT_NAME=? AND CONSTRAINT_TYPE='CHECK'")) {
+            statement.setString(1, schema);
+            statement.setString(2, checkName);
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    if (table.equalsIgnoreCase(rows.getString("TABLE_NAME"))) {
+                        onTable = true;
+                        enforced = "YES".equalsIgnoreCase(rows.getString("ENFORCED"));
+                    } else {
+                        elsewhere = true;
+                    }
+                }
+            }
+        }
+        return new CheckPlacement(onTable, enforced, elsewhere);
+    }
+
+    /** anchor列1件の判定を記録する。 */
+    static void recordAuthorizationEpochColumn(PreflightReport report, EpochColumnSpec spec, EpochColumnState state) {
+        List<String> problems = new ArrayList<>();
+        if (state.present()) {
+            if (!"bigint".equalsIgnoreCase(state.dataType())) problems.add("type=" + safeToken(state.dataType()));
+            if (state.nullable()) problems.add("nullable");
+            if (!"0".equals(state.columnDefault())) problems.add("default=" + safeToken(state.columnDefault()));
+            if (!state.checkOnTable()) problems.add("checkMissing=" + spec.checkName());
+            else if (!state.checkEnforced()) problems.add("checkNotEnforced=" + spec.checkName());
+            if (state.negativeRows() > 0) problems.add("negativeRows=" + state.negativeRows());
+        }
+        if (state.checkElsewhere()) problems.add("checkNameUsedByAnotherTable=" + spec.checkName());
+        report.finding("AUTHORIZATION_EPOCH_COLUMN", spec.table() + "." + spec.column(),
+                problems.isEmpty() ? "PASS" : "FAIL", state.negativeRows(), List.of(),
+                "state=" + (state.present() ? "APPLIED" : "NOT_APPLIED")
+                        + "; problems=" + (problems.isEmpty() ? "none" : String.join(",", problems))
+                        + "; expected=BIGINT NOT NULL DEFAULT 0 with enforced CHECK " + spec.checkName() + " (>= 0)"
+                        + (state.present() ? "" : "; V189 adds the column with DEFAULT 0, so no backfill or mapping is required"));
+    }
+
+    /** 全体epoch表の判定を記録する。 */
+    static void recordAuthorizationGlobalEpoch(PreflightReport report, GlobalEpochState state) {
+        List<String> problems = new ArrayList<>();
+        if (state.present()) {
+            if (state.rowCount() != 1 || state.validRows() != 1) {
+                problems.add("rows=" + state.rowCount() + ",validSingletonRows=" + state.validRows());
+            }
+            if (state.checksOnTable() != GLOBAL_EPOCH_CHECKS.size()) problems.add("checks=" + state.checksOnTable());
+            else if (!state.checksEnforced()) problems.add("checkNotEnforced");
+        }
+        if (state.checksElsewhere()) problems.add("checkNameUsedByAnotherTable");
+        report.finding("AUTHORIZATION_GLOBAL_EPOCH", GLOBAL_EPOCH_TABLE,
+                problems.isEmpty() ? "PASS" : "FAIL", state.rowCount(), List.of(),
+                "state=" + (state.present() ? "APPLIED" : "NOT_APPLIED")
+                        + "; problems=" + (problems.isEmpty() ? "none" : String.join(",", problems))
+                        + "; expected exactly one row singleton_id=1 with epoch>=0 (missing or extra rows make CONFIRM fail closed"
+                        + " with 409 error.authorization.epochUnavailable)");
+    }
+
+    /** epoch Aの適用が全部か無しかを記録する。 */
+    static void recordAuthorizationEpochApplication(PreflightReport report, int presentObjects, int expectedObjects) {
+        String state = presentObjects == 0 ? "NOT_APPLIED" : presentObjects == expectedObjects ? "APPLIED" : "PARTIAL";
+        report.finding("AUTHORIZATION_EPOCH_APPLICATION", "V189 epoch A",
+                "PARTIAL".equals(state) ? "FAIL" : "PASS", presentObjects, List.of(),
+                "state=" + state + "; presentObjects=" + presentObjects + "/" + expectedObjects
+                        + "; epoch columns default to 0 and organization epochs are tenant-independent,"
+                        + " so ORG_UNIT_TENANT_MAPPING (BLOCKED_MAPPING) does not block epoch A");
+    }
+
     /** 表の一意index（PRIMARY含む）と列構成（SEQ_IN_INDEX順、カンマ区切り）。 */
     private static Map<String, String> uniqueIndexColumns(Connection connection, String schema, String table) throws SQLException {
         Map<String, String> indexes = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
@@ -747,7 +919,8 @@ public final class LifecycleAuthorizationPreflight {
         if (!numericIds.isEmpty() || !candidates.isEmpty()) {
             report.finding("ORG_UNIT_TENANT_MAPPING", "m_organization_unit.tenant_id", "BLOCKED_MAPPING",
                     numericIds.size(), candidates.subList(0, Math.min(20, candidates.size())),
-                    "numeric legacy IDs require an explicitly reviewed mapping; no numeric-to-string conversion is applied");
+                    "numeric legacy IDs require an explicitly reviewed mapping; no numeric-to-string conversion is applied"
+                            + "; this mapping does not block NF01 epoch A (V189), whose organization epochs are tenant-independent");
         } else {
             report.finding("ORG_UNIT_TENANT_MAPPING", "m_organization_unit.tenant_id", "PASS", 0, List.of(),
                     "no non-null numeric legacy tenant IDs were found");
@@ -784,6 +957,12 @@ public final class LifecycleAuthorizationPreflight {
     private record TenantSource(String table, String column) { }
     private record ParentQuery(String name, String sql) { }
     private record UniqueKeySpec(String table, List<String> columns) { }
+    record EpochColumnSpec(String table, String column, String checkName) { }
+    record EpochColumnState(boolean present, String dataType, boolean nullable, String columnDefault,
+                            boolean checkOnTable, boolean checkEnforced, boolean checkElsewhere, long negativeRows) { }
+    record GlobalEpochState(boolean present, long rowCount, long validRows, int checksOnTable, boolean checksEnforced,
+                            boolean checksElsewhere) { }
+    private record CheckPlacement(boolean onTable, boolean enforced, boolean elsewhere) { }
     private record ColumnInfo(String type, boolean nullable, String charLength, String autoIncrement, String collation) { }
 
     public static final class PreflightReport {
