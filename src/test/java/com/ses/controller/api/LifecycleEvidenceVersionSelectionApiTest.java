@@ -26,6 +26,7 @@ import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.lifecycle.LifecycleCaseService;
 import com.ses.service.lifecycle.LifecycleTemplateService;
 import com.ses.test.TenantTestSecurity;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -91,6 +92,9 @@ class LifecycleEvidenceVersionSelectionApiTest {
     void setUp() {
         long suffix = System.nanoTime();
         adminUser = user("lc_evidence_admin_" + suffix, "管理者");
+        // fixtureのテンプレート作成・起票（担当者解決・営業参照）はtenant contextを要求するため、起票者として束縛する
+        // （LifecycleDomainServiceTest と同じ方法）。MockMvcの各要求は要求ごとの認証で上書きする。
+        TenantTestSecurity.bindAs(adminUser.getId(), adminUser.getUsername(), "default", "管理者");
         SysUser hrUser = user("lc_evidence_hr_" + suffix, "HR");
         engineerUser1 = user("lc_evidence_eng1_" + suffix, "要員");
         engineerUser2 = user("lc_evidence_eng2_" + suffix, "要員");
@@ -165,6 +169,11 @@ class LifecycleEvidenceVersionSelectionApiTest {
         cleanV1 = version("default", document.getId(), 1, "CLEAN");
         pendingV2 = version("default", document.getId(), 2, "PENDING");
         cleanV3 = version("default", document.getId(), 3, "CLEAN");
+    }
+
+    @AfterEach
+    void tearDown() {
+        TenantTestSecurity.clear();
     }
 
     @Test

@@ -132,7 +132,7 @@ class LifecycleResignationPortalTenantTest {
     void unlinkedSameEmailPortalUserIsListedAsPendingWithoutRevocation() {
         Long unlinkedPortalUserId = portalUserWithActiveSession("default", email);
 
-        ResignationGateResultDto gate = resignationGateChecker.evaluate(resignationCase("default"), engineer);
+        ResignationGateResultDto gate = evaluateAsGateOperator();
         resignationGateChecker.executeAutomaticGateActions(resignationCase("default"), engineer);
 
         assertNull(revokedAt(unlinkedPortalUserId), "紐付けの無いポータルユーザーは自動処理しないこと");
@@ -149,7 +149,7 @@ class LifecycleResignationPortalTenantTest {
         Long portalUserId = portalUserWithActiveSession("default", "other-" + email);
         registerLink("tenant-other-portal", portalUserId);
 
-        ResignationGateResultDto gate = resignationGateChecker.evaluate(resignationCase("default"), engineer);
+        ResignationGateResultDto gate = evaluateAsGateOperator();
         assertFalse(portalItem(gate).isPassed());
         assertFalse(gate.isPassed());
 
@@ -158,6 +158,30 @@ class LifecycleResignationPortalTenantTest {
         assertEquals(409, ex.getCode());
         assertNull(revokedAt(portalUserId));
         assertEquals(1, sysUserMapper.selectById(linkedUser.getId()).getStatus(), "不整合のまま内部アカウントも停止しないこと");
+    }
+
+    /**
+     * ゲート評価は貸与資産の確認（AssetOffboardingService → 外部アカウントの法人scope）で操作者の一意な法人を要求する。
+     * AssetOffboardingServiceTest と同じく、法人1の組織に所属するHRを操作者として評価し、その後の自動処理は
+     * 従来どおり管理者のcontextへ戻す（法人の決まり方は main code を変えない。R2 N9-P2-1 は W3-11 で扱う）。
+     */
+    private ResignationGateResultDto evaluateAsGateOperator() {
+        SysUser operator = SysUser.builder()
+                .tenantId("default")
+                .username("resign_portal_gate_hr_" + SEQUENCE.incrementAndGet())
+                .password("pass")
+                .realName("退社ゲート確認HR")
+                .role("HR")
+                .status(1)
+                .build();
+        sysUserMapper.insert(operator);
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L, operator.getId());
+        TenantTestSecurity.bindAs(operator.getId(), operator.getUsername(), "default", "HR");
+        try {
+            return resignationGateChecker.evaluate(resignationCase("default"), engineer);
+        } finally {
+            TenantTestSecurity.bindAs("default", "管理者");
+        }
     }
 
     private ResignationGateResultDto.GateItemResult portalItem(ResignationGateResultDto gate) {
