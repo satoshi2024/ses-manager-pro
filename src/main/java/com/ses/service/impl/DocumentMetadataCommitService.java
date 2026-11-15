@@ -11,6 +11,8 @@ import com.ses.mapper.DocumentHashClaimMapper;
 import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
+import com.ses.service.security.epoch.AuthorizationEpochAnchor;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
 import com.ses.service.storage.DocumentStorage;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -21,7 +23,13 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.LocalDateTime;
 
-/** CLEAN済みStorageを短い新規transactionで文書台帳へ確定する。 */
+/**
+ * CLEAN済みStorageを短い新規transactionで文書台帳へ確定する。
+ *
+ * <p>NF01 F3: 新規文書（{@link #commitNew}・{@link #commitImportDocument}）は証跡利用可否epochがDEFAULT 0で、
+ * commit前に読む者がいないため増分しない。初期linkの挿入も同じ理由で増分しない。版追加（{@link #commitVersion}）は
+ * 利用可否を変えないため増分しないが、文書行を先にX lockしてから版を挿入する（lock順 15 DOCUMENT → 16 DOCUMENT_VERSION）。</p>
+ */
 @Service
 public class DocumentMetadataCommitService {
 
@@ -34,19 +42,22 @@ public class DocumentMetadataCommitService {
     private final DocumentAccessLogMapper documentAccessLogMapper;
     private final DocumentHashClaimMapper documentHashClaimMapper;
     private final DocumentStorage documentStorage;
+    private final AuthorizationEpochFence fence;
 
     public DocumentMetadataCommitService(DocumentMapper documentMapper,
                                          DocumentVersionMapper documentVersionMapper,
                                          DocumentLinkMapper documentLinkMapper,
                                          DocumentAccessLogMapper documentAccessLogMapper,
                                          DocumentHashClaimMapper documentHashClaimMapper,
-                                         DocumentStorage documentStorage) {
+                                         DocumentStorage documentStorage,
+                                         AuthorizationEpochFence fence) {
         this.documentMapper = documentMapper;
         this.documentVersionMapper = documentVersionMapper;
         this.documentLinkMapper = documentLinkMapper;
         this.documentAccessLogMapper = documentAccessLogMapper;
         this.documentHashClaimMapper = documentHashClaimMapper;
         this.documentStorage = documentStorage;
+        this.fence = fence;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
@@ -109,6 +120,8 @@ public class DocumentMetadataCommitService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public DocumentVersion commitVersion(Document document, DocumentVersion version) {
+        // 版追加・AMENDEDは利用可否を変えないためepochを進めないが、文書行を先にX lockして証跡readerのS lockと直列化する。
+        fence.lockForUpdate(AuthorizationEpochAnchor.document(document.getTenantId(), document.getId()));
         documentVersionMapper.insert(version);
         if ("CONFIRMED".equals(document.getStatus())) {
             int updated = documentMapper.update(null, new LambdaUpdateWrapper<Document>()

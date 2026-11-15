@@ -36,6 +36,7 @@ import com.ses.service.NotificationService;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.approval.ApprovalTargetAdapterRegistry;
 import com.ses.service.changerequest.EngineerChangeRequestService;
+import com.ses.service.document.DocumentLinkCommandService;
 import com.ses.service.security.OrganizationScopeService;
 import com.ses.service.skillsheet.SkillSheetGenerator;
 import lombok.RequiredArgsConstructor;
@@ -96,6 +97,8 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     private final SkillSheetGenerator skillSheetGenerator;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    /** スキルシート確認の付帯情報をlinkへ記録する（link書込みの集約先。NF01 F3）。 */
+    private final DocumentLinkCommandService documentLinkCommandService;
 
     // ----------------------------------------------------------------
     // 本人
@@ -425,19 +428,12 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
                         .originalName("skill-sheet-" + engineerId + ".pdf")
                         .contentType("application/pdf")
                         .build(), new java.io.ByteArrayInputStream(pdf));
+        // PDF生成・scan・storage・commitNew（registerGeneratedはNOT_SUPPORTED）をlockなしで終えてから、
+        // 文書行のX lock → ENGINEER link挿入 → 証跡利用可否epochの増分を行う（NF01 F3。lock順 15 → 17）。
         documentService.link(document.getId(), "ENGINEER", engineerId);
-        // 確認時点をt_document_linkへ記録する（design §6.1: 確認ごとに更新）。
-        DocumentLink link = documentLinkMapper.selectOne(new LambdaQueryWrapper<DocumentLink>()
-                .eq(DocumentLink::getDocumentId, document.getId())
-                .eq(DocumentLink::getTargetType, "ENGINEER")
-                .eq(DocumentLink::getTargetId, engineerId)
-                .orderByDesc(DocumentLink::getId)
-                .last("LIMIT 1"));
-        if (link != null) {
-            link.setSkillSheetConfirmedAt(LocalDateTime.now(clock));
-            link.setSkillSheetConfirmedVersion(fingerprint);
-            documentLinkMapper.updateById(link);
-        }
+        // 確認時点をt_document_linkへ記録する（design §6.1: 確認ごとに更新）。付帯情報は利用可否を変えないため増分しない。
+        documentLinkCommandService.recordSkillSheetConfirmation(document.getTenantId(), document.getId(), engineerId,
+                LocalDateTime.now(clock), fingerprint);
         return new SkillSheetConfirmResult(fingerprint, LocalDateTime.now(clock));
     }
 

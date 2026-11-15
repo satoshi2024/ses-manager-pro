@@ -12,6 +12,7 @@ import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.ServiceAttachmentLinkMapper;
 import com.ses.mapper.ServiceRequestMapper;
+import com.ses.service.document.DocumentLinkCommandService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -28,17 +29,20 @@ public class ServiceRequestAttachmentCommitService {
     private final DocumentVersionMapper versionMapper;
     private final DocumentLinkMapper documentLinkMapper;
     private final ServiceAttachmentLinkMapper attachmentLinkMapper;
+    private final DocumentLinkCommandService documentLinkCommandService;
 
     public ServiceRequestAttachmentCommitService(ServiceRequestMapper requestMapper,
                                                  DocumentMapper documentMapper,
                                                  DocumentVersionMapper versionMapper,
                                                  DocumentLinkMapper documentLinkMapper,
-                                                 ServiceAttachmentLinkMapper attachmentLinkMapper) {
+                                                 ServiceAttachmentLinkMapper attachmentLinkMapper,
+                                                 DocumentLinkCommandService documentLinkCommandService) {
         this.requestMapper = requestMapper;
         this.documentMapper = documentMapper;
         this.versionMapper = versionMapper;
         this.documentLinkMapper = documentLinkMapper;
         this.attachmentLinkMapper = attachmentLinkMapper;
+        this.documentLinkCommandService = documentLinkCommandService;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
@@ -66,26 +70,9 @@ public class ServiceRequestAttachmentCommitService {
         if (typedLink == null) {
             // DocumentService側のlink確定が一時的に失敗しても、補償再試行で
             // typed linkと業務添付linkを同一短transactionへ収束させる。
-            DocumentLink repairedLink = new DocumentLink();
-            repairedLink.setTenantId(tenantId);
-            repairedLink.setDocumentId(documentId);
-            repairedLink.setTargetType("SERVICE_REQUEST");
-            repairedLink.setTargetId(requestId);
-            boolean inserted = false;
-            try {
-                documentLinkMapper.insert(repairedLink);
-                inserted = true;
-            } catch (DuplicateKeyException duplicate) {
-                // 並行実行時は既存の同一業務linkを再確認する。
-                typedLink = documentLinkMapper.selectOne(new LambdaQueryWrapper<DocumentLink>()
-                        .eq(DocumentLink::getTenantId, tenantId)
-                        .eq(DocumentLink::getDocumentId, documentId)
-                        .eq(DocumentLink::getTargetType, "SERVICE_REQUEST")
-                        .eq(DocumentLink::getTargetId, requestId));
-            }
-            if (typedLink == null && !inserted) {
-                throw BusinessException.of(403, "error.scope.notFound");
-            }
+            // 補修insertは文書行のX lock → 一意keyの再確認 → insert → 証跡利用可否epochの増分で行い、
+            // 並行実行は文書行のlockで直列化する（NF01 F3。lock順 15 → 17）。tenantは文書行の値を使う。
+            documentLinkCommandService.link(document.getTenantId(), documentId, "SERVICE_REQUEST", requestId);
         }
 
         if (businessKey == null || businessKey.isBlank()) {

@@ -34,3 +34,4 @@ FlywayProdFreshInstallMySqlTest
 ImportValidationRunRealMySqlTest
 FlywayNf07PrivacyF1MigrationTest
 PortalEngineerLinkSchemaMySqlTest
+DocumentEligibilityFenceMySqlTest

@@ -69,6 +69,8 @@ class DocumentServiceImplTest {
     @Mock ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
     @Mock com.ses.service.AssetScopeService assetScopeService;
     @Mock com.ses.service.security.LegalEntityContextService legalEntityContextService;
+    /** NF01 F3: 状態・linkの書込みは実serviceで同じmapper mockへ流し、epoch fenceだけをmockにする。 */
+    @Mock com.ses.service.security.epoch.AuthorizationEpochFence epochFence;
 
     DocumentServiceImpl sut;
 
@@ -123,7 +125,10 @@ class DocumentServiceImplTest {
                 authorizationServiceProvider,
                 engineerAccountLinkServiceProvider,
                 organizationScopeServiceProvider,
-                assetScopeService);
+                assetScopeService,
+                new com.ses.service.document.DocumentEligibilityService(
+                        documentMapper, documentDisposalRequestMapper, epochFence),
+                new com.ses.service.document.DocumentLinkCommandService(documentLinkMapper, epochFence));
         org.springframework.test.util.ReflectionTestUtils.setField(
                 sut, "legalEntityContextService", legalEntityContextService);
         lenient().when(legalEntityContextService.requireCurrentLegalEntityId()).thenReturn(1L);

@@ -32,6 +32,7 @@ class ServiceRequestAttachmentCommitServiceTest {
     @Mock private DocumentVersionMapper versionMapper;
     @Mock private DocumentLinkMapper documentLinkMapper;
     @Mock private ServiceAttachmentLinkMapper attachmentLinkMapper;
+    @Mock private com.ses.service.document.DocumentLinkCommandService documentLinkCommandService;
 
     @AfterEach
     void clearTenant() {
@@ -62,7 +63,8 @@ class ServiceRequestAttachmentCommitServiceTest {
                 .thenReturn(null);
 
         ServiceRequestAttachmentCommitService service = new ServiceRequestAttachmentCommitService(
-                requestMapper, documentMapper, versionMapper, documentLinkMapper, attachmentLinkMapper);
+                requestMapper, documentMapper, versionMapper, documentLinkMapper, attachmentLinkMapper,
+                documentLinkCommandService);
 
         ServiceAttachmentLink saved = AccountingTenantContextHolder.runWithTenant("tenant-a", () ->
                 service.commit("tenant-a", 10L, 11L, 30L, "INTERNAL", "a.pdf", 12L, "business-key"));
@@ -83,7 +85,8 @@ class ServiceRequestAttachmentCommitServiceTest {
                 .thenReturn(existing);
 
         ServiceRequestAttachmentCommitService service = new ServiceRequestAttachmentCommitService(
-                requestMapper, documentMapper, versionMapper, documentLinkMapper, attachmentLinkMapper);
+                requestMapper, documentMapper, versionMapper, documentLinkMapper, attachmentLinkMapper,
+                documentLinkCommandService);
 
         // existing linkの冪等returnは親行の再検証後に限るため、まず同一tenantの親境界を用意する。
         ServiceRequest request = new ServiceRequest();
@@ -108,5 +111,34 @@ class ServiceRequestAttachmentCommitServiceTest {
 
         assertEquals(99L, result.getId());
         verify(attachmentLinkMapper, never()).insert(any(ServiceAttachmentLink.class));
+    }
+
+    @Test
+    void typedLinkが無ければ文書行のtenantでlink命令serviceへ補修を委ね直接insertしない() {
+        ServiceRequest request = new ServiceRequest();
+        request.setId(10L);
+        request.setTenantId("tenant-a");
+        Document document = new Document();
+        document.setId(30L);
+        document.setTenantId("tenant-a");
+        DocumentVersion version = new DocumentVersion();
+        version.setDocumentId(30L);
+        version.setTenantId("tenant-a");
+        version.setScanStatus("CLEAN");
+        when(requestMapper.selectByIdAndTenant(10L, "tenant-a")).thenReturn(request);
+        when(documentMapper.selectOne(any())).thenReturn(document);
+        when(versionMapper.findLatestByTenantAndDocumentId("tenant-a", 30L)).thenReturn(version);
+        when(documentLinkMapper.selectOne(any())).thenReturn(null);
+        when(attachmentLinkMapper.selectByBusinessKey("tenant-a", "business-key")).thenReturn(null);
+
+        ServiceRequestAttachmentCommitService service = new ServiceRequestAttachmentCommitService(
+                requestMapper, documentMapper, versionMapper, documentLinkMapper, attachmentLinkMapper,
+                documentLinkCommandService);
+        service.commit("tenant-a", 10L, 11L, 30L, "INTERNAL", "a.pdf", 12L, "business-key");
+
+        // 補修は文書行のX lock・epoch増分を伴う集約先で行う（NF01 F3）
+        verify(documentLinkCommandService).link("tenant-a", 30L, "SERVICE_REQUEST", 10L);
+        verify(documentLinkMapper, never()).insert(any(DocumentLink.class));
+        verify(attachmentLinkMapper).insert(any(ServiceAttachmentLink.class));
     }
 }
