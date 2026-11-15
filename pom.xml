@@ -408,6 +408,31 @@
             </build>
         </profile>
 
+        <!-- NF07 Journal インスタンスの専用Flyway job（NF07-A1J、journal-witness-grant-design.md §2.5）。
+             実行: mvn -B -o -Pprivacy-journal-migrate clean compile flyway:migrate
+             設定はops/flyway/flyway-privacy-journal.confだけに書く（locationはclasspath:db/privacy-journalだけ、
+             履歴表はflyway_schema_history_privacy_journal、applicationのcallbackは持たない）。
+             combine.self="override" で上のlocal開発向けconfigurationを引き継がない。application DBのjob（prod-migrate）と
+             同じ実行で指定しない。接続情報（FLYWAY_URL / FLYWAY_USER / FLYWAY_PASSWORD。Journal migrator用）は
+             環境変数で渡し、POMとMaven propertyを経由させない。plugin依存（flyway-mysql・mysql-connector-j）は
+             build/pluginsの定義をそのまま継承する（profile側では書かない）。 -->
+        <profile>
+            <id>privacy-journal-migrate</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.flywaydb</groupId>
+                        <artifactId>flyway-maven-plugin</artifactId>
+                        <configuration combine.self="override">
+                            <configFiles>
+                                <configFile>${project.basedir}/ops/flyway/flyway-privacy-journal.conf</configFile>
+                            </configFiles>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
         <!-- 実Chrome（CDP・headless）必須のbrowser Demo。default fast suiteへは無条件追加しない。 -->
         <profile>
             <id>browser-tests</id>

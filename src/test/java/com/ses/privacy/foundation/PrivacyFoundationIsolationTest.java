@@ -35,7 +35,8 @@ class PrivacyFoundationIsolationTest {
     void production部品はProductionPrivacyComponents経由でしか生成できない() throws Exception {
         for (Class<?> type : java.util.List.of(ProductionPolicyReadonlyQueryService.class,
                 ProductionApprovalEnvelopeVerifier.class, SecurityContextCallerContextProvider.class,
-                ProductionPolicyEnvelopeDecoder.class, ProductionEnvironmentGuard.class)) {
+                ProductionPolicyEnvelopeDecoder.class, ProductionEnvironmentGuard.class,
+                ProductionPrivacyJournalAdapter.class)) {
             assertFalse(java.lang.reflect.Modifier.isPublic(type.getModifiers()), type.getSimpleName() + " はpackage-private");
             for (java.lang.reflect.Constructor<?> constructor : type.getDeclaredConstructors()) {
                 assertFalse(java.lang.reflect.Modifier.isPublic(constructor.getModifiers()),
@@ -54,6 +55,37 @@ class PrivacyFoundationIsolationTest {
                 CurrentPolicySnapshot.class)) {
             assertTrue(java.lang.reflect.Modifier.isPublic(type.getModifiers()), type.getSimpleName());
         }
+    }
+
+    @Test
+    void 本番Journal_adapterはprod以外では接続前に生成を拒否しhold解除も接続前に拒否する() {
+        java.util.concurrent.atomic.AtomicInteger attempts = new java.util.concurrent.atomic.AtomicInteger();
+        javax.sql.DataSource tripwire = (javax.sql.DataSource) java.lang.reflect.Proxy.newProxyInstance(
+                getClass().getClassLoader(), new Class<?>[]{javax.sql.DataSource.class}, (proxy, method, args) -> {
+                    if ("getConnection".equals(method.getName())) {
+                        attempts.incrementAndGet();
+                        throw new AssertionError("接続前に拒否される必要があります");
+                    }
+                    return null;
+                });
+        for (String[] active : java.util.List.of(new String[]{"test"}, new String[]{}, new String[]{"dev"})) {
+            org.springframework.mock.env.MockEnvironment environment = new org.springframework.mock.env.MockEnvironment();
+            environment.setActiveProfiles(active);
+            assertThrows(SecurityException.class, () -> ProductionPrivacyComponents.productionPrivacyJournal(
+                    environment, tripwire, java.time.Clock.systemUTC()));
+        }
+        org.springframework.mock.env.MockEnvironment prod = new org.springframework.mock.env.MockEnvironment();
+        prod.setActiveProfiles("prod");
+        PrivacyJournalPort journal = ProductionPrivacyComponents.productionPrivacyJournal(
+                prod, tripwire, java.time.Clock.systemUTC());
+        assertNotNull(journal);
+        PrivacyJournalPort.JournalPartition partition = new PrivacyJournalPort.JournalPartition("tenant-a", "subject-a");
+        assertThrows(SecurityException.class, () -> journal.append(PrivacyJournalPort.JournalCommand.create(
+                "release-1", partition, 1, PrivacyJournalPort.CommandType.HOLD_RELEASED,
+                null, null, null, null, 0, null)));
+        assertEquals(0, attempts.get(), "生成時とhold解除の拒否ではJournalへ接続しない");
+        assertEquals(0, ProductionPrivacyJournalAdapter.class.getConstructors().length,
+                "本番adapterにpublic constructorがない");
     }
 
     @Test

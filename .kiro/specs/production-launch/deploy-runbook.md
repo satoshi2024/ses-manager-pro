@@ -251,6 +251,32 @@ SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE
 - **migrationの途中で失敗した場合（初回導入）**: MySQLのDDLはtransactionで戻らないため、失敗行（`success = 0`）と途中までのschemaが残る。初回は業務dataが無いので、`flyway repair` で続行せず、**DBAがschemaを削除して空で作り直し**、原因を直してから§3.3を最初からやり直す。`flyway clean` は使わない（設定で拒否している）。
 - **2回目以降のreleaseで失敗した場合**: §2.5で取得したbackupから戻すことを基本とする。`CLAUDE.md` のrepair手順はlocal開発DB向けであり、本番では許可済みscriptの確認・backup・DBA承認を経てだけ使う。
 
+### 3.6 NF07 Journal インスタンスの専用Flyway job（NF07-A1J）
+
+NF07 の hold の正本となる独立 Journal インスタンス（schema `privacy_journal`）の DDL は、application DB とは別の location（`db/privacy-journal`）・別の履歴表（`flyway_schema_history_privacy_journal`）・別の job で適用する（`journal-witness-grant-design.md` §2.5）。版番号は application の `db/migration` と独立している（Journal は V1 から）。
+
+- **初回リリースでは実行しない**。Journal インスタンスの作成・DB user・GRANT は外部作業（G-DBA / G-BKP。`journal-witness-grant-design.md` §3）で、本job は NF07 の hold 開始（A1H）を開放する前に、DBA がインスタンスを用意した後で実行する。`privacy.retention.enabled` は既定OFFのままでよい（journal 設定が無ければ application は Journal へ一度も接続しない）。
+- 前提（DBA）: Journal は application DB・Witness と**別 instance**（`@@server_uuid` が異なる）。`innodb_flush_log_at_trx_commit = 1`、`sync_binlog = 1`、`log_bin = ON`、`read_only = OFF`、`super_read_only = OFF`、`default_storage_engine = InnoDB`。空の `privacy_journal` schema を作り（`CREATE DATABASE privacy_journal CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin;`）、Journal を application DB の restore 対象に含めない。
+- job 専用の principal は `nf07_journal_migrator`（`privacy_journal.*` への DDL と履歴表。application へは渡さない）。job 実行環境へ渡す値は環境変数 `FLYWAY_URL`（`jdbc:mysql://<journal-host>:3306/privacy_journal?sslMode=VERIFY_IDENTITY`）・`FLYWAY_USER`・`FLYWAY_PASSWORD` の3つだけ。application DB の job（§3.3）とは**別のshell・別の実行**にし、§1.3 の `FLYWAY_PLACEHOLDERS_ADMIN_INITIAL_PASSWORD_HASH` を設定しない。§1.3 の `mvn -X` 禁止・`flyway.conf` / `settings.xml` の確認も同じく守る。
+  ```bash
+  env | grep '^FLYWAY_' | cut -d= -f1 | sort
+  # 期待: FLYWAY_PASSWORD / FLYWAY_URL / FLYWAY_USER の3行だけ
+  mvn -B -o -Pprivacy-journal-migrate clean compile flyway:info      # V1 が Pending、エラー無し
+  mvn -B -o -Pprivacy-journal-migrate clean compile flyway:migrate
+  ```
+- 設定は `ops/flyway/flyway-privacy-journal.conf` だけに書く（location は `classpath:db/privacy-journal` だけ、application の callback を持たない、`baselineOnMigrate=false`、`cleanDisabled=true`）。`-Pprod-migrate` と同時に指定しない。
+- 適用結果の確認（DBA立会い。Journal インスタンス上で実行）:
+  ```sql
+  SELECT version, script, success FROM flyway_schema_history_privacy_journal ORDER BY installed_rank;
+  -- 期待: 1 / V1__privacy_journal_core.sql / 1 の1行だけ
+  SELECT table_name, engine FROM information_schema.tables WHERE table_schema = 'privacy_journal' ORDER BY table_name;
+  -- 期待: flyway_schema_history_privacy_journal・pj_action・pj_command・pj_event・pj_head・pj_lease、全て InnoDB
+  SELECT COUNT(*) FROM pj_head;  -- 0
+  ```
+- application の接続（hold 開始の開放時に設定。flag とは独立に、設定があれば起動時検査を行う）: `PRIVACY_JOURNAL_DATASOURCE_URL`（`jdbc:mysql://` だけ。`sslMode=VERIFY_IDENTITY` 必須、`autoReconnect`・時区 parameter・複数 host・URL 内の認証情報は不可）、`PRIVACY_JOURNAL_DATASOURCE_USERNAME` / `PRIVACY_JOURNAL_DATASOURCE_PASSWORD`（hold 開始を使うなら `nf07_journal_appender`、効力確認だけなら `nf07_journal_reader`。secret store から注入）、`PRIVACY_JOURNAL_JOURNALID`（`privacy.journal.journal-id`。`[A-Za-z0-9._-]{4,64}`）。任意: `PRIVACY_JOURNAL_DATASOURCE_MAXPOOLSIZE`（1〜8、既定4）、`PRIVACY_JOURNAL_DATASOURCE_CONNECTIONTIMEOUT`（上限30秒、既定5秒）、`PRIVACY_JOURNAL_EXPECTEDSCHEMA`（既定 `privacy_journal`）、`PRIVACY_JOURNAL_PENDINGTIMEOUT`（設定するなら10秒より長く）。
+- 起動時検査（`PrivacyJournalStartupVerifier`）: `server_uuid` の相違、上の耐久設定、`DATABASE()`、principal の権限（`information_schema` と `CURRENT_ROLE()`。role 経由の GRANT は不可）、本節の履歴表が artifact と一致、`t_privacy_projection_state.journal_id` の一致を確かめる。`privacy.retention.enabled=true` で1つでも不適合（設定欠落を含む）なら起動しない。OFF なら起動を続け、WARN `NF07_PRIVACY_JOURNAL_UNAVAILABLE` と固定の理由code（接続文字列・user名・passwordは出さない）を出す。
+- 失敗した場合: Journal は業務dataを持たず、初回は空なので、DBA が `privacy_journal` schema を削除して空で作り直し、原因を直してから再実行する。`flyway repair` / `clean` は使わない。hold を一度でも記録した後の Journal は正本であり、作り直さない（B2 の recovery 手順による）。
+
 ## 4. アプリ起動（SRE）
 
 - 環境変数: `SPRING_PROFILES_ACTIVE=prod`（prod単独）、`DB_URL` / `DB_USERNAME` / `DB_PASSWORD`（アプリaccount）、その他prodのsecret（§4.1）。
