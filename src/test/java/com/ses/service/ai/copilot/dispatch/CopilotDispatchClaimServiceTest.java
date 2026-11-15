@@ -567,6 +567,85 @@ class CopilotDispatchClaimServiceTest {
         assertFalse(CopilotDispatchClaimService.isTransient(new DataIntegrityViolationException("x")));
         assertFalse(CopilotDispatchClaimService.isTransient(new IllegalStateException("x")));
         assertFalse(CopilotDispatchClaimService.isTransient(new TransactionSystemException("x")));
+        // Connector/JのMySQLTimeoutExceptionはjava.sql.SQLTimeoutExceptionの派生（SQLTransientException）。
+        assertTrue(CopilotDispatchClaimService.isTransient(new RuntimeException(new java.sql.SQLTimeoutException("x"))));
+        // statement timeoutの後にrollbackも失敗した形（rollbackの例外が元のtimeoutを覆う）。
+        assertTrue(CopilotDispatchClaimService.isTransient(rollbackFailedAfter(
+                new QueryTimeoutException("x", new java.sql.SQLTimeoutException("cancelled")))));
+        assertTrue(CopilotDispatchClaimService.isTransient(rollbackFailedAfter(
+                new RuntimeException(new java.sql.SQLTimeoutException("cancelled")))));
+        assertFalse(CopilotDispatchClaimService.isTransient(rollbackFailedAfter(
+                new DataIntegrityViolationException("x"))), "元の例外が再試行できないものなら再試行しない");
+        assertEquals("TransactionSystemException<-QueryTimeoutException", CopilotDispatchClaimService.failureType(
+                rollbackFailedAfter(new QueryTimeoutException("x"))));
+    }
+
+    @Test
+    void statement_timeoutの後にrollbackも失敗しても元の例外を辿って同じticketで再試行する() {
+        DispatchTicket ticket = prepare();
+        when(runMapper.lockDispatchRow(any()))
+                .thenThrow(new QueryTimeoutException("cancelled", new java.sql.SQLTimeoutException("cancelled")))
+                .thenReturn(DispatchClaimFixtures.readyRow(ticket));
+        failRollbackLikeBrokenConnection();
+
+        ClaimOutcome outcome = service.claim(ticket);
+
+        assertEquals(ClaimOutcome.Status.CLAIMED, outcome.status());
+        assertEquals(2, outcome.transactionAttempts());
+        verify(auditor, times(1)).recordAttempt(any());
+    }
+
+    @Test
+    void statement_timeoutの後に残deadlineが1秒未満ならDEADLINEで止め予約せずNOT_SENTのRESULTを残す() {
+        DispatchTicket ticket = prepare();
+        when(runMapper.lockDispatchRow(any())).thenAnswer(invocation -> {
+            // lock待ちがtimeoutまで続き、その間にdeadlineの残りが1秒を切った。
+            nanos.set(ticket.request().deadlineNanos() - TimeUnit.MILLISECONDS.toNanos(500));
+            throw new QueryTimeoutException("cancelled", new java.sql.SQLTimeoutException("cancelled"));
+        });
+        failRollbackLikeBrokenConnection();
+
+        ClaimOutcome outcome = service.claim(ticket);
+
+        assertEquals(ClaimOutcome.Status.NOT_CLAIMED, outcome.status());
+        assertEquals(CopilotDispatchClaimService.REASON_DEADLINE, outcome.reasonCode());
+        assertEquals(1, outcome.transactionAttempts());
+        assertNull(outcome.permit());
+        verify(ledger, never()).recordReservation(any());
+        verify(runMapper, never()).claimDispatch(any(), any());
+        AiExternalSendAuditor.SendAudit result = captureResult();
+        assertEquals(CopilotDispatchClaimService.REASON_DEADLINE, result.reasonCode());
+        assertEquals("NOT_SENT", result.costState());
+    }
+
+    @Test
+    void statement_timeoutとrollback失敗が3回続けばLEDGER_UNAVAILABLEでCLAIM_FAILEDにしない() {
+        DispatchTicket ticket = prepare();
+        when(runMapper.lockDispatchRow(any())).thenAnswer(invocation -> {
+            throw new QueryTimeoutException("cancelled", new java.sql.SQLTimeoutException("cancelled"));
+        });
+        failRollbackLikeBrokenConnection();
+
+        ClaimOutcome outcome = service.claim(ticket);
+
+        assertEquals(CopilotDispatchClaimService.REASON_LEDGER_UNAVAILABLE, outcome.reasonCode());
+        assertEquals(CopilotDispatchClaimService.MAX_TRANSACTION_ATTEMPTS, outcome.transactionAttempts());
+        verify(auditor, times(1)).recordResult(any());
+    }
+
+    /** Hikariが壊れた接続として閉じた後のrollback失敗（DataSourceTransactionManagerの例外の形）。毎回新しい例外を投げる。 */
+    private void failRollbackLikeBrokenConnection() {
+        doAnswer(invocation -> {
+            throw new TransactionSystemException("Could not roll back JDBC transaction",
+                    new SQLException("Connection is closed", "08003"));
+        }).when(transactionManager).rollback(any());
+    }
+
+    private static TransactionSystemException rollbackFailedAfter(RuntimeException application) {
+        TransactionSystemException failure = new TransactionSystemException("Could not roll back JDBC transaction",
+                new SQLException("Connection is closed", "08003"));
+        failure.initApplicationException(application);
+        return failure;
     }
 
     @Test

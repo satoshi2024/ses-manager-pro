@@ -179,7 +179,7 @@ public class CopilotDispatchClaimService {
         } catch (RuntimeException ex) {
             // 計画 §4 #2: READYのまま期限で失効させ、照合でATTEMPT_NOT_PERSISTEDのRESULTを補記する。
             log.warn("AI外部送信の送信前監査を永続化できないためclaimしません: claim={} errorType={}",
-                    ticket.claimId(), ex.getClass().getSimpleName());
+                    ticket.claimId(), failureType(ex));
             return notClaimed(REASON_AUDIT_UNAVAILABLE, 0);
         }
 
@@ -220,11 +220,14 @@ public class CopilotDispatchClaimService {
                     continue;
                 }
                 if (isTransient(ex)) {
+                    // callbackは完了していないためcommitは発行されていない。statement timeoutの後はHikariが接続を
+                    // 壊れたものとして閉じ（rollback自体が失敗し得る）、server側の未commit transactionは切断で
+                    // rollbackされる。次の試行の前に残deadlineを確かめ、1秒未満ならDEADLINEとして止める。
                     reason = REASON_LEDGER_UNAVAILABLE;
                     continue;
                 }
                 log.warn("Copilot dispatch claim transactionが失敗しました: claim={} errorType={}",
-                        ticket.claimId(), ex.getClass().getSimpleName());
+                        ticket.claimId(), failureType(ex));
                 reason = REASON_CLAIM_FAILED;
                 break;
             }
@@ -352,7 +355,7 @@ public class CopilotDispatchClaimService {
      */
     private ClaimOutcome uncertain(DispatchTicket ticket, int attempts, RuntimeException failure) {
         log.warn("Copilot dispatch claimのcommit結果を確認できないためpermitを発行しません: claim={} errorType={}",
-                ticket.claimId(), failure.getClass().getSimpleName());
+                ticket.claimId(), failureType(failure));
         DispatchState observed = null;
         try {
             Duration remaining = remaining(ticket);
@@ -366,7 +369,7 @@ public class CopilotDispatchClaimService {
                     });
         } catch (RuntimeException ex) {
             log.warn("Copilot dispatch claimの読み直しに失敗しました: claim={} errorType={}",
-                    ticket.claimId(), ex.getClass().getSimpleName());
+                    ticket.claimId(), failureType(ex));
         }
         // CLAIMEDなら予約は維持（上限側に残す）。READYならclaim transactionはcommitされていない。
         // 読めなければ送信可能性を否定できないためUNKNOWNとする。いずれもpermitは発行しない。
@@ -392,7 +395,7 @@ public class CopilotDispatchClaimService {
             } catch (RuntimeException ex) {
                 if (!isTransient(ex)) {
                     log.warn("費用bucketを準備できないためclaimしません: claim={} errorType={}",
-                            ticket.claimId(), ex.getClass().getSimpleName());
+                            ticket.claimId(), failureType(ex));
                     return false;
                 }
             }
@@ -503,9 +506,24 @@ public class CopilotDispatchClaimService {
         return null;
     }
 
-    /** 1213（deadlock）・1205（lock wait timeout）・statement/transaction timeoutなど、再試行してよい失敗。 */
+    /**
+     * 1213（deadlock）・1205（lock wait timeout）・statement/transaction timeoutなど、再試行してよい失敗。
+     * <p>cause鎖に加えて、{@link TransactionSystemException} が保持する元の例外（application exception）も辿る。
+     * 実MySQLではstatement timeout（Connector/Jの {@code MySQLTimeoutException}、{@link java.sql.SQLTimeoutException}
+     * の派生）の後にHikariが接続を壊れたものとして閉じるため、続くrollbackが失敗し、TransactionTemplateは
+     * rollbackの例外（cause鎖に元のtimeoutを含まない）を投げる。元の例外を見ないとtimeoutを一般の失敗と誤分類する。</p>
+     */
     static boolean isTransient(Throwable failure) {
-        for (Throwable current = failure; current != null; current = current.getCause()) {
+        java.util.Deque<Throwable> pending = new java.util.ArrayDeque<>();
+        java.util.Set<Throwable> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        if (failure != null) {
+            pending.add(failure);
+        }
+        while (!pending.isEmpty() && seen.size() < 32) {
+            Throwable current = pending.removeFirst();
+            if (!seen.add(current)) {
+                continue;
+            }
             if (current instanceof PessimisticLockingFailureException || current instanceof QueryTimeoutException
                     || current instanceof TransactionTimedOutException || current instanceof SQLTransientException) {
                 return true;
@@ -514,11 +532,22 @@ public class CopilotDispatchClaimService {
                     && (sql.getErrorCode() == 1213 || sql.getErrorCode() == 1205 || "40001".equals(sql.getSQLState()))) {
                 return true;
             }
-            if (current.getCause() == current) {
-                break;
+            if (current instanceof TransactionSystemException system && system.getApplicationException() != null) {
+                pending.add(system.getApplicationException());
+            }
+            if (current.getCause() != null) {
+                pending.add(current.getCause());
             }
         }
         return false;
+    }
+
+    /** logに出す例外の型名。rollbackの失敗が元の例外を覆った場合は元の型も示す（値・messageは出さない）。 */
+    static String failureType(Throwable failure) {
+        if (failure instanceof TransactionSystemException system && system.getApplicationException() != null) {
+            return failure.getClass().getSimpleName() + "<-" + system.getApplicationException().getClass().getSimpleName();
+        }
+        return failure.getClass().getSimpleName();
     }
 
     /** callbackがCASまで完了したか（commit失敗とcallback内の失敗を区別する）。 */

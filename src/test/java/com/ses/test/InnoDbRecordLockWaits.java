@@ -125,6 +125,77 @@ public final class InnoDbRecordLockWaits {
     }
 
     /**
+     * blocker接続のtransactionが<b>所有する</b>lockへの待機辺を、lockのENGINE_TRANSACTION_IDと
+     * {@code information_schema.innodb_trx} で特定する（{@code index} がnullならtable内の全index）。
+     *
+     * <p>{@code data_locks.THREAD_ID} は「lock構造を作ったsession」であり、lockの所有transactionではない
+     * （MySQL 8.0 reference manual の {@code data_locks} 表の説明）。blockerがinsertした未commit行は暗黙lockだけを持ち、
+     * それを待つ側（重複検査など）が待機の時点で明示lockへ変換するため、その明示lockのTHREAD_IDは<b>requester側</b>になる。
+     * したがって挿入行での待機は {@link #waitEdges} のTHREAD_ID→PROCESSLIST_IDの対応では見つからない
+     * （W3-13のdeadlock試験が実MySQLで待機を確認できなかった原因）。所有transactionで辿ればこの場合も確定できる。
+     * {@code LOCK_DATA} は使わない。辺の接続IDには {@code innodb_trx.trx_mysql_thread_id} を入れる。</p>
+     */
+    public static List<WaitEdge> waitEdgesOwnedBy(JdbcTemplate jdbc, long blockerConnectionId, String table,
+                                                  String index) {
+        return jdbc.query("""
+                        SELECT rt.trx_mysql_thread_id, bt.trx_mysql_thread_id,
+                               req.ENGINE_LOCK_ID, req.OBJECT_NAME, req.INDEX_NAME, req.LOCK_TYPE, req.LOCK_MODE,
+                               req.LOCK_STATUS, req.LOCK_DATA,
+                               blk.ENGINE_LOCK_ID, blk.OBJECT_NAME, blk.INDEX_NAME, blk.LOCK_TYPE, blk.LOCK_MODE,
+                               blk.LOCK_STATUS, blk.LOCK_DATA
+                        FROM performance_schema.data_lock_waits w
+                        JOIN information_schema.innodb_trx bt ON bt.trx_id = w.BLOCKING_ENGINE_TRANSACTION_ID
+                        JOIN information_schema.innodb_trx rt ON rt.trx_id = w.REQUESTING_ENGINE_TRANSACTION_ID
+                        JOIN performance_schema.data_locks req
+                          ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                        JOIN performance_schema.data_locks blk
+                          ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                        WHERE bt.trx_mysql_thread_id=? AND rt.trx_mysql_thread_id<>?
+                          AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=?
+                          AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=?
+                          AND (? IS NULL OR (req.INDEX_NAME=? AND blk.INDEX_NAME=?))
+                        """, (rs, row) -> new WaitEdge(rs.getLong(1), rs.getLong(2), rs.getString(3),
+                        rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8),
+                        rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(12), rs.getString(13),
+                        rs.getString(14), rs.getString(15), rs.getString(16)),
+                blockerConnectionId, blockerConnectionId, table, table, index, index, index);
+    }
+
+    /** 失敗時の診断。blocker接続のtransactionが所有するlockへの全待機辺（table・indexを限定しない）。 */
+    public static String describeWaitsOwnedBy(JdbcTemplate jdbc, long blockerConnectionId) {
+        try {
+            List<String> details = new ArrayList<>();
+            for (WaitEdge edge : jdbc.query("""
+                            SELECT rt.trx_mysql_thread_id, bt.trx_mysql_thread_id,
+                                   req.ENGINE_LOCK_ID, req.OBJECT_NAME, req.INDEX_NAME, req.LOCK_TYPE, req.LOCK_MODE,
+                                   req.LOCK_STATUS, req.LOCK_DATA,
+                                   blk.ENGINE_LOCK_ID, blk.OBJECT_NAME, blk.INDEX_NAME, blk.LOCK_TYPE, blk.LOCK_MODE,
+                                   blk.LOCK_STATUS, blk.LOCK_DATA
+                            FROM performance_schema.data_lock_waits w
+                            JOIN information_schema.innodb_trx bt ON bt.trx_id = w.BLOCKING_ENGINE_TRANSACTION_ID
+                            JOIN information_schema.innodb_trx rt ON rt.trx_id = w.REQUESTING_ENGINE_TRANSACTION_ID
+                            JOIN performance_schema.data_locks req
+                              ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+                            JOIN performance_schema.data_locks blk
+                              ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+                            WHERE bt.trx_mysql_thread_id=?
+                            """, (rs, row) -> new WaitEdge(rs.getLong(1), rs.getLong(2), rs.getString(3),
+                            rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8),
+                            rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(12), rs.getString(13),
+                            rs.getString(14), rs.getString(15), rs.getString(16)),
+                    blockerConnectionId)) {
+                details.add(edge.describe());
+            }
+            Integer waiting = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.innodb_trx "
+                    + "WHERE trx_state='LOCK WAIT'", Integer.class);
+            return details.isEmpty() ? "blocker=" + blockerConnectionId + "の所有lockへの待機辺なし（LOCK WAIT中のtransaction="
+                    + waiting + "件）" : details.toString();
+        } catch (RuntimeException failure) {
+            return "待機診断の取得に失敗しました: " + failure.getClass().getSimpleName();
+        }
+    }
+
+    /**
      * 指定table・index上の全record lock待機辺（requester・blockerを限定しない）。待機列に並ぶ複数requesterの
      * 待機graphを辿る試験が使う。LOCK_DATAでは結合・絞込みしない。
      */

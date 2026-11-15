@@ -332,8 +332,10 @@ class CopilotDispatchClaimMySqlIntegrationTest {
         try (Connection blocker = dataSource.getConnection()) {
             blocker.setAutoCommit(false);
             long blockerId = connectionId(blocker);
-            // blockerを重いtransactionにする（InnoDBは変更行数の少ない側を犠牲にする）。重みはentry表に積み、
-            // 待機を確認するindexには載せない。最後に同じ予約IDのentryを未commitで作り、claimのinsertを待たせる。
+            // blockerを重いtransactionにする（InnoDBは変更行数の少ない側を犠牲にする）。最後に同じ予約IDのentryを
+            // 未commitで作る。claimはlock順 run → DAY → MONTH → entry のとおり、run行（とbucket）をlockした後の
+            // entry insertの一意検査でこの行を待つ（実MySQLのstack traceで insertReserved での待機を確認済み）。
+            // blockerの行は暗黙lockで、待つ側が明示lockへ変換するためTHREAD_IDではなく所有transactionで待機を確かめる。
             try (PreparedStatement weight = blocker.prepareStatement(entryInsertSql())) {
                 for (int i = 0; i < 20; i++) {
                     bindEntry(weight, UUID.randomUUID().toString(), "nf08-weight", 1);
@@ -343,7 +345,7 @@ class CopilotDispatchClaimMySqlIntegrationTest {
                 weight.executeUpdate();
             }
             Future<ClaimOutcome> claim = pool.submit(() -> claimAs(TENANT_A, claimService, ticket));
-            awaitAnyWaiter(blockerId, "t_ai_external_send_cost_entry", "uk_ai_cost_entry_reservation", claim);
+            awaitWaiterOnOwnedLock(blockerId, "t_ai_external_send_cost_entry", claim);
             // claimはrun行の排他lockを保持したままentryの一意検査で待っている。blockerがrun行を要求すると循環する。
             try (PreparedStatement cycle = blocker.prepareStatement(
                     "SELECT id FROM t_ai_recommendation_run WHERE id=? FOR UPDATE")) {
@@ -519,24 +521,30 @@ class CopilotDispatchClaimMySqlIntegrationTest {
                 + InnoDbRecordLockWaits.describeWaitsForBlocker(jdbc, blockerId));
     }
 
-    /** blockerが保持する指定indexのlockを、いずれかの接続が待っていることを確認する。 */
-    private void awaitAnyWaiter(long blockerId, String table, String index, Future<ClaimOutcome> worker)
-            throws Exception {
+    /**
+     * blockerのtransactionが所有する {@code table} のlockを、別の接続（claim）が待っていることを確認する。
+     * 待機辺は所有transaction（ENGINE_TRANSACTION_ID）で辿る。blockerがinsertした行の暗黙lockは待つ側が明示lockへ
+     * 変換するため、THREAD_IDで辿る {@link InnoDbRecordLockWaits#waitEdges} では見つからない。LOCK_DATAは使わない。
+     * claimが待ちを続けている間（transactionのtimeout前）に確認できなければ失敗させる。
+     */
+    private void awaitWaiterOnOwnedLock(long blockerId, String table, Future<ClaimOutcome> worker) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(WAIT_MILLIS);
         while (System.nanoTime() < deadline) {
             if (worker.isDone()) {
-                fail("claimがblockerのentryを待たずに終了した: " + worker.get());
+                fail("claimがblockerのentryを待つ間に待機を確認できなかった: " + worker.get() + " "
+                        + InnoDbRecordLockWaits.describeWaitsOwnedBy(jdbc, blockerId));
             }
-            for (InnoDbRecordLockWaits.WaitEdge edge : InnoDbRecordLockWaits.waitEdges(jdbc, null, blockerId, table,
-                    index)) {
-                if (edge.requesterConnectionId() != blockerId && "WAITING".equals(edge.requesterStatus())) {
+            for (InnoDbRecordLockWaits.WaitEdge edge : InnoDbRecordLockWaits.waitEdgesOwnedBy(jdbc, blockerId, table,
+                    null)) {
+                if (edge.requesterConnectionId() != blockerId && "WAITING".equals(edge.requesterStatus())
+                        && "RECORD".equals(edge.requesterType())) {
                     return;
                 }
             }
             Thread.sleep(25);
         }
         fail("claimがentryの一意検査でblockerを待つことを確認できなかった: "
-                + InnoDbRecordLockWaits.describeWaitsForBlocker(jdbc, blockerId));
+                + InnoDbRecordLockWaits.describeWaitsOwnedBy(jdbc, blockerId));
     }
 
     private static long connectionId(Connection connection) throws Exception {
