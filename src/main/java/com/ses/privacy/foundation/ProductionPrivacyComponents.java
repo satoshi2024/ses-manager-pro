@@ -5,7 +5,10 @@ import com.ses.service.security.AuthorizationService;
 import com.ses.service.security.LegalEntityContextService;
 import org.springframework.core.env.Environment;
 
+import javax.sql.DataSource;
 import java.time.Clock;
+import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
@@ -50,5 +53,34 @@ public final class ProductionPrivacyComponents {
                 legalEntityContextService, sysUserMapper, authorizationService, authorizationTenantId, clock);
         return new ProductionPolicyReadonlyQueryService(sourceEnabled, callerProvider, catalog, source,
                 trustRegistry, revocations, guard, clock);
+    }
+
+    /**
+     * 独立 Journal インスタンスへの本番 adapter を生成する（NF07-A1J、production-bridge-phased-plan.md §3.3）。
+     *
+     * <p>合成 {@code JdbcPrivacyJournalAdapter} とは別 class・別入口で、合成層のコードは使わない（I-6）。
+     * {@code journalDataSource} は Journal 専用の接続（{@code PrivacyJournalConnections} の内部 pool）だけを渡す。
+     * application DB の {@code DataSource} を渡さないことは、起動時検査（{@code PrivacyJournalStartupVerifier}）の
+     * {@code server_uuid}・schema・権限の照合で検出する。生成時に DB へ触れない。
+     *
+     * @param environment       起動環境（prod profile 必須。prod 以外では {@link SecurityException}）
+     * @param journalDataSource Journal 専用の接続
+     * @param clock             event 時刻の時計
+     */
+    public static PrivacyJournalPort productionPrivacyJournal(Environment environment, DataSource journalDataSource,
+                                                              Clock clock) {
+        ProductionEnvironmentGuard guard = new ProductionEnvironmentGuard(
+                Objects.requireNonNull(environment, "environment must not be null"));
+        return new ProductionPrivacyJournalAdapter(journalDataSource, guard, clock);
+    }
+
+    /** 本番 Journal の append・照会の transaction 上限（{@code privacy.journal.pending-timeout} の下限）。 */
+    public static Duration journalAppendTimeout() {
+        return ProductionPrivacyJournalAdapter.APPEND_TRANSACTION_TIMEOUT;
+    }
+
+    /** 本番 Journal の表名（起動時検査の権限・engine 照合に使う）。 */
+    public static List<String> journalTables() {
+        return ProductionPrivacyJournalAdapter.JOURNAL_TABLES;
     }
 }

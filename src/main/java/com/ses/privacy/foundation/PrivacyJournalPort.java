@@ -5,7 +5,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 /**
- * 独立journalのtyped境界。W2aではsynthetic adapter以外の実装を提供しない。
+ * 独立journalのtyped境界。合成実装は test profile 専用の {@code JdbcPrivacyJournalAdapter}、本番実装は
+ * {@code ProductionPrivacyJournalAdapter}（{@link ProductionPrivacyComponents#productionPrivacyJournal} 経由・prod 専用。NF07-A1J）。
  * ACKは合成eventの線形化記録であり、VerifiedDispatchFenceや実policy承認ではない。
  */
 public interface PrivacyJournalPort {

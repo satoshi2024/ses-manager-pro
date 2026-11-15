@@ -6,7 +6,6 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
@@ -67,7 +66,8 @@ public class CustomUserDetailsService implements UserDetailsService {
                 && productionBootstrapMode.isBootstrapLoginAllowed(username, sysUser);
         if (!oidcSecurityProperties.isLocalLoginEnabled() && !breakGlassLogin && !bootstrapLogin) {
             // IdP障害時の無制限local fallbackを防ぎ、明示されたbreak-glassだけを残す。
-            throw new DisabledException("local login is disabled");
+            // パスワード照合前の拒否なので、LoginFailureHandler は失敗回数に数えない（D-P3-1）。
+            throw new LocalLoginDisabledException();
         }
 
         // ユーザーステータスの確認は LoginUser の isEnabled() で行われます
