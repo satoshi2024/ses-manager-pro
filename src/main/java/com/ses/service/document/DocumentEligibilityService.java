@@ -220,12 +220,15 @@ public class DocumentEligibilityService {
     /**
      * 廃棄執行のcommit後にstorage削除が失敗したことを記録する（DISPOSED→FAILED）。文書はDISPOSEDの終端で不適格のまま
      * なのでepochは進めない（§4.3 executeDisposal）。afterCommitから呼ばれるため、元のtransactionに参加せず
-     * 独立したtransactionで確定させる。
+     * 独立したtransactionで確定させる。DISPOSEDの申請だけを書き換える（状態CAS）。
+     *
+     * @return 書き換えた行数（申請がDISPOSEDでなければ0）
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public void markDisposalStorageFailed(long requestId, String reasonText) {
-        disposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
+    public int markDisposalStorageFailed(long requestId, String reasonText) {
+        return disposalRequestMapper.update(null, new LambdaUpdateWrapper<DocumentDisposalRequest>()
                 .eq(DocumentDisposalRequest::getId, requestId)
+                .eq(DocumentDisposalRequest::getStatus, REQUEST_DISPOSED)
                 .set(DocumentDisposalRequest::getStatus, REQUEST_FAILED)
                 .set(DocumentDisposalRequest::getReason, reasonText));
     }

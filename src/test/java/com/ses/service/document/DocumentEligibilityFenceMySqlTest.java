@@ -58,11 +58,14 @@ import static org.junit.jupiter.api.Assertions.fail;
  *   <li>待機の判定は {@code data_locks.LOCK_DATA} に依存せず、保持側が主キー一点で取った単一のrecord lockを基準に、
  *       待機辺のblocking lockがそのlockであることで確かめる（{@link InnoDbRecordLockWaits}）。</li>
  *   <li>対象writer: link追加（ENGINEER・SERVICE_REQUEST）、法的holdの設定・解除、廃棄申請・却下・承認・執行、
- *       保存期限jobの廃棄候補（tenant contextなし）。版追加・確定・同じ値の再設定・既存linkの再追加では進まない。</li>
+ *       保存期限jobの廃棄候補（tenant contextなし）、資産貸与・返却の証跡link。版追加・確定・同じ値の再設定・
+ *       既存linkの再追加では進まない。</li>
+ *   <li>link挿入は全文書共有の一意indexにgap lockを残さず、別文書のlink挿入を待たせない（W3-17 Review P2-1）。</li>
  * </ul>
  *
- * <p>資産貸与・紛失からのlink（AssetAssignmentServiceImpl・AssetLostIncidentServiceImpl）は本バッチで接続していない
- * （他バッチの所有ファイル）ため対象外。confirmSkillSheetがregisterGenerated前にlockを持たないことはfastの
+ * <p>紛失インシデントのlink（AssetLostIncidentServiceImpl）は同じ {@link DocumentLinkCommandService#link} を通り、
+ * fastの {@code AssetServiceTest}・{@code AssetBoundaryAndLifecycleIntegrationTest} が機能を固定する（本classでは紛失報告の
+ * 通知・scope fixtureを持たないため扱わない）。confirmSkillSheetがregisterGenerated前にlockを持たないことはfastの
  * {@code EngineerChangeRequestSkillSheetLockOrderTest} が固定する。</p>
  */
 @SpringBootTest
@@ -103,12 +106,19 @@ class DocumentEligibilityFenceMySqlTest {
     @Autowired private DocumentMetadataCommitService metadataCommit;
     @Autowired private DocumentMapper documentMapper;
 
+    @Autowired private com.ses.service.AssetService assetService;
+    @Autowired private com.ses.service.AssetAssignmentService assetAssignmentService;
+
     /** writerの1経路。{@code prepare} はcommit済みのfixtureを作り、{@code write} はtransaction内で変更する。 */
     private record WriterCase(String label, Function<Fixture, Fixture> prepare, Consumer<Fixture> write) { }
 
-    private record Fixture(String tenant, long documentId, long requestId) {
+    private record Fixture(String tenant, long documentId, long requestId, long assetId, long assignmentId) {
         Fixture withRequest(long id) {
-            return new Fixture(tenant, documentId, id);
+            return new Fixture(tenant, documentId, id, assetId, assignmentId);
+        }
+
+        Fixture withAsset(long asset, long assignment) {
+            return new Fixture(tenant, documentId, requestId, asset, assignment);
         }
     }
 
@@ -139,7 +149,79 @@ class DocumentEligibilityFenceMySqlTest {
                 }, f -> {
                     AccountingTenantContextHolder.clear();
                     eligibility.registerRetentionDisposalCandidate(f.tenant(), f.documentId(), LocalDate.now());
-                }));
+                }),
+                // 資産貸与の受渡証跡（資産X → 貸与insert → 文書X → link。計画 §4.3、F-3）
+                new WriterCase("資産貸与の受渡証跡link", f -> f.withAsset(newAsset(), 0L),
+                        f -> assetAssignmentService.createAssignment(f.assetId(), "ENGINEER", 7L, LocalDate.now(),
+                                LocalDate.now().plusDays(30), f.documentId(), "受渡", 1L)),
+                // 資産返却の返却証跡（資産X → 貸与X → 文書X → link）
+                new WriterCase("資産返却の返却証跡link", f -> {
+                    long asset = newAsset();
+                    long assignment = assetAssignmentService.createAssignment(asset, "ENGINEER", 7L, LocalDate.now(),
+                            LocalDate.now().plusDays(30), null, "受渡", 1L).getId();
+                    return f.withAsset(asset, assignment);
+                }, f -> assetAssignmentService.returnAssignment(f.assignmentId(), LocalDate.now(), f.documentId(),
+                        "返却", 1L)));
+    }
+
+    @Test
+    void 別文書へのlink挿入は互いに待たず同じtransactionで2件作っても1213にならない() throws Exception {
+        Fixture a = fixture();
+        Fixture b = fixture();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch firstLinked = new CountDownLatch(1);
+        CountDownLatch otherFinished = new CountDownLatch(1);
+        try {
+            // T1: 文書Aへ1件目のlinkを作り、T2が終わるまでcommitせずに保持してから2件目を作る（経費の領収書と同じ形）
+            Future<?> first = pool.submit(() -> transactionTemplate().executeWithoutResult(status -> {
+                linkCommand.link(a.tenant(), a.documentId(), "ENGINEER", 7L);
+                firstLinked.countDown();
+                awaitQuietly(otherFinished, WAIT_SECONDS);
+                linkCommand.link(a.tenant(), a.documentId(), "EXPENSE_REQUEST", 9L);
+            }));
+            if (!firstLinked.await(WAIT_SECONDS, TimeUnit.SECONDS)) {
+                fail("T1が1件目のlinkを作れなかった: " + outcome(first));
+            }
+            // T2: 別の文書Bへ同じ形の2件を作る。共有の一意indexにgap lockが残っていれば、T1のcommitまで待ってしまう
+            Future<?> second = pool.submit(() -> transactionTemplate().executeWithoutResult(status -> {
+                linkCommand.link(b.tenant(), b.documentId(), "ENGINEER", 7L);
+                linkCommand.link(b.tenant(), b.documentId(), "EXPENSE_REQUEST", 9L);
+            }));
+            try {
+                second.get(10, TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException waited) {
+                fail("別文書のlink挿入がT1の未commitのlinkを待った（一意indexのgap lock）: "
+                        + InnoDbRecordLockWaits.waitEdgesOnIndex(jdbc, "t_document_link", "uk_document_link"));
+            }
+            otherFinished.countDown();
+            first.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        } finally {
+            otherFinished.countDown();
+            pool.shutdownNow();
+        }
+        assertEquals(1L, epoch(a.documentId()));
+        assertEquals(1L, epoch(b.documentId()));
+        assertEquals(2L, count("SELECT COUNT(*) FROM t_document_link WHERE document_id = ?", a.documentId()));
+        assertEquals(2L, count("SELECT COUNT(*) FROM t_document_link WHERE document_id = ?", b.documentId()));
+    }
+
+    @Test
+    void 既存linkの再作成は重複を受け止め別tenantと論理削除済みを拒否する() {
+        Fixture f = fixture();
+        jdbc.update("INSERT INTO t_document_link (tenant_id, document_id, target_type, target_id) "
+                + "VALUES ('default', ?, 'ENGINEER', 7)", f.documentId());
+        jdbc.update("INSERT INTO t_document_link (tenant_id, document_id, target_type, target_id, deleted_flag) "
+                + "VALUES (?, ?, 'ENGINEER', 8, 1)", f.tenant(), f.documentId());
+
+        var foreign = org.junit.jupiter.api.Assertions.assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> inTransaction(() -> linkCommand.link(f.tenant(), f.documentId(), "ENGINEER", 7L)));
+        assertEquals(403, foreign.getCode());
+        var deleted = org.junit.jupiter.api.Assertions.assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> inTransaction(() -> linkCommand.link(f.tenant(), f.documentId(), "ENGINEER", 8L)));
+        assertEquals(409, deleted.getCode());
+        inTransaction(() -> linkCommand.link(f.tenant(), f.documentId(), "SERVICE_REQUEST", 99L));
+        inTransaction(() -> linkCommand.link(f.tenant(), f.documentId(), "SERVICE_REQUEST", 99L));
+        assertEquals(1L, epoch(f.documentId()), "挿入した1回だけ進み、重複・拒否では進まない");
     }
 
     @Test
@@ -407,7 +489,16 @@ class DocumentEligibilityFenceMySqlTest {
                         + "source_type, business_key, version_discriminator, scan_status) "
                         + "VALUES (?, ?, 1, ?, 'f3.pdf', ?, 'GENERATED', ?, 'v1', 'CLEAN')",
                 tenant, documentId, "nf01/f3/" + documentId, "d".repeat(64), "NF01-F3:" + documentId);
-        return new Fixture(tenant, documentId, 0L);
+        return new Fixture(tenant, documentId, 0L, 0L, 0L);
+    }
+
+    /** 保管中（IN_STOCK）の資産をcommitして返す。 */
+    private long newAsset() {
+        com.ses.entity.Asset asset = com.ses.entity.Asset.builder()
+                .assetTag("NF01-F3-AST-" + SEQUENCE.incrementAndGet())
+                .assetName("F3検証端末").category("PC").status("IN_STOCK").build();
+        assetService.createAsset(asset, 1L);
+        return asset.getId();
     }
 
     private long insertRequest(long documentId, String status) {

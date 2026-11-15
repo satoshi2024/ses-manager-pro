@@ -232,7 +232,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         }
         // 文書台帳へ登録（scan fail-closed: CLEAN以外はregisterReceivedが拒否）。
         // businessKey冪等のため同じ経費への再添付は既存文書を返す。
-        // ※ リンクはDocumentLinkCommandServiceで作る（文書行のX lock → 既存確認 → insert → 証跡利用可否epochの増分。
+        // ※ リンクはDocumentLinkCommandServiceで作る（文書行のX lock → insert（一意keyの重複は既存linkとして照合）→ 証跡利用可否epochの増分。
         //   一意keyの既存linkは再作成しないため冪等。NF01 F3）。
         Document document = documentService.registerReceived(DocumentRegisterRequest.builder()
                 .documentType("RECEIPT")

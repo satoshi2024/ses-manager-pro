@@ -35,6 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  *   <li>変化の無い書込みではepochが進まない。変化があれば1進む。同じtransactionで複数変化しても1だけ進む。</li>
  *   <li>保存期限jobはtenant contextが無くても、各文書行自身のtenantで進める。</li>
  *   <li>証跡適格性readerは、hold・廃棄申請・link・削除に追従する（tenantを問わずlinkを数える）。</li>
+ *   <li>link挿入は一意key違反を受け止めて既存行を照合する（別tenantは403、論理削除済みは409）。</li>
+ *   <li>資産貸与の受渡証跡のlinkも文書のtenantで作り1進める（§7.6 Demo (3)、F-3）。</li>
  * </ul>
  *
  * <p>同じtransaction内の重複除去のため、1つのtestで「変化ごとに+1」を観測することはできない
@@ -56,6 +58,8 @@ class DocumentEligibilityEpochH2Test {
     @Autowired private DocumentMapper documentMapper;
     @Autowired private DocumentVersionMapper documentVersionMapper;
     @Autowired private DocumentDisposalRequestMapper disposalRequestMapper;
+    @Autowired private com.ses.service.AssetService assetService;
+    @Autowired private com.ses.service.AssetAssignmentService assetAssignmentService;
 
     @AfterEach
     void clearContext() {
@@ -195,6 +199,67 @@ class DocumentEligibilityEpochH2Test {
         assertEquals(1L, epoch(documentB));
         assertEquals(tenantB, jdbc.queryForObject("SELECT tenant_id FROM t_document_link WHERE document_id = ?",
                 String.class, documentB));
+    }
+
+    @Test
+    void 重複linkは実DBの一意key違反を受け止め別tenantは403論理削除済みは409で増分しない() {
+        String tenant = tenant();
+        long documentId = insertDocument(tenant, "SKILL_SHEET", "DRAFT", null);
+        // F-3修正前のtenant未設定link（列DEFAULT）と、論理削除済みのlinkを直接置く（fenceを通さないためepochは0のまま）
+        jdbc.update("INSERT INTO t_document_link (tenant_id, document_id, target_type, target_id) "
+                + "VALUES ('default', ?, 'ENGINEER', 7)", documentId);
+        jdbc.update("INSERT INTO t_document_link (tenant_id, document_id, target_type, target_id, deleted_flag) "
+                + "VALUES (?, ?, 'ENGINEER', 8, 1)", tenant, documentId);
+
+        var foreign = org.junit.jupiter.api.Assertions.assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> linkCommandService.link(tenant, documentId, "ENGINEER", 7L));
+        assertEquals(403, foreign.getCode());
+        var deleted = org.junit.jupiter.api.Assertions.assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> linkCommandService.link(tenant, documentId, "ENGINEER", 8L));
+        assertEquals(409, deleted.getCode());
+        assertEquals("error.document.linkDeletedConflict", deleted.getMessageKey());
+        assertEquals(0L, epoch(documentId), "挿入できなかった重複では進めない");
+
+        // 一意key違反（DBの文単位rollback）の後も、同じtransactionでlinkの書込みを続けられる
+        org.junit.jupiter.api.Assertions.assertTrue(linkCommandService.link(tenant, documentId, "EXPENSE_REQUEST", 9L));
+        assertEquals(1L, epoch(documentId));
+        assertEquals(3, count("SELECT COUNT(*) FROM t_document_link WHERE document_id = ?", documentId));
+    }
+
+    @Test
+    void 資産貸与の受渡証跡にSKILL_SHEETをlinkすると1進みlinkは文書のtenantで適格性はlink形の不適合になる() {
+        String tenant = tenant();
+        TenantTestSecurity.bindAs(tenant, "管理者");
+        long documentId = insertDocument(tenant, "SKILL_SHEET", "DRAFT", null);
+        long versionId = insertVersion(tenant, documentId);
+        // 要員へのENGINEER linkはfenceを通さずに置く（同じtransactionの重複除去で資産linkの+1を隠さないため）
+        jdbc.update("INSERT INTO t_document_link (tenant_id, document_id, target_type, target_id) "
+                + "VALUES (?, ?, 'ENGINEER', 7)", tenant, documentId);
+        Candidate candidate = new Candidate(tenant, documentId, versionId, 7L);
+        assertEquals(Verdict.ELIGIBLE, evidenceEligibility.evaluate(candidate).verdict());
+        com.ses.entity.Asset asset = com.ses.entity.Asset.builder().assetTag("AST-NF01-F3-" + SEQUENCE.incrementAndGet())
+                .assetName("F3検証端末").category("PC").status("IN_STOCK").build();
+        assetService.createAsset(asset, 1L);
+
+        com.ses.entity.AssetAssignment assignment = assetAssignmentService.createAssignment(asset.getId(), "ENGINEER", 7L,
+                LocalDate.now(), LocalDate.now().plusDays(30), documentId, "受渡", 1L);
+
+        assertEquals(1L, epoch(documentId));
+        assertEquals(tenant, jdbc.queryForObject("SELECT tenant_id FROM t_document_link WHERE document_id = ? "
+                + "AND target_type = 'ASSET_ASSIGNMENT' AND target_id = ?", String.class, documentId, assignment.getId()));
+        assertEquals(Verdict.TARGET_UNSUPPORTED, evidenceEligibility.evaluate(candidate).verdict());
+    }
+
+    @Test
+    void 資産貸与に存在しない証跡文書を指定すると404で貸与を作らない() {
+        com.ses.entity.Asset asset = com.ses.entity.Asset.builder().assetTag("AST-NF01-F3-" + SEQUENCE.incrementAndGet())
+                .assetName("F3検証端末").category("PC").status("IN_STOCK").build();
+        assetService.createAsset(asset, 1L);
+
+        var missing = org.junit.jupiter.api.Assertions.assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> assetAssignmentService.createAssignment(asset.getId(), "ENGINEER", 7L,
+                        LocalDate.now(), LocalDate.now().plusDays(30), Long.MAX_VALUE, "受渡", 1L));
+        assertEquals(404, missing.getCode());
     }
 
     private long insertDocument(String tenant, String type, String status, LocalDate retentionUntil) {

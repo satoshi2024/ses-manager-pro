@@ -59,7 +59,12 @@ public class DocumentRetentionJob {
             }
         }
 
-        log.info("[保存期限ジョブ] 抽出完了: 対象文書数={} 新規廃棄候補作成数={} 失敗数={}",
-                expiredDocs.size(), createdCount, failedCount);
+        if (failedCount > 0) {
+            // 個別のWARNだけではDB障害等の系統的な失敗が埋もれるため、件数をERRORで1件だけ残す。
+            log.error("[保存期限ジョブ] 廃棄候補の登録に失敗した文書があります: 失敗数={} 対象文書数={} 新規廃棄候補作成数={}",
+                    failedCount, expiredDocs.size(), createdCount);
+        } else {
+            log.info("[保存期限ジョブ] 抽出完了: 対象文書数={} 新規廃棄候補作成数={}", expiredDocs.size(), createdCount);
+        }
     }
 }

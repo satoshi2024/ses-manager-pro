@@ -88,8 +88,9 @@ public interface DocumentLinkMapper extends BaseMapper<DocumentLink> {
     /**
      * link一意key（document_id, target_type, target_id）の既存行をlocking readで取得する（NF01 F3）。
      *
-     * <p>{@code DocumentLinkCommandService} 専用。文書行をX lockした後に呼び、tenantと論理削除の有無を問わず
-     * 一意keyの行を返す（一意keyは論理削除済みの行も含むため）。返す列は照合に使う列だけに限る。</p>
+     * <p>{@code DocumentLinkCommandService} 専用。文書行をX lockし、insertが一意keyの重複で失敗した後にだけ呼ぶ
+     * （行が必ずあるのでrecord lockだけを取る。未命中のlocking readは全文書共有の一意indexにgap lockを掛けるため使わない）。
+     * tenantと論理削除の有無を問わず一意keyの行を返す（一意keyは論理削除済みの行も含むため）。返す列は照合に使う列だけに限る。</p>
      */
     @Select("SELECT id, tenant_id, document_id, target_type, target_id, deleted_flag FROM t_document_link "
             + "WHERE document_id = #{documentId} AND target_type = #{targetType} AND target_id = #{targetId} FOR UPDATE")

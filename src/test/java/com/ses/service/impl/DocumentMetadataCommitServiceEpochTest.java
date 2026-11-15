@@ -62,16 +62,45 @@ class DocumentMetadataCommitServiceEpochTest {
         document.setTenantId("tenant-a");
         document.setStatus("CONFIRMED");
         document.setVersion(2L);
+        when(documentMapper.selectOne(any())).thenReturn(document);
         when(documentMapper.update(any(), any())).thenReturn(1);
 
         service.commitVersion(document, new DocumentVersion());
 
         InOrder order = inOrder(fence, versionMapper, documentMapper);
         order.verify(fence).lockForUpdate(AuthorizationEpochAnchor.document("tenant-a", 5L));
+        order.verify(documentMapper).selectOne(any());
         order.verify(versionMapper).insert(any(DocumentVersion.class));
         order.verify(documentMapper).update(any(), any());
         verify(fence, never()).advance(any());
         verify(fence, never()).advanceIfChanged(any(), any(), any());
+    }
+
+    @Test
+    void lock後に廃棄済み削除済みと分かった文書には版を追加しない() {
+        Document document = new Document();
+        document.setId(5L);
+        document.setTenantId("tenant-a");
+        document.setStatus("CONFIRMED");
+        document.setVersion(2L);
+        Document disposed = new Document();
+        disposed.setId(5L);
+        disposed.setTenantId("tenant-a");
+        disposed.setStatus("DISPOSED");
+        when(documentMapper.selectOne(any())).thenReturn(disposed);
+
+        com.ses.common.exception.BusinessException rejected = org.junit.jupiter.api.Assertions.assertThrows(
+                com.ses.common.exception.BusinessException.class,
+                () -> service.commitVersion(document, new DocumentVersion()));
+        org.junit.jupiter.api.Assertions.assertEquals(409, rejected.getCode());
+        org.junit.jupiter.api.Assertions.assertEquals("error.document.disposed", rejected.getMessageKey());
+
+        when(documentMapper.selectOne(any())).thenReturn(null);
+        com.ses.common.exception.BusinessException missing = org.junit.jupiter.api.Assertions.assertThrows(
+                com.ses.common.exception.BusinessException.class,
+                () -> service.commitVersion(document, new DocumentVersion()));
+        org.junit.jupiter.api.Assertions.assertEquals(404, missing.getCode());
+        verify(versionMapper, never()).insert(any(DocumentVersion.class));
     }
 
     @Test

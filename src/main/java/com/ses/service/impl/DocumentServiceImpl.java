@@ -741,8 +741,14 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         log.info("[文書台帳] 廃棄申請を却下しました: requestId={} rejectedBy={}", disposalRequestId, currentUserId);
     }
 
+    /**
+     * 承認済みの廃棄申請を執行する。READ_COMMITTEDで動かし、文書行のX lockを取った後に版の一覧を読む
+     * （REPEATABLE READでは最初の読取のsnapshotのままlock前にcommitされた版を取りこぼし、その版のstorageが残る）。
+     * 版追加（{@code DocumentMetadataCommitService.commitVersion}）は同じ文書行のX lockの下でDISPOSEDを拒否するため、
+     * lock後に読んだ一覧が廃棄対象の全版になる。
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public void executeDisposal(Long disposalRequestId) {
         assertAdminUser();
         DisposalTarget target = getDisposalRequestOrThrow(disposalRequestId);
@@ -759,58 +765,70 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             return;
         }
 
-        List<DocumentVersion> versions = findVersions(doc.getTenantId(), req.getDocumentId());
-
         // 文書行のX lock → holdと状態の再確認 → DISPOSED・申請CAS → 証跡利用可否epochの増分（NF01 F3）。
         // storageの物理削除はcommit後に行うため、証跡readerはDISPOSEDを必ず先に観測する。
         if (!documentEligibilityService.executeDisposal(doc.getTenantId(), doc.getId(), disposalRequestId)) {
             return;
         }
+        // lock取得後に読む（READ_COMMITTEDのため、lock前にcommitされた版も含む）。
+        List<DocumentVersion> versions = findVersions(doc.getTenantId(), req.getDocumentId());
+        String failedReasonPrefix = req.getReason() != null ? req.getReason() + " | " : "";
 
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    boolean allSuccess = true;
-                    List<String> failedKeys = new ArrayList<>();
-                    for (DocumentVersion v : versions) {
-                        try {
-                            documentStorage.delete(v.getStorageKey());
-                        } catch (Exception e) {
-                            allSuccess = false;
-                            failedKeys.add(v.getStorageKey());
-                            log.error("[文書台帳] Storage削除失敗: key={} exceptionClass={} detail={}",
-                                    v.getStorageKey(),
-                                    com.ses.common.util.LogRedaction.exceptionType(e),
-                                    com.ses.common.util.LogRedaction.safeThrowableSummary(e));
-                        }
-                    }
-                    if (!allSuccess) {
+                    List<String> failedKeys = deleteDisposedStorage(versions);
+                    if (!failedKeys.isEmpty()) {
                         log.error("[文書台帳] 一部Storageの削除に失敗しました: documentId={} failedKeys={}",
                                 req.getDocumentId(), failedKeys);
-                        // DISPOSEDは終端で不適格のままのためepochは進めない。afterCommitなので独立transactionで記録する。
-                        documentEligibilityService.markDisposalStorageFailed(disposalRequestId,
-                                (req.getReason() != null ? req.getReason() + " | " : "") + "Storage物理削除失敗: " + String.join(", ", failedKeys));
+                        recordDisposalStorageFailure(disposalRequestId, req.getDocumentId(),
+                                failedReasonPrefix + "Storage物理削除失敗: " + String.join(", ", failedKeys));
                     }
                 }
             });
         } else {
-            List<String> failedKeys = new ArrayList<>();
-            for (DocumentVersion v : versions) {
-                try {
-                    documentStorage.delete(v.getStorageKey());
-                } catch (Exception e) {
-                    failedKeys.add(v.getStorageKey());
-                }
-            }
+            List<String> failedKeys = deleteDisposedStorage(versions);
             if (!failedKeys.isEmpty()) {
-                documentEligibilityService.markDisposalStorageFailed(disposalRequestId,
-                        (req.getReason() != null ? req.getReason() + " | " : "") + "Storage物理削除失敗: " + String.join(", ", failedKeys));
+                recordDisposalStorageFailure(disposalRequestId, req.getDocumentId(),
+                        failedReasonPrefix + "Storage物理削除失敗: " + String.join(", ", failedKeys));
             }
         }
 
         recordAccessLog(req.getDocumentId(), null, "DISPOSE");
         log.info("[文書台帳] 廃棄実行指示完了: documentId={}", req.getDocumentId());
+    }
+
+    private List<String> deleteDisposedStorage(List<DocumentVersion> versions) {
+        List<String> failedKeys = new ArrayList<>();
+        for (DocumentVersion v : versions) {
+            try {
+                documentStorage.delete(v.getStorageKey());
+            } catch (Exception e) {
+                failedKeys.add(v.getStorageKey());
+                log.error("[文書台帳] Storage削除失敗: key={} exceptionClass={} detail={}",
+                        v.getStorageKey(),
+                        com.ses.common.util.LogRedaction.exceptionType(e),
+                        com.ses.common.util.LogRedaction.safeThrowableSummary(e));
+            }
+        }
+        return failedKeys;
+    }
+
+    /**
+     * storage削除失敗をFAILEDとして記録する。廃棄はcommit済みのため、記録の失敗で応答を500にせずWARNだけを残す
+     * （DISPOSEDは終端で不適格のままのためepochは進めない）。
+     */
+    private void recordDisposalStorageFailure(Long disposalRequestId, Long documentId, String reasonText) {
+        try {
+            if (documentEligibilityService.markDisposalStorageFailed(disposalRequestId, reasonText) == 0) {
+                log.warn("[文書台帳] 廃棄申請がDISPOSEDでないためFAILEDを記録しませんでした: requestId={} documentId={}",
+                        disposalRequestId, documentId);
+            }
+        } catch (RuntimeException failure) {
+            log.warn("[文書台帳] storage削除失敗のFAILED記録に失敗しました: requestId={} documentId={} exceptionType={}",
+                    disposalRequestId, documentId, com.ses.common.util.LogRedaction.exceptionType(failure));
+        }
     }
 
     @Override

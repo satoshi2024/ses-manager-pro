@@ -70,7 +70,7 @@ public class ServiceRequestAttachmentCommitService {
         if (typedLink == null) {
             // DocumentService側のlink確定が一時的に失敗しても、補償再試行で
             // typed linkと業務添付linkを同一短transactionへ収束させる。
-            // 補修insertは文書行のX lock → 一意keyの再確認 → insert → 証跡利用可否epochの増分で行い、
+            // 補修insertは文書行のX lock → insert（一意keyの重複は既存linkとして照合）→ 証跡利用可否epochの増分で行い、
             // 並行実行は文書行のlockで直列化する（NF01 F3。lock順 15 → 17）。tenantは文書行の値を使う。
             documentLinkCommandService.link(document.getTenantId(), documentId, "SERVICE_REQUEST", requestId);
         }

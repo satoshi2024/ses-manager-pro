@@ -1,5 +1,6 @@
 package com.ses.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Document;
@@ -122,6 +123,18 @@ public class DocumentMetadataCommitService {
     public DocumentVersion commitVersion(Document document, DocumentVersion version) {
         // 版追加・AMENDEDは利用可否を変えないためepochを進めないが、文書行を先にX lockして証跡readerのS lockと直列化する。
         fence.lockForUpdate(AuthorizationEpochAnchor.document(document.getTenantId(), document.getId()));
+        // lock後に最新の行を読み、廃棄済み・削除済みの文書へ版を足さない（廃棄執行がlock後に読んだ版一覧から漏れ、
+        // そのstorageが残るのを防ぐ）。
+        Document current = documentMapper.selectOne(new LambdaQueryWrapper<Document>()
+                .eq(Document::getId, document.getId())
+                .eq(Document::getTenantId, document.getTenantId())
+                .last("FOR UPDATE"));
+        if (current == null) {
+            throw BusinessException.of(404, "error.document.notFound");
+        }
+        if ("DISPOSED".equals(current.getStatus())) {
+            throw BusinessException.of(409, "error.document.disposed");
+        }
         documentVersionMapper.insert(version);
         if ("CONFIRMED".equals(document.getStatus())) {
             int updated = documentMapper.update(null, new LambdaUpdateWrapper<Document>()

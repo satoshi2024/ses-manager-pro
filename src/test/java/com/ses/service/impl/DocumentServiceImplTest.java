@@ -128,7 +128,7 @@ class DocumentServiceImplTest {
                 assetScopeService,
                 new com.ses.service.document.DocumentEligibilityService(
                         documentMapper, documentDisposalRequestMapper, epochFence),
-                new com.ses.service.document.DocumentLinkCommandService(documentLinkMapper, epochFence));
+                new com.ses.service.document.DocumentLinkCommandService(documentLinkMapper, documentMapper, epochFence));
         org.springframework.test.util.ReflectionTestUtils.setField(
                 sut, "legalEntityContextService", legalEntityContextService);
         lenient().when(legalEntityContextService.requireCurrentLegalEntityId()).thenReturn(1L);

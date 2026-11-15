@@ -31,7 +31,8 @@ public class AssetAssignmentServiceImpl implements AssetAssignmentService {
     private final AssetAssignmentMapper assetAssignmentMapper;
     private final AssetMapper assetMapper;
     private final AssetEventService assetEventService;
-    private final com.ses.mapper.DocumentLinkMapper documentLinkMapper;
+    /** 受渡・返却証跡のlink（文書行のX lockと証跡利用可否epoch。NF01 F3）。 */
+    private final com.ses.service.document.DocumentLinkCommandService documentLinkCommandService;
     private final ApprovalRequestMapper approvalRequestMapper;
     private final LifecycleTaskMapper lifecycleTaskMapper;
     private final LifecycleCaseMapper lifecycleCaseMapper;
@@ -90,13 +91,10 @@ public class AssetAssignmentServiceImpl implements AssetAssignmentService {
                 .build();
         assetAssignmentMapper.insert(assignment);
 
-        // DocumentLink 連携（受渡証跡）
+        // DocumentLink 連携（受渡証跡）。資産X・貸与insertの後に文書行X → linkの順（lock順 13 → 15 → 17）。
+        // linkのtenantは文書自身のtenant（F-3）。存在しない文書IDは404で貸与ごと取り消す。
         if (handoverEvidenceDocId != null) {
-            com.ses.entity.DocumentLink link = new com.ses.entity.DocumentLink();
-            link.setDocumentId(handoverEvidenceDocId);
-            link.setTargetType("ASSET_ASSIGNMENT");
-            link.setTargetId(assignment.getId());
-            documentLinkMapper.insert(link);
+            documentLinkCommandService.linkExistingDocument(handoverEvidenceDocId, "ASSET_ASSIGNMENT", assignment.getId());
         }
 
         // 4. 資産ステータスを ASSIGNED に更新
@@ -182,13 +180,10 @@ public class AssetAssignmentServiceImpl implements AssetAssignmentService {
         assignment.setStatus("RETURNED");
         assignment.setNote(note);
 
-        // DocumentLink 連携（返却証跡）
+        // DocumentLink 連携（返却証跡）。資産X → 貸与X の後に文書行X → linkの順（lock順 13 → 15 → 17）。
+        // linkのtenantは文書自身のtenant（F-3）。存在しない文書IDは404で返却ごと取り消す。
         if (returnEvidenceDocId != null) {
-            com.ses.entity.DocumentLink link = new com.ses.entity.DocumentLink();
-            link.setDocumentId(returnEvidenceDocId);
-            link.setTargetType("ASSET_ASSIGNMENT");
-            link.setTargetId(assignment.getId());
-            documentLinkMapper.insert(link);
+            documentLinkCommandService.linkExistingDocument(returnEvidenceDocId, "ASSET_ASSIGNMENT", assignment.getId());
         }
 
         // 3. イベント記録（状態更新が両方成功した後だけ記録する）
