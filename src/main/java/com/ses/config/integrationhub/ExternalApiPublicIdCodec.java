@@ -8,11 +8,17 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Base64;
+import java.util.regex.Pattern;
 
 /** client/tenant/resourceにbindしたopaque public ID。内部DB IDを外部へ返さない。 */
 @Component
 @RequiredArgsConstructor
 public class ExternalApiPublicIdCodec {
+    /**
+     * 発行するpublic IDの形式（HMAC-SHA256のpaddingなしbase64url、43文字）。字母に「-」「_」を含むため、約1/32の値は
+     * 先頭がそのどちらかになる。保存境界（{@code ExternalDtoSnapshot}）はこの定数で同じ形式を受け入れる。
+     */
+    public static final Pattern PUBLIC_ID_PATTERN = Pattern.compile("[A-Za-z0-9_-]{43}");
     private static final String PURPOSE = "integration-hub-public-id-v1";
     private final IntegrationHubExternalApiProperties properties;
 
@@ -35,7 +41,7 @@ public class ExternalApiPublicIdCodec {
 
     public boolean matches(ExternalApiPrincipal principal, String resourceType, Long internalId,
                            String publicId) {
-        if (publicId == null || !publicId.matches("[A-Za-z0-9_-]{43}")) {
+        if (publicId == null || !PUBLIC_ID_PATTERN.matcher(publicId).matches()) {
             return false;
         }
         return MessageDigest.isEqual(encode(principal, resourceType, internalId)
