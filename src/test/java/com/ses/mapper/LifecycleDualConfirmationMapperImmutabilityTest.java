@@ -3,6 +3,8 @@ package com.ses.mapper;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.ses.common.mybatis.AppendOnlyMapper;
+import com.ses.config.MybatisConfig;
 import com.ses.entity.LifecycleDualConfirmation;
 import com.ses.entity.LifecycleDualEvent;
 import com.ses.entity.LifecycleDualIdempotency;
@@ -12,6 +14,7 @@ import com.ses.entity.LifecycleDualSubmissionDocument;
 import com.ses.entity.LifecycleDualSubmissionOrgFence;
 import org.apache.ibatis.annotations.Mapper;
 import org.junit.jupiter.api.Test;
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.core.ResolvableType;
 import org.springframework.core.io.ClassPathResource;
 
@@ -22,6 +25,8 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -33,6 +38,7 @@ import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -40,14 +46,17 @@ import static org.assertj.core.api.Assertions.assertThat;
  * NF01 B0（W3-18、計画 §5.12・§7.7 Demo(2)）の不変表をDocker無しで固定する静的guard。
  *
  * <ul>
- *   <li>不変6表のmapperは、{@link BaseMapper} から継承する更新・削除・insertOrUpdateの全メソッドを default で override し、
- *       SQLの実行へ到達させずに {@link UnsupportedOperationException} を投げる。MyBatis-Plusの mapper proxy と同じく
- *       「default methodは本体を実行し、それ以外はSQLを実行する」proxyで呼び、具象型の呼出しと {@code BaseMapper<T>} の
- *       消去型の呼出し（汎用コードからの呼出し）の両方を確かめる。BaseMapperに更新系メソッドが増えると本testが失敗する。</li>
+ *   <li>共通基 {@link AppendOnlyMapper} は、{@link BaseMapper} から継承する更新・削除・insertOrUpdateの全メソッドを default で
+ *       override する。BaseMapperに更新系メソッドが増えると本testが失敗する。共通基は {@code @MapperScan} の範囲外にある。</li>
+ *   <li>不変6表のmapperは共通基を直接継承し、更新系メソッドを再定義しない。MyBatis-Plusの mapper proxy と同じく
+ *       「default methodは本体を実行し、それ以外はSQLを実行する」proxyで呼び、{@code BaseMapper<T>} の消去型と共通基の両方の
+ *       呼出しがSQLへ到達せず、表名を含む {@link UnsupportedOperationException} になることを確かめる。</li>
  *   <li>V195のtriggerは不変6表の BEFORE UPDATE / BEFORE DELETE に1件ずつ（計12件）で、mapperの不変集合と一致する。
  *       単文の SIGNAL で書き、DELIMITER・BEGIN を使わない（Flywayの文分割とV132と同じ形）。</li>
- *   <li>H2の2つのschema（replayと engineer-schema-h2.sql）が7表を持ちtriggerを持たないこと、V1が作り直す表へのFKが
+ *   <li>H2の2つのschema（replayと engineer-schema-h2.sql）が7表と同じCHECKを持ちtriggerを持たないこと、V1が作り直す表へのFKが
  *       replay前のprecleanupで外されること（外さないと2つ目のcontextでV1の DROP TABLE が失敗する）。</li>
+ *   <li>不変6表のentityを {@code IService}・{@code ServiceImpl}・{@code Db}・{@code SqlHelper} で包まない（statement IDで
+ *       直接実行する経路。{@code AppendOnlySqlInjector} が文を注入しないため実行時にも失敗する）。</li>
  * </ul>
  */
 class LifecycleDualConfirmationMapperImmutabilityTest {
@@ -79,25 +88,60 @@ class LifecycleDualConfirmationMapperImmutabilityTest {
             "t_lifecycle_dual_submission_org_fence", "t_lifecycle_dual_projection");
 
     @Test
-    void 不変6表のmapperは継承した更新削除系の全メソッドをdefaultで拒否しSQLへ到達させない() {
+    void 共通基はBaseMapperの更新削除系の全メソッドをdefaultでoverrideしMapperScanの範囲外にある() {
         List<Method> modifying = modifyingBaseMapperMethods();
         assertThat(modifying).extracting(Method::getName)
                 .as("BaseMapperの更新系メソッドを読めていること")
                 .contains("updateById", "update", "deleteById", "delete", "deleteByMap", "deleteBatchIds", "deleteByIds",
                         "insertOrUpdate");
+        List<String> missing = new ArrayList<>();
+        for (Method base : modifying) {
+            Method override = findOverride(AppendOnlyMapper.class, base);
+            if (override == null || !override.isDefault()) {
+                missing.add(signature(base));
+            }
+        }
+        assertThat(missing).as("AppendOnlyMapperにdefaultのoverrideが無いBaseMapperの更新系メソッド").isEmpty();
 
+        assertThat(AppendOnlyMapper.class.isAnnotationPresent(Mapper.class)).isFalse();
+        String[] scanned = MybatisConfig.class.getAnnotation(MapperScan.class).value();
+        assertThat(scanned).isNotEmpty();
+        for (String basePackage : scanned) {
+            assertThat(AppendOnlyMapper.class.getPackageName())
+                    .as("共通基は @MapperScan(%s) の範囲外に置く（範囲内ではentityの無いmapper beanになる）", basePackage)
+                    .isNotEqualTo(basePackage).doesNotStartWith(basePackage + ".");
+        }
+    }
+
+    @Test
+    void 不変6表のmapperは共通基を直接継承し更新削除系を再定義せずproxy経由の呼出しを拒否する() {
+        Set<String> modifyingNames = modifyingBaseMapperMethods().stream().map(Method::getName)
+                .collect(Collectors.toCollection(TreeSet::new));
         List<String> violations = new ArrayList<>();
         for (Table table : IMMUTABLE) {
-            Object proxy = sqlExecutingProxy(table.mapper());
-            for (Method base : modifying) {
-                String label = table.mapper().getSimpleName() + "#" + signature(base);
-                Method override = findOverride(table.mapper(), base);
-                if (override == null || !override.isDefault()) {
-                    violations.add(label + ": defaultのoverrideが無い");
-                    continue;
+            Class<?> mapper = table.mapper();
+            assertThat(mapper.isAnnotationPresent(Mapper.class)).as(mapper.getSimpleName()).isTrue();
+            assertThat(mapper.getInterfaces()).as("%s は AppendOnlyMapper を直接継承する", mapper.getSimpleName())
+                    .contains(AppendOnlyMapper.class);
+            assertThat(ResolvableType.forClass(mapper).as(AppendOnlyMapper.class).resolveGeneric(0))
+                    .as(mapper.getSimpleName()).isEqualTo(table.entity());
+            for (Method declared : mapper.getDeclaredMethods()) {
+                if (!declared.isSynthetic() && !declared.isBridge() && modifyingNames.contains(declared.getName())) {
+                    violations.add(mapper.getSimpleName() + "#" + signature(declared) + ": 更新系を再定義している");
                 }
-                checkRejected(violations, label + "（具象型）", invoke(override, proxy), table.name());
+            }
+
+            Object proxy = sqlExecutingProxy(mapper);
+            Object tableName = invokeReturning(appendOnlyTableMethod(), proxy);
+            assertThat(tableName).as("%s の appendOnlyTable() は @TableName と同じ", mapper.getSimpleName())
+                    .isEqualTo(table.entity().getAnnotation(TableName.class).value()).isEqualTo(table.name());
+            for (Method base : modifyingBaseMapperMethods()) {
+                String label = mapper.getSimpleName() + "#" + signature(base);
                 checkRejected(violations, label + "（BaseMapper経由）", invoke(base, proxy), table.name());
+                Method shared = findOverride(AppendOnlyMapper.class, base);
+                if (shared != null) {
+                    checkRejected(violations, label + "（AppendOnlyMapper経由）", invoke(shared, proxy), table.name());
+                }
             }
         }
         assertThat(violations).as("不変表のmapperは更新・削除をSQLの発行前に拒否すること").isEmpty();
@@ -106,17 +150,18 @@ class LifecycleDualConfirmationMapperImmutabilityTest {
     @Test
     void 不変6表のmapperは追記のinsertと読取を継承のまま使える() {
         for (Table table : IMMUTABLE) {
-            assertThat(table.mapper().isAnnotationPresent(Mapper.class)).as(table.mapper().getSimpleName()).isTrue();
             assertThat(Arrays.stream(table.mapper().getDeclaredMethods()).map(Method::getName))
                     .as("%s は insert を上書きしない", table.mapper().getSimpleName())
                     .doesNotContain("insert");
-            assertThat(ResolvableType.forClass(table.mapper()).as(BaseMapper.class).resolveGeneric(0))
-                    .as(table.mapper().getSimpleName()).isEqualTo(table.entity());
+            assertThat(Arrays.stream(AppendOnlyMapper.class.getDeclaredMethods()).map(Method::getName))
+                    .as("共通基は insert・select を上書きしない")
+                    .doesNotContain("insert", "selectList", "selectById", "selectCount");
         }
     }
 
     @Test
     void projectionのmapperは可変で更新削除を拒否しない() {
+        assertThat(AppendOnlyMapper.class.isAssignableFrom(PROJECTION.mapper())).isFalse();
         List<String> overridden = new ArrayList<>();
         for (Method base : modifyingBaseMapperMethods()) {
             if (findOverride(PROJECTION.mapper(), base) != null) {
@@ -126,6 +171,26 @@ class LifecycleDualConfirmationMapperImmutabilityTest {
         assertThat(overridden).as("projectionはCASで更新するため拒否しない").isEmpty();
         assertThat(ResolvableType.forClass(PROJECTION.mapper()).as(BaseMapper.class).resolveGeneric(0))
                 .isEqualTo(PROJECTION.entity());
+    }
+
+    @Test
+    void 不変6表のentityをIServiceやServiceImplやDbやSqlHelperで包まない() throws Exception {
+        List<String> violations = new ArrayList<>();
+        Path root = Path.of("src/main/java");
+        try (Stream<Path> files = Files.walk(root)) {
+            for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                String source = Files.readString(file, StandardCharsets.UTF_8);
+                for (Table table : IMMUTABLE) {
+                    String entity = Pattern.quote(table.entity().getSimpleName());
+                    Pattern wrapped = Pattern.compile("\\b(?:IService|ServiceImpl)\\s*<[^;{]*\\b" + entity + "\\b"
+                            + "|\\b(?:Db|SqlHelper)\\s*\\.\\s*\\w+\\s*\\([^;]*\\b" + entity + "\\b");
+                    if (wrapped.matcher(source).find()) {
+                        violations.add(root.relativize(file) + ": " + table.entity().getSimpleName());
+                    }
+                }
+            }
+        }
+        assertThat(violations).as("不変表のentityは汎用の更新を持つ型で包まない（計画 §7.8）").isEmpty();
     }
 
     @Test
@@ -178,6 +243,17 @@ class LifecycleDualConfirmationMapperImmutabilityTest {
     }
 
     @Test
+    void 冪等性keyのCHECKはV195とH2の2つのschemaで同じ式を持つ() throws Exception {
+        String expression = "CONSTRAINT ck_dual_idem_key CHECK (CHAR_LENGTH(idempotency_key) >= 1 "
+                + "AND NOT REGEXP_LIKE(idempotency_key, '[^A-Za-z0-9._~-]', 'c'))";
+        for (String source : List.of(MIGRATION, H2_REPLAY, H2_ENGINEER)) {
+            assertThat(normalizeSpaces(stripLineComments(read(source))))
+                    .as("%s の ck_dual_idem_key", source).contains(expression);
+        }
+        assertThat(read(MIGRATION)).contains("idempotency_key VARCHAR(190) CHARACTER SET ascii COLLATE ascii_bin NOT NULL");
+    }
+
+    @Test
     void H2の2つのschemaは7表を持ちtriggerを持たずV1が作り直す表へのFKはprecleanupで外す() throws Exception {
         String replay = read(H2_REPLAY);
         String engineer = read(H2_ENGINEER);
@@ -188,6 +264,14 @@ class LifecycleDualConfirmationMapperImmutabilityTest {
         }
         assertThat(countMatches(replay, "CREATE\\s+TRIGGER")).isZero();
         assertThat(countMatches(engineer, "CREATE\\s+TRIGGER[^;]*t_lifecycle_dual")).isZero();
+
+        // sys_user (tenant_id, id) の一意制約はFKより先に明示する（暗黙の一意制約に頼らない。W3-18 review P3-7）
+        String uniqueSysUser = "ALTER TABLE sys_user ADD CONSTRAINT IF NOT EXISTS uk_sys_user_tenant_id UNIQUE (tenant_id, id);";
+        for (String sql : List.of(replay, engineer)) {
+            int unique = sql.indexOf(uniqueSysUser);
+            assertThat(unique).isPositive();
+            assertThat(unique).isLessThan(sql.indexOf("fk_dual_submission_submitter"));
+        }
 
         // FKは ADD CONSTRAINT IF NOT EXISTS で置き、replayのたびに付け直せる形にする
         Map<String, String> replayForeignKeys = foreignKeyTargets(replay);
@@ -238,14 +322,22 @@ class LifecycleDualConfirmationMapperImmutabilityTest {
                 .toList();
     }
 
-    /** mapperが宣言する、baseの引数型をmapperの型引数で解決した型と完全一致するoverride。 */
-    private static Method findOverride(Class<?> mapper, Method base) {
+    private static Method appendOnlyTableMethod() {
+        try {
+            return AppendOnlyMapper.class.getMethod("appendOnlyTable");
+        } catch (NoSuchMethodException failure) {
+            throw new IllegalStateException(failure);
+        }
+    }
+
+    /** typeが宣言する、baseの引数型をtypeの型引数で解決した型と完全一致するoverride。 */
+    private static Method findOverride(Class<?> type, Method base) {
         Class<?>[] expected = new Class<?>[base.getParameterCount()];
         for (int i = 0; i < expected.length; i++) {
-            expected[i] = ResolvableType.forMethodParameter(base, i, mapper).resolve(Object.class);
+            expected[i] = ResolvableType.forMethodParameter(base, i, type).resolve(Object.class);
         }
-        Class<?> expectedReturn = ResolvableType.forMethodReturnType(base, mapper).resolve(Object.class);
-        for (Method candidate : mapper.getDeclaredMethods()) {
+        Class<?> expectedReturn = ResolvableType.forMethodReturnType(base, type).resolve(Object.class);
+        for (Method candidate : type.getDeclaredMethods()) {
             if (candidate.isBridge() || candidate.isSynthetic() || Modifier.isStatic(candidate.getModifiers())
                     || !candidate.getName().equals(base.getName())) {
                 continue;
@@ -265,6 +357,16 @@ class LifecycleDualConfirmationMapperImmutabilityTest {
             }
             throw new AssertionError("SQLの実行へ到達した: " + method);
         });
+    }
+
+    private static Object invokeReturning(Method method, Object target) {
+        try {
+            return method.invoke(target);
+        } catch (InvocationTargetException failure) {
+            throw new AssertionError(method + " が失敗した", failure.getCause());
+        } catch (IllegalAccessException failure) {
+            throw new IllegalStateException(failure);
+        }
     }
 
     private static Throwable invoke(Method method, Object target) {
@@ -340,6 +442,10 @@ class LifecycleDualConfirmationMapperImmutabilityTest {
             int comment = line.indexOf("--");
             return comment < 0 ? line : line.substring(0, comment);
         }).collect(Collectors.joining("\n"));
+    }
+
+    private static String normalizeSpaces(String text) {
+        return text.replaceAll("\\s+", " ");
     }
 
     private static String read(String classpath) throws Exception {

@@ -493,7 +493,7 @@ CONFIRM（A4）:
 
 ### 5.7 冪等性
 
-- `Idempotency-Key` headerは必須。1〜190文字のASCII `[A-Za-z0-9._~-]`。満たさなければ400 `error.lifecycle.idempotencyKeyInvalid`。DB列は `ascii_bin`（大文字小文字を区別、PAD SPACEで同一視しない）。
+- `Idempotency-Key` headerは必須。1〜190文字のASCII `[A-Za-z0-9._~-]`。満たさなければ400 `error.lifecycle.idempotencyKeyInvalid`。DB列は `ascii_bin`（大文字小文字を区別する）。MySQL 8.0 の `ascii_bin` は PAD SPACE であり（ascii文字集合にNO PADの照合順序は無い）、末尾空白だけが異なる値を一意keyで同一視する。H2のVARCHARは末尾空白を区別するため、両DBで結果が異なり得る。末尾空白はAPIの文字種検証（400）で排除し、DBでもCHECK `ck_dual_idem_key`（V195。空文字と許可外の文字を1つでも含む値を拒否する。`$` は末尾の改行の前でも一致するため、否定文字クラスの `REGEXP_LIKE(..., '[^A-Za-z0-9._~-]', 'c')` が偽であることで判定する）で拒否する。W3-21aは末尾空白・改行・許可外文字の各keyが400になるテストを置く。
 - 一意key: `(tenant_id, task_id, task_generation, operation, actor_user_id, idempotency_key)`。operationは `SUBMIT`/`CONFIRM`（差戻しもCONFIRM操作として記録し、decisionはrequest hashに含める）。検索に使うtask_generationはlock済みtask行の現在値である。
 - request hash: `LifecycleCanonicalization.Request.sha256()`（LifecycleCanonicalization.java:118-176）。CONFIRMでは `ConfirmationBinding` とdecisionを含めるようRequestを拡張する（W3-21a）。server採番のIDは含めない。
 - 判定の位置は§5.5のとおり（認可・epoch・文書適格性の後、task状態の前）。古いgenerationで送られた要求は、現在generationの冪等行に当たらず、状態判定でbodyの `taskGeneration` 不一致となり409 `error.lifecycle.submissionStale`。
@@ -674,7 +674,10 @@ CREATE TABLE t_lifecycle_dual_idempotency (
   UNIQUE KEY uk_dual_idempotency (tenant_id, task_id, task_generation, operation, actor_user_id, idempotency_key),
   CONSTRAINT fk_dual_idem_case FOREIGN KEY (tenant_id, case_id) REFERENCES t_lifecycle_case (tenant_id, id),
   CONSTRAINT fk_dual_idem_actor FOREIGN KEY (tenant_id, actor_user_id) REFERENCES sys_user (tenant_id, id),
-  CONSTRAINT ck_dual_idem_operation CHECK (operation IN ('SUBMIT', 'CONFIRM'))
+  CONSTRAINT ck_dual_idem_operation CHECK (operation IN ('SUBMIT', 'CONFIRM')),
+  -- W3-18で追加（§5.7）: 空文字と許可外の文字（末尾空白・改行を含む）を拒否する
+  CONSTRAINT ck_dual_idem_key CHECK (CHAR_LENGTH(idempotency_key) >= 1
+      AND NOT REGEXP_LIKE(idempotency_key, '[^A-Za-z0-9._~-]', 'c'))
 );
 
 CREATE TABLE t_lifecycle_dual_event (
@@ -699,10 +702,10 @@ CREATE TABLE t_lifecycle_dual_event (
 ```
 
 - 文字集合・照合順序: 各表のtenant列は参照先（`t_lifecycle_case.tenant_id`、`sys_user.tenant_id`、`t_document_version.tenant_id`）と一致させる。DDL作成時に `information_schema` で確定する。
-- 不変表（submission、submission_document、org_fence、confirmation、idempotency、event）はmapperでUPDATE/DELETEを禁止する（`LifecycleEventMapper` と同じ形、review-ledger LC-P1-15）。DB triggerによる禁止（V132と同じ方式、6表×UPDATE/DELETE）も推奨するが、配備runbookのtrigger件数の更新とDBAのtrigger権限が必要なため、採否はDDL laneとPlan Reviewで決める（§12 O-4）。
+- 不変表（submission、submission_document、org_fence、confirmation、idempotency、event）はmapperでUPDATE/DELETEを禁止する（review-ledger LC-P1-15）。W3-18では共通基 `com.ses.common.mybatis.AppendOnlyMapper`（`@MapperScan` の範囲外）が `BaseMapper` の更新・削除系の全メソッドをdefaultで拒否し、`AppendOnlySqlInjector` がこれらのmapperへ更新・削除のMappedStatementを注入しない（statement IDで直接実行する `ServiceImpl` の一括メソッド・`Db`・`SqlHelper` の経路も失敗する）。DB triggerによる禁止（V132と同じ単文SIGNAL、6表×UPDATE/DELETE = 12件）は**W3-18で採用した**（§12 O-4 解決。配備runbookのtrigger件数は 55 → 67）。不変表の自由記述列（`business_comment`・`decision_comment`）の削除・匿名化の経路は §12 O-8 に置く。
 - projectionだけが可変で、`projection_version` のCASで更新する。task行のgenerationとの一致はattempt内で確認する（generationはFKにしない、現行契約§9.1）。
 - `sys_user(tenant_id, id)` へのFKがあるため、F-1の修正（tenant変更の拒否）が無いとtenant変更がFK RESTRICTで500になる。W3-15をW3-18・W3-21aより前に統合する（§7.0）。
-- H2: 同じ表をH2版として `src/test/resources/sql/` に追加し `application-test.yml` に登録する。triggerはH2版に含めない。entity・mapperを追加するとAllMappersSchemaSweepTestの対象になる。
+- H2: 同じ表をH2版として `src/test/resources/sql/` に追加し `application-test.yml` に登録する。triggerはH2版に含めない。entity・mapperを追加するとAllMappersSchemaSweepTestの対象になる。W3-18の実装では、V1のreplayが作り直す `sys_user`・`m_organization_unit`・`t_document_version` へのFKを `test-schema-import-precleanup-h2.sql` で外し、H2版が `ADD CONSTRAINT IF NOT EXISTS` で付け直す。
 
 ### 5.13 外部アカウント失効（Q-6）とgateの整合（W3-11）
 
@@ -886,6 +889,15 @@ W3-21a coordinator＋API ← W3-15, W3-16a, W3-16b, W3-17, W3-18, W3-02, W3-11
 - ファイル: `LifecycleDualConfirmationCoordinator`・`AttemptService`・`DenyRecorder`（新規）、API controller（`LifecycleApiController`・`MyLifecycleApiController` への追加、または新controller）、DTO（`@JsonAnySetter`）、`Feature.java`（子スイッチ）、`application.yml`（`app.features.nf01-dual-confirmation.enabled: false`）、`LifecycleCanonicalization`（CONFIRMのrequest hash拡張）、`messages*.properties`、テスト U11・U12・M8・M9。
 - 規模: 約1,800〜2,400行。
 - 完了条件: 上記テスト、FeatureSwitchRouteCoverageTest、ActionPermissionMatrixTest（一覧を編集しないこと）、全体guard PASS。
+- 開始条件: §10 Privacy の署名（§12 O-8）が、commentを書き込む経路の実装より前に済んでいること。
+- W3-18（B0、V195）からの引継ぎ:
+  - 不変6表は `AppendOnlyMapper` を継承したまま使う。不変6表のentityを `IService`・`ServiceImpl`・`Db`・`SqlHelper` で包まない（更新・削除のMappedStatementは注入されないため実行時に失敗する。静的guardで禁止を固定する）。projectionは可変で、CASの専用メソッド（`projection_version` と tenant・taskを条件にし、`updated_at` を明示して更新する。列に `ON UPDATE` は無い）を追加する。
+  - B0の列名 `task_generation`・`engineer_scope_epoch`・`org_scope_epoch`・`evidence_eligibility_epoch` は `AuthorizationEpochColumnIsolationTest` の監視対象と同名である。main側では注釈SQLや文字列に書かず、`LambdaQueryWrapper` 等（列名はentityのmetadataから得る）で扱うか、B0の表に限った理由付きの例外をguardへ足す。
+  - hash列（`evidence_sha256`・`request_sha256`・`sha256`）は `utf8mb4_unicode_ci` で、FK・一意keyの比較は大文字小文字を区別しない。coordinatorは常に小文字hexで書き、比較する。
+  - DBで束縛されない列がある: `t_lifecycle_dual_confirmation.case_id`、`t_lifecycle_dual_idempotency.task_id`・`submission_id`・`confirmation_id`、`t_lifecycle_dual_submission.engineer_id`。冪等の保存済み結果を返すときは、tenantを条件にsubmission・confirmationを読み直し、これらの列を検索の根拠にしない。
+  - canonical JSON（`LifecycleCanonicalization.Request.canonicalJson()`）はtenantId・文書ID・版ID・版番号・sha256・文書epochだけを持つ。文書title・氏名・commentを含まないことをテストで固定する（§12 O-8）。
+  - `Idempotency-Key` の末尾空白・改行・許可外文字が400になるテストを置く（§5.7。DBの `ck_dual_idem_key` は最後の防御）。
+  - B0の不変表はtriggerが削除を拒否するため、非transactionalのMySQLテスト（M8・M9）は後始末で行を消せない。専用のcontainer DBを使い、テストごとに一意のtenantで分離する。
 - Demo（API、子スイッチをテスト環境でON）: (1) OFFでA1〜A7が400。(2) ONで担当営業が提出→HRが確認→taskがCOMPLETEDになり後続が昇格。(3) 確認成功後に同じkeyで再送すると保存済みの結果、bodyを変えた同keyで409。(4) 提出者本人による確認、マネージャーによる確認が403。(5) 提出後に担当営業を解除→確認が409 `authorizationChanged`。別の要員の担当変更では確認できる（細粒度）。(6) SKILL_SHEET以外、版IDなし、未知のbody propertyが400。(7) 保留→再開後の旧提出が409 `submissionStale`。(8) 拒否eventがrollback後もDBに残る。
 
 ### 7.9 W3-21b 画面・テンプレート連動（DDLなし）
@@ -947,8 +959,8 @@ W3-21a coordinator＋API ← W3-15, W3-16a, W3-16b, W3-17, W3-18, W3-02, W3-11
 | SRE | RR-14（単一tenant配備、`ACCOUNTING_TENANT_IDS` 1件）を配備前提とすること、RR-13（表単位restoreの禁止）、外部失効の通知の閾値と回収workerの間隔 |
 | Document Owner | SKILL_SHEET×単一ENGINEER×1件だけの受理と他種別・他link形の明示拒否（§5.1）、起点writerの緩和と生成者の固定、適格な状態集合 `{DRAFT, CONFIRMED, AMENDED}`、hold・廃棄・link・版追加とepochの規則（§2.2）、`t_document_version.scan_status` を唯一のscan根拠とすること、保存期限jobのservice経由化、資産・紛失・service requestからSKILL_SHEETへlinkした場合に不適格となる扱い、RR-8の受容 |
 | HR | 差戻し（REJECT）を含む二者確認の手順、確認者の役割、提出後の担当・所属・権限変更で再提出が必要になる運用（細粒度化で対象は当該要員・当該利用者に限られる）、保留・担当変更・免除でのgeneration失効、外部失効要求の登録で完了を通す運用と未処理一覧の確認・再要求、別法人所有の外部アカウントの扱い（§5.13）、RR-11の受容、linkの無いportal利用者の「要確認」の扱い、`released_at` に退社基準日を残すこと |
-| DBA | 2つのmigration（epoch A、B0）、B0の不変triggerの採否とtrigger権限、tenant列の文字集合・照合順序、lock待ちの監視、RR-13 |
-| Privacy | submissionのcomment・canonical JSON・拒否eventの保存期間（NF07のretentionとの整合） |
+| DBA | 2つのmigration（epoch A = V189、B0 = V195）、B0の不変trigger 12件（W3-18で採用。§12 O-4）とtrigger権限・binlog条件・DEFINER、tenant列の文字集合・照合順序、`idempotency_key` の `ascii_bin`（PAD SPACE）と `ck_dual_idem_key`、lock待ちの監視、RR-13 |
+| Privacy | B0の不変6表は trigger（V195）と mapper（`AppendOnlyMapper`・`AppendOnlySqlInjector`）で更新・削除できないこと。個人情報になり得る自由記述は `t_lifecycle_dual_submission.business_comment` と `t_lifecycle_dual_confirmation.decision_comment` の2列だけで、canonical JSON はIDとhashだけ、拒否eventはIDと理由codeだけである（§5.8）。これらの保存期間（無期限保存を認めるか、NF07のretentionとの整合）、および削除・匿名化が必要な場合の経路（§12 O-8）。**W3-21aがcommentを書き込む経路を実装する前に、また子スイッチをONにする前に署名を得る**。NF07のPII inventory・data element catalogへのB0の7表と2列の登録はNF07の担当へ引継ぐ |
 
 ## 11. 静的確認で見つかった既存の問題（対処バッチを割当）
 
@@ -967,7 +979,13 @@ W3-21a coordinator＋API ← W3-15, W3-16a, W3-16b, W3-17, W3-18, W3-02, W3-11
 - O-1（利用者確認済みとして扱う。Plan Reviewで解釈が成立と確認）Q-3の「system config」を、認可述語が読むキー（現行は `scope.sales-own-data-only` だけ）に限る。全キーを対象にすると、勤怠同期のcursor（AttendanceSyncServiceImpl.java:720-734）等の定期書込みのたびにglobalが進み、未確認の提出がすべて失効する。
 - O-2（Plan Review r2で確認）1提出1文書、差戻し（REJECT）を含めること、`completed_by` を確認者にすること。
 - O-3（Plan Reviewで受容済み）storage検証をattempt外で行う設計。条件は§5.4に明記した。
-- O-4（DDL laneとPlan Reviewで決定）B0不変表のDB trigger採否（配備runbookのtrigger件数行への影響）。
+- O-4（解決: W3-18で採用）B0不変表のDB trigger採否。V195で不変6表（submission、submission_document、org_fence、confirmation、idempotency、event）に BEFORE UPDATE・BEFORE DELETE の trigger を1件ずつ、計12件置いた（V132と同じ単文SIGNAL。projectionには置かない）。配備runbookのtrigger件数は 55 → 67（§1.2・§3.4、`DeployRunbookMigrationCountTest` が migration の CREATE/DROP TRIGGER から数えて照合する）。DBAのtrigger権限は既存のtriggerと同じ前提である。mapper層の拒否（`AppendOnlyMapper`）とMappedStatementの非注入（`AppendOnlySqlInjector`）も併せて置いた。
+- O-8（Privacyの署名で決定。W3-21aがcommentを書き込む前に必須）B0の自由記述列 `business_comment`・`decision_comment` の削除・匿名化の経路。triggerとmapperにより、現状これらの列は書いたら変えられない。Privacyが削除・匿名化を求める場合は、次をforward migrationと専用の書込み経路で行う（V195は変更しない）。
+  1. submission・confirmation の BEFORE UPDATE trigger を、列を限定したtriggerに置き換える。comment列を NULL にする更新だけを許し、他の列が変わる更新とcommentをNULL以外へ変える更新は拒否する。`BEGIN … END` を伴う複文になるため、V102と同じく `DELIMITER` を使う（`MigrationScriptIntegrityTest` のIF/END IF均衡の対象になる）。BEFORE DELETE trigger は残す。
+  2. mapperに、commentをNULLにする専用メソッド（tenant・IDを条件にした単一列の更新）を1つだけ足す。`AppendOnlyMapper` の汎用更新の拒否は残す。
+  3. commentは `evidence_sha256` にも `ConfirmationBinding` にも含まれないため、匿名化しても提出と確認の束縛は壊れない。`request_sha256` はcommentを含むが、冪等性の比較にだけ使う（匿名化後の同key再送は409になり得ることをPrivacyとHRへ説明する）。
+  4. W3-21aは、canonical JSONが文書title・氏名・commentを含まないことをテストで固定する（§7.8）。
+  5. 保存期間を有限にすると決まった場合で、W3-21aより前なら、comment 2列を可変の別表へ分ける案（Plan Reviewが必要。H2の2つの仕組みとM1も直す）も比較する。
 - O-5（解決）key名はW3-02（9f6d7c0e）で `error.lifecycle.dualConfirmationDisabled`・`error.lifecycle.evidenceVersionRequired`・`error.lifecycle.evidenceVersionNotClean` と確認した。portal link writerのengineer lockはW3-02で実装済み。
 - O-6（W3-11とrootで決定）回収用scheduled methodの間隔。scheduler方針のテスト（SchedulingDisabledDrainTest等、第3波計画§2でNF05-Cが所有）への登録が必要になるため、rootがファイルの所有を調整する。
 - O-7（Plan Review r2で確認）W3-11は専用のoutbox表を作らず、既存の `t_external_account_reference` 行を状態機械として使う（DDLなし）。R2 §4.2(3)の「アカウント行は読取専用」とは異なるが、pollと送信workerが扱う状態を分けたので、両者は同じ行を同時に書き換えない（§5.13の8）。専用表が必要と判断された場合はDDL laneで番号を取り、W3-11をDDLバッチにする。

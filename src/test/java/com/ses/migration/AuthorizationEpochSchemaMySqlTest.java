@@ -98,7 +98,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  *   <li>W3-18（計画 §7.7 B0、V195）: 二者確認coordinatorの7表が空で作られ、一意key・複合主キー・14件のFK・CHECK・
  *       tenant列の照合順序が定義どおりであること。不変6表へのUPDATE・DELETEをtrigger（MySQL error 1644）と
  *       mapper（SQL発行前の例外）が拒否し、projectionだけがversionのCASで更新できること。他tenantの案件・利用者・文書版、
- *       別案件のtask、提出の束縛（revision・証跡hash・世代）違いを複合FK（error 1452）が拒否すること。B0の行はすべて
+ *       別案件のtask、提出の束縛（revision・証跡hash・世代）違いを複合FK（error 1452）が拒否し、各CHECK（error 3819。
+ *       冪等性keyの空文字・末尾空白・改行・許可外の文字を含む）が許可外の値を拒否すること（messageの制約名で特定する）。B0の行はすべて
  *       rollbackするtransactionで入れ、表を空のまま保つ（triggerが削除を拒否するため後始末はできない）。lock待ちは扱わない。</li>
  * </ul>
  */
@@ -568,6 +569,7 @@ class AuthorizationEpochSchemaMySqlTest {
         assertCheck("t_lifecycle_dual_projection", "ck_dual_projection_state", "state");
         assertCheck("t_lifecycle_dual_idempotency", "ck_dual_idem_operation", "operation");
         assertCheck("t_lifecycle_dual_event", "ck_dual_event_type", "event_type");
+        assertCheck("t_lifecycle_dual_idempotency", "ck_dual_idem_key", "idempotency_key");
 
         Map<String, Set<String>> triggers = new TreeMap<>();
         for (Map<String, Object> row : jdbc.queryForList("SELECT EVENT_OBJECT_TABLE AS tbl, EVENT_MANIPULATION AS ev, "
@@ -581,6 +583,22 @@ class AuthorizationEpochSchemaMySqlTest {
             expectedTriggers.put(table, new TreeSet<>(Set.of("DELETE", "UPDATE")));
         }
         assertEquals(expectedTriggers, triggers, "triggerは不変6表のUPDATE・DELETEにだけ付く（projectionは可変）");
+    }
+
+    @Test
+    void 冪等性keyのCHECKは空文字と末尾空白と改行と許可外の文字を拒否し許可する文字だけのkeyを通す() {
+        Fixture f = fixture();
+        rollbackOnly(() -> {
+            long submissionId = insertSubmission(f.tenant(), f.caseId(), f.taskA(), f.engineerId(), f.userId(), 1);
+            // ascii_bin は PAD SPACE のため、末尾空白のkeyは一意keyで 'Key-A' と同一視される。CHECKはその前に拒否する
+            for (String invalid : List.of("", "Key-A ", " Key-A", "key a", "key/a", "key\n", "key\t", "key+a", "key%a")) {
+                assertCheckRejected("key=[" + invalid + "]", "ck_dual_idem_key",
+                        () -> insertIdempotency(f, f.userId(), invalid, submissionId));
+            }
+            for (String valid : List.of("Key-A", "a.b_c~d-1", "Z".repeat(190))) {
+                assertTrue(insertIdempotency(f, f.userId(), valid, submissionId) > 0, "key=[" + valid + "]");
+            }
+        });
     }
 
     @Test
@@ -619,29 +637,54 @@ class AuthorizationEpochSchemaMySqlTest {
         Fixture f = fixture();
         Fixture other = fixture();
         rollbackOnly(() -> {
-            assertForeignKeyRejected("他tenantの案件を指す提出",
+            // 各用例はFKを1つだけ破り、他のFKは満たす（error 1452 とmessage中の制約名で、破った制約を特定する）
+            assertForeignKeyRejected("他tenantの案件を指す提出", "fk_dual_submission_case",
                     () -> insertSubmission(f.tenant(), other.caseId(), other.taskA(), f.engineerId(), f.userId(), 1));
-            assertForeignKeyRejected("別案件のtaskを指す提出",
+            assertForeignKeyRejected("別案件のtaskを指す提出", "fk_dual_submission_task",
                     () -> insertSubmission(f.tenant(), f.caseId(), other.taskA(), f.engineerId(), f.userId(), 1));
-            assertForeignKeyRejected("他tenantの提出者",
+            assertForeignKeyRejected("他tenantの提出者", "fk_dual_submission_submitter",
                     () -> insertSubmission(f.tenant(), f.caseId(), f.taskA(), f.engineerId(), other.userId(), 1));
 
             long submissionId = insertSubmission(f.tenant(), f.caseId(), f.taskA(), f.engineerId(), f.userId(), 1);
-            assertForeignKeyRejected("他tenantの文書版",
+            assertForeignKeyRejected("他tenantの文書版", "fk_dual_doc_version",
                     () -> insertSubmissionDocument(f.tenant(), submissionId, other.documentId(), other.documentVersionId()));
-            assertForeignKeyRejected("別文書の版",
+            assertForeignKeyRejected("別文書の版", "fk_dual_doc_version",
                     () -> insertSubmissionDocument(f.tenant(), submissionId, f.documentId(), other.documentVersionId()));
-            assertForeignKeyRejected("他tenantから提出を指す文書行",
+            assertForeignKeyRejected("他tenantから提出を指す文書行", "fk_dual_doc_submission",
                     () -> insertSubmissionDocument(other.tenant(), submissionId, other.documentId(), other.documentVersionId()));
-            assertForeignKeyRejected("存在しない組織",
+            assertForeignKeyRejected("存在しない組織", "fk_dual_org_unit",
                     () -> jdbc.update(ORG_FENCE_INSERT, f.tenant(), submissionId, MISSING_ID));
-            assertForeignKeyRejected("証跡hashの違う確認", () -> insertConfirmation(f, submissionId, 1, "d".repeat(64), f.userId()));
-            assertForeignKeyRejected("revisionの違う確認", () -> insertConfirmation(f, submissionId, 2, EVIDENCE_SHA, f.userId()));
-            assertForeignKeyRejected("他tenantの確認者", () -> insertConfirmation(f, submissionId, 1, EVIDENCE_SHA, other.userId()));
-            assertForeignKeyRejected("世代の違う提出を指すprojection",
+            assertForeignKeyRejected("他tenantから提出を指す組織fence", "fk_dual_org_submission",
+                    () -> jdbc.update(ORG_FENCE_INSERT, other.tenant(), submissionId, f.organizationId()));
+            assertForeignKeyRejected("証跡hashの違う確認", "fk_dual_confirmation_submission",
+                    () -> insertConfirmation(f, submissionId, 1, "d".repeat(64), f.userId()));
+            assertForeignKeyRejected("revisionの違う確認", "fk_dual_confirmation_submission",
+                    () -> insertConfirmation(f, submissionId, 2, EVIDENCE_SHA, f.userId()));
+            assertForeignKeyRejected("他tenantの確認者", "fk_dual_confirmation_confirmer",
+                    () -> insertConfirmation(f, submissionId, 1, EVIDENCE_SHA, other.userId()));
+            assertForeignKeyRejected("世代の違う提出を指すprojection", "fk_dual_projection_submission",
                     () -> jdbc.update(PROJECTION_INSERT, f.tenant(), f.taskA(), f.caseId(), 1L, 1, submissionId, EVIDENCE_SHA));
-            assertForeignKeyRejected("他tenantの冪等性要求者",
+            assertForeignKeyRejected("他tenantの冪等性要求者", "fk_dual_idem_actor",
                     () -> insertIdempotency(f, other.userId(), "Key-A", submissionId));
+            assertForeignKeyRejected("他tenantの案件を指す冪等性", "fk_dual_idem_case",
+                    () -> jdbc.update(IDEMPOTENCY_INSERT, f.tenant(), other.caseId(), f.taskA(), f.userId(), "Key-B",
+                            REQUEST_SHA, submissionId));
+
+            // CHECK（error 3819）: FKを満たす行で、値だけが許可外。一意keyより先に判定される
+            assertSqlErrorCode(assertThrows(DataAccessException.class,
+                    () -> insertSubmission(f.tenant(), f.caseId(), f.taskA(), f.engineerId(), f.userId(), 0)), 3819, "revision 0");
+            assertCheckRejected("決定がCONFIRMED/REJECTED以外", "ck_dual_confirmation_decision",
+                    () -> jdbc.update(CONFIRMATION_INSERT.replace("'CONFIRMED')", "'APPROVED')"), f.tenant(), f.caseId(),
+                            f.taskA(), submissionId, 1, EVIDENCE_SHA, f.userId()));
+            assertCheckRejected("projectionの状態がPENDING/CONFIRMED/REJECTED以外", "ck_dual_projection_state",
+                    () -> jdbc.update(PROJECTION_INSERT.replace("'PENDING')", "'DONE')"), f.tenant(), f.taskA(), f.caseId(),
+                            0L, 1, submissionId, EVIDENCE_SHA));
+            assertCheckRejected("冪等性の操作がSUBMIT/CONFIRM以外", "ck_dual_idem_operation",
+                    () -> jdbc.update(IDEMPOTENCY_INSERT.replace("'SUBMIT'", "'REJECT'"), f.tenant(), f.caseId(), f.taskA(),
+                            f.userId(), "Key-C", REQUEST_SHA, submissionId));
+            assertCheckRejected("監査eventの種別が既知以外", "ck_dual_event_type",
+                    () -> jdbc.update("INSERT INTO t_lifecycle_dual_event (tenant_id, actor_user_id, operation, event_type) "
+                            + "VALUES (?, ?, 'SUBMIT', 'UPDATED')", f.tenant(), f.userId()));
 
             // 一意key: 同じtask・世代のrevision、提出ごとの確認、冪等性key（ascii_binで大文字小文字を区別する）
             assertThrows(DuplicateKeyException.class,
@@ -652,10 +695,6 @@ class AuthorizationEpochSchemaMySqlTest {
             insertIdempotency(f, f.userId(), "Key-A", submissionId);
             insertIdempotency(f, f.userId(), "key-A", submissionId);
             assertThrows(DuplicateKeyException.class, () -> insertIdempotency(f, f.userId(), "Key-A", submissionId));
-
-            // CHECK: revisionは1から、決定はCONFIRMED/REJECTEDだけ
-            assertSqlErrorCode(assertThrows(DataAccessException.class,
-                    () -> insertSubmission(f.tenant(), f.caseId(), f.taskA(), f.engineerId(), f.userId(), 0)), 3819, "revision 0");
 
             // 監査はFKを持たず、他tenantのIDや存在しないIDを要求値として記録できる（計画 §5.8）
             assertEquals(1, jdbc.update("INSERT INTO t_lifecycle_dual_event (tenant_id, requested_task_id, "
@@ -963,9 +1002,22 @@ class AuthorizationEpochSchemaMySqlTest {
                 + "AND TABLE_NAME = ? AND COLUMN_NAME = ?", String.class, table, column);
     }
 
-    private static void assertForeignKeyRejected(String label, Executable insert) {
+    private static void assertForeignKeyRejected(String label, String constraint, Executable insert) {
         DataAccessException failure = assertThrows(DataAccessException.class, insert, label);
         assertSqlErrorCode(failure, 1452, label + " は複合FKが拒否する");
+        assertConstraintNamed(failure, constraint, label);
+    }
+
+    private static void assertCheckRejected(String label, String constraint, Executable insert) {
+        DataAccessException failure = assertThrows(DataAccessException.class, insert, label);
+        assertSqlErrorCode(failure, 3819, label + " はCHECKが拒否する");
+        assertConstraintNamed(failure, constraint, label);
+    }
+
+    /** MySQLのmessage（1452: CONSTRAINT `名前` FOREIGN KEY …、3819: Check constraint '名前' is violated.）に制約名がある。 */
+    private static void assertConstraintNamed(DataAccessException failure, String constraint, String label) {
+        String message = String.valueOf(failure.getMostSpecificCause().getMessage());
+        assertTrue(message.contains(constraint), label + ": " + constraint + " で拒否されること: " + message);
     }
 
     private long insertSubmission(String tenant, long caseId, long taskId, long engineerId, long submitterUserId,

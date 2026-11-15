@@ -20,9 +20,15 @@
 --    参照先の tenant_id は VARCHAR(100)・utf8mb4_unicode_ci（表の既定）であり、本migrationの各表も同じ文字集合・照合順序で作る。
 --    組織はtenantに依存しない（計画 §2.6）ため、組織fenceは m_organization_unit (id) だけを参照する。
 --    task世代（t_lifecycle_task の世代列）はFKにしない。attempt内でtask行の現在値と比べる（計画 §5.12、現行契約 §9.1）。
--- 3. 不変の6表へのUPDATE・DELETEを BEFORE trigger で拒否する（V132と同じ単文の SIGNAL。DELIMITER不要）。
---    mapper層でも同じ6表のUPDATE・DELETEを拒否する（LifecycleDual*Mapper。H2のreplayにtriggerを置かないため）。
+-- 3. 不変の6表へのUPDATE・DELETEを BEFORE trigger で拒否する（V132と同じ単文の SIGNAL。DELIMITER不要。計画 §12 O-4）。
+--    mapper層でも同じ6表のUPDATE・DELETEを拒否する（共通基 com.ses.common.mybatis.AppendOnlyMapper。H2のreplayにtriggerを
+--    置かないため）。AppendOnlySqlInjector はこれらのmapperへ更新・削除のMappedStatementを注入しない。
 --    trigger 12件の追加により、配備runbookのtrigger件数は 55 → 67 になる（DBAのTRIGGER権限は既存のtriggerと同じ前提）。
+--    自由記述列（business_comment・decision_comment）の削除・匿名化が必要になった場合は、本migrationを変えず、forward migrationで
+--    列を限定したtriggerへ置き換える（計画 §12 O-8）。
+-- 4. idempotency_key は ascii_bin（大文字小文字を区別する。MySQL 8.0 の ascii_bin は PAD SPACE で末尾空白を同一視する）。
+--    ck_dual_idem_key で空文字と許可外の文字（末尾空白・改行を含む）を拒否し、APIの文字種 [A-Za-z0-9._~-] とDBを一致させる
+--    （計画 §5.7）。正規表現の末尾anchorは末尾の改行の前でも一致するため、否定文字クラスが1文字も一致しないことで判定する。
 --
 -- 規約（決定XB-6）: V1と既存migrationは変更しない。H2のreplayは
 -- src/test/resources/sql/schema-nf01-dual-confirmation-h2.sql と engineer-schema-h2.sql が同じ表を持つ（triggerは置かない）。
@@ -143,7 +149,9 @@ CREATE TABLE t_lifecycle_dual_idempotency (
     UNIQUE KEY uk_dual_idempotency (tenant_id, task_id, task_generation, operation, actor_user_id, idempotency_key),
     CONSTRAINT fk_dual_idem_case FOREIGN KEY (tenant_id, case_id) REFERENCES t_lifecycle_case (tenant_id, id),
     CONSTRAINT fk_dual_idem_actor FOREIGN KEY (tenant_id, actor_user_id) REFERENCES sys_user (tenant_id, id),
-    CONSTRAINT ck_dual_idem_operation CHECK (operation IN ('SUBMIT', 'CONFIRM'))
+    CONSTRAINT ck_dual_idem_operation CHECK (operation IN ('SUBMIT', 'CONFIRM')),
+    CONSTRAINT ck_dual_idem_key CHECK (CHAR_LENGTH(idempotency_key) >= 1
+        AND NOT REGEXP_LIKE(idempotency_key, '[^A-Za-z0-9._~-]', 'c'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='二者確認の冪等性（追記専用）';
 
 CREATE TABLE t_lifecycle_dual_event (

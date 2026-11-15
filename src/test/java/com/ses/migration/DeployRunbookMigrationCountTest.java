@@ -6,6 +6,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -35,6 +39,71 @@ class DeployRunbookMigrationCountTest {
                 "SELECT COUNT\\(\\*\\) FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1;[^\\n]*--\\s*(\\d+)",
                 "3.4のversioned適用件数照会末尾へ -- 件数 を記載してください");
         assertThat(Integer.parseInt(countSql.group(1))).isEqualTo(versions.size());
+    }
+
+    /**
+     * 配備手順の trigger 件数（§1.2 の権限説明と §3.4 の COUNT 照会）を、versioned migration の CREATE / DROP TRIGGER を
+     * 版の順に適用した正味の件数へ結び付ける（過去に静的計数を誤った。W3-18 review P3-6）。コメント内の語は数えない。
+     */
+    @Test
+    void 配備手順のtrigger件数はmigrationのCREATEとDROP_TRIGGERを版順に適用した件数と一致する() throws Exception {
+        Pattern name = Pattern.compile("^V([0-9]+(?:_[0-9]+)*)__.+\\.sql$");
+        TreeMap<MigrationVersion, Path> scripts = new TreeMap<>();
+        try (var files = Files.list(Path.of("src/main/resources/db/migration"))) {
+            for (Path file : files.toList()) {
+                Matcher match = name.matcher(file.getFileName().toString());
+                if (match.matches()) {
+                    scripts.put(MigrationVersion.fromVersion(match.group(1).replace('_', '.')), file);
+                }
+            }
+        }
+        Pattern statement = Pattern.compile("\\b(CREATE|DROP)\\s+(?:DEFINER\\s*=\\s*\\S+\\s+)?TRIGGER\\s+"
+                + "(IF\\s+(?:NOT\\s+)?EXISTS\\s+)?`?(\\w+)`?", Pattern.CASE_INSENSITIVE);
+        Set<String> triggers = new TreeSet<>();
+        for (Map.Entry<MigrationVersion, Path> script : scripts.entrySet()) {
+            Matcher match = statement.matcher(stripComments(Files.readString(script.getValue())));
+            while (match.find()) {
+                String trigger = match.group(3).toLowerCase(java.util.Locale.ROOT);
+                if ("DROP".equalsIgnoreCase(match.group(1))) {
+                    triggers.remove(trigger);
+                } else {
+                    boolean added = triggers.add(trigger);
+                    assertThat(added || match.group(2) != null)
+                            .as("V%s が既存の trigger %s を IF NOT EXISTS 無しで再作成している", script.getKey(), trigger)
+                            .isTrue();
+                }
+            }
+        }
+        assertThat(triggers).as("trigger が1件も読めていない").isNotEmpty();
+
+        // versioned 以外（Repeatable・prod 専用 script・Java migration）は trigger を作らない前提で数える
+        for (Path root : List.of(Path.of("src/main/resources/db/migration"), Path.of("src/main/resources/db/migration-prod"),
+                Path.of("src/main/java/db/migration"))) {
+            try (var files = Files.list(root)) {
+                for (Path file : files.toList()) {
+                    if (name.matcher(file.getFileName().toString()).matches()) {
+                        continue;
+                    }
+                    assertThat(statement.matcher(stripComments(Files.readString(file))).find())
+                            .as("%s は trigger を作成・削除しない", file).isFalse();
+                }
+            }
+        }
+
+        String runbook = Files.readString(Path.of(".kiro/specs/production-launch/deploy-runbook.md"));
+        Matcher privilege = required(runbook, "\\*\\*trigger（(\\d+)件",
+                "1.2の migrator 権限に **trigger（N件 ...）とbinlog** と記載してください");
+        Matcher count = required(runbook,
+                "SELECT COUNT\\(\\*\\) FROM information_schema\\.triggers WHERE trigger_schema = DATABASE\\(\\);\\s*--\\s*(\\d+)",
+                "3.4の trigger 件数照会末尾へ -- 件数 を記載してください");
+        assertThat(Integer.parseInt(privilege.group(1))).as("§1.2 の trigger 件数").isEqualTo(triggers.size());
+        assertThat(Integer.parseInt(count.group(1))).as("§3.4 の trigger 件数").isEqualTo(triggers.size());
+    }
+
+    /** SQLのブロックコメントと、2連ハイフンから行末までの行コメントを除く。 */
+    private static String stripComments(String sql) {
+        String withoutBlocks = Pattern.compile("/\\*.*?\\*/", Pattern.DOTALL).matcher(sql).replaceAll(" ");
+        return Pattern.compile("--[^\\n]*").matcher(withoutBlocks).replaceAll("");
     }
 
     private int collect(Path root, String extension, List<String> versions) throws Exception {

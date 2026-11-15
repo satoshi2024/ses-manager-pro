@@ -102,7 +102,9 @@ CREATE TABLE IF NOT EXISTS t_lifecycle_dual_idempotency (
     confirmation_id BIGINT,
     created_at      DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     CONSTRAINT uk_dual_idempotency UNIQUE (tenant_id, task_id, task_generation, operation, actor_user_id, idempotency_key),
-    CONSTRAINT ck_dual_idem_operation CHECK (operation IN ('SUBMIT', 'CONFIRM'))
+    CONSTRAINT ck_dual_idem_operation CHECK (operation IN ('SUBMIT', 'CONFIRM')),
+    CONSTRAINT ck_dual_idem_key CHECK (CHAR_LENGTH(idempotency_key) >= 1
+        AND NOT REGEXP_LIKE(idempotency_key, '[^A-Za-z0-9._~-]', 'c'))
 );
 
 CREATE TABLE IF NOT EXISTS t_lifecycle_dual_event (
@@ -125,6 +127,10 @@ CREATE TABLE IF NOT EXISTS t_lifecycle_dual_event (
 );
 
 CREATE INDEX IF NOT EXISTS idx_dual_event_task ON t_lifecycle_dual_event (tenant_id, task_id, occurred_at);
+
+-- sys_user (tenant_id, id) の一意制約を明示する（MySQLのV165 uk_sys_user_tenant_id に対応。H2のMySQL modeが参照列へ
+-- 暗黙に作る一意制約に頼らない）。sys_user はV1のreplayと engineer-schema-h2.sql が作り直すため、FKより先に毎回付ける。
+ALTER TABLE sys_user ADD CONSTRAINT IF NOT EXISTS uk_sys_user_tenant_id UNIQUE (tenant_id, id);
 
 -- 提出
 ALTER TABLE t_lifecycle_dual_submission ADD CONSTRAINT IF NOT EXISTS fk_dual_submission_case

@@ -22,7 +22,7 @@
   - NF07 F1 + PERM（W3-14）: `V190__nf07_privacy_f1_core.sql`（F1表。行は作らない）、`V191__nf07_privacy_permission_seed.sql`（privacy-admin・privacy.* の拒否・menu）。prodの起動検査 `ProductionSecurityConfigurationValidator` は、全体baseline `'*'` を持つgroup（privacy-admin以外）に privacy.* の拒否行が無ければ起動を止める（bootstrap中も同じ）。`privacy.retention.enabled` / `privacy.dsar.enabled` は既定OFFで、初回リリースはOFFのまま配備する。1つでもONにした起動では `PrivacyProductionConfigurationValidator`（W3-14b）が決定ID束縛（`privacy.approval.*`、D-01・D-09）、privacy-admin の有効な管理者2名以上（OIDCでログインできる管理者だけ。break-glass口座を除く。ロック中も数える。推奨は §5.0 の C〜E の3名）、privacy-admin 以外のgroupに `privacy.` 系の許可行が無いことを検査し、満たさなければ起動しない。決定の署名日前・失効だけなら起動は止めず、WARN `NF07_PRIVACY_STOPPED_AT_STARTUP` を出してNF07をOFFとして扱う（実行中に失効日を迎えた場合も同日から。metric `ses_privacy_decision_binding_state`。ONの手順: `feature-switches.md` 4.7）。新しいmigrationは無い。
   - NF-06 取込センター画面（W3-12）: `V193__nf06_import_center_menu_and_permission_seed.sql`（menu `import-center` を管理者だけへ付与、`import.metadata.manage` を管理者専用group（`role-admin`・`privacy-admin`）へ明示許可し、他の全groupで拒否する。利用者の割当は変えない）。機能スイッチNF06は既定OFFで、初回リリースはOFFのまま配備する。ONにした起動では admission 承認設定（`ImportAdmissionStartupValidator`）と行参照のHMAC鍵 `IMPORT_ROW_REFERENCE_HMAC_KEY`（`ImportRowReferenceKeyStartupValidator`）が揃わなければ起動しない。前提は単一法人（`m_organization_unit` の論理削除されていない組織の法人IDがちょうど1種類。status・有効期間は見ない。新規導入は0件のため、ONの前に法人を持つ組織を登録する）。ONの手順: `feature-switches.md` 4.8。
   - NF08 B2c-1（W3-13）: `V194__nf08_copilot_dispatch_claim_and_cost_ledger.sql`（summary dispatchのclaim列、費用ledgerの `t_ai_external_send_cost_bucket` / `t_ai_external_send_cost_entry`、`t_audit_log.idx_audit_dispatch_key`。行は作らない）。外部送信は未開放のままで、prodは `AI_EXTERNAL_SEND_ENABLED=true` を `dispatch.permitOnlyNotWired` で起動拒否する（B2c-2の完了と独立Reviewまで。設定では解除できない）。`AI_EXTERNAL_SEND_COST_LEDGER`（`ai.external-send-cost-ledger`）は既定の `persistent` のまま設定しない（`persistent` 以外は解除後も起動拒否）。
-  - NF01 B0（W3-18）: `V195__nf01_dual_confirmation_coordinator.sql`（二者確認coordinatorの7表 `t_lifecycle_dual_submission` / `_submission_document` / `_submission_org_fence` / `_confirmation` / `_projection` / `_idempotency` / `_event`。行は作らない。projection以外の不変6表へUPDATE・DELETEを拒否するtrigger 12件を追加する）。二者確認の画面・APIはまだ無く（W3-21a/b）、表は空のまま配備する。trigger件数は §1.2・§3.4 の 67件に含まれる。
+  - NF01 B0（W3-18）: `V195__nf01_dual_confirmation_coordinator.sql`（二者確認coordinatorの7表 `t_lifecycle_dual_submission` / `_submission_document` / `_submission_org_fence` / `_confirmation` / `_projection` / `_idempotency` / `_event`。行は作らない。projection以外の不変6表へUPDATE・DELETEを拒否するtrigger 12件を追加する。冪等性keyは `ascii_bin` で、CHECK `ck_dual_idem_key` が空文字と `[A-Za-z0-9._~-]` 以外の文字を拒否する）。アプリ側は `AppendOnlyMapper`・`AppendOnlySqlInjector` で同じ6表の更新・削除を拒否する。二者確認の画面・APIはまだ無く（W3-21a/b）、表は空のまま配備する。trigger件数は §1.2・§3.4 の 67件に含まれる（`DeployRunbookMigrationCountTest` がmigrationのCREATE/DROP TRIGGERから数えて照合する）。自由記述列の保存期間はPrivacyの署名事項（NF01計画 §10・§12 O-8）。
   - 検証: `FlywayProdFreshInstallMySqlTest`（実MySQL、job設定そのものを読む）、`ProductionFlywayJobConfigurationTest`、`ProductionSchemaVersionGuardTest`、`PasswordChangeEnforcementIntegrationTest`、`ProductionBootstrapIntegrationTest`、`ProductionBootstrapModeTest`、`ProductionBootstrapPersistenceTest`、`ProductionSecurityConfigurationValidatorBootstrapTest` ほか。
 
 ## 0. 全体の流れ
@@ -238,17 +238,22 @@ SELECT (SELECT COUNT(*) FROM t_ai_external_send_cost_bucket)
 SELECT COUNT(*) FROM t_ai_recommendation_run WHERE dispatch_state <> 'NOT_APPLICABLE';       -- 0
 SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE()
    AND table_name = 't_audit_log' AND index_name = 'idx_audit_dispatch_key';                  -- 3（3列の索引）
--- NF01 B0（V195）: 二者確認coordinatorの7表があり行は無い。不変6表（projection以外）にUPDATE・DELETEのtriggerが各1件
+-- NF01 B0（V195）: 二者確認coordinatorの7表があり行は無い。不変6表（projection以外）にUPDATE・DELETEのtriggerが各1件、
+-- projectionにはtriggerが無い。冪等性keyの文字種CHECKがある
 SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN
  ('t_lifecycle_dual_submission', 't_lifecycle_dual_submission_document', 't_lifecycle_dual_submission_org_fence',
   't_lifecycle_dual_confirmation', 't_lifecycle_dual_projection', 't_lifecycle_dual_idempotency',
   't_lifecycle_dual_event');                                                                   -- 7
-SELECT (SELECT COUNT(*) FROM t_lifecycle_dual_submission) + (SELECT COUNT(*) FROM t_lifecycle_dual_confirmation)
+SELECT (SELECT COUNT(*) FROM t_lifecycle_dual_submission) + (SELECT COUNT(*) FROM t_lifecycle_dual_submission_document)
+     + (SELECT COUNT(*) FROM t_lifecycle_dual_submission_org_fence) + (SELECT COUNT(*) FROM t_lifecycle_dual_confirmation)
      + (SELECT COUNT(*) FROM t_lifecycle_dual_projection) + (SELECT COUNT(*) FROM t_lifecycle_dual_idempotency)
      + (SELECT COUNT(*) FROM t_lifecycle_dual_event);                                         -- 0
 SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE()
-   AND event_object_table LIKE 't\_lifecycle\_dual\_%'
-   AND event_object_table <> 't_lifecycle_dual_projection';                                    -- 12
+   AND event_object_table LIKE 't\_lifecycle\_dual\_%';                                        -- 12
+SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE()
+   AND event_object_table = 't_lifecycle_dual_projection';                                     -- 0
+SELECT COUNT(*) FROM information_schema.check_constraints WHERE constraint_schema = DATABASE()
+   AND constraint_name = 'ck_dual_idem_key';                                                   -- 1
 
 -- helper procedureが残っていない・trigger件数
 SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema = DATABASE();           -- 0
