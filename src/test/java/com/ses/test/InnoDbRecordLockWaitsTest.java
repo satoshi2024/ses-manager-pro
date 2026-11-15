@@ -87,6 +87,38 @@ class InnoDbRecordLockWaitsTest {
         assertFalse(InnoDbRecordLockWaits.reachesHolder(waits, 12, 1, "holder-row"));
     }
 
+    @Test
+    void 待機を確認できない理由はperformance_schemaを読めない権限不足を最初に示す() {
+        String reason = visibility(false, false, null, 0, 0).explain();
+        assertTrue(reason.startsWith("権限不足: performance_schemaのlock表を読めない"), reason);
+        assertTrue(reason.contains("user=test@%"), reason);
+    }
+
+    @Test
+    void PROCESS権限が無ければ他sessionを確認できない権限不足の可能性として示す() {
+        String reason = visibility(true, false, 123L, 1, 0).explain();
+        assertTrue(reason.startsWith("権限不足の可能性: PROCESS権限が無く"), reason);
+    }
+
+    @Test
+    void 権限があればblockerのtransaction不可視と待機なしと別lockの待機を区別する() {
+        assertTrue(visibility(true, true, null, 1, 0).explain().startsWith("blockerのtransactionが見えない"));
+        String none = visibility(true, true, 123L, 0, 0).explain();
+        assertTrue(none.startsWith("InnoDBのlock待機なし（待機中のlock=0件、blocker trx=123）"), none);
+        assertTrue(none.contains("id=7,state=update"), "実行中の他sessionの状態を併記する: " + none);
+        assertTrue(visibility(true, true, 123L, 2, 0).explain()
+                .startsWith("待機中のlockはあるがblockerのlockを待っていない（待機中のlock=2件）"));
+        assertTrue(visibility(true, true, 123L, 2, 1).explain().startsWith("blockerへの待機辺あり（1件）"));
+        assertFalse(new InnoDbRecordLockWaits.WaitVisibility("root@%", true, true, 123L, 0, 0, null).explain()
+                .contains("null"), "実行中sessionが無い場合も文にする");
+    }
+
+    private static InnoDbRecordLockWaits.WaitVisibility visibility(boolean readable, boolean process, Long blockerTrx,
+                                                                   int waitingLocks, int edges) {
+        return new InnoDbRecordLockWaits.WaitVisibility(readable && process ? "root@%" : "test@%", process, readable,
+                blockerTrx, waitingLocks, edges, List.of("id=7,state=update,time=3s,sql=INSERT INTO t_x"));
+    }
+
     private static InnoDbRecordLockWaits.WaitEdge edge(long requester, String requesterLockId, long blocker,
                                                        String blockerLockId, String blockerStatus) {
         return new InnoDbRecordLockWaits.WaitEdge(requester, blocker,
