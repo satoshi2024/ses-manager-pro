@@ -477,6 +477,17 @@ class ScopeSourceWriterFenceTest {
                         + " を使わない（lockは1つのplanで1回だけ取る）");
             }
         }
+        // 合成の自動処理（planを通らない）は業務経路から呼ばない（review P3-7。package-privateで、試験だけが使う）。
+        String gateRelative = "com/ses/service/lifecycle/ResignationGateChecker.java";
+        for (Map.Entry<String, String> entry : WriterGuardSources.mainSources().entrySet()) {
+            if (!entry.getKey().equals(gateRelative) && entry.getValue().contains("executeAutomaticGateActions(")) {
+                violations.add(entry.getKey() + ": 退社ゲートの合成の自動処理を業務経路から呼ばない"
+                        + "（案件完了のplanの取得後に applyAutomaticScopeActions を呼ぶ）");
+            }
+        }
+        if (WriterGuardSources.mainSource(gateRelative).contains("public void executeAutomaticGateActions(")) {
+            violations.add(gateRelative + ": executeAutomaticGateActions は package-private にする");
+        }
         // planの組立て: 3（操作者S・連携ユーザーX）→ 4 → 5 → 7 → 8（本人の所属・上長解除の対象）→ 9 → 10 → 14。
         String plannerRelative = "com/ses/service/lifecycle/LifecycleCompletionLockPlanner.java";
         String planner = WriterGuardSources.mainSource(plannerRelative);
@@ -492,15 +503,18 @@ class ScopeSourceWriterFenceTest {
     }
 
     @Test
-    void 要員行をX_lockする業務writerは外部キー参照先の組織行を先に共有lockする() {
+    void 要員行をX_lockする業務writerは外部キー参照先の利用者行と組織行を先に共有lockする() {
         // W3-16a後半 review P3-1: 要員行（rank 7）のX lockの後にinsert・更新の外部キー検査が組織行（rank 6）へS lockを付けると、
         // 組織統合・所属writer（6 X → 7 X）と循環し得る。参照先の組織行を要員行より先に共有lockする。
+        // W3-16b review P3-1: 休暇申請の created_by・applicant_id は申請者本人の利用者行（rank 3）を参照する。後から付く
+        // S lockは退社完了（3 X{連携ユーザー} → 7 X）と循環し得るため、本人の利用者行を最初に共有lockする（3 → 6 → 7）。
         List<String> violations = new ArrayList<>();
         String relative = "com/ses/service/impl/LeaveServiceImpl.java";
         String leave = WriterGuardSources.mainSource(relative);
         violations.addAll(order(relative, "apply", leave, "public LeaveApplicationResult apply(",
+                "actorShareLock.lockActive(applicantUserId, null)",
                 "organizationShareLock.lockReferenced(leave.getOrganizationId())", "assertNoOverlap(engineerId, leave)",
-                "leaveRequestMapper.insert(leave)"));
+                "leaveRequestMapper.insert(leave)", "approvalEngineService.request("));
         violations.addAll(order(relative, "assertNoOverlap", leave, "private void assertNoOverlap(",
                 "engineerMapper.selectByIdForUpdate(engineerId)"));
         String shareLock = WriterGuardSources.mainSource("com/ses/service/security/epoch/OrganizationShareLock.java");

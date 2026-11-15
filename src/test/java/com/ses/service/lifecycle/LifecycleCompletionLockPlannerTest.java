@@ -115,7 +115,7 @@ class LifecycleCompletionLockPlannerTest {
     }
 
     @Test
-    void 操作者自身が退社要員の連携ユーザーなら403で拒否する() {
+    void 操作者自身が退社要員の連携ユーザーなら400で拒否し案内文言のkeyを返す() {
         when(taskMapper.selectByCaseIdAndTenant(CASE_ID, TENANT)).thenReturn(List.of());
         EngineerAccountLink self = link(61L);
         self.setSysUserId(OPERATOR_ID);
@@ -124,7 +124,8 @@ class LifecycleCompletionLockPlannerTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> planner.plan(resignation(), OPERATOR_ID, TENANT));
 
-        assertEquals(403, ex.getCode());
+        // 403は画面の共通処理が固定文言へ置き換え案内が出ないため、業務規則の拒否として400にする（review P3-2）。
+        assertEquals(400, ex.getCode());
         assertEquals("error.lifecycle.selfResignationCompletion", ex.getMessageKey());
         verifyNoInteractions(userOrganizationMapper, engineerSalesMapper, externalAccountReferenceMapper);
     }

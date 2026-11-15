@@ -236,7 +236,7 @@ class ResignationCompletionLockOrderMySqlTest {
     }
 
     @Test
-    void 操作者自身に連携された要員の退社完了は403でlockを取らずに拒否し何も変えない() {
+    void 操作者自身に連携された要員の退社完了は400でlockを取らずに拒否し何も変えない() {
         Fixture f = fixture();
         // 操作者を別の要員へ連携し、その要員の退社案件を操作者が完了しようとする。
         long selfEngineer = insertEngineer(f.sourceOrganization());
@@ -245,7 +245,7 @@ class ResignationCompletionLockOrderMySqlTest {
 
         Throwable outcome = capture(() -> caseService.completeCase(selfCase, operator.getId()));
 
-        assertBusiness(outcome, 403, "error.lifecycle.selfResignationCompletion");
+        assertBusiness(outcome, 400, "error.lifecycle.selfResignationCompletion");
         assertEquals("ACTIVE", caseStatus(selfCase));
         assertEquals(1, userStatus(operator.getId()));
     }

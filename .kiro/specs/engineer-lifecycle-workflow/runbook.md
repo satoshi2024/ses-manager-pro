@@ -223,19 +223,21 @@ NF01細粒度epoch計画 §3.4「completeCase」・§4.2・§7.5。本節は実�
   3. lock後: 同じ照会で依存先を列挙し直し、違えば途中でlockを足さず `409 error.common.optimisticLock` で全体をrollbackする。前提（状態・権限・阻害タスク・ゲート）もlock後の現在値で判定し直す。
   4. 書込み: 取得済みの行（停止 → 所属の終了・上長解除 → 紐付け解除 → 担当営業の解除 → 外部アカウントの失効要求登録 → 要員のBench化 → 案件COMPLETED）と葉（event、内部session・ポータルsessionの失効、commit後の通知と失効要求の送信）だけ。
 - **epoch**: 連携ユーザーの停止は status 列が変わった時だけactor epochを1進める（所属の終了による増分とは同じtransactionで1回にまとまる）。要員のengineer epochは所属の終了・紐付け解除・担当営業の解除が進め、合わせて1回になる。操作者のepochは変えない。
-- **操作者自身に連携された要員**の退社案件は `403 error.lifecycle.selfResignationCompletion` で拒否する（操作の途中で自分のアカウントを停止しないため。別の管理者またはHRが完了する）。
+- **操作者自身に連携された要員**の退社案件は `400 error.lifecycle.selfResignationCompletion` で拒否する（操作の途中で自分のアカウントを停止しないため。別の管理者またはHRが完了する）。権限不足ではなく業務規則の拒否のため400とし、画面に案内文言を出す（403は画面の共通処理が固定文言へ置き換える）。従来は完了でき操作者自身のアカウントが停止されていたため、リリースノートに挙動の変化として記載する。
 - **409が返る場面（運用）**: 完了の確認から実行までの間に、対象要員の紐付け解除・要員削除・所属の登録/異動、担当営業の割当、外部アカウントの登録が確定した場合。画面を再読み込みして退社ゲートを確認し直し、再度「完了確定」を押す。自動再試行はしない（計画 §9 RR-9）。
-- **1213・1205の応答**: deadlock（MySQL 1213）・lock待ちtimeout（1205）はAPI全体で `409`（`error.common.optimisticLock` の文言、ログは `errorCode=LOCK_CONFLICT`・WARN）として返す（従来は500）。再読み込みして再試行すれば通常は成功する。`LOCK_CONFLICT` が継続して出る場合はlock順の不備を疑い、ログの例外型と時刻から経路を特定する。
+- **1213・1205の応答**: deadlock（MySQL 1213）・lock待ちtimeout（1205）はAPI全体で `409`（`error.common.optimisticLock` の文言、ログは `errorCode=LOCK_CONFLICT`・WARN）として返す（従来は500）。再読み込みして再試行すれば通常は成功する。`LOCK_CONFLICT` が継続して出る場合はlock順の不備を疑い、ログの例外型と時刻から経路を特定する。DBAは `innodb_print_all_deadlocks=ON` でdeadlockの待機graphをerror logへ出して確認する。5xx・ERRORだけを見る監視ではdeadlockを検知できなくなるため、SREは `LOCK_CONFLICT` の発生率を監視・通知の対象に加える（計画 §10）。
+- **PWAのオフライン送信（`/api/my/pwa/**`）は例外として503で返す**: オフラインqueue（`pwa-queue.js`）は409を「人の判断が要る競合」（CONFLICT表示）、5xxを「一時的な失敗」（queueに残して自動再送）として扱う。lockの競合は一時的な失敗であり、commandはledgerのclaimと一緒にrollbackされて同じclientRequestIdで再送できるため、`PwaMutationApiController` だけは `503 error.pwa.lockConflictRetry`（ログは `errorCode=LOCK_CONFLICT`）で返し、端末に入っている既存のqueueのまま自動再送させる。
 - **タスク世代**: 案件の保留（終端でないタスク）・取消（取り消したタスク）・タスクの担当変更（担当が変わった時）・免除で、該当タスクの `task_generation` を1つ進める（案件X → タスクX の後）。再開では戻さない。上限（`Long.MAX_VALUE`）では `409 error.authorization.epochUnavailable` で業務更新ごと止まる。担当変更は新担当の利用者行を共有lock（rank 3 S）してから案件・タスクをlockする。
 - **要員の所属組織を書く更新・休暇申請**（`EngineerServiceImpl.updateWithStatusGuard`・`updateById`、`LeaveServiceImpl.apply`）は、外部キー検査の参照先の組織行（rank 6）を要員行（rank 7）より先に共有lockする（W3-16a後半 review P3-1。組織統合・所属writerの 6 X → 7 X との循環を作らない）。
+- **休暇申請**（`LeaveServiceImpl.apply`、要員本人）は、さらに申請者本人の利用者行（rank 3）を最初に共有lockする（3 S → 6 S → 7 X）。申請行の `created_by` と承認申請の `applicant_id` は利用者行への外部キーで、要員行のX lockの後のinsertでその検査が本人の利用者行へS lockを付けると、退社完了（3 X{連携ユーザー} → 7 X{要員}）と循環し得た（W3-16b review P3-1）。
 
 残りのリスク（NF01 ON前の確認事項）:
 
 | # | 内容 | 担当・扱い |
 |---|---|---|
 | R-1 | M6・既存MySQL試験は本バッチでは未実行。待ちの観測と1213/1205が出ないことはRunnerの実測で確定する。 | Runner: shard-3のM6を5回以上、shard-1の `LifecycleLockOrderMySqlTest`・`LifecycleMySqlIntegrationTest`、shard-2の `ResignationRevocationOutboxMySqlTest`・`EngineerScopeFenceMySqlTest` を3回以上、skip 0 |
-| R-2 | 上長が互いの所属行の上長になっている2人を同時に停止・退社完了すると、上長解除（clearManager）が相手の所属行を待ち合い1213になり得る（既存。W3-16a後半 review P3-2）。今回からAPIは409で返す。 | 運用: 互いを上長にする所属を作らない。発生時は片方ずつ再実行する |
-| R-3 | 要員の所属組織を書く更新と休暇申請は外部キー検査の参照先の組織行（6 S）を要員行より先に取るようになったが、それ以外の業務writer（要員行をlockした後に組織を参照する行をinsertするもの）は棚卸ししていない。 | 計画 §9 RR-15。1213は409で返る |
+| R-2 | 上長が互いの所属行の上長になっている2人について、利用者の無効化・削除（所属の一括終了と上長解除）と退社完了、または無効化・削除どうしを同時に実行すると、上長解除（clearManager）が相手の所属行を待ち合い1213になり得る（既存。W3-16a後半 review P3-2）。2人の退社完了どうしは、上長解除の対象行も rank 8 で同じ順にlockするため直列化される。今回からAPIは409で返す。 | 運用: 互いを上長にする所属を作らない。発生時は片方ずつ再実行する |
+| R-3 | 外部キー検査の共有lock: 要員の所属組織を書く更新と休暇申請は参照先の組織行（6 S）を、休暇申請は申請者本人の利用者行（3 S）も、要員行より先に取るようになった。利用者行への外部キー（`created_by`・`applicant_id` 等）も rank 3 の暗黙のS lockである。本人自助のwriterで要員行（7 X）を取ってから本人の利用者行を参照する行をinsertするものは、休暇申請のほかに見つからなかった（PWAの変更申請は要員行の後に利用者行を参照しない）。HR・管理者の操作（スキルの置換等）が自分に連携された要員に対して同じ形になる場合と、組織を参照する行をinsertする他の業務writerは未対応。 | 計画 §9 RR-15。1213は409で返る |
 | R-4 | 退社完了はlock前とlock後の2回、退社ゲートを判定する（読取の増加）。完了は管理操作で頻度が低いため許容する。 | 性能gateで確認 |
 | R-5 | 1つのtransactionで退社完了を2回呼ぶと、2回目のlock planが1回目より前のrankを取ることになりexecutorが拒否する（業務経路は要求ごとのtransaction）。fast testで複数の完了を1つのテストtransactionにまとめる場合は、1回目がlock前の判定で失敗する形に限る。 | 開発規約 |
 | R-6 | H2では共有lockを排他lockで代える（`SharedLockSupport`）。共有lockの意味（readerやwriter同士を待たせないこと）はMySQLの試験だけで確かめる（計画 RR-12）。 | 既知 |

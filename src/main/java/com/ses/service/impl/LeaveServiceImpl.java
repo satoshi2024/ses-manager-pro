@@ -31,6 +31,7 @@ import com.ses.service.attendance.AttendanceScopeSnapshot;
 import com.ses.service.leave.LeaveApprovalAdapter;
 import com.ses.service.leave.LeaveMinutesCalculator;
 import com.ses.service.security.OrganizationScopeService;
+import com.ses.service.security.epoch.ActorShareLock;
 import com.ses.service.security.epoch.OrganizationShareLock;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -77,6 +78,8 @@ public class LeaveServiceImpl implements LeaveService {
     private final SystemConfigService systemConfigService;
     /** 申請行の外部キー参照先の組織行（rank 6）を要員行より先に共有lockする（NF01 W3-16b）。 */
     private final OrganizationShareLock organizationShareLock;
+    /** 申請者本人の利用者行（rank 3）を要員行より先に共有lockする（NF01 W3-16b review P3-1）。 */
+    private final ActorShareLock actorShareLock;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -104,8 +107,16 @@ public class LeaveServiceImpl implements LeaveService {
             throw BusinessException.of(400, "error.leave.zeroMinutes");
         }
         assertNoClosedMonth(engineerId, leave);
-        // NF01 細粒度epoch計画 §3.5 規則1（W3-16a後半 review P3-1）: 申請行のinsertで外部キー検査が組織行（rank 6）に付ける
-        // 共有lockを、重複検査の要員行（rank 7）のX lockより前に取る（組織統合・所属writerの 6 X → 7 X と循環させない）。
+        // NF01 細粒度epoch計画 §3.5 規則1: 申請行・承認申請のinsertで外部キー検査が付ける共有lockを、重複検査の要員行（rank 7）の
+        // X lockより前に、rankの順（3 S{申請者本人} → 6 S{組織} → 7 X{要員}）で取っておく。
+        // - 申請者本人の利用者行（rank 3）: 申請行の created_by・承認申請の applicant_id が参照する。後から付くと、退社完了
+        //   （3 X{連携ユーザー} → 7 X{要員}）と 7 X → 3 S で循環し得た（W3-16b review P3-1）。
+        // - 組織行（rank 6）: 申請行の organization_id が参照する（組織統合・所属writerの 6 X → 7 X と循環させない。
+        //   W3-16a後半 review P3-1）。
+        Long applicantUserId = SecurityUtils.currentUserId();
+        if (applicantUserId != null) {
+            actorShareLock.lockActive(applicantUserId, null);
+        }
         organizationShareLock.lockReferenced(leave.getOrganizationId());
         assertNoOverlap(engineerId, leave);
         assertBalance(engineerId, leave.getLeaveType(), leave.getRequestedMinutes());

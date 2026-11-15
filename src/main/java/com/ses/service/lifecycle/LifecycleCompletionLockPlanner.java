@@ -67,7 +67,8 @@ public class LifecycleCompletionLockPlanner {
      * @param lcCase     完了する案件（tenant照合済み）
      * @param operatorId 操作者の利用者ID
      * @param tenantId   操作者のtenant（DBの値）
-     * @throws BusinessException 403 操作者自身が退社要員の連携ユーザーである場合、409 tenantを読めない所属行がある場合
+     * @throws BusinessException 400 操作者自身が退社要員の連携ユーザーである場合（業務規則。他の自分自身への操作の拒否と同じ
+     *                           400にし、画面に案内文言を出す）、409 tenantを読めない所属行がある場合
      */
     public LifecycleLockPlan plan(LifecycleCase lcCase, Long operatorId, String tenantId) {
         Objects.requireNonNull(lcCase, "lcCase");
@@ -93,8 +94,10 @@ public class LifecycleCompletionLockPlanner {
         if (linkedUserId != null) {
             if (linkedUserId.equals(operatorId)) {
                 // 同じ行をS（操作者）とX（停止する連携ユーザー）で取ることになり、完了操作の途中で自分のアカウントを停止する。
+                // 権限不足ではなく業務規則の拒否のため400で返す（画面の共通処理は403の本文を固定文言に置き換えるため、
+                // 「別の管理者またはHRが完了してください」の案内を表示できるようにする。W3-16b review P3-2）。
                 log.info("操作者自身に連携された要員の退社案件の完了を拒否しました: engineerId={}", engineerId);
-                throw BusinessException.of(403, "error.lifecycle.selfResignationCompletion");
+                throw BusinessException.of(400, "error.lifecycle.selfResignationCompletion");
             }
             keys.add(LockKey.exclusive(Rank.SYS_USER, tenantId, linkedUserId));
             // 所属の一括終了（closeAssignmentsForUser）が閉じる本人の行と、上長解除（clearManager）が書く他人の行。

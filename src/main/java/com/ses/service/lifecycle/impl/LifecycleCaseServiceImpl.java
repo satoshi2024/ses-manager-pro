@@ -784,6 +784,9 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
             throw BusinessException.of(404, "error.lifecycle.caseNotFound");
         }
         requireSameCompletionDependencies(plan, completionLockPlanner.plan(lcCase, userId, tenantId), caseId);
+        // 操作者の行は rank 3 S の取得後に読み直し、その値で権限を判定する（lock前の読取との間に確定した無効化・role変更を
+        // 見落とさない。W3-16b review P3-3）。requireTenant は無効・role不一致・tenant不一致を403で拒否する。
+        user = requireActor(userId);
         Engineer engineer = assertCompletable(lcCase, user, tenantId);
 
         // 4. 書込み（取得済みの行と葉だけ）。

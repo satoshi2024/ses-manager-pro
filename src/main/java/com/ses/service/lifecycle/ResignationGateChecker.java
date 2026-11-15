@@ -295,8 +295,13 @@ public class ResignationGateChecker {
      * 行う。{@link #applyAutomaticScopeActions} と {@link #revokeSessionsAfterScopeActions} をこの順に呼ぶ合成で、案件完了
      * （{@code LifecycleCaseServiceImpl.completeCase}）は間に外部アカウントの失効要求登録（rank 14）を挟むため個別に呼ぶ。
      * Fail-Closed: 例外発生時は例外を送出し、呼び出し元のトランザクションをロールバックする。
+     *
+     * <p>業務経路からは呼ばない（package-private。W3-16b review P3-7）。この合成は案件完了のlock planを通らないため、
+     * 業務経路が直接呼ぶと連携ユーザー（rank 3）を自分でlockし、要員行を保持した呼出元では旧来の 7 → 3 の形に戻る。
+     * 退社ゲートの自動処理は必ず案件完了のplanの取得後に {@link #applyAutomaticScopeActions} を呼ぶ。同じpackageの試験だけが
+     * 自動処理単体の振舞い（列限定更新・fail-closed）を確かめるために使う。</p>
      */
-    public void executeAutomaticGateActions(LifecycleCase lcCase, Engineer engineer) {
+    void executeAutomaticGateActions(LifecycleCase lcCase, Engineer engineer) {
         revokeSessionsAfterScopeActions(applyAutomaticScopeActions(lcCase, engineer));
     }
 

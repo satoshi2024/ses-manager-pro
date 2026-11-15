@@ -227,7 +227,7 @@ SELECT id, tenant_id, deleted_flag, organization_id, engineer_scope_epoch
 実装時の追記（W3-16a後半・W3-16b、W3-16a後半 review P3-6①）。上表との差分だけを記す。
 
 - 所属writer（assign・update・transfer）は、所属行に設定する上長の利用者行も順3でSに取る（外部キー検査が順8の後に上長行へSを付けないため）。組織の祖先鎖は `parent_id` と現行の親子履歴の両方を辿る（食い違いは過剰な増分になるだけ）。mergeは統合元の会計履歴に現れる要員も順7でXに取り、影響ユーザーの順3 Xは論理削除済みの行も含む。
-- completeCase の順8は、連携ユーザー本人の所属行に加え、連携ユーザーを上長とする他人の所属行（上長解除の対象）も含める。順3の操作者Sと連携ユーザーXが同じIDの場合は 403 `error.lifecycle.selfResignationCompletion` で拒否する。lock前に通常読取で前提（状態・権限・阻害タスク・ゲート）を確かめて早期に拒否し、lock後に同じ判定をやり直す。planは `LifecycleCompletionLockPlanner` が列挙し、`LifecycleLockExecutor` で1回だけ取る。
+- completeCase の順8は、連携ユーザー本人の所属行に加え、連携ユーザーを上長とする他人の所属行（上長解除の対象）も含める。順3の操作者Sと連携ユーザーXが同じIDの場合は 400 `error.lifecycle.selfResignationCompletion` で拒否する（業務規則の拒否。画面に案内を出すため403にしない）。lock前に通常読取で前提（状態・権限・阻害タスク・ゲート）を確かめて早期に拒否し、lock後に同じ判定をやり直す。planは `LifecycleCompletionLockPlanner` が列挙し、`LifecycleLockExecutor` で1回だけ取る。
 - 要員行を書く業務writerのうち、所属組織（`t_engineer.organization_id`）を書く更新（EngineerServiceImpl.updateWithStatusGuard・updateById）と休暇申請（LeaveServiceImpl.apply）は、外部キー検査の参照先の組織行を順7のXより前に順6のSで取る。
 - 担当変更（reassignTask）の新担当は順3のSで取る（ActorShareLock）。H2は `FOR SHARE` を解釈しないため、順3・順6の共有lockとexecutorのSHAREDは同じ行・同じ順の `FOR UPDATE` で代える（`SharedLockSupport`）。
 
@@ -944,7 +944,7 @@ W3-21a coordinator＋API ← W3-15, W3-16a, W3-16b, W3-17, W3-18, W3-02, W3-11
 - RR-11 退社gateの資産・license入力: 貸与の新規作成・license割当は要員行をlockしないため、gate評価と完了の間に作られた貸与・licenseを見落とし得る（既存。CONFIRMの述語ではない）。外部アカウントはW3-11の要員行lockと退社後登録時の自動登録で覆う。
 - RR-12 H2: `FOR SHARE` の意味論はH2で証明しない。lock順・待ちの証拠はM系だけ。
 - RR-13 表単位のrestore・rollback: anchor表（sys_user、t_engineer、m_organization_unit、t_document、t_lifecycle_task）だけを古い行へ戻すとepochが巻き戻り、旧提出が復活し得る。DB全体のPITRは前後で一貫するので問題ない。配備runbookで表単位のrestoreを禁止する。
-- RR-15 外部キー検査の共有lock（W3-16b追記）: 要員行（順7）をXに取った後のinsert・更新が、外部キー検査で組織行（順6）にSを付けると、組織行を先にXに取って要員行を待つwriter（merge・所属writer）と循環し得る。要員の所属組織を書く更新と休暇申請は参照先の組織行を先にSで取るようにしたが、それ以外の業務writer（要員行をlockした後に組織を参照する行をinsertするもの）は棚卸ししていない。上長が互いの所属行の上長になっている2人の同時停止（clearManagerの相互待ち）も残る。いずれもMySQL 1213はAPIで409（`LOCK_CONFLICT`）として返り、データは壊れない。
+- RR-15 外部キー検査の共有lock（W3-16b追記）: 要員行（順7）をXに取った後のinsert・更新が、外部キー検査で組織行（順6）にSを付けると、組織行を先にXに取って要員行を待つwriter（merge・所属writer）と循環し得る。要員の所属組織を書く更新と休暇申請は参照先の組織行を先にSで取るようにしたが、それ以外の業務writer（要員行をlockした後に組織を参照する行をinsertするもの）は棚卸ししていない。利用者行への外部キー（`created_by`・`applicant_id` 等）も順3の暗黙のSであり、要員行をXに取った後に本人の利用者行を参照する行をinsertする本人自助writerは、退社完了（3 X{連携ユーザー} → 7 X）と循環し得る。休暇申請は申請者本人を順3のSで最初に取るようにした（3 S → 6 S → 7 X）。PWAの変更申請は要員行の後に利用者行を参照しない。HR・管理者が自分に連携された要員を操作する場合（スキルの置換等）は未対応。上長が互いの所属行の上長になっている2人について、無効化・削除と退社完了、または無効化・削除どうしの同時実行（clearManagerの相互待ち）も残る（2人の退社完了どうしは順8を同じ順に取るため直列化される）。いずれもMySQL 1213はAPIで409（`LOCK_CONFLICT`、PWAのオフライン送信だけは再送可能な503）として返り、データは壊れない。SRE・DBAは `LOCK_CONFLICT` の発生率の監視と `innodb_print_all_deadlocks` での確認を運用に加える（§10）。
 - RR-14 単一tenant前提: `/api/users` は一覧・取得・更新・削除がtenant境界を持たない（§2.6）。F-1の修正後も、多tenant配備では管理者が他tenantの利用者を操作できる。多tenant公開の前に横断バッチ（X3のUSER-TENANT）で `/api/users` をtenant化し、それまでは単一tenant配備を配備前提（X3-4）に書く。外部アカウント関連の表・schedulerも単一tenantを前提とする（`ACCOUNTING_TENANT_IDS` は1件、R2 N9-P3-3）。
 
 ## 10. 外部署名が必要な事項
@@ -952,10 +952,10 @@ W3-21a coordinator＋API ← W3-15, W3-16a, W3-16b, W3-17, W3-18, W3-02, W3-11
 | 署名者 | 事項 |
 |---|---|
 | Identity/Security | 確認者 = 管理者・HRの運用承認（B-NF01-5の運用面）、1213/1205を含む3回予算と409の扱い、attemptのtimeout値、エラーkeyと拒否eventの項目、RR-1・RR-2・RR-4の受容、globalを進める認可キーの範囲（§12 O-1）、内部session台帳が記録するtenantの基準（`PersistentSessionServiceImpl.tenantId()` はOIDC設定のtenantを使う）、IdP側停止をNF01の外とすること、外部失効失敗の通知先、RR-8（DOCUMENT_LINKがfacadeを通らないこと）の受容、別法人所有の外部アカウントを各行の法人で失効要求すること（§5.13）、RR-11の受容、RR-14（単一tenant前提）の受容 |
-| SRE | RR-14（単一tenant配備、`ACCOUNTING_TENANT_IDS` 1件）を配備前提とすること、RR-13（表単位restoreの禁止）、外部失効の通知の閾値と回収workerの間隔 |
+| SRE | RR-14（単一tenant配備、`ACCOUNTING_TENANT_IDS` 1件）を配備前提とすること、RR-13（表単位restoreの禁止）、外部失効の通知の閾値と回収workerの間隔、1213・1205を409（PWAのオフライン送信は503）で返すことに伴う `errorCode=LOCK_CONFLICT` の発生率の監視・通知（5xx・ERRORだけの監視では検知できない。W3-16b） |
 | Document Owner | SKILL_SHEET×単一ENGINEER×1件だけの受理と他種別・他link形の明示拒否（§5.1）、起点writerの緩和と生成者の固定、適格な状態集合 `{DRAFT, CONFIRMED, AMENDED}`、hold・廃棄・link・版追加とepochの規則（§2.2）、`t_document_version.scan_status` を唯一のscan根拠とすること、保存期限jobのservice経由化、資産・紛失・service requestからSKILL_SHEETへlinkした場合に不適格となる扱い、RR-8の受容 |
 | HR | 差戻し（REJECT）を含む二者確認の手順、確認者の役割、提出後の担当・所属・権限変更で再提出が必要になる運用（細粒度化で対象は当該要員・当該利用者に限られる）、保留・担当変更・免除でのgeneration失効、外部失効要求の登録で完了を通す運用と未処理一覧の確認・再要求、別法人所有の外部アカウントの扱い（§5.13）、RR-11の受容、linkの無いportal利用者の「要確認」の扱い、`released_at` に退社基準日を残すこと |
-| DBA | 2つのmigration（epoch A、B0）、B0の不変triggerの採否とtrigger権限、tenant列の文字集合・照合順序、lock待ちの監視、RR-13 |
+| DBA | 2つのmigration（epoch A、B0）、B0の不変triggerの採否とtrigger権限、tenant列の文字集合・照合順序、lock待ちの監視（`innodb_print_all_deadlocks=ON` でdeadlockの待機graphを記録する。RR-15）、RR-13 |
 | Privacy | submissionのcomment・canonical JSON・拒否eventの保存期間（NF07のretentionとの整合） |
 
 ## 11. 静的確認で見つかった既存の問題（対処バッチを割当）
