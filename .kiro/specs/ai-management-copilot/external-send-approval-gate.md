@@ -59,7 +59,7 @@ external-send-enabled
 |---|---|---|
 | 純粋評価 | `service/ai/AiExternalSendApproval` | 承認設定を固定コードで評価し、承認内容digestを再計算して決定書の値と照合し、承認済みsnapshot（digest込み）を返す（I/Oなし、値をメッセージへ出さない） |
 | 総合判定 | `service/ai/AiProductionApprovalGate#externalSendStatus` / `#assertProviderAllowed(provider, purpose)` | flag・provider・チェックリスト・承認設定・用途のAND。不足のうち時間要因だけを `onlyTemporalViolations()`、起動を止める不足を `startupBlockingGates()` で区別する |
-| 起動時 | `config/AiProductionSafetyValidator` | prod で external-send=true の場合、構造的な不足があれば起動失敗、時間要因だけなら起動継続＋WARN |
+| 起動時 | `config/AiProductionSafetyValidator` | prod で external-send=true の場合、構造的な不足があれば起動失敗、時間要因だけなら起動継続＋WARN。**B2c-1〜B2c-2の間（計画 C-2 / R-5）は、承認設定が完全でも external-send=true 自体を起動拒否する**（`dispatch.permitOnlyNotWired`。設定では解除できず、B2c-2の完了と独立Reviewの後にコード定数で解除する）。解除後も `ai.external-send-cost-ledger` が `persistent` と完全一致しなければ起動拒否する（`costLedger.notPersistent`） |
 | 有効期間監視 | `service/ai/AiExternalSendApprovalMonitor` | 失効前警告・失効・署名日前・不完全を WARN log と Prometheus metric で知らせる（§7.3） |
 | 最終gate | `service/ai/impl/AiExecutionGatewayImpl#assertExternalSendPayload` + `service/ai/AiPiiMasker` | 送信fieldを承認data categoryに限定し、実prompt全体の未mask PII・自由文・未登録template・不正なfield値形式を拒否する（§4） |
 | 費用 | `service/ai/copilot/summary/ApprovedExternalSendCostPolicy` | prompt byte数から上限見積りを出し、prompt上限・1回上限・request予算を検査。proof identityは決定IDと承認digestに束縛 |

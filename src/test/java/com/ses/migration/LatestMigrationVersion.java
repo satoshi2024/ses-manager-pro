@@ -15,8 +15,8 @@ package com.ses.migration;
  */
 final class LatestMigrationVersion {
 
-    /** 現在の最新versioned migration（V192: 外部API監査の保存期限。V189 は NF01 細粒度認可epoch、V190/V191 は NF07 F1表と権限seed）。 */
-    static final String LATEST = "192";
+    /** 現在の最新versioned migration（V194: NF08 B2c-1 durable claimと永続費用ledger。V193 は W3-12 NF06 menu に割当済み、V192 は外部API監査の保存期限）。 */
+    static final String LATEST = "194";
 
     private LatestMigrationVersion() {
     }

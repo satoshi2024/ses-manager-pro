@@ -35,3 +35,5 @@ AuthorizationEpochSchemaMySqlTest
 BpPaymentTenantSqlMySqlTest
 GlobalEpochFenceMySqlTest
 ActorEpochFenceMySqlTest
+CopilotDispatchClaimMySqlIntegrationTest
+FlywayV194DispatchClaimLedgerMySqlTest

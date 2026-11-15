@@ -75,6 +75,18 @@ public class AiConfig {
      */
     private boolean externalSendEnabled = false;
 
+    /** {@link #externalSendCostLedger} の値: DBの永続費用ledger（本番で唯一許可する方式）。 */
+    public static final String COST_LEDGER_PERSISTENT = "persistent";
+    /** {@link #externalSendCostLedger} の値: プロセス内の計数（test/local専用。再起動で0に戻る）。 */
+    public static final String COST_LEDGER_MEMORY = "memory";
+
+    /**
+     * NF08 外部送信の費用上限ledger（{@code ai.external-send-cost-ledger}）。既定は {@code persistent}。
+     * prodで external-send=true の場合、{@code persistent} と完全一致しない値（{@code memory}・空白付き・大文字等）は
+     * 起動を拒否する（B2c-2でgatewayを永続ledgerへ接続した後も {@code memory} は拒否のまま）。
+     */
+    private String externalSendCostLedger = COST_LEDGER_PERSISTENT;
+
     /** skill learning candidateのprovider timeout。gapのrule計算を待たせない。 */
     private long learningCandidateTimeoutMs = 2000;
 
