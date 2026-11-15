@@ -5,12 +5,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.ses.entity.Customer;
 import com.ses.mapper.CustomerMapper;
+import com.ses.mapper.SysUserMapper;
+import com.ses.test.TenantTestSecurity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
@@ -34,12 +37,20 @@ class ServiceDeskBrowserMTest {
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(ServiceDeskBrowserMTest.class);
     @LocalServerPort private int port;
     @Autowired private CustomerMapper customers;
+    @Autowired private SysUserMapper sysUserMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
     private Long customerId;
 
     @BeforeEach
     void createCustomer() {
         Customer row = new Customer();
+        // 顧客一覧は組織・法人スコープで絞られるため、ログインする admin を法人1の組織へ所属させ、顧客も法人1に置く
+        // （AccountingIntegrationBrowserDemoTest と同じ fixture）。
+        com.ses.entity.SysUser admin = sysUserMapper.selectByUsername("admin");
+        assertNotNull(admin, "管理者fixtureが存在すること");
+        TenantTestSecurity.ensureLegalEntity(jdbcTemplate, 1L, admin.getId());
         row.setTenantId("default");
+        row.setLegalEntityId(1L);
         row.setCompanyName("サービスデスク表示検証-" + UUID.randomUUID());
         customers.insert(row);
         customerId = row.getId();
