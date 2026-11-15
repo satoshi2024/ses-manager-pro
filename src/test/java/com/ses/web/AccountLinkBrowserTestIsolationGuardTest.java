@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** account linkを書き込むbrowser Demo・統合testが、別classと共有するH2へ行を混入させる再発を防ぐ。 */
-class BrowserDemoDatabaseIsolationGuardTest {
+class AccountLinkBrowserTestIsolationGuardTest {
     /** t_engineer_account_link を書き込むため、共有H2では別classの行と衝突するclass。 */
     private static final List<String> ACCOUNT_LINK_WRITERS = List.of(
             "src/test/java/com/ses/web/AccountingIntegrationBrowserDemoTest.java",
