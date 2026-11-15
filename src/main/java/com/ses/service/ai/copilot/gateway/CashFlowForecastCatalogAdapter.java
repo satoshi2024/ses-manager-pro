@@ -6,6 +6,7 @@ import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.result.MetricBasis;
 import com.ses.service.ai.copilot.result.MetricValue;
+import com.ses.service.ai.copilot.result.CopilotMetricKeys;
 import com.ses.service.ai.copilot.result.TypedResultEnvelope;
 import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import com.ses.service.billing.CashFlowForecastScope;
@@ -50,17 +51,17 @@ class CashFlowForecastCatalogAdapter extends CatalogAdapterSupport implements Ca
         if (forecast.getMonths() != null) {
             for (CashFlowForecastDto.CashFlowMonthDto month : forecast.getMonths()) {
                 String period = month.getMonth();
-                values.add(metricYen("cashflow.inflow." + period, month.getInflow(), period));
-                values.add(metricYen("cashflow.outflow." + period, month.getOutflow(), period));
-                values.add(metricYen("cashflow.net." + period, month.getNet(), period));
-                values.add(metricYen("cashflow.balance." + period, month.getBalance(), period));
+                values.add(metricYen(CopilotMetricKeys.monthly(CopilotMetricKeys.CASHFLOW_INFLOW, period), month.getInflow(), period));
+                values.add(metricYen(CopilotMetricKeys.monthly(CopilotMetricKeys.CASHFLOW_OUTFLOW, period), month.getOutflow(), period));
+                values.add(metricYen(CopilotMetricKeys.monthly(CopilotMetricKeys.CASHFLOW_NET, period), month.getNet(), period));
+                values.add(metricYen(CopilotMetricKeys.monthly(CopilotMetricKeys.CASHFLOW_BALANCE, period), month.getBalance(), period));
             }
         }
         if (forecast.getReconciliation() != null) {
             CashFlowForecastDto.ReconciliationDto rec = forecast.getReconciliation();
-            values.add(metricYen("cashflow.reconciliation.kpiSales", rec.getKpiSales(), rec.getMonth()));
-            values.add(metricYen("cashflow.reconciliation.invoicedSubtotal", rec.getInvoicedSubtotal(), rec.getMonth()));
-            values.add(metricYen("cashflow.reconciliation.difference", rec.getDifference(), rec.getMonth()));
+            values.add(metricYen(CopilotMetricKeys.CASHFLOW_RECONCILIATION_KPI_SALES, rec.getKpiSales(), rec.getMonth()));
+            values.add(metricYen(CopilotMetricKeys.CASHFLOW_RECONCILIATION_INVOICED_SUBTOTAL, rec.getInvoicedSubtotal(), rec.getMonth()));
+            values.add(metricYen(CopilotMetricKeys.CASHFLOW_RECONCILIATION_DIFFERENCE, rec.getDifference(), rec.getMonth()));
         }
         return envelope(entry, scope, values, List.of(), MetricBasis.FORECAST, false, entry.resultLimit(), context);
     }

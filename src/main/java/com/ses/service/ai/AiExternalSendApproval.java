@@ -73,7 +73,7 @@ public final class AiExternalSendApproval {
     /** 未署名の転記を検出するplaceholder断片（大文字比較）。 */
     private static final List<String> PLACEHOLDER_FRAGMENTS = List.of(
             "TBD", "TODO", "PENDING", "CHANGEME", "CHANGE-ME", "PLACEHOLDER", "UNSIGNED",
-            "DUMMY", "SAMPLE", "EXAMPLE", "XXXX", "DRAFT", "UNKNOWN");
+            "DUMMY", "SAMPLE", "EXAMPLE", "XXXX", "DRAFT", "UNKNOWN", "TEST", "FAKE", "MOCK", "DEMO");
     private static final Set<String> PLACEHOLDER_VALUES = Set.of("NONE", "NULL", "N-A");
 
     private AiExternalSendApproval() {

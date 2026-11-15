@@ -74,8 +74,20 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
     private final String approvedDecisionId;
     /** 起動時に完全だった外部送信承認の承認内容digest。approvedDecisionIdと同時にnull/非nullになる。 */
     private final String approvedDigest;
+    private final java.time.Clock approvalClock;
 
     @Autowired
+    public GeminiTextServiceImpl(AiConfig aiConfig,
+                                  @Qualifier("aiRestTemplate") RestTemplate aiRestTemplate,
+                                  ObjectMapper objectMapper, OutboundUrlGuard outboundUrlGuard,
+                                  CopilotBoundedHttpTransport copilotTransport,
+                                  com.ses.service.ai.AiProductionApprovalGate approvalGate,
+                                  java.time.Clock clock) {
+        this(aiConfig, aiRestTemplate, objectMapper, outboundUrlGuard, copilotTransport, false,
+                new CopilotGeminiResponseParser(), approvalGate, clock);
+    }
+
+    /** 手動構築の互換入口。本番DIは共有承認判定とClockを受け取る。 */
     public GeminiTextServiceImpl(AiConfig aiConfig,
                                   @Qualifier("aiRestTemplate") RestTemplate aiRestTemplate,
                                   ObjectMapper objectMapper,
@@ -96,7 +108,16 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
     GeminiTextServiceImpl(AiConfig aiConfig, RestTemplate aiRestTemplate, ObjectMapper objectMapper,
                           OutboundUrlGuard outboundUrlGuard, CopilotBoundedHttpTransport copilotTransport,
                           boolean syntheticLoopbackFixture, CopilotGeminiResponseParser responseParser) {
+        this(aiConfig, aiRestTemplate, objectMapper, outboundUrlGuard, copilotTransport,
+                syntheticLoopbackFixture, responseParser, null, java.time.Clock.systemUTC());
+    }
+
+    private GeminiTextServiceImpl(AiConfig aiConfig, RestTemplate aiRestTemplate, ObjectMapper objectMapper,
+                          OutboundUrlGuard outboundUrlGuard, CopilotBoundedHttpTransport copilotTransport,
+                          boolean syntheticLoopbackFixture, CopilotGeminiResponseParser responseParser,
+                          com.ses.service.ai.AiProductionApprovalGate approvalGate, java.time.Clock clock) {
         this.aiConfig = aiConfig;
+        this.approvalClock = clock;
         this.aiRestTemplate = aiRestTemplate;
         this.objectMapper = objectMapper;
         this.outboundUrlGuard = outboundUrlGuard;
@@ -106,8 +127,11 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
         if (syntheticLoopbackFixture && (copilotTransport == null || !copilotTransport.isTestLoopbackMode())) {
             throw new IllegalArgumentException("合成Gemini fixtureにはloopback transportが必要です");
         }
+        com.ses.service.ai.AiProductionApprovalGate.AiExternalSendGateStatus shared =
+                approvalGate == null ? null : approvalGate.startupExternalSendStatus();
         AiExternalSendApproval.Snapshot startupApproval = syntheticLoopbackFixture || copilotTransport == null
-                ? null : startupApproval(aiConfig);
+                ? null : approvalGate == null ? startupApproval(aiConfig, approvalClock)
+                : shared == null ? null : shared.approval();
         this.approvedDecisionId = startupApproval == null ? null : startupApproval.decisionId();
         this.approvedDigest = startupApproval == null ? null : startupApproval.approvalDigest();
         this.copilotConfigSnapshot = captureCopilotConfig(aiConfig, syntheticLoopbackFixture);
@@ -117,6 +141,7 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
     GeminiTextServiceImpl(AiConfig aiConfig, RestTemplate aiRestTemplate, ObjectMapper objectMapper,
                           OutboundUrlGuard outboundUrlGuard) {
         this.aiConfig = aiConfig;
+        this.approvalClock = java.time.Clock.systemUTC();
         this.aiRestTemplate = aiRestTemplate;
         this.objectMapper = objectMapper;
         this.outboundUrlGuard = outboundUrlGuard;
@@ -257,7 +282,7 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
             return false;
         }
         AiExternalSendApproval.Evaluation live = AiExternalSendApproval.evaluate(aiConfig,
-                AiExternalSendApproval.businessDate(java.time.Clock.systemUTC()));
+                AiExternalSendApproval.businessDate(approvalClock));
         if (!live.complete() || !approvedDecisionId.equals(live.snapshot().decisionId())
                 || !approvedDigest.equals(live.snapshot().approvalDigest())
                 || !live.snapshot().model().equals(copilotConfigSnapshot.modelId())
@@ -278,12 +303,12 @@ public class GeminiTextServiceImpl implements CopilotBoundedAiTextService {
     }
 
     /** 起動時の承認snapshot。external-send無効・承認不完全（失効・digest不一致を含む）ならnull。 */
-    private static AiExternalSendApproval.Snapshot startupApproval(AiConfig config) {
+    private static AiExternalSendApproval.Snapshot startupApproval(AiConfig config, java.time.Clock clock) {
         if (config == null || !config.isExternalSendEnabled()) {
             return null;
         }
         AiExternalSendApproval.Evaluation evaluation = AiExternalSendApproval.evaluate(config,
-                AiExternalSendApproval.businessDate(java.time.Clock.systemUTC()));
+                AiExternalSendApproval.businessDate(clock));
         return evaluation.complete() ? evaluation.snapshot() : null;
     }
 

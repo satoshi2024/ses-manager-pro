@@ -63,7 +63,7 @@ public final class AiPiiMasker {
     private static final Pattern HTML = Pattern.compile("(?i)<[^>]+>");
 
     /** NFKC正規化後の連絡先・氏名・会社名の検出pattern（外部送信の最終gate用。誤検出は拒否側に倒す）。 */
-    private static final Pattern EMAIL = Pattern.compile("[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+");
+    private static final Pattern EMAIL = Pattern.compile("(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]++@[A-Za-z0-9-]++(?:\\.[A-Za-z0-9-]++)++");
     private static final String PHONE_SEPARATOR = "[-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2015\\u2212\\u30FC ()]?";
     private static final Pattern PHONE = Pattern.compile("(?<![0-9])(?:\\+81" + PHONE_SEPARATOR + "|0)[0-9]{1,4}"
             + PHONE_SEPARATOR + "[0-9]{1,4}" + PHONE_SEPARATOR + "[0-9]{3,4}(?![0-9])");

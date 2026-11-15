@@ -25,6 +25,7 @@ public class AiProductionApprovalGate {
 
     private final AiConfig aiConfig;
     private final Clock clock;
+    private AiExternalSendGateStatus startupStatus;
 
     /** 手動構築テスト用。承認日の判定はJSTのシステム時計で行う。 */
     public AiProductionApprovalGate(AiConfig aiConfig) {
@@ -35,6 +36,12 @@ public class AiProductionApprovalGate {
     public AiProductionApprovalGate(AiConfig aiConfig, Clock clock) {
         this.aiConfig = aiConfig;
         this.clock = clock == null ? Clock.system(AiExternalSendApproval.BUSINESS_ZONE) : clock;
+    }
+
+    /** gateway・adapter・monitorが共用する、最初の利用時に固定した起動判定。 */
+    public synchronized AiExternalSendGateStatus startupExternalSendStatus() {
+        if (startupStatus == null) startupStatus = externalSendStatus();
+        return startupStatus;
     }
 
     /**

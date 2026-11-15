@@ -29,7 +29,8 @@ public record CopilotConfigSnapshot(
     }
 
     public static CopilotConfigSnapshot capture(AiConfig config, AiTextService service) {
-        String provider = config == null ? "" : config.getProvider();
+        String provider = config == null || config.getProvider() == null ? ""
+                : config.getProvider().trim().toLowerCase(java.util.Locale.ROOT);
         String endpoint = canonicalEndpoint(config == null ? null : config.getApiUrl());
         int maxOutputTokens = config == null ? 0 : Math.max(0, config.getMaxTokens());
         if (!(service instanceof CopilotBoundedAiTextService bounded)) {

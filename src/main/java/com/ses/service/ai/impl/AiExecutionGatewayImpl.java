@@ -41,6 +41,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import com.ses.service.ai.copilot.summary.CopilotSummaryPromptTemplate;
+import com.ses.service.ai.copilot.catalog.SemanticCatalogRegistry;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -62,6 +65,12 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
     public static final String REASON_FIELD_NOT_APPROVED = "AI_EXTERNAL_SEND_FIELD_NOT_APPROVED";
     /** 送信field値またはuntrusted textに未maskのPIIがある。 */
     public static final String REASON_UNMASKED_PII = "AI_EXTERNAL_SEND_UNMASKED_PII";
+    /** 承認済み外部送信へ自由文を混入できない。 */
+    public static final String REASON_UNTRUSTED = "AI_EXTERNAL_SEND_UNTRUSTED_NOT_ALLOWED";
+    /** 登録済みtemplate・field値形式との不一致。 */
+    public static final String REASON_PAYLOAD_SHAPE = "AI_EXTERNAL_SEND_PAYLOAD_SHAPE_INVALID";
+    /** 接続保持中の外部送信を拒否する。 */
+    public static final String REASON_TRANSACTION = "AI_EXTERNAL_SEND_TRANSACTION_ACTIVE";
 
     private final AiTextService aiTextService;
     private final AiConfig aiConfig;
@@ -126,7 +135,7 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 ? AiExternalSendAuditor.unavailable() : externalSendAuditor;
         // 承認は起動時に一度だけ固定する。実行中に設定が変わっても承認policyへ切り替わらない（再起動が必要）。
         AiProductionApprovalGate.AiExternalSendGateStatus approval =
-                productionApprovalGate == null ? null : productionApprovalGate.externalSendStatus();
+                productionApprovalGate == null ? null : productionApprovalGate.startupExternalSendStatus();
         if (approval != null && approval.approved()) {
             this.startupExternalSendApproval = approval.approval();
             this.approvedExternalSendCostPolicy = new ApprovedExternalSendCostPolicy(approval.approval());
@@ -149,7 +158,19 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         // provider呼出し自体もtenant-bound requestだけに限定し、persist=false経路から
         // tenant未束縛の外部送信が発生しないようにする。
         com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
-        PromptPreparation prepared = preparePrompt(request);
+        assertNoExternalSendTransaction(request);
+        PromptPreparation prepared;
+        try {
+            prepared = preparePrompt(request);
+        } catch (BusinessException ex) {
+            if (REASON_UNTRUSTED.equals(ex.getMessage()) || "SCOPE_CONTEXT_REQUIRED".equals(ex.getMessage())) {
+                recordExternalSendDenied(request, "", null, ex.getMessage());
+            }
+            throw ex;
+        } catch (CopilotExecutionFailure ex) {
+            recordExternalSendDenied(request, "", ex.preflight(), ex.reasonCode());
+            throw ex;
+        }
         Map<String, Object> masked = prepared.maskedFields();
         String prompt = prepared.prompt();
         CopilotInvocation invocation = null;
@@ -229,6 +250,7 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 || !currentTenant.equals(context.tenantId())) {
             throw BusinessException.of(403, "SCOPE_CONTEXT_REQUIRED");
         }
+        assertNoExternalSendTransaction(request);
         PromptPreparation prepared = preparePrompt(request);
         PreflightCostEvidence evidence = validateCopilotPreflight(request, prepared, false);
         // Read-only preflight must exercise the same final provider/policy boundary as execute.
@@ -237,21 +259,64 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         return evidence;
     }
 
+    /** 拒否時にもREQUIRES_NEWを呼ばず、外側の接続を保持した外部送信を防ぐ。 */
+    private void assertNoExternalSendTransaction(AiGatewayRequest request) {
+        if (AiGatewayRequest.USE_COPILOT.equals(request.getUseCase())
+                && startupExternalSendApproval != null
+                && (TransactionSynchronizationManager.isActualTransactionActive()
+                    || TransactionSynchronizationManager.isSynchronizationActive()
+                    || !TransactionSynchronizationManager.getResourceMap().isEmpty())) {
+            // SUPPORTS等は実transactionなしでもDataSourceUtilsの接続を保持し得る。
+            log.warn("AI外部送信を接続保持中のため拒否しました: useCase={} reason={}",
+                    AiGatewayRequest.USE_COPILOT, REASON_TRANSACTION);
+            throw BusinessException.of(400, REASON_TRANSACTION);
+        }
+    }
+
     private PromptPreparation preparePrompt(AiGatewayRequest request) {
-        Map<String, Object> masked = AiPiiMasker.mask(request.getAllowlistedFields());
+        boolean approved = AiGatewayRequest.USE_COPILOT.equals(request.getUseCase())
+                && startupExternalSendApproval != null;
+        if (approved) assertExternalSendTenantBinding(request);
+        String marker = request.getTaskMarker();
+        String instruction = request.getTrustedInstruction();
+        String source = request.getUntrustedSourceText();
+        Map<String, Object> input = request.getAllowlistedFields() == null ? Map.of()
+                : new java.util.LinkedHashMap<>(request.getAllowlistedFields());
+        if (approved && source != null) throw BusinessException.of(400, REASON_UNTRUSTED);
+        boolean invalidFieldType = false;
+        if (approved) {
+            invalidFieldType = input.entrySet().stream().anyMatch(e -> e.getKey() != null && e.getValue() != null
+                    && AiPiiMasker.ALLOWED_SEND.contains(e.getKey()) && !(e.getValue() instanceof String));
+            // HTML正規表現より先に、送信候補を同一Stringへ固定してサイズを制限する。
+            Map<String, Object> strings = new java.util.LinkedHashMap<>();
+            input.forEach((key, value) -> {
+                if (key != null && value != null && AiPiiMasker.ALLOWED_SEND.contains(key)
+                        && !AiPiiMasker.NEVER_SEND.contains(key)) strings.put(key, value.toString());
+            });
+            String raw = buildPrompt(marker, instruction, strings, null);
+            if (utf8Length(raw) > startupExternalSendApproval.costLimit().maxRequestBytes()) {
+                PreflightCostEvidence evidence = approvedExternalSendCostPolicy.preflight(startupCopilotConfigSnapshot,
+                        request.getCostBudgetYen(), utf8Length(raw));
+                throw new CopilotExecutionFailure(evidence.reasonCode(), evidence,
+                        DispatchOutcome.notStarted(evidence.reasonCode()));
+            }
+            input = strings;
+        }
+        Map<String, Object> masked = AiPiiMasker.mask(input);
         if (AiPiiMasker.containsCanary(masked)) {
             throw new BusinessException(400, "PII canary を外部送信できません");
         }
-        String untrusted = AiPiiMasker.sanitizeUntrusted(request.getUntrustedSourceText());
-        String prompt = buildPrompt(request, masked, untrusted);
+        String untrusted = AiPiiMasker.sanitizeUntrusted(source);
+        String prompt = buildPrompt(marker, instruction, masked, untrusted);
         if (prompt.contains(AiGatewayRequest.CANARY)) {
             throw new BusinessException(400, "PII canary を外部送信できません");
         }
-        return new PromptPreparation(masked, untrusted, prompt);
+        return new PromptPreparation(masked, untrusted, prompt, marker, instruction, invalidFieldType);
     }
 
     /** 送信promptと、その構成要素（mask済みfield・sanitize済みuntrusted text）。最終gateの検査に使う。 */
-    private record PromptPreparation(Map<String, Object> maskedFields, String sanitizedUntrusted, String prompt) { }
+    private record PromptPreparation(Map<String, Object> maskedFields, String sanitizedUntrusted, String prompt,
+                                     String taskMarker, String trustedInstruction, boolean invalidFieldType) { }
 
     private String callProvider(String prompt) {
         return aiTextService.generate(prompt);
@@ -317,6 +382,15 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
                 assertExternalSendTenantBinding(request);
                 assertBoundedIdentity(request, configured);
                 assertApprovedExternalSendBinding(configured);
+                // 空文字を含む自由文はサイズ判定より前に400で拒否する。
+                if (request.getUntrustedSourceText() != null) {
+                    throw BusinessException.of(400, REASON_UNTRUSTED);
+                }
+                // 大きすぎる入力は正規化・PII走査より前に拒否する。
+                if (utf8Length(prompt) > startupExternalSendApproval.costLimit().maxRequestBytes()) {
+                    return approvedExternalSendCostPolicy.preflight(startupCopilotConfigSnapshot,
+                            request.getCostBudgetYen(), utf8Length(prompt));
+                }
                 assertExternalSendPayload(request, prepared);
             } catch (BusinessException ex) {
                 if (auditDenials) {
@@ -406,8 +480,8 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
 
     /**
      * 外部送信の最終gate（payload）。送信するfieldが承認済みdata category（管理Copilotの最小field）だけであること、
-     * および送信するfield値とuntrusted textに未maskのPII（連絡先・敬称付き人名・法人格付き会社名、送信対象から
-     * 外したfield値の再出現）が無いことを確認する。どちらかを満たさなければ送信しない（自動maskせず拒否する）。
+     * および実際のprompt全体に未maskのPII（連絡先・敬称付き人名・法人格付き会社名、送信対象から
+     * 外したfield値の再出現）が無いことを確認する。自由文は拒否し、登録templateとfieldの値形式も検証する。全条件を満たさなければ送信しない（自動maskせず拒否する）。
      * 呼出元（CopilotSummaryService等）の約束に依存せず、ここで強制する。検出結果は種別コードだけをlogへ出す。
      */
     private void assertExternalSendPayload(AiGatewayRequest request, PromptPreparation prepared) {
@@ -415,15 +489,39 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         if (!startupExternalSendApproval.permitsDataCategories(sentFields.keySet())) {
             throw BusinessException.of(400, REASON_FIELD_NOT_APPROVED);
         }
+        if (request.getUntrustedSourceText() != null) {
+            throw BusinessException.of(400, REASON_UNTRUSTED);
+        }
         Map<String, Object> withheld = AiPiiMasker.withheldFields(request.getAllowlistedFields(), sentFields.keySet());
-        java.util.Set<String> findings = new java.util.TreeSet<>();
-        findings.addAll(AiPiiMasker.findUnmaskedPii(prepared.sanitizedUntrusted(), withheld));
-        findings.addAll(AiPiiMasker.findUnmaskedPii(sentFields, withheld));
+        // providerへ渡す同一文字列を全体走査し、toStringや深い入れ子も漏らさない。
+        java.util.List<String> findings = AiPiiMasker.findUnmaskedPii(prepared.prompt(), withheld);
         if (!findings.isEmpty()) {
             log.warn("AI外部送信の最終gateで未maskのPIIを検出したため送信しません: categories={}",
                     String.join(",", findings));
             throw BusinessException.of(400, REASON_UNMASKED_PII);
         }
+        if (!CopilotSummaryPromptTemplate.TASK_MARKER.equals(prepared.taskMarker())
+                || !CopilotSummaryPromptTemplate.TRUSTED_INSTRUCTION.equals(prepared.trustedInstruction())) {
+            throw BusinessException.of(400, REASON_PAYLOAD_SHAPE);
+        }
+        if (prepared.invalidFieldType()) throw BusinessException.of(400, REASON_PAYLOAD_SHAPE);
+        sentFields.forEach((key, value) -> {
+            if (!(value instanceof String text) || text.isEmpty() || text.length() > com.ses.service.ai.copilot.result.CopilotMetricKeys.MAX_CLAIM_KEYS_LENGTH
+                    || !validExternalField(key, text)) {
+                throw BusinessException.of(400, REASON_PAYLOAD_SHAPE);
+            }
+        });
+    }
+
+    /** 自由文ではなく固定catalog識別子・版・列挙済みmetric名だけを受け付ける。 */
+    private boolean validExternalField(String key, String text) {
+        return switch (key) {
+            case "catalog.queryId" -> SemanticCatalogRegistry.find(text).isPresent();
+            case "catalog.catalogVersion" -> SemanticCatalogRegistry.CATALOG_VERSION.equals(text);
+            case "summary.claimKeys" -> java.util.Arrays.stream(text.split(",", -1))
+                    .allMatch(com.ses.service.ai.copilot.result.CopilotMetricKeys::isApproved);
+            default -> false;
+        };
     }
 
     /**
@@ -536,7 +634,8 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         }
         String safeReason = reason == null ? "AI_EXTERNAL_SEND_DENIED" : reason;
         int status = safeReason.contains("COST_LIMIT") || safeReason.contains("BUDGET") ? 429
-                : REASON_FIELD_NOT_APPROVED.equals(safeReason) || REASON_UNMASKED_PII.equals(safeReason) ? 400 : 503;
+                : REASON_FIELD_NOT_APPROVED.equals(safeReason) || REASON_UNMASKED_PII.equals(safeReason)
+                || REASON_UNTRUSTED.equals(safeReason) || REASON_PAYLOAD_SHAPE.equals(safeReason) ? 400 : 503;
         CopilotExecutionContext context = request.getExecutionContext();
         externalSendAuditor.recordDenied(new AiExternalSendAuditor.SendAudit(UUID.randomUUID().toString(),
                 ensureTraceId(request), startupExternalSendApproval.decisionId(),
@@ -736,13 +835,13 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         return true;
     }
 
-    private String buildPrompt(AiGatewayRequest request, Map<String, Object> masked, String untrusted) {
+    private String buildPrompt(String marker, String instruction, Map<String, Object> masked, String untrusted) {
         StringBuilder sb = new StringBuilder();
-        if (request.getTaskMarker() != null && !request.getTaskMarker().isBlank()) {
-            sb.append(request.getTaskMarker()).append('\n');
+        if (marker != null && !marker.isBlank()) {
+            sb.append(marker).append('\n');
         }
-        if (request.getTrustedInstruction() != null) {
-            sb.append(request.getTrustedInstruction()).append('\n');
+        if (instruction != null) {
+            sb.append(instruction).append('\n');
         }
         if (!masked.isEmpty()) {
             sb.append("[ALLOWLIST_CONTEXT]\n");

@@ -22,6 +22,40 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** NF-08 本番profileのAI安全起動条件を確認する。 */
 class AiProductionSafetyValidatorTest {
 
+    @Test
+    void 未知providerはprodだけ起動拒否しdevとtestの互換性を維持する() {
+        for (String profile : java.util.List.of("prod", "dev", "test")) {
+            AiConfig config = new AiConfig();
+            config.setProvider("unknown");
+            new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+                    .withInitializer(context -> context.getEnvironment().setActiveProfiles(profile))
+                    .withBean(AiConfig.class, () -> config)
+                    .withBean(Clock.class, () -> FIXED)
+                    .withUserConfiguration(AiProductionSafetyValidator.class, AiProductionApprovalGate.class)
+                    .run(context -> {
+                        if ("prod".equals(profile)) {
+                            org.assertj.core.api.Assertions.assertThat(context).hasFailed();
+                            org.assertj.core.api.Assertions.assertThat(context.getStartupFailure())
+                                    .hasRootCauseMessage("本番のAI providerが未登録です: AI_PROVIDER_NOT_REGISTERED");
+                        } else {
+                            org.assertj.core.api.Assertions.assertThat(context).hasNotFailed();
+                        }
+                    });
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullSource
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"", " ", "unknown", "gemni"})
+    void 未登録providerは外部送信OFFでも本番起動時に拒否する(String provider) {
+        AiConfig config = new AiConfig();
+        config.setProvider(provider);
+        IllegalStateException failure = assertThrows(IllegalStateException.class,
+                () -> validator(config).validate());
+        assertTrue(failure.getMessage().contains("AI_PROVIDER_NOT_REGISTERED"));
+        assertFalse(failure.getMessage().contains("gemni"));
+    }
+
     private static final Clock FIXED = Clock.fixed(Instant.parse("2026-11-13T01:00:00Z"), ZoneId.of("UTC"));
     private static final LocalDate TODAY = LocalDate.of(2026, 11, 13);
 
@@ -45,7 +79,10 @@ class AiProductionSafetyValidatorTest {
 
     @Test
     void 既定設定は外部送信もcopilotも無効のまま起動できる() {
-        assertDoesNotThrow(() -> new AiProductionSafetyValidator(new AiConfig()).validate());
+        AiConfig config = new AiConfig();
+        // application.ymlの既定providerを明示し、未設定値のprod拒否と区別する。
+        config.setProvider("mock");
+        assertDoesNotThrow(() -> new AiProductionSafetyValidator(config).validate());
     }
 
     @Test

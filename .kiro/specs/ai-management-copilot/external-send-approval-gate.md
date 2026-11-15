@@ -12,6 +12,10 @@
 | 実provider呼出し・実secret | 一切追加しない。テストは mock / fake adapter / test用 loopback transport のみ |
 | 利用者経路での実送信 | **まだ発生しない**。B2c-0 の local-only summary attempt 境界（`CopilotSummaryPreflightCandidate.permitsLocalSummaryAttempt`）と予算0円の呼出しを維持する。解放は B2c-1/2（A-NF08-2、DDL・Plan Review 要）完了後 |
 
+**G1 NF08-1b**: 実prompt全体のPII走査、非null自由文の拒否、登録templateとfield値形式の制約、transaction内呼出しの拒否を追加した。G1rでは同期scopeやthread-bound resource保持中も400で拒否し、固定use caseと理由コードだけをWARNへ出す。gateway・adapter・monitorの起動承認はAiProductionApprovalGateの一つのsnapshotを共用する。provider条件は大小文字を無視する相補条件とし、monitorは再起動待ちを明示する。本番は引き続きNO-GO。
+
+**NF07への依存（有効化の必要条件）**: NF08外部送信 ← NF07のREG + TRUST + LINKの統合完了 + `privacy.retention.enabled=true` + 対象policyが `APPROVED_ACTIVE` + NF08の署名・承認設定完備。設定のチェック印だけでは統合・policy状態の証拠にならない。開放前に統合担当とPrivacy Ownerが統合SHA・policy状態・retention設定を記録する。いずれかが未完なら外部送信を開放しない。
+
 ## 1. ゲート設計
 
 ### 1.1 判定式
@@ -27,7 +31,10 @@ external-send-enabled
  ∧ 承認の有効期間内（JST業務日で 署名日 ≦ 当日 ＜ 失効日）
  ∧ 用途が承認用途に含まれる（現時点で受理するのは MANAGEMENT_COPILOT のみ）
  ∧ 宛先host・model・provider が承認値と一致
- ∧ 送信fieldが承認data categoryの範囲内、かつ送信field値とuntrusted textに未maskのPIIが無い（最終gate）
+ ∧ 呼出側のdatabase transactionが無い
+ ∧ untrustedSourceTextがnull（空文字・伏せ字も不可）
+ ∧ 登録済みtemplate定数とfield値の値形式の許可条件に一致
+ ∧ 送信fieldが承認data categoryの範囲内、かつ実prompt全体に未maskのPIIが無い（最終gate）
  ∧ 費用上限（1回・日次・月次）以内
  ∧ 送信前監査の永続化（外側transactionから独立したcommit）に成功
 ```
@@ -54,7 +61,7 @@ external-send-enabled
 | 総合判定 | `service/ai/AiProductionApprovalGate#externalSendStatus` / `#assertProviderAllowed(provider, purpose)` | flag・provider・チェックリスト・承認設定・用途のAND。不足のうち時間要因だけを `onlyTemporalViolations()`、起動を止める不足を `startupBlockingGates()` で区別する |
 | 起動時 | `config/AiProductionSafetyValidator` | prod で external-send=true の場合、構造的な不足があれば起動失敗、時間要因だけなら起動継続＋WARN |
 | 有効期間監視 | `service/ai/AiExternalSendApprovalMonitor` | 失効前警告・失効・署名日前・不完全を WARN log と Prometheus metric で知らせる（§7.3） |
-| 最終gate | `service/ai/impl/AiExecutionGatewayImpl#assertExternalSendPayload` + `service/ai/AiPiiMasker` | 送信fieldを承認data categoryに限定し、送信field値とuntrusted textの未mask PIIを拒否する（§4） |
+| 最終gate | `service/ai/impl/AiExecutionGatewayImpl#assertExternalSendPayload` + `service/ai/AiPiiMasker` | 送信fieldを承認data categoryに限定し、実prompt全体の未mask PII・自由文・未登録template・不正なfield値形式を拒否する（§4） |
 | 費用 | `service/ai/copilot/summary/ApprovedExternalSendCostPolicy` | prompt byte数から上限見積りを出し、prompt上限・1回上限・request予算を検査。proof identityは決定IDと承認digestに束縛 |
 | 累計 | `service/ai/AiExternalSendBudgetLedger` | JST日次/月次の予約・精算・取消（プロセス内。時計の逆行では累計を戻さない） |
 | 監査 | `service/ai/AiExternalSendAuditor` + `AuditLogServiceImpl#recordDomainEventRequiredInNewTransaction` | 既存 `t_audit_log` へ送信前・送信後・拒否をREQUIRES_NEWで記録（§5） |
@@ -99,7 +106,7 @@ external-send-enabled
 | `ai.max-tokens` | 1以上（出力上限見積りに使う） |
 | `ai.production-gates.*` | 10項目全て true（§3） |
 | `ai.copilot.transport.hosts.*` | 承認済みhostの期限付き numeric-address snapshot（既存。運用者が別途配布） |
-| `ai.external-send-monitor.expiry-warning-days`（`AI_EXTERNAL_SEND_EXPIRY_WARNING_DAYS`） | 失効の何日前から警告するか（既定30、1〜366に丸める。承認内容ではないためdigestに含めない） |
+| `ai.external-send-monitor.expiry-warning-days`（`AI_EXTERNAL_SEND_EXPIRY_WARNING_DAYS`） | 失効の何日前から警告するか（既定30、空値も30へ戻す。1〜366に丸める。承認内容ではないためdigestに含めない） |
 
 ### 2.1 承認内容digestの正規形（P2-1）
 
@@ -158,21 +165,17 @@ digestは次の3か所に束縛する。
 
 片側だけ成立（チェックリストだけ true、または承認設定だけ完全）の構成は prod 起動時に失敗する。
 
-## 4. 最終gate（最小field・PII、P2-5）
+## 4. 承認外部送信の最終gate（G1: P2-1 / P2-2 / P3-3）
 
-`AiExecutionGatewayImpl#assertExternalSendPayload` は、承認済み外部送信の経路で、費用の予約・監査・provider呼出しより前に次を強制する。呼出元（`CopilotSummaryService` 等）が最小fieldだけを渡す約束に依存しない。読取専用 preflight も同じ検査を通す（拒否監査は書かない）。
+- 送信fieldは承認data categoryの範囲内に限定する（400、AI_EXTERNAL_SEND_FIELD_NOT_APPROVED）。
+- untrustedSourceTextはnullだけを受理する。空文字・空白・伏せ字・ゼロ幅文字を含む自由文も400、AI_EXTERNAL_SEND_UNTRUSTED_NOT_ALLOWEDで拒否する。将来の自由文追加はNF07/DG-08の新しいdata category承認を必要とする。
+- taskMarkerとtrustedInstructionはCopilotSummaryPromptTemplateの登録済み定数との完全一致を求める。任意のinstructionを承認済みとみなさない。artifactのprompt版・config hashの一致も既存のidentity gateで確認する。
+- 値はStringのみ、空値不可、1項目8192文字以内。catalog.queryIdはSemanticCatalogRegistryの登録済みID、catalog.catalogVersionは現行固定版に限定する。summary.claimKeysはコード登録済みmetric名と、年月付きmetricの正しいyyyy-MMのカンマ列挙だけを受理する。Map/List/POJO/StringBuilder、未知名、改行・非ASCII・空要素は400、AI_EXTERNAL_SEND_PAYLOAD_SHAPE_INVALIDとする。ただしPII検査を先に行うため、PIIが含まれる場合はUNMASKED_PIIが優先する。サイズ超過はHTML処理より前にREQUEST_TOO_LARGEとなる。
+- untrustedを最初に拒否し、送信候補の文字列を固定してUTF-8 prompt上限をHTML処理より前に確認してから、providerへ渡す同一prompt文字列全体をPII走査する。instruction・taskMarker・toString化された値・深い入れ子も走査対象から外れない。email正規表現は左境界とバックトラッキングを抑止する量指定子で長い連続文字列の再走査を抑制する。
+- 連絡先・敬称付き人名・法人格付き会社名・除外field値の再出現を検出した場合は400、AI_EXTERNAL_SEND_UNMASKED_PIIで拒否する。拒否リスト方式の検出は上記の値形式の許可条件に追加する防御であり、自由文の安全性判定には使わない。
+- logと監査にprompt原文、PII、検出値は出さない。PII canaryの拒否は従来通り全用途で先に行う（監査なし）。非null自由文の400拒否はサイズ超過判定より先に行う。
 
-| 検査 | 内容 | 拒否コード |
-|---|---|---|
-| 最小field | `AiPiiMasker.mask` 後の送信fieldが承認 `data-categories`（⊆ `AiPiiMasker.COPILOT_SEND_FIELDS`）に収まること。`bp.bpCompany`・`engineer.initialName`・`project.projectName` 等、legacy matching 用 allow-list では送れる項目もここで拒否する | `AI_EXTERNAL_SEND_FIELD_NOT_APPROVED`（400） |
-| 未mask PII | 送信field値と sanitize 済み untrusted text を `AiPiiMasker.findUnmaskedPii` で検査する。NFKC正規化後に、mail・電話（全角・各種ハイフン含む）・〒付き郵便番号・敬称付きの人名（様/さん/氏/殿/くん/ちゃん、Mr./Ms. 等）・法人格付きの会社名（株式会社・(株)・Co., Ltd. 等）、および送信契約外として外したfield値（氏名・会社名・電話等）の再出現（空白・大文字小文字を無視）を検出する | `AI_EXTERNAL_SEND_UNMASKED_PII`（400） |
-
-方針:
-
-- 自動でmaskせず拒否する（自由文の自動maskは取りこぼしを検証できないため）。伏せ字（`***`、イニシャル）は検出しない。
-- 検出は誤検出を拒否側に倒す（例: 「お客様」「皆様」「皆さん」「氏名」は人名とみなさないが、それ以外の敬称付き語は拒否）。現行の利用者経路（`CopilotSummaryService`）は untrusted text を渡さないため、誤検出による利用者影響はない。
-- log と監査には検出種別のコード（`EMAIL`・`PHONE`・`POSTAL_CODE`・`PERSON_HONORIFIC`・`CORPORATE_NAME`・`WITHHELD_FIELD_VALUE`）と理由コードだけを出し、値は出さない。
-- PII canary（`AiGatewayRequest.CANARY`）の拒否は従来通り全用途で先に行う（監査なし）。
+metric識別子はCopilotMetricKeysを唯一の定義とし、adapterとgatewayが共用する。36か月cashflowの144月次項目と3照合項目のカンマ列挙は3528文字。8192文字上限まで4664文字の余裕があるが、prompt全体は別に署名済みmaxRequestBytesで制限する。
 
 ## 5. 外部送信ごとの監査（P2-1・P2-2）
 
@@ -200,31 +203,33 @@ digestは次の3か所に束縛する。
 
 ### 5.1 永続性（REQUIRES_NEW）と書込み失敗時の方針
 
-- 監査は `AuditLogServiceImpl#recordDomainEventRequiredInNewTransaction`（`@Transactional(propagation = REQUIRES_NEW)`、新規method）で別transactionとしてcommitする。外側transaction（例: B2c-1 の durable claim）が後でrollbackしても、送信した事実の記録は残る。既存の `recordDomainEventRequired`（呼出側transactionへ参加）の意味は変えていない（D1 bootstrap 等の必須監査が依存）。
+- 監査は `AuditLogServiceImpl#recordDomainEventRequiredInNewTransaction`（`@Transactional(propagation = REQUIRES_NEW)`）で別transactionとしてcommitする。gatewayの承認外部送信は実transaction内で呼ぶと400、`AI_EXTERNAL_SEND_TRANSACTION_ACTIVE`で予約・監査より前に拒否する。業務transactionのcommit/rollbackが終わった後に監査を呼ぶ。既存の `recordDomainEventRequired`（呼出側transactionへ参加）の意味は変えていない（D1 bootstrap 等の必須監査が依存）。
 - 独立transactionは Spring proxy 経由でだけ成立する。新methodは、自分のtransaction内（transaction名がこのmethod）で呼ばれていなければ記録せず失敗する（proxyを通らない自己呼出し・手動構築で外側transactionへ参加してしまう経路を拒否）。
 - `AiExternalSendAuditor` は、監査serviceが proxy の `AuditLogServiceImpl` ならREQUIRES_NEWの経路を使う。それ以外（mock・手動構築）は、外側transactionが無い（insertがauto-commitで即時確定する）場合に限り既存methodで記録し、外側transactionがある場合は記録せず失敗させる。
 
 | 失敗 | 扱い |
 |---|---|
-| ATTEMPTを独立commitできない（DB障害、insert件数≠1、独立transactionを確保できない、REQUIRES_NEW用の2本目のconnectionをpoolから取得できず `connection-timeout` まで待った、等） | **送信しない**。費用予約を戻し `AI_EXTERNAL_SEND_AUDIT_UNAVAILABLE`（NOT_STARTED）。WARN logは attempt ID と例外の型だけ |
+| ATTEMPTを独立commitできない（DB障害、insert件数≠1、独立transactionを確保できない、connectionをpoolから取得できず `connection-timeout` まで待った、等） | **送信しない**。費用予約を戻し `AI_EXTERNAL_SEND_AUDIT_UNAVAILABLE`（NOT_STARTED）。WARN logは attempt ID と例外の型だけ |
 | 成功応答後のRESULTを書けない | 応答を破棄して `AI_EXTERNAL_SEND_AUDIT_UNAVAILABLE`（RESPONSE_RECEIVED）。費用は実費（不明なら上限見積り）で精算済み。ATTEMPTは残っている |
 | 失敗後のRESULTを書けない | 元の失敗をそのまま返す。WARN log（attempt ID・理由コード・例外の型）。ATTEMPTは残っているため、運用では ATTEMPT はあるが RESULT の無い attempt を「送信の可能性あり」として provider 請求と照合する |
 | DENIEDを書けない | 拒否結果は変えない。WARN log（理由コード・例外の型） |
 
-運用上の注意: REQUIRES_NEW は外側transactionのconnectionを保持したまま2本目を取得するため、外部送信を外側transaction内から呼ぶ場合は `spring.datasource.hikari.maximum-pool-size` に余裕が必要である（枯渇時は上表のとおり送信しない側に倒れる）。現行の呼出経路（`CopilotQueryService` / `CopilotSummaryService`）はtransaction外である。
+運用上の規則: gatewayの承認外部送信入口では、既存transactionがあれば拒否する（読取専用preflightも同じ）。transaction保持中はREQUIRES_NEW監査を呼ばず、provider I/Oもtransaction外で行う。同一送信のDB connection占有は同時に最大1本となる。監査service単体の既存REQUIRES_NEW契約は変更していない。B2c-1/2計画でもATTEMPT → claim transaction → provider → 完了transaction → RESULTとし、各監査はtransaction外から呼ぶ。
 
 ## 6. 費用上限
 
 - 上限見積り（円、切上げ）＝（prompt byte数 ＋ 256）× 入力単価 ÷ 1000 ＋（`ai.max-tokens` ＋ `max-thinking-tokens`）× 出力単価 ÷ 1000。「1 token ≥ 1 UTF-8 byte」を前提にした保守的な見積りであり、providerの課金単位との整合は料金単価の承認時に確認する。
 - 拒否順序: prompt上限超過（`AI_EXTERNAL_SEND_REQUEST_TOO_LARGE`）→ 1回上限超過（`AI_EXTERNAL_SEND_REQUEST_COST_LIMIT`）→ request予算超過（`COPILOT_COST_BUDGET_EXCEEDED`）→ 日次/月次累計超過（`AI_EXTERNAL_SEND_DAILY_COST_LIMIT` / `AI_EXTERNAL_SEND_MONTHLY_COST_LIMIT`）。
 - 累計: 送信直前に上限見積りを予約し、応答の usage から実費（cache も入力単価、thinking は出力単価で保守的に加算）へ精算する。usage 不明・送信の可能性がある失敗は上限見積りを費用として維持し、未送信が確定した失敗だけ予約を戻す。時計が戻っても記録済みの日付・月の累計を0へ戻さない。
-- **制約（永続化が必要）**: 累計は単一プロセス内のメモリ計数であり、再起動で0に戻り、複数instance間で共有しない。利用者決定Q-11により、専用の永続費用ledger table（DDL、B2c-1 と同じmigration、版番号は未割当で暫定V191）で上限を保証する。設計は技術計画「永続費用ledger」節。それまでは単一instance運用とし、provider側の**硬い上限（GCP API quota：1日のrequest数・1分のtoken数）**を併用する。GCPの予算alertは通知だけで送信を止めないため、上限の代わりにならない。
+- **制約（永続化が必要）**: 累計は単一プロセス内のメモリ計数であり、再起動で0に戻り、複数instance間で共有しない。利用者決定Q-11により、専用の永続費用ledger table（DDL、B2c-1 と同じmigration、版番号は未割当でV?）で上限を保証する。設計は技術計画「永続費用ledger」節。永続ledger接続とB2c-1/2完了までは本番外部送信を開放しない。B2c-1のprod validatorはB2c-2完了までexternal-send-enabled=trueを拒否する計画（G1では文書のみ）である。開放後も単一instance運用とし、provider側の**硬い上限（GCP API quota：1日のrequest数・1分のtoken数）**を併用する。GCPの予算alertは通知だけで送信を止めないため、上限の代わりにならない。
 
 ## 7. 有効化・停止・有効期間の運用
 
 ### 7.1 有効化（全署名完了後）
 
-1. §8 の S-1〜S-9 の記録（決定ID・署名日・失効日・承認digest）を揃え、決定書と設定値の転記を二者で照合する。承認digestは §2.1 の正規形を決定書の値から二者がそれぞれ作り、同じ値になることを確認する。
+以下は本番開放の手順である。S-9取得のためのstaging観測は、B2c-2とpersistent接続の実装・独立Review完了後、S-1〜S-8と対象を限定したstaging送信の人手承認を受けて行う。その観測自体にS-9完了を要求しない。観測結果をS-9として記録した後に本番手順へ進む。
+
+1. NF07のREG/TRUST/LINK統合、retention ON、APPROVED_ACTIVEの依存gateを確認し、§8 の S-1〜S-9 の記録（決定ID・署名日・失効日・承認digest）を揃え、決定書と設定値の転記を二者で照合する。承認digestは §2.1 の正規形を決定書の値から二者がそれぞれ作り、同じ値になることを確認する。
 2. secret manager で API key を発行し `ai.api-key` へ注入する（値を設定ファイル・ログ・チケットへ書かない）。
 3. `ai.copilot.transport.hosts.*` の DNS snapshot を配布する。
 4. `ai.external-send-approval.*` の全項目（`data-categories`・`approval-digest` を含む）と `ai.provider=gemini`、`ai.model=<承認model>` を設定する。
@@ -252,12 +257,17 @@ digestは次の3か所に束縛する。
 | `EXPIRED` | 失効日以降 | **停止**（起動は継続） | WARN（JST日付ごとに1回） |
 | `NOT_YET_VALID` | 署名日前 | **停止**（起動は継続） | WARN |
 | `INCOMPLETE` | 承認設定・チェックリストが不完全 | 停止 | WARN（prodでは構造的な不足があると起動自体が失敗する） |
+| `RESTART_REQUIRED` | 起動時は未承認だったが現在は期間内、または起動後に別承認へ変更した | **停止・再起動が必要** | WARN |
 
 - metric（`/actuator/prometheus`、scrape時に評価）: `ses_ai_external_send_approval_state{state="..."}`（現在の状態だけ1）、`ses_ai_external_send_approval_days_remaining`（失効日までのJST暦日数、未設定はNaN）。tagは状態名だけで、決定ID・tenant・PIIを載せない。
 - WARN log: 固定コード `AI_EXTERNAL_SEND_APPROVAL_STATE`（状態・残日数・警告日数だけ）。起動時と、scrape時に状態またはJST日付が変わった時に出す（schedulerは追加しない）。prod起動時に時間要因だけで外部送信を止めた場合は `AI_EXTERNAL_SEND_STOPPED_AT_STARTUP` も出す。
-- 推奨alert（SRE設定）: `ses_ai_external_send_approval_state{state="EXPIRING"} == 1` で再承認の起票、`state="EXPIRED"`・`"NOT_YET_VALID"`・`"INCOMPLETE"` が1なら運用担当へ即時通知。
+- 推奨alert（SRE設定）: `ses_ai_external_send_approval_state{state="EXPIRING"} == 1` で再承認の起票、`state="EXPIRED"`・`"NOT_YET_VALID"`・`"INCOMPLETE"`・`"RESTART_REQUIRED"` が1なら運用担当へ即時通知。
 - 失効時の手順: (1) 再承認（新しい決定ID・署名日・失効日・digest）を得る。(2) §7.1 の手順4〜8で設定を差し替えて再起動する（実行中の差替えは `AI_EXTERNAL_SEND_DECISION_CHANGED` で拒否され、再起動まで有効にならない）。(3) 再承認を待たない場合は `ai.external-send-enabled=false` にする（再起動時のWARNを止める）。
+- 時間経過後の再評価はPrometheus scrapeを前提とする。scrapeが無い環境では起動時logのみであり、SREが定期scrape・alertの疎通を確認する。
+- 旧決定を新決定で置き換える場合は、旧決定を明示失効させ、監査digestを現行決定と定期照合する。digestは署名でも失効台帳でもなく、永続的な承認高水位は未実装である。
 - 失効中も保存期間のpurge（`CopilotFeatureGate#assertRetentionMaintenanceAllowed`）は止めない（構造的な不足がある場合だけ止める）。
+
+S-9のstaging観測はB2c-2実装・persistent接続完了後、本番開放前に実施する。B2c-2着手時にはS-1〜S-8を要求し、実装前の実送信観測は要求しない。
 
 ## 8. 本番リリース前に必要な署名・決定（未完）
 
@@ -283,13 +293,15 @@ digestは次の3か所に束縛する。
 | `AiExternalSendApprovalTest` | 承認設定の各項目欠落・未署名表記・不一致・失効・上限大小関係・data category・承認digest（欠落・形式・不一致、正規形の固定値、同じ決定IDでの内容変更）、時間要因の分類、有効期間の監視状態、違反コードに値を含めない |
 | `AiProductionApprovalGateTest` | チェックリストだけでは不可、承認設定＋チェックリストで Copilot 用途のみ可、用途不明・legacy 用途・別provider・失効・digest不一致の拒否、時間要因だけの不足と構造的な不足の区別 |
 | `AiProductionSafetyValidatorTest` | prod 起動時の fail-fast（承認設定欠落、チェックリスト不一致、local provider、digest不一致、失効日の書換え）、失効・署名日前では起動を継続しWARN、既定値での起動 |
-| `AiExternalSendApprovalMonitorTest` | VALID/EXPIRING/EXPIRED/NOT_YET_VALID/INCOMPLETE/DISABLED の判定、metric、WARNの日付ごとの重複抑止、警告日数の丸め |
+| `AiExternalSendApprovalMonitorTest` | VALID/EXPIRING/EXPIRED/NOT_YET_VALID/INCOMPLETE/DISABLED/RESTART_REQUIRED の判定、metric、WARNの日付ごとの重複抑止、警告日数の丸め |
 | `AiExternalSendBudgetLedgerTest` | JST日次/月次上限、日付・月替わり、時計の逆行で累計を戻さない、二重精算防止、実費精算、見積り超過 |
 | `ApprovedExternalSendCostPolicyTest` | 上限見積りの算出、prompt上限・1回上限・予算0円の拒否、実費算出、決定ID＋digestのproof identity、B2c-0 境界 |
 | `AiExternalSendAuditorTest` | 監査列の固定書式（digest・送信範囲）、自由文・PII らしき値の正規化、列長、監査先なしの失敗、外側transaction内で独立transactionを使えない監査先の拒否、拒否監査の best effort |
 | `AiExternalSendAuditorH2PersistenceTest` | 実H2へのinsert、外側rollback後もATTEMPT/RESULT/DENIEDが残ること、既存methodは外側rollbackで消えること、proxyを通らない呼出しの拒否 |
 | `AiExternalSendAuditMySqlIntegrationTest`（`mysql`） | 実MySQL（Flyway schema・CHECK制約・strict mode）でのREQUIRES_NEW独立commitと列長上限 |
-| `CopilotExternalSendGateAdversarialTest` | prompt injection、最小field、`bp.bpCompany` 等のdata category外、untrusted text の連絡先・敬称付き人名・法人格付き会社名・送信契約外field値の再出現、送信field値のPII、伏せ字の通過、PII canary、承認なし/チェックリスト欠落/flag OFF/digest不一致の固定 deny-all、実行中のdigest不一致・再署名・失効、費用上限、送信前監査失敗、送信後失敗の費用維持、未送信失敗の予約取消、legacy/取込用途の拒否、読取専用 preflight の無副作用、log へ prompt・応答本文を渡さない |
+| `CopilotExternalSendGateAdversarialTest` | prompt injection、最小field、`bp.bpCompany` 等のdata category外、untrusted text の連絡先・敬称付き人名・法人格付き会社名・送信契約外field値の再出現、送信field値のPII、自由文の全面拒否、登録templateと値形式、transaction内拒否、prompt上限優先、PII canary、承認なし/チェックリスト欠落/flag OFF/digest不一致の固定 deny-all、実行中のdigest不一致・再署名・失効、費用上限、送信前監査失敗、送信後失敗の費用維持、未送信失敗の予約取消、legacy/取込用途の拒否、読取専用 preflight の無副作用、log へ prompt・応答本文を渡さない |
+| `AiConfigurationBindingTest` | 空の警告日数のbindingと30日へのfallback |
+| `AiProviderBeanUniquenessTest` | main sourceのprovider条件付き実装を機械的に列挙し、BP解析を含む全契約を検査する。空白付き値は既存条件と同じlocal fallbackとなり、snapshotはregistryと同じtrim/lowercase。未知・空値はdev/testで互換動作、prodでは起動拒否 |
 | `GeminiCopilotInvocationBoundaryTest` | 本番adapterの決定ID・digest束縛（偽造証拠の拒否）、承認証拠でも test用 loopback transport は公開hostへ送らない、未承認adapterの固定 deny-all と config hash の区別（digestでも区別） |
 
 DNS/TLS/応答body上限・429/timeout は既存の `CopilotBoundedHttpTransportTest`、`CopilotBoundedHttpTransportTlsTest`、`CopilotBoundedJsonParserTest`、`CopilotGeminiResponseParserTest` が担う。実 provider・実 TLS issuer・実 credential での確認は §8 S-9 の staging 観測で行う。
@@ -298,11 +310,11 @@ DNS/TLS/応答body上限・429/timeout は既存の `CopilotBoundedHttpTransport
 
 理由コードは `BusinessException.of(code, key)` のmessage keyとして解決され、4言語（`messages.properties`・`_en`・`_ko`・`_zh_CN`）に訳文がある。訳文は設定値・PIIを含まない。
 
-`AI_EXTERNAL_SEND_APPROVAL_INCOMPLETE`、`AI_EXTERNAL_SEND_PROVIDER_NOT_APPROVED`、`AI_EXTERNAL_SEND_PURPOSE_NOT_APPROVED`、`AI_EXTERNAL_SEND_NOT_APPROVED`、`AI_EXTERNAL_SEND_DECISION_CHANGED`、`AI_EXTERNAL_SEND_MODEL_NOT_APPROVED`、`AI_EXTERNAL_SEND_DESTINATION_NOT_APPROVED`、`AI_EXTERNAL_SEND_REQUEST_TOO_LARGE`、`AI_EXTERNAL_SEND_REQUEST_COST_LIMIT`、`AI_EXTERNAL_SEND_REQUEST_SIZE_UNKNOWN`、`AI_EXTERNAL_SEND_OUTPUT_UNBOUNDED`、`AI_EXTERNAL_SEND_COST_OVERFLOW`、`AI_EXTERNAL_SEND_DAILY_COST_LIMIT`、`AI_EXTERNAL_SEND_MONTHLY_COST_LIMIT`、`AI_EXTERNAL_SEND_AUDIT_UNAVAILABLE`、`COPILOT_COST_BUDGET_EXCEEDED`（以上W2の16件）、`AI_EXTERNAL_SEND_APPROVAL_DIGEST_MISMATCH`、`AI_EXTERNAL_SEND_FIELD_NOT_APPROVED`、`AI_EXTERNAL_SEND_UNMASKED_PII`（W3-03で追加）。
+`AI_EXTERNAL_SEND_APPROVAL_INCOMPLETE`、`AI_EXTERNAL_SEND_PROVIDER_NOT_APPROVED`、`AI_EXTERNAL_SEND_PURPOSE_NOT_APPROVED`、`AI_EXTERNAL_SEND_NOT_APPROVED`、`AI_EXTERNAL_SEND_DECISION_CHANGED`、`AI_EXTERNAL_SEND_MODEL_NOT_APPROVED`、`AI_EXTERNAL_SEND_DESTINATION_NOT_APPROVED`、`AI_EXTERNAL_SEND_REQUEST_TOO_LARGE`、`AI_EXTERNAL_SEND_REQUEST_COST_LIMIT`、`AI_EXTERNAL_SEND_REQUEST_SIZE_UNKNOWN`、`AI_EXTERNAL_SEND_OUTPUT_UNBOUNDED`、`AI_EXTERNAL_SEND_COST_OVERFLOW`、`AI_EXTERNAL_SEND_DAILY_COST_LIMIT`、`AI_EXTERNAL_SEND_MONTHLY_COST_LIMIT`、`AI_EXTERNAL_SEND_AUDIT_UNAVAILABLE`、`COPILOT_COST_BUDGET_EXCEEDED`（以上W2の16件）、`AI_EXTERNAL_SEND_APPROVAL_DIGEST_MISMATCH`、`AI_EXTERNAL_SEND_FIELD_NOT_APPROVED`、`AI_EXTERNAL_SEND_UNMASKED_PII`（W3-03で追加）、`AI_EXTERNAL_SEND_UNTRUSTED_NOT_ALLOWED`、`AI_EXTERNAL_SEND_PAYLOAD_SHAPE_INVALID`、`AI_EXTERNAL_SEND_TRANSACTION_ACTIVE`（G1で追加）。
 
 ## 11. 未解決事項
 
 1. 費用累計の永続化（DDL）。§6 の制約を解消する永続費用ledgerは技術計画で設計済み、実装はB2c-1（DDL承認・version割当後）。
 2. B2c-1/2（durable claim、dispatch/usage authority、fresh current-source drift 検査、commit 後 permit、公開 transport 迂回封鎖）、B2d（cost capability）、B2e（故障matrix）。完了まで利用者経路の実送信は解放しない。
 3. 上限見積りの「1 token ≥ 1 byte」前提と thinking token の課金扱いは、採用 model の公式料金表で S-5 時に再確認する（thinking budget を provider へ明示送信していない点はレビューP3-5として残る）。
-4. レビューP3（adapter証拠の進程内偽造、識別子正規化がPIIを除けないこと、DENIED監査の量、未署名表記の不足、利用者へ返す理由コードの粒度）は本書の範囲外として残る。
+4. レビューP3（adapter証拠のプロセス内偽造、識別子正規化がPIIを除けないこと、DENIED監査の量、未署名表記の不足、利用者へ返す理由コードの粒度）は本書の範囲外として残る。

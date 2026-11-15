@@ -9,8 +9,8 @@ import org.springframework.stereotype.Service;
 
 @Slf4j
 @Service
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
-        name = "ai.provider", havingValue = "mock", matchIfMissing = true)
+@org.springframework.boot.autoconfigure.condition.ConditionalOnExpression(
+        "!'gemini'.equalsIgnoreCase('${ai.provider:mock}') && !'rule'.equalsIgnoreCase('${ai.provider:mock}')")
 public class MockAiTextServiceImpl implements CopilotBoundedAiTextService {
 
     private static final String MODEL_ID = "mock-management-copilot";

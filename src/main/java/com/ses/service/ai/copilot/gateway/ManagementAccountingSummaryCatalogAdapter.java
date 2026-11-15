@@ -7,6 +7,7 @@ import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.result.MetricBasis;
 import com.ses.service.ai.copilot.result.MetricValue;
+import com.ses.service.ai.copilot.result.CopilotMetricKeys;
 import com.ses.service.ai.copilot.result.TypedResultEnvelope;
 import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import lombok.RequiredArgsConstructor;
@@ -40,10 +41,10 @@ class ManagementAccountingSummaryCatalogAdapter extends CatalogAdapterSupport im
         ManagementAccountingSummaryDto summary = managementAccountingService.summary(month.toString(), context);
         String period = month.toString();
         List<MetricValue> values = List.of(
-                MetricValue.nullableYen("accounting.totalRevenue", summary.getTotalRevenue(), period, MetricBasis.ACTUAL),
-                MetricValue.nullableYen("accounting.totalGrossProfit", summary.getTotalGrossProfit(), period, MetricBasis.ACTUAL),
-                MetricValue.nullableYen("accounting.revenueVariance", summary.getRevenueVariance(), period, MetricBasis.MIXED),
-                MetricValue.nullableYen("accounting.grossProfitVariance", summary.getGrossProfitVariance(), period, MetricBasis.MIXED));
+                MetricValue.nullableYen(CopilotMetricKeys.ACCOUNTING_TOTAL_REVENUE, summary.getTotalRevenue(), period, MetricBasis.ACTUAL),
+                MetricValue.nullableYen(CopilotMetricKeys.ACCOUNTING_TOTAL_GROSS_PROFIT, summary.getTotalGrossProfit(), period, MetricBasis.ACTUAL),
+                MetricValue.nullableYen(CopilotMetricKeys.ACCOUNTING_REVENUE_VARIANCE, summary.getRevenueVariance(), period, MetricBasis.MIXED),
+                MetricValue.nullableYen(CopilotMetricKeys.ACCOUNTING_GROSS_PROFIT_VARIANCE, summary.getGrossProfitVariance(), period, MetricBasis.MIXED));
         return envelope(entry, scope, values, List.of(), MetricBasis.MIXED, false, entry.resultLimit(), context);
     }
 }
