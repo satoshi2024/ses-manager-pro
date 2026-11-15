@@ -4,6 +4,8 @@ import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.security.OwnershipRepairRequest;
 import com.ses.dto.security.OwnershipRepairClaimResponse;
+import com.ses.entity.Engineer;
+import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.OwnershipRepairQueue;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
@@ -14,6 +16,8 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.OwnershipRepairService;
 import com.ses.service.security.RepairAuthorityResolver;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
+import com.ses.service.security.epoch.EngineerEpochAnchors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +44,7 @@ public class OwnershipRepairServiceImpl implements OwnershipRepairService {
     private final EngineerAccountLinkMapper engineerAccountLinkMapper;
     private final SysUserMapper sysUserMapper;
     private final RepairAuthorityResolver authorityResolver;
+    private final AuthorizationEpochFence authorizationEpochFence;
 
     @Override
     @Transactional(readOnly = true)
@@ -89,11 +94,27 @@ public class OwnershipRepairServiceImpl implements OwnershipRepairService {
         if ("CUSTOMER".equals(row.getEntityType())) {
             updated = customerMapper.assignTenantForRepair(row.getEntityId(), authority.tenantId());
         } else if ("ENGINEER".equals(row.getEntityType())) {
+            // NF01 F2（計画 §2.6・§4.2）: 要員のtenant補正は要員行（rank 7）をX lockしてから行い、補正後のDB上のtenantで
+            // engineer epochを進める（tenantは述語(e)(f)が読む値）。
+            engineerMapper.selectScopeAnchorForUpdate(row.getEntityId());
             updated = engineerMapper.assignTenantForRepair(row.getEntityId(), authority.tenantId());
+            if (updated == 1) {
+                advanceEngineer(row.getEntityId());
+            }
         } else if ("BP_AVAILABILITY".equals(row.getEntityType())) {
             updated = bpAvailabilityMapper.assignTenantForRepair(row.getEntityId(), authority.tenantId());
         } else if ("ENGINEER_ACCOUNT_LINK".equals(row.getEntityType())) {
+            // 紐付けのtenant補正も、紐付け先の要員行（rank 7）をX lockしてから行い、その要員のengineer epochを進める。
+            // 紐付け行の engineer_id は更新されない（作成・削除・tenant補正だけ）ため、discoveryの値で要員を決めてよい。
+            EngineerAccountLink link = engineerAccountLinkMapper.selectById(row.getEntityId());
+            Long engineerId = link == null ? null : link.getEngineerId();
+            if (engineerId != null) {
+                engineerMapper.selectScopeAnchorForUpdate(engineerId);
+            }
             updated = engineerAccountLinkMapper.assignTenantForRepair(row.getEntityId(), authority.tenantId());
+            if (updated == 1 && engineerId != null) {
+                advanceEngineer(engineerId);
+            }
         } else {
             throw BusinessException.of(400, "error.tenant.repairEntityType");
         }
@@ -131,6 +152,15 @@ public class OwnershipRepairServiceImpl implements OwnershipRepairService {
             throw BusinessException.of(409, "error.tenant.repairConflict");
         }
         return new OwnershipRepairClaimResponse(queueId, claimToken, expectedVersion + 1);
+    }
+
+    /**
+     * lock済みの要員行を読み直し、補正後のDB上のtenantでengineer epochを進める（tenantは要求ではなく行の値を使う）。
+     * 要員行が読めなければ世代を進められないため、補正ごと409で止める。
+     */
+    private void advanceEngineer(Long engineerId) {
+        Engineer locked = engineerMapper.selectScopeAnchorForUpdate(engineerId);
+        authorizationEpochFence.advance(EngineerEpochAnchors.of(locked));
     }
 
     private String structuredEvidence(OwnershipRepairRequest.Evidence evidence) {

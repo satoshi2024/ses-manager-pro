@@ -82,6 +82,16 @@ public interface EngineerAccountLinkMapper extends BaseMapper<EngineerAccountLin
     EngineerAccountLink selectByEngineerIdAndTenant(@Param("engineerId") Long engineerId,
                                                     @Param("tenantId") String tenantId);
 
+    /**
+     * 紐付け解除用の照会。要員削除の後段（同じtransactionで {@code t_engineer.deleted_flag = 1} にした後）でも紐付けを
+     * 見つけるため、要員・利用者の削除状態では絞らず、紐付け自身のtenantだけで照合する。
+     * （{@link #selectByEngineerIdAndTenant} は削除済み要員を除くため、要員削除後の解除が素通りしていた。）
+     */
+    @Select("SELECT * FROM t_engineer_account_link WHERE engineer_id = #{engineerId} AND tenant_id = #{tenantId} "
+            + "ORDER BY id LIMIT 1")
+    EngineerAccountLink selectByEngineerIdAndLinkTenant(@Param("engineerId") Long engineerId,
+                                                       @Param("tenantId") String tenantId);
+
     @Select("<script>SELECT * FROM t_engineer_account_link WHERE engineer_id IN <foreach collection='engineerIds' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
     List<EngineerAccountLink> selectByEngineerIds(@Param("engineerIds") List<Long> engineerIds);
 

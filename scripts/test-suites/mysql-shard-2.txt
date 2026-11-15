@@ -30,3 +30,4 @@ PrivacyWatermarkWitnessBoundaryMySqlTest
 ReportScheduleDispatchPolicyMySqlTest
 LifecycleResignationUniquenessMySqlTest
 ResignationRevocationOutboxMySqlTest
+EngineerScopeFenceMySqlTest

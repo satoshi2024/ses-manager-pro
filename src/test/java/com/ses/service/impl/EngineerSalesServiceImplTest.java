@@ -49,6 +49,9 @@ public class EngineerSalesServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        // NF01 F2: 割当writerは要員行（engineer epochのanchor）をX lockしてから書くため、割当先の要員行を用意する。
+        jdbcTemplate.update("INSERT INTO t_engineer (id, tenant_id, full_name, employment_type, status, deleted_flag) "
+                + "VALUES (?, 'default', '担当営業試験要員', '正社員', 'Bench', 0)", ENGINEER_ID);
         salesUser1Id = insertUser("sales1", "営業 一郎", "営業", 1);
         salesUser2Id = insertUser("sales2", "営業 二郎", "営業", 1);
         hrUserId = insertUser("hr1", "人事 花子", "HR", 1);
@@ -121,6 +124,14 @@ public class EngineerSalesServiceImplTest {
                 () -> engineerSalesService.assign(ENGINEER_ID, hrUserId, false, null));
         assertThrows(BusinessException.class,
                 () -> engineerSalesService.assign(ENGINEER_ID, disabledSalesId, false, null));
+    }
+
+    @Test
+    void 存在しない要員への割当は要員行をlockできず404で拒否される() {
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> engineerSalesService.assign(999_999L, salesUser1Id, false, null));
+        assertEquals(404, ex.getCode());
+        assertTrue(engineerSalesService.listActive(999_999L).isEmpty());
     }
 
     @Test
