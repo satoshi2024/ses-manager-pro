@@ -1,6 +1,7 @@
 package com.ses.mapper;
 
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
@@ -20,6 +21,9 @@ import java.util.List;
  *   <li>タスク行は、同じtransactionで既にX lockした案件（{@code caseIds}）に属する場合だけlockする（case X → task X）。</li>
  * </ul>
  * <p>{@code FOR SHARE} はH2で解釈されないため、共有lockはMySQLでだけ実行する。</p>
+ * <p>各文は実行前にMyBatisのsession cacheを消す（{@code flushCache}）。planの取得後、呼出側は依存先を通常読取で列挙し直して
+ * discoveryと比べるが、同じtransactionでlock前に同じ照会を実行していると、cacheがlock前の結果を返して待っていた相手の
+ * commitを見落とし、再discoveryが常に一致してしまう（W3-16b M6で判明）。</p>
  */
 @Mapper
 public interface LifecycleLockMapper {
@@ -27,97 +31,122 @@ public interface LifecycleLockMapper {
     String MODE = "<choose><when test='exclusive'>FOR UPDATE</when><otherwise>FOR SHARE</otherwise></choose>";
 
     // 順2
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_approval_request WHERE id = #{id} AND tenant_id = #{tenantId} FOR UPDATE")
     Long lockApprovalRequest(@Param("id") long id, @Param("tenantId") String tenantId);
 
     // 順3
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("<script>SELECT id FROM sys_user WHERE id = #{id} AND tenant_id = #{tenantId} " + MODE + "</script>")
     Long lockSysUser(@Param("id") long id, @Param("tenantId") String tenantId, @Param("exclusive") boolean exclusive);
 
     // 順4
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_lifecycle_case WHERE id = #{id} AND tenant_id = #{tenantId} FOR UPDATE")
     Long lockLifecycleCase(@Param("id") long id, @Param("tenantId") String tenantId);
 
     // 順5（案件はlock済み。案件の一覧はtenant照合済みのIDだけを渡す）
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("<script>SELECT id FROM t_lifecycle_task WHERE id = #{id} AND case_id IN "
             + "<foreach collection='caseIds' item='caseId' open='(' separator=',' close=')'>#{caseId}</foreach> "
             + "FOR UPDATE</script>")
     Long lockLifecycleTask(@Param("id") long id, @Param("caseIds") List<Long> caseIds);
 
     // 順6
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("<script>SELECT id FROM m_organization_unit WHERE id = #{id} " + MODE + "</script>")
     Long lockOrganization(@Param("id") long id, @Param("exclusive") boolean exclusive);
 
     // 順7
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("<script>SELECT id FROM t_engineer WHERE id = #{id} AND tenant_id = #{tenantId} " + MODE + "</script>")
     Long lockEngineer(@Param("id") long id, @Param("tenantId") String tenantId, @Param("exclusive") boolean exclusive);
 
     // 順8
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_user_organization WHERE id = #{id} AND tenant_id = #{tenantId} FOR UPDATE")
     Long lockUserOrganization(@Param("id") long id, @Param("tenantId") String tenantId);
 
     // 順9
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_engineer_account_link WHERE id = #{id} AND tenant_id = #{tenantId} FOR UPDATE")
     Long lockEngineerAccountLink(@Param("id") long id, @Param("tenantId") String tenantId);
 
     // 順10
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_engineer_sales WHERE id = #{id} FOR UPDATE")
     Long lockEngineerSales(@Param("id") long id);
 
     // 順11
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_engineer_accounting_history WHERE id = #{id} FOR UPDATE")
     Long lockEngineerAccountingHistory(@Param("id") long id);
 
     // 順12
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_portal_user_engineer_link WHERE id = #{id} AND tenant_id = #{tenantId} FOR UPDATE")
     Long lockPortalEngineerLink(@Param("id") long id, @Param("tenantId") String tenantId);
 
     // 順13（業務親。初回sliceのreaderは取らない）
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM m_customer WHERE id = #{id} AND tenant_id = #{tenantId} FOR UPDATE")
     Long lockCustomer(@Param("id") long id, @Param("tenantId") String tenantId);
 
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_contract WHERE id = #{id} AND tenant_id = #{tenantId} FOR UPDATE")
     Long lockContract(@Param("id") long id, @Param("tenantId") String tenantId);
 
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_proposal WHERE id = #{id} FOR UPDATE")
     Long lockProposal(@Param("id") long id);
 
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_project WHERE id = #{id} FOR UPDATE")
     Long lockProject(@Param("id") long id);
 
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_sales_activity WHERE id = #{id} FOR UPDATE")
     Long lockSalesActivity(@Param("id") long id);
 
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM m_asset WHERE id = #{id} FOR UPDATE")
     Long lockAsset(@Param("id") long id);
 
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_asset_assignment WHERE id = #{id} FOR UPDATE")
     Long lockAssetAssignment(@Param("id") long id);
 
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_acceptance WHERE id = #{id} FOR UPDATE")
     Long lockAcceptance(@Param("id") long id);
 
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_service_request WHERE id = #{id} AND tenant_id = #{tenantId} FOR UPDATE")
     Long lockServiceRequest(@Param("id") long id, @Param("tenantId") String tenantId);
 
     // 順14
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_external_account_reference WHERE id = #{id} AND tenant_id = #{tenantId} FOR UPDATE")
     Long lockExternalAccountReference(@Param("id") long id, @Param("tenantId") String tenantId);
 
     // 順15
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("<script>SELECT id FROM t_document WHERE id = #{id} AND tenant_id = #{tenantId} " + MODE + "</script>")
     Long lockDocument(@Param("id") long id, @Param("tenantId") String tenantId, @Param("exclusive") boolean exclusive);
 
     // 順16
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("<script>SELECT id FROM t_document_version WHERE id = #{id} AND tenant_id = #{tenantId} " + MODE + "</script>")
     Long lockDocumentVersion(@Param("id") long id, @Param("tenantId") String tenantId,
                              @Param("exclusive") boolean exclusive);
 
     // 順17
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_document_link WHERE id = #{id} AND tenant_id = #{tenantId} FOR UPDATE")
     Long lockDocumentLink(@Param("id") long id, @Param("tenantId") String tenantId);
 
     // 順18
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
     @Select("SELECT id FROM t_document_disposal_request WHERE id = #{id} FOR UPDATE")
     Long lockDocumentDisposalRequest(@Param("id") long id);
 }
