@@ -39,10 +39,12 @@
     };
 
     class ImportApiError extends Error {
-        constructor(status, message) {
+        /** fromApplication: 応答がこのアプリのApiResult（JSON）だったか。LB・proxyが返したHTML等ならfalse。 */
+        constructor(status, message, fromApplication) {
             super(message);
             this.name = 'ImportApiError';
             this.status = status;
+            this.fromApplication = fromApplication === true;
         }
     }
 
@@ -109,7 +111,7 @@
             const status = response.ok ? (body && body.code) || 500 : response.status;
             // 403は権限・法人の確認手順を示す固定文言にする（server側の文言は汎用の拒否文言のため）
             const message = status !== 403 && body && body.message ? body.message : statusMessage(status);
-            throw new ImportApiError(status, message);
+            throw new ImportApiError(status, message, body !== null);
         }
         return body.data;
     }
@@ -590,8 +592,9 @@
         } catch (error) {
             state.validation.pending = false;
             el('importValidateBtn').disabled = false;
-            if (LOST_RESPONSE_STATUSES.indexOf(error.status) !== -1) {
-                // 応答が途切れただけで、server側では検証が続いている可能性がある。状態の確認を続ける。
+            if (LOST_RESPONSE_STATUSES.indexOf(error.status) !== -1 || (error.status >= 500 && !error.fromApplication)) {
+                // 応答が途切れただけ（LB・proxyが返すJSONでない5xxを含む）で、server側では検証が続いている可能性がある。
+                // 状態の確認を続ける。アプリのApiResultで返った5xx（120秒の上限超過の503等）は確定した失敗として扱う。
                 setValidationStatus('warning', t('importCenter.validation.connectionLost'), true);
                 return;
             }

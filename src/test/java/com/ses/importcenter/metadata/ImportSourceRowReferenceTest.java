@@ -30,6 +30,9 @@ import static org.mockito.Mockito.when;
  */
 class ImportSourceRowReferenceTest {
     private static final String KEY = ImportA1aH2Fixture.ROW_REFERENCE_KEY;
+    /** prodで使える（公開済みでない）鍵の代わり。test内だけで使う値。 */
+    private static final String PRODUCTION_LIKE_KEY = Base64.getEncoder().encodeToString(
+            "prod-like-nf06-row-reference-key-for-unit-test".getBytes(StandardCharsets.US_ASCII));
     private static final String STORED_HASH = sha256Hex("C-1|株式会社アルファ|山田太郎");
 
     @Test
@@ -71,6 +74,22 @@ class ImportSourceRowReferenceTest {
                 new ImportSourceRowReference(ImportSourceRowReference.DEVELOPMENT_ONLY_KEY, false).state());
         assertEquals(ImportSourceRowReference.KeyState.DEVELOPMENT_KEY_IN_PRODUCTION,
                 new ImportSourceRowReference(ImportSourceRowReference.DEVELOPMENT_ONLY_KEY, true).state());
+        // W3-12 review P3-1: 表記を変えても復号後が同じ公開済み鍵（開発用・test用）はprodで拒否する
+        byte[] developmentBytes = Base64.getDecoder().decode(ImportSourceRowReference.DEVELOPMENT_ONLY_KEY);
+        byte[] testBytes = Base64.getDecoder().decode(ImportSourceRowReference.TEST_ONLY_KEY);
+        for (String disguised : new String[]{
+                ImportSourceRowReference.DEVELOPMENT_ONLY_KEY.replace("=", ""),
+                Base64.getUrlEncoder().withoutPadding().encodeToString(developmentBytes),
+                ImportSourceRowReference.TEST_ONLY_KEY,
+                Base64.getUrlEncoder().encodeToString(testBytes),
+                "  " + ImportSourceRowReference.TEST_ONLY_KEY + "  "}) {
+            assertEquals(ImportSourceRowReference.KeyState.DEVELOPMENT_KEY_IN_PRODUCTION,
+                    new ImportSourceRowReference(disguised, true).state(), "prodで公開済み鍵を拒否する");
+            assertEquals(ImportSourceRowReference.KeyState.AVAILABLE,
+                    new ImportSourceRowReference(disguised, false).state(), "prod以外では使える");
+        }
+        assertEquals(ImportSourceRowReference.KeyState.AVAILABLE,
+                new ImportSourceRowReference(PRODUCTION_LIKE_KEY, true).state());
 
         MockEnvironment production = new MockEnvironment()
                 .withProperty(ImportSourceRowReference.PROPERTY, ImportSourceRowReference.DEVELOPMENT_ONLY_KEY);
@@ -113,8 +132,11 @@ class ImportSourceRowReferenceTest {
                 new ImportSourceRowReference(ImportSourceRowReference.DEVELOPMENT_ONLY_KEY, true), true).validate());
         assertTrue(development.getMessage().contains("state=DEVELOPMENT_KEY_IN_PRODUCTION"));
         assertFalse(development.getMessage().contains(ImportSourceRowReference.DEVELOPMENT_ONLY_KEY));
+        IllegalStateException testKey = assertThrows(IllegalStateException.class,
+                () -> validator(new ImportSourceRowReference(KEY, true), true).validate());
+        assertTrue(testKey.getMessage().contains("state=DEVELOPMENT_KEY_IN_PRODUCTION"), "test用鍵もprodで拒否する");
 
-        assertDoesNotThrow(() -> validator(new ImportSourceRowReference(KEY, true), true).validate());
+        assertDoesNotThrow(() -> validator(new ImportSourceRowReference(PRODUCTION_LIKE_KEY, true), true).validate());
         assertDoesNotThrow(() -> validator(new ImportSourceRowReference(null, true), false).validate());
         assertDoesNotThrow(() -> validator(new ImportSourceRowReference(broken, true), false).validate());
     }

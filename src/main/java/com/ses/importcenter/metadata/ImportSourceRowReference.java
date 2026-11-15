@@ -11,9 +11,11 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 
 /**
  * preview・error exportへ返すsource行参照（W3-12。W3-05 review P2-1）。
@@ -29,7 +31,8 @@ import java.util.HexFormat;
  * 以前に出力したerror CSVの値とは照合できなくなる。
  *
  * <p>鍵は {@value #PROPERTY}（環境変数 {@code IMPORT_ROW_REFERENCE_HMAC_KEY}）。Base64（標準・URL-safeのどちらでも可）で、
- * 復号後 {@value #MIN_KEY_BYTES} byte以上。prodでは開発用の既定鍵を使えない。鍵が使えない間は、preview・
+ * 復号後 {@value #MIN_KEY_BYTES} byte以上。prodでは開発用の既定鍵とtest用の鍵を（表記によらず復号後のbyte列で比べて）
+ * 使えない。鍵が使えない間は、preview・
  * error exportを監査・原本読込より前に503（{@code error.import.rowReferenceUnavailable}）で拒否する（fail-closed）。
  * NF-06をONにしたprodの起動検査は {@link ImportRowReferenceKeyStartupValidator}。鍵の値はlog・例外messageへ出さない。
  */
@@ -41,12 +44,23 @@ public class ImportSourceRowReference {
     static final int MIN_KEY_BYTES = 32;
     /** {@code application.yml} の開発用既定鍵。prodでは使えない（起動検査と実行時の両方で拒否する）。 */
     static final String DEVELOPMENT_ONLY_KEY = "ZGV2LW9ubHktbmYwNi1yb3ctcmVmZXJlbmNlLWtleS1ub3QtZm9yLXByb2Q=";
+    /** {@code application-test.yml} のtest専用鍵。公開されている値なのでprodでは使えない（開発用鍵と同じ扱い）。 */
+    static final String TEST_ONLY_KEY = "dGVzdC1vbmx5LW5mMDYtcm93LXJlZmVyZW5jZS1obWFjLWtleS0wMDAx";
     static final String UNAVAILABLE_MESSAGE_KEY = "error.import.rowReferenceUnavailable";
     private static final String ALGORITHM = "HmacSHA256";
     private static final byte[] DOMAIN = "SES-NF06-SOURCE-ROW-REFERENCE-V1".getBytes(StandardCharsets.US_ASCII);
     private static final int ROW_HASH_BYTES = 32;
+    /**
+     * prodで拒否する公開済みの鍵（復号後のbyte列）。文字列で比べると、末尾の {@code =} を落とす・URL-safe表記にする等の
+     * 書換えで同じ鍵を通せてしまうため、復号後のbyte列で比べる（W3-12 review P3-1）。
+     */
+    private static final List<byte[]> NON_PRODUCTION_KEYS = List.of(
+            Base64.getDecoder().decode(DEVELOPMENT_ONLY_KEY), Base64.getDecoder().decode(TEST_ONLY_KEY));
 
-    /** 鍵の状態。値そのものは持たない（log・監視へ出してよい固定値）。 */
+    /**
+     * 鍵の状態。値そのものは持たない（log・監視へ出してよい固定値）。{@link #DEVELOPMENT_KEY_IN_PRODUCTION} は
+     * prodで開発用・test用の公開済み鍵が設定されたこと（表記を変えても復号後が同じなら該当）を表す。
+     */
     public enum KeyState { AVAILABLE, MISSING, INVALID, DEVELOPMENT_KEY_IN_PRODUCTION }
 
     private final SecretKeySpec key;
@@ -63,12 +77,12 @@ public class ImportSourceRowReference {
         SecretKeySpec spec = null;
         if (configuredKey == null || configuredKey.isBlank()) {
             resolved = KeyState.MISSING;
-        } else if (production && DEVELOPMENT_ONLY_KEY.equals(configuredKey.trim())) {
-            resolved = KeyState.DEVELOPMENT_KEY_IN_PRODUCTION;
         } else {
             byte[] decoded = decode(configuredKey.trim());
             if (decoded == null || decoded.length < MIN_KEY_BYTES) {
                 resolved = KeyState.INVALID;
+            } else if (production && isNonProductionKey(decoded)) {
+                resolved = KeyState.DEVELOPMENT_KEY_IN_PRODUCTION;
             } else {
                 spec = new SecretKeySpec(decoded, ALGORITHM);
                 resolved = KeyState.AVAILABLE;
@@ -101,6 +115,10 @@ public class ImportSourceRowReference {
         } catch (GeneralSecurityException failure) {
             throw BusinessException.of(503, UNAVAILABLE_MESSAGE_KEY);
         }
+    }
+
+    private static boolean isNonProductionKey(byte[] decoded) {
+        return NON_PRODUCTION_KEYS.stream().anyMatch(known -> MessageDigest.isEqual(known, decoded));
     }
 
     private static byte[] decode(String value) {

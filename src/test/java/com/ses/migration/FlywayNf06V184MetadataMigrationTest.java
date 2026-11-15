@@ -27,13 +27,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Testcontainers
 class FlywayNf06V184MetadataMigrationTest {
 
+    /** V193（NF-06 取込センター画面）が明示的に seed する取込 action。V193 の最終状態は FlywayNf06ImportCenterMenuMigrationTest が見る。 */
+    private static final String V193_IMPORT_ACTION = "import.metadata.manage";
+
     /**
      * V184 より後の migration が追加する permission action を除いた件数。V191（NF07 W-5）は privacy-admin group の
-     * 許可行と、他の全 group の {@code privacy.*} deny 行を追加するため、最新版まで上げた後の比較から除外する。
+     * 許可行と、他の全 group の {@code privacy.*} deny 行を追加し、V193 は管理者専用 group の {@value #V193_IMPORT_ACTION}
+     * 許可行と、他の全 group の同 key の deny 行を追加するため、最新版まで上げた後の比較から除外する。
      */
     private static final String PERMISSION_ACTIONS_BEFORE_V184_SCOPE = "SELECT COUNT(*) FROM t_permission_group_action a "
-            + "WHERE a.action_key <> 'privacy.*' AND a.group_id NOT IN "
+            + "WHERE a.action_key <> 'privacy.*' AND a.action_key <> '" + V193_IMPORT_ACTION + "' AND a.group_id NOT IN "
             + "(SELECT g.id FROM m_permission_group g WHERE g.group_key = 'privacy-admin')";
+
+    /**
+     * V184 は import 権限を自動付与しない。最新版まで上げた後は V193 の明示 seed だけが import 行として存在し得るので、
+     * それ以外の import 行が無いこと、および import の許可行が管理者専用 group だけにあることを確認する。
+     */
+    private static final String IMPORT_ACTIONS_OTHER_THAN_V193 = "SELECT COUNT(*) FROM t_permission_group_action "
+            + "WHERE action_key LIKE 'import.%' AND action_key <> '" + V193_IMPORT_ACTION + "'";
+    private static final String IMPORT_GRANTS_OUTSIDE_ADMIN_GROUPS = "SELECT COUNT(*) FROM t_permission_group_action a "
+            + "JOIN m_permission_group g ON g.id = a.group_id WHERE a.action_key LIKE 'import.%' AND a.deny_flag = 0 "
+            + "AND g.group_key NOT IN ('role-admin', 'privacy-admin')";
 
     @Container
     @SuppressWarnings("resource")
@@ -58,9 +72,10 @@ class FlywayNf06V184MetadataMigrationTest {
         try (Connection connection = FRESH.createConnection(""); Statement statement = connection.createStatement()) {
             assertV184Applied(statement, flyway);
             assertMetadataSchema(statement);
-            assertEquals(0L, scalar(statement,
-                    "SELECT COUNT(*) FROM t_permission_group_action WHERE action_key LIKE 'import.%'"),
-                    "V184はimport権限を自動付与しない");
+            assertEquals(0L, scalar(statement, IMPORT_ACTIONS_OTHER_THAN_V193),
+                    "V184はimport権限を自動付与しない（V193の明示seed以外のimport行は無い）");
+            assertEquals(0L, scalar(statement, IMPORT_GRANTS_OUTSIDE_ADMIN_GROUPS),
+                    "管理者専用group以外にimport権限の許可行は無い");
 
             long sourceId = insertSource(statement, "tenant-a", "legacy-a");
             assertMysqlFailure(() -> statement.executeUpdate(
@@ -118,9 +133,10 @@ class FlywayNf06V184MetadataMigrationTest {
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='182' AND success=1"));
             assertEquals(1L, scalar(statement,
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE version='184' AND success=1"));
-            assertEquals(0L, scalar(statement,
-                    "SELECT COUNT(*) FROM t_permission_group_action WHERE action_key LIKE 'import.%'"),
-                    "upgradeでもimport権限を自動付与しない");
+            assertEquals(0L, scalar(statement, IMPORT_ACTIONS_OTHER_THAN_V193),
+                    "upgradeでもimport権限を自動付与しない（V193の明示seed以外のimport行は無い）");
+            assertEquals(0L, scalar(statement, IMPORT_GRANTS_OUTSIDE_ADMIN_GROUPS),
+                    "upgradeでも管理者専用group以外にimport権限の許可行は無い");
         }
 
         // repairを呼ばず再migrateし、Flyway validateを通過した状態でno-opになることを確認する。

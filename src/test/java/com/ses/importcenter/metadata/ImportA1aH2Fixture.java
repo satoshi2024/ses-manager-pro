@@ -37,8 +37,8 @@ final class ImportA1aH2Fixture {
     static final long LEGAL_ENTITY = 77;
     static final Map<String, String> CUSTOMER_MAPPING = mapping("externalKey", "companyName", "contactPerson",
             "contactEmail", "contactPhone", "address");
-    /** 行参照HMACのtest専用鍵（Base64で42 byte。application-test.ymlの値と同じ）。 */
-    static final String ROW_REFERENCE_KEY = "dGVzdC1vbmx5LW5mMDYtcm93LXJlZmVyZW5jZS1obWFjLWtleS0wMDAx";
+    /** 行参照HMACのtest専用鍵（Base64で42 byte。application-test.ymlの値と同じで、prodでは拒否される）。 */
+    static final String ROW_REFERENCE_KEY = ImportSourceRowReference.TEST_ONLY_KEY;
 
     final JdbcTemplate jdbc;
     final ImportSourceRowReference rowReference = new ImportSourceRowReference(ROW_REFERENCE_KEY, false);

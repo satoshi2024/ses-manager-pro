@@ -242,7 +242,7 @@ source-codes=<小文字化し昇順に並べたsource codeのカンマ区切り>
   1. 「取込元・mapping」タブで取込元（source code・表示名）を登録し、mapping 版（顧客の各項目に対応する CSV 見出し）を登録する。版は不変で、内容を変えると次の版になる。取込元の停止・再開は確認ダイアログを出す（version が上がり既存 job の preview が 409 になる。W3-05 review P3-9）。
   2. 「取込ジョブ」タブで取込元・文字コード・CSV を選んで upload する（body は file そのもの、`Content-Type: text/csv`、header `X-Import-Source-Code` / `X-Import-Encoding`、CSRF header 付き）。
   3. UPLOADED の job では mapping 版を選んで検証を開始する。**mapping の束縛は検証 API の `mappingId` で行い、画面から `bindMapping` 相当を直接呼ぶ経路は無い**（W3-05 review P3-2。束縛は `ImportValidationRunService` の可見性確認の後だけ）。
-  4. 検証は同期 API（最長 120 秒＋α、途中で 1 byte も返らない）。画面は要求を送ったまま **`GET /jobs/{id}` を3秒ごとに確認**し（W3-05 review P3-5）、応答が LB 等で途切れても（0・502・504）状態確認を続ける。VALIDATED になれば要約（公開済み job への検証 API は再検証せず要約を返す・冪等）と preview を読む。VALIDATING 以外へ戻れば「検証を再開」（takeover で続きから）を案内する。409 は job を読み直し、VALIDATING なら確認を続ける。確認は最長200秒で打ち切る。
+  4. 検証は同期 API（最長 120 秒＋α、途中で 1 byte も返らない）。画面は要求を送ったまま **`GET /jobs/{id}` を3秒ごとに確認**し（W3-05 review P3-5）、応答が LB 等で途切れても（0・502・504、および LB・proxy が返す JSON でない 5xx）状態確認を続ける。アプリの ApiResult で返った 5xx（120 秒の上限超過の 503 等）は確定した失敗として確認を止める。VALIDATED になれば要約（公開済み job への検証 API は再検証せず要約を返す・冪等）と preview を読む。VALIDATING 以外へ戻れば「検証を再開」（takeover で続きから）を案内する。409 は job を読み直し、VALIDATING なら確認を続ける。確認は最長200秒で打ち切る。
   5. preview（マスク済み、判定で絞込み、page 送り）と、却下行があればエラー CSV を出力する（`SES.download`、失敗は toast）。
 - 403 は「管理者 role・`import.metadata.manage`・法人の設定を確認する」固定文言にする（server の応答は汎用の拒否文言のため）。画面の表示制御は利便のためだけで、権限の根拠は API の service 層である。
 - 一覧画面と同じ絞込み panel の構造（`card > card-body > form#searchForm`）で、スマホ幅では折りたためる。表は `table-responsive` の中で横スクロールし、ページ全体は横にはみ出さない。CDN 等の外部資産は使わない。
@@ -259,7 +259,7 @@ source-codes=<小文字化し昇順に並べたsource codeのカンマ区切り>
   - 同じ job の中では preview と error export の値が一致し、行を照合できる。別 job・別 tenant では同じ内容の行でも別の値になり、job をまたいだ突合はできない。
   - 保存値（`t_import_validation_row.source_row_sha256`）と内部の整合確認（原本再読込・seal・再計算の fence）は変えない。DDL・migration は不要で、既存 job の整合性に影響しない。
   - 既存データへの影響: 表示値だけが変わる。本番では NF06 を一度も ON にしていないため、以前に出力した CSV は存在しない（dev/test で以前に出力した CSV の値とは一致しない）。鍵を差し替えた場合も同様に全ての表示値が変わる。
-- 鍵: `app.import-center.row-reference.hmac-key`（環境変数 `IMPORT_ROW_REFERENCE_HMAC_KEY`）。Base64（標準・URL-safe）で復号後32 byte以上。`application.yml` の既定値は開発用で、prod では使えない（`application-prod.yml` は既定を空にし、開発用鍵は実行時にも拒否する）。
+- 鍵: `app.import-center.row-reference.hmac-key`（環境変数 `IMPORT_ROW_REFERENCE_HMAC_KEY`）。Base64（標準・URL-safe）で復号後32 byte以上。`application.yml` の既定値は開発用で、prod では使えない（`application-prod.yml` は既定を空にし、開発用鍵と test 用鍵は実行時にも拒否する。表記を変えても復号後の byte 列で比べるため、`=` の省略や URL-safe 表記では通らない）。
   - 鍵が使えない間は、preview・error export を認可確認の直後・監査と原本読込の前に 503 `error.import.rowReferenceUnavailable` で拒否する（fail-closed）。
   - prod の起動検査 `ImportRowReferenceKeyStartupValidator`（`ImportAdmissionStartupValidator` と同じ考え方）: NF06 OFF は起動を止めない（設定済みで使えない鍵だけ WARN）。NF06 ON で未設定・形式不正・開発用鍵なら起動失敗。message は `state=` の固定値だけで、鍵の値を log・例外へ出さない。
 - 試験: `ImportSourceRowReferenceTest`、`ImportValidationResultServiceTest`（preview と CSV が同じ行参照で保存 hash を出さない・鍵の差替えで値が変わる・鍵が無ければ監査と原本読込の前に503）。
@@ -275,6 +275,8 @@ source-codes=<小文字化し昇順に並べたsource codeのカンマ区切り>
 - 管理者の法人 context は共通の `LegalEntityContextService` が `m_organization_unit` の全法人 ID（`AttendanceScopeMapper#selectAllLegalEntityIds`）から一意に決める。法人が2つ以上あると取込の全操作が403（`LEGAL_ENTITY_CONTEXT_REQUIRED`）になる。
 - tenant での限定は本バッチでは行わない。理由: `m_organization_unit.tenant_id` は将来用の BIGINT 列で、現行は tenant ごとの独立 DB 運用のため値を持たず、tenant で絞っても結果は変わらない。複数法人の企業で使うには管理者に法人を選ばせる設計変更が必要で、書込み境界の全 writer が使う共通 service の変更になるため、Owner 判断とする。
 - したがって初回は**単一法人前提**で運用する。ON の前に `SELECT COUNT(DISTINCT legal_entity_id) FROM m_organization_unit WHERE legal_entity_id IS NOT NULL AND deleted_flag = 0;` が 1 であることを確認する。複数法人の環境で ON にしても漏れる方向には働かない（全操作が403で閉じる）。
+  - この SQL は `selectAllLegalEntityIds` と同じ条件で、論理削除（`deleted_flag`）だけを見る。組織の状態（status）と有効期間は見ないため、無効・期間外の組織の法人IDも数える（W3-12 review P3-3）。
+  - 新規導入では V60 の移行組織 LEGACY（法人ID NULL）しか無く、結果は0件になる。0件でも全操作が403になるため、ON の前に法人IDを持つ組織を登録する。
 - 防御の重ね（P3-2）: `ImportMetadataService#bindMapping` は job 行の参照と `FOR UPDATE` に現在の法人を条件として付け、別法人の job と lock 前に消えた job を同じ404にする（以前は null を参照して500）。試験: `ImportMetadataBindMappingScopeTest`。
 
 ### 14.4 配備前提（P3-5 ほか）
