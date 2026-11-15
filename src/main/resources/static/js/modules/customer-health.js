@@ -150,7 +150,7 @@
                 $.ajax({
                     url: '/api/customer-success/health/snapshots',
                     type: 'POST',
-                    headers: window.SES && window.SES.csrf ? { [window.SES.csrf.header()]: window.SES.csrf.token() } : {},
+                    headers: window.SES && window.SES.csrf ? window.SES.csrf.header() : {},
                     success: function (res) {
                         if (res.code === 200) {
                             if (window.Toast) {
@@ -187,7 +187,7 @@
             url: '/api/customer-success/qbrs',
             type: 'POST',
             contentType: 'application/json',
-            headers: window.SES && window.SES.csrf ? { [window.SES.csrf.header()]: window.SES.csrf.token() } : {},
+            headers: window.SES && window.SES.csrf ? window.SES.csrf.header() : {},
             data: JSON.stringify(payload),
             success: function (res) {
                 if (res.code === 200) {

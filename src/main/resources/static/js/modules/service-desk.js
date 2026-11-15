@@ -63,7 +63,7 @@ function initListPage() {
             url: '/api/service-desk/requests',
             type: 'GET',
             data: params,
-            headers: window.SES && window.SES.csrf ? { [window.SES.csrf.header()]: window.SES.csrf.token() } : {},
+            headers: window.SES && window.SES.csrf ? window.SES.csrf.header() : {},
             success: function (res) {
                 if (res.code === 200) {
                     renderTable(res.data);
@@ -173,7 +173,7 @@ function initListPage() {
             url: '/api/customers',
             type: 'GET',
             data: { current: 1, size: 500 },
-            headers: window.SES && window.SES.csrf ? { [window.SES.csrf.header()]: window.SES.csrf.token() } : {},
+            headers: window.SES && window.SES.csrf ? window.SES.csrf.header() : {},
             success: function (res) {
                 if (res.code === 200 && res.data && res.data.records) {
                     const $sel = $('#newCustomerId').empty();
@@ -203,7 +203,7 @@ function initListPage() {
             type: 'POST',
             contentType: 'application/json',
             data: JSON.stringify(payload),
-            headers: window.SES && window.SES.csrf ? { [window.SES.csrf.header()]: window.SES.csrf.token() } : {},
+            headers: window.SES && window.SES.csrf ? window.SES.csrf.header() : {},
             success: function (res) {
                 $('#saveRequestBtn').prop('disabled', false);
                 if (res.code === 200) {
@@ -239,7 +239,7 @@ function initDetailPage(requestId) {
         $.ajax({
             url: `/api/service-desk/requests/${id}`,
             type: 'GET',
-            headers: window.SES && window.SES.csrf ? { [window.SES.csrf.header()]: window.SES.csrf.token() } : {},
+            headers: window.SES && window.SES.csrf ? window.SES.csrf.header() : {},
             success: function (res) {
                 if (res.code === 200) {
                     renderDetail(res.data);
@@ -342,7 +342,7 @@ function initDetailPage(requestId) {
                     type: 'POST',
                     contentType: 'application/json',
                     data: JSON.stringify(payload),
-                    headers: window.SES && window.SES.csrf ? { [window.SES.csrf.header()]: window.SES.csrf.token() } : {},
+                    headers: window.SES && window.SES.csrf ? window.SES.csrf.header() : {},
                     success: function (res) {
                         if (res.code === 200) {
                             if (window.Toast) window.Toast.success('ステータスを更新しました');
@@ -455,7 +455,7 @@ function initDetailPage(requestId) {
             type: 'POST',
             contentType: 'application/json',
             data: JSON.stringify(payload),
-            headers: window.SES && window.SES.csrf ? { [window.SES.csrf.header()]: window.SES.csrf.token() } : {},
+            headers: window.SES && window.SES.csrf ? window.SES.csrf.header() : {},
             success: function (res) {
                 $('#submitCommentBtn').prop('disabled', false);
                 if (res.code === 200) {
