@@ -40,6 +40,7 @@ class DocumentServiceImplH2Test {
     @Autowired DocumentMapper documentMapper;
     @Autowired DocumentVersionMapper documentVersionMapper;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired javax.sql.DataSource dataSource;
 
     @BeforeTransaction
     void prepareLegalEntityContext() {
@@ -138,5 +139,62 @@ class DocumentServiceImplH2Test {
         assertEquals("INVOICE_OUT", updated.getDocumentType());
         assertEquals(transactionDate.plusYears(10), updated.getRetentionUntil());
         assertNotNull(documentVersionMapper.findLatestByDocumentId(doc.getId()));
+    }
+
+    /**
+     * V197: 履歴・スキルシート取込（RESUME_INGESTION）と取込センターCSV（IMPORT）は、実際の DocumentService の
+     * {@code validateDocumentType} を通って受領として登録できる。H2 seed の同じ2行を消してから V197 を実行し、
+     * V197 の行だけで成立することを示す（以前はどの migration も2種別を作らず 400 になっていた）。
+     */
+    @Test
+    void H2DB_V197の文書種別で履歴取込と取込センターの原本をregisterReceivedで登録できる() throws Exception {
+        jdbcTemplate.update("DELETE FROM m_document_type WHERE code IN ('RESUME_INGESTION', 'IMPORT')");
+        java.sql.Connection connection = org.springframework.jdbc.datasource.DataSourceUtils.getConnection(dataSource);
+        try {
+            org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,
+                    new org.springframework.core.io.support.EncodedResource(
+                            new org.springframework.core.io.ClassPathResource(
+                                    "db/migration/V197__resume_ingestion_and_import_document_types.sql"),
+                            java.nio.charset.StandardCharsets.UTF_8));
+        } finally {
+            org.springframework.jdbc.datasource.DataSourceUtils.releaseConnection(connection, dataSource);
+        }
+        assertEquals(java.util.List.of("IMPORT:INCOMING", "RESUME_INGESTION:INCOMING"), jdbcTemplate.queryForList(
+                "SELECT CONCAT(code, ':', direction) FROM m_document_type WHERE code IN ('RESUME_INGESTION', 'IMPORT') "
+                        + "AND deleted_flag = 0 ORDER BY code", String.class));
+
+        // ResumeIngestionServiceImpl と同じ要求（方向は RECEIVED から INCOMING）
+        Document resume = documentService.registerReceived(DocumentRegisterRequest.builder()
+                .tenantId("default")
+                .documentType("RESUME_INGESTION")
+                .title("resume.pdf")
+                .sourceType("RECEIVED")
+                .businessKey("RESUME_INGESTION:970001")
+                .versionDiscriminator("original")
+                .originalName("resume.pdf")
+                .contentType("application/pdf")
+                .targetType("RESUME_INGESTION")
+                .targetId(970001L)
+                .build(), new ByteArrayInputStream("RESUME_BYTES".getBytes()));
+        assertNotNull(resume.getId());
+        Document storedResume = documentMapper.selectById(resume.getId());
+        assertEquals("RESUME_INGESTION", storedResume.getDocumentType());
+        assertEquals("INCOMING", storedResume.getDirection());
+        assertNull(storedResume.getRetentionUntil(), "取引日が無いため保存期限は未確定（処分候補にならない）");
+
+        // 取込センター（ImportCsvIngestionService と同じく方向を明示する受領）も種別の検査を通る
+        Document imported = documentService.registerReceived(DocumentRegisterRequest.builder()
+                .tenantId("default")
+                .documentType("IMPORT")
+                .title("CSV import")
+                .direction("INCOMING")
+                .sourceType("RECEIVED")
+                .businessKey("IMPORT:970002")
+                .versionDiscriminator("v1")
+                .originalName("upload.csv")
+                .contentType("text/csv")
+                .build(), new ByteArrayInputStream("a,b\n1,2\n".getBytes()));
+        assertNotNull(imported.getId());
+        assertEquals("IMPORT", documentMapper.selectById(imported.getId()).getDocumentType());
     }
 }

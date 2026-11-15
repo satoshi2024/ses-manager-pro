@@ -183,11 +183,9 @@ class ImportCsvIngestionRealMySqlTest {
         sourceId = metadata.createSource(new ImportSourceRequest(sourceCode, "合成source"));
         admission.bind(new ImportAuthorizedContext(TENANT, actorId, LEGAL_ENTITY),
                 new ImportUploadSource(sourceId, sourceCode.toLowerCase(java.util.Locale.ROOT), 1), CSV_HASH);
-        jdbc.update("""
-                INSERT IGNORE INTO m_document_type
-                  (code, name, direction, retention_years, retention_start_rule, legal_hold_supported, deleted_flag)
-                VALUES ('IMPORT', '合成取込CSV', 'INCOMING', 7, 'CREATED_AT', 1, 0)
-                """);
+        // 文書種別 IMPORT は V197 の seed に依存する（test で投入しない。投入すると seed の欠落を隠す）
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM m_document_type WHERE code='IMPORT' "
+                + "AND direction='INCOMING' AND deleted_flag=0", Integer.class), "V197 の文書種別 IMPORT");
     }
 
     @AfterEach
@@ -204,8 +202,7 @@ class ImportCsvIngestionRealMySqlTest {
                 + "(SELECT id FROM t_document WHERE tenant_id=? AND document_type='IMPORT')", TENANT, TENANT);
         jdbc.update("DELETE FROM t_document WHERE tenant_id=? AND document_type='IMPORT'", TENANT);
         if (sourceId > 0) jdbc.update("DELETE FROM t_import_source_system WHERE tenant_id=? AND id=?", TENANT, sourceId);
-        jdbc.update("DELETE FROM m_document_type WHERE code='IMPORT' AND NOT EXISTS "
-                + "(SELECT 1 FROM t_document WHERE document_type='IMPORT')");
+        // 文書種別 IMPORT は V197 の seed なので消さない
         storage.clear();
         if (groupId > 0) {
             jdbc.update("DELETE FROM t_permission_group_action WHERE tenant_id=? AND group_id=?", TENANT, groupId);

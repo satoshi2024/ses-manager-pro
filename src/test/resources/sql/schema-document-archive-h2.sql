@@ -43,7 +43,10 @@ VALUES
   ('ORDER_ACKNOWLEDGEMENT', '注文請書', 'OUTGOING', 10, 'TRANSACTION_DATE', 1),
   ('ACCEPTANCE', '検収書', 'OUTGOING', 10, 'TRANSACTION_DATE', 1),
   ('SERVICE_REQUEST_ATTACHMENT', 'サービス依頼添付', 'INCOMING', 10, 'TRANSACTION_DATE', 1),
-  ('BP_SUBMISSION', 'BP提出物', 'INCOMING', 10, 'TRANSACTION_DATE', 1);
+  ('BP_SUBMISSION', 'BP提出物', 'INCOMING', 10, 'TRANSACTION_DATE', 1),
+  -- V197: 履歴・スキルシート取込と取込センターCSV（両経路とも受領として登録する）
+  ('RESUME_INGESTION', '履歴・スキルシート取込原本', 'INCOMING', 3, 'TRANSACTION_DATE', 1),
+  ('IMPORT', '取込センターCSV原本', 'INCOMING', 3, 'TRANSACTION_DATE', 1);
 
 CREATE TABLE t_document (
   id                         BIGINT        AUTO_INCREMENT PRIMARY KEY,

@@ -275,10 +275,13 @@ class FlywayNf07PrivacyF1MigrationTest {
         migrateFresh();
         try (Connection connection = FRESH.createConnection(""); Statement st = connection.createStatement()) {
             assertEquals(1L, scalar(st, "SELECT COUNT(*) FROM flyway_schema_history WHERE version='196' AND success=1"));
+            // 件数は文書種別の数に依存させない（V197 が文書種別と DOCUMENT:<code> を足すため。P3-3）
             long documentTypes = scalar(st, "SELECT COUNT(*) FROM m_document_type");
-            assertEquals(CATALOG_FIXED_ELEMENTS + documentTypes,
-                    scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id='default'"),
-                    "固定の data element と文書種別ごとの DOCUMENT:<code>");
+            assertEquals(CATALOG_FIXED_ELEMENTS, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element "
+                    + "WHERE tenant_id='default' AND data_element_id NOT LIKE 'DOCUMENT:%'"), "文書以外の固定の data element");
+            assertEquals(documentTypes, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element "
+                    + "WHERE tenant_id='default' AND data_element_id LIKE 'DOCUMENT:%'"), "文書種別ごとの DOCUMENT:<code>");
+            long defaultRows = scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id='default'");
             assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id='default' "
                     + "AND subject_attribution='UNKNOWN' AND (provider_id IS NOT NULL OR data_element_id LIKE 'DOCUMENT:%' "
                     + "OR data_element_id LIKE 'INTEGRATION_HUB_%' OR data_element_id='EXTERNAL_API_READ_SNAPSHOT')"),
@@ -290,25 +293,26 @@ class FlywayNf07PrivacyF1MigrationTest {
             st.executeUpdate("INSERT INTO sys_user (tenant_id, username, password, real_name, role, status) "
                     + "VALUES ('nf07-seed', 'nf07-seed-user', 'x', 'NF07 seed', '管理者', 1)");
             for (int i = 0; i < 2; i++) {
-                org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,
-                        new org.springframework.core.io.support.EncodedResource(
-                                new org.springframework.core.io.ClassPathResource(
-                                        "db/migration/V196__nf07_privacy_data_element_catalog_seed.sql"),
-                                java.nio.charset.StandardCharsets.UTF_8));
-                assertEquals(CATALOG_FIXED_ELEMENTS + documentTypes,
-                        scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id='default'"),
+                for (String script : List.of("db/migration/V196__nf07_privacy_data_element_catalog_seed.sql",
+                        "db/migration/V197__resume_ingestion_and_import_document_types.sql")) {
+                    org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,
+                            new org.springframework.core.io.support.EncodedResource(
+                                    new org.springframework.core.io.ClassPathResource(script),
+                                    java.nio.charset.StandardCharsets.UTF_8));
+                }
+                assertEquals(defaultRows, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id='default'"),
                         "再実行で既存 tenant の行は増えない");
-                assertEquals(CATALOG_FIXED_ELEMENTS + documentTypes,
-                        scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id='nf07-seed'"),
+                assertEquals(defaultRows, scalar(st, "SELECT COUNT(*) FROM m_pii_data_element WHERE tenant_id='nf07-seed'"),
                         "新しい tenant には1回だけ入る");
+                assertEquals(documentTypes, scalar(st, "SELECT COUNT(*) FROM m_document_type"), "文書種別も重複しない");
             }
             assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM (SELECT tenant_id, data_element_id FROM m_pii_data_element "
                     + "GROUP BY tenant_id, data_element_id HAVING COUNT(*) > 1) d"), "重複なし");
         }
     }
 
-    /** V196 が tenant ごとに入れる固定の data element の件数（文書種別ごとの DOCUMENT:<code> を除く）。 */
-    private static final long CATALOG_FIXED_ELEMENTS = 27L;
+    /** V196 が tenant ごとに入れる文書以外の固定の data element の件数（DOCUMENT:<code> は文書種別ごとに数える）。 */
+    private static final long CATALOG_FIXED_ELEMENTS = 26L;
 
     // ---------------------------------------------------------------- helper
 
