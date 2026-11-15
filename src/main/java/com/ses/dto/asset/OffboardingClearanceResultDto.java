@@ -13,7 +13,7 @@ import java.util.List;
 @AllArgsConstructor
 public class OffboardingClearanceResultDto {
 
-    /** クリアランス判定（true: 退社可能 / 全返却・失効・免除済み, false: 退社ブロック） */
+    /** 退社可否。返却・license条件と、失効要求を登録できないaccountの有無を照合する。 */
     private boolean clearancePassed;
 
     /** 未返却の有効貸与資産数 */
@@ -21,6 +21,12 @@ public class OffboardingClearanceResultDto {
 
     /** 未失効の有効外部アカウント数 */
     private int unrevokedAccountCount;
+
+    /** 所有法人不明・例外保留・既存の空keyで失効要求を登録できない外部アカウント数 */
+    private int unregisterableAccountCount;
+
+    /** 失効要求を登録済みの未失効アカウント数 */
+    private int registeredAccountCount;
 
     /** 未解放の有効ライセンス数 */
     private int unreleasedLicenseCount;

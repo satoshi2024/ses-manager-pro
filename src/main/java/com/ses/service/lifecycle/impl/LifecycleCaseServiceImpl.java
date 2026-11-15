@@ -66,6 +66,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     private final ResignationGateChecker resignationGateChecker;
     private final LifecycleScopeService scopeService;
     private final EngineerSalesService engineerSalesService;
+    private final com.ses.service.ExternalAccountRevocationOutbox revocationOutbox;
     private final com.ses.service.lifecycle.LifecycleNotificationService notificationService;
     private final ObjectMapper objectMapper;
     /** 完了通知のafterCommit発行用。手動構築の単体テストではnullになり得る。 */
@@ -85,6 +86,10 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
             throw BusinessException.of(404, "error.lifecycle.engineerNotFound", "要員が見つかりません");
         }
         scopeService.assertCanAccessEngineer(applicantUser, engineer);
+        if (List.of("JOIN", "REINSTATEMENT").contains(cmd.getLifecycleType())) {
+            engineer = engineerMapper.selectByIdForUpdateForTenant(cmd.getEngineerId(), tenantId);
+            if (engineer == null) throw BusinessException.of(404, "error.lifecycle.engineerNotFound");
+        }
 
         // 同一要員の未終結退社案件の重複作成ガード（早期に400を返すための事前確認）。
         // この確認はlocking readではないため並行起票を止められない。正はV187の一意制約
@@ -713,7 +718,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public void completeCase(Long caseId, Long userId) {
         SysUser user = requireActor(userId);
         String tenantId = scopeService.requireTenant(user);
@@ -725,7 +730,11 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
             throw BusinessException.of(400, "error.lifecycle.invalidStateTransition", "進行中(ACTIVE)以外の案件は完了できません");
         }
 
-        Engineer engineer = findEngineerInTenant(lcCase, tenantId);
+        // 登録writerと同じengineer Xを先に保持し、完了前後の新規アカウント登録を直列化する。
+        Engineer engineer = "RESIGNATION".equals(lcCase.getLifecycleType())
+                ? engineerMapper.selectByIdForUpdateForTenant(lcCase.getEngineerId(), tenantId)
+                : findEngineerInTenant(lcCase, tenantId);
+        if (engineer == null) throw BusinessException.of(404, "error.lifecycle.caseNotFound");
         scopeService.assertCanEditCase(user, lcCase, engineer);
 
         // 阻害タスクの完了確認
@@ -747,6 +756,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 throw BusinessException.of(400, "error.lifecycle.resignationGateFailed", gateResult.getSummary());
             }
             resignationGateChecker.executeAutomaticGateActions(lcCase, engineer);
+            revocationOutbox.enqueueForResignation(lcCase, userId);
 
             // 要員ステータスをBenchへ更新。楽観ロックCASが0件のまま完了すると要員だけ稼動扱いで残るため409にする。
             engineer.setStatus("Bench");

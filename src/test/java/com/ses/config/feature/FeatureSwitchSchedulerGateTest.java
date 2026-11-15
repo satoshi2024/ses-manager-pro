@@ -47,6 +47,19 @@ import static org.mockito.Mockito.when;
 class FeatureSwitchSchedulerGateTest {
 
     @Test
+    void NF01_OFFなら外部失効outboxもtenant巡回を始めずONなら実行する() {
+        var dispatcher = mock(com.ses.service.ExternalAccountRevocationDispatcher.class);
+        TenantAwareBatchRunner runner = mock(TenantAwareBatchRunner.class);
+        var scheduler = new com.ses.service.lifecycle.ExternalAccountRevocationScheduler(
+                dispatcher, runner, disabledOnly(Feature.NF01));
+        scheduler.dispatchRevocations();
+        verifyNoInteractions(dispatcher, runner);
+        inject(scheduler, enabledOnly(Feature.NF01));
+        scheduler.dispatchRevocations();
+        verify(runner).run(any());
+    }
+
+    @Test
     void NF01_OFFならライフサイクルSLA監視は何もせずONなら実行する() {
         LifecycleSlaService slaService = mock(LifecycleSlaService.class);
         TenantAwareBatchRunner runner = mock(TenantAwareBatchRunner.class);

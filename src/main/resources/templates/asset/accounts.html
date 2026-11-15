@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org"
+<html xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
       layout:decorate="~{layout/base}">
 <head>
@@ -58,6 +58,7 @@
         </div>
     </div>
 
+    <span id="outbox-rerequest-permission" sec:authorize="hasRole('管理者')" hidden></span>
     <!-- 外部アカウント参照一覧 -->
     <div class="card bg-secondary border-secondary">
         <div class="card-header border-secondary d-flex justify-content-between align-items-center">
@@ -68,6 +69,10 @@
                 </select>
                 <select class="form-select form-select-sm bg-dark text-white border-secondary" id="filterStatusSelect" style="width: 150px;">
                     <option value="">全ステータス</option>
+                    <option value="OUTBOX" sec:authorize="hasAnyRole('管理者','HR')">失効要求の未処理一覧（全法人）</option>
+                    <option value="PENDING_CONFIRMATION">PENDING_CONFIRMATION (確認待ち)</option>
+                    <option value="UNKNOWN">UNKNOWN (要確認)</option>
+                    <option value="EXCEPTION_HOLD">EXCEPTION_HOLD (保留)</option>
                     <option value="ACTIVE">ACTIVE (有効)</option>
                     <option value="SUSPENDED">SUSPENDED (停止中)</option>
                     <option value="REVOKED">REVOKED (失効済)</option>

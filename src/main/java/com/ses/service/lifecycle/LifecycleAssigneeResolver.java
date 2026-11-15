@@ -49,11 +49,15 @@ public class LifecycleAssigneeResolver {
                                     Engineer engineer,
                                     Long applicantUserId,
                                     Map<String, Long> customAssignees) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        if (engineer == null || !tenantId.equals(engineer.getTenantId())) {
+            throw BusinessException.of(403, "TENANT_CONTEXT_MISMATCH");
+        }
         // 1. 個別指定の優先解決
         if (customAssignees != null && customAssignees.containsKey(tplTask.getTaskCode())) {
             Long customUserId = customAssignees.get(tplTask.getTaskCode());
             if (customUserId != null) {
-                SysUser user = sysUserMapper.selectById(customUserId);
+                SysUser user = sysUserMapper.selectByIdAndTenant(customUserId, tenantId);
                 if (user != null && user.getStatus() != null && user.getStatus() == 1) {
                     return ResolvedAssignee.builder()
                             .userId(user.getId())
@@ -78,7 +82,7 @@ public class LifecycleAssigneeResolver {
                 if (ruleValue != null && !ruleValue.isBlank()) {
                     try {
                         Long targetUserId = Long.parseLong(ruleValue.trim());
-                        SysUser user = sysUserMapper.selectById(targetUserId);
+                        SysUser user = sysUserMapper.selectByIdAndTenant(targetUserId, tenantId);
                         if (user != null && user.getStatus() != null && user.getStatus() == 1) {
                             resolved = ResolvedAssignee.builder()
                                     .userId(user.getId())
@@ -96,8 +100,10 @@ public class LifecycleAssigneeResolver {
                 if (ruleValue != null && !ruleValue.isBlank()) {
                     List<SysUser> users = sysUserMapper.selectList(
                             new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SysUser>()
+                                    .eq(SysUser::getTenantId, tenantId)
                                     .eq(SysUser::getRole, ruleValue.trim())
                                     .eq(SysUser::getStatus, 1)
+                                    .orderByAsc(SysUser::getId)
                     );
                     if (users != null && !users.isEmpty()) {
                         SysUser activeUser = users.get(0);
@@ -120,12 +126,14 @@ public class LifecycleAssigneeResolver {
                 if (engineer.getOrganizationId() != null) {
                     List<UserOrganization> userOrgs = userOrganizationMapper.selectList(
                             new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<UserOrganization>()
+                                    .eq(UserOrganization::getTenantId, tenantId)
                                     .eq(UserOrganization::getOrganizationId, engineer.getOrganizationId())
+                                    .orderByAsc(UserOrganization::getId)
                                     .isNotNull(UserOrganization::getManagerUserId)
                     );
                     if (userOrgs != null && !userOrgs.isEmpty()) {
                         Long mgrId = userOrgs.get(0).getManagerUserId();
-                        SysUser manager = sysUserMapper.selectById(mgrId);
+                        SysUser manager = sysUserMapper.selectByIdAndTenant(mgrId, tenantId);
                         if (manager != null && manager.getStatus() != null && manager.getStatus() == 1) {
                             resolved = ResolvedAssignee.builder()
                                     .userId(manager.getId())
@@ -146,7 +154,7 @@ public class LifecycleAssigneeResolver {
                                 .findFirst()
                                 .orElse(sales.get(0));
                         if (primary.getSalesUserId() != null) {
-                            SysUser salesUser = sysUserMapper.selectById(primary.getSalesUserId());
+                            SysUser salesUser = sysUserMapper.selectByIdAndTenant(primary.getSalesUserId(), tenantId);
                             if (salesUser != null && salesUser.getStatus() != null && salesUser.getStatus() == 1) {
                                 resolved = ResolvedAssignee.builder()
                                         .userId(salesUser.getId())
@@ -163,7 +171,7 @@ public class LifecycleAssigneeResolver {
                 if (engineer.getId() != null) {
                     EngineerAccountLink link = engineerAccountLinkService.findByEngineerId(engineer.getId());
                     if (link != null && link.getSysUserId() != null) {
-                        SysUser engUser = sysUserMapper.selectById(link.getSysUserId());
+                        SysUser engUser = sysUserMapper.selectByIdAndTenant(link.getSysUserId(), tenantId);
                         if (engUser != null && engUser.getStatus() != null && engUser.getStatus() == 1) {
                             resolved = ResolvedAssignee.builder()
                                     .userId(engUser.getId())
@@ -178,7 +186,7 @@ public class LifecycleAssigneeResolver {
             case "APPLICANT":
             default:
                 if (applicantUserId != null) {
-                    SysUser appUser = sysUserMapper.selectById(applicantUserId);
+                    SysUser appUser = sysUserMapper.selectByIdAndTenant(applicantUserId, tenantId);
                     if (appUser != null && appUser.getStatus() != null && appUser.getStatus() == 1) {
                         resolved = ResolvedAssignee.builder()
                                 .userId(appUser.getId())

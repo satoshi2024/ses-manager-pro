@@ -43,6 +43,7 @@ class ExternalAccountTenantBoundaryTest {
     @Mock EngineerMapper engineerMapper;
     @Mock SysUserMapper sysUserMapper;
     @Mock AttendanceScopeMapper attendanceScopeMapper;
+    @Mock ExternalAccountRevocationOutbox revocationOutbox;
 
     @InjectMocks ExternalAccountServiceImpl service;
 
@@ -56,6 +57,33 @@ class ExternalAccountTenantBoundaryTest {
     @AfterEach
     void clearScope() {
         AccountingTenantContextHolder.clear();
+    }
+
+    @Test
+    void 登録は要員ロック待機前の古い退社snapshotを使わない分離レベルを宣言する() throws Exception {
+        for (String name : new String[]{"registerAccountReference", "createAccountReference"}) {
+            var method = ExternalAccountServiceImpl.class.getMethod(name,
+                    Long.class, String.class, String.class, Long.class, String.class, Long.class);
+            assertThat(method.getDeclaringClass()).isEqualTo(ExternalAccountServiceImpl.class);
+            assertThat(method.getAnnotation(org.springframework.transaction.annotation.Transactional.class).isolation())
+                    .isEqualTo(org.springframework.transaction.annotation.Isolation.READ_COMMITTED);
+        }
+    }
+
+    @Test
+    void 外側のRRはscopeや要員を読む前に拒否する() {
+        boolean previous = org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive();
+        Integer previousIsolation = org.springframework.transaction.support.TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
+        try {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(java.sql.Connection.TRANSACTION_REPEATABLE_READ);
+            assertThatThrownBy(() -> service.registerAccountReference(7L, "synthetic", "ENGINEER", 21L, "MEMBER", 1L))
+                    .isInstanceOf(BusinessException.class).hasMessage("error.asset.revocationIsolationRequired");
+            org.mockito.Mockito.verifyNoInteractions(legalEntityContextService, engineerMapper, referenceMapper, revocationOutbox);
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(previous);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(previousIsolation);
+        }
     }
 
     @Test
@@ -78,7 +106,7 @@ class ExternalAccountTenantBoundaryTest {
                 .fullName("境界テスト要員").build();
         engineer.setId(21L);
         when(systemMapper.selectById(7L)).thenReturn(system);
-        when(engineerMapper.selectByIdForTenant(21L, "tenant-a")).thenReturn(engineer);
+        when(engineerMapper.selectByIdForUpdateForTenant(21L, "tenant-a")).thenReturn(engineer);
         when(referenceMapper.insert(any(ExternalAccountReference.class))).thenAnswer(invocation -> {
             ExternalAccountReference inserted = invocation.getArgument(0);
             inserted.setId(100L);
@@ -98,7 +126,7 @@ class ExternalAccountTenantBoundaryTest {
         Engineer otherLegalEntity = Engineer.builder().tenantId("tenant-a").legalEntityId(12L)
                 .fullName("別法人要員").build();
         otherLegalEntity.setId(22L);
-        when(engineerMapper.selectByIdForTenant(22L, "tenant-a")).thenReturn(otherLegalEntity);
+        when(engineerMapper.selectByIdForUpdateForTenant(22L, "tenant-a")).thenReturn(otherLegalEntity);
 
         assertThatThrownBy(() -> service.registerAccountReference(
                 7L, "other@example.jp", "ENGINEER", 22L, "MEMBER", 1L))
@@ -106,6 +134,48 @@ class ExternalAccountTenantBoundaryTest {
                 .hasMessageContaining("ASSIGNEE_SCOPE_MISMATCH");
 
         verify(referenceMapper, never()).insert(any(ExternalAccountReference.class));
+    }
+
+    @Test
+    void 失効要求登録後は識別子や状態を直接書き換えない() {
+        ExternalAccountReference row = ExternalAccountReference.builder().tenantId("tenant-a").legalEntityId(11L)
+                .status("PENDING_CONFIRMATION").idempotencyKey("lifecycle-resign:1:42:g1")
+                .externalSyncStatus("REVOKE_REQUESTED").build(); row.setId(42L);
+        when(referenceMapper.selectByIdAndScope(42L, "tenant-a", 11L)).thenReturn(row);
+        assertThatThrownBy(() -> service.updateAccountReference(42L, "changed", "ADMIN", 1L))
+                .isInstanceOf(BusinessException.class).hasMessage("error.asset.revocationTargetFrozen");
+        assertThatThrownBy(() -> service.changeStatus(42L, "ACTIVE", 1L))
+                .isInstanceOf(BusinessException.class).hasMessage("error.asset.revocationTargetFrozen");
+        row.setStatus("REVOKED");
+        assertThatThrownBy(() -> service.updateAccountReference(42L, "different-target", "MEMBER", 1L))
+                .isInstanceOf(BusinessException.class).hasMessage("error.asset.revocationTargetFrozen");
+        verify(referenceMapper, never()).update(any(), any());
+    }
+
+    @Test void UNKNOWNのPENDINGを送信済みへ降格しない() { assertUnknownPoll(ExternalAccountProviderClient.RevokeConfirmationStatus.PENDING, false); }
+    @Test void UNKNOWNのtimeoutを送信済みへ降格しない() { assertUnknownPoll(ExternalAccountProviderClient.RevokeConfirmationStatus.FAILED_OR_TIMEOUT, false); }
+    @Test void UNKNOWNのpoll例外を送信済みへ降格しない() { assertUnknownPoll(null, true); }
+
+    private void assertUnknownPoll(ExternalAccountProviderClient.RevokeConfirmationStatus outcome, boolean failure) {
+        ExternalAccountReference row = ExternalAccountReference.builder().tenantId("tenant-a").legalEntityId(11L)
+                .status("UNKNOWN").externalSyncStatus(ExternalAccountRevocationStates.UNKNOWN)
+                .version(1).retryCount(0).idempotencyKey("lifecycle-resign:1:30:g1").build(); row.setId(30L);
+        when(referenceMapper.selectPendingForTenant(any(), any())).thenReturn(List.of(row));
+        when(referenceMapper.claimRevokePoll(any(), any(), any(), any(), any(), any())).thenReturn(1);
+        when(referenceMapper.selectByIdAndScope(30L, "tenant-a", 11L)).thenReturn(row);
+        if (failure) when(providerClient.checkRevokeConfirmation(row)).thenThrow(new IllegalStateException("synthetic"));
+        else when(providerClient.checkRevokeConfirmation(row)).thenReturn(outcome);
+        service.processPendingRevokePollJob();
+        verify(revocationOutbox).completePoll(org.mockito.ArgumentMatchers.eq(row), org.mockito.ArgumentMatchers.eq("UNKNOWN"),
+                org.mockito.ArgumentMatchers.eq(1), any(), org.mockito.ArgumentMatchers.eq(ExternalAccountRevocationStates.UNKNOWN), any());
+        verify(confirmationService, never()).confirm(any(), any());
+    }
+
+    @Test void 退社専用の全法人列挙は別tenantを拒否し本人用は従来の法人scopeを保つ() {
+        assertThatThrownBy(() -> service.getUnrevokedAccountsForEngineer("tenant-b", 21L)).isInstanceOf(BusinessException.class);
+        service.getActiveAccountsByAssignee("ENGINEER", 21L);
+        verify(referenceMapper).selectActiveByAssignee("ENGINEER", 21L, "tenant-a", 11L);
+        verify(referenceMapper, never()).selectUnrevokedForEngineer(any(), any());
     }
 
     @Test

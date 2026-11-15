@@ -31,7 +31,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** fail-closed providerから実台帳・退社blockerまでのH2回帰。 */
-@TestPropertySource(properties = {"external-account.provider=none", "app.security.oidc.tenant-id="})
+@TestPropertySource(properties = {"external-account.provider=none", "app.security.oidc.tenant-id=", "app.features.nf01.enabled=true"})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class ExternalAccountFailClosedOffboardingIntegrationTest extends BaseIntegrationTest {
     private static final String ISOLATED_DATABASE = "jdbc:h2:mem:offboarding-failclosed-"
@@ -89,7 +89,10 @@ class ExternalAccountFailClosedOffboardingIntegrationTest extends BaseIntegratio
     @AfterEach
     void cleanOnlyFixtureRowsAndSecurityContext() {
         TenantTestSecurity.clear();
-        if (referenceId != null) jdbcTemplate.update("DELETE FROM t_external_account_reference WHERE id = ?", referenceId);
+        if (referenceId != null) {
+            jdbcTemplate.update("DELETE FROM t_asset_event WHERE reference_type = 'EXTERNAL_ACCOUNT_REFERENCE' AND reference_id = ?", referenceId);
+            jdbcTemplate.update("DELETE FROM t_external_account_reference WHERE id = ?", referenceId);
+        }
         if (systemId != null) jdbcTemplate.update("DELETE FROM m_external_account_system WHERE id = ?", systemId);
         if (engineerId != null) jdbcTemplate.update("DELETE FROM t_engineer WHERE id = ?", engineerId);
         if (actorUserId != null) {
@@ -100,7 +103,7 @@ class ExternalAccountFailClosedOffboardingIntegrationTest extends BaseIntegratio
     }
 
     @RepeatedTest(2)
-    void failClosedRequestAndUnknownPollKeepOffboardingBlockedUntilHumanConfirmation() {
+    void failClosedRequestRemainsVisibleAndRegisteredRequestsDoNotBlockOffboarding() {
         assertThat(providerClient).isInstanceOf(FailClosedExternalAccountProviderClient.class);
         assertThat(AopUtils.getTargetClass(externalAccountService)).isEqualTo(ExternalAccountServiceImpl.class);
         assertThat(AopUtils.getTargetClass(assetOffboardingService)).isEqualTo(AssetOffboardingServiceImpl.class);
@@ -124,14 +127,15 @@ class ExternalAccountFailClosedOffboardingIntegrationTest extends BaseIntegratio
         referenceMapper.insert(reference);
         referenceId = reference.getId();
 
-        assetOffboardingService.triggerOffboardingRevocations(engineerId, actorUserId);
+        externalAccountService.requestRevokeWithIdempotency(referenceId, "fail-closed:" + referenceId, actorUserId);
 
         ExternalAccountReference afterRequest = referenceMapper.selectByIdAndScope(referenceId, tenantId, legalEntityId);
         assertThat(afterRequest.getStatus()).isEqualTo("PENDING_CONFIRMATION");
         assertThat(afterRequest.getRevokeRequestedAt()).isNotNull();
         assertThat(afterRequest.getRevokeRequestedBy()).isEqualTo(actorUserId);
         assertThat(afterRequest.getRevokeConfirmedAt()).isNull();
-        assertThat(afterRequest.getRetryCount()).isZero();
+        assertThat(afterRequest.getRetryCount()).isEqualTo(1);
+        assertThat(afterRequest.getExternalSyncStatus()).isEqualTo("REVOKE_SEND_FAILED");
 
         int madeDue = jdbcTemplate.update("""
                 UPDATE t_external_account_reference
@@ -147,24 +151,27 @@ class ExternalAccountFailClosedOffboardingIntegrationTest extends BaseIntegratio
 
         ExternalAccountReference afterPoll = referenceMapper.selectByIdAndScope(referenceId, tenantId, legalEntityId);
         assertThat(confirmedByPoll).isZero();
-        assertThat(afterPoll.getStatus()).isEqualTo("UNKNOWN");
+        assertThat(afterPoll.getStatus()).isEqualTo("PENDING_CONFIRMATION");
+        assertThat(afterPoll.getExternalSyncStatus()).isEqualTo("REVOKE_SEND_FAILED");
         assertThat(afterPoll.getRevokeConfirmedAt()).isNull();
         assertThat(afterPoll.getRevokeConfirmedBy()).isNull();
         assertThat(afterPoll.getActorType()).isNull();
         assertThat(afterPoll.getConfirmationSource()).isNull();
         assertThat(afterPoll.getRevokeConfirmedSource()).isNull();
         assertThat(afterPoll.getRetryCount()).isEqualTo(1);
-        assertThat(afterPoll.getNextRetryAt()).isAfter(LocalDateTime.now().plusMinutes(9));
+        assertThat(afterPoll.getVersion()).isEqualTo(afterRequest.getVersion());
+        assertThat(afterPoll.getNextRetryAt()).isBefore(LocalDateTime.now());
 
         // この機能に外部アカウント専用event tableはない。永続confirmation attributionを全列で検証する。
         OffboardingClearanceResultDto firstCheck = assetOffboardingService
                 .checkOffboardingClearance(engineerId, null, null);
         OffboardingClearanceResultDto repeatedCheck = assetOffboardingService
                 .checkOffboardingClearance(engineerId, null, null);
-        assertThat(firstCheck.isClearancePassed()).isFalse();
+        assertThat(firstCheck.isClearancePassed()).isTrue();
+        assertThat(firstCheck.getUnregisterableAccountCount()).isZero();
         assertThat(firstCheck.getUnrevokedAccountCount()).isEqualTo(1);
         assertThat(firstCheck.isWaived()).isFalse();
-        assertThat(repeatedCheck.isClearancePassed()).isFalse();
+        assertThat(repeatedCheck.isClearancePassed()).isTrue();
         assertThat(repeatedCheck.getUnrevokedAccountCount()).isEqualTo(1);
         assertThat(repeatedCheck.isWaived()).isFalse();
     }

@@ -228,17 +228,12 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
 
         LicenseAssignment licAssign = licenseService.assignLicense(plan.getId(), "ENGINEER", engineerId, ref.getId(), LocalDate.now(), 1L);
 
-        // 3. オフボーディング一括無効化トリガー実行
-        assetOffboardingService.triggerOffboardingRevocations(engineerId, 1L);
-
-        // 4. 検証: アカウントが REVOKED または SUSPENDED になっていること
-        ExternalAccountReference updatedRef = externalAccountReferenceMapper.selectById(ref.getId());
-        assertThat(updatedRef.getStatus()).isIn("REVOKED", "SUSPENDED");
-        assertThat(updatedRef.getRevokeRequestedAt()).isNotNull();
-
-        // 5. 検証: ライセンスが RELEASED になっていること
-        LicenseAssignment updatedLic = licenseAssignmentMapper.selectById(licAssign.getId());
-        assertThat(updatedLic.getStatus()).isEqualTo("RELEASED");
+        // 旧入口からproviderを同期送信せず、基準日を持つ退社案件の完了処理へ限定する。
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                assetOffboardingService.triggerOffboardingRevocations(engineerId, 1L))
+                .isInstanceOf(com.ses.common.exception.BusinessException.class);
+        assertThat(externalAccountReferenceMapper.selectById(ref.getId()).getStatus()).isEqualTo("ACTIVE");
+        assertThat(licenseAssignmentMapper.selectById(licAssign.getId()).getStatus()).isEqualTo("ACTIVE");
     }
 
     @Test
