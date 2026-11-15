@@ -89,6 +89,8 @@ spring:
         - classpath:sql/schema-integration-hub-external-audit-retention-h2.sql
         # V193: NF-06 取込センター画面のmenuと import.metadata.manage（管理者専用groupの明示許可・他groupのdeny）
         - classpath:sql/schema-import-center-menu-permission-h2.sql
+        # V194: NF08 B2c-1 durable claim列・費用ledger 2表・監査の存在照会索引（t_ai_recommendation_run と t_audit_log の作成より後）
+        - classpath:sql/schema-nf08-dispatch-claim-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

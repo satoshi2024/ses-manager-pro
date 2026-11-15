@@ -747,6 +747,8 @@ CREATE TABLE t_audit_log (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_engineer_audit_reference ON t_audit_log(reference_type, reference_id);
+-- V194（NF08 C-1）: ATTEMPT / RESULT 監査の存在照会（claim IDの完全一致）
+CREATE INDEX idx_audit_dispatch_key ON t_audit_log(idempotency_key, application_code, id);
 
 DROP TABLE IF EXISTS t_external_api_audit CASCADE;
 CREATE TABLE t_external_api_audit (

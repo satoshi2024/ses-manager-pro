@@ -36,3 +36,5 @@ BpPaymentTenantSqlMySqlTest
 GlobalEpochFenceMySqlTest
 ActorEpochFenceMySqlTest
 OrganizationScopeFenceMySqlTest
+CopilotDispatchClaimMySqlIntegrationTest
+FlywayV194DispatchClaimLedgerMySqlTest

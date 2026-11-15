@@ -9,18 +9,16 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 外部送信費用のJST日次/月次累計。送信前に上限見積りを予約し、応答後にusageの実費へ精算する。
- * <p>制約: 単一プロセス内のメモリ計数であり、再起動で累計は0に戻り、複数instance間でも共有しない。
- * 永続化（再起動跨ぎ・instance間共有）は利用者決定Q-11により専用の永続費用ledger table（DDL、B2c-1と同じ
- * migration。版番号は未割当で暫定V191）で行う。設計は
- * {@code .kiro/roadmap/2026-10-18-snf-nf08-c2-b2-technical-plan.md} の「永続費用ledger」節を参照。
- * それまでの運用は単一instanceとし、provider側の硬い上限（GCP API quota。budget alertは通知だけで止めない）を併用する。</p>
+ * 外部送信費用のJST日次/月次累計の<b>in-memory実装</b>（{@link ExternalSendCostLedger.Kind#MEMORY}、test/local専用）。
+ * 送信前に上限見積りを予約し、応答後にusageの実費へ精算する。
+ * <p>制約: 単一プロセス内のメモリ計数であり、再起動で累計は0に戻り、複数instance間でも共有しない。本番の上限には
+ * 使わない。本番の上限は利用者決定Q-11によりDBの永続費用ledger（V194、{@link PersistentExternalSendCostLedger}）で守る。
+ * B2c-1の間はgatewayを永続ledgerへ接続しておらず（B2c-2で接続）、prodは external-send=true 自体を起動拒否する
+ * （{@code AiProductionSafetyValidator}）。設計は {@code .kiro/roadmap/2026-10-18-snf-nf08-c2-b2-technical-plan.md}
+ * の「W3-03 計画更新」§1を参照。</p>
  * <p>時計が戻った場合は記録済みの日付・月を維持し、累計を0へ戻さない（時計の逆行で上限を回避させない）。</p>
  */
-public final class AiExternalSendBudgetLedger {
-
-    public static final String REASON_DAILY = "AI_EXTERNAL_SEND_DAILY_COST_LIMIT";
-    public static final String REASON_MONTHLY = "AI_EXTERNAL_SEND_MONTHLY_COST_LIMIT";
+public final class AiExternalSendBudgetLedger implements ExternalSendCostLedger {
 
     private final AiExternalSendApproval.CostLimitSnapshot limit;
     private final Clock clock;
@@ -84,6 +82,17 @@ public final class AiExternalSendBudgetLedger {
         return new Totals(day, dayTotalYen, month, monthTotalYen);
     }
 
+    @Override
+    public Kind kind() {
+        return Kind.MEMORY;
+    }
+
+    /** このin-memory実装は1つの承認（1 provider）だけを数えるため、cost_scopeを区別しない。 */
+    @Override
+    public Totals totals(String costScope) {
+        return totals();
+    }
+
     private void adjust(Reservation reservation, long deltaYen) {
         if (reservation.day().equals(day)) {
             dayTotalYen = Math.max(0, dayTotalYen + deltaYen);
@@ -143,7 +152,4 @@ public final class AiExternalSendBudgetLedger {
         }
     }
 
-    /** 現在のJST日・月の累計（円）。 */
-    public record Totals(LocalDate day, long dayYen, YearMonth month, long monthYen) {
-    }
 }
