@@ -48,6 +48,17 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
     SysUser selectByIdForUpdate(@Param("id") Long id);
 
     /**
+     * NF01 lock rank 3 の利用者行lock（細粒度epoch計画 §3.1・§3.4）。論理削除済みの行は返さない。
+     * {@code tenantId} が {@code null} ならIDだけで照合する。{@code exclusive=false} は {@code FOR SHARE} で、
+     * H2は解釈しないため呼出しは {@code ActorShareLock} だけにする（H2では {@code exclusive=true} で代える）。
+     */
+    @Select("<script>SELECT * FROM sys_user WHERE id = #{id} AND deleted_flag = 0"
+            + "<if test='tenantId != null'> AND tenant_id = #{tenantId}</if> "
+            + "<choose><when test='exclusive'>FOR UPDATE</when><otherwise>FOR SHARE</otherwise></choose></script>")
+    SysUser selectActiveByIdForLock(@Param("id") Long id, @Param("tenantId") String tenantId,
+                                    @Param("exclusive") boolean exclusive);
+
+    /**
      * ユーザー名でユーザーを検索する
      * ログイン認証時にユーザー情報を取得するために使用
      *

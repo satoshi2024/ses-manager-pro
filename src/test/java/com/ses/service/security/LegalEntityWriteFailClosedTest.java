@@ -84,7 +84,8 @@ class LegalEntityWriteFailClosedTest {
         EngineerServiceImpl service = new EngineerServiceImpl(
                 mock(ContractMapper.class), mock(ProposalMapper.class),
                 mock(EngineerSalesService.class), mock(EngineerAccountLinkService.class),
-                mock(com.ses.mapper.SysUserMapper.class), mock(TenantOwnershipResolver.class));
+                mock(com.ses.mapper.SysUserMapper.class), mock(TenantOwnershipResolver.class),
+                mock(com.ses.service.security.epoch.AuthorizationEpochFence.class));
         ReflectionTestUtils.setField(service, "legalEntityContextService", legalEntityContextService);
 
         BusinessException ex = assertThrows(BusinessException.class,

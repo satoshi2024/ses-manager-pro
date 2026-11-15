@@ -61,8 +61,8 @@ class GlobalActorWriterFenceTest {
      * 契約外の書込みを1件でも足すと失敗する（W3-15 review P3-2）。
      *
      * <ul>
-     *   <li>EngineerServiceImpl（要員削除時の連携ユーザー停止。entityの全体更新が残る唯一の既知例外）は W3-16a F-5 で
-     *       status列の列限定更新＋fence接続へ改める。改めたらこの契約も更新すること。</li>
+     *   <li>EngineerServiceImpl（要員削除時の連携ユーザー停止）は W3-16a F-5 で、lock済みの連携ユーザー行の status列だけを
+     *       書く列限定更新＋actor epochのfence接続へ改めた（entityの全体更新の既知例外は無くなった）。</li>
      *   <li>ResignationGateChecker（退社完了時の連携ユーザー停止）は W3-16b でfence接続する。</li>
      * </ul>
      */
@@ -72,15 +72,17 @@ class GlobalActorWriterFenceTest {
             "com/ses/service/security/impl/AccountLockServiceImpl.java",
             new SysUserWriteContract("failed_count・locked_untilだけ（列限定の注釈SQL）", 3, Set.of("updateLockState"), Set.of()),
             "com/ses/service/impl/EngineerServiceImpl.java",
-            new SysUserWriteContract("要員削除時の連携ユーザー停止（W3-16a F-5で列限定・fence接続へ）", 1,
-                    Set.of("updateById"), Set.of()),
+            new SysUserWriteContract("要員削除時の連携ユーザー停止（status列だけ、F-5。W3-16aでfence接続）", 1,
+                    Set.of("update"), Set.of("status")),
             "com/ses/service/lifecycle/ResignationGateChecker.java",
             new SysUserWriteContract("退社完了時の連携ユーザー停止（W3-16bでfence接続）", 1, Set.of("update"),
                     Set.of("status", "updated_at")));
 
-    /** SysUser entityの全体更新（{@code updateById(entity)}・{@code update(entity, wrapper)}）を残してよい既知の例外。 */
-    private static final Set<String> SYS_USER_ENTITY_UPDATE_EXCEPTIONS = Set.of(
-            "com/ses/service/impl/EngineerServiceImpl.java");
+    /**
+     * SysUser entityの全体更新（{@code updateById(entity)}・{@code update(entity, wrapper)}）を残してよい既知の例外。
+     * W3-16a F-5 で EngineerServiceImpl の全体更新を列限定へ改めたため、例外は無い（SysUserServiceImpl.updateUser は別契約）。
+     */
+    private static final Set<String> SYS_USER_ENTITY_UPDATE_EXCEPTIONS = Set.of();
 
     /**
      * SysUserServiceImpl 内の書込み呼出しの契約（メソッド → 件数）。fenceを通す入口（create/update/status/delete/

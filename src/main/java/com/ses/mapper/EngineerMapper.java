@@ -196,6 +196,15 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
             @org.apache.ibatis.annotations.Param("monthEnd") java.time.LocalDate monthEnd,
             @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
+    /**
+     * NF01 lock rank 7（engineer epochのanchor、細粒度epoch計画 §2.2・§3.1）。主キー一点の {@code FOR UPDATE} で行をlockし、
+     * anchorの照合に要る列だけを返す。論理削除済みの行も返す（要員削除の後段の営業解除・紐付け解除も、lockしてから
+     * 世代を進めるため）。tenantでは絞らず、呼出側がDBの {@code tenant_id} でanchorを作る。epoch列は読まない（E-7）。
+     */
+    @Select("SELECT id, tenant_id, deleted_flag, organization_id, legal_entity_id, version FROM t_engineer "
+            + "WHERE id = #{id} FOR UPDATE")
+    Engineer selectScopeAnchorForUpdate(@Param("id") Long id);
+
     @Select("SELECT e.* FROM t_engineer e "
             + "WHERE e.id = #{id} AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0 FOR UPDATE")
     Engineer selectByIdForUpdateForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
