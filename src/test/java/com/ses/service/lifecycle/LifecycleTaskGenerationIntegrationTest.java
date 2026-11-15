@@ -70,6 +70,7 @@ class LifecycleTaskGenerationIntegrationTest {
     @Autowired private OrganizationUnitMapper organizationUnitMapper;
     @Autowired private LifecycleTaskMapper taskMapper;
     @Autowired private ApprovalRequestMapper approvalRequestMapper;
+    @Autowired private com.ses.mapper.LifecycleLockMapper lifecycleLockMapper;
     @Autowired private JdbcTemplate jdbc;
 
     private SysUser admin;
@@ -94,6 +95,32 @@ class LifecycleTaskGenerationIntegrationTest {
     void tearDown() {
         AccountingTenantContextHolder.clear();
         SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void lock文の後の読み直しはMyBatisのsession_cacheではなく現在の行を読む() {
+        // W3-16b M6で判明: lock前と同じ照会をlock後に繰り返すと session cache がlock前の結果を返していた。
+        // ここではMyBatisを通さない削除（他transactionのcommitの代わり）の後に、lock文 → 読み直しで現在の行を読むことを確かめる。
+        long suffix = System.nanoTime();
+        SysUser linked = insertUser("w316b_cache_" + suffix, "要員");
+        EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId(TENANT);
+        link.setEngineerId(engineer.getId());
+        link.setSysUserId(linked.getId());
+        engineerAccountLinkMapper.insert(link);
+        assertEquals(link.getId(), engineerAccountLinkMapper.selectByEngineerIdAndLinkTenant(engineer.getId(), TENANT).getId());
+        jdbc.update("DELETE FROM t_engineer_account_link WHERE id = ?", link.getId());
+
+        engineerMapper.selectScopeAnchorForUpdate(engineer.getId());
+        assertEquals(null, engineerAccountLinkMapper.selectByEngineerIdAndLinkTenant(engineer.getId(), TENANT),
+                "要員行のlock文の後は現在の行（削除済み）を読む");
+
+        engineerAccountLinkMapper.insert(link);
+        assertEquals(link.getId(), engineerAccountLinkMapper.selectByEngineerIdAndLinkTenant(engineer.getId(), TENANT).getId());
+        jdbc.update("DELETE FROM t_engineer_account_link WHERE id = ?", link.getId());
+        lifecycleLockMapper.lockEngineer(engineer.getId(), TENANT, true);
+        assertEquals(null, engineerAccountLinkMapper.selectByEngineerIdAndLinkTenant(engineer.getId(), TENANT),
+                "lock planのlock文の後も現在の行を読む（退社完了の再discovery）");
     }
 
     @Test

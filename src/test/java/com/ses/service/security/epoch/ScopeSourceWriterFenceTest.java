@@ -503,6 +503,38 @@ class ScopeSourceWriterFenceTest {
     }
 
     @Test
+    void lock後の読み直しがMyBatisのsession_cacheで古い結果にならないようanchorのlock文はcacheを消す() {
+        // W3-16b M6（実MySQL）で判明: 同じtransactionでlock前に実行した照会をlock後に繰り返すと、MyBatisのsession cacheが
+        // lock前の結果を返し、退社完了の再discovery・紐付け解除・要員削除の読み直しが待っていた相手のcommitを見落とした。
+        // anchorのlock文（とexecutorの全lock文）は実行前にsession cacheを消すこと。
+        List<String> violations = new ArrayList<>();
+        int executorStatements = 0;
+        for (Method method : com.ses.mapper.LifecycleLockMapper.class.getDeclaredMethods()) {
+            if (method.isSynthetic() || method.getAnnotation(org.apache.ibatis.annotations.Select.class) == null) {
+                continue;
+            }
+            executorStatements++;
+            if (!flushesCache(method)) {
+                violations.add("LifecycleLockMapper#" + method.getName());
+            }
+        }
+        for (String name : List.of("selectScopeAnchorForUpdate", "selectByIdForUpdateForTenant")) {
+            for (Method method : com.ses.mapper.EngineerMapper.class.getDeclaredMethods()) {
+                if (method.getName().equals(name) && !flushesCache(method)) {
+                    violations.add("EngineerMapper#" + name);
+                }
+            }
+        }
+        assertEquals(List.of(), violations, "lock文は @Options(flushCache = TRUE) を持つ");
+        assertTrue(executorStatements >= 20, "executorのlock文を読めていること: " + executorStatements);
+    }
+
+    private static boolean flushesCache(Method method) {
+        org.apache.ibatis.annotations.Options options = method.getAnnotation(org.apache.ibatis.annotations.Options.class);
+        return options != null && options.flushCache() == org.apache.ibatis.annotations.Options.FlushCachePolicy.TRUE;
+    }
+
+    @Test
     void 要員行をX_lockする業務writerは外部キー参照先の利用者行と組織行を先に共有lockする() {
         // W3-16a後半 review P3-1: 要員行（rank 7）のX lockの後にinsert・更新の外部キー検査が組織行（rank 6）へS lockを付けると、
         // 組織統合・所属writer（6 X → 7 X）と循環し得る。参照先の組織行を要員行より先に共有lockする。
