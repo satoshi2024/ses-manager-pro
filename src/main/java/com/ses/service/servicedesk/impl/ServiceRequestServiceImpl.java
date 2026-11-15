@@ -216,11 +216,11 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
 
             LocalDateTime responseDeadline = slaCalculator.calculateDeadline(executionContext.occurredAt(),
                     policy.getResponseTimeHours(), policy, executionContext.organizationId(),
-                    executionContext.legalEntityId(), executionContext.zoneId())
+                    executionContext.legalEntityId(), executionContext.zoneId(), serviceRequest.getId())
                     .atZone(executionContext.zoneId()).toLocalDateTime();
             LocalDateTime resolveDeadline = slaCalculator.calculateDeadline(executionContext.occurredAt(),
                     policy.getResolveTimeHours(), policy, executionContext.organizationId(),
-                    executionContext.legalEntityId(), executionContext.zoneId())
+                    executionContext.legalEntityId(), executionContext.zoneId(), serviceRequest.getId())
                     .atZone(executionContext.zoneId()).toLocalDateTime();
 
             ServiceSlaClock slaClock = ServiceSlaClock.builder()
@@ -553,11 +553,11 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     }
                     LocalDateTime responseDeadline = slaCalculator.calculateDeadline(executionContext.occurredAt(),
                                 policy.getResponseTimeHours(), policy, executionContext.organizationId(),
-                                executionContext.legalEntityId(), executionContext.zoneId())
+                                executionContext.legalEntityId(), executionContext.zoneId(), existing.getId())
                                 .atZone(executionContext.zoneId()).toLocalDateTime();
                         LocalDateTime resolveDeadline = slaCalculator.calculateDeadline(executionContext.occurredAt(),
                                 policy.getResolveTimeHours(), policy, executionContext.organizationId(),
-                                executionContext.legalEntityId(), executionContext.zoneId())
+                                executionContext.legalEntityId(), executionContext.zoneId(), existing.getId())
                                 .atZone(executionContext.zoneId()).toLocalDateTime();
 
                         ServiceSlaClock newClock = ServiceSlaClock.builder()
@@ -912,7 +912,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         }
         ServiceSlaPolicy policy = slaPolicyMapper.selectById(clockRow.getPolicyId());
         int pausedMinutes = slaCalculator.businessMinutesBetween(clockRow.getLastPausedAt(), now,
-                policy, executionContext.organizationId(), executionContext.legalEntityId(), executionContext.zoneId());
+                policy, executionContext.organizationId(), executionContext.legalEntityId(), executionContext.zoneId(), clockRow.getServiceRequestId());
         int total = (clockRow.getTotalPauseMinutes() != null ? clockRow.getTotalPauseMinutes() : 0) + pausedMinutes;
         clockRow.setTotalPauseMinutes(total);
         clockRow.setLastPausedAt(null);
@@ -921,7 +921,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (policy != null && clockRow.getResolveDeadline() != null) {
             LocalDateTime extended = slaCalculator.calculateExtendedDeadline(
                     clockRow.getResolveDeadline(), pausedMinutes, policy,
-                    executionContext.organizationId(), executionContext.legalEntityId(), executionContext.zoneId());
+                    executionContext.organizationId(), executionContext.legalEntityId(), executionContext.zoneId(), clockRow.getServiceRequestId());
             clockRow.setResolveDeadline(extended);
         }
     }
