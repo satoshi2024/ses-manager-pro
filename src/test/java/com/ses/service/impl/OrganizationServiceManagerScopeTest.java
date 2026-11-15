@@ -5,12 +5,15 @@ import com.ses.entity.OrganizationUnit;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.CostCenterMapper;
+import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.ManagementBudgetMapper;
 import com.ses.mapper.MonthlyAccountingDimensionMapper;
 import com.ses.mapper.OrganizationUnitMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.security.OrganizationScopeService;
+import com.ses.service.security.epoch.ActorShareLock;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,6 +26,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /** 組織scope外の上長を所属へ登録できないことをサービス層で固定する。 */
@@ -36,6 +40,10 @@ class OrganizationServiceManagerScopeTest {
     @Mock private MonthlyAccountingDimensionMapper monthlyAccountingDimensionMapper;
     @Mock private SysUserMapper sysUserMapper;
     @Mock private OrganizationScopeService organizationScopeService;
+    // NF01 F2（W3-16a後半）: 連携要員の発見・epochの増分・上長の共有lock。検査で拒否する経路では増分しない。
+    @Mock private EngineerAccountLinkMapper engineerAccountLinkMapper;
+    @Mock private AuthorizationEpochFence authorizationEpochFence;
+    @Mock private ActorShareLock actorShareLock;
     @InjectMocks private OrganizationServiceImpl service;
 
     @BeforeEach
@@ -65,5 +73,6 @@ class OrganizationServiceManagerScopeTest {
                 .userId(20L).organizationId(10L).managerUserId(30L)
                 .validFrom(LocalDate.of(2026, 7, 1)).primaryFlag(0).build();
         assertThrows(BusinessException.class, () -> service.assignUser(assignment));
+        verifyNoInteractions(authorizationEpochFence);
     }
 }

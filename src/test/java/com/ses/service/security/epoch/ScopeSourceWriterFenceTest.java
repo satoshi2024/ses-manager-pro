@@ -33,8 +33,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <ul>
  *   <li>W3-16a前半（要員・link・営業・tenant補正）でfenceへ接続した書込みは「接続済み」の契約として、メソッド・件数を
  *       固定し、lock順（3 S → 7 X → 子行）と増分の呼出しが各writerに残っていることも確かめる。</li>
- *   <li>組織・所属の書込み（OrganizationServiceImpl）は W3-16a後半へ委ねた既知の例外として、ファイル単位ではなく
- *       メソッド・件数ごと固定する（後半のbatchが接続したらこの契約を更新すること）。</li>
+ *   <li>組織・所属の書込み（OrganizationServiceImpl）は W3-16a後半でfenceへ接続した。委託の例外から外し、「接続済み」の
+ *       契約としてメソッド・件数を固定し、lock順（3 → 6 → 7 → 8 → 葉）と増分の呼出しが各writerに残っていること、
+ *       公開の {@code updateById} override が無いこと（§11 F-8）を確かめる。</li>
  *   <li>要員行の述語外の列だけを書く既存の書込み（status・単価・version）は、理由付きの許可（計画 §4.4）として件数ごと
  *       固定する。</li>
  * </ul>
@@ -82,14 +83,18 @@ class ScopeSourceWriterFenceTest {
             "com/ses/service/impl/EngineerStatusServiceImpl.java", "EngineerMapper#updateById", 3,
             // W3-16b（退社完了の要員status。FOR UPDATE済みの行を@VersionのCASで書き戻す）
             "com/ses/service/lifecycle/impl/LifecycleCaseServiceImpl.java", "EngineerMapper#updateById", 1,
-            // W3-16a後半（組織・所属）へ委ねた既知の例外
+            // 接続済み（W3-16a後半、組織・所属）。どれも呼出元のwriterが rank 3 → 6 → 7 → 8 のanchorをlockした後に書く。
+            // 統合（merge）の要員付替（rank 7）・会計履歴（rank 11）。
             ORGANIZATION_SERVICE_IMPL, "EngineerMapper#reassignOrganization", 1,
             ORGANIZATION_SERVICE_IMPL, "EngineerAccountingHistoryMapper#updateById", 2,
             ORGANIZATION_SERVICE_IMPL, "EngineerAccountingHistoryMapper#insert", 1,
+            // 所属行（rank 8）: merge 4（閉じる・原地更新・後続行・主所属の分割）、配属・更新・異動・解除・一括終了。
             ORGANIZATION_SERVICE_IMPL, "UserOrganizationMapper#updateById", 7,
             ORGANIZATION_SERVICE_IMPL, "UserOrganizationMapper#deleteById", 1,
             ORGANIZATION_SERVICE_IMPL, "UserOrganizationMapper#insert", 4,
+            // 他人の所属行の上長解除。上長本人のactor epochで覆う（計画 §2.2）。
             ORGANIZATION_SERVICE_IMPL, "UserOrganizationMapper#clearManager", 1,
+            // 親子履歴（葉）は当該組織行（rank 6）のX lock下で recordRelation だけが書く。
             ORGANIZATION_SERVICE_IMPL, "OrganizationRelationHistoryMapper#updateById", 1,
             ORGANIZATION_SERVICE_IMPL, "OrganizationRelationHistoryMapper#closeCurrent", 1,
             ORGANIZATION_SERVICE_IMPL, "OrganizationRelationHistoryMapper#insert", 1);
@@ -104,9 +109,9 @@ class ScopeSourceWriterFenceTest {
                     "baseMapper.updateByIdForTenant", 1, "super.save", 1, "super.updateById", 1),
             // 接続済み: insert 1件と、列限定の wrapper 更新（主担当フラグ・解除日・一括解除）。
             ENGINEER_SALES_SERVICE_IMPL, Map.of("save", 1, "update", 3),
-            // W3-16a後半へ委ねた既知の例外（公開overrideの super.updateById は F-8 で削除予定）。
-            ORGANIZATION_SERVICE_IMPL, Map.of("super.save", 1, "super.updateById", 1, "baseMapper.updateById", 4,
-                    "super.removeById", 1));
+            // 接続済み（W3-16a後半）: 登録・削除は祖先鎖のlock後、組織行の更新（属性・子の付替・統合元・状態）は
+            // lock済みの行のCAS。公開overrideの super.updateById は F-8 で削除した。
+            ORGANIZATION_SERVICE_IMPL, Map.of("super.save", 1, "baseMapper.updateById", 4, "super.removeById", 1));
 
     /** scope表のmapperを基底に持ってよいServiceImpl（それ以外に継承書込みの入口を増やさない）。 */
     private static final Map<String, String> GUARDED_SERVICE_IMPLS = Map.of(
@@ -126,7 +131,7 @@ class ScopeSourceWriterFenceTest {
 
     /**
      * service経由の継承書込みで呼んでよいメソッド（fence済みのoverride）。EngineerSalesServiceは継承書込みを一切許さない。
-     * OrganizationServiceの save・removeById は W3-16a後半でfenceへ接続するoverride。
+     * OrganizationServiceの save・removeById は W3-16a後半でfenceへ接続したoverride（継承した updateById 等は許さない）。
      */
     private static final Map<String, Set<String>> SERVICE_INHERITED_ALLOWED = Map.of(
             "EngineerService", Set.of("save", "updateById", "removeById"),
@@ -375,6 +380,87 @@ class ScopeSourceWriterFenceTest {
                 "\"ENGINEER_ACCOUNT_LINK\".equals(", "engineerMapper.selectScopeAnchorForUpdate(",
                 "engineerAccountLinkMapper.assignTenantForRepair(", "advanceEngineer("));
         assertEquals(List.of(), violations, "接続済みwriterのlock順と増分（計画 §3.4・§4.2）");
+    }
+
+    @Test
+    void 組織_所属writerはlock順どおりにanchorを取り組織部分木_actor_engineer_epochを進める() {
+        List<String> violations = new ArrayList<>();
+        String organization = WriterGuardSources.mainSource(ORGANIZATION_SERVICE_IMPL);
+        // 組織階層writer: discovery{祖先鎖} → 6 X（ID昇順）→ 検査・書込み → 葉（親子履歴）→ 組織部分木epoch
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "save", organization,
+                "public boolean save(OrganizationUnit entity)", "lockOrganizations(", "validateOrganization(",
+                "super.save(", "recordRelation(", "advanceOrganizations("));
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "updateOrganization", organization,
+                "public boolean updateOrganization(", "lockOrganizations(", "validateOrganization(",
+                "baseMapper.updateById(entity)", "recordRelation(", "advanceOrganizations("));
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "updateStatus", organization,
+                "public boolean updateStatus(", "lockOrganizations(", "baseMapper.updateById(patch)",
+                "recordRelation(", "advanceOrganizations("));
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "removeById", organization,
+                "public boolean removeById(Serializable id)", "lockOrganizations(", "isReferenced(",
+                "super.removeById(", "advanceOrganizations("));
+        // 統合: discovery → 3（影響ユーザーX・上長S）→ 6 → 7 → 読み直し → 8 → 書込み（7・8・11・葉）→ 増分
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "merge", organization, "public boolean merge(",
+                "discoverMergeScope(", "lockUsers(", "lockOrganizations(", "lockEngineers(", "discoverMergeScope(",
+                "userOrganizationMapper.selectByUserForUpdate(", "baseMapper.updateById(child)",
+                ".selectByUserOrganizationForUpdate(", "engineerMapper.reassignOrganization(",
+                "engineerAccountingHistoryMapper.updateById(", "baseMapper.updateById(current)",
+                "authorizationEpochFence.advanceAll("));
+        // 所属writer: 3 X{本人}・S{上長} →（6 X{対象組織}）→ 7 X{連携要員} → 8 X{本人の所属行} → 書込み → 増分
+        // （組織行を所属行より先に取る。§11 F-4）
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "assignUser", organization,
+                "public UserOrganization assignUser(", "lockSubject(", "linkedEngineerId(", "lockOrganizations(",
+                "lockEngineer(", "userOrganizationMapper.selectByUserForUpdate(", "validateAssignment(",
+                "userOrganizationMapper.insert(", "advanceAssignmentChange("));
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "updateUserOrganization", organization,
+                "public boolean updateUserOrganization(", "userOrganizationMapper.selectById(", "lockSubject(",
+                "lockOrganizations(", "lockEngineer(", "lockedAssignment(", "userOrganizationMapper.updateById(",
+                "advanceAssignmentChange("));
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "transferUser", organization,
+                "public UserOrganization transferUser(", "lockSubject(", "lockOrganizations(", "lockEngineer(",
+                "userOrganizationMapper.selectByUserForUpdate(", "validateAssignmentBasics(",
+                "userOrganizationMapper.insert(", "advanceAssignmentChange("));
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "releaseAssignment", organization,
+                "public boolean releaseAssignment(", "userOrganizationMapper.selectById(", "lockSubject(",
+                "lockEngineer(", "lockedAssignment(", "userOrganizationMapper.updateById(patch)",
+                "advanceAssignmentChange("));
+        // 一括終了: 3 X{本人} → 7 X{連携要員} → 8 X → 上長解除 → 増分は自分で行う（W3-15 review P3-6）
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "closeAssignmentsForUser", organization,
+                "public int closeAssignmentsForUser(", "lockSubject(", "lockEngineer(",
+                "userOrganizationMapper.selectByUserForUpdate(", "userOrganizationMapper.updateById(patch)",
+                "userOrganizationMapper.clearManager(", "advanceAssignmentChange(",
+                "authorizationEpochFence.advance(ActorEpochAnchors.of(user))"));
+        // 補助: 祖先鎖はdiscoveryの後にID昇順（TreeSet）でlockし、lock後に読み直して不一致なら409。
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "lockOrganizations", organization,
+                "private Map<Long, OrganizationUnit> lockOrganizations(", "new TreeSet<>()", "organizationChain(start)",
+                "baseMapper.selectByIdForUpdate(id)", "organizationChain(start)", "error.organization.versionConflict"));
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "lockUsers", organization,
+                "private Map<Long, SysUser> lockUsers(", "new TreeSet<>(exclusive)", "actorShareLock.lockActive(",
+                "sysUserMapper.selectByIdForUpdateIncludingDeleted("));
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "lockEngineer", organization,
+                "private Engineer lockEngineer(", "engineerMapper.selectScopeAnchorForUpdate("));
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "advanceOrganizations", organization,
+                "private void advanceOrganizations(", "authorizationEpochFence.advanceAll(",
+                "AuthorizationEpochAnchor::organization"));
+        violations.addAll(order(ORGANIZATION_SERVICE_IMPL, "advanceAssignmentChange", organization,
+                "private void advanceAssignmentChange(", "ActorEpochAnchors.of(lockedUser)",
+                "EngineerEpochAnchors.of(lockedLinkedEngineer)", "authorizationEpochFence.advanceAll("));
+        assertEquals(List.of(), violations, "組織・所属writerのlock順と増分（計画 §3.4・§4.2、§11 F-4）");
+    }
+
+    @Test
+    void 組織serviceは公開のupdateById_overrideを持たない() {
+        // 計画 §11 F-8: transaction・親子履歴・epochの増分なしに parent_id・status を書ける公開入口を残さない。
+        // 継承した updateById の呼出しは「継承書込みはfence済みのoverrideだけを呼ぶ」testが検出する。
+        List<String> declared = new ArrayList<>();
+        for (Method method : com.ses.service.impl.OrganizationServiceImpl.class.getDeclaredMethods()) {
+            if (method.getName().equals("updateById") && !method.isSynthetic()) {
+                declared.add(method.toGenericString());
+            }
+        }
+        assertEquals(List.of(), declared, "OrganizationServiceImpl.updateById の override は削除する（F-8）");
+        assertTrue(!SERVICE_INHERITED_ALLOWED.get("OrganizationService").contains("updateById"),
+                "組織serviceの継承 updateById は呼出しを許さない");
     }
 
     @Test
