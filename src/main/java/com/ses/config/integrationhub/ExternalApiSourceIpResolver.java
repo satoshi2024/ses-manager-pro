@@ -45,6 +45,9 @@ public class ExternalApiSourceIpResolver {
         if (raw.overflow()) {
             throw ExternalApiSecurityException.authentication("INVALID_PROXY_HEADER");
         }
+        if (raw.xForwardedFor().size() > 1 || raw.forwarded().size() > 1) {
+            throw ExternalApiSecurityException.authentication("DUPLICATE_PROXY_HEADER");
+        }
         if (!ExternalApiCidrMatcher.matchesAny(connectorPeer, trustedProxies)) {
             if (raw.hasAny()) {
                 throw ExternalApiSecurityException.authentication("UNTRUSTED_PROXY");
@@ -56,7 +59,10 @@ public class ExternalApiSourceIpResolver {
         if (lines.isEmpty()) {
             throw ExternalApiSecurityException.authentication("PROXY_HEADER_MISSING");
         }
-        String combined = String.join(",", lines);
+        if (lines.size() != 1) {
+            throw ExternalApiSecurityException.authentication("DUPLICATE_PROXY_HEADER");
+        }
+        String combined = lines.get(0);
         String rightmost = headerType == IntegrationHubExternalApiProperties.ForwardedHeader.FORWARDED
                 ? rightmostForwardedFor(combined) : rightmostXForwardedFor(combined);
         if (rightmost == null) {
@@ -82,7 +88,7 @@ public class ExternalApiSourceIpResolver {
         return attribute instanceof ExternalApiRawForwardedHeaders value ? value : null;
     }
 
-    /** RFC 7230に従い複数行をカンマ連結した値の右端要素。portや空要素は不正として扱う。 */
+    /** 単一header行の右端要素。portや空要素は不正として扱う。 */
     private String rightmostXForwardedFor(String combined) {
         int comma = combined.lastIndexOf(',');
         String last = (comma < 0 ? combined : combined.substring(comma + 1)).trim();

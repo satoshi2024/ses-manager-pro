@@ -85,6 +85,8 @@ spring:
         # V190/V191: NF07 F1表（catalog / policy / hold projection / DSAR）と W-5 権限seed（privacy-admin・privacy.* deny・menu）
         - classpath:sql/schema-privacy-f1-h2.sql
         - classpath:sql/schema-privacy-permission-h2.sql
+        # V192: 外部API監査の保存期限（retention_expires_at・UTC化・purge索引）
+        - classpath:sql/schema-integration-hub-external-audit-retention-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

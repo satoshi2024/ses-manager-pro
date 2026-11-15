@@ -29,18 +29,21 @@ LB 自身が 403/404 を返す。app 側も OFF 時は 404 を返すが、それ
 |---|---|---|
 | `integration_hub_external_api_requests_total{status_class="5xx"}` | 5分連続 > 0 | §2 一般障害 |
 | `integration_hub_external_api_requests_total{outcome="RATE_LIMITED"}` | client tier 単位で急増 | §3 rate/quota |
-| `integration_hub_external_api_requests_total{outcome="AUTH_REJECTED"}` | 急増 | §4 認証・送信元拒否 |
+| `integration_hub_external_api_requests_total{status_class="4xx",outcome=~"AUTH_REJECTED|SOURCE_REJECTED"}` | 急増 | §4 認証・送信元拒否 |
 | `integration_hub_external_api_audit_suppressed_total{reason="UNAUTHENTICATED_BUDGET"}` | 1以上 | §3 abuse 切り分け（未認証 reject が監査上限を超えた） |
 | `integration_hub_external_api_audit_suppressed_total{reason="PUBLIC_API_DISABLED"}` | production で 1以上 | §0 D-1（LB 遮断が効いていない） |
-| delivery DLQ 滞留（metric 未実装。定期 SQL: `SELECT COUNT(*) FROM t_api_delivery WHERE status = 'DLQ'`） | 1件以上 | §5 DLQ / manual replay |
-| inbound DLQ 増加（metric 未実装。定期 SQL: `SELECT COUNT(*) FROM t_inbound_event WHERE status = 'DLQ'`） | 15分連続増加 | §4.1 inbound |
+| `integration_hub_delivery_rows{status="DLQ"}` | 1件以上 | §5 DLQ / manual replay |
+| `integration_hub_delivery_rows{status="FAILED"}` | 新規増加が1件以上 | 即時通知。payload/恒久HTTP拒否を確認し、無断再送しない |
+| `integration_hub_producer_skipped_total{reason=~"NO_TENANT|INVALID_SCOPE|SUBSCRIPTION_LIMIT"}` | 1以上 | 即時通知。event欠落の対象期間と業務変更を照合する |
+| `integration_hub_inbound_rows{status="DLQ"}` | 15分連続増加 | §4.1 inbound |
 | DB connection pool exhausted | Hikari pending > 0 が継続 | §6 DB障害 |
 | startup validator fail-closed | 起動失敗 | §7 config / emergency stop |
 
 metrics label は route template / method / status class（`2xx`〜`5xx`）/ bounded outcome / client tier、
 および監査抑止の reason の有限集合のみ。client ID、correlation ID、resource ID、IP、provider event ID を label に置かない。
 `status_class` は百の位だけを持つため、429 は `status_class="4xx"` に含まれる。429 の監視は `outcome="RATE_LIMITED"` を使う。
-delivery / inbound の状態別 metric は未実装（W3-06b で追加を検討）。それまでは上記 SQL を監視基盤から定期実行する。
+delivery / inbound gaugeはいずれか一方向ON時だけ登録し、各6状態の固定statusだけをlabelに持つ。
+12状態のDB snapshotを30秒cacheする。最大12 query/30秒であり、scrape毎の反復はしない。DB障害時はNaNとなるため、欠測alertも設定する。
 
 ## 2. 一般 API 障害（timeout / 5xx）
 
@@ -49,7 +52,7 @@ delivery / inbound の状態別 metric は未実装（W3-06b で追加を検討�
 3. `t_external_api_audit` で直近 reject の status/result code を確認する。secret/PII/raw body は保存されない。
    public-api OFF 時は監査行を書かない（metric のみ）。ON 時も未認証 reject（principal 無し・5xx 以外）は
    node ごとに `public-api.unauthenticated-audit-max-per-minute`（既定 60/分）までしか行を書かず、超過分は
-   `audit_suppressed_total{reason="UNAUTHENTICATED_BUDGET"}` に集約される。認証済み request と 5xx は常に 1 行。
+   `audit_suppressed_total{reason="UNAUTHENTICATED_BUDGET"}` に集約される。HMAC検証済みreject（CLIENT_IP_NOT_ALLOWED / NONCE_REPLAYを含む）、認証済みrequestと5xxは常に一行。
 4. correlation ID（`X-Correlation-ID`）で同一 request の監査 1 件を特定する（上記の抑止対象は行が無い場合がある）。
 5. 原因が DB の場合は §6 へ。アプリのみの場合は rolling restart 前に in-flight idempotency / delivery lease を確認する。
 6. 復旧後、enabled connector E2E（read 202/200、inbound duplicate/conflict）を development/test で再実行する。
@@ -72,6 +75,7 @@ delivery / inbound の状態別 metric は未実装（W3-06b で追加を検討�
 | `CLIENT_IP_NOT_ALLOWED` | 送信元が client の `allowed_cidrs`、または `public-api.approval.allowed-client-cidrs`（DG-05-IN の承認範囲）の外。両方を確認する |
 | `UNTRUSTED_PROXY` | trusted proxy 以外の peer が転送 header 付きで接続した。LB を経由しない経路が無いか確認する |
 | `PROXY_HEADER_MISSING` | trusted proxy から設定 header（既定 X-Forwarded-For）が届かない。ALB の xff mode（`remove` になっていないか）と `security.forwarded-header` を確認する |
+| `DUPLICATE_PROXY_HEADER` | 転送headerが複数行。ALBの単一行正規化を確認する |
 | `INVALID_PROXY_HEADER` | 右端 hop が IP literal でない（port 付き、空要素など）または header が過大。ALB の `xff_client_port.enabled=false` を確認する |
 | `UNSUPPORTED_PROXY_CHAIN` | 右端 hop も trusted proxy の範囲内（多段 proxy）。trusted-proxies の範囲が広すぎないか確認する |
 | `SOURCE_IP_INVALID` | Tomcat valve の捕捉値が無い。組込み Tomcat 以外での起動や valve 設定の欠落を疑う |
@@ -110,7 +114,7 @@ nonce は `max(受付時刻, 署名時刻) + 601 秒` まで保存し、±300 �
 
 - 外部 HTTP は DB transaction 外。DB 停止中も in-flight lease は expiry 後に recovery 可能。
 - provider 停止時: MOCK/STUB（無接続）または LOOPBACK（development/test のみ）。production は STUB/LOOPBACK を常に拒否し、
-  outbound 無効時は MOCK 固定。現行 mode はいずれも本番 outbound 不可（実 HTTPS transport は W3-06b）。
+  outbound無効時はMOCK固定。本番outboundはHTTPSだけを許可し、承認不足・不正な専用truststoreで起動を拒否する。
 - restore 後: `advanceRestoreEpoch` により purge checkpoint を invalid 化し、retention 対象を先頭から再評価する。
 - legal hold 中は purge を停止する。hold 解除後に cursor reset で再 purge する。
 
@@ -121,7 +125,7 @@ nonce は `max(受付時刻, 署名時刻) + 601 秒` まで保存し、±300 �
 1. 新 credential を issue する。旧 ACTIVE は OVERLAP（24h）へ。
 2. overlap 中は旧 keyId / 新 keyId の双方で HMAC 検証可能。
 3. overlap 終了後、旧世代は usable 検索から除外される。
-4. secret 平文は API 応答・ログ・監査へ出力しない。envelope（IHG1）のみ保存。
+4. secret平文は管理者向け発行応答で一度だけ表示する。再表示APIは無い。ログ・監査へ出力せず、DBはenvelope（IHG1）のみ保存。
 
 ### 7.2 revoke
 
@@ -134,7 +138,11 @@ nonce は `max(受付時刻, 署名時刻) + 601 秒` まで保存し、±300 �
 2. `integration.hub.external-transport.enabled=false`
 3. `integration.hub.provider.mode=MOCK`
 4. 再起動後、deny-only chain が `/external-api/v1/**` を stable 404 JSON で返し、`t_external_api_audit` に行が増えないことを確認する。
-5. controller / worker / scheduler / transport bean が生成されないことを確認する。
+5. external controller / worker / scheduler / transportの停止を確認する。内部管理APIは管理者専用のまま。
+   prodの停止操作はOFFへ変更して全停止・再起動する。実行中propertiesを変更する運用は提供しない。
+   再びONへ起動すると、ID高水位以前のPENDING/RETRYABLEをSTARTUP_REVALIDATION_REQUIREDのDLQへ隔離する。
+   有効leaseは奪わず、旧CLAIMEDも通常送信へ戻さない。期限後に隔離し、結果不明のin-flightを照合してから管理者replayする。
+   初期化前はworkerをgateし、高水位以後の新規IDだけを通常送信する。起動隔離は128件×最大32batch、上限超過は起動拒否。
 6. inbound を止めた場合は LB/WAF の `/external-api/**` 遮断（§0 D-1）を戻す。片方向だけ止める場合は該当方向の
    `enabled=false` だけを変え、他方向の承認値は触らない。
 7. 両方向 OFF では retention purge scheduler が生成されない。停止が長引く場合の payload・監査の扱いは DBA が判断する。
@@ -159,3 +167,31 @@ nonce は `max(受付時刻, 署名時刻) + 601 秒` まで保存し、±300 �
 - 開放決定（草案）: `.kiro/specs/integration-hub-public-api/dg-05-enablement-decision-draft.md`
 - Evidence: `.kiro/specs/integration-hub-public-api/evidence-index.md`
 - Backup restore: `ops/backup/runbooks/restore-cutover.md`
+
+## 11. G3の設定・署名・管理操作
+
+詳細は `.kiro/specs/integration-hub-public-api/g3-implementation-and-runner.md`。HTTPS専用truststore、DNSとegress firewall、
+TLSの失効確認/pinning判断、v2 audience署名の受信側互換性、管理APIとone-time secret、thread drainと残件処理を記載する。
+WAFは正規化後pathも遮断し、encoded slash・dot segment・重複slashの迂回を実LBで検証する。FWD-SANITIZEは別batch。
+prod trusted proxyはIPv4 /24以上・IPv6 /64以上、client許可CIDRと重複不可。AJP / RemoteIpValveは起動時に拒否する。
+V192はUTC一年expiry、EXTERNAL_AUDIT hold/checkpoint付きの最大1000件purgeを追加する。独立Review・Runner・DG-05署名前はNO-GO。
+
+## 12. G3rの再開と運用判断
+
+- 正本は `.kiro/specs/integration-hub-public-api/g3r-fix-and-runner.md`。通常のON再起動も旧台帳を再確認対象にする保守的な方針。
+- 証明書/hostname/peer/destination拒否はretryせずDLQ。TLS確認と設定修正後、管理者replay前のallow-list/handshake検証を通す。
+  handshake probeはHTTPも署名secretも送らず、DB transaction外。結果不明の旧CLAIMEDは受信側と照合してからreplayする。
+- 未送信確定retryでもevent作成から24時間でDLQ。新generationのmanual replayでも元event作成時刻を保つため、古いeventで再び未送信失敗になれば直ちに再確認対象になる。
+- credentialローテーション: 受信側へ新keyId/secretを安全に設定→新versionを発行→同endpointを新versionで再登録→新署名の受信確認→旧credential失効。
+  24時間overlap内にoutbound subscriptionも必ず切り替える。同一clientでkeyIdを再使用しない（DB UNIQUE）。
+- client 90日期限の自動延長はない。期限前に新clientIdでscope/credential/subscriptionを構築し、新しいopaque IDへの移行を受信側と調整する。
+  旧credentialを失効して旧subscriptionを止め、旧client bindingは期限で無効になる。失効後のclientを直接SQLで延命しない。
+- inbound/outboundの共用secretはcanonical用途分離付きで維持する。DG-05 OUT-6のSecurity受容が無ければ開放しない。
+- FWD-SANITIZEのapp.security.trusted-proxiesとNF05のintegration.hub.security.trusted-proxiesを同じALB経路に合わせる。
+  /20〜/22 subnetは承認済み複数/24へ分け、client CIDRとは重ねない。LBのsecurity groupとWAFの証跡を残す。
+- pinのpeer集合は検証済み公開IPだけを120秒/host64件まで保持する。新しい接続は最新DNS回答へ限定する。
+- scheduler lock最大40分は最大network batchに余量を設ける設定。crash時は最長40分failoverが遅れる。
+  DB/quarantine/auditのlock待ち時間をこの不等式は保証しない。overlap時の安全はledger CAS/fenceが担い、実測とDB timeoutをSREが確認する。
+- V192はDDLが暗黙commitする。既存dev/stagingのJVMがJSTだったことを確認し、部分失敗でUPDATEを再実行して二度九時間を引かない。
+  配備前backupから戻すか、DBAが列・UTC変換済み値・index/check・Flyway履歴を照合して段階的に補完する。repairだけで先へ進まない。
+  UTC列の運用比較にはUTC_TIMESTAMP()を使い、DB NOW()（+09:00）と混ぜない。

@@ -40,10 +40,10 @@ outboundは実transport、送信先allow-list、DPA、顧客/providerの書面�
 | IN-3 | DPA・個人情報 | 要員の稼働状況等はAPPIの個人情報に当たりうる。NF07の分類・保存期間の決定とDPA締結 | DPA番号、NF07決定ID | Privacy / Legal |
 | IN-4 | 送信元CIDR allow-list | 取引先の送信元CIDR。IPv4は/16、IPv6は/32より広い範囲は不可。clientごとの`allowed_cidrs`はこの範囲内に限る | `public-api.approval.allowed-client-cidrs`（実行時にclientのallowed_cidrsと両方への一致を要求） | Security |
 | IN-5 | 入口構成（D-1） | LB/WAFの経路、trusted proxy（LBのsubnet）、ALBの`routing.http.xff_header_processing.mode=append`と`routing.http.xff_client_port.enabled=false`、WAFによる認証前rate制限（N5-P3-4） | `security.trusted-proxies`（CIDR必須）、`security.forwarded-header=X_FORWARDED_FOR`、runbook §0 | SRE / Security |
-| IN-6 | credential | client・credential・scopeの発行手順と保管、keyring（`integration.hub.crypto.*`）、`public-api.public-id-key`（32 byte以上）、`topology.bound-tenant-id` | secret storeの登録記録。**production用の発行経路は未実装（N5-P2-4）** | Security / SRE |
+| IN-6 | credential | client・credential・scopeの発行手順と保管、keyring（`integration.hub.crypto.*`）、`public-api.public-id-key`（32 byte以上）、`topology.bound-tenant-id` | secret storeの登録記録。G3管理者APIの発行応答で一度だけ表示。安全な配布・rotationとRunner証跡が必要 | Security / SRE |
 | IN-7 | rate / quota | client×scope×tenant×route templateで60 req/min、burst 20、1日50,000（現行決定値）。未認証rejectの監査行上限 | `public-api.unauthenticated-audit-max-per-minute`（node単位、既定60） | SRE |
 | IN-8 | 予算 | 監視・DB容量・WAF費用の上限。監査1年保存の容量見積り | 決定書に金額と見積り根拠 | Finance |
-| IN-9 | 監査保存 | `t_external_api_audit` の1年保存とpurge。**保存期限列とpurgeは未実装（DDL lane）** | DDL lane完了の証跡 | DBA / Privacy |
+| IN-9 | 監査保存 | `t_external_api_audit` の1年保存とpurge。V192でUTC一年expiry、EXTERNAL_AUDIT hold/checkpoint付きbounded purgeを追加。MySQL Runner証跡が必要 | DDL lane完了の証跡 | DBA / Privacy |
 | IN-10 | 法人readiness | 法人backfill未解決行が0であること（起動時に検査） | `LegalEntityReadinessStartupValidator` | DBA |
 | IN-11 | 処理範囲 | inbound processorは現在Noop。開放後も「受信して記帳するだけ」であることへの合意 | 決定書に明記 | Owner |
 
@@ -54,12 +54,12 @@ outboundは実transport、送信先allow-list、DPA、顧客/providerの書面�
 | OUT-1 | 送信先allow-list | 送信先の`host:port`（小文字FQDN、IP literal・`localhost`系は不可） | `external-transport.approval.allowed-destinations` | Security / Owner |
 | OUT-2 | 書面許可 | 送信先の顧客・providerからの受信許可書 | 決定書の添付 | Owner / Legal |
 | OUT-3 | DPA・個人情報 | payload（`ExternalDtoSnapshot.OUTBOUND_FIELDS`）の個人情報分類、保存期間、DPA。`X-Correlation-ID`の出所にPIIが無いことの確認 | DPA番号、NF07決定ID | Privacy / Legal |
-| OUT-4 | truststore・TLS方針 | trustの出所（JDK cacertsか専用truststore）、TLSv1.3/1.2、hostname検証、失効確認とpinningの方針 | **実HTTPS transportとともにW3-06bで設定化**（TLS残存項目 P2-2） | Security |
-| OUT-5 | egress制御 | host allow-list、期限付きDNS snapshot、全解決addressの`NonGlobalAddressPolicy`判定、実peer照合 | **W3-06b**（TLS残存項目 P2-1） | Security |
+| OUT-4 | truststore・TLS方針 | trustの出所（JDK cacertsか専用truststore）、TLSv1.3/1.2、hostname検証、失効確認とpinningの方針 | G3専用PKCS12/JKS、TLS1.3/1.2とAEAD cipher、public suffix対応hostname検証。OCSP/CRL強制取得・leaf/SPKI pinning無しの判断を明示署名 | Security |
+| OUT-5 | egress制御 | host allow-list、期限付きDNS snapshot、全解決addressの`NonGlobalAddressPolicy`判定、実peer照合 | G3実装。管理DNS・egress firewall・metadata拒否と実ネットワーク証跡をSREが用意する | Security |
 | OUT-6 | credential | webhook署名secretの発行・保管・rotation、keyring、`public-api.public-id-key`（outbound payloadのbindingにも使う）、`topology.bound-tenant-id` | secret storeの登録記録 | Security / SRE |
 | OUT-7 | rate | 送信先ごとの送信上限、`external-transport.batch-size` / `fixed-delay-ms`、retry最大8回とbackoff | 決定書に数値 | SRE / Owner |
 | OUT-8 | 予算 | 月間送信件数と外部費用（送信先側の課金を含む）の上限 | 決定書に金額 | Finance |
-| OUT-9 | 実装前提 | 本番用transport mode（実HTTPS）、業務eventのenqueue producer、subscription登録（登録時にもOUT-1で検証）、outbound replay入口、kill switch時のhold/DLQ | **W3-06b / N5-P2-4**。現行modeはいずれも本番outbound不可としてvalidatorが拒否する | 実装担当 |
+| OUT-9 | 実装前提 | 本番用transport mode（実HTTPS）、業務eventのenqueue producer、subscription登録（登録時にもOUT-1で検証）、outbound replay入口、kill switch時のhold/DLQ | G3実装。HTTPSのみ可能。service外更新・bulk/import・削除は対象外。snapshot通知契約とv2 audience署名の受信側互換性をOwnerが承認する | 実装担当 |
 | OUT-10 | retention | delivery payload 30/90日、replay監査1年のpurge（outboundだけの開放でもscheduler生成済み） | `IntegrationHubRetentionPurgeCondition` | DBA |
 | OUT-11 | 法人readiness | outboundだけの開放でも起動時に検査 | `LegalEntityReadinessStartupValidator` | DBA |
 
@@ -82,7 +82,7 @@ outboundは実transport、送信先allow-list、DPA、顧客/providerの書面�
 1. 本書のoutbound欄（OUT-1〜OUT-11）を埋め、§5の署名を揃える。決定IDを採番する。
 2. 前提を確認する: W3-06bの実HTTPS transport・egress制御・TLS方針（OUT-4/5/9）が独立Review PASS済み。
 3. 注入する: `external-transport.enabled=true`、`external-transport.approval.decision-id`、
-   `external-transport.approval.allowed-destinations`、本番用`provider.mode`、`public-api.public-id-key`、
+   `external-transport.approval.allowed-destinations`、`provider.mode=HTTPS`、専用truststore、`public-api.public-id-key`、
    `topology.bound-tenant-id`、`integration.hub.crypto.*`。**`public-api.enabled`はfalseのまま**（inboundを同時に開く場合はDG-05-INが別途必要）。
 4. 全停止配備で起動し、validatorが通ることを確認する。
 5. 単一送信先・単一subscriptionで送信を確認し、DLQ・retry・payload purgeの動作を確認してから対象を広げる。
@@ -101,15 +101,15 @@ outboundは実transport、送信先allow-list、DPA、顧客/providerの書面�
 
 個人実名は記録しない（現行決定と同じくOwnerRef/OwnerTypeで表す）。
 
-## 6. 現時点で未充足の前提（署名しても開放できない事項）
+## 6. G3の実装状況と未充足の証跡（実装は開放承認ではない）
 
 | 項目 | 方向 | 担当batch |
 |---|---|---|
-| `t_external_api_audit` の保存期限列・purge（N5-P2-1の残り） | inbound | DDL lane |
-| production用のclient/credential/scope発行経路（N5-P2-4） | inbound | 後続batch |
-| 実HTTPS transport、egress制御、TLS方針（TLS残存項目 P2-1/P2-2/P3-2/P3-N2） | outbound | W3-06b |
-| enqueue producer、subscription登録、replay入口（N5-P2-4） | outbound | W3-06b |
-| runbook §1のdelivery/inbound状態metric（現状はSQL確認で代替） | 両方向 | W3-06b |
+| V192のUTC変換・一年expiry・hold/purge | inbound | G3実装、MySQL Runner未実行 |
+| client/credential/scope管理者API | inbound | G3実装、安全なsecret配布はSRE |
+| 実HTTPS transport・SSRF・TLS分類 | outbound | G3実装、Security判断・実ネットワーク証跡は未充足 |
+| 4 resource.changed producer・subscription・replay | outbound | G3実装、実経路Runnerと通知範囲判断が必要 |
+| 有限status gauge（SQL監視を置換） | 両方向 | G3実装、監視基盤設定はSRE |
 
 ## 7. 撤回と緊急停止
 
@@ -117,3 +117,15 @@ outboundは実transport、送信先allow-list、DPA、顧客/providerの書面�
 - 撤回してもretention purgeは他方向が有効なら継続する。両方向OFFでschedulerは生成されないため、
   撤回後に残るpayload・監査の扱いはDBAが別途判断する（手動purgeまたは一時的な再有効化）。
 - 承認値の変更は新しい決定IDで行い、本書の版を更新する。
+
+## G3rの追加署名条件（未署名）
+
+OUT-9: P1-1/P1-2とP2-1〜3の正式証拠（実container commit/rollback、小数秒ClockのH2/MySQL往復、
+再起動前の旧台帳隔離、TLS恒久障害DLQとreplay前のTLS確認）を最終SHAで取得する。
+OUT-7: ON起動ごとの旧ID隔離と結果不明CLAIMEDの照合、未送信24時間上限、FAILED alert、
+40分scheduler lockによるfailover遅延とDB待ち時間の実測を承認する。
+OUT-6: outbound subscriptionを含む24時間overlapローテーション、新clientIdでの90日期限移行、用途分離canonical付きの共用secretを明示判断する。
+P2-2: tenant欠損時は業務継続のためeventをskipする。WARN/counterと業務記録を照合する復旧手順、event欠落の許容をOwnerが署名する。
+IN-5: 二つのtrusted-proxies設定の整合とALB subnetの/24分割をSRE/Securityが確認する。
+外部接続禁止のローカル作業は実ネットワークpeerの証拠を代替しない。truststore、120秒pin grace、DNS、egress、
+OCSP/CRL/pinning無しの判断、DPA/書面許可/予算と既存の全署名は引き続き必要。Production NO-GOを維持する。

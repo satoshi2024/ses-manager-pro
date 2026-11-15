@@ -19,12 +19,12 @@ public class IntegrationHubWebhookDeliveryBindingValidator {
     private final ApiClientMapper clientMapper;
     private final ExternalApiPublicIdCodec publicIdCodec;
 
-    /** 同一DB transaction内のenqueue前にclient bindingをロックして検証する。 */
+    /** 同一DB transaction内のenqueue前にclient bindingを通常readで検証する。送信直前に再検証する。 */
     public void requireForEnqueue(String clientId, String tenantId, String primaryResourceType,
                                   Long primaryResourceId, String eventId, String eventType,
                                   String schemaVersion, String correlationId, ExternalDtoSnapshot snapshot,
                                   LocalDateTime createdAt) {
-        ApiClient client = clientMapper.selectByClientIdForUpdate(clientId);
+        ApiClient client = clientMapper.selectByClientId(clientId);
         requireClient(client, clientId, tenantId, createdAt);
         requireSnapshot(client, clientId, tenantId, primaryResourceType, primaryResourceId,
                 eventId, eventType, schemaVersion, correlationId, snapshot, createdAt);

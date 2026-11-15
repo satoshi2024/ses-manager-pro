@@ -28,6 +28,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 片方向の承認でもう片方向を開けず、STUB/LOOPBACKは常に拒否し、既定（OFF+MOCK）は承認なしで通る。
  */
 class IntegrationHubProductionEnablementPolicyTest {
+    @org.junit.jupiter.api.Test
+    void 承認宛先と送信guardは正規portとFQDNを同じ規則で拒否する() {
+        for (String invalid : java.util.List.of("web.example.com:0443", "web.example.com.:443", "WEB.example.com:443", "127.0.0.1:443")) {
+            org.junit.jupiter.api.Assertions.assertFalse(IntegrationHubProductionEnablementPolicy.validDestination(invalid));
+            org.junit.jupiter.api.Assertions.assertFalse(com.ses.service.integrationhub.IntegrationHubHttpsEndpointGuard.validDestination(invalid));
+        }
+    }
+
     private static final String INBOUND_DECISION = "DG-05-IN-20261201-01";
     private static final String OUTBOUND_DECISION = "DG-05-OUT-20261201-01";
 
@@ -54,13 +62,13 @@ class IntegrationHubProductionEnablementPolicyTest {
         approveOutbound(properties);
 
         assertEquals(List.of(), IntegrationHubProductionEnablementPolicy.outboundViolations(properties).stream()
-                .filter(violation -> !violation.contains("本番用transport mode")).toList());
+                .filter(violation -> !violation.contains("provider.mode=HTTPS")).toList());
         List<String> violations = IntegrationHubProductionEnablementPolicy.violations(properties, prodEnvironment(true));
         assertEquals(1, violations.size(), violations.toString());
-        assertTrue(violations.get(0).contains("本番用transport mode"), violations.toString());
+        assertTrue(violations.get(0).contains("provider.mode=HTTPS"), violations.toString());
         // inbound側の承認項目（決定ID・送信元CIDR・trusted proxy）は一切要求されない。
         assertTrue(violations.stream().noneMatch(violation -> violation.contains("inbound")), violations.toString());
-        assertMessage("本番用transport mode", properties);
+        assertMessage("provider.mode=HTTPS", properties);
     }
 
     @Test
@@ -83,9 +91,9 @@ class IntegrationHubProductionEnablementPolicyTest {
         approveOutbound(properties);
 
         List<String> violations = IntegrationHubProductionEnablementPolicy.violations(properties, prodEnvironment(true));
-        // 両方向の承認が揃っても、outboundは実HTTPS transport（W3-06b）までは開けない。
+        // 両方向の承認が揃っても、HTTPS以外のmodeは開けない。
         assertEquals(1, violations.size(), violations.toString());
-        assertTrue(violations.get(0).contains("本番用transport mode"));
+        assertTrue(violations.get(0).contains("provider.mode=HTTPS"));
 
         // 決定IDを方向間で取り違えると両方とも拒否される。
         properties.getPublicApi().getApproval().setDecisionId(OUTBOUND_DECISION);
@@ -171,12 +179,36 @@ class IntegrationHubProductionEnablementPolicyTest {
     }
 
     @Test
-    void everyCurrentProviderModeIsIncapableOfProductionOutbound() {
+    void onlyHttpsIsCapableOfProductionOutbound() {
         for (IntegrationHubExternalApiProperties.ProviderMode mode
                 : IntegrationHubExternalApiProperties.ProviderMode.values()) {
-            assertFalse(IntegrationHubProductionEnablementPolicy.productionOutboundCapable(mode), mode.name());
+            assertEquals(mode == IntegrationHubExternalApiProperties.ProviderMode.HTTPS,
+                    IntegrationHubProductionEnablementPolicy.productionOutboundCapable(mode), mode.name());
         }
         assertFalse(IntegrationHubProductionEnablementPolicy.productionOutboundCapable(null));
+    }
+
+    @Test
+    void HTTPSは署名済みoutbound承認でinboundを要求せず有効化できる() {
+        var properties = base(false, true);
+        approveOutbound(properties);
+        properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.HTTPS);
+        properties.getExternalTransport().setTruststorePath("fixture.p12");
+        assertEquals(List.of(), IntegrationHubProductionEnablementPolicy.violations(properties, prodEnvironment(true)));
+        assertDoesNotThrow(properties::validateBoundaries);
+    }
+
+    @Test
+    void ALB以外のheaderと広いproxyとclient重複を拒否する() {
+        var properties = base(true, false);
+        approveInbound(properties);
+        properties.getSecurity().setForwardedHeader(IntegrationHubExternalApiProperties.ForwardedHeader.FORWARDED);
+        assertMessage("X_FORWARDED_FOR", properties);
+        properties.getSecurity().setForwardedHeader(IntegrationHubExternalApiProperties.ForwardedHeader.X_FORWARDED_FOR);
+        properties.getSecurity().setTrustedProxies(new java.util.ArrayList<>(List.of("10.0.0.0/8")));
+        assertMessage("/24", properties);
+        properties.getSecurity().setTrustedProxies(new java.util.ArrayList<>(List.of("203.0.113.0/24")));
+        assertMessage("重複", properties);
     }
 
     @Test

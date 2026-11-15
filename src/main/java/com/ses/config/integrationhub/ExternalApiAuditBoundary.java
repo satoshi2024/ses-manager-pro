@@ -94,7 +94,8 @@ public class ExternalApiAuditBoundary extends OncePerRequestFilter {
                     trail, request, status, decision, principal);
             return true;
         }
-        if (principal == null && status < 500 && !unauthenticatedBudgetAvailable()) {
+        if (principal == null && "NONE".equals(trail.postAuthPrincipal())
+                && status < 500 && !unauthenticatedBudgetAvailable()) {
             recordWithoutPersistence(metrics, ExternalApiMetricsRecorder.AuditSuppressionReason.UNAUTHENTICATED_BUDGET,
                     trail, request, status, decision, null);
             return true;
@@ -107,7 +108,8 @@ public class ExternalApiAuditBoundary extends OncePerRequestFilter {
         ExternalApiAuditRecord record = new ExternalApiAuditRecord(
                 "UNAUTHENTICATED",
                 trail.postAuthPrincipal(),
-                principal == null ? null : principal.clientId(),
+                principal == null ? ("NONE".equals(trail.postAuthPrincipal()) ? null : trail.postAuthPrincipal())
+                        : principal.clientId(),
                 trail.credentialVersion(),
                 trail.keyId(),
                 correlationId(request, trail),

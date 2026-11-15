@@ -36,6 +36,8 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
     private final InboundEventMapper inboundMapper;
     private final InboundEventReplayRequestMapper inboundReplayMapper;
     private final ApiPurgeCheckpointMapper checkpointMapper;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.ses.mapper.ExternalApiAuditMapper externalAuditMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -214,6 +216,29 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
                     purged++;
                 }
             }
+        } else if ("EXTERNAL_AUDIT".equals(recordKind)) {
+            if (!IntegrationHubStates.RETENTION_AUDIT_1Y.equals(retentionClass)) {
+                completeCheckpoint(checkpoint, checkpointVersion, null, null, now);
+                return new PurgeReport(0, 0, 0, checkpoint.getRestoreEpoch());
+            }
+            QueryWrapper<com.ses.entity.integrationhub.ExternalApiAudit> query =
+                    new QueryWrapper<com.ses.entity.integrationhub.ExternalApiAudit>()
+                    .select("id", "retention_expires_at").le("retention_expires_at", now)
+                    .notExists("SELECT 1 FROM t_api_retention_hold h WHERE h.record_kind = 'EXTERNAL_AUDIT' "
+                            + "AND h.record_id = t_external_api_audit.id AND h.status = 'ACTIVE'")
+                    .orderByAsc("retention_expires_at", "id");
+            applyCheckpoint(query, checkpointExpiresAt, checkpointRecordId);
+            var candidates = externalAuditMapper.selectList(query.last("LIMIT " + limit));
+            fullBatch = candidates.size() == limit;
+            for (var candidate : candidates) {
+                inspected++;
+                lastExpiresAt = candidate.getRetentionExpiresAt();
+                lastRecordId = candidate.getId();
+                var row = externalAuditMapper.selectForUpdate(candidate.getId());
+                if (row == null || hasActiveHold("EXTERNAL_AUDIT", candidate.getId())
+                        || externalAuditMapper.deleteExpired(candidate.getId(), now) != 1) held++;
+                else purged++;
+            }
         } else if ("AUDIT".equals(recordKind)) {
             QueryWrapper<ApiDeliveryReplayAudit> query = new QueryWrapper<ApiDeliveryReplayAudit>()
                     .select("id", "retention_expires_at")
@@ -357,6 +382,7 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
             case "INBOUND" -> inboundMapper.selectForUpdate(recordId) != null;
             case "INBOUND_REPLAY" -> inboundReplayMapper.selectForUpdate(recordId) != null;
             case "AUDIT" -> replayAuditMapper.selectForUpdate(recordId) != null;
+            case "EXTERNAL_AUDIT" -> externalAuditMapper.selectForUpdate(recordId) != null;
             default -> false;
         };
     }
@@ -383,6 +409,8 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
                 ApiDeliveryReplayAudit row = replayAuditMapper.selectById(recordId);
                 yield row == null ? null : row.getRetentionClass();
             }
+            case "EXTERNAL_AUDIT" -> externalAuditMapper.selectById(recordId) == null
+                    ? null : IntegrationHubStates.RETENTION_AUDIT_1Y;
             default -> null;
         };
     }
@@ -406,7 +434,8 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
 
     private void validateKind(String kind) {
         if (!"IDEMPOTENCY".equals(kind) && !"DELIVERY".equals(kind)
-                && !"INBOUND".equals(kind) && !"INBOUND_REPLAY".equals(kind) && !"AUDIT".equals(kind)) {
+                && !"INBOUND".equals(kind) && !"INBOUND_REPLAY".equals(kind) && !"AUDIT".equals(kind)
+                && !"EXTERNAL_AUDIT".equals(kind)) {
             throw new IllegalArgumentException("invalid retention record kind");
         }
     }

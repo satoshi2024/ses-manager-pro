@@ -25,8 +25,7 @@ import java.util.UUID;
  * 残っている場合はfail-closedし、DB transaction内の外部HTTPを構造的に許可しない。
  */
 @Component
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
-        name = "integration.hub.external-transport.enabled", havingValue = "true")
+@org.springframework.context.annotation.Conditional(IntegrationHubOutboundCondition.class)
 public class IntegrationHubWebhookDeliveryWorker {
     private static final int MAX_DUE_BATCH = 32;
     private static final String PURPOSE = "webhook-signing";
@@ -42,6 +41,10 @@ public class IntegrationHubWebhookDeliveryWorker {
     private final IntegrationHubExternalApiProperties properties;
     private final Clock clock;
     private final ObjectMapper objectMapper;
+    @org.springframework.beans.factory.annotation.Autowired
+    private IntegrationHubWebhookReplayAuthorizationService currentScope;
+    @org.springframework.beans.factory.annotation.Autowired
+    private IntegrationHubOutboundStartupBarrier startupBarrier;
 
     public IntegrationHubWebhookDeliveryWorker(com.ses.mapper.ApiDeliveryMapper deliveryMapper,
                                                ApiDeliveryService deliveryService,
@@ -69,6 +72,15 @@ public class IntegrationHubWebhookDeliveryWorker {
 
     /** schedulerから呼ぶ入口。外部I/Oはこのメソッドのtransaction外でのみ行う。 */
     public int dispatchDue() {
+        if (startupBarrier == null || !startupBarrier.isReady()) return 0;
+        startupBarrier.quarantineBatch();
+        if (!Boolean.TRUE.equals(properties.getExternalTransport().getEnabled())) {
+            int held = 0;
+            for (ApiDelivery row : deliveryMapper.selectDue(utcNow(), properties.getExternalTransport().getBatchSize())) {
+                held += deliveryMapper.holdPending(row.getId(), row.getVersion(), utcNow());
+            }
+            return held;
+        }
         LocalDateTime recoveryNow = utcNow();
         deliveryService.recoverExpiredLeases(recoveryNow);
         LocalDateTime scanNow = utcNow();
@@ -88,6 +100,16 @@ public class IntegrationHubWebhookDeliveryWorker {
         if (deliveryId == null || now == null) {
             throw new IllegalArgumentException("delivery id and time are required");
         }
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                || TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException("webhook送信はtransaction外から呼び出してください");
+        }
+        if (!Boolean.TRUE.equals(properties.getExternalTransport().getEnabled())) {
+            ApiDelivery due = deliveryMapper.selectById(deliveryId);
+            return due != null && deliveryMapper.holdPending(deliveryId, due.getVersion(), utcNow()) == 1;
+        }
+        if (startupBarrier == null || !startupBarrier.isReady()) return false;
+        if (startupBarrier.isHistorical(deliveryId)) { startupBarrier.quarantineBatch(); return false; }
         String leaseToken = UUID.randomUUID().toString();
         LocalDateTime leaseExpiresAt = now.plusSeconds(properties.getExternalTransport().getLeaseSeconds());
         ApiDelivery claimed = deliveryService.claim(deliveryId, leaseToken, now, leaseExpiresAt);
@@ -131,8 +153,11 @@ public class IntegrationHubWebhookDeliveryWorker {
             String secret = cryptoService.decrypt(subscription.getClientId(),
                     subscription.getSigningCredentialVersion(), PURPOSE, subscription.getEncryptedSigningSecret());
             long timestamp = clock.instant().getEpochSecond();
-            String signature = signer.sign(claimed, subscription.getSigningCredentialVersion(),
-                    subscription.getKeyId(), timestamp, secret, body);
+            boolean audienceBound = properties.getProvider().getMode() == IntegrationHubExternalApiProperties.ProviderMode.HTTPS;
+            String signature = audienceBound
+                    ? signer.signForAudience(claimed, subscription.getSigningCredentialVersion(), subscription.getKeyId(),
+                            timestamp, secret, body, URI.create(subscription.getEndpointUrl()).toASCIIString())
+                    : signer.sign(claimed, subscription.getSigningCredentialVersion(), subscription.getKeyId(), timestamp, secret, body);
             headers.put("X-Integration-Hub-Event-ID", claimed.getEventId());
             headers.put("X-Integration-Hub-Event-Type", claimed.getEventType());
             headers.put("X-Integration-Hub-Schema-Version", claimed.getSchemaVersion());
@@ -140,7 +165,7 @@ public class IntegrationHubWebhookDeliveryWorker {
             headers.put("X-Integration-Hub-Key-ID", subscription.getKeyId());
             headers.put("X-Integration-Hub-Credential-Version",
                     Integer.toString(subscription.getSigningCredentialVersion()));
-            headers.put("X-Integration-Hub-Signature", signer.signatureHeaderValue(signature));
+            headers.put("X-Integration-Hub-Signature", audienceBound ? signer.audienceSignatureHeaderValue(signature) : signer.signatureHeaderValue(signature));
             headers.put("Idempotency-Key", claimed.getProviderIdempotencyKey());
             if (claimed.getCorrelationId() != null && !claimed.getCorrelationId().isBlank()) {
                 headers.put("X-Correlation-ID", claimed.getCorrelationId());
@@ -153,6 +178,25 @@ public class IntegrationHubWebhookDeliveryWorker {
 
         IntegrationHubWebhookTransportResult result;
         try {
+            if (properties.getProvider().getMode() == IntegrationHubExternalApiProperties.ProviderMode.HTTPS) {
+                try {
+                    properties.assertTenantBound(claimed.getTenantId());
+                    if (currentScope == null) throw new SecurityException("現在の送信scopeを検証できません");
+                    currentScope.assertCurrentSendScope(claimed, utcNow());
+                } catch (SecurityException | IllegalArgumentException | IllegalStateException refused) {
+                    return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_DLQ, "CURRENT_SCOPE_REJECTED", utcNow());
+                }
+            }
+            if (!Boolean.TRUE.equals(properties.getExternalTransport().getEnabled())) {
+                return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_DLQ, "KILL_SWITCH", utcNow());
+            }
+            long requiredMillis = properties.getExternalTransport().getDnsTimeoutMs()
+                    + properties.getExternalTransport().getConnectTimeoutMs()
+                    + (long) properties.getExternalTransport().getReadTimeoutMs() + 2_000L;
+            if (claimed.getLeaseExpiresAt() == null || !claimed.getLeaseExpiresAt().isAfter(
+                    utcNow().plusNanos(requiredMillis * 1_000_000L))) {
+                return retryable(claimed, leaseToken, "LEASE_MARGIN_INSUFFICIENT", utcNow());
+            }
             result = transport.send(new IntegrationHubWebhookRequest(
                     URI.create(subscription.getEndpointUrl()), body, headers));
         } catch (Exception e) {
@@ -174,8 +218,8 @@ public class IntegrationHubWebhookDeliveryWorker {
             if (result.retryable()) {
                 return retryable(claimed, leaseToken, result.errorCode(), utcNow());
             }
-            return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_FAILED,
-                    result.errorCode(), utcNow());
+            String terminalState = environmentFailure(result.errorCode()) ? IntegrationHubStates.DELIVERY_DLQ : IntegrationHubStates.DELIVERY_FAILED;
+            return terminal(claimed, leaseToken, terminalState, result.errorCode(), utcNow());
         } catch (RuntimeException e) {
             // provider結果確定のCAS障害はlease recoveryで再取得する。ここでretry時刻を
             // 書き込むと、provider成功直後のcrashを別経路の再送へ誤変換し得る。
@@ -183,12 +227,21 @@ public class IntegrationHubWebhookDeliveryWorker {
         }
     }
 
+    private static boolean environmentFailure(String code) {
+        return code != null && (code.startsWith("TLS_CERTIFICATE_") || java.util.Set.of("TLS_IDENTITY_REJECTED",
+                "PEER_REJECTED", "DESTINATION_REJECTED").contains(code));
+    }
+
     private boolean retryable(ApiDelivery claimed, String leaseToken, String errorCode, LocalDateTime now) {
+        if (IntegrationHubWebhookAttemptAccounting.definitelyUnsent(errorCode) && claimed.getCreatedAt() != null
+                && !now.isBefore(claimed.getCreatedAt().plusDays(1)))
+            return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_DLQ, "UNSENT_AGE_EXCEEDED", now);
         int attempt = claimed.getAttemptCount() == null ? 1 : claimed.getAttemptCount();
+        if (IntegrationHubWebhookAttemptAccounting.definitelyUnsent(errorCode)) attempt = Math.max(0, attempt - 1);
         if (attempt >= IntegrationHubWebhookBackoffPolicy.MAX_ATTEMPTS) {
             return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_DLQ, "MAX_ATTEMPTS", now);
         }
-        LocalDateTime next = now.plus(backoffPolicy.delayForAttempt(attempt));
+        LocalDateTime next = now.plus(backoffPolicy.delayForAttempt(Math.max(1, attempt)));
         return deliveryService.markRetryable(claimed.getId(), claimed.getVersion(), claimed.getDeliveryGeneration(),
                 leaseToken, claimed.getProviderIdempotencyKey(), claimed.getPayloadHash(), errorCode, now, next);
     }

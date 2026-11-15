@@ -23,9 +23,6 @@ final class IntegrationHubProductionEnablementPolicy {
     static final Pattern INBOUND_DECISION_ID = Pattern.compile("DG-05-IN-[0-9]{8}-[0-9]{2}");
     /** DG-05 outbound決定ID。inboundと別番号にし、片方向の決定でもう片方向を開けない。 */
     static final Pattern OUTBOUND_DECISION_ID = Pattern.compile("DG-05-OUT-[0-9]{8}-[0-9]{2}");
-    /** 送信先は小文字FQDN + 明示port。IP literal、単一label（localhost等）、userinfo、pathは受け付けない。 */
-    private static final Pattern DESTINATION = Pattern.compile(
-            "(?=.{1,253}:)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?:([0-9]{1,5})");
     /** 承認済み送信元CIDRの最小prefix。これより広い範囲は取引先の送信元として承認できない。 */
     static final int MIN_IPV4_CLIENT_PREFIX = 16;
     static final int MIN_IPV6_CLIENT_PREFIX = 32;
@@ -83,6 +80,19 @@ final class IntegrationHubProductionEnablementPolicy {
         } else if (cidrs.stream().anyMatch(cidr -> !narrowEnough(cidr))) {
             violations.add("public-api.approval.allowed-client-cidrsにIPv4 /16・IPv6 /32より広い範囲は指定できません");
         }
+        if (properties.getSecurity().getForwardedHeader()
+                != IntegrationHubExternalApiProperties.ForwardedHeader.X_FORWARDED_FOR) {
+            violations.add("ALBのinboundはX_FORWARDED_FORだけを使用できます");
+        }
+        for (String proxy : properties.getSecurity().getTrustedProxies()) {
+            int minimum = ExternalApiCidrMatcher.isIpv4Cidr(proxy) ? 24 : 64;
+            if (!ExternalApiCidrMatcher.isValidCidr(proxy) || ExternalApiCidrMatcher.prefixLength(proxy) < minimum) {
+                violations.add("trusted proxyはALB専用のIPv4 /24・IPv6 /64以上の狭い範囲へ限定してください");
+            }
+            if (cidrs != null && cidrs.stream().anyMatch(client -> overlaps(proxy, client))) {
+                violations.add("trusted proxyとclient CIDRの重複は許可できません");
+            }
+        }
         if (properties.getSecurity().getTrustedProxies().isEmpty()) {
             // D-1: production入口はLBのみ。trusted proxy未設定では全requestがLB自身のIPと判定される。
             violations.add("inbound開放にはLBのCIDRをsecurity.trusted-proxiesへ設定してください");
@@ -105,14 +115,14 @@ final class IntegrationHubProductionEnablementPolicy {
             violations.add("external-transport.approval.allowed-destinationsは小文字FQDNのhost:port形式で指定してください");
         }
         if (!productionOutboundCapable(properties.getProvider().getMode())) {
-            violations.add("outbound開放には本番用transport modeが必要です（実HTTPS transportはW3-06bで追加）");
+            violations.add("outbound開放にはprovider.mode=HTTPSが必要です");
         }
         return violations;
     }
 
     /**
      * 本番で実送信を担えるtransport modeか。MOCKは送らずに成功を返し、STUB/LOOPBACKは開発・test専用のため、
-     * 現行modeはすべてfalse。実HTTPS modeを追加したらこのswitchで明示的に判定する（網羅switchで追加漏れを防ぐ）。
+     * HTTPSだけを許可する。網羅switchで追加漏れを防ぐ。
      */
     static boolean productionOutboundCapable(IntegrationHubExternalApiProperties.ProviderMode mode) {
         if (mode == null) {
@@ -120,6 +130,7 @@ final class IntegrationHubProductionEnablementPolicy {
         }
         return switch (mode) {
             case MOCK, STUB, LOOPBACK -> false;
+            case HTTPS -> true;
         };
     }
 
@@ -144,24 +155,14 @@ final class IntegrationHubProductionEnablementPolicy {
                 ? prefix >= MIN_IPV4_CLIENT_PREFIX : prefix >= MIN_IPV6_CLIENT_PREFIX;
     }
 
-    static boolean validDestination(String destination) {
-        if (destination == null || !destination.equals(destination.toLowerCase(Locale.ROOT))) {
-            return false;
-        }
-        var matcher = DESTINATION.matcher(destination);
-        if (!matcher.matches()) {
-            return false;
-        }
-        String host = destination.substring(0, destination.lastIndexOf(':'));
-        if (host.endsWith(".localhost")) {
-            // RFC 6761の予約名はloopbackへ解決されるため、承認済み送信先にできない。
-            return false;
-        }
-        String portText = matcher.group(2);
-        if (portText.length() > 1 && portText.startsWith("0")) {
-            return false;
-        }
-        int port = Integer.parseInt(portText);
-        return port >= 1 && port <= 65535;
+    private static boolean overlaps(String left, String right) {
+        if (!ExternalApiCidrMatcher.isValidCidr(left) || !ExternalApiCidrMatcher.isValidCidr(right)) return true;
+        return ExternalApiCidrMatcher.matchesAny(left.substring(0, left.indexOf('/')), List.of(right))
+                || ExternalApiCidrMatcher.matchesAny(right.substring(0, right.indexOf('/')), List.of(left));
     }
+
+    static boolean validDestination(String destination) {
+        return com.ses.service.integrationhub.IntegrationHubHttpsEndpointGuard.validDestination(destination);
+    }
+
 }

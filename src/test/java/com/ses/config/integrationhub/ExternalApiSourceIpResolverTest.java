@@ -36,10 +36,24 @@ class ExternalApiSourceIpResolverTest {
     }
 
     @Test
-    void multipleForwardedForLinesAreCombinedInReceiveOrderBeforeTakingTheRightmost() {
+    void multipleForwardedForLinesAreRejected() {
         MockHttpServletRequest request = captured("10.0.0.1",
                 List.of("203.0.113.10", "198.51.100.7"), List.of());
-        assertEquals("198.51.100.7", resolver.resolve(request, security("10.0.0.1/32")));
+        assertDecision("DUPLICATE_PROXY_HEADER", () -> resolver.resolve(request, security("10.0.0.1/32")));
+    }
+
+    @Test
+    void multipleForwardedLinesAreRejected() {
+        var settings = security("10.0.0.1/32");
+        settings.setForwardedHeader(IntegrationHubExternalApiProperties.ForwardedHeader.FORWARDED);
+        var request = captured("10.0.0.1", List.of(), List.of("for=203.0.113.10", "for=198.51.100.7"));
+        assertDecision("DUPLICATE_PROXY_HEADER", () -> resolver.resolve(request, settings));
+    }
+
+    @Test
+    void duplicateUnusedHeaderTypeIsAlsoRejected() {
+        var request = captured("10.0.0.1", List.of("198.51.100.7"), List.of("for=203.0.113.10", "for=198.51.100.7"));
+        assertDecision("DUPLICATE_PROXY_HEADER", () -> resolver.resolve(request, security("10.0.0.1/32")));
     }
 
     @Test
