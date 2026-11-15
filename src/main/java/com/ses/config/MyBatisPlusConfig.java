@@ -2,10 +2,13 @@ package com.ses.config;
 
 import com.baomidou.mybatisplus.annotation.DbType;
 import com.baomidou.mybatisplus.core.handlers.MetaObjectHandler;
+import com.baomidou.mybatisplus.core.injector.ISqlInjector;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.OptimisticLockerInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
 import com.ses.common.audit.ExecutionActorContext;
+import com.ses.common.mybatis.AppendOnlyMapper;
+import com.ses.common.mybatis.AppendOnlySqlInjector;
 import org.apache.ibatis.reflection.MetaObject;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -47,6 +50,17 @@ public class MyBatisPlusConfig {
     @Bean
     public MetaObjectHandler metaObjectHandler() {
         return new AutoFillMetaObjectHandler();
+    }
+
+    /**
+     * SQL injector。追記専用のmapper（{@link AppendOnlyMapper} を継承するもの）には更新・削除の文を注入せず、
+     * それ以外のmapperには既定と同じ文を注入する（MyBatis-Plusの自動設定がこのbeanを使う）。
+     *
+     * @return AppendOnlySqlInjector インスタンス
+     */
+    @Bean
+    public ISqlInjector sqlInjector() {
+        return new AppendOnlySqlInjector();
     }
 
     /**

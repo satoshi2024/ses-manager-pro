@@ -57,14 +57,37 @@ class TestSchemaReplayIntegrationTest {
         assertForeignKey("FK_IMPORT_JOB_CURRENT_RUN", "T_IMPORT_VALIDATION_RUN",
                 List.of("TENANT_ID", "ID", "CURRENT_VALIDATION_RUN_ID"),
                 List.of("TENANT_ID", "JOB_ID", "ID"));
+
+        // NF01 B0（V195相当）: V1が作り直す sys_user・m_organization_unit・t_document_version へのFKは
+        // precleanupで外され、schema-nf01-dual-confirmation-h2.sql が付け直す
+        assertForeignKey("T_LIFECYCLE_DUAL_SUBMISSION", "FK_DUAL_SUBMISSION_SUBMITTER", "SYS_USER",
+                List.of("TENANT_ID", "SUBMITTER_USER_ID"), List.of("TENANT_ID", "ID"));
+        assertForeignKey("T_LIFECYCLE_DUAL_SUBMISSION", "FK_DUAL_SUBMISSION_CASE", "T_LIFECYCLE_CASE",
+                List.of("TENANT_ID", "CASE_ID"), List.of("TENANT_ID", "ID"));
+        assertForeignKey("T_LIFECYCLE_DUAL_SUBMISSION_DOCUMENT", "FK_DUAL_DOC_VERSION", "T_DOCUMENT_VERSION",
+                List.of("TENANT_ID", "DOCUMENT_ID", "DOCUMENT_VERSION_ID"), List.of("TENANT_ID", "DOCUMENT_ID", "ID"));
+        assertForeignKey("T_LIFECYCLE_DUAL_SUBMISSION_ORG_FENCE", "FK_DUAL_ORG_UNIT", "M_ORGANIZATION_UNIT",
+                List.of("ORGANIZATION_ID"), List.of("ID"));
+        assertForeignKey("T_LIFECYCLE_DUAL_CONFIRMATION", "FK_DUAL_CONFIRMATION_CONFIRMER", "SYS_USER",
+                List.of("TENANT_ID", "CONFIRMER_USER_ID"), List.of("TENANT_ID", "ID"));
+        assertForeignKey("T_LIFECYCLE_DUAL_CONFIRMATION", "FK_DUAL_CONFIRMATION_SUBMISSION", "T_LIFECYCLE_DUAL_SUBMISSION",
+                List.of("TENANT_ID", "TASK_ID", "TASK_GENERATION", "SUBMISSION_REVISION", "SUBMISSION_ID", "EVIDENCE_SHA256"),
+                List.of("TENANT_ID", "TASK_ID", "TASK_GENERATION", "REVISION", "ID", "EVIDENCE_SHA256"));
+        assertForeignKey("T_LIFECYCLE_DUAL_IDEMPOTENCY", "FK_DUAL_IDEM_ACTOR", "SYS_USER",
+                List.of("TENANT_ID", "ACTOR_USER_ID"), List.of("TENANT_ID", "ID"));
     }
 
     private void assertForeignKey(String name, String targetTable,
                                   List<String> sourceColumns, List<String> targetColumns) throws SQLException {
+        assertForeignKey("T_IMPORT_JOB", name, targetTable, sourceColumns, targetColumns);
+    }
+
+    private void assertForeignKey(String sourceTable, String name, String targetTable,
+                                  List<String> sourceColumns, List<String> targetColumns) throws SQLException {
         List<ImportedKey> keys = new ArrayList<>();
         try (var connection = dataSource.getConnection()) {
             DatabaseMetaData metaData = connection.getMetaData();
-            try (ResultSet rows = metaData.getImportedKeys(connection.getCatalog(), "PUBLIC", "T_IMPORT_JOB")) {
+            try (ResultSet rows = metaData.getImportedKeys(connection.getCatalog(), "PUBLIC", sourceTable)) {
                 while (rows.next()) {
                     if (name.equalsIgnoreCase(rows.getString("FK_NAME"))) {
                         keys.add(new ImportedKey(rows.getShort("KEY_SEQ"), rows.getString("FKTABLE_NAME"),
@@ -79,7 +102,7 @@ class TestSchemaReplayIntegrationTest {
         assertThat(keys.stream().map(ImportedKey::sourceColumn).toList()).containsExactlyElementsOf(sourceColumns);
         assertThat(keys.stream().map(ImportedKey::targetColumn).toList()).containsExactlyElementsOf(targetColumns);
         assertThat(keys).allSatisfy(key -> {
-            assertThat(key.sourceTable()).isEqualToIgnoringCase("T_IMPORT_JOB");
+            assertThat(key.sourceTable()).isEqualToIgnoringCase(sourceTable);
             assertThat(key.targetTable()).isEqualToIgnoringCase(targetTable);
         });
     }
