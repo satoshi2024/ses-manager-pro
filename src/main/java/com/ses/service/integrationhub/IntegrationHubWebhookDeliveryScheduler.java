@@ -15,7 +15,7 @@ public class IntegrationHubWebhookDeliveryScheduler {
 
     @Scheduled(fixedDelayString = "${integration.hub.external-transport.fixed-delay-ms:1000}")
     @net.javacrumbs.shedlock.spring.annotation.SchedulerLock(
-            name = "integrationHubWebhookDelivery", lockAtMostFor = "PT40M")
+            name = "integrationHubWebhookDelivery", lockAtMostFor = "PT5M")
     public void dispatch() {
         worker.dispatchDue();
     }

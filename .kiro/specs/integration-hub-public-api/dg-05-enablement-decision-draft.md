@@ -122,8 +122,11 @@ outboundは実transport、送信先allow-list、DPA、顧客/providerの書面�
 
 OUT-9: P1-1/P1-2とP2-1〜3の正式証拠（実container commit/rollback、小数秒ClockのH2/MySQL往復、
 再起動前の旧台帳隔離、TLS恒久障害DLQとreplay前のTLS確認）を最終SHAで取得する。
-OUT-7: ON起動ごとの旧ID隔離と結果不明CLAIMEDの照合、未送信24時間上限、FAILED alert、
-40分scheduler lockによるfailover遅延とDB待ち時間の実測を承認する。
+OUT-7（G3sで置換）: 永続OFFを確認したOFF→ONだけの隔離、ON→ONのキュー維持とat-least-once、結果不明CLAIMEDの照合を承認する。
+未登録ON／状態DB・監査障害ではNF05だけを未準備とし、他機能の起動を継続する。4096件の起動拒否は採用しない。
+OFF書込成功・同じbound-tenant fingerprintの確認をON変更の必須gateとする。未確認OFF経由は後続ONから識別できない。
+128件の周期復旧とlease待ち、Prometheus→SRE当番／Ownerのalert経路・試験通知、条件付きbulk replayの部分成功・監査失敗時照合を署名条件に追加する。
+24時間未送信期限はreplay auditのgeneration作成時刻から測る。送信lockは5分、開始予算120秒＋最後のnetwork一項でありDB待ちの上限ではない。実測とCASの重複防止を確認する。
 OUT-6: outbound subscriptionを含む24時間overlapローテーション、新clientIdでの90日期限移行、用途分離canonical付きの共用secretを明示判断する。
 P2-2: tenant欠損時は業務継続のためeventをskipする。WARN/counterと業務記録を照合する復旧手順、event欠落の許容をOwnerが署名する。
 IN-5: 二つのtrusted-proxies設定の整合とALB subnetの/24分割をSRE/Securityが確認する。

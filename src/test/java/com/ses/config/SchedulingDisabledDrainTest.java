@@ -114,7 +114,9 @@ class SchedulingDisabledDrainTest {
     /** 起動時に一度だけ動くhook（{@code app.scheduling.enabled} の外。各自の条件で起動する）。 */
     private static final Map<String, String> STARTUP_HOOK_INVENTORY = inventory(
             "com.ses.service.integrationhub.IntegrationHubOutboundStartupBarrier:ApplicationRunner",
-            "outbound ON起動時だけ旧IDをbounded隔離する。完了までworkerをgateし、周期処理は持たない",
+            "起動直後に隔離を一batch進める。例外はNF05内で捕捉しアプリ起動を妨げない",
+            "com.ses.service.integrationhub.IntegrationHubOutboundStartupBarrier:Lifecycle",
+            "web serverより前のphaseでOFF/ONを永続化し高水位を確定する。定期復旧は全体scheduler停止に従う",
             "com.ses.config.ContractDocumentBackfillRunner:ApplicationRunner",
             "app.upload.contract-backfill-enabled（未設定=有効）。契約PDFのmetadataを起動時にbackfillする（DB書込あり）",
             "com.ses.config.ContractDocumentDispatchBackfill:ApplicationRunner",

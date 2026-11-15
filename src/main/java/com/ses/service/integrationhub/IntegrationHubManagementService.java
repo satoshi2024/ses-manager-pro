@@ -202,8 +202,10 @@ public class IntegrationHubManagementService {
                 original.getScopeDigest(), auth, now()).getId();
     }
 
+    public String requireManagementTenant() { return requireAdministrator(); }
+
     public void assertDeliveryScope(String clientId, Long legalEntityId) {
-        requireClient(clientId, legalEntityId);
+        requireClient(clientId, legalEntityId, false);
     }
 
     private ApiClient requireClient(String clientId, Long legalEntityId) { return requireClient(clientId, legalEntityId, true); }

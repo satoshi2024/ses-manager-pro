@@ -34,7 +34,7 @@ LB 自身が 403/404 を返す。app 側も OFF 時は 404 を返すが、それ
 | `integration_hub_external_api_audit_suppressed_total{reason="PUBLIC_API_DISABLED"}` | production で 1以上 | §0 D-1（LB 遮断が効いていない） |
 | `integration_hub_delivery_rows{status="DLQ"}` | 1件以上 | §5 DLQ / manual replay |
 | `integration_hub_delivery_rows{status="FAILED"}` | 新規増加が1件以上 | 即時通知。payload/恒久HTTP拒否を確認し、無断再送しない |
-| `integration_hub_producer_skipped_total{reason=~"NO_TENANT|INVALID_SCOPE|SUBSCRIPTION_LIMIT"}` | 1以上 | 即時通知。event欠落の対象期間と業務変更を照合する |
+| `integration_hub_producer_skipped_total{reason=~"NO_TENANT|TENANT_MISMATCH|INVALID_SCOPE|SUBSCRIPTION_LIMIT"}` | 1以上 | 即時通知。event欠落の対象期間と業務変更を照合する |
 | `integration_hub_inbound_rows{status="DLQ"}` | 15分連続増加 | §4.1 inbound |
 | DB connection pool exhausted | Hikari pending > 0 が継続 | §6 DB障害 |
 | startup validator fail-closed | 起動失敗 | §7 config / emergency stop |
@@ -138,11 +138,13 @@ nonce は `max(受付時刻, 署名時刻) + 601 秒` まで保存し、±300 �
 2. `integration.hub.external-transport.enabled=false`
 3. `integration.hub.provider.mode=MOCK`
 4. 再起動後、deny-only chain が `/external-api/v1/**` を stable 404 JSON で返し、`t_external_api_audit` に行が増えないことを確認する。
-5. external controller / worker / scheduler / transportの停止を確認する。内部管理APIは管理者専用のまま。
-   prodの停止操作はOFFへ変更して全停止・再起動する。実行中propertiesを変更する運用は提供しない。
-   再びONへ起動すると、ID高水位以前のPENDING/RETRYABLEをSTARTUP_REVALIDATION_REQUIREDのDLQへ隔離する。
-   有効leaseは奪わず、旧CLAIMEDも通常送信へ戻さない。期限後に隔離し、結果不明のin-flightを照合してから管理者replayする。
-   初期化前はworkerをgateし、高水位以後の新規IDだけを通常送信する。起動隔離は128件×最大32batch、上限超過は起動拒否。
+5. external controller / worker / 送信scheduler / transportの停止を確認する。内部管理APIは管理者専用のまま。
+   prodの停止操作はOFFへ変更して全停止・再起動する。実行中propertiesの変更とON/OFFの混在nodeは運用しない。
+   OFF/ONの状態管理componentはOFFでも残り、既存m_system_configへ明示OFFを保存する。正常終了stopだけではOFFを書かない。
+   必ず§13のOFF永続化成功を確認してからONへ戻す。OFFのDB書込が失敗した直後にONへ再起動すると、旧ON値からOFF経由を識別できない。
+   初回の未登録状態でONを指定しても送信は未準備のまま。最初に同じbound-tenant-idを設定してOFFで配備・確認する。
+   OFF→ONだけが高水位以前の旧PENDING/RETRYABLEと期限切れCLAIMEDを隔離する。ON→ONの通常配備/crash再起動はキューを維持する。
+   未完了/DB/監査障害はアプリ全体の起動を妨げず、outboundだけ未準備とする。128件ずつ周期復旧し、4096件の起動拒否上限は廃止した。
 6. inbound を止めた場合は LB/WAF の `/external-api/**` 遮断（§0 D-1）を戻す。片方向だけ止める場合は該当方向の
    `enabled=false` だけを変え、他方向の承認値は触らない。
 7. 両方向 OFF では retention purge scheduler が生成されない。停止が長引く場合の payload・監査の扱いは DBA が判断する。
@@ -178,10 +180,10 @@ V192はUTC一年expiry、EXTERNAL_AUDIT hold/checkpoint付きの最大1000件pur
 
 ## 12. G3rの再開と運用判断
 
-- 正本は `.kiro/specs/integration-hub-public-api/g3r-fix-and-runner.md`。通常のON再起動も旧台帳を再確認対象にする保守的な方針。
+- G3r当時の記録は `.kiro/specs/integration-hub-public-api/g3r-fix-and-runner.md`。再開/期限/lockの正本はG3s文書と本書§13。通常ON再起動はqueueを維持する。
 - 証明書/hostname/peer/destination拒否はretryせずDLQ。TLS確認と設定修正後、管理者replay前のallow-list/handshake検証を通す。
   handshake probeはHTTPも署名secretも送らず、DB transaction外。結果不明の旧CLAIMEDは受信側と照合してからreplayする。
-- 未送信確定retryでもevent作成から24時間でDLQ。新generationのmanual replayでも元event作成時刻を保つため、古いeventで再び未送信失敗になれば直ちに再確認対象になる。
+- 未送信確定retryは初代eventで作成から24時間、replayでは当該generationの不変audit作成から24時間でDLQ。元event/bodyは保ち、操作時刻で予算を無期限延長しない。
 - credentialローテーション: 受信側へ新keyId/secretを安全に設定→新versionを発行→同endpointを新versionで再登録→新署名の受信確認→旧credential失効。
   24時間overlap内にoutbound subscriptionも必ず切り替える。同一clientでkeyIdを再使用しない（DB UNIQUE）。
 - client 90日期限の自動延長はない。期限前に新clientIdでscope/credential/subscriptionを構築し、新しいopaque IDへの移行を受信側と調整する。
@@ -190,8 +192,56 @@ V192はUTC一年expiry、EXTERNAL_AUDIT hold/checkpoint付きの最大1000件pur
 - FWD-SANITIZEのapp.security.trusted-proxiesとNF05のintegration.hub.security.trusted-proxiesを同じALB経路に合わせる。
   /20〜/22 subnetは承認済み複数/24へ分け、client CIDRとは重ねない。LBのsecurity groupとWAFの証跡を残す。
 - pinのpeer集合は検証済み公開IPだけを120秒/host64件まで保持する。新しい接続は最新DNS回答へ限定する。
-- scheduler lock最大40分は最大network batchに余量を設ける設定。crash時は最長40分failoverが遅れる。
-  DB/quarantine/auditのlock待ち時間をこの不等式は保証しない。overlap時の安全はledger CAS/fenceが担い、実測とDB timeoutをSREが確認する。
+- 送信scheduler lockは最大5分。実dispatchは120秒経過後に次項を開始しないため、network上界は120秒＋最後の一項のDNS/connect/read/close。
+  最大batch件数32は維持する。DB/quarantine/auditのlock待ち時間はこのnetwork予算で上限化しない。
+  overlap時の安全はledger CAS/fenceが担い、SREはDB timeoutと実測を確認する。状態復旧schedulerは別の1分lockを使う。
 - V192はDDLが暗黙commitする。既存dev/stagingのJVMがJSTだったことを確認し、部分失敗でUPDATEを再実行して二度九時間を引かない。
   配備前backupから戻すか、DBAが列・UTC変換済み値・index/check・Flyway履歴を照合して段階的に補完する。repairだけで先へ進まない。
   UTC列の運用比較にはUTC_TIMESTAMP()を使い、DB NOW()（+09:00）と混ぜない。
+
+## 13. G3s：永続状態、再開と有界bulk replay
+
+### 13.1 永続状態と配備
+
+- 専用keyはm_system_configのintegration.hub.outbound.runtime.v1。値はv1／phase（OFF、QUARANTINING、ON）／高水位ID／bound-tenantのSHA-256を縦線で区切る。
+  schema変更はない。これはruntime専用でsystem-config一覧から除外し、汎用設定APIの未知key拒否も維持する。DBから直接書き換えない。
+- 状態遷移は「未登録→明示OFFの永続成功→OFF」「OFF→ON設定起動→QUARANTINING（境界固定）→旧active行ゼロ→ON」。
+  ON→ON（stop/start、通常配備、crash再起動）はONのままでPENDING/RETRYABLEを継続する。QUARANTINING中のcrash後は同じ境界から再開する。
+  OFFへの設定起動だけがOFFを記録する。OFFが観測できない未登録ONはMISSING_STATEで送信を停止する。
+- OFF配備の時点から正しいintegration.hub.topology.bound-tenant-idを指定し、再開時にも同じ値を使う。fingerprint不一致はTENANT_STATE_MISMATCHで停止する。
+- SREはON変更前に、当該DBの専用keyがOFFでcommit済みであることとNF05_OUTBOUND_OFFの監査を確認する。DB障害時のOFF確認失敗を無視してONへ進めない。
+  旧ONが残ったままOFFプロセスを終了すると、その後のONは経由を検出できない。この不可観測の区間は運用gateで防ぐ。
+- 境界はweb server前のSmartLifecycle phaseで固定する。早期DB障害時は準備未完了のまま起動し、周期復旧時に境界を取得する。
+  この回復区間の新規eventも境界以下に含まれれば保守的に隔離される。外部送信の安全を優先し、必要なら条件付きbulk replayで戻す。
+- 旧CLAIMEDの有効leaseは奪わない。leaseが終わるまで全outboundを未準備に保ち、期限後も旧snapshotはDLQへ隔離する。
+  初期runner、5秒ごとの状態scheduler、送信dispatchの準備確認はいずれも一回128件まで。状態行の短いlock、delivery version CAS、required監査が同じtransaction。
+  走査SELECTにFOR UPDATEは付けず、全隔離完了後は過去行走査を止める。隔離失敗・監査失敗はrollbackして次周期で再試行し、他の機能は起動・応答を続ける。
+- 全停止配備とproviderのin-flight結果照合を維持する。混在ON/OFF node、他プロセスからのruntime値変更、汎用設定cacheを介した操作は対応しない。
+  app.scheduling.enabled=falseでは周期復旧が動かない。drain解除後のscheduling有効化と復旧完了を確認する。
+
+### 13.2 WARN、metricと通知gate
+
+- integration_hub_startup_quarantine_pending=1が60秒継続、またはintegration_hub_outbound_state_events_totalのSTATE_IO_ERROR／MISSING_STATE／TENANT_STATE_MISMATCHが5分以内に増加したら、SRE当番へ即時通知する。
+  5分継続またはQUARANTINE_PENDINGがlease最大時間を超えたらOwnerと運用管理者にもSEV-2として通知し、DB・監査・leaseを確認する。
+- enabled=ON予定の配備でintegration_hub_outbound_ready=0が続く場合も同じ宛先へ通知する。OFF予定のready=0自体は異常ではない。
+  OFF予定でもpending=1は永続化未確認なので、ON移行を禁止する。
+- reason labelは上記4種だけ。metricはメモリのgate状態で、scrapeからDBの反復走査を行わない。WARNはcomponentごと最大1分間隔。
+- 通知方式はPrometheus/Alertmanager等からSREの連絡先への運用alert。アプリからのアプリ内通知や実際の通知配送を本修正で実装・実行したとは扱わない。
+  SREは宛先、routing、閾値、テスト通知、ack責任を設定して証拠化する。未接続のalertや未署名のOUT-7のままoutboundを開放しない。
+
+### 13.3 管理者の条件付きbulk replay
+
+- 既存rootのPOST /api/integration-hub/deliveries/bulk-replayを使う。管理者、既存integration-hub.update、CSRFを要求し、汎用allow-listは増やさない。
+- bodyはtenantId（現在のtenantと完全一致）、subscriptionId、legalEntityId、from／until（UTC Instant、created_atの半開区間、最大31日）、
+  failureClass、reasonCode（大文字の有限code、最大64文字）、limit（1〜20）。failureClassはSTARTUP_REVALIDATION_REQUIRED／TLS_CERTIFICATE／TLS_IDENTITY_REJECTED／PEER_REJECTED／DESTINATION_REJECTED／UNSENT_AGE_EXCEEDED／MAX_ATTEMPTSだけ。
+  subscriptionと現在のclient/法人の境界をTLSより前に検査し、DLQの最新generationだけをid順で選ぶ。上位generationまたは既存replay監査がある元行は選ばない。
+- 最初に条件・候補ID・requestIdのrequired要求監査を短い独立transactionでcommitする。ここで失敗すれば新generationはゼロ。
+  以後は一件ずつ既存replayを呼び、現在権限・scope・帰属を再検証し、HTTPSではallow-list/DNSを検証し、同じ絶対期限内で検証済みaddressを順に試すTLS preflightをtransaction外で行う。最初のTLS成功で止め、全addressの成功は要求しない。
+  HTTP本文やsecretはprobeに送らない。各成功は既存のrequired replay監査と同じtransactionで確定する。
+- 一件の拒否・競合はREJECTEDとして次へ進み、既成功をrollbackしたとは返さない。selected/succeeded/rejected/deferredと元ID／新IDを確認する。
+  120秒経過後は次項を開始しない。最大所要時間のnetwork部分は120秒＋最後のprobe総期限であり、厳密な120秒終了でもDB時間上限でもない。
+- 完了監査が失敗しても要求監査と各成功のreplay監査は残る。completionAuditRecorded=falseとWARNを受けたらrequestIdで照合し、全件失敗と誤認して再投入しない。
+  同じ条件を繰り返すと、再送済みの元DLQを除外して次の未処理へ進む。並行replayの敗者はgeneration/unique制約で拒否される。skipや拒否が続く元行は条件を絞って調査する。
+- eventId、元createdAt、payload/hashはreplayでも変えない。未送信24時間期限だけは当該generationの不変replay audit.created_atから測る。
+  updated_atを使って毎回期限を延長しない。元行がpurge済みなどでauditとのbindingを確認できなければ安全側でDLQに戻す。
+  eventはat-least-onceかつ順序保証なし。同一秒の複数eventも並べ替えできないため、順序が必要な受信側はread APIで現在値を再取得する。

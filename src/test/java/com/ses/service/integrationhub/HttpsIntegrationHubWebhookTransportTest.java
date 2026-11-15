@@ -90,6 +90,8 @@ class HttpsIntegrationHubWebhookTransportTest {
             assertThat(wrongHostname.retryable()).isFalse();
             assertThat(requests).hasValue(2);
             verify(guard, atLeast(2)).validateConnectedPeer(any(), any());
+            when(guard.pinnedAddresses("127.0.0.1")).thenReturn(new InetAddress[]{
+                    InetAddress.getByName("127.0.0.2"), InetAddress.getByName("127.0.0.1")});
             try (var preflight = new IntegrationHubReplayTlsPreflight(properties, guard)) {
                 preflight.validate(URI.create("https://127.0.0.1:" + port + "/"));
                 assertThatThrownBy(() -> preflight.validate(URI.create("https://localhost:" + port + "/")))
@@ -100,6 +102,7 @@ class HttpsIntegrationHubWebhookTransportTest {
                         .isInstanceOf(IllegalStateException.class); }
                 finally { org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization(); }
             }
+            when(guard.pinnedAddresses("127.0.0.1")).thenReturn(new InetAddress[]{InetAddress.getByName("127.0.0.1")});
             Path untrusted = directory.resolve("untrusted.p12");
             Process other = new ProcessBuilder(keytool.toString(), "-genkeypair", "-alias", "other", "-dname", "CN=other",
                     "-storetype", "PKCS12", "-keystore", untrusted.toString(), "-storepass", password, "-keypass", password,

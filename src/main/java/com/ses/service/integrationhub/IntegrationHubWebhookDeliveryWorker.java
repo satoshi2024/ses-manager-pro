@@ -41,6 +41,7 @@ public class IntegrationHubWebhookDeliveryWorker {
     private final IntegrationHubExternalApiProperties properties;
     private final Clock clock;
     private final ObjectMapper objectMapper;
+    private java.util.function.LongSupplier monotonic = System::nanoTime;
     @org.springframework.beans.factory.annotation.Autowired
     private IntegrationHubWebhookReplayAuthorizationService currentScope;
     @org.springframework.beans.factory.annotation.Autowired
@@ -72,8 +73,9 @@ public class IntegrationHubWebhookDeliveryWorker {
 
     /** schedulerから呼ぶ入口。外部I/Oはこのメソッドのtransaction外でのみ行う。 */
     public int dispatchDue() {
-        if (startupBarrier == null || !startupBarrier.isReady()) return 0;
-        startupBarrier.quarantineBatch();
+        if (startupBarrier == null) return 0;
+        startupBarrier.continueRecovery();
+        if (!startupBarrier.isReady()) return 0;
         if (!Boolean.TRUE.equals(properties.getExternalTransport().getEnabled())) {
             int held = 0;
             for (ApiDelivery row : deliveryMapper.selectDue(utcNow(), properties.getExternalTransport().getBatchSize())) {
@@ -87,7 +89,9 @@ public class IntegrationHubWebhookDeliveryWorker {
         List<ApiDelivery> due = deliveryMapper.selectDue(scanNow,
                 Math.min(MAX_DUE_BATCH, properties.getExternalTransport().getBatchSize()));
         int processed = 0;
+        long deadline = monotonic.getAsLong() + java.util.concurrent.TimeUnit.MINUTES.toNanos(2);
         for (ApiDelivery candidate : due) {
+            if (monotonic.getAsLong() >= deadline) break;
             if (dispatchOne(candidate.getId(), utcNow())) {
                 processed++;
             }
@@ -109,7 +113,6 @@ public class IntegrationHubWebhookDeliveryWorker {
             return due != null && deliveryMapper.holdPending(deliveryId, due.getVersion(), utcNow()) == 1;
         }
         if (startupBarrier == null || !startupBarrier.isReady()) return false;
-        if (startupBarrier.isHistorical(deliveryId)) { startupBarrier.quarantineBatch(); return false; }
         String leaseToken = UUID.randomUUID().toString();
         LocalDateTime leaseExpiresAt = now.plusSeconds(properties.getExternalTransport().getLeaseSeconds());
         ApiDelivery claimed = deliveryService.claim(deliveryId, leaseToken, now, leaseExpiresAt);
@@ -233,8 +236,15 @@ public class IntegrationHubWebhookDeliveryWorker {
     }
 
     private boolean retryable(ApiDelivery claimed, String leaseToken, String errorCode, LocalDateTime now) {
-        if (IntegrationHubWebhookAttemptAccounting.definitelyUnsent(errorCode) && claimed.getCreatedAt() != null
-                && !now.isBefore(claimed.getCreatedAt().plusDays(1)))
+        LocalDateTime windowStart = claimed.getCreatedAt();
+        if (claimed.getDeliveryGeneration() != null && claimed.getDeliveryGeneration() > 1
+                && IntegrationHubWebhookAttemptAccounting.definitelyUnsent(errorCode)) {
+            windowStart = deliveryMapper.selectReplayWindowStart(claimed.getEventId(), claimed.getDeliveryGeneration(),
+                    claimed.getSubscriptionId(), claimed.getClientId());
+            if (windowStart == null) return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_DLQ, "UNSENT_AGE_EXCEEDED", now);
+        }
+        if (IntegrationHubWebhookAttemptAccounting.definitelyUnsent(errorCode) && windowStart != null
+                && !now.isBefore(windowStart.plusDays(1)))
             return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_DLQ, "UNSENT_AGE_EXCEEDED", now);
         int attempt = claimed.getAttemptCount() == null ? 1 : claimed.getAttemptCount();
         if (IntegrationHubWebhookAttemptAccounting.definitelyUnsent(errorCode)) attempt = Math.max(0, attempt - 1);

@@ -1,5 +1,7 @@
 # G3実装とRunner引継ぎ（2026-11-14、未承認）
 
+この文書は当時の実装記録。再開屏障・scheduler lock・replay期限はg3s-restart-barrier-and-replay.mdと最新runbook §13で置換する。
+
 起点はb7da8299。#108 TLS候補を継承した状態からproduction専用HTTPS実装を追加した。
 候補のTestHooks / ExchangeExecutor / PeerObserverは移植していない。prod既定の両方向OFF+MOCK、
 方向別DG-05の未署名状態とProduction NO-GOは維持する。実装は開放承認と同義ではない。
