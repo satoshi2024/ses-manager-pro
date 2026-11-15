@@ -44,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -330,7 +331,8 @@ class ServiceSlaSchedulerTest {
 
         monitoringService.checkSlaBreaches(LocalDateTime.now());
 
-        verify(notificationService, never()).publishToUser(any(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString());
+        // 同じcontextの他機能（例: 時間外コンプライアンスの@Async通知）がmockへ届いても誤判定しないよう、SLA通知種別に限定する
+        verify(notificationService, never()).publishToUser(any(), startsWith("SLA_"), anyString(), anyString(), anyString(), anyString(), anyString());
         String dedupeKey = "SLA_FIRST:" + req.getId() + ":1:RESPONSE:FIRST";
         var escalation = escalationMapper.selectByDedupeKeyAndTenant(dedupeKey, tenantId);
         assertNotNull(escalation);
@@ -458,7 +460,8 @@ class ServiceSlaSchedulerTest {
         assertEquals(1, escalationMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ServiceSlaEscalation>()
                 .eq(com.ses.entity.ServiceSlaEscalation::getServiceRequestId, req.getId())
                 .eq(com.ses.entity.ServiceSlaEscalation::getStatus, "RETRY")));
-        verify(notificationService, never()).publishToUser(any(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString());
+        // 同じcontextの他機能（例: 時間外コンプライアンスの@Async通知）がmockへ届いても誤判定しないよう、SLA通知種別に限定する
+        verify(notificationService, never()).publishToUser(any(), startsWith("SLA_"), anyString(), anyString(), anyString(), anyString(), anyString());
 
         SysUser owner = activeUser("retry_owner");
         req.setOwnerUserId(owner.getId());
