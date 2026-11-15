@@ -35,6 +35,8 @@ class IntegrationHubManagementServiceTest {
     private final AttendanceScopeMapper legalEntities = mock(AttendanceScopeMapper.class);
     private final IntegrationHubExternalApiProperties properties = new IntegrationHubExternalApiProperties();
     private final ApiClientScopeMapper scopes = mock(ApiClientScopeMapper.class);
+    private final ApiDeliveryMapper deliveries = mock(ApiDeliveryMapper.class);
+    private final IntegrationHubWebhookDeliveryReplayService replayService = mock(IntegrationHubWebhookDeliveryReplayService.class);
     private IntegrationHubManagementService service;
     private static final String SCOPE = "{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"],\"projectIds\":[\"1\"]}";
 
@@ -48,13 +50,15 @@ class IntegrationHubManagementServiceTest {
             return null;
         }).when(audit).recordDomainEventRequired(any(AuditLog.class));
         properties.getTopology().setBoundTenantId("tenant-a");
-        service = new IntegrationHubManagementService(mock(ApiDeliveryMapper.class),
-                mock(IntegrationHubWebhookDeliveryReplayService.class), clients, scopes, subscriptions, credentials,
+        service = new IntegrationHubManagementService(deliveries,
+                replayService, clients, scopes, subscriptions, credentials,
                 credentialService, crypto, guard, properties, authorization, audit, new ObjectMapper(),
                 Clock.fixed(Instant.parse("2026-11-14T00:00:00Z"), ZoneOffset.UTC), legalEntities);
         when(clients.selectByClientIdForUpdate("client-a")).thenReturn(ApiClient.builder().id(1L).clientId("client-a")
                 .tenantId("tenant-a").legalEntityId(9L).status("ACTIVE").dataScopeJson(SCOPE).build());
         when(legalEntities.selectAllLegalEntityIds()).thenReturn(List.of(9L));
+        when(clients.lockTenantCapacity("tenant-a")).thenReturn(1L);
+        when(subscriptions.selectOutboundForTenantForUpdate("tenant-a")).thenReturn(List.of());
     }
 
     @AfterEach void clear() { SecurityContextHolder.clearContext(); }
@@ -155,6 +159,59 @@ class IntegrationHubManagementServiceTest {
         service.grantScope(new IntegrationHubManagementService.ScopeCommand(
                 "client-a", 9L, "integration.project.read", "integration.webhook.deliver", SCOPE));
         verify(scopes).insert(any(com.ses.entity.integrationhub.ApiClientScope.class));
+    }
+
+    @Test
+    void tenant全体のsubscription上限と非数値scopeを登録時の400で拒否する() {
+        authenticate("管理者", "tenant-a");
+        assertThatThrownBy(() -> service.grantScope(new IntegrationHubManagementService.ScopeCommand("client-a", 9L,
+                "integration.project.read", "integration.webhook.deliver", SCOPE.replace("\"1\"", "\"not-a-number\""))))
+                .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.getCode()).isEqualTo(400));
+        when(credentials.selectByClientAndVersion(1L, 1)).thenReturn(CredentialVersion.builder().credentialVersion(1)
+                .status("ACTIVE").keyId("key-1").expiresAt(LocalDateTime.of(2027, 1, 1, 0, 0)).build());
+        when(subscriptions.selectOutboundForTenantForUpdate("tenant-a")).thenReturn(java.util.Collections.nCopies(256,
+                WebhookSubscription.builder().status("ACTIVE").build()));
+        assertThatThrownBy(() -> service.register(new IntegrationHubManagementService.SubscriptionCommand("client-a", 9L,
+                "resource.changed", "https://web.example.com:443/hook", SCOPE, 1)))
+                .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.getCode()).isEqualTo(400));
+        verify(subscriptions, never()).insert(any(WebhookSubscription.class));
+    }
+
+    @Test
+    void replayの環境再確認はtransaction外で成功した場合だけ新generationを作る() {
+        authenticate("管理者", "tenant-a");
+        properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.HTTPS);
+        ApiDelivery original = ApiDelivery.builder().id(7L).clientId("client-a").subscriptionId(8L)
+                .deliveryGeneration(1).status("DLQ").scopeDigest("a".repeat(64)).build();
+        when(deliveries.selectById(7L)).thenReturn(original);
+        when(clients.selectByClientId("client-a")).thenReturn(ApiClient.builder().id(1L).clientId("client-a")
+                .tenantId("tenant-a").legalEntityId(9L).status("ACTIVE").dataScopeJson(SCOPE).build());
+        when(subscriptions.selectActiveById(8L)).thenReturn(WebhookSubscription.builder()
+                .endpointUrl("https://web.example.com:443/hook").build());
+        var current = mock(IntegrationHubWebhookReplayAuthorizationService.class);
+        var preflight = mock(IntegrationHubReplayTlsPreflight.class);
+        var provider = mock(org.springframework.beans.factory.ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(preflight); when(provider.getObject()).thenReturn(preflight);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "replayAuthorization", current);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "replayPreflights", provider);
+        doAnswer(call -> {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()).isFalse();
+            return null;
+        }).when(preflight).validate(any());
+        when(replayService.replay(eq(7L), eq(2), eq("ENVIRONMENT_FIXED"), eq(original.getScopeDigest()), any(), any()))
+                .thenReturn(ApiDelivery.builder().id(9L).build());
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        assertThat(service.replay(7L, 9L, "ENVIRONMENT_FIXED", auth)).isEqualTo(9L);
+        var order = inOrder(current, preflight, replayService);
+        order.verify(current).authorize(eq(original), eq(original.getScopeDigest()), eq(auth), any());
+        order.verify(preflight).validate(any());
+        order.verify(replayService).replay(eq(7L), eq(2), eq("ENVIRONMENT_FIXED"), eq(original.getScopeDigest()), eq(auth), any());
+        clearInvocations(replayService);
+        doThrow(new IllegalArgumentException("synthetic TLS rejection")).when(preflight).validate(any());
+        assertThatThrownBy(() -> service.replay(7L, 9L, "ENVIRONMENT_FIXED", auth))
+                .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.getCode()).isEqualTo(400));
+        verifyNoInteractions(replayService);
     }
 
     private void authenticate(String role, String tenant) {

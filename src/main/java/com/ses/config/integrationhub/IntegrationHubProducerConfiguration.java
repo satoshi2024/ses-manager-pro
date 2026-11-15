@@ -12,10 +12,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /** 基本CRUDの業務更新とresource.changedを同一transactionへ束縛する。OFF時はadvisorを登録しない。 */
 @Configuration(proxyBeanMethods = false)
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
-        name = "integration.hub.external-transport.enabled", havingValue = "true")
+@org.springframework.context.annotation.Conditional(com.ses.service.integrationhub.IntegrationHubOutboundCondition.class)
 public class IntegrationHubProducerConfiguration {
     @Bean
+    @org.springframework.context.annotation.Role(org.springframework.beans.factory.config.BeanDefinition.ROLE_INFRASTRUCTURE)
     Advisor integrationHubResourceProducerAdvisor(ObjectProvider<PlatformTransactionManager> managers,
             ObjectProvider<IntegrationHubResourceChangedProducer> producers) {
         StaticMethodMatcherPointcut pointcut = new StaticMethodMatcherPointcut() {

@@ -22,8 +22,8 @@
   OS resolverが割込みを無視してもthread数を増やさない。DNS_UNAVAILABLEは未送信retryとする。
 - headerはworkerの9個だけを許可し、User-AgentはSES-Integration-Hub/1固定。prodのHC5 wire/headers loggerはOFF。
   claim時の仮attemptは、未送信確定結果だけを結果CAS内で返却する。通信切断・timeout・crash等の不確定結果は消費を維持する。
-  leaseはDNS+connect+read+closeの2秒を含む。動作中kill switchは取得行をKILL_SWITCHのDLQへ移す。
-  OFF再起動ではworkerが無く、未取得PENDINGは停止したまま残るため、DBAが残件を確認する。
+  leaseはDNS+connect+read+closeの2秒を含む。G3r以降の停止/再開はID高水位barrierで旧snapshotを隔離する。
+  実行中properties変更の運用は提供しない。詳細はg3r-fix-and-runner.md。
 - 既存内部root /api/integration-hubへ管理APIを追加し、管理者・baseline+deny・tenant・明示法人をserviceでも照合する。
   clients、client-scopes、credentials、subscriptionsの順に登録する。発行secretは発行応答だけへ一度返し、再表示しない。
   credential失効は署名secret複製を持つsubscriptionも同一transactionで失効する。replayは既存current scope/graph認可と必須監査を通す。

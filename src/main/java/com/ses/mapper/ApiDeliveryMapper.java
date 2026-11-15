@@ -14,6 +14,23 @@ import java.util.List;
 /** NF-05専用delivery ledger mapper。claim/HTTP/CASの境界を保持する。 */
 @Mapper
 public interface ApiDeliveryMapper extends BaseMapper<ApiDelivery> {
+    @Select("SELECT COALESCE(MAX(id), 0) FROM t_api_delivery")
+    long selectHighWater();
+
+    @org.apache.ibatis.annotations.Options(useCache = false, flushCache = org.apache.ibatis.annotations.Options.FlushCachePolicy.TRUE)
+    @Select("SELECT * FROM t_api_delivery WHERE id <= #{highWater} AND (status IN ('PENDING','RETRYABLE') "
+            + "OR (status = 'CLAIMED' AND lease_expires_at <= #{now})) ORDER BY id LIMIT #{limit} FOR UPDATE")
+    List<ApiDelivery> selectHistoricalForQuarantine(@Param("highWater") long highWater, @Param("now") LocalDateTime now,
+                                                    @Param("limit") int limit);
+
+    @Update("UPDATE t_api_delivery SET status='DLQ', last_error_code='STARTUP_REVALIDATION_REQUIRED', "
+            + "retention_class='FAILED_DLQ_PAYLOAD_90D', retention_expires_at=#{expiry}, terminal_at=#{now}, "
+            + "lease_token=NULL, lease_expires_at=NULL, version=version+1, updated_at=#{now} "
+            + "WHERE id=#{id} AND version=#{version} AND (status IN ('PENDING','RETRYABLE') "
+            + "OR (status='CLAIMED' AND lease_expires_at <= #{now}))")
+    int quarantineHistorical(@Param("id") Long id, @Param("version") Integer version,
+                             @Param("now") LocalDateTime now, @Param("expiry") LocalDateTime expiry);
+
     @Select("SELECT * FROM t_api_delivery WHERE event_id = #{eventId} "
             + "AND subscription_id = #{subscriptionId} AND delivery_generation = #{generation} LIMIT 1")
     ApiDelivery selectByEventGeneration(@Param("eventId") String eventId,

@@ -81,6 +81,8 @@ public class IntegrationHubExternalApiProperties {
         }
         long providerTimeoutSeconds = (externalTransport.dnsTimeoutMs + externalTransport.connectTimeoutMs
                 + (long) externalTransport.readTimeoutMs + 2_000L + 999L) / 1000L;
+        if ((long) externalTransport.batchSize * (providerTimeoutSeconds + 1) >= 2_400 - 30)
+            throw new IllegalStateException("NF05のbatch総期限がscheduler lockを超えています");
         if (externalTransport.leaseSeconds <= providerTimeoutSeconds) {
             throw new IllegalStateException("leaseはDNS/connect/read/closeの合計より長く設定してください");
         }

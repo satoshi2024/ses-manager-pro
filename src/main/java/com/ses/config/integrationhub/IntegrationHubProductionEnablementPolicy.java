@@ -23,9 +23,6 @@ final class IntegrationHubProductionEnablementPolicy {
     static final Pattern INBOUND_DECISION_ID = Pattern.compile("DG-05-IN-[0-9]{8}-[0-9]{2}");
     /** DG-05 outbound決定ID。inboundと別番号にし、片方向の決定でもう片方向を開けない。 */
     static final Pattern OUTBOUND_DECISION_ID = Pattern.compile("DG-05-OUT-[0-9]{8}-[0-9]{2}");
-    /** 送信先は小文字FQDN + 明示port。IP literal、単一label（localhost等）、userinfo、pathは受け付けない。 */
-    private static final Pattern DESTINATION = Pattern.compile(
-            "(?=.{1,253}:)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?:([0-9]{1,5})");
     /** 承認済み送信元CIDRの最小prefix。これより広い範囲は取引先の送信元として承認できない。 */
     static final int MIN_IPV4_CLIENT_PREFIX = 16;
     static final int MIN_IPV6_CLIENT_PREFIX = 32;
@@ -165,23 +162,7 @@ final class IntegrationHubProductionEnablementPolicy {
     }
 
     static boolean validDestination(String destination) {
-        if (destination == null || !destination.equals(destination.toLowerCase(Locale.ROOT))) {
-            return false;
-        }
-        var matcher = DESTINATION.matcher(destination);
-        if (!matcher.matches()) {
-            return false;
-        }
-        String host = destination.substring(0, destination.lastIndexOf(':'));
-        if (host.endsWith(".localhost")) {
-            // RFC 6761の予約名はloopbackへ解決されるため、承認済み送信先にできない。
-            return false;
-        }
-        String portText = matcher.group(2);
-        if (portText.length() > 1 && portText.startsWith("0")) {
-            return false;
-        }
-        int port = Integer.parseInt(portText);
-        return port >= 1 && port <= 65535;
+        return com.ses.service.integrationhub.IntegrationHubHttpsEndpointGuard.validDestination(destination);
     }
+
 }

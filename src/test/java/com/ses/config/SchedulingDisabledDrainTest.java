@@ -104,11 +104,17 @@ class SchedulingDisabledDrainTest {
             "NF05のDNS解決を二thread・待機八件へ制限する。周期実行はなくclose()で中断し最大二秒待つ",
             "com.ses.service.integrationhub.IntegrationHubHttpsEndpointGuard:Thread.<init>",
             "DNS専用daemon thread。外部I/Oは要求起点だけで、schedulerの停止と独立にclose()で停止要求する",
+            "com.ses.service.integrationhub.IntegrationHubReplayTlsPreflight:ScheduledThreadPoolExecutor.<init>",
+            "replay総期限timerはadmission四件まで。取消し時に除去しcloseで停止する",
+            "com.ses.service.integrationhub.IntegrationHubReplayTlsPreflight:Thread.<init>",
+            "replay期限を守るdaemon一thread。closeで停止し最大二秒待つ",
             "com.ses.service.skillgap.AiLearningCandidateServiceImpl:CompletableFuture.supplyAsync",
             "request内のAI呼出をcommonPoolでtimeout付き実行する。timeout後もtaskは継続しうるがshutdown待ちは無い");
 
     /** 起動時に一度だけ動くhook（{@code app.scheduling.enabled} の外。各自の条件で起動する）。 */
     private static final Map<String, String> STARTUP_HOOK_INVENTORY = inventory(
+            "com.ses.service.integrationhub.IntegrationHubOutboundStartupBarrier:ApplicationRunner",
+            "outbound ON起動時だけ旧IDをbounded隔離する。完了までworkerをgateし、周期処理は持たない",
             "com.ses.config.ContractDocumentBackfillRunner:ApplicationRunner",
             "app.upload.contract-backfill-enabled（未設定=有効）。契約PDFのmetadataを起動時にbackfillする（DB書込あり）",
             "com.ses.config.ContractDocumentDispatchBackfill:ApplicationRunner",

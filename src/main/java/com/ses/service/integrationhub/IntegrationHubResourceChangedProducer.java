@@ -30,14 +30,20 @@ public class IntegrationHubResourceChangedProducer {
     private final ObjectMapper json;
     private final Clock clock;
     private final IntegrationHubWebhookResourceScopeMapper ownership;
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(IntegrationHubResourceChangedProducer.class);
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry> registries;
 
-    @Transactional(propagation = Propagation.MANDATORY, rollbackFor = Exception.class)
+    @Transactional(propagation = Propagation.SUPPORTS, rollbackFor = Exception.class)
     public void changed(String type, Long id) {
+        if (!Boolean.TRUE.equals(properties.getExternalTransport().getEnabled())) return;
         if (id == null) throw new IllegalArgumentException("resource IDが必要です");
-        String tenant = AccountingTenantContextHolder.requireTenantContext();
+        String tenant = AccountingTenantContextHolder.getExplicitTenantId();
+        if (tenant == null) tenant = com.ses.common.util.SecurityUtils.currentTenantId();
+        if (tenant == null || tenant.isBlank()) { skipped("NO_TENANT"); return; }
         properties.assertTenantBound(tenant);
         List<WebhookSubscription> targets = subscriptions.selectOutboundForTenant(tenant);
-        if (targets.size() > 256) throw new IllegalStateException("同一更新のsubscription数が上限を超えています");
+        if (targets.size() > 256) { skipped("SUBSCRIPTION_LIMIT"); return; }
         String dimension = switch (type) {
             case "engineer-availability" -> "engineerIds";
             case "project" -> "projectIds";
@@ -54,11 +60,13 @@ public class IntegrationHubResourceChangedProducer {
         for (WebhookSubscription subscription : targets) {
             ApiClient client = clients.selectByClientId(subscription.getClientId());
             if (client == null || !"ACTIVE".equals(client.getStatus()) || client.getRevokedAt() != null || client.getLegalEntityId() == null || !tenant.equals(client.getTenantId())) continue;
-            LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+            LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
             if (!ownership.isCurrentOwnership(type, id, tenant, client.getLegalEntityId())) continue;
             if (client.getExpiresAt() != null && !client.getExpiresAt().isAfter(now)) continue;
             ApiClientScope permission = permissions.selectActive(client.getId(), scopeCode, "integration.webhook.deliver");
             if (permission == null) continue;
+            boolean enqueueStarted = false;
+            try {
             ExternalApiDataScope scope = ExternalApiDataScope.parse(client.getDataScopeJson(), json)
                     .intersect(ExternalApiDataScope.parse(permission.getDataScopeJson(), json))
                     .intersect(ExternalApiDataScope.parse(subscription.getDataScopeJson(), json));
@@ -70,6 +78,7 @@ public class IntegrationHubResourceChangedProducer {
             if (!Set.of(tenant).equals(scope.values().get("tenantIds"))
                     || !Set.of(client.getLegalEntityId().toString()).equals(scope.values().get("legalEntityIds"))
                     || !scope.values().getOrDefault(dimension, Set.of()).contains(id.toString())) continue;
+            scope.values().forEach((key, values) -> { if (!"tenantIds".equals(key)) numbers(values); });
             List<Long> customerIds = numbers(scope.values().get("customerIds"));
             List<Long> contractIds = numbers(scope.values().get("contractIds"));
             List<ExternalApiReadRow> rows = switch (type) {
@@ -114,22 +123,36 @@ public class IntegrationHubResourceChangedProducer {
             envelope.put("eventId", event);
             envelope.put("eventType", "resource.changed");
             envelope.put("schemaVersion", "v1");
-            envelope.put("createdAt", now.atOffset(ZoneOffset.UTC).toString());
+            envelope.put("createdAt", java.time.format.DateTimeFormatter.ISO_INSTANT.format(now.toInstant(ZoneOffset.UTC)));
             envelope.put("publicResourceId", opaque);
             envelope.put("changedFieldNames", payload.keySet().stream().filter(key -> !key.equals(field)).toList());
             envelope.put("payload", payload);
             envelope.put("correlationId", correlation);
             try {
+                enqueueStarted = true;
                 deliveries.enqueue(event, subscription.getId(), 1, client.getClientId(), scopeCode, tenant, type, id,
                         "resource.changed", "v1", correlation, ExternalDtoSnapshot.of(json.writeValueAsString(envelope)), now);
             } catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
                 throw new IllegalStateException("外部DTOを構築できません");
             }
+            } catch (IllegalArgumentException invalidConfiguration) {
+                if (enqueueStarted) throw invalidConfiguration;
+                skipped("INVALID_SCOPE");
+            }
         }
+    }
+
+    private void skipped(String reason) {
+        log.warn("NF05のevent enqueueを省略しました。reason={}", reason);
+        var registry = registries == null ? null : registries.getIfAvailable();
+        if (registry != null) registry.counter("integration_hub_producer_skipped_total", "reason", reason).increment();
     }
 
     private static List<Long> numbers(Set<String> values) {
         if (values == null) return null;
-        return values.stream().map(Long::valueOf).toList();
+        return values.stream().map(value -> {
+            if (!value.matches("[1-9][0-9]{0,18}")) throw new IllegalArgumentException("scope IDが不正です");
+            return Long.valueOf(value);
+        }).toList();
     }
 }

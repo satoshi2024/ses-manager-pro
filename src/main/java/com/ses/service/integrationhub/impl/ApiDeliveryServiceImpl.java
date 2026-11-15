@@ -29,6 +29,7 @@ public class ApiDeliveryServiceImpl implements ApiDeliveryService {
                                String tenantId, String primaryResourceType, Long primaryResourceId,
                                String eventType, String schemaVersion, String correlationId,
                                ExternalDtoSnapshot snapshot, LocalDateTime now) {
+        if (now == null || now.getNano() != 0) throw new IllegalArgumentException("delivery時刻はUTC秒精度で指定してください");
         requireText(eventId, 128, "eventId");
         requireText(clientId, 100, "clientId");
         requireText(scopeCode, 100, "scopeCode");

@@ -163,6 +163,9 @@ class IntegrationHubWebhookDeliveryWorkerTest {
                 crypto, transport, new IntegrationHubWebhookSigner(), new IntegrationHubWebhookBackoffPolicy(() -> 0),
                 bindingValidator, properties, mutableClock, new ObjectMapper());
         ApiDelivery claimed = claimed(1);
+        var barrier = mock(IntegrationHubOutboundStartupBarrier.class);
+        when(barrier.isReady()).thenReturn(true);
+        org.springframework.test.util.ReflectionTestUtils.setField(worker, "startupBarrier", barrier);
         when(deliveryService.recoverExpiredLeases(any())).thenReturn(0);
         when(deliveryMapper.selectDue(any(), anyInt())).thenReturn(List.of(claimed));
         when(deliveryService.claim(eq(7L), any(), any(), any())).thenReturn(claimed);
@@ -313,7 +316,42 @@ class IntegrationHubWebhookDeliveryWorkerTest {
         verify(transport, never()).send(any());
     }
 
+    @Test
+    void 環境の恒久障害は自動retryせず手動replay可能なDLQへ送る() {
+        ApiDelivery row = claimed(1); arrangeClaim(row);
+        when(subscriptionService.getActive(7L)).thenReturn(subscription());
+        when(crypto.decrypt(any(), anyInt(), any(), any())).thenReturn("synthetic-secret");
+        when(transport.send(any())).thenReturn(IntegrationHubWebhookTransportResult.failure(0, "TLS_CERTIFICATE_UNTRUSTED", false));
+        when(deliveryService.markTerminal(any(), any(), any(), any(), any(), any(), eq("DLQ"),
+                eq("TLS_CERTIFICATE_UNTRUSTED"), eq(now))).thenReturn(true);
+        assertTrue(worker.dispatchOne(7L, now));
+        verify(deliveryService).markTerminal(any(), any(), any(), any(), any(), any(), eq("DLQ"),
+                eq("TLS_CERTIFICATE_UNTRUSTED"), eq(now));
+        verify(deliveryService, never()).markRetryable(any(), any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void 未送信障害でも元eventから24時間を超えたらDLQへ収束する() {
+        ApiDelivery row = claimed(1);
+        row.setCreatedAt(now.minusDays(1));
+        row.setExternalDtoSnapshot(row.getExternalDtoSnapshot().replace("2026-08-31", "2026-08-30"));
+        row.setPayloadHash(IntegrationHubDigest.sha256Hex(row.getExternalDtoSnapshot()));
+        arrangeClaim(row);
+        when(subscriptionService.getActive(7L)).thenReturn(subscription());
+        when(crypto.decrypt(any(), anyInt(), any(), any())).thenReturn("synthetic-secret");
+        when(transport.send(any())).thenReturn(IntegrationHubWebhookTransportResult.failure(0, "DNS_UNAVAILABLE", true));
+        when(deliveryService.markTerminal(any(), any(), any(), any(), any(), any(), eq("DLQ"),
+                eq("UNSENT_AGE_EXCEEDED"), eq(now))).thenReturn(true);
+        assertTrue(worker.dispatchOne(7L, now));
+        verify(deliveryService).markTerminal(any(), any(), any(), any(), any(), any(), eq("DLQ"),
+                eq("UNSENT_AGE_EXCEEDED"), eq(now));
+        verify(deliveryService, never()).markRetryable(any(), any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
     private void arrangeClaim(ApiDelivery claimed) {
+        var barrier = mock(IntegrationHubOutboundStartupBarrier.class);
+        when(barrier.isReady()).thenReturn(true);
+        org.springframework.test.util.ReflectionTestUtils.setField(worker, "startupBarrier", barrier);
         when(deliveryService.claim(eq(7L), any(), eq(now), any())).thenReturn(claimed);
     }
 

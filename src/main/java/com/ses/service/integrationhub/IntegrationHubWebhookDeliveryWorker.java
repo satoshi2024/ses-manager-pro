@@ -25,8 +25,7 @@ import java.util.UUID;
  * 残っている場合はfail-closedし、DB transaction内の外部HTTPを構造的に許可しない。
  */
 @Component
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
-        name = "integration.hub.external-transport.enabled", havingValue = "true")
+@org.springframework.context.annotation.Conditional(IntegrationHubOutboundCondition.class)
 public class IntegrationHubWebhookDeliveryWorker {
     private static final int MAX_DUE_BATCH = 32;
     private static final String PURPOSE = "webhook-signing";
@@ -44,6 +43,8 @@ public class IntegrationHubWebhookDeliveryWorker {
     private final ObjectMapper objectMapper;
     @org.springframework.beans.factory.annotation.Autowired
     private IntegrationHubWebhookReplayAuthorizationService currentScope;
+    @org.springframework.beans.factory.annotation.Autowired
+    private IntegrationHubOutboundStartupBarrier startupBarrier;
 
     public IntegrationHubWebhookDeliveryWorker(com.ses.mapper.ApiDeliveryMapper deliveryMapper,
                                                ApiDeliveryService deliveryService,
@@ -71,6 +72,8 @@ public class IntegrationHubWebhookDeliveryWorker {
 
     /** schedulerから呼ぶ入口。外部I/Oはこのメソッドのtransaction外でのみ行う。 */
     public int dispatchDue() {
+        if (startupBarrier == null || !startupBarrier.isReady()) return 0;
+        startupBarrier.quarantineBatch();
         if (!Boolean.TRUE.equals(properties.getExternalTransport().getEnabled())) {
             int held = 0;
             for (ApiDelivery row : deliveryMapper.selectDue(utcNow(), properties.getExternalTransport().getBatchSize())) {
@@ -105,6 +108,8 @@ public class IntegrationHubWebhookDeliveryWorker {
             ApiDelivery due = deliveryMapper.selectById(deliveryId);
             return due != null && deliveryMapper.holdPending(deliveryId, due.getVersion(), utcNow()) == 1;
         }
+        if (startupBarrier == null || !startupBarrier.isReady()) return false;
+        if (startupBarrier.isHistorical(deliveryId)) { startupBarrier.quarantineBatch(); return false; }
         String leaseToken = UUID.randomUUID().toString();
         LocalDateTime leaseExpiresAt = now.plusSeconds(properties.getExternalTransport().getLeaseSeconds());
         ApiDelivery claimed = deliveryService.claim(deliveryId, leaseToken, now, leaseExpiresAt);
@@ -213,8 +218,8 @@ public class IntegrationHubWebhookDeliveryWorker {
             if (result.retryable()) {
                 return retryable(claimed, leaseToken, result.errorCode(), utcNow());
             }
-            return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_FAILED,
-                    result.errorCode(), utcNow());
+            String terminalState = environmentFailure(result.errorCode()) ? IntegrationHubStates.DELIVERY_DLQ : IntegrationHubStates.DELIVERY_FAILED;
+            return terminal(claimed, leaseToken, terminalState, result.errorCode(), utcNow());
         } catch (RuntimeException e) {
             // provider結果確定のCAS障害はlease recoveryで再取得する。ここでretry時刻を
             // 書き込むと、provider成功直後のcrashを別経路の再送へ誤変換し得る。
@@ -222,7 +227,15 @@ public class IntegrationHubWebhookDeliveryWorker {
         }
     }
 
+    private static boolean environmentFailure(String code) {
+        return code != null && (code.startsWith("TLS_CERTIFICATE_") || java.util.Set.of("TLS_IDENTITY_REJECTED",
+                "PEER_REJECTED", "DESTINATION_REJECTED").contains(code));
+    }
+
     private boolean retryable(ApiDelivery claimed, String leaseToken, String errorCode, LocalDateTime now) {
+        if (IntegrationHubWebhookAttemptAccounting.definitelyUnsent(errorCode) && claimed.getCreatedAt() != null
+                && !now.isBefore(claimed.getCreatedAt().plusDays(1)))
+            return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_DLQ, "UNSENT_AGE_EXCEEDED", now);
         int attempt = claimed.getAttemptCount() == null ? 1 : claimed.getAttemptCount();
         if (IntegrationHubWebhookAttemptAccounting.definitelyUnsent(errorCode)) attempt = Math.max(0, attempt - 1);
         if (attempt >= IntegrationHubWebhookBackoffPolicy.MAX_ATTEMPTS) {

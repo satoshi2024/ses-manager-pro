@@ -65,6 +65,63 @@ class IntegrationHubV192AuditRetentionMySqlTest {
     }
 
     @Test
+    void 小数秒Clockの実producerはDATETIME0往復後も送信bindingと現行ownershipを満たす() throws Exception {
+        String client = "precision-" + UUID.randomUUID().toString().replace("-", "");
+        jdbc.update("INSERT INTO t_engineer(full_name,employment_type,status,tenant_id,legal_entity_id) "
+                + "VALUES(?,'正社員','Bench','v192-tenant',9)", client);
+        long engineer = jdbc.queryForObject("SELECT id FROM t_engineer WHERE full_name=?", Long.class, client);
+        String scope = "{\"tenantIds\":[\"v192-tenant\"],\"legalEntityIds\":[\"9\"],\"engineerIds\":[\"" + engineer + "\"]}";
+        jdbc.update("INSERT INTO m_api_client(client_id,owner_ref,tenant_id,legal_entity_id,data_scope_json,allowed_cidrs) "
+                + "VALUES(?,'PROJECT_OWNER','v192-tenant',9,?,'')", client, scope);
+        long clientId = jdbc.queryForObject("SELECT id FROM m_api_client WHERE client_id=?", Long.class, client);
+        jdbc.update("INSERT INTO m_api_client_scope(api_client_id,scope_code,operation_code,data_scope_json) "
+                + "VALUES(?,'integration.availability.read','integration.webhook.deliver',?)", clientId, scope);
+        jdbc.update("INSERT INTO m_webhook_subscription(client_id,direction,event_type,endpoint_url,key_id,encrypted_signing_secret,"
+                + "crypto_key_version,data_scope_json,signing_credential_version) "
+                + "VALUES(?,'OUTBOUND','resource.changed','https://web.example:443/hook','key-1','synthetic','v1',?,1)", client, scope);
+        var configuration = new com.baomidou.mybatisplus.core.MybatisConfiguration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        var factory = new com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean();
+        factory.setDataSource(source); factory.setConfiguration(configuration);
+        var sqlFactory = factory.getObject();
+        for (Class<?> mapper : List.of(ApiDeliveryMapper.class, com.ses.mapper.ApiClientMapper.class,
+                com.ses.mapper.ApiClientScopeMapper.class, com.ses.mapper.WebhookSubscriptionMapper.class,
+                com.ses.mapper.ExternalApiReadMapper.class, com.ses.mapper.IntegrationHubWebhookResourceScopeMapper.class))
+            sqlFactory.getConfiguration().addMapper(mapper);
+        var session = new org.mybatis.spring.SqlSessionTemplate(sqlFactory);
+        var clientMapper = session.getMapper(com.ses.mapper.ApiClientMapper.class);
+        var deliveryMapper = session.getMapper(ApiDeliveryMapper.class);
+        var ownership = session.getMapper(com.ses.mapper.IntegrationHubWebhookResourceScopeMapper.class);
+        var properties = new com.ses.config.integrationhub.IntegrationHubExternalApiProperties();
+        properties.getExternalTransport().setEnabled(true); properties.getTopology().setBoundTenantId("v192-tenant");
+        properties.getPublicApi().setPublicIdKey("synthetic-mysql-precision-public-id-key-at-least-32-bytes");
+        var codec = new com.ses.config.integrationhub.ExternalApiPublicIdCodec(properties);
+        var binding = new com.ses.service.integrationhub.IntegrationHubWebhookDeliveryBindingValidator(clientMapper, codec);
+        var service = new com.ses.service.integrationhub.impl.ApiDeliveryServiceImpl(deliveryMapper, binding);
+        var fractionalClock = java.time.Clock.fixed(java.time.Instant.parse("2026-11-15T01:23:45.987654Z"), java.time.ZoneOffset.UTC);
+        var producer = new com.ses.service.integrationhub.IntegrationHubResourceChangedProducer(
+                session.getMapper(com.ses.mapper.WebhookSubscriptionMapper.class), clientMapper,
+                session.getMapper(com.ses.mapper.ApiClientScopeMapper.class), session.getMapper(com.ses.mapper.ExternalApiReadMapper.class),
+                codec, properties, service, new com.fasterxml.jackson.databind.ObjectMapper(), fractionalClock, ownership);
+        var transactions = new TransactionTemplate(new DataSourceTransactionManager(source));
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("v192-tenant");
+        try { transactions.executeWithoutResult(status -> producer.changed("engineer-availability", engineer)); }
+        finally { com.ses.service.accounting.AccountingTenantContextHolder.clear(); }
+        var rows = deliveryMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.integrationhub.ApiDelivery>()
+                .eq("client_id", client));
+        assertThat(rows).hasSize(1);
+        var delivery = rows.get(0);
+        assertThat(delivery.getCreatedAt()).isEqualTo(LocalDateTime.of(2026, 11, 15, 1, 23, 45));
+        assertThat(new com.fasterxml.jackson.databind.ObjectMapper().readTree(delivery.getExternalDtoSnapshot()).get("createdAt").asText())
+                .isEqualTo("2026-11-15T01:23:45Z");
+        binding.requireForSend(delivery, com.ses.service.integrationhub.ExternalDtoSnapshot.of(delivery.getExternalDtoSnapshot()),
+                delivery.getCreatedAt());
+        assertThat(ownership.isCurrentOwnership("engineer-availability", engineer, "v192-tenant", 9L)).isTrue();
+        jdbc.update("UPDATE t_engineer SET tenant_id='moved-tenant' WHERE id=?", engineer);
+        assertThat(ownership.isCurrentOwnership("engineer-availability", engineer, "v192-tenant", 9L)).isFalse();
+    }
+
+    @Test
     void 同一点の明示lockを待った二つのclaimは一方だけ成功しattemptを一回増やす() throws Exception {
         String client = "v192-" + UUID.randomUUID();
         jdbc.update("INSERT INTO m_api_client(client_id,owner_ref,tenant_id,legal_entity_id,data_scope_json,allowed_cidrs) "

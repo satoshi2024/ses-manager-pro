@@ -27,6 +27,8 @@ public final class IntegrationHubHttpsEndpointGuard implements AutoCloseable {
     private final Set<String> allowed;
     private final int dnsTimeoutMs;
     private final Map<String, List<InetAddress>> pinned = new ConcurrentHashMap<>();
+    private final Map<String, Map<InetAddress, java.time.Instant>> recent = new ConcurrentHashMap<>();
+    @org.springframework.beans.factory.annotation.Autowired private java.time.Clock clock = java.time.Clock.systemUTC();
     private final ThreadPoolExecutor resolver = new ThreadPoolExecutor(2, 2, 0, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(8), runnable -> {
                 Thread thread = new Thread(runnable, "integration-hub-dns");
@@ -59,7 +61,7 @@ public final class IntegrationHubHttpsEndpointGuard implements AutoCloseable {
                     || Arrays.stream(addresses).anyMatch(address -> !isPublicAddress(address))) {
                 throw new IllegalArgumentException("HTTPS送信先のDNS回答を許可できません");
             }
-            pinned.put(target.host(), List.copyOf(Arrays.asList(addresses)));
+            remember(target.host(), addresses);
             return target;
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
@@ -71,6 +73,16 @@ public final class IntegrationHubHttpsEndpointGuard implements AutoCloseable {
         } finally {
             if (answer != null) answer.cancel(true);
         }
+    }
+
+    private synchronized void remember(String host, InetAddress[] addresses) {
+        var now = clock.instant();
+        Map<InetAddress, java.time.Instant> union = new java.util.HashMap<>();
+        recent.getOrDefault(host, Map.of()).forEach((address, expiry) -> { if (expiry.isAfter(now)) union.put(address, expiry); });
+        for (InetAddress address : addresses) union.put(address, now.plusSeconds(120));
+        if (union.size() > 64) throw new IllegalArgumentException("検証済みDNS回答の一時集合が上限を超えています");
+        recent.put(host, Map.copyOf(union));
+        pinned.put(host, List.copyOf(Arrays.asList(addresses)));
     }
 
     /** HC5はOSの再解決をせず、送信直前に検査した公開IPだけに接続する。 */
@@ -87,7 +99,7 @@ public final class IntegrationHubHttpsEndpointGuard implements AutoCloseable {
     void validateConnectedPeer(Target expected, SocketAddress remote) {
         if (!(remote instanceof InetSocketAddress actual) || actual.isUnresolved()
                 || actual.getPort() != expected.port() || !isPublicAddress(actual.getAddress())
-                || !pinned.getOrDefault(expected.host(), List.of()).contains(actual.getAddress())) {
+                || !recent.getOrDefault(expected.host(), Map.of()).getOrDefault(actual.getAddress(), java.time.Instant.MIN).isAfter(clock.instant())) {
             throw new IllegalArgumentException("接続済みpeerが検証済みDNS回答と一致しません");
         }
     }
@@ -137,6 +149,7 @@ public final class IntegrationHubHttpsEndpointGuard implements AutoCloseable {
             Thread.currentThread().interrupt();
         }
         pinned.clear();
+        recent.clear();
     }
 
     static final class ResolutionUnavailable extends RuntimeException {

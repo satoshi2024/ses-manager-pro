@@ -117,3 +117,15 @@ outboundは実transport、送信先allow-list、DPA、顧客/providerの書面�
 - 撤回してもretention purgeは他方向が有効なら継続する。両方向OFFでschedulerは生成されないため、
   撤回後に残るpayload・監査の扱いはDBAが別途判断する（手動purgeまたは一時的な再有効化）。
 - 承認値の変更は新しい決定IDで行い、本書の版を更新する。
+
+## G3rの追加署名条件（未署名）
+
+OUT-9: P1-1/P1-2とP2-1〜3の正式証拠（実container commit/rollback、小数秒ClockのH2/MySQL往復、
+再起動前の旧台帳隔離、TLS恒久障害DLQとreplay前のTLS確認）を最終SHAで取得する。
+OUT-7: ON起動ごとの旧ID隔離と結果不明CLAIMEDの照合、未送信24時間上限、FAILED alert、
+40分scheduler lockによるfailover遅延とDB待ち時間の実測を承認する。
+OUT-6: outbound subscriptionを含む24時間overlapローテーション、新clientIdでの90日期限移行、用途分離canonical付きの共用secretを明示判断する。
+P2-2: tenant欠損時は業務継続のためeventをskipする。WARN/counterと業務記録を照合する復旧手順、event欠落の許容をOwnerが署名する。
+IN-5: 二つのtrusted-proxies設定の整合とALB subnetの/24分割をSRE/Securityが確認する。
+外部接続禁止のローカル作業は実ネットワークpeerの証拠を代替しない。truststore、120秒pin grace、DNS、egress、
+OCSP/CRL/pinning無しの判断、DPA/書面許可/予算と既存の全署名は引き続き必要。Production NO-GOを維持する。

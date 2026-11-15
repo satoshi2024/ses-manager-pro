@@ -6,7 +6,7 @@ UPDATE t_external_api_audit
     SET retention_expires_at = DATE_ADD(DATE_SUB(created_at, INTERVAL 9 HOUR), INTERVAL 1 YEAR),
         created_at = DATE_SUB(created_at, INTERVAL 9 HOUR);
 ALTER TABLE t_external_api_audit
-    MODIFY retention_expires_at DATETIME NOT NULL,
+    MODIFY retention_expires_at DATETIME NOT NULL COMMENT 'UTCの保存期限（一年）',
     ADD INDEX idx_external_audit_retention (retention_expires_at, id);
 ALTER TABLE t_api_retention_hold
     DROP CHECK chk_api_retention_hold_kind,

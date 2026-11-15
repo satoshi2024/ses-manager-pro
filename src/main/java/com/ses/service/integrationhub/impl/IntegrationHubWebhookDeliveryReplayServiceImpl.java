@@ -31,6 +31,7 @@ public class IntegrationHubWebhookDeliveryReplayServiceImpl
     @Transactional(rollbackFor = Exception.class)
     public ApiDelivery replay(Long deliveryId, int replayGeneration, String reasonCode,
                               String revalidatedScopeDigest, Authentication authentication, LocalDateTime now) {
+        if (now != null) now = now.withNano(0);
         if (deliveryId == null || replayGeneration <= 0 || replayGeneration > MAX_GENERATION
                 || !safeReason(reasonCode)
                 || !isHash(revalidatedScopeDigest) || now == null) {

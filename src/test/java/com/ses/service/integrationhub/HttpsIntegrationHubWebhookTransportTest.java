@@ -90,8 +90,83 @@ class HttpsIntegrationHubWebhookTransportTest {
             assertThat(wrongHostname.retryable()).isFalse();
             assertThat(requests).hasValue(2);
             verify(guard, atLeast(2)).validateConnectedPeer(any(), any());
+            try (var preflight = new IntegrationHubReplayTlsPreflight(properties, guard)) {
+                preflight.validate(URI.create("https://127.0.0.1:" + port + "/"));
+                assertThatThrownBy(() -> preflight.validate(URI.create("https://localhost:" + port + "/")))
+                        .isInstanceOf(IllegalArgumentException.class);
+                assertThat(requests).hasValue(2);
+                org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+                try { assertThatThrownBy(() -> preflight.validate(URI.create("https://127.0.0.1:" + port + "/")))
+                        .isInstanceOf(IllegalStateException.class); }
+                finally { org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization(); }
+            }
+            Path untrusted = directory.resolve("untrusted.p12");
+            Process other = new ProcessBuilder(keytool.toString(), "-genkeypair", "-alias", "other", "-dname", "CN=other",
+                    "-storetype", "PKCS12", "-keystore", untrusted.toString(), "-storepass", password, "-keypass", password,
+                    "-keyalg", "RSA", "-keysize", "2048", "-validity", "2", "-noprompt")
+                    .redirectErrorStream(true).redirectOutput(directory.resolve("other-keytool.log").toFile()).start();
+            if (!other.waitFor(30, TimeUnit.SECONDS)) { other.destroyForcibly(); throw new AssertionError("keytool期限超過"); }
+            assertThat(other.exitValue()).isZero();
+            properties.getExternalTransport().setTruststorePath(untrusted.toString());
+            try (var untrustedTransport = new HttpsIntegrationHubWebhookTransport(properties, guard)) {
+                var refused = untrustedTransport.send(new IntegrationHubWebhookRequest(URI.create("https://127.0.0.1:" + port + "/"),
+                        "{}".getBytes(java.nio.charset.StandardCharsets.UTF_8), Map.of("Idempotency-Key", "untrusted")));
+                assertThat(refused.errorCode()).isEqualTo("TLS_CERTIFICATE_UNTRUSTED");
+                assertThat(refused.retryable()).isFalse();
+            }
+            assertThat(requests).hasValue(2);
         } finally {
             server.stop(0);
+        }
+    }
+
+    @Test
+    void replayのTLS確認は小刻みなTLS応答でも総期限でsocketを閉じる() throws Exception {
+        var properties = new IntegrationHubExternalApiProperties();
+        Path store = directory.resolve("deadline-fixture.p12");
+        String password = "synthetic-deadline-password";
+        Path keytool = Path.of(System.getProperty("java.home"), "bin", "keytool"
+                + (System.getProperty("os.name").startsWith("Windows") ? ".exe" : ""));
+        Process generation = new ProcessBuilder(keytool.toString(), "-genkeypair", "-alias", "deadline",
+                "-dname", "CN=synthetic-deadline", "-storetype", "PKCS12", "-keystore", store.toString(),
+                "-storepass", password, "-keypass", password, "-keyalg", "RSA", "-keysize", "2048", "-validity", "2", "-noprompt")
+                .redirectErrorStream(true).redirectOutput(directory.resolve("deadline-keytool.log").toFile()).start();
+        if (!generation.waitFor(30, TimeUnit.SECONDS)) { generation.destroyForcibly(); throw new AssertionError("keytool期限超過"); }
+        assertThat(generation.exitValue()).isZero();
+        properties.getExternalTransport().setTruststorePath(store.toString());
+        properties.getExternalTransport().setTruststorePassword(password);
+        properties.getExternalTransport().setDnsTimeoutMs(100);
+        properties.getExternalTransport().setConnectTimeoutMs(300);
+        properties.getExternalTransport().setReadTimeoutMs(300);
+        var guard = mock(IntegrationHubHttpsEndpointGuard.class);
+        var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try (var server = new java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
+            server.setSoTimeout(3000);
+            int port = server.getLocalPort();
+            URI endpoint = URI.create("https://localhost:" + port + "/");
+            when(guard.validate(endpoint)).thenReturn(new IntegrationHubHttpsEndpointGuard.Target(endpoint, "localhost", port));
+            when(guard.pinnedAddresses("localhost")).thenReturn(new InetAddress[]{InetAddress.getByName("127.0.0.1")});
+            var fixture = executor.submit(() -> {
+                try (var socket = server.accept()) {
+                    var output = socket.getOutputStream();
+                    // 完全なTLS recordを返さずSO_TIMEOUTより短い間隔で継続し、総期限だけを検証する。
+                    output.write(new byte[]{0x16, 0x03, 0x03, 0x10, 0x00}); output.flush();
+                    for (int i = 0; i < 100; i++) { output.write(0); output.flush(); Thread.sleep(50); }
+                } catch (java.io.IOException expectedClose) {
+                    // deadlineでclientがsocketを閉じる。
+                } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            });
+            var preflight = new IntegrationHubReplayTlsPreflight(properties, guard);
+            try {
+                long start = System.nanoTime();
+                assertThatThrownBy(() -> preflight.validate(endpoint)).isInstanceOf(IllegalArgumentException.class);
+                long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+                assertThat(elapsed).isBetween(400L, 3000L);
+            } finally { preflight.close(); }
+            assertThatThrownBy(() -> preflight.validate(endpoint)).isInstanceOf(IllegalArgumentException.class);
+            fixture.get(2, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow(); assertThat(executor.awaitTermination(2, TimeUnit.SECONDS)).isTrue();
         }
     }
 

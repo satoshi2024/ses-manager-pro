@@ -36,6 +36,7 @@ class IntegrationHubResourceChangedProducerTest {
         var ownership = mock(IntegrationHubWebhookResourceScopeMapper.class);
         when(ownership.isCurrentOwnership(type, 17L, "tenant-a", 9L)).thenReturn(true);
         var properties = new IntegrationHubExternalApiProperties();
+        properties.getExternalTransport().setEnabled(true);
         properties.getTopology().setBoundTenantId("tenant-a");
         properties.getPublicApi().setPublicIdKey("synthetic-public-id-key-at-least-32-bytes");
         String scope = "{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"],\"" + dimension + "\":[\"17\"]}";
@@ -61,7 +62,7 @@ class IntegrationHubResourceChangedProducerTest {
         var root = new ObjectMapper().readTree(snapshot.getValue().json());
         assertThat(root.get("payload").get(primaryField).asText()).matches("[A-Za-z0-9_-]{43}");
         assertThat(root.get("publicResourceId").asText()).isEqualTo(root.get("payload").get(primaryField).asText());
-        assertThat(root.get("createdAt").asText()).isEqualTo("2026-11-14T00:00Z");
+        assertThat(root.get("createdAt").asText()).isEqualTo("2026-11-14T00:00:00Z");
         ExternalDtoSnapshot.requireAllowList(snapshot.getValue(), ExternalDtoSnapshot.OUTBOUND_FIELDS);
         clearInvocations(deliveries);
         when(ownership.isCurrentOwnership(type, 17L, "tenant-a", 9L)).thenReturn(false);
@@ -71,5 +72,23 @@ class IntegrationHubResourceChangedProducerTest {
         when(permissions.selectActive(3L, scopeCode, "integration.webhook.deliver")).thenReturn(null);
         producer.changed(type, 17L);
         verifyNoInteractions(deliveries);
+        clearInvocations(subscriptions, clients, resources, permissions, deliveries, ownership);
+        properties.getExternalTransport().setEnabled(false);
+        producer.changed(type, 17L);
+        verifyNoInteractions(subscriptions, clients, resources, permissions, deliveries, ownership);
+        properties.getExternalTransport().setEnabled(true);
+        var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        var provider = mock(org.springframework.beans.factory.ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(registry);
+        org.springframework.test.util.ReflectionTestUtils.setField(producer, "registries", provider);
+        AccountingTenantContextHolder.clear(); org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        producer.changed(type, 17L);
+        assertThat(registry.get("integration_hub_producer_skipped_total").tag("reason", "NO_TENANT").counter().count()).isEqualTo(1);
+        verifyNoInteractions(subscriptions, clients, resources, permissions, deliveries, ownership);
+        AccountingTenantContextHolder.setTenantId("tenant-a");
+        when(subscriptions.selectOutboundForTenant("tenant-a")).thenReturn(java.util.Collections.nCopies(257, WebhookSubscription.builder().build()));
+        producer.changed(type, 17L);
+        assertThat(registry.get("integration_hub_producer_skipped_total").tag("reason", "SUBSCRIPTION_LIMIT").counter().count()).isEqualTo(1);
+        verifyNoInteractions(clients, resources, permissions, deliveries, ownership);
     }
 }

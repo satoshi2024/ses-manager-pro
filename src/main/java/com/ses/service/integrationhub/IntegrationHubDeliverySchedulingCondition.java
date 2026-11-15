@@ -8,9 +8,8 @@ import org.springframework.core.type.AnnotatedTypeMetadata;
 public final class IntegrationHubDeliverySchedulingCondition implements Condition {
     @Override
     public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
-        String transport = context.getEnvironment().getProperty("integration.hub.external-transport.enabled");
-        String scheduling = context.getEnvironment().getProperty("app.scheduling.enabled");
-        return "true".equalsIgnoreCase(transport)
-                && (scheduling == null || "true".equalsIgnoreCase(scheduling));
+        var binder = org.springframework.boot.context.properties.bind.Binder.get(context.getEnvironment());
+        return binder.bind("integration.hub.external-transport.enabled", Boolean.class).orElse(false)
+                && binder.bind("app.scheduling.enabled", Boolean.class).orElse(true);
     }
 }

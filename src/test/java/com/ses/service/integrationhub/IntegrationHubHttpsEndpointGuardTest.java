@@ -74,6 +74,8 @@ class IntegrationHubHttpsEndpointGuardTest {
             assertThatThrownBy(() -> guard.validate(URI.create("https://web.example.com:443/hook")))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> guard.pinnedAddresses("web.example.com")).isInstanceOf(java.net.UnknownHostException.class);
+            java.time.Instant first = java.time.Instant.parse("2026-11-15T00:00:00Z");
+            org.springframework.test.util.ReflectionTestUtils.setField(guard, "clock", java.time.Clock.fixed(first, java.time.ZoneOffset.UTC));
             resolver.answers = new InetAddress[]{publicIp};
             var target = guard.validate(URI.create("https://web.example.com:443/hook"));
             resolver.answers[0] = privateIp;
@@ -82,6 +84,15 @@ class IntegrationHubHttpsEndpointGuardTest {
             for (InetAddress denied : List.of(privateIp, otherPublic))
                 assertThatThrownBy(() -> guard.validateConnectedPeer(target, new java.net.InetSocketAddress(denied, 443)))
                         .isInstanceOf(IllegalArgumentException.class);
+            resolver.answers = new InetAddress[]{otherPublic};
+            guard.validate(URI.create("https://web.example.com:443/hook"));
+            assertThat(guard.pinnedAddresses("web.example.com")).containsExactly(otherPublic);
+            guard.validateConnectedPeer(target, new java.net.InetSocketAddress(publicIp, 443));
+            guard.validateConnectedPeer(target, new java.net.InetSocketAddress(otherPublic, 443));
+            org.springframework.test.util.ReflectionTestUtils.setField(guard, "clock", java.time.Clock.fixed(first.plusSeconds(121), java.time.ZoneOffset.UTC));
+            guard.validate(URI.create("https://web.example.com:443/hook"));
+            assertThatThrownBy(() -> guard.validateConnectedPeer(target, new java.net.InetSocketAddress(publicIp, 443)))
+                    .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> guard.validateConnectedPeer(target, new java.net.InetSocketAddress(publicIp, 444)))
                     .isInstanceOf(IllegalArgumentException.class);
         }

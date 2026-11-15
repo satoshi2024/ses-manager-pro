@@ -69,6 +69,10 @@ import java.util.function.UnaryOperator;
 @ConditionalOnIntegrationHubTransport(mode = "HTTPS")
 public final class HttpsIntegrationHubWebhookTransport
         implements IntegrationHubWebhookTransport, AutoCloseable {
+    static final String[] TLS_CIPHERS = {"TLS_AES_128_GCM_SHA256", "TLS_AES_256_GCM_SHA384",
+            "TLS_CHACHA20_POLY1305_SHA256", "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+            "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384", "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+            "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"};
     private static final int MAX_CONNECTIONS = 8;
     private static final int MAX_CONNECTIONS_PER_ROUTE = 4;
     private static final int MAX_ACTIVE_EXCHANGES = 8;
@@ -110,10 +114,7 @@ public final class HttpsIntegrationHubWebhookTransport
         TlsStrategy tlsStrategy = new ConnectedPeerVerifyingTlsStrategy(ClientTlsStrategyBuilder.create()
                 .setSslContext(loadTruststore(properties))
                 .setTlsVersions("TLSv1.3", "TLSv1.2")
-                .setCiphers("TLS_AES_128_GCM_SHA256", "TLS_AES_256_GCM_SHA384",
-                        "TLS_CHACHA20_POLY1305_SHA256", "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-                        "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384", "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
-                        "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384")
+                .setCiphers(TLS_CIPHERS)
                 .setHostnameVerifier(org.apache.hc.client5.http.ssl.HttpsSupport.getDefaultHostnameVerifier()).build(), endpointGuard);
         this.connectionManager = PoolingAsyncClientConnectionManagerBuilder.create()
                 .setTlsStrategy(tlsStrategy)
@@ -164,7 +165,7 @@ public final class HttpsIntegrationHubWebhookTransport
             "x-integration-hub-timestamp", "x-integration-hub-key-id", "x-integration-hub-credential-version",
             "x-integration-hub-signature", "idempotency-key", "x-correlation-id");
 
-    private static SSLContext loadTruststore(IntegrationHubExternalApiProperties properties) {
+    static SSLContext loadTruststore(IntegrationHubExternalApiProperties properties) {
         var tls = properties.getExternalTransport();
         char[] password = tls.getTruststorePassword() == null ? new char[0] : tls.getTruststorePassword().toCharArray();
         try (var input = java.nio.file.Files.newInputStream(java.nio.file.Path.of(tls.getTruststorePath()))) {

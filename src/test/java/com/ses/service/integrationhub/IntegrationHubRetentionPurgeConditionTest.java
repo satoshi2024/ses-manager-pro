@@ -16,6 +16,21 @@ import static org.mockito.Mockito.mock;
  * outboundだけの開放でdelivery payloadとreplay監査が永久に残らないことを固定する。
  */
 class IntegrationHubRetentionPurgeConditionTest {
+    @org.junit.jupiter.api.Test
+    void 全NF05生成条件がBooleanの別表記で一致する() {
+        for (String value : java.util.List.of("true", "yes", "on", "1")) {
+            var environment = new org.springframework.mock.env.MockEnvironment()
+                    .withProperty("integration.hub.external-transport.enabled", value)
+                    .withProperty("integration.hub.public-api.enabled", value)
+                    .withProperty("app.scheduling.enabled", value);
+            var context = org.mockito.Mockito.mock(org.springframework.context.annotation.ConditionContext.class);
+            org.mockito.Mockito.when(context.getEnvironment()).thenReturn(environment);
+            org.junit.jupiter.api.Assertions.assertTrue(new IntegrationHubOutboundCondition().matches(context, null));
+            org.junit.jupiter.api.Assertions.assertTrue(new IntegrationHubInboundCondition().matches(context, null));
+            org.junit.jupiter.api.Assertions.assertTrue(new IntegrationHubDeliverySchedulingCondition().matches(context, null));
+        }
+    }
+
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withBean(ApiRetentionPurgeService.class, () -> mock(ApiRetentionPurgeService.class))
             .withBean(ApiNonceReplayService.class, () -> mock(ApiNonceReplayService.class))

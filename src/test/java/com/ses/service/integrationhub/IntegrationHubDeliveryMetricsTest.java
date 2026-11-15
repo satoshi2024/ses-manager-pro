@@ -26,7 +26,13 @@ class IntegrationHubDeliveryMetricsTest {
         registry.getMeters().forEach(meter -> assertThat(meter.getId().getTags())
                 .allMatch(tag -> tag.getKey().equals("status") && tag.getValue().matches("[A-Z_]+")));
         assertThat(registry.get("integration_hub_delivery_rows").tag("status", "DLQ").gauge().value()).isEqualTo(2);
+        registry.getMeters().forEach(meter -> meter.measure().forEach(measurement -> measurement.getValue()));
+        registry.getMeters().forEach(meter -> meter.measure().forEach(measurement -> measurement.getValue()));
+        verify(deliveries, times(6)).selectCount(any());
+        verify(inbound, times(6)).selectCount(any());
         when(deliveries.selectCount(any())).thenThrow(new IllegalStateException("synthetic"));
+        registry.clear();
+        new IntegrationHubDeliveryMetrics(deliveries, inbound, provider).register();
         assertThat(registry.get("integration_hub_delivery_rows").tag("status", "DLQ").gauge().value()).isNaN();
     }
 }

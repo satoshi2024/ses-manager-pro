@@ -28,6 +28,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 片方向の承認でもう片方向を開けず、STUB/LOOPBACKは常に拒否し、既定（OFF+MOCK）は承認なしで通る。
  */
 class IntegrationHubProductionEnablementPolicyTest {
+    @org.junit.jupiter.api.Test
+    void 承認宛先と送信guardは正規portとFQDNを同じ規則で拒否する() {
+        for (String invalid : java.util.List.of("web.example.com:0443", "web.example.com.:443", "WEB.example.com:443", "127.0.0.1:443")) {
+            org.junit.jupiter.api.Assertions.assertFalse(IntegrationHubProductionEnablementPolicy.validDestination(invalid));
+            org.junit.jupiter.api.Assertions.assertFalse(com.ses.service.integrationhub.IntegrationHubHttpsEndpointGuard.validDestination(invalid));
+        }
+    }
+
     private static final String INBOUND_DECISION = "DG-05-IN-20261201-01";
     private static final String OUTBOUND_DECISION = "DG-05-OUT-20261201-01";
 

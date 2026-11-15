@@ -89,6 +89,26 @@ class IntegrationHubWebhookDeliveryReplayServiceTest {
                 () -> service.replay(9L, 2, "PROVIDER_RECOVERY", scopeDigest, adminAuthentication, now));
     }
 
+    @Test
+    void 小数秒のreplay操作時刻は秒へ揃え元event時刻とsnapshotは維持する() {
+        ApiDelivery original = original();
+        when(deliveryMapper.selectForUpdate(9L)).thenReturn(original);
+        LocalDateTime operation = now.plusDays(1);
+        when(authorizationService.authorize(original, scopeDigest, adminAuthentication, operation))
+                .thenReturn(new IntegrationHubWebhookReplayAuthorizationService.ReplayAuthorization("sys-user:42"));
+        ApiDelivery replay = service.replay(9L, 2, "PROVIDER_RECOVERY", scopeDigest, adminAuthentication,
+                operation.withNano(123456789));
+        assertEquals(now, replay.getCreatedAt());
+        assertEquals(operation, replay.getUpdatedAt());
+        assertEquals(operation, replay.getNextAttemptAt());
+        assertEquals(original.getExternalDtoSnapshot(), replay.getExternalDtoSnapshot());
+        assertEquals(original.getPayloadHash(), replay.getPayloadHash());
+        assertEquals(IntegrationHubDigest.sha256Hex("event-1|7|2"), replay.getProviderIdempotencyKey());
+        verify(authorizationService).authorize(original, scopeDigest, adminAuthentication, operation);
+        verify(auditMapper).insert(org.mockito.ArgumentMatchers.<ApiDeliveryReplayAudit>argThat(audit ->
+                operation.equals(audit.getCreatedAt()) && operation.plusYears(1).equals(audit.getRetentionExpiresAt())));
+    }
+
     private ApiDelivery original() {
         return ApiDelivery.builder().id(9L).eventId("event-1").subscriptionId(7L).deliveryGeneration(1)
                 .clientId("client-a").scopeCode("resource.read").tenantId("tenant-a").scopeDigest(scopeDigest)

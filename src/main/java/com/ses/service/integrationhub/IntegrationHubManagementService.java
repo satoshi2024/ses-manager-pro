@@ -51,6 +51,10 @@ public class IntegrationHubManagementService {
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final com.ses.mapper.AttendanceScopeMapper legalEntities;
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.beans.factory.ObjectProvider<IntegrationHubReplayTlsPreflight> replayPreflights;
+    @org.springframework.beans.factory.annotation.Autowired
+    private IntegrationHubWebhookReplayAuthorizationService replayAuthorization;
 
     @Transactional(rollbackFor = Exception.class)
     public String registerClient(ClientCommand command) {
@@ -107,6 +111,9 @@ public class IntegrationHubManagementService {
 
     @Transactional(rollbackFor = Exception.class)
     public SubscriptionView register(SubscriptionCommand command) {
+        if (command == null) invalid();
+        String tenant = requireAdministrator();
+        if (clients.lockTenantCapacity(tenant) == null) invalid();
         ApiClient client = requireClient(command.clientId(), command.legalEntityId());
         if (!"resource.changed".equals(command.eventType()) || command.credentialVersion() == null) invalid();
         // 呼出し側だけに依存せず、transaction内ではDNSを伴わないURI/承認一覧を再検査する。
@@ -135,7 +142,9 @@ public class IntegrationHubManagementService {
                 .keyId(credential.getKeyId()).signingCredentialVersion(credential.getCredentialVersion())
                 .encryptedSigningSecret(encrypted).cryptoKeyVersion(credential.getCryptoKeyVersion())
                 .dataScopeJson(command.dataScopeJson()).status("ACTIVE").createdAt(now).updatedAt(now).version(0).build();
+        var currentSubscriptions = subscriptions.selectOutboundForTenantForUpdate(client.getTenantId());
         WebhookSubscription existing = subscriptions.selectOutboundForUpdate(client.getClientId(), command.eventType(), endpoint.toString());
+        if (currentSubscriptions.size() >= 256 && (existing == null || !"ACTIVE".equals(existing.getStatus()))) invalid();
         if (existing == null) {
             subscriptions.insert(row);
             record("NF05_SUBSCRIPTION_REGISTERED", row.getId());
@@ -177,11 +186,18 @@ public class IntegrationHubManagementService {
         record("NF05_CREDENTIAL_REVOKED", client.getId());
     }
 
-    @Transactional(rollbackFor = Exception.class)
     public Long replay(Long id, Long legalEntityId, String reason, Authentication auth) {
-        var original = deliveries.selectForUpdate(id);
+        var original = deliveries.selectById(id);
         if (original == null) throw BusinessException.of(404, "integration.hub.management.notFound");
-        requireClient(original.getClientId(), legalEntityId);
+        requireClient(original.getClientId(), legalEntityId, false);
+        if (!IntegrationHubStates.DELIVERY_DLQ.equals(original.getStatus())) invalid();
+        replayAuthorization.authorize(original, original.getScopeDigest(), auth, now());
+        if (properties.getProvider().getMode() == IntegrationHubExternalApiProperties.ProviderMode.HTTPS) {
+            WebhookSubscription subscription = subscriptions.selectActiveById(original.getSubscriptionId());
+            if (subscription == null || replayPreflights.getIfAvailable() == null) invalid();
+            try { replayPreflights.getObject().validate(URI.create(subscription.getEndpointUrl())); }
+            catch (IllegalArgumentException rejected) { throw BusinessException.of(400, "integration.hub.management.invalid"); }
+        }
         return replayService.replay(id, original.getDeliveryGeneration() + 1, reason,
                 original.getScopeDigest(), auth, now()).getId();
     }
@@ -190,9 +206,11 @@ public class IntegrationHubManagementService {
         requireClient(clientId, legalEntityId);
     }
 
-    private ApiClient requireClient(String clientId, Long legalEntityId) {
+    private ApiClient requireClient(String clientId, Long legalEntityId) { return requireClient(clientId, legalEntityId, true); }
+
+    private ApiClient requireClient(String clientId, Long legalEntityId, boolean lock) {
         String tenant = requireAdministrator();
-        ApiClient row = clients.selectByClientIdForUpdate(clientId);
+        ApiClient row = lock ? clients.selectByClientIdForUpdate(clientId) : clients.selectByClientId(clientId);
         if (row == null || !Objects.equals(tenant, row.getTenantId())
                 || !Objects.equals(legalEntityId, row.getLegalEntityId())
                 || legalEntityId == null || !legalEntities.selectAllLegalEntityIds().contains(legalEntityId)
@@ -234,12 +252,21 @@ public class IntegrationHubManagementService {
     }
 
     private ExternalApiDataScope parseScope(String scope) {
-        try { return ExternalApiDataScope.parse(scope, objectMapper); }
+        try {
+            var parsed = ExternalApiDataScope.parse(scope, objectMapper);
+            parsed.values().forEach((key, values) -> {
+                if (!"tenantIds".equals(key)) for (String value : values) {
+                    if (!value.matches("[1-9][0-9]{0,18}") || Long.parseLong(value) <= 0)
+                        throw new IllegalArgumentException("scope IDが不正です");
+                }
+            });
+            return parsed;
+        }
         catch (RuntimeException rejected) { throw BusinessException.of(400, "integration.hub.management.invalid"); }
     }
 
     private static void invalid() { throw BusinessException.of(400, "integration.hub.management.invalid"); }
-    private LocalDateTime now() { return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC); }
+    private LocalDateTime now() { return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).withNano(0); }
     public record SubscriptionCommand(String clientId, Long legalEntityId, String eventType, String endpoint,
                                       String dataScopeJson, Integer credentialVersion) { }
     public record ClientCommand(String clientId, String ownerRef, Long legalEntityId, String dataScopeJson, String allowedCidrs) { }
