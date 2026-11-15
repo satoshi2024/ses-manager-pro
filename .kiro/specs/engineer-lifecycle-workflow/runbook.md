@@ -143,7 +143,7 @@ NF01（機能スイッチ `FEATURE_NF01_ENABLED`、既定OFF）はCONFIRM完成�
     FROM t_audit_log WHERE reference_type = 'PORTAL_USER_ENGINEER_LINK' ORDER BY id DESC;
   ```
 - **退社完了済みの要員への紐付け**: 拒否はしない（再入社等で正当な場合がある）。ただし完了時の自動処理は遡って行われないため、登録応答の `engineerResigned=true` で画面に警告を出し、監査の `after_state` に `engineerResigned=true` を残す。管理者はポータルユーザーの停止（「停止」ボタン）を個別に判断する。
-- **lock順**: 登録・解除は対象要員の `t_engineer` 行を `FOR UPDATE` してから紐付け行を書く（NF01細粒度epoch計画 §3.1 の 順7 ENGINEER → 順12 PORTAL_ENGINEER_LINK → 葉の監査）。退社完了が要員行を保持して紐付けを読む並べ替えはW3-16bで入る（それまでは、退社完了の直前に登録された紐付けが失効対象に入らない競合が残る。退社完了の直前・直後の紐付け変更は避ける）。
+- **lock順**: 登録・解除は対象要員の `t_engineer` 行を `FOR UPDATE` してから紐付け行を書く（NF01細粒度epoch計画 §3.1 の 順7 ENGINEER → 順12 PORTAL_ENGINEER_LINK → 葉の監査）。W3-16b以降、退社完了は要員行（順7）を含むlock planを取得した後に紐付けを読み直して失効対象を決める（§6.6）。完了と並行した紐付けの登録・解除は、どちらかが先に確定してから他方が進むため、完了の直前に登録された紐付けも失効対象に入る。
 - **公開前の準備（データのある環境）**:
   1. V188適用前にpreflightの `PORTAL_ENGINEER_LINK_CANDIDATES` を確認する（旧email照合の対象だったポータルユーザーの件数）。
   2. V188適用後、管理者が該当するポータルユーザーの紐付けを登録する。要員本人ではないポータルユーザー（共有アドレス等）は紐付けず、その判断を5.2の手順で記録する。
@@ -195,7 +195,7 @@ NF01（機能スイッチ `FEATURE_NF01_ENABLED`、既定OFF）はCONFIRM完成�
 
 | 指摘 | 有効化の前提・担当 |
 |---|---|
-| P3-1（NF01 ON前） | W3-16b担当がcompleteCaseと自動gateをまとめてrank順に並べ替える。現在のengineer X（rank7）→連携sys_user X（rank3）は、EngineerChangeRequestApprovalAdapter.applyProfileのsys_user更新→engineer更新（3→7）と同一要員で競合し、1213 deadlockになり得る。engineerだけをgate後へ移す変更は、判定と自動作用の間に新規accountが入るため本修正では行わない。既存L5（4→3）も含めて消し、M6で並行変更申請・退社・同commit要求登録を検証する。 |
+| P3-1（NF01 ON前） | **W3-16bで実装済み（§6.6）。残りはRunnerの実測。** completeCaseは連携ユーザー（rank 3）を要員（rank 7）より先に、案件・タスク・所属・紐付け・担当営業・外部アカウントまでを1つのlock planで1回だけ取る（3 S{操作者}・X{連携ユーザー} → 4 → 5 → 7 → 8 → 9 → 10 → 14 → 葉）。旧実装のengineer X（rank7）→連携sys_user X（rank3）と既存L5（4→3）は消えた。変更申請の承認（2→3→7）、紐付け解除（3 S→7 X）、要員削除（3 X→7 X）、所属writer・統合・利用者の無効化/削除（3 X→7 X）と同じ向きになる。M6（`ResignationCompletionLockOrderMySqlTest`、shard-3）で、これらと退社完了を両順序で実行して1213/1205が出ず、後続側が先行側の確定を待って成功するか依存先の変化を409で返すこと、外部アカウントの失効要求登録が完了と同じcommitに入ることを検証する（未実行。NF01 ON前にRunnerが5回以上・skip 0で実行する）。 |
 | P3-2（実provider前） | 本transactionのID限定で積残しの同期処理は解消したが、callback終了まで元connectionを保持する制約は残る。有界非同期dispatch/drain、受付上限、停止時回収、pool飽和時の挙動を設計し独立レビューする。CallerRunsPolicyの既存executorへ単純移管するだけでは承認しない。 |
 | P3-9(4)（NF01 ON前） | Runner/DB担当がInnoDbRecordLockWaitsで「登録が退社完了のengineer Xを待ち、commit後に完了済み案件を読み要求登録する」両順序を実MySQLで検証する。LOCK_DATAの値に依存しない。M10の実READ-COMMITTED確認と既存AssetMySqlIntegrationTestをそれぞれ5回以上、skip0で実行する。 |
 | P3-12（実provider前） | SREが100行×provider timeoutの最悪時間とShedLock PT10Mを再評価する。batch件数・総実行期限・HTTP timeout・lease・停止drainを一体で制限し、lock期限切れで重複schedulerが起動しても安全なことを実測して承認する。 |
@@ -212,3 +212,32 @@ NF01（機能スイッチ `FEATURE_NF01_ENABLED`、既定OFF）はCONFIRM完成�
 上記gateの証拠とOwner/Security/SREの承認が揃うまで、本番はNO-GOのままとする。
 
 - P3-10補足: 既存の非NULLかつ空白だけのkeyはCASのNULL条件を満たさないため登録不能とする。HR/DBAが由来と監査を確認して承認済みのデータ修復を別途行う。mapperのCASを緩和して黙って上書きしない。登録済み件数は登録可能かつ非空keyだけを数え、保留行との重複を避ける。
+
+### 6.6 退社完了のlock順とタスク世代（W3-16b）
+
+NF01細粒度epoch計画 §3.4「completeCase」・§4.2・§7.5。本節は実装と残りのリスクの記録であり、本番有効化の承認ではない。
+
+- **処理順**（`LifecycleCaseServiceImpl.completeCase`、単一の `REQUIRED`・`READ_COMMITTED` transaction。CONFIRMのcoordinatorは使わない）:
+  1. discovery: lockを取らない通常読取で、案件の状態・操作者の権限・阻害タスク・退社ゲートを確かめる。完了できない要求はlockを取らずに400等で返す。続けて完了処理が書く行を列挙する（`LifecycleCompletionLockPlanner`）。
+  2. lock: 3 S{操作者}・X{連携ユーザー}（ID昇順）→ 4 X{案件} → 5 X{全タスク} → 7 X{要員} → 8 X{連携ユーザーの所属行と、連携ユーザーを上長とする他人の所属行} → 9 X{紐付け} → 10 X{現任の担当営業} → 14 X{未失効の外部アカウント（全法人）} を `LifecycleLockExecutor` で1回だけ取る。
+  3. lock後: 同じ照会で依存先を列挙し直し、違えば途中でlockを足さず `409 error.common.optimisticLock` で全体をrollbackする。前提（状態・権限・阻害タスク・ゲート）もlock後の現在値で判定し直す。
+  4. 書込み: 取得済みの行（停止 → 所属の終了・上長解除 → 紐付け解除 → 担当営業の解除 → 外部アカウントの失効要求登録 → 要員のBench化 → 案件COMPLETED）と葉（event、内部session・ポータルsessionの失効、commit後の通知と失効要求の送信）だけ。
+- **epoch**: 連携ユーザーの停止は status 列が変わった時だけactor epochを1進める（所属の終了による増分とは同じtransactionで1回にまとまる）。要員のengineer epochは所属の終了・紐付け解除・担当営業の解除が進め、合わせて1回になる。操作者のepochは変えない。
+- **操作者自身に連携された要員**の退社案件は `400 error.lifecycle.selfResignationCompletion` で拒否する（操作の途中で自分のアカウントを停止しないため。別の管理者またはHRが完了する）。権限不足ではなく業務規則の拒否のため400とし、画面に案内文言を出す（403は画面の共通処理が固定文言へ置き換える）。従来は完了でき操作者自身のアカウントが停止されていたため、リリースノートに挙動の変化として記載する。
+- **409が返る場面（運用）**: 完了の確認から実行までの間に、対象要員の紐付け解除・要員削除・所属の登録/異動、担当営業の割当、外部アカウントの登録が確定した場合。画面を再読み込みして退社ゲートを確認し直し、再度「完了確定」を押す。自動再試行はしない（計画 §9 RR-9）。
+- **1213・1205の応答**: deadlock（MySQL 1213）・lock待ちtimeout（1205）はAPI全体で `409`（`error.common.optimisticLock` の文言、ログは `errorCode=LOCK_CONFLICT`・WARN）として返す（従来は500）。再読み込みして再試行すれば通常は成功する。`LOCK_CONFLICT` が継続して出る場合はlock順の不備を疑い、ログの例外型と時刻から経路を特定する。DBAは `innodb_print_all_deadlocks=ON` でdeadlockの待機graphをerror logへ出して確認する。5xx・ERRORだけを見る監視ではdeadlockを検知できなくなるため、SREは `LOCK_CONFLICT` の発生率を監視・通知の対象に加える（計画 §10）。
+- **PWAのオフライン送信（`/api/my/pwa/**`）は例外として503で返す**: オフラインqueue（`pwa-queue.js`）は409を「人の判断が要る競合」（CONFLICT表示）、5xxを「一時的な失敗」（queueに残して自動再送）として扱う。lockの競合は一時的な失敗であり、commandはledgerのclaimと一緒にrollbackされて同じclientRequestIdで再送できるため、`PwaMutationApiController` だけは `503 error.pwa.lockConflictRetry`（ログは `errorCode=LOCK_CONFLICT`）で返し、端末に入っている既存のqueueのまま自動再送させる。
+- **タスク世代**: 案件の保留（終端でないタスク）・取消（取り消したタスク）・タスクの担当変更（担当が変わった時）・免除で、該当タスクの `task_generation` を1つ進める（案件X → タスクX の後）。再開では戻さない。上限（`Long.MAX_VALUE`）では `409 error.authorization.epochUnavailable` で業務更新ごと止まる。担当変更は新担当の利用者行を共有lock（rank 3 S）してから案件・タスクをlockする。
+- **要員の所属組織を書く更新・休暇申請**（`EngineerServiceImpl.updateWithStatusGuard`・`updateById`、`LeaveServiceImpl.apply`）は、外部キー検査の参照先の組織行（rank 6）を要員行（rank 7）より先に共有lockする（W3-16a後半 review P3-1。組織統合・所属writerの 6 X → 7 X との循環を作らない）。
+- **休暇申請**（`LeaveServiceImpl.apply`、要員本人）は、さらに申請者本人の利用者行（rank 3）を最初に共有lockする（3 S → 6 S → 7 X）。申請行の `created_by` と承認申請の `applicant_id` は利用者行への外部キーで、要員行のX lockの後のinsertでその検査が本人の利用者行へS lockを付けると、退社完了（3 X{連携ユーザー} → 7 X{要員}）と循環し得た（W3-16b review P3-1）。
+
+残りのリスク（NF01 ON前の確認事項）:
+
+| # | 内容 | 担当・扱い |
+|---|---|---|
+| R-1 | M6・既存MySQL試験は本バッチでは未実行。待ちの観測と1213/1205が出ないことはRunnerの実測で確定する。 | Runner: shard-3のM6を5回以上、shard-1の `LifecycleLockOrderMySqlTest`・`LifecycleMySqlIntegrationTest`、shard-2の `ResignationRevocationOutboxMySqlTest`・`EngineerScopeFenceMySqlTest` を3回以上、skip 0 |
+| R-2 | 上長が互いの所属行の上長になっている2人について、利用者の無効化・削除（所属の一括終了と上長解除）と退社完了、または無効化・削除どうしを同時に実行すると、上長解除（clearManager）が相手の所属行を待ち合い1213になり得る（既存。W3-16a後半 review P3-2）。2人の退社完了どうしは、上長解除の対象行も rank 8 で同じ順にlockするため直列化される。今回からAPIは409で返す。 | 運用: 互いを上長にする所属を作らない。発生時は片方ずつ再実行する |
+| R-3 | 外部キー検査の共有lock: 要員の所属組織を書く更新と休暇申請は参照先の組織行（6 S）を、休暇申請は申請者本人の利用者行（3 S）も、要員行より先に取るようになった。利用者行への外部キー（`created_by`・`applicant_id` 等）も rank 3 の暗黙のS lockである。本人自助のwriterで要員行（7 X）を取ってから本人の利用者行を参照する行をinsertするものは、休暇申請のほかに見つからなかった（PWAの変更申請は要員行の後に利用者行を参照しない）。HR・管理者の操作（スキルの置換等）が自分に連携された要員に対して同じ形になる場合と、組織を参照する行をinsertする他の業務writerは未対応。 | 計画 §9 RR-15。1213は409で返る |
+| R-4 | 退社完了はlock前とlock後の2回、退社ゲートを判定する（読取の増加）。完了は管理操作で頻度が低いため許容する。 | 性能gateで確認 |
+| R-5 | 1つのtransactionで退社完了を2回呼ぶと、2回目のlock planが1回目より前のrankを取ることになりexecutorが拒否する（業務経路は要求ごとのtransaction）。fast testで複数の完了を1つのテストtransactionにまとめる場合は、1回目がlock前の判定で失敗する形に限る。 | 開発規約 |
+| R-6 | H2では共有lockを排他lockで代える（`SharedLockSupport`）。共有lockの意味（readerやwriter同士を待たせないこと）はMySQLの試験だけで確かめる（計画 RR-12）。 | 既知 |

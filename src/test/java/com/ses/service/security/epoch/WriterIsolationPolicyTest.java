@@ -7,6 +7,9 @@ import com.ses.service.impl.OrganizationServiceImpl;
 import com.ses.service.impl.RoleMenuServiceImpl;
 import com.ses.service.impl.SysUserServiceImpl;
 import com.ses.service.impl.SystemConfigServiceImpl;
+import com.ses.service.lifecycle.ResignationGateChecker;
+import com.ses.service.lifecycle.impl.LifecycleCaseServiceImpl;
+import com.ses.service.lifecycle.impl.LifecycleTaskServiceImpl;
 import com.ses.service.security.impl.OwnershipRepairServiceImpl;
 import com.ses.service.security.impl.PermissionGroupManagementServiceImpl;
 import org.junit.jupiter.api.Test;
@@ -42,6 +45,8 @@ class WriterIsolationPolicyTest {
      * W3-16a分（要員・link・営業）: discovery（連携ユーザー・紐付け）を伴う要員削除（E-3）と紐付け解除。
      * W3-16a後半分（組織・所属）: 計画 §2.4 E-3 の組織階層writer・統合・所属writerの全部（祖先鎖・依存集合・連携要員の
      * discoveryを伴う）。
+     * W3-16b分（lifecycle）: discovery（連携ユーザー・所属・紐付け・担当営業・外部アカウント）→ 1つのplanの取得 →
+     * 再discoveryを行う案件完了（計画 §2.4 E-3・§4.2）。
      */
     private static final Map<Class<?>, List<String>> READ_COMMITTED_WRITERS = Map.of(
             SysUserServiceImpl.class, List.of("updateUserStatus", "deleteUser"),
@@ -49,7 +54,8 @@ class WriterIsolationPolicyTest {
             SystemConfigServiceImpl.class, List.of("updateAll"),
             EngineerServiceImpl.class, List.of("removeById"),
             EngineerAccountLinkServiceImpl.class, List.of("unlinkByEngineerId"),
-            OrganizationServiceImpl.class, OrganizationWriters.ALL);
+            OrganizationServiceImpl.class, OrganizationWriters.ALL,
+            LifecycleCaseServiceImpl.class, List.of("completeCase"));
 
     /** W3-16a後半でfenceへ接続した組織・所属writer（計画 §2.4 E-3 の対象と同じ）。 */
     private static final class OrganizationWriters {
@@ -67,6 +73,10 @@ class WriterIsolationPolicyTest {
     private static final List<Class<?>> F2_ENGINEER_WRITERS = List.of(
             EngineerServiceImpl.class, EngineerSalesServiceImpl.class, EngineerAccountLinkServiceImpl.class,
             OwnershipRepairServiceImpl.class, OrganizationServiceImpl.class);
+
+    /** W3-16bでfenceへ接続したlifecycleのwriterクラス（タスク世代・退社完了）。 */
+    private static final List<Class<?>> F2_LIFECYCLE_WRITERS = List.of(
+            LifecycleCaseServiceImpl.class, LifecycleTaskServiceImpl.class, ResignationGateChecker.class);
 
     @Test
     void discoveryを伴うwriterはREAD_COMMITTEDを宣言する() {
@@ -96,6 +106,7 @@ class WriterIsolationPolicyTest {
         List<String> violations = new ArrayList<>();
         List<Class<?>> writers = new ArrayList<>(F1_WRITERS);
         writers.addAll(F2_ENGINEER_WRITERS);
+        writers.addAll(F2_LIFECYCLE_WRITERS);
         for (Class<?> type : writers) {
             for (Method method : type.getDeclaredMethods()) {
                 Transactional tx = AnnotatedElementUtils.findMergedAnnotation(method, Transactional.class);
@@ -150,6 +161,34 @@ class WriterIsolationPolicyTest {
         });
         assertEquals(List.of(), violations,
                 "fenceはMANDATORYのため、要員writerの入口はREQUIRED＋rollbackFor=Exceptionで業務更新と増分を同じtransactionにする（E-1）");
+    }
+
+    @Test
+    void lifecycleのepoch_writerの入口はrollbackForを持つ実transactionで宣言されている() {
+        // W3-16b: タスク世代（保留・取消・免除・担当変更）と退社完了（actor・engineer）の増分は、業務更新と同じtransactionで行う。
+        // 退社完了はCONFIRMのcoordinator（NEVER・自動再試行）を使わず、単一のREQUIREDで行う（計画 §4.2）。
+        List<String> violations = new ArrayList<>();
+        Map<Class<?>, List<String>> entries = Map.of(
+                LifecycleCaseServiceImpl.class, List.of("holdCase", "cancelCase", "completeCase", "resumeCase"),
+                LifecycleTaskServiceImpl.class, List.of("waiveTask", "reassignTask"));
+        entries.forEach((type, names) -> {
+            for (String name : names) {
+                List<Method> declared = Arrays.stream(type.getDeclaredMethods())
+                        .filter(method -> method.getName().equals(name) && !method.isSynthetic() && !method.isBridge())
+                        .toList();
+                if (declared.isEmpty()) {
+                    violations.add(type.getSimpleName() + "#" + name + " が見つかりません");
+                }
+                for (Method method : declared) {
+                    Transactional tx = AnnotatedElementUtils.findMergedAnnotation(method, Transactional.class);
+                    if (tx == null || tx.propagation() != Propagation.REQUIRED
+                            || !Arrays.asList(tx.rollbackFor()).contains(Exception.class)) {
+                        violations.add(type.getSimpleName() + "#" + name);
+                    }
+                }
+            }
+        });
+        assertEquals(List.of(), violations, "lifecycleのepoch writerの入口はREQUIRED＋rollbackFor=Exception（E-1）");
     }
 
     @Test

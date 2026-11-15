@@ -2,16 +2,10 @@ package com.ses.service.security.epoch;
 
 import com.ses.entity.SysUser;
 import com.ses.mapper.SysUserMapper;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.SQLException;
-import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -24,24 +18,18 @@ import java.util.Objects;
  * 共有lockなので、同じ利用者を提出者・確認者とするCONFIRMのreader（rank 3 S）や、同じ営業を別の要員へ割り当てる
  * writer同士は待たない（細粒度、M4）。</p>
  *
- * <p>H2は {@code FOR SHARE} を解釈しない（計画 §2.5）。H2では同じ行・同じrankの {@code FOR UPDATE} で代える。
- * 排他lockは共有lockの上位互換でlock順も同じなので、fast testで順序と読み直しの振舞いを確かめられ、共有lockの意味
- * （並行するreader・writerを待たせないこと）はMySQLのM4で確かめる。DB製品を判定できない場合も排他lockにする
- * （待ちが増えるだけで、失効漏れにはならない側）。</p>
+ * <p>H2は {@code FOR SHARE} を解釈しない（計画 §2.5）。判定は {@link SharedLockSupport} が行い、H2では同じ行・同じrankの
+ * {@code FOR UPDATE} で代える（排他lockは共有lockの上位互換でlock順も同じ）。</p>
  */
-@Slf4j
 @Component
 public class ActorShareLock {
 
     private final SysUserMapper sysUserMapper;
-    private final DataSource dataSource;
+    private final SharedLockSupport sharedLockSupport;
 
-    /** 接続先DBが {@code FOR SHARE} を解釈するか（初回に1度だけ判定する）。 */
-    private volatile Boolean sharedLockSupported;
-
-    public ActorShareLock(SysUserMapper sysUserMapper, DataSource dataSource) {
+    public ActorShareLock(SysUserMapper sysUserMapper, SharedLockSupport sharedLockSupport) {
         this.sysUserMapper = Objects.requireNonNull(sysUserMapper, "sysUserMapper");
-        this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
+        this.sharedLockSupport = Objects.requireNonNull(sharedLockSupport, "sharedLockSupport");
     }
 
     /**
@@ -51,25 +39,6 @@ public class ActorShareLock {
     @Transactional(propagation = Propagation.MANDATORY, rollbackFor = Exception.class)
     public SysUser lockActive(long userId, String tenantId) {
         TransactionBoundState.requireActualTransaction();
-        return sysUserMapper.selectActiveByIdForLock(userId, tenantId, !sharedLockSupported());
-    }
-
-    private boolean sharedLockSupported() {
-        Boolean cached = sharedLockSupported;
-        if (cached != null) {
-            return cached;
-        }
-        Connection connection = DataSourceUtils.getConnection(dataSource);
-        try {
-            String product = connection.getMetaData().getDatabaseProductName();
-            boolean supported = product != null && product.toLowerCase(Locale.ROOT).contains("mysql");
-            sharedLockSupported = supported;
-            return supported;
-        } catch (SQLException e) {
-            log.warn("[authorization epoch] DB製品を判定できないため利用者行の共有lockを排他lockで代えます: {}", e.getMessage());
-            return false;
-        } finally {
-            DataSourceUtils.releaseConnection(connection, dataSource);
-        }
+        return sysUserMapper.selectActiveByIdForLock(userId, tenantId, !sharedLockSupport.supported());
     }
 }

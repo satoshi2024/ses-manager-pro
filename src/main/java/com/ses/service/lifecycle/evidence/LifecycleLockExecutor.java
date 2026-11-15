@@ -2,7 +2,9 @@ package com.ses.service.lifecycle.evidence;
 
 import com.ses.mapper.AuthorizationEpochMapper;
 import com.ses.mapper.LifecycleLockMapper;
+import com.ses.service.security.epoch.SharedLockSupport;
 import com.ses.service.security.epoch.TransactionBoundState;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,7 +31,12 @@ import java.util.TreeMap;
  *       discovery後に依存先が変わったことを意味するため、呼出側はrollbackして再discoveryする。</li>
  * </ul>
  *
- * <p>W3-10では定義と実MySQL試験だけで、業務経路からは呼ばない（W3-16b・W3-21aが接続する）。</p>
+ * <p>{@link LifecycleLockPlan.Mode#SHARED} は {@code FOR SHARE} で取る。接続先DBが {@code FOR SHARE} を解釈しない場合（H2）は、
+ * {@link SharedLockSupport} の判定に従い同じ行を {@code FOR UPDATE} で代える（排他lockは共有lockの上位互換でlock順も同じ。
+ * 共有lockの意味は実MySQLの試験で確かめる。計画 §2.5）。planの値（keyとmode）は変えない。</p>
+ *
+ * <p>業務経路では W3-16b の退社完了（{@code LifecycleCaseServiceImpl.completeCase}）が、完了処理の書く行を1つのplanで
+ * 1回だけ取る。W3-21aのCONFIRM attemptも同じ規則に従う。</p>
  */
 @Component
 public class LifecycleLockExecutor {
@@ -38,10 +45,19 @@ public class LifecycleLockExecutor {
 
     private final LifecycleLockMapper lockMapper;
     private final AuthorizationEpochMapper epochMapper;
+    private final SharedLockSupport sharedLockSupport;
 
-    public LifecycleLockExecutor(LifecycleLockMapper lockMapper, AuthorizationEpochMapper epochMapper) {
+    @Autowired
+    public LifecycleLockExecutor(LifecycleLockMapper lockMapper, AuthorizationEpochMapper epochMapper,
+                                 SharedLockSupport sharedLockSupport) {
         this.lockMapper = lockMapper;
         this.epochMapper = epochMapper;
+        this.sharedLockSupport = Objects.requireNonNull(sharedLockSupport, "sharedLockSupport");
+    }
+
+    /** DBに接続しない単体試験用（共有lockは常に {@code FOR SHARE} で取る）。 */
+    public LifecycleLockExecutor(LifecycleLockMapper lockMapper, AuthorizationEpochMapper epochMapper) {
+        this(lockMapper, epochMapper, SharedLockSupport.fixed(true));
     }
 
     /**
@@ -70,7 +86,7 @@ public class LifecycleLockExecutor {
     }
 
     private boolean lock(LifecycleLockPlan.LockKey key, Map<String, List<Long>> exclusiveCasesByTenant) {
-        boolean exclusive = key.mode() == LifecycleLockPlan.Mode.EXCLUSIVE;
+        boolean exclusive = key.mode() == LifecycleLockPlan.Mode.EXCLUSIVE || !sharedLockSupport.supported();
         String tenant = key.partition();
         long id = key.id();
         return switch (key.rank()) {

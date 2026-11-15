@@ -63,7 +63,9 @@ class GlobalActorWriterFenceTest {
      * <ul>
      *   <li>EngineerServiceImpl（要員削除時の連携ユーザー停止）は W3-16a F-5 で、lock済みの連携ユーザー行の status列だけを
      *       書く列限定更新＋actor epochのfence接続へ改めた（entityの全体更新の既知例外は無くなった）。</li>
-     *   <li>ResignationGateChecker（退社完了時の連携ユーザー停止）は W3-16b でfence接続する。</li>
+     *   <li>ResignationGateChecker（退社完了時の連携ユーザー停止）は W3-16b で、lock済みの連携ユーザー行の status・updated_at列
+     *       だけを書く列限定更新＋actor epochのfence接続（status変化時だけ）にした。退社完了では連携ユーザー行を案件完了の
+     *       lock plan（rank 3 X、要員の rank 7 より先）で取得済みである。</li>
      * </ul>
      */
     private static final Map<String, SysUserWriteContract> SYS_USER_MAPPER_WRITERS = Map.of(
@@ -75,8 +77,8 @@ class GlobalActorWriterFenceTest {
             new SysUserWriteContract("要員削除時の連携ユーザー停止（status列だけ、F-5。W3-16aでfence接続）", 1,
                     Set.of("update"), Set.of("status")),
             "com/ses/service/lifecycle/ResignationGateChecker.java",
-            new SysUserWriteContract("退社完了時の連携ユーザー停止（W3-16bでfence接続）", 1, Set.of("update"),
-                    Set.of("status", "updated_at")));
+            new SysUserWriteContract("退社完了時の連携ユーザー停止（status・updated_at列だけ。W3-16bでactor epochのfenceへ接続）", 1,
+                    Set.of("update"), Set.of("status", "updated_at")));
 
     /**
      * SysUser entityの全体更新（{@code updateById(entity)}・{@code update(entity, wrapper)}）を残してよい既知の例外。
@@ -317,6 +319,41 @@ class GlobalActorWriterFenceTest {
         assertEquals(SYS_USER_SERVICE_IMPL_WRITES, writes,
                 "SysUserServiceImplの書込み（create・updateUser・status・password変更・delete）の件数契約");
         assertEquals(List.of(), violations, "SysUserServiceの書込み経路（計画 §4.5 U4a）");
+    }
+
+    @Test
+    void sys_userを書く委任先はlock済みの行の列限定更新の後にactor_epochを進める() {
+        // W3-16b: 退社完了の連携ユーザー停止は、lock済みの行（rank 3 X）の status列だけを書き、変化した時だけ
+        // そのlock行のtenantでactor epochを進める（計画 §2.2・§4.2）。EngineerServiceImpl（W3-16a F-5）と同じ型。
+        Map<String, List<String>> expected = Map.of(
+                "com/ses/service/lifecycle/ResignationGateChecker.java", List.of(
+                        "public AutomaticActionResult applyAutomaticScopeActions(", "lockLinkedUserInTenant(userId, tenantId)",
+                        "sysUserMapper.update(null, new UpdateWrapper<SysUser>()", ".set(\"status\", 0)",
+                        "authorizationEpochFence.advanceIfChanged(ActorEpochAnchors.of(user), user.getStatus(), 0)",
+                        "organizationService.closeAssignmentsForUser(", "engineerAccountLinkService.unlinkByEngineerId(",
+                        "engineerSalesService.releaseAllByEngineerId("),
+                "com/ses/service/impl/EngineerServiceImpl.java", List.of(
+                        "private void disableLinkedUser(", "sysUserMapper.update(null, new UpdateWrapper<SysUser>()",
+                        ".set(\"status\", 0)", "authorizationEpochFence.advanceIfChanged(ActorEpochAnchors.of(lockedUser)"));
+        List<String> violations = new ArrayList<>();
+        expected.forEach((relative, tokens) -> {
+            String source = WriterGuardSources.mainSource(relative);
+            int cursor = source.indexOf(tokens.get(0));
+            if (cursor < 0) {
+                violations.add(relative + ": " + tokens.get(0) + " が見つかりません");
+                return;
+            }
+            for (String token : tokens.subList(1, tokens.size())) {
+                int found = source.indexOf(token, cursor);
+                if (found < 0) {
+                    violations.add(relative + ": " + token + " が順序どおりに見つかりません（期待順 "
+                            + String.join(" → ", tokens) + "）");
+                    break;
+                }
+                cursor = found + token.length();
+            }
+        });
+        assertEquals(List.of(), violations, "sys_userの委任先の列限定更新とactor epoch（計画 §4.5 U4a）");
     }
 
     @Test

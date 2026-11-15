@@ -81,7 +81,8 @@ class ScopeSourceWriterFenceTest {
             "com/ses/service/impl/CandidateServiceImpl.java", "EngineerMapper#updateByIdForTenant", 1,
             "com/ses/service/impl/EngineerSkillServiceImpl.java", "EngineerMapper#bumpVersionForTenant", 1,
             "com/ses/service/impl/EngineerStatusServiceImpl.java", "EngineerMapper#updateById", 3,
-            // W3-16b（退社完了の要員status。FOR UPDATE済みの行を@VersionのCASで書き戻す）
+            // W3-16b（退社完了の要員status。述語外の列。案件完了のlock planで rank 7 X を取得済みの行をlock後に読み、
+            // @VersionのCASで書き戻す。engineer epochは入れ子の紐付け解除・担当営業の解除・所属の終了が進める）
             "com/ses/service/lifecycle/impl/LifecycleCaseServiceImpl.java", "EngineerMapper#updateById", 1,
             // 接続済み（W3-16a後半、組織・所属）。どれも呼出元のwriterが rank 3 → 6 → 7 → 8 のanchorをlockした後に書く。
             // 統合（merge）の要員付替（rank 7）・会計履歴（rank 11）。
@@ -352,11 +353,14 @@ class ScopeSourceWriterFenceTest {
                 "authorizationEpochFence.advance("));
 
         String engineer = WriterGuardSources.mainSource(ENGINEER_SERVICE_IMPL);
-        // 7 X{要員}を最初のDB文で取り、旧値はlock後の行で比べる → 更新 → 11 → 増分
+        // 6 S{新しい所属組織。外部キー検査の参照先}（W3-16b、W3-16a後半 review P3-1）→ 7 X{要員}、旧値はlock後の行で比べる
+        // → 更新 → 11 → 増分
         violations.addAll(order(ENGINEER_SERVICE_IMPL, "updateWithStatusGuard", engineer,
-                "public boolean updateWithStatusGuard(", "baseMapper.selectByIdForUpdateForTenant(",
+                "public boolean updateWithStatusGuard(", "organizationShareLock.lockReferenced(engineer.getOrganizationId())",
+                "baseMapper.selectByIdForUpdateForTenant(",
                 "baseMapper.updateByIdForTenant(", "recordAccountingHistory(", "authorizationEpochFence.advance("));
         violations.addAll(order(ENGINEER_SERVICE_IMPL, "updateById", engineer, "public boolean updateById(",
+                "organizationShareLock.lockReferenced(entity.getOrganizationId())",
                 "baseMapper.selectByIdForUpdateForTenant(", "super.updateById(", "recordAccountingHistory(",
                 "authorizationEpochFence.advance("));
         violations.addAll(order(ENGINEER_SERVICE_IMPL, "save", engineer, "public boolean save(",
@@ -449,6 +453,77 @@ class ScopeSourceWriterFenceTest {
     }
 
     @Test
+    void 退社完了は連携ユーザーを要員より先に1つのplanで取りlock後に再discoveryしてから書く() {
+        // W3-16b（計画 §3.4 completeCase 列、§3.5 規則1・5）: discovery → plan（3 S{操作者}・X{連携ユーザー} → 4 → 5 → 7 →
+        // 8 → 9 → 10 → 14）の1回の取得 → 再discoveryと比較 → 取得済みの行（3・8・9・10 → 14 → 7 → 4）→ 葉（session）。
+        // 旧実装の「案件X → 要員X → 自動処理で連携ユーザーX」（4 → 7 → 3）を戻さない。
+        List<String> violations = new ArrayList<>();
+        String relative = "com/ses/service/lifecycle/impl/LifecycleCaseServiceImpl.java";
+        String lifecycle = WriterGuardSources.mainSource(relative);
+        violations.addAll(order(relative, "completeCase", lifecycle, "public void completeCase(",
+                "caseMapper.selectByIdAndTenant(caseId, tenantId)", "assertCompletable(", "completionLockPlanner.plan(",
+                "acquireCompletionLocks(plan, caseId)", "caseMapper.selectByIdAndTenant(caseId, tenantId)",
+                "requireSameCompletionDependencies(plan, completionLockPlanner.plan(", "assertCompletable(",
+                "resignationGateChecker.applyAutomaticScopeActions(", "revocationOutbox.enqueueForResignation(",
+                "engineerMapper.updateById(engineer)", "caseMapper.updateById(lcCase)", "eventMapper.insert(",
+                "resignationGateChecker.revokeSessionsAfterScopeActions("));
+        violations.addAll(order(relative, "acquireCompletionLocks", lifecycle, "private void acquireCompletionLocks(",
+                "lockExecutor.acquire(plan)", "error.common.optimisticLock"));
+        String body = methodBody(lifecycle, "public void completeCase(");
+        for (String forbidden : List.of("selectByIdForUpdateAndTenant(", "selectByIdForUpdateForTenant(",
+                "executeAutomaticGateActions(")) {
+            if (body.contains(forbidden)) {
+                violations.add(relative + "#completeCase: plan外のlocking read・合成の自動処理 " + forbidden
+                        + " を使わない（lockは1つのplanで1回だけ取る）");
+            }
+        }
+        // 合成の自動処理（planを通らない）は業務経路から呼ばない（review P3-7。package-privateで、試験だけが使う）。
+        String gateRelative = "com/ses/service/lifecycle/ResignationGateChecker.java";
+        for (Map.Entry<String, String> entry : WriterGuardSources.mainSources().entrySet()) {
+            if (!entry.getKey().equals(gateRelative) && entry.getValue().contains("executeAutomaticGateActions(")) {
+                violations.add(entry.getKey() + ": 退社ゲートの合成の自動処理を業務経路から呼ばない"
+                        + "（案件完了のplanの取得後に applyAutomaticScopeActions を呼ぶ）");
+            }
+        }
+        if (WriterGuardSources.mainSource(gateRelative).contains("public void executeAutomaticGateActions(")) {
+            violations.add(gateRelative + ": executeAutomaticGateActions は package-private にする");
+        }
+        // planの組立て: 3（操作者S・連携ユーザーX）→ 4 → 5 → 7 → 8（本人の所属・上長解除の対象）→ 9 → 10 → 14。
+        String plannerRelative = "com/ses/service/lifecycle/LifecycleCompletionLockPlanner.java";
+        String planner = WriterGuardSources.mainSource(plannerRelative);
+        violations.addAll(order(plannerRelative, "plan", planner, "public LifecycleLockPlan plan(",
+                "LockKey.shared(Rank.SYS_USER, tenantId, operatorId)", "Rank.LIFECYCLE_CASE", "Rank.LIFECYCLE_TASK",
+                "addResignationTargets("));
+        violations.addAll(order(plannerRelative, "addResignationTargets", planner,
+                "private void addResignationTargets(", "Rank.ENGINEER", "selectByEngineerIdAndTenant(",
+                "error.lifecycle.selfResignationCompletion", "LockKey.exclusive(Rank.SYS_USER, tenantId, linkedUserId)",
+                "UserOrganization::getUserId", "UserOrganization::getManagerUserId", "Rank.ENGINEER_ACCOUNT_LINK",
+                "Rank.ENGINEER_SALES", "selectUnrevokedForEngineer(", "Rank.EXTERNAL_ACCOUNT_REFERENCE"));
+        assertEquals(List.of(), violations, "退社完了のlock順（計画 §3.4・§4.2、G4r review P3-1、W3-16a review P3-1・P2-1）");
+    }
+
+    @Test
+    void 要員行をX_lockする業務writerは外部キー参照先の利用者行と組織行を先に共有lockする() {
+        // W3-16a後半 review P3-1: 要員行（rank 7）のX lockの後にinsert・更新の外部キー検査が組織行（rank 6）へS lockを付けると、
+        // 組織統合・所属writer（6 X → 7 X）と循環し得る。参照先の組織行を要員行より先に共有lockする。
+        // W3-16b review P3-1: 休暇申請の created_by・applicant_id は申請者本人の利用者行（rank 3）を参照する。後から付く
+        // S lockは退社完了（3 X{連携ユーザー} → 7 X）と循環し得るため、本人の利用者行を最初に共有lockする（3 → 6 → 7）。
+        List<String> violations = new ArrayList<>();
+        String relative = "com/ses/service/impl/LeaveServiceImpl.java";
+        String leave = WriterGuardSources.mainSource(relative);
+        violations.addAll(order(relative, "apply", leave, "public LeaveApplicationResult apply(",
+                "actorShareLock.lockActive(applicantUserId, null)",
+                "organizationShareLock.lockReferenced(leave.getOrganizationId())", "assertNoOverlap(engineerId, leave)",
+                "leaveRequestMapper.insert(leave)", "approvalEngineService.request("));
+        violations.addAll(order(relative, "assertNoOverlap", leave, "private void assertNoOverlap(",
+                "engineerMapper.selectByIdForUpdate(engineerId)"));
+        String shareLock = WriterGuardSources.mainSource("com/ses/service/security/epoch/OrganizationShareLock.java");
+        violations.addAll(order("OrganizationShareLock", "lockReferenced", shareLock, "public void lockReferenced(",
+                "sharedLockSupport.supported()"));
+        assertEquals(List.of(), violations, "要員writerの組織行の先行lock（計画 §3.5 規則1）");
+    }
+
+    @Test
     void 組織serviceは公開のupdateById_overrideを持たない() {
         // 計画 §11 F-8: transaction・親子履歴・epochの増分なしに parent_id・status を書ける公開入口を残さない。
         // 継承した updateById の呼出しは「継承書込みはfence済みのoverrideだけを呼ぶ」testが検出する。
@@ -500,6 +575,13 @@ class ScopeSourceWriterFenceTest {
         String previous = source.substring(start, end);
         return TYPE_KEYWORDS.contains(previous)
                 || (!previous.isEmpty() && Character.isUpperCase(previous.charAt(0)));
+    }
+
+    /** {@code marker} から始まるメソッド本体（対応する波括弧まで）。見つからなければ空文字。 */
+    private static String methodBody(String source, String marker) {
+        int at = source.indexOf(marker);
+        int open = at < 0 ? -1 : source.indexOf('{', at);
+        return open < 0 ? "" : WriterGuardSources.callArguments(source, open + 1);
     }
 
     /**

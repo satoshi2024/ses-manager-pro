@@ -98,6 +98,36 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void 行lockの競合1213と1205は再試行可能な409で返しSQLを応答とログへ出さない() {
+        // W3-16b（計画 §9 RR-9）: deadlock（1213）・lock待ちtimeout（1205）は業務上の決定ではないため、500ではなく409にする。
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+        Logger logger = (Logger) LoggerFactory.getLogger(GlobalExceptionHandler.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        String secret = "UPDATE sys_user SET status = 0 WHERE id = 'lockSecret'";
+        try {
+            for (org.springframework.dao.PessimisticLockingFailureException failure : java.util.List.of(
+                    new org.springframework.dao.DeadlockLoserDataAccessException(secret,
+                            new java.sql.SQLException(secret, "40001", 1213)),
+                    new org.springframework.dao.CannotAcquireLockException(secret,
+                            new java.sql.SQLException(secret, "HY000", 1205)))) {
+                var response = handler.handleLockConflict(failure);
+
+                assertEquals(409, response.getStatusCode().value());
+                assertEquals(409, response.getBody().getCode());
+                assertFalse(response.getBody().getMessage().contains("lockSecret"));
+                assertEquals("LOCK_CONFLICT", CorrelationContext.get(CorrelationContext.ERROR_CODE));
+            }
+            assertFalse(appender.list.stream().anyMatch(event -> event.getFormattedMessage().contains("lockSecret")));
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+            CorrelationContext.clear();
+        }
+    }
+
+    @Test
     void 五百系BusinessExceptionはシステム分類を保持する() {
         GlobalExceptionHandler handler = new GlobalExceptionHandler();
         Logger logger = (Logger) LoggerFactory.getLogger(GlobalExceptionHandler.class);

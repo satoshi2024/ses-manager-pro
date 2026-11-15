@@ -29,8 +29,13 @@ import com.ses.service.pwa.PwaClientMutationLedgerService;
 import com.ses.service.pwa.PwaMutationCommand;
 import com.ses.service.pwa.PwaMutationTransactionService;
 import com.ses.service.pwa.PwaUserContextService;
+import com.ses.common.util.CorrelationContext;
+import com.ses.common.util.LogRedaction;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -56,6 +61,7 @@ import java.util.function.Function;
  * 要員PWAでoffline許可されたdraft/daily mutationだけの入口。
  * submit/approve/reject/close/cancel/withdrawや添付はこのcontrollerへ追加しない。
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/my/pwa")
 @RequiredArgsConstructor
@@ -194,8 +200,50 @@ public class PwaMutationApiController {
                                   String clientRequestId, String payloadHash, Integer baseVersion,
                                   Long clientCreatedAt, String userScope,
                                   Function<PwaUserContextService.CurrentContext, Object> action) {
-        return transactionService.execute(() -> runInTransaction(body, expectedScreen, clientRequestId,
-                payloadHash, baseVersion, clientCreatedAt, userScope, action));
+        try {
+            return transactionService.execute(() -> runInTransaction(body, expectedScreen, clientRequestId,
+                    payloadHash, baseVersion, clientCreatedAt, userScope, action));
+        } catch (RuntimeException e) {
+            if (isLockConflict(e)) {
+                // 行lockの競合（MySQL 1213 deadlock・1205 lock待ちtimeout）は一時的な失敗である。commandはledgerのclaimと
+                // 一緒にtransactionごとrollbackされているため、同じclientRequestIdで再送できる。オフラインqueue
+                // （pwa-queue.js）は 409 を人の判断が要る競合（CONFLICT）、5xx を一時的な失敗（queueに残して自動再送）として
+                // 扱う。共通の例外handlerは lockの競合を409にする（W3-16b）ため、このcontrollerだけは再送可能な503で返し、
+                // 既に端末に入っているqueueの挙動（5xxの自動再送）を変えない。
+                CorrelationContext.put(CorrelationContext.ERROR_CODE, "LOCK_CONFLICT");
+                CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "SYSTEM");
+                log.warn("PWA commandが行lockの競合で中断されたため再送可能な503で返します: screen={} exceptionClass={}",
+                        expectedScreen, LogRedaction.exceptionType(e));
+                throw BusinessException.of(503, "error.pwa.lockConflictRetry");
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * 行lockの競合（{@link PessimisticLockingFailureException}。1213・1205の翻訳先）か。rollbackの失敗で
+     * {@link TransactionSystemException} に覆われた場合は元の例外（{@code getApplicationException()}）も調べる。
+     */
+    static boolean isLockConflict(Throwable failure) {
+        java.util.ArrayDeque<Throwable> pending = new java.util.ArrayDeque<>();
+        Set<Throwable> visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        pending.add(failure);
+        while (!pending.isEmpty()) {
+            Throwable cause = pending.poll();
+            if (cause == null || !visited.add(cause)) {
+                continue;
+            }
+            if (cause instanceof PessimisticLockingFailureException) {
+                return true;
+            }
+            if (cause instanceof TransactionSystemException system && system.getApplicationException() != null) {
+                pending.add(system.getApplicationException());
+            }
+            if (cause.getCause() != null) {
+                pending.add(cause.getCause());
+            }
+        }
+        return false;
     }
 
     private ApiResult<Object> runInTransaction(PwaMutationCommandBody body, String expectedScreen,

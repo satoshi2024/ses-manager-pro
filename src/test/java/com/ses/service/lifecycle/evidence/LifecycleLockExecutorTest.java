@@ -140,6 +140,31 @@ class LifecycleLockExecutorTest {
     }
 
     @Test
+    void FOR_SHAREを解釈しないDBでは共有lockを同じ順のFOR_UPDATEで代えplanは変えない() {
+        // W3-16b: H2では退社完了のplan（操作者S）を同じ行・同じ順の排他lockで取る（計画 §2.5、ActorShareLockと同じ扱い）。
+        LifecycleLockExecutor h2 = new LifecycleLockExecutor(lockMapper, epochMapper,
+                com.ses.service.security.epoch.SharedLockSupport.fixed(false));
+        stubAllPresent();
+        LifecycleLockPlan plan = LifecycleLockPlan.from(List.of(
+                LockKey.shared(Rank.SYS_USER, "tenant-a", 5),
+                LockKey.exclusive(Rank.SYS_USER, "tenant-a", 3),
+                LockKey.exclusive(Rank.LIFECYCLE_CASE, "tenant-a", 20),
+                LockKey.global(Mode.SHARED)));
+
+        h2.acquire(plan);
+
+        InOrder order = inOrder(epochMapper, lockMapper);
+        order.verify(epochMapper).selectGlobalForUpdate();
+        order.verify(lockMapper).lockSysUser(3, "tenant-a", true);
+        order.verify(lockMapper).lockSysUser(5, "tenant-a", true);
+        order.verify(lockMapper).lockLifecycleCase(20, "tenant-a");
+        verify(epochMapper, never()).selectGlobalForShare();
+        verify(lockMapper, never()).lockSysUser(anyLong(), anyString(), eq(false));
+        org.junit.jupiter.api.Assertions.assertEquals(Mode.SHARED, plan.locks().get(2).mode(),
+                "planの値（操作者S）は変えない");
+    }
+
+    @Test
     void transaction外では拒否する() {
         tearDown();
         assertThrows(IllegalStateException.class, () -> executor.acquire(LifecycleLockPlan.from(List.of(

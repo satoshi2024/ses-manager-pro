@@ -13,6 +13,7 @@ import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.LegalEntityContextService;
 import com.ses.service.security.epoch.AuthorizationEpochAnchor;
 import com.ses.service.security.epoch.AuthorizationEpochFence;
+import com.ses.service.security.epoch.OrganizationShareLock;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -65,13 +66,16 @@ class EngineerServiceImplTest {
     private LegalEntityContextService legalEntityContextService;
     @Mock
     private AuthorizationEpochFence authorizationEpochFence;
+    @Mock
+    private OrganizationShareLock organizationShareLock;
 
     private EngineerServiceImpl service;
 
     @BeforeEach
     void setUp() {
         service = new EngineerServiceImpl(contractMapper, proposalMapper, engineerSalesService,
-                engineerAccountLinkService, sysUserMapper, tenantOwnershipResolver, authorizationEpochFence);
+                engineerAccountLinkService, sysUserMapper, tenantOwnershipResolver, authorizationEpochFence,
+                organizationShareLock);
         ReflectionTestUtils.setField(service, "baseMapper", engineerMapper);
         ReflectionTestUtils.setField(service, "scopeChangeInvalidator", scopeChangeInvalidator);
         ReflectionTestUtils.setField(service, "legalEntityContextService", legalEntityContextService);
@@ -201,8 +205,10 @@ class EngineerServiceImplTest {
 
         verify(legalEntityContextService).assertCurrent(10L);
         verify(scopeChangeInvalidator, times(1)).invalidate();
-        // E-2: 要員行のX lockを最初に取り、更新の後で engineer epoch を1回だけ進める
-        InOrder order = inOrder(engineerMapper, authorizationEpochFence);
+        // W3-16b: 新しい所属組織（rank 6）を要員行（rank 7）より先に共有lockし、外部キー検査で 7 → 6 の待ちを作らない。
+        // E-2: 要員行のX lockを取り、更新の後で engineer epoch を1回だけ進める
+        InOrder order = inOrder(organizationShareLock, engineerMapper, authorizationEpochFence);
+        order.verify(organizationShareLock).lockReferenced(200L);
         order.verify(engineerMapper).selectByIdForUpdateForTenant(1L, "default");
         order.verify(engineerMapper).updateByIdForTenant(any(Engineer.class), eq("default"), eq(0));
         order.verify(authorizationEpochFence).advance(ENGINEER_ANCHOR);
@@ -277,10 +283,30 @@ class EngineerServiceImplTest {
         Engineer moved = Engineer.builder().organizationId(200L).build();
         moved.setId(1L);
         assertTrue(service.updateById(moved));
-        InOrder order = inOrder(engineerMapper, authorizationEpochFence);
+        InOrder order = inOrder(organizationShareLock, engineerMapper, authorizationEpochFence);
+        order.verify(organizationShareLock).lockReferenced(200L);
         order.verify(engineerMapper).selectByIdForUpdateForTenant(1L, "default");
         order.verify(engineerMapper).updateById(moved);
         order.verify(authorizationEpochFence).advance(ENGINEER_ANCHOR);
+    }
+
+    @Test
+    void 所属組織を指定しない更新は組織行をlockせず要員行だけを取る() {
+        Engineer old = Engineer.builder().fullName("要員A").organizationId(100L).legalEntityId(10L)
+                .tenantId("default").build();
+        old.setId(1L);
+        when(engineerMapper.selectByIdForUpdateForTenant(1L, "default")).thenReturn(old);
+        when(engineerMapper.updateByIdForTenant(any(Engineer.class), eq("default"), eq(0))).thenReturn(1);
+        Engineer patch = Engineer.builder().fullName("要員A改").legalEntityId(10L).build();
+        patch.setId(1L);
+        patch.setVersion(0);
+
+        service.updateWithStatusGuard(patch);
+
+        // lockReferenced(null) は何もしない（OrganizationShareLock の契約）。呼出しは引数nullの1回だけ。
+        verify(organizationShareLock).lockReferenced(isNull());
+        verify(organizationShareLock, never()).lockReferenced(eq(100L));
+        verify(authorizationEpochFence, never()).advance(any());
     }
 
     @Test

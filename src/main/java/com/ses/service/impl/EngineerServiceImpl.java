@@ -22,6 +22,7 @@ import com.ses.service.security.epoch.ActorEpochAnchors;
 import com.ses.service.security.epoch.AuthorizationEpochAnchor;
 import com.ses.service.security.epoch.AuthorizationEpochFence;
 import com.ses.service.security.epoch.EngineerEpochAnchors;
+import com.ses.service.security.epoch.OrganizationShareLock;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -51,6 +52,8 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
     private final com.ses.mapper.SysUserMapper sysUserMapper;
     private final TenantOwnershipResolver tenantOwnershipResolver;
     private final AuthorizationEpochFence authorizationEpochFence;
+    /** 所属組織を書く更新の外部キー参照先（rank 6）を要員行より先に共有lockする（NF01 W3-16b）。 */
+    private final OrganizationShareLock organizationShareLock;
 
     /** 要員アカウント無効化時のsession失効。未配線のテストsliceでは何もしない。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -181,7 +184,10 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
-        // E-2: anchor（rank 7）を最初のDB文でX lockし、旧値はlock後の行で比べる（計画 §4.2）。
+        // 計画 §3.5 規則1（W3-16a後半 review P3-1）: 所属組織を書く更新は、外部キー検査が参照先の組織行（rank 6）に付ける
+        // 共有lockを、要員行（rank 7）のX lockより前に取る（7 X → 6 S と組織統合・所属writerの 6 X → 7 X の循環を作らない）。
+        organizationShareLock.lockReferenced(engineer.getOrganizationId());
+        // E-2: anchor（rank 7）をX lockし、旧値はlock後の行で比べる（計画 §4.2）。
         Engineer old = baseMapper.selectByIdForUpdateForTenant(engineer.getId(), tenantId);
         if (old == null) {
             throw BusinessException.of(404, "error.scope.notFound");
@@ -253,7 +259,9 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
             throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
-        // E-2: anchor（rank 7）を最初のDB文でX lockし、旧値はlock後の行で比べる（計画 §4.2）。
+        // 計画 §3.5 規則1（W3-16a後半 review P3-1）: 外部キー検査の参照先の組織行（rank 6）を要員行（rank 7）より先に共有lockする。
+        organizationShareLock.lockReferenced(entity.getOrganizationId());
+        // E-2: anchor（rank 7）をX lockし、旧値はlock後の行で比べる（計画 §4.2）。
         Engineer current = baseMapper.selectByIdForUpdateForTenant(entity.getId(), tenantId);
         if (current == null || current.getLegalEntityId() == null) {
             throw BusinessException.of(404, "error.scope.notFound");

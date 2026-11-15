@@ -14,6 +14,8 @@ import com.ses.service.AssetOffboardingService;
 import com.ses.service.OrganizationService;
 import com.ses.service.portal.PortalSessionService;
 import com.ses.service.security.PersistentSessionService;
+import com.ses.service.security.epoch.ActorEpochAnchors;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -44,6 +46,8 @@ public class ResignationGateChecker {
     private final LifecycleTaskMapper lifecycleTaskMapper;
     private final AssetOffboardingService assetOffboardingService;
     private final EngineerAccountLinkMapper engineerAccountLinkMapper;
+    /** 連携ユーザー停止時のactor epoch（NF01 W3-16b、計画 §2.2・§4.2）。 */
+    private final AuthorizationEpochFence authorizationEpochFence;
 
     /**
      * 退社ゲートの全項目を検証する。
@@ -287,20 +291,44 @@ public class ResignationGateChecker {
     }
 
     /**
-     * 案件完了確定時に退社ゲートの自動実行処理（アカウント無効化・セッション強制失効・組織閉鎖・担当営業解除・ポータル連携解除）を行う。
+     * 案件完了確定時に退社ゲートの自動実行処理（アカウント無効化・組織閉鎖・ポータル連携解除・担当営業解除・セッション強制失効）を
+     * 行う。{@link #applyAutomaticScopeActions} と {@link #revokeSessionsAfterScopeActions} をこの順に呼ぶ合成で、案件完了
+     * （{@code LifecycleCaseServiceImpl.completeCase}）は間に外部アカウントの失効要求登録（rank 14）を挟むため個別に呼ぶ。
      * Fail-Closed: 例外発生時は例外を送出し、呼び出し元のトランザクションをロールバックする。
+     *
+     * <p>業務経路からは呼ばない（package-private。W3-16b review P3-7）。この合成は案件完了のlock planを通らないため、
+     * 業務経路が直接呼ぶと連携ユーザー（rank 3）を自分でlockし、要員行を保持した呼出元では旧来の 7 → 3 の形に戻る。
+     * 退社ゲートの自動処理は必ず案件完了のplanの取得後に {@link #applyAutomaticScopeActions} を呼ぶ。同じpackageの試験だけが
+     * 自動処理単体の振舞い（列限定更新・fail-closed）を確かめるために使う。</p>
+     */
+    void executeAutomaticGateActions(LifecycleCase lcCase, Engineer engineer) {
+        revokeSessionsAfterScopeActions(applyAutomaticScopeActions(lcCase, engineer));
+    }
+
+    /**
+     * 退社ゲートの自動処理のうち、scope述語の読む行を書くもの（rank 3 → 8 → 9 → 10）を行う。session失効（葉）は
+     * {@link #revokeSessionsAfterScopeActions} が行う。
      *
      * <p>NF01 batch 0: 連携ユーザーは案件tenant限定でlocking readし、停止は status 列だけを更新する
      * （非ロック読取した全列を updateById で書き戻すと、並行して確定した他列の更新を古い値で上書きする）。
      * 担当営業の解除は更新日時の記録とDataScope invalidationを持つ
      * {@link EngineerSalesService#releaseAllByEngineerId(Long, LocalDate)} を通し、解除日には退社基準日を残す。</p>
      *
+     * <p>NF01 W3-16b（細粒度epoch計画 §3.4・§4.2）: 案件完了では、ここで書く行（連携ユーザー・要員・所属・紐付け・担当営業）を
+     * 呼出元が1つのlock planで先に取得済みであり、以下のlocking readと書込みは取得済みの行を取り直すだけで新しい待ちを作らない。
+     * 書く順は rank の順（3 停止 → 8 所属の終了・上長解除 → 9 紐付け解除 → 10 担当営業の解除）。連携ユーザーの停止は
+     * status列が変わった時だけactor epochを1進める（所属の終了による増分とはfenceが重複を除く）。要員のengineer epochは
+     * 紐付け解除・担当営業の解除・所属の終了がそれぞれ進め、同じtransactionでは1回になる。</p>
+     *
      * <p>NF01 N1-4（決定 B-NF01-8・Q-10）: ポータルsessionを失効させるのは、管理者が登録した紐付け
      * （V188 t_portal_user_engineer_link）があり、紐付け・ポータル組織とも案件tenantに属するポータルユーザーだけ。
      * emailでは照合しない（同じemailの無関係なユーザー・他tenantのユーザーを処理しない）。紐付けの無いポータルユーザーは
-     * {@link #evaluate} が「要確認」として列挙する。紐付けにtenant不整合があれば、どの撤権より先に409で止める。</p>
+     * {@link #evaluate} が「要確認」として列挙する。紐付けにtenant不整合があれば、どの撤権より先に409で止める。
+     * 紐付けは要員行（rank 7）のX保持下で安定するため、読取だけでlockしない（rank 12、§3.4）。</p>
+     *
+     * @return session失効の対象（{@link #revokeSessionsAfterScopeActions} へ渡す）
      */
-    public void executeAutomaticGateActions(LifecycleCase lcCase, Engineer engineer) {
+    public AutomaticActionResult applyAutomaticScopeActions(LifecycleCase lcCase, Engineer engineer) {
         Long engineerId = engineer.getId();
         LocalDate anchorDate = lcCase.getAnchorDate() != null ? lcCase.getAnchorDate() : LocalDate.now();
         String tenantId = lcCase.getTenantId() == null || lcCase.getTenantId().isBlank()
@@ -310,7 +338,8 @@ public class ResignationGateChecker {
         }
         List<PortalUserEngineerLink> portalLinks = linkedPortalUsersFailClosed(engineerId, tenantId);
 
-        // 1. ユーザーアカウント無効化 & 組織所属閉鎖 & セッション失効 & ポータル連携解除
+        // 1. ユーザーアカウント無効化（rank 3）& 組織所属閉鎖（rank 8）& ポータル連携解除（rank 9）
+        Long revokedUserId = null;
         EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerIdAndTenant(engineerId, lcCase.getTenantId());
         if (link != null && link.getSysUserId() != null) {
             Long userId = link.getSysUserId();
@@ -324,31 +353,62 @@ public class ResignationGateChecker {
                 if (updated != 1) {
                     throw BusinessException.of(409, "error.common.optimisticLock");
                 }
+                // statusは主体の有効性（述語(a)）を変えるため、lockした行のtenantでactor epochを進める（計画 §2.2）。
+                authorizationEpochFence.advanceIfChanged(ActorEpochAnchors.of(user), user.getStatus(), 0);
                 log.info("Deactivated user {} due to resignation case completion", userId);
             }
 
             int closedCount = organizationService.closeAssignmentsForUser(userId, anchorDate);
             log.info("Closed {} organization assignments for user {}", closedCount, userId);
 
-            // 内部セッション強制失効 (Fail-Closed)
-            persistentSessionService.revokeAllForUser(userId, "退社案件完了によるセッション強制失効");
-            log.info("Revoked all persistent sessions for user {}", userId);
-
             // ポータル連携解除
             engineerAccountLinkService.unlinkByEngineerId(engineerId);
             log.info("Unlinked engineer account link for engineer {}", engineerId);
+            revokedUserId = userId;
         }
 
-        // 紐付け済みポータルユーザーのセッション失効 (Fail-Closed)。内部アカウント連携の有無とは独立に行う。
-        for (PortalUserEngineerLink portalLink : portalLinks) {
-            portalSessionService.revokeAllForUser(portalLink.getPortalUserId(), "退社案件完了によるポータルセッション強制失効");
-            log.info("退社案件完了により紐付け済みポータルユーザー {} のセッションを失効しました", portalLink.getPortalUserId());
-        }
-
-        // 2. 主担当営業および割当の解除。解除日は組織所属の終了日と同じ退社基準日とし、
+        // 2. 主担当営業および割当の解除（rank 10）。解除日は組織所属の終了日と同じ退社基準日とし、
         //    更新日時の記録とDataScope invalidationを持つservice経由で行う。
         engineerSalesService.releaseAllByEngineerId(engineerId, anchorDate);
         log.info("退社案件完了により要員 {} の現任担当営業割当を基準日 {} で解除しました", engineerId, anchorDate);
+
+        List<Long> portalUserIds = new ArrayList<>();
+        for (PortalUserEngineerLink portalLink : portalLinks) {
+            portalUserIds.add(portalLink.getPortalUserId());
+        }
+        return new AutomaticActionResult(revokedUserId, List.copyOf(portalUserIds));
+    }
+
+    /**
+     * 退社ゲートの自動処理のうちsession失効（葉）を行う。rank行の書込み（{@link #applyAutomaticScopeActions}、案件完了では
+     * 外部アカウントの失効要求登録も）の後に呼ぶ（計画 §3.5 規則5: 葉の後にrank行を取らない）。Fail-Closed。
+     */
+    public void revokeSessionsAfterScopeActions(AutomaticActionResult actions) {
+        if (actions == null) {
+            return;
+        }
+        // 内部セッション強制失効 (Fail-Closed)
+        if (actions.linkedUserId() != null) {
+            persistentSessionService.revokeAllForUser(actions.linkedUserId(), "退社案件完了によるセッション強制失効");
+            log.info("Revoked all persistent sessions for user {}", actions.linkedUserId());
+        }
+        // 紐付け済みポータルユーザーのセッション失効 (Fail-Closed)。内部アカウント連携の有無とは独立に行う。
+        for (Long portalUserId : actions.portalUserIds()) {
+            portalSessionService.revokeAllForUser(portalUserId, "退社案件完了によるポータルセッション強制失効");
+            log.info("退社案件完了により紐付け済みポータルユーザー {} のセッションを失効しました", portalUserId);
+        }
+    }
+
+    /**
+     * 自動処理の結果のうち、session失効の対象（連携ユーザーID、紐付け済みポータルユーザーID）。
+     *
+     * @param linkedUserId  停止・所属終了・紐付け解除を行った連携ユーザー（連携なしは {@code null}）
+     * @param portalUserIds 紐付け済みポータルユーザー
+     */
+    public record AutomaticActionResult(Long linkedUserId, List<Long> portalUserIds) {
+        public AutomaticActionResult {
+            portalUserIds = portalUserIds == null ? List.of() : List.copyOf(portalUserIds);
+        }
     }
 
     /**
