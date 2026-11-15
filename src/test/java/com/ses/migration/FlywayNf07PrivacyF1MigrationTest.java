@@ -264,9 +264,13 @@ class FlywayNf07PrivacyF1MigrationTest {
     private static void assertPrivacySeed(Statement st, String tenant, int otherGroups) throws SQLException {
         assertEquals(1L, scalar(st, "SELECT COUNT(*) FROM m_permission_group WHERE tenant_id='" + tenant
                 + "' AND group_key='privacy-admin'"), tenant + " の privacy-admin");
+        // V191 が入れる許可行（'*'・'privacy.*'）だけを見る。後続の migration は privacy-admin に他の明示許可を足し得る
+        // （V193 の import.metadata.manage）ため、最新版まで上げた後の比較は FlywayProdFreshInstallMySqlTest と同じく
+        // key を限定する。
         assertEquals(List.of("*", "privacy.*"), rows(st, "SELECT a.action_key FROM t_permission_group_action a "
                 + "JOIN m_permission_group g ON g.id = a.group_id WHERE g.tenant_id='" + tenant
-                + "' AND g.group_key='privacy-admin' AND a.deny_flag=0 AND a.deleted_flag=0 ORDER BY a.action_key"));
+                + "' AND g.group_key='privacy-admin' AND a.deny_flag=0 AND a.deleted_flag=0 "
+                + "AND a.action_key IN ('*', 'privacy.*') ORDER BY a.action_key"));
         assertEquals(0L, scalar(st, "SELECT COUNT(*) FROM t_permission_group_action a JOIN m_permission_group g "
                 + "ON g.id = a.group_id WHERE g.tenant_id='" + tenant + "' AND g.group_key='privacy-admin' "
                 + "AND a.deny_flag=1"), "privacy-admin は deny を持たない");

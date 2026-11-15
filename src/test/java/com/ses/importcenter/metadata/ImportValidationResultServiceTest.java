@@ -136,6 +136,66 @@ class ImportValidationResultServiceTest {
         assertEquals(opens, fixture.sourceOpens.get(), "監査できない閲覧ではsourceを開かない");
     }
 
+    /** W3-12（W3-05 review P2-1）: 応答とCSVの行参照は鍵付きHMACで、保存済みの無鍵SHA-256を出さない。 */
+    @Test
+    void previewAndErrorExportReturnTheKeyedRowReferenceInsteadOfTheStoredSha256() throws Exception {
+        long jobId = validated(CSV);
+        ImportValidationResultService service = fixture.resultService(System::nanoTime);
+
+        ImportPreviewPage page = service.preview(jobId, 1, 50, null);
+        ImportValidationResultService.ErrorExport export = service.prepareErrorExport(jobId);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        service.writeErrorExport(export, bytes);
+        String csv = bytes.toString(StandardCharsets.UTF_8);
+
+        ImportSourceRowReference.Scope expected = fixture.rowReference.forJob(ImportA1aH2Fixture.TENANT, jobId);
+        for (ImportPreviewRow row : page.rows()) {
+            String stored = fixture.storedRowHash(jobId, row.sourceRowNumber());
+            assertEquals(expected.reference(stored), row.sourceRowHash(), "行 " + row.sourceRowNumber());
+            assertFalse(row.sourceRowHash().equalsIgnoreCase(stored), "無鍵SHA-256を返さない");
+            assertFalse(csv.toLowerCase().contains(stored.toLowerCase()), "CSVへ無鍵SHA-256を出さない");
+        }
+        String rejectedReference = page.rows().get(1).sourceRowHash();
+        assertTrue(csv.contains("2," + rejectedReference + ",DUPLICATE_SOURCE_KEY\r\n"),
+                "previewとerror exportの行参照は同じjobで一致する");
+        String otherKey = java.util.Base64.getEncoder().encodeToString(
+                "another-nf06-row-reference-key-0002-xx".getBytes(StandardCharsets.US_ASCII));
+        ImportPreviewPage rotated = fixture.resultService(System::nanoTime,
+                new ImportSourceRowReference(otherKey, false)).preview(jobId, 1, 50, null);
+        assertFalse(rotated.rows().get(0).sourceRowHash().equals(page.rows().get(0).sourceRowHash()),
+                "鍵を差し替えると行参照も変わる");
+    }
+
+    @Test
+    void previewAndExportAreRefusedBeforeAuditAndSourceReadWhenTheRowReferenceKeyIsUnavailable() {
+        long jobId = validated(CSV);
+        ImportValidationResultService service = fixture.resultService(System::nanoTime,
+                new ImportSourceRowReference(null, false));
+        long opens = fixture.sourceOpens.get();
+
+        BusinessException preview = assertThrows(BusinessException.class, () -> service.preview(jobId, 1, 10, null));
+        BusinessException export = assertThrows(BusinessException.class, () -> service.prepareErrorExport(jobId));
+
+        assertEquals(503, preview.getCode());
+        assertEquals("error.import.rowReferenceUnavailable", preview.getMessageKey());
+        assertEquals(503, export.getCode());
+        assertEquals("error.import.rowReferenceUnavailable", export.getMessageKey());
+        assertEquals(opens, fixture.sourceOpens.get(), "鍵が無ければsourceを開かない");
+        verify(fixture.audit, never()).recordRequired(any(), anyString(), anyString(), anyInt(), anyString(), anyBoolean());
+    }
+
+    /** W3-12（W3-05 review P3-3）: 巨大なpage番号でもOFFSETが桁あふれせず、空のpageを返す。 */
+    @Test
+    void previewPageNumberIsCappedSoTheOffsetCannotOverflow() {
+        long jobId = validated(CSV);
+
+        ImportPreviewPage page = fixture.resultService(System::nanoTime).preview(jobId, Long.MAX_VALUE, 200, null);
+
+        assertEquals(ImportPaging.MAX_PAGE, page.page());
+        assertEquals(3, page.total());
+        assertEquals(List.of(), page.rows());
+    }
+
     @Test
     void previewDetectsASourceThatNoLongerMatchesTheStoredRowHash() {
         long jobId = validated(CSV);

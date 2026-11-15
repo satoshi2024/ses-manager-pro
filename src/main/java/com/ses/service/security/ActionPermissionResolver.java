@@ -435,6 +435,11 @@ public final class ActionPermissionResolver {
         if (!("GET".equals(method) || "HEAD".equals(method))) {
             return null;
         }
+        // NF-06取込センター画面（W3-12）。APIと同じ明示action（import.metadata.manage）へ解決する。
+        // 画面は1枚だけで、配下の未知pathは解決しない（Springの404になる前にaction判定を素通しさせない）。
+        if ("/import-center".equals(uri)) {
+            return "import.metadata.manage";
+        }
         String resource = switch (uri) {
             case "/dashboard" -> "dashboard";
             default -> pageResource(uri);

@@ -4,7 +4,7 @@
 - 位置づけ: **権限ではなく公開可否のスイッチ**。OFFの機能は管理者を含む全ロール・未認証利用者から見えなくなる
 - 実装: `com.ses.config.feature`（`Feature` / `FeatureSwitchProperties` / `FeatureSwitches` / `FeatureSwitchFilter`）
 - 対象外: NF-05・NF-08（既存の本番向けハードゲートで制御）、NF-09。NF-07は保持・保全（`NF07_RETENTION`）だけを登録し、DSAR（`privacy.dsar.enabled`）は入口を追加するA2aで登録する
-- NF-06はスイッチ（公開可否）に加えて本番admission port（Q-5、`.kiro/specs/data-migration-import-center/a1a-ingress-operations.md` §10）でも制御する。apply系はスイッチと無関係に閉じている（同 §1）
+- NF-06はスイッチ（公開可否）に加えて本番admission port（Q-5、`.kiro/specs/data-migration-import-center/a1a-ingress-operations.md` §10）でも制御する。apply系はスイッチと無関係に閉じている（同 §1）。ONの前提（行参照鍵・`import.metadata.manage` の付与・単一法人・LB idle timeout）は4.8
 
 ## 1. スイッチ一覧
 
@@ -16,7 +16,7 @@
 | NF-03 資格・学習・スキルギャップ | `app.features.nf03.enabled` | `FEATURE_NF03_ENABLED` | `false` | `true` |
 | └ NF-03の子: 資格番号（retention class `CERTIFICATION_PII`）の入力 | `app.features.nf03-certification-pii.enabled` | `FEATURE_NF03_CERTIFICATION_PII_ENABLED` | `false` | `true` |
 | NF-04 要員PWAシェル（Service Worker・manifest） | `app.features.nf04.enabled` | `FEATURE_NF04_ENABLED` | `false` | `true` |
-| NF-06 データ移行・取込センター（API。画面はW3-12） | `app.features.nf06.enabled` | `FEATURE_NF06_ENABLED` | `false` | `true` |
+| NF-06 データ移行・取込センター（画面 `/import-center`・API。apply系は含まない）。**ONの条件: admission承認設定・行参照鍵・`import.metadata.manage` の付与（V193）・単一法人**（prodでは承認設定と鍵を起動時に強制。4.8） | `app.features.nf06.enabled` | `FEATURE_NF06_ENABLED` | `false` | `true` |
 | NF-07 保持・保全（policy説明。catalog・holdは後続batchで追加）。**ONの条件: 決定ID束縛（D-01・D-09）の完了と、privacy-admin の有効な管理者2名以上**（prodでは起動時に強制。決定の署名日前・失効の間は起動を止めずOFFとして扱う。4.7） | `privacy.retention.enabled` | `PRIVACY_RETENTION_ENABLED` | `false` | `true` |
 | NF-10 定期管理レポート | `app.features.nf10.enabled` | `FEATURE_NF10_ENABLED` | `false` | `true` |
 
@@ -55,7 +55,7 @@
 | NF-03 | `/certification-learning-skill-gap/**`、`/my/certification-learning-skill-gap/**`、`/api/certification-learning-gap/**`、`/api/my/certification-learning-gap/**` | `CertificationExpiryNotificationScheduler#dispatchToday`（日次） | menu `certification-learning-skill-gap`・`myCertificationLearningGap` |
 | NF-03の子 `nf03-certification-pii` | **URLは遮断しない**。資格申請（`POST /api/my/certification-learning-gap/certifications`）・再申請（`POST .../certifications/{id}/resubmit`）で資格番号が空欄でない要求を `EngineerCertificationServiceImpl` が400（message key `certification.record.numberEntryDisabled`）で拒否する（書込み・lock・暗号化の前。本人scope確認の読取りと再申請のversion照合は先に行うため、version不一致は409が先に返る） | なし | 本人画面（`/my/certification-learning-skill-gap`）の申請モーダルの資格番号入力欄、再申請ダイアログの資格番号入力（確認だけのダイアログになる） |
 | NF-04 | `/service-worker.js`、`/manifest.webmanifest` のみ | なし（下記4.4参照） | manifestリンク、Service Worker登録（`common.js` が既存登録とshell cacheを解除） |
-| NF-06 | `/api/import-center/**`（upload・job詳細・検証・preview・error export・source/mapping管理） | なし（`ImportStageReconcileScheduler` は照合台帳に残った取込原本の回収のためOFFでも止めない） | なし（画面・menuはW3-12で追加する。追加時に画面prefixとmenu keyを本表と `Feature.NF06` へ登録する） |
+| NF-06 | `/import-center/**`（取込センター画面、W3-12）、`/api/import-center/**`（upload・job詳細・検証・preview・error export・source/mapping管理） | なし（`ImportStageReconcileScheduler` は照合台帳に残った取込原本の回収のためOFFでも止めない） | menu `import-center`（V193。管理者だけに付与） |
 | NF-07 保持・保全 | `/api/privacy/policies/**`（W3-14）。OFF中は filter と service 層の `PrivacyAccessGuard` が同じ本文の404にする。遮断表に無い `/api/privacy/<x>` には handler が無く guard も通らないため、privacy-admin 以外の管理者は403（`MenuPermissionFilter`）、privacy-admin は Spring の404になる（管理者以外のroleは `SecurityConfig` の403）。ONでも `privacy.*` の action 権限（privacy-admin）が別に要る | なし | menu `privacy-retention`（W3-14では sidebar 導線なし） |
 | NF-10 | `/management-reports/**`、`/api/management-reports/**` | `ManagementReportScheduler#dispatchDue`（毎分。claim・生成・配布を開始しない） | menu `management-report` |
 
@@ -66,7 +66,7 @@
 ### 3.1 初回デプロイ
 
 1. 全スイッチOFF（環境変数未設定）のまま、全停止デプロイと専用Flyway jobを実施する。機能スイッチはFlywayに影響しない（OFFでもNFのテーブル・seedは作成される）。
-2. 起動ログで `[機能スイッチ] 起動時の状態: NF01=OFF, NF02=OFF, NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF07_RETENTION=OFF, NF10=OFF` を確認する（子スイッチは実効値を表示する）。
+2. 起動ログで `[機能スイッチ] 起動時の状態: NF01=OFF, NF02=OFF, NF02_CUSTOMER_PORTAL=OFF, NF03=OFF, NF03_CERTIFICATION_PII=OFF, NF04=OFF, NF06=OFF, NF07_RETENTION=OFF, NF10=OFF` を確認する（子スイッチは実効値を表示する。並びと値は `FeatureSwitchDefaultsTest` が固定する）。
 3. 各NFの代表URL（例: `/api/lifecycle/cases`）が404になり、サイドバーに表示されないことを確認する。
 
 ### 3.2 1機能ずつONにする
@@ -280,6 +280,46 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 - **失効後**: 入口は失効日（JST）から既にOFFと同じ404で、process はそのまま動く。上の1〜3で再承認して再起動すれば開く。再承認を待たない場合は `PRIVACY_RETENTION_ENABLED` を外して再起動する（WARNとmetricの `EXPIRED` を止める）。
 - 問題時は `PRIVACY_RETENTION_ENABLED` を外して再起動する（OFFでは決定ID束縛と privacy-admin の検査を行わない）。privacy-admin の割当は残る（OFF中は入口が404のため使われない）。
 
+### 4.8 NF-06（W3-12: 取込センター画面とONの前提）
+
+正本: `.kiro/specs/data-migration-import-center/a1a-ingress-operations.md`（§10 admission、§11 検証・preview・error export、§13 画面）。初回リリースはOFFで配備する。ONにしても apply 系（apply・restart・rollback・compensation）は含まない（B-NF06-3）。
+
+#### 4.8.1 OFFのときの応答
+
+- 画面 `/import-center` とAPI `/api/import-center/**` は管理者を含め404になり、menu `import-center` はサイドバーから消える。
+- 照合台帳の回収batch（`ImportStageReconcileScheduler`）はOFFでも止めない（2章）。
+- apply 系の入口はスイッチと無関係に閉じている（route不在・`ActionPermissionResolver` のnull解決・admission port）。
+
+#### 4.8.2 ONにする前の確認（全て満たすこと）
+
+| # | 項目 | 確認方法 | 満たさない場合 |
+|---|---|---|---|
+| 1 | admission 承認設定（`IMPORT_ADMISSION_*` の6項目）が署名済み Data Owner 決定書の転記で、承認 digest が一致する | a1a §10 の正規形から二者で digest を再計算して照合する | 構造的な不備は起動失敗（`ImportAdmissionStartupValidator`）。署名日前・失効だけなら起動するが upload は403 |
+| 2 | 行参照の HMAC 鍵 `IMPORT_ROW_REFERENCE_HMAC_KEY` を secret store から注入する（Base64、復号後32 byte以上。例: `openssl rand -base64 32`）。`application.yml` の開発用既定値と `application-test.yml` のtest用の値は使えない（復号後のbyte列で比べるため、`=` の省略やURL-safe表記にしても拒否される）。全instanceで同じ値にする | 起動ログ `[取込] NF-06行参照鍵を確認しました: nf06Enabled=true` | 起動失敗（`ImportRowReferenceKeyStartupValidator`。messageは `state=MISSING` / `INVALID` / `DEVELOPMENT_KEY_IN_PRODUCTION` だけで、鍵の値は出さない） |
+| 3 | `import.metadata.manage` の明示許可（V193）: 管理者専用group `role-admin`・`privacy-admin` に許可行があり、他の全groupに拒否行がある | `deploy-runbook.md` §3.4 の V193 照会 | 管理者でも取込の全操作が403（service層は全体baseline `'*'` を許可根拠に数えない。W3-05 review P2-3(a)） |
+| 4 | 取込を行う管理者が `role-admin` または `privacy-admin` に所属し、`*`・`import.*`・`import.metadata.manage` の拒否行を持つgroupへ所属していない | `SELECT g.group_key FROM t_user_permission_group u JOIN m_permission_group g ON g.id = u.group_id WHERE u.user_id = ? AND u.deleted_flag = 0;` | 403（拒否が許可より優先） |
+| 5 | **単一法人前提**: 論理削除されていない組織（`deleted_flag = 0`）が持つ法人IDが、ちょうど1種類である。判定は `LegalEntityContextService` と同じ条件で、組織の状態（status）と有効期間は見ない（無効・期間外の組織の法人IDも数える）。**新規導入では V60 の移行組織 LEGACY（法人ID NULL）しか無いため0件**で、ONの前に法人IDを持つ組織を登録する | `SELECT COUNT(DISTINCT legal_entity_id) FROM m_organization_unit WHERE legal_entity_id IS NOT NULL AND deleted_flag = 0;` が 1 | 0件でも2件以上でも、管理者の法人contextが決まらず取込の全操作が403（`LEGAL_ENTITY_CONTEXT_REQUIRED`） |
+| 6 | LB / reverse proxy の idle timeout が130秒以上である（検証は同期要求で、最長120秒＋αの間1 byteも返さない） | SREが LB 設定を確認する | 応答が504等で途切れる。画面は `GET /jobs/{id}` で状態の確認を続けるため結果は失われないが、利用者が「開く」で確認し直す場面が増える |
+| 7 | 透過再接続をしない（JDBC URL の `autoReconnect=true` 禁止、透過再接続proxy無し） | a1a §5、`ImportJdbcReconnectGuard` | `autoReconnect` は起動失敗。proxy はDBA/SREが確認する |
+| 8 | raw CSV（`IMPORT` 文書）の保持期間と、previewのマスク分類（外部キー・会社名・メールdomainを平文で表示）を Privacy が書面で受容している | 決定記録 | ―（運用判断。W3-05 review P3-8） |
+| 9 | 単一instance、または sticky session で運用する（照合台帳は instance local） | a1a §6 | 他instanceの台帳が次にlockを取るまで残る |
+
+- 単一法人前提の理由（W3-05 review P2-3(b)を本バッチでは前提の明記で扱う）: 管理者の法人contextは共通の `LegalEntityContextService`（書込み境界の全writerが使う）が `m_organization_unit` の全法人IDから一意に決める。同表の `tenant_id` は将来用の BIGINT 列で、現行は独立DB運用のため値を持たず、tenantで絞っても結果は変わらない。複数法人の企業で取込を使うには、管理者に法人を選ばせる設計変更（共通serviceの変更）が必要で、Owner判断とする。
+- 法人が2つ以上ある環境でONにしても、情報が漏れる方向には働かない（全操作が403で閉じる）。
+
+#### 4.8.3 ONにする手順（`FEATURE_NF06_ENABLED`）
+
+1. 4.8.2 の1〜9を確認する。
+2. `FEATURE_NF06_ENABLED=true`、`IMPORT_ROW_REFERENCE_HMAC_KEY`、`IMPORT_ADMISSION_*` を全instanceに同じ値で設定し、全停止で再起動する。
+3. 起動ログで `[機能スイッチ] 起動時の状態` の `NF06=ON`、`[取込] NF-06 admission承認設定を確認しました`、`[取込] NF-06行参照鍵を確認しました` を確認する。
+4. 管理者でログインし、サイドバーの「取込センター」を開く。「取込元・mapping」タブで承認済み source code の取込元と mapping 版を登録し、合成CSVで upload → 検証 → preview → エラーCSV を確認する。
+5. 管理者以外のroleではmenuが出ず、`/import-center` が403になることを確認する。
+
+#### 4.8.4 OFF・鍵の差替え
+
+- 問題時は `FEATURE_NF06_ENABLED` を外して再起動する（OFFでは admission と行参照鍵の検査で起動を止めない）。
+- 行参照の鍵を差し替えると、previewとエラーCSVの行参照は全て変わり、以前に出力したエラーCSVとは照合できなくなる。保存済みの検証行（内部の SHA-256）は変わらないため、再検証は不要。
+
 ## 5. 新しい入口を追加するとき
 
 1. `Feature` の該当NFへ画面prefix・API prefix・静的path・menu keyを追加する。親機能の一部だけを後から公開する場合は、親を第1引数に取る子スイッチを `Feature` に追加し、その入口を親の遮断表から子へ移す（同じpathを親子の両方に登録しない）。`FeatureSwitchProperties` にfieldと `toggle(Feature)` のcaseを、3つのymlに設定キーを追加し、`FeatureSwitchRouteCoverageTest` の `CHILD_FEATURE_CONTROLLERS` に一致してよいcontrollerを登録する。
@@ -310,3 +350,7 @@ printf 'nf07-privacy-decision-binding-v1\ntenant-id=tenant-a\ncapabilities=reten
 | `PrivacyDecisionWindowMonitorTest` | Docker不要 | NF-07の有効期間監視: 固定・可変Clockで、有効・EXPIRING・失効・署名日前・不完全の状態とmetric・日付ごとのWARN、実行中に失効日（JST 0:00）を迎えると `FeatureSwitches`・`FeatureSwitchFilter`・`PrivacyAccessGuard` がOFFと同じ404になること、署名日に自動で開くこと、実行時条件の例外はOFF |
 | `FeatureSwitchRuntimeConditionTest` | Docker不要 | 機能スイッチの実行時条件: 設定ONでも条件を満たさない間は `isEnabled`・`blockingFeature`・`disabledKeys`・`visibleMenuKeys` がOFFと同じ、起動ログの `NF07_RETENTION=OFF` と理由のWARN、条件の無い機能・`new` は従来どおり |
 | `PrivacyProductionConfigurationTest` | Docker不要 | prod の policy source はスイッチONかつ決定ID束縛の有効期間内だけ読む（OFFなら束縛を見ない、判定部品が無い・例外なら読まない） |
+| `ImportCenterPageControllerTest` | Docker不要（H2） | NF-06 ONの実context。管理者は取込センター画面とサイドバー導線（menu `import-center`、V193相当のH2 seed）を表示でき、管理者以外のroleは403、未認証はlogin誘導 |
+| `ImportCenterPageFeatureOffTest` | Docker不要（H2） | NF-06 OFFの実context。管理者でも画面404（統一エラーページ）・APIは404 JSON |
+| `ImportSourceRowReferenceTest` | Docker不要 | 行参照のHMAC（domain・tenant・job・保存hash）、鍵の形式検査とprodでの開発用鍵の拒否、NF-06 ONのprod起動検査（値をmessageへ出さない） |
+| `FlywayNf06ImportCenterMenuMigrationTest` | Docker必須（mysql shard 3） | V193 を実MySQLで適用し、menu・明示許可・拒否の最終状態と既存行の補正を確認する |

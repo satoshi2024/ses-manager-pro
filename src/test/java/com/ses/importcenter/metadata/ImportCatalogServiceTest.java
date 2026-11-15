@@ -58,6 +58,22 @@ class ImportCatalogServiceTest {
         assertEquals(1, page.items().size());
     }
 
+    /** W3-12（W3-05 review P3-3）: 巨大なpage番号はOFFSETが桁あふれしないよう上限へ丸め、空のpageを返す。 */
+    @Test
+    void hugePageNumbersAreCappedForSourcesAndMappings() {
+        ImportSourceView source = catalog.createSource(new ImportSourceRequest("source-cap", "上限"));
+
+        ImportCatalogPage<ImportSourceView> sources = catalog.listSources(Long.MAX_VALUE,
+                ImportCatalogService.MAX_PAGE_SIZE);
+        ImportCatalogPage<ImportMappingView> mappings = catalog.listMappings(source.id(), Long.MAX_VALUE, 200);
+
+        assertEquals(ImportPaging.MAX_PAGE, sources.page());
+        assertEquals(1, sources.total());
+        assertEquals(List.of(), sources.items());
+        assertEquals(ImportPaging.MAX_PAGE, mappings.page());
+        assertEquals(List.of(), mappings.items());
+    }
+
     @Test
     void sourceStatusIsChangedOnlyWithTheCurrentVersion() {
         ImportSourceView created = catalog.createSource(new ImportSourceRequest("legacy-crm", "旧CRM"));

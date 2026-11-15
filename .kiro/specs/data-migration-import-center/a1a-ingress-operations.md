@@ -1,6 +1,6 @@
 # NF-06 A1a 顧客raw CSV ingress 運用・配備前提（W2-B1 硬化・W3-05 初回リリースAPI）
 
-- 対象: `/api/import-center` の初回リリースAPI（下表）。W2-B1 で upload と job 詳細、W3-05 で検証・preview・error export・source/mapping 管理と本番 admission port を追加した。画面と menu は W3-12。
+- 対象: `/api/import-center` の初回リリースAPI（下表）と取込センター画面 `/import-center`。W2-B1 で upload と job 詳細、W3-05 で検証・preview・error export・source/mapping 管理と本番 admission port、W3-12 で画面・menu（V193）・`import.metadata.manage` の付与・行参照の鍵付きHMAC を追加した（§13・§14）。
 - 位置づけ: 2026-11-13 の本番公開判断（B-NF06-1〜5）と 2026-11-14 の Q-5・Q-15 を実装へ反映した結果と、配備・運用で守るべき前提をまとめる。
 - 本文書は承認・署名を代替しない。Owner / Privacy / Security / DBA / SRE の確認事項は末尾に残す。
 
@@ -18,6 +18,7 @@
 | `GET /jobs/{id}/error-export` | REJECTED 行の finding code CSV（§11） |
 | `GET /sources`・`POST /sources`・`PUT /sources/{id}` | 取込元の一覧・登録・有効/停止 |
 | `GET /sources/{id}/mappings`・`POST /sources/{id}/mappings` | mapping 版の一覧・登録（版は不変、更新＝新しい版） |
+| 画面 `GET /import-center`（W3-12） | 上表のAPIだけを呼ぶ取込センター画面（§13）。menu `import-center` は管理者だけ |
 
 - apply 系の入口は DENY 機構で閉じる（機能スイッチには依存しない）。
   - `/api/import-center/**` の上表以外の method・path は `ActionPermissionResolver` が action key を返さず、`MenuPermissionFilter` が管理者を含め 403 にする（fail-closed）。route 単位の閉鎖であり、role 別の action allow-list ではない（action 層は baseline＋deny のまま。新しい API root は追加していない）。
@@ -164,6 +165,7 @@
 - Data Owner の admission 判断（§10 の決定 ID・承認 source 一覧・有効期間の署名）。
 - 検証の 120 秒は soft 上限で、1 回の検証は source を3回（検証・append・seal 後の再計算）先頭から読む。上限 64MiB・100,000 行に近い原本は 120 秒に収まらない可能性があり、その場合は 503 で abort される（硬い上限化・非同期化は後続課題）。
 - preview の表示値は page ごとに source を先頭から当該 page の最終行まで再 parse する。末尾に近い page ほど遅い。
+- W3-12 で追加した ON の前提（§14）: 行参照の HMAC 鍵、`import.metadata.manage` の付与（V193）、単一法人前提（複数法人対応は Owner 判断）、LB idle timeout 130 秒以上。
 
 ## 10. 本番 admission の承認設定（Q-5）
 
@@ -210,13 +212,14 @@ source-codes=<小文字化し昇順に並べたsource codeのカンマ区切り>
 
 **preview（`GET /jobs/{id}/preview?page=&size=&disposition=`、`ImportValidationResultService`）**
 - 公開済み run（job VALIDATED・run COMPLETED・published_slot=1）だけ。未完了は 409 `validationNotCompleted`。
-- 行一覧は DB の検証行（PII なし）から読む。`PageUtils.safePage` で既定 50・上限 200 に正規化する（手書きの LIMIT/OFFSET）。
+- 行一覧は DB の検証行（PII なし）から読む。`PageUtils.safePage` で既定 50・上限 200 に正規化する（手書きの LIMIT/OFFSET）。page 番号は 100,000（1 job の行数上限）へ丸め、OFFSET の桁あふれによる 500 を防ぐ（W3-12。W3-05 review P3-3。source・mapping の一覧も同じ）。
 - 表示値は source 原本を exact snapshot（`ImportMetadataService#openSource` の ACL・hash 再確認）から再 parse し、当該 page の行だけをマスクして返す。各行の source 行 hash が保存済み hash と一致しなければ 409。
+- 応答の `sourceRowHash` は保存済みの source 行 hash ではなく、鍵付き HMAC の行参照（§14.1）である。
 - マスク規則（`ImportPreviewMasker`。分類表に無い項目・entity は完全マスク）: 外部 key・会社名・カナ・商流・信用度・納品希望は表示（64 文字で切詰め）、担当者名は先頭 1 文字、メールは local 部先頭 1 文字と domain、電話は末尾 4 桁、住所・備考は値の有無だけ（`＊＊＊`）。
 - 閲覧の前に必須監査（`IMPORT_PREVIEW`）。記録できなければ返さない（503）。
 
 **error export（`GET /jobs/{id}/error-export`）**
-- REJECTED 行の finding code を、source 行番号・source 行 hash と合わせて UTF-8（BOM 付き）CSV で返す。列は `sourceRowNumber,sourceRowHash,code`。原文・値は出さない。
+- REJECTED 行の finding code を、source 行番号・行参照と合わせて UTF-8（BOM 付き）CSV で返す。列は `sourceRowNumber,sourceRowHash,code`（`sourceRowHash` 列の値は preview と同じ鍵付き HMAC の行参照。§14.1）。原文・値は出さない。
 - DB から keyset（行番号順、500 行ずつ）で読み、page ごとに flush する（全件を memory へ載せない）。page 読取の前ごとに認可を再確認し、撤権・法人変更があれば以後を出力しない。
 - 各 cell は `ImportErrorCsvWriter#sanitize` で CSV injection を無害化する（先頭文字が TAB・CR、または前置空白の後の先頭が `=`・`+`・`-`・`@` なら `'` を前置。値全体が十進数の負数はそのまま）。
 - 一時 file を作らないため、`FileReferenceProvider`・`FileScopeValidationService` への追加登録は不要。出力前に必須監査（`IMPORT_ERROR_EXPORT`）。
@@ -229,3 +232,54 @@ source-codes=<小文字化し昇順に並べたsource codeのカンマ区切り>
   - stage を返した後の破棄失敗: 従来どおり照合台帳（`DISCARD_FAILED`）＋ metric `path=winner|failure`。
   - stage 処理の途中失敗時の補償失敗: `ImportCsvIngestionService` が原因の印から照合台帳へ記録し、metric `path=stage` で通知する（元の失敗はそのまま返す）。
   - 照合 batch（§6）は回収時の削除失敗を検知し、台帳を残して次回再試行する（従来は失敗が見えず台帳だけが外れ得た）。
+
+## 13. 取込センター画面（W3-12）
+
+- 画面: `GET /import-center`（`ImportCenterPageController`、view `import-center/index`、JS `static/js/modules/import-center.js`）。menu `import-center`（V193、管理者だけ）。機能スイッチ NF06 の画面prefix・menu key として `Feature.NF06` に登録し、OFF の間は画面も404・menu も非表示になる。
+- 呼ぶ API は §1 の表だけ。画面独自の API・一覧 API は追加していない（`ImportCenterApplyEntryClosedTest` が controller と route を固定する）。
+  - job の一覧 API は無いため、画面は「この端末で upload・表示した job」だけを localStorage に最大10件記憶し、それ以外は job ID を入力して開く（記憶するのは job ID と source code だけで、PII は保存しない）。
+- 操作の流れ:
+  1. 「取込元・mapping」タブで取込元（source code・表示名）を登録し、mapping 版（顧客の各項目に対応する CSV 見出し）を登録する。版は不変で、内容を変えると次の版になる。取込元の停止・再開は確認ダイアログを出す（version が上がり既存 job の preview が 409 になる。W3-05 review P3-9）。
+  2. 「取込ジョブ」タブで取込元・文字コード・CSV を選んで upload する（body は file そのもの、`Content-Type: text/csv`、header `X-Import-Source-Code` / `X-Import-Encoding`、CSRF header 付き）。
+  3. UPLOADED の job では mapping 版を選んで検証を開始する。**mapping の束縛は検証 API の `mappingId` で行い、画面から `bindMapping` 相当を直接呼ぶ経路は無い**（W3-05 review P3-2。束縛は `ImportValidationRunService` の可見性確認の後だけ）。
+  4. 検証は同期 API（最長 120 秒＋α、途中で 1 byte も返らない）。画面は要求を送ったまま **`GET /jobs/{id}` を3秒ごとに確認**し（W3-05 review P3-5）、応答が LB 等で途切れても（0・502・504、および LB・proxy が返す JSON でない 5xx）状態確認を続ける。アプリの ApiResult で返った 5xx（120 秒の上限超過の 503 等）は確定した失敗として確認を止める。VALIDATED になれば要約（公開済み job への検証 API は再検証せず要約を返す・冪等）と preview を読む。VALIDATING 以外へ戻れば「検証を再開」（takeover で続きから）を案内する。409 は job を読み直し、VALIDATING なら確認を続ける。確認は最長200秒で打ち切る。
+  5. preview（マスク済み、判定で絞込み、page 送り）と、却下行があればエラー CSV を出力する（`SES.download`、失敗は toast）。
+- 403 は「管理者 role・`import.metadata.manage`・法人の設定を確認する」固定文言にする（server の応答は汎用の拒否文言のため）。画面の表示制御は利便のためだけで、権限の根拠は API の service 層である。
+- 一覧画面と同じ絞込み panel の構造（`card > card-body > form#searchForm`）で、スマホ幅では折りたためる。表は `table-responsive` の中で横スクロールし、ページ全体は横にはみ出さない。CDN 等の外部資産は使わない。
+- 試験: `ImportCenterPageControllerTest`（管理者だけ到達・サイドバー導線・H2 seed）、`ImportCenterPageFeatureOffTest`（OFF で404）、`FeatureSwitch*`、`ImportCenterBrowserMTest`（`@Tag("browser")`、desktop・390px で upload→検証→preview、console error 0）。
+
+## 14. NF-06 を ON にする前提（W3-12。W3-05 review P2-1・P2-3）
+
+手順の正本は `.kiro/specs/production-launch/feature-switches.md` 4.8。ここでは設計上の要点だけを記す。
+
+### 14.1 行参照の鍵付き HMAC（P2-1）
+
+- 問題: 検証行に保存する source 行 hash は鍵の無い SHA-256（各列の UTF-8 に4 byte の長さを前置した連結）で、preview はこれを平文列・部分値（外部キー・会社名・担当者名の先頭1文字・メール domain・電話末尾4桁・住所/備考の有無）と一緒に返していた。住所・備考が空の行では、未知量が担当者名の残りと電話の前半程度になり、手元の総当たりでマスクした値を復元できた。error export の CSV も、持ち出された後に「ある行が存在するか」を確かめる oracle になっていた。
+- 対処: 外部へ返す値（preview の `sourceRowHash`・error export の `sourceRowHash` 列）だけを、`ImportSourceRowReference` が保存済み hash を秘密鍵で写した HMAC-SHA256（16進64桁）にした。入力は domain（`SES-NF06-SOURCE-ROW-REFERENCE-V1`）・tenant（長さ前置）・job ID・保存済み hash（32 byte）の連結。
+  - 同じ job の中では preview と error export の値が一致し、行を照合できる。別 job・別 tenant では同じ内容の行でも別の値になり、job をまたいだ突合はできない。
+  - 保存値（`t_import_validation_row.source_row_sha256`）と内部の整合確認（原本再読込・seal・再計算の fence）は変えない。DDL・migration は不要で、既存 job の整合性に影響しない。
+  - 既存データへの影響: 表示値だけが変わる。本番では NF06 を一度も ON にしていないため、以前に出力した CSV は存在しない（dev/test で以前に出力した CSV の値とは一致しない）。鍵を差し替えた場合も同様に全ての表示値が変わる。
+- 鍵: `app.import-center.row-reference.hmac-key`（環境変数 `IMPORT_ROW_REFERENCE_HMAC_KEY`）。Base64（標準・URL-safe）で復号後32 byte以上。`application.yml` の既定値は開発用で、prod では使えない（`application-prod.yml` は既定を空にし、開発用鍵と test 用鍵は実行時にも拒否する。表記を変えても復号後の byte 列で比べるため、`=` の省略や URL-safe 表記では通らない）。
+  - 鍵が使えない間は、preview・error export を認可確認の直後・監査と原本読込の前に 503 `error.import.rowReferenceUnavailable` で拒否する（fail-closed）。
+  - prod の起動検査 `ImportRowReferenceKeyStartupValidator`（`ImportAdmissionStartupValidator` と同じ考え方）: NF06 OFF は起動を止めない（設定済みで使えない鍵だけ WARN）。NF06 ON で未設定・形式不正・開発用鍵なら起動失敗。message は `state=` の固定値だけで、鍵の値を log・例外へ出さない。
+- 試験: `ImportSourceRowReferenceTest`、`ImportValidationResultServiceTest`（preview と CSV が同じ行参照で保存 hash を出さない・鍵の差替えで値が変わる・鍵が無ければ監査と原本読込の前に503）。
+
+### 14.2 `import.metadata.manage` の明示許可（P2-3(a)）
+
+- service 層（`ImportMetadataAuthorizationService`）は `import.metadata.manage` の明示許可行を要求し、全体 baseline `'*'` を許可根拠に数えない（`*`・`import.*`・同 key の拒否は優先）。従来は seed が無く、ON にしても全管理者が403だった。
+- V193 で、管理者専用 group（`role-admin`・`privacy-admin`）へ明示許可を入れ、他の全 group では拒否する（baseline＋deny。V191 の `privacy.*` と同型。利用者の割当は変えない）。group を追加する migration・運用作業は、管理者専用でなければ同じ拒否行も入れること。
+- 試験: `ActionPermissionMatrixTest`（H2 fixture `permission-group-seed-h2.sql` の最終状態と判定）、`FlywayNf06ImportCenterMenuMigrationTest`（実 MySQL、mysql shard 3。fresh と V192 からの更新、既存行の補正）。
+
+### 14.3 単一法人前提（P2-3(b)）
+
+- 管理者の法人 context は共通の `LegalEntityContextService` が `m_organization_unit` の全法人 ID（`AttendanceScopeMapper#selectAllLegalEntityIds`）から一意に決める。法人が2つ以上あると取込の全操作が403（`LEGAL_ENTITY_CONTEXT_REQUIRED`）になる。
+- tenant での限定は本バッチでは行わない。理由: `m_organization_unit.tenant_id` は将来用の BIGINT 列で、現行は tenant ごとの独立 DB 運用のため値を持たず、tenant で絞っても結果は変わらない。複数法人の企業で使うには管理者に法人を選ばせる設計変更が必要で、書込み境界の全 writer が使う共通 service の変更になるため、Owner 判断とする。
+- したがって初回は**単一法人前提**で運用する。ON の前に `SELECT COUNT(DISTINCT legal_entity_id) FROM m_organization_unit WHERE legal_entity_id IS NOT NULL AND deleted_flag = 0;` が 1 であることを確認する。複数法人の環境で ON にしても漏れる方向には働かない（全操作が403で閉じる）。
+  - この SQL は `selectAllLegalEntityIds` と同じ条件で、論理削除（`deleted_flag`）だけを見る。組織の状態（status）と有効期間は見ないため、無効・期間外の組織の法人IDも数える（W3-12 review P3-3）。
+  - 新規導入では V60 の移行組織 LEGACY（法人ID NULL）しか無く、結果は0件になる。0件でも全操作が403になるため、ON の前に法人IDを持つ組織を登録する。
+- 防御の重ね（P3-2）: `ImportMetadataService#bindMapping` は job 行の参照と `FOR UPDATE` に現在の法人を条件として付け、別法人の job と lock 前に消えた job を同じ404にする（以前は null を参照して500）。試験: `ImportMetadataBindMappingScopeTest`。
+
+### 14.4 配備前提（P3-5 ほか）
+
+- LB / reverse proxy の idle timeout は130秒以上にする。検証は同期要求で、最長120秒＋αの間 1 byte も返さない。60秒等の既定では LB が先に切断し、利用者には504が見える（server 側は続行し得る。画面は §13 の状態確認で結果を取りこぼさない）。
+- 透過再接続の禁止（§5）、単一 instance または sticky session（§6）、raw CSV の保持期間と preview のマスク分類の Privacy 受容（W3-05 review P3-8）は従来どおり ON の前提に含める。

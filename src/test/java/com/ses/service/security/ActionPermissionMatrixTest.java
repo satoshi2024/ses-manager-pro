@@ -275,18 +275,19 @@ class ActionPermissionMatrixTest {
         org.junit.jupiter.api.Assertions.assertEquals(1, adminBaselineCount, "管理者groupにbaselineが未セット");
 
         // manager(4) と sales(2) はV66の5件 + V78口座action + Fix Batch 1の2件で計8件。
-        // V191（NF07 W-5）で privacy.* の deny が各1件加わり、営業 9・HR 8・マネージャー 9 件。
+        // V191（NF07 W-5）で privacy.* の deny、V193（NF-06）で import.metadata.manage の deny が各1件加わり、
+        // 営業 10・HR 9・マネージャー 10 件。
         Integer salesDenyCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 2 AND deny_flag = 1", Integer.class);
-        org.junit.jupiter.api.Assertions.assertEquals(9, salesDenyCount, "営業groupのdeny行数が不一致");
+        org.junit.jupiter.api.Assertions.assertEquals(10, salesDenyCount, "営業groupのdeny行数が不一致");
 
         Integer hrDenyCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 3 AND deny_flag = 1", Integer.class);
-        org.junit.jupiter.api.Assertions.assertEquals(8, hrDenyCount, "HRgroupのdeny行数が不一致");
+        org.junit.jupiter.api.Assertions.assertEquals(9, hrDenyCount, "HRgroupのdeny行数が不一致");
 
         Integer managerDenyCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 4 AND deny_flag = 1", Integer.class);
-        org.junit.jupiter.api.Assertions.assertEquals(9, managerDenyCount, "マネージャーgroupのdeny行数が不一致");
+        org.junit.jupiter.api.Assertions.assertEquals(10, managerDenyCount, "マネージャーgroupのdeny行数が不一致");
 
         Integer salesBankDeny = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 2 "
@@ -418,6 +419,39 @@ class ActionPermissionMatrixTest {
                 "privacy-admin以外で privacy.* の deny を持たない group がある");
         assertEquals("privacy-admin", jdbcTemplate.queryForObject(
                 "SELECT group_key FROM m_permission_group WHERE id = 6", String.class));
+    }
+
+    // ---------------------------------------------------------------- NF-06（W3-12・V193）
+
+    /**
+     * import.metadata.manage は管理者専用 group（role-admin・privacy-admin）だけが明示許可を持ち、他の group は deny する。
+     * 取込のservice層は '*' を許可根拠に数えず明示許可行を要求する（ImportMetadataAuthorizationService）ため、
+     * seedが無いとNF-06をONにしても全管理者が403になる（W3-05 review P2-3(a)）。
+     */
+    @Test
+    void 取込metadata管理actionは管理者専用groupだけが明示許可を持ち他groupはdenyする() {
+        for (int groupId : new int[]{1, 6}) {
+            assertEquals(1, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_permission_group_action "
+                    + "WHERE group_id = ? AND action_key = 'import.metadata.manage' AND deny_flag = 0 "
+                    + "AND deleted_flag = 0", Integer.class, groupId), "group " + groupId + " の明示許可");
+        }
+        for (int groupId : new int[]{2, 3, 4, 5}) {
+            assertEquals(1, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_permission_group_action "
+                    + "WHERE group_id = ? AND action_key = 'import.metadata.manage' AND deny_flag = 1", Integer.class,
+                    groupId), "group " + groupId + " の deny");
+        }
+        assertTrue(authorizationService.isAllowed(authenticate(9007L, "管理者"), "import.metadata.manage"));
+        assertTrue(authorizationService.isAllowed(authenticate(9005L, "管理者"), "import.metadata.manage"));
+        assertFalse(authorizationService.isAllowed(authenticate(9001L, "営業"), "import.metadata.manage"));
+        assertFalse(authorizationService.isAllowed(authenticate(9002L, "HR"), "import.metadata.manage"));
+        assertFalse(authorizationService.isAllowed(authenticate(9003L, "マネージャー"), "import.metadata.manage"));
+        assertFalse(authorizationService.isAllowed(authenticate(9004L, "要員"), "import.metadata.manage"));
+        assertFalse(authorizationService.isAllowed(authenticate(9999L, "営業"), "import.metadata.manage"),
+                "group未割当のlegacy fallbackも許可しない");
+        // 業務actionは従来どおり（V193は他のactionを変えない）
+        for (String action : BUSINESS_ACTIONS) {
+            assertTrue(authorizationService.isAllowed(authenticate(9001L, "営業"), action), action);
+        }
     }
 
     private Authentication authenticate(Long id, String role) {

@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{importCenter.title} + ' - ' + #{app.name}">取込センター - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4" id="importCenterApp">
+    <!-- ヘッダー -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+            <h2 class="h3 mb-0 text-light">
+                <i class="bi bi-cloud-upload me-2 text-primary"></i><th:block th:text="#{importCenter.title}">取込センター</th:block>
+            </h2>
+            <p class="text-muted small mb-0 mt-1" th:text="#{importCenter.subtitle}">旧システムの顧客CSVを、アップロード・検証・マスク済みpreviewで確認します。</p>
+        </div>
+    </div>
+
+    <div class="alert alert-dark border-secondary small mb-3" role="note">
+        <i class="bi bi-info-circle me-1"></i><span th:text="#{importCenter.scopeNotice}">初回リリースではアップロード・検証・previewだけを提供します。</span>
+    </div>
+    <div id="importCenterAlert" class="alert alert-danger small d-none" role="alert" aria-live="assertive"></div>
+
+    <!-- タブ -->
+    <ul class="nav nav-pills mb-3 flex-wrap" id="importCenterTab" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="import-jobs-tab" data-bs-toggle="pill" data-bs-target="#import-jobs-pane"
+                    type="button" role="tab" aria-controls="import-jobs-pane" aria-selected="true">
+                <i class="bi bi-list-task me-1"></i><th:block th:text="#{importCenter.tab.jobs}">取込ジョブ</th:block>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="import-sources-tab" data-bs-toggle="pill" data-bs-target="#import-sources-pane"
+                    type="button" role="tab" aria-controls="import-sources-pane" aria-selected="false">
+                <i class="bi bi-diagram-2 me-1"></i><th:block th:text="#{importCenter.tab.sources}">取込元・mapping</th:block>
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+        <!-- ===== 取込ジョブ ===== -->
+        <div class="tab-pane fade show active" id="import-jobs-pane" role="tabpanel" aria-labelledby="import-jobs-tab">
+            <div class="row g-3">
+                <div class="col-12 col-xl-5">
+                    <!-- アップロード -->
+                    <div class="card bg-card border-dark shadow-sm mb-3">
+                        <div class="card-header bg-dark border-dark text-white" th:text="#{importCenter.upload.title}">CSVアップロード</div>
+                        <div class="card-body">
+                            <form id="importUploadForm" class="row g-3" novalidate>
+                                <div class="col-12">
+                                    <label class="form-label text-muted small" for="importUploadSource" th:text="#{importCenter.upload.source}">取込元</label>
+                                    <select class="form-select bg-dark border-secondary text-light" id="importUploadSource" required></select>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label text-muted small" for="importUploadEncoding" th:text="#{importCenter.upload.encoding}">文字コード</label>
+                                    <select class="form-select bg-dark border-secondary text-light" id="importUploadEncoding">
+                                        <option value="UTF8" th:text="#{importCenter.upload.encoding.utf8}">UTF-8</option>
+                                        <option value="SHIFT_JIS" th:text="#{importCenter.upload.encoding.sjis}">Shift_JIS</option>
+                                    </select>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label text-muted small" for="importUploadFile" th:text="#{importCenter.upload.file}">CSVファイル</label>
+                                    <input class="form-control bg-dark border-secondary text-light" type="file" id="importUploadFile" accept=".csv,text/csv">
+                                    <div class="form-text text-muted" th:text="#{importCenter.upload.help}">顧客（CUSTOMER・ses-import-v1）だけが対象です。</div>
+                                </div>
+                                <div class="col-12 d-grid d-sm-flex justify-content-sm-end">
+                                    <button class="btn btn-primary" type="submit" id="importUploadBtn">
+                                        <i class="bi bi-upload me-1"></i><th:block th:text="#{importCenter.upload.submit}">アップロード</th:block>
+                                    </button>
+                                </div>
+                            </form>
+                            <div id="importUploadResult" class="small mt-2" aria-live="polite"></div>
+                        </div>
+                    </div>
+
+                    <!-- ジョブを開く -->
+                    <div class="card bg-card border-dark shadow-sm">
+                        <div class="card-header bg-dark border-dark text-white" th:text="#{importCenter.job.openTitle}">ジョブを開く</div>
+                        <div class="card-body">
+                            <form id="importJobOpenForm" class="row g-2 align-items-end" novalidate>
+                                <div class="col-8">
+                                    <label class="form-label text-muted small" for="importJobIdInput" th:text="#{importCenter.job.idLabel}">ジョブID</label>
+                                    <input class="form-control bg-dark border-secondary text-light" type="number" min="1" step="1" id="importJobIdInput" inputmode="numeric">
+                                </div>
+                                <div class="col-4 d-grid">
+                                    <button class="btn btn-outline-light" type="submit" id="importJobOpenBtn" th:text="#{importCenter.job.open}">開く</button>
+                                </div>
+                            </form>
+                            <div class="text-muted small mt-3 mb-1" th:text="#{importCenter.job.recent}">最近のジョブ（この端末のみ）</div>
+                            <div id="importRecentJobs" class="d-flex flex-wrap gap-2"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-xl-7">
+                    <!-- ジョブ詳細・検証 -->
+                    <div class="card bg-card border-dark shadow-sm h-100">
+                        <div class="card-header bg-dark border-dark text-white" th:text="#{importCenter.job.detailTitle}">ジョブ詳細</div>
+                        <div class="card-body">
+                            <div id="importJobEmpty" class="text-muted small" th:text="#{importCenter.job.none}">ジョブをアップロードするか、ジョブIDを指定して開いてください。</div>
+                            <div id="importJobPanel" class="d-none">
+                                <dl class="row small mb-3" id="importJobDetail"></dl>
+
+                                <div id="importValidationSection" class="border-top border-secondary pt-3">
+                                    <h6 class="text-light mb-2" th:text="#{importCenter.validation.title}">検証</h6>
+                                    <div id="importMappingChooser" class="row g-2 mb-2 d-none">
+                                        <div class="col-12 col-sm-6">
+                                            <label class="form-label text-muted small" for="importValidationSource" th:text="#{importCenter.validation.mappingSource}">mappingの取込元</label>
+                                            <select class="form-select bg-dark border-secondary text-light" id="importValidationSource"></select>
+                                        </div>
+                                        <div class="col-12 col-sm-6">
+                                            <label class="form-label text-muted small" for="importValidationMapping" th:text="#{importCenter.validation.mapping}">mapping版</label>
+                                            <select class="form-select bg-dark border-secondary text-light" id="importValidationMapping"></select>
+                                        </div>
+                                    </div>
+                                    <div class="d-grid d-sm-flex justify-content-sm-end gap-2">
+                                        <button class="btn btn-primary" type="button" id="importValidateBtn" th:text="#{importCenter.validation.start}">検証を開始</button>
+                                    </div>
+                                    <div id="importValidationStatus" class="small mt-2" aria-live="polite"></div>
+                                </div>
+
+                                <div id="importSummarySection" class="border-top border-secondary pt-3 mt-3 d-none">
+                                    <div class="row g-2 text-center" id="importValidationSummary"></div>
+                                    <div class="d-grid d-sm-flex justify-content-sm-between align-items-sm-center gap-2 mt-3">
+                                        <span class="text-muted small" th:text="#{importCenter.errorExport.help}">却下行の行番号・行参照・エラーコードだけを出力します。</span>
+                                        <button class="btn btn-outline-warning" type="button" id="importErrorExportBtn">
+                                            <i class="bi bi-download me-1"></i><th:block th:text="#{importCenter.errorExport}">エラーCSVをダウンロード</th:block>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- preview -->
+            <div class="mt-3" id="importPreviewSection">
+                <h5 class="text-light h6 mb-2" th:text="#{importCenter.preview.title}">preview（マスク済み）</h5>
+                <div class="card bg-card border-dark shadow-sm mb-2">
+                    <div class="card-body">
+                        <form id="searchForm" class="row g-2 align-items-end" novalidate>
+                            <div class="col-6 col-md-3">
+                                <label class="form-label text-muted small" for="importPreviewDisposition" th:text="#{importCenter.preview.disposition}">判定</label>
+                                <select class="form-select bg-dark border-secondary text-light" id="importPreviewDisposition" name="disposition">
+                                    <option value="" th:text="#{importCenter.preview.disposition.all}">すべて</option>
+                                    <option value="ACCEPTED" th:text="#{importCenter.preview.disposition.accepted}">受理</option>
+                                    <option value="REJECTED" th:text="#{importCenter.preview.disposition.rejected}">却下</option>
+                                </select>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <label class="form-label text-muted small" for="importPreviewSize" th:text="#{importCenter.preview.size}">表示件数</label>
+                                <select class="form-select bg-dark border-secondary text-light" id="importPreviewSize">
+                                    <option value="20">20</option>
+                                    <option value="50" selected>50</option>
+                                    <option value="100">100</option>
+                                    <option value="200">200</option>
+                                </select>
+                            </div>
+                            <div class="col-12 col-md-3 d-grid">
+                                <button class="btn btn-outline-light" type="submit" id="importPreviewApplyBtn" th:text="#{importCenter.preview.apply}">表示</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <div class="card bg-card border-dark shadow-sm">
+                    <div class="card-body pb-0">
+                        <p class="text-muted small mb-2" th:text="#{importCenter.preview.maskNote}">担当者名・連絡先は一部だけ、住所・備考は有無だけを表示します。</p>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover table-sm mb-0 align-middle small" id="importPreviewTable">
+                            <thead id="importPreviewHead"></thead>
+                            <tbody id="importPreviewBody">
+                                <tr><td class="text-muted" th:text="#{importCenter.preview.notReady}">検証が完了するとpreviewを表示します。</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-footer bg-card border-dark d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <span class="text-muted small" id="importPreviewPageInfo"></span>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button class="btn btn-outline-light" type="button" id="importPreviewPrev" disabled th:text="#{importCenter.preview.prev}">前へ</button>
+                            <button class="btn btn-outline-light" type="button" id="importPreviewNext" disabled th:text="#{importCenter.preview.next}">次へ</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== 取込元・mapping ===== -->
+        <div class="tab-pane fade" id="import-sources-pane" role="tabpanel" aria-labelledby="import-sources-tab">
+            <div class="row g-3">
+                <div class="col-12 col-xl-6">
+                    <div class="card bg-card border-dark shadow-sm mb-3">
+                        <div class="card-header bg-dark border-dark text-white" th:text="#{importCenter.source.title}">取込元</div>
+                        <div class="card-body">
+                            <form id="importSourceForm" class="row g-2 align-items-end" novalidate>
+                                <div class="col-12 col-sm-5">
+                                    <label class="form-label text-muted small" for="importSourceCode" th:text="#{importCenter.source.code}">source code</label>
+                                    <input class="form-control bg-dark border-secondary text-light" id="importSourceCode" maxlength="64" autocomplete="off">
+                                </div>
+                                <div class="col-12 col-sm-5">
+                                    <label class="form-label text-muted small" for="importSourceName" th:text="#{importCenter.source.displayName}">表示名</label>
+                                    <input class="form-control bg-dark border-secondary text-light" id="importSourceName" maxlength="120" autocomplete="off">
+                                </div>
+                                <div class="col-12 col-sm-2 d-grid">
+                                    <button class="btn btn-primary" type="submit" id="importSourceCreateBtn" th:text="#{importCenter.source.create}">登録</button>
+                                </div>
+                                <div class="col-12 form-text text-muted" th:text="#{importCenter.source.codeHelp}">英字で始まる英数字・ハイフン・下線</div>
+                            </form>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-dark table-hover table-sm mb-0 align-middle small">
+                                <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th th:text="#{importCenter.source.code}">source code</th>
+                                    <th th:text="#{importCenter.source.displayName}">表示名</th>
+                                    <th th:text="#{importCenter.source.status}">状態</th>
+                                    <th th:text="#{importCenter.source.version}">版</th>
+                                    <th th:text="#{importCenter.source.actions}">操作</th>
+                                </tr>
+                                </thead>
+                                <tbody id="importSourceTableBody">
+                                <tr><td colspan="6" class="text-muted" th:text="#{common.loading}">読み込み中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-xl-6">
+                    <div class="card bg-card border-dark shadow-sm">
+                        <div class="card-header bg-dark border-dark text-white">
+                            <span th:text="#{importCenter.mapping.title}">mapping版</span>
+                            <span class="text-muted small ms-2" id="importMappingSourceLabel"></span>
+                        </div>
+                        <div class="card-body">
+                            <div id="importMappingEmptyHint" class="text-muted small" th:text="#{importCenter.mapping.selectSource}">一覧から取込元を選ぶと、mapping版を表示・登録できます。</div>
+                            <div id="importMappingPanel" class="d-none">
+                                <div class="table-responsive mb-3">
+                                    <table class="table table-dark table-sm mb-0 align-middle small">
+                                        <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th th:text="#{importCenter.mapping.version}">版</th>
+                                            <th th:text="#{importCenter.mapping.hashPrefix}">hash（先頭12桁）</th>
+                                            <th th:text="#{importCenter.mapping.headerCount}">列数</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody id="importMappingTableBody"></tbody>
+                                    </table>
+                                </div>
+                                <h6 class="text-light" th:text="#{importCenter.mapping.formTitle}">新しいmapping版を登録</h6>
+                                <p class="text-muted small" th:text="#{importCenter.mapping.formHelp}">各項目に、CSVの見出し名を入力します。</p>
+                                <form id="importMappingForm" novalidate>
+                                    <div class="table-responsive">
+                                        <table class="table table-dark table-sm mb-2 align-middle small">
+                                            <thead>
+                                            <tr>
+                                                <th th:text="#{importCenter.mapping.canonical}">項目</th>
+                                                <th th:text="#{importCenter.mapping.header}">CSVの見出し</th>
+                                            </tr>
+                                            </thead>
+                                            <tbody id="importMappingFields"></tbody>
+                                        </table>
+                                    </div>
+                                    <div class="d-grid d-sm-flex justify-content-sm-end">
+                                        <button class="btn btn-primary" type="submit" id="importMappingCreateBtn" th:text="#{importCenter.mapping.create}">mapping版を登録</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/import-center.js}"></script>
+</th:block>
+</body>
+</html>

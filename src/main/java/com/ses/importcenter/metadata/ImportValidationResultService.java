@@ -5,7 +5,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.LogRedaction;
-import com.ses.common.util.PageUtils;
 import com.ses.common.util.SecurityUtils;
 import com.ses.importcenter.foundation.CanonicalImportRow;
 import com.ses.importcenter.foundation.CanonicalRowFactory;
@@ -47,13 +46,18 @@ import java.util.function.LongSupplier;
  * 存在しないjobと同じ404（{@code error.import.jobNotFound}）で返す。認可（管理者role＋明示action）は
  * {@link ImportMetadataAuthorizationService}が操作ごとに再確認する。閲覧の前に必須監査を残し、記録できなければ返さない（503）。
  *
+ * <p>行参照: 応答・CSVの{@code sourceRowHash}は保存済みsource行hash（鍵の無いSHA-256。内部の整合確認用）ではなく、
+ * それを鍵付きHMACで写した行参照（{@link ImportSourceRowReference}）である。鍵が使えなければ認可確認の直後に503で
+ * 拒否し、監査・原本読込・出力を行わない（W3-12。W3-05 review P2-1）。
+ *
  * <p>preview: 行一覧はDBの検証行（PIIを持たない）から{@code PageUtils.safePage}で上限を適用して読む。手書きの
- * LIMIT/OFFSETのため、size・pageは本classで正規化する。表示値はsource原本をexact snapshot（hash・ACL再確認済みの
+ * LIMIT/OFFSETのため、size・pageは本classで正規化する（page番号も{@link ImportPaging}で上限へ丸める）。
+ * 表示値はsource原本をexact snapshot（hash・ACL再確認済みの
  * {@link ImportMetadataService#openSource}）から再parseし、page内の行だけを{@link ImportPreviewMasker}でマスクして返す。
  * 再parseは当該pageの最終行で打ち切り、各行のsource行hashが保存済みhashと一致しなければ409で拒否する。
  * 120秒のsoft上限（B-NF06-1と同じ）を超えたら503。
  *
- * <p>error export: REJECTED行のfinding codeを、source行番号・source行hashと合わせてCSVでstreamする。
+ * <p>error export: REJECTED行のfinding codeを、source行番号・行参照と合わせてCSVでstreamする。
  * DBからkeyset（source行番号順、{@value #EXPORT_PAGE_ROWS}行ずつ）で読み、pageごとにflushする（全件をmemoryへ載せない）。
  * 原文・値は出さないため一時fileを作らず、{@code FileReferenceProvider}・{@code FileScopeValidationService}への
  * 追加登録は不要である。各cellは{@link ImportErrorCsvWriter#sanitize}でCSV injectionを無害化する。
@@ -76,27 +80,30 @@ public class ImportValidationResultService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final ObjectProvider<AuditLogService> auditProvider;
+    private final ImportSourceRowReference rowReferences;
     private final LongSupplier nanoClock;
     private final Duration totalBudget;
 
     @Autowired
     public ImportValidationResultService(ImportMetadataAuthorizationService authorization,
                                          ImportMetadataService metadata, JdbcTemplate jdbc,
-                                         ObjectMapper objectMapper, ObjectProvider<AuditLogService> auditProvider) {
-        this(authorization, metadata, jdbc, objectMapper, auditProvider, System::nanoTime,
+                                         ObjectMapper objectMapper, ObjectProvider<AuditLogService> auditProvider,
+                                         ImportSourceRowReference rowReferences) {
+        this(authorization, metadata, jdbc, objectMapper, auditProvider, rowReferences, System::nanoTime,
                 ImportIngressDeadline.TOTAL_BUDGET);
     }
 
     /** test用。clockと総期限を差し替える。 */
     ImportValidationResultService(ImportMetadataAuthorizationService authorization, ImportMetadataService metadata,
                                   JdbcTemplate jdbc, ObjectMapper objectMapper,
-                                  ObjectProvider<AuditLogService> auditProvider, LongSupplier nanoClock,
-                                  Duration totalBudget) {
+                                  ObjectProvider<AuditLogService> auditProvider, ImportSourceRowReference rowReferences,
+                                  LongSupplier nanoClock, Duration totalBudget) {
         this.authorization = Objects.requireNonNull(authorization);
         this.metadata = Objects.requireNonNull(metadata);
         this.jdbc = Objects.requireNonNull(jdbc);
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.auditProvider = auditProvider;
+        this.rowReferences = Objects.requireNonNull(rowReferences);
         this.nanoClock = Objects.requireNonNull(nanoClock);
         this.totalBudget = Objects.requireNonNull(totalBudget);
     }
@@ -108,8 +115,9 @@ public class ImportValidationResultService {
         ImportIngressDeadline deadline = ImportIngressDeadline.start(nanoClock, totalBudget);
         String filter = normalizeDisposition(disposition);
         ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
+        ImportSourceRowReference.Scope references = rowReferences.forJob(context.tenantId(), jobId);
         PublishedRun run = requirePublishedRun(context, jobId);
-        Page<Object> normalized = PageUtils.safePage(page, size, PREVIEW_DEFAULT_SIZE, PREVIEW_MAX_SIZE);
+        Page<Object> normalized = ImportPaging.safePage(page, size, PREVIEW_DEFAULT_SIZE, PREVIEW_MAX_SIZE);
         long current = normalized.getCurrent();
         long pageSize = normalized.getSize();
         recordRequiredAudit(context, "GET", "/api/import-center/jobs/" + jobId + "/preview;run=" + run.runId()
@@ -123,7 +131,7 @@ public class ImportValidationResultService {
         Long total = jdbc.queryForObject("SELECT COUNT(*) FROM t_import_validation_row WHERE tenant_id=? AND job_id=? "
                 + "AND validation_run_id=?" + dispositionClause, Long.class, countArgs);
         long totalRows = total == null ? 0 : total;
-        long offset = (current - 1) * pageSize;
+        long offset = ImportPaging.offset(normalized);
         if (offset >= totalRows) {
             return new ImportPreviewPage(jobId, run.runId(), current, pageSize, totalRows,
                     filter == null ? "ALL" : filter, List.of());
@@ -139,8 +147,8 @@ public class ImportValidationResultService {
         Map<Long, Map<String, String>> masked = maskedValues(context, jobId, run, rows, deadline);
         List<ImportPreviewRow> result = new ArrayList<>(rows.size());
         for (StoredRow row : rows) {
-            result.add(new ImportPreviewRow(row.number(), row.hashHex(), row.disposition(), row.codes(),
-                    masked.get(row.number())));
+            result.add(new ImportPreviewRow(row.number(), references.reference(row.hashHex()), row.disposition(),
+                    row.codes(), masked.get(row.number())));
         }
         requireSameContext(context);
         return new ImportPreviewPage(jobId, run.runId(), current, pageSize, totalRows,
@@ -150,13 +158,17 @@ public class ImportValidationResultService {
     /** error exportの事前確認。認可・公開run・必須監査を済ませ、出力を始める前に失敗を確定させる。 */
     public ErrorExport prepareErrorExport(long jobId) {
         ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
+        ImportSourceRowReference.Scope references = rowReferences.forJob(context.tenantId(), jobId);
         PublishedRun run = requirePublishedRun(context, jobId);
         recordRequiredAudit(context, "GET", "/api/import-center/jobs/" + jobId + "/error-export;run=" + run.runId(),
                 EXPORT_AUDIT_CODE);
-        return new ErrorExport(context, jobId, run.runId());
+        return new ErrorExport(context, jobId, run.runId(), references);
     }
 
-    /** REJECTED行のfinding codeをUTF-8（BOM付き）CSVでstreamする。読取は{@value #EXPORT_PAGE_ROWS}行ずつ。 */
+    /**
+     * REJECTED行のfinding codeをUTF-8（BOM付き）CSVでstreamする。読取は{@value #EXPORT_PAGE_ROWS}行ずつ。
+     * {@code sourceRowHash}列はpreviewと同じ行参照（鍵付きHMAC）である。
+     */
     public void writeErrorExport(ErrorExport export, OutputStream output) throws IOException {
         Objects.requireNonNull(export, "export");
         Writer writer = new BufferedWriter(new OutputStreamWriter(output, StandardCharsets.UTF_8));
@@ -178,8 +190,9 @@ public class ImportValidationResultService {
             for (StoredRow row : page) {
                 if (row.number() <= after) throw BusinessException.of(409, "error.import.validationRowMismatch");
                 after = row.number();
+                String reference = export.references().reference(row.hashHex());
                 for (String code : row.codes()) {
-                    ImportErrorCsvWriter.writeRowCode(writer, row.number(), row.hashHex(), code);
+                    ImportErrorCsvWriter.writeRowCode(writer, row.number(), reference, code);
                 }
             }
             writer.flush();
@@ -365,21 +378,28 @@ public class ImportValidationResultService {
         }
     }
 
-    /** prepare済みのerror export。認可contextとrunを束縛し、呼出元はjob IDだけを参照できる。 */
+    /**
+     * prepare済みのerror export。認可context・run・行参照の生成器を束縛し、呼出元はjob IDだけを参照できる。
+     * 同じrequestのthreadの中だけで使う（行参照の生成器はthread-safeでない）。
+     */
     public static final class ErrorExport {
         private final ImportAuthorizedContext context;
         private final long jobId;
         private final long runId;
+        private final ImportSourceRowReference.Scope references;
 
-        private ErrorExport(ImportAuthorizedContext context, long jobId, long runId) {
+        private ErrorExport(ImportAuthorizedContext context, long jobId, long runId,
+                            ImportSourceRowReference.Scope references) {
             this.context = context;
             this.jobId = jobId;
             this.runId = runId;
+            this.references = references;
         }
 
         public long jobId() { return jobId; }
         long runId() { return runId; }
         ImportAuthorizedContext context() { return context; }
+        ImportSourceRowReference.Scope references() { return references; }
     }
 
     private record StoredRow(long number, String hashHex, String disposition, List<String> codes) { }

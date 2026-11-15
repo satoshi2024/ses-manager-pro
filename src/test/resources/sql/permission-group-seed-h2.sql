@@ -110,6 +110,15 @@ INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_fla
   ('default', 4, 'privacy.*', 1, 0),
   ('default', 5, 'privacy.*', 1, 0);
 
+-- V193: import.metadata.manage（NF-06取込センター）は管理者専用 group（1・6）だけに明示許可し、他の group は deny する。
+INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag, deleted_flag) VALUES
+  ('default', 1, 'import.metadata.manage', 0, 0),
+  ('default', 6, 'import.metadata.manage', 0, 0),
+  ('default', 2, 'import.metadata.manage', 1, 0),
+  ('default', 3, 'import.metadata.manage', 1, 0),
+  ('default', 4, 'import.metadata.manage', 1, 0),
+  ('default', 5, 'import.metadata.manage', 1, 0);
+
 -- role別のdefault group割当（V64/V66のbackfill相当）
 INSERT INTO t_user_permission_group (tenant_id, user_id, group_id, assigned_at, deleted_flag) VALUES
   ('default', 9001, 2, CURRENT_TIMESTAMP, 0),

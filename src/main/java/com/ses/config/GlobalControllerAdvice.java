@@ -81,6 +81,7 @@ public class GlobalControllerAdvice {
             new NavRoute("/analytics", "/analytics"),
             new NavRoute("/sales-performance", "/sales-performance"),
             new NavRoute("/management-reports", "/management-reports"),
+            new NavRoute("/import-center", "/import-center"),
             new NavRoute("/monthly-closing", "/monthly-closing"),
             new NavRoute("/compliance", "/compliance"),
             new NavRoute("/todo", "/todo"),
