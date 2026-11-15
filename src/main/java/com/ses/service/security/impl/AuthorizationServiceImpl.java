@@ -46,7 +46,26 @@ public class AuthorizationServiceImpl implements AuthorizationService {
         if (authentication == null || !authentication.isAuthenticated() || !StringUtils.hasText(actionKey)) {
             return false;
         }
-        String role = SecurityUtils.currentRole();
+        return evaluate(SecurityUtils.currentRole(), SecurityUtils::currentUserId, actionKey);
+    }
+
+    /**
+     * NF01（細粒度epoch計画 §4.1）: DBから読んだ明示actorで {@link #isAllowed} と同じ判定を行う。SecurityContextは読まない。
+     *
+     * <p>権限group表は設定tenant（{@link #tenantId()}）で引くため、actorのDB上のtenantが設定tenantと一致しない場合は
+     * 拒否する（単一tenant配備の前提。計画 §9 RR-14。別tenantの利用者を設定tenantのgroupで評価しない）。</p>
+     */
+    @Override
+    public boolean isAllowedForActor(String actorTenantId, Long userId, String role, String actionKey) {
+        if (userId == null || !StringUtils.hasText(role) || !StringUtils.hasText(actionKey)
+                || !StringUtils.hasText(actorTenantId) || !tenantId().equals(actorTenantId.trim())) {
+            return false;
+        }
+        return evaluate(role, () -> userId, actionKey);
+    }
+
+    /** {@link #isAllowed} と {@link #isAllowedForActor} の共通判定。利用者IDは従来どおりDB判定の例外処理の内側で解決する。 */
+    private boolean evaluate(String role, java.util.function.Supplier<Long> userIdResolver, String actionKey) {
         boolean privacyAction = isPrivacyAction(actionKey);
         if ("one-on-one.confidential".equals(actionKey)) {
             if (ROLE_HR.equals(role)) {
@@ -71,7 +90,7 @@ public class AuthorizationServiceImpl implements AuthorizationService {
             return true;
         }
         try {
-            Long userId = SecurityUtils.currentUserId();
+            Long userId = userIdResolver.get();
             if (userId != null) {
                 Set<Long> assignedGroupIds = userPermissionGroupMapper.selectList(new LambdaQueryWrapper<UserPermissionGroup>()
                                 .eq(UserPermissionGroup::getTenantId, tenantId())

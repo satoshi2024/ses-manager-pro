@@ -49,13 +49,9 @@ public class ProfileApiController {
         // 本番初回bootstrap sessionの改密では、同じユーザーの他のsession（初期パスワードで先にloginした別端末等）を
         // 先に失効させる（review P3-e）。失効できなければ改密もしない（fail-closed）。
         revokeOtherSessionsIfBootstrap(request, authentication, user.getId());
-        SysUser update = new SysUser();
-        update.setId(user.getId());
-        update.setPassword(passwordEncoder.encode(req.getNewPassword()));
         // 初回ログイン時のパスワード変更要求（配備時の初期admin）は、本人の変更が成功した時点で解除する。
-        update.setPasswordChangeRequired(0);
-        boolean success = sysUserService.updateById(update);
-        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        // password と変更要求の2列だけを書く専用メソッドを使う（継承した汎用更新をcontrollerから呼ばない。NF01計画 §4.1）。
+        sysUserService.changeOwnPassword(user.getId(), passwordEncoder.encode(req.getNewPassword()));
         // 更新が成功した後でだけ、このsessionの遮断（PasswordChangeEnforcementFilter）を解除する。
         HttpSession session = request.getSession(false);
         if (session != null) {

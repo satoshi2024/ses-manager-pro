@@ -90,8 +90,9 @@ class ServiceSlaRecipientScopeIntegrationTest {
     private void commitSalesScopeConfig(String value, String description) {
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        transaction.executeWithoutResult(status -> systemConfigService.put(
-                "scope.sales-own-data-only", value, description));
+        // 認可キーは updateAll だけが書ける（全体epoch行をX lockしてから書き、値が変われば全体epochを進める。NF01 W3-15）。
+        transaction.executeWithoutResult(status -> systemConfigService.updateAll(java.util.List.of(
+                new com.ses.entity.SystemConfig("scope.sales-own-data-only", value, description))));
     }
 
     @BeforeEach
