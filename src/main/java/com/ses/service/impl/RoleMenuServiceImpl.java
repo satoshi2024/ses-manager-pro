@@ -14,6 +14,7 @@ import com.ses.service.security.epoch.AuthorizationEpochAnchor;
 import com.ses.service.security.epoch.AuthorizationEpochFence;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
@@ -44,8 +45,12 @@ public class RoleMenuServiceImpl extends ServiceImpl<RoleMenuMapper, RoleMenu> i
         return baseMapper.selectAllMenuKeys();
     }
 
+    /**
+     * READ_COMMITTED にするのは、REPEATABLE READ で全体epoch行のlockより前に通常読取をしていると、旧集合の読取が
+     * lock前のsnapshotを返し得るため（W3-15 review P3-3）。外側transactionへ参加した場合も旧集合はlocking readで読む。
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public void replaceMenus(String role, List<Long> menuIds) {
         if (StatusConstants.ROLE_ADMIN.equals(role)) {
             throw BusinessException.of(403, "error.roleMenu.adminUnchangeable");
@@ -106,10 +111,10 @@ public class RoleMenuServiceImpl extends ServiceImpl<RoleMenuMapper, RoleMenu> i
         menuCacheService.invalidate();
     }
 
-    /** 全体epoch行のX lock保持下で読む、指定ロールの現在の許可メニューID集合（順序に依存しない比較用）。 */
+    /** 全体epoch行のX lock保持下でlocking readする、指定ロールの現在の許可メニューID集合（順序に依存しない比較用）。 */
     private Set<Long> currentMenuIds(String role) {
-        return list(new LambdaQueryWrapper<RoleMenu>().eq(RoleMenu::getRole, role)).stream()
-                .map(RoleMenu::getMenuId)
+        List<Long> ids = baseMapper.selectMenuIdsByRoleForUpdate(role);
+        return ids == null ? new TreeSet<>() : ids.stream()
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(TreeSet::new));
     }

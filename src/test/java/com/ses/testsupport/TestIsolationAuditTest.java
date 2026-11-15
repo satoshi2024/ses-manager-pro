@@ -96,7 +96,8 @@ class TestIsolationAuditTest {
             "com.ses.service.impl.DocumentAccessLogFailureIntegrationTest",
             "REQUIRES_NEW内で監査ログ失敗を起こして必ずrollbackさせ、commitしない",
             "com.ses.portal.PortalAdminApiTest",
-            "commitするのはm_system_configの値だけで、finallyで元の値へ戻す",
+            "commitするのはm_system_configの値と全体認可epochの増分だけで、設定値はfinallyで元の値へ戻す"
+                    + "（epochは単調増加で戻さないが、epochを読む試験はすべて差分で比べる）",
             "com.ses.portal.PortalAuthFlowTest",
             "commitするのはm_system_configの値だけで、finallyで元の値へ戻す");
 

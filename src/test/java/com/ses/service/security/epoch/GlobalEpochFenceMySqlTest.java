@@ -109,6 +109,19 @@ class GlobalEpochFenceMySqlTest {
     }
 
     @Test
+    void role_menuを外側transactionなしで呼ぶと宣言どおりREAD_COMMITTEDでreaderの解放を待つ() throws Exception {
+        long before = globalEpoch();
+        List<Long> next = alternateMenus();
+
+        String isolation = EpochFenceMySqlSupport.assertDirectWriterWaitsForReaderAndReadIsolation(jdbc,
+                transactionManager, GLOBAL_TABLE, NO_SETUP, reader::readGlobal,
+                () -> roleMenuService.replaceMenus(ROLE, next), "role menu 外側transactionなし");
+
+        assertEquals("READ-COMMITTED", isolation, "replaceMenusはREAD_COMMITTEDで実行される（W3-15 review P3-3）");
+        assertEquals(before + 1, globalEpoch());
+    }
+
+    @Test
     void 認可キーのreader先行ではwriterが解放を待ってから1だけ進める() throws Exception {
         long before = globalEpoch();
         String flipped = flippedScopeValue();

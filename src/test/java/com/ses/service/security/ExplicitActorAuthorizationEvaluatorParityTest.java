@@ -86,6 +86,7 @@ class ExplicitActorAuthorizationEvaluatorParityTest {
     @Autowired private DataScopeService dataScopeService;
     @Autowired private AuthorizationService authorizationService;
     @Autowired private MenuCacheService menuCacheService;
+    @Autowired private com.ses.config.MenuPermissionFilter menuPermissionFilter;
     @Autowired private SystemConfigService systemConfigService;
     @Autowired private SysUserMapper sysUserMapper;
     @Autowired private EngineerMapper engineerMapper;
@@ -228,9 +229,65 @@ class ExplicitActorAuthorizationEvaluatorParityTest {
         assertTrue(evaluator.resolveActor(null, fixture.users.get("HR"), AS_OF).isEmpty());
         ExplicitActor admin = evaluator.resolveActor(" " + TENANT + " ", fixture.users.get("管理者"), AS_OF).orElseThrow();
         assertEquals(TENANT, admin.tenantId(), "tenantはDBの値を使う");
-        assertFalse(evaluator.isRouteAllowed(admin, "GET", "/api/security/sessions"),
-                "action keyを導けない内部APIは拒否する（認証基盤の特例はCONFIRMの経路に無いため扱わない）");
-        assertTrue(evaluator.isRouteAllowed(admin, "GET", "/api/engineers"), "管理者は既知actionのmenuを迂回する");
+    }
+
+    /**
+     * routeの到達可否は {@code MenuPermissionFilter} と同じ（W3-15 review P3-1）。portalの拒否、action keyを導けない内部APIの
+     * 拒否と認証基盤の例外、menu判定対象外pathの素通し、画面pathのmenu由来action、管理者の迂回を5 roleで対照する。
+     */
+    @Test
+    void routeの到達可否はMenuPermissionFilterと5roleで一致する() throws Exception {
+        Map<String, Boolean> expected = new LinkedHashMap<>();
+        Map<String, Boolean> actual = new LinkedHashMap<>();
+        for (String role : ROLES) {
+            long userId = fixture.users.get(role);
+            ExplicitActor actor = evaluator.resolveActor(TENANT, userId, AS_OF).orElseThrow();
+            for (String[] route : ROUTES) {
+                String key = role + " " + route[0] + " " + route[1];
+                authenticate(userId);
+                expected.put(key, filterAllows(route[0], route[1]));
+                SecurityContextHolder.clearContext();
+                actual.put(key, evaluator.isRouteAllowed(actor, route[0], route[1]));
+            }
+        }
+        assertEquals(expected, actual, "MenuPermissionFilterとroute判定が一致すること");
+        assertFalse(expected.get("管理者 GET /api/portal/me"), "前提: 管理者でもportal APIは拒否される");
+        assertFalse(expected.get("管理者 GET /portal/home"), "前提: 管理者でもportal画面は拒否される");
+        assertTrue(expected.get("営業 GET /api/notifications"), "前提: menu判定対象外のpathは素通しになる");
+    }
+
+    /** route対照表（method, アプリ内path）。 */
+    private static final List<String[]> ROUTES = List.of(
+            new String[] {"GET", "/api/engineers"},
+            new String[] {"DELETE", "/api/engineers/1"},
+            new String[] {"GET", "/api/users"},
+            new String[] {"GET", "/api/customers"},
+            new String[] {"GET", "/api/contracts"},
+            new String[] {"POST", "/api/lifecycle/cases"},
+            new String[] {"GET", "/api/privacy/dsar"},
+            new String[] {"GET", "/api/portal"},
+            new String[] {"GET", "/api/portal/me"},
+            new String[] {"GET", "/portal"},
+            new String[] {"GET", "/portal/home"},
+            new String[] {"GET", "/api/security/sessions"},
+            new String[] {"GET", "/api/security/mfa/status"},
+            new String[] {"POST", "/api/security/mfa/1/reset"},
+            new String[] {"GET", "/api/notifications"},
+            new String[] {"GET", "/dashboard"},
+            new String[] {"GET", "/engineer/list"},
+            new String[] {"GET", "/user/list"},
+            new String[] {"GET", "/css/common.css"},
+            new String[] {"GET", "/"});
+
+    /** SecurityContextに置いた利用者で {@code MenuPermissionFilter} を通し、後続のchainへ進んだかを返す。 */
+    private boolean filterAllows(String method, String uri) throws Exception {
+        org.springframework.mock.web.MockHttpServletRequest request =
+                new org.springframework.mock.web.MockHttpServletRequest(method, uri);
+        org.springframework.mock.web.MockHttpServletResponse response =
+                new org.springframework.mock.web.MockHttpServletResponse();
+        org.springframework.mock.web.MockFilterChain chain = new org.springframework.mock.web.MockFilterChain();
+        menuPermissionFilter.doFilter(request, response, chain);
+        return chain.getRequest() != null && response.getStatus() != 403;
     }
 
     // ===== 判定の収集 =====

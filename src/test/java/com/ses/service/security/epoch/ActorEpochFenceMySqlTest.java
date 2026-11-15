@@ -8,6 +8,7 @@ import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.EngineerChangeRequest;
 import com.ses.entity.SysUser;
+import com.ses.mapper.AuthorizationEpochMapper;
 import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.EngineerCareerMapper;
 import com.ses.mapper.EngineerChangeRequestMapper;
@@ -53,6 +54,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.time.Clock;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -71,7 +73,8 @@ import static org.mockito.Mockito.mock;
  * 直列化されること、増分の回数・範囲・rollbackを確かめる。
  *
  * <ul>
- *   <li>reader先行・writer先行の両順序で待機し、commit後の値が+1。別の利用者のepochは変わらない（細粒度）。</li>
+ *   <li>無効化・role変更・権限group割当・削除のそれぞれで、reader先行・writer先行の両順序で待機し、commit後の値が+1。
+ *       別の利用者のepochは変わらない（細粒度）。削除は外側transactionなしで呼び、READ_COMMITTEDで実行されることも見る。</li>
  *   <li>role変更は入れ子の割当置換と合わせて+1。削除は+1。同じ割当集合の再保存は+0。</li>
  *   <li>REQUIRES_NEWの内側でcommitした増分は外側のrollbackで消えず、外側の増分は外側と一緒にrollbackされる。</li>
  *   <li>上限では409で業務更新ごとrollbackし、呼出側が409を握りつぶしてもcommitできない。</li>
@@ -109,6 +112,7 @@ class ActorEpochFenceMySqlTest {
     @Autowired private SysUserService sysUserService;
     @Autowired private PermissionGroupManagementService permissionGroupManagementService;
     @Autowired private AuthorizationEpochReader reader;
+    @Autowired private AuthorizationEpochMapper epochMapper;
     @Autowired private SysUserMapper sysUserMapper;
     @Autowired private EngineerMapper engineerMapper;
     @Autowired private EngineerAccountLinkMapper engineerAccountLinkMapper;
@@ -159,6 +163,98 @@ class ActorEpochFenceMySqlTest {
                 () -> reader.readActor(TENANT, target.getId()), "利用者無効化 writer先行");
 
         assertEquals(before + 1, read);
+    }
+
+    @Test
+    void role変更のreader先行ではwriterが解放を待ち入れ子の割当置換と合わせて1だけ進める() throws Exception {
+        SysUser target = insertUser("営業");
+        long before = actorEpoch(target.getId());
+
+        EpochFenceMySqlSupport.assertWriterWaitsForReader(jdbc, transactionManager, "sys_user", this::bindContexts,
+                () -> reader.readActor(TENANT, target.getId()), () -> {
+                    sysUserService.updateUser(target.getId(), roleOnly("HR"), authentication());
+                    return null;
+                }, "role変更 reader先行");
+
+        assertEquals(before + 1, actorEpoch(target.getId()));
+        assertEquals("HR", jdbc.queryForObject("SELECT role FROM sys_user WHERE id = ?", String.class, target.getId()));
+    }
+
+    @Test
+    void role変更のwriter先行ではreaderがcommitを待ち1進んだactor_epochを読む() throws Exception {
+        SysUser target = insertUser("マネージャー");
+        long before = actorEpoch(target.getId());
+
+        long read = EpochFenceMySqlSupport.assertReaderWaitsForWriter(jdbc, transactionManager, "sys_user",
+                this::bindContexts, () -> sysUserService.updateUser(target.getId(), roleOnly("HR"), authentication()),
+                () -> reader.readActor(TENANT, target.getId()), "role変更 writer先行");
+
+        assertEquals(before + 1, read);
+    }
+
+    @Test
+    void 権限group割当のreader先行ではwriterが解放を待ち1だけ進める() throws Exception {
+        SysUser target = insertUser("営業");
+        long before = actorEpoch(target.getId());
+        Set<Long> changed = Set.of(groupId("role-sales"), groupId("role-manager"));
+
+        EpochFenceMySqlSupport.assertWriterWaitsForReader(jdbc, transactionManager, "sys_user", this::bindContexts,
+                () -> reader.readActor(TENANT, target.getId()), () -> {
+                    permissionGroupManagementService.replaceAssignments(target.getId(), changed, authentication());
+                    return null;
+                }, "権限group割当 reader先行");
+
+        assertEquals(before + 1, actorEpoch(target.getId()));
+        assertEquals(changed, permissionGroupManagementService.assignedGroupIds(target.getId()));
+    }
+
+    @Test
+    void 権限group割当のwriter先行ではreaderがcommitを待ち1進んだactor_epochを読む() throws Exception {
+        SysUser target = insertUser("HR");
+        long before = actorEpoch(target.getId());
+        Set<Long> changed = Set.of(groupId("role-hr"));
+
+        long read = EpochFenceMySqlSupport.assertReaderWaitsForWriter(jdbc, transactionManager, "sys_user",
+                this::bindContexts,
+                () -> permissionGroupManagementService.replaceAssignments(target.getId(), changed, authentication()),
+                () -> reader.readActor(TENANT, target.getId()), "権限group割当 writer先行");
+
+        assertEquals(before + 1, read);
+    }
+
+    @Test
+    void 削除のreader先行ではwriterが宣言どおりREAD_COMMITTEDで解放を待ち1だけ進める() throws Exception {
+        SysUser target = insertUser("HR");
+        long before = actorEpoch(target.getId());
+
+        // 外側transactionを作らずに呼び、serviceが宣言した分離レベルのtransactionを実際に始めさせる（E-3）。
+        String isolation = EpochFenceMySqlSupport.assertDirectWriterWaitsForReaderAndReadIsolation(jdbc,
+                transactionManager, "sys_user", this::bindContexts, () -> reader.readActor(TENANT, target.getId()),
+                () -> sysUserService.deleteUser(target.getId(), authentication()), "利用者削除 reader先行");
+
+        assertEquals("READ-COMMITTED", isolation, "deleteUserはREAD_COMMITTEDで実行される");
+        assertEquals(before + 1, actorEpoch(target.getId()));
+        assertEquals(1, jdbc.queryForObject("SELECT deleted_flag FROM sys_user WHERE id = ?", Integer.class,
+                target.getId()));
+    }
+
+    @Test
+    void 削除のwriter先行ではreaderがcommitを待ち削除済みで1進んだ行を読む() throws Exception {
+        SysUser target = insertUser("HR");
+        long before = actorEpoch(target.getId());
+
+        // CONFIRMのreaderは削除済みの行を409にするため、ここでは同じFOR SHAREの読取をmapperで行い値と削除状態を見る。
+        long read = EpochFenceMySqlSupport.assertReaderWaitsForWriter(jdbc, transactionManager, "sys_user",
+                this::bindContexts, () -> sysUserService.deleteUser(target.getId(), authentication()), () -> {
+                    AuthorizationEpochMapper.EpochRow row = epochMapper.selectActorForShare(target.getId(), TENANT);
+                    assertFalse(row.usable(), "commit後の行は論理削除済み（readerは409にする）");
+                    return row.getEpoch();
+                }, "利用者削除 writer先行");
+
+        assertEquals(before + 1, read);
+        BusinessException unavailable = assertThrows(BusinessException.class, () -> EpochFenceMySqlSupport
+                .readCommitted(transactionManager).execute(status -> reader.readActor(TENANT, target.getId())));
+        assertEquals(409, unavailable.getCode());
     }
 
     @Test
@@ -331,6 +427,12 @@ class ActorEpochFenceMySqlTest {
 
     private int status(long userId) {
         return jdbc.queryForObject("SELECT status FROM sys_user WHERE id = ?", Integer.class, userId);
+    }
+
+    /** Flywayのseed（V63/V64）が作るrole既定groupのID（設定tenant）。 */
+    private long groupId(String groupKey) {
+        return jdbc.queryForObject("SELECT id FROM m_permission_group WHERE tenant_id = ? AND group_key = ? "
+                + "AND enabled = 1 AND deleted_flag = 0", Long.class, TENANT, groupKey);
     }
 
     private static long connectionIdOf(Connection connection) throws Exception {

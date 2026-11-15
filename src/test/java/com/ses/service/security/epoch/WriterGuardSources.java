@@ -138,6 +138,51 @@ final class WriterGuardSources {
         return null;
     }
 
+    /** 呼出しの開き括弧の直後から対応する閉じ括弧までの引数文字列（文字列literal内の括弧は数えない）。 */
+    static String callArguments(String source, int afterOpenParen) {
+        int depth = 1;
+        boolean inString = false;
+        for (int i = afterOpenParen; i < source.length(); i++) {
+            char c = source.charAt(i);
+            if (c == '"' && source.charAt(i - 1) != '\\') {
+                inString = !inString;
+            } else if (!inString && (c == '(' || c == '{' || c == '[')) {
+                depth++;
+            } else if (!inString && (c == ')' || c == '}' || c == ']') && --depth == 0) {
+                return source.substring(afterOpenParen, i);
+            }
+        }
+        return source.substring(afterOpenParen);
+    }
+
+    /**
+     * 括弧・文字列literalの外側にある区切り文字で分ける（引数の分割、{@code +} 連結・三項演算子の分解に使う）。
+     * {@code ::}（メソッド参照）は {@code :} の区切りとみなさない。
+     */
+    static List<String> splitTopLevel(String text, char separator) {
+        List<String> parts = new ArrayList<>();
+        int depth = 0;
+        boolean inString = false;
+        int start = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '"' && (i == 0 || text.charAt(i - 1) != '\\')) {
+                inString = !inString;
+            } else if (!inString && (c == '(' || c == '{' || c == '[')) {
+                depth++;
+            } else if (!inString && (c == ')' || c == '}' || c == ']')) {
+                depth--;
+            } else if (!inString && depth == 0 && c == separator
+                    && !(separator == ':' && ((i + 1 < text.length() && text.charAt(i + 1) == ':')
+                    || (i > 0 && text.charAt(i - 1) == ':')))) {
+                parts.add(text.substring(start, i).trim());
+                start = i + 1;
+            }
+        }
+        parts.add(text.substring(start).trim());
+        return parts;
+    }
+
     /** 1行に整えて短縮した表示（失敗時のmessage用）。 */
     static String abbreviate(String text) {
         String flat = text.replaceAll("\\s+", " ").trim();

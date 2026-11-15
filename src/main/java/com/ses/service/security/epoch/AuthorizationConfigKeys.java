@@ -11,7 +11,7 @@ import java.util.Set;
  *
  * <ul>
  *   <li>台帳のキーを書けるのは {@code SystemConfigServiceImpl.updateAll} だけで、全体epoch行を先にX lockしてから
- *       書く。{@code put} は同じtransactionで全体epoch行のX lockを取得済みでなければ台帳のキーを拒否する。</li>
+ *       書く。{@code put} は台帳のキーを常に拒否する。</li>
  *   <li>認可判定クラスが新しいキーを読み始めたら、ここへ追加しなければ {@code AuthorizationConfigKeyFenceTest} が失敗する
  *       （漏れが許可ではなく失敗になる）。</li>
  * </ul>

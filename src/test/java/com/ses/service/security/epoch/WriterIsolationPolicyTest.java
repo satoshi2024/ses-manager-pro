@@ -31,9 +31,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class WriterIsolationPolicyTest {
 
-    /** E-3の対象メソッド（W3-15分: 所属closeを内包する利用者の状態変更・削除）。 */
+    /**
+     * READ_COMMITTEDを宣言するwriter。W3-15分: 所属closeを内包する利用者の状態変更・削除（E-3）と、全体epoch行の
+     * lockより前の通常読取がlock後の旧値読取のsnapshotにならないようにする全体epochのwriter（W3-15 review P3-3）。
+     */
     private static final Map<Class<?>, List<String>> READ_COMMITTED_WRITERS = Map.of(
-            SysUserServiceImpl.class, List.of("updateUserStatus", "deleteUser"));
+            SysUserServiceImpl.class, List.of("updateUserStatus", "deleteUser"),
+            RoleMenuServiceImpl.class, List.of("replaceMenus"),
+            SystemConfigServiceImpl.class, List.of("updateAll"));
 
     /** W3-15でfenceへ接続したwriterクラス（NESTEDを置かない対象の下限）。 */
     private static final List<Class<?>> F1_WRITERS = List.of(
@@ -89,6 +94,18 @@ class WriterIsolationPolicyTest {
         }
         assertEquals(List.of(), violations, "epoch writerをNESTED（savepoint）の中で呼ばない（W3-10 review P3-6）");
         assertTrue(fenceUsers >= F1_WRITERS.size(), "fenceを使うクラスを検出できていること: " + fenceUsers);
+    }
+
+    @Test
+    void 全体epochのwriterは旧値をlocking_readで読み外側transactionのsnapshotに依存しない() {
+        // 外側transactionへ参加すると宣言した分離レベルは無視されるため、旧値はlocking readで読む（W3-15 review P3-3）。
+        String roleMenu = WriterGuardSources.mainSource("com/ses/service/impl/RoleMenuServiceImpl.java");
+        String systemConfig = WriterGuardSources.mainSource("com/ses/service/impl/SystemConfigServiceImpl.java");
+        assertTrue(roleMenu.contains("baseMapper.selectMenuIdsByRoleForUpdate(role)"),
+                "role menuの旧集合は t_role_menu のlocking readで読む");
+        assertTrue(systemConfig.contains("systemConfigMapper.selectByIdForUpdate(key)")
+                        && !systemConfig.contains("GLOBAL_EPOCH_LOCK_HELD"),
+                "認可キーの旧値・新値は m_system_config のlocking readで読み、putはlockの有無に関係なく認可キーを拒否する");
     }
 
     @Test

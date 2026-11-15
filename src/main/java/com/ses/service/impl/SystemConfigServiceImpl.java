@@ -9,12 +9,11 @@ import com.ses.service.SystemConfigService;
 import com.ses.service.security.epoch.AuthorizationConfigKeys;
 import com.ses.service.security.epoch.AuthorizationEpochAnchor;
 import com.ses.service.security.epoch.AuthorizationEpochFence;
-import com.ses.service.security.epoch.TransactionBoundState;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
@@ -31,22 +30,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * 値はConcurrentHashMapにキャッシュし、put/初回アクセス時にDBと同期する。
  *
  * <p>NF01 F1（計画 §4.1）: 認可述語が読むキー（{@link AuthorizationConfigKeys}）の値を変える更新は
- * {@link #updateAll} だけが行い、全体epoch行を最初にX lockしてから旧値を読み、値が変わった時だけ全体epochを
- * 同じtransactionで1進める。{@link #put} は、同じtransactionで全体epoch行のX lockを取得済みでなければ台帳のキーを
- * 拒否する（他経路から認可キーを書いて増分を漏らさない）。</p>
+ * {@link #updateAll} だけが行い、全体epoch行を最初にX lockしてから旧値をlocking readで読み、値が変わった時だけ
+ * 全体epochを同じtransactionで1進める。{@link #put} は台帳のキーを常に拒否する（他経路から認可キーを書いて増分を
+ * 漏らさない。同じtransactionで全体epoch行をlock済みでも、putからは書かせない）。</p>
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class SystemConfigServiceImpl implements SystemConfigService {
-
-    /** このtransactionで全体epoch行をX lock済みであることを示す、transactionに結び付けた印のキー。 */
-    private static final Object GLOBAL_EPOCH_LOCK_HELD = new Object() {
-        @Override
-        public String toString() {
-            return "SystemConfigServiceImpl.GLOBAL_EPOCH_LOCK_HELD";
-        }
-    };
 
     private final SystemConfigMapper systemConfigMapper;
     private final OutboundUrlGuard outboundUrlGuard;
@@ -222,14 +213,17 @@ public class SystemConfigServiceImpl implements SystemConfigService {
 
     @Override
     public void put(String key, String value, String description) {
-        ConfigSchema schema = SCHEMAS.get(key);
-        if (schema == null) {
-            throw com.ses.common.exception.BusinessException.of(400, "error.config.unknownKey");
+        ConfigSchema schema = requireSchema(key);
+        if (AuthorizationConfigKeys.contains(key)) {
+            // 認可キーは updateAll（全体epoch行のX lock → 旧値のlocking read → 書込み → 増分）以外から書かせない
+            // （計画 §4.1、§4.5）。全体epoch行をlock済みのtransactionでも put からは書かせない（W3-15 review P3-5）。
+            throw new IllegalStateException("認可キーは updateAll でのみ更新できます: " + key);
         }
-        if (AuthorizationConfigKeys.contains(key) && !globalEpochLockHeld()) {
-            // 認可キーは updateAll（全体epoch行のX lock → 旧値read → 書込み → 増分）以外から書かせない（計画 §4.1、§4.5）。
-            throw new IllegalStateException("認可キーは全体epoch行をX lockしたtransactionでのみ更新できます: " + key);
-        }
+        write(key, value, description, schema);
+    }
+
+    /** schema検証済みのキーを書く（{@link #put} と、全体epochのfenceを通した {@link #updateAll} の共通部分）。 */
+    private void write(String key, String value, String description, ConfigSchema schema) {
         if (value != null && !value.isBlank()) {
             if (schema.type == ConfigType.BOOLEAN || schema.type == ConfigType.ENUM) {
                 if (schema.allowedValues != null && !schema.allowedValues.contains(value)) {
@@ -294,8 +288,15 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         return systemConfigMapper.selectList(null);
     }
 
+    /**
+     * 画面からの一括更新。認可キーを含む場合は全体epoch行を最初にX lockし、旧値をlocking readで読む。
+     *
+     * <p>READ_COMMITTED にするのは、REPEATABLE READ で全体epoch行のlockより前に通常読取をしていると、旧値の読取が
+     * lock前のsnapshotを返し得るため（W3-15 review P3-3）。外側transactionへ参加した場合は分離レベルが外側のままになるので、
+     * 旧値・新値は分離レベルに依存しないlocking readで読む。</p>
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public void updateAll(List<SystemConfig> configs) {
         // システム管理キーの拒否はDBに触れる前に行う（無効な要求で全体epoch行をlockしない）。
         Set<String> authorizationKeys = new TreeSet<>();
@@ -312,9 +313,8 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         // NF01 F1（計画 §4.1）: payloadに認可キーがあれば、旧値を読む前に全体epoch行（lock rank 1）をX lockする。
         if (!authorizationKeys.isEmpty()) {
             authorizationEpochFence.lockForUpdate(AuthorizationEpochAnchor.global());
-            TransactionBoundState.current(GLOBAL_EPOCH_LOCK_HELD, () -> Boolean.TRUE);
         }
-        // 認可キーの旧値はcacheではなくDBから読む（cacheはafterCommitでしか失効しない）。
+        // 認可キーの旧値はcacheではなくDBからlocking readで読む（cacheはafterCommitでしか失効しない）。
         Map<String, String> beforeAuthorizationValues = readAuthorizationValues(authorizationKeys);
         String previousScopeValue = authorizationKeys.contains(AuthorizationConfigKeys.SALES_OWN_DATA_ONLY)
                 ? beforeAuthorizationValues.get(AuthorizationConfigKeys.SALES_OWN_DATA_ONLY)
@@ -338,7 +338,8 @@ public class SystemConfigServiceImpl implements SystemConfigService {
                 if (AuthorizationConfigKeys.SALES_OWN_DATA_ONLY.equals(c.getConfigKey())) {
                     finalScopeValue = c.getConfigValue();
                 }
-                put(c.getConfigKey(), c.getConfigValue(), c.getDescription());
+                // 認可キーも含め、全体epoch行をlockしたこの経路だけが内部の書込みを直接呼ぶ（putは認可キーを拒否する）。
+                write(c.getConfigKey(), c.getConfigValue(), c.getDescription(), requireSchema(c.getConfigKey()));
             }
         }
         if (!authorizationKeys.isEmpty()) {
@@ -352,19 +353,24 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         }
     }
 
-    /** 指定した認可キーの現在のDB値（行が無い・値がNULLのキーはNULLで持つ）。比較のため順序を固定する。 */
+    /**
+     * 指定した認可キーの現在のDB値（行が無い・値がNULLのキーはNULLで持つ）。比較のため順序を固定する。
+     * locking readのため、外側transactionのsnapshotに関係なく最新のcommit値（と自transactionの書込み）を読む。
+     */
     private Map<String, String> readAuthorizationValues(Set<String> keys) {
         Map<String, String> values = new TreeMap<>();
         for (String key : keys) {
-            SystemConfig row = systemConfigMapper.selectById(key);
+            SystemConfig row = systemConfigMapper.selectByIdForUpdate(key);
             values.put(key, row == null ? null : row.getConfigValue());
         }
         return values;
     }
 
-    /** 同じ実transactionで全体epoch行をX lock済みか（REQUIRES_NEW等で外側がsuspendされている間は取得済みとみなさない）。 */
-    private static boolean globalEpochLockHeld() {
-        return TransactionSynchronizationManager.isActualTransactionActive()
-                && TransactionSynchronizationManager.getResource(GLOBAL_EPOCH_LOCK_HELD) != null;
+    private static ConfigSchema requireSchema(String key) {
+        ConfigSchema schema = SCHEMAS.get(key);
+        if (schema == null) {
+            throw BusinessException.of(400, "error.config.unknownKey");
+        }
+        return schema;
     }
 }

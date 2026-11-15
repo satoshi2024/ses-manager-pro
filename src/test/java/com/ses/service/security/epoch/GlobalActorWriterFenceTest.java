@@ -57,20 +57,53 @@ class GlobalActorWriterFenceTest {
     private static final Set<String> PERMISSION_SQL_WRITERS = Set.of("UserPermissionGroupMapper#deleteAllForUser");
 
     /**
-     * {@code SysUserMapper} の書込みを呼んでよいクラスと、その理由・担当バッチ。
-     * EngineerServiceImpl（status、W3-16a F-5）とResignationGateChecker（status、W3-16b）はfence接続を後続バッチへ委ねた。
+     * {@code SysUserMapper} の書込みを呼んでよいクラスごとの契約（件数・メソッド・書いてよい列）。ファイル単位では許さず、
+     * 契約外の書込みを1件でも足すと失敗する（W3-15 review P3-2）。
+     *
+     * <ul>
+     *   <li>EngineerServiceImpl（要員削除時の連携ユーザー停止。entityの全体更新が残る唯一の既知例外）は W3-16a F-5 で
+     *       status列の列限定更新＋fence接続へ改める。改めたらこの契約も更新すること。</li>
+     *   <li>ResignationGateChecker（退社完了時の連携ユーザー停止）は W3-16b でfence接続する。</li>
+     * </ul>
      */
-    private static final Map<String, String> SYS_USER_MAPPER_WRITERS = Map.of(
-            "com/ses/service/impl/EngineerChangeRequestApprovalAdapter.java", "email列だけ（F-7、W3-15で列限定化）",
-            "com/ses/service/security/impl/AccountLockServiceImpl.java", "failed_count・locked_untilだけ（updateLockState）",
-            "com/ses/service/impl/EngineerServiceImpl.java", "要員削除時の連携ユーザー停止（W3-16a F-5でfence接続）",
-            "com/ses/service/lifecycle/ResignationGateChecker.java", "退社完了時の連携ユーザー停止（W3-16bでfence接続）");
+    private static final Map<String, SysUserWriteContract> SYS_USER_MAPPER_WRITERS = Map.of(
+            "com/ses/service/impl/EngineerChangeRequestApprovalAdapter.java",
+            new SysUserWriteContract("email列だけ（F-7、W3-15で列限定化）", 1, Set.of("update"), Set.of("email")),
+            "com/ses/service/security/impl/AccountLockServiceImpl.java",
+            new SysUserWriteContract("failed_count・locked_untilだけ（列限定の注釈SQL）", 3, Set.of("updateLockState"), Set.of()),
+            "com/ses/service/impl/EngineerServiceImpl.java",
+            new SysUserWriteContract("要員削除時の連携ユーザー停止（W3-16a F-5で列限定・fence接続へ）", 1,
+                    Set.of("updateById"), Set.of()),
+            "com/ses/service/lifecycle/ResignationGateChecker.java",
+            new SysUserWriteContract("退社完了時の連携ユーザー停止（W3-16bでfence接続）", 1, Set.of("update"),
+                    Set.of("status", "updated_at")));
 
-    /** SysUser entityの全体更新（{@code updateById(entity)}）を残してよい既知の例外（後続バッチで列限定へ改める）。 */
+    /** SysUser entityの全体更新（{@code updateById(entity)}・{@code update(entity, wrapper)}）を残してよい既知の例外。 */
     private static final Set<String> SYS_USER_ENTITY_UPDATE_EXCEPTIONS = Set.of(
             "com/ses/service/impl/EngineerServiceImpl.java");
 
+    /**
+     * SysUserServiceImpl 内の書込み呼出しの契約（メソッド → 件数）。fenceを通す入口（create/update/status/delete/
+     * パスワード変更）以外の書込みを足すと失敗する。
+     */
+    private static final Map<String, Integer> SYS_USER_SERVICE_IMPL_WRITES = Map.of(
+            "save", 1, "updateById", 1, "update", 2, "removeById", 1);
+
+    /** SysUserServiceImpl の列限定更新（UpdateWrapper）が書いてよい列（status、本人のpassword変更の2列）。 */
+    private static final Set<String> SYS_USER_SERVICE_IMPL_SET_COLUMNS = Set.of(
+            "status", "password", "password_change_required");
+
+    /** 権限表・sys_userのmapperを基底に持ってよいServiceImpl（それ以外に継承書込みの入口を増やさない）。 */
+    private static final Map<String, String> GUARDED_SERVICE_IMPLS = Map.of(
+            "SysUserMapper", "com/ses/service/impl/SysUserServiceImpl.java",
+            "RoleMenuMapper", "com/ses/service/impl/RoleMenuServiceImpl.java");
+
     private static final String SYS_USER_SERVICE_IMPL = "com/ses/service/impl/SysUserServiceImpl.java";
+    private static final Pattern SET_COLUMN = Pattern.compile("\\.set\\s*\\(\\s*\"(\\w+)\"");
+    private static final Pattern IMPL_WRITE_CALL = Pattern.compile(
+            "(?<![\\w.])((?:this|super|baseMapper|getBaseMapper\\(\\))\\s*\\.\\s*)?(save|saveBatch|saveOrUpdate"
+                    + "|saveOrUpdateBatch|update|updateById|updateBatchById|remove|removeById|removeByIds|removeByMap"
+                    + "|removeBatchByIds|lambdaUpdate|insert|insertOrUpdate|delete|deleteById|deleteBatchIds|deleteByMap)\\s*\\(");
     private static final String MAPPER_PACKAGE = "com/ses/mapper/";
 
     private static final Pattern MAPPER_WRITE_CALL = Pattern.compile(
@@ -173,9 +206,9 @@ class GlobalActorWriterFenceTest {
     }
 
     @Test
-    void SysUserMapperの書込み呼出しは許可クラスの列限定更新だけ() {
+    void SysUserMapperの書込み呼出しは許可クラスの契約どおりの列限定更新だけ() {
         List<String> violations = new ArrayList<>();
-        Set<String> seenWriters = new TreeSet<>();
+        Map<String, Integer> seen = new java.util.TreeMap<>();
         for (Map.Entry<String, String> entry : WriterGuardSources.mainSources().entrySet()) {
             String relative = entry.getKey();
             String source = entry.getValue();
@@ -186,44 +219,55 @@ class GlobalActorWriterFenceTest {
                     continue;
                 }
                 String method = call.group(2);
-                String rest = source.substring(call.end());
-                if (!SYS_USER_MAPPER_WRITERS.containsKey(relative)) {
+                SysUserWriteContract contract = SYS_USER_MAPPER_WRITERS.get(relative);
+                if (contract == null) {
                     violations.add(relative + ": SysUserMapper." + method + "（許可クラス外の書込み）");
                     continue;
                 }
-                seenWriters.add(relative);
-                if (method.equals("updateById") || (method.equals("update") && !rest.stripLeading().startsWith("null"))) {
-                    if (!SYS_USER_ENTITY_UPDATE_EXCEPTIONS.contains(relative)) {
-                        violations.add(relative + ": SysUser entityの全体更新 " + method + "（列限定のUpdateWrapperにすること）");
-                    }
-                } else if (relative.endsWith("AccountLockServiceImpl.java") && !method.equals("updateLockState")) {
-                    violations.add(relative + ": AccountLockServiceImplはupdateLockStateだけを使う: " + method);
-                } else if (relative.endsWith("EngineerChangeRequestApprovalAdapter.java") && !method.equals("update")) {
-                    violations.add(relative + ": 変更申請adapterはemail列の列限定updateだけを使う: " + method);
+                seen.merge(relative, 1, Integer::sum);
+                String statement = statementFrom(source, call.end());
+                if (!contract.methods().contains(method)) {
+                    violations.add(relative + ": 契約外の書込みメソッド SysUserMapper." + method + "（" + contract.reason() + "）");
+                }
+                boolean entityUpdate = method.equals("updateById")
+                        || (method.equals("update") && !statement.stripLeading().startsWith("null"));
+                if (entityUpdate && !SYS_USER_ENTITY_UPDATE_EXCEPTIONS.contains(relative)) {
+                    violations.add(relative + ": SysUser entityの全体更新 " + method + "（列限定のUpdateWrapperにすること）");
+                }
+                Set<String> columns = setColumns(statement);
+                if (!contract.setColumns().containsAll(columns) || (method.equals("update") && columns.isEmpty())) {
+                    violations.add(relative + ": 契約外の列を書いています " + columns + "（許可 " + contract.setColumns() + "）");
                 }
             }
         }
-        String adapter = WriterGuardSources.mainSource("com/ses/service/impl/EngineerChangeRequestApprovalAdapter.java");
-        if (!adapter.contains(".set(\"email\", email)") || adapter.contains("sysUserMapper.updateById")) {
-            violations.add("EngineerChangeRequestApprovalAdapter: 連携ユーザーはemail列だけを更新すること（F-7）");
-        }
-        assertEquals(List.of(), violations, "sys_userの書込みはfenceを通す許可クラスの列限定更新だけ（計画 §4.5 U4a）");
-        assertTrue(seenWriters.containsAll(Set.of(
-                        "com/ses/service/impl/EngineerChangeRequestApprovalAdapter.java",
-                        "com/ses/service/security/impl/AccountLockServiceImpl.java")),
-                "既知のSysUserMapper書込みを検出できていること: " + seenWriters);
+        SYS_USER_MAPPER_WRITERS.forEach((relative, contract) -> {
+            if (seen.getOrDefault(relative, 0) != contract.count()) {
+                violations.add(relative + ": SysUserMapperの書込みは " + contract.count() + " 件の契約: 実際 "
+                        + seen.getOrDefault(relative, 0) + " 件（" + contract.reason() + "）");
+            }
+        });
+        assertEquals(List.of(), violations, "sys_userの書込みはfenceを通す許可クラスの契約どおりの更新だけ（計画 §4.5 U4a）");
     }
 
     @Test
-    void SysUserServiceの継承書込みは他クラスから呼ばず実装内の全体更新はupdateUserだけ() {
+    void SysUserServiceの継承書込みは他クラスから呼ばず実装内の書込みは契約どおり() {
         List<String> violations = new ArrayList<>();
+        Pattern inheritedTypes = Pattern.compile("(?:IService\\s*<\\s*(?:[\\w.]+\\.)?SysUser\\s*>)\\s+(\\w+)\\s*(?=[;,)=])");
+        Pattern providerTypes = Pattern.compile(
+                "ObjectProvider\\s*<\\s*(?:[\\w.]+\\.)?SysUserService(?:Impl)?\\s*>\\s+(\\w+)\\s*(?=[;,)=])");
         for (Map.Entry<String, String> entry : WriterGuardSources.mainSources().entrySet()) {
             String relative = entry.getKey();
             if (relative.equals(SYS_USER_SERVICE_IMPL)) {
                 continue;
             }
             String source = entry.getValue();
-            for (String variable : WriterGuardSources.variablesOfType(source, "SysUserService")) {
+            Set<String> variables = new TreeSet<>(WriterGuardSources.variablesOfType(source, "SysUserService"));
+            variables.addAll(WriterGuardSources.variablesOfType(source, "SysUserServiceImpl"));
+            Matcher inherited = inheritedTypes.matcher(source);
+            while (inherited.find()) {
+                variables.add(inherited.group(1));
+            }
+            for (String variable : variables) {
                 Matcher call = SERVICE_INHERITED_WRITE.matcher(source);
                 while (call.find()) {
                     if (call.group(1).equals(variable)) {
@@ -232,22 +276,63 @@ class GlobalActorWriterFenceTest {
                     }
                 }
             }
+            Matcher provider = providerTypes.matcher(source);
+            while (provider.find()) {
+                Matcher call = Pattern.compile("\\b" + Pattern.quote(provider.group(1))
+                        + "\\s*\\.\\s*get(?:Object|IfAvailable|IfUnique)\\s*\\(\\s*\\)\\s*\\.\\s*(save\\w*|update\\w*|remove\\w*|lambdaUpdate)\\s*\\(")
+                        .matcher(source);
+                while (call.find()) {
+                    violations.add(relative + ": ObjectProvider経由のSysUserService継承書込み " + call.group(1));
+                }
+            }
         }
+
         String impl = WriterGuardSources.mainSource(SYS_USER_SERVICE_IMPL);
         int updateUser = impl.indexOf("public void updateUser(");
         int nextMethod = impl.indexOf("public void ", updateUser + 1);
-        Matcher entityUpdate = Pattern.compile("(?<![\\w.])updateById\\s*\\(").matcher(impl);
-        int entityUpdates = 0;
-        while (entityUpdate.find()) {
-            entityUpdates++;
-            if (entityUpdate.start() < updateUser || entityUpdate.start() > nextMethod) {
+        Map<String, Integer> writes = new java.util.TreeMap<>();
+        Matcher call = IMPL_WRITE_CALL.matcher(impl);
+        while (call.find()) {
+            String method = call.group(2);
+            if (call.group(1) != null) {
+                violations.add(SYS_USER_SERVICE_IMPL + ": " + call.group(1).trim() + method
+                        + " の直接書込み（継承した列限定の入口だけを使う）");
+            }
+            writes.merge(method, 1, Integer::sum);
+            if (method.equals("updateById") && (call.start() < updateUser || call.start() > nextMethod)) {
                 violations.add(SYS_USER_SERVICE_IMPL + ": updateUser以外のSysUser全体更新（列限定のUpdateWrapperにすること）");
             }
+            if (method.equals("update")) {
+                String statement = statementFrom(impl, call.end());
+                Set<String> columns = setColumns(statement);
+                if (!statement.stripLeading().startsWith("new UpdateWrapper") || columns.isEmpty()
+                        || !SYS_USER_SERVICE_IMPL_SET_COLUMNS.containsAll(columns)) {
+                    violations.add(SYS_USER_SERVICE_IMPL + ": update は認可列status・本人のpassword変更だけの列限定更新: "
+                            + columns);
+                }
+            }
         }
-        if (entityUpdates != 1) {
-            violations.add(SYS_USER_SERVICE_IMPL + ": fenceを通す全体更新はupdateUserの1箇所だけ: " + entityUpdates);
-        }
+        assertEquals(SYS_USER_SERVICE_IMPL_WRITES, writes,
+                "SysUserServiceImplの書込み（create・updateUser・status・password変更・delete）の件数契約");
         assertEquals(List.of(), violations, "SysUserServiceの書込み経路（計画 §4.5 U4a）");
+    }
+
+    @Test
+    void 権限表とsys_userのmapperを基底に持つServiceImplを増やさない() {
+        List<String> violations = new ArrayList<>();
+        Pattern serviceImpl = Pattern.compile("extends\\s+(?:[\\w.]+\\.)?ServiceImpl\\s*<\\s*(?:[\\w.]+\\.)?(\\w+Mapper)\\s*,");
+        Set<String> guardedMappers = new TreeSet<>(PERMISSION_MAPPERS);
+        guardedMappers.add("SysUserMapper");
+        for (Map.Entry<String, String> entry : WriterGuardSources.mainSources().entrySet()) {
+            Matcher matcher = serviceImpl.matcher(entry.getValue());
+            while (matcher.find()) {
+                String mapper = matcher.group(1);
+                if (guardedMappers.contains(mapper) && !entry.getKey().equals(GUARDED_SERVICE_IMPLS.get(mapper))) {
+                    violations.add(entry.getKey() + ": " + mapper + " を基底に持つServiceImpl（継承書込みの入口が増える）");
+                }
+            }
+        }
+        assertEquals(List.of(), violations, "権限表・sys_userの継承書込みの入口は既存のServiceImplだけ");
     }
 
     @Test
@@ -262,6 +347,36 @@ class GlobalActorWriterFenceTest {
     }
 
     // ===== helper =====
+
+    /** sys_userを書いてよいクラスの契約（理由・件数・メソッド・{@code .set("列")} で書いてよい列）。 */
+    private record SysUserWriteContract(String reason, int count, Set<String> methods, Set<String> setColumns) {
+    }
+
+    /** 呼出しの開き括弧の直後から、対応する閉じ括弧までの引数の文字列（文字列literal内の括弧は数えない）。 */
+    private static String statementFrom(String source, int afterOpenParen) {
+        int depth = 1;
+        boolean inString = false;
+        for (int i = afterOpenParen; i < source.length(); i++) {
+            char c = source.charAt(i);
+            if (c == '"' && source.charAt(i - 1) != '\\') {
+                inString = !inString;
+            } else if (!inString && c == '(') {
+                depth++;
+            } else if (!inString && c == ')' && --depth == 0) {
+                return source.substring(afterOpenParen, i);
+            }
+        }
+        return source.substring(afterOpenParen);
+    }
+
+    private static Set<String> setColumns(String statement) {
+        Set<String> columns = new TreeSet<>();
+        Matcher matcher = SET_COLUMN.matcher(statement);
+        while (matcher.find()) {
+            columns.add(matcher.group(1));
+        }
+        return columns;
+    }
 
     private static List<String> anchorTableViolations(String location, String sql) {
         List<String> violations = new ArrayList<>();

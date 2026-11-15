@@ -6,7 +6,6 @@ import com.ses.config.LoginUser;
 import com.ses.config.OidcSecurityProperties;
 import com.ses.entity.AuditLog;
 import com.ses.entity.PermissionGroup;
-import com.ses.entity.RoleMenu;
 import com.ses.entity.SysUser;
 import com.ses.entity.SystemConfig;
 import com.ses.entity.UserPermissionGroup;
@@ -105,7 +104,7 @@ class GlobalActorEpochWriterTest {
         RoleMenuMapper roleMenuMapper = mock(RoleMenuMapper.class);
         MenuCacheService menuCache = mock(MenuCacheService.class);
         RoleMenuServiceImpl service = roleMenuService(roleMenuMapper, menuCache);
-        when(roleMenuMapper.selectList(any())).thenReturn(List.of(roleMenu(11L)));
+        when(roleMenuMapper.selectMenuIdsByRoleForUpdate(anyString())).thenReturn(List.of(11L));
 
         service.replaceMenus("営業", List.of());
         service.replaceMenus("営業", List.of());
@@ -113,14 +112,14 @@ class GlobalActorEpochWriterTest {
         verify(epochMapper, times(1)).incrementGlobal();
         InOrder order = inOrder(epochMapper, roleMenuMapper);
         order.verify(epochMapper).selectGlobalForUpdate();
-        order.verify(roleMenuMapper).selectList(any());
+        order.verify(roleMenuMapper).selectMenuIdsByRoleForUpdate("営業");
         order.verify(roleMenuMapper).delete(any());
         order.verify(epochMapper).incrementGlobal();
         verify(menuCache, times(2)).invalidate();
 
         completeTransaction();
         beginTransaction();
-        when(roleMenuMapper.selectList(any())).thenReturn(List.of());
+        when(roleMenuMapper.selectMenuIdsByRoleForUpdate(anyString())).thenReturn(List.of());
         service.replaceMenus("営業", List.of());
         verify(epochMapper, times(1)).incrementGlobal();
         verify(epochMapper, times(3)).selectGlobalForUpdate();
@@ -143,7 +142,7 @@ class GlobalActorEpochWriterTest {
         RoleMenuMapper roleMenuMapper = mock(RoleMenuMapper.class);
         MenuCacheService menuCache = mock(MenuCacheService.class);
         RoleMenuServiceImpl service = roleMenuService(roleMenuMapper, menuCache);
-        when(roleMenuMapper.selectList(any())).thenReturn(List.of(roleMenu(11L)));
+        when(roleMenuMapper.selectMenuIdsByRoleForUpdate(anyString())).thenReturn(List.of(11L));
         when(epochMapper.incrementGlobal()).thenReturn(0);
 
         BusinessException error = assertThrows(BusinessException.class, () -> service.replaceMenus("HR", List.of()));
@@ -157,7 +156,7 @@ class GlobalActorEpochWriterTest {
     void REQUIRES_NEWの内側transactionは外側の増分済み集合を共有せず別に全体epochを進める() {
         RoleMenuMapper roleMenuMapper = mock(RoleMenuMapper.class);
         RoleMenuServiceImpl service = roleMenuService(roleMenuMapper, mock(MenuCacheService.class));
-        when(roleMenuMapper.selectList(any())).thenReturn(List.of(roleMenu(11L)));
+        when(roleMenuMapper.selectMenuIdsByRoleForUpdate(anyString())).thenReturn(List.of(11L));
 
         service.replaceMenus("営業", List.of());
         List<TransactionSynchronization> outer = suspend();
@@ -176,21 +175,24 @@ class GlobalActorEpochWriterTest {
     void 認可キーの値が変われば全体epochを1回進め同じ値では進めない() {
         SystemConfigMapper configMapper = mock(SystemConfigMapper.class);
         SystemConfigServiceImpl service = new SystemConfigServiceImpl(configMapper, new OutboundUrlGuard(), fence);
-        when(configMapper.selectById(SCOPE_KEY)).thenReturn(config("false"), config("false"), config("true"));
+        when(configMapper.selectByIdForUpdate(SCOPE_KEY)).thenReturn(config("false"), config("true"));
+        when(configMapper.selectById(SCOPE_KEY)).thenReturn(config("false"));
 
         service.updateAll(List.of(new SystemConfig(SCOPE_KEY, "true", "営業の担当データ限定")));
 
         verify(epochMapper, times(1)).incrementGlobal();
         InOrder order = inOrder(epochMapper, configMapper);
         order.verify(epochMapper).selectGlobalForUpdate();
-        // 旧値の読取とput内の既存行確認（2回）→ 書込み → 書込み後の値の読取 → 増分
-        order.verify(configMapper, times(2)).selectById(SCOPE_KEY);
-        order.verify(configMapper).updateById(any(SystemConfig.class));
+        // 旧値のlocking read → 書込み内の既存行確認 → 書込み → 書込み後の値のlocking read → 増分
+        order.verify(configMapper).selectByIdForUpdate(SCOPE_KEY);
         order.verify(configMapper).selectById(SCOPE_KEY);
+        order.verify(configMapper).updateById(any(SystemConfig.class));
+        order.verify(configMapper).selectByIdForUpdate(SCOPE_KEY);
         order.verify(epochMapper).incrementGlobal();
 
         completeTransaction();
         beginTransaction();
+        when(configMapper.selectByIdForUpdate(SCOPE_KEY)).thenReturn(config("true"));
         when(configMapper.selectById(SCOPE_KEY)).thenReturn(config("true"));
         service.updateAll(List.of(new SystemConfig(SCOPE_KEY, "true", "営業の担当データ限定")));
         verify(epochMapper, times(1)).incrementGlobal();
@@ -211,16 +213,22 @@ class GlobalActorEpochWriterTest {
     }
 
     @Test
-    void 認可キーは全体epoch行をlockしていないtransactionからputで書けない() {
+    void 認可キーはputからは全体epoch行をlock済みのtransactionでも書けない() {
         SystemConfigMapper configMapper = mock(SystemConfigMapper.class);
         SystemConfigServiceImpl service = new SystemConfigServiceImpl(configMapper, new OutboundUrlGuard(), fence);
+        when(configMapper.selectByIdForUpdate(SCOPE_KEY)).thenReturn(config("true"));
+        when(configMapper.selectById(SCOPE_KEY)).thenReturn(config("true"));
 
         assertThrows(IllegalStateException.class, () -> service.put(SCOPE_KEY, "true", "直接put"));
+        // 同じtransactionでupdateAll（全体epoch行のlockを伴う）が済んだ後も、putからは書かせない（W3-15 review P3-5）。
+        service.updateAll(List.of(new SystemConfig(SCOPE_KEY, "true", "同じ値の再保存")));
+        assertThrows(IllegalStateException.class, () -> service.put(SCOPE_KEY, "false", "lock後のput"));
         completeTransaction();
         assertThrows(IllegalStateException.class, () -> service.put(SCOPE_KEY, "true", "transaction外のput"));
 
         verify(configMapper, never()).insert(any(SystemConfig.class));
-        verify(configMapper, never()).updateById(any(SystemConfig.class));
+        verify(configMapper, times(1)).updateById(any(SystemConfig.class));
+        verify(epochMapper, never()).incrementGlobal();
     }
 
     @Test
@@ -339,10 +347,6 @@ class GlobalActorEpochWriterTest {
         assignment.setUserId(userId);
         assignment.setGroupId(groupId);
         return assignment;
-    }
-
-    private static RoleMenu roleMenu(Long menuId) {
-        return RoleMenu.builder().role("営業").menuId(menuId).build();
     }
 
     private static SystemConfig config(String value) {

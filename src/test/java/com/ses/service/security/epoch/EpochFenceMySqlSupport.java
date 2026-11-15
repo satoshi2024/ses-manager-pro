@@ -166,6 +166,78 @@ final class EpochFenceMySqlSupport {
         }
     }
 
+    /**
+     * reader先行で、writerを外側transactionなしに直接呼ぶ（serviceが自分で宣言した分離レベルのtransactionを始める）。
+     * writerがreaderの共有lockを待っている間に、待機側接続の {@code transaction_isolation} を
+     * {@code performance_schema.variables_by_thread} から読んで返す（E-3の宣言が実行時に効いていることの確認）。
+     */
+    static String assertDirectWriterWaitsForReaderAndReadIsolation(JdbcTemplate jdbc, PlatformTransactionManager manager,
+                                                                   String table, Runnable threadSetup,
+                                                                   Supplier<Long> readerCall, Runnable writerCall,
+                                                                   String label) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch readerLocked = new CountDownLatch(1);
+        CountDownLatch releaseReader = new CountDownLatch(1);
+        AtomicLong readerConnection = new AtomicLong();
+        try {
+            Future<Long> reader = pool.submit(() -> {
+                threadSetup.run();
+                return readCommitted(manager).execute(status -> {
+                    try {
+                        readerConnection.set(connectionId(jdbc));
+                        return readerCall.get();
+                    } finally {
+                        readerLocked.countDown();
+                        awaitQuietly(releaseReader);
+                        status.setRollbackOnly();
+                    }
+                });
+            });
+            if (!readerLocked.await(WAIT_SECONDS, TimeUnit.SECONDS) || reader.isDone()) {
+                fail(label + ": readerがFOR SHAREのlockを保持できなかった: " + outcome(reader));
+            }
+            String sharedLockId = requireSingleSharedLock(jdbc, readerConnection.get(), table, label);
+            Future<Object> writer = pool.submit(call(threadSetup, () -> {
+                writerCall.run();
+                return null;
+            }));
+            long requester = 0;
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS);
+            while (requester == 0 && System.nanoTime() < deadline) {
+                if (writer.isDone()) {
+                    fail(label + ": writerが待たずに終了した: " + outcome(writer));
+                }
+                for (WaitEdge edge : InnoDbRecordLockWaits.waitEdges(jdbc, null, readerConnection.get(), table, "PRIMARY")) {
+                    if (sharedLockId.equals(edge.blockerLockId()) && "WAITING".equals(edge.requesterStatus())
+                            && InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES.contains(edge.requesterMode())) {
+                        requester = edge.requesterConnectionId();
+                    }
+                }
+                if (requester == 0) {
+                    Thread.sleep(20);
+                }
+            }
+            if (requester == 0) {
+                throw new AssertionError(label + ": writerが" + table + "でreaderの共有lockを待つことを確認できなかった; "
+                        + InnoDbRecordLockWaits.describeWaitsForBlocker(jdbc, readerConnection.get()));
+            }
+            String isolation = jdbc.queryForObject("""
+                    SELECT v.VARIABLE_VALUE
+                    FROM performance_schema.variables_by_thread v
+                    JOIN performance_schema.threads t ON t.THREAD_ID = v.THREAD_ID
+                    WHERE t.PROCESSLIST_ID = ? AND v.VARIABLE_NAME = 'transaction_isolation'
+                    """, String.class, requester);
+            assertFalse(writer.isDone(), label + ": writerはreaderの解放まで待つこと");
+            releaseReader.countDown();
+            reader.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            writer.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            return isolation;
+        } finally {
+            releaseReader.countDown();
+            pool.shutdownNow();
+        }
+    }
+
     /** readerが当該表の主キーで共有record lockをちょうど1件保持していることを確かめ、そのlock IDを返す。 */
     static String requireSingleSharedLock(JdbcTemplate jdbc, long readerConnection, String table, String label)
             throws InterruptedException {

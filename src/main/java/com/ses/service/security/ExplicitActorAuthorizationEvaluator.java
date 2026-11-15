@@ -122,15 +122,29 @@ public class ExplicitActorAuthorizationEvaluator {
     }
 
     /**
-     * routeへの到達可否（{@code MenuPermissionFilter} の action判定 → 管理者迂回 → 最長一致menu判定 と同じ順序）。
-     * portal・認証基盤等のfilter固有の特例は扱わない（CONFIRMの提出・確認routeは内部APIに限るため）。
+     * routeへの到達可否を {@code MenuPermissionFilter} と同じ規則・順序で判定する（menu判定対象外のpathの素通し →
+     * portalの拒否 → action keyを導けない内部APIの拒否（認証基盤の例外を除く）→ action判定 → 管理者迂回 → 最長一致menu判定）。
+     *
+     * <p>{@code uri} はcontext pathを除いたアプリ内path（{@code RequestPaths.pathWithinApplication} と同じ）で渡す。
+     * menu判定対象外のpath（{@code /logout}・静的資源・通知一覧等）はfilterと同じくtrueを返すため、CONFIRMの呼出側
+     * （W3-21a）は提出・確認の固定routeだけを渡すこと（W3-15 review P3-1）。</p>
      */
     public boolean isRouteAllowed(ExplicitActor actor, String httpMethod, String uri) {
         if (actor == null || !StringUtils.hasText(httpMethod) || !StringUtils.hasText(uri)) {
             return false;
         }
+        if (!isMenuControlledPath(uri)) {
+            return true;
+        }
+        // Portalは専用SecurityFilterChainと権限modelが入るまで既存内部roleへ流さない（filterと同じ）。
+        if (uri.equals("/portal") || uri.startsWith("/portal/")
+                || uri.equals("/api/portal") || uri.startsWith("/api/portal/")) {
+            return false;
+        }
         String actionKey = ActionPermissionResolver.resolve(httpMethod, uri);
-        if (uri.startsWith("/api/") && actionKey == null) {
+        if (uri.startsWith("/api/") && actionKey == null
+                && !ActionPermissionResolver.isAuthenticationInfrastructure(httpMethod, uri)
+                && !(uri.equals("/api/auth") || uri.startsWith("/api/auth/"))) {
             return false;
         }
         List<Menu> menus = menuMapper.selectList(new LambdaQueryWrapper<Menu>().orderByAsc(Menu::getSortOrder));
@@ -348,6 +362,14 @@ public class ExplicitActorAuthorizationEvaluator {
     private Set<String> roleMenuKeys(String role) {
         List<String> keys = roleMenuMapper.selectMenuKeysByRole(role);
         return keys == null ? Set.of() : Set.copyOf(keys.stream().filter(Objects::nonNull).toList());
+    }
+
+    /** {@code MenuPermissionFilter#isMenuControlledPath} と同じ判定。 */
+    private static boolean isMenuControlledPath(String uri) {
+        if (uri.startsWith("/api/notifications") && !uri.startsWith("/api/notifications/generate")) {
+            return false;
+        }
+        return !uri.equals("/logout") && !uri.equals("/") && (uri.startsWith("/api/") || !uri.contains("."));
     }
 
     private static int matchedPrefixLength(Menu menu, String uri) {
