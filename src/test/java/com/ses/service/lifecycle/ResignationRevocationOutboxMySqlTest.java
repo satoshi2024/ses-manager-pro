@@ -58,6 +58,7 @@ class ResignationRevocationOutboxMySqlTest {
     @Autowired UserOrganizationMapper assignments;
     @Autowired LifecycleCaseMapper cases;
     @Autowired PlatformTransactionManager manager;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @MockBean ExternalAccountProviderClient provider;
     // 完了とoutboxのcommit境界を対象とし、個別の退社ゲート項目はU10/既存回帰で検証する。
     @MockBean ResignationGateChecker gate;
@@ -85,6 +86,18 @@ class ResignationRevocationOutboxMySqlTest {
         lenient().when(provider.requestRevoke(any())).thenReturn(true);
     }
     @AfterEach void clear() { AccountingTenantContextHolder.clear(); }
+
+    @Test void 外側transactionなしの完了経路は実connectionでREAD_COMMITTEDを使う() {
+        ExternalAccountReference row = account(2L);
+        LifecycleCase resignation = createCase("RESIGNATION", "ACTIVE");
+        when(gate.evaluate(any(), any())).thenAnswer(invocation -> {
+            assertThat(jdbc.queryForObject("SELECT @@transaction_isolation", String.class)).isEqualTo("READ-COMMITTED");
+            verify(provider, never()).requestRevoke(any());
+            return ResignationGateResultDto.builder().passed(true).build();
+        });
+        lifecycle.completeCase(resignation.getId(), actor.getId());
+        assertThat(references.selectById(row.getId()).getExternalSyncStatus()).isEqualTo(SENT);
+    }
 
     @Test void 完了と全法人の要求登録は同じcommitに入り送信はcommit後だけ行う() {
         ExternalAccountReference a = account(1L), b = account(2L);

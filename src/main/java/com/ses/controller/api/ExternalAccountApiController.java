@@ -39,13 +39,13 @@ public class ExternalAccountApiController {
     @PreAuthorize("hasAnyRole('管理者', 'HR')")
     public ApiResult<List<ExternalAccountReferenceDto>> pendingRevocations() {
         return ApiResult.success(externalAccountService.pendingRevocations().stream()
-                .map(ExternalAccountReferenceDto::from).toList());
+                .map(ExternalAccountReferenceDto::forPendingRevocation).toList());
     }
 
     @PostMapping("/{id}/re-request-revoke")
     @PreAuthorize("hasRole('管理者')")
     public ApiResult<ExternalAccountReferenceDto> reRequestRevoke(@PathVariable Long id) {
-        return ApiResult.success(ExternalAccountReferenceDto.from(
+        return ApiResult.success(ExternalAccountReferenceDto.forPendingRevocation(
                 externalAccountService.reRequestUnknownRevoke(id, SecurityUtils.currentUserId())));
     }
 

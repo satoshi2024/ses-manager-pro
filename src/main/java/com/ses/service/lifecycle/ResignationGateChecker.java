@@ -157,8 +157,8 @@ public class ResignationGateChecker {
         // 6. 貸与資産の返却 (ASSET_RETURN)
         LifecycleTask assetTask = findTaskByCode(lcCase.getId(), "RESIGN_ASSET_RETURN");
         com.ses.dto.asset.OffboardingClearanceResultDto offboarding =
-                assetOffboardingService.checkOffboardingClearance(
-                        engineerId, lcCase.getId(), assetTask != null ? assetTask.getId() : null);
+                assetOffboardingService.checkOffboardingClearanceForTenant(
+                        lcCase.getTenantId(), engineerId, lcCase.getId(), assetTask != null ? assetTask.getId() : null);
         boolean blockersClear = offboarding.getUnreturnedAssetCount() == 0
                 && offboarding.getUnregisterableAccountCount() == 0
                 && offboarding.getUnreleasedLicenseCount() == 0;
@@ -175,7 +175,7 @@ public class ResignationGateChecker {
                 // 資産・licenseの承認済み免除でも、法人不明の外部アカウントは要求を登録できない。
                 assetReturned = offboarding.getUnregisterableAccountCount() == 0;
                 assetWaived = assetReturned;
-                assetMsg = !assetReturned ? "所有法人が不明な外部アカウントの失効要求を登録できません" : blockersClear
+                assetMsg = !assetReturned ? "所有法人不明・例外保留・空の既存keyを持つ外部アカウントの失効要求を登録できません" : blockersClear
                         ? "例外承認により返却免除済み（3大blockerなし）"
                         : "承認済み例外により資産・ライセンスの条件を免除済み。外部アカウントは完了時に失効要求を登録します";
             } else {
@@ -189,6 +189,10 @@ public class ResignationGateChecker {
             assetReturned = blockersClear;
             assetMsg = blockersClear ? "貸与・アカウント・ライセンスのblockerなし" : "退社blockerが残存しています";
         }
+        assetMsg += "（完了時に失効要求を登録: "
+                + Math.max(0, offboarding.getUnrevokedAccountCount() - offboarding.getRegisteredAccountCount()
+                - offboarding.getUnregisterableAccountCount())
+                + "件、失効要求登録済み・確認待ち: " + offboarding.getRegisteredAccountCount() + "件）";
         if (!assetReturned) allPassed = false;
         items.add(GateItemResult.builder()
                 .code("ASSET_RETURN")

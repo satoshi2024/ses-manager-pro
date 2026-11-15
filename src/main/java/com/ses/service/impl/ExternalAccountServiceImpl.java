@@ -55,17 +55,6 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
     private final com.ses.service.ExternalAccountRevocationOutbox revocationOutbox;
     private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
-    private static String maskIdentifier(String id) {
-        if (!StringUtils.hasText(id)) return "***";
-        int atIndex = id.indexOf('@');
-        if (atIndex > 2) {
-            return id.substring(0, 2) + "***" + id.substring(atIndex);
-        } else if (id.length() > 4) {
-            return id.substring(0, 2) + "***" + id.substring(id.length() - 2);
-        }
-        return "***";
-    }
-
     /** 互換入口もproxy経由でREAD_COMMITTEDを開始し、default methodの自己呼出しを避ける。 */
     @Override
     @Transactional(rollbackFor = Exception.class, isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
@@ -122,7 +111,7 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
         revocationOutbox.enqueueLateRegistration(ref, actorUserId);
 
         log.info("External account reference registered: id={}, system={}, identifier={}",
-                ref.getId(), system.getSystemCode(), maskIdentifier(accountIdentifier));
+                ref.getId(), system.getSystemCode(), com.ses.service.ExternalAccountRevocationStates.maskIdentifier(accountIdentifier));
         return ref;
     }
 
@@ -243,7 +232,7 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
     @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public int processPendingRevokePollJob() {
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = com.ses.service.ExternalAccountRevocationStates.seconds(LocalDateTime.now());
         List<ExternalAccountReference> pendingList = externalAccountReferenceMapper.selectPendingForTenant(tenantId, now);
 
         int processed = 0;
@@ -253,8 +242,8 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
                 continue;
             }
             // 各レコードのclaim時点でleaseを開始する。job開始時刻を使い回すと、長いbatchでleaseが短くなる。
-            LocalDateTime claimNow = LocalDateTime.now();
-            LocalDateTime leaseUntil = claimNow.plus(providerConfirmationLease());
+            LocalDateTime claimNow = com.ses.service.ExternalAccountRevocationStates.seconds(LocalDateTime.now());
+            LocalDateTime leaseUntil = com.ses.service.ExternalAccountRevocationStates.seconds(claimNow.plus(providerConfirmationLease()));
             if (externalAccountReferenceMapper.claimRevokePoll(
                     ref.getId(), ref.getVersion(), claimNow, leaseUntil,
                     tenantId, ref.getLegalEntityId()) != 1) {
@@ -298,7 +287,7 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
                                             LocalDateTime now) {
         // claim後に別worker/手動処理がversionを進めていれば、古いworkerのbackoffで上書きしない。
         int retries = ref.getRetryCount() != null ? ref.getRetryCount() + 1 : 1;
-        long backoffMinutes = Math.min(1440, (long) Math.pow(2, Math.min(retries, 8)) * 5);
+        long backoffMinutes = Math.min(1440, 5L << Math.min(retries, 9));
         String nextStatus;
         String nextSyncStatus;
         String nextErrorMessage;
@@ -315,7 +304,11 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
             nextSyncStatus = "SYNC_PENDING";
             nextErrorMessage = "Provider revoke pending confirmation (retry=" + retries + ")";
         }
-        if (ref.getExternalSyncStatus() != null && ref.getExternalSyncStatus().startsWith("REVOKE_")) {
+        if (com.ses.service.ExternalAccountRevocationStates.UNKNOWN.equals(ref.getExternalSyncStatus())) {
+            // ACK前の結果不明は確認成功だけで解消する。PENDING/timeout/例外で送信済みと推測しない。
+            nextStatus = "UNKNOWN";
+            nextSyncStatus = com.ses.service.ExternalAccountRevocationStates.UNKNOWN;
+        } else if (ref.getExternalSyncStatus() != null && ref.getExternalSyncStatus().startsWith("REVOKE_")) {
             nextSyncStatus = "UNKNOWN".equals(nextStatus)
                     ? com.ses.service.ExternalAccountRevocationStates.UNKNOWN
                     : com.ses.service.ExternalAccountRevocationStates.SENT;
@@ -354,13 +347,17 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
 
     @Override
     public List<ExternalAccountReference> getActiveAccountsByAssignee(String assigneeType, Long assigneeId) {
-        String tenant = AccountingTenantContextHolder.requireTenantContext();
-        if ("ENGINEER".equals(assigneeType)) {
-            return externalAccountReferenceMapper.selectUnrevokedForEngineer(tenant, assigneeId);
-        }
         Scope scope = requireCurrentScope();
         return externalAccountReferenceMapper.selectActiveByAssignee(
                 assigneeType, assigneeId, scope.tenantId(), scope.legalEntityId());
+    }
+
+    @Override
+    public List<ExternalAccountReference> getUnrevokedAccountsForEngineer(String tenantId, Long engineerId) {
+        if (!AccountingTenantContextHolder.requireTenantContext().equals(tenantId)) {
+            throw BusinessException.of(403, "TENANT_CONTEXT_MISMATCH");
+        }
+        return externalAccountReferenceMapper.selectUnrevokedForEngineer(tenantId, engineerId);
     }
 
     @Override

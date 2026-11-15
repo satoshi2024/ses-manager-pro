@@ -25,7 +25,17 @@ import static org.mockito.Mockito.*;
 @SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:revocation-outbox-h2;DB_CLOSE_DELAY=-1;MODE=MySQL")
 @ActiveProfiles("test")
 @Transactional
+@org.springframework.context.annotation.Import(ResignationGateRevocationOutboxH2Test.FractionalClockConfiguration.class)
 class ResignationGateRevocationOutboxH2Test {
+    @org.springframework.boot.test.context.TestConfiguration
+    static class FractionalClockConfiguration {
+        @org.springframework.context.annotation.Bean
+        @org.springframework.context.annotation.Primary
+        java.time.Clock fractionalClock() {
+            return java.time.Clock.fixed(java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+                    .plusNanos(875_000_000), java.time.ZoneId.of("Asia/Tokyo"));
+        }
+    }
     @Autowired ExternalAccountRevocationOutbox outbox;
     @Autowired ExternalAccountReferenceMapper references;
     @Autowired ExternalAccountSystemMapper systems;
@@ -42,6 +52,7 @@ class ResignationGateRevocationOutboxH2Test {
     @Autowired ExternalAccountService accountService;
     @MockBean ExternalAccountProviderClient provider;
     @MockBean com.ses.service.security.LegalEntityContextService legalContext;
+    @Autowired java.time.Clock clock;
     String tenant;
     Engineer engineer;
     ExternalAccountSystem system;
@@ -205,6 +216,83 @@ class ResignationGateRevocationOutboxH2Test {
     @org.springframework.security.test.context.support.WithMockUser(roles = "HR")
     void 再要求APIはHRにも許可しない() {
         assertThatThrownBy(() -> api.reRequestRevoke(1L)).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+    }
+
+    @Test void 小数秒のClockでも秒精度の登録直後に指定IDだけを送信する() {
+        // H2では期限精度とID選択を検証し、実commit境界はM10と単体試験で検証する。
+        ExternalAccountReference backlog = account(1L), current = account(2L);
+        outbox.request(backlog.getId(), tenant, 1L, "backlog-" + backlog.getId(), null);
+        outbox.request(current.getId(), tenant, 2L, "current-" + current.getId(), null);
+        var queued = references.selectById(current.getId());
+        assertThat(queued.getNextRetryAt().getNano()).isZero();
+        assertThat(java.time.LocalDateTime.now(clock).getNano()).isEqualTo(875_000_000);
+        var switches = mock(com.ses.config.feature.FeatureSwitches.class);
+        when(switches.isEnabled(com.ses.config.feature.Feature.NF01)).thenReturn(true);
+        when(provider.requestRevoke(any())).thenReturn(true);
+        var directDispatcher = new ExternalAccountRevocationDispatcher(references, outbox, provider, switches, clock);
+        assertThat(directDispatcher.dispatchRegistered(java.util.List.of(current.getId()))).isEqualTo(1);
+        assertThat(references.selectById(current.getId()).getExternalSyncStatus()).isEqualTo(SENT);
+        assertThat(references.selectById(backlog.getId()).getExternalSyncStatus()).isEqualTo(REQUESTED);
+        verify(provider).requestRevoke(argThat(row -> row.getId().equals(current.getId())
+                && row.getAccountIdentifier().equals("private-identifier@example.invalid")));
+        verify(provider, never()).requestRevoke(argThat(row -> row.getId().equals(backlog.getId())));
+    }
+
+    @Test void UNKNOWNの確認待ちとtimeoutでも再要求のgenerationを失わない() {
+        ExternalAccountReference row = account(1L);
+        outbox.enqueueForResignation(lifecycle("RESIGNATION", "ACTIVE"), null);
+        outbox.markSendUnknown(outbox.claim(references.selectById(row.getId()), LocalDateTime.now().plusMinutes(1)));
+        Object target = org.springframework.test.util.AopTestUtils.getUltimateTargetObject(accountService);
+        for (var outcome : new ExternalAccountProviderClient.RevokeConfirmationStatus[]{
+                ExternalAccountProviderClient.RevokeConfirmationStatus.PENDING,
+                ExternalAccountProviderClient.RevokeConfirmationStatus.FAILED_OR_TIMEOUT}) {
+            org.springframework.test.util.ReflectionTestUtils.invokeMethod(target, "persistConfirmationOutcome",
+                    references.selectById(row.getId()), outcome, LocalDateTime.now());
+            var stored = references.selectById(row.getId());
+            assertThat(stored.getStatus()).isEqualTo("UNKNOWN");
+            assertThat(stored.getExternalSyncStatus()).isEqualTo(UNKNOWN);
+            assertThat(accountService.pendingRevocations()).extracting(ExternalAccountReference::getId).contains(row.getId());
+        }
+        outbox.reRequestUnknown(row.getId(), tenant, 1L, null);
+        assertThat(references.selectById(row.getId()).getIdempotencyKey()).endsWith(":g2");
+    }
+
+    @Test void 取り消した再入社案件は最新終結と再入社の両判定から除外する() {
+        LifecycleCase resignation = lifecycle("RESIGNATION", "COMPLETED");
+        lifecycle("JOIN", "CANCELLED");
+        lifecycle("REINSTATEMENT", "CANCELLED");
+        assertThat(cases.selectLatestCompletedResignationWithoutReentry(tenant, engineer.getId()).getId()).isEqualTo(resignation.getId());
+        ExternalAccountReference late = account(1L);
+        outbox.enqueueLateRegistration(late, null);
+        assertThat(references.selectById(late.getId()).getExternalSyncStatus()).isEqualTo(REQUESTED);
+    }
+
+    @Test void 例外保留は登録不能として完了を止め原状態を保持する() {
+        ExternalAccountReference held = account(1L); held.setStatus("EXCEPTION_HOLD"); references.updateById(held);
+        assertThat(clearance.checkOffboardingClearanceForTenant(tenant, engineer.getId(), null, null).getUnregisterableAccountCount()).isEqualTo(1);
+        assertThatThrownBy(() -> outbox.enqueueForResignation(lifecycle("RESIGNATION", "ACTIVE"), null))
+                .isInstanceOf(com.ses.common.exception.BusinessException.class);
+        assertThat(references.selectById(held.getId()).getStatus()).isEqualTo("EXCEPTION_HOLD");
+    }
+
+    @Test void NF09のDTOは原値を維持しNF01の追加DTOだけマスクする() {
+        ExternalAccountReference row = account(1L);
+        assertThat(com.ses.dto.asset.ExternalAccountReferenceDto.from(row).getAccountIdentifier()).isEqualTo(row.getAccountIdentifier());
+        assertThat(com.ses.dto.asset.ExternalAccountReferenceDto.forPendingRevocation(row).getAccountIdentifier()).isEqualTo("pr***@example.invalid");
+        assertThatThrownBy(() -> clearance.checkOffboardingClearanceForTenant("foreign-" + tenant, engineer.getId(), null, null))
+                .isInstanceOf(com.ses.common.exception.BusinessException.class);
+    }
+
+    @Test void 登録済みと登録不能と未登録を重複しない件数として返す() {
+        ExternalAccountReference registered = account(1L); registered.setIdempotencyKey("registered-request"); references.updateById(registered);
+        ExternalAccountReference held = account(1L); held.setStatus("EXCEPTION_HOLD"); held.setIdempotencyKey("held-request"); references.updateById(held);
+        account(2L);
+        ExternalAccountReference blank = account(2L); blank.setIdempotencyKey(" "); references.updateById(blank);
+        var result = clearance.checkOffboardingClearanceForTenant(tenant, engineer.getId(), null, null);
+        assertThat(result.getUnrevokedAccountCount()).isEqualTo(4);
+        assertThat(result.getRegisteredAccountCount()).isEqualTo(1);
+        assertThat(result.getUnregisterableAccountCount()).isEqualTo(2);
+        assertThat(result.getUnrevokedAccountCount() - result.getRegisteredAccountCount() - result.getUnregisterableAccountCount()).isEqualTo(1);
     }
 
     private ExternalAccountReference account(Long legal) {

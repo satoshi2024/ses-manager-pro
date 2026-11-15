@@ -83,14 +83,16 @@ class LifecycleResignationGateActionsUnitTest {
                 .caseId(resignation.getId()).taskCode("RESIGN_ASSET_RETURN").status("WAIVED").build();
         asset.setId(101L);
         when(lifecycleTaskMapper.selectByCaseId(resignation.getId())).thenReturn(List.of(asset));
-        when(assetOffboardingService.checkOffboardingClearance(any(), any(), any()))
+        when(assetOffboardingService.checkOffboardingClearanceForTenant(any(), any(), any(), any()))
                 .thenReturn(com.ses.dto.asset.OffboardingClearanceResultDto.builder()
-                        .waived(true).unregisterableAccountCount(1).unrevokedAccountCount(1).build());
+                        .waived(true).unregisterableAccountCount(2).unrevokedAccountCount(4).registeredAccountCount(1).build());
         var item = com.ses.service.accounting.AccountingTenantContextHolder.runWithTenant(TENANT,
                 () -> checker.evaluate(resignation, engineer())).getItems().stream()
                 .filter(result -> "ASSET_RETURN".equals(result.getCode())).findFirst().orElseThrow();
         assertFalse(item.isPassed());
         assertFalse(item.isWaived());
+        assertTrue(item.getMessage().contains("完了時に失効要求を登録: 1件"));
+        assertTrue(item.getMessage().contains("失効要求登録済み・確認待ち: 1件"));
     }
 
     @Test

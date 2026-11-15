@@ -15,6 +15,7 @@ public interface LifecycleCaseMapper extends BaseMapper<LifecycleCase> {
             + "AND c.lifecycle_type = 'RESIGNATION' "
             + "AND NOT EXISTS (SELECT 1 FROM t_lifecycle_case newer WHERE newer.tenant_id = c.tenant_id "
             + "AND newer.engineer_id = c.engineer_id AND newer.deleted_flag = 0 AND newer.id > c.id "
+            + "AND NOT (newer.status = 'CANCELLED' AND newer.lifecycle_type IN ('JOIN','REINSTATEMENT')) "
             + "AND (newer.status IN ('COMPLETED','CANCELLED') OR newer.lifecycle_type IN ('JOIN','REINSTATEMENT'))) "
             + "ORDER BY c.id DESC LIMIT 1")
     LifecycleCase selectLatestCompletedResignationWithoutReentry(@Param("tenantId") String tenantId,

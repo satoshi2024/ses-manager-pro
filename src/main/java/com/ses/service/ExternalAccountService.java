@@ -13,6 +13,9 @@ import java.util.List;
  */
 public interface ExternalAccountService {
 
+    /** 退社gate専用。案件tenantを明示し、本人用の法人scopeとは分離する。 */
+    List<ExternalAccountReference> getUnrevokedAccountsForEngineer(String tenantId, Long engineerId);
+
     /**
      * 外部アカウント参照を新規登録する
      */

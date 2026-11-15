@@ -587,6 +587,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
             ExternalAccountReference requested = externalAccountService.requestRevokeWithIdempotency(ref.getId(), idempotencyKey, 1L);
 
             assertThat(requested.getStatus()).isEqualTo("PENDING_CONFIRMATION");
+            assertThat(requested.getExternalSyncStatus()).isEqualTo("REVOKE_REQUESTED");
             assertThat(requested.getIdempotencyKey()).isEqualTo(idempotencyKey);
             assertThat(requested.getNextRetryAt()).isNotNull();
             assertThat(requested.getRevokeConfirmedAt()).isNull();
@@ -599,7 +600,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
             assertThatThrownBy(() -> externalAccountService.requestRevokeWithIdempotency(
                     ref.getId(), "REVOKE-DIFFERENT-" + ref.getId(), 1L))
                     .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("別の失効要求");
+                    .hasMessage("error.common.optimisticLock");
 
             // 応答形式を分類できない場合だけ UNKNOWN とし、退社 blocker を維持する
             ExternalAccountReference unknownRef = ExternalAccountReference.builder()
@@ -615,10 +616,13 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
             mockClient.setMockStatus(unknownRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.UNKNOWN);
             ExternalAccountReference unknown = externalAccountService.requestRevokeWithIdempotency(
                     unknownRef.getId(), "REVOKE-UNKNOWN-" + unknownRef.getId(), 1L);
-            assertThat(unknown.getStatus()).isEqualTo("UNKNOWN");
+            assertThat(unknown.getStatus()).isEqualTo("PENDING_CONFIRMATION");
+            assertThat(unknown.getExternalSyncStatus()).isEqualTo("REVOKE_REQUESTED");
             assertThat(unknown.getRevokeConfirmedAt()).isNull();
 
             // ジョブ実行時刻やテスト順序に依存せず、この2件を確実にポーリング対象へする。
+            requested = externalAccountReferenceMapper.selectById(requested.getId());
+            unknown = externalAccountReferenceMapper.selectById(unknown.getId());
             requested.setNextRetryAt(LocalDateTime.now().minusMinutes(1));
             unknown.setNextRetryAt(LocalDateTime.now().minusMinutes(1));
             assertThat(externalAccountReferenceMapper.updateById(requested)).isEqualTo(1);
@@ -697,6 +701,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
             assertThat(pendingRef.getStatus()).isEqualTo("PENDING_CONFIRMATION");
 
             // DBの時刻精度や実行順序に依存せず、このテストの対象だけをポーリング対象にする。
+            pendingRef = externalAccountReferenceMapper.selectById(pendingRef.getId());
             pendingRef.setNextRetryAt(LocalDateTime.now().minusMinutes(1));
             assertThat(externalAccountReferenceMapper.updateById(pendingRef)).isEqualTo(1);
 
@@ -790,7 +795,8 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         assertThat(result.getUnreturnedAssetCount()).isGreaterThanOrEqualTo(1);
         assertThat(result.getUnrevokedAccountCount()).isGreaterThanOrEqualTo(1);
         assertThat(result.getUnreleasedLicenseCount()).isGreaterThanOrEqualTo(1);
-        assertThat(result.getBlockingItems()).hasSize(3);
+        assertThat(result.getBlockingItems()).hasSize(2);
+        assertThat(result.getUnregisterableAccountCount()).isZero();
 
         ApprovalRequest approval = ApprovalRequest.builder()
                 .requestNo("AR-BLK-9999")

@@ -33,8 +33,23 @@ public class ExternalAccountRevocationDispatcher {
     public int dispatchPending() {
         if (!switches.isEnabled(Feature.NF01)) return 0;
         String tenant = AccountingTenantContextHolder.requireTenantContext();
+        return dispatchRows(tenant, references.selectOutboxForTenant(tenant, now()));
+    }
+
+    /** 即時送信は当該transactionが新たに登録したIDだけ。積残しはschedulerへ任せる。 */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
+    public int dispatchRegistered(java.util.List<Long> registered) {
+        if (!switches.isEnabled(Feature.NF01)) return 0;
+        String tenant = AccountingTenantContextHolder.requireTenantContext();
+        java.util.List<ExternalAccountReference> rows = registered.stream().distinct().sorted()
+                .map(id -> references.selectOutboxByIdForTenant(id, tenant, now()))
+                .filter(java.util.Objects::nonNull).toList();
+        return dispatchRows(tenant, rows);
+    }
+
+    private int dispatchRows(String tenant, java.util.List<ExternalAccountReference> rows) {
         int sent = 0;
-        for (ExternalAccountReference row : references.selectOutboxForTenant(tenant, LocalDateTime.now(clock))) {
+        for (ExternalAccountReference row : rows) {
             if (!tenant.equals(row.getTenantId()) || row.getLegalEntityId() == null) continue;
             try {
                 if (SENDING.equals(row.getExternalSyncStatus())) {
@@ -43,7 +58,7 @@ public class ExternalAccountRevocationDispatcher {
                 }
                 Duration timeout = provider.revokeRequestTimeout();
                 if (timeout == null || timeout.isNegative() || timeout.isZero()) timeout = Duration.ofSeconds(30);
-                ExternalAccountReference claim = outbox.claim(row, LocalDateTime.now(clock).plus(timeout).plusSeconds(30));
+                ExternalAccountReference claim = outbox.claim(row, seconds(now().plus(timeout).plusSeconds(30)));
                 if (claim == null) continue;
                 // claim commit後だけI/Oする。停止・応答後のDB障害はlease回収時にUNKNOWNへ倒す。
                 boolean accepted;
@@ -62,4 +77,6 @@ public class ExternalAccountRevocationDispatcher {
         }
         return sent;
     }
+
+    private LocalDateTime now() { return seconds(LocalDateTime.now(clock)); }
 }

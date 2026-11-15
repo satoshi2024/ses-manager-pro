@@ -22,8 +22,11 @@ public class OffboardingClearanceResultDto {
     /** 未失効の有効外部アカウント数 */
     private int unrevokedAccountCount;
 
-    /** 所有法人が不明なため失効要求を登録できない外部アカウント数 */
+    /** 所有法人不明・例外保留・既存の空keyで失効要求を登録できない外部アカウント数 */
     private int unregisterableAccountCount;
+
+    /** 失効要求を登録済みの未失効アカウント数 */
+    private int registeredAccountCount;
 
     /** 未解放の有効ライセンス数 */
     private int unreleasedLicenseCount;

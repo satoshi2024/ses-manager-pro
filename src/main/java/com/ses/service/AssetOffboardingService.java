@@ -7,6 +7,10 @@ import com.ses.dto.asset.OffboardingClearanceResultDto;
  */
 public interface AssetOffboardingService {
 
+    /** 退社gateは案件のtenantを明示する。現在のtenantと異なる場合は拒否する。 */
+    OffboardingClearanceResultDto checkOffboardingClearanceForTenant(String tenantId, Long engineerId,
+                                                                     Long lifecycleCaseId, Long lifecycleTaskId);
+
     /**
      * 要員の退社前クリアランスチェックを実施する
      * 未返却端末、未失効アカウント、未解放ライセンスの有無を検証

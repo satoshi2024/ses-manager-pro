@@ -151,25 +151,25 @@ NF01（機能スイッチ `FEATURE_NF01_ENABLED`、既定OFF）はCONFIRM完成�
 
 ## 6. 外部アカウント失効要求のoutbox（W3-11 / Q-6）
 
-- 対象は案件tenant内の要員に紐付く全法人の未失効アカウント。所有法人が分かる行は要求登録可能として退社ゲートを通す。法人がNULLの行だけ登録不能として止める。資産返却とライセンス解放の条件は残る。資産・ライセンスの承認済み免除があっても、所有法人不明の外部アカウントは完了を止める。
+- 対象は案件tenant内の要員に紐付く全法人の未失効アカウント。所有法人が分かる行は要求登録可能として退社ゲートを通す。法人がNULLまたはEXCEPTION_HOLDの行は登録不能として止め、保留を自動解除しない。資産返却とライセンス解放の条件は残る。資産・ライセンスの承認済み免除があっても、所有法人不明・例外保留の外部アカウントは完了を止める。
 - 完了transactionはengineer行を先にロックし、各account行をID順にロックして要求と履歴を登録する。同じcommitに案件完了が入り、provider I/Oはcommit後だけ行う。定期回収はNF01スイッチとShedLockで制御する。
 - 状態は REVOKE_REQUESTED → REVOKE_SENDING → REVOKE_SENT。明確な不受理はREVOKE_SEND_FAILEDとして指数的に再試行し、待機上限は1440分。通信結果不明・ACK前停止では、providerに同じkeyの冪等再送保証が無ければUNKNOWN / REVOKE_SEND_UNKNOWNとし、無条件に再送しない。未送信の3状態は確認pollの対象外。
-- keyはlifecycle-resign:{caseId}:{accountId}:g{n}。UNKNOWNを管理者が再要求するとg{n+1}となる。旧keyの自動確認は新しい要求を確定できない。登録後は識別子・権限・状態を直接変更しない。状態とkeyの変更はt_asset_eventに追記する。適用済みV129の列コメントは変更せず、新値の定義はentityと本節を正本とする。
-- 退社後の新規登録は、最新の終結案件が完了済みRESIGNATIONで、後続にJOIN/REINSTATEMENT案件が無い場合だけ自動登録する。後続の再入社案件はDRAFTでも自動失効を止める。再入社起票とaccount登録は同じengineer行ロックで直列化する。
+- keyはlifecycle-resign:{caseId}:{accountId}:g{n}。UNKNOWNを管理者が再要求するとg{n+1}となる。旧keyの自動確認は新しい要求を確定できない。登録後は識別子・権限・状態を直接変更しない。状態とkeyの変更はt_asset_eventに追記する。人間が登録・再要求した場合はHUMAN/MANUAL_API、workerはSYSTEM/SCHEDULER_POLLまたはPROVIDER/PROVIDER_SYNCとする。outbox履歴のdetailsとidempotency_key列はいずれもkeyのSHA-256で、要求の原keyは参照台帳に保持する。適用済みV129の列コメントは変更せず、新値の定義はentityと本節を正本とする。
+- 退社後の新規登録は、最新の終結案件が完了済みRESIGNATIONで、後続にJOIN/REINSTATEMENT案件が無い場合だけ自動登録する。後続の再入社案件はDRAFTでも自動失効を止める。CANCELLEDのJOIN/REINSTATEMENTは最新終結・後続再入社の両判定から除く。前後関係は案件IDの作成順であり、完了時刻順ではない。再入社起票とaccount登録は同じengineer行ロックで直列化する。
 - 登録の新規transactionは互換入口を含めREAD_COMMITTEDとする。外側transactionに参加する場合も、最初のscope読取前に実connectionの分離レベルを確認し、READ_COMMITTED以外は409で拒否する。既存のREPEATABLE_READ transactionから登録する呼出元は境界を分離して再設計する。
 
 ### 6.1 送信失敗・結果不明の対応
 
 1. 管理者・HRは通知を確認し、外部アカウント画面で「失効要求の未処理一覧（全法人）」を選ぶ。APIはGET /api/external-accounts/pending-revocations（最大100行）。識別子はマスクされる。reference IDと法人で対象を特定する。
 2. 当日中にHRが担当を割り当てる。送信失敗・結果不明が1件でもあれば通知とERRORログで検知し、解消まで毎営業日確認する。大量障害時はNF01を停止して外部システム側を先に確認する。停止中の要求は台帳に残る。
-3. provider=noneでは自動失効しない。外部システムの管理者が対象accountの無効化、既存session、offline session、tokenの失効を個別に実施・確認し、証跡を保管する。識別子の原値が必要な場合は、権限を持つDBAがreference ID・tenant・法人を条件に元台帳を照合し、承認済みの安全な経路で連携先管理者へ伝える（通知やチケット本文へ転記しない）。SESの「失効確認」またはPOST /api/external-accounts/{id}/confirm-revokeで人間の確認主体を記録する。
+3. provider=noneでは自動失効しない。外部システムの管理者が対象accountの無効化、既存session、offline session、tokenの失効を個別に実施・確認し、証跡を保管する。NF09の既存一覧・登録応答・CSVには従来どおり権限内の原識別子を表示する。担当者は現在法人の一覧でreference IDを照合し、承認済みの安全な経路で連携先管理者へ伝える。NF01の追加の未処理一覧・通知・ログだけを共通maskIdentifierでマスクし、通知やチケット本文へ原値を転記しない。SESの「失効確認」またはPOST /api/external-accounts/{id}/confirm-revokeで人間の確認主体を記録する。
 4. 実状態を確認できない場合はUNKNOWNを維持する。再要求が必要なlifecycle形式のkeyに限り、現在の法人scopeを選んだ管理者がPOST /api/external-accounts/{id}/re-request-revokeを使う。legacy形式のkeyは手動確認で閉じる。provider callbackもlifecycleの現行要求keyを提示できない場合は確認を拒否する。
 5. ライセンスは完了前に1件ずつPOST /api/licenses/assignments/{id}/releaseで解放する。releasedDateは処理日でなく案件の退社基準日を指定する。1件の409で残りの解放を止めず、当該IDを再読込してから再実行する。旧triggerOffboardingRevocationsは基準日を持たず同期送信する入口だったため、409で拒否し使用しない。
 6. ACCOUNTING_TENANT_IDSには1つのtenantだけを指定する。workerは行ごとの法人とrunWithTenantのtenantを使い、SecurityContextの操作者法人を参照しない。複数tenantの本番運用は別承認まで行わない。
 
 ### 6.2 実provider公開前に残る接続プールの制約
 
-現在のafterCommitは計画§5.13に従ってNOT_SUPPORTED dispatcherを同期呼出しする。Springはcallbackが戻るまで完了transactionのconnectionを保持するため、claim用の別connectionが必要になり、provider I/O中も元のconnectionを占有し得る。同時完了数がpool上限へ近付くと枯渇する可能性がある。provider=noneを維持し、実provider公開前に、受付数を制限した非同期dispatchとdrainの設計・独立レビューを別途行う。既存taskExecutorにはCallerRunsPolicyがあるため、単に@Asyncを付けても呼出元threadで実行される可能性があり、対策とはみなさない。
+現在のafterCommitは計画§5.13に従ってNOT_SUPPORTED dispatcherを同期呼出しする。即時送信は本transactionで実際に新規登録したIDだけを対象とし、tenant全体の積残しは60秒周期のschedulerだけが回収する。next_retry_atの保存値・lease・比較nowはDATETIME(0)に揃えて秒へ切り捨てる。Springはcallbackが戻るまで完了transactionのconnectionを保持するため、claim用の別connectionが必要になり、provider I/O中も元のconnectionを占有し得る。同時完了数がpool上限へ近付くと枯渇する可能性がある。provider=noneを維持し、実provider公開前に、受付数を制限した非同期dispatchとdrainの設計・独立レビューを別途行う。既存taskExecutorにはCallerRunsPolicyがあるため、単に@Asyncを付けても呼出元threadで実行される可能性があり、対策とはみなさない。
 
 ### 6.3 Runner・運用者の確認項目
 
@@ -181,3 +181,25 @@ NF01（機能スイッチ `FEATURE_NF01_ENABLED`、既定OFF）はCONFIRM完成�
 - [ ] NF01 OFFで送信を開始しないこと、ShedLockと既存scheduler停止手順を確認する。新しい常駐threadやexecutorは追加しない。
 
 本節は実装と確認手順であり、本番有効化の承認ではない。epoch/CONFIRMを含む残りの条件と独立レビュー・Runnerが完了するまで本番はNO-GOとする。
+
+### 6.4 リリースゲート（G4r独立レビューの残項目）
+
+| 指摘 | 有効化の前提・担当 |
+|---|---|
+| P3-1（NF01 ON前） | W3-16b担当がcompleteCaseと自動gateをまとめてrank順に並べ替える。現在のengineer X（rank7）→連携sys_user X（rank3）は、EngineerChangeRequestApprovalAdapter.applyProfileのsys_user更新→engineer更新（3→7）と同一要員で競合し、1213 deadlockになり得る。engineerだけをgate後へ移す変更は、判定と自動作用の間に新規accountが入るため本修正では行わない。既存L5（4→3）も含めて消し、M6で並行変更申請・退社・同commit要求登録を検証する。 |
+| P3-2（実provider前） | 本transactionのID限定で積残しの同期処理は解消したが、callback終了まで元connectionを保持する制約は残る。有界非同期dispatch/drain、受付上限、停止時回収、pool飽和時の挙動を設計し独立レビューする。CallerRunsPolicyの既存executorへ単純移管するだけでは承認しない。 |
+| P3-9(4)（NF01 ON前） | Runner/DB担当がInnoDbRecordLockWaitsで「登録が退社完了のengineer Xを待ち、commit後に完了済み案件を読み要求登録する」両順序を実MySQLで検証する。LOCK_DATAの値に依存しない。M10の実READ-COMMITTED確認と既存AssetMySqlIntegrationTestをそれぞれ5回以上、skip0で実行する。 |
+| P3-12（実provider前） | SREが100行×provider timeoutの最悪時間とShedLock PT10Mを再評価する。batch件数・総実行期限・HTTP timeout・lease・停止drainを一体で制限し、lock期限切れで重複schedulerが起動しても安全なことを実測して承認する。 |
+| P3-5（継続運用前） | HRが案件ID作成順を時系列の基準として確認する。遡及起票・完了順での判定が必要なら、信頼できる時刻列を用いる別設計を承認する。本修正では時刻の意味を推測しない。 |
+
+### 6.5 通知頻度・機能OFF・scope
+
+- P3-3/P3-8: 送信失敗・確認待ちの通知は最初のretryと1440分backoffへ到達したretry（9回目）だけ。毎回の無限通知は行わず、以後も未処理一覧に残す。UNKNOWNへの遷移は直ちに通知する。本文はnotification.msgキーとマスク済み引数のJSON配列で保存する。provider=noneの手動失効運用では、HRが一覧を毎営業日確認する。
+- P2-1: REVOKE_SEND_UNKNOWNはpollのPENDING・timeout・例外でもUNKNOWNのままbackoffだけを更新する。CONFIRMEDのみ失効済みに移し、それ以外ではgN+1の管理者再要求を維持する。REVOKE_SENTの確認待ちも一覧に残す。
+- P3-10/P3-11: gateは案件tenantを明示した専用照合を使い、完了時に登録する件数と登録済み・確認待ち件数を区別する。本人のNF09画面は従来の現在法人scopeを維持する。明示tenantが実行contextと異なる場合は拒否する。
+- P3-13: NF01 OFFでもNF09登録APIは利用でき、完了済み退社の条件を満たす追加accountは同じtransactionでREVOKE_REQUESTEDになる。dispatcher/schedulerはOFF中に送信せず、ON後に回収する。OFFは要求の取り消しを意味しない。運用者は未処理一覧で確認し、必要なら既存の人間確認APIで閉じる。
+- P3-4: EXCEPTION_HOLDは要求登録不能として退社完了を止める。HRが根拠を確認し通常account状態へ戻すか、外部側で失効を確認して人間確認する。outboxは保留を自動解除しない。
+
+上記gateの証拠とOwner/Security/SREの承認が揃うまで、本番はNO-GOのままとする。
+
+- P3-10補足: 既存の非NULLかつ空白だけのkeyはCASのNULL条件を満たさないため登録不能とする。HR/DBAが由来と監査を確認して承認済みのデータ修復を別途行う。mapperのCASを緩和して黙って上書きしない。登録済み件数は登録可能かつ非空keyだけを数え、保留行との重複を避ける。

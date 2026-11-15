@@ -39,7 +39,7 @@ class ExternalAccountRevocationOutboxTest {
     @Mock ObjectProvider<ExternalAccountRevocationDispatcher> provider;
     @Mock ExternalAccountRevocationDispatcher dispatcher;
     ExternalAccountRevocationOutbox outbox;
-    final Clock clock = Clock.fixed(Instant.parse("2026-11-14T01:00:00Z"), ZoneId.of("Asia/Tokyo"));
+    final Clock clock = Clock.fixed(Instant.parse("2026-11-14T01:00:00.875Z"), ZoneId.of("Asia/Tokyo"));
 
     @BeforeEach void setUp() {
         AccountingTenantContextHolder.setTenantId("tenant-a");
@@ -51,10 +51,12 @@ class ExternalAccountRevocationOutboxTest {
     }
 
     @Test void 全法人の行を各法人で登録しcommit後だけdispatcherを呼ぶ() {
-        ExternalAccountReference a = row(11L, 1L), b = row(12L, 2L);
-        when(references.selectUnrevokedForEngineer("tenant-a", 7L)).thenReturn(List.of(a, b));
+        ExternalAccountReference a = row(11L, 1L), b = row(12L, 2L), registered = row(13L, 1L);
+        registered.setIdempotencyKey("existing-request");
+        when(references.selectUnrevokedForEngineer("tenant-a", 7L)).thenReturn(List.of(a, b, registered));
         when(references.selectByIdForUpdate(11L, "tenant-a", 1L)).thenReturn(a);
         when(references.selectByIdForUpdate(12L, "tenant-a", 2L)).thenReturn(b);
+        when(references.selectByIdForUpdate(13L, "tenant-a", 1L)).thenReturn(registered);
         when(references.enqueueRevoke(any(), any(), any(), any(), isNull(), any(), any(), any())).thenReturn(1);
         TransactionSynchronizationManager.initSynchronization();
         outbox.enqueueForResignation(resignation(), 9L);
@@ -64,8 +66,14 @@ class ExternalAccountRevocationOutboxTest {
         verify(references).enqueueRevoke(eq(12L), eq("tenant-a"), eq(2L), eq(0), isNull(),
                 eq("lifecycle-resign:100:12:g1"), eq(9L), any());
         when(provider.getObject()).thenReturn(dispatcher);
+        doAnswer(invocation -> {
+            assertThat(AccountingTenantContextHolder.requireTenantContext()).isEqualTo("tenant-a");
+            return 0;
+        }).when(dispatcher).dispatchRegistered(List.of(11L, 12L));
+        AccountingTenantContextHolder.setTenantId("tenant-b");
         TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
-        verify(dispatcher).dispatchPending();
+        verify(dispatcher).dispatchRegistered(List.of(11L, 12L));
+        assertThat(AccountingTenantContextHolder.requireTenantContext()).isEqualTo("tenant-b");
         verify(events, times(2)).recordExternalAccountConfirmation(any(), eq("EXTERNAL_ACCOUNT_REVOKE_OUTBOX"),
                 any(), eq(REQUESTED), any(), any(), any());
     }
@@ -137,6 +145,38 @@ class ExternalAccountRevocationOutboxTest {
         when(references.selectByIdForUpdate(11L, "tenant-a", 1L)).thenReturn(row);
         assertThatThrownBy(() -> outbox.enqueueForResignation(resignation(), 9L)).isInstanceOf(BusinessException.class);
         verifyNoInteractions(events, provider);
+    }
+
+    @Test void 人間の要求はHUMANで記録しkey列にも原文を残さない() {
+        ExternalAccountReference row = row(11L, 1L);
+        when(references.selectByIdForUpdate(11L, "tenant-a", 1L)).thenReturn(row);
+        when(references.enqueueRevoke(any(), any(), any(), any(), isNull(), any(), any(), any())).thenReturn(1);
+        outbox.request(11L, "tenant-a", 1L, "private-idempotency-text", 9L);
+        var actor = org.mockito.ArgumentCaptor.forClass(com.ses.common.audit.ActorAttribution.class);
+        verify(events).recordExternalAccountConfirmation(eq(11L), any(), any(), eq(REQUESTED), actor.capture(), any(), any());
+        assertThat(actor.getValue().actorType()).isEqualTo(com.ses.common.audit.ActorType.HUMAN);
+        assertThat(actor.getValue().humanUserId()).isEqualTo(9L);
+        assertThat(actor.getValue().idempotencyKey()).matches("[0-9a-f]{64}").doesNotContain("private");
+    }
+
+    @Test void 失敗通知のJSONには共通マスクだけを含み毎回の再試行では通知しない() {
+        ExternalAccountReference row = row(11L, 1L);
+        row.setAccountIdentifier("private-person@example.invalid");
+        row.setExternalSyncStatus(SENDING); row.setIdempotencyKey("lifecycle-resign:100:11:g1");
+        when(references.transitionOutbox(any(), any(), any(), any(), any(), any(), any(), any(), anyInt(), any(), any())).thenReturn(1);
+        when(references.selectByIdAndScope(11L, "tenant-a", 1L)).thenReturn(row);
+        com.ses.entity.SysUser admin = new com.ses.entity.SysUser(); admin.setId(90L);
+        when(users.selectActiveByRoleAndTenant("管理者", "tenant-a")).thenReturn(List.of(admin));
+        outbox.finish(row, false);
+        var message = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(notifications).publishToUser(eq(90L), eq("EXTERNAL_ACCOUNT_REVOKE_ALERT"), any(), message.capture(),
+                eq("/asset/accounts"), any(), eq("asset-management"));
+        assertThat(message.getValue()).startsWith("[\"notification.msg.REVOCATION_SEND_FAILED\"")
+                .contains("pr***@example.invalid").doesNotContain("private-person");
+        clearInvocations(notifications);
+        row.setRetryCount(1);
+        outbox.finish(row, false);
+        verifyNoInteractions(notifications);
     }
 
     private ExternalAccountReference row(Long id, Long legal) {

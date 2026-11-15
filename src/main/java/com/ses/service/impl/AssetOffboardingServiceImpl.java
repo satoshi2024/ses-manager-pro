@@ -54,6 +54,16 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
     public OffboardingClearanceResultDto checkOffboardingClearance(Long engineerId,
                                                                     Long lifecycleCaseId,
                                                                     Long lifecycleTaskId) {
+        return checkOffboardingClearanceForTenant(AccountingTenantContextHolder.requireTenantContext(),
+                engineerId, lifecycleCaseId, lifecycleTaskId);
+    }
+
+    @Override
+    public OffboardingClearanceResultDto checkOffboardingClearanceForTenant(String tenantId, Long engineerId,
+                                                                           Long lifecycleCaseId, Long lifecycleTaskId) {
+        if (!AccountingTenantContextHolder.requireTenantContext().equals(tenantId)) {
+            throw BusinessException.of(403, "TENANT_CONTEXT_MISMATCH");
+        }
         if (engineerId == null) {
             return OffboardingClearanceResultDto.builder().clearancePassed(false).build();
         }
@@ -63,7 +73,7 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
 
         // 2. 未失効の外部アカウント（ACTIVE or SUSPENDED）
         List<ExternalAccountReference> activeAccounts =
-                externalAccountService.getActiveAccountsByAssignee("ENGINEER", engineerId);
+                externalAccountService.getUnrevokedAccountsForEngineer(tenantId, engineerId);
 
         // 3. 未解放のライセンス（ACTIVE）
         List<LicenseAssignment> activeLicenses = licenseAssignmentMapper.selectActiveByAssignee("ENGINEER", engineerId);
@@ -75,8 +85,9 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
             blockingItems.add("未返却端末: " + tag + " [貸与ID: " + as.getId() + "]");
         }
         for (ExternalAccountReference acc : activeAccounts) {
-            if (acc.getLegalEntityId() == null) {
-                blockingItems.add("所有法人不明の外部アカウント: " + maskIdentifier(acc.getAccountIdentifier()));
+            if (com.ses.service.ExternalAccountRevocationStates.isUnregisterable(acc)) {
+                blockingItems.add("失効要求を登録できない外部アカウント（所有法人不明・例外保留・空の既存key）: "
+                        + com.ses.service.ExternalAccountRevocationStates.maskIdentifier(acc.getAccountIdentifier()));
             }
         }
         for (LicenseAssignment lic : activeLicenses) {
@@ -89,13 +100,16 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
                 && assetOffboardingWaiverMapper.selectValidByCaseAndTask(
                 engineerId, lifecycleCaseId, lifecycleTaskId) != null;
         boolean passed = (blockingItems.isEmpty() || hasWaiver)
-                && activeAccounts.stream().noneMatch(account -> account.getLegalEntityId() == null);
+                && activeAccounts.stream().noneMatch(com.ses.service.ExternalAccountRevocationStates::isUnregisterable);
 
         return OffboardingClearanceResultDto.builder()
                 .clearancePassed(passed)
                 .unreturnedAssetCount(activeAssignments.size())
                 .unrevokedAccountCount(activeAccounts.size())
-                .unregisterableAccountCount((int) activeAccounts.stream().filter(a -> a.getLegalEntityId() == null).count())
+                .unregisterableAccountCount((int) activeAccounts.stream().filter(com.ses.service.ExternalAccountRevocationStates::isUnregisterable).count())
+                .registeredAccountCount((int) activeAccounts.stream().filter(a ->
+                        !com.ses.service.ExternalAccountRevocationStates.isUnregisterable(a)
+                                && a.getIdempotencyKey() != null && !a.getIdempotencyKey().isBlank()).count())
                 .unreleasedLicenseCount(activeLicenses.size())
                 .waived(hasWaiver)
                 .blockingItems(blockingItems)
@@ -179,11 +193,4 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
         return status != null && "APPROVED".equalsIgnoreCase(status);
     }
 
-    private static String maskIdentifier(String identifier) {
-        if (!StringUtils.hasText(identifier)) return "***";
-        int atIndex = identifier.indexOf('@');
-        if (atIndex > 2) return identifier.substring(0, 2) + "***" + identifier.substring(atIndex);
-        if (identifier.length() > 4) return identifier.substring(0, 2) + "***" + identifier.substring(identifier.length() - 2);
-        return "***";
-    }
 }

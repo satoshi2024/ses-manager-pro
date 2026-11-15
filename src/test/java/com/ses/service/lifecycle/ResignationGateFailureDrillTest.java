@@ -509,6 +509,7 @@ class ResignationGateFailureDrillTest {
         contractMapper.insert(contract);
 
         LifecycleCase lcCase = LifecycleCase.builder()
+                .tenantId("default")
                 .caseNo("LC-TEST-9999")
                 .lifecycleType("RESIGNATION")
                 .engineerId(testEng.getId())

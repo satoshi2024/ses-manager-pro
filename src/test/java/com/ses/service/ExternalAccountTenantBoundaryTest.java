@@ -152,6 +152,32 @@ class ExternalAccountTenantBoundaryTest {
         verify(referenceMapper, never()).update(any(), any());
     }
 
+    @Test void UNKNOWNのPENDINGを送信済みへ降格しない() { assertUnknownPoll(ExternalAccountProviderClient.RevokeConfirmationStatus.PENDING, false); }
+    @Test void UNKNOWNのtimeoutを送信済みへ降格しない() { assertUnknownPoll(ExternalAccountProviderClient.RevokeConfirmationStatus.FAILED_OR_TIMEOUT, false); }
+    @Test void UNKNOWNのpoll例外を送信済みへ降格しない() { assertUnknownPoll(null, true); }
+
+    private void assertUnknownPoll(ExternalAccountProviderClient.RevokeConfirmationStatus outcome, boolean failure) {
+        ExternalAccountReference row = ExternalAccountReference.builder().tenantId("tenant-a").legalEntityId(11L)
+                .status("UNKNOWN").externalSyncStatus(ExternalAccountRevocationStates.UNKNOWN)
+                .version(1).retryCount(0).idempotencyKey("lifecycle-resign:1:30:g1").build(); row.setId(30L);
+        when(referenceMapper.selectPendingForTenant(any(), any())).thenReturn(List.of(row));
+        when(referenceMapper.claimRevokePoll(any(), any(), any(), any(), any(), any())).thenReturn(1);
+        when(referenceMapper.selectByIdAndScope(30L, "tenant-a", 11L)).thenReturn(row);
+        if (failure) when(providerClient.checkRevokeConfirmation(row)).thenThrow(new IllegalStateException("synthetic"));
+        else when(providerClient.checkRevokeConfirmation(row)).thenReturn(outcome);
+        service.processPendingRevokePollJob();
+        verify(revocationOutbox).completePoll(org.mockito.ArgumentMatchers.eq(row), org.mockito.ArgumentMatchers.eq("UNKNOWN"),
+                org.mockito.ArgumentMatchers.eq(1), any(), org.mockito.ArgumentMatchers.eq(ExternalAccountRevocationStates.UNKNOWN), any());
+        verify(confirmationService, never()).confirm(any(), any());
+    }
+
+    @Test void 退社専用の全法人列挙は別tenantを拒否し本人用は従来の法人scopeを保つ() {
+        assertThatThrownBy(() -> service.getUnrevokedAccountsForEngineer("tenant-b", 21L)).isInstanceOf(BusinessException.class);
+        service.getActiveAccountsByAssignee("ENGINEER", 21L);
+        verify(referenceMapper).selectActiveByAssignee("ENGINEER", 21L, "tenant-a", 11L);
+        verify(referenceMapper, never()).selectUnrevokedForEngineer(any(), any());
+    }
+
     @Test
     void pollはinventoryで束縛されたtenantと行の法人ownershipでclaimする() {
         ExternalAccountReference due = ExternalAccountReference.builder()

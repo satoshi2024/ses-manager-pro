@@ -65,6 +65,15 @@ public interface ExternalAccountReferenceMapper extends BaseMapper<ExternalAccou
     List<ExternalAccountReference> selectOutboxForTenant(@Param("tenantId") String tenantId,
                                                         @Param("now") LocalDateTime now);
 
+    @Select("SELECT * FROM t_external_account_reference WHERE id = #{id} AND tenant_id = #{tenantId} "
+            + "AND legal_entity_id IS NOT NULL AND deleted_flag = 0 AND status <> 'REVOKED' "
+            + "AND idempotency_key IS NOT NULL AND external_sync_status IN "
+            + "('REVOKE_REQUESTED','REVOKE_SENDING','REVOKE_SEND_FAILED') "
+            + "AND (next_retry_at IS NULL OR next_retry_at <= #{now})")
+    ExternalAccountReference selectOutboxByIdForTenant(@Param("id") Long id,
+                                                       @Param("tenantId") String tenantId,
+                                                       @Param("now") LocalDateTime now);
+
     @Update("UPDATE t_external_account_reference SET idempotency_key = #{newKey}, "
             + "status = 'PENDING_CONFIRMATION', external_sync_status = 'REVOKE_REQUESTED', "
             + "revoke_requested_at = #{now}, revoke_requested_by = #{actorId}, retry_count = 0, "
