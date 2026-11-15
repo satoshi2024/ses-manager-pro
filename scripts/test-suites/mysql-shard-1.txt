@@ -32,3 +32,4 @@ ReportScheduleClaimFenceMySqlTest
 LifecycleLockOrderMySqlTest
 AiExternalSendAuditMySqlIntegrationTest
 AuthorizationEpochSchemaMySqlTest
+BpPaymentTenantSqlMySqlTest

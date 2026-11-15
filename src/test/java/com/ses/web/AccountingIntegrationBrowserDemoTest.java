@@ -62,7 +62,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>desktop / 390px の両ビューポートで console error 0</li>
  * </ol>
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "spring.datasource.url=jdbc:h2:mem:accounting-integration-browser;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL")
 @ActiveProfiles("test")
 @Tag("browser")
 class AccountingIntegrationBrowserDemoTest {
