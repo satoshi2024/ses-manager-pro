@@ -95,6 +95,9 @@ class IntegrationHubProducerContainerTest {
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(principal, "unused", principal.getAuthorities()));
         client = "g3r-" + UUID.randomUUID().toString().replace("-", "");
         transactions.executeWithoutResult(status -> {
+            jdbc.update("DELETE FROM m_system_config WHERE config_key=?", IntegrationHubOutboundStartupBarrier.CONFIG_KEY);
+            jdbc.update("INSERT INTO m_system_config(config_key,config_value) VALUES(?,?)", IntegrationHubOutboundStartupBarrier.CONFIG_KEY,
+                    "v1|ON|0|" + IntegrationHubDigest.sha256Hex("default"));
             jdbc.update("INSERT INTO m_organization_unit(legal_entity_id,code,name,type,valid_from) "
                     + "VALUES(9,?,?,'チーム','2020-01-01')", client, client);
             engineer = insert("INSERT INTO t_engineer(full_name,employment_type,status,tenant_id,legal_entity_id,version) "
@@ -112,12 +115,14 @@ class IntegrationHubProducerContainerTest {
                     + "encrypted_signing_secret,crypto_key_version,data_scope_json,signing_credential_version) "
                     + "VALUES(?,'OUTBOUND','resource.changed','https://web.example.com:443/hook','key-1',?,'v1',?,1)", client, secret, scope);
         });
+        originalBarrier.start();
     }
 
     @AfterEach void cleanup() {
         transactions.executeWithoutResult(status -> {
             jdbc.update("DELETE FROM t_audit_log WHERE human_user_id=99001 OR (reference_type='NF05' AND reference_id IN "
                     + "(SELECT id FROM t_api_delivery WHERE client_id=?))", client);
+            jdbc.update("DELETE FROM t_api_delivery_replay_audit WHERE event_id IN (SELECT event_id FROM t_api_delivery WHERE client_id=?)", client);
             jdbc.update("DELETE FROM t_api_delivery WHERE client_id=?", client);
             jdbc.update("DELETE FROM m_api_client_scope WHERE api_client_id IN (SELECT id FROM m_api_client WHERE client_id=?)", client);
             jdbc.update("DELETE FROM m_webhook_subscription WHERE client_id=?", client);
@@ -204,10 +209,13 @@ class IntegrationHubProducerContainerTest {
             jdbc.update("UPDATE t_api_delivery SET status='CLAIMED',lease_token='old-lease',lease_expires_at=? WHERE id=?",
                     now.plusMinutes(1), old.get(2).getId());
         });
+        transactions.executeWithoutResult(status -> jdbc.update("UPDATE m_system_config SET config_value=? WHERE config_key=?",
+                "v1|OFF|0|" + IntegrationHubDigest.sha256Hex("default"), IntegrationHubOutboundStartupBarrier.CONFIG_KEY));
         var restarted = context.getAutowireCapableBeanFactory().createBean(IntegrationHubOutboundStartupBarrier.class);
         org.springframework.test.util.ReflectionTestUtils.setField(worker, "startupBarrier", restarted);
         try {
             assertThat(worker.dispatchDue()).isZero();
+            restarted.start();
             restarted.run(new org.springframework.boot.DefaultApplicationArguments(new String[0]));
             transactions.executeWithoutResult(status -> {
                 assertThat(mapper.selectById(old.get(0).getId()).getStatus()).isEqualTo("DLQ");
@@ -229,6 +237,84 @@ class IntegrationHubProducerContainerTest {
             transactions.executeWithoutResult(status -> assertThat(mapper.selectById(fresh.getId()).getStatus()).isEqualTo("SUCCEEDED"));
         } finally { org.springframework.test.util.ReflectionTestUtils.setField(worker, "startupBarrier", originalBarrier); }
     }
+
+    @Test void runtime設定は一覧に出ず直接編集を拒否して通常設定は保存できる() throws Exception {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/system-configs")
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication(auth)))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(IntegrationHubOutboundStartupBarrier.CONFIG_KEY))));
+        String hidden = "[{\"configKey\":\"" + IntegrationHubOutboundStartupBarrier.CONFIG_KEY + "\",\"configValue\":\"v1|ON|0|forged\"}]";
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/system-configs")
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication(auth))
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+                .contentType("application/json").content(hidden))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(400));
+        var before = jdbc.queryForObject("SELECT config_value FROM m_system_config WHERE config_key='company.name'", String.class);
+        try {
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/system-configs")
+                    .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication(auth))
+                    .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+                    .contentType("application/json").content("[{\"configKey\":\"company.name\",\"configValue\":\"synthetic-normal-setting\"}]"))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(200));
+        } finally { transactions.executeWithoutResult(tx -> jdbc.update("UPDATE m_system_config SET config_value=? WHERE config_key='company.name'", before)); }
+    }
+
+    @Test void ONのproducerは実proxy経由のtransaction外呼出しを拒否する() {
+        assertThat(AopUtils.isAopProxy(producer)).isTrue();
+        assertThatThrownBy(() -> producer.changed("engineer-availability", engineer))
+                .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException.class);
+        List<ApiDelivery> current=transactions.execute(status -> ownDeliveries());
+        assertThat(current).isEmpty();
+    }
+
+    @Test void bulkはCSRFとroleと条件を検査し繰返し要求でも未処理の最新generationへ進む() throws Exception {
+        for (int version=0; version<3; version++) { Engineer row=patch(); row.setVersion(version);
+            transactions.executeWithoutResult(status -> engineers.updateWithStatusGuard(row)); }
+        var rows=transactions.execute(status -> ownDeliveries()); long subscription=rows.get(0).getSubscriptionId();
+        transactions.executeWithoutResult(status -> {
+            jdbc.update("UPDATE t_api_delivery SET status='DLQ',last_error_code='STARTUP_REVALIDATION_REQUIRED' WHERE client_id=?",client);
+            jdbc.update("INSERT INTO m_api_client_scope(api_client_id,scope_code,operation_code,data_scope_json) "
+                    + "SELECT id,'integration.availability.read','integration.webhook.replay',data_scope_json FROM m_api_client WHERE client_id=?",client);
+        });
+        var auth=SecurityContextHolder.getContext().getAuthentication();
+        String url="/api/integration-hub/deliveries/bulk-replay";
+        String prefix="{\"tenantId\":\"default\",\"subscriptionId\":"+subscription+",\"legalEntityId\":9,\"from\":\"2026-11-14T00:00:00Z\",\"until\":\"2026-11-16T00:00:00Z\",\"failureClass\":\"STARTUP_REVALIDATION_REQUIRED\",\"reasonCode\":\"ENVIRONMENT_FIXED\",\"limit\":";
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(url)
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication(auth))
+                .contentType("application/json").content(prefix+"1}"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(url)
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("sales").roles("営業"))
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+                .contentType("application/json").content(prefix+"1}"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+        for (String invalid:List.of(prefix+"21}",(prefix+"1}").replace("default","other-tenant")))
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(url)
+                    .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication(auth))
+                    .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+                    .contentType("application/json").content(invalid))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(400));
+        for (int expected:List.of(1,2,0))
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(url)
+                    .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication(auth))
+                    .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+                    .contentType("application/json").content(prefix+expectedLimit(expected)+"}"))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(200))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.succeeded").value(expected))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.rejected").value(0))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.completionAuditRecorded").value(true));
+        transactions.executeWithoutResult(status -> {
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_api_delivery WHERE client_id=? AND delivery_generation=2",Integer.class,client)).isEqualTo(3);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_api_delivery_replay_audit WHERE event_id IN (SELECT event_id FROM t_api_delivery WHERE client_id=?)",Integer.class,client)).isEqualTo(3);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM t_audit_log WHERE human_user_id=99001 AND application_code='NF05_BULK_REPLAY_REQUEST'",Integer.class)).isEqualTo(3);
+            for (var replay:ownDeliveries()) if(replay.getDeliveryGeneration()==2)
+                assertThat(mapper.selectReplayWindowStart(replay.getEventId(),2,replay.getSubscriptionId(),client))
+                        .isEqualTo(LocalDateTime.ofInstant(clock.instant(),ZoneOffset.UTC).withNano(0));
+        });
+    }
+    private int expectedLimit(int expected) { return expected==1?1:2; }
 
     private Engineer patch() {
         Engineer row = new Engineer(); row.setId(engineer); row.setVersion(0); row.setStatus("提案中"); return row;

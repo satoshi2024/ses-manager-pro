@@ -1,5 +1,7 @@
 # G3rの修正方針とRunner条件（2026-11-15、未承認）
 
+この文書は当時の実装記録。再開屏障・scheduler lock・replay期限はg3s-restart-barrier-and-replay.mdと最新runbook §13で置換する。
+
 対象はG3 a2186394の独立Review。prod既定OFF+MOCK、DG-05未署名、Production NO-GOを維持する。
 
 ## P1 / P2

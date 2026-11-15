@@ -85,6 +85,10 @@ class IntegrationHubResourceChangedProducerTest {
         producer.changed(type, 17L);
         assertThat(registry.get("integration_hub_producer_skipped_total").tag("reason", "NO_TENANT").counter().count()).isEqualTo(1);
         verifyNoInteractions(subscriptions, clients, resources, permissions, deliveries, ownership);
+        AccountingTenantContextHolder.setTenantId("wrong-tenant");
+        producer.changed(type, 17L);
+        assertThat(registry.get("integration_hub_producer_skipped_total").tag("reason", "TENANT_MISMATCH").counter().count()).isEqualTo(1);
+        verifyNoInteractions(subscriptions, clients, resources, permissions, deliveries, ownership);
         AccountingTenantContextHolder.setTenantId("tenant-a");
         when(subscriptions.selectOutboundForTenant("tenant-a")).thenReturn(java.util.Collections.nCopies(257, WebhookSubscription.builder().build()));
         producer.changed(type, 17L);

@@ -40,32 +40,42 @@ public class IntegrationHubReplayTlsPreflight implements AutoCloseable {
                 + properties.getExternalTransport().getReadTimeoutMs();
         long until = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(budget);
         java.util.concurrent.ScheduledFuture<?> timeout = null;
-        Socket tcp = new Socket();
-        try (tcp) {
-            active.add(tcp);
-            if (closed.get()) throw new java.io.IOException("replay TLS確認は停止済みです");
-            timeout = deadlines.schedule(() -> { try { tcp.close(); } catch (java.io.IOException ignored) { } },
+        var current = new java.util.concurrent.atomic.AtomicReference<Socket>();
+        try {
+            timeout = deadlines.schedule(() -> { Socket socket = current.get();
+                if (socket != null) try { socket.close(); } catch (java.io.IOException ignored) { } },
                     budget, java.util.concurrent.TimeUnit.MILLISECONDS);
             var target = guard.validate(endpoint);
             var addresses = guard.pinnedAddresses(target.host());
-            tcp.connect(new InetSocketAddress(addresses[0], target.port()), properties.getExternalTransport().getConnectTimeoutMs());
-            guard.validateConnectedPeer(target, tcp.getRemoteSocketAddress());
-            try (SSLSocket socket = (SSLSocket) tls.getSocketFactory().createSocket(tcp, target.host(), target.port(), true)) {
-                socket.setSoTimeout(properties.getExternalTransport().getReadTimeoutMs());
-                socket.setEnabledProtocols(new String[]{"TLSv1.3", "TLSv1.2"});
-                socket.setEnabledCipherSuites(HttpsIntegrationHubWebhookTransport.TLS_CIPHERS.clone());
-                var parameters = socket.getSSLParameters(); parameters.setEndpointIdentificationAlgorithm("HTTPS");
-                socket.setSSLParameters(parameters);
-                socket.startHandshake();
-                if (!org.apache.hc.client5.http.ssl.HttpsSupport.getDefaultHostnameVerifier().verify(target.host(), socket.getSession()))
-                    throw new javax.net.ssl.SSLPeerUnverifiedException("replayのhostname検証に失敗しました");
-                guard.validateConnectedPeer(target, socket.getRemoteSocketAddress());
-                if (System.nanoTime() >= until) throw new java.net.SocketTimeoutException("replay TLS確認の総期限を超えました");
+            for (var address : addresses) {
+                if (System.nanoTime() >= until || closed.get()) break;
+                Socket tcp = new Socket();
+                try (tcp) {
+                    active.add(tcp); current.set(tcp);
+                    if (closed.get() || System.nanoTime() >= until) break;
+                    int remaining = (int) Math.max(1, java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(until - System.nanoTime()));
+                    tcp.connect(new InetSocketAddress(address, target.port()), Math.min(remaining, properties.getExternalTransport().getConnectTimeoutMs()));
+                    guard.validateConnectedPeer(target, tcp.getRemoteSocketAddress());
+                    try (SSLSocket socket = (SSLSocket) tls.getSocketFactory().createSocket(tcp, target.host(), target.port(), true)) {
+                        socket.setSoTimeout(properties.getExternalTransport().getReadTimeoutMs());
+                        socket.setEnabledProtocols(new String[]{"TLSv1.3", "TLSv1.2"});
+                        socket.setEnabledCipherSuites(HttpsIntegrationHubWebhookTransport.TLS_CIPHERS.clone());
+                        var parameters = socket.getSSLParameters(); parameters.setEndpointIdentificationAlgorithm("HTTPS");
+                        socket.setSSLParameters(parameters); socket.startHandshake();
+                        if (!org.apache.hc.client5.http.ssl.HttpsSupport.getDefaultHostnameVerifier().verify(target.host(), socket.getSession()))
+                            throw new javax.net.ssl.SSLPeerUnverifiedException("replayのhostname検証に失敗しました");
+                        guard.validateConnectedPeer(target, socket.getRemoteSocketAddress());
+                        if (System.nanoTime() >= until) throw new java.net.SocketTimeoutException("replay TLS確認の総期限を超えました");
+                        return;
+                    }
+                } catch (Exception rejectedAddress) {
+                    // 次の検証済みaddressを同じ絶対期限内で試す。HTTPや秘密値は送らない。
+                } finally { current.compareAndSet(tcp, null); active.remove(tcp); }
             }
+            throw new java.io.IOException("すべての検証済みaddressを確認できません");
         } catch (Exception rejected) {
             throw new IllegalArgumentException("replay送信先のTLSを確認できません");
         } finally {
-            active.remove(tcp);
             if (timeout != null) timeout.cancel(false);
             admission.release();
         }

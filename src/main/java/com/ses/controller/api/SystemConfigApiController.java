@@ -32,7 +32,8 @@ public class SystemConfigApiController {
      */
     private static final Set<String> SYSTEM_MANAGED_KEYS = Set.of("closing.confirmed-months",
             "attendance.sync.freee.cursor", "attendance.sync.last-result",
-            "attendance.discrepancy.confirmed", com.ses.config.ProductionBootstrapCompletionLatch.CONFIG_KEY);
+            "attendance.discrepancy.confirmed", com.ses.config.ProductionBootstrapCompletionLatch.CONFIG_KEY,
+            com.ses.service.integrationhub.IntegrationHubOutboundStartupBarrier.CONFIG_KEY);
 
     /** 法人別cursor等、動的システム管理キーのprefix（R5-P2-03） */
     private static final String SYSTEM_MANAGED_PREFIX = "attendance.sync.freee.cursor.le.";

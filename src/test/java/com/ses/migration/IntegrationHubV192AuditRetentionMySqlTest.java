@@ -122,6 +122,47 @@ class IntegrationHubV192AuditRetentionMySqlTest {
     }
 
     @Test
+    void 永続OFFからの再開だけを隔離しON再起動とreplay期限起点のSQLを検証する() throws Exception {
+        String client="restart-"+UUID.randomUUID();
+        jdbc.update("INSERT INTO m_api_client(client_id,owner_ref,tenant_id,legal_entity_id,data_scope_json,allowed_cidrs) VALUES(?,'PROJECT_OWNER','v192-tenant',9,'{}','')",client);
+        jdbc.update("INSERT INTO m_webhook_subscription(client_id,direction,event_type,endpoint_url,key_id,encrypted_signing_secret,crypto_key_version,data_scope_json) "
+                + "VALUES(?,'OUTBOUND','resource.changed','https://web.example.com:443/hook','key-1','synthetic','v1','{}')",client);
+        long subscription=jdbc.queryForObject("SELECT id FROM m_webhook_subscription WHERE client_id=?",Long.class,client);
+        String event=UUID.randomUUID().toString(); String hash="a".repeat(64);
+        jdbc.update("INSERT INTO t_api_delivery(event_id,subscription_id,client_id,scope_code,tenant_id,event_type,schema_version,provider_idempotency_key,external_dto_snapshot,payload_hash,scope_digest,created_at) "
+                + "VALUES(?,?,?,'integration.project.read','v192-tenant','resource.changed','v1',?,'{}',?,?,'2026-11-01 00:00:00')",event,subscription,client,event,hash,hash);
+        long original=jdbc.queryForObject("SELECT id FROM t_api_delivery WHERE event_id=?",Long.class,event);
+        var configuration=new com.baomidou.mybatisplus.core.MybatisConfiguration(); configuration.setMapUnderscoreToCamelCase(true);
+        var factory=new com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean(); factory.setDataSource(source); factory.setConfiguration(configuration);
+        var sqlFactory=factory.getObject();
+        for(Class<?> mapper:List.of(ApiDeliveryMapper.class,com.ses.mapper.SystemConfigMapper.class,com.ses.mapper.AuditLogMapper.class)) sqlFactory.getConfiguration().addMapper(mapper);
+        var session=new org.mybatis.spring.SqlSessionTemplate(sqlFactory);
+        var mapper=session.getMapper(ApiDeliveryMapper.class); var configs=session.getMapper(com.ses.mapper.SystemConfigMapper.class);
+        var audit=new com.ses.service.impl.AuditLogServiceImpl(session.getMapper(com.ses.mapper.AuditLogMapper.class));
+        var manager=new DataSourceTransactionManager(source); var clock=java.time.Clock.fixed(java.time.Instant.parse("2026-11-15T00:00:00Z"),java.time.ZoneOffset.UTC);
+        var properties=new com.ses.config.integrationhub.IntegrationHubExternalApiProperties(); properties.getTopology().setBoundTenantId("v192-tenant");
+        org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry> meters=org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+        String key=com.ses.service.integrationhub.IntegrationHubOutboundStartupBarrier.CONFIG_KEY;
+        try {
+            var off=new com.ses.service.integrationhub.IntegrationHubOutboundStartupBarrier(mapper,audit,manager,clock,configs,properties,meters); off.start();
+            assertThat(configs.selectById(key).getConfigValue()).startsWith("v1|OFF|");
+            properties.getExternalTransport().setEnabled(true);
+            var on=new com.ses.service.integrationhub.IntegrationHubOutboundStartupBarrier(mapper,audit,manager,clock,configs,properties,meters);
+            on.start(); assertThat(on.isReady()).isFalse(); on.run(new org.springframework.boot.DefaultApplicationArguments());
+            assertThat(on.isReady()).isTrue(); assertThat(mapper.selectById(original).getStatus()).isEqualTo("DLQ");
+            jdbc.update("UPDATE t_api_delivery SET status='RETRYABLE' WHERE id=?",original);
+            on.stop(); on.start(); on.run(new org.springframework.boot.DefaultApplicationArguments());
+            assertThat(on.isReady()).isTrue(); assertThat(mapper.selectById(original).getStatus()).isEqualTo("RETRYABLE");
+            jdbc.update("INSERT INTO t_api_delivery_replay_audit(delivery_id,event_id,replay_generation,operator_ref,reason_code,scope_digest,payload_hash,created_at,retention_class,retention_expires_at) "
+                    + "VALUES(?,?,2,'sys-user:42','ENVIRONMENT_FIXED',?,?,'2026-11-15 00:00:00','AUDIT_METADATA_1Y','2027-11-15 00:00:00')",original,event,hash,hash);
+            assertThat(mapper.selectReplayWindowStart(event,2,subscription,client)).isEqualTo(LocalDateTime.of(2026,11,15,0,0));
+            assertThat(mapper.selectReplayWindowStart(event,2,subscription,"another-client")).isNull();
+        } finally {
+            jdbc.update("DELETE FROM m_system_config WHERE config_key=?",key);
+        }
+    }
+
+    @Test
     void 同一点の明示lockを待った二つのclaimは一方だけ成功しattemptを一回増やす() throws Exception {
         String client = "v192-" + UUID.randomUUID();
         jdbc.update("INSERT INTO m_api_client(client_id,owner_ref,tenant_id,legal_entity_id,data_scope_json,allowed_cidrs) "

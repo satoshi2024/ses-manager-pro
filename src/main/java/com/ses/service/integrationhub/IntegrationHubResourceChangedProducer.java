@@ -34,14 +34,15 @@ public class IntegrationHubResourceChangedProducer {
     @org.springframework.beans.factory.annotation.Autowired
     private org.springframework.beans.factory.ObjectProvider<io.micrometer.core.instrument.MeterRegistry> registries;
 
-    @Transactional(propagation = Propagation.SUPPORTS, rollbackFor = Exception.class)
+    @Transactional(propagation = Propagation.MANDATORY, rollbackFor = Exception.class)
     public void changed(String type, Long id) {
         if (!Boolean.TRUE.equals(properties.getExternalTransport().getEnabled())) return;
         if (id == null) throw new IllegalArgumentException("resource IDが必要です");
         String tenant = AccountingTenantContextHolder.getExplicitTenantId();
         if (tenant == null) tenant = com.ses.common.util.SecurityUtils.currentTenantId();
         if (tenant == null || tenant.isBlank()) { skipped("NO_TENANT"); return; }
-        properties.assertTenantBound(tenant);
+        try { properties.assertTenantBound(tenant); }
+        catch (com.ses.config.integrationhub.ExternalApiSecurityException mismatch) { skipped("TENANT_MISMATCH"); return; }
         List<WebhookSubscription> targets = subscriptions.selectOutboundForTenant(tenant);
         if (targets.size() > 256) { skipped("SUBSCRIPTION_LIMIT"); return; }
         String dimension = switch (type) {

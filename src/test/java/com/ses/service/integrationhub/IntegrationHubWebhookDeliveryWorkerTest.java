@@ -33,6 +33,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.when;
 
 /** B1 claim/HTTP/CAS/retry/DLQのtransaction境界をtransport mockで検証する。 */
@@ -346,6 +347,42 @@ class IntegrationHubWebhookDeliveryWorkerTest {
         verify(deliveryService).markTerminal(any(), any(), any(), any(), any(), any(), eq("DLQ"),
                 eq("UNSENT_AGE_EXCEEDED"), eq(now));
         verify(deliveryService, never()).markRetryable(any(), any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void 古いeventでもreplayの未送信期限は新generationの監査作成時刻から測る() {
+        ApiDelivery row=claimed(1); row.setCreatedAt(now.minusDays(3)); row.setDeliveryGeneration(2);
+        row.setExternalDtoSnapshot(row.getExternalDtoSnapshot().replace("2026-08-31","2026-08-28"));
+        row.setPayloadHash(IntegrationHubDigest.sha256Hex(row.getExternalDtoSnapshot()));
+        row.setProviderIdempotencyKey(IntegrationHubDigest.sha256Hex("event-1|7|2")); arrangeClaim(row);
+        when(subscriptionService.getActive(7L)).thenReturn(subscription());
+        when(crypto.decrypt(any(),anyInt(),any(),any())).thenReturn("synthetic-secret");
+        when(transport.send(any())).thenReturn(IntegrationHubWebhookTransportResult.failure(0,"DNS_UNAVAILABLE",true));
+        when(deliveryMapper.selectReplayWindowStart("event-1",2,7L,"client-a")).thenReturn(now.minusHours(1));
+        when(deliveryService.markRetryable(any(),any(),any(),any(),any(),any(),eq("DNS_UNAVAILABLE"),any(),any())).thenReturn(true);
+        assertTrue(worker.dispatchOne(7L,now));
+        verify(deliveryService).markRetryable(any(),any(),eq(2),any(),any(),any(),eq("DNS_UNAVAILABLE"),any(),any());
+        clearInvocations(deliveryService);
+        when(deliveryMapper.selectReplayWindowStart("event-1",2,7L,"client-a")).thenReturn(now.minusDays(1));
+        when(deliveryService.markTerminal(any(),any(),any(),any(),any(),any(),eq("DLQ"),eq("UNSENT_AGE_EXCEEDED"),any())).thenReturn(true);
+        assertTrue(worker.dispatchOne(7L,now));
+        verify(deliveryService).markTerminal(any(),any(),eq(2),any(),any(),any(),eq("DLQ"),eq("UNSENT_AGE_EXCEEDED"),any());
+        verify(deliveryService,never()).markRetryable(any(),any(),any(),any(),any(),any(),any(),any(),any());
+    }
+
+    @Test
+    void 二分の開始予算を超えたら次のdeliveryをclaimしない() {
+        ApiDelivery row=claimed(1); arrangeClaim(row);
+        when(deliveryMapper.selectDue(any(),anyInt())).thenReturn(List.of(row,ApiDelivery.builder().id(8L).build()));
+        when(subscriptionService.getActive(7L)).thenReturn(subscription());
+        when(crypto.decrypt(any(),anyInt(),any(),any())).thenReturn("synthetic-secret");
+        when(transport.send(any())).thenReturn(IntegrationHubWebhookTransportResult.success(204,"synthetic-provider"));
+        when(deliveryService.markSucceeded(any(),any(),any(),any(),any(),any(),any(),any())).thenReturn(true);
+        var calls=new java.util.concurrent.atomic.AtomicInteger();
+        org.springframework.test.util.ReflectionTestUtils.setField(worker,"monotonic",(java.util.function.LongSupplier)()->calls.getAndIncrement()<2?0:java.util.concurrent.TimeUnit.SECONDS.toNanos(121));
+        assertEquals(1,worker.dispatchDue());
+        verify(deliveryService,never()).claim(eq(8L),any(),any(),any());
+        verify(transport).send(any());
     }
 
     private void arrangeClaim(ApiDelivery claimed) {

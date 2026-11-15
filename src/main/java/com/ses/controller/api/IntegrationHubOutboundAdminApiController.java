@@ -21,6 +21,7 @@ import java.time.ZoneOffset;
 @RequiredArgsConstructor
 public class IntegrationHubOutboundAdminApiController {
     private final IntegrationHubManagementService management;
+    private final com.ses.service.integrationhub.IntegrationHubBulkReplayService bulkReplay;
 
     @PostMapping("/clients")
     public ApiResult<String> client(@RequestBody IntegrationHubManagementService.ClientCommand command) {
@@ -54,6 +55,12 @@ public class IntegrationHubOutboundAdminApiController {
     @PostMapping("/deliveries/{id}/replay")
     public ApiResult<Long> replay(@PathVariable Long id, @RequestBody ReplayCommand command, Authentication authentication) {
         return ApiResult.success(management.replay(id, command.legalEntityId(), command.reasonCode(), authentication));
+    }
+
+    @PostMapping("/deliveries/bulk-replay")
+    public ApiResult<com.ses.service.integrationhub.IntegrationHubBulkReplayService.Result> bulkReplay(
+            @RequestBody com.ses.service.integrationhub.IntegrationHubBulkReplayService.Command command, Authentication authentication) {
+        return ApiResult.success(bulkReplay.replay(command, authentication));
     }
 
     public record CredentialCommand(String clientId, Long legalEntityId, int version, String keyId) { }

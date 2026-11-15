@@ -19,9 +19,20 @@ public interface ApiDeliveryMapper extends BaseMapper<ApiDelivery> {
 
     @org.apache.ibatis.annotations.Options(useCache = false, flushCache = org.apache.ibatis.annotations.Options.FlushCachePolicy.TRUE)
     @Select("SELECT * FROM t_api_delivery WHERE id <= #{highWater} AND (status IN ('PENDING','RETRYABLE') "
-            + "OR (status = 'CLAIMED' AND lease_expires_at <= #{now})) ORDER BY id LIMIT #{limit} FOR UPDATE")
+            + "OR (status = 'CLAIMED' AND lease_expires_at <= #{now})) ORDER BY id LIMIT #{limit}")
     List<ApiDelivery> selectHistoricalForQuarantine(@Param("highWater") long highWater, @Param("now") LocalDateTime now,
                                                     @Param("limit") int limit);
+
+    @org.apache.ibatis.annotations.Options(useCache = false, flushCache = org.apache.ibatis.annotations.Options.FlushCachePolicy.TRUE)
+    @Select("SELECT EXISTS(SELECT 1 FROM t_api_delivery WHERE id <= #{highWater} AND status IN ('PENDING','RETRYABLE','CLAIMED'))")
+    boolean hasHistoricalActive(@Param("highWater") long highWater);
+
+    @org.apache.ibatis.annotations.Options(useCache = false, flushCache = org.apache.ibatis.annotations.Options.FlushCachePolicy.TRUE)
+    @Select("SELECT MIN(a.created_at) FROM t_api_delivery_replay_audit a JOIN t_api_delivery original ON original.id=a.delivery_id "
+            + "WHERE a.event_id=#{eventId} AND a.replay_generation=#{generation} AND original.subscription_id=#{subscriptionId} "
+            + "AND original.client_id=#{clientId}")
+    LocalDateTime selectReplayWindowStart(@Param("eventId") String eventId, @Param("generation") int generation,
+                                          @Param("subscriptionId") Long subscriptionId, @Param("clientId") String clientId);
 
     @Update("UPDATE t_api_delivery SET status='DLQ', last_error_code='STARTUP_REVALIDATION_REQUIRED', "
             + "retention_class='FAILED_DLQ_PAYLOAD_90D', retention_expires_at=#{expiry}, terminal_at=#{now}, "
