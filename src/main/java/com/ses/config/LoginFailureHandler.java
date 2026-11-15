@@ -49,7 +49,9 @@ public class LoginFailureHandler extends SimpleUrlAuthenticationFailureHandler {
         if (exception instanceof LockedException) {
             target = "/login?locked";
         } else {
-            if (StringUtils.hasText(username)) {
+            // local login が許されていない利用者への拒否はパスワード照合前なので数えない（D-P3-1）。
+            // 遷移先は他の失敗と同じにし、利用者の種別を外から区別させない。
+            if (StringUtils.hasText(username) && !LocalLoginDisabledException.isCauseOf(exception)) {
                 accountLockService.onLoginFailure(username);
             }
             target = "/login?error";
