@@ -125,73 +125,137 @@ public final class InnoDbRecordLockWaits {
     }
 
     /**
-     * blocker接続のtransactionが<b>所有する</b>lockへの待機辺を、lockのENGINE_TRANSACTION_IDと
-     * {@code information_schema.innodb_trx} で特定する（{@code index} がnullならtable内の全index）。
+     * blocker接続のtransactionが<b>所有する</b>lockへの待機辺を、{@code performance_schema} だけで特定する
+     * （{@code index} がnullならtable内の全index）。{@code information_schema.innodb_trx} も {@code LOCK_DATA} も使わない。
      *
-     * <p>{@code data_locks.THREAD_ID} は「lock構造を作ったsession」であり、lockの所有transactionではない
-     * （MySQL 8.0 reference manual の {@code data_locks} 表の説明）。blockerがinsertした未commit行は暗黙lockだけを持ち、
-     * それを待つ側（重複検査など）が待機の時点で明示lockへ変換するため、その明示lockのTHREAD_IDは<b>requester側</b>になる。
-     * したがって挿入行での待機は {@link #waitEdges} のTHREAD_ID→PROCESSLIST_IDの対応では見つからない
-     * （W3-13のdeadlock試験が実MySQLで待機を確認できなかった原因）。所有transactionで辿ればこの場合も確定できる。
-     * {@code LOCK_DATA} は使わない。辺の接続IDには {@code innodb_trx.trx_mysql_thread_id} を入れる。</p>
+     * <p>{@code data_locks.THREAD_ID} は「lock構造を作ったsession」であり、lockの所有transactionとは限らない
+     * （MySQL 8.0 reference manual の {@code data_locks} 表の説明。暗黙lockを待つ側が明示lockへ変換した場合など）。
+     * そこで (1) blocker自身が作るTABLE lock（意図lock。必ず所有sessionが作る）からblockerのENGINE_TRANSACTION_IDを求め、
+     * (2) {@code data_lock_waits.BLOCKING_ENGINE_TRANSACTION_ID} がそのIDである辺だけを返す。requester側の接続IDは、
+     * 待機中のlock（requester自身が作る）のTHREAD_IDから求める（求められなければ0）。</p>
      */
     public static List<WaitEdge> waitEdgesOwnedBy(JdbcTemplate jdbc, long blockerConnectionId, String table,
                                                   String index) {
+        Long blockerTransaction = transactionIdOf(jdbc, blockerConnectionId);
+        if (blockerTransaction == null) {
+            return List.of();
+        }
         return jdbc.query("""
-                        SELECT rt.trx_mysql_thread_id, bt.trx_mysql_thread_id,
+                        SELECT rth.PROCESSLIST_ID,
                                req.ENGINE_LOCK_ID, req.OBJECT_NAME, req.INDEX_NAME, req.LOCK_TYPE, req.LOCK_MODE,
                                req.LOCK_STATUS, req.LOCK_DATA,
                                blk.ENGINE_LOCK_ID, blk.OBJECT_NAME, blk.INDEX_NAME, blk.LOCK_TYPE, blk.LOCK_MODE,
                                blk.LOCK_STATUS, blk.LOCK_DATA
                         FROM performance_schema.data_lock_waits w
-                        JOIN information_schema.innodb_trx bt ON bt.trx_id = w.BLOCKING_ENGINE_TRANSACTION_ID
-                        JOIN information_schema.innodb_trx rt ON rt.trx_id = w.REQUESTING_ENGINE_TRANSACTION_ID
                         JOIN performance_schema.data_locks req
                           ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
                         JOIN performance_schema.data_locks blk
                           ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                        WHERE bt.trx_mysql_thread_id=? AND rt.trx_mysql_thread_id<>?
+                        LEFT JOIN performance_schema.threads rth ON rth.THREAD_ID=req.THREAD_ID
+                        WHERE w.BLOCKING_ENGINE_TRANSACTION_ID=? AND w.REQUESTING_ENGINE_TRANSACTION_ID<>?
                           AND req.OBJECT_SCHEMA=DATABASE() AND req.OBJECT_NAME=?
                           AND blk.OBJECT_SCHEMA=DATABASE() AND blk.OBJECT_NAME=?
                           AND (? IS NULL OR (req.INDEX_NAME=? AND blk.INDEX_NAME=?))
-                        """, (rs, row) -> new WaitEdge(rs.getLong(1), rs.getLong(2), rs.getString(3),
-                        rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8),
-                        rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(12), rs.getString(13),
-                        rs.getString(14), rs.getString(15), rs.getString(16)),
-                blockerConnectionId, blockerConnectionId, table, table, index, index, index);
+                        """, (rs, row) -> new WaitEdge(rs.getLong(1), blockerConnectionId, rs.getString(2),
+                        rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7),
+                        rs.getString(8), rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(12),
+                        rs.getString(13), rs.getString(14), rs.getString(15)),
+                blockerTransaction, blockerTransaction, table, table, index, index, index);
     }
 
-    /** 失敗時の診断。blocker接続のtransactionが所有するlockへの全待機辺（table・indexを限定しない）。 */
-    public static String describeWaitsOwnedBy(JdbcTemplate jdbc, long blockerConnectionId) {
-        try {
-            List<String> details = new ArrayList<>();
-            for (WaitEdge edge : jdbc.query("""
-                            SELECT rt.trx_mysql_thread_id, bt.trx_mysql_thread_id,
-                                   req.ENGINE_LOCK_ID, req.OBJECT_NAME, req.INDEX_NAME, req.LOCK_TYPE, req.LOCK_MODE,
-                                   req.LOCK_STATUS, req.LOCK_DATA,
-                                   blk.ENGINE_LOCK_ID, blk.OBJECT_NAME, blk.INDEX_NAME, blk.LOCK_TYPE, blk.LOCK_MODE,
-                                   blk.LOCK_STATUS, blk.LOCK_DATA
-                            FROM performance_schema.data_lock_waits w
-                            JOIN information_schema.innodb_trx bt ON bt.trx_id = w.BLOCKING_ENGINE_TRANSACTION_ID
-                            JOIN information_schema.innodb_trx rt ON rt.trx_id = w.REQUESTING_ENGINE_TRANSACTION_ID
-                            JOIN performance_schema.data_locks req
-                              ON req.ENGINE=w.ENGINE AND req.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
-                            JOIN performance_schema.data_locks blk
-                              ON blk.ENGINE=w.ENGINE AND blk.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
-                            WHERE bt.trx_mysql_thread_id=?
-                            """, (rs, row) -> new WaitEdge(rs.getLong(1), rs.getLong(2), rs.getString(3),
-                            rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8),
-                            rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(12), rs.getString(13),
-                            rs.getString(14), rs.getString(15), rs.getString(16)),
-                    blockerConnectionId)) {
-                details.add(edge.describe());
+    /**
+     * 接続のtransactionのENGINE_TRANSACTION_ID。その接続自身が作ったTABLE lock（意図lock）から求める。
+     * transactionが無い・lockを持たない・複数に見える場合はnull。
+     */
+    public static Long transactionIdOf(JdbcTemplate jdbc, long connectionId) {
+        List<Long> ids = jdbc.queryForList("""
+                        SELECT DISTINCT dl.ENGINE_TRANSACTION_ID
+                        FROM performance_schema.data_locks dl
+                        JOIN performance_schema.threads th ON th.THREAD_ID=dl.THREAD_ID
+                        WHERE th.PROCESSLIST_ID=? AND dl.LOCK_TYPE='TABLE'
+                        """, Long.class, connectionId);
+        return ids.size() == 1 ? ids.get(0) : null;
+    }
+
+    /**
+     * 待機を確認できなかったときの切り分け材料（{@link WaitVisibility#explain()} で文にする）。
+     * 「権限不足で見えない」と「本当にInnoDBのlock待機が無い」を区別するため、現在のuser・PROCESS権限・
+     * performance_schemaのlock表の可読性・blockerのtransaction・待機中lockの件数・blockerへの待機辺の件数・
+     * 実行中の他sessionの状態を集める。ここで失敗しても例外は投げない。
+     */
+    public static WaitVisibility inspectVisibility(JdbcTemplate jdbc, long blockerConnectionId) {
+        String user = quietly(() -> jdbc.queryForObject("SELECT CURRENT_USER()", String.class), "?");
+        Integer process = quietly(() -> jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.USER_PRIVILEGES
+                WHERE PRIVILEGE_TYPE IN ('PROCESS', 'SUPER')
+                  AND GRANTEE = CONCAT('''', SUBSTRING_INDEX(CURRENT_USER(), '@', 1), '''@''',
+                                       SUBSTRING_INDEX(CURRENT_USER(), '@', -1), '''')
+                """, Integer.class), null);
+        Integer waiting = quietly(() -> jdbc.queryForObject(
+                "SELECT COUNT(*) FROM performance_schema.data_locks WHERE LOCK_STATUS='WAITING'", Integer.class), null);
+        boolean readable = waiting != null;
+        Long blockerTransaction = readable ? quietly(() -> transactionIdOf(jdbc, blockerConnectionId), null) : null;
+        Integer edges = blockerTransaction == null ? Integer.valueOf(0) : quietly(() -> jdbc.queryForObject(
+                "SELECT COUNT(*) FROM performance_schema.data_lock_waits WHERE BLOCKING_ENGINE_TRANSACTION_ID=?",
+                Integer.class, blockerTransaction), 0);
+        List<String> sessions = quietly(() -> jdbc.query("""
+                        SELECT PROCESSLIST_ID, PROCESSLIST_STATE, PROCESSLIST_TIME, LEFT(PROCESSLIST_INFO, 60)
+                        FROM performance_schema.threads
+                        WHERE PROCESSLIST_COMMAND='Query' AND PROCESSLIST_ID IS NOT NULL
+                          AND PROCESSLIST_ID<>CONNECTION_ID()
+                        """, (rs, row) -> "id=" + rs.getLong(1) + ",state=" + rs.getString(2) + ",time="
+                        + rs.getLong(3) + "s,sql=" + rs.getString(4)), List.of());
+        return new WaitVisibility(user, process != null && process > 0, readable, blockerTransaction,
+                waiting == null ? 0 : waiting, edges == null ? 0 : edges, sessions);
+    }
+
+    /** 待機を確認できなかった理由の切り分け（DBに依存しない純関数部分。{@code InnoDbRecordLockWaitsTest} が固定する）。 */
+    public record WaitVisibility(String currentUser, boolean processPrivilege, boolean performanceSchemaReadable,
+                                 Long blockerTransactionId, int waitingLocks, int edgesToBlocker,
+                                 List<String> runningSessions) {
+        public WaitVisibility {
+            runningSessions = runningSessions == null ? List.of() : List.copyOf(runningSessions);
+        }
+
+        public String explain() {
+            if (!performanceSchemaReadable) {
+                return "権限不足: performance_schemaのlock表を読めない（user=" + currentUser + "）";
             }
-            Integer waiting = jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.innodb_trx "
-                    + "WHERE trx_state='LOCK WAIT'", Integer.class);
-            return details.isEmpty() ? "blocker=" + blockerConnectionId + "の所有lockへの待機辺なし（LOCK WAIT中のtransaction="
-                    + waiting + "件）" : details.toString();
+            if (!processPrivilege) {
+                return "権限不足の可能性: PROCESS権限が無く他sessionの状態を確認できない（user=" + currentUser + "）。"
+                        + sessions();
+            }
+            if (blockerTransactionId == null) {
+                return "blockerのtransactionが見えない（lockを持っていない、または終了済み。user=" + currentUser + "）。"
+                        + sessions();
+            }
+            if (waitingLocks == 0) {
+                return "InnoDBのlock待機なし（待機中のlock=0件、blocker trx=" + blockerTransactionId + "）。"
+                        + sessions();
+            }
+            if (edgesToBlocker == 0) {
+                return "待機中のlockはあるがblockerのlockを待っていない（待機中のlock=" + waitingLocks + "件）。"
+                        + sessions();
+            }
+            return "blockerへの待機辺あり（" + edgesToBlocker + "件）。table・indexの条件が一致していない。" + sessions();
+        }
+
+        private String sessions() {
+            return runningSessions.isEmpty() ? "実行中の他session: なし"
+                    : "実行中の他session: " + String.join(" / ", runningSessions);
+        }
+    }
+
+    @FunctionalInterface
+    private interface Query<T> {
+        T run();
+    }
+
+    private static <T> T quietly(Query<T> query, T fallback) {
+        try {
+            return query.run();
         } catch (RuntimeException failure) {
-            return "待機診断の取得に失敗しました: " + failure.getClass().getSimpleName();
+            return fallback;
         }
     }
 
