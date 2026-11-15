@@ -91,6 +91,8 @@ spring:
         - classpath:sql/schema-import-center-menu-permission-h2.sql
         # V194: NF08 B2c-1 durable claim列・費用ledger 2表・監査の存在照会索引（t_ai_recommendation_run と t_audit_log の作成より後）
         - classpath:sql/schema-nf08-dispatch-claim-h2.sql
+        # V195: NF01 B0 二者確認coordinatorの7表（triggerは置かず、不変6表の更新・削除はmapperで拒否する。V189相当の一意keyより後）
+        - classpath:sql/schema-nf01-dual-confirmation-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

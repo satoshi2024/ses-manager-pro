@@ -6,6 +6,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.entity.Document;
 import com.ses.entity.Engineer;
 import com.ses.entity.LifecycleCase;
+import com.ses.entity.LifecycleDualSubmission;
 import com.ses.entity.LifecycleTask;
 import com.ses.entity.LifecycleTemplate;
 import com.ses.entity.OrganizationUnit;
@@ -13,6 +14,8 @@ import com.ses.entity.SysUser;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.LifecycleCaseMapper;
+import com.ses.mapper.LifecycleDualEventMapper;
+import com.ses.mapper.LifecycleDualSubmissionMapper;
 import com.ses.mapper.LifecycleTaskMapper;
 import com.ses.mapper.LifecycleTemplateMapper;
 import com.ses.mapper.OrganizationUnitMapper;
@@ -32,6 +35,7 @@ import com.ses.test.InnoDbRecordLockWaits.WaitEdge;
 import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
@@ -60,6 +64,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -90,6 +95,11 @@ import static org.junit.jupiter.api.Assertions.fail;
  *       {@code data_locks.LOCK_DATA} に依存せず、readerが主キー一点で取った共有record lockをwriterの開始前に1件だけに
  *       固定し（fixture行はcommit済みで暗黙lockは無い）、待機辺のblocking lock IDがその共有lockであることを要求する
  *       （writer側は主キー一点の {@code FOR UPDATE} なので、同時に待つlockは1件だけである）。</li>
+ *   <li>W3-18（計画 §7.7 B0、V195）: 二者確認coordinatorの7表が空で作られ、一意key・複合主キー・14件のFK・CHECK・
+ *       tenant列の照合順序が定義どおりであること。不変6表へのUPDATE・DELETEをtrigger（MySQL error 1644）と
+ *       mapper（SQL発行前の例外）が拒否し、projectionだけがversionのCASで更新できること。他tenantの案件・利用者・文書版、
+ *       別案件のtask、提出の束縛（revision・証跡hash・世代）違いを複合FK（error 1452）が拒否すること。B0の行はすべて
+ *       rollbackするtransactionで入れ、表を空のまま保つ（triggerが削除を拒否するため後始末はできない）。lock待ちは扱わない。</li>
  * </ul>
  */
 @SpringBootTest
@@ -122,6 +132,32 @@ class AuthorizationEpochSchemaMySqlTest {
     private static final long WAIT_SECONDS = 30;
     private static final Set<String> SHARED_RECORD_MODES = Set.of("S", "S,REC_NOT_GAP");
     private static final Set<String> EXCLUSIVE_RECORD_MODES = Set.of("X", "X,REC_NOT_GAP");
+    /** V195のB0 7表（projectionだけが可変）。 */
+    private static final List<String> B0_TABLES = List.of("t_lifecycle_dual_submission",
+            "t_lifecycle_dual_submission_document", "t_lifecycle_dual_submission_org_fence", "t_lifecycle_dual_confirmation",
+            "t_lifecycle_dual_projection", "t_lifecycle_dual_idempotency", "t_lifecycle_dual_event");
+    private static final List<String> B0_IMMUTABLE_TABLES = B0_TABLES.stream()
+            .filter(table -> !"t_lifecycle_dual_projection".equals(table)).toList();
+    private static final String EVIDENCE_SHA = "b".repeat(64);
+    private static final String REQUEST_SHA = "c".repeat(64);
+    private static final String SUBMISSION_INSERT = "INSERT INTO t_lifecycle_dual_submission (tenant_id, case_id, task_id, "
+            + "engineer_id, task_generation, revision, submitter_user_id, submitter_role_snapshot, global_epoch, "
+            + "submitter_actor_epoch, engineer_scope_epoch, task_version_snapshot, evidence_canonical_json, evidence_sha256, "
+            + "request_sha256) VALUES (?, ?, ?, ?, 0, ?, ?, 'HR', 0, 0, 0, 0, '{}', ?, ?)";
+    private static final String SUBMISSION_DOCUMENT_INSERT = "INSERT INTO t_lifecycle_dual_submission_document (tenant_id, "
+            + "submission_id, document_id, document_version_id, version_no, sha256, evidence_eligibility_epoch) "
+            + "VALUES (?, ?, ?, ?, 1, ?, 0)";
+    private static final String ORG_FENCE_INSERT = "INSERT INTO t_lifecycle_dual_submission_org_fence (tenant_id, "
+            + "submission_id, organization_id, org_scope_epoch) VALUES (?, ?, ?, 0)";
+    private static final String CONFIRMATION_INSERT = "INSERT INTO t_lifecycle_dual_confirmation (tenant_id, case_id, task_id, "
+            + "task_generation, submission_id, submission_revision, evidence_sha256, confirmer_user_id, "
+            + "confirmer_role_snapshot, global_epoch, confirmer_actor_epoch, decision) "
+            + "VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'HR', 0, 0, 'CONFIRMED')";
+    private static final String PROJECTION_INSERT = "INSERT INTO t_lifecycle_dual_projection (tenant_id, task_id, case_id, "
+            + "task_generation, revision, submission_id, evidence_sha256, state) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING')";
+    private static final String IDEMPOTENCY_INSERT = "INSERT INTO t_lifecycle_dual_idempotency (tenant_id, case_id, task_id, "
+            + "task_generation, operation, actor_user_id, idempotency_key, request_sha256, submission_id) "
+            + "VALUES (?, ?, ?, 0, 'SUBMIT', ?, ?, ?, ?)";
 
     @Autowired private JdbcTemplate jdbc;
     @Autowired private PlatformTransactionManager transactionManager;
@@ -135,6 +171,8 @@ class AuthorizationEpochSchemaMySqlTest {
     @Autowired private LifecycleTemplateMapper templateMapper;
     @Autowired private LifecycleCaseMapper caseMapper;
     @Autowired private LifecycleTaskMapper taskMapper;
+    @Autowired private LifecycleDualSubmissionMapper dualSubmissionMapper;
+    @Autowired private LifecycleDualEventMapper dualEventMapper;
 
     // ===== schema =====
 
@@ -445,6 +483,188 @@ class AuthorizationEpochSchemaMySqlTest {
         }
     }
 
+    // ===== B0（V195、W3-18。計画 §5.12・§7.7 Demo (1)〜(3)） =====
+
+    @Test
+    void V195はB0の7表と一意keyとFKを空で作り照合順序は参照先と一致しtriggerは不変6表にだけ付く() {
+        assertEquals(1L, count("SELECT COUNT(*) FROM flyway_schema_history WHERE version = '195' AND success = 1"));
+        for (String table : B0_TABLES) {
+            assertEquals("utf8mb4_unicode_ci", jdbc.queryForObject("SELECT TABLE_COLLATION FROM information_schema.TABLES "
+                    + "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?", String.class, table), table);
+            assertEquals(0L, count("SELECT COUNT(*) FROM " + table), table + " は行を作らない");
+        }
+
+        // 複合FKが参照する4つの一意key（V189の3件とV165の1件。V195は追加しない）
+        assertUniqueKey("t_lifecycle_case", "uk_lifecycle_case_tenant_id", "tenant_id,id");
+        assertUniqueKey("t_lifecycle_task", "uk_lifecycle_task_case_id", "case_id,id");
+        assertUniqueKey("t_document_version", "uk_document_version_tenant_doc_id", "tenant_id,document_id,id");
+        assertUniqueKey("sys_user", "uk_sys_user_tenant_id", "tenant_id,id");
+        // B0の一意key・複合主キー
+        assertUniqueKey("t_lifecycle_dual_submission", "uk_dual_submission_revision",
+                "tenant_id,task_id,task_generation,revision");
+        assertUniqueKey("t_lifecycle_dual_submission", "uk_dual_submission_binding",
+                "tenant_id,task_id,task_generation,revision,id,evidence_sha256");
+        assertUniqueKey("t_lifecycle_dual_submission", "uk_dual_submission_tenant_id", "tenant_id,id");
+        assertUniqueKey("t_lifecycle_dual_confirmation", "uk_dual_confirmation_submission", "tenant_id,submission_id");
+        assertUniqueKey("t_lifecycle_dual_idempotency", "uk_dual_idempotency",
+                "tenant_id,task_id,task_generation,operation,actor_user_id,idempotency_key");
+        assertUniqueKey("t_lifecycle_dual_submission_document", "PRIMARY", "submission_id,document_id");
+        assertUniqueKey("t_lifecycle_dual_submission_org_fence", "PRIMARY", "submission_id,organization_id");
+        assertUniqueKey("t_lifecycle_dual_projection", "PRIMARY", "tenant_id,task_id");
+
+        Map<String, String> expectedForeignKeys = new TreeMap<>(Map.ofEntries(
+                Map.entry("fk_dual_submission_case", "t_lifecycle_dual_submission(tenant_id,case_id)->t_lifecycle_case(tenant_id,id)"),
+                Map.entry("fk_dual_submission_task", "t_lifecycle_dual_submission(case_id,task_id)->t_lifecycle_task(case_id,id)"),
+                Map.entry("fk_dual_submission_submitter",
+                        "t_lifecycle_dual_submission(tenant_id,submitter_user_id)->sys_user(tenant_id,id)"),
+                Map.entry("fk_dual_doc_submission",
+                        "t_lifecycle_dual_submission_document(tenant_id,submission_id)->t_lifecycle_dual_submission(tenant_id,id)"),
+                Map.entry("fk_dual_doc_version", "t_lifecycle_dual_submission_document(tenant_id,document_id,document_version_id)"
+                        + "->t_document_version(tenant_id,document_id,id)"),
+                Map.entry("fk_dual_org_submission",
+                        "t_lifecycle_dual_submission_org_fence(tenant_id,submission_id)->t_lifecycle_dual_submission(tenant_id,id)"),
+                Map.entry("fk_dual_org_unit", "t_lifecycle_dual_submission_org_fence(organization_id)->m_organization_unit(id)"),
+                Map.entry("fk_dual_confirmation_submission", "t_lifecycle_dual_confirmation(tenant_id,task_id,task_generation,"
+                        + "submission_revision,submission_id,evidence_sha256)->t_lifecycle_dual_submission(tenant_id,task_id,"
+                        + "task_generation,revision,id,evidence_sha256)"),
+                Map.entry("fk_dual_confirmation_confirmer",
+                        "t_lifecycle_dual_confirmation(tenant_id,confirmer_user_id)->sys_user(tenant_id,id)"),
+                Map.entry("fk_dual_projection_case", "t_lifecycle_dual_projection(tenant_id,case_id)->t_lifecycle_case(tenant_id,id)"),
+                Map.entry("fk_dual_projection_task", "t_lifecycle_dual_projection(case_id,task_id)->t_lifecycle_task(case_id,id)"),
+                Map.entry("fk_dual_projection_submission", "t_lifecycle_dual_projection(tenant_id,task_id,task_generation,"
+                        + "revision,submission_id,evidence_sha256)->t_lifecycle_dual_submission(tenant_id,task_id,"
+                        + "task_generation,revision,id,evidence_sha256)"),
+                Map.entry("fk_dual_idem_case", "t_lifecycle_dual_idempotency(tenant_id,case_id)->t_lifecycle_case(tenant_id,id)"),
+                Map.entry("fk_dual_idem_actor", "t_lifecycle_dual_idempotency(tenant_id,actor_user_id)->sys_user(tenant_id,id)")));
+        Map<String, String> foreignKeys = new TreeMap<>();
+        for (Map<String, Object> row : jdbc.queryForList("SELECT CONSTRAINT_NAME AS fk, TABLE_NAME AS src, "
+                + "GROUP_CONCAT(COLUMN_NAME ORDER BY ORDINAL_POSITION) AS src_cols, MIN(REFERENCED_TABLE_NAME) AS dst, "
+                + "GROUP_CONCAT(REFERENCED_COLUMN_NAME ORDER BY ORDINAL_POSITION) AS dst_cols "
+                + "FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() "
+                + "AND TABLE_NAME LIKE 't\\_lifecycle\\_dual\\_%' AND REFERENCED_TABLE_NAME IS NOT NULL "
+                + "GROUP BY CONSTRAINT_NAME, TABLE_NAME")) {
+            foreignKeys.put(String.valueOf(row.get("fk")), row.get("src") + "(" + row.get("src_cols") + ")->"
+                    + row.get("dst") + "(" + row.get("dst_cols") + ")");
+        }
+        assertEquals(expectedForeignKeys, foreignKeys);
+        assertEquals(0L, count("SELECT COUNT(*) FROM information_schema.REFERENTIAL_CONSTRAINTS "
+                + "WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME LIKE 't\\_lifecycle\\_dual\\_%' "
+                + "AND (DELETE_RULE IN ('CASCADE', 'SET NULL') OR UPDATE_RULE IN ('CASCADE', 'SET NULL'))"),
+                "B0のFKは参照先の削除・更新を連鎖させない");
+
+        // tenant列は参照先と同じ型・照合順序（計画 §5.12。不一致ならFKを作れない）。idempotency_key は ascii_bin
+        String tenantCollation = columnCollation("sys_user", "tenant_id");
+        assertEquals(tenantCollation, columnCollation("t_lifecycle_case", "tenant_id"));
+        assertEquals(tenantCollation, columnCollation("t_document_version", "tenant_id"));
+        for (String table : B0_TABLES) {
+            assertEquals(tenantCollation, columnCollation(table, "tenant_id"), table);
+            assertEquals("varchar(100)", jdbc.queryForObject("SELECT COLUMN_TYPE FROM information_schema.COLUMNS "
+                    + "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = 'tenant_id'", String.class, table), table);
+        }
+        assertEquals("ascii_bin", columnCollation("t_lifecycle_dual_idempotency", "idempotency_key"));
+
+        assertCheck("t_lifecycle_dual_submission", "ck_dual_submission_nonneg", "revision");
+        assertCheck("t_lifecycle_dual_confirmation", "ck_dual_confirmation_decision", "decision");
+        assertCheck("t_lifecycle_dual_projection", "ck_dual_projection_state", "state");
+        assertCheck("t_lifecycle_dual_idempotency", "ck_dual_idem_operation", "operation");
+        assertCheck("t_lifecycle_dual_event", "ck_dual_event_type", "event_type");
+
+        Map<String, Set<String>> triggers = new TreeMap<>();
+        for (Map<String, Object> row : jdbc.queryForList("SELECT EVENT_OBJECT_TABLE AS tbl, EVENT_MANIPULATION AS ev, "
+                + "ACTION_TIMING AS timing FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() "
+                + "AND EVENT_OBJECT_TABLE LIKE 't\\_lifecycle\\_dual\\_%'")) {
+            assertEquals("BEFORE", row.get("timing"), String.valueOf(row));
+            triggers.computeIfAbsent(String.valueOf(row.get("tbl")), table -> new TreeSet<>()).add(String.valueOf(row.get("ev")));
+        }
+        Map<String, Set<String>> expectedTriggers = new TreeMap<>();
+        for (String table : B0_IMMUTABLE_TABLES) {
+            expectedTriggers.put(table, new TreeSet<>(Set.of("DELETE", "UPDATE")));
+        }
+        assertEquals(expectedTriggers, triggers, "triggerは不変6表のUPDATE・DELETEにだけ付く（projectionは可変）");
+    }
+
+    @Test
+    void B0の不変6表はUPDATEとDELETEをtriggerとmapperで拒否しprojectionだけCASで更新できる() {
+        Fixture f = fixture();
+        rollbackOnly(() -> {
+            B0Rows rows = insertB0Rows(f);
+            for (String table : B0_IMMUTABLE_TABLES) {
+                String where = rows.where(table);
+                DataAccessException update = assertThrows(DataAccessException.class,
+                        () -> jdbc.update("UPDATE " + table + " SET tenant_id = tenant_id WHERE " + where), table);
+                assertSqlErrorCode(update, 1644, table + " のUPDATEはtriggerが拒否する");
+                DataAccessException delete = assertThrows(DataAccessException.class,
+                        () -> jdbc.update("DELETE FROM " + table + " WHERE " + where), table);
+                assertSqlErrorCode(delete, 1644, table + " のDELETEはtriggerが拒否する");
+                assertEquals(1L, count("SELECT COUNT(*) FROM " + table + " WHERE " + where), table + " の行は残る");
+            }
+            assertEquals(1, jdbc.update("UPDATE t_lifecycle_dual_projection SET state = 'CONFIRMED', "
+                    + "projection_version = projection_version + 1 WHERE tenant_id = ? AND task_id = ? AND projection_version = 0",
+                    f.tenant(), f.taskA()), "projectionはversionのCASで更新できる");
+            assertEquals(0, jdbc.update("UPDATE t_lifecycle_dual_projection SET state = 'REJECTED' "
+                    + "WHERE tenant_id = ? AND task_id = ? AND projection_version = 0", f.tenant(), f.taskA()),
+                    "古いversionのCASは0件");
+
+            // mapper層（実MyBatis-Plus proxy）はSQLを発行せずに拒否する
+            LifecycleDualSubmission submission = dualSubmissionMapper.selectById(rows.submissionId());
+            assertEquals(f.tenant(), submission.getTenantId());
+            assertThrows(UnsupportedOperationException.class, () -> dualSubmissionMapper.updateById(submission));
+            assertThrows(UnsupportedOperationException.class, () -> dualSubmissionMapper.deleteById(rows.submissionId()));
+            assertThrows(UnsupportedOperationException.class, () -> dualEventMapper.delete(null));
+        });
+    }
+
+    @Test
+    void B0の複合FKは他tenantの案件と利用者と文書版と別案件のtaskと提出の束縛違いを拒否する() {
+        Fixture f = fixture();
+        Fixture other = fixture();
+        rollbackOnly(() -> {
+            assertForeignKeyRejected("他tenantの案件を指す提出",
+                    () -> insertSubmission(f.tenant(), other.caseId(), other.taskA(), f.engineerId(), f.userId(), 1));
+            assertForeignKeyRejected("別案件のtaskを指す提出",
+                    () -> insertSubmission(f.tenant(), f.caseId(), other.taskA(), f.engineerId(), f.userId(), 1));
+            assertForeignKeyRejected("他tenantの提出者",
+                    () -> insertSubmission(f.tenant(), f.caseId(), f.taskA(), f.engineerId(), other.userId(), 1));
+
+            long submissionId = insertSubmission(f.tenant(), f.caseId(), f.taskA(), f.engineerId(), f.userId(), 1);
+            assertForeignKeyRejected("他tenantの文書版",
+                    () -> insertSubmissionDocument(f.tenant(), submissionId, other.documentId(), other.documentVersionId()));
+            assertForeignKeyRejected("別文書の版",
+                    () -> insertSubmissionDocument(f.tenant(), submissionId, f.documentId(), other.documentVersionId()));
+            assertForeignKeyRejected("他tenantから提出を指す文書行",
+                    () -> insertSubmissionDocument(other.tenant(), submissionId, other.documentId(), other.documentVersionId()));
+            assertForeignKeyRejected("存在しない組織",
+                    () -> jdbc.update(ORG_FENCE_INSERT, f.tenant(), submissionId, MISSING_ID));
+            assertForeignKeyRejected("証跡hashの違う確認", () -> insertConfirmation(f, submissionId, 1, "d".repeat(64), f.userId()));
+            assertForeignKeyRejected("revisionの違う確認", () -> insertConfirmation(f, submissionId, 2, EVIDENCE_SHA, f.userId()));
+            assertForeignKeyRejected("他tenantの確認者", () -> insertConfirmation(f, submissionId, 1, EVIDENCE_SHA, other.userId()));
+            assertForeignKeyRejected("世代の違う提出を指すprojection",
+                    () -> jdbc.update(PROJECTION_INSERT, f.tenant(), f.taskA(), f.caseId(), 1L, 1, submissionId, EVIDENCE_SHA));
+            assertForeignKeyRejected("他tenantの冪等性要求者",
+                    () -> insertIdempotency(f, other.userId(), "Key-A", submissionId));
+
+            // 一意key: 同じtask・世代のrevision、提出ごとの確認、冪等性key（ascii_binで大文字小文字を区別する）
+            assertThrows(DuplicateKeyException.class,
+                    () -> insertSubmission(f.tenant(), f.caseId(), f.taskA(), f.engineerId(), f.userId(), 1));
+            assertTrue(insertSubmission(f.tenant(), f.caseId(), f.taskA(), f.engineerId(), f.userId(), 2) > submissionId);
+            insertConfirmation(f, submissionId, 1, EVIDENCE_SHA, f.userId());
+            assertThrows(DuplicateKeyException.class, () -> insertConfirmation(f, submissionId, 1, EVIDENCE_SHA, f.userId()));
+            insertIdempotency(f, f.userId(), "Key-A", submissionId);
+            insertIdempotency(f, f.userId(), "key-A", submissionId);
+            assertThrows(DuplicateKeyException.class, () -> insertIdempotency(f, f.userId(), "Key-A", submissionId));
+
+            // CHECK: revisionは1から、決定はCONFIRMED/REJECTEDだけ
+            assertSqlErrorCode(assertThrows(DataAccessException.class,
+                    () -> insertSubmission(f.tenant(), f.caseId(), f.taskA(), f.engineerId(), f.userId(), 0)), 3819, "revision 0");
+
+            // 監査はFKを持たず、他tenantのIDや存在しないIDを要求値として記録できる（計画 §5.8）
+            assertEquals(1, jdbc.update("INSERT INTO t_lifecycle_dual_event (tenant_id, requested_task_id, "
+                    + "requested_submission_id, actor_user_id, operation, event_type, reason_code, http_status, attempt_count) "
+                    + "VALUES (?, ?, ?, ?, 'CONFIRM', 'DENIED', 'NOT_FOUND_OR_FOREIGN', 404, 1)",
+                    f.tenant(), other.taskA(), MISSING_ID, f.userId()));
+        });
+    }
+
     // ===== helpers: reader × writer =====
 
     private void assertWriterWaitsForSharedReader(String label, String table, Supplier<Long> readCall,
@@ -734,6 +954,65 @@ class AuthorizationEpochSchemaMySqlTest {
                         AuthorizationEpochAnchor.document(f.tenant(), f.documentId()), true),
                 new AnchorRow("t_lifecycle_task", "task_generation", f.taskA(),
                         AuthorizationEpochAnchor.taskGeneration(f.tenant(), f.caseId(), f.taskA()), true));
+    }
+
+    // ===== helpers: B0（V195） =====
+
+    private String columnCollation(String table, String column) {
+        return jdbc.queryForObject("SELECT COLLATION_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() "
+                + "AND TABLE_NAME = ? AND COLUMN_NAME = ?", String.class, table, column);
+    }
+
+    private static void assertForeignKeyRejected(String label, Executable insert) {
+        DataAccessException failure = assertThrows(DataAccessException.class, insert, label);
+        assertSqlErrorCode(failure, 1452, label + " は複合FKが拒否する");
+    }
+
+    private long insertSubmission(String tenant, long caseId, long taskId, long engineerId, long submitterUserId,
+                                  int revision) {
+        return insert(SUBMISSION_INSERT, tenant, caseId, taskId, engineerId, revision, submitterUserId, EVIDENCE_SHA,
+                REQUEST_SHA);
+    }
+
+    private int insertSubmissionDocument(String tenant, long submissionId, long documentId, long documentVersionId) {
+        return jdbc.update(SUBMISSION_DOCUMENT_INSERT, tenant, submissionId, documentId, documentVersionId, "a".repeat(64));
+    }
+
+    private long insertConfirmation(Fixture f, long submissionId, int revision, String evidenceSha256, long confirmerUserId) {
+        return insert(CONFIRMATION_INSERT, f.tenant(), f.caseId(), f.taskA(), submissionId, revision, evidenceSha256,
+                confirmerUserId);
+    }
+
+    private long insertIdempotency(Fixture f, long actorUserId, String key, long submissionId) {
+        return insert(IDEMPOTENCY_INSERT, f.tenant(), f.caseId(), f.taskA(), actorUserId, key, REQUEST_SHA, submissionId);
+    }
+
+    /** 7表へ整合した1組の行を入れる（呼出し側のtransactionでrollbackする）。 */
+    private B0Rows insertB0Rows(Fixture f) {
+        long submissionId = insertSubmission(f.tenant(), f.caseId(), f.taskA(), f.engineerId(), f.userId(), 1);
+        assertEquals(1, insertSubmissionDocument(f.tenant(), submissionId, f.documentId(), f.documentVersionId()));
+        assertEquals(1, jdbc.update(ORG_FENCE_INSERT, f.tenant(), submissionId, f.organizationId()));
+        long confirmationId = insertConfirmation(f, submissionId, 1, EVIDENCE_SHA, f.userId());
+        assertEquals(1, jdbc.update(PROJECTION_INSERT, f.tenant(), f.taskA(), f.caseId(), 0L, 1, submissionId, EVIDENCE_SHA));
+        long idempotencyId = insertIdempotency(f, f.userId(), "nf01-b0-key", submissionId);
+        long eventId = insert("INSERT INTO t_lifecycle_dual_event (tenant_id, case_id, task_id, task_generation, "
+                + "submission_id, actor_user_id, operation, event_type) VALUES (?, ?, ?, 0, ?, ?, 'SUBMIT', 'SUBMITTED')",
+                f.tenant(), f.caseId(), f.taskA(), submissionId, f.userId());
+        return new B0Rows(submissionId, confirmationId, idempotencyId, eventId);
+    }
+
+    private record B0Rows(long submissionId, long confirmationId, long idempotencyId, long eventId) {
+        String where(String table) {
+            return switch (table) {
+                case "t_lifecycle_dual_submission" -> "id = " + submissionId;
+                case "t_lifecycle_dual_submission_document", "t_lifecycle_dual_submission_org_fence" ->
+                        "submission_id = " + submissionId;
+                case "t_lifecycle_dual_confirmation" -> "id = " + confirmationId;
+                case "t_lifecycle_dual_idempotency" -> "id = " + idempotencyId;
+                case "t_lifecycle_dual_event" -> "id = " + eventId;
+                default -> throw new IllegalArgumentException(table);
+            };
+        }
     }
 
     private record AnchorRow(String table, String column, long id, AuthorizationEpochAnchor anchor, boolean versioned) { }
