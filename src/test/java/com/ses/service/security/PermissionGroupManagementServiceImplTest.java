@@ -44,6 +44,7 @@ class PermissionGroupManagementServiceImplTest {
     @Mock private PersistentSessionService persistentSessionService;
     @Mock private com.ses.mapper.PermissionGroupActionMapper permissionGroupActionMapper;
     @Mock private com.ses.service.NotificationService notificationService;
+    @Mock private com.ses.service.security.epoch.AuthorizationEpochFence authorizationEpochFence;
 
     private PermissionGroupManagementServiceImpl service;
     private Authentication authentication;
@@ -55,7 +56,8 @@ class PermissionGroupManagementServiceImplTest {
         properties.setBreakGlassUsernames(new java.util.LinkedHashSet<>(List.of("admin", "bg-second")));
         service = new PermissionGroupManagementServiceImpl(permissionGroupMapper,
                 userPermissionGroupMapper, sysUserMapper, auditLogMapper,
-                persistentSessionService, properties, permissionGroupActionMapper, notificationService);
+                persistentSessionService, properties, permissionGroupActionMapper, notificationService,
+                authorizationEpochFence);
         authentication = authenticate(1L, "admin", "管理者");
     }
 
@@ -77,6 +79,7 @@ class PermissionGroupManagementServiceImplTest {
     void group変更は対象lock_監査_session失効を同じ実行境界で行う() {
         SysUser target = new SysUser();
         target.setId(7L);
+        target.setTenantId("tenant-a");
         target.setRole("営業");
         PermissionGroup group = new PermissionGroup();
         group.setId(10L);
@@ -312,6 +315,8 @@ class PermissionGroupManagementServiceImplTest {
     private static SysUser target(Long id, String role) {
         SysUser user = new SysUser();
         user.setId(id);
+        // NF01 W3-15: actor epochのanchorはlockした行のtenantを使う（DBでは NOT NULL）
+        user.setTenantId("tenant-a");
         user.setRole(role);
         return user;
     }

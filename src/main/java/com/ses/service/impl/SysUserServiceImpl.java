@@ -1,6 +1,7 @@
 package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.constant.StatusConstants;
 import com.ses.common.exception.BusinessException;
@@ -11,16 +12,25 @@ import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.SysUserService;
+import com.ses.service.security.epoch.ActorEpochAnchors;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 /**
  * システムユーザーサービス実装クラス。
  * アカウントCRUDのトランザクション境界をここに置く（Controllerには置かない）。
+ *
+ * <p>NF01 F1（計画 §4.1、§2.4）: 認可列（role・status・deleted_flag・tenant_id）と権限group割当を変える書込みは、
+ * 対象利用者行（actor epochのanchor、lock rank 3）を最初にX lockしてから旧値を読み、値が変わった時だけ
+ * actor epochを同じtransactionで1進める。tenantはlockした行の値を使う。入れ子の
+ * {@code PermissionGroupManagementService#replaceAssignments} が同じ利用者を進めても、fenceがtransaction内で
+ * 重複を除くので増分は1回になる（E-4）。password・email等の非認可列の更新では進めない。</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -30,6 +40,7 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     private final EngineerSalesMapper engineerSalesMapper;
     private final EngineerAccountLinkService engineerAccountLinkService;
     private final com.ses.service.security.PermissionGroupManagementService permissionGroupManagementService;
+    private final AuthorizationEpochFence authorizationEpochFence;
 
     /** 組織所属のクローズ用。組織機能を配線しないテストスライスでも壊れないよう任意解決にする。 */
     private final org.springframework.beans.factory.ObjectProvider<com.ses.service.OrganizationService>
@@ -50,6 +61,13 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         if (!StringUtils.hasText(sysUser.getUsername()) || !StringUtils.hasText(sysUser.getPassword())) {
             throw BusinessException.of("error.user.credentialsRequired");
         }
+        // NF01 F-1（計画 §11）: bodyのtenantIdは使わず、操作者のDB上のtenantで作成する。
+        // 操作者を特定できなければtenantを推測せずに拒否する（既定tenantへ落とさない）。
+        SysUser operator = currentUser(authentication);
+        if (operator == null || !StringUtils.hasText(operator.getTenantId())) {
+            throw BusinessException.of(403, "error.accessDenied");
+        }
+        sysUser.setTenantId(operator.getTenantId());
         long duplicated = baseMapper.countUsernameIncludingDeleted(sysUser.getUsername(), null);
         if (duplicated > 0) {
             throw BusinessException.of("error.user.loginIdDuplicate");
@@ -66,13 +84,25 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         }
         // 新規ユーザーもrole相当のdefault groupへ割当てる。割当が無いとlegacy fallback
         // 判定になり、group側で権限を編集しても効かないユーザーが増える（V64/V66のbackfillと同じ状態に保つ）。
+        // 割当集合が空→既定groupへ変わるため、入れ子の割当置換が新規ユーザーのactor epochを1回進める。
         permissionGroupManagementService.replaceAssignments(sysUser.getId(), java.util.Set.of(), authentication);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateUser(Long id, SysUser sysUser, Authentication authentication) {
+        // E-2: 対象利用者行（actor anchor）を最初のDB文でX lockし、以降の判定はlock後の値で行う。
+        // role判定と更新を同一ユーザー行で直列化し、並行更新の古いrole判定も防ぐ。
+        SysUser old = baseMapper.selectByIdForUpdate(id);
+        if (old == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
         sysUser.setId(id);
+        // NF01 F-1（計画 §11）: tenantは更新で変えない。bodyのtenantIdがDB上の値と異なれば拒否し、同じ値でも書き込まない。
+        if (StringUtils.hasText(sysUser.getTenantId()) && !sysUser.getTenantId().equals(old.getTenantId())) {
+            throw BusinessException.of(400, "error.user.tenantImmutable");
+        }
+        sysUser.setTenantId(null);
         // 有効/無効の切替は専用エンドポイント(/{id}/status)の無効化ガードを経由させる。
         // 汎用 update で status を受け付けると S1-2 の担当残存ガードを迂回できるため無視する。
         sysUser.setStatus(null);
@@ -86,19 +116,14 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         }
         // 自分自身のロール変更を禁止（自己降格による管理者権限の喪失・ロックアウトを防ぐ）
         SysUser current = currentUser(authentication);
-        if (current != null && sysUser.getId() != null && current.getId().equals(sysUser.getId())
+        if (current != null && current.getId().equals(id)
                 && StringUtils.hasText(sysUser.getRole()) && !sysUser.getRole().equals(current.getRole())) {
             throw BusinessException.of("error.user.roleSelfChange");
         }
         // 営業ロールから他ロールへ変更する場合、現任担当が残っていれば拒否（先に付け替えを促す）
-        // role判定と更新を同一ユーザー行で直列化し、並行更新の古いrole判定を防ぐ。
-        SysUser old = baseMapper.selectByIdForUpdate(id);
-        if (old == null) {
-            throw BusinessException.of(404, "error.scope.notFound");
-        }
         if (StringUtils.hasText(sysUser.getRole()) && StatusConstants.ROLE_SALES.equals(old.getRole())
                 && !StatusConstants.ROLE_SALES.equals(sysUser.getRole())) {
-            guardNoActiveSalesAssignments(sysUser.getId());
+            guardNoActiveSalesAssignments(id);
         }
         if (StringUtils.hasText(sysUser.getPassword())) {
             PasswordPolicyValidator.validate(sysUser.getPassword());
@@ -116,6 +141,9 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         // 進めないと、変更直後もDashboardキャッシュのTTLが切れるまで旧ロールの母集団で集計される
         // （第十四次Review P1-3）。
         if (roleChanged) {
+            // 入口のこのメソッドでactor epochを進める。入れ子の割当置換も同じ利用者を進めるが、
+            // 同一transactionの重複はfenceが除くため増分は1回になる（計画 §2.4 E-4）。
+            authorizationEpochFence.advance(ActorEpochAnchors.of(old));
             // V63で既存roleをdefault groupへ移行済みのため、role変更時も旧role groupを残さない。
             // 空集合は対象ユーザーの新roleに対応するdefault groupへのresetを表す。
             permissionGroupManagementService.replaceAssignments(id, java.util.Set.of(), authentication);
@@ -124,23 +152,27 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public void updateUserStatus(Long id, Integer status, Authentication authentication) {
         if (status == null || (status != 0 && status != 1)) {
             throw BusinessException.of(400, "error.user.invalidStatus");
         }
         guardNotSelf(id, authentication, "自分自身のステータスは変更できません");
+        // E-2・E-3: 所属close（discoveryを伴う）を内包するためREAD_COMMITTEDで、対象利用者行を先にX lockする。
+        SysUser old = baseMapper.selectByIdForUpdate(id);
+        if (old == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
         // 有効(status=1)以外へ切り替える場合、現任担当が残っていれば拒否
         if (status != 1) {
             guardNoActiveSalesAssignments(id);
         }
-        SysUser sysUser = new SysUser();
-        sysUser.setId(id);
-        sysUser.setStatus(status);
-        boolean success = updateById(sysUser);
+        // status列だけを更新する（他列を古い値で書き戻さない）。
+        boolean success = update(new UpdateWrapper<SysUser>().eq("id", id).set("status", status));
         if (!success) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
+        authorizationEpochFence.advanceIfChanged(ActorEpochAnchors.of(old), old.getStatus(), status);
         if (status != 1) {
             closeOrganizationAssignments(id);
             revokeUserSessions(id, "USER_DISABLED");
@@ -148,11 +180,17 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public void deleteUser(Long id, Authentication authentication) {
         guardNotSelf(id, authentication, "自分自身は削除できません");
+        // E-2・E-3: 所属close（discoveryを伴う）を内包するためREAD_COMMITTEDで、対象利用者行を先にX lockする。
+        SysUser old = baseMapper.selectByIdForUpdate(id);
+        if (old == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
         guardNoActiveSalesAssignments(id);
         // 紐付け中の要員アカウントは削除拒否（先に要員詳細から解除させる）。
+        // engineer epochの増分契機に連携ユーザーの削除を加えない前提（計画 §2.2）なので、この拒否を外さないこと。
         if (engineerAccountLinkService.isUserLinked(id)) {
             throw BusinessException.of("error.engineerAccount.linkedUserDelete");
         }
@@ -160,8 +198,26 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         if (!success) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
+        // 論理削除は主体の有効性（述語(a)）を変えるため常に進める。
+        authorizationEpochFence.advance(ActorEpochAnchors.of(old));
         closeOrganizationAssignments(id);
         revokeUserSessions(id, "USER_DELETED");
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void changeOwnPassword(Long userId, String encodedPassword) {
+        if (userId == null || !StringUtils.hasText(encodedPassword)) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        // password・初回変更要求だけを書く列限定の更新（認可列ではないためepochは進めない。計画 §4.1、§4.4）。
+        boolean success = update(new UpdateWrapper<SysUser>()
+                .eq("id", userId)
+                .set("password", encodedPassword)
+                .set("password_change_required", 0));
+        if (!success) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
     }
 
     private void invalidateScope() {

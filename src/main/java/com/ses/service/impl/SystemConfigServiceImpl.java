@@ -6,29 +6,51 @@ import com.ses.common.security.OutboundUrlGuard;
 import com.ses.entity.SystemConfig;
 import com.ses.mapper.SystemConfigMapper;
 import com.ses.service.SystemConfigService;
+import com.ses.service.security.epoch.AuthorizationConfigKeys;
+import com.ses.service.security.epoch.AuthorizationEpochAnchor;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
+import com.ses.service.security.epoch.TransactionBoundState;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * システム設定サービス実装。
  * 値はConcurrentHashMapにキャッシュし、put/初回アクセス時にDBと同期する。
+ *
+ * <p>NF01 F1（計画 §4.1）: 認可述語が読むキー（{@link AuthorizationConfigKeys}）の値を変える更新は
+ * {@link #updateAll} だけが行い、全体epoch行を最初にX lockしてから旧値を読み、値が変わった時だけ全体epochを
+ * 同じtransactionで1進める。{@link #put} は、同じtransactionで全体epoch行のX lockを取得済みでなければ台帳のキーを
+ * 拒否する（他経路から認可キーを書いて増分を漏らさない）。</p>
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class SystemConfigServiceImpl implements SystemConfigService {
 
+    /** このtransactionで全体epoch行をX lock済みであることを示す、transactionに結び付けた印のキー。 */
+    private static final Object GLOBAL_EPOCH_LOCK_HELD = new Object() {
+        @Override
+        public String toString() {
+            return "SystemConfigServiceImpl.GLOBAL_EPOCH_LOCK_HELD";
+        }
+    };
+
     private final SystemConfigMapper systemConfigMapper;
     private final OutboundUrlGuard outboundUrlGuard;
+    private final AuthorizationEpochFence authorizationEpochFence;
     private final ConcurrentHashMap<String, String> cache = new ConcurrentHashMap<>();
     private volatile boolean loaded = false;
 
@@ -204,6 +226,10 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         if (schema == null) {
             throw com.ses.common.exception.BusinessException.of(400, "error.config.unknownKey");
         }
+        if (AuthorizationConfigKeys.contains(key) && !globalEpochLockHeld()) {
+            // 認可キーは updateAll（全体epoch行のX lock → 旧値read → 書込み → 増分）以外から書かせない（計画 §4.1、§4.5）。
+            throw new IllegalStateException("認可キーは全体epoch行をX lockしたtransactionでのみ更新できます: " + key);
+        }
         if (value != null && !value.isBlank()) {
             if (schema.type == ConfigType.BOOLEAN || schema.type == ConfigType.ENUM) {
                 if (schema.allowedValues != null && !schema.allowedValues.contains(value)) {
@@ -271,17 +297,31 @@ public class SystemConfigServiceImpl implements SystemConfigService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateAll(List<SystemConfig> configs) {
-        String previousScopeValue = all().stream()
-                .filter(c -> "scope.sales-own-data-only".equals(c.getConfigKey()))
-                .map(SystemConfig::getConfigValue)
-                .findFirst()
-                .orElse(null);
-        String finalScopeValue = previousScopeValue;
+        // システム管理キーの拒否はDBに触れる前に行う（無効な要求で全体epoch行をlockしない）。
+        Set<String> authorizationKeys = new TreeSet<>();
         if (configs != null) {
             for (SystemConfig c : configs) {
                 if (isSystemManagedKey(c.getConfigKey())) {
                     throw BusinessException.of(400, "error.config.systemKey");
                 }
+                if (AuthorizationConfigKeys.contains(c.getConfigKey())) {
+                    authorizationKeys.add(c.getConfigKey());
+                }
+            }
+        }
+        // NF01 F1（計画 §4.1）: payloadに認可キーがあれば、旧値を読む前に全体epoch行（lock rank 1）をX lockする。
+        if (!authorizationKeys.isEmpty()) {
+            authorizationEpochFence.lockForUpdate(AuthorizationEpochAnchor.global());
+            TransactionBoundState.current(GLOBAL_EPOCH_LOCK_HELD, () -> Boolean.TRUE);
+        }
+        // 認可キーの旧値はcacheではなくDBから読む（cacheはafterCommitでしか失効しない）。
+        Map<String, String> beforeAuthorizationValues = readAuthorizationValues(authorizationKeys);
+        String previousScopeValue = authorizationKeys.contains(AuthorizationConfigKeys.SALES_OWN_DATA_ONLY)
+                ? beforeAuthorizationValues.get(AuthorizationConfigKeys.SALES_OWN_DATA_ONLY)
+                : null;
+        String finalScopeValue = previousScopeValue;
+        if (configs != null) {
+            for (SystemConfig c : configs) {
                 if (MASKED_KEYS.contains(c.getConfigKey()) && MASK_PLACEHOLDER.equals(c.getConfigValue())) {
                     // 画面上で変更されていない（マスキング表示のまま）ので既存値を維持する
                     continue;
@@ -295,15 +335,36 @@ public class SystemConfigServiceImpl implements SystemConfigService {
                         throw BusinessException.of(400, "error.config.webhookUrl");
                     }
                 }
-                if ("scope.sales-own-data-only".equals(c.getConfigKey())) {
+                if (AuthorizationConfigKeys.SALES_OWN_DATA_ONLY.equals(c.getConfigKey())) {
                     finalScopeValue = c.getConfigValue();
                 }
                 put(c.getConfigKey(), c.getConfigValue(), c.getDescription());
             }
         }
+        if (!authorizationKeys.isEmpty()) {
+            // 認可キーの値（書込み後のDB値）が変わった時だけ全体epochを1進める（同じ値の再保存・非認可キーでは進めない）。
+            authorizationEpochFence.advanceIfChanged(AuthorizationEpochAnchor.global(),
+                    beforeAuthorizationValues, readAuthorizationValues(authorizationKeys));
+        }
         if (!Objects.equals(previousScopeValue, finalScopeValue) && scopeChangeInvalidator != null) {
             // ScopeChangeInvalidatorはトランザクションのafterCommitでのみ世代を進める。
             scopeChangeInvalidator.invalidate();
         }
+    }
+
+    /** 指定した認可キーの現在のDB値（行が無い・値がNULLのキーはNULLで持つ）。比較のため順序を固定する。 */
+    private Map<String, String> readAuthorizationValues(Set<String> keys) {
+        Map<String, String> values = new TreeMap<>();
+        for (String key : keys) {
+            SystemConfig row = systemConfigMapper.selectById(key);
+            values.put(key, row == null ? null : row.getConfigValue());
+        }
+        return values;
+    }
+
+    /** 同じ実transactionで全体epoch行をX lock済みか（REQUIRES_NEW等で外側がsuspendされている間は取得済みとみなさない）。 */
+    private static boolean globalEpochLockHeld() {
+        return TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.getResource(GLOBAL_EPOCH_LOCK_HELD) != null;
     }
 }

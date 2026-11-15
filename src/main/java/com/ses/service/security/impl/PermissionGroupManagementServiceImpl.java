@@ -17,6 +17,8 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserPermissionGroupMapper;
 import com.ses.service.security.PermissionGroupManagementService;
 import com.ses.service.security.PersistentSessionService;
+import com.ses.service.security.epoch.ActorEpochAnchors;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -27,8 +29,15 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 
-/** 権限変更・監査・session失効を同一transactionで確定する。 */
+/**
+ * 権限変更・監査・session失効を同一transactionで確定する。
+ *
+ * <p>NF01 F1（計画 §4.1）: 割当の置換は対象利用者行（actor epochのanchor、lock rank 3）をX lockしてから旧割当を読み、
+ * 割当group集合が変わった時だけactor epochを同じtransactionで1進める。tenantはlockした行の値を使う。
+ * {@code SysUserServiceImpl} の作成・role変更から入れ子で呼ばれても、同じ利用者の増分は1回になる（E-4）。</p>
+ */
 @Service
 @RequiredArgsConstructor
 public class PermissionGroupManagementServiceImpl implements PermissionGroupManagementService {
@@ -50,6 +59,7 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
     private final OidcSecurityProperties oidcProperties;
     private final PermissionGroupActionMapper permissionGroupActionMapper;
     private final NotificationService notificationService;
+    private final AuthorizationEpochFence authorizationEpochFence;
 
     @Override
     public List<PermissionGroup> listGroups() {
@@ -103,7 +113,9 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
         }
         // privacy-admin の割当・解除（role変更による既定groupへの再割当を含む）は、変更前の所属と
         // 既存の privacy-admin を書込み前に確定してから、同一transactionで監査・通知する（G-ID 署名までの暫定規則）。
-        Set<String> beforeKeys = currentGroupKeys(userId);
+        // 旧割当は対象利用者行のX lock保持下で読む（actor epochの増分判定にも使う）。
+        Set<Long> beforeGroupIds = currentGroupIds(userId);
+        Set<String> beforeKeys = groupKeysOf(beforeGroupIds);
         boolean privacyAdminChanged = beforeKeys.contains(PRIVACY_ADMIN_GROUP_KEY)
                 != requestedKeys.contains(PRIVACY_ADMIN_GROUP_KEY);
         List<Long> existingPrivacyAdmins = privacyAdminChanged
@@ -123,6 +135,9 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
                 throw BusinessException.of("error.permission.saveFailed");
             }
         }
+        // 割当group集合が変わった時だけactor epochを1進める（同じ集合の再保存では進めない。E-4）。
+        authorizationEpochFence.advanceIfChanged(ActorEpochAnchors.of(target),
+                new TreeSet<>(beforeGroupIds), new TreeSet<>(requested));
         persistentSessionService.revokeAllForUser(userId, "PERMISSION_CHANGED");
         insertAudit(authentication.getName(), userId, now);
         if (privacyAdminChanged) {
@@ -168,8 +183,8 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
         }
     }
 
-    /** 対象ユーザーの現在の所属group key（有効・無効を問わない）。 */
-    private Set<String> currentGroupKeys(Long userId) {
+    /** 対象ユーザーの現在の割当group ID（有効・無効を問わない）。 */
+    private Set<Long> currentGroupIds(Long userId) {
         Set<Long> groupIds = new LinkedHashSet<>();
         for (UserPermissionGroup assignment : userPermissionGroupMapper.selectList(
                 new LambdaQueryWrapper<UserPermissionGroup>()
@@ -179,6 +194,11 @@ public class PermissionGroupManagementServiceImpl implements PermissionGroupMana
                 groupIds.add(assignment.getGroupId());
             }
         }
+        return groupIds;
+    }
+
+    /** 割当group IDの group key（有効・無効を問わない）。 */
+    private Set<String> groupKeysOf(Set<Long> groupIds) {
         if (groupIds.isEmpty()) {
             return new java.util.TreeSet<>();
         }

@@ -33,3 +33,5 @@ LifecycleLockOrderMySqlTest
 AiExternalSendAuditMySqlIntegrationTest
 AuthorizationEpochSchemaMySqlTest
 BpPaymentTenantSqlMySqlTest
+GlobalEpochFenceMySqlTest
+ActorEpochFenceMySqlTest

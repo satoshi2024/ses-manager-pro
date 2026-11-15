@@ -33,7 +33,9 @@ class SystemConfigServiceImplTest {
     @BeforeEach
     void setUp() {
         mapper = Mockito.mock(SystemConfigMapper.class);
-        service = new SystemConfigServiceImpl(mapper, new com.ses.common.security.OutboundUrlGuard());
+        // NF01 W3-15: 認可キーの全体epoch fence（本testの対象キーは認可キーではないため呼ばれない）
+        service = new SystemConfigServiceImpl(mapper, new com.ses.common.security.OutboundUrlGuard(),
+                Mockito.mock(com.ses.service.security.epoch.AuthorizationEpochFence.class));
     }
 
     private void seed(SystemConfig... configs) {

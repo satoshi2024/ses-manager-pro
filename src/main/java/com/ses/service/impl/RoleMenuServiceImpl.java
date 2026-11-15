@@ -10,12 +10,18 @@ import com.ses.mapper.MenuMapper;
 import com.ses.mapper.RoleMenuMapper;
 import com.ses.service.MenuCacheService;
 import com.ses.service.RoleMenuService;
+import com.ses.service.security.epoch.AuthorizationEpochAnchor;
+import com.ses.service.security.epoch.AuthorizationEpochFence;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 /**
  * ロール別メニュー権限サービス実装クラス
@@ -26,6 +32,7 @@ public class RoleMenuServiceImpl extends ServiceImpl<RoleMenuMapper, RoleMenu> i
 
     private final MenuMapper menuMapper;
     private final MenuCacheService menuCacheService;
+    private final AuthorizationEpochFence authorizationEpochFence;
 
     @Override
     public List<String> getMenuKeysByRole(String role) {
@@ -53,6 +60,11 @@ public class RoleMenuServiceImpl extends ServiceImpl<RoleMenuMapper, RoleMenu> i
         if (!validRoles.contains(role)) {
             throw BusinessException.of(400, "error.roleMenu.invalidRole");
         }
+
+        // NF01 F1（計画 §4.1、§3.4「role menu・認可config」）: 全体epoch行（lock rank 1）を最初のDB文でX lockする。
+        // 旧集合の読取と置換はこのlockの保持下で行い、並行する置換やCONFIRMのreader（全体epoch行のS lock）と直列化する。
+        authorizationEpochFence.lockForUpdate(AuthorizationEpochAnchor.global());
+        Set<Long> beforeMenuIds = currentMenuIds(role);
 
         List<Long> distinctMenuIds = menuIds != null
                 ? new ArrayList<>(menuIds.stream().distinct().toList())
@@ -87,6 +99,18 @@ public class RoleMenuServiceImpl extends ServiceImpl<RoleMenuMapper, RoleMenu> i
                     .toList();
             saveBatch(roleMenus);
         }
+        // 許可メニューの集合が変わった時だけ全体epochを1進める（同じ内容の再保存では進めない。E-4）。
+        authorizationEpochFence.advanceIfChanged(AuthorizationEpochAnchor.global(),
+                beforeMenuIds, new TreeSet<>(distinctMenuIds));
+        // cache失効は従来どおり残す（epochの代替ではなく、画面表示を即時に反映するため。E-1）。
         menuCacheService.invalidate();
+    }
+
+    /** 全体epoch行のX lock保持下で読む、指定ロールの現在の許可メニューID集合（順序に依存しない比較用）。 */
+    private Set<Long> currentMenuIds(String role) {
+        return list(new LambdaQueryWrapper<RoleMenu>().eq(RoleMenu::getRole, role)).stream()
+                .map(RoleMenu::getMenuId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(TreeSet::new));
     }
 }
