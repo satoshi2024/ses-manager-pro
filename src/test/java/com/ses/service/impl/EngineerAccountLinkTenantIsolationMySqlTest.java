@@ -1,10 +1,12 @@
 package com.ses.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.config.LoginUser;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.SysUser;
+import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.EngineerAccountLinkService;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -67,6 +70,8 @@ class EngineerAccountLinkTenantIsolationMySqlTest {
     private EngineerMapper engineerMapper;
     @Autowired
     private SysUserMapper sysUserMapper;
+    @Autowired
+    private EngineerAccountLinkMapper engineerAccountLinkMapper;
 
     @AfterEach
     void clearContext() {
@@ -74,8 +79,13 @@ class EngineerAccountLinkTenantIsolationMySqlTest {
         AccountingTenantContextHolder.clear();
     }
 
+    /**
+     * 同時linkは、NF01 F2（細粒度epoch計画 §3.4）で 3 S{連携ユーザー} → 7 X{要員} の順に直列化される。後着は先着のcommit後に
+     * 要員行のlockを得て、lock下の重複判定で 400 {@code error.engineerAccount.userAlreadyLinked} になる（DB一意制約まで
+     * 届かない）。DB一意制約そのものは mapper の直接insertで確かめる。
+     */
     @Test
-    void tenant境界と同時linkのDB一意制約を検証する() throws Exception {
+    void tenant境界と同時linkの直列化とDB一意制約を検証する() throws Exception {
         String suffix = UUID.randomUUID().toString().replace("-", "");
         Engineer engineerA = insertEngineer("mysql-link-a-" + suffix, "tenant-a");
         Engineer engineerB = insertEngineer("mysql-link-b-" + suffix, "tenant-b");
@@ -114,7 +124,9 @@ class EngineerAccountLinkTenantIsolationMySqlTest {
                                 () -> linkService.link(concurrentEngineer.getId(), concurrentUser.getId(), null));
                         success.incrementAndGet();
                     } catch (BusinessException ex) {
-                        assertThat(ex.getCode()).isEqualTo(409);
+                        // 後着は要員行のX lock下の重複判定で拒否される（並行のinsertはDB一意制約に届かない）。
+                        assertThat(ex.getCode()).isEqualTo(400);
+                        assertThat(ex.getMessageKey()).isEqualTo("error.engineerAccount.userAlreadyLinked");
                         conflict.incrementAndGet();
                     } finally {
                         AccountingTenantContextHolder.clear();
@@ -132,6 +144,27 @@ class EngineerAccountLinkTenantIsolationMySqlTest {
         }
         assertThat(success.get()).isEqualTo(1);
         assertThat(conflict.get()).isEqualTo(1);
+        // データ上も1件だけが成立する。
+        assertThat(engineerAccountLinkMapper.selectCount(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getEngineerId, concurrentEngineer.getId()))).isEqualTo(1L);
+        assertThat(engineerAccountLinkMapper.selectCount(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getSysUserId, concurrentUser.getId()))).isEqualTo(1L);
+
+        // DB一意制約（engineer_id・sys_user_id、V32）は最終防線として残っている。serviceの事前判定を経ない直接insertで確かめる。
+        Engineer otherEngineer = insertEngineer("mysql-link-unique-" + suffix, "tenant-a");
+        SysUser otherUser = insertUser("mysql-link-unique-user-" + suffix, "tenant-a");
+        assertThatThrownBy(() -> engineerAccountLinkMapper.insert(rawLink(concurrentEngineer.getId(), otherUser.getId())))
+                .isInstanceOf(DuplicateKeyException.class);
+        assertThatThrownBy(() -> engineerAccountLinkMapper.insert(rawLink(otherEngineer.getId(), concurrentUser.getId())))
+                .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    private static EngineerAccountLink rawLink(Long engineerId, Long sysUserId) {
+        EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId("tenant-a");
+        link.setEngineerId(engineerId);
+        link.setSysUserId(sysUserId);
+        return link;
     }
 
     private Engineer insertEngineer(String name, String tenantId) {

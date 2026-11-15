@@ -75,7 +75,8 @@ class ScopeSourceWriterFenceTest {
             ENGINEER_SERVICE_IMPL, "EngineerAccountingHistoryMapper#updateById", 1,
             ENGINEER_SERVICE_IMPL, "EngineerAccountingHistoryMapper#closeCurrent", 1,
             ENGINEER_SERVICE_IMPL, "EngineerAccountingHistoryMapper#insert", 1,
-            // 理由付きの許可（計画 §4.4: 述語外の列だけ。organization_id等は読んだ値のままversion CASで書き戻す）
+            // 理由付きの許可（計画 §4.4: 述語外の列だけ）。CandidateServiceImpl は非lockの読取だが、読んだversionの
+            // CASで書き戻すため、並行して変わった organization_id 等を旧値へ戻さない（根拠はFOR UPDATEではなくCAS）。
             "com/ses/service/impl/CandidateServiceImpl.java", "EngineerMapper#updateByIdForTenant", 1,
             "com/ses/service/impl/EngineerSkillServiceImpl.java", "EngineerMapper#bumpVersionForTenant", 1,
             "com/ses/service/impl/EngineerStatusServiceImpl.java", "EngineerMapper#updateById", 3,
@@ -355,13 +356,14 @@ class ScopeSourceWriterFenceTest {
                 "authorizationEpochFence.advance("));
         violations.addAll(order(ENGINEER_SERVICE_IMPL, "save", engineer, "public boolean save(",
                 "super.save(", "baseMapper.selectScopeAnchorForUpdate(", "recordAccountingHistory("));
-        // discovery → 3 X{連携ユーザー} → 7 X{要員} → 削除 → 増分 → 10 → 9 → 連携ユーザーのstatusだけ（F-5）
+        // discovery → 3 X{連携ユーザー} → 7 X{要員} → 削除 → 増分 → 9 → 10（子行もrank順。§3.5 規則1）
+        // → 連携ユーザーのstatusだけ（F-5）
         violations.addAll(order(ENGINEER_SERVICE_IMPL, "removeById", engineer,
                 "public boolean removeById(Serializable id, Integer expectedVersion)",
                 "engineerAccountLinkService.findByEngineerId(", "sysUserMapper.selectByIdAndTenantForUpdate(",
                 "baseMapper.selectByIdForUpdateForTenant(", "baseMapper.deleteByIdForTenant(",
-                "authorizationEpochFence.advance(", "engineerSalesService.releaseAllByEngineerId(",
-                "engineerAccountLinkService.unlinkByEngineerId(", "disableLinkedUser("));
+                "authorizationEpochFence.advance(", "engineerAccountLinkService.unlinkByEngineerId(",
+                "engineerSalesService.releaseAllByEngineerId(", "disableLinkedUser("));
         violations.addAll(order(ENGINEER_SERVICE_IMPL, "disableLinkedUser", engineer, "private void disableLinkedUser(",
                 "sysUserMapper.update(null, new UpdateWrapper<SysUser>()", ".set(\"status\", 0)",
                 "authorizationEpochFence.advanceIfChanged("));

@@ -147,7 +147,7 @@ class EngineerServiceImplTest {
 
         assertTrue(service.removeById(1L, 0));
 
-        // 計画 §4.2: discovery → 3 X{連携ユーザー} → 7 X{要員} → 削除 → 増分 → 10 → 9 → 連携ユーザーのstatus
+        // 計画 §4.2: discovery → 3 X{連携ユーザー} → 7 X{要員} → 削除 → 増分 → 9 → 10（子行もrank順）→ 連携ユーザーのstatus
         InOrder order = inOrder(engineerAccountLinkService, sysUserMapper, engineerMapper, authorizationEpochFence,
                 engineerSalesService);
         order.verify(engineerAccountLinkService).findByEngineerId(1L);
@@ -155,8 +155,8 @@ class EngineerServiceImplTest {
         order.verify(engineerMapper).selectByIdForUpdateForTenant(1L, "default");
         order.verify(engineerMapper).deleteByIdForTenant(1L, "default", 0);
         order.verify(authorizationEpochFence).advance(ENGINEER_ANCHOR);
-        order.verify(engineerSalesService).releaseAllByEngineerId(1L);
         order.verify(engineerAccountLinkService).unlinkByEngineerId(1L);
+        order.verify(engineerSalesService).releaseAllByEngineerId(1L);
         order.verify(sysUserMapper).update(isNull(), any());
         order.verify(authorizationEpochFence).advanceIfChanged(AuthorizationEpochAnchor.actor("default", 3L), 1, 0);
 

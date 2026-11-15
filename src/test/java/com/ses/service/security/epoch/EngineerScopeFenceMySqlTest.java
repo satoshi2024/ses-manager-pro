@@ -6,6 +6,7 @@ import com.ses.entity.Engineer;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.EngineerAccountingHistory;
 import com.ses.entity.SysUser;
+import com.ses.mapper.AuthorizationEpochMapper;
 import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.EngineerAccountingHistoryMapper;
 import com.ses.mapper.EngineerMapper;
@@ -69,7 +70,8 @@ import static org.mockito.Mockito.when;
  * 最初にX lockし、CONFIRMのreader（{@code FOR SHARE}）と両順序で直列化されることを確かめる。
  *
  * <ul>
- *   <li>reader先行ではwriterが要員行で待ち、解放後に対象の要員だけが+1。writer先行ではreaderがcommitを待ち+1を読む。
+ *   <li>各writerを reader先行・writer先行の両順序で確かめる（計画 §6.1）。reader先行ではwriterが要員行で待ち、解放後に
+ *       対象の要員だけが+1。writer先行ではreaderがcommitを待ち+1を読む。
  *       writerは要員行を最初から排他lockで取る（S→X昇格なし。FK検査が親の別の行に付けるS lockは数えない）。</li>
  *   <li>細粒度: 要員Aと担当営業を共有lockするreaderは、同じ営業を要員Bへ割り当てるwriterを待たせず、Aのepochも変えない
  *       （営業ユーザー行は共有lock、rank 3 S）。</li>
@@ -119,6 +121,7 @@ class EngineerScopeFenceMySqlTest {
     @Autowired private SysUserMapper sysUserMapper;
     @Autowired private EngineerAccountLinkMapper engineerAccountLinkMapper;
     @Autowired private EngineerAccountingHistoryMapper engineerAccountingHistoryMapper;
+    @Autowired private AuthorizationEpochMapper epochMapper;
     @MockBean private LegalEntityContextService legalEntityContextService;
 
     private SysUser operator;
@@ -408,6 +411,113 @@ class EngineerScopeFenceMySqlTest {
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_engineer_sales WHERE engineer_id = ?",
                 Integer.class, target), "割当のinsertは業務更新ごとrollbackされる");
         assertEquals(Long.MAX_VALUE, engineerEpoch(target), "上限の値は変えない");
+    }
+
+    // ===== 計画 §6.1 M4「× reader の両順序」の残りの向き（W3-16a review P3-9） =====
+
+    @Test
+    void 紐付けのreader先行ではwriterが利用者行の共有lockの後に要員行で待ち1進める() throws Exception {
+        long target = insertEngineer(null);
+        long user = insertUser("要員", 1).getId();
+        long before = engineerEpoch(target);
+
+        // writerは先に連携ユーザー行を共有lockする（readerの要員行S lockとは競合しない）が、紐付け行を書く前に
+        // 要員行のX lockで待つ（anchorが子行より先）。
+        EpochFenceMySqlSupport.assertWriterWaitsForReader(jdbc, transactionManager, "t_engineer", this::bindContexts,
+                () -> reader.readEngineer(TENANT, target),
+                () -> engineerAccountLinkService.link(target, user, operator.getId()), "紐付け reader先行");
+
+        assertEquals(before + 1, engineerEpoch(target));
+        assertEquals(1, linkCount(target));
+    }
+
+    @Test
+    void 営業解除のwriter先行ではreaderがcommitを待ち1進んだepochを読む() throws Exception {
+        long target = insertEngineer(null);
+        long sales = insertUser("営業", 1).getId();
+        engineerSalesService.assign(target, sales, true, null);
+        Long assignmentId = jdbc.queryForObject("SELECT id FROM t_engineer_sales WHERE engineer_id = ? "
+                + "AND released_at IS NULL", Long.class, target);
+        long before = engineerEpoch(target);
+
+        long read = EpochFenceMySqlSupport.assertReaderWaitsForWriter(jdbc, transactionManager, "t_engineer",
+                this::bindContexts, () -> engineerSalesService.release(target, assignmentId),
+                () -> reader.readEngineer(TENANT, target), "営業解除 writer先行");
+
+        assertEquals(before + 1, read);
+    }
+
+    @Test
+    void 紐付け解除のwriter先行ではreaderがcommitを待ち1進んだepochを読む() throws Exception {
+        long target = insertEngineer(null);
+        long user = insertUser("要員", 1).getId();
+        insertLink(target, user);
+        long before = engineerEpoch(target);
+
+        long read = EpochFenceMySqlSupport.assertReaderWaitsForWriter(jdbc, transactionManager, "t_engineer",
+                this::bindContexts, () -> engineerAccountLinkService.unlinkByEngineerId(target),
+                () -> reader.readEngineer(TENANT, target), "紐付け解除 writer先行");
+
+        assertEquals(before + 1, read);
+        assertEquals(0, linkCount(target));
+    }
+
+    @Test
+    void 所属組織の変更のwriter先行ではreaderがcommitを待ち1進んだepochを読む() throws Exception {
+        long from = insertOrganization();
+        long to = insertOrganization();
+        long target = insertEngineer(null);
+        jdbc.update("UPDATE t_engineer SET organization_id = ? WHERE id = ?", from, target);
+        engineerAccountingHistoryMapper.insert(EngineerAccountingHistory.builder().engineerId(target)
+                .organizationId(from).validFrom(LocalDate.now()).validTo(null).build());
+        long before = engineerEpoch(target);
+        Engineer moved = Engineer.builder().organizationId(to).build();
+        moved.setId(target);
+        moved.setVersion(version(target));
+
+        // 要員行のUPDATEはFK（organization_id → m_organization_unit）を検査するが、それは別の表の行へのS lockで数えない。
+        long read = EpochFenceMySqlSupport.assertReaderWaitsForWriter(jdbc, transactionManager, "t_engineer",
+                this::bindContexts, () -> engineerService.updateWithStatusGuard(moved),
+                () -> reader.readEngineer(TENANT, target), "所属組織の変更 writer先行");
+
+        assertEquals(before + 1, read);
+    }
+
+    @Test
+    void 会計履歴だけが変わる更新のreader先行ではwriterが解放を待ち1進める() throws Exception {
+        long target = insertEngineer(new BigDecimal("500000"));
+        engineerAccountingHistoryMapper.insert(EngineerAccountingHistory.builder().engineerId(target)
+                .expectedUnitPrice(new BigDecimal("500000")).validFrom(LocalDate.now()).validTo(null).build());
+        long before = engineerEpoch(target);
+        Engineer repriced = Engineer.builder().expectedUnitPrice(new BigDecimal("700000")).build();
+        repriced.setId(target);
+        repriced.setVersion(version(target));
+
+        EpochFenceMySqlSupport.assertWriterWaitsForReader(jdbc, transactionManager, "t_engineer", this::bindContexts,
+                () -> reader.readEngineer(TENANT, target), () -> engineerService.updateWithStatusGuard(repriced),
+                "会計履歴の変更 reader先行");
+
+        assertEquals(before + 1, engineerEpoch(target));
+    }
+
+    @Test
+    void 要員削除のwriter先行ではreaderがcommitを待ち削除済みで1進んだ行を読む() throws Exception {
+        long target = insertEngineer(null);
+        SysUser linked = insertUser("要員", 1);
+        insertLink(target, linked.getId());
+        long before = engineerEpoch(target);
+        int version = version(target);
+
+        // CONFIRMのreaderは削除済みの要員を409にするため、ここでは同じFOR SHAREの読取をmapperで行い値と削除状態を見る。
+        long read = EpochFenceMySqlSupport.assertReaderWaitsForWriter(jdbc, transactionManager, "t_engineer",
+                this::bindContexts, () -> engineerService.removeById(target, version), () -> {
+                    AuthorizationEpochMapper.EpochRow row = epochMapper.selectEngineerForShare(target, TENANT);
+                    assertFalse(row.usable(), "commit後の要員行は論理削除済み（readerは409にする）");
+                    return row.getEpoch();
+                }, "要員削除 writer先行");
+
+        assertEquals(before + 1, read);
+        assertEquals(0, sysUserMapper.selectById(linked.getId()).getStatus());
     }
 
     // ===== helper =====

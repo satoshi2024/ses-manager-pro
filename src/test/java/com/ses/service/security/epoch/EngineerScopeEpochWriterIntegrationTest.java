@@ -47,7 +47,8 @@ import static org.mockito.Mockito.when;
  * <ul>
  *   <li>変化の無い更新（主担当のままの主担当変更・現任の無い一括解除・名前だけの更新）では進めない。変化があれば1だけ進め、
  *       別の要員は変えない（細粒度）。同じtransactionの入れ子・繰返しでは1回だけ進める（E-4）。</li>
- *   <li>anchorのtenantは要求のtenant contextではなく、lockした要員行の値を使う。</li>
+ *   <li>anchorのtenantはlockした要員行の値を使い、tenant未解決の行では409で止める（行の値の採用自体は
+ *       {@code EngineerEpochAnchorsTest} が固定する）。</li>
  *   <li>要員削除は連携ユーザーの status列だけを0にし（他列は不変、§11 F-5）、actorとengineerを各1回進める。</li>
  *   <li>上限では409 {@code error.authorization.epochUnavailable} で止め、業務更新ごとrollback-onlyにする（E-6）。</li>
  * </ul>
@@ -147,15 +148,22 @@ class EngineerScopeEpochWriterIntegrationTest {
     }
 
     @Test
-    void 要員のtenantは要求のtenantではなくDBの行の値で照合する() {
-        // 担当営業のAPIはtenantで要員を絞らない。anchorを要求のtenantで作ると増分が0件になり409になる。
-        long otherTenantEngineer = insertEngineer("tenant-w316a", null);
+    void tenant未解決の要員行はanchorを作れず409で割当ごと止める() {
+        // anchorはlockした要員行のtenantで作る（計画 §2.6、W3-10 review P3-5）。tenantがNULLのlegacy行は世代を
+        // 進められないため、要求側のtenantで補わずfail-closedにする（割当のinsertより前に止まる）。
+        // 他tenantの要員を操作できること自体は期待値にしない（/api の tenant化は RR-14 の横断batch）。
+        long unresolved = insertEngineer(null, null);
         long sales = insertUser("営業", 1);
-        long before = engineerEpoch(otherTenantEngineer);
+        long before = engineerEpoch(unresolved);
 
-        engineerSalesService.assign(otherTenantEngineer, sales, true, null);
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> engineerSalesService.assign(unresolved, sales, true, null));
 
-        assertEquals(before + 1, engineerEpoch(otherTenantEngineer));
+        assertEquals(409, error.getCode());
+        assertEquals(AuthorizationEpochFence.EPOCH_UNAVAILABLE_KEY, error.getMessageKey());
+        assertEquals(before, engineerEpoch(unresolved));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM t_engineer_sales WHERE engineer_id = ?",
+                Integer.class, unresolved), "割当行を書く前に止める");
     }
 
     @Test

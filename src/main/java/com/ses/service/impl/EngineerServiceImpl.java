@@ -87,7 +87,7 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
      * 要員を論理削除し、現任の担当営業割当・紐付けを解除して連携ユーザーを無効化する。
      *
      * <p>discovery（連携ユーザー）を伴うため READ_COMMITTED（E-3）。lock順は計画 §4.2 の
-     * discovery{連携ユーザー} → 3 X{連携ユーザー} → 7 X{要員} → 9 → 10。連携ユーザーは status列だけを更新する
+     * discovery{連携ユーザー} → 3 X{連携ユーザー} → 7 X{要員} → 9（紐付け）→ 10（担当営業）。連携ユーザーは status列だけを更新する
      * （非lockで読んだ行を {@code updateById} で全列書き戻すと、並行して確定した無効化・role変更を古い値へ戻す。§11 F-5）。</p>
      */
     @Override
@@ -139,15 +139,17 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         // 削除が成功したときだけ現任の担当営業割当を解除する（released_at 設定。履歴保全のため
         // 論理削除はしない）。削除失敗(false)時に解除だけがコミットされるのを防ぐ（review-fixes G3）。
         if (removed) {
-            // 論理削除は要員の有効性（述語(e)(f)）を変えるため常に進める。入れ子の営業解除・紐付け解除の増分は重複除去される。
+            // 論理削除は要員の有効性（述語(e)(f)）を変えるため常に進める。入れ子の紐付け解除・営業解除の増分は重複除去される。
             authorizationEpochFence.advance(anchor);
-            engineerSalesService.releaseAllByEngineerId(engineerId);
+            // 子行はrank順（9 紐付け → 10 担当営業。計画 §3.1・§3.5 規則1、ResignationGateChecker と同じ順）に書く。
             // 削除成功後にのみ、要員アカウントの紐付けを解除し当該ユーザーを無効化する（G3規約）。
             if (link != null) {
                 engineerAccountLinkService.unlinkByEngineerId(engineerId);
-                if (linkedUser != null) {
-                    disableLinkedUser(linkedUser, tenantId);
-                }
+            }
+            engineerSalesService.releaseAllByEngineerId(engineerId);
+            if (link != null && linkedUser != null) {
+                // 連携ユーザー行（rank 3）は冒頭でX lock済みのため、新しいlockは取らない。
+                disableLinkedUser(linkedUser, tenantId);
             }
         }
         return removed;
