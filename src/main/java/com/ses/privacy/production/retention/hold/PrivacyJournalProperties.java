@@ -39,7 +39,8 @@ public class PrivacyJournalProperties {
 
     /**
      * reconciler が「Journal に command が無い」pending を消してよいまでの時間（運用で決定。既定は無し）。
-     * 設定する場合は append の transaction 上限より長いこと。未設定なら reconciler は pending を消さない（A1H）。
+     * 設定する場合は append の在途時間の上限（{@code connection-timeout} + append の transaction 上限10秒 +
+     * socket timeout 20秒。既定の接続待ち5秒なら35秒）より長いこと。未設定なら reconciler は pending を消さない（A1H）。
      */
     private Duration pendingTimeout;
 

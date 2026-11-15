@@ -111,6 +111,24 @@ class PrivacyJournalStartupVerifierTest {
     }
 
     @Test
+    void URLの符号化_認証情報_重複_timeout上書きで検査を迂回させない() {
+        // driver は key・値を percent-decode するため、符号化した sslMode・autoReconnect は検査を迂回し得る（Review P3-4）
+        assertUrlViolation("jdbc:mysql://a:3306/privacy_journal?sslMode=VERIFY_IDENTITY&sslM%6Fde=DISABLED",
+                "datasource.url.percentEncoded");
+        assertUrlViolation(VALID_URL + "&autoReconnect=tr%75e", "datasource.url.percentEncoded");
+        assertUrlViolation(VALID_URL + "&user=nf07_journal_appender", "datasource.url.credentials");
+        assertUrlViolation(VALID_URL + "&password=" + SECRET, "datasource.url.credentials");
+        assertUrlViolation(VALID_URL + "&password1=" + SECRET, "datasource.url.credentials");
+        assertUrlViolation("jdbc:mysql://a:3306/privacy_journal?sslMode=DISABLED&sslMode=VERIFY_IDENTITY",
+                "datasource.url.duplicateParameter");
+        assertUrlViolation(VALID_URL + "&SSLMODE=VERIFY_IDENTITY", "datasource.url.duplicateParameter");
+        assertUrlViolation(VALID_URL + "&socketTimeout=0", "datasource.url.timeoutOverride");
+        assertUrlViolation(VALID_URL + "&connectTimeout=600000", "datasource.url.timeoutOverride");
+        assertThat(String.join(",", violations(p -> p.getDatasource().setUrl(VALID_URL + "&password=" + SECRET))))
+                .as("違反 code に URL の secret を含めない").doesNotContain(SECRET);
+    }
+
+    @Test
     void pool_timeout_schema_journal_id_pendingの範囲を検査する() {
         assertThat(violations(p -> p.getDatasource().setMaxPoolSize(0))).contains("datasource.maxPoolSize.outOfRange");
         assertThat(violations(p -> p.getDatasource().setMaxPoolSize(9))).contains("datasource.maxPoolSize.outOfRange");
@@ -123,9 +141,28 @@ class PrivacyJournalStartupVerifierTest {
         assertThat(violations(p -> p.setExpectedSchema("privacy-journal"))).contains("expectedSchema.invalid");
         assertThat(violations(p -> p.setJournalId("abc"))).contains("journalId.invalid");
         assertThat(violations(p -> p.setJournalId("journal/01"))).contains("journalId.invalid");
-        assertThat(violations(p -> p.setPendingTimeout(Duration.ofSeconds(10))))
-                .contains("pendingTimeout.notLongerThanAppendTimeout");
-        assertThat(violations(p -> p.setPendingTimeout(Duration.ofSeconds(11)))).isEmpty();
+    }
+
+    @Test
+    void pending_timeoutはappendの在途時間の上限より長くなければ違反() {
+        // 上限 = connection-timeout（既定5秒）+ append の transaction 上限10秒 + socket timeout 20秒 = 35秒（Review P2-1）
+        assertThat(PrivacyJournalConnections.appendInFlightUpperBound(PrivacyJournalProperties.DEFAULT_CONNECTION_TIMEOUT))
+                .isEqualTo(Duration.ofSeconds(35));
+        assertThat(PrivacyJournalConnections.create(valid()).appendInFlightUpperBound()).isEqualTo(Duration.ofSeconds(35));
+        assertThat(violations(p -> p.setPendingTimeout(Duration.ofSeconds(11))))
+                .as("append の transaction 上限だけを超える値では足りない")
+                .contains("pendingTimeout.notLongerThanAppendInFlight");
+        assertThat(violations(p -> p.setPendingTimeout(Duration.ofSeconds(35))))
+                .contains("pendingTimeout.notLongerThanAppendInFlight");
+        assertThat(violations(p -> p.setPendingTimeout(Duration.ofSeconds(36)))).isEmpty();
+        assertThat(violations(p -> {
+            p.getDatasource().setConnectionTimeout(Duration.ofSeconds(30));
+            p.setPendingTimeout(Duration.ofSeconds(60));
+        })).as("接続待ちを長くすれば上限も延びる（30+10+20=60秒）").contains("pendingTimeout.notLongerThanAppendInFlight");
+        assertThat(violations(p -> {
+            p.getDatasource().setConnectionTimeout(Duration.ofSeconds(1));
+            p.setPendingTimeout(Duration.ofSeconds(32));
+        })).isEmpty();
     }
 
     @Test
@@ -139,7 +176,7 @@ class PrivacyJournalStartupVerifierTest {
     }
 
     @Test
-    void pool設定は起動時に接続せずsession時区をUTCに固定する() {
+    void pool設定は起動時に接続せずsession時区をUTCに固定しsocket_timeoutを持つ() {
         HikariConfig config = PrivacyJournalConnections.poolConfig(valid());
 
         assertThat(config.getPoolName()).isEqualTo("privacy-journal");
@@ -148,9 +185,63 @@ class PrivacyJournalStartupVerifierTest {
         assertThat(config.getMaximumPoolSize()).isEqualTo(PrivacyJournalProperties.DEFAULT_MAX_POOL_SIZE);
         assertThat(config.getConnectionTimeout()).isEqualTo(PrivacyJournalProperties.DEFAULT_CONNECTION_TIMEOUT.toMillis());
         assertThat(config.getConnectionInitSql()).isEqualTo("SET SESSION time_zone = '+00:00'");
-        assertThat(config.getDataSourceProperties()).containsEntry("connectionTimeZone", "UTC")
-                .containsEntry("preserveInstants", "true").containsEntry("autoReconnect", "false");
         assertThat(config.isRegisterMbeans()).isFalse();
+        assertThat(config.getJdbcUrl()).as("URL・principal・password は Hikari の設定に入れない").isNull();
+        assertThat(config.getUsername()).isNull();
+        assertThat(config.getPassword()).isNull();
+        assertThat(config.getDataSource()).isInstanceOf(SanitizingJournalDriverDataSource.class);
+        SanitizingJournalDriverDataSource driver = (SanitizingJournalDriverDataSource) config.getDataSource();
+        assertThat(driver.hasPassword()).isTrue();
+        assertThat(driver.connectionPropertiesWithoutSecret())
+                .containsEntry("user", USER)
+                .containsEntry("connectionTimeZone", "UTC")
+                .containsEntry("preserveInstants", "true")
+                .containsEntry("autoReconnect", "false")
+                .containsEntry("connectTimeout", "5000")
+                .containsEntry("socketTimeout", "20000")
+                .doesNotContainKey("password");
+        assertThat(PrivacyJournalConnections.SOCKET_TIMEOUT)
+                .as("socket timeout は append の transaction 上限より長い（正常な statement を切らない）")
+                .isGreaterThan(com.ses.privacy.foundation.ProductionPrivacyComponents.journalAppendTimeout());
+        assertThat(driver.toString()).doesNotContain("journal.internal", USER, SECRET);
+    }
+
+    @Test
+    void driverの接続失敗はuser名_host_driverのmessageを固定文言に置き換える() {
+        java.sql.Driver denying = deniedDriver();
+        SanitizingJournalDriverDataSource dataSource = new SanitizingJournalDriverDataSource(VALID_URL,
+                new java.util.Properties(), () -> denying);
+
+        SQLException failure = org.assertj.core.api.Assertions.catchThrowableOfType(dataSource::getConnection,
+                SQLException.class);
+
+        assertThat(failure.getMessage()).startsWith(SanitizingJournalDriverDataSource.FAILURE_MESSAGE)
+                .doesNotContain(USER, "10.0.0.5", "journal.internal", "Access denied");
+        assertThat(failure.getSQLState()).isEqualTo("28000");
+        assertThat(failure.getErrorCode()).isEqualTo(1045);
+        assertThat(failure.getCause()).as("元の例外は cause にも付けない").isNull();
+    }
+
+    @Test
+    void Hikari経由の接続失敗でも例外の連鎖にuser名とhostが出ない() throws Exception {
+        PrivacyJournalProperties properties = valid();
+        properties.getDatasource().setConnectionTimeout(Duration.ofMillis(250));
+        HikariConfig config = PrivacyJournalConnections.poolConfig(properties);
+        java.util.Properties driverProperties = new java.util.Properties();
+        driverProperties.putAll(((SanitizingJournalDriverDataSource) config.getDataSource())
+                .connectionPropertiesWithoutSecret());
+        java.sql.Driver denying = deniedDriver();
+        config.setDataSource(new SanitizingJournalDriverDataSource(VALID_URL, driverProperties, () -> denying));
+
+        try (HikariDataSource pool = new HikariDataSource(config)) {
+            Throwable failure = org.assertj.core.api.Assertions.catchThrowable(pool::getConnection);
+
+            assertThat(failure).isInstanceOf(SQLException.class);
+            for (Throwable current = failure; current != null; current = current.getCause()) {
+                assertThat(String.valueOf(current.getMessage()))
+                        .doesNotContain(USER, "10.0.0.5", "journal.internal", SECRET, "Access denied");
+            }
+        }
     }
 
     // ---------------------------------------------------------------- 権限
@@ -258,19 +349,48 @@ class PrivacyJournalStartupVerifierTest {
         List<PrivacyJournalMigrations.Migration> artifact = List.of(migration("1", "V1__privacy_journal_core.sql"));
 
         assertThat(PrivacyJournalStartupVerifier.historyViolations(artifact,
-                List.of(new HistoryRow("1", "V1__privacy_journal_core.sql", true)))).isEmpty();
+                List.of(applied("1", "V1__privacy_journal_core.sql", true)))).isEmpty();
         assertThat(PrivacyJournalStartupVerifier.historyViolations(artifact, List.of()))
                 .containsExactly("flyway.pending:1");
         assertThat(PrivacyJournalStartupVerifier.historyViolations(artifact, List.of(
-                new HistoryRow("1", "V1__privacy_journal_core.sql", true),
-                new HistoryRow("2", "V2__later.sql", false)))).containsExactly("flyway.failedMigration");
+                applied("1", "V1__privacy_journal_core.sql", true),
+                applied("2", "V2__later.sql", false)))).containsExactly("flyway.failedMigration");
         assertThat(PrivacyJournalStartupVerifier.historyViolations(artifact, List.of(
-                new HistoryRow("1", "V1__privacy_journal_core.sql", true),
-                new HistoryRow("2", "V2__later.sql", true)))).containsExactly("flyway.unknownVersion:2");
+                applied("1", "V1__privacy_journal_core.sql", true),
+                applied("2", "V2__later.sql", true)))).containsExactly("flyway.unknownVersion:2");
         assertThat(PrivacyJournalStartupVerifier.historyViolations(artifact, List.of(
-                new HistoryRow("1", "V1__other.sql", true)))).containsExactly("flyway.scriptMismatch:1");
+                applied("1", "V1__other.sql", true)))).containsExactly("flyway.scriptMismatch:1");
         assertThat(PrivacyJournalStartupVerifier.historyViolations(List.of(), List.of()))
                 .containsExactly("flyway.artifactEmpty");
+    }
+
+    @Test
+    void 適用後にscriptが変わればchecksumの不一致で不適合() {
+        List<PrivacyJournalMigrations.Migration> artifact = List.of(migration("1", "V1__privacy_journal_core.sql"));
+
+        assertThat(PrivacyJournalStartupVerifier.historyViolations(artifact, List.of(new HistoryRow(
+                "1", "V1__privacy_journal_core.sql", CHECKSUM + 1, true)))).containsExactly("flyway.checksumMismatch:1");
+        assertThat(PrivacyJournalStartupVerifier.historyViolations(artifact, List.of(new HistoryRow(
+                "1", "V1__privacy_journal_core.sql", null, true)))).as("checksum が無い履歴も一致とみなさない")
+                .containsExactly("flyway.checksumMismatch:1");
+    }
+
+    @Test
+    void checksumはFlywayのChecksumCalculatorと同じ値になる() throws Exception {
+        String v1;
+        try (var in = PrivacyJournalStartupVerifierTest.class.getClassLoader()
+                .getResourceAsStream("db/privacy-journal/V1__privacy_journal_core.sql")) {
+            v1 = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        for (String content : List.of(v1, v1.replace("\n", "\r\n"), "﻿" + v1, "SELECT 1;", "a\nb", "",
+                "日本語のcomment\n-- 末尾改行なし")) {
+            assertThat(PrivacyJournalMigrations.checksum(content))
+                    .isEqualTo(org.flywaydb.core.internal.resolver.ChecksumCalculator.calculate(
+                            new org.flywaydb.core.internal.resource.StringResource(content)));
+        }
+        assertThat(PrivacyJournalMigrations.fromClasspath())
+                .extracting(PrivacyJournalMigrations.Migration::checksum)
+                .startsWith(PrivacyJournalMigrations.checksum(v1));
     }
 
     @Test
@@ -278,6 +398,21 @@ class PrivacyJournalStartupVerifierTest {
         assertThat(PrivacyJournalMigrations.fromClasspath())
                 .extracting(PrivacyJournalMigrations.Migration::script)
                 .startsWith("V1__privacy_journal_core.sql");
+    }
+
+    @Test
+    void 起動時検査の照会にはquery_timeoutを置き共有のapplication_JdbcTemplateは変えない() {
+        assertThat(PrivacyJournalStartupVerifier.journalTemplate(mock(java.sql.Connection.class)).getQueryTimeout())
+                .isEqualTo(PrivacyJournalStartupVerifier.QUERY_TIMEOUT_SECONDS);
+        DataSource applicationDataSource = mock(DataSource.class);
+        JdbcTemplate shared = new JdbcTemplate(applicationDataSource);
+        JdbcTemplate checked = PrivacyJournalStartupVerifier.applicationTemplate(shared);
+
+        assertThat(checked).isNotSameAs(shared);
+        assertThat(checked.getDataSource()).isSameAs(applicationDataSource);
+        assertThat(checked.getQueryTimeout()).isEqualTo(PrivacyJournalStartupVerifier.QUERY_TIMEOUT_SECONDS);
+        assertThat(shared.getQueryTimeout()).as("共有 Bean の設定は変えない").isEqualTo(-1);
+        assertThat(PrivacyJournalStartupVerifier.applicationTemplate(null)).isNull();
     }
 
     // ---------------------------------------------------------------- 起動時の扱い
@@ -441,7 +576,30 @@ class PrivacyJournalStartupVerifierTest {
         return config;
     }
 
+    /** test 用の固定 checksum（履歴と artifact を一致させる側の値）。 */
+    private static final int CHECKSUM = 12345;
+
     private static PrivacyJournalMigrations.Migration migration(String version, String script) {
-        return new PrivacyJournalMigrations.Migration(MigrationVersion.fromVersion(version), script);
+        return new PrivacyJournalMigrations.Migration(MigrationVersion.fromVersion(version), script, CHECKSUM);
+    }
+
+    private static HistoryRow applied(String version, String script, boolean success) {
+        return new HistoryRow(version, script, CHECKSUM, success);
+    }
+
+    /** Connector/J の認証失敗と同じ形（user 名・接続元 host を message に含む）の例外を投げる driver。 */
+    private static java.sql.Driver deniedDriver() {
+        return (java.sql.Driver) Proxy.newProxyInstance(PrivacyJournalStartupVerifierTest.class.getClassLoader(),
+                new Class<?>[]{java.sql.Driver.class}, (proxy, method, args) -> switch (method.getName()) {
+                    case "connect" -> throw new SQLException("Access denied for user '" + USER
+                            + "'@'10.0.0.5' to journal.internal (using password: YES)", "28000", 1045);
+                    case "acceptsURL" -> true;
+                    case "getMajorVersion", "getMinorVersion" -> 8;
+                    case "jdbcCompliant" -> false;
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    case "toString" -> "denied-driver";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
     }
 }

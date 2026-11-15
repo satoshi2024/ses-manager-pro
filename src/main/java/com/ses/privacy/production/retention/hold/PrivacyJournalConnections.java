@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Properties;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -38,7 +39,13 @@ import java.util.regex.Pattern;
  *       接続は起動時検査と adapter の呼出しのときだけ行う。</li>
  * </ul>
  * session time zone は {@code +00:00} に固定し、driver の時刻変換も UTC にする（{@code TIMESTAMP(6)} とマイクロ秒正規化の
- * hash 再計算を一致させるため。§2.2）。透過再接続は使わない。
+ * hash 再計算を一致させるため。§2.2）。透過再接続は使わない。socket の読み待ちは {@link #SOCKET_TIMEOUT} で打ち切る
+ * （statement timeout が届かない網分断や、statement timeout の対象外の COMMIT でも接続を返させるため。§2.4）。
+ * 接続失敗の例外は {@link SanitizingJournalDriverDataSource} が固定文言に置き換え、principal・接続先を log と cause に出さない。
+ *
+ * <p>principal は1つ（{@code privacy.journal.datasource.*}）。retention flag ON（hold 開始を使う）では appender、OFF
+ * （既存 hold の効力確認だけ）では reader または appender を使う（§2.1・§3.1、総括決定の方式A）。どちらかは起動時検査が
+ * 実際の権限で判定する。
  */
 public final class PrivacyJournalConnections implements AutoCloseable {
 
@@ -50,6 +57,12 @@ public final class PrivacyJournalConnections implements AutoCloseable {
     static final Duration MIN_CONNECTION_TIMEOUT = Duration.ofMillis(250);
     static final Duration MAX_CONNECTION_TIMEOUT = Duration.ofSeconds(30);
 
+    /**
+     * Connector/J の {@code socketTimeout}（設定 key は持たない固定値）。append の transaction 上限
+     * （{@link ProductionPrivacyComponents#journalAppendTimeout()}、10秒）より長くし、正常な statement を切らない。
+     */
+    static final Duration SOCKET_TIMEOUT = Duration.ofSeconds(20);
+
     private static final String URL_PREFIX = "jdbc:mysql://";
     private static final Pattern SCHEMA_NAME = Pattern.compile("[A-Za-z0-9_]{1,64}");
     private static final Pattern JOURNAL_ID = Pattern.compile("[A-Za-z0-9._-]{4,64}");
@@ -59,11 +72,14 @@ public final class PrivacyJournalConnections implements AutoCloseable {
     /** URL で driver の時刻変換を上書きさせない（UTC 固定と hash 再計算の一致を崩すため）。 */
     private static final Set<String> TIME_ZONE_PARAMETERS = Set.of(
             "connectiontimezone", "servertimezone", "forceconnectiontimezonetosession", "preserveinstants");
+    /** URL で holder が決める timeout を上書きさせない（append の在途時間の上限が崩れるため）。 */
+    private static final Set<String> TIMEOUT_PARAMETERS = Set.of("sockettimeout", "connecttimeout");
 
     private final boolean configured;
     private final List<String> contractViolations;
     private final String expectedSchema;
     private final String journalId;
+    private final Duration appendInFlightUpperBound;
     private final HikariDataSource pool;
 
     PrivacyJournalConnections(PrivacyJournalProperties properties, Function<HikariConfig, HikariDataSource> poolFactory) {
@@ -73,6 +89,7 @@ public final class PrivacyJournalConnections implements AutoCloseable {
         this.contractViolations = configured ? contractViolations(properties) : List.of();
         this.expectedSchema = properties.getExpectedSchema();
         this.journalId = properties.getJournalId();
+        this.appendInFlightUpperBound = appendInFlightUpperBound(connectionTimeoutOf(properties));
         this.pool = configured && contractViolations.isEmpty() ? poolFactory.apply(poolConfig(properties)) : null;
     }
 
@@ -102,6 +119,34 @@ public final class PrivacyJournalConnections implements AutoCloseable {
 
     public String journalId() {
         return journalId;
+    }
+
+    /**
+     * 1回の append が Journal で確定し得る時間の上限（{@link #appendInFlightUpperBound(Duration)}）。
+     * A1H の reconciler は {@code pending_since} からこの時間（実際には {@code privacy.journal.pending-timeout}。契約で
+     * これより長いことを要求する）が過ぎるまで「Journal に command が無い」pending を消してはならない。
+     */
+    public Duration appendInFlightUpperBound() {
+        return appendInFlightUpperBound;
+    }
+
+    /**
+     * append の在途時間の上限 = pool の接続待ち（{@code connection-timeout}）+ append の transaction 上限（10秒）
+     * + socket timeout（20秒。statement timeout の対象外の COMMIT と、statement timeout が届かない網分断の余裕）。
+     * Spring の transaction timeout は接続を得た後から数えるため、接続待ちを別に足す。
+     */
+    static Duration appendInFlightUpperBound(Duration connectionTimeout) {
+        return connectionTimeout.plus(ProductionPrivacyComponents.journalAppendTimeout()).plus(SOCKET_TIMEOUT);
+    }
+
+    private static Duration connectionTimeoutOf(PrivacyJournalProperties properties) {
+        PrivacyJournalProperties.Datasource datasource = properties.getDatasource();
+        Duration timeout = datasource == null ? null : datasource.getConnectionTimeout();
+        // 範囲外の値は契約違反（pool を作らない）。上限の計算では保守側の最大値を使う
+        if (timeout == null || timeout.compareTo(MIN_CONNECTION_TIMEOUT) < 0 || timeout.compareTo(MAX_CONNECTION_TIMEOUT) > 0) {
+            return MAX_CONNECTION_TIMEOUT;
+        }
+        return timeout;
     }
 
     /**
@@ -169,8 +214,9 @@ public final class PrivacyJournalConnections implements AutoCloseable {
         }
         Duration pendingTimeout = properties.getPendingTimeout();
         if (pendingTimeout != null
-                && pendingTimeout.compareTo(ProductionPrivacyComponents.journalAppendTimeout()) <= 0) {
-            violations.add("pendingTimeout.notLongerThanAppendTimeout");
+                && pendingTimeout.compareTo(appendInFlightUpperBound(connectionTimeoutOf(properties))) <= 0) {
+            // reconciler が pending を消した後に在途の append が確定し得ないよう、在途時間の上限より長くする
+            violations.add("pendingTimeout.notLongerThanAppendInFlight");
         }
         return List.copyOf(violations);
     }
@@ -193,7 +239,12 @@ public final class PrivacyJournalConnections implements AutoCloseable {
         if (AUTO_RECONNECT.matcher(url).find()) {
             violations.add("datasource.url.autoReconnect");
         }
-        Map<String, String> parameters = parameters(query < 0 ? "" : rest.substring(query + 1));
+        if (url.indexOf('%') >= 0) {
+            // driver は parameter の key・値を percent-decode するが、本検査は decode しない。
+            // 符号化で検査を迂回させない（例: sslM%6Fde=DISABLED、autoReconnect=tr%75e）ため一律に拒否する
+            violations.add("datasource.url.percentEncoded");
+        }
+        Map<String, String> parameters = parameters(query < 0 ? "" : rest.substring(query + 1), violations);
         if (!"VERIFY_IDENTITY".equalsIgnoreCase(parameters.get("sslmode"))) {
             violations.add("datasource.url.sslModeNotVerifyIdentity");
         }
@@ -203,9 +254,17 @@ public final class PrivacyJournalConnections implements AutoCloseable {
         if (parameters.keySet().stream().anyMatch(TIME_ZONE_PARAMETERS::contains)) {
             violations.add("datasource.url.timeZoneOverride");
         }
+        if (parameters.keySet().stream().anyMatch(TIMEOUT_PARAMETERS::contains)) {
+            violations.add("datasource.url.timeoutOverride");
+        }
+        if (parameters.keySet().stream().anyMatch(key -> key.equals("user") || key.startsWith("password"))) {
+            // principal と password は username / password の設定（secret store）だけで渡す。URL に secret を入れない
+            violations.add("datasource.url.credentials");
+        }
     }
 
-    private static Map<String, String> parameters(String query) {
+    /** query を key（小文字）→ 値にする。同じ key が2回以上あれば違反にする（driver と本検査で採る値がずれ得るため）。 */
+    private static Map<String, String> parameters(String query, Set<String> violations) {
         Map<String, String> parameters = new LinkedHashMap<>();
         for (String pair : query.split("&")) {
             if (pair.isBlank()) {
@@ -214,21 +273,36 @@ public final class PrivacyJournalConnections implements AutoCloseable {
             int equals = pair.indexOf('=');
             String key = (equals < 0 ? pair : pair.substring(0, equals)).trim().toLowerCase(Locale.ROOT);
             String value = equals < 0 ? "" : pair.substring(equals + 1).trim();
-            parameters.put(key, value);
+            if (parameters.put(key, value) != null) {
+                violations.add("datasource.url.duplicateParameter");
+            }
         }
         return parameters;
     }
 
-    /** pool の設定（契約の検査は {@link #contractViolations} が先に行う。同じ package の test も同じ設定を使う）。 */
+    /**
+     * pool の設定（契約の検査は {@link #contractViolations} が先に行う。同じ package の test も同じ設定を使う）。
+     * driver への接続は {@link SanitizingJournalDriverDataSource} を通し、principal・password・driver property は
+     * その中にだけ持つ（Hikari の設定には username・password・URL を入れない）。
+     */
     static HikariConfig poolConfig(PrivacyJournalProperties properties) {
         PrivacyJournalProperties.Datasource datasource = properties.getDatasource();
         long timeoutMillis = datasource.getConnectionTimeout().toMillis();
+        Properties driverProperties = new Properties();
+        driverProperties.setProperty("user", datasource.getUsername());
+        driverProperties.setProperty("password", datasource.getPassword());
+        // session time zone は下の init SQL で +00:00 に固定し、driver 側の変換も UTC にそろえる（§2.2）
+        driverProperties.setProperty("connectionTimeZone", "UTC");
+        driverProperties.setProperty("forceConnectionTimeZoneToSession", "false");
+        driverProperties.setProperty("preserveInstants", "true");
+        driverProperties.setProperty("autoReconnect", "false");
+        driverProperties.setProperty("connectTimeout", Long.toString(timeoutMillis));
+        // statement timeout の対象外の COMMIT・網分断で読み待ちが続かないよう、socket の読み待ちを打ち切る（§2.4）
+        driverProperties.setProperty("socketTimeout", Long.toString(SOCKET_TIMEOUT.toMillis()));
+
         HikariConfig config = new HikariConfig();
         config.setPoolName(POOL_NAME);
-        config.setDriverClassName("com.mysql.cj.jdbc.Driver");
-        config.setJdbcUrl(datasource.getUrl().trim());
-        config.setUsername(datasource.getUsername());
-        config.setPassword(datasource.getPassword());
+        config.setDataSource(new SanitizingJournalDriverDataSource(datasource.getUrl().trim(), driverProperties));
         config.setMaximumPoolSize(datasource.getMaxPoolSize());
         // 起動時・待機中に接続を作らない（接続は起動時検査と adapter の呼出しのときだけ）
         config.setMinimumIdle(0);
@@ -236,13 +310,7 @@ public final class PrivacyJournalConnections implements AutoCloseable {
         config.setConnectionTimeout(timeoutMillis);
         config.setAutoCommit(true);
         config.setRegisterMbeans(false);
-        // session time zone を +00:00 に固定し、driver 側の変換も UTC にそろえる（§2.2）
         config.setConnectionInitSql("SET SESSION time_zone = '+00:00'");
-        config.addDataSourceProperty("connectionTimeZone", "UTC");
-        config.addDataSourceProperty("forceConnectionTimeZoneToSession", "false");
-        config.addDataSourceProperty("preserveInstants", "true");
-        config.addDataSourceProperty("autoReconnect", "false");
-        config.addDataSourceProperty("connectTimeout", Long.toString(timeoutMillis));
         return config;
     }
 }

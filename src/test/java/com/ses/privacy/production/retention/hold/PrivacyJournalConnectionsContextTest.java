@@ -104,6 +104,18 @@ class PrivacyJournalConnectionsContextTest {
     }
 
     @Test
+    void 実driverでの接続失敗も例外の連鎖に接続先とprincipalとpasswordが出ない() {
+        // A1H が JournalUnavailableException の cause を log に出しても、接続先・principal が残らないこと（Review P3-8）
+        Throwable failure = org.assertj.core.api.Assertions.catchThrowable(() -> connections.dataSource().getConnection());
+
+        assertThat(failure).isInstanceOf(java.sql.SQLException.class);
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            assertThat(String.valueOf(current.getMessage()))
+                    .doesNotContain("127.0.0.1", JOURNAL_USER, JOURNAL_SECRET, "privacy_journal?");
+        }
+    }
+
+    @Test
     void journal設定が無ければpoolを作らず接続もapplication_DBの照会もしない() {
         AtomicInteger attempts = new AtomicInteger();
         new ApplicationContextRunner()

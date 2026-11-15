@@ -13,7 +13,6 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import javax.sql.DataSource;
 import java.util.List;
 import java.util.UUID;
 
@@ -162,11 +161,43 @@ class PrivacyJournalStartupVerifierMySqlTest {
     }
 
     @Test
-    void session時区を固定しない接続は不適合() {
-        DataSource raw = new DriverManagerDataSource(JOURNAL.getJdbcUrl(), appender, appenderPassword);
+    void session時区が_00_00でない接続は不適合() {
+        // container の既定 time_zone に依存せず、+09:00 の session を明示的に作る（Review P3-6）
+        try (HikariDataSource tokyo = PrivacyJournalTestPools.poolWithSessionTimeZone(JOURNAL.getJdbcUrl(), appender,
+                appenderPassword, "+09:00")) {
+            assertThat(PrivacyJournalStartupVerifier.inspect(tokyo, applicationRoot, SCHEMA, JOURNAL_ID, true,
+                    PrivacyJournalMigrations::fromClasspath)).contains("session.timeZone");
+        }
+    }
 
-        assertThat(PrivacyJournalStartupVerifier.inspect(raw, applicationRoot, SCHEMA, JOURNAL_ID, true,
-                PrivacyJournalMigrations::fromClasspath)).contains("session.timeZone");
+    @Test
+    void 適用後にscriptが変わればchecksumの不一致で不適合() {
+        journalRoot.update("UPDATE " + PrivacyJournalTestPrincipals.HISTORY_TABLE
+                + " SET checksum = checksum + 1 WHERE version = '1'");
+        try {
+            assertThat(inspect(JOURNAL, appender, appenderPassword, true)).contains("flyway.checksumMismatch:1");
+        } finally {
+            journalRoot.update("UPDATE " + PrivacyJournalTestPrincipals.HISTORY_TABLE
+                    + " SET checksum = checksum - 1 WHERE version = '1'");
+        }
+        assertThat(inspect(JOURNAL, appender, appenderPassword, true))
+                .as("Flyway job が記録した checksum と artifact の計算が一致する").isEmpty();
+    }
+
+    @Test
+    void 認証失敗でも例外の連鎖にuser名とhostとpasswordが出ずjournal_unreachableになる() {
+        String wrongPassword = PrivacyJournalTestPrincipals.randomPassword();
+        try (HikariDataSource pool = PrivacyJournalTestPools.pool(JOURNAL.getJdbcUrl(), appender, wrongPassword)) {
+            Throwable failure = org.assertj.core.api.Assertions.catchThrowable(pool::getConnection);
+
+            assertThat(failure).isInstanceOf(java.sql.SQLException.class);
+            for (Throwable current = failure; current != null; current = current.getCause()) {
+                assertThat(String.valueOf(current.getMessage()))
+                        .doesNotContain(appender, wrongPassword, JOURNAL.getHost() + ":", "Access denied");
+            }
+            assertThat(PrivacyJournalStartupVerifier.inspect(pool, applicationRoot, SCHEMA, JOURNAL_ID, true,
+                    PrivacyJournalMigrations::fromClasspath)).containsExactly("journal.unreachable");
+        }
     }
 
     @Test

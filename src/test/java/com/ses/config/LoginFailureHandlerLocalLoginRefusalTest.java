@@ -16,9 +16,13 @@ import org.springframework.security.authentication.dao.DaoAuthenticationProvider
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.crypto.password.NoOpPasswordEncoder;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -106,12 +110,56 @@ class LoginFailureHandlerLocalLoginRefusalTest {
         verify(accountLockService, never()).onLoginFailure("locked-user");
     }
 
+    @Test
+    void bootstrap有効期間中のadminはパスワードを照合し誤りを従来どおり数える() throws Exception {
+        ProductionBootstrapMode bootstrap = mock(ProductionBootstrapMode.class);
+        when(bootstrap.isBootstrapLoginAllowed(eq("admin"), any())).thenReturn(true);
+        DaoAuthenticationProvider provider = provider(false, bootstrap);
+        when(sysUserMapper.selectByUsername("admin")).thenReturn(user("admin", "Bootstrap2026x"));
+        LoginFailureHandler handler = new LoginFailureHandler(accountLockService);
+
+        AuthenticationException failure = authenticate(provider, "admin", "wrong");
+        assertThat(failure).isInstanceOf(BadCredentialsException.class);
+        assertThat(LocalLoginDisabledException.isCauseOf(failure)).isFalse();
+        handler.onAuthenticationFailure(loginRequest("admin"), new MockHttpServletResponse(), failure);
+
+        verify(accountLockService).onLoginFailure("admin");
+    }
+
+    @Test
+    void bootstrap期限切れのadminはパスワード照合前に拒否し数えない() throws Exception {
+        ProductionBootstrapMode bootstrap = mock(ProductionBootstrapMode.class);
+        when(bootstrap.isBootstrapLoginAllowed(eq("admin"), any())).thenReturn(false);
+        DaoAuthenticationProvider provider = provider(false, bootstrap);
+        when(sysUserMapper.selectByUsername("admin")).thenReturn(user("admin", "Bootstrap2026x"));
+        LoginFailureHandler handler = new LoginFailureHandler(accountLockService);
+
+        for (String password : List.of("wrong", "Bootstrap2026x")) {
+            AuthenticationException failure = authenticate(provider, "admin", password);
+            assertThat(LocalLoginDisabledException.isCauseOf(failure)).isTrue();
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            handler.onAuthenticationFailure(loginRequest("admin"), response, failure);
+            assertThat(response.getRedirectedUrl()).isEqualTo("/login?error");
+        }
+
+        verify(accountLockService, never()).onLoginFailure(anyString());
+    }
+
     private DaoAuthenticationProvider provider(boolean localLoginEnabled) {
+        return provider(localLoginEnabled, null);
+    }
+
+    private DaoAuthenticationProvider provider(boolean localLoginEnabled, ProductionBootstrapMode bootstrap) {
         OidcSecurityProperties properties = new OidcSecurityProperties();
         properties.setLocalLoginEnabled(localLoginEnabled);
         properties.setTenantId("default");
+        CustomUserDetailsService userDetailsService =
+                new CustomUserDetailsService(sysUserMapper, properties, breakGlassService);
+        if (bootstrap != null) {
+            userDetailsService.setProductionBootstrapMode(bootstrap);
+        }
         DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
-        provider.setUserDetailsService(new CustomUserDetailsService(sysUserMapper, properties, breakGlassService));
+        provider.setUserDetailsService(userDetailsService);
         provider.setPasswordEncoder(NoOpPasswordEncoder.getInstance());
         return provider;
     }

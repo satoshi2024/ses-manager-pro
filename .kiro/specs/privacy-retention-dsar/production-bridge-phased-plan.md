@@ -552,7 +552,7 @@ WHERE NOT EXISTS (SELECT 1 FROM m_pii_data_element e WHERE e.tenant_id = t.tenan
   - 先に書く pending 記録は成功応答ではなく、gate を fail-closed に倒すための印である（SF-04a の「local DB 更新を先に成功応答しない」に反しない）。
 - `PrivacyHoldProjectionReconciler`（新規。起動時と定期実行、`@SchedulerLock` 付き）
   - Journal の `last_applied_seq` より後の event を projection へ追い付かせる（ACK 後に projection が失敗した hold を補う）。
-  - pending が残る行は command ID で Journal を照会し、ACK 済みなら projection して pending を消す。Journal に command が無く、`pending_since` が `privacy.journal.pending-timeout`（append の timeout より長い値。運用で決める）を過ぎていれば pending を消す。Journal 不達なら pending を残す（gate は `UNAVAILABLE` のまま）。
+  - pending が残る行は command ID で Journal を照会し、ACK 済みなら projection して pending を消す。Journal に command が無く、`pending_since` が `privacy.journal.pending-timeout`（append の在途時間の上限＝`connection-timeout` + 10秒 + 20秒より長い値。運用で決める。journal-witness-grant-design.md §2.1 の「append の timeout」の定義）を過ぎていれば、消す直前にもう一度 command ID で照会して無いことを確かめてから pending を消す。Journal 不達なら pending を残す（gate は `UNAVAILABLE` のまま）。
   - 各判定を required 監査に残し、`UNAVAILABLE` が続く場合は §3.4.3 の7. の監視に載せる。
   - gate と同じく flag に依存させないので、`FeatureSwitchRouteCoverageTest` では理由付きで対象外 scheduler に登録する。
 
@@ -589,6 +589,21 @@ WHERE NOT EXISTS (SELECT 1 FROM m_pii_data_element e WHERE e.tenant_id = t.tenan
 6. pending を残した状態（append 前に process を止める）で再起動 → reconciler が pending を解消し、gate が復帰する。
 
 **規模**: XL（main 12 前後、既存コードの接続 8 か所、test 15 class 前後、画面1）。必要なら「hold 開始・gate・reconciler」と「経路の接続」に分ける（Plan Review で決める）。
+
+#### 3.4.6 NF07-A1J から引き継ぐ事項（A1J 独立 Review `9d7d1b4e` と総括の決定、2026-11-16）
+
+A1J（Journal 本番 adapter・接続 holder・起動時検査・専用 Flyway job）で決めたこと・残したことのうち、A1H が前提にする、または A1H で閉じる事項。A1H の任務説明へそのまま写す。
+
+1. **pending と在途時間（Review P2-1）**: A1J は pool の `socketTimeout`（20秒）、起動時検査の query timeout（10秒）、`pending-timeout` の下限（`connection-timeout` + `APPEND_TRANSACTION_TIMEOUT` 10秒 + socket timeout 20秒より長い。満たさなければ契約違反）を入れた。reconciler は上限を過ぎた後も、pending を消す直前に command ID で Journal を照会し、command が無いことを確かめる（server 側の遅れた確定を完全には否定できないため。§3.4.4）。上限は `PrivacyJournalConnections.appendInFlightUpperBound()` で取れる。
+2. **起動時検査の結果の扱い（Review §3.3 の条件）**: 起動を止めるのは prod の retention flag ON だけ（test profile は flag ON のため）。gate と hold 開始は、profile に関係なく `PrivacyJournalStartupVerifier.startupResult()` が `AVAILABLE` でなければ `UNAVAILABLE`（hold 開始は 503 `JOURNAL_UNAVAILABLE`）として扱い、実行時の fail-closed を保つ。flag は決定ID束縛の有効期間を見ない生の値で判定している（Review P3-5。意図的）。
+3. **principal は1つ（方式A、総括決定）**: flag ON は appender（読み取りも同じ接続）、flag OFF は reader または appender。gate・projection の読み取りも同じ接続を使う。reader を分ける方式B にする場合は設計変更として Plan Review に戻す（journal-witness-grant-design.md §2.1）。
+4. **adapter の生成と Bean**: 本番 adapter は `PrivacyJournalConnections.openJournalPort(Environment, Clock)`（内部で `ProductionPrivacyComponents.productionPrivacyJournal`、prod 必須）だけから作る。`DataSource` 型の Bean は作らない。`PrivacyJournalPort` の Bean 化は A1H で gate と一緒に行う。§3.4 Demo 1 の「dev で retention flag ON・dev 用 journal」は、本番 adapter が prod 以外で生成できないため、prod profile の検証環境で行うか、Demo を Testcontainers の結果で示すかを A1H の Plan Review で決める。
+5. **projection の chain 検証（Review P3-7）**: projection は foundation の `JournalProjectionService.verifyChain` を通す。本番 adapter の chain がこれと一致することは `ProductionPrivacyJournalAdapterMySqlTest` で固定した。
+6. **未実装の設定**: `privacy.clock.max-skew`（未設定なら hold 開始を `DECISION_UNKNOWN` で拒否）の bind は A1H。Witness（`privacy.witness.*`）は B2。
+7. **log（Review P3-8）**: Journal の pool は driver の接続失敗を固定文言に置き換えるので、`JournalUnavailableException` の cause を log に出しても principal・接続先は残らない。それでも hold 開始・gate・reconciler の log には固定 code だけを出し、例外 message を出さない。`com.zaxxer.hikari` を DEBUG にしない。
+8. **残余**: routine・proxy の権限は information_schema に現れず起動時検査の対象外（DBA の GRANT 手順で持たせない）。起動時検査は起動時だけで、実行中の耐久設定は append ごとの検査（adapter）で見る。権限・`server_uuid` の実行中の再検査が要るかは A1H で決める。
+9. **D-P3-1 の関連（Review P3-2、別作業）**: break-glass 名の判定は設定名との完全一致で、大文字小文字違いの username は break-glass として扱われない（local login 拒否になり失敗回数にも数えない）。break-glass 名の正規化は A1H の範囲外の別作業とする。NF07 を ON にするのは bootstrap 完了後（D-P3-2）。
+10. **Javadoc**: `PrivacyJournalPort` の「synthetic adapter 以外の実装を提供しない」は A1J の第3 commit で更新済み（Review P3-9）。
 
 ### 3.5 NF07-A2「DSAR（半手動）」
 

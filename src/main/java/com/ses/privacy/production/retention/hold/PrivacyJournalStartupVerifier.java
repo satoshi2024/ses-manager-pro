@@ -38,9 +38,11 @@ import java.util.function.Supplier;
  *       {@code CURRENT_USER()} の grantee で読み、§3.1 の許可集合（appender または reader）と表×操作の単位で突き合わせる。
  *       超過（global 権限、他 schema、列単位、GRANT OPTION、許可集合外の操作）も不足も不適合。role は使わない前提とし、
  *       {@code CURRENT_ROLE()} が {@code NONE} でなければ不適合（role 経由の権限は上の表に現れないため）。
- *       retention flag ON（hold 開始を使う）では appender が必須。flag OFF（既存 hold の効力確認だけ）では reader も可。</li>
- *   <li>Journal 用 Flyway 履歴表（{@value PrivacyJournalMigrations#HISTORY_TABLE}）が artifact の migration と一致する
- *       （未適用・失敗行・artifact に無い版は不適合）。application は migration を実行しない。</li>
+ *       principal は1つ（総括決定の方式A）で、retention flag ON（hold 開始を使う）では appender が必須、flag OFF
+ *       （既存 hold の効力確認だけ）では reader または appender。</li>
+ *   <li>Journal 用 Flyway 履歴表（{@value PrivacyJournalMigrations#HISTORY_TABLE}）が artifact の migration と版・script 名・
+ *       checksum で一致する（未適用・失敗行・artifact に無い版・適用後に変わった script は不適合）。application は
+ *       migration を実行しない。</li>
  *   <li>application DB の {@code t_privacy_projection_state.journal_id} が設定と一致する（別 journal への誤接続の検出。
  *       行が無い＝hold 機構を一度も使っていない場合は一致とみなす）。</li>
  * </ol>
@@ -52,7 +54,11 @@ import java.util.function.Supplier;
  * （本番 adapter は prod 以外で生成できず Journal を使う経路が無いため。test profile は既存 test の意味を保つため flag ON。
  * {@code PrivacyProductionConfigurationValidator} が prod だけで動くのと同じ）。理由は固定の code だけで出し、接続文字列・
  * user 名・password・例外 message は出さない。{@link SmartInitializingSingleton} で全 singleton 生成後・Tomcat の connector
- * 開始前に実行する。application DB へは読むだけで書かない。
+ * 開始前に実行する。application DB へは読むだけで書かない。各照会には {@link #QUERY_TIMEOUT_SECONDS} 秒の query timeout を
+ * 置き、Journal が TCP を受けて応答しない場合も pool の socket timeout で打ち切る（起動が止まり続けない）。
+ *
+ * <p>flag は決定ID束縛の有効期間を見ない生の {@code privacy.retention.enabled} で判定する（意図的。署名日前・失効で NF07 が
+ * OFF として扱われている間も、実行中に有効期間へ入れば hold 開始が使われ得るため、起動時に Journal を要求する保守側に倒す）。
  */
 public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton {
 
@@ -60,6 +66,9 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
 
     /** flag OFF のまま Journal を UNAVAILABLE として起動したことを示す固定コード（監視の log 検索用）。 */
     public static final String LOG_CODE_UNAVAILABLE = "NF07_PRIVACY_JOURNAL_UNAVAILABLE";
+
+    /** 起動時検査の各照会（Journal・application DB とも）の query timeout。 */
+    static final int QUERY_TIMEOUT_SECONDS = 10;
 
     /** 検査結果の分類。 */
     public enum Availability {
@@ -89,8 +98,8 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
     record GrantRow(Scope scope, String schema, String table, String privilege, boolean grantable) {
     }
 
-    /** Journal 用 Flyway 履歴表の1行。 */
-    record HistoryRow(String version, String script, boolean success) {
+    /** Journal 用 Flyway 履歴表の1行（checksum は NULL があり得る）。 */
+    record HistoryRow(String version, String script, Integer checksum, boolean success) {
     }
 
     /** appender の許可集合（journal-witness-grant-design.md §3.2。表名 → 操作）。 */
@@ -196,9 +205,10 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
         } catch (SQLException | RuntimeException e) {
             return List.of("journal.unreachable");
         }
+        JdbcTemplate checkedApplication = applicationTemplate(application);
         try {
-            JdbcTemplate journal = new JdbcTemplate(new SingleConnectionDataSource(connection, true));
-            checkInstance(journal, application, violations);
+            JdbcTemplate journal = journalTemplate(connection);
+            checkInstance(journal, checkedApplication, violations);
             checkSchema(journal, expectedSchema, violations);
             checkPrivileges(journal, expectedSchema, appenderRequired, violations);
             checkFlywayHistory(journal, artifactMigrations, violations);
@@ -209,8 +219,32 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
                 // 検査結果は確定している。close の失敗は結果を変えない
             }
         }
-        checkProjectionState(application, journalId, violations);
+        checkProjectionState(checkedApplication, journalId, violations);
         return List.copyOf(violations);
+    }
+
+    /** 借りた1接続の上で、query timeout 付きで照会する JdbcTemplate。 */
+    static JdbcTemplate journalTemplate(Connection connection) {
+        JdbcTemplate journal = new JdbcTemplate(new SingleConnectionDataSource(connection, true));
+        journal.setQueryTimeout(QUERY_TIMEOUT_SECONDS);
+        return journal;
+    }
+
+    /**
+     * application DB の照会用 JdbcTemplate。共有 Bean の設定は変えず、同じ DataSource で query timeout 付きの写しを作る
+     * （DataSource が取れない場合は渡されたものをそのまま使う）。
+     */
+    static JdbcTemplate applicationTemplate(JdbcTemplate application) {
+        if (application == null) {
+            return null;
+        }
+        DataSource dataSource = application.getDataSource();
+        if (dataSource == null) {
+            return application;
+        }
+        JdbcTemplate copy = new JdbcTemplate(dataSource);
+        copy.setQueryTimeout(QUERY_TIMEOUT_SECONDS);
+        return copy;
     }
 
     private static void checkInstance(JdbcTemplate journal, JdbcTemplate application, Set<String> violations) {
@@ -417,8 +451,13 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
         }
         List<HistoryRow> history;
         try {
-            history = journal.query("SELECT version, script, success FROM " + PrivacyJournalMigrations.HISTORY_TABLE,
-                    (rs, row) -> new HistoryRow(rs.getString(1), rs.getString(2), rs.getBoolean(3)));
+            history = journal.query("SELECT version, script, checksum, success FROM "
+                            + PrivacyJournalMigrations.HISTORY_TABLE,
+                    (rs, row) -> {
+                        int checksum = rs.getInt(3);
+                        return new HistoryRow(rs.getString(1), rs.getString(2), rs.wasNull() ? null : checksum,
+                                rs.getBoolean(4));
+                    });
         } catch (RuntimeException e) {
             violations.add("flyway.historyUnreadable");
             return;
@@ -433,7 +472,7 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
             violations.add("flyway.artifactEmpty");
             return List.copyOf(violations);
         }
-        Map<MigrationVersion, String> applied = new LinkedHashMap<>();
+        Map<MigrationVersion, HistoryRow> applied = new LinkedHashMap<>();
         for (HistoryRow row : history) {
             if (!row.success()) {
                 violations.add("flyway.failedMigration");
@@ -443,16 +482,20 @@ public class PrivacyJournalStartupVerifier implements SmartInitializingSingleton
                 continue;
             }
             try {
-                applied.put(MigrationVersion.fromVersion(row.version().trim()), row.script());
+                applied.put(MigrationVersion.fromVersion(row.version().trim()), row);
             } catch (RuntimeException e) {
                 violations.add("flyway.historyUnreadable");
             }
         }
         for (PrivacyJournalMigrations.Migration migration : artifact) {
-            if (!applied.containsKey(migration.version())) {
+            HistoryRow row = applied.get(migration.version());
+            if (row == null) {
                 violations.add("flyway.pending:" + migration.version());
-            } else if (!migration.script().equals(applied.get(migration.version()))) {
+            } else if (!migration.script().equals(row.script())) {
                 violations.add("flyway.scriptMismatch:" + migration.version());
+            } else if (row.checksum() == null || row.checksum() != migration.checksum()) {
+                // 適用後に script が書き換えられた artifact（Flyway の validate と同じ判定）
+                violations.add("flyway.checksumMismatch:" + migration.version());
             }
         }
         Set<MigrationVersion> known = new TreeSet<>();

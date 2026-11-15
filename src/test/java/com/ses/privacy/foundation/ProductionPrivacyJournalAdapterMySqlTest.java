@@ -286,6 +286,8 @@ class ProductionPrivacyJournalAdapterMySqlTest {
         assertEquals(synthetic.head(partition), production.head(partition));
         assertEquals(List.of(LEASE_CLAIMED, DISPATCH_AUTHORIZED, HOLD_STARTED),
                 production.events(partition).stream().map(JournalEvent::type).toList());
+        // A1H の projection が通る foundation 既存の chain 検証とも一致する（Review P3-7）
+        assertTrue(JournalProjectionService.verifyChain(partition, production.head(partition), production.events(partition)));
     }
 
     // ---------------------------------------------------------------- helper

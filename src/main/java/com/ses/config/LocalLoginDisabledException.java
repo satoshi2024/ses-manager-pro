@@ -12,6 +12,12 @@ import org.springframework.security.core.AuthenticationException;
  * ロック状態を見る privacy・integration hub の認可判定を妨害できるため）。
  * パスワードを照合する経路（local login 許可の利用者、break-glass、bootstrap）の失敗は従来どおり数える。
  *
+ * <p>挙動の変化（A1J Review P3-2）: break-glass 名の判定は設定名との完全一致だが、{@code sys_user.username} は
+ * 大文字小文字を区別しない collation のため、break-glass 名の大文字小文字違い（例: {@code BG-OPS}）は同じ行に解決される。
+ * この場合は break-glass の login 許可にならずパスワードを照合しないので、以前は数えていた（パスワード無しで
+ * break-glass 口座をロックできた）が、本修正後は数えない。「break-glass は従来どおり」は設定名と完全一致する
+ * username だけに成り立つ。break-glass 名の正規化は別作業とする。
+ *
  * <p>{@code DaoAuthenticationProvider} は {@code loadUserByUsername} の例外を
  * {@code InternalAuthenticationServiceException} に包むので、判定は原因の連鎖をたどる {@link #isCauseOf} で行う。
  */

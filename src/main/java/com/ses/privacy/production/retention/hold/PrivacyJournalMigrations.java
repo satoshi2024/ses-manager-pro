@@ -4,19 +4,23 @@ import org.flywaydb.core.api.MigrationVersion;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.StringReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.zip.CRC32;
 
 /**
  * artifact が持つ Journal 用 migration（{@code classpath:db/privacy-journal}）の一覧。
  *
  * <p>起動時検査は期待版をコードへ固定せず、artifact の migration と Journal の Flyway 履歴表
- * （{@value #HISTORY_TABLE}）を照合する（application の {@code ProductionSchemaVersionGuard} と同じ考え方）。
- * application は migration を実行しない（適用は専用 Flyway job だけ。P-3）。
+ * （{@value #HISTORY_TABLE}）を版・script 名・checksum で照合する（application の {@code ProductionSchemaVersionGuard}
+ * と同じ考え方）。application は migration を実行しない（適用は専用 Flyway job だけ。P-3）。
  */
 final class PrivacyJournalMigrations {
 
@@ -31,8 +35,8 @@ final class PrivacyJournalMigrations {
     private PrivacyJournalMigrations() {
     }
 
-    /** versioned migration 1件（版と script 名）。 */
-    record Migration(MigrationVersion version, String script) {
+    /** versioned migration 1件（版・script 名・Flyway と同じ checksum）。 */
+    record Migration(MigrationVersion version, String script, int checksum) {
     }
 
     /** classpath 上の Journal 用 versioned migration を版の昇順で返す。読めない・版の重複は例外。 */
@@ -55,9 +59,39 @@ final class PrivacyJournalMigrations {
             if (migrations.stream().anyMatch(existing -> existing.version().equals(version))) {
                 throw new IllegalStateException("Journal用migrationの版が重複しています");
             }
-            migrations.add(new Migration(version, name));
+            String content;
+            try (var in = resource.getInputStream()) {
+                content = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                throw new IllegalStateException("Journal用migrationを読めません", e);
+            }
+            migrations.add(new Migration(version, name, checksum(content)));
         }
         migrations.sort(Comparator.comparing(Migration::version));
         return List.copyOf(migrations);
+    }
+
+    /**
+     * Flyway（10.x の {@code ChecksumCalculator}）と同じ SQL migration の checksum。{@link BufferedReader#readLine()} で
+     * 分けた各行（改行を含まない。先頭行は BOM を除く）の UTF-8 bytes を順に CRC32 へ入れ、{@code int} にする。
+     * 同じ計算であることは {@code PrivacyJournalStartupVerifierTest} が Flyway の実装と突き合わせて固定する。
+     */
+    static int checksum(String content) {
+        CRC32 crc32 = new CRC32();
+        try (BufferedReader reader = new BufferedReader(new StringReader(content), 4096)) {
+            String line = reader.readLine();
+            boolean first = true;
+            while (line != null) {
+                if (first && !line.isEmpty() && line.charAt(0) == '﻿') {
+                    line = line.substring(1);
+                }
+                first = false;
+                crc32.update(line.getBytes(StandardCharsets.UTF_8));
+                line = reader.readLine();
+            }
+        } catch (IOException impossible) {
+            throw new IllegalStateException("checksumを計算できません", impossible);
+        }
+        return (int) crc32.getValue();
     }
 }
