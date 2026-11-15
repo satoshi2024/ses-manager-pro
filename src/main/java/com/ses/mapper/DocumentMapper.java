@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.ses.entity.Document;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
@@ -43,4 +44,16 @@ public interface DocumentMapper extends BaseMapper<Document> {
     Long findDocumentIdBySha256AndType(@org.apache.ibatis.annotations.Param("tenantId") String tenantId,
                                        @org.apache.ibatis.annotations.Param("sha256") String sha256,
                                        @org.apache.ibatis.annotations.Param("documentType") String documentType);
+
+    /**
+     * 証跡適格性の判定用に文書行を読む（NF01 計画 §5.1 条件3〜6、{@code DocumentEvidenceEligibility} 専用）。
+     *
+     * <p>論理削除済みの行も返し（削除を「不在」ではなく「利用不可」として区別するため）、判定は呼出側が行う。
+     * tenantは引数で明示し、tenant contextに依存しない。判定の最初に読む文で、実行前にMyBatisのsession cacheを
+     * 消す（同じtransactionで先に読んだlink・廃棄申請・版の結果を判定に使い回さない）。</p>
+     */
+    @Select("SELECT id, tenant_id, document_type, status, legal_hold_flag, deleted_flag FROM t_document "
+            + "WHERE id = #{id} AND tenant_id = #{tenantId}")
+    @Options(flushCache = Options.FlushCachePolicy.TRUE)
+    Document selectEvidenceCandidate(@Param("id") long id, @Param("tenantId") String tenantId);
 }
