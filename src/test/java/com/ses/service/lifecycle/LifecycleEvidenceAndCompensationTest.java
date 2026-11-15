@@ -8,6 +8,8 @@ import com.ses.dto.lifecycle.LifecycleTemplateDto;
 import com.ses.dto.lifecycle.LifecycleTemplateTaskDto;
 import com.ses.entity.*;
 import com.ses.mapper.*;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -69,8 +71,15 @@ class LifecycleEvidenceAndCompensationTest {
     private Long caseId;
     private Long taskId;
 
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
+
     @BeforeEach
     void setUp() {
+        // 担当者解決（LifecycleAssigneeResolver）は tenant context を必須とする（G4 で tenant 限定化）。API 経由と同じく default tenant を束縛する。
+        AccountingTenantContextHolder.setTenantId("default");
         adminUser = SysUser.builder()
                 .username("admin_b2_test")
                 .password("pass")
