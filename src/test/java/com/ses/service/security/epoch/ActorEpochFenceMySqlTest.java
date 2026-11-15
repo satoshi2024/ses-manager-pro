@@ -185,6 +185,8 @@ class ActorEpochFenceMySqlTest {
         SysUser target = insertUser("マネージャー");
         long before = actorEpoch(target.getId());
 
+        // 入れ子の割当insertはFK（assigned_by → sys_user、V63）の検査で操作者の行にS lockを付けるが、
+        // S→X昇格の判定はanchor（対象利用者の行）だけに限る（delta review P1-D1）。
         long read = EpochFenceMySqlSupport.assertReaderWaitsForWriter(jdbc, transactionManager, "sys_user",
                 this::bindContexts, () -> sysUserService.updateUser(target.getId(), roleOnly("HR"), authentication()),
                 () -> reader.readActor(TENANT, target.getId()), "role変更 writer先行");
@@ -214,6 +216,8 @@ class ActorEpochFenceMySqlTest {
         long before = actorEpoch(target.getId());
         Set<Long> changed = Set.of(groupId("role-hr"));
 
+        // 割当insertはFK（assigned_by → sys_user、V63）の検査で操作者の行にS lockを付けるが、
+        // S→X昇格の判定はanchor（対象利用者の行）だけに限る（delta review P1-D1）。
         long read = EpochFenceMySqlSupport.assertReaderWaitsForWriter(jdbc, transactionManager, "sys_user",
                 this::bindContexts,
                 () -> permissionGroupManagementService.replaceAssignments(target.getId(), changed, authentication()),

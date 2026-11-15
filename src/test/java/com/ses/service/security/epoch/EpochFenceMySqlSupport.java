@@ -33,9 +33,13 @@ import static org.junit.jupiter.api.Assertions.fail;
  *   <li>reader先行: readerが主キー一点で取った共有record lockを、writerの開始前に1件だけに固定し、待機辺のblocking lockが
  *       そのlockであることを要求する。</li>
  *   <li>writer先行: writerが当該表の主キーで保持する排他record lockをちょうど1件に固定し（主キー一点の {@code FOR UPDATE}
- *       で明示lockにしたもの）、readerの共有lock要求がそれを待つことを要求する。writerが同じ行の共有lockを持たないこと
- *       （S→X昇格が無いこと）も確かめる。</li>
+ *       で明示lockにしたもの）、readerの共有lock要求がそれを待つことを要求する。writerがanchor記録そのものに共有lockを
+ *       持たないこと（S→X昇格が無いこと）も確かめる。</li>
  * </ul>
+ *
+ * <p>S→X昇格の判定はanchor記録だけに限る（W3-15 delta review P1-D1）。writerが子表へinsertすると、InnoDBはFK検査で
+ * 親表の別の行（例: {@code t_user_permission_group.assigned_by} → 操作者の {@code sys_user} 行）に {@code S,REC_NOT_GAP}
+ * を付ける。これは同じ表・同じindexでも別の記録へのlockで、anchorの昇格ではないため数えない。</p>
  */
 final class EpochFenceMySqlSupport {
 
@@ -139,9 +143,7 @@ final class EpochFenceMySqlSupport {
             }
             PointLock anchor = InnoDbRecordLockWaits.requireSinglePointLock(jdbc, writerConnection.get(), table,
                     "PRIMARY", key -> true, label);
-            List<HeldLock> shared = InnoDbRecordLockWaits.grantedRecordLocks(jdbc, writerConnection.get(), table,
-                    "PRIMARY", SHARED_RECORD_MODES);
-            assertEquals(List.of(), shared, label + ": writerはanchor行を最初から排他lockで取る（S→X昇格なし）");
+            assertNoSharedLockOnAnchorRecord(jdbc, anchor, label);
             Future<Long> reader = pool.submit(call(threadSetup, () -> readCommitted(manager).execute(status -> {
                 readerConnection.set(connectionId(jdbc));
                 Long value = readerCall.get();
@@ -236,6 +238,77 @@ final class EpochFenceMySqlSupport {
             releaseReader.countDown();
             pool.shutdownNow();
         }
+    }
+
+    /**
+     * writerがanchor記録そのものに共有record lockを持たないことを確かめる（S→X昇格が無いこと）。
+     *
+     * <p>同じ表・indexでも、FK検査が親表の別の行に付ける {@code S,REC_NOT_GAP}（例: 権限group割当のinsertが
+     * {@code assigned_by} の操作者行に付けるもの）はanchorではないので数えない。記録の同一性は、InnoDBの record lockの
+     * {@code ENGINE_LOCK_ID}（{@code trx:space:page:heap_no:lock}）の {@code space:page:heap_no} で判定し、
+     * {@code LOCK_DATA} は連結条件にしない（両方見えている場合に位置の判定と矛盾しないことだけを確かめる）。
+     * 判定時点のanchorの排他lockを読み直し、writerが止まっている間の同じ時点の位置どうしで比べる。</p>
+     */
+    static void assertNoSharedLockOnAnchorRecord(JdbcTemplate jdbc, PointLock anchor, String label) {
+        List<HeldLock> exclusive = InnoDbRecordLockWaits.grantedRecordLocks(jdbc, anchor.connectionId(), anchor.table(),
+                anchor.index(), InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES);
+        if (exclusive.size() != 1) {
+            fail(label + ": writerのanchor排他lockが1件ではなくなった: " + exclusive);
+        }
+        List<String> problems = sharedLocksOnAnchorRecord(exclusive.get(0), InnoDbRecordLockWaits.grantedRecordLocks(
+                jdbc, anchor.connectionId(), anchor.table(), anchor.index(), SHARED_RECORD_MODES));
+        assertEquals(List.of(), problems, label + ": writerはanchor記録を最初から排他lockで取る（S→X昇格なし）");
+    }
+
+    /**
+     * anchorの排他lockと同じ記録上にある共有lock、または同じ記録上かを判定できない共有lockを返す（DB無しで検証できる純関数）。
+     * 別の記録（FK検査が付ける親行のS lock等）は返さない。
+     */
+    static List<String> sharedLocksOnAnchorRecord(HeldLock anchorLock, List<HeldLock> sharedLocks) {
+        String anchorPosition = recordPosition(anchorLock.lockId());
+        List<String> problems = new java.util.ArrayList<>();
+        for (HeldLock shared : sharedLocks) {
+            String position = recordPosition(shared.lockId());
+            boolean bothKeysVisible = anchorLock.lockData() != null && shared.lockData() != null;
+            boolean sameRecord;
+            if (anchorPosition != null && position != null) {
+                sameRecord = anchorPosition.equals(position);
+                if (bothKeysVisible && sameRecord != anchorLock.lockData().equals(shared.lockData())) {
+                    problems.add("lockの位置と鍵値の判定が矛盾する: anchor=" + anchorLock + ", shared=" + shared);
+                    continue;
+                }
+            } else if (bothKeysVisible) {
+                sameRecord = anchorLock.lockData().equals(shared.lockData());
+            } else {
+                problems.add("ENGINE_LOCK_IDの形式が想定外で、共有lockがanchor記録上かを判定できない: anchor="
+                        + anchorLock + ", shared=" + shared);
+                continue;
+            }
+            if (sameRecord) {
+                problems.add("anchor記録上の共有lock（S→X昇格の兆候）: anchor=" + anchorLock + ", shared=" + shared);
+            }
+        }
+        return problems;
+    }
+
+    /**
+     * InnoDBの record lockの {@code ENGINE_LOCK_ID}（MySQL 8.0: {@code trx_id:space_id:page_no:heap_no:lock_id}）から
+     * 記録の位置 {@code space:page:heap_no} を取り出す。形式が違えば {@code null}（呼出側は鍵値で代替するか失敗させる）。
+     */
+    static String recordPosition(String engineLockId) {
+        if (engineLockId == null) {
+            return null;
+        }
+        String[] parts = engineLockId.split(":");
+        if (parts.length != 5) {
+            return null;
+        }
+        for (int i = 1; i <= 3; i++) {
+            if (!parts[i].matches("\\d+")) {
+                return null;
+            }
+        }
+        return parts[1] + ":" + parts[2] + ":" + parts[3];
     }
 
     /** readerが当該表の主キーで共有record lockをちょうど1件保持していることを確かめ、そのlock IDを返す。 */
