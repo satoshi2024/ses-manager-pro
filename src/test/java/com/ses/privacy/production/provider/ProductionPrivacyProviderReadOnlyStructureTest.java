@@ -1,7 +1,12 @@
 package com.ses.privacy.production.provider;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.config.BeanDefinition;
+import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
+import org.springframework.core.type.filter.AssignableTypeFilter;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcOperations;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -13,6 +18,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -22,17 +30,35 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * F2 provider の read-only 性と列 allow-list を構造で固定する（production-bridge-phased-plan.md §3.2 の完了条件）。
  *
  * <ul>
- *   <li>provider が持つ DB 接続口は {@link PrivacyReadOnlyQuery} だけ（mapper・JdbcTemplate・DataSource・HTTP client を持たない）</li>
- *   <li>{@link PrivacyReadOnlyQuery} は {@code select} 以外を公開せず、実行は {@code query} だけ（記録用 proxy で確認）</li>
- *   <li>実行する SQL は SELECT で、SELECT 句は allow-list と完全一致する（{@code SELECT *} を使わない）</li>
- *   <li>列 allow-list の内容を固定する（列を足す変更は本 test の更新と Review を要する）</li>
+ *   <li>{@code com.ses} 配下（main）の {@link ProductionPrivacyProvider} 実装を classpath から全て列挙し、本 test の
+ *       一覧・列 allow-list の固定と一致させる（新しい provider は本 test の更新と Review を要する。P2-2）</li>
+ *   <li>列挙した全実装の DB 接続口は {@link PrivacyReadOnlyQuery} だけ（mapper・JdbcTemplate・DataSource・HTTP client を持たない）</li>
+ *   <li>{@link PrivacyReadOnlyQuery} は {@code select} 以外を公開せず、read-only transaction で実行し、実行は {@code query} だけ</li>
+ *   <li>実行する SQL は SELECT で、SELECT 句は allow-list と完全一致し、集合演算を含まず、WHERE の副問合せは
+ *       絞り込みのキー列を1つだけ選ぶ（{@code UNION} 等で allow-list 外の列を返す経路を作らない。P2-1）</li>
  * </ul>
  */
 class ProductionPrivacyProviderReadOnlyStructureTest {
 
     private static final Map<String, Map<String, List<String>>> EXPECTED_ALLOW_LISTS = expectedAllowLists();
 
+    /** WHERE の副問合せが選んでよいキー列。 */
+    private static final Set<String> SUBQUERY_KEY_COLUMNS = Set.of("id", "run_id", "document_id", "private_note_ref");
+
+    private static final Pattern SUBQUERY = Pattern.compile("(?i)\\bselect\\s+([a-z])\\.([a-z_]+)\\s+from\\b");
+
     private final List<String> calls = new ArrayList<>();
+
+    @Test
+    void classpath上の全provider実装は固定した一覧と一致する() throws Exception {
+        Set<String> scanned = mainProviderClasses().stream().map(Class::getName).collect(Collectors.toCollection(TreeSet::new));
+        Set<String> listed = providers(recordingQuery()).stream().map(p -> p.getClass().getName())
+                .collect(Collectors.toCollection(TreeSet::new));
+
+        assertThat(scanned).as("main の ProductionPrivacyProvider 実装").isEqualTo(listed);
+        assertThat(providers(recordingQuery())).extracting(ProductionPrivacyProvider::providerId)
+                .containsExactlyInAnyOrderElementsOf(EXPECTED_ALLOW_LISTS.keySet());
+    }
 
     @Test
     void 各providerの列allow_listは固定された内容と一致する() {
@@ -44,19 +70,9 @@ class ProductionPrivacyProviderReadOnlyStructureTest {
     }
 
     @Test
-    void providerはPrivacyReadOnlyQuery以外のDB部品や外部client部品を持たない() {
-        for (ProductionPrivacyProvider provider : providers(recordingQuery())) {
-            for (Field field : provider.getClass().getDeclaredFields()) {
-                if (field.isSynthetic()) {
-                    continue;
-                }
-                Class<?> type = field.getType();
-                if (Modifier.isStatic(field.getModifiers())) {
-                    assertThat(Set.of(String.class, ProviderTable.class, List.class)).as(field.toString()).contains(type);
-                } else {
-                    assertThat(type).as(field.toString()).isEqualTo(PrivacyReadOnlyQuery.class);
-                }
-            }
+    void classpath上の全providerはPrivacyReadOnlyQuery以外のDB部品や外部client部品を持たない() throws Exception {
+        for (Class<?> type : mainProviderClasses()) {
+            assertThat(fieldViolations(type)).as(type.getName()).isEmpty();
         }
         for (Field field : PrivacyReadOnlyQuery.class.getDeclaredFields()) {
             if (!Modifier.isStatic(field.getModifiers())) {
@@ -66,16 +82,27 @@ class ProductionPrivacyProviderReadOnlyStructureTest {
     }
 
     @Test
-    void PrivacyReadOnlyQueryはselectだけを公開する() {
+    void JdbcTemplateやmapperを持つproviderは構造検査で検出される() {
+        assertThat(fieldViolations(LeakyJdbcProvider.class)).isNotEmpty();
+        assertThat(fieldViolations(LeakyMapperProvider.class)).isNotEmpty();
+        assertThat(fieldViolations(EngineerProfileProvider.class)).isEmpty();
+    }
+
+    @Test
+    void PrivacyReadOnlyQueryはselectだけを公開しread_only_transactionで実行する() throws Exception {
         Set<String> publicMethods = Arrays.stream(PrivacyReadOnlyQuery.class.getDeclaredMethods())
                 .filter(method -> Modifier.isPublic(method.getModifiers()))
                 .map(Method::getName)
                 .collect(Collectors.toSet());
         assertThat(publicMethods).containsExactly("select");
+        Method select = PrivacyReadOnlyQuery.class.getMethod("select", ProviderTable.class, String.class, Map.class);
+        Transactional transactional = select.getAnnotation(Transactional.class);
+        assertThat(transactional).isNotNull();
+        assertThat(transactional.readOnly()).isTrue();
     }
 
     @Test
-    void 全providerの照会はqueryだけでSELECT句はallow_listと一致する() {
+    void 全providerの照会はqueryだけでSELECT句はallow_listと一致し集合演算と複数列の副問合せを持たない() {
         PrivacyReadOnlyQuery query = recordingQuery();
         for (ProductionPrivacyProvider provider : providers(query)) {
             for (PrivacySubjectType type : PrivacySubjectType.values()) {
@@ -96,19 +123,35 @@ class ProductionPrivacyProviderReadOnlyStructureTest {
             assertThat(tables).as(sql).containsKey(table);
             assertThat(selectList).as(sql).isEqualTo(String.join(", ", tables.get(table).columns()));
             assertThat(selectList).doesNotContain("*");
+            String where = sql.substring(sql.indexOf(" WHERE ") + " WHERE ".length());
+            assertThat(where.toUpperCase()).as(sql).doesNotContain("UNION").doesNotContain("INTERSECT")
+                    .doesNotContain("EXCEPT");
+            int selects = where.toUpperCase().split("\\bSELECT\\b", -1).length - 1;
+            Matcher subquery = SUBQUERY.matcher(where);
+            int keyed = 0;
+            while (subquery.find()) {
+                assertThat(SUBQUERY_KEY_COLUMNS).as(sql).contains(subquery.group(2));
+                keyed++;
+            }
+            assertThat(keyed).as("副問合せは全てキー列1つの形: " + sql).isEqualTo(selects);
         }
     }
 
     @Test
-    void WHERE句は文の区切りと書込みとlockの語を拒否し列名の一部は通す() {
+    void WHERE句は文の区切りと書込みとlockと集合演算と複数列の副問合せを拒否し列名の一部は通す() {
         ProviderTable table = EngineerProfileProvider.ENGINEER;
         for (String where : List.of("id = 1; DELETE FROM t_engineer", "id = 1 -- x", "id IN (SELECT 1) FOR UPDATE",
                 "id = 1 UNION SELECT 1 INTO OUTFILE 'x'", "id = (UPDATE t_engineer SET id = 1)", "id = 1 /* x */",
-                "id = 1 LOCK IN SHARE MODE", " ")) {
+                "id = 1 LOCK IN SHARE MODE", " ", "id = 1 UNION SELECT password FROM sys_user",
+                "id = 1 union all select u.password from sys_user u", "id IN (SELECT a.id FROM t_a a INTERSECT SELECT b.id FROM t_b b)",
+                "id IN (SELECT a.id FROM t_a a EXCEPT SELECT b.id FROM t_b b)", "GET_LOCK('x', 1) = 1",
+                "RELEASE_LOCK('x') = 1", "id IN (SELECT a.id, a.password FROM sys_user a)",
+                "id IN (SELECT password FROM sys_user)", "id IN (SELECT a.id FROM (SELECT * FROM sys_user) a)")) {
             assertThatThrownBy(() -> PrivacyReadOnlyQuery.selectSql(table, where)).as(where)
                     .isInstanceOf(IllegalArgumentException.class);
         }
-        assertThat(PrivacyReadOnlyQuery.selectSql(table, "updated_at IS NOT NULL AND deleted_flag = 0 AND created_at > :t"))
+        assertThat(PrivacyReadOnlyQuery.selectSql(table, "updated_at IS NOT NULL AND deleted_flag = 0 AND created_at > :t "
+                + "AND id IN (SELECT k.engineer_id FROM t_contract k WHERE k.id = :c)"))
                 .startsWith("SELECT id, tenant_id, full_name");
     }
 
@@ -131,7 +174,8 @@ class ProductionPrivacyProviderReadOnlyStructureTest {
         assertThat(PrivacySubjectRef.parse("ENGINEER:123")).contains(PrivacySubjectRef.of(PrivacySubjectType.ENGINEER, 123));
         assertThat(PrivacySubjectRef.of(PrivacySubjectType.CANDIDATE, 5).ref()).isEqualTo("CANDIDATE:5");
         for (String invalid : Arrays.asList(null, "", "engineer:1", "ENGINEER:", ":1", "ENGINEER:0", "ENGINEER:01",
-                "ENGINEER:-1", "ENGINEER:1:2", "ENGINEER:1a", "UNKNOWN:1")) {
+                "ENGINEER:-1", "ENGINEER:1:2", "ENGINEER:1a", "UNKNOWN:1", "ENGINEER:１２３", "ENGINEER:\u0661\u0662\u0663",
+                "ENGINEER:1234567890123456789", "ENGINEER: 1")) {
             assertThat(PrivacySubjectRef.parse(invalid)).as(String.valueOf(invalid)).isEmpty();
         }
         assertThatThrownBy(() -> PrivacySubjectRef.of(PrivacySubjectType.ENGINEER, 0))
@@ -139,6 +183,41 @@ class ProductionPrivacyProviderReadOnlyStructureTest {
     }
 
     // ---------------------------------------------------------------- helper
+
+    /** main（test-classes 以外）にある {@link ProductionPrivacyProvider} の具象実装。 */
+    static List<Class<?>> mainProviderClasses() throws Exception {
+        ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(false);
+        scanner.addIncludeFilter(new AssignableTypeFilter(ProductionPrivacyProvider.class));
+        List<Class<?>> classes = new ArrayList<>();
+        for (BeanDefinition candidate : scanner.findCandidateComponents("com.ses")) {
+            Class<?> type = Class.forName(candidate.getBeanClassName());
+            String location = type.getProtectionDomain().getCodeSource().getLocation().toString();
+            if (!location.contains("test-classes")) {
+                classes.add(type);
+            }
+        }
+        assertThat(classes).as("main の provider 実装を検出できること").isNotEmpty();
+        return classes;
+    }
+
+    /** DB 接続口の規則に反する field（instance field は PrivacyReadOnlyQuery だけ、static は定数だけ）。 */
+    static List<String> fieldViolations(Class<?> type) {
+        List<String> violations = new ArrayList<>();
+        for (Field field : type.getDeclaredFields()) {
+            if (field.isSynthetic()) {
+                continue;
+            }
+            Class<?> fieldType = field.getType();
+            boolean allowed = Modifier.isStatic(field.getModifiers())
+                    ? fieldType.isPrimitive() || Set.of(String.class, ProviderTable.class, List.class, Map.class)
+                    .contains(fieldType)
+                    : fieldType == PrivacyReadOnlyQuery.class;
+            if (!allowed) {
+                violations.add(field.toString());
+            }
+        }
+        return violations;
+    }
 
     /** query だけを記録して空を返し、それ以外の操作は失敗させる記録用の接続口。 */
     private PrivacyReadOnlyQuery recordingQuery() {
@@ -193,8 +272,22 @@ class ProductionPrivacyProviderReadOnlyStructureTest {
                 "t_bp_availability_ingestion", List.of("id", "original_file_name", "stored_file_name", "file_ext",
                         "status", "extracted_text", "parsed_json", "review_note", "converted_availability_id",
                         "created_at", "updated_at", "deleted_flag")));
-        expected.put("ai-log", Map.of("t_ai_recommendation_run", List.of("id", "tenant_id", "trace_id", "use_case",
-                "redacted_summary_json", "status", "created_at", "updated_at", "deleted_flag")));
+        expected.put("ai-log", Map.of(
+                "t_ai_recommendation_run", List.of("id", "tenant_id", "trace_id", "use_case", "redacted_summary_json",
+                        "status", "created_at", "updated_at", "deleted_flag"),
+                "t_ai_recommendation_item", List.of("id", "tenant_id", "run_id", "rank_no", "target_type", "target_id")));
         return expected;
+    }
+
+    /** 構造検査の検出確認用: PrivacyReadOnlyQuery を通さず JdbcTemplate を持つ provider（登録しない）。 */
+    static final class LeakyJdbcProvider {
+        @SuppressWarnings("unused")
+        private JdbcTemplate jdbcTemplate;
+    }
+
+    /** 構造検査の検出確認用: mapper を持つ provider（登録しない）。 */
+    static final class LeakyMapperProvider {
+        @SuppressWarnings("unused")
+        private com.ses.mapper.SysUserMapper sysUserMapper;
     }
 }

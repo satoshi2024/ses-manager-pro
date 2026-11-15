@@ -2,6 +2,7 @@ package com.ses.privacy.production.provider;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * 種別付きの subject 参照（例: {@code ENGINEER:123}）。ID は正の整数だけを受け付ける。
@@ -10,6 +11,8 @@ import java.util.Optional;
  * @param id   種別ごとの主キー
  */
 public record PrivacySubjectRef(PrivacySubjectType type, long id) {
+
+    private static final Pattern ASCII_ID = Pattern.compile("[1-9][0-9]{0,17}");
 
     public PrivacySubjectRef {
         Objects.requireNonNull(type, "subjectの種別が必要です");
@@ -38,7 +41,8 @@ public record PrivacySubjectRef(PrivacySubjectType type, long id) {
         }
         String typePart = ref.substring(0, separator);
         String idPart = ref.substring(separator + 1);
-        if (!idPart.chars().allMatch(Character::isDigit) || idPart.length() > 18 || idPart.startsWith("0")) {
+        // ASCII の数字だけ（全角・他の文字体系の数字は受け付けない）。先頭0なし、18桁まで。
+        if (!ASCII_ID.matcher(idPart).matches()) {
             return Optional.empty();
         }
         for (PrivacySubjectType type : PrivacySubjectType.values()) {

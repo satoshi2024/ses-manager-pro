@@ -1,6 +1,8 @@
 package com.ses.privacy.production.provider;
 
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.TenantOwnershipResolver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,6 +36,8 @@ class EngineerProfileProviderTest {
     private JdbcTemplate jdbc;
     @Autowired
     private DataScopeService dataScopeService;
+    @Autowired
+    private TenantOwnershipResolver tenantOwnershipResolver;
 
     private PrivacyProviderH2Fixture fx;
 
@@ -45,6 +49,7 @@ class EngineerProfileProviderTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -108,6 +113,13 @@ class EngineerProfileProviderTest {
                 .collect(Collectors.toSet());
         // tenant を特定できない行は不可視（V169 の resolver と同じ）、論理削除済みは実体が残るため含める
         assertThat(visible).containsExactlyInAnyOrder(a, b);
+        // 論理削除されていない行について、tenant ownership の resolver が返す母集団と一致する（P3-5）
+        AccountingTenantContextHolder.setTenantId(TENANT);
+        Set<Long> owned = tenantOwnershipResolver.resolveEngineerIds(TENANT).stream()
+                .filter(id -> Set.of(a, b, other, unknownTenant).contains(id))
+                .collect(Collectors.toSet());
+        assertThat(owned).containsExactly(a);
+        assertThat(visible).contains(owned.toArray(Long[]::new)).containsOnly(a, b);
     }
 
     @Test

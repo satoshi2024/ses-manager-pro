@@ -100,15 +100,61 @@ final class PrivacyProviderH2Fixture {
     }
 
     long aiRun(long id, String tenant, String summaryJson, boolean deleted) {
+        return aiRun(id, tenant, "MATCHING", summaryJson, null, deleted);
+    }
+
+    long aiRun(long id, String tenant, String useCase, String summaryJson, String parameterHash, boolean deleted) {
         long versionId = id;
         jdbc.update("INSERT INTO m_ai_artifact_version (id, use_case, provider, prompt_version, config_hash, status) "
                 + "VALUES (?, 'NF07_TEST', 'mock', 'p1', ?, 'DRAFT')", versionId, "c".repeat(64));
         jdbc.update("INSERT INTO t_ai_recommendation_run (id, tenant_id, trace_id, use_case, artifact_version_id, "
-                        + "actor_user_id, input_hash, redacted_summary_json, status, cost_jpy, deleted_flag) "
-                        + "VALUES (?, ?, ?, 'NF07_TEST', ?, 1, ?, ?, 'SUCCEEDED', 12, ?)",
-                id, tenant, String.format("00000000-0000-0000-0000-%012d", id), versionId, "b".repeat(64),
-                summaryJson, deleted ? 1 : 0);
+                        + "actor_user_id, input_hash, parameter_hash, redacted_summary_json, status, cost_jpy, "
+                        + "deleted_flag) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'SUCCEEDED', 12, ?)",
+                id, tenant, String.format("00000000-0000-0000-0000-%012d", id), useCase, versionId, "b".repeat(64),
+                parameterHash, summaryJson, deleted ? 1 : 0);
         return id;
+    }
+
+    // ---------------------------------------------------------------- 文書の間接導出（契約・実績・BP支払・見積・資格・1on1）
+
+    long customerProjectContract(long id, long engineerId) {
+        jdbc.update("INSERT INTO m_customer (id, company_name) VALUES (?, 'NF07 customer')", id);
+        jdbc.update("INSERT INTO t_project (id, project_name, customer_id) VALUES (?, 'NF07 project', ?)", id, id);
+        jdbc.update("INSERT INTO t_contract (id, engineer_id, project_id, customer_id, start_date, selling_price, "
+                + "cost_price) VALUES (?, ?, ?, ?, DATE '2026-04-01', 700000, 500000)", id, engineerId, id, id);
+        return id;
+    }
+
+    long workRecord(long id, long contractId) {
+        jdbc.update("INSERT INTO t_work_record (id, contract_id, work_month, actual_hours) VALUES (?, ?, '2026-04', 160.0)",
+                id, contractId);
+        return id;
+    }
+
+    long bpPayment(long id, long workRecordId) {
+        jdbc.update("INSERT INTO t_bp_payment (id, work_record_id, amount) VALUES (?, ?, 400000)", id, workRecordId);
+        return id;
+    }
+
+    long quotation(long id, long customerId, Long engineerId) {
+        jdbc.update("INSERT INTO t_quotation (id, quotation_no, customer_id, title, unit_price, engineer_id) "
+                + "VALUES (?, ?, ?, 'NF07 quotation', 700000, ?)", id, "NF07-Q-" + id, customerId, engineerId);
+        return id;
+    }
+
+    long engineerCertification(long id, String tenant, long engineerId) {
+        jdbc.update("INSERT INTO t_certification_continuity_group (tenant_id, engineer_id, certification_id, "
+                + "continuity_group_id) VALUES (?, ?, ?, ?)", tenant, engineerId, id, id);
+        jdbc.update("INSERT INTO t_engineer_certification (id, tenant_id, engineer_id, certification_id, "
+                + "continuity_group_id, acquired_on) VALUES (?, ?, ?, ?, ?, DATE '2026-01-10')",
+                id, tenant, engineerId, id, id);
+        return id;
+    }
+
+    void privateNote(long id, long engineerId, long counterpartUserId, long documentId) {
+        jdbc.update("INSERT INTO t_one_on_one_request (id, engineer_id, counterpart_user_id, candidate_dates_json, "
+                        + "private_note_ref) VALUES (?, ?, ?, '[]', ?)", id, engineerId, counterpartUserId,
+                Long.toString(documentId));
     }
 
     void aiItem(long id, String tenant, long runId, int rank, String targetType, long targetId) {
