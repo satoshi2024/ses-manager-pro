@@ -87,6 +87,8 @@ spring:
         - classpath:sql/schema-privacy-permission-h2.sql
         # V192: 外部API監査の保存期限（retention_expires_at・UTC化・purge索引）
         - classpath:sql/schema-integration-hub-external-audit-retention-h2.sql
+        # V193: NF-06 取込センター画面のmenuと import.metadata.manage（管理者専用groupの明示許可・他groupのdeny）
+        - classpath:sql/schema-import-center-menu-permission-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 
@@ -157,6 +159,10 @@ app:
     token-secret: test-batch-token-hmac-secret
   pwa:
     context-secret: test-pwa-context-hmac-secret
+  # NF-06 preview・error exportの行参照（鍵付きHMAC）。test専用の値（Base64で42 byte）
+  import-center:
+    row-reference:
+      hmac-key: dGVzdC1vbmx5LW5mMDYtcm93LXJlZmVyZW5jZS1obWFjLWtleS0wMDAx
   security:
     webhook:
       allow-loopback: true

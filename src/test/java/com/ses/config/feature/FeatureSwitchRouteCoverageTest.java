@@ -76,6 +76,8 @@ class FeatureSwitchRouteCoverageTest {
             "customer-health", Feature.NF02,
             "customer-qbr", Feature.NF02,
             "certification-learning-gap", Feature.NF03,
+            // NF-06取込センター画面（/import-center → import.metadata.manage）。APIはcom.ses.importcenterへの依存で判定する
+            "import", Feature.NF06,
             "management-report", Feature.NF10);
 
     /** NF配下だが意図的に機能スイッチの対象外とする入口（パス区切り前方一致）と理由。 */
@@ -148,6 +150,27 @@ class FeatureSwitchRouteCoverageTest {
                 .as("NF配下の入口がFeatureの遮断表に未登録です。Featureへprefixを追加するか、"
                         + "意図的な対象外なら理由付きでUNGATED_ROUTE_PREFIXESへ登録してください: %s", violations)
                 .isEmpty();
+    }
+
+    /** W3-12: 取込センターの画面・API・menu keyはNF06に属し、apply系のpathを含む全ての {@code /api/import-center} 配下を遮断する。 */
+    @Test
+    void NF06の画面とAPIとmenuKeyは取込センターの機能に属する() throws Exception {
+        List<Route> importRoutes = controllerRoutes().stream()
+                .filter(route -> Feature.matchesSegmentPrefix(route.normalized(), "/import-center")
+                        || Feature.matchesSegmentPrefix(route.normalized(), "/api/import-center"))
+                .toList();
+
+        assertThat(importRoutes).as("取込センターのcontroller入口").isNotEmpty();
+        assertThat(importRoutes).anyMatch(route -> route.normalized().equals("/import-center"));
+        for (Route route : importRoutes) {
+            assertThat(owners(route)).as(route.path()).containsExactly(Feature.NF06);
+            assertThat(Feature.forPath(route.normalized())).as(route.path()).contains(Feature.NF06);
+        }
+        assertThat(Feature.NF06.pagePrefixes()).containsExactly("/import-center");
+        assertThat(Feature.NF06.apiPrefixes()).containsExactly("/api/import-center");
+        assertThat(Feature.NF06.menuKeys()).containsExactly("import-center");
+        assertThat(Feature.forPath("/api/import-center/jobs/1/apply")).contains(Feature.NF06);
+        assertThat(Feature.forPath("/import-center-like")).isEmpty();
     }
 
     /** C-1: privacy の入口は保持・保全の機能に属し、{@code /privacy}・{@code /api/privacy} 自体は遮断表に登録しない。 */
@@ -354,7 +377,8 @@ class FeatureSwitchRouteCoverageTest {
             }
         }
 
-        assertThat(linkedFeatures).containsExactlyInAnyOrder(Feature.NF01, Feature.NF02, Feature.NF03, Feature.NF10);
+        assertThat(linkedFeatures).containsExactlyInAnyOrder(Feature.NF01, Feature.NF02, Feature.NF03, Feature.NF06,
+                Feature.NF10);
         assertThat(violations).as("NF導線がFeature.menuKeys以外の条件で表示されている: %s", violations).isEmpty();
     }
 

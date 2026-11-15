@@ -76,7 +76,7 @@ class FeatureSwitchFilterTest {
             Feature.NF10, List.of("/api/management-reports/runs", "/api/management-reports/schedules/7/enable"));
 
     /** 画面を持たずAPIだけを遮断する最上位の機能（API先行。画面prefixは画面を追加するbatchで登録する）。 */
-    private static final Set<Feature> API_ONLY_TOP_LEVEL = Set.of(Feature.NF06, Feature.NF07_RETENTION);
+    private static final Set<Feature> API_ONLY_TOP_LEVEL = Set.of(Feature.NF07_RETENTION);
 
     /** 各機能の代表的な画面・静的入口。 */
     private static final Map<Feature, List<String>> PAGE_SAMPLES = Map.of(
@@ -88,8 +88,8 @@ class FeatureSwitchFilterTest {
             Feature.NF03, List.of("/certification-learning-skill-gap", "/my/certification-learning-skill-gap"),
             Feature.NF03_CERTIFICATION_PII, List.of(),
             Feature.NF04, List.of("/service-worker.js", "/manifest.webmanifest"),
-            // NF-06の画面（/import-center）はW3-12で追加する。現時点は画面入口を持たない
-            Feature.NF06, List.of(),
+            // NF-06の画面（取込センター、W3-12）
+            Feature.NF06, List.of("/import-center"),
             Feature.NF07_RETENTION, List.of(),
             Feature.NF10, List.of("/management-reports"));
 

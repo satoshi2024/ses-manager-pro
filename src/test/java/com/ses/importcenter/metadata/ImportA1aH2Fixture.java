@@ -37,8 +37,11 @@ final class ImportA1aH2Fixture {
     static final long LEGAL_ENTITY = 77;
     static final Map<String, String> CUSTOMER_MAPPING = mapping("externalKey", "companyName", "contactPerson",
             "contactEmail", "contactPhone", "address");
+    /** 行参照HMACのtest専用鍵（Base64で42 byte。application-test.ymlの値と同じ）。 */
+    static final String ROW_REFERENCE_KEY = "dGVzdC1vbmx5LW5mMDYtcm93LXJlZmVyZW5jZS1obWFjLWtleS0wMDAx";
 
     final JdbcTemplate jdbc;
+    final ImportSourceRowReference rowReference = new ImportSourceRowReference(ROW_REFERENCE_KEY, false);
     final ImportAuthorizedContext context = new ImportAuthorizedContext(TENANT, ACTOR, LEGAL_ENTITY);
     final ImportMetadataAuthorizationService authorization;
     final ImportMetadataService metadata;
@@ -87,8 +90,22 @@ final class ImportA1aH2Fixture {
     }
 
     ImportValidationResultService resultService(LongSupplier clock) {
+        return resultService(clock, rowReference);
+    }
+
+    ImportValidationResultService resultService(LongSupplier clock, ImportSourceRowReference references) {
         return new ImportValidationResultService(authorization, metadata, jdbc, new ObjectMapper(), auditProvider,
-                clock, java.time.Duration.ofSeconds(120));
+                references, clock, java.time.Duration.ofSeconds(120));
+    }
+
+    /** 保存済みのsource行hash（16進64桁）。 */
+    String storedRowHash(long jobId, long sourceRowNumber) {
+        byte[] hash = jdbc.queryForObject("SELECT r.source_row_sha256 FROM t_import_validation_row r "
+                        + "JOIN t_import_job j ON j.tenant_id=r.tenant_id AND j.id=r.job_id "
+                        + "AND j.current_validation_run_id=r.validation_run_id "
+                        + "WHERE r.tenant_id=? AND r.job_id=? AND r.source_row_number=?",
+                byte[].class, TENANT, jobId, sourceRowNumber);
+        return HexFormat.of().formatHex(hash);
     }
 
     long createSource(String code) {

@@ -311,6 +311,10 @@ app:
       source-codes: ${IMPORT_ADMISSION_SOURCE_CODES:}
       # 決定書に記載された承認内容のSHA-256（小文字hex 64桁）
       approval-digest: ${IMPORT_ADMISSION_APPROVAL_DIGEST:}
+    # preview・error exportへ返す行参照の鍵付きHMAC（W3-12）。Base64で復号後32 byte以上。
+    # 既定値は開発用（prodでは使えない）。本番は IMPORT_ROW_REFERENCE_HMAC_KEY を secret store から注入する。
+    row-reference:
+      hmac-key: ${IMPORT_ROW_REFERENCE_HMAC_KEY:ZGV2LW9ubHktbmYwNi1yb3ctcmVmZXJlbmNlLWtleS1ub3QtZm9yLXByb2Q=}
   # メール差出人
   mail:
     from: ${MAIL_FROM:noreply@example.com}
@@ -388,7 +392,8 @@ app:
     # NF-04 要員PWAシェル（Service Worker・manifest）。日次入力queue・offline下書き復元は対象外（常時有効）
     nf04:
       enabled: ${FEATURE_NF04_ENABLED:false}
-    # NF-06 データ移行・取込センター（API。apply系は含まない）。ONにするprodはimport-center.admissionの承認設定が必須
+    # NF-06 データ移行・取込センター（画面・API。apply系は含まない）。ONにするprodはimport-center.admissionの
+    # 承認設定と行参照鍵（import-center.row-reference.hmac-key）が必須
     nf06:
       enabled: ${FEATURE_NF06_ENABLED:false}
     # NF-10 定期管理レポート

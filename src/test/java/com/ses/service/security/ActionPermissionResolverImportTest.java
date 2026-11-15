@@ -34,6 +34,20 @@ class ActionPermissionResolverImportTest {
         }
     }
 
+    /** W3-12: 取込センター画面は1枚だけをAPIと同じ明示actionへ解決し、配下の未知pathや更新methodは解決しない。 */
+    @Test
+    void importCenterPageResolvesToTheSameActionAndNothingElseUnderIt() {
+        assertEquals("import.metadata.manage", ActionPermissionResolver.resolve("GET", "/import-center"));
+        assertEquals("import.metadata.manage", ActionPermissionResolver.resolve("HEAD", "/import-center"));
+        assertEquals("import.metadata.manage", ActionPermissionResolver.resolve("GET", "/import-center?jobId=3"));
+        assertNull(ActionPermissionResolver.resolve("POST", "/import-center"));
+        assertNull(ActionPermissionResolver.resolve("GET", "/import-center/jobs/3"));
+        assertNull(ActionPermissionResolver.resolve("GET", "/import-center-like"));
+        // menu（V193）のapi_prefixは公開routeの一覧APIで、同じactionへ解決される（root自体は解決しない）
+        assertEquals("import.metadata.manage", ActionPermissionResolver.resolve("GET", "/api/import-center/sources"));
+        assertNull(ActionPermissionResolver.resolve("GET", "/api/import-center"));
+    }
+
     @Test
     void unpublishedMethodsAndShapesUnderTheSameRoutesStayUnresolved() {
         assertNull(ActionPermissionResolver.resolve("GET", "/api/import-center/jobs/7/validations"));

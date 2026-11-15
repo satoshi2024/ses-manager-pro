@@ -95,17 +95,17 @@ public enum Feature {
             List.of()),
 
     /**
-     * NF-06 データ移行・取込センター（初回はupload・検証・preview・error export・source/mapping管理のAPIだけ）。
+     * NF-06 データ移行・取込センター（初回はupload・検証・preview・error export・source/mapping管理だけ）。
      *
-     * <p>画面とmenuは後続バッチ（W3-12）で追加するため、現時点の入口は {@code /api/import-center} だけである
-     * （画面prefixは実在するcontrollerが入った時点で登録する）。apply系はこのスイッチではなく、route不在・
-     * {@code ActionPermissionResolver} のnull解決・admission portで閉じる（B-NF06-3）。
+     * <p>入口は取込センター画面 {@code /import-center}（W3-12）とAPI {@code /api/import-center}、menu key は
+     * {@code import-center}（V193）。apply系はこのスイッチではなく、route不在・{@code ActionPermissionResolver} の
+     * null解決・admission portで閉じる（B-NF06-3）。
      */
     NF06("データ移行・取込センター",
-            List.of(),
+            List.of("/import-center"),
             List.of("/api/import-center"),
             List.of(),
-            List.of()),
+            List.of("import-center")),
 
     /**
      * NF-07 保持・保全（policy説明・catalog・hold）。production-bridge-phased-plan.md §3.1.2。

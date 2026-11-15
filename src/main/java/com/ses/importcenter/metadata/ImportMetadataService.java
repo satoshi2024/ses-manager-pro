@@ -487,11 +487,21 @@ public class ImportMetadataService {
         return expectedVersion + 1;
     }
 
+    /**
+     * UPLOADEDのjobへmapping版を束縛する。呼出元は検証編成（{@link ImportValidationRunService#validate}）だけで、
+     * 画面・APIから直接は呼ばない。
+     *
+     * <p>防御の重ね（W3-12。W3-05 review P3-2）: 呼出元の可見性確認に頼らず、job行の参照とlockにも現在の法人を
+     * 条件として付け、別法人のjobは存在しないjobと同じ404にする。job行が参照とlockの間に消えた場合も404で返す
+     * （以前はnullを参照して500になっていた）。
+     */
     @Transactional(rollbackFor = Exception.class)
     public long bindMapping(long jobId, long expectedJobVersion, long mappingId) {
         ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
-        Long sourceId = jdbc.query("SELECT source_system_id FROM t_import_job WHERE tenant_id=? AND id=?",
-                rs -> rs.next() ? rs.getLong(1) : null, context.tenantId(), jobId);
+        String legalEntityId = Long.toString(context.legalEntityId());
+        Long sourceId = jdbc.query("SELECT source_system_id FROM t_import_job WHERE tenant_id=? AND id=? "
+                        + "AND legal_entity_id=?",
+                rs -> rs.next() ? rs.getLong(1) : null, context.tenantId(), jobId, legalEntityId);
         if (sourceId == null) {
             throw BusinessException.of(404, "error.import.jobNotFound");
         }
@@ -500,17 +510,20 @@ public class ImportMetadataService {
         JobSnapshot job = jdbc.query("""
                 SELECT id, source_system_id, source_version, entity_type, schema_version, state, version_no,
                        mapping_id, mapping_version, mapping_sha256
-                FROM t_import_job WHERE tenant_id=? AND id=? FOR UPDATE
+                FROM t_import_job WHERE tenant_id=? AND id=? AND legal_entity_id=? FOR UPDATE
                 """, rs -> rs.next() ? new JobSnapshot(rs.getLong("id"), rs.getLong("source_system_id"),
                 rs.getLong("source_version"), rs.getString("entity_type"), rs.getString("schema_version"),
                 rs.getString("state"), rs.getLong("version_no"), rs.getObject("mapping_id", Long.class),
                 rs.getObject("mapping_version", Integer.class), rs.getBytes("mapping_sha256")) : null,
-                context.tenantId(), jobId);
+                context.tenantId(), jobId, legalEntityId);
+        if (job == null) {
+            throw BusinessException.of(404, "error.import.jobNotFound");
+        }
         if (job.sourceId() != sourceId || job.sourceVersion() != source.version()) {
             throw BusinessException.of(409, "error.import.sourceVersionConflict");
         }
-        if (job == null || !"UPLOADED".equals(job.state()) || job.version() != expectedJobVersion) {
-            if (job != null && job.mappingId() != null && job.mappingId() == mappingId) {
+        if (!"UPLOADED".equals(job.state()) || job.version() != expectedJobVersion) {
+            if (job.mappingId() != null && job.mappingId() == mappingId) {
                 authorization.requireCurrentAuthorizationForWrite(context);
                 return job.version();
             }

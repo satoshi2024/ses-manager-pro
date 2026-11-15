@@ -273,7 +273,7 @@ public class SecurityConfig {
                     "/api/portal-admin/users/*/engineer-links",
                     "/api/portal-admin/engineer-links/**",
                     // NF-06取込センター（upload・検証・preview・error export・source/mapping管理）は管理者のみ。
-                    // serviceも管理者role＋明示action（import.metadata.manage）を毎回再確認する。画面はW3-12で追加する。
+                    // serviceも管理者role＋明示action（import.metadata.manage）を毎回再確認する。画面（/import-center）はW3-12。
                     "/import-center/**",
                     "/api/import-center/**"
                 ).hasRole("管理者")

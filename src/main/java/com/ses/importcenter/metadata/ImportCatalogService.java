@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
-import com.ses.common.util.PageUtils;
 import com.ses.importcenter.foundation.ImportEntity;
 import com.ses.importcenter.foundation.SesImportV1Schema;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -50,10 +49,10 @@ public class ImportCatalogService {
 
     public ImportCatalogPage<ImportSourceView> listSources(long page, long size) {
         ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
-        Page<Object> normalized = PageUtils.safePage(page, size, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+        Page<Object> normalized = ImportPaging.safePage(page, size, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
         Long total = jdbc.queryForObject("SELECT COUNT(*) FROM t_import_source_system WHERE tenant_id=?",
                 Long.class, context.tenantId());
-        long offset = (normalized.getCurrent() - 1) * normalized.getSize();
+        long offset = ImportPaging.offset(normalized);
         List<ImportSourceView> items = total == null || offset >= total ? List.of() : jdbc.query("""
                 SELECT id, source_code, display_name, status, version_no FROM t_import_source_system
                 WHERE tenant_id=? ORDER BY id LIMIT ? OFFSET ?
@@ -79,11 +78,11 @@ public class ImportCatalogService {
     public ImportCatalogPage<ImportMappingView> listMappings(long sourceId, long page, long size) {
         ImportAuthorizedContext context = authorization.requireCurrentAuthorization();
         requireSource(context, sourceId);
-        Page<Object> normalized = PageUtils.safePage(page, size, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+        Page<Object> normalized = ImportPaging.safePage(page, size, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
         Long total = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM t_import_mapping WHERE tenant_id=? AND source_system_id=?",
                 Long.class, context.tenantId(), sourceId);
-        long offset = (normalized.getCurrent() - 1) * normalized.getSize();
+        long offset = ImportPaging.offset(normalized);
         List<ImportMappingView> items = total == null || offset >= total ? List.of() : jdbc.query("""
                 SELECT id, source_system_id, entity_type, schema_version, mapping_version, mapping_sha256,
                        canonical_bytes

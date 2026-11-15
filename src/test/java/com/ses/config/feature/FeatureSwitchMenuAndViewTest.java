@@ -49,7 +49,7 @@ class FeatureSwitchMenuAndViewTest {
 
     private static final List<String> ALL_MENU_KEYS = List.of("dashboard", "engineer", "lifecycle", "myLifecycle",
             "service-desk", "customer-success", "certification-learning-skill-gap", "myCertificationLearningGap",
-            "management-report", "invoice");
+            "import-center", "management-report", "invoice");
 
     @AfterEach
     void clearTenant() {
