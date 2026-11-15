@@ -20,6 +20,7 @@
   - 期限付きbootstrap mode: `ProductionBootstrapProperties`（`app.security.bootstrap.*`）、`ProductionBootstrapMode`、`BootstrapSessionFilter`。IdPの登録API: `POST /api/identity-providers`（`IdentityProviderApiController`）。
   - 初回bootstrapの完了marker: `ProductionBootstrapCompletionLatch`（`m_system_config` の `security.bootstrap.completed-at`。新しいmigrationは無い）。
   - NF07 F1 + PERM（W3-14）: `V190__nf07_privacy_f1_core.sql`（F1表。行は作らない）、`V191__nf07_privacy_permission_seed.sql`（privacy-admin・privacy.* の拒否・menu）。prodの起動検査 `ProductionSecurityConfigurationValidator` は、全体baseline `'*'` を持つgroup（privacy-admin以外）に privacy.* の拒否行が無ければ起動を止める（bootstrap中も同じ）。`privacy.retention.enabled` / `privacy.dsar.enabled` は既定OFFで、初回リリースはOFFのまま配備する。1つでもONにした起動では `PrivacyProductionConfigurationValidator`（W3-14b）が決定ID束縛（`privacy.approval.*`、D-01・D-09）、privacy-admin の有効な管理者2名以上（OIDCでログインできる管理者だけ。break-glass口座を除く。ロック中も数える。推奨は §5.0 の C〜E の3名）、privacy-admin 以外のgroupに `privacy.` 系の許可行が無いことを検査し、満たさなければ起動しない。決定の署名日前・失効だけなら起動は止めず、WARN `NF07_PRIVACY_STOPPED_AT_STARTUP` を出してNF07をOFFとして扱う（実行中に失効日を迎えた場合も同日から。metric `ses_privacy_decision_binding_state`。ONの手順: `feature-switches.md` 4.7）。新しいmigrationは無い。
+  - NF08 B2c-1（W3-13）: `V194__nf08_copilot_dispatch_claim_and_cost_ledger.sql`（summary dispatchのclaim列、費用ledgerの `t_ai_external_send_cost_bucket` / `t_ai_external_send_cost_entry`、`t_audit_log.idx_audit_dispatch_key`。行は作らない）。外部送信は未開放のままで、prodは `AI_EXTERNAL_SEND_ENABLED=true` を `dispatch.permitOnlyNotWired` で起動拒否する（B2c-2の完了と独立Reviewまで。設定では解除できない）。`AI_EXTERNAL_SEND_COST_LEDGER`（`ai.external-send-cost-ledger`）は既定の `persistent` のまま設定しない（`persistent` 以外は解除後も起動拒否）。
   - 検証: `FlywayProdFreshInstallMySqlTest`（実MySQL、job設定そのものを読む）、`ProductionFlywayJobConfigurationTest`、`ProductionSchemaVersionGuardTest`、`PasswordChangeEnforcementIntegrationTest`、`ProductionBootstrapIntegrationTest`、`ProductionBootstrapModeTest`、`ProductionBootstrapPersistenceTest`、`ProductionSecurityConfigurationValidatorBootstrapTest` ほか。
 
 ## 0. 全体の流れ
@@ -219,6 +220,14 @@ SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() A
   't_privacy_request_subject_link', 't_privacy_action', 't_privacy_export_package');      -- 8
 SELECT (SELECT COUNT(*) FROM m_pii_data_element) + (SELECT COUNT(*) FROM m_retention_policy)
      + (SELECT COUNT(*) FROM t_legal_hold) + (SELECT COUNT(*) FROM t_privacy_request);       -- 0
+-- NF08 B2c-1（V194）: 費用ledgerの2表があり行は無い。外部送信は未開放のため、claim済み・READYのattemptも無い
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN
+ ('t_ai_external_send_cost_bucket', 't_ai_external_send_cost_entry');                         -- 2
+SELECT (SELECT COUNT(*) FROM t_ai_external_send_cost_bucket)
+     + (SELECT COUNT(*) FROM t_ai_external_send_cost_entry);                                  -- 0
+SELECT COUNT(*) FROM t_ai_recommendation_run WHERE dispatch_state <> 'NOT_APPLICABLE';       -- 0
+SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE()
+   AND table_name = 't_audit_log' AND index_name = 'idx_audit_dispatch_key';                  -- 3（3列の索引）
 
 -- helper procedureが残っていない・trigger件数
 SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema = DATABASE();           -- 0

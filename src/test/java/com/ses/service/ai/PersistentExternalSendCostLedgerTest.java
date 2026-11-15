@@ -21,6 +21,8 @@ import java.time.YearMonth;
 import java.time.ZoneOffset;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -68,8 +70,10 @@ class PersistentExternalSendCostLedgerTest {
         BucketKeys keys = BucketKeys.of(NOW);
         assertThrows(IllegalStateException.class, () -> ledger.ensureBuckets("gemini", keys));
         assertThrows(IllegalStateException.class, () -> ledger.clockHighWater("gemini"));
-        assertThrows(IllegalStateException.class, () -> ledger.reserve(AiExternalSendCostBucket.TYPE_DAY, "gemini",
-                keys.dayKey(), 10, 100, new byte[32], NOW, TOLERANCE));
+        assertThrows(IllegalStateException.class, () -> ledger.lockBucket(AiExternalSendCostBucket.TYPE_DAY, "gemini",
+                keys.dayKey()));
+        assertThrows(IllegalStateException.class, () -> ledger.reserve(bucket(7L, null), 10, 100, new byte[32], NOW,
+                TOLERANCE));
         assertThrows(IllegalStateException.class, () -> ledger.recordReservation(new AiExternalSendCostEntry()));
         verifyNoInteractions(bucketMapper, entryMapper);
     }
@@ -77,30 +81,28 @@ class PersistentExternalSendCostLedgerTest {
     @Test
     void bucketの欠落と上限超過と高水位の逆行を区別する() {
         TransactionSynchronizationManager.setActualTransactionActive(true);
-        assertEquals(ReserveResult.BUCKET_MISSING, ledger.reserve(AiExternalSendCostBucket.TYPE_DAY, "gemini",
-                "2026-11-15", 10, 100, new byte[32], NOW, TOLERANCE));
+        assertNull(ledger.lockBucket(AiExternalSendCostBucket.TYPE_DAY, "gemini", "2026-11-15"));
+        assertEquals(ReserveResult.BUCKET_MISSING, ledger.reserve(null, 10, 100, new byte[32], NOW, TOLERANCE));
 
         AiExternalSendCostBucket bucket = bucket(7L, LocalDateTime.ofInstant(NOW.plusMillis(1001), ZoneOffset.UTC));
         when(bucketMapper.lockBucket("gemini", "DAY", "2026-11-15")).thenReturn(bucket);
-        assertEquals(ReserveResult.CLOCK_INVALID, ledger.reserve(AiExternalSendCostBucket.TYPE_DAY, "gemini",
-                "2026-11-15", 10, 100, new byte[32], NOW, TOLERANCE));
+        assertSame(bucket, ledger.lockBucket(AiExternalSendCostBucket.TYPE_DAY, "gemini", "2026-11-15"));
+        assertEquals(ReserveResult.CLOCK_INVALID, ledger.reserve(bucket, 10, 100, new byte[32], NOW, TOLERANCE));
         verify(bucketMapper, never()).reserve(any(), anyLong(), anyLong(), any(), any());
 
         bucket.setClockHighWaterAt(LocalDateTime.ofInstant(NOW.plusMillis(1000), ZoneOffset.UTC));
         when(bucketMapper.reserve(eq(7L), eq(10L), eq(100L), any(), any())).thenReturn(0, 1);
-        assertEquals(ReserveResult.LIMIT_EXCEEDED, ledger.reserve(AiExternalSendCostBucket.TYPE_DAY, "gemini",
-                "2026-11-15", 10, 100, new byte[32], NOW, TOLERANCE));
-        assertEquals(ReserveResult.RESERVED, ledger.reserve(AiExternalSendCostBucket.TYPE_DAY, "gemini",
-                "2026-11-15", 10, 100, new byte[32], NOW, TOLERANCE));
+        assertEquals(ReserveResult.LIMIT_EXCEEDED, ledger.reserve(bucket, 10, 100, new byte[32], NOW, TOLERANCE));
+        assertEquals(ReserveResult.RESERVED, ledger.reserve(bucket, 10, 100, new byte[32], NOW, TOLERANCE));
     }
 
     @Test
     void 費用予約見積りは1円以上で適用範囲は固定文字集合だけ() {
         TransactionSynchronizationManager.setActualTransactionActive(true);
-        assertThrows(IllegalArgumentException.class, () -> ledger.reserve(AiExternalSendCostBucket.TYPE_DAY,
-                "gemini", "2026-11-15", 0, 100, new byte[32], NOW, TOLERANCE));
-        assertThrows(IllegalArgumentException.class, () -> ledger.reserve(AiExternalSendCostBucket.TYPE_DAY,
-                "Gemini Prod", "2026-11-15", 1, 100, new byte[32], NOW, TOLERANCE));
+        assertThrows(IllegalArgumentException.class, () -> ledger.reserve(bucket(7L, null), 0, 100, new byte[32],
+                NOW, TOLERANCE));
+        assertThrows(IllegalArgumentException.class, () -> ledger.lockBucket(AiExternalSendCostBucket.TYPE_DAY,
+                "Gemini Prod", "2026-11-15"));
         AiExternalSendCostEntry zero = new AiExternalSendCostEntry();
         zero.setReservedYen(0);
         assertThrows(IllegalArgumentException.class, () -> ledger.recordReservation(zero));

@@ -5,6 +5,7 @@ import com.ses.service.ai.copilot.CopilotRunService;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
@@ -42,7 +43,23 @@ final class DispatchClaimFixtures {
                 around.minus(Duration.ofHours(1)), around.plus(Duration.ofHours(1)),
                 "policy-nf08", "v1", "9".repeat(64), "generativelanguage.googleapis.com", "Q-UTIL-001", 9L, 512,
                 costScope, upperBoundYen, dailyLimitYen, monthlyLimitYen, Duration.ofMinutes(2),
-                nowNanos + TimeUnit.MINUTES.toNanos(5));
+                nowNanos + TimeUnit.MINUTES.toNanos(5),
+                businessDay(around).minusDays(30), businessDay(around).plusDays(30));
+    }
+
+    /** 承認の有効期間（署名日・失効日）だけを差し替えた写し。 */
+    static DispatchIssueRequest withApproval(DispatchIssueRequest base, LocalDate signedOn, LocalDate expiresOn) {
+        return new DispatchIssueRequest(base.provider(), base.modelRevision(), base.region(), base.tier(),
+                base.configHash(), base.artifactVersionId(), base.scopeHash(), base.inputHash(),
+                base.preflightSnapshotHash(), base.requestSha256(), base.approvalDigest(), base.decisionId(),
+                base.cardId(), base.cardVersion(), base.cardDigest(), base.cardEffectiveFrom(), base.cardEffectiveUntil(),
+                base.policyId(), base.policyVersion(), base.policyDigest(), base.destinationHost(), base.queryId(),
+                base.legalEntityId(), base.promptBytes(), base.costScope(), base.upperBoundYen(), base.dailyLimitYen(),
+                base.monthlyLimitYen(), base.attemptTtl(), base.deadlineNanos(), signedOn, expiresOn);
+    }
+
+    static LocalDate businessDay(Instant instant) {
+        return LocalDate.ofInstant(instant, com.ses.service.ai.AiExternalSendApproval.BUSINESS_ZONE);
     }
 
     static CopilotRunService.CopilotAttemptRecord summaryAttempt(long runId, String traceId, String tenantId,

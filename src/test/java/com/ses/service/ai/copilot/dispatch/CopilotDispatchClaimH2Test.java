@@ -139,7 +139,7 @@ class CopilotDispatchClaimH2Test {
                 base.cardId(), base.cardVersion(), base.cardDigest(), base.cardEffectiveFrom(), base.cardEffectiveUntil(),
                 base.policyId(), base.policyVersion(), base.policyDigest(), base.destinationHost(), base.queryId(),
                 base.legalEntityId(), base.promptBytes(), base.costScope(), base.upperBoundYen(), base.dailyLimitYen(),
-                base.monthlyLimitYen(), base.attemptTtl(), base.deadlineNanos());
+                base.monthlyLimitYen(), base.attemptTtl(), base.deadlineNanos(), base.approvalSignedOn(), base.approvalExpiresOn());
         DispatchTicket drifted = new DispatchTicket(ticket.runId(), ticket.tenantId(), ticket.traceId(),
                 ticket.claimId(), otherTier, ticket.nonce(), ticket.idempotencyKey(), ticket.issuedAt(),
                 ticket.issuedNanos());
@@ -184,18 +184,13 @@ class CopilotDispatchClaimH2Test {
                 "SELECT COUNT(*) FROM t_ai_external_send_cost_bucket WHERE cost_scope = ?", Integer.class, scope));
         assertNull(ledger.clockHighWater(scope));
 
-        byte[] digest = new byte[32];
-        Duration tolerance = Duration.ofSeconds(1);
-        assertEquals(ReserveResult.RESERVED, ledger.reserve("DAY", scope, keys.dayKey(), 60, 100, digest, now, tolerance));
-        assertEquals(ReserveResult.RESERVED,
-                ledger.reserve("DAY", scope, keys.dayKey(), 40, 100, digest, now.minusMillis(500), tolerance),
+        assertEquals(ReserveResult.RESERVED, reserveDay(scope, keys.dayKey(), 60, 100, now));
+        assertEquals(ReserveResult.RESERVED, reserveDay(scope, keys.dayKey(), 40, 100, now.minusMillis(500)),
                 "高水位から1秒以内の前の時刻は許す");
-        assertEquals(ReserveResult.LIMIT_EXCEEDED,
-                ledger.reserve("DAY", scope, keys.dayKey(), 1, 100, digest, now, tolerance), "上限ちょうどの後は超過");
-        assertEquals(ReserveResult.CLOCK_INVALID,
-                ledger.reserve("DAY", scope, keys.dayKey(), 1, 1000, digest, now.minusSeconds(2), tolerance));
-        assertEquals(ReserveResult.BUCKET_MISSING, ledger.reserve("DAY", scope, "2026-11-16", 1, 100, digest, now,
-                tolerance));
+        assertEquals(ReserveResult.LIMIT_EXCEEDED, reserveDay(scope, keys.dayKey(), 1, 100, now), "上限ちょうどの後は超過");
+        assertEquals(ReserveResult.CLOCK_INVALID, reserveDay(scope, keys.dayKey(), 1, 1000, now.minusSeconds(2)));
+        assertNull(ledger.lockBucket("DAY", scope, "2026-11-16"), "事前生成していない日のbucketは無い");
+        assertEquals(ReserveResult.BUCKET_MISSING, reserveDay(scope, "2026-11-16", 1, 100, now));
         AiExternalSendCostBucket day = bucketMapper.selectBucket(scope, "DAY", keys.dayKey());
         assertEquals(100L, day.getCommittedYen());
         assertEquals(2L, day.getVersion(), "予約ごとにversionを増やす");
@@ -251,6 +246,12 @@ class CopilotDispatchClaimH2Test {
         assertEquals(List.of("IDEMPOTENCY_KEY", "APPLICATION_CODE", "ID"),
                 indexColumns("T_AUDIT_LOG", "IDX_AUDIT_DISPATCH_KEY"));
         assertEquals(List.of("DISPATCH_CLAIM_ID"), indexColumns("T_AI_RECOMMENDATION_RUN", "UK_AI_RUN_DISPATCH_CLAIM"));
+    }
+
+    /** claimと同じ順で、bucketをlockしてから（lock後の観測時刻で）予約する。 */
+    private ReserveResult reserveDay(String scope, String dayKey, int yen, long limit, Instant observedAt) {
+        return ledger.reserve(ledger.lockBucket("DAY", scope, dayKey), yen, limit, new byte[32], observedAt,
+                Duration.ofSeconds(1));
     }
 
     private DispatchTicket prepare(RunRef run) {

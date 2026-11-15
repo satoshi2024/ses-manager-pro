@@ -5,6 +5,7 @@ import com.ses.entity.AiExternalSendCostBucket;
 import com.ses.entity.AiExternalSendCostEntry;
 import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.ai.AiExternalSendApproval;
 import com.ses.service.ai.AiExternalSendAuditor;
 import com.ses.service.ai.ExternalSendCostLedger;
 import com.ses.service.ai.PersistentExternalSendCostLedger;
@@ -31,6 +32,7 @@ import java.sql.SQLTransientException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -63,7 +65,10 @@ public class CopilotDispatchClaimService {
 
     public static final String REASON_STALE = "COPILOT_DISPATCH_CLAIM_STALE";
     public static final String REASON_ALREADY_ATTEMPTED = "COPILOT_DISPATCH_CLAIM_ALREADY_ATTEMPTED";
-    public static final String REASON_TRANSACTION_ACTIVE = "COPILOT_DISPATCH_TRANSACTION_ACTIVE";
+    /** gatewayと同じ理由コード（既存のmessage keyがある）。 */
+    public static final String REASON_TRANSACTION_ACTIVE = "AI_EXTERNAL_SEND_TRANSACTION_ACTIVE";
+    /** claim時のJST業務日が承認の有効期間外（失効日以降・署名日前）。既存のmessage keyがある（計画 §4 #16）。 */
+    public static final String REASON_APPROVAL_NOT_EFFECTIVE = "AI_EXTERNAL_SEND_NOT_APPROVED";
     public static final String REASON_CONTEXT = "EXECUTION_CONTEXT_REQUIRED";
     public static final String REASON_DEADLINE = "COPILOT_DISPATCH_DEADLINE_EXCEEDED";
     public static final String REASON_ATTEMPT_EXPIRED = "COPILOT_DISPATCH_ATTEMPT_EXPIRED";
@@ -258,10 +263,21 @@ public class CopilotDispatchClaimService {
             throw ClaimRefusal.retry(REASON_DAY_BOUNDARY, current);
         }
         byte[] approvalDigest = DispatchDigests.hex(request.approvalDigest());
-        reserve(AiExternalSendCostBucket.TYPE_DAY, keys.dayKey(), request.dailyLimitYen(),
-                ExternalSendCostLedger.REASON_DAILY, ticket, approvalDigest, now);
-        reserve(AiExternalSendCostBucket.TYPE_MONTH, keys.monthKey(), request.monthlyLimitYen(),
-                ExternalSendCostLedger.REASON_MONTHLY, ticket, approvalDigest, now);
+        AiExternalSendCostBucket day = ledger.lockBucket(AiExternalSendCostBucket.TYPE_DAY, request.costScope(),
+                keys.dayKey());
+        if (day == null) {
+            throw ClaimRefusal.retry(PersistentExternalSendCostLedger.REASON_BUCKET_MISSING, null);
+        }
+        // DAYの待機中に他のclaimが先にcommitして高水位を進め得るため、lock取得後に時刻を読み直し、
+        // 同じ検査をやり直す（待機時間を時計の逆行と誤判定しない）。以降の記録はこの時刻を使う。
+        now = afterBucketLock(ticket, keys, now);
+        reserve(day, request.dailyLimitYen(), ExternalSendCostLedger.REASON_DAILY, ticket, approvalDigest, now);
+        AiExternalSendCostBucket month = ledger.lockBucket(AiExternalSendCostBucket.TYPE_MONTH, request.costScope(),
+                keys.monthKey());
+        if (month == null) {
+            throw ClaimRefusal.retry(PersistentExternalSendCostLedger.REASON_BUCKET_MISSING, null);
+        }
+        reserve(month, request.monthlyLimitYen(), ExternalSendCostLedger.REASON_MONTHLY, ticket, approvalDigest, now);
         ledger.recordReservation(entry(ticket, keys, approvalDigest, now));
         if (runMapper.claimDispatch(columns, DispatchDigests.utc(now)) != 1) {
             throw ClaimRefusal.of(REASON_STALE);
@@ -270,11 +286,27 @@ public class CopilotDispatchClaimService {
         return now;
     }
 
-    private void reserve(String bucketType, String bucketKey, long limitYen, String limitReason,
+    /** DAY bucketのlock取得後の時刻。前の時刻より戻っていれば逆行、期限・日付境界は改めて検査する。 */
+    private Instant afterBucketLock(DispatchTicket ticket, BucketKeys keys, Instant beforeLock) {
+        Instant locked = DispatchDigests.micros(clock.instant());
+        if (locked.isBefore(beforeLock)) {
+            throw ClaimRefusal.of(REASON_CLOCK_INVALID);
+        }
+        String problem = timeProblem(ticket, locked);
+        if (problem != null) {
+            throw ClaimRefusal.of(problem);
+        }
+        BucketKeys current = BucketKeys.of(locked);
+        if (!current.equals(keys)) {
+            throw ClaimRefusal.retry(REASON_DAY_BOUNDARY, current);
+        }
+        return locked;
+    }
+
+    private void reserve(AiExternalSendCostBucket locked, long limitYen, String limitReason,
                          DispatchTicket ticket, byte[] approvalDigest, Instant now) {
-        DispatchIssueRequest request = ticket.request();
-        ReserveResult result = ledger.reserve(bucketType, request.costScope(), bucketKey, request.upperBoundYen(),
-                limitYen, approvalDigest, now, CLOCK_TOLERANCE);
+        ReserveResult result = ledger.reserve(locked, ticket.request().upperBoundYen(), limitYen, approvalDigest,
+                now, CLOCK_TOLERANCE);
         switch (result) {
             case RESERVED -> { }
             case LIMIT_EXCEEDED -> throw ClaimRefusal.of(limitReason);
@@ -302,22 +334,31 @@ public class CopilotDispatchClaimService {
         if (now.isBefore(request.cardEffectiveFrom()) || !now.isBefore(request.cardEffectiveUntil())) {
             return REASON_CARD_NOT_EFFECTIVE;
         }
+        // 承認の有効期間はJST業務日で判定する（AiExternalSendApprovalと同じ: 署名日以上・失効日未満）。
+        if (!request.approvalEffectiveOn(LocalDate.ofInstant(now, AiExternalSendApproval.BUSINESS_ZONE))) {
+            return REASON_APPROVAL_NOT_EFFECTIVE;
+        }
         if (remaining(ticket).isNegative() || remaining(ticket).isZero()) {
             return REASON_DEADLINE;
         }
         return null;
     }
 
-    /** callback完了後にcommitの成否を確認できなかった場合。permitを返さず、別transactionで読み直す。 */
+    /**
+     * callback完了後にcommitの成否を確認できなかった場合。permitを返さず、別transactionで読み直す。
+     * 読み直しは排他lock付き（{@code FOR UPDATE}）で行い、進行中のcommitが終わるまで待ってから最新の確定値を読む
+     * （非lockの読取りだとcommit中の行をREADYと読み、RESULTの費用状態を誤り得る）。待ちはtransactionのtimeout
+     * （残deadline以下、最大10秒）で打ち切り、読めなければUNKNOWNとする。行の状態は変えない。
+     */
     private ClaimOutcome uncertain(DispatchTicket ticket, int attempts, RuntimeException failure) {
         log.warn("Copilot dispatch claimのcommit結果を確認できないためpermitを発行しません: claim={} errorType={}",
                 ticket.claimId(), failure.getClass().getSimpleName());
         DispatchState observed = null;
         try {
             Duration remaining = remaining(ticket);
-            observed = template(remaining.compareTo(MIN_REMAINING) < 0 ? MIN_REMAINING : remaining, true)
+            observed = template(remaining.compareTo(MIN_REMAINING) < 0 ? MIN_REMAINING : remaining, false)
                     .execute(status -> {
-                        DispatchRunRow row = runMapper.readDispatchRow(ticket.columns());
+                        DispatchRunRow row = runMapper.lockDispatchRow(ticket.columns());
                         if (row == null || !ticket.claimId().equals(row.getDispatchClaimIdText())) {
                             return null;
                         }

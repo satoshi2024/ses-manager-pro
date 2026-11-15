@@ -192,6 +192,8 @@ public final class DispatchTicket {
         line(canonical, "monthlyLimitYen", String.valueOf(request.monthlyLimitYen()));
         line(canonical, "issuedAt", issuedAt.toString());
         line(canonical, "expiresAt", expiresAt.toString());
+        line(canonical, "approvalSignedOn", request.approvalSignedOn().toString());
+        line(canonical, "approvalExpiresOn", request.approvalExpiresOn().toString());
         return DispatchDigests.sha256(canonical.toString());
     }
 

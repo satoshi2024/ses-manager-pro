@@ -65,6 +65,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  *   <li>二接続の競合では成功1件・STALE1件。待機は {@code performance_schema.data_lock_waits} のlock IDで確認し、
  *       {@code LOCK_DATA} に依存しない（{@link InnoDbRecordLockWaits}）。</li>
  *   <li>日次上限ちょうどの並行予約、commit直後の例外（ACK喪失）とcommit直前の失敗、再起動後の再claim拒否、1213の再試行。</li>
+ *   <li>lock待ちはtransaction timeout（残deadline以下）で打ち切られ、既定50秒の {@code innodb_lock_wait_timeout} を待たない。</li>
  *   <li>tenant-Bのsentinel行は全列不変。</li>
  * </ul>
  * <p>run行の排他lockはFKを持たない列の更新とSELECT ... FOR UPDATEだけで取り、子表へのinsertによるFKのS lockを
@@ -366,9 +367,78 @@ class CopilotDispatchClaimMySqlIntegrationTest {
                 "再試行でATTEMPTを重複させない");
     }
 
+    /**
+     * 計画 §1.6（lock待ちの上限）: claimのlock待ちは残deadline以下のtransaction timeout（MyBatisのstatement timeoutへ
+     * 適用される）で打ち切られ、既定50秒の {@code innodb_lock_wait_timeout} を待たない。blockerがrun行のlockを
+     * timeoutより長く保持しても、claimは予約・entry・行を変えずに送信前のRESULTを残して返る。
+     */
+    @Test
+    void lock待ちはtransaction_timeoutで打ち切られ既定50秒を待たずに予約なしで返る() throws Exception {
+        String scope = scope();
+        // deadlineは約6秒先。claim transactionのtimeoutは残deadlineを秒へ切り捨てた約5秒になる。
+        DispatchTicket ticket = prepare(TENANT_A, scope, 30, 10_000, java.time.Duration.ofSeconds(6));
+        new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                ledger.ensureBuckets(scope, PersistentExternalSendCostLedger.BucketKeys.of(clock.instant())));
+        Map<String, Object> runBefore = runRow(ticket.runId());
+        long dayBefore = committed(scope, "DAY");
+        long monthBefore = committed(scope, "MONTH");
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        ClaimOutcome outcome;
+        long elapsedMillis;
+        try (Connection blocker = dataSource.getConnection()) {
+            blocker.setAutoCommit(false);
+            try (PreparedStatement lock = blocker.prepareStatement(
+                    "SELECT id FROM t_ai_recommendation_run WHERE id=? FOR UPDATE")) {
+                lock.setLong(1, ticket.runId());
+                try (ResultSet row = lock.executeQuery()) {
+                    assertTrue(row.next());
+                }
+            }
+            long blockerId = connectionId(blocker);
+            InnoDbRecordLockWaits.PointLock anchor = InnoDbRecordLockWaits.requireSinglePointLock(jdbc, blockerId,
+                    "t_ai_recommendation_run", "PRIMARY", InnoDbRecordLockWaits.primaryKey(ticket.runId()),
+                    "NF08 claim lock待ち上限");
+            long started = System.nanoTime();
+            Future<ClaimOutcome> claim = pool.submit(() -> claimAs(TENANT_A, claimService, ticket));
+            InnoDbRecordLockWaits.awaitBlockerAnchoredWait(jdbc, anchor, null,
+                    InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES, InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES, 5_000,
+                    () -> {
+                        if (claim.isDone()) {
+                            fail("claimがrun行のlockを待たずに終了した: " + claim.get());
+                        }
+                    }, "NF08 claim lock待ち上限");
+            // blockerはlockを保持したまま。claimはtimeoutで自ら戻らなければならない。
+            outcome = claim.get(20, TimeUnit.SECONDS);
+            elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            assertEquals(1, InnoDbRecordLockWaits.grantedRecordLocks(jdbc, blockerId, "t_ai_recommendation_run",
+                    "PRIMARY", InnoDbRecordLockWaits.EXCLUSIVE_RECORD_MODES).size(), "blockerはlockを保持したまま");
+            blocker.rollback();
+        } finally {
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
+        }
+        assertEquals(ClaimOutcome.Status.NOT_CLAIMED, outcome.status());
+        assertNull(outcome.permit());
+        assertTrue(Set.of(CopilotDispatchClaimService.REASON_LEDGER_UNAVAILABLE,
+                CopilotDispatchClaimService.REASON_DEADLINE).contains(outcome.reasonCode()), outcome.reasonCode());
+        assertTrue(elapsedMillis < 15_000, "既定の50秒のlock待ちに依存しない: elapsed=" + elapsedMillis + "ms");
+        assertEquals(runBefore, runRow(ticket.runId()), "行はREADYのまま全列不変");
+        assertEquals(0, entryCount(scope));
+        assertEquals(dayBefore, committed(scope, "DAY"));
+        assertEquals(monthBefore, committed(scope, "MONTH"));
+        assertEquals(1, auditCount(ticket.claimId(), AiExternalSendAuditor.APPLICATION_ATTEMPT));
+        assertEquals(outcome.reasonCode(), resultErrorCode(ticket.claimId()));
+        assertTrue(resultAfterState(ticket.claimId()).contains("yenState=NOT_SENT"));
+    }
+
     // ---- fixtures ----
 
     private DispatchTicket prepare(String tenant, String scope, int upperBoundYen, long dailyLimitYen) {
+        return prepare(tenant, scope, upperBoundYen, dailyLimitYen, java.time.Duration.ofMinutes(5));
+    }
+
+    private DispatchTicket prepare(String tenant, String scope, int upperBoundYen, long dailyLimitYen,
+                                   java.time.Duration deadlineFromNow) {
         Long artifactId = jdbc.queryForObject("SELECT id FROM m_ai_artifact_version "
                 + "WHERE use_case='MANAGEMENT_COPILOT' AND status='ACTIVE' AND deleted_flag=0 LIMIT 1", Long.class);
         assertNotNull(artifactId);
@@ -380,7 +450,9 @@ class CopilotDispatchClaimMySqlIntegrationTest {
                 "{\"attemptKind\":\"SUMMARY\",\"outcome\":\"PENDING\",\"costState\":\"UNKNOWN\"}");
         long runId = jdbc.queryForObject("SELECT id FROM t_ai_recommendation_run WHERE trace_id=?", Long.class,
                 traceId);
-        DispatchIssueRequest request = DispatchClaimFixtures.request(artifactId, clock.instant(), System.nanoTime(),
+        // fixtureのdeadlineは「nowNanos + 5分」なので、指定した残り時間になるようnowNanosをずらす。
+        long nowNanos = System.nanoTime() - TimeUnit.MINUTES.toNanos(5) + deadlineFromNow.toNanos();
+        DispatchIssueRequest request = DispatchClaimFixtures.request(artifactId, clock.instant(), nowNanos,
                 upperBoundYen, dailyLimitYen, 1_000_000, scope);
         return AccountingTenantContextHolder.runWithTenant(tenant, () -> claimService.prepareReady(
                 DispatchClaimFixtures.summaryAttempt(runId, traceId, tenant, artifactId), request));

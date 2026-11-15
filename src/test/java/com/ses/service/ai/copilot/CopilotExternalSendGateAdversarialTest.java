@@ -619,17 +619,28 @@ class CopilotExternalSendGateAdversarialTest {
         Pattern logCall = Pattern.compile("\\blog\\.(trace|debug|info|warn|error)\\s*\\(");
         Pattern forbidden = Pattern.compile("\\b(prompt|masked|untrusted|text|body|allowlistedFields|apiKey)\\b");
         List<String> violations = new ArrayList<>();
-        for (String file : List.of(
+        List<String> files = new ArrayList<>(List.of(
                 "src/main/java/com/ses/service/ai/impl/AiExecutionGatewayImpl.java",
                 "src/main/java/com/ses/service/ai/impl/GeminiTextServiceImpl.java",
                 "src/main/java/com/ses/service/ai/AiExternalSendAuditor.java",
                 "src/main/java/com/ses/service/ai/AiExternalSendBudgetLedger.java",
+                "src/main/java/com/ses/service/ai/ExternalSendCostLedger.java",
+                "src/main/java/com/ses/service/ai/PersistentExternalSendCostLedger.java",
                 "src/main/java/com/ses/service/ai/AiExternalSendApproval.java",
                 "src/main/java/com/ses/service/ai/AiExternalSendApprovalMonitor.java",
                 "src/main/java/com/ses/service/ai/AiPiiMasker.java",
                 "src/main/java/com/ses/service/ai/AiProductionApprovalGate.java",
                 "src/main/java/com/ses/config/AiProductionSafetyValidator.java",
-                "src/main/java/com/ses/service/ai/copilot/summary/ApprovedExternalSendCostPolicy.java")) {
+                "src/main/java/com/ses/service/ai/copilot/summary/ApprovedExternalSendCostPolicy.java"));
+        // NF08 B2c-1: durable claim・permitのpackageは全fileを対象にする（追加fileの登録漏れを作らない）。
+        try (var dispatch = Files.list(Path.of("src/main/java/com/ses/service/ai/copilot/dispatch"))) {
+            List<String> dispatchFiles = dispatch.map(path -> path.toString().replace('\\', '/'))
+                    .filter(path -> path.endsWith(".java")).sorted().toList();
+            assertTrue(dispatchFiles.stream().anyMatch(path -> path.endsWith("/CopilotDispatchClaimService.java")),
+                    "dispatch packageのclaim serviceを走査対象に含める");
+            files.addAll(dispatchFiles);
+        }
+        for (String file : files) {
             String source = Files.readString(Path.of(file), StandardCharsets.UTF_8);
             Matcher matcher = logCall.matcher(source);
             while (matcher.find()) {

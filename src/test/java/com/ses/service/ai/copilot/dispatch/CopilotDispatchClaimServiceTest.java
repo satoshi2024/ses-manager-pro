@@ -30,7 +30,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.security.SecureRandom;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -50,6 +52,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -77,6 +80,8 @@ class CopilotDispatchClaimServiceTest {
     private DispatchClaimFixtures.SequenceClock clock;
     private AtomicLong nanos;
     private CopilotDispatchClaimService service;
+    private AiExternalSendCostBucket dayBucket;
+    private AiExternalSendCostBucket monthBucket;
 
     @BeforeEach
     void setUp() {
@@ -91,9 +96,20 @@ class CopilotDispatchClaimServiceTest {
                 nanos::get, new SecureRandom());
         when(runMapper.markDispatchReady(any())).thenReturn(1);
         when(runMapper.claimDispatch(any(), any())).thenReturn(1);
-        when(ledger.reserve(anyString(), anyString(), anyString(), anyInt(), anyLong(), any(), any(), any()))
-                .thenReturn(ReserveResult.RESERVED);
+        dayBucket = bucket(1L);
+        monthBucket = bucket(2L);
+        when(ledger.lockBucket(eq(AiExternalSendCostBucket.TYPE_DAY), anyString(), anyString())).thenReturn(dayBucket);
+        when(ledger.lockBucket(eq(AiExternalSendCostBucket.TYPE_MONTH), anyString(), anyString()))
+                .thenReturn(monthBucket);
+        when(ledger.reserve(any(), anyInt(), anyLong(), any(), any(), any())).thenReturn(ReserveResult.RESERVED);
         AccountingTenantContextHolder.setTenantId(TENANT);
+    }
+
+    private static AiExternalSendCostBucket bucket(long id) {
+        AiExternalSendCostBucket bucket = new AiExternalSendCostBucket();
+        bucket.setId(id);
+        bucket.setCommittedYen(0L);
+        return bucket;
     }
 
     @AfterEach
@@ -157,10 +173,12 @@ class CopilotDispatchClaimServiceTest {
         order.verify(transactionManager).commit(any());
         order.verify(auditor).recordAttempt(any());
         order.verify(runMapper).lockDispatchRow(any());
-        order.verify(ledger).reserve(eq(AiExternalSendCostBucket.TYPE_DAY), eq(DispatchClaimFixtures.COST_SCOPE),
-                eq("2026-11-15"), eq(30), eq(10_000L), any(), eq(T0), any());
-        order.verify(ledger).reserve(eq(AiExternalSendCostBucket.TYPE_MONTH), eq(DispatchClaimFixtures.COST_SCOPE),
-                eq("2026-11"), eq(30), eq(100_000L), any(), eq(T0), any());
+        order.verify(ledger).lockBucket(AiExternalSendCostBucket.TYPE_DAY, DispatchClaimFixtures.COST_SCOPE,
+                "2026-11-15");
+        order.verify(ledger).reserve(same(dayBucket), eq(30), eq(10_000L), any(), eq(T0), any());
+        order.verify(ledger).lockBucket(AiExternalSendCostBucket.TYPE_MONTH, DispatchClaimFixtures.COST_SCOPE,
+                "2026-11");
+        order.verify(ledger).reserve(same(monthBucket), eq(30), eq(100_000L), any(), eq(T0), any());
         order.verify(ledger).recordReservation(any());
         order.verify(runMapper).claimDispatch(any(), eq(LocalDateTime.of(2026, 11, 15, 1, 0)));
         order.verify(transactionManager).commit(any());
@@ -179,10 +197,10 @@ class CopilotDispatchClaimServiceTest {
     @Test
     void commitがcallback完了後に失敗したらpermitを返さず読み直しCLAIMEDなら予約維持で再claimしない() {
         DispatchTicket ticket = prepare();
-        when(runMapper.lockDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(ticket));
         DispatchRunRow claimed = DispatchClaimFixtures.readyRow(ticket);
         claimed.setDispatchState("CLAIMED");
-        when(runMapper.readDispatchRow(any())).thenReturn(claimed);
+        // 1回目はclaim transactionのlock、2回目はcommit不明後の排他lock付き読み直し。
+        when(runMapper.lockDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(ticket), claimed);
         failSecondCommit();
 
         ClaimOutcome outcome = service.claim(ticket);
@@ -196,15 +214,18 @@ class CopilotDispatchClaimServiceTest {
         assertEquals(30, result.costYen());
         assertEquals(ClaimOutcome.Status.NOT_CLAIMED, service.claim(ticket).status());
         assertEquals(CopilotDispatchClaimService.REASON_ALREADY_ATTEMPTED, service.claim(ticket).reasonCode());
-        verify(runMapper, times(1)).lockDispatchRow(any());
+        verify(runMapper, times(2)).lockDispatchRow(any());
+        verify(runMapper, never()).readDispatchRow(any());
         verify(runMapper, times(1)).claimDispatch(any(), any());
+        ArgumentCaptor<TransactionDefinition> definitions = ArgumentCaptor.forClass(TransactionDefinition.class);
+        verify(transactionManager, times(3)).getTransaction(definitions.capture());
+        assertFalse(definitions.getAllValues().get(2).isReadOnly(), "排他lock付きの読み直しはread-only transactionにしない");
     }
 
     @Test
     void commit不明で読み直しがREADYならNOT_SENT_読めなければUNKNOWNとしpermitを返さない() {
         DispatchTicket ready = prepare();
         when(runMapper.lockDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(ready));
-        when(runMapper.readDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(ready));
         failSecondCommit();
         ClaimOutcome readyOutcome = service.claim(ready);
         assertEquals(ClaimOutcome.Status.UNCERTAIN, readyOutcome.status());
@@ -213,8 +234,8 @@ class CopilotDispatchClaimServiceTest {
 
         setUp();
         DispatchTicket unreadable = prepare();
-        when(runMapper.lockDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(unreadable));
-        when(runMapper.readDispatchRow(any())).thenThrow(new QueryTimeoutException("readback timeout"));
+        when(runMapper.lockDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(unreadable))
+                .thenThrow(new QueryTimeoutException("readback lock wait timeout"));
         failSecondCommit();
         ClaimOutcome unknown = service.claim(unreadable);
         assertEquals(ClaimOutcome.Status.UNCERTAIN, unknown.status());
@@ -251,7 +272,7 @@ class CopilotDispatchClaimServiceTest {
         assertEquals(ClaimOutcome.Status.NOT_CLAIMED, outcome.status());
         assertEquals(CopilotDispatchClaimService.REASON_STALE, outcome.reasonCode());
         assertEquals(1, outcome.transactionAttempts(), "STALEは再試行しない");
-        verify(ledger, never()).reserve(anyString(), anyString(), anyString(), anyInt(), anyLong(), any(), any(), any());
+        verify(ledger, never()).reserve(any(), anyInt(), anyLong(), any(), any(), any());
         verify(runMapper, never()).claimDispatch(any(), any());
         verify(transactionManager).rollback(any());
         AiExternalSendAuditor.SendAudit result = captureResult();
@@ -277,15 +298,14 @@ class CopilotDispatchClaimServiceTest {
     void 日次上限超過は月次とentryへ進まず429のRESULTを残す() {
         DispatchTicket ticket = prepare();
         when(runMapper.lockDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(ticket));
-        when(ledger.reserve(eq(AiExternalSendCostBucket.TYPE_DAY), anyString(), anyString(), anyInt(), anyLong(),
-                any(), any(), any())).thenReturn(ReserveResult.LIMIT_EXCEEDED);
+        when(ledger.reserve(same(dayBucket), anyInt(), anyLong(), any(), any(), any()))
+                .thenReturn(ReserveResult.LIMIT_EXCEEDED);
 
         ClaimOutcome outcome = service.claim(ticket);
 
         assertEquals(ExternalSendCostLedger.REASON_DAILY, outcome.reasonCode());
         assertEquals(1, outcome.transactionAttempts());
-        verify(ledger, never()).reserve(eq(AiExternalSendCostBucket.TYPE_MONTH), anyString(), anyString(), anyInt(),
-                anyLong(), any(), any(), any());
+        verify(ledger, never()).lockBucket(eq(AiExternalSendCostBucket.TYPE_MONTH), anyString(), anyString());
         verify(ledger, never()).recordReservation(any());
         verify(runMapper, never()).claimDispatch(any(), any());
         assertEquals(429, captureResult().status());
@@ -295,8 +315,8 @@ class CopilotDispatchClaimServiceTest {
     void 月次上限超過はentryへ進まずrollbackする() {
         DispatchTicket ticket = prepare();
         when(runMapper.lockDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(ticket));
-        when(ledger.reserve(eq(AiExternalSendCostBucket.TYPE_MONTH), anyString(), anyString(), anyInt(), anyLong(),
-                any(), any(), any())).thenReturn(ReserveResult.LIMIT_EXCEEDED);
+        when(ledger.reserve(same(monthBucket), anyInt(), anyLong(), any(), any(), any()))
+                .thenReturn(ReserveResult.LIMIT_EXCEEDED);
 
         ClaimOutcome outcome = service.claim(ticket);
 
@@ -309,8 +329,8 @@ class CopilotDispatchClaimServiceTest {
     void bucket行の欠落はbucketを再準備して同じclaim_IDで再試行しATTEMPTを重複させない() {
         DispatchTicket ticket = prepare();
         when(runMapper.lockDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(ticket));
-        when(ledger.reserve(eq(AiExternalSendCostBucket.TYPE_DAY), anyString(), anyString(), anyInt(), anyLong(),
-                any(), any(), any())).thenReturn(ReserveResult.BUCKET_MISSING, ReserveResult.RESERVED);
+        when(ledger.lockBucket(eq(AiExternalSendCostBucket.TYPE_DAY), anyString(), anyString()))
+                .thenReturn(null, dayBucket);
 
         ClaimOutcome outcome = service.claim(ticket);
 
@@ -383,10 +403,9 @@ class CopilotDispatchClaimServiceTest {
                 BucketKeys.of(Instant.parse("2026-11-15T14:59:59.500Z")));
         order.verify(ledger).ensureBuckets(DispatchClaimFixtures.COST_SCOPE,
                 BucketKeys.of(Instant.parse("2026-11-15T15:00:00.100Z")));
-        verify(ledger).reserve(eq(AiExternalSendCostBucket.TYPE_DAY), anyString(), eq("2026-11-16"), anyInt(),
-                anyLong(), any(), any(), any());
-        verify(ledger, never()).reserve(eq(AiExternalSendCostBucket.TYPE_DAY), anyString(), eq("2026-11-15"),
-                anyInt(), anyLong(), any(), any(), any());
+        verify(ledger).lockBucket(AiExternalSendCostBucket.TYPE_DAY, DispatchClaimFixtures.COST_SCOPE, "2026-11-16");
+        verify(ledger, never()).lockBucket(AiExternalSendCostBucket.TYPE_DAY, DispatchClaimFixtures.COST_SCOPE,
+                "2026-11-15");
         verify(auditor, times(1)).recordAttempt(any());
     }
 
@@ -399,7 +418,7 @@ class CopilotDispatchClaimServiceTest {
         ClaimOutcome outcome = service.claim(ticket);
 
         assertEquals(CopilotDispatchClaimService.REASON_CLOCK_INVALID, outcome.reasonCode());
-        verify(ledger, never()).reserve(anyString(), anyString(), anyString(), anyInt(), anyLong(), any(), any(), any());
+        verify(ledger, never()).reserve(any(), anyInt(), anyLong(), any(), any(), any());
     }
 
     @Test
@@ -420,8 +439,8 @@ class CopilotDispatchClaimServiceTest {
     void lock済みbucketの高水位がCLOCK_INVALIDならrollbackする() {
         DispatchTicket ticket = prepare();
         when(runMapper.lockDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(ticket));
-        when(ledger.reserve(eq(AiExternalSendCostBucket.TYPE_MONTH), anyString(), anyString(), anyInt(), anyLong(),
-                any(), any(), any())).thenReturn(ReserveResult.CLOCK_INVALID);
+        when(ledger.reserve(same(monthBucket), anyInt(), anyLong(), any(), any(), any()))
+                .thenReturn(ReserveResult.CLOCK_INVALID);
 
         assertEquals(CopilotDispatchClaimService.REASON_CLOCK_INVALID, service.claim(ticket).reasonCode());
         verify(ledger, never()).recordReservation(any());
@@ -454,7 +473,7 @@ class CopilotDispatchClaimServiceTest {
                 T0.plusSeconds(3600), base.policyId(), base.policyVersion(), base.policyDigest(),
                 base.destinationHost(), base.queryId(), base.legalEntityId(), base.promptBytes(), base.costScope(),
                 base.upperBoundYen(), base.dailyLimitYen(), base.monthlyLimitYen(), base.attemptTtl(),
-                base.deadlineNanos());
+                base.deadlineNanos(), base.approvalSignedOn(), base.approvalExpiresOn());
         DispatchTicket notEffective = service.prepareReady(attempt(7L), futureCard);
         when(runMapper.lockDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(notEffective));
         assertEquals(CopilotDispatchClaimService.REASON_CARD_NOT_EFFECTIVE, service.claim(notEffective).reasonCode());
@@ -548,6 +567,94 @@ class CopilotDispatchClaimServiceTest {
         assertFalse(CopilotDispatchClaimService.isTransient(new DataIntegrityViolationException("x")));
         assertFalse(CopilotDispatchClaimService.isTransient(new IllegalStateException("x")));
         assertFalse(CopilotDispatchClaimService.isTransient(new TransactionSystemException("x")));
+    }
+
+    @Test
+    void 承認の失効日当日はJST業務日で拒否し予約せずNOT_SENTのRESULTを残す() {
+        // T0 = 2026-11-15T01:00Z（JST 11/15 10:00）。失効日11/15は当日から無効。
+        assertApprovalRefused(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 11, 15), T0);
+        // UTCでは11/15だがJSTでは11/16 0:00。失効日11/16はJST業務日で判定するため無効。
+        setUp();
+        assertApprovalRefused(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 11, 16),
+                Instant.parse("2026-11-15T15:00:00Z"));
+    }
+
+    @Test
+    void 承認の署名日前はclaimせず予約しない() {
+        assertApprovalRefused(LocalDate.of(2026, 11, 16), LocalDate.of(2026, 12, 31), T0);
+    }
+
+    @Test
+    void 承認の署名日当日と失効日前日の有効期間内はclaimできる() {
+        assertTrue(claimWithApproval(LocalDate.of(2026, 11, 15), LocalDate.of(2026, 12, 31), T0).claimed(),
+                "署名日当日");
+        setUp();
+        assertTrue(claimWithApproval(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 11, 16), T0).claimed(),
+                "失効日前日");
+    }
+
+    @Test
+    void DAY_lockの待機で進んだ時刻を読み直して予約とclaim時刻に使い高水位の逆行と誤判定しない() {
+        DispatchTicket ticket = prepare();
+        Instant afterLock = T0.plusMillis(2500);
+        clock.then(T0);          // claim開始時のbucket key
+        clock.then(T0);          // run行lock後のfresh Clock
+        clock.then(afterLock);   // DAY bucketのlock取得後（待機中に他のclaimが高水位を進め得る）
+        when(runMapper.lockDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(ticket));
+
+        ClaimOutcome outcome = service.claim(ticket);
+
+        assertTrue(outcome.claimed());
+        assertEquals(afterLock, outcome.permit().claimedAt());
+        verify(ledger).reserve(same(dayBucket), anyInt(), anyLong(), any(), eq(afterLock), any());
+        verify(ledger).reserve(same(monthBucket), anyInt(), anyLong(), any(), eq(afterLock), any());
+        verify(runMapper).claimDispatch(any(), eq(LocalDateTime.ofInstant(afterLock, ZoneOffset.UTC)));
+    }
+
+    @Test
+    void DAY_lock取得後の時刻が前より戻るかattempt期限を過ぎていれば予約せずrollbackする() {
+        DispatchTicket ticket = prepare();
+        clock.then(T0.plusSeconds(1));
+        clock.then(T0.plusSeconds(1));
+        clock.then(T0.plusMillis(500));
+        when(runMapper.lockDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(ticket));
+        assertEquals(CopilotDispatchClaimService.REASON_CLOCK_INVALID, service.claim(ticket).reasonCode());
+        verify(ledger, never()).reserve(any(), anyInt(), anyLong(), any(), any(), any());
+
+        setUp();
+        DispatchTicket expiring = prepare();
+        clock.then(T0);
+        clock.then(T0);
+        clock.then(expiring.expiresAt());
+        when(runMapper.lockDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(expiring));
+        assertEquals(CopilotDispatchClaimService.REASON_ATTEMPT_EXPIRED, service.claim(expiring).reasonCode());
+        verify(ledger, never()).reserve(any(), anyInt(), anyLong(), any(), any(), any());
+        verify(transactionManager).rollback(any());
+    }
+
+    private ClaimOutcome claimWithApproval(LocalDate signedOn, LocalDate expiresOn, Instant at) {
+        clock.set(at);
+        DispatchTicket ticket = service.prepareReady(attempt(7L), DispatchClaimFixtures.withApproval(
+                DispatchClaimFixtures.request(7L, at, nanos.get()), signedOn, expiresOn));
+        when(runMapper.lockDispatchRow(any())).thenReturn(DispatchClaimFixtures.readyRow(ticket));
+        return service.claim(ticket);
+    }
+
+    private void assertApprovalRefused(LocalDate signedOn, LocalDate expiresOn, Instant at) {
+        ClaimOutcome outcome = claimWithApproval(signedOn, expiresOn, at);
+        assertEquals(ClaimOutcome.Status.NOT_CLAIMED, outcome.status());
+        assertEquals(CopilotDispatchClaimService.REASON_APPROVAL_NOT_EFFECTIVE, outcome.reasonCode());
+        assertNull(outcome.permit());
+        assertEquals(1, outcome.transactionAttempts(), "承認の失効は再試行しない");
+        verify(ledger, never()).lockBucket(any(), any(), any());
+        verify(ledger, never()).reserve(any(), anyInt(), anyLong(), any(), any(), any());
+        verify(ledger, never()).recordReservation(any());
+        verify(runMapper, never()).claimDispatch(any(), any());
+        AiExternalSendAuditor.SendAudit result = captureResult();
+        assertEquals(CopilotDispatchClaimService.REASON_APPROVAL_NOT_EFFECTIVE, result.reasonCode());
+        assertEquals("NOT_SENT", result.costState());
+        assertEquals(0, result.costYen());
+        assertEquals("NOT_STARTED", result.outcome());
     }
 
     private DispatchTicket prepare() {

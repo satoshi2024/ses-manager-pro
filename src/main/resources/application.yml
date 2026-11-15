@@ -404,7 +404,8 @@ ai:
   # production-gates（運用者確認チェックリスト）が全てtrueでなければprodは起動しない（fail-fast）。
   # ただし失効日経過・署名日前だけが理由の場合は起動を止めず、外部送信だけを停止してWARNを出す。
   external-send-enabled: ${AI_EXTERNAL_SEND_ENABLED:false}
-  # NF08 外部送信の費用上限ledger。persistent（DBの永続ledger。既定）/ memory（test/local専用）。
+  # NF08 外部送信の費用上限ledger。persistent（DBの永続ledger。既定）/ memory（プロセス内の計数）。
+  # B2c-1ではprodの起動時検査だけが読む（gatewayは本設定を見ず、B2c-2でledgerの選択に接続する）。
   # B2c-2でpermit-only送信とgatewayの永続ledger接続が完了するまで、prodは external-send=true 自体を起動拒否する。
   # 完了後もprodで persistent と完全一致しない値は起動拒否する。
   external-send-cost-ledger: ${AI_EXTERNAL_SEND_COST_LEDGER:persistent}

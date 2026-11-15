@@ -233,7 +233,7 @@ CREATE TABLE t_ai_external_send_cost_entry (
 - `cost_scope` はprovider単位でtenant・承認をまたいで共有する。再承認（digestの変更）や月途中の上限変更で合計を0へ戻さない（上限の回避にならない方向）。
 - FKは張らない（`t_ai_recommendation_run` の行削除・retention purgeとledgerの保持期間が異なるため）。参照整合は `reservation_id` の一意性とservice側の同一transaction更新で保つ。
 
-**C-1の索引**: V?でt_audit_logへidx_audit_dispatch_key(idempotency_key, application_code, id)を追加する。照会はclaim IDの完全一致で、application_codeがAI_EXTERNAL_SEND_ATTEMPTとAI_EXTERNAL_SEND_RESULTの存在照会を別々に行う。それぞれORDER BY id、LIMIT 1とし、ATTEMPTが先に見つかってRESULTを見落とす照会にはしない。tenantへの束縛は照会前のrun確認で行い、claim IDは全tenantで一意なUUIDとする。無索引の監査全表走査を読取経路へ入れない。既存監査の保持期間との境界では、監査の消去後にREADYが残らない順序をretention設計で保証する。
+**C-1の索引**: V194でt_audit_logへidx_audit_dispatch_key(idempotency_key, application_code, id)を追加する。照会はclaim IDの完全一致で、application_codeがAI_EXTERNAL_SEND_ATTEMPTとAI_EXTERNAL_SEND_RESULTの存在照会を別々に行う。それぞれORDER BY id、LIMIT 1とし、ATTEMPTが先に見つかってRESULTを見落とす照会にはしない。tenantへの束縛は照会前のrun確認で行い、claim IDは全tenantで一意なUUIDとする。無索引の監査全表走査を読取経路へ入れない。既存監査の保持期間との境界では、監査の消去後にREADYが残らない順序をretention設計で保証する。
 
 **C-3の識別子**: dispatch_cost_reservation_idとその一意索引を草案から削除する。dispatch_claim_idを全tenantで一意とし、cost_entry.reservation_id、ATTEMPT/RESULTのidempotency_key、permitのreservation IDは同じUUIDを参照する。READY作成時に一度生成し、再試行で変更しない。
 
@@ -301,12 +301,16 @@ CREATE TABLE t_ai_external_send_cost_entry (
 - **C-2を最初に実装した**: `AiProductionSafetyValidator` はprodで external-send=true を `dispatch.permitOnlyNotWired` で起動拒否する（承認設定が完全でも拒否。承認側の不足コードも併記する）。解除はコード定数 `PERMIT_ONLY_DISPATCH_WIRED` だけで、設定・環境変数からは変えられない。`ai.external-send-cost-ledger`（既定 `persistent`）が `persistent` と完全一致しなければ、解除後も `costLedger.notPersistent` で拒否する。
 - **READY行の作成**: `CopilotDispatchClaimService#prepareReady` は、`beginSummaryAttempt` が作ったSUMMARY行（PENDING/v0/NOT_APPLICABLE、dispatch列が未設定）を一度だけREADYへ更新し、発行時bindingを固定する。B2c-2では同じtransactionで呼び、NOT_APPLICABLEのsummary dispatch行を他transactionへ見せない（新しいinsert経路は作らない）。
 - **entityの更新戦略**: dispatch列は `insertStrategy` / `updateStrategy` とも `NEVER` とした（§1.1の「既定のまま」より強い）。古いentityを `updateById` で書き戻しても、claim状態とbindingを巻き戻せない。書込みは列を明示したmapper SQL（READY化・claim CAS）だけである。
-- **lock待ちの上限**: 借用connectionの `innodb_lock_wait_timeout` は変更しない。transactionのtimeout（残deadline以下・最大10秒）がMyBatisのstatement timeoutにも適用されるため、それで既定50秒のlock待ちに依存しないことを担保する。statement timeoutは1205と同じく再試行の対象とする。
+- **lock待ちの上限**: 借用connectionの `innodb_lock_wait_timeout` は変更しない。transactionのtimeout（残deadline以下・最大10秒）がMyBatisのstatement timeoutにも適用されるため、それで既定50秒のlock待ちに依存しないことを担保する。statement timeoutは1205と同じく再試行の対象とする。実MySQLの証拠は `CopilotDispatchClaimMySqlIntegrationTest`（blockerがrun行のlockをtimeoutより長く保持し、claimが約5秒で `LEDGER_UNAVAILABLE` / `COPILOT_DISPATCH_DEADLINE_EXCEEDED` を返し、行・entry・bucketが不変）で取る（W3-13r、G1r後のB2c-1 Review P2-2）。
+- **承認の有効期間の再検査**（W3-13r、Review P2-1）: `DispatchIssueRequest` に承認の署名日・失効日（JST業務日）を持たせ、binding digestへ含める。claim transactionのfresh Clockで、JST業務日が署名日以上・失効日未満でなければ `AI_EXTERNAL_SEND_NOT_APPROVED` で拒否し、費用を予約せずにRESULT（NOT_STARTED / NOT_SENT）を記録する（§4 #16の「claim前なら#1」と同じ結果）。両日付の列は追加しない（V194は変えない）。承認digestが両日付を含むため、DB上は `dispatch_approval_digest` の列照合で間接に束縛される。
+- **bucket lock後の時刻**（W3-13r、Review P3-2）: DAY bucketのlock待ちの間に先行claimが高水位を進め得るため、lock取得後にClockを読み直し、時刻・期限・承認・日付境界を再検査してから予約する。以降の予約・entry・claim時刻はlock後の時刻を使う。lock取得後の時刻がlock前より戻っていれば `CLOCK_INVALID`。
+- **commit不明時の読み直し**（W3-13r、Review P3-1）: 読み直しは排他lock付き（`FOR UPDATE`）とし、進行中のcommitの終了を待ってから確定値を読む（claim transactionと同じmapper SQLを使い、H2とMySQLで同じ文にする）。待ちはtransactionのtimeoutで打ち切り、読めなければUNKNOWNとする。READYと読めた行はREADYのまま残し（§4 #6）、READY→UNKNOWNへの書換えはしない（UNKNOWNは送信不明の確定を表すため）。同じattemptの再claimはticketの一回限り消費で防ぎ、ticketはDB・JSONから作れない。
 - **entryのtenant幅とCHECK**: `t_ai_external_send_cost_entry.tenant_id` は `t_ai_recommendation_run.tenant_id`（V162でVARCHAR(100)）と同じ幅にした。`reserved_yen` のCHECKは追加運用条件に合わせて `>= 1` とした。
 - **ATTEMPTより前の拒否**: transaction内の呼出し・tenant不一致・残deadline 1秒未満・bucket事前生成の失敗はATTEMPT前に止め、監査を書かない（READY行は期限で失効し、照合で ATTEMPT_NOT_PERSISTED を補記する）。ATTEMPT後の拒否・rollback・commit不明はtransaction終了後にRESULT（NOT_STARTED）を記録する。
 - **照合の補記ラベル**（G1r §5.1の補足）: 照合が「ATTEMPTなし」と判定した直後に遅れたATTEMPTがcommitされると、#18を#2（ATTEMPT_NOT_PERSISTED）と記録し得る。期限切れREADYはclaim時のfresh Clockと高水位でclaimされないため、NOT_SENTの事実は変わらず、ラベルの不正確さは無害として受け入れる。
 - **再起動後の再claim**: MySQL gateは、プロセス内の状態を持たない新しいservice instanceと、同じbindingを知る者が作ったticketの写しで、CLAIMED行を再claimできないこと（DBのCAS fence）を確かめる。Spring contextの作り直しは行わない。
 - **接続しないもの**: gateway・transport・`CopilotQueryService` / `CopilotSummaryService` はlocal-only判定のままで、claim serviceを呼ばない（B2c-2）。精算（RESERVED → SETTLED / KEPT_UPPER_BOUND）はB2d、照合はB2eで追加する。
+- **後続batchへ送る指摘**（B2c-1 Review P3）: READY化は `beginSummaryAttempt` の戻り値だけを渡す（P3-3、B2c-2）。gatewayは `ai.external-send-cost-ledger` でledgerを選び、prodではmemory経路を持たない（P3-4、B2c-2）。新しい理由コードを画面へ出す場合は4言語のmessage keyを訳して追加する（P3-10、B2c-2。B2c-1では表示しないため、gatewayと同義のものは既存keyの `AI_EXTERNAL_SEND_TRANSACTION_ACTIVE` / `AI_EXTERNAL_SEND_NOT_APPROVED` を使う）。完了CASへdispatch bindingのfenceを加える（P3-11、B2d）。新しい業務日の最初のclaimが並行するbucket生成のMySQL試験（P3-12、B2c-2またはB2e）。1213/1205の直後の再試行に待ちを入れるかの判断（P3-9）。V193統合後は `FlywayV194DispatchClaimLedgerMySqlTest` の `target("192")` を `target("193")` にする（P3-8）。
 
 ### 2. B2c-2: permit-only 送信
 
@@ -337,7 +341,7 @@ claim commit前は送信も費用計上もしない。claim commit後は送信�
 | 3 | claim CAS 0件（競合・drift） | 変更なし | rollback / NOT_SENT | RESULT（NOT_STARTED、`STALE`） | 新attemptとして可 |
 | 4 | 日次・月次上限超過（bucket更新0件） | READY のまま | rollback / NOT_SENT | RESULT（NOT_STARTED、上限コード） | 上限が空くまで不可 |
 | 5 | 1213/1205 が3回続く | READY のまま | rollback / NOT_SENT | RESULT（NOT_STARTED、`LEDGER_UNAVAILABLE`） | 新attemptとして可 |
-| 6 | claim commit結果が不明 | 再読込で CLAIMED または READY | CLAIMEDなら RESERVED / UPPER_BOUND | RESULT（`CLAIM_UNCERTAIN`） | 同attemptは不可 |
+| 6 | claim commit結果が不明 | 排他lock付きの再読込（進行中のcommitの終了を待つ）で CLAIMED または READY | CLAIMEDなら RESERVED / UPPER_BOUND | RESULT（`CLAIM_UNCERTAIN`） | 同attemptは不可 |
 | 7 | permit再利用・二度目の確認の不一致・socket前の失効 | CLAIMED（意味上UNKNOWN） | RESERVED→KEPT_UPPER_BOUND / UPPER_BOUND | RESULT（`PERMIT_REJECTED` 等） | 不可 |
 | 8 | claim commit後・socket前のprocess停止 | CLAIMED（期限後の照合でUNKNOWN） | RESERVED（照合時にKEPT_UPPER_BOUND） / UPPER_BOUND | ATTEMPTのみ（照合で RESULT を補記） | 不可 |
 | 9 | DNS・接続失敗（transportが未送信を確定） | CLAIMED | KEPT_UPPER_BOUND / UPPER_BOUND（claim後は戻さない） | RESULT（NOT_STARTED） | 不可 |

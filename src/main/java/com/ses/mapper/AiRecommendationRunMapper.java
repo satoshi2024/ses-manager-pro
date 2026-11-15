@@ -86,12 +86,15 @@ public interface AiRecommendationRunMapper extends BaseMapper<AiRecommendationRu
             + "AND dispatch_claim_id IS NULL AND dispatch_issued_at IS NULL")
     int markDispatchReady(@Param("c") DispatchColumns columns);
 
-    /** NF08 B2c-1: claim transactionの最初に対象行を排他lockして読む（lock順の先頭）。 */
+    /**
+     * NF08 B2c-1: 対象行を排他lockして読む。claim transactionの先頭（lock順の先頭）と、commit結果が不明な場合の
+     * 別transactionでの読み直し（進行中のcommitの終了を待ってから確定値を読む）に使う。
+     */
     @Select("SELECT " + DISPATCH_ROW_COLUMNS + "FROM t_ai_recommendation_run WHERE " + DISPATCH_ROW_IDENTITY
             + "FOR UPDATE")
     DispatchRunRow lockDispatchRow(@Param("c") DispatchColumns columns);
 
-    /** NF08 B2c-1: commit結果が不明な場合などに、別transactionで状態を読み直す（lockしない）。 */
+    /** NF08 B2c-1: lockしない読取り（表示・試験用）。commit結果の判定には使わない（{@link #lockDispatchRow} を使う）。 */
     @Select("SELECT " + DISPATCH_ROW_COLUMNS + "FROM t_ai_recommendation_run WHERE " + DISPATCH_ROW_IDENTITY)
     DispatchRunRow readDispatchRow(@Param("c") DispatchColumns columns);
 

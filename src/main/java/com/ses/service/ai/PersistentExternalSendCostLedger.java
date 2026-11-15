@@ -80,13 +80,24 @@ public class PersistentExternalSendCostLedger implements ExternalSendCostLedger 
     }
 
     /**
-     * lock順の2番目・3番目（DAY → MONTH）。bucket行を排他lockし、上限内でだけ予約を積む。
+     * lock順の2番目・3番目（DAY → MONTH）のlock取得。bucket行を排他lockして読む。行が無ければnull
+     * （再試行可能なbucket欠落）。呼出側はlockの待機中に進んだ時刻を、取得後にClockから読み直してから
+     * {@link #reserve} へ渡す（待機が長いと、先にcommitした予約が高水位を進めているため）。
+     */
+    public AiExternalSendCostBucket lockBucket(String bucketType, String costScope, String bucketKey) {
+        requireTransaction();
+        return bucketMapper.lockBucket(requireScope(costScope), bucketType, bucketKey);
+    }
+
+    /**
+     * {@link #lockBucket} でlockしたbucket行へ、上限内でだけ予約を積む。
      *
-     * @param observedAt アプリClockの観測時刻（UTC、マイクロ秒）。高水位の更新と逆行検査に使う
+     * @param locked     同じtransactionでlock済みの行（nullならBUCKET_MISSING）
+     * @param observedAt lock取得後に読んだアプリClockの観測時刻（UTC、マイクロ秒）。高水位の更新と逆行検査に使う
      * @param tolerance  高水位より前の観測をどこまで許すか（計画 R-6: 1秒）
      */
-    public ReserveResult reserve(String bucketType, String costScope, String bucketKey, int yen, long limitYen,
-                                 byte[] approvalDigest, Instant observedAt, Duration tolerance) {
+    public ReserveResult reserve(AiExternalSendCostBucket locked, int yen, long limitYen, byte[] approvalDigest,
+                                 Instant observedAt, Duration tolerance) {
         requireTransaction();
         if (yen < 1) {
             throw new IllegalArgumentException("費用予約見積りは1円以上である必要があります");
@@ -94,7 +105,7 @@ public class PersistentExternalSendCostLedger implements ExternalSendCostLedger 
         if (limitYen < 0) {
             throw new IllegalArgumentException("費用上限は0円以上である必要があります");
         }
-        AiExternalSendCostBucket bucket = bucketMapper.lockBucket(requireScope(costScope), bucketType, bucketKey);
+        AiExternalSendCostBucket bucket = locked;
         if (bucket == null) {
             return ReserveResult.BUCKET_MISSING;
         }

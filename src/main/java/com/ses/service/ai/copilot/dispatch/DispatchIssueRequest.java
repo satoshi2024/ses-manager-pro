@@ -2,6 +2,7 @@ package com.ses.service.ai.copilot.dispatch;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -41,6 +42,10 @@ import java.util.regex.Pattern;
  * @param monthlyLimitYen       承認済み月次上限
  * @param attemptTtl            attemptの有効時間（0より大きく10分以下）
  * @param deadlineNanos         monotonic deadline（{@code System.nanoTime()} の値域）
+ * @param approvalSignedOn      承認の署名日（JST業務日。この日から有効）
+ * @param approvalExpiresOn     承認の失効日（JST業務日。この日からは無効）。claim時にfresh Clockで再検査する
+ *                              （計画 §1.3 step 2・§4 #16）。承認digestも両日付を含むため、DB上は
+ *                              {@code dispatch_approval_digest} の列照合で間接に束縛される
  */
 public record DispatchIssueRequest(
         String provider, String modelRevision, String region, String tier, String configHash,
@@ -50,7 +55,7 @@ public record DispatchIssueRequest(
         String policyId, String policyVersion, String policyDigest,
         String destinationHost, String queryId, Long legalEntityId, int promptBytes,
         String costScope, int upperBoundYen, long dailyLimitYen, long monthlyLimitYen,
-        Duration attemptTtl, long deadlineNanos) {
+        Duration attemptTtl, long deadlineNanos, LocalDate approvalSignedOn, LocalDate approvalExpiresOn) {
 
     static final Duration MAX_ATTEMPT_TTL = Duration.ofMinutes(10);
     private static final Pattern IDENTIFIER = Pattern.compile("[A-Za-z0-9._:/-]+");
@@ -108,6 +113,16 @@ public record DispatchIssueRequest(
                 || attemptTtl.compareTo(MAX_ATTEMPT_TTL) > 0) {
             throw new IllegalArgumentException("attemptの有効時間が不正です");
         }
+        Objects.requireNonNull(approvalSignedOn, "approvalSignedOn");
+        Objects.requireNonNull(approvalExpiresOn, "approvalExpiresOn");
+        if (!approvalSignedOn.isBefore(approvalExpiresOn)) {
+            throw new IllegalArgumentException("承認の有効期間が不正です");
+        }
+    }
+
+    /** JST業務日 {@code businessDay} が承認の有効期間（署名日以上・失効日未満）に入るか。 */
+    boolean approvalEffectiveOn(LocalDate businessDay) {
+        return !businessDay.isBefore(approvalSignedOn) && businessDay.isBefore(approvalExpiresOn);
     }
 
     private static void identifier(String value, int maxLength, String label) {

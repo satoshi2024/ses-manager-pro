@@ -147,7 +147,7 @@ class ClaimPermitTypeContractTest {
                 base.cardId(), base.cardVersion(), base.cardDigest(), base.cardEffectiveFrom(), base.cardEffectiveUntil(),
                 base.policyId(), base.policyVersion(), base.policyDigest(), base.destinationHost(), base.queryId(),
                 base.legalEntityId(), base.promptBytes(), base.costScope(), base.upperBoundYen(), base.dailyLimitYen(),
-                base.monthlyLimitYen(), base.attemptTtl(), base.deadlineNanos());
+                base.monthlyLimitYen(), base.attemptTtl(), base.deadlineNanos(), base.approvalSignedOn(), base.approvalExpiresOn());
         DispatchTicket drifted = new DispatchTicket(ticket.runId(), ticket.tenantId(), ticket.traceId(),
                 ticket.claimId(), otherRegion, ticket.nonce(), ticket.idempotencyKey(), ticket.issuedAt(),
                 ticket.issuedNanos());
@@ -156,6 +156,26 @@ class ClaimPermitTypeContractTest {
         assertEquals(List.of(), ticket.mismatches(DispatchClaimFixtures.readyRow(ticket)));
         assertTrue(ticket.mismatches(DispatchClaimFixtures.readyRow(drifted)).containsAll(
                 List.of("dispatch_binding_hash", "dispatch_region")));
+    }
+
+    @Test
+    void 承認の有効期間はbindingに含まれ署名日は失効日より前でなければならない() {
+        DispatchTicket ticket = ticket();
+        DispatchIssueRequest base = ticket.request();
+        DispatchIssueRequest laterExpiry = DispatchClaimFixtures.withApproval(base, base.approvalSignedOn(),
+                base.approvalExpiresOn().plusDays(1));
+        DispatchTicket extended = new DispatchTicket(ticket.runId(), ticket.tenantId(), ticket.traceId(),
+                ticket.claimId(), laterExpiry, ticket.nonce(), ticket.idempotencyKey(), ticket.issuedAt(),
+                ticket.issuedNanos());
+        assertFalse(Arrays.equals(ticket.bindingHash(), extended.bindingHash()), "失効日の差替えはbindingを変える");
+        assertThrows(IllegalArgumentException.class, () -> DispatchClaimFixtures.withApproval(base,
+                base.approvalExpiresOn(), base.approvalExpiresOn()));
+        assertThrows(NullPointerException.class, () -> DispatchClaimFixtures.withApproval(base, null,
+                base.approvalExpiresOn()));
+        assertTrue(base.approvalEffectiveOn(base.approvalSignedOn()), "署名日から有効");
+        assertTrue(base.approvalEffectiveOn(base.approvalExpiresOn().minusDays(1)));
+        assertFalse(base.approvalEffectiveOn(base.approvalExpiresOn()), "失効日当日から無効");
+        assertFalse(base.approvalEffectiveOn(base.approvalSignedOn().minusDays(1)), "署名日前は無効");
     }
 
     @Test
@@ -168,7 +188,7 @@ class ClaimPermitTypeContractTest {
                 base.cardDigest(), base.cardEffectiveFrom(), base.cardEffectiveUntil(), base.policyId(),
                 base.policyVersion(), base.policyDigest(), base.destinationHost(), base.queryId(), base.legalEntityId(),
                 base.promptBytes(), base.costScope(), base.upperBoundYen(), base.dailyLimitYen(), base.monthlyLimitYen(),
-                base.attemptTtl(), base.deadlineNanos()), "hashは小文字64桁");
+                base.attemptTtl(), base.deadlineNanos(), base.approvalSignedOn(), base.approvalExpiresOn()), "hashは小文字64桁");
         assertThrows(IllegalArgumentException.class, () -> new DispatchIssueRequest(base.provider(),
                 base.modelRevision(), base.region(), base.tier(), base.configHash(), base.artifactVersionId(),
                 base.scopeHash(), base.inputHash(), base.preflightSnapshotHash(), base.requestSha256(),
@@ -176,7 +196,7 @@ class ClaimPermitTypeContractTest {
                 base.cardEffectiveFrom(), base.cardEffectiveUntil(), base.policyId(), base.policyVersion(),
                 base.policyDigest(), base.destinationHost(), base.queryId(), base.legalEntityId(), base.promptBytes(),
                 base.costScope(), 0, base.dailyLimitYen(), base.monthlyLimitYen(), base.attemptTtl(),
-                base.deadlineNanos()), "費用予約見積りは1円以上");
+                base.deadlineNanos(), base.approvalSignedOn(), base.approvalExpiresOn()), "費用予約見積りは1円以上");
         assertThrows(IllegalArgumentException.class, () -> new DispatchIssueRequest(base.provider(),
                 base.modelRevision(), base.region(), base.tier(), base.configHash(), base.artifactVersionId(),
                 base.scopeHash(), base.inputHash(), base.preflightSnapshotHash(), base.requestSha256(),
@@ -184,7 +204,7 @@ class ClaimPermitTypeContractTest {
                 base.cardEffectiveUntil(), base.cardEffectiveFrom(), base.policyId(), base.policyVersion(),
                 base.policyDigest(), base.destinationHost(), base.queryId(), base.legalEntityId(), base.promptBytes(),
                 base.costScope(), base.upperBoundYen(), base.dailyLimitYen(), base.monthlyLimitYen(),
-                base.attemptTtl(), base.deadlineNanos()), "card期間の前後関係");
+                base.attemptTtl(), base.deadlineNanos(), base.approvalSignedOn(), base.approvalExpiresOn()), "card期間の前後関係");
         assertThrows(IllegalArgumentException.class, () -> new DispatchIssueRequest(base.provider(),
                 base.modelRevision(), base.region(), base.tier(), base.configHash(), base.artifactVersionId(),
                 base.scopeHash(), base.inputHash(), base.preflightSnapshotHash(), base.requestSha256(),
@@ -192,7 +212,7 @@ class ClaimPermitTypeContractTest {
                 base.cardEffectiveFrom(), base.cardEffectiveUntil(), base.policyId(), base.policyVersion(),
                 base.policyDigest(), base.destinationHost(), base.queryId(), base.legalEntityId(), base.promptBytes(),
                 base.costScope(), base.upperBoundYen(), base.dailyLimitYen(), base.monthlyLimitYen(),
-                java.time.Duration.ofMinutes(11), base.deadlineNanos()), "attemptの有効時間は10分以下");
+                java.time.Duration.ofMinutes(11), base.deadlineNanos(), base.approvalSignedOn(), base.approvalExpiresOn()), "attemptの有効時間は10分以下");
         assertThrows(IllegalArgumentException.class, () -> new DispatchIssueRequest("gemini\nX",
                 base.modelRevision(), base.region(), base.tier(), base.configHash(), base.artifactVersionId(),
                 base.scopeHash(), base.inputHash(), base.preflightSnapshotHash(), base.requestSha256(),
@@ -200,7 +220,7 @@ class ClaimPermitTypeContractTest {
                 base.cardEffectiveFrom(), base.cardEffectiveUntil(), base.policyId(), base.policyVersion(),
                 base.policyDigest(), base.destinationHost(), base.queryId(), base.legalEntityId(), base.promptBytes(),
                 base.costScope(), base.upperBoundYen(), base.dailyLimitYen(), base.monthlyLimitYen(),
-                base.attemptTtl(), base.deadlineNanos()), "識別子に改行を含めない");
+                base.attemptTtl(), base.deadlineNanos(), base.approvalSignedOn(), base.approvalExpiresOn()), "識別子に改行を含めない");
     }
 
     private static DispatchTicket ticket() {
